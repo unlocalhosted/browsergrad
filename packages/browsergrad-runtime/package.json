@@ -1,0 +1,74 @@
+{
+  "name": "@unlocalhosted/browsergrad-runtime",
+  "version": "0.1.0",
+  "description": "Pyodide-in-Worker runtime for browser-based Python execution. Same-origin assets, AbortSignal cancellation, structured assertion/artifact protocol. Platform-agnostic primitives — bring your own UI.",
+  "type": "module",
+  "license": "MIT",
+  "author": "unlocalhosted",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/unlocalhosted/browsergrad.git",
+    "directory": "packages/browsergrad-runtime"
+  },
+  "homepage": "https://github.com/unlocalhosted/browsergrad/tree/main/packages/browsergrad-runtime#readme",
+  "bugs": {
+    "url": "https://github.com/unlocalhosted/browsergrad/issues"
+  },
+  "keywords": [
+    "pyodide",
+    "python",
+    "webassembly",
+    "worker",
+    "browser",
+    "education"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./worker": {
+      "types": "./dist/worker/index.d.ts",
+      "import": "./dist/worker/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/",
+    "src/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "oxlint src",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "peerDependencies": {
+    "pyodide": "^0.26.0"
+  },
+  "peerDependenciesMeta": {
+    "pyodide": {
+      "optional": false
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "oxlint": "^1.0.0",
+    "pyodide": "^0.26.4",
+    "typescript": "~6.0.0",
+    "vitest": "^4.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "sideEffects": false
+}
