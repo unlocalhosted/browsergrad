@@ -91,6 +91,79 @@ class Linear(Module):
         return f"Linear(in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None})"
 
 
+# ─── Conv2d ────────────────────────────────────────────────
+
+class Conv2d(Module):
+    """2D convolution. v0.3: square kernel, isotropic stride/padding, dense.
+
+    Forward shape:
+        input:  (N, C_in, H, W)
+        weight: (C_out, C_in, kernel_size, kernel_size)
+        bias:   (C_out,)
+        output: (N, C_out, H_out, W_out)
+            H_out = (H + 2*padding - kernel_size) // stride + 1
+            W_out same
+    """
+
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int,
+                 stride: int = 1, padding: int = 0, bias: bool = True):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        fan_in = in_channels * kernel_size * kernel_size
+        bound = 1.0 / math.sqrt(fan_in)
+        rng = np.random.default_rng()
+        W = rng.uniform(
+            -bound, bound,
+            size=(out_channels, in_channels, kernel_size, kernel_size),
+        ).astype(np.float32)
+        self.weight = Tensor(W, requires_grad=True)
+        if bias:
+            self.bias = Tensor(np.zeros(out_channels, dtype=np.float32), requires_grad=True)
+        else:
+            self.bias = None
+
+    def forward(self, x: Tensor) -> Tensor:
+        # Naive direct-loop correlation. Handles kernel_size, stride, padding.
+        # Refactor to im2col after backward + end-to-end tests are green.
+        N, C_in, H, W = x.data.shape
+        K, S, P = self.kernel_size, self.stride, self.padding
+        C_out = self.out_channels
+        if P > 0:
+            x_padded = np.pad(
+                x.data,
+                ((0, 0), (0, 0), (P, P), (P, P)),
+                mode="constant",
+            )
+        else:
+            x_padded = x.data
+        H_pad = H + 2 * P
+        W_pad = W + 2 * P
+        H_out = (H_pad - K) // S + 1
+        W_out = (W_pad - K) // S + 1
+        out = np.zeros((N, C_out, H_out, W_out), dtype=np.float32)
+        for n in range(N):
+            for co in range(C_out):
+                for i in range(H_out):
+                    for j in range(W_out):
+                        h0, w0 = i * S, j * S
+                        out[n, co, i, j] = (
+                            self.weight.data[co] * x_padded[n, :, h0:h0+K, w0:w0+K]
+                        ).sum()
+        if self.bias is not None:
+            out = out + self.bias.data.reshape(1, C_out, 1, 1)
+        return Tensor(out)
+
+    def __repr__(self):
+        return (
+            f"Conv2d({self.in_channels}, {self.out_channels}, "
+            f"kernel_size={self.kernel_size}, stride={self.stride}, padding={self.padding})"
+        )
+
+
 # ─── Sequential ────────────────────────────────────────────
 
 class Sequential(Module):
