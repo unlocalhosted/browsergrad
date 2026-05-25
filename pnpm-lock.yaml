@@ -8,6 +8,24 @@ importers:
 
   .: {}
 
+  packages/browsergrad-kernels:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.12.4
+      '@webgpu/types':
+        specifier: ^0.1.50
+        version: 0.1.70
+      oxlint:
+        specifier: ^1.0.0
+        version: 1.66.0
+      typescript:
+        specifier: ~6.0.0
+        version: 6.0.3
+      vitest:
+        specifier: ^4.0.0
+        version: 4.1.7(@types/node@24.12.4)(vite@8.0.14(@types/node@24.12.4))
+
   packages/browsergrad-runtime:
     devDependencies:
       '@types/node':
@@ -315,6 +333,9 @@ packages:
 
   '@vitest/utils@4.1.7':
     resolution: {integrity: sha512-T532WBu791cBxJlCl6SO+J14l81DQx6uQHm1bQbmCDY7nqlEIgkza/UFnSBNaUtSf41unldDFjdOBYEQC4b5Hw==}
+
+  '@webgpu/types@0.1.70':
+    resolution: {integrity: sha512-LFiNHHKMvmAEvwVew3JLJmTdShhbdwRFSImUshGhE2mGE8ybQzIo63l5uRp+YKnNx+8Qno8Kf6gN+DKMreIJCA==}
 
   assertion-error@2.0.1:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
@@ -810,6 +831,8 @@ snapshots:
       '@vitest/pretty-format': 4.1.7
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.0
+
+  '@webgpu/types@0.1.70': {}
 
   assertion-error@2.0.1: {}
 

@@ -1,0 +1,67 @@
+{
+  "name": "@unlocalhosted/browsergrad-kernels",
+  "version": "0.1.0",
+  "description": "WGSL kernel catalog for browser-side machine learning: matmul, softmax, layernorm, attention, and friends. Each kernel ships with a JS reference for conformance + fallback. Independent of any tensor framework.",
+  "type": "module",
+  "license": "MIT",
+  "author": "unlocalhosted",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/unlocalhosted/browsergrad.git",
+    "directory": "packages/browsergrad-kernels"
+  },
+  "homepage": "https://github.com/unlocalhosted/browsergrad/tree/main/packages/browsergrad-kernels#readme",
+  "bugs": {
+    "url": "https://github.com/unlocalhosted/browsergrad/issues"
+  },
+  "keywords": [
+    "webgpu",
+    "wgsl",
+    "compute-shader",
+    "machine-learning",
+    "matmul",
+    "attention",
+    "browser"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./reference": {
+      "types": "./dist/reference.d.ts",
+      "import": "./dist/reference.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/",
+    "src/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "oxlint src",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@webgpu/types": "^0.1.50",
+    "oxlint": "^1.0.0",
+    "typescript": "~6.0.0",
+    "vitest": "^4.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "sideEffects": false
+}
