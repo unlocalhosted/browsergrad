@@ -94,9 +94,15 @@ describe("Python source bundle", () => {
     expect(optim?.content).toContain("class AdamW(Optimizer)");
   });
 
-  it("__init__.py declares v0.3.2", () => {
+  it("__init__.py declares v0.3.3", () => {
     const init = SOURCE_FILES.find((s) => s.path.endsWith("__init__.py"));
-    expect(init?.content).toContain('__version__ = "0.3.2"');
+    expect(init?.content).toContain('__version__ = "0.3.3"');
+  });
+
+  it("nn.py defines v0.3.3 Dropout family", () => {
+    const nn = SOURCE_FILES.find((s) => s.path.endsWith("nn.py"));
+    expect(nn?.content).toContain("class Dropout(Module)");
+    expect(nn?.content).toContain("class Dropout2d(Module)");
   });
 
   it("nn.py defines v0.3 Conv2d", () => {
