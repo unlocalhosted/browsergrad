@@ -16,6 +16,9 @@ importers:
       oxlint:
         specifier: ^1.0.0
         version: 1.66.0
+      pyodide:
+        specifier: ^0.26.4
+        version: 0.26.4
       typescript:
         specifier: ~6.0.0
         version: 6.0.3

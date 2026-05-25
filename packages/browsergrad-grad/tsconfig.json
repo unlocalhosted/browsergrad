@@ -20,6 +20,6 @@
     "noImplicitOverride": true,
     "types": ["vitest/globals"]
   },
-  "include": ["src", "tests"],
+  "include": ["src", "tests", "tests-integration"],
   "exclude": ["dist", "node_modules"]
 }

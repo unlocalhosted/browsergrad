@@ -49,12 +49,14 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "oxlint src",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "oxlint": "^1.0.0",
+    "pyodide": "^0.26.4",
     "typescript": "~6.0.0",
     "vitest": "^4.0.0"
   },

@@ -7,9 +7,25 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [0.2.0] — 2026-05-25
 
-Broadcasting, transformer parts, Adam. Same public API as 0.1.0 — broadcasting
-just starts working in every binary op. Old code continues to type-check and
-run, only the `_check_shapes`-raising error path goes away.
+Broadcasting, transformer parts, Adam, **and the first real Python-execution
+tests for the autograd**. Same public API as 0.1.0 — broadcasting just starts
+working in every binary op. Old code continues to type-check and run, only the
+`_check_shapes`-raising error path goes away.
+
+### Test coverage (new in this release)
+
+- **`tests-integration/`** boots Pyodide in node, installs the library via the
+  public `installGrad` API, and runs real Python that exercises:
+    - Autograd basics: `d(x²)/dx = 2x`, `d(mean(x²))/dx`, `d(x³)/dx`, `d(exp(x))`, `d(log(x))`
+    - Broadcasting backward: bias-into-batch sums correctly, scalar broadcasts roundtrip
+    - 2D and batched 3D matmul gradients
+    - Functional ops: relu masking, softmax sums to 1, cross-entropy gradient
+      matches the `(softmax - one_hot)/N` formula, MSE gradient
+    - nn modules: Linear shapes, LayerNorm normalizes to mean≈0 var≈1,
+      Embedding scatter-add accumulates duplicate indices correctly
+    - End-to-end: SGD converges to y=3x+1, Adam converges, MLP trains
+  Run via `pnpm test:integration`. Surface tests in `tests/` still run via
+  `pnpm test` for fast feedback.
 
 ### Added
 
