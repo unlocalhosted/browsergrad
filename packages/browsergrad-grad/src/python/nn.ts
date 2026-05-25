@@ -330,6 +330,229 @@ class BatchNorm2d(Module):
         )
 
 
+# ─── Conv1d ────────────────────────────────────────────────
+
+class Conv1d(Module):
+    """1D convolution. PyTorch-conformant correlation (no kernel flip).
+
+    Forward shape:
+        input:  (N, C_in, L)
+        weight: (C_out, C_in, kernel_size)
+        bias:   (C_out,)
+        output: (N, C_out, L_out)
+            L_out = (L + 2*padding - kernel_size) // stride + 1
+    """
+
+    def __init__(self, in_channels: int, out_channels: int, kernel_size: int,
+                 stride: int = 1, padding: int = 0, bias: bool = True):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        fan_in = in_channels * kernel_size
+        bound = 1.0 / math.sqrt(fan_in)
+        rng = np.random.default_rng()
+        W = rng.uniform(
+            -bound, bound,
+            size=(out_channels, in_channels, kernel_size),
+        ).astype(np.float32)
+        self.weight = Tensor(W, requires_grad=True)
+        if bias:
+            self.bias = Tensor(np.zeros(out_channels, dtype=np.float32), requires_grad=True)
+        else:
+            self.bias = None
+
+    def forward(self, x: Tensor) -> Tensor:
+        N, C_in, L = x.data.shape
+        K, S, P = self.kernel_size, self.stride, self.padding
+        C_out = self.out_channels
+        if P > 0:
+            x_padded = np.pad(x.data, ((0, 0), (0, 0), (P, P)), mode="constant")
+        else:
+            x_padded = x.data
+        L_pad = L + 2 * P
+        L_out = (L_pad - K) // S + 1
+        out_data = np.zeros((N, C_out, L_out), dtype=np.float32)
+        for n in range(N):
+            for co in range(C_out):
+                for i in range(L_out):
+                    l0 = i * S
+                    out_data[n, co, i] = (
+                        self.weight.data[co] * x_padded[n, :, l0:l0+K]
+                    ).sum()
+        if self.bias is not None:
+            out_data = out_data + self.bias.data.reshape(1, C_out, 1)
+
+        out = Tensor(out_data)
+        bias_t = self.bias
+        if bias_t is not None:
+            parents = (x, self.weight, bias_t)
+        else:
+            parents = (x, self.weight)
+        x_padded_captured = x_padded
+        weight_captured = self.weight.data
+        weight_shape = self.weight.data.shape
+        L_in = L
+
+        def backward(g):
+            grad_out = g.data
+            grad_w = np.zeros(weight_shape, dtype=np.float32)
+            grad_x_padded = np.zeros_like(x_padded_captured)
+            for nn_ in range(N):
+                for co in range(C_out):
+                    for i in range(L_out):
+                        l0 = i * S
+                        go = grad_out[nn_, co, i]
+                        grad_w[co] += go * x_padded_captured[nn_, :, l0:l0+K]
+                        grad_x_padded[nn_, :, l0:l0+K] += go * weight_captured[co]
+            grad_x = grad_x_padded[:, :, P:P+L_in].copy() if P > 0 else grad_x_padded
+            if bias_t is not None:
+                grad_b = grad_out.sum(axis=(0, 2))
+                return (grad_x, grad_w, grad_b)
+            return (grad_x, grad_w)
+
+        return _build_ctx(out, parents, backward)
+
+    def __repr__(self):
+        return (
+            f"Conv1d({self.in_channels}, {self.out_channels}, "
+            f"kernel_size={self.kernel_size}, stride={self.stride}, padding={self.padding})"
+        )
+
+
+# ─── BatchNorm1d ───────────────────────────────────────────
+
+class BatchNorm1d(Module):
+    """1D batch normalization. Accepts (N, C) or (N, C, L) input."""
+
+    def __init__(self, num_features: int, eps: float = 1e-5,
+                 momentum: float = 0.1, affine: bool = True,
+                 track_running_stats: bool = True):
+        super().__init__()
+        self.num_features = num_features
+        self.eps = float(eps)
+        self.momentum = float(momentum)
+        self.affine = affine
+        self.track_running_stats = track_running_stats
+        if affine:
+            self.weight = Tensor(np.ones(num_features, dtype=np.float32), requires_grad=True)
+            self.bias = Tensor(np.zeros(num_features, dtype=np.float32), requires_grad=True)
+        else:
+            self.weight = None
+            self.bias = None
+        if track_running_stats:
+            self.running_mean = np.zeros(num_features, dtype=np.float32)
+            self.running_var = np.ones(num_features, dtype=np.float32)
+        else:
+            self.running_mean = None
+            self.running_var = None
+
+    def forward(self, x: Tensor) -> Tensor:
+        xd = x.data
+        C = self.num_features
+        if xd.ndim not in (2, 3):
+            raise ValueError(f"BatchNorm1d expects 2D (N, C) or 3D (N, C, L); got {xd.ndim}D")
+        # Reduction axes: (0,) for 2D, (0, 2) for 3D — everything except channel
+        if xd.ndim == 2:
+            reduce_axes = (0,)
+            stat_shape = (1, C)
+        else:
+            reduce_axes = (0, 2)
+            stat_shape = (1, C, 1)
+        is_training_batch = self.training or not self.track_running_stats
+        if is_training_batch:
+            mean = xd.mean(axis=reduce_axes)
+            var = xd.var(axis=reduce_axes)
+            if self.training and self.track_running_stats:
+                m = self.momentum
+                self.running_mean = (1.0 - m) * self.running_mean + m * mean
+                self.running_var = (1.0 - m) * self.running_var + m * var
+        else:
+            mean = self.running_mean
+            var = self.running_var
+        inv_std = 1.0 / np.sqrt(var + self.eps)
+        mean_b = mean.reshape(stat_shape)
+        inv_std_b = inv_std.reshape(stat_shape)
+        x_hat = (xd - mean_b) * inv_std_b
+        if self.affine:
+            out_data = x_hat * self.weight.data.reshape(stat_shape) + self.bias.data.reshape(stat_shape)
+        else:
+            out_data = x_hat
+
+        out = Tensor(out_data.astype(np.float32))
+        if self.affine:
+            parents = (x, self.weight, self.bias)
+        else:
+            parents = (x,)
+        affine_capture = self.affine
+        weight_data = self.weight.data if self.affine else None
+        N_total = float(np.prod([xd.shape[a] for a in reduce_axes]))
+        x_hat_cap = x_hat
+        inv_std_cap = inv_std
+        training_pass = is_training_batch
+
+        def backward(g):
+            grad_out = g.data
+            if affine_capture:
+                grad_x_hat = grad_out * weight_data.reshape(stat_shape)
+                grad_weight = (grad_out * x_hat_cap).sum(axis=reduce_axes)
+                grad_bias = grad_out.sum(axis=reduce_axes)
+            else:
+                grad_x_hat = grad_out
+                grad_weight = None
+                grad_bias = None
+            if training_pass:
+                sum_g = grad_x_hat.sum(axis=reduce_axes, keepdims=True)
+                sum_g_xhat = (grad_x_hat * x_hat_cap).sum(axis=reduce_axes, keepdims=True)
+                grad_x = inv_std_cap.reshape(stat_shape) * (
+                    grad_x_hat - sum_g / N_total - x_hat_cap * sum_g_xhat / N_total
+                )
+            else:
+                grad_x = grad_x_hat * inv_std_cap.reshape(stat_shape)
+            if affine_capture:
+                return (grad_x, grad_weight, grad_bias)
+            return (grad_x,)
+
+        return _build_ctx(out, parents, backward)
+
+    def __repr__(self):
+        return f"BatchNorm1d({self.num_features}, eps={self.eps}, momentum={self.momentum})"
+
+
+# ─── Flatten ───────────────────────────────────────────────
+
+class Flatten(Module):
+    """Flattens dims from start_dim to end_dim (inclusive) into a single dim.
+
+    Defaults match torch.nn.Flatten: start_dim=1, end_dim=-1 → preserves
+    batch dim, collapses everything else.
+    """
+
+    def __init__(self, start_dim: int = 1, end_dim: int = -1):
+        super().__init__()
+        self.start_dim = start_dim
+        self.end_dim = end_dim
+
+    def forward(self, x: Tensor) -> Tensor:
+        shape = x.data.shape
+        ndim = len(shape)
+        sd = self.start_dim % ndim
+        ed = self.end_dim % ndim
+        # New shape: dims [0:sd] + [prod(dims[sd:ed+1])] + dims[ed+1:]
+        prefix = shape[:sd]
+        middle = 1
+        for d in shape[sd:ed+1]:
+            middle *= d
+        suffix = shape[ed+1:]
+        new_shape = prefix + (middle,) + suffix
+        return x.reshape(new_shape)
+
+    def __repr__(self):
+        return f"Flatten(start_dim={self.start_dim}, end_dim={self.end_dim})"
+
+
 # ─── Pooling ───────────────────────────────────────────────
 
 class MaxPool2d(Module):
