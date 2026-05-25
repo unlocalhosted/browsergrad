@@ -29,6 +29,42 @@ Number = Union[int, float]
 ArrayLike = Union[Number, List, Tuple, "np.ndarray", "Tensor"]
 
 
+# ─── Autograd-enabled flag + no_grad context ──────────────────
+#
+# When _GRAD_ENABLED is False, no Tensor created inside the block will
+# build a backward graph, regardless of its parents' requires_grad. The
+# context manager saves and restores the previous value so nesting works.
+
+_GRAD_ENABLED: bool = True
+
+
+class no_grad:
+    """Context manager that disables autograd graph building.
+
+    Use during inference / accuracy probes to avoid building a graph that
+    will never be traversed:
+
+        with grad.no_grad():
+            logits = model(x)
+            preds = logits.argmax(dim=-1)
+    """
+    __slots__ = ("_prev",)
+
+    def __init__(self):
+        self._prev = None
+
+    def __enter__(self):
+        global _GRAD_ENABLED
+        self._prev = _GRAD_ENABLED
+        _GRAD_ENABLED = False
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        global _GRAD_ENABLED
+        _GRAD_ENABLED = self._prev
+        return False
+
+
 class Tensor:
     """A tensor of f32 values with optional gradient tracking.
 
@@ -84,6 +120,21 @@ class Tensor:
             raise ValueError(f"item() only valid on scalar tensors, got shape {self.data.shape}")
         return float(self.data.flat[0])
 
+    def __int__(self) -> int:
+        if self.data.size != 1:
+            raise TypeError(f"int() only valid on scalar tensors, got shape {self.data.shape}")
+        return int(self.data.flat[0])
+
+    def __float__(self) -> float:
+        if self.data.size != 1:
+            raise TypeError(f"float() only valid on scalar tensors, got shape {self.data.shape}")
+        return float(self.data.flat[0])
+
+    def __bool__(self) -> bool:
+        if self.data.size != 1:
+            raise TypeError(f"bool() only valid on scalar tensors, got shape {self.data.shape}")
+        return bool(self.data.flat[0])
+
     def zero_grad(self):
         """Reset .grad to None. Called by Optimizer.zero_grad on every parameter."""
         self.grad = None
@@ -126,6 +177,23 @@ class Tensor:
 
     def mean(self, axis=None, keepdims: bool = False):
         return _mean(self, axis=axis, keepdims=keepdims)
+
+    def argmax(self, dim=None) -> "Tensor":
+        """Return indices of the maximum values along \`dim\`.
+
+        \`dim=None\` (default) returns a scalar — the flat index into the
+        original tensor's storage. Any other \`dim\` returns a tensor with
+        that axis reduced. Result dtype is int64 (PyTorch convention).
+
+        Not differentiable — argmax is non-smooth in input. The output
+        is a regular Tensor for ergonomic .tolist() / indexing but never
+        participates in autograd.
+        """
+        idx = np.argmax(self.data, axis=dim)
+        # We force an f32 backing so the rest of the library doesn't have
+        # to special-case int64 tensors. argmax results are typically used
+        # as plain Python ints (item(), tolist()), not for further math.
+        return Tensor(idx.astype(np.float32))
 
     # ─── Elementwise unary ─────────────────────────────────
 
@@ -213,7 +281,8 @@ def _wrap(x: ArrayLike) -> Tensor:
 
 
 def _build_ctx(out: Tensor, parents: Tuple[Tensor, ...], backward_fn: Callable):
-    if any(p.requires_grad for p in parents):
+    # Skip graph-building when inside no_grad — even if parents.requires_grad.
+    if _GRAD_ENABLED and any(p.requires_grad for p in parents):
         out.requires_grad = True
         out._ctx = (parents, backward_fn)
         out._is_leaf = False

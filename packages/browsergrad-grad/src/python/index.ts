@@ -25,13 +25,14 @@ from .tensor import (
     zeros,
     ones,
     randn,
+    no_grad,
 )
 from . import functional
 from . import nn
 from . import optim
 
-__all__ = ["Tensor", "zeros", "ones", "randn", "functional", "nn", "optim"]
-__version__ = "0.4.2"
+__all__ = ["Tensor", "zeros", "ones", "randn", "no_grad", "functional", "nn", "optim"]
+__version__ = "0.4.3"
 `;
 
 export interface PythonSource {

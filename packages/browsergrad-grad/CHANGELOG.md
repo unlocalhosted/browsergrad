@@ -5,6 +5,33 @@ All notable changes to `@unlocalhosted/browsergrad-grad`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] — 2026-05-25
+
+Inference ergonomics: `no_grad()` context + `Tensor.argmax` + scalar conversions.
+
+### Added
+
+- **`grad.no_grad()`** context manager — disables autograd graph building
+  inside the `with` block. Matches `torch.no_grad()`. Required to keep
+  inference memory-flat for any model (otherwise every eval forward keeps
+  the whole computation graph live).
+- **`Tensor.argmax(dim=None)`** — returns indices of the max along a dim.
+  Mostly used for classification accuracy probes; non-differentiable
+  (no `_ctx`). Result is a float-backed tensor; users call `.tolist()` or
+  use them as numpy-int directly.
+- **`Tensor.__int__`, `Tensor.__float__`, `Tensor.__bool__`** — make
+  Python's `int(tensor)`, `float(tensor)`, `bool(tensor)` work on scalar
+  (0-d or size-1) tensors. Matches PyTorch.
+
+### Verified
+
+- 5 tests check no_grad behavior: ops inside the block don't build graphs,
+  ops outside still do, the block restores prior state, backward through
+  pre-block tensors still works.
+- 5 tests check argmax: global (no axis), axis=0 (per-column), axis=-1
+  (per-row), result is int-coercible, and integrates with a Linear classifier.
+- 88 integration tests total green across 9 files (was 79 in 8 files).
+
 ## [0.4.2] — 2026-05-25
 
 Pure refactor — same surface, no behavior change, big perf win.

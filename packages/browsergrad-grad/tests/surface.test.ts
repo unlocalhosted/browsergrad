@@ -94,9 +94,10 @@ describe("Python source bundle", () => {
     expect(optim?.content).toContain("class AdamW(Optimizer)");
   });
 
-  it("__init__.py declares v0.4.2", () => {
+  it("__init__.py declares v0.4.3 and exports no_grad", () => {
     const init = SOURCE_FILES.find((s) => s.path.endsWith("__init__.py"));
-    expect(init?.content).toContain('__version__ = "0.4.2"');
+    expect(init?.content).toContain('__version__ = "0.4.3"');
+    expect(init?.content).toContain("no_grad");
   });
 
   it("nn.py defines v0.4.1 Conv1d / BatchNorm1d / Flatten", () => {
