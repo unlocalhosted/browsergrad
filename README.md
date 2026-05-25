@@ -5,7 +5,7 @@ Open-source library family for running Python and ML workloads in the browser.
 ```
 @unlocalhosted/browsergrad-runtime   v0.1.1   Pyodide-in-Worker host: exec, fs, AbortSignal cancel, structured assertions/artifacts
 @unlocalhosted/browsergrad-kernels   v0.1.0   WGSL kernel catalog (matmul, softmax, attention, ...) + JS reference impls
-@unlocalhosted/browsergrad-grad      v0.4.3   Tensor + autograd, every standard NN layer, full train/eval mode system
+@unlocalhosted/browsergrad-grad      v0.4.5   Tensor + autograd, every standard NN layer, optimizers + LR schedulers, full train/eval mode
 ```
 
 Each package is **independently consumable** — they share an organization scope on npm but no runtime dependency. Take one or all.
@@ -16,11 +16,11 @@ Each package is **independently consumable** — they share an organization scop
 |---|---|---|---|
 | **browsergrad-runtime** | 11 ✅ | 23 ✅ | Pyodide worker, exec, fs, assertion/artifact protocol, cooperative cancel; Python bridge + JS message routing both verified |
 | **browsergrad-kernels** | 26 ✅ (incl. JS reference correctness) | — (WebGPU needed) | 6 WGSL kernels + JS references: matmul, softmax, relu, gelu, layernorm, attention |
-| **browsergrad-grad** | 23 ✅ | 89 ✅ | See below |
+| **browsergrad-grad** | 24 ✅ | 101 ✅ | See below |
 
-**Total: 172 tests green** across the workspace. Every gradient verified against finite differences or hand-derived oracles; every WGSL kernel verified against its JS counterpart; the entire pipeline verified end-to-end via a 4-class CNN classifier kitchen-sink test.
+**Total: 185 tests green** across the workspace. Every gradient verified against finite differences or hand-derived oracles; every WGSL kernel verified against its JS counterpart; the entire pipeline verified end-to-end via a 4-class CNN classifier kitchen-sink test.
 
-## What `browsergrad-grad` covers (v0.4.3)
+## What `browsergrad-grad` covers (v0.4.5)
 
 Tensor + autograd:
 - Element-wise ops with NumPy-style broadcasting (incl. in backward)
@@ -44,8 +44,9 @@ Functional:
 - mse_loss, cross_entropy_loss (fused softmax+NLL), nll_loss
 
 Optimizers: SGD (+ momentum, weight_decay), Adam, AdamW.
+LR schedulers: StepLR, CosineAnnealingLR (PyTorch-conformant formulas).
 
-Tensor extras: argmax, item/int/float/bool scalar conversions, detach, numpy, tolist.
+Tensor extras: cat / stack (multi-tensor concat with split backward), argmax, item/int/float/bool scalar conversions, detach, numpy, tolist.
 
 ### End-to-end checks that run in CI
 
@@ -94,7 +95,7 @@ browsergrad/
 ├── packages/
 │   ├── browsergrad-runtime/     Pyodide-in-Worker host (v0.1.1)
 │   ├── browsergrad-kernels/     WGSL kernel catalog (v0.1.0)
-│   └── browsergrad-grad/        most-developed; tensor + autograd + nn (v0.4.3)
+│   └── browsergrad-grad/        most-developed; tensor + autograd + nn (v0.4.5)
 ├── package.json                 pnpm-workspace root
 └── LICENSE                      MIT
 ```
@@ -103,7 +104,7 @@ browsergrad/
 
 - `pnpm typecheck` — TypeScript strict mode on all 3 packages
 - `pnpm test` — fast surface tests across all packages (~1s)
-- `pnpm -F @unlocalhosted/browsergrad-grad test:integration` — full Pyodide-in-node integration suite (~15s; 89 tests across 9 files)
+- `pnpm -F @unlocalhosted/browsergrad-grad test:integration` — full Pyodide-in-node integration suite (~20s; 101 tests across 12 files)
 - `pnpm -F @unlocalhosted/browsergrad-runtime test:integration` — runtime Python-bridge + client-routing tests (~3s; 23 tests)
 
 ## License
