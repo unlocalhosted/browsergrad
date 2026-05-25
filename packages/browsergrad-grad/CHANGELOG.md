@@ -5,6 +5,50 @@ All notable changes to `@unlocalhosted/browsergrad-grad`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-05-25
+
+**`nn.Conv2d`**, developed strictly via TDD. One test, one cycle of minimum
+implementation, repeat. Eleven cycles total:
+
+| Cycle | Test (oracle) | Resulting impl change |
+|---|---|---|
+| 1 | tracer: 1×1 kernel → `w*x + b` (hand-derived) | Constructor + 1×1 forward |
+| 2 | 3×3 vs numpy triple-loop reference | General loop forward |
+| 3-5 | multi out-ch, multi in-ch, batch (already passed) | regression coverage |
+| 6 | `stride=2` → output at every-other position | `(H-K)//S+1` + offset math |
+| 7 | `padding=1` preserves spatial dims | `np.pad` input |
+| 8 | `d/d(bias) = grad_out.sum((0,2,3))` (hand-derived) | bias gradient |
+| 9 | `d/d(weight)` matches finite differences | weight gradient (accumulating loop) |
+| 10 | `d/d(input)` matches finite differences | input gradient (scatter-add) |
+| 11 | end-to-end: trains to recover an edge-detection kernel | (no new code — full pipeline check) |
+
+### Added
+
+- `nn.Conv2d(in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True)`
+  - Input shape: `(N, C_in, H, W)` → output: `(N, C_out, H_out, W_out)` where
+    `H_out = (H + 2*padding - kernel_size) // stride + 1`.
+  - Weight shape `(C_out, C_in, K, K)`, Kaiming-uniform init.
+  - Forward: naive 4-deep nested loop with NumPy slicing inside; correct first,
+    optimizable later. Readability over speed for v0.3 — the code is intentionally
+    lesson-material.
+  - Backward: closure captures `x_padded` and `weight.data` at forward time; one
+    scatter-add pass produces `grad_w` and `grad_x_padded`; bias gradient is
+    `grad_out.sum((0, 2, 3))`. All three gradients are verified end-to-end
+    against finite differences (`eps=1e-3`, `tol=5e-3`).
+- 11 new integration tests in `tests-integration/conv2d.test.ts`.
+
+### Still deferred (v0.4+)
+
+- Tuple kernel/stride/padding shapes (e.g. `kernel_size=(3, 5)`).
+- Dilation.
+- Groups / depthwise convolution.
+- Transposed convolution (`ConvTranspose2d`).
+- `Conv1d`, `Conv3d`.
+- **im2col + matmul optimization.** Refactor candidate: identical interface,
+  10–100× faster, sacrifices the readable nested-loop pedagogy.
+- WebGPU dispatch via `@unlocalhosted/browsergrad-kernels`. Will need a
+  matmul-based Conv2d to actually benefit from GPU.
+
 ## [0.2.0] — 2026-05-25
 
 Broadcasting, transformer parts, Adam, **and the first real Python-execution

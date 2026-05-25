@@ -15,7 +15,7 @@ y.backward()
 print(x.grad.tolist())   # [2.0, 4.0, 6.0]
 ```
 
-> **Status: v0.2.0.** Broadcasting throughout autograd, higher-rank matmul, Adam/AdamW, cross-entropy, GELU/softmax/log_softmax, LayerNorm, Embedding. Enough to write a transformer block by hand.
+> **Status: v0.3.0.** All v0.2 + `nn.Conv2d` (TDD'd one cycle at a time, all three gradients verified against finite differences). Enough to write both a CNN and a transformer block by hand.
 
 ## What this is
 
@@ -128,6 +128,7 @@ F.nll_loss(log_probs, targets)
 import browsergrad_grad.nn as nn
 nn.Module                          # base — auto-tracks Tensor params
 nn.Linear(in_features, out_features, bias=True)
+nn.Conv2d(in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True)
 nn.LayerNorm(normalized_shape, eps=1e-5)
 nn.Embedding(num_embeddings, embedding_dim)
 nn.Sequential(m1, m2, m3)
@@ -144,7 +145,9 @@ optim.AdamW(params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-2)
 
 These are documented as deferred — additive when they land:
 
-- **Conv1d / Conv2d.** Highest-priority v0.3 target for CNN labs.
+- **Conv1d / Conv3d.** v0.4 if needed; v0.3 ships Conv2d only.
+- **Tuple kernel/stride/padding shapes, dilation, groups, ConvTranspose2d.** v0.4+.
+- **im2col + matmul optimization** for Conv2d. v0.3 ships naive nested loops (correct + readable). Refactor candidate when perf matters.
 - **BatchNorm / GroupNorm.** Mostly needed for older CNN architectures.
 - **Dropout, RNN, LSTM, GRU.** Less central for transformer-focused curriculum.
 - **WebGPU dispatch.** v0 is pure NumPy. v0.3 will add an optional `device` arg

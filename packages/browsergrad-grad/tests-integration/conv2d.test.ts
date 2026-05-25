@@ -210,3 +210,163 @@ y = conv(grad.Tensor(X))
     expect(result.corner_topleft).toBe(12);
   });
 });
+
+describe("Conv2d — backward", () => {
+  beforeAll(reset);
+
+  it("d(sum(y))/d(bias) = grad_out summed over (N, H_out, W_out)", async () => {
+    // For loss = y.sum(), grad_out is all-ones with shape (N, C_out, H_out, W_out).
+    // db[co] = sum_{n,i,j}(1) = N * H_out * W_out, identical for every output channel.
+    const result = await target.run<number[]>(`
+${PRELUDE}
+conv = nn.Conv2d(1, 2, 2)  # 2 output channels with bias
+conv.weight.data[:] = 0.0  # zero weights → output only depends on bias
+X = np.zeros((3, 1, 4, 4), dtype=np.float32)  # batch of 3
+y = conv(grad.Tensor(X))
+loss = y.sum()
+loss.backward()
+conv.bias.grad.tolist()
+`);
+    // y has shape (3, 2, 3, 3) → H_out * W_out = 9, N = 3 → db[co] = 27 per channel.
+    expect(result).toEqual([27, 27]);
+  });
+
+  it("d(sum(y))/d(weight) matches finite differences", async () => {
+    // Independent oracle: compute (loss(W+ε) - loss(W-ε)) / (2ε) per weight cell,
+    // using only Conv2d.forward (already verified). Compare to analytic grad
+    // produced by .backward(). Catches any mistake in the weight-gradient formula.
+    const result = await target.run<{
+      analytic: number[];
+      finite_diff: number[];
+    }>(`
+${PRELUDE}
+np.random.seed(0)
+conv = nn.Conv2d(1, 1, 3, bias=False)
+X = np.random.randn(1, 1, 5, 5).astype(np.float32) * 0.5
+W_orig = conv.weight.data.copy()
+
+# Analytic
+y = conv(grad.Tensor(X))
+loss = y.sum()
+loss.backward()
+analytic = conv.weight.grad.data.flatten().tolist()
+
+# Finite differences
+eps = 1e-3
+fd = np.zeros_like(W_orig)
+for i in range(W_orig.shape[2]):
+    for j in range(W_orig.shape[3]):
+        conv.weight.data[:] = W_orig
+        conv.weight.data[0, 0, i, j] += eps
+        loss_plus = float(conv(grad.Tensor(X)).sum().item())
+        conv.weight.data[:] = W_orig
+        conv.weight.data[0, 0, i, j] -= eps
+        loss_minus = float(conv(grad.Tensor(X)).sum().item())
+        fd[0, 0, i, j] = (loss_plus - loss_minus) / (2 * eps)
+
+{"analytic": analytic, "finite_diff": fd.flatten().tolist()}
+`);
+    expect(result.analytic.length).toBe(result.finite_diff.length);
+    for (let i = 0; i < result.analytic.length; i++) {
+      // f32 + eps=1e-3 → expect agreement to ~1e-3 at worst.
+      expect(Math.abs(result.analytic[i]! - result.finite_diff[i]!)).toBeLessThan(5e-3);
+    }
+  });
+
+  it("d(sum(y))/d(input) matches finite differences", async () => {
+    // Input gradient (the trickiest of the three) verified the same way:
+    // wiggle each input cell, observe loss delta, compare to analytic .grad.
+    const result = await target.run<{
+      analytic: number[];
+      finite_diff: number[];
+    }>(`
+${PRELUDE}
+np.random.seed(1)
+conv = nn.Conv2d(1, 1, 3, padding=1, bias=False)
+X = np.random.randn(1, 1, 4, 4).astype(np.float32) * 0.3
+W_orig = conv.weight.data.copy()
+
+# Analytic
+x_t = grad.Tensor(X, requires_grad=True)
+y = conv(x_t)
+loss = y.sum()
+loss.backward()
+analytic = x_t.grad.data.flatten().tolist()
+
+# Finite differences (just the input — same shape as X)
+eps = 1e-3
+fd = np.zeros_like(X)
+for i in range(X.shape[2]):
+    for j in range(X.shape[3]):
+        X_plus = X.copy()
+        X_plus[0, 0, i, j] += eps
+        loss_plus = float(conv(grad.Tensor(X_plus)).sum().item())
+        X_minus = X.copy()
+        X_minus[0, 0, i, j] -= eps
+        loss_minus = float(conv(grad.Tensor(X_minus)).sum().item())
+        fd[0, 0, i, j] = (loss_plus - loss_minus) / (2 * eps)
+
+{"analytic": analytic, "finite_diff": fd.flatten().tolist()}
+`);
+    expect(result.analytic.length).toBe(result.finite_diff.length);
+    for (let i = 0; i < result.analytic.length; i++) {
+      expect(Math.abs(result.analytic[i]! - result.finite_diff[i]!)).toBeLessThan(5e-3);
+    }
+  });
+});
+
+describe("Conv2d — end-to-end", () => {
+  beforeAll(reset);
+
+  it("trains to detect a vertical edge from random init", async () => {
+    // The ground-truth filter is a horizontal Sobel-style edge detector
+    // [[-1, 0, 1]] (1x3 expressed as 3x3 with zero top/bottom rows):
+    //   [[ 0, 0, 0],
+    //    [-1, 0, 1],
+    //    [ 0, 0, 0]]
+    // We generate input images and their "edge response" via this filter
+    // applied with padding=1, then train a Conv2d(1, 1, 3, padding=1) from
+    // random init to recover the filter. Loss must drop below a threshold
+    // by the end of training.
+    const result = await target.run<{
+      initial_loss: number;
+      final_loss: number;
+    }>(`
+${PRELUDE}
+import browsergrad_grad.functional as F
+import browsergrad_grad.optim as optim
+np.random.seed(7)
+
+target_kernel = np.array([[
+  [ 0.0,  0.0,  0.0],
+  [-1.0,  0.0,  1.0],
+  [ 0.0,  0.0,  0.0],
+]], dtype=np.float32).reshape(1, 1, 3, 3)
+
+# Reference forward using a Conv2d with the target kernel (no bias).
+gt_conv = nn.Conv2d(1, 1, 3, padding=1, bias=False)
+gt_conv.weight.data[:] = target_kernel
+
+# Training data: 16 random 8x8 images, target output is gt_conv(image).
+X_np = np.random.randn(16, 1, 8, 8).astype(np.float32)
+Y_np = gt_conv(grad.Tensor(X_np)).data.copy()
+X = grad.Tensor(X_np)
+Y = grad.Tensor(Y_np)
+
+# Model: another Conv2d with the same shape, random init.
+model = nn.Conv2d(1, 1, 3, padding=1, bias=False)
+opt = optim.Adam(model.parameters(), lr=0.05)
+
+initial_loss = float(F.mse_loss(model(X), Y).item())
+for _ in range(150):
+    opt.zero_grad()
+    loss = F.mse_loss(model(X), Y)
+    loss.backward()
+    opt.step()
+{"initial_loss": initial_loss, "final_loss": float(loss.item())}
+`);
+    expect(result.final_loss).toBeLessThan(result.initial_loss);
+    // A correctly-learning Conv2d easily drops below 0.01 in 150 steps on this.
+    expect(result.final_loss).toBeLessThan(0.01);
+  });
+});

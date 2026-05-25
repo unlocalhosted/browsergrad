@@ -94,9 +94,14 @@ describe("Python source bundle", () => {
     expect(optim?.content).toContain("class AdamW(Optimizer)");
   });
 
-  it("__init__.py declares v0.2.0", () => {
+  it("__init__.py declares v0.3.0", () => {
     const init = SOURCE_FILES.find((s) => s.path.endsWith("__init__.py"));
-    expect(init?.content).toContain('__version__ = "0.2.0"');
+    expect(init?.content).toContain('__version__ = "0.3.0"');
+  });
+
+  it("nn.py defines v0.3 Conv2d", () => {
+    const nn = SOURCE_FILES.find((s) => s.path.endsWith("nn.py"));
+    expect(nn?.content).toContain("class Conv2d(Module)");
   });
 });
 

@@ -144,18 +144,56 @@ class Conv2d(Module):
         W_pad = W + 2 * P
         H_out = (H_pad - K) // S + 1
         W_out = (W_pad - K) // S + 1
-        out = np.zeros((N, C_out, H_out, W_out), dtype=np.float32)
+        out_data = np.zeros((N, C_out, H_out, W_out), dtype=np.float32)
         for n in range(N):
             for co in range(C_out):
                 for i in range(H_out):
                     for j in range(W_out):
                         h0, w0 = i * S, j * S
-                        out[n, co, i, j] = (
+                        out_data[n, co, i, j] = (
                             self.weight.data[co] * x_padded[n, :, h0:h0+K, w0:w0+K]
                         ).sum()
         if self.bias is not None:
-            out = out + self.bias.data.reshape(1, C_out, 1, 1)
-        return Tensor(out)
+            out_data = out_data + self.bias.data.reshape(1, C_out, 1, 1)
+
+        out = Tensor(out_data)
+        bias_t = self.bias
+        if bias_t is not None:
+            parents = (x, self.weight, bias_t)
+        else:
+            parents = (x, self.weight)
+        # Capture only what backward needs — keeps the closure cheap and
+        # makes it independent of subsequent mutations to weight/x.
+        x_padded_captured = x_padded
+        weight_captured = self.weight.data
+        weight_shape = self.weight.data.shape
+        H_in, W_in = H, W
+
+        def backward(g):
+            grad_out = g.data  # (N, C_out, H_out, W_out)
+            # d/d(weight): accumulate grad_out * input-window per output cell.
+            grad_w = np.zeros(weight_shape, dtype=np.float32)
+            # d/d(x_padded): scatter-add grad_out * weight back to each window.
+            grad_x_padded = np.zeros_like(x_padded_captured)
+            for nn_ in range(N):
+                for co in range(C_out):
+                    for i in range(H_out):
+                        for j in range(W_out):
+                            h0, w0 = i * S, j * S
+                            go = grad_out[nn_, co, i, j]
+                            grad_w[co] += go * x_padded_captured[nn_, :, h0:h0+K, w0:w0+K]
+                            grad_x_padded[nn_, :, h0:h0+K, w0:w0+K] += go * weight_captured[co]
+            # Crop back to the input shape (no padding) if padding was applied.
+            if P > 0:
+                grad_x = grad_x_padded[:, :, P:P+H_in, P:P+W_in].copy()
+            else:
+                grad_x = grad_x_padded
+            if bias_t is not None:
+                grad_b = grad_out.sum(axis=(0, 2, 3))
+                return (grad_x, grad_w, grad_b)
+            return (grad_x, grad_w)
+
+        return _build_ctx(out, parents, backward)
 
     def __repr__(self):
         return (
