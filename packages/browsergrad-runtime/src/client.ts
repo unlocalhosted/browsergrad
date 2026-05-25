@@ -359,7 +359,9 @@ export async function createSession(
   if (!options.pyodideIndexURL) {
     throw new BrowsergradError("createSession: pyodideIndexURL is required");
   }
-  if (typeof Worker === "undefined") {
+  // Only require the global Worker constructor when we have to build a default
+  // worker. Callers providing their own (testing, custom bundlers) bypass.
+  if (!options.worker && typeof Worker === "undefined") {
     throw new BrowsergradError(
       "createSession: Worker is not available in this environment",
     );

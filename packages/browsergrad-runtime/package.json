@@ -1,6 +1,6 @@
 {
   "name": "@unlocalhosted/browsergrad-runtime",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pyodide-in-Worker runtime for browser-based Python execution. Same-origin assets, AbortSignal cancellation, structured assertion/artifact protocol. Platform-agnostic primitives — bring your own UI.",
   "type": "module",
   "license": "MIT",
@@ -48,6 +48,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "oxlint src",
     "clean": "rm -rf dist *.tsbuildinfo"
   },

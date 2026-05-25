@@ -34,6 +34,7 @@ import type {
   ExecError,
   PackageProgressEvent,
 } from "../types";
+import { PY_PREAMBLE } from "./python-preamble";
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
@@ -67,85 +68,6 @@ interface PyodideAPI {
 
 let pyodidePromise: Promise<PyodideAPI> | null = null;
 let currentExecId: number | null = null;
-
-/**
- * Python preamble — defines a `browsergrad` module that user code can
- * `import browsergrad as bg`. The helpers serialize their payload to JSON
- * (so PyProxy/Python types convert cleanly) and call the JS bridge.
- *
- * Kept small and audited: every name introduced into the loader's local
- * scope is deleted at the end so user globals stay clean.
- */
-const PY_PREAMBLE = `
-import json as _bg_json
-import sys as _bg_sys
-import types as _bg_types
-import traceback as _bg_traceback
-import _bg_native as _bg_native_
-
-_bg_mod = _bg_types.ModuleType("browsergrad")
-_bg_mod.__doc__ = "Structured assertion + artifact emission for browsergrad runtime"
-
-def _bg_post_assertion(payload):
-    _bg_native_.postAssertion(_bg_json.dumps(payload))
-
-def _bg_post_artifact(payload):
-    _bg_native_.postArtifact(_bg_json.dumps(payload, default=str))
-
-def _bg_assert_pass(name, duration_ms=None):
-    _bg_post_assertion({"kind": "pass", "name": name, "durationMs": duration_ms})
-
-def _bg_assert_fail(name, message, expected=None, actual=None, duration_ms=None):
-    _bg_post_assertion({
-        "kind": "fail",
-        "name": name,
-        "message": message,
-        "expectedRepr": None if expected is None else repr(expected),
-        "actualRepr": None if actual is None else repr(actual),
-        "durationMs": duration_ms,
-    })
-
-def _bg_assert_error(name, message, exc=None, duration_ms=None):
-    tb = None
-    if exc is not None:
-        tb = "".join(_bg_traceback.format_exception(type(exc), exc, exc.__traceback__))
-    _bg_post_assertion({
-        "kind": "error",
-        "name": name,
-        "message": message,
-        "traceback": tb,
-        "durationMs": duration_ms,
-    })
-
-def _bg_log(name, data, level="info"):
-    _bg_post_artifact({"kind": "log", "name": name, "level": level, "data": str(data)})
-
-def _bg_emit_json(name, data):
-    _bg_post_artifact({"kind": "json", "name": name, "data": data})
-
-def _bg_emit_image(name, mime, data_base64):
-    _bg_post_artifact({
-        "kind": "image",
-        "name": name,
-        "mime": mime,
-        "dataBase64": data_base64,
-    })
-
-_bg_mod.assert_pass = _bg_assert_pass
-_bg_mod.assert_fail = _bg_assert_fail
-_bg_mod.assert_error = _bg_assert_error
-_bg_mod.log = _bg_log
-_bg_mod.emit_json = _bg_emit_json
-_bg_mod.emit_image = _bg_emit_image
-
-_bg_sys.modules["browsergrad"] = _bg_mod
-
-# Clean up loader-local names so user globals stay tidy.
-del _bg_mod, _bg_json, _bg_sys, _bg_types, _bg_traceback, _bg_native_
-del _bg_post_assertion, _bg_post_artifact
-del _bg_assert_pass, _bg_assert_fail, _bg_assert_error
-del _bg_log, _bg_emit_json, _bg_emit_image
-`;
 
 async function bootPyodide(
   indexURL: string,

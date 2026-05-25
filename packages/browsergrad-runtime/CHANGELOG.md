@@ -5,6 +5,45 @@ All notable changes to `@unlocalhosted/browsergrad-runtime`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-05-25
+
+Bug fix + comprehensive integration tests.
+
+### Fixed
+
+- **`bg.emit_json`, `bg.log`, `bg.emit_image`, and `bg.assert_error` would
+  raise `NameError` at call time.** The PY_PREAMBLE deleted internal
+  helpers (`_bg_post_artifact`, `_bg_post_assertion`, `_bg_traceback`) from
+  module globals at the end of installation, but the user-facing helpers
+  resolved those names lazily at call time. After deletion, any call to an
+  artifact-emitting function failed.
+  Fixed by capturing all needed references in keyword-only default args
+  evaluated at function-definition time — the helpers now own their
+  references and are immune to module-globals cleanup.
+  **This was caught by the new integration test suite. Previously
+  undetected.**
+
+### Added
+
+- `tests-integration/python-bridge.test.ts` — 11 tests boot real Pyodide
+  in node, install the PY_PREAMBLE, and verify the entire `browsergrad`
+  module surface: import, assert_pass/fail/error with full payload shapes,
+  log/emit_json/emit_image, plus a hygiene check that no `_bg_*` loader
+  locals leak into user globals.
+- `tests-integration/client-routing.test.ts` — 12 tests use a FakeWorker
+  (implements postMessage / addEventListener / terminate) to exercise
+  client.ts's message routing without booting Pyodide:
+    - createSession → init:done correlation
+    - exec request/response, fs.write + fs.read round-trip
+    - onStdout / onAssertion / onArtifact streaming routes correctly
+    - Error paths: runtime errors, timeout, AbortSignal, dispose
+    - Idempotent dispose, post-dispose operations throw
+- `createSession({ worker })` now skips the `typeof Worker === "undefined"`
+  check when a custom worker is supplied — non-browser test environments
+  can drive the runtime via their own Worker substitute.
+- `src/worker/python-preamble.ts` — PY_PREAMBLE extracted from the worker
+  entry so it can be imported by tests and any future tooling.
+
 ## [0.1.0] — 2026-05-25
 
 Initial functional release. The public API in `src/types.ts` is stable; bumping
