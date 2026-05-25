@@ -37,7 +37,7 @@ __all__ = [
     "Tensor", "zeros", "ones", "randn", "no_grad", "cat", "stack",
     "functional", "nn", "optim",
 ]
-__version__ = "0.4.4"
+__version__ = "0.4.5"
 `;
 
 export interface PythonSource {

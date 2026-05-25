@@ -94,12 +94,18 @@ describe("Python source bundle", () => {
     expect(optim?.content).toContain("class AdamW(Optimizer)");
   });
 
-  it("__init__.py declares v0.4.4 and exports no_grad / cat / stack", () => {
+  it("__init__.py declares v0.4.5 and exports no_grad / cat / stack", () => {
     const init = SOURCE_FILES.find((s) => s.path.endsWith("__init__.py"));
-    expect(init?.content).toContain('__version__ = "0.4.4"');
+    expect(init?.content).toContain('__version__ = "0.4.5"');
     expect(init?.content).toContain("no_grad");
     expect(init?.content).toContain("cat");
     expect(init?.content).toContain("stack");
+  });
+
+  it("optim.py defines v0.4.5 LR schedulers", () => {
+    const optim = SOURCE_FILES.find((s) => s.path.endsWith("optim.py"));
+    expect(optim?.content).toContain("class StepLR(_LRScheduler)");
+    expect(optim?.content).toContain("class CosineAnnealingLR(_LRScheduler)");
   });
 
   it("nn.py defines v0.4.1 Conv1d / BatchNorm1d / Flatten", () => {

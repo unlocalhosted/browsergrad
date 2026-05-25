@@ -81,7 +81,7 @@ async function assertImports(target: GradTarget): Promise<void> {
   await target.exec({
     code: `
 import browsergrad_grad as _bg_check
-assert _bg_check.__version__ == "0.4.4", f"unexpected version {_bg_check.__version__}"
+assert _bg_check.__version__ == "0.4.5", f"unexpected version {_bg_check.__version__}"
 del _bg_check
 `,
   });

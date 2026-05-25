@@ -179,4 +179,64 @@ class AdamW(Optimizer):
             f"eps={self.eps}, weight_decay={self.weight_decay}, "
             f"params={len(self.params)})"
         )
+
+
+# ─── Learning-rate schedulers ──────────────────────────────
+
+class _LRScheduler:
+    """Base class. Subclasses override _compute_lr(step)."""
+
+    def __init__(self, optimizer):
+        self.optimizer = optimizer
+        self.base_lr = float(optimizer.lr)
+        self.last_step = 0
+
+    def step(self):
+        """Advance one scheduler step; update optimizer.lr in place."""
+        self.last_step += 1
+        self.optimizer.lr = float(self._compute_lr(self.last_step))
+
+    def _compute_lr(self, step: int) -> float:
+        raise NotImplementedError
+
+
+class StepLR(_LRScheduler):
+    """Decay lr by \`gamma\` every \`step_size\` scheduler steps.
+
+    Matches torch.optim.lr_scheduler.StepLR. At step N, the effective lr is
+      base_lr * gamma ** (N // step_size)
+    """
+
+    def __init__(self, optimizer, step_size: int, gamma: float = 0.1):
+        super().__init__(optimizer)
+        self.step_size = int(step_size)
+        self.gamma = float(gamma)
+
+    def _compute_lr(self, step: int) -> float:
+        return self.base_lr * (self.gamma ** (step // self.step_size))
+
+    def __repr__(self):
+        return f"StepLR(step_size={self.step_size}, gamma={self.gamma})"
+
+
+class CosineAnnealingLR(_LRScheduler):
+    """Cosine schedule from \`base_lr\` to \`eta_min\` over \`T_max\` steps.
+
+    Matches torch.optim.lr_scheduler.CosineAnnealingLR. At step t:
+      lr = eta_min + 0.5 * (base_lr - eta_min) * (1 + cos(t / T_max * pi))
+
+    After t = T_max the cosine continues (PyTorch does NOT clamp).
+    """
+
+    def __init__(self, optimizer, T_max: int, eta_min: float = 0.0):
+        super().__init__(optimizer)
+        self.T_max = int(T_max)
+        self.eta_min = float(eta_min)
+
+    def _compute_lr(self, step: int) -> float:
+        cos_val = np.cos(step / self.T_max * np.pi)
+        return self.eta_min + 0.5 * (self.base_lr - self.eta_min) * (1.0 + cos_val)
+
+    def __repr__(self):
+        return f"CosineAnnealingLR(T_max={self.T_max}, eta_min={self.eta_min})"
 `;

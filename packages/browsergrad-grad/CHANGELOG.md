@@ -5,6 +5,30 @@ All notable changes to `@unlocalhosted/browsergrad-grad`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] — 2026-05-25
+
+LR schedulers — closes the last commonly-expected gap in `optim`.
+
+### Added
+
+- `optim.StepLR(optimizer, step_size, gamma=0.1)` — decay lr by `gamma`
+  every `step_size` scheduler steps. Matches `torch.optim.lr_scheduler.StepLR`.
+- `optim.CosineAnnealingLR(optimizer, T_max, eta_min=0.0)` — cosine
+  schedule from `optimizer.lr` to `eta_min` over `T_max` steps. Matches
+  the PyTorch formula `eta_min + 0.5 * (base - eta_min) * (1 + cos(t/T_max·π))`.
+  Verified at sampled epochs against the closed-form.
+- `optim._LRScheduler` base class — used by both schedulers; subclasses
+  override `_compute_lr(step) → float`. Internal but exported so users
+  can write their own.
+
+### Verified
+
+- 5 tests cover: StepLR's per-step decay pattern across 10 steps, StepLR
+  on Adam (any Optimizer subclass), CosineAnnealingLR matching the
+  documented formula at every t ∈ [0, T_max], CosineAnnealingLR reaching
+  exactly `eta_min` at t = T_max, and the integration check — scheduler
+  step updates the lr that the optimizer's next step uses.
+
 ## [0.4.4] — 2026-05-25
 
 Compositional multi-tensor ops — `cat` and `stack`.
