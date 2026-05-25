@@ -5,6 +5,23 @@ All notable changes to `@unlocalhosted/browsergrad-grad`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] — 2026-05-25
+
+Pure refactor — same surface, no behavior change, big perf win.
+
+### Changed
+
+- **`nn.Conv2d` now uses im2col + matmul** in both forward and backward
+  instead of the v0.3.0 naive 4-deep nested loops.
+  Forward gathers each K×K window into a column matrix once (two outer
+  loops) then does a single batched matmul against the flattened weight.
+  Backward decomposes symmetrically: grad_weight via `grad_out_flat @ cols.T`
+  (summed over batch), grad_input via `weight_flat.T @ grad_out_flat`
+  scattered back via col2im.
+  All 11 Conv2d tests (forward correctness against numpy, all 3 gradients
+  vs finite differences, end-to-end training) pass unchanged — TDD
+  safety net working as designed. Same numerical result to f32 tolerance.
+
 ## [0.4.1] — 2026-05-25
 
 Round out the standard layer surface for sequence models and CNN→FFN transitions.
