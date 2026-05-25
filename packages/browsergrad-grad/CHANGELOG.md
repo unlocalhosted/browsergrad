@@ -5,6 +5,27 @@ All notable changes to `@unlocalhosted/browsergrad-grad`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] — 2026-05-25
+
+Compositional multi-tensor ops — `cat` and `stack`.
+
+### Added
+
+- `grad.cat(tensors, dim=0)` — concatenate along an existing axis. All
+  inputs must agree on every dim except `dim`. Backward splits the
+  gradient along `dim` (`np.split` with cumulative-size cuts) and
+  distributes one section to each parent.
+- `grad.stack(tensors, dim=0)` — concatenate along a *new* axis inserted
+  at `dim`. All inputs must have identical shape. Backward indexes the
+  gradient along that new axis to recover each parent's slice.
+
+### Verified
+
+- 6 tests cover: cat along axis 0 and 1, cat backward gradient
+  distribution; stack along axis 0 and inner axes; stack backward; plus
+  a compositional check — a two-branch `Linear(cat([h1, h2]))` model
+  trains end-to-end (confirming gradient flows through `cat`).
+
 ## [0.4.3] — 2026-05-25
 
 Inference ergonomics: `no_grad()` context + `Tensor.argmax` + scalar conversions.

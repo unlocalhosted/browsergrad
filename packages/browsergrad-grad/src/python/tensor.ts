@@ -467,4 +467,54 @@ def randn(*shape, requires_grad: bool = False, seed: Optional[int] = None) -> Te
         shape = tuple(shape[0])
     rng = np.random.default_rng(seed)
     return Tensor(rng.standard_normal(shape).astype(np.float32), requires_grad=requires_grad)
+
+
+# ─── Multi-tensor ops ──────────────────────────────────────
+
+def cat(tensors, dim: int = 0) -> Tensor:
+    """Concatenate \`tensors\` along an existing axis.
+
+    PyTorch behavior: all inputs must agree on every dim except \`dim\`.
+    Backward splits the gradient along \`dim\` and distributes to each parent.
+    """
+    if len(tensors) == 0:
+        raise ValueError("cat: empty tensor list")
+    tensors = tuple(_wrap(t) for t in tensors)
+    out_data = np.concatenate([t.data for t in tensors], axis=dim)
+    out = Tensor(out_data)
+    # Capture the split-point sizes so backward knows how to slice.
+    sizes = [t.data.shape[dim] for t in tensors]
+
+    def backward(g):
+        # numpy.split takes split-points (cumulative), not section sizes.
+        cuts = np.cumsum(sizes)[:-1].tolist()
+        parts = np.split(g.data, cuts, axis=dim)
+        return tuple(p.copy() for p in parts)
+
+    return _build_ctx(out, tensors, backward)
+
+
+def stack(tensors, dim: int = 0) -> Tensor:
+    """Concatenate \`tensors\` along a new axis inserted at \`dim\`.
+
+    PyTorch behavior: all inputs must have identical shape.
+    """
+    if len(tensors) == 0:
+        raise ValueError("stack: empty tensor list")
+    tensors = tuple(_wrap(t) for t in tensors)
+    out_data = np.stack([t.data for t in tensors], axis=dim)
+    out = Tensor(out_data)
+    n = len(tensors)
+
+    def backward(g):
+        # The new axis at \`dim\` has size n; iterate it to recover per-parent grads.
+        parts = []
+        for i in range(n):
+            # Index along the new axis to get a slice with that dim removed.
+            idx = [slice(None)] * g.data.ndim
+            idx[dim] = i
+            parts.append(g.data[tuple(idx)].copy())
+        return tuple(parts)
+
+    return _build_ctx(out, tensors, backward)
 `;
