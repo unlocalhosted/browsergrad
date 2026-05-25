@@ -1,111 +1,135 @@
 # browsergrad
 
-Open-source library family for running Python and ML workloads in the browser.
+> A small, readable, well-tested library family for running Python and machine-learning workloads directly in the browser.
 
 ```
-@unlocalhosted/browsergrad-runtime   v0.1.1   Pyodide-in-Worker host: exec, fs, AbortSignal cancel, structured assertions/artifacts
-@unlocalhosted/browsergrad-kernels   v0.1.0   WGSL kernel catalog (matmul, softmax, attention, ...) + JS reference impls
-@unlocalhosted/browsergrad-grad      v0.4.5   Tensor + autograd, every standard NN layer, optimizers + LR schedulers, full train/eval mode
+@unlocalhosted/browsergrad-runtime   Pyodide-in-Worker host with a structured assertion/artifact protocol
+@unlocalhosted/browsergrad-kernels   WGSL compute-shader catalog for ML primitives (matmul, attention, …)
+@unlocalhosted/browsergrad-grad      PyTorch-flavored tensor + autograd library that runs inside Pyodide
 ```
 
 Each package is **independently consumable** — they share an organization scope on npm but no runtime dependency. Take one or all.
 
-## Status
+## Install
 
-| Package | Surface | Integration | What works |
-|---|---|---|---|
-| **browsergrad-runtime** | 11 ✅ | 23 ✅ | Pyodide worker, exec, fs, assertion/artifact protocol, cooperative cancel; Python bridge + JS message routing both verified |
-| **browsergrad-kernels** | 26 ✅ (incl. JS reference correctness) | — (WebGPU needed) | 6 WGSL kernels + JS references: matmul, softmax, relu, gelu, layernorm, attention |
-| **browsergrad-grad** | 24 ✅ | 101 ✅ | See below |
-
-**Total: 185 tests green** across the workspace. Every gradient verified against finite differences or hand-derived oracles; every WGSL kernel verified against its JS counterpart; the entire pipeline verified end-to-end via a 4-class CNN classifier kitchen-sink test.
-
-## What `browsergrad-grad` covers (v0.4.5)
-
-Tensor + autograd:
-- Element-wise ops with NumPy-style broadcasting (incl. in backward)
-- Higher-rank matmul (batched), reductions with axis/keepdims, exp/log/reshape/transpose
-- Reverse-mode autograd via topological sort
-- `grad.no_grad()` context for inference
-
-Neural network modules:
-- Linear, Conv1d, Conv2d (im2col + matmul backend), Embedding
-- MaxPool2d, AvgPool2d, AdaptiveAvgPool2d
-- BatchNorm1d (handles 2D & 3D), BatchNorm2d, LayerNorm
-- Dropout, Dropout2d
-- MultiHeadAttention (batch-first scaled dot-product, multi-head)
-- Flatten, Sequential
-- Activation modules: ReLU, LeakyReLU, Sigmoid, Tanh, GELU
-- `Module.training` / `.train()` / `.eval()` mode system (recursive)
-
-Functional:
-- relu, leaky_relu, sigmoid, tanh, gelu
-- softmax, log_softmax
-- mse_loss, cross_entropy_loss (fused softmax+NLL), nll_loss
-
-Optimizers: SGD (+ momentum, weight_decay), Adam, AdamW.
-LR schedulers: StepLR, CosineAnnealingLR (PyTorch-conformant formulas).
-
-Tensor extras: cat / stack (multi-tensor concat with split backward), argmax, item/int/float/bool scalar conversions, detach, numpy, tolist.
-
-### End-to-end checks that run in CI
-
-- MLP on linear regression converges to known coefficients
-- 2-class image classifier (Conv → ReLU → MaxPool → Linear) reaches >95%
-- 2-class image classifier with BatchNorm reaches >95% with mode switching
-- Conv1d sequence classifier reaches >95%
-- MLP with Dropout reaches >90% in both train and eval modes
-- Transformer block (Embedding → MHA + LayerNorm + FFN) trains a copy task
-- **Kitchen-sink 4-class CNN** combining Conv2d/BN2d/Dropout2d/MaxPool/Flatten/Linear/Dropout/Adam reaches >90% accuracy, eval-mode differs from train-mode, predictions via no_grad+argmax
-
-Every gradient formula is verified against either finite differences or a hand-derived analytic oracle. No test compares the implementation against itself.
-
-### What real bugs were caught by these tests
-
-- **`bg.emit_json` / `bg.log` / `bg.emit_image` / `bg.assert_error` `NameError`** in the runtime's PY_PREAMBLE (helpers' closures looked up deleted globals at call time). Caught the first run of `tests-integration/python-bridge.test.ts`. Fixed by capturing helpers in keyword-only default args. Without this test, every production session would have crashed when user code called any of those functions.
-- A test scaffolding bug (`clearNamespace` deleted its own iteration variable mid-loop) caught by the original grad integration suite.
-- A mistaken assertion that Adam < SGD at small step counts; fixed to match the real behavior (Adam needs ~20 steps to warm up its bias correction).
-
-## Design
-
-Each package exposes **primitives, not workflows.** No baked-in concept of a "notebook," "lab," or "lesson." Consumers compose their own product on top.
-
-- `browsergrad-runtime` doesn't know what tests are.
-- `browsergrad-kernels` doesn't know what a tensor is — it dispatches WGSL with typed buffers.
-- `browsergrad-grad` is the tensor library; it can be installed into *any* Pyodide-shaped target with `exec({code})`, not just our runtime.
-
-This is deliberate. Packages can be used in isolation or together.
-
-## Methodology
-
-Every layer in `browsergrad-grad` was developed via strict TDD:
-
-1. Write one behavior test against an **independent oracle** (NumPy result, hand-derived math identity, or finite-difference numerical check).
-2. Watch it fail.
-3. Write the minimum implementation to make it pass.
-4. Never refactor while red.
-5. Repeat.
-
-Refactors (like the Conv2d im2col rewrite) are validated *only* by existing tests — no new tests written for them; the existing safety net catches drift.
-
-## Repository layout
-
-```
-browsergrad/
-├── packages/
-│   ├── browsergrad-runtime/     Pyodide-in-Worker host (v0.1.1)
-│   ├── browsergrad-kernels/     WGSL kernel catalog (v0.1.0)
-│   └── browsergrad-grad/        most-developed; tensor + autograd + nn (v0.4.5)
-├── package.json                 pnpm-workspace root
-└── LICENSE                      MIT
+```sh
+npm install @unlocalhosted/browsergrad-runtime pyodide
+npm install @unlocalhosted/browsergrad-kernels
+npm install @unlocalhosted/browsergrad-grad
 ```
 
-## Quality gates
+`pyodide` is a peer dependency of the runtime — you install it directly so you control the version and the asset-sync story (assets must be served same-origin).
 
-- `pnpm typecheck` — TypeScript strict mode on all 3 packages
-- `pnpm test` — fast surface tests across all packages (~1s)
-- `pnpm -F @unlocalhosted/browsergrad-grad test:integration` — full Pyodide-in-node integration suite (~20s; 101 tests across 12 files)
-- `pnpm -F @unlocalhosted/browsergrad-runtime test:integration` — runtime Python-bridge + client-routing tests (~3s; 23 tests)
+## Quick start
+
+### Run Python in a Worker
+
+```ts
+import { createSession } from "@unlocalhosted/browsergrad-runtime";
+
+const session = await createSession({
+  pyodideIndexURL: "/pyodide/v0.26.4/",
+  packages: ["numpy"],
+});
+
+await session.exec({
+  code: `
+    import numpy as np
+    print(np.arange(10).sum())
+  `,
+  onStdout: (chunk) => console.log(chunk),
+});
+
+await session.dispose();
+```
+
+### Train a model with browsergrad-grad
+
+```ts
+import { createSession } from "@unlocalhosted/browsergrad-runtime";
+import { installGrad } from "@unlocalhosted/browsergrad-grad";
+
+const session = await createSession({
+  pyodideIndexURL: "/pyodide/v0.26.4/",
+  packages: ["numpy"],
+});
+await installGrad(session);
+
+await session.exec({
+  code: `
+    import browsergrad_grad as grad
+    import browsergrad_grad.nn as nn
+    import browsergrad_grad.optim as optim
+    import browsergrad_grad.functional as F
+
+    model = nn.Sequential(
+        nn.Linear(4, 16),
+        nn.ReLU(),
+        nn.Linear(16, 2),
+    )
+    opt = optim.Adam(model.parameters(), lr=1e-2)
+    # ... training loop ...
+  `,
+});
+```
+
+### Or write vanilla PyTorch code
+
+After `grad.install_torch_alias()`, the `torch` namespace is registered:
+
+```python
+import browsergrad_grad as grad
+grad.install_torch_alias()
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+
+# Standard PyTorch user code from here on
+model = nn.Linear(4, 2)
+opt = optim.Adam(model.parameters(), lr=1e-2)
+loss = F.cross_entropy(model(torch.tensor(X)), y)
+loss.backward()
+opt.step()
+```
+
+The shim covers the subset of `torch` that browsergrad-grad implements. Anything unsupported (e.g. `torch.cuda`) raises `AttributeError` rather than silently faking success.
+
+### Use a WGSL kernel directly
+
+```ts
+import { createDevice, kernels, tensor } from "@unlocalhosted/browsergrad-kernels";
+
+const device = await createDevice();
+const A = tensor([2, 3], new Float32Array([1, 2, 3, 4, 5, 6]));
+const B = tensor([3, 2], new Float32Array([7, 8, 9, 10, 11, 12]));
+const C = await kernels.matmul(device, A, B);
+```
+
+Pure-JS reference implementations are at the `/reference` subpath for environments without WebGPU:
+
+```ts
+import { reference } from "@unlocalhosted/browsergrad-kernels/reference";
+const C = reference.matmul(A, B);
+```
+
+## Packages
+
+| Package | What it does |
+|---|---|
+| [`browsergrad-runtime`](./packages/browsergrad-runtime) | Spawns Pyodide in a Web Worker, exposes `exec` / `fs` / structured assertion + artifact protocol, AbortSignal cancellation. |
+| [`browsergrad-kernels`](./packages/browsergrad-kernels) | WGSL kernels for ML primitives — matmul, softmax, relu, gelu, layernorm, attention — each shipped with a pure-JS reference impl for conformance and CPU fallback. |
+| [`browsergrad-grad`](./packages/browsergrad-grad) | Tensor + reverse-mode autograd in Python, runs inside any Pyodide-shaped target. PyTorch-flavored API. Every standard NN layer for CNN + transformer work, all standard optimizers + LR schedulers, full train/eval mode system. Optional `torch` namespace shim for unmodified PyTorch user code. |
+
+Each package has its own README and CHANGELOG with full API details.
+
+## Documentation
+
+- [STATUS.md](./STATUS.md) — current state, test counts, supported APIs, known limitations
+- [DEVELOPMENT.md](./DEVELOPMENT.md) — how the library is developed; TDD methodology; quality gates
+- [CONTRIBUTING.md](./CONTRIBUTING.md) — how to contribute
+- [SECURITY.md](./SECURITY.md) — how to report vulnerabilities
 
 ## License
 

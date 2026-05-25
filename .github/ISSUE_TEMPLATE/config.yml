@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / discussion
+    url: https://github.com/unlocalhosted/browsergrad/discussions
+    about: Ask a question or discuss usage — not a bug report.
+  - name: Security report
+    url: https://github.com/unlocalhosted/browsergrad/security/advisories/new
+    about: Report a security issue privately. Don't file a public issue.
