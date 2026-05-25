@@ -1,0 +1,66 @@
+{
+  "name": "@unlocalhosted/browsergrad-grad",
+  "version": "0.1.0",
+  "description": "A small, readable tensor + autograd library that runs inside Pyodide. PyTorch-flavored API, NumPy-backed, designed to be educational source code. Not PyTorch — `import browsergrad_grad as grad`.",
+  "type": "module",
+  "license": "MIT",
+  "author": "unlocalhosted",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/unlocalhosted/browsergrad.git",
+    "directory": "packages/browsergrad-grad"
+  },
+  "homepage": "https://github.com/unlocalhosted/browsergrad/tree/main/packages/browsergrad-grad#readme",
+  "bugs": {
+    "url": "https://github.com/unlocalhosted/browsergrad/issues"
+  },
+  "keywords": [
+    "tensor",
+    "autograd",
+    "pyodide",
+    "education",
+    "machine-learning",
+    "browser",
+    "numpy"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./source": {
+      "types": "./dist/python/index.d.ts",
+      "import": "./dist/python/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/",
+    "src/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "oxlint src",
+    "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "oxlint": "^1.0.0",
+    "typescript": "~6.0.0",
+    "vitest": "^4.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "sideEffects": false
+}
