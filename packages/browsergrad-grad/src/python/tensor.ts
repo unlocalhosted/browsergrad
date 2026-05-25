@@ -1,18 +1,25 @@
 /**
  * Tensor + autograd Python source.
  *
+ * v0.2 upgrades v0.1 in-place — same public API, broadcasting now works,
+ * matmul accepts batch dimensions, plus a handful of new Tensor methods
+ * (exp, log, transpose, reshape, view) needed by the functional / nn layers.
+ *
  * Embedded as a TypeScript string so the build is a plain `tsc` — no asset
- * copy step, no bundler magic. Editors will lose Python syntax highlighting
+ * copy step, no bundler magic. Editors lose Python syntax highlighting
  * inside the string; in exchange the package is one bundle and trivially
- * portable. The Python is short enough (~250 lines) that this trade is fine
- * for v0; if it grows past ~500 lines we'll switch to .py + a build step.
+ * portable.
  *
  * NOT exported from index.ts — consumers install the whole library via
  * `installGrad(target)`; they don't import individual files.
  */
 
 export const TENSOR_PY = `
-"""browsergrad_grad.tensor — Tensor + reverse-mode autograd."""
+"""browsergrad_grad.tensor — Tensor + reverse-mode autograd.
+
+v0.2: NumPy-style broadcasting in every binary op. Higher-rank matmul.
+New methods: exp, log, transpose (axis-aware), reshape, view.
+"""
 
 from __future__ import annotations
 import numpy as np
@@ -109,16 +116,45 @@ class Tensor:
 
     def __pow__(self, p):
         if not isinstance(p, (int, float)):
-            raise TypeError("Tensor ** Tensor not supported in v0; use ** with a number")
+            raise TypeError("Tensor ** Tensor not supported; use ** with a number")
         return _pow(self, float(p))
 
     # ─── Reductions ────────────────────────────────────────
 
-    def sum(self):
-        return _sum(self)
+    def sum(self, axis=None, keepdims: bool = False):
+        return _sum(self, axis=axis, keepdims=keepdims)
 
-    def mean(self):
-        return _mean(self)
+    def mean(self, axis=None, keepdims: bool = False):
+        return _mean(self, axis=axis, keepdims=keepdims)
+
+    # ─── Elementwise unary ─────────────────────────────────
+
+    def exp(self) -> "Tensor":
+        return _exp(self)
+
+    def log(self) -> "Tensor":
+        return _log(self)
+
+    # ─── Shape ops ─────────────────────────────────────────
+
+    def reshape(self, *shape) -> "Tensor":
+        if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
+            shape = tuple(shape[0])
+        return _reshape(self, tuple(shape))
+
+    def view(self, *shape) -> "Tensor":
+        """Alias for reshape — provided for PyTorch familiarity."""
+        return self.reshape(*shape)
+
+    def transpose(self, dim0: int, dim1: int) -> "Tensor":
+        return _transpose(self, dim0, dim1)
+
+    @property
+    def T(self) -> "Tensor":
+        """For 2D tensors only — transposes the two dims. Use .transpose for higher rank."""
+        if self.ndim != 2:
+            raise ValueError(f"Tensor.T only defined for 2D tensors, got {self.ndim}D")
+        return self.transpose(0, 1)
 
     # ─── Backward ──────────────────────────────────────────
 
@@ -170,12 +206,7 @@ class Tensor:
                     parent.grad.data = parent.grad.data + g
 
 
-# ─── Op implementations ────────────────────────────────────
-#
-# Every op produces a new Tensor whose _ctx records:
-#   (parents: tuple[Tensor, ...], backward_fn: Callable[[Tensor], tuple[ndarray|None, ...]])
-# The backward_fn returns one gradient per parent, in the same order.
-# None means "this parent didn't participate in the computation."
+# ─── Autograd-internal helpers ─────────────────────────────
 
 def _wrap(x: ArrayLike) -> Tensor:
     return x if isinstance(x, Tensor) else Tensor(x)
@@ -189,98 +220,90 @@ def _build_ctx(out: Tensor, parents: Tuple[Tensor, ...], backward_fn: Callable):
     return out
 
 
-def _check_shapes(name: str, a: Tensor, b: Tensor):
-    if a.data.shape != b.data.shape:
-        raise ValueError(
-            f"{name}: v0 does not support tensor-tensor broadcasting "
-            f"(got shapes {a.data.shape} and {b.data.shape}). "
-            "Use scalar broadcasting or reshape manually."
-        )
+def _unbroadcast(grad: np.ndarray, target_shape: tuple) -> np.ndarray:
+    """Reduce \`grad\` back to \`target_shape\` by summing over broadcasted dims.
+
+    NumPy broadcasting matches dims right-to-left:
+      target [3, 1] broadcast with [3, 4]  → output [3, 4]
+      In backward: gradient w.r.t. target must sum the broadcasted dim (axis=1).
+    """
+    # 1. Collapse extra leading axes the broadcast added.
+    extra = grad.ndim - len(target_shape)
+    for _ in range(extra):
+        grad = grad.sum(axis=0)
+    # 2. For each remaining axis, if target dim is 1 but grad dim > 1, sum it.
+    for axis, (target_dim, grad_dim) in enumerate(zip(target_shape, grad.shape)):
+        if target_dim == 1 and grad_dim != 1:
+            grad = grad.sum(axis=axis, keepdims=True)
+    return grad
 
 
-def _add(a: ArrayLike, b: ArrayLike) -> Tensor:
-    if not isinstance(a, Tensor) and isinstance(b, Tensor):
-        a, b = b, a  # commute so 'a' is the Tensor in the scalar path
+# ─── Binary ops (broadcasting + autograd) ──────────────────
+
+def _binop(a: ArrayLike, b: ArrayLike, fwd, grad_a, grad_b) -> Tensor:
+    """Generic broadcasting binary op.
+
+    fwd(a_data, b_data) → out_data
+    grad_a(g, a_data, b_data) → gradient w.r.t. a, pre-unbroadcast
+    grad_b(g, a_data, b_data) → gradient w.r.t. b, pre-unbroadcast
+    """
     a_t = _wrap(a)
-    if isinstance(b, (int, float)):
-        out = Tensor(a_t.data + b)
-        return _build_ctx(out, (a_t,), lambda g: (g.data,))
     b_t = _wrap(b)
-    _check_shapes("add", a_t, b_t)
-    out = Tensor(a_t.data + b_t.data)
-    return _build_ctx(out, (a_t, b_t), lambda g: (g.data, g.data))
-
-
-def _sub(a: ArrayLike, b: ArrayLike) -> Tensor:
-    if isinstance(a, (int, float)) and isinstance(b, Tensor):
-        out = Tensor(a - b.data)
-        return _build_ctx(out, (b,), lambda g: (-g.data,))
-    a_t = _wrap(a)
-    if isinstance(b, (int, float)):
-        out = Tensor(a_t.data - b)
-        return _build_ctx(out, (a_t,), lambda g: (g.data,))
-    b_t = _wrap(b)
-    _check_shapes("sub", a_t, b_t)
-    out = Tensor(a_t.data - b_t.data)
-    return _build_ctx(out, (a_t, b_t), lambda g: (g.data, -g.data))
-
-
-def _mul(a: ArrayLike, b: ArrayLike) -> Tensor:
-    if not isinstance(a, Tensor) and isinstance(b, Tensor):
-        a, b = b, a
-    a_t = _wrap(a)
-    if isinstance(b, (int, float)):
-        c = float(b)
-        out = Tensor(a_t.data * c)
-        return _build_ctx(out, (a_t,), lambda g: (g.data * c,))
-    b_t = _wrap(b)
-    _check_shapes("mul", a_t, b_t)
-    out = Tensor(a_t.data * b_t.data)
-    # Capture a_data, b_data so the backward function doesn't depend on Tensor mutation.
+    out = Tensor(fwd(a_t.data, b_t.data))
+    a_shape, b_shape = a_t.data.shape, b_t.data.shape
     a_data, b_data = a_t.data, b_t.data
-    return _build_ctx(out, (a_t, b_t), lambda g: (g.data * b_data, g.data * a_data))
-
-
-def _div(a: ArrayLike, b: ArrayLike) -> Tensor:
-    if isinstance(a, (int, float)) and isinstance(b, Tensor):
-        out = Tensor(a / b.data)
-        b_data = b.data
-        return _build_ctx(out, (b,), lambda g: (-g.data * a / (b_data * b_data),))
-    a_t = _wrap(a)
-    if isinstance(b, (int, float)):
-        c = float(b)
-        out = Tensor(a_t.data / c)
-        return _build_ctx(out, (a_t,), lambda g: (g.data / c,))
-    b_t = _wrap(b)
-    _check_shapes("div", a_t, b_t)
-    out = Tensor(a_t.data / b_t.data)
-    a_data, b_data = a_t.data, b_t.data
-    return _build_ctx(
-        out,
-        (a_t, b_t),
-        lambda g: (g.data / b_data, -g.data * a_data / (b_data * b_data)),
-    )
-
-
-def _matmul(a: ArrayLike, b: ArrayLike) -> Tensor:
-    a_t = _wrap(a)
-    b_t = _wrap(b)
-    if a_t.data.ndim != 2 or b_t.data.ndim != 2:
-        raise ValueError(
-            f"matmul: v0 supports 2D × 2D only (got {a_t.data.ndim}D and {b_t.data.ndim}D)"
+    def backward(g):
+        return (
+            _unbroadcast(grad_a(g.data, a_data, b_data), a_shape),
+            _unbroadcast(grad_b(g.data, a_data, b_data), b_shape),
         )
-    if a_t.data.shape[1] != b_t.data.shape[0]:
+    return _build_ctx(out, (a_t, b_t), backward)
+
+
+def _add(a, b):
+    return _binop(a, b, np.add,
+                  lambda g, _a, _b: g,
+                  lambda g, _a, _b: g)
+
+def _sub(a, b):
+    return _binop(a, b, np.subtract,
+                  lambda g, _a, _b: g,
+                  lambda g, _a, _b: -g)
+
+def _mul(a, b):
+    return _binop(a, b, np.multiply,
+                  lambda g, _a, b_: g * b_,
+                  lambda g, a_, _b: g * a_)
+
+def _div(a, b):
+    return _binop(a, b, np.divide,
+                  lambda g, _a, b_: g / b_,
+                  lambda g, a_, b_: -g * a_ / (b_ * b_))
+
+
+def _matmul(a, b) -> Tensor:
+    a_t = _wrap(a)
+    b_t = _wrap(b)
+    if a_t.data.ndim < 2 or b_t.data.ndim < 2:
         raise ValueError(
-            f"matmul: inner dimensions don't match ({a_t.data.shape[1]} vs {b_t.data.shape[0]})"
+            f"matmul: both inputs must be at least 2D (got {a_t.data.ndim}D and {b_t.data.ndim}D)"
+        )
+    if a_t.data.shape[-1] != b_t.data.shape[-2]:
+        raise ValueError(
+            f"matmul: inner dimensions don't match ({a_t.data.shape[-1]} vs {b_t.data.shape[-2]})"
         )
     out = Tensor(a_t.data @ b_t.data)
     a_data, b_data = a_t.data, b_t.data
-    return _build_ctx(
-        out,
-        (a_t, b_t),
-        lambda g: (g.data @ b_data.T, a_data.T @ g.data),
-    )
+    a_shape, b_shape = a_t.data.shape, b_t.data.shape
+    def backward(g):
+        # @ broadcasts batch dims; we _unbroadcast back to each parent's shape.
+        ga = g.data @ np.swapaxes(b_data, -1, -2)
+        gb = np.swapaxes(a_data, -1, -2) @ g.data
+        return (_unbroadcast(ga, a_shape), _unbroadcast(gb, b_shape))
+    return _build_ctx(out, (a_t, b_t), backward)
 
+
+# ─── Unary ops ─────────────────────────────────────────────
 
 def _pow(a: Tensor, p: float) -> Tensor:
     out = Tensor(np.power(a.data, p))
@@ -288,17 +311,72 @@ def _pow(a: Tensor, p: float) -> Tensor:
     return _build_ctx(out, (a,), lambda g: (g.data * p * np.power(a_data, p - 1),))
 
 
-def _sum(a: Tensor) -> Tensor:
-    out = Tensor(a.data.sum())
-    shape = a.data.shape
-    return _build_ctx(out, (a,), lambda g: (np.broadcast_to(g.data, shape).copy(),))
+def _exp(a: Tensor) -> Tensor:
+    exp_data = np.exp(a.data)
+    out = Tensor(exp_data)
+    return _build_ctx(out, (a,), lambda g: (g.data * exp_data,))
 
 
-def _mean(a: Tensor) -> Tensor:
-    out = Tensor(a.data.mean())
-    shape = a.data.shape
-    n = float(a.data.size)
-    return _build_ctx(out, (a,), lambda g: (np.broadcast_to(g.data / n, shape).copy(),))
+def _log(a: Tensor) -> Tensor:
+    out = Tensor(np.log(a.data))
+    a_data = a.data
+    return _build_ctx(out, (a,), lambda g: (g.data / a_data,))
+
+
+# ─── Reductions ────────────────────────────────────────────
+
+def _sum(a: Tensor, axis=None, keepdims: bool = False) -> Tensor:
+    out_data = a.data.sum(axis=axis, keepdims=keepdims)
+    out = Tensor(out_data)
+    a_shape = a.data.shape
+    # Pre-compute the shape needed to broadcast grad back to a's shape.
+    # If keepdims=False, we need to insert size-1 dims at the reduced axes.
+    if axis is None:
+        def backward(g):
+            return (np.broadcast_to(g.data, a_shape).copy(),)
+    else:
+        axes = (axis,) if isinstance(axis, int) else tuple(axis)
+        def backward(g):
+            gd = g.data
+            if not keepdims:
+                for ax in sorted(ax % len(a_shape) for ax in axes):
+                    gd = np.expand_dims(gd, ax)
+            return (np.broadcast_to(gd, a_shape).copy(),)
+    return _build_ctx(out, (a,), backward)
+
+
+def _mean(a: Tensor, axis=None, keepdims: bool = False) -> Tensor:
+    out_data = a.data.mean(axis=axis, keepdims=keepdims)
+    out = Tensor(out_data)
+    a_shape = a.data.shape
+    n = float(np.prod(a_shape) if axis is None else
+              np.prod([a_shape[ax] for ax in ((axis,) if isinstance(axis, int) else axis)]))
+    if axis is None:
+        def backward(g):
+            return (np.broadcast_to(g.data / n, a_shape).copy(),)
+    else:
+        axes = (axis,) if isinstance(axis, int) else tuple(axis)
+        def backward(g):
+            gd = g.data / n
+            if not keepdims:
+                for ax in sorted(ax % len(a_shape) for ax in axes):
+                    gd = np.expand_dims(gd, ax)
+            return (np.broadcast_to(gd, a_shape).copy(),)
+    return _build_ctx(out, (a,), backward)
+
+
+# ─── Shape ops ─────────────────────────────────────────────
+
+def _reshape(a: Tensor, shape: tuple) -> Tensor:
+    out = Tensor(a.data.reshape(shape))
+    a_shape = a.data.shape
+    return _build_ctx(out, (a,), lambda g: (g.data.reshape(a_shape).copy(),))
+
+
+def _transpose(a: Tensor, dim0: int, dim1: int) -> Tensor:
+    out_data = np.swapaxes(a.data, dim0, dim1)
+    out = Tensor(out_data)
+    return _build_ctx(out, (a,), lambda g: (np.swapaxes(g.data, dim0, dim1).copy(),))
 
 
 # ─── Convenience constructors ──────────────────────────────

@@ -1,8 +1,9 @@
 /**
  * nn — neural network modules with parameter management.
  *
- * v0: Module (base class), Linear, Sequential. Enough to build a multi-layer
- * fully-connected net. Conv, BatchNorm, etc. land in v0.2.
+ * v0.2: Linear loses its bias-broadcasting workaround now that the Tensor
+ * supports real broadcasting. Adds LayerNorm, Embedding, and Module wrappers
+ * for common activations so they slot into Sequential cleanly.
  */
 
 export const NN_PY = `
@@ -10,16 +11,17 @@ export const NN_PY = `
 
 import math
 import numpy as np
-from typing import Iterator, List
-from .tensor import Tensor
+from typing import Iterator, Tuple
+from .tensor import Tensor, _build_ctx
+from . import functional as F
 
 
 class Module:
     """Base class for everything with learnable parameters.
 
     Subclasses should:
-      1. Assign Tensors with requires_grad=True as attributes (or wrap them
-         in Module attributes, which Module discovers transitively).
+      1. Assign Tensors with requires_grad=True as attributes (auto-tracked
+         as parameters via __setattr__).
       2. Override .forward(*args, **kwargs).
 
     The default __call__ delegates to forward.
@@ -31,7 +33,6 @@ class Module:
 
     def __setattr__(self, name, value):
         if isinstance(value, Tensor) and value.requires_grad:
-            # Track as a parameter automatically when it's a Tensor with requires_grad.
             self.__dict__.setdefault("_parameters", {})[name] = value
         elif isinstance(value, Module):
             self.__dict__.setdefault("_modules", {})[name] = value
@@ -57,6 +58,8 @@ class Module:
         return self.forward(*args, **kwargs)
 
 
+# ─── Linear ────────────────────────────────────────────────
+
 class Linear(Module):
     """y = x @ W^T + b (PyTorch convention).
 
@@ -68,35 +71,27 @@ class Linear(Module):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features
-        # Kaiming uniform: U(-bound, bound), bound = 1/sqrt(in_features)
         bound = 1.0 / math.sqrt(in_features)
         rng = np.random.default_rng()
         W_data = rng.uniform(-bound, bound, size=(out_features, in_features)).astype(np.float32)
         self.weight = Tensor(W_data, requires_grad=True)
         if bias:
-            b_data = np.zeros(out_features, dtype=np.float32)
-            self.bias = Tensor(b_data, requires_grad=True)
+            self.bias = Tensor(np.zeros(out_features, dtype=np.float32), requires_grad=True)
         else:
             self.bias = None
 
     def forward(self, x: Tensor) -> Tensor:
-        # x: (..., in_features) — v0 supports 2D inputs only.
-        if x.data.ndim != 2:
-            raise ValueError(
-                f"Linear: v0 expects 2D input (batch, features); got shape {x.data.shape}"
-            )
-        if x.data.shape[1] != self.in_features:
-            raise ValueError(
-                f"Linear: input feature dim {x.data.shape[1]} ≠ in_features {self.in_features}"
-            )
-        out = x @ self.weight.T_tensor()
+        # v0.2: bias broadcasts naturally via Tensor.__add__.
+        out = x @ self.weight.transpose(0, 1)
         if self.bias is not None:
-            out = out + self.bias.broadcast_to_rows(out.data.shape[0])
+            out = out + self.bias
         return out
 
     def __repr__(self):
         return f"Linear(in_features={self.in_features}, out_features={self.out_features}, bias={self.bias is not None})"
 
+
+# ─── Sequential ────────────────────────────────────────────
 
 class Sequential(Module):
     """Compose modules in sequence: out = mₙ(...m₂(m₁(x))...)."""
@@ -117,30 +112,165 @@ class Sequential(Module):
         return "Sequential(\\n  " + ",\\n  ".join(parts) + "\\n)"
 
 
-# ─── Tensor extensions used by Linear ──────────────────────
-#
-# Defined here rather than tensor.py so the core tensor file stays focused
-# on autograd primitives. These are convenience methods, not new ops in the
-# graph sense — they wrap existing ops.
+# ─── LayerNorm ─────────────────────────────────────────────
 
-def _T_tensor(self: Tensor) -> Tensor:
-    """Return a transposed view as a new Tensor in the graph (for matmul backward)."""
-    from .tensor import _build_ctx as _bc
-    out = Tensor(self.data.T)
-    return _bc(out, (self,), lambda g: (g.data.T,))
+class LayerNorm(Module):
+    """Layer normalization over the last D dimensions.
+
+    For 2D inputs (batch, features), \`normalized_shape\` should be a single
+    int = features. The forward computes (x - mean) / sqrt(var + eps) along
+    the last axis, then applies elementwise gamma and beta.
+    """
+
+    def __init__(self, normalized_shape, eps: float = 1e-5,
+                 elementwise_affine: bool = True):
+        super().__init__()
+        if isinstance(normalized_shape, int):
+            normalized_shape = (normalized_shape,)
+        self.normalized_shape = tuple(normalized_shape)
+        self.eps = float(eps)
+        self.elementwise_affine = elementwise_affine
+        if elementwise_affine:
+            self.weight = Tensor(np.ones(self.normalized_shape, dtype=np.float32), requires_grad=True)
+            self.bias = Tensor(np.zeros(self.normalized_shape, dtype=np.float32), requires_grad=True)
+        else:
+            self.weight = None
+            self.bias = None
+
+    def forward(self, x: Tensor) -> Tensor:
+        # We hand-write the autograd for LayerNorm rather than chaining ops —
+        # the standard formula is well-known and avoids accumulating numerical
+        # noise through mean→var→sqrt→divide.
+        nd = len(self.normalized_shape)
+        if x.data.shape[-nd:] != self.normalized_shape:
+            raise ValueError(
+                f"LayerNorm: last {nd} dims of input shape {x.data.shape} "
+                f"must equal normalized_shape {self.normalized_shape}"
+            )
+        axes = tuple(range(x.data.ndim - nd, x.data.ndim))
+        xd = x.data
+        mean = xd.mean(axis=axes, keepdims=True)
+        centered = xd - mean
+        var = (centered * centered).mean(axis=axes, keepdims=True)
+        inv_std = 1.0 / np.sqrt(var + self.eps)
+        normed = centered * inv_std
+        if self.weight is not None:
+            out_data = normed * self.weight.data + self.bias.data
+            parents: Tuple[Tensor, ...] = (x, self.weight, self.bias)
+        else:
+            out_data = normed
+            parents = (x,)
+        out = Tensor(out_data)
+
+        N = float(np.prod([xd.shape[a] for a in axes]))
+        weight_data = self.weight.data if self.weight is not None else None
+
+        def backward(g):
+            gd = g.data
+            if weight_data is not None:
+                g_normed = gd * weight_data
+                gW = (gd * normed).sum(axis=tuple(range(gd.ndim - nd)), keepdims=False)
+                gB = gd.sum(axis=tuple(range(gd.ndim - nd)), keepdims=False)
+            else:
+                g_normed = gd
+                gW = None
+                gB = None
+            # Standard layernorm backward:
+            #   dx = (1/N) * inv_std * (N*g_normed - sum(g_normed) - normed*sum(g_normed*normed))
+            sum_g = g_normed.sum(axis=axes, keepdims=True)
+            sum_g_normed = (g_normed * normed).sum(axis=axes, keepdims=True)
+            dx = inv_std * (g_normed - sum_g / N - normed * sum_g_normed / N)
+            if weight_data is not None:
+                return (dx, gW, gB)
+            return (dx,)
+
+        return _build_ctx(out, parents, backward)
+
+    def __repr__(self):
+        return f"LayerNorm({self.normalized_shape}, eps={self.eps}, affine={self.elementwise_affine})"
 
 
-def _broadcast_to_rows(self: Tensor, n_rows: int) -> Tensor:
-    """Tile a 1D bias vector into a 2D shape (n_rows, len(bias))."""
-    from .tensor import _build_ctx as _bc
-    if self.data.ndim != 1:
-        raise ValueError(f"broadcast_to_rows: expected 1D, got {self.data.ndim}D")
-    out_data = np.broadcast_to(self.data[None, :], (n_rows, self.data.shape[0])).copy()
-    out = Tensor(out_data)
-    # backward: sum gradients over rows
-    return _bc(out, (self,), lambda g: (g.data.sum(axis=0),))
+# ─── Embedding ─────────────────────────────────────────────
+
+class Embedding(Module):
+    """Lookup table: indices → embedded vectors.
+
+    \`forward(indices)\` accepts an integer numpy array (or list) of any shape;
+    output shape is \`indices.shape + (embedding_dim,)\`. Gradient w.r.t. the
+    weight is a scatter-add — non-indexed rows stay at zero.
+    """
+
+    def __init__(self, num_embeddings: int, embedding_dim: int):
+        super().__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        # Init U(-1/sqrt(D), 1/sqrt(D)) — standard for embeddings.
+        bound = 1.0 / math.sqrt(embedding_dim)
+        rng = np.random.default_rng()
+        W = rng.uniform(-bound, bound, size=(num_embeddings, embedding_dim)).astype(np.float32)
+        self.weight = Tensor(W, requires_grad=True)
+
+    def forward(self, indices) -> Tensor:
+        if isinstance(indices, Tensor):
+            idx = indices.data.astype(np.int64)
+        else:
+            idx = np.asarray(indices, dtype=np.int64)
+        if (idx < 0).any() or (idx >= self.num_embeddings).any():
+            raise ValueError(
+                f"Embedding: indices out of range [0, {self.num_embeddings})"
+            )
+        out_data = self.weight.data[idx]
+        out = Tensor(out_data)
+        weight_shape = self.weight.data.shape
+        D = self.embedding_dim
+        def backward(g):
+            gw = np.zeros(weight_shape, dtype=np.float32)
+            flat_idx = idx.flatten()
+            flat_grad = g.data.reshape(-1, D)
+            np.add.at(gw, flat_idx, flat_grad)
+            return (gw,)
+        return _build_ctx(out, (self.weight,), backward)
+
+    def __repr__(self):
+        return f"Embedding({self.num_embeddings}, {self.embedding_dim})"
 
 
-Tensor.T_tensor = _T_tensor
-Tensor.broadcast_to_rows = _broadcast_to_rows
+# ─── Activation wrappers (for Sequential composition) ──────
+
+class ReLU(Module):
+    def forward(self, x: Tensor) -> Tensor:
+        return F.relu(x)
+    def __repr__(self):
+        return "ReLU()"
+
+
+class LeakyReLU(Module):
+    def __init__(self, negative_slope: float = 0.01):
+        super().__init__()
+        self.negative_slope = negative_slope
+    def forward(self, x: Tensor) -> Tensor:
+        return F.leaky_relu(x, self.negative_slope)
+    def __repr__(self):
+        return f"LeakyReLU(negative_slope={self.negative_slope})"
+
+
+class Sigmoid(Module):
+    def forward(self, x: Tensor) -> Tensor:
+        return F.sigmoid(x)
+    def __repr__(self):
+        return "Sigmoid()"
+
+
+class Tanh(Module):
+    def forward(self, x: Tensor) -> Tensor:
+        return F.tanh(x)
+    def __repr__(self):
+        return "Tanh()"
+
+
+class GELU(Module):
+    def forward(self, x: Tensor) -> Tensor:
+        return F.gelu(x)
+    def __repr__(self):
+        return "GELU()"
 `;

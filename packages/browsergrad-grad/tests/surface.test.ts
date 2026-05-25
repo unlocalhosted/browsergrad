@@ -64,12 +64,39 @@ describe("Python source bundle", () => {
     expect(optim?.content).toContain("class SGD(Optimizer)");
   });
 
-  it("functional.py defines relu, sigmoid, tanh, mse_loss", () => {
+  it("functional.py defines v0.2 op set", () => {
     const fn = SOURCE_FILES.find((s) => s.path.endsWith("functional.py"));
+    // v0.1 ops still present
     expect(fn?.content).toContain("def relu");
     expect(fn?.content).toContain("def sigmoid");
     expect(fn?.content).toContain("def tanh");
     expect(fn?.content).toContain("def mse_loss");
+    // v0.2 additions
+    expect(fn?.content).toContain("def leaky_relu");
+    expect(fn?.content).toContain("def gelu");
+    expect(fn?.content).toContain("def softmax");
+    expect(fn?.content).toContain("def log_softmax");
+    expect(fn?.content).toContain("def cross_entropy_loss");
+    expect(fn?.content).toContain("def nll_loss");
+  });
+
+  it("nn.py defines v0.2 additions (LayerNorm, Embedding, activations)", () => {
+    const nn = SOURCE_FILES.find((s) => s.path.endsWith("nn.py"));
+    expect(nn?.content).toContain("class LayerNorm(Module)");
+    expect(nn?.content).toContain("class Embedding(Module)");
+    expect(nn?.content).toContain("class ReLU(Module)");
+    expect(nn?.content).toContain("class GELU(Module)");
+  });
+
+  it("optim.py defines Adam and AdamW", () => {
+    const optim = SOURCE_FILES.find((s) => s.path.endsWith("optim.py"));
+    expect(optim?.content).toContain("class Adam(Optimizer)");
+    expect(optim?.content).toContain("class AdamW(Optimizer)");
+  });
+
+  it("__init__.py declares v0.2.0", () => {
+    const init = SOURCE_FILES.find((s) => s.path.endsWith("__init__.py"));
+    expect(init?.content).toContain('__version__ = "0.2.0"');
   });
 });
 

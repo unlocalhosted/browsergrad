@@ -15,7 +15,7 @@ y.backward()
 print(x.grad.tolist())   # [2.0, 4.0, 6.0]
 ```
 
-> **Status: v0.1.0.** Tensors, reverse-mode autograd, basic ops, ReLU/sigmoid/tanh, MSE loss, `nn.Linear`, `nn.Sequential`, SGD with momentum. Enough to train a small MLP end to end.
+> **Status: v0.2.0.** Broadcasting throughout autograd, higher-rank matmul, Adam/AdamW, cross-entropy, GELU/softmax/log_softmax, LayerNorm, Embedding. Enough to write a transformer block by hand.
 
 ## What this is
 
@@ -84,7 +84,7 @@ await installGrad({
 });
 ```
 
-## Python API surface
+## Python API surface (v0.2.0)
 
 ```python
 import browsergrad_grad as grad
@@ -98,45 +98,58 @@ r = grad.randn(5, 5, seed=42)
 # Properties
 t.shape, t.ndim, t.size, t.data    # numpy view
 t.numpy(), t.tolist(), t.item()    # exports
+t.detach()                         # leaf copy, no autograd
 
-# Arithmetic (records into autograd graph if requires_grad)
+# Arithmetic — broadcasts in v0.2
 a + b, a - b, a * b, a / b, -a
-a @ b                              # 2D matmul only in v0
+a @ b                              # any rank ≥ 2, batch dims broadcast
 a ** 2.0                           # scalar power only
+a.exp(), a.log()                   # elementwise
 
-# Reductions
-t.sum(), t.mean()
+# Shape
+a.reshape(*shape), a.view(*shape), a.transpose(d0, d1), a.T   # 2D only
+
+# Reductions (axis-aware)
+t.sum(), t.sum(axis=1, keepdims=True)
+t.mean(axis=-1)
 
 # Autograd
 loss.backward()                    # accumulates into .grad of every leaf
 
 # Functional
 import browsergrad_grad.functional as F
-F.relu(x), F.sigmoid(x), F.tanh(x)
-F.mse_loss(y_hat, y)               # scalar
+F.relu(x), F.leaky_relu(x, 0.01), F.sigmoid(x), F.tanh(x), F.gelu(x)
+F.softmax(x, dim=-1), F.log_softmax(x, dim=-1)
+F.mse_loss(y_hat, y)               # regression
+F.cross_entropy_loss(logits, targets)   # classification (fused, stable)
+F.nll_loss(log_probs, targets)
 
 # Neural net building blocks
 import browsergrad_grad.nn as nn
-nn.Module                          # base class — auto-tracks Tensor params
+nn.Module                          # base — auto-tracks Tensor params
 nn.Linear(in_features, out_features, bias=True)
+nn.LayerNorm(normalized_shape, eps=1e-5)
+nn.Embedding(num_embeddings, embedding_dim)
 nn.Sequential(m1, m2, m3)
+nn.ReLU(), nn.LeakyReLU(0.01), nn.Sigmoid(), nn.Tanh(), nn.GELU()
 
 # Optimization
 import browsergrad_grad.optim as optim
 optim.SGD(params, lr=0.01, momentum=0.0, weight_decay=0.0)
+optim.Adam(params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0)
+optim.AdamW(params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-2)
 ```
 
-## What's NOT in v0.1.0
+## What's NOT yet in (v0.3+ targets)
 
 These are documented as deferred — additive when they land:
 
-- **Tensor-tensor broadcasting.** Same-shape ops + scalar broadcasting only.
-- **Higher-rank matmul.** 2D × 2D only.
-- **Adam, AdamW, RMSprop.** SGD only.
-- **CrossEntropyLoss, BCE, NLL.** MSE only.
-- **Activations beyond relu/sigmoid/tanh.** Add gelu, softmax, etc. as needed.
-- **Conv, BatchNorm, Embedding, Dropout, RNN/LSTM/GRU.** All v0.2+.
-- **WebGPU dispatch.** v0 is pure NumPy. v0.3 will optionally dispatch via `@unlocalhosted/browsergrad-kernels` when available.
+- **Conv1d / Conv2d.** Highest-priority v0.3 target for CNN labs.
+- **BatchNorm / GroupNorm.** Mostly needed for older CNN architectures.
+- **Dropout, RNN, LSTM, GRU.** Less central for transformer-focused curriculum.
+- **WebGPU dispatch.** v0 is pure NumPy. v0.3 will add an optional `device` arg
+  that dispatches matmul / softmax / layernorm / attention to a `KernelDevice`
+  from `@unlocalhosted/browsergrad-kernels` when provided.
 
 ## Design notes
 
