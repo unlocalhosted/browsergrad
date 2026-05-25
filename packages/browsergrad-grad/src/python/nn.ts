@@ -429,6 +429,59 @@ class AvgPool2d(Module):
         return f"AvgPool2d(kernel_size={self.kernel_size}, stride={self.stride}, padding={self.padding})"
 
 
+class AdaptiveAvgPool2d(Module):
+    """Adaptive 2D average pooling matching PyTorch's formula.
+
+    For target output (H_out, W_out) and input (H_in, W_in):
+      start_a(i) = floor(i * dim_in / dim_out)
+      end_a(i)   = ceil((i + 1) * dim_in / dim_out)
+    Each output cell averages its variable-sized bin.
+
+    output_size: int (square) or (H_out, W_out) tuple.
+    """
+
+    def __init__(self, output_size):
+        super().__init__()
+        if isinstance(output_size, int):
+            self.output_size = (output_size, output_size)
+        else:
+            self.output_size = tuple(output_size)
+
+    def forward(self, x: Tensor) -> Tensor:
+        N, C, H_in, W_in = x.data.shape
+        H_out, W_out = self.output_size
+        # Pre-compute bin boundaries (avoids repeated division in tight loop).
+        h_starts = [(i * H_in) // H_out for i in range(H_out)]
+        h_ends = [-(-((i + 1) * H_in) // H_out) for i in range(H_out)]
+        w_starts = [(j * W_in) // W_out for j in range(W_out)]
+        w_ends = [-(-((j + 1) * W_in) // W_out) for j in range(W_out)]
+
+        out_data = np.zeros((N, C, H_out, W_out), dtype=np.float32)
+        for i in range(H_out):
+            for j in range(W_out):
+                out_data[:, :, i, j] = x.data[:, :, h_starts[i]:h_ends[i], w_starts[j]:w_ends[j]].mean(axis=(2, 3))
+
+        out = Tensor(out_data)
+        in_shape = x.data.shape
+
+        def backward(g):
+            grad_x = np.zeros(in_shape, dtype=np.float32)
+            for i in range(H_out):
+                for j in range(W_out):
+                    sh, eh = h_starts[i], h_ends[i]
+                    sw, ew = w_starts[j], w_ends[j]
+                    area = float((eh - sh) * (ew - sw))
+                    grad_x[:, :, sh:eh, sw:ew] += (
+                        g.data[:, :, i, j][:, :, None, None] / area
+                    )
+            return (grad_x,)
+
+        return _build_ctx(out, (x,), backward)
+
+    def __repr__(self):
+        return f"AdaptiveAvgPool2d(output_size={self.output_size})"
+
+
 # ─── Sequential ────────────────────────────────────────────
 
 class Sequential(Module):
@@ -641,6 +694,67 @@ class Dropout(Module):
 
     def __repr__(self):
         return f"Dropout(p={self.p})"
+
+
+class MultiHeadAttention(Module):
+    """Batch-first multi-head scaled dot-product attention.
+
+    Inputs Q, K, V each of shape (N, S, embed_dim); output (N, S, embed_dim).
+    \`embed_dim\` must be divisible by \`num_heads\`. No mask support in v0.
+
+    Composes existing differentiable ops (Linear, matmul, softmax, transpose,
+    reshape) so autograd works automatically — no hand-written backward.
+    """
+
+    def __init__(self, embed_dim: int, num_heads: int, bias: bool = True):
+        super().__init__()
+        if embed_dim % num_heads != 0:
+            raise ValueError(
+                f"MultiHeadAttention: embed_dim {embed_dim} not divisible "
+                f"by num_heads {num_heads}"
+            )
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.q_proj = Linear(embed_dim, embed_dim, bias=bias)
+        self.k_proj = Linear(embed_dim, embed_dim, bias=bias)
+        self.v_proj = Linear(embed_dim, embed_dim, bias=bias)
+        self.out_proj = Linear(embed_dim, embed_dim, bias=bias)
+        self._scale = float(1.0 / np.sqrt(self.head_dim))
+
+    def _split_heads(self, x: Tensor, N: int, S: int) -> Tensor:
+        # (N, S, D) → (N, S, H, d_k) → (N, H, S, d_k)
+        return x.reshape(N, S, self.num_heads, self.head_dim).transpose(1, 2)
+
+    def _merge_heads(self, x: Tensor, N: int, S: int) -> Tensor:
+        # (N, H, S, d_k) → (N, S, H, d_k) → (N, S, D)
+        return x.transpose(1, 2).reshape(N, S, self.embed_dim)
+
+    def forward(self, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
+        if query.data.ndim != 3:
+            raise ValueError(
+                f"MultiHeadAttention expects 3D query (N, S, D); got {query.data.ndim}D"
+            )
+        N, S, D = query.data.shape
+        if D != self.embed_dim:
+            raise ValueError(
+                f"MultiHeadAttention: query last dim {D} ≠ embed_dim {self.embed_dim}"
+            )
+        q = self._split_heads(self.q_proj(query), N, query.data.shape[1])
+        k = self._split_heads(self.k_proj(key), N, key.data.shape[1])
+        v = self._split_heads(self.v_proj(value), N, value.data.shape[1])
+        # scores: (N, H, S_q, S_k)
+        scores = (q @ k.transpose(-1, -2)) * self._scale
+        weights = F.softmax(scores, dim=-1)
+        attn = weights @ v  # (N, H, S_q, d_k)
+        merged = self._merge_heads(attn, N, S)
+        return self.out_proj(merged)
+
+    def __repr__(self):
+        return (
+            f"MultiHeadAttention(embed_dim={self.embed_dim}, "
+            f"num_heads={self.num_heads})"
+        )
 
 
 class Dropout2d(Module):

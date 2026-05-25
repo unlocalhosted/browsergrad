@@ -94,15 +94,21 @@ describe("Python source bundle", () => {
     expect(optim?.content).toContain("class AdamW(Optimizer)");
   });
 
-  it("__init__.py declares v0.3.3", () => {
+  it("__init__.py declares v0.4.0", () => {
     const init = SOURCE_FILES.find((s) => s.path.endsWith("__init__.py"));
-    expect(init?.content).toContain('__version__ = "0.3.3"');
+    expect(init?.content).toContain('__version__ = "0.4.0"');
   });
 
   it("nn.py defines v0.3.3 Dropout family", () => {
     const nn = SOURCE_FILES.find((s) => s.path.endsWith("nn.py"));
     expect(nn?.content).toContain("class Dropout(Module)");
     expect(nn?.content).toContain("class Dropout2d(Module)");
+  });
+
+  it("nn.py defines v0.4 AdaptiveAvgPool2d and MultiHeadAttention", () => {
+    const nn = SOURCE_FILES.find((s) => s.path.endsWith("nn.py"));
+    expect(nn?.content).toContain("class AdaptiveAvgPool2d(Module)");
+    expect(nn?.content).toContain("class MultiHeadAttention(Module)");
   });
 
   it("nn.py defines v0.3 Conv2d", () => {
