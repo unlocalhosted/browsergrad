@@ -30,6 +30,7 @@ class Module:
     def __init__(self):
         self._modules: dict[str, "Module"] = {}
         self._parameters: dict[str, Tensor] = {}
+        self.training: bool = True
 
     def __setattr__(self, name, value):
         if isinstance(value, Tensor) and value.requires_grad:
@@ -48,6 +49,17 @@ class Module:
     def zero_grad(self):
         for p in self.parameters():
             p.zero_grad()
+
+    def train(self, mode: bool = True) -> "Module":
+        """Set this module and all submodules to training mode."""
+        self.training = bool(mode)
+        for m in self._modules.values():
+            m.train(mode)
+        return self
+
+    def eval(self) -> "Module":
+        """Set this module and all submodules to evaluation mode."""
+        return self.train(False)
 
     def forward(self, *args, **kwargs):
         raise NotImplementedError(
@@ -199,6 +211,122 @@ class Conv2d(Module):
         return (
             f"Conv2d({self.in_channels}, {self.out_channels}, "
             f"kernel_size={self.kernel_size}, stride={self.stride}, padding={self.padding})"
+        )
+
+
+# ─── BatchNorm ─────────────────────────────────────────────
+
+class BatchNorm2d(Module):
+    """2D batch normalization. Statistics computed per-channel over (N, H, W).
+
+    See PyTorch's docs for the formula. v0 implements:
+      - train-mode forward (batch statistics)
+      - affine + non-affine variants
+      - running mean/var update via momentum
+      - eval-mode forward (running statistics)
+      - full backward (fused formula like LayerNorm)
+    Each capability lands in its own TDD cycle.
+    """
+
+    def __init__(self, num_features: int, eps: float = 1e-5,
+                 momentum: float = 0.1, affine: bool = True,
+                 track_running_stats: bool = True):
+        super().__init__()
+        self.num_features = num_features
+        self.eps = float(eps)
+        self.momentum = float(momentum)
+        self.affine = affine
+        self.track_running_stats = track_running_stats
+        if affine:
+            self.weight = Tensor(np.ones(num_features, dtype=np.float32), requires_grad=True)
+            self.bias = Tensor(np.zeros(num_features, dtype=np.float32), requires_grad=True)
+        else:
+            self.weight = None
+            self.bias = None
+        # Buffers (not parameters — no requires_grad). Stored as plain numpy
+        # arrays so they don't show up in .parameters().
+        if track_running_stats:
+            self.running_mean = np.zeros(num_features, dtype=np.float32)
+            self.running_var = np.ones(num_features, dtype=np.float32)
+        else:
+            self.running_mean = None
+            self.running_var = None
+
+    def forward(self, x: Tensor) -> Tensor:
+        xd = x.data
+        N, C, H, W = xd.shape
+        is_training_batch = self.training or not self.track_running_stats
+        if is_training_batch:
+            mean = xd.mean(axis=(0, 2, 3))
+            var = xd.var(axis=(0, 2, 3))
+            if self.training and self.track_running_stats:
+                m = self.momentum
+                self.running_mean = (1.0 - m) * self.running_mean + m * mean
+                self.running_var = (1.0 - m) * self.running_var + m * var
+        else:
+            mean = self.running_mean
+            var = self.running_var
+        inv_std = 1.0 / np.sqrt(var + self.eps)
+        mean_4d = mean.reshape(1, C, 1, 1)
+        inv_std_4d = inv_std.reshape(1, C, 1, 1)
+        x_hat = (xd - mean_4d) * inv_std_4d
+        if self.affine:
+            out_data = (
+                x_hat * self.weight.data.reshape(1, C, 1, 1)
+                + self.bias.data.reshape(1, C, 1, 1)
+            )
+        else:
+            out_data = x_hat
+
+        out = Tensor(out_data.astype(np.float32))
+
+        # Build autograd context.
+        # The fused BN backward formula assumes we're in train mode (batch
+        # stats). In eval mode, mean/var are constants — backward only flows
+        # through the affine path. We handle both.
+        if self.affine:
+            parents = (x, self.weight, self.bias)
+        else:
+            parents = (x,)
+        affine_capture = self.affine
+        weight_data = self.weight.data if self.affine else None
+        N_total = float(N * H * W)
+        x_hat_captured = x_hat
+        inv_std_captured = inv_std
+        training_pass = is_training_batch
+
+        def backward(g):
+            grad_out = g.data  # (N, C, H, W)
+            if affine_capture:
+                grad_x_hat = grad_out * weight_data.reshape(1, C, 1, 1)
+                grad_weight = (grad_out * x_hat_captured).sum(axis=(0, 2, 3))
+                grad_bias = grad_out.sum(axis=(0, 2, 3))
+            else:
+                grad_x_hat = grad_out
+                grad_weight = None
+                grad_bias = None
+            if training_pass:
+                # Fused batch-statistics backward (standard formula).
+                sum_g = grad_x_hat.sum(axis=(0, 2, 3), keepdims=True)
+                sum_g_xhat = (grad_x_hat * x_hat_captured).sum(axis=(0, 2, 3), keepdims=True)
+                grad_x = inv_std_captured.reshape(1, C, 1, 1) * (
+                    grad_x_hat
+                    - sum_g / N_total
+                    - x_hat_captured * sum_g_xhat / N_total
+                )
+            else:
+                # In eval, mean/var are constants → grad_x = grad_x_hat * inv_std.
+                grad_x = grad_x_hat * inv_std_captured.reshape(1, C, 1, 1)
+            if affine_capture:
+                return (grad_x, grad_weight, grad_bias)
+            return (grad_x,)
+
+        return _build_ctx(out, parents, backward)
+
+    def __repr__(self):
+        return (
+            f"BatchNorm2d({self.num_features}, eps={self.eps}, "
+            f"momentum={self.momentum}, affine={self.affine})"
         )
 
 

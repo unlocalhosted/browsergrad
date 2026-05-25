@@ -94,9 +94,9 @@ describe("Python source bundle", () => {
     expect(optim?.content).toContain("class AdamW(Optimizer)");
   });
 
-  it("__init__.py declares v0.3.1", () => {
+  it("__init__.py declares v0.3.2", () => {
     const init = SOURCE_FILES.find((s) => s.path.endsWith("__init__.py"));
-    expect(init?.content).toContain('__version__ = "0.3.1"');
+    expect(init?.content).toContain('__version__ = "0.3.2"');
   });
 
   it("nn.py defines v0.3 Conv2d", () => {
@@ -108,6 +108,14 @@ describe("Python source bundle", () => {
     const nn = SOURCE_FILES.find((s) => s.path.endsWith("nn.py"));
     expect(nn?.content).toContain("class MaxPool2d(Module)");
     expect(nn?.content).toContain("class AvgPool2d(Module)");
+  });
+
+  it("nn.py defines v0.3.2 BatchNorm2d + Module.train/eval flags", () => {
+    const nn = SOURCE_FILES.find((s) => s.path.endsWith("nn.py"));
+    expect(nn?.content).toContain("class BatchNorm2d(Module)");
+    expect(nn?.content).toContain("self.training");
+    expect(nn?.content).toContain("def train(self, mode");
+    expect(nn?.content).toContain("def eval(self)");
   });
 });
 

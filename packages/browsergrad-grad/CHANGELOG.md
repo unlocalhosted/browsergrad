@@ -5,6 +5,41 @@ All notable changes to `@unlocalhosted/browsergrad-grad`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] — 2026-05-25
+
+**`nn.BatchNorm2d`** plus the **`Module.training` train/eval mode system**.
+Same TDD discipline (7 cycles). The training flag is a cross-cutting addition
+to `Module` — every existing subclass keeps working unchanged.
+
+### Added
+
+- `Module.training: bool` — default `True`. Recursively flipped by
+  `model.train(mode=True)` / `model.eval()`. Existing Modules (Linear,
+  Conv2d, MaxPool/AvgPool, LayerNorm, Embedding, activations) ignore the
+  flag — same behavior as before. BatchNorm reads it to branch.
+- `nn.BatchNorm2d(num_features, eps=1e-5, momentum=0.1, affine=True, track_running_stats=True)`
+  - Train mode: forward uses batch stats, updates `running_mean` / `running_var`
+    via the EMA `r ← (1 - momentum) * r + momentum * batch`.
+  - Eval mode: forward uses `running_mean` / `running_var`, doesn't update them.
+  - Affine: learnable `weight` (shape `(C,)`, init 1.0) and `bias` (init 0.0).
+  - Buffers (`running_mean`, `running_var`) are plain numpy arrays — NOT in
+    `.parameters()`; the optimizer doesn't touch them.
+  - Backward uses the fused standard formula in train mode (same shape as
+    LayerNorm's: `inv_std/N * (N*dxhat - sum(dxhat) - x_hat * sum(dxhat * x_hat))`),
+    and the simpler `grad_x = grad_x_hat * inv_std` in eval mode.
+  - All three gradients (input via finite-diff, β = `sum(grad_out)` hand-derived,
+    γ via finite-diff) verified end-to-end.
+- End-to-end test in `tests-integration/batchnorm.test.ts`:
+  `Conv2d(1, 4, 3, padding=1) → BatchNorm2d(4) → ReLU → MaxPool2d(2) → reshape → Linear(36, 2)`
+  trains to >95% accuracy in 60 Adam steps, with `model.eval()` used during
+  the accuracy probes to exercise the eval-mode path.
+
+### Still deferred (v0.4+)
+
+- `nn.Dropout` and `nn.Dropout2d` (now feasible — both need the `training` flag).
+- BatchNorm1d / BatchNorm3d.
+- `GroupNorm`, `InstanceNorm`.
+
 ## [0.3.1] — 2026-05-25
 
 **`nn.MaxPool2d` and `nn.AvgPool2d`**, TDD'd in 10 cycles. Same discipline

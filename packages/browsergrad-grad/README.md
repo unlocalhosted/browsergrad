@@ -15,7 +15,7 @@ y.backward()
 print(x.grad.tolist())   # [2.0, 4.0, 6.0]
 ```
 
-> **Status: v0.3.1.** All v0.3 + `nn.MaxPool2d` and `nn.AvgPool2d` (also TDD'd; backward verified via finite differences). End-to-end CNN classifier test trains to >95% accuracy.
+> **Status: v0.3.2.** All v0.3.1 + `nn.BatchNorm2d` and the `Module.training` / `model.train()` / `model.eval()` system. End-to-end Conv → BN → ReLU → MaxPool → Linear classifier verified.
 
 ## What this is
 
@@ -131,7 +131,11 @@ nn.Linear(in_features, out_features, bias=True)
 nn.Conv2d(in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True)
 nn.MaxPool2d(kernel_size, stride=None, padding=0)
 nn.AvgPool2d(kernel_size, stride=None, padding=0)
+nn.BatchNorm2d(num_features, eps=1e-5, momentum=0.1, affine=True)
 nn.LayerNorm(normalized_shape, eps=1e-5)
+# Mode control (cross-cutting):
+model.train()    # enables train-mode behavior (BN uses batch stats)
+model.eval()     # enables eval-mode behavior (BN uses running stats)
 nn.Embedding(num_embeddings, embedding_dim)
 nn.Sequential(m1, m2, m3)
 nn.ReLU(), nn.LeakyReLU(0.01), nn.Sigmoid(), nn.Tanh(), nn.GELU()
