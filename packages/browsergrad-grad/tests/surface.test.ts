@@ -94,14 +94,20 @@ describe("Python source bundle", () => {
     expect(optim?.content).toContain("class AdamW(Optimizer)");
   });
 
-  it("__init__.py declares v0.3.0", () => {
+  it("__init__.py declares v0.3.1", () => {
     const init = SOURCE_FILES.find((s) => s.path.endsWith("__init__.py"));
-    expect(init?.content).toContain('__version__ = "0.3.0"');
+    expect(init?.content).toContain('__version__ = "0.3.1"');
   });
 
   it("nn.py defines v0.3 Conv2d", () => {
     const nn = SOURCE_FILES.find((s) => s.path.endsWith("nn.py"));
     expect(nn?.content).toContain("class Conv2d(Module)");
+  });
+
+  it("nn.py defines v0.3.1 pooling layers", () => {
+    const nn = SOURCE_FILES.find((s) => s.path.endsWith("nn.py"));
+    expect(nn?.content).toContain("class MaxPool2d(Module)");
+    expect(nn?.content).toContain("class AvgPool2d(Module)");
   });
 });
 

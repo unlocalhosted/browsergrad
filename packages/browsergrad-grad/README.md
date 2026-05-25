@@ -15,7 +15,7 @@ y.backward()
 print(x.grad.tolist())   # [2.0, 4.0, 6.0]
 ```
 
-> **Status: v0.3.0.** All v0.2 + `nn.Conv2d` (TDD'd one cycle at a time, all three gradients verified against finite differences). Enough to write both a CNN and a transformer block by hand.
+> **Status: v0.3.1.** All v0.3 + `nn.MaxPool2d` and `nn.AvgPool2d` (also TDD'd; backward verified via finite differences). End-to-end CNN classifier test trains to >95% accuracy.
 
 ## What this is
 
@@ -129,6 +129,8 @@ import browsergrad_grad.nn as nn
 nn.Module                          # base — auto-tracks Tensor params
 nn.Linear(in_features, out_features, bias=True)
 nn.Conv2d(in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True)
+nn.MaxPool2d(kernel_size, stride=None, padding=0)
+nn.AvgPool2d(kernel_size, stride=None, padding=0)
 nn.LayerNorm(normalized_shape, eps=1e-5)
 nn.Embedding(num_embeddings, embedding_dim)
 nn.Sequential(m1, m2, m3)

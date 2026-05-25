@@ -5,6 +5,35 @@ All notable changes to `@unlocalhosted/browsergrad-grad`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] — 2026-05-25
+
+**`nn.MaxPool2d` and `nn.AvgPool2d`**, TDD'd in 10 cycles. Same discipline
+as Conv2d: one test, one minimum impl, public-interface-only oracles
+(NumPy windowed reductions for forward, hand-derived argmax-routing
+for MaxPool backward, finite differences for both gradients).
+
+### Added
+
+- `nn.MaxPool2d(kernel_size, stride=None, padding=0)` — square kernel,
+  isotropic stride/padding. `stride` defaults to `kernel_size`. No
+  learnable params. Forward records the argmax index per output cell;
+  backward scatters `grad_out` to those positions.
+- `nn.AvgPool2d(kernel_size, stride=None, padding=0)` — same shape contract.
+  Backward distributes `grad_out / (K*K)` evenly across each window.
+- End-to-end CNN integration test in `tests-integration/pool2d.test.ts`:
+  `Conv2d(1, 2, 3, padding=1) → ReLU → MaxPool2d(2) → reshape → Linear(18, 2)`
+  trains from random init to >95% accuracy in 60 Adam steps on a 64-sample
+  top-vs-bottom synthetic classification task. The classifier passing
+  proves *all* of Conv2d backward, MaxPool2d backward, reshape, Linear,
+  cross-entropy, and Adam compose correctly.
+
+### Still deferred (v0.4+)
+
+- `padding > 0` for pooling. Currently rejected by the window-bounds math.
+- Tuple kernel/stride/padding shapes for pooling (matches the same Conv2d
+  scope rule).
+- `AdaptivePool` and global pooling helpers.
+
 ## [0.3.0] — 2026-05-25
 
 **`nn.Conv2d`**, developed strictly via TDD. One test, one cycle of minimum

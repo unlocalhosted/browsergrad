@@ -31,7 +31,7 @@ from . import nn
 from . import optim
 
 __all__ = ["Tensor", "zeros", "ones", "randn", "functional", "nn", "optim"]
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 `;
 
 export interface PythonSource {
