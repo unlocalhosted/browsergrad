@@ -147,6 +147,74 @@ def cross_entropy_loss(logits: Tensor, targets) -> Tensor:
     return _build_ctx(out, (logits,), lambda g: (g.data * grad_logits,))
 
 
+def bce_with_logits_loss(logits: Tensor, targets) -> Tensor:
+    """Binary cross-entropy from logits, numerically stable.
+
+    Matches torch.nn.functional.binary_cross_entropy_with_logits with the
+    default reduction='mean'. Stable formula:
+      per_element = max(logits, 0) - logits * targets + log(1 + exp(-|logits|))
+      loss = per_element.mean()
+
+    Gradient (derived from sigmoid + cross-entropy):
+      d(loss)/d(logit_i) = (sigmoid(logit_i) - target_i) / N
+    """
+    if isinstance(targets, Tensor):
+        t_data = targets.data.astype(np.float32)
+    else:
+        t_data = np.asarray(targets, dtype=np.float32)
+    x = logits.data
+    if t_data.shape != x.shape:
+        raise ValueError(
+            f"bce_with_logits_loss: logits shape {x.shape} ≠ targets shape {t_data.shape}"
+        )
+    abs_x = np.abs(x)
+    max_x_0 = np.maximum(x, 0.0)
+    log1pexp = np.log1p(np.exp(-abs_x))
+    per_element = max_x_0 - x * t_data + log1pexp
+    loss_data = float(per_element.mean())
+    out = Tensor(np.float32(loss_data))
+    sigmoid = 1.0 / (1.0 + np.exp(-x))
+    n = float(x.size)
+    grad_logits = (sigmoid - t_data) / n
+    return _build_ctx(out, (logits,), lambda g: (g.data * grad_logits.astype(np.float32),))
+
+
+def one_hot(indices, num_classes: int) -> Tensor:
+    """One-hot encode integer indices.
+
+    \`indices\`: numpy int array (or list / Tensor of integers). Output shape:
+    indices.shape + (num_classes,). Non-differentiable; returns a float
+    Tensor whose data is 0/1 for downstream f32 ops.
+    """
+    if isinstance(indices, Tensor):
+        idx = indices.data.astype(np.int64)
+    else:
+        idx = np.asarray(indices, dtype=np.int64)
+    if (idx < 0).any() or (idx >= num_classes).any():
+        raise ValueError(f"one_hot: indices out of range [0, {num_classes})")
+    out_shape = idx.shape + (num_classes,)
+    out_data = np.zeros(out_shape, dtype=np.float32)
+    flat_idx = idx.flatten()
+    flat_out = out_data.reshape(-1, num_classes)
+    flat_out[np.arange(flat_idx.size), flat_idx] = 1.0
+    return Tensor(out_data)
+
+
+def dropout(x: Tensor, p: float = 0.5, training: bool = True) -> Tensor:
+    """Functional inverted dropout. Matches torch.nn.functional.dropout.
+
+    When training=False or p==0, returns x unchanged.
+    """
+    if not training or p == 0.0:
+        return x
+    if not (0.0 <= p < 1.0):
+        raise ValueError(f"dropout: p must be in [0, 1), got {p}")
+    keep = 1.0 - p
+    mask = (np.random.rand(*x.data.shape) < keep).astype(np.float32) / keep
+    out = Tensor((x.data * mask).astype(np.float32))
+    return _build_ctx(out, (x,), lambda g: (g.data * mask,))
+
+
 def nll_loss(log_probs: Tensor, targets) -> Tensor:
     """Negative log-likelihood: -mean(log_probs[range(N), targets]).
 

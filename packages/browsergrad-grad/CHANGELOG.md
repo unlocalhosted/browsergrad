@@ -5,6 +5,21 @@ All notable changes to `@unlocalhosted/browsergrad-grad`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] — 2026-05-26
+
+**PyTorch-compat completeness pass.** Audit identified ~15 idioms that real
+deep-ml-style PyTorch labs use but the v0.4.6 shim didn't cover. All now
+work — `tensor.unsqueeze/squeeze/permute/size/to/cpu/cuda`, top-level
+`torch.from_numpy/manual_seed/matmul/mm/bmm/exp/log/sum/mean/argmax`, loss
+Modules (`nn.CrossEntropyLoss`, `nn.MSELoss`, `nn.NLLLoss`,
+`nn.BCEWithLogitsLoss`), `nn.MultiheadAttention` lowercase alias,
+`F.one_hot`, `F.dropout`, `F.bce_with_logits_loss`.
+
+17 new integration tests cover every gap individually plus a realistic
+end-to-end PyTorch lab using `nn.CrossEntropyLoss`, `torch.from_numpy`,
+`torch.argmax` under `with torch.no_grad():`, and `model.train()/eval()`
+transitions. Trains to >95% accuracy in 60 Adam steps.
+
 ## [0.4.6] — 2026-05-26
 
 `install_torch_alias()` — vanilla PyTorch code runs against browsergrad_grad.

@@ -217,6 +217,53 @@ class Tensor:
     def transpose(self, dim0: int, dim1: int) -> "Tensor":
         return _transpose(self, dim0, dim1)
 
+    def permute(self, *dims) -> "Tensor":
+        """Reorder axes via a permutation. Matches torch.Tensor.permute."""
+        if len(dims) == 1 and isinstance(dims[0], (tuple, list)):
+            dims = tuple(dims[0])
+        return _permute(self, tuple(dims))
+
+    def unsqueeze(self, dim: int) -> "Tensor":
+        """Insert a size-1 dim at \`dim\`. Matches torch.Tensor.unsqueeze."""
+        nd = self.data.ndim
+        if dim < 0:
+            dim = nd + 1 + dim
+        new_shape = list(self.data.shape)
+        new_shape.insert(dim, 1)
+        return self.reshape(tuple(new_shape))
+
+    def squeeze(self, dim=None) -> "Tensor":
+        """Remove size-1 dims. dim=None removes all; dim=k removes only that one
+        (and returns self unchanged if that dim isn't 1). Matches torch.Tensor.squeeze.
+        """
+        if dim is None:
+            new_shape = tuple(d for d in self.data.shape if d != 1)
+        else:
+            if dim < 0:
+                dim = self.data.ndim + dim
+            if self.data.shape[dim] != 1:
+                return self
+            new_shape = tuple(d for i, d in enumerate(self.data.shape) if i != dim)
+        return self.reshape(new_shape)
+
+    def size(self, dim=None):
+        """torch.Tensor.size() returns the shape; size(dim) returns the int."""
+        if dim is None:
+            return self.data.shape
+        return int(self.data.shape[dim])
+
+    # Device manipulation — no-op stubs (browsergrad has one notional device).
+    # Return self for chaining: tensor(...).to(device).requires_grad_()-style code.
+
+    def to(self, *args, **kwargs) -> "Tensor":
+        return self
+
+    def cpu(self) -> "Tensor":
+        return self
+
+    def cuda(self) -> "Tensor":
+        return self
+
     @property
     def T(self) -> "Tensor":
         """For 2D tensors only — transposes the two dims. Use .transpose for higher rank."""
@@ -448,6 +495,20 @@ def _transpose(a: Tensor, dim0: int, dim1: int) -> Tensor:
     return _build_ctx(out, (a,), lambda g: (np.swapaxes(g.data, dim0, dim1).copy(),))
 
 
+def _permute(a: Tensor, dims: tuple) -> Tensor:
+    # Normalize negative dims
+    nd = a.data.ndim
+    norm = tuple(d if d >= 0 else nd + d for d in dims)
+    out_data = np.transpose(a.data, norm)
+    out = Tensor(out_data)
+    # Inverse permutation for backward
+    inv = [0] * len(norm)
+    for i, d in enumerate(norm):
+        inv[d] = i
+    inv_t = tuple(inv)
+    return _build_ctx(out, (a,), lambda g: (np.transpose(g.data, inv_t).copy(),))
+
+
 # ─── Convenience constructors ──────────────────────────────
 
 def zeros(*shape, requires_grad: bool = False) -> Tensor:
@@ -465,8 +526,58 @@ def ones(*shape, requires_grad: bool = False) -> Tensor:
 def randn(*shape, requires_grad: bool = False, seed: Optional[int] = None) -> Tensor:
     if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
         shape = tuple(shape[0])
+    # If no explicit seed, draw from numpy's global state (which manual_seed sets).
+    if seed is None:
+        return Tensor(np.random.randn(*shape).astype(np.float32), requires_grad=requires_grad)
     rng = np.random.default_rng(seed)
     return Tensor(rng.standard_normal(shape).astype(np.float32), requires_grad=requires_grad)
+
+
+def from_numpy(arr) -> Tensor:
+    """Wrap a numpy array as a Tensor. Matches torch.from_numpy."""
+    return Tensor(arr)
+
+
+def manual_seed(seed: int) -> None:
+    """Seed numpy's global RNG. Matches torch.manual_seed for reproducibility."""
+    np.random.seed(int(seed))
+
+
+# Functional aliases for ops that are also methods/operators.
+# These exist so user code matching torch.* function-form works.
+
+def matmul(a, b) -> Tensor:
+    return _matmul(a, b)
+
+
+def mm(a, b) -> Tensor:
+    """2-D matmul. PyTorch errors on non-2D; we don't enforce since matmul handles all ranks."""
+    return _matmul(a, b)
+
+
+def bmm(a, b) -> Tensor:
+    """Batched matmul (batch dim broadcasts via numpy.matmul semantics)."""
+    return _matmul(a, b)
+
+
+def exp(x) -> Tensor:
+    return _exp(_wrap(x))
+
+
+def log(x) -> Tensor:
+    return _log(_wrap(x))
+
+
+def sum(x, axis=None, keepdims: bool = False) -> Tensor:
+    return _sum(_wrap(x), axis=axis, keepdims=keepdims)
+
+
+def mean(x, axis=None, keepdims: bool = False) -> Tensor:
+    return _mean(_wrap(x), axis=axis, keepdims=keepdims)
+
+
+def argmax(x, dim=None) -> Tensor:
+    return _wrap(x).argmax(dim=dim)
 
 
 # ─── Multi-tensor ops ──────────────────────────────────────

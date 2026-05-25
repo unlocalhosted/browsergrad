@@ -50,6 +50,20 @@ def install_torch_alias():
     torch_mod.stack = _bg.stack
     torch_mod.no_grad = _bg.no_grad
 
+    # Numpy interop + reproducibility
+    torch_mod.from_numpy = _bg.from_numpy
+    torch_mod.manual_seed = _bg.manual_seed
+
+    # Top-level math functions (PyTorch-style alternatives to methods/ops)
+    torch_mod.matmul = _bg.matmul
+    torch_mod.mm = _bg.mm
+    torch_mod.bmm = _bg.bmm
+    torch_mod.exp = _bg.exp
+    torch_mod.log = _bg.log
+    torch_mod.sum = _bg.sum
+    torch_mod.mean = _bg.mean
+    torch_mod.argmax = _bg.argmax
+
     # dtype tokens — strings are enough for the dtype= kwarg path we support
     torch_mod.float32 = "float32"
     torch_mod.float = "float32"
