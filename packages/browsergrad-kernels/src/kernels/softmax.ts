@@ -10,8 +10,8 @@
  * planned for v0.2 as a separate kernel variant.
  */
 
-import { dispatch, numel, type KernelDescriptor } from "../runner";
-import { KernelError, type KernelDevice, type Tensor } from "../types";
+import { dispatch, numel, type KernelDescriptor } from "../runner.js";
+import { KernelError, type KernelDevice, type Tensor } from "../types.js";
 
 const WGSL = /* wgsl */ `
 @group(0) @binding(0) var<storage, read> X: array<f32>;

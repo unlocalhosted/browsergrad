@@ -10,8 +10,8 @@
  * One thread per row. Each thread does a 3-pass scan (mean, variance, normalize).
  */
 
-import { dispatch, numel, type KernelDescriptor } from "../runner";
-import { KernelError, type KernelDevice, type Tensor } from "../types";
+import { dispatch, numel, type KernelDescriptor } from "../runner.js";
+import { KernelError, type KernelDevice, type Tensor } from "../types.js";
 
 const WGSL = /* wgsl */ `
 @group(0) @binding(0) var<storage, read> X: array<f32>;

@@ -27,14 +27,14 @@ import type {
   FsWriteRequest,
   InitRequest,
   WorkerToClient,
-} from "../protocol";
+} from "../protocol.js";
 import type {
   Artifact,
   Assertion,
   ExecError,
   PackageProgressEvent,
-} from "../types";
-import { PY_PREAMBLE } from "./python-preamble";
+} from "../types.js";
+import { PY_PREAMBLE } from "./python-preamble.js";
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 

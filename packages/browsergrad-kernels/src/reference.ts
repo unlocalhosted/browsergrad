@@ -12,8 +12,8 @@
  * speed lives.
  */
 
-import { numel, assertDataLength } from "./runner";
-import { KernelError, type Tensor } from "./types";
+import { numel, assertDataLength } from "./runner.js";
+import { KernelError, type Tensor } from "./types.js";
 
 /* ────────────────────────────────────────────────────────────
  * matmul: A [M, K] × B [K, N] → C [M, N]

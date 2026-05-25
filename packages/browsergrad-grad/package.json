@@ -55,6 +55,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@webgpu/types": "^0.1.50",
     "oxlint": "^1.0.0",
     "pyodide": "^0.26.4",
     "typescript": "~6.0.0",

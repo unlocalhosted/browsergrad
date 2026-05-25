@@ -8,8 +8,8 @@
  * cache key suffix, swapped via a future `mode` option.
  */
 
-import { dispatch, type KernelDescriptor } from "../runner";
-import { KernelError, type KernelDevice, type Tensor } from "../types";
+import { dispatch, type KernelDescriptor } from "../runner.js";
+import { KernelError, type KernelDevice, type Tensor } from "../types.js";
 
 const WGSL = /* wgsl */ `
 @group(0) @binding(0) var<storage, read> A: array<f32>;

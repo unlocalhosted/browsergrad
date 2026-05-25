@@ -9,10 +9,10 @@
  * to install grad without our installer) can access it.
  */
 
-import { TENSOR_PY } from "./tensor";
-import { FUNCTIONAL_PY } from "./functional";
-import { NN_PY } from "./nn";
-import { OPTIM_PY } from "./optim";
+import { TENSOR_PY } from "./tensor.js";
+import { FUNCTIONAL_PY } from "./functional.js";
+import { NN_PY } from "./nn.js";
+import { OPTIM_PY } from "./optim.js";
 
 const INIT_PY = `
 """browsergrad_grad — a small, readable tensor + autograd library.

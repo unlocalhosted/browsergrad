@@ -6,7 +6,7 @@
  * calls and we don't re-compile the same WGSL for the same input shape twice.
  */
 
-import { KernelError, type KernelDevice, type KernelDeviceOptions, type KernelDeviceStats } from "./types";
+import { KernelError, type KernelDevice, type KernelDeviceOptions, type KernelDeviceStats } from "./types.js";
 
 interface PipelineEntry {
   readonly pipeline: GPUComputePipeline;

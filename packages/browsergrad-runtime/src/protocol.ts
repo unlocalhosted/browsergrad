@@ -14,7 +14,7 @@ import type {
   Assertion,
   ExecError,
   PackageProgressEvent,
-} from "./types";
+} from "./types.js";
 
 /* ────────────────────────────────────────────────────────────
  * Client → Worker

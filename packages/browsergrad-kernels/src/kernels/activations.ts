@@ -8,8 +8,8 @@
  * This is the variant in GPT-2/BERT and what the JS reference uses.
  */
 
-import { dispatch, numel, type KernelDescriptor } from "../runner";
-import { type KernelDevice, type Tensor } from "../types";
+import { dispatch, numel, type KernelDescriptor } from "../runner.js";
+import { type KernelDevice, type Tensor } from "../types.js";
 
 const RELU_WGSL = /* wgsl */ `
 @group(0) @binding(0) var<storage, read> X: array<f32>;

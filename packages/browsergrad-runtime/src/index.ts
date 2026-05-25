@@ -43,7 +43,7 @@ export type {
   ArtifactLog,
   ArtifactJson,
   ArtifactImage,
-} from "./types";
+} from "./types.js";
 
-export { BrowsergradError } from "./types";
-export { createSession } from "./client";
+export { BrowsergradError } from "./types.js";
+export { createSession } from "./client.js";

@@ -23,9 +23,9 @@
  * the runtime package's Session.
  */
 
-export { installGrad } from "./install";
-export type { GradTarget, InstallOptions } from "./types";
-export { GradInstallError } from "./types";
+export { installGrad } from "./install.js";
+export type { GradTarget, InstallOptions } from "./types.js";
+export { GradInstallError } from "./types.js";
 
 // The Python source itself is exported at the `./source` subpath
 // for tools that want to install grad through their own Pyodide bootstrap.

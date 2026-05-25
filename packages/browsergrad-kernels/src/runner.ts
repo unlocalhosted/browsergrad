@@ -16,8 +16,8 @@
  * grad-style caller manage its own GPU buffers. v0 is correctness-first.
  */
 
-import { asImpl } from "./device";
-import { KernelError, type KernelDevice } from "./types";
+import { asImpl } from "./device.js";
+import { KernelError, type KernelDevice } from "./types.js";
 
 export interface KernelDescriptor {
   /** Unique kernel name (used as cache key prefix). */

@@ -13,6 +13,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.12.4
+      '@webgpu/types':
+        specifier: ^0.1.50
+        version: 0.1.70
       oxlint:
         specifier: ^1.0.0
         version: 1.66.0

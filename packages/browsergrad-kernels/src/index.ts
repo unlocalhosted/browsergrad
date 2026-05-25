@@ -25,11 +25,11 @@ export type {
   KernelDevice,
   KernelDeviceOptions,
   KernelDeviceStats,
-} from "./types";
+} from "./types.js";
 
-export { tensor, KernelError } from "./types";
+export { tensor, KernelError } from "./types.js";
 
-export { createDevice } from "./device";
+export { createDevice } from "./device.js";
 
 export {
   kernels,
@@ -41,7 +41,7 @@ export {
   attention,
   type Kernels,
   type LayerNormOptions,
-} from "./kernels/index";
+} from "./kernels/index.js";
 
 // Re-export reference as a top-level convenience too (alongside the subpath).
-export { reference } from "./reference";
+export { reference } from "./reference.js";

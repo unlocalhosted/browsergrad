@@ -14,8 +14,8 @@
  *      Less elegant but works with raw Pyodide setups.
  */
 
-import { SOURCE_FILES, MOUNT_ROOT } from "./python/index";
-import { GradInstallError, type GradTarget, type InstallOptions } from "./types";
+import { SOURCE_FILES, MOUNT_ROOT } from "./python/index.js";
+import { GradInstallError, type GradTarget, type InstallOptions } from "./types.js";
 
 export async function installGrad(
   target: GradTarget,

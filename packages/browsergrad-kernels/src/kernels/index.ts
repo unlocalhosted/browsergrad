@@ -6,11 +6,11 @@
  *   const C = await kernels.matmul(device, A, B);
  */
 
-import { matmul } from "./matmul";
-import { softmax } from "./softmax";
-import { relu, gelu } from "./activations";
-import { layernorm } from "./layernorm";
-import { attention } from "./attention";
+import { matmul } from "./matmul.js";
+import { softmax } from "./softmax.js";
+import { relu, gelu } from "./activations.js";
+import { layernorm } from "./layernorm.js";
+import { attention } from "./attention.js";
 
 export const kernels = {
   matmul,
@@ -23,5 +23,5 @@ export const kernels = {
 
 export type Kernels = typeof kernels;
 
-export type { LayerNormOptions } from "./layernorm";
+export type { LayerNormOptions } from "./layernorm.js";
 export { matmul, softmax, relu, gelu, layernorm, attention };

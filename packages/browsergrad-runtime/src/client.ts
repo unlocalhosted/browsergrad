@@ -20,7 +20,7 @@ import type {
   ClientToWorker,
   ExecDoneResponse,
   WorkerToClient,
-} from "./protocol";
+} from "./protocol.js";
 import type {
   Artifact,
   Assertion,
@@ -30,8 +30,8 @@ import type {
   Session,
   SessionFS,
   SessionOptions,
-} from "./types";
-import { BrowsergradError } from "./types";
+} from "./types.js";
+import { BrowsergradError } from "./types.js";
 
 /**
  * Distributive Omit — preserves the discriminated-union shape.

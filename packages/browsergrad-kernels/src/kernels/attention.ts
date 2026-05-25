@@ -15,10 +15,10 @@
  * FlashAttention's tiling but much simpler) — additive, same surface.
  */
 
-import { dispatch, type KernelDescriptor } from "../runner";
-import { KernelError, type KernelDevice, type Tensor } from "../types";
-import { matmul } from "./matmul";
-import { softmax } from "./softmax";
+import { dispatch, type KernelDescriptor } from "../runner.js";
+import { KernelError, type KernelDevice, type Tensor } from "../types.js";
+import { matmul } from "./matmul.js";
+import { softmax } from "./softmax.js";
 
 const TRANSPOSE_2D_WGSL = /* wgsl */ `
 @group(0) @binding(0) var<storage, read> X: array<f32>;
