@@ -5,6 +5,47 @@ All notable changes to `@unlocalhosted/browsergrad-grad`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6] — 2026-05-26
+
+`install_torch_alias()` — vanilla PyTorch code runs against browsergrad_grad.
+
+### Added
+
+- **`grad.install_torch_alias()`** — registers a `torch` namespace shim
+  into `sys.modules` so user code can `import torch`, `import torch.nn as nn`,
+  `import torch.nn.functional as F`, `import torch.optim as optim` and have
+  the calls run against browsergrad_grad transparently.
+- PyTorch-name aliases inside the shim where our internal names differ:
+  `F.cross_entropy` → `cross_entropy_loss`, `F.nll` → `nll_loss`.
+- New Python module: `browsergrad_grad.torch_compat`. Exported from the
+  package's `__init__` as `install_torch_alias`.
+
+### Why this addition
+
+Use case: deep-ml-style problems where the user writes vanilla PyTorch
+code (`import torch.nn as nn` etc.) and expects it to just run. Without
+the alias, a problem author would need to write `import browsergrad_grad
+as torch` everywhere, which doesn't match how PyTorch problems are
+typically authored or shared. The alias lets a platform turn that on
+once per session.
+
+### Verified
+
+- 8 tests cover namespace plumbing (torch / torch.nn / torch.nn.functional /
+  torch.optim) plus an end-to-end PyTorch-style classifier that trains a
+  2-layer MLP to >95% accuracy on a linearly separable problem — using
+  only `torch.*` calls, no `browsergrad_grad` references in user code.
+
+### Limitations
+
+The shim covers only the subset of torch's API that browsergrad_grad
+implements. Notably absent and not faked:
+- `torch.cuda.*` (no GPU device concept in v0)
+- `torch.compile`, `torch.fx`, `torch.jit`
+- dtype objects beyond the f32 we use internally (the shim exposes
+  `torch.float32` etc. as strings, which work for the `dtype=` kwarg
+  paths we support, but they're not full dtype objects)
+
 ## [0.4.5] — 2026-05-25
 
 LR schedulers — closes the last commonly-expected gap in `optim`.
