@@ -5,6 +5,34 @@ All notable changes to `@unlocalhosted/browsergrad-grad`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] — 2026-05-25
+
+Round out the standard layer surface for sequence models and CNN→FFN transitions.
+
+### Added
+- `nn.Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True)` — input shape `(N, C_in, L)`, naive nested-loop forward with capture-and-scatter backward (same pattern as Conv2d). All three gradients verified against finite differences.
+- `nn.BatchNorm1d(num_features, eps, momentum, affine, track_running_stats)` — accepts both 2D `(N, C)` and 3D `(N, C, L)` inputs; reduce axes computed from rank. Same fused-backward formula as BatchNorm2d, parameterized.
+- `nn.Flatten(start_dim=1, end_dim=-1)` — composes on `Tensor.reshape` so backward is automatic.
+- End-to-end Conv1d sequence classifier test (>95% accuracy in 80 Adam steps).
+
+## [0.4.0] — 2026-05-25
+
+The headline release for attention.
+
+### Added
+- `nn.MultiHeadAttention(embed_dim, num_heads, bias=True)` — PyTorch-conformant scaled dot-product attention, batch-first convention `(N, S, D)`. Built entirely from autograd primitives (Linear + matmul + softmax + transpose + reshape) — backward is automatic and correct by construction.
+- `nn.AdaptiveAvgPool2d(output_size)` — adaptive pooling matching the PyTorch bin-boundary formula. Handles non-evenly-divisible cases (e.g. 7×7 → 3×3). Backward distributes gradient over each bin's area.
+- End-to-end transformer-block test (Embedding → MHA → LayerNorm → FFN) trains a copy task to low loss.
+
+## [0.3.3] — 2026-05-25
+
+Dropout family. Uses the `Module.training` flag added in v0.3.2.
+
+### Added
+- `nn.Dropout(p=0.5)` — PyTorch-conformant inverted dropout. Train: keep with prob `1-p`, scale kept by `1/(1-p)` so `E[y] = x`. Eval: identity.
+- `nn.Dropout2d(p=0.5)` — channel-wise dropout for `(N, C, H, W)`; whole channels are zeroed/kept together.
+- 9 integration tests cover: tracer, eval identity, statistical drop rate, scale-preservation, backward (zero pattern matches kept pattern, scale matches `1/(1-p)`), end-to-end MLP-with-dropout trains.
+
 ## [0.3.2] — 2026-05-25
 
 **`nn.BatchNorm2d`** plus the **`Module.training` train/eval mode system**.

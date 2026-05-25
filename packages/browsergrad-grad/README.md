@@ -15,7 +15,7 @@ y.backward()
 print(x.grad.tolist())   # [2.0, 4.0, 6.0]
 ```
 
-> **Status: v0.3.2.** All v0.3.1 + `nn.BatchNorm2d` and the `Module.training` / `model.train()` / `model.eval()` system. End-to-end Conv → BN → ReLU → MaxPool → Linear classifier verified.
+> **Status: v0.4.1.** Comprehensive layer set for CNNs and Transformers: Conv2d/Conv1d, BatchNorm2d/1d, LayerNorm, MaxPool/AvgPool, AdaptiveAvgPool2d, Dropout/Dropout2d, Embedding, MultiHeadAttention, Flatten + all common activations. Optimizers: SGD/Adam/AdamW. Module.train()/eval() mode system. **136 tests green** (57 surface + 79 Pyodide-in-node integration), with end-to-end training checks for MLP, CNN, sequence-CNN, and transformer-block.
 
 ## What this is
 
@@ -129,16 +129,23 @@ import browsergrad_grad.nn as nn
 nn.Module                          # base — auto-tracks Tensor params
 nn.Linear(in_features, out_features, bias=True)
 nn.Conv2d(in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True)
+nn.Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True)
 nn.MaxPool2d(kernel_size, stride=None, padding=0)
 nn.AvgPool2d(kernel_size, stride=None, padding=0)
+nn.AdaptiveAvgPool2d(output_size)
 nn.BatchNorm2d(num_features, eps=1e-5, momentum=0.1, affine=True)
+nn.BatchNorm1d(num_features, eps=1e-5, momentum=0.1, affine=True)   # (N,C) or (N,C,L)
 nn.LayerNorm(normalized_shape, eps=1e-5)
-# Mode control (cross-cutting):
-model.train()    # enables train-mode behavior (BN uses batch stats)
-model.eval()     # enables eval-mode behavior (BN uses running stats)
 nn.Embedding(num_embeddings, embedding_dim)
+nn.MultiHeadAttention(embed_dim, num_heads, bias=True)              # (N, S, D)
+nn.Dropout(p=0.5)
+nn.Dropout2d(p=0.5)                                                 # channel-wise
+nn.Flatten(start_dim=1, end_dim=-1)
 nn.Sequential(m1, m2, m3)
 nn.ReLU(), nn.LeakyReLU(0.01), nn.Sigmoid(), nn.Tanh(), nn.GELU()
+# Mode control (cross-cutting):
+model.train()    # train-mode behavior (BN uses batch stats; Dropout drops)
+model.eval()     # eval-mode behavior  (BN uses running stats; Dropout identity)
 
 # Optimization
 import browsergrad_grad.optim as optim
