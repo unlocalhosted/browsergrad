@@ -98,6 +98,12 @@ OP_FUSED_SOFTMAX     = "FUSED_SOFTMAX"      # arg: {axis: int}
 OP_SCATTER_ADD  = "SCATTER_ADD"   # arg: {dim: int}, inputs: (target, idx, src)
 OP_BROADCAST_TO = "BROADCAST_TO"  # arg: {shape: tuple[int,...]}, inputs: (x,)
 
+# Mixed-precision support (PRD-010). ISNAN is the per-element NaN
+# check used by GradScaler's overflow detection. The "OR across all
+# parameters" reduction reuses REDUCE(any) from PRD-005's reductions
+# — no separate OR opcode needed.
+OP_ISNAN = "ISNAN"  # inputs: (x,) → bool-typed mask of same shape
+
 ALL_OPS: FrozenSet[str] = frozenset({
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CMP,
@@ -108,8 +114,10 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     # Autograd-emitted (PRD-007)
     OP_SCATTER_ADD, OP_BROADCAST_TO,
+    # Mixed precision (PRD-010)
+    OP_ISNAN,
 })
-assert len(ALL_OPS) == 27, "opcode count drifted from PRD-005+006+007"
+assert len(ALL_OPS) == 28, "opcode count drifted from PRD-005+006+007+010"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -335,6 +343,7 @@ __all__ = [
     "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",
     "OP_FUSED_ELEMENTWISE", "OP_FUSED_SOFTMAX",
     "OP_SCATTER_ADD", "OP_BROADCAST_TO",
+    "OP_ISNAN",
     "ALL_OPS",
     # Core class + helpers
     "UOp", "toposort", "all_buffers",

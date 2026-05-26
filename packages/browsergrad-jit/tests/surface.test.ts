@@ -41,6 +41,7 @@ describe("Python source registry", () => {
       "browsergrad_jit/_safetensors.py",
       "browsergrad_jit/_checkpoint.py",
       "browsergrad_jit/_utils_checkpoint.py",
+      "browsergrad_jit/_amp.py",
       "browsergrad_jit/_tensor_proxy.py",
       "browsergrad_jit/_functional.py",
       "browsergrad_jit/_nn.py",
@@ -68,12 +69,12 @@ describe("Python source registry", () => {
     // codegen, the actual version string should be substituted in.
     const initFile = SOURCE_FILES.find((f) => f.path.endsWith("__init__.py"));
     expect(initFile).toBeDefined();
-    expect(initFile!.content).toMatch(/__version__ = "0\.5\.0"/);
+    expect(initFile!.content).toMatch(/__version__ = "0\.6\.0"/);
   });
 
-  it("declares all 27 opcodes in _ir.py (23 core + 2 fusion + 2 autograd)", () => {
+  it("declares all 28 opcodes in _ir.py (23 core + 2 fusion + 2 autograd + 1 AMP)", () => {
     // Sanity check that the codegen bundled the IR with every opcode the
-    // PRD-005 + PRD-006 + PRD-007 surface needs.
+    // PRD-005 + PRD-006 + PRD-007 + PRD-010 surface needs.
     const irFile = SOURCE_FILES.find((f) => f.path.endsWith("_ir.py"));
     expect(irFile).toBeDefined();
     const ops = [
@@ -84,6 +85,7 @@ describe("Python source registry", () => {
       "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",
       "OP_FUSED_ELEMENTWISE", "OP_FUSED_SOFTMAX",
       "OP_SCATTER_ADD", "OP_BROADCAST_TO",
+      "OP_ISNAN",
     ];
     for (const op of ops) {
       expect(irFile!.content).toContain(op);

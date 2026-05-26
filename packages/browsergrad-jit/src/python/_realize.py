@@ -38,6 +38,7 @@ from ._ir import (
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_BROADCAST_TO,
+    OP_ISNAN,
 )
 from ._buffer_table import BufferTable
 from ._errors import RealizationError
@@ -152,9 +153,29 @@ def _h_cmp(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
 
 
 def _h_matmul(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    """Matmul with the tensor-core fp32-accumulator semantics for fp16
+    inputs (PRD-010). Real GPU hardware does fp16 × fp16 → fp32 accumulate
+    → fp16 store; NumPy's `a @ b` with f16 inputs would accumulate in
+    f16, which underflows on long reductions and diverges from any
+    eventual WGSL kernel. Match the WGSL/tensor-core path here so the
+    educational story holds across backends.
+    """
     a = vt[id(node.inputs[0])]
     b = vt[id(node.inputs[1])]
+    if a.dtype == np.float16 or b.dtype == np.float16:
+        # Upcast → accumulate → downcast. Mimics WGSL's
+        # `var<workgroup> acc : f32` pattern.
+        out = a.astype(np.float32) @ b.astype(np.float32)
+        return out.astype(np.dtype(node.dtype), copy=False)
     return a @ b
+
+
+def _h_isnan(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    """Element-wise NaN check. Used by GradScaler's overflow detection
+    (PRD-010); the boolean result feeds REDUCE(any) to produce the
+    "any gradient overflowed?" scalar."""
+    x = vt[id(node.inputs[0])]
+    return np.isnan(x)
 
 
 _REDUCE_OPS = {
@@ -413,6 +434,8 @@ _DISPATCH: dict[str, Handler] = {
     # Autograd (PRD-007)
     OP_SCATTER_ADD:       _h_scatter_add,
     OP_BROADCAST_TO:      _h_broadcast_to,
+    # Mixed precision (PRD-010)
+    OP_ISNAN:             _h_isnan,
 }
 
 
@@ -459,7 +482,19 @@ def realize(
     Raises `RealizationError` if any handler fails. The error carries the
     offending UOp's opcode + shape in the message so debugging is local.
     """
-    from . import _fusion_config
+    from . import _fusion_config, _amp
+    # AMP cast-insertion runs BEFORE fusion (PRD-010). Reason: the cast
+    # pass walks per-UOp `autocast_hint` tags stamped by TensorProxy
+    # builders inside `with autocast(...)`. Fusion's FUSED_SOFTMAX
+    # matcher consumes EXP/REDUCE/DIV decompositions — running the cast
+    # pass first guarantees those ops are wrapped in CAST(f32) before
+    # any fusion rewrite, keeping softmax numerically stable. A
+    # consequence: cast-wrapped softmax chains will not match the
+    # FUSED_SOFTMAX pattern in NumPy v0; the wins flow through the
+    # f32-accumulated MATMUL handler instead (the load-bearing piece).
+    # No-op precheck inside `insert_cast_pass` makes this free when
+    # autocast is inactive.
+    root = _amp.insert_cast_pass(root)
     if _fusion_config.is_enabled():
         from ._fusion import fuse
         root = fuse(root, holdout=autograd_holdout or set())

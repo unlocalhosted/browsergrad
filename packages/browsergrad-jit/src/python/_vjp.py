@@ -51,6 +51,7 @@ from ._ir import (
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CAST,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
     OP_CONST, OP_BROADCAST_TO,
+    OP_ISNAN,
 )
 
 
@@ -519,6 +520,21 @@ def _broadcast_batch_shape(
                 f"batched matmul: cannot broadcast batch dims {a_batch} vs {b_batch}"
             )
     return tuple(out)
+
+
+# ---------------------------------------------------------------------------
+# Non-differentiable ops — the VJP returns `None` per input, telling the
+# symbolic dispatcher to stop propagating gradient through this branch.
+# ---------------------------------------------------------------------------
+
+
+@register_vjp(OP_ISNAN)
+def _vjp_isnan(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """ISNAN's output is bool — no meaningful real-valued gradient flows
+    back into its input. Used by GradScaler's overflow check, which is
+    inherently outside the autograd graph (Python-side `_any_nonfinite`).
+    """
+    return (None,)
 
 
 __all__ = [

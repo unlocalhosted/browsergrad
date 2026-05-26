@@ -7,6 +7,59 @@ contract in the README](README.md#compatibility-contract).
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-05-26
+
+PRD-010 v0 — real mixed precision. Ships an `autocast` context manager
+that tags forward UOps, a cast-insertion IR pass that walks tagged ops
+and inserts CASTs around an ALLOWLIST_F16 / BLOCKLIST_F32 / PROMOTE_OPS
+policy, an fp32-accumulator path inside `_h_matmul` (tensor-core
+semantics: f16 × f16 → f32 accumulate → f16 store), and a real
+`GradScaler` with NaN-triggered scale halving + growth-interval
+doubling. The honest scope cut: NumPy fp16 is not faster than fp32, so
+this PRD lands the *correctness* and *educational* substrate that
+PRD-012's WGSL backend will turn into wall-clock wins.
+
+### Added
+
+- `bg.amp.autocast(device_type, dtype, enabled)` — context manager +
+  `ContextDecorator`. Inside the context, every UOp the tracer builds
+  for MATMUL / ADD / MUL / DIV / NEG / EXP / LOG / REDUCE gets
+  `arg["autocast_hint"]="float16"` stamped on it.
+- `bg.amp.GradScaler` — `scale`, `unscale_`, `step`, `update`,
+  `state_dict`, `load_state_dict`. NaN/Inf detected per-parameter via
+  `np.isfinite` after unscale; on overflow, the scale is multiplied by
+  `backoff_factor` (default 0.5) and the step is skipped. After
+  `growth_interval` clean steps, scale × `growth_factor`.
+- `bg.amp.is_available()` — always True on NumPy v0.
+- `torch.amp.autocast` / `torch.amp.GradScaler` shim via
+  `install_torch_alias()`.
+- `OP_ISNAN` opcode + `_h_isnan` handler + non-differentiable VJP rule.
+  Powers `GradScaler._any_nonfinite`.
+- `_amp.insert_cast_pass(root)` — IR rewriter run before fusion in
+  `realize()`. No-op when no UOp carries an autocast hint (free for
+  non-AMP code paths).
+- `_h_matmul` now upcasts f16 inputs to f32 before `@`, then downcasts
+  the result. Matches the WGSL `var<workgroup> acc : f32` pattern.
+
+### Refusal modes (deliberate v0 cuts per the DL/GPU review)
+
+- `dtype="bfloat16"` — refused with a pointer to the WGSL `shader-bf16`
+  extension gap. Will land when the spec adds the extension.
+- `device_type` values outside `{"webgpu", "cpu"}` — refused. On the
+  NumPy substrate both are identical; the parameter exists so that
+  user code written for PRD-012's WGSL device gating still parses.
+- AMP-aware fusion of `FUSED_SOFTMAX` is deferred. Cast pass runs
+  *before* fusion to keep softmax stable; the perf cost is a missed
+  fusion in NumPy v0 — irrelevant once PRD-012 lowers the casts into
+  shader-internal precision.
+
+### Changed
+
+- `_realize.realize()` now invokes `_amp.insert_cast_pass` before
+  fusion. The cheap precheck inside the pass returns the original
+  root unchanged when no autocast hint is in the graph.
+- Surface test expects 28 opcodes (was 27) and version 0.6.0.
+
 ## [0.5.0] — 2026-05-26
 
 PRD-009 v0 — gradient checkpointing via IR rewrite. Ships the

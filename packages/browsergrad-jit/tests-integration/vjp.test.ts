@@ -37,9 +37,10 @@ list(list_registered())
 `);
     // Week 1: ADD, MUL, DIV, NEG, EXP, LOG, RESHAPE, PERMUTE, CAST,
     // REDUCE, MATMUL. (REDUCE covers sum/mean; max/min defer to W3.)
+    // PRD-010 adds ISNAN as a non-differentiable rule (returns None).
     const expected = [
-      "ADD", "CAST", "DIV", "EXP", "LOG", "MATMUL", "MUL", "NEG",
-      "PERMUTE", "REDUCE", "RESHAPE",
+      "ADD", "CAST", "DIV", "EXP", "ISNAN", "LOG", "MATMUL", "MUL",
+      "NEG", "PERMUTE", "REDUCE", "RESHAPE",
     ];
     expect(registered).toEqual(expected);
   });

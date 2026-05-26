@@ -24,6 +24,7 @@ import { TRACE_CACHE_PY } from "./_trace_cache.generated.js";
 import { SAFETENSORS_PY } from "./_safetensors.generated.js";
 import { CHECKPOINT_PY } from "./_checkpoint.generated.js";
 import { UTILS_CHECKPOINT_PY } from "./_utils_checkpoint.generated.js";
+import { AMP_PY } from "./_amp.generated.js";
 import { TENSOR_PROXY_PY } from "./_tensor_proxy.generated.js";
 import { NN_PY } from "./_nn.generated.js";
 import { FUNCTIONAL_PY } from "./_functional.generated.js";
@@ -88,6 +89,7 @@ from . import _fusion_config as _fc
 from . import _trace_cache as _tc
 from ._safetensors import load_safetensors, save_safetensors
 from . import _utils_checkpoint as _utils_ckpt
+from . import _amp as _amp_mod
 from ._torch_compat import install_torch_alias, uninstall_torch_alias
 import sys as _sys
 import types as _types
@@ -140,6 +142,16 @@ utils_ckpt_mod.checkpoint = _utils_ckpt.checkpoint
 utils.checkpoint = utils_ckpt_mod
 _sys.modules["browsergrad_jit.utils"] = utils
 _sys.modules["browsergrad_jit.utils.checkpoint"] = utils_ckpt_mod
+
+# bg.amp — mixed precision (PRD-010). Matches torch.amp shape exactly:
+#   with bg.amp.autocast(device_type="webgpu", dtype=torch.float16):
+#       loss = ...
+#   scaler = bg.amp.GradScaler()
+amp = _types.ModuleType("browsergrad_jit.amp")
+amp.autocast = _amp_mod.autocast
+amp.GradScaler = _amp_mod.GradScaler
+amp.is_available = _amp_mod.is_available
+_sys.modules["browsergrad_jit.amp"] = amp
 
 
 def cache_stats() -> dict:
@@ -227,7 +239,7 @@ __all__ = [
     "tensor", "zeros", "ones", "randn", "arange", "from_numpy",
     "Session", "get_default_session", "set_default_session", "new_session",
     "manual_seed",
-    "nn", "optim", "jit", "utils",
+    "nn", "optim", "jit", "utils", "amp",
     "install_torch_alias", "uninstall_torch_alias",
     "load_safetensors", "save_safetensors",
     "cache_stats", "clear_cache",
@@ -265,6 +277,7 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_jit/_safetensors.py", content: SAFETENSORS_PY },
   { path: "browsergrad_jit/_checkpoint.py", content: CHECKPOINT_PY },
   { path: "browsergrad_jit/_utils_checkpoint.py", content: UTILS_CHECKPOINT_PY },
+  { path: "browsergrad_jit/_amp.py", content: AMP_PY },
   { path: "browsergrad_jit/_tensor_proxy.py", content: TENSOR_PROXY_PY },
   { path: "browsergrad_jit/_functional.py", content: FUNCTIONAL_PY },
   { path: "browsergrad_jit/_nn.py", content: NN_PY },

@@ -95,6 +95,30 @@ class _BackwardCtx:
 # ---------------------------------------------------------------------------
 
 
+def _amp_arg(arg: Any = None) -> Any:
+    """Stamp the active autocast dtype onto an arg dict, if any.
+
+    The cast-insertion pass (`_amp.insert_cast_pass`) only acts on UOps
+    whose `arg["autocast_hint"]` matches the active autocast dtype, so
+    we tag at construction time. When autocast is inactive this returns
+    `arg` unchanged — zero overhead on the no-autocast path.
+
+    Why centralize: every UOp builder in this file that produces an
+    op the AMP policy cares about (MATMUL, ADD/MUL/DIV/NEG, EXP/LOG,
+    REDUCE) calls this helper. Adding new ops to the policy means
+    updating their `arg=` site here too — easy to grep for.
+    """
+    from . import _amp as _amp_mod
+    active = _amp_mod._active_dtype()
+    if active is None:
+        return arg
+    if arg is None:
+        return {"autocast_hint": active}
+    if isinstance(arg, dict):
+        return {**arg, "autocast_hint": active}
+    return arg
+
+
 def _broadcast_shape(*shapes: Tuple[int, ...]) -> Tuple[int, ...]:
     """np.broadcast_shapes returns a tuple; wrap with a friendlier error."""
     try:
@@ -329,7 +353,7 @@ class TensorProxy:
             inputs=(self._uop, rhs._uop),
             shape=out_shape,
             dtype=out_dtype,
-            arg=None,
+            arg=_amp_arg(None),
         )
         requires = self.requires_grad or rhs.requires_grad
         ctx = (
@@ -384,7 +408,7 @@ class TensorProxy:
         def _bw(dy: np.ndarray, _ins) -> Tuple[Optional[np.ndarray], ...]:
             return (-dy,)
         uop = UOp(op=OP_NEG, inputs=(self._uop,), shape=self._uop.shape,
-                  dtype=self._uop.dtype, arg=None)
+                  dtype=self._uop.dtype, arg=_amp_arg(None))
         ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if self.requires_grad else None
         return TensorProxy(uop, session=self._get_session(),
                            requires_grad=self.requires_grad, ctx=ctx)
@@ -430,7 +454,7 @@ class TensorProxy:
         requires = self.requires_grad or rhs.requires_grad
         ctx = _BackwardCtx(fn=_bw, input_proxies=(self, rhs)) if requires else None
         uop = UOp(op=OP_MATMUL, inputs=(self._uop, rhs._uop),
-                  shape=out_shape, dtype=dtype, arg=None)
+                  shape=out_shape, dtype=dtype, arg=_amp_arg(None))
         return TensorProxy(uop, session=self._get_session(),
                            requires_grad=requires, ctx=ctx)
 
@@ -475,7 +499,7 @@ class TensorProxy:
 
     def exp(self) -> "TensorProxy":
         uop = UOp(op=OP_EXP, inputs=(self._uop,), shape=self._uop.shape,
-                  dtype=self._uop.dtype, arg=None)
+                  dtype=self._uop.dtype, arg=_amp_arg(None))
         def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
             (x_arr,) = ins
             return (dy * np.exp(x_arr),)
@@ -485,7 +509,7 @@ class TensorProxy:
 
     def log(self) -> "TensorProxy":
         uop = UOp(op=OP_LOG, inputs=(self._uop,), shape=self._uop.shape,
-                  dtype=self._uop.dtype, arg=None)
+                  dtype=self._uop.dtype, arg=_amp_arg(None))
         def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
             (x_arr,) = ins
             return (dy / x_arr,)
@@ -522,7 +546,7 @@ class TensorProxy:
             inputs=(self._uop,),
             shape=out_shape,
             dtype=out_dtype,
-            arg={"op": op, "axis": axis, "keepdims": keepdims},
+            arg=_amp_arg({"op": op, "axis": axis, "keepdims": keepdims}),
         )
         # Backward for sum/mean is broadcast-of-dy back to input shape.
         # max/min/argmax are non-differentiable on the indices; for max/min
