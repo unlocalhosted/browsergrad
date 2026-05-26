@@ -26,7 +26,7 @@ Implementable on NumPy with TDD. Each row = one focused commit (or small group).
 | 12 | `torch.einsum` (wrap `np.einsum` with backward) | ✅ done | — |
 | 13 | Tensor math: `abs`, `sign`, `clip`/`clamp`, `where`, `min`/`max(dim)`, `std`, `var`, `topk`, `sort`, `sqrt`, `pow` | 🟡 partial — `abs`, `sign`, `sqrt`, `pow`, `clamp`/`clip`, `topk`, `where` done; `min`/`max(dim)`, `std`, `var`, `sort` still pending | — |
 | 14 | Tensor shape: `expand`, `repeat`, `chunk`, `split`, `contiguous`, `roll`, `flip` | 🟡 partial — `expand`, `repeat`, `flip` done; `chunk`, `split`, `contiguous`, `roll` still pending | — |
-| 15 | `nn.RNN` / `nn.LSTM` / `nn.GRU` + backward through time | ⏳ pending | — |
+| 15 | `nn.RNN` / `nn.LSTM` / `nn.GRU` + backward through time | ✅ done | — |
 | 16 | `nn.Conv3d` + `nn.ConvTranspose1d` / `nn.ConvTranspose2d` | ⏳ pending | — |
 | 17 | `nn.GroupNorm` / `nn.InstanceNorm{1,2,3}d` / `nn.BatchNorm3d` | ⏳ pending | — |
 | 18 | Module hooks: `register_forward_hook`, `register_backward_hook` | ⏳ pending | — |
