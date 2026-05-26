@@ -12,7 +12,7 @@ For broader PyTorch-coverage progress, see [PROGRESS.md](PROGRESS.md).
 | # | Refactor | Verdict | Status | Commit |
 |---|---|---|---|---|
 | 5 | Single-source the version | Add `resolveJsonModule`; import `pkg` in 3 files; don't flip `verbatimModuleSyntax` | ✅ done | `27cf321` |
-| 4 | Python source as `.py` files | Pre-tsc codegen script; commit generated files; base64-IIFE emission | ✅ done | `7da403a` |
+| 4 | Python source as `.py` files | Pre-tsc codegen script; commit generated files; base64-IIFE emission | ✅ done | `a8b926a` |
 | 3 | NodePyodideTarget adapter | Factory at `./node-adapter` subpath; `pyodide` as optionalPeerDep | ⏳ pending | — |
 | 2 | Split torch_compat into real/limited/impossible | Self-installing modules; runtime `is`-identity assertion pins the latent coupling | ⏳ pending | — |
 | 1 | Split nn.ts into per-family TS chunks | Option A (TS-split, single `nn.py`); `NN_CHUNK_ORDER` constant enforces order | ⏳ pending | — |
