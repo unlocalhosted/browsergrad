@@ -20,7 +20,7 @@ Implementable on NumPy with TDD. Each row = one focused commit (or small group).
 | 6 | `nn.init.{kaiming_uniform_, xavier_uniform_, normal_, uniform_, zeros_, ones_, constant_}` | ✅ done | — |
 | 7 | `F.pad`, `F.interpolate`, `F.normalize`, `F.cosine_similarity` | ⏳ pending | — |
 | 8 | `F.scaled_dot_product_attention` | ⏳ pending | — |
-| 9 | More losses: `nn.{BCELoss, L1Loss, SmoothL1Loss, KLDivLoss}` | ⏳ pending | — |
+| 9 | More losses: `nn.{BCELoss, L1Loss, SmoothL1Loss, KLDivLoss}` | ✅ done | — |
 | 10 | More optimizers: `RMSprop`, `Adagrad`, `Adadelta` | ⏳ pending | — |
 | 11 | More schedulers: `ReduceLROnPlateau`, `MultiStepLR`, `ExponentialLR`, `OneCycleLR` | ⏳ pending | — |
 | 12 | `torch.einsum` (wrap `np.einsum` with backward) | ⏳ pending | — |

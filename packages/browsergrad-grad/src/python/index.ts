@@ -77,7 +77,7 @@ __all__ = [
     "save", "load",
     "install_torch_alias",
 ]
-__version__ = "0.4.9"
+__version__ = "0.4.10"
 `;
 
 export interface PythonSource {

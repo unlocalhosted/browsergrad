@@ -236,4 +236,131 @@ def nll_loss(log_probs: Tensor, targets) -> Tensor:
     one_hot[np.arange(N), targets_np] = 1.0
     grad_log_probs = -one_hot / N
     return _build_ctx(out, (log_probs,), lambda g: (g.data * grad_log_probs,))
+
+
+def l1_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
+    """Mean absolute error.
+
+    reduction: 'mean' (default), 'sum', or 'none'. Matches torch.nn.functional.l1_loss
+    for the reductions we support.
+    """
+    if input.data.shape != target.data.shape:
+        raise ValueError(f"l1_loss: shape mismatch {input.data.shape} vs {target.data.shape}")
+    diff = input.data - target.data
+    abs_diff = np.abs(diff)
+    if reduction == "mean":
+        n = float(input.data.size)
+        loss_data = float(abs_diff.mean())
+        out = Tensor(np.float32(loss_data))
+        return _build_ctx(out, (input,), lambda g: (g.data * np.sign(diff).astype(np.float32) / n,))
+    if reduction == "sum":
+        loss_data = float(abs_diff.sum())
+        out = Tensor(np.float32(loss_data))
+        return _build_ctx(out, (input,), lambda g: (g.data * np.sign(diff).astype(np.float32),))
+    if reduction == "none":
+        out = Tensor(abs_diff.astype(np.float32))
+        return _build_ctx(out, (input,), lambda g: (g.data * np.sign(diff).astype(np.float32),))
+    raise ValueError(f"l1_loss: unknown reduction {reduction!r}")
+
+
+def bce_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
+    """Binary cross-entropy from probabilities. Input must be in (0, 1).
+    Use bce_with_logits_loss if you have raw logits — it's numerically stable.
+
+    Forward: -(target * log(input) + (1-target) * log(1-input)).reduce()
+    """
+    if input.data.shape != target.data.shape:
+        raise ValueError(f"bce_loss: shape mismatch {input.data.shape} vs {target.data.shape}")
+    p = input.data.astype(np.float64)
+    t = target.data.astype(np.float64)
+    # clamp to avoid log(0) and division by zero in grad
+    eps = 1e-12
+    p_c = np.clip(p, eps, 1.0 - eps)
+    per_elem = -(t * np.log(p_c) + (1.0 - t) * np.log(1.0 - p_c))
+    if reduction == "mean":
+        n = float(input.data.size)
+        loss_data = float(per_elem.mean())
+        grad_p = ((1.0 - t) / (1.0 - p_c) - t / p_c) / n
+        out = Tensor(np.float32(loss_data))
+        return _build_ctx(out, (input,), lambda g: (g.data * grad_p.astype(np.float32),))
+    if reduction == "sum":
+        loss_data = float(per_elem.sum())
+        grad_p = (1.0 - t) / (1.0 - p_c) - t / p_c
+        out = Tensor(np.float32(loss_data))
+        return _build_ctx(out, (input,), lambda g: (g.data * grad_p.astype(np.float32),))
+    if reduction == "none":
+        out = Tensor(per_elem.astype(np.float32))
+        grad_p = (1.0 - t) / (1.0 - p_c) - t / p_c
+        return _build_ctx(out, (input,), lambda g: (g.data * grad_p.astype(np.float32),))
+    raise ValueError(f"bce_loss: unknown reduction {reduction!r}")
+
+
+def smooth_l1_loss(input: Tensor, target: Tensor, beta: float = 1.0, reduction: str = "mean") -> Tensor:
+    """Smooth L1 (Huber with knee at beta).
+
+    Per element:
+      0.5 * d^2 / beta              if |d| < beta
+      |d| - 0.5 * beta              otherwise
+    """
+    if input.data.shape != target.data.shape:
+        raise ValueError(f"smooth_l1_loss: shape mismatch {input.data.shape} vs {target.data.shape}")
+    if beta <= 0:
+        raise ValueError(f"smooth_l1_loss: beta must be > 0, got {beta}")
+    d = input.data - target.data
+    a = np.abs(d)
+    quad = 0.5 * d * d / beta
+    lin = a - 0.5 * beta
+    per_elem = np.where(a < beta, quad, lin)
+    grad_d = np.where(a < beta, d / beta, np.sign(d))
+    if reduction == "mean":
+        n = float(input.data.size)
+        loss_data = float(per_elem.mean())
+        out = Tensor(np.float32(loss_data))
+        return _build_ctx(out, (input,), lambda g: (g.data * (grad_d / n).astype(np.float32),))
+    if reduction == "sum":
+        loss_data = float(per_elem.sum())
+        out = Tensor(np.float32(loss_data))
+        return _build_ctx(out, (input,), lambda g: (g.data * grad_d.astype(np.float32),))
+    if reduction == "none":
+        out = Tensor(per_elem.astype(np.float32))
+        return _build_ctx(out, (input,), lambda g: (g.data * grad_d.astype(np.float32),))
+    raise ValueError(f"smooth_l1_loss: unknown reduction {reduction!r}")
+
+
+def kl_div_loss(input: Tensor, target: Tensor, reduction: str = "mean", log_target: bool = False) -> Tensor:
+    """KL divergence. input is expected to be a log-probability (output of log_softmax).
+    target is a probability by default; pass log_target=True if you pre-logged it.
+
+    Per element: target * (log(target) - input)
+    """
+    if input.data.shape != target.data.shape:
+        raise ValueError(f"kl_div_loss: shape mismatch {input.data.shape} vs {target.data.shape}")
+    if log_target:
+        log_t = target.data.astype(np.float64)
+        t = np.exp(log_t)
+    else:
+        t = target.data.astype(np.float64)
+        # target * log(target), with the convention 0 * log(0) = 0
+        with np.errstate(divide="ignore", invalid="ignore"):
+            log_t = np.where(t > 0, np.log(t), 0.0)
+    per_elem = t * (log_t - input.data.astype(np.float64))
+    # grad wrt input = -t, then scaled by reduction
+    if reduction == "mean":
+        n = float(input.data.size)
+        loss_data = float(per_elem.sum() / n)
+        out = Tensor(np.float32(loss_data))
+        return _build_ctx(out, (input,), lambda g: (g.data * (-t / n).astype(np.float32),))
+    if reduction == "batchmean":
+        n = float(input.data.shape[0])
+        loss_data = float(per_elem.sum() / n)
+        out = Tensor(np.float32(loss_data))
+        return _build_ctx(out, (input,), lambda g: (g.data * (-t / n).astype(np.float32),))
+    if reduction == "sum":
+        loss_data = float(per_elem.sum())
+        out = Tensor(np.float32(loss_data))
+        return _build_ctx(out, (input,), lambda g: (g.data * (-t).astype(np.float32),))
+    if reduction == "none":
+        out = Tensor(per_elem.astype(np.float32))
+        return _build_ctx(out, (input,), lambda g: (g.data * (-t).astype(np.float32),))
+    raise ValueError(f"kl_div_loss: unknown reduction {reduction!r}")
 `;
