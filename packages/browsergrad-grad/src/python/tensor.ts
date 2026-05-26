@@ -239,6 +239,54 @@ class Tensor:
     def log(self) -> "Tensor":
         return _log(self)
 
+    def abs(self) -> "Tensor":
+        return _abs(self)
+
+    def sign(self) -> "Tensor":
+        # Non-differentiable; matches PyTorch behavior.
+        return Tensor(np.sign(self.data).astype(np.float32))
+
+    def sqrt(self) -> "Tensor":
+        return _pow(self, 0.5)
+
+    def pow(self, exponent) -> "Tensor":
+        return _pow(self, float(exponent))
+
+    def clamp(self, min=None, max=None) -> "Tensor":
+        """Clamp values to [min, max]. min or max may be None to leave that side open."""
+        return _clamp(self, min, max)
+
+    # alias to match PyTorch's torch.clip / Tensor.clip
+    def clip(self, min=None, max=None) -> "Tensor":
+        return self.clamp(min, max)
+
+    def topk(self, k: int):
+        """Return (values, indices) of the k largest elements (1-D only in v0).
+        Returns a tuple of Tensors. Non-differentiable.
+        """
+        if self.data.ndim != 1:
+            raise ValueError(f"topk: v0 supports 1-D tensors only, got {self.data.ndim}D")
+        idx = np.argsort(-self.data)[:k]
+        return Tensor(self.data[idx].astype(np.float32)), Tensor(idx.astype(np.float32))
+
+    def expand(self, *shape) -> "Tensor":
+        """Broadcast size-1 dims to a larger size. Returns a tensor that
+        appears to have the new shape; we use np.broadcast_to + copy to
+        materialize (PyTorch returns a view but our backward handles it
+        either way)."""
+        if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
+            shape = tuple(shape[0])
+        return _expand(self, tuple(shape))
+
+    def repeat(self, *sizes) -> "Tensor":
+        """Tile the tensor along each dimension."""
+        if len(sizes) == 1 and isinstance(sizes[0], (tuple, list)):
+            sizes = tuple(sizes[0])
+        return _repeat(self, tuple(sizes))
+
+    def flip(self, dim: int) -> "Tensor":
+        return _flip(self, int(dim))
+
     # ─── Shape ops ─────────────────────────────────────────
 
     def reshape(self, *shape) -> "Tensor":
@@ -473,6 +521,110 @@ def _log(a: Tensor) -> Tensor:
     out = Tensor(np.log(a.data))
     a_data = a.data
     return _build_ctx(out, (a,), lambda g: (g.data / a_data,))
+
+
+def _abs(a: Tensor) -> Tensor:
+    out = Tensor(np.abs(a.data))
+    a_data = a.data
+    sign = np.sign(a_data).astype(np.float32)
+    return _build_ctx(out, (a,), lambda g: (g.data * sign,))
+
+
+def _clamp(a: Tensor, lo, hi) -> Tensor:
+    out_data = a.data
+    if lo is not None:
+        out_data = np.maximum(out_data, float(lo))
+    if hi is not None:
+        out_data = np.minimum(out_data, float(hi))
+    out = Tensor(out_data.astype(np.float32))
+    a_data = a.data
+    lo_v = float(lo) if lo is not None else None
+    hi_v = float(hi) if hi is not None else None
+    def backward(g):
+        mask = np.ones_like(a_data, dtype=np.float32)
+        if lo_v is not None:
+            mask = mask * (a_data >= lo_v).astype(np.float32)
+        if hi_v is not None:
+            mask = mask * (a_data <= hi_v).astype(np.float32)
+        return (g.data * mask,)
+    return _build_ctx(out, (a,), backward)
+
+
+def _expand(a: Tensor, shape: tuple) -> Tensor:
+    # PyTorch lets -1 mean "keep this dim". Resolve.
+    in_shape = a.data.shape
+    if len(shape) < len(in_shape):
+        raise ValueError(f"expand: target {shape} has fewer dims than input {in_shape}")
+    # Pad input shape with 1s on the left to match output rank.
+    padded = (1,) * (len(shape) - len(in_shape)) + in_shape
+    resolved = []
+    for i, t in enumerate(shape):
+        if t == -1:
+            resolved.append(padded[i])
+        else:
+            resolved.append(t)
+    resolved = tuple(resolved)
+    out_data = np.broadcast_to(a.data.reshape(padded), resolved).copy()
+    out = Tensor(out_data)
+    def backward(g):
+        # Sum the gradient back over the broadcasted dimensions.
+        grad = g.data
+        for i, (orig, new) in enumerate(zip(padded, resolved)):
+            if orig == 1 and new != 1:
+                grad = grad.sum(axis=i, keepdims=True)
+        return (grad.reshape(in_shape),)
+    return _build_ctx(out, (a,), backward)
+
+
+def _repeat(a: Tensor, sizes: tuple) -> Tensor:
+    # np.tile semantics: sizes is the repeat count along each dim.
+    out_data = np.tile(a.data, sizes)
+    out = Tensor(out_data.astype(np.float32))
+    in_shape = a.data.shape
+    def backward(g):
+        # Inverse of tile: sum the gradient over each tile-block back to
+        # the original shape. We do this by reshaping into a higher-dim
+        # array where each tile is its own axis, then summing those.
+        gd = g.data
+        # Pad input shape with 1s on the left so it matches len(sizes).
+        if len(in_shape) < len(sizes):
+            padded_in = (1,) * (len(sizes) - len(in_shape)) + in_shape
+        else:
+            padded_in = in_shape
+        # Reshape g so each axis splits into (repeat_count, orig_dim).
+        new_shape = []
+        for rep, orig in zip(sizes, padded_in):
+            new_shape.extend([rep, orig])
+        gd = gd.reshape(new_shape)
+        # Sum over every "repeat" axis (the even-indexed ones).
+        for i in range(len(sizes) - 1, -1, -1):
+            gd = gd.sum(axis=2 * i)
+        return (gd.reshape(in_shape),)
+    return _build_ctx(out, (a,), backward)
+
+
+def _flip(a: Tensor, dim: int) -> Tensor:
+    out_data = np.flip(a.data, axis=dim).copy()
+    out = Tensor(out_data)
+    return _build_ctx(out, (a,), lambda g: (np.flip(g.data, axis=dim).copy(),))
+
+
+def where(condition, a, b) -> Tensor:
+    """Element-wise select: condition[i] non-zero → a[i] else b[i].
+
+    Matches torch.where(cond, a, b). Backward routes gradient to whichever
+    branch was selected.
+    """
+    cond_data = condition.data if isinstance(condition, Tensor) else np.asarray(condition)
+    a_t = _wrap(a)
+    b_t = _wrap(b)
+    out_data = np.where(cond_data != 0, a_t.data, b_t.data).astype(np.float32)
+    out = Tensor(out_data)
+    mask_a = (cond_data != 0).astype(np.float32)
+    mask_b = (cond_data == 0).astype(np.float32)
+    def backward(g):
+        return (None, g.data * mask_a, g.data * mask_b)
+    return _build_ctx(out, (_wrap(condition), a_t, b_t), backward)
 
 
 # ─── Reductions ────────────────────────────────────────────

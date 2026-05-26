@@ -32,6 +32,7 @@ from .tensor import (
     no_grad,
     cat,
     stack,
+    where,
     from_numpy,
     manual_seed,
     matmul,
@@ -49,13 +50,13 @@ from . import optim
 from .torch_compat import install_torch_alias
 
 __all__ = [
-    "Tensor", "zeros", "ones", "randn", "no_grad", "cat", "stack",
+    "Tensor", "zeros", "ones", "randn", "no_grad", "cat", "stack", "where",
     "from_numpy", "manual_seed",
     "matmul", "mm", "bmm", "exp", "log", "sum", "mean", "argmax",
     "functional", "nn", "optim",
     "install_torch_alias",
 ]
-__version__ = "0.4.7"
+__version__ = "0.4.8"
 `;
 
 export interface PythonSource {
