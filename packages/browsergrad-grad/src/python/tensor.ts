@@ -111,6 +111,15 @@ class Tensor:
         """Return a copy of the underlying numpy array."""
         return self.data.copy()
 
+    def __array__(self, dtype=None):
+        """Numpy array protocol. Lets np.asarray(tensor) and any code that
+        feeds Tensors into NumPy reductions just work, without callers needing
+        to reach for .data or .numpy().
+        """
+        if dtype is None:
+            return self.data
+        return self.data.astype(dtype, copy=False)
+
     def tolist(self):
         return self.data.tolist()
 
@@ -866,4 +875,55 @@ def stack(tensors, dim: int = 0) -> Tensor:
         return tuple(parts)
 
     return _build_ctx(out, tensors, backward)
+
+
+# ─── einsum ────────────────────────────────────────────────
+
+def einsum(equation: str, *operands: "Tensor") -> "Tensor":
+    """Wrap np.einsum with autograd.
+
+    Backward derivation: given out = einsum(eq, A, B), the gradient wrt
+    operand A is einsum(eq_with_A_and_out_swapped, grad_out, B). We do this
+    by rebuilding the equation string per operand.
+
+    Supports the typical lab cases: 1 or 2 operands. Three-plus operands raise.
+    """
+    if not operands:
+        raise ValueError("einsum: need at least one operand")
+    if "->" in equation:
+        in_part, out_subs = equation.split("->", 1)
+        out_subs = out_subs.strip()
+    else:
+        in_part = equation
+        # Implicit: einsum sums duplicates, output is alphabetic single-appearance subscripts.
+        # For our supported cases we require explicit '->' to keep backward simple.
+        raise ValueError("einsum: explicit '->' is required for autograd-able einsum")
+    in_subs = [s.strip() for s in in_part.split(",")]
+    if len(in_subs) != len(operands):
+        raise ValueError(f"einsum: {len(in_subs)} subscript groups but {len(operands)} operands")
+
+    arrays = [op.data for op in operands]
+    out_data = np.einsum(equation, *arrays).astype(np.float32)
+    out = Tensor(out_data)
+
+    if len(operands) == 1:
+        in_a = in_subs[0]
+        def backward(g):
+            # da = einsum(out_subs -> in_a, g)
+            da = np.einsum(f"{out_subs}->{in_a}", g.data)
+            return (da.astype(np.float32),)
+        return _build_ctx(out, operands, backward)
+
+    if len(operands) == 2:
+        in_a, in_b = in_subs
+        a_data = arrays[0]; b_data = arrays[1]
+        def backward(g):
+            # da = einsum("out_subs,in_b -> in_a", g, b)
+            da = np.einsum(f"{out_subs},{in_b}->{in_a}", g.data, b_data)
+            # db = einsum("in_a,out_subs -> in_b", a, g)
+            db = np.einsum(f"{in_a},{out_subs}->{in_b}", a_data, g.data)
+            return (da.astype(np.float32), db.astype(np.float32))
+        return _build_ctx(out, operands, backward)
+
+    raise NotImplementedError("einsum: more than 2 operands not supported yet")
 `;

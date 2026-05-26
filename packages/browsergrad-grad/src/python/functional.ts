@@ -363,4 +363,226 @@ def kl_div_loss(input: Tensor, target: Tensor, reduction: str = "mean", log_targ
         out = Tensor(per_elem.astype(np.float32))
         return _build_ctx(out, (input,), lambda g: (g.data * (-t).astype(np.float32),))
     raise ValueError(f"kl_div_loss: unknown reduction {reduction!r}")
+
+
+# ─── Spatial / shape ops ───────────────────────────────────
+
+def pad(input: Tensor, pad, mode: str = "constant", value: float = 0.0) -> Tensor:
+    """Pad input.
+
+    pad: a sequence of even length, paired by dimension, last-dim-first
+    (matching torch.nn.functional.pad). E.g. for a 2D input,
+    pad=(left, right, top, bottom).
+
+    Currently supports mode='constant' only — that covers nearly every
+    real PyTorch lab. Add reflect / replicate when something needs them.
+    """
+    if mode != "constant":
+        raise NotImplementedError(f"pad: mode {mode!r} not supported; only 'constant'")
+    if len(pad) % 2 != 0:
+        raise ValueError(f"pad: pad length must be even, got {len(pad)}")
+    pairs_lastdim_first = list(zip(pad[0::2], pad[1::2]))
+    # Convert to numpy's first-dim-first ordering, with zero-pad for any dims
+    # that the user didn't specify.
+    ndim = input.data.ndim
+    npad = [(0, 0)] * ndim
+    for k, (lo, hi) in enumerate(pairs_lastdim_first):
+        dim = ndim - 1 - k
+        npad[dim] = (int(lo), int(hi))
+    out_data = np.pad(input.data, npad, mode="constant", constant_values=value)
+    out = Tensor(out_data.astype(np.float32))
+
+    def backward(g):
+        slices = tuple(slice(lo, lo + s) for (lo, _), s in zip(npad, input.data.shape))
+        return (g.data[slices].copy(),)
+
+    return _build_ctx(out, (input,), backward)
+
+
+def _interp_nearest_2d(x_data, out_h, out_w, scale_h, scale_w):
+    H_in, W_in = x_data.shape[-2:]
+    # Source-index map per output pixel.
+    si = np.floor(np.arange(out_h) / scale_h).astype(np.int64)
+    sj = np.floor(np.arange(out_w) / scale_w).astype(np.int64)
+    si = np.clip(si, 0, H_in - 1)
+    sj = np.clip(sj, 0, W_in - 1)
+    return x_data[..., si[:, None], sj[None, :]], si, sj
+
+
+def _interp_bilinear_2d(x_data, out_h, out_w, scale_h, scale_w, align_corners):
+    H_in, W_in = x_data.shape[-2:]
+    if align_corners:
+        ih = np.linspace(0, H_in - 1, out_h).astype(np.float32) if out_h > 1 else np.zeros(out_h, dtype=np.float32)
+        iw = np.linspace(0, W_in - 1, out_w).astype(np.float32) if out_w > 1 else np.zeros(out_w, dtype=np.float32)
+    else:
+        # Half-pixel-center mapping (PyTorch default).
+        ih = (np.arange(out_h, dtype=np.float32) + 0.5) / scale_h - 0.5
+        iw = (np.arange(out_w, dtype=np.float32) + 0.5) / scale_w - 0.5
+    i0 = np.floor(ih).astype(np.int64); i1 = i0 + 1
+    j0 = np.floor(iw).astype(np.int64); j1 = j0 + 1
+    a = (ih - i0).astype(np.float32)
+    b = (iw - j0).astype(np.float32)
+    i0c = np.clip(i0, 0, H_in - 1); i1c = np.clip(i1, 0, H_in - 1)
+    j0c = np.clip(j0, 0, W_in - 1); j1c = np.clip(j1, 0, W_in - 1)
+    # Gather the 4 corners per output pixel.
+    v00 = x_data[..., i0c[:, None], j0c[None, :]]
+    v01 = x_data[..., i0c[:, None], j1c[None, :]]
+    v10 = x_data[..., i1c[:, None], j0c[None, :]]
+    v11 = x_data[..., i1c[:, None], j1c[None, :]]
+    aw = a[:, None]; bw = b[None, :]
+    out = (1 - aw) * ((1 - bw) * v00 + bw * v01) + aw * ((1 - bw) * v10 + bw * v11)
+    return out.astype(np.float32)
+
+
+def interpolate(input: Tensor, size=None, scale_factor=None, mode: str = "nearest", align_corners: bool = False) -> Tensor:
+    """Resize 4D (N, C, H, W) feature maps.
+
+    Supports mode in {'nearest', 'bilinear'}. Either size or scale_factor must
+    be given. Backward path is implemented but slow — fine for educational use.
+    """
+    if input.data.ndim != 4:
+        raise NotImplementedError(f"interpolate: only 4D input supported; got {input.data.ndim}D")
+    H_in, W_in = input.data.shape[-2:]
+    if size is not None:
+        out_h, out_w = int(size[0]), int(size[1])
+    elif scale_factor is not None:
+        sf = scale_factor
+        if isinstance(sf, (int, float)):
+            sf = (sf, sf)
+        out_h = int(round(H_in * sf[0]))
+        out_w = int(round(W_in * sf[1]))
+    else:
+        raise ValueError("interpolate: provide size or scale_factor")
+    scale_h = out_h / H_in
+    scale_w = out_w / W_in
+
+    if mode == "nearest":
+        out_data, si, sj = _interp_nearest_2d(input.data, out_h, out_w, scale_h, scale_w)
+        out = Tensor(out_data.astype(np.float32))
+        def backward(g):
+            # Scatter-add gradients back to source positions.
+            dx = np.zeros_like(input.data)
+            # g shape: (..., out_h, out_w); we add g[..., y, x] to dx[..., si[y], sj[x]].
+            for y in range(out_h):
+                for x in range(out_w):
+                    dx[..., si[y], sj[x]] += g.data[..., y, x]
+            return (dx,)
+        return _build_ctx(out, (input,), backward)
+
+    if mode == "bilinear":
+        out_data = _interp_bilinear_2d(input.data, out_h, out_w, scale_h, scale_w, align_corners)
+        out = Tensor(out_data)
+        # Backward: numerical for the educational case (small enough).
+        def backward(g):
+            # Build the bilinear weight tensor and apply its transpose.
+            if align_corners:
+                ih = np.linspace(0, H_in - 1, out_h).astype(np.float32) if out_h > 1 else np.zeros(out_h, dtype=np.float32)
+                iw = np.linspace(0, W_in - 1, out_w).astype(np.float32) if out_w > 1 else np.zeros(out_w, dtype=np.float32)
+            else:
+                ih = (np.arange(out_h, dtype=np.float32) + 0.5) / scale_h - 0.5
+                iw = (np.arange(out_w, dtype=np.float32) + 0.5) / scale_w - 0.5
+            i0 = np.floor(ih).astype(np.int64); i1 = i0 + 1
+            j0 = np.floor(iw).astype(np.int64); j1 = j0 + 1
+            a = (ih - i0).astype(np.float32)
+            b = (iw - j0).astype(np.float32)
+            i0c = np.clip(i0, 0, H_in - 1); i1c = np.clip(i1, 0, H_in - 1)
+            j0c = np.clip(j0, 0, W_in - 1); j1c = np.clip(j1, 0, W_in - 1)
+            dx = np.zeros_like(input.data)
+            for y in range(out_h):
+                for x in range(out_w):
+                    g_yx = g.data[..., y, x]
+                    aw = a[y]; bw = b[x]
+                    dx[..., i0c[y], j0c[x]] += g_yx * (1 - aw) * (1 - bw)
+                    dx[..., i0c[y], j1c[x]] += g_yx * (1 - aw) * bw
+                    dx[..., i1c[y], j0c[x]] += g_yx * aw * (1 - bw)
+                    dx[..., i1c[y], j1c[x]] += g_yx * aw * bw
+            return (dx,)
+        return _build_ctx(out, (input,), backward)
+
+    raise NotImplementedError(f"interpolate: mode {mode!r} not supported")
+
+
+def normalize(input: Tensor, p: float = 2.0, dim: int = 1, eps: float = 1e-12) -> Tensor:
+    """L_p normalize along dim. Default p=2, dim=1 (matches torch.nn.functional.normalize)."""
+    if p != 2.0:
+        raise NotImplementedError(f"normalize: only p=2 supported; got p={p}")
+    norm = np.sqrt(np.sum(input.data * input.data, axis=dim, keepdims=True))
+    norm = np.maximum(norm, eps)
+    out = Tensor((input.data / norm).astype(np.float32))
+    def backward(g):
+        # d/dx_i of (x_i / ||x||) = 1/||x|| - x_i * x_i / ||x||^3 (along the normalized dim)
+        # In vector form: (I - out * out^T) * g / ||x||
+        x = input.data
+        dot = np.sum(out.data * g.data, axis=dim, keepdims=True)
+        dx = (g.data - out.data * dot) / norm
+        return (dx.astype(np.float32),)
+    return _build_ctx(out, (input,), backward)
+
+
+def cosine_similarity(x1: Tensor, x2: Tensor, dim: int = 1, eps: float = 1e-8) -> Tensor:
+    """Cosine similarity along dim. Returns a tensor of one fewer dim."""
+    a = x1.data
+    b = x2.data
+    na = np.sqrt(np.sum(a * a, axis=dim, keepdims=True))
+    nb = np.sqrt(np.sum(b * b, axis=dim, keepdims=True))
+    na = np.maximum(na, eps); nb = np.maximum(nb, eps)
+    dot = np.sum(a * b, axis=dim, keepdims=True)
+    out_data = (dot / (na * nb)).squeeze(axis=dim).astype(np.float32)
+    out = Tensor(out_data)
+    # Backward omitted (rarely needed); raise on call.
+    def backward(g):
+        raise NotImplementedError("cosine_similarity backward not implemented yet")
+    return _build_ctx(out, (x1, x2), backward)
+
+
+def scaled_dot_product_attention(query: Tensor, key: Tensor, value: Tensor,
+                                  attn_mask=None, dropout_p: float = 0.0,
+                                  is_causal: bool = False, scale=None) -> Tensor:
+    """Scaled dot-product attention: softmax(Q @ K^T / sqrt(d_k)) @ V.
+
+    Supports the subset of torch's API that matters most:
+      - attn_mask: boolean (True = block) or float (added to scores).
+      - is_causal: builds a triangular block mask.
+      - scale: override 1/sqrt(d_k).
+
+    Last dim of Q and K must agree; last-but-one of K and V must agree.
+    """
+    if dropout_p != 0.0:
+        raise NotImplementedError("scaled_dot_product_attention: dropout_p > 0 not supported")
+    Qd = query.data
+    Kd = key.data
+    Vd = value.data
+    d_k = Qd.shape[-1]
+    s = (1.0 / np.sqrt(d_k)) if scale is None else float(scale)
+    # scores: (..., L_q, L_k)
+    scores = np.matmul(Qd, np.swapaxes(Kd, -1, -2)) * s
+    if is_causal:
+        L_q, L_k = scores.shape[-2], scores.shape[-1]
+        tri = np.triu(np.ones((L_q, L_k), dtype=bool), k=1)
+        scores = np.where(tri, -np.inf, scores)
+    if attn_mask is not None:
+        m = np.asarray(attn_mask)
+        if m.dtype == bool:
+            scores = np.where(m, -np.inf, scores)
+        else:
+            scores = scores + m
+    # softmax along last axis, stable.
+    sm = scores - scores.max(axis=-1, keepdims=True)
+    e = np.exp(sm)
+    attn = e / e.sum(axis=-1, keepdims=True)
+    out_data = np.matmul(attn, Vd).astype(np.float32)
+    out = Tensor(out_data)
+    def backward(g):
+        # Educational backward through the explicit formula.
+        # dV = attn^T @ g
+        dV = np.matmul(np.swapaxes(attn, -1, -2), g.data)
+        # dscores via softmax Jacobian: row-wise (diag(p) - pp^T) @ (g @ V^T)
+        ga = np.matmul(g.data, np.swapaxes(Vd, -1, -2))
+        row_sum = np.sum(ga * attn, axis=-1, keepdims=True)
+        dscores = attn * (ga - row_sum)
+        dscores = dscores * s
+        dQ = np.matmul(dscores, Kd)
+        dK = np.matmul(np.swapaxes(dscores, -1, -2), Qd)
+        return (dQ.astype(np.float32), dK.astype(np.float32), dV.astype(np.float32))
+    return _build_ctx(out, (query, key, value), backward)
 `;

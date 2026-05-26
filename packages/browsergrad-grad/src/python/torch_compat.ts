@@ -63,6 +63,7 @@ def install_torch_alias():
     torch_mod.sum = _bg.sum
     torch_mod.mean = _bg.mean
     torch_mod.argmax = _bg.argmax
+    torch_mod.einsum = _bg.einsum
 
     # Serialization
     torch_mod.save = _bg.save

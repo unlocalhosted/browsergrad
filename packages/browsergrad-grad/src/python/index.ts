@@ -34,6 +34,7 @@ from .tensor import (
     cat,
     stack,
     where,
+    einsum,
     from_numpy,
     manual_seed,
     matmul,
@@ -73,13 +74,13 @@ def load(path, **kwargs):
 
 __all__ = [
     "Tensor", "zeros", "ones", "randn", "no_grad", "cat", "stack", "where",
-    "from_numpy", "manual_seed",
+    "einsum", "from_numpy", "manual_seed",
     "matmul", "mm", "bmm", "exp", "log", "sum", "mean", "argmax",
     "functional", "nn", "optim", "utils",
     "save", "load",
     "install_torch_alias",
 ]
-__version__ = "0.4.11"
+__version__ = "0.4.12"
 `;
 
 export interface PythonSource {

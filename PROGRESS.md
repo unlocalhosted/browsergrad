@@ -18,12 +18,12 @@ Implementable on NumPy with TDD. Each row = one focused commit (or small group).
 | 4 | `torch.utils.data.Dataset` + `DataLoader` (single-process) | ✅ done | — |
 | 5 | `state_dict` / `load_state_dict` / `torch.save` / `torch.load` | ✅ done | — |
 | 6 | `nn.init.{kaiming_uniform_, xavier_uniform_, normal_, uniform_, zeros_, ones_, constant_}` | ✅ done | — |
-| 7 | `F.pad`, `F.interpolate`, `F.normalize`, `F.cosine_similarity` | ⏳ pending | — |
-| 8 | `F.scaled_dot_product_attention` | ⏳ pending | — |
+| 7 | `F.pad`, `F.interpolate`, `F.normalize`, `F.cosine_similarity` | ✅ done | — |
+| 8 | `F.scaled_dot_product_attention` | ✅ done | — |
 | 9 | More losses: `nn.{BCELoss, L1Loss, SmoothL1Loss, KLDivLoss}` | ✅ done | — |
 | 10 | More optimizers: `RMSprop`, `Adagrad`, `Adadelta` | ⏳ pending | — |
 | 11 | More schedulers: `ReduceLROnPlateau`, `MultiStepLR`, `ExponentialLR`, `OneCycleLR` | ⏳ pending | — |
-| 12 | `torch.einsum` (wrap `np.einsum` with backward) | ⏳ pending | — |
+| 12 | `torch.einsum` (wrap `np.einsum` with backward) | ✅ done | — |
 | 13 | Tensor math: `abs`, `sign`, `clip`/`clamp`, `where`, `min`/`max(dim)`, `std`, `var`, `topk`, `sort`, `sqrt`, `pow` | 🟡 partial — `abs`, `sign`, `sqrt`, `pow`, `clamp`/`clip`, `topk`, `where` done; `min`/`max(dim)`, `std`, `var`, `sort` still pending | — |
 | 14 | Tensor shape: `expand`, `repeat`, `chunk`, `split`, `contiguous`, `roll`, `flip` | 🟡 partial — `expand`, `repeat`, `flip` done; `chunk`, `split`, `contiguous`, `roll` still pending | — |
 | 15 | `nn.RNN` / `nn.LSTM` / `nn.GRU` + backward through time | ⏳ pending | — |
