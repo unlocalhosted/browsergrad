@@ -254,9 +254,11 @@ A developer at another education platform who wants to embed browsergrad to powe
 
 | Phase | Window | Theme | North-star metric |
 |---|---|---|---|
-| **P0** | Months 1–3 | Close PyTorch gaps + first GPU acceleration + cold-start fix | Deep-ml catalog runs in browsergrad ≥2× faster than v0.5.0 |
-| **P1** | Months 4–9 | Build the tracing JIT + IR + first fusion passes | Training step latency ≤5× current; 4-line training loop fully traced |
-| **P2** | Months 10–12 | Megakernel codegen + WebNN tier + lab platform alignment | Sub-3s training step on educational models; craftingattention first 5 labs ship |
+| **P0** | Months 1–3 | Close PyTorch gaps + first GPU acceleration + cold-start fix + run one real lab | Deep-ml catalog runs in browsergrad ≥2× faster than v0.5.0 |
+| **P1** | Months 4–10 | Tracing JIT + IR + fusion + gradient checkpointing + real mixed precision + OPFS caching + safetensors streaming | Training step latency ≤5× current; fast.ai Part 2 ch 18-25 run as labs; nanoGPT trains end-to-end |
+| **P2** | Months 11–14 | Megakernel codegen + WebNN tier + torch.func/vmap + custom WGSL kernels + ONNX export + lab platform alignment | Sub-3s training step; fast.ai Part 2 complete; Stanford CS336 alignment chapters run; craftingattention first 5 labs ship |
+
+Total expanded window: **14 months** (vs. 12 in v1 of this PRD). Added 2 months to accommodate P1.7, P1.8, P2.4, P2.5, P2.6 — each a real implementation rather than a stub.
 
 ---
 
@@ -456,6 +458,37 @@ Every feature below has: **what** (one-sentence description), **why** (problem s
 
 **Evidence**: [safetensors format spec](https://github.com/huggingface/safetensors); fast.ai Part 2 curriculum dependencies.
 
+#### P1.7: `gradient_checkpoint` — real implementation via IR-level rewriting
+
+**What**: At trace time, designated subgraphs are marked "recompute on backward." Forward kernels skip writing activations to memory; backward re-runs forward to recover them. Trade-off: ~1.3× compute, ~N× memory savings.
+
+**Why**: Fast.ai Ch 18/19 and deep-ml problem #188 both teach gradient checkpointing — and the technique is *literally* the right solution for browser memory constraints. A real implementation (not a stub) makes those chapters genuine and lets students train bigger models than naive autograd allows.
+
+**Acceptance**:
+1. `model = torch.utils.checkpoint.checkpoint_sequential(model, segments=N)` works on a 4-block MLP, with peak memory measurably lower (≥30% reduction vs unchecked).
+2. PyTorch-conformance suite passes (gradients identical within 1e-4).
+3. Documented compute overhead (~1.3× per checkpointed segment).
+
+**Effort**: ~3 weeks. **Dependencies**: P1.1, P1.4.
+
+**Evidence**: [Chen et al., "Training Deep Nets with Sublinear Memory Cost" (arXiv:1604.06174)](https://arxiv.org/abs/1604.06174); fast.ai Part 2 ch 18/19 curriculum.
+
+#### P1.8: Real mixed precision (fp16 storage + fp32 accumulators)
+
+**What**: `torch.amp.autocast(dtype=torch.float16)` becomes a real context manager that downcasts inputs to fp16, runs matmul/conv with fp16 storage and fp32 accumulators (matches tensor-core semantics), upcasts outputs. WebGPU `shader-f16` extension required at the device level.
+
+**Why**: Fast.ai Ch 20 currently has to be reframed because we ship `autocast` as no-op. A real fp16 path makes it an authentic lab — students see the ~2× memory bandwidth speedup on matmul-heavy workloads, learn the numerical-stability caveats, see the loss-scaling pattern. Also a real perf win for the runtime.
+
+**Acceptance**:
+1. Matmul of shape (1024, 1024) in fp16 mode: ≥1.5× faster than fp32 path on M-class GPU (where `shader-f16` is supported).
+2. Numerical stability test: training a small transformer with autocast converges to within 0.05% of the fp32 loss curve.
+3. `GradScaler` works for loss-scaling.
+4. Graceful degradation: devices without `shader-f16` get a clear "autocast unavailable, falling back to fp32" warning, not silent failure.
+
+**Effort**: ~4 weeks. **Dependencies**: P1.1, P1.2 (fusion makes the fp16 path most beneficial).
+
+**Evidence**: [WebGPU shader-f16 extension](https://www.w3.org/TR/webgpu/#shader-f16); fast.ai Part 2 ch 20.
+
 #### P1.5: OPFS pipeline cache (compiled kernels)
 
 **What**: Hash every WGSL kernel by source + entry-point signature. Cache the compiled `GPUComputePipeline` in OPFS. On second page load, restore.
@@ -509,6 +542,69 @@ Every feature below has: **what** (one-sentence description), **why** (problem s
 
 **Evidence**: [Flash Attention](https://arxiv.org/abs/2205.14135); MLC-LLM's transformer block fusion.
 
+#### P2.4: `torch.func` / `vmap` / `grad` / `jacrev`
+
+**What**: Implement JAX-style function transforms. `vmap(fn)(batched_inputs)` retraces `fn` with a batch dim auto-inserted. `grad(fn)` returns a function-of-gradients. `jacrev` returns a Jacobian via reverse-mode.
+
+**Why**: Stanford CS336 alignment chapters (RLHF/DPO) want these; Karpathy's advanced episodes use vmap-shaped patterns; meta-learning labs (MAML) need them. Tractable because we already have tracing + symbolic backward — these transforms are graph rewrites.
+
+**Acceptance**:
+1. `vmap` produces identical output to a manual Python loop, to 1e-4, on 5 representative examples (linear, attention, recurrent step, custom function).
+2. `grad(f)(x)` matches `f(x).backward(); x.grad` exactly.
+3. `jacrev(f)(x)` matches PyTorch's `torch.func.jacrev` within 1e-4 on 3 fixture cases.
+
+**Effort**: ~4 weeks. **Dependencies**: P1.1, P1.4 (symbolic backward).
+
+**Evidence**: [JAX vmap/grad/jacrev docs](https://docs.jax.dev/en/latest/jax.html#); [PyTorch torch.func docs](https://pytorch.org/docs/stable/func.html).
+
+#### P2.5: Custom WGSL kernels from Python
+
+**What**: `@bg.kernel("wgsl")` decorator lets the user write a WGSL kernel as a Python string. The decorator handles buffer binding, dispatch, and dtype validation. Surfaced to Python as a callable that takes Tensors and returns Tensors.
+
+**Example**:
+```python
+@bg.kernel("wgsl", workgroup_size=(64, 1, 1))
+def double_each(x: Tensor) -> Tensor:
+    """
+    @group(0) @binding(0) var<storage, read> input: array<f32>;
+    @group(0) @binding(1) var<storage, read_write> output: array<f32>;
+    @compute @workgroup_size(64) fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+        output[gid.x] = input[gid.x] * 2.0;
+    }
+    """
+```
+
+**Why**: Strategic — opens an entire new category of advanced lab ("write Flash Attention from scratch", "implement a custom convolution variant"). Differentiates us from greed (which doesn't expose WGSL). For a curriculum aiming at *understanding* deep learning down to the metal, this is the unlock.
+
+**Acceptance**:
+1. A toy kernel (elementwise double) round-trips through the harness and matches NumPy reference within exact equality.
+2. A more complex kernel (matmul, tiled with workgroup memory) compiles and runs.
+3. Security review passes: user-provided WGSL is compiled in an isolated worker; failed compilation surfaces as a Python exception, not a tab crash; buffer size validation prevents OOB writes.
+
+**Effort**: ~4 weeks (most of which is security review + ergonomic API design).
+
+**Dependencies**: P1.5 (pipeline cache infrastructure).
+
+**Evidence**: [WGSL spec](https://www.w3.org/TR/WGSL/); existing patterns in tinygrad's `Tensor.uop_kernel` and JAX's `pallas`.
+
+#### P2.6: ONNX export
+
+**What**: Walk the IR graph, emit ONNX nodes, serialize to bytes. Surfaced as `bg.onnx.export(model, sample_input, path)`.
+
+**Why**: "Train in browser, deploy anywhere" is a complete-the-story unlock. Students finishing a craftingattention lab can download `.onnx` and run inference in any environment (Python, C++, Node, mobile). Currently impossible — Pile C stubs onnx.export to raise NotImplementedError.
+
+**Acceptance**:
+1. A 3-layer MLP exports to ONNX; verified by loading in onnxruntime and getting identical predictions within 1e-4.
+2. A small CNN exports; same verification.
+3. A small transformer block exports; same verification.
+4. Documented op coverage (which ops can/can't be exported), since ONNX has its own opset.
+
+**Effort**: ~2 weeks (the IR graph + ONNX is mostly a serialization mapping).
+
+**Dependencies**: P1.1.
+
+**Evidence**: [ONNX opset](https://onnx.ai/onnx/operators/); [PyTorch torch.onnx](https://pytorch.org/docs/stable/onnx.html).
+
 #### P2.3: Lab platform alignment
 
 **What**: Whatever craftingattention needs to ship its first 5 lessons. Identified during craftingattention's lesson authoring, not pre-specified here.
@@ -527,18 +623,22 @@ Every feature below has: **what** (one-sentence description), **why** (problem s
 
 ## 8. What we explicitly DON'T build (and why)
 
-The PyTorch op research surfaced eight features that *look* essential but have **zero appearances** in CS231n A1–A2, fast.ai chapters 1–7, and nanoGPT's model.py. We won't build any of them in this 12-month window:
+The original PyTorch-op research flagged eight features as "zero appearances in surveyed curricula." After expanding scope to cover fast.ai Part 2 + Stanford CS336 + Karpathy advanced episodes, **four of those eight became real-implementable via the JIT** and moved to the roadmap:
 
-1. **Distributed training / DDP / nccl** — no browser equivalent.
-2. **JIT/TorchScript** — our IR is different; we won't compile real TorchScript.
-3. **ONNX export** — different use case.
-4. **Mixed precision (`autocast` + `GradScaler`)** — `autocast` no-ops in Pile B already; that's enough.
-5. **`torch.compile`** — we are our own compiler.
-6. **Custom CUDA kernels** — no CUDA in browser.
-7. **`torch.func` / `vmap`** — JAX-style; rare in education.
-8. **Complex dtypes, sparse tensors** — rare in education.
+- **Mixed precision** → P1.8 (real fp16 path with fp32 accumulators, not stub)
+- **ONNX export** → P2.6 (real graph serialization via IR)
+- **`torch.func` / `vmap`** → P2.4 (JAX-style transforms via re-tracing)
+- **`torch.compile`** → P1.1 sub-feature (`torch.compile(fn) → fn` since JIT is automatic)
 
-Each of these costs months of work and serves zero of our users. They are P3 (defer indefinitely).
+**Still genuinely impossible (not building, ever)**:
+
+1. **Distributed training / DDP / nccl** — no multi-machine in a single browser tab.
+2. **JIT/TorchScript** as TorchScript-compatible — our IR is different; supporting `torch.jit.script` would mean writing a TorchScript parser for no user benefit.
+3. **Custom CUDA kernels** — no CUDA in browser. *We DO offer custom WGSL kernels via P2.5 as the legitimate browser-native alternative.*
+4. **Complex dtypes, sparse tensors** — still zero curriculum demand. Skip until evidence.
+5. **GPT-2-scale reproduction** — 1.5B+ parameters, multi-GB weights, distributed training implied. Out of memory/compute budget for browser.
+
+Updated stance: **the goal is "everything credible done well, nothing faked."** A real fp16 implementation beats a stub for the educational value of teaching mixed precision; a real ONNX export beats a stub for the deploy-after-train story; a real `vmap` beats a stub for batched-gradient labs.
 
 ---
 
@@ -547,6 +647,8 @@ Each of these costs months of work and serves zero of our users. They are P3 (de
 | Metric | Baseline (v0.5.0) | P0 target | P1 target | P2 target |
 |---|---|---|---|---|
 | Greed problem catalog coverage | ~93% (12/14 sampled) | 100% (14/14) | 100% | 100% |
+| Fast.ai Part 2 chapters runnable as labs | ~8/17 | ~14/17 | 16/17 | 17/17 |
+| Stanford CS336 from-scratch chapters | ~10/14 (estimate) | ~12/14 | 13/14 | 14/14 |
 | ResNet18 training step latency | ~500ms | ≤200ms | ≤50ms | ≤20ms |
 | Transformer block forward | ~300ms | ≤100ms | ≤25ms | ≤5ms |
 | Cold-start (second visit) | not cached | ≤8s | ≤3s | ≤2s |
