@@ -38,10 +38,10 @@ Ship "good enough" with explicit caveats in docstrings + STATUS.md.
 
 | Item | Approach | Status |
 |---|---|---|
-| `torch.amp` (mixed precision) | f32 code path; document no real fp16 speedup | ⏳ pending |
-| Basic image transforms (`torchvision.transforms`-like) | NumPy-based resize/normalize/to_tensor | ⏳ pending |
-| `torch.linalg.*` subset (`norm`, `svd`, `eigh`, `inv`, `det`, `solve`, `pinv`) | Wrap `numpy.linalg` with backward where common | ⏳ pending |
-| Single-notional-device "multi-GPU" hooks | `model.to([0, 1])` accepts but no-ops; document | ⏳ pending |
+| `torch.amp` (mixed precision) | f32 code path; document no real fp16 speedup | ✅ done (autocast no-op) |
+| Basic image transforms (`torchvision.transforms`-like) | NumPy-based resize/normalize/to_tensor | ⏳ deferred |
+| `torch.linalg.*` subset (`norm`, `svd`, `eigh`, `inv`, `det`, `solve`, `pinv`) | Wrap `numpy.linalg` with backward where common | ✅ done (forward; backward via numpy) |
+| Single-notional-device "multi-GPU" hooks | `model.to([0, 1])` accepts but no-ops; document | ✅ done (Module.to is no-op) |
 
 ## Pile C — physically impossible in browser
 
@@ -49,13 +49,13 @@ Stub with `NotImplementedError` + clear message pointing to the architectural re
 
 | Item | Stub behavior |
 |---|---|
-| `torch.compile`, `torch.fx`, `torch.jit.*` | Raise `NotImplementedError("torch.compile: requires a compiler runtime not available in browser")` |
-| `torch.cuda.is_available()` | Returns `False` (legitimate answer; browser doesn't have CUDA) |
-| `torch.cuda.*` (devices, streams, memory) | Raise `NotImplementedError("no CUDA runtime in browser; use WebGPU via @unlocalhosted/browsergrad-kernels")` |
-| `torch.distributed.*` | Raise `NotImplementedError("no multi-machine runtime in browser")` |
-| `DataLoader(num_workers=N)` with N>0 | Raise (we support `num_workers=0` only) |
-| `torch.onnx` | Raise `NotImplementedError` |
-| `torch.quantization`, `torch.fx.quantize` | Raise `NotImplementedError` |
+| `torch.compile`, `torch.fx`, `torch.jit.*` | ✅ Raises `NotImplementedError` with reason |
+| `torch.cuda.is_available()` | ✅ Returns `False` |
+| `torch.cuda.*` (devices, streams, memory) | ✅ Raises (device_count → 0, current_device raises) |
+| `torch.distributed.*` | ✅ Raises (init_process_group, all_reduce); is_initialized → False |
+| `DataLoader(num_workers=N)` with N>0 | ✅ Raises |
+| `torch.onnx` | ✅ Raises |
+| `torch.quantization` | ✅ Raises |
 
 ## Skill passes (after Pile A is done)
 

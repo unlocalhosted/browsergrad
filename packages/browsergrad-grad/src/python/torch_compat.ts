@@ -103,6 +103,121 @@ def install_torch_alias():
     torch_utils.data = _bg.utils.data
     torch_mod.utils = torch_utils
 
+    # ─── Pile B — possible but limited ─────────────────────────────
+    # torch.amp.autocast — no-op context manager. We have no real fp16 path
+    # in WASM/Pyodide; calling autocast() shouldn't break code that uses it.
+    import contextlib as _bg_ctxlib
+    import numpy as _bg_np_linalg
+    torch_amp = _bg_torch_types.ModuleType("torch.amp")
+    @_bg_ctxlib.contextmanager
+    def _autocast(*args, **kwargs):
+        yield
+    torch_amp.autocast = _autocast
+    torch_mod.amp = torch_amp
+
+    # torch.linalg — wrap numpy.linalg, return Tensors.
+    torch_linalg = _bg_torch_types.ModuleType("torch.linalg")
+    def _linalg_norm(t, ord=None, dim=None, keepdim=False):
+        arr = _bg_np_linalg.asarray(t)
+        out = _bg_np_linalg.linalg.norm(arr, ord=ord, axis=dim, keepdims=keepdim)
+        return _bg.Tensor(out.astype(_bg_np_linalg.float32))
+    def _linalg_inv(t):
+        return _bg.Tensor(_bg_np_linalg.linalg.inv(_bg_np_linalg.asarray(t)).astype(_bg_np_linalg.float32))
+    def _linalg_det(t):
+        return _bg.Tensor(_bg_np_linalg.linalg.det(_bg_np_linalg.asarray(t)).astype(_bg_np_linalg.float32))
+    def _linalg_svd(t):
+        u, s, vh = _bg_np_linalg.linalg.svd(_bg_np_linalg.asarray(t))
+        return _bg.Tensor(u.astype(_bg_np_linalg.float32)), _bg.Tensor(s.astype(_bg_np_linalg.float32)), _bg.Tensor(vh.astype(_bg_np_linalg.float32))
+    def _linalg_eigh(t):
+        w, v = _bg_np_linalg.linalg.eigh(_bg_np_linalg.asarray(t))
+        return _bg.Tensor(w.astype(_bg_np_linalg.float32)), _bg.Tensor(v.astype(_bg_np_linalg.float32))
+    def _linalg_solve(a, b):
+        out = _bg_np_linalg.linalg.solve(_bg_np_linalg.asarray(a), _bg_np_linalg.asarray(b))
+        return _bg.Tensor(out.astype(_bg_np_linalg.float32))
+    def _linalg_pinv(t):
+        return _bg.Tensor(_bg_np_linalg.linalg.pinv(_bg_np_linalg.asarray(t)).astype(_bg_np_linalg.float32))
+    torch_linalg.norm = _linalg_norm
+    torch_linalg.inv = _linalg_inv
+    torch_linalg.det = _linalg_det
+    torch_linalg.svd = _linalg_svd
+    torch_linalg.eigh = _linalg_eigh
+    torch_linalg.solve = _linalg_solve
+    torch_linalg.pinv = _linalg_pinv
+    torch_mod.linalg = torch_linalg
+
+    # Multi-GPU shim: nn.Module.to(device) accepts the call but no-ops.
+    # The existing implementation already returns self, so we're good — but
+    # be explicit in the alias for users who reach for module.to('cuda:0').
+    def _module_to_shim(self, *args, **kwargs):
+        return self
+    _bg.nn.Module.to = _module_to_shim
+
+    # ─── Pile C — physically impossible in browser ─────────────────
+    # Loud, descriptive NotImplementedError. NEVER silent success (greed
+    # made that mistake and it eats real labs alive).
+    def _impossible(name, reason):
+        def _raise(*args, **kwargs):
+            raise NotImplementedError(f"{name}: {reason}")
+        return _raise
+
+    torch_mod.compile = _impossible(
+        "torch.compile",
+        "requires a compiler runtime not available in browser. Run your model uncompiled.",
+    )
+
+    torch_fx = _bg_torch_types.ModuleType("torch.fx")
+    torch_fx.symbolic_trace = _impossible(
+        "torch.fx.symbolic_trace",
+        "FX tracing relies on Python introspection paths we don't model. Use the eager graph.",
+    )
+    torch_mod.fx = torch_fx
+
+    torch_jit = _bg_torch_types.ModuleType("torch.jit")
+    torch_jit.script = _impossible(
+        "torch.jit.script",
+        "no script compiler in browser. The eager Python path runs the same way.",
+    )
+    torch_jit.trace = _impossible(
+        "torch.jit.trace",
+        "no trace compiler in browser. The eager Python path runs the same way.",
+    )
+    torch_mod.jit = torch_jit
+
+    torch_cuda = _bg_torch_types.ModuleType("torch.cuda")
+    torch_cuda.is_available = lambda: False
+    torch_cuda.device_count = lambda: 0
+    torch_cuda.current_device = _impossible(
+        "torch.cuda.current_device",
+        "no CUDA runtime in browser; use WebGPU via @unlocalhosted/browsergrad-kernels.",
+    )
+    torch_mod.cuda = torch_cuda
+
+    torch_distributed = _bg_torch_types.ModuleType("torch.distributed")
+    torch_distributed.init_process_group = _impossible(
+        "torch.distributed.init_process_group",
+        "no multi-machine runtime in browser.",
+    )
+    torch_distributed.all_reduce = _impossible(
+        "torch.distributed.all_reduce",
+        "no multi-machine runtime in browser.",
+    )
+    torch_distributed.is_initialized = lambda: False
+    torch_mod.distributed = torch_distributed
+
+    torch_onnx = _bg_torch_types.ModuleType("torch.onnx")
+    torch_onnx.export = _impossible(
+        "torch.onnx.export",
+        "ONNX exporter requires the C++ backend we don't ship.",
+    )
+    torch_mod.onnx = torch_onnx
+
+    torch_quant = _bg_torch_types.ModuleType("torch.quantization")
+    torch_quant.quantize = _impossible(
+        "torch.quantization.quantize",
+        "quantization toolchain requires backend kernels we don't ship in WASM.",
+    )
+    torch_mod.quantization = torch_quant
+
     # Register
     _bg_torch_sys.modules["torch"] = torch_mod
     _bg_torch_sys.modules["torch.nn"] = torch_nn
@@ -110,6 +225,14 @@ def install_torch_alias():
     _bg_torch_sys.modules["torch.optim"] = _bg.optim
     _bg_torch_sys.modules["torch.utils"] = torch_utils
     _bg_torch_sys.modules["torch.utils.data"] = _bg.utils.data
+    _bg_torch_sys.modules["torch.amp"] = torch_amp
+    _bg_torch_sys.modules["torch.linalg"] = torch_linalg
+    _bg_torch_sys.modules["torch.fx"] = torch_fx
+    _bg_torch_sys.modules["torch.jit"] = torch_jit
+    _bg_torch_sys.modules["torch.cuda"] = torch_cuda
+    _bg_torch_sys.modules["torch.distributed"] = torch_distributed
+    _bg_torch_sys.modules["torch.onnx"] = torch_onnx
+    _bg_torch_sys.modules["torch.quantization"] = torch_quant
 
     return torch_mod
 `;
