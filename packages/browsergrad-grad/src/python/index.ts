@@ -15,6 +15,7 @@ import { NN_PY } from "./nn.js";
 import { OPTIM_PY } from "./optim.js";
 import { TORCH_COMPAT_PY } from "./torch_compat.js";
 import { UTILS_DATA_PY } from "./utils_data.js";
+import pkg from "../../package.json";
 
 const INIT_PY = `
 """browsergrad_grad — a small, readable tensor + autograd library.
@@ -80,7 +81,7 @@ __all__ = [
     "save", "load",
     "install_torch_alias",
 ]
-__version__ = "0.5.0"
+__version__ = "${pkg.version}"
 `;
 
 export interface PythonSource {

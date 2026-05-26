@@ -6,6 +6,7 @@ import {
   type InstallOptions,
 } from "../src/index";
 import { SOURCE_FILES, MOUNT_ROOT } from "../src/python/index";
+import pkg from "../package.json";
 
 /**
  * Surface + installer tests for the grad package.
@@ -100,9 +101,9 @@ describe("Python source bundle", () => {
     expect(optim?.content).toContain("class AdamW(Optimizer)");
   });
 
-  it("__init__.py declares v0.5.0 and exports no_grad / cat / stack / install_torch_alias / top-level math", () => {
+  it("__init__.py declares the package version and exports no_grad / cat / stack / install_torch_alias / top-level math", () => {
     const init = SOURCE_FILES.find((s) => s.path === "browsergrad_grad/__init__.py");
-    expect(init?.content).toContain('__version__ = "0.5.0"');
+    expect(init?.content).toContain(`__version__ = "${pkg.version}"`);
     expect(init?.content).toContain("no_grad");
     expect(init?.content).toContain("cat");
     expect(init?.content).toContain("stack");

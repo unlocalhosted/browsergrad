@@ -16,6 +16,7 @@
 
 import { SOURCE_FILES, MOUNT_ROOT } from "./python/index.js";
 import { GradInstallError, type GradTarget, type InstallOptions } from "./types.js";
+import pkg from "../package.json";
 
 export async function installGrad(
   target: GradTarget,
@@ -84,7 +85,7 @@ async function assertImports(target: GradTarget): Promise<void> {
   await target.exec({
     code: `
 import browsergrad_grad as _bg_check
-assert _bg_check.__version__ == "0.5.0", f"unexpected version {_bg_check.__version__}"
+assert _bg_check.__version__ == "${pkg.version}", f"expected ${pkg.version}, got {_bg_check.__version__}"
 del _bg_check
 `,
   });
