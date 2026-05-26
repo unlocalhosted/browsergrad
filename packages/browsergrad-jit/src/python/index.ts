@@ -22,6 +22,8 @@ import { FUSION_CONFIG_PY } from "./_fusion_config.generated.js";
 import { VJP_PY } from "./_vjp.generated.js";
 import { TRACE_CACHE_PY } from "./_trace_cache.generated.js";
 import { SAFETENSORS_PY } from "./_safetensors.generated.js";
+import { CHECKPOINT_PY } from "./_checkpoint.generated.js";
+import { UTILS_CHECKPOINT_PY } from "./_utils_checkpoint.generated.js";
 import { TENSOR_PROXY_PY } from "./_tensor_proxy.generated.js";
 import { NN_PY } from "./_nn.generated.js";
 import { FUNCTIONAL_PY } from "./_functional.generated.js";
@@ -85,6 +87,7 @@ from . import _fusion as _fusion_mod
 from . import _fusion_config as _fc
 from . import _trace_cache as _tc
 from ._safetensors import load_safetensors, save_safetensors
+from . import _utils_checkpoint as _utils_ckpt
 from ._torch_compat import install_torch_alias, uninstall_torch_alias
 import sys as _sys
 import types as _types
@@ -128,6 +131,15 @@ jit.trace_cache_enabled = _tc.is_enabled
 jit.trace_cache_stats = _tc.stats
 jit.clear_trace_cache = _tc.clear
 _sys.modules["browsergrad_jit.jit"] = jit
+
+# bg.utils.checkpoint matches torch.utils.checkpoint's shape:
+#   from browsergrad_jit.utils.checkpoint import checkpoint
+utils = _types.ModuleType("browsergrad_jit.utils")
+utils_ckpt_mod = _types.ModuleType("browsergrad_jit.utils.checkpoint")
+utils_ckpt_mod.checkpoint = _utils_ckpt.checkpoint
+utils.checkpoint = utils_ckpt_mod
+_sys.modules["browsergrad_jit.utils"] = utils
+_sys.modules["browsergrad_jit.utils.checkpoint"] = utils_ckpt_mod
 
 
 def cache_stats() -> dict:
@@ -215,7 +227,7 @@ __all__ = [
     "tensor", "zeros", "ones", "randn", "arange", "from_numpy",
     "Session", "get_default_session", "set_default_session", "new_session",
     "manual_seed",
-    "nn", "optim", "jit",
+    "nn", "optim", "jit", "utils",
     "install_torch_alias", "uninstall_torch_alias",
     "load_safetensors", "save_safetensors",
     "cache_stats", "clear_cache",
@@ -251,6 +263,8 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_jit/_vjp.py", content: VJP_PY },
   { path: "browsergrad_jit/_trace_cache.py", content: TRACE_CACHE_PY },
   { path: "browsergrad_jit/_safetensors.py", content: SAFETENSORS_PY },
+  { path: "browsergrad_jit/_checkpoint.py", content: CHECKPOINT_PY },
+  { path: "browsergrad_jit/_utils_checkpoint.py", content: UTILS_CHECKPOINT_PY },
   { path: "browsergrad_jit/_tensor_proxy.py", content: TENSOR_PROXY_PY },
   { path: "browsergrad_jit/_functional.py", content: FUNCTIONAL_PY },
   { path: "browsergrad_jit/_nn.py", content: NN_PY },

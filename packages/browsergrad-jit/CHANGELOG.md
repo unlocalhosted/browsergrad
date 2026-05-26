@@ -7,6 +7,48 @@ contract in the README](README.md#compatibility-contract).
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-05-26
+
+PRD-009 v0 — gradient checkpointing via IR rewrite. Ships the
+mechanism, not the perf win — on NumPy realizer the memory savings
+are modest. The IR-rewrite pattern is load-bearing for PRD-012's
+WGSL megakernels (where activation memory genuinely binds) and for
+PRD-014's vmap (which needs a graph-rewrite backward).
+
+### Added
+
+- `bg.utils.checkpoint.checkpoint(fn, *args)` — PyTorch-shaped
+  gradient checkpointing. The forward call's intermediate UOps are
+  recorded as "interior to a region"; the backward pass rewrites any
+  reference to those interior UOps into fresh clones rooted at the
+  region's anchor inputs. The realizer re-computes the cloned
+  subgraph independently of the original forward's value_table.
+- `torch.utils.checkpoint.checkpoint` resolves to the same function
+  via the `install_torch_alias()` shim.
+- `_checkpoint.py` registry: `CheckpointRegion`, `_open_region`,
+  `_close_region`, `apply_checkpoint_rewrite`. The rewrite reuses
+  the same `_substitute`-style tree walk PRD-006 fusion uses.
+
+### Refusal modes (deliberate v0 cuts per the review)
+
+- `use_reentrant=True` — PyTorch's deprecated reentrant autograd.
+  Refused with explanation.
+- `preserve_rng_state=True` — Philox per-op seeds aren't captured
+  yet. Deferred to PRD-007's dropout-decomposition follow-up.
+- Nested `checkpoint(checkpoint(...))` — region-scoping isn't
+  designed for nesting; refused with clear error.
+- Any op in the region without a registered VJP rule — symbolic
+  backward is the only safe checkpoint host; closure path can't be
+  cleanly checkpointed.
+
+### Deferred (PRD-009.2)
+
+- Selective recompute policy (Korthikanti 2022).
+- `checkpoint_sequential`, `checkpoint_wrap`.
+- `bg.memory_stats()` instrumentation.
+- `viz_regions` Graphviz emitter.
+- Wall-time benchmarks (meaningful only on WGSL — PRD-012).
+
 ## [0.4.0] — 2026-05-26
 
 PRD-008 v0 — safetensors I/O + trace cache. The WGSL pipeline cache

@@ -32,6 +32,8 @@ const MODULES = [
   ["_vjp.py", "_vjp.generated.ts", "VJP_PY"],
   ["_trace_cache.py", "_trace_cache.generated.ts", "TRACE_CACHE_PY"],
   ["_safetensors.py", "_safetensors.generated.ts", "SAFETENSORS_PY"],
+  ["_checkpoint.py", "_checkpoint.generated.ts", "CHECKPOINT_PY"],
+  ["_utils_checkpoint.py", "_utils_checkpoint.generated.ts", "UTILS_CHECKPOINT_PY"],
   ["_tensor_proxy.py", "_tensor_proxy.generated.ts", "TENSOR_PROXY_PY"],
   ["_nn.py", "_nn.generated.ts", "NN_PY"],
   ["_functional.py", "_functional.generated.ts", "FUNCTIONAL_PY"],

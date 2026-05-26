@@ -39,6 +39,8 @@ describe("Python source registry", () => {
       "browsergrad_jit/_vjp.py",
       "browsergrad_jit/_trace_cache.py",
       "browsergrad_jit/_safetensors.py",
+      "browsergrad_jit/_checkpoint.py",
+      "browsergrad_jit/_utils_checkpoint.py",
       "browsergrad_jit/_tensor_proxy.py",
       "browsergrad_jit/_functional.py",
       "browsergrad_jit/_nn.py",
@@ -66,7 +68,7 @@ describe("Python source registry", () => {
     // codegen, the actual version string should be substituted in.
     const initFile = SOURCE_FILES.find((f) => f.path.endsWith("__init__.py"));
     expect(initFile).toBeDefined();
-    expect(initFile!.content).toMatch(/__version__ = "0\.4\.0"/);
+    expect(initFile!.content).toMatch(/__version__ = "0\.5\.0"/);
   });
 
   it("declares all 27 opcodes in _ir.py (23 core + 2 fusion + 2 autograd)", () => {

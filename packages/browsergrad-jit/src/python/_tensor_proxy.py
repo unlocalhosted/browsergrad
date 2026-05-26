@@ -770,6 +770,16 @@ class TensorProxy:
             # value cache inside realize() is a fresh dict each call, so
             # the only outputs anyone reads by-id are the realized leaf
             # gradient ndarrays we return here.
+            #
+            # Before realizing, run the gradient checkpoint rewrite: any
+            # gradient-graph reference to a UOp marked as "interior to a
+            # checkpoint region" gets replaced with a freshly-cloned
+            # forward subgraph rooted at the region's anchors. The
+            # cloned UOps re-realize from anchors during this backward
+            # realize() call; the original forward intermediates are
+            # never re-touched (they've been GC'd by the time we get
+            # here in any non-toy graph).
+            from . import _checkpoint
             grads: dict[int, np.ndarray] = {}
             for pid, gnode in grad_uops.items():
                 proxy = proxy_by_id.get(pid)
@@ -777,6 +787,8 @@ class TensorProxy:
                     continue
                 if proxy._ctx is not None:
                     continue  # only leaves write into .grad
+                if _checkpoint.has_any_region():
+                    gnode = _checkpoint.apply_checkpoint_rewrite(gnode)
                 grads[pid] = realize(gnode, sess.buffer_table)
         else:
             # CLOSURE PATH (PRD-005 legacy, kept as safety net).
