@@ -107,7 +107,33 @@ class Module:
         object.__setattr__(self, name, value)
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        return self.forward(*args, **kwargs)
+        # Trace cache fast path: if the cache has an entry for this
+        # (module instance, training mode, input signature), reuse the
+        # cached IR with the new input BUFFERs rebound. Misses fall
+        # through to the regular forward.
+        #
+        # We only consult the cache for positional-arg calls (the common
+        # case for the `Module(x)` pattern). Kwargs disable the cache
+        # because the signature would need to include kwarg identity and
+        # ordering — adds complexity without observed wins.
+        from . import _trace_cache
+        if not kwargs and _trace_cache.is_enabled():
+            cached = _trace_cache.maybe_cached_forward(
+                module_id=id(self),
+                training=bool(self.training),
+                args=args,
+            )
+            if cached is not None:
+                return cached
+        out = self.forward(*args, **kwargs)
+        if not kwargs:
+            _trace_cache.record(
+                module_id=id(self),
+                training=bool(self.training),
+                args=args,
+                output=out,
+            )
+        return out
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         raise NotImplementedError(

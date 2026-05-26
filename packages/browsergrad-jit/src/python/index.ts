@@ -20,6 +20,8 @@ import { REALIZE_PY } from "./_realize.generated.js";
 import { FUSION_PY } from "./_fusion.generated.js";
 import { FUSION_CONFIG_PY } from "./_fusion_config.generated.js";
 import { VJP_PY } from "./_vjp.generated.js";
+import { TRACE_CACHE_PY } from "./_trace_cache.generated.js";
+import { SAFETENSORS_PY } from "./_safetensors.generated.js";
 import { TENSOR_PROXY_PY } from "./_tensor_proxy.generated.js";
 import { NN_PY } from "./_nn.generated.js";
 import { FUNCTIONAL_PY } from "./_functional.generated.js";
@@ -81,6 +83,8 @@ from ._errors import (
 from . import _functional, _nn, _optim
 from . import _fusion as _fusion_mod
 from . import _fusion_config as _fc
+from . import _trace_cache as _tc
+from ._safetensors import load_safetensors, save_safetensors
 from ._torch_compat import install_torch_alias, uninstall_torch_alias
 import sys as _sys
 import types as _types
@@ -119,7 +123,36 @@ def _debug_unfused_reasons():
 
 jit.debug_fused_kernels = _debug_fused_kernels
 jit.debug_unfused_reasons = _debug_unfused_reasons
+jit.use_trace_cache = _tc.use_trace_cache
+jit.trace_cache_enabled = _tc.is_enabled
+jit.trace_cache_stats = _tc.stats
+jit.clear_trace_cache = _tc.clear
 _sys.modules["browsergrad_jit.jit"] = jit
+
+
+def cache_stats() -> dict:
+    """Aggregate cache observability across the trace cache and (future)
+    OPFS blob cache. Adding new cache categories should extend this
+    function's return shape additively to preserve backwards compat."""
+    return {
+        "trace": _tc.stats(),
+    }
+
+
+def clear_cache(scope: str = "all") -> None:
+    """Wipe one or more cache categories.
+
+    scope:
+      * 'all' — every cache category in scope.
+      * 'trace' — the in-memory IR-trace cache only.
+    Future scopes ('opfs', 'pipelines') ship with PRD-008.2 / PRD-012.
+    """
+    if scope in ("all", "trace"):
+        _tc.clear()
+    if scope not in ("all", "trace"):
+        raise ValueError(
+            f"clear_cache: unknown scope {scope!r}; expected one of 'all', 'trace'"
+        )
 
 
 class Session:
@@ -184,6 +217,8 @@ __all__ = [
     "manual_seed",
     "nn", "optim", "jit",
     "install_torch_alias", "uninstall_torch_alias",
+    "load_safetensors", "save_safetensors",
+    "cache_stats", "clear_cache",
     "JitError", "ShapeError", "TorchAliasConflict",
     "NoBackwardError", "JitNotImplementedError",
     "RealizationError", "BufferTableError",
@@ -214,6 +249,8 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_jit/_realize.py", content: REALIZE_PY },
   { path: "browsergrad_jit/_fusion.py", content: FUSION_PY },
   { path: "browsergrad_jit/_vjp.py", content: VJP_PY },
+  { path: "browsergrad_jit/_trace_cache.py", content: TRACE_CACHE_PY },
+  { path: "browsergrad_jit/_safetensors.py", content: SAFETENSORS_PY },
   { path: "browsergrad_jit/_tensor_proxy.py", content: TENSOR_PROXY_PY },
   { path: "browsergrad_jit/_functional.py", content: FUNCTIONAL_PY },
   { path: "browsergrad_jit/_nn.py", content: NN_PY },

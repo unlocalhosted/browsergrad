@@ -7,6 +7,56 @@ contract in the README](README.md#compatibility-contract).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-05-26
+
+PRD-008 v0 — safetensors I/O + trace cache. The WGSL pipeline cache
+the original PRD scoped is explicitly deferred to PRD-012 (no WGSL
+backend exists in jit yet); the OPFS HTTP cache layer is deferred to
+PRD-008.2 once the runtime bridge for zero-copy ArrayBuffer transfer
+is built. What ships here is the two highest-leverage pieces that
+work against the substrate as-is.
+
+### Added — safetensors
+
+- `bg.load_safetensors(source, *, session=None, progress=None, dtype=None)`
+  parses the HuggingFace safetensors format (8-byte header-length +
+  JSON metadata + raw tensor data) and returns `dict[str, TensorProxy]`.
+  Supports bytes, memoryview, and `file://` / local path sources.
+- `bg.save_safetensors(tensors, path, *, metadata=None)` writes the
+  reverse — round-trip-safe with the loader.
+- All NumPy-supported dtypes (F32/F16, I64/I32/I16/I8, U64/U32/U16/U8,
+  BOOL). BF16 raises `NotImplementedError` pointing at PRD-010.
+- HTTP URLs raise `NotImplementedError` pointing at PRD-008.2 (the
+  runtime bridge follow-up).
+- Zero-copy where the source allows — `np.frombuffer` over memoryview
+  slices, copy only on registration into the BufferTable.
+
+### Added — trace cache
+
+- In-memory cache keyed on `(id(module), training_flag, shape+dtype
+  signature)`. Wired into `nn.Module.__call__` — first call traces
+  and records, subsequent calls with matching signature rebuild zero
+  UOps.
+- Refuses to cache outputs with `_ctx` (closure backward would point
+  at stale input proxies). For training graphs with learnable
+  parameters this means the cache is effectively inference-only;
+  PRD-014 (`torch.func` transforms) makes training-graph caching safe.
+- `bg.jit.use_trace_cache(bool)`, `bg.jit.trace_cache_enabled()`,
+  `bg.jit.trace_cache_stats()`, `bg.jit.clear_trace_cache()` control
+  surface.
+- `bg.cache_stats()` and `bg.clear_cache(scope='all'|'trace')` package-
+  level aggregator API. The scope set is forward-compatible — future
+  PRDs add `'opfs'` / `'pipelines'`.
+
+### Deferred (explicit non-goals for this release)
+
+- WGSL pipeline cache — moves to PRD-012 with the WGSL backend itself.
+- OPFS HTTP blob cache — moves to PRD-008.2 with the JS↔Python
+  zero-copy ArrayBuffer bridge.
+- Trace cache for training graphs — requires PRD-014's graph-rewrite
+  backward to make safe.
+- BF16 dtype support — moves to PRD-010 (mixed precision).
+
 ## [0.3.0] — 2026-05-26
 
 PRD-007 symbolic backward — Weeks 1+2 ship: VJP rule registry +
