@@ -153,6 +153,60 @@ Browser LLM benchmarks ([SitePoint WebGPU vs WebGL inference](https://www.sitepo
 
 ---
 
+## 3.7 Target curricula (the labs we want to host)
+
+The library exists to power lab implementations. Three curricula define the "viability bar":
+
+**(A) deep-ml.com problem catalog** — covered above (§3.2). 2 features short of parity (softsign, gradient_checkpoint).
+
+**(B) fast.ai Part 2** — 17 chapters spanning matmul-from-scratch through latent diffusion. After P0.1 ships, **15 of 17 chapters run** ([fast.ai Part 2](https://course.fast.ai/Lessons/part2.html)). The two exceptions:
+- Ch 20 (Mixed Precision) is conceptually broken in our environment — we deliberately don't ship real fp16 speedup. Lab needs framing as "what mixed precision is and why real training uses it," not as "see your model train 2× faster."
+- Ch 9, 10, 25 (Stable Diffusion / Latent Diffusion) work technically but require a pretrained-weights loading story (~5GB of SD weights via OPFS streaming, or a tiny educational SD variant we curate).
+
+**(C) Stanford CS336 + Karpathy Zero-to-Hero** — every *from-scratch* implementation chapter runs today or after P0.1: micrograd ✅, makemore ✅, "Let's build GPT" ✅, BPE tokenizer ✅, transformer-from-scratch ✅, training small models ✅, RLHF math ✅, MoE ✅, KV cache ✅. Out of scope: reproducing GPT-2 at full 1.5B scale, distributed training, quantization — these are inherently hosted-GPU concerns.
+
+**Implication for the runtime**: the curricula don't require any *new categories* of feature beyond what's already in P0/P1/P2. They do confirm specific priorities:
+- ConvTranspose1d/2d is load-bearing for fast.ai Ch 15/19/21/22/23/25.
+- A `.safetensors` streaming loader through OPFS is needed for any pre-trained-model lab (added as P1.6 below).
+- A "tiny pretrained model gallery" is content-work, not runtime-work, but the runtime needs the loader to exist.
+
+## 3.8 Design principles (locked-in)
+
+These are non-negotiable in the next 12 months. Every feature spec below assumes them.
+
+### Performance by default
+
+The fast path is the default path. There is no opt-in for the JIT, no `@torch.compile` wrapping, no "developer mode" flag a user has to discover.
+
+- **JIT tracing is automatic.** First call to `nn.Module.forward()` traces; subsequent calls dispatch from the cached plan.
+- **Backend auto-selection.** For every kernel, the dispatcher picks the highest-performance available backend silently: WebNN if available → fused WGSL megakernel if a fusion pattern matches → primitive WGSL → WASM SIMD → NumPy. No user choice required.
+- **Eager mode is a debug fallback**, not a default. `browsergrad.use_eager(True)` exists for printf-debugging and for the correctness oracle, not for users.
+- **Cold-start is a first-class metric.** Service worker pre-warm + OPFS pipeline cache + lazy module loading are all in scope from day one, not "later optimizations."
+
+### Security by default
+
+The browser is a hostile environment. We assume an adversarial page somewhere will try to exploit any opening. Every primitive is designed assuming this.
+
+- **Pyodide sandbox is the trust boundary.** Python code can't reach outside the sandbox to other tabs, the user's filesystem, or arbitrary network.
+- **Network access is opt-in by host.** Python `bg.fetch(url)` calls into a JS-side adapter that the host page provides. Default adapter allowlists nothing; the host page must explicitly scope (origin allowlist, max bytes, timeout). No surprise `urllib`/`requests` calls.
+- **OPFS is mediated.** No raw `FileSystemSyncAccessHandle` exposed to Python. Storage goes through `bg.checkpoint(name)` / `bg.load_checkpoint(name)` with explicit per-origin namespacing.
+- **WGSL pipelines compile in isolated workers.** User code never holds a direct `GPUDevice` handle. The host page can revoke the device cleanly.
+- **No `eval` or `exec` of arbitrary strings from JavaScript** unless the host explicitly opts in via a `bg.allow_dynamic_exec()` hook.
+- **Cross-origin isolation is opt-in with graceful degradation.** SAB-requiring features (multi-threaded WASM) detect the COOP/COEP headers; when absent, the library degrades to single-threaded mode silently rather than crashing.
+- **WGSL inputs are size-validated.** Kernel dispatch with oversized buffers (> declared limits) refuses at the dispatcher rather than risking GPU device loss.
+
+## 3.9 Package boundary: `browsergrad-jit` is the new package
+
+Locked-in: the JIT epoch ships as **`@unlocalhosted/browsergrad-jit`**, a new package, not a mutation of `@unlocalhosted/browsergrad-grad`.
+
+Reasons:
+- The current grad library stays as the **correctness oracle**. Every IR-emitted result is cross-checked against the eager NumPy path during development. We can't do that if the eager path stops existing.
+- Migration is reversible. If the JIT path has a bug, users (and craftingattention) can pin to `browsergrad-grad@0.5.x` and keep shipping.
+- The packages have different perf characteristics, license footprints (jit may add WGSL-runtime deps), and update cadences. Keeping them separate lets each evolve independently.
+- `browsergrad-grad` becomes the "minimal-deps, slowest, most-reliable" tier. `browsergrad-jit` becomes the "default fast path" once it matures.
+
+The migration path follows the schedule in §7 (P1.1 onward).
+
 ## 4. Goals and non-goals
 
 ### Goals (in priority order)
@@ -384,6 +438,23 @@ Every feature below has: **what** (one-sentence description), **why** (problem s
 **Dependencies**: P1.1.
 
 **Evidence**: JAX's vjp / grad rules.
+
+#### P1.6: `.safetensors` streaming into GPU buffers via OPFS
+
+**What**: A loader that takes a `.safetensors` URL or `File` object, streams the bytes into OPFS once, and on subsequent loads memory-maps from OPFS directly into GPU storage buffers. Surfaced to Python as `model = bg.load_safetensors(url_or_path)`.
+
+**Why**: Fast.ai Part 2 chapters 9, 10, 23, 25 (Stable Diffusion / super-resolution / latent diffusion) and any "use a pretrained model" lab require this. The naive path (fetch → ArrayBuffer → Float32Array → upload to GPU) does three full copies of multi-GB tensors. Memory-mapped from OPFS is one copy. Critical for first-load UX on real pretrained models.
+
+**Acceptance**:
+1. A test that loads a ~50MB educational `.safetensors` file completes in ≤2s on second visit (cache hit).
+2. Memory peak during load is ≤2× the file size (vs ~4× for the naive path).
+3. Hash-verified — corrupted downloads fail loudly, not silently.
+
+**Effort**: ~2 weeks.
+
+**Dependencies**: P0.3 (OPFS infrastructure), P1.5 (similar pattern).
+
+**Evidence**: [safetensors format spec](https://github.com/huggingface/safetensors); fast.ai Part 2 curriculum dependencies.
 
 #### P1.5: OPFS pipeline cache (compiled kernels)
 
