@@ -9,14 +9,24 @@ Designed as the substrate for downstream optimization passes — fusion, symboli
 
 ## Status
 
-**Pre-1.0 — Week 1 of PRD-005.** What ships in this version:
+**0.1.0 — PRD-005 minimum-viable.** The elementwise + MLP scope is real:
 
-- The UOp IR (`_ir.py`) — 23 opcodes, frozen-dataclass nodes, shape-validated construction, topological-sort helper.
-- The `TensorProxy` stub — metadata-only attributes (`.shape`, `.dtype`, `.ndim`, `len()`, `__repr__`) work. Realization triggers raise `JitNotImplementedError` until Week 3.
-- The per-session `BufferTable` — the lifecycle primitive that keeps two concurrent models from colliding on buffer ids.
-- The install pipeline + codegen tooling, mirroring [`browsergrad-grad`](../browsergrad-grad/)'s shape exactly.
+- The 23-opcode UOp IR (`_ir.py`).
+- The NumPy realizer (`_realize.py`) — one dispatch handler per opcode.
+- `TensorProxy` with full arithmetic surface, reductions, shape ops, dtype casts, broadcasting via NumPy.
+- Closure-based autograd. `.backward()` populates leaf parameter gradients per PyTorch semantics.
+- `nn.Module`, `nn.Linear`, `nn.Sequential`, `nn.Dropout`, activation + loss modules.
+- `nn.functional`: `relu`, `softmax`, `cross_entropy`, `mse_loss`, `nll_loss`, `linear`, etc.
+- `optim.SGD`, `optim.Adam`, `optim.AdamW`.
+- `install_torch_alias()` with the owner-token protocol so `browsergrad-jit` and `browsergrad-grad` coexist cleanly.
+- Per-session `BufferTable` for multi-loop isolation.
 
-Roadmap weeks 2-10 land arithmetic, the NumPy realizer, autograd, and the `nn.Module` / `optim.*` compat layer in subsequent releases. Follow [PRD-005](../../docs/prd/PRD-005-jit-foundation.md) for details.
+**Not yet in 0.1.0** — slipping to 0.1.x patches per PRD-005's revised plan:
+
+- `nn.Conv1d`/`Conv2d`/`Conv3d`, pooling, batch/layer/group norm, embedding, RNN/LSTM/GRU, MultiHeadAttention.
+- Symbolic backward (PRD-007), kernel fusion (PRD-006), pipeline caching (PRD-008), WGSL (PRD-002 extends into jit), mixed precision (PRD-010), function transforms (PRD-014), WebNN (PRD-011), megakernels (PRD-012), ONNX export (PRD-016).
+
+Follow [PRD-005](../../docs/prd/PRD-005-jit-foundation.md) and the other PRDs in `docs/prd/` for the roadmap.
 
 ## Compatibility contract
 

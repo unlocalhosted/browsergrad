@@ -30,10 +30,15 @@ describe("Python source registry", () => {
   it("registers the expected modules in install order", () => {
     const paths = SOURCE_FILES.map((f) => f.path);
     expect(paths).toEqual([
-      "browsergrad_jit/_ir.py",
       "browsergrad_jit/_errors.py",
+      "browsergrad_jit/_ir.py",
       "browsergrad_jit/_buffer_table.py",
+      "browsergrad_jit/_realize.py",
       "browsergrad_jit/_tensor_proxy.py",
+      "browsergrad_jit/_functional.py",
+      "browsergrad_jit/_nn.py",
+      "browsergrad_jit/_optim.py",
+      "browsergrad_jit/_torch_compat.py",
       "browsergrad_jit/__init__.py",
     ]);
   });
@@ -56,7 +61,7 @@ describe("Python source registry", () => {
     // codegen, the actual version string should be substituted in.
     const initFile = SOURCE_FILES.find((f) => f.path.endsWith("__init__.py"));
     expect(initFile).toBeDefined();
-    expect(initFile!.content).toMatch(/__version__ = "0\.1\.0-pre\.1"/);
+    expect(initFile!.content).toMatch(/__version__ = "0\.1\.0"/);
   });
 
   it("declares all 23 opcodes in _ir.py", () => {

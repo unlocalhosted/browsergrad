@@ -16,7 +16,12 @@
 import { IR_PY } from "./_ir.generated.js";
 import { ERRORS_PY } from "./_errors.generated.js";
 import { BUFFER_TABLE_PY } from "./_buffer_table.generated.js";
+import { REALIZE_PY } from "./_realize.generated.js";
 import { TENSOR_PROXY_PY } from "./_tensor_proxy.generated.js";
+import { NN_PY } from "./_nn.generated.js";
+import { FUNCTIONAL_PY } from "./_functional.generated.js";
+import { OPTIM_PY } from "./_optim.generated.js";
+import { TORCH_COMPAT_PY } from "./_torch_compat.generated.js";
 import pkg from "../../package.json";
 
 /**
@@ -33,8 +38,12 @@ const INIT_PY = `"""browsergrad_jit — a PyTorch-shaped lazy tensor library bac
 
 Public surface (semver-stable across the 0.x line):
 
-  TensorProxy            — the lazy tensor; same API shape as PyTorch's Tensor
-  Session / new_session  — per-tab/loop isolation primitive
+  Tensor (alias for TensorProxy), tensor, zeros, ones, randn, arange,
+  from_numpy           — factory functions
+  Session, new_session  — per-tab/loop isolation primitive
+  nn                    — Module, Linear, Sequential, ReLU, Dropout, ...
+  nn.functional         — relu, softmax, cross_entropy, mse_loss, linear, ...
+  optim                 — SGD, Adam, AdamW
 
 Public error types (catch these):
 
@@ -47,7 +56,15 @@ UOp class) is internal and may change between minor releases.
 See \`docs/prd/PRD-005-jit-foundation.md\` for the design rationale.
 """
 
-from ._tensor_proxy import TensorProxy
+from ._tensor_proxy import (
+    TensorProxy,
+    from_numpy,
+    tensor,
+    zeros,
+    ones,
+    randn,
+    arange,
+)
 from ._buffer_table import BufferTable
 from ._errors import (
     JitError,
@@ -58,6 +75,22 @@ from ._errors import (
     RealizationError,
     BufferTableError,
 )
+from . import _functional, _nn, _optim
+from ._torch_compat import install_torch_alias, uninstall_torch_alias
+import sys as _sys
+
+# PyTorch-style alias for the lazy tensor type.
+Tensor = TensorProxy
+
+# Wire up the public sub-namespaces. Registering in sys.modules lets users
+# import via the dotted path even though there is no on-disk file at
+# browsergrad_jit/nn/__init__.py — _nn IS the nn module.
+_nn.functional = _functional
+_sys.modules["browsergrad_jit.nn"] = _nn
+_sys.modules["browsergrad_jit.nn.functional"] = _functional
+_sys.modules["browsergrad_jit.optim"] = _optim
+nn = _nn
+optim = _optim
 
 
 class Session:
@@ -103,21 +136,28 @@ def new_session() -> Session:
     return Session()
 
 
+def manual_seed(seed: int) -> None:
+    """Seed NumPy's global RNG. Mirrors torch.manual_seed.
+
+    The JIT's RANDOM opcode uses its own per-call seed_key when wired,
+    but factory functions like randn() and the dropout op fall back to
+    NumPy's default RNG, which this seeds."""
+    import numpy as _np
+    _np.random.seed(seed)
+
+
 __version__ = "${pkg.version}"
 
 __all__ = [
-    "TensorProxy",
-    "Session",
-    "JitError",
-    "ShapeError",
-    "TorchAliasConflict",
-    "NoBackwardError",
-    "JitNotImplementedError",
-    "RealizationError",
-    "BufferTableError",
-    "get_default_session",
-    "set_default_session",
-    "new_session",
+    "TensorProxy", "Tensor",
+    "tensor", "zeros", "ones", "randn", "arange", "from_numpy",
+    "Session", "get_default_session", "set_default_session", "new_session",
+    "manual_seed",
+    "nn", "optim",
+    "install_torch_alias", "uninstall_torch_alias",
+    "JitError", "ShapeError", "TorchAliasConflict",
+    "NoBackwardError", "JitNotImplementedError",
+    "RealizationError", "BufferTableError",
     "__version__",
 ]
 `;
@@ -138,10 +178,15 @@ export interface PythonSource {
  * statement in `__init__.py` runs.
  */
 export const SOURCE_FILES: readonly PythonSource[] = [
-  { path: "browsergrad_jit/_ir.py", content: IR_PY },
   { path: "browsergrad_jit/_errors.py", content: ERRORS_PY },
+  { path: "browsergrad_jit/_ir.py", content: IR_PY },
   { path: "browsergrad_jit/_buffer_table.py", content: BUFFER_TABLE_PY },
+  { path: "browsergrad_jit/_realize.py", content: REALIZE_PY },
   { path: "browsergrad_jit/_tensor_proxy.py", content: TENSOR_PROXY_PY },
+  { path: "browsergrad_jit/_functional.py", content: FUNCTIONAL_PY },
+  { path: "browsergrad_jit/_nn.py", content: NN_PY },
+  { path: "browsergrad_jit/_optim.py", content: OPTIM_PY },
+  { path: "browsergrad_jit/_torch_compat.py", content: TORCH_COMPAT_PY },
   { path: "browsergrad_jit/__init__.py", content: INIT_PY },
 ];
 

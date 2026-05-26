@@ -30,7 +30,7 @@ describe("browsergrad_jit._ir under real Pyodide", () => {
 import browsergrad_jit
 browsergrad_jit.__version__
 `);
-    expect(version).toBe("0.1.0-pre.1");
+    expect(version).toBe("0.1.0");
   });
 
   it("exposes exactly 23 opcodes in ALL_OPS", async () => {
@@ -426,26 +426,15 @@ result
     expect(err).toMatch(/np\.ndarray implicitly/);
   });
 
-  it("realization triggers raise JitNotImplementedError until Week 3", async () => {
+  it("realization triggers return values for tensors built via factories", async () => {
     const target = await getJitTarget();
-    const results = await target.run<string[]>(`
-from browsergrad_jit import TensorProxy, JitNotImplementedError
-from browsergrad_jit._ir import buffer, load
-proxy = TensorProxy(load(buffer("test:x", (1,), "float32")))
-triggers = ["numpy", "tolist"]
-errs = []
-for name in triggers:
-    try:
-        getattr(proxy, name)()
-        errs.append(name + ":no_error")
-    except JitNotImplementedError as e:
-        errs.append(name + ":" + str(e))
-errs
+    const result = await target.run<{ scalar: number; list: number[] }>(`
+import browsergrad_jit as bg
+t = bg.tensor([1.0, 2.0, 3.0])
+{"scalar": t.sum().item(), "list": t.tolist()}
 `);
-    expect(results.length).toBe(2);
-    for (const r of results) {
-      expect(r).toMatch(/requires the realizer/);
-    }
+    expect(result.scalar).toBeCloseTo(6.0, 5);
+    expect(result.list).toEqual([1.0, 2.0, 3.0]);
   });
 
   it("size() returns a tuple when dim is None, an int when dim is provided", async () => {

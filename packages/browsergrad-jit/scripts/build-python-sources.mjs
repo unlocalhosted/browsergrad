@@ -26,7 +26,12 @@ const MODULES = [
   ["_ir.py", "_ir.generated.ts", "IR_PY"],
   ["_errors.py", "_errors.generated.ts", "ERRORS_PY"],
   ["_buffer_table.py", "_buffer_table.generated.ts", "BUFFER_TABLE_PY"],
+  ["_realize.py", "_realize.generated.ts", "REALIZE_PY"],
   ["_tensor_proxy.py", "_tensor_proxy.generated.ts", "TENSOR_PROXY_PY"],
+  ["_nn.py", "_nn.generated.ts", "NN_PY"],
+  ["_functional.py", "_functional.generated.ts", "FUNCTIONAL_PY"],
+  ["_optim.py", "_optim.generated.ts", "OPTIM_PY"],
+  ["_torch_compat.py", "_torch_compat.generated.ts", "TORCH_COMPAT_PY"],
 ];
 
 function toBase64(content) {
