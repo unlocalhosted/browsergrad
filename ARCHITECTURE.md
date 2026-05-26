@@ -15,7 +15,7 @@ For broader PyTorch-coverage progress, see [PROGRESS.md](PROGRESS.md).
 | 4 | Python source as `.py` files | Pre-tsc codegen script; commit generated files; base64-IIFE emission | ✅ done | `a8b926a` |
 | 3 | NodePyodideTarget adapter | Factory at `./node-adapter` subpath; `pyodide` as optionalPeerDep | ✅ done | `f023df5` |
 | 2 | Split torch_compat into real/limited/impossible | Self-installing modules; runtime `is`-identity assertion pins the latent coupling | ✅ done | `9c78edb` |
-| 1 | Split nn.ts into per-family TS chunks | Option A (TS-split, single `nn.py`); `NN_CHUNK_ORDER` constant enforces order | ⏳ pending | — |
+| 1 | Split nn.ts into per-family TS chunks | Option A (chunk-split, single `nn.py`); `NN_CHUNK_ORDER` in codegen enforces order | ✅ done | (this commit) |
 
 ## Methodology
 
@@ -194,7 +194,12 @@ commit. Mixing dead-code removal into a 12-file refactor poisons the diff.
 
 ### Decisions
 
-_(filled in during implementation)_
+- **Chunks live under `src/python/nn_chunks/` (not under `browsergrad_grad/nn/`)** because they are concatenation fragments, NOT importable Python modules. They get assembled at codegen time into a single `nn.generated.ts`, which contains one flat `nn.py` for Pyodide to import. The public Python namespace stays `import browsergrad_grad.nn as nn` — no subpackage paths exposed.
+- **`NN_CHUNK_ORDER` lives in `scripts/build-python-sources.mjs` `CHUNKED_MODULES`**, not in a separate constants file. The codegen is the single source of truth for assembly; adding a new chunk requires adding it both to the directory AND to the order. A chunk file with no entry in `order` is silently absent — which the 3 ordering-invariant tests in `surface.test.ts` would catch.
+- **Splitter classification by class/def name, not section comment**. Section-header comments like `# ─── Conv1d ───` don't trigger routing in the one-time splitter — only `class X(...)` and `def X(...)` lines do. Side effect: some section comments end up trailing the previous chunk (e.g., the `# ─── More norms ───` header sits at the bottom of `dropout.py` because Dropout2d is the last class before GroupNorm). Cosmetic wart, no functional impact. Future cleanup: extend the routing to recognize section headers.
+- **The one-time splitter (`scripts/split-nn-once.mjs`) was deleted after use**, same as `extract-python-once.mjs` was. Source of truth is now the 12 chunk files.
+- **No new dependencies, no new tooling**. The codegen script grew one new section (`CHUNKED_MODULES`) and one new loop. Same `.mjs` runtime, same `node` invocation, same place in the `build` script.
+- **byte-for-byte concat verification**: the assembled `nn.generated.ts` is 63555 chars — identical to the pre-split nn.py size. Round-trip fidelity confirmed by all 234 integration tests passing unchanged.
 
 ---
 

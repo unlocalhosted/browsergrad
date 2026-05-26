@@ -166,6 +166,32 @@ describe("Python source bundle", () => {
     expect(nn?.content).toContain("def train(self, mode");
     expect(nn?.content).toContain("def eval(self)");
   });
+
+  describe("nn.py chunk-assembly ordering invariants (refactor #1)", () => {
+    // These tests catch chunk-order regressions in NN_CHUNK_ORDER. Each is
+    // an ordering constraint that, if violated, would cause Python-level
+    // NameErrors at Pyodide import time. Cheap to run — no Pyodide needed.
+    it("Module is defined before Linear (Linear inherits from Module)", () => {
+      const nn = SOURCE_FILES.find((s) => s.path === "browsergrad_grad/nn.py")!;
+      expect(nn.content.indexOf("class Module:")).toBeLessThan(
+        nn.content.indexOf("class Linear(Module):"),
+      );
+    });
+
+    it("Linear is defined before MultiHeadAttention (MHA.__init__ instantiates Linear)", () => {
+      const nn = SOURCE_FILES.find((s) => s.path === "browsergrad_grad/nn.py")!;
+      expect(nn.content.indexOf("class Linear(Module):")).toBeLessThan(
+        nn.content.indexOf("class MultiHeadAttention(Module):"),
+      );
+    });
+
+    it("sys.modules['browsergrad_grad.nn.init'] registration appears after MultiHeadAttention", () => {
+      const nn = SOURCE_FILES.find((s) => s.path === "browsergrad_grad/nn.py")!;
+      expect(nn.content.indexOf("class MultiHeadAttention(Module):")).toBeLessThan(
+        nn.content.indexOf('sys.modules["browsergrad_grad.nn.init"]'),
+      );
+    });
+  });
 });
 
 describe("installGrad — fs-path mode", () => {
