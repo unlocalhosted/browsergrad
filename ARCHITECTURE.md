@@ -11,8 +11,8 @@ For broader PyTorch-coverage progress, see [PROGRESS.md](PROGRESS.md).
 
 | # | Refactor | Verdict | Status | Commit |
 |---|---|---|---|---|
-| 5 | Single-source the version | Add `resolveJsonModule`; import `pkg` in 3 files; don't flip `verbatimModuleSyntax` | ✅ done | (this commit) |
-| 4 | Python source as `.py` files | Pre-tsc codegen script; commit generated files; base64-IIFE emission | ⏳ pending | — |
+| 5 | Single-source the version | Add `resolveJsonModule`; import `pkg` in 3 files; don't flip `verbatimModuleSyntax` | ✅ done | `27cf321` |
+| 4 | Python source as `.py` files | Pre-tsc codegen script; commit generated files; base64-IIFE emission | ✅ done | `7da403a` |
 | 3 | NodePyodideTarget adapter | Factory at `./node-adapter` subpath; `pyodide` as optionalPeerDep | ⏳ pending | — |
 | 2 | Split torch_compat into real/limited/impossible | Self-installing modules; runtime `is`-identity assertion pins the latent coupling | ⏳ pending | — |
 | 1 | Split nn.ts into per-family TS chunks | Option A (TS-split, single `nn.py`); `NN_CHUNK_ORDER` constant enforces order | ⏳ pending | — |
@@ -93,7 +93,11 @@ Separate commits, in this order: migration → ruff → mypy. Bundling them pois
 
 ### Decisions
 
-_(filled in during implementation)_
+- **`.mjs` over `.ts` for the codegen script.** Avoids the chicken-and-egg of needing TS tooling before the build step that produces the TS sources. The script is plain Node ESM JS, runs via `node scripts/build-python-sources.mjs`. Zero new devDeps.
+- **One-time extraction script bug**: first version used `tsSource.indexOf("\`")` which matched the FIRST backtick in the JSDoc preamble (e.g., `tensor.ts` has `\`tsc\`` in its doc comment). Production tests all failed with `SyntaxError: invalid character '—'` because the extracted "Python" started inside a JSDoc paragraph. Fixed by anchoring on `export const FOO_PY = \`` and using the right closing `\`;` — extraction script verified before being deleted.
+- **The one-time extraction script (`extract-python-once.mjs`) was deleted after use.** Source of truth is now `.py`; no need to maintain a script that reads the old TS form.
+- **Re-export shim preserves the import graph in `src/python/index.ts`**: each `tensor.ts` is now a single `export { TENSOR_PY } from "./tensor.generated.js";`. No edit to `src/python/index.ts` needed.
+- **Codegen wired into `build` script** as a prefix: `"build": "pnpm codegen && tsc -p tsconfig.build.json"`. Generated files are committed so `pnpm typecheck` and `pnpm test` work without running codegen first on a fresh clone.
 
 ---
 
