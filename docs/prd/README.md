@@ -19,7 +19,7 @@ Every PRD includes: background with cited evidence, user stories, architecture (
 - [PRD-006 — Kernel fusion (elementwise + reduce/softmax)](PRD-006-kernel-fusion.md)
 - [PRD-007 — Symbolic backward](PRD-007-symbolic-backward.md)
 - [PRD-008 — OPFS pipeline cache + safetensors streaming](PRD-008-persistent-caching.md)
-- [PRD-009 — Gradient checkpointing (real, not stub)](PRD-009-gradient-checkpoint.md)
+- [PRD-009 — Gradient checkpointing (real, not stub)](PRD-009-gradient-checkpointing.md)
 - [PRD-010 — Real mixed precision (fp16 storage + fp32 accumulators)](PRD-010-mixed-precision.md)
 
 ### P2 — months 11–14 (megakernels, hardware tiers, transforms, lab content)
@@ -27,7 +27,7 @@ Every PRD includes: background with cited evidence, user stories, architecture (
 - [PRD-011 — WebNN backend tier](PRD-011-webnn-backend.md)
 - [PRD-012 — Megakernel codegen for transformer blocks](PRD-012-megakernel-codegen.md)
 - [PRD-013 — craftingattention lab platform alignment](PRD-013-lab-platform-alignment.md)
-- [PRD-014 — `torch.func` / `vmap` / `grad` / `jacrev`](PRD-014-torch-func-vmap.md)
+- [PRD-014 — `torch.func` / `vmap` / `grad` / `jacrev`](PRD-014-torch-func-transforms.md)
 - [PRD-015 — Custom WGSL kernels from Python](PRD-015-custom-wgsl-kernels.md)
 - [PRD-016 — ONNX export](PRD-016-onnx-export.md)
 
