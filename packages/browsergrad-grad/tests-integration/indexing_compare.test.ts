@@ -143,18 +143,18 @@ for i in range(X.shape[0]):
 describe("comparison ops", () => {
   beforeAll(reset);
 
-  it("== returns 1/0 float tensor (PyTorch returns bool; we use f32 for op compatibility)", async () => {
-    const result = await target.run<number[]>(`
+  it("== returns a bool tensor (matches torch.eq)", async () => {
+    const result = await target.run<boolean[]>(`
 ${PRELUDE}
 a = grad.Tensor([1.0, 2.0, 3.0, 2.0])
 b = grad.Tensor([1.0, 1.0, 3.0, 0.0])
 (a == b).tolist()
 `);
-    expect(result).toEqual([1, 0, 1, 0]);
+    expect(result).toEqual([true, false, true, false]);
   });
 
-  it("!= / < / > / <= / >= behave correctly", async () => {
-    const result = await target.run<{ ne: number[]; lt: number[]; gt: number[]; le: number[]; ge: number[] }>(`
+  it("!= / < / > / <= / >= behave correctly (bool dtype)", async () => {
+    const result = await target.run<{ ne: boolean[]; lt: boolean[]; gt: boolean[]; le: boolean[]; ge: boolean[] }>(`
 ${PRELUDE}
 a = grad.Tensor([1.0, 2.0, 3.0])
 b = grad.Tensor([2.0, 2.0, 2.0])
@@ -166,11 +166,11 @@ b = grad.Tensor([2.0, 2.0, 2.0])
   "ge": (a >= b).tolist(),
 }
 `);
-    expect(result.ne).toEqual([1, 0, 1]);
-    expect(result.lt).toEqual([1, 0, 0]);
-    expect(result.gt).toEqual([0, 0, 1]);
-    expect(result.le).toEqual([1, 1, 0]);
-    expect(result.ge).toEqual([0, 1, 1]);
+    expect(result.ne).toEqual([true, false, true]);
+    expect(result.lt).toEqual([true, false, false]);
+    expect(result.gt).toEqual([false, false, true]);
+    expect(result.le).toEqual([true, true, false]);
+    expect(result.ge).toEqual([false, true, true]);
   });
 
   it("accuracy idiom: (pred == target).float().mean() works (combined with sum/mean)", async () => {

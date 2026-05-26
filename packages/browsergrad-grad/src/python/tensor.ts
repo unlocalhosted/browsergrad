@@ -29,6 +29,28 @@ Number = Union[int, float]
 ArrayLike = Union[Number, List, Tuple, "np.ndarray", "Tensor"]
 
 
+def _resolve_dtype(spec):
+    """Normalize a torch-style dtype spec to a numpy dtype.
+
+    Accepts strings ('float32', 'int64', 'bool', PyTorch aliases like 'long'
+    / 'float' / 'double'), numpy dtypes, or numpy dtype objects.
+    """
+    aliases = {
+        "float": np.float32, "float32": np.float32,
+        "float64": np.float64, "double": np.float64,
+        "int": np.int32, "int32": np.int32,
+        "int64": np.int64, "long": np.int64,
+        "int16": np.int16, "short": np.int16,
+        "int8": np.int8,
+        "uint8": np.uint8,
+        "bool": np.bool_,
+    }
+    if isinstance(spec, str):
+        if spec in aliases:
+            return aliases[spec]
+    return np.dtype(spec).type
+
+
 # ─── Autograd-enabled flag + no_grad context ──────────────────
 #
 # When _GRAD_ENABLED is False, no Tensor created inside the block will
@@ -76,17 +98,47 @@ class Tensor:
 
     __slots__ = ("data", "requires_grad", "grad", "_ctx", "_is_leaf")
 
-    def __init__(self, data: ArrayLike, requires_grad: bool = False, _ctx=None):
+    def __init__(self, data: ArrayLike, requires_grad: bool = False, dtype=None, _ctx=None):
+        # dtype=None preserves the existing default-to-float32 behavior — every
+        # call site that used to work keeps working. Pass dtype='int64' / 'bool'
+        # / 'int32' explicitly to opt out.
+        target_dtype = _resolve_dtype(dtype) if dtype is not None else None
         if isinstance(data, Tensor):
-            self.data = data.data
+            arr = data.data
         elif isinstance(data, np.ndarray):
-            self.data = data.astype(np.float32, copy=False)
+            arr = data
         else:
-            self.data = np.asarray(data, dtype=np.float32)
+            arr = np.asarray(data) if target_dtype is None else np.asarray(data, dtype=target_dtype)
+        if target_dtype is not None:
+            self.data = arr.astype(target_dtype, copy=False) if isinstance(arr, np.ndarray) else np.asarray(arr, dtype=target_dtype)
+        else:
+            self.data = arr.astype(np.float32, copy=False) if isinstance(arr, np.ndarray) else np.asarray(arr, dtype=np.float32)
         self.requires_grad = requires_grad
         self.grad: Optional[Tensor] = None
         self._ctx = _ctx  # ((parent_tensors,), backward_fn) or None
         self._is_leaf = _ctx is None
+
+    @property
+    def dtype(self):
+        return self.data.dtype.name
+
+    def long(self) -> "Tensor":
+        return Tensor(self.data.astype(np.int64), dtype="int64")
+
+    def int(self) -> "Tensor":
+        return Tensor(self.data.astype(np.int32), dtype="int32")
+
+    def float(self) -> "Tensor":
+        return Tensor(self.data.astype(np.float32), dtype="float32")
+
+    def double(self) -> "Tensor":
+        return Tensor(self.data.astype(np.float64), dtype="float64")
+
+    def bool(self) -> "Tensor":
+        return Tensor(self.data.astype(np.bool_), dtype="bool")
+
+    def to(self, dtype) -> "Tensor":
+        return Tensor(self.data, dtype=dtype)
 
     @property
     def shape(self):
@@ -733,13 +785,13 @@ def _getitem(a: Tensor, key) -> Tensor:
 
 
 def _compare(a, b, np_op) -> Tensor:
-    """Element-wise comparison; returns a float-encoded 0/1 tensor.
+    """Element-wise comparison; returns a bool-dtype Tensor.
     Non-differentiable — no _ctx attached.
     """
     a_data = a.data if isinstance(a, Tensor) else np.asarray(a, dtype=np.float32)
     b_data = b.data if isinstance(b, Tensor) else np.asarray(b, dtype=np.float32)
-    out = np_op(a_data, b_data).astype(np.float32)
-    return Tensor(out)
+    out = np_op(a_data, b_data)
+    return Tensor(out, dtype="bool")
 
 
 def _permute(a: Tensor, dims: tuple) -> Tensor:
