@@ -15,7 +15,7 @@ For broader PyTorch-coverage progress, see [PROGRESS.md](PROGRESS.md).
 | 4 | Python source as `.py` files | Pre-tsc codegen script; commit generated files; base64-IIFE emission | ✅ done | `a8b926a` |
 | 3 | NodePyodideTarget adapter | Factory at `./node-adapter` subpath; `pyodide` as optionalPeerDep | ✅ done | `f023df5` |
 | 2 | Split torch_compat into real/limited/impossible | Self-installing modules; runtime `is`-identity assertion pins the latent coupling | ✅ done | `9c78edb` |
-| 1 | Split nn.ts into per-family TS chunks | Option A (chunk-split, single `nn.py`); `NN_CHUNK_ORDER` in codegen enforces order | ✅ done | (this commit) |
+| 1 | Split nn.ts into per-family TS chunks | Option A (chunk-split, single `nn.py`); `NN_CHUNK_ORDER` in codegen enforces order | ✅ done | `43f8b60` |
 
 ## Methodology
 
