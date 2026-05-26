@@ -7,6 +7,39 @@ contract in the README](README.md#compatibility-contract).
 
 ## [Unreleased]
 
+PRD-007 Week 1: symbolic VJP rules registry + first 11 rules. The
+closure-based backward still drives `.backward()`; the rules ship as a
+parallel surface that PRD-009 (gradient checkpointing) and PRD-014
+(vmap/grad) build on. Subsequent PRD-007 weeks migrate `.backward()`
+itself to dispatch through the registry, lift the
+`use_fusion(False)`-during-backward workaround, and ship double backward.
+
+### Added
+
+- IR opcode `OP_SCATTER_ADD` (total: 26). NumPy realizer uses
+  `np.add.at` — deterministic by construction. PRD-012's future WGSL
+  lowering must preserve determinism (sort-and-segment-reduce default).
+- `_vjp.py`: VJP rule registry (`register_vjp` decorator, `get_rule`,
+  `list_registered`) with 11 rules for: `ADD`, `MUL`, `DIV`, `NEG`,
+  `EXP`, `LOG`, `MATMUL`, `REDUCE` (sum/mean), `RESHAPE`, `PERMUTE`,
+  `CAST`. `REDUCE(max/min/argmax/argmin)` and the rest defer to PRD-007
+  W2/W3.
+- Every VJP-emitted UOp carries `arg["vjp_of"] = <forward_uop>` so
+  PRD-009 can identify recompute candidates without inspecting closures.
+- EXP VJP references the forward output directly (`dy * y`, not
+  `dy * exp(x)`) — the Flash-Attention-v2 reuse pattern that lets
+  PRD-006/012 fuse the forward EXP and backward MUL into one kernel
+  with the EXP value resident in shared memory.
+- `TensorProxy.backward(loss_scale=1.0)` argument — PRD-010 mixed
+  precision's GradScaler will pass `2**16` here to keep fp16
+  backward gradients in the representable range.
+
+### Internal
+
+- `_unbroadcast_uop` helper produces the IR sequence that sums dy back
+  to a target shape over broadcast-extended axes.
+- `_broadcast_batch_shape` for MATMUL VJP's batched broadcasting logic.
+
 ## [0.2.0] — 2026-05-26
 
 PRD-006 kernel fusion (NumPy realizer scope). The fusion pass is on by

@@ -29,6 +29,7 @@ const MODULES = [
   ["_realize.py", "_realize.generated.ts", "REALIZE_PY"],
   ["_fusion.py", "_fusion.generated.ts", "FUSION_PY"],
   ["_fusion_config.py", "_fusion_config.generated.ts", "FUSION_CONFIG_PY"],
+  ["_vjp.py", "_vjp.generated.ts", "VJP_PY"],
   ["_tensor_proxy.py", "_tensor_proxy.generated.ts", "TENSOR_PROXY_PY"],
   ["_nn.py", "_nn.generated.ts", "NN_PY"],
   ["_functional.py", "_functional.generated.ts", "FUNCTIONAL_PY"],

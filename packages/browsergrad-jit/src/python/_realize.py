@@ -37,6 +37,7 @@ from ._ir import (
     OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
+    OP_SCATTER_ADD,
 )
 from ._buffer_table import BufferTable
 from ._errors import RealizationError
@@ -257,6 +258,31 @@ def _h_custom(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     return out
 
 
+def _h_scatter_add(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    """Scatter-add the source values into a copy of `target` at positions
+    given by `idx` along `dim`. The inverse of INDEX / GATHER.
+
+    Inputs: (target, idx, src). The target carries the receiving shape and
+    starting values (typically zeros built by the autograd builder); the
+    realizer copies it so the original BUFFER stays untouched.
+
+    `np.add.at` is the deterministic-by-construction NumPy call — same
+    output every run. When PRD-012 lowers this to WGSL, the kernel must
+    preserve that determinism (sort-and-segment-reduce by default).
+    """
+    target = vt[id(node.inputs[0])]
+    idx = vt[id(node.inputs[1])]
+    src = vt[id(node.inputs[2])]
+    out = target.copy()
+    dim = node.arg.get("dim", 0)
+    # np.add.at handles per-axis fancy indexing; we route via the
+    # `[dim slice + idx slice]` pattern.
+    index_expr: list = [slice(None)] * out.ndim
+    index_expr[dim] = idx
+    np.add.at(out, tuple(index_expr), src)
+    return out
+
+
 def _h_fused_elementwise(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     """Realize an OP_FUSED_ELEMENTWISE chain in a single Python loop.
 
@@ -367,6 +393,8 @@ _DISPATCH: dict[str, Handler] = {
     # Fusion (PRD-006)
     OP_FUSED_ELEMENTWISE: _h_fused_elementwise,
     OP_FUSED_SOFTMAX:     _h_fused_softmax,
+    # Autograd (PRD-007)
+    OP_SCATTER_ADD:       _h_scatter_add,
 }
 
 

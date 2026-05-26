@@ -88,6 +88,15 @@ OP_CUSTOM  = "CUSTOM"   # arg: {fn_id, captures, ...}  ← opaque NumPy callable
 OP_FUSED_ELEMENTWISE = "FUSED_ELEMENTWISE"  # arg: {ops, external_inputs}
 OP_FUSED_SOFTMAX     = "FUSED_SOFTMAX"      # arg: {axis: int}
 
+# Autograd primitives (PRD-007). SCATTER_ADD is the inverse of INDEX/MASK;
+# emitted by the VJP rules for those opcodes and by NLL/cross-entropy
+# backwards that distribute gradient back to per-class positions. The
+# NumPy realizer uses `np.add.at` — deterministic by construction.
+# When PRD-012 lowers SCATTER_ADD to WGSL, the kernel must default to a
+# deterministic sort-and-segment-reduce, with an opt-in atomic-add fast
+# path. See PRD-007's deliverable 7 (OQ6).
+OP_SCATTER_ADD = "SCATTER_ADD"  # arg: {dim: int}, inputs: (target, idx, src)
+
 ALL_OPS: FrozenSet[str] = frozenset({
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CMP,
@@ -96,8 +105,10 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     # Fusion-emitted (PRD-006)
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
+    # Autograd-emitted (PRD-007)
+    OP_SCATTER_ADD,
 })
-assert len(ALL_OPS) == 25, "opcode count drifted from PRD-005+006"
+assert len(ALL_OPS) == 26, "opcode count drifted from PRD-005+006+007"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -322,6 +333,7 @@ __all__ = [
     "OP_RESHAPE", "OP_PERMUTE", "OP_SLICE", "OP_PAD",
     "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",
     "OP_FUSED_ELEMENTWISE", "OP_FUSED_SOFTMAX",
+    "OP_SCATTER_ADD",
     "ALL_OPS",
     # Core class + helpers
     "UOp", "toposort", "all_buffers",

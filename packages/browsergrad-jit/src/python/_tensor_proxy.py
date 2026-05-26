@@ -651,7 +651,11 @@ class TensorProxy:
     # Autograd
     # ------------------------------------------------------------------
 
-    def backward(self, grad: Optional["TensorProxy"] = None) -> None:
+    def backward(
+        self,
+        grad: Optional["TensorProxy"] = None,
+        loss_scale: float = 1.0,
+    ) -> None:
         """Compute gradients via reverse-topological walk of the graph.
 
         Populates `.grad` on every leaf TensorProxy that has
@@ -660,6 +664,10 @@ class TensorProxy:
 
         For scalar outputs, `grad` defaults to ones-like. For non-scalar
         outputs the caller must pass an explicit `grad` of matching shape.
+
+        `loss_scale` multiplies the seed gradient. PRD-010's GradScaler
+        passes a large value (e.g. 2**16) to keep fp16 backward in the
+        representable range; default 1.0 is a no-op.
         """
         if grad is None:
             if self.ndim != 0 and self.numel() != 1:
@@ -668,9 +676,13 @@ class TensorProxy:
                     f"{self.shape}; pass an explicit `grad` argument of "
                     f"matching shape."
                 )
-            grad_arr = np.ones(self._uop.shape, dtype=np.dtype(self._uop.dtype))
+            grad_arr = np.full(
+                self._uop.shape,
+                float(loss_scale),
+                dtype=np.dtype(self._uop.dtype),
+            )
         else:
-            grad_arr = grad._realize_array()
+            grad_arr = grad._realize_array() * float(loss_scale)
 
         # 1. Collect every proxy on the autograd chain rooted at self.
         #    `proxy_by_uop_id` lets the reverse walk find a proxy by UOp.

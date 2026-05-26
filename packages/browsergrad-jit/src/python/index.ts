@@ -19,6 +19,7 @@ import { BUFFER_TABLE_PY } from "./_buffer_table.generated.js";
 import { REALIZE_PY } from "./_realize.generated.js";
 import { FUSION_PY } from "./_fusion.generated.js";
 import { FUSION_CONFIG_PY } from "./_fusion_config.generated.js";
+import { VJP_PY } from "./_vjp.generated.js";
 import { TENSOR_PROXY_PY } from "./_tensor_proxy.generated.js";
 import { NN_PY } from "./_nn.generated.js";
 import { FUNCTIONAL_PY } from "./_functional.generated.js";
@@ -212,6 +213,7 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_jit/_fusion_config.py", content: FUSION_CONFIG_PY },
   { path: "browsergrad_jit/_realize.py", content: REALIZE_PY },
   { path: "browsergrad_jit/_fusion.py", content: FUSION_PY },
+  { path: "browsergrad_jit/_vjp.py", content: VJP_PY },
   { path: "browsergrad_jit/_tensor_proxy.py", content: TENSOR_PROXY_PY },
   { path: "browsergrad_jit/_functional.py", content: FUNCTIONAL_PY },
   { path: "browsergrad_jit/_nn.py", content: NN_PY },

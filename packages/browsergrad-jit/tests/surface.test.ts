@@ -36,6 +36,7 @@ describe("Python source registry", () => {
       "browsergrad_jit/_fusion_config.py",
       "browsergrad_jit/_realize.py",
       "browsergrad_jit/_fusion.py",
+      "browsergrad_jit/_vjp.py",
       "browsergrad_jit/_tensor_proxy.py",
       "browsergrad_jit/_functional.py",
       "browsergrad_jit/_nn.py",
@@ -66,10 +67,9 @@ describe("Python source registry", () => {
     expect(initFile!.content).toMatch(/__version__ = "0\.2\.0"/);
   });
 
-  it("declares all 25 opcodes in _ir.py (23 core + 2 fusion-emitted)", () => {
+  it("declares all 26 opcodes in _ir.py (23 core + 2 fusion + 1 autograd)", () => {
     // Sanity check that the codegen bundled the IR with every opcode the
-    // PRD-005 + PRD-006 surface needs. If a refactor accidentally drops
-    // one, the unit test catches it before any Python ever runs.
+    // PRD-005 + PRD-006 + PRD-007 surface needs.
     const irFile = SOURCE_FILES.find((f) => f.path.endsWith("_ir.py"));
     expect(irFile).toBeDefined();
     const ops = [
@@ -79,6 +79,7 @@ describe("Python source registry", () => {
       "OP_RESHAPE", "OP_PERMUTE", "OP_SLICE", "OP_PAD",
       "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",
       "OP_FUSED_ELEMENTWISE", "OP_FUSED_SOFTMAX",
+      "OP_SCATTER_ADD",
     ];
     for (const op of ops) {
       expect(irFile!.content).toContain(op);
