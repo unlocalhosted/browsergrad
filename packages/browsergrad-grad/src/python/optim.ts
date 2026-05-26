@@ -239,4 +239,224 @@ class CosineAnnealingLR(_LRScheduler):
 
     def __repr__(self):
         return f"CosineAnnealingLR(T_max={self.T_max}, eta_min={self.eta_min})"
+
+
+# ─── More optimizers (Pile A #10) ──────────────────────────
+
+class RMSprop(Optimizer):
+    """RMSprop. Update rule (matches torch.optim.RMSprop, centered=False):
+      v_t = alpha * v_{t-1} + (1 - alpha) * g_t^2
+      param -= lr * g_t / (sqrt(v_t) + eps)
+    """
+    def __init__(self, params: Iterable[Tensor], lr: float = 0.01, alpha: float = 0.99,
+                 eps: float = 1e-8, weight_decay: float = 0.0):
+        super().__init__(params, lr)
+        self.alpha = float(alpha)
+        self.eps = float(eps)
+        self.weight_decay = float(weight_decay)
+        self._v: List[np.ndarray] = [np.zeros_like(p.data) for p in self.params]
+
+    def step(self):
+        for i, p in enumerate(self.params):
+            if p.grad is None:
+                continue
+            g = p.grad.data
+            if self.weight_decay != 0.0:
+                g = g + self.weight_decay * p.data
+            self._v[i] = self.alpha * self._v[i] + (1.0 - self.alpha) * (g * g)
+            p.data = p.data - self.lr * g / (np.sqrt(self._v[i]) + self.eps)
+
+    def __repr__(self):
+        return f"RMSprop(lr={self.lr}, alpha={self.alpha}, eps={self.eps})"
+
+
+class Adagrad(Optimizer):
+    """Adagrad. Update rule:
+      G_t = G_{t-1} + g_t^2
+      param -= lr * g_t / (sqrt(G_t) + eps)
+    """
+    def __init__(self, params: Iterable[Tensor], lr: float = 0.01,
+                 eps: float = 1e-10, weight_decay: float = 0.0):
+        super().__init__(params, lr)
+        self.eps = float(eps)
+        self.weight_decay = float(weight_decay)
+        self._G: List[np.ndarray] = [np.zeros_like(p.data) for p in self.params]
+
+    def step(self):
+        for i, p in enumerate(self.params):
+            if p.grad is None:
+                continue
+            g = p.grad.data
+            if self.weight_decay != 0.0:
+                g = g + self.weight_decay * p.data
+            self._G[i] = self._G[i] + g * g
+            p.data = p.data - self.lr * g / (np.sqrt(self._G[i]) + self.eps)
+
+    def __repr__(self):
+        return f"Adagrad(lr={self.lr}, eps={self.eps})"
+
+
+class Adadelta(Optimizer):
+    """Adadelta. Update rule:
+      Eg_t = rho * Eg_{t-1} + (1 - rho) * g_t^2
+      dx_t = -(sqrt(Ex_{t-1} + eps) / sqrt(Eg_t + eps)) * g_t
+      Ex_t = rho * Ex_{t-1} + (1 - rho) * dx_t^2
+      param += lr * dx_t
+    """
+    def __init__(self, params: Iterable[Tensor], lr: float = 1.0, rho: float = 0.9,
+                 eps: float = 1e-6, weight_decay: float = 0.0):
+        super().__init__(params, lr)
+        self.rho = float(rho)
+        self.eps = float(eps)
+        self.weight_decay = float(weight_decay)
+        self._Eg: List[np.ndarray] = [np.zeros_like(p.data) for p in self.params]
+        self._Ex: List[np.ndarray] = [np.zeros_like(p.data) for p in self.params]
+
+    def step(self):
+        for i, p in enumerate(self.params):
+            if p.grad is None:
+                continue
+            g = p.grad.data
+            if self.weight_decay != 0.0:
+                g = g + self.weight_decay * p.data
+            self._Eg[i] = self.rho * self._Eg[i] + (1.0 - self.rho) * (g * g)
+            dx = -(np.sqrt(self._Ex[i] + self.eps) / np.sqrt(self._Eg[i] + self.eps)) * g
+            self._Ex[i] = self.rho * self._Ex[i] + (1.0 - self.rho) * (dx * dx)
+            p.data = p.data + self.lr * dx
+
+    def __repr__(self):
+        return f"Adadelta(lr={self.lr}, rho={self.rho}, eps={self.eps})"
+
+
+# ─── More LR schedulers (Pile A #11) ───────────────────────
+
+class MultiStepLR(_LRScheduler):
+    """Decay lr by gamma at each milestone. Matches torch.optim.lr_scheduler.MultiStepLR.
+    At step N, effective lr = base_lr * gamma^(number_of_milestones_passed_by_N).
+    """
+    def __init__(self, optimizer, milestones, gamma: float = 0.1):
+        super().__init__(optimizer)
+        self.milestones = sorted(int(m) for m in milestones)
+        self.gamma = float(gamma)
+
+    def _compute_lr(self, step: int) -> float:
+        passed = sum(1 for m in self.milestones if step >= m)
+        return self.base_lr * (self.gamma ** passed)
+
+    def __repr__(self):
+        return f"MultiStepLR(milestones={self.milestones}, gamma={self.gamma})"
+
+
+class ExponentialLR(_LRScheduler):
+    """lr *= gamma each scheduler step. Matches torch.optim.lr_scheduler.ExponentialLR."""
+    def __init__(self, optimizer, gamma: float):
+        super().__init__(optimizer)
+        self.gamma = float(gamma)
+
+    def _compute_lr(self, step: int) -> float:
+        return self.base_lr * (self.gamma ** step)
+
+    def __repr__(self):
+        return f"ExponentialLR(gamma={self.gamma})"
+
+
+class ReduceLROnPlateau:
+    """Reduce LR when a metric stops improving. Matches torch's class with the
+    common subset of options: mode in {min, max}, factor, patience, threshold.
+
+    Unlike _LRScheduler, this one takes a metric in step(metric).
+    """
+    def __init__(self, optimizer, mode: str = "min", factor: float = 0.1,
+                 patience: int = 10, threshold: float = 1e-4, min_lr: float = 0.0):
+        if mode not in ("min", "max"):
+            raise ValueError(f"ReduceLROnPlateau: mode must be 'min' or 'max', got {mode!r}")
+        if not (0.0 < factor < 1.0):
+            raise ValueError(f"ReduceLROnPlateau: factor must be in (0, 1), got {factor}")
+        self.optimizer = optimizer
+        self.mode = mode
+        self.factor = float(factor)
+        self.patience = int(patience)
+        self.threshold = float(threshold)
+        self.min_lr = float(min_lr)
+        self.best = float("inf") if mode == "min" else float("-inf")
+        self.num_bad_epochs = 0
+
+    def _is_better(self, metric: float) -> bool:
+        if self.mode == "min":
+            return metric < self.best - self.threshold
+        return metric > self.best + self.threshold
+
+    def step(self, metric: float) -> None:
+        m = float(metric)
+        if self._is_better(m):
+            self.best = m
+            self.num_bad_epochs = 0
+        else:
+            self.num_bad_epochs += 1
+        if self.num_bad_epochs > self.patience:
+            new_lr = max(self.optimizer.lr * self.factor, self.min_lr)
+            self.optimizer.lr = float(new_lr)
+            self.num_bad_epochs = 0
+
+    def __repr__(self):
+        return f"ReduceLROnPlateau(mode={self.mode!r}, factor={self.factor}, patience={self.patience})"
+
+
+class OneCycleLR(_LRScheduler):
+    """One-cycle policy: warm up from initial_lr to max_lr, then anneal to a
+    very small final value. Matches torch.optim.lr_scheduler.OneCycleLR in
+    its essentials: pct_start, anneal_strategy='cos', cosine warmup + anneal.
+
+    Drops the more exotic momentum-cycling features (we don't model momentum
+    in our optimizer base class).
+    """
+    def __init__(self, optimizer, max_lr: float, total_steps: int,
+                 pct_start: float = 0.3, div_factor: float = 25.0,
+                 final_div_factor: float = 1e4, anneal_strategy: str = "cos"):
+        super().__init__(optimizer)
+        if anneal_strategy not in ("cos", "linear"):
+            raise ValueError(f"OneCycleLR: anneal_strategy must be 'cos' or 'linear'")
+        self.max_lr = float(max_lr)
+        self.total_steps = int(total_steps)
+        self.pct_start = float(pct_start)
+        self.div_factor = float(div_factor)
+        self.final_div_factor = float(final_div_factor)
+        self.anneal_strategy = anneal_strategy
+        self.initial_lr = self.max_lr / self.div_factor
+        self.final_lr = self.initial_lr / self.final_div_factor
+        self.warmup_steps = max(1, int(round(self.pct_start * self.total_steps)))
+        self.optimizer.lr = self.initial_lr
+        self.base_lr = self.initial_lr  # for _LRScheduler interface compatibility
+
+    def _compute_lr(self, step: int) -> float:
+        if step <= self.warmup_steps:
+            # Cosine warmup from initial_lr → max_lr.
+            t = step / self.warmup_steps
+            if self.anneal_strategy == "linear":
+                return self.initial_lr + t * (self.max_lr - self.initial_lr)
+            cos = 0.5 * (1.0 - np.cos(np.pi * t))
+            return self.initial_lr + cos * (self.max_lr - self.initial_lr)
+        # Anneal from max_lr → final_lr over remaining steps.
+        remaining = self.total_steps - self.warmup_steps
+        t = (step - self.warmup_steps) / max(remaining, 1)
+        if self.anneal_strategy == "linear":
+            return self.max_lr + t * (self.final_lr - self.max_lr)
+        cos = 0.5 * (1.0 + np.cos(np.pi * min(t, 1.0)))
+        return self.final_lr + cos * (self.max_lr - self.final_lr)
+
+    def __repr__(self):
+        return f"OneCycleLR(max_lr={self.max_lr}, total_steps={self.total_steps})"
+
+
+# Expose schedulers under a sub-namespace matching torch.optim.lr_scheduler
+import types as _bg_optim_types
+import sys as _bg_optim_sys
+lr_scheduler = _bg_optim_types.ModuleType("browsergrad_grad.optim.lr_scheduler")
+lr_scheduler.StepLR = StepLR
+lr_scheduler.CosineAnnealingLR = CosineAnnealingLR
+lr_scheduler.MultiStepLR = MultiStepLR
+lr_scheduler.ExponentialLR = ExponentialLR
+lr_scheduler.ReduceLROnPlateau = ReduceLROnPlateau
+lr_scheduler.OneCycleLR = OneCycleLR
+_bg_optim_sys.modules["browsergrad_grad.optim.lr_scheduler"] = lr_scheduler
 `;
