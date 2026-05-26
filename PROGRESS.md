@@ -30,7 +30,7 @@ Implementable on NumPy with TDD. Each row = one focused commit (or small group).
 | 16 | `nn.Conv3d` + `nn.ConvTranspose1d` / `nn.ConvTranspose2d` | ⏳ deferred (rarely used in browser labs; track if demand emerges) | — |
 | 17 | `nn.GroupNorm` / `nn.InstanceNorm{1,2,3}d` / `nn.BatchNorm3d` | 🟡 partial — GroupNorm, InstanceNorm2d, BatchNorm3d done; InstanceNorm1d/3d still pending | — |
 | 18 | Module hooks: `register_forward_hook`, `register_backward_hook` | 🟡 partial — forward hook done; backward hook still pending | — |
-| ★ | **PyTorch-conformance fixture suite** (real torch in subprocess generates fixtures; Pyodide loads + compares) | ⏳ pending | — |
+| ★ | **PyTorch-conformance fixture suite** (real torch in subprocess generates fixtures; Pyodide loads + compares) | ✅ done (Linear, CrossEntropy, LayerNorm, Softmax, ReLU against torch 2.12.0) | — |
 
 ## Pile B — possible but limited
 
