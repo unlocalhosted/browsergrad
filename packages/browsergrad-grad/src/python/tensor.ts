@@ -135,6 +135,42 @@ class Tensor:
             raise TypeError(f"bool() only valid on scalar tensors, got shape {self.data.shape}")
         return bool(self.data.flat[0])
 
+    # ─── Indexing ──────────────────────────────────────────
+
+    def __getitem__(self, key):
+        """Index/slice/mask/fancy-index, all routed through numpy's getitem.
+
+        Boolean masks (np.bool_ array) and integer-array indexing produce
+        a gather-style op whose backward scatters gradient back to the
+        original positions via np.add.at — handles duplicate indices
+        correctly. Slice indexing backward is just a slot-assign on a zero
+        gradient.
+        """
+        return _getitem(self, key)
+
+    # ─── Comparison ops ───────────────────────────────────
+    # Return float-encoded 0/1 tensors (PyTorch returns bool but our
+    # downstream ops are all f32 — float-encoded is more useful for the
+    # common (pred == target).float().mean() pattern).
+
+    def __eq__(self, other):
+        return _compare(self, other, np.equal)
+    def __ne__(self, other):
+        return _compare(self, other, np.not_equal)
+    def __lt__(self, other):
+        return _compare(self, other, np.less)
+    def __gt__(self, other):
+        return _compare(self, other, np.greater)
+    def __le__(self, other):
+        return _compare(self, other, np.less_equal)
+    def __ge__(self, other):
+        return _compare(self, other, np.greater_equal)
+    # __hash__ is removed by Python when __eq__ is overridden in a class
+    # with __slots__. Re-add identity-hash so Tensors can still be put in
+    # sets / dict keys (needed by some user code that caches by tensor).
+    def __hash__(self):
+        return id(self)
+
     def zero_grad(self):
         """Reset .grad to None. Called by Optimizer.zero_grad on every parameter."""
         self.grad = None
@@ -493,6 +529,56 @@ def _transpose(a: Tensor, dim0: int, dim1: int) -> Tensor:
     out_data = np.swapaxes(a.data, dim0, dim1)
     out = Tensor(out_data)
     return _build_ctx(out, (a,), lambda g: (np.swapaxes(g.data, dim0, dim1).copy(),))
+
+
+def _getitem(a: Tensor, key) -> Tensor:
+    """Generic indexing. numpy handles every flavor (slice / int / int-array /
+    bool-mask / tuple of any of the above). For backward we route through
+    np.add.at so duplicate indices accumulate correctly.
+    """
+    # Normalize Tensor keys to numpy arrays
+    def _to_np(k):
+        if isinstance(k, Tensor):
+            # Heuristic: a Tensor used as a mask/index is converted to an
+            # int64 array if it looks integral, else used as a bool mask.
+            arr = k.data
+            if arr.dtype == np.bool_:
+                return arr
+            # All-integral float → int64
+            if np.all(np.equal(np.mod(arr, 1), 0)):
+                return arr.astype(np.int64)
+            return arr
+        return k
+
+    if isinstance(key, tuple):
+        norm_key = tuple(_to_np(k) for k in key)
+    else:
+        norm_key = _to_np(key)
+
+    out_data = a.data[norm_key]
+    # Ensure we have a Tensor (numpy may have returned a scalar)
+    out_arr = np.asarray(out_data, dtype=np.float32)
+    out = Tensor(out_arr)
+    in_shape = a.data.shape
+
+    def backward(g):
+        grad_a = np.zeros(in_shape, dtype=np.float32)
+        # np.add.at handles duplicate indices for fancy indexing AND works
+        # for slice / bool-mask / int indices.
+        np.add.at(grad_a, norm_key, g.data)
+        return (grad_a,)
+
+    return _build_ctx(out, (a,), backward)
+
+
+def _compare(a, b, np_op) -> Tensor:
+    """Element-wise comparison; returns a float-encoded 0/1 tensor.
+    Non-differentiable — no _ctx attached.
+    """
+    a_data = a.data if isinstance(a, Tensor) else np.asarray(a, dtype=np.float32)
+    b_data = b.data if isinstance(b, Tensor) else np.asarray(b, dtype=np.float32)
+    out = np_op(a_data, b_data).astype(np.float32)
+    return Tensor(out)
 
 
 def _permute(a: Tensor, dims: tuple) -> Tensor:
