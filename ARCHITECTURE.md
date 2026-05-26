@@ -13,8 +13,8 @@ For broader PyTorch-coverage progress, see [PROGRESS.md](PROGRESS.md).
 |---|---|---|---|---|
 | 5 | Single-source the version | Add `resolveJsonModule`; import `pkg` in 3 files; don't flip `verbatimModuleSyntax` | ✅ done | `27cf321` |
 | 4 | Python source as `.py` files | Pre-tsc codegen script; commit generated files; base64-IIFE emission | ✅ done | `a8b926a` |
-| 3 | NodePyodideTarget adapter | Factory at `./node-adapter` subpath; `pyodide` as optionalPeerDep | ✅ done | (this commit) |
-| 2 | Split torch_compat into real/limited/impossible | Self-installing modules; runtime `is`-identity assertion pins the latent coupling | ⏳ pending | — |
+| 3 | NodePyodideTarget adapter | Factory at `./node-adapter` subpath; `pyodide` as optionalPeerDep | ✅ done | `f023df5` |
+| 2 | Split torch_compat into real/limited/impossible | Self-installing modules; runtime `is`-identity assertion pins the latent coupling | ✅ done | (this commit) |
 | 1 | Split nn.ts into per-family TS chunks | Option A (TS-split, single `nn.py`); `NN_CHUNK_ORDER` constant enforces order | ⏳ pending | — |
 
 ## Methodology
@@ -156,7 +156,12 @@ The `Module.to` monkey-patch fix (moving it into `nn.ts` as a proper method) is 
 
 ### Decisions
 
-_(filled in during implementation)_
+- **Underscore-prefixed sibling files**, not a `_torch_compat/` subpackage. The three private modules are `_torch_compat_real.py`, `_torch_compat_limited.py`, `_torch_compat_impossible.py` — leading underscore signals private, no new subpackage namespace pollution.
+- **The identity assertion reads `torch_mod.nn.Module is _bg.nn.Module`** (via the orchestrator's already-available `torch_mod` reference), not the local `torch_nn` variable. Simpler — doesn't change install_real's signature.
+- **Pile B/C functions don't need to register sys.modules themselves.** The orchestrator reads sub-modules off `torch_mod` (e.g., `torch_mod.amp`, `torch_mod.cuda`) for sys.modules registration. Each pile installer's only side effect is mutating `torch_mod`, which keeps the contract narrow.
+- **Pile C doesn't take `_bg`** as an argument — Pile C is `_bg`-free by design, and threading an unused arg in would weaken that property.
+- **`surface.test.ts` "ships the documented module set" assertion updated** to list all three new private .py files in the SOURCE_FILES order (real → limited → impossible → torch_compat, because torch_compat imports from them at Python module load).
+- **`_torch_compat_real.py` carries a comment naming the assertion as the load-bearing dependency**: future contributors changing the shallow copy to a deep copy will see the comment AND fail the runtime assertion the next time `install_torch_alias()` runs. Two signals, one obvious next step (move `Module.to` into nn.py).
 
 ---
 

@@ -29,6 +29,9 @@ const MODULES = [
   ["nn.py", "nn.generated.ts", "NN_PY"],
   ["optim.py", "optim.generated.ts", "OPTIM_PY"],
   ["torch_compat.py", "torch_compat.generated.ts", "TORCH_COMPAT_PY"],
+  ["_torch_compat_real.py", "_torch_compat_real.generated.ts", "TORCH_COMPAT_REAL_PY"],
+  ["_torch_compat_limited.py", "_torch_compat_limited.generated.ts", "TORCH_COMPAT_LIMITED_PY"],
+  ["_torch_compat_impossible.py", "_torch_compat_impossible.generated.ts", "TORCH_COMPAT_IMPOSSIBLE_PY"],
   ["utils_data.py", "utils_data.generated.ts", "UTILS_DATA_PY"],
 ];
 

@@ -14,6 +14,9 @@ import { FUNCTIONAL_PY } from "./functional.js";
 import { NN_PY } from "./nn.js";
 import { OPTIM_PY } from "./optim.js";
 import { TORCH_COMPAT_PY } from "./torch_compat.js";
+import { TORCH_COMPAT_REAL_PY } from "./_torch_compat_real.js";
+import { TORCH_COMPAT_LIMITED_PY } from "./_torch_compat_limited.js";
+import { TORCH_COMPAT_IMPOSSIBLE_PY } from "./_torch_compat_impossible.js";
 import { UTILS_DATA_PY } from "./utils_data.js";
 import pkg from "../../package.json";
 
@@ -99,6 +102,9 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_grad/functional.py", content: FUNCTIONAL_PY },
   { path: "browsergrad_grad/nn.py", content: NN_PY },
   { path: "browsergrad_grad/optim.py", content: OPTIM_PY },
+  { path: "browsergrad_grad/_torch_compat_real.py", content: TORCH_COMPAT_REAL_PY },
+  { path: "browsergrad_grad/_torch_compat_limited.py", content: TORCH_COMPAT_LIMITED_PY },
+  { path: "browsergrad_grad/_torch_compat_impossible.py", content: TORCH_COMPAT_IMPOSSIBLE_PY },
   { path: "browsergrad_grad/torch_compat.py", content: TORCH_COMPAT_PY },
   { path: "browsergrad_grad/utils/__init__.py", content: 'from . import data\n__all__ = ["data"]\n' },
   { path: "browsergrad_grad/utils/data.py", content: UTILS_DATA_PY },
