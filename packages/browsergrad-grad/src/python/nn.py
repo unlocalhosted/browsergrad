@@ -1195,17 +1195,6 @@ class Dropout2d(Module):
 # training use cases. A fully fused backward through statistics can be
 # added later if a use case needs it.
 
-def _normalize_with_affine(x_data, mean, var, eps, weight, bias, broadcast_shape):
-    """Shared helper: return (out_data, x_hat, inv_std_broadcast)."""
-    inv_std = 1.0 / np.sqrt(var + eps)
-    x_hat = (x_data - mean.reshape(broadcast_shape)) * inv_std.reshape(broadcast_shape)
-    if weight is None and bias is None:
-        return x_hat.astype(np.float32), x_hat, inv_std
-    w = weight.data.reshape(broadcast_shape) if weight is not None else 1.0
-    b = bias.data.reshape(broadcast_shape) if bias is not None else 0.0
-    return (x_hat * w + b).astype(np.float32), x_hat, inv_std
-
-
 class GroupNorm(Module):
     """Group normalization (Wu & He, 2018). Splits channels into groups
     and normalizes within each group.
