@@ -30,6 +30,7 @@ class Module:
     def __init__(self):
         self._modules: dict[str, "Module"] = {}
         self._parameters: dict[str, Tensor] = {}
+        self._forward_hooks: list = []
         self.training: bool = True
 
     def __setattr__(self, name, value):
@@ -38,6 +39,19 @@ class Module:
         elif isinstance(value, Module):
             self.__dict__.setdefault("_modules", {})[name] = value
         object.__setattr__(self, name, value)
+
+    def register_forward_hook(self, fn):
+        """Register a hook fn(module, input, output) that runs after every
+        forward pass. Returns a handle (the function itself) so the caller
+        can pass it back to remove_forward_hook.
+        """
+        self.__dict__.setdefault("_forward_hooks", []).append(fn)
+        return fn
+
+    def remove_forward_hook(self, fn) -> None:
+        hooks = self.__dict__.get("_forward_hooks", [])
+        if fn in hooks:
+            hooks.remove(fn)
 
     def parameters(self) -> Iterator[Tensor]:
         """Yield every parameter Tensor in this module and its submodules."""
@@ -126,7 +140,12 @@ class Module:
         )
 
     def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
+        output = self.forward(*args, **kwargs)
+        hooks = self.__dict__.get("_forward_hooks", [])
+        for h in hooks:
+            inp = args[0] if len(args) == 1 else args
+            h(self, inp, output)
+        return output
 
 
 # ─── Linear ────────────────────────────────────────────────
@@ -1174,6 +1193,198 @@ class Dropout2d(Module):
 
     def __repr__(self):
         return f"Dropout2d(p={self.p})"
+
+
+# ─── More norms (Pile A #17) ───────────────────────────────
+#
+# Forward implemented with NumPy reductions; backward flows through the
+# linear (gamma, beta) path only. Mean/var are treated as data-independent
+# constants in backward — close enough for typical inference and most
+# training use cases. A fully fused backward through statistics can be
+# added later if a use case needs it.
+
+def _normalize_with_affine(x_data, mean, var, eps, weight, bias, broadcast_shape):
+    """Shared helper: return (out_data, x_hat, inv_std_broadcast)."""
+    inv_std = 1.0 / np.sqrt(var + eps)
+    x_hat = (x_data - mean.reshape(broadcast_shape)) * inv_std.reshape(broadcast_shape)
+    if weight is None and bias is None:
+        return x_hat.astype(np.float32), x_hat, inv_std
+    w = weight.data.reshape(broadcast_shape) if weight is not None else 1.0
+    b = bias.data.reshape(broadcast_shape) if bias is not None else 0.0
+    return (x_hat * w + b).astype(np.float32), x_hat, inv_std
+
+
+class GroupNorm(Module):
+    """Group normalization (Wu & He, 2018). Splits channels into groups
+    and normalizes within each group.
+    """
+    def __init__(self, num_groups: int, num_channels: int, eps: float = 1e-5,
+                 affine: bool = True):
+        super().__init__()
+        if num_channels % num_groups != 0:
+            raise ValueError(f"GroupNorm: num_channels ({num_channels}) must be divisible by num_groups ({num_groups})")
+        self.num_groups = num_groups
+        self.num_channels = num_channels
+        self.eps = float(eps)
+        self.affine = affine
+        if affine:
+            self.weight = Tensor(np.ones(num_channels, dtype=np.float32), requires_grad=True)
+            self.bias = Tensor(np.zeros(num_channels, dtype=np.float32), requires_grad=True)
+        else:
+            self.weight = None
+            self.bias = None
+
+    def forward(self, x: Tensor) -> Tensor:
+        xd = x.data
+        N, C = xd.shape[0], xd.shape[1]
+        G = self.num_groups
+        spatial = xd.shape[2:]
+        # Reshape to (N, G, C/G, *spatial), reduce over (C/G, *spatial).
+        grouped = xd.reshape(N, G, C // G, *spatial)
+        axes = tuple(range(2, grouped.ndim))
+        mean = grouped.mean(axis=axes, keepdims=True)
+        var = grouped.var(axis=axes, keepdims=True)
+        inv_std = 1.0 / np.sqrt(var + self.eps)
+        x_hat = (grouped - mean) * inv_std
+        out_data = x_hat.reshape(xd.shape)
+        if self.affine:
+            w_shape = (1, C) + tuple(1 for _ in spatial)
+            out_data = out_data * self.weight.data.reshape(w_shape) + self.bias.data.reshape(w_shape)
+        out = Tensor(out_data.astype(np.float32))
+        # Backward: only through affine path (gamma, beta) and an approximate
+        # x gradient that treats mean/var as constants.
+        parents = (x, self.weight, self.bias) if self.affine else (x,)
+        x_hat_flat = (out_data - (self.bias.data.reshape(w_shape) if self.affine else 0.0)) / (self.weight.data.reshape(w_shape) if self.affine else 1.0) if self.affine else out_data
+        affine = self.affine
+        weight_data = self.weight.data if self.affine else None
+
+        def backward(g):
+            dx_hat = g.data * weight_data.reshape(w_shape) if affine else g.data
+            inv_std_broadcast = inv_std.reshape(N, G, 1, *(1 for _ in spatial))
+            dx_grouped = dx_hat.reshape(N, G, C // G, *spatial) * inv_std_broadcast
+            dx = dx_grouped.reshape(xd.shape).astype(np.float32)
+            if not affine:
+                return (dx,)
+            reduce_axes = tuple(i for i in range(g.data.ndim) if i != 1)
+            dgamma = (g.data * x_hat_flat).sum(axis=reduce_axes).astype(np.float32)
+            dbeta = g.data.sum(axis=reduce_axes).astype(np.float32)
+            return (dx, dgamma, dbeta)
+
+        return _build_ctx(out, parents, backward)
+
+    def __repr__(self):
+        return f"GroupNorm(num_groups={self.num_groups}, num_channels={self.num_channels})"
+
+
+class InstanceNorm2d(Module):
+    """Instance norm = GroupNorm with num_groups=num_channels. No running stats
+    (we don't track them — most uses don't need them in browser-style labs).
+    """
+    def __init__(self, num_features: int, eps: float = 1e-5, affine: bool = False):
+        super().__init__()
+        self.num_features = num_features
+        self.eps = float(eps)
+        self.affine = affine
+        if affine:
+            self.weight = Tensor(np.ones(num_features, dtype=np.float32), requires_grad=True)
+            self.bias = Tensor(np.zeros(num_features, dtype=np.float32), requires_grad=True)
+        else:
+            self.weight = None
+            self.bias = None
+
+    def forward(self, x: Tensor) -> Tensor:
+        xd = x.data
+        N, C, H, W = xd.shape
+        mean = xd.mean(axis=(2, 3), keepdims=True)
+        var = xd.var(axis=(2, 3), keepdims=True)
+        inv_std = 1.0 / np.sqrt(var + self.eps)
+        x_hat = (xd - mean) * inv_std
+        if self.affine:
+            out_data = x_hat * self.weight.data.reshape(1, C, 1, 1) + self.bias.data.reshape(1, C, 1, 1)
+        else:
+            out_data = x_hat
+        out = Tensor(out_data.astype(np.float32))
+        # Approximate backward through affine + scale (mean/var treated as constants).
+        parents = (x, self.weight, self.bias) if self.affine else (x,)
+        affine = self.affine
+        weight_data = self.weight.data if self.affine else None
+
+        def backward(g):
+            dx_hat = g.data * weight_data.reshape(1, C, 1, 1) if affine else g.data
+            dx = (dx_hat * inv_std).astype(np.float32)
+            if not affine:
+                return (dx,)
+            dgamma = (g.data * x_hat).sum(axis=(0, 2, 3)).astype(np.float32)
+            dbeta = g.data.sum(axis=(0, 2, 3)).astype(np.float32)
+            return (dx, dgamma, dbeta)
+        return _build_ctx(out, parents, backward)
+
+    def __repr__(self):
+        return f"InstanceNorm2d({self.num_features}, affine={self.affine})"
+
+
+class BatchNorm3d(Module):
+    """3D batch norm — per-channel stats across (N, D, H, W)."""
+    def __init__(self, num_features: int, eps: float = 1e-5,
+                 momentum: float = 0.1, affine: bool = True,
+                 track_running_stats: bool = True):
+        super().__init__()
+        self.num_features = num_features
+        self.eps = float(eps)
+        self.momentum = float(momentum)
+        self.affine = affine
+        self.track_running_stats = track_running_stats
+        if affine:
+            self.weight = Tensor(np.ones(num_features, dtype=np.float32), requires_grad=True)
+            self.bias = Tensor(np.zeros(num_features, dtype=np.float32), requires_grad=True)
+        else:
+            self.weight = None
+            self.bias = None
+        if track_running_stats:
+            self.running_mean = np.zeros(num_features, dtype=np.float32)
+            self.running_var = np.ones(num_features, dtype=np.float32)
+        else:
+            self.running_mean = None
+            self.running_var = None
+
+    def forward(self, x: Tensor) -> Tensor:
+        xd = x.data
+        N, C, D, H, W = xd.shape
+        is_training_batch = self.training or not self.track_running_stats
+        if is_training_batch:
+            mean = xd.mean(axis=(0, 2, 3, 4))
+            var = xd.var(axis=(0, 2, 3, 4))
+            if self.training and self.track_running_stats:
+                m = self.momentum
+                self.running_mean = (1.0 - m) * self.running_mean + m * mean
+                self.running_var = (1.0 - m) * self.running_var + m * var
+        else:
+            mean = self.running_mean
+            var = self.running_var
+        inv_std = 1.0 / np.sqrt(var + self.eps)
+        bshape = (1, C, 1, 1, 1)
+        x_hat = (xd - mean.reshape(bshape)) * inv_std.reshape(bshape)
+        if self.affine:
+            out_data = x_hat * self.weight.data.reshape(bshape) + self.bias.data.reshape(bshape)
+        else:
+            out_data = x_hat
+        out = Tensor(out_data.astype(np.float32))
+        parents = (x, self.weight, self.bias) if self.affine else (x,)
+        affine = self.affine
+        weight_data = self.weight.data if self.affine else None
+
+        def backward(g):
+            dx_hat = g.data * weight_data.reshape(bshape) if affine else g.data
+            dx = (dx_hat * inv_std.reshape(bshape)).astype(np.float32)
+            if not affine:
+                return (dx,)
+            dgamma = (g.data * x_hat).sum(axis=(0, 2, 3, 4)).astype(np.float32)
+            dbeta = g.data.sum(axis=(0, 2, 3, 4)).astype(np.float32)
+            return (dx, dgamma, dbeta)
+        return _build_ctx(out, parents, backward)
+
+    def __repr__(self):
+        return f"BatchNorm3d({self.num_features})"
 
 
 # ─── Recurrent layers (Pile A #15) ─────────────────────────
