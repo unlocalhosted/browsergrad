@@ -203,6 +203,31 @@ commit. Mixing dead-code removal into a 12-file refactor poisons the diff.
 
 ---
 
+## Post-refactor quality pass
+
+After all 5 refactors landed (#5 → #4 → #3 → #2 → #1), one combined commit
+ran `/polish` + `/delight` + `/harden` over the new code, and a final
+`/extract` survey looked for duplication that emerged from the refactors.
+
+### /harden + /delight + /polish (one commit)
+
+- **Codegen fail-fast pre-check.** `build-python-sources.mjs` now refuses to emit anything if any `MODULES` source or `CHUNKED_MODULES` chunk file is missing. Previously a missing chunk would silently truncate the assembled `nn.py` and fail at Pyodide import time with a cryptic Python traceback. Now it lists every missing path and exits non-zero.
+- **NodePyodideTarget shape check.** `createNodePyodideTarget` validates that the argument has `runPythonAsync`, `FS.writeFile`, and `FS.mkdirTree` before constructing the adapter. Catches "wrong object" mistakes at the call site, not deep inside `installGrad`.
+- **README documents `./node-adapter`** with a complete `loadPyodide() → createNodePyodideTarget() → installGrad()` example and the `optionalPeerDependencies` note.
+
+### /extract (no win found)
+
+Surveyed for duplication introduced by the refactors:
+
+- **The 9 `.ts` re-export shims** (each one a single `export { FOO_PY } from "./foo.generated.js"`) are visually repetitive but each carries a one-line docstring naming what the module contains. Deleting them would shuffle `src/python/index.ts` imports to use `.generated.js` paths directly — uglier, no real leverage gained.
+- **The 3 Pile A/B/C install functions** in `_torch_compat_*.py` already share the `(torch_mod, _bg, _types)` signature shape; their bodies mutate `torch_mod` differently, so there's no shared helper to extract.
+- **The IIFE in `.generated.ts` files** is duplicated 9 times in OUTPUT, but the source of truth (the `emit()` function in `build-python-sources.mjs`) is a single function. No source duplication.
+- **The norm classes** (BatchNorm{1,2,3}d, GroupNorm, InstanceNorm2d) share parameter-init and running-stat patterns, but that's a Python-level refactor inside `nn/norm.py`, not architectural deepening.
+
+Honest verdict: the architectural deepening pass produced clean enough seams that no meaningful duplication emerged. Closing out the /extract pass with "nothing material to extract" is the right answer — over-extraction would be worse than the (tiny) repetition.
+
+---
+
 ## Methodology meta-decisions
 
 These are choices made about HOW we work, not about specific refactors:
