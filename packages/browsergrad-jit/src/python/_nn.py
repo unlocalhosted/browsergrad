@@ -179,13 +179,17 @@ class Linear(Module):
         self.out_features = out_features
         # Kaiming-uniform init (PyTorch default). For our v0, simpler:
         # uniform(-bound, bound) with bound = 1 / sqrt(in_features).
+        # NB: use np.random.uniform (legacy global API) — NOT default_rng() —
+        # because the latter creates a fresh generator per call and ignores
+        # np.random.seed() / bg.manual_seed(). The educational use case
+        # depends on deterministic init across runs given a fixed seed.
         bound = 1.0 / math.sqrt(in_features)
-        weight_init = np.random.default_rng().uniform(
+        weight_init = np.random.uniform(
             -bound, bound, size=(out_features, in_features)
         ).astype(np.float32)
         self.weight = Parameter(from_numpy(weight_init, requires_grad=True))
         if bias:
-            bias_init = np.random.default_rng().uniform(
+            bias_init = np.random.uniform(
                 -bound, bound, size=(out_features,)
             ).astype(np.float32)
             self.bias: Optional[Parameter] = Parameter(from_numpy(bias_init, requires_grad=True))

@@ -7,6 +7,52 @@ contract in the README](README.md#compatibility-contract).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-26
+
+PRD-006 kernel fusion (NumPy realizer scope). The fusion pass is on by
+default; toggle with `bg.jit.use_fusion(False)` or `BG_DISABLE_FUSION=1`.
+WGSL fusion stays in PRD-012; PRD-006 v0 establishes the graph-rewrite
+mechanism on the NumPy backend so PRD-012 is a backend swap, not a new
+compiler. 77 tests green (8 unit + 69 integration); zero regressions.
+
+### Added
+
+- IR opcodes `OP_FUSED_ELEMENTWISE` and `OP_FUSED_SOFTMAX` (total: 25).
+- `_fusion.py` graph-rewrite pass with two matchers:
+  - Elementwise-chain matcher absorbing linear sequences of
+    `{ADD, MUL, DIV, NEG, EXP, LOG}` of length ≥ 2 with matching
+    shape/dtype and single-consumer intermediates.
+  - Softmax DAG matcher absorbing the canonical 6-node template
+    (REDUCE(max,keepdims) → NEG → ADD → EXP → REDUCE(sum,keepdims) → DIV)
+    with the EXP's two-consumer (diamond) structure.
+- `_realize.py` handlers for both fused opcodes — the fused-elementwise
+  handler eliminates intermediate ndarray allocations between chain
+  steps; the fused-softmax handler runs three NumPy calls instead of six.
+- `bg.jit` namespace with `use_fusion(bool)`, `fusion_enabled()`,
+  `debug_fused_kernels()`, `debug_unfused_reasons()`.
+- `_fusion_config.py` with the `BG_DISABLE_FUSION` env-var override.
+- Autograd-safety mechanism: backward's intermediate-value pre-pass runs
+  with fusion disabled, so closures that capture original UOps by
+  identity continue to find them by id in the value cache. PRD-007's
+  symbolic backward will lift this restriction.
+
+### Fixed
+
+- `nn.Linear` now uses `np.random.uniform` (legacy global API) instead
+  of `np.random.default_rng().uniform` so `bg.manual_seed()` is
+  respected for parameter init. The previous behavior silently broke
+  deterministic-init expectations; surfaced by the PRD-006
+  fusion-on-vs-off cross-test.
+
+### Internal
+
+- Two-pass design: softmax first (DAG), elementwise second (chain).
+  Order matters — softmax owns nodes the chain matcher would otherwise
+  greedily absorb, producing a worse fusion overall.
+- Per-trace introspection (`FusionReport`) tracks fused groups + matcher
+  rejections with reasons, enabling "why didn't my softmax fuse?"
+  debugging without external profiling.
+
 ## [0.1.0] — 2026-05-26
 
 First public release of the JIT epoch. PRD-005 minimum-viable scope:

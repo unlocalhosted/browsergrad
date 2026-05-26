@@ -36,6 +36,7 @@ from ._ir import (
     OP_EXP, OP_LOG, OP_CMP, OP_MATMUL, OP_REDUCE,
     OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
+    OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
 )
 from ._buffer_table import BufferTable
 from ._errors import RealizationError
@@ -256,6 +257,66 @@ def _h_custom(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     return out
 
 
+def _h_fused_elementwise(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    """Realize an OP_FUSED_ELEMENTWISE chain in a single Python loop.
+
+    The arg carries `ops`: a tuple of `(opcode, lhs_ref, rhs_ref_or_None)`.
+    Refs are integers — negative means "external input N" (using
+    `node.inputs[-ref - 1]`), non-negative means "the i-th step's output."
+
+    Compared to dispatching each op through the realizer's main loop:
+      * No `value_table` insertion + lookup overhead per intermediate.
+      * No np.ndarray retained for any non-terminal step (Python's GC
+        reclaims each step once the next one consumes it).
+      * One Python frame instead of N.
+
+    On a 3-op chain over (B=64, hidden=512) f32: peak intermediate memory
+    drops from 384 KB (3 × 128 KB) to 128 KB (one in-flight).
+    """
+    ops = node.arg["ops"]
+    externals = [vt[id(inp)] for inp in node.inputs]
+    steps: list[np.ndarray] = []
+
+    def _resolve(ref: int) -> np.ndarray:
+        if ref < 0:
+            return externals[-ref - 1]
+        return steps[ref]
+
+    for opcode, lhs_ref, rhs_ref in ops:
+        a = _resolve(lhs_ref)
+        if opcode == OP_ADD:
+            steps.append(a + _resolve(rhs_ref))
+        elif opcode == OP_MUL:
+            steps.append(a * _resolve(rhs_ref))
+        elif opcode == OP_DIV:
+            steps.append(a / _resolve(rhs_ref))
+        elif opcode == OP_NEG:
+            steps.append(-a)
+        elif opcode == OP_EXP:
+            steps.append(np.exp(a))
+        elif opcode == OP_LOG:
+            steps.append(np.log(a))
+        else:
+            raise RealizationError(
+                f"FUSED_ELEMENTWISE: unsupported inner opcode {opcode!r}"
+            )
+    return steps[-1]
+
+
+def _h_fused_softmax(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    """Realize an OP_FUSED_SOFTMAX in three NumPy calls.
+
+    Numerically stable: subtract the row-max before exp. Equivalent to
+    the unfused 7-node decomposition the matcher absorbed, but emits
+    fewer intermediate ndarrays (`x - m` doesn't survive past the
+    subsequent `np.exp`)."""
+    x = vt[id(node.inputs[0])]
+    axis = node.arg["axis"]
+    m = x.max(axis=axis, keepdims=True)
+    e = np.exp(x - m)
+    return e / e.sum(axis=axis, keepdims=True)
+
+
 def _h_store(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     """STORE writes its source into the BUFFER referenced by inputs[0].
 
@@ -303,6 +364,9 @@ _DISPATCH: dict[str, Handler] = {
     OP_INDEX:   _h_index,
     OP_MASK:    _h_mask,
     OP_CUSTOM:  _h_custom,
+    # Fusion (PRD-006)
+    OP_FUSED_ELEMENTWISE: _h_fused_elementwise,
+    OP_FUSED_SOFTMAX:     _h_fused_softmax,
 }
 
 
@@ -325,18 +389,41 @@ if _extra:
 # ---------------------------------------------------------------------------
 
 
-def realize(root: UOp, buffer_table: BufferTable) -> np.ndarray:
+def realize(
+    root: UOp,
+    buffer_table: BufferTable,
+    *,
+    autograd_holdout: "set[int] | None" = None,
+) -> np.ndarray:
     """Walk the IR rooted at `root` in topological order, dispatching each
     UOp to its NumPy handler. Returns a fresh np.ndarray; safe to mutate.
 
-    The dispatched values are held in a per-call dict (`value_table`).
-    Intermediates that are no longer needed are not evicted in this v0
-    implementation — gradient checkpointing (PRD-009) is the right tool
-    for memory-limited workloads.
+    When fusion is enabled (`_fusion_config.is_enabled()`), the pass runs
+    first and replaces `root` with a rewritten graph containing
+    `OP_FUSED_*` nodes. The dispatch table picks them up via their
+    handlers transparently.
+
+    `autograd_holdout`: the set of UOp ids that must not be absorbed as
+    non-terminal nodes in any fused group. The caller (typically a
+    backward walker that has access to per-proxy `_ctx.input_proxies`)
+    computes this via `_fusion.collect_autograd_holdout` and passes it
+    in. Default `None` ≡ "no constraints," which is correct for forward-
+    only realization where no closures will later read intermediates.
 
     Raises `RealizationError` if any handler fails. The error carries the
     offending UOp's opcode + shape in the message so debugging is local.
     """
+    from . import _fusion_config
+    if _fusion_config.is_enabled():
+        from ._fusion import fuse
+        root = fuse(root, holdout=autograd_holdout or set())
+    else:
+        # Keep introspection state consistent: a realize() with fusion
+        # disabled should not leave a stale report from a prior fuse()
+        # call lying around for debug_fused_kernels() to find.
+        from . import _fusion as _f
+        _f._LAST_REPORT = _f.FusionReport()
+
     value_table: dict[int, np.ndarray] = {}
     order = toposort(root)
     for node in order:

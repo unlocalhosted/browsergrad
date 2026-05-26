@@ -79,14 +79,25 @@ OP_INDEX   = "INDEX"    # arg: {dim: int}              ← int-array indexing
 OP_MASK    = "MASK"     # arg: None                    ← bool-mask indexing
 OP_CUSTOM  = "CUSTOM"   # arg: {fn_id, captures, ...}  ← opaque NumPy callable
 
+# Fusion-emitted opcodes (PRD-006). These never appear in user-built IR;
+# they're created by `_fusion.fuse()` as graph rewrites of the elementwise
+# and softmax subgraphs the matcher recognizes. The realizer dispatches
+# each as a single NumPy handler, eliminating per-op intermediate
+# allocations. Equally important: they create the seam that PRD-012's
+# WGSL megakernel codegen plugs into without touching pattern matching.
+OP_FUSED_ELEMENTWISE = "FUSED_ELEMENTWISE"  # arg: {ops, external_inputs}
+OP_FUSED_SOFTMAX     = "FUSED_SOFTMAX"      # arg: {axis: int}
+
 ALL_OPS: FrozenSet[str] = frozenset({
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CMP,
     OP_MATMUL, OP_REDUCE,
     OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
+    # Fusion-emitted (PRD-006)
+    OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
 })
-assert len(ALL_OPS) == 23, "opcode count drifted from PRD-005 critique"
+assert len(ALL_OPS) == 25, "opcode count drifted from PRD-005+006"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -310,6 +321,7 @@ __all__ = [
     "OP_EXP", "OP_LOG", "OP_CMP", "OP_MATMUL", "OP_REDUCE",
     "OP_RESHAPE", "OP_PERMUTE", "OP_SLICE", "OP_PAD",
     "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",
+    "OP_FUSED_ELEMENTWISE", "OP_FUSED_SOFTMAX",
     "ALL_OPS",
     # Core class + helpers
     "UOp", "toposort", "all_buffers",

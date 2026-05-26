@@ -685,13 +685,24 @@ class TensorProxy:
         }
 
         # 2. Realize every UOp once for the values backward closures need.
+        #    Fusion is temporarily disabled here: every UOp we realize is
+        #    one the closures will later read by id, and fusion would
+        #    absorb those UOps into FUSED_* nodes whose intermediates
+        #    don't live in `value_cache`. PRD-007's symbolic backward
+        #    lifts this restriction by rewriting the closures themselves.
         from ._ir import toposort
         from ._realize import realize
+        from . import _fusion_config
         order = toposort(self._uop)
         sess = self._get_session()
         value_cache: dict[int, np.ndarray] = {}
-        for node in order:
-            value_cache[id(node)] = realize(node, sess.buffer_table)
+        was_enabled = _fusion_config.is_enabled()
+        _fusion_config.use_fusion(False)
+        try:
+            for node in order:
+                value_cache[id(node)] = realize(node, sess.buffer_table)
+        finally:
+            _fusion_config.use_fusion(was_enabled)
 
         # 3. Reverse-topological walk: propagate gradients via each proxy's
         #    backward closure. `grads` is keyed by proxy id (we may have

@@ -17,6 +17,8 @@ import { IR_PY } from "./_ir.generated.js";
 import { ERRORS_PY } from "./_errors.generated.js";
 import { BUFFER_TABLE_PY } from "./_buffer_table.generated.js";
 import { REALIZE_PY } from "./_realize.generated.js";
+import { FUSION_PY } from "./_fusion.generated.js";
+import { FUSION_CONFIG_PY } from "./_fusion_config.generated.js";
 import { TENSOR_PROXY_PY } from "./_tensor_proxy.generated.js";
 import { NN_PY } from "./_nn.generated.js";
 import { FUNCTIONAL_PY } from "./_functional.generated.js";
@@ -76,8 +78,11 @@ from ._errors import (
     BufferTableError,
 )
 from . import _functional, _nn, _optim
+from . import _fusion as _fusion_mod
+from . import _fusion_config as _fc
 from ._torch_compat import install_torch_alias, uninstall_torch_alias
 import sys as _sys
+import types as _types
 
 # PyTorch-style alias for the lazy tensor type.
 Tensor = TensorProxy
@@ -91,6 +96,29 @@ _sys.modules["browsergrad_jit.nn.functional"] = _functional
 _sys.modules["browsergrad_jit.optim"] = _optim
 nn = _nn
 optim = _optim
+
+
+# bg.jit — the introspection + control surface for the JIT.
+# Public methods (semver-stable across the 0.x line):
+#   use_fusion(bool)          — toggle fusion globally (default True)
+#   debug_fused_kernels()     — list of FusedKernelInfo from the last run
+#   debug_unfused_reasons()   — list of UnfusedReason from the last run
+jit = _types.ModuleType("browsergrad_jit.jit")
+jit.use_fusion = _fc.use_fusion
+jit.fusion_enabled = _fc.is_enabled
+
+
+def _debug_fused_kernels():
+    return list(_fusion_mod.get_last_report().fused)
+
+
+def _debug_unfused_reasons():
+    return list(_fusion_mod.get_last_report().unfused)
+
+
+jit.debug_fused_kernels = _debug_fused_kernels
+jit.debug_unfused_reasons = _debug_unfused_reasons
+_sys.modules["browsergrad_jit.jit"] = jit
 
 
 class Session:
@@ -153,7 +181,7 @@ __all__ = [
     "tensor", "zeros", "ones", "randn", "arange", "from_numpy",
     "Session", "get_default_session", "set_default_session", "new_session",
     "manual_seed",
-    "nn", "optim",
+    "nn", "optim", "jit",
     "install_torch_alias", "uninstall_torch_alias",
     "JitError", "ShapeError", "TorchAliasConflict",
     "NoBackwardError", "JitNotImplementedError",
@@ -181,7 +209,9 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_jit/_errors.py", content: ERRORS_PY },
   { path: "browsergrad_jit/_ir.py", content: IR_PY },
   { path: "browsergrad_jit/_buffer_table.py", content: BUFFER_TABLE_PY },
+  { path: "browsergrad_jit/_fusion_config.py", content: FUSION_CONFIG_PY },
   { path: "browsergrad_jit/_realize.py", content: REALIZE_PY },
+  { path: "browsergrad_jit/_fusion.py", content: FUSION_PY },
   { path: "browsergrad_jit/_tensor_proxy.py", content: TENSOR_PROXY_PY },
   { path: "browsergrad_jit/_functional.py", content: FUNCTIONAL_PY },
   { path: "browsergrad_jit/_nn.py", content: NN_PY },

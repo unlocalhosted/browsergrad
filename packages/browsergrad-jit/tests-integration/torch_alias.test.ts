@@ -65,7 +65,7 @@ import torch.nn.functional as F
 t = torch.tensor([1.0, 2.0, 3.0, 4.0])
 {"ver": torch.__version__, "sumValue": float(t.sum().item())}
 `);
-    expect(result.ver).toBe("0.1.0");
+    expect(result.ver).toBe("0.2.0");
     expect(result.sumValue).toBe(10.0);
   });
 
