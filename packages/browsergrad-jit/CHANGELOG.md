@@ -7,18 +7,26 @@ contract in the README](README.md#compatibility-contract).
 
 ## [Unreleased]
 
-PRD-007 Week 1: symbolic VJP rules registry + first 11 rules. The
-closure-based backward still drives `.backward()`; the rules ship as a
-parallel surface that PRD-009 (gradient checkpointing) and PRD-014
-(vmap/grad) build on. Subsequent PRD-007 weeks migrate `.backward()`
-itself to dispatch through the registry, lift the
-`use_fusion(False)`-during-backward workaround, and ship double backward.
+## [0.3.0] — 2026-05-26
+
+PRD-007 symbolic backward — Weeks 1+2 ship: VJP rule registry +
+dispatcher that routes `.backward()` through the registry when all ops
+on the chain have rules, with a closure fallback for unregistered ops.
+The symbolic path runs with fusion ON (the workaround from PRD-006 only
+applies to the closure fallback).
 
 ### Added
 
-- IR opcode `OP_SCATTER_ADD` (total: 26). NumPy realizer uses
-  `np.add.at` — deterministic by construction. PRD-012's future WGSL
-  lowering must preserve determinism (sort-and-segment-reduce default).
+- IR opcodes `OP_SCATTER_ADD` and `OP_BROADCAST_TO` (total: 27).
+  `SCATTER_ADD`'s NumPy realizer uses `np.add.at` — deterministic by
+  construction. PRD-012's future WGSL lowering must preserve
+  determinism (sort-and-segment-reduce default). `BROADCAST_TO` makes
+  implicit shape extension explicit in the IR — needed because the
+  metadata-shape contract doesn't coerce NumPy op outputs.
+- `TensorProxy.backward()` dispatcher: when every UOp on the path has
+  a registered VJP rule, runs the symbolic path (build backward IR,
+  realize once with fusion ON). Otherwise falls back to the legacy
+  closure path (with fusion forced off, as PRD-006 requires).
 - `_vjp.py`: VJP rule registry (`register_vjp` decorator, `get_rule`,
   `list_registered`) with 11 rules for: `ADD`, `MUL`, `DIV`, `NEG`,
   `EXP`, `LOG`, `MATMUL`, `REDUCE` (sum/mean), `RESHAPE`, `PERMUTE`,

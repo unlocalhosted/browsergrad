@@ -30,16 +30,16 @@ describe("browsergrad_jit._ir under real Pyodide", () => {
 import browsergrad_jit
 browsergrad_jit.__version__
 `);
-    expect(version).toBe("0.2.0");
+    expect(version).toBe("0.3.0");
   });
 
-  it("exposes 26 opcodes in ALL_OPS (23 core + 2 fusion + 1 autograd)", async () => {
+  it("exposes 27 opcodes in ALL_OPS (23 core + 2 fusion + 2 autograd)", async () => {
     const target = await getJitTarget();
     const count = await target.run<number>(`
 from browsergrad_jit._ir import ALL_OPS
 len(ALL_OPS)
 `);
-    expect(count).toBe(26);
+    expect(count).toBe(27);
   });
 
   it("constructs a BUFFER leaf with the documented signature", async () => {

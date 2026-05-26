@@ -50,7 +50,7 @@ from ._ir import (
     UOp,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CAST,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
-    OP_CONST,
+    OP_CONST, OP_BROADCAST_TO,
 )
 
 
@@ -155,10 +155,9 @@ def _unbroadcast_uop(dy: UOp, target_shape: Tuple[int, ...],
     cur = dy
     extra_dims = len(cur.shape) - len(target_shape)
     if extra_dims > 0:
-        # Sum over the leading extra dims. NumPy/_ir REDUCE expects a
-        # tuple of axes; we collapse them in one call rather than emit
-        # one REDUCE per leading dim.
-        axes = list(range(extra_dims))
+        # Sum over the leading extra dims. NumPy's `axis` argument accepts
+        # int or tuple of int but NOT list — be explicit about the type.
+        axes_t = tuple(range(extra_dims))
         reduced_shape = tuple(cur.shape[i] for i in range(extra_dims, len(cur.shape)))
         cur = _vjp_uop(
             OP_REDUCE,
@@ -166,18 +165,19 @@ def _unbroadcast_uop(dy: UOp, target_shape: Tuple[int, ...],
             reduced_shape,
             cur.dtype,
             forward_node,
-            arg={"op": "sum", "axis": axes, "keepdims": False},
+            arg={"op": "sum", "axis": axes_t, "keepdims": False},
         )
 
     # Now cur.shape is at least as short as target_shape; walk the
     # remaining dims and squash any size-1 ↔ size-N mismatches.
-    extra_axes_to_reduce: list[int] = []
+    extra_axes: list[int] = []
     for i, target_dim in enumerate(target_shape):
         if target_dim == 1 and cur.shape[i] != 1:
-            extra_axes_to_reduce.append(i)
-    if extra_axes_to_reduce:
+            extra_axes.append(i)
+    if extra_axes:
+        extra_axes_t = tuple(extra_axes)
         new_shape = tuple(
-            1 if i in extra_axes_to_reduce else cur.shape[i]
+            1 if i in extra_axes else cur.shape[i]
             for i in range(len(cur.shape))
         )
         cur = _vjp_uop(
@@ -186,7 +186,7 @@ def _unbroadcast_uop(dy: UOp, target_shape: Tuple[int, ...],
             new_shape,
             cur.dtype,
             forward_node,
-            arg={"op": "sum", "axis": extra_axes_to_reduce, "keepdims": True},
+            arg={"op": "sum", "axis": extra_axes_t, "keepdims": True},
         )
     return cur
 
@@ -405,29 +405,18 @@ def _vjp_reduce(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional
         )
         cur = _vjp_uop(OP_MUL, (cur, scale), expanded_shape, cur.dtype, output)
 
-    # Broadcast back to input shape by re-running an unbroadcast in reverse:
-    # we use a MUL by ones_like(x) so the IR remains a normal graph (no
-    # implicit broadcasts). Simpler in practice: tag the gradient with the
-    # target shape via RESHAPE then let downstream consumers broadcast in
-    # NumPy. The cleanest way is to use ADD with a zero of the input shape —
-    # but ADD broadcasts NumPy-style, which is exactly what we want.
+    # Broadcast back to input shape. The IR's shape field is metadata —
+    # it doesn't coerce a NumPy op's output. We need an explicit
+    # broadcast: OP_BROADCAST_TO calls np.broadcast_to under the hood.
     if cur.shape != x.shape:
-        zero = _vjp_uop(
-            OP_CONST,
-            (),
-            (),
+        cur = _vjp_uop(
+            OP_BROADCAST_TO,
+            (cur,),
+            x.shape,
             cur.dtype,
             output,
-            arg={"value": 0.0},
+            arg={"shape": x.shape},
         )
-        # We need a tensor of x.shape full of zeros to broadcast `cur` to.
-        # Wrap the scalar zero in a RESHAPE-style identity: zero_like(x) is
-        # `ADD(zero, zero, broadcast)` — but that's circular. The cleanest
-        # is to emit an explicit broadcast: `cur + 0.0_broadcast(x.shape)`.
-        # The trick: ADD broadcasts naturally if one side has the target
-        # shape. So emit a zero-CONST of `x.shape` (scalar zero is enough —
-        # NumPy will broadcast it).
-        cur = _vjp_uop(OP_ADD, (cur, zero), x.shape, cur.dtype, output)
     return (cur,)
 
 

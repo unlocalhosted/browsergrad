@@ -696,53 +696,123 @@ class TensorProxy:
             id(p): p for p in proxy_by_uop_id.values()
         }
 
-        # 2. Realize every UOp once for the values backward closures need.
-        #    Fusion is temporarily disabled here: every UOp we realize is
-        #    one the closures will later read by id, and fusion would
-        #    absorb those UOps into FUSED_* nodes whose intermediates
-        #    don't live in `value_cache`. PRD-007's symbolic backward
-        #    lifts this restriction by rewriting the closures themselves.
+        # 2. Decide: symbolic or closure path?
+        #    Symbolic path requires every non-leaf proxy on the chain to
+        #    have a registered VJP rule. If even one is missing, fall back
+        #    to the legacy closure path (which has been validated since
+        #    PRD-005 and stays the safety net while PRD-007 lands).
         from ._ir import toposort
         from ._realize import realize
-        from . import _fusion_config
+        from . import _fusion_config, _vjp
         order = toposort(self._uop)
         sess = self._get_session()
-        value_cache: dict[int, np.ndarray] = {}
-        was_enabled = _fusion_config.is_enabled()
-        _fusion_config.use_fusion(False)
-        try:
-            for node in order:
-                value_cache[id(node)] = realize(node, sess.buffer_table)
-        finally:
-            _fusion_config.use_fusion(was_enabled)
 
-        # 3. Reverse-topological walk: propagate gradients via each proxy's
-        #    backward closure. `grads` is keyed by proxy id (we may have
-        #    multiple proxies wrapping the same UOp during a single
-        #    backward, so the proxy identity is the correct key).
-        grads: dict[int, np.ndarray] = {id(self): grad_arr}
-        for node in reversed(order):
-            proxy = proxy_by_uop_id.get(id(node))
-            if proxy is None or proxy._ctx is None:
+        symbolic_viable = True
+        for proxy in proxy_by_uop_id.values():
+            if proxy._ctx is None:
                 continue
-            if id(proxy) not in grads:
-                # No gradient flowed to this proxy (e.g. it sits off the
-                # path between `self` and any leaf that wants a gradient).
-                continue
-            dy = grads[id(proxy)]
-            ctx = proxy._ctx
-            input_arrays = tuple(
-                value_cache[id(inp_proxy._uop)] for inp_proxy in ctx.input_proxies
-            )
-            partials = ctx.fn(dy, input_arrays)
-            for inp_proxy, partial in zip(ctx.input_proxies, partials):
-                if partial is None:
+            if _vjp.get_rule(proxy._uop.op) is None:
+                symbolic_viable = False
+                break
+
+        # 3. Build gradients via the chosen path.
+        if symbolic_viable:
+            # SYMBOLIC PATH (PRD-007 W2).
+            # Build a parallel "gradient UOp" graph: for each forward UOp,
+            # record the UOp that represents its accumulated gradient.
+            # Then realize the gradients in one shot — fusion stays ON
+            # because the closures aren't reading by-id from the value
+            # cache; only the leaf gradient buffers matter.
+            from ._ir import buffer as _buffer_uop, load as _load_uop
+
+            # Seed: the loss's gradient UOp is grad_arr loaded via a BUFFER.
+            seed_bid = sess.buffer_table.new_buffer(grad_arr.astype(
+                np.dtype(self._uop.dtype), copy=False))
+            seed_buf = _buffer_uop(seed_bid, self._uop.shape, self._uop.dtype)
+            seed_uop = _load_uop(seed_buf)
+
+            grad_uops: dict[int, UOp] = {id(self): seed_uop}
+
+            for node in reversed(order):
+                proxy = proxy_by_uop_id.get(id(node))
+                if proxy is None or proxy._ctx is None:
                     continue
-                if not inp_proxy.requires_grad and inp_proxy._ctx is None:
-                    # Const / non-grad leaf — nothing further to compute.
+                if id(proxy) not in grad_uops:
                     continue
-                pid = id(inp_proxy)
-                grads[pid] = (grads[pid] + partial) if pid in grads else partial
+                dy_uop = grad_uops[id(proxy)]
+                rule = _vjp.get_rule(proxy._uop.op)
+                # rule is non-None by the viability check above.
+                input_uops = tuple(inp._uop for inp in proxy._ctx.input_proxies)
+                emitted = rule(proxy._uop, input_uops, dy_uop)
+                # Per-input UOp may be None (non-differentiable arm of
+                # WHERE/CMP, etc.) — but no W1 rule emits None in active
+                # use; the dispatcher is robust to it for future rules.
+                for inp_proxy, gnode in zip(proxy._ctx.input_proxies, emitted):
+                    if gnode is None:
+                        continue
+                    if not inp_proxy.requires_grad and inp_proxy._ctx is None:
+                        continue
+                    pid = id(inp_proxy)
+                    if pid in grad_uops:
+                        # Accumulate via ADD UOp.
+                        existing = grad_uops[pid]
+                        grad_uops[pid] = UOp(
+                            op="ADD",
+                            inputs=(existing, gnode),
+                            shape=existing.shape,
+                            dtype=existing.dtype,
+                            arg={"vjp_of": proxy._uop, "accumulator": True},
+                        )
+                    else:
+                        grad_uops[pid] = gnode
+
+            # Realize each leaf gradient UOp once. Fusion stays ON — the
+            # value cache inside realize() is a fresh dict each call, so
+            # the only outputs anyone reads by-id are the realized leaf
+            # gradient ndarrays we return here.
+            grads: dict[int, np.ndarray] = {}
+            for pid, gnode in grad_uops.items():
+                proxy = proxy_by_id.get(pid)
+                if proxy is None or not proxy.requires_grad:
+                    continue
+                if proxy._ctx is not None:
+                    continue  # only leaves write into .grad
+                grads[pid] = realize(gnode, sess.buffer_table)
+        else:
+            # CLOSURE PATH (PRD-005 legacy, kept as safety net).
+            # Fusion is disabled here because backward closures read
+            # intermediate values by id from the local value_cache; fusion
+            # would absorb those intermediates into FUSED_* nodes whose
+            # outputs don't carry the same ids.
+            value_cache: dict[int, np.ndarray] = {}
+            was_enabled = _fusion_config.is_enabled()
+            _fusion_config.use_fusion(False)
+            try:
+                for node in order:
+                    value_cache[id(node)] = realize(node, sess.buffer_table)
+            finally:
+                _fusion_config.use_fusion(was_enabled)
+
+            grads = {id(self): grad_arr}
+            for node in reversed(order):
+                proxy = proxy_by_uop_id.get(id(node))
+                if proxy is None or proxy._ctx is None:
+                    continue
+                if id(proxy) not in grads:
+                    continue
+                dy = grads[id(proxy)]
+                ctx = proxy._ctx
+                input_arrays = tuple(
+                    value_cache[id(inp_proxy._uop)] for inp_proxy in ctx.input_proxies
+                )
+                partials = ctx.fn(dy, input_arrays)
+                for inp_proxy, partial in zip(ctx.input_proxies, partials):
+                    if partial is None:
+                        continue
+                    if not inp_proxy.requires_grad and inp_proxy._ctx is None:
+                        continue
+                    pid = id(inp_proxy)
+                    grads[pid] = (grads[pid] + partial) if pid in grads else partial
 
         # 4. Stage the accumulated gradients onto leaf parameters.
         for pid, g in grads.items():

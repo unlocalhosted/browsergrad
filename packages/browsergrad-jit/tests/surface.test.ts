@@ -64,10 +64,10 @@ describe("Python source registry", () => {
     // codegen, the actual version string should be substituted in.
     const initFile = SOURCE_FILES.find((f) => f.path.endsWith("__init__.py"));
     expect(initFile).toBeDefined();
-    expect(initFile!.content).toMatch(/__version__ = "0\.2\.0"/);
+    expect(initFile!.content).toMatch(/__version__ = "0\.3\.0"/);
   });
 
-  it("declares all 26 opcodes in _ir.py (23 core + 2 fusion + 1 autograd)", () => {
+  it("declares all 27 opcodes in _ir.py (23 core + 2 fusion + 2 autograd)", () => {
     // Sanity check that the codegen bundled the IR with every opcode the
     // PRD-005 + PRD-006 + PRD-007 surface needs.
     const irFile = SOURCE_FILES.find((f) => f.path.endsWith("_ir.py"));
@@ -79,7 +79,7 @@ describe("Python source registry", () => {
       "OP_RESHAPE", "OP_PERMUTE", "OP_SLICE", "OP_PAD",
       "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",
       "OP_FUSED_ELEMENTWISE", "OP_FUSED_SOFTMAX",
-      "OP_SCATTER_ADD",
+      "OP_SCATTER_ADD", "OP_BROADCAST_TO",
     ];
     for (const op of ops) {
       expect(irFile!.content).toContain(op);

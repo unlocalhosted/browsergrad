@@ -37,7 +37,7 @@ from ._ir import (
     OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
-    OP_SCATTER_ADD,
+    OP_SCATTER_ADD, OP_BROADCAST_TO,
 )
 from ._buffer_table import BufferTable
 from ._errors import RealizationError
@@ -258,6 +258,23 @@ def _h_custom(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     return out
 
 
+def _h_broadcast_to(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    """Broadcast `x` to `arg["shape"]`. The realizer's metadata-shape
+    contract doesn't coerce — ADD or any other op produces NumPy's
+    natural broadcast result, which equals the smaller side's shape.
+    This opcode makes the broadcast explicit.
+
+    Calls `np.broadcast_to(...)` which returns a view (read-only by
+    default); we `.copy()` so downstream ops see a writable, owning
+    ndarray. The copy cost is the price of "the IR is the truth"
+    semantics — without it, a buggy downstream op could mutate the
+    broadcast source in-place.
+    """
+    x = vt[id(node.inputs[0])]
+    target_shape = tuple(node.arg["shape"])
+    return np.broadcast_to(x, target_shape).copy()
+
+
 def _h_scatter_add(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     """Scatter-add the source values into a copy of `target` at positions
     given by `idx` along `dim`. The inverse of INDEX / GATHER.
@@ -395,6 +412,7 @@ _DISPATCH: dict[str, Handler] = {
     OP_FUSED_SOFTMAX:     _h_fused_softmax,
     # Autograd (PRD-007)
     OP_SCATTER_ADD:       _h_scatter_add,
+    OP_BROADCAST_TO:      _h_broadcast_to,
 }
 
 
