@@ -48,7 +48,22 @@ def _resolve_dtype(spec):
     if isinstance(spec, str):
         if spec in aliases:
             return aliases[spec]
-    return np.dtype(spec).type
+        try:
+            return np.dtype(spec).type
+        except TypeError:
+            supported = ", ".join(sorted(aliases.keys()))
+            raise ValueError(
+                f"dtype {spec!r} not recognized. Supported aliases: {supported}."
+            )
+    if isinstance(spec, (list, tuple, dict)):
+        raise TypeError(
+            f"dtype must be a string or numpy dtype; got {type(spec).__name__} {spec!r}. "
+            "Pass 'float32', 'int64', etc."
+        )
+    try:
+        return np.dtype(spec).type
+    except (TypeError, ValueError):
+        raise ValueError(f"dtype {spec!r} not recognized; pass a string like 'float32' or a numpy dtype.")
 
 
 # ─── Autograd-enabled flag + no_grad context ──────────────────

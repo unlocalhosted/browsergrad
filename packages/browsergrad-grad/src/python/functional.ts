@@ -238,6 +238,32 @@ def nll_loss(log_probs: Tensor, targets) -> Tensor:
     return _build_ctx(out, (log_probs,), lambda g: (g.data * grad_log_probs,))
 
 
+def _reduce_loss(per_elem: np.ndarray, grad_per_elem: np.ndarray, input_t: Tensor,
+                 reduction: str, op_name: str, mean_denom=None) -> Tensor:
+    """Shared reduction handler for losses.
+
+    per_elem: per-element loss array.
+    grad_per_elem: per-element dLoss/dInput before reduction-scale.
+    reduction: 'mean' (scale loss by 1/N and grad by 1/N), 'sum', 'none', or
+        any KL-style alias whose denominator is supplied via mean_denom.
+    mean_denom: overrides the denominator for mean-style reductions (e.g.
+        KL's 'batchmean' uses batch size instead of total element count).
+        When None, uses per_elem.size.
+    """
+    if reduction in ("mean", "batchmean"):
+        denom = float(per_elem.size if mean_denom is None else mean_denom)
+        out = Tensor(np.float32(float(per_elem.sum()) / denom))
+        scale = 1.0 / denom
+        return _build_ctx(out, (input_t,), lambda g: ((g.data * grad_per_elem * scale).astype(np.float32),))
+    if reduction == "sum":
+        out = Tensor(np.float32(float(per_elem.sum())))
+        return _build_ctx(out, (input_t,), lambda g: ((g.data * grad_per_elem).astype(np.float32),))
+    if reduction == "none":
+        out = Tensor(per_elem.astype(np.float32))
+        return _build_ctx(out, (input_t,), lambda g: ((g.data * grad_per_elem).astype(np.float32),))
+    raise ValueError(f"{op_name}: unknown reduction {reduction!r}")
+
+
 def l1_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
     """Mean absolute error.
 
@@ -247,20 +273,9 @@ def l1_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
     if input.data.shape != target.data.shape:
         raise ValueError(f"l1_loss: shape mismatch {input.data.shape} vs {target.data.shape}")
     diff = input.data - target.data
-    abs_diff = np.abs(diff)
-    if reduction == "mean":
-        n = float(input.data.size)
-        loss_data = float(abs_diff.mean())
-        out = Tensor(np.float32(loss_data))
-        return _build_ctx(out, (input,), lambda g: (g.data * np.sign(diff).astype(np.float32) / n,))
-    if reduction == "sum":
-        loss_data = float(abs_diff.sum())
-        out = Tensor(np.float32(loss_data))
-        return _build_ctx(out, (input,), lambda g: (g.data * np.sign(diff).astype(np.float32),))
-    if reduction == "none":
-        out = Tensor(abs_diff.astype(np.float32))
-        return _build_ctx(out, (input,), lambda g: (g.data * np.sign(diff).astype(np.float32),))
-    raise ValueError(f"l1_loss: unknown reduction {reduction!r}")
+    per_elem = np.abs(diff)
+    grad_per_elem = np.sign(diff).astype(np.float32)
+    return _reduce_loss(per_elem, grad_per_elem, input, reduction, "l1_loss")
 
 
 def bce_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
@@ -277,22 +292,8 @@ def bce_loss(input: Tensor, target: Tensor, reduction: str = "mean") -> Tensor:
     eps = 1e-12
     p_c = np.clip(p, eps, 1.0 - eps)
     per_elem = -(t * np.log(p_c) + (1.0 - t) * np.log(1.0 - p_c))
-    if reduction == "mean":
-        n = float(input.data.size)
-        loss_data = float(per_elem.mean())
-        grad_p = ((1.0 - t) / (1.0 - p_c) - t / p_c) / n
-        out = Tensor(np.float32(loss_data))
-        return _build_ctx(out, (input,), lambda g: (g.data * grad_p.astype(np.float32),))
-    if reduction == "sum":
-        loss_data = float(per_elem.sum())
-        grad_p = (1.0 - t) / (1.0 - p_c) - t / p_c
-        out = Tensor(np.float32(loss_data))
-        return _build_ctx(out, (input,), lambda g: (g.data * grad_p.astype(np.float32),))
-    if reduction == "none":
-        out = Tensor(per_elem.astype(np.float32))
-        grad_p = (1.0 - t) / (1.0 - p_c) - t / p_c
-        return _build_ctx(out, (input,), lambda g: (g.data * grad_p.astype(np.float32),))
-    raise ValueError(f"bce_loss: unknown reduction {reduction!r}")
+    grad_per_elem = ((1.0 - t) / (1.0 - p_c) - t / p_c).astype(np.float32)
+    return _reduce_loss(per_elem, grad_per_elem, input, reduction, "bce_loss")
 
 
 def smooth_l1_loss(input: Tensor, target: Tensor, beta: float = 1.0, reduction: str = "mean") -> Tensor:
@@ -311,20 +312,8 @@ def smooth_l1_loss(input: Tensor, target: Tensor, beta: float = 1.0, reduction: 
     quad = 0.5 * d * d / beta
     lin = a - 0.5 * beta
     per_elem = np.where(a < beta, quad, lin)
-    grad_d = np.where(a < beta, d / beta, np.sign(d))
-    if reduction == "mean":
-        n = float(input.data.size)
-        loss_data = float(per_elem.mean())
-        out = Tensor(np.float32(loss_data))
-        return _build_ctx(out, (input,), lambda g: (g.data * (grad_d / n).astype(np.float32),))
-    if reduction == "sum":
-        loss_data = float(per_elem.sum())
-        out = Tensor(np.float32(loss_data))
-        return _build_ctx(out, (input,), lambda g: (g.data * grad_d.astype(np.float32),))
-    if reduction == "none":
-        out = Tensor(per_elem.astype(np.float32))
-        return _build_ctx(out, (input,), lambda g: (g.data * grad_d.astype(np.float32),))
-    raise ValueError(f"smooth_l1_loss: unknown reduction {reduction!r}")
+    grad_per_elem = np.where(a < beta, d / beta, np.sign(d)).astype(np.float32)
+    return _reduce_loss(per_elem, grad_per_elem, input, reduction, "smooth_l1_loss")
 
 
 def kl_div_loss(input: Tensor, target: Tensor, reduction: str = "mean", log_target: bool = False) -> Tensor:
@@ -344,25 +333,9 @@ def kl_div_loss(input: Tensor, target: Tensor, reduction: str = "mean", log_targ
         with np.errstate(divide="ignore", invalid="ignore"):
             log_t = np.where(t > 0, np.log(t), 0.0)
     per_elem = t * (log_t - input.data.astype(np.float64))
-    # grad wrt input = -t, then scaled by reduction
-    if reduction == "mean":
-        n = float(input.data.size)
-        loss_data = float(per_elem.sum() / n)
-        out = Tensor(np.float32(loss_data))
-        return _build_ctx(out, (input,), lambda g: (g.data * (-t / n).astype(np.float32),))
-    if reduction == "batchmean":
-        n = float(input.data.shape[0])
-        loss_data = float(per_elem.sum() / n)
-        out = Tensor(np.float32(loss_data))
-        return _build_ctx(out, (input,), lambda g: (g.data * (-t / n).astype(np.float32),))
-    if reduction == "sum":
-        loss_data = float(per_elem.sum())
-        out = Tensor(np.float32(loss_data))
-        return _build_ctx(out, (input,), lambda g: (g.data * (-t).astype(np.float32),))
-    if reduction == "none":
-        out = Tensor(per_elem.astype(np.float32))
-        return _build_ctx(out, (input,), lambda g: (g.data * (-t).astype(np.float32),))
-    raise ValueError(f"kl_div_loss: unknown reduction {reduction!r}")
+    grad_per_elem = (-t).astype(np.float32)
+    mean_denom = float(input.data.shape[0]) if reduction == "batchmean" else None
+    return _reduce_loss(per_elem, grad_per_elem, input, reduction, "kl_div_loss", mean_denom=mean_denom)
 
 
 # ─── Spatial / shape ops ───────────────────────────────────

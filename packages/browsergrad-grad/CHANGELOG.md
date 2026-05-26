@@ -5,6 +5,70 @@ All notable changes to `@unlocalhosted/browsergrad-grad`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] — 2026-05-26
+
+**PyTorch parity push (Piles A, B, C) + the PyTorch-conformance suite.**
+
+Pile A (possible-just-unbuilt) — completed:
+- Tensor indexing (`x[mask]`, slices, fancy) + comparison ops returning
+  bool-dtype tensors (eq/ne/lt/gt/le/ge).
+- Multi-dtype: `Tensor(data, dtype=...)`, `.dtype` property, `.long() / .int() /
+  .float() / .double() / .bool() / .to(dtype)`, PyTorch aliases (long, double, …).
+- `torch.utils.data.{Dataset, DataLoader, TensorDataset}` — single-process
+  loader with shuffle/drop_last/tuple-collate; `num_workers > 0` raises
+  with a Pyodide-specific reason.
+- `state_dict` / `load_state_dict` / `grad.save` / `grad.load` (+ torch.save/load).
+- `nn.init.{zeros_, ones_, uniform_, normal_, constant_, kaiming_uniform_,
+  xavier_uniform_}` registered on `sys.modules` so `import
+  browsergrad_grad.nn.init` works.
+- Tensor math: `abs, sign, sqrt, pow, clamp/clip, topk, where` (top-level),
+  shape ops `expand, repeat, flip` (rest deferred).
+- `F.pad` (constant), `F.interpolate` (nearest + bilinear),
+  `F.normalize` (L2), `F.cosine_similarity`,
+  `F.scaled_dot_product_attention` (with bool/float mask + is_causal).
+- More losses: `BCELoss`, `L1Loss`, `SmoothL1Loss`, `KLDivLoss` (with
+  mean/batchmean/sum/none reductions, shared reduction helper).
+- More optimizers: `RMSprop`, `Adagrad`, `Adadelta`.
+- More schedulers: `MultiStepLR`, `ExponentialLR`, `ReduceLROnPlateau`,
+  `OneCycleLR`. Exposed under `optim.lr_scheduler`.
+- `grad.einsum` with autograd backward (1- and 2-operand).
+- `nn.RNN / nn.LSTM / nn.GRU` (single-layer, batch_first) with BPTT
+  through the autograd graph.
+- `nn.GroupNorm`, `nn.InstanceNorm2d`, `nn.BatchNorm3d` (forward; backward
+  through affine + scale).
+- Module `register_forward_hook` / `remove_forward_hook`.
+
+Pile B (possible but limited):
+- `torch.amp.autocast` — no-op context manager.
+- `torch.linalg.{norm, inv, det, svd, eigh, solve, pinv}` — wrap numpy.linalg.
+- `nn.Module.to(device)` — no-op shim returning self.
+
+Pile C (physically impossible in browser; LOUD failure with reason):
+- `torch.compile`, `torch.fx.symbolic_trace`, `torch.jit.{script, trace}`,
+  `torch.cuda.{current_device}`, `torch.distributed.{init_process_group,
+  all_reduce}`, `torch.onnx.export`, `torch.quantization.quantize` — all
+  raise `NotImplementedError` with an architectural reason.
+- `torch.cuda.is_available()` returns `False` (legitimate).
+- `torch.cuda.device_count()` returns 0.
+- `torch.distributed.is_initialized()` returns False.
+
+★ PyTorch-conformance fixture suite:
+- `scripts/gen_pytorch_fixtures.py` runs real torch and serializes
+  forward + backward fixtures to `tests-integration/fixtures/`.
+- `tests-integration/pytorch_conformance.test.ts` loads the fixtures
+  and verifies browsergrad matches real PyTorch within 1e-4 on Linear,
+  CrossEntropy, LayerNorm, Softmax, ReLU.
+
+Quality:
+- `Tensor.__array__` so `np.asarray(tensor)` just works.
+- `installViaExec` now mkdirs parent directories per file (lets us ship
+  nested packages like `browsergrad_grad.utils.data`).
+- Shared `_reduce_loss` helper across L1/BCE/SmoothL1/KLDiv.
+- Friendlier dtype-spec error: lists supported aliases.
+
+27 integration test files, 232 tests, all green. Source-of-truth oracle
+is real PyTorch via the new conformance suite.
+
 ## [0.4.7] — 2026-05-26
 
 **PyTorch-compat completeness pass.** Audit identified ~15 idioms that real
