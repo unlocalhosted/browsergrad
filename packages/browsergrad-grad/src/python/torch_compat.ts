@@ -97,11 +97,18 @@ def install_torch_alias():
     # torch.optim — re-exposed directly (no name differences in v0)
     torch_mod.optim = _bg.optim
 
+    # torch.utils.data — pass through to browsergrad_grad.utils.data
+    torch_utils = _bg_torch_types.ModuleType("torch.utils")
+    torch_utils.data = _bg.utils.data
+    torch_mod.utils = torch_utils
+
     # Register
     _bg_torch_sys.modules["torch"] = torch_mod
     _bg_torch_sys.modules["torch.nn"] = torch_nn
     _bg_torch_sys.modules["torch.nn.functional"] = torch_F
     _bg_torch_sys.modules["torch.optim"] = _bg.optim
+    _bg_torch_sys.modules["torch.utils"] = torch_utils
+    _bg_torch_sys.modules["torch.utils.data"] = _bg.utils.data
 
     return torch_mod
 `;

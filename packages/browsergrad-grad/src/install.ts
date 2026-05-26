@@ -65,14 +65,17 @@ async function installViaExec(target: GradTarget, mountRoot: string): Promise<vo
     `os.makedirs(_pkg_dir, exist_ok=True)`,
   ];
   for (const file of SOURCE_FILES) {
-    // file.path looks like "browsergrad_grad/tensor.py" — we want absolute.
+    // file.path looks like "browsergrad_grad/utils/__init__.py" — we want absolute.
     const relPath = file.path.split("/").slice(1).join("/"); // strip "browsergrad_grad/"
-    lines.push(`with open(os.path.join(_pkg_dir, ${JSON.stringify(relPath)}), "w") as _f:`);
+    const fullExpr = `os.path.join(_pkg_dir, ${JSON.stringify(relPath)})`;
+    lines.push(`_p = ${fullExpr}`);
+    lines.push(`os.makedirs(os.path.dirname(_p), exist_ok=True)`);
+    lines.push(`with open(_p, "w") as _f:`);
     lines.push(`    _f.write(${pythonStringLiteral(file.content)})`);
   }
   lines.push(`if _root not in sys.path:`);
   lines.push(`    sys.path.insert(0, _root)`);
-  lines.push(`del _root, _pkg_dir, _f`);
+  lines.push(`del _root, _pkg_dir, _f, _p`);
 
   await target.exec({ code: lines.join("\n") });
 }
@@ -81,7 +84,7 @@ async function assertImports(target: GradTarget): Promise<void> {
   await target.exec({
     code: `
 import browsergrad_grad as _bg_check
-assert _bg_check.__version__ == "0.4.10", f"unexpected version {_bg_check.__version__}"
+assert _bg_check.__version__ == "0.4.11", f"unexpected version {_bg_check.__version__}"
 del _bg_check
 `,
   });

@@ -1,6 +1,6 @@
 {
   "name": "@unlocalhosted/browsergrad-grad",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "description": "A small, readable tensor + autograd library that runs inside Pyodide. PyTorch-flavored API, NumPy-backed, designed to be educational source code. Not PyTorch — `import browsergrad_grad as grad`.",
   "type": "module",
   "license": "MIT",

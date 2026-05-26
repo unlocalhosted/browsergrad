@@ -14,6 +14,7 @@ import { FUNCTIONAL_PY } from "./functional.js";
 import { NN_PY } from "./nn.js";
 import { OPTIM_PY } from "./optim.js";
 import { TORCH_COMPAT_PY } from "./torch_compat.js";
+import { UTILS_DATA_PY } from "./utils_data.js";
 
 const INIT_PY = `
 """browsergrad_grad — a small, readable tensor + autograd library.
@@ -47,6 +48,7 @@ from .tensor import (
 from . import functional
 from . import nn
 from . import optim
+from . import utils  # nested namespace: browsergrad_grad.utils.data
 from .torch_compat import install_torch_alias
 
 import pickle as _bg_pickle
@@ -73,11 +75,11 @@ __all__ = [
     "Tensor", "zeros", "ones", "randn", "no_grad", "cat", "stack", "where",
     "from_numpy", "manual_seed",
     "matmul", "mm", "bmm", "exp", "log", "sum", "mean", "argmax",
-    "functional", "nn", "optim",
+    "functional", "nn", "optim", "utils",
     "save", "load",
     "install_torch_alias",
 ]
-__version__ = "0.4.10"
+__version__ = "0.4.11"
 `;
 
 export interface PythonSource {
@@ -96,6 +98,8 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_grad/nn.py", content: NN_PY },
   { path: "browsergrad_grad/optim.py", content: OPTIM_PY },
   { path: "browsergrad_grad/torch_compat.py", content: TORCH_COMPAT_PY },
+  { path: "browsergrad_grad/utils/__init__.py", content: 'from . import data\n__all__ = ["data"]\n' },
+  { path: "browsergrad_grad/utils/data.py", content: UTILS_DATA_PY },
   { path: "browsergrad_grad/__init__.py", content: INIT_PY },
 ];
 

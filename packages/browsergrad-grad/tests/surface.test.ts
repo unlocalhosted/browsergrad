@@ -29,7 +29,7 @@ describe("public surface", () => {
 });
 
 describe("Python source bundle", () => {
-  it("ships six modules in the documented order", () => {
+  it("ships the documented module set in load order", () => {
     const paths = SOURCE_FILES.map((s) => s.path);
     expect(paths).toEqual([
       "browsergrad_grad/tensor.py",
@@ -37,13 +37,18 @@ describe("Python source bundle", () => {
       "browsergrad_grad/nn.py",
       "browsergrad_grad/optim.py",
       "browsergrad_grad/torch_compat.py",
+      "browsergrad_grad/utils/__init__.py",
+      "browsergrad_grad/utils/data.py",
       "browsergrad_grad/__init__.py",
     ]);
   });
 
   it("every module has non-trivial content", () => {
+    // Tiny passthrough packages (utils/__init__.py) get a small floor;
+    // real modules have to clear 100.
     for (const file of SOURCE_FILES) {
-      expect(file.content.length).toBeGreaterThan(100);
+      const floor = file.path.endsWith("utils/__init__.py") ? 30 : 100;
+      expect(file.content.length).toBeGreaterThan(floor);
     }
   });
 
@@ -95,9 +100,9 @@ describe("Python source bundle", () => {
     expect(optim?.content).toContain("class AdamW(Optimizer)");
   });
 
-  it("__init__.py declares v0.4.10 and exports no_grad / cat / stack / install_torch_alias / top-level math", () => {
-    const init = SOURCE_FILES.find((s) => s.path.endsWith("__init__.py"));
-    expect(init?.content).toContain('__version__ = "0.4.10"');
+  it("__init__.py declares v0.4.11 and exports no_grad / cat / stack / install_torch_alias / top-level math", () => {
+    const init = SOURCE_FILES.find((s) => s.path === "browsergrad_grad/__init__.py");
+    expect(init?.content).toContain('__version__ = "0.4.11"');
     expect(init?.content).toContain("no_grad");
     expect(init?.content).toContain("cat");
     expect(init?.content).toContain("stack");
