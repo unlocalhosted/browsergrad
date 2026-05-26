@@ -16,7 +16,7 @@ Implementable on NumPy with TDD. Each row = one focused commit (or small group).
 | 2 | Comparison ops (`==` `<` `>` `<=` `>=` `!=`) | ✅ done | — |
 | 3 | Multi-dtype (`int64`, `bool`); tensor stores `.dtype` | ⏳ pending | — |
 | 4 | `torch.utils.data.Dataset` + `DataLoader` (single-process) | ⏳ pending | — |
-| 5 | `state_dict` / `load_state_dict` / `torch.save` / `torch.load` | ⏳ pending | — |
+| 5 | `state_dict` / `load_state_dict` / `torch.save` / `torch.load` | ✅ done | — |
 | 6 | `nn.init.{kaiming_uniform_, xavier_uniform_, normal_, uniform_, zeros_, ones_, constant_}` | ✅ done | — |
 | 7 | `F.pad`, `F.interpolate`, `F.normalize`, `F.cosine_similarity` | ⏳ pending | — |
 | 8 | `F.scaled_dot_product_attention` | ⏳ pending | — |

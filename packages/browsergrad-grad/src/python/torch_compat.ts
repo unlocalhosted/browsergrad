@@ -64,6 +64,10 @@ def install_torch_alias():
     torch_mod.mean = _bg.mean
     torch_mod.argmax = _bg.argmax
 
+    # Serialization
+    torch_mod.save = _bg.save
+    torch_mod.load = _bg.load
+
     # dtype tokens — strings are enough for the dtype= kwarg path we support
     torch_mod.float32 = "float32"
     torch_mod.float = "float32"

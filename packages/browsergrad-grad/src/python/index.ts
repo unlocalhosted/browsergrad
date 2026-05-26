@@ -49,14 +49,35 @@ from . import nn
 from . import optim
 from .torch_compat import install_torch_alias
 
+import pickle as _bg_pickle
+
+
+def save(obj, path):
+    """Pickle obj to path. Pairs with load() and torch.save() in the shim.
+
+    The intended use is checkpointing — pass a Module.state_dict() (which is
+    a dict[str, np.ndarray]) and load it back via load() + load_state_dict().
+    """
+    with open(path, "wb") as f:
+        _bg_pickle.dump(obj, f)
+
+
+def load(path, **kwargs):
+    """Unpickle from path. Ignores PyTorch-specific kwargs like map_location
+    and weights_only — we're in-browser, none of them apply."""
+    with open(path, "rb") as f:
+        return _bg_pickle.load(f)
+
+
 __all__ = [
     "Tensor", "zeros", "ones", "randn", "no_grad", "cat", "stack", "where",
     "from_numpy", "manual_seed",
     "matmul", "mm", "bmm", "exp", "log", "sum", "mean", "argmax",
     "functional", "nn", "optim",
+    "save", "load",
     "install_torch_alias",
 ]
-__version__ = "0.4.8"
+__version__ = "0.4.9"
 `;
 
 export interface PythonSource {

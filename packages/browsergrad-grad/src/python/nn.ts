@@ -50,6 +50,65 @@ class Module:
         for p in self.parameters():
             p.zero_grad()
 
+    def state_dict(self, prefix: str = "") -> dict:
+        """Return a flat dict[qualified-name → np.ndarray copy] of all
+        parameters in this module and its submodules.
+
+        Matches torch.nn.Module.state_dict() for the subset we model. Values
+        are NumPy array copies — safe to serialize, mutate, or hand off
+        without affecting the live parameters.
+        """
+        out: dict = {}
+        for name, p in self._parameters.items():
+            if p is None:
+                continue
+            out[prefix + name] = p.data.copy()
+        for name, m in self._modules.items():
+            if m is None:
+                continue
+            out.update(m.state_dict(prefix=prefix + name + "."))
+        return out
+
+    def load_state_dict(self, state: dict, strict: bool = True) -> None:
+        """Copy values from state (dict of name to ndarray or Tensor) into
+        the module's parameters in place.
+
+        Raises RuntimeError on shape mismatch. With strict=True (default),
+        also raises on unknown or missing keys — matching PyTorch.
+        """
+        own = self.state_dict()
+        own_keys = set(own.keys())
+        given_keys = set(state.keys())
+        if strict:
+            unexpected = given_keys - own_keys
+            missing = own_keys - given_keys
+            if unexpected or missing:
+                raise RuntimeError(
+                    "load_state_dict mismatch: "
+                    f"missing={sorted(missing)}, unexpected={sorted(unexpected)}"
+                )
+        self._assign_state(state, prefix="")
+
+    def _assign_state(self, state: dict, prefix: str) -> None:
+        for name, p in self._parameters.items():
+            if p is None:
+                continue
+            key = prefix + name
+            if key not in state:
+                continue
+            value = state[key]
+            arr = value.data if isinstance(value, Tensor) else np.asarray(value)
+            if arr.shape != p.data.shape:
+                raise RuntimeError(
+                    f"shape mismatch for {key}: "
+                    f"checkpoint {tuple(arr.shape)} vs model {tuple(p.data.shape)}"
+                )
+            p.data[...] = arr.astype(p.data.dtype, copy=False)
+        for name, m in self._modules.items():
+            if m is None:
+                continue
+            m._assign_state(state, prefix=prefix + name + ".")
+
     def train(self, mode: bool = True) -> "Module":
         """Set this module and all submodules to training mode."""
         self.training = bool(mode)
