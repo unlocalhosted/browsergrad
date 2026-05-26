@@ -8,9 +8,9 @@
 
 import { loadPyodide } from "pyodide";
 import { installGrad, type GradTarget } from "../src/index";
+import { createNodePyodideTarget, type PyodideInterface } from "../src/node-adapter";
 
-interface PyodideAPI {
-  runPythonAsync: (code: string) => Promise<unknown>;
+interface PyodideAPI extends PyodideInterface {
   loadPackage: (names: readonly string[]) => Promise<void>;
   globals: { get: (name: string) => unknown };
 }
@@ -35,22 +35,15 @@ export async function getPyodide(): Promise<PyodideAPI> {
 }
 
 /**
- * A GradTarget that wraps Pyodide. Used to install the library once
- * (in test setup) and to run Python from individual tests.
- *
- * `exec({code})` returns the value of the last Python expression converted
- * to a JS value via Pyodide's automatic conversions:
- *   - Python lists/tuples → JS arrays
- *   - Python dicts → JS Maps (we convert to plain objects via toJs where needed)
- *   - Numbers → numbers
- *   - None → undefined
+ * A GradTarget that wraps Pyodide, plus a `.run<T>()` helper for the test
+ * suite. The GradTarget shape comes from the published `createNodePyodideTarget`
+ * factory — that's what consumers use too. The `.run<T>()` wrapper is purely
+ * test glue (PyProxy unwrap + dict conversion + cleanup) and stays here.
  */
 export function makeTarget(py: PyodideAPI): GradTarget & {
   run: <T = unknown>(code: string) => Promise<T>;
 } {
-  const exec = async ({ code }: { code: string }): Promise<unknown> => {
-    return py.runPythonAsync(code);
-  };
+  const adapter = createNodePyodideTarget(py);
   const run = async <T = unknown>(code: string): Promise<T> => {
     const result = await py.runPythonAsync(code);
     // PyProxy values have a .toJs method; native conversions return as-is.
@@ -65,7 +58,7 @@ export function makeTarget(py: PyodideAPI): GradTarget & {
     }
     return result as T;
   };
-  return { exec, run };
+  return { ...adapter, run };
 }
 
 /**

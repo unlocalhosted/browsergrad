@@ -13,7 +13,7 @@ For broader PyTorch-coverage progress, see [PROGRESS.md](PROGRESS.md).
 |---|---|---|---|---|
 | 5 | Single-source the version | Add `resolveJsonModule`; import `pkg` in 3 files; don't flip `verbatimModuleSyntax` | ✅ done | `27cf321` |
 | 4 | Python source as `.py` files | Pre-tsc codegen script; commit generated files; base64-IIFE emission | ✅ done | `a8b926a` |
-| 3 | NodePyodideTarget adapter | Factory at `./node-adapter` subpath; `pyodide` as optionalPeerDep | ⏳ pending | — |
+| 3 | NodePyodideTarget adapter | Factory at `./node-adapter` subpath; `pyodide` as optionalPeerDep | ✅ done | (this commit) |
 | 2 | Split torch_compat into real/limited/impossible | Self-installing modules; runtime `is`-identity assertion pins the latent coupling | ⏳ pending | — |
 | 1 | Split nn.ts into per-family TS chunks | Option A (TS-split, single `nn.py`); `NN_CHUNK_ORDER` constant enforces order | ⏳ pending | — |
 
@@ -125,7 +125,11 @@ and the "install into raw Pyodide" use case (Deno, Jupyter, server Node).
 
 ### Decisions
 
-_(filled in during implementation)_
+- **`PyodideInterface` declared locally**, not imported from the `pyodide` package. Mirrors how `GradTarget` itself is duck-typed — the Adapter accepts anything quacking like Pyodide. Keeps the Module free of any type-level dependency on the `pyodide` package, even though pyodide is an `optionalPeerDependency` at runtime.
+- **`PyodideInterface` exported** alongside `createNodePyodideTarget` so consumers can write their own factory or extend it. Tiny export with high leverage for downstream users.
+- **`makeTarget` in tests now spreads the Adapter** rather than re-implementing `exec` and `fs`. The `.run<T>()` test-glue helper sits on top via `{...adapter, run}`. Makes tests exercise the same code path consumers exercise.
+- **Test name `install_via_fs.test.ts`** (snake_case to match the file's naming convention in this test suite) rather than `install-via-fs.test.ts` — every other integration test file uses snake_case.
+- **Two assertions, not one**, in the new test: `__init__.py` exists (proves the basic write path) AND `utils/data.py` exists (proves `mkdirTree` ran for the nested subpackage). Without the second, a regression in the `mkdirTree` step would slip through.
 
 ---
 

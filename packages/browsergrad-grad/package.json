@@ -35,6 +35,10 @@
       "types": "./dist/python/index.d.ts",
       "import": "./dist/python/index.js"
     },
+    "./node-adapter": {
+      "types": "./dist/node-adapter.d.ts",
+      "import": "./dist/node-adapter.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -61,6 +65,9 @@
     "pyodide": "^0.26.4",
     "typescript": "~6.0.0",
     "vitest": "^4.0.0"
+  },
+  "optionalPeerDependencies": {
+    "pyodide": "^0.26.4"
   },
   "publishConfig": {
     "access": "public",
