@@ -41,6 +41,25 @@ function dirname(path: string): string {
 }
 
 export function createNodePyodideTarget(pyodide: PyodideInterface): GradTarget {
+  // Defensive shape check: pyodide.FS isn't part of the public Pyodide API
+  // type definitions everywhere, but it's always present on a real instance
+  // returned by `loadPyodide()`. Catch obvious mistakes (e.g. passing the
+  // wrong object) at adapter construction rather than at the first install
+  // step deep inside `installGrad`.
+  if (typeof pyodide?.runPythonAsync !== "function") {
+    throw new TypeError(
+      "createNodePyodideTarget: expected a Pyodide instance with " +
+        "`runPythonAsync` — pass the value returned by `await loadPyodide()`.",
+    );
+  }
+  if (typeof pyodide?.FS?.writeFile !== "function" || typeof pyodide?.FS?.mkdirTree !== "function") {
+    throw new TypeError(
+      "createNodePyodideTarget: this Pyodide instance is missing FS.writeFile " +
+        "or FS.mkdirTree. Make sure you're passing the real Pyodide API object " +
+        "(not a wrapper) — these methods are always present on the value from " +
+        "`loadPyodide()`.",
+    );
+  }
   return {
     exec: async ({ code }) => pyodide.runPythonAsync(code),
     fs: {

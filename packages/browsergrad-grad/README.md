@@ -84,6 +84,20 @@ await installGrad({
 });
 ```
 
+For Node scripts and CI where you `loadPyodide()` directly, use the shipped adapter at the `./node-adapter` subpath — it wraps Pyodide's `FS.writeFile + FS.mkdirTree` to go through `installViaFs` (faster than `installViaExec`):
+
+```ts
+import { loadPyodide } from "pyodide";
+import { installGrad } from "@unlocalhosted/browsergrad-grad";
+import { createNodePyodideTarget } from "@unlocalhosted/browsergrad-grad/node-adapter";
+
+const py = await loadPyodide();
+await py.loadPackage(["numpy"]);
+await installGrad(createNodePyodideTarget(py));
+```
+
+`pyodide` is an `optionalPeerDependencies` — bring your own version. The adapter has no other dependencies.
+
 ## Python API surface (v0.2.0)
 
 ```python

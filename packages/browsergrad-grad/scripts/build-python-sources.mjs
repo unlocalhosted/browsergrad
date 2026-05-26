@@ -15,7 +15,7 @@
  * entry to MODULES below, then run `pnpm codegen`.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -80,6 +80,31 @@ export const ${constName}: string = ((): string => {
   return new TextDecoder("utf-8").decode(bytes);
 })();
 `;
+}
+
+// Fail-fast pre-check: every input file must exist before we emit anything.
+// Without this, a missing chunk would either ENOENT mid-loop (after some
+// generated files were already updated, leaving the repo in a half-emitted
+// state) or — worse for CHUNKED_MODULES — produce a silently truncated
+// concatenation that fails at Pyodide import with a cryptic Python
+// traceback instead of here with a clear file path.
+const missing = [];
+for (const [py] of MODULES) {
+  if (!existsSync(resolve(PYTHON_DIR, py))) missing.push(py);
+}
+for (const { chunksDir, order } of CHUNKED_MODULES) {
+  for (const chunk of order) {
+    const chunkPath = resolve(PYTHON_DIR, chunksDir, `${chunk}.py`);
+    if (!existsSync(chunkPath)) missing.push(`${chunksDir}/${chunk}.py`);
+  }
+}
+if (missing.length) {
+  process.stderr.write(
+    `codegen: refusing to emit — missing source files:\n` +
+      missing.map((m) => `  - ${m}\n`).join("") +
+      `Check MODULES / CHUNKED_MODULES in scripts/build-python-sources.mjs.\n`,
+  );
+  process.exit(1);
 }
 
 let wrote = 0;
