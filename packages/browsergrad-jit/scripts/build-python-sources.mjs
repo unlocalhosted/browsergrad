@@ -40,6 +40,7 @@ const MODULES = [
   ["_realize_webgpu.py", "_realize_webgpu.generated.ts", "REALIZE_WEBGPU_PY"],
   ["_func.py", "_func.generated.ts", "FUNC_PY"],
   ["_custom_kernel.py", "_custom_kernel.generated.ts", "CUSTOM_KERNEL_PY"],
+  ["_onnx.py", "_onnx.generated.ts", "ONNX_PY"],
   ["_tensor_proxy.py", "_tensor_proxy.generated.ts", "TENSOR_PROXY_PY"],
   ["_nn.py", "_nn.generated.ts", "NN_PY"],
   ["_functional.py", "_functional.generated.ts", "FUNCTIONAL_PY"],

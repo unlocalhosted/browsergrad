@@ -30,6 +30,7 @@ import { GPU_BUFFER_TABLE_PY } from "./_gpu_buffer_table.generated.js";
 import { REALIZE_WEBGPU_PY } from "./_realize_webgpu.generated.js";
 import { FUNC_PY } from "./_func.generated.js";
 import { CUSTOM_KERNEL_PY } from "./_custom_kernel.generated.js";
+import { ONNX_PY } from "./_onnx.generated.js";
 import { TENSOR_PROXY_PY } from "./_tensor_proxy.generated.js";
 import { NN_PY } from "./_nn.generated.js";
 import { FUNCTIONAL_PY } from "./_functional.generated.js";
@@ -98,6 +99,7 @@ from . import _amp as _amp_mod
 from . import _realize_webgpu as _webgpu_mod
 from . import _func as _func_mod
 from . import _custom_kernel as _custom_kernel_mod
+from . import _onnx as _onnx_mod
 from ._torch_compat import install_torch_alias, uninstall_torch_alias
 import sys as _sys
 import types as _types
@@ -226,6 +228,33 @@ _sys.modules["browsergrad_jit.func"] = func
 custom_kernel = _custom_kernel_mod.custom_kernel
 
 
+# bg.onnx — pure-Python ONNX export (PRD-016). Inference graphs only;
+# caller declares which BUFFERs are inputs vs initializers.
+def export_onnx_inference(tensor, *, input_buffers=(), output_name="output",
+                          model_name="browsergrad_model", opset_version=17):
+    """Serialize the tensor's IR as an ONNX ModelProto. Returns bytes.
+
+    The tensor argument is a TensorProxy. The graph rooted at its UOp is
+    exported. The input_buffers argument is a sequence of TensorProxy
+    whose underlying BUFFER becomes a graph input (placeholder).
+    Everything else reachable becomes an initializer (frozen weight).
+    """
+    sess = tensor._get_session()
+    return _onnx_mod.export_inference(
+        tensor._uop,
+        buffer_table=sess.buffer_table,
+        input_buffers=input_buffers,
+        output_name=output_name,
+        model_name=model_name,
+        opset_version=opset_version,
+    )
+
+onnx = _types.ModuleType("browsergrad_jit.onnx")
+onnx.export_inference = export_onnx_inference
+onnx.OnnxUnmappableOp = _onnx_mod.OnnxUnmappableOp
+_sys.modules["browsergrad_jit.onnx"] = onnx
+
+
 # bg.realize_webgpu — explicit-realize entry point (PRD-011.5).
 # Mirrors the .numpy() trigger but routes through the WebGPU bridge
 # instead of the NumPy realizer. Raises if no bridge is registered.
@@ -345,7 +374,7 @@ __all__ = [
     "Session", "get_default_session", "set_default_session", "new_session",
     "manual_seed",
     "nn", "optim", "jit", "utils", "amp", "kernels", "func",
-    "custom_kernel",
+    "custom_kernel", "onnx",
     "realize_webgpu", "register_webgpu_bridge", "unregister_webgpu_bridge",
     "webgpu_is_available", "webgpu_supported_opcodes",
     "install_torch_alias", "uninstall_torch_alias",
@@ -391,6 +420,7 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_jit/_realize_webgpu.py", content: REALIZE_WEBGPU_PY },
   { path: "browsergrad_jit/_func.py", content: FUNC_PY },
   { path: "browsergrad_jit/_custom_kernel.py", content: CUSTOM_KERNEL_PY },
+  { path: "browsergrad_jit/_onnx.py", content: ONNX_PY },
   { path: "browsergrad_jit/_tensor_proxy.py", content: TENSOR_PROXY_PY },
   { path: "browsergrad_jit/_functional.py", content: FUNCTIONAL_PY },
   { path: "browsergrad_jit/_nn.py", content: NN_PY },
