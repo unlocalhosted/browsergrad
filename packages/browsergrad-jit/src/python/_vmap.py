@@ -137,42 +137,40 @@ _VMAP_RULES[OP_DIV] = _elementwise_binop(OP_DIV)
 @register_vmap(OP_NEG)
 def _vmap_neg(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
     inner = batched[id(node.inputs[0])]
+    # Derive shape from the batched input, NOT from node.shape — VJP
+    # rules sometimes record dy.shape (smaller than the broadcast result).
     return UOp(op=OP_NEG, inputs=(inner,),
-               shape=_batched_shape(node.shape, B),
-               dtype=node.dtype, arg=node.arg)
+               shape=inner.shape, dtype=node.dtype, arg=node.arg)
 
 
 @register_vmap(OP_EXP)
 def _vmap_exp(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
     inner = batched[id(node.inputs[0])]
     return UOp(op=OP_EXP, inputs=(inner,),
-               shape=_batched_shape(node.shape, B),
-               dtype=node.dtype, arg=node.arg)
+               shape=inner.shape, dtype=node.dtype, arg=node.arg)
 
 
 @register_vmap(OP_LOG)
 def _vmap_log(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
     inner = batched[id(node.inputs[0])]
     return UOp(op=OP_LOG, inputs=(inner,),
-               shape=_batched_shape(node.shape, B),
-               dtype=node.dtype, arg=node.arg)
+               shape=inner.shape, dtype=node.dtype, arg=node.arg)
 
 
 @register_vmap(OP_CAST)
 def _vmap_cast(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
     inner = batched[id(node.inputs[0])]
     return UOp(op=OP_CAST, inputs=(inner,),
-               shape=_batched_shape(node.shape, B),
-               dtype=node.dtype, arg=node.arg)
+               shape=inner.shape, dtype=node.dtype, arg=node.arg)
 
 
 @register_vmap(OP_CMP)
 def _vmap_cmp(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
     a = batched[id(node.inputs[0])]
     b = batched[id(node.inputs[1])]
+    new_shape = _broadcast(a.shape, b.shape)
     return UOp(op=OP_CMP, inputs=(a, b),
-               shape=_batched_shape(node.shape, B),
-               dtype=node.dtype, arg=node.arg)
+               shape=new_shape, dtype=node.dtype, arg=node.arg)
 
 
 @register_vmap(OP_WHERE)
@@ -180,22 +178,34 @@ def _vmap_where(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
     cond = batched[id(node.inputs[0])]
     a = batched[id(node.inputs[1])]
     b = batched[id(node.inputs[2])]
+    new_shape = _broadcast(cond.shape, a.shape, b.shape)
     return UOp(op=OP_WHERE, inputs=(cond, a, b),
-               shape=_batched_shape(node.shape, B),
-               dtype=node.dtype, arg=node.arg)
+               shape=new_shape, dtype=node.dtype, arg=node.arg)
 
 
 # Compute --------------------------------------------------------------
 
 
+def _matmul_out_shape(a_shape: Tuple[int, ...], b_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+    """Resolve the output shape of a @ b given the batched inputs."""
+    if len(a_shape) < 2 and len(b_shape) < 2:
+        raise ValueError(f"vmap matmul: both inputs are vectors: {a_shape}, {b_shape}")
+    if len(a_shape) == 1 and len(b_shape) >= 2:
+        return b_shape[:-2] + (b_shape[-1],)
+    if len(a_shape) >= 2 and len(b_shape) == 1:
+        return a_shape[:-1]
+    # Both have ≥2 dims: leading dims broadcast, last two contract.
+    lead = _broadcast(a_shape[:-2], b_shape[:-2])
+    return lead + (a_shape[-2], b_shape[-1])
+
+
 @register_vmap(OP_MATMUL)
 def _vmap_matmul(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
-    """Both inputs gain a leading batch dim. NumPy's `@` broadcasts
-    over leading batch dims correctly, so the realizer doesn't need
-    any new opcode — we just emit a MATMUL with batched shapes."""
+    """NumPy's `@` broadcasts over leading batch dims correctly. We emit
+    a MATMUL with batched shapes; the realizer's `_h_matmul` Just Works."""
     a = batched[id(node.inputs[0])]
     b = batched[id(node.inputs[1])]
-    new_shape = _batched_shape(node.shape, B)
+    new_shape = _matmul_out_shape(a.shape, b.shape)
     return UOp(op=OP_MATMUL, inputs=(a, b), shape=new_shape,
                dtype=node.dtype, arg=node.arg)
 

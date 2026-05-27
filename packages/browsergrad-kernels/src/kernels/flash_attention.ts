@@ -37,7 +37,11 @@ import { KernelError, type KernelDevice } from "../types.js";
 
 const BR = 32;
 const BC = 32;
-const MAX_D = 128;
+// MAX_D bounds the workgroup-shared K_tile + V_tile memory:
+//   2 × BR × MAX_D × 4 bytes = workgroup memory.
+// WebGPU min spec is 16384 bytes → MAX_D ≤ 64 with BR=BC=32.
+// Larger D should chunk D-dimension across multiple FA passes (PRD-014b).
+const MAX_D = 64;
 
 const WGSL = /* wgsl */ `
 @group(0) @binding(0) var<storage, read> Q: array<f32>;
@@ -85,9 +89,13 @@ fn main(
   let b = bh / params.H;
   let h = bh % params.H;
 
-  if (q_idx >= params.Sq) { return; }
+  // WGSL requires uniform control flow at workgroupBarrier(). Threads
+  // whose q_idx is out of range must STILL execute the loop body and
+  // hit every barrier — they just refrain from writing the final output.
+  let active = q_idx < params.Sq;
+  let q_idx_safe = select(0u, q_idx, active);
 
-  let qkv_row_base = ((b * params.H + h) * params.Sq + q_idx) * params.D;
+  let qkv_row_base = ((b * params.H + h) * params.Sq + q_idx_safe) * params.D;
   let k_row_base_bh = (b * params.H + h) * params.Sk * params.D;
   let mask_b = select(0u, b, params.mask_B > 1u);
   let mask_h = select(0u, h, params.mask_H > 1u);
@@ -176,10 +184,12 @@ fn main(
     workgroupBarrier();
   }
 
-  // Final normalize: O_i / l_i, write back to global.
+  // Final normalize: O_i / l_i, write back to global — only for active threads.
   let inv_l = select(0.0, 1.0 / l_i, l_i > 0.0);
-  for (var d: u32 = 0u; d < params.D; d = d + 1u) {
-    Out[qkv_row_base + d] = O_i[d] * inv_l;
+  if (active) {
+    for (var d: u32 = 0u; d < params.D; d = d + 1u) {
+      Out[qkv_row_base + d] = O_i[d] * inv_l;
+    }
   }
 }
 `;
