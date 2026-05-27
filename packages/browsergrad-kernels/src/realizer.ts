@@ -33,6 +33,8 @@
 import {
   materializeFloat32,
   uploadFloat32,
+  runDirect,
+  type KernelDescriptor,
 } from "./runner.js";
 import { matmulTiledDirect } from "./kernels/matmul_tiled.js";
 import {
@@ -76,6 +78,17 @@ export interface WebGpuRealizerBridge {
     scale: number,
     dtype: string,
   ): Promise<Handle>;
+  run_user_kernel(
+    inputs: readonly Handle[],
+    wgsl: string,
+    name: string,
+    hash: string,
+    workgroupSize: readonly [number, number, number],
+    dispatchShape: readonly [number, number, number],
+    outputLength: number,
+    outputShape: readonly number[],
+    dtype: string,
+  ): Handle;
   /** Diagnostic — number of GPU buffers currently alive. */
   aliveHandleCount(): number;
 }
@@ -255,6 +268,39 @@ export function createWebGpuRealizerBridge(
         scale,
       );
       return mint(result.buffer, result.byteLength, [b, h, sq, d], dtype);
+    },
+
+    run_user_kernel(
+      inputs: readonly Handle[],
+      wgsl: string,
+      name: string,
+      hash: string,
+      workgroupSize: readonly [number, number, number],
+      dispatchShape: readonly [number, number, number],
+      outputLength: number,
+      outputShape: readonly number[],
+      dtype: string,
+    ): Handle {
+      assertF32(dtype, "run_user_kernel");
+      const inputBufs = inputs.map(
+        (h, i) => get(h, `run_user_kernel[in${i}]`).buffer,
+      );
+      const desc: KernelDescriptor = {
+        // Cache key prefix carries the first 8 hash chars so kernels with
+        // the same `name` but different WGSL get distinct cache entries.
+        name: `user_${hash.slice(0, 8)}_${name}`,
+        wgsl,
+        workgroupSize: [workgroupSize[0], workgroupSize[1], workgroupSize[2]],
+      };
+      // v0: no uniform params. Users bake constants into WGSL.
+      const result = runDirect(device, desc, {
+        inputBuffers: inputBufs,
+        outputLength,
+        params: new Uint32Array(0),
+        dispatchCount: [dispatchShape[0], dispatchShape[1], dispatchShape[2]],
+        cacheKeySuffix: hash,
+      });
+      return mint(result.buffer, result.byteLength, outputShape, dtype);
     },
 
     aliveHandleCount(): number {

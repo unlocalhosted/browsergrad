@@ -89,5 +89,18 @@ class WebGpuBridge(Protocol):
         dtype: str,
     ) -> Any: ...
 
+    def run_user_kernel(
+        self,
+        inputs: list,
+        wgsl: str,
+        name: str,
+        hash: str,
+        workgroup_size: Tuple[int, int, int],
+        dispatch_shape: Tuple[int, int, int],
+        output_length: int,
+        output_shape: Tuple[int, ...],
+        dtype: str,
+    ) -> Any: ...
+
 
 __all__ = ["WebGpuBridge"]

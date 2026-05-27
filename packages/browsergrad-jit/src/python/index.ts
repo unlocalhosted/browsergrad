@@ -29,6 +29,7 @@ import { BRIDGE_PY } from "./_bridge.generated.js";
 import { GPU_BUFFER_TABLE_PY } from "./_gpu_buffer_table.generated.js";
 import { REALIZE_WEBGPU_PY } from "./_realize_webgpu.generated.js";
 import { FUNC_PY } from "./_func.generated.js";
+import { CUSTOM_KERNEL_PY } from "./_custom_kernel.generated.js";
 import { TENSOR_PROXY_PY } from "./_tensor_proxy.generated.js";
 import { NN_PY } from "./_nn.generated.js";
 import { FUNCTIONAL_PY } from "./_functional.generated.js";
@@ -96,6 +97,7 @@ from . import _utils_checkpoint as _utils_ckpt
 from . import _amp as _amp_mod
 from . import _realize_webgpu as _webgpu_mod
 from . import _func as _func_mod
+from . import _custom_kernel as _custom_kernel_mod
 from ._torch_compat import install_torch_alias, uninstall_torch_alias
 import sys as _sys
 import types as _types
@@ -218,6 +220,12 @@ func.jacrev = _func_mod.jacrev     # refuses with pointer in v0
 _sys.modules["browsergrad_jit.func"] = func
 
 
+# bg.custom_kernel — user-supplied WGSL (PRD-015). Forward-only;
+# downstream .backward() raises NoBackwardError because OP_CUSTOM has
+# no registered VJP rule. Realize via bg.realize_webgpu.
+custom_kernel = _custom_kernel_mod.custom_kernel
+
+
 # bg.realize_webgpu — explicit-realize entry point (PRD-011.5).
 # Mirrors the .numpy() trigger but routes through the WebGPU bridge
 # instead of the NumPy realizer. Raises if no bridge is registered.
@@ -337,6 +345,7 @@ __all__ = [
     "Session", "get_default_session", "set_default_session", "new_session",
     "manual_seed",
     "nn", "optim", "jit", "utils", "amp", "kernels", "func",
+    "custom_kernel",
     "realize_webgpu", "register_webgpu_bridge", "unregister_webgpu_bridge",
     "webgpu_is_available", "webgpu_supported_opcodes",
     "install_torch_alias", "uninstall_torch_alias",
@@ -381,6 +390,7 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_jit/_gpu_buffer_table.py", content: GPU_BUFFER_TABLE_PY },
   { path: "browsergrad_jit/_realize_webgpu.py", content: REALIZE_WEBGPU_PY },
   { path: "browsergrad_jit/_func.py", content: FUNC_PY },
+  { path: "browsergrad_jit/_custom_kernel.py", content: CUSTOM_KERNEL_PY },
   { path: "browsergrad_jit/_tensor_proxy.py", content: TENSOR_PROXY_PY },
   { path: "browsergrad_jit/_functional.py", content: FUNCTIONAL_PY },
   { path: "browsergrad_jit/_nn.py", content: NN_PY },

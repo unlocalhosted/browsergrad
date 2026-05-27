@@ -149,29 +149,57 @@ def _h_custom(node: UOp, vt: dict, gbt: GpuBufferTable, br: Any,
                  "has_mask": True/False})
     """
     op_name = node.arg.get("op") if isinstance(node.arg, dict) else None
-    if op_name != "flash_attention":
-        raise JitNotImplementedError(
-            f"WebGPU realizer: CUSTOM op {op_name!r} is not supported in "
-            f"v0. Only 'flash_attention' is wired today; fall back to "
-            f"bg.realize() for anything else."
-        )
     inputs = [vt[id(inp)] for inp in node.inputs]
     arg = node.arg
-    has_mask = bool(arg.get("has_mask", False))
-    if has_mask:
-        q, k, v, mask = inputs
-    else:
-        q, k, v = inputs
-        mask = None
-    return br.flash_attention(
-        q, k, v, mask,
-        int(arg["b"]),
-        int(arg["h"]),
-        int(arg["sq"]),
-        int(arg["sk"]),
-        int(arg["d"]),
-        float(arg["scale"]),
-        node.dtype,
+    if op_name == "flash_attention":
+        has_mask = bool(arg.get("has_mask", False))
+        if has_mask:
+            q, k, v, mask = inputs
+        else:
+            q, k, v = inputs
+            mask = None
+        return br.flash_attention(
+            q, k, v, mask,
+            int(arg["b"]),
+            int(arg["h"]),
+            int(arg["sq"]),
+            int(arg["sk"]),
+            int(arg["d"]),
+            float(arg["scale"]),
+            node.dtype,
+        )
+    if op_name == "user":
+        # User WGSL kernel (PRD-015). The Python-side registry holds the
+        # WGSL source by hash; the bridge looks it up to dispatch.
+        from ._custom_kernel import get_registry
+        spec = get_registry().get(arg["kernel_hash"])
+        if spec is None:
+            raise RealizationError(
+                f"WebGPU realizer: user kernel {arg['kernel_name']!r} hash "
+                f"{arg['kernel_hash'][:8]!r} not found in registry. Ensure "
+                f"the @custom_kernel decorator ran in this process before "
+                f"realize_webgpu."
+            )
+        out_len = 1
+        for d in arg["output_shape"]:
+            out_len *= d
+        if out_len == 0:
+            out_len = 1
+        return br.run_user_kernel(
+            inputs,
+            spec.wgsl,
+            arg["kernel_name"],
+            arg["kernel_hash"],
+            tuple(arg["workgroup_size"]),
+            tuple(arg["dispatch_shape"]),
+            int(out_len),
+            tuple(arg["output_shape"]),
+            node.dtype,
+        )
+    raise JitNotImplementedError(
+        f"WebGPU realizer: CUSTOM op {op_name!r} is not supported in "
+        f"v0. Supported: 'flash_attention', 'user'. Fall back to "
+        f"bg.realize() for anything else."
     )
 
 
