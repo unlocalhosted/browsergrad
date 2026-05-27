@@ -34,7 +34,11 @@ import {
   materializeFloat32,
   uploadFloat32,
 } from "./runner.js";
-import { matmulDirect } from "./kernels/matmul.js";
+import { matmulTiledDirect } from "./kernels/matmul_tiled.js";
+import {
+  fusedElementwiseDirect,
+  type FusedOp,
+} from "./kernels/fused_elementwise.js";
 import { flashAttentionDirect } from "./kernels/flash_attention.js";
 import { KernelError, type KernelDevice } from "./types.js";
 
@@ -162,7 +166,10 @@ export function createWebGpuRealizerBridge(
       assertF32(dtype, "matmul");
       const aRec = get(a, "matmul[A]");
       const bRec = get(b, "matmul[B]");
-      const result = matmulDirect(device, aRec.buffer, bRec.buffer, m, k, n);
+      // PRD-012a: tiled GEMM (16×16 workgroup-shared tiles) replaces the
+      // naive triple-loop. Reduces DRAM reads from 2*M*N*K to ~M*N*K/8 —
+      // the load-bearing perf win the megakernel-PRD was claiming.
+      const result = matmulTiledDirect(device, aRec.buffer, bRec.buffer, m, k, n);
       return mint(result.buffer, result.byteLength, [m, n], dtype);
     },
 
@@ -173,16 +180,16 @@ export function createWebGpuRealizerBridge(
       dtype: string,
     ): Handle {
       assertF32(dtype, "fused_elementwise");
-      void inputs;
-      void ops;
-      void shape;
-      throw new KernelError(
-        `WebGPU bridge: fused_elementwise is not implemented in v0. ` +
-          `Either decompose the chain back into primitive ops with their ` +
-          `own GPU handlers, or fall back to bg.realize() (NumPy) for ` +
-          `subgraphs containing OP_FUSED_ELEMENTWISE. PRD-012a will land ` +
-          `a generic codegen path here.`,
-      );
+      // PRD-012a: WGSL codegen for arbitrary elementwise chains. The ops
+      // list is the same shape the Python fusion pass produces; we walk
+      // it, emit a single compute shader, and pipeline-cache by hash.
+      const inputBufs = inputs.map((h, i) => get(h, `fused_elementwise[in${i}]`).buffer);
+      let total = 1;
+      for (const d of shape) total *= d;
+      if (total === 0) total = 1;
+      const fusedOps: FusedOp[] = ops.map((o) => [o[0], o[1], o[2]] as FusedOp);
+      const result = fusedElementwiseDirect(device, inputBufs, fusedOps, total);
+      return mint(result.buffer, result.byteLength, shape, dtype);
     },
 
     cast(
@@ -194,20 +201,29 @@ export function createWebGpuRealizerBridge(
       // v0: f32→f32 is a no-op (returns same buffer alias). Any other
       // cast is unsupported until f16/AMP lands in PRD-012a.
       if (srcDtype === "float32" && dstDtype === "float32") {
-        void handle;
-        void shape;
-        // A true GPU-only copy via CopyBufferToBuffer lands in PRD-012a
-        // alongside the f16 cast kernel. For v0, surface a clear refusal.
-        throw new KernelError(
-          `WebGPU bridge: cast even for float32→float32 needs a real ` +
-            `CopyBufferToBuffer path or shared-handle semantics. Lands ` +
-            `in PRD-012a; for v0, avoid OP_CAST in your IR or use ` +
-            `bg.realize() (NumPy).`,
-        );
+        // GPU-only copy via CopyBufferToBuffer (PRD-012a). The source
+        // buffer's lifetime stays with the caller; the new handle owns
+        // a freshly-allocated GPUBuffer with STORAGE | COPY_SRC usage so
+        // downstream ops can read it and a future materialize() can
+        // copy from it.
+        const src = get(handle, "cast[f32→f32]");
+        const impl = (device as unknown as { gpu: GPUDevice }).gpu;
+        let n = 1;
+        for (const d of shape) n *= d;
+        const byteLength = (n || 1) * 4;
+        const aligned = Math.ceil(byteLength / 4) * 4;
+        const dst = impl.createBuffer({
+          size: aligned,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+        });
+        const encoder = impl.createCommandEncoder({ label: "bg-cast-f32-f32" });
+        encoder.copyBufferToBuffer(src.buffer, 0, dst, 0, aligned);
+        impl.queue.submit([encoder.finish()]);
+        return mint(dst, byteLength, shape, dstDtype);
       }
       throw new KernelError(
         `WebGPU bridge: cast ${srcDtype}→${dstDtype} not supported in v0. ` +
-          `f16 paths land in PRD-012a.`,
+          `f16/bf16 cast kernels land in PRD-012b.`,
       );
     },
 

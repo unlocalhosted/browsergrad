@@ -63,6 +63,12 @@ export {
 } from "./runner.js";
 
 export { matmulDirect } from "./kernels/matmul.js";
+export { matmulTiledDirect, matmulTiled } from "./kernels/matmul_tiled.js";
+export {
+  fusedElementwiseDirect,
+  generateFusedWgsl,
+  type FusedOp,
+} from "./kernels/fused_elementwise.js";
 export { flashAttentionDirect } from "./kernels/flash_attention.js";
 
 // Re-export reference as a top-level convenience too (alongside the subpath).
