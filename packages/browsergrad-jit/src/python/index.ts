@@ -25,6 +25,9 @@ import { SAFETENSORS_PY } from "./_safetensors.generated.js";
 import { CHECKPOINT_PY } from "./_checkpoint.generated.js";
 import { UTILS_CHECKPOINT_PY } from "./_utils_checkpoint.generated.js";
 import { AMP_PY } from "./_amp.generated.js";
+import { BRIDGE_PY } from "./_bridge.generated.js";
+import { GPU_BUFFER_TABLE_PY } from "./_gpu_buffer_table.generated.js";
+import { REALIZE_WEBGPU_PY } from "./_realize_webgpu.generated.js";
 import { TENSOR_PROXY_PY } from "./_tensor_proxy.generated.js";
 import { NN_PY } from "./_nn.generated.js";
 import { FUNCTIONAL_PY } from "./_functional.generated.js";
@@ -90,6 +93,7 @@ from . import _trace_cache as _tc
 from ._safetensors import load_safetensors, save_safetensors
 from . import _utils_checkpoint as _utils_ckpt
 from . import _amp as _amp_mod
+from . import _realize_webgpu as _webgpu_mod
 from ._torch_compat import install_torch_alias, uninstall_torch_alias
 import sys as _sys
 import types as _types
@@ -152,6 +156,87 @@ amp.autocast = _amp_mod.autocast
 amp.GradScaler = _amp_mod.GradScaler
 amp.is_available = _amp_mod.is_available
 _sys.modules["browsergrad_jit.amp"] = amp
+
+
+# bg.kernels — public surface for opt-in CUSTOM kernels (PRD-011.5).
+# Today only flash_attention; PRD-012a auto-recognises the same pattern.
+import math as _math
+
+
+def flash_attention(q, k, v, mask=None, scale=None):
+    """Build a CUSTOM(flash_attention) UOp; realize via bg.realize_webgpu.
+
+    Inputs are TensorProxy. Shapes:
+        Q: (B, H, Sq, D)
+        K: (B, H, Sk, D)
+        V: (B, H, Sk, D)
+        mask (optional): (B or 1, H or 1, Sq, Sk) — additive logits mask
+                         (use -inf for blocked positions, 0 for allowed)
+    Returns a TensorProxy of shape (B, H, Sq, D).
+
+    NOTE: backward is not implemented. Calling .backward() on a tensor
+    downstream of flash_attention falls off the symbolic VJP path
+    because OP_CUSTOM has no registered VJP rule — the closure path
+    fires and there is no closure, raising NoBackwardError. Use only
+    for forward/inference paths in v0.
+    """
+    if scale is None:
+        scale = 1.0 / _math.sqrt(q.shape[-1])
+    B, H, Sq, D = q.shape
+    _, _, Sk, _ = k.shape
+    out_shape = (B, H, Sq, D)
+    inputs_uops = [q._uop, k._uop, v._uop]
+    has_mask = mask is not None
+    if has_mask:
+        inputs_uops.append(mask._uop)
+    from ._ir import UOp, OP_CUSTOM
+    arg = {
+        "op": "flash_attention",
+        "b": int(B), "h": int(H), "sq": int(Sq), "sk": int(Sk), "d": int(D),
+        "scale": float(scale),
+        "has_mask": bool(has_mask),
+    }
+    uop = UOp(op=OP_CUSTOM, inputs=tuple(inputs_uops),
+              shape=out_shape, dtype=q.dtype, arg=arg)
+    return TensorProxy(uop, session=q._get_session(), requires_grad=False)
+
+
+kernels = _types.ModuleType("browsergrad_jit.kernels")
+kernels.flash_attention = flash_attention
+_sys.modules["browsergrad_jit.kernels"] = kernels
+
+
+# bg.realize_webgpu — explicit-realize entry point (PRD-011.5).
+# Mirrors the .numpy() trigger but routes through the WebGPU bridge
+# instead of the NumPy realizer. Raises if no bridge is registered.
+def realize_webgpu(tensor):
+    """Realize a TensorProxy through the registered WebGPU bridge.
+
+    Returns a NumPy ndarray (the bridge materialises bytes back at the
+    seam). Raises JitNotImplementedError if no bridge is registered or
+    if the IR contains opcodes the WebGPU realizer doesn't support yet.
+    """
+    bridge = _webgpu_mod.get_registered_bridge()
+    if bridge is None:
+        raise JitNotImplementedError(
+            "No WebGPU bridge registered. Call "
+            "bg.register_webgpu_bridge(bridge) first — the bridge is "
+            "constructed JS-side via createWebGpuRealizerBridge(device) "
+            "from @unlocalhosted/browsergrad-kernels."
+        )
+    gbt = _webgpu_mod.get_registered_gpu_buffer_table()
+    sess = tensor._get_session()
+    return _webgpu_mod.realize_webgpu(
+        tensor._uop,
+        numpy_buffer_table=sess.buffer_table,
+        gpu_buffer_table=gbt,
+    )
+
+
+register_webgpu_bridge = _webgpu_mod.register_webgpu_bridge
+unregister_webgpu_bridge = _webgpu_mod.unregister_webgpu_bridge
+webgpu_is_available = _webgpu_mod.is_available
+webgpu_supported_opcodes = _webgpu_mod.supported_opcodes
 
 
 def cache_stats() -> dict:
@@ -239,7 +324,9 @@ __all__ = [
     "tensor", "zeros", "ones", "randn", "arange", "from_numpy",
     "Session", "get_default_session", "set_default_session", "new_session",
     "manual_seed",
-    "nn", "optim", "jit", "utils", "amp",
+    "nn", "optim", "jit", "utils", "amp", "kernels",
+    "realize_webgpu", "register_webgpu_bridge", "unregister_webgpu_bridge",
+    "webgpu_is_available", "webgpu_supported_opcodes",
     "install_torch_alias", "uninstall_torch_alias",
     "load_safetensors", "save_safetensors",
     "cache_stats", "clear_cache",
@@ -278,6 +365,9 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_jit/_checkpoint.py", content: CHECKPOINT_PY },
   { path: "browsergrad_jit/_utils_checkpoint.py", content: UTILS_CHECKPOINT_PY },
   { path: "browsergrad_jit/_amp.py", content: AMP_PY },
+  { path: "browsergrad_jit/_bridge.py", content: BRIDGE_PY },
+  { path: "browsergrad_jit/_gpu_buffer_table.py", content: GPU_BUFFER_TABLE_PY },
+  { path: "browsergrad_jit/_realize_webgpu.py", content: REALIZE_WEBGPU_PY },
   { path: "browsergrad_jit/_tensor_proxy.py", content: TENSOR_PROXY_PY },
   { path: "browsergrad_jit/_functional.py", content: FUNCTIONAL_PY },
   { path: "browsergrad_jit/_nn.py", content: NN_PY },

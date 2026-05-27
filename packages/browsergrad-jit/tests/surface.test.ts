@@ -42,6 +42,9 @@ describe("Python source registry", () => {
       "browsergrad_jit/_checkpoint.py",
       "browsergrad_jit/_utils_checkpoint.py",
       "browsergrad_jit/_amp.py",
+      "browsergrad_jit/_bridge.py",
+      "browsergrad_jit/_gpu_buffer_table.py",
+      "browsergrad_jit/_realize_webgpu.py",
       "browsergrad_jit/_tensor_proxy.py",
       "browsergrad_jit/_functional.py",
       "browsergrad_jit/_nn.py",
@@ -69,7 +72,7 @@ describe("Python source registry", () => {
     // codegen, the actual version string should be substituted in.
     const initFile = SOURCE_FILES.find((f) => f.path.endsWith("__init__.py"));
     expect(initFile).toBeDefined();
-    expect(initFile!.content).toMatch(/__version__ = "0\.6\.0"/);
+    expect(initFile!.content).toMatch(/__version__ = "0\.7\.0"/);
   });
 
   it("declares all 28 opcodes in _ir.py (23 core + 2 fusion + 2 autograd + 1 AMP)", () => {

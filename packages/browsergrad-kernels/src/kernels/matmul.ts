@@ -8,7 +8,12 @@
  * cache key suffix, swapped via a future `mode` option.
  */
 
-import { dispatch, type KernelDescriptor } from "../runner.js";
+import {
+  dispatch,
+  runDirect,
+  type KernelDescriptor,
+  type DirectDispatchResult,
+} from "../runner.js";
 import { KernelError, type KernelDevice, type Tensor } from "../types.js";
 
 const WGSL = /* wgsl */ `
@@ -42,6 +47,29 @@ const DESCRIPTOR: KernelDescriptor = {
   wgsl: WGSL,
   workgroupSize: [8, 8, 1],
 };
+
+/**
+ * Direct-dispatch variant: inputs and output stay as GPUBuffers. Used by
+ * the WebGPU realizer (PRD-011.5) to keep intermediates resident on the
+ * GPU across chained ops. Caller owns the returned GPUBuffer's lifetime.
+ */
+export function matmulDirect(
+  device: KernelDevice,
+  A: GPUBuffer,
+  B: GPUBuffer,
+  M: number,
+  K: number,
+  N: number,
+): DirectDispatchResult {
+  const params = new Uint32Array([M, K, N, 0]);
+  return runDirect(device, DESCRIPTOR, {
+    inputBuffers: [A, B],
+    outputLength: M * N,
+    params,
+    dispatchCount: [M, N, 1],
+    cacheKeySuffix: "f32",
+  });
+}
 
 export async function matmul(
   device: KernelDevice,

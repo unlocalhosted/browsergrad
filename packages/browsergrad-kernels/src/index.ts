@@ -43,5 +43,27 @@ export {
   type LayerNormOptions,
 } from "./kernels/index.js";
 
+// PRD-011.5: WebGPU realizer bridge for browsergrad-jit.
+// Construct via `createWebGpuRealizerBridge(device)` and hand to
+// `bg.register_webgpu_bridge(...)` on the Python side.
+export {
+  createWebGpuRealizerBridge,
+  type WebGpuRealizerBridge,
+} from "./realizer.js";
+
+// Direct-dispatch helpers — public so PRD-012's Python codegen can call
+// individual kernels with GPUBuffer residency. The bridge above is the
+// recommended path; these are escape hatches.
+export {
+  runDirect,
+  materializeFloat32,
+  uploadFloat32,
+  type DirectDispatchOptions,
+  type DirectDispatchResult,
+} from "./runner.js";
+
+export { matmulDirect } from "./kernels/matmul.js";
+export { flashAttentionDirect } from "./kernels/flash_attention.js";
+
 // Re-export reference as a top-level convenience too (alongside the subpath).
 export { reference } from "./reference.js";

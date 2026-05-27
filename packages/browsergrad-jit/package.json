@@ -1,6 +1,6 @@
 {
   "name": "@unlocalhosted/browsergrad-jit",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "PyTorch-shaped Python library that traces ops into a UOp IR and realizes through NumPy. The JIT epoch successor to browsergrad-grad — same API surface, lazy by default, designed for downstream fusion / WGSL / WebNN passes. Educational source code, MIT-licensed.",
   "type": "module",
   "license": "MIT",

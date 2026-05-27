@@ -7,6 +7,61 @@ contract in the README](README.md#compatibility-contract).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-05-27
+
+PRD-011.5 spike — GPUBuffer-backed WGSL realizer seam. Forward-only.
+The dispatcher seam between jit (Python-WASM) and kernels (JS WGSL)
+that PRD-011 and PRD-012 both depend on. Backward stays on the
+NumPy realizer. No pattern matcher, no autotune, no fused-elementwise
+codegen yet — those land in PRD-012a.
+
+### Added
+
+- `bg.realize_webgpu(tensor)` — explicit-realize entry point that
+  walks the IR via the registered bridge instead of NumPy. Returns
+  an ndarray (the bridge materialises bytes at the seam).
+- `bg.register_webgpu_bridge(bridge)` / `bg.unregister_webgpu_bridge()`
+  / `bg.webgpu_is_available()` / `bg.webgpu_supported_opcodes()` —
+  lifecycle + introspection.
+- `bg.kernels.flash_attention(Q, K, V, mask=None, scale=None)` —
+  opt-in CUSTOM op constructor. Forward-only; no symbolic VJP rule.
+- `_realize_webgpu.py` — bounded dispatch table (BUFFER, LOAD, CONST,
+  CAST, MATMUL, FUSED_ELEMENTWISE, CUSTOM). Anything outside raises
+  `JitNotImplementedError` with a pointer to `bg.realize()`.
+- `_gpu_buffer_table.py` — opaque handle registry; seed BUFFERs
+  persist across realize calls so chained ops reuse uploaded weights.
+- `_bridge.py` — `WebGpuBridge` Protocol the realizer talks to.
+- Kernels package: `createWebGpuRealizerBridge(device)`, `runDirect`,
+  `materializeFloat32`, `uploadFloat32`, `matmulDirect`,
+  `flashAttentionDirect`, and the new `flash_attention.ts` WGSL kernel
+  (Flash Attention v2 forward, online softmax, fixed tile 32×32, D ≤ 128).
+
+### Refusal modes (per DL/GPU review)
+
+- No `async realize()` refactor — production path uses JSPI (Pyodide
+  0.27+ on Chrome 144+) so Python stays sync.
+- No transformer-block pattern matcher (would not survive nn.Module
+  reorderings; PRD-012a).
+- No backward through the GPU path — backward closures read NumPy
+  intermediates; the GPU path is forward-inference only in v0.
+- No `OP_CAST` GPU handler in v0 (needs CopyBufferToBuffer plumbing
+  or f16/AMP work; both land in PRD-012a).
+- No `OP_FUSED_ELEMENTWISE` GPU handler in v0 (generic codegen is
+  PRD-012a). The Python mock-bridge handler works for tests; the
+  production bridge raises until the WGSL codegen lands.
+- No autotune (cold-sweep cost needs PRD-013 worker infra).
+- No bitwise determinism claim — workgroup reductions reorder
+  additions; 1e-4 abs is the honest tolerance.
+
+### Tests
+
+- `tests-integration/webgpu_realizer.test.ts` — 9 tests against a
+  NumPy-backed mock bridge: single matmul parity, chained-matmul
+  residency proof (3 uploads + 1 materialise + 2 releases),
+  seed-buffer reuse across calls, no-bridge refusal, unsupported-op
+  refusal pointing at `bg.realize()`, Flash Attention with + without
+  causal mask, supported_opcodes whitelist, is_available lifecycle.
+
 ## [0.6.0] — 2026-05-26
 
 PRD-010 v0 — real mixed precision. Ships an `autocast` context manager
