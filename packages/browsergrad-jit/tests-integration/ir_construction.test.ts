@@ -30,7 +30,7 @@ describe("browsergrad_jit._ir under real Pyodide", () => {
 import browsergrad_jit
 browsergrad_jit.__version__
 `);
-    expect(version).toBe("0.7.0");
+    expect(version).toBe("0.8.0");
   });
 
   it("exposes 28 opcodes in ALL_OPS (23 core + 2 fusion + 2 autograd + 1 AMP)", async () => {

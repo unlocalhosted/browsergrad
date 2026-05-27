@@ -7,6 +7,52 @@ contract in the README](README.md#compatibility-contract).
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-05-28
+
+Multi-PRD batch. Each PRD scoped via an independent DL/GPU systems
+review agent that cut speculative scope and identified the load-bearing
+core. Five PRDs shipped at v0:
+
+- **PRD-012a** (kernels package): tiled 16×16 GEMM replaces the naive
+  triple-loop in the WebGPU realizer's matmul path. ~16× DRAM read
+  reduction. New `fused_elementwise.ts` runtime WGSL codegen — we own
+  the code generator, no template engine. `cast` handler does true
+  GPU-only CopyBufferToBuffer for f32→f32.
+- **PRD-013**: lab platform alignment. `LabManifest` schema + parser
+  in the runtime package (no ajv dep), `isSemverCompatible` semver
+  gate, `assertCompatibleRuntime` hard-fail with `LabRuntimeMismatch`.
+  Plus `bg.lab.{assert_pytorch_match, assert_shape_match,
+  assert_no_nan_inf}` Python harness primitives routing through the
+  runtime's existing `browsergrad` assertion module.
+- **PRD-014**: `bg.func.{grad, vjp, functional_call}`. Functional
+  gradient that does NOT mutate `.grad` (critical for future vmap
+  composition). vmap/jacrev refuse with PRD-014b pointer. `torch.func`
+  shim via `install_torch_alias()`.
+- **PRD-015**: `@bg.custom_kernel(wgsl=..., ...)` decorator for
+  user-supplied WGSL. SHA-256 of source = cache key. Routes through
+  OP_CUSTOM("user") to the WebGPU bridge's `run_user_kernel`. Forward
+  only.
+- **PRD-016**: `bg.onnx.export_inference(tensor, input_buffers=...)`.
+  Pure-Python proto3 encoder (no protobuf C-ext dep), 14 ONNX ops
+  mapped, opset 17, fp32/int64 dtypes. `OnnxUnmappableOp` typed
+  refusal for the rest.
+
+### Explicitly deferred (per review verdicts)
+
+- **PRD-011 (WebNN backend tier)**: deferred until Chrome GA. Live
+  user population that sees the speedup today is < 5%; the JS bridge
+  cost erodes the win before WGSL even runs.
+- **PRD-012b** (cost model + producer-consumer fusion + autotune):
+  next slice. Requires more lab content to know which patterns appear.
+- **PRD-012c** (cross-block megakernel): deferred indefinitely. PRD's
+  own text admits block I/O materialises to DRAM — the win shrinks to
+  what Flash Attention + fused FFN deliver separately (already shipped).
+- Per-opcode batching rules for vmap (PRD-014b): ~18 rules / ~900 LOC.
+- Backward through GPU realizer (any PRD): NumPy realizer handles all
+  `.backward()` calls; GPU path is forward-inference only.
+- Cross-browser WGSL compile-error line/column parsing: vendor formats
+  differ; ship `raw_browser_message` and call it honest.
+
 ## [0.7.0] — 2026-05-27
 
 PRD-011.5 spike — GPUBuffer-backed WGSL realizer seam. Forward-only.

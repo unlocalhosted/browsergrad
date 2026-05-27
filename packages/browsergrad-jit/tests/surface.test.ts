@@ -76,7 +76,7 @@ describe("Python source registry", () => {
     // codegen, the actual version string should be substituted in.
     const initFile = SOURCE_FILES.find((f) => f.path.endsWith("__init__.py"));
     expect(initFile).toBeDefined();
-    expect(initFile!.content).toMatch(/__version__ = "0\.7\.0"/);
+    expect(initFile!.content).toMatch(/__version__ = "0\.8\.0"/);
   });
 
   it("declares all 28 opcodes in _ir.py (23 core + 2 fusion + 2 autograd + 1 AMP)", () => {
