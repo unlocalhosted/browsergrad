@@ -38,6 +38,7 @@ const MODULES = [
   ["_bridge.py", "_bridge.generated.ts", "BRIDGE_PY"],
   ["_gpu_buffer_table.py", "_gpu_buffer_table.generated.ts", "GPU_BUFFER_TABLE_PY"],
   ["_realize_webgpu.py", "_realize_webgpu.generated.ts", "REALIZE_WEBGPU_PY"],
+  ["_func.py", "_func.generated.ts", "FUNC_PY"],
   ["_tensor_proxy.py", "_tensor_proxy.generated.ts", "TENSOR_PROXY_PY"],
   ["_nn.py", "_nn.generated.ts", "NN_PY"],
   ["_functional.py", "_functional.generated.ts", "FUNCTIONAL_PY"],

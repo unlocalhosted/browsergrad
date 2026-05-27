@@ -28,6 +28,7 @@ import { AMP_PY } from "./_amp.generated.js";
 import { BRIDGE_PY } from "./_bridge.generated.js";
 import { GPU_BUFFER_TABLE_PY } from "./_gpu_buffer_table.generated.js";
 import { REALIZE_WEBGPU_PY } from "./_realize_webgpu.generated.js";
+import { FUNC_PY } from "./_func.generated.js";
 import { TENSOR_PROXY_PY } from "./_tensor_proxy.generated.js";
 import { NN_PY } from "./_nn.generated.js";
 import { FUNCTIONAL_PY } from "./_functional.generated.js";
@@ -94,6 +95,7 @@ from ._safetensors import load_safetensors, save_safetensors
 from . import _utils_checkpoint as _utils_ckpt
 from . import _amp as _amp_mod
 from . import _realize_webgpu as _webgpu_mod
+from . import _func as _func_mod
 from ._torch_compat import install_torch_alias, uninstall_torch_alias
 import sys as _sys
 import types as _types
@@ -204,6 +206,16 @@ def flash_attention(q, k, v, mask=None, scale=None):
 kernels = _types.ModuleType("browsergrad_jit.kernels")
 kernels.flash_attention = flash_attention
 _sys.modules["browsergrad_jit.kernels"] = kernels
+
+
+# bg.func — functional transforms (PRD-014). Mirrors torch.func.
+func = _types.ModuleType("browsergrad_jit.func")
+func.grad = _func_mod.grad
+func.vjp = _func_mod.vjp
+func.functional_call = _func_mod.functional_call
+func.vmap = _func_mod.vmap         # refuses with pointer in v0
+func.jacrev = _func_mod.jacrev     # refuses with pointer in v0
+_sys.modules["browsergrad_jit.func"] = func
 
 
 # bg.realize_webgpu — explicit-realize entry point (PRD-011.5).
@@ -324,7 +336,7 @@ __all__ = [
     "tensor", "zeros", "ones", "randn", "arange", "from_numpy",
     "Session", "get_default_session", "set_default_session", "new_session",
     "manual_seed",
-    "nn", "optim", "jit", "utils", "amp", "kernels",
+    "nn", "optim", "jit", "utils", "amp", "kernels", "func",
     "realize_webgpu", "register_webgpu_bridge", "unregister_webgpu_bridge",
     "webgpu_is_available", "webgpu_supported_opcodes",
     "install_torch_alias", "uninstall_torch_alias",
@@ -368,6 +380,7 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_jit/_bridge.py", content: BRIDGE_PY },
   { path: "browsergrad_jit/_gpu_buffer_table.py", content: GPU_BUFFER_TABLE_PY },
   { path: "browsergrad_jit/_realize_webgpu.py", content: REALIZE_WEBGPU_PY },
+  { path: "browsergrad_jit/_func.py", content: FUNC_PY },
   { path: "browsergrad_jit/_tensor_proxy.py", content: TENSOR_PROXY_PY },
   { path: "browsergrad_jit/_functional.py", content: FUNCTIONAL_PY },
   { path: "browsergrad_jit/_nn.py", content: NN_PY },

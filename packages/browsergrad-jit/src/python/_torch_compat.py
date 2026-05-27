@@ -87,6 +87,9 @@ def install_torch_alias(*, force: bool = False) -> None:
     # torch.amp — autocast + GradScaler (PRD-010).
     if hasattr(browsergrad_jit, "amp"):
         sys.modules["torch.amp"] = browsergrad_jit.amp
+    # torch.func — functional transforms (PRD-014).
+    if hasattr(browsergrad_jit, "func"):
+        sys.modules["torch.func"] = browsergrad_jit.func
 
 
 def uninstall_torch_alias() -> None:
