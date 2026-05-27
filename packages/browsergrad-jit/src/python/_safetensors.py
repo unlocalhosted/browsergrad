@@ -302,26 +302,42 @@ def _resolve_source(
 
 def save_safetensors(
     tensors: Dict[str, Any],
-    path: str,
+    path: Optional[str] = None,
     *,
     metadata: Optional[Dict[str, str]] = None,
-) -> None:
-    """Write a dict of TensorProxies to a safetensors file.
+) -> bytes:
+    """Serialize a dict of tensors to the safetensors format.
 
-    Tensors are realized via `.numpy()` and laid out in the order given.
-    `metadata` is serialized as a `__metadata__` entry; safetensors spec
-    requires its values be strings.
+    Accepts TensorProxy or np.ndarray values — TensorProxy is realized
+    via .numpy(); ndarray passes through. Browser-side users typically
+    omit `path` and use the returned bytes; Node-side users may pass a
+    path to also write the file.
+
+    Returns the serialized bytes either way. The path-write side-effect
+    is additive — handy for tests and Node CLIs.
+
+    `metadata` is serialized as a `__metadata__` entry; safetensors
+    spec requires its values be strings.
+
+    Browser-friendly v0 (PRD-008 feedback): the original signature
+    required a path argument, which is impossible in the browser without
+    a filesystem polyfill. The bytes-returning form lets the caller
+    pipe to OPFS, IndexedDB, an HTTP POST, or a JavaScript download.
     """
+    import numpy as np
     header: Dict[str, Any] = {}
     arrays: list[np.ndarray] = []
     cursor = 0
     for name, proxy in tensors.items():
-        if not hasattr(proxy, "numpy"):
+        if hasattr(proxy, "numpy"):
+            arr = proxy.numpy()
+        elif isinstance(proxy, np.ndarray):
+            arr = proxy
+        else:
             raise TypeError(
                 f"safetensors: value at {name!r} is a {type(proxy).__name__}, "
-                f"expected TensorProxy"
+                f"expected TensorProxy or np.ndarray"
             )
-        arr = proxy.numpy()
         if not arr.flags.c_contiguous:
             arr = np.ascontiguousarray(arr)
         np_dtype_name = arr.dtype.name
@@ -354,11 +370,18 @@ def save_safetensors(
         header["__metadata__"] = metadata
 
     header_bytes = json.dumps(header, separators=(",", ":")).encode("utf-8")
-    with open(path, "wb") as f:
-        f.write(struct.pack("<Q", len(header_bytes)))
-        f.write(header_bytes)
-        for arr in arrays:
-            f.write(arr.tobytes())
+    out = bytearray()
+    out += struct.pack("<Q", len(header_bytes))
+    out += header_bytes
+    for arr in arrays:
+        out += arr.tobytes()
+    blob = bytes(out)
+
+    if path is not None:
+        with open(path, "wb") as f:
+            f.write(blob)
+
+    return blob
 
 
 __all__ = ["load_safetensors", "save_safetensors"]

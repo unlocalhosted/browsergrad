@@ -912,7 +912,7 @@ def _to_proxy(value: Any, session: Any) -> "TensorProxy":
 
 
 def from_numpy(
-    array: np.ndarray,
+    array: Any,
     requires_grad: bool = False,
     session: Any = None,
 ) -> "TensorProxy":
@@ -921,7 +921,23 @@ def from_numpy(
 
     The array is stored by reference (no copy) — callers must not mutate
     it after registration. Use `array.copy()` if you need independence.
+
+    UX convenience (from end-to-end harness feedback): accepts an
+    existing TensorProxy as identity. This lets natural call sites
+    like `model.weight = bg.from_numpy(restored['weight'])` work even
+    when the restored value is already a proxy (e.g. from
+    load_safetensors). The proxy's session is preserved; requires_grad
+    can be flipped True via this path (mirror torch.nn.Parameter idiom).
     """
+    if isinstance(array, TensorProxy):
+        if requires_grad and not array.requires_grad:
+            # Re-wrap with the requested flag — the underlying UOp stays.
+            return TensorProxy(
+                array._uop,
+                session=array._session if session is None else session,
+                requires_grad=True,
+            )
+        return array
     if session is None:
         import browsergrad_jit
         session = browsergrad_jit.get_default_session()
