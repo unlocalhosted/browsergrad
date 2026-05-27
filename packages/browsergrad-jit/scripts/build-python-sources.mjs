@@ -39,6 +39,7 @@ const MODULES = [
   ["_gpu_buffer_table.py", "_gpu_buffer_table.generated.ts", "GPU_BUFFER_TABLE_PY"],
   ["_realize_webgpu.py", "_realize_webgpu.generated.ts", "REALIZE_WEBGPU_PY"],
   ["_func.py", "_func.generated.ts", "FUNC_PY"],
+  ["_vmap.py", "_vmap.generated.ts", "VMAP_PY"],
   ["_custom_kernel.py", "_custom_kernel.generated.ts", "CUSTOM_KERNEL_PY"],
   ["_onnx.py", "_onnx.generated.ts", "ONNX_PY"],
   ["_lab.py", "_lab.generated.ts", "LAB_PY"],

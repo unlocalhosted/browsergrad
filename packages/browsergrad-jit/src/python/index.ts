@@ -29,6 +29,7 @@ import { BRIDGE_PY } from "./_bridge.generated.js";
 import { GPU_BUFFER_TABLE_PY } from "./_gpu_buffer_table.generated.js";
 import { REALIZE_WEBGPU_PY } from "./_realize_webgpu.generated.js";
 import { FUNC_PY } from "./_func.generated.js";
+import { VMAP_PY } from "./_vmap.generated.js";
 import { CUSTOM_KERNEL_PY } from "./_custom_kernel.generated.js";
 import { ONNX_PY } from "./_onnx.generated.js";
 import { LAB_PY } from "./_lab.generated.js";
@@ -431,6 +432,7 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_jit/_gpu_buffer_table.py", content: GPU_BUFFER_TABLE_PY },
   { path: "browsergrad_jit/_realize_webgpu.py", content: REALIZE_WEBGPU_PY },
   { path: "browsergrad_jit/_func.py", content: FUNC_PY },
+  { path: "browsergrad_jit/_vmap.py", content: VMAP_PY },
   { path: "browsergrad_jit/_custom_kernel.py", content: CUSTOM_KERNEL_PY },
   { path: "browsergrad_jit/_onnx.py", content: ONNX_PY },
   { path: "browsergrad_jit/_lab.py", content: LAB_PY },

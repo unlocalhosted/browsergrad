@@ -46,6 +46,7 @@ describe("Python source registry", () => {
       "browsergrad_jit/_gpu_buffer_table.py",
       "browsergrad_jit/_realize_webgpu.py",
       "browsergrad_jit/_func.py",
+      "browsergrad_jit/_vmap.py",
       "browsergrad_jit/_custom_kernel.py",
       "browsergrad_jit/_onnx.py",
       "browsergrad_jit/_lab.py",

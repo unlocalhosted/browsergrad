@@ -220,22 +220,26 @@ def grad(
 
         grad_uops = _symbolic_vjp_walk(out_scalar, seed_uop, wanted_leaves)
 
-        from ._realize import realize
         from . import _checkpoint
         out_grads: List[Any] = []
         for leaf in wanted_leaves:
             pid = id(leaf)
             if pid not in grad_uops:
                 # Leaf wasn't on the autograd chain — zero gradient of
-                # matching shape.
+                # matching shape. This is a fresh leaf; realize a zero
+                # buffer (no autograd chain to preserve).
                 z = np.zeros(leaf._uop.shape, dtype=np.dtype(leaf._uop.dtype))
                 out_grads.append(from_numpy(z, session=sess))
                 continue
             gnode = grad_uops[pid]
             if _checkpoint.has_any_region():
                 gnode = _checkpoint.apply_checkpoint_rewrite(gnode)
-            arr = realize(gnode, sess.buffer_table)
-            out_grads.append(from_numpy(np.array(arr, copy=True), session=sess))
+            # Return a LAZY TensorProxy wrapping the gradient subgraph —
+            # do NOT realize. This is the load-bearing piece for
+            # `vmap(grad(fn))`: vmap needs the gradient graph to walk
+            # and transform, not a realized BUFFER+LOAD leaf.
+            out_grads.append(TensorProxy(gnode, session=sess,
+                                         requires_grad=False))
 
         return out_grads[0] if single else tuple(out_grads)
 
@@ -377,20 +381,15 @@ def functional_call(
 
 
 def vmap(fn: Any, in_dims: Any = 0, out_dims: Any = 0) -> Any:
-    """vmap — DEFERRED to PRD-014b.
+    """JAX-style batching transform. Per-opcode rules cover 17 of our
+    28 IR opcodes — enough for MLP/Linear/elementwise/matmul/reduce.
 
-    A real vmap implementation requires per-opcode batching rules (~18
-    rules in our IR). For v0, this entry point exists so the surface is
-    stable but refuses with a clear pointer. Use a Python `for` loop
-    over the batch dimension for now — slow but correct and composable
-    with `grad`.
+    Routes through `_vmap.vmap` which contains the actual rules. This
+    wrapper just exposes them at the public `bg.func.vmap` location
+    and forwards. See `_vmap.py` for op coverage and limitations.
     """
-    raise JitNotImplementedError(
-        "bg.func.vmap is not implemented in v0. Use a Python `for` loop "
-        "over the batch dimension, or stack inputs and use the natural "
-        "broadcasting behavior of the IR. A real batching transform "
-        "(per-opcode rules) lands in PRD-014b."
-    )
+    from . import _vmap as _vmap_mod
+    return _vmap_mod.vmap(fn, in_dims=in_dims, out_dims=out_dims)
 
 
 def jacrev(fn: Any, argnums: Any = 0) -> Any:
