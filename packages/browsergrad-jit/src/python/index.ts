@@ -31,6 +31,7 @@ import { REALIZE_WEBGPU_PY } from "./_realize_webgpu.generated.js";
 import { FUNC_PY } from "./_func.generated.js";
 import { CUSTOM_KERNEL_PY } from "./_custom_kernel.generated.js";
 import { ONNX_PY } from "./_onnx.generated.js";
+import { LAB_PY } from "./_lab.generated.js";
 import { TENSOR_PROXY_PY } from "./_tensor_proxy.generated.js";
 import { NN_PY } from "./_nn.generated.js";
 import { FUNCTIONAL_PY } from "./_functional.generated.js";
@@ -100,6 +101,7 @@ from . import _realize_webgpu as _webgpu_mod
 from . import _func as _func_mod
 from . import _custom_kernel as _custom_kernel_mod
 from . import _onnx as _onnx_mod
+from . import _lab as _lab_mod
 from ._torch_compat import install_torch_alias, uninstall_torch_alias
 import sys as _sys
 import types as _types
@@ -255,6 +257,16 @@ onnx.OnnxUnmappableOp = _onnx_mod.OnnxUnmappableOp
 _sys.modules["browsergrad_jit.onnx"] = onnx
 
 
+# bg.lab — semantic harness primitives (PRD-013). Calls into the
+# runtime's browsergrad module if available; structured-stdout fallback
+# for plain-pyodide unit tests.
+lab = _types.ModuleType("browsergrad_jit.lab")
+lab.assert_pytorch_match = _lab_mod.assert_pytorch_match
+lab.assert_shape_match = _lab_mod.assert_shape_match
+lab.assert_no_nan_inf = _lab_mod.assert_no_nan_inf
+_sys.modules["browsergrad_jit.lab"] = lab
+
+
 # bg.realize_webgpu — explicit-realize entry point (PRD-011.5).
 # Mirrors the .numpy() trigger but routes through the WebGPU bridge
 # instead of the NumPy realizer. Raises if no bridge is registered.
@@ -374,7 +386,7 @@ __all__ = [
     "Session", "get_default_session", "set_default_session", "new_session",
     "manual_seed",
     "nn", "optim", "jit", "utils", "amp", "kernels", "func",
-    "custom_kernel", "onnx",
+    "custom_kernel", "onnx", "lab",
     "realize_webgpu", "register_webgpu_bridge", "unregister_webgpu_bridge",
     "webgpu_is_available", "webgpu_supported_opcodes",
     "install_torch_alias", "uninstall_torch_alias",
@@ -421,6 +433,7 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_jit/_func.py", content: FUNC_PY },
   { path: "browsergrad_jit/_custom_kernel.py", content: CUSTOM_KERNEL_PY },
   { path: "browsergrad_jit/_onnx.py", content: ONNX_PY },
+  { path: "browsergrad_jit/_lab.py", content: LAB_PY },
   { path: "browsergrad_jit/_tensor_proxy.py", content: TENSOR_PROXY_PY },
   { path: "browsergrad_jit/_functional.py", content: FUNCTIONAL_PY },
   { path: "browsergrad_jit/_nn.py", content: NN_PY },

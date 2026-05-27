@@ -48,6 +48,7 @@ describe("Python source registry", () => {
       "browsergrad_jit/_func.py",
       "browsergrad_jit/_custom_kernel.py",
       "browsergrad_jit/_onnx.py",
+      "browsergrad_jit/_lab.py",
       "browsergrad_jit/_tensor_proxy.py",
       "browsergrad_jit/_functional.py",
       "browsergrad_jit/_nn.py",
