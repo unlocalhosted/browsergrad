@@ -273,19 +273,24 @@ def vjp(
     multiple times with different cotangents; each call produces a fresh
     realize pass.
 
-    Limitations match `grad`: VJP rule coverage required for every op on
-    the chain.
+    Like `grad`, this force-sets `requires_grad=True` on primals so the
+    autograd chain builds whether or not the caller flagged them.
     """
     from ._tensor_proxy import TensorProxy, from_numpy
 
     primal_proxies: List[Any] = []
+    primals_list = list(primals)
     for i, p in enumerate(primals):
         if not isinstance(p, TensorProxy):
             raise TypeError(
                 f"bg.func.vjp: primal at position {i} is not a TensorProxy "
                 f"(got {type(p).__name__})."
             )
+        if not p.requires_grad:
+            p = TensorProxy(p._uop, session=p._session, requires_grad=True)
+            primals_list[i] = p
         primal_proxies.append(p)
+    primals = tuple(primals_list)
 
     outputs = fn(*primals)
     # outputs may be a single TensorProxy or a tuple. Normalize.
