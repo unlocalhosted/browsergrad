@@ -207,4 +207,57 @@ result
 `);
     expect(err).toMatch(/ambiguous/);
   });
+
+  it("__pow__ supports integer exponents (MSE idiom)", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      sq: number[];
+      cube: number[];
+      mse: number;
+    }>(`
+import browsergrad_jit as bg
+import numpy as np
+x = bg.from_numpy(np.array([1.0, 2.0, 3.0], dtype=np.float32))
+{
+    "sq": (x ** 2).numpy().tolist(),
+    "cube": (x ** 3).numpy().tolist(),
+    "mse": float(((x - 1.0) ** 2).mean().numpy()),
+}
+`);
+    expect(result.sq).toEqual([1, 4, 9]);
+    expect(result.cube).toEqual([1, 8, 27]);
+    // (0**2 + 1**2 + 2**2) / 3 = 5/3
+    expect(result.mse).toBeCloseTo(5 / 3, 5);
+  });
+
+  it("__pow__ with float exponent uses exp(log(x) * n)", async () => {
+    const target = await getJitTarget();
+    const r = await target.run<{ values: number[] }>(`
+import browsergrad_jit as bg
+import numpy as np
+x = bg.from_numpy(np.array([1.0, 4.0, 9.0], dtype=np.float32))
+{"values": (x ** 0.5).numpy().tolist()}
+`);
+    // sqrt of [1, 4, 9] = [1, 2, 3]
+    expect(r.values[0]).toBeCloseTo(1, 4);
+    expect(r.values[1]).toBeCloseTo(2, 4);
+    expect(r.values[2]).toBeCloseTo(3, 4);
+  });
+
+  it("__pow__ backward through MSE works (the craftingattention training loop)", async () => {
+    const target = await getJitTarget();
+    const r = await target.run<{ max_diff: number }>(`
+import browsergrad_jit as bg
+import numpy as np
+
+x = bg.from_numpy(np.array([1.0, 2.0, 3.0], dtype=np.float32), requires_grad=True)
+loss = ((x - 1.0) ** 2).mean()
+loss.backward()
+
+# d/dx mean((x-1)^2) = (2/N)*(x-1)
+expected = (2.0 / 3) * (np.array([1.0, 2.0, 3.0]) - 1.0)
+{"max_diff": float(np.max(np.abs(x.grad.numpy() - expected)))}
+`);
+    expect(r.max_diff).toBeLessThan(1e-5);
+  });
 });

@@ -413,6 +413,40 @@ class TensorProxy:
         return TensorProxy(uop, session=self._get_session(),
                            requires_grad=self.requires_grad, ctx=ctx)
 
+    def __pow__(self, exponent: Any) -> "TensorProxy":
+        """Universal MSE idiom support: `(pred - target) ** 2`. Surfaced
+        by craftingattention integration testing.
+
+        Integer exponents up to 8 unroll into a chain of MUL UOps —
+        cheap, no transcendentals, fusion-friendly. Larger or non-int
+        exponents lower to exp(log(x) * exponent), which preserves
+        autograd through the existing EXP/LOG/MUL VJP rules but
+        requires positive x. Negative-base non-int exponent raises.
+        """
+        if isinstance(exponent, int) and 0 <= exponent <= 8:
+            if exponent == 0:
+                # x ** 0 = 1 — return a CONST proxy of ones.
+                arr = np.ones(self._uop.shape, dtype=np.dtype(self._uop.dtype))
+                return from_numpy(arr, session=self._get_session())
+            result = self
+            for _ in range(exponent - 1):
+                result = result * self
+            return result
+        # General case: exp(log(x) * exponent).
+        if isinstance(exponent, (int, float)):
+            return (self.log() * float(exponent)).exp()
+        return (self.log() * exponent).exp()
+
+    def __rpow__(self, base: Any) -> "TensorProxy":
+        """`scalar ** TensorProxy` — `base ** self = exp(log(base) * self)`."""
+        if not isinstance(base, (int, float)):
+            return NotImplemented
+        if base <= 0:
+            raise ValueError(
+                f"TensorProxy.__rpow__: base must be positive (got {base})"
+            )
+        return (self * float(np.log(base))).exp()
+
     def __matmul__(self, other: Any) -> "TensorProxy":
         rhs = _to_proxy(other, self._get_session())
         # Inline matmul shape inference for clarity; np.matmul agrees.
