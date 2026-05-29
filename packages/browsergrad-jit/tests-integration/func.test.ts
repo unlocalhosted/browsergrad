@@ -209,17 +209,34 @@ expected = (np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float32)
     expect(result.max_diff).toBeLessThan(1e-5);
   });
 
-  it("vmap-of-grad composition is deferred to PRD-014b with a clear pointer", async () => {
-    // The composition has subtler shape-broadcasting interactions
-    // (grad's VJP rules record dy.shape which can be smaller than the
-    // realized ndarray shape; vmap's per-op rules need to derive
-    // broadcast shapes more carefully). v0 vmap covers stand-alone
-    // transforms; composition with grad is a known-caveat follow-on.
-    //
-    // The test below exists as a known-failure marker — when PRD-014b
-    // fixes broadcast-shape derivation in the symbolic-VJP path, this
-    // test should be moved to assert success.
-    expect(true).toBe(true);
+  it("vmap composes with grad for per-sample gradients", async () => {
+    // PRD-014b — composition now works after two fixes:
+    //  1. bg.func.grad force-sets requires_grad=True on argnums inputs
+    //     so the autograd chain builds even when vmap passes plain leaves.
+    //  2. _vmap.{reshape,broadcast_to} check whether the input was
+    //     actually batched (ndim grew by 1) before prepending B —
+    //     un-batched pass-throughs keep their original target shape.
+    const target = await getJitTarget();
+    const result = await target.run<{ shape: number[]; max_diff: number }>(`
+import browsergrad_jit as bg
+import numpy as np
+
+batched_x = bg.from_numpy(np.array(
+    [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float32))
+
+def loss(x):
+    return (x * x).sum()
+
+per_sample = bg.func.vmap(bg.func.grad(loss))(batched_x)
+arr = per_sample.numpy()
+expected = 2 * np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=np.float32)
+{
+    "shape": list(arr.shape),
+    "max_diff": float(np.max(np.abs(arr - expected))),
+}
+`);
+    expect(result.shape).toEqual([3, 2]);
+    expect(result.max_diff).toBeLessThan(1e-5);
   });
 
   it("jacrev is deferred with a clear pointer", async () => {

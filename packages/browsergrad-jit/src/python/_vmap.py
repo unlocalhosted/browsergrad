@@ -53,7 +53,10 @@ from ._ir import (
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CMP,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
-    OP_WHERE, OP_BROADCAST_TO,
+    OP_WHERE, OP_BROADCAST_TO, OP_ISNAN,
+    OP_PAD, OP_SLICE, OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
+    OP_SCATTER_ADD, OP_INDEX, OP_MASK, OP_RANDOM, OP_CUSTOM,
+    OP_STORE,
 )
 from ._errors import JitNotImplementedError
 
@@ -251,8 +254,20 @@ def _vmap_reduce(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
 
 @register_vmap(OP_RESHAPE)
 def _vmap_reshape(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    """If the input was un-batched (pass-through scalar / const), the
+    reshape keeps its original target shape. Otherwise we prepend B.
+
+    The original IR's `node.inputs[0].shape` tells us what was expected;
+    `inner.shape` tells us what arrived. Same ndim → unbatched; +1 ndim
+    → batched (and we prepend B).
+    """
     inner = batched[id(node.inputs[0])]
-    new_shape = _batched_shape(node.arg["new_shape"], B)
+    orig_input_ndim = len(node.inputs[0].shape)
+    is_batched = len(inner.shape) > orig_input_ndim
+    if is_batched:
+        new_shape = _batched_shape(node.arg["new_shape"], B)
+    else:
+        new_shape = tuple(node.arg["new_shape"])
     return UOp(op=OP_RESHAPE, inputs=(inner,), shape=new_shape,
                dtype=node.dtype,
                arg={**node.arg, "new_shape": new_shape})
@@ -268,10 +283,174 @@ def _vmap_permute(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
                dtype=node.dtype, arg={**node.arg, "axes": shifted})
 
 
+# Remaining v0 rules: ISNAN (passthrough), PAD (prepend (0,0)),
+# SLICE (prepend slice(None)), FUSED_SOFTMAX (shift axis),
+# FUSED_ELEMENTWISE (re-broadcast over batched inputs), INDEX (shift dim),
+# SCATTER_ADD (shift dim).
+# Refused (need richer semantics): RANDOM, MASK, CUSTOM, STORE.
+
+
+@register_vmap(OP_ISNAN)
+def _vmap_isnan(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    inner = batched[id(node.inputs[0])]
+    return UOp(op=OP_ISNAN, inputs=(inner,),
+               shape=inner.shape, dtype=node.dtype, arg=node.arg)
+
+
+@register_vmap(OP_PAD)
+def _vmap_pad(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    """Prepend a no-op (0, 0) pad for the batch dim (only when actually
+    batched). The original pad_width acts on the un-batched axes."""
+    inner = batched[id(node.inputs[0])]
+    orig_input_ndim = len(node.inputs[0].shape)
+    is_batched = len(inner.shape) > orig_input_ndim
+    arg = dict(node.arg)
+    pad_width = list(arg.get("pad_width", ()))
+    if is_batched:
+        pad_width = [(0, 0)] + pad_width
+    arg["pad_width"] = pad_width
+    # Recompute output shape from inner.shape + pad_width.
+    out_dims = []
+    for d, (lo, hi) in zip(inner.shape, pad_width):
+        out_dims.append(d + lo + hi)
+    return UOp(op=OP_PAD, inputs=(inner,), shape=tuple(out_dims),
+               dtype=node.dtype, arg=arg)
+
+
+@register_vmap(OP_SLICE)
+def _vmap_slice(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    """Prepend slice(None) for the batch dim. Original slices stay."""
+    inner = batched[id(node.inputs[0])]
+    orig_input_ndim = len(node.inputs[0].shape)
+    is_batched = len(inner.shape) > orig_input_ndim
+    arg = dict(node.arg)
+    slices = list(arg.get("slices", ()))
+    if is_batched:
+        slices = [slice(None)] + slices
+    arg["slices"] = slices
+    # Output shape: batch dim from inner + sliced unbatched dims.
+    new_shape = list(node.shape)
+    if is_batched:
+        new_shape = [B] + new_shape
+    return UOp(op=OP_SLICE, inputs=(inner,), shape=tuple(new_shape),
+               dtype=node.dtype, arg=arg)
+
+
+@register_vmap(OP_FUSED_SOFTMAX)
+def _vmap_fused_softmax(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    inner = batched[id(node.inputs[0])]
+    arg = dict(node.arg)
+    axis = arg.get("axis", -1)
+    # Shift positive axis by +1 (only when input was batched).
+    orig_input_ndim = len(node.inputs[0].shape)
+    is_batched = len(inner.shape) > orig_input_ndim
+    if is_batched and isinstance(axis, int) and axis >= 0:
+        arg["axis"] = axis + 1
+    return UOp(op=OP_FUSED_SOFTMAX, inputs=(inner,),
+               shape=inner.shape, dtype=node.dtype, arg=arg)
+
+
+@register_vmap(OP_FUSED_ELEMENTWISE)
+def _vmap_fused_elementwise(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    """All inputs gain (or keep) their shapes; the ops list stays the
+    same. The realizer's _h_fused_elementwise loops over flat indices
+    so it Just Works with the new batched shapes."""
+    new_inputs = tuple(batched[id(inp)] for inp in node.inputs)
+    # Output shape: broadcast all batched input shapes.
+    new_shape = _broadcast(*[i.shape for i in new_inputs])
+    return UOp(op=OP_FUSED_ELEMENTWISE, inputs=new_inputs,
+               shape=new_shape, dtype=node.dtype, arg=node.arg)
+
+
+@register_vmap(OP_INDEX)
+def _vmap_index(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    """Shift dim by +1 (when batched). Both data and idx assumed
+    batched along axis 0; broadcasting over the new batch dim works
+    naturally for np.take semantics."""
+    data = batched[id(node.inputs[0])]
+    idx = batched[id(node.inputs[1])]
+    arg = dict(node.arg)
+    dim = arg.get("dim", 0)
+    orig_data_ndim = len(node.inputs[0].shape)
+    is_batched = len(data.shape) > orig_data_ndim
+    if is_batched and dim >= 0:
+        arg["dim"] = dim + 1
+    # Output shape: same as data with dim replaced by idx's gather axis.
+    # Simplest derivation: prepend B if batched, otherwise unchanged.
+    new_shape = (B,) + node.shape if is_batched else node.shape
+    return UOp(op=OP_INDEX, inputs=(data, idx),
+               shape=new_shape, dtype=node.dtype, arg=arg)
+
+
+@register_vmap(OP_SCATTER_ADD)
+def _vmap_scatter_add(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    """target, idx, src all assumed batched along axis 0; dim shifts +1."""
+    target = batched[id(node.inputs[0])]
+    idx = batched[id(node.inputs[1])]
+    src = batched[id(node.inputs[2])]
+    arg = dict(node.arg)
+    dim = arg.get("dim", 0)
+    orig_target_ndim = len(node.inputs[0].shape)
+    is_batched = len(target.shape) > orig_target_ndim
+    if is_batched and dim >= 0:
+        arg["dim"] = dim + 1
+    return UOp(op=OP_SCATTER_ADD, inputs=(target, idx, src),
+               shape=target.shape, dtype=node.dtype, arg=arg)
+
+
+# Refusal stubs — these ops have semantics that don't translate
+# trivially under vmap. We document the gap rather than silently
+# producing wrong results.
+
+
+def _refuse(op_name: str, reason: str):
+    def _rule(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+        raise JitNotImplementedError(
+            f"bg.func.vmap: {op_name} is not vmappable in v0 — {reason}. "
+            f"Use a Python for-loop or refactor your function to avoid "
+            f"this op."
+        )
+    return _rule
+
+
+_VMAP_RULES[OP_RANDOM] = _refuse(
+    "OP_RANDOM",
+    "random sampling requires a per-invocation key split (JAX uses "
+    "PRNGKey for this). v0 has no key split — every randn() call returns "
+    "the same sequence across batches",
+)
+
+_VMAP_RULES[OP_MASK] = _refuse(
+    "OP_MASK",
+    "boolean indexing produces a data-dependent output shape; vmap "
+    "needs a static shape across batches",
+)
+
+_VMAP_RULES[OP_CUSTOM] = _refuse(
+    "OP_CUSTOM",
+    "user-defined ops can have arbitrary semantics; provide a hand-"
+    "written vmap rule via _vmap.register_vmap if you need it",
+)
+
+_VMAP_RULES[OP_STORE] = _refuse(
+    "OP_STORE",
+    "STORE mutates a BUFFER; that's an autograd-time concern, not a "
+    "vmap-time one. If you're seeing this, you constructed a graph "
+    "with explicit STORE — restructure to use functional ops",
+)
+
+
 @register_vmap(OP_BROADCAST_TO)
 def _vmap_broadcast_to(node: UOp, batched: Dict[int, UOp], B: int) -> UOp:
+    """Same input-batched-or-not check as RESHAPE: if input is the
+    un-batched pass-through, broadcast target stays as recorded."""
     inner = batched[id(node.inputs[0])]
-    new_shape = _batched_shape(node.arg["shape"], B)
+    orig_input_ndim = len(node.inputs[0].shape)
+    is_batched = len(inner.shape) > orig_input_ndim
+    if is_batched:
+        new_shape = _batched_shape(node.arg["shape"], B)
+    else:
+        new_shape = tuple(node.arg["shape"])
     return UOp(op=OP_BROADCAST_TO, inputs=(inner,), shape=new_shape,
                dtype=node.dtype, arg={**node.arg, "shape": new_shape})
 

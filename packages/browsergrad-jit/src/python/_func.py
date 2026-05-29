@@ -189,10 +189,15 @@ def grad(
     def wrapped(*args: Any, **kwargs: Any) -> Any:
         from ._tensor_proxy import TensorProxy, from_numpy
 
-        # The function may close over module parameters; we still expose
-        # all leaf TensorProxy inputs as candidates. The argnums filter
-        # selects which ones to return gradients for.
+        # Force the argnums inputs to be differentiable for this call —
+        # natural call sites (and `vmap(grad(fn))`) pass plain
+        # TensorProxies whose requires_grad may be False. Without this
+        # the autograd chain doesn't build and grad silently returns
+        # zeros. Wrap with a fresh TensorProxy sharing the same UOp;
+        # the new proxy has its own identity so symbolic_vjp_walk
+        # accumulates into the right leaf id.
         wanted_leaves: List[Any] = []
+        args_list = list(args)
         for i in argnums_t:
             arg_i = args[i]
             if not isinstance(arg_i, TensorProxy):
@@ -201,7 +206,15 @@ def grad(
                     f"(got {type(arg_i).__name__}). Wrap with bg.from_numpy or "
                     f"bg.tensor first."
                 )
+            if not arg_i.requires_grad:
+                arg_i = TensorProxy(
+                    arg_i._uop,
+                    session=arg_i._session,
+                    requires_grad=True,
+                )
+                args_list[i] = arg_i
             wanted_leaves.append(arg_i)
+        args = tuple(args_list)
 
         out = fn(*args, **kwargs)
         out_scalar = _scalarize(out)

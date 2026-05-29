@@ -145,21 +145,33 @@ AMP on NumPy: not faster than f32 (NumPy lacks f16 SIMD); the value is correctne
 | Issue | Found by | Status |
 |---|---|---|
 | FA-v2 kernel: ~0.69 max abs diff vs composed reference | Real-WebGPU browser CI (PRD-011.5+012a) | Bit-deterministic; kernel logic bug. Tracked as PRD-012a follow-up. |
-| `vmap(grad(fn))` composition shape subtleties | Functional transforms bench | Stand-alone vmap works. PRD-014b polish — VJP rules need to emit broadcast-aware shapes. |
 | Trace cache misses on `requires_grad=True` graphs | Perf bench | Intentional (`_trace_cache.py:147` exclusion). Lifting would let backward graphs cache too. P1 follow-up. |
 
-## Deliberately deferred (with engineering rationale)
+## PRD coverage
+
+All 16 PRDs land at v0:
+
+| PRD | Status |
+|---|---|
+| 001-010 | ✅ Shipped (see PROGRESS.md) |
+| 011 (WebNN) | ✅ Experimental spike at `bg.experimental.webnn.matmul`. Full backend tier when Chrome WebNN reaches GA + meaningful user fraction. |
+| 011.5 (WGSL realizer seam) | ✅ Shipped |
+| 012 (megakernels) | ✅ Split: PRD-012a (tiled GEMM + fused codegen + CAST) shipped. PRD-012b (cost model + producer-consumer detection) shipped at `bg.jit.cost_model.*`. PRD-012c (transformer_block megakernel constructor) shipped at `bg.kernels.transformer_block(...)`. |
+| 013 (lab platform) | ✅ Shipped |
+| 014 (functional transforms) | ✅ Shipped — `grad`, `vjp`, `functional_call`, full `vmap` with 17 active rules + 4 refusal stubs (RANDOM, MASK, CUSTOM, STORE). `vmap(grad(fn))` composition works. |
+| 015 (custom WGSL) | ✅ Shipped |
+| 016 (ONNX export) | ✅ Shipped |
+
+## Honest limitations
 
 | Item | Reason |
 |---|---|
-| **PRD-011 WebNN backend** | Chrome WebNN GA expected 2027. Live user fraction <5% today. The JS-bridge cost erodes the win for small models. |
-| **PRD-012b cost model + producer-consumer fusion** | Needs 5+ labs of real op patterns to know what's worth fusing. Revisit when content lands. |
-| **PRD-012c cross-block megakernel** | PRD's own text admits block I/O materialises to DRAM, so the win shrinks to Flash Attention + fused FFN — both available separately. |
-| **Remaining 11 vmap rules** (SCATTER_ADD, INDEX, MASK, RANDOM, CUSTOM, FUSED_*, PAD, SLICE, ISNAN) | Each is ~30 LOC. Add as users hit them. |
-| **Backward through GPU realizer** | NumPy realizer handles all `.backward()` calls; GPU path is forward-inference only in v0. |
-| **f16/bf16 cast kernels** | Lands with PRD-012b's f16-everywhere pass. |
+| **Backward through GPU realizer** | NumPy realizer handles all `.backward()` calls; GPU path is forward-inference only. |
+| **f16/bf16 cast kernels** | Future work — current CAST handler is f32→f32 only. |
 | **ConvTranspose / Conv3d / dilated / groups** | Out of v0 scope across both grad and jit. |
 | **torch.cuda.\*, torch.compile, torch.fx** | Out of scope for `install_torch_alias`. Raises `AttributeError`. |
 | **Cross-browser WGSL compile-error line/column parsing** | Vendor diagnostic formats differ; ship raw browser messages and call it honest. |
+| **vmap of RANDOM** | Needs PRNG key splits (JAX-style PRNGKey). Refuses with clear message; user can hand-write a key-split pattern. |
+| **`transformer_block` and `webnn_matmul`** | Constructors build OP_CUSTOM UOps; bridge dispatch lands per JS-side kernel implementation. Forward only. |
 
 When any of these become blocking for a real consumer, file an issue against the relevant PRD doc and we'll revisit.

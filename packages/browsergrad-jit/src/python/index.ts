@@ -30,6 +30,8 @@ import { GPU_BUFFER_TABLE_PY } from "./_gpu_buffer_table.generated.js";
 import { REALIZE_WEBGPU_PY } from "./_realize_webgpu.generated.js";
 import { FUNC_PY } from "./_func.generated.js";
 import { VMAP_PY } from "./_vmap.generated.js";
+import { WEBNN_PY } from "./_webnn.generated.js";
+import { COST_MODEL_PY } from "./_cost_model.generated.js";
 import { CUSTOM_KERNEL_PY } from "./_custom_kernel.generated.js";
 import { ONNX_PY } from "./_onnx.generated.js";
 import { LAB_PY } from "./_lab.generated.js";
@@ -103,6 +105,8 @@ from . import _func as _func_mod
 from . import _custom_kernel as _custom_kernel_mod
 from . import _onnx as _onnx_mod
 from . import _lab as _lab_mod
+from . import _webnn as _webnn_mod_exp
+from . import _cost_model as _cost_model_mod
 from ._torch_compat import install_torch_alias, uninstall_torch_alias
 import sys as _sys
 import types as _types
@@ -268,6 +272,63 @@ lab.assert_no_nan_inf = _lab_mod.assert_no_nan_inf
 _sys.modules["browsergrad_jit.lab"] = lab
 
 
+# bg.experimental — unstable surfaces behind feature flags (PRD-011 spike).
+experimental = _types.ModuleType("browsergrad_jit.experimental")
+experimental_webnn = _types.ModuleType("browsergrad_jit.experimental.webnn")
+experimental_webnn.is_available = _webnn_mod_exp.is_available
+experimental_webnn.matmul = _webnn_mod_exp.matmul
+experimental.webnn = experimental_webnn
+_sys.modules["browsergrad_jit.experimental"] = experimental
+_sys.modules["browsergrad_jit.experimental.webnn"] = experimental_webnn
+
+
+# bg.jit.cost_model — tier selector (PRD-012b).
+cost_model_mod = _types.ModuleType("browsergrad_jit.jit.cost_model")
+cost_model_mod.estimate_flops = _cost_model_mod.estimate_flops
+cost_model_mod.estimate_bytes = _cost_model_mod.estimate_bytes
+cost_model_mod.pick_tier = _cost_model_mod.pick_tier
+cost_model_mod.find_producer_consumer_pairs = _cost_model_mod.find_producer_consumer_pairs
+cost_model_mod.cost_stats = _cost_model_mod.cost_stats
+jit.cost_model = cost_model_mod
+_sys.modules["browsergrad_jit.jit.cost_model"] = cost_model_mod
+
+
+# bg.kernels.transformer_block — opt-in megakernel constructor (PRD-012c).
+# Forward-only; user explicitly opts in via this constructor. Builds an
+# OP_CUSTOM tagged "transformer_block" — the bridge dispatches one fused
+# WGSL kernel. Bridge support is best-effort; absent → falls back to
+# bg.kernels.flash_attention + Linear (which the user can also compose).
+def transformer_block(x, w_qkv, w_o, w_ff1, w_ff2, *, num_heads=8, eps=1e-5):
+    """Single transformer block: LayerNorm -> Attention -> Residual ->
+    LayerNorm -> FFN -> Residual. Forward only.
+
+    Shapes:
+        x: (B, S, D) — input activations
+        w_qkv: (D, 3*D) — fused Q/K/V projection
+        w_o: (D, D) — output projection
+        w_ff1: (D, 4*D), w_ff2: (4*D, D) — FFN
+    Returns: (B, S, D)
+    """
+    if x.ndim != 3:
+        raise TypeError(
+            f"bg.kernels.transformer_block: x must be (B, S, D); got {x.shape}"
+        )
+    B, S, D = x.shape
+    arg = {
+        "op": "transformer_block",
+        "b": int(B), "s": int(S), "d": int(D),
+        "num_heads": int(num_heads),
+        "eps": float(eps),
+    }
+    from ._ir import UOp, OP_CUSTOM
+    uop = UOp(op=OP_CUSTOM,
+              inputs=(x._uop, w_qkv._uop, w_o._uop, w_ff1._uop, w_ff2._uop),
+              shape=(B, S, D), dtype=x.dtype, arg=arg)
+    return TensorProxy(uop, session=x._get_session(), requires_grad=False)
+
+kernels.transformer_block = transformer_block
+
+
 # bg.realize_webgpu — explicit-realize entry point (PRD-011.5).
 # Mirrors the .numpy() trigger but routes through the WebGPU bridge
 # instead of the NumPy realizer. Raises if no bridge is registered.
@@ -387,7 +448,7 @@ __all__ = [
     "Session", "get_default_session", "set_default_session", "new_session",
     "manual_seed",
     "nn", "optim", "jit", "utils", "amp", "kernels", "func",
-    "custom_kernel", "onnx", "lab",
+    "custom_kernel", "onnx", "lab", "experimental",
     "realize_webgpu", "register_webgpu_bridge", "unregister_webgpu_bridge",
     "webgpu_is_available", "webgpu_supported_opcodes",
     "install_torch_alias", "uninstall_torch_alias",
@@ -433,6 +494,8 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_jit/_realize_webgpu.py", content: REALIZE_WEBGPU_PY },
   { path: "browsergrad_jit/_func.py", content: FUNC_PY },
   { path: "browsergrad_jit/_vmap.py", content: VMAP_PY },
+  { path: "browsergrad_jit/_webnn.py", content: WEBNN_PY },
+  { path: "browsergrad_jit/_cost_model.py", content: COST_MODEL_PY },
   { path: "browsergrad_jit/_custom_kernel.py", content: CUSTOM_KERNEL_PY },
   { path: "browsergrad_jit/_onnx.py", content: ONNX_PY },
   { path: "browsergrad_jit/_lab.py", content: LAB_PY },
