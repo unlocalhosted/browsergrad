@@ -3,91 +3,147 @@
 [![npm](https://img.shields.io/npm/v/@unlocalhosted/browsergrad-kernels.svg)](https://www.npmjs.com/package/@unlocalhosted/browsergrad-kernels)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-WGSL kernel catalog for browser-side machine learning. Every kernel ships with:
+WGSL compute-shader catalog for browser ML. Each kernel ships with a pure-JS reference implementation that doubles as a conformance oracle and a CPU fallback. Also ships the production `WebGpuRealizerBridge` that [`browsergrad-jit`](../browsergrad-jit/) consumes for its WebGPU realizer tier.
 
-1. A WebGPU implementation (WGSL compute shader + dispatch logic)
-2. A pure-JS reference (oracle for conformance + CPU fallback + lesson material)
+Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; layer in jit if you want the full PyTorch shape.
 
-Independent of any tensor framework. Take what you want; the rest tree-shakes away.
+## What's shipped
 
-> **Status: v0.1.0.** Six kernels: matmul, softmax, relu, gelu, layernorm, attention. f32-only. Independent package — no dependency on the runtime.
+### Kernels (with JS reference)
+
+| Kernel | Variant | Status |
+|---|---|---|
+| `matmul` | Naive triple-loop, host-tensor input/output | ✅ |
+| `matmulTiled` / `matmulTiledDirect` | 16×16 workgroup-tiled GEMM. **Production path.** | ✅ |
+| `softmax` | Stable, along last axis | ✅ |
+| `relu`, `gelu` | Elementwise activations | ✅ |
+| `layernorm` | Along last axis, optional gamma/beta | ✅ |
+| `attention` | Composed 3-kernel SDPA | ✅ |
+| `flashAttentionDirect` | Flash Attention v2 forward, online softmax. **Known numerical issue on real Metal — tracked.** | ⚠️ |
+| `fusedElementwiseDirect` | Runtime WGSL codegen for arbitrary elementwise chains | ✅ |
+
+### Realizer-tier surface (consumed by jit)
+
+- `createWebGpuRealizerBridge(device)` — production bridge satisfying the `WebGpuBridge` Protocol declared in jit. Opaque integer handles; bridge owns `GPUBuffer` lifetimes; pipeline cache via `runDirect`.
+- `runDirect(device, desc, opts)` — `GPUBuffer`-in / `GPUBuffer`-out dispatch. The realizer-tier path; no host round-trip per op.
+- `materializeFloat32(device, buffer, byteLength)` — read a `GPUBuffer` back to a `Float32Array` (the single readback at the realize boundary).
+- `uploadFloat32(device, data)` — upload a typed array into a fresh `GPUBuffer`.
 
 ## Install
 
-```sh
+```bash
 npm install @unlocalhosted/browsergrad-kernels
 ```
 
-No runtime dependencies. `@webgpu/types` is a devDependency for our build; consumers don't need it (modern TS pulls WebGPU types from `lib.dom.d.ts`).
+## Quick start
 
-## Usage
+### One-shot kernel (host round-trip)
 
 ```ts
-import { createDevice, kernels, tensor } from "@unlocalhosted/browsergrad-kernels";
+import { createDevice, kernels, tensor, matmulTiled } from "@unlocalhosted/browsergrad-kernels";
+
+const device = await createDevice();
+const A = tensor([2, 3], new Float32Array([1, 2, 3, 4, 5, 6]));
+const B = tensor([3, 2], new Float32Array([7, 8, 9, 10, 11, 12]));
+
+const C = await matmulTiled(device, A, B);   // tiled GEMM — production path
+console.log(C.shape, C.data);                 // [2, 2], Float32Array(4)
+```
+
+### Pure-JS reference (no WebGPU required)
+
+```ts
+import { reference } from "@unlocalhosted/browsergrad-kernels/reference";
+const C = reference.matmul(A, B);  // identical surface; CPU only
+```
+
+### Realizer-tier (chained ops, GPU residency)
+
+```ts
+import {
+  createDevice,
+  matmulTiledDirect,
+  materializeFloat32,
+  uploadFloat32,
+} from "@unlocalhosted/browsergrad-kernels";
 
 const device = await createDevice();
 
-const A = tensor([2, 3], new Float32Array([1, 2, 3, 4, 5, 6]));
-const B = tensor([3, 2], new Float32Array([7, 8, 9, 10, 11, 12]));
+const x = uploadFloat32(device, xData);
+const w1 = uploadFloat32(device, w1Data);
+const w2 = uploadFloat32(device, w2Data);
 
-const C = await kernels.matmul(device, A, B);
-console.log(C.shape);  // [2, 2]
-console.log(C.data);   // Float32Array(4) [ 58, 64, 139, 154 ]
+// (x @ w1) stays on the GPU; only the final readback crosses host.
+const mid = matmulTiledDirect(device, x, w1, M, K, N);
+const out = matmulTiledDirect(device, mid.buffer, w2, M, N, N);
+const result = await materializeFloat32(device, out.buffer, out.byteLength);
+
+mid.buffer.destroy();
+out.buffer.destroy();
 ```
 
-### Without a GPU — the JS reference
-
-Every kernel has a pure-JS counterpart at `@unlocalhosted/browsergrad-kernels/reference`:
+### Hand the bridge to browsergrad-jit
 
 ```ts
-import { reference, tensor } from "@unlocalhosted/browsergrad-kernels/reference";
+import { createDevice, createWebGpuRealizerBridge } from "@unlocalhosted/browsergrad-kernels";
 
-const A = tensor([2, 3], new Float32Array([1, 2, 3, 4, 5, 6]));
-const B = tensor([3, 2], new Float32Array([7, 8, 9, 10, 11, 12]));
+const device = await createDevice();
+const bridge = createWebGpuRealizerBridge(device);
 
-const C = reference.matmul(A, B);  // same surface, runs on CPU
+// Expose the bridge to Pyodide
+pyodide.registerJsModule("_bg_webgpu_bridge", bridge);
 ```
 
-The reference is also imported by the WGSL implementations' conformance tests — if a WGSL kernel's output diverges from the JS reference by more than `1e-4`, CI fails.
+```python
+# In Python (Pyodide)
+import browsergrad_jit as bg
+from js import _bg_webgpu_bridge
+bg.register_webgpu_bridge(_bg_webgpu_bridge)
 
-## Kernels in v0.1.0
+out = bg.realize_webgpu(model(x))   # all matmuls + fused chains run on the GPU
+```
 
-| Kernel | Shapes | Notes |
-|---|---|---|
-| `matmul(device, A, B)` | A: `[M, K]`, B: `[K, N]` → `[M, N]` | Naive triple-loop WGSL, workgroup 8×8. |
-| `softmax(device, x)` | any rank; along last axis | Stable (subtracts max). One thread per row. |
-| `relu(device, x)` | any shape | Elementwise. |
-| `gelu(device, x)` | any shape | Tanh-approximation (GPT-2/BERT variant). |
-| `layernorm(device, x, { gamma?, beta?, eps? })` | any rank; along last axis | `gamma`/`beta` shape `[D]`; default `eps=1e-5`. |
-| `attention(device, Q, K, V)` | Q, K, V: `[S, D]` → `[S, D]` | Scaled dot-product. Single head, no batching, no mask. |
+### Runtime WGSL codegen
 
-All kernels are f32. Output buffers are freshly allocated each call.
+```ts
+import { generateFusedWgsl, fusedElementwiseDirect } from "@unlocalhosted/browsergrad-kernels";
 
-## Design notes
+// Produces a self-contained WGSL compute shader for the chain.
+// Hash of the ops list = pipeline cache key.
+const wgsl = generateFusedWgsl(
+  [
+    ["ADD", -1, -2],   // step0 = in0 + in1
+    ["EXP", 0, 0],     // step1 = exp(step0)
+    ["DIV", 1, -1],    // step2 = step1 / in0
+  ],
+  2,                    // num inputs
+);
+```
 
-- **Naive WGSL, not optimized.** Each kernel does the simplest correct thing. A 30-line correct matmul beats a 200-line tiled one with an off-by-one. Tiled and fused variants will land as additive features.
-- **Reference impls are lesson material.** `src/reference.ts` is deliberately legible — a learner should be able to read `referenceAttention` and understand how Q·Kᵀ, scaling, softmax, and the V multiply compose. The WGSL versions are next to them for the "now make it fast" lesson.
-- **Pipeline caching.** `createDevice` returns a `KernelDevice` that caches `GPUComputePipeline`s by `(kernelName, param-signature)`. Calling the same kernel with the same shape category repeatedly re-uses pipelines.
-- **Buffer lifecycle.** v0 allocates fresh GPU buffers per call. Hot loops (training) should use a pre-allocated path; that API lands in v0.2 as `kernel.runOnGpu(gpuBuffers, params)`.
-- **No fused attention yet.** v0 attention is four kernels glued together (transpose, matmul, scale+softmax, matmul). A fused FlashAttention-style kernel is on the roadmap — same surface, different cache key.
+## Browser testing
 
-## API
+```bash
+pnpm test:browser
+```
 
-See [`src/types.ts`](./src/types.ts) and [`src/kernels/`](./src/kernels/). Stability contract:
+Launches Chromium via Playwright with WebGPU enabled. Runs against a real `GPUDevice`. On macOS the browser is headed (Metal driver only exposed when visible); on Linux CI set `BG_BROWSER_HEADLESS=1`.
 
-- Adding optional fields → minor version bump
-- Removing fields, adding required params, renaming exports → major version bump
-- Anything not exported from `src/index.ts` is private
+7 scenarios: adapter info, naive vs tiled matmul, residency contract (3 uploads + 1 readback chained matmul), fused-elementwise codegen output matches NumPy semantics, FA-v2 (known-issue advisory), end-to-end `WebGpuRealizerBridge.matmul`.
 
-## Why not WebGL / TensorFlow.js / ONNX Runtime Web?
+The browser CI was added when the FEEDBACK loop demanded it — NumPy mocks pass everything green but only a real GPU surfaces shader-level bugs. Found the FA-v2 numerical issue this way.
 
-Those are excellent frameworks. This library is much smaller and exposes the WGSL itself. Use it when:
-- You want to *read* the kernel source (lesson material)
-- You want a thin layer that doesn't bring its own tensor abstraction
-- You want WebGPU specifically (newer, generally faster than WebGL paths, no fallback drama)
+## API stability
 
-If you want a full framework with autograd and a graph compiler, those tools are better.
+| Surface | Stability |
+|---|---|
+| `kernels.*`, `matmul`, `matmulTiled`, `softmax`, `relu`, `gelu`, `layernorm`, `attention` | Semver-stable across `0.x` |
+| `runDirect`, `matmulTiledDirect`, `fusedElementwiseDirect`, `flashAttentionDirect` | Semver-stable |
+| `materializeFloat32`, `uploadFloat32` | Semver-stable |
+| `createWebGpuRealizerBridge`, `WebGpuRealizerBridge` interface | Semver-stable; new methods added additively |
+| `KernelError` | Semver-stable |
+| WGSL source strings | **Internal.** Tuned freely. |
+| Pipeline cache keys | **Internal.** Same WGSL → same key, but the encoding may change. |
 
 ## License
 
-MIT
+[MIT](LICENSE).

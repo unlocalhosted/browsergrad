@@ -1,72 +1,109 @@
 # Status
 
-Living document. Reflects the current state of each package, what's tested, and what's known-deferred.
+Living document. Reflects the current state of each package, what's tested, and what's deliberately deferred.
 
 ## Package versions
 
-| Package | Version | Surface tests | Integration tests |
-|---|---|---|---|
-| `@unlocalhosted/browsergrad-runtime` | `0.1.1` | 11 | 23 (Pyodide-in-node) |
-| `@unlocalhosted/browsergrad-kernels` | `0.1.0` | 26 (incl. JS-reference numerical checks) | — (WebGPU required) |
-| `@unlocalhosted/browsergrad-grad` | `0.4.6` | 25 | 115 (Pyodide-in-node) |
+| Package | Version | Surface tests | Integration tests | Browser tests |
+|---|---|---|---|---|
+| `@unlocalhosted/browsergrad-runtime` | `0.1.1` | 27 | 23 (Pyodide-in-node) | — |
+| `@unlocalhosted/browsergrad-kernels` | `0.1.0` | 35 (incl. JS-reference numerical checks, FUSED WGSL codegen) | — | 7 (real Chromium + WebGPU) |
+| `@unlocalhosted/browsergrad-grad` | `0.4.6` | 25 | 115 (Pyodide-in-node) | — |
+| `@unlocalhosted/browsergrad-jit` | `0.8.0` | 8 | 156 (Pyodide-in-node, incl. feedback + perf benches) | — (via kernels) |
 
-**Total: 200 tests green**, every gradient verified against finite differences or hand-derived oracles.
+**Total: 396 tests green** across the workspace.
+
+Every gradient verified against finite differences or a hand-derived oracle. Every realizer numerical result verified against a NumPy or JS-reference oracle. No test compares the implementation against itself.
+
+## Two-library story
+
+- `browsergrad-grad` is the **closure-autograd** library. PyTorch-shaped, NumPy-backed, eager. Used today by curriculum content. Stable.
+- `browsergrad-jit` is the **lazy IR** successor. Same PyTorch surface, but ops build a UOp graph that gets realized through a backend (NumPy today, WebGPU via PRD-011.5's seam). Fusion + symbolic backward + AMP + gradient checkpointing + functional transforms + ONNX export + custom WGSL kernels all live here.
+
+Both ship under the same `unlocalhosted` npm scope. They can coexist in the same Pyodide session (separate `install_torch_alias()` namespaces, owner-token protocol prevents collision).
+
+## Surface inventory — `browsergrad-jit` (v0.8.0)
+
+### Core (PRD-005)
+- 28-opcode IR (`_ir.py`): BUFFER, LOAD, STORE, CONST, RANDOM, CAST, ADD, MUL, DIV, NEG, EXP, LOG, CMP, MATMUL, REDUCE, RESHAPE, PERMUTE, SLICE, PAD, WHERE, INDEX, MASK, CUSTOM, FUSED_ELEMENTWISE, FUSED_SOFTMAX, SCATTER_ADD, BROADCAST_TO, ISNAN.
+- `TensorProxy` — lazy tensor; metadata never realizes; arithmetic builds IR; `.numpy()` / `.item()` triggers realize.
+- `Session` + `BufferTable` for per-tab isolation.
+- NumPy realizer (`_realize.py`): single dispatch table; one Python function per opcode; deterministic across runs.
+
+### Fusion (PRD-006)
+- Elementwise chain fusion → `OP_FUSED_ELEMENTWISE`.
+- Softmax DAG → `OP_FUSED_SOFTMAX`.
+- Introspection: `bg.jit.debug_fused_kernels()`, `bg.jit.debug_unfused_reasons()`.
+
+### Symbolic backward (PRD-007)
+- 13 VJP rules (ADD, MUL, DIV, NEG, EXP, LOG, CAST, MATMUL, REDUCE, RESHAPE, PERMUTE, ISNAN, CMP).
+- Closure-backward kept as the safety net for ops without VJPs.
+- `arg["vjp_of"]` tags every emitted backward node — observable by checkpointing.
+
+### Trace cache + safetensors (PRD-008)
+- In-memory trace cache (`_trace_cache.py`); hit ratio observable via `bg.jit.trace_cache_stats()`.
+- `bg.save_safetensors(state) -> bytes` (browser-friendly), `bg.load_safetensors(blob)`.
+
+### Gradient checkpointing (PRD-009)
+- `bg.utils.checkpoint.checkpoint(fn, *args)` (and `torch.utils.checkpoint.checkpoint`).
+- IR rewrite at backward time: interior UOps are re-cloned from anchor inputs and re-realized.
+
+### Mixed precision (PRD-010)
+- `bg.amp.autocast(device_type, dtype, enabled)` context manager. Tags forward UOps with `arg["autocast_hint"]`.
+- Cast-insertion IR pass (`_amp.insert_cast_pass`) wraps tagged ops with explicit CASTs per the ALLOWLIST_F16 / BLOCKLIST_F32 / PROMOTE_OPS policy.
+- `bg.amp.GradScaler` — real loss scaler with NaN-triggered backoff + growth-interval doubling.
+- `_h_matmul` runs `f16 @ f16` with fp32 accumulator (tensor-core semantics).
+
+### GPUBuffer-backed WGSL realizer (PRD-011.5)
+- `bg.realize_webgpu(tensor)` — explicit-realize through the registered bridge.
+- `bg.register_webgpu_bridge(bridge)` — pluggable; bridge owns GPUBuffer lifetimes.
+- Whitelisted opcodes: BUFFER, LOAD, CONST, CAST, MATMUL, FUSED_ELEMENTWISE, CUSTOM.
+- `bg.kernels.flash_attention(Q, K, V, mask=None)` — opt-in CUSTOM op for FA-v2.
+
+### Tiled GEMM + fused codegen + GPU cast (PRD-012a)
+- `matmulTiledDirect` — 16×16 tiled GEMM (workgroup-shared A/B tiles). Closes most of the gap PRD-012 was claiming via "megakernels".
+- `fusedElementwiseDirect` — runtime WGSL codegen. Walks the ops list, emits a single compute shader, hashed for pipeline cache.
+- `cast` (f32→f32) via `CopyBufferToBuffer` — true GPU-only copy, no host round-trip.
+
+### Lab platform alignment (PRD-013)
+- `LabManifest` schema + `parseManifest(json)` validator (no ajv dep, hand-written).
+- `isSemverCompatible(range, version)` + `assertCompatibleRuntime` with `LabRuntimeMismatch`.
+- `bg.lab.{assert_pytorch_match, assert_shape_match, assert_no_nan_inf}` — semantic harness primitives that route through the runtime's `browsergrad` module.
+
+### Functional transforms (PRD-014 + partial 014b)
+- `bg.func.grad(fn, argnums)` — functional gradient. Does NOT write `.grad`. Returns lazy TensorProxy.
+- `bg.func.vjp(fn, *primals)` — outputs + vjp_fn for vector-valued backward.
+- `bg.func.functional_call(module, params_dict, args, kwargs)` — stateless module evaluation.
+- `bg.func.vmap(fn)` — JAX-style batching transform. 17 per-opcode rules. Stand-alone vmap works; `vmap(grad(fn))` composition has remaining shape-broadcasting subtleties (PRD-014b polish).
+- `torch.func.*` shim via `install_torch_alias()`.
+
+### Custom WGSL kernels (PRD-015)
+- `@bg.custom_kernel(wgsl, name, workgroup_size, output_shape_fn, dispatch_shape_fn, num_inputs)` decorator.
+- SHA-256 of WGSL = cache key. Forward only.
+
+### ONNX export (PRD-016)
+- `bg.onnx.export_inference(tensor, input_buffers=(...))` — pure-Python proto3 encoder (no protobuf wheel).
+- 14 ops mapped (ADD/MUL/DIV/NEG/EXP/LOG/MATMUL/WHERE/CAST/REDUCE/RESHAPE/PERMUTE/CMP/BROADCAST_TO) + lifecycle.
+- `OnnxUnmappableOp` typed refusal for the rest.
 
 ## Surface inventory — `browsergrad-grad`
 
-### Tensor + autograd
-
-- `Tensor(data, requires_grad=False)` — f32 NumPy-backed
-- Element-wise ops with NumPy-style broadcasting (forward + backward)
-- Higher-rank matmul (batched)
-- Reductions with `axis`/`keepdims` for `sum` and `mean`
-- Element-wise unary: `exp`, `log`
-- Shape ops: `reshape`, `view`, `transpose(d0, d1)`, `.T`
-- Multi-tensor ops: `grad.cat([...], dim)`, `grad.stack([...], dim)`
-- Reverse-mode autograd via topological sort
-- `grad.no_grad()` context for inference
-- Scalar conversion: `t.item()`, `int(t)`, `float(t)`, `bool(t)`
-- Constructors: `zeros`, `ones`, `randn(seed=)`
-- `Tensor.argmax(dim=None)`
-- `grad.install_torch_alias()` — registers `torch`, `torch.nn`, `torch.nn.functional`,
-  `torch.optim` in `sys.modules` so vanilla PyTorch user code runs unmodified
-
-### Neural network modules (`browsergrad_grad.nn`)
-
-- `Module` base — auto-tracks parameters, recursive `train()`/`eval()`/`training` flag
-- `Linear`
-- `Conv1d`, `Conv2d` (im2col + matmul backend)
-- `Embedding`
-- `MaxPool2d`, `AvgPool2d`, `AdaptiveAvgPool2d`
-- `BatchNorm1d` (accepts `(N, C)` and `(N, C, L)`), `BatchNorm2d`
-- `LayerNorm`
-- `Dropout`, `Dropout2d`
-- `MultiHeadAttention` (batch-first `(N, S, D)`)
-- `Flatten`, `Sequential`
-- Activation modules: `ReLU`, `LeakyReLU`, `Sigmoid`, `Tanh`, `GELU`
-
-### Functional (`browsergrad_grad.functional`)
-
-- Activations: `relu`, `leaky_relu`, `sigmoid`, `tanh`, `gelu`
-- `softmax`, `log_softmax`
-- Losses: `mse_loss`, `cross_entropy_loss` (fused softmax + NLL), `nll_loss`
-
-### Optimization (`browsergrad_grad.optim`)
-
-- Optimizers: `SGD` (with momentum, weight_decay), `Adam`, `AdamW`
-- LR schedulers: `StepLR`, `CosineAnnealingLR`
+(Stable; unchanged from prior releases. PyTorch-shaped tensor + autograd, closure backward, NumPy-backed eager. See `packages/browsergrad-grad/README.md` for the full API.)
 
 ## Surface inventory — `browsergrad-kernels`
 
-WGSL compute-shader catalog. Every kernel ships with a pure-JS reference impl that doubles as a conformance oracle and a CPU fallback:
-
-- `matmul` (naive `[M,K]·[K,N]`)
+WGSL kernels — each with a JS reference for conformance:
+- `matmul` (naive triple-loop), `matmulTiledDirect` (16×16 tiled, the production path)
 - `softmax` (stable, along last axis)
 - `relu`, `gelu` (elementwise)
 - `layernorm` (along last axis, optional gamma/beta)
-- `attention` (single-head scaled-dot-product; `[S, D]` shapes)
+- `attention` (composed 3-kernel)
+- `flash_attention.ts` (FA-v2 forward — **known issue**, see below)
+- `fusedElementwiseDirect` — runtime WGSL codegen for arbitrary elementwise chains
 
-Pipeline cache per device, buffer cleanup on each invocation.
+Plus the realizer-tier API:
+- `createWebGpuRealizerBridge(device)` — production bridge for browsergrad-jit.
+- `runDirect` / `materializeFloat32` / `uploadFloat32` — GPUBuffer-in/out dispatch path.
 
 ## Surface inventory — `browsergrad-runtime`
 
@@ -76,32 +113,53 @@ Pipeline cache per device, buffer cleanup on each invocation.
 - `session.interrupt()` + `session.canInterrupt` (SAB + cross-origin isolation)
 - `session.clearNamespace()`, `session.dispose()`
 - Structured assertion + artifact protocols emitted from Python via `import browsergrad as bg`
+- Lab manifest: `parseManifest`, `isSemverCompatible`, `assertCompatibleRuntime`, `LabRuntimeMismatch`
 
-## End-to-end checks
+## Browser testing
 
-These run as part of the integration suite — they validate the full pipeline composes correctly:
+Real-WebGPU CI ships with the kernels package. Run with:
 
-- MLP on linear regression converges to known coefficients
-- 2-class CNN (Conv → ReLU → MaxPool → Linear) reaches >95%
-- 2-class CNN with BatchNorm reaches >95% across `model.train()`/`model.eval()` switches
-- Conv1d sequence classifier reaches >95%
-- MLP with Dropout reaches >90% in both train and eval modes
-- Transformer block (Embedding → MHA → LayerNorm → FFN) trains a copy task to low loss
-- 4-class CNN "kitchen sink" (Conv → BN → Dropout2d → Pool → Flatten → Linear → Dropout → Linear) reaches >95%
-- Two-branch model with `grad.cat([h1, h2])` trains to low loss
-- Vanilla-PyTorch MLP (using `import torch`) reaches >95%
+```sh
+pnpm --filter @unlocalhosted/browsergrad-kernels test:browser
+```
 
-Every gradient formula is verified against either finite differences or a hand-derived analytic oracle. No test compares the implementation against itself.
+Launches Chromium via Playwright with WebGPU enabled. Tests the actual tiled GEMM, fused elementwise codegen, residency contract, and the `WebGpuRealizerBridge` end-to-end against a real `GPUDevice`. On macOS the browser is headed (Metal driver only exposed when visible); on Linux CI set `BG_BROWSER_HEADLESS=1`.
 
-## Known deferred / out of scope
+## Performance baselines (NumPy realizer)
+
+From `tests-integration/perf_bench.test.ts` — written to `/tmp/bg-perf-report.md` each run.
+
+| Shape | Time | GFLOPS |
+|---|---|---|
+| matmul 64×64×64 | 0.41ms | 1.27 |
+| matmul 128×128×128 | 1.43ms | 2.93 |
+| matmul 256×256×256 | 11.51ms | 2.91 |
+| matmul 512×64×256 | 5.26ms | 3.19 |
+
+Trace cache: ~3.6× warm-vs-cold speedup on a chained matmul + reduce.
+vmap vs Python for-loop on 32 samples: ~16× speedup.
+AMP on NumPy: not faster than f32 (NumPy lacks f16 SIMD); the value is correctness substrate + WGSL-ready cast pass. Wall-clock wins materialise on real GPU.
+
+## Known issues
+
+| Issue | Found by | Status |
+|---|---|---|
+| FA-v2 kernel: ~0.69 max abs diff vs composed reference | Real-WebGPU browser CI (PRD-011.5+012a) | Bit-deterministic; kernel logic bug. Tracked as PRD-012a follow-up. |
+| `vmap(grad(fn))` composition shape subtleties | Functional transforms bench | Stand-alone vmap works. PRD-014b polish — VJP rules need to emit broadcast-aware shapes. |
+| Trace cache misses on `requires_grad=True` graphs | Perf bench | Intentional (`_trace_cache.py:147` exclusion). Lifting would let backward graphs cache too. P1 follow-up. |
+
+## Deliberately deferred (with engineering rationale)
 
 | Item | Reason |
 |---|---|
-| Runtime browser-context tests | Web Workers in node behave differently; covered by Pyodide-in-node integration tests for the protocol; full Worker isolation needs a real browser. |
-| Kernels WGSL conformance against the JS reference | Requires real WebGPU; node WebGPU bindings (`@google/dawn` etc.) are not stable enough to depend on. |
-| WebGPU dispatch from `browsergrad-grad` | Depends on kernels conformance being testable. |
-| ConvTranspose / Conv3d / dilated conv / groups | Out of v0 scope. |
-| RNN / LSTM / GRU | Largely superseded by transformers for the curriculum-shaped use cases. |
-| `torch.cuda.*`, `torch.compile`, `torch.fx` | Out of scope for `install_torch_alias`. Raises `AttributeError`. |
+| **PRD-011 WebNN backend** | Chrome WebNN GA expected 2027. Live user fraction <5% today. The JS-bridge cost erodes the win for small models. |
+| **PRD-012b cost model + producer-consumer fusion** | Needs 5+ labs of real op patterns to know what's worth fusing. Revisit when content lands. |
+| **PRD-012c cross-block megakernel** | PRD's own text admits block I/O materialises to DRAM, so the win shrinks to Flash Attention + fused FFN — both available separately. |
+| **Remaining 11 vmap rules** (SCATTER_ADD, INDEX, MASK, RANDOM, CUSTOM, FUSED_*, PAD, SLICE, ISNAN) | Each is ~30 LOC. Add as users hit them. |
+| **Backward through GPU realizer** | NumPy realizer handles all `.backward()` calls; GPU path is forward-inference only in v0. |
+| **f16/bf16 cast kernels** | Lands with PRD-012b's f16-everywhere pass. |
+| **ConvTranspose / Conv3d / dilated / groups** | Out of v0 scope across both grad and jit. |
+| **torch.cuda.\*, torch.compile, torch.fx** | Out of scope for `install_torch_alias`. Raises `AttributeError`. |
+| **Cross-browser WGSL compile-error line/column parsing** | Vendor diagnostic formats differ; ship raw browser messages and call it honest. |
 
-When these become blocking for a real consumer, file an issue.
+When any of these become blocking for a real consumer, file an issue against the relevant PRD doc and we'll revisit.

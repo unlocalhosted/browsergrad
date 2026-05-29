@@ -1,238 +1,162 @@
-# Architecture deepening tracker
-
-Tracking the five-candidate architectural refactor identified post-v0.5.0.
-Each candidate was researched (dossier) and grilled (verdict + plan) before
-implementation. This doc records the load-bearing decisions and links each
-to its commit, so the rationale survives the codebase.
-
-For broader PyTorch-coverage progress, see [PROGRESS.md](PROGRESS.md).
-
-## Summary
-
-| # | Refactor | Verdict | Status | Commit |
-|---|---|---|---|---|
-| 5 | Single-source the version | Add `resolveJsonModule`; import `pkg` in 3 files; don't flip `verbatimModuleSyntax` | ✅ done | `27cf321` |
-| 4 | Python source as `.py` files | Pre-tsc codegen script; commit generated files; base64-IIFE emission | ✅ done | `a8b926a` |
-| 3 | NodePyodideTarget adapter | Factory at `./node-adapter` subpath; `pyodide` as optionalPeerDep | ✅ done | `f023df5` |
-| 2 | Split torch_compat into real/limited/impossible | Self-installing modules; runtime `is`-identity assertion pins the latent coupling | ✅ done | `9c78edb` |
-| 1 | Split nn.ts into per-family TS chunks | Option A (chunk-split, single `nn.py`); `NN_CHUNK_ORDER` in codegen enforces order | ✅ done | `43f8b60` |
-
-## Methodology
-
-Each refactor follows the same shape:
-1. **Dossier** — research-only Explore pass producing files-touched + alternative shapes.
-2. **Grilling** — adversarial design walk producing a verdict + concrete plan.
-3. **Implementation** — small TDD-style commits, each landing all-green.
-4. **Decision log** — load-bearing trade-offs captured below, not in code comments.
-
-ADRs are not being introduced as a separate format. This doc IS the decision log;
-if a decision survives long enough to be re-litigated, it gets hoisted into a
-proper ADR. Don't create per-decision files prematurely.
-
-Implementation order is intentional: #5 → #4 → #3 → #2 → #1. Rationale:
-- #5 is small and validates the `resolveJsonModule` path that other refactors might need.
-- #4 must precede #1 — splitting real `.py` files into a directory is mechanically simpler than splitting a 1628-line TS template literal.
-- #3 is independent and unlocks the first real-Pyodide coverage of `installViaFs`.
-- #2 benefits from #4 landing first (the source becomes a normal `.py` file).
-- #1 has the biggest blast radius; everything else clears its path first.
-
----
-
-## #5 — Single-source the version
-
-### Verdict
-
-Import `pkg` from `package.json` directly at the three duplicated touch-points:
-`src/python/index.ts`, `src/install.ts`, `tests/surface.test.ts`. Do NOT introduce
-a `src/version.ts` intermediary — three import sites doing the same 2-line import
-isn't a Depth problem, just two lines of repetition. Do NOT flip
-`verbatimModuleSyntax` to `false` — that flag enforces `import type` discipline
-across the whole codebase, which is a real Locality signal worth keeping. Just
-add `resolveJsonModule: true` alongside the existing `esModuleInterop: true`.
-
-### Plan
-
-1. `packages/browsergrad-grad/tsconfig.json` — add `"resolveJsonModule": true`.
-2. `packages/browsergrad-grad/tsconfig.build.json` — add `"resolveJsonModule": true`.
-3. `packages/browsergrad-grad/src/python/index.ts` — import `pkg`; replace literal `"0.5.0"` in INIT_PY template with `${pkg.version}`.
-4. `packages/browsergrad-grad/src/install.ts` — import `pkg`; replace literal in smoke-check assert; upgrade error message to `f"expected ${pkg.version}, got {_bg_check.__version__}"`.
-5. `packages/browsergrad-grad/tests/surface.test.ts` — import `pkg`; replace literal with `pkg.version`; strip version from the `it()` description.
-
-### Validation gate
-
-Hand-bump `package.json` to a sentinel version (e.g. `0.6.0-dry`), run typecheck + full test suite, confirm zero other files need editing. Revert. That single experiment proves the single-source property is real, not theoretical.
-
-### Decisions
-
-- **`resolveJsonModule: true` added only to dev tsconfig.json**, not also to `tsconfig.build.json` as the grilling verdict suggested. `tsconfig.build.json` extends the dev config so the flag is inherited — making it explicit in both would be redundant, not defensive.
-- **No `assert { type: "json" }` import attribute** on the JSON imports. The grilling verdict used the older proposal syntax; current TC39 stage-3 is `with { type: "json" }`. Plain `import pkg from "../../package.json"` works once `resolveJsonModule: true` is set, and avoids picking a syntax form before TypeScript settles on one.
-- **`verbatimModuleSyntax: true` preserved** in dev tsconfig. The flag does not block JSON value imports (it blocks type-only re-exports without `import type`/`export type`), so adding `resolveJsonModule` is sufficient.
-- **Validation gate ran clean** on `0.6.0-dry`: typecheck + 25 unit tests + 27 integration files / 232 integration tests all green with zero other file edits. Property is real.
-
----
-
-## #4 — Python source as `.py` files (pending)
-
-### Verdict
-
-Option A (pre-tsc codegen script emitting `*.generated.ts`), with generated files
-**committed** (not gitignored). Option B (Vite plugin) would require introducing
-a Vite build pipeline that doesn't exist today; the package builds with `tsc` only.
-
-### Plan
-
-1. Create `src/python/{tensor,functional,nn,optim,torch_compat,utils_data}.py` — copy Python content verbatim, auto-strip the `\`` escapes.
-2. Create `scripts/build-python-sources.ts` — reads each `.py`, encodes via `TextEncoder + btoa` (same idiom as `pythonStringLiteral` in `install.ts:99-109`), emits `*.generated.ts` with a self-contained IIFE that decodes the base64. Header: `// @generated — do not edit by hand`.
-3. Thin each existing `src/python/*.ts` to a single re-export: `export { TENSOR_PY } from "./tensor.generated.js"`. Preserves the import graph in `src/python/index.ts` without changing it.
-4. Update `package.json` scripts: `"codegen": "tsx scripts/build-python-sources.ts"`, prepend it to `"build"`.
-5. Diff-test (one-off, deleted after): assert byte-for-byte that each generated string equals the current template-literal value before deleting the original content.
-
-### ruff + mypy follow-ons
-
-Separate commits, in this order: migration → ruff → mypy. Bundling them poisons the migration diff with noise (expect 30–80 mypy errors in `tensor.py` alone on first `--strict` run). Use `uvx` to avoid requiring a local Python env.
-
-### Decisions
-
-- **`.mjs` over `.ts` for the codegen script.** Avoids the chicken-and-egg of needing TS tooling before the build step that produces the TS sources. The script is plain Node ESM JS, runs via `node scripts/build-python-sources.mjs`. Zero new devDeps.
-- **One-time extraction script bug**: first version used `tsSource.indexOf("\`")` which matched the FIRST backtick in the JSDoc preamble (e.g., `tensor.ts` has `\`tsc\`` in its doc comment). Production tests all failed with `SyntaxError: invalid character '—'` because the extracted "Python" started inside a JSDoc paragraph. Fixed by anchoring on `export const FOO_PY = \`` and using the right closing `\`;` — extraction script verified before being deleted.
-- **The one-time extraction script (`extract-python-once.mjs`) was deleted after use.** Source of truth is now `.py`; no need to maintain a script that reads the old TS form.
-- **Re-export shim preserves the import graph in `src/python/index.ts`**: each `tensor.ts` is now a single `export { TENSOR_PY } from "./tensor.generated.js";`. No edit to `src/python/index.ts` needed.
-- **Codegen wired into `build` script** as a prefix: `"build": "pnpm codegen && tsc -p tsconfig.build.json"`. Generated files are committed so `pnpm typecheck` and `pnpm test` work without running codegen first on a fresh clone.
-
----
-
-## #3 — NodePyodideTarget adapter (pending)
-
-### Verdict
-
-Ship a `createNodePyodideTarget(pyodide)` factory at `./node-adapter` subpath.
-Adds no required dependency — `pyodide` becomes `optionalPeerDependencies` with
-the version range already in devDeps. Status quo is indefensible: `installViaFs`
-is a published code path that has never run against real Pyodide. Option (a)
-(drop GradTarget, take `Session`) rejected because it forces a peer dep on
-`@unlocalhosted/browsergrad-runtime`, breaking the README's "no peer dep" claim
-and the "install into raw Pyodide" use case (Deno, Jupyter, server Node).
-
-### Plan
-
-1. `src/node-adapter.ts` — exports `createNodePyodideTarget(pyodide: PyodideInterface): GradTarget`. Structural `PyodideInterface` declared locally (no hard pyodide import). Factory does NOT expose `.run<T>()` — that's test glue.
-2. `package.json` — add `"./node-adapter"` to `exports`; add `optionalPeerDependencies: { "pyodide": "^0.26.4" }`.
-3. `tests-integration/pyodide-host.ts` — replace `makeTarget(py)` in `getGradTarget` with `createNodePyodideTarget(py)`. Keep the local `.run<T>()` wrapper for tests.
-4. `tests-integration/install-via-fs.test.ts` — new test asserting `py.FS.analyzePath('/lib/browsergrad_grad_src/browsergrad_grad/__init__.py').exists === true`. That's the proof installViaFs ran (not exec).
-5. README — one section documenting `./node-adapter` and the optional peer dep.
-
-`install.ts` itself: zero changes.
-
-### Decisions
-
-- **`PyodideInterface` declared locally**, not imported from the `pyodide` package. Mirrors how `GradTarget` itself is duck-typed — the Adapter accepts anything quacking like Pyodide. Keeps the Module free of any type-level dependency on the `pyodide` package, even though pyodide is an `optionalPeerDependency` at runtime.
-- **`PyodideInterface` exported** alongside `createNodePyodideTarget` so consumers can write their own factory or extend it. Tiny export with high leverage for downstream users.
-- **`makeTarget` in tests now spreads the Adapter** rather than re-implementing `exec` and `fs`. The `.run<T>()` test-glue helper sits on top via `{...adapter, run}`. Makes tests exercise the same code path consumers exercise.
-- **Test name `install_via_fs.test.ts`** (snake_case to match the file's naming convention in this test suite) rather than `install-via-fs.test.ts` — every other integration test file uses snake_case.
-- **Two assertions, not one**, in the new test: `__init__.py` exists (proves the basic write path) AND `utils/data.py` exists (proves `mkdirTree` ran for the nested subpackage). Without the second, a regression in the `mkdirTree` step would slip through.
-
----
-
-## #2 — Split torch_compat into real/limited/impossible (pending)
-
-### Verdict
-
-Option B (self-installing modules with `def _install_pile_a(torch_mod, _bg, _types): ...`),
-not Option A (string-concat). String-concat is indentation-fragile; any auto-formatter
-silently shifts pile boundaries out of function scope. Pin the latent
-`torch_nn.Module is _bg.nn.Module` coupling with a runtime assertion inside
-`install_torch_alias()` — not a comment, not a new test. The assertion message
-names the next file to look at.
-
-### Plan
-
-1. Create `src/python/torch_compat_real.ts` — exports `TORCH_REAL_PY: string` defining `_install_pile_a(torch_mod, _bg, _types)`.
-2. Create `src/python/torch_compat_limited.ts` — exports `TORCH_LIMITED_PY: string` defining `_install_pile_b(torch_mod, _bg, _types, _ctxlib, _np)`.
-3. Create `src/python/torch_compat_impossible.ts` — exports `TORCH_IMPOSSIBLE_PY: string` defining `_impossible(name, reason)` factory + `_install_pile_c(torch_mod, _types)`.
-4. Thin `src/python/torch_compat.ts` — orchestrator that concatenates the three strings and defines `install_torch_alias()` calling each `_install_pile_*` in order, with the identity assertion between Pile A and Pile B.
-5. No test file changes — existing tests (`torch_alias.test.ts`, `torch_compat_completeness.test.ts`, `piles_b_c.test.ts`) reach only through the Python torch namespace.
-
-The `Module.to` monkey-patch fix (moving it into `nn.ts` as a proper method) is **deferred** — the assertion makes the cross-pile coupling loud, which is enough for now.
-
-### Decisions
-
-- **Underscore-prefixed sibling files**, not a `_torch_compat/` subpackage. The three private modules are `_torch_compat_real.py`, `_torch_compat_limited.py`, `_torch_compat_impossible.py` — leading underscore signals private, no new subpackage namespace pollution.
-- **The identity assertion reads `torch_mod.nn.Module is _bg.nn.Module`** (via the orchestrator's already-available `torch_mod` reference), not the local `torch_nn` variable. Simpler — doesn't change install_real's signature.
-- **Pile B/C functions don't need to register sys.modules themselves.** The orchestrator reads sub-modules off `torch_mod` (e.g., `torch_mod.amp`, `torch_mod.cuda`) for sys.modules registration. Each pile installer's only side effect is mutating `torch_mod`, which keeps the contract narrow.
-- **Pile C doesn't take `_bg`** as an argument — Pile C is `_bg`-free by design, and threading an unused arg in would weaken that property.
-- **`surface.test.ts` "ships the documented module set" assertion updated** to list all three new private .py files in the SOURCE_FILES order (real → limited → impossible → torch_compat, because torch_compat imports from them at Python module load).
-- **`_torch_compat_real.py` carries a comment naming the assertion as the load-bearing dependency**: future contributors changing the shallow copy to a deep copy will see the comment AND fail the runtime assertion the next time `install_torch_alias()` runs. Two signals, one obvious next step (move `Module.to` into nn.py).
-
----
-
-## #1 — Split nn.ts into per-family TS chunks (pending)
-
-### Verdict
-
-Option A (TS-split into 12 sibling `.ts` chunks producing one flat `nn.py`),
-not Option B (real Python subpackage). The library's pedagogical contract is
-`nn.Foo`, not `from browsergrad_grad.nn.linear import Linear`. Exposing sub-modules
-would forever-couple the API to that import surface for no domain reason.
-
-Mechanical enforcement: encode concat order as `NN_CHUNK_ORDER: readonly string[]`
-in `src/python/nn/index.ts`. Missing chunks become silently absent, which the
-existing content-assertion tests catch. Not a comment, not a convention.
-
-### Prerequisite
-
-Remove `_normalize_with_affine` (dead code, `nn.ts:1206`) as a separate prior
-commit. Mixing dead-code removal into a 12-file refactor poisons the diff.
-
-### Plan
-
-1. (Prerequisite commit) Remove `_normalize_with_affine` from `nn.ts`.
-2. Create `src/python/nn/{module,linear,conv,norm,pool,dropout,activation,embedding,recurrent,attention,loss,init}.ts` (12 chunk files).
-3. Create `src/python/nn/index.ts` — assembler exporting `NN_PY` via `NN_CHUNK_ORDER.map(...).join("\n")` plus a build-time `length > 10000` floor assertion.
-4. Delete `src/python/nn.ts`.
-5. Update `src/python/index.ts` import — explicit `"./nn/index.js"` if tsconfig uses `node16`/`nodenext`.
-6. Add 3 ordering-invariant tests to `tests/surface.test.ts` (Module before Linear, Linear before MultiHeadAttention, `sys.modules["browsergrad_grad.nn.init"]` registration after MultiHeadAttention).
-
-### Decisions
-
-- **Chunks live under `src/python/nn_chunks/` (not under `browsergrad_grad/nn/`)** because they are concatenation fragments, NOT importable Python modules. They get assembled at codegen time into a single `nn.generated.ts`, which contains one flat `nn.py` for Pyodide to import. The public Python namespace stays `import browsergrad_grad.nn as nn` — no subpackage paths exposed.
-- **`NN_CHUNK_ORDER` lives in `scripts/build-python-sources.mjs` `CHUNKED_MODULES`**, not in a separate constants file. The codegen is the single source of truth for assembly; adding a new chunk requires adding it both to the directory AND to the order. A chunk file with no entry in `order` is silently absent — which the 3 ordering-invariant tests in `surface.test.ts` would catch.
-- **Splitter classification by class/def name, not section comment**. Section-header comments like `# ─── Conv1d ───` don't trigger routing in the one-time splitter — only `class X(...)` and `def X(...)` lines do. Side effect: some section comments end up trailing the previous chunk (e.g., the `# ─── More norms ───` header sits at the bottom of `dropout.py` because Dropout2d is the last class before GroupNorm). Cosmetic wart, no functional impact. Future cleanup: extend the routing to recognize section headers.
-- **The one-time splitter (`scripts/split-nn-once.mjs`) was deleted after use**, same as `extract-python-once.mjs` was. Source of truth is now the 12 chunk files.
-- **No new dependencies, no new tooling**. The codegen script grew one new section (`CHUNKED_MODULES`) and one new loop. Same `.mjs` runtime, same `node` invocation, same place in the `build` script.
-- **byte-for-byte concat verification**: the assembled `nn.generated.ts` is 63555 chars — identical to the pre-split nn.py size. Round-trip fidelity confirmed by all 234 integration tests passing unchanged.
-
----
-
-## Post-refactor quality pass
-
-After all 5 refactors landed (#5 → #4 → #3 → #2 → #1), one combined commit
-ran `/polish` + `/delight` + `/harden` over the new code, and a final
-`/extract` survey looked for duplication that emerged from the refactors.
-
-### /harden + /delight + /polish (one commit)
-
-- **Codegen fail-fast pre-check.** `build-python-sources.mjs` now refuses to emit anything if any `MODULES` source or `CHUNKED_MODULES` chunk file is missing. Previously a missing chunk would silently truncate the assembled `nn.py` and fail at Pyodide import time with a cryptic Python traceback. Now it lists every missing path and exits non-zero.
-- **NodePyodideTarget shape check.** `createNodePyodideTarget` validates that the argument has `runPythonAsync`, `FS.writeFile`, and `FS.mkdirTree` before constructing the adapter. Catches "wrong object" mistakes at the call site, not deep inside `installGrad`.
-- **README documents `./node-adapter`** with a complete `loadPyodide() → createNodePyodideTarget() → installGrad()` example and the `optionalPeerDependencies` note.
-
-### /extract (no win found)
-
-Surveyed for duplication introduced by the refactors:
-
-- **The 9 `.ts` re-export shims** (each one a single `export { FOO_PY } from "./foo.generated.js"`) are visually repetitive but each carries a one-line docstring naming what the module contains. Deleting them would shuffle `src/python/index.ts` imports to use `.generated.js` paths directly — uglier, no real leverage gained.
-- **The 3 Pile A/B/C install functions** in `_torch_compat_*.py` already share the `(torch_mod, _bg, _types)` signature shape; their bodies mutate `torch_mod` differently, so there's no shared helper to extract.
-- **The IIFE in `.generated.ts` files** is duplicated 9 times in OUTPUT, but the source of truth (the `emit()` function in `build-python-sources.mjs`) is a single function. No source duplication.
-- **The norm classes** (BatchNorm{1,2,3}d, GroupNorm, InstanceNorm2d) share parameter-init and running-stat patterns, but that's a Python-level refactor inside `nn/norm.py`, not architectural deepening.
-
-Honest verdict: the architectural deepening pass produced clean enough seams that no meaningful duplication emerged. Closing out the /extract pass with "nothing material to extract" is the right answer — over-extraction would be worse than the (tiny) repetition.
-
----
-
-## Methodology meta-decisions
-
-These are choices made about HOW we work, not about specific refactors:
-
-- **Dossier-then-grill-then-implement** is the standard pattern for any refactor expected to take >2 hours. For small one-file changes, skip directly to implementation.
-- **Subagents fan out research and grilling**; implementation stays in the main thread because each step needs to be reviewable as a single coherent change.
-- **One commit per refactor**, all-green. No mid-refactor commits.
-- **This doc is the single source of architectural rationale.** PROGRESS.md is for PyTorch-coverage; CHANGELOG.md is for user-facing release notes; README is for what the library does. ARCHITECTURE.md is for why it's shaped this way.
+# Architecture
+
+How the four packages compose, what each layer owns, where the seams live, and why we made the calls we did.
+
+For PRD history (what was scoped, what was deferred, with rationale) see [PROGRESS.md](./PROGRESS.md) and the per-PRD docs under [`docs/prd/`](./docs/prd/). For end-to-end test data + ranked improvement priorities see [FEEDBACK.md](./FEEDBACK.md).
+
+## The layered picture
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                       craftingattention (lab UI)                       │
+│        - lab.json manifest validated at boot                           │
+│        - rubric.py emits assertions via bg.lab.assert_*                │
+│        - student code runs via session.exec()                          │
+└─────────────────────────────────┬──────────────────────────────────────┘
+                                  │  loadLab + runLab
+┌─────────────────────────────────▼──────────────────────────────────────┐
+│                  @unlocalhosted/browsergrad-runtime                    │
+│  - Spawns Pyodide in a Worker                                          │
+│  - exec / fs / interrupt / onAssertion / onArtifact protocol           │
+│  - parseManifest + assertCompatibleRuntime (semver gate)               │
+│  - Python preamble registers bg.assert_pass/fail/error/log/emit_*      │
+└─────────┬────────────────────────────────────────────────────┬─────────┘
+          │                                                    │
+          │  install_torch_alias()                             │  createWebGpuRealizerBridge(device)
+          │                                                    │  (only for jit + WebGPU consumers)
+┌─────────▼──────────────────┐    ┌─────────────────┐     ┌────▼──────────────────────────────┐
+│  @unlocalhosted/           │    │  @unlocalhosted/│     │  @unlocalhosted/                  │
+│  browsergrad-grad          │    │  browsergrad-jit│     │  browsergrad-kernels              │
+│  (eager, NumPy-backed)     │    │  (lazy IR)      │     │  (WGSL kernels + JS reference)    │
+│                            │    │                 │     │                                   │
+│  Tensor + autograd         │    │  TensorProxy +  │     │  matmul / matmulTiled /           │
+│  nn.{Linear,Conv,...}      │    │  UOp IR (28 ops)│     │  softmax / layernorm /            │
+│  optim.{SGD,Adam,AdamW}    │    │  Fusion         │     │  attention / FA-v2 /              │
+│  Closure backward          │◀───┼─optional────────│     │  fusedElementwise (codegen)       │
+│                            │    │  Symbolic VJP   │     │                                   │
+│                            │    │  AMP + Scaler   │     │  createWebGpuRealizerBridge       │
+│                            │    │  Checkpointing  │─────▶  (PRD-011.5 seam)                 │
+│                            │    │  bg.func.*      │     │                                   │
+│                            │    │  bg.onnx.*      │     │  reference.* (pure-JS oracle)     │
+│                            │    │  bg.custom_kernel─────▶  runs user WGSL                   │
+└────────────────────────────┘    └─────────────────┘     └───────────────────────────────────┘
+```
+
+## Package responsibilities
+
+### `browsergrad-runtime` — host
+Owns the **lifecycle**: Pyodide booted in a Worker, the wire protocol between host and Python (stdout/stderr/assertions/artifacts), interrupt + clearNamespace + fs. Also owns the **lab contract**: `LabManifest` schema + parser + semver gate. Knows nothing about tensors.
+
+### `browsergrad-kernels` — GPU layer
+Owns the **WGSL**. Every kernel has a JS reference for conformance + a CPU fallback path. No tensor library dependency — it's a primitives catalog. Plus the **realizer-bridge** (`createWebGpuRealizerBridge`) that browsergrad-jit consumes for its WebGPU realizer tier.
+
+### `browsergrad-grad` — eager autograd (stable)
+Owns the **eager closure-backward** path. Each op carries a Python closure that runs at `.backward()` time. NumPy-backed, no IR. This is what curriculum content uses today.
+
+### `browsergrad-jit` — lazy IR (active development)
+Owns the **UOp IR + lazy execution**. Every arithmetic operation builds an IR node; nothing realizes until you call `.numpy()` / `.item()` / `.backward()` / `optimizer.step()`. The IR enables fusion, symbolic backward, AMP cast-insertion, gradient checkpointing rewrites, functional transforms (vmap/grad/vjp), ONNX export, and pluggable backends.
+
+## Data flow — a forward+backward pass through jit
+
+```
+1. user code:  y = x @ w + b; loss = ((y - t)**2).mean()
+                  │
+                  ▼ (TensorProxy.__matmul__, __add__, etc. build UOps)
+
+2. IR graph:   REDUCE(sum)
+                  │
+                  ▼
+                MUL
+                ┌─┴─┐
+              SUB   SUB
+              ┌┴┐   ┌┴┐
+            ADD t   ADD t          ← t = LOAD(BUFFER_t)
+            ┌┴┐     ┌┴┐
+          MAT b   MAT b           ← b = LOAD(BUFFER_b)
+          ┌┴┐     ┌┴┐
+        x   w   x   w             ← x, w = LOAD(BUFFER_x), LOAD(BUFFER_w)
+
+3. user calls loss.backward()
+   │
+   ▼ _tensor_proxy.backward() decides path:
+   │
+   ├──► symbolic-viable? yes (every op has a VJP rule)
+   │    → build a parallel "gradient UOp" graph via _vjp rules
+   │    → checkpoint rewrite if any region is open
+   │    → realize each leaf-grad UOp via realize(buffer_table)
+   │
+   └──► closure path (safety net for ops without VJPs)
+
+4. realize() → _amp.insert_cast_pass → _fusion.fuse →
+   topological NumPy dispatch → ndarray returned
+                            ↑
+                            └── OR, if bridge registered:
+                                bg.realize_webgpu → _h_matmul / _h_fused_elementwise
+                                → kernels.matmulTiledDirect etc.
+                                → GPUBuffer materialise at the seam → bytes → ndarray
+```
+
+## Key design principles
+
+### 1. Lazy by default, realize at explicit triggers
+Arithmetic builds IR. Realization happens at `.numpy()`, `.tolist()`, `.item()`, `.backward()`, optimizer.step, or any Python boolean conversion (`__bool__`, `__float__`, `__int__`). The metadata path (`.shape`, `.dtype`, `.ndim`, `len()`, `repr`) NEVER realizes — important for IDE tooling.
+
+### 2. Three layers of fallback
+- **Symbolic VJP path** (fast, fusion-friendly) for ops with registered VJP rules.
+- **Closure backward** for ops without VJPs (PRD-005 substrate, kept as the safety net).
+- **NumPy realizer** as the universal backend; WebGPU realizer is opt-in via the bridge.
+
+Each layer fails over to the one below with a clear error. Never silently degrades to wrong-result paths.
+
+### 3. The realizer-tier seam is bridge-shaped
+`browsergrad-jit` doesn't talk to WebGPU directly — Python in Pyodide doesn't have a WebGPU binding. Instead, jit accepts an arbitrary **bridge object** that satisfies a Protocol (`upload`, `materialize`, `release`, `matmul`, `fused_elementwise`, `cast`, `flash_attention`, `run_user_kernel`). The kernels package ships the production bridge (`createWebGpuRealizerBridge`); tests use a NumPy-backed mock. **This is the load-bearing seam** — it's what lets us validate the Python side in pyodide-in-node without a GPU and the WGSL side in headed Chromium without Python.
+
+### 4. Honest scope cuts
+Every PRD passed through a DL/GPU systems review before implementation. Each review killed speculative scope (WebNN's <5% user reach, cross-block megakernel's DRAM-bound block I/O, autotune sweeps cold-start cost) and identified the load-bearing piece (tiled GEMM, fused-elementwise codegen, Flash Attention v2). The review's verdicts live in commits; what shipped is the cut scope, not the original.
+
+### 5. We own the codegen
+The fused-elementwise WGSL is assembled from a TypeScript walker over the ops list. No template engine. No WGSL parser. The hash of the ops sequence drives the pipeline cache. Same approach for the ONNX export: hand-rolled proto3 encoder (no protobuf wheel). When a library would have added a dep we couldn't ship in Pyodide, we wrote the encoder ourselves.
+
+## Where the seams are
+
+| Seam | What crosses it | Why it's there |
+|---|---|---|
+| `session.exec({ code })` | Python source string | Host ↔ Worker; the only string-passing boundary. |
+| `import browsergrad` (Pyodide) | Structured assertions/artifacts (JSON) | Lab UI receives student progress events. |
+| `bg.register_webgpu_bridge(bridge)` | A Protocol-satisfying object | Pluggable backend; tests use a mock. |
+| `_realize.realize(root, buffer_table)` | UOp graph + a per-session BufferTable | Single dispatch table; one Python fn per opcode. |
+| `_amp.insert_cast_pass(root)` | UOp graph | Cast-insertion IR rewriter; opt-in by `autocast_hint`. |
+| `_fusion.fuse(root, holdout)` | UOp graph | Pattern matcher; produces FUSED_* nodes. |
+| `_vjp.get_rule(opcode)` | Function pointer | VJP registry; rules emit UOps tagged `vjp_of`. |
+| `bg.save_safetensors(state)` | bytes | Browser-friendly checkpoint format. |
+| `bg.onnx.export_inference(root)` | bytes | Pure-Python proto3 encoder. |
+| `parseManifest(json)` | A LabManifest object | Lab contract; semver-gated. |
+
+## Testing strategy
+
+| Layer | Test type | Where |
+|---|---|---|
+| **Pure TS / structural** | vitest unit tests | `packages/*/tests/` |
+| **Pyodide-in-node** (Python correctness) | vitest integration | `packages/*/tests-integration/` |
+| **Real WebGPU** (kernel + bridge) | vitest browser mode + Playwright Chromium | `packages/browsergrad-kernels/tests-browser/` |
+| **End-to-end feedback** | record() harness writes `/tmp/bg-feedback-report.md` | `tests-integration/end_to_end_bench.test.ts` |
+| **Performance baseline** | timing sweep writes `/tmp/bg-perf-report.md` | `tests-integration/perf_bench.test.ts` |
+
+The end-to-end + perf benches treat the library **as a user would** — every shipped PRD has one `record(prd, scenario, fn)` entry. When a real workflow breaks, the bench surfaces it as structured data in the markdown report, not just a failing assertion. This is how we found the FA-v2 kernel bug and the two API friction points fixed in v0.8.0.
+
+## Historical refactor decisions
+
+The pre-jit ARCHITECTURE.md tracked five candidate refactors and their grilling-then-implement cycle (single-source version, Python-as-.py-files, NodePyodideTarget adapter, torch_compat split, nn.ts split). Those decisions are preserved in git history. The current architecture above is the result; the load-bearing call from each refactor (codegen pipeline, owner-token alias protocol, per-family chunk codegen) survived into the jit library and is documented there.
+
+## Where to start reading the source
+
+- `packages/browsergrad-jit/src/python/_ir.py` — 28 opcodes + UOp + toposort. Smallest file; biggest leverage.
+- `packages/browsergrad-jit/src/python/_realize.py` — dispatch table. One handler per opcode. Read top-to-bottom.
+- `packages/browsergrad-jit/src/python/_tensor_proxy.py` — what users actually touch. Lazy semantics; arithmetic dunders build IR.
+- `packages/browsergrad-jit/src/python/_vjp.py` — symbolic backward rules. Each rule emits IR.
+- `packages/browsergrad-jit/src/python/_realize_webgpu.py` — the WebGPU realizer tier. Bridge-shaped.
+- `packages/browsergrad-kernels/src/realizer.ts` — the production bridge.
+- `packages/browsergrad-kernels/src/kernels/matmul_tiled.ts` — the tiled GEMM. Read alongside the WGSL.
+- `packages/browsergrad-kernels/src/kernels/fused_elementwise.ts` — runtime WGSL codegen. ~120 LOC; representative of the "we own the codegen" stance.
+
+If you're contributing a new opcode: see `docs/prd/PRD-005-jit-foundation.md` for the IR rules + the four-file checklist (declare in `_ir.py`, handler in `_realize.py`, VJP in `_vjp.py` or refuse-via-closure, batching rule in `_vmap.py` or refuse).

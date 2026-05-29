@@ -15,7 +15,9 @@ y.backward()
 print(x.grad.tolist())   # [2.0, 4.0, 6.0]
 ```
 
-> **Status: v0.4.1.** Comprehensive layer set for CNNs and Transformers: Conv2d/Conv1d, BatchNorm2d/1d, LayerNorm, MaxPool/AvgPool, AdaptiveAvgPool2d, Dropout/Dropout2d, Embedding, MultiHeadAttention, Flatten + all common activations. Optimizers: SGD/Adam/AdamW. Module.train()/eval() mode system. **136 tests green** (57 surface + 79 Pyodide-in-node integration), with end-to-end training checks for MLP, CNN, sequence-CNN, and transformer-block.
+> **Status: v0.4.6 — stable.** Comprehensive layer set for CNNs and Transformers: Conv2d/Conv1d, BatchNorm2d/1d, LayerNorm, MaxPool/AvgPool, AdaptiveAvgPool2d, Dropout/Dropout2d, Embedding, MultiHeadAttention, Flatten + all common activations. Optimizers: SGD/Adam/AdamW. Module.train()/eval() mode system. **140 tests green** (25 surface + 115 Pyodide-in-node integration), with end-to-end training checks for MLP, CNN, sequence-CNN, and transformer-block.
+>
+> **The lazy-IR successor is [`browsergrad-jit`](../browsergrad-jit/)** — same PyTorch surface, but ops build a UOp graph that fusion / symbolic backward / AMP / gradient checkpointing / functional transforms / ONNX export / WebGPU realizer-bridge all hook into. Use grad for stable curriculum content; use jit when you want fusion + GPU acceleration + the broader toolkit. Both coexist in the same Pyodide session.
 
 ## What this is
 
@@ -27,7 +29,7 @@ The library is meant to be **legible source code**. If you `print(inspect.getsou
 
 - ❌ PyTorch. We don't try to match its API exactly.
 - ❌ A polyfill. Don't expect `import torch` to work.
-- ❌ Production-fast. v0 is NumPy-on-CPU. WebGPU acceleration via `@unlocalhosted/browsergrad-kernels` is planned for v0.3.
+- ❌ Production-fast. NumPy-on-CPU. **GPU acceleration lives in [`browsergrad-jit`](../browsergrad-jit/)** via the WebGPU realizer-bridge (PRD-011.5) — if you need throughput, migrate to jit; if you want stable curriculum semantics, stay here.
 - ❌ A general framework. It's a **teaching artifact** sized to fit in your head.
 
 ## Install

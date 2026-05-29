@@ -5,7 +5,7 @@
 
 Pyodide-in-Worker runtime for browser-based Python execution. Same-origin assets, AbortSignal cancellation, cooperative cancel via `SharedArrayBuffer`, structured assertion + artifact protocols. Platform-agnostic primitives — bring your own UI.
 
-> **Status: v0.1.0.** API in [`src/types.ts`](./src/types.ts) is the stable contract — adding optional fields is non-breaking; everything else triggers a major bump.
+> **Status: v0.1.1.** Stable API in [`src/types.ts`](./src/types.ts) — adding optional fields is non-breaking; everything else triggers a major bump. Adds the lab manifest validator + semver gate (see below).
 
 ## Install
 
@@ -116,6 +116,45 @@ bg.emit_image(name, mime, data_base64)        # → ArtifactImage
 
 The library does not interpret these — it just relays them. Build your test framework / visualizer / grader on top.
 
+## Lab manifest (PRD-013)
+
+Lab platforms (notably [craftingattention](../../README.md#using-inside-craftingattention)) pin a runtime semver in each lab's `manifest.json`. This package ships a small hand-written validator + semver gate — no `ajv` dependency.
+
+```ts
+import {
+  parseManifest,
+  assertCompatibleRuntime,
+  LabRuntimeMismatch,
+} from "@unlocalhosted/browsergrad-runtime";
+
+const manifestJson = JSON.parse(await fetch("/labs/single-neuron/manifest.json").then((r) => r.text()));
+
+const result = parseManifest(manifestJson);
+if (!result.ok) {
+  throw new Error(`Invalid manifest: ${result.errors.join("; ")}`);
+}
+
+try {
+  assertCompatibleRuntime(result.manifest, "0.8.0");
+} catch (e) {
+  if (e instanceof LabRuntimeMismatch) {
+    // Show "lab requires <pin>, runtime is <version>" with no fallback
+  }
+}
+```
+
+The schema is intentionally small (8 fields):
+
+| Field | Purpose |
+|---|---|
+| `id`, `version` | Lab identity (kebab-case + semver) |
+| `requires_browsergrad` | Semver range — `^0.8.0`, `~0.8.1`, or exact |
+| `required_ops` | UOps the lab uses (≤ 64; informational for the dispatcher) |
+| `rubric_path`, `starter_path`, `reference_path` | Where the lab's Python files live |
+| `datasets` | Optional safetensors URLs (≤ 32) |
+
+Hard-fail on mismatch is the v0 contract — no legacy CDN, no GH-Action mirror. When 5+ labs exist and an actual coexistence problem appears, we'll revisit.
+
 ## What this is, and is not
 
 **This is:** a small, well-typed primitive for running Python in a browser worker. ~1,000 LOC. Boots Pyodide, mounts files, exec, stream stdout/stderr, structured assert/artifact protocols, cooperative + hard cancel, persistent namespace.
@@ -124,7 +163,7 @@ The library does not interpret these — it just relays them. Build your test fr
 - A notebook UI
 - A test framework (you compose one from `onAssertion`)
 - A grading harness (those live in your platform, not in the library)
-- A PyTorch / WebGPU bridge (planned: `@unlocalhosted/browsergrad-kernels`, `@unlocalhosted/browsergrad-grad`)
+- A PyTorch / WebGPU library — those ship as separate packages: [`browsergrad-grad`](../browsergrad-grad/) (eager autograd, stable), [`browsergrad-jit`](../browsergrad-jit/) (lazy IR + fusion + WebGPU seam), [`browsergrad-kernels`](../browsergrad-kernels/) (WGSL primitives + the production realizer bridge)
 
 ## API reference
 
