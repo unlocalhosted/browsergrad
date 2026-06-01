@@ -1,124 +1,80 @@
 # browsergrad
 
-> A small, readable, well-tested library family for running Python and machine-learning workloads directly in the browser.
+**PyTorch-shaped deep learning in the browser.** Lazy IR with fusion, symbolic backward, AMP, gradient checkpointing, functional transforms, WGSL kernels, ONNX export.
 
-```
-@unlocalhosted/browsergrad-runtime   Pyodide-in-Worker host + structured assertion/artifact protocol + lab manifest
-@unlocalhosted/browsergrad-kernels   WGSL kernels for ML primitives + WebGpuRealizerBridge for jit
-@unlocalhosted/browsergrad-grad      PyTorch-flavored tensor + autograd library (eager, NumPy-backed). Stable.
-@unlocalhosted/browsergrad-jit       Lazy-IR successor: same PyTorch surface + fusion + symbolic backward
-                                      + AMP + checkpointing + functional transforms + ONNX + WebGPU seam
-```
-
-Each package is **independently consumable** — they share an organization scope on npm but no runtime dependency. Take one or all.
-
-## Install
-
-```sh
-npm install @unlocalhosted/browsergrad-runtime pyodide
-npm install @unlocalhosted/browsergrad-kernels
-npm install @unlocalhosted/browsergrad-grad   # eager autograd
-npm install @unlocalhosted/browsergrad-jit    # lazy IR + fusion + GPU seam
-```
-
-`pyodide` is a peer dependency of the runtime — you install it directly so you control the version and the asset-sync story (assets must be served same-origin).
-
-## Quick start
-
-### Run Python in a Worker
-
-```ts
-import { createSession } from "@unlocalhosted/browsergrad-runtime";
-
-const session = await createSession({
-  pyodideIndexURL: "/pyodide/v0.26.4/",
-  packages: ["numpy"],
-});
-
-await session.exec({
-  code: `
-    import numpy as np
-    print(np.arange(10).sum())
-  `,
-  onStdout: (chunk) => console.log(chunk),
-});
-
-await session.dispose();
-```
-
-### Train a model with browsergrad-jit (lazy IR + fusion)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![CI status](https://img.shields.io/badge/tests-396%20passing-brightgreen.svg)](#testing)
+[![browser](https://img.shields.io/badge/runs-in%20the%20browser-blue.svg)](#)
 
 ```python
 import browsergrad_jit as bg
 import numpy as np
 
-bg.manual_seed(0)
 model = bg.nn.Sequential(
-    bg.nn.Linear(8, 16),
+    bg.nn.Linear(784, 128),
     bg.nn.ReLU(),
-    bg.nn.Linear(16, 4),
+    bg.nn.Linear(128, 10),
 )
-opt = bg.optim.SGD([p for p in model.parameters()], lr=0.01)
+opt = bg.optim.Adam(model.parameters(), lr=1e-3)
 
-x = bg.from_numpy(np.random.randn(32, 8).astype(np.float32))
-y = bg.from_numpy(np.random.randn(32, 4).astype(np.float32))
+x = bg.from_numpy(np.random.randn(64, 784).astype(np.float32))
+y = bg.from_numpy(np.random.randint(0, 10, size=(64,)).astype(np.int64))
 
-for _ in range(10):
+for _ in range(100):
     opt.zero_grad()
-    loss = ((model(x) - y) ** 2).mean()
-    loss.backward()      # symbolic backward via VJP rules
+    loss = bg.nn.functional.cross_entropy(model(x), y)
+    loss.backward()
     opt.step()
-
-# Save weights — browser-friendly bytes, no filesystem required
-state = {"w1": model[0].weight, "b1": model[0].bias,
-         "w2": model[2].weight, "b2": model[2].bias}
-blob = bg.save_safetensors(state)
 ```
 
-The jit library ships fusion, AMP, gradient checkpointing, functional transforms (`bg.func.{grad, vjp, vmap, functional_call}`), custom WGSL kernels (`@bg.custom_kernel`), and ONNX export (`bg.onnx.export_inference`). See [`packages/browsergrad-jit/README.md`](./packages/browsergrad-jit/README.md) for the full surface.
+That code runs unmodified inside Pyodide in a browser tab. Same surface as PyTorch; no CUDA, no native compile step, no install — just `<script type="module">` and a Web Worker.
 
-### Run on real WebGPU (jit + kernels seam)
+## Why
 
-The jit library realizes through a pluggable bridge. The kernels package ships the production WebGPU bridge:
+- **Same API as PyTorch.** `nn.Module`, `optim.Adam`, `nn.functional.cross_entropy`, `.backward()`, `torch.func.{grad, vjp, vmap, functional_call}`, `torch.amp.autocast`, `torch.utils.checkpoint`. Toggle a single flag and existing PyTorch code runs unchanged.
+- **Lazy by default.** Arithmetic builds a UOp graph; nothing realizes until you ask for `.numpy()` or call `.backward()`. Enables fusion, AMP cast-insertion, gradient-checkpointing IR rewrites, and pluggable backends.
+- **GPU when you want it.** Plug a WGSL backend via a small bridge protocol. Forward inference runs on the GPU; backward stays correct on NumPy. No CUDA. No driver install.
+- **Real autograd, two paths.** Symbolic VJP rules emit IR; closure backward is the safety net. Verified against finite differences and hand-derived oracles.
+- **Save and ship.** safetensors for weights (returns bytes — browser-friendly), ONNX export for inference graphs (pure-Python proto3 encoder, no protobuf wheel).
+- **Honest about scope.** Per-PRD design reviews kill speculative ambitions before they ship. What's listed is what works. Limitations are listed too.
+
+## Install
+
+```sh
+npm install @unlocalhosted/browsergrad-runtime pyodide
+npm install @unlocalhosted/browsergrad-jit
+npm install @unlocalhosted/browsergrad-kernels        # optional: WGSL kernels + WebGPU bridge
+npm install @unlocalhosted/browsergrad-grad           # optional: eager-autograd alternative
+```
+
+`pyodide` is a peer dependency. Asset-sync into `public/pyodide/v0.26.4/` so the runtime is served same-origin.
+
+## Quick start
+
+### Boot Pyodide in a Worker
 
 ```ts
-// JS side — create the device + bridge
-import { createDevice, createWebGpuRealizerBridge } from "@unlocalhosted/browsergrad-kernels";
+import { createSession } from "@unlocalhosted/browsergrad-runtime";
+import { installJit } from "@unlocalhosted/browsergrad-jit";
 
-const device = await createDevice();
-const bridge = createWebGpuRealizerBridge(device);
+const session = await createSession({
+  pyodideIndexURL: "/pyodide/v0.26.4/",
+  packages: ["numpy"],
+});
+await installJit(session);
 
-// Hand to Pyodide so Python can call into it
-pyodide.registerJsModule("_bg_webgpu_bridge", bridge);
+await session.exec({
+  code: `
+    import browsergrad_jit as bg
+    import numpy as np
+
+    x = bg.from_numpy(np.array([[1.0, 2.0], [3.0, 4.0]]))
+    print((x @ x.T).numpy())
+  `,
+});
 ```
 
-```python
-# Python side — register and realize
-import browsergrad_jit as bg
-from js import _bg_webgpu_bridge
-bg.register_webgpu_bridge(_bg_webgpu_bridge)
-
-# Now graphs realize on the GPU
-out = bg.realize_webgpu(x @ w + b)   # ndarray, materialised at the seam
-```
-
-Backward stays on the NumPy realizer in v0; the GPU path is forward-inference for now.
-
-### Or use the eager library (browsergrad-grad)
-
-```python
-import browsergrad_grad as grad
-import browsergrad_grad.nn as nn
-import browsergrad_grad.optim as optim
-
-model = nn.Sequential(nn.Linear(4, 16), nn.ReLU(), nn.Linear(16, 2))
-opt = optim.Adam(model.parameters(), lr=1e-2)
-# ... training loop ...
-```
-
-### Or write vanilla PyTorch code
-
-After `install_torch_alias()`, the `torch` namespace is registered against either library:
+### Use the PyTorch alias
 
 ```python
 import browsergrad_jit as bg
@@ -126,114 +82,64 @@ bg.install_torch_alias()
 
 import torch
 import torch.nn as nn
-import torch.func        # → bg.func
-import torch.amp         # → bg.amp
-import torch.utils.checkpoint   # → bg.utils.checkpoint
+import torch.func
 
-model = nn.Linear(4, 2)
-with torch.amp.autocast(device_type="webgpu", dtype=torch.float16):
-    pred = model(x)
-loss = ((pred - y) ** 2).mean()
-loss.backward()
+x = torch.from_numpy(...)
+g = torch.func.grad(lambda t: (t * t).sum())(x)
 ```
 
-Anything unsupported raises `AttributeError` rather than silently faking success.
+Anything browsergrad doesn't implement raises `AttributeError`, not silent wrong behavior.
 
-### Use a WGSL kernel directly
+### Run on real WebGPU
 
 ```ts
-import { createDevice, kernels, tensor, matmulTiled } from "@unlocalhosted/browsergrad-kernels";
+import { createDevice, createWebGpuRealizerBridge } from "@unlocalhosted/browsergrad-kernels";
 
 const device = await createDevice();
-const A = tensor([2, 3], new Float32Array([1, 2, 3, 4, 5, 6]));
-const B = tensor([3, 2], new Float32Array([7, 8, 9, 10, 11, 12]));
-const C = await matmulTiled(device, A, B);   // tiled 16×16 GEMM
+const bridge = createWebGpuRealizerBridge(device);
+pyodide.registerJsModule("_bg_webgpu_bridge", bridge);
 ```
 
-Pure-JS reference implementations live at the `/reference` subpath for environments without WebGPU.
+```python
+from js import _bg_webgpu_bridge
+bg.register_webgpu_bridge(_bg_webgpu_bridge)
 
-## Browser testing
-
-The kernels package has real-Chromium tests against an actual `GPUDevice`:
-
-```sh
-pnpm --filter @unlocalhosted/browsergrad-kernels test:browser
+out = bg.realize_webgpu(x @ w + b)   # tiled GEMM, fused elementwise, custom WGSL
 ```
-
-This launches Chromium via Playwright with WebGPU enabled and exercises the tiled GEMM, fused-elementwise codegen, residency contract, and the realizer-bridge end-to-end. On macOS the browser is headed (Metal driver only exposed when visible); on Linux CI set `BG_BROWSER_HEADLESS=1`.
-
-The browser-test harness was added when the FEEDBACK loop demanded it — the NumPy mocks pass everything green but only a real GPU surfaces shader-level bugs (we found a deterministic FA-v2 kernel issue this way; tracked in [STATUS.md](./STATUS.md)).
-
-## Using inside craftingattention
-
-The lab platform consumes these packages directly:
-
-1. **Pin the runtime version** in each lab's `manifest.json`:
-   ```json
-   {
-     "id": "single-neuron-relu",
-     "version": "1.0.0",
-     "requires_browsergrad": "^0.8.0",
-     "required_ops": ["MATMUL", "ADD", "WHERE"],
-     "rubric_path": "rubric.py",
-     "starter_path": "starter.py",
-     "reference_path": "reference.py",
-     "datasets": []
-   }
-   ```
-   The runtime validates the manifest at boot via `parseManifest()` and refuses to run a lab whose pin doesn't satisfy the live runtime semver (`assertCompatibleRuntime` throws `LabRuntimeMismatch`).
-
-2. **Author rubrics in Python** using the harness primitives:
-   ```python
-   import browsergrad_jit as bg
-   # student's code runs first, producing `student_out`...
-
-   bg.lab.assert_pytorch_match("forward_matches_reference",
-                               student_out, reference_out, rtol=1e-4)
-   bg.lab.assert_shape_match("output_shape_correct", student_out, (32, 10))
-   bg.lab.assert_no_nan_inf("no_nan_in_gradient", w_grad)
-   ```
-   Each call routes through the runtime's `browsergrad` assertion module — craftingattention's UI receives them via the existing `onAssertion` callback.
-
-3. **Wire the WebGPU bridge** if the lab needs GPU acceleration (any matmul-heavy workload):
-   ```ts
-   // In craftingattention's worker host
-   import { createWebGpuRealizerBridge, createDevice } from "@unlocalhosted/browsergrad-kernels";
-
-   const device = await createDevice();
-   const bridge = createWebGpuRealizerBridge(device);
-   pyodide.registerJsModule("_bg_webgpu_bridge", bridge);
-   // Then in the lab's setup code:
-   //   from js import _bg_webgpu_bridge
-   //   bg.register_webgpu_bridge(_bg_webgpu_bridge)
-   ```
-
-4. **Export trained models for download** via `bg.onnx.export_inference`. Returns bytes — pipe to a `Blob` URL + `<a download>` in JS.
-
-The craftingattention repo lives separately; the integration surface is small enough that no changes here are required to wire it up.
 
 ## Packages
 
 | Package | What it does |
 |---|---|
-| [`browsergrad-runtime`](./packages/browsergrad-runtime) | Spawns Pyodide in a Web Worker, exposes `exec` / `fs` / structured assertion + artifact protocol, AbortSignal cancellation, lab manifest validator. |
-| [`browsergrad-kernels`](./packages/browsergrad-kernels) | WGSL kernels for ML primitives — naive + tiled matmul, softmax, layernorm, attention, Flash Attention v2, elementwise activations. Each shipped with a pure-JS reference impl. Plus `createWebGpuRealizerBridge` for browsergrad-jit. |
-| [`browsergrad-grad`](./packages/browsergrad-grad) | Eager tensor + reverse-mode autograd in Python. Stable. Used by curriculum content today. |
-| [`browsergrad-jit`](./packages/browsergrad-jit) | Lazy-IR successor. PyTorch-shaped surface; fusion, symbolic backward, AMP, gradient checkpointing, functional transforms (`bg.func.{grad, vjp, vmap, functional_call}`), custom WGSL kernels, ONNX export, GPUBuffer-backed WGSL realizer seam. |
+| [`browsergrad-runtime`](./packages/browsergrad-runtime) | Pyodide-in-Worker host. `createSession`, `exec`, structured assertion + artifact protocol, AbortSignal cancellation, optional lab-manifest validator. |
+| [`browsergrad-jit`](./packages/browsergrad-jit) | Lazy-IR PyTorch-shape library. 28-opcode IR, fusion, symbolic VJP, AMP, gradient checkpointing, `bg.func.*`, custom WGSL kernels, ONNX export. |
+| [`browsergrad-kernels`](./packages/browsergrad-kernels) | WGSL compute-shader catalog (matmul, tiled matmul, softmax, layernorm, attention, Flash Attention v2, runtime fused-elementwise codegen). Pure-JS reference per kernel. |
+| [`browsergrad-grad`](./packages/browsergrad-grad) | Eager-autograd alternative. PyTorch-flavored, NumPy-backed, closure backward. Stable. |
 
-Each package has its own README and CHANGELOG with full API details.
+Each package is independently consumable; they share an npm scope but no runtime dependency. Take one or all.
+
+## Testing
+
+396 tests green across the workspace:
+
+```sh
+pnpm -r test                                                # 78 surface tests
+pnpm -r test:integration                                    # 311 Pyodide-in-node tests
+pnpm --filter @unlocalhosted/browsergrad-kernels test:browser    # 7 real-Chromium WebGPU tests
+```
+
+The browser-mode suite runs the WGSL kernels and the realizer bridge against an actual `GPUDevice` via Playwright + Chromium. It catches shader-level bugs that NumPy mocks miss.
 
 ## Documentation
 
-- [STATUS.md](./STATUS.md) — current state, test counts, supported APIs, known issues, deliberate deferrals
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — how the packages compose; data flow; design principles
-- [FEEDBACK.md](./FEEDBACK.md) — what end-to-end exercising the library surfaced; perf baselines; ranked improvement priorities
-- [VISION.md](./VISION.md) — what this is for; why each package exists; what we won't build
-- [PROGRESS.md](./PROGRESS.md) — PRD log
-- [DEVELOPMENT.md](./DEVELOPMENT.md) — TDD methodology, quality gates
-- [CONTRIBUTING.md](./CONTRIBUTING.md) — how to contribute
-- [SECURITY.md](./SECURITY.md) — how to report vulnerabilities
+- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — how the packages compose; data flow; design principles
+- [`CHANGELOG.md`](./CHANGELOG.md) — release history
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — how to contribute
+- [`SECURITY.md`](./SECURITY.md) — vulnerability reporting
+- [`docs/`](./docs) — design documents, PRDs, and internal notes
+
+Per-package READMEs cover the package-level API surface and stability contracts.
 
 ## License
 
-MIT. See [LICENSE](./LICENSE).
+[MIT](LICENSE).

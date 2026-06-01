@@ -244,7 +244,7 @@ x = bg.from_numpy(np.array([1.0, 4.0, 9.0], dtype=np.float32))
     expect(r.values[2]).toBeCloseTo(3, 4);
   });
 
-  it("__pow__ backward through MSE works (the craftingattention training loop)", async () => {
+  it("__pow__ backward through MSE works (the canonical training-loop idiom)", async () => {
     const target = await getJitTarget();
     const r = await target.run<{ max_diff: number }>(`
 import browsergrad_jit as bg

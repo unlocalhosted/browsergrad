@@ -297,7 +297,7 @@ def _resolve_source(
 
 
 # Convenience: round-trip writer for tests and for the BufferTable→file
-# checkpoint flow that craftingattention may want. Not the primary API;
+# checkpoint flow that downstream consumers may want. Not the primary API;
 # kept lean.
 
 def save_safetensors(

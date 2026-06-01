@@ -414,8 +414,7 @@ class TensorProxy:
                            requires_grad=self.requires_grad, ctx=ctx)
 
     def __pow__(self, exponent: Any) -> "TensorProxy":
-        """Universal MSE idiom support: `(pred - target) ** 2`. Surfaced
-        by craftingattention integration testing.
+        """Universal MSE idiom support: `(pred - target) ** 2`.
 
         Integer exponents up to 8 unroll into a chain of MUL UOps —
         cheap, no transcendentals, fusion-friendly. Larger or non-int

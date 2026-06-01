@@ -116,9 +116,9 @@ bg.emit_image(name, mime, data_base64)        # → ArtifactImage
 
 The library does not interpret these — it just relays them. Build your test framework / visualizer / grader on top.
 
-## Lab manifest (PRD-013)
+## Lab manifest
 
-Lab platforms (notably [craftingattention](../../README.md#using-inside-craftingattention)) pin a runtime semver in each lab's `manifest.json`. This package ships a small hand-written validator + semver gate — no `ajv` dependency.
+Optional helper for platforms that ship versioned "labs" (or any other unit of executable Python content) and want a contract surface for pinning runtime versions. Hand-written validator + semver gate — no `ajv` dependency.
 
 ```ts
 import {

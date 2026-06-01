@@ -48,8 +48,8 @@ export type {
 export { BrowsergradError } from "./types.js";
 export { createSession } from "./client.js";
 
-// PRD-013: lab manifest + semver gate. Used by craftingattention to
-// validate lab.json files at boot and refuse mismatched runtime pins.
+// Lab manifest + semver gate. For platforms that ship versioned content
+// units and want to refuse mismatched runtime pins at boot.
 export {
   parseManifest,
   isSemverCompatible,

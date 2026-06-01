@@ -130,7 +130,7 @@ Launches Chromium via Playwright with WebGPU enabled. Runs against a real `GPUDe
 
 7 scenarios: adapter info, naive vs tiled matmul, residency contract (3 uploads + 1 readback chained matmul), fused-elementwise codegen output matches NumPy semantics, FA-v2 (known-issue advisory), end-to-end `WebGpuRealizerBridge.matmul`.
 
-The browser CI was added when the FEEDBACK loop demanded it — NumPy mocks pass everything green but only a real GPU surfaces shader-level bugs. Found the FA-v2 numerical issue this way.
+Real-WebGPU CI is the only reliable way to catch shader-level bugs — NumPy mocks pass everything green even when the WGSL is wrong. The FA-v2 numerical issue tracked in the changelog was caught this way.
 
 ## API stability
 
