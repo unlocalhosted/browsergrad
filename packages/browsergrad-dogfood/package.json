@@ -1,0 +1,29 @@
+{
+  "name": "@unlocalhosted/browsergrad-dogfood",
+  "version": "0.0.0",
+  "description": "Post-publish dogfood suite. Consumes the npm-published @unlocalhosted/browsergrad-* tarballs and runs adversarial tests in real Chromium with WebGPU. Not published. Gates the next release.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "pnpm test:node && pnpm test:browser",
+    "test:browser": "vitest run --config vitest.config.ts",
+    "test:node": "vitest run --config vitest.node.config.ts",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@unlocalhosted/browsergrad-grad": "0.5.1",
+    "@unlocalhosted/browsergrad-jit": "0.8.1",
+    "@unlocalhosted/browsergrad-kernels": "0.1.1",
+    "@unlocalhosted/browsergrad-runtime": "0.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@vitest/browser": "^4.1.7",
+    "@vitest/browser-playwright": "^4.1.7",
+    "@webgpu/types": "^0.1.50",
+    "playwright": "^1.60.0",
+    "pyodide": "^0.26.4",
+    "typescript": "~6.0.0",
+    "vitest": "^4.0.0"
+  }
+}
