@@ -1,6 +1,6 @@
 {
   "name": "@unlocalhosted/browsergrad-kernels",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "WGSL kernel catalog for browser-side machine learning: matmul, softmax, layernorm, attention, and friends. Each kernel ships with a JS reference for conformance + fallback. Independent of any tensor framework.",
   "type": "module",
   "license": "MIT",

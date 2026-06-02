@@ -201,7 +201,17 @@ export function referenceAttention(Q: Tensor, K: Tensor, V: Tensor): Tensor {
   const [SV] = V.shape as [number, number];
   if (DQ !== DK) throw new KernelError(`attention: Q dim ${DQ} ≠ K dim ${DK}`);
   if (S !== SK || S !== SV) {
-    throw new KernelError(`attention: sequence lengths must match (Q: ${S}, K: ${SK}, V: ${SV})`);
+    throw new KernelError(
+      `attention (v0): self-attention only — Q seq (${S}), K seq (${SK}), V seq (${SV}) ` +
+      `must all be equal. Cross-attention (Q seq ≠ K=V seq) is not yet implemented; ` +
+      `track via PRD-012c follow-up. Workaround: pad Q to match K, then truncate output.`,
+    );
+  }
+  if (SK !== SV) {
+    throw new KernelError(
+      `attention: K seq (${SK}) and V seq (${SV}) must always match — they index the ` +
+      `same source token positions. This holds even when cross-attention lands.`,
+    );
   }
 
   // K^T has shape [DK, SK] = [DK, S]

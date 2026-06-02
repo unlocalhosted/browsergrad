@@ -55,7 +55,19 @@ interface BufferRecord {
 
 export interface WebGpuRealizerBridge {
   upload(data: Uint8Array, shape: readonly number[], dtype: string): Handle;
-  materialize(handle: Handle, shape: readonly number[], dtype: string): Uint8Array;
+  /**
+   * Read a handle's contents back to a Uint8Array of f32 byte content.
+   *
+   * Returns a Promise because GPU readback is asynchronous (mapAsync). Pyodide
+   * JSPI consumers (Python's `bridge.materialize(...)` call) hide the await
+   * transparently — the Promise is unwrapped at the JS↔Python boundary, so
+   * Python sees a synchronous Uint8Array return as the Protocol declares.
+   *
+   * JS/TS consumers must `await` this. (Previous releases declared the return
+   * type as `Uint8Array` directly to mirror the Python Protocol; that was a
+   * type contract violation — runtime always returned a Promise.)
+   */
+  materialize(handle: Handle, shape: readonly number[], dtype: string): Promise<Uint8Array>;
   release(handle: Handle): void;
   matmul(a: Handle, b: Handle, m: number, k: number, n: number, dtype: string): Handle;
   fused_elementwise(
@@ -151,21 +163,17 @@ export function createWebGpuRealizerBridge(
       return mint(buf, data.byteLength, shape, dtype);
     },
 
-    materialize(handle: Handle, shape: readonly number[], dtype: string): Uint8Array {
+    async materialize(handle: Handle, shape: readonly number[], dtype: string): Promise<Uint8Array> {
       assertF32(dtype, "materialize");
       // Shape is informational here; the buffer carries its own byte length.
       void shape;
       const rec = get(handle, "materialize");
-      // materializeFloat32 is async; Python crosses the boundary via JSPI
-      // so this Promise can be returned and awaited transparently.
-      // For v0 we expose the Promise — Python's JSPI shim awaits it.
-      // The Protocol on the Python side is sync from Python's POV.
-      const promise = materializeFloat32(device, rec.buffer, rec.byteLength);
-      // Wrap to return bytes view (Uint8Array of the f32 byte content).
-      // We can't synchronously block here, so this is a Promise<Uint8Array>
-      // that Pyodide JSPI will unwrap. TypeScript signature stays sync to
-      // match the Python Protocol; the runtime hides the await.
-      return promise as unknown as Uint8Array;
+      // materializeFloat32 returns Float32Array; reinterpret the bytes as
+      // a Uint8Array view so the Python side reads raw f32 bytes. Pyodide
+      // JSPI unwraps this Promise transparently — the Python Protocol
+      // declares a sync return, JS callers must await.
+      const f32 = await materializeFloat32(device, rec.buffer, rec.byteLength);
+      return new Uint8Array(f32.buffer, f32.byteOffset, f32.byteLength);
     },
 
     release(handle: Handle): void {

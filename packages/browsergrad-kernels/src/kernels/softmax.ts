@@ -32,24 +32,32 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let base = r * params.cols;
 
   // Pass 1: find max for numerical stability.
-  var maxVal: f32 = -3.4028235e38; // approx -f32_max
-  for (var i: u32 = 0u; i < params.cols; i = i + 1u) {
+  //
+  // Note: initializing maxVal with the first element rather than -f32_max.
+  // A negative literal at the magnitude of -f32_max ( -3.4028235e38 ) parsed
+  // as 0 on Chromium's SwiftShader + Metal-driver path (confirmed by a series
+  // of incremental probe kernels — literal init alone is the failure point).
+  // Using X[base] sidesteps the literal-parse issue entirely and is also a
+  // touch more numerically robust: subtracting an actual element instead of
+  // an arbitrarily-tiny floor doesn't change correctness but avoids hitting
+  // exp(very_large_finite_positive) on cols where every input is far above
+  // -f32_max.
+  var maxVal: f32 = X[base];
+  for (var i: u32 = 1u; i < params.cols; i = i + 1u) {
     let v = X[base + i];
     if (v > maxVal) { maxVal = v; }
   }
 
-  // Pass 2: exp and accumulate sum.
+  // Pass 2: accumulate sum of exp(x - max) in a register. Do not write Y.
   var sum: f32 = 0.0;
   for (var i: u32 = 0u; i < params.cols; i = i + 1u) {
-    let e = exp(X[base + i] - maxVal);
-    Y[base + i] = e;
-    sum = sum + e;
+    sum = sum + exp(X[base + i] - maxVal);
   }
 
-  // Pass 3: divide.
+  // Pass 3: pure-write the final normalized values.
   let inv = 1.0 / sum;
   for (var i: u32 = 0u; i < params.cols; i = i + 1u) {
-    Y[base + i] = Y[base + i] * inv;
+    Y[base + i] = exp(X[base + i] - maxVal) * inv;
   }
 }
 `;

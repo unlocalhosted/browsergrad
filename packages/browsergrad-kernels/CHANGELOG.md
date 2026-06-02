@@ -5,6 +5,43 @@ All notable changes to `@unlocalhosted/browsergrad-kernels`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-06-02
+
+Dogfood pass on the published 0.1.0 tarball surfaced three issues. All fixed.
+
+### Fixed
+
+- **GPU `kernels.softmax` returned all zeros** on Chromium's
+  SwiftShader + Metal-driver path (real-WebGPU dogfood in headed
+  Chromium on macOS). Root cause, isolated via incremental probe
+  kernels: the literal `-3.4028235e38` used as the max-init sentinel
+  parsed to **0** on that driver path, so the comparison
+  `v > maxVal` always evaluated false, no max was found, and the
+  whole row's subsequent exp-divide-by-sum collapsed (sum overflowed
+  or wrote zeros). Fix: initialize `maxVal` with `X[base]` and iterate
+  from `i = 1`. Sidesteps the literal-parse issue and is also a touch
+  more numerically robust. Pass 3 was additionally tightened to a
+  pure-write (re-computing `exp(x - max)` rather than reading Y back
+  from pass 2) — defense in depth against read-after-write storage
+  semantics on the same driver path.
+  Caught by `@unlocalhosted/browsergrad-dogfood`; was not covered by
+  the package's own `tests-browser/webgpu_real.test.ts` (which
+  exercises matmul/tiled-GEMM/fused-elementwise/FA-v2 but not
+  softmax). Cascades into `kernels.attention` correctness (attention
+  composes softmax).
+- **`WebGpuRealizerBridge.materialize` type contract**: declared
+  `Uint8Array`, runtime always returned `Promise<Uint8Array>`. TS
+  consumers following the `.d.ts` got `undefined.buffer` at runtime;
+  the package's own browser test silently cast via
+  `as unknown as Promise<Uint8Array>`. The interface now honestly
+  declares `Promise<Uint8Array>` and the implementation is `async`.
+  Pyodide JSPI consumers (Python) still see a synchronous return — the
+  Promise is unwrapped at the boundary as documented.
+- **`kernels.attention` / `reference.attention` error message** when
+  Q seq ≠ K=V seq is now explicit about the v0 self-attention-only
+  limitation and points at the PRD-012c follow-on. Behavior unchanged;
+  documentation gap closed.
+
 ## [0.1.0] — 2026-05-25
 
 Initial release. Six WGSL kernels, each with a pure-JS reference.

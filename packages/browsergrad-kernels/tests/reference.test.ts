@@ -225,7 +225,7 @@ describe("referenceAttention", () => {
     const Q = tensor([3, 4], new Float32Array(12));
     const K = tensor([5, 4], new Float32Array(20));
     const V = tensor([5, 4], new Float32Array(20));
-    expect(() => referenceAttention(Q, K, V)).toThrow(/sequence lengths/);
+    expect(() => referenceAttention(Q, K, V)).toThrow(/seq/);
   });
 
   it("rejects Q/K feature dim mismatch", () => {
