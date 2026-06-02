@@ -8,46 +8,6 @@ importers:
 
   .: {}
 
-  packages/browsergrad-dogfood:
-    dependencies:
-      '@unlocalhosted/browsergrad-grad':
-        specifier: file:../browsergrad-grad/unlocalhosted-browsergrad-grad-0.5.1.tgz
-        version: file:packages/browsergrad-grad/unlocalhosted-browsergrad-grad-0.5.1.tgz
-      '@unlocalhosted/browsergrad-jit':
-        specifier: file:../browsergrad-jit/unlocalhosted-browsergrad-jit-0.8.1.tgz
-        version: file:packages/browsergrad-jit/unlocalhosted-browsergrad-jit-0.8.1.tgz
-      '@unlocalhosted/browsergrad-kernels':
-        specifier: file:../browsergrad-kernels/unlocalhosted-browsergrad-kernels-0.1.1.tgz
-        version: file:packages/browsergrad-kernels/unlocalhosted-browsergrad-kernels-0.1.1.tgz
-      '@unlocalhosted/browsergrad-runtime':
-        specifier: 0.1.1
-        version: 0.1.1(pyodide@0.26.4)
-    devDependencies:
-      '@types/node':
-        specifier: ^24.0.0
-        version: 24.12.4
-      '@vitest/browser':
-        specifier: ^4.1.7
-        version: 4.1.7(vite@8.0.14(@types/node@24.12.4))(vitest@4.1.7)
-      '@vitest/browser-playwright':
-        specifier: ^4.1.7
-        version: 4.1.7(playwright@1.60.0)(vite@8.0.14(@types/node@24.12.4))(vitest@4.1.7)
-      '@webgpu/types':
-        specifier: ^0.1.50
-        version: 0.1.70
-      playwright:
-        specifier: ^1.60.0
-        version: 1.60.0
-      pyodide:
-        specifier: ^0.26.4
-        version: 0.26.4
-      typescript:
-        specifier: ~6.0.0
-        version: 6.0.3
-      vitest:
-        specifier: ^4.0.0
-        version: 4.1.7(@types/node@24.12.4)(@vitest/browser-playwright@4.1.7)(vite@8.0.14(@types/node@24.12.4))
-
   packages/browsergrad-grad:
     devDependencies:
       '@types/node':
@@ -401,23 +361,6 @@ packages:
 
   '@types/node@24.12.4':
     resolution: {integrity: sha512-GUUEShf+PBCGW2KaXwcIt3Yk+e3pkKwWKb9GSyM9WQVE+ep2jzmHdGsHzu4wgcZy5fN9FBdVzjpBQsYlpfpgLA==}
-
-  '@unlocalhosted/browsergrad-grad@file:packages/browsergrad-grad/unlocalhosted-browsergrad-grad-0.5.1.tgz':
-    resolution: {integrity: sha512-NsstuWJLT85jRqnLvKV1K1nUAsQ2nHp4/X90l3oZ8E2A6lHkj4G05e854tOQsi6JhE0eTX9E9LlZhvt+ldBI6w==, tarball: file:packages/browsergrad-grad/unlocalhosted-browsergrad-grad-0.5.1.tgz}
-    version: 0.5.1
-
-  '@unlocalhosted/browsergrad-jit@file:packages/browsergrad-jit/unlocalhosted-browsergrad-jit-0.8.1.tgz':
-    resolution: {integrity: sha512-qJ0GDCnm9//tXmmOGEKlo3nL86bIkoMOPy7ZYXUtbThEzem04AzFfpNgrSPAU9uULlN885Z/MpDRtthuU5uYFw==, tarball: file:packages/browsergrad-jit/unlocalhosted-browsergrad-jit-0.8.1.tgz}
-    version: 0.8.1
-
-  '@unlocalhosted/browsergrad-kernels@file:packages/browsergrad-kernels/unlocalhosted-browsergrad-kernels-0.1.1.tgz':
-    resolution: {integrity: sha512-vNJHe5s24kOyMw0sinGWA06XcxV2IsGdIsscdW7fSPQVUWgody5L7M6iuXGzPnJ20mB56NHYyuxSBwUDdiA7dQ==, tarball: file:packages/browsergrad-kernels/unlocalhosted-browsergrad-kernels-0.1.1.tgz}
-    version: 0.1.1
-
-  '@unlocalhosted/browsergrad-runtime@0.1.1':
-    resolution: {integrity: sha512-KvhluUfImyCHvucGubanN23adwzKQPixk2iwXIwRScopyZUuAf7/8kHjFHKH/wHURarVuFBXjyBZ9i6LHO6nKw==}
-    peerDependencies:
-      pyodide: ^0.26.0
 
   '@vitest/browser-playwright@4.1.7':
     resolution: {integrity: sha512-OlTlJej7YN6VwV7zJJoNeaCsctF+JXpzpZ4oBHUbrQFfIq+0KW2f07rprCLh9N/zRIZ0v4Mchn1QDDmWMUhPKw==}
@@ -950,16 +893,6 @@ snapshots:
   '@types/node@24.12.4':
     dependencies:
       undici-types: 7.16.0
-
-  '@unlocalhosted/browsergrad-grad@file:packages/browsergrad-grad/unlocalhosted-browsergrad-grad-0.5.1.tgz': {}
-
-  '@unlocalhosted/browsergrad-jit@file:packages/browsergrad-jit/unlocalhosted-browsergrad-jit-0.8.1.tgz': {}
-
-  '@unlocalhosted/browsergrad-kernels@file:packages/browsergrad-kernels/unlocalhosted-browsergrad-kernels-0.1.1.tgz': {}
-
-  '@unlocalhosted/browsergrad-runtime@0.1.1(pyodide@0.26.4)':
-    dependencies:
-      pyodide: 0.26.4
 
   '@vitest/browser-playwright@4.1.7(playwright@1.60.0)(vite@8.0.14(@types/node@24.12.4))(vitest@4.1.7)':
     dependencies:

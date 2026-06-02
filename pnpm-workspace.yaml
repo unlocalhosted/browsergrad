@@ -1,2 +1,9 @@
 packages:
   - "packages/*"
+  # browsergrad-dogfood depends on the npm-PUBLISHED tarballs by design;
+  # it must NOT be a workspace member because (a) workspace links would
+  # bypass the whole "test the actual published artifact" goal, and
+  # (b) its npm-pinned deps poison the shared lockfile across version
+  # bumps. It has its own pnpm-lock.yaml and is run separately:
+  #   cd packages/browsergrad-dogfood && pnpm install && pnpm test
+  - "!packages/browsergrad-dogfood"
