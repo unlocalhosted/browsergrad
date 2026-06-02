@@ -40,7 +40,7 @@ import { NN_PY } from "./_nn.generated.js";
 import { FUNCTIONAL_PY } from "./_functional.generated.js";
 import { OPTIM_PY } from "./_optim.generated.js";
 import { TORCH_COMPAT_PY } from "./_torch_compat.generated.js";
-import pkg from "../../package.json";
+import pkg from "../../package.json" with { type: "json" };
 
 /**
  * `browsergrad_jit/__init__.py` content, built inline so we can interpolate

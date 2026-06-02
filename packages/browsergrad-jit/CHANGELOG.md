@@ -7,6 +7,20 @@ contract in the README](README.md#compatibility-contract).
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-06-02
+
+Dogfood pass on the published 0.8.0 tarball surfaced one issue. Fixed.
+
+### Fixed
+
+- **Raw-Node ESM import broke.** `dist/install.js` and
+  `dist/python/index.js` did `import pkg from "./package.json"` without
+  the `with { type: "json" }` attribute required by Node 20+ ESM.
+  Worked under Vite/webpack/vitest (transformed); failed in raw Node,
+  edge runtimes, and SSR frameworks (`TypeError: Module ".../package.json"
+  needs an import attribute of "type: json"`). Both files now use the
+  required attribute.
+
 ## [0.8.0] — 2026-05-28
 
 Multi-PRD batch. Each PRD scoped via an independent DL/GPU systems

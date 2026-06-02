@@ -15,7 +15,7 @@
 
 import { SOURCE_FILES, MOUNT_ROOT } from "./python/index.js";
 import { JitInstallError, type JitTarget, type InstallOptions } from "./types.js";
-import pkg from "../package.json";
+import pkg from "../package.json" with { type: "json" };
 
 export async function installJit(
   target: JitTarget,
