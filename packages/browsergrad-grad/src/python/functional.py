@@ -545,3 +545,14 @@ def scaled_dot_product_attention(query: Tensor, key: Tensor, value: Tensor,
         dK = np.matmul(np.swapaxes(dscores, -1, -2), Qd)
         return (dQ.astype(np.float32), dK.astype(np.float32), dV.astype(np.float32))
     return _build_ctx(out, (query, key, value), backward)
+
+
+# ─────────────────────────────────────────────────────────────────────
+# PyTorch-name aliases. The native names use *_loss suffixes for the loss
+# family (cross_entropy_loss, mse_loss, ...); PyTorch's torch.nn.functional
+# drops the suffix for some (cross_entropy, nll, bce_with_logits). Expose
+# both so user code copied from PyTorch tutorials works against the grad
+# namespace without going through install_torch_alias().
+cross_entropy = cross_entropy_loss
+nll = nll_loss
+bce_with_logits = bce_with_logits_loss

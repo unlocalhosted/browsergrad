@@ -5,6 +5,30 @@ All notable changes to `@unlocalhosted/browsergrad-grad`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] — 2026-06-02
+
+Dogfood pass on the published 0.5.0 tarball surfaced two issues. Both fixed.
+
+### Fixed
+
+- **Raw-Node ESM import broke.** `dist/install.js` and
+  `dist/python/index.js` did `import pkg from "./package.json"` without
+  the `with { type: "json" }` attribute required by Node 20+ ESM. The
+  package worked under Vite/webpack/vitest (transformed) but failed in
+  raw Node, edge runtimes, and any SSR framework hand-rolling Node ESM
+  (`TypeError: Module ".../package.json" needs an import attribute of
+  "type: json"`). Both source files now use the required attribute.
+- **PyTorch ergonomic gaps.** `grad.nn.functional` was unreachable as
+  an attribute; `from browsergrad_grad.nn import functional` failed
+  (`'browsergrad_grad.nn' is not a package`); `F.cross_entropy` didn't
+  exist (only the native `cross_entropy_loss`). All three resolved:
+  `grad.F` is the standard shorthand, `grad.nn.functional` is wired as
+  an attribute (and registered in `sys.modules` so the `import`
+  statement also works), and `cross_entropy`/`nll`/`bce_with_logits`
+  are added as PyTorch-name aliases alongside the native `_loss` names.
+  Code copied from PyTorch tutorials now runs without
+  `install_torch_alias()`.
+
 ## [0.5.0] — 2026-05-26
 
 **PyTorch parity push (Piles A, B, C) + the PyTorch-conformance suite.**

@@ -18,7 +18,7 @@ import { TORCH_COMPAT_REAL_PY } from "./_torch_compat_real.js";
 import { TORCH_COMPAT_LIMITED_PY } from "./_torch_compat_limited.js";
 import { TORCH_COMPAT_IMPOSSIBLE_PY } from "./_torch_compat_impossible.js";
 import { UTILS_DATA_PY } from "./utils_data.js";
-import pkg from "../../package.json";
+import pkg from "../../package.json" with { type: "json" };
 
 const INIT_PY = `
 """browsergrad_grad — a small, readable tensor + autograd library.
@@ -56,6 +56,17 @@ from . import optim
 from . import utils  # nested namespace: browsergrad_grad.utils.data
 from .torch_compat import install_torch_alias
 
+# PyTorch ergonomics — \`F\` is the standard shorthand and \`nn.functional\`
+# is the canonical location for stateless ops. Make both reachable so:
+#   import browsergrad_grad as grad
+#   loss = grad.F.cross_entropy(...)              # idiomatic PyTorch
+#   loss = grad.nn.functional.cross_entropy(...)  # canonical
+# work alongside the existing \`grad.functional.cross_entropy(...)\` path.
+F = functional
+nn.functional = functional
+import sys as _sys
+_sys.modules["browsergrad_grad.nn.functional"] = functional
+
 import pickle as _bg_pickle
 
 
@@ -80,7 +91,7 @@ __all__ = [
     "Tensor", "zeros", "ones", "randn", "no_grad", "cat", "stack", "where",
     "einsum", "from_numpy", "manual_seed",
     "matmul", "mm", "bmm", "exp", "log", "sum", "mean", "argmax",
-    "functional", "nn", "optim", "utils",
+    "functional", "F", "nn", "optim", "utils",
     "save", "load",
     "install_torch_alias",
 ]
