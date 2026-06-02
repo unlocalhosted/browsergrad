@@ -95,18 +95,16 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Extract changelog excerpt
-        id: changelog
         working-directory: packages/${{ steps.parse.outputs.package }}
         run: |
-          # Pull the most recent versioned section out of CHANGELOG.md.
-          # awk: print everything between the first "## " line and the next "## " line.
-          NOTES=$(awk '/^## / {if(found) exit; found=1} found' CHANGELOG.md || true)
-          if [ -z "$NOTES" ]; then NOTES="See CHANGELOG.md for details."; fi
-          {
-            echo 'notes<<EOF'
-            echo "$NOTES"
-            echo EOF
-          } >> "$GITHUB_OUTPUT"
+          # Pull the most recent versioned section out of CHANGELOG.md and
+          # write to a file. We use --notes-file (not --notes) so the
+          # changelog body — which contains backticks, ${...}, and other
+          # shell-meaningful characters — never gets re-interpreted by bash.
+          awk '/^## / {if(found) exit; found=1} found' CHANGELOG.md > /tmp/release-notes.md
+          if [ ! -s /tmp/release-notes.md ]; then
+            echo "See CHANGELOG.md for details." > /tmp/release-notes.md
+          fi
 
       - name: Create GitHub Release
         env:
@@ -114,4 +112,4 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             --title "${{ steps.parse.outputs.npmname }} v${{ steps.parse.outputs.version }}" \
-            --notes "${{ steps.changelog.outputs.notes }}"
+            --notes-file /tmp/release-notes.md
