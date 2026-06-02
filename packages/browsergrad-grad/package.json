@@ -56,7 +56,8 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "oxlint src",
-    "clean": "rm -rf dist *.tsbuildinfo"
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "pnpm run build && pnpm run test"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -1,0 +1,119 @@
+# Release — publish ONE package to npm when its tag is pushed.
+#
+# Tag format: <package>-v<semver>
+#   jit-v0.8.1
+#   runtime-v0.1.2
+#   kernels-v0.1.0
+#   grad-v0.5.0
+#
+# To cut a release:
+#   1. Bump the version in packages/<pkg>/package.json
+#   2. Update packages/<pkg>/CHANGELOG.md (and the top-level CHANGELOG.md)
+#   3. Commit and push to main (CI will run)
+#   4. Create and push the tag:
+#        git tag jit-v0.8.1
+#        git push --tags
+#
+# The workflow:
+#   - Parses the tag → package name + version
+#   - Verifies package.json version matches the tag
+#   - Runs full build + tests (no shortcut — same gates as CI)
+#   - Publishes via `pnpm publish --access public`
+#   - Creates a GitHub Release with the changelog excerpt as the body
+#
+# Required secret:
+#   NPM_TOKEN — npm automation token, "Publish" scope.
+#               Create at https://www.npmjs.com/settings/<user>/tokens
+#               Add as repo secret in GitHub.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'jit-v*'
+      - 'runtime-v*'
+      - 'kernels-v*'
+      - 'grad-v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # required for `gh release create`
+      id-token: write   # required for npm provenance
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need full history for the release notes step
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Parse tag → package + version
+        id: parse
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          # jit-v0.8.1 → jit, 0.8.1
+          SHORTNAME="${TAG%-v*}"          # everything before -v
+          VERSION="${TAG#*-v}"            # everything after -v
+          PACKAGE="browsergrad-$SHORTNAME"
+          NPMNAME="@unlocalhosted/$PACKAGE"
+          PKG_VERSION=$(jq -r .version "packages/$PACKAGE/package.json")
+          if [ "$VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::Tag version $VERSION doesn't match package.json $PKG_VERSION"
+            exit 1
+          fi
+          echo "shortname=$SHORTNAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "package=$PACKAGE" >> "$GITHUB_OUTPUT"
+          echo "npmname=$NPMNAME" >> "$GITHUB_OUTPUT"
+          echo "Releasing $NPMNAME@$VERSION"
+
+      - name: Build (all packages — handles inter-package types)
+        run: pnpm -r build
+
+      - name: Surface tests
+        run: pnpm --filter "${{ steps.parse.outputs.npmname }}" run test
+
+      - name: Integration tests (jit / grad only)
+        if: contains(fromJSON('["jit","grad"]'), steps.parse.outputs.shortname)
+        run: pnpm --filter "${{ steps.parse.outputs.npmname }}" run test:integration
+
+      - name: Publish to npm
+        working-directory: packages/${{ steps.parse.outputs.package }}
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Extract changelog excerpt
+        id: changelog
+        working-directory: packages/${{ steps.parse.outputs.package }}
+        run: |
+          # Pull the most recent versioned section out of CHANGELOG.md.
+          # awk: print everything between the first "## " line and the next "## " line.
+          NOTES=$(awk '/^## / {if(found) exit; found=1} found' CHANGELOG.md || true)
+          if [ -z "$NOTES" ]; then NOTES="See CHANGELOG.md for details."; fi
+          {
+            echo 'notes<<EOF'
+            echo "$NOTES"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "${{ steps.parse.outputs.npmname }} v${{ steps.parse.outputs.version }}" \
+            --notes "${{ steps.changelog.outputs.notes }}"

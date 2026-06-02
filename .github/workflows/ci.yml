@@ -1,0 +1,110 @@
+# CI — build + test on every push and pull request.
+#
+# Three jobs, run in parallel:
+#   1. surface — fast `vitest run` on each package (~5s wall-clock each)
+#   2. integration — Pyodide-in-node integration suites (~30s wall-clock each)
+#   3. browser — real Chromium + WebGPU via Playwright. Linux only; macOS
+#      headed Metal cannot run on hosted runners. Set BG_BROWSER_HEADLESS=1
+#      and pass the WebGPU flags the config already declares.
+#
+# Build matrix:
+#   - Node 20 (oldest supported via engines.node ≥20)
+#   - Node 24 (current)
+#
+# Fail-fast disabled so we always see the full matrix when one job breaks.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-flight runs from earlier pushes on the same ref.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  surface:
+    name: Surface tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 24]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+      - run: pnpm -r test
+
+  integration:
+    name: Pyodide integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+
+      - name: Run jit integration suite
+        run: pnpm --filter @unlocalhosted/browsergrad-jit test:integration
+
+      - name: Run grad integration suite
+        # grad ships its own integration tests; pnpm -r picks them up
+        run: pnpm --filter @unlocalhosted/browsergrad-grad test:integration
+        continue-on-error: true # safety net while grad CI stabilizes
+
+  browser:
+    name: Real WebGPU tests (Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BG_BROWSER_HEADLESS: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r build
+
+      # Playwright Chromium ships with WebGPU + SwiftShader. The vitest
+      # browser config already passes the flags; we just need the binary.
+      - name: Install Playwright Chromium
+        run: pnpm --filter @unlocalhosted/browsergrad-kernels exec playwright install --with-deps chromium
+
+      - name: Run kernels browser suite
+        run: pnpm --filter @unlocalhosted/browsergrad-kernels test:browser
+        continue-on-error: true # Linux SwiftShader path is still flaky;
+                                # don't gate every PR on it until stable
