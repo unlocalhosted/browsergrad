@@ -49,6 +49,53 @@ class Sequential(Module):
         return "Sequential(\\n  " + ",\\n  ".join(parts) + "\\n)"
 
 
+# ─── ModuleList ────────────────────────────────────────────
+
+class ModuleList(Module):
+    """A list container for Module instances.
+
+    Registers all child modules so their parameters are yielded by
+    .parameters(). Supports len(), iteration, integer indexing, and append().
+    """
+
+    def __init__(self, modules=None):
+        super().__init__()
+        self._n = 0
+        if modules is not None:
+            for m in modules:
+                self.append(m)
+
+    def append(self, module: "Module") -> "ModuleList":
+        setattr(self, str(self._n), module)
+        self._n += 1
+        return self
+
+    def __getitem__(self, idx: int) -> "Module":
+        if idx < 0:
+            idx = self._n + idx
+        if idx < 0 or idx >= self._n:
+            raise IndexError(f"ModuleList index {idx} out of range for length {self._n}")
+        return getattr(self, str(idx))
+
+    def __len__(self) -> int:
+        return self._n
+
+    def __iter__(self):
+        for i in range(self._n):
+            yield getattr(self, str(i))
+
+    def forward(self, *args, **kwargs):
+        raise RuntimeError(
+            "ModuleList has no forward() — iterate over it and call each module directly."
+        )
+
+    def __repr__(self):
+        if self._n == 0:
+            return "ModuleList()"
+        parts = [f"  ({i}): {repr(getattr(self, str(i)))}" for i in range(self._n)]
+        return "ModuleList(\n" + "\n".join(parts) + "\n)"
+
+
 # ─── LayerNorm ─────────────────────────────────────────────
 
 class Embedding(Module):
@@ -59,11 +106,11 @@ class Embedding(Module):
     weight is a scatter-add — non-indexed rows stay at zero.
     """
 
-    def __init__(self, num_embeddings: int, embedding_dim: int):
+    def __init__(self, num_embeddings: int, embedding_dim: int,
+                 dtype=None, device=None):
         super().__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
-        # Init U(-1/sqrt(D), 1/sqrt(D)) — standard for embeddings.
         bound = 1.0 / math.sqrt(embedding_dim)
         rng = np.random.default_rng()
         W = rng.uniform(-bound, bound, size=(num_embeddings, embedding_dim)).astype(np.float32)

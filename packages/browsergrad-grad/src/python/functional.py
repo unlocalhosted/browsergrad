@@ -7,6 +7,18 @@ from .tensor import Tensor, _build_ctx
 
 # ─── Activations ───────────────────────────────────────────
 
+def silu(x: Tensor) -> Tensor:
+    """Sigmoid Linear Unit: x * sigmoid(x). Used in SwiGLU feed-forward."""
+    s = 1.0 / (1.0 + np.exp(-x.data))
+    out = Tensor((x.data * s).astype(np.float32))
+    x_data = x.data
+    def backward(g):
+        s_bw = 1.0 / (1.0 + np.exp(-x_data))
+        dsilu = (s_bw + x_data * s_bw * (1.0 - s_bw)).astype(np.float32)
+        return (g.data * dsilu,)
+    return _build_ctx(out, (x,), backward)
+
+
 def relu(x: Tensor) -> Tensor:
     out_data = np.maximum(x.data, 0.0)
     out = Tensor(out_data)

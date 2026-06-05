@@ -54,6 +54,7 @@ def install_torch_alias():
     _bg_torch_sys.modules["torch"] = torch_mod
     _bg_torch_sys.modules["torch.nn"] = torch_mod.nn
     _bg_torch_sys.modules["torch.nn.functional"] = torch_mod.nn.functional
+    _bg_torch_sys.modules["torch.nn.utils"] = torch_mod.nn.utils
     _bg_torch_sys.modules["torch.optim"] = torch_mod.optim
     _bg_torch_sys.modules["torch.utils"] = torch_mod.utils
     _bg_torch_sys.modules["torch.utils.data"] = torch_mod.utils.data

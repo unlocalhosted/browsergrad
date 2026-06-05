@@ -5,7 +5,8 @@ class Linear(Module):
     Initialized via Kaiming uniform on W and zeros on b, matching torch.nn.Linear.
     """
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = True):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True,
+                 dtype=None, device=None):
         super().__init__()
         self.in_features = in_features
         self.out_features = out_features

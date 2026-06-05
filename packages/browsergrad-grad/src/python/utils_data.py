@@ -17,14 +17,24 @@ class Dataset:
         raise NotImplementedError("Dataset subclasses must implement __getitem__")
 
 
+def _collate_column(items):
+    """Stack a homogeneous list of items into one tensor or array."""
+    try:
+        from browsergrad_grad.tensor import Tensor as _T, stack as _stack
+        if isinstance(items[0], _T):
+            return _stack(list(items))
+    except Exception:
+        pass
+    return np.stack([np.asarray(s) for s in items])
+
+
 def _default_collate(samples):
     """Stack a list of samples into one batch.
 
     - If samples are tuples of the same arity, returns a tuple of stacks
-      (one per position).
-    - Otherwise, returns one stack.
-
-    Uses np.asarray + np.stack — fast and Tensor-friendly via np.asarray.
+      (one per position), each stack wrapped as a Tensor when the input items
+      are Tensors.
+    - Otherwise returns one stack.
     """
     if len(samples) == 0:
         raise RuntimeError("_default_collate: empty batch")
@@ -32,10 +42,10 @@ def _default_collate(samples):
     if isinstance(first, tuple):
         arity = len(first)
         return tuple(
-            np.stack([np.asarray(s[i]) for s in samples])
+            _collate_column([s[i] for s in samples])
             for i in range(arity)
         )
-    return np.stack([np.asarray(s) for s in samples])
+    return _collate_column(samples)
 
 
 class DataLoader:

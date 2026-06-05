@@ -22,6 +22,9 @@ def _resolve_dtype(spec):
     aliases = {
         "float": np.float32, "float32": np.float32,
         "float64": np.float64, "double": np.float64,
+        "float16": np.float16, "half": np.float16, "fp16": np.float16,
+        # bfloat16 is not supported by NumPy — silently fall back to float32
+        "bfloat16": np.float32, "bf16": np.float32,
         "int": np.int32, "int32": np.int32,
         "int64": np.int64, "long": np.int64,
         "int16": np.int16, "short": np.int16,
@@ -208,6 +211,18 @@ class Tensor:
         """
         return _getitem(self, key)
 
+    def __setitem__(self, key, value):
+        """In-place item assignment. Mutates self.data; breaks autograd if used mid-graph."""
+        if isinstance(key, tuple):
+            norm_key = tuple(k.data.astype(np.int64) if isinstance(k, Tensor) else k
+                             for k in key)
+        elif isinstance(key, Tensor):
+            norm_key = key.data
+        else:
+            norm_key = key
+        val = value.data if isinstance(value, Tensor) else value
+        self.data[norm_key] = val
+
     # ─── Comparison ops ───────────────────────────────────
     # Return float-encoded 0/1 tensors (PyTorch returns bool but our
     # downstream ops are all f32 — float-encoded is more useful for the
@@ -266,30 +281,35 @@ class Tensor:
             raise TypeError("Tensor ** Tensor not supported; use ** with a number")
         return _pow(self, float(p))
 
+    def __rpow__(self, base) -> "Tensor":
+        """base ** self — used in RoPE: theta_base ** (arange / head_dim)."""
+        if not isinstance(base, (int, float)):
+            return NotImplemented
+        if float(base) <= 0:
+            raise ValueError(f"__rpow__: base must be positive, got {base}")
+        return (self * float(np.log(float(base)))).exp()
+
     # ─── Reductions ────────────────────────────────────────
 
-    def sum(self, axis=None, keepdims: bool = False):
-        return _sum(self, axis=axis, keepdims=keepdims)
+    def sum(self, dim=None, axis=None, keepdim: bool = False, keepdims: bool = False):
+        return _sum(self, axis=dim if dim is not None else axis,
+                    keepdims=keepdim or keepdims)
 
-    def mean(self, axis=None, keepdims: bool = False):
-        return _mean(self, axis=axis, keepdims=keepdims)
+    def mean(self, dim=None, axis=None, keepdim: bool = False, keepdims: bool = False):
+        return _mean(self, axis=dim if dim is not None else axis,
+                     keepdims=keepdim or keepdims)
 
-    def argmax(self, dim=None) -> "Tensor":
+    def argmax(self, dim=None, keepdim: bool = False) -> "Tensor":
         """Return indices of the maximum values along `dim`.
 
-        `dim=None` (default) returns a scalar — the flat index into the
-        original tensor's storage. Any other `dim` returns a tensor with
-        that axis reduced. Result dtype is int64 (PyTorch convention).
-
-        Not differentiable — argmax is non-smooth in input. The output
-        is a regular Tensor for ergonomic .tolist() / indexing but never
-        participates in autograd.
+        `dim=None` returns a scalar (flat index). `keepdim=True` inserts a
+        size-1 dimension at the reduced axis, matching PyTorch semantics.
+        Result dtype is int64. Non-differentiable.
         """
         idx = np.argmax(self.data, axis=dim)
-        # We force an f32 backing so the rest of the library doesn't have
-        # to special-case int64 tensors. argmax results are typically used
-        # as plain Python ints (item(), tolist()), not for further math.
-        return Tensor(idx.astype(np.float32))
+        if keepdim and dim is not None:
+            idx = np.expand_dims(idx, axis=dim)
+        return Tensor(idx.astype(np.int64), dtype="int64")
 
     # ─── Elementwise unary ─────────────────────────────────
 
@@ -320,14 +340,17 @@ class Tensor:
     def clip(self, min=None, max=None) -> "Tensor":
         return self.clamp(min, max)
 
-    def topk(self, k: int):
-        """Return (values, indices) of the k largest elements (1-D only in v0).
+    def topk(self, k: int, dim: int = -1, largest: bool = True):
+        """Return (values, indices) of the k largest (or smallest) elements along dim.
         Returns a tuple of Tensors. Non-differentiable.
         """
-        if self.data.ndim != 1:
-            raise ValueError(f"topk: v0 supports 1-D tensors only, got {self.data.ndim}D")
-        idx = np.argsort(-self.data)[:k]
-        return Tensor(self.data[idx].astype(np.float32)), Tensor(idx.astype(np.float32))
+        ax = dim % self.data.ndim if self.data.ndim > 0 else 0
+        sort_idx = np.argsort(-self.data if largest else self.data, axis=ax)
+        slices = [slice(None)] * self.data.ndim
+        slices[ax] = slice(k)
+        idx = sort_idx[tuple(slices)]
+        values = np.take_along_axis(self.data, idx, axis=ax)
+        return Tensor(values.astype(np.float32)), Tensor(idx.astype(np.float32))
 
     def expand(self, *shape) -> "Tensor":
         """Broadcast size-1 dims to a larger size. Returns a tensor that
@@ -343,6 +366,80 @@ class Tensor:
         if len(sizes) == 1 and isinstance(sizes[0], (tuple, list)):
             sizes = tuple(sizes[0])
         return _repeat(self, tuple(sizes))
+
+    def numel(self) -> int:
+        """Total number of elements. Matches torch.Tensor.numel()."""
+        return int(self.data.size)
+
+    def contiguous(self) -> "Tensor":
+        """No-op: NumPy-backed tensors are always contiguous."""
+        return self
+
+    def flatten(self, start_dim: int = 0, end_dim: int = -1) -> "Tensor":
+        """Merge dims from start_dim to end_dim into one. Matches torch.Tensor.flatten."""
+        nd = self.data.ndim
+        if nd == 0:
+            return self.reshape((1,))
+        sd = start_dim % nd
+        ed = end_dim % nd
+        prefix = self.data.shape[:sd]
+        middle = 1
+        for d in self.data.shape[sd:ed + 1]:
+            middle *= d
+        suffix = self.data.shape[ed + 1:]
+        return self.reshape(prefix + (middle,) + suffix)
+
+    def masked_fill(self, mask, value: float) -> "Tensor":
+        """Return a copy with positions where mask is True replaced by value."""
+        return _masked_fill(self, mask, float(value))
+
+    def masked_fill_(self, mask, value: float) -> "Tensor":
+        """True in-place variant: mutates self.data and returns self.
+
+        Safe for the workshop pattern (causal masking before softmax) because
+        the masked positions receive 0 gradient through softmax regardless.
+        """
+        mask_bool = mask.data.astype(bool) if isinstance(mask, Tensor) else np.asarray(mask, dtype=bool)
+        self.data = np.where(mask_bool, np.float32(value), self.data).astype(np.float32)
+        return self
+
+    def var(self, dim=None, axis=None, keepdim: bool = False, keepdims: bool = False,
+            unbiased: bool = True) -> "Tensor":
+        """Variance. Accepts both PyTorch (dim/keepdim) and NumPy (axis/keepdims) kwargs."""
+        return _var(self, dim=dim if dim is not None else axis,
+                    keepdim=keepdim or keepdims, unbiased=unbiased)
+
+    def std(self, dim=None, axis=None, keepdim: bool = False, keepdims: bool = False,
+            unbiased: bool = True) -> "Tensor":
+        """Standard deviation (sqrt of variance)."""
+        return _pow(self.var(dim=dim, axis=axis, keepdim=keepdim,
+                             keepdims=keepdims, unbiased=unbiased), 0.5)
+
+    def prod(self, dim=None, axis=None, keepdim: bool = False,
+             keepdims: bool = False) -> "Tensor":
+        """Product reduction along dim."""
+        return _prod(self, dim=dim if dim is not None else axis,
+                     keepdims=keepdim or keepdims)
+
+    def gather(self, dim: int, index) -> "Tensor":
+        """Gather values along dim using index. Matches torch.Tensor.gather."""
+        return _gather(self, dim, index)
+
+    def repeat_interleave(self, repeats: int, dim: int) -> "Tensor":
+        """Repeat each element `repeats` times along `dim`. Matches torch.repeat_interleave."""
+        return _repeat_interleave(self, repeats, dim)
+
+    def scatter(self, dim: int, index, src) -> "Tensor":
+        """Non-in-place scatter: return a copy with src placed at index positions."""
+        idx_np = index.data.astype(np.int64) if isinstance(index, Tensor) else np.asarray(index, dtype=np.int64)
+        src_np = src.data if isinstance(src, Tensor) else np.full(idx_np.shape, float(src), dtype=np.float32)
+        out_data = self.data.copy().astype(np.float32)
+        np.put_along_axis(out_data, idx_np, src_np.astype(np.float32), axis=dim)
+        return Tensor(out_data)
+
+    def clamp_min(self, min_val: float) -> "Tensor":
+        """Clamp to [min_val, +inf). Alias for clamp(min=min_val)."""
+        return self.clamp(min=min_val)
 
     def flip(self, dim: int) -> "Tensor":
         return _flip(self, int(dim))
@@ -399,7 +496,22 @@ class Tensor:
     # Device manipulation — no-op stubs (browsergrad has one notional device).
     # Return self for chaining: tensor(...).to(device).requires_grad_()-style code.
 
+    @property
+    def device(self) -> str:
+        """Always 'cpu' — browsergrad runs in-process (NumPy / Pyodide WASM)."""
+        return "cpu"
+
     def to(self, *args, **kwargs) -> "Tensor":
+        # Handle dtype conversion: x.to("float32"), x.to(dtype="int64"), etc.
+        dtype_spec = kwargs.get("dtype") or (args[0] if args else None)
+        if dtype_spec is not None:
+            try:
+                target_type = _resolve_dtype(dtype_spec)
+                if target_type == self.data.dtype.type:
+                    return self  # same dtype — preserve autograd graph intact
+                return Tensor(self.data, dtype=dtype_spec)
+            except (ValueError, TypeError):
+                pass  # Not a dtype (e.g. device string "cpu")
         return self
 
     def cpu(self) -> "Tensor":
@@ -807,28 +919,141 @@ def _permute(a: Tensor, dims: tuple) -> Tensor:
     return _build_ctx(out, (a,), lambda g: (np.transpose(g.data, inv_t).copy(),))
 
 
+# ─── var / masked_fill helpers ─────────────────────────────
+
+def _var(a: Tensor, dim=None, keepdim: bool = False, unbiased: bool = True) -> Tensor:
+    xd = a.data
+    ddof = 1 if unbiased else 0
+    out_data = xd.var(axis=dim, keepdims=keepdim, ddof=ddof).astype(np.float32)
+    out = Tensor(out_data)
+    a_shape = xd.shape
+    if dim is None:
+        n = float(xd.size)
+        mean_data = xd.mean()
+        centered = xd - mean_data
+    else:
+        mean_data = xd.mean(axis=dim, keepdims=True)
+        centered = xd - mean_data
+        n = float(np.prod([xd.shape[ax] for ax in ((dim,) if isinstance(dim, int) else tuple(dim))]))
+    denom = n - float(ddof)
+    # d(var)/dx_i = 2*(x_i - mean) / denom  (mean's own gradient cancels)
+    def backward(g):
+        gd = g.data
+        if not keepdim and dim is not None:
+            norm_axes = (dim,) if isinstance(dim, int) else tuple(dim)
+            for ax in sorted(ax % len(a_shape) for ax in norm_axes):
+                gd = np.expand_dims(gd, ax)
+        return (np.broadcast_to(gd * 2.0 * centered / denom, a_shape).copy().astype(np.float32),)
+    return _build_ctx(out, (a,), backward)
+
+
+def _masked_fill(a: Tensor, mask, value: float) -> Tensor:
+    mask_bool = mask.data.astype(bool) if isinstance(mask, Tensor) else np.asarray(mask, dtype=bool)
+    # np.where broadcasts mask against a.data, handling rank mismatches
+    # (e.g. (T, T) mask into (B, H, T, T) attention scores).
+    out_data = np.where(mask_bool, np.float32(value), a.data).astype(np.float32)
+    out = Tensor(out_data)
+    def backward(g):
+        return (np.where(mask_bool, np.float32(0.0), g.data).astype(np.float32),)
+    return _build_ctx(out, (a,), backward)
+
+
+# ─── New reduction / index helpers ────────────────────────
+
+def _prod(a: Tensor, dim=None, keepdims: bool = False) -> Tensor:
+    a_data = a.data
+    out_data = np.prod(a_data, axis=dim, keepdims=keepdims).astype(np.float32)
+    out = Tensor(out_data)
+    a_shape = a_data.shape
+    if dim is None:
+        out_kd = out_data  # scalar, broadcasts to any shape
+    elif keepdims:
+        out_kd = out_data
+    else:
+        axes = (dim,) if isinstance(dim, int) else tuple(dim)
+        out_kd = np.expand_dims(out_data, axis=axes)
+    def backward(g):
+        gd = g.data
+        if not keepdims and dim is not None:
+            axes = (dim,) if isinstance(dim, int) else tuple(dim)
+            for ax in sorted(ax % len(a_shape) for ax in axes):
+                gd = np.expand_dims(gd, ax)
+        gd_b = np.broadcast_to(gd, a_shape)
+        out_b = np.broadcast_to(out_kd, a_shape)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            grad = np.where(a_data != 0, gd_b * out_b / a_data, 0.0)
+        return (grad.astype(np.float32),)
+    return _build_ctx(out, (a,), backward)
+
+
+def _make_gather_idx(idx_np, dim: int, ndim: int):
+    """Build a full-index tuple for scatter-add (inverse of take_along_axis)."""
+    idx_list = []
+    for d in range(ndim):
+        if d == dim:
+            idx_list.append(idx_np)
+        else:
+            sz = idx_np.shape[d]
+            shape = [1] * ndim
+            shape[d] = sz
+            arr = np.arange(sz).reshape(shape)
+            idx_list.append(np.broadcast_to(arr, idx_np.shape).copy())
+    return tuple(idx_list)
+
+
+def _gather(a: Tensor, dim: int, index) -> Tensor:
+    idx_np = index.data.astype(np.int64) if isinstance(index, Tensor) else np.asarray(index, dtype=np.int64)
+    out_data = np.take_along_axis(a.data, idx_np, axis=dim).astype(np.float32)
+    out = Tensor(out_data)
+    a_shape = a.data.shape
+    def backward(g):
+        grad_a = np.zeros(a_shape, dtype=np.float32)
+        np.add.at(grad_a, _make_gather_idx(idx_np, dim, len(a_shape)), g.data)
+        return (grad_a,)
+    return _build_ctx(out, (a,), backward)
+
+
+def _repeat_interleave(a: Tensor, repeats: int, dim: int) -> Tensor:
+    out_data = np.repeat(a.data, int(repeats), axis=dim).astype(np.float32)
+    out = Tensor(out_data)
+    a_shape = a.data.shape
+    def backward(g):
+        gd = g.data
+        new_shape = list(gd.shape[:dim]) + [a_shape[dim], repeats] + list(gd.shape[dim+1:])
+        return (gd.reshape(new_shape).sum(axis=dim+1).astype(np.float32),)
+    return _build_ctx(out, (a,), backward)
+
+
 # ─── Convenience constructors ──────────────────────────────
 
-def zeros(*shape, requires_grad: bool = False) -> Tensor:
+def zeros(*shape, dtype=None, requires_grad: bool = False, device=None) -> Tensor:
     if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
         shape = tuple(shape[0])
-    return Tensor(np.zeros(shape, dtype=np.float32), requires_grad=requires_grad)
+    np_dtype = _resolve_dtype(dtype) if dtype is not None else np.float32
+    arr = np.zeros(shape, dtype=np_dtype)
+    return Tensor(arr, requires_grad=requires_grad, dtype=arr.dtype.name)
 
 
-def ones(*shape, requires_grad: bool = False) -> Tensor:
+def ones(*shape, dtype=None, requires_grad: bool = False, device=None) -> Tensor:
     if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
         shape = tuple(shape[0])
-    return Tensor(np.ones(shape, dtype=np.float32), requires_grad=requires_grad)
+    np_dtype = _resolve_dtype(dtype) if dtype is not None else np.float32
+    arr = np.ones(shape, dtype=np_dtype)
+    return Tensor(arr, requires_grad=requires_grad, dtype=arr.dtype.name)
 
 
-def randn(*shape, requires_grad: bool = False, seed: Optional[int] = None) -> Tensor:
+def randn(*shape, dtype=None, requires_grad: bool = False, seed: Optional[int] = None,
+          device=None) -> Tensor:
     if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
         shape = tuple(shape[0])
-    # If no explicit seed, draw from numpy's global state (which manual_seed sets).
     if seed is None:
-        return Tensor(np.random.randn(*shape).astype(np.float32), requires_grad=requires_grad)
-    rng = np.random.default_rng(seed)
-    return Tensor(rng.standard_normal(shape).astype(np.float32), requires_grad=requires_grad)
+        arr = np.random.randn(*shape).astype(np.float32)
+    else:
+        rng = np.random.default_rng(seed)
+        arr = rng.standard_normal(shape).astype(np.float32)
+    if dtype is not None:
+        arr = arr.astype(_resolve_dtype(dtype))
+    return Tensor(arr, requires_grad=requires_grad, dtype=arr.dtype.name)
 
 
 def from_numpy(arr) -> Tensor:
@@ -866,16 +1091,33 @@ def log(x) -> Tensor:
     return _log(_wrap(x))
 
 
-def sum(x, axis=None, keepdims: bool = False) -> Tensor:
-    return _sum(_wrap(x), axis=axis, keepdims=keepdims)
+def sum(x, dim=None, axis=None, keepdim: bool = False, keepdims: bool = False) -> Tensor:
+    return _sum(_wrap(x), axis=dim if dim is not None else axis,
+                keepdims=keepdim or keepdims)
 
 
-def mean(x, axis=None, keepdims: bool = False) -> Tensor:
-    return _mean(_wrap(x), axis=axis, keepdims=keepdims)
+def mean(x, dim=None, axis=None, keepdim: bool = False, keepdims: bool = False) -> Tensor:
+    return _mean(_wrap(x), axis=dim if dim is not None else axis,
+                 keepdims=keepdim or keepdims)
 
 
-def argmax(x, dim=None) -> Tensor:
-    return _wrap(x).argmax(dim=dim)
+def argmax(x, dim=None, keepdim: bool = False) -> Tensor:
+    return _wrap(x).argmax(dim=dim, keepdim=keepdim)
+
+
+def tanh(x) -> Tensor:
+    xw = _wrap(x)
+    t = np.tanh(xw.data)
+    out = Tensor(t.astype(np.float32))
+    return _build_ctx(out, (xw,), lambda g: (g.data * (1.0 - t * t),))
+
+
+def sqrt(x) -> Tensor:
+    return _pow(_wrap(x), 0.5)
+
+
+def pow(x, exponent) -> Tensor:
+    return _pow(_wrap(x), float(exponent))
 
 
 # ─── Multi-tensor ops ──────────────────────────────────────
@@ -929,6 +1171,154 @@ def stack(tensors, dim: int = 0) -> Tensor:
 
 
 # ─── einsum ────────────────────────────────────────────────
+
+def arange(*args, dtype=None, requires_grad: bool = False, device=None) -> Tensor:
+    """1-D tensor with evenly spaced values. Matches torch.arange.
+
+    Integer ranges default to int64 (PyTorch convention for indexing).
+    `device` is accepted but ignored — browsergrad always runs on CPU.
+    """
+    arr = np.arange(*args)
+    if dtype is not None:
+        arr = arr.astype(_resolve_dtype(dtype))
+    elif np.issubdtype(arr.dtype, np.integer):
+        arr = arr.astype(np.int64)
+    return Tensor(arr, requires_grad=requires_grad, dtype=arr.dtype.name)
+
+
+def triu(input, diagonal: int = 0) -> Tensor:
+    """Upper-triangular part of input. Non-differentiable. Matches torch.triu."""
+    arr = input.data if isinstance(input, Tensor) else np.asarray(input, dtype=np.float32)
+    return Tensor(np.triu(arr, k=diagonal).copy(), dtype=str(arr.dtype))
+
+
+def tril(input, diagonal: int = 0) -> Tensor:
+    """Lower-triangular part of input. Non-differentiable. Matches torch.tril."""
+    arr = input.data if isinstance(input, Tensor) else np.asarray(input, dtype=np.float32)
+    return Tensor(np.tril(arr, k=diagonal).copy(), dtype=str(arr.dtype))
+
+
+def multinomial(input, num_samples: int, replacement: bool = True) -> Tensor:
+    """Sample indices from categorical probabilities. Non-differentiable.
+
+    Matches torch.multinomial. Returns an int64 index tensor of shape
+    (..., num_samples).
+    """
+    probs = input.data if isinstance(input, Tensor) else np.asarray(input, dtype=np.float32)
+    if probs.ndim == 1:
+        total = probs.sum()
+        if total <= 0:
+            raise ValueError("multinomial: all weights are zero")
+        p = (probs / total).astype(np.float64)
+        p /= p.sum()  # re-normalise: float32→float64 may shift sum off 1.0
+        idx = np.random.choice(len(p), size=num_samples, replace=replacement, p=p)
+        return Tensor(idx.astype(np.int64), dtype="int64")
+    if probs.ndim == 2:
+        rows = []
+        for row in probs:
+            total = row.sum()
+            if total <= 0:
+                raise ValueError("multinomial: row has all-zero weights")
+            p = (row / total).astype(np.float64)
+            p /= p.sum()
+            rows.append(np.random.choice(len(p), size=num_samples, replace=replacement, p=p))
+        return Tensor(np.array(rows, dtype=np.int64), dtype="int64")
+    raise ValueError(f"multinomial: only 1-D and 2-D inputs supported, got {probs.ndim}D")
+
+
+def rsqrt(x) -> Tensor:
+    """Reciprocal square root: 1/sqrt(x). Used in RMSNorm."""
+    return _pow(_wrap(x), -0.5)
+
+
+def cos(x) -> Tensor:
+    """Element-wise cosine with autograd. Used for RoPE."""
+    xw = _wrap(x)
+    c = np.cos(xw.data).astype(np.float32)
+    out = Tensor(c)
+    xd = xw.data
+    return _build_ctx(out, (xw,), lambda g: (-g.data * np.sin(xd).astype(np.float32),))
+
+
+def sin(x) -> Tensor:
+    """Element-wise sine with autograd. Used for RoPE."""
+    xw = _wrap(x)
+    s = np.sin(xw.data).astype(np.float32)
+    out = Tensor(s)
+    xd = xw.data
+    return _build_ctx(out, (xw,), lambda g: (g.data * np.cos(xd).astype(np.float32),))
+
+
+def cumsum(x, dim: int = 0) -> Tensor:
+    """Cumulative sum along dim. Used for top-p nucleus sampling."""
+    xw = _wrap(x)
+    out_data = np.cumsum(xw.data, axis=dim).astype(np.float32)
+    out = Tensor(out_data)
+    def backward(g):
+        return (np.flip(np.cumsum(np.flip(g.data, axis=dim), axis=dim), axis=dim).copy().astype(np.float32),)
+    return _build_ctx(out, (xw,), backward)
+
+
+def sort(x, dim: int = -1, descending: bool = False):
+    """Sort along dim. Returns (values, indices). Non-differentiable."""
+    xw = _wrap(x)
+    ax = dim % xw.data.ndim if xw.data.ndim > 0 else 0
+    sort_idx = np.argsort(xw.data, axis=ax)
+    if descending:
+        slices = [slice(None)] * xw.data.ndim
+        slices[ax] = slice(None, None, -1)
+        sort_idx = sort_idx[tuple(slices)]
+    values = np.take_along_axis(xw.data, sort_idx, axis=ax)
+    return Tensor(values.astype(np.float32)), Tensor(sort_idx.astype(np.int64), dtype="int64")
+
+
+def minimum(a, b) -> Tensor:
+    """Element-wise minimum with autograd."""
+    at = _wrap(a)
+    bt = _wrap(b)
+    out_data = np.minimum(at.data, bt.data).astype(np.float32)
+    out = Tensor(out_data)
+    def backward(g):
+        mask = (at.data <= bt.data).astype(np.float32)
+        return (_unbroadcast(g.data * mask, at.data.shape),
+                _unbroadcast(g.data * (1.0 - mask), bt.data.shape))
+    return _build_ctx(out, (at, bt), backward)
+
+
+def zeros_like(input, dtype=None, device=None) -> Tensor:
+    """Return a zero tensor with the same shape as input."""
+    arr = input.data if isinstance(input, Tensor) else np.asarray(input)
+    np_dtype = _resolve_dtype(dtype) if dtype is not None else arr.dtype
+    return Tensor(np.zeros_like(arr, dtype=np_dtype), dtype=str(np.dtype(np_dtype)))
+
+
+def ones_like(input, dtype=None, device=None) -> Tensor:
+    """Return a ones tensor with the same shape as input."""
+    arr = input.data if isinstance(input, Tensor) else np.asarray(input)
+    np_dtype = _resolve_dtype(dtype) if dtype is not None else arr.dtype
+    return Tensor(np.ones_like(arr, dtype=np_dtype), dtype=str(np.dtype(np_dtype)))
+
+
+def std(x, dim=None, axis=None, keepdim: bool = False, keepdims: bool = False,
+        unbiased: bool = True) -> Tensor:
+    xw = _wrap(x)
+    return _pow(xw.var(dim=dim, axis=axis, keepdim=keepdim, keepdims=keepdims, unbiased=unbiased), 0.5)
+
+
+def prod(x, dim=None, axis=None, keepdim: bool = False, keepdims: bool = False) -> Tensor:
+    return _prod(_wrap(x), dim=dim if dim is not None else axis,
+                 keepdims=keepdim or keepdims)
+
+
+def gather(x, dim: int, index) -> Tensor:
+    """Gather values along dim using index tensor. Matches torch.gather."""
+    return _gather(_wrap(x), dim, index)
+
+
+def repeat_interleave(x, repeats: int, dim: int) -> Tensor:
+    """Repeat each element repeats times along dim."""
+    return _repeat_interleave(_wrap(x), repeats, dim)
+
 
 def einsum(equation: str, *operands: "Tensor") -> "Tensor":
     """Wrap np.einsum with autograd.
