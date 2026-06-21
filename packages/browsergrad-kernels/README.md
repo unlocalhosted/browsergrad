@@ -61,17 +61,12 @@ const C = reference.matmul(A, B);  // identical surface; CPU only
 
 ```ts
 import {
-  createKernelRubric,
-  kernelRubricFailureToAssertionDetails,
+  createBrowsergradKernelRubric,
+  kernels,
   reference,
-  tensor,
 } from "@unlocalhosted/browsergrad-kernels";
 
-const rubric = createKernelRubric({
-  assertPass: (name) => ctx.assertPass(name),
-  assertFail: (name, message, details) =>
-    ctx.assertFail(name, message, kernelRubricFailureToAssertionDetails(details)),
-});
+const rubric = createBrowsergradKernelRubric(ctx);
 
 const actual = await kernels.matmul(device, A, B);
 const expected = reference.matmul(A, B);
@@ -85,6 +80,8 @@ error for learner-facing JS rubrics. Non-finite actual or expected values fail
 the comparison instead of slipping through tolerance math.
 `kernelRubricFailureToAssertionDetails()` formats structured rubric details into
 `expected` / `actual` strings for BrowserGrad-style assertion callbacks.
+`createBrowsergradKernelRubric(ctx)` is the convenience adapter for
+`runAssignmentJavascriptRubric()` contexts and any compatible assertion target.
 
 ### Realizer-tier (chained ops, GPU residency)
 

@@ -14,6 +14,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   first failing index, non-finite value detection, and max absolute error.
 - `kernelRubricFailureToAssertionDetails()` formats kernel failure details into
   `expected` / `actual` strings for BrowserGrad-style assertion callbacks.
+- `createBrowsergradKernelRubric(target)` adapts kernel rubric assertions to a
+  BrowserGrad JS rubric context or any compatible assertion target.
 
 ## [0.1.1] — 2026-06-02
 

@@ -224,9 +224,7 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
 13. For runnable JavaScript labs, imports the rubric module and calls
    `runAssignmentJavascriptRubric`; JS rubrics read binary fixtures with
    `ctx.readBytes(path)`. Kernel labs can use
-   `@unlocalhosted/browsergrad-kernels` `createKernelRubric()` to compare WGSL
-   outputs against CPU references, then
-   `kernelRubricFailureToAssertionDetails()` when forwarding failures into
-   `ctx.assertFail()`.
+   `@unlocalhosted/browsergrad-kernels` `createBrowsergradKernelRubric(ctx)` to
+   compare WGSL outputs against CPU references and emit BrowserGrad assertions.
 14. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

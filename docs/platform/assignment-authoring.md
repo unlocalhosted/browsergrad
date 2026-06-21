@@ -68,6 +68,9 @@ and forward pass/fail assertions into the BrowserGrad JS rubric context. Use
 `kernelRubricFailureToAssertionDetails()` when forwarding failures to
 `ctx.assertFail()` so previews and mismatch details survive as expected/actual
 strings.
+Prefer `createBrowsergradKernelRubric(ctx)` inside `runAssignmentJavascriptRubric`
+callbacks; it wires those callbacks for you without making kernel packages
+depend on the runtime package.
 
 ## Files And Fixtures
 

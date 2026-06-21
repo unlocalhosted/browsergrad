@@ -201,6 +201,10 @@ runtime branches.
   `createKernelRubric()` so JS/WebGPU labs can collect pass/fail assertions and
   compare tensor outputs against CPU oracles without requiring Pyodide or a
   real GPU.
+- Kernel-runtime bridge guarantee: `createBrowsergradKernelRubric(ctx)` adapts
+  kernel tensor checks to `runAssignmentJavascriptRubric()` contexts, and a
+  cross-package integration test proves pass/fail assertions survive through
+  BrowserGrad's JS rubric runner.
 - Later implementation slices:
   - Assignment runner plan: packages, mounts, JS oracles, timeout/watchdog, and
     allowed tests.

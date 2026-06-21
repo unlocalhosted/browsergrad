@@ -45,6 +45,15 @@ export interface KernelAssertionDetails {
   readonly actual?: string;
 }
 
+export interface BrowsergradKernelAssertionTarget {
+  assertPass(name: string): void;
+  assertFail(
+    name: string,
+    message: string,
+    details?: KernelAssertionDetails,
+  ): void;
+}
+
 export interface KernelRubric {
   readonly assertions: readonly KernelRubricAssertion[];
   pass(name: string): void;
@@ -163,6 +172,21 @@ export function kernelRubricFailureToAssertionDetails(
       rtol: details.rtol,
     }),
   };
+}
+
+export function createBrowsergradKernelRubric(
+  target: BrowsergradKernelAssertionTarget,
+): KernelRubric {
+  return createKernelRubric({
+    assertPass: (name) => target.assertPass(name),
+    assertFail: (name, message, details) => {
+      target.assertFail(
+        name,
+        message,
+        kernelRubricFailureToAssertionDetails(details),
+      );
+    },
+  });
 }
 
 function sameShape(actual: readonly number[], expected: readonly number[]): boolean {

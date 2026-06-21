@@ -32,8 +32,10 @@ export { tensor, KernelError } from "./types.js";
 export { createDevice } from "./device.js";
 
 export {
+  createBrowsergradKernelRubric,
   createKernelRubric,
   kernelRubricFailureToAssertionDetails,
+  type BrowsergradKernelAssertionTarget,
   type KernelRubric,
   type KernelRubricOptions,
   type KernelCloseOptions,
