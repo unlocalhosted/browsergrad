@@ -14,6 +14,7 @@ import type {
   Assertion,
   ExecError,
   PackageProgressEvent,
+  PyodideJsModule,
 } from "./types.js";
 
 /* ────────────────────────────────────────────────────────────
@@ -32,6 +33,7 @@ export interface InitRequest {
   readonly kind: "init";
   readonly pyodideIndexURL: string;
   readonly packages: readonly string[];
+  readonly jsModules: readonly PyodideJsModule[];
   /**
    * SharedArrayBuffer-backed Uint8Array for cooperative cancel.
    * Written by client (value 2 = SIGINT). Read by Pyodide via setInterruptBuffer.

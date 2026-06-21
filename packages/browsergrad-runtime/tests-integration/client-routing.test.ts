@@ -85,6 +85,31 @@ describe("client request/response correlation", () => {
     await session.dispose();
   });
 
+  it("passes JS module registrations through init", async () => {
+    const fake = new FakeWorker();
+    const session = await makeSession(fake, {
+      jsModules: [
+        {
+          name: "_bg_tokenizers",
+          importURL: "/assets/tokenizer-oracle.js",
+          exportName: "oracle",
+        },
+      ],
+    });
+
+    expect(fake.lastMessage).toMatchObject({
+      kind: "init",
+      jsModules: [
+        {
+          name: "_bg_tokenizers",
+          importURL: "/assets/tokenizer-oracle.js",
+          exportName: "oracle",
+        },
+      ],
+    });
+    await session.dispose();
+  });
+
   it("exec resolves with exec:done payload", async () => {
     const fake = new FakeWorker();
     const session = await makeSession(fake);

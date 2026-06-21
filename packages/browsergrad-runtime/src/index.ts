@@ -31,6 +31,7 @@ export type {
   SessionFS,
   SessionOptions,
   PackageProgressEvent,
+  PyodideJsModule,
   ExecOptions,
   ExecResult,
   ExecError,

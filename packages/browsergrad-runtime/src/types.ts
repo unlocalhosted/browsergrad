@@ -31,6 +31,17 @@ export interface SessionOptions {
    */
   packages?: readonly string[];
 
+  /**
+   * JS modules to import inside the Pyodide worker and register via
+   * `pyodide.registerJsModule()`. Use this for small browser-safe oracle
+   * helpers that Python rubrics call through Pyodide's JS bridge.
+   *
+   * `importURL` must be a URL the worker can dynamically import. If
+   * `exportName` is omitted, the full module namespace object is registered.
+   * If it is set, that named export must be an object.
+   */
+  jsModules?: readonly PyodideJsModule[];
+
   /** Called as each preload package transitions states. Useful for boot UI. */
   onPackageProgress?: (event: PackageProgressEvent) => void;
 
@@ -64,6 +75,15 @@ export interface PackageProgressEvent {
   readonly status: "loading" | "loaded" | "failed";
   /** Error message if `status === "failed"`. */
   readonly message?: string;
+}
+
+export interface PyodideJsModule {
+  /** Python import name exposed through Pyodide, e.g. `_bg_tokenizers`. */
+  readonly name: string;
+  /** Worker-importable module URL. */
+  readonly importURL: string;
+  /** Optional named export to register instead of the full module namespace. */
+  readonly exportName?: string;
 }
 
 /* ────────────────────────────────────────────────────────────

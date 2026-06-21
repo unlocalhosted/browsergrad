@@ -33,6 +33,7 @@ import type {
   Assertion,
   ExecError,
   PackageProgressEvent,
+  PyodideJsModule,
 } from "../types.js";
 import { PY_PREAMBLE } from "./python-preamble.js";
 
@@ -72,6 +73,7 @@ let currentExecId: number | null = null;
 async function bootPyodide(
   indexURL: string,
   packages: readonly string[],
+  jsModules: readonly PyodideJsModule[],
   interruptBuffer: Uint8Array | undefined,
   emit: (event: PackageProgressEvent) => void,
 ): Promise<PyodideAPI> {
@@ -109,6 +111,8 @@ async function bootPyodide(
       },
     });
 
+    await registerJsModules(py, jsModules);
+
     for (const pkg of packages) {
       emit({ package: pkg, status: "loading" });
       try {
@@ -128,6 +132,28 @@ async function bootPyodide(
     return py;
   })();
   return pyodidePromise;
+}
+
+async function registerJsModules(
+  py: PyodideAPI,
+  jsModules: readonly PyodideJsModule[],
+): Promise<void> {
+  for (const spec of jsModules) {
+    const imported = (await import(/* @vite-ignore */ spec.importURL)) as Record<
+      string,
+      unknown
+    >;
+    const value =
+      spec.exportName === undefined ? imported : imported[spec.exportName];
+    if (typeof value !== "object" || value === null) {
+      const suffix =
+        spec.exportName === undefined ? "" : ` export ${spec.exportName}`;
+      throw new Error(
+        `JS module ${spec.name}${suffix} must resolve to an object for Pyodide registration`,
+      );
+    }
+    py.registerJsModule(spec.name, value);
+  }
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -157,6 +183,7 @@ async function handleInit(req: InitRequest): Promise<void> {
     await bootPyodide(
       req.pyodideIndexURL,
       req.packages,
+      req.jsModules,
       req.interruptBuffer,
       (event) => {
         reply({ id: 0, kind: "init:progress", event });

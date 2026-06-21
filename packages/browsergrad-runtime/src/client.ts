@@ -106,6 +106,7 @@ class SessionImpl implements Session {
       kind: "init",
       pyodideIndexURL: opts.pyodideIndexURL,
       packages: opts.packages ?? [],
+      jsModules: opts.jsModules ?? [],
       ...(this.interruptBuffer ? { interruptBuffer: this.interruptBuffer } : {}),
     };
     await this.request(initPayload);
