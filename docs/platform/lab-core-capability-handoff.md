@@ -26,7 +26,7 @@ For every lab profile, the platform should:
 6. Call `assignmentRunReadiness(plan)` before launching the lab, or call
    `createAssignmentPreflightReport(profile, environment)` when the platform
    wants the run plan, readiness, rubric kind, required capabilities, and mount
-   plan together.
+   plan/cache plan together.
    Use `assignmentRunnerRoute(plan)` or `report.runnerRoute` for the final
    launch branch: `pyodide`, `javascript`, `external`, `unsupported`, or
    `blocked`.
@@ -206,7 +206,7 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
 5. Calls `assignmentRunReadiness(plan)` and renders its status, selected
    capabilities, and missing capabilities.
 6. Or uses `createAssignmentPreflightReport(profile, environment)` to get all
-   preflight fields in one object.
+   preflight fields, including `datasetCachePlan`, in one object.
    Read `report.runnerRoute.target` to choose launch controls.
 7. Renders `plan.capabilityEvaluation.gates` as preflight rows using each gate's
    `status`, `selectedAnyOf`, `selectedCapabilities`, and missing fields.

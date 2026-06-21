@@ -160,9 +160,9 @@ runtime branches.
   capability-map construction.
 - Platform preflight guarantee: `createAssignmentPreflightReport(profile,
   environment)` returns the run plan, readiness, rubric kind, required
-  capabilities, runner route, and mount plan as one readonly handoff object,
-  and benchmark profile tests assert readiness for the CS336/GPU Puzzles/CS149
-  probe set.
+  capabilities, runner route, mount plan, and dataset cache plan as one readonly
+  handoff object, and benchmark profile tests assert readiness for the
+  CS336/GPU Puzzles/CS149 probe set.
 - Runner-route guarantee: `assignmentRunnerRoute(plan)` maps preflight output
   to `pyodide`, `javascript`, `external`, `unsupported`, or `blocked`, so
   platform launch controls do not duplicate BrowserGrad's rubric/readiness

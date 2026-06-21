@@ -33,7 +33,7 @@ into `createSession({ jsModules })` registrations, and
 `createAssignmentRunPlan()` to hand the platform a complete launch recipe.
 Use `createAssignmentPreflightReport(profile, environment)` when the platform
 needs one readonly object containing the run plan, rubric kind, readiness,
-required capabilities, and mount plan.
+required capabilities, mount plan, and dataset cache plan.
 Use `createAssignmentCapabilityEnvironment()` to build that environment from
 `browserCapabilities`, `simulatedCapabilities`, and `externalCapabilities`
 instead of handcrafting `capabilityModes`. It de-duplicates names, sorts them

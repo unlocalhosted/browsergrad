@@ -39,8 +39,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   simulatedCapabilities, externalCapabilities })` builds a deterministic
   capability environment and mode map for platform preflight.
 - `createAssignmentPreflightReport(profile, environment)` bundles run plan,
-  rubric kind, readiness, required capabilities, and mount plan for platform
-  preflight panels.
+  rubric kind, readiness, required capabilities, mount plan, and dataset cache
+  plan for platform preflight panels.
 - `assignmentRunnerRoute(plan)` maps a run plan to `pyodide`, `javascript`,
   `external`, `unsupported`, or `blocked`, and preflight reports now include
   that route.

@@ -258,8 +258,9 @@ platform branching before calling `runAssignmentRubric()` or
 
 `createAssignmentPreflightReport(profile, environment)` bundles the common
 platform preflight calls into `{ plan, rubricKind, readiness, runnerRoute,
-requiredCapabilities, mountPlan }`. Use it when the UI needs a single readonly
-object before fetching fixtures, mounting files, or launching code.
+requiredCapabilities, mountPlan, datasetCachePlan }`. Use it when the UI needs
+a single readonly object before fetching fixtures, mounting files, or launching
+code.
 Each capability gate evaluation includes `status`, `selectedAnyOf`, and
 `selectedCapabilities`, so platforms can render the chosen route per gate
 without reimplementing BrowserGrad's route selection.

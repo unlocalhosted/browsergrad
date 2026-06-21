@@ -505,6 +505,17 @@ describe("parseAssignmentProfile", () => {
         mountPath: "/assignments/cs336-assignment1/fixtures/datasets/tiny.txt",
       },
     ]);
+    expect(report.datasetCachePlan.datasets).toEqual([
+      {
+        name: "tiny",
+        url: "/fixtures/tiny.txt",
+        hash: "sha256:abc",
+        mountPath: "/assignments/cs336-assignment1/fixtures/datasets/tiny.txt",
+        strategy: "invalid-hash",
+        cacheKey: "url:/fixtures/tiny.txt",
+        cachePath: "datasets/url/%2Ffixtures%2Ftiny.txt",
+      },
+    ]);
     expect(report.plan.ok).toBe(true);
   });
 
