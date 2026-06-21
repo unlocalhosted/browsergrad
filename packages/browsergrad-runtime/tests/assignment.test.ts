@@ -756,4 +756,97 @@ describe("parseAssignmentProfile", () => {
     );
     expect(invoked).toBe(false);
   });
+
+  it("passes browser substrate objects to JavaScript rubrics", async () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      id: "gpu-puzzles",
+      runtime_packages: [],
+      files: {
+        root: "/assignments/gpu-puzzles",
+        rubric_path: "rubric.js",
+      },
+      allowed_tests: ["test_gpu_substrate"],
+      gates: [
+        {
+          name: "webgpu_path",
+          kind: "capability",
+          options: { requires: ["javascript-rubric", "webgpu"] },
+        },
+      ],
+      datasets: [],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const plan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["javascript-rubric", "webgpu"],
+    });
+
+    const run = await runAssignmentJavascriptRubric(
+      plan,
+      {
+        files: {
+          "/assignments/gpu-puzzles/rubric.js": "export async function run() {}",
+        },
+      },
+      async (ctx) => {
+        const webgpu = ctx.substrate<{ adapter: string }>("webgpu");
+        if (webgpu.adapter === "mock-adapter") {
+          ctx.assertPass("test_gpu_substrate");
+        } else {
+          ctx.assertFail("test_gpu_substrate", "wrong substrate");
+        }
+      },
+      {
+        substrates: {
+          webgpu: { adapter: "mock-adapter" },
+        },
+      },
+    );
+
+    expect(run.assertions).toEqual([
+      { kind: "pass", name: "test_gpu_substrate" },
+    ]);
+  });
+
+  it("throws a clear error when a JavaScript rubric requires a missing substrate", async () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      files: {
+        root: "/assignments/gpu-puzzles",
+        rubric_path: "rubric.js",
+      },
+      gates: [
+        {
+          name: "webgpu_path",
+          kind: "capability",
+          options: { requires: ["javascript-rubric", "webgpu"] },
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const plan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["javascript-rubric", "webgpu"],
+    });
+
+    await expect(
+      runAssignmentJavascriptRubric(
+        plan,
+        {
+          files: {
+            "/assignments/gpu-puzzles/rubric.js": "export async function run() {}",
+          },
+          datasets: {
+            tiny: "fixture text",
+          },
+        },
+        (ctx) => {
+          ctx.substrate("webgpu");
+        },
+      ),
+    ).rejects.toThrow("assignment JavaScript substrate is not registered: webgpu");
+  });
 });

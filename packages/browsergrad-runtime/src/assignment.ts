@@ -179,6 +179,7 @@ export interface AssignmentJavascriptRubricContext {
   readonly behavioralGates: readonly AssignmentGateSpec[];
   readText(path: string): string;
   oracle<T = unknown>(name: string): T;
+  substrate<T = unknown>(name: string): T;
   assertPass(name: string, durationMs?: number): void;
   assertFail(
     name: string,
@@ -201,6 +202,7 @@ export type AssignmentJavascriptRubric = (
 
 export interface AssignmentJavascriptRubricRunOptions {
   readonly oracles?: Readonly<Record<string, unknown>>;
+  readonly substrates?: Readonly<Record<string, unknown>>;
 }
 
 export interface AssignmentJavascriptRubricRunResult {
@@ -562,6 +564,13 @@ export async function runAssignmentJavascriptRubric(
         throw new BrowsergradError(`assignment JavaScript oracle is not registered: ${name}`);
       }
       return oracle as T;
+    },
+    substrate<T = unknown>(name: string): T {
+      const substrate = options.substrates?.[name];
+      if (substrate === undefined) {
+        throw new BrowsergradError(`assignment JavaScript substrate is not registered: ${name}`);
+      }
+      return substrate as T;
     },
     assertPass(name, durationMs) {
       assertions.push({

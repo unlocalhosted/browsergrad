@@ -264,7 +264,9 @@ the Pyodide rubric runner.
 the active run plan, prepares an in-memory read-only mount view, exposes
 assignment context, declared oracles, and assertion/artifact helpers to the
 rubric function, then returns `{ mount, assertions, artifacts }`. This is the
-starting point for GPU Puzzles and CS149-style JS/WebGPU rubrics.
+starting point for GPU Puzzles and CS149-style JS/WebGPU rubrics. Pass browser
+resources such as WebGPU adapters/devices through `substrates`, then read them
+inside the rubric with `ctx.substrate("webgpu")`.
 
 ## What this is, and is not
 

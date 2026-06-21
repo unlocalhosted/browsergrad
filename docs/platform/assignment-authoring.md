@@ -45,7 +45,8 @@ BrowserGrad to derive mounts, materialize contents, and execute the rubric as
 one operation.
 Use `runAssignmentJavascriptRubric()` for browser-native JS rubrics that need
 assignment context, mounted text, oracles, and structured assertion/artifact
-helpers without Pyodide.
+helpers without Pyodide. Pass browser resources such as WebGPU adapters/devices
+through `substrates` and read them with `ctx.substrate(name)`.
 
 ## Files And Fixtures
 

@@ -27,6 +27,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `runAssignmentJavascriptRubric(plan, contents, rubric, options)` runs
   browser-native JS rubrics with assignment context, mounted text reads,
   declared oracles, and structured assertion/artifact helpers.
+- JavaScript rubric contexts now expose `ctx.substrate(name)` for browser
+  resources such as WebGPU adapters/devices supplied by the platform.
 
 ## [0.1.1] — 2026-05-25
 

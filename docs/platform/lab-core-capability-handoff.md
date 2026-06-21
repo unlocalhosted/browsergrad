@@ -32,8 +32,9 @@ For every lab profile, the platform should:
    Worker mesh, external/native runner, or future custom compiler.
 10. For Pyodide-backed labs, create the rubric execution request with
    `createAssignmentRubricExecRequest`.
-11. For JavaScript-backed labs, pass the imported rubric function and declared
-    oracle objects to `runAssignmentJavascriptRubric`.
+11. For JavaScript-backed labs, pass the imported rubric function, declared
+    oracle objects, and browser substrates such as WebGPU devices to
+    `runAssignmentJavascriptRubric`.
 12. In Python rubrics, call profile-registered JS oracles with
     `browsergrad.oracle("<module-name>")`.
 13. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
