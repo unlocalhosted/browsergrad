@@ -40,8 +40,35 @@ export interface DeterministicMesh {
     trace(): SimulationEvent[];
     clear(): void;
 }
+export type TaskGraphEventKind = "task-ready" | "task-start" | "task-finish";
+export interface TaskSpec {
+    readonly id: string;
+    readonly duration: number;
+    readonly dependsOn?: readonly string[];
+}
+export interface TaskGraphEvent {
+    time: number;
+    kind: TaskGraphEventKind;
+    taskId: string;
+    worker?: number;
+}
+export interface TaskGraphRunResult {
+    readonly makespan: number;
+    readonly completedTaskIds: string[];
+    readonly events: TaskGraphEvent[];
+}
+export interface TaskGraphSimulatorOptions {
+    readonly workers: number;
+}
+export interface TaskGraphSimulator {
+    readonly workerCount: number;
+    addTask(task: TaskSpec): void;
+    run(): TaskGraphRunResult;
+    clear(): void;
+}
 export declare class SimulatorError extends Error {
     constructor(message: string);
 }
 export declare function createDeterministicMesh(options: DeterministicMeshOptions): DeterministicMesh;
+export declare function createTaskGraphSimulator(options: TaskGraphSimulatorOptions): TaskGraphSimulator;
 //# sourceMappingURL=index.d.ts.map

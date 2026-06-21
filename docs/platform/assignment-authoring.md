@@ -93,9 +93,12 @@ depend on the runtime package.
 Distributed or systems-style JS rubrics can use `createDeterministicMesh()` from
 `@unlocalhosted/browsergrad-simulators` to model worker ranks, barriers,
 broadcasts, point-to-point messages, and `allReduce` results as deterministic
-event traces. Use it for `worker-mesh`, `distributed-simulator`,
-`pthreads-simulator`, or `task-graph-simulator` profile paths when the teaching
-goal is ordering and participation rather than native throughput.
+event traces. Use `createTaskGraphSimulator()` from the same package for
+dependency-constrained task-system traces with deterministic ready/start/finish
+events and worker assignment. These APIs back `worker-mesh`,
+`distributed-simulator`, `pthreads-simulator`, or `task-graph-simulator`
+profile paths when the teaching goal is ordering and participation rather than
+native throughput.
 
 ## Files And Fixtures
 

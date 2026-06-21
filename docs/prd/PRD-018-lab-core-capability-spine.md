@@ -229,6 +229,10 @@ runtime branches.
   browser-safe rank meshes, barriers, broadcasts, point-to-point messages, and
   `allReduce` event traces for DDP/FSDP/task-system teaching slices without
   native threads or MPI.
+- Task-graph guarantee: the same package exports
+  `createTaskGraphSimulator()` so CS149-style task-system rubrics can model
+  dependency readiness, deterministic worker assignment, task start/finish
+  order, and makespan without relying on browser Worker timing.
 - Later implementation slices:
   - Assignment runner plan: packages, mounts, JS oracles, timeout/watchdog, and
     allowed tests.
@@ -237,7 +241,7 @@ runtime branches.
   - Browser kernel lab core: WGSL puzzle runner, CUDA-like educational subset,
     and performance/correctness rubrics.
   - Distributed simulator follow-ons: Worker-backed execution, richer sharding
-    traces, and task scheduling on top of deterministic mesh traces.
+    traces, and richer task scheduling on top of deterministic mesh/task traces.
   - External/native runner bridge: explicit gates for vLLM, flash-attn, CUDA,
     ISPC, OpenMP, and C++ build steps.
 - Benchmark capability families:

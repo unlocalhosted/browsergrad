@@ -10,7 +10,10 @@ process behavior.
 ## Public Surface
 
 ```ts
-import { createDeterministicMesh } from "@unlocalhosted/browsergrad-simulators";
+import {
+  createDeterministicMesh,
+  createTaskGraphSimulator,
+} from "@unlocalhosted/browsergrad-simulators";
 
 const mesh = createDeterministicMesh({ ranks: 4 });
 const reduced = mesh.allReduce({
@@ -21,6 +24,12 @@ const reduced = mesh.allReduce({
 
 console.log(reduced); // [10, 10, 10, 10]
 console.log(mesh.trace());
+
+const tasks = createTaskGraphSimulator({ workers: 2 });
+tasks.addTask({ id: "load", duration: 2 });
+tasks.addTask({ id: "decode", duration: 3 });
+tasks.addTask({ id: "train", duration: 4, dependsOn: ["load", "decode"] });
+console.log(tasks.run().events);
 ```
 
 Use it as a rubric oracle for DDP/FSDP/task-system labs when the learning goal

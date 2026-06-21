@@ -56,7 +56,8 @@ For every lab profile, the platform should:
 14. For simulator-backed systems labs, use
    `@unlocalhosted/browsergrad-simulators` `createDeterministicMesh()` inside
    JS rubrics or platform oracles to produce deterministic rank/collective
-   traces before adding real Worker execution.
+   traces before adding real Worker execution. Use `createTaskGraphSimulator()`
+   for dependency-constrained task scheduling traces.
 15. For external/native labs, call `createAssignmentExternalRunnerRequest(plan)`
    and hand that object to platform-owned native, hosted, or CI runners.
    If using `createAssignmentPreflightReport()`, read
@@ -113,8 +114,9 @@ This table is a living convention, not a runtime enum. Add names when a new
 assignment family needs them, but prefer reusing names across courses.
 The first reusable simulator substrate is
 `@unlocalhosted/browsergrad-simulators`: it provides deterministic mesh event
-traces and simple collectives for labs that choose simulated `worker-mesh` or
-`distributed-simulator` paths.
+traces, simple collectives, and task-graph ready/start/finish traces for labs
+that choose simulated `worker-mesh`, `distributed-simulator`, or
+`task-graph-simulator` paths.
 
 ## Readiness Modes
 
@@ -204,7 +206,7 @@ CS336 Assignment 5 and CS149GPT, proving their profile drafts can produce
 | CS336 A4 Data | Small Common Crawl fixtures + data-quality rubrics | `dataset-fixture`, `large-file-streaming`, `classifier-oracle`, `pii-oracle` |
 | CS336 A5 Alignment | GRPO/DPO math snapshot labs | `torch-compat`, `transformers-compatible`, `snapshot-oracle`, `rl-loss-oracle` |
 | GPU Puzzles | WGSL puzzle runner | `webgpu`, `wgsl-kernel`, `kernel-visualizer` |
-| CS149 A1/A2 | Thread/SIMD/task-system simulator with deterministic event traces | `pthreads-simulator`, `simd-simulator`, `distributed-simulator` |
+| CS149 A1/A2 | Thread/SIMD/task-system simulator with deterministic task traces | `pthreads-simulator`, `simd-simulator`, `distributed-simulator` |
 | CS149 A3 | CUDA scan/SAXPY/render concepts | `webgpu`, `cuda-compatible-subset`, `performance-rubric` |
 | CS149GPT | CPU attention optimization oracle | `native-cpp-external`, `attention-oracle`, `simd-simulator` |
 
@@ -272,7 +274,7 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     `@unlocalhosted/browsergrad-kernels` `createBrowsergradKernelRubric(ctx)` to
     compare WGSL outputs against CPU references and emit BrowserGrad assertions.
     Simulator-backed labs can use `@unlocalhosted/browsergrad-simulators`
-    `createDeterministicMesh()` for event-trace rubrics before real Worker
-    execution exists.
+    `createDeterministicMesh()` or `createTaskGraphSimulator()` for event-trace
+    rubrics before real Worker execution exists.
 17. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.
