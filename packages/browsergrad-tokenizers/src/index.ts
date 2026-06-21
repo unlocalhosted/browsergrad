@@ -32,6 +32,16 @@ export interface TokenizerOracle {
   decodeByteBpe(ids: readonly number[], model: ByteBpeModel): string;
 }
 
+export interface Cs336TokenizerOracleModule {
+  train_cs336_bpe(
+    input: string,
+    vocabSize: number,
+    specialTokens?: readonly string[],
+  ): SerializedByteBpeModel;
+  encode_cs336(text: string, model: SerializedByteBpeModel): number[];
+  decode_cs336(ids: readonly number[], model: SerializedByteBpeModel): string;
+}
+
 export interface StreamingGateOptions {
   readonly maxChunksBeforeFirstYield: number;
   readonly chunkCount: number;
@@ -225,6 +235,25 @@ export function createCs336TokenizerOracle(): TokenizerOracle {
     decodeByteBpe,
   };
 }
+
+export function createCs336TokenizerOracleModule(): Cs336TokenizerOracleModule {
+  return {
+    train_cs336_bpe: (input, vocabSize, specialTokens) =>
+      serializeByteBpeModel(
+        trainByteBpe(input, {
+          vocabSize,
+          specialTokens: specialTokens ?? CS336_DEFAULT_SPECIAL_TOKENS,
+          pretokenizerPattern: CS336_PRETOKENIZER_PATTERN,
+        }),
+      ),
+    encode_cs336: (text, model) =>
+      encodeByteBpe(text, deserializeByteBpeModel(model)),
+    decode_cs336: (ids, model) =>
+      decodeByteBpe(ids, deserializeByteBpeModel(model)),
+  };
+}
+
+export const cs336TokenizerOracleModule = createCs336TokenizerOracleModule();
 
 export function createStreamingGate(
   options: StreamingGateOptions,

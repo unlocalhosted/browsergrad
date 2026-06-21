@@ -48,6 +48,8 @@ profile record, not root agent behavior.
 
 - Start from `docs/internal/cs336-assignment1.profile.json`.
 - Use `@unlocalhosted/browsergrad-tokenizers` as the TS source of truth.
+  Export `cs336TokenizerOracleModule` or an equivalent wrapper as the profile's
+  registered oracle object.
 - Register a small JS oracle module into Pyodide for Python rubrics.
 - Mount assignment files under `/assignments/cs336-assignment1/`.
 - Load only browser-available Pyodide packages in the profile.

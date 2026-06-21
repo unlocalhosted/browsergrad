@@ -4,7 +4,9 @@ import {
   CS336_DEFAULT_SPECIAL_TOKENS,
   CS336_PRETOKENIZER_PATTERN,
   createCs336TokenizerOracle,
+  createCs336TokenizerOracleModule,
   createStreamingGate,
+  cs336TokenizerOracleModule,
   decodeByteBpe,
   deserializeByteBpeModel,
   encodeByteBpe,
@@ -27,5 +29,7 @@ describe("public surface", () => {
     expect(typeof deserializeByteBpeModel).toBe("function");
     expect(typeof createStreamingGate).toBe("function");
     expect(typeof createCs336TokenizerOracle().trainByteBpe).toBe("function");
+    expect(typeof createCs336TokenizerOracleModule().train_cs336_bpe).toBe("function");
+    expect(typeof cs336TokenizerOracleModule.encode_cs336).toBe("function");
   });
 });

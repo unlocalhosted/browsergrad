@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createCs336TokenizerOracle,
+  createCs336TokenizerOracleModule,
   decodeByteBpe,
   deserializeByteBpeModel,
   encodeByteBpe,
@@ -49,5 +50,14 @@ describe("encodeByteBpe and decodeByteBpe", () => {
 
     expect(model.specialTokens).toEqual(["<|endoftext|>"]);
     expect(model.merges).toEqual([]);
+  });
+
+  it("CS336 oracle module returns JSON-friendly serialized models", () => {
+    const module = createCs336TokenizerOracleModule();
+    const model = module.train_cs336_bpe("low lower <|endoftext|> widest", 270);
+    const text = "lower <|endoftext|> widest";
+
+    expect(model.specialTokens).toEqual(["<|endoftext|>"]);
+    expect(module.decode_cs336(module.encode_cs336(text, model), model)).toBe(text);
   });
 });
