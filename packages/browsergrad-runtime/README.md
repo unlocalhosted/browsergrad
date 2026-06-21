@@ -262,8 +262,9 @@ platform branching before calling `runAssignmentRubric()` or
 `runAssignmentJavascriptRubric()`.
 For `external` routes, `createAssignmentExternalRunnerRequest(plan)` returns the
 native/hosted runner handoff: selected external capabilities, resolved files,
-timeouts, behavioral gates, mount plan, and dataset cache plan. BrowserGrad does
-not execute native code; the platform owns that runner.
+timeouts, behavioral gates, mount plan, and dataset cache plan. Preflight
+reports include this as `externalRunnerRequest` when applicable. BrowserGrad
+does not execute native code; the platform owns that runner.
 
 `createAssignmentPreflightReport(profile, environment)` bundles the common
 platform preflight calls into `{ plan, rubricKind, readiness, runnerRoute,

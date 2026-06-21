@@ -52,6 +52,8 @@ For every lab profile, the platform should:
    Worker mesh, external/native runner, or future custom compiler.
 13. For external/native labs, call `createAssignmentExternalRunnerRequest(plan)`
    and hand that object to platform-owned native, hosted, or CI runners.
+   If using `createAssignmentPreflightReport()`, read
+   `report.externalRunnerRequest` for external routes.
 14. For Pyodide-backed labs, create the rubric execution request with
    `createAssignmentRubricExecRequest`.
    The request uses the shorter runtime watchdog from `test_ms` and `worker_ms`;

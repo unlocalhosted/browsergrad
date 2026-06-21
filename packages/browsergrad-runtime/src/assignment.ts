@@ -144,6 +144,7 @@ export interface AssignmentPreflightReport {
   readonly requiredCapabilities: readonly string[];
   readonly mountPlan: AssignmentMountPlan;
   readonly datasetCachePlan: AssignmentDatasetCachePlan;
+  readonly externalRunnerRequest?: AssignmentExternalRunnerRequest;
 }
 
 export interface AssignmentRunPlan {
@@ -570,15 +571,19 @@ export function createAssignmentPreflightReport(
   const plan = createAssignmentRunPlan(profile, environment);
   const rubricKind = assignmentRubricKind(plan);
   const readiness = assignmentRunReadiness(plan);
+  const runnerRoute = assignmentRunnerRoute(plan);
   const mountPlan = createAssignmentMountPlan(plan);
   return {
     plan,
     rubricKind,
     readiness,
-    runnerRoute: assignmentRunnerRoute(plan),
+    runnerRoute,
     requiredCapabilities: requiredAssignmentCapabilities(profile),
     mountPlan,
     datasetCachePlan: createAssignmentDatasetCachePlan(mountPlan),
+    ...(runnerRoute.target === "external"
+      ? { externalRunnerRequest: createAssignmentExternalRunnerRequest(plan) }
+      : {}),
   };
 }
 

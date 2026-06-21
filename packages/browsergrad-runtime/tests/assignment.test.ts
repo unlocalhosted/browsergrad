@@ -765,6 +765,37 @@ describe("parseAssignmentProfile", () => {
     });
   });
 
+  it("includes an external runner request in external preflight reports", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "native_cuda_path",
+          kind: "capability",
+          options: { requires: ["native-cuda-external"] },
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const report = createAssignmentPreflightReport(
+      result.profile,
+      createAssignmentCapabilityEnvironment({
+        externalCapabilities: ["native-cuda-external"],
+      }),
+    );
+
+    expect(report.runnerRoute.target).toBe("external");
+    expect(report.externalRunnerRequest?.externalCapabilities).toEqual([
+      "native-cuda-external",
+    ]);
+    expect(report.externalRunnerRequest?.mountPlan).toEqual(report.mountPlan);
+    expect(report.externalRunnerRequest?.datasetCachePlan).toEqual(
+      report.datasetCachePlan,
+    );
+  });
+
   it("creates a rubric exec request from a run plan", () => {
     const result = parseAssignmentProfile(VALID_PROFILE);
     expect(result.ok).toBe(true);

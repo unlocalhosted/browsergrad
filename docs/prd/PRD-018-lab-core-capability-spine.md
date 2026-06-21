@@ -170,7 +170,8 @@ runtime branches.
 - External-runner guarantee: `createAssignmentExternalRunnerRequest(plan)`
   packages external-only plans into a deterministic native/hosted runner
   handoff with selected capabilities, resolved files, timeouts, mount/cache
-  metadata, and behavioral gates.
+  metadata, and behavioral gates; external preflight reports include this
+  request directly.
 - Gate-route guarantee: each capability gate evaluation exposes `status`,
   `selectedAnyOf`, and `selectedCapabilities`, so platform preflight rows can
   show the exact browser/simulated/external path selected by BrowserGrad.

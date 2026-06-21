@@ -48,6 +48,8 @@ Use `assignmentRunnerRoute(plan)` when the platform wants one branch key:
 When that branch is `external`, use `createAssignmentExternalRunnerRequest(plan)`
 to hand native/hosted infrastructure a stable object containing selected
 external capabilities, timeouts, mount/cache metadata, and behavioral gates.
+`createAssignmentPreflightReport()` also includes `externalRunnerRequest` when
+the active route is external.
 Use `createAssignmentMountPlan()` to derive the files and dataset fixtures that
 must exist in the runtime filesystem.
 Use `createAssignmentDatasetCachePlan(mountPlan)` before fetch/cache work so
