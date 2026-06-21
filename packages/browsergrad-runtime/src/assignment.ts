@@ -345,6 +345,14 @@ export function createAssignmentRunPlan(
 export function createAssignmentRubricExecRequest(
   plan: AssignmentRunPlan,
 ): AssignmentRubricExecRequest {
+  if (!plan.ok) {
+    const missing = plan.capabilityEvaluation.missingCapabilities.join(", ");
+    const reason = missing.length > 0
+      ? `missing assignment capabilities: ${missing}`
+      : "assignment capability preflight failed";
+    throw new BrowsergradError(`cannot create rubric exec request; ${reason}`);
+  }
+
   if (!plan.files.rubricPath.endsWith(".py")) {
     throw new BrowsergradError(
       "createAssignmentRubricExecRequest requires a Python rubric path",

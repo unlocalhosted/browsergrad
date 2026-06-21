@@ -181,6 +181,10 @@ const preflight = evaluateAssignmentCapabilities(parsed.profile, {
 const plan = createAssignmentRunPlan(parsed.profile, {
   capabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
 });
+if (!plan.ok) {
+  throw new Error(`Missing capabilities: ${plan.capabilityEvaluation.missingCapabilities.join(", ")}`);
+}
+
 const mounts = createAssignmentMountPlan(plan);
 const execRequest = createAssignmentRubricExecRequest(plan);
 
@@ -222,7 +226,8 @@ contents are keyed by dataset name.
 `createAssignmentRubricExecRequest()` turns that plan into the minimal
 `Session.exec` request for rubric execution. It sets assignment metadata in
 environment variables, puts the assignment root on `sys.path`, runs the resolved
-rubric path, and uses the profile's test timeout.
+rubric path, and uses the profile's test timeout. It refuses plans whose
+capability preflight failed so unavailable labs do not accidentally launch.
 
 ## What this is, and is not
 

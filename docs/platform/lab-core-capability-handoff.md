@@ -20,11 +20,11 @@ For every lab profile, the platform should:
 1. Parse the assignment profile with `parseAssignmentProfile`.
 2. Convert oracle specs with `profileOracleJsModules`.
 3. Build a substrate-neutral run plan with `createAssignmentRunPlan`.
-4. Build a file/dataset mount plan with `createAssignmentMountPlan`.
-5. Materialize provided file and dataset contents with
+4. Evaluate capability readiness before launching the lab.
+5. Show missing capability gates as preflight status, not as runtime crashes.
+6. Build a file/dataset mount plan with `createAssignmentMountPlan`.
+7. Materialize provided file and dataset contents with
    `materializeAssignmentMountPlan`.
-6. Evaluate capability readiness before launching the lab.
-7. Show missing capability gates as preflight status, not as runtime crashes.
 8. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
    Worker mesh, external/native runner, or future custom compiler.
 9. For Pyodide-backed labs, create the rubric execution request with
@@ -123,10 +123,10 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
 
 1. Reads an assignment profile.
 2. Builds a BrowserGrad run plan.
-3. Builds the BrowserGrad mount plan.
-4. Fetches or provides assignment file/dataset contents, then materializes them
+3. Calls BrowserGrad capability evaluation from the run plan.
+4. Builds the BrowserGrad mount plan for runnable or inspectable labs.
+5. Fetches or provides assignment file/dataset contents, then materializes them
    into `Session.fs`.
-5. Calls BrowserGrad capability evaluation from the run plan.
 6. Shows packages, oracle modules, file mounts, and satisfied/missing capability
    groups.
 7. For runnable Pyodide labs, uses `createAssignmentRubricExecRequest` to launch

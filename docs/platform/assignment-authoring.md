@@ -36,7 +36,8 @@ must exist in the runtime filesystem.
 Use `materializeAssignmentMountPlan()` to write provided file and dataset
 contents into `Session.fs`.
 Use `createAssignmentRubricExecRequest()` when the platform is ready to run the
-profile's rubric through `Session.exec`.
+profile's rubric through `Session.exec`. It refuses run plans whose capability
+preflight failed.
 
 ## Files And Fixtures
 
@@ -86,6 +87,8 @@ implementation detail.
 Capability gates should make upstream-native requirements explicit. For
 example, a CUDA/Triton test can be declared as a capability gate and replaced by
 a WebGPU oracle or skipped with a clear browser-edition reason.
+Evaluate these gates before fetching large fixtures or creating rubric exec
+requests.
 
 Capability gate options use:
 

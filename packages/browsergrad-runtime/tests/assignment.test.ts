@@ -313,6 +313,29 @@ describe("parseAssignmentProfile", () => {
     );
   });
 
+  it("rejects rubric exec requests when capability preflight failed", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "kernel_path",
+          kind: "capability",
+          options: { requires: ["pyodide", "webgpu"] },
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const plan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["pyodide"],
+    });
+
+    expect(() => createAssignmentRubricExecRequest(plan)).toThrow(
+      "cannot create rubric exec request; missing assignment capabilities: webgpu",
+    );
+  });
+
   it("creates a deterministic mount plan from a run plan", () => {
     const result = parseAssignmentProfile(VALID_PROFILE);
     expect(result.ok).toBe(true);
