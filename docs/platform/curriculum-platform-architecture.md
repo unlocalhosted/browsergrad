@@ -51,6 +51,9 @@ structured place to do the work.
   context.
 - Use `profileOracleJsModules()` and `createSession({ jsModules })` for
   browser-safe reference helpers.
+- Use profile capability gates for upstream requirements such as CUDA, Triton,
+  process groups, browser APIs, or Worker meshes that may be skipped or replaced
+  in the browser edition.
 - Use worker `timeoutMs`, streaming gates, fixture checks, and deterministic
   oracles for grading.
 - Keep future course families independent: CS336, fast.ai, MIT, CMU, Berkeley,

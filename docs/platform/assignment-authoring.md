@@ -17,8 +17,9 @@ An assignment profile should name:
 - `files`: starter, rubric, reference, and fixture mount paths.
 - `timeouts`: wall-clock limits for setup, tests, and long-running student code.
 - `oracles`: JS or Python reference helpers available to rubrics.
-- `gates`: browser-safe behavioral checks such as streaming, timeout, and
-  forbidden eager APIs.
+- `gates`: browser-safe behavioral checks and capability declarations such as
+  streaming, timeout, forbidden eager APIs, CUDA/Triton requirements, or
+  Worker-mesh requirements.
 
 Profiles should not encode course-specific assumptions in `runtime`, `grad`,
 `jit`, or `kernels`. If a behavior is broadly reusable, expose it as a small
@@ -66,6 +67,10 @@ Resource tests should verify behavior rather than emulate Linux:
 
 Failure messages should describe the assignment contract, not the browser
 implementation detail.
+
+Capability gates should make upstream-native requirements explicit. For
+example, a CUDA/Triton test can be declared as a capability gate and replaced by
+a WebGPU oracle or skipped with a clear browser-edition reason.
 
 ## New Assignment Checklist
 

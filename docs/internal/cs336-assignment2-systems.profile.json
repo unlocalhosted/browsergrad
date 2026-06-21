@@ -1,0 +1,95 @@
+{
+  "id": "cs336-assignment2-systems",
+  "version": "0.1.0",
+  "requires_browsergrad": "^0.1.0",
+  "metadata": {
+    "title": "Stanford CS336 Assignment 2: Systems",
+    "course": "Stanford CS336: Language Modeling from Scratch",
+    "source_url": "https://github.com/stanford-cs336/assignment2-systems",
+    "lecture_urls": [],
+    "tags": [
+      "language-modeling",
+      "systems",
+      "flash-attention",
+      "distributed-training",
+      "fsdp",
+      "sharded-optimizer"
+    ]
+  },
+  "runtime_packages": ["numpy", "regex", "pytest", "einops"],
+  "files": {
+    "root": "/assignments/cs336-assignment2-systems",
+    "rubric_path": "rubric.py",
+    "starter_path": "cs336_systems",
+    "reference_path": "reference.py",
+    "fixtures_path": "fixtures"
+  },
+  "timeouts": {
+    "setup_ms": 15000,
+    "test_ms": 45000,
+    "worker_ms": 90000
+  },
+  "allowed_tests": [
+    "test_flash_forward_pass_pytorch",
+    "test_flash_backward_pytorch",
+    "test_ddp_single_worker_simulator",
+    "test_sharded_optimizer_single_worker_simulator",
+    "test_fsdp_single_worker_simulator"
+  ],
+  "oracles": [
+    {
+      "name": "_bg_attention_oracles",
+      "js_module": "/assignments/cs336-assignment2-systems/oracles/attention.js",
+      "export_name": "oracle"
+    },
+    {
+      "name": "_bg_distributed_oracles",
+      "js_module": "/assignments/cs336-assignment2-systems/oracles/distributed.js",
+      "export_name": "oracle"
+    }
+  ],
+  "gates": [
+    {
+      "name": "browser_pyodide_runtime",
+      "kind": "capability",
+      "options": {
+        "requires": ["pyodide", "structured-assertions", "js-oracles"]
+      }
+    },
+    {
+      "name": "triton_cuda_native_only",
+      "kind": "capability",
+      "options": {
+        "requires": ["cuda", "triton"],
+        "browser_action": "skip-or-replace-with-webgpu-oracle"
+      }
+    },
+    {
+      "name": "distributed_process_group_native_only",
+      "kind": "capability",
+      "options": {
+        "requires": ["multiprocessing", "torch.distributed", "gloo"],
+        "browser_action": "replace-with-worker-mesh-or-single-worker-simulator"
+      }
+    },
+    {
+      "name": "student_code_timeout",
+      "kind": "timeout",
+      "options": {
+        "timeout_ms": 45000
+      }
+    }
+  ],
+  "datasets": [
+    {
+      "name": "ddp-test-data",
+      "url": "/assignments/cs336-assignment2-systems/fixtures/ddp_test_data.pt",
+      "hash": "sha256:replace-with-fixture-hash"
+    },
+    {
+      "name": "ddp-test-labels",
+      "url": "/assignments/cs336-assignment2-systems/fixtures/ddp_test_labels.pt",
+      "hash": "sha256:replace-with-fixture-hash"
+    }
+  ]
+}

@@ -38,6 +38,11 @@ const VALID_PROFILE = {
   ],
   gates: [
     {
+      name: "browser_runtime",
+      kind: "capability",
+      options: { requires: ["pyodide"] },
+    },
+    {
       name: "encode_iterable_streaming",
       kind: "streaming",
       options: { max_chunks_before_first_yield: 2 },
@@ -58,7 +63,8 @@ describe("parseAssignmentProfile", () => {
         "https://www.youtube.com/watch?v=example",
       ]);
       expect(result.profile.runtime_packages).toEqual(["numpy", "regex", "pytest"]);
-      expect(result.profile.gates[0]?.kind).toBe("streaming");
+      expect(result.profile.gates[0]?.kind).toBe("capability");
+      expect(result.profile.gates[1]?.kind).toBe("streaming");
     }
   });
 

@@ -43,6 +43,7 @@ export interface AssignmentOracleSpec {
 }
 
 export type AssignmentGateKind =
+  | "capability"
   | "streaming"
   | "timeout"
   | "forbidden-read";
@@ -67,6 +68,7 @@ const SEMVER_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 const SEMVER_RANGE_RE = /^[\^~]?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
 const ID_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const GATE_KINDS = new Set<AssignmentGateKind>([
+  "capability",
   "streaming",
   "timeout",
   "forbidden-read",
@@ -326,7 +328,7 @@ function readGates(
     const name = readString(obj, "name", errors);
     const kindValue = obj.kind;
     if (typeof kindValue !== "string" || !GATE_KINDS.has(kindValue as AssignmentGateKind)) {
-      errors.push(`gates[${i}].kind: must be one of streaming, timeout, forbidden-read`);
+      errors.push(`gates[${i}].kind: must be one of capability, streaming, timeout, forbidden-read`);
       continue;
     }
     const options = obj.options;
