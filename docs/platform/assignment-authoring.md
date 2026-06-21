@@ -106,10 +106,12 @@ as losses, logits, masks, event traces, dedupe decisions, or alignment math
 fixtures; it reports deterministic mismatch paths and numeric tolerances
 without native `.npz` or PyTorch dependencies.
 Data-cleaning rubrics can use `@unlocalhosted/browsergrad-data` for
-`pii-oracle` and `dedupe-oracle` fixture checks. Its first helpers cover
-`maskPii()`, `exactLineDeduplicate()`, and `extractVisibleTextFromHtml()` so
-CS336 A4-style tests can validate browser-safe behavior before WARC readers,
-fastText, transformers, or full Common Crawl data enter the loop.
+`pii-oracle`, `dedupe-oracle`, `near-dedupe-oracle`, and `quality-rule-oracle`
+fixture checks. Its helpers cover `maskPii()`, `exactLineDeduplicate()`,
+`minhashDeduplicateDocuments()`, `evaluateGopherQuality()`,
+`gopherQualityFilter()`, and `extractVisibleTextFromHtml()` so CS336 A4-style
+tests can validate browser-safe behavior before WARC readers, fastText,
+transformers, or full Common Crawl data enter the loop.
 Scaling-law and hosted API rubrics can use
 `@unlocalhosted/browsergrad-scaling` for `hosted-api-mock`,
 `scheduler-simulator`, and `scaling-law-oracle` fixture checks. Its helpers

@@ -239,9 +239,11 @@ runtime branches.
   numeric tolerance, and non-finite checks before reaching for PyTorch, `.npz`,
   or GPU-only model runtimes.
 - Data-oracle guarantee: `@unlocalhosted/browsergrad-data` exports
-  `maskPii()`, `exactLineDeduplicate()`, and `extractVisibleTextFromHtml()` so
-  CS336 A4-style Common Crawl/data-cleaning rubrics can run fixture-scale PII,
-  dedupe, and HTML extraction checks in browser-safe JS before WARC readers,
+  `maskPii()`, `exactLineDeduplicate()`, `minhashDeduplicateDocuments()`,
+  `evaluateGopherQuality()`, `gopherQualityFilter()`, and
+  `extractVisibleTextFromHtml()` so CS336 A4-style Common Crawl/data-cleaning
+  rubrics can run fixture-scale PII, exact/near dedupe, rule-based quality, and
+  HTML extraction checks in browser-safe JS before WARC readers,
   fastText/transformers classifiers, or full dataset training runs.
 - Scaling-oracle guarantee: `@unlocalhosted/browsergrad-scaling` exports
   `createHostedScalingApiMock()`, `selectExperimentsForDispatch()`, and
@@ -266,7 +268,8 @@ runtime branches.
     `scaling-law-oracle`, `jax-external`, `postgres-external`,
     `scheduler-simulator`.
   - CS336 A4: `dataset-fixture`, `large-file-streaming`, `warc-reader`,
-    `classifier-oracle`, `dedupe-oracle`, `pii-oracle`, `network-gated`.
+    `classifier-oracle`, `dedupe-oracle`, `near-dedupe-oracle`,
+    `quality-rule-oracle`, `pii-oracle`, `network-gated`.
   - CS336 A5: `torch-compat`, `transformers-compatible`, `snapshot-oracle`,
     `tokenizer-oracle`, `rl-loss-oracle`, `vllm-external`, `flash-attn-external`.
   - GPU Puzzles / CS149 A3: `webgpu`, `wgsl-kernel`, `cuda-compatible-subset`,

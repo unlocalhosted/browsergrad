@@ -22,7 +22,11 @@ root agent behavior.
 - Register a JS oracle module from `@unlocalhosted/browsergrad-data` for:
   - `extractVisibleTextFromHtml()` for HTML fixture text extraction.
   - `exactLineDeduplicate()` for exact line dedupe checks.
+  - `minhashDeduplicateDocuments()` for fixture-scale exact/fuzzy document
+    dedupe checks.
   - `maskPii()` for email, phone, and IP masking checks.
+  - `evaluateGopherQuality()` / `gopherQualityFilter()` for deterministic
+    Gopher-style quality rules.
 - Use `@unlocalhosted/browsergrad-snapshots` when expected data-cleaning output
   is easiest to store as JSON.
 
@@ -37,17 +41,19 @@ root agent behavior.
 
 - Fetch/cache tiny fixtures, then call
   `createVerifiedAssignmentBenchmarkPreflightMatrix()` before mounting.
-- Route `pii-oracle` and `dedupe-oracle` to `@unlocalhosted/browsergrad-data`.
+- Route `pii-oracle`, `dedupe-oracle`, `near-dedupe-oracle`, and
+  `quality-rule-oracle` to `@unlocalhosted/browsergrad-data`.
 - Route `classifier-oracle` to a later deterministic fixture classifier or to
   explicit external classifier capabilities.
 - Render failures as data-specific rubric messages, for example:
   - `email was not masked`
   - `duplicate line survived`
+  - `near duplicate document survived`
+  - `Gopher quality rule failed`
   - `script/style text leaked from HTML extraction`
   - `student consumed corpus eagerly`
 
 ## Later Slices
 
 - Add fixture classifier oracle for language/quality/toxicity labels.
-- Add MinHash/LSH fixture helper for near-duplicate tests.
 - Add WARC/WET fixture parser only after exact fixture tests stabilize.

@@ -48,8 +48,16 @@
       "name": "browser_data_fixture_slice",
       "kind": "capability",
       "options": {
-        "requires": ["pyodide", "dataset-fixture", "large-file-streaming", "dedupe-oracle", "pii-oracle"],
-        "message": "CS336 A4 browser labs should use small checked-in data fixtures and behavior gates for streaming."
+        "requires": [
+          "pyodide",
+          "dataset-fixture",
+          "large-file-streaming",
+          "dedupe-oracle",
+          "near-dedupe-oracle",
+          "pii-oracle",
+          "quality-rule-oracle"
+        ],
+        "message": "CS336 A4 browser labs should use small checked-in data fixtures, data oracles, and behavior gates for streaming."
       }
     },
     {

@@ -10,4 +10,5 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 
 - Initial browser-safe data helpers for PII masking, exact line deduplication,
-  and HTML text extraction.
+  near-duplicate document deduplication, Gopher-style quality rules, and HTML
+  text extraction.

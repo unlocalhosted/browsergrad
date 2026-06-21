@@ -48,7 +48,7 @@ npm install @unlocalhosted/browsergrad-grad           # optional: eager-autograd
 npm install @unlocalhosted/browsergrad-tokenizers     # optional: browser-safe tokenizer/BPE oracles
 npm install @unlocalhosted/browsergrad-simulators     # optional: deterministic systems-lab simulators
 npm install @unlocalhosted/browsergrad-snapshots      # optional: JSON/numeric snapshot oracles
-npm install @unlocalhosted/browsergrad-data           # optional: data-lab PII/dedupe/HTML helpers
+npm install @unlocalhosted/browsergrad-data           # optional: data-lab PII/dedupe/quality/HTML helpers
 npm install @unlocalhosted/browsergrad-scaling        # optional: scaling-law + hosted API oracles
 ```
 
@@ -123,7 +123,7 @@ out = bg.realize_webgpu(x @ w + b)   # tiled GEMM, fused elementwise, custom WGS
 | [`browsergrad-tokenizers`](./packages/browsergrad-tokenizers) | Pure TypeScript tokenizer/BPE reference helpers and streaming gates for browser-safe platform rubrics. |
 | [`browsergrad-simulators`](./packages/browsergrad-simulators) | Deterministic browser-safe simulators for worker-mesh, collective, and systems-lab event traces. |
 | [`browsergrad-snapshots`](./packages/browsergrad-snapshots) | Browser-safe JSON/numeric snapshot comparison oracles for fixture-backed rubrics. |
-| [`browsergrad-data`](./packages/browsergrad-data) | Browser-safe data-lab helpers for fixture HTML extraction, exact line dedupe, and PII masking. |
+| [`browsergrad-data`](./packages/browsergrad-data) | Browser-safe data-lab helpers for fixture HTML extraction, exact/near dedupe, Gopher quality rules, and PII masking. |
 | [`browsergrad-scaling`](./packages/browsergrad-scaling) | Browser-safe CS336 A3-style hosted API mock, scheduler selector, and scaling-law fitter. |
 
 Each package is independently consumable; they share an npm scope but no runtime dependency. Take one or all.
