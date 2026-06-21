@@ -184,6 +184,21 @@ export interface AssignmentRubricExecRequest {
   readonly timeoutMs?: number;
 }
 
+export interface AssignmentExternalRunnerRequest {
+  readonly id: string;
+  readonly profileVersion: string;
+  readonly requiresBrowsergrad: string;
+  readonly route: AssignmentRunnerRoute;
+  readonly selectedCapabilities: readonly string[];
+  readonly externalCapabilities: readonly string[];
+  readonly simulatedCapabilities: readonly string[];
+  readonly files: AssignmentRunPlanFiles;
+  readonly execution: AssignmentRunPlanExecution;
+  readonly mountPlan: AssignmentMountPlan;
+  readonly datasetCachePlan: AssignmentDatasetCachePlan;
+  readonly behavioralGates: readonly AssignmentGateSpec[];
+}
+
 export interface AssignmentMountPlan {
   readonly root: string;
   readonly files: readonly AssignmentMountFile[];
@@ -711,6 +726,33 @@ export function createAssignmentRubricExecRequest(
   return {
     code: lines.join("\n"),
     ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+  };
+}
+
+export function createAssignmentExternalRunnerRequest(
+  plan: AssignmentRunPlan,
+): AssignmentExternalRunnerRequest {
+  const route = assignmentRunnerRoute(plan);
+  if (route.target !== "external") {
+    throw new BrowsergradError(
+      `createAssignmentExternalRunnerRequest requires an external runner plan; got ${route.target}`,
+    );
+  }
+  const readiness = assignmentRunReadiness(plan);
+  const mountPlan = createAssignmentMountPlan(plan);
+  return {
+    id: plan.id,
+    profileVersion: plan.profileVersion,
+    requiresBrowsergrad: plan.requiresBrowsergrad,
+    route,
+    selectedCapabilities: readiness.selectedCapabilities,
+    externalCapabilities: readiness.externalCapabilities,
+    simulatedCapabilities: readiness.simulatedCapabilities,
+    files: plan.files,
+    execution: plan.execution,
+    mountPlan,
+    datasetCachePlan: createAssignmentDatasetCachePlan(mountPlan),
+    behavioralGates: plan.behavioralGates,
   };
 }
 

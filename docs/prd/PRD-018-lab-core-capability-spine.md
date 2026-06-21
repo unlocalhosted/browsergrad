@@ -167,6 +167,10 @@ runtime branches.
   to `pyodide`, `javascript`, `external`, `unsupported`, or `blocked`, so
   platform launch controls do not duplicate BrowserGrad's rubric/readiness
   branching.
+- External-runner guarantee: `createAssignmentExternalRunnerRequest(plan)`
+  packages external-only plans into a deterministic native/hosted runner
+  handoff with selected capabilities, resolved files, timeouts, mount/cache
+  metadata, and behavioral gates.
 - Gate-route guarantee: each capability gate evaluation exposes `status`,
   `selectedAnyOf`, and `selectedCapabilities`, so platform preflight rows can
   show the exact browser/simulated/external path selected by BrowserGrad.

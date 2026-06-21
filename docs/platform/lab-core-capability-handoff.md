@@ -50,27 +50,29 @@ For every lab profile, the platform should:
    worker bytes against cache, hash, or snapshot metadata.
 12. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
    Worker mesh, external/native runner, or future custom compiler.
-13. For Pyodide-backed labs, create the rubric execution request with
+13. For external/native labs, call `createAssignmentExternalRunnerRequest(plan)`
+   and hand that object to platform-owned native, hosted, or CI runners.
+14. For Pyodide-backed labs, create the rubric execution request with
    `createAssignmentRubricExecRequest`.
    The request uses the shorter runtime watchdog from `test_ms` and `worker_ms`;
    keep `setup_ms` for package preload/cache UI.
-14. For JavaScript-backed labs, pass the imported rubric function, declared
+15. For JavaScript-backed labs, pass the imported rubric function, declared
     oracle objects, and browser substrates such as WebGPU devices to
     `runAssignmentJavascriptRubric`.
     JS/TS streaming checks can import `createStreamingGate` and use
     `gate.wrapInput` plus `gate.wrapOutput`.
-15. In Python rubrics, call profile-registered JS oracles with
+16. In Python rubrics, call profile-registered JS oracles with
     `browsergrad.oracle("<module-name>")`.
-16. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
+17. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
     context with `browsergrad.assignment_context()`.
-17. In Python rubrics, enforce streaming gates with
+18. In Python rubrics, enforce streaming gates with
     `browsergrad.streaming_gate(name, iterable)` plus
     `gate.wrap_output(student_output)` so eager consumers fail before launchers
     need Linux RSS behavior.
-18. In Python rubrics, enforce forbidden-read gates with
+19. In Python rubrics, enforce forbidden-read gates with
     `browsergrad.forbidden_read_gate(name, text)` so eager `read()` or
     `readlines()` calls fail while incremental line reads still work.
-19. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
+20. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
     implementation slice.
 
 ## Capability Vocabulary
@@ -221,16 +223,19 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
    into `Session.fs`.
 12. Shows packages, oracle modules, rubric kind, file mounts, and
    satisfied/missing capability groups.
-13. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
+13. For external-only labs, calls `createAssignmentExternalRunnerRequest(plan)`
+   and queues platform-owned native/hosted execution with the returned files,
+   timeouts, selected external capabilities, mount plan, and dataset cache plan.
+14. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
    launch the rubric through `Session.exec`, or uses
    `createAssignmentRubricExecRequest` when the platform needs manual staging.
    Binary fixtures can be verified after staging with `Session.fs.readBytes`.
    Dataset hashes should be verified before staging with
    `verifyAssignmentMountContentHashes`.
-14. For runnable JavaScript labs, imports the rubric module and calls
+15. For runnable JavaScript labs, imports the rubric module and calls
    `runAssignmentJavascriptRubric`; JS rubrics read binary fixtures with
    `ctx.readBytes(path)`. Kernel labs can use
    `@unlocalhosted/browsergrad-kernels` `createBrowsergradKernelRubric(ctx)` to
    compare WGSL outputs against CPU references and emit BrowserGrad assertions.
-15. Offers the learner a runnable browser path, simulated path, or external-runner
+16. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

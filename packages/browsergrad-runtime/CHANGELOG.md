@@ -44,6 +44,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `assignmentRunnerRoute(plan)` maps a run plan to `pyodide`, `javascript`,
   `external`, `unsupported`, or `blocked`, and preflight reports now include
   that route.
+- `createAssignmentExternalRunnerRequest(plan)` packages external-only plans
+  into a native/hosted runner handoff with route, selected capabilities, files,
+  timeouts, behavioral gates, mount plan, and dataset cache plan.
 - Capability `any_of` evaluation now prefers the strongest satisfied path by
   mode: browser, then simulated, then external.
 - Capability gate evaluations now expose gate-level `status`, `selectedAnyOf`,

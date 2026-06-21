@@ -4,6 +4,7 @@ import {
   assignmentRunReadiness,
   assignmentRunnerRoute,
   createAssignmentCapabilityEnvironment,
+  createAssignmentExternalRunnerRequest,
   createAssignmentPreflightReport,
   createAssignmentMountPreflightReport,
   createAssignmentMountPlan,
@@ -643,6 +644,125 @@ describe("parseAssignmentProfile", () => {
         createAssignmentRunPlan(unknownResult.profile, { capabilities: ["pyodide"] }),
       ).target,
     ).toBe("unsupported");
+  });
+
+  it("creates an external runner request for native-only plans", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      id: "cs149gpt",
+      files: {
+        root: "/assignments/cs149gpt",
+        rubric_path: "rubric.py",
+        starter_path: "starter",
+        fixtures_path: "fixtures",
+      },
+      allowed_tests: ["attention_performance_smoke"],
+      gates: [
+        {
+          name: "native_attention_path",
+          kind: "capability",
+          options: {
+            requires: ["attention-oracle"],
+            any_of: [["native-cpp-external"], ["browser-cpp-simulator"]],
+          },
+        },
+        {
+          name: "student_timeout",
+          kind: "timeout",
+          options: { timeout_ms: 45_000 },
+        },
+      ],
+      datasets: [
+        {
+          name: "tiny-attention",
+          url: "/fixtures/tiny-attention.npz",
+          hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const plan = createAssignmentRunPlan(
+      result.profile,
+      createAssignmentCapabilityEnvironment({
+        browserCapabilities: ["attention-oracle"],
+        externalCapabilities: ["native-cpp-external"],
+      }),
+    );
+
+    expect(createAssignmentExternalRunnerRequest(plan)).toEqual({
+      id: "cs149gpt",
+      profileVersion: "1.0.0",
+      requiresBrowsergrad: "^0.1.0",
+      route: {
+        target: "external",
+        readinessStatus: "external-only",
+        rubricKind: "python",
+        message: "assignment requires external runner capabilities",
+        missingCapabilities: [],
+        selectedCapabilities: ["attention-oracle", "native-cpp-external"],
+      },
+      selectedCapabilities: ["attention-oracle", "native-cpp-external"],
+      externalCapabilities: ["native-cpp-external"],
+      simulatedCapabilities: [],
+      files: {
+        root: "/assignments/cs149gpt",
+        rubricPath: "/assignments/cs149gpt/rubric.py",
+        starterPath: "/assignments/cs149gpt/starter",
+        fixturesPath: "/assignments/cs149gpt/fixtures",
+      },
+      execution: {
+        allowedTests: ["attention_performance_smoke"],
+        setupTimeoutMs: 10_000,
+        testTimeoutMs: 30_000,
+        workerTimeoutMs: 60_000,
+      },
+      mountPlan: {
+        root: "/assignments/cs149gpt",
+        files: [
+          {
+            role: "rubric",
+            path: "/assignments/cs149gpt/rubric.py",
+            required: true,
+          },
+          {
+            role: "starter",
+            path: "/assignments/cs149gpt/starter",
+            required: false,
+          },
+        ],
+        datasets: [
+          {
+            name: "tiny-attention",
+            url: "/fixtures/tiny-attention.npz",
+            hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            mountPath: "/assignments/cs149gpt/fixtures/datasets/tiny-attention.npz",
+          },
+        ],
+      },
+      datasetCachePlan: {
+        root: "/assignments/cs149gpt",
+        datasets: [
+          {
+            name: "tiny-attention",
+            url: "/fixtures/tiny-attention.npz",
+            hash: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            mountPath: "/assignments/cs149gpt/fixtures/datasets/tiny-attention.npz",
+            strategy: "content-addressed",
+            cacheKey: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            cachePath: "datasets/sha256/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          },
+        ],
+      },
+      behavioralGates: [
+        {
+          name: "student_timeout",
+          kind: "timeout",
+          options: { timeout_ms: 45_000 },
+        },
+      ],
+    });
   });
 
   it("creates a rubric exec request from a run plan", () => {

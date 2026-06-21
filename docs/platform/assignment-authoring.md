@@ -45,6 +45,9 @@ Use `assignmentRubricKind()` to route Python, JavaScript, and unknown rubric
 paths to the right execution substrate.
 Use `assignmentRunnerRoute(plan)` when the platform wants one branch key:
 `pyodide`, `javascript`, `external`, `unsupported`, or `blocked`.
+When that branch is `external`, use `createAssignmentExternalRunnerRequest(plan)`
+to hand native/hosted infrastructure a stable object containing selected
+external capabilities, timeouts, mount/cache metadata, and behavioral gates.
 Use `createAssignmentMountPlan()` to derive the files and dataset fixtures that
 must exist in the runtime filesystem.
 Use `createAssignmentDatasetCachePlan(mountPlan)` before fetch/cache work so
@@ -205,6 +208,9 @@ Use `assignmentRunnerRoute(plan)` or `report.runnerRoute` for the final launch
 branch. A simulated-but-runnable Python lab still routes to `pyodide`; an
 external-only plan routes to `external`; unknown rubric extensions route to
 `unsupported`.
+External plans should not call Pyodide or JS rubric runners. Generate an
+external runner request and pass it to platform-owned native, hosted, or CI
+execution infrastructure.
 
 ## New Assignment Checklist
 

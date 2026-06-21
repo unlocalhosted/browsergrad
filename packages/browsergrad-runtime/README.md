@@ -179,6 +179,7 @@ import {
   assignmentRunnerRoute,
   createAssignmentCapabilityEnvironment,
   createAssignmentDatasetCachePlan,
+  createAssignmentExternalRunnerRequest,
   createAssignmentMountPlan,
   createAssignmentPreflightReport,
   createAssignmentRunPlan,
@@ -205,6 +206,10 @@ const report = createAssignmentPreflightReport(parsed.profile, environment);
 const route = assignmentRunnerRoute(plan);
 if (!plan.ok) {
   throw new Error(`Missing capabilities: ${plan.capabilityEvaluation.missingCapabilities.join(", ")}`);
+}
+if (route.target === "external") {
+  const externalRequest = createAssignmentExternalRunnerRequest(plan);
+  // Send externalRequest to your native/hosted runner queue.
 }
 
 const mounts = createAssignmentMountPlan(plan);
@@ -255,6 +260,10 @@ mode: `browser`, then `simulated`, then `external`.
 `pyodide`, `javascript`, `external`, `unsupported`, or `blocked`. Use this for
 platform branching before calling `runAssignmentRubric()` or
 `runAssignmentJavascriptRubric()`.
+For `external` routes, `createAssignmentExternalRunnerRequest(plan)` returns the
+native/hosted runner handoff: selected external capabilities, resolved files,
+timeouts, behavioral gates, mount plan, and dataset cache plan. BrowserGrad does
+not execute native code; the platform owns that runner.
 
 `createAssignmentPreflightReport(profile, environment)` bundles the common
 platform preflight calls into `{ plan, rubricKind, readiness, runnerRoute,
