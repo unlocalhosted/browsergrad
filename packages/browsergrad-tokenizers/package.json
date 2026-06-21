@@ -1,0 +1,62 @@
+{
+  "name": "@unlocalhosted/browsergrad-tokenizers",
+  "version": "0.1.0",
+  "description": "Browser-safe tokenizer and BPE reference helpers for BrowserGrad assignment rubrics.",
+  "type": "module",
+  "license": "MIT",
+  "author": "unlocalhosted",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/unlocalhosted/browsergrad.git",
+    "directory": "packages/browsergrad-tokenizers"
+  },
+  "homepage": "https://github.com/unlocalhosted/browsergrad/tree/main/packages/browsergrad-tokenizers#readme",
+  "bugs": {
+    "url": "https://github.com/unlocalhosted/browsergrad/issues"
+  },
+  "keywords": [
+    "bpe",
+    "tokenizer",
+    "pyodide",
+    "browser",
+    "education",
+    "grading"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/",
+    "src/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "oxlint src",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "pnpm run build && pnpm run test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "oxlint": "^1.0.0",
+    "typescript": "~6.0.0",
+    "vitest": "^4.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "sideEffects": false
+}
