@@ -29,7 +29,7 @@ interface PyodideAPI {
       data: string | Uint8Array,
       opts?: { encoding?: string },
     ) => void;
-    readFile: (path: string, opts?: { encoding?: string }) => string;
+    readFile: (path: string, opts?: { encoding?: string }) => string | Uint8Array;
     mkdirTree: (path: string) => void;
     analyzePath: (path: string) => { exists: boolean };
   };
@@ -191,9 +191,11 @@ describe("runAssignmentRubric", () => {
 
     assertions = [];
     artifacts = [];
+    const fs = pyodideSessionFs(pyodide);
+    const fixtureBytes = Uint8Array.of(0, 1, 255);
     const result = await runAssignmentRubric(
       {
-        fs: pyodideSessionFs(pyodide),
+        fs,
         exec: pyodideExec,
       },
       plan,
@@ -210,7 +212,7 @@ else:
 `,
         },
         datasets: {
-          tiny: Uint8Array.of(0, 1, 255),
+          tiny: fixtureBytes,
         },
       },
     );
@@ -219,6 +221,9 @@ else:
     expect(result.exec.assertions).toEqual([
       { kind: "pass", name: "test_binary_dataset", durationMs: null },
     ]);
+    await expect(
+      fs.readBytes("/assignments/assignment-smoke/fixtures/datasets/tiny.txt"),
+    ).resolves.toEqual(fixtureBytes);
   });
 });
 
@@ -236,7 +241,18 @@ function pyodideSessionFs(py: PyodideAPI): SessionFS {
       }
     },
     async read(path) {
-      return py.FS.readFile(path, { encoding: "utf8" });
+      const content = py.FS.readFile(path, { encoding: "utf8" });
+      if (typeof content !== "string") {
+        throw new Error(`expected text content for ${path}`);
+      }
+      return content;
+    },
+    async readBytes(path) {
+      const content = py.FS.readFile(path);
+      if (typeof content === "string") {
+        throw new Error(`expected binary content for ${path}`);
+      }
+      return content;
     },
   };
 }

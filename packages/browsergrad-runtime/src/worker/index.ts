@@ -23,6 +23,7 @@ import type {
   ClearNamespaceRequest,
   ClientToWorker,
   ExecRequest,
+  FsReadBytesRequest,
   FsReadRequest,
   FsWriteRequest,
   InitRequest,
@@ -60,8 +61,12 @@ interface PyodideAPI {
   registerJsModule: (name: string, module: object) => void;
   globals: { get: (name: string) => PyProxy };
   FS: {
-    writeFile: (path: string, data: string, opts?: { encoding?: string }) => void;
-    readFile: (path: string, opts?: { encoding?: string }) => string;
+    writeFile: (
+      path: string,
+      data: string | Uint8Array,
+      opts?: { encoding?: string },
+    ) => void;
+    readFile: (path: string, opts?: { encoding?: string }) => string | Uint8Array;
     mkdirTree: (path: string) => void;
     analyzePath: (path: string) => { exists: boolean };
   };
@@ -224,7 +229,24 @@ async function handleFsRead(req: FsReadRequest): Promise<void> {
     const py = await ensureReady(req.id);
     if (!py) return;
     const content = py.FS.readFile(req.path, { encoding: "utf8" });
+    if (typeof content !== "string") {
+      throw new Error(`expected text content for ${req.path}`);
+    }
     reply({ id: req.id, kind: "fs.read:done", content });
+  } catch (err) {
+    replyError(req.id, err);
+  }
+}
+
+async function handleFsReadBytes(req: FsReadBytesRequest): Promise<void> {
+  try {
+    const py = await ensureReady(req.id);
+    if (!py) return;
+    const content = py.FS.readFile(req.path);
+    if (typeof content === "string") {
+      throw new Error(`expected binary content for ${req.path}`);
+    }
+    reply({ id: req.id, kind: "fs.readBytes:done", content });
   } catch (err) {
     replyError(req.id, err);
   }
@@ -371,6 +393,9 @@ ctx.addEventListener("message", (event: MessageEvent<ClientToWorker>) => {
       return;
     case "fs.read":
       void handleFsRead(req);
+      return;
+    case "fs.readBytes":
+      void handleFsReadBytes(req);
       return;
     case "exec":
       void handleExec(req);

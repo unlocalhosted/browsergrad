@@ -145,6 +145,9 @@ export interface SessionFS {
 
   /** Read a UTF-8 file from the worker's virtual FS. */
   read(path: string): Promise<string>;
+
+  /** Read raw bytes from the worker's virtual FS. */
+  readBytes(path: string): Promise<Uint8Array>;
 }
 
 /* ────────────────────────────────────────────────────────────

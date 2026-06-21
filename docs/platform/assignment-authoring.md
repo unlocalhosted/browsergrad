@@ -66,6 +66,9 @@ when they are small enough to review. Large datasets should be declared as
 datasets with hashes and mounted by the host before execution.
 Fixture contents can be strings or `Uint8Array` bytes. Use bytes for compact
 binary fixtures and snapshots such as `.pt`, `.npz`, and `.safetensors`.
+After materializing a binary fixture, platforms can call
+`Session.fs.readBytes(path)` to verify the worker-visible bytes match cache or
+snapshot expectations.
 
 Dataset mount paths default under `<fixturesPath>/datasets/<filename>`.
 Profiles can still point at large external URLs; BrowserGrad records the mount

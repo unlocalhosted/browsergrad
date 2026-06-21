@@ -625,6 +625,12 @@ describe("parseAssignmentProfile", () => {
           const content = writes.find((write) => write.path === path)?.content;
           return typeof content === "string" ? content : "";
         },
+        async readBytes(path) {
+          const content = writes.find((write) => write.path === path)?.content;
+          return typeof content === "string" || content === undefined
+            ? new Uint8Array()
+            : content;
+        },
       },
       mountPlan,
       {
@@ -718,6 +724,9 @@ describe("parseAssignmentProfile", () => {
         async read() {
           return "";
         },
+        async readBytes() {
+          return new Uint8Array();
+        },
       },
       mountPlan,
       {
@@ -760,6 +769,9 @@ describe("parseAssignmentProfile", () => {
           async read() {
             return "";
           },
+          async readBytes() {
+            return new Uint8Array();
+          },
         },
         mountPlan,
         {
@@ -796,6 +808,9 @@ describe("parseAssignmentProfile", () => {
           },
           async read() {
             return "";
+          },
+          async readBytes() {
+            return new Uint8Array();
           },
         },
         mountPlan,
@@ -837,6 +852,9 @@ describe("parseAssignmentProfile", () => {
             },
             async read() {
               return "";
+            },
+            async readBytes() {
+              return new Uint8Array();
             },
           },
           async exec() {

@@ -25,6 +25,7 @@ export type ClientToWorker =
   | InitRequest
   | FsWriteRequest
   | FsReadRequest
+  | FsReadBytesRequest
   | ExecRequest
   | ClearNamespaceRequest;
 
@@ -55,6 +56,12 @@ export interface FsReadRequest {
   readonly path: string;
 }
 
+export interface FsReadBytesRequest {
+  readonly id: number;
+  readonly kind: "fs.readBytes";
+  readonly path: string;
+}
+
 export interface ExecRequest {
   readonly id: number;
   readonly kind: "exec";
@@ -75,6 +82,7 @@ export type WorkerToClient =
   | InitDoneResponse
   | FsWriteResponse
   | FsReadResponse
+  | FsReadBytesResponse
   | ExecStdoutEvent
   | ExecStderrEvent
   | ExecAssertionEvent
@@ -103,6 +111,12 @@ export interface FsReadResponse {
   readonly id: number;
   readonly kind: "fs.read:done";
   readonly content: string;
+}
+
+export interface FsReadBytesResponse {
+  readonly id: number;
+  readonly kind: "fs.readBytes:done";
+  readonly content: Uint8Array;
 }
 
 export interface ExecStdoutEvent {

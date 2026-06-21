@@ -38,6 +38,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   content readiness before writing to `Session.fs`.
 - Assignment mount contents and `Session.fs.write` now accept `Uint8Array`
   bytes for small binary fixtures such as `.pt`, `.npz`, and snapshots.
+- `Session.fs.readBytes(path)` returns `Uint8Array` bytes from the worker FS for
+  fixture verification, snapshot debug, and binary cache checks.
 - `runAssignmentJavascriptRubric(plan, contents, rubric, options)` runs
   browser-native JS rubrics with assignment context, mounted text reads,
   declared oracles, and structured assertion/artifact helpers.

@@ -271,7 +271,8 @@ files, missing datasets, optional skips, and writable paths without touching
 `Session.fs`.
 Mount contents may be UTF-8 strings or `Uint8Array` bytes. Use bytes for
 snapshots and small upstream fixtures such as `.pt`, `.npz`, or
-`.safetensors`.
+`.safetensors`. Hosts can verify mounted or cached bytes with
+`Session.fs.readBytes(path)` without decoding through UTF-8.
 
 `materializeAssignmentMountPlan()` writes provided string contents into
 `Session.fs` in mount-plan order, preserving byte contents for binary fixtures.

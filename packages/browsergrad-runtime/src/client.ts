@@ -93,6 +93,7 @@ class SessionImpl implements Session {
     this.fs = {
       write: (path, content) => this.fsWrite(path, content),
       read: (path) => this.fsRead(path),
+      readBytes: (path) => this.fsReadBytes(path),
     };
     this.worker.addEventListener("message", this.onMessage);
     this.worker.addEventListener("error", this.onWorkerError);
@@ -266,6 +267,15 @@ class SessionImpl implements Session {
     const reply = await this.request({ kind: "fs.read", path });
     if (reply.kind !== "fs.read:done") {
       throw new BrowsergradError(`unexpected fs.read reply: ${reply.kind}`);
+    }
+    return reply.content;
+  }
+
+  private async fsReadBytes(path: string): Promise<Uint8Array> {
+    this.assertLive();
+    const reply = await this.request({ kind: "fs.readBytes", path });
+    if (reply.kind !== "fs.readBytes:done") {
+      throw new BrowsergradError(`unexpected fs.readBytes reply: ${reply.kind}`);
     }
     return reply.content;
   }

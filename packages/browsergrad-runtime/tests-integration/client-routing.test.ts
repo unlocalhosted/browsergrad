@@ -163,6 +163,20 @@ describe("client request/response correlation", () => {
     expect(sentContent).toBe(bytes);
     await session.dispose();
   });
+
+  it("fs.readBytes returns binary content from the worker", async () => {
+    const fake = new FakeWorker();
+    const session = await makeSession(fake);
+    const bytes = Uint8Array.of(3, 4, 255);
+    fake.handler = (msg) => {
+      if (msg.kind === "fs.readBytes") {
+        fake.reply({ id: msg.id, kind: "fs.readBytes:done", content: bytes });
+      }
+    };
+
+    await expect(session.fs.readBytes("/fixture.bin")).resolves.toBe(bytes);
+    await session.dispose();
+  });
 });
 
 describe("streaming event routing", () => {

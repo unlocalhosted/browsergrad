@@ -142,6 +142,7 @@ describe("type shape sanity", () => {
     const _check: (s: Session) => Promise<unknown> = async (s) => {
       await s.fs.write("/x", "");
       await s.fs.read("/x");
+      await s.fs.readBytes("/x");
       const result = await s.exec({ code: "" });
       expect(result.assertions).toBeDefined();
       expect(result.artifacts).toBeDefined();

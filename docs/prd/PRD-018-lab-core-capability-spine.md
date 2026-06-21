@@ -167,7 +167,8 @@ runtime branches.
   rubric/dataset contents deterministically.
 - Binary fixture guarantee: assignment mount contents and `Session.fs.write`
   accept `Uint8Array` bytes so small `.pt`, `.npz`, and snapshot fixtures can
-  be mounted without text/base64 loss; JS rubrics can inspect those bytes with
+  be mounted without text/base64 loss; hosts can verify worker bytes with
+  `Session.fs.readBytes(path)`, and JS rubrics can inspect mounted bytes with
   `ctx.readBytes(path)`.
 - Later implementation slices:
   - Assignment runner plan: packages, mounts, JS oracles, timeout/watchdog, and
