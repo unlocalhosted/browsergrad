@@ -64,6 +64,7 @@ export {
 export {
   assignmentRubricKind,
   assignmentRunReadiness,
+  createAssignmentMountPreflightReport,
   createAssignmentPreflightReport,
   createAssignmentMountPlan,
   createAssignmentRunPlan,
@@ -108,6 +109,7 @@ export {
   type AssignmentMountHashStatus,
   type AssignmentMountHashCheck,
   type AssignmentMountHashVerification,
+  type AssignmentMountPreflightReport,
   type AssignmentMaterializeResult,
   type AssignmentRubricSession,
   type AssignmentRubricRunOptions,

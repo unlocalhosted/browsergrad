@@ -41,6 +41,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   content readiness before writing to `Session.fs`.
 - `verifyAssignmentMountContentHashes(mountPlan, contents)` checks dataset
   `sha256:<64 hex>` hashes for text and binary mount contents before write.
+- `createAssignmentMountPreflightReport(mountPlan, contents)` bundles mount
+  content readiness and hash verification for platform preflight UI.
 - Assignment mount contents and `Session.fs.write` now accept `Uint8Array`
   bytes for small binary fixtures such as `.pt`, `.npz`, and snapshots.
 - `Session.fs.readBytes(path)` returns `Uint8Array` bytes from the worker FS for

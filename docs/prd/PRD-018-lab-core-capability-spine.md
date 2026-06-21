@@ -167,7 +167,8 @@ runtime branches.
 - Mount-readiness guarantee: `evaluateAssignmentMountContents(mountPlan,
   contents)` dry-runs platform-provided files and datasets before any
   `Session.fs` write, and benchmark tests assert every profile reports missing
-  rubric/dataset contents deterministically.
+  rubric/dataset contents deterministically; `createAssignmentMountPreflightReport`
+  bundles content readiness and hash checks for platform preflight UI.
 - Fixture-hash guarantee: `verifyAssignmentMountContentHashes(mountPlan,
   contents)` validates dataset `sha256:<64 hex>` hashes for text and binary
   mount contents before execution.

@@ -79,6 +79,8 @@ preflight status, not partial filesystem writes.
 When dataset declarations include `sha256:<64 hex>`, call
 `verifyAssignmentMountContentHashes()` before materializing. Treat `mismatch`,
 `invalid`, and `unsupported` as platform preflight failures, not rubric failures.
+Use `createAssignmentMountPreflightReport()` when the UI wants content readiness
+and hash verification in one object.
 `materializeAssignmentMountPlan()` expects dataset contents keyed by dataset
 name, so platforms can fetch/cache however they want before writing to Pyodide.
 JavaScript rubrics should use `ctx.readBytes(path)` for binary mounts and

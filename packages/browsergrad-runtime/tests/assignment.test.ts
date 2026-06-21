@@ -3,6 +3,7 @@ import {
   assignmentRubricKind,
   assignmentRunReadiness,
   createAssignmentPreflightReport,
+  createAssignmentMountPreflightReport,
   createAssignmentMountPlan,
   createAssignmentRunPlan,
   createAssignmentRubricExecRequest,
@@ -826,6 +827,57 @@ describe("parseAssignmentProfile", () => {
           status: "match",
         },
       ],
+    });
+  });
+
+  it("bundles mount content readiness and hash verification", async () => {
+    const textSha256 =
+      "5cb72f90e968922d30557d0af8f719d21f61792becaa87eb32477767d739dc0b";
+    const wrongSha256 =
+      "a40d856f7bd138b40fc924da7f59edc8edb9e4a749994ca49a4a5e5f7a32602d";
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      datasets: [
+        {
+          name: "tiny",
+          url: "/fixtures/tiny.txt",
+          hash: `sha256:${textSha256}`,
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const mountPlan = createAssignmentMountPlan(
+      createAssignmentRunPlan(result.profile, { capabilities: ["pyodide"] }),
+    );
+
+    await expect(
+      createAssignmentMountPreflightReport(mountPlan, {
+        files: { "/assignments/cs336-assignment1/rubric.py": "print('rubric')" },
+        datasets: { tiny: "wrong fixture" },
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      content: {
+        ok: true,
+        missingRequiredFiles: [],
+        missingDatasets: [],
+        skippedOptionalPaths: ["/assignments/cs336-assignment1/assignment.py",
+          "/assignments/cs336-assignment1/reference.py"],
+      },
+      hashes: {
+        ok: false,
+        checks: [
+          {
+            name: "tiny",
+            expected: `sha256:${textSha256}`,
+            actual: `sha256:${wrongSha256}`,
+            ok: false,
+            status: "mismatch",
+          },
+        ],
+      },
     });
   });
 

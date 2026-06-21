@@ -37,6 +37,8 @@ For every lab profile, the platform should:
    browser-native JS rubrics.
    Contents may be strings or `Uint8Array` bytes for compact binary fixtures
    such as `.pt`, `.npz`, or `.safetensors`.
+   Use `createAssignmentMountPreflightReport` when rendering one platform
+   preflight result for missing content plus hash verification.
    Verify dataset `sha256:<64 hex>` declarations with
    `verifyAssignmentMountContentHashes` before writing to runtime FS.
    Use `Session.fs.readBytes(path)` when the platform needs to verify mounted

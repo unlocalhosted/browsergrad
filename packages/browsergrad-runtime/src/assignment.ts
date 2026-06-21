@@ -218,6 +218,12 @@ export interface AssignmentMountHashVerification {
   readonly checks: readonly AssignmentMountHashCheck[];
 }
 
+export interface AssignmentMountPreflightReport {
+  readonly ok: boolean;
+  readonly content: AssignmentMountContentEvaluation;
+  readonly hashes: AssignmentMountHashVerification;
+}
+
 export interface AssignmentMaterializeResult {
   readonly writtenPaths: readonly string[];
   readonly skippedOptionalPaths: readonly string[];
@@ -667,6 +673,19 @@ export async function verifyAssignmentMountContentHashes(
   return {
     ok: checks.every((check) => check.ok),
     checks,
+  };
+}
+
+export async function createAssignmentMountPreflightReport(
+  plan: AssignmentMountPlan,
+  contents: AssignmentMountContents,
+): Promise<AssignmentMountPreflightReport> {
+  const content = evaluateAssignmentMountContents(plan, contents);
+  const hashes = await verifyAssignmentMountContentHashes(plan, contents);
+  return {
+    ok: content.ok && hashes.ok,
+    content,
+    hashes,
   };
 }
 
