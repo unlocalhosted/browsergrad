@@ -61,6 +61,7 @@ assert callable(bg.emit_image)
 assert callable(bg.oracle)
 assert callable(bg.assignment_context)
 assert callable(bg.streaming_gate)
+assert callable(bg.forbidden_read_gate)
 `);
   });
 });
@@ -179,6 +180,66 @@ eager_consumer(gate.input)
     ).rejects.toThrow(
       "encode_iterable_streaming consumed input eagerly: read 2 chunks before first output",
     );
+  });
+});
+
+describe("browser-safe forbidden-read gates", () => {
+  it("allows incremental line iteration while forbidding eager APIs", async () => {
+    await exec(`
+import browsergrad as bg
+
+file_obj = bg.forbidden_read_gate(
+    "no_eager_file_read",
+    "line-1\\nline-2\\n",
+    methods=["read", "readlines"],
+)
+first = next(iter(file_obj))
+second = file_obj.readline()
+if first == "line-1\\n" and second == "line-2\\n":
+    bg.assert_pass("test_forbidden_read_gate_allows_incremental_reads")
+else:
+    bg.assert_fail(
+        "test_forbidden_read_gate_allows_incremental_reads",
+        "wrong incremental file output",
+        expected=["line-1\\n", "line-2\\n"],
+        actual=[first, second],
+    )
+`);
+    expect(assertions).toEqual([
+      {
+        kind: "pass",
+        name: "test_forbidden_read_gate_allows_incremental_reads",
+        durationMs: null,
+      },
+    ]);
+  });
+
+  it("raises a clear error when student code calls eager read", async () => {
+    await expect(
+      pyodide.runPythonAsync(`
+import browsergrad as bg
+
+file_obj = bg.forbidden_read_gate(
+    "no_eager_file_read",
+    "line-1\\nline-2\\n",
+    methods=["read", "readlines"],
+)
+file_obj.read()
+`),
+    ).rejects.toThrow("no_eager_file_read forbids eager read()");
+  });
+
+  it("uses the active assignment forbidden-read gate configuration by name", async () => {
+    await expect(
+      pyodide.runPythonAsync(`
+import os
+import browsergrad as bg
+
+os.environ["BROWSERGRAD_BEHAVIORAL_GATES_JSON"] = "[{\\"name\\":\\"no_eager_file_read\\",\\"kind\\":\\"forbidden-read\\",\\"options\\":{\\"methods\\":[\\"readlines\\"]}}]"
+file_obj = bg.forbidden_read_gate("no_eager_file_read", "line-1\\nline-2\\n")
+file_obj.readlines()
+`),
+    ).rejects.toThrow("no_eager_file_read forbids eager readlines()");
   });
 });
 

@@ -314,6 +314,16 @@ gate = bg.streaming_gate("encode_iterable_streaming", chunks)
 output = gate.wrap_output(student.encode_iterable(gate.input))
 first_token = next(iter(output))
 ```
+For browser-safe file behavior, Python rubrics can wrap text with
+`browsergrad.forbidden_read_gate(name, text)`. The helper reads the forbidden
+`methods` list from the matching `forbidden-read` gate when omitted, permits
+incremental iteration/`readline()`, and raises `ForbiddenReadViolation` for
+eager `read()` or `readlines()` calls:
+
+```py
+file_obj = bg.forbidden_read_gate("no_eager_file_read", fixture_text)
+student.process(file_obj)
+```
 
 `runAssignmentRubric()` is the one-call Pyodide path for platforms that do not
 need to stage each step manually. It derives the mount plan, materializes files

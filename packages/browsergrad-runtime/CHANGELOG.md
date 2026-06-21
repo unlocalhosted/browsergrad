@@ -21,6 +21,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `browsergrad.streaming_gate(name, iterable, max_chunks_before_first_yield?)`
   lets Python rubrics catch eager iterable consumption with clear browser-safe
   failures.
+- `browsergrad.forbidden_read_gate(name, text, methods?)` gives Python rubrics a
+  file-like text object that permits incremental reads while rejecting eager
+  `read()` / `readlines()` calls declared by `forbidden-read` gates.
 - `runAssignmentRubric(session, plan, contents, options)` orchestrates the
   common assignment path: derive mounts, materialize contents, create the rubric
   exec request, run it, and return both mount and exec results.

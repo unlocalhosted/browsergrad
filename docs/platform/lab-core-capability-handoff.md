@@ -60,7 +60,10 @@ For every lab profile, the platform should:
     `browsergrad.streaming_gate(name, iterable)` plus
     `gate.wrap_output(student_output)` so eager consumers fail before launchers
     need Linux RSS behavior.
-17. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
+17. In Python rubrics, enforce forbidden-read gates with
+    `browsergrad.forbidden_read_gate(name, text)` so eager `read()` or
+    `readlines()` calls fail while incremental line reads still work.
+18. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
     implementation slice.
 
 ## Capability Vocabulary

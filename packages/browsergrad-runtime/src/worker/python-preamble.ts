@@ -192,6 +192,94 @@ def _bg_streaming_gate(
         )
     return _gate_cls(name, iterable, max_chunks_before_first_yield)
 
+class _bg_ForbiddenReadViolation(AssertionError):
+    pass
+
+class _bg_ForbiddenReadGate:
+    def __init__(self, name, text, methods):
+        if not isinstance(name, str) or not name:
+            raise ValueError("BrowserGrad forbidden-read gate name must be a non-empty string")
+        if not isinstance(text, str):
+            raise ValueError("forbidden_read_gate content must be text")
+        if not isinstance(methods, (list, tuple, set)) or not all(
+            isinstance(method, str) for method in methods
+        ):
+            raise ValueError("forbidden_read_gate methods must be strings")
+        self.name = name
+        self._text = text
+        self._pos = 0
+        self._methods = set(methods)
+
+    def _forbid(self, method, *, _violation_cls=_bg_ForbiddenReadViolation):
+        raise _violation_cls(f"{self.name} forbids eager {method}()")
+
+    def read(self, size=-1):
+        if "read" in self._methods and (size is None or size < 0):
+            self._forbid("read")
+        if size is None or size < 0:
+            size = len(self._text) - self._pos
+        start = self._pos
+        end = min(len(self._text), self._pos + size)
+        self._pos = end
+        return self._text[start:end]
+
+    def readline(self, size=-1):
+        if self._pos >= len(self._text):
+            return ""
+        newline = self._text.find("\\n", self._pos)
+        if newline == -1:
+            end = len(self._text)
+        else:
+            end = newline + 1
+        if size is not None and size >= 0:
+            end = min(end, self._pos + size)
+        start = self._pos
+        self._pos = end
+        return self._text[start:end]
+
+    def readlines(self, hint=-1):
+        if "readlines" in self._methods:
+            self._forbid("readlines")
+        lines = []
+        total = 0
+        while True:
+            line = self.readline()
+            if line == "":
+                break
+            lines.append(line)
+            total += len(line)
+            if hint is not None and hint > 0 and total >= hint:
+                break
+        return lines
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        line = self.readline()
+        if line == "":
+            raise StopIteration
+        return line
+
+def _bg_forbidden_read_gate(
+    name,
+    text,
+    methods=None,
+    *,
+    _gate_cls=_bg_ForbiddenReadGate,
+    _context=_bg_assignment_context,
+):
+    if methods is None:
+        for gate in _context().get("behavioral_gates", []):
+            if gate.get("name") == name and gate.get("kind") == "forbidden-read":
+                methods = gate.get("options", {}).get("methods")
+                break
+    if methods is None:
+        raise ValueError(
+            f"BrowserGrad forbidden-read gate is not configured: {name}"
+        )
+    return _gate_cls(name, text, methods)
+
 _bg_mod.assert_pass = _bg_assert_pass
 _bg_mod.assert_fail = _bg_assert_fail
 _bg_mod.assert_error = _bg_assert_error
@@ -202,6 +290,8 @@ _bg_mod.oracle = _bg_oracle
 _bg_mod.assignment_context = _bg_assignment_context
 _bg_mod.StreamingGateViolation = _bg_StreamingGateViolation
 _bg_mod.streaming_gate = _bg_streaming_gate
+_bg_mod.ForbiddenReadViolation = _bg_ForbiddenReadViolation
+_bg_mod.forbidden_read_gate = _bg_forbidden_read_gate
 
 _bg_sys.modules["browsergrad"] = _bg_mod
 
@@ -214,4 +304,5 @@ del _bg_assert_pass, _bg_assert_fail, _bg_assert_error
 del _bg_log, _bg_emit_json, _bg_emit_image, _bg_oracle, _bg_assignment_context
 del _bg_StreamingGateViolation, _bg_StreamingInput, _bg_StreamingOutput
 del _bg_StreamingGate, _bg_streaming_gate
+del _bg_ForbiddenReadViolation, _bg_ForbiddenReadGate, _bg_forbidden_read_gate
 `;

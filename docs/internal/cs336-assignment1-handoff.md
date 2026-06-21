@@ -96,3 +96,7 @@ pass `gate.input` into the student function, wrap the student output with
 that calls `list(iterable)` or `"".join(iterable)` raises
 `StreamingGateViolation` with a message such as
 `encode_iterable_streaming consumed input eagerly: read 2 chunks before first output`.
+For file APIs, use `browsergrad.forbidden_read_gate("no_eager_file_read",
+fixture_text)` and pass that file-like object to student code. It permits line
+iteration and `readline()` while rejecting eager `read()` or `readlines()` calls
+listed in the profile's `forbidden-read` gate.

@@ -167,6 +167,10 @@ runtime branches.
 - Streaming-gate guarantee: Python rubrics can use `browsergrad.streaming_gate`
   to enforce `max_chunks_before_first_yield` from behavioral gates and fail eager
   iterable consumers with assignment-specific messages.
+- Forbidden-read guarantee: Python rubrics can use
+  `browsergrad.forbidden_read_gate` to permit incremental text consumption while
+  rejecting eager `read()` / `readlines()` calls declared by `forbidden-read`
+  gates.
 - Mount-readiness guarantee: `evaluateAssignmentMountContents(mountPlan,
   contents)` dry-runs platform-provided files and datasets before any
   `Session.fs` write, and benchmark tests assert every profile reports missing

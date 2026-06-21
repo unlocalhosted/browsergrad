@@ -141,6 +141,11 @@ For Python iterable streaming checks, wrap rubric input with
 with `gate.wrap_output(output)`. The helper reads
 `max_chunks_before_first_yield` from the matching streaming gate and raises
 `StreamingGateViolation` on eager consumption.
+For Python file-style checks, wrap fixture text with
+`browsergrad.forbidden_read_gate(name, text)`. The helper reads forbidden
+`methods` from the matching `forbidden-read` gate, allows incremental iteration
+and `readline()`, and raises `ForbiddenReadViolation` for eager `read()` or
+`readlines()` calls.
 
 Capability gates should make upstream-native requirements explicit. For
 example, a CUDA/Triton test can be declared as a capability gate and replaced by
