@@ -239,55 +239,65 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   kernel tensor checks to `runAssignmentJavascriptRubric()` contexts, and a
   cross-package integration test proves pass/fail assertions survive through
   BrowserGrad's JS rubric runner.
+- Primitive-facade guarantee: `@unlocalhosted/browsergrad-primitives` is the
+  canonical small-helper interface for text, data, evaluation, scaling,
+  simulation, and RL/math references. Existing leaf primitive packages remain
+  implementation shards; new lab/profile guidance should consume the facade
+  unless a bundle or release constraint requires a leaf package.
 - Profile-driven JS runner guarantee: `runAssignmentJavascriptProfile()` builds
   preflight, validates the JavaScript route, mounts declared contents, wires
   oracles/substrates, and runs browser-native rubrics from a full assignment
   profile. It rejects missing profile-declared JS oracles before invoking the
   rubric. Runtime e2e coverage proves CS149 A1 and GPU Puzzles can execute this
   way with simulator/kernel oracles.
-- Simulator-core guarantee: `@unlocalhosted/browsergrad-simulators` exports
-  `createDeterministicMesh()` so JS rubrics and platform oracles can model
+- Simulator-core guarantee: `@unlocalhosted/browsergrad-primitives` exports
+  `simulation.createDeterministicMesh()` so JS rubrics and platform references can model
   browser-safe rank meshes, barriers, broadcasts, point-to-point messages, and
   `allReduce` event traces for DDP/FSDP/task-system teaching slices without
   native threads or MPI.
 - Distributed-training simulator guarantee: the same package exports
-  `simulateDdpGradientSynchronization()`, `simulateFsdpParameterSharding()`,
-  `simulateFsdpGradientReduceScatter()`, and `simulateShardedAdamWStep()` so
+  `simulation.simulateDdpGradientSynchronization()`,
+  `simulation.simulateFsdpParameterSharding()`,
+  `simulation.simulateFsdpGradientReduceScatter()`, and
+  `simulation.simulateShardedAdamWStep()` so
   CS336 A2-style DDP, FSDP, and sharded optimizer rubrics can check
   gradient-averaging, all-gather, reduce-scatter, and AdamW state-sharding
   semantics without `torch.multiprocessing`, `torch.distributed`, or CUDA.
 - CS149 CPU/SIMD simulator guarantee: the same package exports
-  `simulateVectorizedClampedExp()`, `simulateVectorizedArraySum()`, and
-  `partitionStaticWork()` so CS149 A1-style rubrics can check fake-SIMD
+  `simulation.simulateVectorizedClampedExp()`,
+  `simulation.simulateVectorizedArraySum()`, and
+  `simulation.partitionStaticWork()` so CS149 A1-style rubrics can check fake-SIMD
   clamped exponentiation, vector reductions, active-lane utilization, tail
   masks, and static contiguous/cyclic thread decomposition without native C++,
   AVX2, ISPC, or host timing.
 - Task-graph guarantee: the same package exports
-  `createTaskGraphSimulator()` so CS149-style task-system rubrics can model
+  `simulation.createTaskGraphSimulator()` so CS149-style task-system rubrics can model
   dependency readiness, deterministic worker assignment, task start/finish
   order, and makespan without relying on browser Worker timing.
-- Snapshot-oracle guarantee: `@unlocalhosted/browsergrad-snapshots` exports
-  `compareSnapshot()` and `createSnapshotOracle()` so CS336 A2/A5-style rubrics
+- Snapshot-comparator guarantee: `@unlocalhosted/browsergrad-primitives`
+  exports `compareSnapshot()` and `createSnapshotComparator()` so CS336
+  A2/A5-style rubrics
   can compare small JSON/numeric fixture outputs with deterministic paths,
   numeric tolerance, and non-finite checks before reaching for PyTorch, `.npz`,
   or GPU-only model runtimes.
-- Data-oracle guarantee: `@unlocalhosted/browsergrad-data` exports
-  `maskPii()`, `exactLineDeduplicate()`, `minhashDeduplicateDocuments()`,
-  `evaluateGopherQuality()`, `gopherQualityFilter()`, and
-  `extractVisibleTextFromHtml()` so CS336 A4-style Common Crawl/data-cleaning
+- Data-reference guarantee: `@unlocalhosted/browsergrad-primitives` exports
+  `data.maskPii()`, `data.exactLineDeduplicate()`,
+  `data.minhashDeduplicateDocuments()`, `data.evaluateGopherQuality()`,
+  `data.gopherQualityFilter()`, and `data.extractVisibleTextFromHtml()` so
+  CS336 A4-style Common Crawl/data-cleaning
   rubrics can run fixture-scale PII, exact/near dedupe, rule-based quality, and
   HTML extraction checks in browser-safe JS before WARC readers,
   fastText/transformers classifiers, or full dataset training runs.
-- Scaling-oracle guarantee: `@unlocalhosted/browsergrad-scaling` exports
-  `createHostedScalingApiMock()`, `selectExperimentsForDispatch()`, and
+- Scaling-fixture guarantee: `@unlocalhosted/browsergrad-primitives` exports
+  `createHostedTrainingApiFixture()`, `selectExperimentsForDispatch()`, and
   `fitPowerLawScalingLaw()` so CS336 A3-style hosted API, scheduler, and
   scaling-law rubrics can run fixture-scale browser-safe checks before a real
   FastAPI/Postgres/JAX/Modal service enters the loop.
-- Alignment-oracle guarantee: `@unlocalhosted/browsergrad-alignment` exports
-  `computePerInstanceDpoLoss()`, `parseMmluResponse()`,
-  `parseGsm8kResponse()`, `computeRolloutRewards()`,
-  `computeGroupNormalizedRewards()`, `computePolicyGradientLoss()`, and
-  `aggregateLossAcrossMicrobatch()` so CS336 A5-style DPO/GRPO/reasoning
+- RL-reference guarantee: `@unlocalhosted/browsergrad-primitives` exports
+  `rl.computePerInstanceDpoLoss()`, `rl.parseMmluResponse()`,
+  `rl.parseGsm8kResponse()`, `rl.computeRolloutRewards()`,
+  `rl.computeGroupNormalizedRewards()`, `rl.computePolicyGradientLoss()`, and
+  `rl.aggregateLossAcrossMicrobatch()` so CS336 A5-style DPO/GRPO/reasoning
   metrics rubrics can run fixture-scale browser-safe checks before vLLM,
   flash-attn, or full model training enters the loop.
 - Later implementation slices:

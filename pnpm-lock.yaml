@@ -107,6 +107,40 @@ importers:
         specifier: ^4.0.0
         version: 4.1.7(@types/node@24.12.4)(@vitest/browser-playwright@4.1.7)(vite@8.0.14(@types/node@24.12.4))
 
+  packages/browsergrad-primitives:
+    dependencies:
+      '@unlocalhosted/browsergrad-alignment':
+        specifier: workspace:*
+        version: link:../browsergrad-alignment
+      '@unlocalhosted/browsergrad-data':
+        specifier: workspace:*
+        version: link:../browsergrad-data
+      '@unlocalhosted/browsergrad-scaling':
+        specifier: workspace:*
+        version: link:../browsergrad-scaling
+      '@unlocalhosted/browsergrad-simulators':
+        specifier: workspace:*
+        version: link:../browsergrad-simulators
+      '@unlocalhosted/browsergrad-snapshots':
+        specifier: workspace:*
+        version: link:../browsergrad-snapshots
+      '@unlocalhosted/browsergrad-tokenizers':
+        specifier: workspace:*
+        version: link:../browsergrad-tokenizers
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.12.4
+      oxlint:
+        specifier: ^1.0.0
+        version: 1.66.0
+      typescript:
+        specifier: ~6.0.0
+        version: 6.0.3
+      vitest:
+        specifier: ^4.0.0
+        version: 4.1.7(@types/node@24.12.4)(@vitest/browser-playwright@4.1.7)(vite@8.0.14(@types/node@24.12.4))
+
   packages/browsergrad-runtime:
     devDependencies:
       '@types/node':

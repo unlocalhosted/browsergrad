@@ -415,7 +415,7 @@ text with `ctx.readText(path)` or mounted bytes with `ctx.readBytes(path)`.
 Use `runAssignmentJavascriptProfile()` for full assignment profiles when the
 profile's declared oracle modules should be checked before rubric execution.
 For JS/TS streaming rubrics, pair this with `createStreamingGate()` from
-`@unlocalhosted/browsergrad-tokenizers` and wrap student input/output iterables.
+`@unlocalhosted/browsergrad-primitives` and wrap student input/output iterables.
 
 ## What this is, and is not
 

@@ -45,12 +45,7 @@ npm install @unlocalhosted/browsergrad-runtime pyodide
 npm install @unlocalhosted/browsergrad-jit
 npm install @unlocalhosted/browsergrad-kernels        # optional: WGSL kernels + WebGPU bridge
 npm install @unlocalhosted/browsergrad-grad           # optional: eager-autograd alternative
-npm install @unlocalhosted/browsergrad-tokenizers     # optional: tokenizer/BPE + streaming primitives
-npm install @unlocalhosted/browsergrad-simulators     # optional: parallel/distributed execution simulators
-npm install @unlocalhosted/browsergrad-snapshots      # optional: JSON/numeric snapshot comparison
-npm install @unlocalhosted/browsergrad-data           # optional: HTML/dedupe/PII/data-quality primitives
-npm install @unlocalhosted/browsergrad-scaling        # optional: scaling-law + hosted API mock primitives
-npm install @unlocalhosted/browsergrad-alignment      # optional: DPO/GRPO/alignment math primitives
+npm install @unlocalhosted/browsergrad-primitives     # optional: text/data/eval/simulation/RL primitives
 ```
 
 `pyodide` is a peer dependency. Asset-sync into `public/pyodide/v0.26.4/` so the runtime is served same-origin.
@@ -121,14 +116,11 @@ out = bg.realize_webgpu(x @ w + b)   # tiled GEMM, fused elementwise, custom WGS
 | [`browsergrad-jit`](./packages/browsergrad-jit) | Lazy-IR PyTorch-shape library. 28-opcode IR, fusion, symbolic VJP, AMP, gradient checkpointing, `bg.func.*`, custom WGSL kernels, ONNX export. |
 | [`browsergrad-kernels`](./packages/browsergrad-kernels) | WGSL compute-shader catalog, CUDA-shaped 1D program authoring, and pure-JS references for attention, tensor kernels, and GPU teaching subsets. |
 | [`browsergrad-grad`](./packages/browsergrad-grad) | Eager-autograd alternative. PyTorch-flavored, NumPy-backed, closure backward. Stable. |
-| [`browsergrad-tokenizers`](./packages/browsergrad-tokenizers) | Pure TypeScript tokenizer/BPE primitives and streaming gates. |
-| [`browsergrad-simulators`](./packages/browsergrad-simulators) | Deterministic simulators for SIMD/thread/task traces, worker-mesh collectives, DDP/FSDP, and sharded optimizer behavior. |
-| [`browsergrad-snapshots`](./packages/browsergrad-snapshots) | Browser-safe JSON/numeric snapshot comparison for structured and tensor-like outputs. |
-| [`browsergrad-data`](./packages/browsergrad-data) | Browser-safe data primitives for HTML extraction, exact/near dedupe, quality rules, and PII masking. |
-| [`browsergrad-scaling`](./packages/browsergrad-scaling) | Browser-safe hosted API mocks, budget schedulers, and scaling-law fitters. |
-| [`browsergrad-alignment`](./packages/browsergrad-alignment) | Browser-safe DPO, GRPO, rollout reward, parser, and policy-gradient math primitives. |
+| [`browsergrad-primitives`](./packages/browsergrad-primitives) | Canonical small-primitive facade: byte-BPE, streaming gates, data filters, snapshot comparators, hosted-training fixtures, deterministic simulations, and RL/alignment math. |
 
-Each package is independently consumable; they share an npm scope but no runtime dependency. Take one or all.
+The leaf primitive packages remain publishable implementation shards for
+compatibility and release mechanics. New callers should start with
+`browsergrad-primitives` unless they need a narrower package for bundle policy.
 
 ## Testing
 
@@ -138,6 +130,7 @@ Workspace tests cover package surfaces, Pyodide integration, and browser WebGPU:
 pnpm -r test
 pnpm -r test:integration                                    # 311 Pyodide-in-node tests
 pnpm --filter @unlocalhosted/browsergrad-kernels test:browser    # 7 real-Chromium WebGPU tests
+pnpm --filter @unlocalhosted/browsergrad-primitives test
 pnpm --filter @unlocalhosted/browsergrad-simulators test
 pnpm --filter @unlocalhosted/browsergrad-snapshots test
 pnpm --filter @unlocalhosted/browsergrad-data test

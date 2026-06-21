@@ -1,0 +1,94 @@
+{
+  "name": "@unlocalhosted/browsergrad-primitives",
+  "version": "0.1.0",
+  "description": "Generic browser-safe ML primitives for tokenization, data cleaning, evaluation, simulation, scaling, and RL math.",
+  "type": "module",
+  "license": "MIT",
+  "author": "unlocalhosted",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/unlocalhosted/browsergrad.git",
+    "directory": "packages/browsergrad-primitives"
+  },
+  "homepage": "https://github.com/unlocalhosted/browsergrad/tree/main/packages/browsergrad-primitives#readme",
+  "bugs": {
+    "url": "https://github.com/unlocalhosted/browsergrad/issues"
+  },
+  "keywords": [
+    "machine-learning",
+    "browser",
+    "tokenization",
+    "simulation",
+    "evaluation",
+    "webgpu"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./data": {
+      "types": "./dist/data.d.ts",
+      "import": "./dist/data.js"
+    },
+    "./evaluation": {
+      "types": "./dist/evaluation.d.ts",
+      "import": "./dist/evaluation.js"
+    },
+    "./rl": {
+      "types": "./dist/rl.d.ts",
+      "import": "./dist/rl.js"
+    },
+    "./scaling": {
+      "types": "./dist/scaling.d.ts",
+      "import": "./dist/scaling.js"
+    },
+    "./simulation": {
+      "types": "./dist/simulation.d.ts",
+      "import": "./dist/simulation.js"
+    },
+    "./text": {
+      "types": "./dist/text.d.ts",
+      "import": "./dist/text.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/",
+    "src/",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "oxlint src",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "prepublishOnly": "pnpm run build && pnpm run test"
+  },
+  "dependencies": {
+    "@unlocalhosted/browsergrad-alignment": "workspace:*",
+    "@unlocalhosted/browsergrad-data": "workspace:*",
+    "@unlocalhosted/browsergrad-scaling": "workspace:*",
+    "@unlocalhosted/browsergrad-simulators": "workspace:*",
+    "@unlocalhosted/browsergrad-snapshots": "workspace:*",
+    "@unlocalhosted/browsergrad-tokenizers": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "oxlint": "^1.0.0",
+    "typescript": "~6.0.0",
+    "vitest": "^4.0.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "sideEffects": false
+}

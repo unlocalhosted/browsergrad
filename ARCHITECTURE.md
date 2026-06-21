@@ -56,8 +56,14 @@ Closure-based reverse-mode autograd in Python. Each op carries a closure that ru
 ### `browsergrad-jit` — lazy IR
 The UOp graph + lazy execution path. Every arithmetic op builds an IR node; nothing realizes until `.numpy()` / `.item()` / `.backward()` / `optimizer.step()`. The IR enables fusion, symbolic backward, AMP cast-insertion, gradient-checkpointing IR rewrites, functional transforms (vmap / grad / vjp / functional_call), custom WGSL kernels, ONNX export, and pluggable backends.
 
-### `browsergrad-tokenizers` — rubric oracle helpers
-Pure TypeScript tokenizer and byte-level BPE helpers for platform rubrics. It owns browser-safe exact reference behavior, serialization across JS/Python boundaries, and streaming behavior gates. No Pyodide or tensor dependency.
+### `browsergrad-primitives` — small primitive facade
+Canonical public interface for browser-safe text, data, evaluation,
+simulation, hosted-training, and RL/math primitives. It keeps generic caller
+vocabulary such as references, comparators, fixtures, and simulators. The
+legacy leaf packages (`browsergrad-tokenizers`, `browsergrad-data`,
+`browsergrad-snapshots`, `browsergrad-scaling`, `browsergrad-simulators`, and
+`browsergrad-alignment`) are implementation shards and compatibility surfaces,
+not the product identity.
 
 ## Data flow — a forward+backward pass through jit
 
@@ -157,6 +163,7 @@ Every major feature passes through a design review before implementation. Each r
 - `packages/browsergrad-kernels/src/realizer.ts` — the production bridge.
 - `packages/browsergrad-kernels/src/kernels/matmul_tiled.ts` — the tiled GEMM. Read alongside the WGSL.
 - `packages/browsergrad-kernels/src/kernels/fused_elementwise.ts` — runtime WGSL codegen. ~120 LOC; representative of the "we own the codegen" stance.
-- `packages/browsergrad-tokenizers/src/index.ts` — pure TS tokenizer/BPE oracle and streaming gate helpers.
+- `packages/browsergrad-primitives/src/index.ts` — canonical facade for small
+  primitive helpers.
 
 If you're adding a new opcode, the contract is in `docs/prd/PRD-005-jit-foundation.md`: declare in `_ir.py`, handler in `_realize.py`, VJP in `_vjp.py` (or refuse-via-closure), batching rule in `_vmap.py` (or refuse with a clear message).

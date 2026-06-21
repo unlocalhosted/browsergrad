@@ -18,7 +18,7 @@ not root platform identity.
 
 - Use `docs/internal/cs336-assignment5-alignment.profile.json` as source
   profile.
-- Use `@unlocalhosted/browsergrad-alignment` for:
+- Use `@unlocalhosted/browsergrad-primitives` for:
   - `computePerInstanceDpoLoss()` for optional safety/RLHF DPO fixtures.
   - `parseMmluResponse()` and `parseGsm8kResponse()` for metrics fixtures.
   - `computeRolloutRewards()` for reward-function wiring checks.
@@ -26,10 +26,9 @@ not root platform identity.
   - `computePolicyGradientLoss()` for on-policy and off-policy token losses.
   - `aggregateLossAcrossMicrobatch()` for masked sequence/constant loss
     normalization.
-- Use `@unlocalhosted/browsergrad-snapshots` for expected numeric fixture
-  outputs.
-- Use `@unlocalhosted/browsergrad-tokenizers` for prompt/output tokenization
-  fixtures where pure token IDs are enough.
+- Use `createSnapshotComparator()` for expected numeric fixture outputs.
+- Use `createByteBpeReference()` for prompt/output tokenization fixtures where
+  pure token IDs are enough.
 
 ## Non-Portable Upstream Assumptions
 
@@ -40,9 +39,9 @@ not root platform identity.
 
 ## Platform Work
 
-- Register a JS oracle module from `@unlocalhosted/browsergrad-alignment` as
-  `_bg_alignment_oracles`.
-- Route `rl-loss-oracle` to the alignment package.
+- Register a JS reference module from `@unlocalhosted/browsergrad-primitives` as
+  `_bg_alignment_references`.
+- Route `rl-loss-oracle` to the primitive facade's `rl` namespace.
 - Route `response-parser-oracle` to `parseMmluResponse()` and
   `parseGsm8kResponse()`.
 - Keep full inference/training behind `vllm-external`, `flash-attn-external`,

@@ -19,7 +19,7 @@ root agent behavior.
 - Use small checked-in HTML/text fixtures declared as datasets.
 - Keep `large-file-streaming` as behavior under test; do not replace it with
   Linux RSS or process-resource checks.
-- Register a JS oracle module from `@unlocalhosted/browsergrad-data` for:
+- Register a JS reference module from `@unlocalhosted/browsergrad-primitives` for:
   - `extractVisibleTextFromHtml()` for HTML fixture text extraction.
   - `exactLineDeduplicate()` for exact line dedupe checks.
   - `minhashDeduplicateDocuments()` for fixture-scale exact/fuzzy document
@@ -27,8 +27,8 @@ root agent behavior.
   - `maskPii()` for email, phone, and IP masking checks.
   - `evaluateGopherQuality()` / `gopherQualityFilter()` for deterministic
     Gopher-style quality rules.
-- Use `@unlocalhosted/browsergrad-snapshots` when expected data-cleaning output
-  is easiest to store as JSON.
+- Use `createSnapshotComparator()` from `@unlocalhosted/browsergrad-primitives`
+  when expected data-cleaning output is easiest to store as JSON.
 
 ## Non-Portable Upstream Assumptions
 
@@ -42,7 +42,7 @@ root agent behavior.
 - Fetch/cache tiny fixtures, then call
   `createVerifiedAssignmentBenchmarkPreflightMatrix()` before mounting.
 - Route `pii-oracle`, `dedupe-oracle`, `near-dedupe-oracle`, and
-  `quality-rule-oracle` to `@unlocalhosted/browsergrad-data`.
+  `quality-rule-oracle` to `@unlocalhosted/browsergrad-primitives`.
 - Route `classifier-oracle` to a later deterministic fixture classifier or to
   explicit external classifier capabilities.
 - Render failures as data-specific rubric messages, for example:

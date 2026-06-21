@@ -109,10 +109,10 @@ GPU Puzzles and CS149 A3-style CUDA concept rubrics can use the same package's
 `cuda-compatible-subset` fixture checks. The grid simulator records
 thread/block ids, global reads/writes, and out-of-bounds accesses so missing
 guards fail as teaching feedback before native CUDA runners exist.
-Distributed or systems-style JS rubrics can use `createDeterministicMesh()` from
-`@unlocalhosted/browsergrad-simulators` to model worker ranks, barriers,
+Distributed or systems-style JS rubrics can use `simulation.createDeterministicMesh()`
+from `@unlocalhosted/browsergrad-primitives` to model worker ranks, barriers,
 broadcasts, point-to-point messages, and `allReduce` results as deterministic
-event traces. Use `createTaskGraphSimulator()` from the same package for
+event traces. Use `simulation.createTaskGraphSimulator()` from the same package for
 dependency-constrained task-system traces with deterministic ready/start/finish
 events and worker assignment. These APIs back `worker-mesh`,
 `distributed-simulator`, `pthreads-simulator`, or `task-graph-simulator`
@@ -131,25 +131,26 @@ utilization, vector-instruction traces, tail masks, horizontal reductions, and
 static contiguous/cyclic work decomposition without depending on native C++,
 AVX2, ISPC, or host timing.
 Fixture-backed JS rubrics can use `compareSnapshot()` or
-`createSnapshotOracle()` from `@unlocalhosted/browsergrad-snapshots` for
+`createSnapshotComparator()` from `@unlocalhosted/browsergrad-primitives` for
 `snapshot-oracle` profile paths. Prefer it for small JSON/numeric outputs such
 as losses, logits, masks, event traces, dedupe decisions, or alignment math
 fixtures; it reports deterministic mismatch paths and numeric tolerances
 without native `.npz` or PyTorch dependencies.
-Data-cleaning rubrics can use `@unlocalhosted/browsergrad-data` for
+Data-cleaning rubrics can use `@unlocalhosted/browsergrad-primitives` for
 `pii-oracle`, `dedupe-oracle`, `near-dedupe-oracle`, and `quality-rule-oracle`
-fixture checks. Its helpers cover `maskPii()`, `exactLineDeduplicate()`,
-`minhashDeduplicateDocuments()`, `evaluateGopherQuality()`,
-`gopherQualityFilter()`, and `extractVisibleTextFromHtml()` so CS336 A4-style
+fixture checks. Its `data` helpers cover `maskPii()`,
+`exactLineDeduplicate()`, `minhashDeduplicateDocuments()`,
+`evaluateGopherQuality()`, `gopherQualityFilter()`, and
+`extractVisibleTextFromHtml()` so CS336 A4-style
 tests can validate browser-safe behavior before WARC readers, fastText,
 transformers, or full Common Crawl data enter the loop.
 Scaling-law and hosted API rubrics can use
-`@unlocalhosted/browsergrad-scaling` for `hosted-api-mock`,
+`@unlocalhosted/browsergrad-primitives` for `hosted-api-mock`,
 `scheduler-simulator`, and `scaling-law-oracle` fixture checks. Its helpers
-cover CS336 A3-style budget/submit/list/final-submission API behavior,
-duplicate training-config rejection, dispatch fairness, and log-space power-law
-fits before a real FastAPI/Postgres/JAX/Modal stack enters the loop.
-Alignment rubrics can use `@unlocalhosted/browsergrad-alignment` for
+cover hosted training API fixture behavior, duplicate training-config
+rejection, dispatch fairness, and log-space power-law fits before a real
+FastAPI/Postgres/JAX/Modal stack enters the loop.
+Alignment rubrics can use `@unlocalhosted/browsergrad-primitives` for
 `rl-loss-oracle` and `response-parser-oracle` fixture checks. Its helpers cover
 CS336 A5-style DPO loss, MMLU/GSM8K parsing, rollout reward metadata,
 group-normalized rewards, policy-gradient token losses, and masked microbatch
@@ -188,10 +189,11 @@ name, so platforms can fetch/cache however they want before writing to Pyodide.
 JavaScript rubrics should use `ctx.readBytes(path)` for binary mounts and
 `ctx.readText(path)` for UTF-8 text.
 JS/TS rubrics that need streaming checks can import `createStreamingGate()` from
-`@unlocalhosted/browsergrad-tokenizers`, then use `gate.wrapInput(chunks)` and
+`@unlocalhosted/browsergrad-primitives`, then use `gate.wrapInput(chunks)` and
 `gate.wrapOutput(studentOutput)` to mirror the Python streaming-gate contract.
 JS/TS rubrics that need hosted API fixtures can import
-`createHostedScalingApiMock()` from `@unlocalhosted/browsergrad-scaling`, then
+`createHostedTrainingApiFixture()` from `@unlocalhosted/browsergrad-primitives`,
+then
 exercise student HTTP-client logic against deterministic `/budget`, `/submit`,
 `/experiments`, `/experiment/{id}`, and `/final_submission` behavior. Keep live
 hosted servers and JAX training behind explicit external capability gates.

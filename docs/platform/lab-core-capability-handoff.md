@@ -54,10 +54,11 @@ For every lab profile, the platform should:
 13. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
    Worker mesh, external/native runner, or future custom compiler.
 14. For simulator-backed systems labs, use
-   `@unlocalhosted/browsergrad-simulators` `createDeterministicMesh()` inside
+   `@unlocalhosted/browsergrad-primitives` `simulation.createDeterministicMesh()` inside
    JS rubrics or platform oracles to produce deterministic rank/collective
-   traces before adding real Worker execution. Use `createTaskGraphSimulator()`
-   for dependency-constrained task scheduling traces.
+   traces before adding real Worker execution. Use
+   `simulation.createTaskGraphSimulator()` for dependency-constrained task
+   scheduling traces.
    Use `simulateDdpGradientSynchronization()`,
     `simulateFsdpParameterSharding()`, `simulateFsdpGradientReduceScatter()`,
     and `simulateShardedAdamWStep()` for CS336 A2-style DDP/FSDP/sharded
@@ -92,24 +93,25 @@ For every lab profile, the platform should:
     `simulateCuda1DGrid()`, `referenceSaxpy()`, and
     `referenceExclusiveScan()` for browser-safe map/guard/SAXPY/scan checks
     before native CUDA runners exist.
-    Snapshot-backed labs can use `@unlocalhosted/browsergrad-snapshots`
-    `createSnapshotOracle()` to compare small JSON/numeric fixtures and emit
+    Snapshot-backed labs can use `@unlocalhosted/browsergrad-primitives`
+    `createSnapshotComparator()` to compare small JSON/numeric fixtures and emit
     deterministic mismatch paths.
-    Data-cleaning labs can use `@unlocalhosted/browsergrad-data`
-    `maskPii()`, `exactLineDeduplicate()`, `minhashDeduplicateDocuments()`,
-    `evaluateGopherQuality()`, `gopherQualityFilter()`, and
+    Data-cleaning labs can use `@unlocalhosted/browsergrad-primitives`
+    `data.maskPii()`, `data.exactLineDeduplicate()`,
+    `data.minhashDeduplicateDocuments()`, `data.evaluateGopherQuality()`,
+    `data.gopherQualityFilter()`, and
     `extractVisibleTextFromHtml()` for fixture-scale CS336 A4 checks before
     external classifiers or WARC tooling are available.
-    Scaling-law labs can use `@unlocalhosted/browsergrad-scaling`
-    `createHostedScalingApiMock()`, `selectExperimentsForDispatch()`, and
+    Scaling-law labs can use `@unlocalhosted/browsergrad-primitives`
+    `createHostedTrainingApiFixture()`, `selectExperimentsForDispatch()`, and
     `fitPowerLawScalingLaw()` for CS336 A3-style hosted API, scheduler, and
     scaling-law checks before external FastAPI/Postgres/JAX/Modal runners are
     attached.
-    Alignment labs can use `@unlocalhosted/browsergrad-alignment`
-    `computePerInstanceDpoLoss()`, `parseMmluResponse()`,
-    `parseGsm8kResponse()`, `computeRolloutRewards()`,
-    `computeGroupNormalizedRewards()`, `computePolicyGradientLoss()`, and
-    `aggregateLossAcrossMicrobatch()` for fixture-scale CS336 A5 DPO/GRPO
+    Alignment labs can use `@unlocalhosted/browsergrad-primitives`
+    `rl.computePerInstanceDpoLoss()`, `rl.parseMmluResponse()`,
+    `rl.parseGsm8kResponse()`, `rl.computeRolloutRewards()`,
+    `rl.computeGroupNormalizedRewards()`, `rl.computePolicyGradientLoss()`, and
+    `rl.aggregateLossAcrossMicrobatch()` for fixture-scale CS336 A5 DPO/GRPO
     checks before vLLM, flash-attn, or full model training enter the path.
 18. In Python rubrics, call profile-registered JS oracles with
     `browsergrad.oracle("<module-name>")`.
@@ -164,41 +166,20 @@ Capability names are strings. Keep them descriptive and reusable:
 
 This table is a living convention, not a runtime enum. Add names when a new
 assignment family needs them, but prefer reusing names across courses.
-The first reusable simulator substrate is
-`@unlocalhosted/browsergrad-simulators`: it provides deterministic mesh event
-traces, simple collectives, and task-graph ready/start/finish traces for labs
-that choose simulated `worker-mesh`, `distributed-simulator`, or
-`task-graph-simulator` paths. It also provides DDP gradient synchronization,
-FSDP sharding/reduce-scatter, and sharded AdamW update simulators for labs that
-choose `ddp-simulator`, `fsdp-simulator`, or `sharded-optimizer-simulator`
-paths.
-The first reusable snapshot substrate is
-`@unlocalhosted/browsergrad-snapshots`: it provides JSON/numeric snapshot
-comparison for labs that choose `snapshot-oracle` paths before heavier `.npz`,
-PyTorch, or model-runtime fixtures are needed.
-The first reusable data substrate is `@unlocalhosted/browsergrad-data`: it
-provides fixture-scale PII masking, exact line dedupe, near-duplicate document
-dedupe, Gopher quality rules, and HTML text extraction for labs that choose
-`pii-oracle`, `dedupe-oracle`, `near-dedupe-oracle`, or `quality-rule-oracle`
-paths.
-The first reusable scaling substrate is `@unlocalhosted/browsergrad-scaling`:
-it provides deterministic CS336 A3-style hosted API behavior, scheduler
-selection, and log-space power-law fitting for labs that choose
-`hosted-api-mock`, `scheduler-simulator`, or `scaling-law-oracle` paths.
-The first reusable alignment substrate is
-`@unlocalhosted/browsergrad-alignment`: it provides deterministic DPO loss,
-response parsing, rollout reward, group-normalized advantage, policy-gradient,
-and masked aggregation helpers for labs that choose `rl-loss-oracle` or
-`response-parser-oracle` paths.
+The first reusable small-helper substrate is
+`@unlocalhosted/browsergrad-primitives`: it provides deterministic mesh event
+traces, task-graph traces, DDP/FSDP/sharded-optimizer simulators,
+JSON/numeric snapshot comparators, fixture-scale data filters, hosted-training
+fixtures, scaling-law fitting, and RL/math references. Leaf packages remain
+implementation shards, but platform handoffs should teach the facade first.
 The first reusable CUDA-concept substrate lives in
 `@unlocalhosted/browsergrad-kernels`: it provides `simulateCuda1DGrid()`,
 `referenceSaxpy()`, and `referenceExclusiveScan()` for labs that choose
 `cuda-compatible-subset`, `wgsl-kernel`, or `performance-rubric` paths.
-The first reusable CS149 CPU/SIMD substrate also lives in
-`@unlocalhosted/browsergrad-simulators`: it provides clamped-exp lane-mask
-simulation, vector array-sum reduction traces, and static contiguous/cyclic work
-partitioning for labs that choose `simd-simulator`, `pthreads-simulator`,
-`ispc-simulator`, or `performance-rubric` paths.
+The same primitive facade provides the first reusable CS149 CPU/SIMD substrate:
+clamped-exp lane-mask simulation, vector array-sum reduction traces, and static
+contiguous/cyclic work partitioning for labs that choose `simd-simulator`,
+`pthreads-simulator`, `ispc-simulator`, or `performance-rubric` paths.
 
 ## Readiness Modes
 
@@ -284,9 +265,9 @@ CS336 Assignment 5 and CS149GPT, proving their profile drafts can produce
 | Benchmark | First platform slice | Core capabilities |
 | --- | --- | --- |
 | CS336 A2 Systems | FlashAttention oracle + DDP/FSDP/sharded optimizer simulator preflight | `torch-compat`, `flash-attention-oracle`, `webgpu`, `worker-mesh`, `distributed-simulator`, `ddp-simulator`, `fsdp-simulator`, `sharded-optimizer-simulator` |
-| CS336 A3 Scaling | Hosted API mock + scheduler tests via `@unlocalhosted/browsergrad-scaling` | `http-client`, `hosted-api-mock`, `server-fixture`, `scheduler-simulator`, `scaling-law-oracle` |
-| CS336 A4 Data | Small Common Crawl fixtures + `browsergrad-data` PII/dedupe/quality/HTML rubrics | `dataset-fixture`, `large-file-streaming`, `classifier-oracle`, `pii-oracle`, `near-dedupe-oracle`, `quality-rule-oracle` |
-| CS336 A5 Alignment | GRPO/DPO math snapshot labs via `@unlocalhosted/browsergrad-alignment` + snapshots | `torch-compat`, `transformers-compatible`, `snapshot-oracle`, `rl-loss-oracle`, `response-parser-oracle` |
+| CS336 A3 Scaling | Hosted training fixture + scheduler tests via `@unlocalhosted/browsergrad-primitives` | `http-client`, `hosted-api-mock`, `server-fixture`, `scheduler-simulator`, `scaling-law-oracle` |
+| CS336 A4 Data | Small Common Crawl fixtures + `browsergrad-primitives` data filters | `dataset-fixture`, `large-file-streaming`, `classifier-oracle`, `pii-oracle`, `near-dedupe-oracle`, `quality-rule-oracle` |
+| CS336 A5 Alignment | GRPO/DPO math snapshot labs via `@unlocalhosted/browsergrad-primitives` | `torch-compat`, `transformers-compatible`, `snapshot-oracle`, `rl-loss-oracle`, `response-parser-oracle` |
 | GPU Puzzles | WGSL puzzle runner | `webgpu`, `wgsl-kernel`, `kernel-visualizer` |
 | CS149 A1/A2 | Thread/SIMD/task-system simulator with deterministic lane and task traces | `pthreads-simulator`, `simd-simulator`, `task-graph-simulator`, `performance-rubric` |
 | CS149 A3 | CUDA scan/SAXPY/render concepts via 1D grid and reference oracles | `webgpu`, `cuda-compatible-subset`, `performance-rubric` |
@@ -365,8 +346,8 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     `referenceExclusiveScan()` for map/guard/SAXPY/scan fixtures and
     out-of-bounds guard diagnostics. This is the current HipScript-inspired
     CUDA-shaped path: simulator trace first, WGSL/WebGPU lowering next.
-    Simulator-backed labs can use `@unlocalhosted/browsergrad-simulators`
-    `createDeterministicMesh()` or `createTaskGraphSimulator()` for event-trace
+    Simulator-backed labs can use `@unlocalhosted/browsergrad-primitives`
+    `simulation.createDeterministicMesh()` or `simulation.createTaskGraphSimulator()` for event-trace
     rubrics before real Worker execution exists. CS336 A2 systems labs can also
     use the DDP/FSDP/sharded-optimizer simulator helpers for gradient averaging,
     all-gather/reduce-scatter, and AdamW state-sharding checks.
@@ -374,15 +355,15 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     `simulateVectorizedClampedExp()`, `simulateVectorizedArraySum()`, and
     `partitionStaticWork()` to check clamped exponentiation, vector sums,
     active-lane utilization, tails, and static work partitioning.
-    Snapshot-backed labs can use `@unlocalhosted/browsergrad-snapshots`
+    Snapshot-backed labs can use `@unlocalhosted/browsergrad-primitives`
     `compareSnapshot()` for JSON/numeric fixture checks.
-    CS336 A4 data labs can use `@unlocalhosted/browsergrad-data` for
+    CS336 A4 data labs can use `@unlocalhosted/browsergrad-primitives` for
     browser-safe PII, exact/near dedupe, Gopher quality, and HTML extraction
     checks.
-    CS336 A3 scaling labs can use `@unlocalhosted/browsergrad-scaling` for
+    CS336 A3 scaling labs can use `@unlocalhosted/browsergrad-primitives` for
     hosted API mock, scheduler fairness, and scaling-law fixture checks.
     CS336 A5 alignment labs can use
-    `@unlocalhosted/browsergrad-alignment` for DPO, parser, reward,
+    `@unlocalhosted/browsergrad-primitives` for DPO, parser, reward,
     group-normalized advantage, policy-gradient, and masked aggregation checks.
 17. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

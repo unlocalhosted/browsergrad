@@ -25,9 +25,9 @@ capability choices, not hardcoded runtime branches.
 
 Start from `docs/internal/cs336-assignment3-scaling.profile.json`.
 
-Use `@unlocalhosted/browsergrad-scaling` as the first browser-safe oracle:
+Use `@unlocalhosted/browsergrad-primitives` as the first browser-safe reference:
 
-- `createHostedScalingApiMock()` for fixture-scale hosted API behavior.
+- `createHostedTrainingApiFixture()` for fixture-scale hosted API behavior.
 - `selectExperimentsForDispatch()` for scheduler fairness.
 - `fitPowerLawScalingLaw()` for scaling-law projection rubrics.
 
@@ -60,7 +60,7 @@ Portable as JS/TS or Pyodide rubrics:
 
 Browser-safe replacements:
 
-- Replace live `requests` calls with `createHostedScalingApiMock()`.
+- Replace live `requests` calls with `createHostedTrainingApiFixture()`.
 - Replace SQLAlchemy/Postgres scheduler setup with plain JSON experiment
   fixtures passed to `selectExperimentsForDispatch()`.
 - Replace live training runs with deterministic loss fixtures and
@@ -77,8 +77,8 @@ External-only:
 
 craftingattention should:
 
-1. Import `@unlocalhosted/browsergrad-scaling` in the assignment-profile E2E.
-2. Register the scaling oracle through `runAssignmentJavascriptRubric()` or
+1. Import `@unlocalhosted/browsergrad-primitives` in the assignment-profile E2E.
+2. Register the scaling reference through `runAssignmentJavascriptRubric()` or
    Pyodide JS module bridge.
 3. Mount small JSON fixtures for training configs, queued/running experiments,
    and expected scaling-law outputs.
@@ -91,7 +91,7 @@ craftingattention should:
 ## Acceptance
 
 - BrowserGrad package tests pass:
-  `pnpm --filter @unlocalhosted/browsergrad-scaling test`.
+  `pnpm --filter @unlocalhosted/browsergrad-primitives test`.
 - Root profile matrix tests keep A3 expected status `simulated`.
 - Platform E2E consumes the package as one declared oracle before adding a full
   A3 content unit.

@@ -6,6 +6,10 @@
   useful outside one course, assignment, or platform. Public names should speak
   in domain primitives: byte BPE, kernel, tensor, snapshot, scaling law,
   alignment loss, data filter, task graph, worker mesh.
+- **Primitive facade**: the canonical package interface for small reusable
+  primitives that would otherwise fragment into lab-shaped packages. The facade
+  may delegate to implementation shards, but callers should learn one generic
+  vocabulary.
 - **Curriculum profile**: assignment- or course-specific JSON/docs that map an
   upstream lab onto BrowserGrad primitives. Profiles may mention CS336, CS149,
   GPU Puzzles, or Crafting Attention; primitive packages should not depend on
@@ -24,6 +28,8 @@
 ## Architecture Rules
 
 - Core packages stay primitive-first and assignment-agnostic.
+- New small primitive domains should enter `browsergrad-primitives` first; split
+  them only when implementation weight or release cadence proves a real seam.
 - Course and assignment facts live in curriculum profiles, handoff docs,
   fixtures, and platform adapters.
 - A public package export must pass this test: someone building a non-course
