@@ -25,9 +25,11 @@ Profiles should not encode course-specific assumptions in `runtime`, `grad`,
 `jit`, or `kernels`. If a behavior is broadly reusable, expose it as a small
 library API and let the profile opt into it.
 
-Use `parseAssignmentProfile()` to validate this shape and
-`profileOracleJsModules()` to convert oracle declarations into
-`createSession({ jsModules })` registrations.
+Use `parseAssignmentProfile()` to validate this shape,
+`requiredAssignmentCapabilities()` to list the profile's preflight needs,
+`evaluateAssignmentCapabilities()` to compare those needs against the current
+platform substrate, and `profileOracleJsModules()` to convert oracle
+declarations into `createSession({ jsModules })` registrations.
 
 ## Files And Fixtures
 
@@ -71,6 +73,12 @@ implementation detail.
 Capability gates should make upstream-native requirements explicit. For
 example, a CUDA/Triton test can be declared as a capability gate and replaced by
 a WebGPU oracle or skipped with a clear browser-edition reason.
+
+Capability gate options use:
+
+- `requires`: every listed capability must be available.
+- `any_of`: at least one listed capability group must be available.
+- `message`: optional platform-facing explanation.
 
 ## New Assignment Checklist
 

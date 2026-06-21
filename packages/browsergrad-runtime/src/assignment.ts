@@ -60,6 +60,26 @@ export interface AssignmentDataset {
   readonly hash?: string;
 }
 
+export interface AssignmentCapabilityEnvironment {
+  readonly capabilities: readonly string[];
+}
+
+export interface AssignmentCapabilityGateEvaluation {
+  readonly name: string;
+  readonly ok: boolean;
+  readonly requires: readonly string[];
+  readonly anyOf: readonly (readonly string[])[];
+  readonly missingRequired: readonly string[];
+  readonly missingAnyOf: readonly (readonly string[])[];
+  readonly message?: string;
+}
+
+export interface AssignmentCapabilityEvaluation {
+  readonly ok: boolean;
+  readonly missingCapabilities: readonly string[];
+  readonly gates: readonly AssignmentCapabilityGateEvaluation[];
+}
+
 export type AssignmentProfileParseResult =
   | { ok: true; profile: AssignmentProfile }
   | { ok: false; errors: readonly string[] };
@@ -169,6 +189,41 @@ export function profileOracleJsModules(
   }));
 }
 
+export function evaluateAssignmentCapabilities(
+  profile: AssignmentProfile,
+  environment: AssignmentCapabilityEnvironment,
+): AssignmentCapabilityEvaluation {
+  const available = new Set(environment.capabilities);
+  const gates = profile.gates
+    .filter((gate) => gate.kind === "capability")
+    .map((gate) => evaluateCapabilityGate(gate, available));
+
+  return {
+    ok: gates.every((gate) => gate.ok),
+    missingCapabilities: uniqueSorted(
+      gates.flatMap((gate) => [
+        ...gate.missingRequired,
+        ...gate.missingAnyOf.flat(),
+      ]),
+    ),
+    gates,
+  };
+}
+
+export function requiredAssignmentCapabilities(
+  profile: AssignmentProfile,
+): string[] {
+  return uniqueSorted(
+    profile.gates
+      .filter((gate) => gate.kind === "capability")
+      .flatMap((gate) => {
+        const requires = readCapabilityStringList(gate.options.requires);
+        const anyOf = readCapabilityAlternatives(gate.options.any_of);
+        return [...requires, ...anyOf.flat()];
+      }),
+  );
+}
+
 function readString(
   obj: Record<string, unknown>,
   key: string,
@@ -249,6 +304,104 @@ function readTimeouts(
     out[key] = timeout;
   }
   return out;
+}
+
+function evaluateCapabilityGate(
+  gate: AssignmentGateSpec,
+  available: ReadonlySet<string>,
+): AssignmentCapabilityGateEvaluation {
+  const requires = readCapabilityStringList(gate.options.requires);
+  const anyOf = readCapabilityAlternatives(gate.options.any_of);
+  const missingRequired = requires.filter((capability) => !available.has(capability));
+  const missingAnyOf =
+    anyOf.length === 0 || anyOf.some((group) => group.every((capability) => available.has(capability)))
+      ? []
+      : anyOf.map((group) => group.filter((capability) => !available.has(capability)));
+  const message =
+    typeof gate.options.message === "string" ? gate.options.message : undefined;
+
+  return {
+    name: gate.name,
+    ok: missingRequired.length === 0 && missingAnyOf.length === 0,
+    requires,
+    anyOf,
+    missingRequired,
+    missingAnyOf,
+    ...(message ? { message } : {}),
+  };
+}
+
+function readCapabilityStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function validateCapabilityGateOptions(
+  options: Record<string, unknown>,
+  path: string,
+  errors: string[],
+): void {
+  validateStringListOption(options.requires, `${path}.requires`, errors);
+
+  const anyOf = options.any_of;
+  if (anyOf !== undefined) {
+    if (!Array.isArray(anyOf)) {
+      errors.push(`${path}.any_of: must be an array of string arrays when present`);
+    } else {
+      for (let i = 0; i < anyOf.length; i++) {
+        const group = anyOf[i];
+        if (!Array.isArray(group)) {
+          errors.push(`${path}.any_of[${i}]: must be a string array`);
+          continue;
+        }
+        validateStringListItems(group, `${path}.any_of[${i}]`, errors);
+      }
+    }
+  }
+
+  const message = options.message;
+  if (message !== undefined && typeof message !== "string") {
+    errors.push(`${path}.message: must be a string when present`);
+  }
+}
+
+function validateStringListOption(
+  value: unknown,
+  path: string,
+  errors: string[],
+): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    errors.push(`${path}: must be a string array when present`);
+    return;
+  }
+  validateStringListItems(value, path, errors);
+}
+
+function validateStringListItems(
+  value: readonly unknown[],
+  path: string,
+  errors: string[],
+): void {
+  for (let i = 0; i < value.length; i++) {
+    if (typeof value[i] !== "string") {
+      errors.push(`${path}[${i}]: must be a string`);
+    }
+  }
+}
+
+function readCapabilityAlternatives(value: unknown): string[][] {
+  if (!Array.isArray(value)) return [];
+  const groups: string[][] = [];
+  for (const item of value) {
+    if (!Array.isArray(item)) continue;
+    groups.push(readCapabilityStringList(item));
+  }
+  return groups;
+}
+
+function uniqueSorted(values: readonly string[]): string[] {
+  return [...new Set(values)].sort();
 }
 
 function readStringArray(
@@ -339,11 +492,19 @@ function readGates(
       errors.push(`gates[${i}].options: must be an object when present`);
       continue;
     }
+    const normalizedOptions = options === undefined ? {} : { ...(options as Record<string, unknown>) };
+    if (kindValue === "capability") {
+      validateCapabilityGateOptions(
+        normalizedOptions,
+        `gates[${i}].options`,
+        errors,
+      );
+    }
     if (name) {
       out.push({
         name,
         kind: kindValue as AssignmentGateKind,
-        options: options === undefined ? {} : { ...(options as Record<string, unknown>) },
+        options: normalizedOptions,
       });
     }
   }

@@ -155,6 +155,33 @@ The schema is intentionally small (8 fields):
 
 Hard-fail on mismatch is the v0 contract — no legacy CDN, no GH-Action mirror. When 5+ labs exist and an actual coexistence problem appears, we'll revisit.
 
+## Assignment profile preflight
+
+Platforms can validate assignment profiles and decide whether a lab is runnable
+before launching a Worker:
+
+```ts
+import {
+  evaluateAssignmentCapabilities,
+  parseAssignmentProfile,
+  requiredAssignmentCapabilities,
+} from "@unlocalhosted/browsergrad-runtime";
+
+const parsed = parseAssignmentProfile(profileJson);
+if (!parsed.ok) throw new Error(parsed.errors.join("; "));
+
+const required = requiredAssignmentCapabilities(parsed.profile);
+const preflight = evaluateAssignmentCapabilities(parsed.profile, {
+  capabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
+});
+
+console.log(required, preflight.ok, preflight.missingCapabilities);
+```
+
+Capability gates support `requires` for all-of requirements and `any_of` for
+alternative groups. Non-capability gates such as streaming and timeout remain
+rubric/watchdog checks.
+
 ## What this is, and is not
 
 **This is:** a small, well-typed primitive for running Python in a browser worker. ~1,000 LOC. Boots Pyodide, mounts files, exec, stream stdout/stderr, structured assert/artifact protocols, cooperative + hard cancel, persistent namespace.

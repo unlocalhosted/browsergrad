@@ -62,8 +62,10 @@ export {
 } from "./lab.js";
 
 export {
+  evaluateAssignmentCapabilities,
   parseAssignmentProfile,
   profileOracleJsModules,
+  requiredAssignmentCapabilities,
   type AssignmentProfile,
   type AssignmentProfileMetadata,
   type AssignmentProfileFiles,
@@ -72,5 +74,8 @@ export {
   type AssignmentGateKind,
   type AssignmentGateSpec,
   type AssignmentDataset,
+  type AssignmentCapabilityEnvironment,
+  type AssignmentCapabilityGateEvaluation,
+  type AssignmentCapabilityEvaluation,
   type AssignmentProfileParseResult,
 } from "./assignment.js";

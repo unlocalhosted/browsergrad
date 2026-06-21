@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  evaluateAssignmentCapabilities,
   parseAssignmentProfile,
   profileOracleJsModules,
-} from "../src/assignment";
+  requiredAssignmentCapabilities,
+} from "../src/index";
 
 const VALID_PROFILE = {
   id: "cs336-assignment1",
@@ -86,6 +88,32 @@ describe("parseAssignmentProfile", () => {
     }
   });
 
+  it("rejects malformed capability gate options", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "bad_capability_options",
+          kind: "capability",
+          options: {
+            requires: ["pyodide", 123],
+            any_of: [["webgpu"], "native-cuda"],
+            message: false,
+          },
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors).toEqual([
+        "gates[0].options.requires[1]: must be a string",
+        "gates[0].options.any_of[1]: must be a string array",
+        "gates[0].options.message: must be a string when present",
+      ]);
+    }
+  });
+
   it("maps oracle specs to runtime JS module registrations", () => {
     const result = parseAssignmentProfile(VALID_PROFILE);
     expect(result.ok).toBe(true);
@@ -97,6 +125,82 @@ describe("parseAssignmentProfile", () => {
         importURL: "/assets/tokenizer-oracle.js",
         exportName: "oracle",
       },
+    ]);
+  });
+
+  it("evaluates required and alternative capability gates", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "flash_attention_path",
+          kind: "capability",
+          options: {
+            requires: ["pyodide", "torch-compat"],
+            any_of: [["webgpu", "wgsl-kernel"], ["triton-compatible"]],
+            message: "FlashAttention labs need a browser or native kernel path.",
+          },
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(
+      evaluateAssignmentCapabilities(result.profile, {
+        capabilities: ["pyodide", "torch-compat", "webgpu"],
+      }),
+    ).toEqual({
+      ok: false,
+      missingCapabilities: ["triton-compatible", "wgsl-kernel"],
+      gates: [
+        {
+          name: "flash_attention_path",
+          ok: false,
+          requires: ["pyodide", "torch-compat"],
+          anyOf: [["webgpu", "wgsl-kernel"], ["triton-compatible"]],
+          missingRequired: [],
+          missingAnyOf: [["wgsl-kernel"], ["triton-compatible"]],
+          message: "FlashAttention labs need a browser or native kernel path.",
+        },
+      ],
+    });
+
+    expect(
+      evaluateAssignmentCapabilities(result.profile, {
+        capabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
+      }).ok,
+    ).toBe(true);
+  });
+
+  it("lists required capabilities deterministically and ignores behavioral gates", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "kernel_path",
+          kind: "capability",
+          options: {
+            requires: ["pyodide", "torch-compat", "pyodide"],
+            any_of: [["webgpu", "wgsl-kernel"], ["native-cuda-external"]],
+          },
+        },
+        {
+          name: "streaming_behavior",
+          kind: "streaming",
+          options: { max_chunks_before_first_yield: 2 },
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(requiredAssignmentCapabilities(result.profile)).toEqual([
+      "native-cuda-external",
+      "pyodide",
+      "torch-compat",
+      "webgpu",
+      "wgsl-kernel",
     ]);
   });
 });
