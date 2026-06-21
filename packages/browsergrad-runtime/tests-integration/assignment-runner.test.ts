@@ -6,8 +6,13 @@
  * context parsing, and structured assertion emission.
  */
 
+import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
 import { loadPyodide } from "pyodide";
+import {
+  createHostedTrainingApiFixture,
+  fitPowerLawScalingLaw,
+} from "@unlocalhosted/browsergrad-primitives";
 import {
   createAssignmentRunPlan,
   parseAssignmentProfile,
@@ -68,6 +73,13 @@ const PROFILE = {
   ],
   datasets: [{ name: "tiny", url: "/fixtures/tiny.txt" }],
 };
+
+const CS336_A3_PROFILE = JSON.parse(
+  readFileSync(
+    new URL("../../../docs/internal/cs336-assignment3-scaling.profile.json", import.meta.url),
+    "utf8",
+  ),
+);
 
 const RUBRIC_SOURCE = `
 import browsergrad as bg
@@ -224,6 +236,121 @@ else:
     await expect(
       fs.readBytes("/assignments/assignment-smoke/fixtures/datasets/tiny.txt"),
     ).resolves.toEqual(fixtureBytes);
+  });
+
+  it("runs the CS336 A3 profile with a primitive-facade scaling oracle", async () => {
+    const parsed = parseAssignmentProfile(CS336_A3_PROFILE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const plan = createAssignmentRunPlan(parsed.profile, {
+      capabilities: [
+        "hosted-api-mock",
+        "http-client",
+        "pyodide",
+        "scaling-law-oracle",
+        "scheduler-simulator",
+        "server-fixture",
+      ],
+    });
+    const oracleSpec = plan.session.jsModules[0];
+    expect(oracleSpec?.name).toBe("_bg_scaling_api");
+    if (!oracleSpec) return;
+
+    const api = createHostedTrainingApiFixture({
+      totalBudgetSeconds: 30,
+      users: [{ userId: "student-001", apiKey: "a3-key" }],
+    });
+    pyodide.registerJsModule(oracleSpec.name, {
+      budgetAfterSubmit() {
+        const response = api.submitExperiment("a3-key", {
+          model: "tiny-transformer",
+          max_runtime_seconds: 10,
+        });
+        return response.budgetSummary.remainingSeconds;
+      },
+      duplicateSubmitStatus() {
+        try {
+          api.submitExperiment("a3-key", {
+            model: "tiny-transformer",
+            max_runtime_seconds: 10,
+          });
+        } catch (error) {
+          return error instanceof Error ? error.message : "unknown";
+        }
+        return "no-error";
+      },
+      scalingPrediction() {
+        const fit = fitPowerLawScalingLaw(
+          [
+            { compute: 1, loss: 4 },
+            { compute: 4, loss: 2 },
+            { compute: 16, loss: 1 },
+          ],
+          { x: "compute", y: "loss" },
+        );
+        return fit.predict(64);
+      },
+    });
+
+    assertions = [];
+    artifacts = [];
+    const result = await runAssignmentRubric(
+      {
+        fs: pyodideSessionFs(pyodide),
+        exec: pyodideExec,
+      },
+      plan,
+      {
+        files: {
+          [plan.files.rubricPath]: `
+import browsergrad as bg
+
+ctx = bg.assignment_context()
+oracle = bg.oracle("_bg_scaling_api")
+
+remaining = oracle.budgetAfterSubmit()
+duplicate = oracle.duplicateSubmitStatus()
+prediction = oracle.scalingPrediction()
+
+if (
+    "test_submit_jobs" in ctx["allowed_tests"]
+    and remaining == 20
+    and "experiment already exists" in duplicate
+    and abs(prediction - 0.5) < 1e-9
+):
+    bg.assert_pass("test_cs336_a3_scaling_primitive_facade")
+    bg.emit_json("cs336-a3-scaling-summary", {
+        "remaining": remaining,
+        "prediction": prediction,
+    })
+else:
+    bg.assert_fail(
+        "test_cs336_a3_scaling_primitive_facade",
+        "CS336 A3 primitive facade oracle mismatch",
+        expected={"remaining": 20, "duplicate": "experiment already exists", "prediction": 0.5},
+        actual={"remaining": remaining, "duplicate": duplicate, "prediction": prediction},
+    )
+`,
+        },
+      },
+    );
+
+    expect(result.exec.ok).toBe(true);
+    expect(result.exec.assertions).toEqual([
+      {
+        kind: "pass",
+        name: "test_cs336_a3_scaling_primitive_facade",
+        durationMs: null,
+      },
+    ]);
+    expect(result.exec.artifacts).toEqual([
+      expect.objectContaining({
+        kind: "json",
+        name: "cs336-a3-scaling-summary",
+        data: { remaining: 20, prediction: 0.5 },
+      }),
+    ]);
   });
 });
 

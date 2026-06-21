@@ -366,6 +366,9 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     checks.
     CS336 A3 scaling labs can use `@unlocalhosted/browsergrad-primitives` for
     hosted API mock, scheduler fairness, and scaling-law fixture checks.
+    BrowserGrad runtime integration now proves a Python rubric can call the
+    A3 profile's declared `_bg_scaling_api` JS oracle through Pyodide while
+    that oracle is backed by the primitive facade.
     CS336 A5 alignment labs can use
     `@unlocalhosted/browsergrad-primitives` for DPO, parser, reward,
     group-normalized advantage, policy-gradient, and masked aggregation checks.

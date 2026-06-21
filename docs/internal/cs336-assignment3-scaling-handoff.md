@@ -92,6 +92,9 @@ craftingattention should:
 
 - BrowserGrad package tests pass:
   `pnpm --filter @unlocalhosted/browsergrad-primitives test`.
+- BrowserGrad runtime integration proves the real Python-rubric path can call a
+  primitive-facade JS oracle from Pyodide:
+  `pnpm --filter @unlocalhosted/browsergrad-runtime test:integration -- assignment-runner`.
 - Root profile matrix tests keep A3 expected status `simulated`.
 - Platform E2E consumes the package as one declared oracle before adding a full
   A3 content unit.
