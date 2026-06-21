@@ -40,6 +40,11 @@ export interface KernelRubricFailureDetails {
   readonly rtol?: number;
 }
 
+export interface KernelAssertionDetails {
+  readonly expected?: string;
+  readonly actual?: string;
+}
+
 export interface KernelRubric {
   readonly assertions: readonly KernelRubricAssertion[];
   pass(name: string): void;
@@ -137,6 +142,29 @@ export function createKernelRubric(
   };
 }
 
+export function kernelRubricFailureToAssertionDetails(
+  details?: KernelRubricFailureDetails,
+): KernelAssertionDetails | undefined {
+  if (!details) return undefined;
+  return {
+    actual: formatKernelSide({
+      shape: details.actualShape,
+      preview: details.actualPreview,
+      mismatchIndex: details.mismatchIndex,
+      value: details.actualValue,
+      maxAbsDiff: details.maxAbsDiff,
+    }),
+    expected: formatKernelSide({
+      shape: details.expectedShape,
+      preview: details.expectedPreview,
+      mismatchIndex: details.mismatchIndex,
+      value: details.expectedValue,
+      atol: details.atol,
+      rtol: details.rtol,
+    }),
+  };
+}
+
 function sameShape(actual: readonly number[], expected: readonly number[]): boolean {
   return actual.length === expected.length &&
     actual.every((dim, index) => dim === expected[index]);
@@ -185,4 +213,38 @@ function firstTensorMismatch(
 
   if (!first) return undefined;
   return { ...first, maxAbsDiff };
+}
+
+function formatKernelSide(input: {
+  readonly shape?: readonly number[] | undefined;
+  readonly preview?: readonly number[] | undefined;
+  readonly mismatchIndex?: number | undefined;
+  readonly value?: number | undefined;
+  readonly maxAbsDiff?: number | undefined;
+  readonly atol?: number | undefined;
+  readonly rtol?: number | undefined;
+}): string {
+  const parts: string[] = [];
+  if (input.shape) parts.push(`shape=${formatArray(input.shape)}`);
+  if (input.preview) parts.push(`preview=${formatArray(input.preview)}`);
+  if (input.mismatchIndex !== undefined && input.value !== undefined) {
+    parts.push(`value[${input.mismatchIndex}]=${formatNumber(input.value)}`);
+  }
+  if (input.maxAbsDiff !== undefined) {
+    parts.push(`maxAbsDiff=${formatNumber(input.maxAbsDiff)}`);
+  }
+  if (input.atol !== undefined) parts.push(`atol=${formatNumber(input.atol)}`);
+  if (input.rtol !== undefined) parts.push(`rtol=${formatNumber(input.rtol)}`);
+  return parts.join(" ");
+}
+
+function formatArray(values: readonly number[]): string {
+  return `[${values.map(formatNumber).join(",")}]`;
+}
+
+function formatNumber(value: number): string {
+  if (Number.isNaN(value)) return "NaN";
+  if (value === Number.POSITIVE_INFINITY) return "Infinity";
+  if (value === Number.NEGATIVE_INFINITY) return "-Infinity";
+  return String(value);
 }

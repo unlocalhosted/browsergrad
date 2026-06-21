@@ -225,6 +225,8 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
    `runAssignmentJavascriptRubric`; JS rubrics read binary fixtures with
    `ctx.readBytes(path)`. Kernel labs can use
    `@unlocalhosted/browsergrad-kernels` `createKernelRubric()` to compare WGSL
-   outputs against CPU references and forward structured pass/fail assertions.
+   outputs against CPU references, then
+   `kernelRubricFailureToAssertionDetails()` when forwarding failures into
+   `ctx.assertFail()`.
 14. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

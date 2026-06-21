@@ -64,7 +64,10 @@ helpers without Pyodide. Pass browser resources such as WebGPU adapters/devices
 through `substrates` and read them with `ctx.substrate(name)`.
 Kernel-style JS rubrics can use `createKernelRubric()` from
 `@unlocalhosted/browsergrad-kernels` to compare tensors against CPU references
-and forward pass/fail assertions into the BrowserGrad JS rubric context.
+and forward pass/fail assertions into the BrowserGrad JS rubric context. Use
+`kernelRubricFailureToAssertionDetails()` when forwarding failures to
+`ctx.assertFail()` so previews and mismatch details survive as expected/actual
+strings.
 
 ## Files And Fixtures
 

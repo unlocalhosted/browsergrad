@@ -12,6 +12,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `createKernelRubric()` records pass/fail assertions for JS/WebGPU lab
   rubrics, including `assertCloseTensor()` with shape checks, compact previews,
   first failing index, non-finite value detection, and max absolute error.
+- `kernelRubricFailureToAssertionDetails()` formats kernel failure details into
+  `expected` / `actual` strings for BrowserGrad-style assertion callbacks.
 
 ## [0.1.1] — 2026-06-02
 

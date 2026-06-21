@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createKernelRubric, tensor } from "../src/index";
+import {
+  createKernelRubric,
+  kernelRubricFailureToAssertionDetails,
+  tensor,
+} from "../src/index";
 
 describe("KernelRubric", () => {
   it("records a pass when tensors match within tolerance", () => {
@@ -116,5 +120,26 @@ describe("KernelRubric", () => {
         },
       },
     ]);
+  });
+
+  it("formats failure details for BrowserGrad-style assertion callbacks", () => {
+    const details = {
+      actualShape: [4],
+      expectedShape: [4],
+      actualPreview: [0, 1, 2.25],
+      expectedPreview: [0, 1, 2],
+      mismatchIndex: 2,
+      actualValue: 2.25,
+      expectedValue: 2,
+      maxAbsDiff: 0.25,
+      atol: 0.001,
+      rtol: 0.000001,
+    };
+
+    expect(kernelRubricFailureToAssertionDetails(details)).toEqual({
+      actual: "shape=[4] preview=[0,1,2.25] value[2]=2.25 maxAbsDiff=0.25",
+      expected: "shape=[4] preview=[0,1,2] value[2]=2 atol=0.001 rtol=0.000001",
+    });
+    expect(kernelRubricFailureToAssertionDetails()).toBeUndefined();
   });
 });

@@ -60,11 +60,17 @@ const C = reference.matmul(A, B);  // identical surface; CPU only
 ### Kernel rubric assertions
 
 ```ts
-import { createKernelRubric, reference, tensor } from "@unlocalhosted/browsergrad-kernels";
+import {
+  createKernelRubric,
+  kernelRubricFailureToAssertionDetails,
+  reference,
+  tensor,
+} from "@unlocalhosted/browsergrad-kernels";
 
 const rubric = createKernelRubric({
   assertPass: (name) => ctx.assertPass(name),
-  assertFail: (name, message, details) => ctx.assertFail(name, message, details),
+  assertFail: (name, message, details) =>
+    ctx.assertFail(name, message, kernelRubricFailureToAssertionDetails(details)),
 });
 
 const actual = await kernels.matmul(device, A, B);
@@ -77,6 +83,8 @@ pass/fail assertions, checks tensor shapes, compares values with absolute and
 relative tolerance, and emits compact previews plus first failing index/max
 error for learner-facing JS rubrics. Non-finite actual or expected values fail
 the comparison instead of slipping through tolerance math.
+`kernelRubricFailureToAssertionDetails()` formats structured rubric details into
+`expected` / `actual` strings for BrowserGrad-style assertion callbacks.
 
 ### Realizer-tier (chained ops, GPU residency)
 

@@ -33,11 +33,13 @@ export { createDevice } from "./device.js";
 
 export {
   createKernelRubric,
+  kernelRubricFailureToAssertionDetails,
   type KernelRubric,
   type KernelRubricOptions,
   type KernelCloseOptions,
   type KernelRubricAssertion,
   type KernelRubricFailureDetails,
+  type KernelAssertionDetails,
 } from "./rubric.js";
 
 export {
