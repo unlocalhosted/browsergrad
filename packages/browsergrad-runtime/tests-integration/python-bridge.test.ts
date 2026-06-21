@@ -9,6 +9,10 @@
 
 import { beforeAll, describe, expect, it } from "vitest";
 import { loadPyodide } from "pyodide";
+import {
+  createAssignmentRunPlan,
+  parseAssignmentProfile,
+} from "../src/index";
 import { PY_PREAMBLE } from "../src/worker/python-preamble";
 
 interface PyodideAPI {
@@ -54,7 +58,70 @@ assert callable(bg.assert_error)
 assert callable(bg.log)
 assert callable(bg.emit_json)
 assert callable(bg.emit_image)
+assert callable(bg.oracle)
 `);
+  });
+});
+
+describe("profile JS oracle bridge", () => {
+  it("lets Python rubrics call a profile-declared JS oracle module", async () => {
+    const parsed = parseAssignmentProfile({
+      id: "oracle-bridge",
+      version: "1.0.0",
+      requires_browsergrad: "^0.1.0",
+      runtime_packages: [],
+      files: {
+        root: "/assignments/oracle-bridge",
+        rubric_path: "rubric.py",
+      },
+      allowed_tests: ["test_oracle_bridge"],
+      oracles: [
+        {
+          name: "_bg_test_oracle",
+          js_module: "/assets/test-oracle.js",
+          export_name: "oracle",
+        },
+      ],
+      gates: [],
+      datasets: [],
+    });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const plan = createAssignmentRunPlan(parsed.profile, { capabilities: [] });
+    const oracleName = plan.session.jsModules[0]?.name;
+    expect(oracleName).toBe("_bg_test_oracle");
+    if (!oracleName) return;
+
+    pyodide.registerJsModule(oracleName, {
+      score: (text: string) => text.length * 2,
+    });
+
+    await exec(`
+import browsergrad as bg
+
+oracle = bg.oracle("${oracleName}")
+actual = oracle.score("abc")
+if actual == 6:
+    bg.assert_pass("test_oracle_bridge")
+else:
+    bg.assert_fail("test_oracle_bridge", "oracle returned wrong score",
+                   expected=6, actual=actual)
+`);
+    expect(assertions).toEqual([
+      { kind: "pass", name: "test_oracle_bridge", durationMs: null },
+    ]);
+  });
+
+  it("raises a clear error when a rubric asks for an unregistered oracle", async () => {
+    await expect(
+      pyodide.runPythonAsync(`
+import browsergrad as bg
+bg.oracle("_bg_missing_oracle")
+`),
+    ).rejects.toThrow(
+      "BrowserGrad oracle module is not registered: _bg_missing_oracle",
+    );
   });
 });
 

@@ -29,7 +29,9 @@ For every lab profile, the platform should:
    Worker mesh, external/native runner, or future custom compiler.
 9. For Pyodide-backed labs, create the rubric execution request with
    `createAssignmentRubricExecRequest`.
-10. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
+10. In Python rubrics, call profile-registered JS oracles with
+    `browsergrad.oracle("<module-name>")`.
+11. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
     implementation slice.
 
 ## Capability Vocabulary

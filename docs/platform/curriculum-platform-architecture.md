@@ -53,7 +53,8 @@ structured place to do the work.
 - Use optional profile `metadata` to connect labs to course/source/lecture
   context.
 - Use `profileOracleJsModules()` and `createSession({ jsModules })` for
-  browser-safe reference helpers.
+  browser-safe reference helpers, then call them from Python rubrics with
+  `browsergrad.oracle(name)`.
 - Use profile capability gates for upstream requirements such as CUDA, Triton,
   process groups, browser APIs, or Worker meshes that may be skipped or replaced
   in the browser edition.

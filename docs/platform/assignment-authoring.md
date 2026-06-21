@@ -60,8 +60,15 @@ signals, Linux `/proc`, or process RSS behavior inside Pyodide.
 
 The platform may register JS modules into Pyodide with `registerJsModule` via
 `createSession({ jsModules })`.
-Python rubrics can import those modules through Pyodide's JS bridge and call
-small deterministic helpers.
+Python rubrics should access those modules through `browsergrad.oracle(name)`
+and call small deterministic helpers:
+
+```py
+import browsergrad as bg
+
+tokenizers = bg.oracle("_bg_tokenizers")
+model = tokenizers.train_cs336_bpe(corpus, vocab_size, special_tokens)
+```
 
 Use this pattern when:
 
@@ -70,7 +77,9 @@ Use this pattern when:
 - The oracle result is small enough to serialize between JS and Python.
 
 Keep the bridge narrow. Return plain JSON-compatible values or byte arrays
-encoded in an explicit representation.
+encoded in an explicit representation. If `bg.oracle(name)` cannot find a
+registered module, the rubric should fail as a platform wiring error, not a
+student-code failure.
 
 ## Browser-Safe Gates
 

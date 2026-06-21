@@ -69,14 +69,14 @@ profile record, not root agent behavior.
 
 ## Rubric Sketch
 
-Python rubrics should call the registered JS oracle through Pyodide's JS bridge
+Python rubrics should call the registered JS oracle through `browsergrad.oracle`
 for exact tokenizer checks, then report through `browsergrad` assertions.
 
 ```py
-from js import _bg_tokenizers
 import browsergrad as bg
 
-model = _bg_tokenizers.train_cs336_bpe(corpus, vocab_size, special_tokens)
+tokenizers = bg.oracle("_bg_tokenizers")
+model = tokenizers.train_cs336_bpe(corpus, vocab_size, special_tokens)
 actual = student.run_train_bpe(input_path, vocab_size, special_tokens)
 
 if actual["merges"] == model["merges"]:

@@ -112,9 +112,15 @@ bg.assert_error(name, message, exc=None, duration_ms=None)
 bg.log(name, data, level="info")             # → ArtifactLog
 bg.emit_json(name, data)                      # → ArtifactJson (data must be JSON-able)
 bg.emit_image(name, mime, data_base64)        # → ArtifactImage
+
+oracle = bg.oracle("_bg_tokenizers")          # profile-registered JS oracle module
+model = oracle.train_cs336_bpe(corpus, 300)
 ```
 
-The library does not interpret these — it just relays them. Build your test framework / visualizer / grader on top.
+The library does not interpret assertion/artifact events — it just relays them.
+`bg.oracle(name)` imports a JS module registered through
+`createSession({ jsModules })` and raises a clear error if the profile/runtime
+forgot to register it. Build your test framework / visualizer / grader on top.
 
 ## Lab manifest
 

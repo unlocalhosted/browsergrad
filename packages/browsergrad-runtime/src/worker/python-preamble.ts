@@ -14,6 +14,7 @@
  */
 export const PY_PREAMBLE = `
 import json as _bg_json
+import importlib as _bg_importlib
 import sys as _bg_sys
 import types as _bg_types
 import traceback as _bg_traceback
@@ -69,20 +70,33 @@ def _bg_emit_image(name, mime, data_base64, *, _post=_bg_post_artifact):
         "dataBase64": data_base64,
     })
 
+def _bg_oracle(name, *, _import_module=_bg_importlib.import_module):
+    if not isinstance(name, str) or not name:
+        raise ValueError("BrowserGrad oracle module name must be a non-empty string")
+    try:
+        return _import_module(name)
+    except ModuleNotFoundError as exc:
+        if getattr(exc, "name", None) != name:
+            raise
+        raise ImportError(
+            f"BrowserGrad oracle module is not registered: {name}"
+        ) from exc
+
 _bg_mod.assert_pass = _bg_assert_pass
 _bg_mod.assert_fail = _bg_assert_fail
 _bg_mod.assert_error = _bg_assert_error
 _bg_mod.log = _bg_log
 _bg_mod.emit_json = _bg_emit_json
 _bg_mod.emit_image = _bg_emit_image
+_bg_mod.oracle = _bg_oracle
 
 _bg_sys.modules["browsergrad"] = _bg_mod
 
 # Clean up loader-local names so user globals stay tidy.
 # Safe because every helper captured the names it needs via default args
 # at definition time — they don't depend on module globals at call time.
-del _bg_mod, _bg_json, _bg_sys, _bg_types, _bg_traceback, _bg_native_
+del _bg_mod, _bg_json, _bg_importlib, _bg_sys, _bg_types, _bg_traceback, _bg_native_
 del _bg_post_assertion, _bg_post_artifact
 del _bg_assert_pass, _bg_assert_fail, _bg_assert_error
-del _bg_log, _bg_emit_json, _bg_emit_image
+del _bg_log, _bg_emit_json, _bg_emit_image, _bg_oracle
 `;
