@@ -5,6 +5,14 @@ All notable changes to `@unlocalhosted/browsergrad-kernels`.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `createKernelRubric()` records pass/fail assertions for JS/WebGPU lab
+  rubrics, including `assertCloseTensor()` with shape checks, compact previews,
+  first failing index, non-finite value detection, and max absolute error.
+
 ## [0.1.1] — 2026-06-02
 
 Dogfood pass on the published 0.1.0 tarball surfaced three issues. All fixed.

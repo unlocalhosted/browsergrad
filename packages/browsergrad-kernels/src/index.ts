@@ -32,6 +32,15 @@ export { tensor, KernelError } from "./types.js";
 export { createDevice } from "./device.js";
 
 export {
+  createKernelRubric,
+  type KernelRubric,
+  type KernelRubricOptions,
+  type KernelCloseOptions,
+  type KernelRubricAssertion,
+  type KernelRubricFailureDetails,
+} from "./rubric.js";
+
+export {
   kernels,
   matmul,
   softmax,

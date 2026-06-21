@@ -57,6 +57,27 @@ import { reference } from "@unlocalhosted/browsergrad-kernels/reference";
 const C = reference.matmul(A, B);  // identical surface; CPU only
 ```
 
+### Kernel rubric assertions
+
+```ts
+import { createKernelRubric, reference, tensor } from "@unlocalhosted/browsergrad-kernels";
+
+const rubric = createKernelRubric({
+  assertPass: (name) => ctx.assertPass(name),
+  assertFail: (name, message, details) => ctx.assertFail(name, message, details),
+});
+
+const actual = await kernels.matmul(device, A, B);
+const expected = reference.matmul(A, B);
+rubric.assertCloseTensor("matmul_tiny", actual, expected, { atol: 1e-4 });
+```
+
+`createKernelRubric()` is CPU-only and works without WebGPU. It records
+pass/fail assertions, checks tensor shapes, compares values with absolute and
+relative tolerance, and emits compact previews plus first failing index/max
+error for learner-facing JS rubrics. Non-finite actual or expected values fail
+the comparison instead of slipping through tolerance math.
+
 ### Realizer-tier (chained ops, GPU residency)
 
 ```ts

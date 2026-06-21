@@ -44,6 +44,11 @@ The first stable core should include:
 - `KernelRubric`: structured assertion helpers for output tolerance, dispatch
   errors, forbidden APIs, and timing envelopes.
 
+First shipped BrowserGrad primitive: `@unlocalhosted/browsergrad-kernels`
+exports `createKernelRubric()`, a CPU-only assertion collector for JS/WebGPU
+rubrics. It checks tensor shape/value closeness with tolerances, records compact
+failure details, and can forward directly into BrowserGrad JS rubric callbacks.
+
 This core should be independent from Pyodide. Python assignments may call it
 through registered JS modules, but JS/WGSL labs should run without Python.
 

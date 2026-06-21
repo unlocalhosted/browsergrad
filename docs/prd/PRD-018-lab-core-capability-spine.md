@@ -197,6 +197,10 @@ runtime branches.
   be mounted without text/base64 loss; hosts can verify worker bytes with
   `Session.fs.readBytes(path)`, and JS rubrics can inspect mounted bytes with
   `ctx.readBytes(path)`.
+- Kernel-rubric guarantee: `@unlocalhosted/browsergrad-kernels` exports
+  `createKernelRubric()` so JS/WebGPU labs can collect pass/fail assertions and
+  compare tensor outputs against CPU oracles without requiring Pyodide or a
+  real GPU.
 - Later implementation slices:
   - Assignment runner plan: packages, mounts, JS oracles, timeout/watchdog, and
     allowed tests.
