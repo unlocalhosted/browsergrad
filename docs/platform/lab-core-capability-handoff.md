@@ -96,6 +96,9 @@ When several `any_of` groups are available, BrowserGrad selects the strongest
 group by mode: direct `browser` path first, then `simulated`, then `external`.
 This prevents a teaching simulator from hiding a real browser-native path such
 as WGSL.
+Render each gate from `plan.capabilityEvaluation.gates`: `status` is the
+gate-level route state, `selectedAnyOf` is the chosen alternative group, and
+`selectedCapabilities` is the complete selected path including required caps.
 
 ## Profile Gate Shape
 
@@ -169,15 +172,17 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
    capabilities, and missing capabilities.
 6. Or uses `createAssignmentPreflightReport(profile, environment)` to get all
    preflight fields in one object.
-7. Builds the BrowserGrad mount plan for runnable or inspectable labs.
-8. Fetches or provides assignment file/dataset contents, then materializes them
+7. Renders `plan.capabilityEvaluation.gates` as preflight rows using each gate's
+   `status`, `selectedAnyOf`, `selectedCapabilities`, and missing fields.
+8. Builds the BrowserGrad mount plan for runnable or inspectable labs.
+9. Fetches or provides assignment file/dataset contents, then materializes them
    into `Session.fs`.
-9. Shows packages, oracle modules, rubric kind, file mounts, and
+10. Shows packages, oracle modules, rubric kind, file mounts, and
    satisfied/missing capability groups.
-10. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
+11. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
    launch the rubric through `Session.exec`, or uses
    `createAssignmentRubricExecRequest` when the platform needs manual staging.
-11. For runnable JavaScript labs, imports the rubric module and calls
+12. For runnable JavaScript labs, imports the rubric module and calls
    `runAssignmentJavascriptRubric`.
-12. Offers the learner a runnable browser path, simulated path, or external-runner
+13. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

@@ -80,8 +80,11 @@ export type AssignmentCapabilityMode = "browser" | "simulated" | "external";
 export interface AssignmentCapabilityGateEvaluation {
   readonly name: string;
   readonly ok: boolean;
+  readonly status: AssignmentRunReadinessStatus;
   readonly requires: readonly string[];
   readonly anyOf: readonly (readonly string[])[];
+  readonly selectedAnyOf: readonly string[];
+  readonly selectedCapabilities: readonly string[];
   readonly satisfiedCapabilities: readonly string[];
   readonly missingRequired: readonly string[];
   readonly missingAnyOf: readonly (readonly string[])[];
@@ -858,21 +861,42 @@ function evaluateCapabilityGate(
       : anyOf.map((group) => group.filter((capability) => !available.has(capability)));
   const message =
     typeof gate.options.message === "string" ? gate.options.message : undefined;
-  const satisfiedCapabilities =
-    missingRequired.length === 0 && missingAnyOf.length === 0
-      ? uniqueSorted([...requires, ...satisfiedAnyOf])
-      : uniqueSorted(requires.filter((capability) => available.has(capability)));
+  const ok = missingRequired.length === 0 && missingAnyOf.length === 0;
+  const selectedCapabilities = ok
+    ? uniqueSorted([...requires, ...satisfiedAnyOf])
+    : [];
+  const satisfiedCapabilities = ok
+    ? selectedCapabilities
+    : uniqueSorted(requires.filter((capability) => available.has(capability)));
 
   return {
     name: gate.name,
-    ok: missingRequired.length === 0 && missingAnyOf.length === 0,
+    ok,
+    status: capabilityGateStatus(selectedCapabilities, capabilityModes, ok),
     requires,
     anyOf,
+    selectedAnyOf: ok ? satisfiedAnyOf : [],
+    selectedCapabilities,
     satisfiedCapabilities,
     missingRequired,
     missingAnyOf,
     ...(message ? { message } : {}),
   };
+}
+
+function capabilityGateStatus(
+  selectedCapabilities: readonly string[],
+  capabilityModes: Readonly<Record<string, AssignmentCapabilityMode>>,
+  ok: boolean,
+): AssignmentRunReadinessStatus {
+  if (!ok) return "blocked";
+  if (selectedCapabilities.some((capability) => capabilityModes[capability] === "external")) {
+    return "external-only";
+  }
+  if (selectedCapabilities.some((capability) => capabilityModes[capability] === "simulated")) {
+    return "simulated";
+  }
+  return "runnable";
 }
 
 function bestSatisfiedCapabilityGroup(

@@ -134,6 +134,9 @@ simulator-backed lab on another, or an external-runner lab when native tooling
 is attached. If multiple `any_of` capability groups are available, BrowserGrad
 chooses the strongest group by mode: `browser` before `simulated` before
 `external`.
+Each capability gate evaluation includes gate-level `status`, `selectedAnyOf`,
+and `selectedCapabilities`; use those fields for preflight rows instead of
+duplicating route-choice logic in the platform.
 
 ## New Assignment Checklist
 

@@ -158,6 +158,9 @@ runtime branches.
   environment)` returns the run plan, readiness, rubric kind, required
   capabilities, and mount plan as one readonly handoff object, and benchmark
   profile tests assert readiness for the CS336/GPU Puzzles/CS149 probe set.
+- Gate-route guarantee: each capability gate evaluation exposes `status`,
+  `selectedAnyOf`, and `selectedCapabilities`, so platform preflight rows can
+  show the exact browser/simulated/external path selected by BrowserGrad.
 - Later implementation slices:
   - Assignment runner plan: packages, mounts, JS oracles, timeout/watchdog, and
     allowed tests.

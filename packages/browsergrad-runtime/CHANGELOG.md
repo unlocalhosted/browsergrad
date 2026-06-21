@@ -32,6 +32,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   preflight panels.
 - Capability `any_of` evaluation now prefers the strongest satisfied path by
   mode: browser, then simulated, then external.
+- Capability gate evaluations now expose gate-level `status`, `selectedAnyOf`,
+  and `selectedCapabilities` for platform preflight routing UI.
 - `runAssignmentJavascriptRubric(plan, contents, rubric, options)` runs
   browser-native JS rubrics with assignment context, mounted text reads,
   declared oracles, and structured assertion/artifact helpers.

@@ -242,6 +242,9 @@ are available, BrowserGrad selects the strongest path by mode: `browser`, then
 platform preflight calls into `{ plan, rubricKind, readiness,
 requiredCapabilities, mountPlan }`. Use it when the UI needs a single readonly
 object before fetching fixtures, mounting files, or launching code.
+Each capability gate evaluation includes `status`, `selectedAnyOf`, and
+`selectedCapabilities`, so platforms can render the chosen route per gate
+without reimplementing BrowserGrad's route selection.
 
 `createAssignmentRunPlan()` does not execute student code. It produces the
 platform handoff object: package preload list, JS oracle modules, resolved
