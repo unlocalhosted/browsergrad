@@ -45,9 +45,12 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
+    "pretypecheck": "pnpm --filter @unlocalhosted/browsergrad-primitives build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "pnpm --filter @unlocalhosted/browsergrad-primitives build",
     "test": "vitest run",
     "test:watch": "vitest",
+    "pretest:integration": "pnpm --filter @unlocalhosted/browsergrad-primitives build",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "oxlint src",
     "clean": "rm -rf dist *.tsbuildinfo",

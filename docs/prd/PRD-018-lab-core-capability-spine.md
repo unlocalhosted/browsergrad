@@ -244,6 +244,9 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   simulation, and RL/math references. Existing leaf primitive packages remain
   implementation shards; new lab/profile guidance should consume the facade
   unless a bundle or release constraint requires a leaf package.
+- Profile-adapter locality guarantee: Python/Pyodide bridge wrappers that only
+  translate primitive references into snake_case or JSON-string methods live in
+  runtime/profile glue. They are not exported as primitive package interfaces.
 - Profile-driven JS runner guarantee: `runAssignmentJavascriptProfile()` builds
   preflight, validates the JavaScript route, mounts declared contents, wires
   oracles/substrates, and runs browser-native rubrics from a full assignment

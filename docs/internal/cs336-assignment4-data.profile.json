@@ -38,7 +38,7 @@
   ],
   "oracles": [
     {
-      "name": "_bg_data_oracles",
+      "name": "_bg_data_cleaning",
       "js_module": "/assignments/cs336-assignment4-data/oracles/data-quality.js",
       "export_name": "oracle"
     }
@@ -57,7 +57,7 @@
           "pii-oracle",
           "quality-rule-oracle"
         ],
-        "message": "CS336 A4 browser labs should use small checked-in data fixtures, data oracles, and behavior gates for streaming."
+        "message": "CS336 A4 browser labs should use small checked-in data fixtures, data-cleaning references, and behavior gates for streaming."
       }
     },
     {

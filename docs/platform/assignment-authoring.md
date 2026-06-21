@@ -138,7 +138,9 @@ fixtures; it reports deterministic mismatch paths and numeric tolerances
 without native `.npz` or PyTorch dependencies.
 Data-cleaning rubrics can use `@unlocalhosted/browsergrad-primitives` for
 `pii-oracle`, `dedupe-oracle`, `near-dedupe-oracle`, and `quality-rule-oracle`
-fixture checks. Its `data` helpers cover `maskPii()`,
+fixture checks. Register a profile-local module such as `_bg_data_cleaning`
+when Python needs snake_case or JSON-string bridge methods; keep that wrapper
+outside the primitive package surface. The primitive `data` helpers cover `maskPii()`,
 `exactLineDeduplicate()`, `minhashDeduplicateDocuments()`,
 `evaluateGopherQuality()`, `gopherQualityFilter()`, and
 `extractVisibleTextFromHtml()` so CS336 A4-style

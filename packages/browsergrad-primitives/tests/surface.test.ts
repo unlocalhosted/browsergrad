@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createByteBpeReference,
+  createDataCleaningReference,
   createHostedTrainingApiFixture,
   createSnapshotComparator,
   data,
@@ -57,5 +58,25 @@ describe("@unlocalhosted/browsergrad-primitives public surface", () => {
       userId: "alice",
       trainingConfig: { model: "tiny-transformer", max_runtime_seconds: 10 },
     });
+  });
+
+  it("creates data-cleaning references without rubric adapter vocabulary", () => {
+    const reference = createDataCleaningReference();
+
+    expect(reference.extractVisibleTextFromHtml("<p>Hello&nbsp;data</p>")).toBe(
+      "Hello data",
+    );
+    expect(reference.maskPii("Email jane@example.com").text).toBe("Email <EMAIL>");
+    expect(
+      reference.exactLineDeduplicate(["alpha", "beta", "alpha"]).keptLines,
+    ).toEqual(["alpha", "beta"]);
+    expect(
+      reference.minhashDeduplicateDocuments([
+        { id: "a", text: "permission is hereby granted free of charge" },
+        { id: "b", text: "permission is hereby granted free of charge" },
+      ]).duplicates.length,
+    ).toBe(1);
+    expect(reference.evaluateGopherQuality("high quality words ".repeat(80)).passed)
+      .toBe(true);
   });
 });

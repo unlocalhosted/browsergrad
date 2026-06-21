@@ -10,6 +10,7 @@ import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
 import { loadPyodide } from "pyodide";
 import {
+  createDataCleaningReference,
   createHostedTrainingApiFixture,
   fitPowerLawScalingLaw,
 } from "@unlocalhosted/browsergrad-primitives";
@@ -77,6 +78,13 @@ const PROFILE = {
 const CS336_A3_PROFILE = JSON.parse(
   readFileSync(
     new URL("../../../docs/internal/cs336-assignment3-scaling.profile.json", import.meta.url),
+    "utf8",
+  ),
+);
+
+const CS336_A4_PROFILE = JSON.parse(
+  readFileSync(
+    new URL("../../../docs/internal/cs336-assignment4-data.profile.json", import.meta.url),
     "utf8",
   ),
 );
@@ -229,6 +237,7 @@ else:
       },
     );
 
+    expect(result.exec.error).toBeNull();
     expect(result.exec.ok).toBe(true);
     expect(result.exec.assertions).toEqual([
       { kind: "pass", name: "test_binary_dataset", durationMs: null },
@@ -352,7 +361,140 @@ else:
       }),
     ]);
   });
+
+  it("runs the CS336 A4 profile with a generic data-cleaning reference", async () => {
+    const parsed = parseAssignmentProfile(CS336_A4_PROFILE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const plan = createAssignmentRunPlan(parsed.profile, {
+      capabilities: [
+        "classifier-oracle",
+        "dataset-fixture",
+        "dedupe-oracle",
+        "large-file-streaming",
+        "near-dedupe-oracle",
+        "pii-oracle",
+        "pyodide",
+        "quality-rule-oracle",
+      ],
+    });
+    const oracleSpec = plan.session.jsModules[0];
+    expect(oracleSpec?.name).toBe("_bg_data_cleaning");
+    if (!oracleSpec) return;
+
+    pyodide.registerJsModule(oracleSpec.name, createDataCleaningBridge());
+
+    assertions = [];
+    artifacts = [];
+    const result = await runAssignmentRubric(
+      {
+        fs: pyodideSessionFs(pyodide),
+        exec: pyodideExec,
+      },
+      plan,
+      {
+        files: {
+          [plan.files.rubricPath]: `
+import browsergrad as bg
+import json
+
+ctx = bg.assignment_context()
+data = bg.oracle("_bg_data_cleaning")
+
+html_text = data.extract_visible_text_from_html("<html><style>x</style><p>Hello&nbsp;data</p><script>bad()</script></html>")
+masked = data.mask_pii_text("Email jane@example.com or call 415-555-1212 from 127.0.0.1")
+kept = json.loads(data.exact_line_deduplicate_kept_json('["alpha", "beta", "alpha"]'))
+near_duplicate_count = data.minhash_duplicate_count_json(
+    '[{"id": "a", "text": "permission is hereby granted free of charge"},'
+    ' {"id": "b", "text": "permission is hereby granted free of charge"}]'
+)
+quality_passed = data.gopher_quality_passed("high quality words " * 80)
+
+if (
+    "test_extract_text_from_html_bytes" in ctx["allowed_tests"]
+    and html_text == "Hello data"
+    and masked == "Email <EMAIL> or call <PHONE> from <IP>"
+    and kept == ["alpha", "beta"]
+    and near_duplicate_count == 1
+    and quality_passed is True
+):
+    bg.assert_pass("test_cs336_a4_data_primitive_facade")
+    bg.emit_json("cs336-a4-data-summary", {
+        "html_text": html_text,
+        "masked": masked,
+        "kept": kept,
+        "near_duplicate_count": near_duplicate_count,
+    })
+else:
+    bg.assert_fail(
+        "test_cs336_a4_data_primitive_facade",
+        "CS336 A4 primitive facade oracle mismatch",
+        expected={"html_text": "Hello data", "near_duplicate_count": 1},
+        actual={
+            "html_text": html_text,
+            "masked": masked,
+            "kept": kept,
+            "near_duplicate_count": near_duplicate_count,
+            "quality_passed": quality_passed,
+        },
+    )
+`,
+        },
+        datasets: {
+          "moby-html": "<p>Hello&nbsp;data</p>",
+          "low-quality-cc": "short text",
+        },
+      },
+    );
+
+    expect(result.exec.error).toBeNull();
+    expect(result.exec.ok).toBe(true);
+    expect(result.exec.assertions).toEqual([
+      {
+        kind: "pass",
+        name: "test_cs336_a4_data_primitive_facade",
+        durationMs: null,
+      },
+    ]);
+    expect(result.exec.artifacts).toEqual([
+      expect.objectContaining({
+        kind: "json",
+        name: "cs336-a4-data-summary",
+        data: expect.objectContaining({
+          html_text: "Hello data",
+          near_duplicate_count: 1,
+        }),
+      }),
+    ]);
+  });
 });
+
+function createDataCleaningBridge(): object {
+  const reference = createDataCleaningReference();
+  return {
+    extract_visible_text_from_html(html: string) {
+      return reference.extractVisibleTextFromHtml(html);
+    },
+    mask_pii_text(input: string) {
+      return reference.maskPii(input).text;
+    },
+    exact_line_deduplicate_kept_json(linesJson: string) {
+      const lines = JSON.parse(linesJson) as string[];
+      return JSON.stringify(reference.exactLineDeduplicate(lines).keptLines);
+    },
+    minhash_duplicate_count_json(documentsJson: string) {
+      const documents = JSON.parse(documentsJson) as {
+        id: string;
+        text: string;
+      }[];
+      return reference.minhashDeduplicateDocuments(documents).duplicates.length;
+    },
+    gopher_quality_passed(text: string) {
+      return reference.evaluateGopherQuality(text).passed;
+    },
+  };
+}
 
 function pyodideSessionFs(py: PyodideAPI): SessionFS {
   return {

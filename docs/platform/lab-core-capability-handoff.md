@@ -363,7 +363,9 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     `compareSnapshot()` for JSON/numeric fixture checks.
     CS336 A4 data labs can use `@unlocalhosted/browsergrad-primitives` for
     browser-safe PII, exact/near dedupe, Gopher quality, and HTML extraction
-    checks.
+    checks. BrowserGrad runtime integration proves a Python rubric can call the
+    A4 profile's `_bg_data_cleaning` JS module through Pyodide while the
+    profile-local bridge is backed by generic primitive data references.
     CS336 A3 scaling labs can use `@unlocalhosted/browsergrad-primitives` for
     hosted API mock, scheduler fairness, and scaling-law fixture checks.
     BrowserGrad runtime integration now proves a Python rubric can call the

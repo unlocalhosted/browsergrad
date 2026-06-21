@@ -19,7 +19,8 @@ root agent behavior.
 - Use small checked-in HTML/text fixtures declared as datasets.
 - Keep `large-file-streaming` as behavior under test; do not replace it with
   Linux RSS or process-resource checks.
-- Register a JS reference module from `@unlocalhosted/browsergrad-primitives` for:
+- Register `_bg_data_cleaning` as a profile-local JS reference module backed by
+  `@unlocalhosted/browsergrad-primitives` for:
   - `extractVisibleTextFromHtml()` for HTML fixture text extraction.
   - `exactLineDeduplicate()` for exact line dedupe checks.
   - `minhashDeduplicateDocuments()` for fixture-scale exact/fuzzy document
@@ -42,7 +43,8 @@ root agent behavior.
 - Fetch/cache tiny fixtures, then call
   `createVerifiedAssignmentBenchmarkPreflightMatrix()` before mounting.
 - Route `pii-oracle`, `dedupe-oracle`, `near-dedupe-oracle`, and
-  `quality-rule-oracle` to `@unlocalhosted/browsergrad-primitives`.
+  `quality-rule-oracle` through the `_bg_data_cleaning` profile adapter backed
+  by `@unlocalhosted/browsergrad-primitives`.
 - Route `classifier-oracle` to a later deterministic fixture classifier or to
   explicit external classifier capabilities.
 - Render failures as data-specific rubric messages, for example:

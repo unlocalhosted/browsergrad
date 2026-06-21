@@ -65,6 +65,11 @@ legacy leaf packages (`browsergrad-tokenizers`, `browsergrad-data`,
 `browsergrad-alignment`) are implementation shards and compatibility surfaces,
 not the product identity.
 
+Profile-specific bridge objects that exist only to expose snake_case or JSON
+methods to Python rubrics are not primitive interfaces. Keep those wrappers in
+runtime tests, profile modules, or platform code; keep package exports useful
+for non-course browser ML tools.
+
 ## Data flow — a forward+backward pass through jit
 
 ```

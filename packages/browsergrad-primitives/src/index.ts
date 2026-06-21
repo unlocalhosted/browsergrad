@@ -29,6 +29,11 @@ export {
 } from "./text.js";
 
 export {
+  createDataCleaningReference,
+  type DataCleaningReference,
+} from "./data.js";
+
+export {
   compareSnapshot,
   createSnapshotComparator,
   SnapshotError,
@@ -55,4 +60,3 @@ export {
   type TrainingFinalSubmissionResponse,
   type TrainingSubmitResponse,
 } from "./scaling.js";
-
