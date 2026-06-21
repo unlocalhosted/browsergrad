@@ -34,10 +34,13 @@ into `createSession({ jsModules })` registrations, and
 Use `createAssignmentPreflightReport(profile, environment)` when the platform
 needs one readonly object containing the run plan, rubric kind, readiness,
 required capabilities, and mount plan.
-Pass `capabilityModes` with the platform environment when a capability should
-be labeled as `browser`, `simulated`, or `external`, then call
-`assignmentRunReadiness(plan)` to get the learner-facing preflight state:
-`runnable`, `simulated`, `external-only`, or `blocked`.
+Use `createAssignmentCapabilityEnvironment()` to build that environment from
+`browserCapabilities`, `simulatedCapabilities`, and `externalCapabilities`
+instead of handcrafting `capabilityModes`. It de-duplicates names, sorts them
+deterministically, and labels each selected capability as `browser`,
+`simulated`, or `external`. Then call `assignmentRunReadiness(plan)` to get the
+learner-facing preflight state: `runnable`, `simulated`, `external-only`, or
+`blocked`.
 Use `assignmentRubricKind()` to route Python, JavaScript, and unknown rubric
 paths to the right execution substrate.
 Use `createAssignmentMountPlan()` to derive the files and dataset fixtures that
@@ -172,9 +175,11 @@ Capability gate options use:
 Capability modes are supplied by the platform environment, not the profile.
 This lets the same profile run as a direct browser lab on one platform, a
 simulator-backed lab on another, or an external-runner lab when native tooling
-is attached. If multiple `any_of` capability groups are available, BrowserGrad
-chooses the strongest group by mode: `browser` before `simulated` before
-`external`.
+is attached. Prefer `createAssignmentCapabilityEnvironment()` so duplicate
+capabilities are normalized consistently; direct browser support wins over
+simulated and external mode labels for the same capability. If multiple
+`any_of` capability groups are available, BrowserGrad chooses the strongest
+group by mode: `browser` before `simulated` before `external`.
 Each capability gate evaluation includes gate-level `status`, `selectedAnyOf`,
 and `selectedCapabilities`; use those fields for preflight rows instead of
 duplicating route-choice logic in the platform.

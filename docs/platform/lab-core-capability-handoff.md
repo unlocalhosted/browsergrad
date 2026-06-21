@@ -21,8 +21,8 @@ For every lab profile, the platform should:
 2. Convert oracle specs with `profileOracleJsModules`.
 3. Build a substrate-neutral run plan with `createAssignmentRunPlan`.
 4. Classify the rubric with `assignmentRubricKind`.
-5. Provide `capabilityModes` for detected capabilities when the platform knows
-   a capability is `browser`, `simulated`, or `external`.
+5. Build the environment with `createAssignmentCapabilityEnvironment()` from
+   detected browser, simulated, and external capability groups.
 6. Call `assignmentRunReadiness(plan)` before launching the lab, or call
    `createAssignmentPreflightReport(profile, environment)` when the platform
    wants the run plan, readiness, rubric kind, required capabilities, and mount
@@ -108,10 +108,13 @@ mean in the current environment:
 - `external`: native or hosted runner paths such as CUDA, ISPC, vLLM, Modal, or
   external servers.
 
-Pass these labels through `capabilityModes` when calling
+Pass these labels through `createAssignmentCapabilityEnvironment()` when calling
 `createAssignmentRunPlan`, then use `assignmentRunReadiness(plan)`.
-`external` wins over `simulated`, and failed capability preflight becomes
-`blocked`.
+The helper de-duplicates and sorts capabilities, and direct `browser` support
+wins over `simulated` or `external` labels for duplicate capability names.
+For overall readiness status, selected `external` capabilities produce
+`external-only`, selected `simulated` capabilities produce `simulated`, and
+failed capability preflight becomes `blocked`.
 When several `any_of` groups are available, BrowserGrad selects the strongest
 group by mode: direct `browser` path first, then `simulated`, then `external`.
 This prevents a teaching simulator from hiding a real browser-native path such
@@ -150,9 +153,10 @@ Use a capability gate when availability can be checked before execution:
 Machine-readable profile drafts live in `docs/internal/*.profile.json`. They are
 parsed by `packages/browsergrad-runtime/tests/benchmark-profiles.test.ts` so the
 handoff matrix cannot drift silently from runtime profile validation.
-That test also builds `createAssignmentPreflightReport` for every benchmark
-profile under a browser-teaching environment and checks expected readiness
-states. It dry-runs empty mount contents for every profile with
+That test also builds a browser-teaching environment with
+`createAssignmentCapabilityEnvironment()`, runs `createAssignmentPreflightReport`
+for every benchmark profile, and checks expected readiness states. It dry-runs
+empty mount contents for every profile with
 `evaluateAssignmentMountContents` so missing rubric files and datasets stay
 visible before filesystem writes. Runtime integration tests also mount binary
 fixture bytes through the Pyodide path.

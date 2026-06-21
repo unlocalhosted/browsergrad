@@ -176,6 +176,7 @@ before launching a Worker:
 import {
   assignmentRubricKind,
   assignmentRunReadiness,
+  createAssignmentCapabilityEnvironment,
   createAssignmentMountPlan,
   createAssignmentPreflightReport,
   createAssignmentRunPlan,
@@ -190,19 +191,15 @@ import {
 const parsed = parseAssignmentProfile(profileJson);
 if (!parsed.ok) throw new Error(parsed.errors.join("; "));
 
+const environment = createAssignmentCapabilityEnvironment({
+  browserCapabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
+  simulatedCapabilities: ["worker-mesh", "distributed-simulator"],
+  externalCapabilities: ["native-cuda-external"],
+});
 const required = requiredAssignmentCapabilities(parsed.profile);
-const preflight = evaluateAssignmentCapabilities(parsed.profile, {
-  capabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
-  capabilityModes: { webgpu: "browser", "wgsl-kernel": "browser" },
-});
-const plan = createAssignmentRunPlan(parsed.profile, {
-  capabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
-  capabilityModes: { webgpu: "browser", "wgsl-kernel": "browser" },
-});
-const report = createAssignmentPreflightReport(parsed.profile, {
-  capabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
-  capabilityModes: { webgpu: "browser", "wgsl-kernel": "browser" },
-});
+const preflight = evaluateAssignmentCapabilities(parsed.profile, environment);
+const plan = createAssignmentRunPlan(parsed.profile, environment);
+const report = createAssignmentPreflightReport(parsed.profile, environment);
 if (!plan.ok) {
   throw new Error(`Missing capabilities: ${plan.capabilityEvaluation.missingCapabilities.join(", ")}`);
 }
@@ -241,13 +238,14 @@ Capability gates support `requires` for all-of requirements and `any_of` for
 alternative groups. Non-capability gates such as streaming and timeout remain
 rubric/watchdog checks.
 
-Platforms may attach `capabilityModes` to the environment. Use `browser` for a
-direct in-browser path, `simulated` for Worker/oracle/fixture approximations,
-and `external` for native or hosted runners. `assignmentRunReadiness(plan)`
-turns the selected capabilities into a platform status: `runnable`,
-`simulated`, `external-only`, or `blocked`. When multiple `any_of` alternatives
-are available, BrowserGrad selects the strongest path by mode: `browser`, then
-`simulated`, then `external`.
+Use `createAssignmentCapabilityEnvironment()` to build the platform environment
+from browser, simulated, and external capability groups. It de-duplicates and
+sorts capabilities, then attaches `capabilityModes`; if a capability appears in
+multiple groups, direct browser support wins over simulated and external modes.
+`assignmentRunReadiness(plan)` turns the selected capabilities into a platform
+status: `runnable`, `simulated`, `external-only`, or `blocked`. When multiple
+`any_of` alternatives are available, BrowserGrad selects the strongest path by
+mode: `browser`, then `simulated`, then `external`.
 
 `createAssignmentPreflightReport(profile, environment)` bundles the common
 platform preflight calls into `{ plan, rubricKind, readiness,

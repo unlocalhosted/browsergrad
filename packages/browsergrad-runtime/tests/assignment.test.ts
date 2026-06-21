@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assignmentRubricKind,
   assignmentRunReadiness,
+  createAssignmentCapabilityEnvironment,
   createAssignmentPreflightReport,
   createAssignmentMountPreflightReport,
   createAssignmentMountPlan,
@@ -1399,5 +1400,32 @@ describe("parseAssignmentProfile", () => {
         },
       ),
     ).rejects.toThrow("assignment JavaScript substrate is not registered: webgpu");
+  });
+});
+
+describe("createAssignmentCapabilityEnvironment", () => {
+  it("normalizes browser, simulated, and external capability groups", () => {
+    expect(
+      createAssignmentCapabilityEnvironment({
+        browserCapabilities: ["pyodide", "webgpu", "pyodide"],
+        simulatedCapabilities: ["worker-mesh", "distributed-simulator"],
+        externalCapabilities: ["native-cuda-external", "webgpu", "worker-mesh"],
+      }),
+    ).toEqual({
+      capabilities: [
+        "distributed-simulator",
+        "native-cuda-external",
+        "pyodide",
+        "webgpu",
+        "worker-mesh",
+      ],
+      capabilityModes: {
+        "distributed-simulator": "simulated",
+        "native-cuda-external": "external",
+        pyodide: "browser",
+        webgpu: "browser",
+        "worker-mesh": "simulated",
+      },
+    });
   });
 });

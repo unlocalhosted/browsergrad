@@ -64,6 +64,7 @@ export {
 export {
   assignmentRubricKind,
   assignmentRunReadiness,
+  createAssignmentCapabilityEnvironment,
   createAssignmentMountPreflightReport,
   createAssignmentPreflightReport,
   createAssignmentMountPlan,
@@ -88,6 +89,7 @@ export {
   type AssignmentGateSpec,
   type AssignmentDataset,
   type AssignmentCapabilityEnvironment,
+  type AssignmentCapabilityEnvironmentInput,
   type AssignmentCapabilityMode,
   type AssignmentCapabilityGateEvaluation,
   type AssignmentCapabilityEvaluation,

@@ -77,6 +77,12 @@ export interface AssignmentCapabilityEnvironment {
 
 export type AssignmentCapabilityMode = "browser" | "simulated" | "external";
 
+export interface AssignmentCapabilityEnvironmentInput {
+  readonly browserCapabilities?: readonly string[];
+  readonly simulatedCapabilities?: readonly string[];
+  readonly externalCapabilities?: readonly string[];
+}
+
 export interface AssignmentCapabilityGateEvaluation {
   readonly name: string;
   readonly ok: boolean;
@@ -389,6 +395,32 @@ export function profileOracleJsModules(
     importURL: oracle.js_module,
     ...(oracle.export_name ? { exportName: oracle.export_name } : {}),
   }));
+}
+
+export function createAssignmentCapabilityEnvironment(
+  input: AssignmentCapabilityEnvironmentInput = {},
+): AssignmentCapabilityEnvironment {
+  const browserCapabilities = uniqueSorted(input.browserCapabilities ?? []);
+  const simulatedCapabilities = uniqueSorted(input.simulatedCapabilities ?? []);
+  const externalCapabilities = uniqueSorted(input.externalCapabilities ?? []);
+  const capabilities = uniqueSorted([
+    ...browserCapabilities,
+    ...simulatedCapabilities,
+    ...externalCapabilities,
+  ]);
+  const capabilityModes: Record<string, AssignmentCapabilityMode> = {};
+
+  for (const capability of externalCapabilities) {
+    capabilityModes[capability] = "external";
+  }
+  for (const capability of simulatedCapabilities) {
+    capabilityModes[capability] = "simulated";
+  }
+  for (const capability of browserCapabilities) {
+    capabilityModes[capability] = "browser";
+  }
+
+  return { capabilities, capabilityModes };
 }
 
 export function evaluateAssignmentCapabilities(

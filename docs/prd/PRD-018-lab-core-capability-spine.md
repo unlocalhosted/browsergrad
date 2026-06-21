@@ -154,6 +154,10 @@ runtime branches.
   `browser`, `simulated`, or `external` and call
   `assignmentRunReadiness(plan)` to render a deterministic learner-facing state:
   `runnable`, `simulated`, `external-only`, or `blocked`.
+- Environment-builder guarantee: `createAssignmentCapabilityEnvironment()`
+  converts browser, simulated, and external capability groups into one
+  deterministic environment with mode labels, so platforms do not duplicate
+  capability-map construction.
 - Platform preflight guarantee: `createAssignmentPreflightReport(profile,
   environment)` returns the run plan, readiness, rubric kind, required
   capabilities, and mount plan as one readonly handoff object, and benchmark
@@ -222,6 +226,10 @@ runtime branches.
   errors instead of silently passing unusable gate specs.
 - Third RED test: required capabilities are de-duplicated deterministically and
   ignore non-capability behavioral gates.
+- Later RED test: capability environment construction de-duplicates browser,
+  simulated, and external groups, sorts them deterministically, and gives
+  browser-native support precedence when the same capability appears in multiple
+  groups.
 - Run focused package tests:
   - `pnpm --filter @unlocalhosted/browsergrad-runtime test -- assignment`
   - `pnpm --filter @unlocalhosted/browsergrad-runtime typecheck`
