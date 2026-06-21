@@ -61,11 +61,12 @@
       "kind": "capability",
       "options": {
         "any_of": [
+          ["flash-attention-oracle"],
           ["webgpu", "wgsl-kernel"],
           ["triton-compatible"],
           ["native-cuda-external", "triton-native"]
         ],
-        "message": "FlashAttention labs need a browser kernel path, Triton-compatible path, or explicit native CUDA runner."
+        "message": "FlashAttention labs need a browser oracle/kernel path, Triton-compatible path, or explicit native CUDA runner."
       }
     },
     {

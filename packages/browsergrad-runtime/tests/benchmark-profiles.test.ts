@@ -46,6 +46,7 @@ const BROWSER_TEACHING_ENVIRONMENT = createAssignmentCapabilityEnvironment({
     "classifier-oracle",
     "dataset-fixture",
     "dedupe-oracle",
+    "flash-attention-oracle",
     "http-client",
     "js-oracles",
     "kernel-visualizer",

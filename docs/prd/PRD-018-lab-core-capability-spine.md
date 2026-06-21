@@ -220,6 +220,10 @@ runtime branches.
   `createKernelRubric()` so JS/WebGPU labs can collect pass/fail assertions and
   compare tensor outputs against CPU oracles without requiring Pyodide or a
   real GPU.
+- FlashAttention-oracle guarantee: `@unlocalhosted/browsergrad-kernels` exports
+  `referenceFlashAttention()` and `referenceFlashAttentionBackward()` so CS336
+  A2-style FlashAttention rubrics can check output, saved log-sum-exp, and Q/K/V
+  gradients in browser-safe JS before Triton/CUDA kernels are available.
 - Kernel-runtime bridge guarantee: `createBrowsergradKernelRubric(ctx)` adapts
   kernel tensor checks to `runAssignmentJavascriptRubric()` contexts, and a
   cross-package integration test proves pass/fail assertions survive through
@@ -276,8 +280,9 @@ runtime branches.
     ISPC, OpenMP, and C++ build steps.
 - Benchmark capability families:
   - CS336 A2: `pyodide`, `torch-compat`, `webgpu`, `triton-compatible`,
-    `worker-mesh`, `distributed-simulator`, `ddp-simulator`, `fsdp-simulator`,
-    `sharded-optimizer-simulator`, `snapshot-oracle`.
+    `flash-attention-oracle`, `worker-mesh`, `distributed-simulator`,
+    `ddp-simulator`, `fsdp-simulator`, `sharded-optimizer-simulator`,
+    `snapshot-oracle`.
   - CS336 A3: `http-client`, `hosted-api-mock`, `server-fixture`,
     `scaling-law-oracle`, `jax-external`, `postgres-external`,
     `scheduler-simulator`.

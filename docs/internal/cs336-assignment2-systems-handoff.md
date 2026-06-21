@@ -35,6 +35,9 @@ Portable first slice:
 - Port `test_flash_forward_pass_pytorch` and `test_flash_backward_pytorch` to a
   browser-safe attention oracle.
 - Use BrowserGrad `jit`/`kernels` attention references where possible.
+- Use `@unlocalhosted/browsergrad-kernels` for:
+  - `referenceFlashAttention()` to return output and log-sum-exp tensors.
+  - `referenceFlashAttentionBackward()` to return Q/K/V gradients.
 - Keep the CUDA/Triton tests declared as capability-gated, not failed browser
   tests.
 
@@ -87,8 +90,8 @@ Future slice:
 
 ## Platform Gaps To Track
 
-- Attention oracle package or runtime helper for FlashAttention-style
-  forward/backward checks.
+- Platform JS oracle wiring for `referenceFlashAttention()` and
+  `referenceFlashAttentionBackward()` in A2 rubrics.
 - Distributed simulator API for rank-local model copies, collectives, FSDP
   sharding, and sharded optimizer state.
 - Fixture conversion path for small `.pt` files.

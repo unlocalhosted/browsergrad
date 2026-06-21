@@ -86,3 +86,10 @@ export { flashAttentionDirect } from "./kernels/flash_attention.js";
 
 // Re-export reference as a top-level convenience too (alongside the subpath).
 export { reference } from "./reference.js";
+export {
+  referenceFlashAttention,
+  referenceFlashAttentionBackward,
+  type FlashAttentionBackwardResult,
+  type FlashAttentionForwardResult,
+  type FlashAttentionOptions,
+} from "./reference.js";

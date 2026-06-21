@@ -4,6 +4,8 @@ import {
   kernels,
   KernelError,
   reference,
+  referenceFlashAttention,
+  referenceFlashAttentionBackward,
   tensor,
   type Kernels,
   type KernelDevice,
@@ -23,6 +25,8 @@ describe("public surface", () => {
     expect(typeof KernelError).toBe("function");
     expect(typeof reference).toBe("object");
     expect(typeof kernels).toBe("object");
+    expect(typeof referenceFlashAttention).toBe("function");
+    expect(typeof referenceFlashAttentionBackward).toBe("function");
   });
 
   it("kernels bundle exposes the v0 op set", () => {
@@ -46,6 +50,8 @@ describe("public surface", () => {
     expect(typeof reference.gelu).toBe("function");
     expect(typeof reference.layernorm).toBe("function");
     expect(typeof reference.attention).toBe("function");
+    expect(typeof reference.flashAttention).toBe("function");
+    expect(typeof reference.flashAttentionBackward).toBe("function");
   });
 });
 

@@ -19,6 +19,7 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
 | `relu`, `gelu` | Elementwise activations | ✅ |
 | `layernorm` | Along last axis, optional gamma/beta | ✅ |
 | `attention` | Composed 3-kernel SDPA | ✅ |
+| `referenceFlashAttention` / `referenceFlashAttentionBackward` | Pure-JS FlashAttention oracle with output, log-sum-exp, and Q/K/V gradients | ✅ |
 | `flashAttentionDirect` | Flash Attention v2 forward, online softmax. **Known numerical issue on real Metal — tracked.** | ⚠️ |
 | `fusedElementwiseDirect` | Runtime WGSL codegen for arbitrary elementwise chains | ✅ |
 
@@ -56,6 +57,13 @@ console.log(C.shape, C.data);                 // [2, 2], Float32Array(4)
 import { reference } from "@unlocalhosted/browsergrad-kernels/reference";
 const C = reference.matmul(A, B);  // identical surface; CPU only
 ```
+
+For CS336 A2-style FlashAttention rubrics, import
+`referenceFlashAttention()` and `referenceFlashAttentionBackward()` from the
+top-level package. The forward oracle returns `{ output, logSumExp }`, matching
+the upstream test's saved-LSE contract; the backward oracle recomputes softmax
+probabilities and returns Q/K/V gradients without requiring PyTorch autograd,
+Triton, or CUDA.
 
 ### Kernel rubric assertions
 

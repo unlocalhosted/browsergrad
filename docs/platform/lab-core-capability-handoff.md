@@ -75,6 +75,10 @@ For every lab profile, the platform should:
     `runAssignmentJavascriptRubric`.
     JS/TS streaming checks can import `createStreamingGate` and use
     `gate.wrapInput` plus `gate.wrapOutput`.
+    FlashAttention labs can use `@unlocalhosted/browsergrad-kernels`
+    `referenceFlashAttention()` and `referenceFlashAttentionBackward()` for
+    browser-safe output/LSE/backward checks before Triton/CUDA execution is
+    available.
     Snapshot-backed labs can use `@unlocalhosted/browsergrad-snapshots`
     `createSnapshotOracle()` to compare small JSON/numeric fixtures and emit
     deterministic mismatch paths.
@@ -118,6 +122,7 @@ Capability names are strings. Keep them descriptive and reusable:
 | `torch-compat` | BrowserGrad PyTorch-shaped teaching surface is sufficient. |
 | `webgpu` | Browser WebGPU adapter is available. |
 | `wgsl-kernel` | Lab can run WGSL kernels directly. |
+| `flash-attention-oracle` | FlashAttention output, log-sum-exp, and gradients are checked by a deterministic oracle. |
 | `cuda-compatible-subset` | Lab targets a BrowserGrad CUDA-like educational subset. |
 | `worker-mesh` | Multiple Workers can simulate distributed participants. |
 | `distributed-simulator` | Deterministic simulator for DDP/FSDP/task-system behavior. |
@@ -252,7 +257,7 @@ CS336 Assignment 5 and CS149GPT, proving their profile drafts can produce
 
 | Benchmark | First platform slice | Core capabilities |
 | --- | --- | --- |
-| CS336 A2 Systems | FlashAttention fixture + DDP/FSDP/sharded optimizer simulator preflight via `@unlocalhosted/browsergrad-simulators` | `torch-compat`, `webgpu`, `worker-mesh`, `distributed-simulator`, `ddp-simulator`, `fsdp-simulator`, `sharded-optimizer-simulator` |
+| CS336 A2 Systems | FlashAttention oracle + DDP/FSDP/sharded optimizer simulator preflight | `torch-compat`, `flash-attention-oracle`, `webgpu`, `worker-mesh`, `distributed-simulator`, `ddp-simulator`, `fsdp-simulator`, `sharded-optimizer-simulator` |
 | CS336 A3 Scaling | Hosted API mock + scheduler tests via `@unlocalhosted/browsergrad-scaling` | `http-client`, `hosted-api-mock`, `server-fixture`, `scheduler-simulator`, `scaling-law-oracle` |
 | CS336 A4 Data | Small Common Crawl fixtures + `browsergrad-data` PII/dedupe/quality/HTML rubrics | `dataset-fixture`, `large-file-streaming`, `classifier-oracle`, `pii-oracle`, `near-dedupe-oracle`, `quality-rule-oracle` |
 | CS336 A5 Alignment | GRPO/DPO math snapshot labs via `@unlocalhosted/browsergrad-alignment` + snapshots | `torch-compat`, `transformers-compatible`, `snapshot-oracle`, `rl-loss-oracle`, `response-parser-oracle` |
@@ -324,6 +329,9 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     `ctx.readBytes(path)`. Kernel labs can use
     `@unlocalhosted/browsergrad-kernels` `createBrowsergradKernelRubric(ctx)` to
     compare WGSL outputs against CPU references and emit BrowserGrad assertions.
+    CS336 A2 FlashAttention labs can use `referenceFlashAttention()` and
+    `referenceFlashAttentionBackward()` for output, log-sum-exp, and Q/K/V
+    gradient fixtures.
     Simulator-backed labs can use `@unlocalhosted/browsergrad-simulators`
     `createDeterministicMesh()` or `createTaskGraphSimulator()` for event-trace
     rubrics before real Worker execution exists. CS336 A2 systems labs can also

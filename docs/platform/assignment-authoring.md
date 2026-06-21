@@ -90,6 +90,11 @@ strings.
 Prefer `createBrowsergradKernelRubric(ctx)` inside `runAssignmentJavascriptRubric`
 callbacks; it wires those callbacks for you without making kernel packages
 depend on the runtime package.
+CS336 A2-style FlashAttention rubrics can use
+`referenceFlashAttention()` and `referenceFlashAttentionBackward()` from
+`@unlocalhosted/browsergrad-kernels` for `flash-attention-oracle` fixture
+checks that include output, saved log-sum-exp, and Q/K/V gradients before native
+Triton/CUDA paths are available.
 Distributed or systems-style JS rubrics can use `createDeterministicMesh()` from
 `@unlocalhosted/browsergrad-simulators` to model worker ranks, barriers,
 broadcasts, point-to-point messages, and `allReduce` results as deterministic

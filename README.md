@@ -3,7 +3,7 @@
 **PyTorch-shaped deep learning in the browser.** Lazy IR with fusion, symbolic backward, AMP, gradient checkpointing, functional transforms, WGSL kernels, ONNX export.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![CI status](https://img.shields.io/badge/tests-411%20passing-brightgreen.svg)](#testing)
+[![CI status](https://img.shields.io/badge/tests-414%20passing-brightgreen.svg)](#testing)
 [![browser](https://img.shields.io/badge/runs-in%20the%20browser-blue.svg)](#)
 
 ```python

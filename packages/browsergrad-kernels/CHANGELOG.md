@@ -9,6 +9,10 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- `referenceFlashAttention()` returns browser-safe FlashAttention output plus
+  log-sum-exp tensors for CS336 A2-style forward/LSE rubric checks.
+- `referenceFlashAttentionBackward()` recomputes Q/K/V gradients for
+  CS336 A2-style backward checks without PyTorch autograd, Triton, or CUDA.
 - `createKernelRubric()` records pass/fail assertions for JS/WebGPU lab
   rubrics, including `assertCloseTensor()` with shape checks, compact previews,
   first failing index, non-finite value detection, and max absolute error.
