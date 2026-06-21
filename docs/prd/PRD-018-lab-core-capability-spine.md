@@ -250,6 +250,13 @@ runtime branches.
   `fitPowerLawScalingLaw()` so CS336 A3-style hosted API, scheduler, and
   scaling-law rubrics can run fixture-scale browser-safe checks before a real
   FastAPI/Postgres/JAX/Modal service enters the loop.
+- Alignment-oracle guarantee: `@unlocalhosted/browsergrad-alignment` exports
+  `computePerInstanceDpoLoss()`, `parseMmluResponse()`,
+  `parseGsm8kResponse()`, `computeRolloutRewards()`,
+  `computeGroupNormalizedRewards()`, `computePolicyGradientLoss()`, and
+  `aggregateLossAcrossMicrobatch()` so CS336 A5-style DPO/GRPO/reasoning
+  metrics rubrics can run fixture-scale browser-safe checks before vLLM,
+  flash-attn, or full model training enters the loop.
 - Later implementation slices:
   - Assignment runner plan: packages, mounts, JS oracles, timeout/watchdog, and
     allowed tests.
@@ -271,7 +278,8 @@ runtime branches.
     `classifier-oracle`, `dedupe-oracle`, `near-dedupe-oracle`,
     `quality-rule-oracle`, `pii-oracle`, `network-gated`.
   - CS336 A5: `torch-compat`, `transformers-compatible`, `snapshot-oracle`,
-    `tokenizer-oracle`, `rl-loss-oracle`, `vllm-external`, `flash-attn-external`.
+    `tokenizer-oracle`, `rl-loss-oracle`, `response-parser-oracle`,
+    `vllm-external`, `flash-attn-external`.
   - GPU Puzzles / CS149 A3: `webgpu`, `wgsl-kernel`, `cuda-compatible-subset`,
     `kernel-visualizer`, `performance-rubric`.
   - CS149 A1/A2/CS149GPT: `native-cpp-external`, `pthreads-simulator`,

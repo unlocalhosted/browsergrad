@@ -47,8 +47,15 @@
       "name": "alignment_math_snapshot_slice",
       "kind": "capability",
       "options": {
-        "requires": ["pyodide", "torch-compat", "snapshot-oracle", "tokenizer-oracle", "rl-loss-oracle"],
-        "message": "CS336 A5 browser labs should start with GRPO/DPO/SFT math and snapshot fixtures."
+        "requires": [
+          "pyodide",
+          "torch-compat",
+          "snapshot-oracle",
+          "tokenizer-oracle",
+          "rl-loss-oracle",
+          "response-parser-oracle"
+        ],
+        "message": "CS336 A5 browser labs should start with GRPO/DPO/SFT math, parser, and snapshot fixtures."
       }
     },
     {

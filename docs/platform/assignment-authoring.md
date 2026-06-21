@@ -118,6 +118,12 @@ Scaling-law and hosted API rubrics can use
 cover CS336 A3-style budget/submit/list/final-submission API behavior,
 duplicate training-config rejection, dispatch fairness, and log-space power-law
 fits before a real FastAPI/Postgres/JAX/Modal stack enters the loop.
+Alignment rubrics can use `@unlocalhosted/browsergrad-alignment` for
+`rl-loss-oracle` and `response-parser-oracle` fixture checks. Its helpers cover
+CS336 A5-style DPO loss, MMLU/GSM8K parsing, rollout reward metadata,
+group-normalized rewards, policy-gradient token losses, and masked microbatch
+aggregation before full vLLM, flash-attn, Qwen inference, or native training
+loops enter the loop.
 
 ## Files And Fixtures
 

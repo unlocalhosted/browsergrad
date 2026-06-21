@@ -84,6 +84,12 @@ For every lab profile, the platform should:
     `fitPowerLawScalingLaw()` for CS336 A3-style hosted API, scheduler, and
     scaling-law checks before external FastAPI/Postgres/JAX/Modal runners are
     attached.
+    Alignment labs can use `@unlocalhosted/browsergrad-alignment`
+    `computePerInstanceDpoLoss()`, `parseMmluResponse()`,
+    `parseGsm8kResponse()`, `computeRolloutRewards()`,
+    `computeGroupNormalizedRewards()`, `computePolicyGradientLoss()`, and
+    `aggregateLossAcrossMicrobatch()` for fixture-scale CS336 A5 DPO/GRPO
+    checks before vLLM, flash-attn, or full model training enter the path.
 18. In Python rubrics, call profile-registered JS oracles with
     `browsergrad.oracle("<module-name>")`.
 19. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
@@ -117,6 +123,7 @@ Capability names are strings. Keep them descriptive and reusable:
 | `tokenizer-oracle` | JS/TS tokenizer oracle is available to rubrics. |
 | `near-dedupe-oracle` | Near-duplicate document decisions are checked by a deterministic oracle. |
 | `quality-rule-oracle` | Rule-based data quality filters are checked by a deterministic oracle. |
+| `response-parser-oracle` | Metric response parsers are checked by deterministic text oracles. |
 | `rl-loss-oracle` | Alignment/RL losses have independent reference checks. |
 | `hosted-api-mock` | Hosted API behavior is reproduced by a deterministic local mock. |
 | `scaling-law-oracle` | Scaling-law projections are checked by a deterministic browser-safe oracle. |
@@ -146,6 +153,11 @@ The first reusable scaling substrate is `@unlocalhosted/browsergrad-scaling`:
 it provides deterministic CS336 A3-style hosted API behavior, scheduler
 selection, and log-space power-law fitting for labs that choose
 `hosted-api-mock`, `scheduler-simulator`, or `scaling-law-oracle` paths.
+The first reusable alignment substrate is
+`@unlocalhosted/browsergrad-alignment`: it provides deterministic DPO loss,
+response parsing, rollout reward, group-normalized advantage, policy-gradient,
+and masked aggregation helpers for labs that choose `rl-loss-oracle` or
+`response-parser-oracle` paths.
 
 ## Readiness Modes
 
@@ -233,7 +245,7 @@ CS336 Assignment 5 and CS149GPT, proving their profile drafts can produce
 | CS336 A2 Systems | FlashAttention fixture + DDP/FSDP simulator preflight via `createDeterministicMesh()` | `torch-compat`, `webgpu`, `worker-mesh`, `distributed-simulator` |
 | CS336 A3 Scaling | Hosted API mock + scheduler tests via `@unlocalhosted/browsergrad-scaling` | `http-client`, `hosted-api-mock`, `server-fixture`, `scheduler-simulator`, `scaling-law-oracle` |
 | CS336 A4 Data | Small Common Crawl fixtures + `browsergrad-data` PII/dedupe/quality/HTML rubrics | `dataset-fixture`, `large-file-streaming`, `classifier-oracle`, `pii-oracle`, `near-dedupe-oracle`, `quality-rule-oracle` |
-| CS336 A5 Alignment | GRPO/DPO math snapshot labs via `createSnapshotOracle()` | `torch-compat`, `transformers-compatible`, `snapshot-oracle`, `rl-loss-oracle` |
+| CS336 A5 Alignment | GRPO/DPO math snapshot labs via `@unlocalhosted/browsergrad-alignment` + snapshots | `torch-compat`, `transformers-compatible`, `snapshot-oracle`, `rl-loss-oracle`, `response-parser-oracle` |
 | GPU Puzzles | WGSL puzzle runner | `webgpu`, `wgsl-kernel`, `kernel-visualizer` |
 | CS149 A1/A2 | Thread/SIMD/task-system simulator with deterministic task traces | `pthreads-simulator`, `simd-simulator`, `distributed-simulator` |
 | CS149 A3 | CUDA scan/SAXPY/render concepts | `webgpu`, `cuda-compatible-subset`, `performance-rubric` |
@@ -312,5 +324,8 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     checks.
     CS336 A3 scaling labs can use `@unlocalhosted/browsergrad-scaling` for
     hosted API mock, scheduler fairness, and scaling-law fixture checks.
+    CS336 A5 alignment labs can use
+    `@unlocalhosted/browsergrad-alignment` for DPO, parser, reward,
+    group-normalized advantage, policy-gradient, and masked aggregation checks.
 17. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

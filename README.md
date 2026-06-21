@@ -3,7 +3,7 @@
 **PyTorch-shaped deep learning in the browser.** Lazy IR with fusion, symbolic backward, AMP, gradient checkpointing, functional transforms, WGSL kernels, ONNX export.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![CI status](https://img.shields.io/badge/tests-396%20passing-brightgreen.svg)](#testing)
+[![CI status](https://img.shields.io/badge/tests-405%20passing-brightgreen.svg)](#testing)
 [![browser](https://img.shields.io/badge/runs-in%20the%20browser-blue.svg)](#)
 
 ```python
@@ -50,6 +50,7 @@ npm install @unlocalhosted/browsergrad-simulators     # optional: deterministic 
 npm install @unlocalhosted/browsergrad-snapshots      # optional: JSON/numeric snapshot oracles
 npm install @unlocalhosted/browsergrad-data           # optional: data-lab PII/dedupe/quality/HTML helpers
 npm install @unlocalhosted/browsergrad-scaling        # optional: scaling-law + hosted API oracles
+npm install @unlocalhosted/browsergrad-alignment      # optional: DPO/GRPO/alignment math oracles
 ```
 
 `pyodide` is a peer dependency. Asset-sync into `public/pyodide/v0.26.4/` so the runtime is served same-origin.
@@ -125,6 +126,7 @@ out = bg.realize_webgpu(x @ w + b)   # tiled GEMM, fused elementwise, custom WGS
 | [`browsergrad-snapshots`](./packages/browsergrad-snapshots) | Browser-safe JSON/numeric snapshot comparison oracles for fixture-backed rubrics. |
 | [`browsergrad-data`](./packages/browsergrad-data) | Browser-safe data-lab helpers for fixture HTML extraction, exact/near dedupe, Gopher quality rules, and PII masking. |
 | [`browsergrad-scaling`](./packages/browsergrad-scaling) | Browser-safe CS336 A3-style hosted API mock, scheduler selector, and scaling-law fitter. |
+| [`browsergrad-alignment`](./packages/browsergrad-alignment) | Browser-safe CS336 A5-style DPO, GRPO, rollout reward, parser, and policy-gradient math oracles. |
 
 Each package is independently consumable; they share an npm scope but no runtime dependency. Take one or all.
 
@@ -140,6 +142,7 @@ pnpm --filter @unlocalhosted/browsergrad-simulators test
 pnpm --filter @unlocalhosted/browsergrad-snapshots test
 pnpm --filter @unlocalhosted/browsergrad-data test
 pnpm --filter @unlocalhosted/browsergrad-scaling test
+pnpm --filter @unlocalhosted/browsergrad-alignment test
 ```
 
 The browser-mode suite runs the WGSL kernels and the realizer bridge against an actual `GPUDevice` via Playwright + Chromium. It catches shader-level bugs that NumPy mocks miss.
