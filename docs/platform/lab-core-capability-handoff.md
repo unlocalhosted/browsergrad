@@ -35,6 +35,8 @@ For every lab profile, the platform should:
    `materializeAssignmentMountPlan`, use `runAssignmentRubric` for the common
    Pyodide mount-and-execute path, or use `runAssignmentJavascriptRubric` for
    browser-native JS rubrics.
+   Contents may be strings or `Uint8Array` bytes for compact binary fixtures
+   such as `.pt`, `.npz`, or `.safetensors`.
 11. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
    Worker mesh, external/native runner, or future custom compiler.
 12. For Pyodide-backed labs, create the rubric execution request with
@@ -132,7 +134,8 @@ That test also builds `createAssignmentPreflightReport` for every benchmark
 profile under a browser-teaching environment and checks expected readiness
 states. It dry-runs empty mount contents for every profile with
 `evaluateAssignmentMountContents` so missing rubric files and datasets stay
-visible before filesystem writes.
+visible before filesystem writes. Runtime integration tests also mount binary
+fixture bytes through the Pyodide path.
 
 | Benchmark | First platform slice | Core capabilities |
 | --- | --- | --- |
@@ -188,6 +191,7 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
    launch the rubric through `Session.exec`, or uses
    `createAssignmentRubricExecRequest` when the platform needs manual staging.
 13. For runnable JavaScript labs, imports the rubric module and calls
-   `runAssignmentJavascriptRubric`.
+   `runAssignmentJavascriptRubric`; JS rubrics read binary fixtures with
+   `ctx.readBytes(path)`.
 14. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

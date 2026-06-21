@@ -101,6 +101,7 @@ export {
   type AssignmentMountFileRole,
   type AssignmentMountFile,
   type AssignmentDatasetMount,
+  type AssignmentMountContent,
   type AssignmentMountContents,
   type AssignmentMountContentEvaluation,
   type AssignmentMaterializeResult,

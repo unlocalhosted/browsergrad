@@ -64,6 +64,8 @@ Mount assignment files under a dedicated root such as `/assignments/<id>/`.
 Use deterministic fixture names and keep generated expected outputs checked in
 when they are small enough to review. Large datasets should be declared as
 datasets with hashes and mounted by the host before execution.
+Fixture contents can be strings or `Uint8Array` bytes. Use bytes for compact
+binary fixtures and snapshots such as `.pt`, `.npz`, and `.safetensors`.
 
 Dataset mount paths default under `<fixturesPath>/datasets/<filename>`.
 Profiles can still point at large external URLs; BrowserGrad records the mount
@@ -73,6 +75,8 @@ Use `evaluateAssignmentMountContents()` after fetching/cache lookup and before
 preflight status, not partial filesystem writes.
 `materializeAssignmentMountPlan()` expects dataset contents keyed by dataset
 name, so platforms can fetch/cache however they want before writing to Pyodide.
+JavaScript rubrics should use `ctx.readBytes(path)` for binary mounts and
+`ctx.readText(path)` for UTF-8 text.
 
 Rubrics should prefer exact fixtures for correctness and calibrated benchmark
 fixtures for performance. Do not depend on host OS paths, subprocesses, POSIX

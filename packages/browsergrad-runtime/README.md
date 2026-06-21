@@ -215,7 +215,7 @@ console.log(required, preflight.ok, preflight.missingCapabilities);
 console.log(plan.session.packages, plan.files.rubricPath, plan.execution.allowedTests);
 console.log(readiness.status, rubricKind, mounts.files, mounts.datasets);
 console.log(report.readiness.status, report.rubricKind, report.mountPlan.files);
-const fileContents: Record<string, string> = {
+const fileContents: Record<string, string | Uint8Array> = {
   [plan.files.rubricPath]: rubricSource,
 };
 if (plan.files.starterPath) fileContents[plan.files.starterPath] = starterSource;
@@ -269,11 +269,14 @@ uses it to decide what to place into `Session.fs` before rubric execution.
 against platform-provided file/dataset contents and returns missing required
 files, missing datasets, optional skips, and writable paths without touching
 `Session.fs`.
+Mount contents may be UTF-8 strings or `Uint8Array` bytes. Use bytes for
+snapshots and small upstream fixtures such as `.pt`, `.npz`, or
+`.safetensors`.
 
 `materializeAssignmentMountPlan()` writes provided string contents into
-`Session.fs` in mount-plan order. Required rubric content fails loudly when
-missing; optional starter/reference files are skipped when absent. Dataset
-contents are keyed by dataset name.
+`Session.fs` in mount-plan order, preserving byte contents for binary fixtures.
+Required rubric content fails loudly when missing; optional starter/reference
+files are skipped when absent. Dataset contents are keyed by dataset name.
 
 `createAssignmentRubricExecRequest()` turns that plan into the minimal
 `Session.exec` request for rubric execution. It sets assignment metadata in
@@ -307,7 +310,8 @@ assignment context, declared oracles, and assertion/artifact helpers to the
 rubric function, then returns `{ mount, assertions, artifacts }`. This is the
 starting point for GPU Puzzles and CS149-style JS/WebGPU rubrics. Pass browser
 resources such as WebGPU adapters/devices through `substrates`, then read them
-inside the rubric with `ctx.substrate("webgpu")`.
+inside the rubric with `ctx.substrate("webgpu")`. JS rubrics can read mounted
+text with `ctx.readText(path)` or mounted bytes with `ctx.readBytes(path)`.
 
 ## What this is, and is not
 

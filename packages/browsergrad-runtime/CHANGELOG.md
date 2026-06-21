@@ -36,9 +36,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   and `selectedCapabilities` for platform preflight routing UI.
 - `evaluateAssignmentMountContents(mountPlan, contents)` dry-runs file/dataset
   content readiness before writing to `Session.fs`.
+- Assignment mount contents and `Session.fs.write` now accept `Uint8Array`
+  bytes for small binary fixtures such as `.pt`, `.npz`, and snapshots.
 - `runAssignmentJavascriptRubric(plan, contents, rubric, options)` runs
   browser-native JS rubrics with assignment context, mounted text reads,
   declared oracles, and structured assertion/artifact helpers.
+- JavaScript rubric contexts now expose `ctx.readBytes(path)` for binary
+  mounted fixtures.
 - JavaScript rubric contexts now expose `ctx.substrate(name)` for browser
   resources such as WebGPU adapters/devices supplied by the platform.
 

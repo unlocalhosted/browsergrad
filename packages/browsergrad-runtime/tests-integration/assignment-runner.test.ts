@@ -24,7 +24,11 @@ interface PyodideAPI {
   runPythonAsync: (code: string) => Promise<unknown>;
   registerJsModule: (name: string, module: object) => void;
   FS: {
-    writeFile: (path: string, data: string, opts?: { encoding?: string }) => void;
+    writeFile: (
+      path: string,
+      data: string | Uint8Array,
+      opts?: { encoding?: string },
+    ) => void;
     readFile: (path: string, opts?: { encoding?: string }) => string;
     mkdirTree: (path: string) => void;
     analyzePath: (path: string) => { exists: boolean };
@@ -175,6 +179,47 @@ describe("runAssignmentRubric", () => {
       { kind: "pass", name: "test_assignment_smoke", durationMs: null },
     ]);
   });
+
+  it("mounts binary dataset contents for Python rubrics", async () => {
+    const parsed = parseAssignmentProfile(PROFILE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const plan = createAssignmentRunPlan(parsed.profile, {
+      capabilities: ["pyodide"],
+    });
+
+    assertions = [];
+    artifacts = [];
+    const result = await runAssignmentRubric(
+      {
+        fs: pyodideSessionFs(pyodide),
+        exec: pyodideExec,
+      },
+      plan,
+      {
+        files: {
+          [plan.files.rubricPath]: `
+import browsergrad as bg
+with open("/assignments/assignment-smoke/fixtures/datasets/tiny.txt", "rb") as f:
+    data = f.read()
+if data == bytes([0, 1, 255]):
+    bg.assert_pass("test_binary_dataset")
+else:
+    bg.assert_fail("test_binary_dataset", "binary dataset mismatch", expected=[0, 1, 255], actual=list(data))
+`,
+        },
+        datasets: {
+          tiny: Uint8Array.of(0, 1, 255),
+        },
+      },
+    );
+
+    expect(result.exec.ok).toBe(true);
+    expect(result.exec.assertions).toEqual([
+      { kind: "pass", name: "test_binary_dataset", durationMs: null },
+    ]);
+  });
 });
 
 function pyodideSessionFs(py: PyodideAPI): SessionFS {
@@ -184,7 +229,11 @@ function pyodideSessionFs(py: PyodideAPI): SessionFS {
       if (parent && !py.FS.analyzePath(parent).exists) {
         py.FS.mkdirTree(parent);
       }
-      py.FS.writeFile(path, content, { encoding: "utf8" });
+      if (typeof content === "string") {
+        py.FS.writeFile(path, content, { encoding: "utf8" });
+      } else {
+        py.FS.writeFile(path, content);
+      }
     },
     async read(path) {
       return py.FS.readFile(path, { encoding: "utf8" });

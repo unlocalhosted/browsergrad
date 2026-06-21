@@ -203,7 +203,16 @@ async function handleFsWrite(req: FsWriteRequest): Promise<void> {
     if (parent && !py.FS.analyzePath(parent).exists) {
       py.FS.mkdirTree(parent);
     }
-    py.FS.writeFile(req.path, req.content, { encoding: "utf8" });
+    const writeFile = py.FS.writeFile as (
+      path: string,
+      data: string | Uint8Array,
+      options?: { encoding?: string },
+    ) => void;
+    if (typeof req.content === "string") {
+      writeFile(req.path, req.content, { encoding: "utf8" });
+    } else {
+      writeFile(req.path, req.content);
+    }
     reply({ id: req.id, kind: "fs.write:done" });
   } catch (err) {
     replyError(req.id, err);

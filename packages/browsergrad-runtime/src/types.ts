@@ -139,8 +139,9 @@ export interface SessionFS {
   /**
    * Write a file to the worker's virtual FS.
    * Parent directories are created automatically.
+   * Strings are written as UTF-8; Uint8Array values are written as bytes.
    */
-  write(path: string, content: string): Promise<void>;
+  write(path: string, content: string | Uint8Array): Promise<void>;
 
   /** Read a UTF-8 file from the worker's virtual FS. */
   read(path: string): Promise<string>;

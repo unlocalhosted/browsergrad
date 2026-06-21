@@ -46,7 +46,7 @@ export interface FsWriteRequest {
   readonly id: number;
   readonly kind: "fs.write";
   readonly path: string;
-  readonly content: string;
+  readonly content: string | Uint8Array;
 }
 
 export interface FsReadRequest {

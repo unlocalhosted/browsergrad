@@ -614,7 +614,7 @@ describe("parseAssignmentProfile", () => {
       capabilities: ["pyodide"],
     });
     const mountPlan = createAssignmentMountPlan(runPlan);
-    const writes: Array<{ path: string; content: string }> = [];
+    const writes: Array<{ path: string; content: string | Uint8Array }> = [];
 
     const materialized = await materializeAssignmentMountPlan(
       {
@@ -622,7 +622,8 @@ describe("parseAssignmentProfile", () => {
           writes.push({ path, content });
         },
         async read(path) {
-          return writes.find((write) => write.path === path)?.content ?? "";
+          const content = writes.find((write) => write.path === path)?.content;
+          return typeof content === "string" ? content : "";
         },
       },
       mountPlan,
@@ -697,6 +698,48 @@ describe("parseAssignmentProfile", () => {
     ).toBe(true);
   });
 
+  it("materializes binary assignment dataset contents", async () => {
+    const result = parseAssignmentProfile(VALID_PROFILE);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const runPlan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["pyodide"],
+    });
+    const mountPlan = createAssignmentMountPlan(runPlan);
+    const writes: Array<{ path: string; content: string | Uint8Array }> = [];
+    const binaryFixture = Uint8Array.of(0x50, 0x54, 0x00, 0xff);
+
+    const materialized = await materializeAssignmentMountPlan(
+      {
+        async write(path, content) {
+          writes.push({ path, content });
+        },
+        async read() {
+          return "";
+        },
+      },
+      mountPlan,
+      {
+        files: {
+          "/assignments/cs336-assignment1/rubric.py": "print('rubric')",
+        },
+        datasets: {
+          tiny: binaryFixture,
+        },
+      },
+    );
+
+    expect(materialized.writtenPaths).toEqual([
+      "/assignments/cs336-assignment1/rubric.py",
+      "/assignments/cs336-assignment1/fixtures/datasets/tiny.txt",
+    ]);
+    expect(writes.at(-1)).toEqual({
+      path: "/assignments/cs336-assignment1/fixtures/datasets/tiny.txt",
+      content: binaryFixture,
+    });
+  });
+
   it("rejects missing required mount content before writing optional files", async () => {
     const result = parseAssignmentProfile(VALID_PROFILE);
     expect(result.ok).toBe(true);
@@ -706,7 +749,7 @@ describe("parseAssignmentProfile", () => {
       capabilities: ["pyodide"],
     });
     const mountPlan = createAssignmentMountPlan(runPlan);
-    const writes: Array<{ path: string; content: string }> = [];
+    const writes: Array<{ path: string; content: string | Uint8Array }> = [];
 
     await expect(
       materializeAssignmentMountPlan(
@@ -743,7 +786,7 @@ describe("parseAssignmentProfile", () => {
       capabilities: ["pyodide"],
     });
     const mountPlan = createAssignmentMountPlan(runPlan);
-    const writes: Array<{ path: string; content: string }> = [];
+    const writes: Array<{ path: string; content: string | Uint8Array }> = [];
 
     await expect(
       materializeAssignmentMountPlan(
@@ -783,7 +826,7 @@ describe("parseAssignmentProfile", () => {
     const plan = createAssignmentRunPlan(result.profile, {
       capabilities: ["pyodide"],
     });
-    const writes: Array<{ path: string; content: string }> = [];
+    const writes: Array<{ path: string; content: string | Uint8Array }> = [];
 
     await expect(
       runAssignmentRubric(
@@ -1025,6 +1068,61 @@ describe("parseAssignmentProfile", () => {
 
     expect(run.assertions).toEqual([
       { kind: "pass", name: "test_gpu_substrate" },
+    ]);
+  });
+
+  it("lets JavaScript rubrics read binary mounted content", async () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      id: "alignment-snapshots",
+      runtime_packages: [],
+      files: {
+        root: "/assignments/alignment-snapshots",
+        rubric_path: "rubric.js",
+        fixtures_path: "fixtures",
+      },
+      allowed_tests: ["test_binary_snapshot"],
+      gates: [
+        {
+          name: "js_snapshot_rubric",
+          kind: "capability",
+          options: { requires: ["javascript-rubric", "snapshot-oracle"] },
+        },
+      ],
+      datasets: [{ name: "tiny-npz", url: "/fixtures/tiny.npz" }],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const plan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["javascript-rubric", "snapshot-oracle"],
+    });
+    const snapshotBytes = Uint8Array.of(0x50, 0x4b, 0x03, 0x04);
+
+    const run = await runAssignmentJavascriptRubric(
+      plan,
+      {
+        files: {
+          "/assignments/alignment-snapshots/rubric.js": "export async function run() {}",
+        },
+        datasets: {
+          "tiny-npz": snapshotBytes,
+        },
+      },
+      (ctx) => {
+        const bytes = ctx.readBytes(
+          "/assignments/alignment-snapshots/fixtures/datasets/tiny.npz",
+        );
+        if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
+          ctx.assertPass("test_binary_snapshot");
+        } else {
+          ctx.assertFail("test_binary_snapshot", "wrong bytes");
+        }
+      },
+    );
+
+    expect(run.assertions).toEqual([
+      { kind: "pass", name: "test_binary_snapshot" },
     ]);
   });
 

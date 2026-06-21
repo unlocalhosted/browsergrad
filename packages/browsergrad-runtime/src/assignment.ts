@@ -181,9 +181,11 @@ export interface AssignmentDatasetMount {
   readonly mountPath: string;
 }
 
+export type AssignmentMountContent = string | Uint8Array;
+
 export interface AssignmentMountContents {
-  readonly files: Readonly<Record<string, string>>;
-  readonly datasets?: Readonly<Record<string, string>>;
+  readonly files: Readonly<Record<string, AssignmentMountContent>>;
+  readonly datasets?: Readonly<Record<string, AssignmentMountContent>>;
 }
 
 export interface AssignmentMountContentEvaluation {
@@ -218,6 +220,7 @@ export interface AssignmentJavascriptRubricContext {
   readonly allowedTests: readonly string[];
   readonly behavioralGates: readonly AssignmentGateSpec[];
   readText(path: string): string;
+  readBytes(path: string): Uint8Array;
   oracle<T = unknown>(name: string): T;
   substrate<T = unknown>(name: string): T;
   assertPass(name: string, durationMs?: number): void;
@@ -682,11 +685,24 @@ export async function runAssignmentJavascriptRubric(
     allowedTests: plan.execution.allowedTests,
     behavioralGates: plan.behavioralGates,
     readText(path) {
-      const text = textByPath.get(path);
-      if (text === undefined) {
+      const content = textByPath.get(path);
+      if (content === undefined) {
         throw new BrowsergradError(`assignment text file is not mounted: ${path}`);
       }
-      return text;
+      if (typeof content !== "string") {
+        throw new BrowsergradError(`assignment text file is binary: ${path}`);
+      }
+      return content;
+    },
+    readBytes(path) {
+      const content = textByPath.get(path);
+      if (content === undefined) {
+        throw new BrowsergradError(`assignment byte file is not mounted: ${path}`);
+      }
+      if (typeof content === "string") {
+        return new TextEncoder().encode(content);
+      }
+      return new Uint8Array(content);
     },
     oracle<T = unknown>(name: string): T {
       const oracle = options.oracles?.[name];
@@ -754,7 +770,7 @@ function collectAssignmentMountEntries(
   plan: AssignmentMountPlan,
   contents: AssignmentMountContents,
 ): {
-  readonly writes: readonly { readonly path: string; readonly content: string }[];
+  readonly writes: readonly { readonly path: string; readonly content: AssignmentMountContent }[];
   readonly skippedOptionalPaths: readonly string[];
 } {
   const evaluation = inspectAssignmentMountContents(plan, contents);
@@ -778,7 +794,7 @@ function inspectAssignmentMountContents(
   plan: AssignmentMountPlan,
   contents: AssignmentMountContents,
 ): {
-  readonly writes: readonly { readonly path: string; readonly content: string }[];
+  readonly writes: readonly { readonly path: string; readonly content: AssignmentMountContent }[];
   readonly missingRequiredFiles: readonly string[];
   readonly missingDatasets: readonly string[];
   readonly skippedOptionalPaths: readonly string[];
@@ -786,8 +802,8 @@ function inspectAssignmentMountContents(
   const skippedOptionalPaths: string[] = [];
   const missingRequiredFiles: string[] = [];
   const missingDatasets: string[] = [];
-  const fileWrites: Array<{ path: string; content: string }> = [];
-  const datasetWrites: Array<{ path: string; content: string }> = [];
+  const fileWrites: Array<{ path: string; content: AssignmentMountContent }> = [];
+  const datasetWrites: Array<{ path: string; content: AssignmentMountContent }> = [];
 
   for (const file of plan.files) {
     const content = contents.files[file.path];

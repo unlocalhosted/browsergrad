@@ -145,6 +145,24 @@ describe("client request/response correlation", () => {
     expect(content).toBe("hello world");
     await session.dispose();
   });
+
+  it("fs.write sends binary content to the worker", async () => {
+    const fake = new FakeWorker();
+    const session = await makeSession(fake);
+    let sentContent: unknown;
+    fake.handler = (msg) => {
+      if (msg.kind === "fs.write") {
+        sentContent = msg.content;
+        fake.reply({ id: msg.id, kind: "fs.write:done" });
+      }
+    };
+
+    const bytes = Uint8Array.of(1, 2, 255);
+    await session.fs.write("/fixture.bin", bytes);
+
+    expect(sentContent).toBe(bytes);
+    await session.dispose();
+  });
 });
 
 describe("streaming event routing", () => {

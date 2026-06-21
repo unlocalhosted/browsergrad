@@ -256,7 +256,7 @@ class SessionImpl implements Session {
 
   /* ── FS impl ───────────────────────────────────────────── */
 
-  private async fsWrite(path: string, content: string): Promise<void> {
+  private async fsWrite(path: string, content: string | Uint8Array): Promise<void> {
     this.assertLive();
     await this.request({ kind: "fs.write", path, content });
   }
