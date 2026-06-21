@@ -77,6 +77,10 @@ For every lab profile, the platform should:
 17. For JavaScript-backed labs, pass the imported rubric function, declared
     oracle objects, and browser substrates such as WebGPU devices to
     `runAssignmentJavascriptRubric`.
+    Prefer `runAssignmentJavascriptProfile()` when the platform has a full
+    profile; it owns preflight, route validation, mount collection,
+    oracle/substrate wiring, and rubric execution as one e2e path. CS149 A1 is
+    the first benchmark profile covered by this route.
     JS/TS streaming checks can import `createStreamingGate` and use
     `gate.wrapInput` plus `gate.wrapOutput`.
     FlashAttention labs can use `@unlocalhosted/browsergrad-kernels`
@@ -337,9 +341,10 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     Binary fixtures can be verified after staging with `Session.fs.readBytes`.
     Dataset hashes should be verified before staging with
     `verifyAssignmentMountContentHashes`.
-16. For runnable JavaScript labs, imports the rubric module and calls
-    `runAssignmentJavascriptRubric`; JS rubrics read binary fixtures with
-    `ctx.readBytes(path)`. Kernel labs can use
+16. For runnable JavaScript labs, import the rubric module and call
+    `runAssignmentJavascriptProfile()` for full profile-driven runs or
+    `runAssignmentJavascriptRubric()` when the platform already owns preflight.
+    JS rubrics read binary fixtures with `ctx.readBytes(path)`. Kernel labs can use
     `@unlocalhosted/browsergrad-kernels` `createBrowsergradKernelRubric(ctx)` to
     compare WGSL outputs against CPU references and emit BrowserGrad assertions.
     CS336 A2 FlashAttention labs can use `referenceFlashAttention()` and

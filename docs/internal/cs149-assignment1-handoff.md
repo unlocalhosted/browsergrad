@@ -45,6 +45,9 @@ Crafting Attention should:
 
 1. Load the profile and show readiness through
    `createAssignmentPreflightReport()`.
+   For execution, call `runAssignmentJavascriptProfile()` with the imported JS
+   rubric and `_bg_cs149_cpu_oracles`; BrowserGrad has an e2e test proving this
+   exact profile-driven route.
 2. Treat `simd-simulator`, `pthreads-simulator`, `ispc-simulator`, and
    `performance-rubric` as simulated/browser-safe teaching capabilities.
 3. Mount a JS rubric that calls the simulator helpers and reports structured

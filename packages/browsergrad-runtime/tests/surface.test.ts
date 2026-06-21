@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BrowsergradError,
   createSession,
+  runAssignmentJavascriptProfile,
   type Artifact,
   type ArtifactImage,
   type ArtifactJson,
@@ -26,6 +27,10 @@ import {
 describe("public surface", () => {
   it("exports createSession as a function", () => {
     expect(typeof createSession).toBe("function");
+  });
+
+  it("exports profile-level JavaScript assignment runner", () => {
+    expect(typeof runAssignmentJavascriptProfile).toBe("function");
   });
 
   it("exports BrowsergradError as a constructable error subclass", () => {

@@ -395,6 +395,11 @@ export interface AssignmentJavascriptRubricRunResult {
   readonly artifacts: readonly Artifact[];
 }
 
+export interface AssignmentJavascriptProfileRunResult {
+  readonly report: AssignmentPreflightReport;
+  readonly run: AssignmentJavascriptRubricRunResult;
+}
+
 export type AssignmentProfileParseResult =
   | { ok: true; profile: AssignmentProfile }
   | { ok: false; errors: readonly string[] };
@@ -1193,6 +1198,28 @@ export async function runAssignmentJavascriptRubric(
     assertions,
     artifacts,
   };
+}
+
+export async function runAssignmentJavascriptProfile(
+  profile: AssignmentProfile,
+  environment: AssignmentCapabilityEnvironment,
+  contents: AssignmentMountContents,
+  rubric: AssignmentJavascriptRubric,
+  options: AssignmentJavascriptRubricRunOptions = {},
+): Promise<AssignmentJavascriptProfileRunResult> {
+  const report = createAssignmentPreflightReport(profile, environment);
+  if (report.runnerRoute.target !== "javascript") {
+    throw new BrowsergradError(
+      `cannot run JavaScript profile; runner route is ${report.runnerRoute.target}: ${report.runnerRoute.message}`,
+    );
+  }
+  const run = await runAssignmentJavascriptRubric(
+    report.plan,
+    contents,
+    rubric,
+    options,
+  );
+  return { report, run };
 }
 
 async function verifyDatasetMountHash(

@@ -228,6 +228,11 @@ runtime branches.
   kernel tensor checks to `runAssignmentJavascriptRubric()` contexts, and a
   cross-package integration test proves pass/fail assertions survive through
   BrowserGrad's JS rubric runner.
+- Profile-driven JS runner guarantee: `runAssignmentJavascriptProfile()` builds
+  preflight, validates the JavaScript route, mounts declared contents, wires
+  oracles/substrates, and runs browser-native rubrics from a full assignment
+  profile. Runtime e2e coverage proves the CS149 A1 profile can execute this
+  way with simulator oracles.
 - Simulator-core guarantee: `@unlocalhosted/browsergrad-simulators` exports
   `createDeterministicMesh()` so JS rubrics and platform oracles can model
   browser-safe rank meshes, barriers, broadcasts, point-to-point messages, and

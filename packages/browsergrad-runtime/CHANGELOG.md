@@ -81,6 +81,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `runAssignmentJavascriptRubric(plan, contents, rubric, options)` runs
   browser-native JS rubrics with assignment context, mounted text reads,
   declared oracles, and structured assertion/artifact helpers.
+- `runAssignmentJavascriptProfile(profile, environment, contents, rubric,
+  options)` runs a full profile-driven JavaScript assignment path: preflight,
+  route validation, mount readiness, oracle/substrate wiring, and rubric
+  execution.
 - JavaScript rubric contexts now expose `ctx.readBytes(path)` for binary
   mounted fixtures.
 - JavaScript rubric contexts now expose `ctx.substrate(name)` for browser

@@ -189,6 +189,7 @@ import {
   evaluateAssignmentMountContents,
   parseAssignmentProfile,
   requiredAssignmentCapabilities,
+  runAssignmentJavascriptProfile,
   runAssignmentJavascriptRubric,
   runAssignmentRubric,
 } from "@unlocalhosted/browsergrad-runtime";
@@ -259,6 +260,15 @@ const run = await runAssignmentRubric(session, plan, {
   datasets: { tiny: tinyFixtureText },
 });
 console.log(run.mount.writtenPaths, run.exec.assertions);
+
+const jsRun = await runAssignmentJavascriptProfile(
+  parsed.profile,
+  environment,
+  { files: { [report.plan.files.rubricPath]: rubricSource } },
+  importedRubric,
+  { oracles: { _bg_cs149_cpu_oracles: cs149Oracle } },
+);
+console.log(jsRun.report.runnerRoute.target, jsRun.run.assertions);
 ```
 
 Capability gates support `requires` for all-of requirements and `any_of` for
@@ -278,6 +288,9 @@ mode: `browser`, then `simulated`, then `external`.
 `pyodide`, `javascript`, `external`, `unsupported`, or `blocked`. Use this for
 platform branching before calling `runAssignmentRubric()` or
 `runAssignmentJavascriptRubric()`.
+Use `runAssignmentJavascriptProfile()` when the platform has a full JS-routed
+profile and wants BrowserGrad to own preflight, route validation, mount
+collection, oracle/substrate wiring, and rubric execution in one call.
 For `external` routes, `createAssignmentExternalRunnerRequest(plan)` returns the
 native/hosted runner handoff: selected external capabilities, resolved files,
 timeouts, behavioral gates, mount plan, and dataset cache plan. Preflight

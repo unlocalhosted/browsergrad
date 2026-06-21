@@ -81,6 +81,10 @@ Use `runAssignmentJavascriptRubric()` for browser-native JS rubrics that need
 assignment context, mounted text, oracles, and structured assertion/artifact
 helpers without Pyodide. Pass browser resources such as WebGPU adapters/devices
 through `substrates` and read them with `ctx.substrate(name)`.
+Use `runAssignmentJavascriptProfile()` when the platform has a full profile and
+wants one profile-driven call that builds preflight, validates the JavaScript
+route, mounts declared contents, wires oracles/substrates, and runs the rubric.
+CS149 A1 has an e2e test proving this route with simulator oracles.
 Kernel-style JS rubrics can use `createKernelRubric()` from
 `@unlocalhosted/browsergrad-kernels` to compare tensors against CPU references
 and forward pass/fail assertions into the BrowserGrad JS rubric context. Use
