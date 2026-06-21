@@ -179,6 +179,7 @@ import {
   assignmentRunnerRoute,
   createAssignmentCapabilityEnvironment,
   createAssignmentBenchmarkPreflightMatrix,
+  createVerifiedAssignmentBenchmarkPreflightMatrix,
   createAssignmentDatasetCachePlan,
   createAssignmentExternalRunnerRequest,
   createAssignmentMountPlan,
@@ -209,6 +210,14 @@ const matrix = createAssignmentBenchmarkPreflightMatrix(
   environment,
   { files: { [report.plan.files.rubricPath]: rubricSource } },
 );
+const verifiedMatrix = await createVerifiedAssignmentBenchmarkPreflightMatrix(
+  [parsed.profile],
+  environment,
+  {
+    files: { [report.plan.files.rubricPath]: rubricSource },
+    datasets: { tiny: tinyFixtureText },
+  },
+);
 const route = assignmentRunnerRoute(plan);
 if (!plan.ok) {
   throw new Error(`Missing capabilities: ${plan.capabilityEvaluation.missingCapabilities.join(", ")}`);
@@ -229,6 +238,7 @@ console.log(readiness.status, rubricKind, mounts.files, mounts.datasets);
 console.log(route.target, report.runnerRoute.target, report.mountPlan.files, datasetCache.datasets);
 console.log(matrix.rows[0]?.readinessStatus, matrix.rows[0]?.contentOk);
 console.log(matrix.rows[0]?.gates.map((gate) => [gate.name, gate.status, gate.selectedCapabilities]));
+console.log(verifiedMatrix.rows[0]?.hashOk, verifiedMatrix.rows[0]?.hashChecks);
 const fileContents: Record<string, string | Uint8Array> = {
   [plan.files.rubricPath]: rubricSource,
 };
@@ -288,6 +298,10 @@ capability-gate table with `status`, `selectedAnyOf`, `selectedCapabilities`,
 `missingRequired`, `missingAnyOf`, and optional author `message`. Use it for
 benchmark dashboards, PRD handoffs, and platform smoke tests that cover many
 course profiles at once without reimplementing BrowserGrad's route selection.
+Use `createVerifiedAssignmentBenchmarkPreflightMatrix(profiles, environment,
+contents)` after file/dataset contents are fetched to run the same matrix plus
+dataset SHA checks. Its rows add `hashOk` and `hashChecks`, and row `ok` stays
+false until capability, content, and declared dataset hashes all pass.
 
 `createAssignmentRunPlan()` does not execute student code. It produces the
 platform handoff object: package preload list, JS oracle modules, resolved

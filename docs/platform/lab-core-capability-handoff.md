@@ -180,6 +180,11 @@ flat: `readinessStatus`, `runnerTarget`, `rubricKind`, capability lists,
 `status`, selected alternatives, selected capabilities, missing requirements,
 missing alternatives, and optional author messages, so dashboards can show the
 exact BrowserGrad-selected route without rebuilding profile reports.
+When files and datasets have been fetched, call
+`createVerifiedAssignmentBenchmarkPreflightMatrix()` instead. It preserves the
+same rows, adds `hashOk` and `hashChecks`, and keeps row `ok` false until
+declared dataset SHA-256 hashes match; platforms should run it before any
+Pyodide/JS filesystem mount.
 The same benchmark test pressure-checks external-runner handoffs for
 CS336 Assignment 5 and CS149GPT, proving their profile drafts can produce
 `externalRunnerRequest` objects from real capability environments.
@@ -237,24 +242,27 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
    source-addressed URL cache paths, and malformed hashes remain preflight
    failures.
 10. Fetches or provides assignment file/dataset contents, then calls
-   `evaluateAssignmentMountContents` to show missing files/datasets.
-11. Materializes validated contents
+    `evaluateAssignmentMountContents` to show missing files/datasets.
+11. For batch dashboards with fetched contents, calls
+    `createVerifiedAssignmentBenchmarkPreflightMatrix` so `hashOk` and
+    `hashChecks` block stale or wrong datasets before mount.
+12. Materializes validated contents
    into `Session.fs`.
-12. Shows packages, oracle modules, rubric kind, file mounts, and
-   satisfied/missing capability groups.
-13. For external-only labs, calls `createAssignmentExternalRunnerRequest(plan)`
-   and queues platform-owned native/hosted execution with the returned files,
-   timeouts, selected external capabilities, mount plan, and dataset cache plan.
-14. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
-   launch the rubric through `Session.exec`, or uses
-   `createAssignmentRubricExecRequest` when the platform needs manual staging.
-   Binary fixtures can be verified after staging with `Session.fs.readBytes`.
-   Dataset hashes should be verified before staging with
-   `verifyAssignmentMountContentHashes`.
-15. For runnable JavaScript labs, imports the rubric module and calls
-   `runAssignmentJavascriptRubric`; JS rubrics read binary fixtures with
-   `ctx.readBytes(path)`. Kernel labs can use
-   `@unlocalhosted/browsergrad-kernels` `createBrowsergradKernelRubric(ctx)` to
-   compare WGSL outputs against CPU references and emit BrowserGrad assertions.
-16. Offers the learner a runnable browser path, simulated path, or external-runner
+13. Shows packages, oracle modules, rubric kind, file mounts, and
+    satisfied/missing capability groups.
+14. For external-only labs, calls `createAssignmentExternalRunnerRequest(plan)`
+    and queues platform-owned native/hosted execution with the returned files,
+    timeouts, selected external capabilities, mount plan, and dataset cache plan.
+15. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
+    launch the rubric through `Session.exec`, or uses
+    `createAssignmentRubricExecRequest` when the platform needs manual staging.
+    Binary fixtures can be verified after staging with `Session.fs.readBytes`.
+    Dataset hashes should be verified before staging with
+    `verifyAssignmentMountContentHashes`.
+16. For runnable JavaScript labs, imports the rubric module and calls
+    `runAssignmentJavascriptRubric`; JS rubrics read binary fixtures with
+    `ctx.readBytes(path)`. Kernel labs can use
+    `@unlocalhosted/browsergrad-kernels` `createBrowsergradKernelRubric(ctx)` to
+    compare WGSL outputs against CPU references and emit BrowserGrad assertions.
+17. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

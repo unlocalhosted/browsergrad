@@ -41,6 +41,10 @@ external-runner fields without asking the platform to duplicate BrowserGrad's
 preflight logic. Each row also includes capability `gates` with selected
 alternatives and missing alternatives so UI can explain why a lab is runnable,
 simulated, external-only, or blocked per gate.
+Use `createVerifiedAssignmentBenchmarkPreflightMatrix(profiles, environment,
+contents)` once dataset contents are available. It adds `hashOk` and
+`hashChecks`, so platforms can reject wrong or stale fixtures before writing
+anything into Pyodide or a JS rubric context.
 Use `createAssignmentCapabilityEnvironment()` to build that environment from
 `browserCapabilities`, `simulatedCapabilities`, and `externalCapabilities`
 instead of handcrafting `capabilityModes`. It de-duplicates names, sorts them

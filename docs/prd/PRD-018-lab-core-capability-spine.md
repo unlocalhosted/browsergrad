@@ -169,6 +169,10 @@ runtime branches.
   capability, content-gap, cache-strategy, external-runner, and per-gate route
   fields. This is the handoff shape for platform dashboards and cross-course
   smoke tests.
+- Verified-matrix guarantee:
+  `createVerifiedAssignmentBenchmarkPreflightMatrix(profiles, environment,
+  contents)` extends the benchmark matrix with `hashOk` and dataset `hashChecks`
+  so platforms can reject stale or wrong fixtures before any filesystem mount.
 - Runner-route guarantee: `assignmentRunnerRoute(plan)` maps preflight output
   to `pyodide`, `javascript`, `external`, `unsupported`, or `blocked`, so
   platform launch controls do not duplicate BrowserGrad's rubric/readiness
@@ -268,6 +272,9 @@ runtime branches.
   missing, without duplicating preflight semantics in platform code. Matrix rows
   include capability gate details so platform dashboards can render selected and
   missing alternatives directly.
+- Later RED test: verified benchmark matrix helper marks rows not-ok when
+  required dataset contents exist but declared SHA-256 hashes mismatch, and
+  reports per-dataset hash status without writing to `Session.fs`.
 - Run focused package tests:
   - `pnpm --filter @unlocalhosted/browsergrad-runtime test -- assignment`
   - `pnpm --filter @unlocalhosted/browsergrad-runtime typecheck`

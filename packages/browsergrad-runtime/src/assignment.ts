@@ -188,6 +188,17 @@ export interface AssignmentBenchmarkPreflightMatrix {
   readonly rows: readonly AssignmentBenchmarkPreflightRow[];
 }
 
+export interface AssignmentVerifiedBenchmarkPreflightRow
+  extends AssignmentBenchmarkPreflightRow {
+  readonly hashOk: boolean;
+  readonly hashChecks: readonly AssignmentMountHashCheck[];
+}
+
+export interface AssignmentVerifiedBenchmarkPreflightMatrix {
+  readonly ok: boolean;
+  readonly rows: readonly AssignmentVerifiedBenchmarkPreflightRow[];
+}
+
 export interface AssignmentRunPlan {
   readonly id: string;
   readonly profileVersion: string;
@@ -633,56 +644,96 @@ export function createAssignmentBenchmarkPreflightMatrix(
   environment: AssignmentCapabilityEnvironment,
   contents: AssignmentMountContents = { files: {} },
 ): AssignmentBenchmarkPreflightMatrix {
-  const rows = profiles.map((profile) => {
-    const report = createAssignmentPreflightReport(profile, environment);
-    const content = evaluateAssignmentMountContents(report.mountPlan, contents);
-    const ok =
-      report.readiness.status !== "blocked" &&
-      report.runnerRoute.target !== "unsupported" &&
-      content.ok;
-
-    return {
-      id: profile.id,
-      ...(profile.metadata?.title ? { title: profile.metadata.title } : {}),
-      ...(profile.metadata?.course ? { course: profile.metadata.course } : {}),
-      ...(profile.metadata?.source_url
-        ? { sourceUrl: profile.metadata.source_url }
-        : {}),
-      ok,
-      readinessStatus: report.readiness.status,
-      runnerTarget: report.runnerRoute.target,
-      rubricKind: report.rubricKind,
-      requiredCapabilities: report.requiredCapabilities,
-      selectedCapabilities: report.readiness.selectedCapabilities,
-      missingCapabilities: report.readiness.missingCapabilities,
-      simulatedCapabilities: report.readiness.simulatedCapabilities,
-      externalCapabilities: report.readiness.externalCapabilities,
-      contentOk: content.ok,
-      missingRequiredFiles: content.missingRequiredFiles,
-      missingDatasets: content.missingDatasets,
-      skippedOptionalPaths: content.skippedOptionalPaths,
-      cacheStrategies: report.datasetCachePlan.datasets.map(
-        (dataset) => dataset.strategy,
-      ),
-      externalRunnerRequired: Boolean(report.externalRunnerRequest),
-      gates: report.plan.capabilityEvaluation.gates.map((gate) => ({
-        name: gate.name,
-        ok: gate.ok,
-        status: gate.status,
-        requires: gate.requires,
-        anyOf: gate.anyOf,
-        selectedAnyOf: gate.selectedAnyOf,
-        selectedCapabilities: gate.selectedCapabilities,
-        missingRequired: gate.missingRequired,
-        missingAnyOf: gate.missingAnyOf,
-        ...(gate.message ? { message: gate.message } : {}),
-      })),
-    };
-  });
+  const rows = profiles.map((profile) =>
+    createAssignmentBenchmarkPreflightRow(
+      profile,
+      createAssignmentPreflightReport(profile, environment),
+      contents,
+    )
+  );
 
   return {
     ok: rows.every((row) => row.ok),
     rows,
+  };
+}
+
+export async function createVerifiedAssignmentBenchmarkPreflightMatrix(
+  profiles: readonly AssignmentProfile[],
+  environment: AssignmentCapabilityEnvironment,
+  contents: AssignmentMountContents,
+): Promise<AssignmentVerifiedBenchmarkPreflightMatrix> {
+  const rows = await Promise.all(
+    profiles.map(async (profile) => {
+      const report = createAssignmentPreflightReport(profile, environment);
+      const row = createAssignmentBenchmarkPreflightRow(profile, report, contents);
+      const hashes = await verifyAssignmentMountContentHashes(
+        report.mountPlan,
+        contents,
+      );
+
+      return {
+        ...row,
+        ok: row.ok && hashes.ok,
+        hashOk: hashes.ok,
+        hashChecks: hashes.checks,
+      };
+    }),
+  );
+
+  return {
+    ok: rows.every((row) => row.ok),
+    rows,
+  };
+}
+
+function createAssignmentBenchmarkPreflightRow(
+  profile: AssignmentProfile,
+  report: AssignmentPreflightReport,
+  contents: AssignmentMountContents,
+): AssignmentBenchmarkPreflightRow {
+  const content = evaluateAssignmentMountContents(report.mountPlan, contents);
+  const ok =
+    report.readiness.status !== "blocked" &&
+    report.runnerRoute.target !== "unsupported" &&
+    content.ok;
+
+  return {
+    id: profile.id,
+    ...(profile.metadata?.title ? { title: profile.metadata.title } : {}),
+    ...(profile.metadata?.course ? { course: profile.metadata.course } : {}),
+    ...(profile.metadata?.source_url
+      ? { sourceUrl: profile.metadata.source_url }
+      : {}),
+    ok,
+    readinessStatus: report.readiness.status,
+    runnerTarget: report.runnerRoute.target,
+    rubricKind: report.rubricKind,
+    requiredCapabilities: report.requiredCapabilities,
+    selectedCapabilities: report.readiness.selectedCapabilities,
+    missingCapabilities: report.readiness.missingCapabilities,
+    simulatedCapabilities: report.readiness.simulatedCapabilities,
+    externalCapabilities: report.readiness.externalCapabilities,
+    contentOk: content.ok,
+    missingRequiredFiles: content.missingRequiredFiles,
+    missingDatasets: content.missingDatasets,
+    skippedOptionalPaths: content.skippedOptionalPaths,
+    cacheStrategies: report.datasetCachePlan.datasets.map(
+      (dataset) => dataset.strategy,
+    ),
+    externalRunnerRequired: Boolean(report.externalRunnerRequest),
+    gates: report.plan.capabilityEvaluation.gates.map((gate) => ({
+      name: gate.name,
+      ok: gate.ok,
+      status: gate.status,
+      requires: gate.requires,
+      anyOf: gate.anyOf,
+      selectedAnyOf: gate.selectedAnyOf,
+      selectedCapabilities: gate.selectedCapabilities,
+      missingRequired: gate.missingRequired,
+      missingAnyOf: gate.missingAnyOf,
+      ...(gate.message ? { message: gate.message } : {}),
+    })),
   };
 }
 

@@ -6,6 +6,7 @@ import {
   createAssignmentCapabilityEnvironment,
   createAssignmentExternalRunnerRequest,
   createAssignmentBenchmarkPreflightMatrix,
+  createVerifiedAssignmentBenchmarkPreflightMatrix,
   createAssignmentPreflightReport,
   createAssignmentMountPreflightReport,
   createAssignmentMountPlan,
@@ -292,6 +293,83 @@ describe("parseAssignmentProfile", () => {
         ],
       }),
     ]);
+  });
+
+  it("verifies benchmark preflight matrix dataset hashes before mounting", async () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "python_runtime",
+          kind: "capability",
+          options: { requires: ["pyodide"] },
+        },
+      ],
+      datasets: [
+        {
+          name: "tiny",
+          url: "/fixtures/tiny.txt",
+          hash: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const environment = createAssignmentCapabilityEnvironment({
+      browserCapabilities: ["pyodide"],
+    });
+    const files = {
+      "/assignments/cs336-assignment1/rubric.py": "print('ok')",
+    };
+
+    const wrongMatrix = await createVerifiedAssignmentBenchmarkPreflightMatrix(
+      [result.profile],
+      environment,
+      { files, datasets: { tiny: "abcd" } },
+    );
+
+    expect(wrongMatrix.ok).toBe(false);
+    expect(wrongMatrix.rows[0]).toEqual(
+      expect.objectContaining({
+        id: "cs336-assignment1",
+        ok: false,
+        contentOk: true,
+        hashOk: false,
+        hashChecks: [
+          expect.objectContaining({
+            name: "tiny",
+            status: "mismatch",
+            ok: false,
+            expected:
+              "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            actual: expect.stringMatching(/^sha256:/),
+          }),
+        ],
+      }),
+    );
+
+    const correctMatrix = await createVerifiedAssignmentBenchmarkPreflightMatrix(
+      [result.profile],
+      environment,
+      { files, datasets: { tiny: "abc" } },
+    );
+
+    expect(correctMatrix.ok).toBe(true);
+    expect(correctMatrix.rows[0]).toEqual(
+      expect.objectContaining({
+        ok: true,
+        contentOk: true,
+        hashOk: true,
+        hashChecks: [
+          expect.objectContaining({
+            name: "tiny",
+            status: "match",
+            ok: true,
+          }),
+        ],
+      }),
+    );
   });
 
   it("evaluates required and alternative capability gates", () => {

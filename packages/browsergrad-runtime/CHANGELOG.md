@@ -48,6 +48,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   runner fields. Rows now include capability gate details for route UI:
   `status`, selected alternatives, selected capabilities, missing alternatives,
   and author messages.
+- `createVerifiedAssignmentBenchmarkPreflightMatrix(profiles, environment,
+  contents)` extends batch preflight with dataset hash verification, adding
+  `hashOk` and `hashChecks` and keeping row `ok` false until declared fixture
+  hashes match.
 - `assignmentRunnerRoute(plan)` maps a run plan to `pyodide`, `javascript`,
   `external`, `unsupported`, or `blocked`, and preflight reports now include
   that route.
