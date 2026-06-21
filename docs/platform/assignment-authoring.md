@@ -99,6 +99,11 @@ events and worker assignment. These APIs back `worker-mesh`,
 `distributed-simulator`, `pthreads-simulator`, or `task-graph-simulator`
 profile paths when the teaching goal is ordering and participation rather than
 native throughput.
+CS336 A2-style distributed-training rubrics can use the same package's
+`simulateDdpGradientSynchronization()`, `simulateFsdpParameterSharding()`,
+`simulateFsdpGradientReduceScatter()`, and `simulateShardedAdamWStep()` for
+`ddp-simulator`, `fsdp-simulator`, and `sharded-optimizer-simulator` profile
+paths before using native `torch.distributed`, multiprocessing, or CUDA.
 Fixture-backed JS rubrics can use `compareSnapshot()` or
 `createSnapshotOracle()` from `@unlocalhosted/browsergrad-snapshots` for
 `snapshot-oracle` profile paths. Prefer it for small JSON/numeric outputs such

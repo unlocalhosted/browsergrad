@@ -58,6 +58,10 @@ For every lab profile, the platform should:
    JS rubrics or platform oracles to produce deterministic rank/collective
    traces before adding real Worker execution. Use `createTaskGraphSimulator()`
    for dependency-constrained task scheduling traces.
+   Use `simulateDdpGradientSynchronization()`,
+   `simulateFsdpParameterSharding()`, `simulateFsdpGradientReduceScatter()`,
+   and `simulateShardedAdamWStep()` for CS336 A2-style DDP/FSDP/sharded
+   optimizer fixtures before adding native distributed runners.
 15. For external/native labs, call `createAssignmentExternalRunnerRequest(plan)`
    and hand that object to platform-owned native, hosted, or CI runners.
    If using `createAssignmentPreflightReport()`, read
@@ -117,6 +121,9 @@ Capability names are strings. Keep them descriptive and reusable:
 | `cuda-compatible-subset` | Lab targets a BrowserGrad CUDA-like educational subset. |
 | `worker-mesh` | Multiple Workers can simulate distributed participants. |
 | `distributed-simulator` | Deterministic simulator for DDP/FSDP/task-system behavior. |
+| `ddp-simulator` | DDP gradient averaging and parameter-sync behavior is simulated deterministically. |
+| `fsdp-simulator` | FSDP parameter sharding, all-gather, and reduce-scatter behavior is simulated deterministically. |
+| `sharded-optimizer-simulator` | Optimizer-state ownership and sharded update equivalence are simulated deterministically. |
 | `dataset-fixture` | Small checked-in fixture replaces a large external dataset. |
 | `large-file-streaming` | Lab can stream large files instead of loading whole corpora. |
 | `snapshot-oracle` | Expected outputs are stored as JSON/NPZ/safetensors snapshots. |
@@ -139,7 +146,10 @@ The first reusable simulator substrate is
 `@unlocalhosted/browsergrad-simulators`: it provides deterministic mesh event
 traces, simple collectives, and task-graph ready/start/finish traces for labs
 that choose simulated `worker-mesh`, `distributed-simulator`, or
-`task-graph-simulator` paths.
+`task-graph-simulator` paths. It also provides DDP gradient synchronization,
+FSDP sharding/reduce-scatter, and sharded AdamW update simulators for labs that
+choose `ddp-simulator`, `fsdp-simulator`, or `sharded-optimizer-simulator`
+paths.
 The first reusable snapshot substrate is
 `@unlocalhosted/browsergrad-snapshots`: it provides JSON/numeric snapshot
 comparison for labs that choose `snapshot-oracle` paths before heavier `.npz`,
@@ -242,7 +252,7 @@ CS336 Assignment 5 and CS149GPT, proving their profile drafts can produce
 
 | Benchmark | First platform slice | Core capabilities |
 | --- | --- | --- |
-| CS336 A2 Systems | FlashAttention fixture + DDP/FSDP simulator preflight via `createDeterministicMesh()` | `torch-compat`, `webgpu`, `worker-mesh`, `distributed-simulator` |
+| CS336 A2 Systems | FlashAttention fixture + DDP/FSDP/sharded optimizer simulator preflight via `@unlocalhosted/browsergrad-simulators` | `torch-compat`, `webgpu`, `worker-mesh`, `distributed-simulator`, `ddp-simulator`, `fsdp-simulator`, `sharded-optimizer-simulator` |
 | CS336 A3 Scaling | Hosted API mock + scheduler tests via `@unlocalhosted/browsergrad-scaling` | `http-client`, `hosted-api-mock`, `server-fixture`, `scheduler-simulator`, `scaling-law-oracle` |
 | CS336 A4 Data | Small Common Crawl fixtures + `browsergrad-data` PII/dedupe/quality/HTML rubrics | `dataset-fixture`, `large-file-streaming`, `classifier-oracle`, `pii-oracle`, `near-dedupe-oracle`, `quality-rule-oracle` |
 | CS336 A5 Alignment | GRPO/DPO math snapshot labs via `@unlocalhosted/browsergrad-alignment` + snapshots | `torch-compat`, `transformers-compatible`, `snapshot-oracle`, `rl-loss-oracle`, `response-parser-oracle` |
@@ -316,7 +326,9 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     compare WGSL outputs against CPU references and emit BrowserGrad assertions.
     Simulator-backed labs can use `@unlocalhosted/browsergrad-simulators`
     `createDeterministicMesh()` or `createTaskGraphSimulator()` for event-trace
-    rubrics before real Worker execution exists.
+    rubrics before real Worker execution exists. CS336 A2 systems labs can also
+    use the DDP/FSDP/sharded-optimizer simulator helpers for gradient averaging,
+    all-gather/reduce-scatter, and AdamW state-sharding checks.
     Snapshot-backed labs can use `@unlocalhosted/browsergrad-snapshots`
     `compareSnapshot()` for JSON/numeric fixture checks.
     CS336 A4 data labs can use `@unlocalhosted/browsergrad-data` for

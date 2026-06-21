@@ -46,6 +46,15 @@ Second slice:
   behavior, tied weights, and non-trainable parameters without real processes.
 - Preserve upstream test intent, but replace `torch.multiprocessing.spawn` and
   `torch.distributed` process groups with deterministic simulator calls.
+- Use `@unlocalhosted/browsergrad-simulators` for:
+  - `simulateDdpGradientSynchronization()` to average per-parameter gradients
+    across rank-local minibatches.
+  - `simulateFsdpParameterSharding()` to create deterministic parameter shard
+    ownership plus all-gather expectations.
+  - `simulateFsdpGradientReduceScatter()` to reduce averaged gradients back to
+    owned shards or replicated parameters.
+  - `simulateShardedAdamWStep()` to prove rank-owned optimizer state produces
+    the same full-parameter update as non-sharded AdamW.
 
 Future slice:
 
@@ -80,13 +89,14 @@ Future slice:
 
 - Attention oracle package or runtime helper for FlashAttention-style
   forward/backward checks.
-- Distributed simulator API for rank-local model copies and collectives.
+- Distributed simulator API for rank-local model copies, collectives, FSDP
+  sharding, and sharded optimizer state.
 - Fixture conversion path for small `.pt` files.
 - Assignment-profile capability gates in the UI, so native-only tests are shown
   as intentionally replaced/skipped.
 - Clear failures for simulator mismatches: wrong gradient average, missing
-  parameter broadcast, stale all-gather, bad tied-weight handling, or incorrect
-  sharded optimizer update.
+  parameter broadcast, stale all-gather, bad reduce-scatter range, bad
+  tied-weight handling, or incorrect sharded optimizer update.
 
 ## First Adoption Boundaries
 

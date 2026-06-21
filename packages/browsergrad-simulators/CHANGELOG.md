@@ -13,3 +13,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   learning rubrics.
 - `createTaskGraphSimulator()` records deterministic ready/start/finish traces
   for dependency-constrained task-system labs.
+- Deterministic DDP gradient averaging, FSDP parameter sharding/all-gather,
+  FSDP reduce-scatter, and sharded AdamW optimizer state/update simulators for
+  CS336 A2-style distributed-training rubrics.

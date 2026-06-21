@@ -229,6 +229,12 @@ runtime branches.
   browser-safe rank meshes, barriers, broadcasts, point-to-point messages, and
   `allReduce` event traces for DDP/FSDP/task-system teaching slices without
   native threads or MPI.
+- Distributed-training simulator guarantee: the same package exports
+  `simulateDdpGradientSynchronization()`, `simulateFsdpParameterSharding()`,
+  `simulateFsdpGradientReduceScatter()`, and `simulateShardedAdamWStep()` so
+  CS336 A2-style DDP, FSDP, and sharded optimizer rubrics can check
+  gradient-averaging, all-gather, reduce-scatter, and AdamW state-sharding
+  semantics without `torch.multiprocessing`, `torch.distributed`, or CUDA.
 - Task-graph guarantee: the same package exports
   `createTaskGraphSimulator()` so CS149-style task-system rubrics can model
   dependency readiness, deterministic worker assignment, task start/finish
@@ -270,7 +276,8 @@ runtime branches.
     ISPC, OpenMP, and C++ build steps.
 - Benchmark capability families:
   - CS336 A2: `pyodide`, `torch-compat`, `webgpu`, `triton-compatible`,
-    `worker-mesh`, `distributed-simulator`, `snapshot-oracle`.
+    `worker-mesh`, `distributed-simulator`, `ddp-simulator`, `fsdp-simulator`,
+    `sharded-optimizer-simulator`, `snapshot-oracle`.
   - CS336 A3: `http-client`, `hosted-api-mock`, `server-fixture`,
     `scaling-law-oracle`, `jax-external`, `postgres-external`,
     `scheduler-simulator`.

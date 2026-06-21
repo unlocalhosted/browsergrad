@@ -66,9 +66,134 @@ export interface TaskGraphSimulator {
     run(): TaskGraphRunResult;
     clear(): void;
 }
+export interface DistributedParameterSpec {
+    readonly name: string;
+    readonly trainable?: boolean;
+}
+export type RankGradientMap = Readonly<Record<string, readonly number[]>>;
+export interface DdpGradientSyncEvent {
+    readonly step: number;
+    readonly kind: "ddp-gradient-all-reduce";
+    readonly parameter: string;
+    readonly participants: readonly number[];
+    readonly inputGradients: readonly (readonly number[])[];
+    readonly outputGradient: readonly number[];
+}
+export interface DdpGradientSynchronizationInput {
+    readonly parameters: readonly DistributedParameterSpec[];
+    readonly rankGradients: readonly RankGradientMap[];
+}
+export interface DdpGradientSynchronizationResult {
+    readonly synchronizedGradients: readonly RankGradientMap[];
+    readonly events: readonly DdpGradientSyncEvent[];
+}
+export interface DistributedParameterValueSpec {
+    readonly name: string;
+    readonly values: readonly number[];
+    readonly sharded?: boolean;
+}
+export interface FsdpTensorShard {
+    readonly start: number;
+    readonly end: number;
+    readonly values: readonly number[];
+    readonly replicated?: boolean;
+}
+export type FsdpRankShardMap = Readonly<Record<string, FsdpTensorShard>>;
+export interface FsdpParameterShardPlan {
+    readonly name: string;
+    readonly length: number;
+    readonly sharded: boolean;
+    readonly ranges: readonly {
+        readonly rank: number;
+        readonly start: number;
+        readonly end: number;
+        readonly replicated?: boolean;
+    }[];
+}
+export interface FsdpShardPlan {
+    readonly ranks: number;
+    readonly parameters: readonly FsdpParameterShardPlan[];
+}
+export type FsdpShardingEventKind = "fsdp-shard" | "fsdp-replicate" | "fsdp-all-gather" | "fsdp-reduce-scatter" | "fsdp-replicated-gradient-all-reduce";
+export interface FsdpShardingEvent {
+    readonly step: number;
+    readonly kind: FsdpShardingEventKind;
+    readonly parameter?: string;
+    readonly participants: readonly number[];
+    readonly ranges?: readonly {
+        readonly rank: number;
+        readonly start: number;
+        readonly end: number;
+    }[];
+    readonly output?: readonly number[];
+}
+export interface FsdpParameterShardingInput {
+    readonly ranks: number;
+    readonly parameters: readonly DistributedParameterValueSpec[];
+}
+export interface FsdpParameterShardingResult {
+    readonly shardPlan: FsdpShardPlan;
+    readonly rankShards: readonly FsdpRankShardMap[];
+    readonly fullParameters: Readonly<Record<string, readonly number[]>>;
+    readonly events: readonly FsdpShardingEvent[];
+}
+export interface FsdpGradientReduceScatterInput {
+    readonly shardPlan: FsdpShardPlan;
+    readonly rankGradients: readonly RankGradientMap[];
+}
+export interface FsdpGradientReduceScatterResult {
+    readonly rankGradientShards: readonly FsdpRankShardMap[];
+    readonly events: readonly FsdpShardingEvent[];
+}
+export interface ShardedAdamWParameterSpec {
+    readonly name: string;
+    readonly values: readonly number[];
+    readonly gradients: readonly number[];
+    readonly trainable?: boolean;
+}
+export interface ShardedAdamWOptions {
+    readonly lr: number;
+    readonly weightDecay?: number;
+    readonly betas?: readonly [number, number];
+    readonly eps?: number;
+}
+export interface ShardedAdamWState {
+    readonly step: number;
+    readonly expAvg: readonly number[];
+    readonly expAvgSq: readonly number[];
+}
+export interface ShardedAdamWInput {
+    readonly ranks: number;
+    readonly parameters: readonly ShardedAdamWParameterSpec[];
+    readonly optimizer: ShardedAdamWOptions;
+    readonly state?: Readonly<Record<string, ShardedAdamWState>>;
+}
+export interface ShardedOptimizerOwnership {
+    readonly rank: number;
+    readonly parameters: readonly string[];
+    readonly elements: number;
+}
+export type ShardedOptimizerEventKind = "optimizer-state-shard" | "sharded-adamw-step";
+export interface ShardedOptimizerEvent {
+    readonly step: number;
+    readonly kind: ShardedOptimizerEventKind;
+    readonly participants: readonly number[];
+    readonly rank?: number;
+    readonly parameters?: readonly string[];
+}
+export interface ShardedAdamWResult {
+    readonly updatedParameters: Readonly<Record<string, readonly number[]>>;
+    readonly nextState: Readonly<Record<string, ShardedAdamWState>>;
+    readonly ownership: readonly ShardedOptimizerOwnership[];
+    readonly events: readonly ShardedOptimizerEvent[];
+}
 export declare class SimulatorError extends Error {
     constructor(message: string);
 }
 export declare function createDeterministicMesh(options: DeterministicMeshOptions): DeterministicMesh;
+export declare function simulateShardedAdamWStep(input: ShardedAdamWInput): ShardedAdamWResult;
+export declare function simulateDdpGradientSynchronization(input: DdpGradientSynchronizationInput): DdpGradientSynchronizationResult;
+export declare function simulateFsdpParameterSharding(input: FsdpParameterShardingInput): FsdpParameterShardingResult;
+export declare function simulateFsdpGradientReduceScatter(input: FsdpGradientReduceScatterInput): FsdpGradientReduceScatterResult;
 export declare function createTaskGraphSimulator(options: TaskGraphSimulatorOptions): TaskGraphSimulator;
 //# sourceMappingURL=index.d.ts.map

@@ -3,8 +3,16 @@ import {
   createDeterministicMesh,
   createTaskGraphSimulator,
   SimulatorError,
+  simulateDdpGradientSynchronization,
+  simulateFsdpGradientReduceScatter,
+  simulateFsdpParameterSharding,
+  simulateShardedAdamWStep,
   type DeterministicMesh,
+  type DdpGradientSynchronizationResult,
+  type FsdpGradientReduceScatterResult,
+  type FsdpParameterShardingResult,
   type SimulationEvent,
+  type ShardedAdamWResult,
   type TaskGraphEvent,
   type TaskGraphSimulator,
 } from "../src/index";
@@ -13,6 +21,10 @@ describe("public surface", () => {
   it("exports deterministic mesh primitives", () => {
     expect(typeof createDeterministicMesh).toBe("function");
     expect(typeof createTaskGraphSimulator).toBe("function");
+    expect(typeof simulateDdpGradientSynchronization).toBe("function");
+    expect(typeof simulateFsdpParameterSharding).toBe("function");
+    expect(typeof simulateFsdpGradientReduceScatter).toBe("function");
+    expect(typeof simulateShardedAdamWStep).toBe("function");
     expect(typeof SimulatorError).toBe("function");
   });
 
@@ -38,5 +50,30 @@ describe("public surface", () => {
     };
     expect(simulator.workerCount).toBe(1);
     expect(event.taskId).toBe("load");
+  });
+
+  it("types distributed training simulator results for compile-time consumers", () => {
+    const ddp: DdpGradientSynchronizationResult = simulateDdpGradientSynchronization({
+      parameters: [{ name: "w" }],
+      rankGradients: [{ w: [1] }, { w: [3] }],
+    });
+    const fsdp: FsdpParameterShardingResult = simulateFsdpParameterSharding({
+      ranks: 2,
+      parameters: [{ name: "w", values: [1, 2] }],
+    });
+    const scattered: FsdpGradientReduceScatterResult =
+      simulateFsdpGradientReduceScatter({
+        shardPlan: fsdp.shardPlan,
+        rankGradients: [{ w: [1, 3] }, { w: [3, 5] }],
+      });
+    const optimizer: ShardedAdamWResult = simulateShardedAdamWStep({
+      ranks: 2,
+      parameters: [{ name: "w", values: [1], gradients: [1] }],
+      optimizer: { lr: 0.1 },
+    });
+
+    expect(ddp.synchronizedGradients[0]?.w).toEqual([2]);
+    expect(scattered.rankGradientShards[0]?.w?.values).toEqual([2]);
+    expect(optimizer.ownership[0]?.parameters).toEqual(["w"]);
   });
 });
