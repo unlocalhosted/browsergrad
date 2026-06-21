@@ -104,6 +104,30 @@ const EXPECTED_BROWSER_TEACHING_RUNNER: Record<string, AssignmentRunnerTarget> =
   "cs149gpt.profile.json": "pyodide",
 };
 
+const EXTERNAL_BENCHMARK_ENVIRONMENTS = {
+  "cs336-assignment5-alignment.profile.json": {
+    environment: createAssignmentCapabilityEnvironment({
+      browserCapabilities: [
+        "pyodide",
+        "torch-compat",
+        "snapshot-oracle",
+        "tokenizer-oracle",
+        "rl-loss-oracle",
+      ],
+      externalCapabilities: ["vllm-external", "flash-attn-external"],
+    }),
+    externalCapabilities: ["flash-attn-external", "vllm-external"],
+  },
+  "cs149gpt.profile.json": {
+    environment: createAssignmentCapabilityEnvironment({
+      browserCapabilities: ["attention-oracle", "performance-rubric"],
+      simulatedCapabilities: ["simd-simulator"],
+      externalCapabilities: ["native-cpp-external"],
+    }),
+    externalCapabilities: ["native-cpp-external"],
+  },
+} as const;
+
 describe("benchmark assignment profiles", () => {
   for (const file of PROFILE_FILES) {
     it(`parses ${file} and declares capability requirements`, () => {
@@ -180,4 +204,31 @@ describe("benchmark assignment profiles", () => {
       );
     });
   }
+
+  it("creates external runner requests for native-heavy benchmark profiles", () => {
+    for (const [file, expected] of Object.entries(EXTERNAL_BENCHMARK_ENVIRONMENTS)) {
+      const profileJson = JSON.parse(
+        readFileSync(new URL(`../../../docs/internal/${file}`, import.meta.url), "utf8"),
+      );
+
+      const result = parseAssignmentProfile(profileJson);
+      expect(result).toMatchObject({ ok: true });
+      if (!result.ok) continue;
+
+      const report = createAssignmentPreflightReport(
+        result.profile,
+        expected.environment,
+      );
+
+      expect(report.runnerRoute.target).toBe("external");
+      expect(report.externalRunnerRequest?.externalCapabilities).toEqual(
+        expected.externalCapabilities,
+      );
+      expect(report.externalRunnerRequest?.files.root).toBe(result.profile.files.root);
+      expect(report.externalRunnerRequest?.mountPlan).toEqual(report.mountPlan);
+      expect(report.externalRunnerRequest?.datasetCachePlan).toEqual(
+        report.datasetCachePlan,
+      );
+    }
+  });
 });

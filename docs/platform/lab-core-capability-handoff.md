@@ -169,6 +169,9 @@ empty mount contents for every profile with
 `evaluateAssignmentMountContents` so missing rubric files and datasets stay
 visible before filesystem writes. Runtime integration tests also mount binary
 fixture bytes through the Pyodide path.
+The same benchmark test pressure-checks external-runner handoffs for
+CS336 Assignment 5 and CS149GPT, proving their profile drafts can produce
+`externalRunnerRequest` objects from real capability environments.
 
 | Benchmark | First platform slice | Core capabilities |
 | --- | --- | --- |

@@ -255,6 +255,8 @@ runtime branches.
 - Later RED test: runner-route construction maps Python rubrics to Pyodide, JS
   rubrics to the browser-native runner, external-only readiness to external
   launch, failed readiness to blocked, and unknown rubric kinds to unsupported.
+- Later benchmark test: CS336 Assignment 5 and CS149GPT profile drafts produce
+  `externalRunnerRequest` objects under external capability environments.
 - Run focused package tests:
   - `pnpm --filter @unlocalhosted/browsergrad-runtime test -- assignment`
   - `pnpm --filter @unlocalhosted/browsergrad-runtime typecheck`
