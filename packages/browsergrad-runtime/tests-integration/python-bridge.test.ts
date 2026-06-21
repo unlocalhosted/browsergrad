@@ -59,7 +59,44 @@ assert callable(bg.log)
 assert callable(bg.emit_json)
 assert callable(bg.emit_image)
 assert callable(bg.oracle)
+assert callable(bg.assignment_context)
 `);
+  });
+});
+
+describe("assignment execution context", () => {
+  it("parses launcher-provided assignment environment for Python rubrics", async () => {
+    await exec(`
+import os
+import browsergrad as bg
+
+os.environ["BROWSERGRAD_ASSIGNMENT_ID"] = "cs336-assignment1"
+os.environ["BROWSERGRAD_ASSIGNMENT_ROOT"] = "/assignments/cs336-assignment1"
+os.environ["BROWSERGRAD_FIXTURES_PATH"] = "/assignments/cs336-assignment1/fixtures"
+os.environ["BROWSERGRAD_ALLOWED_TESTS_JSON"] = "[\\"test_train_bpe_tiny\\"]"
+os.environ["BROWSERGRAD_BEHAVIORAL_GATES_JSON"] = "[{\\"name\\":\\"encode_iterable_streaming\\",\\"kind\\":\\"streaming\\",\\"options\\":{\\"max_chunks_before_first_yield\\":2}}]"
+
+ctx = bg.assignment_context()
+expected = {
+    "id": "cs336-assignment1",
+    "root": "/assignments/cs336-assignment1",
+    "fixtures_path": "/assignments/cs336-assignment1/fixtures",
+    "allowed_tests": ["test_train_bpe_tiny"],
+    "behavioral_gates": [{
+        "name": "encode_iterable_streaming",
+        "kind": "streaming",
+        "options": {"max_chunks_before_first_yield": 2},
+    }],
+}
+if ctx == expected:
+    bg.assert_pass("test_assignment_context")
+else:
+    bg.assert_fail("test_assignment_context", "wrong assignment context",
+                   expected=expected, actual=ctx)
+`);
+    expect(assertions).toEqual([
+      { kind: "pass", name: "test_assignment_context", durationMs: null },
+    ]);
   });
 });
 

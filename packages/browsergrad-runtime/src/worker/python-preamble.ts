@@ -15,6 +15,7 @@
 export const PY_PREAMBLE = `
 import json as _bg_json
 import importlib as _bg_importlib
+import os as _bg_os
 import sys as _bg_sys
 import types as _bg_types
 import traceback as _bg_traceback
@@ -82,6 +83,24 @@ def _bg_oracle(name, *, _import_module=_bg_importlib.import_module):
             f"BrowserGrad oracle module is not registered: {name}"
         ) from exc
 
+def _bg_assignment_context(*, _os=_bg_os, _json=_bg_json):
+    def _load_json_env(name, default):
+        raw = _os.environ.get(name)
+        if raw is None or raw == "":
+            return default
+        try:
+            return _json.loads(raw)
+        except Exception as exc:
+            raise ValueError(f"{name} must contain valid JSON") from exc
+
+    return {
+        "id": _os.environ.get("BROWSERGRAD_ASSIGNMENT_ID"),
+        "root": _os.environ.get("BROWSERGRAD_ASSIGNMENT_ROOT"),
+        "fixtures_path": _os.environ.get("BROWSERGRAD_FIXTURES_PATH"),
+        "allowed_tests": _load_json_env("BROWSERGRAD_ALLOWED_TESTS_JSON", []),
+        "behavioral_gates": _load_json_env("BROWSERGRAD_BEHAVIORAL_GATES_JSON", []),
+    }
+
 _bg_mod.assert_pass = _bg_assert_pass
 _bg_mod.assert_fail = _bg_assert_fail
 _bg_mod.assert_error = _bg_assert_error
@@ -89,14 +108,15 @@ _bg_mod.log = _bg_log
 _bg_mod.emit_json = _bg_emit_json
 _bg_mod.emit_image = _bg_emit_image
 _bg_mod.oracle = _bg_oracle
+_bg_mod.assignment_context = _bg_assignment_context
 
 _bg_sys.modules["browsergrad"] = _bg_mod
 
 # Clean up loader-local names so user globals stay tidy.
 # Safe because every helper captured the names it needs via default args
 # at definition time — they don't depend on module globals at call time.
-del _bg_mod, _bg_json, _bg_importlib, _bg_sys, _bg_types, _bg_traceback, _bg_native_
+del _bg_mod, _bg_json, _bg_importlib, _bg_os, _bg_sys, _bg_types, _bg_traceback, _bg_native_
 del _bg_post_assertion, _bg_post_artifact
 del _bg_assert_pass, _bg_assert_fail, _bg_assert_error
-del _bg_log, _bg_emit_json, _bg_emit_image, _bg_oracle
+del _bg_log, _bg_emit_json, _bg_emit_image, _bg_oracle, _bg_assignment_context
 `;

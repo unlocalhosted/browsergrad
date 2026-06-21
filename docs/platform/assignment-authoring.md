@@ -96,8 +96,9 @@ implementation detail.
 `createAssignmentRubricExecRequest()` exposes non-capability gates to Python
 rubrics through `BROWSERGRAD_BEHAVIORAL_GATES_JSON`, alongside
 `BROWSERGRAD_ASSIGNMENT_ROOT`, optional `BROWSERGRAD_FIXTURES_PATH`, and
-`BROWSERGRAD_ALLOWED_TESTS_JSON`. Rubrics should parse those values and enforce
-only the tests/gates declared by the active profile.
+`BROWSERGRAD_ALLOWED_TESTS_JSON`. Rubrics should use
+`browsergrad.assignment_context()` to parse those values and enforce only the
+tests/gates declared by the active profile.
 
 Capability gates should make upstream-native requirements explicit. For
 example, a CUDA/Triton test can be declared as a capability gate and replaced by

@@ -115,12 +115,18 @@ bg.emit_image(name, mime, data_base64)        # → ArtifactImage
 
 oracle = bg.oracle("_bg_tokenizers")          # profile-registered JS oracle module
 model = oracle.train_cs336_bpe(corpus, 300)
+
+ctx = bg.assignment_context()                 # id/root/fixtures/tests/gates
+for gate in ctx["behavioral_gates"]:
+    ...
 ```
 
 The library does not interpret assertion/artifact events — it just relays them.
 `bg.oracle(name)` imports a JS module registered through
 `createSession({ jsModules })` and raises a clear error if the profile/runtime
-forgot to register it. Build your test framework / visualizer / grader on top.
+forgot to register it. `bg.assignment_context()` parses the launcher-provided
+assignment environment into a plain dict. Build your test framework /
+visualizer / grader on top.
 
 ## Lab manifest
 
@@ -241,6 +247,9 @@ Rubrics can read:
 - `BROWSERGRAD_FIXTURES_PATH` when the profile declares one
 - `BROWSERGRAD_ALLOWED_TESTS_JSON`
 - `BROWSERGRAD_BEHAVIORAL_GATES_JSON`
+
+Prefer `browsergrad.assignment_context()` inside Python rubrics unless you need
+the raw environment values.
 
 ## What this is, and is not
 

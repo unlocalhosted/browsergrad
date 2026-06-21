@@ -16,6 +16,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Assignment rubric launchers now expose profile execution context in
   environment variables, including `BROWSERGRAD_ASSIGNMENT_ROOT`,
   `BROWSERGRAD_FIXTURES_PATH`, and `BROWSERGRAD_BEHAVIORAL_GATES_JSON`.
+- `browsergrad.assignment_context()` parses the launcher-provided assignment
+  environment into a plain Python dict for rubrics.
 
 ## [0.1.1] — 2026-05-25
 

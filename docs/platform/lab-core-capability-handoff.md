@@ -31,8 +31,8 @@ For every lab profile, the platform should:
    `createAssignmentRubricExecRequest`.
 10. In Python rubrics, call profile-registered JS oracles with
     `browsergrad.oracle("<module-name>")`.
-11. In Python rubrics, read behavioral gates from
-    `BROWSERGRAD_BEHAVIORAL_GATES_JSON`.
+11. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
+    context with `browsergrad.assignment_context()`.
 12. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
     implementation slice.
 
