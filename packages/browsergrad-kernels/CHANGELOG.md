@@ -9,6 +9,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- `defineCuda1DProgram()`, `simulateCuda1DProgram()`, and
+  `emitCuda1DProgramWgsl()` provide a tiny CUDA-shaped 1D program IR that can
+  run through a deterministic simulator and lower to WGSL.
 - `simulateCuda1DGrid()`, `referenceSaxpy()`, and
   `referenceExclusiveScan()` provide CUDA-shaped browser-safe oracles for GPU
   Puzzles and CS149 A3-style rubrics.

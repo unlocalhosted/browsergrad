@@ -19,6 +19,8 @@ First browser-safe slice:
 - Treat this as the first HipScript-inspired slice: CUDA-shaped kernel
   semantics are explicit in JS today, then can lower into WGSL/WebGPU once the
   simulator trace path is boring and trusted.
+- Prefer `defineCuda1DProgram()` for new fixtures that should share one
+  source between simulator checks and generated WGSL.
 
 ## Upstream Signals
 

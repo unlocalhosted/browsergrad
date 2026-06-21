@@ -85,6 +85,21 @@ export {
 export { flashAttentionDirect } from "./kernels/flash_attention.js";
 
 export {
+  defineCuda1DProgram,
+  emitCuda1DProgramWgsl,
+  simulateCuda1DProgram,
+  type Cuda1DCondition,
+  type Cuda1DExpression,
+  type Cuda1DLaunch,
+  type Cuda1DProgram,
+  type Cuda1DProgramInput,
+  type Cuda1DProgramRunInput,
+  type Cuda1DStatement,
+  type Cuda1DWriteStatement,
+  type Cuda1DIfStatement,
+} from "./cuda_program.js";
+
+export {
   referenceExclusiveScan,
   referenceSaxpy,
   simulateCuda1DGrid,

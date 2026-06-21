@@ -3,7 +3,7 @@
 **PyTorch-shaped deep learning in the browser.** Lazy IR with fusion, symbolic backward, AMP, gradient checkpointing, functional transforms, WGSL kernels, ONNX export.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![CI status](https://img.shields.io/badge/tests-426%20passing-brightgreen.svg)](#testing)
+[![CI status](https://img.shields.io/badge/tests-427%20passing-brightgreen.svg)](#testing)
 [![browser](https://img.shields.io/badge/runs-in%20the%20browser-blue.svg)](#)
 
 ```python
@@ -119,7 +119,7 @@ out = bg.realize_webgpu(x @ w + b)   # tiled GEMM, fused elementwise, custom WGS
 |---|---|
 | [`browsergrad-runtime`](./packages/browsergrad-runtime) | Pyodide-in-Worker host. `createSession`, `exec`, structured assertion + artifact protocol, AbortSignal cancellation, optional lab-manifest validator. |
 | [`browsergrad-jit`](./packages/browsergrad-jit) | Lazy-IR PyTorch-shape library. 28-opcode IR, fusion, symbolic VJP, AMP, gradient checkpointing, `bg.func.*`, custom WGSL kernels, ONNX export. |
-| [`browsergrad-kernels`](./packages/browsergrad-kernels) | WGSL compute-shader catalog plus pure-JS kernel/CUDA-concept references for attention, tensor kernels, and CUDA-shaped teaching subsets. |
+| [`browsergrad-kernels`](./packages/browsergrad-kernels) | WGSL compute-shader catalog, CUDA-shaped 1D program authoring, and pure-JS references for attention, tensor kernels, and GPU teaching subsets. |
 | [`browsergrad-grad`](./packages/browsergrad-grad) | Eager-autograd alternative. PyTorch-flavored, NumPy-backed, closure backward. Stable. |
 | [`browsergrad-tokenizers`](./packages/browsergrad-tokenizers) | Pure TypeScript tokenizer/BPE primitives and streaming gates. |
 | [`browsergrad-simulators`](./packages/browsergrad-simulators) | Deterministic simulators for SIMD/thread/task traces, worker-mesh collectives, DDP/FSDP, and sharded optimizer behavior. |

@@ -230,6 +230,11 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   GPU Puzzles and CS149 A3-style rubrics can check CUDA-shaped map/guard,
   SAXPY, scan, thread/block traces, and out-of-bounds memory behavior before
   native CUDA runners are available.
+- CUDA-shaped program guarantee: `@unlocalhosted/browsergrad-kernels` exports
+  `defineCuda1DProgram()`, `simulateCuda1DProgram()`, and
+  `emitCuda1DProgramWgsl()` so one small grid/thread program can be simulated
+  and lowered to WGSL. This is the pragmatic HipScript/gpu.cpp-inspired path:
+  small explicit kernel IR now, heavier compiler compatibility later.
 - Kernel-runtime bridge guarantee: `createBrowsergradKernelRubric(ctx)` adapts
   kernel tensor checks to `runAssignmentJavascriptRubric()` contexts, and a
   cross-package integration test proves pass/fail assertions survive through

@@ -1,0 +1,357 @@
+import {
+  simulateCuda1DGrid,
+  type Cuda1DGridResult,
+  type Cuda1DThreadContext,
+} from "./cuda_concepts.js";
+import { KernelError } from "./types.js";
+
+export interface Cuda1DProgramInput {
+  readonly name: string;
+  readonly inputLength: number;
+  readonly outputLength: number;
+  readonly launch: Cuda1DLaunch;
+  readonly body: readonly Cuda1DStatement[];
+}
+
+export interface Cuda1DProgram extends Cuda1DProgramInput {
+  readonly body: readonly Cuda1DStatement[];
+}
+
+export interface Cuda1DLaunch {
+  readonly blocks: number;
+  readonly threadsPerBlock: number;
+}
+
+export type Cuda1DStatement =
+  | Cuda1DWriteStatement
+  | Cuda1DIfStatement;
+
+export interface Cuda1DWriteStatement {
+  readonly op: "write";
+  readonly index: Cuda1DExpression;
+  readonly value: Cuda1DExpression;
+}
+
+export interface Cuda1DIfStatement {
+  readonly op: "if";
+  readonly condition: Cuda1DCondition;
+  readonly body: readonly Cuda1DStatement[];
+}
+
+export type Cuda1DExpression =
+  | { readonly op: "literal"; readonly value: number }
+  | { readonly op: "threadId" }
+  | { readonly op: "inputLength" }
+  | { readonly op: "outputLength" }
+  | { readonly op: "read"; readonly index: Cuda1DExpression }
+  | { readonly op: "add"; readonly left: Cuda1DExpression; readonly right: Cuda1DExpression }
+  | { readonly op: "sub"; readonly left: Cuda1DExpression; readonly right: Cuda1DExpression }
+  | { readonly op: "mul"; readonly left: Cuda1DExpression; readonly right: Cuda1DExpression }
+  | { readonly op: "div"; readonly left: Cuda1DExpression; readonly right: Cuda1DExpression };
+
+export type Cuda1DCondition =
+  | { readonly op: "lt"; readonly left: Cuda1DExpression; readonly right: Cuda1DExpression }
+  | { readonly op: "lte"; readonly left: Cuda1DExpression; readonly right: Cuda1DExpression }
+  | { readonly op: "eq"; readonly left: Cuda1DExpression; readonly right: Cuda1DExpression };
+
+export interface Cuda1DProgramRunInput {
+  readonly initialInput?: readonly number[];
+  readonly initialOutput?: readonly number[];
+}
+
+export function defineCuda1DProgram(input: Cuda1DProgramInput): Cuda1DProgram {
+  validateIdentifier(input.name, "name");
+  validateNonNegativeInteger(input.inputLength, "inputLength");
+  validateNonNegativeInteger(input.outputLength, "outputLength");
+  validatePositiveInteger(input.launch.blocks, "launch.blocks");
+  validatePositiveInteger(
+    input.launch.threadsPerBlock,
+    "launch.threadsPerBlock",
+  );
+  if (input.body.length === 0) {
+    throw new KernelError("Cuda1DProgram body must contain at least one statement");
+  }
+  return {
+    name: input.name,
+    inputLength: input.inputLength,
+    outputLength: input.outputLength,
+    launch: {
+      blocks: input.launch.blocks,
+      threadsPerBlock: input.launch.threadsPerBlock,
+    },
+    body: input.body.map(cloneStatement),
+  };
+}
+
+export function simulateCuda1DProgram(
+  program: Cuda1DProgram,
+  input: Cuda1DProgramRunInput = {},
+): Cuda1DGridResult {
+  return simulateCuda1DGrid({
+    inputLength: program.inputLength,
+    outputLength: program.outputLength,
+    blocks: program.launch.blocks,
+    threadsPerBlock: program.launch.threadsPerBlock,
+    ...(input.initialInput !== undefined ? { initialInput: input.initialInput } : {}),
+    ...(input.initialOutput !== undefined ? { initialOutput: input.initialOutput } : {}),
+    kernel(context) {
+      executeStatements(program.body, context);
+    },
+  });
+}
+
+export function emitCuda1DProgramWgsl(program: Cuda1DProgram): string {
+  const body = emitStatements(program.body, 1);
+  return [
+    `// BrowserGrad CUDA-shaped 1D program: ${program.name}`,
+    "@group(0) @binding(0) var<storage, read> inputBuffer: array<f32>;",
+    "@group(0) @binding(1) var<storage, read_write> outputBuffer: array<f32>;",
+    "",
+    `@compute @workgroup_size(${program.launch.threadsPerBlock})`,
+    "fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {",
+    "  let i: u32 = global_id.x;",
+    "  let inputLength: u32 = arrayLength(&inputBuffer);",
+    "  let outputLength: u32 = arrayLength(&outputBuffer);",
+    ...body,
+    "}",
+    "",
+  ].join("\n");
+}
+
+function executeStatements(
+  statements: readonly Cuda1DStatement[],
+  context: Cuda1DThreadContext,
+): void {
+  for (const statement of statements) {
+    switch (statement.op) {
+      case "write":
+        context.write(
+          evaluateIndexExpression(statement.index, context),
+          evaluateExpression(statement.value, context),
+        );
+        break;
+      case "if":
+        if (evaluateCondition(statement.condition, context)) {
+          executeStatements(statement.body, context);
+        }
+        break;
+    }
+  }
+}
+
+function evaluateCondition(
+  condition: Cuda1DCondition,
+  context: Cuda1DThreadContext,
+): boolean {
+  const left = evaluateExpression(condition.left, context);
+  const right = evaluateExpression(condition.right, context);
+  switch (condition.op) {
+    case "lt":
+      return left < right;
+    case "lte":
+      return left <= right;
+    case "eq":
+      return left === right;
+  }
+}
+
+function evaluateIndexExpression(
+  expression: Cuda1DExpression,
+  context: Cuda1DThreadContext,
+): number {
+  return validateInteger(evaluateExpression(expression, context), "memory index");
+}
+
+function evaluateExpression(
+  expression: Cuda1DExpression,
+  context: Cuda1DThreadContext,
+): number {
+  switch (expression.op) {
+    case "literal":
+      return validateFiniteNumber(expression.value, "literal");
+    case "threadId":
+      return context.globalThreadId;
+    case "inputLength":
+      return context.inputLength;
+    case "outputLength":
+      return context.outputLength;
+    case "read":
+      return context.read(evaluateIndexExpression(expression.index, context));
+    case "add":
+      return evaluateExpression(expression.left, context) +
+        evaluateExpression(expression.right, context);
+    case "sub":
+      return evaluateExpression(expression.left, context) -
+        evaluateExpression(expression.right, context);
+    case "mul":
+      return evaluateExpression(expression.left, context) *
+        evaluateExpression(expression.right, context);
+    case "div":
+      return evaluateExpression(expression.left, context) /
+        evaluateExpression(expression.right, context);
+  }
+}
+
+function emitStatements(
+  statements: readonly Cuda1DStatement[],
+  indentLevel: number,
+): string[] {
+  return statements.flatMap((statement) => emitStatement(statement, indentLevel));
+}
+
+function emitStatement(
+  statement: Cuda1DStatement,
+  indentLevel: number,
+): string[] {
+  const indent = "  ".repeat(indentLevel);
+  switch (statement.op) {
+    case "write":
+      return [
+        `${indent}outputBuffer[${emitIndexExpression(statement.index)}] = ${emitExpression(statement.value, "value")};`,
+      ];
+    case "if":
+      return [
+        `${indent}if (${emitCondition(statement.condition)}) {`,
+        ...emitStatements(statement.body, indentLevel + 1),
+        `${indent}}`,
+      ];
+  }
+}
+
+function emitCondition(condition: Cuda1DCondition): string {
+  const left = emitExpression(condition.left, "index");
+  const right = emitExpression(condition.right, "index");
+  switch (condition.op) {
+    case "lt":
+      return `${left} < ${right}`;
+    case "lte":
+      return `${left} <= ${right}`;
+    case "eq":
+      return `${left} == ${right}`;
+  }
+}
+
+function emitIndexExpression(expression: Cuda1DExpression): string {
+  return emitExpression(expression, "index");
+}
+
+function emitExpression(
+  expression: Cuda1DExpression,
+  usage: "index" | "value",
+): string {
+  switch (expression.op) {
+    case "literal":
+      return usage === "index"
+        ? emitU32Literal(expression.value)
+        : emitF32Literal(expression.value);
+    case "threadId":
+      return "i";
+    case "inputLength":
+      return "inputLength";
+    case "outputLength":
+      return "outputLength";
+    case "read":
+      return `inputBuffer[${emitIndexExpression(expression.index)}]`;
+    case "add":
+      return `(${emitExpression(expression.left, usage)} + ${emitExpression(expression.right, usage)})`;
+    case "sub":
+      return `(${emitExpression(expression.left, usage)} - ${emitExpression(expression.right, usage)})`;
+    case "mul":
+      return `(${emitExpression(expression.left, usage)} * ${emitExpression(expression.right, usage)})`;
+    case "div":
+      return `(${emitExpression(expression.left, usage)} / ${emitExpression(expression.right, usage)})`;
+  }
+}
+
+function cloneStatement(statement: Cuda1DStatement): Cuda1DStatement {
+  switch (statement.op) {
+    case "write":
+      return {
+        op: "write",
+        index: cloneExpression(statement.index),
+        value: cloneExpression(statement.value),
+      };
+    case "if":
+      return {
+        op: "if",
+        condition: cloneCondition(statement.condition),
+        body: statement.body.map(cloneStatement),
+      };
+  }
+}
+
+function cloneCondition(condition: Cuda1DCondition): Cuda1DCondition {
+  return {
+    op: condition.op,
+    left: cloneExpression(condition.left),
+    right: cloneExpression(condition.right),
+  };
+}
+
+function cloneExpression(expression: Cuda1DExpression): Cuda1DExpression {
+  switch (expression.op) {
+    case "literal":
+      return { op: "literal", value: expression.value };
+    case "threadId":
+    case "inputLength":
+    case "outputLength":
+      return { op: expression.op };
+    case "read":
+      return { op: "read", index: cloneExpression(expression.index) };
+    case "add":
+    case "sub":
+    case "mul":
+    case "div":
+      return {
+        op: expression.op,
+        left: cloneExpression(expression.left),
+        right: cloneExpression(expression.right),
+      };
+  }
+}
+
+function emitF32Literal(value: number): string {
+  const finite = validateFiniteNumber(value, "literal");
+  if (Number.isInteger(finite)) return `${finite}.0`;
+  return String(finite);
+}
+
+function emitU32Literal(value: number): string {
+  const integer = validateNonNegativeInteger(value, "literal index");
+  return `${integer}u`;
+}
+
+function validateIdentifier(value: string, name: string): string {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(value)) {
+    throw new KernelError(`${name} must be a valid WGSL identifier`);
+  }
+  return value;
+}
+
+function validatePositiveInteger(value: number, name: string): number {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new KernelError(`${name} must be a positive integer`);
+  }
+  return value;
+}
+
+function validateNonNegativeInteger(value: number, name: string): number {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new KernelError(`${name} must be a non-negative integer`);
+  }
+  return value;
+}
+
+function validateInteger(value: number, name: string): number {
+  if (!Number.isInteger(value)) {
+    throw new KernelError(`${name} must be an integer`);
+  }
+  return value;
+}
+
+function validateFiniteNumber(value: number, name: string): number {
+  if (!Number.isFinite(value)) {
+    throw new KernelError(`${name} must be finite`);
+  }
+  return value;
+}

@@ -20,6 +20,7 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
 | `layernorm` | Along last axis, optional gamma/beta | ✅ |
 | `attention` | Composed 3-kernel SDPA | ✅ |
 | `referenceFlashAttention` / `referenceFlashAttentionBackward` | Pure-JS FlashAttention oracle with output, log-sum-exp, and Q/K/V gradients | ✅ |
+| `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` | CUDA-shaped 1D kernel IR with simulator and WGSL lowering | ✅ |
 | `simulateCuda1DGrid`, `referenceSaxpy`, `referenceExclusiveScan` | CUDA-shaped teaching oracles for GPU Puzzles and CS149 A3 browser rubrics | ✅ |
 | `flashAttentionDirect` | Flash Attention v2 forward, online softmax. **Known numerical issue on real Metal — tracked.** | ⚠️ |
 | `fusedElementwiseDirect` | Runtime WGSL codegen for arbitrary elementwise chains | ✅ |
@@ -72,6 +73,44 @@ For GPU Puzzles and CS149 A3-style CUDA concept rubrics, import
 records per-thread reads/writes, and reports out-of-bounds access instead of
 hiding missing guards. It is a correctness and pedagogy oracle, not a native
 CUDA performance runner.
+
+For a more durable author-once path, define a tiny CUDA-shaped 1D program and
+run it through both adapters:
+
+```ts
+import {
+  defineCuda1DProgram,
+  emitCuda1DProgramWgsl,
+  simulateCuda1DProgram,
+} from "@unlocalhosted/browsergrad-kernels";
+
+const program = defineCuda1DProgram({
+  name: "add_ten_guarded",
+  inputLength: 4,
+  outputLength: 4,
+  launch: { blocks: 1, threadsPerBlock: 8 },
+  body: [{
+    op: "if",
+    condition: { op: "lt", left: { op: "threadId" }, right: { op: "inputLength" } },
+    body: [{
+      op: "write",
+      index: { op: "threadId" },
+      value: {
+        op: "add",
+        left: { op: "read", index: { op: "threadId" } },
+        right: { op: "literal", value: 10 },
+      },
+    }],
+  }],
+});
+
+const simulated = simulateCuda1DProgram(program, { initialInput: [0, 1, 2, 3] });
+const wgsl = emitCuda1DProgramWgsl(program);
+```
+
+This is the first HipScript-inspired kernel-authoring seam: explicit grid/thread
+semantics, deterministic simulator trace, and WGSL source generation without
+shipping a browser LLVM toolchain.
 
 ### Kernel rubric assertions
 

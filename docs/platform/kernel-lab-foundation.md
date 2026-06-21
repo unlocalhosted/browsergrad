@@ -51,6 +51,10 @@ failure details, and can forward directly into BrowserGrad JS rubric callbacks.
 The same package now exports CUDA-shaped concept oracles such as
 `simulateCuda1DGrid()`, which gives GPU Puzzles/CS149-style labs thread/block
 traces, guard diagnostics, and deterministic outputs before WGSL lowering.
+The next shipped primitive is `defineCuda1DProgram()`: one small CUDA-shaped 1D
+program description can run through `simulateCuda1DProgram()` and
+`emitCuda1DProgramWgsl()`. This keeps the HipScript direction alive without
+making browser LLVM the first dependency.
 
 This core should be independent from Pyodide. Python assignments may call it
 through registered JS modules, but JS/WGSL labs should run without Python.
@@ -58,12 +62,13 @@ through registered JS modules, but JS/WGSL labs should run without Python.
 ## Maturation Path
 
 1. WGSL-first kernel labs with CPU oracles.
-2. Native Dawn/gpu.cpp-style runner for CI and local benchmarking.
-3. Kernel tracing artifacts: source, bindings, workgroups, timing, output
+2. CUDA-shaped 1D program IR with simulator and WGSL lowering.
+3. Native Dawn/gpu.cpp-style runner for CI and local benchmarking.
+4. Kernel tracing artifacts: source, bindings, workgroups, timing, output
    previews.
-4. CUDA-lite syntax for teaching simple kernels.
-5. Worker-mesh collectives for distributed systems labs.
-6. Pattern-specific kernels such as FlashAttention once the simple core is
+5. CUDA-lite syntax for teaching simple kernels.
+6. Worker-mesh collectives for distributed systems labs.
+7. Pattern-specific kernels such as FlashAttention once the simple core is
    boring and stable.
 
 ## Compatibility Posture
