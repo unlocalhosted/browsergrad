@@ -60,3 +60,16 @@ export {
   type LabDataset,
   type ManifestParseResult,
 } from "./lab.js";
+
+export {
+  parseAssignmentProfile,
+  profileOracleJsModules,
+  type AssignmentProfile,
+  type AssignmentProfileFiles,
+  type AssignmentProfileTimeouts,
+  type AssignmentOracleSpec,
+  type AssignmentGateKind,
+  type AssignmentGateSpec,
+  type AssignmentDataset,
+  type AssignmentProfileParseResult,
+} from "./assignment.js";

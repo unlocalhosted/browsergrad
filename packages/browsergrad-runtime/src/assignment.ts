@@ -1,0 +1,343 @@
+import type { PyodideJsModule } from "./types.js";
+
+export interface AssignmentProfile {
+  readonly id: string;
+  readonly version: string;
+  readonly requires_browsergrad: string;
+  readonly runtime_packages: readonly string[];
+  readonly files: AssignmentProfileFiles;
+  readonly timeouts: AssignmentProfileTimeouts;
+  readonly allowed_tests: readonly string[];
+  readonly oracles: readonly AssignmentOracleSpec[];
+  readonly gates: readonly AssignmentGateSpec[];
+  readonly datasets: readonly AssignmentDataset[];
+}
+
+export interface AssignmentProfileFiles {
+  readonly root: string;
+  readonly rubric_path: string;
+  readonly starter_path?: string;
+  readonly reference_path?: string;
+  readonly fixtures_path?: string;
+}
+
+export interface AssignmentProfileTimeouts {
+  readonly setup_ms?: number;
+  readonly test_ms?: number;
+  readonly worker_ms?: number;
+}
+
+export interface AssignmentOracleSpec {
+  readonly name: string;
+  readonly js_module: string;
+  readonly export_name?: string;
+}
+
+export type AssignmentGateKind =
+  | "streaming"
+  | "timeout"
+  | "forbidden-read";
+
+export interface AssignmentGateSpec {
+  readonly name: string;
+  readonly kind: AssignmentGateKind;
+  readonly options: Record<string, unknown>;
+}
+
+export interface AssignmentDataset {
+  readonly name: string;
+  readonly url: string;
+  readonly hash?: string;
+}
+
+export type AssignmentProfileParseResult =
+  | { ok: true; profile: AssignmentProfile }
+  | { ok: false; errors: readonly string[] };
+
+const SEMVER_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+const SEMVER_RANGE_RE = /^[\^~]?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+const ID_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+const GATE_KINDS = new Set<AssignmentGateKind>([
+  "streaming",
+  "timeout",
+  "forbidden-read",
+]);
+
+export function parseAssignmentProfile(
+  input: unknown,
+): AssignmentProfileParseResult {
+  const errors: string[] = [];
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return { ok: false, errors: ["assignment profile must be a JSON object"] };
+  }
+  const obj = input as Record<string, unknown>;
+
+  const id = readString(obj, "id", errors, ID_RE);
+  const version = readString(obj, "version", errors, SEMVER_RE);
+  const requires_browsergrad = readString(
+    obj,
+    "requires_browsergrad",
+    errors,
+    SEMVER_RANGE_RE,
+  );
+  const files = readFiles(obj.files, errors);
+  const timeouts = readTimeouts(obj.timeouts, errors);
+  const runtime_packages = readStringArray(
+    obj.runtime_packages,
+    "runtime_packages",
+    errors,
+    64,
+  );
+  const allowed_tests = readStringArray(
+    obj.allowed_tests,
+    "allowed_tests",
+    errors,
+    256,
+  );
+  const oracles = readOracles(obj.oracles, errors);
+  const gates = readGates(obj.gates, errors);
+  const datasets = readDatasets(obj.datasets, errors);
+
+  if (errors.length > 0) return { ok: false, errors };
+
+  return {
+    ok: true,
+    profile: {
+      id: id!,
+      version: version!,
+      requires_browsergrad: requires_browsergrad!,
+      runtime_packages,
+      files: files!,
+      timeouts,
+      allowed_tests,
+      oracles,
+      gates,
+      datasets,
+    },
+  };
+}
+
+export function profileOracleJsModules(
+  profile: AssignmentProfile,
+): PyodideJsModule[] {
+  return profile.oracles.map((oracle) => ({
+    name: oracle.name,
+    importURL: oracle.js_module,
+    ...(oracle.export_name ? { exportName: oracle.export_name } : {}),
+  }));
+}
+
+function readString(
+  obj: Record<string, unknown>,
+  key: string,
+  errors: string[],
+  pattern?: RegExp,
+): string | undefined {
+  const value = obj[key];
+  if (typeof value !== "string") {
+    errors.push(`${key}: required string field missing or not a string`);
+    return undefined;
+  }
+  if (pattern && !pattern.test(value)) {
+    errors.push(`${key}: value ${JSON.stringify(value)} does not match ${pattern.source}`);
+  }
+  return value;
+}
+
+function readOptionalString(
+  obj: Record<string, unknown>,
+  key: string,
+  errors: string[],
+): string | undefined {
+  const value = obj[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") {
+    errors.push(`${key}: must be a string when present`);
+    return undefined;
+  }
+  return value;
+}
+
+function readFiles(
+  value: unknown,
+  errors: string[],
+): AssignmentProfileFiles | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    errors.push("files: required object field missing or not an object");
+    return undefined;
+  }
+  const obj = value as Record<string, unknown>;
+  const root = readString(obj, "root", errors);
+  const rubric_path = readString(obj, "rubric_path", errors);
+  const starter_path = readOptionalString(obj, "starter_path", errors);
+  const reference_path = readOptionalString(obj, "reference_path", errors);
+  const fixtures_path = readOptionalString(obj, "fixtures_path", errors);
+  if (!root || !rubric_path) return undefined;
+  return {
+    root,
+    rubric_path,
+    ...(starter_path ? { starter_path } : {}),
+    ...(reference_path ? { reference_path } : {}),
+    ...(fixtures_path ? { fixtures_path } : {}),
+  };
+}
+
+function readTimeouts(
+  value: unknown,
+  errors: string[],
+): AssignmentProfileTimeouts {
+  if (value === undefined) return {};
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    errors.push("timeouts: must be an object when present");
+    return {};
+  }
+  const obj = value as Record<string, unknown>;
+  const out: Record<string, number> = {};
+  for (const key of ["setup_ms", "test_ms", "worker_ms"]) {
+    const timeout = obj[key];
+    if (timeout === undefined) continue;
+    if (
+      typeof timeout !== "number" ||
+      !Number.isInteger(timeout) ||
+      timeout < 0
+    ) {
+      errors.push(`timeouts.${key}: must be a non-negative integer`);
+      continue;
+    }
+    out[key] = timeout;
+  }
+  return out;
+}
+
+function readStringArray(
+  value: unknown,
+  key: string,
+  errors: string[],
+  maxLength: number,
+): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    errors.push(`${key}: must be a string array when present`);
+    return [];
+  }
+  if (value.length > maxLength) {
+    errors.push(`${key}: at most ${maxLength} entries (got ${value.length})`);
+  }
+  const out: string[] = [];
+  for (let i = 0; i < value.length; i++) {
+    const item = value[i];
+    if (typeof item !== "string") {
+      errors.push(`${key}[${i}]: must be a string`);
+    } else {
+      out.push(item);
+    }
+  }
+  return out;
+}
+
+function readOracles(
+  value: unknown,
+  errors: string[],
+): AssignmentOracleSpec[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    errors.push("oracles: must be an array when present");
+    return [];
+  }
+  const out: AssignmentOracleSpec[] = [];
+  for (let i = 0; i < value.length; i++) {
+    const item = value[i];
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      errors.push(`oracles[${i}]: must be an object`);
+      continue;
+    }
+    const obj = item as Record<string, unknown>;
+    const name = readString(obj, "name", errors);
+    const js_module = readString(obj, "js_module", errors);
+    const export_name = readOptionalString(obj, "export_name", errors);
+    if (name && js_module) {
+      out.push({
+        name,
+        js_module,
+        ...(export_name ? { export_name } : {}),
+      });
+    }
+  }
+  return out;
+}
+
+function readGates(
+  value: unknown,
+  errors: string[],
+): AssignmentGateSpec[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    errors.push("gates: must be an array when present");
+    return [];
+  }
+  const out: AssignmentGateSpec[] = [];
+  for (let i = 0; i < value.length; i++) {
+    const item = value[i];
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      errors.push(`gates[${i}]: must be an object`);
+      continue;
+    }
+    const obj = item as Record<string, unknown>;
+    const name = readString(obj, "name", errors);
+    const kindValue = obj.kind;
+    if (typeof kindValue !== "string" || !GATE_KINDS.has(kindValue as AssignmentGateKind)) {
+      errors.push(`gates[${i}].kind: must be one of streaming, timeout, forbidden-read`);
+      continue;
+    }
+    const options = obj.options;
+    if (
+      options !== undefined &&
+      (typeof options !== "object" || options === null || Array.isArray(options))
+    ) {
+      errors.push(`gates[${i}].options: must be an object when present`);
+      continue;
+    }
+    if (name) {
+      out.push({
+        name,
+        kind: kindValue as AssignmentGateKind,
+        options: options === undefined ? {} : { ...(options as Record<string, unknown>) },
+      });
+    }
+  }
+  return out;
+}
+
+function readDatasets(
+  value: unknown,
+  errors: string[],
+): AssignmentDataset[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    errors.push("datasets: must be an array when present");
+    return [];
+  }
+  if (value.length > 32) {
+    errors.push(`datasets: at most 32 entries (got ${value.length})`);
+  }
+  const out: AssignmentDataset[] = [];
+  for (let i = 0; i < value.length; i++) {
+    const item = value[i];
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      errors.push(`datasets[${i}]: must be an object`);
+      continue;
+    }
+    const obj = item as Record<string, unknown>;
+    const name = readString(obj, "name", errors);
+    const url = readString(obj, "url", errors);
+    const hash = readOptionalString(obj, "hash", errors);
+    if (name && url) {
+      out.push({
+        name,
+        url,
+        ...(hash ? { hash } : {}),
+      });
+    }
+  }
+  return out;
+}
