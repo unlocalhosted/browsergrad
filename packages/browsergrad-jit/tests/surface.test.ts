@@ -41,6 +41,7 @@ describe("Python source registry", () => {
       "browsergrad_jit/_safetensors.py",
       "browsergrad_jit/_checkpoint.py",
       "browsergrad_jit/_utils_checkpoint.py",
+      "browsergrad_jit/_utils_data.py",
       "browsergrad_jit/_amp.py",
       "browsergrad_jit/_bridge.py",
       "browsergrad_jit/_gpu_buffer_table.py",

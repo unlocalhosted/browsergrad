@@ -80,10 +80,13 @@ def install_torch_alias(*, force: bool = False) -> None:
     sys.modules["torch.nn"] = browsergrad_jit.nn
     sys.modules["torch.nn.functional"] = browsergrad_jit._functional
     sys.modules["torch.optim"] = browsergrad_jit.optim
-    # torch.utils.checkpoint — PyTorch-shaped checkpointing API.
+    # torch.utils.checkpoint / torch.utils.data — PyTorch-shaped utility APIs.
     if hasattr(browsergrad_jit, "utils"):
         sys.modules["torch.utils"] = browsergrad_jit.utils
-        sys.modules["torch.utils.checkpoint"] = browsergrad_jit.utils.checkpoint
+        if hasattr(browsergrad_jit.utils, "checkpoint"):
+            sys.modules["torch.utils.checkpoint"] = browsergrad_jit.utils.checkpoint
+        if hasattr(browsergrad_jit.utils, "data"):
+            sys.modules["torch.utils.data"] = browsergrad_jit.utils.data
     # torch.amp — autocast + GradScaler (PRD-010).
     if hasattr(browsergrad_jit, "amp"):
         sys.modules["torch.amp"] = browsergrad_jit.amp
@@ -108,6 +111,9 @@ def uninstall_torch_alias() -> None:
     sys.modules.pop("torch.optim", None)
     sys.modules.pop("torch.utils", None)
     sys.modules.pop("torch.utils.checkpoint", None)
+    sys.modules.pop("torch.utils.data", None)
+    sys.modules.pop("torch.amp", None)
+    sys.modules.pop("torch.func", None)
 
 
 __all__ = ["install_torch_alias", "uninstall_torch_alias"]

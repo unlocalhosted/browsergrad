@@ -34,6 +34,7 @@ const MODULES = [
   ["_safetensors.py", "_safetensors.generated.ts", "SAFETENSORS_PY"],
   ["_checkpoint.py", "_checkpoint.generated.ts", "CHECKPOINT_PY"],
   ["_utils_checkpoint.py", "_utils_checkpoint.generated.ts", "UTILS_CHECKPOINT_PY"],
+  ["_utils_data.py", "_utils_data.generated.ts", "UTILS_DATA_PY"],
   ["_amp.py", "_amp.generated.ts", "AMP_PY"],
   ["_bridge.py", "_bridge.generated.ts", "BRIDGE_PY"],
   ["_gpu_buffer_table.py", "_gpu_buffer_table.generated.ts", "GPU_BUFFER_TABLE_PY"],

@@ -26,13 +26,18 @@ browsergrad_jit.uninstall_torch_alias()
 `);
   });
 
-  it("registers torch / torch.nn / torch.nn.functional / torch.optim", async () => {
+  it("registers torch / torch.nn / torch.nn.functional / torch.optim / torch.utils", async () => {
     const target = await getJitTarget();
     const result = await target.run<{
       hasTorch: boolean;
       hasNn: boolean;
       hasFunc: boolean;
       hasOptim: boolean;
+      hasUtils: boolean;
+      hasCheckpoint: boolean;
+      hasData: boolean;
+      hasAmp: boolean;
+      hasFuncTransforms: boolean;
       owner: string;
     }>(`
 import browsergrad_jit
@@ -43,6 +48,11 @@ result = {
     "hasNn": "torch.nn" in sys.modules,
     "hasFunc": "torch.nn.functional" in sys.modules,
     "hasOptim": "torch.optim" in sys.modules,
+    "hasUtils": "torch.utils" in sys.modules,
+    "hasCheckpoint": "torch.utils.checkpoint" in sys.modules,
+    "hasData": "torch.utils.data" in sys.modules,
+    "hasAmp": "torch.amp" in sys.modules,
+    "hasFuncTransforms": "torch.func" in sys.modules,
     "owner": getattr(sys.modules["torch"], "__bg_owner__", "<none>"),
 }
 result
@@ -51,6 +61,11 @@ result
     expect(result.hasNn).toBe(true);
     expect(result.hasFunc).toBe(true);
     expect(result.hasOptim).toBe(true);
+    expect(result.hasUtils).toBe(true);
+    expect(result.hasCheckpoint).toBe(true);
+    expect(result.hasData).toBe(true);
+    expect(result.hasAmp).toBe(true);
+    expect(result.hasFuncTransforms).toBe(true);
     expect(result.owner).toBe("browsergrad_jit");
   });
 
@@ -82,9 +97,13 @@ import sys
     expect(ok).toBe(true);
   });
 
-  it("uninstall removes the alias and is safe to call twice", async () => {
+  it("uninstall removes the alias and registered submodules", async () => {
     const target = await getJitTarget();
-    const states = await target.run<{ after_install: boolean; after_uninstall: boolean }>(`
+    const states = await target.run<{
+      after_install: boolean;
+      after_uninstall: boolean;
+      stale_submodules: string[];
+    }>(`
 import browsergrad_jit
 import sys
 browsergrad_jit.install_torch_alias()
@@ -92,10 +111,16 @@ after_install = "torch" in sys.modules
 browsergrad_jit.uninstall_torch_alias()
 browsergrad_jit.uninstall_torch_alias()  # double-uninstall safe
 after_uninstall = "torch" in sys.modules
-{"after_install": after_install, "after_uninstall": after_uninstall}
+stale_submodules = sorted(k for k in sys.modules if k == "torch" or k.startswith("torch."))
+{
+    "after_install": after_install,
+    "after_uninstall": after_uninstall,
+    "stale_submodules": stale_submodules,
+}
 `);
     expect(states.after_install).toBe(true);
     expect(states.after_uninstall).toBe(false);
+    expect(states.stale_submodules).toEqual([]);
   });
 
   it("refuses to shadow a foreign owner without force=True", async () => {

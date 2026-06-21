@@ -70,6 +70,17 @@ def block(x): return model_layers(x)
 y = checkpoint(block, x)   # forward intermediates recomputed at backward
 ```
 
+### Data loading
+```python
+from browsergrad_jit.utils.data import TensorDataset, DataLoader
+
+ds = TensorDataset(x, y)
+loader = DataLoader(ds, batch_size=32, shuffle=True, num_workers=0)
+```
+
+`DataLoader` is intentionally single-process in Pyodide. `num_workers > 0`
+raises with a browser-specific explanation.
+
 ### Functional transforms
 ```python
 g = bg.func.grad(lambda t: (t * t).sum())(x)
@@ -131,10 +142,10 @@ Routes through the runtime's structured assertion protocol when run inside `@unl
 
 ```python
 bg.install_torch_alias()
-import torch, torch.nn, torch.func, torch.amp, torch.utils.checkpoint
+import torch, torch.nn, torch.func, torch.amp, torch.utils.checkpoint, torch.utils.data
 ```
 
-The shim covers `torch.nn`, `torch.optim`, `torch.nn.functional`, `torch.func`, `torch.amp`, `torch.utils.checkpoint`. Anything not implemented raises `AttributeError`, not silent wrong behavior.
+The shim covers `torch.nn`, `torch.optim`, `torch.nn.functional`, `torch.func`, `torch.amp`, `torch.utils.checkpoint`, and `torch.utils.data`. Anything not implemented raises `AttributeError`, not silent wrong behavior.
 
 ## Coexists with browsergrad-grad
 
@@ -146,7 +157,7 @@ Both libraries can be installed in the same Pyodide worker. They mount to distin
 |---|---|
 | `TensorProxy` attributes & methods | Semver-stable across `0.x` |
 | `nn.*`, `optim.*`, `nn.functional.*` shapes | Semver-stable |
-| `bg.func.*`, `bg.amp.*`, `bg.utils.checkpoint.*`, `bg.onnx.*`, `bg.kernels.*`, `bg.custom_kernel`, `bg.lab.*` | Semver-stable |
+| `bg.func.*`, `bg.amp.*`, `bg.utils.checkpoint.*`, `bg.utils.data.*`, `bg.onnx.*`, `bg.kernels.*`, `bg.custom_kernel`, `bg.lab.*` | Semver-stable |
 | `bg.realize_webgpu`, `bg.register_webgpu_bridge`, `bg.webgpu_supported_opcodes()` | Semver-stable; supported-opcode set may grow |
 | Public errors (`ShapeError`, `JitError`, `JitNotImplementedError`, `NoBackwardError`, `TorchAliasConflict`, `RealizationError`, `BufferTableError`, `OnnxUnmappableOp`) | Semver-stable |
 | Per-opcode numerical match vs `browsergrad-grad` | Within `1e-4` (fp32) |

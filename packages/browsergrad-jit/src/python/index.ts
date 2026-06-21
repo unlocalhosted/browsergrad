@@ -24,6 +24,7 @@ import { TRACE_CACHE_PY } from "./_trace_cache.generated.js";
 import { SAFETENSORS_PY } from "./_safetensors.generated.js";
 import { CHECKPOINT_PY } from "./_checkpoint.generated.js";
 import { UTILS_CHECKPOINT_PY } from "./_utils_checkpoint.generated.js";
+import { UTILS_DATA_PY } from "./_utils_data.generated.js";
 import { AMP_PY } from "./_amp.generated.js";
 import { BRIDGE_PY } from "./_bridge.generated.js";
 import { GPU_BUFFER_TABLE_PY } from "./_gpu_buffer_table.generated.js";
@@ -99,6 +100,7 @@ from . import _fusion_config as _fc
 from . import _trace_cache as _tc
 from ._safetensors import load_safetensors, save_safetensors
 from . import _utils_checkpoint as _utils_ckpt
+from . import _utils_data as _utils_data_mod
 from . import _amp as _amp_mod
 from . import _realize_webgpu as _webgpu_mod
 from . import _func as _func_mod
@@ -156,9 +158,15 @@ _sys.modules["browsergrad_jit.jit"] = jit
 utils = _types.ModuleType("browsergrad_jit.utils")
 utils_ckpt_mod = _types.ModuleType("browsergrad_jit.utils.checkpoint")
 utils_ckpt_mod.checkpoint = _utils_ckpt.checkpoint
+utils_data_mod = _types.ModuleType("browsergrad_jit.utils.data")
+utils_data_mod.Dataset = _utils_data_mod.Dataset
+utils_data_mod.DataLoader = _utils_data_mod.DataLoader
+utils_data_mod.TensorDataset = _utils_data_mod.TensorDataset
 utils.checkpoint = utils_ckpt_mod
+utils.data = utils_data_mod
 _sys.modules["browsergrad_jit.utils"] = utils
 _sys.modules["browsergrad_jit.utils.checkpoint"] = utils_ckpt_mod
+_sys.modules["browsergrad_jit.utils.data"] = utils_data_mod
 
 # bg.amp — mixed precision (PRD-010). Matches torch.amp shape exactly:
 #   with bg.amp.autocast(device_type="webgpu", dtype=torch.float16):
@@ -488,6 +496,7 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_jit/_safetensors.py", content: SAFETENSORS_PY },
   { path: "browsergrad_jit/_checkpoint.py", content: CHECKPOINT_PY },
   { path: "browsergrad_jit/_utils_checkpoint.py", content: UTILS_CHECKPOINT_PY },
+  { path: "browsergrad_jit/_utils_data.py", content: UTILS_DATA_PY },
   { path: "browsergrad_jit/_amp.py", content: AMP_PY },
   { path: "browsergrad_jit/_bridge.py", content: BRIDGE_PY },
   { path: "browsergrad_jit/_gpu_buffer_table.py", content: GPU_BUFFER_TABLE_PY },
