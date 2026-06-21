@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  assignmentRubricKind,
+  createAssignmentRunPlan,
   parseAssignmentProfile,
   requiredAssignmentCapabilities,
 } from "../src/index";
@@ -18,6 +20,19 @@ const PROFILE_FILES = [
   "cs149gpt.profile.json",
 ];
 
+const EXPECTED_RUBRIC_KIND: Record<string, "python" | "javascript"> = {
+  "cs336-assignment1.profile.json": "python",
+  "cs336-assignment2-systems.profile.json": "python",
+  "cs336-assignment3-scaling.profile.json": "python",
+  "cs336-assignment4-data.profile.json": "python",
+  "cs336-assignment5-alignment.profile.json": "python",
+  "gpu-puzzles.profile.json": "javascript",
+  "cs149-assignment1.profile.json": "javascript",
+  "cs149-assignment2.profile.json": "javascript",
+  "cs149-assignment3.profile.json": "javascript",
+  "cs149gpt.profile.json": "python",
+};
+
 describe("benchmark assignment profiles", () => {
   for (const file of PROFILE_FILES) {
     it(`parses ${file} and declares capability requirements`, () => {
@@ -31,6 +46,13 @@ describe("benchmark assignment profiles", () => {
 
       expect(result.profile.metadata?.source_url).toMatch(/^https:\/\/github.com\//);
       expect(requiredAssignmentCapabilities(result.profile).length).toBeGreaterThan(0);
+      expect(
+        assignmentRubricKind(
+          createAssignmentRunPlan(result.profile, {
+            capabilities: requiredAssignmentCapabilities(result.profile),
+          }),
+        ),
+      ).toBe(EXPECTED_RUBRIC_KIND[file]);
     });
   }
 });

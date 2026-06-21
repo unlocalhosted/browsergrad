@@ -54,6 +54,8 @@ export type AssignmentGateKind =
   | "timeout"
   | "forbidden-read";
 
+export type AssignmentRubricKind = "python" | "javascript" | "unknown";
+
 export interface AssignmentGateSpec {
   readonly name: string;
   readonly kind: AssignmentGateKind;
@@ -367,7 +369,7 @@ export function createAssignmentRubricExecRequest(
     throw new BrowsergradError(`cannot create rubric exec request; ${reason}`);
   }
 
-  if (!plan.files.rubricPath.endsWith(".py")) {
+  if (assignmentRubricKind(plan) !== "python") {
     throw new BrowsergradError(
       "createAssignmentRubricExecRequest requires a Python rubric path",
     );
@@ -392,6 +394,15 @@ export function createAssignmentRubricExecRequest(
       ? { timeoutMs: plan.execution.testTimeoutMs }
       : {}),
   };
+}
+
+export function assignmentRubricKind(
+  plan: AssignmentRunPlan,
+): AssignmentRubricKind {
+  const path = plan.files.rubricPath.toLowerCase();
+  if (path.endsWith(".py")) return "python";
+  if (path.endsWith(".js") || path.endsWith(".mjs")) return "javascript";
+  return "unknown";
 }
 
 export function createAssignmentMountPlan(

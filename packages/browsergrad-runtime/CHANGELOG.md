@@ -21,6 +21,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `runAssignmentRubric(session, plan, contents, options)` orchestrates the
   common assignment path: derive mounts, materialize contents, create the rubric
   exec request, run it, and return both mount and exec results.
+- `assignmentRubricKind(plan)` classifies resolved rubric paths as `python`,
+  `javascript`, or `unknown` so platforms can route non-Pyodide labs before
+  launch.
 
 ## [0.1.1] — 2026-05-25
 

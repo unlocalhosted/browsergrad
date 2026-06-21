@@ -20,21 +20,22 @@ For every lab profile, the platform should:
 1. Parse the assignment profile with `parseAssignmentProfile`.
 2. Convert oracle specs with `profileOracleJsModules`.
 3. Build a substrate-neutral run plan with `createAssignmentRunPlan`.
-4. Evaluate capability readiness before launching the lab.
-5. Show missing capability gates as preflight status, not as runtime crashes.
-6. Build a file/dataset mount plan with `createAssignmentMountPlan`.
-7. Materialize provided file and dataset contents with
+4. Classify the rubric with `assignmentRubricKind`.
+5. Evaluate capability readiness before launching the lab.
+6. Show missing capability gates as preflight status, not as runtime crashes.
+7. Build a file/dataset mount plan with `createAssignmentMountPlan`.
+8. Materialize provided file and dataset contents with
    `materializeAssignmentMountPlan`, or use `runAssignmentRubric` for the
    common mount-and-execute path.
-8. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
+9. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
    Worker mesh, external/native runner, or future custom compiler.
-9. For Pyodide-backed labs, create the rubric execution request with
+10. For Pyodide-backed labs, create the rubric execution request with
    `createAssignmentRubricExecRequest`.
-10. In Python rubrics, call profile-registered JS oracles with
+11. In Python rubrics, call profile-registered JS oracles with
     `browsergrad.oracle("<module-name>")`.
-11. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
+12. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
     context with `browsergrad.assignment_context()`.
-12. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
+13. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
     implementation slice.
 
 ## Capability Vocabulary
@@ -128,14 +129,15 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
 
 1. Reads an assignment profile.
 2. Builds a BrowserGrad run plan.
-3. Calls BrowserGrad capability evaluation from the run plan.
-4. Builds the BrowserGrad mount plan for runnable or inspectable labs.
-5. Fetches or provides assignment file/dataset contents, then materializes them
+3. Classifies rubric kind with `assignmentRubricKind`.
+4. Calls BrowserGrad capability evaluation from the run plan.
+5. Builds the BrowserGrad mount plan for runnable or inspectable labs.
+6. Fetches or provides assignment file/dataset contents, then materializes them
    into `Session.fs`.
-6. Shows packages, oracle modules, file mounts, and satisfied/missing capability
-   groups.
-7. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
+7. Shows packages, oracle modules, rubric kind, file mounts, and
+   satisfied/missing capability groups.
+8. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
    launch the rubric through `Session.exec`, or uses
    `createAssignmentRubricExecRequest` when the platform needs manual staging.
-8. Offers the learner a runnable browser path, simulated path, or external-runner
+9. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

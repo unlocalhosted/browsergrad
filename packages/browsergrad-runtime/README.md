@@ -174,6 +174,7 @@ before launching a Worker:
 
 ```ts
 import {
+  assignmentRubricKind,
   createAssignmentMountPlan,
   createAssignmentRunPlan,
   evaluateAssignmentCapabilities,
@@ -197,10 +198,11 @@ if (!plan.ok) {
 }
 
 const mounts = createAssignmentMountPlan(plan);
+const rubricKind = assignmentRubricKind(plan);
 
 console.log(required, preflight.ok, preflight.missingCapabilities);
 console.log(plan.session.packages, plan.files.rubricPath, plan.execution.allowedTests);
-console.log(mounts.files, mounts.datasets);
+console.log(rubricKind, mounts.files, mounts.datasets);
 const fileContents: Record<string, string> = {
   [plan.files.rubricPath]: rubricSource,
 };
@@ -252,6 +254,10 @@ need to stage each step manually. It derives the mount plan, materializes files
 and datasets, builds the rubric exec request, calls `session.exec()`, and
 returns `{ mount, exec }`. Use the lower-level helpers when the UI needs a
 preflight preview before writing files or launching code.
+
+`assignmentRubricKind(plan)` returns `python`, `javascript`, or `unknown` from
+the resolved rubric path. Use it to route JS/WebGPU/native-style labs away from
+the Pyodide rubric runner.
 
 ## What this is, and is not
 

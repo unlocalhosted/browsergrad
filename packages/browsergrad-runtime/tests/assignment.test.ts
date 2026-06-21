@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assignmentRubricKind,
   createAssignmentMountPlan,
   createAssignmentRunPlan,
   createAssignmentRubricExecRequest,
@@ -269,6 +270,48 @@ describe("parseAssignmentProfile", () => {
         },
       ],
     });
+  });
+
+  it("classifies rubric substrate from the run plan path", () => {
+    const pythonResult = parseAssignmentProfile(VALID_PROFILE);
+    expect(pythonResult.ok).toBe(true);
+    if (!pythonResult.ok) return;
+
+    const jsResult = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      files: {
+        ...VALID_PROFILE.files,
+        rubric_path: "rubric.js",
+      },
+    });
+    expect(jsResult.ok).toBe(true);
+    if (!jsResult.ok) return;
+
+    const unknownResult = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      files: {
+        ...VALID_PROFILE.files,
+        rubric_path: "rubric.wasm",
+      },
+    });
+    expect(unknownResult.ok).toBe(true);
+    if (!unknownResult.ok) return;
+
+    expect(
+      assignmentRubricKind(
+        createAssignmentRunPlan(pythonResult.profile, { capabilities: ["pyodide"] }),
+      ),
+    ).toBe("python");
+    expect(
+      assignmentRubricKind(
+        createAssignmentRunPlan(jsResult.profile, { capabilities: ["pyodide"] }),
+      ),
+    ).toBe("javascript");
+    expect(
+      assignmentRubricKind(
+        createAssignmentRunPlan(unknownResult.profile, { capabilities: ["pyodide"] }),
+      ),
+    ).toBe("unknown");
   });
 
   it("creates a rubric exec request from a run plan", () => {

@@ -31,6 +31,8 @@ Use `parseAssignmentProfile()` to validate this shape,
 platform substrate, `profileOracleJsModules()` to convert oracle declarations
 into `createSession({ jsModules })` registrations, and
 `createAssignmentRunPlan()` to hand the platform a complete launch recipe.
+Use `assignmentRubricKind()` to route Python, JavaScript, and unknown rubric
+paths to the right execution substrate.
 Use `createAssignmentMountPlan()` to derive the files and dataset fixtures that
 must exist in the runtime filesystem.
 Use `materializeAssignmentMountPlan()` to write provided file and dataset
@@ -120,8 +122,10 @@ Capability gate options use:
 1. Add a profile with runtime packages, mounts, timeouts, oracles, and gates.
 2. Keep reusable helpers in a package and assignment-specific wiring in docs or
    profile code.
-3. Port upstream tests only when their assumptions are browser-safe.
-4. Replace native OS resource checks with behavior gates.
-5. Add unit tests for profile validation and at least one platform integration
+3. Classify the rubric kind and route non-Python rubrics to JS/WebGPU/native
+   substrates instead of Pyodide.
+4. Port upstream tests only when their assumptions are browser-safe.
+5. Replace native OS resource checks with behavior gates.
+6. Add unit tests for profile validation and at least one platform integration
    test using `runAssignmentRubric()` that mounts files, runs the rubric, calls
    declared oracles, and reports clear failures.

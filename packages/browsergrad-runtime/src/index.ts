@@ -62,6 +62,7 @@ export {
 } from "./lab.js";
 
 export {
+  assignmentRubricKind,
   createAssignmentMountPlan,
   createAssignmentRunPlan,
   createAssignmentRubricExecRequest,
@@ -77,6 +78,7 @@ export {
   type AssignmentProfileTimeouts,
   type AssignmentOracleSpec,
   type AssignmentGateKind,
+  type AssignmentRubricKind,
   type AssignmentGateSpec,
   type AssignmentDataset,
   type AssignmentCapabilityEnvironment,
