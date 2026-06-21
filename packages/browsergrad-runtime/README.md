@@ -291,6 +291,8 @@ environment variables, puts the assignment root on `sys.path`, runs the resolved
 rubric path, and uses the profile's effective execution timeout. It refuses
 plans whose capability preflight failed so unavailable labs do not accidentally
 launch.
+Profile parsing validates option shapes for `streaming`, `forbidden-read`, and
+`timeout` behavioral gates before they reach rubrics.
 When both `test_ms` and `worker_ms` are declared, the shorter value becomes the
 exec watchdog; when only `worker_ms` is declared, it is used directly.
 Rubrics can read:

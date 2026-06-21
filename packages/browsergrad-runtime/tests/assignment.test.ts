@@ -126,6 +126,46 @@ describe("parseAssignmentProfile", () => {
     }
   });
 
+  it("rejects malformed browser-safe behavioral gate options", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "bad_streaming",
+          kind: "streaming",
+          options: {
+            max_chunks_before_first_yield: -1,
+            chunk_count: "many",
+          },
+        },
+        {
+          name: "bad_forbidden_read",
+          kind: "forbidden-read",
+          options: {
+            methods: ["read", 42],
+          },
+        },
+        {
+          name: "bad_timeout",
+          kind: "timeout",
+          options: {
+            timeout_ms: 1.5,
+          },
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors).toEqual([
+        "gates[0].options.max_chunks_before_first_yield: must be a non-negative integer",
+        "gates[0].options.chunk_count: must be a non-negative integer when present",
+        "gates[1].options.methods[1]: must be a string",
+        "gates[2].options.timeout_ms: must be a non-negative integer",
+      ]);
+    }
+  });
+
   it("maps oracle specs to runtime JS module registrations", () => {
     const result = parseAssignmentProfile(VALID_PROFILE);
     expect(result.ok).toBe(true);

@@ -1191,6 +1191,70 @@ function validateCapabilityGateOptions(
   }
 }
 
+function validateStreamingGateOptions(
+  options: Record<string, unknown>,
+  path: string,
+  errors: string[],
+): void {
+  validateNonNegativeIntegerOption(
+    options.max_chunks_before_first_yield,
+    `${path}.max_chunks_before_first_yield`,
+    errors,
+    false,
+  );
+  validateNonNegativeIntegerOption(
+    options.chunk_count,
+    `${path}.chunk_count`,
+    errors,
+    true,
+  );
+}
+
+function validateForbiddenReadGateOptions(
+  options: Record<string, unknown>,
+  path: string,
+  errors: string[],
+): void {
+  if (!Array.isArray(options.methods)) {
+    errors.push(`${path}.methods: must be a string array`);
+    return;
+  }
+  validateStringListItems(options.methods, `${path}.methods`, errors);
+}
+
+function validateTimeoutGateOptions(
+  options: Record<string, unknown>,
+  path: string,
+  errors: string[],
+): void {
+  validateNonNegativeIntegerOption(
+    options.timeout_ms,
+    `${path}.timeout_ms`,
+    errors,
+    false,
+  );
+}
+
+function validateNonNegativeIntegerOption(
+  value: unknown,
+  path: string,
+  errors: string[],
+  optional: boolean,
+): void {
+  if (value === undefined && optional) return;
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 0
+  ) {
+    errors.push(
+      optional
+        ? `${path}: must be a non-negative integer when present`
+        : `${path}: must be a non-negative integer`,
+    );
+  }
+}
+
 function validateStringListOption(
   value: unknown,
   path: string,
@@ -1332,6 +1396,24 @@ function readGates(
     const normalizedOptions = options === undefined ? {} : { ...(options as Record<string, unknown>) };
     if (kindValue === "capability") {
       validateCapabilityGateOptions(
+        normalizedOptions,
+        `gates[${i}].options`,
+        errors,
+      );
+    } else if (kindValue === "streaming") {
+      validateStreamingGateOptions(
+        normalizedOptions,
+        `gates[${i}].options`,
+        errors,
+      );
+    } else if (kindValue === "forbidden-read") {
+      validateForbiddenReadGateOptions(
+        normalizedOptions,
+        `gates[${i}].options`,
+        errors,
+      );
+    } else if (kindValue === "timeout") {
+      validateTimeoutGateOptions(
         normalizedOptions,
         `gates[${i}].options`,
         errors,

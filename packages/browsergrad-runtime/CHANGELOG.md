@@ -24,6 +24,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `browsergrad.forbidden_read_gate(name, text, methods?)` gives Python rubrics a
   file-like text object that permits incremental reads while rejecting eager
   `read()` / `readlines()` calls declared by `forbidden-read` gates.
+- Assignment profile parsing now validates browser-safe behavioral gate option
+  shapes for `streaming`, `forbidden-read`, and `timeout` gates.
 - `runAssignmentRubric(session, plan, contents, options)` orchestrates the
   common assignment path: derive mounts, materialize contents, create the rubric
   exec request, run it, and return both mount and exec results.

@@ -161,6 +161,9 @@ runtime branches.
 - Gate-route guarantee: each capability gate evaluation exposes `status`,
   `selectedAnyOf`, and `selectedCapabilities`, so platform preflight rows can
   show the exact browser/simulated/external path selected by BrowserGrad.
+- Behavioral-gate schema guarantee: profile parsing validates `streaming`,
+  `forbidden-read`, and `timeout` gate option shapes before rubrics consume
+  those declarations.
 - Watchdog guarantee: Python rubric exec requests use the shortest declared
   runtime watchdog among `test_ms` and `worker_ms`, and honor `worker_ms` when
   no `test_ms` is declared.

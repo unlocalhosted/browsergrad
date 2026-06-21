@@ -139,6 +139,9 @@ Use a capability gate when availability can be checked before execution:
 - `message` is platform-facing explanatory text.
 - Non-capability gates such as streaming and timeout should remain separate
   because they are checked by rubrics or watchdogs during execution.
+- BrowserGrad validates option shapes for `streaming`, `forbidden-read`, and
+  `timeout` gates at profile parse time, so platform authoring should surface
+  those errors before fetching fixtures.
 
 ## Benchmark Pressure Matrix
 

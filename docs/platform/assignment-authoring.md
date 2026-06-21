@@ -130,6 +130,13 @@ Resource tests should verify behavior rather than emulate Linux:
 Failure messages should describe the assignment contract, not the browser
 implementation detail.
 
+Browser-safe gate options are validated at profile parse time:
+
+- `streaming`: required `max_chunks_before_first_yield`, optional `chunk_count`.
+- `forbidden-read`: required string-array `methods`, usually `read` and
+  `readlines`.
+- `timeout`: required `timeout_ms`.
+
 `createAssignmentRubricExecRequest()` exposes non-capability gates to Python
 rubrics through `BROWSERGRAD_BEHAVIORAL_GATES_JSON`, alongside
 `BROWSERGRAD_ASSIGNMENT_ROOT`, optional `BROWSERGRAD_FIXTURES_PATH`, and
