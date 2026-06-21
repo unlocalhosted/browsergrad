@@ -5,6 +5,7 @@ import {
   assignmentRunnerRoute,
   createAssignmentCapabilityEnvironment,
   createAssignmentExternalRunnerRequest,
+  createAssignmentBenchmarkPreflightMatrix,
   createAssignmentPreflightReport,
   createAssignmentMountPreflightReport,
   createAssignmentMountPlan,
@@ -181,6 +182,89 @@ describe("parseAssignmentProfile", () => {
         importURL: "/assets/tokenizer-oracle.js",
         exportName: "oracle",
       },
+    ]);
+  });
+
+  it("creates a platform-ready benchmark preflight matrix", () => {
+    const pythonResult = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "python_runtime",
+          kind: "capability",
+          options: { requires: ["pyodide"] },
+        },
+      ],
+    });
+    const jsResult = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      id: "gpu-puzzles-smoke",
+      files: {
+        root: "/assignments/gpu-puzzles-smoke",
+        rubric_path: "rubric.js",
+        starter_path: "student.js",
+        fixtures_path: "fixtures",
+      },
+      gates: [
+        {
+          name: "kernel_path",
+          kind: "capability",
+          options: {
+            any_of: [["webgpu", "wgsl-kernel"], ["cuda-compatible-subset"]],
+          },
+        },
+      ],
+      datasets: [
+        {
+          name: "cases",
+          url: "/fixtures/cases.bin",
+          hash: "sha256:" + "a".repeat(64),
+        },
+      ],
+    });
+    expect(pythonResult.ok).toBe(true);
+    expect(jsResult.ok).toBe(true);
+    if (!pythonResult.ok || !jsResult.ok) return;
+
+    const matrix = createAssignmentBenchmarkPreflightMatrix(
+      [pythonResult.profile, jsResult.profile],
+      createAssignmentCapabilityEnvironment({
+        browserCapabilities: ["pyodide", "webgpu", "wgsl-kernel"],
+      }),
+      {
+        files: {
+          "/assignments/cs336-assignment1/rubric.py": "print('ok')",
+        },
+      },
+    );
+
+    expect(matrix.ok).toBe(false);
+    expect(matrix.rows).toEqual([
+      expect.objectContaining({
+        id: "cs336-assignment1",
+        title: "Stanford CS336 Assignment 1: Basics",
+        readinessStatus: "runnable",
+        runnerTarget: "pyodide",
+        rubricKind: "python",
+        contentOk: false,
+        missingRequiredFiles: [],
+        missingDatasets: ["tiny"],
+        cacheStrategies: ["invalid-hash"],
+        externalRunnerRequired: false,
+      }),
+      expect.objectContaining({
+        id: "gpu-puzzles-smoke",
+        readinessStatus: "runnable",
+        runnerTarget: "javascript",
+        rubricKind: "javascript",
+        contentOk: false,
+        missingRequiredFiles: [
+          "/assignments/gpu-puzzles-smoke/rubric.js",
+        ],
+        missingDatasets: ["cases"],
+        cacheStrategies: ["content-addressed"],
+        externalRunnerRequired: false,
+      }),
     ]);
   });
 

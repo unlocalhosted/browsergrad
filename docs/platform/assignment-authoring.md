@@ -34,6 +34,11 @@ into `createSession({ jsModules })` registrations, and
 Use `createAssignmentPreflightReport(profile, environment)` when the platform
 needs one readonly object containing the run plan, rubric kind, readiness,
 required capabilities, mount plan, and dataset cache plan.
+Use `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
+when a platform needs one dashboard/checklist row per benchmark assignment. It
+returns flattened readiness, route, capability, content-gap, cache-strategy, and
+external-runner fields without asking the platform to duplicate BrowserGrad's
+preflight logic.
 Use `createAssignmentCapabilityEnvironment()` to build that environment from
 `browserCapabilities`, `simulatedCapabilities`, and `externalCapabilities`
 instead of handcrafting `capabilityModes`. It de-duplicates names, sorts them

@@ -178,6 +178,7 @@ import {
   assignmentRunReadiness,
   assignmentRunnerRoute,
   createAssignmentCapabilityEnvironment,
+  createAssignmentBenchmarkPreflightMatrix,
   createAssignmentDatasetCachePlan,
   createAssignmentExternalRunnerRequest,
   createAssignmentMountPlan,
@@ -203,6 +204,11 @@ const required = requiredAssignmentCapabilities(parsed.profile);
 const preflight = evaluateAssignmentCapabilities(parsed.profile, environment);
 const plan = createAssignmentRunPlan(parsed.profile, environment);
 const report = createAssignmentPreflightReport(parsed.profile, environment);
+const matrix = createAssignmentBenchmarkPreflightMatrix(
+  [parsed.profile],
+  environment,
+  { files: { [report.plan.files.rubricPath]: rubricSource } },
+);
 const route = assignmentRunnerRoute(plan);
 if (!plan.ok) {
   throw new Error(`Missing capabilities: ${plan.capabilityEvaluation.missingCapabilities.join(", ")}`);
@@ -221,6 +227,7 @@ console.log(required, preflight.ok, preflight.missingCapabilities);
 console.log(plan.session.packages, plan.files.rubricPath, plan.execution.allowedTests);
 console.log(readiness.status, rubricKind, mounts.files, mounts.datasets);
 console.log(route.target, report.runnerRoute.target, report.mountPlan.files, datasetCache.datasets);
+console.log(matrix.rows[0]?.readinessStatus, matrix.rows[0]?.contentOk);
 const fileContents: Record<string, string | Uint8Array> = {
   [plan.files.rubricPath]: rubricSource,
 };
@@ -271,6 +278,12 @@ platform preflight calls into `{ plan, rubricKind, readiness, runnerRoute,
 requiredCapabilities, mountPlan, datasetCachePlan }`. Use it when the UI needs
 a single readonly object before fetching fixtures, mounting files, or launching
 code.
+`createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
+batch-flattens those same preflight decisions into platform-ready rows:
+readiness status, runner target, rubric kind, required/selected/missing
+capabilities, mount-content gaps, dataset cache strategies, and whether an
+external runner handoff is required. Use it for benchmark dashboards, PRD
+handoffs, and platform smoke tests that cover many course profiles at once.
 Each capability gate evaluation includes `status`, `selectedAnyOf`, and
 `selectedCapabilities`, so platforms can render the chosen route per gate
 without reimplementing BrowserGrad's route selection.

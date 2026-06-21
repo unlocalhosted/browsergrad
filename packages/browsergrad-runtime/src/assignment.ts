@@ -147,6 +147,33 @@ export interface AssignmentPreflightReport {
   readonly externalRunnerRequest?: AssignmentExternalRunnerRequest;
 }
 
+export interface AssignmentBenchmarkPreflightRow {
+  readonly id: string;
+  readonly title?: string;
+  readonly course?: string;
+  readonly sourceUrl?: string;
+  readonly ok: boolean;
+  readonly readinessStatus: AssignmentRunReadinessStatus;
+  readonly runnerTarget: AssignmentRunnerTarget;
+  readonly rubricKind: AssignmentRubricKind;
+  readonly requiredCapabilities: readonly string[];
+  readonly selectedCapabilities: readonly string[];
+  readonly missingCapabilities: readonly string[];
+  readonly simulatedCapabilities: readonly string[];
+  readonly externalCapabilities: readonly string[];
+  readonly contentOk: boolean;
+  readonly missingRequiredFiles: readonly string[];
+  readonly missingDatasets: readonly string[];
+  readonly skippedOptionalPaths: readonly string[];
+  readonly cacheStrategies: readonly AssignmentDatasetCacheStrategy[];
+  readonly externalRunnerRequired: boolean;
+}
+
+export interface AssignmentBenchmarkPreflightMatrix {
+  readonly ok: boolean;
+  readonly rows: readonly AssignmentBenchmarkPreflightRow[];
+}
+
 export interface AssignmentRunPlan {
   readonly id: string;
   readonly profileVersion: string;
@@ -584,6 +611,52 @@ export function createAssignmentPreflightReport(
     ...(runnerRoute.target === "external"
       ? { externalRunnerRequest: createAssignmentExternalRunnerRequest(plan) }
       : {}),
+  };
+}
+
+export function createAssignmentBenchmarkPreflightMatrix(
+  profiles: readonly AssignmentProfile[],
+  environment: AssignmentCapabilityEnvironment,
+  contents: AssignmentMountContents = { files: {} },
+): AssignmentBenchmarkPreflightMatrix {
+  const rows = profiles.map((profile) => {
+    const report = createAssignmentPreflightReport(profile, environment);
+    const content = evaluateAssignmentMountContents(report.mountPlan, contents);
+    const ok =
+      report.readiness.status !== "blocked" &&
+      report.runnerRoute.target !== "unsupported" &&
+      content.ok;
+
+    return {
+      id: profile.id,
+      ...(profile.metadata?.title ? { title: profile.metadata.title } : {}),
+      ...(profile.metadata?.course ? { course: profile.metadata.course } : {}),
+      ...(profile.metadata?.source_url
+        ? { sourceUrl: profile.metadata.source_url }
+        : {}),
+      ok,
+      readinessStatus: report.readiness.status,
+      runnerTarget: report.runnerRoute.target,
+      rubricKind: report.rubricKind,
+      requiredCapabilities: report.requiredCapabilities,
+      selectedCapabilities: report.readiness.selectedCapabilities,
+      missingCapabilities: report.readiness.missingCapabilities,
+      simulatedCapabilities: report.readiness.simulatedCapabilities,
+      externalCapabilities: report.readiness.externalCapabilities,
+      contentOk: content.ok,
+      missingRequiredFiles: content.missingRequiredFiles,
+      missingDatasets: content.missingDatasets,
+      skippedOptionalPaths: content.skippedOptionalPaths,
+      cacheStrategies: report.datasetCachePlan.datasets.map(
+        (dataset) => dataset.strategy,
+      ),
+      externalRunnerRequired: Boolean(report.externalRunnerRequest),
+    };
+  });
+
+  return {
+    ok: rows.every((row) => row.ok),
+    rows,
   };
 }
 

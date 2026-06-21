@@ -23,20 +23,23 @@ For every lab profile, the platform should:
 4. Classify the rubric with `assignmentRubricKind`.
 5. Build the environment with `createAssignmentCapabilityEnvironment()` from
    detected browser, simulated, and external capability groups.
-6. Call `assignmentRunReadiness(plan)` before launching the lab, or call
+6. For benchmark dashboards or multi-assignment smoke tests, call
+   `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
+   and render its rows instead of hand-flattening individual reports.
+7. Call `assignmentRunReadiness(plan)` before launching the lab, or call
    `createAssignmentPreflightReport(profile, environment)` when the platform
    wants the run plan, readiness, rubric kind, required capabilities, and mount
    plan/cache plan together.
    Use `assignmentRunnerRoute(plan)` or `report.runnerRoute` for the final
    launch branch: `pyodide`, `javascript`, `external`, `unsupported`, or
    `blocked`.
-7. Show `runnable`, `simulated`, `external-only`, or `blocked` as preflight
+8. Show `runnable`, `simulated`, `external-only`, or `blocked` as preflight
    status, not as runtime crashes.
-8. Build a file/dataset mount plan with `createAssignmentMountPlan`.
-9. Build dataset cache metadata with `createAssignmentDatasetCachePlan` before
+9. Build a file/dataset mount plan with `createAssignmentMountPlan`.
+10. Build dataset cache metadata with `createAssignmentDatasetCachePlan` before
    fetching, caching, or mounting dataset contents.
-10. Dry-run platform-provided contents with `evaluateAssignmentMountContents`.
-11. Materialize provided file and dataset contents with
+11. Dry-run platform-provided contents with `evaluateAssignmentMountContents`.
+12. Materialize provided file and dataset contents with
    `materializeAssignmentMountPlan`, use `runAssignmentRubric` for the common
    Pyodide mount-and-execute path, or use `runAssignmentJavascriptRubric` for
    browser-native JS rubrics.
@@ -48,33 +51,33 @@ For every lab profile, the platform should:
    `verifyAssignmentMountContentHashes` before writing to runtime FS.
    Use `Session.fs.readBytes(path)` when the platform needs to verify mounted
    worker bytes against cache, hash, or snapshot metadata.
-12. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
+13. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
    Worker mesh, external/native runner, or future custom compiler.
-13. For external/native labs, call `createAssignmentExternalRunnerRequest(plan)`
+14. For external/native labs, call `createAssignmentExternalRunnerRequest(plan)`
    and hand that object to platform-owned native, hosted, or CI runners.
    If using `createAssignmentPreflightReport()`, read
    `report.externalRunnerRequest` for external routes.
-14. For Pyodide-backed labs, create the rubric execution request with
+15. For Pyodide-backed labs, create the rubric execution request with
    `createAssignmentRubricExecRequest`.
    The request uses the shorter runtime watchdog from `test_ms` and `worker_ms`;
    keep `setup_ms` for package preload/cache UI.
-15. For JavaScript-backed labs, pass the imported rubric function, declared
+16. For JavaScript-backed labs, pass the imported rubric function, declared
     oracle objects, and browser substrates such as WebGPU devices to
     `runAssignmentJavascriptRubric`.
     JS/TS streaming checks can import `createStreamingGate` and use
     `gate.wrapInput` plus `gate.wrapOutput`.
-16. In Python rubrics, call profile-registered JS oracles with
+17. In Python rubrics, call profile-registered JS oracles with
     `browsergrad.oracle("<module-name>")`.
-17. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
+18. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
     context with `browsergrad.assignment_context()`.
-18. In Python rubrics, enforce streaming gates with
+19. In Python rubrics, enforce streaming gates with
     `browsergrad.streaming_gate(name, iterable)` plus
     `gate.wrap_output(student_output)` so eager consumers fail before launchers
     need Linux RSS behavior.
-19. In Python rubrics, enforce forbidden-read gates with
+20. In Python rubrics, enforce forbidden-read gates with
     `browsergrad.forbidden_read_gate(name, text)` so eager `read()` or
     `readlines()` calls fail while incremental line reads still work.
-20. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
+21. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
     implementation slice.
 
 ## Capability Vocabulary
@@ -169,6 +172,11 @@ empty mount contents for every profile with
 `evaluateAssignmentMountContents` so missing rubric files and datasets stay
 visible before filesystem writes. Runtime integration tests also mount binary
 fixture bytes through the Pyodide path.
+Use `createAssignmentBenchmarkPreflightMatrix()` when the platform wants the
+same benchmark pressure as one consumable object. Its rows are intentionally
+flat: `readinessStatus`, `runnerTarget`, `rubricKind`, capability lists,
+`contentOk`, `missingRequiredFiles`, `missingDatasets`, `cacheStrategies`, and
+`externalRunnerRequired`.
 The same benchmark test pressure-checks external-runner handoffs for
 CS336 Assignment 5 and CS149GPT, proving their profile drafts can produce
 `externalRunnerRequest` objects from real capability environments.
@@ -206,8 +214,11 @@ BrowserGrad handoff: <lab or capability slice>
 
 After PRD-018 lands, craftingattention should add a preflight panel that:
 
-1. Reads an assignment profile.
-2. Builds a BrowserGrad run plan.
+1. Reads one or more assignment profiles.
+2. Builds a BrowserGrad run plan for a single profile, or builds a batch
+   dashboard with
+   `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
+   when showing many benchmark assignments together.
 3. Classifies rubric kind with `assignmentRubricKind`.
 4. Calls BrowserGrad capability evaluation from the run plan.
 5. Calls `assignmentRunReadiness(plan)` and renders its status, selected

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assignmentRubricKind,
   createAssignmentCapabilityEnvironment,
+  createAssignmentBenchmarkPreflightMatrix,
   createAssignmentDatasetCachePlan,
   createAssignmentPreflightReport,
   createAssignmentRunPlan,
@@ -204,6 +205,37 @@ describe("benchmark assignment profiles", () => {
       );
     });
   }
+
+  it("creates one platform handoff matrix row per benchmark profile", () => {
+    const profiles = PROFILE_FILES.map((file) => {
+      const profileJson = JSON.parse(
+        readFileSync(new URL(`../../../docs/internal/${file}`, import.meta.url), "utf8"),
+      );
+      const result = parseAssignmentProfile(profileJson);
+      expect(result).toMatchObject({ ok: true });
+      if (!result.ok) throw new Error(`${file} did not parse`);
+      return result.profile;
+    });
+
+    const matrix = createAssignmentBenchmarkPreflightMatrix(
+      profiles,
+      BROWSER_TEACHING_ENVIRONMENT,
+    );
+
+    expect(matrix.ok).toBe(false);
+    expect(matrix.rows.map((row) => row.id)).toEqual(
+      profiles.map((profile) => profile.id),
+    );
+    expect(matrix.rows.map((row) => row.readinessStatus)).toEqual(
+      PROFILE_FILES.map((file) => EXPECTED_BROWSER_TEACHING_READINESS[file]),
+    );
+    expect(matrix.rows.map((row) => row.runnerTarget)).toEqual(
+      PROFILE_FILES.map((file) => EXPECTED_BROWSER_TEACHING_RUNNER[file]),
+    );
+    expect(matrix.rows.every((row) => row.contentOk === false)).toBe(true);
+    expect(matrix.rows.every((row) => row.missingRequiredFiles.length === 1)).toBe(true);
+    expect(matrix.rows.every((row) => row.externalRunnerRequired === false)).toBe(true);
+  });
 
   it("creates external runner requests for native-heavy benchmark profiles", () => {
     for (const [file, expected] of Object.entries(EXTERNAL_BENCHMARK_ENVIRONMENTS)) {
