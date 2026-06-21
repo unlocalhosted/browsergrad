@@ -239,6 +239,12 @@ runtime branches.
   CS336 A2-style DDP, FSDP, and sharded optimizer rubrics can check
   gradient-averaging, all-gather, reduce-scatter, and AdamW state-sharding
   semantics without `torch.multiprocessing`, `torch.distributed`, or CUDA.
+- CS149 CPU/SIMD simulator guarantee: the same package exports
+  `simulateCs149ClampedExpVector()`, `simulateCs149ArraySumVector()`, and
+  `partitionStaticWork()` so CS149 A1-style rubrics can check fake-SIMD
+  clamped exponentiation, vector reductions, active-lane utilization, tail
+  masks, and static contiguous/cyclic thread decomposition without native C++,
+  AVX2, ISPC, or host timing.
 - Task-graph guarantee: the same package exports
   `createTaskGraphSimulator()` so CS149-style task-system rubrics can model
   dependency readiness, deterministic worker assignment, task start/finish

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   createDeterministicMesh,
   createTaskGraphSimulator,
+  partitionStaticWork,
   SimulatorError,
+  simulateCs149ArraySumVector,
+  simulateCs149ClampedExpVector,
   simulateDdpGradientSynchronization,
   simulateFsdpGradientReduceScatter,
   simulateFsdpParameterSharding,
@@ -12,7 +15,9 @@ import {
   type FsdpGradientReduceScatterResult,
   type FsdpParameterShardingResult,
   type SimulationEvent,
+  type SimdKernelStats,
   type ShardedAdamWResult,
+  type StaticWorkPartition,
   type TaskGraphEvent,
   type TaskGraphSimulator,
 } from "../src/index";
@@ -21,6 +26,9 @@ describe("public surface", () => {
   it("exports deterministic mesh primitives", () => {
     expect(typeof createDeterministicMesh).toBe("function");
     expect(typeof createTaskGraphSimulator).toBe("function");
+    expect(typeof partitionStaticWork).toBe("function");
+    expect(typeof simulateCs149ArraySumVector).toBe("function");
+    expect(typeof simulateCs149ClampedExpVector).toBe("function");
     expect(typeof simulateDdpGradientSynchronization).toBe("function");
     expect(typeof simulateFsdpParameterSharding).toBe("function");
     expect(typeof simulateFsdpGradientReduceScatter).toBe("function");
@@ -50,6 +58,23 @@ describe("public surface", () => {
     };
     expect(simulator.workerCount).toBe(1);
     expect(event.taskId).toBe("load");
+  });
+
+  it("types CS149 CPU/SIMD simulator results for compile-time consumers", () => {
+    const clamped = simulateCs149ClampedExpVector({
+      values: [2],
+      exponents: [1],
+      vectorWidth: 4,
+    });
+    const stats: SimdKernelStats = clamped.stats;
+    const partitions: StaticWorkPartition[] = partitionStaticWork({
+      items: 2,
+      workers: 1,
+    });
+
+    expect(clamped.output).toEqual([2]);
+    expect(stats.vectorInstructions).toBeGreaterThan(0);
+    expect(partitions[0]?.ranges).toEqual([{ start: 0, end: 2 }]);
   });
 
   it("types distributed training simulator results for compile-time consumers", () => {

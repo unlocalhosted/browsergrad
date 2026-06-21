@@ -109,6 +109,13 @@ CS336 A2-style distributed-training rubrics can use the same package's
 `simulateFsdpGradientReduceScatter()`, and `simulateShardedAdamWStep()` for
 `ddp-simulator`, `fsdp-simulator`, and `sharded-optimizer-simulator` profile
 paths before using native `torch.distributed`, multiprocessing, or CUDA.
+CS149 A1-style JavaScript rubrics can use
+`simulateCs149ClampedExpVector()`, `simulateCs149ArraySumVector()`, and
+`partitionStaticWork()` for `simd-simulator`, `pthreads-simulator`, and
+`performance-rubric` fixture checks. These helpers verify outputs plus lane
+utilization, vector-instruction traces, tail masks, horizontal reductions, and
+static contiguous/cyclic work decomposition without depending on native C++,
+AVX2, ISPC, or host timing.
 Fixture-backed JS rubrics can use `compareSnapshot()` or
 `createSnapshotOracle()` from `@unlocalhosted/browsergrad-snapshots` for
 `snapshot-oracle` profile paths. Prefer it for small JSON/numeric outputs such

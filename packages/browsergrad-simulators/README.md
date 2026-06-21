@@ -13,6 +13,9 @@ process behavior.
 import {
   createDeterministicMesh,
   createTaskGraphSimulator,
+  partitionStaticWork,
+  simulateCs149ArraySumVector,
+  simulateCs149ClampedExpVector,
   simulateDdpGradientSynchronization,
   simulateFsdpGradientReduceScatter,
   simulateFsdpParameterSharding,
@@ -58,8 +61,25 @@ console.log(simulateShardedAdamWStep({
   parameters: [{ name: "fc.weight", values: [1], gradients: [1] }],
   optimizer: { lr: 0.1 },
 }).updatedParameters);
+
+const clamped = simulateCs149ClampedExpVector({
+  values: [2, 3, -2, 4, 2],
+  exponents: [0, 2, 3, 4, 5],
+  vectorWidth: 4,
+});
+console.log(clamped.output, clamped.stats.utilization);
+
+console.log(simulateCs149ArraySumVector({
+  values: [1, 2, 3, 4, 5, 6, 7, 8],
+  vectorWidth: 4,
+}).sum);
+
+console.log(partitionStaticWork({ items: 10, workers: 3, chunkSize: 2 }));
 ```
 
 Use it as a rubric oracle for DDP/FSDP/sharded-optimizer/task-system labs when
 the learning goal is ordering, participation, reduction, sharding, and update
-semantics rather than native performance.
+semantics rather than native performance. For CS149 A1-style CPU labs, use the
+SIMD helpers to verify clamped exponentiation, vector-reduction behavior,
+active-lane utilization, tail masking, and static row/task decomposition before
+an external C++/ISPC runner is attached.

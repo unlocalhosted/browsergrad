@@ -59,9 +59,13 @@ For every lab profile, the platform should:
    traces before adding real Worker execution. Use `createTaskGraphSimulator()`
    for dependency-constrained task scheduling traces.
    Use `simulateDdpGradientSynchronization()`,
-   `simulateFsdpParameterSharding()`, `simulateFsdpGradientReduceScatter()`,
-   and `simulateShardedAdamWStep()` for CS336 A2-style DDP/FSDP/sharded
-   optimizer fixtures before adding native distributed runners.
+    `simulateFsdpParameterSharding()`, `simulateFsdpGradientReduceScatter()`,
+    and `simulateShardedAdamWStep()` for CS336 A2-style DDP/FSDP/sharded
+    optimizer fixtures before adding native distributed runners.
+    CS149 A1 CPU/SIMD labs can use `simulateCs149ClampedExpVector()`,
+    `simulateCs149ArraySumVector()`, and `partitionStaticWork()` for
+    browser-safe lane-mask, vector-reduction, and static work-decomposition
+    rubrics before C++/ISPC/native timing runners exist.
 15. For external/native labs, call `createAssignmentExternalRunnerRequest(plan)`
    and hand that object to platform-owned native, hosted, or CI runners.
    If using `createAssignmentPreflightReport()`, read
@@ -126,6 +130,10 @@ Capability names are strings. Keep them descriptive and reusable:
 | `cuda-compatible-subset` | Lab targets a BrowserGrad CUDA-like educational subset. |
 | `worker-mesh` | Multiple Workers can simulate distributed participants. |
 | `distributed-simulator` | Deterministic simulator for DDP/FSDP/task-system behavior. |
+| `pthreads-simulator` | Static thread/work decomposition can be checked without native pthreads. |
+| `task-graph-simulator` | Dependency-constrained task readiness and scheduling traces are simulated. |
+| `simd-simulator` | SIMD lane-mask behavior, utilization, and vector reductions are simulated. |
+| `ispc-simulator` | ISPC-style program instance/task concepts are modeled without the native compiler. |
 | `ddp-simulator` | DDP gradient averaging and parameter-sync behavior is simulated deterministically. |
 | `fsdp-simulator` | FSDP parameter sharding, all-gather, and reduce-scatter behavior is simulated deterministically. |
 | `sharded-optimizer-simulator` | Optimizer-state ownership and sharded update equivalence are simulated deterministically. |
@@ -173,6 +181,11 @@ The first reusable alignment substrate is
 response parsing, rollout reward, group-normalized advantage, policy-gradient,
 and masked aggregation helpers for labs that choose `rl-loss-oracle` or
 `response-parser-oracle` paths.
+The first reusable CS149 CPU/SIMD substrate also lives in
+`@unlocalhosted/browsergrad-simulators`: it provides clamped-exp lane-mask
+simulation, vector array-sum reduction traces, and static contiguous/cyclic work
+partitioning for labs that choose `simd-simulator`, `pthreads-simulator`,
+`ispc-simulator`, or `performance-rubric` paths.
 
 ## Readiness Modes
 
@@ -262,7 +275,7 @@ CS336 Assignment 5 and CS149GPT, proving their profile drafts can produce
 | CS336 A4 Data | Small Common Crawl fixtures + `browsergrad-data` PII/dedupe/quality/HTML rubrics | `dataset-fixture`, `large-file-streaming`, `classifier-oracle`, `pii-oracle`, `near-dedupe-oracle`, `quality-rule-oracle` |
 | CS336 A5 Alignment | GRPO/DPO math snapshot labs via `@unlocalhosted/browsergrad-alignment` + snapshots | `torch-compat`, `transformers-compatible`, `snapshot-oracle`, `rl-loss-oracle`, `response-parser-oracle` |
 | GPU Puzzles | WGSL puzzle runner | `webgpu`, `wgsl-kernel`, `kernel-visualizer` |
-| CS149 A1/A2 | Thread/SIMD/task-system simulator with deterministic task traces | `pthreads-simulator`, `simd-simulator`, `distributed-simulator` |
+| CS149 A1/A2 | Thread/SIMD/task-system simulator with deterministic lane and task traces | `pthreads-simulator`, `simd-simulator`, `task-graph-simulator`, `performance-rubric` |
 | CS149 A3 | CUDA scan/SAXPY/render concepts | `webgpu`, `cuda-compatible-subset`, `performance-rubric` |
 | CS149GPT | CPU attention optimization oracle | `native-cpp-external`, `attention-oracle`, `simd-simulator` |
 
@@ -337,6 +350,10 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     rubrics before real Worker execution exists. CS336 A2 systems labs can also
     use the DDP/FSDP/sharded-optimizer simulator helpers for gradient averaging,
     all-gather/reduce-scatter, and AdamW state-sharding checks.
+    CS149 A1 CPU/SIMD labs can use the same package's
+    `simulateCs149ClampedExpVector()`, `simulateCs149ArraySumVector()`, and
+    `partitionStaticWork()` to check clamped exponentiation, vector sums,
+    active-lane utilization, tails, and static work partitioning.
     Snapshot-backed labs can use `@unlocalhosted/browsergrad-snapshots`
     `compareSnapshot()` for JSON/numeric fixture checks.
     CS336 A4 data labs can use `@unlocalhosted/browsergrad-data` for

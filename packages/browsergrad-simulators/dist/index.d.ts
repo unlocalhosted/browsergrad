@@ -66,6 +66,61 @@ export interface TaskGraphSimulator {
     run(): TaskGraphRunResult;
     clear(): void;
 }
+export type Cs149SimdInstructionOp = "load-values" | "load-exponents" | "add-accumulator" | "horizontal-add" | "mul" | "decrement-exponents" | "clamp" | "store";
+export interface Cs149SimdTraceEvent {
+    step: number;
+    op: Cs149SimdInstructionOp;
+    chunk: number;
+    laneStart: number;
+    mask: boolean[];
+    activeLanes: number;
+}
+export interface SimdKernelStats {
+    vectorWidth: number;
+    chunks: number;
+    inputLanes: number;
+    laneSlots: number;
+    tailInactiveLanes: number;
+    vectorInstructions: number;
+    activeLanes: number;
+    totalLanes: number;
+    utilization: number;
+}
+export interface Cs149ClampedExpVectorInput {
+    readonly values: readonly number[];
+    readonly exponents: readonly number[];
+    readonly vectorWidth: number;
+    readonly clamp?: number;
+}
+export interface Cs149ClampedExpVectorResult {
+    output: number[];
+    stats: SimdKernelStats;
+    trace: Cs149SimdTraceEvent[];
+}
+export interface Cs149ArraySumVectorInput {
+    readonly values: readonly number[];
+    readonly vectorWidth: number;
+}
+export interface Cs149ArraySumVectorResult {
+    sum: number;
+    partialLaneSums: number[];
+    horizontalReductionRounds: number;
+    stats: SimdKernelStats;
+    trace: Cs149SimdTraceEvent[];
+}
+export interface StaticWorkRange {
+    start: number;
+    end: number;
+}
+export interface StaticWorkPartition {
+    worker: number;
+    ranges: StaticWorkRange[];
+}
+export interface StaticWorkPartitionInput {
+    readonly items: number;
+    readonly workers: number;
+    readonly chunkSize?: number;
+}
 export interface DistributedParameterSpec {
     readonly name: string;
     readonly trainable?: boolean;
@@ -191,6 +246,9 @@ export declare class SimulatorError extends Error {
     constructor(message: string);
 }
 export declare function createDeterministicMesh(options: DeterministicMeshOptions): DeterministicMesh;
+export declare function simulateCs149ClampedExpVector(input: Cs149ClampedExpVectorInput): Cs149ClampedExpVectorResult;
+export declare function simulateCs149ArraySumVector(input: Cs149ArraySumVectorInput): Cs149ArraySumVectorResult;
+export declare function partitionStaticWork(input: StaticWorkPartitionInput): StaticWorkPartition[];
 export declare function simulateShardedAdamWStep(input: ShardedAdamWInput): ShardedAdamWResult;
 export declare function simulateDdpGradientSynchronization(input: DdpGradientSynchronizationInput): DdpGradientSynchronizationResult;
 export declare function simulateFsdpParameterSharding(input: FsdpParameterShardingInput): FsdpParameterShardingResult;

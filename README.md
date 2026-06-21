@@ -3,7 +3,7 @@
 **PyTorch-shaped deep learning in the browser.** Lazy IR with fusion, symbolic backward, AMP, gradient checkpointing, functional transforms, WGSL kernels, ONNX export.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![CI status](https://img.shields.io/badge/tests-414%20passing-brightgreen.svg)](#testing)
+[![CI status](https://img.shields.io/badge/tests-419%20passing-brightgreen.svg)](#testing)
 [![browser](https://img.shields.io/badge/runs-in%20the%20browser-blue.svg)](#)
 
 ```python
@@ -122,7 +122,7 @@ out = bg.realize_webgpu(x @ w + b)   # tiled GEMM, fused elementwise, custom WGS
 | [`browsergrad-kernels`](./packages/browsergrad-kernels) | WGSL compute-shader catalog (matmul, tiled matmul, softmax, layernorm, attention, Flash Attention v2, runtime fused-elementwise codegen). Pure-JS reference per kernel. |
 | [`browsergrad-grad`](./packages/browsergrad-grad) | Eager-autograd alternative. PyTorch-flavored, NumPy-backed, closure backward. Stable. |
 | [`browsergrad-tokenizers`](./packages/browsergrad-tokenizers) | Pure TypeScript tokenizer/BPE reference helpers and streaming gates for browser-safe platform rubrics. |
-| [`browsergrad-simulators`](./packages/browsergrad-simulators) | Deterministic browser-safe simulators for worker-mesh, collective, DDP/FSDP, sharded optimizer, and systems-lab event traces. |
+| [`browsergrad-simulators`](./packages/browsergrad-simulators) | Deterministic browser-safe simulators for CS149-style SIMD/thread/task traces, worker-mesh collectives, DDP/FSDP, and sharded optimizer behavior. |
 | [`browsergrad-snapshots`](./packages/browsergrad-snapshots) | Browser-safe JSON/numeric snapshot comparison oracles for fixture-backed rubrics. |
 | [`browsergrad-data`](./packages/browsergrad-data) | Browser-safe data-lab helpers for fixture HTML extraction, exact/near dedupe, Gopher quality rules, and PII masking. |
 | [`browsergrad-scaling`](./packages/browsergrad-scaling) | Browser-safe CS336 A3-style hosted API mock, scheduler selector, and scaling-law fitter. |
