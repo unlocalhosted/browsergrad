@@ -10,7 +10,7 @@ Use this as a fast navigation layer before diving into files.
 | `ARCHITECTURE.md` | Package responsibilities, data flow, core seams, testing strategy. |
 | `DEVELOPMENT.md` | Development notes. |
 | `docs/internal/` | Internal vision, progress, status, and compatibility notes. |
-| `docs/platform/` | Platform authoring guides for labs, assignment profiles, rubrics, fixtures, and browser-safe gates. |
+| `docs/platform/` | Platform architecture and authoring guides for multi-course guided labs, profiles, rubrics, fixtures, and browser-safe gates. |
 | `docs/prd/` | Design records and roadmap PRDs. |
 | `packages/` | Workspace packages. |
 
@@ -45,6 +45,7 @@ Use this as a fast navigation layer before diving into files.
 ## Curriculum Compatibility Pointers
 
 - Keep root package behavior course-agnostic.
+- Read `docs/platform/curriculum-platform-architecture.md` before adding new course or lecture companion work.
 - Use `docs/internal/` for assignment-specific compatibility records.
 - Use runtime lab manifests and rubrics for platform packaging.
 - Use `browsergrad-grad` for stable eager teaching surfaces.

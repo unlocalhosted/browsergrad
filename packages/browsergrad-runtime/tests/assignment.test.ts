@@ -8,6 +8,13 @@ const VALID_PROFILE = {
   id: "cs336-assignment1",
   version: "1.0.0",
   requires_browsergrad: "^0.1.0",
+  metadata: {
+    title: "Stanford CS336 Assignment 1: Basics",
+    course: "Stanford CS336",
+    source_url: "https://github.com/stanford-cs336/assignment1-basics",
+    lecture_urls: ["https://www.youtube.com/watch?v=example"],
+    tags: ["language-modeling", "tokenization"],
+  },
   runtime_packages: ["numpy", "regex", "pytest"],
   files: {
     root: "/assignments/cs336-assignment1",
@@ -46,6 +53,10 @@ describe("parseAssignmentProfile", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.profile.id).toBe("cs336-assignment1");
+      expect(result.profile.metadata?.course).toBe("Stanford CS336");
+      expect(result.profile.metadata?.lecture_urls).toEqual([
+        "https://www.youtube.com/watch?v=example",
+      ]);
       expect(result.profile.runtime_packages).toEqual(["numpy", "regex", "pytest"]);
       expect(result.profile.gates[0]?.kind).toBe("streaming");
     }

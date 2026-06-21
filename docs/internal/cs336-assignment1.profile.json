@@ -2,6 +2,13 @@
   "id": "cs336-assignment1",
   "version": "0.1.0",
   "requires_browsergrad": "^0.1.0",
+  "metadata": {
+    "title": "Stanford CS336 Assignment 1: Basics",
+    "course": "Stanford CS336: Language Modeling from Scratch",
+    "source_url": "https://github.com/stanford-cs336/assignment1-basics",
+    "lecture_urls": [],
+    "tags": ["language-modeling", "tokenization", "bpe"]
+  },
   "runtime_packages": ["numpy", "regex", "pytest"],
   "files": {
     "root": "/assignments/cs336-assignment1",

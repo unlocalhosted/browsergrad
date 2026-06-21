@@ -4,6 +4,7 @@ export interface AssignmentProfile {
   readonly id: string;
   readonly version: string;
   readonly requires_browsergrad: string;
+  readonly metadata?: AssignmentProfileMetadata;
   readonly runtime_packages: readonly string[];
   readonly files: AssignmentProfileFiles;
   readonly timeouts: AssignmentProfileTimeouts;
@@ -11,6 +12,14 @@ export interface AssignmentProfile {
   readonly oracles: readonly AssignmentOracleSpec[];
   readonly gates: readonly AssignmentGateSpec[];
   readonly datasets: readonly AssignmentDataset[];
+}
+
+export interface AssignmentProfileMetadata {
+  readonly title?: string;
+  readonly course?: string;
+  readonly source_url?: string;
+  readonly lecture_urls: readonly string[];
+  readonly tags: readonly string[];
 }
 
 export interface AssignmentProfileFiles {
@@ -80,6 +89,7 @@ export function parseAssignmentProfile(
     errors,
     SEMVER_RANGE_RE,
   );
+  const metadata = readMetadata(obj.metadata, errors);
   const files = readFiles(obj.files, errors);
   const timeouts = readTimeouts(obj.timeouts, errors);
   const runtime_packages = readStringArray(
@@ -106,6 +116,7 @@ export function parseAssignmentProfile(
       id: id!,
       version: version!,
       requires_browsergrad: requires_browsergrad!,
+      ...(metadata ? { metadata } : {}),
       runtime_packages,
       files: files!,
       timeouts,
@@ -114,6 +125,35 @@ export function parseAssignmentProfile(
       gates,
       datasets,
     },
+  };
+}
+
+function readMetadata(
+  value: unknown,
+  errors: string[],
+): AssignmentProfileMetadata | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    errors.push("metadata: must be an object when present");
+    return undefined;
+  }
+  const obj = value as Record<string, unknown>;
+  const title = readOptionalString(obj, "title", errors);
+  const course = readOptionalString(obj, "course", errors);
+  const source_url = readOptionalString(obj, "source_url", errors);
+  const lecture_urls = readStringArray(
+    obj.lecture_urls,
+    "metadata.lecture_urls",
+    errors,
+    32,
+  );
+  const tags = readStringArray(obj.tags, "metadata.tags", errors, 64);
+  return {
+    ...(title ? { title } : {}),
+    ...(course ? { course } : {}),
+    ...(source_url ? { source_url } : {}),
+    lecture_urls,
+    tags,
   };
 }
 

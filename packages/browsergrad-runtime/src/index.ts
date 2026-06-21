@@ -65,6 +65,7 @@ export {
   parseAssignmentProfile,
   profileOracleJsModules,
   type AssignmentProfile,
+  type AssignmentProfileMetadata,
   type AssignmentProfileFiles,
   type AssignmentProfileTimeouts,
   type AssignmentOracleSpec,

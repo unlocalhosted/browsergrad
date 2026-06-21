@@ -37,6 +37,9 @@ How the packages compose, what each layer owns, and why the calls were made the 
 
 The runtime knows nothing about tensors. The kernels package knows nothing about Python. The two ML libraries pick their own backends — grad is eager NumPy, jit is lazy IR with pluggable realizers. Each piece composes with the others but doesn't depend on them at runtime.
 
+For the multi-course guided-lab layer that sits above these packages, see
+`docs/platform/curriculum-platform-architecture.md`.
+
 ## Package responsibilities
 
 ### `browsergrad-runtime` — host layer

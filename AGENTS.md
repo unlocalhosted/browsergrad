@@ -49,11 +49,15 @@ pnpm --filter @unlocalhosted/browsergrad-jit run codegen
 ## Curriculum And Platform Direction
 
 Keep BrowserGrad general-purpose. It should support many in-browser ML labs,
-course slices, notebooks, and framework-shaped exercises. Do not shape root
-agent guidance around one assignment or one downstream app.
+course slices, lecture companions, notebooks, and framework-shaped exercises.
+The platform vision is a guided-lab layer for many classes and videos, not a
+single-course clone. Do not shape root agent guidance around one assignment or
+one downstream app.
 
 When adding curriculum support:
 
+- Read `docs/platform/curriculum-platform-architecture.md` for the multi-course
+  architecture.
 - Keep reusable runtime/library capability in packages.
 - Put assignment-specific findings in `docs/internal/` or lab manifests, not in root repo rules.
 - Prefer platform adapters/rubrics over hard-coding course assumptions into `grad`, `jit`, `runtime`, or `kernels`.

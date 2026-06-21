@@ -11,6 +11,8 @@ An assignment profile should name:
 - `id`: stable kebab-case assignment identifier.
 - `version`: semver version for the profile.
 - `requires_browsergrad`: runtime semver range.
+- `metadata`: optional title, course, source URL, lecture links, and tags for
+  guided-lab discovery.
 - `runtime_packages`: Pyodide packages loaded before rubrics run.
 - `files`: starter, rubric, reference, and fixture mount paths.
 - `timeouts`: wall-clock limits for setup, tests, and long-running student code.
