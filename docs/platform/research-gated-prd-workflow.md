@@ -103,20 +103,23 @@ Use the standard PRD sections:
 3. User Stories
 4. Research Dossier
 5. Grill Decisions
-6. Implementation Decisions
-7. Testing Decisions
-8. Out of Scope
-9. Further Notes
+6. Novelty Reach
+7. Implementation Decisions
+8. Testing Decisions
+9. Out of Scope
+10. Further Notes
 
-The `Research Dossier` and `Grill Decisions` sections are mandatory for new
-PRDs. They can be short for small features, but they cannot be empty.
+The `Research Dossier`, `Grill Decisions`, and `Novelty Reach` sections are
+mandatory for new PRDs. They can be short for small features, but they cannot be
+empty.
 
 ## Publishing
 
 1. Add the PRD under `docs/prd/`.
 2. Add it to `docs/prd/README.md`.
-3. Open a GitHub issue using the research-gated PRD template.
-4. Apply `ready-for-agent` only when the readiness rule is satisfied.
+3. Run `pnpm validate:prd docs/prd/<your-prd>.md`.
+4. Open a GitHub issue using the research-gated PRD template.
+5. Apply `ready-for-agent` only when the readiness rule is satisfied.
 
 ## Default First Question
 

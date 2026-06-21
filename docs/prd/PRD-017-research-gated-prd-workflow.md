@@ -54,6 +54,79 @@ right subagent roles, artifacts, and decision checkpoints.
 24. As a platform maintainer, I want each PRD to avoid premature UI details, so that the core platform can mature independently.
 25. As a learner, I want assignments built from these PRDs to produce clear feedback, so that failures teach concepts rather than browser internals.
 
+## Research Dossier
+
+- Repo exploration: `AGENTS.md`, `AGENTS-MAP.md`, `docs/prd/README.md`,
+  `docs/platform/curriculum-platform-architecture.md`,
+  `docs/platform/kernel-lab-foundation.md`, and the CS336 handoff docs show
+  that BrowserGrad already has platform vocabulary for assignment profiles,
+  capability gates, rubrics, fixtures, browser-safe gates, and kernel labs.
+- External research:
+  - https://pyodide.org/en/stable/usage/loading-packages.html confirms Pyodide
+    has a package loading model that works for Python labs but should be
+    treated as one runtime backend, not the whole architecture.
+  - https://pyodide.org/en/stable/usage/wasm-constraints.html grounds the
+    browser/Wasm constraint model that PRDs must account for before promising
+    native Linux compatibility.
+  - https://github.com/AnswerDotAI/gpu.cpp demonstrates a compact WebGPU/Dawn
+    compute API worth studying for BrowserGrad's kernel-lab foundation.
+  - https://lights0123.com/blog/2025/01/07/hip-script/ and
+    https://github.com/lights0123/hipscript show that CUDA/HIP-style syntax can
+    be explored against WebGPU, supporting a progressive compatibility posture.
+- Upstream/course research:
+  - https://github.com/stanford-cs336/assignment1-basics exposed tokenizer,
+    BPE, streaming, and Linux-resource assumptions that need browser-safe
+    oracles and gates.
+  - https://github.com/stanford-cs336/assignment2-systems exposed systems,
+    distributed training, attention, and GPU-kernel assumptions that need
+    assignment profiles plus deeper runtime substrates.
+- Browser/runtime constraints: browser labs may need Pyodide, pure TypeScript,
+  WebGPU/WGSL, Worker meshes, native Dawn runners, or custom compilers depending
+  on the learning contract.
+- Existing libraries considered: `js-tiktoken`, `gpt-tokenizer`, Comlink,
+  ONNX Runtime Web, safetensors, Pyodide, WebGPU helper layers, `gpu.cpp`, and
+  HipScript-style syntax experiments.
+
+## Grill Decisions
+
+1. Question: Should PRD creation stay as a plain synthesis step, or should it
+   include an explicit research and grill readiness gate?
+   Recommended answer: Bake research and grill gates into readiness before an
+   issue can be labeled `ready-for-agent`.
+   Decision: Adopt the readiness gate so future PRDs cannot skip evidence or
+   unresolved decisions.
+2. Question: Should the workflow ask the user every possible design question?
+   Recommended answer: Ask only material questions that cannot be answered from
+   repo exploration or research, and include a recommended answer each time.
+   Decision: Keep `grill-me` as an adversarial decision phase, not a generic
+   interview tax.
+3. Question: Should Pyodide be the default substrate for every assignment port?
+   Recommended answer: Treat Pyodide as one backend behind assignment profiles
+   and capability gates, while allowing TS/JS, WebGPU, Worker mesh, native
+   runners, and custom tooling where they preserve the learning contract better.
+   Decision: Keep platform architecture substrate-plural.
+4. Question: Should compatibility ambitions be framed as non-goals when they
+   are not in the first slice?
+   Recommended answer: Separate first stable guarantees from larger progressive
+   compatibility targets.
+   Decision: Do not write PRDs as if BrowserGrad is giving up early; write them
+   as staged compatibility plans.
+
+## Novelty Reach
+
+- Novel idea considered: make PRD authoring itself a multi-role pipeline with
+  Research Scout, Codebase Cartographer, Grill Interviewer, Novelty Scout,
+  Architecture Editor, and Test Strategist passes.
+- Why selected or rejected: selected as a lightweight convention first because
+  it raises the quality bar immediately without needing agent orchestration
+  infrastructure.
+- Novel idea considered: require every assignment-port PRD to name browser-native
+  substitutions for native-only assumptions, such as TS oracles, WebGPU kernels,
+  Worker mesh simulators, and behavior gates.
+- Why selected or rejected: selected because the platform vision depends on
+  complementing many courses without copying each course's native harness
+  limitations into BrowserGrad core.
+
 ## Implementation Decisions
 
 - Build the workflow as a project convention first, then automate it once it is stable.
@@ -69,7 +142,7 @@ right subagent roles, artifacts, and decision checkpoints.
 - Prefer deep modules over shallow glue. Candidate deep modules for the current roadmap include assignment runner, rubric kit, fixture registry, distributed simulator, attention oracle, and kernel lab core.
 - Require every assignment-port PRD to classify upstream tests into portable, replaced, skipped with capability gate, or future compatibility target.
 - Require every systems/GPU PRD to consider whether Pyodide, native TS/JS, WebGPU/WGSL, Worker mesh, or a future custom compiler is the right substrate.
-- Require every PRD to include a “novel idea reach” section inside Implementation Decisions, even if the final decision is conservative.
+- Require every PRD to include a `Novelty Reach` section, even if the final decision is conservative.
 - Keep compatibility ambition explicit. PRDs may start with small stable slices, but should not frame broader CUDA/Triton/PyTorch-style experimentation as abandoned.
 - Publish final PRDs to GitHub issues with the `ready-for-agent` label after the gates pass.
 
