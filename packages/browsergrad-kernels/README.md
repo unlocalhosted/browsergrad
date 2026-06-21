@@ -20,6 +20,7 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
 | `layernorm` | Along last axis, optional gamma/beta | ✅ |
 | `attention` | Composed 3-kernel SDPA | ✅ |
 | `referenceFlashAttention` / `referenceFlashAttentionBackward` | Pure-JS FlashAttention oracle with output, log-sum-exp, and Q/K/V gradients | ✅ |
+| `simulateCuda1DGrid`, `referenceSaxpy`, `referenceExclusiveScan` | CUDA-shaped teaching oracles for GPU Puzzles and CS149 A3 browser rubrics | ✅ |
 | `flashAttentionDirect` | Flash Attention v2 forward, online softmax. **Known numerical issue on real Metal — tracked.** | ⚠️ |
 | `fusedElementwiseDirect` | Runtime WGSL codegen for arbitrary elementwise chains | ✅ |
 
@@ -64,6 +65,13 @@ top-level package. The forward oracle returns `{ output, logSumExp }`, matching
 the upstream test's saved-LSE contract; the backward oracle recomputes softmax
 probabilities and returns Q/K/V gradients without requiring PyTorch autograd,
 Triton, or CUDA.
+
+For GPU Puzzles and CS149 A3-style CUDA concept rubrics, import
+`simulateCuda1DGrid()`, `referenceSaxpy()`, and `referenceExclusiveScan()`.
+`simulateCuda1DGrid()` runs a browser-safe CUDA-shaped 1D thread/block callback,
+records per-thread reads/writes, and reports out-of-bounds access instead of
+hiding missing guards. It is a correctness and pedagogy oracle, not a native
+CUDA performance runner.
 
 ### Kernel rubric assertions
 

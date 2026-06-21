@@ -4,8 +4,11 @@ import {
   kernels,
   KernelError,
   reference,
+  referenceExclusiveScan,
   referenceFlashAttention,
   referenceFlashAttentionBackward,
+  referenceSaxpy,
+  simulateCuda1DGrid,
   tensor,
   type Kernels,
   type KernelDevice,
@@ -25,6 +28,9 @@ describe("public surface", () => {
     expect(typeof KernelError).toBe("function");
     expect(typeof reference).toBe("object");
     expect(typeof kernels).toBe("object");
+    expect(typeof simulateCuda1DGrid).toBe("function");
+    expect(typeof referenceSaxpy).toBe("function");
+    expect(typeof referenceExclusiveScan).toBe("function");
     expect(typeof referenceFlashAttention).toBe("function");
     expect(typeof referenceFlashAttentionBackward).toBe("function");
   });

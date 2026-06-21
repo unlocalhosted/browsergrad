@@ -84,6 +84,21 @@ export {
 } from "./kernels/fused_elementwise.js";
 export { flashAttentionDirect } from "./kernels/flash_attention.js";
 
+export {
+  referenceExclusiveScan,
+  referenceSaxpy,
+  simulateCuda1DGrid,
+  type Cuda1DGridInput,
+  type Cuda1DGridResult,
+  type Cuda1DGridStats,
+  type Cuda1DKernel,
+  type Cuda1DMemoryAccess,
+  type Cuda1DThreadContext,
+  type Cuda1DThreadTrace,
+  type Cuda1DViolation,
+  type SaxpyInput,
+} from "./cuda_concepts.js";
+
 // Re-export reference as a top-level convenience too (alongside the subpath).
 export { reference } from "./reference.js";
 export {

@@ -9,6 +9,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- `simulateCuda1DGrid()`, `referenceSaxpy()`, and
+  `referenceExclusiveScan()` provide CUDA-shaped browser-safe oracles for GPU
+  Puzzles and CS149 A3-style rubrics.
 - `referenceFlashAttention()` returns browser-safe FlashAttention output plus
   log-sum-exp tensors for CS336 A2-style forward/LSE rubric checks.
 - `referenceFlashAttentionBackward()` recomputes Q/K/V gradients for

@@ -87,6 +87,10 @@ For every lab profile, the platform should:
     `referenceFlashAttention()` and `referenceFlashAttentionBackward()` for
     browser-safe output/LSE/backward checks before Triton/CUDA execution is
     available.
+    GPU Puzzles and CS149 A3 CUDA concept labs can use
+    `simulateCuda1DGrid()`, `referenceSaxpy()`, and
+    `referenceExclusiveScan()` for browser-safe map/guard/SAXPY/scan checks
+    before native CUDA runners exist.
     Snapshot-backed labs can use `@unlocalhosted/browsergrad-snapshots`
     `createSnapshotOracle()` to compare small JSON/numeric fixtures and emit
     deterministic mismatch paths.
@@ -185,6 +189,10 @@ The first reusable alignment substrate is
 response parsing, rollout reward, group-normalized advantage, policy-gradient,
 and masked aggregation helpers for labs that choose `rl-loss-oracle` or
 `response-parser-oracle` paths.
+The first reusable CUDA-concept substrate lives in
+`@unlocalhosted/browsergrad-kernels`: it provides `simulateCuda1DGrid()`,
+`referenceSaxpy()`, and `referenceExclusiveScan()` for labs that choose
+`cuda-compatible-subset`, `wgsl-kernel`, or `performance-rubric` paths.
 The first reusable CS149 CPU/SIMD substrate also lives in
 `@unlocalhosted/browsergrad-simulators`: it provides clamped-exp lane-mask
 simulation, vector array-sum reduction traces, and static contiguous/cyclic work
@@ -280,7 +288,7 @@ CS336 Assignment 5 and CS149GPT, proving their profile drafts can produce
 | CS336 A5 Alignment | GRPO/DPO math snapshot labs via `@unlocalhosted/browsergrad-alignment` + snapshots | `torch-compat`, `transformers-compatible`, `snapshot-oracle`, `rl-loss-oracle`, `response-parser-oracle` |
 | GPU Puzzles | WGSL puzzle runner | `webgpu`, `wgsl-kernel`, `kernel-visualizer` |
 | CS149 A1/A2 | Thread/SIMD/task-system simulator with deterministic lane and task traces | `pthreads-simulator`, `simd-simulator`, `task-graph-simulator`, `performance-rubric` |
-| CS149 A3 | CUDA scan/SAXPY/render concepts | `webgpu`, `cuda-compatible-subset`, `performance-rubric` |
+| CS149 A3 | CUDA scan/SAXPY/render concepts via 1D grid and reference oracles | `webgpu`, `cuda-compatible-subset`, `performance-rubric` |
 | CS149GPT | CPU attention optimization oracle | `native-cpp-external`, `attention-oracle`, `simd-simulator` |
 
 ## Platform Issue Convention
@@ -350,6 +358,10 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     CS336 A2 FlashAttention labs can use `referenceFlashAttention()` and
     `referenceFlashAttentionBackward()` for output, log-sum-exp, and Q/K/V
     gradient fixtures.
+    GPU Puzzles and CS149 A3 CUDA concept labs can use
+    `simulateCuda1DGrid()`, `referenceSaxpy()`, and
+    `referenceExclusiveScan()` for map/guard/SAXPY/scan fixtures and
+    out-of-bounds guard diagnostics.
     Simulator-backed labs can use `@unlocalhosted/browsergrad-simulators`
     `createDeterministicMesh()` or `createTaskGraphSimulator()` for event-trace
     rubrics before real Worker execution exists. CS336 A2 systems labs can also

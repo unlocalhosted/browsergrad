@@ -224,6 +224,11 @@ runtime branches.
   `referenceFlashAttention()` and `referenceFlashAttentionBackward()` so CS336
   A2-style FlashAttention rubrics can check output, saved log-sum-exp, and Q/K/V
   gradients in browser-safe JS before Triton/CUDA kernels are available.
+- CUDA-concept oracle guarantee: `@unlocalhosted/browsergrad-kernels` exports
+  `simulateCuda1DGrid()`, `referenceSaxpy()`, and `referenceExclusiveScan()` so
+  GPU Puzzles and CS149 A3-style rubrics can check CUDA-shaped map/guard,
+  SAXPY, scan, thread/block traces, and out-of-bounds memory behavior before
+  native CUDA runners are available.
 - Kernel-runtime bridge guarantee: `createBrowsergradKernelRubric(ctx)` adapts
   kernel tensor checks to `runAssignmentJavascriptRubric()` contexts, and a
   cross-package integration test proves pass/fail assertions survive through

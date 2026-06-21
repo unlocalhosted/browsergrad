@@ -99,6 +99,11 @@ CS336 A2-style FlashAttention rubrics can use
 `@unlocalhosted/browsergrad-kernels` for `flash-attention-oracle` fixture
 checks that include output, saved log-sum-exp, and Q/K/V gradients before native
 Triton/CUDA paths are available.
+GPU Puzzles and CS149 A3-style CUDA concept rubrics can use the same package's
+`simulateCuda1DGrid()`, `referenceSaxpy()`, and `referenceExclusiveScan()` for
+`cuda-compatible-subset` fixture checks. The grid simulator records
+thread/block ids, global reads/writes, and out-of-bounds accesses so missing
+guards fail as teaching feedback before native CUDA runners exist.
 Distributed or systems-style JS rubrics can use `createDeterministicMesh()` from
 `@unlocalhosted/browsergrad-simulators` to model worker ranks, barriers,
 broadcasts, point-to-point messages, and `allReduce` results as deterministic
