@@ -180,6 +180,7 @@ import {
   evaluateAssignmentCapabilities,
   parseAssignmentProfile,
   requiredAssignmentCapabilities,
+  runAssignmentJavascriptRubric,
   runAssignmentRubric,
 } from "@unlocalhosted/browsergrad-runtime";
 
@@ -258,6 +259,12 @@ preflight preview before writing files or launching code.
 `assignmentRubricKind(plan)` returns `python`, `javascript`, or `unknown` from
 the resolved rubric path. Use it to route JS/WebGPU/native-style labs away from
 the Pyodide rubric runner.
+
+`runAssignmentJavascriptRubric()` is the browser-native JS path. It validates
+the active run plan, prepares an in-memory read-only mount view, exposes
+assignment context, declared oracles, and assertion/artifact helpers to the
+rubric function, then returns `{ mount, assertions, artifacts }`. This is the
+starting point for GPU Puzzles and CS149-style JS/WebGPU rubrics.
 
 ## What this is, and is not
 

@@ -43,6 +43,9 @@ preflight failed.
 Use `runAssignmentRubric()` for the common Pyodide path when the platform wants
 BrowserGrad to derive mounts, materialize contents, and execute the rubric as
 one operation.
+Use `runAssignmentJavascriptRubric()` for browser-native JS rubrics that need
+assignment context, mounted text, oracles, and structured assertion/artifact
+helpers without Pyodide.
 
 ## Files And Fixtures
 
@@ -127,5 +130,6 @@ Capability gate options use:
 4. Port upstream tests only when their assumptions are browser-safe.
 5. Replace native OS resource checks with behavior gates.
 6. Add unit tests for profile validation and at least one platform integration
-   test using `runAssignmentRubric()` that mounts files, runs the rubric, calls
-   declared oracles, and reports clear failures.
+   test using `runAssignmentRubric()` or `runAssignmentJavascriptRubric()` that
+   mounts files, runs the rubric, calls declared oracles, and reports clear
+   failures.

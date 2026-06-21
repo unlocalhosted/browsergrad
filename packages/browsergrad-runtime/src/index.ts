@@ -71,6 +71,7 @@ export {
   parseAssignmentProfile,
   profileOracleJsModules,
   requiredAssignmentCapabilities,
+  runAssignmentJavascriptRubric,
   runAssignmentRubric,
   type AssignmentProfile,
   type AssignmentProfileMetadata,
@@ -98,5 +99,9 @@ export {
   type AssignmentRubricSession,
   type AssignmentRubricRunOptions,
   type AssignmentRubricRunResult,
+  type AssignmentJavascriptRubricContext,
+  type AssignmentJavascriptRubric,
+  type AssignmentJavascriptRubricRunOptions,
+  type AssignmentJavascriptRubricRunResult,
   type AssignmentProfileParseResult,
 } from "./assignment.js";

@@ -24,6 +24,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `assignmentRubricKind(plan)` classifies resolved rubric paths as `python`,
   `javascript`, or `unknown` so platforms can route non-Pyodide labs before
   launch.
+- `runAssignmentJavascriptRubric(plan, contents, rubric, options)` runs
+  browser-native JS rubrics with assignment context, mounted text reads,
+  declared oracles, and structured assertion/artifact helpers.
 
 ## [0.1.1] — 2026-05-25
 

@@ -9,6 +9,7 @@ import {
   parseAssignmentProfile,
   profileOracleJsModules,
   requiredAssignmentCapabilities,
+  runAssignmentJavascriptRubric,
   runAssignmentRubric,
 } from "../src/index";
 
@@ -595,5 +596,164 @@ describe("parseAssignmentProfile", () => {
       "cannot create rubric exec request; missing assignment capabilities: webgpu",
     );
     expect(writes).toEqual([]);
+  });
+
+  it("runs a JavaScript rubric with mounted text, assignment context, oracles, and assertions", async () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      id: "gpu-puzzles",
+      runtime_packages: [],
+      files: {
+        root: "/assignments/gpu-puzzles",
+        rubric_path: "rubric.js",
+        starter_path: "student.js",
+        fixtures_path: "fixtures",
+      },
+      allowed_tests: ["test_js_rubric"],
+      oracles: [
+        {
+          name: "_bg_gpu_oracle",
+          js_module: "/assignments/gpu-puzzles/oracles/gpu-puzzles.js",
+          export_name: "oracle",
+        },
+      ],
+      gates: [
+        {
+          name: "js_rubric_runtime",
+          kind: "capability",
+          options: { requires: ["javascript-rubric"] },
+        },
+        {
+          name: "streaming_contract",
+          kind: "streaming",
+          options: { max_chunks_before_first_yield: 2 },
+        },
+      ],
+      datasets: [{ name: "tiny", url: "/fixtures/tiny.txt" }],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const plan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["javascript-rubric"],
+    });
+
+    const run = await runAssignmentJavascriptRubric(
+      plan,
+      {
+        files: {
+          "/assignments/gpu-puzzles/rubric.js": "export async function run() {}",
+          "/assignments/gpu-puzzles/student.js": "export const answer = 42;",
+        },
+        datasets: {
+          tiny: "fixture text",
+        },
+      },
+      async (ctx) => {
+        const oracle = ctx.oracle<{ score(input: string): number }>("_bg_gpu_oracle");
+        const fixture = ctx.readText("/assignments/gpu-puzzles/fixtures/datasets/tiny.txt");
+        ctx.emitJson("js_rubric_context", {
+          id: ctx.id,
+          root: ctx.root,
+          fixturesPath: ctx.fixturesPath,
+          allowedTests: ctx.allowedTests,
+          behavioralGates: ctx.behavioralGates,
+          rubricSource: ctx.readText("/assignments/gpu-puzzles/rubric.js"),
+          studentSource: ctx.readText("/assignments/gpu-puzzles/student.js"),
+        });
+        if (fixture === "fixture text" && oracle.score(fixture) === 24) {
+          ctx.assertPass("test_js_rubric");
+        } else {
+          ctx.assertFail("test_js_rubric", "JS rubric mismatch", {
+            expected: "fixture text / 24",
+            actual: `${fixture} / ${oracle.score(fixture)}`,
+          });
+        }
+      },
+      {
+        oracles: {
+          _bg_gpu_oracle: {
+            score: (input: string) => input.length * 2,
+          },
+        },
+      },
+    );
+
+    expect(run.mount).toEqual({
+      writtenPaths: [
+        "/assignments/gpu-puzzles/rubric.js",
+        "/assignments/gpu-puzzles/student.js",
+        "/assignments/gpu-puzzles/fixtures/datasets/tiny.txt",
+      ],
+      skippedOptionalPaths: [],
+    });
+    expect(run.assertions).toEqual([
+      { kind: "pass", name: "test_js_rubric" },
+    ]);
+    expect(run.artifacts).toEqual([
+      {
+        kind: "json",
+        name: "js_rubric_context",
+        data: {
+          id: "gpu-puzzles",
+          root: "/assignments/gpu-puzzles",
+          fixturesPath: "/assignments/gpu-puzzles/fixtures",
+          allowedTests: ["test_js_rubric"],
+          behavioralGates: [
+            {
+              name: "streaming_contract",
+              kind: "streaming",
+              options: { max_chunks_before_first_yield: 2 },
+            },
+          ],
+          rubricSource: "export async function run() {}",
+          studentSource: "export const answer = 42;",
+        },
+      },
+    ]);
+  });
+
+  it("rejects JavaScript rubric runs with failed preflight before invoking the rubric", async () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      files: {
+        ...VALID_PROFILE.files,
+        rubric_path: "rubric.js",
+      },
+      gates: [
+        {
+          name: "js_rubric_runtime",
+          kind: "capability",
+          options: { requires: ["javascript-rubric", "webgpu"] },
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const plan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["javascript-rubric"],
+    });
+    let invoked = false;
+
+    await expect(
+      runAssignmentJavascriptRubric(
+        plan,
+        {
+          files: {
+            "/assignments/cs336-assignment1/rubric.js": "export async function run() {}",
+          },
+          datasets: {
+            tiny: "fixture text",
+          },
+        },
+        () => {
+          invoked = true;
+        },
+      ),
+    ).rejects.toThrow(
+      "cannot run JavaScript rubric; missing assignment capabilities: webgpu",
+    );
+    expect(invoked).toBe(false);
   });
 });

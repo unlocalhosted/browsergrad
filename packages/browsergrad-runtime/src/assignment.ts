@@ -1,4 +1,6 @@
 import {
+  type Artifact,
+  type Assertion,
   BrowsergradError,
   type ExecOptions,
   type ExecResult,
@@ -167,6 +169,44 @@ export type AssignmentRubricRunOptions = Omit<ExecOptions, "code">;
 export interface AssignmentRubricRunResult {
   readonly mount: AssignmentMaterializeResult;
   readonly exec: ExecResult;
+}
+
+export interface AssignmentJavascriptRubricContext {
+  readonly id: string;
+  readonly root: string;
+  readonly fixturesPath?: string;
+  readonly allowedTests: readonly string[];
+  readonly behavioralGates: readonly AssignmentGateSpec[];
+  readText(path: string): string;
+  oracle<T = unknown>(name: string): T;
+  assertPass(name: string, durationMs?: number): void;
+  assertFail(
+    name: string,
+    message: string,
+    details?: {
+      readonly expected?: unknown;
+      readonly actual?: unknown;
+      readonly durationMs?: number;
+    },
+  ): void;
+  assertError(name: string, message: string, error?: unknown): void;
+  log(name: string, data: string, level?: "info" | "warn" | "error"): void;
+  emitJson(name: string, data: unknown): void;
+  emitImage(name: string, mime: string, dataBase64: string): void;
+}
+
+export type AssignmentJavascriptRubric = (
+  context: AssignmentJavascriptRubricContext,
+) => void | Promise<void>;
+
+export interface AssignmentJavascriptRubricRunOptions {
+  readonly oracles?: Readonly<Record<string, unknown>>;
+}
+
+export interface AssignmentJavascriptRubricRunResult {
+  readonly mount: AssignmentMaterializeResult;
+  readonly assertions: readonly Assertion[];
+  readonly artifacts: readonly Artifact[];
 }
 
 export type AssignmentProfileParseResult =
@@ -448,6 +488,136 @@ export async function materializeAssignmentMountPlan(
   plan: AssignmentMountPlan,
   contents: AssignmentMountContents,
 ): Promise<AssignmentMaterializeResult> {
+  const entries = collectAssignmentMountEntries(plan, contents);
+
+  const writtenPaths: string[] = [];
+  for (const entry of entries.writes) {
+    await fs.write(entry.path, entry.content);
+    writtenPaths.push(entry.path);
+  }
+
+  return { writtenPaths, skippedOptionalPaths: entries.skippedOptionalPaths };
+}
+
+export async function runAssignmentRubric(
+  session: AssignmentRubricSession,
+  plan: AssignmentRunPlan,
+  contents: AssignmentMountContents,
+  options: AssignmentRubricRunOptions = {},
+): Promise<AssignmentRubricRunResult> {
+  const request = createAssignmentRubricExecRequest(plan);
+  const mountPlan = createAssignmentMountPlan(plan);
+  const mount = await materializeAssignmentMountPlan(
+    session.fs,
+    mountPlan,
+    contents,
+  );
+  const exec = await session.exec({ ...request, ...options });
+  return { mount, exec };
+}
+
+export async function runAssignmentJavascriptRubric(
+  plan: AssignmentRunPlan,
+  contents: AssignmentMountContents,
+  rubric: AssignmentJavascriptRubric,
+  options: AssignmentJavascriptRubricRunOptions = {},
+): Promise<AssignmentJavascriptRubricRunResult> {
+  if (!plan.ok) {
+    const missing = plan.capabilityEvaluation.missingCapabilities.join(", ");
+    const reason = missing.length > 0
+      ? `missing assignment capabilities: ${missing}`
+      : "assignment capability preflight failed";
+    throw new BrowsergradError(`cannot run JavaScript rubric; ${reason}`);
+  }
+  if (assignmentRubricKind(plan) !== "javascript") {
+    throw new BrowsergradError(
+      "runAssignmentJavascriptRubric requires a JavaScript rubric path",
+    );
+  }
+
+  const mountPlan = createAssignmentMountPlan(plan);
+  const entries = collectAssignmentMountEntries(mountPlan, contents);
+  const textByPath = new Map(
+    entries.writes.map((entry) => [entry.path, entry.content] as const),
+  );
+  const assertions: Assertion[] = [];
+  const artifacts: Artifact[] = [];
+
+  const context: AssignmentJavascriptRubricContext = {
+    id: plan.id,
+    root: plan.files.root,
+    ...(plan.files.fixturesPath ? { fixturesPath: plan.files.fixturesPath } : {}),
+    allowedTests: plan.execution.allowedTests,
+    behavioralGates: plan.behavioralGates,
+    readText(path) {
+      const text = textByPath.get(path);
+      if (text === undefined) {
+        throw new BrowsergradError(`assignment text file is not mounted: ${path}`);
+      }
+      return text;
+    },
+    oracle<T = unknown>(name: string): T {
+      const oracle = options.oracles?.[name];
+      if (oracle === undefined) {
+        throw new BrowsergradError(`assignment JavaScript oracle is not registered: ${name}`);
+      }
+      return oracle as T;
+    },
+    assertPass(name, durationMs) {
+      assertions.push({
+        kind: "pass",
+        name,
+        ...(durationMs !== undefined ? { durationMs } : {}),
+      });
+    },
+    assertFail(name, message, details = {}) {
+      assertions.push({
+        kind: "fail",
+        name,
+        message,
+        ...(details.expected !== undefined ? { expectedRepr: String(details.expected) } : {}),
+        ...(details.actual !== undefined ? { actualRepr: String(details.actual) } : {}),
+        ...(details.durationMs !== undefined ? { durationMs: details.durationMs } : {}),
+      });
+    },
+    assertError(name, message, error) {
+      assertions.push({
+        kind: "error",
+        name,
+        message,
+        ...(error !== undefined ? { traceback: error instanceof Error ? error.stack : String(error) } : {}),
+      });
+    },
+    log(name, data, level = "info") {
+      artifacts.push({ kind: "log", name, level, data });
+    },
+    emitJson(name, data) {
+      artifacts.push({ kind: "json", name, data });
+    },
+    emitImage(name, mime, dataBase64) {
+      artifacts.push({ kind: "image", name, mime, dataBase64 });
+    },
+  };
+
+  await rubric(context);
+
+  return {
+    mount: {
+      writtenPaths: entries.writes.map((entry) => entry.path),
+      skippedOptionalPaths: entries.skippedOptionalPaths,
+    },
+    assertions,
+    artifacts,
+  };
+}
+
+function collectAssignmentMountEntries(
+  plan: AssignmentMountPlan,
+  contents: AssignmentMountContents,
+): {
+  readonly writes: readonly { readonly path: string; readonly content: string }[];
+  readonly skippedOptionalPaths: readonly string[];
+} {
   const skippedOptionalPaths: string[] = [];
   const fileWrites: Array<{ path: string; content: string }> = [];
   const datasetWrites: Array<{ path: string; content: string }> = [];
@@ -472,30 +642,10 @@ export async function materializeAssignmentMountPlan(
     datasetWrites.push({ path: dataset.mountPath, content });
   }
 
-  const writtenPaths: string[] = [];
-  for (const entry of [...fileWrites, ...datasetWrites]) {
-    await fs.write(entry.path, entry.content);
-    writtenPaths.push(entry.path);
-  }
-
-  return { writtenPaths, skippedOptionalPaths };
-}
-
-export async function runAssignmentRubric(
-  session: AssignmentRubricSession,
-  plan: AssignmentRunPlan,
-  contents: AssignmentMountContents,
-  options: AssignmentRubricRunOptions = {},
-): Promise<AssignmentRubricRunResult> {
-  const request = createAssignmentRubricExecRequest(plan);
-  const mountPlan = createAssignmentMountPlan(plan);
-  const mount = await materializeAssignmentMountPlan(
-    session.fs,
-    mountPlan,
-    contents,
-  );
-  const exec = await session.exec({ ...request, ...options });
-  return { mount, exec };
+  return {
+    writes: [...fileWrites, ...datasetWrites],
+    skippedOptionalPaths,
+  };
 }
 
 function readString(

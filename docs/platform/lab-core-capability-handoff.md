@@ -25,17 +25,20 @@ For every lab profile, the platform should:
 6. Show missing capability gates as preflight status, not as runtime crashes.
 7. Build a file/dataset mount plan with `createAssignmentMountPlan`.
 8. Materialize provided file and dataset contents with
-   `materializeAssignmentMountPlan`, or use `runAssignmentRubric` for the
-   common mount-and-execute path.
+   `materializeAssignmentMountPlan`, use `runAssignmentRubric` for the common
+   Pyodide mount-and-execute path, or use `runAssignmentJavascriptRubric` for
+   browser-native JS rubrics.
 9. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
    Worker mesh, external/native runner, or future custom compiler.
 10. For Pyodide-backed labs, create the rubric execution request with
    `createAssignmentRubricExecRequest`.
-11. In Python rubrics, call profile-registered JS oracles with
+11. For JavaScript-backed labs, pass the imported rubric function and declared
+    oracle objects to `runAssignmentJavascriptRubric`.
+12. In Python rubrics, call profile-registered JS oracles with
     `browsergrad.oracle("<module-name>")`.
-12. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
+13. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
     context with `browsergrad.assignment_context()`.
-13. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
+14. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
     implementation slice.
 
 ## Capability Vocabulary
@@ -139,5 +142,7 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
 8. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
    launch the rubric through `Session.exec`, or uses
    `createAssignmentRubricExecRequest` when the platform needs manual staging.
-9. Offers the learner a runnable browser path, simulated path, or external-runner
+9. For runnable JavaScript labs, imports the rubric module and calls
+   `runAssignmentJavascriptRubric`.
+10. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.
