@@ -53,6 +53,8 @@ Future slice:
   scheduling.
 - Add WebGPU FlashAttention comparisons when custom kernels are stable enough
   to be part of the learner-facing rubric.
+- Build the kernel-programming pieces on the tiny core described in
+  `docs/platform/kernel-lab-foundation.md`, not on a full CUDA/Triton clone.
 
 ## Portable As-Is
 

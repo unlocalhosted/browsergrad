@@ -1,0 +1,74 @@
+# Kernel Lab Foundation
+
+BrowserGrad should grow a tiny browser-native kernel core first, then mature it
+into more powerful GPU-programming features. The goal is not to clone CUDA,
+Triton, or PyTorch wholesale. The goal is to preserve the clean learning model:
+buffers, kernels, dispatch, synchronization, correctness oracles, and
+performance feedback.
+
+## Decision
+
+Build a foundational `kernel-lab` layer around WebGPU/WGSL and BrowserGrad
+rubrics. Treat projects like `gpu.cpp` and HipScript as design references, not
+hard dependencies.
+
+## Clean Parts To Steal
+
+From `gpu.cpp`:
+
+- Small nouns and verbs: context, tensor/buffer, kernel, bindings, dispatch,
+  copy-to-host.
+- Low boilerplate API where resource setup is explicit and dispatch is obvious.
+- Native Dawn runner as an optional test/benchmark companion.
+- Fast iteration and examples that expose the GPU model directly.
+
+From HipScript:
+
+- CUDA/HIP teaching concepts can map to WebGPU: grid, block, thread index,
+  shared memory, barriers, kernel launch.
+- A restricted CUDA-like language can be educational without supporting all of
+  CUDA.
+- Browser compilation is possible, but a full LLVM toolchain is heavy and should
+  stay optional or future-facing.
+
+## Initial Core
+
+The first stable core should include:
+
+- `KernelContext`: owns a WebGPU device/queue and cache.
+- `KernelBuffer`: typed storage buffer with explicit upload/download.
+- `KernelProgram`: WGSL source plus workgroup metadata and bind layout.
+- `dispatchKernel`: validates bindings, dispatches, awaits completion.
+- `KernelOracle`: CPU/JS reference for correctness checks.
+- `KernelRubric`: structured assertion helpers for output tolerance, dispatch
+  errors, forbidden APIs, and timing envelopes.
+
+This core should be independent from Pyodide. Python assignments may call it
+through registered JS modules, but JS/WGSL labs should run without Python.
+
+## Maturation Path
+
+1. WGSL-first kernel labs with CPU oracles.
+2. Native Dawn/gpu.cpp-style runner for CI and local benchmarking.
+3. Kernel tracing artifacts: source, bindings, workgroups, timing, output
+   previews.
+4. CUDA-lite syntax for teaching simple kernels.
+5. Worker-mesh collectives for distributed systems labs.
+6. Pattern-specific kernels such as FlashAttention once the simple core is
+   boring and stable.
+
+## Non-Goals For The Core
+
+- Full CUDA compatibility.
+- Triton compatibility.
+- cuBLAS/cuDNN/cuRAND equivalents.
+- Hiding WebGPU behind too much abstraction.
+- Making Pyodide required for kernel labs.
+
+## Why This Matters
+
+For systems assignments like CS336 assignment 2, a browser-native kernel core
+lets BrowserGrad teach the real concepts without pretending a browser is a
+Linux CUDA box. We can capability-gate native-only tests, then replace them with
+labs that show the same systems ideas through WebGPU, deterministic simulators,
+and transparent rubrics.

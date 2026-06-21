@@ -39,6 +39,8 @@ The runtime knows nothing about tensors. The kernels package knows nothing about
 
 For the multi-course guided-lab layer that sits above these packages, see
 `docs/platform/curriculum-platform-architecture.md`.
+For the browser-native systems/kernel lab direction, see
+`docs/platform/kernel-lab-foundation.md`.
 
 ## Package responsibilities
 

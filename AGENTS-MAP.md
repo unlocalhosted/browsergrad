@@ -46,6 +46,7 @@ Use this as a fast navigation layer before diving into files.
 
 - Keep root package behavior course-agnostic.
 - Read `docs/platform/curriculum-platform-architecture.md` before adding new course or lecture companion work.
+- Read `docs/platform/kernel-lab-foundation.md` before adding browser-native GPU/kernel lab work.
 - Use `docs/internal/` for assignment-specific compatibility records.
 - Use runtime lab manifests and rubrics for platform packaging.
 - Use `browsergrad-grad` for stable eager teaching surfaces.

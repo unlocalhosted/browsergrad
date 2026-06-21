@@ -30,6 +30,9 @@ structured place to do the work.
    cancellation, structured assertions, and JS oracle registration.
 6. **ML libraries/backends**: `grad`, `jit`, `kernels`, and future libraries
    that provide reusable capability across many assignments.
+7. **Kernel lab foundation**: a small WebGPU/WGSL core for systems assignments
+   that can mature into native runners, CUDA-lite syntax, and Worker-mesh
+   collectives.
 
 ## Design Rules
 
@@ -56,6 +59,8 @@ structured place to do the work.
   in the browser edition.
 - Use worker `timeoutMs`, streaming gates, fixture checks, and deterministic
   oracles for grading.
+- Build GPU/systems labs on the tiny kernel core described in
+  `docs/platform/kernel-lab-foundation.md`.
 - Keep future course families independent: CS336, fast.ai, MIT, CMU, Berkeley,
   paper replications, and local workshops should all use the same platform
   primitives.

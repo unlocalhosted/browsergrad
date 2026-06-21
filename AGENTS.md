@@ -58,6 +58,8 @@ When adding curriculum support:
 
 - Read `docs/platform/curriculum-platform-architecture.md` for the multi-course
   architecture.
+- Read `docs/platform/kernel-lab-foundation.md` before adding GPU-programming,
+  CUDA-like, Triton-like, or distributed systems lab support.
 - Keep reusable runtime/library capability in packages.
 - Put assignment-specific findings in `docs/internal/` or lab manifests, not in root repo rules.
 - Prefer platform adapters/rubrics over hard-coding course assumptions into `grad`, `jit`, `runtime`, or `kernels`.
