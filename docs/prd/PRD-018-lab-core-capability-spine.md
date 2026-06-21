@@ -154,6 +154,10 @@ runtime branches.
   `browser`, `simulated`, or `external` and call
   `assignmentRunReadiness(plan)` to render a deterministic learner-facing state:
   `runnable`, `simulated`, `external-only`, or `blocked`.
+- Platform preflight guarantee: `createAssignmentPreflightReport(profile,
+  environment)` returns the run plan, readiness, rubric kind, required
+  capabilities, and mount plan as one readonly handoff object, and benchmark
+  profile tests assert readiness for the CS336/GPU Puzzles/CS149 probe set.
 - Later implementation slices:
   - Assignment runner plan: packages, mounts, JS oracles, timeout/watchdog, and
     allowed tests.

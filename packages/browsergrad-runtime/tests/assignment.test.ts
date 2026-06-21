@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assignmentRubricKind,
   assignmentRunReadiness,
+  createAssignmentPreflightReport,
   createAssignmentMountPlan,
   createAssignmentRunPlan,
   createAssignmentRubricExecRequest,
@@ -341,6 +342,37 @@ describe("parseAssignmentProfile", () => {
         }),
       ).status,
     ).toBe("blocked");
+  });
+
+  it("creates a platform preflight report without executing or mounting code", () => {
+    const result = parseAssignmentProfile(VALID_PROFILE);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const report = createAssignmentPreflightReport(result.profile, {
+      capabilities: ["pyodide"],
+      capabilityModes: { pyodide: "browser" },
+    });
+
+    expect(report.rubricKind).toBe("python");
+    expect(report.readiness).toEqual({
+      status: "runnable",
+      summary: "assignment can run in the current platform",
+      missingCapabilities: [],
+      selectedCapabilities: ["pyodide"],
+      simulatedCapabilities: [],
+      externalCapabilities: [],
+    });
+    expect(report.requiredCapabilities).toEqual(["pyodide"]);
+    expect(report.mountPlan.datasets).toEqual([
+      {
+        name: "tiny",
+        url: "/fixtures/tiny.txt",
+        hash: "sha256:abc",
+        mountPath: "/assignments/cs336-assignment1/fixtures/datasets/tiny.txt",
+      },
+    ]);
+    expect(report.plan.ok).toBe(true);
   });
 
   it("classifies rubric substrate from the run plan path", () => {

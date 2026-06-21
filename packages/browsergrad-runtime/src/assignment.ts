@@ -111,6 +111,14 @@ export interface AssignmentRunReadiness {
   readonly externalCapabilities: readonly string[];
 }
 
+export interface AssignmentPreflightReport {
+  readonly plan: AssignmentRunPlan;
+  readonly rubricKind: AssignmentRubricKind;
+  readonly readiness: AssignmentRunReadiness;
+  readonly requiredCapabilities: readonly string[];
+  readonly mountPlan: AssignmentMountPlan;
+}
+
 export interface AssignmentRunPlan {
   readonly id: string;
   readonly profileVersion: string;
@@ -349,7 +357,7 @@ export function evaluateAssignmentCapabilities(
   const capabilityModes = normalizeCapabilityModes(environment.capabilityModes);
   const gates = profile.gates
     .filter((gate) => gate.kind === "capability")
-    .map((gate) => evaluateCapabilityGate(gate, available));
+    .map((gate) => evaluateCapabilityGate(gate, available, capabilityModes));
   const satisfiedCapabilities = uniqueSorted(
     gates.flatMap((gate) => gate.satisfiedCapabilities),
   );
@@ -424,6 +432,20 @@ export function createAssignmentRunPlan(
     datasets: profile.datasets,
     capabilityEvaluation,
     behavioralGates: profile.gates.filter((gate) => gate.kind !== "capability"),
+  };
+}
+
+export function createAssignmentPreflightReport(
+  profile: AssignmentProfile,
+  environment: AssignmentCapabilityEnvironment,
+): AssignmentPreflightReport {
+  const plan = createAssignmentRunPlan(profile, environment);
+  return {
+    plan,
+    rubricKind: assignmentRubricKind(plan),
+    readiness: assignmentRunReadiness(plan),
+    requiredCapabilities: requiredAssignmentCapabilities(profile),
+    mountPlan: createAssignmentMountPlan(plan),
   };
 }
 
@@ -824,13 +846,12 @@ function readTimeouts(
 function evaluateCapabilityGate(
   gate: AssignmentGateSpec,
   available: ReadonlySet<string>,
+  capabilityModes: Readonly<Record<string, AssignmentCapabilityMode>>,
 ): AssignmentCapabilityGateEvaluation {
   const requires = readCapabilityStringList(gate.options.requires);
   const anyOf = readCapabilityAlternatives(gate.options.any_of);
   const missingRequired = requires.filter((capability) => !available.has(capability));
-  const satisfiedAnyOf = anyOf.find((group) =>
-    group.every((capability) => available.has(capability)),
-  ) ?? [];
+  const satisfiedAnyOf = bestSatisfiedCapabilityGroup(anyOf, available, capabilityModes);
   const missingAnyOf =
     anyOf.length === 0 || satisfiedAnyOf.length > 0
       ? []
@@ -852,6 +873,38 @@ function evaluateCapabilityGate(
     missingAnyOf,
     ...(message ? { message } : {}),
   };
+}
+
+function bestSatisfiedCapabilityGroup(
+  groups: readonly (readonly string[])[],
+  available: ReadonlySet<string>,
+  capabilityModes: Readonly<Record<string, AssignmentCapabilityMode>>,
+): readonly string[] {
+  return groups
+    .filter((group) => group.every((capability) => available.has(capability)))
+    .sort((a, b) => {
+      const modeDiff =
+        capabilityGroupModeRank(a, capabilityModes) -
+        capabilityGroupModeRank(b, capabilityModes);
+      if (modeDiff !== 0) return modeDiff;
+      return a.length - b.length;
+    })[0] ?? [];
+}
+
+function capabilityGroupModeRank(
+  group: readonly string[],
+  capabilityModes: Readonly<Record<string, AssignmentCapabilityMode>>,
+): number {
+  return Math.max(
+    0,
+    ...group.map((capability) => capabilityModeRank(capabilityModes[capability])),
+  );
+}
+
+function capabilityModeRank(mode: AssignmentCapabilityMode | undefined): number {
+  if (mode === "external") return 2;
+  if (mode === "simulated") return 1;
+  return 0;
 }
 
 function normalizeCapabilityModes(

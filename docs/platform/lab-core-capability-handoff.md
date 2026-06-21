@@ -23,7 +23,10 @@ For every lab profile, the platform should:
 4. Classify the rubric with `assignmentRubricKind`.
 5. Provide `capabilityModes` for detected capabilities when the platform knows
    a capability is `browser`, `simulated`, or `external`.
-6. Call `assignmentRunReadiness(plan)` before launching the lab.
+6. Call `assignmentRunReadiness(plan)` before launching the lab, or call
+   `createAssignmentPreflightReport(profile, environment)` when the platform
+   wants the run plan, readiness, rubric kind, required capabilities, and mount
+   plan together.
 7. Show `runnable`, `simulated`, `external-only`, or `blocked` as preflight
    status, not as runtime crashes.
 8. Build a file/dataset mount plan with `createAssignmentMountPlan`.
@@ -89,6 +92,10 @@ Pass these labels through `capabilityModes` when calling
 `createAssignmentRunPlan`, then use `assignmentRunReadiness(plan)`.
 `external` wins over `simulated`, and failed capability preflight becomes
 `blocked`.
+When several `any_of` groups are available, BrowserGrad selects the strongest
+group by mode: direct `browser` path first, then `simulated`, then `external`.
+This prevents a teaching simulator from hiding a real browser-native path such
+as WGSL.
 
 ## Profile Gate Shape
 
@@ -117,6 +124,9 @@ Use a capability gate when availability can be checked before execution:
 Machine-readable profile drafts live in `docs/internal/*.profile.json`. They are
 parsed by `packages/browsergrad-runtime/tests/benchmark-profiles.test.ts` so the
 handoff matrix cannot drift silently from runtime profile validation.
+That test also builds `createAssignmentPreflightReport` for every benchmark
+profile under a browser-teaching environment and checks expected readiness
+states.
 
 | Benchmark | First platform slice | Core capabilities |
 | --- | --- | --- |
@@ -157,15 +167,17 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
 4. Calls BrowserGrad capability evaluation from the run plan.
 5. Calls `assignmentRunReadiness(plan)` and renders its status, selected
    capabilities, and missing capabilities.
-6. Builds the BrowserGrad mount plan for runnable or inspectable labs.
-7. Fetches or provides assignment file/dataset contents, then materializes them
+6. Or uses `createAssignmentPreflightReport(profile, environment)` to get all
+   preflight fields in one object.
+7. Builds the BrowserGrad mount plan for runnable or inspectable labs.
+8. Fetches or provides assignment file/dataset contents, then materializes them
    into `Session.fs`.
-8. Shows packages, oracle modules, rubric kind, file mounts, and
+9. Shows packages, oracle modules, rubric kind, file mounts, and
    satisfied/missing capability groups.
-9. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
+10. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
    launch the rubric through `Session.exec`, or uses
    `createAssignmentRubricExecRequest` when the platform needs manual staging.
-10. For runnable JavaScript labs, imports the rubric module and calls
+11. For runnable JavaScript labs, imports the rubric module and calls
    `runAssignmentJavascriptRubric`.
-11. Offers the learner a runnable browser path, simulated path, or external-runner
+12. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

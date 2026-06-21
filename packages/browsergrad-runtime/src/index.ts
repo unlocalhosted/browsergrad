@@ -64,6 +64,7 @@ export {
 export {
   assignmentRubricKind,
   assignmentRunReadiness,
+  createAssignmentPreflightReport,
   createAssignmentMountPlan,
   createAssignmentRunPlan,
   createAssignmentRubricExecRequest,
@@ -89,6 +90,7 @@ export {
   type AssignmentCapabilityEvaluation,
   type AssignmentRunReadinessStatus,
   type AssignmentRunReadiness,
+  type AssignmentPreflightReport,
   type AssignmentRunPlan,
   type AssignmentRunPlanSession,
   type AssignmentRunPlanFiles,

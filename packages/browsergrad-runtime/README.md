@@ -177,6 +177,7 @@ import {
   assignmentRubricKind,
   assignmentRunReadiness,
   createAssignmentMountPlan,
+  createAssignmentPreflightReport,
   createAssignmentRunPlan,
   evaluateAssignmentCapabilities,
   parseAssignmentProfile,
@@ -197,6 +198,10 @@ const plan = createAssignmentRunPlan(parsed.profile, {
   capabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
   capabilityModes: { webgpu: "browser", "wgsl-kernel": "browser" },
 });
+const report = createAssignmentPreflightReport(parsed.profile, {
+  capabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
+  capabilityModes: { webgpu: "browser", "wgsl-kernel": "browser" },
+});
 if (!plan.ok) {
   throw new Error(`Missing capabilities: ${plan.capabilityEvaluation.missingCapabilities.join(", ")}`);
 }
@@ -208,6 +213,7 @@ const readiness = assignmentRunReadiness(plan);
 console.log(required, preflight.ok, preflight.missingCapabilities);
 console.log(plan.session.packages, plan.files.rubricPath, plan.execution.allowedTests);
 console.log(readiness.status, rubricKind, mounts.files, mounts.datasets);
+console.log(report.readiness.status, report.rubricKind, report.mountPlan.files);
 const fileContents: Record<string, string> = {
   [plan.files.rubricPath]: rubricSource,
 };
@@ -228,7 +234,14 @@ Platforms may attach `capabilityModes` to the environment. Use `browser` for a
 direct in-browser path, `simulated` for Worker/oracle/fixture approximations,
 and `external` for native or hosted runners. `assignmentRunReadiness(plan)`
 turns the selected capabilities into a platform status: `runnable`,
-`simulated`, `external-only`, or `blocked`.
+`simulated`, `external-only`, or `blocked`. When multiple `any_of` alternatives
+are available, BrowserGrad selects the strongest path by mode: `browser`, then
+`simulated`, then `external`.
+
+`createAssignmentPreflightReport(profile, environment)` bundles the common
+platform preflight calls into `{ plan, rubricKind, readiness,
+requiredCapabilities, mountPlan }`. Use it when the UI needs a single readonly
+object before fetching fixtures, mounting files, or launching code.
 
 `createAssignmentRunPlan()` does not execute student code. It produces the
 platform handoff object: package preload list, JS oracle modules, resolved
