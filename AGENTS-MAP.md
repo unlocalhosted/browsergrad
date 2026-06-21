@@ -22,6 +22,7 @@ Use this as a fast navigation layer before diving into files.
 | `browsergrad-grad` | `packages/browsergrad-grad/README.md` | `src/python/tensor.py`, `src/python/functional.py`, `src/python/optim.py`, `src/python/nn_chunks/`, `src/python/_torch_compat_*.py` | `tests/`, `tests-integration/` |
 | `browsergrad-jit` | `packages/browsergrad-jit/README.md` | `src/python/_ir.py`, `_tensor_proxy.py`, `_realize.py`, `_vjp.py`, `_functional.py`, `_nn.py`, `_optim.py`, `_torch_compat.py` | `tests/`, `tests-integration/` |
 | `browsergrad-kernels` | `packages/browsergrad-kernels/README.md` | `src/realizer.ts`, `src/kernels/` | `tests/`, `tests-browser/` |
+| `browsergrad-tokenizers` | `packages/browsergrad-tokenizers/README.md` | `src/index.ts` | `tests/` |
 | `browsergrad-dogfood` | `packages/browsergrad-dogfood/README.md` | `tests-node/`, `tests/` | cross-package published compatibility |
 
 ## Generated Source Rules
@@ -48,6 +49,7 @@ Use this as a fast navigation layer before diving into files.
 - Use runtime lab manifests and rubrics for platform packaging.
 - Use `browsergrad-grad` for stable eager teaching surfaces.
 - Use `browsergrad-jit` for lazy IR, fusion, symbolic backward, and GPU-oriented labs.
+- Use `browsergrad-tokenizers` for browser-safe tokenizer/BPE oracles and streaming rubric gates.
 - Move broadly useful gaps into package source/tests; keep one-off course glue outside package internals.
 
 ## Test Selection
@@ -62,6 +64,7 @@ pnpm --filter @unlocalhosted/browsergrad-jit test
 pnpm --filter @unlocalhosted/browsergrad-jit test:integration
 pnpm --filter @unlocalhosted/browsergrad-kernels test
 pnpm --filter @unlocalhosted/browsergrad-kernels test:browser
+pnpm --filter @unlocalhosted/browsergrad-tokenizers test
 pnpm --filter @unlocalhosted/browsergrad-dogfood test:node
 ```
 

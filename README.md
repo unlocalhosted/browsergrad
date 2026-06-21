@@ -45,6 +45,7 @@ npm install @unlocalhosted/browsergrad-runtime pyodide
 npm install @unlocalhosted/browsergrad-jit
 npm install @unlocalhosted/browsergrad-kernels        # optional: WGSL kernels + WebGPU bridge
 npm install @unlocalhosted/browsergrad-grad           # optional: eager-autograd alternative
+npm install @unlocalhosted/browsergrad-tokenizers     # optional: browser-safe tokenizer/BPE oracles
 ```
 
 `pyodide` is a peer dependency. Asset-sync into `public/pyodide/v0.26.4/` so the runtime is served same-origin.
@@ -115,6 +116,7 @@ out = bg.realize_webgpu(x @ w + b)   # tiled GEMM, fused elementwise, custom WGS
 | [`browsergrad-jit`](./packages/browsergrad-jit) | Lazy-IR PyTorch-shape library. 28-opcode IR, fusion, symbolic VJP, AMP, gradient checkpointing, `bg.func.*`, custom WGSL kernels, ONNX export. |
 | [`browsergrad-kernels`](./packages/browsergrad-kernels) | WGSL compute-shader catalog (matmul, tiled matmul, softmax, layernorm, attention, Flash Attention v2, runtime fused-elementwise codegen). Pure-JS reference per kernel. |
 | [`browsergrad-grad`](./packages/browsergrad-grad) | Eager-autograd alternative. PyTorch-flavored, NumPy-backed, closure backward. Stable. |
+| [`browsergrad-tokenizers`](./packages/browsergrad-tokenizers) | Pure TypeScript tokenizer/BPE reference helpers and streaming gates for browser-safe platform rubrics. |
 
 Each package is independently consumable; they share an npm scope but no runtime dependency. Take one or all.
 
