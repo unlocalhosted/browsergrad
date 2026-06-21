@@ -78,6 +78,11 @@ For every lab profile, the platform should:
     `maskPii()`, `exactLineDeduplicate()`, and `extractVisibleTextFromHtml()`
     for fixture-scale CS336 A4 checks before external classifiers or WARC
     tooling are available.
+    Scaling-law labs can use `@unlocalhosted/browsergrad-scaling`
+    `createHostedScalingApiMock()`, `selectExperimentsForDispatch()`, and
+    `fitPowerLawScalingLaw()` for CS336 A3-style hosted API, scheduler, and
+    scaling-law checks before external FastAPI/Postgres/JAX/Modal runners are
+    attached.
 18. In Python rubrics, call profile-registered JS oracles with
     `browsergrad.oracle("<module-name>")`.
 19. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
@@ -111,6 +116,7 @@ Capability names are strings. Keep them descriptive and reusable:
 | `tokenizer-oracle` | JS/TS tokenizer oracle is available to rubrics. |
 | `rl-loss-oracle` | Alignment/RL losses have independent reference checks. |
 | `hosted-api-mock` | Hosted API behavior is reproduced by a deterministic local mock. |
+| `scaling-law-oracle` | Scaling-law projections are checked by a deterministic browser-safe oracle. |
 | `native-cpp-external` | Lab requires external native C++ build/run support. |
 | `ispc-external` | Lab requires external ISPC support or a simulator. |
 | `openmp-external` | Lab requires external OpenMP support or a simulator. |
@@ -131,6 +137,10 @@ PyTorch, or model-runtime fixtures are needed.
 The first reusable data substrate is `@unlocalhosted/browsergrad-data`: it
 provides fixture-scale PII masking, exact line dedupe, and HTML text extraction
 for labs that choose `pii-oracle` or `dedupe-oracle` paths.
+The first reusable scaling substrate is `@unlocalhosted/browsergrad-scaling`:
+it provides deterministic CS336 A3-style hosted API behavior, scheduler
+selection, and log-space power-law fitting for labs that choose
+`hosted-api-mock`, `scheduler-simulator`, or `scaling-law-oracle` paths.
 
 ## Readiness Modes
 
@@ -216,7 +226,7 @@ CS336 Assignment 5 and CS149GPT, proving their profile drafts can produce
 | Benchmark | First platform slice | Core capabilities |
 | --- | --- | --- |
 | CS336 A2 Systems | FlashAttention fixture + DDP/FSDP simulator preflight via `createDeterministicMesh()` | `torch-compat`, `webgpu`, `worker-mesh`, `distributed-simulator` |
-| CS336 A3 Scaling | Hosted API mock + scheduler tests | `http-client`, `hosted-api-mock`, `server-fixture` |
+| CS336 A3 Scaling | Hosted API mock + scheduler tests via `@unlocalhosted/browsergrad-scaling` | `http-client`, `hosted-api-mock`, `server-fixture`, `scheduler-simulator`, `scaling-law-oracle` |
 | CS336 A4 Data | Small Common Crawl fixtures + `browsergrad-data` PII/dedupe/HTML rubrics | `dataset-fixture`, `large-file-streaming`, `classifier-oracle`, `pii-oracle` |
 | CS336 A5 Alignment | GRPO/DPO math snapshot labs via `createSnapshotOracle()` | `torch-compat`, `transformers-compatible`, `snapshot-oracle`, `rl-loss-oracle` |
 | GPU Puzzles | WGSL puzzle runner | `webgpu`, `wgsl-kernel`, `kernel-visualizer` |
@@ -294,5 +304,7 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     `compareSnapshot()` for JSON/numeric fixture checks.
     CS336 A4 data labs can use `@unlocalhosted/browsergrad-data` for
     browser-safe PII, exact dedupe, and HTML extraction checks.
+    CS336 A3 scaling labs can use `@unlocalhosted/browsergrad-scaling` for
+    hosted API mock, scheduler fairness, and scaling-law fixture checks.
 17. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

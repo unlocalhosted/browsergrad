@@ -110,6 +110,12 @@ Data-cleaning rubrics can use `@unlocalhosted/browsergrad-data` for
 `maskPii()`, `exactLineDeduplicate()`, and `extractVisibleTextFromHtml()` so
 CS336 A4-style tests can validate browser-safe behavior before WARC readers,
 fastText, transformers, or full Common Crawl data enter the loop.
+Scaling-law and hosted API rubrics can use
+`@unlocalhosted/browsergrad-scaling` for `hosted-api-mock`,
+`scheduler-simulator`, and `scaling-law-oracle` fixture checks. Its helpers
+cover CS336 A3-style budget/submit/list/final-submission API behavior,
+duplicate training-config rejection, dispatch fairness, and log-space power-law
+fits before a real FastAPI/Postgres/JAX/Modal stack enters the loop.
 
 ## Files And Fixtures
 
@@ -145,6 +151,11 @@ JavaScript rubrics should use `ctx.readBytes(path)` for binary mounts and
 JS/TS rubrics that need streaming checks can import `createStreamingGate()` from
 `@unlocalhosted/browsergrad-tokenizers`, then use `gate.wrapInput(chunks)` and
 `gate.wrapOutput(studentOutput)` to mirror the Python streaming-gate contract.
+JS/TS rubrics that need hosted API fixtures can import
+`createHostedScalingApiMock()` from `@unlocalhosted/browsergrad-scaling`, then
+exercise student HTTP-client logic against deterministic `/budget`, `/submit`,
+`/experiments`, `/experiment/{id}`, and `/final_submission` behavior. Keep live
+hosted servers and JAX training behind explicit external capability gates.
 
 Rubrics should prefer exact fixtures for correctness and calibrated benchmark
 fixtures for performance. Do not depend on host OS paths, subprocesses, POSIX

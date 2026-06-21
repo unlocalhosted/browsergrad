@@ -43,7 +43,13 @@
       "name": "scaling_api_browser_slice",
       "kind": "capability",
       "options": {
-        "requires": ["http-client", "hosted-api-mock", "server-fixture"],
+        "requires": [
+          "http-client",
+          "hosted-api-mock",
+          "server-fixture",
+          "scheduler-simulator",
+          "scaling-law-oracle"
+        ],
         "any_of": [["pyodide"], ["external-server"]],
         "message": "CS336 A3 first slice should use a deterministic hosted API mock or an explicit external server."
       }
@@ -53,7 +59,7 @@
       "kind": "capability",
       "options": {
         "any_of": [["jax-external"], ["hosted-api-mock"]],
-        "message": "Full JAX/Modal training is external; browser labs should start from API and scheduler fixtures."
+        "message": "Full JAX/Modal training is external; browser labs should start from API, scheduler, and scaling-law fixtures."
       }
     },
     {

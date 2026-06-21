@@ -243,6 +243,11 @@ runtime branches.
   CS336 A4-style Common Crawl/data-cleaning rubrics can run fixture-scale PII,
   dedupe, and HTML extraction checks in browser-safe JS before WARC readers,
   fastText/transformers classifiers, or full dataset training runs.
+- Scaling-oracle guarantee: `@unlocalhosted/browsergrad-scaling` exports
+  `createHostedScalingApiMock()`, `selectExperimentsForDispatch()`, and
+  `fitPowerLawScalingLaw()` so CS336 A3-style hosted API, scheduler, and
+  scaling-law rubrics can run fixture-scale browser-safe checks before a real
+  FastAPI/Postgres/JAX/Modal service enters the loop.
 - Later implementation slices:
   - Assignment runner plan: packages, mounts, JS oracles, timeout/watchdog, and
     allowed tests.
@@ -257,8 +262,9 @@ runtime branches.
 - Benchmark capability families:
   - CS336 A2: `pyodide`, `torch-compat`, `webgpu`, `triton-compatible`,
     `worker-mesh`, `distributed-simulator`, `snapshot-oracle`.
-  - CS336 A3: `http-client`, `hosted-api-mock`, `server-fixture`, `jax-external`,
-    `postgres-external`, `scheduler-simulator`.
+  - CS336 A3: `http-client`, `hosted-api-mock`, `server-fixture`,
+    `scaling-law-oracle`, `jax-external`, `postgres-external`,
+    `scheduler-simulator`.
   - CS336 A4: `dataset-fixture`, `large-file-streaming`, `warc-reader`,
     `classifier-oracle`, `dedupe-oracle`, `pii-oracle`, `network-gated`.
   - CS336 A5: `torch-compat`, `transformers-compatible`, `snapshot-oracle`,
