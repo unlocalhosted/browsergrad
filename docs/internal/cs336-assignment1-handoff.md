@@ -90,3 +90,9 @@ consumes more than the profile's `max_chunks_before_first_yield` before yielding
 the first token. Read the active gate declaration through
 `browsergrad.assignment_context()["behavioral_gates"]` instead of hard-coding
 the limit in the rubric.
+Use `browsergrad.streaming_gate("encode_iterable_streaming", chunks)` for this:
+pass `gate.input` into the student function, wrap the student output with
+`gate.wrap_output(output)`, then pull the first token. An eager implementation
+that calls `list(iterable)` or `"".join(iterable)` raises
+`StreamingGateViolation` with a message such as
+`encode_iterable_streaming consumed input eagerly: read 2 chunks before first output`.

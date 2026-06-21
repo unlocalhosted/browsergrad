@@ -136,6 +136,11 @@ rubrics through `BROWSERGRAD_BEHAVIORAL_GATES_JSON`, alongside
 `BROWSERGRAD_ALLOWED_TESTS_JSON`. Rubrics should use
 `browsergrad.assignment_context()` to parse those values and enforce only the
 tests/gates declared by the active profile.
+For Python iterable streaming checks, wrap rubric input with
+`browsergrad.streaming_gate(name, iterable)` and wrap the returned student output
+with `gate.wrap_output(output)`. The helper reads
+`max_chunks_before_first_yield` from the matching streaming gate and raises
+`StreamingGateViolation` on eager consumption.
 
 Capability gates should make upstream-native requirements explicit. For
 example, a CUDA/Triton test can be declared as a capability gate and replaced by

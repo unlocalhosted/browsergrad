@@ -60,6 +60,7 @@ assert callable(bg.emit_json)
 assert callable(bg.emit_image)
 assert callable(bg.oracle)
 assert callable(bg.assignment_context)
+assert callable(bg.streaming_gate)
 `);
   });
 });
@@ -97,6 +98,87 @@ else:
     expect(assertions).toEqual([
       { kind: "pass", name: "test_assignment_context", durationMs: null },
     ]);
+  });
+});
+
+describe("browser-safe streaming gates", () => {
+  it("allows output before the configured input-read limit", async () => {
+    await exec(`
+import browsergrad as bg
+
+gate = bg.streaming_gate(
+    "encode_iterable_streaming",
+    ["a", "b", "c"],
+    max_chunks_before_first_yield=2,
+)
+
+def streaming_consumer(chunks):
+    for chunk in chunks:
+        yield chunk.upper()
+
+out = gate.wrap_output(streaming_consumer(gate.input))
+first = next(iter(out))
+if first == "A" and gate.chunks_consumed == 1 and gate.first_output_yielded:
+    bg.assert_pass("test_streaming_gate_allows_incremental_output")
+else:
+    bg.assert_fail(
+        "test_streaming_gate_allows_incremental_output",
+        "streaming gate state mismatch",
+        expected={"first": "A", "chunks": 1, "yielded": True},
+        actual={
+            "first": first,
+            "chunks": gate.chunks_consumed,
+            "yielded": gate.first_output_yielded,
+        },
+    )
+`);
+    expect(assertions).toEqual([
+      {
+        kind: "pass",
+        name: "test_streaming_gate_allows_incremental_output",
+        durationMs: null,
+      },
+    ]);
+  });
+
+  it("raises a clear error when student code consumes input before first output", async () => {
+    await expect(
+      pyodide.runPythonAsync(`
+import browsergrad as bg
+
+gate = bg.streaming_gate(
+    "encode_iterable_streaming",
+    ["chunk-1", "chunk-2", "chunk-3"],
+    max_chunks_before_first_yield=1,
+)
+
+def eager_consumer(chunks):
+    return "".join(chunks)
+
+eager_consumer(gate.input)
+`),
+    ).rejects.toThrow(
+      "encode_iterable_streaming consumed input eagerly: read 2 chunks before first output",
+    );
+  });
+
+  it("uses the active assignment streaming gate configuration by name", async () => {
+    await expect(
+      pyodide.runPythonAsync(`
+import os
+import browsergrad as bg
+
+os.environ["BROWSERGRAD_BEHAVIORAL_GATES_JSON"] = "[{\\"name\\":\\"encode_iterable_streaming\\",\\"kind\\":\\"streaming\\",\\"options\\":{\\"max_chunks_before_first_yield\\":1}}]"
+gate = bg.streaming_gate("encode_iterable_streaming", ["chunk-1", "chunk-2"])
+
+def eager_consumer(chunks):
+    return list(chunks)
+
+eager_consumer(gate.input)
+`),
+    ).rejects.toThrow(
+      "encode_iterable_streaming consumed input eagerly: read 2 chunks before first output",
+    );
   });
 });
 

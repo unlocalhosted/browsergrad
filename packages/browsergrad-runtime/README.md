@@ -303,6 +303,17 @@ Rubrics can read:
 
 Prefer `browsergrad.assignment_context()` inside Python rubrics unless you need
 the raw environment values.
+For browser-safe streaming checks, Python rubrics can wrap chunk iterables with
+`browsergrad.streaming_gate(name, iterable)`. The helper reads
+`max_chunks_before_first_yield` from the active behavioral gate when omitted and
+raises `StreamingGateViolation` if student code consumes too much input before
+the first wrapped output yield:
+
+```py
+gate = bg.streaming_gate("encode_iterable_streaming", chunks)
+output = gate.wrap_output(student.encode_iterable(gate.input))
+first_token = next(iter(output))
+```
 
 `runAssignmentRubric()` is the one-call Pyodide path for platforms that do not
 need to stage each step manually. It derives the mount plan, materializes files

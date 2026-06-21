@@ -56,7 +56,11 @@ For every lab profile, the platform should:
     `browsergrad.oracle("<module-name>")`.
 15. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
     context with `browsergrad.assignment_context()`.
-16. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
+16. In Python rubrics, enforce streaming gates with
+    `browsergrad.streaming_gate(name, iterable)` plus
+    `gate.wrap_output(student_output)` so eager consumers fail before launchers
+    need Linux RSS behavior.
+17. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
     implementation slice.
 
 ## Capability Vocabulary

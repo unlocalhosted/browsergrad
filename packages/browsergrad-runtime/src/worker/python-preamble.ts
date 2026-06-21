@@ -101,6 +101,97 @@ def _bg_assignment_context(*, _os=_bg_os, _json=_bg_json):
         "behavioral_gates": _load_json_env("BROWSERGRAD_BEHAVIORAL_GATES_JSON", []),
     }
 
+class _bg_StreamingGateViolation(AssertionError):
+    pass
+
+class _bg_StreamingInput:
+    def __init__(self, gate, iterable):
+        self._gate = gate
+        self._iterator = iter(iterable)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        item = next(self._iterator)
+        self._gate._record_input_read()
+        return item
+
+class _bg_StreamingOutput:
+    def __init__(self, gate, iterable):
+        self._gate = gate
+        self._iterator = iter(iterable)
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        item = next(self._iterator)
+        self._gate.mark_output_yielded()
+        return item
+
+class _bg_StreamingGate:
+    def __init__(
+        self,
+        name,
+        iterable,
+        max_chunks_before_first_yield,
+        *,
+        _input_cls=_bg_StreamingInput,
+        _output_cls=_bg_StreamingOutput,
+    ):
+        if not isinstance(name, str) or not name:
+            raise ValueError("BrowserGrad streaming gate name must be a non-empty string")
+        if (
+            not isinstance(max_chunks_before_first_yield, int)
+            or max_chunks_before_first_yield < 0
+        ):
+            raise ValueError("max_chunks_before_first_yield must be a non-negative integer")
+        self.name = name
+        self.max_chunks_before_first_yield = max_chunks_before_first_yield
+        self.chunks_consumed = 0
+        self.first_output_yielded = False
+        self.input = _input_cls(self, iterable)
+        self._output_cls = _output_cls
+
+    def _record_input_read(self, *, _violation_cls=_bg_StreamingGateViolation):
+        self.chunks_consumed += 1
+        if (
+            not self.first_output_yielded
+            and self.chunks_consumed > self.max_chunks_before_first_yield
+        ):
+            raise _violation_cls(
+                f"{self.name} consumed input eagerly: read "
+                f"{self.chunks_consumed} chunks before first output"
+            )
+
+    def mark_output_yielded(self):
+        self.first_output_yielded = True
+
+    def wrap_output(self, iterable):
+        return self._output_cls(self, iterable)
+
+def _bg_streaming_gate(
+    name,
+    iterable,
+    max_chunks_before_first_yield=None,
+    *,
+    _gate_cls=_bg_StreamingGate,
+    _context=_bg_assignment_context,
+):
+    if max_chunks_before_first_yield is None:
+        for gate in _context().get("behavioral_gates", []):
+            if gate.get("name") == name and gate.get("kind") == "streaming":
+                max_chunks_before_first_yield = gate.get("options", {}).get(
+                    "max_chunks_before_first_yield"
+                )
+                break
+    if max_chunks_before_first_yield is None:
+        raise ValueError(
+            f"BrowserGrad streaming gate is not configured: {name}"
+        )
+    return _gate_cls(name, iterable, max_chunks_before_first_yield)
+
 _bg_mod.assert_pass = _bg_assert_pass
 _bg_mod.assert_fail = _bg_assert_fail
 _bg_mod.assert_error = _bg_assert_error
@@ -109,6 +200,8 @@ _bg_mod.emit_json = _bg_emit_json
 _bg_mod.emit_image = _bg_emit_image
 _bg_mod.oracle = _bg_oracle
 _bg_mod.assignment_context = _bg_assignment_context
+_bg_mod.StreamingGateViolation = _bg_StreamingGateViolation
+_bg_mod.streaming_gate = _bg_streaming_gate
 
 _bg_sys.modules["browsergrad"] = _bg_mod
 
@@ -119,4 +212,6 @@ del _bg_mod, _bg_json, _bg_importlib, _bg_os, _bg_sys, _bg_types, _bg_traceback,
 del _bg_post_assertion, _bg_post_artifact
 del _bg_assert_pass, _bg_assert_fail, _bg_assert_error
 del _bg_log, _bg_emit_json, _bg_emit_image, _bg_oracle, _bg_assignment_context
+del _bg_StreamingGateViolation, _bg_StreamingInput, _bg_StreamingOutput
+del _bg_StreamingGate, _bg_streaming_gate
 `;

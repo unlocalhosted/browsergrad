@@ -18,6 +18,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `BROWSERGRAD_FIXTURES_PATH`, and `BROWSERGRAD_BEHAVIORAL_GATES_JSON`.
 - `browsergrad.assignment_context()` parses the launcher-provided assignment
   environment into a plain Python dict for rubrics.
+- `browsergrad.streaming_gate(name, iterable, max_chunks_before_first_yield?)`
+  lets Python rubrics catch eager iterable consumption with clear browser-safe
+  failures.
 - `runAssignmentRubric(session, plan, contents, options)` orchestrates the
   common assignment path: derive mounts, materialize contents, create the rubric
   exec request, run it, and return both mount and exec results.

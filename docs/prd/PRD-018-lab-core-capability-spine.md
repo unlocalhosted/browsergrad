@@ -164,6 +164,9 @@ runtime branches.
 - Watchdog guarantee: Python rubric exec requests use the shortest declared
   runtime watchdog among `test_ms` and `worker_ms`, and honor `worker_ms` when
   no `test_ms` is declared.
+- Streaming-gate guarantee: Python rubrics can use `browsergrad.streaming_gate`
+  to enforce `max_chunks_before_first_yield` from behavioral gates and fail eager
+  iterable consumers with assignment-specific messages.
 - Mount-readiness guarantee: `evaluateAssignmentMountContents(mountPlan,
   contents)` dry-runs platform-provided files and datasets before any
   `Session.fs` write, and benchmark tests assert every profile reports missing
