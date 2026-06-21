@@ -34,6 +34,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   mode: browser, then simulated, then external.
 - Capability gate evaluations now expose gate-level `status`, `selectedAnyOf`,
   and `selectedCapabilities` for platform preflight routing UI.
+- Python rubric exec requests now use the shortest declared runtime watchdog
+  among `test_ms` and `worker_ms`, with `worker_ms` honored when it is the only
+  declared runtime timeout.
 - `evaluateAssignmentMountContents(mountPlan, contents)` dry-runs file/dataset
   content readiness before writing to `Session.fs`.
 - `verifyAssignmentMountContentHashes(mountPlan, contents)` checks dataset

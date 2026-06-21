@@ -161,6 +161,9 @@ runtime branches.
 - Gate-route guarantee: each capability gate evaluation exposes `status`,
   `selectedAnyOf`, and `selectedCapabilities`, so platform preflight rows can
   show the exact browser/simulated/external path selected by BrowserGrad.
+- Watchdog guarantee: Python rubric exec requests use the shortest declared
+  runtime watchdog among `test_ms` and `worker_ms`, and honor `worker_ms` when
+  no `test_ms` is declared.
 - Mount-readiness guarantee: `evaluateAssignmentMountContents(mountPlan,
   contents)` dry-runs platform-provided files and datasets before any
   `Session.fs` write, and benchmark tests assert every profile reports missing

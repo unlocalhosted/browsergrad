@@ -45,6 +45,8 @@ For every lab profile, the platform should:
    Worker mesh, external/native runner, or future custom compiler.
 12. For Pyodide-backed labs, create the rubric execution request with
    `createAssignmentRubricExecRequest`.
+   The request uses the shorter runtime watchdog from `test_ms` and `worker_ms`;
+   keep `setup_ms` for package preload/cache UI.
 13. For JavaScript-backed labs, pass the imported rubric function, declared
     oracle objects, and browser substrates such as WebGPU devices to
     `runAssignmentJavascriptRubric`.

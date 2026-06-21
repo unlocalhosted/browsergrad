@@ -570,11 +570,10 @@ export function createAssignmentRubricExecRequest(
     `os.environ["BROWSERGRAD_BEHAVIORAL_GATES_JSON"] = ${JSON.stringify(JSON.stringify(plan.behavioralGates))}`,
     `runpy.run_path(${JSON.stringify(plan.files.rubricPath)}, run_name="__main__")`,
   ];
+  const timeoutMs = assignmentRubricTimeoutMs(plan);
   return {
     code: lines.join("\n"),
-    ...(plan.execution.testTimeoutMs !== undefined
-      ? { timeoutMs: plan.execution.testTimeoutMs }
-      : {}),
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
   };
 }
 
@@ -842,6 +841,15 @@ async function verifyDatasetMountHash(
     ok,
     status: ok ? "match" : "mismatch",
   };
+}
+
+function assignmentRubricTimeoutMs(plan: AssignmentRunPlan): number | undefined {
+  const candidates = [
+    plan.execution.testTimeoutMs,
+    plan.execution.workerTimeoutMs,
+  ].filter((timeout): timeout is number => timeout !== undefined);
+  if (candidates.length === 0) return undefined;
+  return Math.min(...candidates);
 }
 
 function parseAssignmentContentHash(hash: string):

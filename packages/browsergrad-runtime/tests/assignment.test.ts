@@ -524,6 +524,42 @@ describe("parseAssignmentProfile", () => {
     });
   });
 
+  it("uses the shortest declared rubric watchdog timeout", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      timeouts: {
+        setup_ms: 10_000,
+        test_ms: 90_000,
+        worker_ms: 45_000,
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const plan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["pyodide"],
+    });
+
+    expect(createAssignmentRubricExecRequest(plan).timeoutMs).toBe(45_000);
+  });
+
+  it("uses worker watchdog timeout when no test timeout is declared", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      timeouts: {
+        worker_ms: 45_000,
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const plan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["pyodide"],
+    });
+
+    expect(createAssignmentRubricExecRequest(plan).timeoutMs).toBe(45_000);
+  });
+
   it("rejects Pyodide exec requests for non-Python rubrics", () => {
     const result = parseAssignmentProfile({
       ...VALID_PROFILE,

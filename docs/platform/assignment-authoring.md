@@ -118,6 +118,9 @@ student-code failure.
 Resource tests should verify behavior rather than emulate Linux:
 
 - Use worker `timeoutMs` for runaway code.
+- For Python rubrics, BrowserGrad chooses the shorter declared runtime watchdog
+  from `test_ms` and `worker_ms`; `setup_ms` remains a platform preload/cache
+  concern.
 - Use iterables that fail when consumers call forbidden eager APIs.
 - Verify streaming by requiring first output before the whole input is consumed.
 - Use browser memory telemetry only for diagnostics, not hard pass/fail rules.
