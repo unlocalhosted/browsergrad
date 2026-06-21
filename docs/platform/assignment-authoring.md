@@ -105,6 +105,11 @@ Fixture-backed JS rubrics can use `compareSnapshot()` or
 as losses, logits, masks, event traces, dedupe decisions, or alignment math
 fixtures; it reports deterministic mismatch paths and numeric tolerances
 without native `.npz` or PyTorch dependencies.
+Data-cleaning rubrics can use `@unlocalhosted/browsergrad-data` for
+`pii-oracle` and `dedupe-oracle` fixture checks. Its first helpers cover
+`maskPii()`, `exactLineDeduplicate()`, and `extractVisibleTextFromHtml()` so
+CS336 A4-style tests can validate browser-safe behavior before WARC readers,
+fastText, transformers, or full Common Crawl data enter the loop.
 
 ## Files And Fixtures
 

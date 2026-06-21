@@ -238,6 +238,11 @@ runtime branches.
   can compare small JSON/numeric fixture outputs with deterministic paths,
   numeric tolerance, and non-finite checks before reaching for PyTorch, `.npz`,
   or GPU-only model runtimes.
+- Data-oracle guarantee: `@unlocalhosted/browsergrad-data` exports
+  `maskPii()`, `exactLineDeduplicate()`, and `extractVisibleTextFromHtml()` so
+  CS336 A4-style Common Crawl/data-cleaning rubrics can run fixture-scale PII,
+  dedupe, and HTML extraction checks in browser-safe JS before WARC readers,
+  fastText/transformers classifiers, or full dataset training runs.
 - Later implementation slices:
   - Assignment runner plan: packages, mounts, JS oracles, timeout/watchdog, and
     allowed tests.

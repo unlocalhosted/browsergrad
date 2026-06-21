@@ -48,6 +48,7 @@ npm install @unlocalhosted/browsergrad-grad           # optional: eager-autograd
 npm install @unlocalhosted/browsergrad-tokenizers     # optional: browser-safe tokenizer/BPE oracles
 npm install @unlocalhosted/browsergrad-simulators     # optional: deterministic systems-lab simulators
 npm install @unlocalhosted/browsergrad-snapshots      # optional: JSON/numeric snapshot oracles
+npm install @unlocalhosted/browsergrad-data           # optional: data-lab PII/dedupe/HTML helpers
 ```
 
 `pyodide` is a peer dependency. Asset-sync into `public/pyodide/v0.26.4/` so the runtime is served same-origin.
@@ -121,6 +122,7 @@ out = bg.realize_webgpu(x @ w + b)   # tiled GEMM, fused elementwise, custom WGS
 | [`browsergrad-tokenizers`](./packages/browsergrad-tokenizers) | Pure TypeScript tokenizer/BPE reference helpers and streaming gates for browser-safe platform rubrics. |
 | [`browsergrad-simulators`](./packages/browsergrad-simulators) | Deterministic browser-safe simulators for worker-mesh, collective, and systems-lab event traces. |
 | [`browsergrad-snapshots`](./packages/browsergrad-snapshots) | Browser-safe JSON/numeric snapshot comparison oracles for fixture-backed rubrics. |
+| [`browsergrad-data`](./packages/browsergrad-data) | Browser-safe data-lab helpers for fixture HTML extraction, exact line dedupe, and PII masking. |
 
 Each package is independently consumable; they share an npm scope but no runtime dependency. Take one or all.
 
@@ -134,6 +136,7 @@ pnpm -r test:integration                                    # 311 Pyodide-in-nod
 pnpm --filter @unlocalhosted/browsergrad-kernels test:browser    # 7 real-Chromium WebGPU tests
 pnpm --filter @unlocalhosted/browsergrad-simulators test
 pnpm --filter @unlocalhosted/browsergrad-snapshots test
+pnpm --filter @unlocalhosted/browsergrad-data test
 ```
 
 The browser-mode suite runs the WGSL kernels and the realizer bridge against an actual `GPUDevice` via Playwright + Chromium. It catches shader-level bugs that NumPy mocks miss.
