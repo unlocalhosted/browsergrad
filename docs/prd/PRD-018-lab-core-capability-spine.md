@@ -233,6 +233,11 @@ runtime branches.
   `createTaskGraphSimulator()` so CS149-style task-system rubrics can model
   dependency readiness, deterministic worker assignment, task start/finish
   order, and makespan without relying on browser Worker timing.
+- Snapshot-oracle guarantee: `@unlocalhosted/browsergrad-snapshots` exports
+  `compareSnapshot()` and `createSnapshotOracle()` so CS336 A2/A5-style rubrics
+  can compare small JSON/numeric fixture outputs with deterministic paths,
+  numeric tolerance, and non-finite checks before reaching for PyTorch, `.npz`,
+  or GPU-only model runtimes.
 - Later implementation slices:
   - Assignment runner plan: packages, mounts, JS oracles, timeout/watchdog, and
     allowed tests.

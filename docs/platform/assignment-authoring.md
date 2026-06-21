@@ -99,6 +99,12 @@ events and worker assignment. These APIs back `worker-mesh`,
 `distributed-simulator`, `pthreads-simulator`, or `task-graph-simulator`
 profile paths when the teaching goal is ordering and participation rather than
 native throughput.
+Fixture-backed JS rubrics can use `compareSnapshot()` or
+`createSnapshotOracle()` from `@unlocalhosted/browsergrad-snapshots` for
+`snapshot-oracle` profile paths. Prefer it for small JSON/numeric outputs such
+as losses, logits, masks, event traces, dedupe decisions, or alignment math
+fixtures; it reports deterministic mismatch paths and numeric tolerances
+without native `.npz` or PyTorch dependencies.
 
 ## Files And Fixtures
 

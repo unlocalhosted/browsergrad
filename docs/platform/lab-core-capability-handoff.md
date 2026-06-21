@@ -71,6 +71,9 @@ For every lab profile, the platform should:
     `runAssignmentJavascriptRubric`.
     JS/TS streaming checks can import `createStreamingGate` and use
     `gate.wrapInput` plus `gate.wrapOutput`.
+    Snapshot-backed labs can use `@unlocalhosted/browsergrad-snapshots`
+    `createSnapshotOracle()` to compare small JSON/numeric fixtures and emit
+    deterministic mismatch paths.
 18. In Python rubrics, call profile-registered JS oracles with
     `browsergrad.oracle("<module-name>")`.
 19. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
@@ -117,6 +120,10 @@ The first reusable simulator substrate is
 traces, simple collectives, and task-graph ready/start/finish traces for labs
 that choose simulated `worker-mesh`, `distributed-simulator`, or
 `task-graph-simulator` paths.
+The first reusable snapshot substrate is
+`@unlocalhosted/browsergrad-snapshots`: it provides JSON/numeric snapshot
+comparison for labs that choose `snapshot-oracle` paths before heavier `.npz`,
+PyTorch, or model-runtime fixtures are needed.
 
 ## Readiness Modes
 
@@ -204,7 +211,7 @@ CS336 Assignment 5 and CS149GPT, proving their profile drafts can produce
 | CS336 A2 Systems | FlashAttention fixture + DDP/FSDP simulator preflight via `createDeterministicMesh()` | `torch-compat`, `webgpu`, `worker-mesh`, `distributed-simulator` |
 | CS336 A3 Scaling | Hosted API mock + scheduler tests | `http-client`, `hosted-api-mock`, `server-fixture` |
 | CS336 A4 Data | Small Common Crawl fixtures + data-quality rubrics | `dataset-fixture`, `large-file-streaming`, `classifier-oracle`, `pii-oracle` |
-| CS336 A5 Alignment | GRPO/DPO math snapshot labs | `torch-compat`, `transformers-compatible`, `snapshot-oracle`, `rl-loss-oracle` |
+| CS336 A5 Alignment | GRPO/DPO math snapshot labs via `createSnapshotOracle()` | `torch-compat`, `transformers-compatible`, `snapshot-oracle`, `rl-loss-oracle` |
 | GPU Puzzles | WGSL puzzle runner | `webgpu`, `wgsl-kernel`, `kernel-visualizer` |
 | CS149 A1/A2 | Thread/SIMD/task-system simulator with deterministic task traces | `pthreads-simulator`, `simd-simulator`, `distributed-simulator` |
 | CS149 A3 | CUDA scan/SAXPY/render concepts | `webgpu`, `cuda-compatible-subset`, `performance-rubric` |
@@ -276,5 +283,7 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     Simulator-backed labs can use `@unlocalhosted/browsergrad-simulators`
     `createDeterministicMesh()` or `createTaskGraphSimulator()` for event-trace
     rubrics before real Worker execution exists.
+    Snapshot-backed labs can use `@unlocalhosted/browsergrad-snapshots`
+    `compareSnapshot()` for JSON/numeric fixture checks.
 17. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.
