@@ -34,6 +34,7 @@ Every PRD includes: background with cited evidence, user stories, architecture (
 ### Platform process
 
 - [PRD-017 — Research-gated PRD workflow](PRD-017-research-gated-prd-workflow.md)
+- [PRD-018 — Lab core capability spine](PRD-018-lab-core-capability-spine.md)
 
 ## How to use these PRDs
 
