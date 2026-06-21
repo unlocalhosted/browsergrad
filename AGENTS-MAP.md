@@ -10,6 +10,7 @@ Use this as a fast navigation layer before diving into files.
 | `ARCHITECTURE.md` | Package responsibilities, data flow, core seams, testing strategy. |
 | `DEVELOPMENT.md` | Development notes. |
 | `docs/internal/` | Internal vision, progress, status, and compatibility notes. |
+| `docs/platform/` | Platform authoring guides for labs, assignment profiles, rubrics, fixtures, and browser-safe gates. |
 | `docs/prd/` | Design records and roadmap PRDs. |
 | `packages/` | Workspace packages. |
 
