@@ -364,7 +364,12 @@ export function createAssignmentRubricExecRequest(
     "if assignment_root not in sys.path:",
     "    sys.path.insert(0, assignment_root)",
     `os.environ["BROWSERGRAD_ASSIGNMENT_ID"] = ${JSON.stringify(plan.id)}`,
+    `os.environ["BROWSERGRAD_ASSIGNMENT_ROOT"] = ${JSON.stringify(plan.files.root)}`,
+    ...(plan.files.fixturesPath
+      ? [`os.environ["BROWSERGRAD_FIXTURES_PATH"] = ${JSON.stringify(plan.files.fixturesPath)}`]
+      : []),
     `os.environ["BROWSERGRAD_ALLOWED_TESTS_JSON"] = ${JSON.stringify(JSON.stringify(plan.execution.allowedTests))}`,
+    `os.environ["BROWSERGRAD_BEHAVIORAL_GATES_JSON"] = ${JSON.stringify(JSON.stringify(plan.behavioralGates))}`,
     `runpy.run_path(${JSON.stringify(plan.files.rubricPath)}, run_name="__main__")`,
   ];
   return {

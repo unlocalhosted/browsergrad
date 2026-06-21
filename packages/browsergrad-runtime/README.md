@@ -234,6 +234,13 @@ contents are keyed by dataset name.
 environment variables, puts the assignment root on `sys.path`, runs the resolved
 rubric path, and uses the profile's test timeout. It refuses plans whose
 capability preflight failed so unavailable labs do not accidentally launch.
+Rubrics can read:
+
+- `BROWSERGRAD_ASSIGNMENT_ID`
+- `BROWSERGRAD_ASSIGNMENT_ROOT`
+- `BROWSERGRAD_FIXTURES_PATH` when the profile declares one
+- `BROWSERGRAD_ALLOWED_TESTS_JSON`
+- `BROWSERGRAD_BEHAVIORAL_GATES_JSON`
 
 ## What this is, and is not
 

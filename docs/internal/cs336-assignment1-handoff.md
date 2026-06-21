@@ -87,4 +87,6 @@ else:
 
 For streaming checks, use a rubric iterable that raises if the implementation
 consumes more than the profile's `max_chunks_before_first_yield` before yielding
-the first token.
+the first token. Read the active gate declaration from
+`BROWSERGRAD_BEHAVIORAL_GATES_JSON` instead of hard-coding the limit in the
+rubric.
