@@ -53,31 +53,35 @@ For every lab profile, the platform should:
    worker bytes against cache, hash, or snapshot metadata.
 13. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
    Worker mesh, external/native runner, or future custom compiler.
-14. For external/native labs, call `createAssignmentExternalRunnerRequest(plan)`
+14. For simulator-backed systems labs, use
+   `@unlocalhosted/browsergrad-simulators` `createDeterministicMesh()` inside
+   JS rubrics or platform oracles to produce deterministic rank/collective
+   traces before adding real Worker execution.
+15. For external/native labs, call `createAssignmentExternalRunnerRequest(plan)`
    and hand that object to platform-owned native, hosted, or CI runners.
    If using `createAssignmentPreflightReport()`, read
    `report.externalRunnerRequest` for external routes.
-15. For Pyodide-backed labs, create the rubric execution request with
+16. For Pyodide-backed labs, create the rubric execution request with
    `createAssignmentRubricExecRequest`.
    The request uses the shorter runtime watchdog from `test_ms` and `worker_ms`;
    keep `setup_ms` for package preload/cache UI.
-16. For JavaScript-backed labs, pass the imported rubric function, declared
+17. For JavaScript-backed labs, pass the imported rubric function, declared
     oracle objects, and browser substrates such as WebGPU devices to
     `runAssignmentJavascriptRubric`.
     JS/TS streaming checks can import `createStreamingGate` and use
     `gate.wrapInput` plus `gate.wrapOutput`.
-17. In Python rubrics, call profile-registered JS oracles with
+18. In Python rubrics, call profile-registered JS oracles with
     `browsergrad.oracle("<module-name>")`.
-18. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
+19. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
     context with `browsergrad.assignment_context()`.
-19. In Python rubrics, enforce streaming gates with
+20. In Python rubrics, enforce streaming gates with
     `browsergrad.streaming_gate(name, iterable)` plus
     `gate.wrap_output(student_output)` so eager consumers fail before launchers
     need Linux RSS behavior.
-20. In Python rubrics, enforce forbidden-read gates with
+21. In Python rubrics, enforce forbidden-read gates with
     `browsergrad.forbidden_read_gate(name, text)` so eager `read()` or
     `readlines()` calls fail while incremental line reads still work.
-21. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
+22. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
     implementation slice.
 
 ## Capability Vocabulary
@@ -107,6 +111,10 @@ Capability names are strings. Keep them descriptive and reusable:
 
 This table is a living convention, not a runtime enum. Add names when a new
 assignment family needs them, but prefer reusing names across courses.
+The first reusable simulator substrate is
+`@unlocalhosted/browsergrad-simulators`: it provides deterministic mesh event
+traces and simple collectives for labs that choose simulated `worker-mesh` or
+`distributed-simulator` paths.
 
 ## Readiness Modes
 
@@ -191,12 +199,12 @@ CS336 Assignment 5 and CS149GPT, proving their profile drafts can produce
 
 | Benchmark | First platform slice | Core capabilities |
 | --- | --- | --- |
-| CS336 A2 Systems | FlashAttention fixture + DDP/FSDP simulator preflight | `torch-compat`, `webgpu`, `worker-mesh`, `distributed-simulator` |
+| CS336 A2 Systems | FlashAttention fixture + DDP/FSDP simulator preflight via `createDeterministicMesh()` | `torch-compat`, `webgpu`, `worker-mesh`, `distributed-simulator` |
 | CS336 A3 Scaling | Hosted API mock + scheduler tests | `http-client`, `hosted-api-mock`, `server-fixture` |
 | CS336 A4 Data | Small Common Crawl fixtures + data-quality rubrics | `dataset-fixture`, `large-file-streaming`, `classifier-oracle`, `pii-oracle` |
 | CS336 A5 Alignment | GRPO/DPO math snapshot labs | `torch-compat`, `transformers-compatible`, `snapshot-oracle`, `rl-loss-oracle` |
 | GPU Puzzles | WGSL puzzle runner | `webgpu`, `wgsl-kernel`, `kernel-visualizer` |
-| CS149 A1/A2 | Thread/SIMD/task-system simulator | `pthreads-simulator`, `simd-simulator`, `distributed-simulator` |
+| CS149 A1/A2 | Thread/SIMD/task-system simulator with deterministic event traces | `pthreads-simulator`, `simd-simulator`, `distributed-simulator` |
 | CS149 A3 | CUDA scan/SAXPY/render concepts | `webgpu`, `cuda-compatible-subset`, `performance-rubric` |
 | CS149GPT | CPU attention optimization oracle | `native-cpp-external`, `attention-oracle`, `simd-simulator` |
 
@@ -246,8 +254,7 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
 11. For batch dashboards with fetched contents, calls
     `createVerifiedAssignmentBenchmarkPreflightMatrix` so `hashOk` and
     `hashChecks` block stale or wrong datasets before mount.
-12. Materializes validated contents
-   into `Session.fs`.
+12. Materializes validated contents into `Session.fs`.
 13. Shows packages, oracle modules, rubric kind, file mounts, and
     satisfied/missing capability groups.
 14. For external-only labs, calls `createAssignmentExternalRunnerRequest(plan)`
@@ -264,5 +271,8 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     `ctx.readBytes(path)`. Kernel labs can use
     `@unlocalhosted/browsergrad-kernels` `createBrowsergradKernelRubric(ctx)` to
     compare WGSL outputs against CPU references and emit BrowserGrad assertions.
+    Simulator-backed labs can use `@unlocalhosted/browsergrad-simulators`
+    `createDeterministicMesh()` for event-trace rubrics before real Worker
+    execution exists.
 17. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

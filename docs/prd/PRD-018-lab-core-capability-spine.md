@@ -224,6 +224,11 @@ runtime branches.
   kernel tensor checks to `runAssignmentJavascriptRubric()` contexts, and a
   cross-package integration test proves pass/fail assertions survive through
   BrowserGrad's JS rubric runner.
+- Simulator-core guarantee: `@unlocalhosted/browsergrad-simulators` exports
+  `createDeterministicMesh()` so JS rubrics and platform oracles can model
+  browser-safe rank meshes, barriers, broadcasts, point-to-point messages, and
+  `allReduce` event traces for DDP/FSDP/task-system teaching slices without
+  native threads or MPI.
 - Later implementation slices:
   - Assignment runner plan: packages, mounts, JS oracles, timeout/watchdog, and
     allowed tests.
@@ -231,8 +236,8 @@ runtime branches.
     OPFS caching, and snapshot comparison.
   - Browser kernel lab core: WGSL puzzle runner, CUDA-like educational subset,
     and performance/correctness rubrics.
-  - Distributed simulator: Worker mesh and deterministic event traces for DDP,
-    FSDP, sharding, and task scheduling.
+  - Distributed simulator follow-ons: Worker-backed execution, richer sharding
+    traces, and task scheduling on top of deterministic mesh traces.
   - External/native runner bridge: explicit gates for vLLM, flash-attn, CUDA,
     ISPC, OpenMP, and C++ build steps.
 - Benchmark capability families:

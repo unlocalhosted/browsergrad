@@ -46,6 +46,7 @@ npm install @unlocalhosted/browsergrad-jit
 npm install @unlocalhosted/browsergrad-kernels        # optional: WGSL kernels + WebGPU bridge
 npm install @unlocalhosted/browsergrad-grad           # optional: eager-autograd alternative
 npm install @unlocalhosted/browsergrad-tokenizers     # optional: browser-safe tokenizer/BPE oracles
+npm install @unlocalhosted/browsergrad-simulators     # optional: deterministic systems-lab simulators
 ```
 
 `pyodide` is a peer dependency. Asset-sync into `public/pyodide/v0.26.4/` so the runtime is served same-origin.
@@ -117,17 +118,19 @@ out = bg.realize_webgpu(x @ w + b)   # tiled GEMM, fused elementwise, custom WGS
 | [`browsergrad-kernels`](./packages/browsergrad-kernels) | WGSL compute-shader catalog (matmul, tiled matmul, softmax, layernorm, attention, Flash Attention v2, runtime fused-elementwise codegen). Pure-JS reference per kernel. |
 | [`browsergrad-grad`](./packages/browsergrad-grad) | Eager-autograd alternative. PyTorch-flavored, NumPy-backed, closure backward. Stable. |
 | [`browsergrad-tokenizers`](./packages/browsergrad-tokenizers) | Pure TypeScript tokenizer/BPE reference helpers and streaming gates for browser-safe platform rubrics. |
+| [`browsergrad-simulators`](./packages/browsergrad-simulators) | Deterministic browser-safe simulators for worker-mesh, collective, and systems-lab event traces. |
 
 Each package is independently consumable; they share an npm scope but no runtime dependency. Take one or all.
 
 ## Testing
 
-396 tests green across the workspace:
+Workspace tests cover package surfaces, Pyodide integration, and browser WebGPU:
 
 ```sh
-pnpm -r test                                                # 78 surface tests
+pnpm -r test
 pnpm -r test:integration                                    # 311 Pyodide-in-node tests
 pnpm --filter @unlocalhosted/browsergrad-kernels test:browser    # 7 real-Chromium WebGPU tests
+pnpm --filter @unlocalhosted/browsergrad-simulators test
 ```
 
 The browser-mode suite runs the WGSL kernels and the realizer bridge against an actual `GPUDevice` via Playwright + Chromium. It catches shader-level bugs that NumPy mocks miss.
