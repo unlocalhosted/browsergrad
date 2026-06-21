@@ -251,6 +251,19 @@ describe("parseAssignmentProfile", () => {
         missingDatasets: ["tiny"],
         cacheStrategies: ["invalid-hash"],
         externalRunnerRequired: false,
+        gates: [
+          {
+            name: "python_runtime",
+            status: "runnable",
+            ok: true,
+            requires: ["pyodide"],
+            anyOf: [],
+            selectedAnyOf: [],
+            selectedCapabilities: ["pyodide"],
+            missingRequired: [],
+            missingAnyOf: [],
+          },
+        ],
       }),
       expect.objectContaining({
         id: "gpu-puzzles-smoke",
@@ -264,6 +277,19 @@ describe("parseAssignmentProfile", () => {
         missingDatasets: ["cases"],
         cacheStrategies: ["content-addressed"],
         externalRunnerRequired: false,
+        gates: [
+          {
+            name: "kernel_path",
+            status: "runnable",
+            ok: true,
+            requires: [],
+            anyOf: [["webgpu", "wgsl-kernel"], ["cuda-compatible-subset"]],
+            selectedAnyOf: ["webgpu", "wgsl-kernel"],
+            selectedCapabilities: ["webgpu", "wgsl-kernel"],
+            missingRequired: [],
+            missingAnyOf: [],
+          },
+        ],
       }),
     ]);
   });

@@ -167,6 +167,20 @@ export interface AssignmentBenchmarkPreflightRow {
   readonly skippedOptionalPaths: readonly string[];
   readonly cacheStrategies: readonly AssignmentDatasetCacheStrategy[];
   readonly externalRunnerRequired: boolean;
+  readonly gates: readonly AssignmentBenchmarkPreflightGateRow[];
+}
+
+export interface AssignmentBenchmarkPreflightGateRow {
+  readonly name: string;
+  readonly ok: boolean;
+  readonly status: AssignmentRunReadinessStatus;
+  readonly requires: readonly string[];
+  readonly anyOf: readonly (readonly string[])[];
+  readonly selectedAnyOf: readonly string[];
+  readonly selectedCapabilities: readonly string[];
+  readonly missingRequired: readonly string[];
+  readonly missingAnyOf: readonly (readonly string[])[];
+  readonly message?: string;
 }
 
 export interface AssignmentBenchmarkPreflightMatrix {
@@ -651,6 +665,18 @@ export function createAssignmentBenchmarkPreflightMatrix(
         (dataset) => dataset.strategy,
       ),
       externalRunnerRequired: Boolean(report.externalRunnerRequest),
+      gates: report.plan.capabilityEvaluation.gates.map((gate) => ({
+        name: gate.name,
+        ok: gate.ok,
+        status: gate.status,
+        requires: gate.requires,
+        anyOf: gate.anyOf,
+        selectedAnyOf: gate.selectedAnyOf,
+        selectedCapabilities: gate.selectedCapabilities,
+        missingRequired: gate.missingRequired,
+        missingAnyOf: gate.missingAnyOf,
+        ...(gate.message ? { message: gate.message } : {}),
+      })),
     };
   });
 

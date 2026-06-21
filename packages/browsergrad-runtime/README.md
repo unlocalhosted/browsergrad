@@ -228,6 +228,7 @@ console.log(plan.session.packages, plan.files.rubricPath, plan.execution.allowed
 console.log(readiness.status, rubricKind, mounts.files, mounts.datasets);
 console.log(route.target, report.runnerRoute.target, report.mountPlan.files, datasetCache.datasets);
 console.log(matrix.rows[0]?.readinessStatus, matrix.rows[0]?.contentOk);
+console.log(matrix.rows[0]?.gates.map((gate) => [gate.name, gate.status, gate.selectedCapabilities]));
 const fileContents: Record<string, string | Uint8Array> = {
   [plan.files.rubricPath]: rubricSource,
 };
@@ -282,11 +283,11 @@ code.
 batch-flattens those same preflight decisions into platform-ready rows:
 readiness status, runner target, rubric kind, required/selected/missing
 capabilities, mount-content gaps, dataset cache strategies, and whether an
-external runner handoff is required. Use it for benchmark dashboards, PRD
-handoffs, and platform smoke tests that cover many course profiles at once.
-Each capability gate evaluation includes `status`, `selectedAnyOf`, and
-`selectedCapabilities`, so platforms can render the chosen route per gate
-without reimplementing BrowserGrad's route selection.
+external runner handoff is required. Each row also contains `gates`, a
+capability-gate table with `status`, `selectedAnyOf`, `selectedCapabilities`,
+`missingRequired`, `missingAnyOf`, and optional author `message`. Use it for
+benchmark dashboards, PRD handoffs, and platform smoke tests that cover many
+course profiles at once without reimplementing BrowserGrad's route selection.
 
 `createAssignmentRunPlan()` does not execute student code. It produces the
 platform handoff object: package preload list, JS oracle modules, resolved

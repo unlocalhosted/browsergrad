@@ -166,8 +166,9 @@ runtime branches.
 - Benchmark-matrix guarantee:
   `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
   turns many profile reports into platform-ready rows with readiness, runner,
-  capability, content-gap, cache-strategy, and external-runner fields. This is
-  the handoff shape for platform dashboards and cross-course smoke tests.
+  capability, content-gap, cache-strategy, external-runner, and per-gate route
+  fields. This is the handoff shape for platform dashboards and cross-course
+  smoke tests.
 - Runner-route guarantee: `assignmentRunnerRoute(plan)` maps preflight output
   to `pyodide`, `javascript`, `external`, `unsupported`, or `blocked`, so
   platform launch controls do not duplicate BrowserGrad's rubric/readiness
@@ -264,7 +265,9 @@ runtime branches.
   `externalRunnerRequest` objects under external capability environments.
 - Later RED test: batch benchmark matrix helper returns one flattened row per
   profile and marks the matrix not-ok when required content or datasets are
-  missing, without duplicating preflight semantics in platform code.
+  missing, without duplicating preflight semantics in platform code. Matrix rows
+  include capability gate details so platform dashboards can render selected and
+  missing alternatives directly.
 - Run focused package tests:
   - `pnpm --filter @unlocalhosted/browsergrad-runtime test -- assignment`
   - `pnpm --filter @unlocalhosted/browsergrad-runtime typecheck`

@@ -235,6 +235,8 @@ describe("benchmark assignment profiles", () => {
     expect(matrix.rows.every((row) => row.contentOk === false)).toBe(true);
     expect(matrix.rows.every((row) => row.missingRequiredFiles.length === 1)).toBe(true);
     expect(matrix.rows.every((row) => row.externalRunnerRequired === false)).toBe(true);
+    expect(matrix.rows.every((row) => row.gates.length > 0)).toBe(true);
+    expect(matrix.rows.flatMap((row) => row.gates).every((gate) => gate.ok)).toBe(true);
   });
 
   it("creates external runner requests for native-heavy benchmark profiles", () => {

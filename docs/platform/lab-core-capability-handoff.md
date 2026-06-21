@@ -176,7 +176,10 @@ Use `createAssignmentBenchmarkPreflightMatrix()` when the platform wants the
 same benchmark pressure as one consumable object. Its rows are intentionally
 flat: `readinessStatus`, `runnerTarget`, `rubricKind`, capability lists,
 `contentOk`, `missingRequiredFiles`, `missingDatasets`, `cacheStrategies`, and
-`externalRunnerRequired`.
+`externalRunnerRequired`. Each row includes a `gates` array with per-gate
+`status`, selected alternatives, selected capabilities, missing requirements,
+missing alternatives, and optional author messages, so dashboards can show the
+exact BrowserGrad-selected route without rebuilding profile reports.
 The same benchmark test pressure-checks external-runner handoffs for
 CS336 Assignment 5 and CS149GPT, proving their profile drafts can produce
 `externalRunnerRequest` objects from real capability environments.

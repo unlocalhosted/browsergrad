@@ -38,7 +38,9 @@ Use `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
 when a platform needs one dashboard/checklist row per benchmark assignment. It
 returns flattened readiness, route, capability, content-gap, cache-strategy, and
 external-runner fields without asking the platform to duplicate BrowserGrad's
-preflight logic.
+preflight logic. Each row also includes capability `gates` with selected
+alternatives and missing alternatives so UI can explain why a lab is runnable,
+simulated, external-only, or blocked per gate.
 Use `createAssignmentCapabilityEnvironment()` to build that environment from
 `browserCapabilities`, `simulatedCapabilities`, and `externalCapabilities`
 instead of handcrafting `capabilityModes`. It de-duplicates names, sorts them

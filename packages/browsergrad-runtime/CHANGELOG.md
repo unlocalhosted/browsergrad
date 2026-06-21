@@ -45,7 +45,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
   batch-flattens profile preflight into platform-ready benchmark rows with
   readiness, route, capability, mount-content, cache-strategy, and external
-  runner fields.
+  runner fields. Rows now include capability gate details for route UI:
+  `status`, selected alternatives, selected capabilities, missing alternatives,
+  and author messages.
 - `assignmentRunnerRoute(plan)` maps a run plan to `pyodide`, `javascript`,
   `external`, `unsupported`, or `blocked`, and preflight reports now include
   that route.

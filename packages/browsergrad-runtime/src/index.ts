@@ -103,6 +103,7 @@ export {
   type AssignmentRunnerRoute,
   type AssignmentPreflightReport,
   type AssignmentBenchmarkPreflightRow,
+  type AssignmentBenchmarkPreflightGateRow,
   type AssignmentBenchmarkPreflightMatrix,
   type AssignmentRunPlan,
   type AssignmentRunPlanSession,
