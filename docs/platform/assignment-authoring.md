@@ -33,6 +33,8 @@ into `createSession({ jsModules })` registrations, and
 `createAssignmentRunPlan()` to hand the platform a complete launch recipe.
 Use `createAssignmentMountPlan()` to derive the files and dataset fixtures that
 must exist in the runtime filesystem.
+Use `materializeAssignmentMountPlan()` to write provided file and dataset
+contents into `Session.fs`.
 Use `createAssignmentRubricExecRequest()` when the platform is ready to run the
 profile's rubric through `Session.exec`.
 
@@ -46,6 +48,8 @@ datasets with hashes and mounted by the host before execution.
 Dataset mount paths default under `<fixturesPath>/datasets/<filename>`.
 Profiles can still point at large external URLs; BrowserGrad records the mount
 intent and leaves fetching/caching policy to the platform.
+`materializeAssignmentMountPlan()` expects dataset contents keyed by dataset
+name, so platforms can fetch/cache however they want before writing to Pyodide.
 
 Rubrics should prefer exact fixtures for correctness and calibrated benchmark
 fixtures for performance. Do not depend on host OS paths, subprocesses, POSIX

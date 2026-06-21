@@ -1,4 +1,8 @@
-import { BrowsergradError, type PyodideJsModule } from "./types.js";
+import {
+  BrowsergradError,
+  type PyodideJsModule,
+  type SessionFS,
+} from "./types.js";
 
 export interface AssignmentProfile {
   readonly id: string;
@@ -137,6 +141,16 @@ export interface AssignmentDatasetMount {
   readonly url: string;
   readonly hash?: string;
   readonly mountPath: string;
+}
+
+export interface AssignmentMountContents {
+  readonly files: Readonly<Record<string, string>>;
+  readonly datasets?: Readonly<Record<string, string>>;
+}
+
+export interface AssignmentMaterializeResult {
+  readonly writtenPaths: readonly string[];
+  readonly skippedOptionalPaths: readonly string[];
 }
 
 export type AssignmentProfileParseResult =
@@ -389,6 +403,44 @@ export function createAssignmentMountPlan(
       ),
     })),
   };
+}
+
+export async function materializeAssignmentMountPlan(
+  fs: SessionFS,
+  plan: AssignmentMountPlan,
+  contents: AssignmentMountContents,
+): Promise<AssignmentMaterializeResult> {
+  const skippedOptionalPaths: string[] = [];
+  const fileWrites: Array<{ path: string; content: string }> = [];
+  const datasetWrites: Array<{ path: string; content: string }> = [];
+
+  for (const file of plan.files) {
+    const content = contents.files[file.path];
+    if (content === undefined) {
+      if (file.required) {
+        throw new BrowsergradError(`missing required assignment file content: ${file.path}`);
+      }
+      skippedOptionalPaths.push(file.path);
+      continue;
+    }
+    fileWrites.push({ path: file.path, content });
+  }
+
+  for (const dataset of plan.datasets) {
+    const content = contents.datasets?.[dataset.name];
+    if (content === undefined) {
+      throw new BrowsergradError(`missing assignment dataset content: ${dataset.name}`);
+    }
+    datasetWrites.push({ path: dataset.mountPath, content });
+  }
+
+  const writtenPaths: string[] = [];
+  for (const entry of [...fileWrites, ...datasetWrites]) {
+    await fs.write(entry.path, entry.content);
+    writtenPaths.push(entry.path);
+  }
+
+  return { writtenPaths, skippedOptionalPaths };
 }
 
 function readString(

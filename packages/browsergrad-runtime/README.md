@@ -166,6 +166,7 @@ import {
   createAssignmentRunPlan,
   createAssignmentRubricExecRequest,
   evaluateAssignmentCapabilities,
+  materializeAssignmentMountPlan,
   parseAssignmentProfile,
   requiredAssignmentCapabilities,
 } from "@unlocalhosted/browsergrad-runtime";
@@ -186,6 +187,17 @@ const execRequest = createAssignmentRubricExecRequest(plan);
 console.log(required, preflight.ok, preflight.missingCapabilities);
 console.log(plan.session.packages, plan.files.rubricPath, plan.execution.allowedTests);
 console.log(mounts.files, mounts.datasets);
+const fileContents: Record<string, string> = {
+  [plan.files.rubricPath]: rubricSource,
+};
+if (plan.files.starterPath) fileContents[plan.files.starterPath] = starterSource;
+
+await materializeAssignmentMountPlan(session.fs, mounts, {
+  files: fileContents,
+  datasets: {
+    tiny: tinyFixtureText,
+  },
+});
 await session.exec(execRequest);
 ```
 
@@ -201,6 +213,11 @@ capability preflight, and behavioral gates.
 `createAssignmentMountPlan()` turns a run plan into deterministic file and
 dataset mount declarations. It does not fetch or write content; the platform
 uses it to decide what to place into `Session.fs` before rubric execution.
+
+`materializeAssignmentMountPlan()` writes provided string contents into
+`Session.fs` in mount-plan order. Required rubric content fails loudly when
+missing; optional starter/reference files are skipped when absent. Dataset
+contents are keyed by dataset name.
 
 `createAssignmentRubricExecRequest()` turns that plan into the minimal
 `Session.exec` request for rubric execution. It sets assignment metadata in

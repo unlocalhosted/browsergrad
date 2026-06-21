@@ -4,6 +4,7 @@ import {
   createAssignmentRunPlan,
   createAssignmentRubricExecRequest,
   evaluateAssignmentCapabilities,
+  materializeAssignmentMountPlan,
   parseAssignmentProfile,
   profileOracleJsModules,
   requiredAssignmentCapabilities,
@@ -349,5 +350,130 @@ describe("parseAssignmentProfile", () => {
         },
       ],
     });
+  });
+
+  it("materializes provided assignment mount contents into SessionFS", async () => {
+    const result = parseAssignmentProfile(VALID_PROFILE);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const runPlan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["pyodide"],
+    });
+    const mountPlan = createAssignmentMountPlan(runPlan);
+    const writes: Array<{ path: string; content: string }> = [];
+
+    const materialized = await materializeAssignmentMountPlan(
+      {
+        async write(path, content) {
+          writes.push({ path, content });
+        },
+        async read(path) {
+          return writes.find((write) => write.path === path)?.content ?? "";
+        },
+      },
+      mountPlan,
+      {
+        files: {
+          "/assignments/cs336-assignment1/rubric.py": "print('rubric')",
+          "/assignments/cs336-assignment1/assignment.py": "answer = 42",
+        },
+        datasets: {
+          tiny: "fixture text",
+        },
+      },
+    );
+
+    expect(materialized).toEqual({
+      writtenPaths: [
+        "/assignments/cs336-assignment1/rubric.py",
+        "/assignments/cs336-assignment1/assignment.py",
+        "/assignments/cs336-assignment1/fixtures/datasets/tiny.txt",
+      ],
+      skippedOptionalPaths: ["/assignments/cs336-assignment1/reference.py"],
+    });
+    expect(writes).toEqual([
+      {
+        path: "/assignments/cs336-assignment1/rubric.py",
+        content: "print('rubric')",
+      },
+      {
+        path: "/assignments/cs336-assignment1/assignment.py",
+        content: "answer = 42",
+      },
+      {
+        path: "/assignments/cs336-assignment1/fixtures/datasets/tiny.txt",
+        content: "fixture text",
+      },
+    ]);
+  });
+
+  it("rejects missing required mount content before writing optional files", async () => {
+    const result = parseAssignmentProfile(VALID_PROFILE);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const runPlan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["pyodide"],
+    });
+    const mountPlan = createAssignmentMountPlan(runPlan);
+    const writes: Array<{ path: string; content: string }> = [];
+
+    await expect(
+      materializeAssignmentMountPlan(
+        {
+          async write(path, content) {
+            writes.push({ path, content });
+          },
+          async read() {
+            return "";
+          },
+        },
+        mountPlan,
+        {
+          files: {
+            "/assignments/cs336-assignment1/assignment.py": "answer = 42",
+          },
+          datasets: {
+            tiny: "fixture text",
+          },
+        },
+      ),
+    ).rejects.toThrow(
+      "missing required assignment file content: /assignments/cs336-assignment1/rubric.py",
+    );
+    expect(writes).toEqual([]);
+  });
+
+  it("rejects missing dataset mount content before writing files", async () => {
+    const result = parseAssignmentProfile(VALID_PROFILE);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const runPlan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["pyodide"],
+    });
+    const mountPlan = createAssignmentMountPlan(runPlan);
+    const writes: Array<{ path: string; content: string }> = [];
+
+    await expect(
+      materializeAssignmentMountPlan(
+        {
+          async write(path, content) {
+            writes.push({ path, content });
+          },
+          async read() {
+            return "";
+          },
+        },
+        mountPlan,
+        {
+          files: {
+            "/assignments/cs336-assignment1/rubric.py": "print('rubric')",
+          },
+        },
+      ),
+    ).rejects.toThrow("missing assignment dataset content: tiny");
+    expect(writes).toEqual([]);
   });
 });

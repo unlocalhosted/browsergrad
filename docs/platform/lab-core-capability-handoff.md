@@ -21,14 +21,16 @@ For every lab profile, the platform should:
 2. Convert oracle specs with `profileOracleJsModules`.
 3. Build a substrate-neutral run plan with `createAssignmentRunPlan`.
 4. Build a file/dataset mount plan with `createAssignmentMountPlan`.
-5. Evaluate capability readiness before launching the lab.
-6. Show missing capability gates as preflight status, not as runtime crashes.
-7. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
+5. Materialize provided file and dataset contents with
+   `materializeAssignmentMountPlan`.
+6. Evaluate capability readiness before launching the lab.
+7. Show missing capability gates as preflight status, not as runtime crashes.
+8. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
    Worker mesh, external/native runner, or future custom compiler.
-8. For Pyodide-backed labs, create the rubric execution request with
+9. For Pyodide-backed labs, create the rubric execution request with
    `createAssignmentRubricExecRequest`.
-9. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
-   implementation slice.
+10. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
+    implementation slice.
 
 ## Capability Vocabulary
 
@@ -122,10 +124,12 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
 1. Reads an assignment profile.
 2. Builds a BrowserGrad run plan.
 3. Builds the BrowserGrad mount plan.
-4. Calls BrowserGrad capability evaluation from the run plan.
-5. Shows packages, oracle modules, file mounts, and satisfied/missing capability
+4. Fetches or provides assignment file/dataset contents, then materializes them
+   into `Session.fs`.
+5. Calls BrowserGrad capability evaluation from the run plan.
+6. Shows packages, oracle modules, file mounts, and satisfied/missing capability
    groups.
-6. For runnable Pyodide labs, uses `createAssignmentRubricExecRequest` to launch
+7. For runnable Pyodide labs, uses `createAssignmentRubricExecRequest` to launch
    the rubric through `Session.exec`.
-7. Offers the learner a runnable browser path, simulated path, or external-runner
+8. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

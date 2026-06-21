@@ -66,6 +66,7 @@ export {
   createAssignmentRunPlan,
   createAssignmentRubricExecRequest,
   evaluateAssignmentCapabilities,
+  materializeAssignmentMountPlan,
   parseAssignmentProfile,
   profileOracleJsModules,
   requiredAssignmentCapabilities,
@@ -89,5 +90,7 @@ export {
   type AssignmentMountFileRole,
   type AssignmentMountFile,
   type AssignmentDatasetMount,
+  type AssignmentMountContents,
+  type AssignmentMaterializeResult,
   type AssignmentProfileParseResult,
 } from "./assignment.js";
