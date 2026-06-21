@@ -10,12 +10,12 @@ First browser-safe slice:
   identity.
 - Use `docs/internal/cs149-assignment1.profile.json` for profile metadata,
   allowed tests, JS rubric path, and capability gates.
-- Use `@unlocalhosted/browsergrad-simulators` for:
-  - `simulateVectorizedClampedExp()` to check clamped exponentiation output,
+- Use `@unlocalhosted/browsergrad-primitives` for:
+  - `simulation.simulateVectorizedClampedExp()` to check clamped exponentiation output,
     tail masks, vector instruction traces, and active-lane utilization.
-  - `simulateVectorizedArraySum()` to check vector-width array-sum reductions
+  - `simulation.simulateVectorizedArraySum()` to check vector-width array-sum reductions
     and horizontal reduction rounds.
-  - `partitionStaticWork()` to check contiguous or cyclic static work
+  - `simulation.partitionStaticWork()` to check contiguous or cyclic static work
     decomposition for Mandelbrot/K-means-style thread labs.
 
 ## Upstream Signals

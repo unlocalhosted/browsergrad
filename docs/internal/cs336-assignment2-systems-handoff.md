@@ -49,14 +49,14 @@ Second slice:
   behavior, tied weights, and non-trainable parameters without real processes.
 - Preserve upstream test intent, but replace `torch.multiprocessing.spawn` and
   `torch.distributed` process groups with deterministic simulator calls.
-- Use `@unlocalhosted/browsergrad-simulators` for:
-  - `simulateDdpGradientSynchronization()` to average per-parameter gradients
+- Use `@unlocalhosted/browsergrad-primitives` for:
+  - `simulation.simulateDdpGradientSynchronization()` to average per-parameter gradients
     across rank-local minibatches.
-  - `simulateFsdpParameterSharding()` to create deterministic parameter shard
+  - `simulation.simulateFsdpParameterSharding()` to create deterministic parameter shard
     ownership plus all-gather expectations.
-  - `simulateFsdpGradientReduceScatter()` to reduce averaged gradients back to
+  - `simulation.simulateFsdpGradientReduceScatter()` to reduce averaged gradients back to
     owned shards or replicated parameters.
-  - `simulateShardedAdamWStep()` to prove rank-owned optimizer state produces
+  - `simulation.simulateShardedAdamWStep()` to prove rank-owned optimizer state produces
     the same full-parameter update as non-sharded AdamW.
 
 Future slice:

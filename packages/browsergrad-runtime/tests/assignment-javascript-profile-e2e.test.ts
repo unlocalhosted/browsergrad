@@ -6,17 +6,13 @@ import {
   runAssignmentJavascriptProfile,
   type AssignmentJavascriptRubric,
 } from "../src/index";
-import {
-  partitionStaticWork,
-  simulateVectorizedArraySum,
-  simulateVectorizedClampedExp,
-} from "../../browsergrad-simulators/src/index";
+import { simulation } from "@unlocalhosted/browsergrad-primitives";
 import { simulateCuda1DGrid } from "../../browsergrad-kernels/src/cuda_concepts";
 
 interface CpuParallelismOracle {
-  simulateVectorizedClampedExp: typeof simulateVectorizedClampedExp;
-  simulateVectorizedArraySum: typeof simulateVectorizedArraySum;
-  partitionStaticWork: typeof partitionStaticWork;
+  simulateVectorizedClampedExp: typeof simulation.simulateVectorizedClampedExp;
+  simulateVectorizedArraySum: typeof simulation.simulateVectorizedArraySum;
+  partitionStaticWork: typeof simulation.partitionStaticWork;
 }
 
 interface GpuPuzzleOracle {
@@ -177,9 +173,9 @@ describe("profile-driven JavaScript assignment e2e", () => {
       },
     };
     const oracle: CpuParallelismOracle = {
-      simulateVectorizedClampedExp,
-      simulateVectorizedArraySum,
-      partitionStaticWork,
+      simulateVectorizedClampedExp: simulation.simulateVectorizedClampedExp,
+      simulateVectorizedArraySum: simulation.simulateVectorizedArraySum,
+      partitionStaticWork: simulation.partitionStaticWork,
     };
     const rubric: AssignmentJavascriptRubric = (ctx) => {
       const cpuParallelism = ctx.oracle<CpuParallelismOracle>("_bg_cpu_parallelism");

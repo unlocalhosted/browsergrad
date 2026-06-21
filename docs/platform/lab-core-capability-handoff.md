@@ -59,12 +59,15 @@ For every lab profile, the platform should:
    traces before adding real Worker execution. Use
    `simulation.createTaskGraphSimulator()` for dependency-constrained task
    scheduling traces.
-   Use `simulateDdpGradientSynchronization()`,
-    `simulateFsdpParameterSharding()`, `simulateFsdpGradientReduceScatter()`,
-    and `simulateShardedAdamWStep()` for CS336 A2-style DDP/FSDP/sharded
-    optimizer fixtures before adding native distributed runners.
-    CS149 A1 CPU/SIMD labs can use `simulateVectorizedClampedExp()`,
-    `simulateVectorizedArraySum()`, and `partitionStaticWork()` for
+   Use `simulation.simulateDdpGradientSynchronization()`,
+   `simulation.simulateFsdpParameterSharding()`,
+   `simulation.simulateFsdpGradientReduceScatter()`, and
+   `simulation.simulateShardedAdamWStep()` for CS336 A2-style
+   DDP/FSDP/sharded optimizer fixtures before adding native distributed
+   runners.
+   CS149 A1 CPU/SIMD labs can use `simulation.simulateVectorizedClampedExp()`,
+   `simulation.simulateVectorizedArraySum()`, and
+   `simulation.partitionStaticWork()` for
     browser-safe lane-mask, vector-reduction, and static work-decomposition
     rubrics before C++/ISPC/native timing runners exist.
 15. For external/native labs, call `createAssignmentExternalRunnerRequest(plan)`
@@ -351,9 +354,10 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     rubrics before real Worker execution exists. CS336 A2 systems labs can also
     use the DDP/FSDP/sharded-optimizer simulator helpers for gradient averaging,
     all-gather/reduce-scatter, and AdamW state-sharding checks.
-    CS149 A1 CPU/SIMD labs can use the same package's
-    `simulateVectorizedClampedExp()`, `simulateVectorizedArraySum()`, and
-    `partitionStaticWork()` to check clamped exponentiation, vector sums,
+    CS149 A1 CPU/SIMD labs can use
+    `simulation.simulateVectorizedClampedExp()`,
+    `simulation.simulateVectorizedArraySum()`, and
+    `simulation.partitionStaticWork()` to check clamped exponentiation, vector sums,
     active-lane utilization, tails, and static work partitioning.
     Snapshot-backed labs can use `@unlocalhosted/browsergrad-primitives`
     `compareSnapshot()` for JSON/numeric fixture checks.

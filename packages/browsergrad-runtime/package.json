@@ -63,6 +63,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@unlocalhosted/browsergrad-primitives": "workspace:*",
     "oxlint": "^1.0.0",
     "pyodide": "^0.26.4",
     "typescript": "~6.0.0",
