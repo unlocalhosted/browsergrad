@@ -19,11 +19,12 @@ For every lab profile, the platform should:
 
 1. Parse the assignment profile with `parseAssignmentProfile`.
 2. Convert oracle specs with `profileOracleJsModules`.
-3. Evaluate capability readiness before launching the lab.
-4. Show missing capability gates as preflight status, not as runtime crashes.
-5. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
+3. Build a substrate-neutral run plan with `createAssignmentRunPlan`.
+4. Evaluate capability readiness before launching the lab.
+5. Show missing capability gates as preflight status, not as runtime crashes.
+6. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
    Worker mesh, external/native runner, or future custom compiler.
-6. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
+7. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
    implementation slice.
 
 ## Capability Vocabulary
@@ -116,7 +117,9 @@ BrowserGrad handoff: <lab or capability slice>
 After PRD-018 lands, craftingattention should add a preflight panel that:
 
 1. Reads an assignment profile.
-2. Calls BrowserGrad capability evaluation.
-3. Shows satisfied and missing capability groups.
-4. Offers the learner a runnable browser path, simulated path, or external-runner
+2. Builds a BrowserGrad run plan.
+3. Calls BrowserGrad capability evaluation from the run plan.
+4. Shows packages, oracle modules, file mounts, and satisfied/missing capability
+   groups.
+5. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

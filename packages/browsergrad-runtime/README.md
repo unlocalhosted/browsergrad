@@ -162,6 +162,7 @@ before launching a Worker:
 
 ```ts
 import {
+  createAssignmentRunPlan,
   evaluateAssignmentCapabilities,
   parseAssignmentProfile,
   requiredAssignmentCapabilities,
@@ -174,13 +175,22 @@ const required = requiredAssignmentCapabilities(parsed.profile);
 const preflight = evaluateAssignmentCapabilities(parsed.profile, {
   capabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
 });
+const plan = createAssignmentRunPlan(parsed.profile, {
+  capabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
+});
 
 console.log(required, preflight.ok, preflight.missingCapabilities);
+console.log(plan.session.packages, plan.files.rubricPath, plan.execution.allowedTests);
 ```
 
 Capability gates support `requires` for all-of requirements and `any_of` for
 alternative groups. Non-capability gates such as streaming and timeout remain
 rubric/watchdog checks.
+
+`createAssignmentRunPlan()` does not execute student code. It produces the
+platform handoff object: package preload list, JS oracle modules, resolved
+profile file paths, allowed test ids, timeout hints, dataset declarations,
+capability preflight, and behavioral gates.
 
 ## What this is, and is not
 

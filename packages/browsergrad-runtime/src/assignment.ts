@@ -80,6 +80,39 @@ export interface AssignmentCapabilityEvaluation {
   readonly gates: readonly AssignmentCapabilityGateEvaluation[];
 }
 
+export interface AssignmentRunPlan {
+  readonly id: string;
+  readonly profileVersion: string;
+  readonly requiresBrowsergrad: string;
+  readonly ok: boolean;
+  readonly session: AssignmentRunPlanSession;
+  readonly files: AssignmentRunPlanFiles;
+  readonly execution: AssignmentRunPlanExecution;
+  readonly datasets: readonly AssignmentDataset[];
+  readonly capabilityEvaluation: AssignmentCapabilityEvaluation;
+  readonly behavioralGates: readonly AssignmentGateSpec[];
+}
+
+export interface AssignmentRunPlanSession {
+  readonly packages: readonly string[];
+  readonly jsModules: readonly PyodideJsModule[];
+}
+
+export interface AssignmentRunPlanFiles {
+  readonly root: string;
+  readonly rubricPath: string;
+  readonly starterPath?: string;
+  readonly referencePath?: string;
+  readonly fixturesPath?: string;
+}
+
+export interface AssignmentRunPlanExecution {
+  readonly allowedTests: readonly string[];
+  readonly setupTimeoutMs?: number;
+  readonly testTimeoutMs?: number;
+  readonly workerTimeoutMs?: number;
+}
+
 export type AssignmentProfileParseResult =
   | { ok: true; profile: AssignmentProfile }
   | { ok: false; errors: readonly string[] };
@@ -222,6 +255,51 @@ export function requiredAssignmentCapabilities(
         return [...requires, ...anyOf.flat()];
       }),
   );
+}
+
+export function createAssignmentRunPlan(
+  profile: AssignmentProfile,
+  environment: AssignmentCapabilityEnvironment,
+): AssignmentRunPlan {
+  const capabilityEvaluation = evaluateAssignmentCapabilities(profile, environment);
+  return {
+    id: profile.id,
+    profileVersion: profile.version,
+    requiresBrowsergrad: profile.requires_browsergrad,
+    ok: capabilityEvaluation.ok,
+    session: {
+      packages: profile.runtime_packages,
+      jsModules: profileOracleJsModules(profile),
+    },
+    files: {
+      root: profile.files.root,
+      rubricPath: joinAssignmentPath(profile.files.root, profile.files.rubric_path),
+      ...(profile.files.starter_path
+        ? { starterPath: joinAssignmentPath(profile.files.root, profile.files.starter_path) }
+        : {}),
+      ...(profile.files.reference_path
+        ? { referencePath: joinAssignmentPath(profile.files.root, profile.files.reference_path) }
+        : {}),
+      ...(profile.files.fixtures_path
+        ? { fixturesPath: joinAssignmentPath(profile.files.root, profile.files.fixtures_path) }
+        : {}),
+    },
+    execution: {
+      allowedTests: profile.allowed_tests,
+      ...(profile.timeouts.setup_ms !== undefined
+        ? { setupTimeoutMs: profile.timeouts.setup_ms }
+        : {}),
+      ...(profile.timeouts.test_ms !== undefined
+        ? { testTimeoutMs: profile.timeouts.test_ms }
+        : {}),
+      ...(profile.timeouts.worker_ms !== undefined
+        ? { workerTimeoutMs: profile.timeouts.worker_ms }
+        : {}),
+    },
+    datasets: profile.datasets,
+    capabilityEvaluation,
+    behavioralGates: profile.gates.filter((gate) => gate.kind !== "capability"),
+  };
 }
 
 function readString(
@@ -402,6 +480,11 @@ function readCapabilityAlternatives(value: unknown): string[][] {
 
 function uniqueSorted(values: readonly string[]): string[] {
   return [...new Set(values)].sort();
+}
+
+function joinAssignmentPath(root: string, path: string): string {
+  if (path.startsWith("/")) return path;
+  return `${root.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
 }
 
 function readStringArray(

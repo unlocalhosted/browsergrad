@@ -62,6 +62,7 @@ export {
 } from "./lab.js";
 
 export {
+  createAssignmentRunPlan,
   evaluateAssignmentCapabilities,
   parseAssignmentProfile,
   profileOracleJsModules,
@@ -77,5 +78,9 @@ export {
   type AssignmentCapabilityEnvironment,
   type AssignmentCapabilityGateEvaluation,
   type AssignmentCapabilityEvaluation,
+  type AssignmentRunPlan,
+  type AssignmentRunPlanSession,
+  type AssignmentRunPlanFiles,
+  type AssignmentRunPlanExecution,
   type AssignmentProfileParseResult,
 } from "./assignment.js";

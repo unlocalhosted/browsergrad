@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createAssignmentRunPlan,
   evaluateAssignmentCapabilities,
   parseAssignmentProfile,
   profileOracleJsModules,
@@ -202,5 +203,67 @@ describe("parseAssignmentProfile", () => {
       "webgpu",
       "wgsl-kernel",
     ]);
+  });
+
+  it("creates a substrate-neutral run plan from profile data", () => {
+    const result = parseAssignmentProfile(VALID_PROFILE);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(
+      createAssignmentRunPlan(result.profile, {
+        capabilities: ["pyodide"],
+      }),
+    ).toEqual({
+      id: "cs336-assignment1",
+      profileVersion: "1.0.0",
+      requiresBrowsergrad: "^0.1.0",
+      ok: true,
+      session: {
+        packages: ["numpy", "regex", "pytest"],
+        jsModules: [
+          {
+            name: "_bg_tokenizers",
+            importURL: "/assets/tokenizer-oracle.js",
+            exportName: "oracle",
+          },
+        ],
+      },
+      files: {
+        root: "/assignments/cs336-assignment1",
+        rubricPath: "/assignments/cs336-assignment1/rubric.py",
+        starterPath: "/assignments/cs336-assignment1/assignment.py",
+        referencePath: "/assignments/cs336-assignment1/reference.py",
+        fixturesPath: "/assignments/cs336-assignment1/fixtures",
+      },
+      execution: {
+        allowedTests: ["test_train_bpe_tiny", "test_encode_iterable_streams"],
+        setupTimeoutMs: 10_000,
+        testTimeoutMs: 30_000,
+        workerTimeoutMs: 60_000,
+      },
+      datasets: [{ name: "tiny", url: "/fixtures/tiny.txt", hash: "sha256:abc" }],
+      capabilityEvaluation: {
+        ok: true,
+        missingCapabilities: [],
+        gates: [
+          {
+            name: "browser_runtime",
+            ok: true,
+            requires: ["pyodide"],
+            anyOf: [],
+            missingRequired: [],
+            missingAnyOf: [],
+          },
+        ],
+      },
+      behavioralGates: [
+        {
+          name: "encode_iterable_streaming",
+          kind: "streaming",
+          options: { max_chunks_before_first_yield: 2 },
+        },
+      ],
+    });
   });
 });

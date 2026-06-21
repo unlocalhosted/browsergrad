@@ -28,8 +28,9 @@ library API and let the profile opt into it.
 Use `parseAssignmentProfile()` to validate this shape,
 `requiredAssignmentCapabilities()` to list the profile's preflight needs,
 `evaluateAssignmentCapabilities()` to compare those needs against the current
-platform substrate, and `profileOracleJsModules()` to convert oracle
-declarations into `createSession({ jsModules })` registrations.
+platform substrate, `profileOracleJsModules()` to convert oracle declarations
+into `createSession({ jsModules })` registrations, and
+`createAssignmentRunPlan()` to hand the platform a complete launch recipe.
 
 ## Files And Fixtures
 
