@@ -163,6 +163,7 @@ before launching a Worker:
 ```ts
 import {
   createAssignmentRunPlan,
+  createAssignmentRubricExecRequest,
   evaluateAssignmentCapabilities,
   parseAssignmentProfile,
   requiredAssignmentCapabilities,
@@ -178,9 +179,11 @@ const preflight = evaluateAssignmentCapabilities(parsed.profile, {
 const plan = createAssignmentRunPlan(parsed.profile, {
   capabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
 });
+const execRequest = createAssignmentRubricExecRequest(plan);
 
 console.log(required, preflight.ok, preflight.missingCapabilities);
 console.log(plan.session.packages, plan.files.rubricPath, plan.execution.allowedTests);
+await session.exec(execRequest);
 ```
 
 Capability gates support `requires` for all-of requirements and `any_of` for
@@ -191,6 +194,11 @@ rubric/watchdog checks.
 platform handoff object: package preload list, JS oracle modules, resolved
 profile file paths, allowed test ids, timeout hints, dataset declarations,
 capability preflight, and behavioral gates.
+
+`createAssignmentRubricExecRequest()` turns that plan into the minimal
+`Session.exec` request for rubric execution. It sets assignment metadata in
+environment variables, puts the assignment root on `sys.path`, runs the resolved
+rubric path, and uses the profile's test timeout.
 
 ## What this is, and is not
 

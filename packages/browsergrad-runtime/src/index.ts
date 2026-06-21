@@ -63,6 +63,7 @@ export {
 
 export {
   createAssignmentRunPlan,
+  createAssignmentRubricExecRequest,
   evaluateAssignmentCapabilities,
   parseAssignmentProfile,
   profileOracleJsModules,
@@ -82,5 +83,6 @@ export {
   type AssignmentRunPlanSession,
   type AssignmentRunPlanFiles,
   type AssignmentRunPlanExecution,
+  type AssignmentRubricExecRequest,
   type AssignmentProfileParseResult,
 } from "./assignment.js";

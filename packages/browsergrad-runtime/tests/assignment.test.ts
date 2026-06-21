@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   createAssignmentRunPlan,
+  createAssignmentRubricExecRequest,
   evaluateAssignmentCapabilities,
   parseAssignmentProfile,
   profileOracleJsModules,
@@ -264,6 +265,29 @@ describe("parseAssignmentProfile", () => {
           options: { max_chunks_before_first_yield: 2 },
         },
       ],
+    });
+  });
+
+  it("creates a rubric exec request from a run plan", () => {
+    const result = parseAssignmentProfile(VALID_PROFILE);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const plan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["pyodide"],
+    });
+
+    expect(createAssignmentRubricExecRequest(plan)).toEqual({
+      code: [
+        "import json, os, runpy, sys",
+        'assignment_root = "/assignments/cs336-assignment1"',
+        "if assignment_root not in sys.path:",
+        "    sys.path.insert(0, assignment_root)",
+        'os.environ["BROWSERGRAD_ASSIGNMENT_ID"] = "cs336-assignment1"',
+        'os.environ["BROWSERGRAD_ALLOWED_TESTS_JSON"] = "[\\"test_train_bpe_tiny\\",\\"test_encode_iterable_streams\\"]"',
+        'runpy.run_path("/assignments/cs336-assignment1/rubric.py", run_name="__main__")',
+      ].join("\n"),
+      timeoutMs: 30_000,
     });
   });
 });

@@ -113,6 +113,11 @@ export interface AssignmentRunPlanExecution {
   readonly workerTimeoutMs?: number;
 }
 
+export interface AssignmentRubricExecRequest {
+  readonly code: string;
+  readonly timeoutMs?: number;
+}
+
 export type AssignmentProfileParseResult =
   | { ok: true; profile: AssignmentProfile }
   | { ok: false; errors: readonly string[] };
@@ -299,6 +304,26 @@ export function createAssignmentRunPlan(
     datasets: profile.datasets,
     capabilityEvaluation,
     behavioralGates: profile.gates.filter((gate) => gate.kind !== "capability"),
+  };
+}
+
+export function createAssignmentRubricExecRequest(
+  plan: AssignmentRunPlan,
+): AssignmentRubricExecRequest {
+  const lines = [
+    "import json, os, runpy, sys",
+    `assignment_root = ${JSON.stringify(plan.files.root)}`,
+    "if assignment_root not in sys.path:",
+    "    sys.path.insert(0, assignment_root)",
+    `os.environ["BROWSERGRAD_ASSIGNMENT_ID"] = ${JSON.stringify(plan.id)}`,
+    `os.environ["BROWSERGRAD_ALLOWED_TESTS_JSON"] = ${JSON.stringify(JSON.stringify(plan.execution.allowedTests))}`,
+    `runpy.run_path(${JSON.stringify(plan.files.rubricPath)}, run_name="__main__")`,
+  ];
+  return {
+    code: lines.join("\n"),
+    ...(plan.execution.testTimeoutMs !== undefined
+      ? { timeoutMs: plan.execution.testTimeoutMs }
+      : {}),
   };
 }
 

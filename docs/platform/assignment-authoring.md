@@ -31,6 +31,8 @@ Use `parseAssignmentProfile()` to validate this shape,
 platform substrate, `profileOracleJsModules()` to convert oracle declarations
 into `createSession({ jsModules })` registrations, and
 `createAssignmentRunPlan()` to hand the platform a complete launch recipe.
+Use `createAssignmentRubricExecRequest()` when the platform is ready to run the
+profile's rubric through `Session.exec`.
 
 ## Files And Fixtures
 

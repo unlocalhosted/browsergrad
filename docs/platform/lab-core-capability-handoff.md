@@ -24,7 +24,9 @@ For every lab profile, the platform should:
 5. Show missing capability gates as preflight status, not as runtime crashes.
 6. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
    Worker mesh, external/native runner, or future custom compiler.
-7. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
+7. For Pyodide-backed labs, create the rubric execution request with
+   `createAssignmentRubricExecRequest`.
+8. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
    implementation slice.
 
 ## Capability Vocabulary
@@ -121,5 +123,7 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
 3. Calls BrowserGrad capability evaluation from the run plan.
 4. Shows packages, oracle modules, file mounts, and satisfied/missing capability
    groups.
-5. Offers the learner a runnable browser path, simulated path, or external-runner
+5. For runnable Pyodide labs, uses `createAssignmentRubricExecRequest` to launch
+   the rubric through `Session.exec`.
+6. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.
