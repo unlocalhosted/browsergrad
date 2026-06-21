@@ -43,6 +43,8 @@ learner-facing preflight state: `runnable`, `simulated`, `external-only`, or
 `blocked`.
 Use `assignmentRubricKind()` to route Python, JavaScript, and unknown rubric
 paths to the right execution substrate.
+Use `assignmentRunnerRoute(plan)` when the platform wants one branch key:
+`pyodide`, `javascript`, `external`, `unsupported`, or `blocked`.
 Use `createAssignmentMountPlan()` to derive the files and dataset fixtures that
 must exist in the runtime filesystem.
 Use `evaluateAssignmentMountContents(mountPlan, contents)` before writing files
@@ -183,6 +185,10 @@ group by mode: `browser` before `simulated` before `external`.
 Each capability gate evaluation includes gate-level `status`, `selectedAnyOf`,
 and `selectedCapabilities`; use those fields for preflight rows instead of
 duplicating route-choice logic in the platform.
+Use `assignmentRunnerRoute(plan)` or `report.runnerRoute` for the final launch
+branch. A simulated-but-runnable Python lab still routes to `pyodide`; an
+external-only plan routes to `external`; unknown rubric extensions route to
+`unsupported`.
 
 ## New Assignment Checklist
 
@@ -190,7 +196,7 @@ duplicating route-choice logic in the platform.
 2. Keep reusable helpers in a package and assignment-specific wiring in docs or
    profile code.
 3. Classify the rubric kind and route non-Python rubrics to JS/WebGPU/native
-   substrates instead of Pyodide.
+   substrates instead of Pyodide with `assignmentRunnerRoute()`.
 4. Port upstream tests only when their assumptions are browser-safe.
 5. Replace native OS resource checks with behavior gates.
 6. Add unit tests for profile validation and at least one platform integration

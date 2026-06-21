@@ -27,6 +27,9 @@ For every lab profile, the platform should:
    `createAssignmentPreflightReport(profile, environment)` when the platform
    wants the run plan, readiness, rubric kind, required capabilities, and mount
    plan together.
+   Use `assignmentRunnerRoute(plan)` or `report.runnerRoute` for the final
+   launch branch: `pyodide`, `javascript`, `external`, `unsupported`, or
+   `blocked`.
 7. Show `runnable`, `simulated`, `external-only`, or `blocked` as preflight
    status, not as runtime crashes.
 8. Build a file/dataset mount plan with `createAssignmentMountPlan`.
@@ -202,6 +205,7 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
    capabilities, and missing capabilities.
 6. Or uses `createAssignmentPreflightReport(profile, environment)` to get all
    preflight fields in one object.
+   Read `report.runnerRoute.target` to choose launch controls.
 7. Renders `plan.capabilityEvaluation.gates` as preflight rows using each gate's
    `status`, `selectedAnyOf`, `selectedCapabilities`, and missing fields.
 8. Builds the BrowserGrad mount plan for runnable or inspectable labs.

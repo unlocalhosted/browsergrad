@@ -41,6 +41,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `createAssignmentPreflightReport(profile, environment)` bundles run plan,
   rubric kind, readiness, required capabilities, and mount plan for platform
   preflight panels.
+- `assignmentRunnerRoute(plan)` maps a run plan to `pyodide`, `javascript`,
+  `external`, `unsupported`, or `blocked`, and preflight reports now include
+  that route.
 - Capability `any_of` evaluation now prefers the strongest satisfied path by
   mode: browser, then simulated, then external.
 - Capability gate evaluations now expose gate-level `status`, `selectedAnyOf`,

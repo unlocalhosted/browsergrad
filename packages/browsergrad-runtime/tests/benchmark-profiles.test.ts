@@ -9,6 +9,7 @@ import {
   parseAssignmentProfile,
   requiredAssignmentCapabilities,
   type AssignmentRunReadinessStatus,
+  type AssignmentRunnerTarget,
 } from "../src/index";
 
 const PROFILE_FILES = [
@@ -89,6 +90,19 @@ const EXPECTED_BROWSER_TEACHING_READINESS: Record<
   "cs149gpt.profile.json": "simulated",
 };
 
+const EXPECTED_BROWSER_TEACHING_RUNNER: Record<string, AssignmentRunnerTarget> = {
+  "cs336-assignment1.profile.json": "pyodide",
+  "cs336-assignment2-systems.profile.json": "pyodide",
+  "cs336-assignment3-scaling.profile.json": "pyodide",
+  "cs336-assignment4-data.profile.json": "pyodide",
+  "cs336-assignment5-alignment.profile.json": "pyodide",
+  "gpu-puzzles.profile.json": "javascript",
+  "cs149-assignment1.profile.json": "javascript",
+  "cs149-assignment2.profile.json": "javascript",
+  "cs149-assignment3.profile.json": "javascript",
+  "cs149gpt.profile.json": "pyodide",
+};
+
 describe("benchmark assignment profiles", () => {
   for (const file of PROFILE_FILES) {
     it(`parses ${file} and declares capability requirements`, () => {
@@ -126,6 +140,7 @@ describe("benchmark assignment profiles", () => {
       );
 
       expect(report.readiness.status).toBe(EXPECTED_BROWSER_TEACHING_READINESS[file]);
+      expect(report.runnerRoute.target).toBe(EXPECTED_BROWSER_TEACHING_RUNNER[file]);
       expect(report.requiredCapabilities).toEqual(
         requiredAssignmentCapabilities(result.profile),
       );

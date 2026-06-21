@@ -176,6 +176,7 @@ before launching a Worker:
 import {
   assignmentRubricKind,
   assignmentRunReadiness,
+  assignmentRunnerRoute,
   createAssignmentCapabilityEnvironment,
   createAssignmentMountPlan,
   createAssignmentPreflightReport,
@@ -200,6 +201,7 @@ const required = requiredAssignmentCapabilities(parsed.profile);
 const preflight = evaluateAssignmentCapabilities(parsed.profile, environment);
 const plan = createAssignmentRunPlan(parsed.profile, environment);
 const report = createAssignmentPreflightReport(parsed.profile, environment);
+const route = assignmentRunnerRoute(plan);
 if (!plan.ok) {
   throw new Error(`Missing capabilities: ${plan.capabilityEvaluation.missingCapabilities.join(", ")}`);
 }
@@ -211,7 +213,7 @@ const readiness = assignmentRunReadiness(plan);
 console.log(required, preflight.ok, preflight.missingCapabilities);
 console.log(plan.session.packages, plan.files.rubricPath, plan.execution.allowedTests);
 console.log(readiness.status, rubricKind, mounts.files, mounts.datasets);
-console.log(report.readiness.status, report.rubricKind, report.mountPlan.files);
+console.log(route.target, report.runnerRoute.target, report.mountPlan.files);
 const fileContents: Record<string, string | Uint8Array> = {
   [plan.files.rubricPath]: rubricSource,
 };
@@ -247,8 +249,13 @@ status: `runnable`, `simulated`, `external-only`, or `blocked`. When multiple
 `any_of` alternatives are available, BrowserGrad selects the strongest path by
 mode: `browser`, then `simulated`, then `external`.
 
+`assignmentRunnerRoute(plan)` maps preflight output to a runner target:
+`pyodide`, `javascript`, `external`, `unsupported`, or `blocked`. Use this for
+platform branching before calling `runAssignmentRubric()` or
+`runAssignmentJavascriptRubric()`.
+
 `createAssignmentPreflightReport(profile, environment)` bundles the common
-platform preflight calls into `{ plan, rubricKind, readiness,
+platform preflight calls into `{ plan, rubricKind, readiness, runnerRoute,
 requiredCapabilities, mountPlan }`. Use it when the UI needs a single readonly
 object before fetching fixtures, mounting files, or launching code.
 Each capability gate evaluation includes `status`, `selectedAnyOf`, and

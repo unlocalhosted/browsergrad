@@ -64,6 +64,7 @@ export {
 export {
   assignmentRubricKind,
   assignmentRunReadiness,
+  assignmentRunnerRoute,
   createAssignmentCapabilityEnvironment,
   createAssignmentMountPreflightReport,
   createAssignmentPreflightReport,
@@ -94,7 +95,9 @@ export {
   type AssignmentCapabilityGateEvaluation,
   type AssignmentCapabilityEvaluation,
   type AssignmentRunReadinessStatus,
+  type AssignmentRunnerTarget,
   type AssignmentRunReadiness,
+  type AssignmentRunnerRoute,
   type AssignmentPreflightReport,
   type AssignmentRunPlan,
   type AssignmentRunPlanSession,

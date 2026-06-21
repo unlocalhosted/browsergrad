@@ -111,6 +111,13 @@ export type AssignmentRunReadinessStatus =
   | "external-only"
   | "blocked";
 
+export type AssignmentRunnerTarget =
+  | "pyodide"
+  | "javascript"
+  | "external"
+  | "unsupported"
+  | "blocked";
+
 export interface AssignmentRunReadiness {
   readonly status: AssignmentRunReadinessStatus;
   readonly summary: string;
@@ -120,10 +127,20 @@ export interface AssignmentRunReadiness {
   readonly externalCapabilities: readonly string[];
 }
 
+export interface AssignmentRunnerRoute {
+  readonly target: AssignmentRunnerTarget;
+  readonly readinessStatus: AssignmentRunReadinessStatus;
+  readonly rubricKind: AssignmentRubricKind;
+  readonly message: string;
+  readonly missingCapabilities: readonly string[];
+  readonly selectedCapabilities: readonly string[];
+}
+
 export interface AssignmentPreflightReport {
   readonly plan: AssignmentRunPlan;
   readonly rubricKind: AssignmentRubricKind;
   readonly readiness: AssignmentRunReadiness;
+  readonly runnerRoute: AssignmentRunnerRoute;
   readonly requiredCapabilities: readonly string[];
   readonly mountPlan: AssignmentMountPlan;
 }
@@ -514,12 +531,70 @@ export function createAssignmentPreflightReport(
   environment: AssignmentCapabilityEnvironment,
 ): AssignmentPreflightReport {
   const plan = createAssignmentRunPlan(profile, environment);
+  const rubricKind = assignmentRubricKind(plan);
+  const readiness = assignmentRunReadiness(plan);
   return {
     plan,
-    rubricKind: assignmentRubricKind(plan),
-    readiness: assignmentRunReadiness(plan),
+    rubricKind,
+    readiness,
+    runnerRoute: assignmentRunnerRoute(plan),
     requiredCapabilities: requiredAssignmentCapabilities(profile),
     mountPlan: createAssignmentMountPlan(plan),
+  };
+}
+
+export function assignmentRunnerRoute(
+  plan: AssignmentRunPlan,
+): AssignmentRunnerRoute {
+  const readiness = assignmentRunReadiness(plan);
+  const rubricKind = assignmentRubricKind(plan);
+  if (readiness.status === "blocked") {
+    return {
+      target: "blocked",
+      readinessStatus: readiness.status,
+      rubricKind,
+      message: readiness.summary,
+      missingCapabilities: readiness.missingCapabilities,
+      selectedCapabilities: readiness.selectedCapabilities,
+    };
+  }
+  if (readiness.status === "external-only") {
+    return {
+      target: "external",
+      readinessStatus: readiness.status,
+      rubricKind,
+      message: readiness.summary,
+      missingCapabilities: readiness.missingCapabilities,
+      selectedCapabilities: readiness.selectedCapabilities,
+    };
+  }
+  if (rubricKind === "python") {
+    return {
+      target: "pyodide",
+      readinessStatus: readiness.status,
+      rubricKind,
+      message: "assignment routes to Pyodide rubric runner",
+      missingCapabilities: readiness.missingCapabilities,
+      selectedCapabilities: readiness.selectedCapabilities,
+    };
+  }
+  if (rubricKind === "javascript") {
+    return {
+      target: "javascript",
+      readinessStatus: readiness.status,
+      rubricKind,
+      message: "assignment routes to JavaScript rubric runner",
+      missingCapabilities: readiness.missingCapabilities,
+      selectedCapabilities: readiness.selectedCapabilities,
+    };
+  }
+  return {
+    target: "unsupported",
+    readinessStatus: readiness.status,
+    rubricKind,
+    message: `assignment rubric kind is not supported by built-in runners: ${rubricKind}`,
+    missingCapabilities: readiness.missingCapabilities,
+    selectedCapabilities: readiness.selectedCapabilities,
   };
 }
 

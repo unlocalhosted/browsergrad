@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assignmentRubricKind,
   assignmentRunReadiness,
+  assignmentRunnerRoute,
   createAssignmentCapabilityEnvironment,
   createAssignmentPreflightReport,
   createAssignmentMountPreflightReport,
@@ -486,6 +487,14 @@ describe("parseAssignmentProfile", () => {
       simulatedCapabilities: [],
       externalCapabilities: [],
     });
+    expect(report.runnerRoute).toEqual({
+      target: "pyodide",
+      readinessStatus: "runnable",
+      rubricKind: "python",
+      message: "assignment routes to Pyodide rubric runner",
+      missingCapabilities: [],
+      selectedCapabilities: ["pyodide"],
+    });
     expect(report.requiredCapabilities).toEqual(["pyodide"]);
     expect(report.mountPlan.datasets).toEqual([
       {
@@ -538,6 +547,90 @@ describe("parseAssignmentProfile", () => {
         createAssignmentRunPlan(unknownResult.profile, { capabilities: ["pyodide"] }),
       ),
     ).toBe("unknown");
+  });
+
+  it("routes run plans to built-in or external runner targets", () => {
+    const pythonResult = parseAssignmentProfile(VALID_PROFILE);
+    expect(pythonResult.ok).toBe(true);
+    if (!pythonResult.ok) return;
+
+    const jsResult = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      files: {
+        ...VALID_PROFILE.files,
+        rubric_path: "rubric.js",
+      },
+      gates: [
+        {
+          name: "js_rubric_runtime",
+          kind: "capability",
+          options: { requires: ["javascript-rubric", "webgpu"] },
+        },
+      ],
+    });
+    expect(jsResult.ok).toBe(true);
+    if (!jsResult.ok) return;
+
+    const unknownResult = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      files: {
+        ...VALID_PROFILE.files,
+        rubric_path: "rubric.wasm",
+      },
+    });
+    expect(unknownResult.ok).toBe(true);
+    if (!unknownResult.ok) return;
+
+    expect(
+      assignmentRunnerRoute(
+        createAssignmentRunPlan(pythonResult.profile, { capabilities: ["pyodide"] }),
+      ),
+    ).toEqual({
+      target: "pyodide",
+      readinessStatus: "runnable",
+      rubricKind: "python",
+      message: "assignment routes to Pyodide rubric runner",
+      missingCapabilities: [],
+      selectedCapabilities: ["pyodide"],
+    });
+
+    expect(
+      assignmentRunnerRoute(
+        createAssignmentRunPlan(jsResult.profile, {
+          capabilities: ["javascript-rubric", "webgpu"],
+          capabilityModes: {
+            "javascript-rubric": "browser",
+            webgpu: "browser",
+          },
+        }),
+      ).target,
+    ).toBe("javascript");
+
+    expect(
+      assignmentRunnerRoute(
+        createAssignmentRunPlan(jsResult.profile, {
+          capabilities: ["javascript-rubric", "webgpu"],
+          capabilityModes: {
+            "javascript-rubric": "browser",
+            webgpu: "external",
+          },
+        }),
+      ).target,
+    ).toBe("external");
+
+    expect(
+      assignmentRunnerRoute(
+        createAssignmentRunPlan(jsResult.profile, {
+          capabilities: ["javascript-rubric"],
+        }),
+      ).target,
+    ).toBe("blocked");
+
+    expect(
+      assignmentRunnerRoute(
+        createAssignmentRunPlan(unknownResult.profile, { capabilities: ["pyodide"] }),
+      ).target,
+    ).toBe("unsupported");
   });
 
   it("creates a rubric exec request from a run plan", () => {
