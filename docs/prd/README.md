@@ -38,6 +38,8 @@ Every PRD includes: background with cited evidence, user stories, architecture (
 ## How to use these PRDs
 
 - Before starting implementation on a feature, **read the PRD end-to-end**.
+- For new PRDs, follow the research-gated workflow in
+  [`../platform/research-gated-prd-workflow.md`](../platform/research-gated-prd-workflow.md).
 - If the PRD has open questions, resolve them with the user before coding.
 - If implementation diverges from the PRD (a decision changes), update the PRD AND log the decision in [../../ARCHITECTURE.md](../../ARCHITECTURE.md).
 - Each PRD has measurable acceptance criteria. Don't ship the feature until they pass.
