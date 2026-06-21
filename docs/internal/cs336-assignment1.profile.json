@@ -1,0 +1,62 @@
+{
+  "id": "cs336-assignment1",
+  "version": "0.1.0",
+  "requires_browsergrad": "^0.1.0",
+  "runtime_packages": ["numpy", "regex", "pytest"],
+  "files": {
+    "root": "/assignments/cs336-assignment1",
+    "rubric_path": "rubric.py",
+    "starter_path": "assignment.py",
+    "reference_path": "reference.py",
+    "fixtures_path": "fixtures"
+  },
+  "timeouts": {
+    "setup_ms": 10000,
+    "test_ms": 30000,
+    "worker_ms": 60000
+  },
+  "allowed_tests": [
+    "test_train_bpe_tiny",
+    "test_train_bpe_special_tokens",
+    "test_tokenizer_roundtrip",
+    "test_encode_iterable_streams"
+  ],
+  "oracles": [
+    {
+      "name": "_bg_tokenizers",
+      "js_module": "/assignments/cs336-assignment1/oracles/tokenizers.js",
+      "export_name": "oracle"
+    }
+  ],
+  "gates": [
+    {
+      "name": "encode_iterable_streaming",
+      "kind": "streaming",
+      "options": {
+        "max_chunks_before_first_yield": 2,
+        "chunk_count": 64
+      }
+    },
+    {
+      "name": "student_code_timeout",
+      "kind": "timeout",
+      "options": {
+        "timeout_ms": 30000
+      }
+    },
+    {
+      "name": "no_eager_file_read",
+      "kind": "forbidden-read",
+      "options": {
+        "methods": ["read", "readlines"]
+      }
+    }
+  ],
+  "datasets": [
+    {
+      "name": "tinystories-sample",
+      "url": "/assignments/cs336-assignment1/fixtures/tinystories-sample.txt",
+      "hash": "sha256:replace-with-fixture-hash"
+    }
+  ]
+}

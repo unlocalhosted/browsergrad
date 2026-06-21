@@ -22,6 +22,10 @@ Profiles should not encode course-specific assumptions in `runtime`, `grad`,
 `jit`, or `kernels`. If a behavior is broadly reusable, expose it as a small
 library API and let the profile opt into it.
 
+Use `parseAssignmentProfile()` to validate this shape and
+`profileOracleJsModules()` to convert oracle declarations into
+`createSession({ jsModules })` registrations.
+
 ## Files And Fixtures
 
 Mount assignment files under a dedicated root such as `/assignments/<id>/`.
@@ -35,7 +39,8 @@ signals, Linux `/proc`, or process RSS behavior inside Pyodide.
 
 ## JS Oracles From Pyodide
 
-The platform may register JS modules into Pyodide with `registerJsModule`.
+The platform may register JS modules into Pyodide with `registerJsModule` via
+`createSession({ jsModules })`.
 Python rubrics can import those modules through Pyodide's JS bridge and call
 small deterministic helpers.
 

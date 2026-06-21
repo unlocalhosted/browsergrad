@@ -46,6 +46,7 @@ profile record, not root agent behavior.
 
 ## Platform Wiring
 
+- Start from `docs/internal/cs336-assignment1.profile.json`.
 - Use `@unlocalhosted/browsergrad-tokenizers` as the TS source of truth.
 - Register a small JS oracle module into Pyodide for Python rubrics.
 - Mount assignment files under `/assignments/cs336-assignment1/`.
@@ -63,3 +64,25 @@ profile record, not root agent behavior.
 - Linux `resource.setrlimit` behavior.
 - `multiprocessing` process workers.
 - Machine-specific BPE training time and memory budgets.
+
+## Rubric Sketch
+
+Python rubrics should call the registered JS oracle through Pyodide's JS bridge
+for exact tokenizer checks, then report through `browsergrad` assertions.
+
+```py
+from js import _bg_tokenizers
+import browsergrad as bg
+
+model = _bg_tokenizers.train_cs336_bpe(corpus, vocab_size, special_tokens)
+actual = student.run_train_bpe(input_path, vocab_size, special_tokens)
+
+if actual["merges"] == model["merges"]:
+    bg.assert_pass("test_train_bpe_tiny")
+else:
+    bg.assert_fail("test_train_bpe_tiny", "wrong BPE merges")
+```
+
+For streaming checks, use a rubric iterable that raises if the implementation
+consumes more than the profile's `max_chunks_before_first_yield` before yielding
+the first token.
