@@ -53,6 +53,7 @@ export const CS336_BPE_EXAMPLE = {
 } as const;
 
 const UTF8_ENCODER = new TextEncoder();
+const UTF8_DECODER = new TextDecoder();
 
 interface WordEntry {
   tokens: number[];
@@ -117,34 +118,108 @@ export function trainByteBpe(
 }
 
 export function encodeByteBpe(
-  _text: string,
-  _model: ByteBpeModel,
+  text: string,
+  model: ByteBpeModel,
 ): number[] {
-  throw new Error("encodeByteBpe is not implemented yet");
+  const out: number[] = [];
+  const byteToId = buildByteToId(model.vocab);
+  const specialTokenIds = buildSpecialTokenIds(model);
+  const pattern = new RegExp(model.pretokenizerPattern, "gu");
+
+  for (const segment of splitPreservingSpecialTokens(text, model.specialTokens)) {
+    if (segment.kind === "special") {
+      const id = specialTokenIds.get(segment.text);
+      if (id === undefined) {
+        throw new Error(`special token is missing from vocabulary: ${segment.text}`);
+      }
+      out.push(id);
+      continue;
+    }
+
+    pattern.lastIndex = 0;
+    for (const match of segment.text.matchAll(pattern)) {
+      const pretoken = match[0];
+      if (pretoken.length === 0) continue;
+      const bytes = UTF8_ENCODER.encode(pretoken);
+      let ids = [...bytes];
+      ids = applyMerges(ids, model, byteToId);
+      out.push(...ids);
+    }
+  }
+
+  return out;
 }
 
 export function decodeByteBpe(
-  _ids: readonly number[],
-  _model: ByteBpeModel,
+  ids: readonly number[],
+  model: ByteBpeModel,
 ): string {
-  throw new Error("decodeByteBpe is not implemented yet");
+  const chunks: Uint8Array[] = [];
+  let totalLength = 0;
+  for (const id of ids) {
+    const bytes = model.vocab.get(id);
+    if (!bytes) {
+      throw new Error(`unknown token id: ${id}`);
+    }
+    chunks.push(bytes);
+    totalLength += bytes.length;
+  }
+
+  const joined = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    joined.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return UTF8_DECODER.decode(joined);
 }
 
 export function serializeByteBpeModel(
-  _model: ByteBpeModel,
+  model: ByteBpeModel,
 ): SerializedByteBpeModel {
-  throw new Error("serializeByteBpeModel is not implemented yet");
+  const vocab: Record<string, readonly number[]> = {};
+  for (const [id, bytes] of [...model.vocab.entries()].sort((a, b) => a[0] - b[0])) {
+    vocab[String(id)] = [...bytes];
+  }
+  return {
+    vocab,
+    merges: model.merges.map(([left, right]) => [[...left], [...right]]),
+    specialTokens: [...model.specialTokens],
+    pretokenizerPattern: model.pretokenizerPattern,
+  };
 }
 
 export function deserializeByteBpeModel(
-  _model: SerializedByteBpeModel,
+  model: SerializedByteBpeModel,
 ): ByteBpeModel {
-  throw new Error("deserializeByteBpeModel is not implemented yet");
+  const vocab = new Map<number, Uint8Array>();
+  for (const [idText, bytes] of Object.entries(model.vocab)) {
+    const id = Number(idText);
+    if (!Number.isInteger(id) || id < 0) {
+      throw new Error(`invalid serialized token id: ${idText}`);
+    }
+    vocab.set(id, bytesToUint8Array(bytes, `vocab[${idText}]`));
+  }
+  return {
+    vocab,
+    merges: model.merges.map(([left, right]) => [
+      bytesToUint8Array(left, "merge left token"),
+      bytesToUint8Array(right, "merge right token"),
+    ]),
+    specialTokens: [...model.specialTokens],
+    pretokenizerPattern: model.pretokenizerPattern,
+  };
 }
 
 export function createCs336TokenizerOracle(): TokenizerOracle {
   return {
-    trainByteBpe,
+    trainByteBpe: (input, options) =>
+      trainByteBpe(input, {
+        ...options,
+        specialTokens: options.specialTokens ?? CS336_DEFAULT_SPECIAL_TOKENS,
+        pretokenizerPattern:
+          options.pretokenizerPattern ?? CS336_PRETOKENIZER_PATTERN,
+      }),
     encodeByteBpe,
     decodeByteBpe,
   };
@@ -251,6 +326,51 @@ function splitOnSpecialTokens(
   return segments;
 }
 
+type PreservedSegment =
+  | { readonly kind: "text"; readonly text: string }
+  | { readonly kind: "special"; readonly text: string };
+
+function splitPreservingSpecialTokens(
+  input: string,
+  specialTokens: readonly string[],
+): PreservedSegment[] {
+  const activeTokens = [...specialTokens]
+    .filter((token) => token.length > 0)
+    .sort((a, b) => b.length - a.length || a.localeCompare(b));
+  if (activeTokens.length === 0) return [{ kind: "text", text: input }];
+
+  const segments: PreservedSegment[] = [];
+  let cursor = 0;
+  while (cursor < input.length) {
+    let nextIndex = -1;
+    let nextToken = "";
+    for (const token of activeTokens) {
+      const idx = input.indexOf(token, cursor);
+      if (idx === -1) continue;
+      if (
+        nextIndex === -1 ||
+        idx < nextIndex ||
+        (idx === nextIndex && token.length > nextToken.length)
+      ) {
+        nextIndex = idx;
+        nextToken = token;
+      }
+    }
+
+    if (nextIndex === -1) {
+      segments.push({ kind: "text", text: input.slice(cursor) });
+      break;
+    }
+    if (nextIndex > cursor) {
+      segments.push({ kind: "text", text: input.slice(cursor, nextIndex) });
+    }
+    segments.push({ kind: "special", text: nextToken });
+    cursor = nextIndex + nextToken.length;
+  }
+
+  return segments;
+}
+
 function countPairs(words: readonly WordEntry[]): Map<string, PairCount> {
   const pairCounts = new Map<string, PairCount>();
   for (const word of words) {
@@ -342,6 +462,61 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
   return a.length - b.length;
 }
 
+function applyMerges(
+  ids: readonly number[],
+  model: ByteBpeModel,
+  byteToId: ReadonlyMap<string, number>,
+): number[] {
+  let current = [...ids];
+  const firstMergeId = 256 + model.specialTokens.length;
+  for (let mergeIndex = 0; mergeIndex < model.merges.length; mergeIndex++) {
+    const pair = model.merges[mergeIndex];
+    if (!pair) continue;
+    const [leftBytes, rightBytes] = pair;
+    const leftId = byteToId.get(bytesKey(leftBytes));
+    const rightId = byteToId.get(bytesKey(rightBytes));
+    const mergedId = firstMergeId + mergeIndex;
+    if (leftId === undefined || rightId === undefined) {
+      throw new Error("model merge references a token missing from vocabulary");
+    }
+    if (!model.vocab.has(mergedId)) {
+      throw new Error(`model merge id ${mergedId} is missing from vocabulary`);
+    }
+
+    const next: number[] = [];
+    for (let i = 0; i < current.length; i++) {
+      const token = current[i];
+      const following = current[i + 1];
+      if (token === leftId && following === rightId) {
+        next.push(mergedId);
+        i += 1;
+      } else if (token !== undefined) {
+        next.push(token);
+      }
+    }
+    current = next;
+  }
+  return current;
+}
+
+function buildByteToId(vocab: ReadonlyMap<number, Uint8Array>): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [id, bytes] of [...vocab.entries()].sort((a, b) => a[0] - b[0])) {
+    const key = bytesKey(bytes);
+    if (!out.has(key)) out.set(key, id);
+  }
+  return out;
+}
+
+function buildSpecialTokenIds(model: ByteBpeModel): Map<string, number> {
+  const out = new Map<string, number>();
+  for (let i = 0; i < model.specialTokens.length; i++) {
+    const token = model.specialTokens[i];
+    if (token !== undefined) out.set(token, 256 + i);
+  }
+  return out;
+}
+
 function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
   const out = new Uint8Array(a.length + b.length);
   out.set(a, 0);
@@ -359,4 +534,16 @@ function pairKey(left: number, right: number): string {
 
 function bytesKey(bytes: Uint8Array): string {
   return [...bytes].join(",");
+}
+
+function bytesToUint8Array(
+  bytes: readonly number[],
+  label: string,
+): Uint8Array {
+  for (const byte of bytes) {
+    if (!Number.isInteger(byte) || byte < 0 || byte > 255) {
+      throw new Error(`${label} contains invalid byte: ${byte}`);
+    }
+  }
+  return Uint8Array.from(bytes);
 }
