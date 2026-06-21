@@ -31,6 +31,10 @@ Use `parseAssignmentProfile()` to validate this shape,
 platform substrate, `profileOracleJsModules()` to convert oracle declarations
 into `createSession({ jsModules })` registrations, and
 `createAssignmentRunPlan()` to hand the platform a complete launch recipe.
+Pass `capabilityModes` with the platform environment when a capability should
+be labeled as `browser`, `simulated`, or `external`, then call
+`assignmentRunReadiness(plan)` to get the learner-facing preflight state:
+`runnable`, `simulated`, `external-only`, or `blocked`.
 Use `assignmentRubricKind()` to route Python, JavaScript, and unknown rubric
 paths to the right execution substrate.
 Use `createAssignmentMountPlan()` to derive the files and dataset fixtures that
@@ -120,6 +124,11 @@ Capability gate options use:
 - `requires`: every listed capability must be available.
 - `any_of`: at least one listed capability group must be available.
 - `message`: optional platform-facing explanation.
+
+Capability modes are supplied by the platform environment, not the profile.
+This lets the same profile run as a direct browser lab on one platform, a
+simulator-backed lab on another, or an external-runner lab when native tooling
+is attached.
 
 ## New Assignment Checklist
 

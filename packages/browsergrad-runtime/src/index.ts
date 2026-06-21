@@ -63,6 +63,7 @@ export {
 
 export {
   assignmentRubricKind,
+  assignmentRunReadiness,
   createAssignmentMountPlan,
   createAssignmentRunPlan,
   createAssignmentRubricExecRequest,
@@ -83,8 +84,11 @@ export {
   type AssignmentGateSpec,
   type AssignmentDataset,
   type AssignmentCapabilityEnvironment,
+  type AssignmentCapabilityMode,
   type AssignmentCapabilityGateEvaluation,
   type AssignmentCapabilityEvaluation,
+  type AssignmentRunReadinessStatus,
+  type AssignmentRunReadiness,
   type AssignmentRunPlan,
   type AssignmentRunPlanSession,
   type AssignmentRunPlanFiles,

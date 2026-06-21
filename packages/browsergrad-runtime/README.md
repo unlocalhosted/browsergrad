@@ -175,6 +175,7 @@ before launching a Worker:
 ```ts
 import {
   assignmentRubricKind,
+  assignmentRunReadiness,
   createAssignmentMountPlan,
   createAssignmentRunPlan,
   evaluateAssignmentCapabilities,
@@ -190,9 +191,11 @@ if (!parsed.ok) throw new Error(parsed.errors.join("; "));
 const required = requiredAssignmentCapabilities(parsed.profile);
 const preflight = evaluateAssignmentCapabilities(parsed.profile, {
   capabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
+  capabilityModes: { webgpu: "browser", "wgsl-kernel": "browser" },
 });
 const plan = createAssignmentRunPlan(parsed.profile, {
   capabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
+  capabilityModes: { webgpu: "browser", "wgsl-kernel": "browser" },
 });
 if (!plan.ok) {
   throw new Error(`Missing capabilities: ${plan.capabilityEvaluation.missingCapabilities.join(", ")}`);
@@ -200,10 +203,11 @@ if (!plan.ok) {
 
 const mounts = createAssignmentMountPlan(plan);
 const rubricKind = assignmentRubricKind(plan);
+const readiness = assignmentRunReadiness(plan);
 
 console.log(required, preflight.ok, preflight.missingCapabilities);
 console.log(plan.session.packages, plan.files.rubricPath, plan.execution.allowedTests);
-console.log(rubricKind, mounts.files, mounts.datasets);
+console.log(readiness.status, rubricKind, mounts.files, mounts.datasets);
 const fileContents: Record<string, string> = {
   [plan.files.rubricPath]: rubricSource,
 };
@@ -219,6 +223,12 @@ console.log(run.mount.writtenPaths, run.exec.assertions);
 Capability gates support `requires` for all-of requirements and `any_of` for
 alternative groups. Non-capability gates such as streaming and timeout remain
 rubric/watchdog checks.
+
+Platforms may attach `capabilityModes` to the environment. Use `browser` for a
+direct in-browser path, `simulated` for Worker/oracle/fixture approximations,
+and `external` for native or hosted runners. `assignmentRunReadiness(plan)`
+turns the selected capabilities into a platform status: `runnable`,
+`simulated`, `external-only`, or `blocked`.
 
 `createAssignmentRunPlan()` does not execute student code. It produces the
 platform handoff object: package preload list, JS oracle modules, resolved

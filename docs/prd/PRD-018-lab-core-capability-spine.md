@@ -150,6 +150,10 @@ runtime branches.
   format.
 - First stable guarantee: a platform can evaluate a parsed profile against an
   available capability list and get deterministic missing-capability output.
+- Next stable guarantee: a platform can label available capabilities as
+  `browser`, `simulated`, or `external` and call
+  `assignmentRunReadiness(plan)` to render a deterministic learner-facing state:
+  `runnable`, `simulated`, `external-only`, or `blocked`.
 - Later implementation slices:
   - Assignment runner plan: packages, mounts, JS oracles, timeout/watchdog, and
     allowed tests.

@@ -72,13 +72,17 @@ export interface AssignmentDataset {
 
 export interface AssignmentCapabilityEnvironment {
   readonly capabilities: readonly string[];
+  readonly capabilityModes?: Readonly<Record<string, AssignmentCapabilityMode>>;
 }
+
+export type AssignmentCapabilityMode = "browser" | "simulated" | "external";
 
 export interface AssignmentCapabilityGateEvaluation {
   readonly name: string;
   readonly ok: boolean;
   readonly requires: readonly string[];
   readonly anyOf: readonly (readonly string[])[];
+  readonly satisfiedCapabilities: readonly string[];
   readonly missingRequired: readonly string[];
   readonly missingAnyOf: readonly (readonly string[])[];
   readonly message?: string;
@@ -86,8 +90,25 @@ export interface AssignmentCapabilityGateEvaluation {
 
 export interface AssignmentCapabilityEvaluation {
   readonly ok: boolean;
+  readonly satisfiedCapabilities: readonly string[];
   readonly missingCapabilities: readonly string[];
+  readonly capabilityModes: Readonly<Record<string, AssignmentCapabilityMode>>;
   readonly gates: readonly AssignmentCapabilityGateEvaluation[];
+}
+
+export type AssignmentRunReadinessStatus =
+  | "runnable"
+  | "simulated"
+  | "external-only"
+  | "blocked";
+
+export interface AssignmentRunReadiness {
+  readonly status: AssignmentRunReadinessStatus;
+  readonly summary: string;
+  readonly missingCapabilities: readonly string[];
+  readonly selectedCapabilities: readonly string[];
+  readonly simulatedCapabilities: readonly string[];
+  readonly externalCapabilities: readonly string[];
 }
 
 export interface AssignmentRunPlan {
@@ -325,18 +346,24 @@ export function evaluateAssignmentCapabilities(
   environment: AssignmentCapabilityEnvironment,
 ): AssignmentCapabilityEvaluation {
   const available = new Set(environment.capabilities);
+  const capabilityModes = normalizeCapabilityModes(environment.capabilityModes);
   const gates = profile.gates
     .filter((gate) => gate.kind === "capability")
     .map((gate) => evaluateCapabilityGate(gate, available));
+  const satisfiedCapabilities = uniqueSorted(
+    gates.flatMap((gate) => gate.satisfiedCapabilities),
+  );
 
   return {
     ok: gates.every((gate) => gate.ok),
+    satisfiedCapabilities,
     missingCapabilities: uniqueSorted(
       gates.flatMap((gate) => [
         ...gate.missingRequired,
         ...gate.missingAnyOf.flat(),
       ]),
     ),
+    capabilityModes,
     gates,
   };
 }
@@ -397,6 +424,61 @@ export function createAssignmentRunPlan(
     datasets: profile.datasets,
     capabilityEvaluation,
     behavioralGates: profile.gates.filter((gate) => gate.kind !== "capability"),
+  };
+}
+
+export function assignmentRunReadiness(
+  plan: AssignmentRunPlan,
+): AssignmentRunReadiness {
+  const selectedCapabilities = plan.capabilityEvaluation.satisfiedCapabilities;
+  const capabilityModes = plan.capabilityEvaluation.capabilityModes;
+  const simulatedCapabilities = selectedCapabilities.filter(
+    (capability) => capabilityModes[capability] === "simulated",
+  );
+  const externalCapabilities = selectedCapabilities.filter(
+    (capability) => capabilityModes[capability] === "external",
+  );
+
+  if (!plan.ok) {
+    return {
+      status: "blocked",
+      summary: "assignment cannot run until missing platform capabilities are available",
+      missingCapabilities: plan.capabilityEvaluation.missingCapabilities,
+      selectedCapabilities,
+      simulatedCapabilities,
+      externalCapabilities,
+    };
+  }
+
+  if (externalCapabilities.length > 0) {
+    return {
+      status: "external-only",
+      summary: "assignment requires external runner capabilities",
+      missingCapabilities: [],
+      selectedCapabilities,
+      simulatedCapabilities,
+      externalCapabilities,
+    };
+  }
+
+  if (simulatedCapabilities.length > 0) {
+    return {
+      status: "simulated",
+      summary: "assignment can run through simulated platform capabilities",
+      missingCapabilities: [],
+      selectedCapabilities,
+      simulatedCapabilities,
+      externalCapabilities,
+    };
+  }
+
+  return {
+    status: "runnable",
+    summary: "assignment can run in the current platform",
+    missingCapabilities: [],
+    selectedCapabilities,
+    simulatedCapabilities,
+    externalCapabilities,
   };
 }
 
@@ -746,22 +828,43 @@ function evaluateCapabilityGate(
   const requires = readCapabilityStringList(gate.options.requires);
   const anyOf = readCapabilityAlternatives(gate.options.any_of);
   const missingRequired = requires.filter((capability) => !available.has(capability));
+  const satisfiedAnyOf = anyOf.find((group) =>
+    group.every((capability) => available.has(capability)),
+  ) ?? [];
   const missingAnyOf =
-    anyOf.length === 0 || anyOf.some((group) => group.every((capability) => available.has(capability)))
+    anyOf.length === 0 || satisfiedAnyOf.length > 0
       ? []
       : anyOf.map((group) => group.filter((capability) => !available.has(capability)));
   const message =
     typeof gate.options.message === "string" ? gate.options.message : undefined;
+  const satisfiedCapabilities =
+    missingRequired.length === 0 && missingAnyOf.length === 0
+      ? uniqueSorted([...requires, ...satisfiedAnyOf])
+      : uniqueSorted(requires.filter((capability) => available.has(capability)));
 
   return {
     name: gate.name,
     ok: missingRequired.length === 0 && missingAnyOf.length === 0,
     requires,
     anyOf,
+    satisfiedCapabilities,
     missingRequired,
     missingAnyOf,
     ...(message ? { message } : {}),
   };
+}
+
+function normalizeCapabilityModes(
+  value: AssignmentCapabilityEnvironment["capabilityModes"],
+): Readonly<Record<string, AssignmentCapabilityMode>> {
+  if (!value) return {};
+  const out: Record<string, AssignmentCapabilityMode> = {};
+  for (const [capability, mode] of Object.entries(value)) {
+    if (mode === "browser" || mode === "simulated" || mode === "external") {
+      out[capability] = mode;
+    }
+  }
+  return out;
 }
 
 function readCapabilityStringList(value: unknown): string[] {

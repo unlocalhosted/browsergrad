@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assignmentRubricKind,
+  assignmentRunReadiness,
   createAssignmentMountPlan,
   createAssignmentRunPlan,
   createAssignmentRubricExecRequest,
@@ -159,13 +160,16 @@ describe("parseAssignmentProfile", () => {
       }),
     ).toEqual({
       ok: false,
+      satisfiedCapabilities: ["pyodide", "torch-compat"],
       missingCapabilities: ["triton-compatible", "wgsl-kernel"],
+      capabilityModes: {},
       gates: [
         {
           name: "flash_attention_path",
           ok: false,
           requires: ["pyodide", "torch-compat"],
           anyOf: [["webgpu", "wgsl-kernel"], ["triton-compatible"]],
+          satisfiedCapabilities: ["pyodide", "torch-compat"],
           missingRequired: [],
           missingAnyOf: [["wgsl-kernel"], ["triton-compatible"]],
           message: "FlashAttention labs need a browser or native kernel path.",
@@ -251,13 +255,16 @@ describe("parseAssignmentProfile", () => {
       datasets: [{ name: "tiny", url: "/fixtures/tiny.txt", hash: "sha256:abc" }],
       capabilityEvaluation: {
         ok: true,
+        satisfiedCapabilities: ["pyodide"],
         missingCapabilities: [],
+        capabilityModes: {},
         gates: [
           {
             name: "browser_runtime",
             ok: true,
             requires: ["pyodide"],
             anyOf: [],
+            satisfiedCapabilities: ["pyodide"],
             missingRequired: [],
             missingAnyOf: [],
           },
@@ -271,6 +278,69 @@ describe("parseAssignmentProfile", () => {
         },
       ],
     });
+  });
+
+  it("summarizes assignment run readiness from platform capability modes", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "browser_runtime",
+          kind: "capability",
+          options: { requires: ["pyodide"] },
+        },
+        {
+          name: "distributed_path",
+          kind: "capability",
+          options: {
+            any_of: [
+              ["worker-mesh", "distributed-simulator"],
+              ["native-distributed-external"],
+            ],
+          },
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(
+      assignmentRunReadiness(
+        createAssignmentRunPlan(result.profile, {
+          capabilities: ["pyodide", "worker-mesh", "distributed-simulator"],
+          capabilityModes: {
+            "worker-mesh": "simulated",
+            "distributed-simulator": "simulated",
+          },
+        }),
+      ),
+    ).toEqual({
+      status: "simulated",
+      summary: "assignment can run through simulated platform capabilities",
+      missingCapabilities: [],
+      selectedCapabilities: ["distributed-simulator", "pyodide", "worker-mesh"],
+      simulatedCapabilities: ["distributed-simulator", "worker-mesh"],
+      externalCapabilities: [],
+    });
+
+    expect(
+      assignmentRunReadiness(
+        createAssignmentRunPlan(result.profile, {
+          capabilities: ["pyodide", "native-distributed-external"],
+          capabilityModes: {
+            "native-distributed-external": "external",
+          },
+        }),
+      ).status,
+    ).toBe("external-only");
+
+    expect(
+      assignmentRunReadiness(
+        createAssignmentRunPlan(result.profile, {
+          capabilities: ["pyodide"],
+        }),
+      ).status,
+    ).toBe("blocked");
   });
 
   it("classifies rubric substrate from the run plan path", () => {

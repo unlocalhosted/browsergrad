@@ -21,25 +21,28 @@ For every lab profile, the platform should:
 2. Convert oracle specs with `profileOracleJsModules`.
 3. Build a substrate-neutral run plan with `createAssignmentRunPlan`.
 4. Classify the rubric with `assignmentRubricKind`.
-5. Evaluate capability readiness before launching the lab.
-6. Show missing capability gates as preflight status, not as runtime crashes.
-7. Build a file/dataset mount plan with `createAssignmentMountPlan`.
-8. Materialize provided file and dataset contents with
+5. Provide `capabilityModes` for detected capabilities when the platform knows
+   a capability is `browser`, `simulated`, or `external`.
+6. Call `assignmentRunReadiness(plan)` before launching the lab.
+7. Show `runnable`, `simulated`, `external-only`, or `blocked` as preflight
+   status, not as runtime crashes.
+8. Build a file/dataset mount plan with `createAssignmentMountPlan`.
+9. Materialize provided file and dataset contents with
    `materializeAssignmentMountPlan`, use `runAssignmentRubric` for the common
    Pyodide mount-and-execute path, or use `runAssignmentJavascriptRubric` for
    browser-native JS rubrics.
-9. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
+10. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
    Worker mesh, external/native runner, or future custom compiler.
-10. For Pyodide-backed labs, create the rubric execution request with
+11. For Pyodide-backed labs, create the rubric execution request with
    `createAssignmentRubricExecRequest`.
-11. For JavaScript-backed labs, pass the imported rubric function, declared
+12. For JavaScript-backed labs, pass the imported rubric function, declared
     oracle objects, and browser substrates such as WebGPU devices to
     `runAssignmentJavascriptRubric`.
-12. In Python rubrics, call profile-registered JS oracles with
+13. In Python rubrics, call profile-registered JS oracles with
     `browsergrad.oracle("<module-name>")`.
-13. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
+14. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
     context with `browsergrad.assignment_context()`.
-14. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
+15. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
     implementation slice.
 
 ## Capability Vocabulary
@@ -69,6 +72,23 @@ Capability names are strings. Keep them descriptive and reusable:
 
 This table is a living convention, not a runtime enum. Add names when a new
 assignment family needs them, but prefer reusing names across courses.
+
+## Readiness Modes
+
+Profiles declare capability names; platforms declare what those capabilities
+mean in the current environment:
+
+- `browser`: direct in-browser execution such as Pyodide, WebGPU, or JS oracle
+  execution.
+- `simulated`: deterministic Worker/oracle/fixture substitutes that preserve the
+  learning objective without native infrastructure.
+- `external`: native or hosted runner paths such as CUDA, ISPC, vLLM, Modal, or
+  external servers.
+
+Pass these labels through `capabilityModes` when calling
+`createAssignmentRunPlan`, then use `assignmentRunReadiness(plan)`.
+`external` wins over `simulated`, and failed capability preflight becomes
+`blocked`.
 
 ## Profile Gate Shape
 
@@ -135,15 +155,17 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
 2. Builds a BrowserGrad run plan.
 3. Classifies rubric kind with `assignmentRubricKind`.
 4. Calls BrowserGrad capability evaluation from the run plan.
-5. Builds the BrowserGrad mount plan for runnable or inspectable labs.
-6. Fetches or provides assignment file/dataset contents, then materializes them
+5. Calls `assignmentRunReadiness(plan)` and renders its status, selected
+   capabilities, and missing capabilities.
+6. Builds the BrowserGrad mount plan for runnable or inspectable labs.
+7. Fetches or provides assignment file/dataset contents, then materializes them
    into `Session.fs`.
-7. Shows packages, oracle modules, rubric kind, file mounts, and
+8. Shows packages, oracle modules, rubric kind, file mounts, and
    satisfied/missing capability groups.
-8. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
+9. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
    launch the rubric through `Session.exec`, or uses
    `createAssignmentRubricExecRequest` when the platform needs manual staging.
-9. For runnable JavaScript labs, imports the rubric module and calls
+10. For runnable JavaScript labs, imports the rubric module and calls
    `runAssignmentJavascriptRubric`.
-10. Offers the learner a runnable browser path, simulated path, or external-runner
+11. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.
