@@ -54,7 +54,8 @@ Future slice:
 - Add WebGPU FlashAttention comparisons when custom kernels are stable enough
   to be part of the learner-facing rubric.
 - Build the kernel-programming pieces on the tiny core described in
-  `docs/platform/kernel-lab-foundation.md`, not on a full CUDA/Triton clone.
+  `docs/platform/kernel-lab-foundation.md`; let CUDA/Triton-style
+  compatibility grow as an expansion path instead of blocking the first slice.
 
 ## Portable As-Is
 
@@ -87,10 +88,12 @@ Future slice:
   parameter broadcast, stale all-gather, bad tied-weight handling, or incorrect
   sharded optimizer update.
 
-## Non-Goals For First Adoption
+## First Adoption Boundaries
 
-- Running Triton in-browser.
-- Emulating `torch.distributed` at the CPython process level.
-- Matching Nsight Systems or CUDA profiler deliverables.
-- Claiming multi-GPU performance parity. First adoption is correctness and
-  guided systems intuition.
+The first adoption does not need to guarantee Triton-in-browser,
+CPython-process-level `torch.distributed`, Nsight parity, or multi-GPU
+performance parity.
+
+Those are compatibility ambitions for later layers. The first adoption should
+ship correctness and guided systems intuition while preserving a path for
+tinkering with broader GPU/distributed semantics.

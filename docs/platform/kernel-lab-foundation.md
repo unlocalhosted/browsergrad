@@ -1,10 +1,11 @@
 # Kernel Lab Foundation
 
 BrowserGrad should grow a tiny browser-native kernel core first, then mature it
-into more powerful GPU-programming features. The goal is not to clone CUDA,
-Triton, or PyTorch wholesale. The goal is to preserve the clean learning model:
-buffers, kernels, dispatch, synchronization, correctness oracles, and
-performance feedback.
+into more powerful GPU-programming features. The goal is progressive
+compatibility: start with the clean learning model of buffers, kernels,
+dispatch, synchronization, correctness oracles, and performance feedback, then
+keep expanding toward CUDA/Triton-style experimentation wherever the browser can
+support it honestly.
 
 ## Decision
 
@@ -26,8 +27,8 @@ From HipScript:
 
 - CUDA/HIP teaching concepts can map to WebGPU: grid, block, thread index,
   shared memory, barriers, kernel launch.
-- A restricted CUDA-like language can be educational without supporting all of
-  CUDA.
+- A CUDA-like language can start with a small supported subset while keeping the
+  door open to broader compatibility as compiler/runtime pieces mature.
 - Browser compilation is possible, but a full LLVM toolchain is heavy and should
   stay optional or future-facing.
 
@@ -57,13 +58,21 @@ through registered JS modules, but JS/WGSL labs should run without Python.
 6. Pattern-specific kernels such as FlashAttention once the simple core is
    boring and stable.
 
-## Non-Goals For The Core
+## Compatibility Posture
 
-- Full CUDA compatibility.
-- Triton compatibility.
-- cuBLAS/cuDNN/cuRAND equivalents.
-- Hiding WebGPU behind too much abstraction.
-- Making Pyodide required for kernel labs.
+The core should be ambitious about compatibility for learning and
+experimentation. Learners should be able to tinker with CUDA-like syntax,
+Triton-like ideas, handwritten WGSL, and native-runner workflows over time.
+
+The first stable guarantee is smaller: WGSL kernels, explicit buffers,
+deterministic oracles, and transparent dispatch. Features like broad CUDA
+surface area, Triton-style kernels, GPU libraries, warp intrinsics, and richer
+compiler support are expansion targets, not abandoned goals.
+
+Two constraints remain load-bearing:
+
+- Do not hide WebGPU so thoroughly that learners cannot see the real GPU model.
+- Do not make Pyodide required for kernel labs.
 
 ## Why This Matters
 
