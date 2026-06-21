@@ -68,6 +68,7 @@ For every lab profile, the platform should:
     rubrics before C++/ISPC/native timing runners exist.
 15. For external/native labs, call `createAssignmentExternalRunnerRequest(plan)`
    and hand that object to platform-owned native, hosted, or CI runners.
+   Inject `request.environment` into the runner process or hosted job.
    If using `createAssignmentPreflightReport()`, read
    `report.externalRunnerRequest` for external routes.
 16. For Pyodide-backed labs, create the rubric execution request with
@@ -342,7 +343,8 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     satisfied/missing capability groups.
 14. For external-only labs, calls `createAssignmentExternalRunnerRequest(plan)`
     and queues platform-owned native/hosted execution with the returned files,
-    timeouts, selected external capabilities, mount plan, and dataset cache plan.
+    timeouts, selected external capabilities, environment variables, mount plan,
+    and dataset cache plan.
 15. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
     launch the rubric through `Session.exec`, or uses
     `createAssignmentRubricExecRequest` when the platform needs manual staging.

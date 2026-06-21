@@ -894,6 +894,20 @@ describe("parseAssignmentProfile", () => {
       selectedCapabilities: ["attention-oracle", "native-cpp-external"],
       externalCapabilities: ["native-cpp-external"],
       simulatedCapabilities: [],
+      environment: {
+        BROWSERGRAD_ALLOWED_TESTS_JSON: "[\"attention_performance_smoke\"]",
+        BROWSERGRAD_ASSIGNMENT_ID: "cs149gpt",
+        BROWSERGRAD_ASSIGNMENT_ROOT: "/assignments/cs149gpt",
+        BROWSERGRAD_BEHAVIORAL_GATES_JSON:
+          "[{\"name\":\"student_timeout\",\"kind\":\"timeout\",\"options\":{\"timeout_ms\":45000}}]",
+        BROWSERGRAD_EXTERNAL_CAPABILITIES_JSON: "[\"native-cpp-external\"]",
+        BROWSERGRAD_FIXTURES_PATH: "/assignments/cs149gpt/fixtures",
+        BROWSERGRAD_RUNNER_READINESS: "external-only",
+        BROWSERGRAD_RUNNER_TARGET: "external",
+        BROWSERGRAD_SELECTED_CAPABILITIES_JSON:
+          "[\"attention-oracle\",\"native-cpp-external\"]",
+        BROWSERGRAD_SIMULATED_CAPABILITIES_JSON: "[]",
+      },
       files: {
         root: "/assignments/cs149gpt",
         rubricPath: "/assignments/cs149gpt/rubric.py",

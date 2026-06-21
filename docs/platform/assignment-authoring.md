@@ -61,7 +61,8 @@ Use `assignmentRunnerRoute(plan)` when the platform wants one branch key:
 `pyodide`, `javascript`, `external`, `unsupported`, or `blocked`.
 When that branch is `external`, use `createAssignmentExternalRunnerRequest(plan)`
 to hand native/hosted infrastructure a stable object containing selected
-external capabilities, timeouts, mount/cache metadata, and behavioral gates.
+external capabilities, timeouts, mount/cache metadata, behavioral gates, and a
+ready-to-inject `environment` map of `BROWSERGRAD_*` variables.
 `createAssignmentPreflightReport()` also includes `externalRunnerRequest` when
 the active route is external.
 Use `createAssignmentMountPlan()` to derive the files and dataset fixtures that
@@ -292,7 +293,10 @@ external-only plan routes to `external`; unknown rubric extensions route to
 `unsupported`.
 External plans should not call Pyodide or JS rubric runners. Generate an
 external runner request and pass it to platform-owned native, hosted, or CI
-execution infrastructure.
+execution infrastructure. Inject `request.environment` into that runner so
+Python, shell, or hosted adapters see the same assignment id, root, fixtures,
+allowed tests, selected capabilities, and behavioral gates as BrowserGrad
+rubrics.
 
 ## New Assignment Checklist
 

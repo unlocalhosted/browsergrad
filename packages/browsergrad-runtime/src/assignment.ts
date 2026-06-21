@@ -245,6 +245,7 @@ export interface AssignmentExternalRunnerRequest {
   readonly selectedCapabilities: readonly string[];
   readonly externalCapabilities: readonly string[];
   readonly simulatedCapabilities: readonly string[];
+  readonly environment: Readonly<Record<string, string>>;
   readonly files: AssignmentRunPlanFiles;
   readonly execution: AssignmentRunPlanExecution;
   readonly mountPlan: AssignmentMountPlan;
@@ -908,11 +909,43 @@ export function createAssignmentExternalRunnerRequest(
     selectedCapabilities: readiness.selectedCapabilities,
     externalCapabilities: readiness.externalCapabilities,
     simulatedCapabilities: readiness.simulatedCapabilities,
+    environment: createAssignmentExternalRunnerEnvironment(
+      plan,
+      route,
+      readiness,
+    ),
     files: plan.files,
     execution: plan.execution,
     mountPlan,
     datasetCachePlan: createAssignmentDatasetCachePlan(mountPlan),
     behavioralGates: plan.behavioralGates,
+  };
+}
+
+function createAssignmentExternalRunnerEnvironment(
+  plan: AssignmentRunPlan,
+  route: AssignmentRunnerRoute,
+  readiness: AssignmentRunReadiness,
+): Readonly<Record<string, string>> {
+  return {
+    BROWSERGRAD_ALLOWED_TESTS_JSON: JSON.stringify(plan.execution.allowedTests),
+    BROWSERGRAD_ASSIGNMENT_ID: plan.id,
+    BROWSERGRAD_ASSIGNMENT_ROOT: plan.files.root,
+    BROWSERGRAD_BEHAVIORAL_GATES_JSON: JSON.stringify(plan.behavioralGates),
+    BROWSERGRAD_EXTERNAL_CAPABILITIES_JSON: JSON.stringify(
+      readiness.externalCapabilities,
+    ),
+    ...(plan.files.fixturesPath
+      ? { BROWSERGRAD_FIXTURES_PATH: plan.files.fixturesPath }
+      : {}),
+    BROWSERGRAD_RUNNER_READINESS: route.readinessStatus,
+    BROWSERGRAD_RUNNER_TARGET: route.target,
+    BROWSERGRAD_SELECTED_CAPABILITIES_JSON: JSON.stringify(
+      readiness.selectedCapabilities,
+    ),
+    BROWSERGRAD_SIMULATED_CAPABILITIES_JSON: JSON.stringify(
+      readiness.simulatedCapabilities,
+    ),
   };
 }
 

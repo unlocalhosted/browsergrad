@@ -295,9 +295,10 @@ execution in one call. The runner rejects missing profile-declared JS oracles
 before invoking the rubric, so broken platform wiring cannot silently pass.
 For `external` routes, `createAssignmentExternalRunnerRequest(plan)` returns the
 native/hosted runner handoff: selected external capabilities, resolved files,
-timeouts, behavioral gates, mount plan, and dataset cache plan. Preflight
-reports include this as `externalRunnerRequest` when applicable. BrowserGrad
-does not execute native code; the platform owns that runner.
+timeouts, behavioral gates, a `BROWSERGRAD_*` environment map, mount plan, and
+dataset cache plan. Preflight reports include this as `externalRunnerRequest`
+when applicable. BrowserGrad does not execute native code; the platform owns
+that runner.
 
 `createAssignmentPreflightReport(profile, environment)` bundles the common
 platform preflight calls into `{ plan, rubricKind, readiness, runnerRoute,

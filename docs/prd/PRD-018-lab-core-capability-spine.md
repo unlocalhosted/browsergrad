@@ -181,8 +181,8 @@ curriculum profiles and handoff docs absorb course-specific adapters.
 - External-runner guarantee: `createAssignmentExternalRunnerRequest(plan)`
   packages external-only plans into a deterministic native/hosted runner
   handoff with selected capabilities, resolved files, timeouts, mount/cache
-  metadata, and behavioral gates; external preflight reports include this
-  request directly.
+  metadata, behavioral gates, and a ready-to-inject `BROWSERGRAD_*`
+  environment map; external preflight reports include this request directly.
 - Gate-route guarantee: each capability gate evaluation exposes `status`,
   `selectedAnyOf`, and `selectedCapabilities`, so platform preflight rows can
   show the exact browser/simulated/external path selected by BrowserGrad.
