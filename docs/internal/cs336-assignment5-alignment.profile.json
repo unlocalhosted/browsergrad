@@ -1,0 +1,77 @@
+{
+  "id": "cs336-assignment5-alignment",
+  "version": "0.1.0",
+  "requires_browsergrad": "^0.1.0",
+  "metadata": {
+    "title": "Stanford CS336 Assignment 5: Alignment",
+    "course": "Stanford CS336: Language Modeling from Scratch",
+    "source_url": "https://github.com/stanford-cs336/assignment5-alignment",
+    "lecture_urls": ["https://cs336.stanford.edu/"],
+    "tags": ["language-modeling", "alignment", "sft", "dpo", "grpo", "rlhf"]
+  },
+  "runtime_packages": ["numpy", "pytest", "regex"],
+  "files": {
+    "root": "/assignments/cs336-assignment5-alignment",
+    "rubric_path": "rubric.py",
+    "starter_path": "cs336_alignment",
+    "reference_path": "reference.py",
+    "fixtures_path": "fixtures"
+  },
+  "timeouts": {
+    "setup_ms": 15000,
+    "test_ms": 60000,
+    "worker_ms": 120000
+  },
+  "allowed_tests": [
+    "test_packed_sft_dataset",
+    "test_iterate_batches",
+    "test_per_instance_dpo_loss",
+    "test_parse_mmlu_response",
+    "test_parse_gsm8k_response",
+    "test_tokenize_prompt_and_output",
+    "test_get_response_log_probs",
+    "test_compute_rollout_rewards",
+    "test_compute_group_normalized_rewards_grpo",
+    "test_compute_policy_gradient_loss_on_policy",
+    "test_grpo_train_step_standard_on_policy"
+  ],
+  "oracles": [
+    {
+      "name": "_bg_alignment_oracles",
+      "js_module": "/assignments/cs336-assignment5-alignment/oracles/alignment.js",
+      "export_name": "oracle"
+    }
+  ],
+  "gates": [
+    {
+      "name": "alignment_math_snapshot_slice",
+      "kind": "capability",
+      "options": {
+        "requires": ["pyodide", "torch-compat", "snapshot-oracle", "tokenizer-oracle", "rl-loss-oracle"],
+        "message": "CS336 A5 browser labs should start with GRPO/DPO/SFT math and snapshot fixtures."
+      }
+    },
+    {
+      "name": "gpu_inference_external_only",
+      "kind": "capability",
+      "options": {
+        "any_of": [["vllm-external", "flash-attn-external"], ["browser-math-only"]],
+        "message": "Full vLLM/flash-attn inference is an external or future-runner capability."
+      }
+    },
+    {
+      "name": "student_code_timeout",
+      "kind": "timeout",
+      "options": {
+        "timeout_ms": 60000
+      }
+    }
+  ],
+  "datasets": [
+    {
+      "name": "sft-sample",
+      "url": "/assignments/cs336-assignment5-alignment/fixtures/sft_sample.jsonl",
+      "hash": "sha256:replace-with-fixture-hash"
+    }
+  ]
+}

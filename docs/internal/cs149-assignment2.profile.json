@@ -1,0 +1,58 @@
+{
+  "id": "cs149-assignment2",
+  "version": "0.1.0",
+  "requires_browsergrad": "^0.1.0",
+  "metadata": {
+    "title": "Stanford CS149 Assignment 2: Task Execution Library",
+    "course": "Stanford CS149: Parallel Computing",
+    "source_url": "https://github.com/stanford-cs149/asst2",
+    "lecture_urls": [],
+    "tags": ["parallel-computing", "task-runtime", "thread-pool", "task-graph"]
+  },
+  "runtime_packages": [],
+  "files": {
+    "root": "/assignments/cs149-assignment2",
+    "rubric_path": "rubric.js",
+    "starter_path": "starter",
+    "reference_path": "reference.js",
+    "fixtures_path": "fixtures"
+  },
+  "timeouts": {
+    "setup_ms": 5000,
+    "test_ms": 30000,
+    "worker_ms": 60000
+  },
+  "allowed_tests": [
+    "simple_test_sync",
+    "mandelbrot_chunked",
+    "ping_pong_equal",
+    "super_light_async",
+    "task_graph_dependencies"
+  ],
+  "oracles": [
+    {
+      "name": "_bg_task_runtime_oracles",
+      "js_module": "/assignments/cs149-assignment2/oracles/task-runtime.js",
+      "export_name": "oracle"
+    }
+  ],
+  "gates": [
+    {
+      "name": "task_runtime_browser_simulation",
+      "kind": "capability",
+      "options": {
+        "requires": ["pthreads-simulator", "task-graph-simulator", "performance-rubric"],
+        "any_of": [["worker-mesh"], ["native-cpp-external"]],
+        "message": "CS149 A2 should start with deterministic task graph simulation, then graduate to worker/native runners."
+      }
+    },
+    {
+      "name": "scheduler_watchdog",
+      "kind": "timeout",
+      "options": {
+        "timeout_ms": 30000
+      }
+    }
+  ],
+  "datasets": []
+}

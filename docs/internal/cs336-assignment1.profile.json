@@ -37,6 +37,14 @@
   ],
   "gates": [
     {
+      "name": "browser_tokenizer_rubric_path",
+      "kind": "capability",
+      "options": {
+        "requires": ["pyodide", "structured-assertions", "js-oracles", "tokenizer-oracle"],
+        "message": "CS336 A1 browser labs need Pyodide plus the BrowserGrad tokenizer oracle bridge."
+      }
+    },
+    {
       "name": "encode_iterable_streaming",
       "kind": "streaming",
       "options": {

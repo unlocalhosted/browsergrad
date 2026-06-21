@@ -1,0 +1,51 @@
+{
+  "id": "cs149-assignment1",
+  "version": "0.1.0",
+  "requires_browsergrad": "^0.1.0",
+  "metadata": {
+    "title": "Stanford CS149 Assignment 1: Performance Analysis on a Quad-Core CPU",
+    "course": "Stanford CS149: Parallel Computing",
+    "source_url": "https://github.com/stanford-cs149/asst1",
+    "lecture_urls": [],
+    "tags": ["parallel-computing", "threads", "simd", "ispc", "performance"]
+  },
+  "runtime_packages": [],
+  "files": {
+    "root": "/assignments/cs149-assignment1",
+    "rubric_path": "rubric.js",
+    "starter_path": "starter",
+    "reference_path": "reference.js",
+    "fixtures_path": "fixtures"
+  },
+  "timeouts": {
+    "setup_ms": 5000,
+    "test_ms": 30000,
+    "worker_ms": 60000
+  },
+  "allowed_tests": [
+    "mandelbrot_thread_decomposition",
+    "clamped_exp_simd",
+    "array_sum_simd",
+    "ispc_task_model",
+    "kmeans_partitioning"
+  ],
+  "oracles": [
+    {
+      "name": "_bg_cs149_cpu_oracles",
+      "js_module": "/assignments/cs149-assignment1/oracles/cpu-parallel.js",
+      "export_name": "oracle"
+    }
+  ],
+  "gates": [
+    {
+      "name": "browser_cpu_parallel_simulation",
+      "kind": "capability",
+      "options": {
+        "requires": ["pthreads-simulator", "simd-simulator", "performance-rubric"],
+        "any_of": [["ispc-simulator"], ["ispc-external"]],
+        "message": "CS149 A1 browser labs should simulate thread/SIMD/ISPC behavior before requiring native tooling."
+      }
+    }
+  ],
+  "datasets": []
+}

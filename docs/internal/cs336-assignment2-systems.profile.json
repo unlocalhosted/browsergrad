@@ -53,23 +53,30 @@
       "name": "browser_pyodide_runtime",
       "kind": "capability",
       "options": {
-        "requires": ["pyodide", "structured-assertions", "js-oracles"]
+        "requires": ["pyodide", "structured-assertions", "js-oracles", "torch-compat"]
       }
     },
     {
-      "name": "triton_cuda_native_only",
+      "name": "flash_attention_kernel_path",
       "kind": "capability",
       "options": {
-        "requires": ["cuda", "triton"],
-        "browser_action": "skip-or-replace-with-webgpu-oracle"
+        "any_of": [
+          ["webgpu", "wgsl-kernel"],
+          ["triton-compatible"],
+          ["native-cuda-external", "triton-native"]
+        ],
+        "message": "FlashAttention labs need a browser kernel path, Triton-compatible path, or explicit native CUDA runner."
       }
     },
     {
-      "name": "distributed_process_group_native_only",
+      "name": "distributed_training_simulation_path",
       "kind": "capability",
       "options": {
-        "requires": ["multiprocessing", "torch.distributed", "gloo"],
-        "browser_action": "replace-with-worker-mesh-or-single-worker-simulator"
+        "any_of": [
+          ["worker-mesh", "distributed-simulator"],
+          ["native-distributed-external"]
+        ],
+        "message": "DDP/FSDP labs need a Worker-mesh simulator or explicit native distributed runner."
       }
     },
     {

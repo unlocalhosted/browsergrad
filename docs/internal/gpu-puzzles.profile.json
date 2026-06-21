@@ -1,0 +1,58 @@
+{
+  "id": "gpu-puzzles",
+  "version": "0.1.0",
+  "requires_browsergrad": "^0.1.0",
+  "metadata": {
+    "title": "GPU Puzzles",
+    "course": "Sasha Rush GPU Puzzles",
+    "source_url": "https://github.com/srush/gpu-puzzles",
+    "lecture_urls": [],
+    "tags": ["gpu", "cuda", "webgpu", "kernels", "puzzles"]
+  },
+  "runtime_packages": [],
+  "files": {
+    "root": "/assignments/gpu-puzzles",
+    "rubric_path": "rubric.js",
+    "starter_path": "puzzles",
+    "reference_path": "reference.js",
+    "fixtures_path": "fixtures"
+  },
+  "timeouts": {
+    "setup_ms": 5000,
+    "test_ms": 15000,
+    "worker_ms": 30000
+  },
+  "allowed_tests": [
+    "puzzle_map",
+    "puzzle_zip",
+    "puzzle_guard",
+    "puzzle_blocks",
+    "puzzle_shared_memory"
+  ],
+  "oracles": [
+    {
+      "name": "_bg_gpu_puzzle_oracles",
+      "js_module": "/assignments/gpu-puzzles/oracles/gpu-puzzles.js",
+      "export_name": "oracle"
+    }
+  ],
+  "gates": [
+    {
+      "name": "browser_wgsl_kernel_path",
+      "kind": "capability",
+      "options": {
+        "requires": ["webgpu", "wgsl-kernel", "kernel-visualizer"],
+        "any_of": [["cuda-compatible-subset"], ["wgsl-kernel"]],
+        "message": "GPU Puzzles should run as WGSL kernels while preserving CUDA-shaped concepts."
+      }
+    },
+    {
+      "name": "kernel_watchdog",
+      "kind": "timeout",
+      "options": {
+        "timeout_ms": 15000
+      }
+    }
+  ],
+  "datasets": []
+}

@@ -78,6 +78,10 @@ Use a capability gate when availability can be checked before execution:
 
 ## Benchmark Pressure Matrix
 
+Machine-readable profile drafts live in `docs/internal/*.profile.json`. They are
+parsed by `packages/browsergrad-runtime/tests/benchmark-profiles.test.ts` so the
+handoff matrix cannot drift silently from runtime profile validation.
+
 | Benchmark | First platform slice | Core capabilities |
 | --- | --- | --- |
 | CS336 A2 Systems | FlashAttention fixture + DDP/FSDP simulator preflight | `torch-compat`, `webgpu`, `worker-mesh`, `distributed-simulator` |

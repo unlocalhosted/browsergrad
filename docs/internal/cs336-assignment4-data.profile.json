@@ -1,0 +1,84 @@
+{
+  "id": "cs336-assignment4-data",
+  "version": "0.1.0",
+  "requires_browsergrad": "^0.1.0",
+  "metadata": {
+    "title": "Stanford CS336 Assignment 4: Data",
+    "course": "Stanford CS336: Language Modeling from Scratch",
+    "source_url": "https://github.com/stanford-cs336/assignment4-data",
+    "lecture_urls": ["https://cs336.stanford.edu/"],
+    "tags": ["language-modeling", "data-quality", "common-crawl", "deduplication", "pii"]
+  },
+  "runtime_packages": ["numpy", "pytest", "regex"],
+  "files": {
+    "root": "/assignments/cs336-assignment4-data",
+    "rubric_path": "rubric.py",
+    "starter_path": "cs336_data",
+    "reference_path": "reference.py",
+    "fixtures_path": "fixtures"
+  },
+  "timeouts": {
+    "setup_ms": 10000,
+    "test_ms": 45000,
+    "worker_ms": 90000
+  },
+  "allowed_tests": [
+    "test_identify_language_english",
+    "test_identify_language_chinese_simplified",
+    "test_classify_quality",
+    "test_gopher_valid_input",
+    "test_classify_nsfw",
+    "test_classify_toxic_speech",
+    "test_extract_text_from_html_bytes",
+    "test_exact_line_deduplication",
+    "test_minhash_deduplication_exact_duplicates",
+    "test_mask_emails_single",
+    "test_mask_phones_single",
+    "test_mask_ips"
+  ],
+  "oracles": [
+    {
+      "name": "_bg_data_oracles",
+      "js_module": "/assignments/cs336-assignment4-data/oracles/data-quality.js",
+      "export_name": "oracle"
+    }
+  ],
+  "gates": [
+    {
+      "name": "browser_data_fixture_slice",
+      "kind": "capability",
+      "options": {
+        "requires": ["pyodide", "dataset-fixture", "large-file-streaming", "dedupe-oracle", "pii-oracle"],
+        "message": "CS336 A4 browser labs should use small checked-in data fixtures and behavior gates for streaming."
+      }
+    },
+    {
+      "name": "classifier_dependencies",
+      "kind": "capability",
+      "options": {
+        "any_of": [["classifier-oracle"], ["fasttext-external", "transformers-external"]],
+        "message": "Language/toxicity classification needs browser-safe oracles or explicit external classifiers."
+      }
+    },
+    {
+      "name": "no_eager_corpus_read",
+      "kind": "streaming",
+      "options": {
+        "max_chunks_before_first_yield": 4,
+        "chunk_count": 128
+      }
+    }
+  ],
+  "datasets": [
+    {
+      "name": "moby-html",
+      "url": "/assignments/cs336-assignment4-data/fixtures/moby.html",
+      "hash": "sha256:replace-with-fixture-hash"
+    },
+    {
+      "name": "low-quality-cc",
+      "url": "/assignments/cs336-assignment4-data/fixtures/low_quality_cc.txt",
+      "hash": "sha256:replace-with-fixture-hash"
+    }
+  ]
+}

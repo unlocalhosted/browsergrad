@@ -1,0 +1,58 @@
+{
+  "id": "cs149-assignment3",
+  "version": "0.1.0",
+  "requires_browsergrad": "^0.1.0",
+  "metadata": {
+    "title": "Stanford CS149 Assignment 3: CUDA Programming",
+    "course": "Stanford CS149: Parallel Computing",
+    "source_url": "https://github.com/stanford-cs149/asst3",
+    "lecture_urls": [],
+    "tags": ["parallel-computing", "cuda", "scan", "saxpy", "renderer", "webgpu"]
+  },
+  "runtime_packages": [],
+  "files": {
+    "root": "/assignments/cs149-assignment3",
+    "rubric_path": "rubric.js",
+    "starter_path": "starter",
+    "reference_path": "reference.js",
+    "fixtures_path": "fixtures"
+  },
+  "timeouts": {
+    "setup_ms": 5000,
+    "test_ms": 45000,
+    "worker_ms": 90000
+  },
+  "allowed_tests": [
+    "saxpy_correctness",
+    "exclusive_scan_correctness",
+    "renderer_ordering_correctness",
+    "kernel_memory_bounds",
+    "performance_rubric_smoke"
+  ],
+  "oracles": [
+    {
+      "name": "_bg_cuda_concept_oracles",
+      "js_module": "/assignments/cs149-assignment3/oracles/cuda-concepts.js",
+      "export_name": "oracle"
+    }
+  ],
+  "gates": [
+    {
+      "name": "cuda_concepts_browser_kernel_path",
+      "kind": "capability",
+      "options": {
+        "requires": ["webgpu", "cuda-compatible-subset", "performance-rubric"],
+        "any_of": [["wgsl-kernel"], ["native-cuda-external"]],
+        "message": "CS149 A3 browser labs should preserve CUDA concepts through WGSL or an explicit native CUDA runner."
+      }
+    },
+    {
+      "name": "kernel_watchdog",
+      "kind": "timeout",
+      "options": {
+        "timeout_ms": 45000
+      }
+    }
+  ],
+  "datasets": []
+}
