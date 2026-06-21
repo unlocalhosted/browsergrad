@@ -31,6 +31,8 @@ Use `parseAssignmentProfile()` to validate this shape,
 platform substrate, `profileOracleJsModules()` to convert oracle declarations
 into `createSession({ jsModules })` registrations, and
 `createAssignmentRunPlan()` to hand the platform a complete launch recipe.
+Use `createAssignmentMountPlan()` to derive the files and dataset fixtures that
+must exist in the runtime filesystem.
 Use `createAssignmentRubricExecRequest()` when the platform is ready to run the
 profile's rubric through `Session.exec`.
 
@@ -40,6 +42,10 @@ Mount assignment files under a dedicated root such as `/assignments/<id>/`.
 Use deterministic fixture names and keep generated expected outputs checked in
 when they are small enough to review. Large datasets should be declared as
 datasets with hashes and mounted by the host before execution.
+
+Dataset mount paths default under `<fixturesPath>/datasets/<filename>`.
+Profiles can still point at large external URLs; BrowserGrad records the mount
+intent and leaves fetching/caching policy to the platform.
 
 Rubrics should prefer exact fixtures for correctness and calibrated benchmark
 fixtures for performance. Do not depend on host OS paths, subprocesses, POSIX

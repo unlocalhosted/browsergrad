@@ -20,13 +20,14 @@ For every lab profile, the platform should:
 1. Parse the assignment profile with `parseAssignmentProfile`.
 2. Convert oracle specs with `profileOracleJsModules`.
 3. Build a substrate-neutral run plan with `createAssignmentRunPlan`.
-4. Evaluate capability readiness before launching the lab.
-5. Show missing capability gates as preflight status, not as runtime crashes.
-6. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
+4. Build a file/dataset mount plan with `createAssignmentMountPlan`.
+5. Evaluate capability readiness before launching the lab.
+6. Show missing capability gates as preflight status, not as runtime crashes.
+7. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
    Worker mesh, external/native runner, or future custom compiler.
-7. For Pyodide-backed labs, create the rubric execution request with
+8. For Pyodide-backed labs, create the rubric execution request with
    `createAssignmentRubricExecRequest`.
-8. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
+9. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
    implementation slice.
 
 ## Capability Vocabulary
@@ -120,10 +121,11 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
 
 1. Reads an assignment profile.
 2. Builds a BrowserGrad run plan.
-3. Calls BrowserGrad capability evaluation from the run plan.
-4. Shows packages, oracle modules, file mounts, and satisfied/missing capability
+3. Builds the BrowserGrad mount plan.
+4. Calls BrowserGrad capability evaluation from the run plan.
+5. Shows packages, oracle modules, file mounts, and satisfied/missing capability
    groups.
-5. For runnable Pyodide labs, uses `createAssignmentRubricExecRequest` to launch
+6. For runnable Pyodide labs, uses `createAssignmentRubricExecRequest` to launch
    the rubric through `Session.exec`.
-6. Offers the learner a runnable browser path, simulated path, or external-runner
+7. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

@@ -118,6 +118,27 @@ export interface AssignmentRubricExecRequest {
   readonly timeoutMs?: number;
 }
 
+export interface AssignmentMountPlan {
+  readonly root: string;
+  readonly files: readonly AssignmentMountFile[];
+  readonly datasets: readonly AssignmentDatasetMount[];
+}
+
+export type AssignmentMountFileRole = "rubric" | "starter" | "reference";
+
+export interface AssignmentMountFile {
+  readonly role: AssignmentMountFileRole;
+  readonly path: string;
+  readonly required: boolean;
+}
+
+export interface AssignmentDatasetMount {
+  readonly name: string;
+  readonly url: string;
+  readonly hash?: string;
+  readonly mountPath: string;
+}
+
 export type AssignmentProfileParseResult =
   | { ok: true; profile: AssignmentProfile }
   | { ok: false; errors: readonly string[] };
@@ -332,6 +353,44 @@ export function createAssignmentRubricExecRequest(
   };
 }
 
+export function createAssignmentMountPlan(
+  plan: AssignmentRunPlan,
+): AssignmentMountPlan {
+  return {
+    root: plan.files.root,
+    files: [
+      {
+        role: "rubric",
+        path: plan.files.rubricPath,
+        required: true,
+      },
+      ...(plan.files.starterPath
+        ? [{
+            role: "starter" as const,
+            path: plan.files.starterPath,
+            required: false,
+          }]
+        : []),
+      ...(plan.files.referencePath
+        ? [{
+            role: "reference" as const,
+            path: plan.files.referencePath,
+            required: false,
+          }]
+        : []),
+    ],
+    datasets: plan.datasets.map((dataset) => ({
+      name: dataset.name,
+      url: dataset.url,
+      ...(dataset.hash ? { hash: dataset.hash } : {}),
+      mountPath: joinAssignmentPath(
+        plan.files.fixturesPath ?? joinAssignmentPath(plan.files.root, "fixtures"),
+        `datasets/${datasetFileName(dataset)}`,
+      ),
+    })),
+  };
+}
+
 function readString(
   obj: Record<string, unknown>,
   key: string,
@@ -515,6 +574,12 @@ function uniqueSorted(values: readonly string[]): string[] {
 function joinAssignmentPath(root: string, path: string): string {
   if (path.startsWith("/")) return path;
   return `${root.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+}
+
+function datasetFileName(dataset: AssignmentDataset): string {
+  const withoutQuery = dataset.url.split(/[?#]/, 1)[0] ?? "";
+  const lastSegment = withoutQuery.split("/").filter(Boolean).at(-1);
+  return lastSegment || dataset.name;
 }
 
 function readStringArray(

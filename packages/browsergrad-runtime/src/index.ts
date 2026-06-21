@@ -62,6 +62,7 @@ export {
 } from "./lab.js";
 
 export {
+  createAssignmentMountPlan,
   createAssignmentRunPlan,
   createAssignmentRubricExecRequest,
   evaluateAssignmentCapabilities,
@@ -84,5 +85,9 @@ export {
   type AssignmentRunPlanFiles,
   type AssignmentRunPlanExecution,
   type AssignmentRubricExecRequest,
+  type AssignmentMountPlan,
+  type AssignmentMountFileRole,
+  type AssignmentMountFile,
+  type AssignmentDatasetMount,
   type AssignmentProfileParseResult,
 } from "./assignment.js";

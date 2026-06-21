@@ -162,6 +162,7 @@ before launching a Worker:
 
 ```ts
 import {
+  createAssignmentMountPlan,
   createAssignmentRunPlan,
   createAssignmentRubricExecRequest,
   evaluateAssignmentCapabilities,
@@ -179,10 +180,12 @@ const preflight = evaluateAssignmentCapabilities(parsed.profile, {
 const plan = createAssignmentRunPlan(parsed.profile, {
   capabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
 });
+const mounts = createAssignmentMountPlan(plan);
 const execRequest = createAssignmentRubricExecRequest(plan);
 
 console.log(required, preflight.ok, preflight.missingCapabilities);
 console.log(plan.session.packages, plan.files.rubricPath, plan.execution.allowedTests);
+console.log(mounts.files, mounts.datasets);
 await session.exec(execRequest);
 ```
 
@@ -194,6 +197,10 @@ rubric/watchdog checks.
 platform handoff object: package preload list, JS oracle modules, resolved
 profile file paths, allowed test ids, timeout hints, dataset declarations,
 capability preflight, and behavioral gates.
+
+`createAssignmentMountPlan()` turns a run plan into deterministic file and
+dataset mount declarations. It does not fetch or write content; the platform
+uses it to decide what to place into `Session.fs` before rubric execution.
 
 `createAssignmentRubricExecRequest()` turns that plan into the minimal
 `Session.exec` request for rubric execution. It sets assignment metadata in

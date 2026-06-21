@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createAssignmentMountPlan,
   createAssignmentRunPlan,
   createAssignmentRubricExecRequest,
   evaluateAssignmentCapabilities,
@@ -309,5 +310,44 @@ describe("parseAssignmentProfile", () => {
     expect(() => createAssignmentRubricExecRequest(plan)).toThrow(
       "createAssignmentRubricExecRequest requires a Python rubric path",
     );
+  });
+
+  it("creates a deterministic mount plan from a run plan", () => {
+    const result = parseAssignmentProfile(VALID_PROFILE);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const plan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["pyodide"],
+    });
+
+    expect(createAssignmentMountPlan(plan)).toEqual({
+      root: "/assignments/cs336-assignment1",
+      files: [
+        {
+          role: "rubric",
+          path: "/assignments/cs336-assignment1/rubric.py",
+          required: true,
+        },
+        {
+          role: "starter",
+          path: "/assignments/cs336-assignment1/assignment.py",
+          required: false,
+        },
+        {
+          role: "reference",
+          path: "/assignments/cs336-assignment1/reference.py",
+          required: false,
+        },
+      ],
+      datasets: [
+        {
+          name: "tiny",
+          url: "/fixtures/tiny.txt",
+          hash: "sha256:abc",
+          mountPath: "/assignments/cs336-assignment1/fixtures/datasets/tiny.txt",
+        },
+      ],
+    });
   });
 });
