@@ -176,11 +176,10 @@ before launching a Worker:
 import {
   createAssignmentMountPlan,
   createAssignmentRunPlan,
-  createAssignmentRubricExecRequest,
   evaluateAssignmentCapabilities,
-  materializeAssignmentMountPlan,
   parseAssignmentProfile,
   requiredAssignmentCapabilities,
+  runAssignmentRubric,
 } from "@unlocalhosted/browsergrad-runtime";
 
 const parsed = parseAssignmentProfile(profileJson);
@@ -198,7 +197,6 @@ if (!plan.ok) {
 }
 
 const mounts = createAssignmentMountPlan(plan);
-const execRequest = createAssignmentRubricExecRequest(plan);
 
 console.log(required, preflight.ok, preflight.missingCapabilities);
 console.log(plan.session.packages, plan.files.rubricPath, plan.execution.allowedTests);
@@ -208,13 +206,11 @@ const fileContents: Record<string, string> = {
 };
 if (plan.files.starterPath) fileContents[plan.files.starterPath] = starterSource;
 
-await materializeAssignmentMountPlan(session.fs, mounts, {
+const run = await runAssignmentRubric(session, plan, {
   files: fileContents,
-  datasets: {
-    tiny: tinyFixtureText,
-  },
+  datasets: { tiny: tinyFixtureText },
 });
-await session.exec(execRequest);
+console.log(run.mount.writtenPaths, run.exec.assertions);
 ```
 
 Capability gates support `requires` for all-of requirements and `any_of` for
@@ -250,6 +246,12 @@ Rubrics can read:
 
 Prefer `browsergrad.assignment_context()` inside Python rubrics unless you need
 the raw environment values.
+
+`runAssignmentRubric()` is the one-call Pyodide path for platforms that do not
+need to stage each step manually. It derives the mount plan, materializes files
+and datasets, builds the rubric exec request, calls `session.exec()`, and
+returns `{ mount, exec }`. Use the lower-level helpers when the UI needs a
+preflight preview before writing files or launching code.
 
 ## What this is, and is not
 

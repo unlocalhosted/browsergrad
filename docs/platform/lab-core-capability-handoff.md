@@ -24,7 +24,8 @@ For every lab profile, the platform should:
 5. Show missing capability gates as preflight status, not as runtime crashes.
 6. Build a file/dataset mount plan with `createAssignmentMountPlan`.
 7. Materialize provided file and dataset contents with
-   `materializeAssignmentMountPlan`.
+   `materializeAssignmentMountPlan`, or use `runAssignmentRubric` for the
+   common mount-and-execute path.
 8. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
    Worker mesh, external/native runner, or future custom compiler.
 9. For Pyodide-backed labs, create the rubric execution request with
@@ -133,7 +134,8 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
    into `Session.fs`.
 6. Shows packages, oracle modules, file mounts, and satisfied/missing capability
    groups.
-7. For runnable Pyodide labs, uses `createAssignmentRubricExecRequest` to launch
-   the rubric through `Session.exec`.
+7. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
+   launch the rubric through `Session.exec`, or uses
+   `createAssignmentRubricExecRequest` when the platform needs manual staging.
 8. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

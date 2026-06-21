@@ -8,6 +8,7 @@ import {
   parseAssignmentProfile,
   profileOracleJsModules,
   requiredAssignmentCapabilities,
+  runAssignmentRubric,
 } from "../src/index";
 
 const VALID_PROFILE = {
@@ -500,6 +501,56 @@ describe("parseAssignmentProfile", () => {
         },
       ),
     ).rejects.toThrow("missing assignment dataset content: tiny");
+    expect(writes).toEqual([]);
+  });
+
+  it("rejects assignment rubric runs with failed preflight before mounting files", async () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "kernel_path",
+          kind: "capability",
+          options: { requires: ["pyodide", "webgpu"] },
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const plan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["pyodide"],
+    });
+    const writes: Array<{ path: string; content: string }> = [];
+
+    await expect(
+      runAssignmentRubric(
+        {
+          fs: {
+            async write(path, content) {
+              writes.push({ path, content });
+            },
+            async read() {
+              return "";
+            },
+          },
+          async exec() {
+            throw new Error("exec should not run");
+          },
+        },
+        plan,
+        {
+          files: {
+            "/assignments/cs336-assignment1/rubric.py": "print('rubric')",
+          },
+          datasets: {
+            tiny: "fixture text",
+          },
+        },
+      ),
+    ).rejects.toThrow(
+      "cannot create rubric exec request; missing assignment capabilities: webgpu",
+    );
     expect(writes).toEqual([]);
   });
 });

@@ -38,6 +38,9 @@ contents into `Session.fs`.
 Use `createAssignmentRubricExecRequest()` when the platform is ready to run the
 profile's rubric through `Session.exec`. It refuses run plans whose capability
 preflight failed.
+Use `runAssignmentRubric()` for the common Pyodide path when the platform wants
+BrowserGrad to derive mounts, materialize contents, and execute the rubric as
+one operation.
 
 ## Files And Fixtures
 
@@ -120,4 +123,5 @@ Capability gate options use:
 3. Port upstream tests only when their assumptions are browser-safe.
 4. Replace native OS resource checks with behavior gates.
 5. Add unit tests for profile validation and at least one platform integration
-   test that mounts files, runs the rubric, and reports clear failures.
+   test using `runAssignmentRubric()` that mounts files, runs the rubric, calls
+   declared oracles, and reports clear failures.

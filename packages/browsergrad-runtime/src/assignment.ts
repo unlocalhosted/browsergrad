@@ -1,5 +1,7 @@
 import {
   BrowsergradError,
+  type ExecOptions,
+  type ExecResult,
   type PyodideJsModule,
   type SessionFS,
 } from "./types.js";
@@ -151,6 +153,18 @@ export interface AssignmentMountContents {
 export interface AssignmentMaterializeResult {
   readonly writtenPaths: readonly string[];
   readonly skippedOptionalPaths: readonly string[];
+}
+
+export interface AssignmentRubricSession {
+  readonly fs: SessionFS;
+  exec(options: ExecOptions): Promise<ExecResult>;
+}
+
+export type AssignmentRubricRunOptions = Omit<ExecOptions, "code">;
+
+export interface AssignmentRubricRunResult {
+  readonly mount: AssignmentMaterializeResult;
+  readonly exec: ExecResult;
 }
 
 export type AssignmentProfileParseResult =
@@ -454,6 +468,23 @@ export async function materializeAssignmentMountPlan(
   }
 
   return { writtenPaths, skippedOptionalPaths };
+}
+
+export async function runAssignmentRubric(
+  session: AssignmentRubricSession,
+  plan: AssignmentRunPlan,
+  contents: AssignmentMountContents,
+  options: AssignmentRubricRunOptions = {},
+): Promise<AssignmentRubricRunResult> {
+  const request = createAssignmentRubricExecRequest(plan);
+  const mountPlan = createAssignmentMountPlan(plan);
+  const mount = await materializeAssignmentMountPlan(
+    session.fs,
+    mountPlan,
+    contents,
+  );
+  const exec = await session.exec({ ...request, ...options });
+  return { mount, exec };
 }
 
 function readString(

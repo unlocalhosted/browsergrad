@@ -70,6 +70,7 @@ export {
   parseAssignmentProfile,
   profileOracleJsModules,
   requiredAssignmentCapabilities,
+  runAssignmentRubric,
   type AssignmentProfile,
   type AssignmentProfileMetadata,
   type AssignmentProfileFiles,
@@ -92,5 +93,8 @@ export {
   type AssignmentDatasetMount,
   type AssignmentMountContents,
   type AssignmentMaterializeResult,
+  type AssignmentRubricSession,
+  type AssignmentRubricRunOptions,
+  type AssignmentRubricRunResult,
   type AssignmentProfileParseResult,
 } from "./assignment.js";
