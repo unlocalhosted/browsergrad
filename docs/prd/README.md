@@ -31,6 +31,10 @@ Every PRD includes: background with cited evidence, user stories, architecture (
 - [PRD-015 — Custom WGSL kernels from Python](PRD-015-custom-wgsl-kernels.md)
 - [PRD-016 — ONNX export](PRD-016-onnx-export.md)
 
+### Platform process
+
+- [PRD-017 — Research-gated PRD workflow](PRD-017-research-gated-prd-workflow.md)
+
 ## How to use these PRDs
 
 - Before starting implementation on a feature, **read the PRD end-to-end**.
