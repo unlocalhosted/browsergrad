@@ -161,6 +161,10 @@ runtime branches.
 - Gate-route guarantee: each capability gate evaluation exposes `status`,
   `selectedAnyOf`, and `selectedCapabilities`, so platform preflight rows can
   show the exact browser/simulated/external path selected by BrowserGrad.
+- Mount-readiness guarantee: `evaluateAssignmentMountContents(mountPlan,
+  contents)` dry-runs platform-provided files and datasets before any
+  `Session.fs` write, and benchmark tests assert every profile reports missing
+  rubric/dataset contents deterministically.
 - Later implementation slices:
   - Assignment runner plan: packages, mounts, JS oracles, timeout/watchdog, and
     allowed tests.

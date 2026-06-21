@@ -42,6 +42,9 @@ Use `assignmentRubricKind()` to route Python, JavaScript, and unknown rubric
 paths to the right execution substrate.
 Use `createAssignmentMountPlan()` to derive the files and dataset fixtures that
 must exist in the runtime filesystem.
+Use `evaluateAssignmentMountContents(mountPlan, contents)` before writing files
+to report missing rubric files, missing datasets, optional skips, and writable
+paths without touching `Session.fs`.
 Use `materializeAssignmentMountPlan()` to write provided file and dataset
 contents into `Session.fs`.
 Use `createAssignmentRubricExecRequest()` when the platform is ready to run the
@@ -65,6 +68,9 @@ datasets with hashes and mounted by the host before execution.
 Dataset mount paths default under `<fixturesPath>/datasets/<filename>`.
 Profiles can still point at large external URLs; BrowserGrad records the mount
 intent and leaves fetching/caching policy to the platform.
+Use `evaluateAssignmentMountContents()` after fetching/cache lookup and before
+`materializeAssignmentMountPlan()` so missing fixture inputs surface as
+preflight status, not partial filesystem writes.
 `materializeAssignmentMountPlan()` expects dataset contents keyed by dataset
 name, so platforms can fetch/cache however they want before writing to Pyodide.
 

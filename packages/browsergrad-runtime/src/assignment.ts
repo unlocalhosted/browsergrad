@@ -186,6 +186,14 @@ export interface AssignmentMountContents {
   readonly datasets?: Readonly<Record<string, string>>;
 }
 
+export interface AssignmentMountContentEvaluation {
+  readonly ok: boolean;
+  readonly writablePaths: readonly string[];
+  readonly missingRequiredFiles: readonly string[];
+  readonly missingDatasets: readonly string[];
+  readonly skippedOptionalPaths: readonly string[];
+}
+
 export interface AssignmentMaterializeResult {
   readonly writtenPaths: readonly string[];
   readonly skippedOptionalPaths: readonly string[];
@@ -608,6 +616,21 @@ export async function materializeAssignmentMountPlan(
   return { writtenPaths, skippedOptionalPaths: entries.skippedOptionalPaths };
 }
 
+export function evaluateAssignmentMountContents(
+  plan: AssignmentMountPlan,
+  contents: AssignmentMountContents,
+): AssignmentMountContentEvaluation {
+  const evaluation = inspectAssignmentMountContents(plan, contents);
+  return {
+    ok: evaluation.missingRequiredFiles.length === 0 &&
+      evaluation.missingDatasets.length === 0,
+    writablePaths: evaluation.writes.map((entry) => entry.path),
+    missingRequiredFiles: evaluation.missingRequiredFiles,
+    missingDatasets: evaluation.missingDatasets,
+    skippedOptionalPaths: evaluation.skippedOptionalPaths,
+  };
+}
+
 export async function runAssignmentRubric(
   session: AssignmentRubricSession,
   plan: AssignmentRunPlan,
@@ -734,7 +757,35 @@ function collectAssignmentMountEntries(
   readonly writes: readonly { readonly path: string; readonly content: string }[];
   readonly skippedOptionalPaths: readonly string[];
 } {
+  const evaluation = inspectAssignmentMountContents(plan, contents);
+  if (evaluation.missingRequiredFiles.length > 0) {
+    throw new BrowsergradError(
+      `missing required assignment file content: ${evaluation.missingRequiredFiles[0]}`,
+    );
+  }
+  if (evaluation.missingDatasets.length > 0) {
+    throw new BrowsergradError(
+      `missing assignment dataset content: ${evaluation.missingDatasets[0]}`,
+    );
+  }
+  return {
+    writes: evaluation.writes,
+    skippedOptionalPaths: evaluation.skippedOptionalPaths,
+  };
+}
+
+function inspectAssignmentMountContents(
+  plan: AssignmentMountPlan,
+  contents: AssignmentMountContents,
+): {
+  readonly writes: readonly { readonly path: string; readonly content: string }[];
+  readonly missingRequiredFiles: readonly string[];
+  readonly missingDatasets: readonly string[];
+  readonly skippedOptionalPaths: readonly string[];
+} {
   const skippedOptionalPaths: string[] = [];
+  const missingRequiredFiles: string[] = [];
+  const missingDatasets: string[] = [];
   const fileWrites: Array<{ path: string; content: string }> = [];
   const datasetWrites: Array<{ path: string; content: string }> = [];
 
@@ -742,7 +793,8 @@ function collectAssignmentMountEntries(
     const content = contents.files[file.path];
     if (content === undefined) {
       if (file.required) {
-        throw new BrowsergradError(`missing required assignment file content: ${file.path}`);
+        missingRequiredFiles.push(file.path);
+        continue;
       }
       skippedOptionalPaths.push(file.path);
       continue;
@@ -753,13 +805,16 @@ function collectAssignmentMountEntries(
   for (const dataset of plan.datasets) {
     const content = contents.datasets?.[dataset.name];
     if (content === undefined) {
-      throw new BrowsergradError(`missing assignment dataset content: ${dataset.name}`);
+      missingDatasets.push(dataset.name);
+      continue;
     }
     datasetWrites.push({ path: dataset.mountPath, content });
   }
 
   return {
     writes: [...fileWrites, ...datasetWrites],
+    missingRequiredFiles,
+    missingDatasets,
     skippedOptionalPaths,
   };
 }

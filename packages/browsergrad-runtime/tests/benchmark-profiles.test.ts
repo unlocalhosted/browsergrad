@@ -4,6 +4,7 @@ import {
   assignmentRubricKind,
   createAssignmentPreflightReport,
   createAssignmentRunPlan,
+  evaluateAssignmentMountContents,
   parseAssignmentProfile,
   requiredAssignmentCapabilities,
   type AssignmentCapabilityEnvironment,
@@ -159,6 +160,32 @@ describe("benchmark assignment profiles", () => {
       );
       expect(report.mountPlan.root).toBe(result.profile.files.root);
       expect(report.rubricKind).toBe(EXPECTED_RUBRIC_KIND[file]);
+    });
+
+    it(`dry-runs missing mount contents for ${file}`, () => {
+      const profileJson = JSON.parse(
+        readFileSync(new URL(`../../../docs/internal/${file}`, import.meta.url), "utf8"),
+      );
+
+      const result = parseAssignmentProfile(profileJson);
+      expect(result).toMatchObject({ ok: true });
+      if (!result.ok) return;
+
+      const report = createAssignmentPreflightReport(
+        result.profile,
+        BROWSER_TEACHING_ENVIRONMENT,
+      );
+      const contentEvaluation = evaluateAssignmentMountContents(report.mountPlan, {
+        files: {},
+      });
+
+      expect(contentEvaluation.ok).toBe(false);
+      expect(contentEvaluation.missingRequiredFiles).toEqual([
+        report.plan.files.rubricPath,
+      ]);
+      expect(contentEvaluation.missingDatasets).toEqual(
+        result.profile.datasets.map((dataset) => dataset.name),
+      );
     });
   }
 });

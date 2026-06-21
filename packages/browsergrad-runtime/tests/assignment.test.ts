@@ -7,6 +7,7 @@ import {
   createAssignmentRunPlan,
   createAssignmentRubricExecRequest,
   evaluateAssignmentCapabilities,
+  evaluateAssignmentMountContents,
   materializeAssignmentMountPlan,
   parseAssignmentProfile,
   profileOracleJsModules,
@@ -658,6 +659,42 @@ describe("parseAssignmentProfile", () => {
         content: "fixture text",
       },
     ]);
+  });
+
+  it("evaluates assignment mount contents without writing to SessionFS", () => {
+    const result = parseAssignmentProfile(VALID_PROFILE);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const runPlan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["pyodide"],
+    });
+    const mountPlan = createAssignmentMountPlan(runPlan);
+
+    expect(
+      evaluateAssignmentMountContents(mountPlan, {
+        files: {
+          "/assignments/cs336-assignment1/assignment.py": "answer = 42",
+        },
+      }),
+    ).toEqual({
+      ok: false,
+      writablePaths: ["/assignments/cs336-assignment1/assignment.py"],
+      missingRequiredFiles: ["/assignments/cs336-assignment1/rubric.py"],
+      missingDatasets: ["tiny"],
+      skippedOptionalPaths: ["/assignments/cs336-assignment1/reference.py"],
+    });
+
+    expect(
+      evaluateAssignmentMountContents(mountPlan, {
+        files: {
+          "/assignments/cs336-assignment1/rubric.py": "print('rubric')",
+        },
+        datasets: {
+          tiny: "fixture text",
+        },
+      }).ok,
+    ).toBe(true);
   });
 
   it("rejects missing required mount content before writing optional files", async () => {

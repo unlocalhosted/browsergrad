@@ -30,22 +30,23 @@ For every lab profile, the platform should:
 7. Show `runnable`, `simulated`, `external-only`, or `blocked` as preflight
    status, not as runtime crashes.
 8. Build a file/dataset mount plan with `createAssignmentMountPlan`.
-9. Materialize provided file and dataset contents with
+9. Dry-run platform-provided contents with `evaluateAssignmentMountContents`.
+10. Materialize provided file and dataset contents with
    `materializeAssignmentMountPlan`, use `runAssignmentRubric` for the common
    Pyodide mount-and-execute path, or use `runAssignmentJavascriptRubric` for
    browser-native JS rubrics.
-10. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
+11. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
    Worker mesh, external/native runner, or future custom compiler.
-11. For Pyodide-backed labs, create the rubric execution request with
+12. For Pyodide-backed labs, create the rubric execution request with
    `createAssignmentRubricExecRequest`.
-12. For JavaScript-backed labs, pass the imported rubric function, declared
+13. For JavaScript-backed labs, pass the imported rubric function, declared
     oracle objects, and browser substrates such as WebGPU devices to
     `runAssignmentJavascriptRubric`.
-13. In Python rubrics, call profile-registered JS oracles with
+14. In Python rubrics, call profile-registered JS oracles with
     `browsergrad.oracle("<module-name>")`.
-14. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
+15. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate
     context with `browsergrad.assignment_context()`.
-15. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
+16. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
     implementation slice.
 
 ## Capability Vocabulary
@@ -129,7 +130,9 @@ parsed by `packages/browsergrad-runtime/tests/benchmark-profiles.test.ts` so the
 handoff matrix cannot drift silently from runtime profile validation.
 That test also builds `createAssignmentPreflightReport` for every benchmark
 profile under a browser-teaching environment and checks expected readiness
-states.
+states. It dry-runs empty mount contents for every profile with
+`evaluateAssignmentMountContents` so missing rubric files and datasets stay
+visible before filesystem writes.
 
 | Benchmark | First platform slice | Core capabilities |
 | --- | --- | --- |
@@ -175,14 +178,16 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
 7. Renders `plan.capabilityEvaluation.gates` as preflight rows using each gate's
    `status`, `selectedAnyOf`, `selectedCapabilities`, and missing fields.
 8. Builds the BrowserGrad mount plan for runnable or inspectable labs.
-9. Fetches or provides assignment file/dataset contents, then materializes them
+9. Fetches or provides assignment file/dataset contents, then calls
+   `evaluateAssignmentMountContents` to show missing files/datasets.
+10. Materializes validated contents
    into `Session.fs`.
-10. Shows packages, oracle modules, rubric kind, file mounts, and
+11. Shows packages, oracle modules, rubric kind, file mounts, and
    satisfied/missing capability groups.
-11. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
+12. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
    launch the rubric through `Session.exec`, or uses
    `createAssignmentRubricExecRequest` when the platform needs manual staging.
-12. For runnable JavaScript labs, imports the rubric module and calls
+13. For runnable JavaScript labs, imports the rubric module and calls
    `runAssignmentJavascriptRubric`.
-13. Offers the learner a runnable browser path, simulated path, or external-runner
+14. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

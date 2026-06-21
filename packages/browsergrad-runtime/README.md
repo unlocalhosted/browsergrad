@@ -180,6 +180,7 @@ import {
   createAssignmentPreflightReport,
   createAssignmentRunPlan,
   evaluateAssignmentCapabilities,
+  evaluateAssignmentMountContents,
   parseAssignmentProfile,
   requiredAssignmentCapabilities,
   runAssignmentJavascriptRubric,
@@ -218,6 +219,16 @@ const fileContents: Record<string, string> = {
   [plan.files.rubricPath]: rubricSource,
 };
 if (plan.files.starterPath) fileContents[plan.files.starterPath] = starterSource;
+const contentReadiness = evaluateAssignmentMountContents(mounts, {
+  files: fileContents,
+  datasets: { tiny: tinyFixtureText },
+});
+if (!contentReadiness.ok) {
+  throw new Error(`Missing mount contents: ${[
+    ...contentReadiness.missingRequiredFiles,
+    ...contentReadiness.missingDatasets,
+  ].join(", ")}`);
+}
 
 const run = await runAssignmentRubric(session, plan, {
   files: fileContents,
@@ -254,6 +265,10 @@ capability preflight, and behavioral gates.
 `createAssignmentMountPlan()` turns a run plan into deterministic file and
 dataset mount declarations. It does not fetch or write content; the platform
 uses it to decide what to place into `Session.fs` before rubric execution.
+`evaluateAssignmentMountContents(mountPlan, contents)` dry-runs that mount plan
+against platform-provided file/dataset contents and returns missing required
+files, missing datasets, optional skips, and writable paths without touching
+`Session.fs`.
 
 `materializeAssignmentMountPlan()` writes provided string contents into
 `Session.fs` in mount-plan order. Required rubric content fails loudly when
