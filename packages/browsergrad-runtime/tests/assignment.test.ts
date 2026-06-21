@@ -7,6 +7,7 @@ import {
   createAssignmentPreflightReport,
   createAssignmentMountPreflightReport,
   createAssignmentMountPlan,
+  createAssignmentDatasetCachePlan,
   createAssignmentRunPlan,
   createAssignmentRubricExecRequest,
   evaluateAssignmentCapabilities,
@@ -772,6 +773,67 @@ describe("parseAssignmentProfile", () => {
           url: "/fixtures/tiny.txt",
           hash: "sha256:abc",
           mountPath: "/assignments/cs336-assignment1/fixtures/datasets/tiny.txt",
+        },
+      ],
+    });
+  });
+
+  it("creates deterministic dataset cache entries from mount plans", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      datasets: [
+        {
+          name: "hashed",
+          url: "/fixtures/hashed.bin?download=1",
+          hash: "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        },
+        {
+          name: "source-only",
+          url: "https://example.test/data/tiny.txt?version=1",
+        },
+        {
+          name: "bad-hash",
+          url: "/fixtures/bad.txt",
+          hash: "sha256:replace-with-fixture-hash",
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const plan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["pyodide"],
+    });
+    const mountPlan = createAssignmentMountPlan(plan);
+
+    expect(createAssignmentDatasetCachePlan(mountPlan)).toEqual({
+      root: "/assignments/cs336-assignment1",
+      datasets: [
+        {
+          name: "hashed",
+          url: "/fixtures/hashed.bin?download=1",
+          hash: "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+          mountPath: "/assignments/cs336-assignment1/fixtures/datasets/hashed.bin",
+          strategy: "content-addressed",
+          cacheKey: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          cachePath: "datasets/sha256/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        },
+        {
+          name: "source-only",
+          url: "https://example.test/data/tiny.txt?version=1",
+          mountPath: "/assignments/cs336-assignment1/fixtures/datasets/tiny.txt",
+          strategy: "source-addressed",
+          cacheKey: "url:https://example.test/data/tiny.txt?version=1",
+          cachePath: "datasets/url/https%3A%2F%2Fexample.test%2Fdata%2Ftiny.txt%3Fversion%3D1",
+        },
+        {
+          name: "bad-hash",
+          url: "/fixtures/bad.txt",
+          hash: "sha256:replace-with-fixture-hash",
+          mountPath: "/assignments/cs336-assignment1/fixtures/datasets/bad.txt",
+          strategy: "invalid-hash",
+          cacheKey: "url:/fixtures/bad.txt",
+          cachePath: "datasets/url/%2Ffixtures%2Fbad.txt",
         },
       ],
     });

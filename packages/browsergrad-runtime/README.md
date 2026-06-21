@@ -178,6 +178,7 @@ import {
   assignmentRunReadiness,
   assignmentRunnerRoute,
   createAssignmentCapabilityEnvironment,
+  createAssignmentDatasetCachePlan,
   createAssignmentMountPlan,
   createAssignmentPreflightReport,
   createAssignmentRunPlan,
@@ -207,13 +208,14 @@ if (!plan.ok) {
 }
 
 const mounts = createAssignmentMountPlan(plan);
+const datasetCache = createAssignmentDatasetCachePlan(mounts);
 const rubricKind = assignmentRubricKind(plan);
 const readiness = assignmentRunReadiness(plan);
 
 console.log(required, preflight.ok, preflight.missingCapabilities);
 console.log(plan.session.packages, plan.files.rubricPath, plan.execution.allowedTests);
 console.log(readiness.status, rubricKind, mounts.files, mounts.datasets);
-console.log(route.target, report.runnerRoute.target, report.mountPlan.files);
+console.log(route.target, report.runnerRoute.target, report.mountPlan.files, datasetCache.datasets);
 const fileContents: Record<string, string | Uint8Array> = {
   [plan.files.rubricPath]: rubricSource,
 };
@@ -270,6 +272,11 @@ capability preflight, and behavioral gates.
 `createAssignmentMountPlan()` turns a run plan into deterministic file and
 dataset mount declarations. It does not fetch or write content; the platform
 uses it to decide what to place into `Session.fs` before rubric execution.
+`createAssignmentDatasetCachePlan(mountPlan)` turns dataset mount declarations
+into deterministic cache metadata for platform fetch/OPFS layers. Valid
+`sha256:<64 hex>` hashes become content-addressed cache entries; missing hashes
+use source-addressed URL keys; malformed/unsupported hashes are marked
+`invalid-hash` or `unsupported-hash` so preflight can block before trust.
 `evaluateAssignmentMountContents(mountPlan, contents)` dry-runs that mount plan
 against platform-provided file/dataset contents and returns missing required
 files, missing datasets, optional skips, and writable paths without touching

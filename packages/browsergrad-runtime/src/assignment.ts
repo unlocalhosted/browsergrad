@@ -204,6 +204,27 @@ export interface AssignmentDatasetMount {
   readonly mountPath: string;
 }
 
+export type AssignmentDatasetCacheStrategy =
+  | "content-addressed"
+  | "source-addressed"
+  | "invalid-hash"
+  | "unsupported-hash";
+
+export interface AssignmentDatasetCacheEntry {
+  readonly name: string;
+  readonly url: string;
+  readonly hash?: string;
+  readonly mountPath: string;
+  readonly strategy: AssignmentDatasetCacheStrategy;
+  readonly cacheKey: string;
+  readonly cachePath: string;
+}
+
+export interface AssignmentDatasetCachePlan {
+  readonly root: string;
+  readonly datasets: readonly AssignmentDatasetCacheEntry[];
+}
+
 export type AssignmentMountContent = string | Uint8Array;
 
 export interface AssignmentMountContents {
@@ -737,6 +758,15 @@ export function createAssignmentMountPlan(
   };
 }
 
+export function createAssignmentDatasetCachePlan(
+  plan: AssignmentMountPlan,
+): AssignmentDatasetCachePlan {
+  return {
+    root: plan.root,
+    datasets: plan.datasets.map((dataset) => datasetCacheEntry(dataset)),
+  };
+}
+
 export async function materializeAssignmentMountPlan(
   fs: SessionFS,
   plan: AssignmentMountPlan,
@@ -751,6 +781,43 @@ export async function materializeAssignmentMountPlan(
   }
 
   return { writtenPaths, skippedOptionalPaths: entries.skippedOptionalPaths };
+}
+
+function datasetCacheEntry(
+  dataset: AssignmentDatasetMount,
+): AssignmentDatasetCacheEntry {
+  const hash = dataset.hash;
+  const parsed = hash
+    ? parseAssignmentContentHash(hash)
+    : undefined;
+  if (hash && parsed?.status === "ok") {
+    const digest = parsed.expected.slice("sha256:".length);
+    return {
+      name: dataset.name,
+      url: dataset.url,
+      hash,
+      mountPath: dataset.mountPath,
+      strategy: "content-addressed",
+      cacheKey: parsed.expected,
+      cachePath: `datasets/sha256/${digest}`,
+    };
+  }
+
+  const strategy: AssignmentDatasetCacheStrategy = parsed?.status === "invalid"
+    ? "invalid-hash"
+    : parsed?.status === "unsupported"
+      ? "unsupported-hash"
+      : "source-addressed";
+
+  return {
+    name: dataset.name,
+    url: dataset.url,
+    ...(hash ? { hash } : {}),
+    mountPath: dataset.mountPath,
+    strategy,
+    cacheKey: `url:${dataset.url}`,
+    cachePath: `datasets/url/${encodeURIComponent(dataset.url)}`,
+  };
 }
 
 export function evaluateAssignmentMountContents(

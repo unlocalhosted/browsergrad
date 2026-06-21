@@ -47,6 +47,9 @@ Use `assignmentRunnerRoute(plan)` when the platform wants one branch key:
 `pyodide`, `javascript`, `external`, `unsupported`, or `blocked`.
 Use `createAssignmentMountPlan()` to derive the files and dataset fixtures that
 must exist in the runtime filesystem.
+Use `createAssignmentDatasetCachePlan(mountPlan)` before fetch/cache work so
+datasets get deterministic platform cache keys and explicit hash-status
+strategies.
 Use `evaluateAssignmentMountContents(mountPlan, contents)` before writing files
 to report missing rubric files, missing datasets, optional skips, and writable
 paths without touching `Session.fs`.
@@ -87,6 +90,10 @@ snapshot expectations.
 Dataset mount paths default under `<fixturesPath>/datasets/<filename>`.
 Profiles can still point at large external URLs; BrowserGrad records the mount
 intent and leaves fetching/caching policy to the platform.
+`createAssignmentDatasetCachePlan()` adds cache metadata without fetching: valid
+SHA-256 declarations are `content-addressed`, missing hashes are
+`source-addressed`, and malformed/unsupported hashes are explicit preflight
+statuses.
 Use `evaluateAssignmentMountContents()` after fetching/cache lookup and before
 `materializeAssignmentMountPlan()` so missing fixture inputs surface as
 preflight status, not partial filesystem writes.

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assignmentRubricKind,
   createAssignmentCapabilityEnvironment,
+  createAssignmentDatasetCachePlan,
   createAssignmentPreflightReport,
   createAssignmentRunPlan,
   evaluateAssignmentMountContents,
@@ -170,6 +171,11 @@ describe("benchmark assignment profiles", () => {
         report.plan.files.rubricPath,
       ]);
       expect(contentEvaluation.missingDatasets).toEqual(
+        result.profile.datasets.map((dataset) => dataset.name),
+      );
+
+      const cachePlan = createAssignmentDatasetCachePlan(report.mountPlan);
+      expect(cachePlan.datasets.map((dataset) => dataset.name)).toEqual(
         result.profile.datasets.map((dataset) => dataset.name),
       );
     });
