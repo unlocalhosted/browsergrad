@@ -1,4 +1,4 @@
-import type { PyodideJsModule } from "./types.js";
+import { BrowsergradError, type PyodideJsModule } from "./types.js";
 
 export interface AssignmentProfile {
   readonly id: string;
@@ -310,6 +310,11 @@ export function createAssignmentRunPlan(
 export function createAssignmentRubricExecRequest(
   plan: AssignmentRunPlan,
 ): AssignmentRubricExecRequest {
+  if (!plan.files.rubricPath.endsWith(".py")) {
+    throw new BrowsergradError(
+      "createAssignmentRubricExecRequest requires a Python rubric path",
+    );
+  }
   const lines = [
     "import json, os, runpy, sys",
     `assignment_root = ${JSON.stringify(plan.files.root)}`,

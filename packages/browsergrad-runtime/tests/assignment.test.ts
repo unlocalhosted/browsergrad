@@ -290,4 +290,24 @@ describe("parseAssignmentProfile", () => {
       timeoutMs: 30_000,
     });
   });
+
+  it("rejects Pyodide exec requests for non-Python rubrics", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      files: {
+        ...VALID_PROFILE.files,
+        rubric_path: "rubric.js",
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const plan = createAssignmentRunPlan(result.profile, {
+      capabilities: ["pyodide"],
+    });
+
+    expect(() => createAssignmentRubricExecRequest(plan)).toThrow(
+      "createAssignmentRubricExecRequest requires a Python rubric path",
+    );
+  });
 });
