@@ -4,12 +4,12 @@ import {
   createTaskGraphSimulator,
   partitionStaticWork,
   SimulatorError,
-  simulateCs149ArraySumVector,
-  simulateCs149ClampedExpVector,
   simulateDdpGradientSynchronization,
   simulateFsdpGradientReduceScatter,
   simulateFsdpParameterSharding,
   simulateShardedAdamWStep,
+  simulateVectorizedArraySum,
+  simulateVectorizedClampedExp,
   type DeterministicMesh,
   type DdpGradientSynchronizationResult,
   type FsdpGradientReduceScatterResult,
@@ -27,8 +27,8 @@ describe("public surface", () => {
     expect(typeof createDeterministicMesh).toBe("function");
     expect(typeof createTaskGraphSimulator).toBe("function");
     expect(typeof partitionStaticWork).toBe("function");
-    expect(typeof simulateCs149ArraySumVector).toBe("function");
-    expect(typeof simulateCs149ClampedExpVector).toBe("function");
+    expect(typeof simulateVectorizedArraySum).toBe("function");
+    expect(typeof simulateVectorizedClampedExp).toBe("function");
     expect(typeof simulateDdpGradientSynchronization).toBe("function");
     expect(typeof simulateFsdpParameterSharding).toBe("function");
     expect(typeof simulateFsdpGradientReduceScatter).toBe("function");
@@ -60,8 +60,8 @@ describe("public surface", () => {
     expect(event.taskId).toBe("load");
   });
 
-  it("types CS149 CPU/SIMD simulator results for compile-time consumers", () => {
-    const clamped = simulateCs149ClampedExpVector({
+  it("types CPU/SIMD simulator results for compile-time consumers", () => {
+    const clamped = simulateVectorizedClampedExp({
       values: [2],
       exponents: [1],
       vectorWidth: 4,

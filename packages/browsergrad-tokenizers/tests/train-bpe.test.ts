@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  CS336_BPE_EXAMPLE,
+  BYTE_BPE_EXAMPLE,
   trainByteBpe,
   type BytePair,
 } from "../src/index";
@@ -12,10 +12,10 @@ function pairToText(pair: BytePair): readonly [string, string] {
 }
 
 describe("trainByteBpe", () => {
-  it("uses the CS336 lexicographically greater tie-break", () => {
-    const model = trainByteBpe(CS336_BPE_EXAMPLE.corpus, {
-      vocabSize: CS336_BPE_EXAMPLE.vocabSize,
-      specialTokens: CS336_BPE_EXAMPLE.specialTokens,
+  it("uses the byte-BPE lexicographically greater tie-break", () => {
+    const model = trainByteBpe(BYTE_BPE_EXAMPLE.corpus, {
+      vocabSize: BYTE_BPE_EXAMPLE.vocabSize,
+      specialTokens: BYTE_BPE_EXAMPLE.specialTokens,
     });
 
     expect(model.merges.map(pairToText).slice(0, 2)).toEqual([

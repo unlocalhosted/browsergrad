@@ -48,6 +48,9 @@ First shipped BrowserGrad primitive: `@unlocalhosted/browsergrad-kernels`
 exports `createKernelRubric()`, a CPU-only assertion collector for JS/WebGPU
 rubrics. It checks tensor shape/value closeness with tolerances, records compact
 failure details, and can forward directly into BrowserGrad JS rubric callbacks.
+The same package now exports CUDA-shaped concept oracles such as
+`simulateCuda1DGrid()`, which gives GPU Puzzles/CS149-style labs thread/block
+traces, guard diagnostics, and deterministic outputs before WGSL lowering.
 
 This core should be independent from Pyodide. Python assignments may call it
 through registered JS modules, but JS/WGSL labs should run without Python.

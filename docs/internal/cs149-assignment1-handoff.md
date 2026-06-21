@@ -11,9 +11,9 @@ First browser-safe slice:
 - Use `docs/internal/cs149-assignment1.profile.json` for profile metadata,
   allowed tests, JS rubric path, and capability gates.
 - Use `@unlocalhosted/browsergrad-simulators` for:
-  - `simulateCs149ClampedExpVector()` to check clamped exponentiation output,
+  - `simulateVectorizedClampedExp()` to check clamped exponentiation output,
     tail masks, vector instruction traces, and active-lane utilization.
-  - `simulateCs149ArraySumVector()` to check vector-width array-sum reductions
+  - `simulateVectorizedArraySum()` to check vector-width array-sum reductions
     and horizontal reduction rounds.
   - `partitionStaticWork()` to check contiguous or cyclic static work
     decomposition for Mandelbrot/K-means-style thread labs.
@@ -46,7 +46,7 @@ Crafting Attention should:
 1. Load the profile and show readiness through
    `createAssignmentPreflightReport()`.
    For execution, call `runAssignmentJavascriptProfile()` with the imported JS
-   rubric and `_bg_cs149_cpu_oracles`; BrowserGrad has an e2e test proving this
+   rubric and `_bg_cpu_parallelism`; BrowserGrad has an e2e test proving this
    exact profile-driven route.
 2. Treat `simd-simulator`, `pthreads-simulator`, `ispc-simulator`, and
    `performance-rubric` as simulated/browser-safe teaching capabilities.

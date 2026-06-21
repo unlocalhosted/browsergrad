@@ -1,7 +1,7 @@
 {
   "name": "@unlocalhosted/browsergrad-simulators",
   "version": "0.1.0",
-  "description": "Deterministic browser-safe simulators for systems and distributed-learning labs.",
+  "description": "Deterministic browser-safe simulators for parallelism, task graphs, and distributed execution.",
   "type": "module",
   "license": "MIT",
   "author": "unlocalhosted",

@@ -31,7 +31,8 @@ labs, distributed simulators, and craftingattention platform handoffs.
 
 The capability spine should stay assignment-agnostic. CS336 and CS149 are
 benchmark probes: they should pressure-test the vocabulary, not become hardcoded
-runtime branches.
+runtime branches. Primitive packages stay named around browser ML capabilities;
+curriculum profiles and handoff docs absorb course-specific adapters.
 
 ## User Stories
 
@@ -236,8 +237,9 @@ runtime branches.
 - Profile-driven JS runner guarantee: `runAssignmentJavascriptProfile()` builds
   preflight, validates the JavaScript route, mounts declared contents, wires
   oracles/substrates, and runs browser-native rubrics from a full assignment
-  profile. Runtime e2e coverage proves the CS149 A1 profile can execute this
-  way with simulator oracles.
+  profile. It rejects missing profile-declared JS oracles before invoking the
+  rubric. Runtime e2e coverage proves CS149 A1 and GPU Puzzles can execute this
+  way with simulator/kernel oracles.
 - Simulator-core guarantee: `@unlocalhosted/browsergrad-simulators` exports
   `createDeterministicMesh()` so JS rubrics and platform oracles can model
   browser-safe rank meshes, barriers, broadcasts, point-to-point messages, and
@@ -250,7 +252,7 @@ runtime branches.
   gradient-averaging, all-gather, reduce-scatter, and AdamW state-sharding
   semantics without `torch.multiprocessing`, `torch.distributed`, or CUDA.
 - CS149 CPU/SIMD simulator guarantee: the same package exports
-  `simulateCs149ClampedExpVector()`, `simulateCs149ArraySumVector()`, and
+  `simulateVectorizedClampedExp()`, `simulateVectorizedArraySum()`, and
   `partitionStaticWork()` so CS149 A1-style rubrics can check fake-SIMD
   clamped exponentiation, vector reductions, active-lane utilization, tail
   masks, and static contiguous/cyclic thread decomposition without native C++,

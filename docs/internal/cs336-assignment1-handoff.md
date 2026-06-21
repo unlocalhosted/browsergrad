@@ -48,7 +48,7 @@ profile record, not root agent behavior.
 
 - Start from `docs/internal/cs336-assignment1.profile.json`.
 - Use `@unlocalhosted/browsergrad-tokenizers` as the TS source of truth.
-  Export `cs336TokenizerOracleModule` or an equivalent wrapper as the profile's
+  Export `byteBpeOracleModule` or an assignment-local wrapper as the profile's
   registered oracle object.
 - Register a small JS oracle module into Pyodide for Python rubrics.
 - Mount assignment files under `/assignments/cs336-assignment1/`.
@@ -76,7 +76,7 @@ for exact tokenizer checks, then report through `browsergrad` assertions.
 import browsergrad as bg
 
 tokenizers = bg.oracle("_bg_tokenizers")
-model = tokenizers.train_cs336_bpe(corpus, vocab_size, special_tokens)
+model = tokenizers.train_byte_bpe(corpus, vocab_size, special_tokens)
 actual = student.run_train_bpe(input_path, vocab_size, special_tokens)
 
 if actual["merges"] == model["merges"]:

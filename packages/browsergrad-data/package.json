@@ -1,7 +1,7 @@
 {
   "name": "@unlocalhosted/browsergrad-data",
   "version": "0.1.0",
-  "description": "Browser-safe data processing oracles for BrowserGrad assignment rubrics.",
+  "description": "Browser-safe data processing primitives for HTML extraction, dedupe, quality filters, and PII masking.",
   "type": "module",
   "license": "MIT",
   "author": "unlocalhosted",

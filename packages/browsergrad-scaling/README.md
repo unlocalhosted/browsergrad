@@ -1,12 +1,12 @@
 # @unlocalhosted/browsergrad-scaling
 
-Browser-safe scaling-law and hosted API oracles for BrowserGrad assignment
-rubrics.
+Browser-safe scaling-law, budget scheduling, and hosted-API mock primitives for
+BrowserGrad.
 
-This package exists for CS336 Assignment 3-style labs where the upstream path
-uses a hosted training API, budget accounting, scheduler fairness, and scaling
-law projections. It does not run JAX, Modal, Postgres, or W&B in the browser.
-It gives platforms a deterministic fixture-scale truth source first.
+This package models browser-side experiments that need hosted training API
+responses, budget accounting, scheduler fairness, and scaling-law projections.
+It does not run JAX, Modal, Postgres, or W&B in the browser. It gives platforms
+a deterministic fixture-scale truth source first.
 
 ## Install
 
@@ -41,7 +41,7 @@ api.listExperiments("test-api-key");
 api.saveFinalSubmission("test-api-key", config, 2.75);
 ```
 
-The response shapes intentionally mirror the portable CS336 A3 API tests:
+The response shapes intentionally mirror a portable hosted-training API:
 `/budget`, `/submit`, `/experiments`, `/experiment/{id}`,
 `/final_submission`, and the dashboard HTML smoke.
 

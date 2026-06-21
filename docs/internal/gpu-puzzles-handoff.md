@@ -16,6 +16,9 @@ First browser-safe slice:
     with CS149 A3 CUDA concept fixtures.
   - `createBrowsergradKernelRubric(ctx)` when comparing WGSL output tensors
     against references.
+- Treat this as the first HipScript-inspired slice: CUDA-shaped kernel
+  semantics are explicit in JS today, then can lower into WGSL/WebGPU once the
+  simulator trace path is boring and trusted.
 
 ## Upstream Signals
 
@@ -40,8 +43,9 @@ Crafting Attention should:
 
 1. Load `gpu-puzzles.profile.json` and route through
    `runAssignmentJavascriptProfile()`.
-2. Register `_bg_gpu_puzzle_oracles` with `simulateCuda1DGrid()` and kernel
-   rubric helpers.
+2. Register `_bg_cuda_concepts` with `simulateCuda1DGrid()` and kernel
+   rubric helpers. The runner should reject the profile before executing the
+   rubric if this oracle is missing.
 3. Start with `puzzle_map`, `puzzle_zip`, and `puzzle_guard` fixtures.
 4. Report guard failures using `violations` from `simulateCuda1DGrid()` instead
    of browser/runtime exceptions.

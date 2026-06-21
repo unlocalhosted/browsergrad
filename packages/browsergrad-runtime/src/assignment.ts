@@ -1213,6 +1213,15 @@ export async function runAssignmentJavascriptProfile(
       `cannot run JavaScript profile; runner route is ${report.runnerRoute.target}: ${report.runnerRoute.message}`,
     );
   }
+  const missingOracles = missingAssignmentJavascriptOracles(
+    profile,
+    options.oracles,
+  );
+  if (missingOracles.length > 0) {
+    throw new BrowsergradError(
+      `cannot run JavaScript profile; missing declared JavaScript assignment oracle: ${missingOracles.join(", ")}`,
+    );
+  }
   const run = await runAssignmentJavascriptRubric(
     report.plan,
     contents,
@@ -1220,6 +1229,18 @@ export async function runAssignmentJavascriptProfile(
     options,
   );
   return { report, run };
+}
+
+function missingAssignmentJavascriptOracles(
+  profile: AssignmentProfile,
+  oracles: Readonly<Record<string, unknown>> | undefined,
+): string[] {
+  const provided = new Set(Object.keys(oracles ?? {}));
+  return uniqueSorted(
+    profile.oracles
+      .map((oracle) => oracle.name)
+      .filter((name) => !provided.has(name)),
+  );
 }
 
 async function verifyDatasetMountHash(

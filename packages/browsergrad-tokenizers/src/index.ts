@@ -1,7 +1,7 @@
-export const CS336_PRETOKENIZER_PATTERN =
+export const GPT2_PRETOKENIZER_PATTERN =
   String.raw`'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+`;
 
-export const CS336_DEFAULT_SPECIAL_TOKENS = ["<|endoftext|>"] as const;
+export const GPT2_DEFAULT_SPECIAL_TOKENS = ["<|endoftext|>"] as const;
 
 export interface TrainByteBpeOptions {
   readonly vocabSize: number;
@@ -32,14 +32,20 @@ export interface TokenizerOracle {
   decodeByteBpe(ids: readonly number[], model: ByteBpeModel): string;
 }
 
-export interface Cs336TokenizerOracleModule {
-  train_cs336_bpe(
+export interface ByteBpeOracleDefaults {
+  readonly specialTokens?: readonly string[];
+  readonly pretokenizerPattern?: string;
+}
+
+export interface ByteBpeOracleModule {
+  train_byte_bpe(
     input: string,
     vocabSize: number,
     specialTokens?: readonly string[],
+    pretokenizerPattern?: string,
   ): SerializedByteBpeModel;
-  encode_cs336(text: string, model: SerializedByteBpeModel): number[];
-  decode_cs336(ids: readonly number[], model: SerializedByteBpeModel): string;
+  encode_byte_bpe(text: string, model: SerializedByteBpeModel): number[];
+  decode_byte_bpe(ids: readonly number[], model: SerializedByteBpeModel): string;
 }
 
 export interface StreamingGateOptions {
@@ -59,10 +65,10 @@ export interface StreamingGate {
   assertAllowed(): void;
 }
 
-export const CS336_BPE_EXAMPLE = {
+export const BYTE_BPE_EXAMPLE = {
   corpus: "low low low low low lower lower widest widest widest newest newest newest newest newest newest",
   vocabSize: 259,
-  specialTokens: CS336_DEFAULT_SPECIAL_TOKENS,
+  specialTokens: GPT2_DEFAULT_SPECIAL_TOKENS,
 } as const;
 
 const UTF8_ENCODER = new TextEncoder();
@@ -89,7 +95,7 @@ export function trainByteBpe(
 
   const specialTokens = [...(options.specialTokens ?? [])];
   const pretokenizerPattern =
-    options.pretokenizerPattern ?? CS336_PRETOKENIZER_PATTERN;
+    options.pretokenizerPattern ?? GPT2_PRETOKENIZER_PATTERN;
   const vocab = createInitialVocabulary(specialTokens);
   const targetSize = options.vocabSize;
   if (targetSize <= vocab.size) {
@@ -224,38 +230,53 @@ export function deserializeByteBpeModel(
   };
 }
 
-export function createCs336TokenizerOracle(): TokenizerOracle {
+export function createByteBpeOracle(
+  defaults: ByteBpeOracleDefaults = {},
+): TokenizerOracle {
   return {
     trainByteBpe: (input, options) =>
       trainByteBpe(input, {
         ...options,
-        specialTokens: options.specialTokens ?? CS336_DEFAULT_SPECIAL_TOKENS,
+        specialTokens:
+          options.specialTokens ??
+          defaults.specialTokens ??
+          GPT2_DEFAULT_SPECIAL_TOKENS,
         pretokenizerPattern:
-          options.pretokenizerPattern ?? CS336_PRETOKENIZER_PATTERN,
+          options.pretokenizerPattern ??
+          defaults.pretokenizerPattern ??
+          GPT2_PRETOKENIZER_PATTERN,
       }),
     encodeByteBpe,
     decodeByteBpe,
   };
 }
 
-export function createCs336TokenizerOracleModule(): Cs336TokenizerOracleModule {
+export function createByteBpeOracleModule(
+  defaults: ByteBpeOracleDefaults = {},
+): ByteBpeOracleModule {
   return {
-    train_cs336_bpe: (input, vocabSize, specialTokens) =>
+    train_byte_bpe: (input, vocabSize, specialTokens, pretokenizerPattern) =>
       serializeByteBpeModel(
         trainByteBpe(input, {
           vocabSize,
-          specialTokens: specialTokens ?? CS336_DEFAULT_SPECIAL_TOKENS,
-          pretokenizerPattern: CS336_PRETOKENIZER_PATTERN,
+          specialTokens:
+            specialTokens ??
+            defaults.specialTokens ??
+            GPT2_DEFAULT_SPECIAL_TOKENS,
+          pretokenizerPattern:
+            pretokenizerPattern ??
+            defaults.pretokenizerPattern ??
+            GPT2_PRETOKENIZER_PATTERN,
         }),
       ),
-    encode_cs336: (text, model) =>
+    encode_byte_bpe: (text, model) =>
       encodeByteBpe(text, deserializeByteBpeModel(model)),
-    decode_cs336: (ids, model) =>
+    decode_byte_bpe: (ids, model) =>
       decodeByteBpe(ids, deserializeByteBpeModel(model)),
   };
 }
 
-export const cs336TokenizerOracleModule = createCs336TokenizerOracleModule();
+export const byteBpeOracleModule = createByteBpeOracleModule();
 
 export function createStreamingGate(
   options: StreamingGateOptions,

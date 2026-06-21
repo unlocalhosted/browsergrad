@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  CS336_BPE_EXAMPLE,
-  CS336_DEFAULT_SPECIAL_TOKENS,
-  CS336_PRETOKENIZER_PATTERN,
-  createCs336TokenizerOracle,
-  createCs336TokenizerOracleModule,
+  BYTE_BPE_EXAMPLE,
+  GPT2_DEFAULT_SPECIAL_TOKENS,
+  GPT2_PRETOKENIZER_PATTERN,
+  byteBpeOracleModule,
+  createByteBpeOracle,
+  createByteBpeOracleModule,
   createStreamingGate,
-  cs336TokenizerOracleModule,
   decodeByteBpe,
   deserializeByteBpeModel,
   encodeByteBpe,
@@ -15,10 +15,10 @@ import {
 } from "../src/index";
 
 describe("public surface", () => {
-  it("exports CS336 defaults", () => {
-    expect(CS336_PRETOKENIZER_PATTERN).toContain("\\p{L}");
-    expect(CS336_DEFAULT_SPECIAL_TOKENS).toEqual(["<|endoftext|>"]);
-    expect(CS336_BPE_EXAMPLE.vocabSize).toBe(259);
+  it("exports byte-BPE defaults", () => {
+    expect(GPT2_PRETOKENIZER_PATTERN).toContain("\\p{L}");
+    expect(GPT2_DEFAULT_SPECIAL_TOKENS).toEqual(["<|endoftext|>"]);
+    expect(BYTE_BPE_EXAMPLE.vocabSize).toBe(259);
   });
 
   it("exports planned helpers", () => {
@@ -28,8 +28,8 @@ describe("public surface", () => {
     expect(typeof serializeByteBpeModel).toBe("function");
     expect(typeof deserializeByteBpeModel).toBe("function");
     expect(typeof createStreamingGate).toBe("function");
-    expect(typeof createCs336TokenizerOracle().trainByteBpe).toBe("function");
-    expect(typeof createCs336TokenizerOracleModule().train_cs336_bpe).toBe("function");
-    expect(typeof cs336TokenizerOracleModule.encode_cs336).toBe("function");
+    expect(typeof createByteBpeOracle().trainByteBpe).toBe("function");
+    expect(typeof createByteBpeOracleModule().train_byte_bpe).toBe("function");
+    expect(typeof byteBpeOracleModule.encode_byte_bpe).toBe("function");
   });
 });

@@ -3,7 +3,7 @@
 **PyTorch-shaped deep learning in the browser.** Lazy IR with fusion, symbolic backward, AMP, gradient checkpointing, functional transforms, WGSL kernels, ONNX export.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![CI status](https://img.shields.io/badge/tests-424%20passing-brightgreen.svg)](#testing)
+[![CI status](https://img.shields.io/badge/tests-426%20passing-brightgreen.svg)](#testing)
 [![browser](https://img.shields.io/badge/runs-in%20the%20browser-blue.svg)](#)
 
 ```python
@@ -45,12 +45,12 @@ npm install @unlocalhosted/browsergrad-runtime pyodide
 npm install @unlocalhosted/browsergrad-jit
 npm install @unlocalhosted/browsergrad-kernels        # optional: WGSL kernels + WebGPU bridge
 npm install @unlocalhosted/browsergrad-grad           # optional: eager-autograd alternative
-npm install @unlocalhosted/browsergrad-tokenizers     # optional: browser-safe tokenizer/BPE oracles
-npm install @unlocalhosted/browsergrad-simulators     # optional: deterministic systems-lab simulators
-npm install @unlocalhosted/browsergrad-snapshots      # optional: JSON/numeric snapshot oracles
-npm install @unlocalhosted/browsergrad-data           # optional: data-lab PII/dedupe/quality/HTML helpers
-npm install @unlocalhosted/browsergrad-scaling        # optional: scaling-law + hosted API oracles
-npm install @unlocalhosted/browsergrad-alignment      # optional: DPO/GRPO/alignment math oracles
+npm install @unlocalhosted/browsergrad-tokenizers     # optional: tokenizer/BPE + streaming primitives
+npm install @unlocalhosted/browsergrad-simulators     # optional: parallel/distributed execution simulators
+npm install @unlocalhosted/browsergrad-snapshots      # optional: JSON/numeric snapshot comparison
+npm install @unlocalhosted/browsergrad-data           # optional: HTML/dedupe/PII/data-quality primitives
+npm install @unlocalhosted/browsergrad-scaling        # optional: scaling-law + hosted API mock primitives
+npm install @unlocalhosted/browsergrad-alignment      # optional: DPO/GRPO/alignment math primitives
 ```
 
 `pyodide` is a peer dependency. Asset-sync into `public/pyodide/v0.26.4/` so the runtime is served same-origin.
@@ -119,14 +119,14 @@ out = bg.realize_webgpu(x @ w + b)   # tiled GEMM, fused elementwise, custom WGS
 |---|---|
 | [`browsergrad-runtime`](./packages/browsergrad-runtime) | Pyodide-in-Worker host. `createSession`, `exec`, structured assertion + artifact protocol, AbortSignal cancellation, optional lab-manifest validator. |
 | [`browsergrad-jit`](./packages/browsergrad-jit) | Lazy-IR PyTorch-shape library. 28-opcode IR, fusion, symbolic VJP, AMP, gradient checkpointing, `bg.func.*`, custom WGSL kernels, ONNX export. |
-| [`browsergrad-kernels`](./packages/browsergrad-kernels) | WGSL compute-shader catalog plus pure-JS kernel/CUDA-concept oracles for FlashAttention, GPU Puzzles, and CS149 A3-style rubrics. |
+| [`browsergrad-kernels`](./packages/browsergrad-kernels) | WGSL compute-shader catalog plus pure-JS kernel/CUDA-concept references for attention, tensor kernels, and CUDA-shaped teaching subsets. |
 | [`browsergrad-grad`](./packages/browsergrad-grad) | Eager-autograd alternative. PyTorch-flavored, NumPy-backed, closure backward. Stable. |
-| [`browsergrad-tokenizers`](./packages/browsergrad-tokenizers) | Pure TypeScript tokenizer/BPE reference helpers and streaming gates for browser-safe platform rubrics. |
-| [`browsergrad-simulators`](./packages/browsergrad-simulators) | Deterministic browser-safe simulators for CS149-style SIMD/thread/task traces, worker-mesh collectives, DDP/FSDP, and sharded optimizer behavior. |
-| [`browsergrad-snapshots`](./packages/browsergrad-snapshots) | Browser-safe JSON/numeric snapshot comparison oracles for fixture-backed rubrics. |
-| [`browsergrad-data`](./packages/browsergrad-data) | Browser-safe data-lab helpers for fixture HTML extraction, exact/near dedupe, Gopher quality rules, and PII masking. |
-| [`browsergrad-scaling`](./packages/browsergrad-scaling) | Browser-safe CS336 A3-style hosted API mock, scheduler selector, and scaling-law fitter. |
-| [`browsergrad-alignment`](./packages/browsergrad-alignment) | Browser-safe CS336 A5-style DPO, GRPO, rollout reward, parser, and policy-gradient math oracles. |
+| [`browsergrad-tokenizers`](./packages/browsergrad-tokenizers) | Pure TypeScript tokenizer/BPE primitives and streaming gates. |
+| [`browsergrad-simulators`](./packages/browsergrad-simulators) | Deterministic simulators for SIMD/thread/task traces, worker-mesh collectives, DDP/FSDP, and sharded optimizer behavior. |
+| [`browsergrad-snapshots`](./packages/browsergrad-snapshots) | Browser-safe JSON/numeric snapshot comparison for structured and tensor-like outputs. |
+| [`browsergrad-data`](./packages/browsergrad-data) | Browser-safe data primitives for HTML extraction, exact/near dedupe, quality rules, and PII masking. |
+| [`browsergrad-scaling`](./packages/browsergrad-scaling) | Browser-safe hosted API mocks, budget schedulers, and scaling-law fitters. |
+| [`browsergrad-alignment`](./packages/browsergrad-alignment) | Browser-safe DPO, GRPO, rollout reward, parser, and policy-gradient math primitives. |
 
 Each package is independently consumable; they share an npm scope but no runtime dependency. Take one or all.
 

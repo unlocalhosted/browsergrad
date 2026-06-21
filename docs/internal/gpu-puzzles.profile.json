@@ -31,8 +31,8 @@
   ],
   "oracles": [
     {
-      "name": "_bg_gpu_puzzle_oracles",
-      "js_module": "/assignments/gpu-puzzles/oracles/gpu-puzzles.js",
+      "name": "_bg_cuda_concepts",
+      "js_module": "/browsergrad/oracles/cuda-concepts.js",
       "export_name": "oracle"
     }
   ],

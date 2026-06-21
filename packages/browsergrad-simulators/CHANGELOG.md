@@ -16,7 +16,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Deterministic DDP gradient averaging, FSDP parameter sharding/all-gather,
   FSDP reduce-scatter, and sharded AdamW optimizer state/update simulators for
   CS336 A2-style distributed-training rubrics.
-- CS149 A1-style CPU/SIMD teaching helpers:
-  `simulateCs149ClampedExpVector()`, `simulateCs149ArraySumVector()`, and
+- CPU/SIMD teaching helpers:
+  `simulateVectorizedClampedExp()`, `simulateVectorizedArraySum()`, and
   `partitionStaticWork()` for lane-mask utilization, vector reductions, and
   static thread decomposition rubrics.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  createCs336TokenizerOracle,
-  createCs336TokenizerOracleModule,
+  createByteBpeOracle,
+  createByteBpeOracleModule,
   decodeByteBpe,
   deserializeByteBpeModel,
   encodeByteBpe,
@@ -44,20 +44,20 @@ describe("encodeByteBpe and decodeByteBpe", () => {
     expect(decodeByteBpe(encodeByteBpe(text, restored), restored)).toBe(text);
   });
 
-  it("CS336 oracle defaults to the end-of-text special token", () => {
-    const oracle = createCs336TokenizerOracle();
+  it("byte-BPE oracle defaults to the GPT-2 end-of-text special token", () => {
+    const oracle = createByteBpeOracle();
     const model = oracle.trainByteBpe("a<|endoftext|>b", { vocabSize: 258 });
 
     expect(model.specialTokens).toEqual(["<|endoftext|>"]);
     expect(model.merges).toEqual([]);
   });
 
-  it("CS336 oracle module returns JSON-friendly serialized models", () => {
-    const module = createCs336TokenizerOracleModule();
-    const model = module.train_cs336_bpe("low lower <|endoftext|> widest", 270);
+  it("byte-BPE oracle module returns JSON-friendly serialized models", () => {
+    const module = createByteBpeOracleModule();
+    const model = module.train_byte_bpe("low lower <|endoftext|> widest", 270);
     const text = "lower <|endoftext|> widest";
 
     expect(model.specialTokens).toEqual(["<|endoftext|>"]);
-    expect(module.decode_cs336(module.encode_cs336(text, model), model)).toBe(text);
+    expect(module.decode_byte_bpe(module.encode_byte_bpe(text, model), model)).toBe(text);
   });
 });

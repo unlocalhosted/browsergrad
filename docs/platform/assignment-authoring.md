@@ -3,6 +3,9 @@
 BrowserGrad assignments are platform profiles around reusable runtime
 capabilities. Keep assignment facts in profiles, fixtures, and rubrics; keep
 package code assignment-agnostic.
+Primitive packages should expose domain names, not course names. Put
+course-specific wording in the profile/handoff layer. See
+`docs/platform/primitive-package-architecture.md` for the naming rule.
 
 ## Profile Shape
 
@@ -83,8 +86,9 @@ helpers without Pyodide. Pass browser resources such as WebGPU adapters/devices
 through `substrates` and read them with `ctx.substrate(name)`.
 Use `runAssignmentJavascriptProfile()` when the platform has a full profile and
 wants one profile-driven call that builds preflight, validates the JavaScript
-route, mounts declared contents, wires oracles/substrates, and runs the rubric.
-CS149 A1 has an e2e test proving this route with simulator oracles.
+route, mounts declared contents, preflights declared JS oracles, wires
+oracles/substrates, and runs the rubric. CS149 A1 and GPU Puzzles have e2e
+tests proving this route with simulator/kernel oracles.
 Kernel-style JS rubrics can use `createKernelRubric()` from
 `@unlocalhosted/browsergrad-kernels` to compare tensors against CPU references
 and forward pass/fail assertions into the BrowserGrad JS rubric context. Use
@@ -119,7 +123,7 @@ CS336 A2-style distributed-training rubrics can use the same package's
 `ddp-simulator`, `fsdp-simulator`, and `sharded-optimizer-simulator` profile
 paths before using native `torch.distributed`, multiprocessing, or CUDA.
 CS149 A1-style JavaScript rubrics can use
-`simulateCs149ClampedExpVector()`, `simulateCs149ArraySumVector()`, and
+`simulateVectorizedClampedExp()`, `simulateVectorizedArraySum()`, and
 `partitionStaticWork()` for `simd-simulator`, `pthreads-simulator`, and
 `performance-rubric` fixture checks. These helpers verify outputs plus lane
 utilization, vector-instruction traces, tail masks, horizontal reductions, and
@@ -206,7 +210,7 @@ and call small deterministic helpers:
 import browsergrad as bg
 
 tokenizers = bg.oracle("_bg_tokenizers")
-model = tokenizers.train_cs336_bpe(corpus, vocab_size, special_tokens)
+model = tokenizers.train_byte_bpe(corpus, vocab_size, special_tokens)
 ```
 
 Use this pattern when:
@@ -303,3 +307,5 @@ execution infrastructure.
    test using `runAssignmentRubric()` or `runAssignmentJavascriptRubric()` that
    mounts files, runs the rubric, calls declared oracles, and reports clear
    failures.
+7. If using `runAssignmentJavascriptProfile()`, provide every profile-declared
+   oracle in `options.oracles`; missing names should fail before the rubric runs.

@@ -62,8 +62,8 @@ For every lab profile, the platform should:
     `simulateFsdpParameterSharding()`, `simulateFsdpGradientReduceScatter()`,
     and `simulateShardedAdamWStep()` for CS336 A2-style DDP/FSDP/sharded
     optimizer fixtures before adding native distributed runners.
-    CS149 A1 CPU/SIMD labs can use `simulateCs149ClampedExpVector()`,
-    `simulateCs149ArraySumVector()`, and `partitionStaticWork()` for
+    CS149 A1 CPU/SIMD labs can use `simulateVectorizedClampedExp()`,
+    `simulateVectorizedArraySum()`, and `partitionStaticWork()` for
     browser-safe lane-mask, vector-reduction, and static work-decomposition
     rubrics before C++/ISPC/native timing runners exist.
 15. For external/native labs, call `createAssignmentExternalRunnerRequest(plan)`
@@ -79,8 +79,8 @@ For every lab profile, the platform should:
     `runAssignmentJavascriptRubric`.
     Prefer `runAssignmentJavascriptProfile()` when the platform has a full
     profile; it owns preflight, route validation, mount collection,
-    oracle/substrate wiring, and rubric execution as one e2e path. CS149 A1 is
-    the first benchmark profile covered by this route.
+    declared-oracle preflight, oracle/substrate wiring, and rubric execution as
+    one e2e path. CS149 A1 and GPU Puzzles are covered by this route.
     JS/TS streaming checks can import `createStreamingGate` and use
     `gate.wrapInput` plus `gate.wrapOutput`.
     FlashAttention labs can use `@unlocalhosted/browsergrad-kernels`
@@ -361,14 +361,15 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     GPU Puzzles and CS149 A3 CUDA concept labs can use
     `simulateCuda1DGrid()`, `referenceSaxpy()`, and
     `referenceExclusiveScan()` for map/guard/SAXPY/scan fixtures and
-    out-of-bounds guard diagnostics.
+    out-of-bounds guard diagnostics. This is the current HipScript-inspired
+    CUDA-shaped path: simulator trace first, WGSL/WebGPU lowering next.
     Simulator-backed labs can use `@unlocalhosted/browsergrad-simulators`
     `createDeterministicMesh()` or `createTaskGraphSimulator()` for event-trace
     rubrics before real Worker execution exists. CS336 A2 systems labs can also
     use the DDP/FSDP/sharded-optimizer simulator helpers for gradient averaging,
     all-gather/reduce-scatter, and AdamW state-sharding checks.
     CS149 A1 CPU/SIMD labs can use the same package's
-    `simulateCs149ClampedExpVector()`, `simulateCs149ArraySumVector()`, and
+    `simulateVectorizedClampedExp()`, `simulateVectorizedArraySum()`, and
     `partitionStaticWork()` to check clamped exponentiation, vector sums,
     active-lane utilization, tails, and static work partitioning.
     Snapshot-backed labs can use `@unlocalhosted/browsergrad-snapshots`

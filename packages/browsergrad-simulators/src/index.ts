@@ -87,7 +87,7 @@ export interface TaskGraphSimulator {
   clear(): void;
 }
 
-export type Cs149SimdInstructionOp =
+export type SimdInstructionOp =
   | "load-values"
   | "load-exponents"
   | "add-accumulator"
@@ -97,9 +97,9 @@ export type Cs149SimdInstructionOp =
   | "clamp"
   | "store";
 
-export interface Cs149SimdTraceEvent {
+export interface SimdTraceEvent {
   step: number;
-  op: Cs149SimdInstructionOp;
+  op: SimdInstructionOp;
   chunk: number;
   laneStart: number;
   mask: boolean[];
@@ -118,30 +118,30 @@ export interface SimdKernelStats {
   utilization: number;
 }
 
-export interface Cs149ClampedExpVectorInput {
+export interface VectorizedClampedExpInput {
   readonly values: readonly number[];
   readonly exponents: readonly number[];
   readonly vectorWidth: number;
   readonly clamp?: number;
 }
 
-export interface Cs149ClampedExpVectorResult {
+export interface VectorizedClampedExpResult {
   output: number[];
   stats: SimdKernelStats;
-  trace: Cs149SimdTraceEvent[];
+  trace: SimdTraceEvent[];
 }
 
-export interface Cs149ArraySumVectorInput {
+export interface VectorizedArraySumInput {
   readonly values: readonly number[];
   readonly vectorWidth: number;
 }
 
-export interface Cs149ArraySumVectorResult {
+export interface VectorizedArraySumResult {
   sum: number;
   partialLaneSums: number[];
   horizontalReductionRounds: number;
   stats: SimdKernelStats;
-  trace: Cs149SimdTraceEvent[];
+  trace: SimdTraceEvent[];
 }
 
 export interface StaticWorkRange {
@@ -414,9 +414,9 @@ export function createDeterministicMesh(
   };
 }
 
-export function simulateCs149ClampedExpVector(
-  input: Cs149ClampedExpVectorInput,
-): Cs149ClampedExpVectorResult {
+export function simulateVectorizedClampedExp(
+  input: VectorizedClampedExpInput,
+): VectorizedClampedExpResult {
   const vectorWidth = validateVectorWidth(input.vectorWidth);
   const values = validateNumberVector(input.values, "values");
   if (values.length === 0) {
@@ -430,13 +430,13 @@ export function simulateCs149ClampedExpVector(
   const chunks = Math.ceil(values.length / vectorWidth);
   const laneSlots = chunks * vectorWidth;
   const output = Array.from({ length: values.length }, () => 0);
-  const trace: Cs149SimdTraceEvent[] = [];
+  const trace: SimdTraceEvent[] = [];
   let step = 0;
   let activeLaneTotal = 0;
   let laneTotal = 0;
 
   const record = (
-    op: Cs149SimdInstructionOp,
+    op: SimdInstructionOp,
     chunk: number,
     laneStart: number,
     mask: readonly boolean[],
@@ -508,13 +508,13 @@ export function simulateCs149ClampedExpVector(
       totalLanes: laneTotal,
       utilization: laneTotal === 0 ? 0 : activeLaneTotal / laneTotal,
     },
-    trace: trace.map(cloneCs149SimdTraceEvent),
+    trace: trace.map(cloneSimdTraceEvent),
   };
 }
 
-export function simulateCs149ArraySumVector(
-  input: Cs149ArraySumVectorInput,
-): Cs149ArraySumVectorResult {
+export function simulateVectorizedArraySum(
+  input: VectorizedArraySumInput,
+): VectorizedArraySumResult {
   const vectorWidth = validateVectorWidth(input.vectorWidth);
   const values = validateNumberVector(input.values, "values");
   if (values.length === 0) {
@@ -528,13 +528,13 @@ export function simulateCs149ArraySumVector(
   const chunks = values.length / vectorWidth;
   const laneSlots = values.length;
   const partialLaneSums = Array.from({ length: vectorWidth }, () => 0);
-  const trace: Cs149SimdTraceEvent[] = [];
+  const trace: SimdTraceEvent[] = [];
   let step = 0;
   let activeLaneTotal = 0;
   let laneTotal = 0;
 
   const record = (
-    op: Cs149SimdInstructionOp,
+    op: SimdInstructionOp,
     chunk: number,
     laneStart: number,
     mask: readonly boolean[],
@@ -596,7 +596,7 @@ export function simulateCs149ArraySumVector(
       totalLanes: laneTotal,
       utilization: laneTotal === 0 ? 0 : activeLaneTotal / laneTotal,
     },
-    trace: trace.map(cloneCs149SimdTraceEvent),
+    trace: trace.map(cloneSimdTraceEvent),
   };
 }
 
@@ -901,9 +901,9 @@ function validateChunkSize(chunkSize: number): number {
   return chunkSize;
 }
 
-function cloneCs149SimdTraceEvent(
-  event: Cs149SimdTraceEvent,
-): Cs149SimdTraceEvent {
+function cloneSimdTraceEvent(
+  event: SimdTraceEvent,
+): SimdTraceEvent {
   return {
     ...event,
     mask: [...event.mask],

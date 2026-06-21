@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   partitionStaticWork,
-  simulateCs149ArraySumVector,
-  simulateCs149ClampedExpVector,
   SimulatorError,
+  simulateVectorizedArraySum,
+  simulateVectorizedClampedExp,
 } from "../src/index";
 
 function expectCloseArray(actual: readonly number[], expected: readonly number[]): void {
@@ -13,9 +13,9 @@ function expectCloseArray(actual: readonly number[], expected: readonly number[]
   }
 }
 
-describe("CS149 CPU/SIMD teaching simulators", () => {
+describe("CPU/SIMD teaching simulators", () => {
   it("simulates clampedExp with tail masks and divergent lane utilization", () => {
-    const result = simulateCs149ClampedExpVector({
+    const result = simulateVectorizedClampedExp({
       values: [2, 3, -2, 4, 2],
       exponents: [0, 2, 3, 4, 5],
       vectorWidth: 4,
@@ -37,7 +37,7 @@ describe("CS149 CPU/SIMD teaching simulators", () => {
 
     result.trace[0]!.activeLanes = 0;
     expect(
-      simulateCs149ClampedExpVector({
+      simulateVectorizedClampedExp({
         values: [2],
         exponents: [1],
         vectorWidth: 4,
@@ -47,21 +47,21 @@ describe("CS149 CPU/SIMD teaching simulators", () => {
 
   it("rejects invalid SIMD fixtures before rubrics trust their stats", () => {
     expect(() =>
-      simulateCs149ClampedExpVector({
+      simulateVectorizedClampedExp({
         values: [2],
         exponents: [1, 2],
         vectorWidth: 4,
       }),
     ).toThrow(SimulatorError);
     expect(() =>
-      simulateCs149ClampedExpVector({
+      simulateVectorizedClampedExp({
         values: [2],
         exponents: [Number.NaN],
         vectorWidth: 4,
       }),
     ).toThrow(SimulatorError);
     expect(() =>
-      simulateCs149ClampedExpVector({
+      simulateVectorizedClampedExp({
         values: [2],
         exponents: [1],
         vectorWidth: 0,
@@ -70,7 +70,7 @@ describe("CS149 CPU/SIMD teaching simulators", () => {
   });
 
   it("simulates vector array sum with deterministic horizontal reduction stats", () => {
-    const result = simulateCs149ArraySumVector({
+    const result = simulateVectorizedArraySum({
       values: [1, 2, 3, 4, 5, 6, 7, 8],
       vectorWidth: 4,
     });

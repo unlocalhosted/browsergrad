@@ -1,10 +1,10 @@
 # @unlocalhosted/browsergrad-alignment
 
-Browser-safe alignment and RL loss oracles for BrowserGrad assignment rubrics.
+Browser-safe alignment and RL math primitives for BrowserGrad.
 
-This package targets fixture-scale alignment labs such as CS336 Assignment 5.
-It gives rubrics deterministic math helpers before full vLLM, flash-attn,
-large-model inference, or native training loops enter the path.
+This package targets fixture-scale alignment and RL experiments. It gives
+callers deterministic math helpers before full vLLM, flash-attn, large-model
+inference, or native training loops enter the path.
 
 ## Public Surface
 

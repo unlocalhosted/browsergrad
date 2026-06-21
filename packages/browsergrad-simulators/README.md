@@ -1,9 +1,10 @@
 # @unlocalhosted/browsergrad-simulators
 
-Deterministic browser-safe simulators for BrowserGrad systems labs.
+Deterministic browser-safe simulators for BrowserGrad parallel and distributed
+execution.
 
 This package is intentionally small and dependency-free. It models event traces
-and collective behavior for course rubrics that need distributed or parallel
+and collective behavior for browser workloads that need distributed or parallel
 systems concepts without depending on native threads, CUDA, MPI, or Linux
 process behavior.
 
@@ -14,8 +15,8 @@ import {
   createDeterministicMesh,
   createTaskGraphSimulator,
   partitionStaticWork,
-  simulateCs149ArraySumVector,
-  simulateCs149ClampedExpVector,
+  simulateVectorizedArraySum,
+  simulateVectorizedClampedExp,
   simulateDdpGradientSynchronization,
   simulateFsdpGradientReduceScatter,
   simulateFsdpParameterSharding,
@@ -62,14 +63,14 @@ console.log(simulateShardedAdamWStep({
   optimizer: { lr: 0.1 },
 }).updatedParameters);
 
-const clamped = simulateCs149ClampedExpVector({
+const clamped = simulateVectorizedClampedExp({
   values: [2, 3, -2, 4, 2],
   exponents: [0, 2, 3, 4, 5],
   vectorWidth: 4,
 });
 console.log(clamped.output, clamped.stats.utilization);
 
-console.log(simulateCs149ArraySumVector({
+console.log(simulateVectorizedArraySum({
   values: [1, 2, 3, 4, 5, 6, 7, 8],
   vectorWidth: 4,
 }).sum);

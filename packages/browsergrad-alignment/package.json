@@ -1,7 +1,7 @@
 {
   "name": "@unlocalhosted/browsergrad-alignment",
   "version": "0.1.0",
-  "description": "Browser-safe alignment and RL loss oracles for BrowserGrad assignment rubrics.",
+  "description": "Browser-safe alignment and RL math primitives for BrowserGrad.",
   "type": "module",
   "license": "MIT",
   "author": "unlocalhosted",

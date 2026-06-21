@@ -114,7 +114,7 @@ bg.emit_json(name, data)                      # → ArtifactJson (data must be J
 bg.emit_image(name, mime, data_base64)        # → ArtifactImage
 
 oracle = bg.oracle("_bg_tokenizers")          # profile-registered JS oracle module
-model = oracle.train_cs336_bpe(corpus, 300)
+model = oracle.train_byte_bpe(corpus, 300)
 
 ctx = bg.assignment_context()                 # id/root/fixtures/tests/gates
 for gate in ctx["behavioral_gates"]:
@@ -266,7 +266,7 @@ const jsRun = await runAssignmentJavascriptProfile(
   environment,
   { files: { [report.plan.files.rubricPath]: rubricSource } },
   importedRubric,
-  { oracles: { _bg_cs149_cpu_oracles: cs149Oracle } },
+  { oracles: { _bg_cpu_parallelism: cs149Oracle } },
 );
 console.log(jsRun.report.runnerRoute.target, jsRun.run.assertions);
 ```
@@ -290,7 +290,9 @@ platform branching before calling `runAssignmentRubric()` or
 `runAssignmentJavascriptRubric()`.
 Use `runAssignmentJavascriptProfile()` when the platform has a full JS-routed
 profile and wants BrowserGrad to own preflight, route validation, mount
-collection, oracle/substrate wiring, and rubric execution in one call.
+collection, declared-oracle preflight, oracle/substrate wiring, and rubric
+execution in one call. The runner rejects missing profile-declared JS oracles
+before invoking the rubric, so broken platform wiring cannot silently pass.
 For `external` routes, `createAssignmentExternalRunnerRequest(plan)` returns the
 native/hosted runner handoff: selected external capabilities, resolved files,
 timeouts, behavioral gates, mount plan, and dataset cache plan. Preflight
@@ -409,6 +411,8 @@ starting point for GPU Puzzles and CS149-style JS/WebGPU rubrics. Pass browser
 resources such as WebGPU adapters/devices through `substrates`, then read them
 inside the rubric with `ctx.substrate("webgpu")`. JS rubrics can read mounted
 text with `ctx.readText(path)` or mounted bytes with `ctx.readBytes(path)`.
+Use `runAssignmentJavascriptProfile()` for full assignment profiles when the
+profile's declared oracle modules should be checked before rubric execution.
 For JS/TS streaming rubrics, pair this with `createStreamingGate()` from
 `@unlocalhosted/browsergrad-tokenizers` and wrap student input/output iterables.
 

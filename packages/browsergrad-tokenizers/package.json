@@ -1,7 +1,7 @@
 {
   "name": "@unlocalhosted/browsergrad-tokenizers",
   "version": "0.1.0",
-  "description": "Browser-safe tokenizer and BPE reference helpers for BrowserGrad assignment rubrics.",
+  "description": "Browser-safe tokenizer, byte-BPE, and streaming primitives for BrowserGrad.",
   "type": "module",
   "license": "MIT",
   "author": "unlocalhosted",

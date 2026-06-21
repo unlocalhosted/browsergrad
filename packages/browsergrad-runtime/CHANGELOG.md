@@ -10,8 +10,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Added
 
 - `browsergrad.oracle(name)` for Python rubrics. It imports a JS module
-  registered through `createSession({ jsModules })`, giving assignment rubrics
-  a stable BrowserGrad API for profile-declared TS/JS oracles instead of raw
+  registered through `createSession({ jsModules })`, giving Python runtimes a
+  stable BrowserGrad API for profile-declared TS/JS primitives instead of raw
   Pyodide import mechanics.
 - Assignment rubric launchers now expose profile execution context in
   environment variables, including `BROWSERGRAD_ASSIGNMENT_ROOT`,
@@ -83,8 +83,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   declared oracles, and structured assertion/artifact helpers.
 - `runAssignmentJavascriptProfile(profile, environment, contents, rubric,
   options)` runs a full profile-driven JavaScript assignment path: preflight,
-  route validation, mount readiness, oracle/substrate wiring, and rubric
-  execution.
+  route validation, mount readiness, declared-oracle preflight,
+  oracle/substrate wiring, and rubric execution.
 - JavaScript rubric contexts now expose `ctx.readBytes(path)` for binary
   mounted fixtures.
 - JavaScript rubric contexts now expose `ctx.substrate(name)` for browser

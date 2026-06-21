@@ -31,8 +31,8 @@
   ],
   "oracles": [
     {
-      "name": "_bg_cs149_cpu_oracles",
-      "js_module": "/assignments/cs149-assignment1/oracles/cpu-parallel.js",
+      "name": "_bg_cpu_parallelism",
+      "js_module": "/browsergrad/oracles/cpu-parallelism.js",
       "export_name": "oracle"
     }
   ],

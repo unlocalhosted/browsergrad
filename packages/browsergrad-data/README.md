@@ -1,12 +1,12 @@
 # @unlocalhosted/browsergrad-data
 
-Browser-safe data processing oracles for BrowserGrad assignment rubrics.
+Browser-safe data processing primitives for BrowserGrad.
 
-This package targets small fixture slices of data-processing labs such as
-CS336 Assignment 4. It is not a Common Crawl replacement; it gives rubrics
-deterministic helpers for PII masking, exact deduplication, near-duplicate
-document deduplication, Gopher-style quality rules, and HTML text extraction
-without native classifiers or WARC tooling.
+This package targets small fixture slices of browser-side data processing. It
+is not a Common Crawl replacement; it provides deterministic helpers for PII
+masking, exact deduplication, near-duplicate document deduplication,
+Gopher-style quality rules, and HTML text extraction without native classifiers
+or WARC tooling.
 
 ## Public Surface
 

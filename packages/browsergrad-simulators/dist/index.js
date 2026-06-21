@@ -91,7 +91,7 @@ export function createDeterministicMesh(options) {
         },
     };
 }
-export function simulateCs149ClampedExpVector(input) {
+export function simulateVectorizedClampedExp(input) {
     const vectorWidth = validateVectorWidth(input.vectorWidth);
     const values = validateNumberVector(input.values, "values");
     if (values.length === 0) {
@@ -167,10 +167,10 @@ export function simulateCs149ClampedExpVector(input) {
             totalLanes: laneTotal,
             utilization: laneTotal === 0 ? 0 : activeLaneTotal / laneTotal,
         },
-        trace: trace.map(cloneCs149SimdTraceEvent),
+        trace: trace.map(cloneSimdTraceEvent),
     };
 }
-export function simulateCs149ArraySumVector(input) {
+export function simulateVectorizedArraySum(input) {
     const vectorWidth = validateVectorWidth(input.vectorWidth);
     const values = validateNumberVector(input.values, "values");
     if (values.length === 0) {
@@ -236,7 +236,7 @@ export function simulateCs149ArraySumVector(input) {
             totalLanes: laneTotal,
             utilization: laneTotal === 0 ? 0 : activeLaneTotal / laneTotal,
         },
-        trace: trace.map(cloneCs149SimdTraceEvent),
+        trace: trace.map(cloneSimdTraceEvent),
     };
 }
 export function partitionStaticWork(input) {
@@ -493,7 +493,7 @@ function validateChunkSize(chunkSize) {
     }
     return chunkSize;
 }
-function cloneCs149SimdTraceEvent(event) {
+function cloneSimdTraceEvent(event) {
     return {
         ...event,
         mask: [...event.mask],
