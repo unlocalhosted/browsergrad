@@ -52,6 +52,8 @@ export interface StreamingGate {
   readonly chunkCount: number;
   readonly chunksConsumed: number;
   readonly firstYieldSeen: boolean;
+  wrapInput<T>(iterable: Iterable<T>): Iterable<T>;
+  wrapOutput<T>(iterable: Iterable<T>): Iterable<T>;
   noteChunkConsumed(): void;
   noteFirstYield(): void;
   assertAllowed(): void;
@@ -287,6 +289,30 @@ class BasicStreamingGate implements StreamingGate {
 
   get firstYieldSeen(): boolean {
     return this.yielded;
+  }
+
+  wrapInput<T>(iterable: Iterable<T>): Iterable<T> {
+    const noteChunkConsumed = this.noteChunkConsumed.bind(this);
+    return {
+      *[Symbol.iterator](): Iterator<T> {
+        for (const item of iterable) {
+          noteChunkConsumed();
+          yield item;
+        }
+      },
+    };
+  }
+
+  wrapOutput<T>(iterable: Iterable<T>): Iterable<T> {
+    const noteFirstYield = this.noteFirstYield.bind(this);
+    return {
+      *[Symbol.iterator](): Iterator<T> {
+        for (const item of iterable) {
+          noteFirstYield();
+          yield item;
+        }
+      },
+    };
   }
 
   noteChunkConsumed(): void {

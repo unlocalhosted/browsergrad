@@ -345,6 +345,8 @@ starting point for GPU Puzzles and CS149-style JS/WebGPU rubrics. Pass browser
 resources such as WebGPU adapters/devices through `substrates`, then read them
 inside the rubric with `ctx.substrate("webgpu")`. JS rubrics can read mounted
 text with `ctx.readText(path)` or mounted bytes with `ctx.readBytes(path)`.
+For JS/TS streaming rubrics, pair this with `createStreamingGate()` from
+`@unlocalhosted/browsergrad-tokenizers` and wrap student input/output iterables.
 
 ## What this is, and is not
 

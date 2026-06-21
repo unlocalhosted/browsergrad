@@ -169,7 +169,8 @@ runtime branches.
   no `test_ms` is declared.
 - Streaming-gate guarantee: Python rubrics can use `browsergrad.streaming_gate`
   to enforce `max_chunks_before_first_yield` from behavioral gates and fail eager
-  iterable consumers with assignment-specific messages.
+  iterable consumers with assignment-specific messages; JS/TS rubrics can use
+  `createStreamingGate().wrapInput()` and `.wrapOutput()` for the same behavior.
 - Forbidden-read guarantee: Python rubrics can use
   `browsergrad.forbidden_read_gate` to permit incremental text consumption while
   rejecting eager `read()` / `readlines()` calls declared by `forbidden-read`

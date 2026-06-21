@@ -52,6 +52,8 @@ For every lab profile, the platform should:
 13. For JavaScript-backed labs, pass the imported rubric function, declared
     oracle objects, and browser substrates such as WebGPU devices to
     `runAssignmentJavascriptRubric`.
+    JS/TS streaming checks can import `createStreamingGate` and use
+    `gate.wrapInput` plus `gate.wrapOutput`.
 14. In Python rubrics, call profile-registered JS oracles with
     `browsergrad.oracle("<module-name>")`.
 15. In Python rubrics, read root, fixture, allowed-test, and behavioral-gate

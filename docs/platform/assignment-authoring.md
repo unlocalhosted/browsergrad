@@ -85,6 +85,9 @@ and hash verification in one object.
 name, so platforms can fetch/cache however they want before writing to Pyodide.
 JavaScript rubrics should use `ctx.readBytes(path)` for binary mounts and
 `ctx.readText(path)` for UTF-8 text.
+JS/TS rubrics that need streaming checks can import `createStreamingGate()` from
+`@unlocalhosted/browsergrad-tokenizers`, then use `gate.wrapInput(chunks)` and
+`gate.wrapOutput(studentOutput)` to mirror the Python streaming-gate contract.
 
 Rubrics should prefer exact fixtures for correctness and calibrated benchmark
 fixtures for performance. Do not depend on host OS paths, subprocesses, POSIX
