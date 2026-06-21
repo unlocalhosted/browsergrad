@@ -165,6 +165,9 @@ runtime branches.
   contents)` dry-runs platform-provided files and datasets before any
   `Session.fs` write, and benchmark tests assert every profile reports missing
   rubric/dataset contents deterministically.
+- Fixture-hash guarantee: `verifyAssignmentMountContentHashes(mountPlan,
+  contents)` validates dataset `sha256:<64 hex>` hashes for text and binary
+  mount contents before execution.
 - Binary fixture guarantee: assignment mount contents and `Session.fs.write`
   accept `Uint8Array` bytes so small `.pt`, `.npz`, and snapshot fixtures can
   be mounted without text/base64 loss; hosts can verify worker bytes with

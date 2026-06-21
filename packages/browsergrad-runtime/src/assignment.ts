@@ -196,6 +196,28 @@ export interface AssignmentMountContentEvaluation {
   readonly skippedOptionalPaths: readonly string[];
 }
 
+export type AssignmentMountHashStatus =
+  | "match"
+  | "mismatch"
+  | "missing"
+  | "invalid"
+  | "unsupported";
+
+export interface AssignmentMountHashCheck {
+  readonly name: string;
+  readonly path: string;
+  readonly algorithm: string;
+  readonly expected: string;
+  readonly actual?: string;
+  readonly ok: boolean;
+  readonly status: AssignmentMountHashStatus;
+}
+
+export interface AssignmentMountHashVerification {
+  readonly ok: boolean;
+  readonly checks: readonly AssignmentMountHashCheck[];
+}
+
 export interface AssignmentMaterializeResult {
   readonly writtenPaths: readonly string[];
   readonly skippedOptionalPaths: readonly string[];
@@ -634,6 +656,21 @@ export function evaluateAssignmentMountContents(
   };
 }
 
+export async function verifyAssignmentMountContentHashes(
+  plan: AssignmentMountPlan,
+  contents: AssignmentMountContents,
+): Promise<AssignmentMountHashVerification> {
+  const checks: AssignmentMountHashCheck[] = [];
+  for (const dataset of plan.datasets) {
+    if (!dataset.hash) continue;
+    checks.push(await verifyDatasetMountHash(dataset, contents));
+  }
+  return {
+    ok: checks.every((check) => check.ok),
+    checks,
+  };
+}
+
 export async function runAssignmentRubric(
   session: AssignmentRubricSession,
   plan: AssignmentRunPlan,
@@ -764,6 +801,84 @@ export async function runAssignmentJavascriptRubric(
     assertions,
     artifacts,
   };
+}
+
+async function verifyDatasetMountHash(
+  dataset: AssignmentDatasetMount,
+  contents: AssignmentMountContents,
+): Promise<AssignmentMountHashCheck> {
+  const parsed = parseAssignmentContentHash(dataset.hash!);
+  if (parsed.status !== "ok") {
+    return {
+      name: dataset.name,
+      path: dataset.mountPath,
+      algorithm: parsed.algorithm,
+      expected: dataset.hash!,
+      ok: false,
+      status: parsed.status,
+    };
+  }
+
+  const content = contents.datasets?.[dataset.name];
+  if (content === undefined) {
+    return {
+      name: dataset.name,
+      path: dataset.mountPath,
+      algorithm: parsed.algorithm,
+      expected: parsed.expected,
+      ok: false,
+      status: "missing",
+    };
+  }
+
+  const actual = `sha256:${await sha256Hex(content)}`;
+  const ok = actual === parsed.expected;
+  return {
+    name: dataset.name,
+    path: dataset.mountPath,
+    algorithm: parsed.algorithm,
+    expected: parsed.expected,
+    actual,
+    ok,
+    status: ok ? "match" : "mismatch",
+  };
+}
+
+function parseAssignmentContentHash(hash: string):
+  | { readonly status: "ok"; readonly algorithm: "sha256"; readonly expected: string }
+  | { readonly status: "invalid" | "unsupported"; readonly algorithm: string } {
+  const [algorithm, digest, ...extra] = hash.split(":");
+  if (!algorithm || digest === undefined || extra.length > 0) {
+    return { status: "invalid", algorithm: algorithm ?? "" };
+  }
+  const normalizedAlgorithm = algorithm.toLowerCase();
+  if (normalizedAlgorithm !== "sha256") {
+    return { status: "unsupported", algorithm: normalizedAlgorithm };
+  }
+  if (!/^[0-9a-f]{64}$/i.test(digest)) {
+    return { status: "invalid", algorithm: normalizedAlgorithm };
+  }
+  return {
+    status: "ok",
+    algorithm: "sha256",
+    expected: `sha256:${digest.toLowerCase()}`,
+  };
+}
+
+async function sha256Hex(content: AssignmentMountContent): Promise<string> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) {
+    throw new BrowsergradError("Web Crypto SHA-256 is not available");
+  }
+  const bytes = typeof content === "string"
+    ? new TextEncoder().encode(content)
+    : content;
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  const digest = await subtle.digest("SHA-256", copy.buffer);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function collectAssignmentMountEntries(

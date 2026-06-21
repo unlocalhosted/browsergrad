@@ -14,6 +14,7 @@ import {
   requiredAssignmentCapabilities,
   runAssignmentJavascriptRubric,
   runAssignmentRubric,
+  verifyAssignmentMountContentHashes,
 } from "../src/index";
 
 const VALID_PROFILE = {
@@ -702,6 +703,94 @@ describe("parseAssignmentProfile", () => {
         },
       }).ok,
     ).toBe(true);
+  });
+
+  it("verifies mounted dataset hashes for text and binary contents", async () => {
+    const textSha256 =
+      "5cb72f90e968922d30557d0af8f719d21f61792becaa87eb32477767d739dc0b";
+    const binarySha256 =
+      "26a66b061e8f48f39927c312f25293959729eee95978e2892d49d3512a5cc092";
+    const wrongSha256 =
+      "a40d856f7bd138b40fc924da7f59edc8edb9e4a749994ca49a4a5e5f7a32602d";
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      datasets: [
+        {
+          name: "tiny",
+          url: "/fixtures/tiny.txt",
+          hash: `sha256:${textSha256}`,
+        },
+        {
+          name: "tiny-bin",
+          url: "/fixtures/tiny.bin",
+          hash: `sha256:${binarySha256}`,
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const mountPlan = createAssignmentMountPlan(
+      createAssignmentRunPlan(result.profile, { capabilities: ["pyodide"] }),
+    );
+
+    await expect(
+      verifyAssignmentMountContentHashes(mountPlan, {
+        files: { "/assignments/cs336-assignment1/rubric.py": "print('rubric')" },
+        datasets: {
+          tiny: "fixture text",
+          "tiny-bin": Uint8Array.of(0, 1, 255),
+        },
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      checks: [
+        {
+          name: "tiny",
+          path: "/assignments/cs336-assignment1/fixtures/datasets/tiny.txt",
+          algorithm: "sha256",
+          expected: `sha256:${textSha256}`,
+          actual: `sha256:${textSha256}`,
+          ok: true,
+          status: "match",
+        },
+        {
+          name: "tiny-bin",
+          path: "/assignments/cs336-assignment1/fixtures/datasets/tiny.bin",
+          algorithm: "sha256",
+          expected: `sha256:${binarySha256}`,
+          actual: `sha256:${binarySha256}`,
+          ok: true,
+          status: "match",
+        },
+      ],
+    });
+
+    await expect(
+      verifyAssignmentMountContentHashes(mountPlan, {
+        files: { "/assignments/cs336-assignment1/rubric.py": "print('rubric')" },
+        datasets: {
+          tiny: "wrong fixture",
+          "tiny-bin": Uint8Array.of(0, 1, 255),
+        },
+      }),
+    ).resolves.toMatchObject({
+      ok: false,
+      checks: [
+        {
+          name: "tiny",
+          expected: `sha256:${textSha256}`,
+          actual: `sha256:${wrongSha256}`,
+          ok: false,
+          status: "mismatch",
+        },
+        {
+          name: "tiny-bin",
+          ok: true,
+          status: "match",
+        },
+      ],
+    });
   });
 
   it("materializes binary assignment dataset contents", async () => {

@@ -269,6 +269,9 @@ uses it to decide what to place into `Session.fs` before rubric execution.
 against platform-provided file/dataset contents and returns missing required
 files, missing datasets, optional skips, and writable paths without touching
 `Session.fs`.
+`verifyAssignmentMountContentHashes(mountPlan, contents)` hashes dataset contents
+that declare `sha256:<64 hex>` and returns per-dataset `match`, `mismatch`,
+`missing`, `invalid`, or `unsupported` checks before write.
 Mount contents may be UTF-8 strings or `Uint8Array` bytes. Use bytes for
 snapshots and small upstream fixtures such as `.pt`, `.npz`, or
 `.safetensors`. Hosts can verify mounted or cached bytes with

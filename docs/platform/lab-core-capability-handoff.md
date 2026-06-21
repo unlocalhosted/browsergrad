@@ -37,6 +37,8 @@ For every lab profile, the platform should:
    browser-native JS rubrics.
    Contents may be strings or `Uint8Array` bytes for compact binary fixtures
    such as `.pt`, `.npz`, or `.safetensors`.
+   Verify dataset `sha256:<64 hex>` declarations with
+   `verifyAssignmentMountContentHashes` before writing to runtime FS.
    Use `Session.fs.readBytes(path)` when the platform needs to verify mounted
    worker bytes against cache, hash, or snapshot metadata.
 11. Route runnable labs to the right substrate: Pyodide, TS/JS oracle, WebGPU,
@@ -193,6 +195,8 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
    launch the rubric through `Session.exec`, or uses
    `createAssignmentRubricExecRequest` when the platform needs manual staging.
    Binary fixtures can be verified after staging with `Session.fs.readBytes`.
+   Dataset hashes should be verified before staging with
+   `verifyAssignmentMountContentHashes`.
 13. For runnable JavaScript labs, imports the rubric module and calls
    `runAssignmentJavascriptRubric`; JS rubrics read binary fixtures with
    `ctx.readBytes(path)`.
