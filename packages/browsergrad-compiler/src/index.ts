@@ -59,6 +59,11 @@ export {
 } from "./compatibility.js";
 export { formatCudaLiteDiagnostics } from "./diagnostics.js";
 export {
+  createCudaHostDynamicLaunchPlan,
+  type CudaHostDynamicLaunch,
+  type CudaHostDynamicLaunchPlan,
+} from "./dynamic_launch.js";
+export {
   createCudaGridSyncPhasePlan,
   createCudaRuntimePlan,
   type CudaGridSyncPhasePlan,

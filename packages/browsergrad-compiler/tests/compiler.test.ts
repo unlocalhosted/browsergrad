@@ -4,6 +4,7 @@ import {
   analyzeCudaLite,
   compileCudaLiteKernel,
   createCudaGridSyncPhasePlan,
+  createCudaHostDynamicLaunchPlan,
   createCudaLoweringPlan,
   createCudaRuntimePlan,
   describeCudaDiagnostic,
@@ -1069,6 +1070,39 @@ __global__ void parent(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([2, 3]);
   });
 
+  it("plans host-liftable dynamic launches without running WebGPU", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(float *dst, int n) {
+  int idx = threadIdx.x;
+  if (idx < n) { dst[idx] += 1.0f; }
+}
+__global__ void parent(float *x, int n) {
+  if (threadIdx.x < 1) {
+    dim3 grid(1);
+    dim3 block(n);
+    child<<<grid, block>>>(x, n);
+    cudaDeviceSynchronize();
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const plan = createCudaHostDynamicLaunchPlan(
+      compiled,
+      { buffers: { x: new Float32Array([1, 2]) }, scalars: { n: 2 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(plan.supported).toBe(true);
+    expect(plan.launches).toHaveLength(1);
+    expect(plan.launches[0]).toMatchObject({
+      gridDim: [1, 1, 1],
+      blockDim: [2, 1, 1],
+      storageAliases: { dst: "x" },
+    });
+  });
+
   it("keeps pointer-offset dynamic launches reference-only for WebGPU", async () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void child(float *out) {
@@ -1111,7 +1145,14 @@ __global__ void parent(float *x) {
       referenceDynamicParallelism: true,
       workgroupSize: [1, 1, 1],
     });
+    const plan = createCudaHostDynamicLaunchPlan(
+      compiled,
+      { buffers: { x: new Float32Array([0]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
+    expect(plan.supported).toBe(false);
+    expect(plan.reason).toContain("no host-liftable");
     await expect(runCompiledKernelWebGpu(
       {} as never,
       compiled,
