@@ -19,6 +19,7 @@ import {
 } from "./types.js";
 import { collectKernelLaunchCallees } from "./ast_queries.js";
 import { CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
+import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 
 const DEFAULT_WORKGROUP_SIZE: readonly [number, number, number] = [256, 1, 1];
 const BUILTIN_VECTORS = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]);
@@ -59,16 +60,6 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaMemcpyAsync", [5, 5]],
   ["cudaMemcpyPeerAsync", [6, 6]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
-]);
-const CUDA_RUNTIME_CONSTANTS = new Set([
-  "cudaEventDefault",
-  "cudaEventDisableTiming",
-  "cudaEventInterprocess",
-  "cudaEventBlockingSync",
-  "cudaStreamDefault",
-  "cudaStreamNonBlocking",
-  "cudaMemcpyDeviceToDevice",
-  "cudaMemcpyDefault",
 ]);
 const WGSL_RESERVED_WORDS = new Set([
   "alias",
@@ -1316,7 +1307,8 @@ function expressionInfoForIdentifier(
 ): ExpressionInfo {
   const symbol = lookupSymbol(name, scope, span);
   if (!symbol && name === "nullptr") return { kind: "scalar", valueType: "voidptr" };
-  if (!symbol && CUDA_RUNTIME_CONSTANTS.has(name)) return { kind: "scalar", valueType: "uint" };
+  const namedConstant = !symbol ? CUDA_NAMED_CONSTANTS.get(name) : undefined;
+  if (namedConstant) return { kind: "scalar", valueType: namedConstant.valueType };
   if (!symbol) {
     diagnostics.push(error("unknown-symbol", `unknown CUDA-lite symbol '${name}'`, span));
     return { kind: "unknown" };

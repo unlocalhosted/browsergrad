@@ -104,6 +104,9 @@ Scalar half helpers lower behind `shader-f16`: `__half2float`, `__float2half`,
 `hexp`, `__hadd`, `__hsub`, `__hmul`, `__hdiv`, `__hneg`, `__hfma`,
 `__hmin`, `__hmax`, `__heq`, `__hne`, `__hgt`, `__hge`, `__hlt`, and
 `__hle`.
+CUDA/C named constants such as `INFINITY`, `NAN`, `FLT_MAX`, `M_PI`,
+`cudaMemcpyDeviceToDevice`, and stream/event flag values lower through the same
+analyzer, CPU-reference, and WGSL path.
 Common C/CUDA integer spellings are accepted for learner kernels: `signed`,
 `unsigned`, `short`, `long`, `long long`, `size_t`, `int32_t`, `uint32_t`,
 `int64_t`, `uint64_t`, and `uintptr_t`. Current WebGPU lowering maps them onto

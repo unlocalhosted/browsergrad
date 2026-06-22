@@ -1468,6 +1468,34 @@ __global__ void mathy(float *x, float *out) {
     expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
   });
 
+  it("recognizes CUDA/C numeric named constants", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void constants(float* out, uint* kinds) {
+  if (threadIdx.x < 1) {
+    out[0] = INFINITY;
+    out[1] = -FLT_MAX;
+    out[2] = M_PI;
+    out[3] = NAN;
+    kinds[0] = cudaMemcpyDeviceToDevice + cudaStreamNonBlocking;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4), kinds: new Uint32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const out = [...result.buffers.out as Float32Array];
+
+    expect(compiled.wgsl).toContain("return bitcast<f32>(bits);");
+    expect(compiled.wgsl).toContain("3.4028234663852886e38");
+    expect(compiled.wgsl).toContain("3.141592653589793");
+    expect(out[0]).toBe(Number.POSITIVE_INFINITY);
+    expect(out[1]).toBeLessThan(-3e38);
+    expect(out[2]).toBeCloseTo(Math.PI, 6);
+    expect(Number.isNaN(out[3])).toBe(true);
+    expect([...result.buffers.kinds as Uint32Array]).toEqual([4]);
+  });
+
   it("lowers CUDA device cuRAND state to deterministic browser RNG helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void monteCarloPiKernel(unsigned long long *counts, int totalPoints, unsigned long long seed) {

@@ -6,6 +6,7 @@ import {
 import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
 import { CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
+import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
 import {
@@ -146,6 +147,10 @@ export function emitKernelIrWgsl(
   if (usesCurand(ir)) {
     lines.push("");
     lines.push(...emitCurandHelpers());
+  }
+  if (usesSpecialFloatNamedConstants(ir)) {
+    lines.push("");
+    lines.push(...emitSpecialFloatConstantHelpers());
   }
   if (usesDevicePointerParams(ir)) {
     lines.push("");
@@ -952,6 +957,8 @@ function emitPointerIndex(rootName: string, index: CudaLiteExpression, context: 
 
 function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "value"): string {
   if (name === "nullptr") return "0u";
+  const namedConstant = CUDA_NAMED_CONSTANTS.get(name);
+  if (namedConstant) return namedConstant.wgsl;
   if (name === "threadIdx" || name === "blockIdx" || name === "blockDim" || name === "gridDim") return name;
   if (context.isAtomicShared(name) && mode === "value") return `atomicLoad(&${name})`;
   const param = context.paramFor(name);
@@ -1592,6 +1599,12 @@ function usesCurand(ir: KernelIrModule): boolean {
     ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["curand_init", "curand_uniform"])));
 }
 
+function usesSpecialFloatNamedConstants(ir: KernelIrModule): boolean {
+  const names = new Set(["INFINITY", "NAN"]);
+  return statementsUseIdentifier(ir.body, names) ||
+    ir.functions.some((fn) => statementsUseIdentifier(fn.body, names));
+}
+
 function statementsUseCall(statements: readonly CudaLiteStatement[], names: ReadonlySet<string>): boolean {
   for (const statement of statements) {
     if (statement.kind === "expr" && expressionUsesCall(statement.expression, names)) return true;
@@ -1609,6 +1622,37 @@ function statementsUseCall(statements: readonly CudaLiteStatement[], names: Read
       statementsUseCall(statement.body, names)
     )) return true;
     if (statement.kind === "return" && statement.value && expressionUsesCall(statement.value, names)) return true;
+  }
+  return false;
+}
+
+function statementsUseIdentifier(statements: readonly CudaLiteStatement[], names: ReadonlySet<string>): boolean {
+  for (const statement of statements) {
+    if (statement.kind === "expr" && expressionUsesIdentifier(statement.expression, names)) return true;
+    if (statement.kind === "var" && statement.init && expressionUsesIdentifier(statement.init, names)) return true;
+    if (statement.kind === "if" && (
+      expressionUsesIdentifier(statement.condition, names) ||
+      statementsUseIdentifier(statement.consequent, names) ||
+      (statement.alternate ? statementsUseIdentifier(statement.alternate, names) : false)
+    )) return true;
+    if (statement.kind === "for" && (
+      (statement.init?.kind === "var" && statement.init.init ? expressionUsesIdentifier(statement.init.init, names) : false) ||
+      (statement.init && statement.init.kind !== "var" ? expressionUsesIdentifier(statement.init, names) : false) ||
+      (statement.condition ? expressionUsesIdentifier(statement.condition, names) : false) ||
+      (statement.update ? expressionUsesIdentifier(statement.update, names) : false) ||
+      statementsUseIdentifier(statement.body, names)
+    )) return true;
+    if (statement.kind === "return" && statement.value && expressionUsesIdentifier(statement.value, names)) return true;
+    if (statement.kind === "kernel-launch" && (
+      statement.grid.some((expression) => expressionUsesIdentifier(expression, names)) ||
+      statement.block.some((expression) => expressionUsesIdentifier(expression, names)) ||
+      statement.args.some((expression) => expressionUsesIdentifier(expression, names))
+    )) return true;
+    if (statement.kind === "dim3" && statement.args.some((expression) => expressionUsesIdentifier(expression, names))) return true;
+    if (statement.kind === "asm" && (
+      expressionUsesIdentifier(statement.output, names) ||
+      statement.inputs.some((expression) => expressionUsesIdentifier(expression, names))
+    )) return true;
   }
   return false;
 }
@@ -1631,6 +1675,39 @@ function expressionUsesCall(expression: CudaLiteExpression, names: ReadonlySet<s
   }
   if (expression.kind === "assignment") return expressionUsesCall(expression.left, names) || expressionUsesCall(expression.right, names);
   return false;
+}
+
+function expressionUsesIdentifier(expression: CudaLiteExpression, names: ReadonlySet<string>): boolean {
+  if (expression.kind === "identifier") return names.has(expression.name);
+  if (expression.kind === "cast") return expressionUsesIdentifier(expression.expression, names);
+  if (expression.kind === "member") return expressionUsesIdentifier(expression.object, names);
+  if (expression.kind === "index") return expressionUsesIdentifier(expression.target, names) || expressionUsesIdentifier(expression.index, names);
+  if (expression.kind === "unary" || expression.kind === "update") return expressionUsesIdentifier(expression.argument, names);
+  if (expression.kind === "binary") return expressionUsesIdentifier(expression.left, names) || expressionUsesIdentifier(expression.right, names);
+  if (expression.kind === "conditional") {
+    return expressionUsesIdentifier(expression.condition, names) ||
+      expressionUsesIdentifier(expression.consequent, names) ||
+      expressionUsesIdentifier(expression.alternate, names);
+  }
+  if (expression.kind === "assignment") return expressionUsesIdentifier(expression.left, names) || expressionUsesIdentifier(expression.right, names);
+  if (expression.kind === "call") {
+    return expressionUsesIdentifier(expression.callee, names) ||
+      expression.args.some((arg) => expressionUsesIdentifier(arg, names));
+  }
+  return false;
+}
+
+function emitSpecialFloatConstantHelpers(): readonly string[] {
+  return [
+    "fn bg_f32_inf() -> f32 {",
+    "  var bits: u32 = 0x7f800000u;",
+    "  return bitcast<f32>(bits);",
+    "}",
+    "fn bg_f32_nan() -> f32 {",
+    "  var bits: u32 = 0x7fc00000u;",
+    "  return bitcast<f32>(bits);",
+    "}",
+  ];
 }
 
 function atomicTargetParam(expression: CudaLiteExpression, context: EmitContext): CudaLiteParam | undefined {

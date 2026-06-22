@@ -6,6 +6,7 @@ import {
 import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./ast_queries.js";
 import { CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { validateCudaKernelLaunch } from "./launch.js";
+import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import {
   CudaLiteCompilerError,
   type CompiledCudaLiteKernel,
@@ -819,6 +820,8 @@ function readMemberObject(expression: CudaLiteExpression, context: ThreadContext
 
 function readIdentifier(name: string, context: ThreadContext): LocalValue {
   if (name === "nullptr") return { kind: "pool-pointer", poolName: "", byteOffset: -1 };
+  const namedConstant = CUDA_NAMED_CONSTANTS.get(name);
+  if (namedConstant) return namedConstant.value;
   if (name === "threadIdx") return context.threadIdx;
   if (name === "blockIdx") return context.blockIdx;
   if (name === "blockDim") return context.blockDim;

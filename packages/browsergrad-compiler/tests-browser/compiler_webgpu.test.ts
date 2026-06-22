@@ -290,6 +290,25 @@ describe("real WebGPU — CUDA-lite compiler", () => {
     expect(Math.abs(actualValues[1]! - expectedValues[1]!)).toBeLessThan(1e-4);
   });
 
+  it("runs CUDA named constants through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void namedConstants(float* out, uint* kinds) {
+  if (threadIdx.x < 1) {
+    if (INFINITY > FLT_MAX) { out[0] = M_PI; }
+    kinds[0] = cudaMemcpyDeviceToDevice + cudaStreamNonBlocking;
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Float32Array(1), kinds: new Uint32Array(1) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.kinds as Uint32Array]).toEqual([...expected.buffers.kinds as Uint32Array]);
+    expect([...actual.buffers.out as Float32Array][0]).toBeCloseTo([...expected.buffers.out as Float32Array][0]!, 6);
+  });
+
   it("runs device helper functions with storage pointer params through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(DEVICE_POINTER_HELPERS, { workgroupSize: [4, 1, 1] });
