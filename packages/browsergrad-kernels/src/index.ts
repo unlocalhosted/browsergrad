@@ -102,6 +102,7 @@ export {
 export {
   referenceExclusiveScan,
   referenceFindRepeats,
+  referenceOrderedCircleRender,
   referenceSaxpy,
   simulateCuda1DGrid,
   type Cuda1DGridInput,
@@ -112,6 +113,11 @@ export {
   type Cuda1DThreadContext,
   type Cuda1DThreadTrace,
   type Cuda1DViolation,
+  type CirclePrimitive,
+  type OrderedCircleRenderInput,
+  type OrderedCircleRenderResult,
+  type Point2D,
+  type RgbColor,
   type SaxpyInput,
 } from "./cuda_concepts.js";
 

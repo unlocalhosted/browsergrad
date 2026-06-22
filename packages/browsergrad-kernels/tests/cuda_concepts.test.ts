@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   referenceExclusiveScan,
   referenceFindRepeats,
+  referenceOrderedCircleRender,
   referenceSaxpy,
   simulateCuda1DGrid,
 } from "../src/index";
@@ -79,5 +80,31 @@ describe("CUDA-shaped concept oracles", () => {
     ]);
     expect(referenceExclusiveScan([3, 1, 4, 1, 5])).toEqual([0, 3, 4, 8, 9]);
     expect(referenceFindRepeats([3, 3, 1, 4, 4, 4, 2])).toEqual([0, 3, 4]);
+  });
+
+  it("renders overlapping translucent circles in input order", () => {
+    const redGreenBlue = referenceOrderedCircleRender({
+      width: 1,
+      height: 1,
+      background: [0, 0, 0],
+      circles: [
+        { center: [0.5, 0.5], radius: 1, color: [1, 0, 0], alpha: 0.5 },
+        { center: [0.5, 0.5], radius: 1, color: [0, 1, 0], alpha: 0.5 },
+        { center: [0.5, 0.5], radius: 1, color: [0, 0, 1], alpha: 0.5 },
+      ],
+    });
+    const blueGreenRed = referenceOrderedCircleRender({
+      width: 1,
+      height: 1,
+      background: [0, 0, 0],
+      circles: [
+        { center: [0.5, 0.5], radius: 1, color: [0, 0, 1], alpha: 0.5 },
+        { center: [0.5, 0.5], radius: 1, color: [0, 1, 0], alpha: 0.5 },
+        { center: [0.5, 0.5], radius: 1, color: [1, 0, 0], alpha: 0.5 },
+      ],
+    });
+
+    expect(redGreenBlue.pixels).toEqual([0.125, 0.25, 0.5]);
+    expect(blueGreenRed.pixels).toEqual([0.5, 0.25, 0.125]);
   });
 });

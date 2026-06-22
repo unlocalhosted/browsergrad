@@ -94,8 +94,10 @@ For every lab profile, the platform should:
     available.
     GPU Puzzles and CS149 A3 CUDA concept labs can use
     `simulateCuda1DGrid()`, `referenceSaxpy()`,
-    `referenceExclusiveScan()`, and `referenceFindRepeats()` for browser-safe
-    map/guard/SAXPY/scan/find-repeats checks before native CUDA runners exist.
+    `referenceExclusiveScan()`, `referenceFindRepeats()`, and
+    `referenceOrderedCircleRender()` for browser-safe
+    map/guard/SAXPY/scan/find-repeats/renderer-ordering checks before native
+    CUDA runners exist.
     Snapshot-backed labs can use `@unlocalhosted/browsergrad-primitives`
     `createSnapshotComparator()` to compare small JSON/numeric fixtures and emit
     deterministic mismatch paths.
@@ -179,7 +181,7 @@ adapter seam appears.
 The first reusable CUDA-concept substrate lives in
 `@unlocalhosted/browsergrad-kernels`: it provides `simulateCuda1DGrid()`,
 `referenceSaxpy()`, `referenceExclusiveScan()`, and
-`referenceFindRepeats()` for labs that choose
+`referenceFindRepeats()`, plus `referenceOrderedCircleRender()` for labs that choose
 `cuda-compatible-subset`, `wgsl-kernel`, or `performance-rubric` paths.
 The same primitive facade provides the first reusable CS149 CPU/SIMD substrate:
 clamped-exp lane-mask simulation, vector array-sum reduction traces, and static
@@ -348,9 +350,10 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     gradient fixtures.
     GPU Puzzles and CS149 A3 CUDA concept labs can use
     `simulateCuda1DGrid()`, `referenceSaxpy()`,
-    `referenceExclusiveScan()`, and `referenceFindRepeats()` for
-    map/guard/SAXPY/scan/find-repeats fixtures and out-of-bounds guard
-    diagnostics. This is the current HipScript-inspired
+    `referenceExclusiveScan()`, `referenceFindRepeats()`, and
+    `referenceOrderedCircleRender()` for
+    map/guard/SAXPY/scan/find-repeats/renderer-ordering fixtures and
+    out-of-bounds guard diagnostics. This is the current HipScript-inspired
     CUDA-shaped path: simulator trace first, WGSL/WebGPU lowering next.
     Simulator-backed labs can use `@unlocalhosted/browsergrad-primitives`
     `simulation.createDeterministicMesh()` or `simulation.createTaskGraphSimulator()` for event-trace

@@ -10,6 +10,7 @@ import { simulation } from "@unlocalhosted/browsergrad-primitives";
 import {
   referenceExclusiveScan,
   referenceFindRepeats,
+  referenceOrderedCircleRender,
   referenceSaxpy,
   simulateCuda1DGrid,
 } from "@unlocalhosted/browsergrad-kernels";
@@ -31,6 +32,7 @@ interface GpuPuzzleOracle {
 interface CudaConceptsReference {
   referenceExclusiveScan: typeof referenceExclusiveScan;
   referenceFindRepeats: typeof referenceFindRepeats;
+  referenceOrderedCircleRender: typeof referenceOrderedCircleRender;
   referenceSaxpy: typeof referenceSaxpy;
   simulateCuda1DGrid: typeof simulateCuda1DGrid;
 }
@@ -386,6 +388,7 @@ describe("profile-driven JavaScript assignment e2e", () => {
     const reference: CudaConceptsReference = {
       referenceExclusiveScan,
       referenceFindRepeats,
+      referenceOrderedCircleRender,
       referenceSaxpy,
       simulateCuda1DGrid,
     };
@@ -398,6 +401,16 @@ describe("profile-driven JavaScript assignment e2e", () => {
       });
       const scan = cuda.referenceExclusiveScan([3, 1, 4, 1, 5]);
       const repeats = cuda.referenceFindRepeats([7, 7, 1, 4, 4, 4]);
+      const rendered = cuda.referenceOrderedCircleRender({
+        width: 1,
+        height: 1,
+        background: [0, 0, 0],
+        circles: [
+          { center: [0.5, 0.5], radius: 1, color: [1, 0, 0], alpha: 0.5 },
+          { center: [0.5, 0.5], radius: 1, color: [0, 1, 0], alpha: 0.5 },
+          { center: [0.5, 0.5], radius: 1, color: [0, 0, 1], alpha: 0.5 },
+        ],
+      });
       const guard = cuda.simulateCuda1DGrid({
         inputLength: 4,
         outputLength: 4,
@@ -417,6 +430,7 @@ describe("profile-driven JavaScript assignment e2e", () => {
         saxpy.join(",") !== "12,24,36,48" ||
         scan.join(",") !== "0,3,4,8,9" ||
         repeats.join(",") !== "0,3,4" ||
+        rendered.pixels.join(",") !== "0.125,0.25,0.5" ||
         guard.violations.length !== 0
       ) {
         ctx.assertFail("cs149-a3-cuda-concepts", "CS149 A3 CUDA concept mismatch", {
@@ -424,20 +438,29 @@ describe("profile-driven JavaScript assignment e2e", () => {
             saxpy: [12, 24, 36, 48],
             scan: [0, 3, 4, 8, 9],
             repeats: [0, 3, 4],
+            renderedPixel: [0.125, 0.25, 0.5],
             guardViolations: 0,
           },
-          actual: { saxpy, scan, repeats, guardViolations: guard.violations },
+          actual: {
+            saxpy,
+            scan,
+            repeats,
+            renderedPixel: rendered.pixels,
+            guardViolations: guard.violations,
+          },
         });
         return;
       }
 
       ctx.assertPass("saxpy_correctness");
       ctx.assertPass("exclusive_scan_correctness");
+      ctx.assertPass("renderer_ordering_correctness");
       ctx.assertPass("kernel_memory_bounds");
       ctx.emitJson("cs149-a3-summary", {
         readiness: "browser-kernel-concepts",
         guardThreads: guard.stats.launchedThreads,
         globalWrites: guard.stats.globalWrites,
+        renderedPixel: rendered.pixels,
         repeatCount: repeats.length,
       });
     };
@@ -455,6 +478,7 @@ describe("profile-driven JavaScript assignment e2e", () => {
     expect(result.run.assertions).toEqual([
       { kind: "pass", name: "saxpy_correctness" },
       { kind: "pass", name: "exclusive_scan_correctness" },
+      { kind: "pass", name: "renderer_ordering_correctness" },
       { kind: "pass", name: "kernel_memory_bounds" },
     ]);
     expect(result.run.artifacts).toEqual([
@@ -465,6 +489,7 @@ describe("profile-driven JavaScript assignment e2e", () => {
           readiness: "browser-kernel-concepts",
           guardThreads: 8,
           globalWrites: 4,
+          renderedPixel: [0.125, 0.25, 0.5],
           repeatCount: 3,
         },
       }),

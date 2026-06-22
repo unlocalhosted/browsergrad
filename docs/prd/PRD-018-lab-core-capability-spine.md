@@ -231,9 +231,10 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   gradient synchronization references through Pyodide.
 - CUDA-concept oracle guarantee: `@unlocalhosted/browsergrad-kernels` exports
   `simulateCuda1DGrid()`, `referenceSaxpy()`, `referenceExclusiveScan()`, and
-  `referenceFindRepeats()` so GPU Puzzles and CS149 A3-style rubrics can check
-  CUDA-shaped map/guard, SAXPY, scan/find-repeats, thread/block traces, and
-  out-of-bounds memory behavior before native CUDA runners are available.
+  `referenceFindRepeats()`, plus `referenceOrderedCircleRender()` so GPU
+  Puzzles and CS149 A3-style rubrics can check CUDA-shaped map/guard, SAXPY,
+  scan/find-repeats, renderer ordering, thread/block traces, and out-of-bounds
+  memory behavior before native CUDA runners are available.
 - CUDA-shaped program guarantee: `@unlocalhosted/browsergrad-kernels` exports
   `defineCuda1DProgram()`, `simulateCuda1DProgram()`, and
   `emitCuda1DProgramWgsl()` so one small grid/thread program can be simulated

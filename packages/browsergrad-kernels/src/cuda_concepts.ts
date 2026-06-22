@@ -65,6 +65,29 @@ export interface SaxpyInput {
   readonly y: readonly number[];
 }
 
+export type RgbColor = readonly [number, number, number];
+export type Point2D = readonly [number, number];
+
+export interface CirclePrimitive {
+  readonly center: Point2D;
+  readonly radius: number;
+  readonly color: RgbColor;
+  readonly alpha: number;
+}
+
+export interface OrderedCircleRenderInput {
+  readonly width: number;
+  readonly height: number;
+  readonly background?: RgbColor;
+  readonly circles: readonly CirclePrimitive[];
+}
+
+export interface OrderedCircleRenderResult {
+  readonly width: number;
+  readonly height: number;
+  readonly pixels: readonly number[];
+}
+
 export function simulateCuda1DGrid(input: Cuda1DGridInput): Cuda1DGridResult {
   const inputLength = validateNonNegativeInteger(input.inputLength, "inputLength");
   const outputLength = validateNonNegativeInteger(input.outputLength, "outputLength");
@@ -191,6 +214,40 @@ export function referenceFindRepeats(values: readonly number[]): number[] {
   return repeatedAt;
 }
 
+export function referenceOrderedCircleRender(
+  input: OrderedCircleRenderInput,
+): OrderedCircleRenderResult {
+  const width = validatePositiveInteger(input.width, "width");
+  const height = validatePositiveInteger(input.height, "height");
+  const background = validateRgbColor(input.background ?? [0, 0, 0], "background");
+  const pixels = Array.from({ length: width * height }, () => [...background]);
+  const circles = input.circles.map(validateCirclePrimitive);
+
+  for (const circle of circles) {
+    const [cx, cy] = circle.center;
+    const radiusSquared = circle.radius * circle.radius;
+    for (let y = 0; y < height; y++) {
+      const py = (y + 0.5) / height;
+      for (let x = 0; x < width; x++) {
+        const px = (x + 0.5) / width;
+        const dx = px - cx;
+        const dy = py - cy;
+        if (dx * dx + dy * dy > radiusSquared) continue;
+        const pixel = pixels[y * width + x]!;
+        pixel[0] = blendChannel(pixel[0]!, circle.color[0], circle.alpha);
+        pixel[1] = blendChannel(pixel[1]!, circle.color[1], circle.alpha);
+        pixel[2] = blendChannel(pixel[2]!, circle.color[2], circle.alpha);
+      }
+    }
+  }
+
+  return {
+    width,
+    height,
+    pixels: pixels.flat(),
+  };
+}
+
 function validatePositiveInteger(value: number, name: string): number {
   if (!Number.isInteger(value) || value <= 0) {
     throw new KernelError(`${name} must be a positive integer`);
@@ -223,6 +280,52 @@ function validateNumberList(values: readonly number[], name: string): number[] {
   return values.map((value, index) =>
     validateFiniteNumber(value, `${name}[${index}]`),
   );
+}
+
+function validateRgbColor(value: RgbColor, name: string): RgbColor {
+  if (value.length !== 3) {
+    throw new KernelError(`${name} must have exactly 3 channels`);
+  }
+  return [
+    validateFiniteNumber(value[0], `${name}[0]`),
+    validateFiniteNumber(value[1], `${name}[1]`),
+    validateFiniteNumber(value[2], `${name}[2]`),
+  ];
+}
+
+function validatePoint2D(value: Point2D, name: string): Point2D {
+  if (value.length !== 2) {
+    throw new KernelError(`${name} must have exactly 2 coordinates`);
+  }
+  return [
+    validateFiniteNumber(value[0], `${name}[0]`),
+    validateFiniteNumber(value[1], `${name}[1]`),
+  ];
+}
+
+function validateAlpha(value: number, name: string): number {
+  const alpha = validateFiniteNumber(value, name);
+  if (alpha < 0 || alpha > 1) {
+    throw new KernelError(`${name} must be between 0 and 1`);
+  }
+  return alpha;
+}
+
+function validateCirclePrimitive(circle: CirclePrimitive, index: number): CirclePrimitive {
+  const radius = validateFiniteNumber(circle.radius, `circles[${index}].radius`);
+  if (radius < 0) {
+    throw new KernelError(`circles[${index}].radius must be non-negative`);
+  }
+  return {
+    center: validatePoint2D(circle.center, `circles[${index}].center`),
+    radius,
+    color: validateRgbColor(circle.color, `circles[${index}].color`),
+    alpha: validateAlpha(circle.alpha, `circles[${index}].alpha`),
+  };
+}
+
+function blendChannel(base: number, over: number, alpha: number): number {
+  return alpha * over + (1 - alpha) * base;
 }
 
 function materializeVector(

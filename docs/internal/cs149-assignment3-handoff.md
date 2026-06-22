@@ -15,13 +15,16 @@ First browser-safe slice:
   - `referenceExclusiveScan()` to check scan fixtures.
   - `referenceFindRepeats()` to check repeated-adjacent output fixtures from
     the scan/find-repeats part of the assignment.
+  - `referenceOrderedCircleRender()` to check renderer ordering fixtures with
+    deterministic normalized circle geometry and ordered alpha blending.
   - `simulateCuda1DGrid()` to check 1D thread/block indexing, guard behavior,
     and out-of-bounds access before native CUDA execution exists.
 - Proven BrowserGrad route:
   - `packages/browsergrad-runtime/tests/assignment-javascript-profile-e2e.test.ts`
     loads this profile, registers `_bg_cuda_concepts`, and passes
     `saxpy_correctness`, `exclusive_scan_correctness`, and
-    `kernel_memory_bounds` through the generic kernel concept reference.
+    `renderer_ordering_correctness`, and `kernel_memory_bounds` through the
+    generic kernel concept reference.
 
 ## Upstream Signals
 
@@ -47,7 +50,7 @@ Crafting Attention should:
    `runAssignmentJavascriptProfile()`.
 2. Register `_bg_cuda_concepts` with the CUDA-concept helpers.
 3. Start with `saxpy_correctness`, `exclusive_scan_correctness`, and
-   `kernel_memory_bounds`.
+   `renderer_ordering_correctness`, and `kernel_memory_bounds`.
 4. Add `find_repeats` fixtures through `referenceFindRepeats()` when authoring
    scan labs.
 5. Keep `performance_rubric_smoke` informational until WebGPU/native timing
@@ -61,6 +64,8 @@ Crafting Attention should:
 - Scan fixtures: input array and expected exclusive prefix sums.
 - Find-repeats fixtures: sorted/input array and expected indexes `i` where
   `input[i] === input[i + 1]`.
+- Renderer-ordering fixtures: image size, background RGB, ordered circles with
+  normalized center/radius/color/alpha, and expected flat RGB pixels.
 - Memory-bounds fixtures: launch shape, input/output lengths, expected
   violations.
 
