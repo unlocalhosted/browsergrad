@@ -85,6 +85,22 @@ Pool pointers are byte offsets with `0` as null. Casted accesses such as
 base buffer for raw pointer pools. This is a teaching-grade CUDA allocator
 primitive, not a course-specific shim.
 
+## Dynamic Parallelism
+
+Device-side launches parse into Kernel IR. By default they remain compile-time
+runtime gaps. For CPU teaching traces, opt in:
+
+```ts
+compileCudaLiteKernel(source, {
+  kernelName: "parent",
+  referenceDynamicParallelism: true,
+});
+```
+
+`runCompiledKernelReference` executes child kernels against shared buffers and
+memory pools. `runCompiledKernelWebGpu` rejects these kernels until host-side
+multi-dispatch orchestration exists, so GPU output is never silently wrong.
+
 Use `createCudaLoweringPlan(diagnostics)` and `describeCudaDiagnostic()` to group
 compatibility gaps by semantic family instead of raw parser messages.
 

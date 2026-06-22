@@ -109,6 +109,7 @@ export interface CudaLiteVarDecl {
 export interface CudaLiteDim3Decl {
   readonly kind: "dim3";
   readonly name: string;
+  readonly args: readonly CudaLiteExpression[];
   readonly span: SourceSpan;
 }
 
@@ -125,6 +126,9 @@ export interface CudaLiteCooperativeGroupDecl {
 export interface CudaLiteKernelLaunchStatement {
   readonly kind: "kernel-launch";
   readonly callee: string;
+  readonly grid: readonly CudaLiteExpression[];
+  readonly block: readonly CudaLiteExpression[];
+  readonly args: readonly CudaLiteExpression[];
   readonly span: SourceSpan;
 }
 
@@ -295,6 +299,7 @@ export interface CudaLiteAnalyzeOptions {
   readonly features?: Partial<Record<"shader-f16" | "subgroups" | "compatibility", boolean>>;
   readonly workgroupSize?: readonly [number, number, number];
   readonly dynamicSharedMemory?: Readonly<Record<string, number>>;
+  readonly referenceDynamicParallelism?: boolean;
 }
 
 export interface CudaLiteAnalysis {

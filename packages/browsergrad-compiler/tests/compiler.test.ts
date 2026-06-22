@@ -8,6 +8,7 @@ import {
   formatCudaLiteDiagnostics,
   parseCudaLite,
   runCompiledKernelReference,
+  runCompiledKernelWebGpu,
 } from "../src/index";
 
 const SAXPY = `
@@ -824,6 +825,43 @@ __global__ void parent(float *x) {
     expect(analysis.diagnostics).toContainEqual(expect.objectContaining({
       code: "unsupported-dynamic-parallelism",
     }));
+  });
+
+  it("runs device-side kernel launches in the CPU reference when explicitly enabled", async () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(float *x) {
+  int idx = threadIdx.x;
+  if (idx < 2) { x[idx] += 1.0f; }
+}
+__global__ void parent(float *x) {
+  if (threadIdx.x < 1) {
+    dim3 grid(1);
+    dim3 block(2);
+    child<<<grid, block>>>(x);
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([1, 2]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.loweringPlan.canRunOnGpu).toBe(false);
+    expect(compiled.diagnostics).toContainEqual(expect.objectContaining({
+      code: "unsupported-dynamic-parallelism",
+      severity: "warning",
+    }));
+    expect([...result.buffers.x as Float32Array]).toEqual([2, 3]);
+    await expect(runCompiledKernelWebGpu(
+      {} as never,
+      compiled,
+      { buffers: { x: new Float32Array([1, 2]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    )).rejects.toThrow("dynamic parallelism is reference-only");
   });
 
   it("lowers named dynamic extern shared memory when launch metadata supplies its size", () => {

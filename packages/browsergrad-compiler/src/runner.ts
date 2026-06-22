@@ -59,6 +59,7 @@ export async function runCompiledKernelWebGpu(
   launch: KernelLaunch,
 ): Promise<ReferenceKernelResult> {
   validateLaunch(launch, compiled.ir.workgroupSize);
+  rejectReferenceOnlyRuntime(compiled);
   const uniforms = packScalarParams(compiled, input);
   const buffers = {
     ...input.buffers,
@@ -91,6 +92,16 @@ export async function runCompiledKernelWebGpu(
     },
   );
   return { buffers: normalizePoolReadback(compiled, result.buffers), trace: [] };
+}
+
+function rejectReferenceOnlyRuntime(compiled: CompiledCudaLiteKernel): void {
+  const diagnostic = compiled.diagnostics.find((item) => item.code === "unsupported-dynamic-parallelism");
+  if (!diagnostic) return;
+  throw new CudaLiteCompilerError("dynamic parallelism is reference-only; WebGPU host orchestration is not implemented yet", [{
+    ...diagnostic,
+    severity: "error",
+    message: "dynamic parallelism is reference-only; WebGPU host orchestration is not implemented yet",
+  }]);
 }
 
 function packScalarParams(

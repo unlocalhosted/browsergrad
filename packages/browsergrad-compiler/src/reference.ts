@@ -6,6 +6,7 @@ import {
   type CudaLiteCooperativeGroupDecl,
   type CudaLiteDeviceFunction,
   type CudaLiteExpression,
+  type CudaLiteKernel,
   type CudaLiteScalarType,
   type CudaLiteStatement,
   type CudaLiteVarDecl,
@@ -45,6 +46,7 @@ interface PoolPointerValue {
   readonly poolName: string;
   readonly byteOffset: number;
   readonly rawBuffer?: boolean;
+  readonly valueType?: CudaLiteScalarType;
 }
 
 interface LValue {
@@ -67,6 +69,7 @@ interface ThreadContext {
   readonly surfaces: NonNullable<CompiledKernelInput["surfaces"]>;
   readonly memoryPools: Map<string, MemoryPoolValue>;
   readonly functions: ReadonlyMap<string, CudaLiteDeviceFunction>;
+  readonly kernels: ReadonlyMap<string, CudaLiteKernel>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly valueTypes: ReadonlyMap<string, CudaLiteScalarType>;
   readonly locals: Map<string, LocalValue>;
@@ -111,6 +114,7 @@ export function runCompiledKernelReference(
   const surfaces = cloneSurfaces(input.surfaces ?? {});
   const memoryPools = cloneMemoryPools(input.memoryPools ?? {});
   const functions = new Map(compiled.ir.functions.map((fn) => [fn.name, fn]));
+  const kernels = new Map(compiled.ast.kernels.map((kernel) => [kernel.name, kernel]));
   const scalars = input.scalars ?? {};
   const valueTypes = new Map<string, CudaLiteScalarType>([
     ...compiled.ir.params.map((param) => [param.name, param.valueType] as const),
@@ -121,7 +125,7 @@ export function runCompiledKernelReference(
   for (let bz = 0; bz < launch.gridDim[2]; bz++) {
     for (let by = 0; by < launch.gridDim[1]; by++) {
       for (let bx = 0; bx < launch.gridDim[0]; bx++) {
-        runBlock(compiled, buffers, constants, constantDimensions, textures, surfaces, memoryPools, functions, scalars, valueTypes, {
+        runBlock(compiled.ir.body, compiled, buffers, constants, constantDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, {
           x: bx,
           y: by,
           z: bz,
@@ -145,6 +149,7 @@ export function runCompiledKernelReference(
 }
 
 function runBlock(
+  body: readonly CudaLiteStatement[],
   compiled: CompiledCudaLiteKernel,
   buffers: Map<string, WgslTypedArray>,
   constants: Map<string, number | WgslTypedArray>,
@@ -153,6 +158,7 @@ function runBlock(
   surfaces: NonNullable<CompiledKernelInput["surfaces"]>,
   memoryPools: Map<string, MemoryPoolValue>,
   functions: ReadonlyMap<string, CudaLiteDeviceFunction>,
+  kernels: ReadonlyMap<string, CudaLiteKernel>,
   scalars: Readonly<Record<string, number>>,
   valueTypes: ReadonlyMap<string, CudaLiteScalarType>,
   blockIdx: Vector3,
@@ -160,7 +166,7 @@ function runBlock(
   gridDim: Vector3,
   traces: MutableTrace[],
 ): void {
-  const shared = allocateShared(compiled.ir.sharedDeclarations);
+  const shared = allocateShared(sharedDeclarationsFor(body, compiled.ir.sharedDeclarations));
   const generators: BarrierGenerator[] = [];
   const active: boolean[] = [];
 
@@ -188,13 +194,14 @@ function runBlock(
           surfaces,
           memoryPools,
           functions,
+          kernels,
           scalars,
           valueTypes,
           locals: new Map(),
           shared,
           trace,
         };
-        generators.push(execStatements(compiled.ir.body, context));
+        generators.push(execStatements(body, context));
         active.push(true);
       }
     }
@@ -229,6 +236,7 @@ function* execStatements(
         execVar(statement, context);
         break;
       case "dim3":
+        context.locals.set(statement.name, vectorFromExpressions(statement.args, context));
         break;
       case "cooperative-group":
         context.locals.set(statement.name, {
@@ -238,6 +246,7 @@ function* execStatements(
         });
         break;
       case "kernel-launch":
+        execKernelLaunch(statement, context);
         break;
       case "asm":
         execInlineAsm(statement, context);
@@ -304,6 +313,102 @@ function execVar(statement: CudaLiteVarDecl, context: ThreadContext): void {
     return;
   }
   context.locals.set(statement.name, statement.init ? evalExpression(statement.init, context) : zeroLocalValue(statement.valueType));
+}
+
+function execKernelLaunch(
+  statement: Extract<CudaLiteStatement, { kind: "kernel-launch" }>,
+  context: ThreadContext,
+): void {
+  const kernel = context.kernels.get(statement.callee);
+  if (!kernel) throw compilerFailure(`unknown dynamic kernel '${statement.callee}'`);
+  const gridDim = vectorFromLaunchExpressions(statement.grid, context);
+  const blockDim = vectorFromLaunchExpressions(statement.block, context);
+  const locals = new Map<string, LocalValue>();
+  const childValueTypes = new Map(context.valueTypes);
+  for (const [index, param] of kernel.params.entries()) {
+    const arg = statement.args[index];
+    childValueTypes.set(param.name, param.valueType);
+    if (!arg) {
+      locals.set(param.name, zeroLocalValue(param.valueType));
+      continue;
+    }
+    if (param.pointer) {
+      locals.set(param.name, pointerArgumentValue(arg, param.valueType, context));
+    } else {
+      locals.set(param.name, evalNumber(arg, context));
+    }
+  }
+  for (let bz = 0; bz < gridDim.z; bz++) {
+    for (let by = 0; by < gridDim.y; by++) {
+      for (let bx = 0; bx < gridDim.x; bx++) {
+        const childContextSeed = new Map(locals);
+        runChildBlock(kernel.body, context, childContextSeed, childValueTypes, { x: bx, y: by, z: bz }, blockDim, gridDim);
+      }
+    }
+  }
+}
+
+function runChildBlock(
+  body: readonly CudaLiteStatement[],
+  parent: ThreadContext,
+  seedLocals: Map<string, LocalValue>,
+  valueTypes: ReadonlyMap<string, CudaLiteScalarType>,
+  blockIdx: Vector3,
+  blockDim: Vector3,
+  gridDim: Vector3,
+): void {
+  const shared = allocateShared(sharedDeclarationsFor(body, []));
+  const generators: BarrierGenerator[] = [];
+  const active: boolean[] = [];
+  const trace = parent.trace;
+  for (let tz = 0; tz < blockDim.z; tz++) {
+    for (let ty = 0; ty < blockDim.y; ty++) {
+      for (let tx = 0; tx < blockDim.x; tx++) {
+        generators.push(execStatements(body, {
+          ...parent,
+          blockIdx,
+          threadIdx: { x: tx, y: ty, z: tz },
+          blockDim,
+          gridDim,
+          valueTypes,
+          locals: new Map(seedLocals),
+          shared,
+          trace,
+        }));
+        active.push(true);
+      }
+    }
+  }
+  while (active.some(Boolean)) {
+    let activeBefore = 0;
+    let barriers = 0;
+    for (let i = 0; i < generators.length; i++) {
+      if (!active[i]) continue;
+      activeBefore++;
+      const next = generators[i]!.next();
+      if (next.done) active[i] = false;
+      else barriers++;
+    }
+    if (barriers > 0 && barriers !== activeBefore) {
+      throw compilerFailure("barrier mismatch: not every active dynamic-launch thread reached __syncthreads()");
+    }
+  }
+}
+
+function pointerArgumentValue(
+  arg: CudaLiteExpression,
+  valueType: CudaLiteScalarType,
+  context: ThreadContext,
+): LocalValue {
+  if (arg.kind === "identifier") {
+    if (context.buffers.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "buffer", index: 0 } };
+    const local = context.locals.get(arg.name);
+    if (isPoolPointer(local)) return { ...local, valueType };
+    if (local && typeof local !== "number") return local;
+  }
+  const value = evalExpression(arg, context);
+  if (isPoolPointer(value)) return { ...value, valueType };
+  throw compilerFailure("unsupported dynamic kernel pointer argument");
 }
 
 function evalExpression(expression: CudaLiteExpression, context: ThreadContext): EvalValue {
@@ -813,6 +918,15 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
       index: (alias.target.index ?? 0) + chain[0]!,
     };
   }
+  if (isPoolPointer(alias)) {
+    if (chain.length !== 1) throw compilerFailure(`pool pointer alias '${cursor.name}' expects one-dimensional indexing`);
+    return {
+      name: alias.poolName,
+      space: "pool",
+      index: alias.byteOffset < 0 ? -1 : Math.trunc(alias.byteOffset / 4) + chain[0]!,
+      ...(alias.valueType === undefined ? {} : { valueType: alias.valueType }),
+    };
+  }
   const shared = context.shared.get(cursor.name);
   if (shared) {
     return { name: cursor.name, space: "shared", index: flattenIndex(shared.dimensions, chain) };
@@ -1132,6 +1246,51 @@ function intFromBits(value: number): number {
 
 function vectorFromTuple(value: readonly [number, number, number]): Vector3 {
   return { x: value[0], y: value[1], z: value[2] };
+}
+
+function vectorFromExpressions(expressions: readonly CudaLiteExpression[], context: ThreadContext): Vector3 {
+  return {
+    x: Math.trunc(expressions[0] ? evalNumber(expressions[0], context) : 1),
+    y: Math.trunc(expressions[1] ? evalNumber(expressions[1], context) : 1),
+    z: Math.trunc(expressions[2] ? evalNumber(expressions[2], context) : 1),
+  };
+}
+
+function vectorFromLaunchExpressions(expressions: readonly CudaLiteExpression[], context: ThreadContext): Vector3 {
+  if (expressions.length === 1 && expressions[0]?.kind === "identifier") {
+    const local = context.locals.get(expressions[0].name);
+    if (isVector3(local)) return local;
+  }
+  return vectorFromExpressions(expressions, context);
+}
+
+function isVector3(value: LocalValue | undefined): value is Vector3 {
+  return value !== undefined &&
+    typeof value !== "number" &&
+    !("kind" in value) &&
+    typeof value.x === "number" &&
+    typeof value.y === "number" &&
+    typeof value.z === "number";
+}
+
+function sharedDeclarationsFor(
+  statements: readonly CudaLiteStatement[],
+  fallback: readonly CudaLiteVarDecl[],
+): readonly CudaLiteVarDecl[] {
+  if (fallback.length > 0) return fallback;
+  const out: CudaLiteVarDecl[] = [];
+  const visit = (items: readonly CudaLiteStatement[]): void => {
+    for (const item of items) {
+      if (item.kind === "var" && item.storage === "shared") out.push(item);
+      if (item.kind === "if") {
+        visit(item.consequent);
+        if (item.alternate) visit(item.alternate);
+      }
+      if (item.kind === "for") visit(item.body);
+    }
+  };
+  visit(statements);
+  return out;
 }
 
 function valueAsNumber(value: LocalValue, name: string): number {

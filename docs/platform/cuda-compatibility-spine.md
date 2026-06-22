@@ -39,5 +39,8 @@ Current corpus gate:
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, and WebGPU
   atomic offset updates.
+- Device-side launches now parse into IR and can run in CPU reference when
+  `referenceDynamicParallelism` is enabled; WebGPU still rejects them until
+  host-side multi-dispatch orchestration lands.
 - Remaining failures group cleanly: dynamic parallelism/runtime launches,
-  cooperative groups/grid sync, and frontend pseudocode/ellipsis parsing.
+  cooperative groups/grid sync, and one incomplete pseudocode symbol.

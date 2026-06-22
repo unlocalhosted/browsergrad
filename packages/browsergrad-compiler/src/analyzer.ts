@@ -219,6 +219,7 @@ export function analyzeCudaLite(
             valueType: "uint",
             span: statement.span,
           });
+          for (const arg of statement.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
           break;
         case "cooperative-group":
           if (names.has(statement.name)) {
@@ -235,11 +236,17 @@ export function analyzeCudaLite(
           });
           break;
         case "kernel-launch":
-          diagnostics.push(error(
-            "unsupported-dynamic-parallelism",
-            `device-side kernel launch '${statement.callee}<<<...>>>' is not lowered in CUDA-lite v0`,
-            statement.span,
-          ));
+          diagnostics.push({
+            ...error(
+              "unsupported-dynamic-parallelism",
+              `device-side kernel launch '${statement.callee}<<<...>>>' is reference-only in CUDA-lite`,
+              statement.span,
+            ),
+            severity: options.referenceDynamicParallelism ? "warning" : "error",
+          });
+          for (const arg of statement.grid) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+          for (const arg of statement.block) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+          for (const arg of statement.args) walkExpression(arg, scope);
           break;
         case "asm":
           validateInlineAsmStatement(statement, scope, diagnostics, walkExpression);

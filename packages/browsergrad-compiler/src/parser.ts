@@ -310,11 +310,12 @@ class Parser {
   private parseDim3Decl(): CudaLiteDim3Decl {
     const start = this.expect("dim3").span;
     const name = this.expectIdentifier("dim3 variable name");
-    if (this.match("(")) this.skipBalanced("(", ")");
+    const args = this.match("(") ? this.parseArgumentList() : [];
     const end = this.expect(";").span;
     return {
       kind: "dim3",
       name: name.value,
+      args,
       span: mergeSpans(start, end),
     };
   }
@@ -360,12 +361,22 @@ class Parser {
     const name = this.expectIdentifier("kernel launch callee");
     this.expect("<<");
     this.expect("<");
-    this.skipUntilTripleChevronClose();
-    this.skipBalanced("(", ")");
+    const launchArgs: CudaLiteExpression[][] = [];
+    if (!(this.peek().value === ">>" && this.tokens[this.index + 1]?.value === ">")) {
+      do {
+        launchArgs.push([this.parseExpression()]);
+      } while (this.consumeIf(","));
+    }
+    this.expect(">>");
+    this.expect(">");
+    const args = this.parseArgumentList();
     const end = this.expect(";").span;
     return {
       kind: "kernel-launch",
       callee: name.value,
+      grid: launchArgs[0] ?? [],
+      block: launchArgs[1] ?? [],
+      args,
       span: mergeSpans(name.span, end),
     };
   }
@@ -454,6 +465,7 @@ class Parser {
   private parseExpression(minPrecedence = 1): CudaLiteExpression {
     let left = this.parsePrefix();
     while (true) {
+      if (this.peek().value === ">>" && this.tokens[this.index + 1]?.value === ">") break;
       if (ASSIGNMENT.has(this.peek().value) && minPrecedence <= 1) {
         const op = this.advance().value as CudaLiteAssignmentExpression["operator"];
         const right = this.parseExpression(1);
@@ -522,12 +534,7 @@ class Parser {
         continue;
       }
       if (this.consumeIf("(")) {
-        const args: CudaLiteExpression[] = [];
-        if (!this.match(")")) {
-          do args.push(this.parseExpression());
-          while (this.consumeIf(","));
-        }
-        const end = this.expect(")").span;
+        const { args, end } = this.parseArgumentListAfterOpen();
         expression = { kind: "call", callee: expression, args, span: mergeSpans(expression.span, end) };
         continue;
       }
@@ -558,6 +565,21 @@ class Parser {
     }
     const ident = this.expectIdentifier("expression");
     return { kind: "identifier", name: ident.value, span: ident.span };
+  }
+
+  private parseArgumentList(): readonly CudaLiteExpression[] {
+    this.expect("(");
+    return this.parseArgumentListAfterOpen().args;
+  }
+
+  private parseArgumentListAfterOpen(): { readonly args: readonly CudaLiteExpression[]; readonly end: SourceSpan } {
+    const args: CudaLiteExpression[] = [];
+    if (!this.match(")")) {
+      do args.push(this.parseExpression());
+      while (this.consumeIf(","));
+    }
+    const end = this.expect(")").span;
+    return { args, end };
   }
 
   private startsScalarCast(): boolean {
@@ -737,15 +759,6 @@ class Parser {
       if (token.value === open) depth++;
       else if (token.value === close) depth--;
     }
-  }
-
-  private skipUntilTripleChevronClose(): void {
-    while (!(this.peek().value === ">>" && this.tokens[this.index + 1]?.value === ">")) {
-      if (this.match("<eof>")) this.fail("expected '>>>'", this.peek().span);
-      this.advance();
-    }
-    this.expect(">>");
-    this.expect(">");
   }
 
   private consumeNamespaceQualifier(): void {
