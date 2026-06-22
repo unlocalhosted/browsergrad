@@ -440,6 +440,12 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     group-normalized advantage, policy-gradient, and masked aggregation checks.
     BrowserGrad runtime integration now proves a Python rubric can call the
     A5 profile's `_bg_rl_math` JS module through Pyodide while the bridge is
-    backed by the primitive facade's `rl` namespace.
+    backed by the primitive facade's `rl` namespace. CraftingAttention also has
+    a platform e2e that loads
+    `docs/internal/cs336-assignment5-alignment.profile.json`, selects the
+    Pyodide route with a simulated browser-math replacement for GPU inference,
+    blocks launch on placeholder SFT fixture hashes, and checks DPO, response
+    parsers, rollout rewards, group-normalized rewards, policy-gradient loss,
+    and masked aggregation through the platform's package-loading path.
 17. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.

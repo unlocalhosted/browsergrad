@@ -4,6 +4,8 @@ This note captures the browser-safe path for
 `stanford-cs336/assignment5-alignment`. Keep it as an assignment profile record,
 not root platform identity.
 
+Supplement: <https://github.com/stanford-cs336/assignment5-alignment/blob/main/cs336_spring2025_assignment5_supplement_safety_rlhf.pdf>
+
 ## Upstream Shape
 
 - CS336 Spring 2026 describes Assignment 5 as alignment and reasoning RL:
@@ -41,6 +43,12 @@ not root platform identity.
 
 - Register a profile-local JS reference module from
   `@unlocalhosted/browsergrad-primitives` as `_bg_rl_math`.
+- CraftingAttention platform e2e now loads the real
+  `cs336-assignment5-alignment.profile.json`, selects the Pyodide route with a
+  simulated browser-math inference replacement, blocks launch on placeholder
+  SFT fixture hashes, and exercises DPO loss, MMLU/GSM8K parsers, rollout
+  rewards, group-normalized advantages, clipped policy-gradient loss, and
+  masked microbatch aggregation through `@unlocalhosted/browsergrad-primitives`.
 - Route `rl-loss-oracle` to the primitive facade's `rl` namespace.
 - Route `response-parser-oracle` to `parseMmluResponse()` and
   `parseGsm8kResponse()`.

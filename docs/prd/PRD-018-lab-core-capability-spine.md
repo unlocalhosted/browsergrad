@@ -356,6 +356,11 @@ curriculum profiles and handoff docs absorb course-specific adapters.
 - A5 runtime proof guarantee: the CS336 A5 profile registers generic
   `_bg_rl_math` profile glue, and runtime integration proves a Python rubric can
   call DPO, MMLU, GSM8K, and group-normalized reward references through Pyodide.
+  CraftingAttention loads the real A5 benchmark profile, selects the Pyodide
+  route with a simulated browser-math replacement for GPU inference, blocks
+  launch on placeholder SFT fixture hashes, and verifies DPO, MMLU/GSM8K,
+  rollout reward, group-normalized reward, clipped policy-gradient, and masked
+  aggregation references through the platform e2e suite.
 - Later implementation slices:
   - Assignment runner plan: packages, mounts, JS oracles, timeout/watchdog, and
     allowed tests.
