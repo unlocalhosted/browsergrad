@@ -772,6 +772,28 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return `exp(${args.join(", ")})`;
     case "logf":
       return `log(${args.join(", ")})`;
+    case "fabsf":
+      return `abs(${args.join(", ")})`;
+    case "floorf":
+      return `floor(${args.join(", ")})`;
+    case "ceilf":
+      return `ceil(${args.join(", ")})`;
+    case "roundf":
+      return `round(${args.join(", ")})`;
+    case "truncf":
+      return `trunc(${args.join(", ")})`;
+    case "sinf":
+      return `sin(${args.join(", ")})`;
+    case "cosf":
+      return `cos(${args.join(", ")})`;
+    case "tanf":
+      return `tan(${args.join(", ")})`;
+    case "powf":
+      return `pow(${args.join(", ")})`;
+    case "fminf":
+      return `min(${args.join(", ")})`;
+    case "fmaxf":
+      return `max(${args.join(", ")})`;
     case "__half2float":
       return `f32(${args.join(", ")})`;
     case "__float2half":

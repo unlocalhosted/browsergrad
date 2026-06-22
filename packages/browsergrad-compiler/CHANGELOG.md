@@ -85,3 +85,6 @@
 - CUDA corpus audit output now separates strict direct lowering from total
   WebGPU runnable coverage with `directLoweringOk`, `strictCompileGaps`, and
   `webGpuRunnableOk`.
+- Added native WGSL/reference lowering for common CUDA float math builtins:
+  `fabsf`, `floorf`, `ceilf`, `roundf`, `truncf`, `sinf`, `cosf`, `tanf`,
+  `powf`, `fminf`, and `fmaxf`.

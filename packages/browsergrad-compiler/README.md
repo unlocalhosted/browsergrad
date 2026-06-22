@@ -87,6 +87,9 @@ host-orchestrated WebGPU plans such as grid-sync phases, host peer copy, or
 host-lifted dynamic launches.
 Fixed thread-local arrays lower to WGSL function arrays and CPU-reference typed
 arrays, so small per-thread scratch patterns do not need shared memory.
+Common CUDA float math helpers lower natively in both WGSL and CPU reference:
+`sqrtf`, `expf`, `logf`, `fabsf`, `floorf`, `ceilf`, `roundf`, `truncf`,
+`sinf`, `cosf`, `tanf`, `powf`, `fminf`, and `fmaxf`.
 
 For hot WebGPU paths, pass caller-owned buffers through `residentBuffers` and
 set `readback: []`. This keeps data on GPU across compiler-dispatched kernels;

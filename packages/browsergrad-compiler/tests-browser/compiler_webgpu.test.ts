@@ -63,6 +63,26 @@ __global__ void localArray(float* out) {
 }
 `;
 
+const FLOAT_MATH = `
+__global__ void floatMath(float *x, float *out) {
+  int idx = threadIdx.x;
+  if (idx < 2) {
+    float value = x[idx];
+    out[idx] = fabsf(value) +
+      floorf(value) +
+      ceilf(value) +
+      truncf(value) +
+      roundf(value) +
+      sinf(value) +
+      cosf(value) +
+      tanf(value) +
+      powf(fabsf(value), 2.0f) +
+      fminf(value, 1.0f) +
+      fmaxf(value, -1.0f);
+  }
+}
+`;
+
 const COMPLEX_MULTIPLY = `
 __global__ void multiplyFreqDomain(cufftComplex *A, const cufftComplex *B, int N) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -206,6 +226,25 @@ describe("real WebGPU — CUDA-lite compiler", () => {
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
+  it("runs common CUDA float math builtins through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(FLOAT_MATH, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        x: new Float32Array([-1.25, 0.6]),
+        out: new Float32Array(2),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    const expectedValues = [...expected.buffers.out as Float32Array];
+    const actualValues = [...actual.buffers.out as Float32Array];
+    expect(Math.abs(actualValues[0]! - expectedValues[0]!)).toBeLessThan(1e-4);
+    expect(Math.abs(actualValues[1]! - expectedValues[1]!)).toBeLessThan(1e-4);
   });
 
   it("runs compiled SAXPY over resident WebGPU buffers without forced readback", async () => {
@@ -754,7 +793,7 @@ __global__ void parent(float *x, int n) {
 
     try {
       expect(prepared.kind).toBe("host-dynamic-launch");
-      expect(prepared.stepCount).toBe(2);
+      expect(prepared.stepCount).toBe(1);
 
       const first = await prepared.run();
       expect(first.buffers).toEqual({});

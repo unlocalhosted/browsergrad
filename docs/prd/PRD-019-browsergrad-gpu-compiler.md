@@ -103,7 +103,9 @@ backend, not the first dependency.
   indexing, `if`, canonical `for`, fixed `__shared__` arrays,
   `__syncthreads()`, scalar `__device__` helpers, selected warp/cooperative
   group primitives, dynamic shared memory with launch metadata, simple runtime
-  calls in CPU reference, `min/max/sqrtf/expf/logf`, and common atomics.
+  calls in CPU reference, common float math builtins (`sqrtf`, `expf`, `logf`,
+  `fabsf`, `floorf`, `ceilf`, `roundf`, `truncf`, `sinf`, `cosf`, `tanf`,
+  `powf`, `fminf`, `fmaxf`), and common atomics.
 - Emit explicit diagnostics for broad C++, templates, classes, unsupported
   runtime orchestration, divergent barriers, const-pointer writes, unsupported
   atomics, and unavailable f16/subgroup features.

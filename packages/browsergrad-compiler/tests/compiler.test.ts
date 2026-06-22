@@ -380,7 +380,7 @@ __global__ void bad(float* x) {
 
     const unsupportedCall = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(float* x) {
-  if (threadIdx.x < 1) { x[0] = sinf(x[0]); }
+  if (threadIdx.x < 1) { x[0] = erff(x[0]); }
 }`));
     expect(unsupportedCall.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-call");
 
@@ -1119,6 +1119,60 @@ __global__ void boolKernel(int *data, int N,) {
 
     expect(compiled.wgsl).toContain("var even: bool = ((idx % 2) == 0);");
     expect([...result.buffers.data as Int32Array]).toEqual([11, -8, 13, -6]);
+  });
+
+  it("lowers common CUDA float math builtins to WGSL and reference math", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void mathy(float *x, float *out) {
+  int idx = threadIdx.x;
+  if (idx < 2) {
+    float value = x[idx];
+    out[idx] = fabsf(value) +
+      floorf(value) +
+      ceilf(value) +
+      truncf(value) +
+      roundf(value) +
+      sinf(value) +
+      cosf(value) +
+      tanf(value) +
+      powf(fabsf(value), 2.0f) +
+      fminf(value, 1.0f) +
+      fmaxf(value, -1.0f);
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const input = new Float32Array([-1.25, 0.6]);
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: input, out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("abs(value)");
+    expect(compiled.wgsl).toContain("floor(value)");
+    expect(compiled.wgsl).toContain("ceil(value)");
+    expect(compiled.wgsl).toContain("trunc(value)");
+    expect(compiled.wgsl).toContain("round(value)");
+    expect(compiled.wgsl).toContain("sin(value)");
+    expect(compiled.wgsl).toContain("cos(value)");
+    expect(compiled.wgsl).toContain("tan(value)");
+    expect(compiled.wgsl).toContain("pow(abs(value), 2.0)");
+    expect(compiled.wgsl).toContain("min(value, 1.0)");
+    expect(compiled.wgsl).toContain("max(value, (-1.0))");
+    const expected = [...input].map((value) =>
+      Math.abs(value) +
+      Math.floor(value) +
+      Math.ceil(value) +
+      Math.trunc(value) +
+      Math.round(value) +
+      Math.sin(value) +
+      Math.cos(value) +
+      Math.tan(value) +
+      Math.pow(Math.abs(value), 2) +
+      Math.min(value, 1) +
+      Math.max(value, -1)
+    );
+    expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(expected[0]!, 5);
+    expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
   });
 
   it("lowers CUDA device cuRAND state to deterministic browser RNG helpers", () => {

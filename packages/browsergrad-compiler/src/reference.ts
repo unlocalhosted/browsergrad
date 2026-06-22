@@ -1030,6 +1030,28 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       return Math.exp(args[0] ?? 0);
     case "logf":
       return Math.log(args[0] ?? 0);
+    case "fabsf":
+      return Math.abs(args[0] ?? 0);
+    case "floorf":
+      return Math.floor(args[0] ?? 0);
+    case "ceilf":
+      return Math.ceil(args[0] ?? 0);
+    case "roundf":
+      return Math.round(args[0] ?? 0);
+    case "truncf":
+      return Math.trunc(args[0] ?? 0);
+    case "sinf":
+      return Math.sin(args[0] ?? 0);
+    case "cosf":
+      return Math.cos(args[0] ?? 0);
+    case "tanf":
+      return Math.tan(args[0] ?? 0);
+    case "powf":
+      return Math.pow(args[0] ?? 0, args[1] ?? 0);
+    case "fminf":
+      return Math.min(args[0] ?? 0, args[1] ?? 0);
+    case "fmaxf":
+      return Math.max(args[0] ?? 0, args[1] ?? 0);
     case "__half2float":
     case "__float2half":
       return args[0] ?? 0;
