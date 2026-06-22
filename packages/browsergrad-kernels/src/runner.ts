@@ -49,6 +49,7 @@ export async function dispatch(
 ): Promise<Float32Array> {
   const impl = asImpl(device);
   const gpu = impl.gpu;
+  validatePositiveInteger(opts.outputLength, "outputLength");
 
   const numInputs = opts.inputs.length;
   const hasParams = opts.params.length > 0;
@@ -89,101 +90,127 @@ export async function dispatch(
 
   /* Buffers ───────────────────────────────────────────── */
   const inputBuffers: GPUBuffer[] = [];
-  for (const input of opts.inputs) {
-    const buf = gpu.createBuffer({
-      size: alignTo(input.byteLength, 4),
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    gpu.queue.writeBuffer(buf, 0, input.buffer, input.byteOffset, input.byteLength);
-    inputBuffers.push(buf);
-  }
+  let outputBuffer: GPUBuffer | undefined;
+  let paramsBuffer: GPUBuffer | undefined;
+  let readBuffer: GPUBuffer | undefined;
 
-  const outputByteLength = opts.outputLength * 4;
-  const outputBuffer = gpu.createBuffer({
-    size: alignTo(outputByteLength, 4),
-    usage:
-      GPUBufferUsage.STORAGE |
-      GPUBufferUsage.COPY_SRC |
-      GPUBufferUsage.COPY_DST,
-  });
-  if (opts.initialOutput) {
-    if (opts.initialOutput.length !== opts.outputLength) {
-      throw new KernelError("initialOutput length must match outputLength");
+  try {
+    for (const input of opts.inputs) {
+      const buf = gpu.createBuffer({
+        size: validateStorageByteLength(input.byteLength, "input"),
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+      gpu.queue.writeBuffer(buf, 0, input.buffer, input.byteOffset, input.byteLength);
+      inputBuffers.push(buf);
     }
-    gpu.queue.writeBuffer(
-      outputBuffer,
-      0,
-      opts.initialOutput.buffer,
-      opts.initialOutput.byteOffset,
-      opts.initialOutput.byteLength,
-    );
-  }
 
-  let paramsBuffer: GPUBuffer | null = null;
-  if (hasParams) {
-    paramsBuffer = gpu.createBuffer({
-      size: alignTo(opts.params.byteLength, 16),
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    const outputByteLength = opts.outputLength * 4;
+    outputBuffer = gpu.createBuffer({
+      size: alignTo(outputByteLength, 4),
+      usage:
+        GPUBufferUsage.STORAGE |
+        GPUBufferUsage.COPY_SRC |
+        GPUBufferUsage.COPY_DST,
     });
-    gpu.queue.writeBuffer(
-      paramsBuffer,
-      0,
-      opts.params.buffer,
-      opts.params.byteOffset,
-      opts.params.byteLength,
-    );
+    if (opts.initialOutput) {
+      if (opts.initialOutput.length !== opts.outputLength) {
+        throw new KernelError("initialOutput length must match outputLength");
+      }
+      gpu.queue.writeBuffer(
+        outputBuffer,
+        0,
+        opts.initialOutput.buffer,
+        opts.initialOutput.byteOffset,
+        opts.initialOutput.byteLength,
+      );
+    }
+
+    if (hasParams) {
+      paramsBuffer = gpu.createBuffer({
+        size: alignTo(opts.params.byteLength, 16),
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+      gpu.queue.writeBuffer(
+        paramsBuffer,
+        0,
+        opts.params.buffer,
+        opts.params.byteOffset,
+        opts.params.byteLength,
+      );
+    }
+
+    /* Bind group ────────────────────────────────────────── */
+    const bgEntries: GPUBindGroupEntry[] = [];
+    for (let i = 0; i < numInputs; i++) {
+      bgEntries.push({ binding: i, resource: { buffer: inputBuffers[i]! } });
+    }
+    bgEntries.push({ binding: numInputs, resource: { buffer: outputBuffer } });
+    if (paramsBuffer) {
+      bgEntries.push({ binding: numInputs + 1, resource: { buffer: paramsBuffer } });
+    }
+    const bindGroup = gpu.createBindGroup({
+      layout: bindGroupLayout,
+      entries: bgEntries,
+    });
+
+    /* Dispatch ──────────────────────────────────────────── */
+    const encoder = gpu.createCommandEncoder({ label: `bg-${desc.name}` });
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    const wgX = Math.ceil(opts.dispatchCount[0] / desc.workgroupSize[0]);
+    const wgY = Math.ceil(opts.dispatchCount[1] / desc.workgroupSize[1]);
+    const wgZ = Math.ceil(opts.dispatchCount[2] / desc.workgroupSize[2]);
+    pass.dispatchWorkgroups(Math.max(wgX, 1), Math.max(wgY, 1), Math.max(wgZ, 1));
+    pass.end();
+
+    /* Readback ─────────────────────────────────────────── */
+    readBuffer = gpu.createBuffer({
+      size: alignTo(outputByteLength, 4),
+      usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+    });
+    encoder.copyBufferToBuffer(outputBuffer, 0, readBuffer, 0, alignTo(outputByteLength, 4));
+    gpu.queue.submit([encoder.finish()]);
+
+    await readBuffer.mapAsync(GPUMapMode.READ);
+    try {
+      impl.recordInvocation();
+      return new Float32Array(readBuffer.getMappedRange(0, outputByteLength).slice(0));
+    } finally {
+      readBuffer.unmap();
+    }
+  } finally {
+    for (const b of inputBuffers) b.destroy();
+    outputBuffer?.destroy();
+    paramsBuffer?.destroy();
+    readBuffer?.destroy();
   }
-
-  /* Bind group ────────────────────────────────────────── */
-  const bgEntries: GPUBindGroupEntry[] = [];
-  for (let i = 0; i < numInputs; i++) {
-    bgEntries.push({ binding: i, resource: { buffer: inputBuffers[i]! } });
-  }
-  bgEntries.push({ binding: numInputs, resource: { buffer: outputBuffer } });
-  if (paramsBuffer) {
-    bgEntries.push({ binding: numInputs + 1, resource: { buffer: paramsBuffer } });
-  }
-  const bindGroup = gpu.createBindGroup({
-    layout: bindGroupLayout,
-    entries: bgEntries,
-  });
-
-  /* Dispatch ──────────────────────────────────────────── */
-  const encoder = gpu.createCommandEncoder({ label: `bg-${desc.name}` });
-  const pass = encoder.beginComputePass();
-  pass.setPipeline(pipeline);
-  pass.setBindGroup(0, bindGroup);
-  const wgX = Math.ceil(opts.dispatchCount[0] / desc.workgroupSize[0]);
-  const wgY = Math.ceil(opts.dispatchCount[1] / desc.workgroupSize[1]);
-  const wgZ = Math.ceil(opts.dispatchCount[2] / desc.workgroupSize[2]);
-  pass.dispatchWorkgroups(Math.max(wgX, 1), Math.max(wgY, 1), Math.max(wgZ, 1));
-  pass.end();
-
-  /* Readback ─────────────────────────────────────────── */
-  const readBuffer = gpu.createBuffer({
-    size: alignTo(outputByteLength, 4),
-    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-  });
-  encoder.copyBufferToBuffer(outputBuffer, 0, readBuffer, 0, alignTo(outputByteLength, 4));
-  gpu.queue.submit([encoder.finish()]);
-
-  await readBuffer.mapAsync(GPUMapMode.READ);
-  // Copy into a fresh Float32Array so we can unmap + destroy the GPU buffer.
-  const view = new Float32Array(readBuffer.getMappedRange(0, outputByteLength).slice(0));
-  readBuffer.unmap();
-
-  /* Cleanup ──────────────────────────────────────────── */
-  for (const b of inputBuffers) b.destroy();
-  outputBuffer.destroy();
-  paramsBuffer?.destroy();
-  readBuffer.destroy();
-
-  impl.recordInvocation();
-  return view;
 }
 
 function alignTo(value: number, align: number): number {
   return Math.ceil(value / align) * align;
+}
+
+function validatePositiveInteger(value: number, name: string): number {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new KernelError(`${name} must be a positive integer`);
+  }
+  return value;
+}
+
+function validateStorageByteLength(byteLength: number, name: string): number {
+  if (!Number.isInteger(byteLength) || byteLength <= 0) {
+    throw new KernelError(`${name} must not be empty`);
+  }
+  return alignTo(byteLength, 4);
+}
+
+function validateFloat32ByteLength(byteLength: number, name: string): number {
+  validatePositiveInteger(byteLength, name);
+  if (byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) {
+    throw new KernelError(`${name} must be a multiple of ${Float32Array.BYTES_PER_ELEMENT}`);
+  }
+  return byteLength;
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -225,6 +252,7 @@ export function runDirect(
 ): DirectDispatchResult {
   const impl = asImpl(device);
   const gpu = impl.gpu;
+  validatePositiveInteger(opts.outputLength, "outputLength");
 
   const numInputs = opts.inputBuffers.length;
   const hasParams = opts.params.length > 0;
@@ -263,56 +291,63 @@ export function runDirect(
   });
 
   const outputByteLength = opts.outputLength * 4;
-  const outputBuffer =
-    opts.outputBuffer ??
-    gpu.createBuffer({
-      size: alignTo(outputByteLength, 4),
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+  const ownsOutput = opts.outputBuffer === undefined || opts.outputBuffer === null;
+  let completed = false;
+  let outputBuffer: GPUBuffer | undefined;
+  let paramsBuffer: GPUBuffer | undefined;
+  try {
+    outputBuffer =
+      opts.outputBuffer ??
+      gpu.createBuffer({
+        size: alignTo(outputByteLength, 4),
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+      });
+
+    if (hasParams) {
+      paramsBuffer = gpu.createBuffer({
+        size: alignTo(opts.params.byteLength, 16),
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+      gpu.queue.writeBuffer(
+        paramsBuffer,
+        0,
+        opts.params.buffer,
+        opts.params.byteOffset,
+        opts.params.byteLength,
+      );
+    }
+
+    const bgEntries: GPUBindGroupEntry[] = [];
+    for (let i = 0; i < numInputs; i++) {
+      bgEntries.push({ binding: i, resource: { buffer: opts.inputBuffers[i]! } });
+    }
+    bgEntries.push({ binding: numInputs, resource: { buffer: outputBuffer } });
+    if (paramsBuffer) {
+      bgEntries.push({ binding: numInputs + 1, resource: { buffer: paramsBuffer } });
+    }
+    const bindGroup = gpu.createBindGroup({
+      layout: bindGroupLayout,
+      entries: bgEntries,
     });
 
-  let paramsBuffer: GPUBuffer | null = null;
-  if (hasParams) {
-    paramsBuffer = gpu.createBuffer({
-      size: alignTo(opts.params.byteLength, 16),
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-    gpu.queue.writeBuffer(
-      paramsBuffer,
-      0,
-      opts.params.buffer,
-      opts.params.byteOffset,
-      opts.params.byteLength,
-    );
+    const encoder = gpu.createCommandEncoder({ label: `bg-direct-${desc.name}` });
+    const pass = encoder.beginComputePass();
+    pass.setPipeline(pipeline);
+    pass.setBindGroup(0, bindGroup);
+    const wgX = Math.ceil(opts.dispatchCount[0] / desc.workgroupSize[0]);
+    const wgY = Math.ceil(opts.dispatchCount[1] / desc.workgroupSize[1]);
+    const wgZ = Math.ceil(opts.dispatchCount[2] / desc.workgroupSize[2]);
+    pass.dispatchWorkgroups(Math.max(wgX, 1), Math.max(wgY, 1), Math.max(wgZ, 1));
+    pass.end();
+    gpu.queue.submit([encoder.finish()]);
+
+    impl.recordInvocation();
+    completed = true;
+    return { buffer: outputBuffer, byteLength: outputByteLength };
+  } finally {
+    paramsBuffer?.destroy();
+    if (!completed && ownsOutput) outputBuffer?.destroy();
   }
-
-  const bgEntries: GPUBindGroupEntry[] = [];
-  for (let i = 0; i < numInputs; i++) {
-    bgEntries.push({ binding: i, resource: { buffer: opts.inputBuffers[i]! } });
-  }
-  bgEntries.push({ binding: numInputs, resource: { buffer: outputBuffer } });
-  if (paramsBuffer) {
-    bgEntries.push({ binding: numInputs + 1, resource: { buffer: paramsBuffer } });
-  }
-  const bindGroup = gpu.createBindGroup({
-    layout: bindGroupLayout,
-    entries: bgEntries,
-  });
-
-  const encoder = gpu.createCommandEncoder({ label: `bg-direct-${desc.name}` });
-  const pass = encoder.beginComputePass();
-  pass.setPipeline(pipeline);
-  pass.setBindGroup(0, bindGroup);
-  const wgX = Math.ceil(opts.dispatchCount[0] / desc.workgroupSize[0]);
-  const wgY = Math.ceil(opts.dispatchCount[1] / desc.workgroupSize[1]);
-  const wgZ = Math.ceil(opts.dispatchCount[2] / desc.workgroupSize[2]);
-  pass.dispatchWorkgroups(Math.max(wgX, 1), Math.max(wgY, 1), Math.max(wgZ, 1));
-  pass.end();
-  gpu.queue.submit([encoder.finish()]);
-
-  paramsBuffer?.destroy();
-  impl.recordInvocation();
-
-  return { buffer: outputBuffer, byteLength: outputByteLength };
 }
 
 /**
@@ -326,19 +361,25 @@ export async function materializeFloat32(
 ): Promise<Float32Array> {
   const impl = asImpl(device);
   const gpu = impl.gpu;
+  validateFloat32ByteLength(byteLength, "byteLength");
   const aligned = alignTo(byteLength, 4);
   const readBuffer = gpu.createBuffer({
     size: aligned,
     usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
   });
-  const encoder = gpu.createCommandEncoder({ label: "bg-materialize" });
-  encoder.copyBufferToBuffer(buffer, 0, readBuffer, 0, aligned);
-  gpu.queue.submit([encoder.finish()]);
-  await readBuffer.mapAsync(GPUMapMode.READ);
-  const view = new Float32Array(readBuffer.getMappedRange(0, byteLength).slice(0));
-  readBuffer.unmap();
-  readBuffer.destroy();
-  return view;
+  try {
+    const encoder = gpu.createCommandEncoder({ label: "bg-materialize" });
+    encoder.copyBufferToBuffer(buffer, 0, readBuffer, 0, aligned);
+    gpu.queue.submit([encoder.finish()]);
+    await readBuffer.mapAsync(GPUMapMode.READ);
+    try {
+      return new Float32Array(readBuffer.getMappedRange(0, byteLength).slice(0));
+    } finally {
+      readBuffer.unmap();
+    }
+  } finally {
+    readBuffer.destroy();
+  }
 }
 
 /** Upload typed array data into a freshly-allocated GPUBuffer. */
@@ -349,7 +390,7 @@ export function uploadFloat32(
   const impl = asImpl(device);
   const gpu = impl.gpu;
   const buf = gpu.createBuffer({
-    size: alignTo(data.byteLength, 4),
+    size: validateStorageByteLength(data.byteLength, "uploadFloat32 data"),
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
   });
   gpu.queue.writeBuffer(buf, 0, data.buffer, data.byteOffset, data.byteLength);

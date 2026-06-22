@@ -164,6 +164,7 @@ export async function runWgslKernelProgram(
   const layoutEntries: GPUBindGroupLayoutEntry[] = [];
   const storageBuffers = new Map<string, { binding: WgslStorageBinding; buffer: GPUBuffer; byteLength: number }>();
   const uniformBuffers: GPUBuffer[] = [];
+  const readBuffers = new Set<GPUBuffer>();
 
   try {
     for (const binding of program.bindings) {
@@ -171,7 +172,7 @@ export async function runWgslKernelProgram(
         const data = input.buffers[binding.name];
         if (!data) throw new KernelError(`missing storage buffer input: ${binding.name}`);
         validateTypedArray(data, binding);
-        const byteLength = alignTo(data.byteLength, 4);
+        const byteLength = validateStorageByteLength(data.byteLength, binding.name);
         const buffer = gpu.createBuffer({
           size: byteLength,
           usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
@@ -194,6 +195,9 @@ export async function runWgslKernelProgram(
           throw new KernelError(
             `uniform ${binding.name} has ${bytes.byteLength} bytes; expected at most ${binding.byteLength}`,
           );
+        }
+        if (binding.byteLength === undefined && bytes.byteLength === 0) {
+          throw new KernelError(`uniform ${binding.name} must not be empty`);
         }
         const buffer = gpu.createBuffer({
           size: alignTo(binding.byteLength ?? bytes.byteLength, 16),
@@ -234,6 +238,7 @@ export async function runWgslKernelProgram(
         size: alignTo(entry.byteLength, 4),
         usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
       });
+      readBuffers.add(readBuffer);
       encoder.copyBufferToBuffer(entry.buffer, 0, readBuffer, 0, alignTo(entry.byteLength, 4));
       reads.push({ name, binding: entry.binding, readBuffer, byteLength: entry.byteLength });
     }
@@ -242,14 +247,19 @@ export async function runWgslKernelProgram(
     const output: Record<string, WgslTypedArray> = {};
     for (const read of reads) {
       await read.readBuffer.mapAsync(GPUMapMode.READ);
-      const bytes = read.readBuffer.getMappedRange(0, read.byteLength).slice(0);
-      output[read.name] = typedArrayFromBytes(read.binding.valueType, bytes);
-      read.readBuffer.unmap();
+      try {
+        const bytes = read.readBuffer.getMappedRange(0, read.byteLength).slice(0);
+        output[read.name] = typedArrayFromBytes(read.binding.valueType, bytes);
+      } finally {
+        read.readBuffer.unmap();
+      }
       read.readBuffer.destroy();
+      readBuffers.delete(read.readBuffer);
     }
     impl.recordInvocation();
     return { buffers: output };
   } finally {
+    for (const readBuffer of readBuffers) readBuffer.destroy();
     for (const entry of storageBuffers.values()) entry.buffer.destroy();
     for (const buffer of uniformBuffers) buffer.destroy();
   }
@@ -367,6 +377,13 @@ function validateTypedArray(data: WgslTypedArray, binding: Extract<WgslKernelBin
   if (binding.valueType === "u32" && !(data instanceof Uint32Array)) {
     throw new KernelError(`storage buffer ${binding.name} expects Uint32Array`);
   }
+}
+
+function validateStorageByteLength(byteLength: number, name: string): number {
+  if (!Number.isInteger(byteLength) || byteLength <= 0) {
+    throw new KernelError(`storage buffer ${name} must not be empty`);
+  }
+  return alignTo(byteLength, 4);
 }
 
 function validateWorkgroupSize(
