@@ -216,6 +216,18 @@ pnpm test:browser:open
 Vitest browser watch rerun path reports an orchestrator-session error, restart
 the command instead of trusting that rerun.
 
+## Corpus Audit
+
+```bash
+pnpm --filter @unlocalhosted/browsergrad-compiler audit:corpus -- /path/to/cuda-corpus --expect-webgpu-min 10
+pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
+```
+
+`audit:corpus` extracts CUDA-shaped kernels from Markdown/CUDA/C++ files and
+reports single-dispatch WebGPU coverage, host-lifted WebGPU coverage, CPU
+reference fallbacks, and hard gaps. Threshold flags make corpus coverage
+regressions fail fast instead of living only in docs.
+
 ## Performance Harness
 
 ```bash

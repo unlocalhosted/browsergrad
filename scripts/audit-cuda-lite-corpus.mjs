@@ -3,18 +3,19 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const { corpusPathArg, details, firstFailureLimit, help } = parseArgs(process.argv.slice(2));
+const { corpusPathArg, details, expectations, firstFailureLimit, help } = parseArgs(process.argv.slice(2));
 if (help) {
-  console.log("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details]");
+  console.log("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--expect-total N] [--expect-webgpu-min N] [--expect-hard-fail-max N]");
   process.exit(0);
 }
 if (!corpusPathArg) {
-  console.error("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details]");
+  console.error("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--expect-total N] [--expect-webgpu-min N] [--expect-hard-fail-max N]");
   process.exit(2);
 }
 
 const corpusRoot = path.resolve(corpusPathArg);
-const compilerUrl = pathToFileURL(path.resolve("packages/browsergrad-compiler/dist/index.js")).href;
+const repoRoot = findRepoRoot(process.cwd());
+const compilerUrl = pathToFileURL(path.join(repoRoot, "packages/browsergrad-compiler/dist/index.js")).href;
 const {
   compileCudaLiteKernel,
   createCudaRuntimePlan,
@@ -130,6 +131,13 @@ if (!details && failures.length > 0 && firstFailureLimit > 0) {
   }
 }
 
+const expectationFailures = checkExpectations(summary, expectations);
+if (expectationFailures.length > 0) {
+  console.error("\ncoverage expectations failed:");
+  for (const failure of expectationFailures) console.error(`- ${failure}`);
+  process.exit(1);
+}
+
 function classifyReferenceFallback(source) {
   try {
     const compiled = compileCudaLiteKernel(source, {
@@ -230,6 +238,16 @@ function listFiles(root, prefix = "") {
     else if (entry.isFile()) out.push(relative);
   }
   return out;
+}
+
+function findRepoRoot(start) {
+  let current = path.resolve(start);
+  while (true) {
+    if (fs.existsSync(path.join(current, "pnpm-workspace.yaml"))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) return path.resolve(start);
+    current = parent;
+  }
 }
 
 function markdownBlocks(text, file) {
@@ -445,10 +463,12 @@ function countBy(items, keyFn) {
 function parseArgs(args) {
   let corpusPathArg;
   let details = false;
+  const expectations = {};
   let firstFailureLimit = 80;
   let help = false;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
+    if (arg === "--") continue;
     if (arg === "--details" || arg === "--json") {
       details = true;
       continue;
@@ -471,6 +491,12 @@ function parseArgs(args) {
       firstFailureLimit = value;
       continue;
     }
+    const expectation = parseExpectationArg(arg, args, index);
+    if (expectation) {
+      expectations[expectation.key] = expectation.value;
+      index = expectation.nextIndex;
+      continue;
+    }
     if (arg === "--help" || arg === "-h") {
       help = true;
       continue;
@@ -482,5 +508,59 @@ function parseArgs(args) {
     console.error(`unexpected argument: ${arg}`);
     process.exit(2);
   }
-  return { corpusPathArg, details, firstFailureLimit, help };
+  return { corpusPathArg, details, expectations, firstFailureLimit, help };
+}
+
+function parseExpectationArg(arg, args, index) {
+  const specs = {
+    "--expect-total": "totalKernelDefinitions",
+    "--expect-ok-min": "okMin",
+    "--expect-single-dispatch-min": "webGpuSingleDispatchMin",
+    "--expect-webgpu-lifted-min": "webGpuLiftedMin",
+    "--expect-webgpu-min": "webGpuTotalMin",
+    "--expect-reference-fallback-min": "referenceFallbackMin",
+    "--expect-reference-only-max": "referenceOnlyMax",
+    "--expect-hard-fail-max": "hardFailMax",
+  };
+  for (const [flag, key] of Object.entries(specs)) {
+    if (arg === flag) {
+      return { key, value: parseExpectationValue(flag, args[index + 1]), nextIndex: index + 1 };
+    }
+    if (arg?.startsWith(`${flag}=`)) {
+      return { key, value: parseExpectationValue(flag, arg.slice(flag.length + 1)), nextIndex: index };
+    }
+  }
+  return undefined;
+}
+
+function parseExpectationValue(flag, rawValue) {
+  const value = Number(rawValue);
+  if (!Number.isInteger(value) || value < 0) {
+    console.error(`${flag} expects a non-negative integer`);
+    process.exit(2);
+  }
+  return value;
+}
+
+function checkExpectations(summary, expectations) {
+  const failures = [];
+  if (expectations.totalKernelDefinitions !== undefined && summary.totalKernelDefinitions !== expectations.totalKernelDefinitions) {
+    failures.push(`totalKernelDefinitions expected ${expectations.totalKernelDefinitions}, got ${summary.totalKernelDefinitions}`);
+  }
+  minExpectation(failures, summary.ok, expectations.okMin, "ok");
+  minExpectation(failures, summary.webGpuSingleDispatchOk, expectations.webGpuSingleDispatchMin, "webGpuSingleDispatchOk");
+  minExpectation(failures, summary.webGpuLiftedOk, expectations.webGpuLiftedMin, "webGpuLiftedOk");
+  minExpectation(failures, summary.webGpuTotalOk, expectations.webGpuTotalMin, "webGpuTotalOk");
+  minExpectation(failures, summary.referenceFallbackOk, expectations.referenceFallbackMin, "referenceFallbackOk");
+  maxExpectation(failures, summary.referenceOnlyOk, expectations.referenceOnlyMax, "referenceOnlyOk");
+  maxExpectation(failures, summary.hardFail, expectations.hardFailMax, "hardFail");
+  return failures;
+}
+
+function minExpectation(failures, actual, expected, label) {
+  if (expected !== undefined && actual < expected) failures.push(`${label} expected >= ${expected}, got ${actual}`);
+}
+
+function maxExpectation(failures, actual, expected, label) {
+  if (expected !== undefined && actual > expected) failures.push(`${label} expected <= ${expected}, got ${actual}`);
 }

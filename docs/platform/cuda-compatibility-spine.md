@@ -45,7 +45,11 @@ Public APIs:
 Rule: do not add assignment-specific fixes. Add semantic primitives, reference
 truth, WGSL lowering, browser tests, and corpus audit evidence.
 
-Current corpus gate (`node scripts/audit-cuda-lite-corpus.mjs /tmp/CUDA-120-DAYS--CHALLENGE`):
+Current corpus gate:
+
+```sh
+pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
+```
 
 - `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/243` real code-kernel
   definitions compile as single-dispatch WGSL/WebGPU. Another `10/243` are
@@ -95,8 +99,10 @@ Current corpus gate (`node scripts/audit-cuda-lite-corpus.mjs /tmp/CUDA-120-DAYS
 - Remaining failures group cleanly: dynamic parallelism/runtime launches,
   cooperative groups/grid sync, and one incomplete pseudocode symbol.
 - Use `--limit N` to cap printed failures and `--details`/`--json` to emit
-  `{ summary, failures }` with `webGpuLiftBlocker` values. This keeps feature
-  triage grounded in exact runtime-plan blockers instead of prose-only notes.
+  `{ summary, failures }` with `webGpuLiftBlocker` values. Use threshold flags
+  such as `--expect-webgpu-min`, `--expect-reference-only-max`, and
+  `--expect-hard-fail-max` so feature triage is grounded in executable
+  regression gates instead of prose-only notes.
 
 Performance gate:
 

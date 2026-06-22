@@ -30,3 +30,5 @@
   hot-loop timing and watchdog gates.
 - Added `pnpm bench` benchmark harness for compiler, CPU reference, and
   orchestration planner timing.
+- Added corpus-audit threshold flags and `audit:cuda-120` so CUDA corpus
+  coverage baselines fail on regression.
