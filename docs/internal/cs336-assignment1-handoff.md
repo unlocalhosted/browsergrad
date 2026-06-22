@@ -48,8 +48,8 @@ profile record, not root agent behavior.
 
 - Start from `docs/internal/cs336-assignment1.profile.json`.
 - Use `@unlocalhosted/browsergrad-primitives` as the TS source of truth.
-  Export `createByteBpeRuntimeAdapter()` or an assignment-local wrapper as the
-  profile's registered oracle object.
+  Export `createByteBpeReferenceModule()` or an assignment-local wrapper as the
+  profile's registered reference object.
 - Register a small JS oracle module into Pyodide for Python rubrics.
 - Mount assignment files under `/assignments/cs336-assignment1/`.
 - Load only browser-available Pyodide packages in the profile.

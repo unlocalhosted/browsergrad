@@ -9,7 +9,7 @@ export { data, evaluation, rl, scaling, simulation, text };
 
 export {
   createByteBpeReference,
-  createByteBpeRuntimeAdapter,
+  createByteBpeReferenceModule,
   createStreamingGate,
   decodeByteBpe,
   deserializeByteBpeModel,
@@ -21,7 +21,7 @@ export {
   type ByteBpeModel,
   type ByteBpeReference,
   type ByteBpeReferenceDefaults,
-  type ByteBpeRuntimeAdapter,
+  type ByteBpeReferenceModule,
   type SerializedByteBpeModel,
   type StreamingGate,
   type StreamingGateOptions,

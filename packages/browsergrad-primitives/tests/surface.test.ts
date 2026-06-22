@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import * as primitives from "../src/index";
 import {
   createByteBpeReference,
+  createByteBpeReferenceModule,
   createDataCleaningReference,
   createHostedTrainingApiFixture,
   createSnapshotComparator,
@@ -15,6 +17,11 @@ import {
 import { createByteBpeReference as createByteBpeReferenceFromText } from "../src/text";
 
 describe("@unlocalhosted/browsergrad-primitives public surface", () => {
+  it("keeps profile/runtime adapter vocabulary out of the primitive facade", () => {
+    expect(Object.keys(primitives).filter((name) => /RuntimeAdapter/.test(name)))
+      .toEqual([]);
+  });
+
   it("exposes generic primitive namespaces instead of lab-shaped package names", () => {
     expect(text.trainByteBpe).toBe(createByteBpeReference().trainByteBpe);
     expect(typeof data.extractVisibleTextFromHtml).toBe("function");
@@ -31,6 +38,8 @@ describe("@unlocalhosted/browsergrad-primitives public surface", () => {
     expect(reference.decodeByteBpe(reference.encodeByteBpe("low", model), model)).toBe(
       "low",
     );
+    expect(createByteBpeReferenceModule().train_byte_bpe("low low", 258).merges)
+      .toBeInstanceOf(Array);
   });
 
   it("uses evaluation comparators without rubric/oracle vocabulary", () => {

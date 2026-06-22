@@ -28,7 +28,7 @@ export {
   serializeByteBpeModel,
   type ByteBpeModel,
   type ByteBpeOracleDefaults as ByteBpeReferenceDefaults,
-  type ByteBpeOracleModule as ByteBpeRuntimeAdapter,
+  type ByteBpeOracleModule as ByteBpeReferenceModule,
   type SerializedByteBpeModel,
   type StreamingGate,
   type StreamingGateOptions,
@@ -52,7 +52,7 @@ export function createByteBpeReference(
   return createByteBpeOracle(defaults);
 }
 
-export function createByteBpeRuntimeAdapter(
+export function createByteBpeReferenceModule(
   defaults: ByteBpeOracleDefaults = {},
 ): ByteBpeOracleModule {
   return createByteBpeOracleModule(defaults);

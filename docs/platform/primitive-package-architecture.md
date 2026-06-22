@@ -6,6 +6,8 @@ adapters that use those primitives for guided labs.
 `@unlocalhosted/browsergrad-primitives` is the canonical facade for small
 helpers. Leaf packages may remain as implementation shards for compatibility or
 release mechanics, but new public guidance should teach the facade first.
+See `docs/platform/package-consolidation-audit.md` for the current package
+classification.
 
 ## Keep In Packages
 
@@ -45,6 +47,8 @@ Use primitive names in public interfaces and profile oracle adapters:
 - `_bg_cpu_parallelism`, not `_bg_cs149_cpu_oracles`.
 - `_bg_data_cleaning`, not `_bg_cs336_data_oracles`.
 - `createByteBpeReference()` in public primitive code.
+- `createByteBpeReferenceModule()` when exposing a JSON-friendly reference
+  object to a profile.
 - Profile-local wrappers may translate camelCase primitive references into
   Python-safe snake_case or JSON-string methods, but those wrappers belong in
   runtime/profile glue, not the primitive package surface.
