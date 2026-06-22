@@ -174,6 +174,20 @@ __global__ void bad(int* x) {
   if (threadIdx.x < 1) { atomicAdd(x[0], 1); }
 }`));
     expect(badAtomicAddress.diagnostics.map((diagnostic) => diagnostic.code)).toContain("atomic-address-required");
+
+    const barrierExpression = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(float* x) {
+  int ok = __syncthreads();
+  if (threadIdx.x < 1) { x[0] = 1.0; }
+}`));
+    expect(barrierExpression.diagnostics.map((diagnostic) => diagnostic.code)).toContain("barrier-expression");
+
+    const barrierArity = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(float* x) {
+  __syncthreads(1);
+  if (threadIdx.x < 1) { x[0] = 1.0; }
+}`));
+    expect(barrierArity.diagnostics.map((diagnostic) => diagnostic.code)).toContain("invalid-call-arity");
   });
 
   it("rejects parser edge cases with clear errors", () => {

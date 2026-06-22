@@ -126,9 +126,11 @@ export function analyzeCudaLite(
           break;
         case "expr":
           if (isBarrierCall(statement.expression)) {
+            validateBarrierStatement(statement.expression, diagnostics);
             if (divergentDepth > 0) {
               diagnostics.push(error("divergent-barrier", "__syncthreads() cannot appear in divergent control flow", statement.span));
             }
+            break;
           } else {
             validateExpressionStatement(statement.expression, params, guardDepth, diagnostics);
           }
@@ -266,6 +268,9 @@ function validateCallExpression(
   }
 
   if (callName === "bg_subgroup_add") requiredFeatures.add("subgroups");
+  if (callName === "__syncthreads") {
+    diagnostics.push(error("barrier-expression", "__syncthreads() must be used as a standalone statement", expression.span));
+  }
   if (callName === "atomicAdd") {
     validateAtomicAdd(expression, scope, params, atomicParams, diagnostics, walkExpression);
     return { kind: "scalar" };
@@ -484,6 +489,15 @@ function validateExpressionStatement(
   }
 }
 
+function validateBarrierStatement(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  diagnostics: CudaLiteDiagnostic[],
+): void {
+  if (expression.args.length !== 0) {
+    diagnostics.push(error("invalid-call-arity", "__syncthreads expects 0 arguments", expression.span));
+  }
+}
+
 function collectSharedDeclarations(statements: readonly CudaLiteStatement[]): readonly CudaLiteVarDecl[] {
   const declarations: CudaLiteVarDecl[] = [];
   const walk = (items: readonly CudaLiteStatement[]): void => {
@@ -518,7 +532,7 @@ function expressionIsDivergent(
   return divergent;
 }
 
-function isBarrierCall(expression: CudaLiteExpression): boolean {
+function isBarrierCall(expression: CudaLiteExpression): expression is Extract<CudaLiteExpression, { kind: "call" }> {
   return expression.kind === "call" && expressionName(expression.callee) === "__syncthreads";
 }
 
