@@ -943,6 +943,31 @@ __global__ void syncOnly(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([9]);
   });
 
+  it("passes pointer-offset arguments into reference dynamic launches", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(float *out) {
+  if (threadIdx.x < 1) { out[0] = 7.0f; }
+}
+__global__ void parent(float *out) {
+  if (threadIdx.x < 1) {
+    dim3 grid(1);
+    dim3 block(1);
+    child<<<grid, block>>>(out + 1);
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array([0, 0]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([0, 7]);
+  });
+
   it("lowers named dynamic extern shared memory when launch metadata supplies its size", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void dynamicShared(float *x) {

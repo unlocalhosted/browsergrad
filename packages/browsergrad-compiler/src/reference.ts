@@ -507,6 +507,8 @@ function pointerArgumentValue(
   valueType: CudaLiteScalarType,
   context: ThreadContext,
 ): LocalValue {
+  const offset = pointerOffsetArgumentValue(arg, valueType, context);
+  if (offset) return offset;
   if (arg.kind === "identifier") {
     if (context.buffers.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "buffer", index: 0 } };
     const local = context.locals.get(arg.name);
@@ -516,6 +518,29 @@ function pointerArgumentValue(
   const value = evalExpression(arg, context);
   if (isPoolPointer(value)) return { ...value, valueType };
   throw compilerFailure("unsupported dynamic kernel pointer argument");
+}
+
+function pointerOffsetArgumentValue(
+  arg: CudaLiteExpression,
+  valueType: CudaLiteScalarType,
+  context: ThreadContext,
+): LocalValue | undefined {
+  if (arg.kind !== "binary" || (arg.operator !== "+" && arg.operator !== "-")) return undefined;
+  const left = pointerArgumentValue(arg.left, valueType, context);
+  const delta = evalNumber(arg.right, context) * (arg.operator === "-" ? -1 : 1);
+  if (isPoolPointer(left)) {
+    return { ...left, byteOffset: left.byteOffset + delta * 4, valueType };
+  }
+  if (typeof left !== "number" && "kind" in left && left.kind === "address") {
+    return {
+      kind: "address",
+      target: {
+        ...left.target,
+        index: (left.target.index ?? 0) + Math.trunc(delta),
+      },
+    };
+  }
+  return undefined;
 }
 
 function evalExpression(expression: CudaLiteExpression, context: ThreadContext): EvalValue {

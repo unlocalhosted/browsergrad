@@ -1070,6 +1070,10 @@ function validateNonCallExpression(
     case "binary": {
       const left = walkExpression(expression.left, scope);
       const right = walkExpression(expression.right, scope);
+      if ((expression.operator === "+" || expression.operator === "-") && (left.kind === "pointer" || left.kind === "pool-pointer")) {
+        validateScalarOperand(right, expression.right.span, diagnostics);
+        return left;
+      }
       validateScalarOperand(left, expression.left.span, diagnostics);
       validateScalarOperand(right, expression.right.span, diagnostics);
       return { kind: "scalar" };
