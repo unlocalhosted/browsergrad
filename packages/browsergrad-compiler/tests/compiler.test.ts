@@ -548,4 +548,35 @@ __global__ void atomic_count(int* x) {
     expect(compiled.wgsl).toContain("atomicAdd(&x[0], 1);");
     expect([...result.buffers.x as Int32Array]).toEqual([42]);
   });
+
+  it("supports CUDA integer atomic exchange and compare-swap", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void atomic_more(int* x, int* out) {
+  if (threadIdx.x == 0) {
+    out[0] = atomicExch(&x[0], 7);
+    out[1] = atomicCAS(&x[0], 7, 9);
+    out[2] = atomicMax(&x[1], 5);
+    out[3] = atomicMin(&x[1], 3);
+    out[4] = atomicSub(&x[1], 1);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Int32Array([2, 4]),
+          out: new Int32Array(5),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.x as Int32Array]).toEqual([9, 2]);
+    expect([...result.buffers.out as Int32Array]).toEqual([2, 7, 4, 5, 3]);
+    expect(compiled.wgsl).toContain("atomicExchange(&x[0], 7)");
+    expect(compiled.wgsl).toContain("atomicCompareExchangeWeak(&x[0], 7, 9).old_value");
+    expect(compiled.wgsl).toContain("atomicMax(&x[1], 5)");
+    expect(compiled.wgsl).toContain("atomicMin(&x[1], 3)");
+    expect(compiled.wgsl).toContain("atomicSub(&x[1], 1)");
+  });
 });

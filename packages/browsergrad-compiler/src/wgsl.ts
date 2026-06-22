@@ -293,20 +293,48 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return `${name}(${args.join(", ")})`;
     case "bg_subgroup_add":
       return `subgroupAdd(${args.join(", ")})`;
-    case "atomicAdd": {
+    case "atomicAdd":
+      return emitAtomicCall("atomicAdd", expression, context, args);
+    case "atomicSub":
+      return emitAtomicCall("atomicSub", expression, context, args);
+    case "atomicMin":
+      return emitAtomicCall("atomicMin", expression, context, args);
+    case "atomicMax":
+      return emitAtomicCall("atomicMax", expression, context, args);
+    case "atomicExch":
+      return emitAtomicCall("atomicExchange", expression, context, args);
+    case "atomicCAS": {
       const target = expression.args[0];
-      const value = expression.args[1];
-      if (target?.kind === "unary" && target.operator === "&" && value) {
-        return `atomicAdd(&${emitExpression(target.argument, context, "lvalue")}, ${emitExpression(value, context)})`;
+      const compare = expression.args[1];
+      const value = expression.args[2];
+      if (target?.kind === "unary" && target.operator === "&" && compare && value) {
+        return `atomicCompareExchangeWeak(&${emitExpression(target.argument, context, "lvalue")}, ${emitExpression(compare, context)}, ${emitExpression(value, context)}).old_value`;
       }
-      if (target?.kind === "identifier" && value) {
-        return `atomicAdd(&${target.name}[0], ${emitExpression(value, context)})`;
+      if (target?.kind === "identifier" && compare && value) {
+        return `atomicCompareExchangeWeak(&${target.name}[0], ${emitExpression(compare, context)}, ${emitExpression(value, context)}).old_value`;
       }
-      return `atomicAdd(${args.join(", ")})`;
+      return `atomicCompareExchangeWeak(${args.join(", ")}).old_value`;
     }
     default:
       return `${emitExpression(expression.callee, context)}(${args.join(", ")})`;
   }
+}
+
+function emitAtomicCall(
+  wgslName: string,
+  expression: CudaLiteCallExpression,
+  context: EmitContext,
+  args: readonly string[],
+): string {
+      const target = expression.args[0];
+      const value = expression.args[1];
+      if (target?.kind === "unary" && target.operator === "&" && value) {
+    return `${wgslName}(&${emitExpression(target.argument, context, "lvalue")}, ${emitExpression(value, context)})`;
+      }
+      if (target?.kind === "identifier" && value) {
+    return `${wgslName}(&${target.name}[0], ${emitExpression(value, context)})`;
+      }
+  return `${wgslName}(${args.join(", ")})`;
 }
 
 function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string {

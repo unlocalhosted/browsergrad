@@ -357,12 +357,29 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     : undefined;
   if (name === "printf") return 0;
   if (name === "atomicAdd") {
+    return evalAtomicReadModifyWrite(expression, context, (current, value) => current + value);
+  }
+  if (name === "atomicSub") {
+    return evalAtomicReadModifyWrite(expression, context, (current, value) => current - value);
+  }
+  if (name === "atomicMin") {
+    return evalAtomicReadModifyWrite(expression, context, (current, value) => Math.min(current, value));
+  }
+  if (name === "atomicMax") {
+    return evalAtomicReadModifyWrite(expression, context, (current, value) => Math.max(current, value));
+  }
+  if (name === "atomicExch") {
+    return evalAtomicReadModifyWrite(expression, context, (_current, value) => value);
+  }
+  if (name === "atomicCAS") {
     const first = expression.args[0];
-    if (!first) throw compilerFailure("atomicAdd expects target");
+    if (!first) throw compilerFailure("atomicCAS expects target");
     const target = first.kind === "unary" && first.operator === "&" ? first.argument : first;
     const lvalue = resolveLValue(target, context);
     const current = readLValue(lvalue, context);
-    writeLValue(lvalue, current + evalExpression(expression.args[1]!, context), context);
+    const compare = evalExpression(expression.args[1]!, context);
+    const value = evalExpression(expression.args[2]!, context);
+    if (Math.trunc(current) === Math.trunc(compare)) writeLValue(lvalue, value, context);
     return current;
   }
   const args = expression.args.map((arg) => evalExpression(arg, context));
@@ -384,6 +401,21 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     default:
       throw compilerFailure(`unsupported call '${name ?? "<expr>"}'`);
   }
+}
+
+function evalAtomicReadModifyWrite(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: ThreadContext,
+  op: (current: number, value: number) => number,
+): number {
+  const first = expression.args[0];
+  if (!first) throw compilerFailure("atomic operation expects target");
+  const target = first.kind === "unary" && first.operator === "&" ? first.argument : first;
+  const lvalue = resolveLValue(target, context);
+  const current = readLValue(lvalue, context);
+  const value = evalExpression(expression.args[1]!, context);
+  writeLValue(lvalue, op(current, value), context);
+  return current;
 }
 
 function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): LValue {

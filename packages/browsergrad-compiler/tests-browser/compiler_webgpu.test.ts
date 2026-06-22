@@ -132,6 +132,30 @@ __global__ void constant_scale(const float* x, float* y, int n) {
     expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
   });
 
+  it("runs compiled integer CAS atomics through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void atomic_mark(int* visited, int* out) {
+  int idx = threadIdx.x;
+  if (idx < 2) {
+    int old = atomicCAS(&visited[0], 0, idx + 1);
+    out[idx] = old;
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        visited: new Int32Array([0]),
+        out: new Int32Array(2),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.visited as Int32Array][0]).toBeGreaterThan(0);
+    expect([...actual.buffers.out as Int32Array].filter((value) => value === 0)).toHaveLength(1);
+  });
+
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

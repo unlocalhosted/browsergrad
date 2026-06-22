@@ -26,6 +26,11 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["max", [2, 2]],
   ["bg_subgroup_add", [1, 1]],
   ["atomicAdd", [2, 2]],
+  ["atomicSub", [2, 2]],
+  ["atomicMin", [2, 2]],
+  ["atomicMax", [2, 2]],
+  ["atomicExch", [2, 2]],
+  ["atomicCAS", [3, 3]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
 ]);
 const WGSL_RESERVED_WORDS = new Set([
@@ -368,8 +373,8 @@ function validateCallExpression(
     }
     return { kind: "scalar" };
   }
-  if (callName === "atomicAdd") {
-    validateAtomicAdd(expression, scope, params, atomicParams, diagnostics, walkExpression);
+  if (isAtomicBuiltin(callName)) {
+    validateAtomicBuiltin(expression, scope, params, atomicParams, diagnostics, walkExpression);
     return { kind: "scalar" };
   }
 
@@ -380,7 +385,7 @@ function validateCallExpression(
   return { kind: "scalar" };
 }
 
-function validateAtomicAdd(
+function validateAtomicBuiltin(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
   scope: Scope,
   params: ReadonlyMap<string, CudaLiteParam>,
@@ -389,7 +394,6 @@ function validateAtomicAdd(
   walkExpression: ExpressionWalker,
 ): void {
   const target = expression.args[0];
-  const addend = expression.args[1];
   const targetExpression = atomicTargetExpression(target);
   if (!targetExpression) {
     diagnostics.push(error("atomic-address-required", "atomicAdd first argument must be a pointer parameter or address like &x[i]", expression.span));
@@ -411,10 +415,18 @@ function validateAtomicAdd(
       }
     }
   }
-  if (addend) {
-    validateScalarOperand(walkExpression(addend, scope), addend.span, diagnostics);
+  for (const arg of expression.args.slice(1)) {
+    validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
   }
-  for (const extra of expression.args.slice(2)) walkExpression(extra, scope);
+}
+
+function isAtomicBuiltin(callName: string): boolean {
+  return callName === "atomicAdd" ||
+    callName === "atomicSub" ||
+    callName === "atomicMin" ||
+    callName === "atomicMax" ||
+    callName === "atomicExch" ||
+    callName === "atomicCAS";
 }
 
 function atomicTargetExpression(
