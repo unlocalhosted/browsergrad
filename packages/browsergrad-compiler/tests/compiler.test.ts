@@ -539,6 +539,34 @@ __global__ void multiplyFreqDomain(cufftComplex *A, const cufftComplex *B, int N
     expect([...result.buffers.A as Float32Array]).toEqual([-7, 16, -11, 52]);
   });
 
+  it("lowers supported inline PTX fma statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void asmFma(const float *A, const float *B, float *out) {
+  int idx = threadIdx.x;
+  float sum = out[idx];
+  asm volatile (
+    "fma.rn.f32 %0, %1, %2, %0;\\n\\t"
+    : "+f"(sum)
+    : "f"(A[idx]), "f"(B[idx])
+  );
+  out[idx] = sum;
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          A: new Float32Array([2, 3]),
+          B: new Float32Array([4, 5]),
+          out: new Float32Array([10, 20]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("sum = fma(A[idx], B[idx], sum);");
+    expect([...result.buffers.out as Float32Array]).toEqual([18, 35]);
+  });
+
   it("parses dynamic extern shared memory as a clear unsupported diagnostic", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void dynamicShared(float *x) {

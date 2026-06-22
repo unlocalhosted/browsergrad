@@ -2,6 +2,7 @@ import { tokenizeCudaLite, type Token } from "./lexer.js";
 import {
   CudaLiteCompilerError,
   type CudaLiteAssignmentExpression,
+  type CudaLiteAsmStatement,
   type CudaLiteBinaryExpression,
   type CudaLiteCastExpression,
   type CudaLiteCooperativeGroupDecl,
@@ -233,6 +234,7 @@ class Parser {
     if (this.match("dim3")) return [this.parseDim3Decl()];
     if (this.startsCooperativeGroupDecl()) return [this.parseCooperativeGroupDecl()];
     if (this.startsKernelLaunch()) return [this.parseKernelLaunch()];
+    if (this.match("asm")) return [this.parseAsmStatement()];
     if (this.startsVarDecl()) return this.parseVarDeclList(true);
     const expression = this.parseExpression();
     const end = this.expect(";");
@@ -356,6 +358,38 @@ class Parser {
       callee: name.value,
       span: mergeSpans(name.span, end),
     };
+  }
+
+  private parseAsmStatement(): CudaLiteAsmStatement {
+    const start = this.expect("asm").span;
+    this.consumeIf("volatile");
+    this.expect("(");
+    const template = this.expectString("inline assembly template");
+    this.expect(":");
+    const output = this.parseAsmOperand();
+    this.expect(":");
+    const inputs: CudaLiteExpression[] = [];
+    if (!this.match(")")) {
+      do inputs.push(this.parseAsmOperand());
+      while (this.consumeIf(","));
+    }
+    this.expect(")");
+    const end = this.expect(";").span;
+    return {
+      kind: "asm",
+      template: template.value.slice(1, -1),
+      output,
+      inputs,
+      span: mergeSpans(start, end),
+    };
+  }
+
+  private parseAsmOperand(): CudaLiteExpression {
+    this.expectString("inline assembly constraint");
+    this.expect("(");
+    const expression = this.parseExpression();
+    this.expect(")");
+    return expression;
   }
 
   private parseBodyAsStatements(): readonly CudaLiteStatement[] {
@@ -617,6 +651,12 @@ class Parser {
   private expectIdentifier(label: string): Token {
     const token = this.peek();
     if (token.kind !== "identifier") this.fail(`expected ${label}`, token.span);
+    return this.advance();
+  }
+
+  private expectString(label: string): Token {
+    const token = this.peek();
+    if (token.kind !== "string") this.fail(`expected ${label}`, token.span);
     return this.advance();
   }
 

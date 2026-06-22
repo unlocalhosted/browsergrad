@@ -215,6 +215,9 @@ function* execStatements(
         break;
       case "kernel-launch":
         break;
+      case "asm":
+        execInlineAsm(statement, context);
+        break;
       case "expr":
         if (isBarrier(statement.expression)) {
           yield "barrier";
@@ -251,6 +254,23 @@ function* execStatements(
         return { kind: "continue" };
     }
   }
+}
+
+function execInlineAsm(
+  statement: Extract<CudaLiteStatement, { kind: "asm" }>,
+  context: ThreadContext,
+): void {
+  if (!/\bfma\.rn\.f32\b/u.test(statement.template)) {
+    throw compilerFailure("unsupported inline asm template");
+  }
+  if (statement.inputs.length !== 2) {
+    throw compilerFailure("fma.rn.f32 inline asm expects two inputs");
+  }
+  const target = resolveLValue(statement.output, context);
+  const current = valueAsNumber(readLValue(target, context), target.name);
+  const a = evalNumber(statement.inputs[0]!, context);
+  const b = evalNumber(statement.inputs[1]!, context);
+  writeLValue(target, current + a * b, context);
 }
 
 function execVar(statement: CudaLiteVarDecl, context: ThreadContext): void {

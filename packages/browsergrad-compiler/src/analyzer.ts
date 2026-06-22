@@ -236,6 +236,9 @@ export function analyzeCudaLite(
             statement.span,
           ));
           break;
+        case "asm":
+          validateInlineAsmStatement(statement, scope, diagnostics, walkExpression);
+          break;
         case "expr":
           if (isBarrierCall(statement.expression)) {
             validateBarrierStatement(statement.expression, diagnostics);
@@ -479,6 +482,25 @@ function isSupportedSharedPointerAlias(statement: CudaLiteVarDecl, scope: Scope)
 }
 
 type ExpressionWalker = (expression: CudaLiteExpression, scope: Scope) => ExpressionInfo;
+
+function validateInlineAsmStatement(
+  statement: Extract<CudaLiteStatement, { kind: "asm" }>,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  if (!isInlineAsmFma(statement.template)) {
+    diagnostics.push(error("unsupported-inline-asm", "only fma.rn.f32 inline PTX is supported in CUDA-lite v0", statement.span));
+  }
+  validateLValueExpression(statement.output, scope, diagnostics, walkExpression);
+  validateScalarOperand(walkExpression(statement.output, scope), statement.output.span, diagnostics);
+  if (statement.inputs.length !== 2) {
+    diagnostics.push(error("invalid-inline-asm-operands", "fma.rn.f32 inline PTX expects exactly two input operands", statement.span));
+  }
+  for (const input of statement.inputs) {
+    validateScalarOperand(walkExpression(input, scope), input.span, diagnostics);
+  }
+}
 
 function validateCallExpression(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
@@ -1028,6 +1050,10 @@ function validateDeclaredSymbolName(
   if (WGSL_RESERVED_WORDS.has(name)) {
     diagnostics.push(error("reserved-symbol", `symbol '${name}' is reserved by WGSL output`, span));
   }
+}
+
+function isInlineAsmFma(template: string): boolean {
+  return /\bfma\.rn\.f32\b/u.test(template);
 }
 
 function validateSideEffectPlacement(

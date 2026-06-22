@@ -243,6 +243,8 @@ function emitStatement(
       return [];
     case "kernel-launch":
       return [`${prefix}// device-side launch omitted: ${statement.callee}<<<...>>>`];
+    case "asm":
+      return [`${prefix}${emitInlineAsmStatement(statement, context)};`];
     case "expr":
       if (isNoopCall(statement.expression)) return [`${prefix}// printf omitted: WebGPU has no device stdout`];
       if (isBarrierCall(statement.expression)) return [`${prefix}workgroupBarrier();`];
@@ -275,6 +277,17 @@ function emitStatement(
     case "continue":
       return [`${prefix}continue;`];
   }
+}
+
+function emitInlineAsmStatement(
+  statement: Extract<CudaLiteStatement, { kind: "asm" }>,
+  context: EmitContext,
+): string {
+  if (!/\bfma\.rn\.f32\b/u.test(statement.template) || statement.inputs.length !== 2) {
+    throw featureError("unsupported-inline-asm", "only fma.rn.f32 inline PTX is supported in WGSL output");
+  }
+  const target = emitExpression(statement.output, context);
+  return `${target} = fma(${emitExpression(statement.inputs[0]!, context)}, ${emitExpression(statement.inputs[1]!, context)}, ${target})`;
 }
 
 function emitForVar(statement: CudaLiteVarDecl, context: EmitContext): string {

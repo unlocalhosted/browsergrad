@@ -57,6 +57,19 @@ __global__ void multiplyFreqDomain(cufftComplex *A, const cufftComplex *B, int N
 }
 `;
 
+const ASM_FMA = `
+__global__ void asmFma(const float *A, const float *B, float *out) {
+  int idx = threadIdx.x;
+  float sum = out[idx];
+  asm volatile (
+    "fma.rn.f32 %0, %1, %2, %0;\\n\\t"
+    : "+f"(sum)
+    : "f"(A[idx]), "f"(B[idx])
+  );
+  out[idx] = sum;
+}
+`;
+
 async function checkDevice(): Promise<DeviceCheck> {
   if (typeof navigator === "undefined" || !("gpu" in navigator)) {
     return { available: false, reason: "navigator.gpu undefined" };
@@ -248,6 +261,23 @@ __global__ void atomic_exchange(float* x, float* out) {
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
     expect([...actual.buffers.A as Float32Array]).toEqual([...expected.buffers.A as Float32Array]);
+  });
+
+  it("runs supported inline PTX fma through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(ASM_FMA, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        A: new Float32Array([2, 3]),
+        B: new Float32Array([4, 5]),
+        out: new Float32Array([10, 20]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {

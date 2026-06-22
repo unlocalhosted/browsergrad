@@ -87,6 +87,7 @@ export type CudaLiteStatement =
   | CudaLiteDim3Decl
   | CudaLiteCooperativeGroupDecl
   | CudaLiteKernelLaunchStatement
+  | CudaLiteAsmStatement
   | CudaLiteIfStatement
   | CudaLiteForStatement
   | CudaLiteExprStatement
@@ -124,6 +125,14 @@ export interface CudaLiteCooperativeGroupDecl {
 export interface CudaLiteKernelLaunchStatement {
   readonly kind: "kernel-launch";
   readonly callee: string;
+  readonly span: SourceSpan;
+}
+
+export interface CudaLiteAsmStatement {
+  readonly kind: "asm";
+  readonly template: string;
+  readonly output: CudaLiteExpression;
+  readonly inputs: readonly CudaLiteExpression[];
   readonly span: SourceSpan;
 }
 
