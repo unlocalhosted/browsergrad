@@ -68,6 +68,9 @@ small supported subset, lowers into Kernel IR, emits WGSL, and runs both a
 lockstep CPU reference and real WebGPU dispatch. This is the default path for
 browser-native GPU programming. A HipScript-style LLVM backend remains a future
 power backend, not the first dependency.
+The compiler package includes SAXPY, guarded-map, and tiled-matmul examples;
+profiles should declare `cuda-lite-compiler` when they depend on this authoring
+path rather than handwritten WGSL.
 
 This core should be independent from Pyodide. Python assignments may call it
 through registered JS modules, but JS/WGSL labs should run without Python.

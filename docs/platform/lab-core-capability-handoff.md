@@ -149,6 +149,7 @@ Capability names are strings. Keep them descriptive and reusable:
 | `torch-compat` | BrowserGrad PyTorch-shaped teaching surface is sufficient. |
 | `webgpu` | Browser WebGPU adapter is available. |
 | `wgsl-kernel` | Lab can run WGSL kernels directly. |
+| `cuda-lite-compiler` | Lab can compile BrowserGrad CUDA-lite source into Kernel IR/WGSL and run CPU reference plus WebGPU dispatch. |
 | `flash-attention-oracle` | FlashAttention output, log-sum-exp, and gradients are checked by a deterministic oracle. |
 | `attention-oracle` | Scaled-dot-product attention output and memory behavior are checked by deterministic JS oracles. |
 | `cuda-compatible-subset` | Lab targets a BrowserGrad CUDA-like educational subset. |
