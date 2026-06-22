@@ -10,6 +10,7 @@ import { analyzeCudaLite, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js"
 import { createCudaLoweringPlan } from "./compatibility.js";
 import { createCudaHostDynamicLaunchPlan } from "./dynamic_launch.js";
 import { parseCudaLite } from "./parser.js";
+import { poolDataName, poolOffsetName } from "./pool_bindings.js";
 import { runCompiledKernelReference } from "./reference.js";
 import { createCudaGridSyncPhasePlan, createCudaRuntimePlan } from "./runtime_plan.js";
 import { emitKernelIrWgsl } from "./wgsl.js";
@@ -354,14 +355,6 @@ function constantBufferInputs(
 
 function isDevicePoolParam(param: { readonly pointer: boolean; readonly valueType: string }): boolean {
   return param.pointer && param.valueType === "devicepool";
-}
-
-function poolDataName(name: string): string {
-  return `${name}_pool`;
-}
-
-function poolOffsetName(name: string): string {
-  return `${name}_offset`;
 }
 
 function float16Bits(value: number): number {

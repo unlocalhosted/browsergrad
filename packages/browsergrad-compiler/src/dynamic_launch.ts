@@ -1,6 +1,7 @@
 import type { WgslTypedArray } from "@unlocalhosted/browsergrad-kernels";
 import { walkCudaLiteExpressions } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
+import { poolDataName, poolOffsetName } from "./pool_bindings.js";
 import { createCudaRuntimePlan } from "./runtime_plan.js";
 import type {
   CompiledCudaLiteKernel,
@@ -34,6 +35,7 @@ interface HostLiftedLaunch {
 }
 
 type HostEvalValue = number | readonly [number, number, number];
+type MemoryPoolInput = NonNullable<CompiledKernelInput["memoryPools"]>[string];
 
 export function createCudaHostDynamicLaunchPlan(
   compiled: CompiledCudaLiteKernel,
@@ -207,6 +209,7 @@ function createChildKernelInput(
 ): { readonly input: CompiledKernelInput; readonly storageAliases: Readonly<Record<string, string>> } | undefined {
   const scalars: Record<string, number> = {};
   const buffers: Record<string, WgslTypedArray> = {};
+  const memoryPools: Record<string, MemoryPoolInput> = {};
   const storageAliases: Record<string, string> = {};
   for (const [index, param] of params.entries()) {
     const arg = statement.args[index];
@@ -214,6 +217,16 @@ function createChildKernelInput(
     if (param.pointer) {
       const root = arg.kind === "identifier" ? rootIdentifier(arg) : undefined;
       if (!root) return undefined;
+      if (param.valueType === "devicepool") {
+        const pool = input.memoryPools?.[root];
+        if (!pool) return undefined;
+        memoryPools[param.name] = pool;
+        if (root !== param.name) {
+          storageAliases[poolDataName(param.name)] = poolDataName(root);
+          storageAliases[poolOffsetName(param.name)] = poolOffsetName(root);
+        }
+        continue;
+      }
       const buffer = input.buffers[root];
       if (!buffer) return undefined;
       buffers[param.name] = buffer;
@@ -228,6 +241,7 @@ function createChildKernelInput(
     input: {
       ...input,
       buffers,
+      memoryPools: { ...input.memoryPools, ...memoryPools },
       scalars: { ...input.scalars, ...scalars },
     },
     storageAliases,

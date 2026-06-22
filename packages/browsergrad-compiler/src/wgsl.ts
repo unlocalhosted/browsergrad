@@ -5,6 +5,7 @@ import {
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
+import { poolDataName, poolOffsetName } from "./pool_bindings.js";
 import {
   CudaLiteCompilerError,
   type CudaLiteAssignmentExpression,
@@ -1360,14 +1361,6 @@ function isDevicePoolParam(param: CudaLiteParam): boolean {
 
 function isEmittedPointerVar(statement: CudaLiteVarDecl, context: EmitContext): boolean {
   return statement.valueType === "voidptr" || context.poolPointerFor(statement.name) !== undefined;
-}
-
-function poolDataName(name: string): string {
-  return `${name}_pool`;
-}
-
-function poolOffsetName(name: string): string {
-  return `${name}_offset`;
 }
 
 function rawPoolHelperName(baseName: string, offsetName: string): string {

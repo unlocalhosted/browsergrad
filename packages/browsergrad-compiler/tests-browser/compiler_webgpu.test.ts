@@ -303,6 +303,43 @@ __global__ void parent(float *x, int n) {
     expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
   });
 
+  it("runs host-lifted dynamic child launch with DevicePool alias through WebGPU sequence", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void child(DevicePool *childPool, float *dst) {
+  if (threadIdx.x < 1) {
+    float *ptr = (float*) deviceAllocate(childPool, sizeof(float));
+    if (ptr != nullptr) {
+      ptr[0] = 6.0f;
+      dst[0] = ptr[0];
+    }
+  }
+}
+__global__ void parent(DevicePool *pool, float *out) {
+  if (threadIdx.x < 1) {
+    dim3 grid(1);
+    dim3 block(1);
+    child<<<grid, block>>>(pool, out);
+    cudaDeviceSynchronize();
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: { out: new Float32Array(1) },
+      memoryPools: { pool: { data: new Uint32Array(1), offset: new Uint32Array([0]) } },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+    expect([...actual.buffers.pool as Uint32Array]).toEqual([...expected.buffers.pool as Uint32Array]);
+  });
+
   it("runs ordered host-lifted dynamic child launches through WebGPU sequence", async () => {
     if (!deviceCheck.available) return;
     const source = `

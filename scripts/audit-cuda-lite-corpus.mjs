@@ -14,6 +14,7 @@ const compilerUrl = pathToFileURL(path.resolve("packages/browsergrad-compiler/di
 const {
   compileCudaLiteKernel,
   createCudaGridSyncPhasePlan,
+  createCudaHostDynamicLaunchPlan,
   createCudaRuntimePlan,
   describeCudaDiagnostic,
 } = await import(compilerUrl);
@@ -93,6 +94,7 @@ const summary = {
   ok: results.length - failures.length,
   webGpuSingleDispatchOk: results.length - failures.length,
   webGpuLiftedOk: failures.filter((failure) => failure.webGpuLiftOk).length,
+  hostDynamicLiftableOk: failures.filter((failure) => failure.webGpuLiftKind === "host-dynamic-launches").length,
   webGpuTotalOk: results.length - failures.length + failures.filter((failure) => failure.webGpuLiftOk).length,
   fail: failures.length,
   referenceFallbackOk: failures.filter((failure) => failure.referenceOk).length,
@@ -138,6 +140,12 @@ function webGpuLiftKindFor(compiled) {
   const phasePlan = createCudaGridSyncPhasePlan(compiled.ir);
   if (phasePlan.supported && phasePlan.modules.length > 1) return "grid-sync-phases";
   const runtimePlan = createCudaRuntimePlan(compiled);
+  const dynamicPlan = createCudaHostDynamicLaunchPlan(
+    compiled,
+    syntheticInputFor(compiled),
+    { gridDim: [1, 1, 1], blockDim: compiled.ir.workgroupSize },
+  );
+  if (dynamicPlan.supported && hostDynamicPlanCompiles(compiled, dynamicPlan)) return "host-dynamic-launches";
   if (
     runtimePlan.operations.length > 0 &&
     runtimePlan.operations.every((operation) => operation.kind === "device-sync")
@@ -145,6 +153,61 @@ function webGpuLiftKindFor(compiled) {
     return "device-sync-noop";
   }
   return undefined;
+}
+
+function hostDynamicPlanCompiles(parentCompiled, dynamicPlan) {
+  try {
+    for (const launch of dynamicPlan.launches) {
+      const childCompiled = compileCudaLiteKernel(parentCompiled.ast.source, {
+        kernelName: launch.kernel.name,
+        features: { "shader-f16": true, subgroups: true },
+        workgroupSize: launch.blockDim,
+        dynamicSharedMemory: inferDynamicSharedMemory(parentCompiled.ast.source),
+      });
+      const childRuntime = createCudaRuntimePlan(childCompiled);
+      if (!childRuntime.operations.every((operation) => operation.kind === "device-sync")) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function syntheticInputFor(compiled) {
+  const scalars = {};
+  const buffers = {};
+  const constants = {};
+  const memoryPools = {};
+  for (const param of compiled.ir.params) {
+    if (param.pointer) {
+      if (param.valueType === "devicepool") {
+        memoryPools[param.name] = { data: new Uint32Array(4096), offset: new Uint32Array([0]) };
+      } else {
+        buffers[param.name] = syntheticBufferForType(param.valueType);
+      }
+    } else {
+      scalars[param.name] = syntheticScalarForName(param.name);
+    }
+  }
+  for (const constant of compiled.ir.constants) {
+    constants[constant.name] = constant.dimensions.length === 0
+      ? syntheticScalarForName(constant.name)
+      : syntheticBufferForType(constant.valueType);
+  }
+  return { buffers, scalars, constants, memoryPools };
+}
+
+function syntheticBufferForType(type) {
+  if (type === "int") return new Int32Array(4096);
+  if (type === "uint" || type === "voidptr") return new Uint32Array(4096);
+  return new Float32Array(4096);
+}
+
+function syntheticScalarForName(name) {
+  if (/^(?:n|N|num|count|length|totalLen|frontierSize|numSamples|totalThreads|poolSize)$/u.test(name)) return 1024;
+  if (/^(?:threads|threadsPerBlock|blockSize)$/u.test(name)) return 256;
+  if (/^(?:blocks|blocksPerGrid|numBlocks)$/u.test(name)) return 4;
+  return 1;
 }
 
 function listFiles(root, prefix = "") {

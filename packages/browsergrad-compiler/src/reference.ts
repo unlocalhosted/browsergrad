@@ -515,6 +515,7 @@ function pointerArgumentValue(
   }
   if (arg.kind === "identifier") {
     if (context.buffers.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "buffer", index: 0 } };
+    if (context.memoryPools.has(arg.name)) return { kind: "pool-pointer", poolName: arg.name, byteOffset: 0, valueType };
     const local = context.locals.get(arg.name);
     if (isPoolPointer(local)) return { ...local, valueType };
     if (local && typeof local !== "number") return local;
@@ -674,7 +675,10 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
       return valueAsNumber(value, expression.name);
     }
     case "cast":
-      if (expression.pointer) return evalExpression(expression.expression, context);
+      if (expression.pointer) {
+        const value = evalExpression(expression.expression, context);
+        return isPoolPointer(value) ? { ...value, valueType: expression.valueType } : value;
+      }
       return castNumber(expression.valueType, evalNumber(expression.expression, context));
     case "member": {
       const object = readMemberObject(expression.object, context);
@@ -890,7 +894,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       }
       return { kind: "pool-pointer", poolName: baseRef.name, byteOffset: oldOffset, rawBuffer: true };
     }
-    const poolName = poolNameFromAllocatorArg(expression.args[0]);
+    const poolName = poolNameFromAllocatorArg(expression.args[0], context);
     if (!poolName) throw compilerFailure(`${name} expects DevicePool* argument`);
     const pool = context.memoryPools.get(poolName);
     if (!pool) throw compilerFailure(`missing memory pool '${poolName}'`);
@@ -1003,8 +1007,12 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   }
 }
 
-function poolNameFromAllocatorArg(expression: CudaLiteExpression | undefined): string | undefined {
-  if (expression?.kind === "identifier") return expression.name;
+function poolNameFromAllocatorArg(expression: CudaLiteExpression | undefined, context: ThreadContext): string | undefined {
+  if (expression?.kind === "identifier") {
+    const local = context.locals.get(expression.name);
+    if (isPoolPointer(local)) return local.poolName;
+    return expression.name;
+  }
   if (expression?.kind === "unary" && expression.operator === "&" && expression.argument.kind === "identifier") {
     return expression.argument.name;
   }

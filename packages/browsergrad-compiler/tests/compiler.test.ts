@@ -1103,6 +1103,55 @@ __global__ void parent(float *x, int n) {
     });
   });
 
+  it("plans host-liftable dynamic launches with DevicePool aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(DevicePool *childPool, float *dst) {
+  if (threadIdx.x < 1) {
+    float *ptr = (float*) deviceAllocate(childPool, sizeof(float));
+    if (ptr != nullptr) {
+      ptr[0] = 6.0f;
+      dst[0] = ptr[0];
+    }
+  }
+}
+__global__ void parent(DevicePool *pool, float *out) {
+  if (threadIdx.x < 1) {
+    dim3 grid(1);
+    dim3 block(1);
+    child<<<grid, block>>>(pool, out);
+    cudaDeviceSynchronize();
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const pool = { data: new Uint32Array(1), offset: new Uint32Array([0]) };
+    const plan = createCudaHostDynamicLaunchPlan(
+      compiled,
+      { buffers: { out: new Float32Array(1) }, memoryPools: { pool } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(plan.supported).toBe(true);
+    expect(plan.launches[0]).toMatchObject({
+      storageAliases: {
+        childPool_pool: "pool_pool",
+        childPool_offset: "pool_offset",
+        dst: "out",
+      },
+    });
+    expect(plan.launches[0]?.input.memoryPools?.childPool).toBe(pool);
+
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) }, memoryPools: { pool } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    expect([...result.buffers.out as Float32Array]).toEqual([6]);
+    expect([...result.buffers.pool as Uint32Array]).toEqual([floatBits(6)]);
+  });
+
   it("plans multiple ordered host-liftable dynamic launches", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void addOne(float *dst, int n) {
