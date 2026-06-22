@@ -45,6 +45,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "bench": "pnpm run build && node ../../scripts/benchmark-cuda-lite-compiler.mjs",
+    "bench:browser": "pnpm run build && node ../../scripts/benchmark-cuda-lite-webgpu.mjs",
     "test:watch": "vitest",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:browser:open": "vitest --config vitest.browser.config.ts --watch --browser.headless=false",
@@ -63,6 +64,7 @@
     "oxlint": "^1.0.0",
     "playwright": "^1.60.0",
     "typescript": "~6.0.0",
+    "vite": "^8.0.14",
     "vitest": "^4.0.0"
   },
   "publishConfig": {

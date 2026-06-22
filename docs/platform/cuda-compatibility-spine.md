@@ -103,4 +103,5 @@ Performance gate:
   numbers as regression evidence, not universal pass/fail thresholds.
 - Browser/WebGPU hot-loop perf should compare one-shot execution against
   `prepareCompiledKernelWebGpu()` over resident buffers. Keep this as measured
-  evidence, not prose claims.
+  evidence, not prose claims. Run:
+  `pnpm --filter @unlocalhosted/browsergrad-compiler bench:browser -- --markdown /tmp/bg-cuda-lite-webgpu-bench.md`.

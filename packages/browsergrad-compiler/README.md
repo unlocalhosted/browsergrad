@@ -213,9 +213,14 @@ the command instead of trusting that rerun.
 
 ```bash
 pnpm --filter @unlocalhosted/browsergrad-compiler bench -- --markdown /tmp/bg-cuda-lite-bench.md
+pnpm --filter @unlocalhosted/browsergrad-compiler bench:browser -- --markdown /tmp/bg-cuda-lite-webgpu-bench.md
 ```
 
 The harness emits stable JSON timing for compile, CPU reference, dynamic-launch
 planning, and peer-copy planning paths. It is data-only: no fixed threshold is
 portable across laptops, browsers, and CI runners. Use median/p95 deltas across
 commits to catch regressions before promoting platform perf rubrics.
+The browser harness launches Chromium through Playwright and compares one-shot
+resident-buffer dispatch against `prepareCompiledKernelWebGpu()` hot-loop
+dispatch. Pass `--require-webgpu` when CI should fail instead of reporting a
+skipped WebGPU bench.
