@@ -75,6 +75,25 @@ export {
   type DirectDispatchResult,
 } from "./runner.js";
 
+export {
+  defineWgslKernelProgram,
+  detectKernelFeatures,
+  runWgslKernelProgram,
+  type KernelFeatureSet,
+  type WgslKernelBinding,
+  type WgslKernelBindingInput,
+  type WgslKernelLaunch,
+  type WgslKernelProgram,
+  type WgslKernelProgramInput,
+  type WgslKernelRunInput,
+  type WgslKernelRunResult,
+  type WgslStorageAccess,
+  type WgslStorageBindingInput,
+  type WgslTypedArray,
+  type WgslUniformBindingInput,
+  type WgslValueType,
+} from "./wgsl_program.js";
+
 export { matmulDirect } from "./kernels/matmul.js";
 export { matmulTiledDirect, matmulTiled } from "./kernels/matmul_tiled.js";
 export {
