@@ -174,6 +174,11 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   messages, missing content, selected capabilities, cache strategy, and
   external-runner state. This is the generic Crafting Attention launch-panel
   contract.
+- Verified launch-handoff guarantee:
+  `createVerifiedAssignmentPlatformHandoff(profile, report, contents?)` adds
+  dataset hash verification to the same launch-panel contract and blocks runner
+  actions with `nextAction: "verify-content"` when declared hashes are invalid,
+  unsupported, missing, or mismatched.
 - Benchmark-matrix guarantee:
   `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
   turns many profile reports into platform-ready rows with readiness, runner,
@@ -389,6 +394,9 @@ curriculum profiles and handoff docs absorb course-specific adapters.
 - Later RED test: platform handoff helper returns a deterministic `nextAction`
   and renderable messages for missing-content benchmark profiles, then switches
   to the concrete runner action once required content is present.
+- Later RED test: verified platform handoff blocks launch when present fixture
+  contents fail declared dataset hash checks, including benchmark profiles with
+  placeholder hashes.
 - Run focused package tests:
   - `pnpm --filter @unlocalhosted/browsergrad-runtime test -- assignment`
   - `pnpm --filter @unlocalhosted/browsergrad-runtime typecheck`

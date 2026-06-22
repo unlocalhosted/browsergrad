@@ -49,6 +49,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   preflight plus mount readiness into one launch-panel object with `nextAction`,
   `launchable`, learner-facing messages, mount gaps, route, selected
   capabilities, cache strategies, and external-runner requirement.
+- `createVerifiedAssignmentPlatformHandoff(profile, report, contents?)` adds
+  dataset hash checks to that launch-panel handoff and blocks launch with
+  `nextAction: "verify-content"` when declared fixture hashes are missing,
+  invalid, unsupported, or mismatched.
 - `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
   batch-flattens profile preflight into platform-ready benchmark rows with
   readiness, route, capability, mount-content, cache-strategy, and external

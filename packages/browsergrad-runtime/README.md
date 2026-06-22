@@ -181,6 +181,7 @@ import {
   createAssignmentCapabilityCatalog,
   createAssignmentBenchmarkPreflightMatrix,
   createAssignmentPlatformHandoff,
+  createVerifiedAssignmentPlatformHandoff,
   createVerifiedAssignmentBenchmarkPreflightMatrix,
   createAssignmentDatasetCachePlan,
   createAssignmentExternalRunnerRequest,
@@ -212,6 +213,14 @@ const report = createAssignmentPreflightReport(parsed.profile, environment);
 const handoff = createAssignmentPlatformHandoff(parsed.profile, report, {
   files: { [report.plan.files.rubricPath]: rubricSource },
 });
+const verifiedHandoff = await createVerifiedAssignmentPlatformHandoff(
+  parsed.profile,
+  report,
+  {
+    files: { [report.plan.files.rubricPath]: rubricSource },
+    datasets: { tiny: tinyFixtureText },
+  },
+);
 const matrix = createAssignmentBenchmarkPreflightMatrix(
   [parsed.profile],
   environment,
@@ -245,6 +254,7 @@ console.log(plan.session.packages, plan.files.rubricPath, plan.execution.allowed
 console.log(readiness.status, rubricKind, mounts.files, mounts.datasets);
 console.log(route.target, report.runnerRoute.target, report.mountPlan.files, datasetCache.datasets);
 console.log(handoff.nextAction, handoff.launchable, handoff.messages);
+console.log(verifiedHandoff.nextAction, verifiedHandoff.hashOk, verifiedHandoff.hashChecks);
 console.log(matrix.rows[0]?.readinessStatus, matrix.rows[0]?.contentOk);
 console.log(matrix.rows[0]?.gates.map((gate) => [gate.name, gate.status, gate.selectedCapabilities]));
 console.log(verifiedMatrix.rows[0]?.hashOk, verifiedMatrix.rows[0]?.hashChecks);
@@ -321,9 +331,14 @@ code.
 `createAssignmentPlatformHandoff(profile, report, contents?)` turns that report
 plus currently available file/dataset contents into the exact launch-panel
 decision: `install-capabilities`, `mount-content`, `run-pyodide`,
-`run-javascript`, `request-external-runner`, or `unsupported`. It also carries
-missing files/datasets, selected capabilities, cache strategies, and concise
-messages so platform UI does not re-derive BrowserGrad decisions.
+`verify-content`, `run-javascript`, `request-external-runner`, or `unsupported`.
+It also carries missing files/datasets, selected capabilities, cache
+strategies, and concise messages so platform UI does not re-derive BrowserGrad
+decisions.
+Use `createVerifiedAssignmentPlatformHandoff(profile, report, contents?)` for
+launch buttons after fixture contents are available; it adds `hashOk` and
+`hashChecks`, and returns `nextAction: "verify-content"` when declared dataset
+hashes fail.
 `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
 batch-flattens those same preflight decisions into platform-ready rows:
 readiness status, runner target, rubric kind, required/selected/missing

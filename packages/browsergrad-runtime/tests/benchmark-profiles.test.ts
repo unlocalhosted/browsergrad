@@ -9,6 +9,7 @@ import {
   createAssignmentPlatformHandoff,
   createAssignmentPreflightReport,
   createAssignmentRunPlan,
+  createVerifiedAssignmentPlatformHandoff,
   evaluateAssignmentMountContents,
   parseAssignmentProfile,
   requiredAssignmentCapabilities,
@@ -333,6 +334,40 @@ describe("benchmark assignment profiles", () => {
         `missing required file: ${report.plan.files.rubricPath}`,
       );
     }
+  });
+
+  it("blocks benchmark launch handoffs when declared dataset hashes are invalid", async () => {
+    const profileJson = JSON.parse(
+      readFileSync(
+        new URL("../../../docs/internal/cs336-assignment5-alignment.profile.json", import.meta.url),
+        "utf8",
+      ),
+    );
+    const result = parseAssignmentProfile(profileJson);
+    expect(result).toMatchObject({ ok: true });
+    if (!result.ok) return;
+
+    const report = createAssignmentPreflightReport(
+      result.profile,
+      BROWSER_TEACHING_ENVIRONMENT,
+    );
+    const handoff = await createVerifiedAssignmentPlatformHandoff(
+      result.profile,
+      report,
+      {
+        files: { [report.plan.files.rubricPath]: "print('ok')" },
+        datasets: { "sft-sample": "fixture" },
+      },
+    );
+
+    expect(handoff).toEqual(
+      expect.objectContaining({
+        nextAction: "verify-content",
+        launchable: false,
+        hashOk: false,
+        messages: ["dataset hash invalid: sft-sample"],
+      }),
+    );
   });
 
   it("creates external runner requests for native-heavy benchmark profiles", () => {

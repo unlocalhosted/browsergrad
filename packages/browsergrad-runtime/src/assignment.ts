@@ -212,6 +212,7 @@ export interface AssignmentBenchmarkPreflightMatrix {
 export type AssignmentPlatformNextAction =
   | "install-capabilities"
   | "mount-content"
+  | "verify-content"
   | "run-pyodide"
   | "run-javascript"
   | "request-external-runner"
@@ -238,6 +239,12 @@ export interface AssignmentPlatformHandoff {
   readonly cacheStrategies: readonly AssignmentDatasetCacheStrategy[];
   readonly externalRunnerRequired: boolean;
   readonly messages: readonly string[];
+}
+
+export interface AssignmentVerifiedPlatformHandoff
+  extends AssignmentPlatformHandoff {
+  readonly hashOk: boolean;
+  readonly hashChecks: readonly AssignmentMountHashCheck[];
 }
 
 export interface AssignmentVerifiedBenchmarkPreflightRow
@@ -835,6 +842,32 @@ export function createAssignmentPlatformHandoff(
   };
 }
 
+export async function createVerifiedAssignmentPlatformHandoff(
+  profile: AssignmentProfile,
+  report: AssignmentPreflightReport,
+  contents: AssignmentMountContents = { files: {} },
+): Promise<AssignmentVerifiedPlatformHandoff> {
+  const handoff = createAssignmentPlatformHandoff(profile, report, contents);
+  const hashes = await verifyAssignmentMountContentHashes(report.mountPlan, contents);
+  const canHashBlockLaunch =
+    handoff.nextAction === "run-pyodide" ||
+    handoff.nextAction === "run-javascript" ||
+    handoff.nextAction === "request-external-runner";
+  if (hashes.ok || !canHashBlockLaunch) {
+    return { ...handoff, hashOk: hashes.ok, hashChecks: hashes.checks };
+  }
+
+  return {
+    ...handoff,
+    nextAction: "verify-content",
+    summary: "fix dataset hash declarations or contents before launch",
+    launchable: false,
+    hashOk: false,
+    hashChecks: hashes.checks,
+    messages: assignmentPlatformHashMessages(hashes),
+  };
+}
+
 export async function createVerifiedAssignmentBenchmarkPreflightMatrix(
   profiles: readonly AssignmentProfile[],
   environment: AssignmentCapabilityEnvironment,
@@ -888,6 +921,8 @@ function assignmentPlatformSummary(
       return report.readiness.summary;
     case "mount-content":
       return "mount required assignment files and datasets before launch";
+    case "verify-content":
+      return "fix dataset hash declarations or contents before launch";
     case "request-external-runner":
       return "assignment requires an external runner handoff";
     case "run-pyodide":
@@ -922,9 +957,19 @@ function assignmentPlatformMessages(
       return ["ready for JavaScript rubric runner"];
     case "install-capabilities":
     case "mount-content":
+    case "verify-content":
     case "unsupported":
       return [report.runnerRoute.message];
   }
+}
+
+function assignmentPlatformHashMessages(
+  hashes: AssignmentMountHashVerification,
+): string[] {
+  const messages = hashes.checks
+    .filter((check) => !check.ok)
+    .map((check) => `dataset hash ${check.status}: ${check.name}`);
+  return messages.length > 0 ? messages : ["dataset hash verification failed"];
 }
 
 function createAssignmentBenchmarkPreflightRow(

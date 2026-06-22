@@ -9,6 +9,7 @@ import {
   createAssignmentBenchmarkPreflightMatrix,
   createVerifiedAssignmentBenchmarkPreflightMatrix,
   createAssignmentPlatformHandoff,
+  createVerifiedAssignmentPlatformHandoff,
   createAssignmentPreflightReport,
   createAssignmentMountPreflightReport,
   createAssignmentMountPlan,
@@ -361,6 +362,64 @@ describe("parseAssignmentProfile", () => {
         launchable: true,
         missingRequiredFiles: [],
         missingDatasets: [],
+        messages: ["ready for Pyodide rubric runner"],
+      }),
+    );
+  });
+
+  it("creates a verified platform handoff that blocks bad dataset hashes", async () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "python_runtime",
+          kind: "capability",
+          options: { requires: ["pyodide"] },
+        },
+      ],
+      datasets: [
+        {
+          name: "tiny",
+          url: "/fixtures/tiny.txt",
+          hash: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const report = createAssignmentPreflightReport(
+      result.profile,
+      createAssignmentCapabilityEnvironment({ browserCapabilities: ["pyodide"] }),
+    );
+    const files = {
+      "/assignments/cs336-assignment1/rubric.py": "print('ok')",
+    };
+
+    await expect(
+      createVerifiedAssignmentPlatformHandoff(result.profile, report, {
+        files,
+        datasets: { tiny: "abcd" },
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        nextAction: "verify-content",
+        launchable: false,
+        hashOk: false,
+        messages: ["dataset hash mismatch: tiny"],
+      }),
+    );
+
+    await expect(
+      createVerifiedAssignmentPlatformHandoff(result.profile, report, {
+        files,
+        datasets: { tiny: "abc" },
+      }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        nextAction: "run-pyodide",
+        launchable: true,
+        hashOk: true,
         messages: ["ready for Pyodide rubric runner"],
       }),
     );

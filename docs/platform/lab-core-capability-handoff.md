@@ -326,6 +326,10 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
    top-level launch decision. Render `nextAction`, `launchable`, `messages`,
    missing files/datasets, selected capabilities, and external-runner fields
    directly instead of duplicating BrowserGrad preflight logic.
+   Once fixture contents are present, prefer
+   `createVerifiedAssignmentPlatformHandoff(profile, report, contents?)` so
+   invalid or mismatched dataset hashes produce `nextAction: "verify-content"`
+   instead of a launch action.
 9. Renders `plan.capabilityEvaluation.gates` as preflight rows using each gate's
    `status`, `selectedAnyOf`, `selectedCapabilities`, and missing fields.
 10. Builds the BrowserGrad mount plan for runnable or inspectable labs.

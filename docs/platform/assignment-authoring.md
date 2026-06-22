@@ -42,8 +42,12 @@ needs one readonly object containing the run plan, rubric kind, readiness,
 required capabilities, mount plan, and dataset cache plan.
 Use `createAssignmentPlatformHandoff(profile, report, contents?)` when UI needs
 one launch-panel object. Its `nextAction` is one of `install-capabilities`,
-`mount-content`, `run-pyodide`, `run-javascript`, `request-external-runner`, or
-`unsupported`, and its `messages`/missing fields are safe to render directly.
+`mount-content`, `verify-content`, `run-pyodide`, `run-javascript`,
+`request-external-runner`, or `unsupported`, and its `messages`/missing fields
+are safe to render directly. Prefer
+`createVerifiedAssignmentPlatformHandoff(profile, report, contents?)` once
+fixture contents are available; it blocks launch on invalid, unsupported,
+missing, or mismatched dataset hashes.
 Use `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
 when a platform needs one dashboard/checklist row per benchmark assignment. It
 returns flattened readiness, route, capability, content-gap, cache-strategy, and
