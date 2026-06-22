@@ -1,0 +1,509 @@
+import type { PyodideJsModule } from "./types.js";
+import type {
+  AssignmentDataset,
+  AssignmentGateKind,
+  AssignmentGateSpec,
+  AssignmentOracleSpec,
+  AssignmentProfile,
+  AssignmentProfileFiles,
+  AssignmentProfileMetadata,
+  AssignmentProfileParseResult,
+  AssignmentProfileTimeouts,
+} from "./assignment-types.js";
+
+const SEMVER_RE = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+
+const SEMVER_RANGE_RE = /^[\^~]?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+
+const ID_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+const GATE_KINDS = new Set<AssignmentGateKind>([
+  "capability",
+  "streaming",
+  "timeout",
+  "forbidden-read",
+]);
+
+export function parseAssignmentProfile(
+  input: unknown,
+): AssignmentProfileParseResult {
+  const errors: string[] = [];
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return { ok: false, errors: ["assignment profile must be a JSON object"] };
+  }
+  const obj = input as Record<string, unknown>;
+
+  const id = readString(obj, "id", errors, ID_RE);
+  const version = readString(obj, "version", errors, SEMVER_RE);
+  const requires_browsergrad = readString(
+    obj,
+    "requires_browsergrad",
+    errors,
+    SEMVER_RANGE_RE,
+  );
+  const metadata = readMetadata(obj.metadata, errors);
+  const files = readFiles(obj.files, errors);
+  const timeouts = readTimeouts(obj.timeouts, errors);
+  const runtime_packages = readStringArray(
+    obj.runtime_packages,
+    "runtime_packages",
+    errors,
+    64,
+  );
+  const allowed_tests = readStringArray(
+    obj.allowed_tests,
+    "allowed_tests",
+    errors,
+    256,
+  );
+  const oracles = readOracles(obj.oracles, errors);
+  const gates = readGates(obj.gates, errors);
+  const datasets = readDatasets(obj.datasets, errors);
+
+  if (errors.length > 0) return { ok: false, errors };
+
+  return {
+    ok: true,
+    profile: {
+      id: id!,
+      version: version!,
+      requires_browsergrad: requires_browsergrad!,
+      ...(metadata ? { metadata } : {}),
+      runtime_packages,
+      files: files!,
+      timeouts,
+      allowed_tests,
+      oracles,
+      gates,
+      datasets,
+    },
+  };
+}
+
+function readMetadata(
+  value: unknown,
+  errors: string[],
+): AssignmentProfileMetadata | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    errors.push("metadata: must be an object when present");
+    return undefined;
+  }
+  const obj = value as Record<string, unknown>;
+  const title = readOptionalString(obj, "title", errors);
+  const course = readOptionalString(obj, "course", errors);
+  const source_url = readOptionalString(obj, "source_url", errors);
+  const lecture_urls = readStringArray(
+    obj.lecture_urls,
+    "metadata.lecture_urls",
+    errors,
+    32,
+  );
+  const tags = readStringArray(obj.tags, "metadata.tags", errors, 64);
+  return {
+    ...(title ? { title } : {}),
+    ...(course ? { course } : {}),
+    ...(source_url ? { source_url } : {}),
+    lecture_urls,
+    tags,
+  };
+}
+
+export function profileOracleJsModules(
+  profile: AssignmentProfile,
+): PyodideJsModule[] {
+  return profile.oracles.map((oracle) => ({
+    name: oracle.name,
+    importURL: oracle.js_module,
+    ...(oracle.export_name ? { exportName: oracle.export_name } : {}),
+  }));
+}
+
+function readString(
+  obj: Record<string, unknown>,
+  key: string,
+  errors: string[],
+  pattern?: RegExp,
+): string | undefined {
+  const value = obj[key];
+  if (typeof value !== "string") {
+    errors.push(`${key}: required string field missing or not a string`);
+    return undefined;
+  }
+  if (pattern && !pattern.test(value)) {
+    errors.push(`${key}: value ${JSON.stringify(value)} does not match ${pattern.source}`);
+  }
+  return value;
+}
+
+function readOptionalString(
+  obj: Record<string, unknown>,
+  key: string,
+  errors: string[],
+): string | undefined {
+  const value = obj[key];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string") {
+    errors.push(`${key}: must be a string when present`);
+    return undefined;
+  }
+  return value;
+}
+
+function readFiles(
+  value: unknown,
+  errors: string[],
+): AssignmentProfileFiles | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    errors.push("files: required object field missing or not an object");
+    return undefined;
+  }
+  const obj = value as Record<string, unknown>;
+  const root = readString(obj, "root", errors);
+  const rubric_path = readString(obj, "rubric_path", errors);
+  const starter_path = readOptionalString(obj, "starter_path", errors);
+  const reference_path = readOptionalString(obj, "reference_path", errors);
+  const fixtures_path = readOptionalString(obj, "fixtures_path", errors);
+  if (!root || !rubric_path) return undefined;
+  return {
+    root,
+    rubric_path,
+    ...(starter_path ? { starter_path } : {}),
+    ...(reference_path ? { reference_path } : {}),
+    ...(fixtures_path ? { fixtures_path } : {}),
+  };
+}
+
+function readTimeouts(
+  value: unknown,
+  errors: string[],
+): AssignmentProfileTimeouts {
+  if (value === undefined) return {};
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    errors.push("timeouts: must be an object when present");
+    return {};
+  }
+  const obj = value as Record<string, unknown>;
+  const out: Record<string, number> = {};
+  for (const key of ["setup_ms", "test_ms", "worker_ms"]) {
+    const timeout = obj[key];
+    if (timeout === undefined) continue;
+    if (
+      typeof timeout !== "number" ||
+      !Number.isInteger(timeout) ||
+      timeout < 0
+    ) {
+      errors.push(`timeouts.${key}: must be a non-negative integer`);
+      continue;
+    }
+    out[key] = timeout;
+  }
+  return out;
+}
+
+export function readCapabilityStringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function validateCapabilityGateOptions(
+  options: Record<string, unknown>,
+  path: string,
+  errors: string[],
+): void {
+  validateStringListOption(options.requires, `${path}.requires`, errors);
+
+  const anyOf = options.any_of;
+  if (anyOf !== undefined) {
+    if (!Array.isArray(anyOf)) {
+      errors.push(`${path}.any_of: must be an array of string arrays when present`);
+    } else {
+      for (let i = 0; i < anyOf.length; i++) {
+        const group = anyOf[i];
+        if (!Array.isArray(group)) {
+          errors.push(`${path}.any_of[${i}]: must be a string array`);
+          continue;
+        }
+        validateStringListItems(group, `${path}.any_of[${i}]`, errors);
+      }
+    }
+  }
+
+  const message = options.message;
+  if (message !== undefined && typeof message !== "string") {
+    errors.push(`${path}.message: must be a string when present`);
+  }
+}
+
+function validateStreamingGateOptions(
+  options: Record<string, unknown>,
+  path: string,
+  errors: string[],
+): void {
+  validateNonNegativeIntegerOption(
+    options.max_chunks_before_first_yield,
+    `${path}.max_chunks_before_first_yield`,
+    errors,
+    false,
+  );
+  validateNonNegativeIntegerOption(
+    options.chunk_count,
+    `${path}.chunk_count`,
+    errors,
+    true,
+  );
+}
+
+function validateForbiddenReadGateOptions(
+  options: Record<string, unknown>,
+  path: string,
+  errors: string[],
+): void {
+  if (!Array.isArray(options.methods)) {
+    errors.push(`${path}.methods: must be a string array`);
+    return;
+  }
+  validateStringListItems(options.methods, `${path}.methods`, errors);
+}
+
+function validateTimeoutGateOptions(
+  options: Record<string, unknown>,
+  path: string,
+  errors: string[],
+): void {
+  validateNonNegativeIntegerOption(
+    options.timeout_ms,
+    `${path}.timeout_ms`,
+    errors,
+    false,
+  );
+}
+
+function validateNonNegativeIntegerOption(
+  value: unknown,
+  path: string,
+  errors: string[],
+  optional: boolean,
+): void {
+  if (value === undefined && optional) return;
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 0
+  ) {
+    errors.push(
+      optional
+        ? `${path}: must be a non-negative integer when present`
+        : `${path}: must be a non-negative integer`,
+    );
+  }
+}
+
+function validateStringListOption(
+  value: unknown,
+  path: string,
+  errors: string[],
+): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) {
+    errors.push(`${path}: must be a string array when present`);
+    return;
+  }
+  validateStringListItems(value, path, errors);
+}
+
+function validateStringListItems(
+  value: readonly unknown[],
+  path: string,
+  errors: string[],
+): void {
+  for (let i = 0; i < value.length; i++) {
+    if (typeof value[i] !== "string") {
+      errors.push(`${path}[${i}]: must be a string`);
+    }
+  }
+}
+
+export function readCapabilityAlternatives(value: unknown): string[][] {
+  if (!Array.isArray(value)) return [];
+  const groups: string[][] = [];
+  for (const item of value) {
+    if (!Array.isArray(item)) continue;
+    groups.push(readCapabilityStringList(item));
+  }
+  return groups;
+}
+
+export function uniqueSorted(values: readonly string[]): string[] {
+  return [...new Set(values)].sort();
+}
+
+export function joinAssignmentPath(root: string, path: string): string {
+  if (path.startsWith("/")) return path;
+  return `${root.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+}
+
+export function datasetFileName(dataset: AssignmentDataset): string {
+  const withoutQuery = dataset.url.split(/[?#]/, 1)[0] ?? "";
+  const lastSegment = withoutQuery.split("/").filter(Boolean).at(-1);
+  return lastSegment || dataset.name;
+}
+
+function readStringArray(
+  value: unknown,
+  key: string,
+  errors: string[],
+  maxLength: number,
+): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    errors.push(`${key}: must be a string array when present`);
+    return [];
+  }
+  if (value.length > maxLength) {
+    errors.push(`${key}: at most ${maxLength} entries (got ${value.length})`);
+  }
+  const out: string[] = [];
+  for (let i = 0; i < value.length; i++) {
+    const item = value[i];
+    if (typeof item !== "string") {
+      errors.push(`${key}[${i}]: must be a string`);
+    } else {
+      out.push(item);
+    }
+  }
+  return out;
+}
+
+function readOracles(
+  value: unknown,
+  errors: string[],
+): AssignmentOracleSpec[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    errors.push("oracles: must be an array when present");
+    return [];
+  }
+  const out: AssignmentOracleSpec[] = [];
+  for (let i = 0; i < value.length; i++) {
+    const item = value[i];
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      errors.push(`oracles[${i}]: must be an object`);
+      continue;
+    }
+    const obj = item as Record<string, unknown>;
+    const name = readString(obj, "name", errors);
+    const js_module = readString(obj, "js_module", errors);
+    const export_name = readOptionalString(obj, "export_name", errors);
+    if (name && js_module) {
+      out.push({
+        name,
+        js_module,
+        ...(export_name ? { export_name } : {}),
+      });
+    }
+  }
+  return out;
+}
+
+function readGates(
+  value: unknown,
+  errors: string[],
+): AssignmentGateSpec[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    errors.push("gates: must be an array when present");
+    return [];
+  }
+  const out: AssignmentGateSpec[] = [];
+  for (let i = 0; i < value.length; i++) {
+    const item = value[i];
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      errors.push(`gates[${i}]: must be an object`);
+      continue;
+    }
+    const obj = item as Record<string, unknown>;
+    const name = readString(obj, "name", errors);
+    const kindValue = obj.kind;
+    if (typeof kindValue !== "string" || !GATE_KINDS.has(kindValue as AssignmentGateKind)) {
+      errors.push(`gates[${i}].kind: must be one of capability, streaming, timeout, forbidden-read`);
+      continue;
+    }
+    const options = obj.options;
+    if (
+      options !== undefined &&
+      (typeof options !== "object" || options === null || Array.isArray(options))
+    ) {
+      errors.push(`gates[${i}].options: must be an object when present`);
+      continue;
+    }
+    const normalizedOptions = options === undefined ? {} : { ...(options as Record<string, unknown>) };
+    if (kindValue === "capability") {
+      validateCapabilityGateOptions(
+        normalizedOptions,
+        `gates[${i}].options`,
+        errors,
+      );
+    } else if (kindValue === "streaming") {
+      validateStreamingGateOptions(
+        normalizedOptions,
+        `gates[${i}].options`,
+        errors,
+      );
+    } else if (kindValue === "forbidden-read") {
+      validateForbiddenReadGateOptions(
+        normalizedOptions,
+        `gates[${i}].options`,
+        errors,
+      );
+    } else if (kindValue === "timeout") {
+      validateTimeoutGateOptions(
+        normalizedOptions,
+        `gates[${i}].options`,
+        errors,
+      );
+    }
+    if (name) {
+      out.push({
+        name,
+        kind: kindValue as AssignmentGateKind,
+        options: normalizedOptions,
+      });
+    }
+  }
+  return out;
+}
+
+function readDatasets(
+  value: unknown,
+  errors: string[],
+): AssignmentDataset[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) {
+    errors.push("datasets: must be an array when present");
+    return [];
+  }
+  if (value.length > 32) {
+    errors.push(`datasets: at most 32 entries (got ${value.length})`);
+  }
+  const out: AssignmentDataset[] = [];
+  for (let i = 0; i < value.length; i++) {
+    const item = value[i];
+    if (typeof item !== "object" || item === null || Array.isArray(item)) {
+      errors.push(`datasets[${i}]: must be an object`);
+      continue;
+    }
+    const obj = item as Record<string, unknown>;
+    const name = readString(obj, "name", errors);
+    const url = readString(obj, "url", errors);
+    const hash = readOptionalString(obj, "hash", errors);
+    if (name && url) {
+      out.push({
+        name,
+        url,
+        ...(hash ? { hash } : {}),
+      });
+    }
+  }
+  return out;
+}
