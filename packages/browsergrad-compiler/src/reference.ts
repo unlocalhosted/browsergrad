@@ -131,7 +131,10 @@ export function runCompiledKernelReference(
   }
 
   const readback = input.readback ??
-    compiled.ir.params.filter((param) => (param.pointer && !param.constant) || param.valueType === "surface2d").map((param) => param.name);
+    [
+      ...compiled.ir.params.filter((param) => (param.pointer && !param.constant) || param.valueType === "surface2d").map((param) => param.name),
+      ...collectExternalPoolNames(compiled.ir.body),
+    ];
   const result: Record<string, WgslTypedArray> = {};
   for (const name of readback) {
     const buffer = buffers.get(name) ?? surfaces[name]?.data ?? memoryPools.get(name)?.data;
@@ -527,17 +530,17 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       }
       return { kind: "pool-pointer", poolName: baseRef.name, byteOffset: oldOffset, rawBuffer: true };
     }
-    const poolRef = expression.args[0];
-    if (poolRef?.kind !== "identifier") throw compilerFailure(`${name} expects DevicePool* argument`);
-    const pool = context.memoryPools.get(poolRef.name);
-    if (!pool) throw compilerFailure(`missing memory pool '${poolRef.name}'`);
+    const poolName = poolNameFromAllocatorArg(expression.args[0]);
+    if (!poolName) throw compilerFailure(`${name} expects DevicePool* argument`);
+    const pool = context.memoryPools.get(poolName);
+    if (!pool) throw compilerFailure(`missing memory pool '${poolName}'`);
     const sizeBytes = Math.max(0, Math.trunc(evalNumber(expression.args[1]!, context)));
     const oldOffset = pool.offset;
     pool.offset += sizeBytes;
     if (oldOffset + sizeBytes > pool.data.length * 4) {
-      return { kind: "pool-pointer", poolName: poolRef.name, byteOffset: -1 };
+      return { kind: "pool-pointer", poolName, byteOffset: -1 };
     }
-    return { kind: "pool-pointer", poolName: poolRef.name, byteOffset: oldOffset };
+    return { kind: "pool-pointer", poolName, byteOffset: oldOffset };
   }
   if (name === "atomicAdd") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => current + value);
@@ -638,6 +641,72 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     default:
       throw compilerFailure(`unsupported call '${name ?? "<expr>"}'`);
   }
+}
+
+function poolNameFromAllocatorArg(expression: CudaLiteExpression | undefined): string | undefined {
+  if (expression?.kind === "identifier") return expression.name;
+  if (expression?.kind === "unary" && expression.operator === "&" && expression.argument.kind === "identifier") {
+    return expression.argument.name;
+  }
+  return undefined;
+}
+
+function collectExternalPoolNames(statements: readonly CudaLiteStatement[]): readonly string[] {
+  const pools = new Set<string>();
+  const visit = (expression: CudaLiteExpression): void => {
+    if (expression.kind === "call") {
+      const callName = expression.kind === "call" && expression.callee.kind === "identifier"
+        ? expression.callee.name
+        : undefined;
+      if ((callName === "deviceAllocate" || callName === "streamOrderedAllocate") && expression.args.length === 2) {
+        const first = expression.args[0];
+        if (first?.kind === "unary" && first.operator === "&" && first.argument.kind === "identifier") {
+          pools.add(first.argument.name);
+        }
+      }
+      visit(expression.callee);
+      for (const arg of expression.args) visit(arg);
+      return;
+    }
+    if (expression.kind === "cast") visit(expression.expression);
+    else if (expression.kind === "member") visit(expression.object);
+    else if (expression.kind === "index") {
+      visit(expression.target);
+      visit(expression.index);
+    } else if (expression.kind === "unary" || expression.kind === "update") visit(expression.argument);
+    else if (expression.kind === "binary") {
+      visit(expression.left);
+      visit(expression.right);
+    } else if (expression.kind === "conditional") {
+      visit(expression.condition);
+      visit(expression.consequent);
+      visit(expression.alternate);
+    } else if (expression.kind === "assignment") {
+      visit(expression.left);
+      visit(expression.right);
+    }
+  };
+  const walk = (items: readonly CudaLiteStatement[]): void => {
+    for (const item of items) {
+      if (item.kind === "var" && item.init) visit(item.init);
+      if (item.kind === "expr") visit(item.expression);
+      if (item.kind === "if") {
+        visit(item.condition);
+        walk(item.consequent);
+        if (item.alternate) walk(item.alternate);
+      }
+      if (item.kind === "for") {
+        if (item.init?.kind === "var" && item.init.init) visit(item.init.init);
+        else if (item.init && item.init.kind !== "var") visit(item.init);
+        if (item.condition) visit(item.condition);
+        if (item.update) visit(item.update);
+        walk(item.body);
+      }
+      if (item.kind === "return" && item.value) visit(item.value);
+    }
+  };
+  walk(statements);
+  return [...pools].sort();
 }
 
 function evalCooperativeGroupCall(
@@ -1213,6 +1282,11 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
     const value = input.textures?.[texture.name];
     if (!value) throw compilerFailure(`missing texture input '${texture.name}'`);
     validateSurfaceInput(`texture ${texture.name}`, value);
+  }
+  for (const poolName of collectExternalPoolNames(compiled.ir.body)) {
+    const pool = input.memoryPools?.[poolName];
+    if (!pool) throw compilerFailure(`missing memory pool input '${poolName}'`);
+    validateMemoryPoolInput(poolName, pool);
   }
 }
 

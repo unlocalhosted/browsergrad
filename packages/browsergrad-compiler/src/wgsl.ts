@@ -67,6 +67,14 @@ export function emitKernelIrWgsl(
       `@group(0) @binding(${context.bindingFor(poolOffsetName(pool.name))}) var<storage, read_write> ${poolOffsetName(pool.name)}: atomic<u32>;`,
     );
   }
+  for (const poolName of context.externalPoolNames) {
+    lines.push(
+      `@group(0) @binding(${context.bindingFor(poolDataName(poolName))}) var<storage, read_write> ${poolDataName(poolName)}: array<u32>;`,
+    );
+    lines.push(
+      `@group(0) @binding(${context.bindingFor(poolOffsetName(poolName))}) var<storage, read_write> ${poolOffsetName(poolName)}: atomic<u32>;`,
+    );
+  }
 
   for (const constant of ir.constants.filter((constant) => constant.dimensions.length > 0)) {
     lines.push(
@@ -104,6 +112,10 @@ export function emitKernelIrWgsl(
   for (const pool of ir.params.filter(isDevicePoolParam)) {
     lines.push("");
     lines.push(...emitPoolHelper(pool.name));
+  }
+  for (const poolName of context.externalPoolNames) {
+    lines.push("");
+    lines.push(...emitPoolHelper(poolName));
   }
   for (const allocator of context.rawPoolAllocators) {
     lines.push("");
@@ -171,6 +183,7 @@ interface EmitContext {
   pointerAliasFor(name: string): PointerAlias | undefined;
   poolPointerFor(name: string): PoolPointerAlias | undefined;
   readonly rawPoolAllocators: readonly RawPoolAllocator[];
+  readonly externalPoolNames: readonly string[];
   cooperativeGroupFor(name: string): CudaLiteCooperativeGroupDecl | undefined;
   surfaceWidthField(name: string): string;
 }
@@ -233,6 +246,27 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
     bindings.push({
       kind: "storage",
       name: poolOffsetName(param.name),
+      valueType: "u32",
+      access: "read_write",
+      binding: offsetBinding,
+    });
+  }
+  const externalPoolNames = collectExternalPoolNames(ir);
+  for (const poolName of externalPoolNames) {
+    const dataBinding = bindings.length;
+    bindingByName.set(poolDataName(poolName), dataBinding);
+    bindings.push({
+      kind: "storage",
+      name: poolDataName(poolName),
+      valueType: "u32",
+      access: "read_write",
+      binding: dataBinding,
+    });
+    const offsetBinding = bindings.length;
+    bindingByName.set(poolOffsetName(poolName), offsetBinding);
+    bindings.push({
+      kind: "storage",
+      name: poolOffsetName(poolName),
       valueType: "u32",
       access: "read_write",
       binding: offsetBinding,
@@ -312,6 +346,7 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
       return poolPointers.get(name);
     },
     rawPoolAllocators,
+    externalPoolNames,
     cooperativeGroupFor(name) {
       return cooperativeGroups.get(name);
     },
@@ -531,7 +566,62 @@ function poolPointerForAllocationCall(call: CudaLiteCallExpression): PoolPointer
       : undefined;
   }
   const pool = call.args[0];
+  if (pool?.kind === "unary" && pool.operator === "&" && pool.argument.kind === "identifier") {
+    return { poolName: pool.argument.name };
+  }
   return pool?.kind === "identifier" ? { poolName: pool.name } : undefined;
+}
+
+function collectExternalPoolNames(ir: KernelIrModule): readonly string[] {
+  const paramPools = new Set(ir.params.filter(isDevicePoolParam).map((param) => param.name));
+  const pools = new Set<string>();
+  const visitExpression = (expression: CudaLiteExpression): void => {
+    if (expression.kind === "call") {
+      const alias = poolPointerForAllocationCall(expression);
+      if (alias && !alias.rawBuffer && !paramPools.has(alias.poolName)) pools.add(alias.poolName);
+      visitExpression(expression.callee);
+      for (const arg of expression.args) visitExpression(arg);
+      return;
+    }
+    if (expression.kind === "cast") visitExpression(expression.expression);
+    else if (expression.kind === "member") visitExpression(expression.object);
+    else if (expression.kind === "index") {
+      visitExpression(expression.target);
+      visitExpression(expression.index);
+    } else if (expression.kind === "unary" || expression.kind === "update") visitExpression(expression.argument);
+    else if (expression.kind === "binary") {
+      visitExpression(expression.left);
+      visitExpression(expression.right);
+    } else if (expression.kind === "conditional") {
+      visitExpression(expression.condition);
+      visitExpression(expression.consequent);
+      visitExpression(expression.alternate);
+    } else if (expression.kind === "assignment") {
+      visitExpression(expression.left);
+      visitExpression(expression.right);
+    }
+  };
+  const walk = (items: readonly CudaLiteStatement[]): void => {
+    for (const item of items) {
+      if (item.kind === "var" && item.init) visitExpression(item.init);
+      if (item.kind === "expr") visitExpression(item.expression);
+      if (item.kind === "if") {
+        visitExpression(item.condition);
+        walk(item.consequent);
+        if (item.alternate) walk(item.alternate);
+      }
+      if (item.kind === "for") {
+        if (item.init?.kind === "var" && item.init.init) visitExpression(item.init.init);
+        else if (item.init && item.init.kind !== "var") visitExpression(item.init);
+        if (item.condition) visitExpression(item.condition);
+        if (item.update) visitExpression(item.update);
+        walk(item.body);
+      }
+      if (item.kind === "return" && item.value) visitExpression(item.value);
+    }
+  };
+  walk(ir.body);
+  return [...pools].sort();
 }
 
 function collectRawPoolAllocators(statements: readonly CudaLiteStatement[]): readonly RawPoolAllocator[] {
@@ -715,6 +805,9 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       }
       if (expression.args.length >= 2 && expression.args[0]?.kind === "identifier") {
         return `bg_pool_alloc_${expression.args[0].name}(u32(${emitExpression(expression.args[1]!, context)}))`;
+      }
+      if (expression.args.length >= 2 && expression.args[0]?.kind === "unary" && expression.args[0].operator === "&" && expression.args[0].argument.kind === "identifier") {
+        return `bg_pool_alloc_${expression.args[0].argument.name}(u32(${emitExpression(expression.args[1]!, context)}))`;
       }
       return "0u";
     case "sizeof":

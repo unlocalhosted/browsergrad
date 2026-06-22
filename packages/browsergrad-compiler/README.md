@@ -63,6 +63,8 @@ bindings, workgroup size, shared memory, and barriers directly.
 The compiler lowers simple bump allocators to real WebGPU atomics:
 
 - `DevicePool* pool` with `streamOrderedAllocate(pool, size)` / `deviceAllocate(pool, size)`.
+- external device pools referenced as `deviceAllocate(&g_pool, size)` and supplied
+  through `memoryPools.g_pool`.
 - raw pool form `deviceAllocate(poolBase, offset, poolSize, size)` where `poolBase`
   is a pointer parameter and `offset` is an integer pointer counter.
 

@@ -124,6 +124,16 @@ __global__ void rawPoolKernel(float* poolBase, size_t* offset, size_t poolSize, 
 }
 `;
 
+const EXTERNAL_POOL_ALLOC = `
+__global__ void externalPoolKernel(float* out) {
+  float* ptr = (float*) deviceAllocate(&g_pool, sizeof(float));
+  if (ptr != nullptr) {
+    ((float*)ptr)[0] = 5.5f;
+    out[0] = ((float*)ptr)[0];
+  }
+}
+`;
+
 async function checkDevice(): Promise<DeviceCheck> {
   if (typeof navigator === "undefined" || !("gpu" in navigator)) {
     return { available: false, reason: "navigator.gpu undefined" };
@@ -414,6 +424,21 @@ __global__ void atomic_exchange(float* x, float* out) {
 
     expect([...actual.buffers.poolBase as Float32Array]).toEqual([...expected.buffers.poolBase as Float32Array]);
     expect([...actual.buffers.offset as Uint32Array]).toEqual([...expected.buffers.offset as Uint32Array]);
+  });
+
+  it("runs external DevicePool allocation through WebGPU atomics", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(EXTERNAL_POOL_ALLOC, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(1) },
+      memoryPools: { g_pool: { data: new Uint32Array(1), offset: new Uint32Array([0]) } },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+    expect([...actual.buffers.g_pool as Uint32Array]).toEqual([...expected.buffers.g_pool as Uint32Array]);
   });
 
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {

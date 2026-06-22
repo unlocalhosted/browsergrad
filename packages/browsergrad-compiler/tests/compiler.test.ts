@@ -72,6 +72,16 @@ __global__ void rawPoolKernel(float* poolBase, size_t* offset, size_t poolSize, 
 }
 `;
 
+const EXTERNAL_POOL_ALLOC = `
+__global__ void externalPoolKernel(float* out) {
+  float* ptr = (float*) deviceAllocate(&g_pool, sizeof(float));
+  if (ptr != nullptr) {
+    ((float*)ptr)[0] = 5.5f;
+    out[0] = ((float*)ptr)[0];
+  }
+}
+`;
+
 function floatBits(value: number): number {
   const floats = new Float32Array([value]);
   return new Uint32Array(floats.buffer)[0] ?? 0;
@@ -164,6 +174,23 @@ describe("CUDA-lite compiler", () => {
     expect(compiled.wgsl).toContain("var<storage, read_write> offset: array<atomic<u32>>;");
     expect([...result.buffers.poolBase as Float32Array]).toEqual([4.5, 4.5]);
     expect([...result.buffers.offset as Uint32Array]).toEqual([8]);
+  });
+
+  it("allocates from an external DevicePool reference", () => {
+    const compiled = compileCudaLiteKernel(EXTERNAL_POOL_ALLOC, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(1) },
+        memoryPools: { g_pool: { data: new Uint32Array(1), offset: new Uint32Array([0]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<storage, read_write> g_pool_pool: array<u32>;");
+    expect(compiled.wgsl).toContain("fn bg_pool_alloc_g_pool(size_bytes: u32) -> u32");
+    expect([...result.buffers.out as Float32Array]).toEqual([5.5]);
+    expect([...result.buffers.g_pool as Uint32Array]).toEqual([floatBits(5.5)]);
   });
 
   it("supports unary pointer dereference in scalar expressions", () => {

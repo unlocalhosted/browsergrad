@@ -513,6 +513,7 @@ function isSupportedPoolPointerInitializer(init: CudaLiteExpression | undefined,
       (offsetSymbol.valueType === "uint" || offsetSymbol.valueType === "int");
   }
   const pool = init.args[0];
+  if (isExternalPoolAddress(pool)) return true;
   if (pool?.kind !== "identifier") return false;
   const symbol = lookupSymbol(pool.name, scope, pool.span);
   return symbol?.valueType === "devicepool" && symbol.pointer === true;
@@ -792,7 +793,9 @@ function validatePoolAllocate(
     return;
   }
   const pool = expression.args[0];
-  if (pool?.kind !== "identifier") {
+  if (isExternalPoolAddress(pool)) {
+    // External device pool. Runtime input must provide memoryPools[name].
+  } else if (pool?.kind !== "identifier") {
     diagnostics.push(error("unsupported-device-pool", "device pool allocation expects DevicePool* as first argument", expression.span));
   } else {
     const symbol = lookupSymbol(pool.name, scope, pool.span);
@@ -802,6 +805,12 @@ function validatePoolAllocate(
   }
   const size = expression.args[1];
   if (size) validateScalarOperand(walkExpression(size, scope), size.span, diagnostics);
+}
+
+function isExternalPoolAddress(expression: CudaLiteExpression | undefined): expression is Extract<CudaLiteExpression, { kind: "unary" }> {
+  return expression?.kind === "unary" &&
+    expression.operator === "&" &&
+    expression.argument.kind === "identifier";
 }
 
 function validateRawPoolAllocate(
@@ -959,8 +968,13 @@ function validateNonCallExpression(
       return expressionInfoForIdentifier(expression.name, expression.span, scope, diagnostics);
     case "cast": {
       const info = walkExpression(expression.expression, scope);
+      if (expression.pointer) {
+        if (info.kind !== "scalar" && info.kind !== "pointer" && info.kind !== "pool-pointer" && info.kind !== "unknown") {
+          diagnostics.push(error("unsupported-pointer-cast", "pointer cast expects scalar or pointer expression", expression.expression.span));
+        }
+        return { kind: "pool-pointer", valueType: expression.valueType };
+      }
       validateScalarOperand(info, expression.expression.span, diagnostics);
-      if (expression.pointer) return { kind: "pool-pointer", valueType: expression.valueType };
       return { kind: "scalar", valueType: expression.valueType };
     }
     case "member": {
@@ -1154,6 +1168,8 @@ function validateScalarOperand(
   diagnostics: CudaLiteDiagnostic[],
 ): void {
   if (info.kind === "scalar" || info.kind === "unknown") return;
+  if (info.kind === "pool-pointer") return;
+  if (info.kind === "pointer" && info.symbol?.kind === "local") return;
   diagnostics.push(error("unsupported-scalar-expression", "expression must resolve to a scalar value", span));
 }
 
