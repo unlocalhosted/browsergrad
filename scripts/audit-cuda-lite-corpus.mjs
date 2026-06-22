@@ -152,10 +152,16 @@ function extractKernelDefinitions(source) {
       }
     }
     if (end < 0) break;
-    kernels.push(clean.slice(start, end));
+    const kernel = clean.slice(start, end);
+    if (!isPlaceholderKernel(kernel)) kernels.push(kernel);
     index = end;
   }
   return kernels;
+}
+
+function isPlaceholderKernel(kernel) {
+  const signature = kernel.slice(0, kernel.indexOf("{"));
+  return /\(\s*\.\.\.\s*\)/u.test(signature) || /\?\?\?/u.test(kernel);
 }
 
 function collectScalarDeviceFunctions(source) {
