@@ -77,7 +77,7 @@ for (const file of files) {
           family: feature?.family ?? "unknown",
           feature: feature?.label ?? "Unknown compatibility gap",
           lowering: feature?.lowering ?? "unsupported",
-          message: String(error?.message ?? error).split("\n")[0],
+          message: diagnostic?.message ?? String(error?.message ?? error).split("\n")[0],
           referenceOk: fallback.referenceOk,
           webGpuLiftOk: fallback.webGpuLiftOk,
           webGpuLiftKind: fallback.webGpuLiftKind,
@@ -98,16 +98,23 @@ function isNonKernelCodeBlock(block) {
 }
 
 const failures = results.filter((result) => !result.ok);
+const directLoweringOk = results.length - failures.length;
+const webGpuLiftedOk = failures.filter((failure) => failure.webGpuLiftOk).length;
+const webGpuRunnableOk = directLoweringOk + webGpuLiftedOk;
 const summary = {
   files: files.length,
   codeBlocks,
   cudaBlocks,
   totalKernelDefinitions: results.length,
-  ok: results.length - failures.length,
-  webGpuSingleDispatchOk: results.length - failures.length,
-  webGpuLiftedOk: failures.filter((failure) => failure.webGpuLiftOk).length,
+  directLoweringOk,
+  strictCompileGaps: failures.length,
+  webGpuRunnableOk,
+  webGpuHostOrchestratedOk: webGpuLiftedOk,
+  ok: directLoweringOk,
+  webGpuSingleDispatchOk: directLoweringOk,
+  webGpuLiftedOk,
   hostDynamicLiftableOk: failures.filter((failure) => failure.webGpuLiftKind === "host-dynamic-launch").length,
-  webGpuTotalOk: results.length - failures.length + failures.filter((failure) => failure.webGpuLiftOk).length,
+  webGpuTotalOk: webGpuRunnableOk,
   fail: failures.length,
   referenceFallbackOk: failures.filter((failure) => failure.referenceOk).length,
   referenceOnlyOk: failures.filter((failure) => failure.referenceOk && !failure.webGpuLiftOk).length,
@@ -127,7 +134,7 @@ if (details) {
   console.log(JSON.stringify(summary, null, 2));
 }
 if (!details && failures.length > 0 && firstFailureLimit > 0) {
-  console.log("\nfirst failures:");
+  console.log("\nfirst direct-lowering gaps:");
   for (const failure of failures.slice(0, firstFailureLimit)) {
     const lift = failure.webGpuLiftOk ? ` [webgpu-lift:${failure.webGpuLiftKind}]` : "";
     const reference = failure.referenceOk ? " [reference-ok]" : "";

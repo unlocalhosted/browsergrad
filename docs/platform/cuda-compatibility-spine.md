@@ -61,11 +61,11 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
 ```
 
 - `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/240` real code-kernel
-  definitions compile as single-dispatch WGSL/WebGPU. Another `15/240` are
+  definitions compile as strict direct-lowering WGSL/WebGPU
+  (`directLoweringOk`). Another `15/240` are
   real-GPU runnable through WebGPU orchestration lifts (`grid-sync-phases` and
-  `host-dynamic-launch`), for `240/240` total WebGPU coverage. `0/240` remain
-  reference-only and `0/240` remain hard gaps after filtering docs/pseudocode
-  placeholders.
+  `host-dynamic-launch`), for `240/240` `webGpuRunnableOk`. `0/240` remain
+  reference-only and `0/240` remain hard gaps after filtering docs/pseudocode.
 - `referenceFallbackOk` is `15/240`: kernels whose semantics are understood by
   CPU reference or host/WebGPU orchestration. `referenceOnlyOk` is stricter and
   excludes kernels now runnable on real WebGPU through orchestration; current

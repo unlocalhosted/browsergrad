@@ -82,3 +82,6 @@
 - Added `compileCudaLiteKernelForWebGpu()` and `cudaLiteWebGpuCompileOptions()`
   for platform code that wants host-orchestrated WebGPU plans without manually
   toggling reference/runtime warning flags.
+- CUDA corpus audit output now separates strict direct lowering from total
+  WebGPU runnable coverage with `directLoweringOk`, `strictCompileGaps`, and
+  `webGpuRunnableOk`.

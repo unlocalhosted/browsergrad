@@ -283,6 +283,10 @@ reports single-dispatch WebGPU coverage, host-lifted WebGPU coverage, CPU
 reference fallbacks, and hard gaps. Failure details include WebGPU blocker
 kind/code/message. Threshold flags make corpus coverage regressions fail fast
 instead of living only in docs.
+`directLoweringOk` means strict one-pass WGSL compile. `webGpuRunnableOk` also
+counts host-orchestrated WebGPU plans such as grid-sync phases and dynamic
+launch lifts. The legacy `ok` and `fail` fields remain as strict direct-lowering
+metrics for older scripts.
 
 ## Performance Harness
 
