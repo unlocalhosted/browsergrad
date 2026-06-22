@@ -7,5 +7,9 @@
 - Added real WebGPU orchestration for safe `grid.sync()` phase splitting,
   standalone `cudaDeviceSynchronize()`, and conservative host-lifted dynamic
   child launches.
-- Added `createCudaRuntimePlan()`, `createCudaGridSyncPhasePlan()`, and
-  `createCudaHostDynamicLaunchPlan()` for platform/rubric preflight.
+- Added DevicePool aliasing and positive pointer-offset support for host-lifted
+  dynamic launches, plus conservative host-lifted `cudaMemcpyPeerAsync` typed
+  buffer copies.
+- Added `createCudaRuntimePlan()`, `createCudaGridSyncPhasePlan()`,
+  `createCudaHostDynamicLaunchPlan()`, and `createCudaPeerCopyPlan()` for
+  platform/rubric preflight.

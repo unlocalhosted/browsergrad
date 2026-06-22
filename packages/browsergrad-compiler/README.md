@@ -104,17 +104,19 @@ memory pools.
 `runCompiledKernelWebGpu` can host-lift conservative child launches into a real
 WebGPU dispatch sequence when the parent launch has one workgroup, the child
 block size is host-evaluable, pointer args alias named storage buffers, and
-child scalar args come from host-evaluable expressions. Inspect this before
-dispatching:
+child scalar args come from host-evaluable expressions. Named `DevicePool*`
+arguments alias their backing pool data/offset bindings, and positive pointer
+offsets such as `out + 1` lower to generated base-offset uniforms so WebGPU
+bindings stay whole-buffer and alignment-safe. Inspect this before dispatching:
 
 ```ts
 const plan = createCudaHostDynamicLaunchPlan(compiled, input, launch);
 console.log(plan.supported, plan.reason);
 ```
 
-Pointer-offset launches, recursive launches, device-derived launch args, and
-parent side effects after launch stay reference-only so GPU output is never
-silently wrong.
+Recursive launches, device-derived launch args, per-thread launch queues,
+negative pointer offsets, and parent side effects after launch stay
+reference-only so GPU output is never silently wrong.
 
 ## CUDA Runtime Reference Calls
 
@@ -128,8 +130,12 @@ compileCudaLiteKernel(source, {
 ```
 
 `cudaMemcpyPeerAsync(dst, dstDevice, src, srcDevice, bytes, stream)` copies bytes
-inside the reference interpreter. WebGPU still rejects these kernels until
-BrowserGrad owns host/device orchestration for runtime calls.
+inside the reference interpreter. `runCompiledKernelWebGpu` can host-lift
+conservative peer copies into a typed WebGPU copy dispatch when the call is
+single-invocation guarded, source/destination are named `Float32Array`,
+`Int32Array`, or `Uint32Array` buffers, offsets are non-negative and
+host-evaluable, and byte count is element-aligned. Mixed buffer types, pools,
+device-derived counts, and parent side effects after copy remain reference-only.
 
 ## Cooperative Grid Sync
 

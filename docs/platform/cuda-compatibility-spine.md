@@ -45,20 +45,26 @@ Current corpus gate (`node scripts/audit-cuda-lite-corpus.mjs /tmp/CUDA-120-DAYS
   CPU reference. `referenceOnlyOk` is stricter and excludes kernels now runnable
   on real WebGPU through orchestration.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
-  with integer offset counters, casted pool pointer reads/writes, and WebGPU
-  atomic offset updates.
+  with integer offset counters, casted pool pointer reads/writes, WebGPU atomic
+  offset updates, DevicePool aliasing across host-lifted child launches,
+  positive pointer-offset child launches via generated base-offset uniforms, and
+  conservative host-lifted peer copies through a typed WebGPU copy dispatch.
 - Device-side launches now parse into IR and can run in CPU reference when
   `referenceDynamicParallelism` is enabled. WebGPU can host-lift conservative
   child launches into a multi-dispatch sequence when the parent launch has one
   workgroup, the child block size is statically known, pointer args alias the
   same named storage buffers, and child scalar launch args are host-evaluable.
-  Pointer-offset launches, per-thread launch queues, recursive launches, and
-  device-derived launch args remain reference-only.
+  DevicePool pointer params alias their pool data/offset bindings, and positive
+  pointer-offset args lower to base-offset uniforms. Per-thread launch queues,
+  recursive launches, negative pointer offsets, and device-derived launch args
+  remain reference-only.
 - CUDA runtime calls such as `cudaDeviceSynchronize` and `cudaMemcpyPeerAsync`
   classify as runtime orchestration gaps. Standalone `cudaDeviceSynchronize()`
   is a WebGPU-safe no-op because dispatch completion is host-managed. Peer
-  copies can run in CPU reference with `referenceCudaRuntime`; WebGPU still
-  rejects until host/device orchestration lands.
+  copies can run in CPU reference with `referenceCudaRuntime`; WebGPU can
+  host-lift single-invocation guarded typed buffer copies when source,
+  destination, offsets, and byte count are host-evaluable. Mixed types, pools,
+  device-derived counts, or side effects after copy remain reference-only.
 - Cooperative `grid.sync()` can run in CPU reference with `referenceGridSync`.
   Safe top-level uniform `grid.sync()` also runs on real WebGPU as multiple
   dispatch phases over shared GPU buffers. Pure launch-derived locals are
