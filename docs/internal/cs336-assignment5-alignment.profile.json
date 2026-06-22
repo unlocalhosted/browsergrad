@@ -37,7 +37,7 @@
   ],
   "oracles": [
     {
-      "name": "_bg_alignment_oracles",
+      "name": "_bg_rl_math",
       "js_module": "/assignments/cs336-assignment5-alignment/oracles/alignment.js",
       "export_name": "oracle"
     }
@@ -55,7 +55,7 @@
           "rl-loss-oracle",
           "response-parser-oracle"
         ],
-        "message": "CS336 A5 browser labs should start with GRPO/DPO/SFT math, parser, and snapshot fixtures."
+        "message": "CS336 A5 browser labs should start with generic RL/math references, parser fixtures, and snapshots."
       }
     },
     {

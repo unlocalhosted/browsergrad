@@ -39,8 +39,8 @@ not root platform identity.
 
 ## Platform Work
 
-- Register a JS reference module from `@unlocalhosted/browsergrad-primitives` as
-  `_bg_alignment_references`.
+- Register a profile-local JS reference module from
+  `@unlocalhosted/browsergrad-primitives` as `_bg_rl_math`.
 - Route `rl-loss-oracle` to the primitive facade's `rl` namespace.
 - Route `response-parser-oracle` to `parseMmluResponse()` and
   `parseGsm8kResponse()`.

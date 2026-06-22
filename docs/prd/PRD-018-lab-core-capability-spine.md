@@ -303,6 +303,9 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   `rl.aggregateLossAcrossMicrobatch()` so CS336 A5-style DPO/GRPO/reasoning
   metrics rubrics can run fixture-scale browser-safe checks before vLLM,
   flash-attn, or full model training enters the loop.
+- A5 runtime proof guarantee: the CS336 A5 profile registers generic
+  `_bg_rl_math` profile glue, and runtime integration proves a Python rubric can
+  call DPO, MMLU, GSM8K, and group-normalized reward references through Pyodide.
 - Later implementation slices:
   - Assignment runner plan: packages, mounts, JS oracles, timeout/watchdog, and
     allowed tests.

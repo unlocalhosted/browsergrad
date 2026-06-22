@@ -157,7 +157,8 @@ Alignment rubrics can use `@unlocalhosted/browsergrad-primitives` for
 CS336 A5-style DPO loss, MMLU/GSM8K parsing, rollout reward metadata,
 group-normalized rewards, policy-gradient token losses, and masked microbatch
 aggregation before full vLLM, flash-attn, Qwen inference, or native training
-loops enter the loop.
+loops enter the loop. Register a profile-local module such as `_bg_rl_math`
+when Python rubrics need JSON-string bridge methods.
 
 ## Files And Fixtures
 

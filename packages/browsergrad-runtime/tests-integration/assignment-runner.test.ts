@@ -13,6 +13,7 @@ import {
   createDataCleaningReference,
   createHostedTrainingApiFixture,
   fitPowerLawScalingLaw,
+  rl,
 } from "@unlocalhosted/browsergrad-primitives";
 import {
   createAssignmentRunPlan,
@@ -85,6 +86,13 @@ const CS336_A3_PROFILE = JSON.parse(
 const CS336_A4_PROFILE = JSON.parse(
   readFileSync(
     new URL("../../../docs/internal/cs336-assignment4-data.profile.json", import.meta.url),
+    "utf8",
+  ),
+);
+
+const CS336_A5_PROFILE = JSON.parse(
+  readFileSync(
+    new URL("../../../docs/internal/cs336-assignment5-alignment.profile.json", import.meta.url),
     "utf8",
   ),
 );
@@ -468,6 +476,114 @@ else:
       }),
     ]);
   });
+
+  it("runs the CS336 A5 profile with a generic RL math reference", async () => {
+    const parsed = parseAssignmentProfile(CS336_A5_PROFILE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const plan = createAssignmentRunPlan(parsed.profile, {
+      capabilities: [
+        "browser-math-only",
+        "pyodide",
+        "response-parser-oracle",
+        "rl-loss-oracle",
+        "snapshot-oracle",
+        "tokenizer-oracle",
+        "torch-compat",
+      ],
+    });
+    const oracleSpec = plan.session.jsModules[0];
+    expect(oracleSpec?.name).toBe("_bg_rl_math");
+    if (!oracleSpec) return;
+
+    pyodide.registerJsModule(oracleSpec.name, createRlMathBridge());
+
+    assertions = [];
+    artifacts = [];
+    const result = await runAssignmentRubric(
+      {
+        fs: pyodideSessionFs(pyodide),
+        exec: pyodideExec,
+      },
+      plan,
+      {
+        files: {
+          [plan.files.rubricPath]: `
+import browsergrad as bg
+import json
+
+ctx = bg.assignment_context()
+math = bg.oracle("_bg_rl_math")
+
+dpo_loss = math.dpo_loss_json(json.dumps({
+    "beta": 0.1,
+    "policyChosenLogProbability": -1.0,
+    "policyRejectedLogProbability": -2.0,
+    "referenceChosenLogProbability": -1.4,
+    "referenceRejectedLogProbability": -1.8,
+}))
+mmlu = math.parse_mmlu_response_json(json.dumps({
+    "options": ["A", "B", "C", "D"],
+}), "The answer is (C).")
+gsm8k = math.parse_gsm8k_response("First 12, then 1,234.")
+advantages = json.loads(math.group_normalized_rewards_json(json.dumps({
+    "rawRewards": [1, 3],
+    "groupSize": 2,
+    "baseline": "mean",
+    "advantageNormalizer": "none",
+})))["advantages"]
+
+if (
+    "test_per_instance_dpo_loss" in ctx["allowed_tests"]
+    and abs(dpo_loss - 0.663597113) < 1e-6
+    and mmlu == "C"
+    and gsm8k == "1234"
+    and advantages == [-1, 1]
+):
+    bg.assert_pass("test_cs336_a5_rl_math_reference")
+    bg.emit_json("cs336-a5-rl-summary", {
+        "dpo_loss": dpo_loss,
+        "mmlu": mmlu,
+        "gsm8k": gsm8k,
+        "advantages": advantages,
+    })
+else:
+    bg.assert_fail(
+        "test_cs336_a5_rl_math_reference",
+        "CS336 A5 RL math reference mismatch",
+        expected={"dpo_loss": 0.663597113, "mmlu": "C", "gsm8k": "1234", "advantages": [-1, 1]},
+        actual={"dpo_loss": dpo_loss, "mmlu": mmlu, "gsm8k": gsm8k, "advantages": advantages},
+    )
+`,
+        },
+        datasets: {
+          "sft-sample": "{\"prompt\":\"2+2\",\"response\":\"4\"}\\n",
+        },
+      },
+    );
+
+    expect(result.exec.error).toBeNull();
+    expect(result.exec.ok).toBe(true);
+    expect(result.exec.assertions).toEqual([
+      {
+        kind: "pass",
+        name: "test_cs336_a5_rl_math_reference",
+        durationMs: null,
+      },
+    ]);
+    expect(result.exec.artifacts).toEqual([
+      expect.objectContaining({
+        kind: "json",
+        name: "cs336-a5-rl-summary",
+        data: expect.objectContaining({
+          mmlu: "C",
+          gsm8k: "1234",
+          advantages: [-1, 1],
+        }),
+      }),
+    ]);
+  });
 });
 
 function createDataCleaningBridge(): object {
@@ -492,6 +608,23 @@ function createDataCleaningBridge(): object {
     },
     gopher_quality_passed(text: string) {
       return reference.evaluateGopherQuality(text).passed;
+    },
+  };
+}
+
+function createRlMathBridge(): object {
+  return {
+    dpo_loss_json(inputJson: string) {
+      return rl.computePerInstanceDpoLoss(JSON.parse(inputJson));
+    },
+    parse_mmlu_response_json(exampleJson: string, modelOutput: string) {
+      return rl.parseMmluResponse(JSON.parse(exampleJson), modelOutput);
+    },
+    parse_gsm8k_response(modelOutput: string) {
+      return rl.parseGsm8kResponse(modelOutput);
+    },
+    group_normalized_rewards_json(inputJson: string) {
+      return JSON.stringify(rl.computeGroupNormalizedRewards(JSON.parse(inputJson)));
     },
   };
 }

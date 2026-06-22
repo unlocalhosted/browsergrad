@@ -374,5 +374,8 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     CS336 A5 alignment labs can use
     `@unlocalhosted/browsergrad-primitives` for DPO, parser, reward,
     group-normalized advantage, policy-gradient, and masked aggregation checks.
+    BrowserGrad runtime integration now proves a Python rubric can call the
+    A5 profile's `_bg_rl_math` JS module through Pyodide while the bridge is
+    backed by the primitive facade's `rl` namespace.
 17. Offers the learner a runnable browser path, simulated path, or external-runner
    note depending on the profile result.
