@@ -100,6 +100,7 @@ export interface CudaLiteVarDecl {
   readonly pointer: boolean;
   readonly name: string;
   readonly dimensions: readonly number[];
+  readonly dynamicShared?: boolean;
   readonly init?: CudaLiteExpression;
   readonly span: SourceSpan;
 }

@@ -373,7 +373,7 @@ class Parser {
 
   private parseVarDeclList(expectSemicolon: boolean): readonly CudaLiteVarDecl[] {
     const start = this.peek().span;
-    const storage = this.consumeStorageQualifier();
+    const storageInfo = this.consumeStorageQualifier();
     const valueType = this.parseType();
     const declarations: CudaLiteVarDecl[] = [];
     do {
@@ -390,11 +390,12 @@ class Parser {
       const init = this.consumeIf("=") ? this.parseExpression() : undefined;
       declarations.push({
         kind: "var",
-        storage,
+        storage: storageInfo.storage,
         valueType,
         pointer,
         name: name.value,
         dimensions,
+        ...(storageInfo.dynamicShared ? { dynamicShared: true } : {}),
         ...(init === undefined ? {} : { init }),
         span: mergeSpans(start, init?.span ?? name.span),
       });
@@ -594,11 +595,11 @@ class Parser {
     return TYPE_KEYWORDS.has(this.peek().value);
   }
 
-  private consumeStorageQualifier(): "local" | "shared" {
+  private consumeStorageQualifier(): { readonly storage: "local" | "shared"; readonly dynamicShared: boolean } {
     const external = this.consumeIf("extern") !== undefined;
-    if (this.consumeIf("__shared__")) return "shared";
+    if (this.consumeIf("__shared__")) return { storage: "shared", dynamicShared: external };
     if (external) this.fail("extern is only supported with __shared__ declarations", this.previous().span);
-    return "local";
+    return { storage: "local", dynamicShared: false };
   }
 
   private consumeTypeQualifiers(): void {

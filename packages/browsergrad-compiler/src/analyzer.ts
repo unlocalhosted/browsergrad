@@ -190,7 +190,7 @@ export function analyzeCudaLite(
           if (statement.storage === "local" && statement.dimensions.length > 0) {
             diagnostics.push(error("unsupported-local-array", "local arrays are not supported in CUDA-lite v0; use fixed __shared__ arrays or scalar locals", statement.span));
           }
-          if (statement.storage === "shared" && statement.dimensions.length === 0 && !resolvedSharedDimensions(statement, options)) {
+          if (statement.dynamicShared && !resolvedSharedDimensions(statement, options)) {
             diagnostics.push(error("dynamic-shared-memory", "__shared__ arrays must have fixed dimensions", statement.span));
           }
           for (const dimension of statement.dimensions) {
@@ -864,7 +864,7 @@ function validateLValueExpression(
       diagnostics.push(error("unknown-symbol", `unknown CUDA-lite symbol '${expression.name}'`, expression.span));
       return;
     }
-    if (symbol.kind === "local") return;
+    if (symbol.kind === "local" || symbol.kind === "shared") return;
     if (symbol.kind === "param" && !symbol.pointer) {
       diagnostics.push(error("parameter-assignment", `cannot assign to scalar parameter '${expression.name}'`, expression.span));
       return;
@@ -1038,7 +1038,7 @@ function resolvedSharedDimensions(
   statement: CudaLiteVarDecl,
   options: CudaLiteAnalyzeOptions,
 ): readonly number[] | undefined {
-  if (statement.storage !== "shared" || statement.dimensions.length > 0) return undefined;
+  if (statement.storage !== "shared" || !statement.dynamicShared || statement.dimensions.length > 0) return undefined;
   const elements = options.dynamicSharedMemory?.[statement.name];
   if (elements === undefined) return undefined;
   return [positiveInteger(elements, `dynamicSharedMemory.${statement.name}`)];

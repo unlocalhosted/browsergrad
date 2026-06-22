@@ -558,6 +558,24 @@ __global__ void splitShared(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([6, 2, 3, 4]);
   });
 
+  it("supports scalar __shared__ declarations without dynamic shared metadata", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sharedScalar(int *out) {
+  __shared__ int localCount;
+  if (threadIdx.x == 0) { localCount = 7; }
+  __syncthreads();
+  if (threadIdx.x == 1) { out[0] = localCount; }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<workgroup> localCount: i32;");
+    expect([...result.buffers.out as Int32Array]).toEqual([7]);
+  });
+
   it("evaluates integer constant expressions in shared array dimensions", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void padded(float *x) {

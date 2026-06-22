@@ -315,6 +315,7 @@ function readIdentifier(name: string, context: ThreadContext): LocalValue {
   if (name === "blockDim") return context.blockDim;
   if (name === "gridDim") return context.gridDim;
   if (context.locals.has(name)) return context.locals.get(name)!;
+  if (context.shared.has(name)) return readLValue({ name, space: "shared", index: 0 }, context);
   if (context.constants.has(name)) {
     const value = context.constants.get(name)!;
     if (typeof value === "number") return value;
@@ -568,6 +569,7 @@ function curandNext(state: number): number {
 function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): LValue {
   if (expression.kind === "identifier") {
     if (context.buffers.has(expression.name)) return { name: expression.name, space: "buffer", index: 0 };
+    if (context.shared.has(expression.name)) return { name: expression.name, space: "shared", index: 0 };
     return { name: expression.name, space: "local" };
   }
   const chain: number[] = [];
