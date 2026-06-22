@@ -70,6 +70,31 @@ deterministically, and labels each selected capability as `browser`,
 `simulated`, or `external`. Then call `assignmentRunReadiness(plan)` to get the
 learner-facing preflight state: `runnable`, `simulated`, `external-only`, or
 `blocked`.
+For GPU labs, derive browser-side labels from detected feature facts instead of
+hardcoding names:
+
+```ts
+import { detectKernelFeatures } from "@unlocalhosted/browsergrad-kernels";
+import {
+  browserGpuCapabilities,
+  createAssignmentCapabilityEnvironment,
+} from "@unlocalhosted/browsergrad-runtime";
+
+const features = await detectKernelFeatures(device);
+const environment = createAssignmentCapabilityEnvironment({
+  browserCapabilities: [
+    "pyodide",
+    ...browserGpuCapabilities({
+      webgpu: features.webgpu,
+      wgslKernel: features.webgpu,
+      cudaLiteCompiler: features.webgpu,
+      shaderF16: features.shaderF16,
+      subgroups: features.subgroups,
+      performanceRubric: true,
+    }),
+  ],
+});
+```
 Use `assignmentRubricKind()` to route Python, JavaScript, and unknown rubric
 paths to the right execution substrate.
 Use `assignmentRunnerRoute(plan)` when the platform wants one branch key:
@@ -132,6 +157,9 @@ input order determines alpha blending. Use `defineKernel1DProgram()`,
 `runKernel1DProgramReference()`, `emitKernel1DProgramWgsl()`, and
 `runKernel1DProgramWebGpu()` for author-once 1D kernels that need scalar params,
 input reads, output reads, WGSL source generation, and browser WebGPU dispatch.
+Use the `cuda-lite-compiler` capability when rubrics accept learner CUDA-lite
+source through `@unlocalhosted/browsergrad-compiler` rather than handwritten
+WGSL only.
 `simulateCuda1DGrid()`, `defineCuda1DProgram()`, and related CUDA names remain
 compatibility aliases for rubrics that intentionally teach CUDA vocabulary. The
 thread-grid executor records thread/block ids, global reads/writes, and

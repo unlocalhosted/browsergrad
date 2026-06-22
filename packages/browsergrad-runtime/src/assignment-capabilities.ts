@@ -13,6 +13,32 @@ import type {
   AssignmentRunReadinessStatus,
 } from "./assignment-types.js";
 
+export interface BrowserGpuCapabilityInput {
+  readonly webgpu?: boolean;
+  readonly wgslKernel?: boolean;
+  readonly cudaLiteCompiler?: boolean;
+  readonly cudaCompatibleSubset?: boolean;
+  readonly shaderF16?: boolean;
+  readonly subgroups?: boolean;
+  readonly performanceRubric?: boolean;
+  readonly kernelVisualizer?: boolean;
+}
+
+export function browserGpuCapabilities(
+  input: BrowserGpuCapabilityInput = {},
+): string[] {
+  const capabilities: string[] = [];
+  if (input.webgpu) capabilities.push("webgpu");
+  if (input.webgpu && input.wgslKernel) capabilities.push("wgsl-kernel");
+  if (input.webgpu && input.cudaLiteCompiler) capabilities.push("cuda-lite-compiler");
+  if (input.webgpu && input.cudaCompatibleSubset) capabilities.push("cuda-compatible-subset");
+  if (input.webgpu && input.shaderF16) capabilities.push("shader-f16");
+  if (input.webgpu && input.subgroups) capabilities.push("subgroups");
+  if (input.performanceRubric) capabilities.push("performance-rubric");
+  if (input.kernelVisualizer) capabilities.push("kernel-visualizer");
+  return uniqueSorted(capabilities);
+}
+
 export function createAssignmentCapabilityEnvironment(
   input: AssignmentCapabilityEnvironmentInput = {},
 ): AssignmentCapabilityEnvironment {

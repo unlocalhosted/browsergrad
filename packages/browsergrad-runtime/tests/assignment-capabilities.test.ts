@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { VALID_PROFILE } from "./assignment-fixtures";
 import {
+  browserGpuCapabilities,
   createAssignmentCapabilityEnvironment,
   evaluateAssignmentCapabilities,
   parseAssignmentProfile,
@@ -8,6 +9,37 @@ import {
 } from "../src/index";
 
 describe("assignment capabilities", () => {
+  it("derives browser GPU capability labels from detected feature facts", () => {
+    expect(browserGpuCapabilities({
+      webgpu: true,
+      wgslKernel: true,
+      cudaLiteCompiler: true,
+      cudaCompatibleSubset: true,
+      shaderF16: true,
+      subgroups: true,
+      performanceRubric: true,
+      kernelVisualizer: true,
+    })).toEqual([
+      "cuda-compatible-subset",
+      "cuda-lite-compiler",
+      "kernel-visualizer",
+      "performance-rubric",
+      "shader-f16",
+      "subgroups",
+      "webgpu",
+      "wgsl-kernel",
+    ]);
+
+    expect(browserGpuCapabilities({
+      webgpu: false,
+      wgslKernel: true,
+      cudaLiteCompiler: true,
+      shaderF16: true,
+      subgroups: true,
+      performanceRubric: true,
+    })).toEqual(["performance-rubric"]);
+  });
+
   it("evaluates required and alternative capability gates", () => {
     const result = parseAssignmentProfile({
       ...VALID_PROFILE,

@@ -1,9 +1,11 @@
 export { parseAssignmentProfile, profileOracleJsModules } from "./assignment-profile.js";
 export {
+  browserGpuCapabilities,
   createAssignmentCapabilityCatalog,
   createAssignmentCapabilityEnvironment,
   evaluateAssignmentCapabilities,
   requiredAssignmentCapabilities,
+  type BrowserGpuCapabilityInput,
 } from "./assignment-capabilities.js";
 export {
   createAssignmentDatasetCachePlan,

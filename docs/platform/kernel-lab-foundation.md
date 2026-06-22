@@ -73,6 +73,9 @@ low-level extension invariants and evidence gates.
 The compiler package includes SAXPY, guarded-map, and tiled-matmul examples;
 profiles should declare `cuda-lite-compiler` when they depend on this authoring
 path rather than handwritten WGSL.
+Platforms can derive that label with `browserGpuCapabilities()` after calling
+`detectKernelFeatures()` so `shader-f16`, subgroup, WGSL, and CUDA-lite support
+come from one capability environment.
 For hot loops, the low-level WGSL runner exposes prepared sequences and resident
 storage buffers, while the compiler exposes `prepareCompiledKernelWebGpu()` over
 the same execution plans. Platform labs should use the prepared path when launch

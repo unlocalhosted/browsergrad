@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   assignmentRubricKind,
+  browserGpuCapabilities,
   createAssignmentCapabilityCatalog,
   createAssignmentCapabilityEnvironment,
   createAssignmentBenchmarkPreflightMatrix,
@@ -53,10 +54,8 @@ const BROWSER_TEACHING_ENVIRONMENT = createAssignmentCapabilityEnvironment({
     "flash-attention-oracle",
     "http-client",
     "js-oracles",
-    "kernel-visualizer",
     "large-file-streaming",
     "near-dedupe-oracle",
-    "performance-rubric",
     "pii-oracle",
     "quality-rule-oracle",
     "pyodide",
@@ -68,8 +67,15 @@ const BROWSER_TEACHING_ENVIRONMENT = createAssignmentCapabilityEnvironment({
     "structured-assertions",
     "tokenizer-oracle",
     "torch-compat",
-    "webgpu",
-    "wgsl-kernel",
+    ...browserGpuCapabilities({
+      webgpu: true,
+      wgslKernel: true,
+      cudaLiteCompiler: true,
+      shaderF16: true,
+      subgroups: true,
+      performanceRubric: true,
+      kernelVisualizer: true,
+    }),
   ],
   simulatedCapabilities: [
     "browser-cpp-simulator",
@@ -275,6 +281,18 @@ describe("benchmark assignment profiles", () => {
     ).toMatchObject({
       capability: "webgpu",
       profiles: expect.arrayContaining(["cs336-assignment2-systems", "gpu-puzzles"]),
+    });
+    expect(
+      catalog.capabilities.find((entry) => entry.capability === "cuda-lite-compiler"),
+    ).toMatchObject({
+      capability: "cuda-lite-compiler",
+      alternativeIn: [
+        expect.objectContaining({
+          profileId: "cs149-assignment3",
+          gate: "cuda_concepts_browser_kernel_path",
+          group: ["cuda-lite-compiler"],
+        }),
+      ],
     });
     expect(
       catalog.capabilities.find((entry) => entry.capability === "vllm-external"),

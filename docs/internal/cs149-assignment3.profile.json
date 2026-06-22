@@ -43,8 +43,8 @@
       "kind": "capability",
       "options": {
         "requires": ["webgpu", "cuda-compatible-subset", "performance-rubric"],
-        "any_of": [["wgsl-kernel"], ["native-cuda-external"]],
-        "message": "CS149 A3 browser labs should preserve CUDA concepts through WGSL or an explicit native CUDA runner."
+        "any_of": [["cuda-lite-compiler"], ["wgsl-kernel"], ["native-cuda-external"]],
+        "message": "CS149 A3 browser labs should preserve CUDA concepts through BrowserGrad CUDA-lite, WGSL, or an explicit native CUDA runner."
       }
     },
     {

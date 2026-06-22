@@ -63,6 +63,7 @@ export {
 
 export {
   assignmentRubricKind,
+  browserGpuCapabilities,
   assignmentRunReadiness,
   assignmentRunnerRoute,
   createAssignmentCapabilityEnvironment,
@@ -108,6 +109,7 @@ export {
   type AssignmentCapabilityCatalogEntry,
   type AssignmentCapabilityCatalogReference,
   type AssignmentCapabilityCatalogAlternative,
+  type BrowserGpuCapabilityInput,
   type AssignmentRunReadinessStatus,
   type AssignmentRunnerTarget,
   type AssignmentRunReadiness,

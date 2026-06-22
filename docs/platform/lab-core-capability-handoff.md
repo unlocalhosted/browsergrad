@@ -150,6 +150,8 @@ Capability names are strings. Keep them descriptive and reusable:
 | `webgpu` | Browser WebGPU adapter is available. |
 | `wgsl-kernel` | Lab can run WGSL kernels directly. |
 | `cuda-lite-compiler` | Lab can compile BrowserGrad CUDA-lite source into Kernel IR/WGSL and run CPU reference plus WebGPU dispatch. |
+| `shader-f16` | Browser WebGPU device exposes the WGSL `shader-f16` feature. |
+| `subgroups` | Browser WebGPU device exposes WGSL subgroup operations. |
 | `flash-attention-oracle` | FlashAttention output, log-sum-exp, and gradients are checked by a deterministic oracle. |
 | `attention-oracle` | Scaled-dot-product attention output and memory behavior are checked by deterministic JS oracles. |
 | `cuda-compatible-subset` | Lab targets a BrowserGrad CUDA-like educational subset. |
@@ -217,6 +219,27 @@ Pass these labels through `createAssignmentCapabilityEnvironment()` when calling
 `createAssignmentRunPlan`, then use `assignmentRunReadiness(plan)`.
 The helper de-duplicates and sorts capabilities, and direct `browser` support
 wins over `simulated` or `external` labels for duplicate capability names.
+GPU platforms should derive browser GPU labels from feature detection, then pass
+them into the same environment helper:
+
+```ts
+import { detectKernelFeatures } from "@unlocalhosted/browsergrad-kernels";
+import {
+  browserGpuCapabilities,
+  createAssignmentCapabilityEnvironment,
+} from "@unlocalhosted/browsergrad-runtime";
+
+const features = await detectKernelFeatures(device);
+const environment = createAssignmentCapabilityEnvironment({
+  browserCapabilities: browserGpuCapabilities({
+    webgpu: features.webgpu,
+    wgslKernel: features.webgpu,
+    cudaLiteCompiler: features.webgpu,
+    shaderF16: features.shaderF16,
+    subgroups: features.subgroups,
+  }),
+});
+```
 For overall readiness status, selected `external` capabilities produce
 `external-only`, selected `simulated` capabilities produce `simulated`, and
 failed capability preflight becomes `blocked`.
