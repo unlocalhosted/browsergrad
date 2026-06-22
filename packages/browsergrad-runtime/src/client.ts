@@ -85,6 +85,7 @@ class SessionImpl implements Session {
   private disposed = false;
   private interruptBuffer: Uint8Array | null;
   private onInitProgress: ((event: PackageProgressEvent) => void) | undefined;
+  private activeExecId: number | null = null;
 
   constructor(worker: Worker, interruptBuffer: Uint8Array | null) {
     this.worker = worker;
@@ -131,123 +132,141 @@ class SessionImpl implements Session {
   interrupt(): void {
     if (this.disposed) return;
     if (!this.interruptBuffer) return;
+    if (this.activeExecId === null) return;
     this.interruptBuffer[0] = 2; // SIGINT — Pyodide raises KeyboardInterrupt
   }
 
   async exec(opts: ExecOptions): Promise<ExecResult> {
     this.assertLive();
+    if (this.activeExecId !== null) {
+      throw new BrowsergradError("Another exec is already running in this session");
+    }
     const id = this.nextId++;
+    this.activeExecId = id;
+    if (this.interruptBuffer) this.interruptBuffer[0] = 0;
     const t0 = performance.now();
     const assertions: Assertion[] = [];
     const artifacts: Artifact[] = [];
 
-    const donePromise = new Promise<ExecDoneResponse>((resolve, reject) => {
-      this.pending.set(id, {
-        kind: "exec",
-        resolve: (msg) => {
-          if (msg.kind === "exec:done") resolve(msg);
-          else reject(new BrowsergradError(`unexpected reply: ${msg.kind}`));
-        },
-        reject,
-        ...(opts.onStdout ? { onStdout: opts.onStdout } : {}),
-        ...(opts.onStderr ? { onStderr: opts.onStderr } : {}),
-        ...(opts.onAssertion ? { onAssertion: opts.onAssertion } : {}),
-        ...(opts.onArtifact ? { onArtifact: opts.onArtifact } : {}),
-        assertions,
-        artifacts,
-      });
-    });
-
-    /* AbortSignal + timeout handling.
-     * Both first attempt cooperative cancel via the interrupt buffer, then
-     * fall back to disposing the worker after a grace period. The exec:done
-     * (with KeyboardInterrupt error) arrives via the normal channel.
-     */
-    let cancelReason: "aborted" | "timeout" | null = null;
-    const cancelHandle = (reason: "aborted" | "timeout"): void => {
-      if (cancelReason !== null) return;
-      cancelReason = reason;
-      if (this.interruptBuffer) {
-        this.interruptBuffer[0] = 2;
-        // Safety net — if Python ignores SIGINT, terminate
-        setTimeout(() => {
-          if (this.pending.has(id)) void this.dispose();
-        }, COOPERATIVE_CANCEL_GRACE_MS);
-      } else {
-        void this.dispose();
-      }
-    };
-
-    let removeAbortListener: (() => void) | null = null;
-    if (opts.signal) {
-      if (opts.signal.aborted) {
-        cancelHandle("aborted");
-      } else {
-        const handler = (): void => cancelHandle("aborted");
-        opts.signal.addEventListener("abort", handler, { once: true });
-        removeAbortListener = () =>
-          opts.signal?.removeEventListener("abort", handler);
-      }
-    }
-
-    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
-    if (typeof opts.timeoutMs === "number" && opts.timeoutMs > 0) {
-      timeoutHandle = setTimeout(() => cancelHandle("timeout"), opts.timeoutMs);
-    }
-
-    this.post({ id, kind: "exec", code: opts.code });
-
-    let done: ExecDoneResponse;
     try {
-      done = await donePromise;
-    } catch (err) {
-      // Either disposed mid-exec (cooperative cancel grace expired, or signal
-      // aborted with no interrupt buffer) — synthesize an ExecResult so the
-      // caller has a uniform shape.
-      const kind =
-        cancelReason === "timeout"
-          ? "timeout"
-          : cancelReason === "aborted"
-            ? "aborted"
-            : "worker-crash";
+      const donePromise = new Promise<ExecDoneResponse>((resolve, reject) => {
+        this.pending.set(id, {
+          kind: "exec",
+          resolve: (msg) => {
+            if (msg.kind === "exec:done") resolve(msg);
+            else reject(new BrowsergradError(`unexpected reply: ${msg.kind}`));
+          },
+          reject,
+          ...(opts.onStdout ? { onStdout: opts.onStdout } : {}),
+          ...(opts.onStderr ? { onStderr: opts.onStderr } : {}),
+          ...(opts.onAssertion ? { onAssertion: opts.onAssertion } : {}),
+          ...(opts.onArtifact ? { onArtifact: opts.onArtifact } : {}),
+          assertions,
+          artifacts,
+        });
+      });
+
+      /* AbortSignal + timeout handling.
+       * Both first attempt cooperative cancel via the interrupt buffer, then
+       * fall back to disposing the worker after a grace period. The exec:done
+       * (with KeyboardInterrupt error) arrives via the normal channel.
+       */
+      let cancelReason: "aborted" | "timeout" | null = null;
+      const cancelHandle = (reason: "aborted" | "timeout"): void => {
+        if (cancelReason !== null) return;
+        cancelReason = reason;
+        if (this.interruptBuffer) {
+          this.interruptBuffer[0] = 2;
+          // Safety net — if Python ignores SIGINT, terminate
+          setTimeout(() => {
+            if (this.pending.has(id)) void this.dispose();
+          }, COOPERATIVE_CANCEL_GRACE_MS);
+        } else {
+          void this.dispose();
+        }
+      };
+
+      let removeAbortListener: (() => void) | null = null;
+      if (opts.signal) {
+        if (opts.signal.aborted) {
+          cancelHandle("aborted");
+        } else {
+          const handler = (): void => cancelHandle("aborted");
+          opts.signal.addEventListener("abort", handler, { once: true });
+          removeAbortListener = () =>
+            opts.signal?.removeEventListener("abort", handler);
+        }
+      }
+
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      if (typeof opts.timeoutMs === "number" && opts.timeoutMs > 0) {
+        timeoutHandle = setTimeout(() => cancelHandle("timeout"), opts.timeoutMs);
+      }
+
+      let done: ExecDoneResponse;
+      try {
+        try {
+          this.post({ id, kind: "exec", code: opts.code });
+        } catch (err) {
+          this.pending.delete(id);
+          throw err;
+        }
+
+        try {
+          done = await donePromise;
+        } catch (err) {
+          // Either disposed mid-exec (cooperative cancel grace expired, or signal
+          // aborted with no interrupt buffer) — synthesize an ExecResult so the
+          // caller has a uniform shape.
+          const kind =
+            cancelReason === "timeout"
+              ? "timeout"
+              : cancelReason === "aborted"
+                ? "aborted"
+                : "worker-crash";
+          return {
+            ok: false,
+            stdout: "",
+            stderr: "",
+            assertions,
+            artifacts,
+            error: {
+              kind,
+              message:
+                err instanceof Error ? err.message : "exec failed before completion",
+            },
+            durationMs: performance.now() - t0,
+          };
+        }
+      } finally {
+        if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+        if (removeAbortListener) removeAbortListener();
+      }
+
+      // If we initiated a cancel and Python honored it, the error came back as
+      // "interrupted". Re-label according to the cancel reason so the API stays clean.
+      let error = done.error;
+      if (error && error.kind === "interrupted") {
+        if (cancelReason === "aborted") {
+          error = { ...error, kind: "aborted" };
+        } else if (cancelReason === "timeout") {
+          error = { ...error, kind: "timeout" };
+        }
+      }
+
       return {
-        ok: false,
-        stdout: "",
-        stderr: "",
+        ok: done.ok,
+        stdout: done.stdout,
+        stderr: done.stderr,
         assertions,
         artifacts,
-        error: {
-          kind,
-          message:
-            err instanceof Error ? err.message : "exec failed before completion",
-        },
-        durationMs: performance.now() - t0,
+        error,
+        durationMs: done.durationMs,
       };
     } finally {
-      if (timeoutHandle !== null) clearTimeout(timeoutHandle);
-      if (removeAbortListener) removeAbortListener();
+      this.activeExecId = null;
+      if (this.interruptBuffer) this.interruptBuffer[0] = 0;
     }
-
-    // If we initiated a cancel and Python honored it, the error came back as
-    // "interrupted". Re-label according to the cancel reason so the API stays clean.
-    let error = done.error;
-    if (error && error.kind === "interrupted") {
-      if (cancelReason === "aborted") {
-        error = { ...error, kind: "aborted" };
-      } else if (cancelReason === "timeout") {
-        error = { ...error, kind: "timeout" };
-      }
-    }
-
-    return {
-      ok: done.ok,
-      stdout: done.stdout,
-      stderr: done.stderr,
-      assertions,
-      artifacts,
-      error,
-      durationMs: done.durationMs,
-    };
   }
 
   async clearNamespace(): Promise<void> {
@@ -286,7 +305,12 @@ class SessionImpl implements Session {
     const id = this.nextId++;
     return new Promise<WorkerToClient>((resolve, reject) => {
       this.pending.set(id, { kind: payload.kind, resolve, reject });
-      this.post({ ...payload, id } as ClientToWorker);
+      try {
+        this.post({ ...payload, id } as ClientToWorker);
+      } catch (err) {
+        this.pending.delete(id);
+        reject(err instanceof Error ? err : new BrowsergradError(String(err)));
+      }
     });
   }
 

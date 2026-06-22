@@ -16,6 +16,63 @@ import {
   type Session,
   type SessionOptions,
 } from "../src/index";
+import type { ClientToWorker, WorkerToClient } from "../src/protocol";
+
+class FakeWorker {
+  readonly messages: ClientToWorker[] = [];
+  readonly holdExec: boolean;
+  interruptBuffer: Uint8Array | undefined;
+  terminated = false;
+
+  private readonly messageListeners = new Set<(event: MessageEvent<WorkerToClient>) => void>();
+
+  constructor(options: { readonly holdExec?: boolean } = {}) {
+    this.holdExec = options.holdExec ?? false;
+  }
+
+  addEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    if (type !== "message") return;
+    this.messageListeners.add(listener as (event: MessageEvent<WorkerToClient>) => void);
+  }
+
+  removeEventListener(type: string, listener: EventListenerOrEventListenerObject): void {
+    if (type !== "message") return;
+    this.messageListeners.delete(listener as (event: MessageEvent<WorkerToClient>) => void);
+  }
+
+  postMessage(message: ClientToWorker): void {
+    this.messages.push(message);
+    if (message.kind === "init") {
+      this.interruptBuffer = message.interruptBuffer;
+      this.emit({ id: message.id, kind: "init:done" });
+      return;
+    }
+    if (message.kind === "exec" && !this.holdExec) {
+      this.finishExec(message.id);
+    }
+  }
+
+  terminate(): void {
+    this.terminated = true;
+  }
+
+  finishExec(id: number): void {
+    this.emit({
+      id,
+      kind: "exec:done",
+      ok: true,
+      stdout: "",
+      stderr: "",
+      error: null,
+      durationMs: 1,
+    });
+  }
+
+  private emit(message: WorkerToClient): void {
+    const event = { data: message } as MessageEvent<WorkerToClient>;
+    for (const listener of this.messageListeners) listener(event);
+  }
+}
 
 /**
  * v0 tests cover what we can without a real browser:
@@ -59,6 +116,52 @@ describe("createSession argument validation", () => {
     await expect(
       createSession({ pyodideIndexURL: "/pyodide/v0.26.4/" }),
     ).rejects.toThrow(/Worker is not available|pyodide/i);
+  });
+});
+
+describe("Session worker hardening", () => {
+  it("rejects concurrent exec calls on one worker session", async () => {
+    const worker = new FakeWorker({ holdExec: true });
+    const session = await createSession({
+      pyodideIndexURL: "/pyodide/",
+      worker: worker as unknown as Worker,
+      disableInterruptBuffer: true,
+    });
+
+    const first = session.exec({ code: "print('first')" });
+    await expect(session.exec({ code: "print('second')" })).rejects.toThrow(/already running/);
+
+    const execMessage = worker.messages.find((message) => message.kind === "exec");
+    expect(execMessage).toBeDefined();
+    worker.finishExec(execMessage!.id);
+    await expect(first).resolves.toMatchObject({ ok: true });
+    await session.dispose();
+  });
+
+  it("only sets the interrupt byte for active execs and resets it after completion", async () => {
+    if (typeof SharedArrayBuffer === "undefined") return;
+    const worker = new FakeWorker({ holdExec: true });
+    const session = await createSession({
+      pyodideIndexURL: "/pyodide/",
+      worker: worker as unknown as Worker,
+    });
+    const interruptBuffer = worker.interruptBuffer;
+    expect(interruptBuffer).toBeDefined();
+
+    session.interrupt();
+    expect(interruptBuffer![0]).toBe(0);
+
+    const first = session.exec({ code: "while True: pass" });
+    expect(interruptBuffer![0]).toBe(0);
+    session.interrupt();
+    expect(interruptBuffer![0]).toBe(2);
+
+    const execMessage = worker.messages.find((message) => message.kind === "exec");
+    expect(execMessage).toBeDefined();
+    worker.finishExec(execMessage!.id);
+    await first;
+    expect(interruptBuffer![0]).toBe(0);
+    await session.dispose();
   });
 });
 
