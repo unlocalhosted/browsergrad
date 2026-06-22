@@ -49,6 +49,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   value types, enabling byte-identical storage views for compiler-generated
   pool/data aliases.
 
+### Fixed
+
+- Mixed-view WGSL sequence inputs now validate against all byte-compatible
+  storage value types for a physical buffer, not only the first step-local
+  binding.
+
 ## [0.1.1] — 2026-06-02
 
 Dogfood pass on the published 0.1.0 tarball surfaced three issues. All fixed.

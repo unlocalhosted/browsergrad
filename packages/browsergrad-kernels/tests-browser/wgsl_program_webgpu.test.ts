@@ -245,6 +245,45 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     expect([...result.buffers.x as Float32Array]).toEqual([3, 6, 9, 12]);
   });
 
+  it("runs sequence aliases that reinterpret the same storage bytes by value type", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const writeBits = defineWgslKernelProgram({
+      name: "seq_mixed_write_bits",
+      workgroupSize: [4, 1, 1],
+      bindings: [{ kind: "storage", name: "words", valueType: "u32", access: "read_write", binding: 0 }],
+      wgsl: `
+@group(0) @binding(0) var<storage, read_write> words: array<u32>;
+@compute @workgroup_size(4, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < arrayLength(&words)) { words[gid.x] = bitcast<u32>(f32(gid.x) + 1.25); }
+}`,
+    });
+    const scaleFloats = defineWgslKernelProgram({
+      name: "seq_mixed_scale_floats",
+      workgroupSize: [4, 1, 1],
+      bindings: [{ kind: "storage", name: "floats", valueType: "f32", access: "read_write", binding: 0 }],
+      wgsl: `
+@group(0) @binding(0) var<storage, read_write> floats: array<f32>;
+@compute @workgroup_size(4, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < arrayLength(&floats)) { floats[gid.x] = floats[gid.x] * 2.0; }
+}`,
+    });
+
+    const result = await runWgslKernelProgramSequence(
+      device,
+      [
+        { program: writeBits, launch: { dispatchCount: [4, 1, 1] }, storageAliases: { words: "x" } },
+        { program: scaleFloats, launch: { dispatchCount: [4, 1, 1] }, storageAliases: { floats: "x" } },
+      ],
+      { buffers: { x: new Float32Array(4) } },
+    );
+
+    const bytes = (result.buffers.x as Uint32Array).buffer;
+    expect([...new Float32Array(bytes)]).toEqual([2.5, 4.5, 6.5, 8.5]);
+  });
+
   it("runs over caller-owned resident GPU buffers without forced readback", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

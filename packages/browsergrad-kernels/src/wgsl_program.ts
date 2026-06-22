@@ -67,6 +67,7 @@ export type WgslKernelBinding =
   | (WgslUniformBindingInput & { readonly binding: number })
   | (WgslTexture2DBindingInput & { readonly binding: number });
 type WgslStorageBinding = Extract<WgslKernelBinding, { readonly kind: "storage" }>;
+type CollectedWgslStorageBinding = WgslStorageBinding & { readonly valueTypes: readonly WgslValueType[] };
 
 export interface WgslKernelProgramInput {
   readonly name: string;
@@ -130,7 +131,7 @@ interface CachedWgslPipeline {
 }
 
 type KernelDeviceImpl = ReturnType<typeof asImpl>;
-type PreparedStorageBuffer = { binding: WgslStorageBinding; buffer: GPUBuffer; byteLength: number; owned: boolean };
+type PreparedStorageBuffer = { binding: CollectedWgslStorageBinding; buffer: GPUBuffer; byteLength: number; owned: boolean };
 type PreparedUniformBuffer = { buffer: GPUBuffer; byteLength: number };
 type PreparedExecutableStep = { pipeline: GPUComputePipeline; bindGroup: GPUBindGroup; program: WgslKernelProgram };
 
@@ -373,7 +374,7 @@ export async function prepareWgslKernelProgramSequence(
         continue;
       }
       if (!data) throw new KernelError(`missing storage buffer input: ${binding.name}`);
-      validateTypedArray(data, binding);
+      validateTypedArrayForStorageBinding(data, binding);
       const byteLength = validateStorageByteLength(data.byteLength, binding.name);
       const buffer = gpu.createBuffer({
         size: byteLength,
@@ -506,7 +507,7 @@ class PreparedWgslKernelSequenceImpl implements WgslPreparedKernelSequence {
 
     const readbackNames = new Set(options.readback ?? this.defaultReadbackNames);
     const readBuffers = new Set<GPUBuffer>();
-    const reads: Array<{ name: string; binding: WgslStorageBinding; readBuffer: GPUBuffer; byteLength: number }> = [];
+    const reads: Array<{ name: string; binding: CollectedWgslStorageBinding; readBuffer: GPUBuffer; byteLength: number }> = [];
     try {
       for (const name of readbackNames) {
         const entry = this.storageBuffers.get(name);
@@ -544,7 +545,7 @@ function hasPreparedUniformUpdates(options: WgslPreparedKernelSequenceRunOptions
 }
 
 async function collectReadbacks(
-  reads: readonly { readonly name: string; readonly binding: WgslStorageBinding; readonly readBuffer: GPUBuffer; readonly byteLength: number }[],
+  reads: readonly { readonly name: string; readonly binding: CollectedWgslStorageBinding; readonly readBuffer: GPUBuffer; readonly byteLength: number }[],
 ): Promise<Record<string, WgslTypedArray>> {
   const output: Record<string, WgslTypedArray> = {};
   const mapResults = await Promise.allSettled(reads.map((read) => read.readBuffer.mapAsync(GPUMapMode.READ)));
@@ -636,20 +637,21 @@ function paddedBytesForUniformWrite(
   return padded;
 }
 
-function collectStorageBindings(steps: readonly WgslKernelSequenceStep[]): readonly WgslStorageBinding[] {
-  const byName = new Map<string, WgslStorageBinding>();
+function collectStorageBindings(steps: readonly WgslKernelSequenceStep[]): readonly CollectedWgslStorageBinding[] {
+  const byName = new Map<string, CollectedWgslStorageBinding>();
   for (const step of steps) {
     for (const binding of step.program.bindings) {
       if (binding.kind !== "storage") continue;
       const storageName = storageBufferNameForStep(step, binding.name);
       const existing = byName.get(storageName);
       if (!existing) {
-        byName.set(storageName, { ...binding, name: storageName });
+        byName.set(storageName, { ...binding, name: storageName, valueTypes: [binding.valueType] });
         continue;
       }
       byName.set(storageName, {
         ...existing,
         access: existing.access === "read_write" || binding.access === "read_write" ? "read_write" : "read",
+        valueTypes: uniqueValueTypes([...existing.valueTypes, binding.valueType]),
       });
     }
   }
@@ -861,9 +863,19 @@ function validateTypedArray(data: WgslTypedArray, binding: Extract<WgslKernelBin
   }
 }
 
-function validateResidentStorageBuffer(resident: WgslResidentBuffer, binding: WgslStorageBinding): void {
+function validateTypedArrayForStorageBinding(data: WgslTypedArray, binding: CollectedWgslStorageBinding): void {
+  try {
+    validateTypedArray(data, binding);
+    return;
+  } catch (error) {
+    if (!canReinterpretStorageBinding(binding) || !storageArrayMatchesAnyValueType(data, binding.valueTypes)) throw error;
+  }
+}
+
+function validateResidentStorageBuffer(resident: WgslResidentBuffer, binding: CollectedWgslStorageBinding): void {
   validateResidentBuffer(resident, binding.name);
   if (resident.valueType !== binding.valueType) {
+    if (canReinterpretStorageBinding(binding) && binding.valueTypes.includes(resident.valueType)) return;
     throw new KernelError(`storage buffer ${binding.name} expects ${binding.valueType}, got ${resident.valueType}`);
   }
 }
@@ -885,10 +897,26 @@ function validateResidentByteLength(byteLength: number, name: string): number {
 }
 
 function validateResidentValueByteLength(byteLength: number, type: WgslValueType, name: string): void {
-  const divisor = type === "f16" ? 2 : 4;
+  const divisor = valueTypeByteSize(type);
   if (byteLength % divisor !== 0) {
     throw new KernelError(`storage buffer ${name} byteLength must be a multiple of ${divisor} for ${type}`);
   }
+}
+
+function canReinterpretStorageBinding(binding: CollectedWgslStorageBinding): boolean {
+  return binding.valueTypes.length > 1 && new Set(binding.valueTypes.map(valueTypeByteSize)).size === 1;
+}
+
+function storageArrayMatchesAnyValueType(data: WgslTypedArray, valueTypes: readonly WgslValueType[]): boolean {
+  return valueTypes.some((valueType) => data.BYTES_PER_ELEMENT === valueTypeByteSize(valueType));
+}
+
+function valueTypeByteSize(type: WgslValueType): number {
+  return type === "f16" ? 2 : 4;
+}
+
+function uniqueValueTypes(valueTypes: readonly WgslValueType[]): readonly WgslValueType[] {
+  return [...new Set(valueTypes)];
 }
 
 function validateTexture2DInput(input: WgslTexture2DInput, name: string): void {
