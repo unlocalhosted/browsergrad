@@ -115,7 +115,8 @@ from `@unlocalhosted/browsergrad-primitives` to model worker ranks, barriers,
 broadcasts, point-to-point messages, and `allReduce` results as deterministic
 event traces. Use `simulation.createTaskGraphSimulator()` from the same package for
 dependency-constrained task-system traces with deterministic ready/start/finish
-events and worker assignment. These APIs back `worker-mesh`,
+events and worker assignment. Register profile glue such as `_bg_task_graph`
+for task-runtime rubrics. These APIs back `worker-mesh`,
 `distributed-simulator`, `pthreads-simulator`, or `task-graph-simulator`
 profile paths when the teaching goal is ordering and participation rather than
 native throughput.

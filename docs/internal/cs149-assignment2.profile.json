@@ -31,7 +31,7 @@
   ],
   "oracles": [
     {
-      "name": "_bg_task_runtime_oracles",
+      "name": "_bg_task_graph",
       "js_module": "/assignments/cs149-assignment2/oracles/task-runtime.js",
       "export_name": "oracle"
     }

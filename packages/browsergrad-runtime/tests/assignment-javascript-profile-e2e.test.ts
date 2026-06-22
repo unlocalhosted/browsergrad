@@ -15,6 +15,10 @@ interface CpuParallelismOracle {
   partitionStaticWork: typeof simulation.partitionStaticWork;
 }
 
+interface TaskGraphOracle {
+  createTaskGraphSimulator: typeof simulation.createTaskGraphSimulator;
+}
+
 interface GpuPuzzleOracle {
   simulateCuda1DGrid: typeof simulateCuda1DGrid;
 }
@@ -22,6 +26,13 @@ interface GpuPuzzleOracle {
 const CS149_A1_PROFILE = JSON.parse(
   readFileSync(
     new URL("../../../docs/internal/cs149-assignment1.profile.json", import.meta.url),
+    "utf8",
+  ),
+);
+
+const CS149_A2_PROFILE = JSON.parse(
+  readFileSync(
+    new URL("../../../docs/internal/cs149-assignment2.profile.json", import.meta.url),
     "utf8",
   ),
 );
@@ -251,6 +262,85 @@ describe("profile-driven JavaScript assignment e2e", () => {
           readiness: "simulated",
           horizontalReductionRounds: 2,
         }),
+      }),
+    ]);
+  });
+
+  it("runs the CS149 A2 profile with a generic task-graph simulator", async () => {
+    const parsed = parseAssignmentProfile(CS149_A2_PROFILE);
+    expect(parsed).toMatchObject({ ok: true });
+    if (!parsed.ok) return;
+
+    const environment = createAssignmentCapabilityEnvironment({
+      browserCapabilities: ["performance-rubric"],
+      simulatedCapabilities: [
+        "pthreads-simulator",
+        "task-graph-simulator",
+        "worker-mesh",
+      ],
+    });
+    const contents = {
+      files: {
+        "/assignments/cs149-assignment2/rubric.js":
+          "export default async function rubric(ctx) { return ctx.id; }",
+      },
+    };
+    const oracle: TaskGraphOracle = {
+      createTaskGraphSimulator: simulation.createTaskGraphSimulator,
+    };
+    const rubric: AssignmentJavascriptRubric = (ctx) => {
+      const taskGraph = ctx.oracle<TaskGraphOracle>("_bg_task_graph");
+      const simulator = taskGraph.createTaskGraphSimulator({ workers: 2 });
+      simulator.addTask({ id: "root", duration: 2 });
+      simulator.addTask({ id: "left", duration: 3, dependsOn: ["root"] });
+      simulator.addTask({ id: "right", duration: 4, dependsOn: ["root"] });
+      const run = simulator.run();
+
+      if (
+        !ctx.allowedTests.includes("task_graph_dependencies") ||
+        run.makespan !== 6 ||
+        run.completedTaskIds.join(",") !== "root,left,right"
+      ) {
+        ctx.assertFail("cs149-a2-task-graph", "CS149 A2 task graph mismatch", {
+          expected: {
+            makespan: 6,
+            completedTaskIds: ["root", "left", "right"],
+          },
+          actual: run,
+        });
+        return;
+      }
+
+      ctx.assertPass("task_graph_dependencies");
+      ctx.emitJson("cs149-a2-summary", {
+        readiness: "simulated",
+        makespan: run.makespan,
+        starts: run.events.filter((event) => event.kind === "task-start").length,
+      });
+    };
+
+    const result = await runAssignmentJavascriptProfile(
+      parsed.profile,
+      environment,
+      contents,
+      rubric,
+      { oracles: { _bg_task_graph: oracle } },
+    );
+
+    expect(result.report.runnerRoute.target).toBe("javascript");
+    expect(result.report.readiness.status).toBe("simulated");
+    expect(result.run.assertions).toEqual([
+      { kind: "pass", name: "task_graph_dependencies" },
+    ]);
+    expect(result.run.artifacts).toEqual([
+      expect.objectContaining({
+        kind: "json",
+        name: "cs149-a2-summary",
+        data: {
+          readiness: "simulated",
+          makespan: 6,
+          starts: 3,
+        },
       }),
     ]);
   });

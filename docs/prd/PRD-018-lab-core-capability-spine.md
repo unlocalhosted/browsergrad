@@ -262,6 +262,10 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   browser-safe rank meshes, barriers, broadcasts, point-to-point messages, and
   `allReduce` event traces for DDP/FSDP/task-system teaching slices without
   native threads or MPI.
+- Task-graph runtime proof guarantee: the CS149 A2 profile registers generic
+  `_bg_task_graph` profile glue, and runtime integration proves a JavaScript
+  rubric can call deterministic task graph scheduling references through the
+  profile runner.
 - Distributed-training simulator guarantee: the same package exports
   `simulation.simulateDdpGradientSynchronization()`,
   `simulation.simulateFsdpParameterSharding()`,
