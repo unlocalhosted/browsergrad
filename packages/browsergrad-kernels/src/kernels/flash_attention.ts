@@ -274,7 +274,7 @@ export function flashAttentionDirect(
 function makeDummyBuffer(device: KernelDevice): GPUBuffer {
   // 16-byte zero buffer satisfying STORAGE | COPY_DST + read-only-storage binding.
   // Cheap to allocate per call; could be cached on the device adapter in PRD-012a.
-  const impl = (device as unknown as { gpu: GPUDevice }).gpu;
+  const impl = device.gpu;
   const buf = impl.createBuffer({
     size: 16,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,

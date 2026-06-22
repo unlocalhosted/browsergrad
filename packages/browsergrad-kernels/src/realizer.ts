@@ -228,7 +228,7 @@ export function createWebGpuRealizerBridge(
         // downstream ops can read it and a future materialize() can
         // copy from it.
         const src = get(handle, "cast[f32→f32]");
-        const impl = (device as unknown as { gpu: GPUDevice }).gpu;
+        const impl = device.gpu;
         let n = 1;
         for (const d of shape) n *= d;
         const byteLength = (n || 1) * 4;
