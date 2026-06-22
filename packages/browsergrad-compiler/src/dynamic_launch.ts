@@ -1,4 +1,5 @@
 import type { WgslTypedArray } from "@unlocalhosted/browsergrad-kernels";
+import { walkCudaLiteExpressions } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
 import { createCudaRuntimePlan } from "./runtime_plan.js";
 import type {
@@ -57,6 +58,8 @@ export function createCudaHostDynamicLaunchPlan(
   for (const item of launches) {
     const childKernel = compiled.ast.kernels.find((kernel) => kernel.name === item.statement.callee);
     if (!childKernel) return unsupported(`unknown dynamic kernel '${item.statement.callee}'`);
+    const childRuntimeGap = unsupportedHostLiftChildRuntime(childKernel);
+    if (childRuntimeGap) return unsupported(childRuntimeGap);
     const childBlock = evaluateLaunchVector(item.statement.block, item.env, input);
     const childGrid = evaluateLaunchVector(item.statement.grid, item.env, input);
     if (!childBlock || !childGrid) return unsupported("child launch dimensions must be host-evaluable");
@@ -110,19 +113,19 @@ function collectHostLiftedLaunches(
         const before = out.length;
         if (isSingleInvocationGuard(item.condition)) {
           containsLaunch = visit(item.consequent, current, true) || containsLaunch;
-          if (out.length > before && hasHostSideEffects(items.slice(index + 1))) unsafe = true;
+          if (out.length > before && hasParentSideEffectsAfterLaunch(items.slice(index + 1))) unsafe = true;
           continue;
         }
         const condition = evaluateHostNumber(item.condition, current, input);
         if (condition === undefined) return containsLaunch;
         containsLaunch = visit(condition !== 0 ? item.consequent : item.alternate ?? [], current, singleInvocationGuard) || containsLaunch;
-        if (out.length > before && hasHostSideEffects(items.slice(index + 1))) unsafe = true;
+        if (out.length > before && hasParentSideEffectsAfterLaunch(items.slice(index + 1))) unsafe = true;
         continue;
       }
       if (item.kind === "kernel-launch") {
         if (!(singleInvocationGuard || parentHasSingleInvocation)) unsafe = true;
         else {
-          if (hasHostSideEffects(items.slice(index + 1))) unsafe = true;
+          if (hasParentSideEffectsAfterLaunch(items.slice(index + 1))) unsafe = true;
           out.push({ statement: item, env: current });
           containsLaunch = true;
         }
@@ -134,7 +137,7 @@ function collectHostLiftedLaunches(
   return unsafe ? [] : out;
 }
 
-function hasHostSideEffects(statements: readonly CudaLiteStatement[]): boolean {
+function hasParentSideEffectsAfterLaunch(statements: readonly CudaLiteStatement[]): boolean {
   for (const statement of statements) {
     switch (statement.kind) {
       case "dim3":
@@ -144,12 +147,13 @@ function hasHostSideEffects(statements: readonly CudaLiteStatement[]): boolean {
         if (isHostNoopExpression(statement.expression)) continue;
         return true;
       case "if":
-        if (hasHostSideEffects(statement.consequent) || hasHostSideEffects(statement.alternate ?? [])) return true;
+        if (hasParentSideEffectsAfterLaunch(statement.consequent) || hasParentSideEffectsAfterLaunch(statement.alternate ?? [])) return true;
         continue;
       case "var":
         if (statement.storage === "local" && !statement.pointer) continue;
         return true;
       case "kernel-launch":
+        continue;
       case "asm":
       case "for":
       case "return":
@@ -158,6 +162,35 @@ function hasHostSideEffects(statements: readonly CudaLiteStatement[]): boolean {
     }
   }
   return false;
+}
+
+function unsupportedHostLiftChildRuntime(kernel: CudaLiteKernel): string | undefined {
+  if (containsKernelLaunch(kernel.body)) {
+    return `child kernel '${kernel.name}' contains nested device-side launches`;
+  }
+  let reason: string | undefined;
+  walkCudaLiteExpressions(kernel.body, (expression) => {
+    if (reason || expression.kind !== "call") return;
+    const name = expressionName(expression.callee);
+    if (name === "cudaMemcpyPeerAsync") reason = `child kernel '${kernel.name}' requires peer-copy orchestration`;
+    if (isGridSyncCall(expression)) reason = `child kernel '${kernel.name}' requires grid-sync orchestration`;
+  });
+  return reason;
+}
+
+function containsKernelLaunch(statements: readonly CudaLiteStatement[]): boolean {
+  for (const statement of statements) {
+    if (statement.kind === "kernel-launch") return true;
+    if (statement.kind === "if" && (containsKernelLaunch(statement.consequent) || containsKernelLaunch(statement.alternate ?? []))) return true;
+    if (statement.kind === "for" && containsKernelLaunch(statement.body)) return true;
+  }
+  return false;
+}
+
+function isGridSyncCall(expression: CudaLiteExpression): boolean {
+  return expression.kind === "call" &&
+    expression.callee.kind === "member" &&
+    expression.callee.property === "sync";
 }
 
 function isHostNoopExpression(expression: CudaLiteExpression): boolean {

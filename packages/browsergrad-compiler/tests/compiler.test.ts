@@ -1103,6 +1103,40 @@ __global__ void parent(float *x, int n) {
     });
   });
 
+  it("plans multiple ordered host-liftable dynamic launches", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void addOne(float *dst, int n) {
+  int idx = threadIdx.x;
+  if (idx < n) { dst[idx] += 1.0f; }
+}
+__global__ void scaleTwo(float *out, int n) {
+  int idx = threadIdx.x;
+  if (idx < n) { out[idx] *= 2.0f; }
+}
+__global__ void parent(float *x, int n) {
+  if (threadIdx.x < 1) {
+    dim3 grid(1);
+    dim3 block(n);
+    addOne<<<grid, block>>>(x, n);
+    cudaDeviceSynchronize();
+    scaleTwo<<<grid, block>>>(x, n);
+    cudaDeviceSynchronize();
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const plan = createCudaHostDynamicLaunchPlan(
+      compiled,
+      { buffers: { x: new Float32Array([1, 2]) }, scalars: { n: 2 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(plan.supported).toBe(true);
+    expect(plan.launches.map((item) => item.kernel.name)).toEqual(["addOne", "scaleTwo"]);
+  });
+
   it("keeps pointer-offset dynamic launches reference-only for WebGPU", async () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void child(float *out) {
