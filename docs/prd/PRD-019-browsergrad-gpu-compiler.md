@@ -101,10 +101,12 @@ backend, not the first dependency.
 - Support CUDA-lite v0: `__global__ void`, pointer/scalar params, builtins
   `threadIdx/blockIdx/blockDim/gridDim`, declarations, assignment, array
   indexing, `if`, canonical `for`, fixed `__shared__` arrays,
-  `__syncthreads()`, `min/max/sqrtf/expf/logf`, and `atomicAdd` for `i32/u32`.
-- Emit explicit errors for broad C++, templates, classes, dynamic shared memory,
-  device function definitions, divergent barriers, const-pointer writes,
-  unsupported atomics, and unavailable f16/subgroup features.
+  `__syncthreads()`, scalar `__device__` helpers, selected warp/cooperative
+  group primitives, dynamic shared memory with launch metadata, simple runtime
+  calls in CPU reference, `min/max/sqrtf/expf/logf`, and common atomics.
+- Emit explicit diagnostics for broad C++, templates, classes, unsupported
+  runtime orchestration, divergent barriers, const-pointer writes, unsupported
+  atomics, and unavailable f16/subgroup features.
 - Add examples: SAXPY, guarded map, and shared-memory tiled matmul.
 - Add platform capability vocabulary: `cuda-lite-compiler`.
 
@@ -123,14 +125,18 @@ backend, not the first dependency.
   `pnpm --filter @unlocalhosted/browsergrad-compiler test:browser`,
   plus build/typecheck for both packages.
 
-## Out of Scope
+## Expansion Tracks
 
-- Full CUDA/HIP/C++ compatibility.
-- Browser LLVM/chipStar/clspv/Tint bundle.
-- Triton-compatible syntax.
-- Device functions, templates, classes, warp intrinsics, dynamic shared memory,
-  and broad CUDA runtime APIs.
-- Pyodide-specific assignment wiring or CraftingAttention platform e2e.
+- CUDA/HIP/C++ compatibility grows by semantic families, not by course-specific
+  patches: frontend, memory, atomic, texture, subgroup, library, runtime,
+  feature, and safety.
+- Browser LLVM/chipStar/clspv/Tint remains a power backend candidate once the
+  BrowserGrad IR path owns diagnostics, traces, and WebGPU dispatch truth.
+- Triton-compatible syntax can become another frontend over the same Kernel IR.
+- Broad runtime APIs advance through explicit orchestration plans: device
+  launches, sync, peer copies, streams/events, then host-side multi-dispatch.
+- Pyodide assignment wiring and CraftingAttention platform e2e sit above this
+  compiler package; they should consume generic compiler/runtime capabilities.
 
 ## Further Notes
 

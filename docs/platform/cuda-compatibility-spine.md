@@ -27,6 +27,9 @@ Public APIs:
 - `describeCudaDiagnostic(diagnostic)` maps compiler diagnostics to semantic features.
 - `createCudaLoweringPlan(diagnostics)` summarizes whether a kernel can run on GPU,
   requires GPU polyfill, has CPU reference coverage, or is unsupported.
+- `createCudaRuntimePlan(compiled)` reports runtime operations that need host
+  orchestration before single-dispatch WebGPU can run: device launches,
+  device sync, peer copies, and grid sync.
 
 Rule: do not add assignment-specific fixes. Add semantic primitives, reference
 truth, WGSL lowering, browser tests, and corpus audit evidence.
