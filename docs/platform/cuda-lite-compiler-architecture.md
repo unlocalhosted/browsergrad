@@ -170,6 +170,7 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
 Current WebGPU smoke/perf gate:
 
 ```sh
+pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu
 pnpm --filter @unlocalhosted/browsergrad-compiler bench:browser -- --require-webgpu --expect-prepared-ratio-max 10
 ```
 

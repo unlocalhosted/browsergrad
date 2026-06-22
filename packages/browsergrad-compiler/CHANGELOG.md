@@ -49,3 +49,6 @@
   pseudocode no longer counts as a hard compiler failure.
 - CUDA corpus audit now skips explicit pseudocode solution blocks; CUDA-120
   real-code baseline is `235/240` WebGPU runnable and `0/240` hard failures.
+- Added `e2e:webgpu`, a real-browser reference-vs-WebGPU proof for examples,
+  grid-sync phases, host peer copy, host dynamic launch, and prepared resident
+  dispatch.

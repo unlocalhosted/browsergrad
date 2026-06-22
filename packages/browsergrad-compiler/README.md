@@ -219,11 +219,17 @@ compiler names.
 ```bash
 pnpm test:browser
 pnpm test:browser:open
+pnpm e2e:webgpu
 ```
 
 `test:browser:open` keeps Chromium open for inspection; quit with `q`. If the
 Vitest browser watch rerun path reports an orchestrator-session error, restart
 the command instead of trusting that rerun.
+
+`e2e:webgpu` launches a real browser and runs example kernels plus runtime
+orchestration probes against both `runCompiledKernelReference()` and real
+WebGPU. It covers SAXPY, guarded map, tiled matmul, grid-sync phases, host
+peer copy, host dynamic launch, and prepared resident dispatch.
 
 ## Corpus Audit
 

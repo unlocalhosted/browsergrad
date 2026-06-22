@@ -115,6 +115,18 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
   `--expect-hard-fail-max` so feature triage is grounded in executable
   regression gates instead of prose-only notes.
 
+Current real-browser e2e gate:
+
+```sh
+pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu
+```
+
+- Runs compiler examples and runtime-orchestration probes through CPU reference
+  and real WebGPU in Chromium, then compares outputs. Covered probes: SAXPY,
+  guarded map, tiled matmul, grid-sync phases, host peer copy, host dynamic
+  launch, and prepared resident dispatch.
+- Use `-- --require-webgpu` on machines where absence of WebGPU should fail CI.
+
 Performance gate:
 
 - Compiler/runtime perf is tracked by
