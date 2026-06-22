@@ -33,6 +33,7 @@ resident buffers, and readback mechanics.
 - `src/wgsl.ts`: WGSL emission only. It should not rediscover CUDA semantics.
 - `src/runtime_plan.ts`: CUDA runtime operations discovered from IR.
 - `src/webgpu_orchestration.ts`: exact WebGPU executable plan selection.
+- `src/launch.ts`: shared launch-shape diagnostics for reference/WebGPU parity.
 - `src/runner.ts`: public compile/run/prepare APIs.
 - `src/compatibility.ts`: diagnostic to semantic-family mapping.
 

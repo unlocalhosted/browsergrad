@@ -7,6 +7,7 @@ import {
 } from "@unlocalhosted/browsergrad-kernels";
 import { analyzeCudaLite, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
 import { createCudaLoweringPlan } from "./compatibility.js";
+import { validateCudaKernelLaunch } from "./launch.js";
 import { parseCudaLite } from "./parser.js";
 import { runCompiledKernelReference } from "./reference.js";
 import { emitKernelIrWgsl } from "./wgsl.js";
@@ -85,7 +86,7 @@ export async function runCompiledKernelWebGpu(
   input: CompiledKernelInput,
   launch: KernelLaunch,
 ): Promise<ReferenceKernelResult> {
-  validateLaunch(launch, compiled.ir.workgroupSize);
+  validateCudaKernelLaunch(launch, compiled.ir.workgroupSize);
   const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, {
     compileKernel: compileCudaLiteKernel,
   });
@@ -106,7 +107,7 @@ export async function prepareCompiledKernelWebGpu(
   input: CompiledKernelInput,
   launch: KernelLaunch,
 ): Promise<PreparedCompiledKernelWebGpu> {
-  validateLaunch(launch, compiled.ir.workgroupSize);
+  validateCudaKernelLaunch(launch, compiled.ir.workgroupSize);
   const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, {
     compileKernel: compileCudaLiteKernel,
   });
@@ -285,17 +286,4 @@ function hashString(value: string): string {
     hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   return hash.toString(16).padStart(8, "0");
-}
-
-function validateLaunch(launch: KernelLaunch, workgroupSize: readonly [number, number, number]): void {
-  for (let axis = 0; axis < 3; axis++) {
-    if (launch.blockDim[axis] !== workgroupSize[axis]) {
-      throw new CudaLiteCompilerError("launch.blockDim must match compiled workgroupSize", [{
-        code: "launch-workgroup-mismatch",
-        severity: "error",
-        message: "launch.blockDim must match compiled workgroupSize",
-        span: { start: 0, end: 0, line: 1, column: 1 },
-      }]);
-    }
-  }
 }

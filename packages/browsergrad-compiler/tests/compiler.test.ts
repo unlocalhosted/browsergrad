@@ -5,6 +5,7 @@ import {
   compileCudaLiteKernel,
   createCudaGridSyncPhasePlan,
   createCudaHostDynamicLaunchPlan,
+  createCudaLaunchValidationDiagnostics,
   createCudaLoweringPlan,
   createCudaPeerCopyPlan,
   createCudaRuntimePlan,
@@ -15,6 +16,7 @@ import {
   parseCudaLite,
   runCompiledKernelReference,
   runCompiledKernelWebGpu,
+  validateCudaKernelLaunch,
 } from "../src/index";
 
 const SAXPY = `
@@ -838,6 +840,36 @@ __global__ void parent(float *x, int n) {
       expect(dynamicPlan.steps).toHaveLength(2);
       expect(dynamicPlan.steps[1]?.storageAliases).toEqual({ dst: "x" });
     }
+  });
+
+  it("validates launch shape before reference or WebGPU execution", async () => {
+    const compiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
+    const input = {
+      buffers: {
+        x: new Float32Array([1, 2]),
+        y: new Float32Array([10, 20]),
+      },
+      scalars: { a: 2, n: 2 },
+    };
+    const badGrid = { gridDim: [0, 1, 1] as const, blockDim: [8, 1, 1] as const };
+    const badBlock = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+
+    expect(createCudaLaunchValidationDiagnostics(badGrid, compiled.ir.workgroupSize)).toContainEqual(expect.objectContaining({
+      code: "launch-grid-dim-invalid",
+      message: "launch.gridDim[0] must be a positive integer",
+    }));
+    expect(() => validateCudaKernelLaunch(badBlock, compiled.ir.workgroupSize)).toThrow(CudaLiteCompilerError);
+    expect(() => runCompiledKernelReference(compiled, input, badGrid)).toThrow("launch.gridDim[0] must be a positive integer");
+    await expect(runCompiledKernelWebGpu(
+      {} as never,
+      compiled,
+      input,
+      badBlock,
+    )).rejects.toMatchObject({
+      diagnostics: [expect.objectContaining({
+        code: "launch-workgroup-mismatch",
+      })],
+    });
   });
 
   it("maps logical DevicePool readback names to internal storage bindings", () => {

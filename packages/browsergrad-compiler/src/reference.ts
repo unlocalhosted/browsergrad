@@ -1,5 +1,6 @@
 import type { WgslTypedArray } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames } from "./ast_queries.js";
+import { validateCudaKernelLaunch } from "./launch.js";
 import {
   CudaLiteCompilerError,
   type CompiledCudaLiteKernel,
@@ -114,7 +115,7 @@ export function runCompiledKernelReference(
   input: CompiledKernelInput,
   launch: KernelLaunch,
 ): ReferenceKernelResult {
-  validateLaunch(launch, compiled.ir.workgroupSize);
+  validateCudaKernelLaunch(launch, compiled.ir.workgroupSize);
   validateInputs(compiled, input);
   const buffers = cloneBuffers(input.buffers);
   const constants = cloneConstants(input.constants ?? {});
@@ -1689,20 +1690,6 @@ function freezeTrace(trace: MutableTrace): KernelThreadTrace {
     sharedReads: trace.sharedReads.map((item) => ({ ...item })),
     sharedWrites: trace.sharedWrites.map((item) => ({ ...item })),
   };
-}
-
-function validateLaunch(launch: KernelLaunch, workgroupSize: readonly [number, number, number]): void {
-  for (let axis = 0; axis < 3; axis++) {
-    const block = launch.blockDim[axis];
-    const grid = launch.gridDim[axis];
-    const expected = workgroupSize[axis];
-    if (block !== expected) {
-      throw compilerFailure("launch.blockDim must match compiled workgroupSize for reference/WebGPU parity");
-    }
-    if (grid === undefined || !Number.isInteger(grid) || grid <= 0) {
-      throw compilerFailure("launch.gridDim values must be positive integers");
-    }
-  }
 }
 
 function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelInput): void {

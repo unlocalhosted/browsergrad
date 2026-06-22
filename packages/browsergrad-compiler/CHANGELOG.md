@@ -52,3 +52,5 @@
 - Added `e2e:webgpu`, a real-browser reference-vs-WebGPU proof for examples,
   grid-sync phases, host peer copy, host dynamic launch, and prepared resident
   dispatch.
+- Added shared launch-shape diagnostics so platform preflight, CPU reference,
+  and WebGPU runners reject invalid grid/block dimensions consistently.

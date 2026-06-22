@@ -30,6 +30,9 @@ Public APIs:
 - `createCudaRuntimePlan(compiled)` reports runtime operations that need host
   orchestration before single-dispatch WebGPU can run: device launches,
   device sync, peer copies, and grid sync.
+- `createCudaLaunchValidationDiagnostics(launch, workgroupSize)` reports
+  launch-shape errors before execution. `validateCudaKernelLaunch()` throws the
+  same diagnostics. Reference and WebGPU runners share this validator.
 - `createCudaWebGpuExecutionPlan(compiled, input, launch, { compileKernel })`
   returns the exact executable WebGPU plan kind and sequence steps:
   `single-dispatch`, `grid-sync-phases`, `host-dynamic-launch`, or
