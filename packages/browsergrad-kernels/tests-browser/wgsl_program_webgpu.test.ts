@@ -389,4 +389,30 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       destroyWgslStorageBuffer(x);
     }
   });
+
+  it("rejects running a prepared WGSL sequence after destroy", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const program = defineWgslKernelProgram({
+      name: "prepared_destroyed",
+      workgroupSize: [1, 1, 1],
+      bindings: [{ kind: "storage", name: "x", valueType: "f32", access: "read_write" }],
+      wgsl: `
+@group(0) @binding(0) var<storage, read_write> x: array<f32>;
+@compute @workgroup_size(1, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < arrayLength(&x)) { x[gid.x] = x[gid.x] + 1.0; }
+}`,
+    });
+    const prepared = await prepareWgslKernelProgramSequence(
+      device,
+      [{ program, launch: { dispatchCount: [1, 1, 1] } }],
+      { buffers: { x: new Float32Array([1]) } },
+    );
+
+    prepared.destroy();
+    prepared.destroy();
+
+    await expect(prepared.run()).rejects.toThrow(/prepared WGSL sequence has been destroyed/);
+  });
 });

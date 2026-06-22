@@ -268,6 +268,33 @@ describe("real WebGPU — CUDA-lite compiler", () => {
     }
   });
 
+  it("rejects running a prepared compiled WebGPU kernel after destroy", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const compiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
+    const prepared = await prepareCompiledKernelWebGpu(
+      device,
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([1, 2, 3, 4]),
+          y: new Float32Array([10, 20, 30, 40]),
+        },
+        scalars: { a: 2, n: 4 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    );
+
+    prepared.destroy();
+    prepared.destroy();
+
+    await expect(prepared.run()).rejects.toMatchObject({
+      diagnostics: [{
+        code: "prepared-webgpu-kernel-destroyed",
+      }],
+    });
+  });
+
   it("runs compiled shared-memory tiled matmul through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(TILED_MATMUL, { workgroupSize: [2, 2, 1] });

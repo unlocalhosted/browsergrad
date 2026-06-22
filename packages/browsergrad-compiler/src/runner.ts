@@ -115,6 +115,7 @@ export async function prepareCompiledKernelWebGpu(
 
 class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
   readonly stepCount: number;
+  private destroyed = false;
 
   constructor(
     private readonly compiled: CompiledCudaLiteKernel,
@@ -125,11 +126,21 @@ class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
   }
 
   async run(options?: PreparedCompiledKernelWebGpuRunOptions): Promise<ReferenceKernelResult> {
+    if (this.destroyed) {
+      throw new CudaLiteCompilerError("prepared compiled WebGPU kernel has been destroyed", [{
+        code: "prepared-webgpu-kernel-destroyed",
+        severity: "error",
+        message: "prepared compiled WebGPU kernel has been destroyed",
+        span: { start: 0, end: 0, line: 1, column: 1 },
+      }]);
+    }
     const result = await this.prepared.run(normalizePreparedRunOptions(this.compiled, options));
     return { buffers: normalizeCudaWebGpuReadback(this.compiled, result.buffers), trace: [] };
   }
 
   destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
     this.prepared.destroy();
   }
 }
