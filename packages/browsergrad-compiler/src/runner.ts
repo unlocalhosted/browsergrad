@@ -28,6 +28,8 @@ import {
 } from "./types.js";
 import { formatCudaLiteDiagnostics } from "./diagnostics.js";
 
+const peerCopyProgramCache = new Map<CudaPeerCopyOperation["valueType"], WgslKernelProgram>();
+
 export function compileCudaLiteKernel(
   source: string,
   options: CompileCudaLiteOptions = {},
@@ -127,8 +129,10 @@ async function tryRunHostLiftedPeerCopy(
 }
 
 function definePeerCopyProgram(copy: CudaPeerCopyOperation): WgslKernelProgram {
+  const cached = peerCopyProgramCache.get(copy.valueType);
+  if (cached) return cached;
   const valueType = copy.valueType === "float" ? "f32" : copy.valueType === "int" ? "i32" : "u32";
-  return defineWgslKernelProgram({
+  const program = defineWgslKernelProgram({
     name: `bg_peer_copy_${copy.valueType}`,
     workgroupSize: [64, 1, 1],
     bindings: [
@@ -154,6 +158,8 @@ function definePeerCopyProgram(copy: CudaPeerCopyOperation): WgslKernelProgram {
       "}",
     ].join("\n"),
   });
+  peerCopyProgramCache.set(copy.valueType, program);
+  return program;
 }
 
 function packPeerCopyParams(copy: CudaPeerCopyOperation): Uint8Array {
@@ -198,20 +204,11 @@ async function tryRunHostLiftedDynamicLaunch(
     launch: { dispatchCount: dispatchCountForLaunch(launch) },
     ...(parentInput.uniforms === undefined ? {} : { uniforms: parentInput.uniforms }),
   }];
+  const childCompileCache = new Map<string, CompiledCudaLiteKernel>();
 
   for (const item of plan.launches) {
-    let childCompiled: CompiledCudaLiteKernel;
-    try {
-      childCompiled = compileCudaLiteKernel(compiled.ast.source, {
-        kernelName: item.kernel.name,
-        features: featureOptionsFor(compiled.ir.requiredFeatures),
-        referenceCudaRuntime: true,
-        workgroupSize: item.blockDim,
-        pointerBaseOffsets: item.pointerBaseOffsets,
-      });
-    } catch {
-      return undefined;
-    }
+    const childCompiled = getOrCompileDynamicChild(compiled, item, childCompileCache);
+    if (!childCompiled) return undefined;
     const childRuntime = createCudaRuntimePlan(childCompiled);
     if (!childRuntime.operations.every((operation) => operation.kind === "device-sync" || operation.kind === "peer-copy")) return undefined;
     const childWgslInput = createWgslRunInput(childCompiled, item.input);
@@ -242,6 +239,37 @@ async function tryRunHostLiftedDynamicLaunch(
     },
   );
   return { buffers: normalizePoolReadback(compiled, result.buffers), trace: [] };
+}
+
+function getOrCompileDynamicChild(
+  parent: CompiledCudaLiteKernel,
+  item: {
+    readonly kernel: { readonly name: string };
+    readonly blockDim: readonly [number, number, number];
+    readonly pointerBaseOffsets: Readonly<Record<string, number>>;
+  },
+  cache: Map<string, CompiledCudaLiteKernel>,
+): CompiledCudaLiteKernel | undefined {
+  const key = JSON.stringify({
+    kernelName: item.kernel.name,
+    blockDim: item.blockDim,
+    pointerBaseOffsets: item.pointerBaseOffsets,
+  });
+  const cached = cache.get(key);
+  if (cached) return cached;
+  try {
+    const compiled = compileCudaLiteKernel(parent.ast.source, {
+      kernelName: item.kernel.name,
+      features: featureOptionsFor(parent.ir.requiredFeatures),
+      referenceCudaRuntime: true,
+      workgroupSize: item.blockDim,
+      pointerBaseOffsets: item.pointerBaseOffsets,
+    });
+    cache.set(key, compiled);
+    return compiled;
+  } catch {
+    return undefined;
+  }
 }
 
 function createWgslRunInput(
