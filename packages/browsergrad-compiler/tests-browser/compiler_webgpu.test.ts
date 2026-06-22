@@ -258,7 +258,7 @@ describe("real WebGPU — CUDA-lite compiler", () => {
       expect([...firstReadback as Float32Array]).toEqual([12, 24, 36, 48]);
 
       writeWgslStorageBuffer(device, y, new Float32Array([1, 1, 1, 1]));
-      await prepared.run({ readback: [] });
+      await prepared.run({ readback: [], awaitCompletion: true });
       const secondReadback = await readWgslStorageBuffer(device, y);
       expect([...secondReadback as Float32Array]).toEqual([3, 5, 7, 9]);
 
@@ -443,7 +443,7 @@ __global__ void gridSync(float *scratch, float *out, float scale) {
 
       writeWgslStorageBuffer(device, scratch, new Float32Array([0, 0]));
       writeWgslStorageBuffer(device, out, new Float32Array([0]));
-      const second = await prepared.run({ scalars: { scale: 2 }, readback: ["out"] });
+      const second = await prepared.run({ scalars: { scale: 2 }, readback: ["out"], awaitCompletion: true });
       expect([...second.buffers.out as Float32Array]).toEqual([6]);
     } finally {
       prepared.destroy();
@@ -653,7 +653,7 @@ __global__ void parent(float *x, int n) {
       expect([...firstReadback as Float32Array]).toEqual([2, 3]);
 
       writeWgslStorageBuffer(device, x, new Float32Array([4, 5]));
-      const second = await prepared.run({ readback: ["x"] });
+      const second = await prepared.run({ readback: ["x"], awaitCompletion: true });
       expect([...second.buffers.x as Float32Array]).toEqual([5, 6]);
     } finally {
       prepared.destroy();

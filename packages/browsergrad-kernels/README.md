@@ -187,13 +187,15 @@ const prepared = await prepareWgslKernelProgramSequence(
 );
 await prepared.run();
 await prepared.run({ readback: [] });
+await prepared.run({ readback: [], awaitCompletion: true });
 await prepared.run({ uniforms: { params: new Float32Array([3]) } });
 prepared.destroy();
 ```
 
 Prepared uniform updates rewrite existing uniform buffers and reuse bind groups.
 Use `stepUniforms` only when sequence steps need different values for the same
-uniform binding name.
+uniform binding name. Use `awaitCompletion: true` for no-readback timing gates
+or platform watchdogs that need command completion, not only command submission.
 
 ### Kernel rubric assertions
 

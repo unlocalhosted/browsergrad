@@ -107,18 +107,16 @@ const html = String.raw`<!doctype html>
             });
             const preparedRun = await measure("webgpu:saxpy-prepared-resident", runs, warmup, async () => {
               writeWgslStorageBuffer(device, y, yInitial);
-              await prepared.run({ readback: [] });
-              await device.gpu.queue.onSubmittedWorkDone();
+              await prepared.run({ readback: [], awaitCompletion: true });
             });
             let scalar = 4;
             const preparedScalarUpdate = await measure("webgpu:saxpy-prepared-scalar-update", runs, warmup, async () => {
               writeWgslStorageBuffer(device, y, yInitial);
               scalar = scalar === 4 ? 3 : 4;
-              await prepared.run({ scalars: { a: scalar }, readback: [] });
-              await device.gpu.queue.onSubmittedWorkDone();
+              await prepared.run({ scalars: { a: scalar }, readback: [], awaitCompletion: true });
             });
             writeWgslStorageBuffer(device, y, yInitial);
-            await prepared.run({ scalars: { a: 4 }, readback: [] });
+            await prepared.run({ scalars: { a: 4 }, readback: [], awaitCompletion: true });
             const out = await readWgslStorageBuffer(device, y);
             const ok = out[0] === 6 && out[length - 1] === 6;
             return {

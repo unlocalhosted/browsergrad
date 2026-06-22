@@ -113,6 +113,7 @@ export interface WgslKernelRunResult {
 
 export interface WgslPreparedKernelSequenceRunOptions {
   readonly readback?: readonly string[];
+  readonly awaitCompletion?: boolean;
   readonly uniforms?: Readonly<Record<string, ArrayBuffer | ArrayBufferView>>;
   readonly stepUniforms?: Readonly<Record<number, Readonly<Record<string, ArrayBuffer | ArrayBufferView>>>>;
 }
@@ -520,8 +521,10 @@ class PreparedWgslKernelSequenceImpl implements WgslPreparedKernelSequence {
       }
 
       gpu.queue.submit([encoder.finish()]);
-      this.lastSubmission = gpu.queue.onSubmittedWorkDone();
+      const completion = gpu.queue.onSubmittedWorkDone();
+      this.lastSubmission = completion;
       const output = await collectReadbacks(reads);
+      if (options.awaitCompletion === true) await completion;
       for (let i = 0; i < this.stepCount; i++) this.impl.recordInvocation();
       return { buffers: output };
     } finally {

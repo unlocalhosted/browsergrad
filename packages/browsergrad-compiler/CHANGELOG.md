@@ -26,5 +26,7 @@
   callers can request `"dp"` instead of internal WGSL storage names.
 - Prepared compiler runners can update scalar params for single-dispatch and
   grid-sync phase plans without rebuilding bind groups.
+- Prepared compiler runners pass through `awaitCompletion: true` for no-readback
+  hot-loop timing and watchdog gates.
 - Added `pnpm bench` benchmark harness for compiler, CPU reference, and
   orchestration planner timing.

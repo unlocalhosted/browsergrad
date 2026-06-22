@@ -381,7 +381,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       expect([...firstReadback as Float32Array]).toEqual([3, 6, 9, 12]);
 
       writeWgslStorageBuffer(device, x, new Float32Array([2, 4, 6, 8]));
-      await prepared.run({ readback: [] });
+      await prepared.run({ readback: [], awaitCompletion: true });
       const secondReadback = await readWgslStorageBuffer(device, x);
       expect([...secondReadback as Float32Array]).toEqual([6, 12, 18, 24]);
     } finally {

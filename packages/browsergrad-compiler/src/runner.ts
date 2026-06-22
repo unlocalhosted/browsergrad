@@ -29,6 +29,7 @@ import { formatCudaLiteDiagnostics } from "./diagnostics.js";
 
 export interface PreparedCompiledKernelWebGpuRunOptions {
   readonly readback?: readonly string[];
+  readonly awaitCompletion?: boolean;
   readonly scalars?: Readonly<Record<string, number>>;
 }
 
@@ -159,11 +160,13 @@ function normalizePreparedRunOptions(
   if (!options) return undefined;
   const out: {
     readback?: readonly string[];
+    awaitCompletion?: boolean;
     uniforms?: Readonly<Record<string, ArrayBuffer | ArrayBufferView>>;
   } = {};
   if (options.readback !== undefined) {
     out.readback = normalizeCudaWebGpuReadbackNames(compiled, options.readback);
   }
+  if (options.awaitCompletion !== undefined) out.awaitCompletion = options.awaitCompletion;
   if (options.scalars !== undefined) {
     if (kind === "host-dynamic-launch" || kind === "host-peer-copy") {
       throw new CudaLiteCompilerError("prepared scalar updates are not supported for host-orchestrated WebGPU plans yet", [{

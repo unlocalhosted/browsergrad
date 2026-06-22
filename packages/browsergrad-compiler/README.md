@@ -69,7 +69,7 @@ actual materialization boundary.
 Readback names are logical compiler names: use `"dp"` for a `DevicePool* dp`
 input, not its internal WGSL backing buffer name.
 
-If launch shape, scalar params, and bindings stay fixed across iterations, use
+If launch shape and bindings stay fixed across iterations, use
 `prepareCompiledKernelWebGpu()` once. It prebuilds the WebGPU sequence, pipelines,
 and bind groups, then reruns over resident buffers without per-iteration setup:
 
@@ -83,13 +83,15 @@ const prepared = await prepareCompiledKernelWebGpu(device, compiled, {
 
 await prepared.run();
 await prepared.run({ readback: [] });
-await prepared.run({ scalars: { a: 4 } });
+await prepared.run({ scalars: { a: 4 }, readback: [], awaitCompletion: true });
 prepared.destroy();
 ```
 
 Prepared scalar updates are supported for single-dispatch and grid-sync phase
 plans. Host-orchestrated dynamic launch / peer-copy plans keep scalar params
-fixed until step-specific compiler uniform updates are added.
+fixed until step-specific compiler uniform updates are added. Use
+`awaitCompletion: true` when a no-readback hot loop must measure GPU completion
+instead of JS command submission.
 
 ## CUDA Memory Pools
 
