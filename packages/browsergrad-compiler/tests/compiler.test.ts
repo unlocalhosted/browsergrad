@@ -291,6 +291,29 @@ __global__ void halfy(half* x) {
       workgroupSize: [1, 1, 1],
     });
     expect(halfCompiled.wgsl).toContain("enable f16;");
+    expect(halfCompiled.wgslProgram.bindings[0]).toMatchObject({ valueType: "f16" });
+
+    const halfScalar = compileCudaLiteKernel(`
+__global__ void half_scale(half* x, half a) {
+  if (threadIdx.x < 1) { x[0] = x[0] + a; }
+}`, {
+      features: { "shader-f16": true },
+      workgroupSize: [1, 1, 1],
+    });
+    expect(halfScalar.wgsl).toContain("@align(4) a: f16");
+    const halfResult = runCompiledKernelReference(
+      halfScalar,
+      { buffers: { x: new Float16Array([1]) }, scalars: { a: 2 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    expect([...halfResult.buffers.x as Float16Array]).toEqual([3]);
+    expect(() =>
+      runCompiledKernelReference(
+        halfScalar,
+        { buffers: { x: new Float32Array([1]) }, scalars: { a: 2 } },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      ),
+    ).toThrow(/expects Float16Array/);
 
     const subgroupSource = `
 __global__ void reduce(float* x) {

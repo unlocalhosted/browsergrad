@@ -80,6 +80,7 @@ export {
   detectKernelFeatures,
   runWgslKernelProgram,
   type KernelFeatureSet,
+  type WgslFloat16Array,
   type WgslKernelBinding,
   type WgslKernelBindingInput,
   type WgslKernelLaunch,

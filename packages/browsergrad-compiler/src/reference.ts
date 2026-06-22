@@ -1,3 +1,4 @@
+import type { WgslTypedArray } from "@unlocalhosted/browsergrad-kernels";
 import {
   CudaLiteCompilerError,
   type CompiledCudaLiteKernel,
@@ -29,7 +30,7 @@ interface ThreadContext {
   readonly threadIdx: Vector3;
   readonly blockDim: Vector3;
   readonly gridDim: Vector3;
-  readonly buffers: Map<string, Float32Array | Int32Array | Uint32Array>;
+  readonly buffers: Map<string, WgslTypedArray>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly locals: Map<string, LocalValue>;
   readonly shared: Map<string, SharedArrayValue>;
@@ -38,7 +39,7 @@ interface ThreadContext {
 
 interface SharedArrayValue {
   readonly dimensions: readonly number[];
-  readonly data: Float32Array | Int32Array | Uint32Array;
+  readonly data: WgslTypedArray;
 }
 
 interface MutableTrace {
@@ -77,7 +78,7 @@ export function runCompiledKernelReference(
 
   const readback = input.readback ??
     compiled.ir.params.filter((param) => param.pointer && !param.constant).map((param) => param.name);
-  const result: Record<string, Float32Array | Int32Array | Uint32Array> = {};
+  const result: Record<string, WgslTypedArray> = {};
   for (const name of readback) {
     const buffer = buffers.get(name);
     if (!buffer) throw compilerFailure(`missing readback buffer '${name}'`);
@@ -88,7 +89,7 @@ export function runCompiledKernelReference(
 
 function runBlock(
   compiled: CompiledCudaLiteKernel,
-  buffers: Map<string, Float32Array | Int32Array | Uint32Array>,
+  buffers: Map<string, WgslTypedArray>,
   scalars: Readonly<Record<string, number>>,
   blockIdx: Vector3,
   blockDim: Vector3,
@@ -412,7 +413,9 @@ function allocateShared(declarations: readonly CudaLiteVarDecl[]): Map<string, S
       ? new Int32Array(length)
       : declaration.valueType === "uint"
         ? new Uint32Array(length)
-        : new Float32Array(length);
+        : declaration.valueType === "half"
+          ? new Float16Array(length)
+          : new Float32Array(length);
     shared.set(declaration.name, { dimensions: declaration.dimensions, data });
   }
   return shared;
@@ -436,16 +439,16 @@ function isBarrier(expression: CudaLiteExpression): boolean {
 }
 
 function cloneBuffers(
-  buffers: Readonly<Record<string, Float32Array | Int32Array | Uint32Array>>,
-): Map<string, Float32Array | Int32Array | Uint32Array> {
-  const out = new Map<string, Float32Array | Int32Array | Uint32Array>();
+  buffers: Readonly<Record<string, WgslTypedArray>>,
+): Map<string, WgslTypedArray> {
+  const out = new Map<string, WgslTypedArray>();
   for (const [name, buffer] of Object.entries(buffers)) {
     out.set(name, cloneTypedArray(buffer));
   }
   return out;
 }
 
-function cloneTypedArray<T extends Float32Array | Int32Array | Uint32Array>(value: T): T {
+function cloneTypedArray<T extends WgslTypedArray>(value: T): T {
   return value.slice() as T;
 }
 
@@ -498,8 +501,11 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
       if (param.valueType === "uint" && !(buffer instanceof Uint32Array)) {
         throw compilerFailure(`buffer '${param.name}' expects Uint32Array`);
       }
-      if ((param.valueType === "float" || param.valueType === "half") && !(buffer instanceof Float32Array)) {
+      if (param.valueType === "float" && !(buffer instanceof Float32Array)) {
         throw compilerFailure(`buffer '${param.name}' expects Float32Array`);
+      }
+      if (param.valueType === "half" && !(buffer instanceof Float16Array)) {
+        throw compilerFailure(`buffer '${param.name}' expects Float16Array`);
       }
     } else if (input.scalars?.[param.name] === undefined) {
       throw compilerFailure(`missing scalar input '${param.name}'`);

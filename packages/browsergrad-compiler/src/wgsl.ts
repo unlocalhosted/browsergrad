@@ -57,7 +57,8 @@ export function emitKernelIrWgsl(
   if (scalarParams.length > 0) {
     lines.push("struct Params {");
     for (const param of scalarParams) {
-      lines.push(`  ${param.name}: ${wgslScalar(param.valueType)},`);
+      const align = param.valueType === "half" ? "@align(4) " : "";
+      lines.push(`  ${align}${param.name}: ${wgslScalar(param.valueType)},`);
     }
     lines.push("};");
     lines.push(`@group(0) @binding(${context.paramsBinding}) var<uniform> params: Params;`);
@@ -307,7 +308,8 @@ function wgslScalar(type: CudaLiteScalarType): string {
   }
 }
 
-function wgslBindingType(type: CudaLiteScalarType): "f32" | "i32" | "u32" {
+function wgslBindingType(type: CudaLiteScalarType): "f16" | "f32" | "i32" | "u32" {
+  if (type === "half") return "f16";
   if (type === "int") return "i32";
   if (type === "uint") return "u32";
   return "f32";

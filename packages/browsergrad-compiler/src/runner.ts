@@ -96,9 +96,15 @@ function packScalarParams(
     const offset = i * 4;
     if (param.valueType === "int") view.setInt32(offset, Math.trunc(value), true);
     else if (param.valueType === "uint") view.setUint32(offset, Math.trunc(value), true);
+    else if (param.valueType === "half") view.setUint16(offset, float16Bits(value), true);
     else view.setFloat32(offset, value, true);
   }
   return bytes;
+}
+
+function float16Bits(value: number): number {
+  const half = new Float16Array([value]);
+  return new Uint16Array(half.buffer)[0] ?? 0;
 }
 
 function validateLaunch(launch: KernelLaunch, workgroupSize: readonly [number, number, number]): void {

@@ -21,6 +21,17 @@ describe("generic WGSL kernel programs", () => {
     expect(program.bindings[1]).toMatchObject({ kind: "storage", access: "read_write" });
   });
 
+  it("supports f16 storage bindings explicitly", () => {
+    const program = defineWgslKernelProgram({
+      name: "half_kernel",
+      wgsl: "enable f16;\n@compute @workgroup_size(1) fn main() {}",
+      workgroupSize: [1, 1, 1],
+      bindings: [{ kind: "storage", name: "x", valueType: "f16" }],
+    });
+
+    expect(program.bindings[0]).toMatchObject({ kind: "storage", valueType: "f16" });
+  });
+
   it("rejects duplicate names and invalid workgroups", () => {
     expect(() =>
       defineWgslKernelProgram({

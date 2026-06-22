@@ -1,9 +1,10 @@
 import { asImpl } from "./device.js";
 import { KernelError, type KernelDevice } from "./types.js";
 
-export type WgslValueType = "f32" | "i32" | "u32";
+export type WgslValueType = "f16" | "f32" | "i32" | "u32";
 export type WgslStorageAccess = "read" | "read_write";
-export type WgslTypedArray = Float32Array | Int32Array | Uint32Array;
+export interface WgslFloat16Array extends Uint16Array {}
+export type WgslTypedArray = WgslFloat16Array | Float32Array | Int32Array | Uint32Array;
 
 export interface KernelFeatureSet {
   readonly webgpu: boolean;
@@ -358,6 +359,8 @@ function bytesFromBufferSource(source: ArrayBuffer | ArrayBufferView): Uint8Arra
 
 function typedArrayFromBytes(type: WgslValueType, bytes: ArrayBuffer): WgslTypedArray {
   switch (type) {
+    case "f16":
+      return new Float16Array(bytes);
     case "f32":
       return new Float32Array(bytes);
     case "i32":
@@ -368,6 +371,9 @@ function typedArrayFromBytes(type: WgslValueType, bytes: ArrayBuffer): WgslTyped
 }
 
 function validateTypedArray(data: WgslTypedArray, binding: Extract<WgslKernelBinding, { kind: "storage" }>): void {
+  if (binding.valueType === "f16" && !(data instanceof Float16Array)) {
+    throw new KernelError(`storage buffer ${binding.name} expects Float16Array`);
+  }
   if (binding.valueType === "f32" && !(data instanceof Float32Array)) {
     throw new KernelError(`storage buffer ${binding.name} expects Float32Array`);
   }
@@ -407,7 +413,7 @@ function validateDispatchCount(
 }
 
 function validateValueType(type: WgslValueType, name: string): void {
-  if (type !== "f32" && type !== "i32" && type !== "u32") {
+  if (type !== "f16" && type !== "f32" && type !== "i32" && type !== "u32") {
     throw new KernelError(`${name} has unsupported WGSL value type: ${String(type)}`);
   }
 }
