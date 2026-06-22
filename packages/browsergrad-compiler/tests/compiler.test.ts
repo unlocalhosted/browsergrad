@@ -110,7 +110,7 @@ __global__ void bad(const float* x) {
 
 const unsupportedF32Atomic = parseCudaLite(`
 __global__ void bad(float* x) {
-  if (threadIdx.x < 1) { atomicMin(&x[0], 1.0); }
+  if (threadIdx.x < 1) { atomicCAS(&x[0], 0, 1); }
 }`);
     const atomicAnalysis = analyzeCudaLite(unsupportedF32Atomic);
     expect(atomicAnalysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-atomic-f32");
@@ -168,7 +168,7 @@ __global__ void exactLaunch(float* x) {
   it("classifies CUDA compatibility gaps by semantic feature", () => {
     const unsupported = analyzeCudaLite(parseCudaLite(`
 __global__ void unsupported(float* x) {
-  if (threadIdx.x < 1) { atomicMin(&x[0], 1.0f); }
+  if (threadIdx.x < 1) { atomicCAS(&x[0], 0, 1); }
 }`));
     const plan = createCudaLoweringPlan(unsupported.diagnostics);
 
@@ -638,6 +638,32 @@ __global__ void maxKernel(const float *input, float *result, int N) {
 
     expect(compiled.wgsl).toContain("bg_atomicMax_f32");
     expect([...result.buffers.result as Float32Array]).toEqual([9]);
+  });
+
+  it("lowers f32 atomic min and sub helpers through CAS semantics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void atomicFloatOps(float *minValue, float *subValue) {
+  int idx = threadIdx.x;
+  if (idx < 2) {
+    atomicMin(&minValue[0], idx == 0 ? 5.0f : 3.0f);
+    atomicSub(&subValue[0], idx == 0 ? 1.5f : 2.25f);
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          minValue: new Float32Array([10]),
+          subValue: new Float32Array([10]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_atomicMin_f32");
+    expect(compiled.wgsl).toContain("bg_atomicSub_f32");
+    expect([...result.buffers.minValue as Float32Array]).toEqual([3]);
+    expect([...result.buffers.subValue as Float32Array][0]).toBeCloseTo(6.25);
   });
 
   it("parses dynamic extern shared memory as a clear unsupported diagnostic", () => {

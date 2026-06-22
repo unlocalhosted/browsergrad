@@ -91,6 +91,16 @@ __global__ void maxKernel(const float *input, float *result, int N) {
 }
 `;
 
+const ATOMIC_FLOAT_MIN_SUB = `
+__global__ void atomicFloatOps(float *minValue, float *subValue) {
+  int idx = threadIdx.x;
+  if (idx < 2) {
+    atomicMin(&minValue[0], idx == 0 ? 5.0f : 3.0f);
+    atomicSub(&subValue[0], idx == 0 ? 1.5f : 2.25f);
+  }
+}
+`;
+
 async function checkDevice(): Promise<DeviceCheck> {
   if (typeof navigator === "undefined" || !("gpu" in navigator)) {
     return { available: false, reason: "navigator.gpu undefined" };
@@ -331,6 +341,22 @@ __global__ void atomic_exchange(float* x, float* out) {
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
     expect([...actual.buffers.result as Float32Array][0]).toBeCloseTo(9);
+  });
+
+  it("runs f32 atomic min/sub through WebGPU CAS loops", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(ATOMIC_FLOAT_MIN_SUB, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        minValue: new Float32Array([10]),
+        subValue: new Float32Array([10]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.minValue as Float32Array][0]).toBeCloseTo(3);
+    expect([...actual.buffers.subValue as Float32Array][0]).toBeCloseTo(6.25);
   });
 
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {
