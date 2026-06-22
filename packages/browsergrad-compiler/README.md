@@ -98,8 +98,8 @@ compileCudaLiteKernel(source, {
 ```
 
 `runCompiledKernelReference` executes child kernels against shared buffers and
-memory pools. `runCompiledKernelWebGpu` rejects these kernels until host-side
-multi-dispatch orchestration exists, so GPU output is never silently wrong.
+memory pools. `runCompiledKernelWebGpu` rejects device launches until host-side
+orchestration exists, so GPU output is never silently wrong.
 
 ## CUDA Runtime Reference Calls
 
@@ -127,8 +127,10 @@ compileCudaLiteKernel(source, {
 ```
 
 The CPU reference scheduler runs all blocks in lockstep at grid barriers, so
-block-0 reduction patterns see writes from every block. WebGPU dispatch rejects
-these kernels until cooperative launch or host multi-dispatch lowering exists.
+block-0 reduction patterns see writes from every block. WebGPU runs safe
+top-level uniform `grid.sync()` as multiple dispatch phases over shared GPU
+buffers. Kernels with private locals/shared memory crossing `grid.sync()` still
+stay reference-only until broader orchestration lands.
 
 Use `createCudaLoweringPlan(diagnostics)` and `describeCudaDiagnostic()` to group
 compatibility gaps by semantic family instead of raw parser messages.

@@ -1,5 +1,6 @@
 import {
   runWgslKernelProgram,
+  runWgslKernelProgramSequence,
   type KernelDevice,
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
@@ -8,7 +9,7 @@ import { analyzeCudaLite, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js"
 import { createCudaLoweringPlan } from "./compatibility.js";
 import { parseCudaLite } from "./parser.js";
 import { runCompiledKernelReference } from "./reference.js";
-import { createCudaRuntimePlan } from "./runtime_plan.js";
+import { createCudaGridSyncPhasePlan, createCudaRuntimePlan } from "./runtime_plan.js";
 import { emitKernelIrWgsl } from "./wgsl.js";
 import {
   CudaLiteCompilerError,
@@ -59,7 +60,36 @@ export async function runCompiledKernelWebGpu(
   launch: KernelLaunch,
 ): Promise<ReferenceKernelResult> {
   validateLaunch(launch, compiled.ir.workgroupSize);
+  const gridSyncPhasePlan = createCudaGridSyncPhasePlan(compiled.ir);
+  if (gridSyncPhasePlan.supported && gridSyncPhasePlan.modules.length > 1) {
+    const wgslInput = createWgslRunInput(compiled, input);
+    const dispatchCount = dispatchCountForLaunch(launch);
+    const programs = gridSyncPhasePlan.modules.map((module) =>
+      emitKernelIrWgsl(module, { features: featureOptionsFor(module.requiredFeatures) }).program
+    );
+    const result = await runWgslKernelProgramSequence(
+      device,
+      programs.map((program) => ({ program, launch: { dispatchCount } })),
+      wgslInput,
+    );
+    return { buffers: normalizePoolReadback(compiled, result.buffers), trace: [] };
+  }
   rejectReferenceOnlyRuntime(compiled);
+  const wgslInput = createWgslRunInput(compiled, input);
+  const dispatchCount = dispatchCountForLaunch(launch);
+  const result = await runWgslKernelProgram(device, compiled.wgslProgram, wgslInput, { dispatchCount });
+  return { buffers: normalizePoolReadback(compiled, result.buffers), trace: [] };
+}
+
+function createWgslRunInput(
+  compiled: CompiledCudaLiteKernel,
+  input: CompiledKernelInput,
+): {
+  readonly buffers: Record<string, WgslTypedArray>;
+  readonly textures?: NonNullable<CompiledKernelInput["textures"]>;
+  readonly uniforms?: { readonly params: Uint8Array };
+  readonly readback: readonly string[];
+} {
   const uniforms = packScalarParams(compiled, input);
   const buffers = {
     ...input.buffers,
@@ -74,24 +104,29 @@ export async function runCompiledKernelWebGpu(
         .map((param) => param.valueType === "devicepool" ? poolDataName(param.name) : param.name),
       ...collectExternalDevicePoolNames(compiled.ir.body).map(poolDataName),
     ];
-  const result = await runWgslKernelProgram(
-    device,
-    compiled.wgslProgram,
-    {
-      buffers,
-      ...(input.textures === undefined ? {} : { textures: input.textures }),
-      ...(uniforms.byteLength === 0 ? {} : { uniforms: { params: uniforms } }),
-      readback,
-    },
-    {
-      dispatchCount: [
-        launch.gridDim[0] * launch.blockDim[0],
-        launch.gridDim[1] * launch.blockDim[1],
-        launch.gridDim[2] * launch.blockDim[2],
-      ],
-    },
-  );
-  return { buffers: normalizePoolReadback(compiled, result.buffers), trace: [] };
+  return {
+    buffers,
+    ...(input.textures === undefined ? {} : { textures: input.textures }),
+    ...(uniforms.byteLength === 0 ? {} : { uniforms: { params: uniforms } }),
+    readback,
+  };
+}
+
+function dispatchCountForLaunch(launch: KernelLaunch): readonly [number, number, number] {
+  return [
+    launch.gridDim[0] * launch.blockDim[0],
+    launch.gridDim[1] * launch.blockDim[1],
+    launch.gridDim[2] * launch.blockDim[2],
+  ];
+}
+
+function featureOptionsFor(
+  requiredFeatures: readonly string[],
+): Partial<Record<"shader-f16" | "subgroups" | "compatibility", boolean>> {
+  return {
+    ...(requiredFeatures.includes("shader-f16") ? { "shader-f16": true } : {}),
+    ...(requiredFeatures.includes("subgroups") ? { subgroups: true } : {}),
+  };
 }
 
 function rejectReferenceOnlyRuntime(compiled: CompiledCudaLiteKernel): void {

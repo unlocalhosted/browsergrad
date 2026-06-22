@@ -3,6 +3,7 @@ import {
   CudaLiteCompilerError,
   analyzeCudaLite,
   compileCudaLiteKernel,
+  createCudaGridSyncPhasePlan,
   createCudaLoweringPlan,
   createCudaRuntimePlan,
   describeCudaDiagnostic,
@@ -578,17 +579,7 @@ __global__ void gridSync(float *scratch, float *out) {
       severity: "warning",
     }));
     expect([...result.buffers.out as Float32Array]).toEqual([3]);
-    await expect(runCompiledKernelWebGpu(
-      {} as never,
-      compiled,
-      {
-        buffers: {
-          scratch: new Float32Array(2),
-          out: new Float32Array(1),
-        },
-      },
-      { gridDim: [2, 1, 1], blockDim: [1, 1, 1] },
-    )).rejects.toThrow("grid-sync");
+    expect(createCudaGridSyncPhasePlan(compiled.ir).supported).toBe(true);
   });
 
   it("runs cudaMemcpyPeerAsync in CPU reference when explicitly enabled", async () => {
@@ -665,6 +656,50 @@ __global__ void parent(float *dst, float *src) {
     ]);
     expect(plan.canRunSingleDispatchWebGpu).toBe(false);
     expect(plan.referenceAvailable).toBe(true);
+  });
+
+  it("plans safe top-level grid sync as WebGPU dispatch phases", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void gridPhases(float *scratch, float *out) {
+  cg::grid_group grid = cg::this_grid();
+  scratch[blockIdx.x] = blockIdx.x + 1;
+  grid.sync();
+  if (blockIdx.x == 0 && threadIdx.x == 0) {
+    out[0] = scratch[0] + scratch[1];
+  }
+}`, {
+      referenceGridSync: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const plan = createCudaGridSyncPhasePlan(compiled.ir);
+
+    expect(plan.supported).toBe(true);
+    if (plan.supported) {
+      expect(plan.modules).toHaveLength(2);
+      expect(plan.modules.map((module) => module.name)).toEqual([
+        "gridPhases_grid_phase_0",
+        "gridPhases_grid_phase_1",
+      ]);
+    }
+  });
+
+  it("rejects grid sync phase splitting when private locals cross phases", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void badGridPhase(float *out) {
+  cg::grid_group grid = cg::this_grid();
+  float carry = blockIdx.x + 1;
+  grid.sync();
+  if (blockIdx.x == 0 && threadIdx.x == 0) { out[0] = carry; }
+}`, {
+      referenceGridSync: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const plan = createCudaGridSyncPhasePlan(compiled.ir);
+
+    expect(plan.supported).toBe(false);
+    if (!plan.supported) expect(plan.reason).toContain("private thread state");
   });
 
   it("supports cooperative-group shuffle variants and linear thread ranks", () => {

@@ -195,6 +195,35 @@ describe("real WebGPU — CUDA-lite compiler", () => {
     expect([...actual.buffers.C as Float32Array]).toEqual([...expected.buffers.C as Float32Array]);
   });
 
+  it("runs top-level grid.sync as WebGPU dispatch phases", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+namespace cg = cooperative_groups;
+__global__ void gridSync(float *scratch, float *out) {
+  cg::grid_group grid = cg::this_grid();
+  scratch[blockIdx.x] = (float)blockIdx.x + 1.0f;
+  grid.sync();
+  if (blockIdx.x == 0 && threadIdx.x == 0) {
+    out[0] = scratch[0] + scratch[1];
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      referenceGridSync: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        scratch: new Float32Array(2),
+        out: new Float32Array(1),
+      },
+    };
+    const launch = { gridDim: [2, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
   it("runs compiled constant memory through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `

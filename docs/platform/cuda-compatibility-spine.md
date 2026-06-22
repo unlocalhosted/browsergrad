@@ -49,7 +49,9 @@ Current corpus gate:
   classify as runtime orchestration gaps. Peer copies can run in CPU reference
   with `referenceCudaRuntime`; WebGPU still rejects until host/device
   orchestration lands.
-- Cooperative `grid.sync()` can run in CPU reference with `referenceGridSync`;
-  WebGPU still rejects until cooperative launch or host multi-dispatch lowering.
+- Cooperative `grid.sync()` can run in CPU reference with `referenceGridSync`.
+  Safe top-level uniform `grid.sync()` also runs on real WebGPU as multiple
+  dispatch phases over shared GPU buffers. Non-uniform sync, private locals
+  crossing phases, or shared-memory state crossing phases remain reference-only.
 - Remaining failures group cleanly: dynamic parallelism/runtime launches,
   cooperative groups/grid sync, and one incomplete pseudocode symbol.

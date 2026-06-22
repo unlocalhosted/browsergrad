@@ -3,6 +3,7 @@ import {
   createDevice,
   defineWgslKernelProgram,
   runWgslKernelProgram,
+  runWgslKernelProgramSequence,
 } from "../src/index";
 
 interface DeviceCheck {
@@ -113,5 +114,43 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     );
 
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
+  });
+
+  it("runs a sequence over shared GPU buffers without intermediate readback", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const addOne = defineWgslKernelProgram({
+      name: "seq_add_one",
+      workgroupSize: [4, 1, 1],
+      bindings: [{ kind: "storage", name: "x", valueType: "f32", access: "read_write" }],
+      wgsl: `
+@group(0) @binding(0) var<storage, read_write> x: array<f32>;
+@compute @workgroup_size(4, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < arrayLength(&x)) { x[gid.x] = x[gid.x] + 1.0; }
+}`,
+    });
+    const scale = defineWgslKernelProgram({
+      name: "seq_scale",
+      workgroupSize: [4, 1, 1],
+      bindings: [{ kind: "storage", name: "x", valueType: "f32", access: "read_write" }],
+      wgsl: `
+@group(0) @binding(0) var<storage, read_write> x: array<f32>;
+@compute @workgroup_size(4, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < arrayLength(&x)) { x[gid.x] = x[gid.x] * 2.0; }
+}`,
+    });
+
+    const result = await runWgslKernelProgramSequence(
+      device,
+      [
+        { program: addOne, launch: { dispatchCount: [4, 1, 1] } },
+        { program: scale, launch: { dispatchCount: [4, 1, 1] } },
+      ],
+      { buffers: { x: new Float32Array([1, 2, 3, 4]) } },
+    );
+
+    expect([...result.buffers.x as Float32Array]).toEqual([4, 6, 8, 10]);
   });
 });

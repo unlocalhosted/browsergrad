@@ -59,7 +59,9 @@ export {
 } from "./compatibility.js";
 export { formatCudaLiteDiagnostics } from "./diagnostics.js";
 export {
+  createCudaGridSyncPhasePlan,
   createCudaRuntimePlan,
+  type CudaGridSyncPhasePlan,
   type CudaRuntimeOperation,
   type CudaRuntimeOperationKind,
   type CudaRuntimePlan,

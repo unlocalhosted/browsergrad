@@ -85,6 +85,11 @@ export interface WgslKernelLaunch {
   readonly dispatchCount: readonly [number, number, number];
 }
 
+export interface WgslKernelSequenceStep {
+  readonly program: WgslKernelProgram;
+  readonly launch: WgslKernelLaunch;
+}
+
 export interface WgslKernelRunResult {
   readonly buffers: Readonly<Record<string, WgslTypedArray>>;
 }
@@ -179,46 +184,50 @@ export async function runWgslKernelProgram(
   input: WgslKernelRunInput,
   launch: WgslKernelLaunch,
 ): Promise<WgslKernelRunResult> {
+  return runWgslKernelProgramSequence(device, [{ program, launch }], input);
+}
+
+export async function runWgslKernelProgramSequence(
+  device: KernelDevice,
+  steps: readonly WgslKernelSequenceStep[],
+  input: WgslKernelRunInput,
+): Promise<WgslKernelRunResult> {
+  if (steps.length === 0) throw new KernelError("WGSL program sequence must contain at least one step");
   const impl = asImpl(device);
   const gpu = impl.gpu;
-  const dispatchCount = validateDispatchCount(launch.dispatchCount);
+  const dispatchCounts = steps.map((step, index) => validateDispatchCountWithName(step.launch.dispatchCount, `steps[${index}].launch.dispatchCount`));
+  const programs = steps.map((step) => step.program);
   const readbackNames = new Set(
     input.readback ??
-      program.bindings
+      programs
+        .flatMap((program) => program.bindings)
         .filter((binding) => binding.kind === "storage" && binding.access === "read_write")
         .map((binding) => binding.name),
   );
 
-  const bindGroupEntries: GPUBindGroupEntry[] = [];
-  const layoutEntries: GPUBindGroupLayoutEntry[] = [];
   const storageBuffers = new Map<string, { binding: WgslStorageBinding; buffer: GPUBuffer; byteLength: number }>();
   const uniformBuffers: GPUBuffer[] = [];
+  const uniformBuffersByName = new Map<string, GPUBuffer>();
   const textures: GPUTexture[] = [];
+  const textureViewsByName = new Map<string, GPUTextureView>();
   const readBuffers = new Set<GPUBuffer>();
 
   try {
-    for (const binding of program.bindings) {
-      if (binding.kind === "storage") {
-        const data = input.buffers[binding.name];
-        if (!data) throw new KernelError(`missing storage buffer input: ${binding.name}`);
-        validateTypedArray(data, binding);
-        const byteLength = validateStorageByteLength(data.byteLength, binding.name);
-        const buffer = gpu.createBuffer({
-          size: byteLength,
-          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
-        });
-        const upload = bytesForGpuWrite(data, byteLength);
-        gpu.queue.writeBuffer(buffer, 0, upload.buffer, upload.byteOffset, upload.byteLength);
-        storageBuffers.set(binding.name, { binding, buffer, byteLength: data.byteLength });
-        layoutEntries.push({
-          binding: binding.binding,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: {
-            type: binding.access === "read" ? "read-only-storage" : "storage",
-          },
-        });
-        bindGroupEntries.push({ binding: binding.binding, resource: { buffer } });
-      } else if (binding.kind === "uniform") {
+    for (const binding of collectStorageBindings(programs)) {
+      const data = input.buffers[binding.name];
+      if (!data) throw new KernelError(`missing storage buffer input: ${binding.name}`);
+      validateTypedArray(data, binding);
+      const byteLength = validateStorageByteLength(data.byteLength, binding.name);
+      const buffer = gpu.createBuffer({
+        size: byteLength,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+      });
+      const upload = bytesForGpuWrite(data, byteLength);
+      gpu.queue.writeBuffer(buffer, 0, upload.buffer, upload.byteOffset, upload.byteLength);
+      storageBuffers.set(binding.name, { binding, buffer, byteLength: data.byteLength });
+    }
+
+    for (const binding of collectUniformBindings(programs)) {
         const data = input.uniforms?.[binding.name];
         if (!data) throw new KernelError(`missing uniform input: ${binding.name}`);
         const bytes = bytesFromBufferSource(data);
@@ -236,13 +245,10 @@ export async function runWgslKernelProgram(
         });
         gpu.queue.writeBuffer(buffer, 0, bytes.buffer, bytes.byteOffset, bytes.byteLength);
         uniformBuffers.push(buffer);
-        layoutEntries.push({
-          binding: binding.binding,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: "uniform" },
-        });
-        bindGroupEntries.push({ binding: binding.binding, resource: { buffer } });
-      } else {
+        uniformBuffersByName.set(binding.name, buffer);
+    }
+
+    for (const binding of collectTextureBindings(programs)) {
         const textureInput = input.textures?.[binding.name];
         if (!textureInput) throw new KernelError(`missing texture input: ${binding.name}`);
         validateTexture2DInput(textureInput, binding.name);
@@ -260,34 +266,41 @@ export async function runWgslKernelProgram(
         );
         const view = texture.createView();
         textures.push(texture);
-        layoutEntries.push({
-          binding: binding.binding,
-          visibility: GPUShaderStage.COMPUTE,
-          texture: {
-            sampleType: "unfilterable-float",
-            viewDimension: "2d",
-            multisampled: false,
-          },
-        });
-        bindGroupEntries.push({ binding: binding.binding, resource: view });
-      }
+        textureViewsByName.set(binding.name, view);
     }
 
-    const { pipeline, bindGroupLayout } = await getOrCreatePipeline(gpu, program, layoutEntries);
-    const bindGroup = gpu.createBindGroup({
-      layout: bindGroupLayout,
-      entries: bindGroupEntries,
+    const executableSteps = [];
+    for (const program of programs) {
+      const { layoutEntries, bindGroupEntries } = bindGroupInputsForProgram(
+        program,
+        storageBuffers,
+        uniformBuffersByName,
+        textureViewsByName,
+      );
+      const { pipeline, bindGroupLayout } = await getOrCreatePipeline(gpu, program, layoutEntries);
+      const bindGroup = gpu.createBindGroup({
+        layout: bindGroupLayout,
+        entries: [...bindGroupEntries],
+      });
+      executableSteps.push({ pipeline, bindGroup, program });
+    }
+
+    const encoder = gpu.createCommandEncoder({
+      label: `bg-wgsl-sequence-${programs.map((program) => program.name).join("-")}`,
     });
-    const encoder = gpu.createCommandEncoder({ label: `bg-wgsl-${program.name}` });
-    const pass = encoder.beginComputePass();
-    pass.setPipeline(pipeline);
-    pass.setBindGroup(0, bindGroup);
-    pass.dispatchWorkgroups(
-      Math.max(Math.ceil(dispatchCount[0] / program.workgroupSize[0]), 1),
-      Math.max(Math.ceil(dispatchCount[1] / program.workgroupSize[1]), 1),
-      Math.max(Math.ceil(dispatchCount[2] / program.workgroupSize[2]), 1),
-    );
-    pass.end();
+    for (let i = 0; i < executableSteps.length; i++) {
+      const step = executableSteps[i]!;
+      const dispatchCount = dispatchCounts[i]!;
+      const pass = encoder.beginComputePass({ label: `bg-wgsl-${step.program.name}-step-${i}` });
+      pass.setPipeline(step.pipeline);
+      pass.setBindGroup(0, step.bindGroup);
+      pass.dispatchWorkgroups(
+        Math.max(Math.ceil(dispatchCount[0] / step.program.workgroupSize[0]), 1),
+        Math.max(Math.ceil(dispatchCount[1] / step.program.workgroupSize[1]), 1),
+        Math.max(Math.ceil(dispatchCount[2] / step.program.workgroupSize[2]), 1),
+      );
+      pass.end();
+    }
 
     const reads: Array<{ name: string; binding: WgslStorageBinding; readBuffer: GPUBuffer; byteLength: number }> = [];
     for (const name of readbackNames) {
@@ -315,7 +328,7 @@ export async function runWgslKernelProgram(
       read.readBuffer.destroy();
       readBuffers.delete(read.readBuffer);
     }
-    impl.recordInvocation();
+    for (let i = 0; i < steps.length; i++) impl.recordInvocation();
     return { buffers: output };
   } finally {
     for (const readBuffer of readBuffers) readBuffer.destroy();
@@ -323,6 +336,104 @@ export async function runWgslKernelProgram(
     for (const buffer of uniformBuffers) buffer.destroy();
     for (const texture of textures) texture.destroy();
   }
+}
+
+function collectStorageBindings(programs: readonly WgslKernelProgram[]): readonly WgslStorageBinding[] {
+  const byName = new Map<string, WgslStorageBinding>();
+  for (const program of programs) {
+    for (const binding of program.bindings) {
+      if (binding.kind !== "storage") continue;
+      const existing = byName.get(binding.name);
+      if (!existing) {
+        byName.set(binding.name, binding);
+        continue;
+      }
+      if (existing.valueType !== binding.valueType) {
+        throw new KernelError(`storage buffer ${binding.name} has conflicting value types`);
+      }
+      byName.set(binding.name, {
+        ...existing,
+        access: existing.access === "read_write" || binding.access === "read_write" ? "read_write" : "read",
+      });
+    }
+  }
+  return [...byName.values()];
+}
+
+function collectUniformBindings(programs: readonly WgslKernelProgram[]): readonly Extract<WgslKernelBinding, { kind: "uniform" }>[] {
+  const byName = new Map<string, Extract<WgslKernelBinding, { kind: "uniform" }>>();
+  for (const program of programs) {
+    for (const binding of program.bindings) {
+      if (binding.kind !== "uniform") continue;
+      const existing = byName.get(binding.name);
+      if (!existing) {
+        byName.set(binding.name, binding);
+        continue;
+      }
+      const byteLength = Math.max(existing.byteLength ?? 0, binding.byteLength ?? 0);
+      byName.set(binding.name, {
+        ...existing,
+        ...(byteLength === 0 ? {} : { byteLength }),
+      });
+    }
+  }
+  return [...byName.values()];
+}
+
+function collectTextureBindings(programs: readonly WgslKernelProgram[]): readonly Extract<WgslKernelBinding, { kind: "texture2d" }>[] {
+  const byName = new Map<string, Extract<WgslKernelBinding, { kind: "texture2d" }>>();
+  for (const program of programs) {
+    for (const binding of program.bindings) {
+      if (binding.kind !== "texture2d") continue;
+      byName.set(binding.name, binding);
+    }
+  }
+  return [...byName.values()];
+}
+
+function bindGroupInputsForProgram(
+  program: WgslKernelProgram,
+  storageBuffers: ReadonlyMap<string, { readonly buffer: GPUBuffer }>,
+  uniformBuffers: ReadonlyMap<string, GPUBuffer>,
+  textureViews: ReadonlyMap<string, GPUTextureView>,
+): { readonly layoutEntries: readonly GPUBindGroupLayoutEntry[]; readonly bindGroupEntries: readonly GPUBindGroupEntry[] } {
+  const layoutEntries: GPUBindGroupLayoutEntry[] = [];
+  const bindGroupEntries: GPUBindGroupEntry[] = [];
+  for (const binding of program.bindings) {
+    if (binding.kind === "storage") {
+      const entry = storageBuffers.get(binding.name);
+      if (!entry) throw new KernelError(`missing storage buffer input: ${binding.name}`);
+      layoutEntries.push({
+        binding: binding.binding,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: { type: binding.access === "read" ? "read-only-storage" : "storage" },
+      });
+      bindGroupEntries.push({ binding: binding.binding, resource: { buffer: entry.buffer } });
+    } else if (binding.kind === "uniform") {
+      const buffer = uniformBuffers.get(binding.name);
+      if (!buffer) throw new KernelError(`missing uniform input: ${binding.name}`);
+      layoutEntries.push({
+        binding: binding.binding,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: { type: "uniform" },
+      });
+      bindGroupEntries.push({ binding: binding.binding, resource: { buffer } });
+    } else {
+      const view = textureViews.get(binding.name);
+      if (!view) throw new KernelError(`missing texture input: ${binding.name}`);
+      layoutEntries.push({
+        binding: binding.binding,
+        visibility: GPUShaderStage.COMPUTE,
+        texture: {
+          sampleType: "unfilterable-float",
+          viewDimension: "2d",
+          multisampled: false,
+        },
+      });
+      bindGroupEntries.push({ binding: binding.binding, resource: view });
+    }
+  }
+  return { layoutEntries, bindGroupEntries };
 }
 
 async function getOrCreatePipeline(
@@ -494,13 +605,14 @@ function validateWorkgroupSize(
   ];
 }
 
-function validateDispatchCount(
+function validateDispatchCountWithName(
   value: readonly [number, number, number],
+  name: string,
 ): [number, number, number] {
   return [
-    validatePositiveInteger(value[0], "dispatchCount[0]"),
-    validatePositiveInteger(value[1], "dispatchCount[1]"),
-    validatePositiveInteger(value[2], "dispatchCount[2]"),
+    validatePositiveInteger(value[0], `${name}[0]`),
+    validatePositiveInteger(value[1], `${name}[1]`),
+    validatePositiveInteger(value[2], `${name}[2]`),
   ];
 }
 
