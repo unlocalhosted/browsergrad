@@ -38,12 +38,12 @@
   ],
   "oracles": [
     {
-      "name": "_bg_attention_oracles",
+      "name": "_bg_attention_math",
       "js_module": "/assignments/cs336-assignment2-systems/oracles/attention.js",
       "export_name": "oracle"
     },
     {
-      "name": "_bg_distributed_oracles",
+      "name": "_bg_distributed_training",
       "js_module": "/assignments/cs336-assignment2-systems/oracles/distributed.js",
       "export_name": "oracle"
     }

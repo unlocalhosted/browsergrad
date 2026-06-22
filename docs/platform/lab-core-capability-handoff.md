@@ -354,6 +354,10 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     rubrics before real Worker execution exists. CS336 A2 systems labs can also
     use the DDP/FSDP/sharded-optimizer simulator helpers for gradient averaging,
     all-gather/reduce-scatter, and AdamW state-sharding checks.
+    BrowserGrad runtime integration now proves a Python rubric can call the
+    A2 profile's `_bg_attention_math` and `_bg_distributed_training` JS modules
+    through Pyodide while the bridges are backed by `browsergrad-kernels` and
+    the primitive facade's `simulation` namespace.
     CS149 A1 CPU/SIMD labs can use
     `simulation.simulateVectorizedClampedExp()`,
     `simulation.simulateVectorizedArraySum()`, and

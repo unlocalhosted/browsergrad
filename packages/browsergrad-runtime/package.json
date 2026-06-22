@@ -45,12 +45,12 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "pretypecheck": "pnpm --filter @unlocalhosted/browsergrad-primitives build",
+    "pretypecheck": "pnpm --filter @unlocalhosted/browsergrad-primitives build && pnpm --filter @unlocalhosted/browsergrad-kernels build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "pretest": "pnpm --filter @unlocalhosted/browsergrad-primitives build",
+    "pretest": "pnpm --filter @unlocalhosted/browsergrad-primitives build && pnpm --filter @unlocalhosted/browsergrad-kernels build",
     "test": "vitest run",
     "test:watch": "vitest",
-    "pretest:integration": "pnpm --filter @unlocalhosted/browsergrad-primitives build",
+    "pretest:integration": "pnpm --filter @unlocalhosted/browsergrad-primitives build && pnpm --filter @unlocalhosted/browsergrad-kernels build",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "oxlint src",
     "clean": "rm -rf dist *.tsbuildinfo",
@@ -66,6 +66,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@unlocalhosted/browsergrad-kernels": "workspace:*",
     "@unlocalhosted/browsergrad-primitives": "workspace:*",
     "oxlint": "^1.0.0",
     "pyodide": "^0.26.4",

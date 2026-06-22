@@ -47,6 +47,8 @@ Use primitive names in public interfaces and profile oracle adapters:
 - `_bg_cpu_parallelism`, not `_bg_cs149_cpu_oracles`.
 - `_bg_data_cleaning`, not `_bg_cs336_data_oracles`.
 - `_bg_rl_math`, not `_bg_alignment_oracles`.
+- `_bg_attention_math`, not `_bg_attention_oracles`.
+- `_bg_distributed_training`, not `_bg_distributed_oracles`.
 - `createByteBpeReference()` in public primitive code.
 - `createByteBpeReferenceModule()` when exposing a JSON-friendly reference
   object to a profile.

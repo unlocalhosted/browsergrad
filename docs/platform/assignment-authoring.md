@@ -103,7 +103,8 @@ CS336 A2-style FlashAttention rubrics can use
 `referenceFlashAttention()` and `referenceFlashAttentionBackward()` from
 `@unlocalhosted/browsergrad-kernels` for `flash-attention-oracle` fixture
 checks that include output, saved log-sum-exp, and Q/K/V gradients before native
-Triton/CUDA paths are available.
+Triton/CUDA paths are available. Register a profile-local module such as
+`_bg_attention_math` when Python rubrics need JSON-string bridge methods.
 GPU Puzzles and CS149 A3-style CUDA concept rubrics can use the same package's
 `simulateCuda1DGrid()`, `referenceSaxpy()`, and `referenceExclusiveScan()` for
 `cuda-compatible-subset` fixture checks. The grid simulator records
@@ -123,6 +124,7 @@ CS336 A2-style distributed-training rubrics can use the same package's
 `simulateFsdpGradientReduceScatter()`, and `simulateShardedAdamWStep()` for
 `ddp-simulator`, `fsdp-simulator`, and `sharded-optimizer-simulator` profile
 paths before using native `torch.distributed`, multiprocessing, or CUDA.
+Register profile glue such as `_bg_distributed_training` for Python rubrics.
 CS149 A1-style JavaScript rubrics can use
 `simulateVectorizedClampedExp()`, `simulateVectorizedArraySum()`, and
 `partitionStaticWork()` for `simd-simulator`, `pthreads-simulator`, and

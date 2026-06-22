@@ -225,6 +225,10 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   `referenceFlashAttention()` and `referenceFlashAttentionBackward()` so CS336
   A2-style FlashAttention rubrics can check output, saved log-sum-exp, and Q/K/V
   gradients in browser-safe JS before Triton/CUDA kernels are available.
+- A2 runtime proof guarantee: the CS336 A2 profile registers generic
+  `_bg_attention_math` and `_bg_distributed_training` profile glue, and runtime
+  integration proves a Python rubric can call FlashAttention forward and DDP
+  gradient synchronization references through Pyodide.
 - CUDA-concept oracle guarantee: `@unlocalhosted/browsergrad-kernels` exports
   `simulateCuda1DGrid()`, `referenceSaxpy()`, and `referenceExclusiveScan()` so
   GPU Puzzles and CS149 A3-style rubrics can check CUDA-shaped map/guard,

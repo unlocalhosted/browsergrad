@@ -10,10 +10,16 @@ import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
 import { loadPyodide } from "pyodide";
 import {
+  referenceFlashAttention,
+  tensor,
+  type Tensor,
+} from "@unlocalhosted/browsergrad-kernels";
+import {
   createDataCleaningReference,
   createHostedTrainingApiFixture,
   fitPowerLawScalingLaw,
   rl,
+  simulation,
 } from "@unlocalhosted/browsergrad-primitives";
 import {
   createAssignmentRunPlan,
@@ -79,6 +85,13 @@ const PROFILE = {
 const CS336_A3_PROFILE = JSON.parse(
   readFileSync(
     new URL("../../../docs/internal/cs336-assignment3-scaling.profile.json", import.meta.url),
+    "utf8",
+  ),
+);
+
+const CS336_A2_PROFILE = JSON.parse(
+  readFileSync(
+    new URL("../../../docs/internal/cs336-assignment2-systems.profile.json", import.meta.url),
     "utf8",
   ),
 );
@@ -253,6 +266,109 @@ else:
     await expect(
       fs.readBytes("/assignments/assignment-smoke/fixtures/datasets/tiny.txt"),
     ).resolves.toEqual(fixtureBytes);
+  });
+
+  it("runs the CS336 A2 profile with generic attention and distributed references", async () => {
+    const parsed = parseAssignmentProfile(CS336_A2_PROFILE);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const plan = createAssignmentRunPlan(parsed.profile, {
+      capabilities: [
+        "ddp-simulator",
+        "distributed-simulator",
+        "flash-attention-oracle",
+        "fsdp-simulator",
+        "js-oracles",
+        "pyodide",
+        "sharded-optimizer-simulator",
+        "structured-assertions",
+        "torch-compat",
+        "worker-mesh",
+      ],
+    });
+    const [attentionSpec, distributedSpec] = plan.session.jsModules;
+    expect(attentionSpec?.name).toBe("_bg_attention_math");
+    expect(distributedSpec?.name).toBe("_bg_distributed_training");
+    if (!attentionSpec || !distributedSpec) return;
+
+    pyodide.registerJsModule(attentionSpec.name, createAttentionMathBridge());
+    pyodide.registerJsModule(distributedSpec.name, createDistributedTrainingBridge());
+
+    assertions = [];
+    artifacts = [];
+    const result = await runAssignmentRubric(
+      {
+        fs: pyodideSessionFs(pyodide),
+        exec: pyodideExec,
+      },
+      plan,
+      {
+        files: {
+          [plan.files.rubricPath]: `
+import browsergrad as bg
+import json
+
+ctx = bg.assignment_context()
+attention = bg.oracle("_bg_attention_math")
+distributed = bg.oracle("_bg_distributed_training")
+
+forward = json.loads(attention.flash_forward_json(json.dumps({
+    "q": {"shape": [1, 1, 2, 2], "data": [1, 0, 0, 1]},
+    "k": {"shape": [1, 1, 2, 2], "data": [1, 0, 0, 1]},
+    "v": {"shape": [1, 1, 2, 2], "data": [1, 2, 3, 4]},
+})))
+ddp = json.loads(distributed.ddp_average_json(json.dumps({
+    "parameters": [{"name": "w"}],
+    "rankGradients": [{"w": [1, 3]}, {"w": [3, 5]}],
+})))
+
+if (
+    "test_flash_forward_pass_pytorch" in ctx["allowed_tests"]
+    and abs(forward["output"][0] - 1.660476923) < 1e-6
+    and abs(forward["logSumExp"][0] - 1.107940316) < 1e-6
+    and ddp["synchronizedGradients"][0]["w"] == [2, 4]
+):
+    bg.assert_pass("test_cs336_a2_attention_distributed_references")
+    bg.emit_json("cs336-a2-systems-summary", {
+        "output0": forward["output"][0],
+        "log_sum_exp0": forward["logSumExp"][0],
+        "averaged_gradient": ddp["synchronizedGradients"][0]["w"],
+    })
+else:
+    bg.assert_fail(
+        "test_cs336_a2_attention_distributed_references",
+        "CS336 A2 attention/distributed reference mismatch",
+        expected={"output0": 1.660476923, "log_sum_exp0": 1.107940316, "averaged_gradient": [2, 4]},
+        actual={"forward": forward, "ddp": ddp},
+    )
+`,
+        },
+        datasets: {
+          "ddp-test-data": Uint8Array.of(1, 2, 3),
+          "ddp-test-labels": Uint8Array.of(0, 1),
+        },
+      },
+    );
+
+    expect(result.exec.error).toBeNull();
+    expect(result.exec.ok).toBe(true);
+    expect(result.exec.assertions).toEqual([
+      {
+        kind: "pass",
+        name: "test_cs336_a2_attention_distributed_references",
+        durationMs: null,
+      },
+    ]);
+    expect(result.exec.artifacts).toEqual([
+      expect.objectContaining({
+        kind: "json",
+        name: "cs336-a2-systems-summary",
+        data: expect.objectContaining({
+          averaged_gradient: [2, 4],
+        }),
+      }),
+    ]);
   });
 
   it("runs the CS336 A3 profile with a primitive-facade scaling oracle", async () => {
@@ -608,6 +724,46 @@ function createDataCleaningBridge(): object {
     },
     gopher_quality_passed(text: string) {
       return reference.evaluateGopherQuality(text).passed;
+    },
+  };
+}
+
+interface SerializedTensor {
+  readonly shape: readonly number[];
+  readonly data: readonly number[];
+}
+
+function createAttentionMathBridge(): object {
+  return {
+    flash_forward_json(inputJson: string) {
+      const input = JSON.parse(inputJson) as {
+        q: SerializedTensor;
+        k: SerializedTensor;
+        v: SerializedTensor;
+      };
+      const forward = referenceFlashAttention(
+        serializedTensor(input.q),
+        serializedTensor(input.k),
+        serializedTensor(input.v),
+      );
+      return JSON.stringify({
+        output: [...forward.output.data],
+        logSumExp: [...forward.logSumExp.data],
+      });
+    },
+  };
+}
+
+function serializedTensor(input: SerializedTensor): Tensor {
+  return tensor(input.shape, new Float32Array(input.data));
+}
+
+function createDistributedTrainingBridge(): object {
+  return {
+    ddp_average_json(inputJson: string) {
+      return JSON.stringify(
+        simulation.simulateDdpGradientSynchronization(JSON.parse(inputJson)),
+      );
     },
   };
 }

@@ -31,7 +31,7 @@
   ],
   "oracles": [
     {
-      "name": "_bg_attention_oracles",
+      "name": "_bg_attention_math",
       "js_module": "/assignments/cs149gpt/oracles/attention.js",
       "export_name": "oracle"
     }

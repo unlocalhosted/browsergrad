@@ -91,9 +91,11 @@ Future slice:
 ## Platform Gaps To Track
 
 - Platform JS oracle wiring for `referenceFlashAttention()` and
-  `referenceFlashAttentionBackward()` in A2 rubrics.
+  `referenceFlashAttentionBackward()` through the `_bg_attention_math`
+  profile module in A2 rubrics.
 - Distributed simulator API for rank-local model copies, collectives, FSDP
-  sharding, and sharded optimizer state.
+  sharding, and sharded optimizer state through the `_bg_distributed_training`
+  profile module.
 - Fixture conversion path for small `.pt` files.
 - Assignment-profile capability gates in the UI, so native-only tests are shown
   as intentionally replaced/skipped.
