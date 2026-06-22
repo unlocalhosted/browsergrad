@@ -179,7 +179,8 @@ export async function runWgslKernelProgram(
           size: byteLength,
           usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
         });
-        gpu.queue.writeBuffer(buffer, 0, data.buffer, data.byteOffset, data.byteLength);
+        const upload = bytesForGpuWrite(data, byteLength);
+        gpu.queue.writeBuffer(buffer, 0, upload.buffer, upload.byteOffset, upload.byteLength);
         storageBuffers.set(binding.name, { binding, buffer, byteLength: data.byteLength });
         layoutEntries.push({
           binding: binding.binding,
@@ -357,6 +358,14 @@ function createFeatureSet(
 function bytesFromBufferSource(source: ArrayBuffer | ArrayBufferView): Uint8Array {
   if (source instanceof ArrayBuffer) return new Uint8Array(source);
   return new Uint8Array(source.buffer, source.byteOffset, source.byteLength);
+}
+
+function bytesForGpuWrite(source: ArrayBufferView, alignedByteLength: number): Uint8Array {
+  const bytes = bytesFromBufferSource(source);
+  if (bytes.byteLength === alignedByteLength) return bytes;
+  const padded = new Uint8Array(alignedByteLength);
+  padded.set(bytes);
+  return padded;
 }
 
 function typedArrayFromBytes(type: WgslValueType, bytes: ArrayBuffer): WgslTypedArray {
