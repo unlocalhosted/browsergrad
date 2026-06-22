@@ -259,6 +259,9 @@ the command instead of trusting that rerun.
 orchestration probes against both `runCompiledKernelReference()` and real
 WebGPU. It covers SAXPY, guarded map, tiled matmul, grid-sync phases, host
 peer copy, host dynamic launch, and prepared resident dispatch.
+Compiler e2e, corpus, and benchmark package scripts use
+`scripts/run-cuda-lite-tool.mjs`, which locks build + tool execution so parallel
+invocations cannot import a partially rebuilt `dist/` tree.
 
 ## Corpus Audit
 

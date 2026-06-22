@@ -76,3 +76,6 @@
 - Added `summarizeCudaWebGpuExecutionPlan()` so platforms can distinguish direct
   WebGPU, host-orchestrated WebGPU, and unsupported plans without misusing the
   conservative lowering plan.
+- Compiler corpus, e2e, and benchmark package scripts now run through a locked
+  tool wrapper so concurrent invocations cannot import a partially rebuilt
+  `dist/` tree.
