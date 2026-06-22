@@ -589,6 +589,33 @@ __global__ (cufftComplex *data, int N) {
     expect([...result.buffers.data as Float32Array]).toEqual([2, 4, 6, 8]);
   });
 
+  it("lowers cudaSurfaceObject_t surf2Dwrite to storage-backed surfaces", () => {
+    const compiled = compileCudaLiteKernel(`
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void surfaceWrite(cudaSurfaceObject_t outputSurf, int width, int height) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  if (x < width && y < height) {
+    float value = tex2D(texRef, (float)x + 0.5f, (float)y + 0.5f);
+    surf2Dwrite(value * 2.0f, outputSurf, x * sizeof(float), y);
+  }
+}`, { workgroupSize: [2, 2, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {},
+        textures: { texRef: { width: 2, height: 2, data: new Float32Array([1, 2, 3, 4]) } },
+        surfaces: { outputSurf: { width: 2, height: 2, data: new Float32Array(4) } },
+        scalars: { width: 2, height: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 2, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<storage, read_write> outputSurf: array<f32>;");
+    expect(compiled.wgsl).toContain("bg_surf2dwrite_outputSurf");
+    expect([...result.buffers.outputSurf as Float32Array]).toEqual([2, 4, 6, 8]);
+  });
+
   it("parses dynamic extern shared memory as a clear unsupported diagnostic", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void dynamicShared(float *x) {

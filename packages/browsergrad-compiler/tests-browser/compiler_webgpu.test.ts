@@ -70,6 +70,18 @@ __global__ void asmFma(const float *A, const float *B, float *out) {
 }
 `;
 
+const SURFACE_WRITE = `
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void surfaceWrite(cudaSurfaceObject_t outputSurf, int width, int height) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  if (x < width && y < height) {
+    float value = tex2D(texRef, (float)x + 0.5f, (float)y + 0.5f);
+    surf2Dwrite(value * 2.0f, outputSurf, x * sizeof(float), y);
+  }
+}
+`;
+
 async function checkDevice(): Promise<DeviceCheck> {
   if (typeof navigator === "undefined" || !("gpu" in navigator)) {
     return { available: false, reason: "navigator.gpu undefined" };
@@ -278,6 +290,22 @@ __global__ void atomic_exchange(float* x, float* out) {
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
+  it("runs surface writes through WebGPU storage-backed surfaces", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(SURFACE_WRITE, { workgroupSize: [2, 2, 1] });
+    const input = {
+      buffers: {},
+      textures: { texRef: { width: 2, height: 2, data: new Float32Array([1, 2, 3, 4]) } },
+      surfaces: { outputSurf: { width: 2, height: 2, data: new Float32Array(4) } },
+      scalars: { width: 2, height: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 2, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.outputSurf as Float32Array]).toEqual([...expected.buffers.outputSurf as Float32Array]);
   });
 
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {

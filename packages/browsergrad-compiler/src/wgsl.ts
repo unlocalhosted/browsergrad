@@ -54,6 +54,11 @@ export function emitKernelIrWgsl(
       `@group(0) @binding(${context.bindingFor(param.name)}) var<storage, ${access}> ${param.name}: array<${element}>;`,
     );
   }
+  for (const surface of ir.params.filter(isSurfaceParam)) {
+    lines.push(
+      `@group(0) @binding(${context.bindingFor(surface.name)}) var<storage, read_write> ${surface.name}: array<f32>;`,
+    );
+  }
 
   for (const constant of ir.constants.filter((constant) => constant.dimensions.length > 0)) {
     lines.push(
@@ -83,6 +88,10 @@ export function emitKernelIrWgsl(
   if (ir.textures.length > 0) {
     lines.push("");
     for (const texture of ir.textures) lines.push(...emitTextureHelper(texture.name));
+  }
+  for (const surface of ir.params.filter(isSurfaceParam)) {
+    lines.push("");
+    lines.push(...emitSurfaceHelper(surface.name));
   }
   if (usesFloatAtomicAdd(ir)) {
     lines.push("");
@@ -133,6 +142,7 @@ interface EmitContext {
   isAtomicShared(name: string): boolean;
   pointerAliasFor(name: string): PointerAlias | undefined;
   cooperativeGroupFor(name: string): CudaLiteCooperativeGroupDecl | undefined;
+  surfaceWidthField(name: string): string;
 }
 
 interface PointerAlias {
@@ -153,6 +163,17 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
       name: param.name,
       valueType: wgslBindingType(param.valueType),
       access: param.constant ? "read" : "read_write",
+      binding,
+    });
+  }
+  for (const param of ir.params.filter(isSurfaceParam)) {
+    const binding = bindings.length;
+    bindingByName.set(param.name, binding);
+    bindings.push({
+      kind: "storage",
+      name: param.name,
+      valueType: "f32",
+      access: "read_write",
       binding,
     });
   }
@@ -178,8 +199,12 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
     });
   }
   const uniformScalars = [
-    ...ir.params.filter((param) => !param.pointer).map((param) => ({ name: param.name, valueType: param.valueType })),
+    ...ir.params.filter((param) => !param.pointer && !isSurfaceParam(param)).map((param) => ({ name: param.name, valueType: param.valueType })),
     ...ir.constants.filter((constant) => constant.dimensions.length === 0).map((constant) => ({ name: constant.name, valueType: constant.valueType })),
+    ...ir.params.filter(isSurfaceParam).flatMap((param) => [
+      { name: surfaceWidthField(param.name), valueType: "uint" as const },
+      { name: surfaceHeightField(param.name), valueType: "uint" as const },
+    ]),
   ];
   const uniformScalarNames = new Set(uniformScalars.map((scalar) => scalar.name));
   const uniformScalarTypes = new Map(uniformScalars.map((scalar) => [scalar.name, scalar.valueType] as const));
@@ -222,6 +247,9 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
     },
     cooperativeGroupFor(name) {
       return cooperativeGroups.get(name);
+    },
+    surfaceWidthField(name) {
+      return surfaceWidthField(name);
     },
   };
 }
@@ -413,7 +441,7 @@ function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "va
   if (context.isAtomicShared(name) && mode === "value") return `atomicLoad(&${name})`;
   const param = context.paramFor(name);
   const uniformType = context.uniformScalarTypeFor(name);
-  if ((param && !param.pointer) || context.isUniformScalar(name)) {
+  if ((param && !param.pointer && !isSurfaceParam(param)) || context.isUniformScalar(name)) {
     return uniformType === "bool" ? `(params.${name} != 0u)` : `params.${name}`;
   }
   return name;
@@ -473,6 +501,14 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
         return `bg_tex2d_${expression.args[0].name}(${emitExpression(expression.args[1]!, context)}, ${emitExpression(expression.args[2]!, context)})`;
       }
       return `tex2D(${args.join(", ")})`;
+    case "surf2Dwrite":
+      if (expression.args.length === 4 && expression.args[1]?.kind === "identifier") {
+        return `bg_surf2dwrite_${expression.args[1].name}(${emitExpression(expression.args[0]!, context)}, ${emitExpression(expression.args[2]!, context)}, ${emitExpression(expression.args[3]!, context)})`;
+      }
+      return `surf2Dwrite(${args.join(", ")})`;
+    case "sizeof":
+      if (expression.args[0]?.kind === "identifier") return String(sizeofType(expression.args[0].name));
+      return "4";
     case "curand_init":
       return `bg_curand_init(u32(${args[0] ?? "0"}), u32(${args[1] ?? "0"}), u32(${args[2] ?? "0"}), ${args[3] ?? "&state"})`;
     case "curand_uniform":
@@ -642,6 +678,18 @@ function emitTextureHelper(name: string): string[] {
   ];
 }
 
+function emitSurfaceHelper(name: string): string[] {
+  return [
+    `fn bg_surf2dwrite_${name}(value: f32, x_bytes: i32, y: i32) {`,
+    "  let x = x_bytes / 4;",
+    `  let index = y * i32(params.${surfaceWidthField(name)}) + x;`,
+    `  if (index >= 0 && index < i32(arrayLength(&${name}))) {`,
+    `    ${name}[index] = value;`,
+    "  }",
+    "}",
+  ];
+}
+
 function emitFloatAtomicAddHelper(): string[] {
   return [
     "fn bg_atomicAdd_f32(ptr_value: ptr<storage, atomic<u32>, read_write>, value: f32) -> f32 {",
@@ -755,6 +803,7 @@ function zeroValue(type: CudaLiteScalarType): string {
   if (type === "uint") return "0u";
   if (type === "bool") return "false";
   if (type === "complex64") return "vec2<f32>(0.0, 0.0)";
+  if (type === "surface2d") return "0u";
   return "0";
 }
 
@@ -772,6 +821,8 @@ function wgslScalar(type: CudaLiteScalarType): string {
       return "bool";
     case "complex64":
       return "vec2<f32>";
+    case "surface2d":
+      return "u32";
     case "void":
       return "void";
   }
@@ -779,6 +830,7 @@ function wgslScalar(type: CudaLiteScalarType): string {
 
 function wgslUniformScalar(type: CudaLiteScalarType): string {
   if (type === "complex64") return "vec2<f32>";
+  if (type === "surface2d") return "u32";
   return type === "bool" ? "u32" : wgslScalar(type);
 }
 
@@ -788,7 +840,32 @@ function wgslBindingType(type: CudaLiteScalarType): "f16" | "f32" | "i32" | "u32
   if (type === "uint") return "u32";
   if (type === "bool") return "u32";
   if (type === "complex64") return "f32";
+  if (type === "surface2d") return "f32";
   return "f32";
+}
+
+function isSurfaceParam(param: CudaLiteParam): boolean {
+  return param.valueType === "surface2d";
+}
+
+function surfaceWidthField(name: string): string {
+  return `${name}_width`;
+}
+
+function surfaceHeightField(name: string): string {
+  return `${name}_height`;
+}
+
+function sizeofType(typeName: string): number {
+  switch (typeName) {
+    case "half":
+    case "__half":
+      return 2;
+    case "cufftComplex":
+      return 8;
+    default:
+      return 4;
+  }
 }
 
 function indent(level: number): string {

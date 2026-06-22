@@ -56,6 +56,7 @@ interface ThreadContext {
   readonly constants: Map<string, number | WgslTypedArray>;
   readonly constantDimensions: Map<string, readonly number[]>;
   readonly textures: NonNullable<CompiledKernelInput["textures"]>;
+  readonly surfaces: NonNullable<CompiledKernelInput["surfaces"]>;
   readonly functions: ReadonlyMap<string, CudaLiteDeviceFunction>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly valueTypes: ReadonlyMap<string, CudaLiteScalarType>;
@@ -93,6 +94,7 @@ export function runCompiledKernelReference(
   const constants = cloneConstants(input.constants ?? {});
   const constantDimensions = new Map(compiled.ir.constants.map((constant) => [constant.name, constant.dimensions]));
   const textures = input.textures ?? {};
+  const surfaces = cloneSurfaces(input.surfaces ?? {});
   const functions = new Map(compiled.ir.functions.map((fn) => [fn.name, fn]));
   const scalars = input.scalars ?? {};
   const valueTypes = new Map<string, CudaLiteScalarType>([
@@ -104,7 +106,7 @@ export function runCompiledKernelReference(
   for (let bz = 0; bz < launch.gridDim[2]; bz++) {
     for (let by = 0; by < launch.gridDim[1]; by++) {
       for (let bx = 0; bx < launch.gridDim[0]; bx++) {
-        runBlock(compiled, buffers, constants, constantDimensions, textures, functions, scalars, valueTypes, {
+        runBlock(compiled, buffers, constants, constantDimensions, textures, surfaces, functions, scalars, valueTypes, {
           x: bx,
           y: by,
           z: bz,
@@ -114,10 +116,10 @@ export function runCompiledKernelReference(
   }
 
   const readback = input.readback ??
-    compiled.ir.params.filter((param) => param.pointer && !param.constant).map((param) => param.name);
+    compiled.ir.params.filter((param) => (param.pointer && !param.constant) || param.valueType === "surface2d").map((param) => param.name);
   const result: Record<string, WgslTypedArray> = {};
   for (const name of readback) {
-    const buffer = buffers.get(name);
+    const buffer = buffers.get(name) ?? surfaces[name]?.data;
     if (!buffer) throw compilerFailure(`missing readback buffer '${name}'`);
     result[name] = cloneTypedArray(buffer);
   }
@@ -130,6 +132,7 @@ function runBlock(
   constants: Map<string, number | WgslTypedArray>,
   constantDimensions: Map<string, readonly number[]>,
   textures: NonNullable<CompiledKernelInput["textures"]>,
+  surfaces: NonNullable<CompiledKernelInput["surfaces"]>,
   functions: ReadonlyMap<string, CudaLiteDeviceFunction>,
   scalars: Readonly<Record<string, number>>,
   valueTypes: ReadonlyMap<string, CudaLiteScalarType>,
@@ -163,6 +166,7 @@ function runBlock(
           constants,
           constantDimensions,
           textures,
+          surfaces,
           functions,
           scalars,
           valueTypes,
@@ -503,6 +507,24 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const y = Math.max(0, Math.min(texture.height - 1, Math.floor(evalNumber(expression.args[2]!, context))));
     return texture.data[y * texture.width + x] ?? 0;
   }
+  if (name === "surf2Dwrite") {
+    const surfaceRef = expression.args[1];
+    if (surfaceRef?.kind !== "identifier") throw compilerFailure("surf2Dwrite expects surface reference");
+    const surface = context.surfaces[surfaceRef.name];
+    if (!surface) throw compilerFailure(`missing surface input '${surfaceRef.name}'`);
+    const value = evalNumber(expression.args[0]!, context);
+    const x = Math.trunc(evalNumber(expression.args[2]!, context) / 4);
+    const y = Math.trunc(evalNumber(expression.args[3]!, context));
+    const index = y * surface.width + x;
+    const ok = x >= 0 && y >= 0 && x < surface.width && y < surface.height && index < surface.data.length;
+    if (ok) surface.data[index] = value;
+    context.trace.writes.push({ name: surfaceRef.name, index, value, ok });
+    return 0;
+  }
+  if (name === "sizeof") {
+    const target = expression.args[0];
+    return target?.kind === "identifier" ? sizeofType(target.name) : 4;
+  }
   if (name === "curand_init") {
     const state = expression.args[3];
     if (!state) throw compilerFailure("curand_init expects state address");
@@ -826,6 +848,20 @@ function cloneBuffers(
   return out;
 }
 
+function cloneSurfaces(
+  surfaces: NonNullable<CompiledKernelInput["surfaces"]>,
+): Record<string, { readonly width: number; readonly height: number; readonly data: Float32Array }> {
+  const out: Record<string, { readonly width: number; readonly height: number; readonly data: Float32Array }> = {};
+  for (const [name, surface] of Object.entries(surfaces)) {
+    out[name] = {
+      width: surface.width,
+      height: surface.height,
+      data: new Float32Array(surface.data),
+    };
+  }
+  return out;
+}
+
 function cloneConstants(
   constants: Readonly<Record<string, number | WgslTypedArray>>,
 ): Map<string, number | WgslTypedArray> {
@@ -874,6 +910,18 @@ function zeroLocalValue(type: CudaLiteScalarType): EvalValue {
   return type === "complex64" ? { kind: "complex64", x: 0, y: 0 } : 0;
 }
 
+function sizeofType(typeName: string): number {
+  switch (typeName) {
+    case "half":
+    case "__half":
+      return 2;
+    case "cufftComplex":
+      return 8;
+    default:
+      return 4;
+  }
+}
+
 function traceValue(value: EvalValue): number {
   return isComplex(value) ? value.x : value;
 }
@@ -916,7 +964,11 @@ function validateLaunch(launch: KernelLaunch, workgroupSize: readonly [number, n
 
 function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelInput): void {
   for (const param of compiled.ir.params) {
-    if (param.pointer) {
+    if (param.valueType === "surface2d") {
+      const surface = input.surfaces?.[param.name];
+      if (!surface) throw compilerFailure(`missing surface input '${param.name}'`);
+      validateSurfaceInput(param.name, surface);
+    } else if (param.pointer) {
       const buffer = input.buffers[param.name];
       if (!buffer) throw compilerFailure(`missing buffer input '${param.name}'`);
       if (param.valueType === "int" && !(buffer instanceof Int32Array)) {
@@ -956,12 +1008,16 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
   for (const texture of compiled.ir.textures) {
     const value = input.textures?.[texture.name];
     if (!value) throw compilerFailure(`missing texture input '${texture.name}'`);
-    if (!(value.data instanceof Float32Array)) throw compilerFailure(`texture '${texture.name}' expects Float32Array data`);
-    if (!Number.isInteger(value.width) || value.width <= 0) throw compilerFailure(`texture '${texture.name}' width must be positive`);
-    if (!Number.isInteger(value.height) || value.height <= 0) throw compilerFailure(`texture '${texture.name}' height must be positive`);
-    const expected = value.width * value.height;
-    if (value.data.length < expected) throw compilerFailure(`texture '${texture.name}' expects at least ${expected} texels`);
+    validateSurfaceInput(`texture ${texture.name}`, value);
   }
+}
+
+function validateSurfaceInput(name: string, value: { readonly width: number; readonly height: number; readonly data: Float32Array }): void {
+  if (!(value.data instanceof Float32Array)) throw compilerFailure(`${name} expects Float32Array data`);
+  if (!Number.isInteger(value.width) || value.width <= 0) throw compilerFailure(`${name} width must be positive`);
+  if (!Number.isInteger(value.height) || value.height <= 0) throw compilerFailure(`${name} height must be positive`);
+  const expected = value.width * value.height;
+  if (value.data.length < expected) throw compilerFailure(`${name} expects at least ${expected} elements`);
 }
 
 function contextConstantDimensions(name: string, context: ThreadContext): readonly number[] {

@@ -40,6 +40,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["atomicExch", [2, 2]],
   ["atomicCAS", [3, 3]],
   ["tex2D", [3, 3]],
+  ["surf2Dwrite", [4, 4]],
+  ["sizeof", [1, 1]],
   ["curand_init", [4, 4]],
   ["curand_uniform", [1, 1]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
@@ -99,7 +101,7 @@ interface Scope {
 }
 
 interface ExpressionInfo {
-  readonly kind: "scalar" | "complex" | "pointer" | "array" | "texture" | "vector" | "function" | "address" | "string" | "unknown";
+  readonly kind: "scalar" | "complex" | "pointer" | "array" | "texture" | "surface" | "vector" | "function" | "address" | "string" | "unknown";
   readonly valueType?: ValueType | undefined;
   readonly dimensions?: readonly number[] | undefined;
   readonly symbol?: SymbolInfo | undefined;
@@ -583,6 +585,14 @@ function validateCallExpression(
     validateTex2D(expression, scope, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "float" };
   }
+  if (callName === "surf2Dwrite") {
+    validateSurf2DWrite(expression, scope, diagnostics, walkExpression);
+    return { kind: "scalar", valueType: "float" };
+  }
+  if (callName === "sizeof") {
+    validateSizeof(expression, diagnostics);
+    return { kind: "scalar", valueType: "uint" };
+  }
   if (callName === "curand_init") {
     validateCurandInit(expression, diagnostics, walkExpression, scope);
     return { kind: "scalar", valueType: "uint" };
@@ -695,6 +705,39 @@ function validateTex2D(
   }
   for (const coord of expression.args.slice(1)) {
     validateScalarOperand(walkExpression(coord, scope), coord.span, diagnostics);
+  }
+}
+
+function validateSurf2DWrite(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const value = expression.args[0];
+  const surface = expression.args[1];
+  const xBytes = expression.args[2];
+  const y = expression.args[3];
+  if (value) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
+  if (surface?.kind !== "identifier") {
+    diagnostics.push(error("unsupported-surface", "surf2Dwrite second argument must be a surface object", expression.span));
+  } else {
+    const symbol = lookupSymbol(surface.name, scope, surface.span);
+    if (symbol?.valueType !== "surface2d") {
+      diagnostics.push(error("unsupported-surface", `surf2Dwrite target '${surface.name}' is not a cudaSurfaceObject_t parameter`, surface.span));
+    }
+  }
+  if (xBytes) validateScalarOperand(walkExpression(xBytes, scope), xBytes.span, diagnostics);
+  if (y) validateScalarOperand(walkExpression(y, scope), y.span, diagnostics);
+}
+
+function validateSizeof(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  diagnostics: CudaLiteDiagnostic[],
+): void {
+  const target = expression.args[0];
+  if (target?.kind !== "identifier" || sizeofType(target.name) === undefined) {
+    diagnostics.push(error("unsupported-sizeof", "sizeof only supports CUDA-lite scalar types", target?.span ?? expression.span));
   }
 }
 
@@ -967,6 +1010,7 @@ function expressionInfoForIdentifier(
   if (symbol.kind === "device-function") return { kind: "function", symbol };
   if (symbol.kind === "cooperative-group") return { kind: "unknown", symbol };
   if (symbol.kind === "texture") return { kind: "texture", valueType: symbol.valueType, symbol };
+  if (symbol.valueType === "surface2d") return { kind: "surface", valueType: symbol.valueType, symbol };
   if (symbol.kind === "shared" || symbol.kind === "constant") {
     if (symbol.valueType === "complex64" && (!symbol.dimensions || symbol.dimensions.length === 0)) {
       return { kind: "complex", valueType: symbol.valueType, symbol };
@@ -1054,6 +1098,25 @@ function validateDeclaredSymbolName(
 
 function isInlineAsmFma(template: string): boolean {
   return /\bfma\.rn\.f32\b/u.test(template);
+}
+
+function sizeofType(typeName: string): number | undefined {
+  switch (typeName) {
+    case "float":
+    case "int":
+    case "uint":
+    case "unsigned":
+      return 4;
+    case "half":
+    case "__half":
+      return 2;
+    case "bool":
+      return 4;
+    case "cufftComplex":
+      return 8;
+    default:
+      return undefined;
+  }
 }
 
 function validateSideEffectPlacement(

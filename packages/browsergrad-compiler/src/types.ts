@@ -12,7 +12,7 @@ export interface SourceSpan {
   readonly column: number;
 }
 
-export type CudaLiteScalarType = "float" | "int" | "uint" | "half" | "bool" | "complex64" | "void";
+export type CudaLiteScalarType = "float" | "int" | "uint" | "half" | "bool" | "complex64" | "surface2d" | "void";
 export type DiagnosticSeverity = "error" | "warning";
 
 export interface CudaLiteDiagnostic {
@@ -342,6 +342,7 @@ export interface CompiledKernelInput {
   readonly buffers: Readonly<Record<string, WgslTypedArray>>;
   readonly constants?: Readonly<Record<string, number | WgslTypedArray>>;
   readonly textures?: Readonly<Record<string, WgslTexture2DInput>>;
+  readonly surfaces?: Readonly<Record<string, WgslTexture2DInput>>;
   readonly scalars?: Readonly<Record<string, number>>;
   readonly readback?: readonly string[];
 }

@@ -624,6 +624,7 @@ class Parser {
     if (token.value === "size_t") return "uint";
     if (token.value === "curandState_t") return "uint";
     if (token.value === "cufftComplex") return "complex64";
+    if (token.value === "cudaSurfaceObject_t") return "surface2d";
     if (!TYPE_KEYWORDS.has(token.value)) this.fail(`unsupported CUDA-lite type: ${token.value}`, token.span);
     return token.value as Exclude<CudaLiteScalarType, "void">;
   }

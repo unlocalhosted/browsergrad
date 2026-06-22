@@ -60,6 +60,7 @@ export async function runCompiledKernelWebGpu(
   const uniforms = packScalarParams(compiled, input);
   const buffers = {
     ...input.buffers,
+    ...surfaceBufferInputs(compiled, input),
     ...constantBufferInputs(compiled, input),
   };
   const result = await runWgslKernelProgram(
@@ -70,7 +71,7 @@ export async function runCompiledKernelWebGpu(
       ...(input.textures === undefined ? {} : { textures: input.textures }),
       ...(uniforms.byteLength === 0 ? {} : { uniforms: { params: uniforms } }),
       readback: input.readback ??
-        compiled.ir.params.filter((param) => param.pointer && !param.constant).map((param) => param.name),
+        compiled.ir.params.filter((param) => (param.pointer && !param.constant) || param.valueType === "surface2d").map((param) => param.name),
     },
     {
       dispatchCount: [
@@ -88,19 +89,25 @@ function packScalarParams(
   input: CompiledKernelInput,
 ): Uint8Array {
   const scalarParams = [
-    ...compiled.ir.params.filter((param) => !param.pointer),
+    ...compiled.ir.params.filter((param) => !param.pointer && param.valueType !== "surface2d"),
     ...compiled.ir.constants.filter((constant) => constant.dimensions.length === 0),
+    ...compiled.ir.params.filter((param) => param.valueType === "surface2d").flatMap((param) => [
+      { name: `${param.name}_width`, valueType: "uint" as const, surface: param.name, span: param.span },
+      { name: `${param.name}_height`, valueType: "uint" as const, surface: param.name, span: param.span },
+    ]),
   ];
   if (scalarParams.length === 0) return new Uint8Array(0);
   const bytes = new Uint8Array(Math.max(16, scalarParams.length * 4));
   const view = new DataView(bytes.buffer);
   for (let i = 0; i < scalarParams.length; i++) {
     const param = scalarParams[i]!;
-    const value = "pointer" in param
+    const value = "surface" in param
+      ? (param.name.endsWith("_width") ? input.surfaces?.[param.surface]?.width : input.surfaces?.[param.surface]?.height)
+      : "pointer" in param
       ? input.scalars?.[param.name]
       : input.constants?.[param.name];
     if (value === undefined) {
-      const kind = "pointer" in param ? "scalar input" : "constant input";
+      const kind = "surface" in param ? "surface input" : "pointer" in param ? "scalar input" : "constant input";
       throw new CudaLiteCompilerError(`missing ${kind} '${param.name}'`, [{
         code: "missing-scalar",
         severity: "error",
@@ -124,6 +131,26 @@ function packScalarParams(
     else view.setFloat32(offset, value, true);
   }
   return bytes;
+}
+
+function surfaceBufferInputs(
+  compiled: CompiledCudaLiteKernel,
+  input: CompiledKernelInput,
+): Record<string, WgslTypedArray> {
+  const out: Record<string, WgslTypedArray> = {};
+  for (const surface of compiled.ir.params.filter((param) => param.valueType === "surface2d")) {
+    const value = input.surfaces?.[surface.name];
+    if (!value) {
+      throw new CudaLiteCompilerError(`missing surface input '${surface.name}'`, [{
+        code: "missing-surface",
+        severity: "error",
+        message: `missing surface input '${surface.name}'`,
+        span: surface.span,
+      }]);
+    }
+    out[surface.name] = value.data;
+  }
+  return out;
 }
 
 function constantBufferInputs(
