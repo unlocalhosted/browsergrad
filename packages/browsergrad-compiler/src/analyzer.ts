@@ -99,7 +99,7 @@ interface Scope {
 }
 
 interface ExpressionInfo {
-  readonly kind: "scalar" | "pointer" | "array" | "texture" | "vector" | "function" | "address" | "string" | "unknown";
+  readonly kind: "scalar" | "complex" | "pointer" | "array" | "texture" | "vector" | "function" | "address" | "string" | "unknown";
   readonly valueType?: ValueType | undefined;
   readonly dimensions?: readonly number[] | undefined;
   readonly symbol?: SymbolInfo | undefined;
@@ -742,7 +742,7 @@ function validateAtomicBuiltin(
       if (param.constant) {
         diagnostics.push(error("const-pointer-write", `cannot ${callName} through const pointer '${param.name}'`, expression.span));
       }
-    } else if (param.valueType === "float" || param.valueType === "half") {
+    } else if (param.valueType === "float" || param.valueType === "half" || param.valueType === "complex64") {
       diagnostics.push(error("unsupported-atomic-f32", "only atomicAdd/atomicExch are supported for float pointers in CUDA-lite v0", expression.span));
     } else {
       atomicParams.add(param.name);
@@ -801,6 +801,12 @@ function validateNonCallExpression(
     case "member": {
       const object = walkExpression(expression.object, scope);
       if (object.kind === "unknown") return { kind: "unknown" };
+      if (object.kind === "complex") {
+        if (expression.property !== "x" && expression.property !== "y") {
+          diagnostics.push(error("unsupported-member-target", `unsupported complex member '${expression.property}'`, expression.span));
+        }
+        return { kind: "scalar", valueType: "float" };
+      }
       if (object.kind !== "vector") {
         diagnostics.push(error("unsupported-member-target", "member access is only supported on CUDA-lite builtin vectors", expression.span));
       }
@@ -812,7 +818,11 @@ function validateNonCallExpression(
     case "index": {
       const target = walkExpression(expression.target, scope);
       validateScalarOperand(walkExpression(expression.index, scope), expression.index.span, diagnostics);
-      if (target.kind === "pointer") return { kind: "scalar", valueType: target.valueType, symbol: target.symbol };
+      if (target.kind === "pointer") {
+        return target.valueType === "complex64"
+          ? { kind: "complex", valueType: target.valueType, symbol: target.symbol }
+          : { kind: "scalar", valueType: target.valueType, symbol: target.symbol };
+      }
       if (target.kind === "array") {
         const dimensions = target.dimensions ?? [];
         if (dimensions.length > 1) {
@@ -823,7 +833,9 @@ function validateNonCallExpression(
             symbol: target.symbol,
           };
         }
-        return { kind: "scalar", valueType: target.valueType, symbol: target.symbol };
+        return target.valueType === "complex64"
+          ? { kind: "complex", valueType: target.valueType, symbol: target.symbol }
+          : { kind: "scalar", valueType: target.valueType, symbol: target.symbol };
       }
       diagnostics.push(error("unsupported-index-target", "only pointer parameters and fixed __shared__ arrays can be indexed", expression.span));
       return { kind: "unknown" };
@@ -852,7 +864,15 @@ function validateNonCallExpression(
     }
     case "assignment": {
       validateLValueExpression(expression.left, scope, diagnostics, walkExpression);
-      validateScalarOperand(walkExpression(expression.right, scope), expression.right.span, diagnostics);
+      const left = walkExpression(expression.left, scope);
+      const right = walkExpression(expression.right, scope);
+      if (left.kind === "complex") {
+        if (right.kind !== "complex" && right.kind !== "unknown") {
+          diagnostics.push(error("unsupported-scalar-expression", "complex assignment expects a complex value", expression.right.span));
+        }
+      } else {
+        validateScalarOperand(right, expression.right.span, diagnostics);
+      }
       return { kind: "scalar" };
     }
     case "update": {
@@ -892,10 +912,19 @@ function validateLValueExpression(
       diagnostics.push(error("const-pointer-write", `cannot write to constant memory '${root}'`, expression.span));
       return;
     }
-    if (info.kind !== "scalar") {
-      diagnostics.push(error("invalid-assignment-target", "assignment target must resolve to a scalar element", expression.span));
+    if (info.kind !== "scalar" && info.kind !== "complex") {
+      diagnostics.push(error("invalid-assignment-target", "assignment target must resolve to a scalar or complex element", expression.span));
     }
     return;
+  }
+  if (expression.kind === "member") {
+    const info = walkExpression(expression.object, scope);
+    if (info.kind === "complex") {
+      if (expression.property !== "x" && expression.property !== "y") {
+        diagnostics.push(error("invalid-assignment-target", "complex assignment target must be .x or .y", expression.span));
+      }
+      return;
+    }
   }
   diagnostics.push(error("invalid-assignment-target", "assignment target must be a local variable, pointer element, or shared element", expression.span));
 }
@@ -917,6 +946,9 @@ function expressionInfoForIdentifier(
   if (symbol.kind === "cooperative-group") return { kind: "unknown", symbol };
   if (symbol.kind === "texture") return { kind: "texture", valueType: symbol.valueType, symbol };
   if (symbol.kind === "shared" || symbol.kind === "constant") {
+    if (symbol.valueType === "complex64" && (!symbol.dimensions || symbol.dimensions.length === 0)) {
+      return { kind: "complex", valueType: symbol.valueType, symbol };
+    }
     return {
       kind: symbol.dimensions && symbol.dimensions.length > 0 ? "array" : "scalar",
       valueType: symbol.valueType,
@@ -929,6 +961,9 @@ function expressionInfoForIdentifier(
   }
   if (symbol.kind === "local" && symbol.pointer) {
     return { kind: "pointer", valueType: symbol.valueType, symbol };
+  }
+  if (symbol.kind === "local" && symbol.valueType === "complex64") {
+    return { kind: "complex", valueType: symbol.valueType, symbol };
   }
   return { kind: "scalar", valueType: symbol.valueType, symbol };
 }

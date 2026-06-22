@@ -12,7 +12,7 @@ export interface SourceSpan {
   readonly column: number;
 }
 
-export type CudaLiteScalarType = "float" | "int" | "uint" | "half" | "bool" | "void";
+export type CudaLiteScalarType = "float" | "int" | "uint" | "half" | "bool" | "complex64" | "void";
 export type DiagnosticSeverity = "error" | "warning";
 
 export interface CudaLiteDiagnostic {

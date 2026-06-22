@@ -482,6 +482,63 @@ __global__ void monteCarloPiKernel(unsigned long long *counts, int totalPoints, 
     expect([...result.buffers.counts as Uint32Array].every((value) => value === 0 || value === 1)).toBe(true);
   });
 
+  it("supports cufftComplex buffers as interleaved complex64 values", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void magnitudeKernel(cufftComplex *data, float *mag, int N) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < N) {
+    float real = data[idx].x;
+    float imag = data[idx].y;
+    mag[idx] = sqrtf(real * real + imag * imag);
+  }
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          data: new Float32Array([3, 4, 5, 12]),
+          mag: new Float32Array(2),
+        },
+        scalars: { N: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<storage, read_write> data: array<vec2<f32>>;");
+    expect(compiled.wgsl).toContain("data[idx].x");
+    expect([...result.buffers.mag as Float32Array]).toEqual([5, 13]);
+  });
+
+  it("supports local cufftComplex values and whole-complex writeback", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void multiplyFreqDomain(cufftComplex *A, const cufftComplex *B, int N) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < N) {
+    cufftComplex a = A[idx];
+    cufftComplex b = B[idx];
+    cufftComplex c;
+    c.x = a.x * b.x - a.y * b.y;
+    c.y = a.x * b.y + a.y * b.x;
+    A[idx] = c;
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          A: new Float32Array([1, 2, 3, 4]),
+          B: new Float32Array([5, 6, 7, 8]),
+        },
+        scalars: { N: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var c: vec2<f32>");
+    expect(compiled.wgsl).toContain("A[idx] = c");
+    expect([...result.buffers.A as Float32Array]).toEqual([-7, 16, -11, 52]);
+  });
+
   it("parses dynamic extern shared memory as a clear unsupported diagnostic", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void dynamicShared(float *x) {

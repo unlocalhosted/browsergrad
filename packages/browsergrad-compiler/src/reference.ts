@@ -6,6 +6,7 @@ import {
   type CudaLiteCooperativeGroupDecl,
   type CudaLiteDeviceFunction,
   type CudaLiteExpression,
+  type CudaLiteScalarType,
   type CudaLiteStatement,
   type CudaLiteVarDecl,
   type KernelLaunch,
@@ -14,7 +15,8 @@ import {
   type ReferenceKernelResult,
 } from "./types.js";
 
-type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue;
+type EvalValue = number | ComplexValue;
+type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue | ComplexValue;
 interface Vector3 {
   readonly x: number;
   readonly y: number;
@@ -32,10 +34,17 @@ interface CooperativeGroupValue {
   readonly tileSize?: number;
 }
 
+interface ComplexValue {
+  readonly kind: "complex64";
+  readonly x: number;
+  readonly y: number;
+}
+
 interface LValue {
   readonly name: string;
   readonly space: "local" | "buffer" | "shared" | "constant";
   readonly index?: number;
+  readonly field?: "x" | "y";
 }
 
 interface ThreadContext {
@@ -49,6 +58,7 @@ interface ThreadContext {
   readonly textures: NonNullable<CompiledKernelInput["textures"]>;
   readonly functions: ReadonlyMap<string, CudaLiteDeviceFunction>;
   readonly scalars: Readonly<Record<string, number>>;
+  readonly valueTypes: ReadonlyMap<string, CudaLiteScalarType>;
   readonly locals: Map<string, LocalValue>;
   readonly shared: Map<string, SharedArrayValue>;
   readonly trace: MutableTrace;
@@ -56,6 +66,7 @@ interface ThreadContext {
 
 interface SharedArrayValue {
   readonly dimensions: readonly number[];
+  readonly valueType: CudaLiteScalarType;
   readonly data: WgslTypedArray;
 }
 
@@ -84,12 +95,16 @@ export function runCompiledKernelReference(
   const textures = input.textures ?? {};
   const functions = new Map(compiled.ir.functions.map((fn) => [fn.name, fn]));
   const scalars = input.scalars ?? {};
+  const valueTypes = new Map<string, CudaLiteScalarType>([
+    ...compiled.ir.params.map((param) => [param.name, param.valueType] as const),
+    ...compiled.ir.constants.map((constant) => [constant.name, constant.valueType] as const),
+  ]);
   const traces: MutableTrace[] = [];
 
   for (let bz = 0; bz < launch.gridDim[2]; bz++) {
     for (let by = 0; by < launch.gridDim[1]; by++) {
       for (let bx = 0; bx < launch.gridDim[0]; bx++) {
-        runBlock(compiled, buffers, constants, constantDimensions, textures, functions, scalars, {
+        runBlock(compiled, buffers, constants, constantDimensions, textures, functions, scalars, valueTypes, {
           x: bx,
           y: by,
           z: bz,
@@ -117,6 +132,7 @@ function runBlock(
   textures: NonNullable<CompiledKernelInput["textures"]>,
   functions: ReadonlyMap<string, CudaLiteDeviceFunction>,
   scalars: Readonly<Record<string, number>>,
+  valueTypes: ReadonlyMap<string, CudaLiteScalarType>,
   blockIdx: Vector3,
   blockDim: Vector3,
   gridDim: Vector3,
@@ -149,6 +165,7 @@ function runBlock(
           textures,
           functions,
           scalars,
+          valueTypes,
           locals: new Map(),
           shared,
           trace,
@@ -206,7 +223,7 @@ function* execStatements(
         }
         break;
       case "if":
-        if (truthy(evalExpression(statement.condition, context))) {
+        if (truthy(evalNumber(statement.condition, context))) {
           const control = yield* execStatements(statement.consequent, context);
           if (control) return control;
         } else if (statement.alternate) {
@@ -219,7 +236,7 @@ function* execStatements(
           if (statement.init.kind === "var") execVar(statement.init, context);
           else evalExpression(statement.init, context);
         }
-        while (statement.condition ? truthy(evalExpression(statement.condition, context)) : true) {
+        while (statement.condition ? truthy(evalNumber(statement.condition, context)) : true) {
           const control = yield* execStatements(statement.body, context);
           if (control?.kind === "return") return control;
           if (statement.update) evalExpression(statement.update, context);
@@ -228,7 +245,7 @@ function* execStatements(
       case "return":
         return {
           kind: "return",
-          ...(statement.value === undefined ? {} : { value: evalExpression(statement.value, context) }),
+          ...(statement.value === undefined ? {} : { value: evalNumber(statement.value, context) }),
         };
       case "continue":
         return { kind: "continue" };
@@ -242,21 +259,29 @@ function execVar(statement: CudaLiteVarDecl, context: ThreadContext): void {
     context.locals.set(statement.name, resolvePointerInitializer(statement, context));
     return;
   }
-  context.locals.set(statement.name, statement.init ? evalExpression(statement.init, context) : 0);
+  context.locals.set(statement.name, statement.init ? evalExpression(statement.init, context) : zeroLocalValue(statement.valueType));
 }
 
-function evalExpression(expression: CudaLiteExpression, context: ThreadContext): number {
+function evalExpression(expression: CudaLiteExpression, context: ThreadContext): EvalValue {
   switch (expression.kind) {
     case "number":
       return expression.value;
     case "string":
       return 0;
-    case "identifier":
-      return valueAsNumber(readIdentifier(expression.name, context), expression.name);
+    case "identifier": {
+      const value = readIdentifier(expression.name, context);
+      if (isComplex(value)) return value;
+      return valueAsNumber(value, expression.name);
+    }
     case "cast":
-      return castNumber(expression.valueType, evalExpression(expression.expression, context));
+      return castNumber(expression.valueType, evalNumber(expression.expression, context));
     case "member": {
-      const object = readExpressionObject(expression.object, context);
+      const object = readMemberObject(expression.object, context);
+      if (isComplex(object)) {
+        if (expression.property === "x") return object.x;
+        if (expression.property === "y") return object.y;
+        throw compilerFailure(`unsupported complex member '${expression.property}'`);
+      }
       if (expression.property === "x") return object.x;
       if (expression.property === "y") return object.y;
       if (expression.property === "z") return object.z;
@@ -268,7 +293,7 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
     }
     case "unary": {
       if (expression.operator === "&") return 0;
-      const value = evalExpression(expression.argument, context);
+      const value = evalNumber(expression.argument, context);
       if (expression.operator === "-") return -value;
       if (expression.operator === "+") return value;
       return truthy(value) ? 0 : 1;
@@ -276,7 +301,7 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
     case "binary":
       return evalBinary(expression.operator, expression.left, expression.right, context);
     case "conditional":
-      return truthy(evalExpression(expression.condition, context))
+      return truthy(evalNumber(expression.condition, context))
         ? evalExpression(expression.consequent, context)
         : evalExpression(expression.alternate, context);
     case "assignment":
@@ -284,29 +309,38 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
     case "update": {
       const lvalue = resolveLValue(expression.argument, context);
       const current = readLValue(lvalue, context);
-      const next = expression.operator === "++" ? current + 1 : current - 1;
+      const currentNumber = valueAsNumber(current, lvalue.name);
+      const next = expression.operator === "++" ? currentNumber + 1 : currentNumber - 1;
       writeLValue(lvalue, next, context);
-      return expression.prefix ? next : current;
+      return expression.prefix ? next : currentNumber;
     }
     case "call":
       return evalCall(expression, context);
   }
 }
 
-function castNumber(type: "float" | "int" | "uint" | "half" | "bool", value: number): number {
+function evalNumber(expression: CudaLiteExpression, context: ThreadContext): number {
+  return valueAsNumber(evalExpression(expression, context), expression.kind);
+}
+
+function castNumber(type: Exclude<CudaLiteScalarType, "void">, value: number): EvalValue {
   if (type === "int") return Math.trunc(value) | 0;
   if (type === "uint") return Math.trunc(value) >>> 0;
   if (type === "bool") return truthy(value) ? 1 : 0;
+  if (type === "complex64") return { kind: "complex64", x: value, y: 0 };
   return value;
 }
 
-function readExpressionObject(expression: CudaLiteExpression, context: ThreadContext): Vector3 {
-  if (expression.kind !== "identifier") {
-    throw compilerFailure("member access only supports CUDA-lite builtin vectors");
+function readMemberObject(expression: CudaLiteExpression, context: ThreadContext): Vector3 | ComplexValue {
+  if (expression.kind === "identifier") {
+    const value = readIdentifier(expression.name, context);
+    if (isComplex(value)) return value;
+    if (typeof value === "number" || "kind" in value) throw compilerFailure(`'${expression.name}' is not a vector`);
+    return value;
   }
-  const value = readIdentifier(expression.name, context);
-  if (typeof value === "number" || "kind" in value) throw compilerFailure(`'${expression.name}' is not a vector`);
-  return value;
+  const value = evalExpression(expression, context);
+  if (isComplex(value)) return value;
+  throw compilerFailure("member access only supports CUDA-lite builtin vectors and complex values");
 }
 
 function readIdentifier(name: string, context: ThreadContext): LocalValue {
@@ -331,13 +365,13 @@ function evalBinary(
   context: ThreadContext,
 ): number {
   if (operator === "&&") {
-    return truthy(evalExpression(leftExpression, context)) && truthy(evalExpression(rightExpression, context)) ? 1 : 0;
+    return truthy(evalNumber(leftExpression, context)) && truthy(evalNumber(rightExpression, context)) ? 1 : 0;
   }
   if (operator === "||") {
-    return truthy(evalExpression(leftExpression, context)) || truthy(evalExpression(rightExpression, context)) ? 1 : 0;
+    return truthy(evalNumber(leftExpression, context)) || truthy(evalNumber(rightExpression, context)) ? 1 : 0;
   }
-  const left = evalExpression(leftExpression, context);
-  const right = evalExpression(rightExpression, context);
+  const left = evalNumber(leftExpression, context);
+  const right = evalNumber(rightExpression, context);
   switch (operator) {
     case "+":
       return left + right;
@@ -381,11 +415,16 @@ function evalAssignment(
   leftExpression: CudaLiteExpression,
   rightExpression: CudaLiteExpression,
   context: ThreadContext,
-): number {
+): EvalValue {
   const lvalue = resolveLValue(leftExpression, context);
   const right = evalExpression(rightExpression, context);
-  const current = operator === "=" ? 0 : readLValue(lvalue, context);
-  const value = operator === "="
+  if (isComplex(right)) {
+    if (operator !== "=") throw compilerFailure("complex values only support assignment");
+    writeLValue(lvalue, right, context);
+    return right;
+  }
+  const current = operator === "=" ? 0 : valueAsNumber(readLValue(lvalue, context), lvalue.name);
+  const value: number = operator === "="
     ? right
     : operator === "+="
       ? current + right
@@ -429,9 +468,9 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     if (!first) throw compilerFailure("atomicCAS expects target");
     const target = first.kind === "unary" && first.operator === "&" ? first.argument : first;
     const lvalue = resolveLValue(target, context);
-    const current = readLValue(lvalue, context);
-    const compare = evalExpression(expression.args[1]!, context);
-    const value = evalExpression(expression.args[2]!, context);
+    const current = valueAsNumber(readLValue(lvalue, context), lvalue.name);
+    const compare = evalNumber(expression.args[1]!, context);
+    const value = evalNumber(expression.args[2]!, context);
     if (Math.trunc(current) === Math.trunc(compare)) writeLValue(lvalue, value, context);
     return current;
   }
@@ -440,16 +479,16 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     if (textureRef?.kind !== "identifier") throw compilerFailure("tex2D expects texture reference");
     const texture = context.textures[textureRef.name];
     if (!texture) throw compilerFailure(`missing texture input '${textureRef.name}'`);
-    const x = Math.max(0, Math.min(texture.width - 1, Math.floor(evalExpression(expression.args[1]!, context))));
-    const y = Math.max(0, Math.min(texture.height - 1, Math.floor(evalExpression(expression.args[2]!, context))));
+    const x = Math.max(0, Math.min(texture.width - 1, Math.floor(evalNumber(expression.args[1]!, context))));
+    const y = Math.max(0, Math.min(texture.height - 1, Math.floor(evalNumber(expression.args[2]!, context))));
     return texture.data[y * texture.width + x] ?? 0;
   }
   if (name === "curand_init") {
     const state = expression.args[3];
     if (!state) throw compilerFailure("curand_init expects state address");
-    const seed = evalExpression(expression.args[0]!, context) >>> 0;
-    const sequence = evalExpression(expression.args[1]!, context) >>> 0;
-    const offset = evalExpression(expression.args[2]!, context) >>> 0;
+    const seed = evalNumber(expression.args[0]!, context) >>> 0;
+    const sequence = evalNumber(expression.args[1]!, context) >>> 0;
+    const offset = evalNumber(expression.args[2]!, context) >>> 0;
     const initialized = curandNext((seed ^ Math.imul(sequence, 747796405) ^ offset ^ 2891336453) >>> 0);
     writeLValue(resolveAddressArgument(state, context), initialized, context);
     return 0;
@@ -458,11 +497,11 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const state = expression.args[0];
     if (!state) throw compilerFailure("curand_uniform expects state address");
     const lvalue = resolveAddressArgument(state, context);
-    const next = curandNext(readLValue(lvalue, context) >>> 0);
+    const next = curandNext(valueAsNumber(readLValue(lvalue, context), lvalue.name) >>> 0);
     writeLValue(lvalue, next, context);
     return (next + 1) * 2.3283064365386963e-10;
   }
-  const args = expression.args.map((arg) => evalExpression(arg, context));
+  const args = expression.args.map((arg) => evalNumber(arg, context));
   const deviceFunction = name ? context.functions.get(name) : undefined;
   if (deviceFunction) return evalDeviceFunction(deviceFunction, args, context);
   switch (name) {
@@ -500,7 +539,7 @@ function evalCooperativeGroupCall(
   if (callee.kind !== "member" || callee.object.kind !== "identifier") return undefined;
   const value = context.locals.get(callee.object.name);
   if (!isCooperativeGroup(value)) return undefined;
-  const args = expression.args.map((arg) => evalExpression(arg, context));
+  const args = expression.args.map((arg) => evalNumber(arg, context));
   if (callee.property === "sync") return 0;
   if (callee.property === "size") {
     if (value.groupKind === "tile") return value.tileSize ?? 32;
@@ -511,7 +550,7 @@ function evalCooperativeGroupCall(
     if (value.groupKind === "tile") return localRank % (value.tileSize ?? 32);
     return localRank;
   }
-  if (callee.property === "shfl_down" || callee.property === "shfl_up" || callee.property === "shfl_xor") return args[0] ?? 0;
+  if (callee.property === "shfl_down" || callee.property === "shfl_up" || callee.property === "shfl_xor") return valueAsNumber(args[0] ?? 0, "shuffle value");
   return undefined;
 }
 
@@ -549,8 +588,8 @@ function evalAtomicReadModifyWrite(
   if (!first) throw compilerFailure("atomic operation expects target");
   const target = first.kind === "unary" && first.operator === "&" ? first.argument : first;
   const lvalue = resolveLValue(target, context);
-  const current = readLValue(lvalue, context);
-  const value = evalExpression(expression.args[1]!, context);
+  const current = valueAsNumber(readLValue(lvalue, context), lvalue.name);
+  const value = evalNumber(expression.args[1]!, context);
   writeLValue(lvalue, op(current, value), context);
   return current;
 }
@@ -567,6 +606,12 @@ function curandNext(state: number): number {
 }
 
 function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): LValue {
+  if (expression.kind === "member") {
+    if (expression.property !== "x" && expression.property !== "y") {
+      throw compilerFailure(`unsupported lvalue member '${expression.property}'`);
+    }
+    return { ...resolveLValue(expression.object, context), field: expression.property };
+  }
   if (expression.kind === "identifier") {
     if (context.buffers.has(expression.name)) return { name: expression.name, space: "buffer", index: 0 };
     if (context.shared.has(expression.name)) return { name: expression.name, space: "shared", index: 0 };
@@ -575,7 +620,7 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
   const chain: number[] = [];
   let cursor: CudaLiteExpression = expression;
   while (cursor.kind === "index") {
-    chain.unshift(Math.trunc(evalExpression(cursor.index, context)));
+    chain.unshift(Math.trunc(evalNumber(cursor.index, context)));
     cursor = cursor.target;
   }
   if (cursor.kind !== "identifier") throw compilerFailure("unsupported lvalue");
@@ -615,59 +660,74 @@ function resolvePointerInitializer(statement: CudaLiteVarDecl, context: ThreadCo
   return { kind: "address", target };
 }
 
-function readLValue(lvalue: LValue, context: ThreadContext): number {
-  if (lvalue.space === "local") return valueAsNumber(readIdentifier(lvalue.name, context), lvalue.name);
+function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
+  if (lvalue.space === "local") return projectField(readIdentifier(lvalue.name, context), lvalue);
   if (lvalue.index === undefined) throw compilerFailure(`missing index for '${lvalue.name}'`);
   if (lvalue.space === "buffer") {
     const buffer = context.buffers.get(lvalue.name);
     if (!buffer) throw compilerFailure(`missing buffer '${lvalue.name}'`);
-    const ok = lvalue.index >= 0 && lvalue.index < buffer.length;
-    const value = ok ? Number(buffer[lvalue.index]!) : 0;
-    context.trace.reads.push({ name: lvalue.name, index: lvalue.index, value, ok });
+    const valueType = context.valueTypes.get(lvalue.name);
+    const storageIndex = valueType === "complex64" ? lvalue.index * 2 : lvalue.index;
+    const ok = storageIndex >= 0 && storageIndex < buffer.length && (valueType !== "complex64" || storageIndex + 1 < buffer.length);
+    const value = ok ? readBufferValue(buffer, storageIndex, valueType, lvalue.field) : 0;
+    context.trace.reads.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
     return value;
   }
   if (lvalue.space === "constant") {
     const value = context.constants.get(lvalue.name);
     if (!value || typeof value === "number") throw compilerFailure(`missing constant buffer '${lvalue.name}'`);
-    const ok = lvalue.index >= 0 && lvalue.index < value.length;
-    const read = ok ? Number(value[lvalue.index]!) : 0;
-    context.trace.reads.push({ name: lvalue.name, index: lvalue.index, value: read, ok });
+    const valueType = context.valueTypes.get(lvalue.name);
+    const storageIndex = valueType === "complex64" ? lvalue.index * 2 : lvalue.index;
+    const ok = storageIndex >= 0 && storageIndex < value.length && (valueType !== "complex64" || storageIndex + 1 < value.length);
+    const read = ok ? readBufferValue(value, storageIndex, valueType, lvalue.field) : 0;
+    context.trace.reads.push({ name: lvalue.name, index: storageIndex, value: traceValue(read), ok });
     return read;
   }
   const shared = context.shared.get(lvalue.name);
   if (!shared) throw compilerFailure(`missing shared array '${lvalue.name}'`);
-  const ok = lvalue.index >= 0 && lvalue.index < shared.data.length;
-  const value = ok ? Number(shared.data[lvalue.index]!) : 0;
-  context.trace.sharedReads.push({ name: lvalue.name, index: lvalue.index, value, ok });
+  const storageIndex = shared.valueType === "complex64" ? lvalue.index * 2 : lvalue.index;
+  const ok = storageIndex >= 0 && storageIndex < shared.data.length && (shared.valueType !== "complex64" || storageIndex + 1 < shared.data.length);
+  const value = ok ? readBufferValue(shared.data, storageIndex, shared.valueType, lvalue.field) : 0;
+  context.trace.sharedReads.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
   return value;
 }
 
-function writeLValue(lvalue: LValue, value: number, context: ThreadContext): void {
+function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): void {
   if (lvalue.space === "local") {
-    context.locals.set(lvalue.name, value);
+    if (lvalue.field) {
+      const current = readIdentifier(lvalue.name, context);
+      if (!isComplex(current)) throw compilerFailure(`'${lvalue.name}' is not complex`);
+      context.locals.set(lvalue.name, { ...current, [lvalue.field]: valueAsNumber(value, lvalue.name) });
+    } else {
+      context.locals.set(lvalue.name, value);
+    }
     return;
   }
   if (lvalue.index === undefined) throw compilerFailure(`missing index for '${lvalue.name}'`);
   if (lvalue.space === "buffer") {
     const buffer = context.buffers.get(lvalue.name);
     if (!buffer) throw compilerFailure(`missing buffer '${lvalue.name}'`);
-    const ok = lvalue.index >= 0 && lvalue.index < buffer.length;
-    if (ok) buffer[lvalue.index] = value;
-    context.trace.writes.push({ name: lvalue.name, index: lvalue.index, value, ok });
+    const valueType = context.valueTypes.get(lvalue.name);
+    const storageIndex = valueType === "complex64" ? lvalue.index * 2 : lvalue.index;
+    const ok = storageIndex >= 0 && storageIndex < buffer.length && (valueType !== "complex64" || storageIndex + 1 < buffer.length);
+    if (ok) writeBufferValue(buffer, storageIndex, valueType, lvalue.field, value);
+    context.trace.writes.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
     return;
   }
   if (lvalue.space === "constant") throw compilerFailure(`cannot write constant memory '${lvalue.name}'`);
   const shared = context.shared.get(lvalue.name);
   if (!shared) throw compilerFailure(`missing shared array '${lvalue.name}'`);
-  const ok = lvalue.index >= 0 && lvalue.index < shared.data.length;
-  if (ok) shared.data[lvalue.index] = value;
-  context.trace.sharedWrites.push({ name: lvalue.name, index: lvalue.index, value, ok });
+  const storageIndex = shared.valueType === "complex64" ? lvalue.index * 2 : lvalue.index;
+  const ok = storageIndex >= 0 && storageIndex < shared.data.length && (shared.valueType !== "complex64" || storageIndex + 1 < shared.data.length);
+  if (ok) writeBufferValue(shared.data, storageIndex, shared.valueType, lvalue.field, value);
+  context.trace.sharedWrites.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
 }
 
 function allocateShared(declarations: readonly CudaLiteVarDecl[]): Map<string, SharedArrayValue> {
   const shared = new Map<string, SharedArrayValue>();
   for (const declaration of declarations) {
-    const length = declaration.dimensions.reduce((product, item) => product * item, 1);
+    const elements = declaration.dimensions.reduce((product, item) => product * item, 1);
+    const length = declaration.valueType === "complex64" ? elements * 2 : elements;
     const data = declaration.valueType === "int"
       ? new Int32Array(length)
       : declaration.valueType === "uint"
@@ -677,9 +737,46 @@ function allocateShared(declarations: readonly CudaLiteVarDecl[]): Map<string, S
           : declaration.valueType === "half"
             ? new Float16Array(length)
             : new Float32Array(length);
-    shared.set(declaration.name, { dimensions: declaration.dimensions, data });
+    shared.set(declaration.name, { dimensions: declaration.dimensions, valueType: declaration.valueType, data });
   }
   return shared;
+}
+
+function readBufferValue(
+  buffer: WgslTypedArray,
+  storageIndex: number,
+  valueType: CudaLiteScalarType | undefined,
+  field: "x" | "y" | undefined,
+): EvalValue {
+  if (valueType === "complex64") {
+    const value = {
+      kind: "complex64" as const,
+      x: Number(buffer[storageIndex]!),
+      y: Number(buffer[storageIndex + 1]!),
+    };
+    return field ? value[field] : value;
+  }
+  return Number(buffer[storageIndex]!);
+}
+
+function writeBufferValue(
+  buffer: WgslTypedArray,
+  storageIndex: number,
+  valueType: CudaLiteScalarType | undefined,
+  field: "x" | "y" | undefined,
+  value: EvalValue,
+): void {
+  if (valueType === "complex64") {
+    if (field) {
+      buffer[storageIndex + (field === "x" ? 0 : 1)] = valueAsNumber(value, field);
+      return;
+    }
+    const complex = valueAsComplex(value, "complex write");
+    buffer[storageIndex] = complex.x;
+    buffer[storageIndex + 1] = complex.y;
+    return;
+  }
+  buffer[storageIndex] = valueAsNumber(value, "write value");
 }
 
 function flattenIndex(dimensions: readonly number[], indices: readonly number[]): number {
@@ -730,6 +827,35 @@ function vectorFromTuple(value: readonly [number, number, number]): Vector3 {
 function valueAsNumber(value: LocalValue, name: string): number {
   if (typeof value === "number") return value;
   throw compilerFailure(`'${name}' is not a scalar`);
+}
+
+function valueAsComplex(value: LocalValue, name: string): ComplexValue {
+  if (isComplex(value)) return value;
+  throw compilerFailure(`'${name}' is not complex`);
+}
+
+function isComplex(value: LocalValue | EvalValue | undefined): value is ComplexValue {
+  return value !== undefined &&
+    typeof value !== "number" &&
+    "kind" in value &&
+    value.kind === "complex64";
+}
+
+function projectField(value: LocalValue, lvalue: LValue): EvalValue {
+  if (!lvalue.field) {
+    if (isComplex(value)) return value;
+    return valueAsNumber(value, lvalue.name);
+  }
+  const complex = valueAsComplex(value, lvalue.name);
+  return complex[lvalue.field];
+}
+
+function zeroLocalValue(type: CudaLiteScalarType): EvalValue {
+  return type === "complex64" ? { kind: "complex64", x: 0, y: 0 } : 0;
+}
+
+function traceValue(value: EvalValue): number {
+  return isComplex(value) ? value.x : value;
 }
 
 function isCooperativeGroup(value: LocalValue | undefined): value is CooperativeGroupValue {
@@ -788,6 +914,9 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
       if (param.valueType === "bool" && !(buffer instanceof Uint32Array)) {
         throw compilerFailure(`buffer '${param.name}' expects Uint32Array`);
       }
+      if (param.valueType === "complex64" && !(buffer instanceof Float32Array)) {
+        throw compilerFailure(`buffer '${param.name}' expects interleaved Float32Array`);
+      }
     } else if (input.scalars?.[param.name] === undefined) {
       throw compilerFailure(`missing scalar input '${param.name}'`);
     }
@@ -836,6 +965,9 @@ function validateTypedConstant(name: string, valueType: string, value: WgslTyped
   }
   if (valueType === "bool" && !(value instanceof Uint32Array)) {
     throw compilerFailure(`constant '${name}' expects Uint32Array`);
+  }
+  if (valueType === "complex64" && !(value instanceof Float32Array)) {
+    throw compilerFailure(`constant '${name}' expects interleaved Float32Array`);
   }
 }
 

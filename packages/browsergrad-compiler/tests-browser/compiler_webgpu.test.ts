@@ -43,6 +43,20 @@ __global__ void tiled(const float* A, const float* B, float* C, int N) {
 }
 `;
 
+const COMPLEX_MULTIPLY = `
+__global__ void multiplyFreqDomain(cufftComplex *A, const cufftComplex *B, int N) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < N) {
+    cufftComplex a = A[idx];
+    cufftComplex b = B[idx];
+    cufftComplex c;
+    c.x = a.x * b.x - a.y * b.y;
+    c.y = a.x * b.y + a.y * b.x;
+    A[idx] = c;
+  }
+}
+`;
+
 async function checkDevice(): Promise<DeviceCheck> {
   if (typeof navigator === "undefined" || !("gpu" in navigator)) {
     return { available: false, reason: "navigator.gpu undefined" };
@@ -217,6 +231,23 @@ __global__ void atomic_exchange(float* x, float* out) {
 
     expect([...actual.buffers.x as Float32Array][0]).toBeCloseTo(7.5);
     expect([...actual.buffers.out as Float32Array][0]).toBeCloseTo(2.5);
+  });
+
+  it("runs compiled cufftComplex writeback through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(COMPLEX_MULTIPLY, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        A: new Float32Array([1, 2, 3, 4]),
+        B: new Float32Array([5, 6, 7, 8]),
+      },
+      scalars: { N: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.A as Float32Array]).toEqual([...expected.buffers.A as Float32Array]);
   });
 
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {

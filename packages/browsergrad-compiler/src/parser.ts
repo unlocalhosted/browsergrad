@@ -579,6 +579,7 @@ class Parser {
     }
     if (token.value === "size_t") return "uint";
     if (token.value === "curandState_t") return "uint";
+    if (token.value === "cufftComplex") return "complex64";
     if (!TYPE_KEYWORDS.has(token.value)) this.fail(`unsupported CUDA-lite type: ${token.value}`, token.span);
     return token.value as Exclude<CudaLiteScalarType, "void">;
   }
@@ -592,6 +593,7 @@ class Parser {
     if (this.match("__shared__") || this.match("extern")) return true;
     if (this.match("unsigned")) return true;
     if (this.match("curandState_t")) return true;
+    if (this.match("cufftComplex")) return true;
     return TYPE_KEYWORDS.has(this.peek().value);
   }
 

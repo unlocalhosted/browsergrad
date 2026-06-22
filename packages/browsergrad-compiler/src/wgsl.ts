@@ -741,6 +741,7 @@ function zeroValue(type: CudaLiteScalarType): string {
   if (type === "half") return "f16(0.0)";
   if (type === "uint") return "0u";
   if (type === "bool") return "false";
+  if (type === "complex64") return "vec2<f32>(0.0, 0.0)";
   return "0";
 }
 
@@ -756,12 +757,15 @@ function wgslScalar(type: CudaLiteScalarType): string {
       return "f16";
     case "bool":
       return "bool";
+    case "complex64":
+      return "vec2<f32>";
     case "void":
       return "void";
   }
 }
 
 function wgslUniformScalar(type: CudaLiteScalarType): string {
+  if (type === "complex64") return "vec2<f32>";
   return type === "bool" ? "u32" : wgslScalar(type);
 }
 
@@ -770,6 +774,7 @@ function wgslBindingType(type: CudaLiteScalarType): "f16" | "f32" | "i32" | "u32
   if (type === "int") return "i32";
   if (type === "uint") return "u32";
   if (type === "bool") return "u32";
+  if (type === "complex64") return "f32";
   return "f32";
 }
 
