@@ -32,3 +32,5 @@
   orchestration planner timing.
 - Added corpus-audit threshold flags and `audit:cuda-120` so CUDA corpus
   coverage baselines fail on regression.
+- Browser WebGPU benchmarks now fail on validation errors and accept optional
+  prepared-dispatch ratio thresholds for machine-local perf gates.

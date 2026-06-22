@@ -19,6 +19,8 @@ const length = positiveInt(args.get("--length"), 16_384);
 const markdownPath = args.get("--markdown");
 const headed = args.get("--headed") === "true";
 const requireWebGpu = args.get("--require-webgpu") === "true";
+const preparedRatioMax = positiveNumber(args.get("--expect-prepared-ratio-max"));
+const preparedScalarRatioMax = positiveNumber(args.get("--expect-prepared-scalar-ratio-max"));
 
 const root = findRepoRoot(process.cwd());
 const packageRequire = createRequire(path.join(root, "packages/browsergrad-compiler/package.json"));
@@ -234,6 +236,9 @@ try {
   if (requireWebGpu && !report.available) {
     throw new Error(`WebGPU unavailable: ${report.reason ?? "unknown"}`);
   }
+  assertValidation(report);
+  assertRatio(report, "webgpu:saxpy-prepared-resident", "webgpu:saxpy-one-shot-resident", preparedRatioMax, "--expect-prepared-ratio-max");
+  assertRatio(report, "webgpu:saxpy-prepared-scalar-update", "webgpu:saxpy-one-shot-resident", preparedScalarRatioMax, "--expect-prepared-scalar-ratio-max");
   console.log(JSON.stringify(report, null, 2));
   if (markdownPath && markdownPath !== "true") {
     fs.writeFileSync(path.resolve(markdownPath), markdownReport(report));
@@ -268,6 +273,36 @@ function markdownReport(data) {
 function positiveInt(value, fallback) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function positiveNumber(value) {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  throw new Error(`expected positive number, got ${value}`);
+}
+
+function assertValidation(report) {
+  if (!report.available) return;
+  for (const [name, ok] of Object.entries(report.validation ?? {})) {
+    if (ok !== true) throw new Error(`benchmark validation failed: ${name}`);
+  }
+}
+
+function assertRatio(report, numeratorName, denominatorName, maxRatio, flag) {
+  if (!report.available || maxRatio === undefined) return;
+  const numerator = report.benchmarks?.find((bench) => bench.name === numeratorName);
+  const denominator = report.benchmarks?.find((bench) => bench.name === denominatorName);
+  if (!numerator || !denominator) throw new Error(`${flag} could not find benchmark pair`);
+  if (denominator.medianMs <= 0) throw new Error(`${flag} denominator median must be > 0`);
+  const ratio = numerator.medianMs / denominator.medianMs;
+  if (ratio > maxRatio) {
+    throw new Error(`${flag} failed: ${numeratorName}/${denominatorName} median ratio ${round(ratio)} > ${maxRatio}`);
+  }
+}
+
+function round(value) {
+  return Math.round(value * 1000) / 1000;
 }
 
 function findRepoRoot(start) {
