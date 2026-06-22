@@ -80,6 +80,9 @@ Current corpus gate (`node scripts/audit-cuda-lite-corpus.mjs /tmp/CUDA-120-DAYS
   reference-only.
 - Remaining failures group cleanly: dynamic parallelism/runtime launches,
   cooperative groups/grid sync, and one incomplete pseudocode symbol.
+- Use `--limit N` to cap printed failures and `--details`/`--json` to emit
+  `{ summary, failures }` with `webGpuLiftBlocker` values. This keeps feature
+  triage grounded in exact runtime-plan blockers instead of prose-only notes.
 
 Performance gate:
 

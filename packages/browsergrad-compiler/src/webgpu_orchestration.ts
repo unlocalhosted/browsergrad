@@ -55,16 +55,31 @@ export function createCudaWebGpuExecutionPlan(
   launch: KernelLaunch,
   options: CudaWebGpuExecutionPlanOptions = {},
 ): CudaWebGpuExecutionPlan {
-  const gridSyncPlan = createGridSyncWebGpuPlan(compiled, input, launch);
+  const runtimePlan = createCudaRuntimePlan(compiled);
+  const blockers: string[] = [];
+
+  const gridSyncPhasePlan = createCudaGridSyncPhasePlan(compiled.ir);
+  const gridSyncPlan = createGridSyncWebGpuPlan(compiled, input, launch, gridSyncPhasePlan);
   if (gridSyncPlan) return gridSyncPlan;
+  if (runtimePlan.operations.some((operation) => operation.kind === "grid-sync") && !gridSyncPhasePlan.supported) {
+    blockers.push(`grid-sync: ${gridSyncPhasePlan.reason}`);
+  }
 
-  const dynamicLaunchPlan = createHostLiftedDynamicWebGpuPlan(compiled, input, launch, options);
+  const hostDynamicPlan = createCudaHostDynamicLaunchPlan(compiled, input, launch);
+  const dynamicLaunchPlan = createHostLiftedDynamicWebGpuPlan(compiled, input, launch, options, hostDynamicPlan);
   if (dynamicLaunchPlan) return dynamicLaunchPlan;
+  if (runtimePlan.operations.some((operation) => operation.kind === "device-launch") && !hostDynamicPlan.supported) {
+    blockers.push(`device-launch: ${hostDynamicPlan.reason}`);
+  }
 
-  const peerCopyPlan = createHostLiftedPeerCopyWebGpuPlan(compiled, input, launch);
+  const peerCopyRuntimePlan = createCudaPeerCopyPlan(compiled, input, launch);
+  const peerCopyPlan = createHostLiftedPeerCopyWebGpuPlan(compiled, input, launch, peerCopyRuntimePlan);
   if (peerCopyPlan) return peerCopyPlan;
+  if (runtimePlan.operations.some((operation) => operation.kind === "peer-copy") && !peerCopyRuntimePlan.supported) {
+    blockers.push(`peer-copy: ${peerCopyRuntimePlan.reason}`);
+  }
 
-  const unsupported = createReferenceOnlyRuntimePlan(compiled);
+  const unsupported = createReferenceOnlyRuntimePlan(compiled, blockers);
   if (unsupported) return unsupported;
 
   return createSingleDispatchWebGpuPlan(compiled, input, launch);
@@ -90,8 +105,8 @@ function createGridSyncWebGpuPlan(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
   launch: KernelLaunch,
+  gridSyncPhasePlan: ReturnType<typeof createCudaGridSyncPhasePlan>,
 ): CudaWebGpuExecutionPlan | undefined {
-  const gridSyncPhasePlan = createCudaGridSyncPhasePlan(compiled.ir);
   if (!gridSyncPhasePlan.supported || gridSyncPhasePlan.modules.length <= 1) return undefined;
   const wgslInput = createWgslRunInput(compiled, input);
   const dispatchCount = dispatchCountForLaunch(launch);
@@ -112,8 +127,8 @@ function createHostLiftedPeerCopyWebGpuPlan(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
   launch: KernelLaunch,
+  plan: ReturnType<typeof createCudaPeerCopyPlan>,
 ): CudaWebGpuExecutionPlan | undefined {
-  const plan = createCudaPeerCopyPlan(compiled, input, launch);
   if (!plan.supported || plan.copies.length === 0) return undefined;
   const parentInput = createWgslRunInput(compiled, input);
   const steps: WgslKernelSequenceStep[] = [{
@@ -141,8 +156,8 @@ function createHostLiftedDynamicWebGpuPlan(
   input: CompiledKernelInput,
   launch: KernelLaunch,
   options: CudaWebGpuExecutionPlanOptions,
+  plan: ReturnType<typeof createCudaHostDynamicLaunchPlan>,
 ): CudaWebGpuExecutionPlan | undefined {
-  const plan = createCudaHostDynamicLaunchPlan(compiled, input, launch);
   if (!plan.supported || plan.launches.length === 0) return undefined;
   if (!options.compileKernel) {
     return {
@@ -224,6 +239,7 @@ function createSingleDispatchWebGpuPlan(
 
 function createReferenceOnlyRuntimePlan(
   compiled: CompiledCudaLiteKernel,
+  blockers: readonly string[],
 ): CudaWebGpuExecutionPlan | undefined {
   const diagnostic = compiled.diagnostics.find((item) =>
     item.code === "unsupported-dynamic-parallelism" ||
@@ -237,13 +253,16 @@ function createReferenceOnlyRuntimePlan(
   const reason = labels.length > 0
     ? `CUDA runtime orchestration is reference-only (${labels}); WebGPU host orchestration is not implemented yet`
     : "CUDA runtime orchestration is reference-only; WebGPU host orchestration is not implemented yet";
+  const message = blockers.length > 0
+    ? `${reason}: ${blockers.join("; ")}`
+    : reason;
   return {
     supported: false,
-    reason,
+    reason: message,
     diagnostics: [{
       ...diagnostic,
       severity: "error",
-      message: reason,
+      message,
     }],
   };
 }

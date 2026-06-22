@@ -3,9 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [corpusPathArg] = process.argv.slice(2);
+const { corpusPathArg, details, firstFailureLimit, help } = parseArgs(process.argv.slice(2));
+if (help) {
+  console.log("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details]");
+  process.exit(0);
+}
 if (!corpusPathArg) {
-  console.error("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path>");
+  console.error("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details]");
   process.exit(2);
 }
 
@@ -13,10 +17,8 @@ const corpusRoot = path.resolve(corpusPathArg);
 const compilerUrl = pathToFileURL(path.resolve("packages/browsergrad-compiler/dist/index.js")).href;
 const {
   compileCudaLiteKernel,
-  createCudaGridSyncPhasePlan,
-  createCudaHostDynamicLaunchPlan,
-  createCudaPeerCopyPlan,
   createCudaRuntimePlan,
+  createCudaWebGpuExecutionPlan,
   describeCudaDiagnostic,
 } = await import(compilerUrl);
 const CUDA_HINT_RE = /__global__|cuda[A-Z]|<<<|threadIdx|blockIdx|__shared__/;
@@ -74,6 +76,7 @@ for (const file of files) {
           referenceOk: fallback.referenceOk,
           webGpuLiftOk: fallback.webGpuLiftOk,
           webGpuLiftKind: fallback.webGpuLiftKind,
+          webGpuLiftBlocker: fallback.webGpuLiftBlocker,
         });
       }
     }
@@ -104,15 +107,26 @@ const summary = {
   errors: countBy(failures, (failure) => failure.error),
   families: countBy(failures, (failure) => failure.family),
   lowering: countBy(failures, (failure) => failure.lowering),
+  webGpuLiftBlockers: countBy(
+    failures.filter((failure) => failure.referenceOk && !failure.webGpuLiftOk),
+    (failure) => failure.webGpuLiftBlocker ?? "unknown",
+  ),
 };
 
-console.log(JSON.stringify(summary, null, 2));
-if (failures.length > 0) {
+if (details) {
+  console.log(JSON.stringify({ summary, failures }, null, 2));
+} else {
+  console.log(JSON.stringify(summary, null, 2));
+}
+if (!details && failures.length > 0 && firstFailureLimit > 0) {
   console.log("\nfirst failures:");
-  for (const failure of failures.slice(0, 80)) {
+  for (const failure of failures.slice(0, firstFailureLimit)) {
     const lift = failure.webGpuLiftOk ? ` [webgpu-lift:${failure.webGpuLiftKind}]` : "";
     const reference = failure.referenceOk ? " [reference-ok]" : "";
-    console.log(`${failure.file} block ${failure.block} kernel ${failure.kernel}: ${failure.family}/${failure.error}${lift}${reference}: ${failure.message}`);
+    const blocker = failure.referenceOk && !failure.webGpuLiftOk && failure.webGpuLiftBlocker
+      ? ` [webgpu-blocker:${failure.webGpuLiftBlocker}]`
+      : "";
+    console.log(`${failure.file} block ${failure.block} kernel ${failure.kernel}: ${failure.family}/${failure.error}${lift}${reference}${blocker}: ${failure.message}`);
   }
 }
 
@@ -126,63 +140,47 @@ function classifyReferenceFallback(source) {
       referenceGridSync: true,
       referenceCudaRuntime: true,
     });
-    const liftKind = webGpuLiftKindFor(compiled);
+    const lift = webGpuLiftFor(compiled);
     return {
       referenceOk: true,
-      webGpuLiftOk: liftKind !== undefined,
-      webGpuLiftKind: liftKind,
+      webGpuLiftOk: lift.kind !== undefined,
+      webGpuLiftKind: lift.kind,
+      webGpuLiftBlocker: lift.blocker,
     };
-  } catch {
-    return { referenceOk: false, webGpuLiftOk: false, webGpuLiftKind: undefined };
+  } catch (error) {
+    return {
+      referenceOk: false,
+      webGpuLiftOk: false,
+      webGpuLiftKind: undefined,
+      webGpuLiftBlocker: String(error?.message ?? error).split("\n")[0],
+    };
   }
 }
 
-function webGpuLiftKindFor(compiled) {
-  const phasePlan = createCudaGridSyncPhasePlan(compiled.ir);
-  if (phasePlan.supported && phasePlan.modules.length > 1) return "grid-sync-phases";
+function webGpuLiftFor(compiled) {
   const runtimePlan = createCudaRuntimePlan(compiled);
-  const dynamicPlan = createCudaHostDynamicLaunchPlan(
+  const executionPlan = createCudaWebGpuExecutionPlan(
     compiled,
     syntheticInputFor(compiled),
     { gridDim: [1, 1, 1], blockDim: compiled.ir.workgroupSize },
+    {
+      compileKernel: (childSource, options = {}) => compileCudaLiteKernel(childSource, {
+        ...options,
+        features: { "shader-f16": true, subgroups: true, ...options.features },
+        dynamicSharedMemory: inferDynamicSharedMemory(childSource),
+      }),
+    },
   );
-  if (dynamicPlan.supported && hostDynamicPlanCompiles(compiled, dynamicPlan)) return "host-dynamic-launches";
-  const peerCopyPlan = createCudaPeerCopyPlan(
-    compiled,
-    syntheticInputFor(compiled),
-    { gridDim: [1, 1, 1], blockDim: compiled.ir.workgroupSize },
-  );
-  if (peerCopyPlan.supported) return "peer-copy-sequence";
+  if (!executionPlan.supported) return { kind: undefined, blocker: executionPlan.reason };
   if (
+    executionPlan.kind === "single-dispatch" &&
     runtimePlan.operations.length > 0 &&
     runtimePlan.operations.every((operation) => operation.kind === "device-sync")
   ) {
-    return "device-sync-noop";
+    return { kind: "device-sync-noop", blocker: undefined };
   }
-  return undefined;
-}
-
-function hostDynamicPlanCompiles(parentCompiled, dynamicPlan) {
-  try {
-    for (const launch of dynamicPlan.launches) {
-      const childCompiled = compileCudaLiteKernel(parentCompiled.ast.source, {
-        kernelName: launch.kernel.name,
-        features: { "shader-f16": true, subgroups: true },
-        workgroupSize: launch.blockDim,
-        dynamicSharedMemory: inferDynamicSharedMemory(parentCompiled.ast.source),
-        pointerBaseOffsets: launch.pointerBaseOffsets,
-      });
-      const childRuntime = createCudaRuntimePlan(childCompiled);
-      if (!childRuntime.operations.every((operation) => operation.kind === "device-sync" || operation.kind === "peer-copy")) return false;
-      if (childRuntime.operations.some((operation) => operation.kind === "peer-copy")) {
-        const peerCopyPlan = createCudaPeerCopyPlan(childCompiled, launch.input, { gridDim: launch.gridDim, blockDim: launch.blockDim });
-        if (!peerCopyPlan.supported) return false;
-      }
-    }
-    return true;
-  } catch {
-    return false;
-  }
+  if (executionPlan.kind === "single-dispatch") return { kind: undefined, blocker: "no runtime WebGPU lift required" };
+  return { kind: executionPlan.kind, blocker: undefined };
 }
 
 function syntheticInputFor(compiled) {
@@ -442,4 +440,47 @@ function countBy(items, keyFn) {
     out[key] = (out[key] ?? 0) + 1;
   }
   return out;
+}
+
+function parseArgs(args) {
+  let corpusPathArg;
+  let details = false;
+  let firstFailureLimit = 80;
+  let help = false;
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index];
+    if (arg === "--details" || arg === "--json") {
+      details = true;
+      continue;
+    }
+    if (arg === "--limit") {
+      const value = Number(args[++index]);
+      if (!Number.isInteger(value) || value < 0) {
+        console.error("--limit expects a non-negative integer");
+        process.exit(2);
+      }
+      firstFailureLimit = value;
+      continue;
+    }
+    if (arg?.startsWith("--limit=")) {
+      const value = Number(arg.slice("--limit=".length));
+      if (!Number.isInteger(value) || value < 0) {
+        console.error("--limit expects a non-negative integer");
+        process.exit(2);
+      }
+      firstFailureLimit = value;
+      continue;
+    }
+    if (arg === "--help" || arg === "-h") {
+      help = true;
+      continue;
+    }
+    if (!corpusPathArg) {
+      corpusPathArg = arg;
+      continue;
+    }
+    console.error(`unexpected argument: ${arg}`);
+    process.exit(2);
+  }
+  return { corpusPathArg, details, firstFailureLimit, help };
 }
