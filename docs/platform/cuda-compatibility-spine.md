@@ -30,3 +30,12 @@ Public APIs:
 
 Rule: do not add assignment-specific fixes. Add semantic primitives, reference
 truth, WGSL lowering, browser tests, and corpus audit evidence.
+
+Current corpus gate:
+
+- `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/247` kernel definitions compile.
+- Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
+  with integer offset counters, casted pool pointer reads/writes, and WebGPU
+  atomic offset updates.
+- Remaining failures group cleanly: dynamic parallelism/runtime launches,
+  cooperative groups/grid sync, and frontend pseudocode/ellipsis parsing.

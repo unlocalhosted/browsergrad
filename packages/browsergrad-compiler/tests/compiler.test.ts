@@ -49,6 +49,34 @@ __global__ void tiled(const float* A, const float* B, float* C, int N) {
 }
 `;
 
+const DEVICE_POOL_ALLOC = `
+__global__ void poolKernel(DevicePool* dp, float* out, int N) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  void* ptr = streamOrderedAllocate(dp, sizeof(float));
+  if (ptr != nullptr && idx < N) {
+    ((float*)ptr)[0] = 3.25f;
+    out[idx] = ((float*)ptr)[0];
+  }
+}
+`;
+
+const RAW_POOL_ALLOC = `
+__global__ void rawPoolKernel(float* poolBase, size_t* offset, size_t poolSize, int N) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < N) {
+    void* ptr = deviceAllocate(poolBase, offset, poolSize, sizeof(float));
+    if (ptr != nullptr) {
+      ((float*)ptr)[0] = 4.5f;
+    }
+  }
+}
+`;
+
+function floatBits(value: number): number {
+  const floats = new Float32Array([value]);
+  return new Uint32Array(floats.buffer)[0] ?? 0;
+}
+
 describe("CUDA-lite compiler", () => {
   it("parses and compiles SAXPY to WGSL", () => {
     const ast = parseCudaLite(SAXPY);
@@ -98,6 +126,44 @@ describe("CUDA-lite compiler", () => {
     expect([...result.buffers.C as Float32Array]).toEqual([19, 22, 43, 50]);
     expect(compiled.wgsl).toContain("var<workgroup> As: array<array<f32, 2>, 2>;");
     expect(compiled.wgsl).toContain("workgroupBarrier();");
+  });
+
+  it("allocates from a DevicePool and writes through casted pool pointers", () => {
+    const compiled = compileCudaLiteKernel(DEVICE_POOL_ALLOC, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(2) },
+        memoryPools: { dp: { data: new Uint32Array(2), offset: new Uint32Array([0]) } },
+        scalars: { N: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<storage, read_write> dp_pool: array<u32>;");
+    expect(compiled.wgsl).toContain("fn bg_pool_alloc_dp(size_bytes: u32) -> u32");
+    expect([...result.buffers.out as Float32Array]).toEqual([3.25, 3.25]);
+    expect([...result.buffers.dp as Uint32Array]).toEqual([floatBits(3.25), floatBits(3.25)]);
+  });
+
+  it("allocates from a raw pointer pool with a size_t offset counter", () => {
+    const compiled = compileCudaLiteKernel(RAW_POOL_ALLOC, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          poolBase: new Float32Array(2),
+          offset: new Uint32Array([0]),
+        },
+        scalars: { poolSize: 8, N: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_raw_pool_alloc_poolBase_offset(pool_size_bytes: u32, size_bytes: u32) -> u32");
+    expect(compiled.wgsl).toContain("var<storage, read_write> offset: array<atomic<u32>>;");
+    expect([...result.buffers.poolBase as Float32Array]).toEqual([4.5, 4.5]);
+    expect([...result.buffers.offset as Uint32Array]).toEqual([8]);
   });
 
   it("returns stable diagnostics for unsupported unsafe cases", () => {

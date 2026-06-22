@@ -15,8 +15,8 @@ import {
   type ReferenceKernelResult,
 } from "./types.js";
 
-type EvalValue = number | ComplexValue;
-type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue | ComplexValue;
+type EvalValue = number | ComplexValue | PoolPointerValue;
+type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue | ComplexValue | PoolPointerValue;
 interface Vector3 {
   readonly x: number;
   readonly y: number;
@@ -40,11 +40,19 @@ interface ComplexValue {
   readonly y: number;
 }
 
+interface PoolPointerValue {
+  readonly kind: "pool-pointer";
+  readonly poolName: string;
+  readonly byteOffset: number;
+  readonly rawBuffer?: boolean;
+}
+
 interface LValue {
   readonly name: string;
-  readonly space: "local" | "buffer" | "shared" | "constant";
+  readonly space: "local" | "buffer" | "shared" | "constant" | "pool";
   readonly index?: number;
   readonly field?: "x" | "y";
+  readonly valueType?: CudaLiteScalarType;
 }
 
 interface ThreadContext {
@@ -57,12 +65,18 @@ interface ThreadContext {
   readonly constantDimensions: Map<string, readonly number[]>;
   readonly textures: NonNullable<CompiledKernelInput["textures"]>;
   readonly surfaces: NonNullable<CompiledKernelInput["surfaces"]>;
+  readonly memoryPools: Map<string, MemoryPoolValue>;
   readonly functions: ReadonlyMap<string, CudaLiteDeviceFunction>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly valueTypes: ReadonlyMap<string, CudaLiteScalarType>;
   readonly locals: Map<string, LocalValue>;
   readonly shared: Map<string, SharedArrayValue>;
   readonly trace: MutableTrace;
+}
+
+interface MemoryPoolValue {
+  readonly data: Uint32Array;
+  offset: number;
 }
 
 interface SharedArrayValue {
@@ -95,6 +109,7 @@ export function runCompiledKernelReference(
   const constantDimensions = new Map(compiled.ir.constants.map((constant) => [constant.name, constant.dimensions]));
   const textures = input.textures ?? {};
   const surfaces = cloneSurfaces(input.surfaces ?? {});
+  const memoryPools = cloneMemoryPools(input.memoryPools ?? {});
   const functions = new Map(compiled.ir.functions.map((fn) => [fn.name, fn]));
   const scalars = input.scalars ?? {};
   const valueTypes = new Map<string, CudaLiteScalarType>([
@@ -106,7 +121,7 @@ export function runCompiledKernelReference(
   for (let bz = 0; bz < launch.gridDim[2]; bz++) {
     for (let by = 0; by < launch.gridDim[1]; by++) {
       for (let bx = 0; bx < launch.gridDim[0]; bx++) {
-        runBlock(compiled, buffers, constants, constantDimensions, textures, surfaces, functions, scalars, valueTypes, {
+        runBlock(compiled, buffers, constants, constantDimensions, textures, surfaces, memoryPools, functions, scalars, valueTypes, {
           x: bx,
           y: by,
           z: bz,
@@ -119,7 +134,7 @@ export function runCompiledKernelReference(
     compiled.ir.params.filter((param) => (param.pointer && !param.constant) || param.valueType === "surface2d").map((param) => param.name);
   const result: Record<string, WgslTypedArray> = {};
   for (const name of readback) {
-    const buffer = buffers.get(name) ?? surfaces[name]?.data;
+    const buffer = buffers.get(name) ?? surfaces[name]?.data ?? memoryPools.get(name)?.data;
     if (!buffer) throw compilerFailure(`missing readback buffer '${name}'`);
     result[name] = cloneTypedArray(buffer);
   }
@@ -133,6 +148,7 @@ function runBlock(
   constantDimensions: Map<string, readonly number[]>,
   textures: NonNullable<CompiledKernelInput["textures"]>,
   surfaces: NonNullable<CompiledKernelInput["surfaces"]>,
+  memoryPools: Map<string, MemoryPoolValue>,
   functions: ReadonlyMap<string, CudaLiteDeviceFunction>,
   scalars: Readonly<Record<string, number>>,
   valueTypes: ReadonlyMap<string, CudaLiteScalarType>,
@@ -167,6 +183,7 @@ function runBlock(
           constantDimensions,
           textures,
           surfaces,
+          memoryPools,
           functions,
           scalars,
           valueTypes,
@@ -295,9 +312,11 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
     case "identifier": {
       const value = readIdentifier(expression.name, context);
       if (isComplex(value)) return value;
+      if (isPoolPointer(value)) return value;
       return valueAsNumber(value, expression.name);
     }
     case "cast":
+      if (expression.pointer) return evalExpression(expression.expression, context);
       return castNumber(expression.valueType, evalNumber(expression.expression, context));
     case "member": {
       const object = readMemberObject(expression.object, context);
@@ -368,6 +387,7 @@ function readMemberObject(expression: CudaLiteExpression, context: ThreadContext
 }
 
 function readIdentifier(name: string, context: ThreadContext): LocalValue {
+  if (name === "nullptr") return { kind: "pool-pointer", poolName: "", byteOffset: -1 };
   if (name === "threadIdx") return context.threadIdx;
   if (name === "blockIdx") return context.blockIdx;
   if (name === "blockDim") return context.blockDim;
@@ -442,6 +462,11 @@ function evalAssignment(
 ): EvalValue {
   const lvalue = resolveLValue(leftExpression, context);
   const right = evalExpression(rightExpression, context);
+  if (isPoolPointer(right)) {
+    if (operator !== "=") throw compilerFailure("pool pointers only support assignment");
+    writeLValue(lvalue, right, context);
+    return right;
+  }
   if (isComplex(right)) {
     if (operator !== "=") throw compilerFailure("complex values only support assignment");
     writeLValue(lvalue, right, context);
@@ -465,13 +490,41 @@ function evalAssignment(
   return value;
 }
 
-function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): number {
+function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): EvalValue {
   const name = expression.kind === "call" && expression.callee.kind === "identifier"
     ? expression.callee.name
     : undefined;
   const cooperativeGroupCall = evalCooperativeGroupCall(expression, context);
   if (cooperativeGroupCall !== undefined) return cooperativeGroupCall;
   if (name === "printf") return 0;
+  if (name === "deviceAllocate" || name === "streamOrderedAllocate") {
+    if (expression.args.length === 4) {
+      const baseRef = expression.args[0];
+      if (baseRef?.kind !== "identifier") throw compilerFailure(`${name} expects raw pool base`);
+      const offsetRef = expression.args[1];
+      if (!offsetRef) throw compilerFailure(`${name} expects raw pool offset`);
+      const offset = resolveLValue(offsetRef, context);
+      const oldOffset = valueAsNumber(readLValue(offset, context), offset.name);
+      const poolSize = Math.max(0, Math.trunc(evalNumber(expression.args[2]!, context)));
+      const sizeBytes = Math.max(0, Math.trunc(evalNumber(expression.args[3]!, context)));
+      writeLValue(offset, oldOffset + sizeBytes, context);
+      if (oldOffset + sizeBytes > poolSize) {
+        return { kind: "pool-pointer", poolName: baseRef.name, byteOffset: -1, rawBuffer: true };
+      }
+      return { kind: "pool-pointer", poolName: baseRef.name, byteOffset: oldOffset, rawBuffer: true };
+    }
+    const poolRef = expression.args[0];
+    if (poolRef?.kind !== "identifier") throw compilerFailure(`${name} expects DevicePool* argument`);
+    const pool = context.memoryPools.get(poolRef.name);
+    if (!pool) throw compilerFailure(`missing memory pool '${poolRef.name}'`);
+    const sizeBytes = Math.max(0, Math.trunc(evalNumber(expression.args[1]!, context)));
+    const oldOffset = pool.offset;
+    pool.offset += sizeBytes;
+    if (oldOffset + sizeBytes > pool.data.length * 4) {
+      return { kind: "pool-pointer", poolName: poolRef.name, byteOffset: -1 };
+    }
+    return { kind: "pool-pointer", poolName: poolRef.name, byteOffset: oldOffset };
+  }
   if (name === "atomicAdd") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => current + value);
   }
@@ -648,6 +701,8 @@ function curandNext(state: number): number {
 }
 
 function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): LValue {
+  const pool = resolvePoolLValue(expression, context);
+  if (pool) return pool;
   if (expression.kind === "member") {
     if (expression.property !== "x" && expression.property !== "y") {
       throw compilerFailure(`unsupported lvalue member '${expression.property}'`);
@@ -691,11 +746,38 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
   throw compilerFailure(`unknown lvalue '${cursor.name}'`);
 }
 
-function resolvePointerInitializer(statement: CudaLiteVarDecl, context: ThreadContext): AddressValue {
-  if (statement.init?.kind !== "unary" || statement.init.operator !== "&") {
+function resolvePoolLValue(expression: CudaLiteExpression, context: ThreadContext): LValue | undefined {
+  if (expression.kind !== "index") return undefined;
+  const target = expression.target;
+  if (target.kind !== "cast" || !target.pointer) return undefined;
+  const pointer = valueAsPoolPointer(evalExpression(target.expression, context), "pool pointer");
+  if (pointer.byteOffset < 0) return {
+    name: pointer.poolName,
+    space: "pool",
+    index: -1,
+    valueType: target.valueType,
+  };
+  const index = Math.trunc(evalNumber(expression.index, context));
+  const stride = target.valueType === "complex64" ? 2 : 1;
+  return {
+    name: pointer.poolName,
+    space: "pool",
+    index: Math.trunc(pointer.byteOffset / 4) + index * stride,
+    valueType: target.valueType,
+  };
+}
+
+function resolvePointerInitializer(statement: CudaLiteVarDecl, context: ThreadContext): AddressValue | PoolPointerValue {
+  const init = statement.init;
+  if (!init) return { kind: "pool-pointer", poolName: "", byteOffset: -1 };
+  if (init?.kind === "call" || (init?.kind === "cast" && init.pointer) || init?.kind === "identifier") {
+    const value = evalExpression(init, context);
+    if (isPoolPointer(value)) return value;
+  }
+  if (init?.kind !== "unary" || init.operator !== "&") {
     throw compilerFailure(`pointer '${statement.name}' must initialize from an address`);
   }
-  const target = resolveLValue(statement.init.argument, context);
+  const target = resolveLValue(init.argument, context);
   if (target.space !== "shared") {
     throw compilerFailure(`pointer '${statement.name}' can only alias shared memory in CUDA-lite v0`);
   }
@@ -724,6 +806,20 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
     const read = ok ? readBufferValue(value, storageIndex, valueType, lvalue.field) : 0;
     context.trace.reads.push({ name: lvalue.name, index: storageIndex, value: traceValue(read), ok });
     return read;
+  }
+  if (lvalue.space === "pool") {
+    const pool = context.memoryPools.get(lvalue.name);
+    const buffer = context.buffers.get(lvalue.name);
+    if (!pool && !buffer) throw compilerFailure(`missing memory pool '${lvalue.name}'`);
+    const length = pool ? pool.data.length : buffer!.length;
+    const ok = lvalue.index >= 0 && lvalue.index < length;
+    const value = ok
+      ? pool
+        ? readPoolValue(pool.data, lvalue.index, lvalue.valueType)
+        : readBufferValue(buffer!, lvalue.index, lvalue.valueType, lvalue.field)
+      : 0;
+    context.trace.reads.push({ name: lvalue.name, index: lvalue.index, value: traceValue(value), ok });
+    return value;
   }
   const shared = context.shared.get(lvalue.name);
   if (!shared) throw compilerFailure(`missing shared array '${lvalue.name}'`);
@@ -757,6 +853,19 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
     return;
   }
   if (lvalue.space === "constant") throw compilerFailure(`cannot write constant memory '${lvalue.name}'`);
+  if (lvalue.space === "pool") {
+    const pool = context.memoryPools.get(lvalue.name);
+    const buffer = context.buffers.get(lvalue.name);
+    if (!pool && !buffer) throw compilerFailure(`missing memory pool '${lvalue.name}'`);
+    const length = pool ? pool.data.length : buffer!.length;
+    const ok = lvalue.index >= 0 && lvalue.index < length;
+    if (ok) {
+      if (pool) writePoolValue(pool.data, lvalue.index, lvalue.valueType, value);
+      else writeBufferValue(buffer!, lvalue.index, lvalue.valueType, lvalue.field, value);
+    }
+    context.trace.writes.push({ name: lvalue.name, index: lvalue.index, value: traceValue(value), ok });
+    return;
+  }
   const shared = context.shared.get(lvalue.name);
   if (!shared) throw compilerFailure(`missing shared array '${lvalue.name}'`);
   const storageIndex = shared.valueType === "complex64" ? lvalue.index * 2 : lvalue.index;
@@ -821,6 +930,35 @@ function writeBufferValue(
   buffer[storageIndex] = valueAsNumber(value, "write value");
 }
 
+function readPoolValue(
+  data: Uint32Array,
+  storageIndex: number,
+  valueType: CudaLiteScalarType | undefined,
+): EvalValue {
+  const raw = data[storageIndex] ?? 0;
+  if (valueType === "float") return floatFromBits(raw);
+  if (valueType === "int") return intFromBits(raw);
+  if (valueType === "bool") return raw === 0 ? 0 : 1;
+  return raw;
+}
+
+function writePoolValue(
+  data: Uint32Array,
+  storageIndex: number,
+  valueType: CudaLiteScalarType | undefined,
+  value: EvalValue,
+): void {
+  if (valueType === "float") {
+    data[storageIndex] = bitsFromFloat(valueAsNumber(value, "pool write"));
+    return;
+  }
+  if (valueType === "int") {
+    data[storageIndex] = valueAsNumber(value, "pool write") >>> 0;
+    return;
+  }
+  data[storageIndex] = valueAsNumber(value, "pool write") >>> 0;
+}
+
 function flattenIndex(dimensions: readonly number[], indices: readonly number[]): number {
   if (dimensions.length !== indices.length) {
     throw compilerFailure(`expected ${dimensions.length} indices, got ${indices.length}`);
@@ -862,6 +1000,19 @@ function cloneSurfaces(
   return out;
 }
 
+function cloneMemoryPools(
+  pools: NonNullable<CompiledKernelInput["memoryPools"]>,
+): Map<string, MemoryPoolValue> {
+  const out = new Map<string, MemoryPoolValue>();
+  for (const [name, pool] of Object.entries(pools)) {
+    out.set(name, {
+      data: new Uint32Array(pool.data),
+      offset: pool.offset?.[0] ?? 0,
+    });
+  }
+  return out;
+}
+
 function cloneConstants(
   constants: Readonly<Record<string, number | WgslTypedArray>>,
 ): Map<string, number | WgslTypedArray> {
@@ -876,13 +1027,40 @@ function cloneTypedArray<T extends WgslTypedArray>(value: T): T {
   return value.slice() as T;
 }
 
+const BITCAST_BUFFER = new ArrayBuffer(4);
+const BITCAST_FLOAT = new Float32Array(BITCAST_BUFFER);
+const BITCAST_UINT = new Uint32Array(BITCAST_BUFFER);
+const BITCAST_INT = new Int32Array(BITCAST_BUFFER);
+
+function bitsFromFloat(value: number): number {
+  BITCAST_FLOAT[0] = value;
+  return BITCAST_UINT[0] ?? 0;
+}
+
+function floatFromBits(value: number): number {
+  BITCAST_UINT[0] = value >>> 0;
+  return BITCAST_FLOAT[0] ?? 0;
+}
+
+function intFromBits(value: number): number {
+  BITCAST_UINT[0] = value >>> 0;
+  return BITCAST_INT[0] ?? 0;
+}
+
 function vectorFromTuple(value: readonly [number, number, number]): Vector3 {
   return { x: value[0], y: value[1], z: value[2] };
 }
 
 function valueAsNumber(value: LocalValue, name: string): number {
   if (typeof value === "number") return value;
+  if (isPoolPointer(value)) return value.byteOffset < 0 ? 0 : value.byteOffset + 1;
   throw compilerFailure(`'${name}' is not a scalar`);
+}
+
+function valueAsPoolPointer(value: EvalValue, name: string): PoolPointerValue {
+  if (isPoolPointer(value)) return value;
+  if (typeof value === "number" && value === 0) return { kind: "pool-pointer", poolName: "", byteOffset: -1 };
+  throw compilerFailure(`'${name}' is not a pool pointer`);
 }
 
 function valueAsComplex(value: LocalValue, name: string): ComplexValue {
@@ -895,6 +1073,13 @@ function isComplex(value: LocalValue | EvalValue | undefined): value is ComplexV
     typeof value !== "number" &&
     "kind" in value &&
     value.kind === "complex64";
+}
+
+function isPoolPointer(value: LocalValue | EvalValue | undefined): value is PoolPointerValue {
+  return value !== undefined &&
+    typeof value !== "number" &&
+    "kind" in value &&
+    value.kind === "pool-pointer";
 }
 
 function projectField(value: LocalValue, lvalue: LValue): EvalValue {
@@ -923,6 +1108,7 @@ function sizeofType(typeName: string): number {
 }
 
 function traceValue(value: EvalValue): number {
+  if (isPoolPointer(value)) return valueAsNumber(value, "pool pointer");
   return isComplex(value) ? value.x : value;
 }
 
@@ -968,6 +1154,10 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
       const surface = input.surfaces?.[param.name];
       if (!surface) throw compilerFailure(`missing surface input '${param.name}'`);
       validateSurfaceInput(param.name, surface);
+    } else if (param.valueType === "devicepool") {
+      const pool = input.memoryPools?.[param.name];
+      if (!pool) throw compilerFailure(`missing memory pool input '${param.name}'`);
+      validateMemoryPoolInput(param.name, pool);
     } else if (param.pointer) {
       const buffer = input.buffers[param.name];
       if (!buffer) throw compilerFailure(`missing buffer input '${param.name}'`);
@@ -1018,6 +1208,13 @@ function validateSurfaceInput(name: string, value: { readonly width: number; rea
   if (!Number.isInteger(value.height) || value.height <= 0) throw compilerFailure(`${name} height must be positive`);
   const expected = value.width * value.height;
   if (value.data.length < expected) throw compilerFailure(`${name} expects at least ${expected} elements`);
+}
+
+function validateMemoryPoolInput(name: string, value: { readonly data: Uint32Array; readonly offset?: Uint32Array }): void {
+  if (!(value.data instanceof Uint32Array)) throw compilerFailure(`${name} memory pool expects Uint32Array data`);
+  if (value.offset !== undefined && (!(value.offset instanceof Uint32Array) || value.offset.length < 1)) {
+    throw compilerFailure(`${name} memory pool offset expects Uint32Array length >= 1`);
+  }
 }
 
 function contextConstantDimensions(name: string, context: ThreadContext): readonly number[] {

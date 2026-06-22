@@ -12,7 +12,7 @@ export interface SourceSpan {
   readonly column: number;
 }
 
-export type CudaLiteScalarType = "float" | "int" | "uint" | "half" | "bool" | "complex64" | "surface2d" | "void";
+export type CudaLiteScalarType = "float" | "int" | "uint" | "half" | "bool" | "complex64" | "surface2d" | "devicepool" | "voidptr" | "void";
 export type DiagnosticSeverity = "error" | "warning";
 
 export interface CudaLiteDiagnostic {
@@ -207,6 +207,7 @@ export interface CudaLiteIdentifier {
 export interface CudaLiteCastExpression {
   readonly kind: "cast";
   readonly valueType: Exclude<CudaLiteScalarType, "void">;
+  readonly pointer?: boolean;
   readonly expression: CudaLiteExpression;
   readonly span: SourceSpan;
 }
@@ -343,8 +344,14 @@ export interface CompiledKernelInput {
   readonly constants?: Readonly<Record<string, number | WgslTypedArray>>;
   readonly textures?: Readonly<Record<string, WgslTexture2DInput>>;
   readonly surfaces?: Readonly<Record<string, WgslTexture2DInput>>;
+  readonly memoryPools?: Readonly<Record<string, CudaLiteMemoryPoolInput>>;
   readonly scalars?: Readonly<Record<string, number>>;
   readonly readback?: readonly string[];
+}
+
+export interface CudaLiteMemoryPoolInput {
+  readonly data: Uint32Array;
+  readonly offset?: Uint32Array;
 }
 
 export interface KernelMemoryAccess {

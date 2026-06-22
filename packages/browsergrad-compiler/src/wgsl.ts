@@ -47,7 +47,7 @@ export function emitKernelIrWgsl(
   if (lines.length > 0) lines.push("");
   lines.push(`// BrowserGrad CUDA-lite kernel: ${ir.name}`);
 
-  for (const param of ir.params.filter((param) => param.pointer)) {
+  for (const param of ir.params.filter((param) => param.pointer && !isDevicePoolParam(param))) {
     const access = param.constant ? "read" : "read_write";
     const element = storageElementType(param, ir);
     lines.push(
@@ -57,6 +57,14 @@ export function emitKernelIrWgsl(
   for (const surface of ir.params.filter(isSurfaceParam)) {
     lines.push(
       `@group(0) @binding(${context.bindingFor(surface.name)}) var<storage, read_write> ${surface.name}: array<f32>;`,
+    );
+  }
+  for (const pool of ir.params.filter(isDevicePoolParam)) {
+    lines.push(
+      `@group(0) @binding(${context.bindingFor(poolDataName(pool.name))}) var<storage, read_write> ${poolDataName(pool.name)}: array<u32>;`,
+    );
+    lines.push(
+      `@group(0) @binding(${context.bindingFor(poolOffsetName(pool.name))}) var<storage, read_write> ${poolOffsetName(pool.name)}: atomic<u32>;`,
     );
   }
 
@@ -92,6 +100,14 @@ export function emitKernelIrWgsl(
   for (const surface of ir.params.filter(isSurfaceParam)) {
     lines.push("");
     lines.push(...emitSurfaceHelper(surface.name));
+  }
+  for (const pool of ir.params.filter(isDevicePoolParam)) {
+    lines.push("");
+    lines.push(...emitPoolHelper(pool.name));
+  }
+  for (const allocator of context.rawPoolAllocators) {
+    lines.push("");
+    lines.push(...emitRawPoolHelper(allocator));
   }
   if (usesFloatAtomicAdd(ir)) {
     lines.push("");
@@ -153,6 +169,8 @@ interface EmitContext {
   uniformScalarTypeFor(name: string): CudaLiteScalarType | undefined;
   isAtomicShared(name: string): boolean;
   pointerAliasFor(name: string): PointerAlias | undefined;
+  poolPointerFor(name: string): PoolPointerAlias | undefined;
+  readonly rawPoolAllocators: readonly RawPoolAllocator[];
   cooperativeGroupFor(name: string): CudaLiteCooperativeGroupDecl | undefined;
   surfaceWidthField(name: string): string;
 }
@@ -162,12 +180,23 @@ interface PointerAlias {
   readonly baseIndex: CudaLiteExpression;
 }
 
+interface PoolPointerAlias {
+  readonly poolName: string;
+  readonly offsetName?: string;
+  readonly rawBuffer?: boolean;
+}
+
+interface RawPoolAllocator {
+  readonly baseName: string;
+  readonly offsetName: string;
+}
+
 type EmitMode = "value" | "lvalue";
 
 function createEmitContext(ir: KernelIrModule): EmitContext {
   const bindings: WgslKernelBindingInput[] = [];
   const bindingByName = new Map<string, number>();
-  for (const param of ir.params.filter((param) => param.pointer)) {
+  for (const param of ir.params.filter((param) => param.pointer && !isDevicePoolParam(param))) {
     const binding = bindings.length;
     bindingByName.set(param.name, binding);
     bindings.push({
@@ -187,6 +216,26 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
       valueType: "f32",
       access: "read_write",
       binding,
+    });
+  }
+  for (const param of ir.params.filter(isDevicePoolParam)) {
+    const dataBinding = bindings.length;
+    bindingByName.set(poolDataName(param.name), dataBinding);
+    bindings.push({
+      kind: "storage",
+      name: poolDataName(param.name),
+      valueType: "u32",
+      access: "read_write",
+      binding: dataBinding,
+    });
+    const offsetBinding = bindings.length;
+    bindingByName.set(poolOffsetName(param.name), offsetBinding);
+    bindings.push({
+      kind: "storage",
+      name: poolOffsetName(param.name),
+      valueType: "u32",
+      access: "read_write",
+      binding: offsetBinding,
     });
   }
   for (const constant of ir.constants.filter((constant) => constant.dimensions.length > 0)) {
@@ -221,6 +270,8 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
   const uniformScalarNames = new Set(uniformScalars.map((scalar) => scalar.name));
   const uniformScalarTypes = new Map(uniformScalars.map((scalar) => [scalar.name, scalar.valueType] as const));
   const pointerAliases = collectPointerAliases(ir.body);
+  const poolPointers = collectPoolPointers(ir.body);
+  const rawPoolAllocators = collectRawPoolAllocators(ir.body);
   const cooperativeGroups = collectCooperativeGroups(ir.body);
   const paramsBinding = uniformScalars.length > 0 ? bindings.length : undefined;
   if (paramsBinding !== undefined) {
@@ -257,6 +308,10 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
     pointerAliasFor(name) {
       return pointerAliases.get(name);
     },
+    poolPointerFor(name) {
+      return poolPointers.get(name);
+    },
+    rawPoolAllocators,
     cooperativeGroupFor(name) {
       return cooperativeGroups.get(name);
     },
@@ -275,7 +330,10 @@ function emitStatement(
   switch (statement.kind) {
     case "var":
       if (statement.storage === "shared") return [];
-      if (statement.pointer) return [];
+      if (statement.pointer) {
+        if (!isEmittedPointerVar(statement, context)) return [];
+        return [`${prefix}var ${statement.name}: u32${statement.init ? ` = ${emitExpression(statement.init, context)}` : " = 0u"};`];
+      }
       return [`${prefix}var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitExpression(statement.init, context)}` : ""};`];
     case "dim3":
       return [];
@@ -331,6 +389,7 @@ function emitInlineAsmStatement(
 }
 
 function emitForVar(statement: CudaLiteVarDecl, context: EmitContext): string {
+  if (statement.pointer) return `var ${statement.name}: u32${statement.init ? ` = ${emitExpression(statement.init, context)}` : " = 0u"}`;
   return `var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitExpression(statement.init, context)}` : ""}`;
 }
 
@@ -363,10 +422,13 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
     case "identifier":
       return emitIdentifier(expression.name, context, mode);
     case "cast":
+      if (expression.pointer) return emitExpression(expression.expression, context);
       return `${wgslScalar(expression.valueType)}(${emitExpression(expression.expression, context)})`;
     case "member":
       return emitMember(expression, context);
     case "index": {
+      const poolAccess = poolAccessForIndex(expression, context);
+      if (poolAccess) return emitPoolRead(poolAccess, context);
       if (expression.target.kind === "identifier") {
         const alias = context.pointerAliasFor(expression.target.name);
         if (alias) {
@@ -421,6 +483,110 @@ function collectPointerAliases(statements: readonly CudaLiteStatement[]): Readon
   return aliases;
 }
 
+function collectPoolPointers(statements: readonly CudaLiteStatement[]): ReadonlyMap<string, PoolPointerAlias> {
+  const aliases = new Map<string, PoolPointerAlias>();
+  const walk = (items: readonly CudaLiteStatement[]): void => {
+    for (const item of items) {
+      if (item.kind === "var" && item.pointer) {
+        const alias = poolPointerForInitializer(item.init, aliases);
+        if (alias) aliases.set(item.name, alias);
+      }
+      if (item.kind === "if") {
+        walk(item.consequent);
+        if (item.alternate) walk(item.alternate);
+      }
+      if (item.kind === "for") {
+        if (item.init?.kind === "var" && item.init.pointer) {
+          const alias = poolPointerForInitializer(item.init.init, aliases);
+          if (alias) aliases.set(item.init.name, alias);
+        }
+        walk(item.body);
+      }
+    }
+  };
+  walk(statements);
+  return aliases;
+}
+
+function poolPointerForInitializer(
+  init: CudaLiteExpression | undefined,
+  aliases: ReadonlyMap<string, PoolPointerAlias>,
+): PoolPointerAlias | undefined {
+  if (!init) return undefined;
+  if (init.kind === "call") return poolPointerForAllocationCall(init);
+  if (init.kind === "cast" && init.pointer) return poolPointerForInitializer(init.expression, aliases);
+  if (init.kind === "identifier") return aliases.get(init.name);
+  return undefined;
+}
+
+function poolPointerForAllocationCall(call: CudaLiteCallExpression): PoolPointerAlias | undefined {
+  const name = expressionName(call.callee);
+  if (name !== "deviceAllocate" && name !== "streamOrderedAllocate") return undefined;
+  if (call.args.length === 4) {
+    const base = call.args[0];
+    const offset = call.args[1];
+    return base?.kind === "identifier" && offset?.kind === "identifier"
+      ? { poolName: base.name, offsetName: offset.name, rawBuffer: true }
+      : undefined;
+  }
+  const pool = call.args[0];
+  return pool?.kind === "identifier" ? { poolName: pool.name } : undefined;
+}
+
+function collectRawPoolAllocators(statements: readonly CudaLiteStatement[]): readonly RawPoolAllocator[] {
+  const allocators = new Map<string, RawPoolAllocator>();
+  const visitExpression = (expression: CudaLiteExpression): void => {
+    if (expression.kind === "call") {
+      const alias = poolPointerForAllocationCall(expression);
+      if (alias?.rawBuffer && alias.offsetName) {
+        const key = `${alias.poolName}\0${alias.offsetName}`;
+        allocators.set(key, { baseName: alias.poolName, offsetName: alias.offsetName });
+      }
+      visitExpression(expression.callee);
+      for (const arg of expression.args) visitExpression(arg);
+      return;
+    }
+    if (expression.kind === "cast") visitExpression(expression.expression);
+    else if (expression.kind === "member") visitExpression(expression.object);
+    else if (expression.kind === "index") {
+      visitExpression(expression.target);
+      visitExpression(expression.index);
+    } else if (expression.kind === "unary" || expression.kind === "update") visitExpression(expression.argument);
+    else if (expression.kind === "binary") {
+      visitExpression(expression.left);
+      visitExpression(expression.right);
+    } else if (expression.kind === "conditional") {
+      visitExpression(expression.condition);
+      visitExpression(expression.consequent);
+      visitExpression(expression.alternate);
+    } else if (expression.kind === "assignment") {
+      visitExpression(expression.left);
+      visitExpression(expression.right);
+    }
+  };
+  const walk = (items: readonly CudaLiteStatement[]): void => {
+    for (const item of items) {
+      if (item.kind === "var" && item.init) visitExpression(item.init);
+      if (item.kind === "expr") visitExpression(item.expression);
+      if (item.kind === "if") {
+        visitExpression(item.condition);
+        walk(item.consequent);
+        if (item.alternate) walk(item.alternate);
+      }
+      if (item.kind === "for") {
+        if (item.init?.kind === "var" && item.init.init) visitExpression(item.init.init);
+        else if (item.init && item.init.kind !== "var") visitExpression(item.init);
+        if (item.condition) visitExpression(item.condition);
+        if (item.update) visitExpression(item.update);
+        walk(item.body);
+      }
+      if (item.kind === "return" && item.value) visitExpression(item.value);
+    }
+  };
+  walk(statements);
+  return [...allocators.values()];
+}
+
 function collectCooperativeGroups(statements: readonly CudaLiteStatement[]): ReadonlyMap<string, CudaLiteCooperativeGroupDecl> {
   const groups = new Map<string, CudaLiteCooperativeGroupDecl>();
   const walk = (items: readonly CudaLiteStatement[]): void => {
@@ -449,6 +615,7 @@ function pointerAliasForVar(statement: CudaLiteVarDecl): PointerAlias | undefine
 }
 
 function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "value"): string {
+  if (name === "nullptr") return "0u";
   if (name === "threadIdx" || name === "blockIdx" || name === "blockDim" || name === "gridDim") return name;
   if (context.isAtomicShared(name) && mode === "value") return `atomicLoad(&${name})`;
   const param = context.paramFor(name);
@@ -518,6 +685,15 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
         return `bg_surf2dwrite_${expression.args[1].name}(${emitExpression(expression.args[0]!, context)}, ${emitExpression(expression.args[2]!, context)}, ${emitExpression(expression.args[3]!, context)})`;
       }
       return `surf2Dwrite(${args.join(", ")})`;
+    case "deviceAllocate":
+    case "streamOrderedAllocate":
+      if (expression.args.length === 4 && expression.args[0]?.kind === "identifier" && expression.args[1]?.kind === "identifier") {
+        return `${rawPoolHelperName(expression.args[0].name, expression.args[1].name)}(u32(${emitExpression(expression.args[2]!, context)}), u32(${emitExpression(expression.args[3]!, context)}))`;
+      }
+      if (expression.args.length >= 2 && expression.args[0]?.kind === "identifier") {
+        return `bg_pool_alloc_${expression.args[0].name}(u32(${emitExpression(expression.args[1]!, context)}))`;
+      }
+      return "0u";
     case "sizeof":
       if (expression.args[0]?.kind === "identifier") return String(sizeofType(expression.args[0].name));
       return "4";
@@ -648,6 +824,8 @@ function emitAtomicCall(
 }
 
 function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string {
+  const poolAccess = poolAccessForIndex(expression.left, context);
+  if (poolAccess) return emitPoolAssignment(poolAccess, expression.operator, expression.right, context);
   const root = rootIdentifier(expression.left);
   const param = root ? context.paramFor(root) : undefined;
   if (root && context.isAtomicShared(root)) {
@@ -719,6 +897,134 @@ function emitSurfaceHelper(name: string): string[] {
     `  if (index >= 0 && index < i32(arrayLength(&${name}))) {`,
     `    ${name}[index] = value;`,
     "  }",
+    "}",
+  ];
+}
+
+interface PoolAccess {
+  readonly poolName: string;
+  readonly pointerExpression: CudaLiteExpression;
+  readonly indexExpression: CudaLiteExpression;
+  readonly valueType: CudaLiteScalarType;
+  readonly rawBuffer?: boolean;
+}
+
+function poolAccessForIndex(expression: CudaLiteExpression, context: EmitContext): PoolAccess | undefined {
+  if (expression.kind !== "index") return undefined;
+  const target = expression.target;
+  if (target.kind === "cast" && target.pointer) {
+    const pointer = poolPointerExpressionInfo(target.expression, context);
+    if (!pointer) return undefined;
+    return {
+      poolName: pointer.poolName,
+      pointerExpression: target.expression,
+      indexExpression: expression.index,
+      valueType: target.valueType,
+      ...(pointer.rawBuffer ? { rawBuffer: true } : {}),
+    };
+  }
+  if (target.kind === "identifier") {
+    const pointer = context.poolPointerFor(target.name);
+    if (!pointer) return undefined;
+    return {
+      poolName: pointer.poolName,
+      pointerExpression: target,
+      indexExpression: expression.index,
+      valueType: "float",
+      ...(pointer.rawBuffer ? { rawBuffer: true } : {}),
+    };
+  }
+  return undefined;
+}
+
+function poolPointerExpressionInfo(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+): PoolPointerAlias | undefined {
+  if (expression.kind === "identifier") return context.poolPointerFor(expression.name);
+  if (expression.kind === "call") return poolPointerForAllocationCall(expression);
+  if (expression.kind === "cast" && expression.pointer) return poolPointerExpressionInfo(expression.expression, context);
+  return undefined;
+}
+
+function emitPoolRead(access: PoolAccess, context: EmitContext): string {
+  const raw = poolRawAccess(access, context);
+  if (access.rawBuffer) return raw;
+  return decodePoolWord(access.valueType, raw);
+}
+
+function emitPoolAssignment(
+  access: PoolAccess,
+  operator: string,
+  right: CudaLiteExpression,
+  context: EmitContext,
+): string {
+  const raw = poolRawAccess(access, context);
+  const rightValue = emitExpression(right, context);
+  if (access.rawBuffer) {
+    if (operator === "=") return `${raw} = ${rightValue}`;
+    const op = operator.slice(0, -1);
+    return `${raw} = (${raw} ${op} ${rightValue})`;
+  }
+  if (operator === "=") return `${raw} = ${encodePoolWord(access.valueType, rightValue)}`;
+  const current = decodePoolWord(access.valueType, raw);
+  const op = operator.slice(0, -1);
+  return `${raw} = ${encodePoolWord(access.valueType, `(${current} ${op} ${rightValue})`)}`;
+}
+
+function poolRawAccess(access: PoolAccess, context: EmitContext): string {
+  const name = access.rawBuffer ? access.poolName : poolDataName(access.poolName);
+  return `${name}[${poolWordIndex(access, context)}]`;
+}
+
+function poolWordIndex(access: PoolAccess, context: EmitContext): string {
+  const pointer = emitExpression(access.pointerExpression, context);
+  const index = emitExpression(access.indexExpression, context);
+  const stride = access.valueType === "complex64" ? "2u" : "1u";
+  return `(((${pointer} - 1u) / 4u) + (u32(${index}) * ${stride}))`;
+}
+
+function decodePoolWord(type: CudaLiteScalarType, raw: string): string {
+  if (type === "float") return `bitcast<f32>(${raw})`;
+  if (type === "int") return `bitcast<i32>(${raw})`;
+  if (type === "uint" || type === "voidptr" || type === "devicepool" || type === "surface2d") return raw;
+  if (type === "bool") return `(${raw} != 0u)`;
+  if (type === "half") return `f16(0.0)`;
+  if (type === "complex64") return `vec2<f32>(bitcast<f32>(${raw}), bitcast<f32>(${raw}))`;
+  return raw;
+}
+
+function encodePoolWord(type: CudaLiteScalarType, value: string): string {
+  if (type === "float") return `bitcast<u32>(${value})`;
+  if (type === "int") return `bitcast<u32>(${value})`;
+  if (type === "uint" || type === "voidptr" || type === "devicepool" || type === "surface2d") return `u32(${value})`;
+  if (type === "bool") return `select(0u, 1u, ${value})`;
+  if (type === "half") return "0u";
+  if (type === "complex64") return `bitcast<u32>(${value}.x)`;
+  return `u32(${value})`;
+}
+
+function emitPoolHelper(name: string): string[] {
+  return [
+    `fn bg_pool_alloc_${name}(size_bytes: u32) -> u32 {`,
+    `  let old = atomicAdd(&${poolOffsetName(name)}, size_bytes);`,
+    `  let capacity = arrayLength(&${poolDataName(name)}) * 4u;`,
+    "  if ((old + size_bytes) > capacity) {",
+    "    return 0u;",
+    "  }",
+    "  return old + 1u;",
+    "}",
+  ];
+}
+
+function emitRawPoolHelper(allocator: RawPoolAllocator): string[] {
+  return [
+    `fn ${rawPoolHelperName(allocator.baseName, allocator.offsetName)}(pool_size_bytes: u32, size_bytes: u32) -> u32 {`,
+    `  let old = atomicAdd(&${allocator.offsetName}[0], size_bytes);`,
+    "  if ((old + size_bytes) > pool_size_bytes) {",
+    "    return 0u;",
+    "  }",
+    "  return old + 1u;",
     "}",
   ];
 }
@@ -915,7 +1221,7 @@ function zeroValue(type: CudaLiteScalarType): string {
   if (type === "uint") return "0u";
   if (type === "bool") return "false";
   if (type === "complex64") return "vec2<f32>(0.0, 0.0)";
-  if (type === "surface2d") return "0u";
+  if (type === "surface2d" || type === "devicepool" || type === "voidptr") return "0u";
   return "0";
 }
 
@@ -934,6 +1240,8 @@ function wgslScalar(type: CudaLiteScalarType): string {
     case "complex64":
       return "vec2<f32>";
     case "surface2d":
+    case "devicepool":
+    case "voidptr":
       return "u32";
     case "void":
       return "void";
@@ -942,7 +1250,7 @@ function wgslScalar(type: CudaLiteScalarType): string {
 
 function wgslUniformScalar(type: CudaLiteScalarType): string {
   if (type === "complex64") return "vec2<f32>";
-  if (type === "surface2d") return "u32";
+  if (type === "surface2d" || type === "devicepool" || type === "voidptr") return "u32";
   return type === "bool" ? "u32" : wgslScalar(type);
 }
 
@@ -953,11 +1261,32 @@ function wgslBindingType(type: CudaLiteScalarType): "f16" | "f32" | "i32" | "u32
   if (type === "bool") return "u32";
   if (type === "complex64") return "f32";
   if (type === "surface2d") return "f32";
+  if (type === "devicepool" || type === "voidptr") return "u32";
   return "f32";
 }
 
 function isSurfaceParam(param: CudaLiteParam): boolean {
   return param.valueType === "surface2d";
+}
+
+function isDevicePoolParam(param: CudaLiteParam): boolean {
+  return param.pointer && param.valueType === "devicepool";
+}
+
+function isEmittedPointerVar(statement: CudaLiteVarDecl, context: EmitContext): boolean {
+  return statement.valueType === "voidptr" || context.poolPointerFor(statement.name) !== undefined;
+}
+
+function poolDataName(name: string): string {
+  return `${name}_pool`;
+}
+
+function poolOffsetName(name: string): string {
+  return `${name}_offset`;
+}
+
+function rawPoolHelperName(baseName: string, offsetName: string): string {
+  return `bg_raw_pool_alloc_${baseName}_${offsetName}`;
 }
 
 function surfaceWidthField(name: string): string {

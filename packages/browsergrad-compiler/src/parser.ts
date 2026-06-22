@@ -482,11 +482,13 @@ class Parser {
     if (this.startsScalarCast()) {
       const start = this.expect("(").span;
       const valueType = this.parseType();
+      const pointer = this.consumeIf("*") !== undefined;
       this.expect(")");
       const expression = this.parsePrefix();
       return {
         kind: "cast",
         valueType,
+        ...(pointer ? { pointer: true } : {}),
         expression,
         span: mergeSpans(start, expression.span),
       } satisfies CudaLiteCastExpression;
@@ -561,10 +563,14 @@ class Parser {
   private startsScalarCast(): boolean {
     if (!this.match("(")) return false;
     const typeToken = this.tokens[this.index + 1];
-    const closeToken = this.tokens[this.index + 2];
+    const maybeStar = this.tokens[this.index + 2];
+    const closeToken = maybeStar?.value === "*" ? this.tokens[this.index + 3] : maybeStar;
     if (typeToken === undefined || closeToken === undefined || closeToken.value !== ")") return false;
     if (typeToken.value === "unsigned") return true;
     if (typeToken.value === "size_t") return true;
+    if (typeToken.value === "void") return true;
+    if (typeToken.value === "DevicePool") return true;
+    if (typeToken.value === "cufftComplex") return true;
     return TYPE_KEYWORDS.has(typeToken.value);
   }
 
@@ -625,6 +631,8 @@ class Parser {
     if (token.value === "curandState_t") return "uint";
     if (token.value === "cufftComplex") return "complex64";
     if (token.value === "cudaSurfaceObject_t") return "surface2d";
+    if (token.value === "DevicePool") return "devicepool";
+    if (token.value === "void") return "voidptr";
     if (!TYPE_KEYWORDS.has(token.value)) this.fail(`unsupported CUDA-lite type: ${token.value}`, token.span);
     return token.value as Exclude<CudaLiteScalarType, "void">;
   }
@@ -639,6 +647,8 @@ class Parser {
     if (this.match("unsigned")) return true;
     if (this.match("curandState_t")) return true;
     if (this.match("cufftComplex")) return true;
+    if (this.match("DevicePool")) return true;
+    if (this.match("void")) return true;
     return TYPE_KEYWORDS.has(this.peek().value);
   }
 

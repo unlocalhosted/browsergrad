@@ -58,6 +58,31 @@ Examples live in `examples/`: SAXPY, guarded map, and shared-memory tiled
 matmul. The emitted WGSL is intentionally inspectable so labs can show source,
 bindings, workgroup size, shared memory, and barriers directly.
 
+## CUDA Memory Pools
+
+The compiler lowers simple bump allocators to real WebGPU atomics:
+
+- `DevicePool* pool` with `streamOrderedAllocate(pool, size)` / `deviceAllocate(pool, size)`.
+- raw pool form `deviceAllocate(poolBase, offset, poolSize, size)` where `poolBase`
+  is a pointer parameter and `offset` is an integer pointer counter.
+
+`DevicePool*` inputs use `memoryPools`:
+
+```ts
+const input = {
+  buffers: { out: new Float32Array(2) },
+  memoryPools: {
+    pool: { data: new Uint32Array(2), offset: new Uint32Array([0]) },
+  },
+  scalars: { n: 2 },
+};
+```
+
+Pool pointers are byte offsets with `0` as null. Casted accesses such as
+`((float*)ptr)[0]` lower to raw pool words for `DevicePool*`, and to the typed
+base buffer for raw pointer pools. This is a teaching-grade CUDA allocator
+primitive, not a course-specific shim.
+
 Use `createCudaLoweringPlan(diagnostics)` and `describeCudaDiagnostic()` to group
 compatibility gaps by semantic family instead of raw parser messages.
 

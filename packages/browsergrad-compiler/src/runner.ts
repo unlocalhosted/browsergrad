@@ -61,8 +61,13 @@ export async function runCompiledKernelWebGpu(
   const buffers = {
     ...input.buffers,
     ...surfaceBufferInputs(compiled, input),
+    ...memoryPoolBufferInputs(compiled, input),
     ...constantBufferInputs(compiled, input),
   };
+  const readback = input.readback ??
+    compiled.ir.params
+      .filter((param) => (param.pointer && !param.constant) || param.valueType === "surface2d")
+      .map((param) => param.valueType === "devicepool" ? poolDataName(param.name) : param.name);
   const result = await runWgslKernelProgram(
     device,
     compiled.wgslProgram,
@@ -70,8 +75,7 @@ export async function runCompiledKernelWebGpu(
       buffers,
       ...(input.textures === undefined ? {} : { textures: input.textures }),
       ...(uniforms.byteLength === 0 ? {} : { uniforms: { params: uniforms } }),
-      readback: input.readback ??
-        compiled.ir.params.filter((param) => (param.pointer && !param.constant) || param.valueType === "surface2d").map((param) => param.name),
+      readback,
     },
     {
       dispatchCount: [
@@ -81,7 +85,7 @@ export async function runCompiledKernelWebGpu(
       ],
     },
   );
-  return { buffers: result.buffers, trace: [] };
+  return { buffers: normalizePoolReadback(compiled, result.buffers), trace: [] };
 }
 
 function packScalarParams(
@@ -153,6 +157,56 @@ function surfaceBufferInputs(
   return out;
 }
 
+function memoryPoolBufferInputs(
+  compiled: CompiledCudaLiteKernel,
+  input: CompiledKernelInput,
+): Record<string, WgslTypedArray> {
+  const out: Record<string, WgslTypedArray> = {};
+  for (const pool of compiled.ir.params.filter(isDevicePoolParam)) {
+    const value = input.memoryPools?.[pool.name];
+    if (!value) {
+      throw new CudaLiteCompilerError(`missing memory pool input '${pool.name}'`, [{
+        code: "missing-memory-pool",
+        severity: "error",
+        message: `missing memory pool input '${pool.name}'`,
+        span: pool.span,
+      }]);
+    }
+    if (!(value.data instanceof Uint32Array)) {
+      throw new CudaLiteCompilerError(`memory pool '${pool.name}' expects Uint32Array data`, [{
+        code: "invalid-memory-pool",
+        severity: "error",
+        message: `memory pool '${pool.name}' expects Uint32Array data`,
+        span: pool.span,
+      }]);
+    }
+    const offset = value.offset ?? new Uint32Array([0]);
+    if (!(offset instanceof Uint32Array) || offset.length < 1) {
+      throw new CudaLiteCompilerError(`memory pool '${pool.name}' offset expects Uint32Array length >= 1`, [{
+        code: "invalid-memory-pool",
+        severity: "error",
+        message: `memory pool '${pool.name}' offset expects Uint32Array length >= 1`,
+        span: pool.span,
+      }]);
+    }
+    out[poolDataName(pool.name)] = value.data;
+    out[poolOffsetName(pool.name)] = offset;
+  }
+  return out;
+}
+
+function normalizePoolReadback(
+  compiled: CompiledCudaLiteKernel,
+  buffers: Readonly<Record<string, WgslTypedArray>>,
+): Record<string, WgslTypedArray> {
+  const out: Record<string, WgslTypedArray> = { ...buffers };
+  for (const pool of compiled.ir.params.filter(isDevicePoolParam)) {
+    const data = buffers[poolDataName(pool.name)];
+    if (data) out[pool.name] = data;
+  }
+  return out;
+}
+
 function constantBufferInputs(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
@@ -171,6 +225,18 @@ function constantBufferInputs(
     out[constant.name] = value;
   }
   return out;
+}
+
+function isDevicePoolParam(param: { readonly pointer: boolean; readonly valueType: string }): boolean {
+  return param.pointer && param.valueType === "devicepool";
+}
+
+function poolDataName(name: string): string {
+  return `${name}_pool`;
+}
+
+function poolOffsetName(name: string): string {
+  return `${name}_offset`;
 }
 
 function float16Bits(value: number): number {

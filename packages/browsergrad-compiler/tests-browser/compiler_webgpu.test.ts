@@ -101,6 +101,29 @@ __global__ void atomicFloatOps(float *minValue, float *subValue) {
 }
 `;
 
+const DEVICE_POOL_ALLOC = `
+__global__ void poolKernel(DevicePool* dp, float* out, int N) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  void* ptr = streamOrderedAllocate(dp, sizeof(float));
+  if (ptr != nullptr && idx < N) {
+    ((float*)ptr)[0] = 3.25f;
+    out[idx] = ((float*)ptr)[0];
+  }
+}
+`;
+
+const RAW_POOL_ALLOC = `
+__global__ void rawPoolKernel(float* poolBase, size_t* offset, size_t poolSize, int N) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < N) {
+    void* ptr = deviceAllocate(poolBase, offset, poolSize, sizeof(float));
+    if (ptr != nullptr) {
+      ((float*)ptr)[0] = 4.5f;
+    }
+  }
+}
+`;
+
 async function checkDevice(): Promise<DeviceCheck> {
   if (typeof navigator === "undefined" || !("gpu" in navigator)) {
     return { available: false, reason: "navigator.gpu undefined" };
@@ -357,6 +380,40 @@ __global__ void atomic_exchange(float* x, float* out) {
 
     expect([...actual.buffers.minValue as Float32Array][0]).toBeCloseTo(3);
     expect([...actual.buffers.subValue as Float32Array][0]).toBeCloseTo(6.25);
+  });
+
+  it("runs DevicePool allocation through WebGPU atomics", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(DEVICE_POOL_ALLOC, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(2) },
+      memoryPools: { dp: { data: new Uint32Array(2), offset: new Uint32Array([0]) } },
+      scalars: { N: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+    expect([...actual.buffers.dp as Uint32Array]).toEqual([...expected.buffers.dp as Uint32Array]);
+  });
+
+  it("runs raw pointer pool allocation through WebGPU atomics", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(RAW_POOL_ALLOC, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        poolBase: new Float32Array(2),
+        offset: new Uint32Array([0]),
+      },
+      scalars: { poolSize: 8, N: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.poolBase as Float32Array]).toEqual([...expected.buffers.poolBase as Float32Array]);
+    expect([...actual.buffers.offset as Uint32Array]).toEqual([...expected.buffers.offset as Uint32Array]);
   });
 
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {

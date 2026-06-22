@@ -43,6 +43,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["tex2D", [3, 3]],
   ["surf2Dwrite", [4, 4]],
   ["sizeof", [1, 1]],
+  ["deviceAllocate", [2, 4]],
+  ["streamOrderedAllocate", [2, 4]],
   ["curand_init", [4, 4]],
   ["curand_uniform", [1, 1]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
@@ -102,7 +104,7 @@ interface Scope {
 }
 
 interface ExpressionInfo {
-  readonly kind: "scalar" | "complex" | "pointer" | "array" | "texture" | "surface" | "vector" | "function" | "address" | "string" | "unknown";
+  readonly kind: "scalar" | "complex" | "pool-pointer" | "pointer" | "array" | "texture" | "surface" | "vector" | "function" | "address" | "string" | "unknown";
   readonly valueType?: ValueType | undefined;
   readonly dimensions?: readonly number[] | undefined;
   readonly symbol?: SymbolInfo | undefined;
@@ -188,7 +190,7 @@ export function analyzeCudaLite(
         case "var":
           declareVar(statement, scope, names);
           if (statement.valueType === "half") requiredFeatures.add("shader-f16");
-          if (statement.pointer && !isSupportedSharedPointerAlias(statement, scope)) {
+          if (statement.pointer && !isSupportedLocalPointer(statement, scope)) {
             diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.span));
           }
           if (statement.storage === "local" && statement.dimensions.length > 0) {
@@ -271,7 +273,7 @@ export function analyzeCudaLite(
           if (statement.init?.kind === "var") {
             declareVar(statement.init, loopScope, loopNames);
             if (statement.init.valueType === "half") requiredFeatures.add("shader-f16");
-            if (statement.init.pointer && !isSupportedSharedPointerAlias(statement.init, loopScope)) {
+            if (statement.init.pointer && !isSupportedLocalPointer(statement.init, loopScope)) {
               diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.init.span));
             }
             if (statement.init.init) walkExpression(statement.init.init, loopScope);
@@ -484,6 +486,38 @@ function isSupportedSharedPointerAlias(statement: CudaLiteVarDecl, scope: Scope)
   return symbol?.kind === "shared" && symbol.valueType === statement.valueType;
 }
 
+function isSupportedLocalPointer(statement: CudaLiteVarDecl, scope: Scope): boolean {
+  if (isSupportedSharedPointerAlias(statement, scope)) return true;
+  if (!statement.pointer || statement.storage !== "local") return false;
+  return isSupportedPoolPointerInitializer(statement.init, scope);
+}
+
+function isSupportedPoolPointerInitializer(init: CudaLiteExpression | undefined, scope: Scope): boolean {
+  if (!init) return true;
+  if (init.kind === "identifier") {
+    if (init.name === "nullptr") return true;
+    const symbol = lookupSymbol(init.name, scope, init.span);
+    return symbol?.kind === "local" && symbol.pointer === true;
+  }
+  if (init.kind === "cast" && init.pointer) return isSupportedPoolPointerInitializer(init.expression, scope);
+  if (init.kind !== "call") return false;
+  const callName = expressionName(init.callee);
+  if (callName !== "deviceAllocate" && callName !== "streamOrderedAllocate") return false;
+  if (init.args.length === 4) {
+    const base = init.args[0];
+    const offset = init.args[1];
+    if (base?.kind !== "identifier" || offset?.kind !== "identifier") return false;
+    const baseSymbol = lookupSymbol(base.name, scope, base.span);
+    const offsetSymbol = lookupSymbol(offset.name, scope, offset.span);
+    return baseSymbol?.pointer === true && offsetSymbol?.pointer === true &&
+      (offsetSymbol.valueType === "uint" || offsetSymbol.valueType === "int");
+  }
+  const pool = init.args[0];
+  if (pool?.kind !== "identifier") return false;
+  const symbol = lookupSymbol(pool.name, scope, pool.span);
+  return symbol?.valueType === "devicepool" && symbol.pointer === true;
+}
+
 type ExpressionWalker = (expression: CudaLiteExpression, scope: Scope) => ExpressionInfo;
 
 function validateInlineAsmStatement(
@@ -593,6 +627,10 @@ function validateCallExpression(
   if (callName === "sizeof") {
     validateSizeof(expression, diagnostics);
     return { kind: "scalar", valueType: "uint" };
+  }
+  if (callName === "deviceAllocate" || callName === "streamOrderedAllocate") {
+    validatePoolAllocate(expression, scope, atomicParams, diagnostics, walkExpression);
+    return { kind: "scalar", valueType: "voidptr" };
   }
   if (callName === "curand_init") {
     validateCurandInit(expression, diagnostics, walkExpression, scope);
@@ -742,6 +780,58 @@ function validateSizeof(
   }
 }
 
+function validatePoolAllocate(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  scope: Scope,
+  atomicParams: Set<string>,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  if (expression.args.length === 4) {
+    validateRawPoolAllocate(expression, scope, atomicParams, diagnostics, walkExpression);
+    return;
+  }
+  const pool = expression.args[0];
+  if (pool?.kind !== "identifier") {
+    diagnostics.push(error("unsupported-device-pool", "device pool allocation expects DevicePool* as first argument", expression.span));
+  } else {
+    const symbol = lookupSymbol(pool.name, scope, pool.span);
+    if (symbol?.valueType !== "devicepool" || !symbol.pointer) {
+      diagnostics.push(error("unsupported-device-pool", `allocation target '${pool.name}' is not a DevicePool* parameter`, pool.span));
+    }
+  }
+  const size = expression.args[1];
+  if (size) validateScalarOperand(walkExpression(size, scope), size.span, diagnostics);
+}
+
+function validateRawPoolAllocate(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  scope: Scope,
+  atomicParams: Set<string>,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const base = expression.args[0];
+  const offset = expression.args[1];
+  if (base?.kind !== "identifier") {
+    diagnostics.push(error("unsupported-device-pool", "raw pool allocation expects pointer base as first argument", expression.span));
+  } else {
+    const symbol = lookupSymbol(base.name, scope, base.span);
+    if (!symbol?.pointer) diagnostics.push(error("unsupported-device-pool", `allocation base '${base.name}' is not a pointer`, base.span));
+  }
+  if (offset?.kind !== "identifier") {
+    diagnostics.push(error("unsupported-device-pool", "raw pool allocation expects size_t* offset as second argument", expression.span));
+  } else {
+    const symbol = lookupSymbol(offset.name, scope, offset.span);
+    if (!symbol?.pointer || (symbol.valueType !== "uint" && symbol.valueType !== "int")) {
+      diagnostics.push(error("unsupported-device-pool", `allocation offset '${offset.name}' is not an integer pointer`, offset.span));
+    } else {
+      atomicParams.add(offset.name);
+    }
+  }
+  for (const arg of expression.args.slice(2)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+}
+
 function validateCurandInit(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
   diagnostics: CudaLiteDiagnostic[],
@@ -870,6 +960,7 @@ function validateNonCallExpression(
     case "cast": {
       const info = walkExpression(expression.expression, scope);
       validateScalarOperand(info, expression.expression.span, diagnostics);
+      if (expression.pointer) return { kind: "pool-pointer", valueType: expression.valueType };
       return { kind: "scalar", valueType: expression.valueType };
     }
     case "member": {
@@ -896,6 +987,9 @@ function validateNonCallExpression(
         return target.valueType === "complex64"
           ? { kind: "complex", valueType: target.valueType, symbol: target.symbol }
           : { kind: "scalar", valueType: target.valueType, symbol: target.symbol };
+      }
+      if (target.kind === "pool-pointer") {
+        return { kind: "scalar", valueType: target.valueType };
       }
       if (target.kind === "array") {
         const dimensions = target.dimensions ?? [];
@@ -1010,6 +1104,7 @@ function expressionInfoForIdentifier(
   diagnostics: CudaLiteDiagnostic[],
 ): ExpressionInfo {
   const symbol = lookupSymbol(name, scope, span);
+  if (!symbol && name === "nullptr") return { kind: "scalar", valueType: "voidptr" };
   if (!symbol) {
     diagnostics.push(error("unknown-symbol", `unknown CUDA-lite symbol '${name}'`, span));
     return { kind: "unknown" };
@@ -1032,9 +1127,11 @@ function expressionInfoForIdentifier(
     };
   }
   if (symbol.kind === "param" && symbol.pointer) {
+    if (symbol.valueType === "devicepool") return { kind: "pool-pointer", valueType: "devicepool", symbol };
     return { kind: "pointer", valueType: symbol.valueType, symbol };
   }
   if (symbol.kind === "local" && symbol.pointer) {
+    if (symbol.valueType === "voidptr") return { kind: "scalar", valueType: "voidptr", symbol };
     return { kind: "pointer", valueType: symbol.valueType, symbol };
   }
   if (symbol.kind === "local" && symbol.valueType === "complex64") {
