@@ -16,6 +16,8 @@ for (let i = 2; i < process.argv.length; i++) {
 const runs = positiveInt(args.get("--runs"), 40);
 const warmup = positiveInt(args.get("--warmup"), 8);
 const markdownPath = args.get("--markdown");
+const medianMaxExpectations = parseBenchmarkThresholds(args.get("--expect-median-max"), "--expect-median-max");
+const p95MaxExpectations = parseBenchmarkThresholds(args.get("--expect-p95-max"), "--expect-p95-max");
 const root = findRepoRoot(process.cwd());
 const compilerUrl = pathToFileURL(path.join(root, "packages/browsergrad-compiler/dist/index.js")).href;
 const {
@@ -84,12 +86,17 @@ function main() {
   ];
 
   const measured = benchmarks.map((bench) => measure(bench.name, bench.fn, { runs, warmup }));
+  const thresholdChecks = [
+    ...assertBenchmarkThresholds(measured, "medianMs", medianMaxExpectations, "--expect-median-max"),
+    ...assertBenchmarkThresholds(measured, "p95Ms", p95MaxExpectations, "--expect-p95-max"),
+  ];
   const result = {
     tool: "browsergrad-cuda-lite-compiler-benchmark",
     node: process.version,
     runs,
     warmup,
     benchmarks: measured,
+    thresholdChecks,
   };
 
   console.log(JSON.stringify(result, null, 2));
@@ -131,6 +138,42 @@ function positiveInt(value, fallback) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function parseBenchmarkThresholds(value, flag) {
+  if (value === undefined || value === "true") return new Map();
+  const out = new Map();
+  for (const rawEntry of String(value).split(",")) {
+    const entry = rawEntry.trim();
+    if (entry.length === 0) continue;
+    const separator = entry.lastIndexOf("=");
+    if (separator <= 0 || separator === entry.length - 1) {
+      throw new Error(`${flag} expects comma-separated benchmark=maxMs entries`);
+    }
+    const name = entry.slice(0, separator);
+    const maxMs = Number(entry.slice(separator + 1));
+    if (!Number.isFinite(maxMs) || maxMs <= 0) {
+      throw new Error(`${flag} expects positive max ms for ${name}`);
+    }
+    out.set(name, maxMs);
+  }
+  return out;
+}
+
+function assertBenchmarkThresholds(benchmarks, metric, expectations, flag) {
+  const checks = [];
+  for (const [name, maxMs] of expectations) {
+    const benchmark = benchmarks.find((item) => item.name === name);
+    if (!benchmark) throw new Error(`${flag} unknown benchmark: ${name}`);
+    const actualMs = benchmark[metric];
+    if (typeof actualMs !== "number") throw new Error(`${flag} missing ${metric} for ${name}`);
+    const check = { name, metric, actualMs, maxMs, ok: actualMs <= maxMs };
+    checks.push(check);
+    if (!check.ok) {
+      throw new Error(`${flag} failed: ${name} ${metric} ${actualMs}ms > ${maxMs}ms`);
+    }
+  }
+  return checks;
+}
+
 function filledFloat32(length, value) {
   const out = new Float32Array(length);
   out.fill(value);
@@ -149,6 +192,13 @@ function markdownReport(data) {
   ];
   for (const bench of data.benchmarks) {
     lines.push(`| \`${bench.name}\` | ${bench.minMs} | ${bench.medianMs} | ${bench.p95Ms} | ${bench.maxMs} |`);
+  }
+  if ((data.thresholdChecks?.length ?? 0) > 0) {
+    lines.push("", "| Threshold | metric | actual ms | max ms | ok |");
+    lines.push("| --- | --- | ---: | ---: | --- |");
+    for (const check of data.thresholdChecks) {
+      lines.push(`| \`${check.name}\` | \`${check.metric}\` | ${check.actualMs} | ${check.maxMs} | \`${check.ok}\` |`);
+    }
   }
   lines.push("");
   return `${lines.join("\n")}\n`;

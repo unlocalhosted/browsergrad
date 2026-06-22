@@ -148,8 +148,10 @@ Performance gate:
 - Compiler/runtime perf is tracked by
   `pnpm --filter @unlocalhosted/browsergrad-compiler bench -- --markdown /tmp/bg-cuda-lite-bench.md`.
   It reports JSON plus optional markdown for compile hot paths, CPU reference
-  execution, host-lifted dynamic planning, and peer-copy planning. Treat the
-  numbers as regression evidence, not universal pass/fail thresholds.
+  execution, host-lifted dynamic planning, and peer-copy planning. Pinned
+  machines can add `--expect-median-max` or `--expect-p95-max` with
+  comma-separated `benchmark=ms` entries. Treat uncalibrated numbers as
+  regression evidence, not universal pass/fail thresholds.
 - Browser/WebGPU hot-loop perf should compare one-shot execution against
   `prepareCompiledKernelWebGpu()` over resident buffers. Keep this as measured
   evidence, not prose claims; no-readback prepared measurements should use

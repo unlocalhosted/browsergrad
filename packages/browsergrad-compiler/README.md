@@ -304,9 +304,12 @@ pnpm --filter @unlocalhosted/browsergrad-compiler bench:browser -- --markdown /t
 ```
 
 The harness emits stable JSON timing for compile, CPU reference, dynamic-launch
-planning, and peer-copy planning paths. It is data-only: no fixed threshold is
-portable across laptops, browsers, and CI runners. Use median/p95 deltas across
-commits to catch regressions before promoting platform perf rubrics.
+planning, and peer-copy planning paths. Use
+`--expect-median-max benchmark=ms[,benchmark=ms]` and
+`--expect-p95-max benchmark=ms[,benchmark=ms]` only on pinned machines; no fixed
+threshold is portable across laptops, browsers, and CI runners. Without
+threshold flags, use median/p95 deltas across commits to catch regressions
+before promoting platform perf rubrics.
 The browser harness launches Chromium through Playwright and compares one-shot
 resident-buffer dispatch against `prepareCompiledKernelWebGpu()` hot-loop
 dispatch. Pass `--require-webgpu` when CI should fail instead of reporting a
