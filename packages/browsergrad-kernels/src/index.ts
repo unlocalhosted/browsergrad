@@ -100,6 +100,7 @@ export {
   type WgslResidentBuffer,
   type WgslStorageAccess,
   type WgslStorageBindingInput,
+  type WgslStorageBufferMetadata,
   type WgslStorageBufferDescriptor,
   type WgslTexture2DBindingInput,
   type WgslTexture2DInput,

@@ -68,5 +68,5 @@
   host-lifted dynamic launches, raising the CUDA-120 WebGPU audit baseline to
   `240/240`.
 - Host-dynamic WebGPU plans now elide pure parent replay and seed host-planned
-  `DevicePool` offsets once, avoiding double allocation while preserving typed
-  pool readback.
+  `DevicePool` offsets once through generic storage metadata, avoiding double
+  allocation without adding a no-op anchor dispatch.

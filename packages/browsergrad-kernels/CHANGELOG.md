@@ -48,6 +48,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - WGSL sequences can bind the same storage buffer through multiple step-local
   value types, enabling byte-identical storage views for compiler-generated
   pool/data aliases.
+- `storageMetadata` lets generic WGSL callers declare canonical storage
+  readback types and byte-compatible aliases, including readback-only state
+  buffers that are not bound by any sequence step.
 
 ### Fixed
 

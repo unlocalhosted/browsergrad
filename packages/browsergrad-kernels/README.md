@@ -197,6 +197,25 @@ Use `stepUniforms` only when sequence steps need different values for the same
 uniform binding name. Use `awaitCompletion: true` for no-readback timing gates
 or platform watchdogs that need command completion, not only command submission.
 
+Use `storageMetadata` when one physical storage buffer is viewed through
+multiple WGSL value types, or when state needs readback even though no step binds
+it:
+
+```ts
+await runWgslKernelProgramSequence(
+  device,
+  [{ program, launch, storageAliases: { floats: "raw" } }],
+  {
+    buffers: { raw: new Uint32Array(1024), state: new Uint32Array([0]) },
+    storageMetadata: {
+      raw: { valueType: "u32", compatibleValueTypes: ["f32"] },
+      state: "u32",
+    },
+    readback: ["raw", "state"],
+  },
+);
+```
+
 ### Kernel rubric assertions
 
 ```ts

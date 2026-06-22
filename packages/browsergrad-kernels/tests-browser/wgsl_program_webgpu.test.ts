@@ -284,6 +284,58 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     expect([...new Float32Array(bytes)]).toEqual([2.5, 4.5, 6.5, 8.5]);
   });
 
+  it("uses storage metadata for canonical mixed-view readback", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const writeFloats = defineWgslKernelProgram({
+      name: "metadata_write_floats",
+      workgroupSize: [4, 1, 1],
+      bindings: [{ kind: "storage", name: "floats", valueType: "f32", access: "read_write", binding: 0 }],
+      wgsl: `
+@group(0) @binding(0) var<storage, read_write> floats: array<f32>;
+@compute @workgroup_size(4, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < arrayLength(&floats)) { floats[gid.x] = f32(gid.x) + 1.5; }
+}`,
+    });
+
+    const result = await runWgslKernelProgramSequence(
+      device,
+      [{ program: writeFloats, launch: { dispatchCount: [4, 1, 1] }, storageAliases: { floats: "raw" } }],
+      {
+        buffers: { raw: new Uint32Array(4) },
+        storageMetadata: { raw: { valueType: "u32", compatibleValueTypes: ["f32"] } },
+        readback: ["raw"],
+      },
+    );
+
+    expect(result.buffers.raw).toBeInstanceOf(Uint32Array);
+    expect([...new Float32Array((result.buffers.raw as Uint32Array).buffer)]).toEqual([1.5, 2.5, 3.5, 4.5]);
+  });
+
+  it("reads storage-metadata-only buffers without a WGSL binding", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const noBindings = defineWgslKernelProgram({
+      name: "metadata_no_bindings",
+      workgroupSize: [1, 1, 1],
+      bindings: [],
+      wgsl: "@compute @workgroup_size(1, 1, 1) fn main() {}",
+    });
+
+    const result = await runWgslKernelProgramSequence(
+      device,
+      [{ program: noBindings, launch: { dispatchCount: [1, 1, 1] } }],
+      {
+        buffers: { state: new Uint32Array([7, 11]) },
+        storageMetadata: { state: "u32" },
+        readback: ["state"],
+      },
+    );
+
+    expect([...result.buffers.state as Uint32Array]).toEqual([7, 11]);
+  });
+
   it("runs over caller-owned resident GPU buffers without forced readback", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

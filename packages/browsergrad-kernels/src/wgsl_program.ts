@@ -69,6 +69,11 @@ export type WgslKernelBinding =
 type WgslStorageBinding = Extract<WgslKernelBinding, { readonly kind: "storage" }>;
 type CollectedWgslStorageBinding = WgslStorageBinding & { readonly valueTypes: readonly WgslValueType[] };
 
+export interface WgslStorageBufferMetadata {
+  readonly valueType: WgslValueType;
+  readonly compatibleValueTypes?: readonly WgslValueType[];
+}
+
 export interface WgslKernelProgramInput {
   readonly name: string;
   readonly wgsl: string;
@@ -86,6 +91,7 @@ export interface WgslKernelProgram {
 export interface WgslKernelRunInput {
   readonly buffers: Readonly<Record<string, WgslTypedArray>>;
   readonly residentBuffers?: Readonly<Record<string, WgslResidentBuffer>>;
+  readonly storageMetadata?: Readonly<Record<string, WgslStorageBufferMetadata | WgslValueType>>;
   readonly textures?: Readonly<Record<string, WgslTexture2DInput>>;
   readonly uniforms?: Readonly<Record<string, ArrayBuffer | ArrayBufferView>>;
   readonly readback?: readonly string[];
@@ -362,7 +368,7 @@ export async function prepareWgslKernelProgramSequence(
   const textureViewsByName = new Map<string, GPUTextureView>();
 
   try {
-    for (const binding of collectStorageBindings(steps)) {
+    for (const binding of collectStorageBindings(steps, input.storageMetadata)) {
       const resident = input.residentBuffers?.[binding.name];
       const data = input.buffers[binding.name];
       if (resident && data) {
@@ -637,7 +643,10 @@ function paddedBytesForUniformWrite(
   return padded;
 }
 
-function collectStorageBindings(steps: readonly WgslKernelSequenceStep[]): readonly CollectedWgslStorageBinding[] {
+function collectStorageBindings(
+  steps: readonly WgslKernelSequenceStep[],
+  storageMetadata: WgslKernelRunInput["storageMetadata"],
+): readonly CollectedWgslStorageBinding[] {
   const byName = new Map<string, CollectedWgslStorageBinding>();
   for (const step of steps) {
     for (const binding of step.program.bindings) {
@@ -655,7 +664,44 @@ function collectStorageBindings(steps: readonly WgslKernelSequenceStep[]): reado
       });
     }
   }
+  for (const [name, rawMetadata] of Object.entries(storageMetadata ?? {})) {
+    validateIdentifier(name, `storageMetadata.${name}`);
+    const metadata = normalizeStorageMetadata(rawMetadata, name);
+    const valueTypes = uniqueValueTypes([metadata.valueType, ...(metadata.compatibleValueTypes ?? [])]);
+    const existing = byName.get(name);
+    if (!existing) {
+      byName.set(name, {
+        kind: "storage",
+        name,
+        valueType: metadata.valueType,
+        access: "read_write",
+        binding: 0,
+        valueTypes,
+      });
+      continue;
+    }
+    byName.set(name, {
+      ...existing,
+      valueType: metadata.valueType,
+      valueTypes: uniqueValueTypes([...existing.valueTypes, ...valueTypes]),
+    });
+  }
   return [...byName.values()];
+}
+
+function normalizeStorageMetadata(
+  raw: WgslStorageBufferMetadata | WgslValueType,
+  name: string,
+): WgslStorageBufferMetadata {
+  if (typeof raw === "string") {
+    validateValueType(raw, `storageMetadata.${name}.valueType`);
+    return { valueType: raw };
+  }
+  validateValueType(raw.valueType, `storageMetadata.${name}.valueType`);
+  for (const valueType of raw.compatibleValueTypes ?? []) {
+    validateValueType(valueType, `storageMetadata.${name}.compatibleValueTypes`);
+  }
+  return raw;
 }
 
 function storageBufferNameForStep(step: WgslKernelSequenceStep, bindingName: string): string {

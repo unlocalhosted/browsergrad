@@ -1590,8 +1590,10 @@ __global__ void parent(DevicePool *pool, int n) {
       kind: "host-dynamic-launch",
     });
     if (executionPlan.supported) {
-      expect(executionPlan.steps).toHaveLength(2);
+      expect(executionPlan.steps).toHaveLength(1);
       expect([...executionPlan.input.buffers.pool_offset as Uint32Array]).toEqual([8]);
+      expect(executionPlan.input.storageMetadata?.pool_pool).toEqual({ valueType: "u32", compatibleValueTypes: ["f32", "i32"] });
+      expect(executionPlan.input.storageMetadata?.pool_offset).toEqual({ valueType: "u32" });
     }
   });
 
@@ -1632,8 +1634,10 @@ __global__ void parent(DevicePool *pool, int n) {
       kind: "host-dynamic-launch",
     });
     if (executionPlan.supported) {
-      expect(executionPlan.steps).toHaveLength(5);
+      expect(executionPlan.steps).toHaveLength(4);
       expect([...executionPlan.input.buffers.pool_offset as Uint32Array]).toEqual([32]);
+      expect(executionPlan.input.storageMetadata?.pool_pool).toEqual({ valueType: "u32", compatibleValueTypes: ["f32", "i32"] });
+      expect(executionPlan.input.storageMetadata?.pool_offset).toEqual({ valueType: "u32" });
     }
 
     const result = runCompiledKernelReference(compiled, input, launch);

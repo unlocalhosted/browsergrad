@@ -1,10 +1,10 @@
 import {
   defineWgslKernelProgram,
-  type WgslKernelBindingInput,
   type WgslKernelProgram,
   type WgslKernelRunInput,
   type WgslKernelSequenceStep,
   type WgslResidentBuffer,
+  type WgslStorageBufferMetadata,
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames } from "./ast_queries.js";
@@ -70,7 +70,6 @@ export interface CudaWebGpuExecutionPlanOptions {
 }
 
 const peerCopyProgramCache = new Map<CudaPeerCopyOperation["valueType"], WgslKernelProgram>();
-const hostDynamicPoolAnchorCache = new Map<string, WgslKernelProgram>();
 const DEFAULT_MAX_HOST_DYNAMIC_LAUNCH_DEPTH = 8;
 const HOST_SIDE_EFFECT_FREE_CALLS = new Set([
   "cudaDeviceSynchronize",
@@ -278,11 +277,6 @@ function createHostLiftedDynamicWebGpuPlan(
       launch: { dispatchCount: dispatchCountForLaunch(launch) },
       ...(parentInput.uniforms === undefined ? {} : { uniforms: parentInput.uniforms }),
     });
-  } else if (Object.keys(poolOffsetUpdates).length > 0) {
-    steps.push({
-      program: defineHostDynamicPoolAnchorProgram(Object.keys(poolOffsetUpdates)),
-      launch: { dispatchCount: [1, 1, 1] },
-    });
   }
   const childCompileCache = new Map<string, CompiledCudaLiteKernel>();
 
@@ -325,37 +319,11 @@ function createHostLiftedDynamicWebGpuPlan(
     input: {
       buffers,
       ...(Object.keys(residentBuffers).length === 0 ? {} : { residentBuffers }),
+      ...(parentInput.storageMetadata === undefined ? {} : { storageMetadata: parentInput.storageMetadata }),
       ...(parentInput.textures === undefined ? {} : { textures: parentInput.textures }),
       ...(parentInput.readback === undefined ? {} : { readback: parentInput.readback }),
     },
   };
-}
-
-function defineHostDynamicPoolAnchorProgram(poolNames: readonly string[]): WgslKernelProgram {
-  const names = [...poolNames].sort();
-  const key = names.join("\0");
-  const cached = hostDynamicPoolAnchorCache.get(key);
-  if (cached) return cached;
-  const bindings = names.flatMap((name, index): WgslKernelBindingInput[] => [
-    { kind: "storage", name: poolDataName(name), valueType: "u32", access: "read_write", binding: index * 2 },
-    { kind: "storage", name: poolOffsetName(name), valueType: "u32", access: "read_write", binding: index * 2 + 1 },
-  ]);
-  const declarations = bindings.map((binding) => (
-    `@group(0) @binding(${binding.binding}) var<storage, read_write> ${binding.name}: array<u32>;`
-  ));
-  const program = defineWgslKernelProgram({
-    name: `bg_host_dynamic_pool_anchor_${names.join("_")}`,
-    bindings,
-    workgroupSize: [1, 1, 1],
-    wgsl: [
-      ...declarations,
-      "@compute @workgroup_size(1, 1, 1)",
-      "fn main() {",
-      "}",
-    ].join("\n"),
-  });
-  hostDynamicPoolAnchorCache.set(key, program);
-  return program;
 }
 
 function applyHostDynamicPoolOffsetUpdates(
@@ -679,6 +647,7 @@ function createWgslRunInput(
     ...memoryPoolBufferInputs(compiled, input),
     ...constantBufferInputs(compiled, input),
   };
+  const storageMetadata = memoryPoolStorageMetadata(compiled);
   const readback = input.readback === undefined
     ? [
       ...compiled.ir.params
@@ -690,6 +659,7 @@ function createWgslRunInput(
   return {
     buffers,
     ...(input.residentBuffers === undefined ? {} : { residentBuffers: input.residentBuffers }),
+    ...(Object.keys(storageMetadata).length === 0 ? {} : { storageMetadata }),
     ...(input.textures === undefined ? {} : { textures: input.textures }),
     ...(uniforms.byteLength === 0 ? {} : { uniforms: { params: uniforms } }),
     readback,
@@ -797,10 +767,7 @@ function memoryPoolBufferInputs(
   input: CompiledKernelInput,
 ): Record<string, WgslTypedArray> {
   const out: Record<string, WgslTypedArray> = {};
-  for (const pool of [
-    ...compiled.ir.params.filter(isDevicePoolParam).map((param) => ({ name: param.name, span: param.span })),
-    ...collectExternalDevicePoolNames(compiled.ir.body).map((name) => ({ name, span: compiled.ir.body[0]?.span ?? compiled.ir.params[0]?.span ?? { start: 0, end: 0, line: 1, column: 1 } })),
-  ]) {
+  for (const pool of memoryPoolDescriptors(compiled)) {
     const value = input.memoryPools?.[pool.name];
     if (!value) {
       throw new CudaLiteCompilerError(`missing memory pool input '${pool.name}'`, [{
@@ -831,6 +798,27 @@ function memoryPoolBufferInputs(
     out[poolOffsetName(pool.name)] = offset;
   }
   return out;
+}
+
+function memoryPoolStorageMetadata(
+  compiled: CompiledCudaLiteKernel,
+): Record<string, WgslStorageBufferMetadata> {
+  const out: Record<string, WgslStorageBufferMetadata> = {};
+  for (const pool of memoryPoolDescriptors(compiled)) {
+    out[poolDataName(pool.name)] = { valueType: "u32", compatibleValueTypes: ["f32", "i32"] };
+    out[poolOffsetName(pool.name)] = { valueType: "u32" };
+  }
+  return out;
+}
+
+function memoryPoolDescriptors(compiled: CompiledCudaLiteKernel): Array<{ readonly name: string; readonly span: CudaLiteDiagnostic["span"] }> {
+  return [
+    ...compiled.ir.params.filter(isDevicePoolParam).map((param) => ({ name: param.name, span: param.span })),
+    ...collectExternalDevicePoolNames(compiled.ir.body).map((name) => ({
+      name,
+      span: compiled.ir.body[0]?.span ?? compiled.ir.params[0]?.span ?? { start: 0, end: 0, line: 1, column: 1 },
+    })),
+  ];
 }
 
 function constantBufferInputs(
