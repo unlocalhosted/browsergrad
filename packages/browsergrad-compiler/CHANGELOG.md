@@ -41,3 +41,5 @@
   rejection when scalar changes alter plan topology.
 - Host-lifted peer-copy planning now supports resident GPU buffers and rejects
   copies that exceed source or destination capacity before dispatch.
+- CUDA corpus audit now skips placeholder identifiers such as `someCount`, so
+  pseudocode no longer counts as a hard compiler failure.

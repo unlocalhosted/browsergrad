@@ -303,7 +303,9 @@ function extractKernelDefinitions(source) {
 
 function isPlaceholderKernel(kernel) {
   const signature = kernel.slice(0, kernel.indexOf("{"));
-  return /\(\s*\.\.\.\s*\)/u.test(signature) || /\?\?\?/u.test(kernel);
+  return /\(\s*\.\.\.\s*\)/u.test(signature) ||
+    /\?\?\?/u.test(kernel) ||
+    /\bsome[A-Z][A-Za-z0-9_]*\b/u.test(stripComments(kernel));
 }
 
 function collectScalarDeviceFunctions(source) {

@@ -47,7 +47,7 @@
     "bench": "pnpm run build && node ../../scripts/benchmark-cuda-lite-compiler.mjs",
     "bench:browser": "pnpm run build && node ../../scripts/benchmark-cuda-lite-webgpu.mjs",
     "audit:corpus": "pnpm run build && node ../../scripts/audit-cuda-lite-corpus.mjs",
-    "audit:cuda-120": "pnpm run build && node ../../scripts/audit-cuda-lite-corpus.mjs /tmp/CUDA-120-DAYS--CHALLENGE --expect-total 243 --expect-ok-min 225 --expect-webgpu-min 235 --expect-reference-only-max 7 --expect-hard-fail-max 1",
+    "audit:cuda-120": "pnpm run build && node ../../scripts/audit-cuda-lite-corpus.mjs /tmp/CUDA-120-DAYS--CHALLENGE --expect-total 242 --expect-ok-min 225 --expect-webgpu-min 235 --expect-reference-only-max 7 --expect-hard-fail-max 0",
     "test:watch": "vitest",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:browser:open": "vitest --config vitest.browser.config.ts --watch --browser.headless=false",
