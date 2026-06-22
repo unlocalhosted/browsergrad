@@ -295,7 +295,7 @@ describe("real WebGPU — CUDA-lite compiler", () => {
     }
   });
 
-  it("rejects prepared scalar updates for host-orchestrated dynamic plans", async () => {
+  it("rejects prepared scalar updates that change host-orchestrated topology", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();
     const source = `
@@ -329,7 +329,7 @@ __global__ void parent(float *x, int n) {
     try {
       await expect(prepared.run({ scalars: { n: 1 } })).rejects.toMatchObject({
         diagnostics: [{
-          code: "prepared-scalar-update-unsupported",
+          code: "prepared-scalar-update-topology-changed",
         }],
       });
     } finally {
@@ -552,6 +552,46 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
     expect([...actual.buffers.dst as Float32Array]).toEqual([...expected.buffers.dst as Float32Array]);
   });
 
+  it("updates prepared host-lifted peer-copy scalar uniforms when topology is fixed", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void peerCopy(float *dst, const float *src, float a) {
+  if (threadIdx.x == 0) {
+    dst[0] = a;
+    cudaMemcpyPeerAsync(dst + 1, 1, src, 0, sizeof(float) * 2, 0);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const prepared = await prepareCompiledKernelWebGpu(
+      await createDevice(),
+      compiled,
+      {
+        buffers: {
+          dst: new Float32Array([0, 0, 0, 0]),
+          src: new Float32Array([2.5, 3.5]),
+        },
+        scalars: { a: 5 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    try {
+      expect(prepared.kind).toBe("host-peer-copy");
+      expect(prepared.stepCount).toBe(2);
+
+      const first = await prepared.run({ readback: ["dst"] });
+      expect([...first.buffers.dst as Float32Array]).toEqual([5, 2.5, 3.5, 0]);
+
+      const second = await prepared.run({ scalars: { a: 7 }, readback: ["dst"] });
+      expect([...second.buffers.dst as Float32Array]).toEqual([7, 2.5, 3.5, 0]);
+    } finally {
+      prepared.destroy();
+    }
+  });
+
   it("runs host-lifted dynamic child launch through WebGPU sequence", async () => {
     if (!deviceCheck.available) return;
     const source = `
@@ -639,7 +679,7 @@ __global__ void child(float *dst, int n) {
 __global__ void parent(float *x, int n) {
   if (threadIdx.x < 1) {
     dim3 grid(1);
-    dim3 block(n);
+    dim3 block(2);
     child<<<grid, block>>>(x, n);
     cudaDeviceSynchronize();
   }
@@ -676,8 +716,8 @@ __global__ void parent(float *x, int n) {
       expect([...firstReadback as Float32Array]).toEqual([2, 3]);
 
       writeWgslStorageBuffer(device, x, new Float32Array([4, 5]));
-      const second = await prepared.run({ readback: ["x"], awaitCompletion: true });
-      expect([...second.buffers.x as Float32Array]).toEqual([5, 6]);
+      const second = await prepared.run({ scalars: { n: 1 }, readback: ["x"], awaitCompletion: true });
+      expect([...second.buffers.x as Float32Array]).toEqual([5, 5]);
     } finally {
       prepared.destroy();
       destroyWgslStorageBuffer(x);

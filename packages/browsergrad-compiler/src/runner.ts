@@ -11,6 +11,7 @@ import { parseCudaLite } from "./parser.js";
 import { runCompiledKernelReference } from "./reference.js";
 import { emitKernelIrWgsl } from "./wgsl.js";
 import {
+  type CudaWebGpuExecutionPlan,
   createCudaWebGpuExecutionPlan,
   normalizeCudaWebGpuReadback,
   normalizeCudaWebGpuReadbackNames,
@@ -26,6 +27,8 @@ import {
   type ReferenceKernelResult,
 } from "./types.js";
 import { formatCudaLiteDiagnostics } from "./diagnostics.js";
+
+type SupportedCudaWebGpuExecutionPlan = Extract<CudaWebGpuExecutionPlan, { readonly supported: true }>;
 
 export interface PreparedCompiledKernelWebGpuRunOptions {
   readonly readback?: readonly string[];
@@ -115,7 +118,7 @@ export async function prepareCompiledKernelWebGpu(
     executionPlan.steps,
     executionPlan.input,
   );
-  return new PreparedCompiledKernelWebGpuImpl(compiled, executionPlan.kind, input, prepared);
+  return new PreparedCompiledKernelWebGpuImpl(compiled, executionPlan.kind, input, launch, executionPlan, prepared);
 }
 
 class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
@@ -126,6 +129,8 @@ class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
     private readonly compiled: CompiledCudaLiteKernel,
     readonly kind: PreparedCompiledKernelWebGpu["kind"],
     private readonly input: CompiledKernelInput,
+    private readonly launch: KernelLaunch,
+    private readonly executionPlan: SupportedCudaWebGpuExecutionPlan,
     private readonly prepared: WgslPreparedKernelSequence,
   ) {
     this.stepCount = prepared.stepCount;
@@ -140,7 +145,7 @@ class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
         span: { start: 0, end: 0, line: 1, column: 1 },
       }]);
     }
-    const result = await this.prepared.run(normalizePreparedRunOptions(this.compiled, this.kind, this.input, options));
+    const result = await this.prepared.run(normalizePreparedRunOptions(this.compiled, this.input, this.launch, this.executionPlan, options));
     return { buffers: normalizeCudaWebGpuReadback(this.compiled, result.buffers), trace: [] };
   }
 
@@ -153,8 +158,9 @@ class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
 
 function normalizePreparedRunOptions(
   compiled: CompiledCudaLiteKernel,
-  kind: CudaWebGpuExecutionPlanKind,
   input: CompiledKernelInput,
+  launch: KernelLaunch,
+  initialPlan: SupportedCudaWebGpuExecutionPlan,
   options: PreparedCompiledKernelWebGpuRunOptions | undefined,
 ): WgslPreparedKernelSequenceRunOptions | undefined {
   if (!options) return undefined;
@@ -162,29 +168,98 @@ function normalizePreparedRunOptions(
     readback?: readonly string[];
     awaitCompletion?: boolean;
     uniforms?: Readonly<Record<string, ArrayBuffer | ArrayBufferView>>;
+    stepUniforms?: Readonly<Record<number, Readonly<Record<string, ArrayBuffer | ArrayBufferView>>>>;
   } = {};
   if (options.readback !== undefined) {
     out.readback = normalizeCudaWebGpuReadbackNames(compiled, options.readback);
   }
   if (options.awaitCompletion !== undefined) out.awaitCompletion = options.awaitCompletion;
   if (options.scalars !== undefined) {
-    if (kind === "host-dynamic-launch" || kind === "host-peer-copy") {
-      throw new CudaLiteCompilerError("prepared scalar updates are not supported for host-orchestrated WebGPU plans yet", [{
-        code: "prepared-scalar-update-unsupported",
-        severity: "error",
-        message: "prepared scalar updates are not supported for host-orchestrated WebGPU plans yet",
-        span: { start: 0, end: 0, line: 1, column: 1 },
-      }]);
-    }
-    const uniforms = packCudaWebGpuUniformParams(compiled, {
+    const nextInput = {
       ...input,
       scalars: { ...input.scalars, ...options.scalars },
-    });
-    if (uniforms.byteLength > 0) {
-      out.uniforms = { params: uniforms };
+    };
+    if (initialPlan.kind === "single-dispatch" || initialPlan.kind === "grid-sync-phases") {
+      const uniforms = packCudaWebGpuUniformParams(compiled, nextInput);
+      if (uniforms.byteLength > 0) out.uniforms = { params: uniforms };
+      return out;
     }
+    const nextPlan = createCudaWebGpuExecutionPlan(compiled, nextInput, launch, {
+      compileKernel: compileCudaLiteKernel,
+    });
+    if (!nextPlan.supported) throw new CudaLiteCompilerError(nextPlan.reason, nextPlan.diagnostics);
+    validatePreparedPlanTopology(initialPlan, nextPlan);
+    const stepUniforms = stepUniformUpdatesForPlan(nextPlan);
+    if (Object.keys(stepUniforms).length > 0) out.stepUniforms = stepUniforms;
   }
   return out;
+}
+
+function validatePreparedPlanTopology(
+  initialPlan: SupportedCudaWebGpuExecutionPlan,
+  nextPlan: SupportedCudaWebGpuExecutionPlan,
+): void {
+  if (initialPlan.kind !== nextPlan.kind) {
+    throwPreparedTopologyChanged("prepared scalar update changed WebGPU execution plan kind");
+  }
+  if (initialPlan.steps.length !== nextPlan.steps.length) {
+    throwPreparedTopologyChanged("prepared scalar update changed WebGPU step count");
+  }
+  for (let i = 0; i < initialPlan.steps.length; i++) {
+    const initial = initialPlan.steps[i]!;
+    const next = nextPlan.steps[i]!;
+    if (!sameTuple(initial.launch.dispatchCount, next.launch.dispatchCount)) {
+      throwPreparedTopologyChanged(`prepared scalar update changed dispatch count for step ${i}`);
+    }
+    if (!sameRecord(initial.storageAliases, next.storageAliases)) {
+      throwPreparedTopologyChanged(`prepared scalar update changed storage aliases for step ${i}`);
+    }
+    if (programTopologyKey(initial.program) !== programTopologyKey(next.program)) {
+      throwPreparedTopologyChanged(`prepared scalar update changed WGSL program topology for step ${i}`);
+    }
+  }
+}
+
+function stepUniformUpdatesForPlan(
+  plan: SupportedCudaWebGpuExecutionPlan,
+): Record<number, Readonly<Record<string, ArrayBuffer | ArrayBufferView>>> {
+  const updates: Record<number, Readonly<Record<string, ArrayBuffer | ArrayBufferView>>> = {};
+  for (let i = 0; i < plan.steps.length; i++) {
+    const uniforms = plan.steps[i]?.uniforms;
+    if (uniforms && Object.keys(uniforms).length > 0) updates[i] = uniforms;
+  }
+  return updates;
+}
+
+function programTopologyKey(program: SupportedCudaWebGpuExecutionPlan["steps"][number]["program"]): string {
+  return JSON.stringify({
+    name: program.name,
+    wgsl: program.wgsl,
+    bindings: program.bindings,
+    workgroupSize: program.workgroupSize,
+  });
+}
+
+function sameTuple(left: readonly [number, number, number], right: readonly [number, number, number]): boolean {
+  return left[0] === right[0] && left[1] === right[1] && left[2] === right[2];
+}
+
+function sameRecord(
+  left: Readonly<Record<string, string>> | undefined,
+  right: Readonly<Record<string, string>> | undefined,
+): boolean {
+  const leftEntries = Object.entries(left ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  const rightEntries = Object.entries(right ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  return JSON.stringify(leftEntries) === JSON.stringify(rightEntries);
+}
+
+function throwPreparedTopologyChanged(message: string): never {
+  throw new CudaLiteCompilerError(message, [{
+    code: "prepared-scalar-update-topology-changed",
+    severity: "error",
+    message,
+    span: { start: 0, end: 0, line: 1, column: 1 },
+  }]);
 }
 
 function validateLaunch(launch: KernelLaunch, workgroupSize: readonly [number, number, number]): void {

@@ -37,7 +37,8 @@ Public APIs:
   duplicating runner heuristics.
 - `prepareCompiledKernelWebGpu(device, compiled, input, launch)` prepares the
   same executable WebGPU plan once and reruns it over resident buffers. Use it
-  for hot loops with fixed launch shape, scalar params, and bindings.
+  for hot loops with fixed launch shape and bindings; scalar params can change
+  when the execution-plan topology stays identical.
 - `normalizeCudaWebGpuReadbackNames(compiled, names)` maps logical compiler
   readback names, such as `DevicePool* dp` -> `dp`, to internal WGSL storage
   bindings. Platform code should not depend on backing buffer names.
@@ -72,10 +73,12 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
   execution sequences resident: `residentBuffers` avoids upload/readback churn,
   and prepared compiler/WebGPU runners avoid rebuilding pipelines and bind
   groups between iterations. Prepared single-dispatch and grid-sync phase plans
-  can also update scalar params without reprepare. No-readback prepared runs can
-  opt into `awaitCompletion: true` when timing gates or watchdogs need real GPU
-  completion instead of JS command submission. Host-orchestrated dynamic launch /
-  peer-copy plans keep scalar params fixed for now.
+  can update scalar params without reprepare. Host-orchestrated dynamic launch /
+  peer-copy plans can also update scalar params when step count, dispatch counts,
+  aliases, and WGSL programs remain unchanged; topology-changing updates fail
+  before dispatch. No-readback prepared runs can opt into `awaitCompletion: true`
+  when timing gates or watchdogs need real GPU completion instead of JS command
+  submission.
 - Device-side launches now parse into IR and can run in CPU reference when
   `referenceDynamicParallelism` is enabled. WebGPU can host-lift conservative
   child launches into a multi-dispatch sequence when the parent launch has one

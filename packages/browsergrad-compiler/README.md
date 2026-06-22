@@ -92,11 +92,12 @@ await prepared.run({ scalars: { a: 4 }, readback: [], awaitCompletion: true });
 prepared.destroy();
 ```
 
-Prepared scalar updates are supported for single-dispatch and grid-sync phase
-plans. Host-orchestrated dynamic launch / peer-copy plans keep scalar params
-fixed until step-specific compiler uniform updates are added. Use
-`awaitCompletion: true` when a no-readback hot loop must measure GPU completion
-instead of JS command submission.
+Prepared scalar updates are supported when the WebGPU plan topology remains
+fixed. That includes host-orchestrated dynamic launch / peer-copy plans whose
+step count, dispatch counts, storage aliases, and WGSL programs do not change.
+Topology-changing scalar updates fail with a deterministic compiler diagnostic.
+Use `awaitCompletion: true` when a no-readback hot loop must measure GPU
+completion instead of JS command submission.
 
 ## CUDA Memory Pools
 

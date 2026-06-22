@@ -36,3 +36,6 @@
   prepared-dispatch ratio thresholds for machine-local perf gates.
 - Fixed thread-local arrays now run through CPU reference and WGSL/WebGPU
   lowering.
+- Prepared compiler scalar updates now support fixed-topology host-dynamic and
+  host-peer-copy plans through per-step uniform updates, with deterministic
+  rejection when scalar changes alter plan topology.

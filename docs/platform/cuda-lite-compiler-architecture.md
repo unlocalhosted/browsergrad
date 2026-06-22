@@ -126,6 +126,9 @@ Hot-loop rules:
 - Use prepared WGSL sequences to avoid pipeline/bind-group rebuilds.
 - Use scalar uniform updates only when launch shape and binding topology remain
   fixed.
+- For host-orchestrated prepared plans, replan scalar updates and compare
+  topology before writing per-step uniforms. Never mutate prepared dispatch
+  counts or aliases implicitly.
 - Use `awaitCompletion: true` for no-readback timing and watchdog gates.
 
 ## Compatibility Growth
