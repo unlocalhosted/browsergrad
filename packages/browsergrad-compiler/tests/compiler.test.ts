@@ -201,6 +201,19 @@ __global__ void bad(float* x) {
   if (blockIdx.x < 1) { x[0] = threadIdx; }
 }`));
     expect(builtinShadow.diagnostics.map((diagnostic) => diagnostic.code)).toContain("reserved-symbol");
+
+    const sideEffectCondition = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(float* x, int n) {
+  if ((n = 1) < 2) { x[0] = 1.0; }
+}`));
+    expect(sideEffectCondition.diagnostics.map((diagnostic) => diagnostic.code)).toContain("side-effect-expression");
+
+    const sideEffectRhs = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(float* x) {
+  int i = 0;
+  if (threadIdx.x < 1) { x[0] = i++; }
+}`));
+    expect(sideEffectRhs.diagnostics.map((diagnostic) => diagnostic.code)).toContain("side-effect-expression");
   });
 
   it("rejects parser edge cases with clear errors", () => {

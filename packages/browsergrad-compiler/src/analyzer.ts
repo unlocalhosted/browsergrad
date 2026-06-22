@@ -157,6 +157,7 @@ export function analyzeCudaLite(
             }
           }
           if (statement.init) walkExpression(statement.init, scope);
+          if (statement.init) validateSideEffectPlacement(statement.init, false, diagnostics);
           break;
         case "expr":
           if (isBarrierCall(statement.expression)) {
@@ -166,11 +167,13 @@ export function analyzeCudaLite(
             }
             break;
           } else {
+            validateSideEffectPlacement(statement.expression, true, diagnostics);
             validateExpressionStatement(statement.expression, params, guardDepth, diagnostics);
           }
           walkExpression(statement.expression, scope);
           break;
         case "if": {
+          validateSideEffectPlacement(statement.condition, false, diagnostics);
           walkExpression(statement.condition, scope);
           const divergent = expressionIsDivergent(statement.condition, params);
           walkStatements(statement.consequent, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth);
@@ -185,10 +188,14 @@ export function analyzeCudaLite(
             declareVar(statement.init, loopScope);
             if (statement.init.valueType === "half") requiredFeatures.add("shader-f16");
             if (statement.init.init) walkExpression(statement.init.init, loopScope);
+            if (statement.init.init) validateSideEffectPlacement(statement.init.init, false, diagnostics);
           } else if (statement.init) {
+            validateSideEffectPlacement(statement.init, true, diagnostics);
             walkExpression(statement.init, loopScope);
           }
+          if (statement.condition) validateSideEffectPlacement(statement.condition, false, diagnostics);
           if (statement.condition) walkExpression(statement.condition, loopScope);
+          if (statement.update) validateSideEffectPlacement(statement.update, true, diagnostics);
           if (statement.update) walkExpression(statement.update, loopScope);
           const divergent = statement.condition ? expressionIsDivergent(statement.condition, params) : false;
           walkStatements(statement.body, loopScope, guardDepth, divergent ? divergentDepth + 1 : divergentDepth);
@@ -535,6 +542,26 @@ function validateDeclaredSymbolName(
   if (WGSL_RESERVED_WORDS.has(name)) {
     diagnostics.push(error("reserved-symbol", `symbol '${name}' is reserved by WGSL output`, span));
   }
+}
+
+function validateSideEffectPlacement(
+  expression: CudaLiteExpression,
+  allowRootSideEffect: boolean,
+  diagnostics: CudaLiteDiagnostic[],
+): void {
+  const visit = (node: CudaLiteExpression, root: boolean): void => {
+    if ((node.kind === "assignment" || node.kind === "update") && !(allowRootSideEffect && root)) {
+      diagnostics.push(error(
+        "side-effect-expression",
+        "assignments and ++/-- must be standalone statements or for-loop clauses",
+        node.span,
+      ));
+    }
+    forEachExpressionChild(node, (child) => {
+      visit(child, false);
+    });
+  };
+  visit(expression, true);
 }
 
 function validateBarrierStatement(
