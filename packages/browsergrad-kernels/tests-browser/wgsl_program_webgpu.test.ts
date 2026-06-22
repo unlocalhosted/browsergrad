@@ -7,6 +7,7 @@ import {
   readWgslStorageBuffer,
   runWgslKernelProgram,
   runWgslKernelProgramSequence,
+  writeWgslStorageBuffer,
 } from "../src/index";
 
 interface DeviceCheck {
@@ -297,6 +298,51 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     } finally {
       destroyWgslStorageBuffer(x);
       destroyWgslStorageBuffer(y);
+    }
+  });
+
+  it("rewrites resident GPU buffers in place between dispatches", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const program = defineWgslKernelProgram({
+      name: "resident_scale",
+      workgroupSize: [4, 1, 1],
+      bindings: [{ kind: "storage", name: "x", valueType: "f32", access: "read_write" }],
+      wgsl: `
+@group(0) @binding(0) var<storage, read_write> x: array<f32>;
+@compute @workgroup_size(4, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < arrayLength(&x)) { x[gid.x] = x[gid.x] * 2.0; }
+}`,
+    });
+    const x = createWgslStorageBuffer(device, {
+      valueType: "f32",
+      byteLength: Float32Array.BYTES_PER_ELEMENT * 4,
+      label: "resident-rewrite-x",
+    });
+
+    try {
+      writeWgslStorageBuffer(device, x, new Float32Array([1, 2, 3, 4]));
+      await runWgslKernelProgram(
+        device,
+        program,
+        { buffers: {}, residentBuffers: { x }, readback: [] },
+        { dispatchCount: [4, 1, 1] },
+      );
+      const first = await readWgslStorageBuffer(device, x);
+      expect([...first as Float32Array]).toEqual([2, 4, 6, 8]);
+
+      writeWgslStorageBuffer(device, x, new Float32Array([5, 6]), Float32Array.BYTES_PER_ELEMENT);
+      await runWgslKernelProgram(
+        device,
+        program,
+        { buffers: {}, residentBuffers: { x }, readback: [] },
+        { dispatchCount: [4, 1, 1] },
+      );
+      const second = await readWgslStorageBuffer(device, x);
+      expect([...second as Float32Array]).toEqual([4, 10, 12, 16]);
+    } finally {
+      destroyWgslStorageBuffer(x);
     }
   });
 });

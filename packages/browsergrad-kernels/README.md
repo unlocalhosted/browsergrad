@@ -32,10 +32,10 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
 - `runDirect(device, desc, opts)` — `GPUBuffer`-in / `GPUBuffer`-out dispatch. The realizer-tier path; no host round-trip per op.
 - `materializeFloat32(device, buffer, byteLength)` — read a `GPUBuffer` back to a `Float32Array` (the single readback at the realize boundary).
 - `uploadFloat32(device, data)` — upload a typed array into a fresh `GPUBuffer`.
-- `createWgslStorageBuffer()` / `readWgslStorageBuffer()` — caller-owned
-  resident storage buffers for generic WGSL programs. Use `residentBuffers`
-  with `runWgslKernelProgramSequence()` to avoid per-call upload and skip
-  readback with `readback: []`.
+- `createWgslStorageBuffer()` / `writeWgslStorageBuffer()` /
+  `readWgslStorageBuffer()` — caller-owned resident storage buffers for generic
+  WGSL programs. Use `residentBuffers` with `runWgslKernelProgramSequence()` to
+  avoid per-call upload and skip readback with `readback: []`.
 
 ## Install
 
@@ -144,6 +144,7 @@ import {
   defineWgslKernelProgram,
   readWgslStorageBuffer,
   runWgslKernelProgram,
+  writeWgslStorageBuffer,
 } from "@unlocalhosted/browsergrad-kernels";
 
 const device = await createDevice();
@@ -162,6 +163,7 @@ const x = createWgslStorageBuffer(device, {
   valueType: "f32",
   data: new Float32Array([1, 2, 3, 4]),
 });
+writeWgslStorageBuffer(device, x, new Float32Array([5, 6]), Float32Array.BYTES_PER_ELEMENT);
 
 await runWgslKernelProgram(
   device,

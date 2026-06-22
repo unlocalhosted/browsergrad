@@ -277,6 +277,30 @@ export async function readWgslStorageBuffer(
   }
 }
 
+export function writeWgslStorageBuffer(
+  device: KernelDevice,
+  resident: WgslResidentBuffer,
+  data: WgslTypedArray,
+  offsetBytes = 0,
+): void {
+  validateResidentBuffer(resident, "resident");
+  validateTypedArray(data, {
+    kind: "storage",
+    name: "resident",
+    valueType: resident.valueType,
+    access: "read_write",
+    binding: 0,
+  });
+  if (!Number.isInteger(offsetBytes) || offsetBytes < 0) {
+    throw new KernelError("resident buffer write offset must be a non-negative integer");
+  }
+  if (offsetBytes + data.byteLength > resident.byteLength) {
+    throw new KernelError("resident buffer write exceeds buffer byteLength");
+  }
+  const impl = asImpl(device);
+  impl.gpu.queue.writeBuffer(resident.buffer, offsetBytes, data.buffer, data.byteOffset, data.byteLength);
+}
+
 export function destroyWgslStorageBuffer(resident: WgslResidentBuffer): void {
   resident.buffer.destroy();
 }

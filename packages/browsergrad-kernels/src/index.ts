@@ -83,6 +83,7 @@ export {
   readWgslStorageBuffer,
   runWgslKernelProgram,
   runWgslKernelProgramSequence,
+  writeWgslStorageBuffer,
   type KernelFeatureSet,
   type WgslFloat16Array,
   type WgslKernelBinding,
