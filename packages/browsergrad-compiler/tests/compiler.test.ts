@@ -8,6 +8,7 @@ import {
   createCudaLiteCompilerCache,
   compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
+  prepareCompiledKernelWebGpu,
   createCudaGridSyncPhasePlan,
   createCudaHostDynamicLaunchPlan,
   createCudaLaunchValidationDiagnostics,
@@ -1754,6 +1755,37 @@ __global__ void parent(float *out) {
       code: "too-many-parent-invocations",
       message: "host-expanded dynamic launch needs 4 parent invocations; max is 2",
     });
+    expect(() => createCudaHostDynamicLaunchPlan(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      { maxHostExpandedParentInvocations: -1 },
+    )).toThrow("maxHostExpandedParentInvocations must be a non-negative integer");
+  });
+
+  it("threads host orchestration caps through high-level WebGPU APIs", async () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(float *dst) {
+  if (threadIdx.x < 1) { dst[0] = 1.0f; }
+}
+__global__ void parent(float *out) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  dim3 grid(1);
+  dim3 block(1);
+  child<<<grid, block>>>(out + idx);
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [4, 1, 1],
+    });
+    const input = { buffers: { out: new Float32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const options = { maxHostExpandedParentInvocations: 2 };
+
+    await expect(runCompiledKernelWebGpu({} as never, compiled, input, launch, options))
+      .rejects.toThrow("too-many-parent-invocations");
+    await expect(prepareCompiledKernelWebGpu({} as never, compiled, input, launch, options))
+      .rejects.toThrow("too-many-parent-invocations");
   });
 
   it("treats host-evaluable inactive dynamic launches as single dispatch", () => {
@@ -1828,6 +1860,10 @@ __global__ void parent(float *out, int n) {
         code: "host-dynamic-launch-depth-exceeded",
       }],
     });
+    expect(() => createCudaWebGpuExecutionPlan(compiled, input, launch, {
+      compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options),
+      maxHostDynamicLaunchDepth: -1,
+    })).toThrow("maxHostDynamicLaunchDepth must be a non-negative integer");
   });
 
   it("plans host-liftable dynamic launches with DevicePool aliases", () => {

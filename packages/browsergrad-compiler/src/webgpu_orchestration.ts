@@ -127,7 +127,7 @@ export function createCudaWebGpuExecutionPlan(
 
   if (runtimePlan.operations.some((operation) => operation.kind === "device-launch")) {
     const depth = options.hostDynamicLaunchDepth ?? 0;
-    const maxDepth = options.maxHostDynamicLaunchDepth ?? DEFAULT_MAX_HOST_DYNAMIC_LAUNCH_DEPTH;
+    const maxDepth = normalizeMaxHostDynamicLaunchDepth(options.maxHostDynamicLaunchDepth);
     if (depth >= maxDepth) {
       blockers.push(webGpuBlocker(
         "device-launch",
@@ -577,6 +577,14 @@ function webGpuBlocker(
 
 function formatWebGpuBlockers(blockers: readonly CudaWebGpuExecutionBlocker[]): string {
   return blockers.map((blocker) => `${blocker.kind}/${blocker.code}: ${blocker.message}`).join("; ");
+}
+
+function normalizeMaxHostDynamicLaunchDepth(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_MAX_HOST_DYNAMIC_LAUNCH_DEPTH;
+  if (!Number.isInteger(value) || value < 0) {
+    throw new RangeError("maxHostDynamicLaunchDepth must be a non-negative integer");
+  }
+  return value;
 }
 
 function definePeerCopyProgram(copy: CudaPeerCopyOperation): WgslKernelProgram {

@@ -19,6 +19,7 @@ import {
   normalizeCudaWebGpuReadbackNames,
   packCudaWebGpuUniformParams,
   type CudaWebGpuExecutionPlanKind,
+  type CudaWebGpuExecutionPlanOptions,
 } from "./webgpu_orchestration.js";
 import {
   CudaLiteCompilerError,
@@ -38,6 +39,8 @@ export interface CompiledKernelWebGpuExecutionOptions {
     options?: CompileCudaLiteOptions,
   ) => CompiledCudaLiteKernel;
   readonly childCompileCacheMaxEntries?: number;
+  readonly maxHostExpandedParentInvocations?: number;
+  readonly maxHostDynamicLaunchDepth?: number;
 }
 
 export interface PreparedCompiledKernelWebGpuRunOptions {
@@ -150,9 +153,8 @@ export async function runCompiledKernelWebGpu(
 ): Promise<ReferenceKernelResult> {
   validateCudaKernelLaunch(launch, compiled.ir.workgroupSize);
   const compileKernel = createCachedWebGpuChildCompiler(options);
-  const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, {
-    compileKernel,
-  });
+  const planOptions = webGpuExecutionPlanOptions(options, compileKernel);
+  const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, planOptions);
   if (!executionPlan.supported) {
     throw new CudaLiteCompilerError(executionPlan.reason, executionPlan.diagnostics);
   }
@@ -173,9 +175,8 @@ export async function prepareCompiledKernelWebGpu(
 ): Promise<PreparedCompiledKernelWebGpu> {
   validateCudaKernelLaunch(launch, compiled.ir.workgroupSize);
   const compileKernel = createCachedWebGpuChildCompiler(options);
-  const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, {
-    compileKernel,
-  });
+  const planOptions = webGpuExecutionPlanOptions(options, compileKernel);
+  const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, planOptions);
   if (!executionPlan.supported) {
     throw new CudaLiteCompilerError(executionPlan.reason, executionPlan.diagnostics);
   }
@@ -184,7 +185,7 @@ export async function prepareCompiledKernelWebGpu(
     executionPlan.steps,
     executionPlan.input,
   );
-  return new PreparedCompiledKernelWebGpuImpl(compiled, executionPlan.kind, input, launch, executionPlan, prepared, compileKernel);
+  return new PreparedCompiledKernelWebGpuImpl(compiled, executionPlan.kind, input, launch, executionPlan, prepared, planOptions);
 }
 
 class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
@@ -198,7 +199,7 @@ class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
     private readonly launch: KernelLaunch,
     private readonly executionPlan: SupportedCudaWebGpuExecutionPlan,
     private readonly prepared: WgslPreparedKernelSequence,
-    private readonly compileKernel: NonNullable<CompiledKernelWebGpuExecutionOptions["compileKernel"]>,
+    private readonly planOptions: CudaWebGpuExecutionPlanOptions,
   ) {
     this.stepCount = prepared.stepCount;
   }
@@ -217,7 +218,7 @@ class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
       this.input,
       this.launch,
       this.executionPlan,
-      this.compileKernel,
+      this.planOptions,
       options,
     ));
     return { buffers: normalizeCudaWebGpuReadback(this.compiled, result.buffers), trace: [] };
@@ -235,7 +236,7 @@ function normalizePreparedRunOptions(
   input: CompiledKernelInput,
   launch: KernelLaunch,
   initialPlan: SupportedCudaWebGpuExecutionPlan,
-  compileKernel: NonNullable<CompiledKernelWebGpuExecutionOptions["compileKernel"]>,
+  planOptions: CudaWebGpuExecutionPlanOptions,
   options: PreparedCompiledKernelWebGpuRunOptions | undefined,
 ): WgslPreparedKernelSequenceRunOptions | undefined {
   if (!options) return undefined;
@@ -259,15 +260,24 @@ function normalizePreparedRunOptions(
       if (uniforms.byteLength > 0) out.uniforms = { params: uniforms };
       return out;
     }
-    const nextPlan = createCudaWebGpuExecutionPlan(compiled, nextInput, launch, {
-      compileKernel,
-    });
+    const nextPlan = createCudaWebGpuExecutionPlan(compiled, nextInput, launch, planOptions);
     if (!nextPlan.supported) throw new CudaLiteCompilerError(nextPlan.reason, nextPlan.diagnostics);
     validatePreparedPlanTopology(initialPlan, nextPlan);
     const stepUniforms = stepUniformUpdatesForPlan(nextPlan);
     if (Object.keys(stepUniforms).length > 0) out.stepUniforms = stepUniforms;
   }
   return out;
+}
+
+function webGpuExecutionPlanOptions(
+  options: CompiledKernelWebGpuExecutionOptions,
+  compileKernel: NonNullable<CompiledKernelWebGpuExecutionOptions["compileKernel"]>,
+): CudaWebGpuExecutionPlanOptions {
+  return {
+    compileKernel,
+    ...(options.maxHostExpandedParentInvocations === undefined ? {} : { maxHostExpandedParentInvocations: options.maxHostExpandedParentInvocations }),
+    ...(options.maxHostDynamicLaunchDepth === undefined ? {} : { maxHostDynamicLaunchDepth: options.maxHostDynamicLaunchDepth }),
+  };
 }
 
 function validatePreparedPlanTopology(

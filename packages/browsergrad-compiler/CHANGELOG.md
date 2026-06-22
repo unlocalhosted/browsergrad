@@ -104,3 +104,5 @@
 - Prepared WebGPU host-orchestrated runs now reuse a bounded child-kernel
   compile cache during scalar-update replanning, avoiding repeated child
   parse/analyze/lower work in hot loops.
+- `runCompiledKernelWebGpu()` and `prepareCompiledKernelWebGpu()` now expose
+  host-dynamic expansion/depth caps and validate cap values before planning.

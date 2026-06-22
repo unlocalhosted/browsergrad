@@ -109,6 +109,9 @@ Supported layers:
 - Host-dynamic launch planning can expand parent invocations with CUDA builtin
   coordinates and flatten recursive child launches, but bounded caps protect the
   browser from runaway launch trees.
+  High-level runner APIs expose those same caps as
+  `maxHostExpandedParentInvocations` and `maxHostDynamicLaunchDepth`; platform
+  code should set them per lab profile instead of relying on global defaults.
 - Host-lifted pool allocation pointers are allowed when they map to known
   `DevicePool` byte offsets. Expanded parent allocations are liftable when
   child launches are order-stable except for pointer base offsets. When the

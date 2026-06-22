@@ -96,7 +96,7 @@ export function createCudaHostDynamicLaunchPlan(
   }
   const parentInvocations = launch.gridDim[0] * launch.gridDim[1] * launch.gridDim[2] *
     launch.blockDim[0] * launch.blockDim[1] * launch.blockDim[2];
-  const maxParentInvocations = options.maxHostExpandedParentInvocations ?? DEFAULT_MAX_HOST_EXPANDED_PARENT_INVOCATIONS;
+  const maxParentInvocations = normalizeMaxHostExpandedParentInvocations(options.maxHostExpandedParentInvocations);
   if (parentInvocations > maxParentInvocations) {
     return unsupported(
       "too-many-parent-invocations",
@@ -408,6 +408,14 @@ function hasParentSideEffectsAfterLaunch(statements: readonly CudaLiteStatement[
     }
   }
   return false;
+}
+
+function normalizeMaxHostExpandedParentInvocations(value: number | undefined): number {
+  if (value === undefined) return DEFAULT_MAX_HOST_EXPANDED_PARENT_INVOCATIONS;
+  if (!Number.isInteger(value) || value < 0) {
+    throw new RangeError("maxHostExpandedParentInvocations must be a non-negative integer");
+  }
+  return value;
 }
 
 function containsKernelLaunch(statements: readonly CudaLiteStatement[]): boolean {

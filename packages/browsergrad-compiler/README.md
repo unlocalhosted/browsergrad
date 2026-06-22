@@ -133,6 +133,9 @@ prepared.destroy();
 Prepared host-orchestrated plans keep a bounded child-kernel compile cache by
 default. Tune with `childCompileCacheMaxEntries`, or pass `0` when a caller
 wants no cache for deterministic instrumentation.
+Use `maxHostExpandedParentInvocations` and `maxHostDynamicLaunchDepth` on
+`runCompiledKernelWebGpu()` / `prepareCompiledKernelWebGpu()` to bound
+host-lifted dynamic launch expansion in learner-facing hot paths.
 Prepared scalar updates are supported when the WebGPU plan topology remains
 fixed. That includes host-orchestrated dynamic launch / peer-copy plans whose
 step count, dispatch counts, storage aliases, and WGSL programs do not change.
