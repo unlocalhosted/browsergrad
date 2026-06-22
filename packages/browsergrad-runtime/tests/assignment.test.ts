@@ -486,6 +486,50 @@ describe("parseAssignmentProfile", () => {
     });
   });
 
+  it("includes hash checks in issue drafts for verified handoffs", async () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "python_runtime",
+          kind: "capability",
+          options: { requires: ["pyodide"] },
+        },
+      ],
+      datasets: [
+        {
+          name: "tiny",
+          url: "/fixtures/tiny.txt",
+          hash: "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const report = createAssignmentPreflightReport(
+      result.profile,
+      createAssignmentCapabilityEnvironment({ browserCapabilities: ["pyodide"] }),
+    );
+    const handoff = await createVerifiedAssignmentPlatformHandoff(
+      result.profile,
+      report,
+      {
+        files: { "/assignments/cs336-assignment1/rubric.py": "print('ok')" },
+        datasets: { tiny: "abcd" },
+      },
+    );
+    const draft = createAssignmentPlatformIssueDraft(result.profile, handoff);
+
+    expect(draft.labels).toContain("next:verify-content");
+    expect(draft.body).toContain("## Hash Checks");
+    expect(draft.body).toContain("- tiny: mismatch");
+    expect(draft.body).toContain(
+      "expected sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    );
+    expect(draft.body).toContain("actual sha256:");
+  });
+
   it("creates a cross-profile capability catalog for platform substrate triage", () => {
     const pythonResult = parseAssignmentProfile({
       ...VALID_PROFILE,

@@ -348,7 +348,8 @@ hashes fail.
 Use `createAssignmentPlatformIssueDraft(profile, handoff)` to turn a launch
 handoff into a deterministic issue title/body/labels payload for downstream
 platform queues such as Crafting Attention. BrowserGrad only drafts content; it
-does not call a tracker API.
+does not call a tracker API. If the handoff is verified, the draft includes a
+hash-check section so stale fixtures are visible in the tracker.
 `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
 batch-flattens those same preflight decisions into platform-ready rows:
 readiness status, runner target, rubric kind, required/selected/missing

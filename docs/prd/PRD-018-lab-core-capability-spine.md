@@ -183,7 +183,7 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   `createAssignmentPlatformIssueDraft(profile, handoff)` turns a generic
   BrowserGrad handoff into deterministic issue title/body/labels content so
   platform agents can log lab rollout issues without tracker-specific runtime
-  code.
+  code. Verified handoffs include dataset hash-check details in the draft body.
 - Benchmark-matrix guarantee:
   `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
   turns many profile reports into platform-ready rows with readiness, runner,
@@ -403,7 +403,8 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   contents fail declared dataset hash checks, including benchmark profiles with
   placeholder hashes.
 - Later RED test: platform issue draft helper turns a handoff into deterministic
-  title/body/labels content for downstream tracker posting.
+  title/body/labels content for downstream tracker posting, including hash-check
+  details when the handoff was verified.
 - Run focused package tests:
   - `pnpm --filter @unlocalhosted/browsergrad-runtime test -- assignment`
   - `pnpm --filter @unlocalhosted/browsergrad-runtime typecheck`

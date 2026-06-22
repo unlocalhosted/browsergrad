@@ -301,7 +301,9 @@ For each handoff or implementation slice, create a craftingattention issue with:
 
 BrowserGrad can draft this payload with
 `createAssignmentPlatformIssueDraft(profile, handoff)`. The draft is deliberately
-tracker-agnostic: it contains title, body, and labels only.
+tracker-agnostic: it contains title, body, and labels only. When the handoff is
+verified, the body includes fixture hash-check status so content problems become
+platform work instead of hidden runner failures.
 
 Use the issue title pattern:
 

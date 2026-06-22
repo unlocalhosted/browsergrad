@@ -51,6 +51,7 @@ missing, or mismatched dataset hashes.
 Use `createAssignmentPlatformIssueDraft(profile, handoff)` to create a stable
 issue title/body/labels payload for each lab handoff or implementation slice.
 BrowserGrad returns the draft; the platform or agent decides where to post it.
+Verified handoffs include dataset hash-check details in the draft body.
 Use `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
 when a platform needs one dashboard/checklist row per benchmark assignment. It
 returns flattened readiness, route, capability, content-gap, cache-strategy, and

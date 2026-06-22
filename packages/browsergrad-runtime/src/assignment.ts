@@ -916,6 +916,7 @@ export function createAssignmentPlatformIssueDraft(
       `- Selected: ${humanList(handoff.selectedCapabilities)}`,
       `- Simulated: ${humanList(handoff.simulatedCapabilities)}`,
       `- External: ${humanList(handoff.externalCapabilities)}`,
+      ...platformIssueHashSection(handoff),
     ].join("\n"),
   };
 }
@@ -1030,6 +1031,26 @@ function markdownListOrNone(items: readonly string[]): string[] {
 
 function humanList(items: readonly string[]): string {
   return items.length > 0 ? items.join(", ") : "none";
+}
+
+function platformIssueHashSection(
+  handoff: AssignmentPlatformHandoff,
+): string[] {
+  if (!("hashChecks" in handoff)) return [];
+  const verified = handoff as AssignmentVerifiedPlatformHandoff;
+  return [
+    "",
+    "## Hash Checks",
+    "",
+    ...markdownListOrNone(
+      verified.hashChecks.map((check) => {
+        const parts = [`${check.name}: ${check.status}`];
+        if (check.expected) parts.push(`expected ${check.expected}`);
+        if (check.actual) parts.push(`actual ${check.actual}`);
+        return parts.join(" — ");
+      }),
+    ),
+  ];
 }
 
 function createAssignmentBenchmarkPreflightRow(

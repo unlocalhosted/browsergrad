@@ -380,6 +380,9 @@ describe("benchmark assignment profiles", () => {
         messages: ["dataset hash invalid: sft-sample"],
       }),
     );
+    const draft = createAssignmentPlatformIssueDraft(result.profile, handoff);
+    expect(draft.body).toContain("## Hash Checks");
+    expect(draft.body).toContain("- sft-sample: invalid");
   });
 
   it("creates external runner requests for native-heavy benchmark profiles", () => {
