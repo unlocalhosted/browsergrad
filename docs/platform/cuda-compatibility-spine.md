@@ -48,8 +48,12 @@ Current corpus gate (`node scripts/audit-cuda-lite-corpus.mjs /tmp/CUDA-120-DAYS
   with integer offset counters, casted pool pointer reads/writes, and WebGPU
   atomic offset updates.
 - Device-side launches now parse into IR and can run in CPU reference when
-  `referenceDynamicParallelism` is enabled; WebGPU still rejects them until
-  host-side multi-dispatch orchestration lands.
+  `referenceDynamicParallelism` is enabled. WebGPU can host-lift conservative
+  child launches into a multi-dispatch sequence when the parent launch has one
+  workgroup, the child block size is statically known, pointer args alias the
+  same named storage buffers, and child scalar launch args are host-evaluable.
+  Pointer-offset launches, per-thread launch queues, recursive launches, and
+  device-derived launch args remain reference-only.
 - CUDA runtime calls such as `cudaDeviceSynchronize` and `cudaMemcpyPeerAsync`
   classify as runtime orchestration gaps. Standalone `cudaDeviceSynchronize()`
   is a WebGPU-safe no-op because dispatch completion is host-managed. Peer

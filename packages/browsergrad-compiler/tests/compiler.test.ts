@@ -1067,10 +1067,29 @@ __global__ void parent(float *x) {
       severity: "warning",
     }));
     expect([...result.buffers.x as Float32Array]).toEqual([2, 3]);
+  });
+
+  it("keeps pointer-offset dynamic launches reference-only for WebGPU", async () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(float *out) {
+  if (threadIdx.x < 1) { out[0] = 7.0f; }
+}
+__global__ void parent(float *out) {
+  if (threadIdx.x < 1) {
+    dim3 grid(1);
+    dim3 block(1);
+    child<<<grid, block>>>(out + 1);
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+
     await expect(runCompiledKernelWebGpu(
       {} as never,
       compiled,
-      { buffers: { x: new Float32Array([1, 2]) } },
+      { buffers: { out: new Float32Array([0, 0]) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     )).rejects.toThrow("CUDA runtime orchestration is reference-only");
   });
