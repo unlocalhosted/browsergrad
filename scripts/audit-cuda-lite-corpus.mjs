@@ -43,7 +43,7 @@ for (const file of files) {
     if (isNonKernelCodeBlock(block)) continue;
     const blockDefines = collectObjectDefines(block.code);
     const blockFunctionDefines = collectFunctionDefines(block.code);
-    const blockDeviceFunctions = collectScalarDeviceFunctions(block.code);
+    const blockDeviceFunctions = collectPortableDeviceFunctions(block.code);
     const blockConstants = collectConstantDeclarations(block.code);
     const blockTextures = collectTextureDeclarations(block.code);
     const effectiveDefines = blockDefines.size === 0 ? carriedDefines : blockDefines;
@@ -336,7 +336,7 @@ function isPlaceholderKernel(kernel) {
     /\bsome[A-Z][A-Za-z0-9_]*\b/u.test(stripComments(kernel));
 }
 
-function collectScalarDeviceFunctions(source) {
+function collectPortableDeviceFunctions(source) {
   const clean = stripComments(source);
   const functions = [];
   let index = 0;
@@ -370,7 +370,9 @@ function collectScalarDeviceFunctions(source) {
     const fn = clean.slice(start, end);
     const signature = fn.slice(0, fn.indexOf("{"));
     const name = /(?:float|int|uint|half|unsigned\s+int|void)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/u.exec(signature)?.[1];
-    if (name && isPortableScalarDeviceFunction(signature, fn)) functions.push({ name, source: fn });
+    if (name && (isPortableScalarDeviceFunction(signature, fn) || isLaunchTargetDeviceFunction(clean, name, fn))) {
+      functions.push({ name, source: fn });
+    }
     index = end;
   }
   return functions;
@@ -382,13 +384,19 @@ function isPortableScalarDeviceFunction(signature, source) {
   return true;
 }
 
+function isLaunchTargetDeviceFunction(source, name, fn) {
+  if (!new RegExp(`\\b${escapeRegExp(name)}\\s*<<\\s*<`, "u").test(source)) return false;
+  if (/\bdo\b|reinterpret|static_cast|__float_as_int|__int_as_float/u.test(fn)) return false;
+  return true;
+}
+
 function kernelSourceWithContext(kernel, siblingKernels, definesByName, functionDeclarations, deviceFunctions, constantDeclarations, textureDeclarations) {
   const params = new Set(kernelParamNames(kernel));
   const defines = [...definesByName]
     .filter(([name]) => !params.has(name))
     .map(([name, value]) => `#define ${name} ${value}`);
   const referencedDeviceFunctions = deviceFunctions
-    .filter((fn) => new RegExp(`\\b${escapeRegExp(fn.name)}\\s*\\(`, "u").test(kernel))
+    .filter((fn) => new RegExp(`\\b${escapeRegExp(fn.name)}\\s*(?:\\(|<<\\s*<)`, "u").test(kernel))
     .map((fn) => fn.source);
   return `${defines.join("\n")}\n${functionDeclarations.join("\n")}\n${referencedDeviceFunctions.join("\n")}\n${constantDeclarations.join("\n")}\n${textureDeclarations.join("\n")}\n${siblingKernels.join("\n")}\n${kernel}`;
 }

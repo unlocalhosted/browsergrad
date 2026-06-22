@@ -259,7 +259,7 @@ __global__ void sizeKernel(uint* out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("var bytes: u32 = 4");
+    expect(compiled.wgsl).toContain("var bytes: u32 = u32(4)");
     expect([...result.buffers.out as Uint32Array]).toEqual([4]);
   });
 
@@ -1587,6 +1587,128 @@ __global__ void parent(DevicePool *pool, int n) {
     expect(executionPlan).toMatchObject({
       supported: true,
       kind: "host-dynamic-launch",
+    });
+  });
+
+  it("plans host-expanded dynamic launches over order-stable DevicePool allocations", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(float *data, int n) {
+  int idx = threadIdx.x;
+  if (idx < n) { data[idx] = (float)(idx + 1); }
+}
+__global__ void parent(DevicePool *pool, int n) {
+  float *ptr = (float*) deviceAllocate(pool, n * sizeof(float));
+  if (ptr != nullptr) {
+    dim3 grid(1);
+    dim3 block(n);
+    child<<<grid, block>>>(ptr, n);
+    cudaDeviceSynchronize();
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [4, 1, 1],
+    });
+    const pool = { data: new Uint32Array(8), offset: new Uint32Array([0]) };
+    const input = { buffers: {}, scalars: { n: 2 }, memoryPools: { pool } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const plan = createCudaHostDynamicLaunchPlan(compiled, input, launch);
+
+    expect(plan.supported).toBe(true);
+    expect(plan.launches).toHaveLength(4);
+    expect(plan.launches.map((item) => item.pointerBaseOffsets.data)).toEqual([0, 2, 4, 6]);
+
+    const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, {
+      compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options),
+    });
+    expect(executionPlan).toMatchObject({
+      supported: true,
+      kind: "host-dynamic-launch",
+    });
+
+    const result = runCompiledKernelReference(compiled, input, launch);
+    expect([...result.buffers.pool as Uint32Array]).toEqual([
+      floatBits(1), floatBits(2),
+      floatBits(1), floatBits(2),
+      floatBits(1), floatBits(2),
+      floatBits(1), floatBits(2),
+    ]);
+  });
+
+  it("treats launched __device__ functions as kernel-compatible child entries", () => {
+    const source = `
+__device__ void childKernel(float *data, int n) {
+  int idx = threadIdx.x;
+  if (idx < n) { data[idx] = (float)(idx + 1); }
+}
+__global__ void parent(DevicePool *pool, int n) {
+  float *ptr = (float*) deviceAllocate(pool, n * sizeof(float));
+  if (ptr != nullptr) {
+    dim3 grid(1);
+    dim3 block(n);
+    childKernel<<<grid, block>>>(ptr, n);
+    cudaDeviceSynchronize();
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [2, 1, 1],
+    });
+    const child = compileCudaLiteKernel(source, {
+      kernelName: "childKernel",
+      referenceDynamicParallelism: true,
+      workgroupSize: [2, 1, 1],
+    });
+    const input = {
+      buffers: {},
+      scalars: { n: 2 },
+      memoryPools: { pool: { data: new Uint32Array(4), offset: new Uint32Array([0]) } },
+    };
+    const plan = createCudaHostDynamicLaunchPlan(compiled, input, {
+      gridDim: [1, 1, 1],
+      blockDim: [2, 1, 1],
+    });
+
+    expect(child.ir.name).toBe("childKernel");
+    expect(compiled.wgsl).not.toContain("fn childKernel(");
+    expect(child.wgsl).not.toContain("fn childKernel(");
+    expect(plan.supported).toBe(true);
+    expect(plan.launches).toHaveLength(2);
+  });
+
+  it("rejects host-expanded DevicePool allocations when child args depend on parent order", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(float *data, int n, int value) {
+  int idx = threadIdx.x;
+  if (idx < n) { data[idx] = (float)value; }
+}
+__global__ void parent(DevicePool *pool, int n) {
+  float *ptr = (float*) deviceAllocate(pool, n * sizeof(float));
+  if (ptr != nullptr) {
+    dim3 grid(1);
+    dim3 block(n);
+    child<<<grid, block>>>(ptr, n, threadIdx.x);
+    cudaDeviceSynchronize();
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [4, 1, 1],
+    });
+    const input = {
+      buffers: {},
+      scalars: { n: 2 },
+      memoryPools: { pool: { data: new Uint32Array(8), offset: new Uint32Array([0]) } },
+    };
+    const plan = createCudaHostDynamicLaunchPlan(compiled, input, {
+      gridDim: [1, 1, 1],
+      blockDim: [4, 1, 1],
+    });
+
+    expect(plan).toMatchObject({
+      supported: false,
+      blocker: { code: "pool-allocation-order-sensitive" },
     });
   });
 

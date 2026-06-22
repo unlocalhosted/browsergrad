@@ -3,7 +3,7 @@ import {
   type WgslKernelBindingInput,
   type WgslKernelProgram,
 } from "@unlocalhosted/browsergrad-kernels";
-import { collectExternalDevicePoolNames } from "./ast_queries.js";
+import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
@@ -146,7 +146,8 @@ export function emitKernelIrWgsl(
     lines.push(...emitCurandHelpers());
   }
 
-  for (const fn of ir.functions) {
+  const emittedFunctions = functionsToEmit(ir);
+  for (const fn of emittedFunctions) {
     lines.push("");
     lines.push(...emitDeviceFunction(fn, context));
   }
@@ -384,7 +385,7 @@ function emitStatement(
         return [`${prefix}var ${statement.name}: u32${statement.init ? ` = ${emitExpression(statement.init, context)}` : " = 0u"};`];
       }
       if (statement.dimensions.length > 0) return [`${prefix}var ${statement.name}: ${emitLocalArrayType(statement)};`];
-      return [`${prefix}var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitExpression(statement.init, context)}` : ""};`];
+      return [`${prefix}var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitLocalInit(statement, context)}` : ""};`];
     case "dim3":
       return [];
     case "cooperative-group":
@@ -430,6 +431,11 @@ function emitStatement(
   }
 }
 
+function functionsToEmit(ir: KernelIrModule): readonly CudaLiteDeviceFunction[] {
+  const launchCallees = new Set(collectKernelLaunchCallees(ir.body));
+  return ir.functions.filter((fn) => fn.name !== ir.name && !launchCallees.has(fn.name));
+}
+
 function emitInlineAsmStatement(
   statement: Extract<CudaLiteStatement, { kind: "asm" }>,
   context: EmitContext,
@@ -444,7 +450,13 @@ function emitInlineAsmStatement(
 function emitForVar(statement: CudaLiteVarDecl, context: EmitContext): string {
   if (statement.pointer) return `var ${statement.name}: u32${statement.init ? ` = ${emitExpression(statement.init, context)}` : " = 0u"}`;
   if (statement.dimensions.length > 0) return `var ${statement.name}: ${emitLocalArrayType(statement)}`;
-  return `var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitExpression(statement.init, context)}` : ""}`;
+  return `var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitLocalInit(statement, context)}` : ""}`;
+}
+
+function emitLocalInit(statement: CudaLiteVarDecl, context: EmitContext): string {
+  const value = statement.init ? emitExpression(statement.init, context) : zeroValue(statement.valueType);
+  if (statement.valueType === "uint") return `u32(${value})`;
+  return value;
 }
 
 function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): string[] {

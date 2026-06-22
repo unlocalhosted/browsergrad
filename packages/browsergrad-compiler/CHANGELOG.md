@@ -62,3 +62,8 @@
 - Host dynamic launch planning can pass single-invocation `DevicePool`
   allocation pointers into child pointer params through pool-data aliases and
   base-offset uniforms.
+- Host dynamic launch planning can now lift expanded `DevicePool` allocations
+  when child launches are order-stable except for pointer base offsets.
+- Launched `__device__` functions can now be promoted to child kernels for
+  host-lifted dynamic launches, raising the CUDA-120 WebGPU audit baseline to
+  `240/240`.

@@ -1,5 +1,5 @@
 import type { WgslTypedArray } from "@unlocalhosted/browsergrad-kernels";
-import { collectExternalDevicePoolNames } from "./ast_queries.js";
+import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./ast_queries.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import {
   CudaLiteCompilerError,
@@ -124,7 +124,7 @@ export function runCompiledKernelReference(
   const surfaces = cloneSurfaces(input.surfaces ?? {});
   const memoryPools = cloneMemoryPools(input.memoryPools ?? {});
   const functions = new Map(compiled.ir.functions.map((fn) => [fn.name, fn]));
-  const kernels = new Map(compiled.ast.kernels.map((kernel) => [kernel.name, kernel]));
+  const kernels = collectReferenceKernels(compiled);
   const scalars = input.scalars ?? {};
   const valueTypes = new Map<string, CudaLiteScalarType>([
     ...compiled.ir.params.map((param) => [param.name, param.valueType] as const),
@@ -160,6 +160,31 @@ export function runCompiledKernelReference(
     result[name] = cloneTypedArray(buffer);
   }
   return { buffers: result, trace: traces.map(freezeTrace) };
+}
+
+function collectReferenceKernels(compiled: CompiledCudaLiteKernel): Map<string, CudaLiteKernel> {
+  const kernels = new Map(compiled.ast.kernels.map((kernel) => [kernel.name, kernel] as const));
+  const launched = new Set<string>();
+  for (const kernel of compiled.ast.kernels) {
+    for (const name of collectKernelLaunchCallees(kernel.body)) launched.add(name);
+  }
+  for (const fn of compiled.ast.functions) {
+    for (const name of collectKernelLaunchCallees(fn.body)) launched.add(name);
+  }
+  for (const fn of compiled.ast.functions) {
+    if (launched.has(fn.name)) kernels.set(fn.name, deviceFunctionAsKernel(fn));
+  }
+  return kernels;
+}
+
+function deviceFunctionAsKernel(fn: CudaLiteDeviceFunction): CudaLiteKernel {
+  return {
+    kind: "kernel",
+    name: fn.name,
+    params: fn.params,
+    body: fn.body,
+    span: fn.span,
+  };
 }
 
 function runBlock(

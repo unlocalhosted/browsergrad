@@ -88,6 +88,35 @@ __global__ void parent(DevicePool *pool, int n) {
     }
   }
 }`,
+  dynamicPoolExpandedLaunch: `
+__global__ void child(float *data, int n) {
+  int idx = threadIdx.x;
+  if (idx < n) { data[idx] = (float)(idx + 1); }
+}
+__global__ void parent(DevicePool *pool, int n) {
+  float *ptr = (float*) deviceAllocate(pool, n * sizeof(float));
+  if (ptr != nullptr) {
+    dim3 grid(1);
+    dim3 block(n);
+    child<<<grid, block>>>(ptr, n);
+    cudaDeviceSynchronize();
+  }
+}`,
+  dynamicDeviceFunctionPoolLaunch: `
+__global__ void parentKernel(int N) {
+  size_t size = N * sizeof(float);
+  float *devBuf = (float*) deviceAllocate(&g_pool, size);
+  if (devBuf == nullptr) return;
+  dim3 grid((N + 255) / 256);
+  dim3 block(256);
+  childKernel<<<grid, block>>>(devBuf, N);
+}
+__device__ void childKernel(float *data, int N) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < N) {
+    data[idx] += 3.14f;
+  }
+}`,
 };
 
 const html = String.raw`<!doctype html>
@@ -265,6 +294,34 @@ const html = String.raw`<!doctype html>
               scalars: { n: 2 },
             }),
             output: "pool",
+          },
+          {
+            name: "runtime:expanded-pool-pointer-host-dynamic-launch",
+            source: SOURCES.dynamicPoolExpandedLaunch,
+            options: { kernelName: "parent", referenceDynamicParallelism: true, workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {},
+              memoryPools: {
+                pool: { data: new Uint32Array(8), offset: new Uint32Array([0]) },
+              },
+              scalars: { n: 2 },
+            }),
+            output: "pool",
+          },
+          {
+            name: "runtime:launched-device-function-pool-dynamic-launch",
+            source: SOURCES.dynamicDeviceFunctionPoolLaunch,
+            options: { kernelName: "parentKernel", referenceDynamicParallelism: true, workgroupSize: [2, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+            input: () => ({
+              buffers: {},
+              memoryPools: {
+                g_pool: { data: new Uint32Array(4), offset: new Uint32Array([0]) },
+              },
+              scalars: { N: 2 },
+            }),
+            output: "g_pool",
           },
         ];
       }

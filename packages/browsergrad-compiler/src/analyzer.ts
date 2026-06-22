@@ -17,6 +17,7 @@ import {
   type KernelIrModule,
   type SourceSpan,
 } from "./types.js";
+import { collectKernelLaunchCallees } from "./ast_queries.js";
 
 const DEFAULT_WORKGROUP_SIZE: readonly [number, number, number] = [256, 1, 1];
 const BUILTIN_VECTORS = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]);
@@ -116,7 +117,10 @@ export function analyzeCudaLite(
   ast: CudaLiteModule,
   options: CudaLiteAnalyzeOptions = {},
 ): CudaLiteAnalysis {
-  const kernel = selectKernel(ast, options.kernelName);
+  const launchCallees = launchedDeviceFunctionNames(ast);
+  const kernel = selectKernel(ast, options.kernelName, launchCallees);
+  const selectedDeviceFunctionAsKernel = ast.functions.some((fn) => fn.name === kernel.name) &&
+    !ast.kernels.some((candidate) => candidate.name === kernel.name);
   const diagnostics: CudaLiteDiagnostic[] = [];
   const requiredFeatures = new Set<string>();
   const atomicParams = new Set<string>();
@@ -132,8 +136,10 @@ export function analyzeCudaLite(
     declareTexture(texture, rootScope, declaredNames, diagnostics);
   }
   for (const fn of ast.functions) {
+    if (selectedDeviceFunctionAsKernel && fn.name === kernel.name) continue;
     declareDeviceFunction(fn, rootScope, declaredNames, requiredFeatures, diagnostics);
   }
+  const rootDeclaredNames = new Set(declaredNames);
 
   for (const param of kernel.params) {
     if (declaredNames.has(param.name)) {
@@ -315,8 +321,9 @@ export function analyzeCudaLite(
   };
 
   for (const fn of ast.functions) {
+    if (selectedDeviceFunctionAsKernel && fn.name === kernel.name) continue;
     const functionScope = createScope(rootScope);
-    const functionDeclaredNames = new Set(declaredNames);
+    const functionDeclaredNames = new Set(rootDeclaredNames);
     for (const param of fn.params) {
       if (functionDeclaredNames.has(param.name)) {
         diagnostics.push(error("duplicate-symbol", `duplicate parameter '${param.name}'`, param.span));
@@ -332,7 +339,7 @@ export function analyzeCudaLite(
         span: param.span,
       });
       if (param.valueType === "half") requiredFeatures.add("shader-f16");
-      if (param.pointer) {
+      if (param.pointer && !launchCallees.has(fn.name)) {
         diagnostics.push(error("unsupported-device-pointer-param", "CUDA-lite device functions only support scalar params in v0", param.span));
       }
     }
@@ -394,8 +401,14 @@ export function lowerAnalyzedCudaLiteToKernelIr(
   };
 }
 
-function selectKernel(ast: CudaLiteModule, kernelName: string | undefined): CudaLiteKernel {
+function selectKernel(
+  ast: CudaLiteModule,
+  kernelName: string | undefined,
+  launchCallees: ReadonlySet<string>,
+): CudaLiteKernel {
   if (ast.kernels.length === 0) {
+    const launchableFunction = kernelName ? ast.functions.find((fn) => fn.name === kernelName && launchCallees.has(fn.name)) : undefined;
+    if (launchableFunction) return deviceFunctionAsKernel(launchableFunction);
     throw new CudaLiteCompilerError("no CUDA-lite kernels found", [{
       code: "missing-kernel",
       severity: "error",
@@ -405,15 +418,36 @@ function selectKernel(ast: CudaLiteModule, kernelName: string | undefined): Cuda
   }
   if (!kernelName) return ast.kernels[0]!;
   const kernel = ast.kernels.find((candidate) => candidate.name === kernelName);
-  if (!kernel) {
-    throw new CudaLiteCompilerError(`CUDA-lite kernel '${kernelName}' not found`, [{
-      code: "missing-kernel",
-      severity: "error",
-      message: `CUDA-lite kernel '${kernelName}' not found`,
-      span: ast.span,
-    }]);
+  if (kernel) return kernel;
+  const launchableFunction = ast.functions.find((fn) => fn.name === kernelName && launchCallees.has(fn.name));
+  if (launchableFunction) return deviceFunctionAsKernel(launchableFunction);
+  throw new CudaLiteCompilerError(`CUDA-lite kernel '${kernelName}' not found`, [{
+    code: "missing-kernel",
+    severity: "error",
+    message: `CUDA-lite kernel '${kernelName}' not found`,
+    span: ast.span,
+  }]);
+}
+
+function launchedDeviceFunctionNames(ast: CudaLiteModule): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const kernel of ast.kernels) {
+    for (const name of collectKernelLaunchCallees(kernel.body)) names.add(name);
   }
-  return kernel;
+  for (const fn of ast.functions) {
+    for (const name of collectKernelLaunchCallees(fn.body)) names.add(name);
+  }
+  return names;
+}
+
+function deviceFunctionAsKernel(fn: CudaLiteDeviceFunction): CudaLiteKernel {
+  return {
+    kind: "kernel",
+    name: fn.name,
+    params: fn.params,
+    body: fn.body,
+    span: fn.span,
+  };
 }
 
 function declareConstant(

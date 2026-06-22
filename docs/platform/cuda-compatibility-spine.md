@@ -61,19 +61,22 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
 ```
 
 - `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/240` real code-kernel
-  definitions compile as single-dispatch WGSL/WebGPU. Another `14/240` are
+  definitions compile as single-dispatch WGSL/WebGPU. Another `15/240` are
   real-GPU runnable through WebGPU orchestration lifts (`grid-sync-phases` and
-  `host-dynamic-launch`), for `239/240` total WebGPU coverage. `1/240` remains
+  `host-dynamic-launch`), for `240/240` total WebGPU coverage. `0/240` remain
   reference-only and `0/240` remain hard gaps after filtering docs/pseudocode
   placeholders.
 - `referenceFallbackOk` is `15/240`: kernels whose semantics are understood by
   CPU reference or host/WebGPU orchestration. `referenceOnlyOk` is stricter and
-  excludes kernels now runnable on real WebGPU through orchestration.
+  excludes kernels now runnable on real WebGPU through orchestration; current
+  baseline is `0/240`.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, WebGPU atomic
   offset updates, DevicePool aliasing across host-lifted child launches,
-  positive pointer-offset child launches via generated base-offset uniforms, and
-  conservative host-lifted peer copies through a typed WebGPU copy dispatch.
+  positive pointer-offset child launches via generated base-offset uniforms,
+  expanded order-stable DevicePool allocation launches, launched `__device__`
+  child functions, and conservative host-lifted peer copies through a typed
+  WebGPU copy dispatch.
   Fixed thread-local arrays lower to per-thread WGSL function arrays and CPU
   reference typed arrays.
 - Hot-loop dispatch can keep both caller buffers and compiler-generated

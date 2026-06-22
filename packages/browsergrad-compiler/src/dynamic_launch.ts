@@ -15,6 +15,7 @@ import { createCudaRuntimePlan } from "./runtime_plan.js";
 import type {
   CompiledCudaLiteKernel,
   CompiledKernelInput,
+  CudaLiteDeviceFunction,
   CudaLiteExpression,
   CudaLiteKernel,
   CudaLiteKernelLaunchStatement,
@@ -46,6 +47,7 @@ export type CudaHostDynamicLaunchBlockerCode =
   | "child-arguments-not-host-evaluable"
   | "unsafe-parent-side-effects"
   | "pool-allocation-not-single-invocation"
+  | "pool-allocation-order-sensitive"
   | "branch-not-host-evaluable";
 
 export interface CudaHostDynamicLaunchPlanOptions {
@@ -71,6 +73,7 @@ interface HostLiftedLaunchCollection {
   readonly launches: readonly HostLiftedLaunch[];
   readonly reason?: string;
   readonly blocker?: CudaHostDynamicLaunchBlocker;
+  readonly expandedPoolAllocation: boolean;
 }
 
 type MemoryPoolInput = NonNullable<CompiledKernelInput["memoryPools"]>[string];
@@ -108,7 +111,7 @@ export function createCudaHostDynamicLaunchPlan(
 
   const planned: CudaHostDynamicLaunch[] = [];
   for (const item of launches) {
-    const childKernel = compiled.ast.kernels.find((kernel) => kernel.name === item.statement.callee);
+    const childKernel = findLaunchableKernel(compiled, item.statement.callee);
     if (!childKernel) return unsupported("unknown-child-kernel", `unknown dynamic kernel '${item.statement.callee}'`);
     const childBlock = evaluateLaunchVector(item.statement.block, item.env, input);
     const childGrid = evaluateLaunchVector(item.statement.grid, item.env, input);
@@ -125,7 +128,29 @@ export function createCudaHostDynamicLaunchPlan(
       pointerBaseOffsets: childInput.pointerBaseOffsets,
     });
   }
+  if (launchCollection.expandedPoolAllocation && !hostDynamicLaunchesAreOrderStable(planned)) {
+    return unsupported(
+      "pool-allocation-order-sensitive",
+      "expanded DevicePool allocation needs child launches to be order-stable except pointer base offsets",
+    );
+  }
   return { supported: true, launches: planned };
+}
+
+function findLaunchableKernel(compiled: CompiledCudaLiteKernel, name: string): CudaLiteKernel | undefined {
+  return compiled.ast.kernels.find((kernel) => kernel.name === name) ??
+    launchableDeviceFunctionAsKernel(compiled.ast.functions.find((fn) => fn.name === name));
+}
+
+function launchableDeviceFunctionAsKernel(fn: CudaLiteDeviceFunction | undefined): CudaLiteKernel | undefined {
+  if (!fn) return undefined;
+  return {
+    kind: "kernel",
+    name: fn.name,
+    params: fn.params,
+    body: fn.body,
+    span: fn.span,
+  };
 }
 
 function unsupported(code: CudaHostDynamicLaunchBlockerCode, message: string): CudaHostDynamicLaunchPlan {
@@ -142,11 +167,14 @@ function collectHostLiftedLaunches(
   launch: KernelLaunch,
 ): HostLiftedLaunchCollection {
   const out: HostLiftedLaunch[] = [];
-  const allowPoolAllocation = launch.gridDim.every((axis) => axis === 1) && launch.blockDim.every((axis) => axis === 1);
+  const parentInvocations = launch.gridDim[0] * launch.gridDim[1] * launch.gridDim[2] *
+    launch.blockDim[0] * launch.blockDim[1] * launch.blockDim[2];
+  const hasExpandedParent = parentInvocations > 1;
   const poolOffsets = new Map(
     Object.entries(input.memoryPools ?? {}).map(([name, pool]) => [name, pool.offset?.[0] ?? 0] as const),
   );
   let unsafeBlocker: CudaHostDynamicLaunchBlocker | undefined;
+  let expandedPoolAllocation = false;
   const markUnsafe = (code: CudaHostDynamicLaunchBlockerCode, message: string): void => {
     unsafeBlocker ??= { code, message };
   };
@@ -169,11 +197,9 @@ function collectHostLiftedLaunches(
         continue;
       }
       if (item.kind === "var" && item.pointer && item.storage === "local" && item.init) {
-        const pointer = evaluateHostPoolPointer(item.init, current, input, poolOffsets, allowPoolAllocation);
-        if (pointer === "unsafe") {
-          markUnsafe("pool-allocation-not-single-invocation", "host-lifted DevicePool allocation requires a single parent invocation");
-          return { containsLaunch, returned: false, env: current };
-        }
+        const pointer = evaluateHostPoolPointer(item.init, current, input, poolOffsets, () => {
+          if (hasExpandedParent) expandedPoolAllocation = true;
+        });
         if (pointer) current.set(item.name, pointer);
         continue;
       }
@@ -226,7 +252,9 @@ function collectHostLiftedLaunches(
   forEachParentInvocation(launch, (env) => {
     if (!unsafeBlocker) visit(statements, env);
   });
-  return unsafeBlocker ? { launches: [], reason: unsafeBlocker.message, blocker: unsafeBlocker } : { launches: out };
+  return unsafeBlocker
+    ? { launches: [], reason: unsafeBlocker.message, blocker: unsafeBlocker, expandedPoolAllocation }
+    : { launches: out, expandedPoolAllocation };
 }
 
 function coerceHostScalar(valueType: CudaLiteParam["valueType"], value: number): number {
@@ -250,19 +278,18 @@ function evaluateHostPoolPointer(
   env: ReadonlyMap<string, HostEvalValue>,
   input: CompiledKernelInput,
   poolOffsets: Map<string, number>,
-  allowPoolAllocation: boolean,
-): HostEvalPoolPointer | "unsafe" | undefined {
+  onPoolAllocation: () => void,
+): HostEvalPoolPointer | undefined {
   if (expression.kind === "identifier") {
     const pointer = env.get(expression.name);
     return isHostPoolPointer(pointer) ? pointer : undefined;
   }
   if (expression.kind === "cast" && expression.pointer) {
-    return evaluateHostPoolPointer(expression.expression, env, input, poolOffsets, allowPoolAllocation);
+    return evaluateHostPoolPointer(expression.expression, env, input, poolOffsets, onPoolAllocation);
   }
   if (expression.kind !== "call") return undefined;
   const name = expressionName(expression.callee);
   if (name !== "deviceAllocate" && name !== "streamOrderedAllocate") return undefined;
-  if (!allowPoolAllocation) return "unsafe";
   if (expression.args.length !== 2) return undefined;
   const poolName = poolNameFromAllocatorArg(expression.args[0]);
   if (!poolName) return undefined;
@@ -272,12 +299,41 @@ function evaluateHostPoolPointer(
   if (!Number.isFinite(sizeBytes)) return undefined;
   const oldOffset = poolOffsets.get(poolName) ?? pool.offset?.[0] ?? 0;
   poolOffsets.set(poolName, oldOffset + sizeBytes);
+  onPoolAllocation();
   const capacity = pool.data.byteLength;
   return {
     kind: "pool-pointer",
     poolName,
     byteOffset: oldOffset + sizeBytes > capacity ? -1 : oldOffset,
   };
+}
+
+function hostDynamicLaunchesAreOrderStable(launches: readonly CudaHostDynamicLaunch[]): boolean {
+  if (launches.length <= 1) return true;
+  const first = hostDynamicLaunchOrderSignature(launches[0]!);
+  return launches.every((launch) => hostDynamicLaunchOrderSignature(launch) === first);
+}
+
+function hostDynamicLaunchOrderSignature(launch: CudaHostDynamicLaunch): string {
+  return JSON.stringify({
+    kernel: launch.kernel.name,
+    gridDim: launch.gridDim,
+    blockDim: launch.blockDim,
+    scalars: sortedScalarRecord(launch.input.scalars ?? {}),
+    storageAliases: sortedStringRecord(launch.storageAliases),
+    bufferNames: Object.keys(launch.input.buffers).sort(),
+    residentBufferNames: Object.keys(launch.input.residentBuffers ?? {}).sort(),
+    memoryPoolNames: Object.keys(launch.input.memoryPools ?? {}).sort(),
+    pointerOffsetNames: Object.keys(launch.pointerBaseOffsets).sort(),
+  });
+}
+
+function sortedScalarRecord(values: Readonly<Record<string, number>>): Record<string, number> {
+  return Object.fromEntries(Object.entries(values).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function sortedStringRecord(values: Readonly<Record<string, string>>): Record<string, string> {
+  return Object.fromEntries(Object.entries(values).sort(([left], [right]) => left.localeCompare(right)));
 }
 
 function poolNameFromAllocatorArg(expression: CudaLiteExpression | undefined): string | undefined {

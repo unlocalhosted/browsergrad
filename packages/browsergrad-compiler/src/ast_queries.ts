@@ -17,6 +17,14 @@ export function collectExternalDevicePoolNames(
   return [...pools].sort();
 }
 
+export function collectKernelLaunchCallees(statements: readonly CudaLiteStatement[]): readonly string[] {
+  const out = new Set<string>();
+  walkCudaLiteStatements(statements, (statement) => {
+    if (statement.kind === "kernel-launch") out.add(statement.callee);
+  });
+  return [...out].sort();
+}
+
 export function walkCudaLiteExpressions(
   statements: readonly CudaLiteStatement[],
   visitExpression: (expression: CudaLiteExpression) => void,
@@ -49,6 +57,20 @@ export function walkCudaLiteExpressions(
       walkCudaLiteExpressions(statement.body, visitExpression);
     }
     if (statement.kind === "return" && statement.value) walkExpression(statement.value, visitExpression);
+  }
+}
+
+export function walkCudaLiteStatements(
+  statements: readonly CudaLiteStatement[],
+  visitStatement: (statement: CudaLiteStatement) => void,
+): void {
+  for (const statement of statements) {
+    visitStatement(statement);
+    if (statement.kind === "if") {
+      walkCudaLiteStatements(statement.consequent, visitStatement);
+      if (statement.alternate) walkCudaLiteStatements(statement.alternate, visitStatement);
+    }
+    if (statement.kind === "for") walkCudaLiteStatements(statement.body, visitStatement);
   }
 }
 
