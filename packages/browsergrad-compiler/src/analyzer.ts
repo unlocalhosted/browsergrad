@@ -47,6 +47,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["streamOrderedAllocate", [2, 4]],
   ["curand_init", [4, 4]],
   ["curand_uniform", [1, 1]],
+  ["cudaDeviceSynchronize", [0, 0]],
+  ["cudaMemcpyPeerAsync", [6, 6]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
 ]);
 const WGSL_RESERVED_WORDS = new Set([
@@ -172,7 +174,7 @@ export function analyzeCudaLite(
 
   const walkExpression = (expression: CudaLiteExpression, scope: Scope): ExpressionInfo => {
     if (expression.kind === "call") {
-      return validateCallExpression(expression, scope, params, atomicParams, atomicShared, requiredFeatures, diagnostics, walkExpression);
+      return validateCallExpression(expression, scope, params, atomicParams, atomicShared, requiredFeatures, diagnostics, walkExpression, options);
     }
     return validateNonCallExpression(expression, scope, diagnostics, walkExpression);
   };
@@ -556,6 +558,7 @@ function validateCallExpression(
   requiredFeatures: Set<string>,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
+  options: CudaLiteAnalyzeOptions,
 ): ExpressionInfo {
   const callName = expressionName(expression.callee);
   const cooperativeCall = cooperativeGroupCall(expression, scope);
@@ -599,6 +602,20 @@ function validateCallExpression(
       validateScalarOperand(info, arg.span, diagnostics);
     }
     return { kind: "scalar" };
+  }
+  if (callName === "cudaDeviceSynchronize" || callName === "cudaMemcpyPeerAsync") {
+    diagnostics.push({
+      ...error(
+        "unsupported-cuda-runtime",
+        callName === "cudaDeviceSynchronize"
+          ? "cudaDeviceSynchronize() is reference-only; WebGPU host orchestration is not implemented yet"
+          : `${callName}() requires CUDA runtime peer-copy orchestration`,
+        expression.span,
+      ),
+      severity: callName === "cudaDeviceSynchronize" && options.referenceDynamicParallelism ? "warning" : "error",
+    });
+    for (const arg of expression.args) walkExpression(arg, scope);
+    return { kind: "scalar", valueType: "int" };
   }
   if (isAtomicBuiltin(callName)) {
     validateAtomicBuiltin(expression, scope, params, atomicParams, atomicShared, diagnostics, walkExpression);

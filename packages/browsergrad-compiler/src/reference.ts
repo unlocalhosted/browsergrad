@@ -619,6 +619,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   const cooperativeGroupCall = evalCooperativeGroupCall(expression, context);
   if (cooperativeGroupCall !== undefined) return cooperativeGroupCall;
   if (name === "printf") return 0;
+  if (name === "cudaDeviceSynchronize") return 0;
+  if (name === "cudaMemcpyPeerAsync") throw compilerFailure("cudaMemcpyPeerAsync is not available in CPU reference");
   if (name === "deviceAllocate" || name === "streamOrderedAllocate") {
     if (expression.args.length === 4) {
       const baseRef = expression.args[0];

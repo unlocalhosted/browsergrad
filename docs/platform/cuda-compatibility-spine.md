@@ -42,5 +42,7 @@ Current corpus gate:
 - Device-side launches now parse into IR and can run in CPU reference when
   `referenceDynamicParallelism` is enabled; WebGPU still rejects them until
   host-side multi-dispatch orchestration lands.
+- CUDA runtime calls such as `cudaDeviceSynchronize` and `cudaMemcpyPeerAsync`
+  classify as runtime orchestration gaps, not generic unsupported calls.
 - Remaining failures group cleanly: dynamic parallelism/runtime launches,
   cooperative groups/grid sync, and one incomplete pseudocode symbol.

@@ -58,6 +58,7 @@ const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("unsupported-texture", "texture", "Texture/surface access", "unsupported", false, true, "Future texture binding lowering."),
   feature("unsupported-cooperative-groups", "subgroup", "Cooperative groups", "unsupported", false, true, "Future group semantic IR."),
   feature("unsupported-dynamic-parallelism", "runtime", "Dynamic parallelism", "unsupported", false, true, "Future device enqueue + host launch loop."),
+  feature("unsupported-cuda-runtime", "runtime", "CUDA runtime call", "unsupported", false, true, "Future host-side runtime orchestration."),
   feature("unsupported-cufft", "library", "cuFFT library island", "unsupported", false, true, "Future WGSL FFT library lowering."),
   feature("unsupported-curand", "library", "cuRAND library island", "unsupported", false, true, "Future counter RNG library lowering."),
 ];

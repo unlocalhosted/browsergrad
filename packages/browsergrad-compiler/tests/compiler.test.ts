@@ -332,6 +332,15 @@ __global__ void bad(float* x) {
 }`));
     expect(unsupportedCall.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-call");
 
+    const runtimeCopy = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(float* dst, float* src, int device) {
+  if (threadIdx.x < 1) { cudaMemcpyPeerAsync(dst, device, src, 0, sizeof(float), 0); }
+}`));
+    expect(runtimeCopy.diagnostics).toContainEqual(expect.objectContaining({
+      code: "unsupported-cuda-runtime",
+      severity: "error",
+    }));
+
     const scalarParamWrite = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(float* x, int n) {
   if (threadIdx.x < 1) { n = 2; x[0] = 1.0; }
@@ -838,6 +847,7 @@ __global__ void parent(float *x) {
     dim3 grid(1);
     dim3 block(2);
     child<<<grid, block>>>(x);
+    cudaDeviceSynchronize();
   }
 }`, {
       kernelName: "parent",
@@ -861,7 +871,33 @@ __global__ void parent(float *x) {
       compiled,
       { buffers: { x: new Float32Array([1, 2]) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
-    )).rejects.toThrow("dynamic parallelism is reference-only");
+    )).rejects.toThrow("CUDA runtime orchestration is reference-only");
+  });
+
+  it("treats cudaDeviceSynchronize as reference-only runtime orchestration", () => {
+    const source = `
+__global__ void syncOnly(float *x) {
+  if (threadIdx.x < 1) {
+    cudaDeviceSynchronize();
+    x[0] = 9.0f;
+  }
+}`;
+    expect(() => compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] })).toThrow(CudaLiteCompilerError);
+    const compiled = compileCudaLiteKernel(source, {
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([0]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics).toContainEqual(expect.objectContaining({
+      code: "unsupported-cuda-runtime",
+      severity: "warning",
+    }));
+    expect([...result.buffers.x as Float32Array]).toEqual([9]);
   });
 
   it("lowers named dynamic extern shared memory when launch metadata supplies its size", () => {

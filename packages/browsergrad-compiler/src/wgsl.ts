@@ -767,6 +767,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   switch (name) {
     case "__syncthreads":
       return "workgroupBarrier()";
+    case "cudaDeviceSynchronize":
+      return "0";
+    case "cudaMemcpyPeerAsync":
+      return "0";
     case "sqrtf":
       return `sqrt(${args.join(", ")})`;
     case "expf":

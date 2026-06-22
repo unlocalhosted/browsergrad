@@ -95,12 +95,12 @@ export async function runCompiledKernelWebGpu(
 }
 
 function rejectReferenceOnlyRuntime(compiled: CompiledCudaLiteKernel): void {
-  const diagnostic = compiled.diagnostics.find((item) => item.code === "unsupported-dynamic-parallelism");
+  const diagnostic = compiled.diagnostics.find((item) => item.code === "unsupported-dynamic-parallelism" || item.code === "unsupported-cuda-runtime");
   if (!diagnostic) return;
-  throw new CudaLiteCompilerError("dynamic parallelism is reference-only; WebGPU host orchestration is not implemented yet", [{
+  throw new CudaLiteCompilerError("CUDA runtime orchestration is reference-only; WebGPU host orchestration is not implemented yet", [{
     ...diagnostic,
     severity: "error",
-    message: "dynamic parallelism is reference-only; WebGPU host orchestration is not implemented yet",
+    message: "CUDA runtime orchestration is reference-only; WebGPU host orchestration is not implemented yet",
   }]);
 }
 
