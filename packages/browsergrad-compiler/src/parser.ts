@@ -493,7 +493,7 @@ class Parser {
         span: mergeSpans(start, expression.span),
       } satisfies CudaLiteCastExpression;
     }
-    if (["-", "+", "!", "&"].includes(token.value)) {
+    if (["-", "+", "!", "&", "*"].includes(token.value)) {
       const op = this.advance().value as CudaLiteUnaryExpression["operator"];
       const argument = this.parsePrefix();
       return { kind: "unary", operator: op, argument, span: mergeSpans(token.span, argument.span) };

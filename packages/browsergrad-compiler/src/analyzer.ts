@@ -1013,6 +1013,14 @@ function validateNonCallExpression(
         validateLValueExpression(expression.argument, scope, diagnostics, walkExpression);
         return { kind: "address" };
       }
+      if (expression.operator === "*") {
+        const info = walkExpression(expression.argument, scope);
+        if (info.kind !== "pointer" && info.kind !== "pool-pointer") {
+          diagnostics.push(error("unsupported-deref-target", "unary * expects a pointer expression", expression.argument.span));
+          return { kind: "unknown" };
+        }
+        return { kind: "scalar", valueType: info.valueType };
+      }
       const info = walkExpression(expression.argument, scope);
       validateScalarOperand(info, expression.argument.span, diagnostics);
       return { kind: "scalar", valueType: info.valueType };

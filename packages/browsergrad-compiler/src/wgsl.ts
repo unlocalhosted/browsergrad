@@ -449,6 +449,7 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       return emitCall(expression, context);
     case "unary":
       if (expression.operator === "&") return `&${emitExpression(expression.argument, context, "lvalue")}`;
+      if (expression.operator === "*") return emitDeref(expression.argument, context);
       return `(${expression.operator}${emitExpression(expression.argument, context)})`;
     case "binary":
       return `(${emitExpression(expression.left, context)} ${expression.operator} ${emitExpression(expression.right, context)})`;
@@ -624,6 +625,28 @@ function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "va
     return uniformType === "bool" ? `(params.${name} != 0u)` : `params.${name}`;
   }
   return name;
+}
+
+function emitDeref(expression: CudaLiteExpression, context: EmitContext): string {
+  if (expression.kind === "identifier") {
+    const param = context.paramFor(expression.name);
+    const access = `${expression.name}[0]`;
+    if (param && context.ir.atomicParams.includes(param.name)) {
+      const loaded = `atomicLoad(&${access})`;
+      return param.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
+    }
+    return access;
+  }
+  if (expression.kind === "cast" && expression.pointer) {
+    return emitPoolRead({
+      poolName: poolPointerExpressionInfo(expression.expression, context)?.poolName ?? "",
+      pointerExpression: expression.expression,
+      indexExpression: { kind: "number", value: 0, raw: "0", span: expression.span },
+      valueType: expression.valueType,
+      ...(poolPointerExpressionInfo(expression.expression, context)?.rawBuffer ? { rawBuffer: true } : {}),
+    }, context);
+  }
+  return `*${emitExpression(expression, context)}`;
 }
 
 function emitMember(expression: Extract<CudaLiteExpression, { kind: "member" }>, context: EmitContext): string {

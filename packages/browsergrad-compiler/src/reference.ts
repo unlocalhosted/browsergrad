@@ -336,6 +336,7 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
     }
     case "unary": {
       if (expression.operator === "&") return 0;
+      if (expression.operator === "*") return evalDeref(expression.argument, context);
       const value = evalNumber(expression.argument, context);
       if (expression.operator === "-") return -value;
       if (expression.operator === "+") return value;
@@ -360,6 +361,19 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
     case "call":
       return evalCall(expression, context);
   }
+}
+
+function evalDeref(expression: CudaLiteExpression, context: ThreadContext): EvalValue {
+  if (expression.kind === "identifier") {
+    if (context.buffers.has(expression.name)) return readLValue({ name: expression.name, space: "buffer", index: 0 }, context);
+    const local = context.locals.get(expression.name);
+    if (isPoolPointer(local)) return readLValue({ name: local.poolName, space: "pool", index: Math.trunc(local.byteOffset / 4), valueType: "float" }, context);
+  }
+  if (expression.kind === "cast" && expression.pointer) {
+    const pointer = valueAsPoolPointer(evalExpression(expression.expression, context), "pool pointer");
+    return readLValue({ name: pointer.poolName, space: "pool", index: Math.trunc(pointer.byteOffset / 4), valueType: expression.valueType }, context);
+  }
+  throw compilerFailure("unsupported pointer dereference");
 }
 
 function evalNumber(expression: CudaLiteExpression, context: ThreadContext): number {

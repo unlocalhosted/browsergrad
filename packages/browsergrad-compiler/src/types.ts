@@ -235,7 +235,7 @@ export interface CudaLiteCallExpression {
 
 export interface CudaLiteUnaryExpression {
   readonly kind: "unary";
-  readonly operator: "-" | "+" | "!" | "&";
+  readonly operator: "-" | "+" | "!" | "&" | "*";
   readonly argument: CudaLiteExpression;
   readonly span: SourceSpan;
 }

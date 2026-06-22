@@ -166,6 +166,26 @@ describe("CUDA-lite compiler", () => {
     expect([...result.buffers.offset as Uint32Array]).toEqual([8]);
   });
 
+  it("supports unary pointer dereference in scalar expressions", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void derefKernel(const int* n, float* out) {
+  if (threadIdx.x < *n) { out[0] = 1.0f; }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          n: new Int32Array([1]),
+          out: new Float32Array(1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("i32(local_id.x) < n[0]");
+    expect([...result.buffers.out as Float32Array]).toEqual([1]);
+  });
+
   it("returns stable diagnostics for unsupported unsafe cases", () => {
     const constWrite = parseCudaLite(`
 __global__ void bad(const float* x) {
