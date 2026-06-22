@@ -278,9 +278,9 @@ __global__ void syncOnly(float *x) {
   it("runs host-lifted dynamic child launch through WebGPU sequence", async () => {
     if (!deviceCheck.available) return;
     const source = `
-__global__ void child(float *x) {
+__global__ void child(float *dst) {
   int idx = threadIdx.x;
-  if (idx < 2) { x[idx] += 1.0f; }
+  if (idx < 2) { dst[idx] += 1.0f; }
 }
 __global__ void parent(float *x) {
   if (threadIdx.x < 1) {

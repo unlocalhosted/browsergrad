@@ -138,11 +138,14 @@ async function tryRunHostLiftedDynamicLaunch(
     if (!childRuntime.operations.every((operation) => operation.kind === "device-sync")) return undefined;
     const childInput = createChildKernelInput(childKernel.params, item.statement, item.env, input);
     if (!childInput) return undefined;
-    const childWgslInput = createWgslRunInput(childCompiled, childInput);
-    for (const [name, value] of Object.entries(childWgslInput.buffers)) buffers[name] = value;
+    const childWgslInput = createWgslRunInput(childCompiled, childInput.input);
+    for (const [name, value] of Object.entries(childWgslInput.buffers)) {
+      buffers[childInput.storageAliases[name] ?? name] = value;
+    }
     steps.push({
       program: childCompiled.wgslProgram,
       launch: { dispatchCount: dispatchCountForLaunch({ gridDim: childGrid, blockDim: childBlock }) },
+      storageAliases: childInput.storageAliases,
       ...(childWgslInput.uniforms === undefined ? {} : { uniforms: childWgslInput.uniforms }),
     });
   }
@@ -208,18 +211,20 @@ function createChildKernelInput(
   statement: CudaLiteKernelLaunchStatement,
   env: ReadonlyMap<string, HostEvalValue>,
   input: CompiledKernelInput,
-): CompiledKernelInput | undefined {
+): { readonly input: CompiledKernelInput; readonly storageAliases: Readonly<Record<string, string>> } | undefined {
   const scalars: Record<string, number> = {};
   const buffers: Record<string, WgslTypedArray> = {};
+  const storageAliases: Record<string, string> = {};
   for (const [index, param] of params.entries()) {
     const arg = statement.args[index];
     if (!arg) return undefined;
     if (param.pointer) {
       const root = arg.kind === "identifier" ? rootIdentifier(arg) : undefined;
-      if (!root || root !== param.name) return undefined;
+      if (!root) return undefined;
       const buffer = input.buffers[root];
       if (!buffer) return undefined;
       buffers[param.name] = buffer;
+      if (root !== param.name) storageAliases[param.name] = root;
     } else {
       const value = evaluateHostNumber(arg, env, input);
       if (value === undefined) return undefined;
@@ -227,9 +232,12 @@ function createChildKernelInput(
     }
   }
   return {
-    ...input,
-    buffers,
-    scalars: { ...input.scalars, ...scalars },
+    input: {
+      ...input,
+      buffers,
+      scalars: { ...input.scalars, ...scalars },
+    },
+    storageAliases,
   };
 }
 
