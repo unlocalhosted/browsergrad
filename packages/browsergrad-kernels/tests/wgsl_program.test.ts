@@ -61,6 +61,7 @@ describe("generic WGSL kernel programs", () => {
 
     expect(result.webgpu).toBe(true);
     expect(result.shaderF16).toBe(true);
+    expect(result.float16Array).toBe(typeof Float16Array !== "undefined");
     expect(result.subgroups).toBe(true);
     expect(result.features).toEqual(["shader-f16", "subgroups"]);
   });

@@ -9,6 +9,7 @@ export type WgslTypedArray = WgslFloat16Array | Float32Array | Int32Array | Uint
 export interface KernelFeatureSet {
   readonly webgpu: boolean;
   readonly shaderF16: boolean;
+  readonly float16Array: boolean;
   readonly subgroups: boolean;
   readonly compatibilityMode: boolean;
   readonly features: readonly string[];
@@ -346,6 +347,7 @@ function createFeatureSet(
   return {
     webgpu,
     shaderF16: features.includes("shader-f16"),
+    float16Array: getFloat16ArrayConstructor() !== undefined,
     subgroups: features.includes("subgroups"),
     compatibilityMode,
     features: [...features].sort(),
@@ -360,7 +362,7 @@ function bytesFromBufferSource(source: ArrayBuffer | ArrayBufferView): Uint8Arra
 function typedArrayFromBytes(type: WgslValueType, bytes: ArrayBuffer): WgslTypedArray {
   switch (type) {
     case "f16":
-      return new Float16Array(bytes);
+      return new (requireFloat16ArrayConstructor("f16 readback"))(bytes);
     case "f32":
       return new Float32Array(bytes);
     case "i32":
@@ -371,7 +373,7 @@ function typedArrayFromBytes(type: WgslValueType, bytes: ArrayBuffer): WgslTyped
 }
 
 function validateTypedArray(data: WgslTypedArray, binding: Extract<WgslKernelBinding, { kind: "storage" }>): void {
-  if (binding.valueType === "f16" && !(data instanceof Float16Array)) {
+  if (binding.valueType === "f16" && !isFloat16Array(data)) {
     throw new KernelError(`storage buffer ${binding.name} expects Float16Array`);
   }
   if (binding.valueType === "f32" && !(data instanceof Float32Array)) {
@@ -416,6 +418,21 @@ function validateValueType(type: WgslValueType, name: string): void {
   if (type !== "f16" && type !== "f32" && type !== "i32" && type !== "u32") {
     throw new KernelError(`${name} has unsupported WGSL value type: ${String(type)}`);
   }
+}
+
+function isFloat16Array(data: WgslTypedArray): boolean {
+  const ctor = getFloat16ArrayConstructor();
+  return ctor !== undefined && data instanceof ctor;
+}
+
+function requireFloat16ArrayConstructor(context: string): Float16ArrayConstructor {
+  const ctor = getFloat16ArrayConstructor();
+  if (!ctor) throw new KernelError(`Float16Array runtime support is required for ${context}`);
+  return ctor;
+}
+
+function getFloat16ArrayConstructor(): Float16ArrayConstructor | undefined {
+  return (globalThis as typeof globalThis & { readonly Float16Array?: Float16ArrayConstructor }).Float16Array;
 }
 
 function validateIdentifier(value: string, name: string): void {
