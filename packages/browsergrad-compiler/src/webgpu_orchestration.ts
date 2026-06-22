@@ -32,6 +32,8 @@ export type CudaWebGpuExecutionPlanKind =
   | "host-dynamic-launch"
   | "host-peer-copy";
 
+export type CudaWebGpuExecutionMode = "direct" | "host-orchestrated" | "unsupported";
+
 export type CudaWebGpuExecutionBlockerKind =
   | "launch"
   | "grid-sync"
@@ -58,6 +60,16 @@ export type CudaWebGpuExecutionPlan =
       readonly blockers: readonly CudaWebGpuExecutionBlocker[];
       readonly diagnostics: readonly CudaLiteDiagnostic[];
     };
+
+export interface CudaWebGpuExecutionStatus {
+  readonly canRunOnWebGpu: boolean;
+  readonly mode: CudaWebGpuExecutionMode;
+  readonly kind?: CudaWebGpuExecutionPlanKind;
+  readonly requiresHostOrchestration: boolean;
+  readonly reason?: string;
+  readonly blockers: readonly CudaWebGpuExecutionBlocker[];
+  readonly diagnostics: readonly CudaLiteDiagnostic[];
+}
 
 export interface CudaWebGpuExecutionPlanOptions {
   readonly compileKernel?: (
@@ -158,6 +170,31 @@ export function createCudaWebGpuExecutionPlan(
   if (unsupported) return unsupported;
 
   return createSingleDispatchWebGpuPlan(compiled, input, launch);
+}
+
+export function summarizeCudaWebGpuExecutionPlan(
+  plan: CudaWebGpuExecutionPlan,
+): CudaWebGpuExecutionStatus {
+  if (!plan.supported) {
+    return {
+      canRunOnWebGpu: false,
+      mode: "unsupported",
+      requiresHostOrchestration: false,
+      reason: plan.reason,
+      blockers: plan.blockers,
+      diagnostics: plan.diagnostics,
+    };
+  }
+
+  const requiresHostOrchestration = plan.kind !== "single-dispatch";
+  return {
+    canRunOnWebGpu: true,
+    mode: requiresHostOrchestration ? "host-orchestrated" : "direct",
+    kind: plan.kind,
+    requiresHostOrchestration,
+    blockers: [],
+    diagnostics: [],
+  };
 }
 
 export function normalizeCudaWebGpuReadback(

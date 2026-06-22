@@ -73,3 +73,6 @@
 - Added `cudaLiteFeatureOptionsFromKernelFeatures()` and
   `compileCudaLiteOptionsFromKernelFeatures()` so platforms can feed
   `detectKernelFeatures()` results directly into CUDA-lite compile gates.
+- Added `summarizeCudaWebGpuExecutionPlan()` so platforms can distinguish direct
+  WebGPU, host-orchestrated WebGPU, and unsupported plans without misusing the
+  conservative lowering plan.

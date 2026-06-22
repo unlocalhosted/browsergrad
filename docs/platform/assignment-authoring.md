@@ -78,6 +78,8 @@ import { detectKernelFeatures } from "@unlocalhosted/browsergrad-kernels";
 import {
   compileCudaLiteKernel,
   compileCudaLiteOptionsFromKernelFeatures,
+  createCudaWebGpuExecutionPlan,
+  summarizeCudaWebGpuExecutionPlan,
 } from "@unlocalhosted/browsergrad-compiler";
 import {
   browserGpuCapabilities,
@@ -105,10 +107,16 @@ const compiled = compileCudaLiteKernel(
     workgroupSize: [8, 1, 1],
   }),
 );
+const executionStatus = summarizeCudaWebGpuExecutionPlan(
+  createCudaWebGpuExecutionPlan(compiled, input, launch),
+);
 ```
 The same `features` object should feed both capability labels and compiler
 options. Platform code should not duplicate `shader-f16`, subgroup, or
-compatibility flag strings.
+compatibility flag strings. Use `executionStatus`, not
+`compiled.loweringPlan.canRunOnGpu`, for learner-facing WebGPU readiness because
+host-orchestrated plans can run real WebGPU even when direct lowering is
+conservatively marked as unsupported.
 Use `assignmentRubricKind()` to route Python, JavaScript, and unknown rubric
 paths to the right execution substrate.
 Use `assignmentRunnerRoute(plan)` when the platform wants one branch key:

@@ -33,6 +33,7 @@ import {
   prepareCompiledKernelWebGpu,
   runCompiledKernelReference,
   runCompiledKernelWebGpu,
+  summarizeCudaWebGpuExecutionPlan,
 } from "@unlocalhosted/browsergrad-compiler";
 
 const source = `
@@ -63,7 +64,8 @@ const launch = { gridDim: [1, 1, 1], blockDim: [8, 1, 1] } as const;
 
 const reference = runCompiledKernelReference(compiled, input, launch);
 const plan = createCudaWebGpuExecutionPlan(compiled, input, launch);
-console.log(plan.supported && plan.kind);
+const status = summarizeCudaWebGpuExecutionPlan(plan);
+console.log(status.canRunOnWebGpu, status.mode, status.kind);
 const gpu = await runCompiledKernelWebGpu(device, compiled, input, launch);
 ```
 
@@ -74,6 +76,10 @@ Use `compileCudaLiteOptionsFromKernelFeatures()` to pass browser/device facts
 from `detectKernelFeatures()` into the compiler. This keeps `shader-f16`,
 subgroup, and compatibility-mode gates aligned with the runtime instead of
 duplicating string flags in platform code.
+Use `summarizeCudaWebGpuExecutionPlan()` for platform readiness UI. A kernel can
+have `compiled.loweringPlan.canRunOnGpu === false` because it contains runtime
+gaps, while a host-orchestrated WebGPU plan can still run it through real GPU
+passes.
 Fixed thread-local arrays lower to WGSL function arrays and CPU-reference typed
 arrays, so small per-thread scratch patterns do not need shared memory.
 

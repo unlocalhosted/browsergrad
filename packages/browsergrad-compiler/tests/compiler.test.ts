@@ -18,6 +18,7 @@ import {
   parseCudaLite,
   runCompiledKernelReference,
   runCompiledKernelWebGpu,
+  summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
 } from "../src/index";
 
@@ -121,6 +122,20 @@ describe("CUDA-lite compiler", () => {
     expect(compiled.wgsl).toContain("var<storage, read> x: array<f32>;");
     expect(compiled.wgsl).toContain("var<storage, read_write> y: array<f32>;");
     expect(compiled.wgsl).toContain("params.a");
+    const directPlan = createCudaWebGpuExecutionPlan(
+      compiled,
+      {
+        buffers: { x: new Float32Array(4), y: new Float32Array(4) },
+        scalars: { a: 2, n: 4 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    );
+    expect(summarizeCudaWebGpuExecutionPlan(directPlan)).toMatchObject({
+      canRunOnWebGpu: true,
+      mode: "direct",
+      kind: "single-dispatch",
+      requiresHostOrchestration: false,
+    });
   });
 
   it("runs SAXPY in the lockstep CPU reference interpreter", () => {
@@ -596,23 +611,29 @@ __global__ void gridSync(float *scratch, float *out) {
       referenceGridSync: true,
       workgroupSize: [1, 1, 1],
     });
-    const result = runCompiledKernelReference(
-      compiled,
-      {
-        buffers: {
-          scratch: new Float32Array(2),
-          out: new Float32Array(1),
-        },
+    const input = {
+      buffers: {
+        scratch: new Float32Array(2),
+        out: new Float32Array(1),
       },
-      { gridDim: [2, 1, 1], blockDim: [1, 1, 1] },
-    );
+    };
+    const launch = { gridDim: [2, 1, 1], blockDim: [1, 1, 1] } as const;
+    const result = runCompiledKernelReference(compiled, input, launch);
 
+    expect(compiled.loweringPlan.canRunOnGpu).toBe(false);
     expect(compiled.diagnostics).toContainEqual(expect.objectContaining({
       code: "unsupported-cooperative-groups",
       severity: "warning",
     }));
     expect([...result.buffers.out as Float32Array]).toEqual([3]);
     expect(createCudaGridSyncPhasePlan(compiled.ir).supported).toBe(true);
+    const webGpuPlan = createCudaWebGpuExecutionPlan(compiled, input, launch);
+    expect(summarizeCudaWebGpuExecutionPlan(webGpuPlan)).toMatchObject({
+      canRunOnWebGpu: true,
+      mode: "host-orchestrated",
+      kind: "grid-sync-phases",
+      requiresHostOrchestration: true,
+    });
   });
 
   it("runs cudaMemcpyPeerAsync in CPU reference when explicitly enabled", async () => {
@@ -860,12 +881,19 @@ __global__ void parent(float *x, int n) {
       code: "launch-grid-dim-invalid",
       message: "launch.gridDim[0] must be a positive integer",
     }));
-    expect(createCudaWebGpuExecutionPlan(compiled, input, badGrid)).toMatchObject({
+    const badGridPlan = createCudaWebGpuExecutionPlan(compiled, input, badGrid);
+    expect(badGridPlan).toMatchObject({
       supported: false,
       blockers: [{
         kind: "launch",
         code: "launch-grid-dim-invalid",
       }],
+    });
+    expect(summarizeCudaWebGpuExecutionPlan(badGridPlan)).toMatchObject({
+      canRunOnWebGpu: false,
+      mode: "unsupported",
+      requiresHostOrchestration: false,
+      blockers: [expect.objectContaining({ code: "launch-grid-dim-invalid" })],
     });
     expect(() => validateCudaKernelLaunch(badBlock, compiled.ir.workgroupSize)).toThrow(CudaLiteCompilerError);
     expect(() => runCompiledKernelReference(compiled, input, badGrid)).toThrow("launch.gridDim[0] must be a positive integer");

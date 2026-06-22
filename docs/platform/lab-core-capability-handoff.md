@@ -247,6 +247,9 @@ const compilerOptions = compileCudaLiteOptionsFromKernelFeatures(features, {
 ```
 Use the same `features` object for capability preflight and CUDA-lite compiler
 gates. This avoids drift between "lab runnable" UI and actual WGSL emission.
+For compiled CUDA-lite kernels, derive learner-facing WebGPU status from
+`summarizeCudaWebGpuExecutionPlan()`, not `compiled.loweringPlan.canRunOnGpu`,
+because host-orchestrated plans can still run as real WebGPU passes.
 For overall readiness status, selected `external` capabilities produce
 `external-only`, selected `simulated` capabilities produce `simulated`, and
 failed capability preflight becomes `blocked`.

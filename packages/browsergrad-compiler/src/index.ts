@@ -96,11 +96,14 @@ export {
   createCudaWebGpuExecutionPlan,
   normalizeCudaWebGpuReadbackNames,
   normalizeCudaWebGpuReadback,
+  summarizeCudaWebGpuExecutionPlan,
   type CudaWebGpuExecutionBlocker,
   type CudaWebGpuExecutionBlockerKind,
+  type CudaWebGpuExecutionMode,
   type CudaWebGpuExecutionPlan,
   type CudaWebGpuExecutionPlanKind,
   type CudaWebGpuExecutionPlanOptions,
+  type CudaWebGpuExecutionStatus,
 } from "./webgpu_orchestration.js";
 export { emitKernelIrWgsl, type EmitKernelIrWgslOptions, type KernelIrWgslOutput } from "./wgsl.js";
 export {
