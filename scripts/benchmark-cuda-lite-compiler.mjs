@@ -21,6 +21,7 @@ const p95MaxExpectations = parseBenchmarkThresholds(args.get("--expect-p95-max")
 const root = findRepoRoot(process.cwd());
 const compilerUrl = pathToFileURL(path.join(root, "packages/browsergrad-compiler/dist/index.js")).href;
 const {
+  createCudaLiteCompilerCache,
   compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   createCudaHostDynamicLaunchPlan,
@@ -30,6 +31,8 @@ const {
 
 function main() {
   const saxpyCompiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [256, 1, 1] });
+  const compilerCache = createCudaLiteCompilerCache({ maxEntries: 8 });
+  compilerCache.compile(SAXPY, { workgroupSize: [256, 1, 1] });
   const dynamicCompiled = compileCudaLiteKernelForWebGpu(DYNAMIC_OFFSET, {
     kernelName: "parent",
     workgroupSize: [1, 1, 1],
@@ -42,6 +45,10 @@ function main() {
     {
       name: "compile:saxpy",
       fn: () => compileCudaLiteKernel(SAXPY, { workgroupSize: [256, 1, 1] }),
+    },
+    {
+      name: "compile-cache-hit:saxpy",
+      fn: () => compilerCache.compile(SAXPY, { workgroupSize: [256, 1, 1] }),
     },
     {
       name: "compile:tiled-matmul-shared",
