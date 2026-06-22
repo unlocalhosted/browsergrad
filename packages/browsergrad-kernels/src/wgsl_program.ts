@@ -449,8 +449,15 @@ export async function runWgslKernelProgramSequence(
 
     gpu.queue.submit([encoder.finish()]);
     const output: Record<string, WgslTypedArray> = {};
+    const mapResults = await Promise.allSettled(reads.map((read) => read.readBuffer.mapAsync(GPUMapMode.READ)));
+    const failedMap = mapResults.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failedMap) {
+      for (let i = 0; i < mapResults.length; i++) {
+        if (mapResults[i]?.status === "fulfilled") reads[i]?.readBuffer.unmap();
+      }
+      throw failedMap.reason;
+    }
     for (const read of reads) {
-      await read.readBuffer.mapAsync(GPUMapMode.READ);
       try {
         const bytes = read.readBuffer.getMappedRange(0, read.byteLength).slice(0);
         output[read.name] = typedArrayFromBytes(read.binding.valueType, bytes);
