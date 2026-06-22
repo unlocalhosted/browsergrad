@@ -143,6 +143,13 @@ export function lowerCudaLiteToKernelIr(
   options: CudaLiteAnalyzeOptions = {},
 ): KernelIrModule {
   const analysis = analyzeCudaLite(ast, options);
+  return lowerAnalyzedCudaLiteToKernelIr(analysis, options);
+}
+
+export function lowerAnalyzedCudaLiteToKernelIr(
+  analysis: CudaLiteAnalysis,
+  options: CudaLiteAnalyzeOptions = {},
+): KernelIrModule {
   const errors = analysis.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
   if (errors.length > 0) {
     throw new CudaLiteCompilerError("CUDA-lite analysis failed", errors);

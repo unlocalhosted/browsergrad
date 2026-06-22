@@ -127,7 +127,7 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
     ...(paramsBinding === undefined ? {} : { paramsBinding }),
     bindingFor(name) {
       const binding = bindingByName.get(name);
-      if (binding === undefined) throw new Error(`missing binding for ${name}`);
+      if (binding === undefined) throw featureError("missing-wgsl-binding", `missing WGSL binding for '${name}'`);
       return binding;
     },
     paramFor(name) {

@@ -143,6 +143,20 @@ __global__ void bad(float* x) {
     expect(invalidShared.diagnostics.map((diagnostic) => diagnostic.code)).toContain("invalid-array-dimension");
   });
 
+  it("rejects parser edge cases with clear errors", () => {
+    expect(() => parseCudaLite(`
+__global__ void bad(float* x) {
+  {
+    x[0] = 1.0;
+  }
+}`)).toThrow(/standalone blocks/);
+
+    expect(() => parseCudaLite(`
+__global__ void bad(float* x) {
+  if (threadIdx.x < 1) { x[0] = 1.2.3; }
+}`)).toThrow(/invalid numeric literal/);
+  });
+
   it("formats diagnostics with source snippets", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(const float* x) {

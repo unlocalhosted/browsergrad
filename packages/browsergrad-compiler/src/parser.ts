@@ -110,12 +110,7 @@ class Parser {
 
   private parseStatement(): CudaLiteStatement {
     if (this.match("{")) {
-      const block = this.parseBlock();
-      return {
-        kind: "expr",
-        expression: { kind: "number", value: 0, raw: "0", span: block[0]?.span ?? this.previous().span },
-        span: block[0]?.span ?? this.previous().span,
-      };
+      this.fail("standalone blocks are not supported in CUDA-lite v0", this.peek().span);
     }
     if (this.match("if")) return this.parseIf();
     if (this.match("for")) return this.parseFor();
@@ -176,8 +171,8 @@ class Parser {
     const name = this.expectIdentifier("variable name");
     const dimensions: number[] = [];
     while (this.consumeIf("[")) {
-      const size = this.expectNumber("array size");
-      dimensions.push(Number(size.value));
+      const size = this.parseNumberLiteral("array size");
+      dimensions.push(size.value);
       this.expect("]");
     }
     const init = this.consumeIf("=") ? this.parseExpression() : undefined;
@@ -272,8 +267,8 @@ class Parser {
       return expression;
     }
     if (this.peek().kind === "number") {
-      const token = this.advance();
-      return { kind: "number", value: Number(token.value), raw: token.value, span: token.span };
+      const token = this.parseNumberLiteral("numeric literal");
+      return { kind: "number", value: token.value, raw: token.raw, span: token.span };
     }
     const ident = this.expectIdentifier("expression");
     return { kind: "identifier", name: ident.value, span: ident.span };
@@ -300,6 +295,13 @@ class Parser {
     const token = this.peek();
     if (token.kind !== "number") this.fail(`expected ${label}`, token.span);
     return this.advance();
+  }
+
+  private parseNumberLiteral(label: string): { readonly value: number; readonly raw: string; readonly span: SourceSpan } {
+    const token = this.expectNumber(label);
+    const value = Number(token.value);
+    if (!Number.isFinite(value)) this.fail(`invalid ${label}: ${token.value}`, token.span);
+    return { value, raw: token.value, span: token.span };
   }
 
   private expect(value: string): Token {

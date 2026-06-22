@@ -2,7 +2,7 @@ import {
   runWgslKernelProgram,
   type KernelDevice,
 } from "@unlocalhosted/browsergrad-kernels";
-import { analyzeCudaLite, lowerCudaLiteToKernelIr } from "./analyzer.js";
+import { analyzeCudaLite, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
 import { parseCudaLite } from "./parser.js";
 import { runCompiledKernelReference } from "./reference.js";
 import { emitKernelIrWgsl } from "./wgsl.js";
@@ -29,7 +29,7 @@ export function compileCudaLiteKernel(
       errors,
     );
   }
-  const ir = lowerCudaLiteToKernelIr(ast, options);
+  const ir = lowerAnalyzedCudaLiteToKernelIr(analysis, options);
   const emitted = emitKernelIrWgsl(
     ir,
     options.features === undefined ? {} : { features: options.features },
