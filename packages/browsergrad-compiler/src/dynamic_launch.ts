@@ -27,6 +27,7 @@ export interface CudaHostDynamicLaunch {
   readonly blockDim: readonly [number, number, number];
   readonly input: CompiledKernelInput;
   readonly storageAliases: Readonly<Record<string, string>>;
+  readonly pointerBaseOffsets: Readonly<Record<string, number>>;
 }
 
 interface HostLiftedLaunch {
@@ -74,6 +75,7 @@ export function createCudaHostDynamicLaunchPlan(
       blockDim: childBlock,
       input: childInput.input,
       storageAliases: childInput.storageAliases,
+      pointerBaseOffsets: childInput.pointerBaseOffsets,
     });
   }
   return { supported: true, launches: planned };
@@ -206,18 +208,23 @@ function createChildKernelInput(
   statement: CudaLiteKernelLaunchStatement,
   env: ReadonlyMap<string, HostEvalValue>,
   input: CompiledKernelInput,
-): { readonly input: CompiledKernelInput; readonly storageAliases: Readonly<Record<string, string>> } | undefined {
+): {
+  readonly input: CompiledKernelInput;
+  readonly storageAliases: Readonly<Record<string, string>>;
+  readonly pointerBaseOffsets: Readonly<Record<string, number>>;
+} | undefined {
   const scalars: Record<string, number> = {};
   const buffers: Record<string, WgslTypedArray> = {};
   const memoryPools: Record<string, MemoryPoolInput> = {};
   const storageAliases: Record<string, string> = {};
+  const pointerBaseOffsets: Record<string, number> = {};
   for (const [index, param] of params.entries()) {
     const arg = statement.args[index];
     if (!arg) return undefined;
     if (param.pointer) {
-      const root = arg.kind === "identifier" ? rootIdentifier(arg) : undefined;
-      if (!root) return undefined;
       if (param.valueType === "devicepool") {
+        const root = arg.kind === "identifier" ? rootIdentifier(arg) : undefined;
+        if (!root) return undefined;
         const pool = input.memoryPools?.[root];
         if (!pool) return undefined;
         memoryPools[param.name] = pool;
@@ -227,10 +234,15 @@ function createChildKernelInput(
         }
         continue;
       }
+      const pointer = evaluatePointerArgument(arg, env, input);
+      if (!pointer) return undefined;
+      if (pointer.offset < 0) return undefined;
+      const root = pointer.root;
       const buffer = input.buffers[root];
       if (!buffer) return undefined;
       buffers[param.name] = buffer;
       if (root !== param.name) storageAliases[param.name] = root;
+      if (pointer.offset !== 0) pointerBaseOffsets[param.name] = pointer.offset;
     } else {
       const value = evaluateHostNumber(arg, env, input);
       if (value === undefined) return undefined;
@@ -245,6 +257,23 @@ function createChildKernelInput(
       scalars: { ...input.scalars, ...scalars },
     },
     storageAliases,
+    pointerBaseOffsets,
+  };
+}
+
+function evaluatePointerArgument(
+  expression: CudaLiteExpression,
+  env: ReadonlyMap<string, HostEvalValue>,
+  input: CompiledKernelInput,
+): { readonly root: string; readonly offset: number } | undefined {
+  if (expression.kind === "identifier") return { root: expression.name, offset: 0 };
+  if (expression.kind !== "binary" || (expression.operator !== "+" && expression.operator !== "-")) return undefined;
+  if (expression.left.kind !== "identifier") return undefined;
+  const offset = evaluateHostNumber(expression.right, env, input);
+  if (offset === undefined) return undefined;
+  return {
+    root: expression.left.name,
+    offset: Math.trunc(offset) * (expression.operator === "-" ? -1 : 1),
   };
 }
 

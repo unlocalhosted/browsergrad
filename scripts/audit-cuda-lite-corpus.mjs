@@ -163,6 +163,7 @@ function hostDynamicPlanCompiles(parentCompiled, dynamicPlan) {
         features: { "shader-f16": true, subgroups: true },
         workgroupSize: launch.blockDim,
         dynamicSharedMemory: inferDynamicSharedMemory(parentCompiled.ast.source),
+        pointerBaseOffsets: launch.pointerBaseOffsets,
       });
       const childRuntime = createCudaRuntimePlan(childCompiled);
       if (!childRuntime.operations.every((operation) => operation.kind === "device-sync")) return false;

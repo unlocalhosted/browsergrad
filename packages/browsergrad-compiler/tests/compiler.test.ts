@@ -1186,7 +1186,7 @@ __global__ void parent(float *x, int n) {
     expect(plan.launches.map((item) => item.kernel.name)).toEqual(["addOne", "scaleTwo"]);
   });
 
-  it("keeps pointer-offset dynamic launches reference-only for WebGPU", async () => {
+  it("plans pointer-offset dynamic launches as pointer base uniforms", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void child(float *out) {
   if (threadIdx.x < 1) { out[0] = 7.0f; }
@@ -1202,13 +1202,48 @@ __global__ void parent(float *out) {
       referenceDynamicParallelism: true,
       workgroupSize: [1, 1, 1],
     });
-
-    await expect(runCompiledKernelWebGpu(
-      {} as never,
+    const plan = createCudaHostDynamicLaunchPlan(
       compiled,
       { buffers: { out: new Float32Array([0, 0]) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
-    )).rejects.toThrow("CUDA runtime orchestration is reference-only");
+    );
+
+    expect(plan.supported).toBe(true);
+    expect(plan.launches[0]).toMatchObject({
+      pointerBaseOffsets: { out: 1 },
+      storageAliases: {},
+    });
+    const child = compileCudaLiteKernel(compiled.ast.source, {
+      kernelName: "child",
+      pointerBaseOffsets: plan.launches[0]!.pointerBaseOffsets,
+      workgroupSize: [1, 1, 1],
+    });
+    expect(child.wgsl).toContain("bg_base_out");
+  });
+
+  it("keeps negative pointer-offset dynamic launches reference-only", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(float *out) {
+  if (threadIdx.x < 1) { out[0] = 7.0f; }
+}
+__global__ void parent(float *out) {
+  if (threadIdx.x < 1) {
+    dim3 grid(1);
+    dim3 block(1);
+    child<<<grid, block>>>(out - 1);
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const plan = createCudaHostDynamicLaunchPlan(
+      compiled,
+      { buffers: { out: new Float32Array([0, 0]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(plan.supported).toBe(false);
   });
 
   it("keeps dynamic launches with parent side effects after launch reference-only", async () => {

@@ -10,6 +10,7 @@ import { analyzeCudaLite, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js"
 import { createCudaLoweringPlan } from "./compatibility.js";
 import { createCudaHostDynamicLaunchPlan } from "./dynamic_launch.js";
 import { parseCudaLite } from "./parser.js";
+import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
 import { runCompiledKernelReference } from "./reference.js";
 import { createCudaGridSyncPhasePlan, createCudaRuntimePlan } from "./runtime_plan.js";
@@ -40,7 +41,10 @@ export function compileCudaLiteKernel(
   const ir = lowerAnalyzedCudaLiteToKernelIr(analysis, options);
   const emitted = emitKernelIrWgsl(
     ir,
-    options.features === undefined ? {} : { features: options.features },
+    {
+      ...(options.features === undefined ? {} : { features: options.features }),
+      ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
+    },
   );
   const loweringPlan = createCudaLoweringPlan(analysis.diagnostics);
   return {
@@ -51,6 +55,7 @@ export function compileCudaLiteKernel(
     wgslProgram: emitted.program,
     diagnostics: analysis.diagnostics,
     loweringPlan,
+    ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
   };
 }
 
@@ -109,6 +114,7 @@ async function tryRunHostLiftedDynamicLaunch(
         kernelName: item.kernel.name,
         features: featureOptionsFor(compiled.ir.requiredFeatures),
         workgroupSize: item.blockDim,
+        pointerBaseOffsets: item.pointerBaseOffsets,
       });
     } catch {
       return undefined;
@@ -218,6 +224,14 @@ function packScalarParams(
       { name: `${param.name}_width`, valueType: "uint" as const, surface: param.name, span: param.span },
       { name: `${param.name}_height`, valueType: "uint" as const, surface: param.name, span: param.span },
     ]),
+    ...compiled.ir.params
+      .filter((param) => param.pointer && compiled.pointerBaseOffsets?.[param.name] !== undefined)
+      .map((param) => ({
+        name: pointerBaseOffsetUniformName(param.name),
+        valueType: "uint" as const,
+        pointerBase: param.name,
+        span: param.span,
+      })),
   ];
   if (scalarParams.length === 0) return new Uint8Array(0);
   const bytes = new Uint8Array(Math.max(16, scalarParams.length * 4));
@@ -226,6 +240,8 @@ function packScalarParams(
     const param = scalarParams[i]!;
     const value = "surface" in param
       ? (param.name.endsWith("_width") ? input.surfaces?.[param.surface]?.width : input.surfaces?.[param.surface]?.height)
+      : "pointerBase" in param
+      ? compiled.pointerBaseOffsets?.[param.pointerBase]
       : "pointer" in param
       ? input.scalars?.[param.name]
       : input.constants?.[param.name];

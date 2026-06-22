@@ -329,7 +329,9 @@ export interface KernelIrModule {
   readonly workgroupSize: readonly [number, number, number];
 }
 
-export interface CompileCudaLiteOptions extends CudaLiteAnalyzeOptions {}
+export interface CompileCudaLiteOptions extends CudaLiteAnalyzeOptions {
+  readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
+}
 
 export interface CompiledCudaLiteKernel {
   readonly ast: CudaLiteModule;
@@ -339,6 +341,7 @@ export interface CompiledCudaLiteKernel {
   readonly wgslProgram: WgslKernelProgram;
   readonly diagnostics: readonly CudaLiteDiagnostic[];
   readonly loweringPlan: CudaLoweringPlan;
+  readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
 }
 
 export interface KernelLaunch {

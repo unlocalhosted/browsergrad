@@ -5,6 +5,7 @@ import {
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
+import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
 import {
   CudaLiteCompilerError,
@@ -24,6 +25,7 @@ import {
 
 export interface EmitKernelIrWgslOptions {
   readonly features?: Partial<Record<"shader-f16" | "subgroups" | "compatibility", boolean>>;
+  readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
 }
 
 export interface KernelIrWgslOutput {
@@ -42,7 +44,7 @@ export function emitKernelIrWgsl(
     throw featureError("missing-feature-subgroups", "bg_subgroup_add requires WebGPU subgroups support");
   }
 
-  const context = createEmitContext(ir);
+  const context = createEmitContext(ir, options);
   const lines: string[] = [];
   if (ir.requiredFeatures.includes("shader-f16")) lines.push("enable f16;");
   if (ir.requiredFeatures.includes("subgroups")) lines.push("enable subgroups;");
@@ -184,6 +186,7 @@ interface EmitContext {
   isAtomicShared(name: string): boolean;
   pointerAliasFor(name: string): PointerAlias | undefined;
   poolPointerFor(name: string): PoolPointerAlias | undefined;
+  pointerBaseOffsetFieldFor(name: string): string | undefined;
   readonly rawPoolAllocators: readonly RawPoolAllocator[];
   readonly externalPoolNames: readonly string[];
   cooperativeGroupFor(name: string): CudaLiteCooperativeGroupDecl | undefined;
@@ -208,7 +211,7 @@ interface RawPoolAllocator {
 
 type EmitMode = "value" | "lvalue";
 
-function createEmitContext(ir: KernelIrModule): EmitContext {
+function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions = {}): EmitContext {
   const bindings: WgslKernelBindingInput[] = [];
   const bindingByName = new Map<string, number>();
   for (const param of ir.params.filter((param) => param.pointer && !isDevicePoolParam(param))) {
@@ -305,6 +308,9 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
       { name: surfaceWidthField(param.name), valueType: "uint" as const },
       { name: surfaceHeightField(param.name), valueType: "uint" as const },
     ]),
+    ...ir.params
+      .filter((param) => param.pointer && options.pointerBaseOffsets?.[param.name] !== undefined)
+      .map((param) => ({ name: pointerBaseOffsetUniformName(param.name), valueType: "uint" as const })),
   ];
   const uniformScalarNames = new Set(uniformScalars.map((scalar) => scalar.name));
   const uniformScalarTypes = new Map(uniformScalars.map((scalar) => [scalar.name, scalar.valueType] as const));
@@ -349,6 +355,9 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
     },
     poolPointerFor(name) {
       return poolPointers.get(name);
+    },
+    pointerBaseOffsetFieldFor(name) {
+      return options.pointerBaseOffsets?.[name] === undefined ? undefined : pointerBaseOffsetUniformName(name);
     },
     rawPoolAllocators,
     externalPoolNames,
@@ -475,11 +484,14 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       if (expression.target.kind === "identifier") {
         const alias = context.pointerAliasFor(expression.target.name);
         if (alias) {
-          return `${alias.rootName}[(${emitExpression(alias.baseIndex, context)}) + (${emitExpression(expression.index, context)})]`;
+          return `${alias.rootName}[${emitPointerAliasIndex(alias, expression.index, context)}]`;
         }
       }
-      const access = `${emitExpression(expression.target, context, "lvalue")}[${emitExpression(expression.index, context)}]`;
       const root = rootIdentifier(expression);
+      const index = root && expression.target.kind === "identifier"
+        ? emitPointerIndex(root, expression.index, context)
+        : emitExpression(expression.index, context);
+      const access = `${emitExpression(expression.target, context, "lvalue")}[${index}]`;
       const param = root ? context.paramFor(root) : undefined;
       if (mode === "value" && param && context.ir.atomicParams.includes(param.name)) {
         const loaded = `atomicLoad(&${access})`;
@@ -659,6 +671,18 @@ function pointerAliasForVar(statement: CudaLiteVarDecl): PointerAlias | undefine
     rootName: target.target.name,
     baseIndex: target.index,
   };
+}
+
+function emitPointerAliasIndex(alias: PointerAlias, index: CudaLiteExpression, context: EmitContext): string {
+  const base = context.pointerBaseOffsetFieldFor(alias.rootName);
+  if (!base) return `(${emitExpression(alias.baseIndex, context)}) + (${emitExpression(index, context)})`;
+  return `(params.${base} + u32(${emitExpression(alias.baseIndex, context)}) + u32(${emitExpression(index, context)}))`;
+}
+
+function emitPointerIndex(rootName: string, index: CudaLiteExpression, context: EmitContext): string {
+  const base = context.pointerBaseOffsetFieldFor(rootName);
+  if (!base) return emitExpression(index, context);
+  return `(params.${base} + u32(${emitExpression(index, context)}))`;
 }
 
 function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "value"): string {

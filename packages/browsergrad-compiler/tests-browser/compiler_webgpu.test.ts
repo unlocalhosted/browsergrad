@@ -340,6 +340,33 @@ __global__ void parent(DevicePool *pool, float *out) {
     expect([...actual.buffers.pool as Uint32Array]).toEqual([...expected.buffers.pool as Uint32Array]);
   });
 
+  it("runs host-lifted pointer-offset dynamic child launch through WebGPU sequence", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void child(float *out) {
+  if (threadIdx.x < 1) { out[0] = 7.0f; }
+}
+__global__ void parent(float *out) {
+  if (threadIdx.x < 1) {
+    dim3 grid(1);
+    dim3 block(1);
+    child<<<grid, block>>>(out + 1);
+    cudaDeviceSynchronize();
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = { buffers: { out: new Float32Array([0, 0]) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
   it("runs ordered host-lifted dynamic child launches through WebGPU sequence", async () => {
     if (!deviceCheck.available) return;
     const source = `
