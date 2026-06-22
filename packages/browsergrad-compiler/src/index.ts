@@ -58,6 +58,12 @@ export {
   type CudaLoweringPlan,
 } from "./compatibility.js";
 export { formatCudaLiteDiagnostics } from "./diagnostics.js";
+export {
+  createCudaRuntimePlan,
+  type CudaRuntimeOperation,
+  type CudaRuntimeOperationKind,
+  type CudaRuntimePlan,
+} from "./runtime_plan.js";
 export { emitKernelIrWgsl, type EmitKernelIrWgslOptions, type KernelIrWgslOutput } from "./wgsl.js";
 export {
   compileCudaLiteKernel,

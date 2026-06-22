@@ -132,6 +132,9 @@ these kernels until cooperative launch or host multi-dispatch lowering exists.
 
 Use `createCudaLoweringPlan(diagnostics)` and `describeCudaDiagnostic()` to group
 compatibility gaps by semantic family instead of raw parser messages.
+Use `createCudaRuntimePlan(compiled)` to see which kernels need host
+orchestration (`device-launch`, `device-sync`, `peer-copy`, `grid-sync`) before
+trying WebGPU single-dispatch execution.
 
 ## Browser Testing
 

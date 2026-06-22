@@ -4,6 +4,7 @@ import {
   analyzeCudaLite,
   compileCudaLiteKernel,
   createCudaLoweringPlan,
+  createCudaRuntimePlan,
   describeCudaDiagnostic,
   formatCudaLiteDiagnostics,
   parseCudaLite,
@@ -629,6 +630,41 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     )).rejects.toThrow("CUDA runtime orchestration is reference-only");
+  });
+
+  it("summarizes runtime orchestration gaps without course-specific logic", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void child(float *x) {
+  if (threadIdx.x == 0) { x[0] += 1.0f; }
+}
+__global__ void parent(float *dst, float *src) {
+  cg::thread_block block = cg::this_thread_block();
+  cg::grid_group grid = cg::this_grid();
+  if (threadIdx.x == 0) {
+    child<<<1, 1>>>(dst);
+    cudaDeviceSynchronize();
+    cudaMemcpyPeerAsync(dst, 0, src, 1, sizeof(float), 0);
+  }
+  block.sync();
+  grid.sync();
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      referenceGridSync: true,
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const plan = createCudaRuntimePlan(compiled);
+
+    expect(plan.operations.map((operation) => operation.kind)).toEqual([
+      "device-launch",
+      "device-sync",
+      "peer-copy",
+      "grid-sync",
+    ]);
+    expect(plan.canRunSingleDispatchWebGpu).toBe(false);
+    expect(plan.referenceAvailable).toBe(true);
   });
 
   it("supports cooperative-group shuffle variants and linear thread ranks", () => {

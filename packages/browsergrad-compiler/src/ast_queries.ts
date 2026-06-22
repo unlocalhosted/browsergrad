@@ -5,7 +5,7 @@ export function collectExternalDevicePoolNames(
   excluded: ReadonlySet<string> = new Set(),
 ): readonly string[] {
   const pools = new Set<string>();
-  walkStatements(statements, (expression) => {
+  walkCudaLiteExpressions(statements, (expression) => {
     if (expression.kind !== "call") return;
     const callName = expressionName(expression.callee);
     if (callName !== "deviceAllocate" && callName !== "streamOrderedAllocate") return;
@@ -17,7 +17,7 @@ export function collectExternalDevicePoolNames(
   return [...pools].sort();
 }
 
-function walkStatements(
+export function walkCudaLiteExpressions(
   statements: readonly CudaLiteStatement[],
   visitExpression: (expression: CudaLiteExpression) => void,
 ): void {
@@ -38,15 +38,15 @@ function walkStatements(
     if (statement.kind === "expr") walkExpression(statement.expression, visitExpression);
     if (statement.kind === "if") {
       walkExpression(statement.condition, visitExpression);
-      walkStatements(statement.consequent, visitExpression);
-      if (statement.alternate) walkStatements(statement.alternate, visitExpression);
+      walkCudaLiteExpressions(statement.consequent, visitExpression);
+      if (statement.alternate) walkCudaLiteExpressions(statement.alternate, visitExpression);
     }
     if (statement.kind === "for") {
       if (statement.init?.kind === "var" && statement.init.init) walkExpression(statement.init.init, visitExpression);
       else if (statement.init && statement.init.kind !== "var") walkExpression(statement.init, visitExpression);
       if (statement.condition) walkExpression(statement.condition, visitExpression);
       if (statement.update) walkExpression(statement.update, visitExpression);
-      walkStatements(statement.body, visitExpression);
+      walkCudaLiteExpressions(statement.body, visitExpression);
     }
     if (statement.kind === "return" && statement.value) walkExpression(statement.value, visitExpression);
   }
