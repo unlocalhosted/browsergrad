@@ -275,6 +275,32 @@ __global__ void syncOnly(float *x) {
     expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
   });
 
+  it("runs host-lifted cudaMemcpyPeerAsync through WebGPU sequence", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void peerCopy(float *dst, const float *src, int n) {
+  if (threadIdx.x == 0) {
+    cudaMemcpyPeerAsync(dst + 1, 1, src, 0, sizeof(float) * n, 0);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        dst: new Float32Array([0, 0, 0, 0]),
+        src: new Float32Array([2.5, 3.5]),
+      },
+      scalars: { n: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.dst as Float32Array]).toEqual([...expected.buffers.dst as Float32Array]);
+  });
+
   it("runs host-lifted dynamic child launch through WebGPU sequence", async () => {
     if (!deviceCheck.available) return;
     const source = `

@@ -6,6 +6,7 @@ import {
   createCudaGridSyncPhasePlan,
   createCudaHostDynamicLaunchPlan,
   createCudaLoweringPlan,
+  createCudaPeerCopyPlan,
   createCudaRuntimePlan,
   describeCudaDiagnostic,
   formatCudaLiteDiagnostics,
@@ -610,8 +611,7 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
       severity: "warning",
     }));
     expect([...result.buffers.dst as Float32Array]).toEqual([0, 2.5, 3.5, 0]);
-    await expect(runCompiledKernelWebGpu(
-      {} as never,
+    const plan = createCudaPeerCopyPlan(
       compiled,
       {
         buffers: {
@@ -621,7 +621,16 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
         scalars: { n: 2 },
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
-    )).rejects.toThrow("peer-copy");
+    );
+    expect(plan.supported).toBe(true);
+    expect(plan.copies[0]).toMatchObject({
+      dstRoot: "dst",
+      dstOffset: 1,
+      srcRoot: "src",
+      srcOffset: 0,
+      elementCount: 2,
+      valueType: "float",
+    });
   });
 
   it("summarizes runtime orchestration gaps without course-specific logic", () => {

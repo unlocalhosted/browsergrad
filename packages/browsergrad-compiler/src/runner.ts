@@ -1,7 +1,9 @@
 import {
+  defineWgslKernelProgram,
   runWgslKernelProgram,
   runWgslKernelProgramSequence,
   type KernelDevice,
+  type WgslKernelProgram,
   type WgslKernelSequenceStep,
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
@@ -10,6 +12,7 @@ import { analyzeCudaLite, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js"
 import { createCudaLoweringPlan } from "./compatibility.js";
 import { createCudaHostDynamicLaunchPlan } from "./dynamic_launch.js";
 import { parseCudaLite } from "./parser.js";
+import { createCudaPeerCopyPlan, type CudaPeerCopyOperation } from "./peer_copy.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
 import { runCompiledKernelReference } from "./reference.js";
@@ -84,11 +87,93 @@ export async function runCompiledKernelWebGpu(
   }
   const dynamicResult = await tryRunHostLiftedDynamicLaunch(device, compiled, input, launch);
   if (dynamicResult) return dynamicResult;
+  const peerCopyResult = await tryRunHostLiftedPeerCopy(device, compiled, input, launch);
+  if (peerCopyResult) return peerCopyResult;
   rejectReferenceOnlyRuntime(compiled);
   const wgslInput = createWgslRunInput(compiled, input);
   const dispatchCount = dispatchCountForLaunch(launch);
   const result = await runWgslKernelProgram(device, compiled.wgslProgram, wgslInput, { dispatchCount });
   return { buffers: normalizePoolReadback(compiled, result.buffers), trace: [] };
+}
+
+async function tryRunHostLiftedPeerCopy(
+  device: KernelDevice,
+  compiled: CompiledCudaLiteKernel,
+  input: CompiledKernelInput,
+  launch: KernelLaunch,
+): Promise<ReferenceKernelResult | undefined> {
+  const plan = createCudaPeerCopyPlan(compiled, input, launch);
+  if (!plan.supported || plan.copies.length === 0) return undefined;
+  const parentInput = createWgslRunInput(compiled, input);
+  const buffers: Record<string, WgslTypedArray> = { ...parentInput.buffers };
+  const steps: WgslKernelSequenceStep[] = [{
+    program: compiled.wgslProgram,
+    launch: { dispatchCount: dispatchCountForLaunch(launch) },
+    ...(parentInput.uniforms === undefined ? {} : { uniforms: parentInput.uniforms }),
+  }];
+
+  for (const copy of plan.copies) {
+    const program = definePeerCopyProgram(copy);
+    steps.push({
+      program,
+      launch: { dispatchCount: [Math.max(copy.elementCount, 1), 1, 1] },
+      storageAliases: {
+        bg_peer_dst: copy.dstRoot,
+        bg_peer_src: copy.srcRoot,
+      },
+      uniforms: { params: packPeerCopyParams(copy) },
+    });
+  }
+
+  const result = await runWgslKernelProgramSequence(
+    device,
+    steps,
+    {
+      buffers,
+      ...(parentInput.textures === undefined ? {} : { textures: parentInput.textures }),
+      readback: parentInput.readback,
+    },
+  );
+  return { buffers: normalizePoolReadback(compiled, result.buffers), trace: [] };
+}
+
+function definePeerCopyProgram(copy: CudaPeerCopyOperation): WgslKernelProgram {
+  const valueType = copy.valueType === "float" ? "f32" : copy.valueType === "int" ? "i32" : "u32";
+  return defineWgslKernelProgram({
+    name: `bg_peer_copy_${copy.valueType}`,
+    workgroupSize: [64, 1, 1],
+    bindings: [
+      { kind: "storage", name: "bg_peer_dst", valueType: copy.valueType === "float" ? "f32" : copy.valueType === "int" ? "i32" : "u32", access: "read_write", binding: 0 },
+      { kind: "storage", name: "bg_peer_src", valueType: copy.valueType === "float" ? "f32" : copy.valueType === "int" ? "i32" : "u32", access: "read", binding: 1 },
+      { kind: "uniform", name: "params", byteLength: 16, binding: 2 },
+    ],
+    wgsl: [
+      "struct Params {",
+      "  dst_base: u32,",
+      "  src_base: u32,",
+      "  count: u32,",
+      "};",
+      "@group(0) @binding(0) var<storage, read_write> bg_peer_dst: array<" + valueType + ">;",
+      "@group(0) @binding(1) var<storage, read> bg_peer_src: array<" + valueType + ">;",
+      "@group(0) @binding(2) var<uniform> params: Params;",
+      "@compute @workgroup_size(64, 1, 1)",
+      "fn main(@builtin(global_invocation_id) gid: vec3<u32>) {",
+      "  let index = gid.x;",
+      "  if (index < params.count) {",
+      "    bg_peer_dst[params.dst_base + index] = bg_peer_src[params.src_base + index];",
+      "  }",
+      "}",
+    ].join("\n"),
+  });
+}
+
+function packPeerCopyParams(copy: CudaPeerCopyOperation): Uint8Array {
+  const bytes = new Uint8Array(16);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, copy.dstOffset, true);
+  view.setUint32(4, copy.srcOffset, true);
+  view.setUint32(8, copy.elementCount, true);
+  return bytes;
 }
 
 async function tryRunHostLiftedDynamicLaunch(

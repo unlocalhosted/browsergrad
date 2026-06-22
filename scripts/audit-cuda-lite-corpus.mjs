@@ -15,6 +15,7 @@ const {
   compileCudaLiteKernel,
   createCudaGridSyncPhasePlan,
   createCudaHostDynamicLaunchPlan,
+  createCudaPeerCopyPlan,
   createCudaRuntimePlan,
   describeCudaDiagnostic,
 } = await import(compilerUrl);
@@ -146,6 +147,12 @@ function webGpuLiftKindFor(compiled) {
     { gridDim: [1, 1, 1], blockDim: compiled.ir.workgroupSize },
   );
   if (dynamicPlan.supported && hostDynamicPlanCompiles(compiled, dynamicPlan)) return "host-dynamic-launches";
+  const peerCopyPlan = createCudaPeerCopyPlan(
+    compiled,
+    syntheticInputFor(compiled),
+    { gridDim: [1, 1, 1], blockDim: compiled.ir.workgroupSize },
+  );
+  if (peerCopyPlan.supported) return "peer-copy-sequence";
   if (
     runtimePlan.operations.length > 0 &&
     runtimePlan.operations.every((operation) => operation.kind === "device-sync")

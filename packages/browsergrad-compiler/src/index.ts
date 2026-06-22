@@ -64,6 +64,11 @@ export {
   type CudaHostDynamicLaunchPlan,
 } from "./dynamic_launch.js";
 export {
+  createCudaPeerCopyPlan,
+  type CudaPeerCopyOperation,
+  type CudaPeerCopyPlan,
+} from "./peer_copy.js";
+export {
   createCudaGridSyncPhasePlan,
   createCudaRuntimePlan,
   type CudaGridSyncPhasePlan,
