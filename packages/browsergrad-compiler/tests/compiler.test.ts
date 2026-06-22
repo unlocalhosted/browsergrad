@@ -186,6 +186,22 @@ __global__ void derefKernel(const int* n, float* out) {
     expect([...result.buffers.out as Float32Array]).toEqual([1]);
   });
 
+  it("supports local size_t declarations as uint scalars", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sizeKernel(uint* out) {
+  size_t bytes = sizeof(float);
+  if (threadIdx.x < 1) { out[0] = bytes; }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var bytes: u32 = 4");
+    expect([...result.buffers.out as Uint32Array]).toEqual([4]);
+  });
+
   it("returns stable diagnostics for unsupported unsafe cases", () => {
     const constWrite = parseCudaLite(`
 __global__ void bad(const float* x) {

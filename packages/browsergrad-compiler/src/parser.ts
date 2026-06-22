@@ -645,6 +645,7 @@ class Parser {
   private startsVarDecl(): boolean {
     if (this.match("__shared__") || this.match("extern")) return true;
     if (this.match("unsigned")) return true;
+    if (this.match("size_t")) return true;
     if (this.match("curandState_t")) return true;
     if (this.match("cufftComplex")) return true;
     if (this.match("DevicePool")) return true;
