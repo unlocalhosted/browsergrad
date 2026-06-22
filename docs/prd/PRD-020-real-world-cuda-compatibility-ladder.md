@@ -183,9 +183,9 @@ Decision: Coverage reports stay honest and machine-readable.
   kernel count, direct WebGPU count, host-orchestrated count, reference-only
   count, hard gaps, error codes, and semantic families.
 - Add thresholds per corpus. CUDA-120 should stay at `240/240`
-  WebGPU-runnable. LeetCUDA, samples, and `llm.c` begin as non-blocking report
-  gates, then graduate to minimum thresholds after the first compatibility
-  slice lands.
+  WebGPU-runnable. LeetCUDA, samples, and `llm.c` are hard no-regression gates
+  from their measured baselines, then graduate to higher minimums after generic
+  compatibility primitives land.
 - Build a source normalizer module as a deep module. It should create a minimal
   compilation unit for one kernel and include only relevant context: safe object
   macros, expression macros, constants, type aliases, called device helpers,
@@ -238,20 +238,29 @@ Suggested implementation chunks:
   emission checks once memory-view lowering lands.
 - Add corpus regression gates:
   `audit:cuda-120` remains blocking;
-  `audit:corpus /tmp/browsergrad-corpora/LeetCUDA` reports first, then enforces
-  a minimum after the first slice;
-  `cuda-samples` and `llm.c` remain report-only until their first primitives
-  have landed.
+  `audit:real-world-cuda` runs CUDA-120 plus LeetCUDA, NVIDIA `cuda-samples`,
+  and `llm.c` as hard no-regression gates from pinned commits.
 - Add before/after numbers to docs for every coherent chunk. A compatibility
   claim without corpus delta is not accepted.
 
 Acceptance criteria for the first slice:
 
 - Working tree has a PRD and corpus registry update before implementation.
-- LeetCUDA audit can be run by a documented command and records repo commit.
-- Current LeetCUDA baseline is recorded as `3/293` direct/WebGPU-runnable.
+- Real-world corpus audit can be run by
+  `pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda`.
+- The audit wrapper fetches or verifies pinned corpus commits before running.
+- Gate output records stable corpus metadata: repo, commit, path, kernel count,
+  WebGPU-runnable count, hard-gap count, error codes, and semantic families.
+- `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
+  `>=21` WebGPU-runnable, and `<=336` hard gaps.
+- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=3`
+  WebGPU-runnable, and `<=145` hard gaps.
+- `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
+  `>=3` WebGPU-runnable, and `<=290` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
   unit tests.
+- Source/context normalization raises LeetCUDA to `>=31/293` WebGPU-runnable
+  before that higher threshold is promoted into the hard gate.
 - At least one broad intrinsic gap from `llm.c` or LeetCUDA lands with parser,
   analyzer, reference, WGSL, and test coverage.
 - CUDA-120 remains `240/240` WebGPU-runnable.

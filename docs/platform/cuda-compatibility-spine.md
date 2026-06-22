@@ -58,6 +58,7 @@ Current corpus gate:
 
 ```sh
 pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
+pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
 ```
 
 - `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/240` real code-kernel
@@ -70,6 +71,14 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
   CPU reference or host/WebGPU orchestration. `referenceOnlyOk` is stricter and
   excludes kernels now runnable on real WebGPU through orchestration; current
   baseline is `0/240`.
+- Real-world no-regression gate:
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=21`
+  WebGPU-runnable, and `<=336` hard gaps;
+  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=3`
+  WebGPU-runnable, and `<=145` hard gaps;
+  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=3`
+  WebGPU-runnable, and `<=290` hard gaps. The aggregate gate also verifies
+  CUDA-120 at its pinned commit.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, WebGPU atomic
   offset updates, DevicePool aliasing across host-lifted child launches,

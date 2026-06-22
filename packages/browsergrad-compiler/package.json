@@ -48,6 +48,7 @@
     "bench:browser": "node ../../scripts/run-cuda-lite-tool.mjs bench:browser",
     "e2e:webgpu": "node ../../scripts/run-cuda-lite-tool.mjs e2e:webgpu",
     "audit:corpus": "node ../../scripts/run-cuda-lite-tool.mjs audit:corpus",
+    "audit:real-world-cuda": "node ../../scripts/run-cuda-lite-tool.mjs audit:real-world-cuda",
     "audit:cuda-120": "node ../../scripts/run-cuda-lite-tool.mjs audit:cuda-120",
     "test:watch": "vitest",
     "test:browser": "vitest run --config vitest.browser.config.ts",
