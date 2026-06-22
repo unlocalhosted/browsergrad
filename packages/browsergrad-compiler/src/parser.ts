@@ -25,7 +25,7 @@ import {
   type SourceSpan,
 } from "./types.js";
 
-const TYPE_KEYWORDS = new Set(["float", "int", "uint", "half"]);
+const TYPE_KEYWORDS = new Set(["float", "int", "uint", "half", "bool"]);
 const ASSIGNMENT = new Set(["=", "+=", "-=", "*=", "/=", "<<=", ">>="]);
 const BINARY_PRECEDENCE = new Map<string, number>([
   ["||", 2],
@@ -195,6 +195,7 @@ class Parser {
     const params: CudaLiteParam[] = [];
     if (this.match(")")) return params;
     do {
+      if (this.match(")")) break;
       const startToken = this.peek();
       const constant = this.consumeIf("const") !== undefined;
       const type = this.parseType();

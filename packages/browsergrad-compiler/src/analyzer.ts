@@ -140,6 +140,9 @@ export function analyzeCudaLite(
       span: param.span,
     });
     if (param.valueType === "half") requiredFeatures.add("shader-f16");
+    if (param.valueType === "bool" && param.pointer) {
+      diagnostics.push(error("unsupported-bool-pointer", "bool pointer parameters are not supported in CUDA-lite v0", param.span));
+    }
   }
 
   const declareVar = (statement: CudaLiteVarDecl, scope: Scope, names: Set<string>): void => {

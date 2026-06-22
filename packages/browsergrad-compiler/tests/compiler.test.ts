@@ -437,6 +437,26 @@ __global__ void scopedLoops(float *x) {
     expect(analysis.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("duplicate-symbol");
   });
 
+  it("supports bool locals and trailing commas in kernel parameter lists", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void boolKernel(int *data, int N,) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  bool even = (idx % 2 == 0);
+  if (idx < N) {
+    if (even) { data[idx] += 10; }
+    else { data[idx] -= 10; }
+  }
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { data: new Int32Array([1, 2, 3, 4]) }, scalars: { N: 4 } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var even: bool = ((idx % 2) == 0);");
+    expect([...result.buffers.data as Int32Array]).toEqual([11, -8, 13, -6]);
+  });
+
   it("parses dynamic extern shared memory as a clear unsupported diagnostic", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void dynamicShared(float *x) {

@@ -293,9 +293,10 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
   }
 }
 
-function castNumber(type: "float" | "int" | "uint" | "half", value: number): number {
+function castNumber(type: "float" | "int" | "uint" | "half" | "bool", value: number): number {
   if (type === "int") return Math.trunc(value) | 0;
   if (type === "uint") return Math.trunc(value) >>> 0;
+  if (type === "bool") return truthy(value) ? 1 : 0;
   return value;
 }
 
@@ -640,9 +641,11 @@ function allocateShared(declarations: readonly CudaLiteVarDecl[]): Map<string, S
       ? new Int32Array(length)
       : declaration.valueType === "uint"
         ? new Uint32Array(length)
-        : declaration.valueType === "half"
-          ? new Float16Array(length)
-          : new Float32Array(length);
+        : declaration.valueType === "bool"
+          ? new Uint32Array(length)
+          : declaration.valueType === "half"
+            ? new Float16Array(length)
+            : new Float32Array(length);
     shared.set(declaration.name, { dimensions: declaration.dimensions, data });
   }
   return shared;
@@ -751,6 +754,9 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
       if (param.valueType === "half" && !(buffer instanceof Float16Array)) {
         throw compilerFailure(`buffer '${param.name}' expects Float16Array`);
       }
+      if (param.valueType === "bool" && !(buffer instanceof Uint32Array)) {
+        throw compilerFailure(`buffer '${param.name}' expects Uint32Array`);
+      }
     } else if (input.scalars?.[param.name] === undefined) {
       throw compilerFailure(`missing scalar input '${param.name}'`);
     }
@@ -796,6 +802,9 @@ function validateTypedConstant(name: string, valueType: string, value: WgslTyped
   }
   if (valueType === "half" && !(value instanceof Float16Array)) {
     throw compilerFailure(`constant '${name}' expects Float16Array`);
+  }
+  if (valueType === "bool" && !(value instanceof Uint32Array)) {
+    throw compilerFailure(`constant '${name}' expects Uint32Array`);
   }
 }
 

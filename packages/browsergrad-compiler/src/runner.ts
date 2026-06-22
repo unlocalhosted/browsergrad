@@ -120,6 +120,7 @@ function packScalarParams(
     if (param.valueType === "int") view.setInt32(offset, Math.trunc(value), true);
     else if (param.valueType === "uint") view.setUint32(offset, Math.trunc(value), true);
     else if (param.valueType === "half") view.setUint16(offset, float16Bits(value), true);
+    else if (param.valueType === "bool") view.setUint32(offset, value ? 1 : 0, true);
     else view.setFloat32(offset, value, true);
   }
   return bytes;

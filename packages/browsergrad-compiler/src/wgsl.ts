@@ -70,7 +70,7 @@ export function emitKernelIrWgsl(
     lines.push("struct Params {");
     for (const scalar of uniformScalars) {
       const align = scalar.valueType === "half" ? "@align(4) " : "";
-      lines.push(`  ${align}${scalar.name}: ${wgslScalar(scalar.valueType)},`);
+      lines.push(`  ${align}${scalar.name}: ${wgslUniformScalar(scalar.valueType)},`);
     }
     lines.push("};");
     lines.push(`@group(0) @binding(${context.paramsBinding}) var<uniform> params: Params;`);
@@ -125,6 +125,7 @@ interface EmitContext {
   bindingFor(name: string): number;
   paramFor(name: string): CudaLiteParam | undefined;
   isUniformScalar(name: string): boolean;
+  uniformScalarTypeFor(name: string): CudaLiteScalarType | undefined;
   pointerAliasFor(name: string): PointerAlias | undefined;
   cooperativeGroupFor(name: string): CudaLiteCooperativeGroupDecl | undefined;
 }
@@ -176,6 +177,7 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
     ...ir.constants.filter((constant) => constant.dimensions.length === 0).map((constant) => ({ name: constant.name, valueType: constant.valueType })),
   ];
   const uniformScalarNames = new Set(uniformScalars.map((scalar) => scalar.name));
+  const uniformScalarTypes = new Map(uniformScalars.map((scalar) => [scalar.name, scalar.valueType] as const));
   const pointerAliases = collectPointerAliases(ir.body);
   const cooperativeGroups = collectCooperativeGroups(ir.body);
   const paramsBinding = uniformScalars.length > 0 ? bindings.length : undefined;
@@ -203,6 +205,9 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
     },
     isUniformScalar(name) {
       return uniformScalarNames.has(name);
+    },
+    uniformScalarTypeFor(name) {
+      return uniformScalarTypes.get(name);
     },
     pointerAliasFor(name) {
       return pointerAliases.get(name);
@@ -384,7 +389,10 @@ function pointerAliasForVar(statement: CudaLiteVarDecl): PointerAlias | undefine
 function emitIdentifier(name: string, context: EmitContext): string {
   if (name === "threadIdx" || name === "blockIdx" || name === "blockDim" || name === "gridDim") return name;
   const param = context.paramFor(name);
-  if ((param && !param.pointer) || context.isUniformScalar(name)) return `params.${name}`;
+  const uniformType = context.uniformScalarTypeFor(name);
+  if ((param && !param.pointer) || context.isUniformScalar(name)) {
+    return uniformType === "bool" ? `(params.${name} != 0u)` : `params.${name}`;
+  }
   return name;
 }
 
@@ -642,6 +650,7 @@ function zeroValue(type: CudaLiteScalarType): string {
   if (type === "float") return "0.0";
   if (type === "half") return "f16(0.0)";
   if (type === "uint") return "0u";
+  if (type === "bool") return "false";
   return "0";
 }
 
@@ -655,15 +664,22 @@ function wgslScalar(type: CudaLiteScalarType): string {
       return "u32";
     case "half":
       return "f16";
+    case "bool":
+      return "bool";
     case "void":
       return "void";
   }
+}
+
+function wgslUniformScalar(type: CudaLiteScalarType): string {
+  return type === "bool" ? "u32" : wgslScalar(type);
 }
 
 function wgslBindingType(type: CudaLiteScalarType): "f16" | "f32" | "i32" | "u32" {
   if (type === "half") return "f16";
   if (type === "int") return "i32";
   if (type === "uint") return "u32";
+  if (type === "bool") return "u32";
   return "f32";
 }
 
