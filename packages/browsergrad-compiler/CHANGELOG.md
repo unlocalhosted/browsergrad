@@ -11,12 +11,12 @@
   dynamic launches, plus conservative host-lifted `cudaMemcpyPeerAsync` typed
   buffer copies.
 - Added composed host orchestration for child dispatches whose child kernel
-  performs a host-liftable peer copy.
+  performs a host-liftable runtime copy.
 - Added `createCudaRuntimePlan()`, `createCudaGridSyncPhasePlan()`,
   `createCudaHostDynamicLaunchPlan()`, `createCudaPeerCopyPlan()`, and
   `createCudaWebGpuExecutionPlan()` for platform/rubric preflight.
 - Refactored WebGPU execution through an explicit plan interface so native
-  dispatch, grid-sync phases, dynamic child launches, and peer-copy lifts share
+  dispatch, grid-sync phases, dynamic child launches, and runtime-copy lifts share
   one runner path.
 - Added `residentBuffers` pass-through for compiler WebGPU execution so
   platform callers can keep storage buffers on GPU and opt out of readback.
@@ -37,11 +37,11 @@
 - Fixed thread-local arrays now run through CPU reference and WGSL/WebGPU
   lowering.
 - Prepared compiler scalar updates now support fixed-topology host-dynamic and
-  host-peer-copy plans through per-step uniform updates, with deterministic
+  host-copy plans through per-step uniform updates, with deterministic
   rejection when scalar changes alter plan topology.
 - Prepared scalar-update topology checks now use compact WGSL/binding
   signatures instead of JSON stringifying full programs.
-- Host-lifted peer-copy planning now supports resident GPU buffers and rejects
+- Host-lifted runtime-copy planning now supports resident GPU buffers and rejects
   copies that exceed source or destination capacity before dispatch.
 - Unsupported WebGPU execution plans now expose stable `blockers[]` entries
   with `{ kind, code, message }` for platform preflight and audit reporting.
@@ -50,7 +50,7 @@
 - CUDA corpus audit now skips explicit pseudocode solution blocks; CUDA-120
   real-code baseline is `235/240` WebGPU runnable and `0/240` hard failures.
 - Added `e2e:webgpu`, a real-browser reference-vs-WebGPU proof for examples,
-  grid-sync phases, host peer copy, host dynamic launch, and prepared resident
+  grid-sync phases, host runtime copy, host dynamic launch, and prepared resident
   dispatch.
 - Added shared launch-shape diagnostics so platform preflight, CPU reference,
   and WebGPU runners reject invalid grid/block dimensions consistently.
@@ -106,3 +106,5 @@
   parse/analyze/lower work in hot loops.
 - `runCompiledKernelWebGpu()` and `prepareCompiledKernelWebGpu()` now expose
   host-dynamic expansion/depth caps and validate cap values before planning.
+- Host-copy orchestration now supports `cudaMemcpy` and `cudaMemcpyAsync`
+  device-to-device copies alongside `cudaMemcpyPeerAsync`.

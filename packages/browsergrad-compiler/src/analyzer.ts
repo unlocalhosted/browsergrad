@@ -60,6 +60,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["curand_init", [4, 4]],
   ["curand_uniform", [1, 1]],
   ["cudaDeviceSynchronize", [0, 0]],
+  ["cudaMemcpy", [4, 4]],
+  ["cudaMemcpyAsync", [5, 5]],
   ["cudaMemcpyPeerAsync", [6, 6]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
 ]);
@@ -645,19 +647,12 @@ function validateCallExpression(
     }
     return { kind: "scalar" };
   }
-  if (callName === "cudaDeviceSynchronize" || callName === "cudaMemcpyPeerAsync") {
-    const referenceRuntime = options.referenceCudaRuntime || options.referenceDynamicParallelism;
-    diagnostics.push({
-      ...error(
-        "unsupported-cuda-runtime",
-        callName === "cudaDeviceSynchronize"
-          ? "cudaDeviceSynchronize() requires explicit runtime orchestration"
-          : `${callName}() requires CUDA runtime peer-copy orchestration`,
-        expression.span,
-      ),
-      severity: referenceRuntime ? "warning" : "error",
-    });
-    for (const arg of expression.args) walkExpression(arg, scope);
+  if (callName === "cudaDeviceSynchronize") {
+    validateRuntimeCall(expression, "cudaDeviceSynchronize() requires explicit runtime orchestration", diagnostics, walkExpression, scope, options);
+    return { kind: "scalar", valueType: "int" };
+  }
+  if (isCudaRuntimeCopyCall(callName)) {
+    validateRuntimeCopyCall(expression, callName, diagnostics, walkExpression, scope, options);
     return { kind: "scalar", valueType: "int" };
   }
   if (isAtomicBuiltin(callName)) {
@@ -714,6 +709,65 @@ function validateCallExpression(
     validateScalarOperand(info, arg.span, diagnostics);
   }
   return { kind: "scalar" };
+}
+
+function validateRuntimeCall(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  message: string,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+  scope: Scope,
+  options: CudaLiteAnalyzeOptions,
+): void {
+  const referenceRuntime = options.referenceCudaRuntime || options.referenceDynamicParallelism;
+  diagnostics.push({
+    ...error("unsupported-cuda-runtime", message, expression.span),
+    severity: referenceRuntime ? "warning" : "error",
+  });
+  for (const arg of expression.args) walkExpression(arg, scope);
+}
+
+function validateRuntimeCopyCall(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  callName: string,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+  scope: Scope,
+  options: CudaLiteAnalyzeOptions,
+): void {
+  const referenceRuntime = options.referenceCudaRuntime || options.referenceDynamicParallelism;
+  diagnostics.push({
+    ...error("unsupported-cuda-runtime", `${callName}() requires CUDA runtime copy orchestration`, expression.span),
+    severity: referenceRuntime ? "warning" : "error",
+  });
+  const dst = expression.args[0];
+  const src = expression.args[callName === "cudaMemcpyPeerAsync" ? 2 : 1];
+  const byteCount = expression.args[callName === "cudaMemcpyPeerAsync" ? 4 : 2];
+  if (dst) walkExpression(dst, scope);
+  if (src) walkExpression(src, scope);
+  if (byteCount) validateScalarOperand(walkExpression(byteCount, scope), byteCount.span, diagnostics);
+  if ((callName === "cudaMemcpy" || callName === "cudaMemcpyAsync") && !supportedCudaMemcpyKind(expression.args[3])) {
+    diagnostics.push(error(
+      "unsupported-cuda-runtime-copy-kind",
+      `${callName} supports cudaMemcpyDeviceToDevice/cudaMemcpyDefault only`,
+      expression.args[3]?.span ?? expression.span,
+    ));
+  }
+}
+
+function isCudaRuntimeCopyCall(callName: string): boolean {
+  return callName === "cudaMemcpy" || callName === "cudaMemcpyAsync" || callName === "cudaMemcpyPeerAsync";
+}
+
+function supportedCudaMemcpyKind(expression: CudaLiteExpression | undefined): boolean {
+  if (!expression) return false;
+  if (expression.kind === "identifier") {
+    return expression.name === "cudaMemcpyDeviceToDevice" || expression.name === "cudaMemcpyDefault";
+  }
+  if (expression.kind === "number") {
+    return expression.value === 3 || expression.value === 4;
+  }
+  return false;
 }
 
 function validateDeviceFunctionCall(

@@ -12,7 +12,7 @@ export type CudaRuntimeOperationKind =
   | "device-launch"
   | "device-sync"
   | "grid-sync"
-  | "peer-copy";
+  | "runtime-copy";
 
 export interface CudaRuntimeOperation {
   readonly kind: CudaRuntimeOperationKind;
@@ -54,7 +54,7 @@ const REFERENCE_RUNTIME_OPERATIONS: ReadonlySet<CudaRuntimeOperationKind> = new 
   "device-launch",
   "device-sync",
   "grid-sync",
-  "peer-copy",
+  "runtime-copy",
 ]);
 
 export function createCudaGridSyncPhasePlan(ir: KernelIrModule): CudaGridSyncPhasePlan {
@@ -134,11 +134,11 @@ function runtimeOperationForExpression(
         label: "cudaDeviceSynchronize()",
       };
     }
-    if (expression.callee.name === "cudaMemcpyPeerAsync") {
+    if (isCudaRuntimeCopyCall(expression.callee.name)) {
       return {
-        kind: "peer-copy",
+        kind: "runtime-copy",
         span: expression.span,
-        label: "cudaMemcpyPeerAsync(...)",
+        label: `${expression.callee.name}(...)`,
       };
     }
   }
@@ -155,6 +155,10 @@ function runtimeOperationForExpression(
     span: expression.span,
     label: "grid.sync()",
   };
+}
+
+function isCudaRuntimeCopyCall(name: string): boolean {
+  return name === "cudaMemcpy" || name === "cudaMemcpyAsync" || name === "cudaMemcpyPeerAsync";
 }
 
 function collectCooperativeGroups(

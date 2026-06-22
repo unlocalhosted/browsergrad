@@ -656,6 +656,33 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
     expect([...actual.buffers.dst as Float32Array]).toEqual([...expected.buffers.dst as Float32Array]);
   });
 
+  it("runs host-lifted cudaMemcpy and cudaMemcpyAsync through WebGPU sequence", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void runtimeCopy(float *dst, const float *src, int n) {
+  if (threadIdx.x == 0) {
+    cudaMemcpy(dst + 1, src, sizeof(float) * n, cudaMemcpyDeviceToDevice);
+    cudaMemcpyAsync(dst + 3, src + 1, sizeof(float), cudaMemcpyDefault, 0);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        dst: new Float32Array([0, 0, 0, 0]),
+        src: new Float32Array([2.5, 3.5]),
+      },
+      scalars: { n: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.dst as Float32Array]).toEqual([...expected.buffers.dst as Float32Array]);
+  });
+
   it("runs host-lifted cudaMemcpyPeerAsync over resident WebGPU buffers", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();
@@ -729,7 +756,7 @@ __global__ void peerCopy(float *dst, const float *src, float a) {
     );
 
     try {
-      expect(prepared.kind).toBe("host-peer-copy");
+      expect(prepared.kind).toBe("host-copy");
       expect(prepared.stepCount).toBe(2);
 
       const first = await prepared.run({ readback: ["dst"] });

@@ -103,7 +103,7 @@ Supported layers:
   reference execution.
 - Safe top-level uniform `grid.sync()` maps to multi-dispatch
   `grid-sync-phases`.
-- Device launches and peer copies are runtime operations. They may be
+- Device launches and runtime copies are runtime operations. They may be
   host-lifted only when `webgpu_orchestration.ts` can build a complete,
   deterministic sequence.
 - Host-dynamic launch planning can expand parent invocations with CUDA builtin
@@ -136,7 +136,7 @@ Rules:
 - `single-dispatch`: direct WGSL compute.
 - `grid-sync-phases`: multiple WGSL dispatches over shared GPU buffers.
 - `host-dynamic-launch`: host-lifted child dispatch sequence.
-- `host-peer-copy`: host-lifted typed copy dispatch.
+- `host-copy`: host-lifted typed runtime-copy dispatch.
 - unsupported plan with diagnostics.
 
 Use `summarizeCudaWebGpuExecutionPlan()` for platform UI/readiness rows. Do not

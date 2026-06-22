@@ -79,10 +79,15 @@ export {
 } from "./dynamic_launch.js";
 export {
   createCudaPeerCopyPlan,
+  createCudaRuntimeCopyPlan,
   type CudaPeerCopyBlocker,
   type CudaPeerCopyBlockerCode,
   type CudaPeerCopyOperation,
   type CudaPeerCopyPlan,
+  type CudaRuntimeCopyBlocker,
+  type CudaRuntimeCopyBlockerCode,
+  type CudaRuntimeCopyOperation,
+  type CudaRuntimeCopyPlan,
 } from "./peer_copy.js";
 export {
   createCudaGridSyncPhasePlan,

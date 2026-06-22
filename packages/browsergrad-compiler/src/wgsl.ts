@@ -1025,6 +1025,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return "workgroupBarrier()";
     case "cudaDeviceSynchronize":
       return "0";
+    case "cudaMemcpy":
+      return "0";
+    case "cudaMemcpyAsync":
+      return "0";
     case "cudaMemcpyPeerAsync":
       return "0";
     case "sqrtf":
@@ -1282,8 +1286,12 @@ function noopCallComment(expression: CudaLiteExpression): string | undefined {
       return "printf omitted: WebGPU has no device stdout";
     case "cudaDeviceSynchronize":
       return "cudaDeviceSynchronize omitted: WebGPU dispatch completion is host-managed";
+    case "cudaMemcpy":
+      return "cudaMemcpy omitted: WebGPU copy orchestration is host-managed";
+    case "cudaMemcpyAsync":
+      return "cudaMemcpyAsync omitted: WebGPU copy orchestration is host-managed";
     case "cudaMemcpyPeerAsync":
-      return "cudaMemcpyPeerAsync omitted: WebGPU peer-copy orchestration is host-managed";
+      return "cudaMemcpyPeerAsync omitted: WebGPU copy orchestration is host-managed";
     default:
       return undefined;
   }

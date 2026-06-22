@@ -251,7 +251,7 @@ For compiled CUDA-lite kernels, derive learner-facing WebGPU status from
 `summarizeCudaWebGpuExecutionPlan()`, not `compiled.loweringPlan.canRunOnGpu`,
 because host-orchestrated plans can still run as real WebGPU passes.
 Compile those runtime-gap kernels with `compileCudaLiteKernelForWebGpu()` so
-device launches, grid-sync phases, and peer-copy runtime calls enter planning as
+device launches, grid-sync phases, and runtime-copy calls enter planning as
 warnings instead of platform-side manual flag toggles.
 For overall readiness status, selected `external` capabilities produce
 `external-only`, selected `simulated` capabilities produce `simulated`, and

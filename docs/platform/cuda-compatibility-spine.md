@@ -37,7 +37,7 @@ Public APIs:
 - `createCudaWebGpuExecutionPlan(compiled, input, launch, { compileKernel })`
   returns the exact executable WebGPU plan kind and sequence steps:
   `single-dispatch`, `grid-sync-phases`, `host-dynamic-launch`, or
-  `host-peer-copy`. Unsupported plans keep a human `reason` and expose
+  `host-copy`. Unsupported plans keep a human `reason` and expose
   machine-readable `blockers[]` with `{ kind, code, message }`, so platform
   preflight can route failures without parsing prose. Platform preflight should
   use this interface instead of duplicating runner heuristics.
@@ -84,7 +84,7 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
   and prepared compiler/WebGPU runners avoid rebuilding pipelines and bind
   groups between iterations. Prepared single-dispatch and grid-sync phase plans
   can update scalar params without reprepare. Host-orchestrated dynamic launch /
-  peer-copy plans can also update scalar params when step count, dispatch counts,
+  runtime-copy plans can also update scalar params when step count, dispatch counts,
   aliases, and WGSL programs remain unchanged; topology-changing updates fail
   before dispatch. No-readback prepared runs can opt into `awaitCompletion: true`
   when timing gates or watchdogs need real GPU completion instead of JS command
@@ -139,7 +139,7 @@ pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu
 
 - Runs compiler examples and runtime-orchestration probes through CPU reference
   and real WebGPU in Chromium, then compares outputs. Covered probes: SAXPY,
-  guarded map, tiled matmul, grid-sync phases, host peer copy, host dynamic
+  guarded map, tiled matmul, grid-sync phases, host runtime copy, host dynamic
   launch, and prepared resident dispatch.
 - Use `-- --require-webgpu` on machines where absence of WebGPU should fail CI.
 
@@ -148,7 +148,7 @@ Performance gate:
 - Compiler/runtime perf is tracked by
   `pnpm --filter @unlocalhosted/browsergrad-compiler bench -- --markdown /tmp/bg-cuda-lite-bench.md`.
   It reports JSON plus optional markdown for compile hot paths, CPU reference
-  execution, host-lifted dynamic planning, and peer-copy planning. Pinned
+  execution, host-lifted dynamic planning, and runtime-copy planning. Pinned
   machines can add `--expect-median-max` or `--expect-p95-max` with
   comma-separated `benchmark=ms` entries. Treat uncalibrated numbers as
   regression evidence, not universal pass/fail thresholds.

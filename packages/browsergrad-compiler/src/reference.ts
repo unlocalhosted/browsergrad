@@ -590,14 +590,16 @@ function pointerOffsetArgumentValue(
   return undefined;
 }
 
-function execCudaMemcpyPeerAsync(
+function execCudaRuntimeCopy(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
   context: ThreadContext,
 ): void {
+  const shape = cudaRuntimeCopyShape(expression);
+  if (!shape) throw compilerFailure("unsupported CUDA runtime copy call");
   const dst = expression.args[0];
-  const src = expression.args[2];
-  const count = expression.args[4];
-  if (!dst || !src || !count) throw compilerFailure("cudaMemcpyPeerAsync expects dst, src, and byte count");
+  const src = expression.args[shape.srcIndex];
+  const count = expression.args[shape.countIndex];
+  if (!dst || !src || !count) throw compilerFailure("CUDA runtime copy expects dst, src, and byte count");
   const dstView = pointerBytesForCopy(dst, context);
   const srcView = pointerBytesForCopy(src, context);
   const byteCount = Math.max(0, Math.trunc(evalNumber(count, context)));
@@ -609,6 +611,15 @@ function execCudaMemcpyPeerAsync(
   dstView.bytes.set(copied, dstView.byteOffset);
   context.trace.reads.push({ name: srcView.name, index: srcView.byteOffset, value: writable, ok: writable === byteCount });
   context.trace.writes.push({ name: dstView.name, index: dstView.byteOffset, value: writable, ok: writable === byteCount });
+}
+
+function cudaRuntimeCopyShape(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+): { readonly srcIndex: number; readonly countIndex: number } | undefined {
+  const name = expression.callee.kind === "identifier" ? expression.callee.name : undefined;
+  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync") return { srcIndex: 1, countIndex: 2 };
+  if (name === "cudaMemcpyPeerAsync") return { srcIndex: 2, countIndex: 4 };
+  return undefined;
 }
 
 interface PointerByteView {
@@ -631,7 +642,7 @@ function pointerBytesForCopy(expression: CudaLiteExpression, context: ThreadCont
     return { name: pointer.poolName, bytes: byteView(pool.data), byteOffset: pointer.byteOffset };
   }
   if (typeof pointer === "number" || !("kind" in pointer) || pointer.kind !== "address") {
-    throw compilerFailure("cudaMemcpyPeerAsync expects pointer arguments");
+    throw compilerFailure("CUDA runtime copy expects pointer arguments");
   }
   return lvalueByteView(pointer.target, valueType, context);
 }
@@ -658,7 +669,7 @@ function lvalueByteView(
     if (!pool && !buffer) throw compilerFailure(`missing memory pool '${lvalue.name}'`);
     return { name: lvalue.name, bytes: byteView(pool ? pool.data : buffer!), byteOffset: index * 4 };
   }
-  throw compilerFailure(`cudaMemcpyPeerAsync cannot copy from ${lvalue.space} '${lvalue.name}'`);
+  throw compilerFailure(`CUDA runtime copy cannot copy from ${lvalue.space} '${lvalue.name}'`);
 }
 
 function pointerValueTypeForExpression(
@@ -923,8 +934,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (cooperativeGroupCall !== undefined) return cooperativeGroupCall;
   if (name === "printf") return 0;
   if (name === "cudaDeviceSynchronize") return 0;
-  if (name === "cudaMemcpyPeerAsync") {
-    execCudaMemcpyPeerAsync(expression, context);
+  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync" || name === "cudaMemcpyPeerAsync") {
+    execCudaRuntimeCopy(expression, context);
     return 0;
   }
   if (name === "deviceAllocate" || name === "streamOrderedAllocate") {

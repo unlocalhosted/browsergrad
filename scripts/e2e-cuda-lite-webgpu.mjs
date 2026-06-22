@@ -45,6 +45,13 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
     cudaMemcpyPeerAsync(dst + 1, 1, src, 0, sizeof(float) * n, 0);
   }
 }`,
+  runtimeCopy: `
+__global__ void runtimeCopy(float *dst, const float *src, int n) {
+  if (threadIdx.x == 0) {
+    cudaMemcpy(dst + 1, src, sizeof(float) * n, cudaMemcpyDeviceToDevice);
+    cudaMemcpyAsync(dst + 3, src + 1, sizeof(float), cudaMemcpyDefault, 0);
+  }
+}`,
   dynamicLaunch: `
 __global__ void child(float *dst, int n) {
   int idx = threadIdx.x;
@@ -272,6 +279,20 @@ const html = String.raw`<!doctype html>
           {
             name: "runtime:host-peer-copy",
             source: SOURCES.peerCopy,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                dst: new Float32Array([0, 0, 0, 0]),
+                src: new Float32Array([2.5, 3.5]),
+              },
+              scalars: { n: 2 },
+            }),
+            output: "dst",
+          },
+          {
+            name: "runtime:host-copy",
+            source: SOURCES.runtimeCopy,
             options: { workgroupSize: [1, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({

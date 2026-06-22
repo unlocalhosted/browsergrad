@@ -48,6 +48,11 @@ export interface CudaPeerCopyOperation {
   readonly valueType: "float" | "int" | "uint";
 }
 
+export type CudaRuntimeCopyPlan = CudaPeerCopyPlan;
+export type CudaRuntimeCopyBlocker = CudaPeerCopyBlocker;
+export type CudaRuntimeCopyBlockerCode = CudaPeerCopyBlockerCode;
+export type CudaRuntimeCopyOperation = CudaPeerCopyOperation;
+
 interface HostPeerCopyCollection {
   readonly copies: readonly CudaPeerCopyOperation[];
   readonly reason?: string;
@@ -66,10 +71,10 @@ export function createCudaPeerCopyPlan(
   launch: KernelLaunch,
 ): CudaPeerCopyPlan {
   const runtimePlan = createCudaRuntimePlan(compiled);
-  if (!runtimePlan.operations.some((operation) => operation.kind === "peer-copy")) {
+  if (!runtimePlan.operations.some((operation) => operation.kind === "runtime-copy")) {
     return unsupported("no-peer-copy", "no peer-copy operation found");
   }
-  if (!runtimePlan.operations.every((operation) => operation.kind === "peer-copy" || operation.kind === "device-sync")) {
+  if (!runtimePlan.operations.every((operation) => operation.kind === "runtime-copy" || operation.kind === "device-sync")) {
     return unsupported("mixed-runtime-operations", "runtime operations besides peer-copy/device sync require reference runtime");
   }
   const copyCollection = collectHostPeerCopies(compiled.ir.body, input, launch);
@@ -77,6 +82,14 @@ export function createCudaPeerCopyPlan(
   if (copyCollection.blocker) return unsupportedWithBlocker(copyCollection.blocker);
   if (copies.length === 0) return unsupported("no-host-liftable-peer-copy", copyCollection.reason ?? "no host-liftable peer-copy operations");
   return { supported: true, copies };
+}
+
+export function createCudaRuntimeCopyPlan(
+  compiled: CompiledCudaLiteKernel,
+  input: CompiledKernelInput,
+  launch: KernelLaunch,
+): CudaRuntimeCopyPlan {
+  return createCudaPeerCopyPlan(compiled, input, launch);
 }
 
 function unsupported(code: CudaPeerCopyBlockerCode, message: string): CudaPeerCopyPlan {
@@ -171,9 +184,13 @@ function createPeerCopyOperation(
   env: ReadonlyMap<string, HostEvalValue>,
   input: CompiledKernelInput,
 ): CudaPeerCopyOperation | undefined {
+  const copyShape = cudaRuntimeCopyShape(expression);
+  if (!copyShape) return undefined;
   const dst = expression.args[0] ? evaluatePointerArgument(expression.args[0], env, input) : undefined;
-  const src = expression.args[2] ? evaluatePointerArgument(expression.args[2], env, input) : undefined;
-  const byteCount = expression.args[4] ? evaluateHostNumber(expression.args[4], env, input) : undefined;
+  const srcArg = expression.args[copyShape.srcIndex];
+  const countArg = expression.args[copyShape.countIndex];
+  const src = srcArg ? evaluatePointerArgument(srcArg, env, input) : undefined;
+  const byteCount = countArg ? evaluateHostNumber(countArg, env, input) : undefined;
   if (!dst || !src || byteCount === undefined || byteCount < 0) return undefined;
   if (dst.offset < 0 || src.offset < 0) return undefined;
   const dstBuffer = copyBufferViewFor(input, dst.root);
@@ -255,7 +272,7 @@ function hasParentSideEffectsAfterPeerCopy(statements: readonly CudaLiteStatemen
 }
 
 function isPeerCopyCall(expression: CudaLiteExpression): expression is CudaLiteCallExpression {
-  return expression.kind === "call" && expressionName(expression.callee) === "cudaMemcpyPeerAsync";
+  return expression.kind === "call" && cudaRuntimeCopyShape(expression) !== undefined;
 }
 
 function containsPeerCopyCall(statements: readonly CudaLiteStatement[]): boolean {
@@ -271,4 +288,13 @@ function isHostNoopExpression(expression: CudaLiteExpression): boolean {
   if (expression.kind !== "call") return false;
   const name = expressionName(expression.callee);
   return name === "cudaDeviceSynchronize" || name === "printf";
+}
+
+function cudaRuntimeCopyShape(
+  expression: CudaLiteCallExpression,
+): { readonly srcIndex: number; readonly countIndex: number } | undefined {
+  const name = expressionName(expression.callee);
+  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync") return { srcIndex: 1, countIndex: 2 };
+  if (name === "cudaMemcpyPeerAsync") return { srcIndex: 2, countIndex: 4 };
+  return undefined;
 }

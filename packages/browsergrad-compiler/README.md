@@ -88,7 +88,7 @@ gaps, while a host-orchestrated WebGPU plan can still run it through real GPU
 passes.
 Use `compileCudaLiteKernel()` when you need strict direct-lowering diagnostics.
 Use `compileCudaLiteKernelForWebGpu()` when the platform intends to run
-host-orchestrated WebGPU plans such as grid-sync phases, host peer copy, or
+host-orchestrated WebGPU plans such as grid-sync phases, host runtime copy, or
 host-lifted dynamic launches.
 Fixed thread-local arrays lower to WGSL function arrays and CPU-reference typed
 arrays, so small per-thread scratch patterns do not need shared memory.
@@ -137,7 +137,7 @@ Use `maxHostExpandedParentInvocations` and `maxHostDynamicLaunchDepth` on
 `runCompiledKernelWebGpu()` / `prepareCompiledKernelWebGpu()` to bound
 host-lifted dynamic launch expansion in learner-facing hot paths.
 Prepared scalar updates are supported when the WebGPU plan topology remains
-fixed. That includes host-orchestrated dynamic launch / peer-copy plans whose
+fixed. That includes host-orchestrated dynamic launch / runtime-copy plans whose
 step count, dispatch counts, storage aliases, and WGSL programs do not change.
 Topology-changing scalar updates fail with a deterministic compiler diagnostic.
 Use `awaitCompletion: true` when a no-readback hot loop must measure GPU
@@ -212,7 +212,8 @@ effects after launch stay reference-only so GPU output is never silently wrong.
 ## CUDA Runtime Reference Calls
 
 Some runtime orchestration calls have CPU reference truth before GPU lowering.
-Peer copies are byte-accurate over modeled buffers/pools when explicitly enabled:
+Runtime copies are byte-accurate over modeled buffers/pools when explicitly
+enabled:
 
 ```ts
 compileCudaLiteKernel(source, {
@@ -220,15 +221,15 @@ compileCudaLiteKernel(source, {
 });
 ```
 
-`cudaMemcpyPeerAsync(dst, dstDevice, src, srcDevice, bytes, stream)` copies bytes
-inside the reference interpreter. `runCompiledKernelWebGpu` can host-lift
-conservative peer copies into a typed WebGPU copy dispatch when the call is
+`cudaMemcpy`, `cudaMemcpyAsync`, and `cudaMemcpyPeerAsync` copy bytes inside the
+reference interpreter. `runCompiledKernelWebGpu` can host-lift conservative
+device-to-device copies into a typed WebGPU copy dispatch when the call is
 single-invocation guarded, source/destination are named `Float32Array`,
 `Int32Array`, `Uint32Array`, or matching resident GPU buffers, offsets are
 non-negative and host-evaluable, byte count is element-aligned, and the copy
-fits both buffers. The same peer-copy lift can compose after a host-lifted child
-dispatch. Mixed buffer types, pools, device-derived counts, and side effects
-after copy remain reference-only.
+fits both buffers. The same copy lift can compose after a host-lifted child
+dispatch. Mixed buffer types, pools, host/device transfer kinds,
+device-derived counts, and side effects after copy remain reference-only.
 
 ## Cooperative Grid Sync
 
@@ -252,7 +253,7 @@ reference-only.
 Use `createCudaLoweringPlan(diagnostics)` and `describeCudaDiagnostic()` to group
 compatibility gaps by semantic family instead of raw parser messages.
 Use `createCudaRuntimePlan(compiled)` to see which kernels need host
-orchestration (`device-launch`, `device-sync`, `peer-copy`, `grid-sync`) before
+orchestration (`device-launch`, `device-sync`, `runtime-copy`, `grid-sync`) before
 trying WebGPU single-dispatch execution.
 Use `createCudaLaunchValidationDiagnostics(launch, compiled.ir.workgroupSize)`
 or `validateCudaKernelLaunch()` to preflight launch shape before selecting CPU
@@ -262,7 +263,7 @@ validator, and `createCudaWebGpuExecutionPlan()` reports the same failures as
 codes across planning and execution.
 Use `createCudaWebGpuExecutionPlan(compiled, input, launch, { compileKernel })`
 to inspect the exact executable WebGPU plan before running: `single-dispatch`,
-`grid-sync-phases`, `host-dynamic-launch`, or `host-peer-copy`. The runner uses
+`grid-sync-phases`, `host-dynamic-launch`, or `host-copy`. The runner uses
 the same plan interface internally, so platform preflight and execution share
 one source of truth. Unsupported plans include both a human `reason` and
 machine-readable `blockers[]` entries with `{ kind, code, message }`; route
@@ -289,7 +290,7 @@ the command instead of trusting that rerun.
 `e2e:webgpu` launches a real browser and runs example kernels plus runtime
 orchestration probes against both `runCompiledKernelReference()` and real
 WebGPU. It covers SAXPY, guarded map, tiled matmul, grid-sync phases, host
-peer copy, host dynamic launch, and prepared resident dispatch.
+runtime copy, host dynamic launch, and prepared resident dispatch.
 Compiler e2e, corpus, and benchmark package scripts use
 `scripts/run-cuda-lite-tool.mjs`, which locks build + tool execution so parallel
 invocations cannot import a partially rebuilt `dist/` tree.
@@ -319,7 +320,7 @@ pnpm --filter @unlocalhosted/browsergrad-compiler bench:browser -- --markdown /t
 ```
 
 The harness emits stable JSON timing for compile, CPU reference, dynamic-launch
-planning, and peer-copy planning paths. Use
+planning, and runtime-copy planning paths. Use
 `--expect-median-max benchmark=ms[,benchmark=ms]` and
 `--expect-p95-max benchmark=ms[,benchmark=ms]` only on pinned machines; no fixed
 threshold is portable across laptops, browsers, and CI runners. Without

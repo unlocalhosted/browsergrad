@@ -31,7 +31,7 @@ export type CudaWebGpuExecutionPlanKind =
   | "single-dispatch"
   | "grid-sync-phases"
   | "host-dynamic-launch"
-  | "host-peer-copy";
+  | "host-copy";
 
 export type CudaWebGpuExecutionMode = "direct" | "host-orchestrated" | "unsupported";
 
@@ -39,7 +39,7 @@ export type CudaWebGpuExecutionBlockerKind =
   | "launch"
   | "grid-sync"
   | "device-launch"
-  | "peer-copy"
+  | "runtime-copy"
   | "runtime";
 
 export interface CudaWebGpuExecutionBlocker {
@@ -159,11 +159,11 @@ export function createCudaWebGpuExecutionPlan(
   const peerCopyRuntimePlan = createCudaPeerCopyPlan(compiled, input, launch);
   const peerCopyPlan = createHostLiftedPeerCopyWebGpuPlan(compiled, input, launch, peerCopyRuntimePlan);
   if (peerCopyPlan) return peerCopyPlan;
-  if (runtimePlan.operations.some((operation) => operation.kind === "peer-copy") && !peerCopyRuntimePlan.supported) {
+  if (runtimePlan.operations.some((operation) => operation.kind === "runtime-copy") && !peerCopyRuntimePlan.supported) {
     blockers.push(webGpuBlocker(
-      "peer-copy",
-      peerCopyRuntimePlan.blocker?.code ?? "host-peer-copy-unsupported",
-      peerCopyRuntimePlan.reason ?? "host-lifted peer copy unsupported",
+      "runtime-copy",
+      peerCopyRuntimePlan.blocker?.code ?? "host-copy-unsupported",
+      peerCopyRuntimePlan.reason ?? "host-lifted runtime copy unsupported",
     ));
   }
 
@@ -268,7 +268,7 @@ function createHostLiftedPeerCopyWebGpuPlan(
 
   return {
     supported: true,
-    kind: "host-peer-copy",
+    kind: "host-copy",
     steps,
     input: {
       buffers: { ...parentInput.buffers },

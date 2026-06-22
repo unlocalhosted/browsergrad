@@ -14,6 +14,7 @@ import {
   createCudaLaunchValidationDiagnostics,
   createCudaLoweringPlan,
   createCudaPeerCopyPlan,
+  createCudaRuntimeCopyPlan,
   createCudaRuntimePlan,
   createCudaWebGpuExecutionPlan,
   cudaLiteWebGpuCompileOptions,
@@ -961,6 +962,51 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
     expect(shortResidentPlan.supported).toBe(false);
   });
 
+  it("runs cudaMemcpy and cudaMemcpyAsync through the host-copy planner", () => {
+    const source = `
+__global__ void runtimeCopy(float *dst, const float *src, int n) {
+  if (threadIdx.x == 0) {
+    cudaMemcpy(dst + 1, src, sizeof(float) * n, cudaMemcpyDeviceToDevice);
+    cudaMemcpyAsync(dst + 3, src + 1, sizeof(float), cudaMemcpyDefault, 0);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        dst: new Float32Array([0, 0, 0, 0]),
+        src: new Float32Array([2.5, 3.5]),
+      },
+      scalars: { n: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const plan = createCudaRuntimeCopyPlan(compiled, input, launch);
+
+    expect([...result.buffers.dst as Float32Array]).toEqual([0, 2.5, 3.5, 3.5]);
+    expect(plan.supported).toBe(true);
+    expect(plan.copies.map((copy) => ({
+      dstOffset: copy.dstOffset,
+      srcOffset: copy.srcOffset,
+      elementCount: copy.elementCount,
+    }))).toEqual([
+      { dstOffset: 1, srcOffset: 0, elementCount: 2 },
+      { dstOffset: 3, srcOffset: 1, elementCount: 1 },
+    ]);
+
+    expect(() => compileCudaLiteKernel(`
+__global__ void unsupportedKind(float *dst, const float *src) {
+  if (threadIdx.x == 0) {
+    cudaMemcpy(dst, src, sizeof(float), cudaMemcpyHostToDevice);
+  }
+}`, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    })).toThrow("unsupported-cuda-runtime-copy-kind");
+  });
+
   it("explains why unsafe peer-copy lifts stay reference-only", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void peerCopyBad(float *dst, const float *src) {
@@ -1019,7 +1065,7 @@ __global__ void parent(float *dst, float *src) {
     expect(plan.operations.map((operation) => operation.kind)).toEqual([
       "device-launch",
       "device-sync",
-      "peer-copy",
+      "runtime-copy",
       "grid-sync",
     ]);
     expect(plan.canRunSingleDispatchWebGpu).toBe(false);
@@ -1065,7 +1111,7 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
-    expect(peerPlan).toMatchObject({ supported: true, kind: "host-peer-copy" });
+    expect(peerPlan).toMatchObject({ supported: true, kind: "host-copy" });
     if (peerPlan.supported) {
       expect(peerPlan.steps.map((step) => step.program.name)).toEqual(["peerCopy", "bg_peer_copy_float"]);
     }

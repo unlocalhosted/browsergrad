@@ -60,6 +60,7 @@ const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("unsupported-cooperative-groups", "subgroup", "Cooperative groups", "unsupported", false, true, "Future group semantic IR."),
   feature("unsupported-dynamic-parallelism", "runtime", "Dynamic parallelism", "unsupported", false, true, "Future device enqueue + host launch loop."),
   feature("unsupported-cuda-runtime", "runtime", "CUDA runtime call", "unsupported", false, true, "Future host-side runtime orchestration."),
+  feature("unsupported-cuda-runtime-copy-kind", "runtime", "CUDA runtime copy kind", "unsupported", false, true, "Only modeled device-to-device runtime copies can be host-lifted."),
   feature("unsupported-cufft", "library", "cuFFT library island", "unsupported", false, true, "Future WGSL FFT library lowering."),
   feature("unsupported-curand", "library", "cuRAND library island", "unsupported", false, true, "Future counter RNG library lowering."),
 ];
