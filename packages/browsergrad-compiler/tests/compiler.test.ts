@@ -143,6 +143,18 @@ __global__ void bad(float* x) {
     expect(invalidShared.diagnostics.map((diagnostic) => diagnostic.code)).toContain("invalid-array-dimension");
   });
 
+  it("reports unguarded writes as warnings, not compiler blockers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void exactLaunch(float* x) {
+  x[threadIdx.x] = 1.0;
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.diagnostics).toContainEqual(expect.objectContaining({
+      code: "unguarded-write",
+      severity: "warning",
+    }));
+  });
+
   it("rejects semantic gaps before WGSL/runtime execution", () => {
     const unknownSymbol = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(float* x) {
@@ -277,6 +289,28 @@ __global__ void dynamicShared(float *x) {
 }`));
 
     expect(analysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("dynamic-shared-memory");
+  });
+
+  it("lowers named dynamic extern shared memory when launch metadata supplies its size", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void dynamicShared(float *x) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  if (tid < 2) { scratch[tid] = x[tid]; }
+  __syncthreads();
+  if (tid < 1) { x[0] = scratch[0] + scratch[1]; }
+}`, {
+      workgroupSize: [2, 1, 1],
+      dynamicSharedMemory: { scratch: 2 },
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([2, 3]) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<workgroup> scratch: array<f32, 2>;");
+    expect([...result.buffers.x as Float32Array]).toEqual([5, 3]);
   });
 
   it("formats diagnostics with source snippets", () => {

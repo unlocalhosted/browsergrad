@@ -114,6 +114,7 @@ export function analyzeCudaLite(
   }
 
   const declareVar = (statement: CudaLiteVarDecl, scope: Scope): void => {
+    const dimensions = resolvedSharedDimensions(statement, options) ?? statement.dimensions;
     if (declaredNames.has(statement.name)) {
       diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${statement.name}'`, statement.span));
     }
@@ -123,7 +124,7 @@ export function analyzeCudaLite(
       name: statement.name,
       kind: statement.storage === "shared" ? "shared" : "local",
       valueType: statement.valueType,
-      dimensions: statement.dimensions,
+      dimensions,
       span: statement.span,
     });
   };
@@ -150,7 +151,7 @@ export function analyzeCudaLite(
           if (statement.storage === "local" && statement.dimensions.length > 0) {
             diagnostics.push(error("unsupported-local-array", "local arrays are not supported in CUDA-lite v0; use fixed __shared__ arrays or scalar locals", statement.span));
           }
-          if (statement.storage === "shared" && statement.dimensions.length === 0) {
+          if (statement.storage === "shared" && statement.dimensions.length === 0 && !resolvedSharedDimensions(statement, options)) {
             diagnostics.push(error("dynamic-shared-memory", "__shared__ arrays must have fixed dimensions", statement.span));
           }
           for (const dimension of statement.dimensions) {
@@ -258,7 +259,7 @@ export function lowerAnalyzedCudaLiteToKernelIr(
     name: analysis.kernel.name,
     params: analysis.kernel.params,
     body: analysis.kernel.body,
-    sharedDeclarations: collectSharedDeclarations(analysis.kernel.body),
+    sharedDeclarations: collectSharedDeclarations(analysis.kernel.body, options),
     requiredFeatures: analysis.requiredFeatures,
     atomicParams: analysis.atomicParams,
     workgroupSize: normalizeWorkgroupSize(options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE),
@@ -566,7 +567,7 @@ function validateExpressionStatement(
     diagnostics.push(error("const-pointer-write", `cannot write through const pointer '${root}'`, expression.span));
   }
   if (guardDepth === 0) {
-    diagnostics.push(error("unguarded-write", `write to pointer '${root}' must be guarded in CUDA-lite v0`, expression.span));
+    diagnostics.push(warning("unguarded-write", `write to pointer '${root}' has no syntactic bounds guard`, expression.span));
   }
 }
 
@@ -613,11 +614,17 @@ function validateBarrierStatement(
   }
 }
 
-function collectSharedDeclarations(statements: readonly CudaLiteStatement[]): readonly CudaLiteVarDecl[] {
+function collectSharedDeclarations(
+  statements: readonly CudaLiteStatement[],
+  options: CudaLiteAnalyzeOptions,
+): readonly CudaLiteVarDecl[] {
   const declarations: CudaLiteVarDecl[] = [];
   const walk = (items: readonly CudaLiteStatement[]): void => {
     for (const item of items) {
-      if (item.kind === "var" && item.storage === "shared") declarations.push(item);
+      if (item.kind === "var" && item.storage === "shared") {
+        const dimensions = resolvedSharedDimensions(item, options);
+        declarations.push(dimensions ? { ...item, dimensions } : item);
+      }
       if (item.kind === "if") {
         walk(item.consequent);
         if (item.alternate) walk(item.alternate);
@@ -627,6 +634,16 @@ function collectSharedDeclarations(statements: readonly CudaLiteStatement[]): re
   };
   walk(statements);
   return declarations;
+}
+
+function resolvedSharedDimensions(
+  statement: CudaLiteVarDecl,
+  options: CudaLiteAnalyzeOptions,
+): readonly number[] | undefined {
+  if (statement.storage !== "shared" || statement.dimensions.length > 0) return undefined;
+  const elements = options.dynamicSharedMemory?.[statement.name];
+  if (elements === undefined) return undefined;
+  return [positiveInteger(elements, `dynamicSharedMemory.${statement.name}`)];
 }
 
 function expressionIsDivergent(
@@ -725,4 +742,8 @@ function positiveInteger(value: number, name: string): number {
 
 function error(code: string, message: string, span: SourceSpan): CudaLiteDiagnostic {
   return { code, severity: "error", message, span };
+}
+
+function warning(code: string, message: string, span: SourceSpan): CudaLiteDiagnostic {
+  return { code, severity: "warning", message, span };
 }

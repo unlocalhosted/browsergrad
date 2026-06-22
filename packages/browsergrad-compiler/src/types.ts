@@ -220,6 +220,7 @@ export interface CudaLiteAnalyzeOptions {
   readonly kernelName?: string;
   readonly features?: Partial<Record<"shader-f16" | "subgroups" | "compatibility", boolean>>;
   readonly workgroupSize?: readonly [number, number, number];
+  readonly dynamicSharedMemory?: Readonly<Record<string, number>>;
 }
 
 export interface CudaLiteAnalysis {
