@@ -60,9 +60,9 @@ Repo exploration:
 
 Local corpus audits on 2026-06-23:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `36` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `47` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
-  expansion, and `321` hard gaps. Main
+  expansion and scalarized CUDA vector storage views, and `310` hard gaps. Main
   failures: parser/frontend gaps, texture/vector types, `clock_t`, `half2`,
   `double`, templates, and runtime library shape.
 - `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `20` direct
@@ -70,9 +70,9 @@ Local corpus audits on 2026-06-23:
   expansion, CUDA/C named constants, and CUDA cache-hint memory builtins, with
   `128` hard gaps. Main failures: frontend macro/type shape, `floatX` aliases,
   parser C++-isms, and remaining library/front-end gaps.
-- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `37` direct
+- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `45` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
-  expansion, and `256` hard gaps.
+  expansion and scalarized CUDA vector storage views, and `248` hard gaps.
   The pre-normalizer baseline was `3/293`, which proved context isolation was
   the first ladder rung.
 
@@ -255,11 +255,11 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=36` WebGPU-runnable, and `<=321` hard gaps.
+  `>=47` WebGPU-runnable, and `<=310` hard gaps.
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=20`
   WebGPU-runnable, and `<=128` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
-  `>=37` WebGPU-runnable, and `<=256` hard gaps.
+  `>=45` WebGPU-runnable, and `<=248` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
   unit tests.
 - Intrinsic-ledger expansion improves coverage through generic CUDA math and
@@ -268,6 +268,9 @@ Acceptance criteria for the first slice:
   enum-style values lower through a shared analyzer/reference/WGSL registry.
 - CUDA cache-hint builtins `__ldcs` and `__stcs` lower as plain storage
   pointer loads/stores in analyzer, CPU reference, and WGSL.
+- CUDA vector storage types `float2/3/4`, `int2/3/4`, and `uint2/3/4` lower
+  through one semantic vector ABI with scalar storage buffers, lane
+  member access, `make_*` constructors, CPU reference, and WebGPU coverage.
 - Source/context normalization stays generic: no repo-name, file-name, or
   assignment-name branching.
 - At least one broad intrinsic gap from `llm.c` or LeetCUDA lands with parser,

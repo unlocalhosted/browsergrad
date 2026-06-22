@@ -20,6 +20,13 @@ import {
 import { collectKernelLaunchCallees } from "./ast_queries.js";
 import { CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
+import {
+  CUDA_VECTOR_TYPES,
+  cudaVectorConstructorType,
+  cudaVectorFieldIndex,
+  cudaVectorScalarType,
+  isCudaVectorType,
+} from "./vector_types.js";
 
 const DEFAULT_WORKGROUP_SIZE: readonly [number, number, number] = [256, 1, 1];
 const BUILTIN_VECTORS = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]);
@@ -62,6 +69,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__ldcs", [1, 1]],
   ["__stcs", [2, 2]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
+  ...[...CUDA_VECTOR_TYPES].map(([type, info]) => [`make_${type}`, [info.lanes, info.lanes]] as const),
 ]);
 const WGSL_RESERVED_WORDS = new Set([
   "alias",
@@ -319,7 +327,10 @@ export function analyzeCudaLite(
         case "return":
           if (statement.value) {
             validateSideEffectPlacement(statement.value, false, diagnostics);
-            validateScalarOperand(walkExpression(statement.value, scope), statement.value.span, diagnostics);
+            const info = walkExpression(statement.value, scope);
+            if (info.kind !== "scalar" && info.kind !== "vector" && info.kind !== "complex" && info.kind !== "unknown") {
+              diagnostics.push(error("unsupported-return-expression", "return expression must resolve to a scalar or CUDA vector value", statement.value.span));
+            }
           }
           break;
         case "continue":
@@ -664,7 +675,9 @@ function validateCallExpression(
     if (info.kind !== "pointer" && info.kind !== "pool-pointer" && info.kind !== "address" && info.kind !== "unknown") {
       diagnostics.push(error("unsupported-cache-hint-address", "__ldcs expects a pointer expression", arg.span));
     }
-    return { kind: "scalar", valueType: info.valueType };
+    return isCudaVectorType(info.valueType)
+      ? { kind: "vector", valueType: info.valueType }
+      : { kind: "scalar", valueType: info.valueType };
   }
   if (callName === "__stcs") {
     const target = expression.args[0];
@@ -677,6 +690,11 @@ function validateCallExpression(
     }
     if (value) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
     return { kind: "scalar", valueType: "voidptr" };
+  }
+  const vectorConstructor = cudaVectorConstructorType(callName);
+  if (vectorConstructor) {
+    for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return { kind: "vector", valueType: vectorConstructor };
   }
   const intrinsic = CUDA_INTRINSICS_BY_NAME.get(callName);
   if (intrinsic) {
@@ -828,10 +846,18 @@ function validateDeviceFunctionCall(
       continue;
     }
     const info = walkExpression(arg, scope);
+    if (isCudaVectorType(param?.valueType)) {
+      if (info.kind !== "vector" && info.kind !== "unknown") {
+        diagnostics.push(error("unsupported-vector-argument", `device parameter '${param.name}' expects ${param.valueType}`, arg.span));
+      }
+      continue;
+    }
     validateScalarOperand(info, arg.span, diagnostics);
   }
   if (symbol.returnType === undefined || symbol.returnType === "void") return { kind: "unknown" };
-  return { kind: "scalar", valueType: symbol.returnType };
+  return isCudaVectorType(symbol.returnType)
+    ? { kind: "vector", valueType: symbol.returnType }
+    : { kind: "scalar", valueType: symbol.returnType };
 }
 
 function validateDevicePointerArgument(
@@ -1181,6 +1207,13 @@ function validateNonCallExpression(
         }
         return { kind: "scalar", valueType: "float" };
       }
+      if (isCudaVectorType(object.valueType)) {
+        const field = cudaVectorFieldIndex(object.valueType, expression.property);
+        if (field === undefined) {
+          diagnostics.push(error("unsupported-vector-member", `unsupported ${object.valueType} member '${expression.property}'`, expression.span));
+        }
+        return { kind: "scalar", valueType: cudaVectorScalarType(object.valueType) };
+      }
       if (object.kind !== "vector") {
         diagnostics.push(error("unsupported-member-target", "member access is only supported on CUDA-lite builtin vectors", expression.span));
       }
@@ -1193,6 +1226,9 @@ function validateNonCallExpression(
       const target = walkExpression(expression.target, scope);
       validateScalarOperand(walkExpression(expression.index, scope), expression.index.span, diagnostics);
       if (target.kind === "pointer") {
+        if (isCudaVectorType(target.valueType)) {
+          return { kind: "vector", valueType: target.valueType, symbol: target.symbol };
+        }
         return target.valueType === "complex64"
           ? { kind: "complex", valueType: target.valueType, symbol: target.symbol }
           : { kind: "scalar", valueType: target.valueType, symbol: target.symbol };
@@ -1209,6 +1245,9 @@ function validateNonCallExpression(
             dimensions: dimensions.slice(1),
             symbol: target.symbol,
           };
+        }
+        if (isCudaVectorType(target.valueType)) {
+          return { kind: "vector", valueType: target.valueType, symbol: target.symbol };
         }
         return target.valueType === "complex64"
           ? { kind: "complex", valueType: target.valueType, symbol: target.symbol }
@@ -1259,6 +1298,10 @@ function validateNonCallExpression(
         if (right.kind !== "complex" && right.kind !== "unknown") {
           diagnostics.push(error("unsupported-scalar-expression", "complex assignment expects a complex value", expression.right.span));
         }
+      } else if (left.kind === "vector") {
+        if (right.kind !== "vector" && right.kind !== "unknown") {
+          diagnostics.push(error("unsupported-vector-assignment", "CUDA vector assignment expects a CUDA vector value", expression.right.span));
+        }
       } else {
         validateScalarOperand(right, expression.right.span, diagnostics);
       }
@@ -1305,7 +1348,7 @@ function validateLValueExpression(
       diagnostics.push(error("const-pointer-write", `cannot write through const pointer '${root}'`, expression.span));
       return;
     }
-    if (info.kind !== "scalar" && info.kind !== "complex") {
+    if (info.kind !== "scalar" && info.kind !== "complex" && info.kind !== "vector") {
       diagnostics.push(error("invalid-assignment-target", "assignment target must resolve to a scalar or complex element", expression.span));
     }
     return;
@@ -1315,6 +1358,12 @@ function validateLValueExpression(
     if (info.kind === "complex") {
       if (expression.property !== "x" && expression.property !== "y") {
         diagnostics.push(error("invalid-assignment-target", "complex assignment target must be .x or .y", expression.span));
+      }
+      return;
+    }
+    if (isCudaVectorType(info.valueType)) {
+      if (cudaVectorFieldIndex(info.valueType, expression.property) === undefined) {
+        diagnostics.push(error("invalid-assignment-target", `vector assignment target must be one of .${CUDA_VECTOR_TYPES.get(info.valueType)!.fields.join("/.")}`, expression.span));
       }
       return;
     }
@@ -1371,6 +1420,9 @@ function expressionInfoForIdentifier(
   }
   if (symbol.kind === "local" && symbol.valueType === "complex64") {
     return { kind: "complex", valueType: symbol.valueType, symbol };
+  }
+  if (isCudaVectorType(symbol.valueType)) {
+    return { kind: "vector", valueType: symbol.valueType, symbol };
   }
   return { kind: "scalar", valueType: symbol.valueType, symbol };
 }
@@ -1466,6 +1518,18 @@ function sizeofType(typeName: string): number | undefined {
       return 4;
     case "cufftComplex":
       return 8;
+    case "float2":
+    case "int2":
+    case "uint2":
+      return 8;
+    case "float3":
+    case "int3":
+    case "uint3":
+      return 12;
+    case "float4":
+    case "int4":
+    case "uint4":
+      return 16;
     default:
       return undefined;
   }

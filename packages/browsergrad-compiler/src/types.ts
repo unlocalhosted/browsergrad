@@ -13,7 +13,26 @@ export interface SourceSpan {
   readonly column: number;
 }
 
-export type CudaLiteScalarType = "float" | "int" | "uint" | "half" | "bool" | "complex64" | "surface2d" | "devicepool" | "voidptr" | "void";
+export type CudaLiteScalarType =
+  | "float"
+  | "int"
+  | "uint"
+  | "half"
+  | "bool"
+  | "complex64"
+  | "float2"
+  | "float3"
+  | "float4"
+  | "int2"
+  | "int3"
+  | "int4"
+  | "uint2"
+  | "uint3"
+  | "uint4"
+  | "surface2d"
+  | "devicepool"
+  | "voidptr"
+  | "void";
 export type DiagnosticSeverity = "error" | "warning";
 
 export interface CudaLiteDiagnostic {

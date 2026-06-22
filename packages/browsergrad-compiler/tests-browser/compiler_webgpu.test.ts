@@ -328,6 +328,66 @@ __global__ void cacheHint(const float* x, float* y) {
     expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
   });
 
+  it("runs CUDA float4 storage memory views through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__device__ inline float4 add_float4(const float4& a, const float4& b) {
+  return make_float4(a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w);
+}
+__global__ void vectorSaxpy(float a, const float4* x, const float4* y, float4* z, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    const float4 x4 = x[i];
+    const float4 y4 = y[i];
+    float4 sum = add_float4(x4, y4);
+    sum.w = sum.w + a;
+    z[i] = make_float4(a * x4.x + y4.x, sum.y, sum.z, sum.w);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        x: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+        y: new Float32Array([10, 20, 30, 40, 50, 60, 70, 80]),
+        z: new Float32Array(8),
+      },
+      scalars: { a: 2, n: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.z as Float32Array]).toEqual([...expected.buffers.z as Float32Array]);
+  });
+
+  it("runs CUDA float4 shared arrays through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__device__ inline float4 load_float4(float4* tile, int i) {
+  return tile[i];
+}
+__global__ void sharedVector(const float4* x, float4* y) {
+  __shared__ float4 tile[2];
+  int tid = threadIdx.x;
+  tile[tid] = x[tid];
+  __syncthreads();
+  float4 swapped = load_float4(tile, 1 - tid);
+  y[tid] = make_float4(swapped.x, swapped.y, swapped.z, swapped.w + 1.0f);
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        x: new Float32Array([1, 2, 3, 4, 10, 20, 30, 40]),
+        y: new Float32Array(8),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
+  });
+
   it("runs device helper functions with storage pointer params through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(DEVICE_POINTER_HELPERS, { workgroupSize: [4, 1, 1] });

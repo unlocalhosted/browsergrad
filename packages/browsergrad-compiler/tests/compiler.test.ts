@@ -1516,6 +1516,68 @@ __global__ void cache_hint(const float* x, float* y) {
     expect([...result.buffers.y as Float32Array]).toEqual([3, 5]);
   });
 
+  it("lowers CUDA float4 values as scalar storage memory views", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ inline float4 add_float4(const float4& a, const float4& b) {
+  return make_float4(a.x + b.x, a.y + b.y, a.z + b.z, a.w + b.w);
+}
+__global__ void vectorSaxpy(float a, const float4* x, const float4* y, float4* z, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    const float4 x4 = x[i];
+    const float4 y4 = y[i];
+    float4 sum = add_float4(x4, y4);
+    sum.w = sum.w + a;
+    z[i] = make_float4(a * x4.x + y4.x, sum.y, sum.z, sum.w);
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+          y: new Float32Array([10, 20, 30, 40, 50, 60, 70, 80]),
+          z: new Float32Array(8),
+        },
+        scalars: { a: 2, n: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<storage, read> x: array<f32>;");
+    expect(compiled.wgsl).toContain("vec4<f32>");
+    expect([...result.buffers.z as Float32Array]).toEqual([12, 22, 33, 46, 60, 66, 77, 90]);
+  });
+
+  it("keeps CUDA vector shared arrays as logical vec storage", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ inline float4 load_float4(float4* tile, int i) {
+  return tile[i];
+}
+__global__ void sharedVector(const float4* x, float4* y) {
+  __shared__ float4 tile[2];
+  int tid = threadIdx.x;
+  tile[tid] = x[tid];
+  __syncthreads();
+  float4 swapped = load_float4(tile, 1 - tid);
+  y[tid] = make_float4(swapped.x, swapped.y, swapped.z, swapped.w + 1.0f);
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([1, 2, 3, 4, 10, 20, 30, 40]),
+          y: new Float32Array(8),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<workgroup> tile: array<vec4<f32>, 2>;");
+    expect(compiled.wgsl).toContain("bg_ptr_read_f32x4");
+    expect([...result.buffers.y as Float32Array]).toEqual([10, 20, 30, 41, 1, 2, 3, 5]);
+  });
+
   it("lowers CUDA device cuRAND state to deterministic browser RNG helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void monteCarloPiKernel(unsigned long long *counts, int totalPoints, unsigned long long seed) {

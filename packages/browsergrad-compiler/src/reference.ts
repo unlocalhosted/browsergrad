@@ -8,6 +8,13 @@ import { CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import {
+  cudaVectorConstructorType,
+  cudaVectorFieldIndex,
+  cudaVectorLaneCount,
+  isCudaVectorType,
+  type CudaLiteVectorType,
+} from "./vector_types.js";
+import {
   CudaLiteCompilerError,
   type CompiledCudaLiteKernel,
   type CompiledKernelInput,
@@ -24,8 +31,8 @@ import {
   type ReferenceKernelResult,
 } from "./types.js";
 
-type EvalValue = number | AddressValue | ComplexValue | PoolPointerValue;
-type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue | ComplexValue | PoolPointerValue | LocalArrayValue;
+type EvalValue = number | AddressValue | ComplexValue | CudaVectorValue | PoolPointerValue;
+type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue | LocalArrayValue;
 interface Vector3 {
   readonly x: number;
   readonly y: number;
@@ -49,6 +56,12 @@ interface ComplexValue {
   readonly y: number;
 }
 
+interface CudaVectorValue {
+  readonly kind: "cuda-vector";
+  readonly valueType: CudaLiteVectorType;
+  readonly lanes: readonly number[];
+}
+
 interface PoolPointerValue {
   readonly kind: "pool-pointer";
   readonly poolName: string;
@@ -61,7 +74,7 @@ interface LValue {
   readonly name: string;
   readonly space: "local" | "buffer" | "shared" | "constant" | "pool";
   readonly index?: number;
-  readonly field?: "x" | "y";
+  readonly field?: "x" | "y" | "z" | "w";
   readonly valueType?: CudaLiteScalarType;
 }
 
@@ -112,7 +125,7 @@ interface MutableTrace {
   readonly sharedWrites: KernelMemoryAccess[];
 }
 
-type ExecControl = { readonly kind: "return"; readonly value?: number } | { readonly kind: "continue" };
+type ExecControl = { readonly kind: "return"; readonly value?: EvalValue } | { readonly kind: "continue" };
 type BarrierKind = "barrier" | "grid-barrier";
 type BarrierGenerator = Generator<BarrierKind, ExecControl | void, void>;
 
@@ -428,7 +441,7 @@ function* execStatements(
       case "return":
         return {
           kind: "return",
-          ...(statement.value === undefined ? {} : { value: evalNumber(statement.value, context) }),
+          ...(statement.value === undefined ? {} : { value: evalExpression(statement.value, context) }),
         };
       case "continue":
         return { kind: "continue" };
@@ -578,7 +591,7 @@ function pointerOffsetArgumentValue(
   const left = pointerArgumentValue(arg.left, valueType, context);
   const delta = evalNumber(arg.right, context) * (arg.operator === "-" ? -1 : 1);
   if (isPoolPointer(left)) {
-    return { ...left, byteOffset: left.byteOffset + delta * 4, valueType };
+    return { ...left, byteOffset: left.byteOffset + delta * elementByteSize(valueType), valueType };
   }
   if (typeof left !== "number" && "kind" in left && left.kind === "address") {
     return {
@@ -695,11 +708,29 @@ function pointerValueTypeForExpression(
   return root ? context.valueTypes.get(root) ?? "uint" : "uint";
 }
 
+function expressionValueType(expression: CudaLiteExpression, context: ThreadContext): CudaLiteScalarType | undefined {
+  if (expression.kind === "identifier") {
+    const local = context.locals.get(expression.name);
+    if (isCudaVectorValue(local)) return local.valueType;
+    if (isComplex(local)) return "complex64";
+    return context.valueTypes.get(expression.name);
+  }
+  if (expression.kind === "index") return pointerValueTypeForExpression(expression.target, context);
+  if (expression.kind === "call") {
+    const name = expressionNameForReference(expression.callee);
+    return name ? cudaVectorConstructorType(name) : undefined;
+  }
+  if (expression.kind === "member") return expressionValueType(expression.object, context);
+  return undefined;
+}
+
 function byteView(buffer: WgslTypedArray): Uint8Array {
   return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
 }
 
 function elementByteSize(valueType: CudaLiteScalarType): number {
+  const vector = cudaVectorLaneCount(valueType);
+  if (vector > 1) return vector * 4;
   if (valueType === "half") return 2;
   if (valueType === "complex64") return 8;
   return 4;
@@ -726,6 +757,7 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
     case "identifier": {
       const value = readIdentifier(expression.name, context);
       if (isComplex(value)) return value;
+      if (isCudaVectorValue(value)) return value;
       if (isPoolPointer(value)) return value;
       return valueAsNumber(value, expression.name);
     }
@@ -741,6 +773,11 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
         if (expression.property === "x") return object.x;
         if (expression.property === "y") return object.y;
         throw compilerFailure(`unsupported complex member '${expression.property}'`);
+      }
+      if (isCudaVectorValue(object)) {
+        const index = cudaVectorFieldIndex(object.valueType, expression.property);
+        if (index !== undefined) return object.lanes[index] ?? 0;
+        throw compilerFailure(`unsupported ${object.valueType} member '${expression.property}'`);
       }
       if (expression.property === "x") return object.x;
       if (expression.property === "y") return object.y;
@@ -806,16 +843,18 @@ function castNumber(type: Exclude<CudaLiteScalarType, "void">, value: number): E
   return value;
 }
 
-function readMemberObject(expression: CudaLiteExpression, context: ThreadContext): Vector3 | ComplexValue {
+function readMemberObject(expression: CudaLiteExpression, context: ThreadContext): Vector3 | ComplexValue | CudaVectorValue {
   if (expression.kind === "identifier") {
     const value = readIdentifier(expression.name, context);
     if (isComplex(value)) return value;
+    if (isCudaVectorValue(value)) return value;
     if (typeof value === "number" || "kind" in value) throw compilerFailure(`'${expression.name}' is not a vector`);
     return value;
   }
   const value = evalExpression(expression, context);
   if (isComplex(value)) return value;
-  throw compilerFailure("member access only supports CUDA-lite builtin vectors and complex values");
+  if (isCudaVectorValue(value)) return value;
+  throw compilerFailure("member access only supports CUDA-lite builtin vectors, CUDA vector values, and complex values");
 }
 
 function readIdentifier(name: string, context: ThreadContext): LocalValue {
@@ -903,6 +942,11 @@ function evalAssignment(
   }
   if (isComplex(right)) {
     if (operator !== "=") throw compilerFailure("complex values only support assignment");
+    writeLValue(lvalue, right, context);
+    return right;
+  }
+  if (isCudaVectorValue(right)) {
+    if (operator !== "=") throw compilerFailure("CUDA vector values only support assignment");
     writeLValue(lvalue, right, context);
     return right;
   }
@@ -1053,6 +1097,10 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     writeLValue(resolvePointerArgument(target, context), evalExpression(value, context), context);
     return 0;
   }
+  const vectorConstructor = name ? cudaVectorConstructorType(name) : undefined;
+  if (vectorConstructor) {
+    return { kind: "cuda-vector", valueType: vectorConstructor, lanes: expression.args.map((arg) => evalNumber(arg, context)) };
+  }
   const deviceFunction = name ? context.functions.get(name) : undefined;
   if (deviceFunction) return evalDeviceFunction(
     deviceFunction,
@@ -1149,7 +1197,7 @@ function deviceFunctionArgs(
   });
 }
 
-function evalDeviceFunction(fn: CudaLiteDeviceFunction, args: readonly EvalValue[], context: ThreadContext): number {
+function evalDeviceFunction(fn: CudaLiteDeviceFunction, args: readonly EvalValue[], context: ThreadContext): EvalValue {
   const locals = new Map<string, LocalValue>();
   for (const [index, param] of fn.params.entries()) locals.set(param.name, args[index] ?? zeroLocalValue(param.valueType));
   const fnContext: ThreadContext = {
@@ -1161,8 +1209,8 @@ function evalDeviceFunction(fn: CudaLiteDeviceFunction, args: readonly EvalValue
     const next = generator.next();
     if (next.done) {
       const control = next.value;
-      if (control?.kind === "return") return control.value ?? 0;
-      return 0;
+      if (control?.kind === "return") return control.value ?? zeroLocalValue(fn.returnType);
+      return zeroLocalValue(fn.returnType);
     }
     throw compilerFailure(`device function '${fn.name}' cannot contain __syncthreads()`);
   }
@@ -1215,9 +1263,13 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
   if (pool) return pool;
   if (expression.kind === "member") {
     if (expression.property !== "x" && expression.property !== "y") {
-      throw compilerFailure(`unsupported lvalue member '${expression.property}'`);
+      const info = expressionValueType(expression.object, context);
+      if (!isCudaVectorType(info) || cudaVectorFieldIndex(info, expression.property) === undefined) {
+        throw compilerFailure(`unsupported lvalue member '${expression.property}'`);
+      }
     }
-    return { ...resolveLValue(expression.object, context), field: expression.property };
+    const field = expression.property as NonNullable<LValue["field"]>;
+    return { ...resolveLValue(expression.object, context), field };
   }
   if (expression.kind === "identifier") {
     if (context.buffers.has(expression.name)) return { name: expression.name, space: "buffer", index: 0 };
@@ -1311,8 +1363,9 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
     if (lvalue.index === undefined) return projectField(readIdentifier(lvalue.name, context), lvalue);
     const local = context.locals.get(lvalue.name);
     if (!isLocalArray(local)) throw compilerFailure(`'${lvalue.name}' is not a local array`);
-    const storageIndex = local.valueType === "complex64" ? lvalue.index * 2 : lvalue.index;
-    const ok = storageIndex >= 0 && storageIndex < local.data.length && (local.valueType !== "complex64" || storageIndex + 1 < local.data.length);
+    const storageIndex = lvalue.index * valueStorageWidth(local.valueType);
+    const width = valueStorageWidth(local.valueType);
+    const ok = storageIndex >= 0 && storageIndex + width - 1 < local.data.length;
     return ok ? readBufferValue(local.data, storageIndex, local.valueType, lvalue.field) : 0;
   }
   if (lvalue.index === undefined) throw compilerFailure(`missing index for '${lvalue.name}'`);
@@ -1320,8 +1373,9 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
     const buffer = context.buffers.get(lvalue.name);
     if (!buffer) throw compilerFailure(`missing buffer '${lvalue.name}'`);
     const valueType = context.valueTypes.get(lvalue.name);
-    const storageIndex = valueType === "complex64" ? lvalue.index * 2 : lvalue.index;
-    const ok = storageIndex >= 0 && storageIndex < buffer.length && (valueType !== "complex64" || storageIndex + 1 < buffer.length);
+    const storageIndex = lvalue.index * valueStorageWidth(valueType);
+    const width = valueStorageWidth(valueType);
+    const ok = storageIndex >= 0 && storageIndex + width - 1 < buffer.length;
     const value = ok ? readBufferValue(buffer, storageIndex, valueType, lvalue.field) : 0;
     context.trace.reads.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
     return value;
@@ -1330,8 +1384,9 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
     const value = context.constants.get(lvalue.name);
     if (!value || typeof value === "number") throw compilerFailure(`missing constant buffer '${lvalue.name}'`);
     const valueType = context.valueTypes.get(lvalue.name);
-    const storageIndex = valueType === "complex64" ? lvalue.index * 2 : lvalue.index;
-    const ok = storageIndex >= 0 && storageIndex < value.length && (valueType !== "complex64" || storageIndex + 1 < value.length);
+    const storageIndex = lvalue.index * valueStorageWidth(valueType);
+    const width = valueStorageWidth(valueType);
+    const ok = storageIndex >= 0 && storageIndex + width - 1 < value.length;
     const read = ok ? readBufferValue(value, storageIndex, valueType, lvalue.field) : 0;
     context.trace.reads.push({ name: lvalue.name, index: storageIndex, value: traceValue(read), ok });
     return read;
@@ -1352,8 +1407,9 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
   }
   const shared = context.shared.get(lvalue.name);
   if (!shared) throw compilerFailure(`missing shared array '${lvalue.name}'`);
-  const storageIndex = shared.valueType === "complex64" ? lvalue.index * 2 : lvalue.index;
-  const ok = storageIndex >= 0 && storageIndex < shared.data.length && (shared.valueType !== "complex64" || storageIndex + 1 < shared.data.length);
+  const storageIndex = lvalue.index * valueStorageWidth(shared.valueType);
+  const width = valueStorageWidth(shared.valueType);
+  const ok = storageIndex >= 0 && storageIndex + width - 1 < shared.data.length;
   const value = ok ? readBufferValue(shared.data, storageIndex, shared.valueType, lvalue.field) : 0;
   context.trace.sharedReads.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
   return value;
@@ -1364,15 +1420,25 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
     if (lvalue.index !== undefined) {
       const local = context.locals.get(lvalue.name);
       if (!isLocalArray(local)) throw compilerFailure(`'${lvalue.name}' is not a local array`);
-      const storageIndex = local.valueType === "complex64" ? lvalue.index * 2 : lvalue.index;
-      const ok = storageIndex >= 0 && storageIndex < local.data.length && (local.valueType !== "complex64" || storageIndex + 1 < local.data.length);
+      const storageIndex = lvalue.index * valueStorageWidth(local.valueType);
+      const width = valueStorageWidth(local.valueType);
+      const ok = storageIndex >= 0 && storageIndex + width - 1 < local.data.length;
       if (ok) writeBufferValue(local.data, storageIndex, local.valueType, lvalue.field, value);
       return;
     }
     if (lvalue.field) {
       const current = readIdentifier(lvalue.name, context);
-      if (!isComplex(current)) throw compilerFailure(`'${lvalue.name}' is not complex`);
-      context.locals.set(lvalue.name, { ...current, [lvalue.field]: valueAsNumber(value, lvalue.name) });
+      if (isComplex(current)) {
+        context.locals.set(lvalue.name, { ...current, [lvalue.field]: valueAsNumber(value, lvalue.name) });
+      } else if (isCudaVectorValue(current)) {
+        const field = cudaVectorFieldIndex(current.valueType, lvalue.field);
+        if (field === undefined) throw compilerFailure(`unsupported ${current.valueType} member '${lvalue.field}'`);
+        const lanes = [...current.lanes];
+        lanes[field] = valueAsNumber(value, lvalue.name);
+        context.locals.set(lvalue.name, { ...current, lanes });
+      } else {
+        throw compilerFailure(`'${lvalue.name}' is not complex or CUDA vector`);
+      }
     } else {
       context.locals.set(lvalue.name, value);
     }
@@ -1383,8 +1449,9 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
     const buffer = context.buffers.get(lvalue.name);
     if (!buffer) throw compilerFailure(`missing buffer '${lvalue.name}'`);
     const valueType = context.valueTypes.get(lvalue.name);
-    const storageIndex = valueType === "complex64" ? lvalue.index * 2 : lvalue.index;
-    const ok = storageIndex >= 0 && storageIndex < buffer.length && (valueType !== "complex64" || storageIndex + 1 < buffer.length);
+    const storageIndex = lvalue.index * valueStorageWidth(valueType);
+    const width = valueStorageWidth(valueType);
+    const ok = storageIndex >= 0 && storageIndex + width - 1 < buffer.length;
     if (ok) writeBufferValue(buffer, storageIndex, valueType, lvalue.field, value);
     context.trace.writes.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
     return;
@@ -1405,8 +1472,9 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
   }
   const shared = context.shared.get(lvalue.name);
   if (!shared) throw compilerFailure(`missing shared array '${lvalue.name}'`);
-  const storageIndex = shared.valueType === "complex64" ? lvalue.index * 2 : lvalue.index;
-  const ok = storageIndex >= 0 && storageIndex < shared.data.length && (shared.valueType !== "complex64" || storageIndex + 1 < shared.data.length);
+  const storageIndex = lvalue.index * valueStorageWidth(shared.valueType);
+  const width = valueStorageWidth(shared.valueType);
+  const ok = storageIndex >= 0 && storageIndex + width - 1 < shared.data.length;
   if (ok) writeBufferValue(shared.data, storageIndex, shared.valueType, lvalue.field, value);
   context.trace.sharedWrites.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
 }
@@ -1415,7 +1483,7 @@ function allocateShared(declarations: readonly CudaLiteVarDecl[]): Map<string, S
   const shared = new Map<string, SharedArrayValue>();
   for (const declaration of declarations) {
     const elements = declaration.dimensions.reduce((product, item) => product * item, 1);
-    const length = declaration.valueType === "complex64" ? elements * 2 : elements;
+    const length = elements * valueStorageWidth(declaration.valueType);
     const data = declaration.valueType === "int"
       ? new Int32Array(length)
       : declaration.valueType === "uint"
@@ -1441,7 +1509,7 @@ function allocateLocalArray(declaration: CudaLiteVarDecl): LocalArrayValue {
 
 function allocateTypedArray(valueType: CudaLiteScalarType, dimensions: readonly number[]): WgslTypedArray {
   const elements = dimensions.reduce((product, item) => product * item, 1);
-  const length = valueType === "complex64" ? elements * 2 : elements;
+  const length = elements * valueStorageWidth(valueType);
   return valueType === "int"
     ? new Int32Array(length)
     : valueType === "uint"
@@ -1457,7 +1525,7 @@ function readBufferValue(
   buffer: WgslTypedArray,
   storageIndex: number,
   valueType: CudaLiteScalarType | undefined,
-  field: "x" | "y" | undefined,
+  field: "x" | "y" | "z" | "w" | undefined,
 ): EvalValue {
   if (valueType === "complex64") {
     const value = {
@@ -1465,7 +1533,19 @@ function readBufferValue(
       x: Number(buffer[storageIndex]!),
       y: Number(buffer[storageIndex + 1]!),
     };
-    return field ? value[field] : value;
+    if (field) {
+      if (field !== "x" && field !== "y") throw compilerFailure(`unsupported complex member '${field}'`);
+      return value[field];
+    }
+    return value;
+  }
+  if (isCudaVectorType(valueType)) {
+    const lanes = Array.from({ length: cudaVectorLaneCount(valueType) }, (_, lane) => Number(buffer[storageIndex + lane]!));
+    if (field) {
+      const index = cudaVectorFieldIndex(valueType, field);
+      return index === undefined ? 0 : lanes[index] ?? 0;
+    }
+    return { kind: "cuda-vector", valueType, lanes };
   }
   return Number(buffer[storageIndex]!);
 }
@@ -1474,7 +1554,7 @@ function writeBufferValue(
   buffer: WgslTypedArray,
   storageIndex: number,
   valueType: CudaLiteScalarType | undefined,
-  field: "x" | "y" | undefined,
+  field: "x" | "y" | "z" | "w" | undefined,
   value: EvalValue,
 ): void {
   if (valueType === "complex64") {
@@ -1485,6 +1565,16 @@ function writeBufferValue(
     const complex = valueAsComplex(value, "complex write");
     buffer[storageIndex] = complex.x;
     buffer[storageIndex + 1] = complex.y;
+    return;
+  }
+  if (isCudaVectorType(valueType)) {
+    if (field) {
+      const index = cudaVectorFieldIndex(valueType, field);
+      if (index !== undefined) buffer[storageIndex + index] = valueAsNumber(value, field);
+      return;
+    }
+    const vector = valueAsCudaVector(value, valueType);
+    for (let lane = 0; lane < cudaVectorLaneCount(valueType); lane++) buffer[storageIndex + lane] = vector.lanes[lane] ?? 0;
     return;
   }
   buffer[storageIndex] = valueAsNumber(value, "write value");
@@ -1724,11 +1814,23 @@ function valueAsComplex(value: LocalValue, name: string): ComplexValue {
   throw compilerFailure(`'${name}' is not complex`);
 }
 
+function valueAsCudaVector(value: LocalValue, type: CudaLiteVectorType): CudaVectorValue {
+  if (isCudaVectorValue(value) && value.valueType === type) return value;
+  throw compilerFailure(`value is not ${type}`);
+}
+
 function isComplex(value: LocalValue | EvalValue | undefined): value is ComplexValue {
   return value !== undefined &&
     typeof value !== "number" &&
     "kind" in value &&
     value.kind === "complex64";
+}
+
+function isCudaVectorValue(value: LocalValue | EvalValue | undefined): value is CudaVectorValue {
+  return value !== undefined &&
+    typeof value !== "number" &&
+    "kind" in value &&
+    value.kind === "cuda-vector";
 }
 
 function isLocalArray(value: LocalValue | undefined): value is LocalArrayValue {
@@ -1755,14 +1857,28 @@ function isAddress(value: LocalValue | EvalValue | undefined): value is AddressV
 function projectField(value: LocalValue, lvalue: LValue): EvalValue {
   if (!lvalue.field) {
     if (isComplex(value)) return value;
+    if (isCudaVectorValue(value)) return value;
     return valueAsNumber(value, lvalue.name);
   }
+  if (isCudaVectorValue(value)) {
+    const field = cudaVectorFieldIndex(value.valueType, lvalue.field);
+    if (field !== undefined) return value.lanes[field] ?? 0;
+    throw compilerFailure(`unsupported ${value.valueType} member '${lvalue.field}'`);
+  }
   const complex = valueAsComplex(value, lvalue.name);
+  if (lvalue.field !== "x" && lvalue.field !== "y") throw compilerFailure(`unsupported complex member '${lvalue.field}'`);
   return complex[lvalue.field];
 }
 
 function zeroLocalValue(type: CudaLiteScalarType): EvalValue {
-  return type === "complex64" ? { kind: "complex64", x: 0, y: 0 } : 0;
+  if (type === "complex64") return { kind: "complex64", x: 0, y: 0 };
+  if (isCudaVectorType(type)) return { kind: "cuda-vector", valueType: type, lanes: Array.from({ length: cudaVectorLaneCount(type) }, () => 0) };
+  return 0;
+}
+
+function valueStorageWidth(type: CudaLiteScalarType | undefined): number {
+  if (isCudaVectorType(type)) return cudaVectorLaneCount(type);
+  return type === "complex64" ? 2 : 1;
 }
 
 function sizeofType(typeName: string): number {
@@ -1780,7 +1896,12 @@ function sizeofType(typeName: string): number {
 function traceValue(value: EvalValue): number {
   if (isPoolPointer(value)) return valueAsNumber(value, "pool pointer");
   if (isAddress(value)) return value.target.index ?? 0;
+  if (isCudaVectorValue(value)) return value.lanes[0] ?? 0;
   return isComplex(value) ? value.x : value;
+}
+
+function expressionNameForReference(expression: CudaLiteExpression): string | undefined {
+  return expression.kind === "identifier" ? expression.name : undefined;
 }
 
 function isCooperativeGroup(value: LocalValue | undefined): value is CooperativeGroupValue {

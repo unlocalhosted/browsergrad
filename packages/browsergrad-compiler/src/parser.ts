@@ -25,8 +25,9 @@ import {
   type CudaLiteVarDecl,
   type SourceSpan,
 } from "./types.js";
+import { CUDA_VECTOR_TYPES } from "./vector_types.js";
 
-const TYPE_KEYWORDS = new Set(["float", "int", "uint", "half", "__half", "bool"]);
+const TYPE_KEYWORDS = new Set(["float", "int", "uint", "half", "__half", "bool", ...CUDA_VECTOR_TYPES.keys()]);
 const TYPE_START_KEYWORDS = new Set([
   ...TYPE_KEYWORDS,
   "unsigned",
@@ -231,6 +232,7 @@ class Parser {
       const constant = this.consumeIf("const") !== undefined;
       const type = this.parseType();
       const pointer = this.consumeIf("*") !== undefined;
+      this.consumeIf("&");
       this.consumeTypeQualifiers();
       const name = this.expectIdentifier("parameter name");
       this.consumeTypeQualifiers();
@@ -449,6 +451,7 @@ class Parser {
   private parseVarDeclList(expectSemicolon: boolean): readonly CudaLiteVarDecl[] {
     const start = this.peek().span;
     const storageInfo = this.consumeStorageQualifier();
+    this.consumeIf("const");
     const valueType = this.parseType();
     const declarations: CudaLiteVarDecl[] = [];
     do {
@@ -691,6 +694,7 @@ class Parser {
 
   private startsVarDecl(): boolean {
     if (this.match("__shared__") || this.match("extern")) return true;
+    if (this.match("const")) return TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "");
     return TYPE_START_KEYWORDS.has(this.peek().value);
   }
 

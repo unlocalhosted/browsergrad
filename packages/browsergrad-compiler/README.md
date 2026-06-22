@@ -110,6 +110,10 @@ analyzer, CPU-reference, and WGSL path.
 CUDA cache-hint memory builtins `__ldcs` and `__stcs` lower as ordinary storage
 pointer loads/stores; BrowserGrad preserves semantics and intentionally ignores
 the cache placement hint on WebGPU.
+CUDA vector storage types `float2/3/4`, `int2/3/4`, and `uint2/3/4` lower
+through a scalar storage ABI with `make_*` constructors and lane member access.
+This keeps caller buffers as ordinary typed arrays while still emitting vector
+values inside WGSL and the CPU reference interpreter.
 Common C/CUDA integer spellings are accepted for learner kernels: `signed`,
 `unsigned`, `short`, `long`, `long long`, `size_t`, `int32_t`, `uint32_t`,
 `int64_t`, `uint64_t`, and `uintptr_t`. Current WebGPU lowering maps them onto
