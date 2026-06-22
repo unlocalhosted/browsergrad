@@ -315,6 +315,67 @@ __global__ void gridSync(float *scratch, float *out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("reuses prepared grid-sync phases over resident buffers", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const source = `
+namespace cg = cooperative_groups;
+__global__ void gridSync(float *scratch, float *out) {
+  cg::grid_group grid = cg::this_grid();
+  scratch[blockIdx.x] = (float)blockIdx.x + 1.0f;
+  grid.sync();
+  if (blockIdx.x == 0 && threadIdx.x == 0) {
+    out[0] = scratch[0] + scratch[1];
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      referenceGridSync: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const scratch = createWgslStorageBuffer(device, {
+      valueType: "f32",
+      data: new Float32Array(2),
+      label: "prepared-grid-sync-scratch",
+    });
+    const out = createWgslStorageBuffer(device, {
+      valueType: "f32",
+      data: new Float32Array(1),
+      label: "prepared-grid-sync-out",
+    });
+    const input = {
+      buffers: {},
+      residentBuffers: { scratch, out },
+      readback: [],
+    };
+    const launch = { gridDim: [2, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, {
+      buffers: {
+        scratch: new Float32Array(2),
+        out: new Float32Array(1),
+      },
+    }, launch);
+    const prepared = await prepareCompiledKernelWebGpu(device, compiled, input, launch);
+
+    try {
+      expect(prepared.kind).toBe("grid-sync-phases");
+      expect(prepared.stepCount).toBe(2);
+
+      const first = await prepared.run();
+      expect(first.buffers).toEqual({});
+      const firstReadback = await readWgslStorageBuffer(device, out);
+      expect([...firstReadback as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+
+      writeWgslStorageBuffer(device, scratch, new Float32Array([0, 0]));
+      writeWgslStorageBuffer(device, out, new Float32Array([0]));
+      const second = await prepared.run({ readback: ["out"] });
+      expect([...second.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+    } finally {
+      prepared.destroy();
+      destroyWgslStorageBuffer(scratch);
+      destroyWgslStorageBuffer(out);
+    }
+  });
+
   it("runs grid.sync phases when shared memory is rewritten after sync", async () => {
     if (!deviceCheck.available) return;
     const source = `
@@ -464,6 +525,62 @@ __global__ void parent(float *x, int n) {
       const xReadback = await readWgslStorageBuffer(device, x);
       expect([...xReadback as Float32Array]).toEqual([2, 3]);
     } finally {
+      destroyWgslStorageBuffer(x);
+    }
+  });
+
+  it("reuses a prepared host-lifted dynamic launch over resident buffers", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const source = `
+__global__ void child(float *dst, int n) {
+  int idx = threadIdx.x;
+  if (idx < n) { dst[idx] += 1.0f; }
+}
+__global__ void parent(float *x, int n) {
+  if (threadIdx.x < 1) {
+    dim3 grid(1);
+    dim3 block(n);
+    child<<<grid, block>>>(x, n);
+    cudaDeviceSynchronize();
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const x = createWgslStorageBuffer(device, {
+      valueType: "f32",
+      data: new Float32Array([1, 2]),
+      label: "prepared-dynamic-x",
+    });
+    const prepared = await prepareCompiledKernelWebGpu(
+      device,
+      compiled,
+      {
+        buffers: {},
+        residentBuffers: { x },
+        scalars: { n: 2 },
+        readback: [],
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    try {
+      expect(prepared.kind).toBe("host-dynamic-launch");
+      expect(prepared.stepCount).toBe(2);
+
+      const first = await prepared.run();
+      expect(first.buffers).toEqual({});
+      const firstReadback = await readWgslStorageBuffer(device, x);
+      expect([...firstReadback as Float32Array]).toEqual([2, 3]);
+
+      writeWgslStorageBuffer(device, x, new Float32Array([4, 5]));
+      const second = await prepared.run({ readback: ["x"] });
+      expect([...second.buffers.x as Float32Array]).toEqual([5, 6]);
+    } finally {
+      prepared.destroy();
       destroyWgslStorageBuffer(x);
     }
   });
