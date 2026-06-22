@@ -85,7 +85,8 @@ For every lab profile, the platform should:
     Prefer `runAssignmentJavascriptProfile()` when the platform has a full
     profile; it owns preflight, route validation, mount collection,
     declared-oracle preflight, oracle/substrate wiring, and rubric execution as
-    one e2e path. CS149 A1 and GPU Puzzles are covered by this route.
+    one e2e path. CS149 A1, CS149 A2, CS149 A3, and GPU Puzzles are covered by
+    this route.
     JS/TS streaming checks can import `createStreamingGate` and use
     `gate.wrapInput` plus `gate.wrapOutput`.
     FlashAttention labs can use `@unlocalhosted/browsergrad-kernels`
@@ -93,13 +94,15 @@ For every lab profile, the platform should:
     browser-safe output/LSE/backward checks before Triton/CUDA execution is
     available.
     GPU Puzzles and CS149 A3 CUDA concept labs can use
-    `simulateCuda1DGrid()`, `referenceSaxpy()`,
+    `runThreadGrid()`, `referenceSaxpy()`,
     `referenceExclusiveScan()`, `referenceFindRepeats()`, and
     `referenceOrderedCircleRender()` for browser-safe
     map/guard/SAXPY/scan/find-repeats/renderer-ordering checks before native
-    CUDA runners exist. `defineCuda1DProgram()`, `simulateCuda1DProgram()`,
-    `emitCuda1DProgramWgsl()`, and `runCuda1DProgramWebGpu()` cover the first
-    author-once simulator-plus-WGSL-plus-WebGPU path.
+    CUDA runners exist. `defineKernel1DProgram()`,
+    `runKernel1DProgramReference()`, `emitKernel1DProgramWgsl()`, and
+    `runKernel1DProgramWebGpu()` cover the first author-once
+    reference-plus-WGSL-plus-WebGPU path. CUDA-named helpers remain
+    compatibility aliases for upstream-shaped rubrics.
     Snapshot-backed labs can use `@unlocalhosted/browsergrad-primitives`
     `createSnapshotComparator()` to compare small JSON/numeric fixtures and emit
     deterministic mismatch paths.
@@ -391,6 +394,12 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     oracle from `@unlocalhosted/browsergrad-kernels`, calls the generic
     `runThreadGrid()` surface, and verifies the profile's JS
     route/assertion/artifact path end to end.
+    CraftingAttention also has a platform e2e that loads
+    `docs/internal/cs149-assignment3.profile.json`, wires the same kernel
+    oracle, uses generic `Kernel1D` and `runThreadGrid()` APIs, and verifies
+    SAXPY, exclusive scan/find-repeats, ordered circle rendering, WGSL lowering,
+    guarded and unguarded memory behavior, and the informational performance
+    rubric assertion.
     CraftingAttention also has a platform e2e that loads
     `docs/internal/cs336-assignment2-systems.profile.json`, proves the A2
     profile selects Pyodide when browser-safe simulator/oracle capabilities are

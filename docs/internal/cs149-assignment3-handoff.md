@@ -17,12 +17,16 @@ First browser-safe slice:
     the scan/find-repeats part of the assignment.
   - `referenceOrderedCircleRender()` to check renderer ordering fixtures with
     deterministic normalized circle geometry and ordered alpha blending.
-  - `defineCuda1DProgram()`, `simulateCuda1DProgram()`, and
-    `emitCuda1DProgramWgsl()` to prove the same guarded SAXPY-like 1D program
-    can run through simulator trace, WGSL source generation, and
-    `runCuda1DProgramWebGpu()` browser dispatch.
-  - `simulateCuda1DGrid()` to check 1D thread/block indexing, guard behavior,
-    and out-of-bounds access before native CUDA execution exists.
+  - `defineKernel1DProgram()`, `runKernel1DProgramReference()`, and
+    `emitKernel1DProgramWgsl()` to prove the same guarded SAXPY-like 1D
+    program can run through the BrowserGrad reference runner and WGSL source
+    generation before native CUDA execution exists.
+  - `runKernel1DProgramWebGpu()` as the real WebGPU dispatch path when a
+    browser `GPUDevice` is available.
+  - `runThreadGrid()` to check 1D thread/block indexing, guard behavior, and
+    out-of-bounds access before native CUDA execution exists.
+  - CUDA-named helpers remain compatibility aliases for rubrics that
+    intentionally mirror upstream vocabulary.
 - Proven BrowserGrad route:
   - `packages/browsergrad-runtime/tests/assignment-javascript-profile-e2e.test.ts`
     loads this profile, registers `_bg_cuda_concepts`, and passes
@@ -51,20 +55,26 @@ Native/external-heavy concepts:
 Crafting Attention should:
 
 1. Load `cs149-assignment3.profile.json` and route through
-   `runAssignmentJavascriptProfile()`.
-2. Register `_bg_cuda_concepts` with the CUDA-concept helpers.
+   `runVerifiedAssignmentJavascriptProfile()`.
+2. Register `_bg_cuda_concepts` with `@unlocalhosted/browsergrad-kernels`; use
+   the generic `Kernel1D` and `runThreadGrid()` calls inside rubrics unless the
+   lab deliberately teaches CUDA vocabulary.
 3. Start with `saxpy_correctness`, `exclusive_scan_correctness`,
    `renderer_ordering_correctness`, and `kernel_memory_bounds`.
 4. Add `find_repeats` fixtures through `referenceFindRepeats()` when authoring
    scan labs.
-5. Use `wgsl_lowering_smoke` for author-once CUDA-shaped kernels: scalar params
+5. Use `wgsl_lowering_smoke` for author-once BrowserGrad kernels: scalar params
    and `outputRead` cover the first SAXPY shape, and
-   `runCuda1DProgramWebGpu()` covers real WebGPU dispatch when an adapter
+   `runKernel1DProgramWebGpu()` covers real WebGPU dispatch when an adapter
    exists.
 6. Keep `performance_rubric_smoke` informational until WebGPU/native timing
    fixtures are calibrated.
 7. Keep native CUDA as an explicit external runner, not hidden BrowserGrad
    behavior.
+8. Current platform proof: CraftingAttention loads the real profile, wires
+   `_bg_cuda_concepts`, verifies SAXPY, scan/find-repeats, renderer ordering,
+   Kernel1D WGSL lowering, guarded and unguarded memory behavior, and records
+   `performance_rubric_smoke` as an informational pass.
 
 ## Required Fixture Shape
 
@@ -74,10 +84,10 @@ Crafting Attention should:
   `input[i] === input[i + 1]`.
 - Renderer-ordering fixtures: image size, background RGB, ordered circles with
   normalized center/radius/color/alpha, and expected flat RGB pixels.
-- WGSL-lowering fixtures: small `Cuda1DProgram` with launch shape, params,
+- WGSL-lowering fixtures: small `Kernel1DProgram` with launch shape, params,
   input/output initial buffers, expected simulator output, and expected WGSL
   source markers.
-- WebGPU-dispatch fixtures: the same `Cuda1DProgram`, expected output, and a
+- WebGPU-dispatch fixtures: the same `Kernel1DProgram`, expected output, and a
   clear unavailable path when `navigator.gpu` or a GPU adapter is missing.
 - Memory-bounds fixtures: launch shape, input/output lengths, expected
   violations.

@@ -263,16 +263,20 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   Puzzles and CS149 A3-style rubrics can check map/guard, SAXPY,
   scan/find-repeats, renderer ordering, thread/block traces, and out-of-bounds
   memory behavior before native CUDA runners are available. `simulateCuda1DGrid()`
-  remains a compatibility alias for CUDA-vocabulary rubrics.
+  remains a compatibility alias for CUDA-vocabulary rubrics. CraftingAttention
+  loads the real CS149 A3 benchmark profile, wires `_bg_cuda_concepts` from
+  the kernel package, and verifies these concepts through the platform e2e
+  suite.
 - Kernel1D program guarantee: `@unlocalhosted/browsergrad-kernels` exports
   `defineKernel1DProgram()`, `runKernel1DProgramReference()`, and
   `emitKernel1DProgramWgsl()`, plus `runKernel1DProgramWebGpu()` so one small
   grid/thread program can be executed by the reference runner, lowered to WGSL,
   and dispatched on a real browser `GPUDevice` when available. It supports
   scalar params and `outputRead` expressions, which proves a first CS149 A3
-  SAXPY-like kernel shape. CUDA-shaped names remain compatibility aliases. This
-  is the pragmatic HipScript/gpu.cpp-inspired path: small explicit BrowserGrad
-  kernel IR now, heavier compiler compatibility later.
+  SAXPY-like kernel shape. The platform e2e proves this route with the generic
+  `Kernel1D` API and only keeps CUDA-shaped names as compatibility aliases.
+  This is the pragmatic HipScript/gpu.cpp-inspired path: small explicit
+  BrowserGrad kernel IR now, heavier compiler compatibility later.
 - Kernel-runtime bridge guarantee: `createBrowsergradKernelRubric(ctx)` adapts
   kernel tensor checks to `runAssignmentJavascriptRubric()` contexts, and a
   cross-package integration test proves pass/fail assertions survive through
@@ -290,7 +294,9 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   oracles/substrates, and runs browser-native rubrics from a full assignment
   profile. It rejects missing profile-declared JS oracles before invoking the
   rubric. Runtime e2e coverage proves CS149 A1, CS149 A2, CS149 A3, and GPU
-  Puzzles can execute this way with simulator/kernel references.
+  Puzzles can execute this way with simulator/kernel references. CraftingAttention
+  platform coverage now consumes the real CS149 A1, A2, A3, CS336 A2-A5, and
+  GPU Puzzles profiles through verified profile runners or preflight gates.
 - Simulator-core guarantee: `@unlocalhosted/browsergrad-primitives` exports
   `simulation.createDeterministicMesh()` so JS rubrics and platform references can model
   browser-safe rank meshes, barriers, broadcasts, point-to-point messages, and
