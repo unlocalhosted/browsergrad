@@ -86,6 +86,9 @@ export {
 export { emitKernelIrWgsl, type EmitKernelIrWgslOptions, type KernelIrWgslOutput } from "./wgsl.js";
 export {
   compileCudaLiteKernel,
+  prepareCompiledKernelWebGpu,
   runCompiledKernelReference,
   runCompiledKernelWebGpu,
+  type PreparedCompiledKernelWebGpu,
+  type PreparedCompiledKernelWebGpuRunOptions,
 } from "./runner.js";

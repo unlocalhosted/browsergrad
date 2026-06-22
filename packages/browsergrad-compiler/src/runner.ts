@@ -1,6 +1,9 @@
 import {
+  prepareWgslKernelProgramSequence,
   runWgslKernelProgramSequence,
   type KernelDevice,
+  type WgslPreparedKernelSequence,
+  type WgslPreparedKernelSequenceRunOptions,
 } from "@unlocalhosted/browsergrad-kernels";
 import { analyzeCudaLite, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
 import { createCudaLoweringPlan } from "./compatibility.js";
@@ -10,6 +13,7 @@ import { emitKernelIrWgsl } from "./wgsl.js";
 import {
   createCudaWebGpuExecutionPlan,
   normalizeCudaWebGpuReadback,
+  type CudaWebGpuExecutionPlanKind,
 } from "./webgpu_orchestration.js";
 import {
   CudaLiteCompilerError,
@@ -20,6 +24,15 @@ import {
   type ReferenceKernelResult,
 } from "./types.js";
 import { formatCudaLiteDiagnostics } from "./diagnostics.js";
+
+export type PreparedCompiledKernelWebGpuRunOptions = WgslPreparedKernelSequenceRunOptions;
+
+export interface PreparedCompiledKernelWebGpu {
+  readonly kind: CudaWebGpuExecutionPlanKind;
+  readonly stepCount: number;
+  run(options?: PreparedCompiledKernelWebGpuRunOptions): Promise<ReferenceKernelResult>;
+  destroy(): void;
+}
 
 export function compileCudaLiteKernel(
   source: string,
@@ -76,6 +89,48 @@ export async function runCompiledKernelWebGpu(
     executionPlan.input,
   );
   return { buffers: normalizeCudaWebGpuReadback(compiled, result.buffers), trace: [] };
+}
+
+export async function prepareCompiledKernelWebGpu(
+  device: KernelDevice,
+  compiled: CompiledCudaLiteKernel,
+  input: CompiledKernelInput,
+  launch: KernelLaunch,
+): Promise<PreparedCompiledKernelWebGpu> {
+  validateLaunch(launch, compiled.ir.workgroupSize);
+  const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, {
+    compileKernel: compileCudaLiteKernel,
+  });
+  if (!executionPlan.supported) {
+    throw new CudaLiteCompilerError(executionPlan.reason, executionPlan.diagnostics);
+  }
+  const prepared = await prepareWgslKernelProgramSequence(
+    device,
+    executionPlan.steps,
+    executionPlan.input,
+  );
+  return new PreparedCompiledKernelWebGpuImpl(compiled, executionPlan.kind, prepared);
+}
+
+class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
+  readonly stepCount: number;
+
+  constructor(
+    private readonly compiled: CompiledCudaLiteKernel,
+    readonly kind: PreparedCompiledKernelWebGpu["kind"],
+    private readonly prepared: WgslPreparedKernelSequence,
+  ) {
+    this.stepCount = prepared.stepCount;
+  }
+
+  async run(options?: PreparedCompiledKernelWebGpuRunOptions): Promise<ReferenceKernelResult> {
+    const result = await this.prepared.run(options);
+    return { buffers: normalizeCudaWebGpuReadback(this.compiled, result.buffers), trace: [] };
+  }
+
+  destroy(): void {
+    this.prepared.destroy();
+  }
 }
 
 function validateLaunch(launch: KernelLaunch, workgroupSize: readonly [number, number, number]): void {

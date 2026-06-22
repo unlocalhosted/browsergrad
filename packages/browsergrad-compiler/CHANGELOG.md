@@ -20,5 +20,7 @@
   one runner path.
 - Added `residentBuffers` pass-through for compiler WebGPU execution so
   platform callers can keep storage buffers on GPU and opt out of readback.
+- Added `prepareCompiledKernelWebGpu()` for hot-loop compiler dispatch over
+  resident buffers without rebuilding pipelines and bind groups each iteration.
 - Added `pnpm bench` benchmark harness for compiler, CPU reference, and
   orchestration planner timing.

@@ -5,9 +5,11 @@ import {
   destroyWgslStorageBuffer,
   detectKernelFeatures,
   readWgslStorageBuffer,
+  writeWgslStorageBuffer,
 } from "@unlocalhosted/browsergrad-kernels";
 import {
   compileCudaLiteKernel,
+  prepareCompiledKernelWebGpu,
   runCompiledKernelReference,
   runCompiledKernelWebGpu,
 } from "../src/index";
@@ -215,6 +217,52 @@ describe("real WebGPU — CUDA-lite compiler", () => {
       const yReadback = await readWgslStorageBuffer(device, y);
       expect([...yReadback as Float32Array]).toEqual([12, 24, 36, 48]);
     } finally {
+      destroyWgslStorageBuffer(x);
+      destroyWgslStorageBuffer(y);
+    }
+  });
+
+  it("reuses a prepared compiled WebGPU kernel over resident buffers", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const compiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
+    const x = createWgslStorageBuffer(device, {
+      valueType: "f32",
+      data: new Float32Array([1, 2, 3, 4]),
+      label: "compiler-prepared-x",
+    });
+    const y = createWgslStorageBuffer(device, {
+      valueType: "f32",
+      data: new Float32Array([10, 20, 30, 40]),
+      label: "compiler-prepared-y",
+    });
+    const prepared = await prepareCompiledKernelWebGpu(
+      device,
+      compiled,
+      {
+        buffers: {},
+        residentBuffers: { x, y },
+        scalars: { a: 2, n: 4 },
+        readback: [],
+      },
+      { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    );
+
+    try {
+      expect(prepared.kind).toBe("single-dispatch");
+      expect(prepared.stepCount).toBe(1);
+
+      const first = await prepared.run();
+      expect(first.buffers).toEqual({});
+      const firstReadback = await readWgslStorageBuffer(device, y);
+      expect([...firstReadback as Float32Array]).toEqual([12, 24, 36, 48]);
+
+      writeWgslStorageBuffer(device, y, new Float32Array([1, 1, 1, 1]));
+      await prepared.run({ readback: [] });
+      const secondReadback = await readWgslStorageBuffer(device, y);
+      expect([...secondReadback as Float32Array]).toEqual([3, 5, 7, 9]);
+    } finally {
+      prepared.destroy();
       destroyWgslStorageBuffer(x);
       destroyWgslStorageBuffer(y);
     }

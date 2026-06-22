@@ -26,6 +26,7 @@ import { createDevice } from "@unlocalhosted/browsergrad-kernels";
 import {
   compileCudaLiteKernel,
   createCudaWebGpuExecutionPlan,
+  prepareCompiledKernelWebGpu,
   runCompiledKernelReference,
   runCompiledKernelWebGpu,
 } from "@unlocalhosted/browsergrad-compiler";
@@ -65,6 +66,23 @@ For hot WebGPU paths, pass caller-owned buffers through `residentBuffers` and
 set `readback: []`. This keeps data on GPU across compiler-dispatched kernels;
 use `readWgslStorageBuffer()` from `@unlocalhosted/browsergrad-kernels` at the
 actual materialization boundary.
+
+If launch shape, scalar params, and bindings stay fixed across iterations, use
+`prepareCompiledKernelWebGpu()` once. It prebuilds the WebGPU sequence, pipelines,
+and bind groups, then reruns over resident buffers without per-iteration setup:
+
+```ts
+const prepared = await prepareCompiledKernelWebGpu(device, compiled, {
+  buffers: {},
+  residentBuffers: { x, y },
+  scalars: { a: 2, n: 4 },
+  readback: [],
+}, launch);
+
+await prepared.run();
+await prepared.run({ readback: [] });
+prepared.destroy();
+```
 
 ## CUDA Memory Pools
 
