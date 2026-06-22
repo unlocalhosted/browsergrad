@@ -98,7 +98,8 @@ interface MutableTrace {
 }
 
 type ExecControl = { readonly kind: "return"; readonly value?: number } | { readonly kind: "continue" };
-type BarrierGenerator = Generator<"barrier", ExecControl | void, void>;
+type BarrierKind = "barrier" | "grid-barrier";
+type BarrierGenerator = Generator<BarrierKind, ExecControl | void, void>;
 
 export function runCompiledKernelReference(
   compiled: CompiledCudaLiteKernel,
@@ -122,14 +123,18 @@ export function runCompiledKernelReference(
   ]);
   const traces: MutableTrace[] = [];
 
-  for (let bz = 0; bz < launch.gridDim[2]; bz++) {
-    for (let by = 0; by < launch.gridDim[1]; by++) {
-      for (let bx = 0; bx < launch.gridDim[0]; bx++) {
-        runBlock(compiled.ir.body, compiled, buffers, constants, constantDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, {
-          x: bx,
-          y: by,
-          z: bz,
-        }, vectorFromTuple(launch.blockDim), vectorFromTuple(launch.gridDim), traces);
+  if (usesGridSync(compiled.ir.body)) {
+    runGrid(compiled.ir.body, compiled, buffers, constants, constantDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, vectorFromTuple(launch.blockDim), vectorFromTuple(launch.gridDim), traces);
+  } else {
+    for (let bz = 0; bz < launch.gridDim[2]; bz++) {
+      for (let by = 0; by < launch.gridDim[1]; by++) {
+        for (let bx = 0; bx < launch.gridDim[0]; bx++) {
+          runBlock(compiled.ir.body, compiled, buffers, constants, constantDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, {
+            x: bx,
+            y: by,
+            z: bz,
+          }, vectorFromTuple(launch.blockDim), vectorFromTuple(launch.gridDim), traces);
+        }
       }
     }
   }
@@ -226,6 +231,104 @@ function runBlock(
   }
 }
 
+function runGrid(
+  body: readonly CudaLiteStatement[],
+  compiled: CompiledCudaLiteKernel,
+  buffers: Map<string, WgslTypedArray>,
+  constants: Map<string, number | WgslTypedArray>,
+  constantDimensions: Map<string, readonly number[]>,
+  textures: NonNullable<CompiledKernelInput["textures"]>,
+  surfaces: NonNullable<CompiledKernelInput["surfaces"]>,
+  memoryPools: Map<string, MemoryPoolValue>,
+  functions: ReadonlyMap<string, CudaLiteDeviceFunction>,
+  kernels: ReadonlyMap<string, CudaLiteKernel>,
+  scalars: Readonly<Record<string, number>>,
+  valueTypes: ReadonlyMap<string, CudaLiteScalarType>,
+  blockDim: Vector3,
+  gridDim: Vector3,
+  traces: MutableTrace[],
+): void {
+  const generators: BarrierGenerator[] = [];
+  const active: boolean[] = [];
+  const blockKeys: string[] = [];
+  const sharedByBlock = new Map<string, Map<string, SharedArrayValue>>();
+  for (let bz = 0; bz < gridDim.z; bz++) {
+    for (let by = 0; by < gridDim.y; by++) {
+      for (let bx = 0; bx < gridDim.x; bx++) {
+        const blockIdx = { x: bx, y: by, z: bz };
+        const blockKey = `${bx},${by},${bz}`;
+        const shared = sharedByBlock.get(blockKey) ?? allocateShared(sharedDeclarationsFor(body, compiled.ir.sharedDeclarations));
+        sharedByBlock.set(blockKey, shared);
+        for (let tz = 0; tz < blockDim.z; tz++) {
+          for (let ty = 0; ty < blockDim.y; ty++) {
+            for (let tx = 0; tx < blockDim.x; tx++) {
+              const trace: MutableTrace = {
+                blockIdx: [bx, by, bz],
+                threadIdx: [tx, ty, tz],
+                reads: [],
+                writes: [],
+                sharedReads: [],
+                sharedWrites: [],
+              };
+              traces.push(trace);
+              generators.push(execStatements(body, {
+                blockIdx,
+                threadIdx: { x: tx, y: ty, z: tz },
+                blockDim,
+                gridDim,
+                buffers,
+                constants,
+                constantDimensions,
+                textures,
+                surfaces,
+                memoryPools,
+                functions,
+                kernels,
+                scalars,
+                valueTypes,
+                locals: new Map(),
+                shared,
+                trace,
+              }));
+              active.push(true);
+              blockKeys.push(blockKey);
+            }
+          }
+        }
+      }
+    }
+  }
+  while (active.some(Boolean)) {
+    let activeBefore = 0;
+    let gridBarriers = 0;
+    const activeByBlock = new Map<string, number>();
+    const barriersByBlock = new Map<string, number>();
+    for (let i = 0; i < generators.length; i++) {
+      if (!active[i]) continue;
+      activeBefore++;
+      const blockKey = blockKeys[i]!;
+      activeByBlock.set(blockKey, (activeByBlock.get(blockKey) ?? 0) + 1);
+      const next = generators[i]!.next();
+      if (next.done) {
+        active[i] = false;
+      } else if (next.value === "grid-barrier") {
+        gridBarriers++;
+      } else {
+        barriersByBlock.set(blockKey, (barriersByBlock.get(blockKey) ?? 0) + 1);
+      }
+    }
+    if (gridBarriers > 0 && gridBarriers !== activeBefore) {
+      throw compilerFailure("grid barrier mismatch: not every active thread reached grid.sync()");
+    }
+    if (gridBarriers > 0) continue;
+    for (const [blockKey, barriers] of barriersByBlock) {
+      if (barriers !== activeByBlock.get(blockKey)) {
+        throw compilerFailure("barrier mismatch: not every active thread reached __syncthreads()");
+      }
+    }
+  }
+}
+
 function* execStatements(
   statements: readonly CudaLiteStatement[],
   context: ThreadContext,
@@ -253,6 +356,10 @@ function* execStatements(
         break;
       case "expr":
         if (isBarrier(statement.expression)) {
+          yield "barrier";
+        } else if (cooperativeSyncKind(statement.expression, context) === "grid") {
+          yield "grid-barrier";
+        } else if (cooperativeSyncKind(statement.expression, context) === "block") {
           yield "barrier";
         } else {
           evalExpression(statement.expression, context);
@@ -1175,6 +1282,14 @@ function isBarrier(expression: CudaLiteExpression): boolean {
     expression.callee.name === "__syncthreads";
 }
 
+function cooperativeSyncKind(expression: CudaLiteExpression, context: ThreadContext): "block" | "grid" | undefined {
+  if (expression.kind !== "call" || expression.callee.kind !== "member" || expression.callee.property !== "sync") return undefined;
+  if (expression.callee.object.kind !== "identifier") return undefined;
+  const value = context.locals.get(expression.callee.object.name);
+  if (!isCooperativeGroup(value)) return undefined;
+  return value.groupKind === "grid" ? "grid" : "block";
+}
+
 function cloneBuffers(
   buffers: Readonly<Record<string, WgslTypedArray>>,
 ): Map<string, WgslTypedArray> {
@@ -1293,6 +1408,49 @@ function sharedDeclarationsFor(
   };
   visit(statements);
   return out;
+}
+
+function usesGridSync(statements: readonly CudaLiteStatement[]): boolean {
+  const gridGroups = new Set<string>();
+  const visitExpression = (expression: CudaLiteExpression): boolean => {
+    if (expression.kind === "call") {
+      if (
+        expression.callee.kind === "member" &&
+        expression.callee.property === "sync" &&
+        expression.callee.object.kind === "identifier" &&
+        gridGroups.has(expression.callee.object.name)
+      ) return true;
+      if (visitExpression(expression.callee)) return true;
+      return expression.args.some(visitExpression);
+    }
+    if (expression.kind === "cast") return visitExpression(expression.expression);
+    if (expression.kind === "member") return visitExpression(expression.object);
+    if (expression.kind === "index") return visitExpression(expression.target) || visitExpression(expression.index);
+    if (expression.kind === "unary" || expression.kind === "update") return visitExpression(expression.argument);
+    if (expression.kind === "binary") return visitExpression(expression.left) || visitExpression(expression.right);
+    if (expression.kind === "conditional") return visitExpression(expression.condition) || visitExpression(expression.consequent) || visitExpression(expression.alternate);
+    if (expression.kind === "assignment") return visitExpression(expression.left) || visitExpression(expression.right);
+    return false;
+  };
+  const walk = (items: readonly CudaLiteStatement[]): boolean => {
+    for (const item of items) {
+      if (item.kind === "cooperative-group" && item.groupKind === "grid") gridGroups.add(item.name);
+      if (item.kind === "expr" && visitExpression(item.expression)) return true;
+      if (item.kind === "if") {
+        if (visitExpression(item.condition) || walk(item.consequent) || (item.alternate ? walk(item.alternate) : false)) return true;
+      }
+      if (item.kind === "for") {
+        if (item.init?.kind === "var" && item.init.init && visitExpression(item.init.init)) return true;
+        if (item.init && item.init.kind !== "var" && visitExpression(item.init)) return true;
+        if (item.condition && visitExpression(item.condition)) return true;
+        if (item.update && visitExpression(item.update)) return true;
+        if (walk(item.body)) return true;
+      }
+      if (item.kind === "return" && item.value && visitExpression(item.value)) return true;
+    }
+    return false;
+  };
+  return walk(statements);
 }
 
 function valueAsNumber(value: LocalValue, name: string): number {

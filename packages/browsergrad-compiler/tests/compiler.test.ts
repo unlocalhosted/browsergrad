@@ -547,6 +547,49 @@ __global__ void gridSync(float *x) {
     }));
   });
 
+  it("runs grid-wide cooperative sync in CPU reference when explicitly enabled", async () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void gridSync(float *scratch, float *out) {
+  cg::grid_group grid = cg::this_grid();
+  scratch[blockIdx.x] = blockIdx.x + 1;
+  grid.sync();
+  if (blockIdx.x == 0 && threadIdx.x == 0) {
+    out[0] = scratch[0] + scratch[1];
+  }
+}`, {
+      referenceGridSync: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          scratch: new Float32Array(2),
+          out: new Float32Array(1),
+        },
+      },
+      { gridDim: [2, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics).toContainEqual(expect.objectContaining({
+      code: "unsupported-cooperative-groups",
+      severity: "warning",
+    }));
+    expect([...result.buffers.out as Float32Array]).toEqual([3]);
+    await expect(runCompiledKernelWebGpu(
+      {} as never,
+      compiled,
+      {
+        buffers: {
+          scratch: new Float32Array(2),
+          out: new Float32Array(1),
+        },
+      },
+      { gridDim: [2, 1, 1], blockDim: [1, 1, 1] },
+    )).rejects.toThrow("CUDA runtime orchestration is reference-only");
+  });
+
   it("supports cooperative-group shuffle variants and linear thread ranks", () => {
     const compiled = compileCudaLiteKernel(`
 namespace cg = cooperative_groups;

@@ -101,6 +101,20 @@ compileCudaLiteKernel(source, {
 memory pools. `runCompiledKernelWebGpu` rejects these kernels until host-side
 multi-dispatch orchestration exists, so GPU output is never silently wrong.
 
+## Cooperative Grid Sync
+
+`cg::grid_group::sync()` is also reference-only for now:
+
+```ts
+compileCudaLiteKernel(source, {
+  referenceGridSync: true,
+});
+```
+
+The CPU reference scheduler runs all blocks in lockstep at grid barriers, so
+block-0 reduction patterns see writes from every block. WebGPU dispatch rejects
+these kernels until cooperative launch or host multi-dispatch lowering exists.
+
 Use `createCudaLoweringPlan(diagnostics)` and `describeCudaDiagnostic()` to group
 compatibility gaps by semantic family instead of raw parser messages.
 

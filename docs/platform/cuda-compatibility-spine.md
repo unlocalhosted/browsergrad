@@ -44,5 +44,7 @@ Current corpus gate:
   host-side multi-dispatch orchestration lands.
 - CUDA runtime calls such as `cudaDeviceSynchronize` and `cudaMemcpyPeerAsync`
   classify as runtime orchestration gaps, not generic unsupported calls.
+- Cooperative `grid.sync()` can run in CPU reference with `referenceGridSync`;
+  WebGPU still rejects until cooperative launch or host multi-dispatch lowering.
 - Remaining failures group cleanly: dynamic parallelism/runtime launches,
   cooperative groups/grid sync, and one incomplete pseudocode symbol.

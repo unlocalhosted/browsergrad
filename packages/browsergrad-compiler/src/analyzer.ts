@@ -563,7 +563,7 @@ function validateCallExpression(
   const callName = expressionName(expression.callee);
   const cooperativeCall = cooperativeGroupCall(expression, scope);
   if (cooperativeCall) {
-    return validateCooperativeGroupCall(expression, cooperativeCall, requiredFeatures, diagnostics, walkExpression, scope);
+    return validateCooperativeGroupCall(expression, cooperativeCall, requiredFeatures, diagnostics, walkExpression, scope, options);
   }
   if (!callName) {
     diagnostics.push(error("unsupported-call", "CUDA-lite v0 only supports direct builtin calls", expression.span));
@@ -707,10 +707,14 @@ function validateCooperativeGroupCall(
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
   scope: Scope,
+  options: CudaLiteAnalyzeOptions,
 ): ExpressionInfo {
   const { symbol, method } = call;
   if (symbol.groupKind === "grid" && method === "sync") {
-    diagnostics.push(error("unsupported-cooperative-groups", "grid.sync() requires cooperative launch/runtime support", expression.span));
+    diagnostics.push({
+      ...error("unsupported-cooperative-groups", "grid.sync() is reference-only; WebGPU cooperative launch is not implemented yet", expression.span),
+      severity: options.referenceGridSync ? "warning" : "error",
+    });
     return { kind: "scalar" };
   }
   if (method === "sync") {

@@ -300,6 +300,7 @@ export interface CudaLiteAnalyzeOptions {
   readonly workgroupSize?: readonly [number, number, number];
   readonly dynamicSharedMemory?: Readonly<Record<string, number>>;
   readonly referenceDynamicParallelism?: boolean;
+  readonly referenceGridSync?: boolean;
 }
 
 export interface CudaLiteAnalysis {
