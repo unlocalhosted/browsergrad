@@ -11,7 +11,12 @@ if (!corpusPathArg) {
 
 const corpusRoot = path.resolve(corpusPathArg);
 const compilerUrl = pathToFileURL(path.resolve("packages/browsergrad-compiler/dist/index.js")).href;
-const { compileCudaLiteKernel, describeCudaDiagnostic } = await import(compilerUrl);
+const {
+  compileCudaLiteKernel,
+  createCudaGridSyncPhasePlan,
+  createCudaRuntimePlan,
+  describeCudaDiagnostic,
+} = await import(compilerUrl);
 const CUDA_HINT_RE = /__global__|cuda[A-Z]|<<<|threadIdx|blockIdx|__shared__/;
 const NON_CODE_BLOCK_LANG_RE = /^(?:mermaid|flowchart|graphviz|dot|plantuml|text|txt)$/iu;
 
@@ -49,7 +54,7 @@ for (const file of files) {
         });
         results.push({ file, block: blockIndex + 1, kernel: kernelIndex + 1, ok: true });
       } catch (error) {
-        const referenceOk = canCompileReferenceOnly(source);
+        const fallback = classifyReferenceFallback(source);
         const diagnostic = error?.diagnostics?.[0];
         const feature = diagnostic
           ? describeCudaDiagnostic(diagnostic)
@@ -64,7 +69,9 @@ for (const file of files) {
           feature: feature?.label ?? "Unknown compatibility gap",
           lowering: feature?.lowering ?? "unsupported",
           message: String(error?.message ?? error).split("\n")[0],
-          referenceOk,
+          referenceOk: fallback.referenceOk,
+          webGpuLiftOk: fallback.webGpuLiftOk,
+          webGpuLiftKind: fallback.webGpuLiftKind,
         });
       }
     }
@@ -84,8 +91,12 @@ const summary = {
   cudaBlocks,
   totalKernelDefinitions: results.length,
   ok: results.length - failures.length,
+  webGpuSingleDispatchOk: results.length - failures.length,
+  webGpuLiftedOk: failures.filter((failure) => failure.webGpuLiftOk).length,
+  webGpuTotalOk: results.length - failures.length + failures.filter((failure) => failure.webGpuLiftOk).length,
   fail: failures.length,
-  referenceOnlyOk: failures.filter((failure) => failure.referenceOk).length,
+  referenceFallbackOk: failures.filter((failure) => failure.referenceOk).length,
+  referenceOnlyOk: failures.filter((failure) => failure.referenceOk && !failure.webGpuLiftOk).length,
   hardFail: failures.filter((failure) => !failure.referenceOk).length,
   errors: countBy(failures, (failure) => failure.error),
   families: countBy(failures, (failure) => failure.family),
@@ -96,14 +107,15 @@ console.log(JSON.stringify(summary, null, 2));
 if (failures.length > 0) {
   console.log("\nfirst failures:");
   for (const failure of failures.slice(0, 80)) {
+    const lift = failure.webGpuLiftOk ? ` [webgpu-lift:${failure.webGpuLiftKind}]` : "";
     const reference = failure.referenceOk ? " [reference-ok]" : "";
-    console.log(`${failure.file} block ${failure.block} kernel ${failure.kernel}: ${failure.family}/${failure.error}${reference}: ${failure.message}`);
+    console.log(`${failure.file} block ${failure.block} kernel ${failure.kernel}: ${failure.family}/${failure.error}${lift}${reference}: ${failure.message}`);
   }
 }
 
-function canCompileReferenceOnly(source) {
+function classifyReferenceFallback(source) {
   try {
-    compileCudaLiteKernel(source, {
+    const compiled = compileCudaLiteKernel(source, {
       features: { "shader-f16": true, subgroups: true },
       workgroupSize: [256, 1, 1],
       dynamicSharedMemory: inferDynamicSharedMemory(source),
@@ -111,10 +123,28 @@ function canCompileReferenceOnly(source) {
       referenceGridSync: true,
       referenceCudaRuntime: true,
     });
-    return true;
+    const liftKind = webGpuLiftKindFor(compiled);
+    return {
+      referenceOk: true,
+      webGpuLiftOk: liftKind !== undefined,
+      webGpuLiftKind: liftKind,
+    };
   } catch {
-    return false;
+    return { referenceOk: false, webGpuLiftOk: false, webGpuLiftKind: undefined };
   }
+}
+
+function webGpuLiftKindFor(compiled) {
+  const phasePlan = createCudaGridSyncPhasePlan(compiled.ir);
+  if (phasePlan.supported && phasePlan.modules.length > 1) return "grid-sync-phases";
+  const runtimePlan = createCudaRuntimePlan(compiled);
+  if (
+    runtimePlan.operations.length > 0 &&
+    runtimePlan.operations.every((operation) => operation.kind === "device-sync")
+  ) {
+    return "device-sync-noop";
+  }
+  return undefined;
 }
 
 function listFiles(root, prefix = "") {

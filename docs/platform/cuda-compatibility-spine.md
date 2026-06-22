@@ -34,11 +34,16 @@ Public APIs:
 Rule: do not add assignment-specific fixes. Add semantic primitives, reference
 truth, WGSL lowering, browser tests, and corpus audit evidence.
 
-Current corpus gate:
+Current corpus gate (`node scripts/audit-cuda-lite-corpus.mjs /tmp/CUDA-120-DAYS--CHALLENGE`):
 
 - `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/243` real code-kernel
-  definitions compile for GPU. Another `17/243` compile as explicit
-  reference-only coverage, leaving `1` hard gap after filtering docs/pseudocode.
+  definitions compile as single-dispatch WGSL/WebGPU. Another `2/243` are
+  real-GPU runnable through WebGPU orchestration lifts (`grid-sync-phases`),
+  for `227/243` total WebGPU coverage. `15/243` remain true reference-only,
+  and `1/243` remains a hard gap after filtering docs/pseudocode.
+- `referenceFallbackOk` is `17/243`: kernels whose semantics are understood by
+  CPU reference. `referenceOnlyOk` is stricter and excludes kernels now runnable
+  on real WebGPU through orchestration.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, and WebGPU
   atomic offset updates.
