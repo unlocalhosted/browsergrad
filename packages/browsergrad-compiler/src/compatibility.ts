@@ -51,6 +51,7 @@ const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("divergent-barrier", "safety", "Divergent barrier", "unsupported", false, true, "Cannot lower unsafe barrier control flow."),
   feature("const-pointer-write", "safety", "Const pointer write", "unsupported", false, false, "Rejects invalid memory mutation."),
   feature("unsupported-local-array", "memory", "Local arrays", "unsupported", false, true, "Local array address space not modeled yet."),
+  feature("unsupported-local-pointer", "memory", "Local pointer aliases", "unsupported", false, true, "Future pointer alias lowering into modeled memory."),
   feature("invalid-array-dimension", "memory", "Invalid array dimension", "unsupported", false, false, "Requires positive constant dimensions."),
   feature("unguarded-write", "safety", "Unguarded pointer write", "native", true, true, "Compiler warning; launch/rubric may enforce bounds discipline."),
   feature("unsupported-constant-memory", "memory", "Constant memory", "unsupported", false, true, "Future readonly binding lowering."),

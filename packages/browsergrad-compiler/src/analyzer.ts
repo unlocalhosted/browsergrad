@@ -134,6 +134,7 @@ export function analyzeCudaLite(
       name: statement.name,
       kind: statement.storage === "shared" ? "shared" : "local",
       valueType: statement.valueType,
+      pointer: statement.pointer,
       dimensions,
       span: statement.span,
     });
@@ -158,6 +159,9 @@ export function analyzeCudaLite(
         case "var":
           declareVar(statement, scope);
           if (statement.valueType === "half") requiredFeatures.add("shader-f16");
+          if (statement.pointer) {
+            diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.span));
+          }
           if (statement.storage === "local" && statement.dimensions.length > 0) {
             diagnostics.push(error("unsupported-local-array", "local arrays are not supported in CUDA-lite v0; use fixed __shared__ arrays or scalar locals", statement.span));
           }
@@ -200,6 +204,9 @@ export function analyzeCudaLite(
           if (statement.init?.kind === "var") {
             declareVar(statement.init, loopScope);
             if (statement.init.valueType === "half") requiredFeatures.add("shader-f16");
+            if (statement.init.pointer) {
+              diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.init.span));
+            }
             if (statement.init.init) walkExpression(statement.init.init, loopScope);
             if (statement.init.init) validateSideEffectPlacement(statement.init.init, false, diagnostics);
           } else if (statement.init) {
@@ -571,6 +578,9 @@ function expressionInfoForIdentifier(
     };
   }
   if (symbol.kind === "param" && symbol.pointer) {
+    return { kind: "pointer", valueType: symbol.valueType, symbol };
+  }
+  if (symbol.kind === "local" && symbol.pointer) {
     return { kind: "pointer", valueType: symbol.valueType, symbol };
   }
   return { kind: "scalar", valueType: symbol.valueType, symbol };

@@ -241,6 +241,7 @@ class Parser {
     const valueType = this.parseType();
     const declarations: CudaLiteVarDecl[] = [];
     do {
+      const pointer = this.consumeIf("*") !== undefined;
       const name = this.expectIdentifier("variable name");
       const dimensions: number[] = [];
       while (this.consumeIf("[")) {
@@ -255,6 +256,7 @@ class Parser {
         kind: "var",
         storage,
         valueType,
+        pointer,
         name: name.value,
         dimensions,
         ...(init === undefined ? {} : { init }),

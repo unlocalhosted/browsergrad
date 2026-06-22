@@ -75,6 +75,7 @@ export interface CudaLiteVarDecl {
   readonly kind: "var";
   readonly storage: "local" | "shared";
   readonly valueType: Exclude<CudaLiteScalarType, "void">;
+  readonly pointer: boolean;
   readonly name: string;
   readonly dimensions: readonly number[];
   readonly init?: CudaLiteExpression;

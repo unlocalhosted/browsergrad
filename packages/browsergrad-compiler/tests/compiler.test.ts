@@ -137,6 +137,13 @@ __global__ void bad(float* x) {
 }`));
     expect(localArray.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-local-array");
 
+    const localPointer = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(float* x) {
+  float* y = &x[0];
+  if (threadIdx.x < 1) { x[0] = 1.0; }
+}`));
+    expect(localPointer.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-local-pointer");
+
     const invalidShared = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(float* x) {
   __shared__ float tile[0];
