@@ -351,7 +351,7 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     CUDA-shaped path: simulator trace first, WGSL/WebGPU lowering next.
     Simulator-backed labs can use `@unlocalhosted/browsergrad-primitives`
     `simulation.createDeterministicMesh()` or `simulation.createTaskGraphSimulator()` for event-trace
-    rubrics before real Worker execution exists. CS149 A2 task-runtime labs can
+    rubrics before real Worker execution exists. CS149 A2 task-graph labs can
     use `_bg_task_graph` to preserve dependency and worker-assignment semantics
     before real C++/pthread execution exists. CS336 A2 systems labs can also
     use the DDP/FSDP/sharded-optimizer simulator helpers for gradient averaging,

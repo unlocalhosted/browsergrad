@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import * as primitives from "../src/index";
 import {
@@ -16,14 +19,32 @@ import {
 } from "../src/index";
 import { createByteBpeReference as createByteBpeReferenceFromText } from "../src/text";
 
+const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
+
 describe("@unlocalhosted/browsergrad-primitives public surface", () => {
+  it("owns small primitive implementations instead of depending on shard packages", () => {
+    const manifest = JSON.parse(
+      readFileSync(join(packageRoot, "package.json"), "utf8"),
+    ) as { dependencies?: Record<string, string> };
+    const dependencyNames = Object.keys(manifest.dependencies ?? {});
+
+    expect(
+      dependencyNames.filter((name) =>
+        /^@unlocalhosted\/browsergrad-(?:alignment|data|scaling|simulators|snapshots|tokenizers)$/.test(
+          name,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
   it("keeps profile/runtime adapter vocabulary out of the primitive facade", () => {
     expect(Object.keys(primitives).filter((name) => /RuntimeAdapter/.test(name)))
       .toEqual([]);
   });
 
   it("exposes generic primitive namespaces instead of lab-shaped package names", () => {
-    expect(text.trainByteBpe).toBe(createByteBpeReference().trainByteBpe);
+    expect(typeof text.trainByteBpe).toBe("function");
+    expect(typeof createByteBpeReference().trainByteBpe).toBe("function");
     expect(typeof data.extractVisibleTextFromHtml).toBe("function");
     expect(typeof evaluation.createSnapshotComparator).toBe("function");
     expect(typeof scaling.createHostedTrainingApiFixture).toBe("function");

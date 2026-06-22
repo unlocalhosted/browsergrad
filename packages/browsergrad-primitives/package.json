@@ -72,14 +72,6 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "prepublishOnly": "pnpm run build && pnpm run test"
   },
-  "dependencies": {
-    "@unlocalhosted/browsergrad-alignment": "workspace:*",
-    "@unlocalhosted/browsergrad-data": "workspace:*",
-    "@unlocalhosted/browsergrad-scaling": "workspace:*",
-    "@unlocalhosted/browsergrad-simulators": "workspace:*",
-    "@unlocalhosted/browsergrad-snapshots": "workspace:*",
-    "@unlocalhosted/browsergrad-tokenizers": "workspace:*"
-  },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "oxlint": "^1.0.0",

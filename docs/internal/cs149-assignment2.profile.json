@@ -7,7 +7,7 @@
     "course": "Stanford CS149: Parallel Computing",
     "source_url": "https://github.com/stanford-cs149/asst2",
     "lecture_urls": [],
-    "tags": ["parallel-computing", "task-runtime", "thread-pool", "task-graph"]
+    "tags": ["parallel-computing", "thread-pool", "task-graph"]
   },
   "runtime_packages": [],
   "files": {
@@ -32,7 +32,7 @@
   "oracles": [
     {
       "name": "_bg_task_graph",
-      "js_module": "/assignments/cs149-assignment2/oracles/task-runtime.js",
+      "js_module": "/assignments/cs149-assignment2/oracles/task-graph.js",
       "export_name": "oracle"
     }
   ],

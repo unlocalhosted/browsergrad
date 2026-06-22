@@ -31,7 +31,7 @@
   ],
   "oracles": [
     {
-      "name": "_bg_cuda_concept_oracles",
+      "name": "_bg_cuda_concepts",
       "js_module": "/assignments/cs149-assignment3/oracles/cuda-concepts.js",
       "export_name": "oracle"
     }

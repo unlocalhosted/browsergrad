@@ -37,7 +37,7 @@ BrowserGrad package identity.
 
 - Mount rubric/starter files under `/assignments/cs149-assignment2`.
 - Provide `_bg_task_graph` to JavaScript rubrics.
-- Render failures as task-runtime feedback, for example:
+- Render failures as task-graph feedback, for example:
   - `dependent task started before parent finished`
   - `task graph makespan mismatch`
   - `ready task was never scheduled`

@@ -4,8 +4,9 @@ BrowserGrad packages are reusable browser ML primitives. Curriculum profiles are
 adapters that use those primitives for guided labs.
 
 `@unlocalhosted/browsergrad-primitives` is the canonical facade for small
-helpers. Leaf packages may remain as implementation shards for compatibility or
-release mechanics, but new public guidance should teach the facade first.
+helpers. Text, data, scaling, RL math, snapshot comparison, and deterministic
+simulation code lives behind this facade until a future split passes the package
+split test.
 See `docs/platform/package-consolidation-audit.md` for the current package
 classification.
 
@@ -36,7 +37,9 @@ Before adding a new package, run the deletion test:
 
 Use `browsergrad-primitives` for small references, comparators, fixtures,
 simulators, parsers, and data-cleaning helpers. Split only when bundle weight,
-backend constraints, release cadence, or ownership proves a durable seam.
+backend constraints, release cadence, or ownership proves a durable seam. Do
+not create a sibling package for a helper whose complexity disappears when it
+moves into the facade.
 
 ## Naming Rule
 

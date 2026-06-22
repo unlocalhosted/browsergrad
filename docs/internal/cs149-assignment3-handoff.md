@@ -38,7 +38,7 @@ Crafting Attention should:
 
 1. Load `cs149-assignment3.profile.json` and route through
    `runAssignmentJavascriptProfile()`.
-2. Register `_bg_cuda_concept_oracles` with the CUDA-concept helpers.
+2. Register `_bg_cuda_concepts` with the CUDA-concept helpers.
 3. Start with `saxpy_correctness`, `exclusive_scan_correctness`, and
    `kernel_memory_bounds`.
 4. Keep `performance_rubric_smoke` informational until WebGPU/native timing
