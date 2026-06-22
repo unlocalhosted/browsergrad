@@ -94,8 +94,9 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
   is a WebGPU-safe no-op because dispatch completion is host-managed. Peer
   copies can run in CPU reference with `referenceCudaRuntime`; WebGPU can
   host-lift single-invocation guarded typed buffer copies when source,
-  destination, offsets, and byte count are host-evaluable. Mixed types, pools,
-  device-derived counts, or side effects after copy remain reference-only.
+  destination, offsets, and byte count are host-evaluable. Typed-array and
+  resident-buffer copies are capacity-checked before dispatch. Mixed types,
+  pools, device-derived counts, or side effects after copy remain reference-only.
 - Cooperative `grid.sync()` can run in CPU reference with `referenceGridSync`.
   Safe top-level uniform `grid.sync()` also runs on real WebGPU as multiple
   dispatch phases over shared GPU buffers. Pure launch-derived locals are

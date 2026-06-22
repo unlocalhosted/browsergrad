@@ -39,3 +39,5 @@
 - Prepared compiler scalar updates now support fixed-topology host-dynamic and
   host-peer-copy plans through per-step uniform updates, with deterministic
   rejection when scalar changes alter plan topology.
+- Host-lifted peer-copy planning now supports resident GPU buffers and rejects
+  copies that exceed source or destination capacity before dispatch.

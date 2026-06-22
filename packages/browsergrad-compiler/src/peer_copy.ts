@@ -1,4 +1,4 @@
-import type { WgslTypedArray } from "@unlocalhosted/browsergrad-kernels";
+import type { WgslResidentBuffer, WgslTypedArray, WgslValueType } from "@unlocalhosted/browsergrad-kernels";
 import { expressionName } from "./analyzer.js";
 import {
   evaluateHostNumber,
@@ -36,6 +36,12 @@ export interface CudaPeerCopyOperation {
 interface HostPeerCopyCollection {
   readonly copies: readonly CudaPeerCopyOperation[];
   readonly reason?: string;
+}
+
+interface CopyBufferView {
+  readonly valueType: "float" | "int" | "uint";
+  readonly elementSize: number;
+  readonly elementLength: number;
 }
 
 export function createCudaPeerCopyPlan(
@@ -150,33 +156,56 @@ function createPeerCopyOperation(
   const byteCount = expression.args[4] ? evaluateHostNumber(expression.args[4], env, input) : undefined;
   if (!dst || !src || byteCount === undefined || byteCount < 0) return undefined;
   if (dst.offset < 0 || src.offset < 0) return undefined;
-  const dstBuffer = input.buffers[dst.root];
-  const srcBuffer = input.buffers[src.root];
-  if (!dstBuffer || !srcBuffer) return undefined;
-  const valueType = compatibleCopyValueType(dstBuffer, srcBuffer);
-  if (!valueType) return undefined;
-  const elementSize = dstBuffer.BYTES_PER_ELEMENT;
+  const dstBuffer = copyBufferViewFor(input, dst.root);
+  const srcBuffer = copyBufferViewFor(input, src.root);
+  if (!dstBuffer || !srcBuffer || dstBuffer.valueType !== srcBuffer.valueType) return undefined;
+  const elementSize = dstBuffer.elementSize;
   if (Math.trunc(byteCount) % elementSize !== 0) return undefined;
+  const elementCount = Math.trunc(byteCount) / elementSize;
+  if (dst.offset + elementCount > dstBuffer.elementLength || src.offset + elementCount > srcBuffer.elementLength) return undefined;
   return {
     expression,
     dstRoot: dst.root,
     srcRoot: src.root,
     dstOffset: dst.offset,
     srcOffset: src.offset,
-    elementCount: Math.trunc(byteCount) / elementSize,
-    valueType,
+    elementCount,
+    valueType: dstBuffer.valueType,
   };
 }
 
-function compatibleCopyValueType(
-  dst: WgslTypedArray,
-  src: WgslTypedArray,
-): "float" | "int" | "uint" | undefined {
-  if (dst.constructor !== src.constructor) return undefined;
-  if (dst instanceof Float32Array) return "float";
-  if (dst instanceof Int32Array) return "int";
-  if (dst instanceof Uint32Array) return "uint";
+function copyBufferViewFor(input: CompiledKernelInput, name: string): CopyBufferView | undefined {
+  const typed = input.buffers[name];
+  const resident = input.residentBuffers?.[name];
+  if (typed && resident) return undefined;
+  if (typed) return copyTypedArrayView(typed);
+  if (resident) return copyResidentBufferView(resident);
   return undefined;
+}
+
+function copyTypedArrayView(buffer: WgslTypedArray): CopyBufferView | undefined {
+  if (buffer instanceof Float32Array) return { valueType: "float", elementSize: Float32Array.BYTES_PER_ELEMENT, elementLength: buffer.length };
+  if (buffer instanceof Int32Array) return { valueType: "int", elementSize: Int32Array.BYTES_PER_ELEMENT, elementLength: buffer.length };
+  if (buffer instanceof Uint32Array) return { valueType: "uint", elementSize: Uint32Array.BYTES_PER_ELEMENT, elementLength: buffer.length };
+  return undefined;
+}
+
+function copyResidentBufferView(buffer: WgslResidentBuffer): CopyBufferView | undefined {
+  const valueType = copyValueTypeForWgsl(buffer.valueType);
+  if (!valueType) return undefined;
+  const elementSize = elementSizeForWgsl(buffer.valueType);
+  return { valueType, elementSize, elementLength: Math.trunc(buffer.byteLength / elementSize) };
+}
+
+function copyValueTypeForWgsl(valueType: WgslValueType): "float" | "int" | "uint" | undefined {
+  if (valueType === "f32") return "float";
+  if (valueType === "i32") return "int";
+  if (valueType === "u32") return "uint";
+  return undefined;
+}
+
+function elementSizeForWgsl(valueType: WgslValueType): number {
+  return valueType === "f16" ? 2 : 4;
 }
 
 function hasParentSideEffectsAfterPeerCopy(statements: readonly CudaLiteStatement[]): boolean {

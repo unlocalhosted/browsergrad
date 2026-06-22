@@ -552,6 +552,52 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
     expect([...actual.buffers.dst as Float32Array]).toEqual([...expected.buffers.dst as Float32Array]);
   });
 
+  it("runs host-lifted cudaMemcpyPeerAsync over resident WebGPU buffers", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const source = `
+__global__ void peerCopy(float *dst, const float *src, int n) {
+  if (threadIdx.x == 0) {
+    cudaMemcpyPeerAsync(dst + 1, 1, src, 0, sizeof(float) * n, 0);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const dst = createWgslStorageBuffer(device, {
+      valueType: "f32",
+      data: new Float32Array([0, 0, 0, 0]),
+      label: "peer-copy-resident-dst",
+    });
+    const src = createWgslStorageBuffer(device, {
+      valueType: "f32",
+      data: new Float32Array([2.5, 3.5]),
+      label: "peer-copy-resident-src",
+    });
+
+    try {
+      const actual = await runCompiledKernelWebGpu(
+        device,
+        compiled,
+        {
+          buffers: {},
+          residentBuffers: { dst, src },
+          scalars: { n: 2 },
+          readback: [],
+        },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect(actual.buffers).toEqual({});
+
+      const dstReadback = await readWgslStorageBuffer(device, dst);
+      expect([...dstReadback as Float32Array]).toEqual([0, 2.5, 3.5, 0]);
+    } finally {
+      destroyWgslStorageBuffer(dst);
+      destroyWgslStorageBuffer(src);
+    }
+  });
+
   it("updates prepared host-lifted peer-copy scalar uniforms when topology is fixed", async () => {
     if (!deviceCheck.available) return;
     const source = `

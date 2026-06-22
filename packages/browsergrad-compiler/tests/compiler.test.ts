@@ -658,6 +658,35 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
       elementCount: 2,
       valueType: "float",
     });
+
+    const residentPlan = createCudaPeerCopyPlan(
+      compiled,
+      {
+        buffers: {},
+        residentBuffers: {
+          dst: { buffer: {} as GPUBuffer, byteLength: 16, valueType: "f32" },
+          src: { buffer: {} as GPUBuffer, byteLength: 8, valueType: "f32" },
+        },
+        scalars: { n: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    expect(residentPlan.supported).toBe(true);
+    expect(residentPlan.copies[0]).toMatchObject({ dstRoot: "dst", srcRoot: "src", elementCount: 2 });
+
+    const shortResidentPlan = createCudaPeerCopyPlan(
+      compiled,
+      {
+        buffers: {},
+        residentBuffers: {
+          dst: { buffer: {} as GPUBuffer, byteLength: 16, valueType: "f32" },
+          src: { buffer: {} as GPUBuffer, byteLength: 4, valueType: "f32" },
+        },
+        scalars: { n: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    expect(shortResidentPlan.supported).toBe(false);
   });
 
   it("explains why unsafe peer-copy lifts stay reference-only", () => {
