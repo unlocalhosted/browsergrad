@@ -88,6 +88,10 @@ export function emitKernelIrWgsl(
     lines.push("");
     lines.push(...emitFloatAtomicAddHelper());
   }
+  if (usesCurand(ir)) {
+    lines.push("");
+    lines.push(...emitCurandHelpers());
+  }
 
   for (const fn of ir.functions) {
     lines.push("");
@@ -450,6 +454,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
         return `bg_tex2d_${expression.args[0].name}(${emitExpression(expression.args[1]!, context)}, ${emitExpression(expression.args[2]!, context)})`;
       }
       return `tex2D(${args.join(", ")})`;
+    case "curand_init":
+      return `bg_curand_init(u32(${args[0] ?? "0"}), u32(${args[1] ?? "0"}), u32(${args[2] ?? "0"}), ${args[3] ?? "&state"})`;
+    case "curand_uniform":
+      return `bg_curand_uniform(${args[0] ?? "&state"})`;
     case "atomicAdd":
       return emitAtomicCall("atomicAdd", expression, context, args);
     case "atomicSub":
@@ -621,6 +629,25 @@ function emitFloatAtomicAddHelper(): string[] {
   ];
 }
 
+function emitCurandHelpers(): string[] {
+  return [
+    "fn bg_curand_next(state: ptr<function, u32>) -> u32 {",
+    "  var x = *state;",
+    "  x = (x * 1664525u) + 1013904223u;",
+    "  *state = x;",
+    "  return x;",
+    "}",
+    "fn bg_curand_init(seed: u32, sequence: u32, offset: u32, state: ptr<function, u32>) {",
+    "  *state = seed ^ (sequence * 747796405u) ^ offset ^ 2891336453u;",
+    "  _ = bg_curand_next(state);",
+    "}",
+    "fn bg_curand_uniform(state: ptr<function, u32>) -> f32 {",
+    "  let bits = bg_curand_next(state);",
+    "  return (f32(bits) + 1.0) * 2.3283064365386963e-10;",
+    "}",
+  ];
+}
+
 function storageElementType(param: CudaLiteParam, ir: KernelIrModule): string {
   if (!ir.atomicParams.includes(param.name)) return wgslScalar(param.valueType);
   if (param.valueType === "float") return "atomic<u32>";
@@ -629,6 +656,52 @@ function storageElementType(param: CudaLiteParam, ir: KernelIrModule): string {
 
 function usesFloatAtomicAdd(ir: KernelIrModule): boolean {
   return ir.params.some((param) => param.pointer && param.valueType === "float" && ir.atomicParams.includes(param.name));
+}
+
+function usesCurand(ir: KernelIrModule): boolean {
+  return statementsUseCall(ir.body, new Set(["curand_init", "curand_uniform"])) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["curand_init", "curand_uniform"])));
+}
+
+function statementsUseCall(statements: readonly CudaLiteStatement[], names: ReadonlySet<string>): boolean {
+  for (const statement of statements) {
+    if (statement.kind === "expr" && expressionUsesCall(statement.expression, names)) return true;
+    if (statement.kind === "var" && statement.init && expressionUsesCall(statement.init, names)) return true;
+    if (statement.kind === "if" && (
+      expressionUsesCall(statement.condition, names) ||
+      statementsUseCall(statement.consequent, names) ||
+      (statement.alternate ? statementsUseCall(statement.alternate, names) : false)
+    )) return true;
+    if (statement.kind === "for" && (
+      (statement.init?.kind === "var" && statement.init.init ? expressionUsesCall(statement.init.init, names) : false) ||
+      (statement.init && statement.init.kind !== "var" ? expressionUsesCall(statement.init, names) : false) ||
+      (statement.condition ? expressionUsesCall(statement.condition, names) : false) ||
+      (statement.update ? expressionUsesCall(statement.update, names) : false) ||
+      statementsUseCall(statement.body, names)
+    )) return true;
+    if (statement.kind === "return" && statement.value && expressionUsesCall(statement.value, names)) return true;
+  }
+  return false;
+}
+
+function expressionUsesCall(expression: CudaLiteExpression, names: ReadonlySet<string>): boolean {
+  if (expression.kind === "call") {
+    const name = expressionName(expression.callee);
+    if (name && names.has(name)) return true;
+    return expression.args.some((arg) => expressionUsesCall(arg, names)) || expressionUsesCall(expression.callee, names);
+  }
+  if (expression.kind === "cast") return expressionUsesCall(expression.expression, names);
+  if (expression.kind === "member") return expressionUsesCall(expression.object, names);
+  if (expression.kind === "index") return expressionUsesCall(expression.target, names) || expressionUsesCall(expression.index, names);
+  if (expression.kind === "unary" || expression.kind === "update") return expressionUsesCall(expression.argument, names);
+  if (expression.kind === "binary") return expressionUsesCall(expression.left, names) || expressionUsesCall(expression.right, names);
+  if (expression.kind === "conditional") {
+    return expressionUsesCall(expression.condition, names) ||
+      expressionUsesCall(expression.consequent, names) ||
+      expressionUsesCall(expression.alternate, names);
+  }
+  if (expression.kind === "assignment") return expressionUsesCall(expression.left, names) || expressionUsesCall(expression.right, names);
+  return false;
 }
 
 function atomicTargetParam(expression: CudaLiteExpression, context: EmitContext): CudaLiteParam | undefined {

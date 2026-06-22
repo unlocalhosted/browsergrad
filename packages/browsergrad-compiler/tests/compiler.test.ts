@@ -457,6 +457,31 @@ __global__ void boolKernel(int *data, int N,) {
     expect([...result.buffers.data as Int32Array]).toEqual([11, -8, 13, -6]);
   });
 
+  it("lowers CUDA device cuRAND state to deterministic browser RNG helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void monteCarloPiKernel(unsigned long long *counts, int totalPoints, unsigned long long seed) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < totalPoints) {
+    curandState_t state;
+    curand_init(seed, idx, 0, &state);
+    float x = curand_uniform(&state);
+    float y = curand_uniform(&state);
+    unsigned long long localCount = 0ULL;
+    if (x * x + y * y <= 1.0f) { localCount = 1ULL; }
+    counts[idx] = localCount;
+  }
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { counts: new Uint32Array(4) }, scalars: { totalPoints: 4, seed: 1234 } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_curand_uniform");
+    expect(compiled.wgsl).toContain("var state: u32");
+    expect([...result.buffers.counts as Uint32Array].every((value) => value === 0 || value === 1)).toBe(true);
+  });
+
   it("parses dynamic extern shared memory as a clear unsupported diagnostic", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void dynamicShared(float *x) {

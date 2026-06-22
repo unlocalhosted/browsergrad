@@ -40,6 +40,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["atomicExch", [2, 2]],
   ["atomicCAS", [3, 3]],
   ["tex2D", [3, 3]],
+  ["curand_init", [4, 4]],
+  ["curand_uniform", [1, 1]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
 ]);
 const WGSL_RESERVED_WORDS = new Set([
@@ -555,6 +557,14 @@ function validateCallExpression(
     validateTex2D(expression, scope, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "float" };
   }
+  if (callName === "curand_init") {
+    validateCurandInit(expression, diagnostics, walkExpression, scope);
+    return { kind: "scalar", valueType: "uint" };
+  }
+  if (callName === "curand_uniform") {
+    validateCurandUniform(expression, diagnostics, walkExpression, scope);
+    return { kind: "scalar", valueType: "float" };
+  }
 
   for (const arg of expression.args) {
     const info = walkExpression(arg, scope);
@@ -659,6 +669,37 @@ function validateTex2D(
   }
   for (const coord of expression.args.slice(1)) {
     validateScalarOperand(walkExpression(coord, scope), coord.span, diagnostics);
+  }
+}
+
+function validateCurandInit(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+  scope: Scope,
+): void {
+  for (const arg of expression.args.slice(0, 3)) {
+    validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+  }
+  const state = expression.args[3];
+  if (!state) return;
+  const info = walkExpression(state, scope);
+  if (info.kind !== "address") {
+    diagnostics.push(error("curand-state-address", "curand_init expects a state address as its fourth argument", state.span));
+  }
+}
+
+function validateCurandUniform(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+  scope: Scope,
+): void {
+  const state = expression.args[0];
+  if (!state) return;
+  const info = walkExpression(state, scope);
+  if (info.kind !== "address") {
+    diagnostics.push(error("curand-state-address", "curand_uniform expects a state address", state.span));
   }
 }
 

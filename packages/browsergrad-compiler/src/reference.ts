@@ -443,6 +443,24 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const y = Math.max(0, Math.min(texture.height - 1, Math.floor(evalExpression(expression.args[2]!, context))));
     return texture.data[y * texture.width + x] ?? 0;
   }
+  if (name === "curand_init") {
+    const state = expression.args[3];
+    if (!state) throw compilerFailure("curand_init expects state address");
+    const seed = evalExpression(expression.args[0]!, context) >>> 0;
+    const sequence = evalExpression(expression.args[1]!, context) >>> 0;
+    const offset = evalExpression(expression.args[2]!, context) >>> 0;
+    const initialized = curandNext((seed ^ Math.imul(sequence, 747796405) ^ offset ^ 2891336453) >>> 0);
+    writeLValue(resolveAddressArgument(state, context), initialized, context);
+    return 0;
+  }
+  if (name === "curand_uniform") {
+    const state = expression.args[0];
+    if (!state) throw compilerFailure("curand_uniform expects state address");
+    const lvalue = resolveAddressArgument(state, context);
+    const next = curandNext(readLValue(lvalue, context) >>> 0);
+    writeLValue(lvalue, next, context);
+    return (next + 1) * 2.3283064365386963e-10;
+  }
   const args = expression.args.map((arg) => evalExpression(arg, context));
   const deviceFunction = name ? context.functions.get(name) : undefined;
   if (deviceFunction) return evalDeviceFunction(deviceFunction, args, context);
@@ -534,6 +552,17 @@ function evalAtomicReadModifyWrite(
   const value = evalExpression(expression.args[1]!, context);
   writeLValue(lvalue, op(current, value), context);
   return current;
+}
+
+function resolveAddressArgument(expression: CudaLiteExpression, context: ThreadContext): LValue {
+  if (expression.kind !== "unary" || expression.operator !== "&") {
+    throw compilerFailure("expected address argument");
+  }
+  return resolveLValue(expression.argument, context);
+}
+
+function curandNext(state: number): number {
+  return (Math.imul(state >>> 0, 1664525) + 1013904223) >>> 0;
 }
 
 function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): LValue {

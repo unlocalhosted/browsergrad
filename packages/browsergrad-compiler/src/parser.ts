@@ -570,13 +570,14 @@ class Parser {
       if (this.consumeIf("int")) return "uint";
       if (this.consumeIf("long")) {
         if (this.consumeIf("long")) {
-          this.fail("unsupported CUDA-lite type: unsigned long long", token.span);
+          return "uint";
         }
-        this.fail("unsupported CUDA-lite type: unsigned long", token.span);
+        return "uint";
       }
       return "uint";
     }
     if (token.value === "size_t") return "uint";
+    if (token.value === "curandState_t") return "uint";
     if (!TYPE_KEYWORDS.has(token.value)) this.fail(`unsupported CUDA-lite type: ${token.value}`, token.span);
     return token.value as Exclude<CudaLiteScalarType, "void">;
   }
@@ -589,6 +590,7 @@ class Parser {
   private startsVarDecl(): boolean {
     if (this.match("__shared__") || this.match("extern")) return true;
     if (this.match("unsigned")) return true;
+    if (this.match("curandState_t")) return true;
     return TYPE_KEYWORDS.has(this.peek().value);
   }
 
