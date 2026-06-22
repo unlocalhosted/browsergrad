@@ -224,6 +224,27 @@ __global__ void gridSync(float *scratch, float *out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs standalone cudaDeviceSynchronize as a WebGPU no-op", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void syncOnly(float *x) {
+  if (threadIdx.x < 1) {
+    cudaDeviceSynchronize();
+    x[0] = 9.0f;
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = { buffers: { x: new Float32Array([0]) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
+  });
+
   it("runs compiled constant memory through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `

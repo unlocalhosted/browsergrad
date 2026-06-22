@@ -1029,7 +1029,7 @@ __global__ void parent(float *x) {
     )).rejects.toThrow("CUDA runtime orchestration is reference-only");
   });
 
-  it("treats cudaDeviceSynchronize as reference-only runtime orchestration", () => {
+  it("treats standalone cudaDeviceSynchronize as a WebGPU-safe no-op", () => {
     const source = `
 __global__ void syncOnly(float *x) {
   if (threadIdx.x < 1) {
@@ -1052,6 +1052,7 @@ __global__ void syncOnly(float *x) {
       code: "unsupported-cuda-runtime",
       severity: "warning",
     }));
+    expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind)).toEqual(["device-sync"]);
     expect([...result.buffers.x as Float32Array]).toEqual([9]);
   });
 

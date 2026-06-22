@@ -383,7 +383,10 @@ function emitStatement(
     case "asm":
       return [`${prefix}${emitInlineAsmStatement(statement, context)};`];
     case "expr":
-      if (isNoopCall(statement.expression)) return [`${prefix}// printf omitted: WebGPU has no device stdout`];
+      {
+        const noopComment = noopCallComment(statement.expression);
+        if (noopComment) return [`${prefix}// ${noopComment}`];
+      }
       if (isBarrierCall(statement.expression)) return [`${prefix}workgroupBarrier();`];
       return [`${prefix}${emitExpression(statement.expression, context)};`];
     case "if": {
@@ -930,8 +933,18 @@ function isBarrierCall(expression: CudaLiteExpression): boolean {
   return expression.kind === "call" && expressionName(expression.callee) === "__syncthreads";
 }
 
-function isNoopCall(expression: CudaLiteExpression): boolean {
-  return expression.kind === "call" && expressionName(expression.callee) === "printf";
+function noopCallComment(expression: CudaLiteExpression): string | undefined {
+  if (expression.kind !== "call") return undefined;
+  switch (expressionName(expression.callee)) {
+    case "printf":
+      return "printf omitted: WebGPU has no device stdout";
+    case "cudaDeviceSynchronize":
+      return "cudaDeviceSynchronize omitted: WebGPU dispatch completion is host-managed";
+    case "cudaMemcpyPeerAsync":
+      return "cudaMemcpyPeerAsync omitted: WebGPU peer-copy orchestration is host-managed";
+    default:
+      return undefined;
+  }
 }
 
 function emitSharedType(statement: CudaLiteVarDecl, ir: KernelIrModule): string {

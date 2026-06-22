@@ -46,9 +46,10 @@ Current corpus gate:
   `referenceDynamicParallelism` is enabled; WebGPU still rejects them until
   host-side multi-dispatch orchestration lands.
 - CUDA runtime calls such as `cudaDeviceSynchronize` and `cudaMemcpyPeerAsync`
-  classify as runtime orchestration gaps. Peer copies can run in CPU reference
-  with `referenceCudaRuntime`; WebGPU still rejects until host/device
-  orchestration lands.
+  classify as runtime orchestration gaps. Standalone `cudaDeviceSynchronize()`
+  is a WebGPU-safe no-op because dispatch completion is host-managed. Peer
+  copies can run in CPU reference with `referenceCudaRuntime`; WebGPU still
+  rejects until host/device orchestration lands.
 - Cooperative `grid.sync()` can run in CPU reference with `referenceGridSync`.
   Safe top-level uniform `grid.sync()` also runs on real WebGPU as multiple
   dispatch phases over shared GPU buffers. Non-uniform sync, private locals

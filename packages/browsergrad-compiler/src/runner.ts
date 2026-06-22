@@ -137,6 +137,7 @@ function rejectReferenceOnlyRuntime(compiled: CompiledCudaLiteKernel): void {
   );
   if (!diagnostic) return;
   const runtimePlan = createCudaRuntimePlan(compiled);
+  if (runtimePlan.operations.every((operation) => operation.kind === "device-sync")) return;
   const labels = [...new Set(runtimePlan.operations.map((operation) => operation.kind))].join(", ");
   const message = labels.length > 0
     ? `CUDA runtime orchestration is reference-only (${labels}); WebGPU host orchestration is not implemented yet`
