@@ -1,4 +1,10 @@
-interface Float16Array extends Uint16Array {}
+interface Float16Array extends ArrayBufferView {
+  readonly BYTES_PER_ELEMENT: 2;
+  readonly length: number;
+  [index: number]: number;
+  [Symbol.iterator](): IterableIterator<number>;
+  slice(start?: number, end?: number): Float16Array;
+}
 
 interface Float16ArrayConstructor {
   readonly prototype: Float16Array;

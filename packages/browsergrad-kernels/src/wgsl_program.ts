@@ -3,7 +3,13 @@ import { KernelError, type KernelDevice } from "./types.js";
 
 export type WgslValueType = "f16" | "f32" | "i32" | "u32";
 export type WgslStorageAccess = "read" | "read_write";
-export interface WgslFloat16Array extends Uint16Array {}
+export interface WgslFloat16Array extends ArrayBufferView {
+  readonly BYTES_PER_ELEMENT: 2;
+  readonly length: number;
+  [index: number]: number;
+  [Symbol.iterator](): IterableIterator<number>;
+  slice(start?: number, end?: number): WgslFloat16Array;
+}
 export type WgslTypedArray = WgslFloat16Array | Float32Array | Int32Array | Uint32Array;
 
 export interface KernelFeatureSet {
@@ -371,7 +377,7 @@ function bytesForGpuWrite(source: ArrayBufferView, alignedByteLength: number): U
 function typedArrayFromBytes(type: WgslValueType, bytes: ArrayBuffer): WgslTypedArray {
   switch (type) {
     case "f16":
-      return new (requireFloat16ArrayConstructor("f16 readback"))(bytes);
+      return new (requireFloat16ArrayConstructor("f16 readback"))(bytes) as WgslFloat16Array;
     case "f32":
       return new Float32Array(bytes);
     case "i32":
