@@ -1,5 +1,6 @@
 import {
   defineWgslKernelProgram,
+  float32ToFloat16Bits,
   type WgslKernelProgram,
   type WgslKernelRunInput,
   type WgslKernelSequenceStep,
@@ -883,6 +884,5 @@ function isDevicePoolParam(param: { readonly pointer: boolean; readonly valueTyp
 }
 
 function float16Bits(value: number): number {
-  const half = new Float16Array([value]);
-  return new Uint16Array(half.buffer)[0] ?? 0;
+  return float32ToFloat16Bits(value);
 }

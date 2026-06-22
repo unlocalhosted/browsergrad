@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  createWgslFloat16Array,
   defineWgslKernelProgram,
   detectKernelFeatures,
+  float16BitsToFloat32,
+  float32ToFloat16Bits,
+  getWgslFloat16ArrayConstructor,
 } from "../src/index";
 
 describe("generic WGSL kernel programs", () => {
@@ -30,6 +34,18 @@ describe("generic WGSL kernel programs", () => {
     });
 
     expect(program.bindings[0]).toMatchObject({ kind: "storage", valueType: "f16" });
+  });
+
+  it("provides a float16 backing array when the JS runtime lacks a native one", () => {
+    const half = createWgslFloat16Array([1.5, 3]);
+    const fromBytes = createWgslFloat16Array(half.buffer);
+
+    expect(half instanceof getWgslFloat16ArrayConstructor()).toBe(true);
+    expect(half.BYTES_PER_ELEMENT).toBe(2);
+    expect(half.byteLength).toBe(4);
+    expect(float32ToFloat16Bits(1.5)).toBe(0x3e00);
+    expect(float16BitsToFloat32(0x3e00)).toBe(1.5);
+    expect([...fromBytes]).toEqual([1.5, 3]);
   });
 
   it("supports texture2d bindings explicitly", () => {

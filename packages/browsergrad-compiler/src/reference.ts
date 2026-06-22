@@ -1,4 +1,8 @@
-import type { WgslTypedArray } from "@unlocalhosted/browsergrad-kernels";
+import {
+  createWgslFloat16Array,
+  isWgslFloat16Array,
+  type WgslTypedArray,
+} from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./ast_queries.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import {
@@ -1365,7 +1369,7 @@ function allocateShared(declarations: readonly CudaLiteVarDecl[]): Map<string, S
         : declaration.valueType === "bool"
           ? new Uint32Array(length)
           : declaration.valueType === "half"
-            ? new Float16Array(length)
+            ? createWgslFloat16Array(length)
             : new Float32Array(length);
     shared.set(declaration.name, { dimensions: declaration.dimensions, valueType: declaration.valueType, data });
   }
@@ -1391,7 +1395,7 @@ function allocateTypedArray(valueType: CudaLiteScalarType, dimensions: readonly 
       : valueType === "bool"
         ? new Uint32Array(length)
         : valueType === "half"
-          ? new Float16Array(length)
+          ? createWgslFloat16Array(length)
           : new Float32Array(length);
 }
 
@@ -1761,7 +1765,7 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
       if (param.valueType === "float" && !(buffer instanceof Float32Array)) {
         throw compilerFailure(`buffer '${param.name}' expects Float32Array`);
       }
-      if (param.valueType === "half" && !(buffer instanceof Float16Array)) {
+      if (param.valueType === "half" && !isWgslFloat16Array(buffer)) {
         throw compilerFailure(`buffer '${param.name}' expects Float16Array`);
       }
       if (param.valueType === "bool" && !(buffer instanceof Uint32Array)) {
@@ -1829,7 +1833,7 @@ function validateTypedConstant(name: string, valueType: string, value: WgslTyped
   if (valueType === "float" && !(value instanceof Float32Array)) {
     throw compilerFailure(`constant '${name}' expects Float32Array`);
   }
-  if (valueType === "half" && !(value instanceof Float16Array)) {
+  if (valueType === "half" && !isWgslFloat16Array(value)) {
     throw compilerFailure(`constant '${name}' expects Float16Array`);
   }
   if (valueType === "bool" && !(value instanceof Uint32Array)) {

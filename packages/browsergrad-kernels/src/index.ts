@@ -76,6 +76,16 @@ export {
 } from "./runner.js";
 
 export {
+  createWgslFloat16Array,
+  float16BitsToFloat32,
+  float32ToFloat16Bits,
+  getWgslFloat16ArrayConstructor,
+  installWgslFloat16ArrayPolyfill,
+  isWgslFloat16Array,
+  type WgslFloat16ArrayConstructor,
+} from "./float16.js";
+
+export {
   createWgslStorageBuffer,
   defineWgslKernelProgram,
   destroyWgslStorageBuffer,

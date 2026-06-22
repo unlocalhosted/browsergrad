@@ -51,6 +51,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `storageMetadata` lets generic WGSL callers declare canonical storage
   readback types and byte-compatible aliases, including readback-only state
   buffers that are not bound by any sequence step.
+- `createWgslFloat16Array()` and float16 conversion helpers provide a small
+  JS `Float16Array` backing path when the host runtime has WebGPU `shader-f16`
+  support but Node/browser JS lacks the typed array constructor.
 
 ### Fixed
 

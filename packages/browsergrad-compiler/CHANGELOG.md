@@ -76,6 +76,9 @@
 - Accepted common C/CUDA integer aliases (`signed`, `unsigned`, `short`,
   `long`, `long long`, `size_t`, fixed-width 32/64-bit aliases, and
   `uintptr_t`) as CUDA-lite `i32`/`u32` spellings for learner kernels.
+- CUDA-lite half reference execution now uses BrowserGrad's float16 backing
+  array helper, so Node versions without native `Float16Array` still run f16
+  unit tests and scalar packing deterministically.
 - Added `summarizeCudaWebGpuExecutionPlan()` so platforms can distinguish direct
   WebGPU, host-orchestrated WebGPU, and unsupported plans without misusing the
   conservative lowering plan.

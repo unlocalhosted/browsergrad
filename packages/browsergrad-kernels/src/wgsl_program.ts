@@ -1,4 +1,9 @@
 import { asImpl } from "./device.js";
+import {
+  createWgslFloat16Array,
+  getWgslFloat16ArrayConstructor,
+  isWgslFloat16Array,
+} from "./float16.js";
 import { KernelError, type KernelDevice } from "./types.js";
 
 export type WgslValueType = "f16" | "f32" | "i32" | "u32";
@@ -861,7 +866,7 @@ function createFeatureSet(
   return {
     webgpu,
     shaderF16: features.includes("shader-f16"),
-    float16Array: getFloat16ArrayConstructor() !== undefined,
+    float16Array: getWgslFloat16ArrayConstructor() !== undefined,
     subgroups: features.includes("subgroups"),
     compatibilityMode,
     features: [...features].sort(),
@@ -884,7 +889,7 @@ function bytesForGpuWrite(source: ArrayBufferView, alignedByteLength: number): U
 function typedArrayFromBytes(type: WgslValueType, bytes: ArrayBuffer): WgslTypedArray {
   switch (type) {
     case "f16":
-      return new (requireFloat16ArrayConstructor("f16 readback"))(bytes) as WgslFloat16Array;
+      return createWgslFloat16Array(bytes);
     case "f32":
       return new Float32Array(bytes);
     case "i32":
@@ -1024,18 +1029,7 @@ function validateValueType(type: WgslValueType, name: string): void {
 }
 
 function isFloat16Array(data: WgslTypedArray): boolean {
-  const ctor = getFloat16ArrayConstructor();
-  return ctor !== undefined && data instanceof ctor;
-}
-
-function requireFloat16ArrayConstructor(context: string): Float16ArrayConstructor {
-  const ctor = getFloat16ArrayConstructor();
-  if (!ctor) throw new KernelError(`Float16Array runtime support is required for ${context}`);
-  return ctor;
-}
-
-function getFloat16ArrayConstructor(): Float16ArrayConstructor | undefined {
-  return (globalThis as typeof globalThis & { readonly Float16Array?: Float16ArrayConstructor }).Float16Array;
+  return isWgslFloat16Array(data);
 }
 
 function validateIdentifier(value: string, name: string): void {
