@@ -201,4 +201,42 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     expect([...result.buffers.x as Float32Array]).toEqual([7, 7, 7, 7]);
   });
+
+  it("runs sequence steps with storage binding aliases", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const writeX = defineWgslKernelProgram({
+      name: "seq_alias_write_x",
+      workgroupSize: [4, 1, 1],
+      bindings: [{ kind: "storage", name: "x", valueType: "f32", access: "read_write", binding: 0 }],
+      wgsl: `
+@group(0) @binding(0) var<storage, read_write> x: array<f32>;
+@compute @workgroup_size(4, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < arrayLength(&x)) { x[gid.x] = f32(gid.x + 1u); }
+}`,
+    });
+    const scaleY = defineWgslKernelProgram({
+      name: "seq_alias_scale_y",
+      workgroupSize: [4, 1, 1],
+      bindings: [{ kind: "storage", name: "y", valueType: "f32", access: "read_write", binding: 0 }],
+      wgsl: `
+@group(0) @binding(0) var<storage, read_write> y: array<f32>;
+@compute @workgroup_size(4, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < arrayLength(&y)) { y[gid.x] = y[gid.x] * 3.0; }
+}`,
+    });
+
+    const result = await runWgslKernelProgramSequence(
+      device,
+      [
+        { program: writeX, launch: { dispatchCount: [4, 1, 1] } },
+        { program: scaleY, launch: { dispatchCount: [4, 1, 1] }, storageAliases: { y: "x" } },
+      ],
+      { buffers: { x: new Float32Array(4) } },
+    );
+
+    expect([...result.buffers.x as Float32Array]).toEqual([3, 6, 9, 12]);
+  });
 });

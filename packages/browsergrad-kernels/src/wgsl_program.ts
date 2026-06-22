@@ -88,6 +88,7 @@ export interface WgslKernelLaunch {
 export interface WgslKernelSequenceStep {
   readonly program: WgslKernelProgram;
   readonly launch: WgslKernelLaunch;
+  readonly storageAliases?: Readonly<Record<string, string>>;
   readonly uniforms?: Readonly<Record<string, ArrayBuffer | ArrayBufferView>>;
 }
 
@@ -200,10 +201,10 @@ export async function runWgslKernelProgramSequence(
   const programs = steps.map((step) => step.program);
   const readbackNames = new Set(
     input.readback ??
-      programs
-        .flatMap((program) => program.bindings)
-        .filter((binding) => binding.kind === "storage" && binding.access === "read_write")
-        .map((binding) => binding.name),
+      steps
+        .flatMap((step) => step.program.bindings.map((binding) => ({ step, binding })))
+        .filter(({ binding }) => binding.kind === "storage" && binding.access === "read_write")
+        .map(({ step, binding }) => storageBufferNameForStep(step, binding.name)),
   );
 
   const storageBuffers = new Map<string, { binding: WgslStorageBinding; buffer: GPUBuffer; byteLength: number }>();
@@ -214,7 +215,7 @@ export async function runWgslKernelProgramSequence(
   const readBuffers = new Set<GPUBuffer>();
 
   try {
-    for (const binding of collectStorageBindings(programs)) {
+    for (const binding of collectStorageBindings(steps)) {
       const data = input.buffers[binding.name];
       if (!data) throw new KernelError(`missing storage buffer input: ${binding.name}`);
       validateTypedArray(data, binding);
@@ -278,7 +279,7 @@ export async function runWgslKernelProgramSequence(
     for (let stepIndex = 0; stepIndex < programs.length; stepIndex++) {
       const program = programs[stepIndex]!;
       const { layoutEntries, bindGroupEntries } = bindGroupInputsForProgram(
-        program,
+        steps[stepIndex]!,
         storageBuffers,
         uniformBuffersForStep(uniformBuffersByStep, stepIndex),
         textureViewsByName,
@@ -344,26 +345,31 @@ export async function runWgslKernelProgramSequence(
   }
 }
 
-function collectStorageBindings(programs: readonly WgslKernelProgram[]): readonly WgslStorageBinding[] {
+function collectStorageBindings(steps: readonly WgslKernelSequenceStep[]): readonly WgslStorageBinding[] {
   const byName = new Map<string, WgslStorageBinding>();
-  for (const program of programs) {
-    for (const binding of program.bindings) {
+  for (const step of steps) {
+    for (const binding of step.program.bindings) {
       if (binding.kind !== "storage") continue;
-      const existing = byName.get(binding.name);
+      const storageName = storageBufferNameForStep(step, binding.name);
+      const existing = byName.get(storageName);
       if (!existing) {
-        byName.set(binding.name, binding);
+        byName.set(storageName, { ...binding, name: storageName });
         continue;
       }
       if (existing.valueType !== binding.valueType) {
-        throw new KernelError(`storage buffer ${binding.name} has conflicting value types`);
+        throw new KernelError(`storage buffer ${storageName} has conflicting value types`);
       }
-      byName.set(binding.name, {
+      byName.set(storageName, {
         ...existing,
         access: existing.access === "read_write" || binding.access === "read_write" ? "read_write" : "read",
       });
     }
   }
   return [...byName.values()];
+}
+
+function storageBufferNameForStep(step: WgslKernelSequenceStep, bindingName: string): string {
+  return step.storageAliases?.[bindingName] ?? bindingName;
 }
 
 function collectTextureBindings(programs: readonly WgslKernelProgram[]): readonly Extract<WgslKernelBinding, { kind: "texture2d" }>[] {
@@ -394,17 +400,18 @@ function uniformBuffersForStep(
 }
 
 function bindGroupInputsForProgram(
-  program: WgslKernelProgram,
+  step: WgslKernelSequenceStep,
   storageBuffers: ReadonlyMap<string, { readonly buffer: GPUBuffer }>,
   uniformBuffers: ReadonlyMap<string, GPUBuffer>,
   textureViews: ReadonlyMap<string, GPUTextureView>,
 ): { readonly layoutEntries: readonly GPUBindGroupLayoutEntry[]; readonly bindGroupEntries: readonly GPUBindGroupEntry[] } {
   const layoutEntries: GPUBindGroupLayoutEntry[] = [];
   const bindGroupEntries: GPUBindGroupEntry[] = [];
-  for (const binding of program.bindings) {
+  for (const binding of step.program.bindings) {
     if (binding.kind === "storage") {
-      const entry = storageBuffers.get(binding.name);
-      if (!entry) throw new KernelError(`missing storage buffer input: ${binding.name}`);
+      const storageName = storageBufferNameForStep(step, binding.name);
+      const entry = storageBuffers.get(storageName);
+      if (!entry) throw new KernelError(`missing storage buffer input: ${storageName}`);
       layoutEntries.push({
         binding: binding.binding,
         visibility: GPUShaderStage.COMPUTE,
