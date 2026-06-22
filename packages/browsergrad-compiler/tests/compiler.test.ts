@@ -99,6 +99,23 @@ __global__ void rawPoolKernel(float* poolBase, size_t* offset, size_t poolSize, 
 }
 `;
 
+const DEVICE_POINTER_HELPERS = `
+__device__ float loadAt(const float* ptr, int offset) {
+  return ptr[offset];
+}
+
+__device__ void addAt(float* ptr, int offset, float value) {
+  ptr[offset] += value;
+}
+
+__global__ void helperKernel(const float* x, float* y, float a, int n) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < n) {
+    addAt(y, idx, a * loadAt(x + 1, idx));
+  }
+}
+`;
+
 const EXTERNAL_POOL_ALLOC = `
 __global__ void externalPoolKernel(float* out) {
   float* ptr = (float*) deviceAllocate(&g_pool, sizeof(float));
@@ -157,6 +174,52 @@ describe("CUDA-lite compiler", () => {
 
     expect([...result.buffers.y as Float32Array]).toEqual([12, 24, 36, 48]);
     expect(result.trace.some((thread) => thread.writes.length > 0)).toBe(true);
+  });
+
+  it("lowers device helper functions with storage pointer params", () => {
+    const compiled = compileCudaLiteKernel(DEVICE_POINTER_HELPERS, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([1, 2, 3, 4]),
+          y: new Float32Array([10, 20, 30]),
+        },
+        scalars: { a: 2, n: 3 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
+    expect(compiled.wgsl).toContain("fn bg_ptr_read_f32(buffer: u32, index: u32) -> f32");
+    expect(compiled.wgsl).toContain("fn bg_ptr_write_f32(buffer: u32, index: u32, value: f32)");
+    expect(compiled.wgsl).toContain("loadAt(0u, (0u + u32(1)), idx");
+    expect(compiled.wgsl).toContain("addAt(1u, 0u, idx");
+    expect([...result.buffers.y as Float32Array]).toEqual([14, 26, 38]);
+  });
+
+  it("rejects writes through const device helper pointer params", () => {
+    expect(() => compileCudaLiteKernel(`
+__device__ void bad(const float* x) {
+  x[0] = 1.0f;
+}
+
+__global__ void kernel(const float* x) {
+  bad(x);
+}
+`)).toThrow(CudaLiteCompilerError);
+  });
+
+  it("rejects passing const storage pointers to writable helper params", () => {
+    expect(() => compileCudaLiteKernel(`
+__device__ void addAt(float* ptr) {
+  ptr[0] += 1.0f;
+}
+
+__global__ void kernel(const float* x) {
+  addAt(x);
+}
+`)).toThrow(CudaLiteCompilerError);
   });
 
   it("lowers fixed thread-local arrays through reference and WGSL", () => {

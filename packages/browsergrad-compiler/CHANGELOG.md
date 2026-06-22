@@ -94,3 +94,7 @@
 - Added native WGSL/reference lowering for common CUDA float math builtins:
   `fabsf`, `floorf`, `ceilf`, `roundf`, `truncf`, `sinf`, `cosf`, `tanf`,
   `powf`, `fminf`, and `fmaxf`.
+- `__device__` helper functions now accept storage pointer params for
+  `float`/`int`/`uint`/`half`, lowering pointer args to a compact
+  `{ buffer id, base index }` ABI in WGSL and matching address values in the
+  CPU reference interpreter.

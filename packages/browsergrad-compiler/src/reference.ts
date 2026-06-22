@@ -22,7 +22,7 @@ import {
   type ReferenceKernelResult,
 } from "./types.js";
 
-type EvalValue = number | ComplexValue | PoolPointerValue;
+type EvalValue = number | AddressValue | ComplexValue | PoolPointerValue;
 type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue | ComplexValue | PoolPointerValue | LocalArrayValue;
 interface Vector3 {
   readonly x: number;
@@ -738,7 +738,7 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
       return readLValue(lvalue, context);
     }
     case "unary": {
-      if (expression.operator === "&") return 0;
+      if (expression.operator === "&") return { kind: "address", target: resolveLValue(expression.argument, context) };
       if (expression.operator === "*") return evalDeref(expression.argument, context);
       const value = evalNumber(expression.argument, context);
       if (expression.operator === "-") return -value;
@@ -770,6 +770,7 @@ function evalDeref(expression: CudaLiteExpression, context: ThreadContext): Eval
   if (expression.kind === "identifier") {
     if (context.buffers.has(expression.name)) return readLValue({ name: expression.name, space: "buffer", index: 0 }, context);
     const local = context.locals.get(expression.name);
+    if (isAddress(local)) return readLValue(local.target, context);
     if (isPoolPointer(local)) return readLValue({ name: local.poolName, space: "pool", index: Math.trunc(local.byteOffset / 4), valueType: "float" }, context);
   }
   if (expression.kind === "cast" && expression.pointer) {
@@ -889,20 +890,26 @@ function evalAssignment(
     writeLValue(lvalue, right, context);
     return right;
   }
+  if (isAddress(right)) {
+    if (operator !== "=") throw compilerFailure("addresses only support assignment");
+    writeLValue(lvalue, right, context);
+    return right;
+  }
+  const rightNumber = valueAsNumber(right, lvalue.name);
   const current = operator === "=" ? 0 : valueAsNumber(readLValue(lvalue, context), lvalue.name);
   const value: number = operator === "="
-    ? right
+    ? rightNumber
     : operator === "+="
-      ? current + right
+      ? current + rightNumber
     : operator === "-="
-      ? current - right
+      ? current - rightNumber
       : operator === "*="
-        ? current * right
+        ? current * rightNumber
         : operator === "/="
-          ? current / right
+          ? current / rightNumber
           : operator === "<<="
-            ? Math.trunc(current) << Math.trunc(right)
-            : Math.trunc(current) >> Math.trunc(right);
+            ? Math.trunc(current) << Math.trunc(rightNumber)
+            : Math.trunc(current) >> Math.trunc(rightNumber);
   writeLValue(lvalue, value, context);
   return value;
 }
@@ -1018,9 +1025,13 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     writeLValue(lvalue, next, context);
     return (next + 1) * 2.3283064365386963e-10;
   }
-  const args = expression.args.map((arg) => evalNumber(arg, context));
   const deviceFunction = name ? context.functions.get(name) : undefined;
-  if (deviceFunction) return evalDeviceFunction(deviceFunction, args, context);
+  if (deviceFunction) return evalDeviceFunction(
+    deviceFunction,
+    deviceFunctionArgs(deviceFunction, expression.args, context),
+    context,
+  );
+  const args = expression.args.map((arg) => evalNumber(arg, context));
   switch (name) {
     case "__syncthreads":
       return 0;
@@ -1111,9 +1122,24 @@ function localLinearRank(context: ThreadContext): number {
     context.threadIdx.z * context.blockDim.x * context.blockDim.y;
 }
 
-function evalDeviceFunction(fn: CudaLiteDeviceFunction, args: readonly number[], context: ThreadContext): number {
+function deviceFunctionArgs(
+  fn: CudaLiteDeviceFunction,
+  args: readonly CudaLiteExpression[],
+  context: ThreadContext,
+): readonly EvalValue[] {
+  return fn.params.map((param, index) => {
+    const arg = args[index];
+    if (!arg) return 0;
+    if (!param.pointer) return evalExpression(arg, context);
+    const value = pointerArgumentValue(arg, param.valueType, context);
+    if (isAddress(value) || isPoolPointer(value)) return value;
+    throw compilerFailure(`device pointer parameter '${param.name}' expects a pointer argument`);
+  });
+}
+
+function evalDeviceFunction(fn: CudaLiteDeviceFunction, args: readonly EvalValue[], context: ThreadContext): number {
   const locals = new Map<string, LocalValue>();
-  for (const [index, param] of fn.params.entries()) locals.set(param.name, args[index] ?? 0);
+  for (const [index, param] of fn.params.entries()) locals.set(param.name, args[index] ?? zeroLocalValue(param.valueType));
   const fnContext: ThreadContext = {
     ...context,
     locals,
@@ -1691,6 +1717,13 @@ function isPoolPointer(value: LocalValue | EvalValue | undefined): value is Pool
     value.kind === "pool-pointer";
 }
 
+function isAddress(value: LocalValue | EvalValue | undefined): value is AddressValue {
+  return value !== undefined &&
+    typeof value !== "number" &&
+    "kind" in value &&
+    value.kind === "address";
+}
+
 function projectField(value: LocalValue, lvalue: LValue): EvalValue {
   if (!lvalue.field) {
     if (isComplex(value)) return value;
@@ -1718,6 +1751,7 @@ function sizeofType(typeName: string): number {
 
 function traceValue(value: EvalValue): number {
   if (isPoolPointer(value)) return valueAsNumber(value, "pool pointer");
+  if (isAddress(value)) return value.target.index ?? 0;
   return isComplex(value) ? value.x : value;
 }
 

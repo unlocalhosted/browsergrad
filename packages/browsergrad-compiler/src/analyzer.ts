@@ -350,9 +350,6 @@ export function analyzeCudaLite(
         span: param.span,
       });
       if (param.valueType === "half") requiredFeatures.add("shader-f16");
-      if (param.pointer && !launchCallees.has(fn.name)) {
-        diagnostics.push(error("unsupported-device-pointer-param", "CUDA-lite device functions only support scalar params in v0", param.span));
-      }
     }
     walkStatements(fn.body, functionScope, 0, 0, 0, functionDeclaredNames);
   }
@@ -735,15 +732,41 @@ function validateDeviceFunctionCall(
     ));
   }
   for (const [index, arg] of expression.args.entries()) {
-    const info = walkExpression(arg, scope);
-    validateScalarOperand(info, arg.span, diagnostics);
     const param = fnParams[index];
     if (param?.pointer) {
-      diagnostics.push(error("unsupported-device-pointer-param", "CUDA-lite device function calls only support scalar params in v0", arg.span));
+      validateDevicePointerArgument(arg, param, scope, diagnostics, walkExpression);
+      continue;
     }
+    const info = walkExpression(arg, scope);
+    validateScalarOperand(info, arg.span, diagnostics);
   }
   if (symbol.returnType === undefined || symbol.returnType === "void") return { kind: "unknown" };
   return { kind: "scalar", valueType: symbol.returnType };
+}
+
+function validateDevicePointerArgument(
+  arg: CudaLiteExpression,
+  param: CudaLiteParam,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const info = walkExpression(arg, scope);
+  if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "unknown") {
+    diagnostics.push(error("unsupported-device-pointer-param", `device pointer parameter '${param.name}' expects a pointer argument`, arg.span));
+    return;
+  }
+  const root = rootIdentifier(arg);
+  const rootSymbol = root ? lookupSymbol(root, scope, arg.span) : undefined;
+  if (rootSymbol?.kind === "shared" || rootSymbol?.kind === "constant") {
+    diagnostics.push(error("unsupported-device-pointer-param", `device pointer parameter '${param.name}' expects storage-buffer memory`, arg.span));
+  }
+  if (rootSymbol?.pointer && rootSymbol.constant && !param.constant) {
+    diagnostics.push(error("const-pointer-write", `cannot pass const pointer '${root}' to writable device pointer parameter '${param.name}'`, arg.span));
+  }
+  if (info.valueType && info.valueType !== param.valueType) {
+    diagnostics.push(error("unsupported-device-pointer-param", `device pointer parameter '${param.name}' expects ${param.valueType} pointer`, arg.span));
+  }
 }
 
 function validateCooperativeGroupCall(
@@ -1178,6 +1201,10 @@ function validateLValueExpression(
     const symbol = root ? lookupSymbol(root, scope, expression.span) : undefined;
     if (symbol?.kind === "constant") {
       diagnostics.push(error("const-pointer-write", `cannot write to constant memory '${root}'`, expression.span));
+      return;
+    }
+    if (symbol?.pointer && symbol.constant) {
+      diagnostics.push(error("const-pointer-write", `cannot write through const pointer '${root}'`, expression.span));
       return;
     }
     if (info.kind !== "scalar" && info.kind !== "complex") {

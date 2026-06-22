@@ -84,6 +84,23 @@ __global__ void floatMath(float *x, float *out) {
 }
 `;
 
+const DEVICE_POINTER_HELPERS = `
+__device__ float loadAt(const float* ptr, int offset) {
+  return ptr[offset];
+}
+
+__device__ void addAt(float* ptr, int offset, float value) {
+  ptr[offset] += value;
+}
+
+__global__ void helperKernel(const float* x, float* y, float a, int n) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < n) {
+    addAt(y, idx, a * loadAt(x + 1, idx));
+  }
+}
+`;
+
 const COMPLEX_MULTIPLY = `
 __global__ void multiplyFreqDomain(cufftComplex *A, const cufftComplex *B, int N) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -246,6 +263,23 @@ describe("real WebGPU — CUDA-lite compiler", () => {
     const actualValues = [...actual.buffers.out as Float32Array];
     expect(Math.abs(actualValues[0]! - expectedValues[0]!)).toBeLessThan(1e-4);
     expect(Math.abs(actualValues[1]! - expectedValues[1]!)).toBeLessThan(1e-4);
+  });
+
+  it("runs device helper functions with storage pointer params through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(DEVICE_POINTER_HELPERS, { workgroupSize: [4, 1, 1] });
+    const input = {
+      buffers: {
+        x: new Float32Array([1, 2, 3, 4]),
+        y: new Float32Array([10, 20, 30]),
+      },
+      scalars: { a: 2, n: 3 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
   });
 
   it("runs compiled SAXPY over resident WebGPU buffers without forced readback", async () => {

@@ -117,6 +117,19 @@ __device__ void childKernel(float *data, int N) {
     data[idx] += 3.14f;
   }
 }`,
+  devicePointerHelpers: `
+__device__ float loadAt(const float* ptr, int offset) {
+  return ptr[offset];
+}
+__device__ void addAt(float* ptr, int offset, float value) {
+  ptr[offset] += value;
+}
+__global__ void helperKernel(const float* x, float* y, float a, int n) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < n) {
+    addAt(y, idx, a * loadAt(x + 1, idx));
+  }
+}`,
 };
 
 const html = String.raw`<!doctype html>
@@ -332,6 +345,20 @@ const html = String.raw`<!doctype html>
             output: "g_pool",
             offsetOutput: "g_pool_offset",
             expectedOffset: 16,
+          },
+          {
+            name: "device-function:pointer-param-helpers",
+            source: SOURCES.devicePointerHelpers,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                x: new Float32Array([1, 2, 3, 4]),
+                y: new Float32Array([10, 20, 30]),
+              },
+              scalars: { a: 2, n: 3 },
+            }),
+            output: "y",
           },
         ];
       }
