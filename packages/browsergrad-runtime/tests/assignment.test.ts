@@ -4,6 +4,7 @@ import {
   assignmentRunReadiness,
   assignmentRunnerRoute,
   createAssignmentCapabilityEnvironment,
+  createAssignmentCapabilityCatalog,
   createAssignmentExternalRunnerRequest,
   createAssignmentBenchmarkPreflightMatrix,
   createVerifiedAssignmentBenchmarkPreflightMatrix,
@@ -363,6 +364,68 @@ describe("parseAssignmentProfile", () => {
         messages: ["ready for Pyodide rubric runner"],
       }),
     );
+  });
+
+  it("creates a cross-profile capability catalog for platform substrate triage", () => {
+    const pythonResult = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "python_runtime",
+          kind: "capability",
+          options: { requires: ["pyodide", "torch-compat"] },
+        },
+      ],
+    });
+    const kernelResult = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      id: "kernel-lab-smoke",
+      gates: [
+        {
+          name: "kernel_path",
+          kind: "capability",
+          options: {
+            requires: ["structured-assertions"],
+            any_of: [["webgpu", "wgsl-kernel"], ["native-cuda-external"]],
+          },
+        },
+      ],
+    });
+    expect(pythonResult.ok).toBe(true);
+    expect(kernelResult.ok).toBe(true);
+    if (!pythonResult.ok || !kernelResult.ok) return;
+
+    const catalog = createAssignmentCapabilityCatalog([
+      pythonResult.profile,
+      kernelResult.profile,
+    ]);
+
+    expect(catalog.capabilities).toContainEqual({
+      capability: "pyodide",
+      profiles: ["cs336-assignment1"],
+      requiredBy: [{ profileId: "cs336-assignment1", gate: "python_runtime" }],
+      alternativeIn: [],
+    });
+    expect(catalog.capabilities).toContainEqual({
+      capability: "webgpu",
+      profiles: ["kernel-lab-smoke"],
+      requiredBy: [],
+      alternativeIn: [
+        {
+          profileId: "kernel-lab-smoke",
+          gate: "kernel_path",
+          group: ["webgpu", "wgsl-kernel"],
+        },
+      ],
+    });
+    expect(catalog.capabilities.map((entry) => entry.capability)).toEqual([
+      "native-cuda-external",
+      "pyodide",
+      "structured-assertions",
+      "torch-compat",
+      "webgpu",
+      "wgsl-kernel",
+    ]);
   });
 
   it("verifies benchmark preflight matrix dataset hashes before mounting", async () => {

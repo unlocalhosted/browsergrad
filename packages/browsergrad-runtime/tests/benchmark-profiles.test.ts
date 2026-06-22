@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   assignmentRubricKind,
+  createAssignmentCapabilityCatalog,
   createAssignmentCapabilityEnvironment,
   createAssignmentBenchmarkPreflightMatrix,
   createAssignmentDatasetCachePlan,
@@ -248,6 +249,63 @@ describe("benchmark assignment profiles", () => {
     expect(matrix.rows.every((row) => row.externalRunnerRequired === false)).toBe(true);
     expect(matrix.rows.every((row) => row.gates.length > 0)).toBe(true);
     expect(matrix.rows.flatMap((row) => row.gates).every((gate) => gate.ok)).toBe(true);
+  });
+
+  it("catalogs capabilities across all benchmark profiles", () => {
+    const profiles = PROFILE_FILES.map((file) => {
+      const profileJson = JSON.parse(
+        readFileSync(new URL(`../../../docs/internal/${file}`, import.meta.url), "utf8"),
+      );
+      const result = parseAssignmentProfile(profileJson);
+      expect(result).toMatchObject({ ok: true });
+      if (!result.ok) throw new Error(`${file} did not parse`);
+      return result.profile;
+    });
+
+    const catalog = createAssignmentCapabilityCatalog(profiles);
+
+    expect(catalog.capabilities.length).toBeGreaterThan(20);
+    expect(catalog.capabilities.map((entry) => entry.capability)).toEqual(
+      [...catalog.capabilities.map((entry) => entry.capability)].sort(),
+    );
+    expect(
+      catalog.capabilities.find((entry) => entry.capability === "webgpu"),
+    ).toMatchObject({
+      capability: "webgpu",
+      profiles: expect.arrayContaining(["cs336-assignment2-systems", "gpu-puzzles"]),
+    });
+    expect(
+      catalog.capabilities.find((entry) => entry.capability === "vllm-external"),
+    ).toMatchObject({
+      capability: "vllm-external",
+      requiredBy: [],
+      alternativeIn: [
+        expect.objectContaining({
+          profileId: "cs336-assignment5-alignment",
+          gate: "gpu_inference_external_only",
+          group: ["vllm-external", "flash-attn-external"],
+        }),
+      ],
+    });
+    expect(
+      catalog.capabilities.find((entry) => entry.capability === "pyodide")
+        ?.requiredBy.map((reference) => reference.profileId),
+    ).toEqual(
+      expect.arrayContaining([
+        "cs336-assignment1",
+        "cs336-assignment2-systems",
+        "cs336-assignment4-data",
+        "cs336-assignment5-alignment",
+      ]),
+    );
+    expect(
+      catalog.capabilities.find((entry) => entry.capability === "pyodide")
+        ?.alternativeIn,
+    ).toContainEqual({
+      profileId: "cs336-assignment3-scaling",
+      gate: "scaling_api_browser_slice",
+      group: ["pyodide"],
+    });
   });
 
   it("creates platform handoffs for every benchmark profile", () => {

@@ -105,6 +105,27 @@ export interface AssignmentCapabilityEvaluation {
   readonly gates: readonly AssignmentCapabilityGateEvaluation[];
 }
 
+export interface AssignmentCapabilityCatalog {
+  readonly capabilities: readonly AssignmentCapabilityCatalogEntry[];
+}
+
+export interface AssignmentCapabilityCatalogEntry {
+  readonly capability: string;
+  readonly profiles: readonly string[];
+  readonly requiredBy: readonly AssignmentCapabilityCatalogReference[];
+  readonly alternativeIn: readonly AssignmentCapabilityCatalogAlternative[];
+}
+
+export interface AssignmentCapabilityCatalogReference {
+  readonly profileId: string;
+  readonly gate: string;
+}
+
+export interface AssignmentCapabilityCatalogAlternative
+  extends AssignmentCapabilityCatalogReference {
+  readonly group: readonly string[];
+}
+
 export type AssignmentRunReadinessStatus =
   | "runnable"
   | "simulated"
@@ -608,6 +629,47 @@ export function requiredAssignmentCapabilities(
   );
 }
 
+export function createAssignmentCapabilityCatalog(
+  profiles: readonly AssignmentProfile[],
+): AssignmentCapabilityCatalog {
+  const entries = new Map<string, MutableAssignmentCapabilityCatalogEntry>();
+
+  for (const profile of profiles) {
+    for (const gate of profile.gates) {
+      if (gate.kind !== "capability") continue;
+      for (const capability of readCapabilityStringList(gate.options.requires)) {
+        getMutableCatalogEntry(entries, capability).requiredBy.push({
+          profileId: profile.id,
+          gate: gate.name,
+        });
+      }
+      for (const group of readCapabilityAlternatives(gate.options.any_of)) {
+        for (const capability of group) {
+          getMutableCatalogEntry(entries, capability).alternativeIn.push({
+            profileId: profile.id,
+            gate: gate.name,
+            group,
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    capabilities: [...entries.values()]
+      .map((entry) => ({
+        capability: entry.capability,
+        profiles: uniqueSorted([
+          ...entry.requiredBy.map((reference) => reference.profileId),
+          ...entry.alternativeIn.map((reference) => reference.profileId),
+        ]),
+        requiredBy: sortCatalogReferences(entry.requiredBy),
+        alternativeIn: sortCatalogAlternatives(entry.alternativeIn),
+      }))
+      .sort((a, b) => a.capability.localeCompare(b.capability)),
+  };
+}
+
 export function createAssignmentRunPlan(
   profile: AssignmentProfile,
   environment: AssignmentCapabilityEnvironment,
@@ -651,6 +713,46 @@ export function createAssignmentRunPlan(
     capabilityEvaluation,
     behavioralGates: profile.gates.filter((gate) => gate.kind !== "capability"),
   };
+}
+
+interface MutableAssignmentCapabilityCatalogEntry {
+  readonly capability: string;
+  readonly requiredBy: AssignmentCapabilityCatalogReference[];
+  readonly alternativeIn: AssignmentCapabilityCatalogAlternative[];
+}
+
+function getMutableCatalogEntry(
+  entries: Map<string, MutableAssignmentCapabilityCatalogEntry>,
+  capability: string,
+): MutableAssignmentCapabilityCatalogEntry {
+  let entry = entries.get(capability);
+  if (!entry) {
+    entry = { capability, requiredBy: [], alternativeIn: [] };
+    entries.set(capability, entry);
+  }
+  return entry;
+}
+
+function sortCatalogReferences(
+  references: readonly AssignmentCapabilityCatalogReference[],
+): AssignmentCapabilityCatalogReference[] {
+  return [...references].sort(compareCatalogReferences);
+}
+
+function sortCatalogAlternatives(
+  alternatives: readonly AssignmentCapabilityCatalogAlternative[],
+): AssignmentCapabilityCatalogAlternative[] {
+  return [...alternatives].sort((a, b) =>
+    compareCatalogReferences(a, b) ||
+    a.group.join("\0").localeCompare(b.group.join("\0"))
+  );
+}
+
+function compareCatalogReferences(
+  a: AssignmentCapabilityCatalogReference,
+  b: AssignmentCapabilityCatalogReference,
+): number {
+  return a.profileId.localeCompare(b.profileId) || a.gate.localeCompare(b.gate);
 }
 
 export function createAssignmentPreflightReport(

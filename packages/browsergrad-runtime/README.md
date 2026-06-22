@@ -178,6 +178,7 @@ import {
   assignmentRunReadiness,
   assignmentRunnerRoute,
   createAssignmentCapabilityEnvironment,
+  createAssignmentCapabilityCatalog,
   createAssignmentBenchmarkPreflightMatrix,
   createAssignmentPlatformHandoff,
   createVerifiedAssignmentBenchmarkPreflightMatrix,
@@ -198,6 +199,7 @@ import {
 const parsed = parseAssignmentProfile(profileJson);
 if (!parsed.ok) throw new Error(parsed.errors.join("; "));
 
+const catalog = createAssignmentCapabilityCatalog([parsed.profile]);
 const environment = createAssignmentCapabilityEnvironment({
   browserCapabilities: ["pyodide", "torch-compat", "webgpu", "wgsl-kernel"],
   simulatedCapabilities: ["worker-mesh", "distributed-simulator"],
@@ -238,6 +240,7 @@ const rubricKind = assignmentRubricKind(plan);
 const readiness = assignmentRunReadiness(plan);
 
 console.log(required, preflight.ok, preflight.missingCapabilities);
+console.log(catalog.capabilities.map((entry) => [entry.capability, entry.profiles]));
 console.log(plan.session.packages, plan.files.rubricPath, plan.execution.allowedTests);
 console.log(readiness.status, rubricKind, mounts.files, mounts.datasets);
 console.log(route.target, report.runnerRoute.target, report.mountPlan.files, datasetCache.datasets);
@@ -293,6 +296,11 @@ mode: `browser`, then `simulated`, then `external`.
 `pyodide`, `javascript`, `external`, `unsupported`, or `blocked`. Use this for
 platform branching before calling `runAssignmentRubric()` or
 `runAssignmentJavascriptRubric()`.
+Use `createAssignmentCapabilityCatalog(profiles)` when planning a curriculum or
+dashboard across many profiles. It returns one sorted entry per capability with
+the profiles/gates that require it and the gates where it appears as an
+alternative, so platform teams can prioritize generic substrates instead of
+scraping profile JSON.
 Use `runAssignmentJavascriptProfile()` when the platform has a full JS-routed
 profile and wants BrowserGrad to own preflight, route validation, mount
 collection, declared-oracle preflight, oracle/substrate wiring, and rubric

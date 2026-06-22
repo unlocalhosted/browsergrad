@@ -35,6 +35,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `assignmentRunReadiness(plan)` summarizes selected capability modes as
   `runnable`, `simulated`, `external-only`, or `blocked` for platform preflight
   UIs.
+- `createAssignmentCapabilityCatalog(profiles)` builds a deterministic
+  cross-profile capability inventory with required and alternative gate
+  references, so platforms can triage substrate work across many labs.
 - `createAssignmentCapabilityEnvironment({ browserCapabilities,
   simulatedCapabilities, externalCapabilities })` builds a deterministic
   capability environment and mode map for platform preflight.

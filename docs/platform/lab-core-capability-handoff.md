@@ -312,37 +312,40 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
    dashboard with
    `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
    when showing many benchmark assignments together.
-3. Classifies rubric kind with `assignmentRubricKind`.
-4. Calls BrowserGrad capability evaluation from the run plan.
-5. Calls `assignmentRunReadiness(plan)` and renders its status, selected
+3. Calls `createAssignmentCapabilityCatalog(profiles)` for cross-course substrate
+   triage: show which labs require WebGPU, Pyodide, Worker mesh, native
+   external runners, and which gates treat them as alternatives.
+4. Classifies rubric kind with `assignmentRubricKind`.
+5. Calls BrowserGrad capability evaluation from the run plan.
+6. Calls `assignmentRunReadiness(plan)` and renders its status, selected
    capabilities, and missing capabilities.
-6. Or uses `createAssignmentPreflightReport(profile, environment)` to get all
+7. Or uses `createAssignmentPreflightReport(profile, environment)` to get all
    preflight fields, including `datasetCachePlan`, in one object.
    Read `report.runnerRoute.target` to choose launch controls.
-7. Prefer `createAssignmentPlatformHandoff(profile, report, contents?)` for the
+8. Prefer `createAssignmentPlatformHandoff(profile, report, contents?)` for the
    top-level launch decision. Render `nextAction`, `launchable`, `messages`,
    missing files/datasets, selected capabilities, and external-runner fields
    directly instead of duplicating BrowserGrad preflight logic.
-8. Renders `plan.capabilityEvaluation.gates` as preflight rows using each gate's
+9. Renders `plan.capabilityEvaluation.gates` as preflight rows using each gate's
    `status`, `selectedAnyOf`, `selectedCapabilities`, and missing fields.
-9. Builds the BrowserGrad mount plan for runnable or inspectable labs.
-10. Builds dataset cache metadata with `createAssignmentDatasetCachePlan`; valid
+10. Builds the BrowserGrad mount plan for runnable or inspectable labs.
+11. Builds dataset cache metadata with `createAssignmentDatasetCachePlan`; valid
    hashes become content-addressed cache paths, missing hashes become
    source-addressed URL cache paths, and malformed hashes remain preflight
    failures.
-10. Fetches or provides assignment file/dataset contents, then calls
+12. Fetches or provides assignment file/dataset contents, then calls
     `evaluateAssignmentMountContents` to show missing files/datasets.
-11. For batch dashboards with fetched contents, calls
+13. For batch dashboards with fetched contents, calls
     `createVerifiedAssignmentBenchmarkPreflightMatrix` so `hashOk` and
     `hashChecks` block stale or wrong datasets before mount.
-12. Materializes validated contents into `Session.fs`.
-13. Shows packages, oracle modules, rubric kind, file mounts, and
+14. Materializes validated contents into `Session.fs`.
+15. Shows packages, oracle modules, rubric kind, file mounts, and
     satisfied/missing capability groups.
-14. For external-only labs, calls `createAssignmentExternalRunnerRequest(plan)`
+16. For external-only labs, calls `createAssignmentExternalRunnerRequest(plan)`
     and queues platform-owned native/hosted execution with the returned files,
     timeouts, selected external capabilities, environment variables, mount plan,
     and dataset cache plan.
-15. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
+17. For runnable Pyodide labs, uses `runAssignmentRubric` to mount contents and
     launch the rubric through `Session.exec`, or uses
     `createAssignmentRubricExecRequest` when the platform needs manual staging.
     Binary fixtures can be verified after staging with `Session.fs.readBytes`.

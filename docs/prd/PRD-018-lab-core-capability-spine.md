@@ -159,6 +159,10 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   converts browser, simulated, and external capability groups into one
   deterministic environment with mode labels, so platforms do not duplicate
   capability-map construction.
+- Capability-catalog guarantee: `createAssignmentCapabilityCatalog(profiles)`
+  creates one deterministic cross-profile inventory of capability identifiers,
+  including which profiles/gates require them and where they appear as
+  alternatives. This is the substrate-triage surface for benchmark dashboards.
 - Platform preflight guarantee: `createAssignmentPreflightReport(profile,
   environment)` returns the run plan, readiness, rubric kind, required
   capabilities, runner route, mount plan, and dataset cache plan as one readonly
@@ -367,6 +371,8 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   simulated, and external groups, sorts them deterministically, and gives
   browser-native support precedence when the same capability appears in multiple
   groups.
+- Later RED test: capability catalog construction returns sorted cross-profile
+  entries and distinguishes required capabilities from alternative groups.
 - Later RED test: runner-route construction maps Python rubrics to Pyodide, JS
   rubrics to the browser-native runner, external-only readiness to external
   launch, failed readiness to blocked, and unknown rubric kinds to unsupported.

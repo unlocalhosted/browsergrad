@@ -34,6 +34,9 @@ Use `parseAssignmentProfile()` to validate this shape,
 platform substrate, `profileOracleJsModules()` to convert oracle declarations
 into `createSession({ jsModules })` registrations, and
 `createAssignmentRunPlan()` to hand the platform a complete launch recipe.
+Use `createAssignmentCapabilityCatalog(profiles)` for cross-course planning. It
+returns sorted capability entries with the profiles/gates that require each
+capability and the alternative groups where each capability appears.
 Use `createAssignmentPreflightReport(profile, environment)` when the platform
 needs one readonly object containing the run plan, rubric kind, readiness,
 required capabilities, mount plan, and dataset cache plan.
