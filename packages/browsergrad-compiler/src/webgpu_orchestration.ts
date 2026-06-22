@@ -27,6 +27,18 @@ export type CudaWebGpuExecutionPlanKind =
   | "host-dynamic-launch"
   | "host-peer-copy";
 
+export type CudaWebGpuExecutionBlockerKind =
+  | "grid-sync"
+  | "device-launch"
+  | "peer-copy"
+  | "runtime";
+
+export interface CudaWebGpuExecutionBlocker {
+  readonly kind: CudaWebGpuExecutionBlockerKind;
+  readonly code: string;
+  readonly message: string;
+}
+
 export type CudaWebGpuExecutionPlan =
   | {
       readonly supported: true;
@@ -37,6 +49,7 @@ export type CudaWebGpuExecutionPlan =
   | {
       readonly supported: false;
       readonly reason: string;
+      readonly blockers: readonly CudaWebGpuExecutionBlocker[];
       readonly diagnostics: readonly CudaLiteDiagnostic[];
     };
 
@@ -56,27 +69,35 @@ export function createCudaWebGpuExecutionPlan(
   options: CudaWebGpuExecutionPlanOptions = {},
 ): CudaWebGpuExecutionPlan {
   const runtimePlan = createCudaRuntimePlan(compiled);
-  const blockers: string[] = [];
+  const blockers: CudaWebGpuExecutionBlocker[] = [];
 
   const gridSyncPhasePlan = createCudaGridSyncPhasePlan(compiled.ir);
   const gridSyncPlan = createGridSyncWebGpuPlan(compiled, input, launch, gridSyncPhasePlan);
   if (gridSyncPlan) return gridSyncPlan;
   if (runtimePlan.operations.some((operation) => operation.kind === "grid-sync") && !gridSyncPhasePlan.supported) {
-    blockers.push(`grid-sync: ${gridSyncPhasePlan.reason}`);
+    blockers.push(webGpuBlocker("grid-sync", "grid-sync-phase-unsupported", gridSyncPhasePlan.reason));
   }
 
   const hostDynamicPlan = createCudaHostDynamicLaunchPlan(compiled, input, launch);
   const dynamicLaunchPlan = createHostLiftedDynamicWebGpuPlan(compiled, input, launch, options, hostDynamicPlan);
   if (dynamicLaunchPlan) return dynamicLaunchPlan;
   if (runtimePlan.operations.some((operation) => operation.kind === "device-launch") && !hostDynamicPlan.supported) {
-    blockers.push(`device-launch: ${hostDynamicPlan.reason}`);
+    blockers.push(webGpuBlocker(
+      "device-launch",
+      hostDynamicPlan.blocker?.code ?? "host-dynamic-launch-unsupported",
+      hostDynamicPlan.reason ?? "host-lifted dynamic launch unsupported",
+    ));
   }
 
   const peerCopyRuntimePlan = createCudaPeerCopyPlan(compiled, input, launch);
   const peerCopyPlan = createHostLiftedPeerCopyWebGpuPlan(compiled, input, launch, peerCopyRuntimePlan);
   if (peerCopyPlan) return peerCopyPlan;
   if (runtimePlan.operations.some((operation) => operation.kind === "peer-copy") && !peerCopyRuntimePlan.supported) {
-    blockers.push(`peer-copy: ${peerCopyRuntimePlan.reason}`);
+    blockers.push(webGpuBlocker(
+      "peer-copy",
+      peerCopyRuntimePlan.blocker?.code ?? "host-peer-copy-unsupported",
+      peerCopyRuntimePlan.reason ?? "host-lifted peer copy unsupported",
+    ));
   }
 
   const unsupported = createReferenceOnlyRuntimePlan(compiled, blockers);
@@ -175,14 +196,9 @@ function createHostLiftedDynamicWebGpuPlan(
 ): CudaWebGpuExecutionPlan | undefined {
   if (!plan.supported || plan.launches.length === 0) return undefined;
   if (!options.compileKernel) {
-    return {
-      supported: false,
-      reason: "dynamic child compiler unavailable for WebGPU host orchestration",
-      diagnostics: referenceRuntimeDiagnostics(
-        compiled,
-        "dynamic child compiler unavailable for WebGPU host orchestration",
-      ),
-    };
+    return unsupportedWebGpuPlan(compiled, [
+      webGpuBlocker("device-launch", "dynamic-child-compiler-unavailable", "dynamic child compiler unavailable for WebGPU host orchestration"),
+    ]);
   }
 
   const parentInput = createWgslRunInput(compiled, input);
@@ -202,9 +218,17 @@ function createHostLiftedDynamicWebGpuPlan(
       childCompileCache,
       options.compileKernel,
     );
-    if (!childCompiled) return undefined;
+    if (!childCompiled) {
+      return unsupportedWebGpuPlan(compiled, [
+        webGpuBlocker("device-launch", "dynamic-child-compile-failed", `dynamic child kernel '${item.kernel.name}' could not be compiled for WebGPU`),
+      ]);
+    }
     const childRuntime = createCudaRuntimePlan(childCompiled);
-    if (!childRuntime.operations.every((operation) => operation.kind === "device-sync" || operation.kind === "peer-copy")) return undefined;
+    if (!childRuntime.operations.every((operation) => operation.kind === "device-sync" || operation.kind === "peer-copy")) {
+      return unsupportedWebGpuPlan(compiled, [
+        webGpuBlocker("device-launch", "dynamic-child-runtime-unsupported", `dynamic child kernel '${item.kernel.name}' needs unsupported runtime orchestration`),
+      ]);
+    }
     const childWgslInput = createWgslRunInput(childCompiled, item.input);
     for (const [name, value] of Object.entries(childWgslInput.buffers)) {
       buffers[item.storageAliases[name] ?? name] = value;
@@ -221,7 +245,15 @@ function createHostLiftedDynamicWebGpuPlan(
     });
     if (childRuntime.operations.some((operation) => operation.kind === "peer-copy")) {
       const peerCopyPlan = createCudaPeerCopyPlan(childCompiled, item.input, childLaunch);
-      if (!peerCopyPlan.supported) return undefined;
+      if (!peerCopyPlan.supported) {
+        return unsupportedWebGpuPlan(compiled, [
+          webGpuBlocker(
+            "peer-copy",
+            peerCopyPlan.blocker?.code ?? "host-peer-copy-unsupported",
+            peerCopyPlan.reason ?? `dynamic child kernel '${item.kernel.name}' contains unsupported peer copy`,
+          ),
+        ]);
+      }
       appendPeerCopySteps(steps, peerCopyPlan.copies, item.storageAliases);
     }
   }
@@ -259,7 +291,7 @@ function createSingleDispatchWebGpuPlan(
 
 function createReferenceOnlyRuntimePlan(
   compiled: CompiledCudaLiteKernel,
-  blockers: readonly string[],
+  blockers: readonly CudaWebGpuExecutionBlocker[],
 ): CudaWebGpuExecutionPlan | undefined {
   const diagnostic = compiled.diagnostics.find((item) =>
     item.code === "unsupported-dynamic-parallelism" ||
@@ -274,16 +306,30 @@ function createReferenceOnlyRuntimePlan(
     ? `CUDA runtime orchestration is reference-only (${labels}); WebGPU host orchestration is not implemented yet`
     : "CUDA runtime orchestration is reference-only; WebGPU host orchestration is not implemented yet";
   const message = blockers.length > 0
-    ? `${reason}: ${blockers.join("; ")}`
+    ? `${reason}: ${formatWebGpuBlockers(blockers)}`
     : reason;
   return {
     supported: false,
     reason: message,
+    blockers,
     diagnostics: [{
       ...diagnostic,
       severity: "error",
       message,
     }],
+  };
+}
+
+function unsupportedWebGpuPlan(
+  compiled: CompiledCudaLiteKernel,
+  blockers: readonly CudaWebGpuExecutionBlocker[],
+): CudaWebGpuExecutionPlan {
+  const reason = formatWebGpuBlockers(blockers);
+  return {
+    supported: false,
+    reason,
+    blockers,
+    diagnostics: referenceRuntimeDiagnostics(compiled, reason),
   };
 }
 
@@ -302,6 +348,18 @@ function referenceRuntimeDiagnostics(
     severity: "error",
     message,
   }];
+}
+
+function webGpuBlocker(
+  kind: CudaWebGpuExecutionBlockerKind,
+  code: string,
+  message: string,
+): CudaWebGpuExecutionBlocker {
+  return { kind, code, message };
+}
+
+function formatWebGpuBlockers(blockers: readonly CudaWebGpuExecutionBlocker[]): string {
+  return blockers.map((blocker) => `${blocker.kind}/${blocker.code}: ${blocker.message}`).join("; ");
 }
 
 function definePeerCopyProgram(copy: CudaPeerCopyOperation): WgslKernelProgram {

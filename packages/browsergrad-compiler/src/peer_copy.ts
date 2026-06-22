@@ -20,8 +20,23 @@ import type {
 export interface CudaPeerCopyPlan {
   readonly supported: boolean;
   readonly reason?: string;
+  readonly blocker?: CudaPeerCopyBlocker;
   readonly copies: readonly CudaPeerCopyOperation[];
 }
+
+export interface CudaPeerCopyBlocker {
+  readonly code: CudaPeerCopyBlockerCode;
+  readonly message: string;
+}
+
+export type CudaPeerCopyBlockerCode =
+  | "no-peer-copy"
+  | "mixed-runtime-operations"
+  | "no-host-liftable-peer-copy"
+  | "unsafe-parent-side-effects"
+  | "branch-not-host-evaluable"
+  | "parent-not-single-invocation"
+  | "arguments-not-host-evaluable";
 
 export interface CudaPeerCopyOperation {
   readonly expression: CudaLiteCallExpression;
@@ -36,6 +51,7 @@ export interface CudaPeerCopyOperation {
 interface HostPeerCopyCollection {
   readonly copies: readonly CudaPeerCopyOperation[];
   readonly reason?: string;
+  readonly blocker?: CudaPeerCopyBlocker;
 }
 
 interface CopyBufferView {
@@ -51,20 +67,24 @@ export function createCudaPeerCopyPlan(
 ): CudaPeerCopyPlan {
   const runtimePlan = createCudaRuntimePlan(compiled);
   if (!runtimePlan.operations.some((operation) => operation.kind === "peer-copy")) {
-    return unsupported("no peer-copy operation found");
+    return unsupported("no-peer-copy", "no peer-copy operation found");
   }
   if (!runtimePlan.operations.every((operation) => operation.kind === "peer-copy" || operation.kind === "device-sync")) {
-    return unsupported("runtime operations besides peer-copy/device sync require reference runtime");
+    return unsupported("mixed-runtime-operations", "runtime operations besides peer-copy/device sync require reference runtime");
   }
   const copyCollection = collectHostPeerCopies(compiled.ir.body, input, launch);
   const copies = copyCollection.copies;
-  if (copyCollection.reason) return unsupported(copyCollection.reason);
-  if (copies.length === 0) return unsupported("no host-liftable peer-copy operations");
+  if (copyCollection.blocker) return unsupportedWithBlocker(copyCollection.blocker);
+  if (copies.length === 0) return unsupported("no-host-liftable-peer-copy", copyCollection.reason ?? "no host-liftable peer-copy operations");
   return { supported: true, copies };
 }
 
-function unsupported(reason: string): CudaPeerCopyPlan {
-  return { supported: false, reason, copies: [] };
+function unsupported(code: CudaPeerCopyBlockerCode, message: string): CudaPeerCopyPlan {
+  return unsupportedWithBlocker({ code, message });
+}
+
+function unsupportedWithBlocker(blocker: CudaPeerCopyBlocker): CudaPeerCopyPlan {
+  return { supported: false, reason: blocker.message, blocker, copies: [] };
 }
 
 function collectHostPeerCopies(
@@ -74,9 +94,9 @@ function collectHostPeerCopies(
 ): HostPeerCopyCollection {
   const out: CudaPeerCopyOperation[] = [];
   const parentHasSingleInvocation = launch.gridDim.every((axis) => axis === 1) && launch.blockDim.every((axis) => axis === 1);
-  let unsafeReason: string | undefined;
-  const markUnsafe = (reason: string): void => {
-    unsafeReason ??= reason;
+  let unsafeBlocker: CudaPeerCopyBlocker | undefined;
+  const markUnsafe = (code: CudaPeerCopyBlockerCode, message: string): void => {
+    unsafeBlocker ??= { code, message };
   };
 
   const visit = (
@@ -103,34 +123,34 @@ function collectHostPeerCopies(
         if (isSingleInvocationGuard(item.condition)) {
           containsPeerCopy = visit(item.consequent, current, true) || containsPeerCopy;
           if (out.length > before && hasParentSideEffectsAfterPeerCopy(items.slice(index + 1))) {
-            markUnsafe("parent side effects after peer copy cannot be replayed in host-lifted sequence");
+            markUnsafe("unsafe-parent-side-effects", "parent side effects after peer copy cannot be replayed in host-lifted sequence");
           }
           continue;
         }
         const condition = evaluateHostNumber(item.condition, current, input);
         if (condition === undefined) {
           if (containsPeerCopyCall(item.consequent) || containsPeerCopyCall(item.alternate ?? [])) {
-            markUnsafe("peer-copy branch condition must be host-evaluable or a single-invocation guard");
+            markUnsafe("branch-not-host-evaluable", "peer-copy branch condition must be host-evaluable or a single-invocation guard");
           }
           return containsPeerCopy;
         }
         containsPeerCopy = visit(condition !== 0 ? item.consequent : item.alternate ?? [], current, singleInvocationGuard) || containsPeerCopy;
         if (out.length > before && hasParentSideEffectsAfterPeerCopy(items.slice(index + 1))) {
-          markUnsafe("parent side effects after peer copy cannot be replayed in host-lifted sequence");
+          markUnsafe("unsafe-parent-side-effects", "parent side effects after peer copy cannot be replayed in host-lifted sequence");
         }
         continue;
       }
       if (item.kind === "expr" && isPeerCopyCall(item.expression)) {
         if (!(singleInvocationGuard || parentHasSingleInvocation)) {
-          markUnsafe("peer copy must be single-invocation guarded or parent launch must be one thread");
+          markUnsafe("parent-not-single-invocation", "peer copy must be single-invocation guarded or parent launch must be one thread");
         }
         else if (hasParentSideEffectsAfterPeerCopy(items.slice(index + 1))) {
-          markUnsafe("parent side effects after peer copy cannot be replayed in host-lifted sequence");
+          markUnsafe("unsafe-parent-side-effects", "parent side effects after peer copy cannot be replayed in host-lifted sequence");
         }
         else {
           const operation = createPeerCopyOperation(item.expression, current, input);
           if (!operation) {
-            markUnsafe("peer-copy arguments must resolve to typed buffer aliases, non-negative offsets, and element-aligned byte count");
+            markUnsafe("arguments-not-host-evaluable", "peer-copy arguments must resolve to typed buffer aliases, non-negative offsets, and element-aligned byte count");
           }
           else {
             out.push(operation);
@@ -143,7 +163,7 @@ function collectHostPeerCopies(
   };
 
   visit(statements, new Map(), parentHasSingleInvocation);
-  return unsafeReason ? { copies: [], reason: unsafeReason } : { copies: out };
+  return unsafeBlocker ? { copies: [], reason: unsafeBlocker.message, blocker: unsafeBlocker } : { copies: out };
 }
 
 function createPeerCopyOperation(

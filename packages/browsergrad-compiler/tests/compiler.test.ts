@@ -713,6 +713,10 @@ __global__ void peerCopyBad(float *dst, const float *src) {
 
     expect(plan.supported).toBe(false);
     expect(plan.reason).toContain("parent side effects after peer copy");
+    expect(plan.blocker).toMatchObject({
+      code: "unsafe-parent-side-effects",
+      message: expect.stringContaining("parent side effects after peer copy"),
+    });
   });
 
   it("summarizes runtime orchestration gaps without course-specific logic", () => {
@@ -816,8 +820,15 @@ __global__ void parent(float *x, int n) {
     const dynamicWithoutCompiler = createCudaWebGpuExecutionPlan(dynamic, dynamicInput, dynamicLaunch);
     expect(dynamicWithoutCompiler).toMatchObject({
       supported: false,
-      reason: "dynamic child compiler unavailable for WebGPU host orchestration",
+      blockers: [{
+        kind: "device-launch",
+        code: "dynamic-child-compiler-unavailable",
+        message: "dynamic child compiler unavailable for WebGPU host orchestration",
+      }],
     });
+    if (!dynamicWithoutCompiler.supported) {
+      expect(dynamicWithoutCompiler.reason).toContain("dynamic-child-compiler-unavailable");
+    }
 
     const dynamicPlan = createCudaWebGpuExecutionPlan(dynamic, dynamicInput, dynamicLaunch, {
       compileKernel: compileCudaLiteKernel,
@@ -1508,6 +1519,23 @@ __global__ void parent(float *x) {
 
     expect(plan.supported).toBe(false);
     expect(plan.reason).toContain("parent side effects after device-side launch");
+    expect(plan.blocker).toMatchObject({
+      code: "unsafe-parent-side-effects",
+      message: expect.stringContaining("parent side effects after device-side launch"),
+    });
+    const executionPlan = createCudaWebGpuExecutionPlan(
+      compiled,
+      { buffers: { x: new Float32Array([0]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      { compileKernel: compileCudaLiteKernel },
+    );
+    expect(executionPlan).toMatchObject({
+      supported: false,
+      blockers: [{
+        kind: "device-launch",
+        code: "unsafe-parent-side-effects",
+      }],
+    });
     await expect(runCompiledKernelWebGpu(
       {} as never,
       compiled,

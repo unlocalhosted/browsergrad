@@ -78,6 +78,8 @@ for (const file of files) {
           webGpuLiftOk: fallback.webGpuLiftOk,
           webGpuLiftKind: fallback.webGpuLiftKind,
           webGpuLiftBlocker: fallback.webGpuLiftBlocker,
+          webGpuLiftBlockerKind: fallback.webGpuLiftBlockerKind,
+          webGpuLiftBlockerCode: fallback.webGpuLiftBlockerCode,
         });
       }
     }
@@ -111,7 +113,7 @@ const summary = {
   lowering: countBy(failures, (failure) => failure.lowering),
   webGpuLiftBlockers: countBy(
     failures.filter((failure) => failure.referenceOk && !failure.webGpuLiftOk),
-    (failure) => failure.webGpuLiftBlocker ?? "unknown",
+    (failure) => failure.webGpuLiftBlockerCode ?? failure.webGpuLiftBlocker ?? "unknown",
   ),
 };
 
@@ -126,7 +128,7 @@ if (!details && failures.length > 0 && firstFailureLimit > 0) {
     const lift = failure.webGpuLiftOk ? ` [webgpu-lift:${failure.webGpuLiftKind}]` : "";
     const reference = failure.referenceOk ? " [reference-ok]" : "";
     const blocker = failure.referenceOk && !failure.webGpuLiftOk && failure.webGpuLiftBlocker
-      ? ` [webgpu-blocker:${failure.webGpuLiftBlocker}]`
+      ? ` [webgpu-blocker:${failure.webGpuLiftBlockerCode ?? failure.webGpuLiftBlocker}]`
       : "";
     console.log(`${failure.file} block ${failure.block} kernel ${failure.kernel}: ${failure.family}/${failure.error}${lift}${reference}${blocker}: ${failure.message}`);
   }
@@ -155,6 +157,8 @@ function classifyReferenceFallback(source) {
       webGpuLiftOk: lift.kind !== undefined,
       webGpuLiftKind: lift.kind,
       webGpuLiftBlocker: lift.blocker,
+      webGpuLiftBlockerKind: lift.blockerKind,
+      webGpuLiftBlockerCode: lift.blockerCode,
     };
   } catch (error) {
     return {
@@ -162,6 +166,8 @@ function classifyReferenceFallback(source) {
       webGpuLiftOk: false,
       webGpuLiftKind: undefined,
       webGpuLiftBlocker: String(error?.message ?? error).split("\n")[0],
+      webGpuLiftBlockerKind: undefined,
+      webGpuLiftBlockerCode: undefined,
     };
   }
 }
@@ -180,7 +186,15 @@ function webGpuLiftFor(compiled) {
       }),
     },
   );
-  if (!executionPlan.supported) return { kind: undefined, blocker: executionPlan.reason };
+  if (!executionPlan.supported) {
+    const firstBlocker = executionPlan.blockers?.[0];
+    return {
+      kind: undefined,
+      blocker: firstBlocker?.message ?? executionPlan.reason,
+      blockerKind: firstBlocker?.kind,
+      blockerCode: firstBlocker?.code,
+    };
+  }
   if (
     executionPlan.kind === "single-dispatch" &&
     runtimePlan.operations.length > 0 &&

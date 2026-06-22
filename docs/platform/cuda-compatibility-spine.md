@@ -33,8 +33,10 @@ Public APIs:
 - `createCudaWebGpuExecutionPlan(compiled, input, launch, { compileKernel })`
   returns the exact executable WebGPU plan kind and sequence steps:
   `single-dispatch`, `grid-sync-phases`, `host-dynamic-launch`, or
-  `host-peer-copy`. Platform preflight should use this interface instead of
-  duplicating runner heuristics.
+  `host-peer-copy`. Unsupported plans keep a human `reason` and expose
+  machine-readable `blockers[]` with `{ kind, code, message }`, so platform
+  preflight can route failures without parsing prose. Platform preflight should
+  use this interface instead of duplicating runner heuristics.
 - `prepareCompiledKernelWebGpu(device, compiled, input, launch)` prepares the
   same executable WebGPU plan once and reruns it over resident buffers. Use it
   for hot loops with fixed launch shape and bindings; scalar params can change
@@ -104,10 +106,11 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
   phase rewrites it before any read. Non-uniform sync, non-replayable private
   locals crossing phases, or shared-memory read-before-rewrite remain
   reference-only.
-- Remaining failures group cleanly: dynamic parallelism/runtime launches,
-  cooperative groups/grid sync, and one incomplete pseudocode symbol.
+- Remaining failures group cleanly: dynamic parallelism/runtime launches and
+  cooperative groups/grid sync.
 - Use `--limit N` to cap printed failures and `--details`/`--json` to emit
-  `{ summary, failures }` with `webGpuLiftBlocker` values. Use threshold flags
+  `{ summary, failures }` with `webGpuLiftBlockerKind`,
+  `webGpuLiftBlockerCode`, and `webGpuLiftBlocker` values. Use threshold flags
   such as `--expect-webgpu-min`, `--expect-reference-only-max`, and
   `--expect-hard-fail-max` so feature triage is grounded in executable
   regression gates instead of prose-only notes.

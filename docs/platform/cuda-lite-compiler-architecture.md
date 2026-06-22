@@ -53,6 +53,8 @@ If a feature needs support in multiple files, add it in this order:
 - GPU support is a lowering decision, not a parser side effect.
 - Runtime orchestration goes through `createCudaWebGpuExecutionPlan()`.
 - Platform code must not duplicate compiler planning heuristics.
+- Unsupported WebGPU execution plans expose stable blocker codes; prose reasons
+  are for humans, not platform branching.
 - Readback names exposed to callers are logical compiler names. Internal WGSL
   storage aliases stay internal.
 - No assignment-specific names or course-specific branches in compiler logic.

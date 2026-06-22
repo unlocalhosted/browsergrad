@@ -61,10 +61,14 @@ export { formatCudaLiteDiagnostics } from "./diagnostics.js";
 export {
   createCudaHostDynamicLaunchPlan,
   type CudaHostDynamicLaunch,
+  type CudaHostDynamicLaunchBlocker,
+  type CudaHostDynamicLaunchBlockerCode,
   type CudaHostDynamicLaunchPlan,
 } from "./dynamic_launch.js";
 export {
   createCudaPeerCopyPlan,
+  type CudaPeerCopyBlocker,
+  type CudaPeerCopyBlockerCode,
   type CudaPeerCopyOperation,
   type CudaPeerCopyPlan,
 } from "./peer_copy.js";
@@ -80,6 +84,8 @@ export {
   createCudaWebGpuExecutionPlan,
   normalizeCudaWebGpuReadbackNames,
   normalizeCudaWebGpuReadback,
+  type CudaWebGpuExecutionBlocker,
+  type CudaWebGpuExecutionBlockerKind,
   type CudaWebGpuExecutionPlan,
   type CudaWebGpuExecutionPlanKind,
   type CudaWebGpuExecutionPlanOptions,

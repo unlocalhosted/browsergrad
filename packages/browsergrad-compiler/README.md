@@ -207,7 +207,9 @@ Use `createCudaWebGpuExecutionPlan(compiled, input, launch, { compileKernel })`
 to inspect the exact executable WebGPU plan before running: `single-dispatch`,
 `grid-sync-phases`, `host-dynamic-launch`, or `host-peer-copy`. The runner uses
 the same plan interface internally, so platform preflight and execution share
-one source of truth.
+one source of truth. Unsupported plans include both a human `reason` and
+machine-readable `blockers[]` entries with `{ kind, code, message }`; route
+platform UI/rubric behavior from blocker codes instead of parsing reason text.
 Use `normalizeCudaWebGpuReadbackNames(compiled, names)` if platform code needs
 to inspect the internal WGSL storage readbacks that correspond to logical
 compiler names.
@@ -232,8 +234,9 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
 
 `audit:corpus` extracts CUDA-shaped kernels from Markdown/CUDA/C++ files and
 reports single-dispatch WebGPU coverage, host-lifted WebGPU coverage, CPU
-reference fallbacks, and hard gaps. Threshold flags make corpus coverage
-regressions fail fast instead of living only in docs.
+reference fallbacks, and hard gaps. Failure details include WebGPU blocker
+kind/code/message. Threshold flags make corpus coverage regressions fail fast
+instead of living only in docs.
 
 ## Performance Harness
 
