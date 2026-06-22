@@ -333,6 +333,10 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   rubrics can run fixture-scale PII, exact/near dedupe, rule-based quality, and
   HTML extraction checks in browser-safe JS before WARC readers,
   fastText/transformers classifiers, or full dataset training runs.
+  CraftingAttention also loads the real A4 benchmark profile, selects the
+  Pyodide route with browser-safe data/classifier capabilities, blocks launch
+  on placeholder fixture hashes, and verifies each data-cleaning oracle family
+  through the platform e2e suite.
 - Scaling-fixture guarantee: `@unlocalhosted/browsergrad-primitives` exports
   `createHostedTrainingApiFixture()`, `selectExperimentsForDispatch()`, and
   `fitPowerLawScalingLaw()` so CS336 A3-style hosted API, scheduler, and

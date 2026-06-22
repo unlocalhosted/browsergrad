@@ -42,9 +42,16 @@ root agent behavior.
 
 - Fetch/cache tiny fixtures, then call
   `createVerifiedAssignmentBenchmarkPreflightMatrix()` before mounting.
+- CraftingAttention platform e2e now loads the real
+  `cs336-assignment4-data.profile.json`, proves the Pyodide route with
+  browser-safe data/classifier capabilities, blocks launch on placeholder
+  dataset hashes, and exercises the data-cleaning oracle path for visible HTML
+  extraction, exact line dedupe, MinHash near dedupe, PII masking, and
+  Gopher-style quality rules.
 - Route `pii-oracle`, `dedupe-oracle`, `near-dedupe-oracle`, and
   `quality-rule-oracle` through the `_bg_data_cleaning` profile adapter backed
-  by `@unlocalhosted/browsergrad-primitives`.
+  by `@unlocalhosted/browsergrad-primitives` when the real Python rubric file
+  is mounted.
 - Route `classifier-oracle` to a later deterministic fixture classifier or to
   explicit external classifier capabilities.
 - Render failures as data-specific rubric messages, for example:

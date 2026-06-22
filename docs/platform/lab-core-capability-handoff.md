@@ -412,6 +412,13 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     `simulation.simulateVectorizedArraySum()`, and
     `simulation.partitionStaticWork()` to check clamped exponentiation, vector sums,
     active-lane utilization, tails, and static work partitioning.
+    CS336 A4 data labs can use `@unlocalhosted/browsergrad-primitives`
+    `createDataCleaningReference()` for visible HTML extraction, exact line
+    dedupe, MinHash near dedupe, PII masking, and Gopher-style quality checks.
+    CraftingAttention now has a platform e2e that loads
+    `docs/internal/cs336-assignment4-data.profile.json`, proves the Pyodide
+    route with browser-safe data/classifier capabilities, blocks launch on
+    placeholder fixture hashes, and checks each data-cleaning oracle family.
     Snapshot-backed labs can use `@unlocalhosted/browsergrad-primitives`
     `compareSnapshot()` for JSON/numeric fixture checks.
     CS336 A4 data labs can use `@unlocalhosted/browsergrad-primitives` for
