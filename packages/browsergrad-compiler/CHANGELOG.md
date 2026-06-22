@@ -43,3 +43,5 @@
   copies that exceed source or destination capacity before dispatch.
 - CUDA corpus audit now skips placeholder identifiers such as `someCount`, so
   pseudocode no longer counts as a hard compiler failure.
+- CUDA corpus audit now skips explicit pseudocode solution blocks; CUDA-120
+  real-code baseline is `235/240` WebGPU runnable and `0/240` hard failures.

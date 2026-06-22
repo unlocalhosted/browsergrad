@@ -40,7 +40,7 @@ for (const file of files) {
   let carriedDefines = new Map();
   codeBlocks += blocks.length;
   for (const [blockIndex, block] of blocks.entries()) {
-    if (isDocumentationDiagramBlock(block)) continue;
+    if (isNonKernelCodeBlock(block)) continue;
     const blockDefines = collectObjectDefines(block.code);
     const blockFunctionDefines = collectFunctionDefines(block.code);
     const blockDeviceFunctions = collectScalarDeviceFunctions(block.code);
@@ -85,8 +85,9 @@ for (const file of files) {
   }
 }
 
-function isDocumentationDiagramBlock(block) {
+function isNonKernelCodeBlock(block) {
   if (NON_CODE_BLOCK_LANG_RE.test(block.lang)) return true;
+  if (/^\s*(?:\/\/\s*)?Pseudocode solution\b/iu.test(block.code)) return true;
   return /^\s*(?:flowchart|graph)\s+(?:LR|RL|TB|TD|BT)\b/iu.test(block.code);
 }
 

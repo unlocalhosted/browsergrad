@@ -54,12 +54,12 @@ Current corpus gate:
 pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
 ```
 
-- `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/242` real code-kernel
-  definitions compile as single-dispatch WGSL/WebGPU. Another `10/242` are
+- `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/240` real code-kernel
+  definitions compile as single-dispatch WGSL/WebGPU. Another `10/240` are
   real-GPU runnable through WebGPU orchestration lifts (`grid-sync-phases`),
-  for `235/242` total WebGPU coverage. `7/242` remain true reference-only,
-  and `0/242` remain hard gaps after filtering docs/pseudocode placeholders.
-- `referenceFallbackOk` is `17/242`: kernels whose semantics are understood by
+  for `235/240` total WebGPU coverage. `5/240` remain true reference-only,
+  and `0/240` remain hard gaps after filtering docs/pseudocode placeholders.
+- `referenceFallbackOk` is `15/240`: kernels whose semantics are understood by
   CPU reference. `referenceOnlyOk` is stricter and excludes kernels now runnable
   on real WebGPU through orchestration.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
