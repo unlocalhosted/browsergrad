@@ -17,6 +17,8 @@ export {
   type CudaLiteDiagnostic,
   type CudaLiteDim3Decl,
   type CudaLiteExpression,
+  type CudaLiteFeatureName,
+  type CudaLiteFeatureOptions,
   type CudaLiteForStatement,
   type CudaLiteGlobalConstant,
   type CudaLiteIdentifier,
@@ -58,6 +60,11 @@ export {
   type CudaLoweringPlan,
 } from "./compatibility.js";
 export { formatCudaLiteDiagnostics } from "./diagnostics.js";
+export {
+  compileCudaLiteOptionsFromKernelFeatures,
+  cudaLiteFeatureOptionsFromKernelFeatures,
+  type CudaLiteKernelFeatureSource,
+} from "./features.js";
 export {
   createCudaLaunchValidationDiagnostics,
   validateCudaKernelLaunch,

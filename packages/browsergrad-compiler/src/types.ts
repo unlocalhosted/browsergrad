@@ -295,9 +295,12 @@ export interface CudaLiteUpdateExpression {
   readonly span: SourceSpan;
 }
 
+export type CudaLiteFeatureName = "shader-f16" | "subgroups" | "compatibility";
+export type CudaLiteFeatureOptions = Partial<Record<CudaLiteFeatureName, boolean>>;
+
 export interface CudaLiteAnalyzeOptions {
   readonly kernelName?: string;
-  readonly features?: Partial<Record<"shader-f16" | "subgroups" | "compatibility", boolean>>;
+  readonly features?: CudaLiteFeatureOptions;
   readonly workgroupSize?: readonly [number, number, number];
   readonly dynamicSharedMemory?: Readonly<Record<string, number>>;
   readonly referenceDynamicParallelism?: boolean;

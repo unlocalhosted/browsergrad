@@ -76,6 +76,10 @@ hardcoding names:
 ```ts
 import { detectKernelFeatures } from "@unlocalhosted/browsergrad-kernels";
 import {
+  compileCudaLiteKernel,
+  compileCudaLiteOptionsFromKernelFeatures,
+} from "@unlocalhosted/browsergrad-compiler";
+import {
   browserGpuCapabilities,
   createAssignmentCapabilityEnvironment,
 } from "@unlocalhosted/browsergrad-runtime";
@@ -94,7 +98,17 @@ const environment = createAssignmentCapabilityEnvironment({
     }),
   ],
 });
+
+const compiled = compileCudaLiteKernel(
+  source,
+  compileCudaLiteOptionsFromKernelFeatures(features, {
+    workgroupSize: [8, 1, 1],
+  }),
+);
 ```
+The same `features` object should feed both capability labels and compiler
+options. Platform code should not duplicate `shader-f16`, subgroup, or
+compatibility flag strings.
 Use `assignmentRubricKind()` to route Python, JavaScript, and unknown rubric
 paths to the right execution substrate.
 Use `assignmentRunnerRoute(plan)` when the platform wants one branch key:

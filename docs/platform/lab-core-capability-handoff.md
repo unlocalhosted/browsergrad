@@ -224,6 +224,7 @@ them into the same environment helper:
 
 ```ts
 import { detectKernelFeatures } from "@unlocalhosted/browsergrad-kernels";
+import { compileCudaLiteOptionsFromKernelFeatures } from "@unlocalhosted/browsergrad-compiler";
 import {
   browserGpuCapabilities,
   createAssignmentCapabilityEnvironment,
@@ -239,7 +240,13 @@ const environment = createAssignmentCapabilityEnvironment({
     subgroups: features.subgroups,
   }),
 });
+
+const compilerOptions = compileCudaLiteOptionsFromKernelFeatures(features, {
+  workgroupSize: [8, 1, 1],
+});
 ```
+Use the same `features` object for capability preflight and CUDA-lite compiler
+gates. This avoids drift between "lab runnable" UI and actual WGSL emission.
 For overall readiness status, selected `external` capabilities produce
 `external-only`, selected `simulated` capabilities produce `simulated`, and
 failed capability preflight becomes `blocked`.

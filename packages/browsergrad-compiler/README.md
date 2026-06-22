@@ -25,8 +25,9 @@ Low-level extension boundaries live in
 ## Quick Start
 
 ```ts
-import { createDevice } from "@unlocalhosted/browsergrad-kernels";
+import { createDevice, detectKernelFeatures } from "@unlocalhosted/browsergrad-kernels";
 import {
+  compileCudaLiteOptionsFromKernelFeatures,
   compileCudaLiteKernel,
   createCudaWebGpuExecutionPlan,
   prepareCompiledKernelWebGpu,
@@ -42,9 +43,14 @@ __global__ void saxpy(const float* x, float* y, float a, int n) {
   }
 }`;
 
-const compiled = compileCudaLiteKernel(source, {
-  workgroupSize: [8, 1, 1],
-});
+const device = await createDevice();
+const features = await detectKernelFeatures(device);
+const compiled = compileCudaLiteKernel(
+  source,
+  compileCudaLiteOptionsFromKernelFeatures(features, {
+    workgroupSize: [8, 1, 1],
+  }),
+);
 console.log(compiled.loweringPlan.canRunOnGpu);
 const input = {
   buffers: {
@@ -58,12 +64,16 @@ const launch = { gridDim: [1, 1, 1], blockDim: [8, 1, 1] } as const;
 const reference = runCompiledKernelReference(compiled, input, launch);
 const plan = createCudaWebGpuExecutionPlan(compiled, input, launch);
 console.log(plan.supported && plan.kind);
-const gpu = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+const gpu = await runCompiledKernelWebGpu(device, compiled, input, launch);
 ```
 
 Examples live in `examples/`: SAXPY, guarded map, and shared-memory tiled
 matmul. The emitted WGSL is intentionally inspectable so labs can show source,
 bindings, workgroup size, shared memory, and barriers directly.
+Use `compileCudaLiteOptionsFromKernelFeatures()` to pass browser/device facts
+from `detectKernelFeatures()` into the compiler. This keeps `shader-f16`,
+subgroup, and compatibility-mode gates aligned with the runtime instead of
+duplicating string flags in platform code.
 Fixed thread-local arrays lower to WGSL function arrays and CPU-reference typed
 arrays, so small per-thread scratch patterns do not need shared memory.
 

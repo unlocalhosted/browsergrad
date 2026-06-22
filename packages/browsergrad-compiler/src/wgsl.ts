@@ -14,6 +14,7 @@ import {
   type CudaLiteCooperativeGroupDecl,
   type CudaLiteDeviceFunction,
   type CudaLiteExpression,
+  type CudaLiteFeatureOptions,
   type CudaLiteGlobalConstant,
   type CudaLiteParam,
   type CudaLiteScalarType,
@@ -24,7 +25,7 @@ import {
 } from "./types.js";
 
 export interface EmitKernelIrWgslOptions {
-  readonly features?: Partial<Record<"shader-f16" | "subgroups" | "compatibility", boolean>>;
+  readonly features?: CudaLiteFeatureOptions;
   readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
 }
 

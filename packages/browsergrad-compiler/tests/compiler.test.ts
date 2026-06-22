@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   CudaLiteCompilerError,
   analyzeCudaLite,
+  compileCudaLiteOptionsFromKernelFeatures,
   compileCudaLiteKernel,
   createCudaGridSyncPhasePlan,
   createCudaHostDynamicLaunchPlan,
@@ -10,6 +11,7 @@ import {
   createCudaPeerCopyPlan,
   createCudaRuntimePlan,
   createCudaWebGpuExecutionPlan,
+  cudaLiteFeatureOptionsFromKernelFeatures,
   describeCudaDiagnostic,
   formatCudaLiteDiagnostics,
   normalizeCudaWebGpuReadbackNames,
@@ -2277,6 +2279,39 @@ __global__ void reduce(float* x) {
   if (threadIdx.x < 1) { x[0] = bg_subgroup_add(x[0]); }
 }`;
     expect(() => compileCudaLiteKernel(subgroupSource)).toThrow(CudaLiteCompilerError);
+  });
+
+  it("derives compile feature options from kernel feature detection", () => {
+    expect(
+      cudaLiteFeatureOptionsFromKernelFeatures({
+        shaderF16: false,
+        subgroups: false,
+        compatibilityMode: true,
+        features: ["shader-f16", "subgroups"],
+      }),
+    ).toEqual({ "shader-f16": true, subgroups: true, compatibility: true });
+
+    const detectedOptions = compileCudaLiteOptionsFromKernelFeatures(
+      { shaderF16: true, subgroups: true, compatibilityMode: false, features: [] },
+      { workgroupSize: [1, 1, 1] },
+    );
+    expect(detectedOptions).toEqual({
+      workgroupSize: [1, 1, 1],
+      features: { "shader-f16": true, subgroups: true },
+    });
+
+    const halfSource = `
+__global__ void halfy(half* x) {
+  if (threadIdx.x < 1) { x[0] = x[0]; }
+}`;
+    expect(compileCudaLiteKernel(halfSource, detectedOptions).wgsl).toContain("enable f16;");
+
+    const overridden = compileCudaLiteOptionsFromKernelFeatures(
+      { shaderF16: true, subgroups: true, compatibilityMode: false, features: [] },
+      { features: { "shader-f16": false }, workgroupSize: [1, 1, 1] },
+    );
+    expect(overridden.features).toEqual({ "shader-f16": false, subgroups: true });
+    expect(() => compileCudaLiteKernel(halfSource, overridden)).toThrow(CudaLiteCompilerError);
   });
 
   it("lowers CUDA half conversion builtins and exponent literals", () => {

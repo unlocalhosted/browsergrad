@@ -76,6 +76,10 @@ path rather than handwritten WGSL.
 Platforms can derive that label with `browserGpuCapabilities()` after calling
 `detectKernelFeatures()` so `shader-f16`, subgroup, WGSL, and CUDA-lite support
 come from one capability environment.
+Pass the same detected feature set through
+`compileCudaLiteOptionsFromKernelFeatures()` before compiling learner CUDA-lite
+source, so runtime preflight and compiler codegen use one source of browser GPU
+truth.
 For hot loops, the low-level WGSL runner exposes prepared sequences and resident
 storage buffers, while the compiler exposes `prepareCompiledKernelWebGpu()` over
 the same execution plans. Platform labs should use the prepared path when launch

@@ -70,3 +70,6 @@
 - Host-dynamic WebGPU plans now elide pure parent replay and seed host-planned
   `DevicePool` offsets once through generic storage metadata, avoiding double
   allocation without adding a no-op anchor dispatch.
+- Added `cudaLiteFeatureOptionsFromKernelFeatures()` and
+  `compileCudaLiteOptionsFromKernelFeatures()` so platforms can feed
+  `detectKernelFeatures()` results directly into CUDA-lite compile gates.
