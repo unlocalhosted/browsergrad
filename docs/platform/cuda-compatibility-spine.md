@@ -93,10 +93,11 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
   Parent invocations expand with CUDA builtin coordinates up to a cap, recursive
   launches flatten up to a depth cap, and inactive host-evaluable launch
   branches use single dispatch. DevicePool pointer params alias their pool
-  data/offset bindings, and positive pointer-offset args lower to base-offset
-  uniforms. Unknown branch guards before launch, negative pointer offsets,
-  device-derived launch args, and parent side effects after launch remain
-  reference-only.
+  data/offset bindings, single-invocation DevicePool allocation pointers can be
+  passed to child pointer params, and positive pointer-offset args lower to
+  base-offset uniforms. Concurrent parent-side pool allocations, unknown branch
+  guards before launch, negative pointer offsets, device-derived launch args,
+  and parent side effects after launch remain reference-only.
 - CUDA runtime calls such as `cudaDeviceSynchronize` and `cudaMemcpyPeerAsync`
   classify as runtime orchestration gaps. Standalone `cudaDeviceSynchronize()`
   is a WebGPU-safe no-op because dispatch completion is host-managed. Peer

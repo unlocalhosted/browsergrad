@@ -59,3 +59,6 @@
 - Host dynamic launch planning now expands parent invocations with CUDA builtin
   coordinates, supports recursive host-dynamic flattening with a depth cap, and
   raises the CUDA-120 WebGPU audit baseline to `239/240`.
+- Host dynamic launch planning can pass single-invocation `DevicePool`
+  allocation pointers into child pointer params through pool-data aliases and
+  base-offset uniforms.

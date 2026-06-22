@@ -147,18 +147,19 @@ sizes, pointer args, and scalar args are host-evaluable. Parent invocations are
 expanded with CUDA builtin coordinates up to a deterministic cap, recursive
 dynamic launches are flattened up to a depth cap, and inactive host-evaluable
 launch branches fall back to single dispatch. Named `DevicePool*` arguments
-alias their backing pool data/offset bindings, and positive pointer offsets
-such as `out + 1` lower to generated base-offset uniforms so WebGPU bindings
-stay whole-buffer and alignment-safe. Inspect this before dispatching:
+alias their backing pool data/offset bindings, single-invocation `DevicePool`
+allocation pointers can be passed to child pointer params, and positive pointer
+offsets such as `out + 1` lower to generated base-offset uniforms so WebGPU
+bindings stay whole-buffer and alignment-safe. Inspect this before dispatching:
 
 ```ts
 const plan = createCudaHostDynamicLaunchPlan(compiled, input, launch);
 console.log(plan.supported, plan.reason);
 ```
 
-Device-derived launch args, unknown branch guards before a launch, negative
-pointer offsets, and parent side effects after launch stay reference-only so GPU
-output is never silently wrong.
+Concurrent parent-side pool allocations, device-derived launch args, unknown
+branch guards before a launch, negative pointer offsets, and parent side effects
+after launch stay reference-only so GPU output is never silently wrong.
 
 ## CUDA Runtime Reference Calls
 

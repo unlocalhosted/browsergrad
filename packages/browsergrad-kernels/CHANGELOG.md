@@ -45,6 +45,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Prepared WGSL sequence runs accept `awaitCompletion: true` so no-readback
   dispatches can explicitly wait for GPU completion without hand-rolled queue
   fences.
+- WGSL sequences can bind the same storage buffer through multiple step-local
+  value types, enabling byte-identical storage views for compiler-generated
+  pool/data aliases.
 
 ## [0.1.1] — 2026-06-02
 

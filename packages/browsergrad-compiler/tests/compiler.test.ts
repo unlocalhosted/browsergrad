@@ -1549,6 +1549,47 @@ __global__ void parent(DevicePool *pool, float *out) {
     expect([...result.buffers.pool as Uint32Array]).toEqual([floatBits(6)]);
   });
 
+  it("plans host-lifted child launches over DevicePool allocation pointers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(float *data, int n) {
+  int idx = threadIdx.x;
+  if (idx < n) { data[idx] = (float)(idx + 1); }
+}
+__global__ void parent(DevicePool *pool, int n) {
+  if (threadIdx.x < 1) {
+    float *ptr = (float*) deviceAllocate(pool, n * sizeof(float));
+    if (ptr != nullptr) {
+      dim3 grid(1);
+      dim3 block(n);
+      child<<<grid, block>>>(ptr, n);
+      cudaDeviceSynchronize();
+    }
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const pool = { data: new Uint32Array(4), offset: new Uint32Array([0]) };
+    const input = { buffers: {}, scalars: { n: 2 }, memoryPools: { pool } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const plan = createCudaHostDynamicLaunchPlan(compiled, input, launch);
+
+    expect(plan.supported).toBe(true);
+    expect(plan.launches[0]).toMatchObject({
+      storageAliases: { data: "pool_pool" },
+      pointerBaseOffsets: { data: 0 },
+    });
+
+    const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, {
+      compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options),
+    });
+    expect(executionPlan).toMatchObject({
+      supported: true,
+      kind: "host-dynamic-launch",
+    });
+  });
+
   it("plans multiple ordered host-liftable dynamic launches", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void addOne(float *dst, int n) {

@@ -4,8 +4,10 @@ import {
   evaluateHostNumber,
   evaluatePointerArgument,
   evaluateVectorExpressions,
+  isHostPoolPointer,
   isHostVector,
   isSingleInvocationGuard,
+  type HostEvalPoolPointer,
   type HostEvalValue,
 } from "./host_eval.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
@@ -43,6 +45,7 @@ export type CudaHostDynamicLaunchBlockerCode =
   | "child-launch-dimensions-not-host-evaluable"
   | "child-arguments-not-host-evaluable"
   | "unsafe-parent-side-effects"
+  | "pool-allocation-not-single-invocation"
   | "branch-not-host-evaluable";
 
 export interface CudaHostDynamicLaunchPlanOptions {
@@ -139,6 +142,10 @@ function collectHostLiftedLaunches(
   launch: KernelLaunch,
 ): HostLiftedLaunchCollection {
   const out: HostLiftedLaunch[] = [];
+  const allowPoolAllocation = launch.gridDim.every((axis) => axis === 1) && launch.blockDim.every((axis) => axis === 1);
+  const poolOffsets = new Map(
+    Object.entries(input.memoryPools ?? {}).map(([name, pool]) => [name, pool.offset?.[0] ?? 0] as const),
+  );
   let unsafeBlocker: CudaHostDynamicLaunchBlocker | undefined;
   const markUnsafe = (code: CudaHostDynamicLaunchBlockerCode, message: string): void => {
     unsafeBlocker ??= { code, message };
@@ -159,6 +166,15 @@ function collectHostLiftedLaunches(
       if (item.kind === "var" && !item.pointer && item.storage === "local" && item.init) {
         const value = evaluateHostNumber(item.init, current, input);
         if (value !== undefined) current.set(item.name, coerceHostScalar(item.valueType, value));
+        continue;
+      }
+      if (item.kind === "var" && item.pointer && item.storage === "local" && item.init) {
+        const pointer = evaluateHostPoolPointer(item.init, current, input, poolOffsets, allowPoolAllocation);
+        if (pointer === "unsafe") {
+          markUnsafe("pool-allocation-not-single-invocation", "host-lifted DevicePool allocation requires a single parent invocation");
+          return { containsLaunch, returned: false, env: current };
+        }
+        if (pointer) current.set(item.name, pointer);
         continue;
       }
       if (item.kind === "if") {
@@ -227,6 +243,50 @@ function applyHostExpressionEffect(
   if (expression.operator !== "=") return;
   const value = evaluateHostNumber(expression.right, env, input);
   if (value !== undefined) env.set(expression.left.name, value);
+}
+
+function evaluateHostPoolPointer(
+  expression: CudaLiteExpression,
+  env: ReadonlyMap<string, HostEvalValue>,
+  input: CompiledKernelInput,
+  poolOffsets: Map<string, number>,
+  allowPoolAllocation: boolean,
+): HostEvalPoolPointer | "unsafe" | undefined {
+  if (expression.kind === "identifier") {
+    const pointer = env.get(expression.name);
+    return isHostPoolPointer(pointer) ? pointer : undefined;
+  }
+  if (expression.kind === "cast" && expression.pointer) {
+    return evaluateHostPoolPointer(expression.expression, env, input, poolOffsets, allowPoolAllocation);
+  }
+  if (expression.kind !== "call") return undefined;
+  const name = expressionName(expression.callee);
+  if (name !== "deviceAllocate" && name !== "streamOrderedAllocate") return undefined;
+  if (!allowPoolAllocation) return "unsafe";
+  if (expression.args.length !== 2) return undefined;
+  const poolName = poolNameFromAllocatorArg(expression.args[0]);
+  if (!poolName) return undefined;
+  const pool = input.memoryPools?.[poolName];
+  if (!pool) return undefined;
+  const sizeBytes = expression.args[1] ? Math.max(0, Math.trunc(evaluateHostNumber(expression.args[1], env, input) ?? NaN)) : NaN;
+  if (!Number.isFinite(sizeBytes)) return undefined;
+  const oldOffset = poolOffsets.get(poolName) ?? pool.offset?.[0] ?? 0;
+  poolOffsets.set(poolName, oldOffset + sizeBytes);
+  const capacity = pool.data.byteLength;
+  return {
+    kind: "pool-pointer",
+    poolName,
+    byteOffset: oldOffset + sizeBytes > capacity ? -1 : oldOffset,
+  };
+}
+
+function poolNameFromAllocatorArg(expression: CudaLiteExpression | undefined): string | undefined {
+  if (!expression) return undefined;
+  if (expression.kind === "identifier") return expression.name;
+  if (expression.kind === "unary" && expression.operator === "&" && expression.argument.kind === "identifier") {
+    return expression.argument.name;
+  }
+  return undefined;
 }
 
 function forEachParentInvocation(
@@ -328,6 +388,16 @@ function createChildKernelInput(
         continue;
       }
       const pointer = evaluatePointerArgument(arg, env, input);
+      const poolPointer = arg.kind === "identifier" ? env.get(arg.name) : undefined;
+      if (isHostPoolPointer(poolPointer)) {
+        if (poolPointer.byteOffset < 0) return undefined;
+        const pool = input.memoryPools?.[poolPointer.poolName];
+        if (!pool) return undefined;
+        buffers[param.name] = typedPoolView(pool.data, param.valueType);
+        storageAliases[param.name] = poolDataName(poolPointer.poolName);
+        pointerBaseOffsets[param.name] = Math.trunc(poolPointer.byteOffset / elementByteSize(param.valueType));
+        continue;
+      }
       if (!pointer) return undefined;
       if (pointer.offset < 0) return undefined;
       const root = pointer.root;
@@ -356,6 +426,16 @@ function createChildKernelInput(
     storageAliases,
     pointerBaseOffsets,
   };
+}
+
+function typedPoolView(data: Uint32Array, valueType: CudaLiteParam["valueType"]): WgslTypedArray {
+  if (valueType === "int") return new Int32Array(data.buffer, data.byteOffset, data.byteLength / 4);
+  if (valueType === "uint" || valueType === "voidptr" || valueType === "bool") return data;
+  return new Float32Array(data.buffer, data.byteOffset, data.byteLength / 4);
+}
+
+function elementByteSize(valueType: CudaLiteParam["valueType"]): number {
+  return valueType === "half" ? 2 : 4;
 }
 
 function evaluateLaunchVector(

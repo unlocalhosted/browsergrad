@@ -1,7 +1,13 @@
 import { expressionName } from "./analyzer.js";
 import type { CompiledKernelInput, CudaLiteExpression } from "./types.js";
 
-export type HostEvalValue = number | readonly [number, number, number];
+export interface HostEvalPoolPointer {
+  readonly kind: "pool-pointer";
+  readonly poolName: string;
+  readonly byteOffset: number;
+}
+
+export type HostEvalValue = number | readonly [number, number, number] | HostEvalPoolPointer;
 
 export function evaluatePointerArgument(
   expression: CudaLiteExpression,
@@ -40,8 +46,10 @@ export function evaluateHostNumber(
     case "number":
       return expression.value;
     case "identifier": {
+      if (expression.name === "nullptr") return 0;
       const local = env.get(expression.name);
       if (typeof local === "number") return local;
+      if (isHostPoolPointer(local)) return local.byteOffset < 0 ? 0 : local.byteOffset + 1;
       return input.scalars?.[expression.name];
     }
     case "cast":
@@ -83,6 +91,14 @@ export function evaluateHostNumber(
 
 export function isHostVector(value: HostEvalValue | undefined): value is readonly [number, number, number] {
   return Array.isArray(value) && value.length === 3;
+}
+
+export function isHostPoolPointer(value: HostEvalValue | undefined): value is HostEvalPoolPointer {
+  return typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "kind" in value &&
+    value.kind === "pool-pointer";
 }
 
 export function isSingleInvocationGuard(expression: CudaLiteExpression): boolean {

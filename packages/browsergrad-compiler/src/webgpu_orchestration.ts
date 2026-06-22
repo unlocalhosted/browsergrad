@@ -310,7 +310,8 @@ function appendExecutionPlanWithAliases(
   aliases: Readonly<Record<string, string>>,
 ): void {
   for (const [name, value] of Object.entries(plan.input.buffers)) {
-    buffers[aliases[name] ?? name] = value;
+    const storageName = aliases[name] ?? name;
+    if (!buffersShareStorage(buffers[storageName], value)) buffers[storageName] = value;
   }
   for (const [name, value] of Object.entries(plan.input.residentBuffers ?? {})) {
     residentBuffers[aliases[name] ?? name] = value;
@@ -322,6 +323,13 @@ function appendExecutionPlanWithAliases(
       ...(storageAliases === undefined ? {} : { storageAliases }),
     });
   }
+}
+
+function buffersShareStorage(left: WgslTypedArray | undefined, right: WgslTypedArray): boolean {
+  return left !== undefined &&
+    left.buffer === right.buffer &&
+    left.byteOffset === right.byteOffset &&
+    left.byteLength === right.byteLength;
 }
 
 function composeStorageAliases(

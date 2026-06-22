@@ -647,9 +647,6 @@ function collectStorageBindings(steps: readonly WgslKernelSequenceStep[]): reado
         byName.set(storageName, { ...binding, name: storageName });
         continue;
       }
-      if (existing.valueType !== binding.valueType) {
-        throw new KernelError(`storage buffer ${storageName} has conflicting value types`);
-      }
       byName.set(storageName, {
         ...existing,
         access: existing.access === "read_write" || binding.access === "read_write" ? "read_write" : "read",
