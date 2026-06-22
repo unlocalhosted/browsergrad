@@ -134,6 +134,10 @@ infer WebGPU runnable status from `compiled.loweringPlan.canRunOnGpu` alone:
 that lowering plan is intentionally conservative and marks CUDA runtime gaps as
 unsupported even when `createCudaWebGpuExecutionPlan()` can host-orchestrate real
 WebGPU passes for the same kernel.
+Compile runtime-gap kernels with `compileCudaLiteKernelForWebGpu()` before
+planning. It keeps strict `compileCudaLiteKernel()` available for direct
+lowering checks, while turning host-orchestratable runtime diagnostics into
+warnings for WebGPU planning.
 
 Prepared execution uses the same plan. `prepareCompiledKernelWebGpu()` must not
 create a second planning path.

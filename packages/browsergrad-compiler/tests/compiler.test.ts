@@ -3,6 +3,7 @@ import {
   CudaLiteCompilerError,
   analyzeCudaLite,
   compileCudaLiteOptionsFromKernelFeatures,
+  compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   createCudaGridSyncPhasePlan,
   createCudaHostDynamicLaunchPlan,
@@ -11,6 +12,7 @@ import {
   createCudaPeerCopyPlan,
   createCudaRuntimePlan,
   createCudaWebGpuExecutionPlan,
+  cudaLiteWebGpuCompileOptions,
   cudaLiteFeatureOptionsFromKernelFeatures,
   describeCudaDiagnostic,
   formatCudaLiteDiagnostics,
@@ -595,6 +597,42 @@ __global__ void gridSync(float *x) {
     expect(analysis.diagnostics).toContainEqual(expect.objectContaining({
       code: "unsupported-cooperative-groups",
     }));
+  });
+
+  it("compiles host-orchestratable runtime gaps for WebGPU planning", () => {
+    const source = `
+namespace cg = cooperative_groups;
+__global__ void gridSync(float *scratch, float *out) {
+  cg::grid_group grid = cg::this_grid();
+  scratch[blockIdx.x] = blockIdx.x + 1;
+  grid.sync();
+  if (blockIdx.x == 0 && threadIdx.x == 0) {
+    out[0] = scratch[0] + scratch[1];
+  }
+}`;
+    expect(() => compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] })).toThrow(CudaLiteCompilerError);
+    expect(cudaLiteWebGpuCompileOptions({ referenceGridSync: false })).toMatchObject({
+      referenceDynamicParallelism: true,
+      referenceGridSync: true,
+      referenceCudaRuntime: true,
+    });
+
+    const compiled = compileCudaLiteKernelForWebGpu(source, { workgroupSize: [1, 1, 1] });
+    expect(compiled.diagnostics).toContainEqual(expect.objectContaining({
+      code: "unsupported-cooperative-groups",
+      severity: "warning",
+    }));
+    const plan = createCudaWebGpuExecutionPlan(
+      compiled,
+      { buffers: { scratch: new Float32Array(2), out: new Float32Array(1) } },
+      { gridDim: [2, 1, 1], blockDim: [1, 1, 1] },
+      { compileKernel: compileCudaLiteKernelForWebGpu },
+    );
+    expect(summarizeCudaWebGpuExecutionPlan(plan)).toMatchObject({
+      canRunOnWebGpu: true,
+      mode: "host-orchestrated",
+      kind: "grid-sync-phases",
+    });
   });
 
   it("runs grid-wide cooperative sync in CPU reference when explicitly enabled", async () => {

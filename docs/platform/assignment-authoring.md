@@ -76,7 +76,7 @@ hardcoding names:
 ```ts
 import { detectKernelFeatures } from "@unlocalhosted/browsergrad-kernels";
 import {
-  compileCudaLiteKernel,
+  compileCudaLiteKernelForWebGpu,
   compileCudaLiteOptionsFromKernelFeatures,
   createCudaWebGpuExecutionPlan,
   summarizeCudaWebGpuExecutionPlan,
@@ -101,7 +101,7 @@ const environment = createAssignmentCapabilityEnvironment({
   ],
 });
 
-const compiled = compileCudaLiteKernel(
+const compiled = compileCudaLiteKernelForWebGpu(
   source,
   compileCudaLiteOptionsFromKernelFeatures(features, {
     workgroupSize: [8, 1, 1],

@@ -17,6 +17,7 @@ const corpusRoot = path.resolve(corpusPathArg);
 const repoRoot = findRepoRoot(process.cwd());
 const compilerUrl = pathToFileURL(path.join(repoRoot, "packages/browsergrad-compiler/dist/index.js")).href;
 const {
+  compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   createCudaRuntimePlan,
   createCudaWebGpuExecutionPlan,
@@ -146,14 +147,11 @@ if (expectationFailures.length > 0) {
 
 function classifyReferenceFallback(source, kernelName) {
   try {
-    const compiled = compileCudaLiteKernel(source, {
+    const compiled = compileCudaLiteKernelForWebGpu(source, {
       kernelName,
       features: { "shader-f16": true, subgroups: true },
       workgroupSize: [256, 1, 1],
       dynamicSharedMemory: inferDynamicSharedMemory(source),
-      referenceDynamicParallelism: true,
-      referenceGridSync: true,
-      referenceCudaRuntime: true,
     });
     const lift = webGpuLiftFor(compiled);
     return {
@@ -183,7 +181,7 @@ function webGpuLiftFor(compiled) {
     syntheticInputFor(compiled),
     { gridDim: [1, 1, 1], blockDim: compiled.ir.workgroupSize },
     {
-      compileKernel: (childSource, options = {}) => compileCudaLiteKernel(childSource, {
+      compileKernel: (childSource, options = {}) => compileCudaLiteKernelForWebGpu(childSource, {
         ...options,
         features: { "shader-f16": true, subgroups: true, ...options.features },
         dynamicSharedMemory: inferDynamicSharedMemory(childSource),

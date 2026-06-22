@@ -28,6 +28,7 @@ Low-level extension boundaries live in
 import { createDevice, detectKernelFeatures } from "@unlocalhosted/browsergrad-kernels";
 import {
   compileCudaLiteOptionsFromKernelFeatures,
+  compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   createCudaWebGpuExecutionPlan,
   prepareCompiledKernelWebGpu,
@@ -80,6 +81,10 @@ Use `summarizeCudaWebGpuExecutionPlan()` for platform readiness UI. A kernel can
 have `compiled.loweringPlan.canRunOnGpu === false` because it contains runtime
 gaps, while a host-orchestrated WebGPU plan can still run it through real GPU
 passes.
+Use `compileCudaLiteKernel()` when you need strict direct-lowering diagnostics.
+Use `compileCudaLiteKernelForWebGpu()` when the platform intends to run
+host-orchestrated WebGPU plans such as grid-sync phases, host peer copy, or
+host-lifted dynamic launches.
 Fixed thread-local arrays lower to WGSL function arrays and CPU-reference typed
 arrays, so small per-thread scratch patterns do not need shared memory.
 
@@ -239,6 +244,9 @@ the same plan interface internally, so platform preflight and execution share
 one source of truth. Unsupported plans include both a human `reason` and
 machine-readable `blockers[]` entries with `{ kind, code, message }`; route
 platform UI/rubric behavior from blocker codes instead of parsing reason text.
+For runtime-gap kernels, pass a `compiled` object from
+`compileCudaLiteKernelForWebGpu()` and use that helper as `compileKernel` so
+dynamic children receive the same host-orchestration semantics.
 Use `normalizeCudaWebGpuReadbackNames(compiled, names)` if platform code needs
 to inspect the internal WGSL storage readbacks that correspond to logical
 compiler names.

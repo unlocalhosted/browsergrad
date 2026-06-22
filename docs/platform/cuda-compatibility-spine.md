@@ -90,8 +90,9 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
   when timing gates or watchdogs need real GPU completion instead of JS command
   submission.
 - Device-side launches now parse into IR and can run in CPU reference when
-  `referenceDynamicParallelism` is enabled. WebGPU can host-lift conservative
-  child launches into a multi-dispatch sequence when parent invocations, launch
+  `referenceDynamicParallelism` is enabled, or when platforms compile through
+  `compileCudaLiteKernelForWebGpu()`. WebGPU can host-lift conservative child
+  launches into a multi-dispatch sequence when parent invocations, launch
   branches, child block sizes, pointer args, and scalar args are host-evaluable.
   Parent invocations expand with CUDA builtin coordinates up to a cap, recursive
   launches flatten up to a depth cap, and inactive host-evaluable launch
@@ -107,14 +108,16 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
 - CUDA runtime calls such as `cudaDeviceSynchronize` and `cudaMemcpyPeerAsync`
   classify as runtime orchestration gaps. Standalone `cudaDeviceSynchronize()`
   is a WebGPU-safe no-op because dispatch completion is host-managed. Peer
-  copies can run in CPU reference with `referenceCudaRuntime`; WebGPU can
-  host-lift single-invocation guarded typed buffer copies when source,
+  copies can run in CPU reference with `referenceCudaRuntime`, or through
+  `compileCudaLiteKernelForWebGpu()` for WebGPU planning. WebGPU can host-lift
+  single-invocation guarded typed buffer copies when source,
   destination, offsets, and byte count are host-evaluable. Typed-array and
   resident-buffer copies are capacity-checked before dispatch. Mixed types,
   pools, device-derived counts, or side effects after copy remain reference-only.
-- Cooperative `grid.sync()` can run in CPU reference with `referenceGridSync`.
-  Safe top-level uniform `grid.sync()` also runs on real WebGPU as multiple
-  dispatch phases over shared GPU buffers. Pure launch-derived locals are
+- Cooperative `grid.sync()` can run in CPU reference with `referenceGridSync`,
+  or through `compileCudaLiteKernelForWebGpu()` for WebGPU planning. Safe
+  top-level uniform `grid.sync()` also runs on real WebGPU as multiple dispatch
+  phases over shared GPU buffers. Pure launch-derived locals are
   replayed in later phases, and shared memory can be reused after sync when the
   phase rewrites it before any read. Non-uniform sync, non-replayable private
   locals crossing phases, or shared-memory read-before-rewrite remain

@@ -79,3 +79,6 @@
 - Compiler corpus, e2e, and benchmark package scripts now run through a locked
   tool wrapper so concurrent invocations cannot import a partially rebuilt
   `dist/` tree.
+- Added `compileCudaLiteKernelForWebGpu()` and `cudaLiteWebGpuCompileOptions()`
+  for platform code that wants host-orchestrated WebGPU plans without manually
+  toggling reference/runtime warning flags.

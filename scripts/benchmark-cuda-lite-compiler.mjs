@@ -19,6 +19,7 @@ const markdownPath = args.get("--markdown");
 const root = findRepoRoot(process.cwd());
 const compilerUrl = pathToFileURL(path.join(root, "packages/browsergrad-compiler/dist/index.js")).href;
 const {
+  compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   createCudaHostDynamicLaunchPlan,
   createCudaPeerCopyPlan,
@@ -27,13 +28,11 @@ const {
 
 function main() {
   const saxpyCompiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [256, 1, 1] });
-  const dynamicCompiled = compileCudaLiteKernel(DYNAMIC_OFFSET, {
+  const dynamicCompiled = compileCudaLiteKernelForWebGpu(DYNAMIC_OFFSET, {
     kernelName: "parent",
-    referenceDynamicParallelism: true,
     workgroupSize: [1, 1, 1],
   });
-  const peerCopyCompiled = compileCudaLiteKernel(PEER_COPY, {
-    referenceCudaRuntime: true,
+  const peerCopyCompiled = compileCudaLiteKernelForWebGpu(PEER_COPY, {
     workgroupSize: [1, 1, 1],
   });
 

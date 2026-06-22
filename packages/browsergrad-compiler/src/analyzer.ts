@@ -247,7 +247,7 @@ export function analyzeCudaLite(
           diagnostics.push({
             ...error(
               "unsupported-dynamic-parallelism",
-              `device-side kernel launch '${statement.callee}<<<...>>>' is reference-only in CUDA-lite`,
+              `device-side kernel launch '${statement.callee}<<<...>>>' requires explicit runtime orchestration in CUDA-lite`,
               statement.span,
             ),
             severity: options.referenceDynamicParallelism ? "warning" : "error",
@@ -643,7 +643,7 @@ function validateCallExpression(
       ...error(
         "unsupported-cuda-runtime",
         callName === "cudaDeviceSynchronize"
-          ? "cudaDeviceSynchronize() is reference-only; WebGPU host orchestration is not implemented yet"
+          ? "cudaDeviceSynchronize() requires explicit runtime orchestration"
           : `${callName}() requires CUDA runtime peer-copy orchestration`,
         expression.span,
       ),
@@ -747,7 +747,7 @@ function validateCooperativeGroupCall(
   const { symbol, method } = call;
   if (symbol.groupKind === "grid" && method === "sync") {
     diagnostics.push({
-      ...error("unsupported-cooperative-groups", "grid.sync() is reference-only; WebGPU cooperative launch is not implemented yet", expression.span),
+      ...error("unsupported-cooperative-groups", "grid.sync() requires explicit runtime orchestration", expression.span),
       severity: options.referenceGridSync ? "warning" : "error",
     });
     return { kind: "scalar" };

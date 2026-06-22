@@ -78,6 +78,24 @@ export function compileCudaLiteKernel(
   };
 }
 
+export function cudaLiteWebGpuCompileOptions(
+  options: CompileCudaLiteOptions = {},
+): CompileCudaLiteOptions {
+  return {
+    ...options,
+    referenceDynamicParallelism: true,
+    referenceGridSync: true,
+    referenceCudaRuntime: true,
+  };
+}
+
+export function compileCudaLiteKernelForWebGpu(
+  source: string,
+  options: CompileCudaLiteOptions = {},
+): CompiledCudaLiteKernel {
+  return compileCudaLiteKernel(source, cudaLiteWebGpuCompileOptions(options));
+}
+
 export { runCompiledKernelReference };
 
 export async function runCompiledKernelWebGpu(
@@ -88,7 +106,7 @@ export async function runCompiledKernelWebGpu(
 ): Promise<ReferenceKernelResult> {
   validateCudaKernelLaunch(launch, compiled.ir.workgroupSize);
   const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, {
-    compileKernel: compileCudaLiteKernel,
+    compileKernel: compileCudaLiteKernelForWebGpu,
   });
   if (!executionPlan.supported) {
     throw new CudaLiteCompilerError(executionPlan.reason, executionPlan.diagnostics);
@@ -109,7 +127,7 @@ export async function prepareCompiledKernelWebGpu(
 ): Promise<PreparedCompiledKernelWebGpu> {
   validateCudaKernelLaunch(launch, compiled.ir.workgroupSize);
   const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, {
-    compileKernel: compileCudaLiteKernel,
+    compileKernel: compileCudaLiteKernelForWebGpu,
   });
   if (!executionPlan.supported) {
     throw new CudaLiteCompilerError(executionPlan.reason, executionPlan.diagnostics);
@@ -186,7 +204,7 @@ function normalizePreparedRunOptions(
       return out;
     }
     const nextPlan = createCudaWebGpuExecutionPlan(compiled, nextInput, launch, {
-      compileKernel: compileCudaLiteKernel,
+      compileKernel: compileCudaLiteKernelForWebGpu,
     });
     if (!nextPlan.supported) throw new CudaLiteCompilerError(nextPlan.reason, nextPlan.diagnostics);
     validatePreparedPlanTopology(initialPlan, nextPlan);

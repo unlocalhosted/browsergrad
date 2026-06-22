@@ -131,6 +131,7 @@ const html = String.raw`<!doctype html>
         readWgslStorageBuffer,
       } from "@unlocalhosted/browsergrad-kernels";
       import {
+        compileCudaLiteKernelForWebGpu,
         compileCudaLiteKernel,
         createCudaWebGpuExecutionPlan,
         prepareCompiledKernelWebGpu,
@@ -230,7 +231,7 @@ const html = String.raw`<!doctype html>
           {
             name: "runtime:grid-sync-phases",
             source: SOURCES.gridSync,
-            options: { referenceGridSync: true, workgroupSize: [1, 1, 1] },
+            options: { workgroupSize: [1, 1, 1] },
             launch: { gridDim: [2, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({
               buffers: {
@@ -244,7 +245,7 @@ const html = String.raw`<!doctype html>
           {
             name: "runtime:host-peer-copy",
             source: SOURCES.peerCopy,
-            options: { referenceCudaRuntime: true, workgroupSize: [1, 1, 1] },
+            options: { workgroupSize: [1, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({
               buffers: {
@@ -258,7 +259,7 @@ const html = String.raw`<!doctype html>
           {
             name: "runtime:host-dynamic-launch",
             source: SOURCES.dynamicLaunch,
-            options: { kernelName: "parent", referenceDynamicParallelism: true, workgroupSize: [1, 1, 1] },
+            options: { kernelName: "parent", workgroupSize: [1, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({
               buffers: {
@@ -271,7 +272,7 @@ const html = String.raw`<!doctype html>
           {
             name: "runtime:recursive-host-dynamic-launch",
             source: SOURCES.recursiveDynamicLaunch,
-            options: { kernelName: "parent", referenceDynamicParallelism: true, workgroupSize: [1, 1, 1] },
+            options: { kernelName: "parent", workgroupSize: [1, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({
               buffers: {
@@ -284,7 +285,7 @@ const html = String.raw`<!doctype html>
           {
             name: "runtime:pool-pointer-host-dynamic-launch",
             source: SOURCES.dynamicPoolLaunch,
-            options: { kernelName: "parent", referenceDynamicParallelism: true, workgroupSize: [1, 1, 1] },
+            options: { kernelName: "parent", workgroupSize: [1, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({
               buffers: {},
@@ -301,7 +302,7 @@ const html = String.raw`<!doctype html>
           {
             name: "runtime:expanded-pool-pointer-host-dynamic-launch",
             source: SOURCES.dynamicPoolExpandedLaunch,
-            options: { kernelName: "parent", referenceDynamicParallelism: true, workgroupSize: [4, 1, 1] },
+            options: { kernelName: "parent", workgroupSize: [4, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
             input: () => ({
               buffers: {},
@@ -318,7 +319,7 @@ const html = String.raw`<!doctype html>
           {
             name: "runtime:launched-device-function-pool-dynamic-launch",
             source: SOURCES.dynamicDeviceFunctionPoolLaunch,
-            options: { kernelName: "parentKernel", referenceDynamicParallelism: true, workgroupSize: [2, 1, 1] },
+            options: { kernelName: "parentKernel", workgroupSize: [2, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
             input: () => ({
               buffers: {},
@@ -336,10 +337,10 @@ const html = String.raw`<!doctype html>
       }
 
       async function runReferenceWebGpuCase(device, spec) {
-        const compiled = compileCudaLiteKernel(spec.source, spec.options);
+        const compiled = compileCudaLiteKernelForWebGpu(spec.source, spec.options);
         const actualInput = spec.input();
         const plan = createCudaWebGpuExecutionPlan(compiled, actualInput, spec.launch, {
-          compileKernel: compileCudaLiteKernel,
+          compileKernel: compileCudaLiteKernelForWebGpu,
         });
         if (!plan.supported) {
           return { ok: false, plan: plan.reason, maxAbsDiff: Number.POSITIVE_INFINITY };
