@@ -98,9 +98,12 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
   branches use single dispatch. DevicePool pointer params alias their pool
   data/offset bindings, single-invocation DevicePool allocation pointers can be
   passed to child pointer params, and positive pointer-offset args lower to
-  base-offset uniforms. Concurrent parent-side pool allocations, unknown branch
-  guards before launch, negative pointer offsets, device-derived launch args,
-  and parent side effects after launch remain reference-only.
+  base-offset uniforms. Pure parents with host-planned pool allocations are
+  elided and their pool offsets seeded once before child dispatch; parents with
+  other side effects plus pool allocation are rejected instead of replayed.
+  Concurrent parent-side pool allocations, unknown branch guards before launch,
+  negative pointer offsets, device-derived launch args, and parent side effects
+  after launch remain reference-only.
 - CUDA runtime calls such as `cudaDeviceSynchronize` and `cudaMemcpyPeerAsync`
   classify as runtime orchestration gaps. Standalone `cudaDeviceSynchronize()`
   is a WebGPU-safe no-op because dispatch completion is host-managed. Peer

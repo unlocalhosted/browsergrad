@@ -837,8 +837,8 @@ __global__ void parent(float *x, int n) {
     });
     expect(dynamicPlan).toMatchObject({ supported: true, kind: "host-dynamic-launch" });
     if (dynamicPlan.supported) {
-      expect(dynamicPlan.steps).toHaveLength(2);
-      expect(dynamicPlan.steps[1]?.storageAliases).toEqual({ dst: "x" });
+      expect(dynamicPlan.steps).toHaveLength(1);
+      expect(dynamicPlan.steps[0]?.storageAliases).toEqual({ dst: "x" });
     }
   });
 
@@ -1394,7 +1394,7 @@ __global__ void parent(float *out, int limit) {
       supported: true,
       kind: "host-dynamic-launch",
     });
-    expect(executionPlan.supported && executionPlan.steps).toHaveLength(4);
+    expect(executionPlan.supported && executionPlan.steps).toHaveLength(3);
   });
 
   it("caps host-expanded dynamic launches before building huge plans", () => {
@@ -1486,7 +1486,7 @@ __global__ void parent(float *out, int n) {
       supported: true,
       kind: "host-dynamic-launch",
     });
-    expect(executionPlan.supported && executionPlan.steps).toHaveLength(4);
+    expect(executionPlan.supported && executionPlan.steps).toHaveLength(2);
 
     const capped = createCudaWebGpuExecutionPlan(compiled, input, launch, {
       compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options),
@@ -1580,6 +1580,7 @@ __global__ void parent(DevicePool *pool, int n) {
       storageAliases: { data: "pool_pool" },
       pointerBaseOffsets: { data: 0 },
     });
+    expect(plan.poolOffsetUpdates).toEqual({ pool: 8 });
 
     const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, {
       compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options),
@@ -1588,6 +1589,10 @@ __global__ void parent(DevicePool *pool, int n) {
       supported: true,
       kind: "host-dynamic-launch",
     });
+    if (executionPlan.supported) {
+      expect(executionPlan.steps).toHaveLength(2);
+      expect([...executionPlan.input.buffers.pool_offset as Uint32Array]).toEqual([8]);
+    }
   });
 
   it("plans host-expanded dynamic launches over order-stable DevicePool allocations", () => {
@@ -1617,6 +1622,7 @@ __global__ void parent(DevicePool *pool, int n) {
     expect(plan.supported).toBe(true);
     expect(plan.launches).toHaveLength(4);
     expect(plan.launches.map((item) => item.pointerBaseOffsets.data)).toEqual([0, 2, 4, 6]);
+    expect(plan.poolOffsetUpdates).toEqual({ pool: 32 });
 
     const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, {
       compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options),
@@ -1625,6 +1631,10 @@ __global__ void parent(DevicePool *pool, int n) {
       supported: true,
       kind: "host-dynamic-launch",
     });
+    if (executionPlan.supported) {
+      expect(executionPlan.steps).toHaveLength(5);
+      expect([...executionPlan.input.buffers.pool_offset as Uint32Array]).toEqual([32]);
+    }
 
     const result = runCompiledKernelReference(compiled, input, launch);
     expect([...result.buffers.pool as Uint32Array]).toEqual([

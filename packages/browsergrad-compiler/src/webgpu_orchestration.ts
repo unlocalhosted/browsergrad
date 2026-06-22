@@ -1,5 +1,6 @@
 import {
   defineWgslKernelProgram,
+  type WgslKernelBindingInput,
   type WgslKernelProgram,
   type WgslKernelRunInput,
   type WgslKernelSequenceStep,
@@ -20,6 +21,8 @@ import {
   type CompiledKernelInput,
   type CompileCudaLiteOptions,
   type CudaLiteDiagnostic,
+  type CudaLiteExpression,
+  type CudaLiteStatement,
   type KernelLaunch,
 } from "./types.js";
 
@@ -67,7 +70,22 @@ export interface CudaWebGpuExecutionPlanOptions {
 }
 
 const peerCopyProgramCache = new Map<CudaPeerCopyOperation["valueType"], WgslKernelProgram>();
+const hostDynamicPoolAnchorCache = new Map<string, WgslKernelProgram>();
 const DEFAULT_MAX_HOST_DYNAMIC_LAUNCH_DEPTH = 8;
+const HOST_SIDE_EFFECT_FREE_CALLS = new Set([
+  "cudaDeviceSynchronize",
+  "deviceAllocate",
+  "expf",
+  "fmaxf",
+  "fminf",
+  "logf",
+  "max",
+  "min",
+  "printf",
+  "sizeof",
+  "sqrtf",
+  "streamOrderedAllocate",
+]);
 
 export function createCudaWebGpuExecutionPlan(
   compiled: CompiledCudaLiteKernel,
@@ -241,11 +259,31 @@ function createHostLiftedDynamicWebGpuPlan(
   const parentInput = createWgslRunInput(compiled, input);
   const buffers: Record<string, WgslTypedArray> = { ...parentInput.buffers };
   const residentBuffers = { ...parentInput.residentBuffers };
-  const steps: WgslKernelSequenceStep[] = [{
-    program: compiled.wgslProgram,
-    launch: { dispatchCount: dispatchCountForLaunch(launch) },
-    ...(parentInput.uniforms === undefined ? {} : { uniforms: parentInput.uniforms }),
-  }];
+  const parentDispatchNeeded = hostDynamicParentDispatchNeeded(compiled.ir.body);
+  const poolOffsetUpdates = plan.poolOffsetUpdates ?? {};
+  if (parentDispatchNeeded && Object.keys(poolOffsetUpdates).length > 0) {
+    return unsupportedWebGpuPlan(compiled, [
+      webGpuBlocker(
+        "device-launch",
+        "parent-side-effects-with-host-pool-allocation",
+        "host-lifted DevicePool allocation cannot replay parent side effects without double allocation",
+      ),
+    ]);
+  }
+  if (!parentDispatchNeeded) applyHostDynamicPoolOffsetUpdates(buffers, poolOffsetUpdates);
+  const steps: WgslKernelSequenceStep[] = [];
+  if (parentDispatchNeeded) {
+    steps.push({
+      program: compiled.wgslProgram,
+      launch: { dispatchCount: dispatchCountForLaunch(launch) },
+      ...(parentInput.uniforms === undefined ? {} : { uniforms: parentInput.uniforms }),
+    });
+  } else if (Object.keys(poolOffsetUpdates).length > 0) {
+    steps.push({
+      program: defineHostDynamicPoolAnchorProgram(Object.keys(poolOffsetUpdates)),
+      launch: { dispatchCount: [1, 1, 1] },
+    });
+  }
   const childCompileCache = new Map<string, CompiledCudaLiteKernel>();
 
   for (const item of plan.launches) {
@@ -291,6 +329,107 @@ function createHostLiftedDynamicWebGpuPlan(
       ...(parentInput.readback === undefined ? {} : { readback: parentInput.readback }),
     },
   };
+}
+
+function defineHostDynamicPoolAnchorProgram(poolNames: readonly string[]): WgslKernelProgram {
+  const names = [...poolNames].sort();
+  const key = names.join("\0");
+  const cached = hostDynamicPoolAnchorCache.get(key);
+  if (cached) return cached;
+  const bindings = names.flatMap((name, index): WgslKernelBindingInput[] => [
+    { kind: "storage", name: poolDataName(name), valueType: "u32", access: "read_write", binding: index * 2 },
+    { kind: "storage", name: poolOffsetName(name), valueType: "u32", access: "read_write", binding: index * 2 + 1 },
+  ]);
+  const declarations = bindings.map((binding) => (
+    `@group(0) @binding(${binding.binding}) var<storage, read_write> ${binding.name}: array<u32>;`
+  ));
+  const program = defineWgslKernelProgram({
+    name: `bg_host_dynamic_pool_anchor_${names.join("_")}`,
+    bindings,
+    workgroupSize: [1, 1, 1],
+    wgsl: [
+      ...declarations,
+      "@compute @workgroup_size(1, 1, 1)",
+      "fn main() {",
+      "}",
+    ].join("\n"),
+  });
+  hostDynamicPoolAnchorCache.set(key, program);
+  return program;
+}
+
+function applyHostDynamicPoolOffsetUpdates(
+  buffers: Record<string, WgslTypedArray>,
+  updates: Readonly<Record<string, number>>,
+): void {
+  for (const [poolName, offset] of Object.entries(updates)) {
+    const name = poolOffsetName(poolName);
+    const existing = buffers[name];
+    const next = existing instanceof Uint32Array ? new Uint32Array(existing) : new Uint32Array(1);
+    next[0] = offset >>> 0;
+    buffers[name] = next;
+  }
+}
+
+function hostDynamicParentDispatchNeeded(statements: readonly CudaLiteStatement[]): boolean {
+  return statements.some(statementNeedsParentDispatch);
+}
+
+function statementNeedsParentDispatch(statement: CudaLiteStatement): boolean {
+  switch (statement.kind) {
+    case "var":
+      return statement.init === undefined ? false : expressionNeedsParentDispatch(statement.init);
+    case "dim3":
+    case "cooperative-group":
+    case "kernel-launch":
+    case "return":
+    case "continue":
+      return false;
+    case "asm":
+      return true;
+    case "expr":
+      return expressionNeedsParentDispatch(statement.expression);
+    case "if":
+      return expressionNeedsParentDispatch(statement.condition) ||
+        statement.consequent.some(statementNeedsParentDispatch) ||
+        (statement.alternate?.some(statementNeedsParentDispatch) ?? false);
+    case "for":
+      return true;
+  }
+}
+
+function expressionNeedsParentDispatch(expression: CudaLiteExpression): boolean {
+  switch (expression.kind) {
+    case "number":
+    case "string":
+    case "identifier":
+      return false;
+    case "cast":
+      return expressionNeedsParentDispatch(expression.expression);
+    case "member":
+      return expressionNeedsParentDispatch(expression.object);
+    case "index":
+      return expressionNeedsParentDispatch(expression.target) || expressionNeedsParentDispatch(expression.index);
+    case "unary":
+      return expressionNeedsParentDispatch(expression.argument);
+    case "binary":
+      return expressionNeedsParentDispatch(expression.left) || expressionNeedsParentDispatch(expression.right);
+    case "conditional":
+      return expressionNeedsParentDispatch(expression.condition) ||
+        expressionNeedsParentDispatch(expression.consequent) ||
+        expressionNeedsParentDispatch(expression.alternate);
+    case "update":
+      return expression.argument.kind !== "identifier";
+    case "assignment":
+      return expression.left.kind !== "identifier" || expressionNeedsParentDispatch(expression.right);
+    case "call": {
+      const name = expression.callee.kind === "identifier" ? expression.callee.name : undefined;
+      if (name !== undefined && HOST_SIDE_EFFECT_FREE_CALLS.has(name)) {
+        return expression.args.some(expressionNeedsParentDispatch);
+      }
+      return true;
+    }
+  }
 }
 
 function childExecutionPlanOptions(options: CudaWebGpuExecutionPlanOptions): CudaWebGpuExecutionPlanOptions {

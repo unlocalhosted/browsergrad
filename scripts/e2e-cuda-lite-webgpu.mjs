@@ -292,8 +292,11 @@ const html = String.raw`<!doctype html>
                 pool: { data: new Uint32Array(4), offset: new Uint32Array([0]) },
               },
               scalars: { n: 2 },
+              readback: ["pool", "pool_offset"],
             }),
             output: "pool",
+            offsetOutput: "pool_offset",
+            expectedOffset: 8,
           },
           {
             name: "runtime:expanded-pool-pointer-host-dynamic-launch",
@@ -306,8 +309,11 @@ const html = String.raw`<!doctype html>
                 pool: { data: new Uint32Array(8), offset: new Uint32Array([0]) },
               },
               scalars: { n: 2 },
+              readback: ["pool", "pool_offset"],
             }),
             output: "pool",
+            offsetOutput: "pool_offset",
+            expectedOffset: 32,
           },
           {
             name: "runtime:launched-device-function-pool-dynamic-launch",
@@ -320,23 +326,36 @@ const html = String.raw`<!doctype html>
                 g_pool: { data: new Uint32Array(4), offset: new Uint32Array([0]) },
               },
               scalars: { N: 2 },
+              readback: ["g_pool", "g_pool_offset"],
             }),
             output: "g_pool",
+            offsetOutput: "g_pool_offset",
+            expectedOffset: 16,
           },
         ];
       }
 
       async function runReferenceWebGpuCase(device, spec) {
         const compiled = compileCudaLiteKernel(spec.source, spec.options);
-        const plan = createCudaWebGpuExecutionPlan(compiled, spec.input(), spec.launch, {
+        const actualInput = spec.input();
+        const plan = createCudaWebGpuExecutionPlan(compiled, actualInput, spec.launch, {
           compileKernel: compileCudaLiteKernel,
         });
         if (!plan.supported) {
           return { ok: false, plan: plan.reason, maxAbsDiff: Number.POSITIVE_INFINITY };
         }
-        const expected = runCompiledKernelReference(compiled, spec.input(), spec.launch);
-        const actual = await runCompiledKernelWebGpu(device, compiled, spec.input(), spec.launch);
+        const expectedInput = spec.offsetOutput && actualInput.readback
+          ? { ...actualInput, readback: actualInput.readback.filter((name) => name !== spec.offsetOutput) }
+          : actualInput;
+        const expected = runCompiledKernelReference(compiled, expectedInput, spec.launch);
+        const actual = await runCompiledKernelWebGpu(device, compiled, actualInput, spec.launch);
         const comparison = compareArrays(expected.buffers[spec.output], actual.buffers[spec.output]);
+        if (comparison.ok && spec.offsetOutput) {
+          const offset = actual.buffers[spec.offsetOutput]?.[0];
+          if (offset !== spec.expectedOffset) {
+            return { ok: false, plan: plan.kind, maxAbsDiff: Math.abs(Number(offset ?? NaN) - spec.expectedOffset) };
+          }
+        }
         return { ...comparison, plan: plan.kind };
       }
 
@@ -447,10 +466,10 @@ try {
   if (requireWebGpu && !report.available) {
     throw new Error(`WebGPU unavailable: ${report.reason ?? "unknown"}`);
   }
+  console.log(JSON.stringify(report, null, 2));
   if (report.available && report.failed > 0) {
     throw new Error(`CUDA-lite WebGPU e2e failed ${report.failed} case(s)`);
   }
-  console.log(JSON.stringify(report, null, 2));
   if (markdownPath && markdownPath !== "true") {
     fs.writeFileSync(path.resolve(markdownPath), markdownReport(report));
   }

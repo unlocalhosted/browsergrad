@@ -152,7 +152,9 @@ can be passed to child pointer params when offsets are known, and positive
 pointer offsets such as `out + 1` lower to generated base-offset uniforms so
 WebGPU bindings stay whole-buffer and alignment-safe. Expanded parent
 allocations are liftable when child launches are order-stable except for pointer
-base offsets. Inspect this before dispatching:
+base offsets. Pure parents with host-planned pool allocations are not replayed;
+their pool offsets are seeded once before child dispatch so allocation state does
+not advance twice. Inspect this before dispatching:
 
 ```ts
 const plan = createCudaHostDynamicLaunchPlan(compiled, input, launch);

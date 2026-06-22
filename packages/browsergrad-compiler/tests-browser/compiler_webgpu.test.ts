@@ -837,9 +837,15 @@ __global__ void parent(DevicePool *pool, int n) {
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(
+      await createDevice(),
+      compiled,
+      { ...input, readback: ["pool", "pool_offset"] },
+      launch,
+    );
 
     expect([...actual.buffers.pool as Uint32Array]).toEqual([...expected.buffers.pool as Uint32Array]);
+    expect([...actual.buffers.pool_offset as Uint32Array]).toEqual([8]);
   });
 
   it("runs host-expanded order-stable DevicePool allocation launches through WebGPU sequence", async () => {
@@ -870,9 +876,15 @@ __global__ void parent(DevicePool *pool, int n) {
       scalars: { n: 2 },
     });
     const expected = runCompiledKernelReference(compiled, input(), launch);
-    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input(), launch);
+    const actual = await runCompiledKernelWebGpu(
+      await createDevice(),
+      compiled,
+      { ...input(), readback: ["pool", "pool_offset"] },
+      launch,
+    );
 
     expect([...actual.buffers.pool as Uint32Array]).toEqual([...expected.buffers.pool as Uint32Array]);
+    expect([...actual.buffers.pool_offset as Uint32Array]).toEqual([32]);
   });
 
   it("runs host-lifted pointer-offset dynamic child launch through WebGPU sequence", async () => {

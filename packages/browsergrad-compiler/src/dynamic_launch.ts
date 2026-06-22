@@ -29,6 +29,7 @@ export interface CudaHostDynamicLaunchPlan {
   readonly reason?: string;
   readonly blocker?: CudaHostDynamicLaunchBlocker;
   readonly launches: readonly CudaHostDynamicLaunch[];
+  readonly poolOffsetUpdates?: Readonly<Record<string, number>>;
 }
 
 export interface CudaHostDynamicLaunchBlocker {
@@ -74,6 +75,7 @@ interface HostLiftedLaunchCollection {
   readonly reason?: string;
   readonly blocker?: CudaHostDynamicLaunchBlocker;
   readonly expandedPoolAllocation: boolean;
+  readonly poolOffsetUpdates: Readonly<Record<string, number>>;
 }
 
 type MemoryPoolInput = NonNullable<CompiledKernelInput["memoryPools"]>[string];
@@ -105,7 +107,7 @@ export function createCudaHostDynamicLaunchPlan(
   const launchCollection = collectHostLiftedLaunches(compiled.ir.body, input, launch);
   const launches = launchCollection.launches;
   if (launches.length === 0) {
-    if (!launchCollection.blocker) return { supported: true, launches: [] };
+    if (!launchCollection.blocker) return { supported: true, launches: [], poolOffsetUpdates: launchCollection.poolOffsetUpdates };
     return unsupportedWithBlocker(launchCollection.blocker);
   }
 
@@ -134,7 +136,7 @@ export function createCudaHostDynamicLaunchPlan(
       "expanded DevicePool allocation needs child launches to be order-stable except pointer base offsets",
     );
   }
-  return { supported: true, launches: planned };
+  return { supported: true, launches: planned, poolOffsetUpdates: launchCollection.poolOffsetUpdates };
 }
 
 function findLaunchableKernel(compiled: CompiledCudaLiteKernel, name: string): CudaLiteKernel | undefined {
@@ -173,6 +175,7 @@ function collectHostLiftedLaunches(
   const poolOffsets = new Map(
     Object.entries(input.memoryPools ?? {}).map(([name, pool]) => [name, pool.offset?.[0] ?? 0] as const),
   );
+  const initialPoolOffsets = new Map(poolOffsets);
   let unsafeBlocker: CudaHostDynamicLaunchBlocker | undefined;
   let expandedPoolAllocation = false;
   const markUnsafe = (code: CudaHostDynamicLaunchBlockerCode, message: string): void => {
@@ -253,8 +256,19 @@ function collectHostLiftedLaunches(
     if (!unsafeBlocker) visit(statements, env);
   });
   return unsafeBlocker
-    ? { launches: [], reason: unsafeBlocker.message, blocker: unsafeBlocker, expandedPoolAllocation }
-    : { launches: out, expandedPoolAllocation };
+    ? { launches: [], reason: unsafeBlocker.message, blocker: unsafeBlocker, expandedPoolAllocation, poolOffsetUpdates: poolOffsetUpdates(initialPoolOffsets, poolOffsets) }
+    : { launches: out, expandedPoolAllocation, poolOffsetUpdates: poolOffsetUpdates(initialPoolOffsets, poolOffsets) };
+}
+
+function poolOffsetUpdates(
+  before: ReadonlyMap<string, number>,
+  after: ReadonlyMap<string, number>,
+): Readonly<Record<string, number>> {
+  const out: Record<string, number> = {};
+  for (const [name, value] of after) {
+    if ((before.get(name) ?? 0) !== value) out[name] = value >>> 0;
+  }
+  return out;
 }
 
 function coerceHostScalar(valueType: CudaLiteParam["valueType"], value: number): number {

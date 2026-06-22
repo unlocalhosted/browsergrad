@@ -104,7 +104,10 @@ Supported layers:
   browser from runaway launch trees.
 - Host-lifted pool allocation pointers are allowed when they map to known
   `DevicePool` byte offsets. Expanded parent allocations are liftable when
-  child launches are order-stable except for pointer base offsets.
+  child launches are order-stable except for pointer base offsets. When the
+  host planner owns pool offset advancement, pure parent kernels are skipped and
+  pool offsets are seeded once before child dispatch; mixed parent side effects
+  plus host-planned pool allocation are unsupported.
 
 Rules:
 
