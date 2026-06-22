@@ -148,9 +148,16 @@ export {
 // Re-export reference as a top-level convenience too (alongside the subpath).
 export { reference } from "./reference.js";
 export {
+  estimateAttentionMemory,
   referenceFlashAttention,
   referenceFlashAttentionBackward,
+  referenceBlockedAttention,
+  referenceFusedAttention,
   type FlashAttentionBackwardResult,
   type FlashAttentionForwardResult,
   type FlashAttentionOptions,
+  type AttentionMemoryEstimate,
+  type AttentionMemoryEstimateInput,
+  type AttentionOptimizationOptions,
+  type AttentionOptimizationReferenceResult,
 } from "./reference.js";

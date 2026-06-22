@@ -3,15 +3,18 @@ import {
   createDevice,
   defineCuda1DProgram,
   defineKernel1DProgram,
+  estimateAttentionMemory,
   emitCuda1DProgramWgsl,
   emitKernel1DProgramWgsl,
   kernels,
   KernelError,
   reference,
+  referenceBlockedAttention,
   referenceExclusiveScan,
   referenceFindRepeats,
   referenceFlashAttention,
   referenceFlashAttentionBackward,
+  referenceFusedAttention,
   referenceOrderedCircleRender,
   referenceSaxpy,
   runCuda1DProgramWebGpu,
@@ -53,6 +56,9 @@ describe("public surface", () => {
     expect(typeof referenceExclusiveScan).toBe("function");
     expect(typeof referenceFindRepeats).toBe("function");
     expect(typeof referenceOrderedCircleRender).toBe("function");
+    expect(typeof estimateAttentionMemory).toBe("function");
+    expect(typeof referenceBlockedAttention).toBe("function");
+    expect(typeof referenceFusedAttention).toBe("function");
     expect(typeof referenceFlashAttention).toBe("function");
     expect(typeof referenceFlashAttentionBackward).toBe("function");
   });
@@ -78,6 +84,9 @@ describe("public surface", () => {
     expect(typeof reference.gelu).toBe("function");
     expect(typeof reference.layernorm).toBe("function");
     expect(typeof reference.attention).toBe("function");
+    expect(typeof reference.attentionMemory).toBe("function");
+    expect(typeof reference.attentionBlocked).toBe("function");
+    expect(typeof reference.attentionFused).toBe("function");
     expect(typeof reference.flashAttention).toBe("function");
     expect(typeof reference.flashAttentionBackward).toBe("function");
   });

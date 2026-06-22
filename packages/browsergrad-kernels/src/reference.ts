@@ -238,6 +238,112 @@ export function referenceAttention(Q: Tensor, K: Tensor, V: Tensor): Tensor {
   return referenceMatmul(weights, V);
 }
 
+export interface AttentionMemoryEstimateInput {
+  readonly queryLength: number;
+  readonly keyLength: number;
+  readonly queryDepth: number;
+  readonly valueDepth: number;
+  readonly blockSize?: number;
+}
+
+export interface AttentionMemoryEstimate {
+  readonly queryElements: number;
+  readonly keyElements: number;
+  readonly valueElements: number;
+  readonly outputElements: number;
+  readonly naiveScoreElements: number;
+  readonly naiveProbabilityElements: number;
+  readonly blockedScoreElements: number;
+  readonly fusedScoreElements: number;
+  readonly blockSize: number;
+}
+
+export interface AttentionOptimizationOptions {
+  readonly blockSize?: number;
+}
+
+export interface AttentionOptimizationReferenceResult {
+  readonly output: Tensor;
+  readonly memory: AttentionMemoryEstimate;
+}
+
+export function estimateAttentionMemory(
+  input: AttentionMemoryEstimateInput,
+): AttentionMemoryEstimate {
+  const {
+    queryLength,
+    keyLength,
+    queryDepth,
+    valueDepth,
+    blockSize = keyLength,
+  } = input;
+  for (const [name, value] of Object.entries({
+    queryLength,
+    keyLength,
+    queryDepth,
+    valueDepth,
+    blockSize,
+  })) {
+    if (!Number.isInteger(value) || value <= 0) {
+      throw new KernelError(`attention memory: ${name} must be a positive integer`);
+    }
+  }
+  const effectiveBlockSize = Math.min(blockSize, keyLength);
+  return {
+    queryElements: queryLength * queryDepth,
+    keyElements: keyLength * queryDepth,
+    valueElements: keyLength * valueDepth,
+    outputElements: queryLength * valueDepth,
+    naiveScoreElements: queryLength * keyLength,
+    naiveProbabilityElements: queryLength * keyLength,
+    blockedScoreElements: queryLength * effectiveBlockSize,
+    fusedScoreElements: 0,
+    blockSize: effectiveBlockSize,
+  };
+}
+
+export function referenceBlockedAttention(
+  Q: Tensor,
+  K: Tensor,
+  V: Tensor,
+  options: AttentionOptimizationOptions = {},
+): AttentionOptimizationReferenceResult {
+  const output = referenceAttention(Q, K, V);
+  const [queryLength, queryDepth] = Q.shape as [number, number];
+  const [keyLength] = K.shape as [number, number];
+  const [, valueDepth] = V.shape as [number, number];
+  return {
+    output,
+    memory: estimateAttentionMemory({
+      queryLength,
+      keyLength,
+      queryDepth,
+      valueDepth,
+      ...(options.blockSize === undefined ? {} : { blockSize: options.blockSize }),
+    }),
+  };
+}
+
+export function referenceFusedAttention(
+  Q: Tensor,
+  K: Tensor,
+  V: Tensor,
+): AttentionOptimizationReferenceResult {
+  const output = referenceAttention(Q, K, V);
+  const [queryLength, queryDepth] = Q.shape as [number, number];
+  const [keyLength] = K.shape as [number, number];
+  const [, valueDepth] = V.shape as [number, number];
+  return {
+    output,
+    memory: estimateAttentionMemory({
+      queryLength,
+      keyLength,
+      queryDepth,
+      valueDepth,
+    }),
+  };
+}
+
 export interface FlashAttentionOptions {
   readonly causal?: boolean;
   readonly scale?: number;
@@ -402,6 +508,9 @@ export const reference = {
   gelu: referenceGelu,
   layernorm: referenceLayerNorm,
   attention: referenceAttention,
+  attentionBlocked: referenceBlockedAttention,
+  attentionFused: referenceFusedAttention,
+  attentionMemory: estimateAttentionMemory,
   flashAttention: referenceFlashAttention,
   flashAttentionBackward: referenceFlashAttentionBackward,
 };

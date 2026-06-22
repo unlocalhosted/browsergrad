@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   reference,
   referenceAttention,
+  estimateAttentionMemory,
+  referenceBlockedAttention,
+  referenceFusedAttention,
   referenceGelu,
   referenceLayerNorm,
   referenceMatmul,
@@ -233,5 +236,53 @@ describe("referenceAttention", () => {
     const K = tensor([3, 6], new Float32Array(18));
     const V = tensor([3, 4], new Float32Array(12));
     expect(() => referenceAttention(Q, K, V)).toThrow(/Q dim/);
+  });
+
+  it("exposes blocked and fused attention references with memory estimates", () => {
+    const Q = tensor([2, 2], new Float32Array([1, 0, 0, 1]));
+    const K = tensor([2, 2], new Float32Array([1, 0, 0, 1]));
+    const V = tensor([2, 2], new Float32Array([10, 20, 30, 40]));
+    const naive = referenceAttention(Q, K, V);
+    const blocked = referenceBlockedAttention(Q, K, V, { blockSize: 1 });
+    const fused = referenceFusedAttention(Q, K, V);
+
+    expectClose(blocked.output.data, [...naive.data]);
+    expectClose(fused.output.data, [...naive.data]);
+    expect(blocked.memory).toEqual({
+      queryElements: 4,
+      keyElements: 4,
+      valueElements: 4,
+      outputElements: 4,
+      naiveScoreElements: 4,
+      naiveProbabilityElements: 4,
+      blockedScoreElements: 2,
+      fusedScoreElements: 0,
+      blockSize: 1,
+    });
+    expect(fused.memory.fusedScoreElements).toBe(0);
+    expect(reference.attentionBlocked).toBe(referenceBlockedAttention);
+    expect(reference.attentionFused).toBe(referenceFusedAttention);
+  });
+
+  it("estimates attention memory from explicit dimensions", () => {
+    expect(
+      estimateAttentionMemory({
+        queryLength: 4,
+        keyLength: 8,
+        queryDepth: 16,
+        valueDepth: 32,
+        blockSize: 3,
+      }),
+    ).toMatchObject({
+      queryElements: 64,
+      keyElements: 128,
+      valueElements: 256,
+      outputElements: 128,
+      naiveScoreElements: 32,
+      naiveProbabilityElements: 32,
+      blockedScoreElements: 12,
+      fusedScoreElements: 0,
+      blockSize: 3,
+    });
   });
 });
