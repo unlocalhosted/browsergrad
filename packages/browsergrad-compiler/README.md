@@ -25,6 +25,7 @@ Compatibility vocabulary:
 import { createDevice } from "@unlocalhosted/browsergrad-kernels";
 import {
   compileCudaLiteKernel,
+  createCudaHostDynamicLaunchPlan,
   runCompiledKernelReference,
   runCompiledKernelWebGpu,
 } from "@unlocalhosted/browsergrad-compiler";
@@ -98,8 +99,22 @@ compileCudaLiteKernel(source, {
 ```
 
 `runCompiledKernelReference` executes child kernels against shared buffers and
-memory pools. `runCompiledKernelWebGpu` rejects device launches until host-side
-orchestration exists, so GPU output is never silently wrong.
+memory pools.
+
+`runCompiledKernelWebGpu` can host-lift conservative child launches into a real
+WebGPU dispatch sequence when the parent launch has one workgroup, the child
+block size is host-evaluable, pointer args alias named storage buffers, and
+child scalar args come from host-evaluable expressions. Inspect this before
+dispatching:
+
+```ts
+const plan = createCudaHostDynamicLaunchPlan(compiled, input, launch);
+console.log(plan.supported, plan.reason);
+```
+
+Pointer-offset launches, recursive launches, device-derived launch args, and
+parent side effects after launch stay reference-only so GPU output is never
+silently wrong.
 
 ## CUDA Runtime Reference Calls
 
@@ -118,7 +133,8 @@ BrowserGrad owns host/device orchestration for runtime calls.
 
 ## Cooperative Grid Sync
 
-`cg::grid_group::sync()` is also reference-only for now:
+`cg::grid_group::sync()` has CPU reference truth and a WebGPU phase-splitting
+path for safe top-level uniform barriers:
 
 ```ts
 compileCudaLiteKernel(source, {
@@ -129,8 +145,10 @@ compileCudaLiteKernel(source, {
 The CPU reference scheduler runs all blocks in lockstep at grid barriers, so
 block-0 reduction patterns see writes from every block. WebGPU runs safe
 top-level uniform `grid.sync()` as multiple dispatch phases over shared GPU
-buffers. Kernels with private locals/shared memory crossing `grid.sync()` still
-stay reference-only until broader orchestration lands.
+buffers. Pure launch-derived locals are replayed in later phases, and shared
+memory reuse is allowed when the phase rewrites it before reading. Non-uniform
+sync, non-replayable locals, and shared-memory read-before-rewrite stay
+reference-only.
 
 Use `createCudaLoweringPlan(diagnostics)` and `describeCudaDiagnostic()` to group
 compatibility gaps by semantic family instead of raw parser messages.
