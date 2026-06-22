@@ -314,7 +314,9 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   `simulation.partitionStaticWork()` so CS149 A1-style rubrics can check fake-SIMD
   clamped exponentiation, vector reductions, active-lane utilization, tail
   masks, and static contiguous/cyclic thread decomposition without native C++,
-  AVX2, ISPC, or host timing.
+  AVX2, ISPC, or host timing. CraftingAttention loads the real A1 benchmark
+  profile, runs the JavaScript profile route with `_bg_cpu_parallelism`, and
+  verifies each CPU/SIMD simulator family through the platform e2e suite.
 - Task-graph guarantee: the same package exports
   `simulation.createTaskGraphSimulator()` so CS149-style task-system rubrics can model
   dependency readiness, deterministic worker assignment, task start/finish

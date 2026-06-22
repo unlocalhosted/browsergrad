@@ -47,7 +47,11 @@ Crafting Attention should:
    `createAssignmentPreflightReport()`.
    For execution, call `runAssignmentJavascriptProfile()` with the imported JS
    rubric and `_bg_cpu_parallelism`; BrowserGrad has an e2e test proving this
-   exact profile-driven route.
+   exact profile-driven route. CraftingAttention now also has a platform e2e
+   that loads the real `cs149-assignment1.profile.json`, runs the JS profile
+   with `_bg_cpu_parallelism`, and verifies static thread decomposition,
+   clamped-exp SIMD tail masks, vector sum reductions, ISPC-style cyclic tasks,
+   and K-means-style partitioning.
 2. Treat `simd-simulator`, `pthreads-simulator`, `ispc-simulator`, and
    `performance-rubric` as simulated/browser-safe teaching capabilities.
 3. Mount a JS rubric that calls the simulator helpers and reports structured

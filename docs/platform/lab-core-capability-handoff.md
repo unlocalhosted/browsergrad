@@ -411,7 +411,11 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     `simulation.simulateVectorizedClampedExp()`,
     `simulation.simulateVectorizedArraySum()`, and
     `simulation.partitionStaticWork()` to check clamped exponentiation, vector sums,
-    active-lane utilization, tails, and static work partitioning.
+    active-lane utilization, tails, and static work partitioning. CraftingAttention
+    now has a platform e2e that loads
+    `docs/internal/cs149-assignment1.profile.json`, runs the JavaScript profile
+    route with `_bg_cpu_parallelism`, and checks static decomposition,
+    SIMD tail-mask behavior, vector reductions, and cyclic ISPC-style tasks.
     CS336 A4 data labs can use `@unlocalhosted/browsergrad-primitives`
     `createDataCleaningReference()` for visible HTML extraction, exact line
     dedupe, MinHash near dedupe, PII masking, and Gopher-style quality checks.
