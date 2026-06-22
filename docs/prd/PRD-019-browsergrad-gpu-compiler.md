@@ -1,92 +1,140 @@
 # PRD-019 — BrowserGrad GPU Compiler
 
-## Problem
+## Problem Statement
 
-BrowserGrad can already run handwritten WGSL kernels and a small `Kernel1D`
-program IR through real WebGPU. The missing layer is a learner-facing compiler:
-students should be able to write CUDA/HIP-shaped kernels in the browser, inspect
-what BrowserGrad understood, run a deterministic CPU reference, then dispatch
-the same program on WebGPU.
+BrowserGrad can run handwritten WGSL kernels and a small `Kernel1D` IR through
+real WebGPU, but learners still cannot write CUDA/HIP-shaped kernels in the
+browser and get a native-feeling compile/run/debug loop. Without that compiler
+layer, GPU Puzzles, CS149, CS336 systems, and future ML-kernel labs either use
+handwritten WGSL or stay simulator-only.
 
-HipScript proves a browser CUDA/HIP path is possible by chaining Clang,
-chipStar, clspv, and Tint. BrowserGrad should not make that heavy toolchain the
-default. The fast path should be BrowserGrad-owned, inspectable, and small:
-CUDA-lite source -> Kernel IR -> WGSL -> WebGPU.
+The goal is not to clone a Linux CUDA box. The goal is browser-native GPU
+programming that is honest, inspectable, and ambitious: CUDA-lite source lowers
+to BrowserGrad Kernel IR, emits WGSL, runs a deterministic CPU reference, then
+dispatches on WebGPU.
 
-## Research Defaults
-
-- HipScript is the compatibility north star, not the default architecture. Its
-  LLVM-derived path can become an optional power backend after the small path is
-  solid.
-- WebGPU/WGSL are the native browser kernel target. Current browser primitives
-  worth exploiting are workgroup memory, barriers, atomics, `shader-f16`,
-  subgroups, and WebGPU compatibility mode.
-- WASM threads, JSPI, and Memory64 are useful for future heavy compiler bundles,
-  especially a browser LLVM worker. They are not required for the v0 compiler.
-- WebNN is a future graph/inference island backend. It is not a custom kernel
-  authoring target.
-
-## Decision
+## Solution
 
 Add `@unlocalhosted/browsergrad-compiler`, a generic compiler package that owns
 parsing, analysis, Kernel IR, reference execution, WGSL emission, and WebGPU
 handoff. Keep `@unlocalhosted/browsergrad-kernels` as the runtime substrate for
-devices, bindings, and dispatch.
+devices, typed storage/uniform bindings, feature detection, and dispatch.
 
-## Public API
+Default path: BrowserGrad-owned CUDA-lite -> Kernel IR -> WGSL -> WebGPU.
+HipScript-style LLVM/chipStar/clspv/Tint compatibility remains a future power
+backend, not the first dependency.
 
-- `parseCudaLite(source)` parses CUDA-lite source and returns an AST with source
-  spans.
-- `analyzeCudaLite(ast, options?)` validates the supported subset and reports
-  feature requirements.
-- `lowerCudaLiteToKernelIr(ast, options?)` lowers the selected kernel into a
-  dimension-agnostic Kernel IR.
-- `emitKernelIrWgsl(module, options?)` emits WGSL with feature-gated extensions.
-- `compileCudaLiteKernel(source, options?)` returns the analyzed IR, WGSL,
-  bindings, diagnostics, and required features.
-- `runCompiledKernelReference(compiled, inputs, launch)` executes the IR in a
-  lockstep CPU interpreter with block-local shared memory.
-- `runCompiledKernelWebGpu(device, compiled, inputs, launch)` dispatches the
-  emitted WGSL through `@unlocalhosted/browsergrad-kernels`.
+## User Stories
 
-## CUDA-Lite v0
+1. As a learner, I want to write SAXPY in CUDA-lite syntax, so that I can run one kernel against both a CPU reference and real WebGPU in the browser.
+2. As a systems-lab author, I want to use shared memory and `__syncthreads()` in a tiled matmul lab, so that I can teach GPU locality without shipping a native CUDA toolchain.
+3. As a platform author, I want compiler diagnostics with source spans, so that unsupported features, divergent barriers, missing feature gates, and unsafe pointer writes become clear learner feedback.
+4. As a future compiler agent, I want a generic Kernel IR, so that I can extend toward 2D/3D kernels, atomics, f16, subgroups, and optional LLVM compatibility without renaming the public surface around one assignment.
 
-Supported:
+## Research Dossier
 
-- `__global__ void kernel(...)`
-- `float*`, `int*`, `uint*`, and `const` pointer params
-- scalar params: `int`, `uint`, `float`, `half`
-- `threadIdx`, `blockIdx`, `blockDim`, and `gridDim` `.x/.y/.z`
-- declarations, assignments, array reads/writes, `if`, and canonical `for`
-- arithmetic, comparisons, boolean ops, `min`, `max`, `sqrtf`, `expf`, `logf`
-- fixed-size `__shared__` arrays
-- `__syncthreads()`
-- `atomicAdd` for `i32/u32`
+- Repo exploration: `@unlocalhosted/browsergrad-kernels` already ships
+  `runThreadGrid()`, `defineKernel1DProgram()`, `emitKernel1DProgramWgsl()`,
+  `runKernel1DProgramWebGpu()`, real WebGPU tests, and a device/pipeline
+  substrate. PRD-019 builds on that seam.
+- Repo exploration: `docs/platform/kernel-lab-foundation.md` already chooses a
+  browser-native kernel core around WebGPU/WGSL and treats HipScript/gpu.cpp as
+  design references rather than mandatory dependencies.
+- HipScript: https://lights0123.com/blog/2025/01/07/hip-script/ proves CUDA/HIP
+  can run in browser by chaining chipStar, clspv, and Tint, but that path is
+  heavyweight for the default educational loop.
+- WGSL/WebGPU: https://www.w3.org/TR/WGSL/ is the browser-native shader target.
+  It exposes workgroup memory, barriers, atomics, f16, and subgroup builtins in
+  the language/spec surface.
+- Chrome WebGPU subgroups: https://developer.chrome.com/blog/new-in-webgpu-134
+  documents subgroup availability and explicit WGSL enablement.
+- Chrome WebGPU compatibility mode:
+  https://developer.chrome.com/blog/new-in-webgpu-146 documents the broader
+  compatibility path and its restricted feature posture.
+- WASM threads: https://emscripten.org/docs/porting/pthreads.html documents the
+  COOP/COEP and `SharedArrayBuffer` requirement for threaded compiler bundles.
+- JSPI: https://v8.dev/blog/jspi documents the future-friendly async bridge for
+  large WASM applications.
+- WebNN: https://www.w3.org/TR/webnn/ is valuable for graph/inference islands,
+  not for custom kernel authoring.
 
-Explicit errors:
+## Grill Decisions
 
-- broad C++ syntax, templates, classes, dynamic shared memory, device function
-  definitions, pointer arithmetic outside array indexing, divergent barriers,
-  writes through `const` pointers, unsupported atomics, and subgroup/f16 use
-  when unavailable.
+1. Question: Should the default path be LLVM/HipScript-style or BrowserGrad IR?
+   Recommended answer: BrowserGrad IR first.
+   Decision: Ship a small CUDA-lite compiler first; keep LLVM as optional
+   future backend.
+2. Question: Should v0 syntax be CUDA-lite, Triton-like, or WGSL macros?
+   Recommended answer: CUDA-lite.
+   Decision: CUDA-lite best fits GPU Puzzles, CS149, CS336 systems, and
+   HipScript compatibility pressure.
+3. Question: Should Pyodide be required for compiler labs?
+   Recommended answer: No.
+   Decision: Compiler/reference/WebGPU paths are pure TS/JS. Python rubrics may
+   call them through platform bridges later.
+4. Question: Should missing f16/subgroups silently fall back?
+   Recommended answer: No.
+   Decision: Emit deterministic feature diagnostics so labs teach the real GPU
+   capability boundary.
 
-## Implementation Notes
+## Novelty Reach
 
-- The compiler package is a real package seam. Parser/analyzer/IR/codegen would
-  bloat either runtime or kernels if embedded there.
-- Diagnostics must include source spans and stable codes so platform rubrics can
-  render helpful learner feedback.
-- Reference execution must be independent of WebGPU and Pyodide.
-- WGSL emission must keep the GPU model visible: storage buffers, uniforms,
-  workgroups, shared memory, and barriers should map directly to inspectable
-  source.
+- Novel idea selected: lockstep CPU execution from the same Kernel IR as WGSL
+  emission. This gives correctness, traces, and barrier teaching before real
+  GPU dispatch.
+- Novel idea selected: feature-specialized compile diagnostics for browser
+  primitives (`shader-f16`, subgroups, compatibility mode) instead of pretending
+  every browser is CUDA.
+- Novel idea selected: keep CUDA/HIP-like syntax as a frontend over BrowserGrad
+  IR. This lets future Triton-like or LLVM backends reuse the same reference,
+  diagnostics, and platform capability vocabulary.
 
-## Acceptance
+## Implementation Decisions
 
-- SAXPY compiles from CUDA-lite source to WGSL and runs through CPU reference
-  and real WebGPU.
-- A tiled matmul fixture uses `__shared__` memory and `__syncthreads()`.
-- `half` and subgroup intrinsics produce deterministic feature diagnostics.
-- Generic WGSL runner supports typed storage buffers, uniform bytes, selected
-  readbacks, 1D/2D/3D dispatch, and structured shader compile failures.
-- Browser tests prove real WebGPU dispatch, not just mock execution.
+- Add public compiler APIs:
+  `parseCudaLite`, `analyzeCudaLite`, `lowerCudaLiteToKernelIr`,
+  `emitKernelIrWgsl`, `compileCudaLiteKernel`,
+  `runCompiledKernelReference`, and `runCompiledKernelWebGpu`.
+- Add generic kernel APIs in `browsergrad-kernels`:
+  `detectKernelFeatures`, `defineWgslKernelProgram`, and
+  `runWgslKernelProgram`.
+- Support CUDA-lite v0: `__global__ void`, pointer/scalar params, builtins
+  `threadIdx/blockIdx/blockDim/gridDim`, declarations, assignment, array
+  indexing, `if`, canonical `for`, fixed `__shared__` arrays,
+  `__syncthreads()`, `min/max/sqrtf/expf/logf`, and `atomicAdd` for `i32/u32`.
+- Emit explicit errors for broad C++, templates, classes, dynamic shared memory,
+  device function definitions, divergent barriers, const-pointer writes,
+  unsupported atomics, and unavailable f16/subgroup features.
+- Add examples: SAXPY, guarded map, and shared-memory tiled matmul.
+- Add platform capability vocabulary: `cuda-lite-compiler`.
+
+## Testing Decisions
+
+- Unit tests cover parser/analyzer diagnostics, SAXPY compilation, shared-memory
+  tiled matmul, WGSL emission, feature gates, and the CPU reference interpreter.
+- Browser tests compile SAXPY and tiled matmul, dispatch them on real WebGPU,
+  and compare against the CPU reference.
+- Kernel package tests cover generic WGSL binding validation, feature detection,
+  and real WebGPU typed storage/uniform dispatch.
+- Required gates:
+  `pnpm --filter @unlocalhosted/browsergrad-kernels test`,
+  `pnpm --filter @unlocalhosted/browsergrad-kernels test:browser`,
+  `pnpm --filter @unlocalhosted/browsergrad-compiler test`,
+  `pnpm --filter @unlocalhosted/browsergrad-compiler test:browser`,
+  plus build/typecheck for both packages.
+
+## Out of Scope
+
+- Full CUDA/HIP/C++ compatibility.
+- Browser LLVM/chipStar/clspv/Tint bundle.
+- Triton-compatible syntax.
+- Device functions, templates, classes, warp intrinsics, dynamic shared memory,
+  and broad CUDA runtime APIs.
+- Pyodide-specific assignment wiring or CraftingAttention platform e2e.
+
+## Further Notes
+
+The v0 compiler is intentionally small. It should feel more native than a
+simulator because it reaches real WebGPU, but more teachable than a giant
+browser LLVM bundle because every stage is inspectable: source, AST, Kernel IR,
+WGSL, CPU trace, and GPU output.
