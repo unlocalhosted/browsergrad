@@ -13,6 +13,7 @@ const corpusRoot = path.resolve(corpusPathArg);
 const compilerUrl = pathToFileURL(path.resolve("packages/browsergrad-compiler/dist/index.js")).href;
 const { compileCudaLiteKernel, describeCudaDiagnostic } = await import(compilerUrl);
 const CUDA_HINT_RE = /__global__|cuda[A-Z]|<<<|threadIdx|blockIdx|__shared__/;
+const NON_CODE_BLOCK_LANG_RE = /^(?:mermaid|flowchart|graphviz|dot|plantuml|text|txt)$/iu;
 
 const files = listFiles(corpusRoot)
   .filter((file) => /\.(?:md|markdown|cu|cuh|cpp|cc|cxx|h|hpp)$/i.test(file))
@@ -29,6 +30,7 @@ for (const file of files) {
   let carriedDefines = new Map();
   codeBlocks += blocks.length;
   for (const [blockIndex, block] of blocks.entries()) {
+    if (isDocumentationDiagramBlock(block)) continue;
     const blockDefines = collectObjectDefines(block.code);
     const blockFunctionDefines = collectFunctionDefines(block.code);
     const blockDeviceFunctions = collectScalarDeviceFunctions(block.code);
@@ -66,6 +68,11 @@ for (const file of files) {
     }
     carriedDefines = mergeCarriedDefines(carriedDefines, blockDefines);
   }
+}
+
+function isDocumentationDiagramBlock(block) {
+  if (NON_CODE_BLOCK_LANG_RE.test(block.lang)) return true;
+  return /^\s*(?:flowchart|graph)\s+(?:LR|RL|TB|TD|BT)\b/iu.test(block.code);
 }
 
 const failures = results.filter((result) => !result.ok);

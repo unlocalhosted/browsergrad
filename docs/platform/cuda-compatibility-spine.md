@@ -33,7 +33,8 @@ truth, WGSL lowering, browser tests, and corpus audit evidence.
 
 Current corpus gate:
 
-- `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/247` kernel definitions compile.
+- `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/246` code-kernel definitions compile
+  after filtering documentation diagram blocks.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, and WebGPU
   atomic offset updates.
