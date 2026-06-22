@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createWgslFloat16Array } from "@unlocalhosted/browsergrad-kernels";
 import {
   CudaLiteCompilerError,
   analyzeCudaLite,
@@ -2417,10 +2418,10 @@ __global__ void half_scale(half* x, half a) {
     expect(halfScalar.wgsl).toContain("@align(4) a: f16");
     const halfResult = runCompiledKernelReference(
       halfScalar,
-      { buffers: { x: new Float16Array([1]) }, scalars: { a: 2 } },
+      { buffers: { x: createWgslFloat16Array([1]) }, scalars: { a: 2 } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
-    expect([...halfResult.buffers.x as Float16Array]).toEqual([3]);
+    expect(Array.from(halfResult.buffers.x as Iterable<number>)).toEqual([3]);
     expect(() =>
       runCompiledKernelReference(
         halfScalar,
@@ -2487,8 +2488,8 @@ __global__ void half_convert(const half* input, half* output, int* flag) {
       compiled,
       {
         buffers: {
-          input: new Float16Array([1.5]),
-          output: new Float16Array(1),
+          input: createWgslFloat16Array([1.5]),
+          output: createWgslFloat16Array(1),
           flag: new Int32Array([0]),
         },
       },
@@ -2498,7 +2499,7 @@ __global__ void half_convert(const half* input, half* output, int* flag) {
     expect(compiled.wgsl).toContain("f32(input[idx])");
     expect(compiled.wgsl).toContain("f16((value * 2.0))");
     expect(compiled.wgsl).toContain("1e6");
-    expect([...result.buffers.output as Float16Array]).toEqual([3]);
+    expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([3]);
     expect([...result.buffers.flag as Int32Array]).toEqual([1]);
   });
 

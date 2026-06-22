@@ -34,6 +34,7 @@ export interface WgslStorageBufferDescriptor {
 export interface KernelFeatureSet {
   readonly webgpu: boolean;
   readonly shaderF16: boolean;
+  /** BrowserGrad can create f16 storage arrays, using native Float16Array or its explicit helper. */
   readonly float16Array: boolean;
   readonly subgroups: boolean;
   readonly compatibilityMode: boolean;

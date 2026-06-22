@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   createDevice,
+  createWgslFloat16Array,
   createWgslStorageBuffer,
   destroyWgslStorageBuffer,
   detectKernelFeatures,
@@ -1314,11 +1315,11 @@ __global__ void half_inc(half* x) {
       features: { "shader-f16": true },
       workgroupSize: [1, 1, 1],
     });
-    const input = { buffers: { x: new Float16Array([1]) } };
+    const input = { buffers: { x: createWgslFloat16Array([1]) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(device, compiled, input, launch);
 
-    expect([...actual.buffers.x as Float16Array]).toEqual([...expected.buffers.x as Float16Array]);
+    expect(Array.from(actual.buffers.x as Iterable<number>)).toEqual(Array.from(expected.buffers.x as Iterable<number>));
   });
 });

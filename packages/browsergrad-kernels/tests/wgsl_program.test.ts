@@ -6,6 +6,7 @@ import {
   float16BitsToFloat32,
   float32ToFloat16Bits,
   getWgslFloat16ArrayConstructor,
+  installWgslFloat16ArrayPolyfill,
 } from "../src/index";
 
 describe("generic WGSL kernel programs", () => {
@@ -46,6 +47,26 @@ describe("generic WGSL kernel programs", () => {
     expect(float32ToFloat16Bits(1.5)).toBe(0x3e00);
     expect(float16BitsToFloat32(0x3e00)).toBe(1.5);
     expect([...fromBytes]).toEqual([1.5, 3]);
+  });
+
+  it("keeps global Float16Array install explicit", () => {
+    const target = globalThis as typeof globalThis & { Float16Array?: unknown };
+    const original = Object.getOwnPropertyDescriptor(target, "Float16Array");
+    if (original && !original.configurable) return;
+
+    try {
+      Reflect.deleteProperty(target, "Float16Array");
+      expect(target.Float16Array).toBeUndefined();
+      expect([...createWgslFloat16Array([2])]).toEqual([2]);
+      expect(target.Float16Array).toBeUndefined();
+
+      const Constructor = installWgslFloat16ArrayPolyfill();
+      expect(target.Float16Array).toBe(Constructor);
+      expect([...new Constructor([3])]).toEqual([3]);
+    } finally {
+      if (original) Object.defineProperty(target, "Float16Array", original);
+      else Reflect.deleteProperty(target, "Float16Array");
+    }
   });
 
   it("supports texture2d bindings explicitly", () => {
@@ -99,7 +120,7 @@ describe("generic WGSL kernel programs", () => {
 
     expect(result.webgpu).toBe(true);
     expect(result.shaderF16).toBe(true);
-    expect(result.float16Array).toBe(typeof Float16Array !== "undefined");
+    expect(result.float16Array).toBe(true);
     expect(result.subgroups).toBe(true);
     expect(result.features).toEqual(["shader-f16", "subgroups"]);
   });

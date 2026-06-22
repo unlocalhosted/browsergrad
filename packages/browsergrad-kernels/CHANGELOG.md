@@ -53,7 +53,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   buffers that are not bound by any sequence step.
 - `createWgslFloat16Array()` and float16 conversion helpers provide a small
   JS `Float16Array` backing path when the host runtime has WebGPU `shader-f16`
-  support but Node/browser JS lacks the typed array constructor.
+  support but Node/browser JS lacks the typed array constructor. Global
+  `Float16Array` installation is explicit via `installWgslFloat16ArrayPolyfill()`.
 
 ### Fixed
 
