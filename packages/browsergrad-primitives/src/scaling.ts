@@ -310,7 +310,37 @@ function cloneFinalSubmission(
 }
 
 function cloneStatus(status: ExperimentStatus): ExperimentStatus {
-  return cloneJsonObject(status as unknown as JsonObject) as unknown as ExperimentStatus;
+  switch (status.status_type) {
+    case "queued":
+      return {
+        status_type: "queued",
+        queued_at: status.queued_at,
+      };
+    case "running":
+      return {
+        status_type: "running",
+        queued_at: status.queued_at,
+        dispatched_at: status.dispatched_at,
+        run_id: status.run_id,
+      };
+    case "completed":
+      return {
+        status_type: "completed",
+        queued_at: status.queued_at,
+        ...(status.dispatched_at ? { dispatched_at: status.dispatched_at } : {}),
+        completed_at: status.completed_at,
+        used_runtime_seconds: status.used_runtime_seconds,
+      };
+    case "failed":
+      return {
+        status_type: "failed",
+        queued_at: status.queued_at,
+        ...(status.dispatched_at ? { dispatched_at: status.dispatched_at } : {}),
+        failed_at: status.failed_at,
+        used_runtime_seconds: status.used_runtime_seconds,
+        ...(status.detail ? { detail: status.detail } : {}),
+      };
+  }
 }
 
 function cloneJsonObject(value: JsonObject): JsonObject {
