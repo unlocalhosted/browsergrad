@@ -1411,9 +1411,15 @@ __global__ void mathy(float *x, float *out) {
       sinf(value) +
       cosf(value) +
       tanf(value) +
+      tanhf(value) +
+      coshf(value) +
+      sqrt(fabsf(value)) +
+      sqrtf(fabsf(value)) +
       powf(fabsf(value), 2.0f) +
       fminf(value, 1.0f) +
-      fmaxf(value, -1.0f);
+      fmaxf(value, -1.0f) +
+      fma(value, 2.0f, 1.0f) +
+      fmaf(value, -1.0f, 0.5f);
   }
 }`, { workgroupSize: [2, 1, 1] });
     const input = new Float32Array([-1.25, 0.6]);
@@ -1431,9 +1437,14 @@ __global__ void mathy(float *x, float *out) {
     expect(compiled.wgsl).toContain("sin(value)");
     expect(compiled.wgsl).toContain("cos(value)");
     expect(compiled.wgsl).toContain("tan(value)");
+    expect(compiled.wgsl).toContain("tanh(value)");
+    expect(compiled.wgsl).toContain("cosh(value)");
+    expect(compiled.wgsl).toContain("sqrt(abs(value))");
     expect(compiled.wgsl).toContain("pow(abs(value), 2.0)");
     expect(compiled.wgsl).toContain("min(value, 1.0)");
     expect(compiled.wgsl).toContain("max(value, (-1.0))");
+    expect(compiled.wgsl).toContain("fma(value, 2.0, 1.0)");
+    expect(compiled.wgsl).toContain("fma(value, (-1.0), 0.5)");
     const expected = [...input].map((value) =>
       Math.abs(value) +
       Math.floor(value) +
@@ -1443,9 +1454,15 @@ __global__ void mathy(float *x, float *out) {
       Math.sin(value) +
       Math.cos(value) +
       Math.tan(value) +
+      Math.tanh(value) +
+      Math.cosh(value) +
+      Math.sqrt(Math.abs(value)) +
+      Math.sqrt(Math.abs(value)) +
       Math.pow(Math.abs(value), 2) +
       Math.min(value, 1) +
-      Math.max(value, -1)
+      Math.max(value, -1) +
+      (value * 2 + 1) +
+      (value * -1 + 0.5)
     );
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(expected[0]!, 5);
     expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
@@ -2776,6 +2793,53 @@ __global__ void half_convert(const half* input, half* output, int* flag) {
     expect(compiled.wgsl).toContain("1e6");
     expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([3]);
     expect([...result.buffers.flag as Int32Array]).toEqual([1]);
+  });
+
+  it("lowers scalar CUDA half arithmetic and comparison intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void half_ops(const __half* input, half* output, int* flags) {
+  int idx = threadIdx.x;
+  if (idx < 1) {
+    half a = input[0];
+    half b = input[1];
+    half sum = __hadd(a, b);
+    half diff = __hsub(sum, __float2half(0.5f));
+    half prod = __hmul(diff, __float2half(2.0f));
+    half quot = __hdiv(prod, __float2half(2.0f));
+    half neg = __hneg(quot);
+    half mixed = __hfma(neg, __float2half(-1.0f), __float2half(0.25f));
+    half one = hexp(__float2half(0.0f));
+    half capped = __hmax(__hmin(mixed, __float2half(3.0f)), one);
+    output[0] = capped;
+    if (__hgt(capped, __float2half(1.0f))) { flags[0] = 1; }
+    if (__heq(__hsub(capped, __float2half(0.5f)), __float2half(1.0f))) { flags[1] = 1; }
+    if (__hne(capped, __float2half(0.5f))) { flags[2] = 1; }
+    if (__hge(capped, __float2half(1.5f))) { flags[3] = 1; }
+    if (__hlt(__float2half(1.0f), capped)) { flags[4] = 1; }
+    if (__hle(capped, __float2half(1.5f))) { flags[5] = 1; }
+  }
+}`, {
+      features: { "shader-f16": true },
+      workgroupSize: [1, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          input: createWgslFloat16Array([1.5, 0.25]),
+          output: createWgslFloat16Array(1),
+          flags: new Int32Array(6),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fma(");
+    expect(compiled.wgsl).toContain("f16(exp(f32(f16(0.0))))");
+    expect(compiled.wgsl).toContain("min(mixed, f16(3.0))");
+    expect(compiled.wgsl).toContain("max(");
+    expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([1.5]);
+    expect([...result.buffers.flags as Int32Array]).toEqual([1, 1, 1, 1, 1, 1]);
   });
 
   it("emits atomic storage buffers with explicit load/store operations", () => {

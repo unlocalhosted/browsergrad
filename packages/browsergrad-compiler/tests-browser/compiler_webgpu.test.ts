@@ -78,9 +78,15 @@ __global__ void floatMath(float *x, float *out) {
       sinf(value) +
       cosf(value) +
       tanf(value) +
+      tanhf(value) +
+      coshf(value) +
+      sqrt(fabsf(value)) +
+      sqrtf(fabsf(value)) +
       powf(fabsf(value), 2.0f) +
       fminf(value, 1.0f) +
-      fmaxf(value, -1.0f);
+      fmaxf(value, -1.0f) +
+      fma(value, 2.0f, 1.0f) +
+      fmaf(value, -1.0f, 0.5f);
   }
 }
 `;
@@ -1416,8 +1422,9 @@ __global__ void atomic_exchange(float* x, float* out) {
     const source = `
 __global__ void half_inc(half* x) {
   if (threadIdx.x < 1) {
-    float value = __half2float(x[0]);
-    x[0] = __float2half(value + 1.0);
+    half one = hexp(__float2half(0.0));
+    half scaled = __hfma(x[0], __float2half(1.0), one);
+    x[0] = __hmax(__hmin(scaled, __float2half(4.0)), one);
   }
 }`;
     const compiled = compileCudaLiteKernel(source, {

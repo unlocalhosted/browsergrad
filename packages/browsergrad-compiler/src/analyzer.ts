@@ -18,27 +18,13 @@ import {
   type SourceSpan,
 } from "./types.js";
 import { collectKernelLaunchCallees } from "./ast_queries.js";
+import { CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 
 const DEFAULT_WORKGROUP_SIZE: readonly [number, number, number] = [256, 1, 1];
 const BUILTIN_VECTORS = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]);
 const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
+  ...CUDA_INTRINSICS.map((intrinsic) => [intrinsic.name, intrinsic.arity] as const),
   ["__syncthreads", [0, 0]],
-  ["sqrtf", [1, 1]],
-  ["expf", [1, 1]],
-  ["logf", [1, 1]],
-  ["fabsf", [1, 1]],
-  ["floorf", [1, 1]],
-  ["ceilf", [1, 1]],
-  ["roundf", [1, 1]],
-  ["truncf", [1, 1]],
-  ["sinf", [1, 1]],
-  ["cosf", [1, 1]],
-  ["tanf", [1, 1]],
-  ["powf", [2, 2]],
-  ["fminf", [2, 2]],
-  ["fmaxf", [2, 2]],
-  ["__half2float", [1, 1]],
-  ["__float2half", [1, 1]],
   ["__shfl_down_sync", [3, 4]],
   ["__shfl_up_sync", [3, 4]],
   ["__shfl_xor_sync", [3, 4]],
@@ -678,14 +664,18 @@ function validateCallExpression(
     validateAtomicBuiltin(expression, scope, params, atomicParams, atomicShared, diagnostics, walkExpression);
     return { kind: "scalar" };
   }
-  if (callName === "__half2float" || callName === "__float2half") {
-    requiredFeatures.add("shader-f16");
+  const intrinsic = CUDA_INTRINSICS_BY_NAME.get(callName);
+  if (intrinsic) {
+    for (const feature of intrinsic.requiredFeatures ?? []) requiredFeatures.add(feature);
+    let argumentValueType: ValueType | undefined;
     for (const arg of expression.args) {
-      validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+      const info = walkExpression(arg, scope);
+      validateScalarOperand(info, arg.span, diagnostics);
+      argumentValueType ??= info.valueType;
     }
     return {
       kind: "scalar",
-      valueType: callName === "__half2float" ? "float" : "half",
+      valueType: intrinsic.returnType === "argument1" ? argumentValueType : intrinsic.returnType,
     };
   }
   if (isShuffleBuiltin(callName)) {

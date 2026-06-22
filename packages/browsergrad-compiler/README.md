@@ -97,8 +97,13 @@ the same source repeatedly. It uses deterministic option keys plus bounded LRU
 eviction; set `maxEntries: 0` to preserve the same call shape while disabling
 caching.
 Common CUDA float math helpers lower natively in both WGSL and CPU reference:
-`sqrtf`, `expf`, `logf`, `fabsf`, `floorf`, `ceilf`, `roundf`, `truncf`,
-`sinf`, `cosf`, `tanf`, `powf`, `fminf`, and `fmaxf`.
+`sqrt`, `sqrtf`, `expf`, `logf`, `fabsf`, `floorf`, `ceilf`, `roundf`,
+`truncf`, `sinf`, `cosf`, `tanf`, `tanhf`, `coshf`, `powf`, `fminf`,
+`fmaxf`, `fma`, and `fmaf`.
+Scalar half helpers lower behind `shader-f16`: `__half2float`, `__float2half`,
+`hexp`, `__hadd`, `__hsub`, `__hmul`, `__hdiv`, `__hneg`, `__hfma`,
+`__hmin`, `__hmax`, `__heq`, `__hne`, `__hgt`, `__hge`, `__hlt`, and
+`__hle`.
 Common C/CUDA integer spellings are accepted for learner kernels: `signed`,
 `unsigned`, `short`, `long`, `long long`, `size_t`, `int32_t`, `uint32_t`,
 `int64_t`, `uint64_t`, and `uintptr_t`. Current WebGPU lowering maps them onto

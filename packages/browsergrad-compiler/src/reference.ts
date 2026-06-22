@@ -4,6 +4,7 @@ import {
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./ast_queries.js";
+import { CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import {
   CudaLiteCompilerError,
@@ -1044,6 +1045,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     context,
   );
   const args = expression.args.map((arg) => evalNumber(arg, context));
+  const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
+  if (intrinsic?.evaluate) return intrinsic.evaluate(args);
   switch (name) {
     case "__syncthreads":
       return 0;
@@ -1051,37 +1054,6 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       return Math.min(...args);
     case "max":
       return Math.max(...args);
-    case "sqrtf":
-      return Math.sqrt(args[0] ?? 0);
-    case "expf":
-      return Math.exp(args[0] ?? 0);
-    case "logf":
-      return Math.log(args[0] ?? 0);
-    case "fabsf":
-      return Math.abs(args[0] ?? 0);
-    case "floorf":
-      return Math.floor(args[0] ?? 0);
-    case "ceilf":
-      return Math.ceil(args[0] ?? 0);
-    case "roundf":
-      return Math.round(args[0] ?? 0);
-    case "truncf":
-      return Math.trunc(args[0] ?? 0);
-    case "sinf":
-      return Math.sin(args[0] ?? 0);
-    case "cosf":
-      return Math.cos(args[0] ?? 0);
-    case "tanf":
-      return Math.tan(args[0] ?? 0);
-    case "powf":
-      return Math.pow(args[0] ?? 0, args[1] ?? 0);
-    case "fminf":
-      return Math.min(args[0] ?? 0, args[1] ?? 0);
-    case "fmaxf":
-      return Math.max(args[0] ?? 0, args[1] ?? 0);
-    case "__half2float":
-    case "__float2half":
-      return args[0] ?? 0;
     case "bg_subgroup_add":
       return args[0] ?? 0;
     case "__shfl_down_sync":
@@ -1089,7 +1061,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     case "__shfl_xor_sync":
       return args[1] ?? 0;
     default:
-  throw compilerFailure(`unsupported call '${name ?? "<expr>"}'`);
+      throw compilerFailure(`unsupported call '${name ?? "<expr>"}'`);
+  }
 }
 
 function isHostManagedRuntimeNoopCall(name: string): boolean {
@@ -1103,7 +1076,6 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaEventDestroy" ||
     name === "cudaEventRecord" ||
     name === "cudaEventSynchronize";
-}
 }
 
 function poolNameFromAllocatorArg(expression: CudaLiteExpression | undefined, context: ThreadContext): string | undefined {

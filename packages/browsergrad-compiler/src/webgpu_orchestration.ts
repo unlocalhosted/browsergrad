@@ -10,6 +10,7 @@ import {
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames } from "./ast_queries.js";
 import { createCudaHostDynamicLaunchPlan } from "./dynamic_launch.js";
+import { CUDA_INTRINSICS } from "./intrinsics.js";
 import { createCudaLaunchValidationDiagnostics } from "./launch.js";
 import { createCudaPeerCopyPlan, type CudaPeerCopyOperation } from "./peer_copy.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
@@ -96,16 +97,12 @@ const HOST_SIDE_EFFECT_FREE_CALLS = new Set([
   "cudaEventRecord",
   "cudaEventSynchronize",
   "deviceAllocate",
-  "expf",
-  "fmaxf",
-  "fminf",
-  "logf",
   "max",
   "min",
   "printf",
   "sizeof",
-  "sqrtf",
   "streamOrderedAllocate",
+  ...CUDA_INTRINSICS.map((intrinsic) => intrinsic.name),
 ]);
 
 export function createCudaWebGpuExecutionPlan(

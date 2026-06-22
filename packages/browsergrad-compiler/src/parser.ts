@@ -26,7 +26,7 @@ import {
   type SourceSpan,
 } from "./types.js";
 
-const TYPE_KEYWORDS = new Set(["float", "int", "uint", "half", "bool"]);
+const TYPE_KEYWORDS = new Set(["float", "int", "uint", "half", "__half", "bool"]);
 const TYPE_START_KEYWORDS = new Set([
   ...TYPE_KEYWORDS,
   "unsigned",
@@ -679,6 +679,7 @@ class Parser {
     if (token.value === "cudaEvent_t" || token.value === "cudaStream_t") return "uint";
     if (token.value === "DevicePool") return "devicepool";
     if (token.value === "void") return "voidptr";
+    if (token.value === "__half") return "half";
     if (!TYPE_KEYWORDS.has(token.value)) this.fail(`unsupported CUDA-lite type: ${token.value}`, token.span);
     return token.value as Exclude<CudaLiteScalarType, "void">;
   }

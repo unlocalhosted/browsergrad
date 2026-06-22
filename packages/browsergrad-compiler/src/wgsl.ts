@@ -5,6 +5,7 @@ import {
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
+import { CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
 import {
@@ -1020,6 +1021,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     return `${name}(${[...args, "local_id", "workgroup_id", "num_workgroups"].join(", ")})`;
   }
   const args = expression.args.map((arg) => emitExpression(arg, context));
+  const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
+  if (intrinsic?.emitWgsl) return intrinsic.emitWgsl(args);
   switch (name) {
     case "__syncthreads":
       return "workgroupBarrier()";
@@ -1040,38 +1043,6 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return "0";
     case "cudaMemcpyPeerAsync":
       return "0";
-    case "sqrtf":
-      return `sqrt(${args.join(", ")})`;
-    case "expf":
-      return `exp(${args.join(", ")})`;
-    case "logf":
-      return `log(${args.join(", ")})`;
-    case "fabsf":
-      return `abs(${args.join(", ")})`;
-    case "floorf":
-      return `floor(${args.join(", ")})`;
-    case "ceilf":
-      return `ceil(${args.join(", ")})`;
-    case "roundf":
-      return `round(${args.join(", ")})`;
-    case "truncf":
-      return `trunc(${args.join(", ")})`;
-    case "sinf":
-      return `sin(${args.join(", ")})`;
-    case "cosf":
-      return `cos(${args.join(", ")})`;
-    case "tanf":
-      return `tan(${args.join(", ")})`;
-    case "powf":
-      return `pow(${args.join(", ")})`;
-    case "fminf":
-      return `min(${args.join(", ")})`;
-    case "fmaxf":
-      return `max(${args.join(", ")})`;
-    case "__half2float":
-      return `f32(${args.join(", ")})`;
-    case "__float2half":
-      return `f16(${args.join(", ")})`;
     case "min":
     case "max":
       return `${name}(${args.join(", ")})`;
