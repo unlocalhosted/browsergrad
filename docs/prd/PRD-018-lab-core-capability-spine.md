@@ -250,6 +250,14 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   `referenceFlashAttention()` and `referenceFlashAttentionBackward()` so CS336
   A2-style FlashAttention rubrics can check output, saved log-sum-exp, and Q/K/V
   gradients in browser-safe JS before Triton/CUDA kernels are available.
+- Attention-optimization oracle guarantee:
+  `@unlocalhosted/browsergrad-kernels` exports `referenceBlockedAttention()`,
+  `referenceFusedAttention()`, and `estimateAttentionMemory()` so CS149GPT-style
+  rubrics can compare naive, blocked, and fused scaled-dot-product attention
+  outputs while checking score/probability-buffer memory behavior before native
+  C++/ISPC runners exist. CraftingAttention loads the real CS149GPT benchmark
+  profile, registers `_bg_attention_math` into Pyodide, and proves a Python lab
+  can call the JS attention oracle.
 - A2 runtime proof guarantee: the CS336 A2 profile registers generic
   `_bg_attention_math` and `_bg_distributed_training` profile glue, and runtime
   integration proves a Python rubric can call FlashAttention forward and DDP
@@ -295,8 +303,9 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   profile. It rejects missing profile-declared JS oracles before invoking the
   rubric. Runtime e2e coverage proves CS149 A1, CS149 A2, CS149 A3, and GPU
   Puzzles can execute this way with simulator/kernel references. CraftingAttention
-  platform coverage now consumes the real CS149 A1, A2, A3, CS336 A2-A5, and
-  GPU Puzzles profiles through verified profile runners or preflight gates.
+  platform coverage now consumes the real CS149 A1, A2, A3, CS149GPT, CS336
+  A2-A5, and GPU Puzzles profiles through verified profile runners, Pyodide
+  bridge tests, or preflight gates.
 - Simulator-core guarantee: `@unlocalhosted/browsergrad-primitives` exports
   `simulation.createDeterministicMesh()` so JS rubrics and platform references can model
   browser-safe rank meshes, barriers, broadcasts, point-to-point messages, and
@@ -425,6 +434,8 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   launch, failed readiness to blocked, and unknown rubric kinds to unsupported.
 - Later benchmark test: CS336 Assignment 5 and CS149GPT profile drafts produce
   `externalRunnerRequest` objects under external capability environments.
+  CS149GPT now also has a browser-first platform proof for attention math and
+  memory behavior before the external C++ runner exists.
 - Later RED test: batch benchmark matrix helper returns one flattened row per
   profile and marks the matrix not-ok when required content or datasets are
   missing, without duplicating preflight semantics in platform code. Matrix rows

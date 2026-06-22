@@ -150,6 +150,7 @@ Capability names are strings. Keep them descriptive and reusable:
 | `webgpu` | Browser WebGPU adapter is available. |
 | `wgsl-kernel` | Lab can run WGSL kernels directly. |
 | `flash-attention-oracle` | FlashAttention output, log-sum-exp, and gradients are checked by a deterministic oracle. |
+| `attention-oracle` | Scaled-dot-product attention output and memory behavior are checked by deterministic JS oracles. |
 | `cuda-compatible-subset` | Lab targets a BrowserGrad CUDA-like educational subset. |
 | `worker-mesh` | Multiple Workers can simulate distributed participants. |
 | `distributed-simulator` | Deterministic simulator for DDP/FSDP/task-system behavior. |
@@ -170,6 +171,7 @@ Capability names are strings. Keep them descriptive and reusable:
 | `rl-loss-oracle` | Alignment/RL losses have independent reference checks. |
 | `hosted-api-mock` | Hosted API behavior is reproduced by a deterministic local mock. |
 | `scaling-law-oracle` | Scaling-law projections are checked by a deterministic browser-safe oracle. |
+| `browser-cpp-simulator` | Browser-safe simulator stands in for a native C++ extension path. |
 | `native-cpp-external` | Lab requires external native C++ build/run support. |
 | `ispc-external` | Lab requires external ISPC support or a simulator. |
 | `openmp-external` | Lab requires external OpenMP support or a simulator. |
@@ -288,7 +290,7 @@ CS336 Assignment 5 and CS149GPT, proving their profile drafts can produce
 | GPU Puzzles | WGSL puzzle runner | `webgpu`, `wgsl-kernel`, `kernel-visualizer` |
 | CS149 A1/A2 | Thread/SIMD/task-system simulator with deterministic lane and task traces | `pthreads-simulator`, `simd-simulator`, `task-graph-simulator`, `performance-rubric` |
 | CS149 A3 | CUDA scan/SAXPY/render concepts via 1D grid and reference oracles | `webgpu`, `cuda-compatible-subset`, `performance-rubric` |
-| CS149GPT | CPU attention optimization oracle | `native-cpp-external`, `attention-oracle`, `simd-simulator` |
+| CS149GPT | Attention math + memory-behavior oracle before native C++ runner | `attention-oracle`, `browser-cpp-simulator`, `simd-simulator`, `native-cpp-external` |
 
 ## Platform Issue Convention
 
@@ -400,6 +402,15 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     SAXPY, exclusive scan/find-repeats, ordered circle rendering, WGSL lowering,
     guarded and unguarded memory behavior, and the informational performance
     rubric assertion.
+    CS149GPT labs can use `@unlocalhosted/browsergrad-kernels`
+    `reference.attention()`, `referenceBlockedAttention()`,
+    `referenceFusedAttention()`, `referenceFlashAttention()`, and
+    `estimateAttentionMemory()` to check naive, blocked, fused, and
+    flash-attention-style outputs plus score/probability-buffer memory behavior
+    before a native C++ extension runner exists. CraftingAttention now has a
+    platform e2e that loads `docs/internal/cs149gpt.profile.json`, preflights
+    the Pyodide profile route, registers `_bg_attention_math` as a Pyodide JS
+    module, and runs a Python lab test through that bridge.
     CraftingAttention also has a platform e2e that loads
     `docs/internal/cs336-assignment2-systems.profile.json`, proves the A2
     profile selects Pyodide when browser-safe simulator/oracle capabilities are
