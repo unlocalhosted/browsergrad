@@ -370,6 +370,31 @@ __global__ void padded(float *x) {
     expect(compiled.wgsl).toContain("* 16");
   });
 
+  it("expands expression-style function macros before parsing", () => {
+    const compiled = compileCudaLiteKernel(`
+#define IDX2C(i,j,ld) (((j)*(ld))+(i))
+__global__ void macroIndex(const float *input, float *output, int M) {
+  int row = threadIdx.x;
+  if (row < 1) {
+    output[0] = input[IDX2C(row, 0, M)];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          input: new Float32Array([13]),
+          output: new Float32Array(1),
+        },
+        scalars: { M: 1 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).not.toContain("IDX2C");
+    expect([...result.buffers.output as Float32Array]).toEqual([13]);
+  });
+
   it("parses C-style declaration lists as sequential locals", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void declarationList(float *x) {

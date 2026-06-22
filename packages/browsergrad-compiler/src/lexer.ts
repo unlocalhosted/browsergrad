@@ -8,13 +8,24 @@ export interface Token {
   readonly span: SourceSpan;
 }
 
+interface FunctionLikeMacro {
+  readonly name: string;
+  readonly params: readonly string[];
+  readonly replacement: string;
+}
+
+interface MacroDefinitions {
+  readonly objects: ReadonlyMap<string, string>;
+  readonly functions: ReadonlyMap<string, FunctionLikeMacro>;
+}
+
 export function tokenizeCudaLite(source: string): readonly Token[] {
-  return scanCudaLiteTokens(source, collectObjectLikeDefines(source));
+  return scanCudaLiteTokens(source, collectMacroDefinitions(source));
 }
 
 function scanCudaLiteTokens(
   source: string,
-  macros: ReadonlyMap<string, string>,
+  macros: MacroDefinitions,
   expansionStack: readonly string[] = [],
   expansionSpan?: SourceSpan,
 ): readonly Token[] {
@@ -80,7 +91,22 @@ function scanCudaLiteTokens(
       while (index < source.length && /[A-Za-z0-9_]/.test(source[index]!)) {
         value += advance();
       }
-      const macroValue = macros.get(value);
+      const functionMacro = macros.functions.get(value);
+      if (functionMacro !== undefined && !expansionStack.includes(value)) {
+        const args = consumeFunctionMacroArgs();
+        if (args !== undefined) {
+          const macroValue = expandFunctionLikeMacro(functionMacro, args);
+          const expanded = scanCudaLiteTokens(
+            macroValue,
+            macros,
+            [...expansionStack, value],
+            tokenSpan(start, index, startLine, startColumn),
+          ).filter((token) => token.kind !== "eof");
+          tokens.push(...expanded);
+          continue;
+        }
+      }
+      const macroValue = macros.objects.get(value);
       if (macroValue !== undefined && !expansionStack.includes(value)) {
         const expanded = scanCudaLiteTokens(
           macroValue,
@@ -164,20 +190,88 @@ function scanCudaLiteTokens(
     span: expansionSpan ?? { start: source.length, end: source.length, line, column },
   });
   return tokens;
+
+  function consumeFunctionMacroArgs(): readonly string[] | undefined {
+    let cursor = index;
+    while (cursor < source.length && /\s/.test(source[cursor]!)) cursor++;
+    if (source[cursor] !== "(") return undefined;
+    while (index < cursor) advance();
+    advance();
+    const args: string[] = [];
+    let current = "";
+    let depth = 1;
+    while (index < source.length) {
+      const next = advance();
+      if (next === "\"") {
+        current += next;
+        let escaped = false;
+        while (index < source.length) {
+          const char = advance();
+          current += char;
+          if (escaped) escaped = false;
+          else if (char === "\\") escaped = true;
+          else if (char === "\"") break;
+        }
+        continue;
+      }
+      if (next === "(") {
+        depth++;
+        current += next;
+        continue;
+      }
+      if (next === ")") {
+        depth--;
+        if (depth === 0) {
+          args.push(current.trim());
+          return args;
+        }
+        current += next;
+        continue;
+      }
+      if (next === "," && depth === 1) {
+        args.push(current.trim());
+        current = "";
+        continue;
+      }
+      current += next;
+    }
+    return args;
+  }
 }
 
-function collectObjectLikeDefines(source: string): ReadonlyMap<string, string> {
-  const macros = new Map<string, string>();
+function collectMacroDefinitions(source: string): MacroDefinitions {
+  const objects = new Map<string, string>();
+  const functions = new Map<string, FunctionLikeMacro>();
   for (const line of source.split(/\r?\n/u)) {
     const stripped = stripLineComment(line);
-    const match = /^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)(?!\()\s+(.+?)\s*$/u.exec(stripped);
-    if (match === null) continue;
-    const [, name, replacement] = match;
+    const functionMatch = /^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\)\s+(.+?)\s*$/u.exec(stripped);
+    if (functionMatch !== null) {
+      const [, name, params, replacement] = functionMatch;
+      if (name === undefined || params === undefined || replacement === undefined) continue;
+      functions.set(name, {
+        name,
+        params: params.split(",").map((param) => param.trim()).filter(Boolean),
+        replacement: replacement.trim(),
+      });
+      continue;
+    }
+    const objectMatch = /^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)(?!\()\s+(.+?)\s*$/u.exec(stripped);
+    if (objectMatch === null) continue;
+    const [, name, replacement] = objectMatch;
     if (name === undefined || replacement === undefined) continue;
     const trimmed = replacement.trim();
-    if (trimmed.length > 0) macros.set(name, trimmed);
+    if (trimmed.length > 0) objects.set(name, trimmed);
   }
-  return macros;
+  return { objects, functions };
+}
+
+function expandFunctionLikeMacro(macro: FunctionLikeMacro, args: readonly string[]): string {
+  let out = macro.replacement;
+  for (const [index, param] of macro.params.entries()) {
+    const arg = args[index] ?? "";
+    out = out.replace(new RegExp(`\\b${escapeRegExp(param)}\\b`, "gu"), `(${arg})`);
+  }
+  return out;
 }
 
 function stripLineComment(line: string): string {
@@ -202,4 +296,8 @@ function stripLineComment(line: string): string {
     if (char === "/" && line[index + 1] === "/") return line.slice(0, index);
   }
   return line;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
