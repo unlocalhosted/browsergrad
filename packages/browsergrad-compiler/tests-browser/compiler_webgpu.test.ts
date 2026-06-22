@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { createDevice } from "@unlocalhosted/browsergrad-kernels";
+import { createDevice, detectKernelFeatures } from "@unlocalhosted/browsergrad-kernels";
 import {
   compileCudaLiteKernel,
   runCompiledKernelReference,
@@ -9,6 +9,7 @@ import {
 interface DeviceCheck {
   readonly available: boolean;
   readonly reason?: string;
+  readonly features?: readonly string[];
 }
 
 const SAXPY = `
@@ -49,7 +50,7 @@ async function checkDevice(): Promise<DeviceCheck> {
   try {
     const adapter = await navigator.gpu.requestAdapter();
     if (!adapter) return { available: false, reason: "no GPU adapter" };
-    return { available: true };
+    return { available: true, features: [...adapter.features].map(String) };
   } catch (error) {
     return {
       available: false,
@@ -101,5 +102,27 @@ describe("real WebGPU — CUDA-lite compiler", () => {
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
     expect([...actual.buffers.C as Float32Array]).toEqual([...expected.buffers.C as Float32Array]);
+  });
+
+  it("runs compiled f16 storage when the browser exposes shader-f16", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const features = await detectKernelFeatures(device);
+    if (!features.shaderF16 || !features.float16Array) return;
+
+    const source = `
+__global__ void half_inc(half* x) {
+  if (threadIdx.x < 1) { x[0] = x[0] + 1.0; }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      features: { "shader-f16": true },
+      workgroupSize: [1, 1, 1],
+    });
+    const input = { buffers: { x: new Float16Array([1]) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(device, compiled, input, launch);
+
+    expect([...actual.buffers.x as Float16Array]).toEqual([...expected.buffers.x as Float16Array]);
   });
 });
