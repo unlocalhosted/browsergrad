@@ -110,10 +110,17 @@ const html = String.raw`<!doctype html>
               await prepared.run({ readback: [] });
               await device.gpu.queue.onSubmittedWorkDone();
             });
+            let scalar = 4;
+            const preparedScalarUpdate = await measure("webgpu:saxpy-prepared-scalar-update", runs, warmup, async () => {
+              writeWgslStorageBuffer(device, y, yInitial);
+              scalar = scalar === 4 ? 3 : 4;
+              await prepared.run({ scalars: { a: scalar }, readback: [] });
+              await device.gpu.queue.onSubmittedWorkDone();
+            });
             writeWgslStorageBuffer(device, y, yInitial);
-            await prepared.run({ readback: [] });
+            await prepared.run({ scalars: { a: 4 }, readback: [] });
             const out = await readWgslStorageBuffer(device, y);
-            const ok = out[0] === 5 && out[length - 1] === 5;
+            const ok = out[0] === 6 && out[length - 1] === 6;
             return {
               available: true,
               runs,
@@ -123,6 +130,7 @@ const html = String.raw`<!doctype html>
                 { name: "webgpu:prepare-compiled-saxpy", minMs: prepareMs, medianMs: prepareMs, p95Ms: prepareMs, maxMs: prepareMs },
                 oneShot,
                 preparedRun,
+                preparedScalarUpdate,
               ],
               validation: { saxpy: ok },
             };

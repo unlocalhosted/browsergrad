@@ -261,10 +261,56 @@ describe("real WebGPU — CUDA-lite compiler", () => {
       await prepared.run({ readback: [] });
       const secondReadback = await readWgslStorageBuffer(device, y);
       expect([...secondReadback as Float32Array]).toEqual([3, 5, 7, 9]);
+
+      writeWgslStorageBuffer(device, y, new Float32Array([1, 1, 1, 1]));
+      const third = await prepared.run({ scalars: { a: 4 }, readback: ["y"] });
+      expect([...third.buffers.y as Float32Array]).toEqual([5, 9, 13, 17]);
     } finally {
       prepared.destroy();
       destroyWgslStorageBuffer(x);
       destroyWgslStorageBuffer(y);
+    }
+  });
+
+  it("rejects prepared scalar updates for host-orchestrated dynamic plans", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const source = `
+__global__ void child(float *dst, int n) {
+  int idx = threadIdx.x;
+  if (idx < n) { dst[idx] += 1.0f; }
+}
+__global__ void parent(float *x, int n) {
+  if (threadIdx.x < 1) {
+    dim3 grid(1);
+    dim3 block(n);
+    child<<<grid, block>>>(x, n);
+    cudaDeviceSynchronize();
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const prepared = await prepareCompiledKernelWebGpu(
+      device,
+      compiled,
+      {
+        buffers: { x: new Float32Array([1, 2]) },
+        scalars: { n: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    try {
+      await expect(prepared.run({ scalars: { n: 1 } })).rejects.toMatchObject({
+        diagnostics: [{
+          code: "prepared-scalar-update-unsupported",
+        }],
+      });
+    } finally {
+      prepared.destroy();
     }
   });
 

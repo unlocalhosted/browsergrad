@@ -83,8 +83,13 @@ const prepared = await prepareCompiledKernelWebGpu(device, compiled, {
 
 await prepared.run();
 await prepared.run({ readback: [] });
+await prepared.run({ scalars: { a: 4 } });
 prepared.destroy();
 ```
+
+Prepared scalar updates are supported for single-dispatch and grid-sync phase
+plans. Host-orchestrated dynamic launch / peer-copy plans keep scalar params
+fixed until step-specific compiler uniform updates are added.
 
 ## CUDA Memory Pools
 

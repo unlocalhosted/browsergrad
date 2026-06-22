@@ -14,6 +14,7 @@ import {
   createCudaWebGpuExecutionPlan,
   normalizeCudaWebGpuReadback,
   normalizeCudaWebGpuReadbackNames,
+  packCudaWebGpuUniformParams,
   type CudaWebGpuExecutionPlanKind,
 } from "./webgpu_orchestration.js";
 import {
@@ -26,7 +27,10 @@ import {
 } from "./types.js";
 import { formatCudaLiteDiagnostics } from "./diagnostics.js";
 
-export type PreparedCompiledKernelWebGpuRunOptions = WgslPreparedKernelSequenceRunOptions;
+export interface PreparedCompiledKernelWebGpuRunOptions {
+  readonly readback?: readonly string[];
+  readonly scalars?: Readonly<Record<string, number>>;
+}
 
 export interface PreparedCompiledKernelWebGpu {
   readonly kind: CudaWebGpuExecutionPlanKind;
@@ -110,7 +114,7 @@ export async function prepareCompiledKernelWebGpu(
     executionPlan.steps,
     executionPlan.input,
   );
-  return new PreparedCompiledKernelWebGpuImpl(compiled, executionPlan.kind, prepared);
+  return new PreparedCompiledKernelWebGpuImpl(compiled, executionPlan.kind, input, prepared);
 }
 
 class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
@@ -120,6 +124,7 @@ class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
   constructor(
     private readonly compiled: CompiledCudaLiteKernel,
     readonly kind: PreparedCompiledKernelWebGpu["kind"],
+    private readonly input: CompiledKernelInput,
     private readonly prepared: WgslPreparedKernelSequence,
   ) {
     this.stepCount = prepared.stepCount;
@@ -134,7 +139,7 @@ class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
         span: { start: 0, end: 0, line: 1, column: 1 },
       }]);
     }
-    const result = await this.prepared.run(normalizePreparedRunOptions(this.compiled, options));
+    const result = await this.prepared.run(normalizePreparedRunOptions(this.compiled, this.kind, this.input, options));
     return { buffers: normalizeCudaWebGpuReadback(this.compiled, result.buffers), trace: [] };
   }
 
@@ -147,10 +152,36 @@ class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
 
 function normalizePreparedRunOptions(
   compiled: CompiledCudaLiteKernel,
+  kind: CudaWebGpuExecutionPlanKind,
+  input: CompiledKernelInput,
   options: PreparedCompiledKernelWebGpuRunOptions | undefined,
-): PreparedCompiledKernelWebGpuRunOptions | undefined {
-  if (options?.readback === undefined) return options;
-  return { readback: normalizeCudaWebGpuReadbackNames(compiled, options.readback) };
+): WgslPreparedKernelSequenceRunOptions | undefined {
+  if (!options) return undefined;
+  const out: {
+    readback?: readonly string[];
+    uniforms?: Readonly<Record<string, ArrayBuffer | ArrayBufferView>>;
+  } = {};
+  if (options.readback !== undefined) {
+    out.readback = normalizeCudaWebGpuReadbackNames(compiled, options.readback);
+  }
+  if (options.scalars !== undefined) {
+    if (kind === "host-dynamic-launch" || kind === "host-peer-copy") {
+      throw new CudaLiteCompilerError("prepared scalar updates are not supported for host-orchestrated WebGPU plans yet", [{
+        code: "prepared-scalar-update-unsupported",
+        severity: "error",
+        message: "prepared scalar updates are not supported for host-orchestrated WebGPU plans yet",
+        span: { start: 0, end: 0, line: 1, column: 1 },
+      }]);
+    }
+    const uniforms = packCudaWebGpuUniformParams(compiled, {
+      ...input,
+      scalars: { ...input.scalars, ...options.scalars },
+    });
+    if (uniforms.byteLength > 0) {
+      out.uniforms = { params: uniforms };
+    }
+  }
+  return out;
 }
 
 function validateLaunch(launch: KernelLaunch, workgroupSize: readonly [number, number, number]): void {

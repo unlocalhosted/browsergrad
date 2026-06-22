@@ -113,6 +113,8 @@ export interface WgslKernelRunResult {
 
 export interface WgslPreparedKernelSequenceRunOptions {
   readonly readback?: readonly string[];
+  readonly uniforms?: Readonly<Record<string, ArrayBuffer | ArrayBufferView>>;
+  readonly stepUniforms?: Readonly<Record<number, Readonly<Record<string, ArrayBuffer | ArrayBufferView>>>>;
 }
 
 export interface WgslPreparedKernelSequence {
@@ -128,6 +130,7 @@ interface CachedWgslPipeline {
 
 type KernelDeviceImpl = ReturnType<typeof asImpl>;
 type PreparedStorageBuffer = { binding: WgslStorageBinding; buffer: GPUBuffer; byteLength: number; owned: boolean };
+type PreparedUniformBuffer = { buffer: GPUBuffer; byteLength: number };
 type PreparedExecutableStep = { pipeline: GPUComputePipeline; bindGroup: GPUBindGroup; program: WgslKernelProgram };
 
 const WGSL_PIPELINE_CACHE_LIMIT = 128;
@@ -352,7 +355,7 @@ export async function prepareWgslKernelProgramSequence(
 
   const storageBuffers = new Map<string, PreparedStorageBuffer>();
   const uniformBuffers: GPUBuffer[] = [];
-  const uniformBuffersByStep = new Map<string, GPUBuffer>();
+  const uniformBuffersByStep = new Map<string, PreparedUniformBuffer>();
   const textures: GPUTexture[] = [];
   const textureViewsByName = new Map<string, GPUTextureView>();
 
@@ -395,13 +398,14 @@ export async function prepareWgslKernelProgramSequence(
         if (binding.byteLength === undefined && bytes.byteLength === 0) {
           throw new KernelError(`uniform ${binding.name} for step ${stepIndex} must not be empty`);
         }
+        const byteLength = alignTo(binding.byteLength ?? bytes.byteLength, 16);
         const buffer = gpu.createBuffer({
-          size: alignTo(binding.byteLength ?? bytes.byteLength, 16),
+          size: byteLength,
           usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         });
         gpu.queue.writeBuffer(buffer, 0, bytes.buffer, bytes.byteOffset, bytes.byteLength);
         uniformBuffers.push(buffer);
-        uniformBuffersByStep.set(sequenceUniformKey(stepIndex, binding.name), buffer);
+        uniformBuffersByStep.set(sequenceUniformKey(stepIndex, binding.name), { buffer, byteLength });
       }
     }
 
@@ -448,6 +452,7 @@ export async function prepareWgslKernelProgramSequence(
       dispatchCounts,
       storageBuffers,
       uniformBuffers,
+      uniformBuffersByStep,
       textures,
       executableSteps,
       readbackNames,
@@ -462,12 +467,14 @@ export async function prepareWgslKernelProgramSequence(
 class PreparedWgslKernelSequenceImpl implements WgslPreparedKernelSequence {
   readonly stepCount: number;
   private destroyed = false;
+  private lastSubmission: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly impl: KernelDeviceImpl,
     private readonly dispatchCounts: readonly (readonly [number, number, number])[],
     private readonly storageBuffers: Map<string, PreparedStorageBuffer>,
     private readonly uniformBuffers: readonly GPUBuffer[],
+    private readonly uniformBuffersByStep: ReadonlyMap<string, PreparedUniformBuffer>,
     private readonly textures: readonly GPUTexture[],
     private readonly executableSteps: readonly PreparedExecutableStep[],
     private readonly defaultReadbackNames: ReadonlySet<string>,
@@ -479,6 +486,8 @@ class PreparedWgslKernelSequenceImpl implements WgslPreparedKernelSequence {
   async run(options: WgslPreparedKernelSequenceRunOptions = {}): Promise<WgslKernelRunResult> {
     if (this.destroyed) throw new KernelError("prepared WGSL sequence has been destroyed");
     const gpu = this.impl.gpu;
+    if (hasPreparedUniformUpdates(options)) await this.lastSubmission;
+    updatePreparedUniformBuffers(gpu, this.uniformBuffersByStep, options);
     const encoder = gpu.createCommandEncoder({ label: this.label });
     for (let i = 0; i < this.executableSteps.length; i++) {
       const step = this.executableSteps[i]!;
@@ -511,6 +520,7 @@ class PreparedWgslKernelSequenceImpl implements WgslPreparedKernelSequence {
       }
 
       gpu.queue.submit([encoder.finish()]);
+      this.lastSubmission = gpu.queue.onSubmittedWorkDone();
       const output = await collectReadbacks(reads);
       for (let i = 0; i < this.stepCount; i++) this.impl.recordInvocation();
       return { buffers: output };
@@ -524,6 +534,10 @@ class PreparedWgslKernelSequenceImpl implements WgslPreparedKernelSequence {
     this.destroyed = true;
     destroyPreparedResources(this.storageBuffers, this.uniformBuffers, this.textures);
   }
+}
+
+function hasPreparedUniformUpdates(options: WgslPreparedKernelSequenceRunOptions): boolean {
+  return Object.keys(options.uniforms ?? {}).length > 0 || Object.keys(options.stepUniforms ?? {}).length > 0;
 }
 
 async function collectReadbacks(
@@ -559,6 +573,64 @@ function destroyPreparedResources(
   }
   for (const buffer of uniformBuffers) buffer.destroy();
   for (const texture of textures) texture.destroy();
+}
+
+function updatePreparedUniformBuffers(
+  gpu: GPUDevice,
+  uniformBuffersByStep: ReadonlyMap<string, PreparedUniformBuffer>,
+  options: WgslPreparedKernelSequenceRunOptions,
+): void {
+  if (options.uniforms) {
+    for (const [name, data] of Object.entries(options.uniforms)) {
+      let matched = false;
+      for (const [key, entry] of uniformBuffersByStep) {
+        if (key.slice(key.indexOf("\0") + 1) !== name) continue;
+        matched = true;
+        writeUniformBuffer(gpu, entry, data, `uniform ${name}`);
+      }
+      if (!matched) throw new KernelError(`prepared uniform input is not a uniform binding: ${name}`);
+    }
+  }
+
+  if (options.stepUniforms) {
+    for (const [stepIndexText, uniforms] of Object.entries(options.stepUniforms)) {
+      const stepIndex = Number(stepIndexText);
+      if (!Number.isInteger(stepIndex) || stepIndex < 0) {
+        throw new KernelError(`prepared step uniform index must be a non-negative integer: ${stepIndexText}`);
+      }
+      for (const [name, data] of Object.entries(uniforms)) {
+        const key = sequenceUniformKey(stepIndex, name);
+        const entry = uniformBuffersByStep.get(key);
+        if (!entry) throw new KernelError(`prepared uniform input is not a uniform binding for step ${stepIndex}: ${name}`);
+        writeUniformBuffer(gpu, entry, data, `uniform ${name} for step ${stepIndex}`);
+      }
+    }
+  }
+}
+
+function writeUniformBuffer(
+  gpu: GPUDevice,
+  entry: PreparedUniformBuffer,
+  data: ArrayBuffer | ArrayBufferView,
+  name: string,
+): void {
+  const bytes = paddedBytesForUniformWrite(data, entry.byteLength, name);
+  gpu.queue.writeBuffer(entry.buffer, 0, bytes.buffer, bytes.byteOffset, bytes.byteLength);
+}
+
+function paddedBytesForUniformWrite(
+  source: ArrayBuffer | ArrayBufferView,
+  byteLength: number,
+  name: string,
+): Uint8Array {
+  const bytes = bytesFromBufferSource(source);
+  if (bytes.byteLength > byteLength) {
+    throw new KernelError(`${name} has ${bytes.byteLength} bytes; expected at most ${byteLength}`);
+  }
+  if (bytes.byteLength === byteLength) return bytes;
+  const padded = new Uint8Array(byteLength);
+  padded.set(bytes);
+  return padded;
 }
 
 function collectStorageBindings(steps: readonly WgslKernelSequenceStep[]): readonly WgslStorageBinding[] {
@@ -604,13 +676,13 @@ function sequenceUniformKey(stepIndex: number, name: string): string {
 }
 
 function uniformBuffersForStep(
-  uniformBuffersByStep: ReadonlyMap<string, GPUBuffer>,
+  uniformBuffersByStep: ReadonlyMap<string, PreparedUniformBuffer>,
   stepIndex: number,
 ): ReadonlyMap<string, GPUBuffer> {
   const buffers = new Map<string, GPUBuffer>();
   const prefix = `${stepIndex}\0`;
-  for (const [key, buffer] of uniformBuffersByStep) {
-    if (key.startsWith(prefix)) buffers.set(key.slice(prefix.length), buffer);
+  for (const [key, entry] of uniformBuffersByStep) {
+    if (key.startsWith(prefix)) buffers.set(key.slice(prefix.length), entry.buffer);
   }
   return buffers;
 }

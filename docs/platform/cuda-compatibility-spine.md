@@ -63,7 +63,9 @@ Current corpus gate (`node scripts/audit-cuda-lite-corpus.mjs /tmp/CUDA-120-DAYS
 - Hot-loop dispatch can keep both caller buffers and compiler-generated
   execution sequences resident: `residentBuffers` avoids upload/readback churn,
   and prepared compiler/WebGPU runners avoid rebuilding pipelines and bind
-  groups between iterations.
+  groups between iterations. Prepared single-dispatch and grid-sync phase plans
+  can also update scalar params without reprepare; host-orchestrated dynamic
+  launch / peer-copy plans keep scalar params fixed for now.
 - Device-side launches now parse into IR and can run in CPU reference when
   `referenceDynamicParallelism` is enabled. WebGPU can host-lift conservative
   child launches into a multi-dispatch sequence when the parent launch has one

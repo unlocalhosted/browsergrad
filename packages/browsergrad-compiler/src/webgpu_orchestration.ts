@@ -401,7 +401,7 @@ function createWgslRunInput(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
 ): WgslKernelRunInput {
-  const uniforms = packScalarParams(compiled, input);
+  const uniforms = packCudaWebGpuUniformParams(compiled, input);
   const buffers = {
     ...input.buffers,
     ...surfaceBufferInputs(compiled, input),
@@ -442,7 +442,7 @@ function featureOptionsFor(
   };
 }
 
-function packScalarParams(
+export function packCudaWebGpuUniformParams(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
 ): Uint8Array {

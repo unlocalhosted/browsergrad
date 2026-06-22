@@ -390,6 +390,58 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
   });
 
+  it("updates prepared uniform buffers without rebuilding bind groups", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const program = defineWgslKernelProgram({
+      name: "prepared_uniform_scale",
+      workgroupSize: [4, 1, 1],
+      bindings: [
+        { kind: "storage", name: "x", valueType: "f32", access: "read_write", binding: 0 },
+        { kind: "uniform", name: "params", byteLength: 16, binding: 1 },
+      ],
+      wgsl: `
+struct Params { scale: f32, n: i32 };
+@group(0) @binding(0) var<storage, read_write> x: array<f32>;
+@group(0) @binding(1) var<uniform> params: Params;
+@compute @workgroup_size(4, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < u32(params.n)) { x[gid.x] = x[gid.x] * params.scale; }
+}`,
+    });
+    const x = createWgslStorageBuffer(device, {
+      valueType: "f32",
+      data: new Float32Array([1, 2, 3, 4]),
+      label: "prepared-uniform-x",
+    });
+    const prepared = await prepareWgslKernelProgramSequence(
+      device,
+      [{ program, launch: { dispatchCount: [4, 1, 1] } }],
+      {
+        buffers: {},
+        residentBuffers: { x },
+        uniforms: { params: paramsBytes(2, 4) },
+        readback: [],
+      },
+    );
+
+    try {
+      await prepared.run();
+      const firstReadback = await readWgslStorageBuffer(device, x);
+      expect([...firstReadback as Float32Array]).toEqual([2, 4, 6, 8]);
+
+      writeWgslStorageBuffer(device, x, new Float32Array([1, 2, 3, 4]));
+      const second = await prepared.run({
+        uniforms: { params: paramsBytes(3, 4) },
+        readback: ["x"],
+      });
+      expect([...second.buffers.x as Float32Array]).toEqual([3, 6, 9, 12]);
+    } finally {
+      prepared.destroy();
+      destroyWgslStorageBuffer(x);
+    }
+  });
+
   it("rejects running a prepared WGSL sequence after destroy", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();
@@ -416,3 +468,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     await expect(prepared.run()).rejects.toThrow(/prepared WGSL sequence has been destroyed/);
   });
 });
+
+function paramsBytes(scale: number, n: number): Uint8Array {
+  const bytes = new Uint8Array(16);
+  const view = new DataView(bytes.buffer);
+  view.setFloat32(0, scale, true);
+  view.setInt32(4, n, true);
+  return bytes;
+}

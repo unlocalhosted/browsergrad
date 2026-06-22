@@ -187,8 +187,13 @@ const prepared = await prepareWgslKernelProgramSequence(
 );
 await prepared.run();
 await prepared.run({ readback: [] });
+await prepared.run({ uniforms: { params: new Float32Array([3]) } });
 prepared.destroy();
 ```
+
+Prepared uniform updates rewrite existing uniform buffers and reuse bind groups.
+Use `stepUniforms` only when sequence steps need different values for the same
+uniform binding name.
 
 ### Kernel rubric assertions
 

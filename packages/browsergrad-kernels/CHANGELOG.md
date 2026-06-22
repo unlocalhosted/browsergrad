@@ -40,6 +40,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   dispatches and opt out of readback with `readback: []`.
 - `prepareWgslKernelProgramSequence()` prebuilds pipelines and bind groups for
   reusable hot-loop WGSL sequences over resident buffers.
+- Prepared WGSL sequences can update uniform buffers at `run()` time without
+  rebuilding bind groups; step-specific overrides use `stepUniforms`.
 
 ## [0.1.1] — 2026-06-02
 
