@@ -77,7 +77,7 @@ export function emitKernelIrWgsl(
   }
 
   for (const shared of ir.sharedDeclarations) {
-    lines.push(`var<workgroup> ${shared.name}: ${emitSharedType(shared)};`);
+    lines.push(`var<workgroup> ${shared.name}: ${emitSharedType(shared, ir)};`);
   }
 
   if (ir.textures.length > 0) {
@@ -130,6 +130,7 @@ interface EmitContext {
   paramFor(name: string): CudaLiteParam | undefined;
   isUniformScalar(name: string): boolean;
   uniformScalarTypeFor(name: string): CudaLiteScalarType | undefined;
+  isAtomicShared(name: string): boolean;
   pointerAliasFor(name: string): PointerAlias | undefined;
   cooperativeGroupFor(name: string): CudaLiteCooperativeGroupDecl | undefined;
 }
@@ -212,6 +213,9 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
     },
     uniformScalarTypeFor(name) {
       return uniformScalarTypes.get(name);
+    },
+    isAtomicShared(name) {
+      return ir.atomicShared.includes(name);
     },
     pointerAliasFor(name) {
       return pointerAliases.get(name);
@@ -304,7 +308,7 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
     case "string":
       return expression.raw;
     case "identifier":
-      return emitIdentifier(expression.name, context);
+      return emitIdentifier(expression.name, context, mode);
     case "cast":
       return `${wgslScalar(expression.valueType)}(${emitExpression(expression.expression, context)})`;
     case "member":
@@ -316,13 +320,14 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
           return `${alias.rootName}[(${emitExpression(alias.baseIndex, context)}) + (${emitExpression(expression.index, context)})]`;
         }
       }
-      const access = `${emitExpression(expression.target, context)}[${emitExpression(expression.index, context)}]`;
+      const access = `${emitExpression(expression.target, context, "lvalue")}[${emitExpression(expression.index, context)}]`;
       const root = rootIdentifier(expression);
       const param = root ? context.paramFor(root) : undefined;
       if (mode === "value" && param && context.ir.atomicParams.includes(param.name)) {
         const loaded = `atomicLoad(&${access})`;
         return param.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
       }
+      if (mode === "value" && root && context.isAtomicShared(root)) return `atomicLoad(&${access})`;
       return access;
     }
     case "call":
@@ -390,8 +395,9 @@ function pointerAliasForVar(statement: CudaLiteVarDecl): PointerAlias | undefine
   };
 }
 
-function emitIdentifier(name: string, context: EmitContext): string {
+function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "value"): string {
   if (name === "threadIdx" || name === "blockIdx" || name === "blockDim" || name === "gridDim") return name;
+  if (context.isAtomicShared(name) && mode === "value") return `atomicLoad(&${name})`;
   const param = context.paramFor(name);
   const uniformType = context.uniformScalarTypeFor(name);
   if ((param && !param.pointer) || context.isUniformScalar(name)) {
@@ -534,6 +540,10 @@ function emitAtomicCall(
     const targetParam = atomicTargetParam(target.argument, context);
     const targetExpression = emitExpression(target.argument, context, "lvalue");
     const valueExpression = emitExpression(value, context);
+    const sharedRoot = rootIdentifier(target.argument);
+    if (sharedRoot && context.isAtomicShared(sharedRoot)) {
+      return `${wgslName}(&${targetExpression}, ${valueExpression})`;
+    }
     if (wgslName === "atomicAdd" && targetParam?.valueType === "float") {
       return `bg_atomicAdd_f32(&${targetExpression}, ${valueExpression})`;
     }
@@ -559,6 +569,13 @@ function emitAtomicCall(
 function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string {
   const root = rootIdentifier(expression.left);
   const param = root ? context.paramFor(root) : undefined;
+  if (root && context.isAtomicShared(root)) {
+    const value = emitExpression(expression.right, context);
+    const target = emitExpression(expression.left, context, "lvalue");
+    if (expression.operator === "=") return `atomicStore(&${target}, ${value})`;
+    if (expression.operator === "+=") return `atomicAdd(&${target}, ${value})`;
+    if (expression.operator === "-=") return `atomicSub(&${target}, ${value})`;
+  }
   if (param && context.ir.atomicParams.includes(param.name)) {
     const value = emitExpression(expression.right, context);
     const target = emitExpression(expression.left, context, "lvalue");
@@ -585,8 +602,8 @@ function isNoopCall(expression: CudaLiteExpression): boolean {
   return expression.kind === "call" && expressionName(expression.callee) === "printf";
 }
 
-function emitSharedType(statement: CudaLiteVarDecl): string {
-  let type = wgslScalar(statement.valueType);
+function emitSharedType(statement: CudaLiteVarDecl, ir: KernelIrModule): string {
+  let type = ir.atomicShared.includes(statement.name) ? `atomic<${wgslScalar(statement.valueType)}>` : wgslScalar(statement.valueType);
   for (let i = statement.dimensions.length - 1; i >= 0; i--) {
     type = `array<${type}, ${statement.dimensions[i]!}>`;
   }

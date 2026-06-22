@@ -295,6 +295,7 @@ export interface CudaLiteAnalysis {
   readonly diagnostics: readonly CudaLiteDiagnostic[];
   readonly requiredFeatures: readonly string[];
   readonly atomicParams: readonly string[];
+  readonly atomicShared: readonly string[];
 }
 
 export interface KernelIrModule {
@@ -307,6 +308,7 @@ export interface KernelIrModule {
   readonly sharedDeclarations: readonly CudaLiteVarDecl[];
   readonly requiredFeatures: readonly string[];
   readonly atomicParams: readonly string[];
+  readonly atomicShared: readonly string[];
   readonly workgroupSize: readonly [number, number, number];
 }
 

@@ -564,6 +564,8 @@ __global__ void sharedScalar(int *out) {
   __shared__ int localCount;
   if (threadIdx.x == 0) { localCount = 7; }
   __syncthreads();
+  atomicAdd(&localCount, 1);
+  __syncthreads();
   if (threadIdx.x == 1) { out[0] = localCount; }
 }`, { workgroupSize: [2, 1, 1] });
     const result = runCompiledKernelReference(
@@ -572,8 +574,11 @@ __global__ void sharedScalar(int *out) {
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("var<workgroup> localCount: i32;");
-    expect([...result.buffers.out as Int32Array]).toEqual([7]);
+    expect(compiled.wgsl).toContain("var<workgroup> localCount: atomic<i32>;");
+    expect(compiled.wgsl).toContain("atomicStore(&localCount, 7)");
+    expect(compiled.wgsl).toContain("atomicAdd(&localCount, 1)");
+    expect(compiled.wgsl).toContain("atomicLoad(&localCount)");
+    expect([...result.buffers.out as Int32Array]).toEqual([9]);
   });
 
   it("evaluates integer constant expressions in shared array dimensions", () => {

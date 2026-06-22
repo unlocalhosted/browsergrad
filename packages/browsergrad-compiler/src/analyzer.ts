@@ -113,6 +113,7 @@ export function analyzeCudaLite(
   const diagnostics: CudaLiteDiagnostic[] = [];
   const requiredFeatures = new Set<string>();
   const atomicParams = new Set<string>();
+  const atomicShared = new Set<string>();
   const params = new Map(kernel.params.map((param) => [param.name, param]));
   const declaredNames = new Set<string>();
   const rootScope = createScope();
@@ -166,7 +167,7 @@ export function analyzeCudaLite(
 
   const walkExpression = (expression: CudaLiteExpression, scope: Scope): ExpressionInfo => {
     if (expression.kind === "call") {
-      return validateCallExpression(expression, scope, params, atomicParams, requiredFeatures, diagnostics, walkExpression);
+      return validateCallExpression(expression, scope, params, atomicParams, atomicShared, requiredFeatures, diagnostics, walkExpression);
     }
     return validateNonCallExpression(expression, scope, diagnostics, walkExpression);
   };
@@ -341,6 +342,7 @@ export function analyzeCudaLite(
     diagnostics,
     requiredFeatures: [...requiredFeatures].sort(),
     atomicParams: [...atomicParams].sort(),
+    atomicShared: [...atomicShared].sort(),
   };
 }
 
@@ -370,6 +372,7 @@ export function lowerAnalyzedCudaLiteToKernelIr(
     sharedDeclarations: collectSharedDeclarations(analysis.kernel.body, options),
     requiredFeatures: analysis.requiredFeatures,
     atomicParams: analysis.atomicParams,
+    atomicShared: analysis.atomicShared,
     workgroupSize: normalizeWorkgroupSize(options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE),
   };
 }
@@ -482,6 +485,7 @@ function validateCallExpression(
   scope: Scope,
   params: ReadonlyMap<string, CudaLiteParam>,
   atomicParams: Set<string>,
+  atomicShared: Set<string>,
   requiredFeatures: Set<string>,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
@@ -530,7 +534,7 @@ function validateCallExpression(
     return { kind: "scalar" };
   }
   if (isAtomicBuiltin(callName)) {
-    validateAtomicBuiltin(expression, scope, params, atomicParams, diagnostics, walkExpression);
+    validateAtomicBuiltin(expression, scope, params, atomicParams, atomicShared, diagnostics, walkExpression);
     return { kind: "scalar" };
   }
   if (callName === "__half2float" || callName === "__float2half") {
@@ -708,6 +712,7 @@ function validateAtomicBuiltin(
   scope: Scope,
   params: ReadonlyMap<string, CudaLiteParam>,
   atomicParams: Set<string>,
+  atomicShared: Set<string>,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
 ): void {
@@ -723,7 +728,14 @@ function validateAtomicBuiltin(
     }
     const targetName = rootIdentifier(targetExpression);
     const param = targetName ? params.get(targetName) : undefined;
-    if (!param?.pointer) {
+    const symbol = targetName ? lookupSymbol(targetName, scope, targetExpression.span) : undefined;
+    if (symbol?.kind === "shared") {
+      if (symbol.valueType === "float" || symbol.valueType === "half" || symbol.valueType === "bool") {
+        diagnostics.push(error("unsupported-atomic-target", "shared atomics support int/uint targets in CUDA-lite v0", targetExpression.span));
+      } else {
+        atomicShared.add(symbol.name);
+      }
+    } else if (!param?.pointer) {
       diagnostics.push(error("unsupported-atomic-target", "atomicAdd target must be a pointer parameter element", targetExpression.span));
     } else if (param.valueType === "float" && (callName === "atomicAdd" || callName === "atomicExch")) {
       atomicParams.add(param.name);
