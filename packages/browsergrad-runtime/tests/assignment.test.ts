@@ -7,6 +7,7 @@ import {
   createAssignmentExternalRunnerRequest,
   createAssignmentBenchmarkPreflightMatrix,
   createVerifiedAssignmentBenchmarkPreflightMatrix,
+  createAssignmentPlatformHandoff,
   createAssignmentPreflightReport,
   createAssignmentMountPreflightReport,
   createAssignmentMountPlan,
@@ -293,6 +294,75 @@ describe("parseAssignmentProfile", () => {
         ],
       }),
     ]);
+  });
+
+  it("creates a platform handoff with the next action for launch UI", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "python_runtime",
+          kind: "capability",
+          options: { requires: ["pyodide"] },
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const environment = createAssignmentCapabilityEnvironment({
+      browserCapabilities: ["pyodide"],
+    });
+    const report = createAssignmentPreflightReport(result.profile, environment);
+
+    expect(
+      createAssignmentPlatformHandoff(result.profile, report, { files: {} }),
+    ).toEqual({
+      id: "cs336-assignment1",
+      title: "Stanford CS336 Assignment 1: Basics",
+      course: "Stanford CS336",
+      sourceUrl: "https://github.com/stanford-cs336/assignment1-basics",
+      readinessStatus: "runnable",
+      runnerTarget: "pyodide",
+      rubricKind: "python",
+      nextAction: "mount-content",
+      summary: "mount required assignment files and datasets before launch",
+      launchable: false,
+      missingCapabilities: [],
+      missingRequiredFiles: ["/assignments/cs336-assignment1/rubric.py"],
+      missingDatasets: ["tiny"],
+      skippedOptionalPaths: [
+        "/assignments/cs336-assignment1/assignment.py",
+        "/assignments/cs336-assignment1/reference.py",
+      ],
+      selectedCapabilities: ["pyodide"],
+      simulatedCapabilities: [],
+      externalCapabilities: [],
+      cacheStrategies: ["invalid-hash"],
+      externalRunnerRequired: false,
+      messages: [
+        "missing required file: /assignments/cs336-assignment1/rubric.py",
+        "missing dataset: tiny",
+      ],
+    });
+
+    expect(
+      createAssignmentPlatformHandoff(result.profile, report, {
+        files: {
+          "/assignments/cs336-assignment1/rubric.py": "print('ok')",
+        },
+        datasets: { tiny: "fixture" },
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        nextAction: "run-pyodide",
+        summary: "assignment can launch in Pyodide",
+        launchable: true,
+        missingRequiredFiles: [],
+        missingDatasets: [],
+        messages: ["ready for Pyodide rubric runner"],
+      }),
+    );
   });
 
   it("verifies benchmark preflight matrix dataset hashes before mounting", async () => {

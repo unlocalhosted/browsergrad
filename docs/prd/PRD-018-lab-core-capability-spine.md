@@ -164,6 +164,12 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   capabilities, runner route, mount plan, and dataset cache plan as one readonly
   handoff object, and benchmark profile tests assert readiness for the
   CS336/GPU Puzzles/CS149 probe set.
+- Platform launch-handoff guarantee: `createAssignmentPlatformHandoff(profile,
+  report, contents?)` converts preflight plus currently available mount
+  contents into one UI-safe object with `nextAction`, `launchable`, concise
+  messages, missing content, selected capabilities, cache strategy, and
+  external-runner state. This is the generic Crafting Attention launch-panel
+  contract.
 - Benchmark-matrix guarantee:
   `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
   turns many profile reports into platform-ready rows with readiness, runner,
@@ -374,6 +380,9 @@ curriculum profiles and handoff docs absorb course-specific adapters.
 - Later RED test: verified benchmark matrix helper marks rows not-ok when
   required dataset contents exist but declared SHA-256 hashes mismatch, and
   reports per-dataset hash status without writing to `Session.fs`.
+- Later RED test: platform handoff helper returns a deterministic `nextAction`
+  and renderable messages for missing-content benchmark profiles, then switches
+  to the concrete runner action once required content is present.
 - Run focused package tests:
   - `pnpm --filter @unlocalhosted/browsergrad-runtime test -- assignment`
   - `pnpm --filter @unlocalhosted/browsergrad-runtime typecheck`

@@ -42,6 +42,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   rubric kind, readiness, required capabilities, mount plan, and dataset cache
   plan for platform preflight panels; external routes also include
   `externalRunnerRequest`.
+- `createAssignmentPlatformHandoff(profile, report, contents?)` condenses
+  preflight plus mount readiness into one launch-panel object with `nextAction`,
+  `launchable`, learner-facing messages, mount gaps, route, selected
+  capabilities, cache strategies, and external-runner requirement.
 - `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
   batch-flattens profile preflight into platform-ready benchmark rows with
   readiness, route, capability, mount-content, cache-strategy, and external

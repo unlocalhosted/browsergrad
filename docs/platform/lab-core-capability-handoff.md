@@ -319,10 +319,14 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
 6. Or uses `createAssignmentPreflightReport(profile, environment)` to get all
    preflight fields, including `datasetCachePlan`, in one object.
    Read `report.runnerRoute.target` to choose launch controls.
-7. Renders `plan.capabilityEvaluation.gates` as preflight rows using each gate's
+7. Prefer `createAssignmentPlatformHandoff(profile, report, contents?)` for the
+   top-level launch decision. Render `nextAction`, `launchable`, `messages`,
+   missing files/datasets, selected capabilities, and external-runner fields
+   directly instead of duplicating BrowserGrad preflight logic.
+8. Renders `plan.capabilityEvaluation.gates` as preflight rows using each gate's
    `status`, `selectedAnyOf`, `selectedCapabilities`, and missing fields.
-8. Builds the BrowserGrad mount plan for runnable or inspectable labs.
-9. Builds dataset cache metadata with `createAssignmentDatasetCachePlan`; valid
+9. Builds the BrowserGrad mount plan for runnable or inspectable labs.
+10. Builds dataset cache metadata with `createAssignmentDatasetCachePlan`; valid
    hashes become content-addressed cache paths, missing hashes become
    source-addressed URL cache paths, and malformed hashes remain preflight
    failures.

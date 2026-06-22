@@ -188,6 +188,37 @@ export interface AssignmentBenchmarkPreflightMatrix {
   readonly rows: readonly AssignmentBenchmarkPreflightRow[];
 }
 
+export type AssignmentPlatformNextAction =
+  | "install-capabilities"
+  | "mount-content"
+  | "run-pyodide"
+  | "run-javascript"
+  | "request-external-runner"
+  | "unsupported";
+
+export interface AssignmentPlatformHandoff {
+  readonly id: string;
+  readonly title?: string;
+  readonly course?: string;
+  readonly sourceUrl?: string;
+  readonly readinessStatus: AssignmentRunReadinessStatus;
+  readonly runnerTarget: AssignmentRunnerTarget;
+  readonly rubricKind: AssignmentRubricKind;
+  readonly nextAction: AssignmentPlatformNextAction;
+  readonly summary: string;
+  readonly launchable: boolean;
+  readonly missingCapabilities: readonly string[];
+  readonly missingRequiredFiles: readonly string[];
+  readonly missingDatasets: readonly string[];
+  readonly skippedOptionalPaths: readonly string[];
+  readonly selectedCapabilities: readonly string[];
+  readonly simulatedCapabilities: readonly string[];
+  readonly externalCapabilities: readonly string[];
+  readonly cacheStrategies: readonly AssignmentDatasetCacheStrategy[];
+  readonly externalRunnerRequired: boolean;
+  readonly messages: readonly string[];
+}
+
 export interface AssignmentVerifiedBenchmarkPreflightRow
   extends AssignmentBenchmarkPreflightRow {
   readonly hashOk: boolean;
@@ -664,6 +695,44 @@ export function createAssignmentBenchmarkPreflightMatrix(
   };
 }
 
+export function createAssignmentPlatformHandoff(
+  profile: AssignmentProfile,
+  report: AssignmentPreflightReport,
+  contents: AssignmentMountContents = { files: {} },
+): AssignmentPlatformHandoff {
+  const content = evaluateAssignmentMountContents(report.mountPlan, contents);
+  const nextAction = assignmentPlatformNextAction(report, content);
+  const summary = assignmentPlatformSummary(report, nextAction);
+  const launchable = nextAction === "run-pyodide" || nextAction === "run-javascript";
+
+  return {
+    id: profile.id,
+    ...(profile.metadata?.title ? { title: profile.metadata.title } : {}),
+    ...(profile.metadata?.course ? { course: profile.metadata.course } : {}),
+    ...(profile.metadata?.source_url
+      ? { sourceUrl: profile.metadata.source_url }
+      : {}),
+    readinessStatus: report.readiness.status,
+    runnerTarget: report.runnerRoute.target,
+    rubricKind: report.rubricKind,
+    nextAction,
+    summary,
+    launchable,
+    missingCapabilities: report.readiness.missingCapabilities,
+    missingRequiredFiles: content.missingRequiredFiles,
+    missingDatasets: content.missingDatasets,
+    skippedOptionalPaths: content.skippedOptionalPaths,
+    selectedCapabilities: report.readiness.selectedCapabilities,
+    simulatedCapabilities: report.readiness.simulatedCapabilities,
+    externalCapabilities: report.readiness.externalCapabilities,
+    cacheStrategies: report.datasetCachePlan.datasets.map(
+      (dataset) => dataset.strategy,
+    ),
+    externalRunnerRequired: Boolean(report.externalRunnerRequest),
+    messages: assignmentPlatformMessages(report, content, nextAction),
+  };
+}
+
 export async function createVerifiedAssignmentBenchmarkPreflightMatrix(
   profiles: readonly AssignmentProfile[],
   environment: AssignmentCapabilityEnvironment,
@@ -691,6 +760,69 @@ export async function createVerifiedAssignmentBenchmarkPreflightMatrix(
     ok: rows.every((row) => row.ok),
     rows,
   };
+}
+
+function assignmentPlatformNextAction(
+  report: AssignmentPreflightReport,
+  content: AssignmentMountContentEvaluation,
+): AssignmentPlatformNextAction {
+  if (report.readiness.status === "blocked" || report.runnerRoute.target === "blocked") {
+    return "install-capabilities";
+  }
+  if (report.runnerRoute.target === "unsupported") return "unsupported";
+  if (!content.ok) return "mount-content";
+  if (report.runnerRoute.target === "external") return "request-external-runner";
+  if (report.runnerRoute.target === "pyodide") return "run-pyodide";
+  if (report.runnerRoute.target === "javascript") return "run-javascript";
+  return "unsupported";
+}
+
+function assignmentPlatformSummary(
+  report: AssignmentPreflightReport,
+  nextAction: AssignmentPlatformNextAction,
+): string {
+  switch (nextAction) {
+    case "install-capabilities":
+      return report.readiness.summary;
+    case "mount-content":
+      return "mount required assignment files and datasets before launch";
+    case "request-external-runner":
+      return "assignment requires an external runner handoff";
+    case "run-pyodide":
+      return "assignment can launch in Pyodide";
+    case "run-javascript":
+      return "assignment can launch in JavaScript";
+    case "unsupported":
+      return report.runnerRoute.message;
+  }
+}
+
+function assignmentPlatformMessages(
+  report: AssignmentPreflightReport,
+  content: AssignmentMountContentEvaluation,
+  nextAction: AssignmentPlatformNextAction,
+): string[] {
+  const messages = [
+    ...report.readiness.missingCapabilities.map(
+      (capability) => `missing capability: ${capability}`,
+    ),
+    ...content.missingRequiredFiles.map((path) => `missing required file: ${path}`),
+    ...content.missingDatasets.map((name) => `missing dataset: ${name}`),
+  ];
+  if (messages.length > 0) return messages;
+
+  switch (nextAction) {
+    case "request-external-runner":
+      return ["ready for external runner handoff"];
+    case "run-pyodide":
+      return ["ready for Pyodide rubric runner"];
+    case "run-javascript":
+      return ["ready for JavaScript rubric runner"];
+    case "install-capabilities":
+    case "mount-content":
+    case "unsupported":
+      return [report.runnerRoute.message];
+  }
 }
 
 function createAssignmentBenchmarkPreflightRow(

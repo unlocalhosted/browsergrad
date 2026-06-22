@@ -179,6 +179,7 @@ import {
   assignmentRunnerRoute,
   createAssignmentCapabilityEnvironment,
   createAssignmentBenchmarkPreflightMatrix,
+  createAssignmentPlatformHandoff,
   createVerifiedAssignmentBenchmarkPreflightMatrix,
   createAssignmentDatasetCachePlan,
   createAssignmentExternalRunnerRequest,
@@ -206,6 +207,9 @@ const required = requiredAssignmentCapabilities(parsed.profile);
 const preflight = evaluateAssignmentCapabilities(parsed.profile, environment);
 const plan = createAssignmentRunPlan(parsed.profile, environment);
 const report = createAssignmentPreflightReport(parsed.profile, environment);
+const handoff = createAssignmentPlatformHandoff(parsed.profile, report, {
+  files: { [report.plan.files.rubricPath]: rubricSource },
+});
 const matrix = createAssignmentBenchmarkPreflightMatrix(
   [parsed.profile],
   environment,
@@ -237,6 +241,7 @@ console.log(required, preflight.ok, preflight.missingCapabilities);
 console.log(plan.session.packages, plan.files.rubricPath, plan.execution.allowedTests);
 console.log(readiness.status, rubricKind, mounts.files, mounts.datasets);
 console.log(route.target, report.runnerRoute.target, report.mountPlan.files, datasetCache.datasets);
+console.log(handoff.nextAction, handoff.launchable, handoff.messages);
 console.log(matrix.rows[0]?.readinessStatus, matrix.rows[0]?.contentOk);
 console.log(matrix.rows[0]?.gates.map((gate) => [gate.name, gate.status, gate.selectedCapabilities]));
 console.log(verifiedMatrix.rows[0]?.hashOk, verifiedMatrix.rows[0]?.hashChecks);
@@ -305,6 +310,12 @@ platform preflight calls into `{ plan, rubricKind, readiness, runnerRoute,
 requiredCapabilities, mountPlan, datasetCachePlan }`. Use it when the UI needs
 a single readonly object before fetching fixtures, mounting files, or launching
 code.
+`createAssignmentPlatformHandoff(profile, report, contents?)` turns that report
+plus currently available file/dataset contents into the exact launch-panel
+decision: `install-capabilities`, `mount-content`, `run-pyodide`,
+`run-javascript`, `request-external-runner`, or `unsupported`. It also carries
+missing files/datasets, selected capabilities, cache strategies, and concise
+messages so platform UI does not re-derive BrowserGrad decisions.
 `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
 batch-flattens those same preflight decisions into platform-ready rows:
 readiness status, runner target, rubric kind, required/selected/missing

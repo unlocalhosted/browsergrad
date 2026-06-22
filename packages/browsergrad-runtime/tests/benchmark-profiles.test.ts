@@ -5,6 +5,7 @@ import {
   createAssignmentCapabilityEnvironment,
   createAssignmentBenchmarkPreflightMatrix,
   createAssignmentDatasetCachePlan,
+  createAssignmentPlatformHandoff,
   createAssignmentPreflightReport,
   createAssignmentRunPlan,
   evaluateAssignmentMountContents,
@@ -249,6 +250,33 @@ describe("benchmark assignment profiles", () => {
     expect(matrix.rows.flatMap((row) => row.gates).every((gate) => gate.ok)).toBe(true);
   });
 
+  it("creates platform handoffs for every benchmark profile", () => {
+    for (const file of PROFILE_FILES) {
+      const profileJson = JSON.parse(
+        readFileSync(new URL(`../../../docs/internal/${file}`, import.meta.url), "utf8"),
+      );
+      const result = parseAssignmentProfile(profileJson);
+      expect(result).toMatchObject({ ok: true });
+      if (!result.ok) continue;
+
+      const report = createAssignmentPreflightReport(
+        result.profile,
+        BROWSER_TEACHING_ENVIRONMENT,
+      );
+      const handoff = createAssignmentPlatformHandoff(result.profile, report, {
+        files: {},
+      });
+
+      expect(handoff.id).toBe(result.profile.id);
+      expect(handoff.nextAction).toBe("mount-content");
+      expect(handoff.launchable).toBe(false);
+      expect(handoff.missingRequiredFiles).toEqual([report.plan.files.rubricPath]);
+      expect(handoff.messages[0]).toBe(
+        `missing required file: ${report.plan.files.rubricPath}`,
+      );
+    }
+  });
+
   it("creates external runner requests for native-heavy benchmark profiles", () => {
     for (const [file, expected] of Object.entries(EXTERNAL_BENCHMARK_ENVIRONMENTS)) {
       const profileJson = JSON.parse(
@@ -263,11 +291,21 @@ describe("benchmark assignment profiles", () => {
         result.profile,
         expected.environment,
       );
+      const handoff = createAssignmentPlatformHandoff(result.profile, report, {
+        files: { [report.plan.files.rubricPath]: "print('external')" },
+        datasets: Object.fromEntries(
+          report.mountPlan.datasets.map((dataset) => [dataset.name, "fixture"]),
+        ),
+      });
 
       expect(report.runnerRoute.target).toBe("external");
       expect(report.externalRunnerRequest?.externalCapabilities).toEqual(
         expected.externalCapabilities,
       );
+      expect(handoff.nextAction).toBe("request-external-runner");
+      expect(handoff.externalRunnerRequired).toBe(true);
+      expect(handoff.launchable).toBe(false);
+      expect(handoff.messages).toEqual(["ready for external runner handoff"]);
       expect(report.externalRunnerRequest?.files.root).toBe(result.profile.files.root);
       expect(report.externalRunnerRequest?.mountPlan).toEqual(report.mountPlan);
       expect(report.externalRunnerRequest?.datasetCachePlan).toEqual(
