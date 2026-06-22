@@ -309,6 +309,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return `exp(${args.join(", ")})`;
     case "logf":
       return `log(${args.join(", ")})`;
+    case "__half2float":
+      return `f32(${args.join(", ")})`;
+    case "__float2half":
+      return `f16(${args.join(", ")})`;
     case "min":
     case "max":
       return `${name}(${args.join(", ")})`;

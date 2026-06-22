@@ -417,6 +417,9 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       return Math.exp(args[0] ?? 0);
     case "logf":
       return Math.log(args[0] ?? 0);
+    case "__half2float":
+    case "__float2half":
+      return args[0] ?? 0;
     case "bg_subgroup_add":
       return args[0] ?? 0;
     default:

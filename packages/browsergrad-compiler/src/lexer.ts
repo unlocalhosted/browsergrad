@@ -115,12 +115,26 @@ function scanCudaLiteTokens(
     }
     if (/[0-9]/.test(char) || (char === "." && /[0-9]/.test(source[index + 1] ?? ""))) {
       let value = "";
-      while (index < source.length && /[0-9.]/.test(source[index]!)) {
+      if (char === "0" && /[xX]/.test(source[index + 1] ?? "")) {
         value += advance();
-      }
-      while (index < source.length && /[A-Za-z]/.test(source[index]!)) {
         value += advance();
+        while (index < source.length && /[0-9A-Fa-f]/.test(source[index]!)) value += advance();
+      } else {
+        while (index < source.length && /[0-9]/.test(source[index]!)) value += advance();
+        if (source[index] === ".") {
+          value += advance();
+          while (index < source.length && /[0-9]/.test(source[index]!)) value += advance();
+        }
+        const exponent = /^[eE][+-]?[0-9]+/u.exec(source.slice(index))?.[0];
+        if (exponent !== undefined) {
+          for (let consumed = 0; consumed < exponent.length; consumed++) value += advance();
+        }
+        while (source[index] === "." && /[0-9]/.test(source[index + 1] ?? "")) {
+          value += advance();
+          while (index < source.length && /[0-9]/.test(source[index]!)) value += advance();
+        }
       }
+      while (index < source.length && /[A-Za-z]/.test(source[index]!)) value += advance();
       tokens.push({ kind: "number", value, span: tokenSpan(start, index, startLine, startColumn) });
       continue;
     }

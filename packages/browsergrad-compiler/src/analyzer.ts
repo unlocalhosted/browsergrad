@@ -23,6 +23,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["sqrtf", [1, 1]],
   ["expf", [1, 1]],
   ["logf", [1, 1]],
+  ["__half2float", [1, 1]],
+  ["__float2half", [1, 1]],
   ["min", [2, 2]],
   ["max", [2, 2]],
   ["bg_subgroup_add", [1, 1]],
@@ -409,6 +411,16 @@ function validateCallExpression(
   if (isAtomicBuiltin(callName)) {
     validateAtomicBuiltin(expression, scope, params, atomicParams, diagnostics, walkExpression);
     return { kind: "scalar" };
+  }
+  if (callName === "__half2float" || callName === "__float2half") {
+    requiredFeatures.add("shader-f16");
+    for (const arg of expression.args) {
+      validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    }
+    return {
+      kind: "scalar",
+      valueType: callName === "__half2float" ? "float" : "half",
+    };
   }
   if (callName === "tex2D") {
     validateTex2D(expression, scope, diagnostics, walkExpression);

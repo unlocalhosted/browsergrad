@@ -278,6 +278,7 @@ __global__ void lessonSyntax(const float *__restrict__ input, float *output, uns
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   int lane = threadIdx.x & 31;
   int warp = threadIdx.x >> 5;
+  unsigned int mask = 0xffffffff;
   if (idx >= n) return;
   if (idx < n) {
     float value = input[idx] + ((input[idx] > 0.0f) ? 0.5f : -0.5f);
@@ -287,12 +288,13 @@ __global__ void lessonSyntax(const float *__restrict__ input, float *output, uns
       value += 1.0f;
     }
     warp >>= 1;
-    output[idx] = value + lane + warp;
+    output[idx] = value + lane + warp + ((mask == 0xffffffff) ? 1.0f : 0.0f);
   }
 }`, { workgroupSize: [32, 1, 1] });
 
     expect(compiled.wgsl).toContain("& 31");
     expect(compiled.wgsl).toContain(">> 5");
+    expect(compiled.wgsl).toContain("0xffffffff");
     expect(compiled.wgsl).toContain("select");
     expect(compiled.wgsl).toContain("return;");
     expect(compiled.wgsl).toContain("continue;");
@@ -565,6 +567,39 @@ __global__ void reduce(float* x) {
   if (threadIdx.x < 1) { x[0] = bg_subgroup_add(x[0]); }
 }`;
     expect(() => compileCudaLiteKernel(subgroupSource)).toThrow(CudaLiteCompilerError);
+  });
+
+  it("lowers CUDA half conversion builtins and exponent literals", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void half_convert(const half* input, half* output, int* flag) {
+  int idx = threadIdx.x;
+  if (idx < 1) {
+    float value = __half2float(input[idx]);
+    float big = 1e6f;
+    if (big > 999999.0f) { atomicExch(flag, 1); }
+    output[idx] = __float2half(value * 2.0f);
+  }
+}`, {
+      features: { "shader-f16": true },
+      workgroupSize: [1, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          input: new Float16Array([1.5]),
+          output: new Float16Array(1),
+          flag: new Int32Array([0]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("f32(input[idx])");
+    expect(compiled.wgsl).toContain("f16((value * 2.0))");
+    expect(compiled.wgsl).toContain("1e6");
+    expect([...result.buffers.output as Float16Array]).toEqual([3]);
+    expect([...result.buffers.flag as Int32Array]).toEqual([1]);
   });
 
   it("emits atomic storage buffers with explicit load/store operations", () => {

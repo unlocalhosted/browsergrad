@@ -187,7 +187,10 @@ __global__ void atomic_mark(int* visited, int* out) {
 
     const source = `
 __global__ void half_inc(half* x) {
-  if (threadIdx.x < 1) { x[0] = x[0] + 1.0; }
+  if (threadIdx.x < 1) {
+    float value = __half2float(x[0]);
+    x[0] = __float2half(value + 1.0);
+  }
 }`;
     const compiled = compileCudaLiteKernel(source, {
       features: { "shader-f16": true },
