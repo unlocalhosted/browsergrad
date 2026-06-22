@@ -57,6 +57,7 @@ class Parser {
   private readonly source: string;
   private readonly tokens: readonly Token[];
   private index = 0;
+  private anonymousKernelIndex = 0;
 
   constructor(source: string) {
     this.source = source;
@@ -153,18 +154,27 @@ class Parser {
     this.consumeKernelAttributes();
     const start = this.expect("__global__").span;
     this.consumeKernelAttributes();
-    this.expect("void");
-    const name = this.expectIdentifier("kernel name");
+    let name: string;
+    let nameSpan = start;
+    if (this.match("(")) {
+      this.anonymousKernelIndex++;
+      name = `anonymous_kernel_${this.anonymousKernelIndex}`;
+    } else {
+      this.expect("void");
+      const nameToken = this.expectIdentifier("kernel name");
+      name = nameToken.value;
+      nameSpan = nameToken.span;
+    }
     this.expect("(");
     const params = this.parseParams();
     this.expect(")");
     const body = this.parseBlock();
     return {
       kind: "kernel",
-      name: name.value,
+      name,
       params,
       body,
-      span: mergeSpans(start, body.at(-1)?.span ?? name.span),
+      span: mergeSpans(start, body.at(-1)?.span ?? nameSpan),
     };
   }
 

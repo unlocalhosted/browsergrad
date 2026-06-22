@@ -256,7 +256,7 @@ function collectTextureDeclarations(source) {
 }
 
 function kernelParamNames(kernel) {
-  const signature = /__global__\s+void\s+[A-Za-z_][A-Za-z0-9_]*\s*\(([\s\S]*?)\)\s*\{/u.exec(kernel);
+  const signature = /__global__\s+(?:void\s+[A-Za-z_][A-Za-z0-9_]*\s*)?\(([\s\S]*?)\)\s*\{/u.exec(kernel);
   if (signature === null) return [];
   return signature[1]
     .split(",")

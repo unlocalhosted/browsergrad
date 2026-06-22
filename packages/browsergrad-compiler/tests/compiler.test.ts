@@ -567,6 +567,28 @@ __global__ void asmFma(const float *A, const float *B, float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([18, 35]);
   });
 
+  it("parses anonymous CUDA lambda kernel bodies", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ (cufftComplex *data, int N) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < N) {
+    data[idx].x *= 2.0f;
+    data[idx].y *= 2.0f;
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { data: new Float32Array([1, 2, 3, 4]) },
+        scalars: { N: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.ir.name).toBe("anonymous_kernel_1");
+    expect([...result.buffers.data as Float32Array]).toEqual([2, 4, 6, 8]);
+  });
+
   it("parses dynamic extern shared memory as a clear unsupported diagnostic", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void dynamicShared(float *x) {
