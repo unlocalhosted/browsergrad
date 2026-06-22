@@ -132,6 +132,29 @@ __global__ void constant_scale(const float* x, float* y, int n) {
     expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
   });
 
+  it("runs compiled texture reads through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void texture_sample(float* out, int width) {
+  int x = threadIdx.x;
+  if (x < width) {
+    out[x] = tex2D(texRef, (float)x + 0.5f, 0.5f);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [4, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(4) },
+      textures: { texRef: { width: 4, height: 1, data: new Float32Array([3, 5, 7, 11]) } },
+      scalars: { width: 4 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
   it("runs compiled integer CAS atomics through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `

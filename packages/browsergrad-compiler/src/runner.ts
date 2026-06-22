@@ -67,6 +67,7 @@ export async function runCompiledKernelWebGpu(
     compiled.wgslProgram,
     {
       buffers,
+      ...(input.textures === undefined ? {} : { textures: input.textures }),
       ...(uniforms.byteLength === 0 ? {} : { uniforms: { params: uniforms } }),
       readback: input.readback ??
         compiled.ir.params.filter((param) => param.pointer && !param.constant).map((param) => param.name),

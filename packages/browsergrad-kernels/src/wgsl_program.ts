@@ -36,13 +36,22 @@ export interface WgslUniformBindingInput {
   readonly binding?: number;
 }
 
+export interface WgslTexture2DBindingInput {
+  readonly kind: "texture2d";
+  readonly name: string;
+  readonly valueType: "f32";
+  readonly binding?: number;
+}
+
 export type WgslKernelBindingInput =
   | WgslStorageBindingInput
-  | WgslUniformBindingInput;
+  | WgslUniformBindingInput
+  | WgslTexture2DBindingInput;
 
 export type WgslKernelBinding =
   | (WgslStorageBindingInput & { readonly binding: number; readonly access: WgslStorageAccess })
-  | (WgslUniformBindingInput & { readonly binding: number });
+  | (WgslUniformBindingInput & { readonly binding: number })
+  | (WgslTexture2DBindingInput & { readonly binding: number });
 type WgslStorageBinding = Extract<WgslKernelBinding, { readonly kind: "storage" }>;
 
 export interface WgslKernelProgramInput {
@@ -61,8 +70,15 @@ export interface WgslKernelProgram {
 
 export interface WgslKernelRunInput {
   readonly buffers: Readonly<Record<string, WgslTypedArray>>;
+  readonly textures?: Readonly<Record<string, WgslTexture2DInput>>;
   readonly uniforms?: Readonly<Record<string, ArrayBuffer | ArrayBufferView>>;
   readonly readback?: readonly string[];
+}
+
+export interface WgslTexture2DInput {
+  readonly width: number;
+  readonly height: number;
+  readonly data: Float32Array;
 }
 
 export interface WgslKernelLaunch {
@@ -130,6 +146,14 @@ export function defineWgslKernelProgram(
         binding: bindingIndex,
       };
     }
+    if (binding.kind === "texture2d") {
+      return {
+        kind: "texture2d",
+        name: binding.name,
+        valueType: binding.valueType,
+        binding: bindingIndex,
+      };
+    }
     if (binding.byteLength !== undefined) {
       validatePositiveInteger(binding.byteLength, `${binding.name}.byteLength`);
     }
@@ -169,6 +193,7 @@ export async function runWgslKernelProgram(
   const layoutEntries: GPUBindGroupLayoutEntry[] = [];
   const storageBuffers = new Map<string, { binding: WgslStorageBinding; buffer: GPUBuffer; byteLength: number }>();
   const uniformBuffers: GPUBuffer[] = [];
+  const textures: GPUTexture[] = [];
   const readBuffers = new Set<GPUBuffer>();
 
   try {
@@ -193,7 +218,7 @@ export async function runWgslKernelProgram(
           },
         });
         bindGroupEntries.push({ binding: binding.binding, resource: { buffer } });
-      } else {
+      } else if (binding.kind === "uniform") {
         const data = input.uniforms?.[binding.name];
         if (!data) throw new KernelError(`missing uniform input: ${binding.name}`);
         const bytes = bytesFromBufferSource(data);
@@ -217,6 +242,34 @@ export async function runWgslKernelProgram(
           buffer: { type: "uniform" },
         });
         bindGroupEntries.push({ binding: binding.binding, resource: { buffer } });
+      } else {
+        const textureInput = input.textures?.[binding.name];
+        if (!textureInput) throw new KernelError(`missing texture input: ${binding.name}`);
+        validateTexture2DInput(textureInput, binding.name);
+        const texture = gpu.createTexture({
+          size: { width: textureInput.width, height: textureInput.height },
+          format: "r32float",
+          usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+        });
+        const bytes = paddedTextureRows(textureInput);
+        gpu.queue.writeTexture(
+          { texture },
+          bytes.data,
+          { bytesPerRow: bytes.bytesPerRow, rowsPerImage: textureInput.height },
+          { width: textureInput.width, height: textureInput.height },
+        );
+        const view = texture.createView();
+        textures.push(texture);
+        layoutEntries.push({
+          binding: binding.binding,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: {
+            sampleType: "unfilterable-float",
+            viewDimension: "2d",
+            multisampled: false,
+          },
+        });
+        bindGroupEntries.push({ binding: binding.binding, resource: view });
       }
     }
 
@@ -268,6 +321,7 @@ export async function runWgslKernelProgram(
     for (const readBuffer of readBuffers) readBuffer.destroy();
     for (const entry of storageBuffers.values()) entry.buffer.destroy();
     for (const buffer of uniformBuffers) buffer.destroy();
+    for (const texture of textures) texture.destroy();
   }
 }
 
@@ -399,6 +453,30 @@ function validateTypedArray(data: WgslTypedArray, binding: Extract<WgslKernelBin
   }
 }
 
+function validateTexture2DInput(input: WgslTexture2DInput, name: string): void {
+  validatePositiveInteger(input.width, `${name}.width`);
+  validatePositiveInteger(input.height, `${name}.height`);
+  if (!(input.data instanceof Float32Array)) {
+    throw new KernelError(`texture ${name} expects Float32Array data`);
+  }
+  const expected = input.width * input.height;
+  if (input.data.length < expected) {
+    throw new KernelError(`texture ${name} expects at least ${expected} texels`);
+  }
+}
+
+function paddedTextureRows(input: WgslTexture2DInput): { readonly data: Uint8Array; readonly bytesPerRow: number } {
+  const sourceRowBytes = input.width * Float32Array.BYTES_PER_ELEMENT;
+  const bytesPerRow = alignTo(sourceRowBytes, 256);
+  const out = new Uint8Array(bytesPerRow * input.height);
+  const source = new Uint8Array(input.data.buffer, input.data.byteOffset, input.width * input.height * Float32Array.BYTES_PER_ELEMENT);
+  for (let row = 0; row < input.height; row++) {
+    const sourceStart = row * sourceRowBytes;
+    out.set(source.subarray(sourceStart, sourceStart + sourceRowBytes), row * bytesPerRow);
+  }
+  return { data: out, bytesPerRow };
+}
+
 function validateStorageByteLength(byteLength: number, name: string): number {
   if (!Number.isInteger(byteLength) || byteLength <= 0) {
     throw new KernelError(`storage buffer ${name} must not be empty`);
@@ -479,7 +557,7 @@ function formatCompilationMessages(messages: readonly GPUCompilationMessage[]): 
 function layoutSignature(entries: readonly GPUBindGroupLayoutEntry[]): string {
   return entries
     .map((entry) => {
-      const type = entry.buffer?.type ?? "none";
+      const type = entry.buffer?.type ?? entry.texture?.sampleType ?? "none";
       return `${entry.binding}:${type}`;
     })
     .join("|");

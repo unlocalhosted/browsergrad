@@ -446,6 +446,35 @@ __global__ void apply(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([20, 80]);
   });
 
+  it("lowers CUDA texture references and tex2D reads", () => {
+    const compiled = compileCudaLiteKernel(`
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void sample(float *out, int width) {
+  int x = threadIdx.x;
+  if (x < width) {
+    out[x] = tex2D(texRef, (float)x + 0.5f, 0.5f);
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(2) },
+        textures: { texRef: { width: 2, height: 1, data: new Float32Array([4, 8]) } },
+        scalars: { width: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.ir.textures.map((texture) => texture.name)).toEqual(["texRef"]);
+    expect(compiled.wgsl).toContain("var texRef: texture_2d<f32>;");
+    expect(compiled.wgsl).toContain("bg_tex2d_texRef");
+    expect(compiled.wgslProgram.bindings).toContainEqual(expect.objectContaining({
+      kind: "texture2d",
+      name: "texRef",
+    }));
+    expect([...result.buffers.out as Float32Array]).toEqual([4, 8]);
+  });
+
   it("formats diagnostics with source snippets", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(const float* x) {

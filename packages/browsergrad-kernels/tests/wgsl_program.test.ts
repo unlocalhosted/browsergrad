@@ -32,6 +32,17 @@ describe("generic WGSL kernel programs", () => {
     expect(program.bindings[0]).toMatchObject({ kind: "storage", valueType: "f16" });
   });
 
+  it("supports texture2d bindings explicitly", () => {
+    const program = defineWgslKernelProgram({
+      name: "texture_kernel",
+      wgsl: "@group(0) @binding(0) var image: texture_2d<f32>;\n@compute @workgroup_size(1) fn main() {}",
+      workgroupSize: [1, 1, 1],
+      bindings: [{ kind: "texture2d", name: "image", valueType: "f32" }],
+    });
+
+    expect(program.bindings[0]).toMatchObject({ kind: "texture2d", valueType: "f32" });
+  });
+
   it("allows compute programs with no bindings", () => {
     const program = defineWgslKernelProgram({
       name: "control_only",

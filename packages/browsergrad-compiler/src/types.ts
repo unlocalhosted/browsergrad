@@ -1,4 +1,5 @@
 import type {
+  WgslTexture2DInput,
   WgslKernelProgram,
   WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
@@ -35,6 +36,7 @@ export interface CudaLiteModule {
   readonly kind: "module";
   readonly source: string;
   readonly constants: readonly CudaLiteGlobalConstant[];
+  readonly textures: readonly CudaLiteTexture2D[];
   readonly kernels: readonly CudaLiteKernel[];
   readonly span: SourceSpan;
 }
@@ -44,6 +46,13 @@ export interface CudaLiteGlobalConstant {
   readonly valueType: Exclude<CudaLiteScalarType, "void">;
   readonly name: string;
   readonly dimensions: readonly number[];
+  readonly span: SourceSpan;
+}
+
+export interface CudaLiteTexture2D {
+  readonly kind: "texture2d";
+  readonly valueType: "float";
+  readonly name: string;
   readonly span: SourceSpan;
 }
 
@@ -120,6 +129,7 @@ export type CudaLiteExpression =
   | CudaLiteNumberLiteral
   | CudaLiteStringLiteral
   | CudaLiteIdentifier
+  | CudaLiteCastExpression
   | CudaLiteMemberExpression
   | CudaLiteIndexExpression
   | CudaLiteCallExpression
@@ -146,6 +156,13 @@ export interface CudaLiteStringLiteral {
 export interface CudaLiteIdentifier {
   readonly kind: "identifier";
   readonly name: string;
+  readonly span: SourceSpan;
+}
+
+export interface CudaLiteCastExpression {
+  readonly kind: "cast";
+  readonly valueType: Exclude<CudaLiteScalarType, "void">;
+  readonly expression: CudaLiteExpression;
   readonly span: SourceSpan;
 }
 
@@ -237,6 +254,7 @@ export interface CudaLiteAnalyzeOptions {
 export interface CudaLiteAnalysis {
   readonly kernel: CudaLiteKernel;
   readonly constants: readonly CudaLiteGlobalConstant[];
+  readonly textures: readonly CudaLiteTexture2D[];
   readonly diagnostics: readonly CudaLiteDiagnostic[];
   readonly requiredFeatures: readonly string[];
   readonly atomicParams: readonly string[];
@@ -246,6 +264,7 @@ export interface KernelIrModule {
   readonly name: string;
   readonly params: readonly CudaLiteParam[];
   readonly constants: readonly CudaLiteGlobalConstant[];
+  readonly textures: readonly CudaLiteTexture2D[];
   readonly body: readonly CudaLiteStatement[];
   readonly sharedDeclarations: readonly CudaLiteVarDecl[];
   readonly requiredFeatures: readonly string[];
@@ -273,6 +292,7 @@ export interface KernelLaunch {
 export interface CompiledKernelInput {
   readonly buffers: Readonly<Record<string, WgslTypedArray>>;
   readonly constants?: Readonly<Record<string, number | WgslTypedArray>>;
+  readonly textures?: Readonly<Record<string, WgslTexture2DInput>>;
   readonly scalars?: Readonly<Record<string, number>>;
   readonly readback?: readonly string[];
 }

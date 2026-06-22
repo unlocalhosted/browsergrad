@@ -77,4 +77,41 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     expect([...result.buffers.y as Float32Array]).toEqual([12, 24, 36, 48]);
   });
+
+  it("runs f32 texture2d bindings", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const program = defineWgslKernelProgram({
+      name: "texture_copy",
+      workgroupSize: [2, 2, 1],
+      bindings: [
+        { kind: "texture2d", name: "image", valueType: "f32", binding: 0 },
+        { kind: "storage", name: "out", valueType: "f32", access: "read_write", binding: 1 },
+      ],
+      wgsl: `
+@group(0) @binding(0) var image: texture_2d<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+@compute @workgroup_size(2, 2, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < 2u && gid.y < 2u) {
+    let i = gid.y * 2u + gid.x;
+    out[i] = textureLoad(image, vec2<i32>(i32(gid.x), i32(gid.y)), 0).r;
+  }
+}`,
+    });
+
+    const result = await runWgslKernelProgram(
+      device,
+      program,
+      {
+        textures: {
+          image: { width: 2, height: 2, data: new Float32Array([1, 2, 3, 4]) },
+        },
+        buffers: { out: new Float32Array(4) },
+      },
+      { dispatchCount: [2, 2, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
+  });
 });

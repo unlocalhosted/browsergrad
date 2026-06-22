@@ -31,11 +31,12 @@ for (const file of files) {
   for (const [blockIndex, block] of blocks.entries()) {
     const blockDefines = collectObjectDefines(block.code);
     const blockConstants = collectConstantDeclarations(block.code);
+    const blockTextures = collectTextureDeclarations(block.code);
     const effectiveDefines = blockDefines.size === 0 ? carriedDefines : blockDefines;
     if (CUDA_HINT_RE.test(block.code)) cudaBlocks++;
     const kernels = extractKernelDefinitions(block.code);
     for (const [kernelIndex, rawKernel] of kernels.entries()) {
-      const source = kernelSourceWithContext(rawKernel, effectiveDefines, blockConstants);
+      const source = kernelSourceWithContext(rawKernel, effectiveDefines, blockConstants, blockTextures);
       try {
         compileCudaLiteKernel(source, {
           features: { "shader-f16": true, subgroups: true },
@@ -148,12 +149,12 @@ function extractKernelDefinitions(source) {
   return kernels;
 }
 
-function kernelSourceWithContext(kernel, definesByName, constantDeclarations) {
+function kernelSourceWithContext(kernel, definesByName, constantDeclarations, textureDeclarations) {
   const params = new Set(kernelParamNames(kernel));
   const defines = [...definesByName]
     .filter(([name]) => !params.has(name))
     .map(([name, value]) => `#define ${name} ${value}`);
-  return `${defines.join("\n")}\n${constantDeclarations.join("\n")}\n${kernel}`;
+  return `${defines.join("\n")}\n${constantDeclarations.join("\n")}\n${textureDeclarations.join("\n")}\n${kernel}`;
 }
 
 function collectObjectDefines(source) {
@@ -180,6 +181,15 @@ function collectConstantDeclarations(source) {
   const clean = stripComments(source);
   const declarations = [];
   const re = /__constant__\s+[^;]+;/g;
+  let match;
+  while ((match = re.exec(clean))) declarations.push(match[0]);
+  return declarations;
+}
+
+function collectTextureDeclarations(source) {
+  const clean = stripComments(source);
+  const declarations = [];
+  const re = /texture\s*<[^;]+>\s*[A-Za-z_][A-Za-z0-9_]*\s*;/g;
   let match;
   while ((match = re.exec(clean))) declarations.push(match[0]);
   return declarations;

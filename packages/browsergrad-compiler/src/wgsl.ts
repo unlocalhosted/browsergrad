@@ -60,6 +60,10 @@ export function emitKernelIrWgsl(
     );
   }
 
+  for (const texture of ir.textures) {
+    lines.push(`@group(0) @binding(${context.bindingFor(texture.name)}) var ${texture.name}: texture_2d<f32>;`);
+  }
+
   const uniformScalars = context.uniformScalars;
   if (uniformScalars.length > 0) {
     lines.push("struct Params {");
@@ -73,6 +77,11 @@ export function emitKernelIrWgsl(
 
   for (const shared of ir.sharedDeclarations) {
     lines.push(`var<workgroup> ${shared.name}: ${emitSharedType(shared)};`);
+  }
+
+  if (ir.textures.length > 0) {
+    lines.push("");
+    for (const texture of ir.textures) lines.push(...emitTextureHelper(texture.name));
   }
 
   lines.push("");
@@ -131,6 +140,16 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
       name: constant.name,
       valueType: wgslBindingType(constant.valueType),
       access: "read",
+      binding,
+    });
+  }
+  for (const texture of ir.textures) {
+    const binding = bindings.length;
+    bindingByName.set(texture.name, binding);
+    bindings.push({
+      kind: "texture2d",
+      name: texture.name,
+      valueType: "f32",
       binding,
     });
   }
@@ -223,6 +242,8 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       return expression.raw;
     case "identifier":
       return emitIdentifier(expression.name, context);
+    case "cast":
+      return `${wgslScalar(expression.valueType)}(${emitExpression(expression.expression, context)})`;
     case "member":
       return emitMember(expression, context);
     case "index": {
@@ -293,6 +314,11 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return `${name}(${args.join(", ")})`;
     case "bg_subgroup_add":
       return `subgroupAdd(${args.join(", ")})`;
+    case "tex2D":
+      if (expression.args.length === 3 && expression.args[0]?.kind === "identifier") {
+        return `bg_tex2d_${expression.args[0].name}(${emitExpression(expression.args[1]!, context)}, ${emitExpression(expression.args[2]!, context)})`;
+      }
+      return `tex2D(${args.join(", ")})`;
     case "atomicAdd":
       return emitAtomicCall("atomicAdd", expression, context, args);
     case "atomicSub":
@@ -375,6 +401,17 @@ function emitConstantArrayType(constant: CudaLiteGlobalConstant): string {
     type = `array<${type}, ${constant.dimensions[i]!}>`;
   }
   return type;
+}
+
+function emitTextureHelper(name: string): string[] {
+  return [
+    `fn bg_tex2d_${name}(x: f32, y: f32) -> f32 {`,
+    `  let dims = textureDimensions(${name});`,
+    "  let max_coord = vec2<i32>(i32(dims.x) - 1, i32(dims.y) - 1);",
+    "  let coord = clamp(vec2<i32>(i32(floor(x)), i32(floor(y))), vec2<i32>(0, 0), max_coord);",
+    `  return textureLoad(${name}, coord, 0).r;`,
+    "}",
+  ];
 }
 
 function wgslScalar(type: CudaLiteScalarType): string {

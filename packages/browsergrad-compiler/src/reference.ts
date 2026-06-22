@@ -33,6 +33,7 @@ interface ThreadContext {
   readonly buffers: Map<string, WgslTypedArray>;
   readonly constants: Map<string, number | WgslTypedArray>;
   readonly constantDimensions: Map<string, readonly number[]>;
+  readonly textures: NonNullable<CompiledKernelInput["textures"]>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly locals: Map<string, LocalValue>;
   readonly shared: Map<string, SharedArrayValue>;
@@ -66,13 +67,14 @@ export function runCompiledKernelReference(
   const buffers = cloneBuffers(input.buffers);
   const constants = cloneConstants(input.constants ?? {});
   const constantDimensions = new Map(compiled.ir.constants.map((constant) => [constant.name, constant.dimensions]));
+  const textures = input.textures ?? {};
   const scalars = input.scalars ?? {};
   const traces: MutableTrace[] = [];
 
   for (let bz = 0; bz < launch.gridDim[2]; bz++) {
     for (let by = 0; by < launch.gridDim[1]; by++) {
       for (let bx = 0; bx < launch.gridDim[0]; bx++) {
-        runBlock(compiled, buffers, constants, constantDimensions, scalars, {
+        runBlock(compiled, buffers, constants, constantDimensions, textures, scalars, {
           x: bx,
           y: by,
           z: bz,
@@ -97,6 +99,7 @@ function runBlock(
   buffers: Map<string, WgslTypedArray>,
   constants: Map<string, number | WgslTypedArray>,
   constantDimensions: Map<string, readonly number[]>,
+  textures: NonNullable<CompiledKernelInput["textures"]>,
   scalars: Readonly<Record<string, number>>,
   blockIdx: Vector3,
   blockDim: Vector3,
@@ -127,6 +130,7 @@ function runBlock(
           buffers,
           constants,
           constantDimensions,
+          textures,
           scalars,
           locals: new Map(),
           shared,
@@ -215,6 +219,8 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
       return 0;
     case "identifier":
       return valueAsNumber(readIdentifier(expression.name, context), expression.name);
+    case "cast":
+      return castNumber(expression.valueType, evalExpression(expression.expression, context));
     case "member": {
       const object = readExpressionObject(expression.object, context);
       return object[expression.property];
@@ -248,6 +254,12 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
     case "call":
       return evalCall(expression, context);
   }
+}
+
+function castNumber(type: "float" | "int" | "uint" | "half", value: number): number {
+  if (type === "int") return Math.trunc(value) | 0;
+  if (type === "uint") return Math.trunc(value) >>> 0;
+  return value;
 }
 
 function readExpressionObject(expression: CudaLiteExpression, context: ThreadContext): Vector3 {
@@ -381,6 +393,15 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const value = evalExpression(expression.args[2]!, context);
     if (Math.trunc(current) === Math.trunc(compare)) writeLValue(lvalue, value, context);
     return current;
+  }
+  if (name === "tex2D") {
+    const textureRef = expression.args[0];
+    if (textureRef?.kind !== "identifier") throw compilerFailure("tex2D expects texture reference");
+    const texture = context.textures[textureRef.name];
+    if (!texture) throw compilerFailure(`missing texture input '${textureRef.name}'`);
+    const x = Math.max(0, Math.min(texture.width - 1, Math.floor(evalExpression(expression.args[1]!, context))));
+    const y = Math.max(0, Math.min(texture.height - 1, Math.floor(evalExpression(expression.args[2]!, context))));
+    return texture.data[y * texture.width + x] ?? 0;
   }
   const args = expression.args.map((arg) => evalExpression(arg, context));
   switch (name) {
@@ -622,6 +643,15 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
       const expected = constant.dimensions.reduce((product, dimension) => product * dimension, 1);
       if (value.length < expected) throw compilerFailure(`constant '${constant.name}' expects at least ${expected} elements`);
     }
+  }
+  for (const texture of compiled.ir.textures) {
+    const value = input.textures?.[texture.name];
+    if (!value) throw compilerFailure(`missing texture input '${texture.name}'`);
+    if (!(value.data instanceof Float32Array)) throw compilerFailure(`texture '${texture.name}' expects Float32Array data`);
+    if (!Number.isInteger(value.width) || value.width <= 0) throw compilerFailure(`texture '${texture.name}' width must be positive`);
+    if (!Number.isInteger(value.height) || value.height <= 0) throw compilerFailure(`texture '${texture.name}' height must be positive`);
+    const expected = value.width * value.height;
+    if (value.data.length < expected) throw compilerFailure(`texture '${texture.name}' expects at least ${expected} texels`);
   }
 }
 

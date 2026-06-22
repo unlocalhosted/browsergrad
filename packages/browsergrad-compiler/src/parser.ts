@@ -3,6 +3,7 @@ import {
   CudaLiteCompilerError,
   type CudaLiteAssignmentExpression,
   type CudaLiteBinaryExpression,
+  type CudaLiteCastExpression,
   type CudaLiteExpression,
   type CudaLiteForStatement,
   type CudaLiteGlobalConstant,
@@ -13,6 +14,7 @@ import {
   type CudaLiteParam,
   type CudaLiteScalarType,
   type CudaLiteStatement,
+  type CudaLiteTexture2D,
   type CudaLiteUnaryExpression,
   type CudaLiteUpdateExpression,
   type CudaLiteVarDecl,
@@ -58,17 +60,46 @@ class Parser {
 
   parseModule(): CudaLiteModule {
     const constants: CudaLiteGlobalConstant[] = [];
+    const textures: CudaLiteTexture2D[] = [];
     const kernels: CudaLiteKernel[] = [];
     while (!this.match("<eof>")) {
       if (this.match("__constant__")) constants.push(this.parseGlobalConstant());
+      else if (this.match("texture")) textures.push(this.parseTexture2D());
       else kernels.push(this.parseKernel());
     }
     return {
       kind: "module",
       source: this.source,
       constants,
+      textures,
       kernels,
       span: { start: 0, end: this.source.length, line: 1, column: 1 },
+    };
+  }
+
+  private parseTexture2D(): CudaLiteTexture2D {
+    const start = this.expect("texture").span;
+    this.expect("<");
+    const valueType = this.parseType();
+    this.expect(",");
+    const textureType = this.expectTextureDimension();
+    this.expect(",");
+    const readMode = this.expectIdentifier("texture read mode");
+    this.expect(">");
+    const name = this.expectIdentifier("texture name");
+    const end = this.expect(";").span;
+    if (valueType !== "float") this.fail("only texture<float, cudaTextureType2D, ...> is supported in CUDA-lite", start);
+    if (textureType.value !== "cudaTextureType2D" && textureType.value !== "2") {
+      this.fail("only cudaTextureType2D / 2D textures are supported in CUDA-lite", textureType.span);
+    }
+    if (readMode.value !== "cudaReadModeElementType") {
+      this.fail("only cudaReadModeElementType texture reads are supported in CUDA-lite", readMode.span);
+    }
+    return {
+      kind: "texture2d",
+      valueType: "float",
+      name: name.value,
+      span: mergeSpans(start, end),
     };
   }
 
@@ -298,6 +329,18 @@ class Parser {
 
   private parsePrefix(): CudaLiteExpression {
     const token = this.peek();
+    if (this.startsScalarCast()) {
+      const start = this.expect("(").span;
+      const valueType = this.parseType();
+      this.expect(")");
+      const expression = this.parsePrefix();
+      return {
+        kind: "cast",
+        valueType,
+        expression,
+        span: mergeSpans(start, expression.span),
+      } satisfies CudaLiteCastExpression;
+    }
     if (["-", "+", "!", "&"].includes(token.value)) {
       const op = this.advance().value as CudaLiteUnaryExpression["operator"];
       const argument = this.parsePrefix();
@@ -366,6 +409,25 @@ class Parser {
     }
     const ident = this.expectIdentifier("expression");
     return { kind: "identifier", name: ident.value, span: ident.span };
+  }
+
+  private startsScalarCast(): boolean {
+    if (!this.match("(")) return false;
+    const typeToken = this.tokens[this.index + 1];
+    const closeToken = this.tokens[this.index + 2];
+    if (typeToken === undefined || closeToken === undefined || closeToken.value !== ")") return false;
+    if (typeToken.value === "unsigned") return true;
+    if (typeToken.value === "size_t") return true;
+    return TYPE_KEYWORDS.has(typeToken.value);
+  }
+
+  private expectTextureDimension(): Token {
+    if (this.peek().kind === "number") {
+      const token = this.advance();
+      if (token.value !== "2") this.fail("only 2D textures are supported in CUDA-lite", token.span);
+      return token;
+    }
+    return this.expectIdentifier("texture type");
   }
 
   private parseType(): Exclude<CudaLiteScalarType, "void"> {

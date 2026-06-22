@@ -90,6 +90,8 @@ export {
   type WgslKernelRunResult,
   type WgslStorageAccess,
   type WgslStorageBindingInput,
+  type WgslTexture2DBindingInput,
+  type WgslTexture2DInput,
   type WgslTypedArray,
   type WgslUniformBindingInput,
   type WgslValueType,

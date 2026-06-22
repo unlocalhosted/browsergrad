@@ -10,6 +10,7 @@ import {
   type CudaLiteParam,
   type CudaLiteScalarType,
   type CudaLiteStatement,
+  type CudaLiteTexture2D,
   type CudaLiteVarDecl,
   type KernelIrModule,
   type SourceSpan,
@@ -31,6 +32,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["atomicMax", [2, 2]],
   ["atomicExch", [2, 2]],
   ["atomicCAS", [3, 3]],
+  ["tex2D", [3, 3]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
 ]);
 const WGSL_RESERVED_WORDS = new Set([
@@ -70,7 +72,7 @@ type ValueType = Exclude<CudaLiteScalarType, "void">;
 
 interface SymbolInfo {
   readonly name: string;
-  readonly kind: "param" | "local" | "shared" | "constant" | "builtin-vector" | "builtin-call";
+  readonly kind: "param" | "local" | "shared" | "constant" | "texture" | "builtin-vector" | "builtin-call";
   readonly valueType?: ValueType;
   readonly pointer?: boolean;
   readonly constant?: boolean;
@@ -84,7 +86,7 @@ interface Scope {
 }
 
 interface ExpressionInfo {
-  readonly kind: "scalar" | "pointer" | "array" | "vector" | "function" | "address" | "string" | "unknown";
+  readonly kind: "scalar" | "pointer" | "array" | "texture" | "vector" | "function" | "address" | "string" | "unknown";
   readonly valueType?: ValueType | undefined;
   readonly dimensions?: readonly number[] | undefined;
   readonly symbol?: SymbolInfo | undefined;
@@ -104,6 +106,9 @@ export function analyzeCudaLite(
 
   for (const constant of ast.constants) {
     declareConstant(constant, rootScope, declaredNames, requiredFeatures, diagnostics);
+  }
+  for (const texture of ast.textures) {
+    declareTexture(texture, rootScope, declaredNames, diagnostics);
   }
 
   for (const param of kernel.params) {
@@ -251,6 +256,7 @@ export function analyzeCudaLite(
   return {
     kernel,
     constants: ast.constants,
+    textures: ast.textures,
     diagnostics,
     requiredFeatures: [...requiredFeatures].sort(),
     atomicParams: [...atomicParams].sort(),
@@ -277,6 +283,7 @@ export function lowerAnalyzedCudaLiteToKernelIr(
     name: analysis.kernel.name,
     params: analysis.kernel.params,
     constants: analysis.constants,
+    textures: analysis.textures,
     body: analysis.kernel.body,
     sharedDeclarations: collectSharedDeclarations(analysis.kernel.body, options),
     requiredFeatures: analysis.requiredFeatures,
@@ -335,6 +342,25 @@ function declareConstant(
   }
 }
 
+function declareTexture(
+  texture: CudaLiteTexture2D,
+  rootScope: Scope,
+  declaredNames: Set<string>,
+  diagnostics: CudaLiteDiagnostic[],
+): void {
+  if (declaredNames.has(texture.name)) {
+    diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${texture.name}'`, texture.span));
+  }
+  validateDeclaredSymbolName(texture.name, texture.span, diagnostics);
+  declaredNames.add(texture.name);
+  rootScope.symbols.set(texture.name, {
+    name: texture.name,
+    kind: "texture",
+    valueType: texture.valueType,
+    span: texture.span,
+  });
+}
+
 type ExpressionWalker = (expression: CudaLiteExpression, scope: Scope) => ExpressionInfo;
 
 function validateCallExpression(
@@ -384,12 +410,36 @@ function validateCallExpression(
     validateAtomicBuiltin(expression, scope, params, atomicParams, diagnostics, walkExpression);
     return { kind: "scalar" };
   }
+  if (callName === "tex2D") {
+    validateTex2D(expression, scope, diagnostics, walkExpression);
+    return { kind: "scalar", valueType: "float" };
+  }
 
   for (const arg of expression.args) {
     const info = walkExpression(arg, scope);
     validateScalarOperand(info, arg.span, diagnostics);
   }
   return { kind: "scalar" };
+}
+
+function validateTex2D(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const texture = expression.args[0];
+  if (texture?.kind !== "identifier") {
+    diagnostics.push(error("unsupported-texture", "tex2D first argument must be a texture reference", expression.span));
+  } else {
+    const symbol = lookupSymbol(texture.name, scope, texture.span);
+    if (symbol?.kind !== "texture") {
+      diagnostics.push(error("unsupported-texture", `tex2D target '${texture.name}' is not a texture reference`, texture.span));
+    }
+  }
+  for (const coord of expression.args.slice(1)) {
+    validateScalarOperand(walkExpression(coord, scope), coord.span, diagnostics);
+  }
 }
 
 function validateAtomicBuiltin(
@@ -458,6 +508,11 @@ function validateNonCallExpression(
       return { kind: "string" };
     case "identifier":
       return expressionInfoForIdentifier(expression.name, expression.span, scope, diagnostics);
+    case "cast": {
+      const info = walkExpression(expression.expression, scope);
+      validateScalarOperand(info, expression.expression.span, diagnostics);
+      return { kind: "scalar", valueType: expression.valueType };
+    }
     case "member": {
       const object = walkExpression(expression.object, scope);
       if (object.kind !== "vector") {
@@ -569,6 +624,7 @@ function expressionInfoForIdentifier(
   }
   if (symbol.kind === "builtin-vector") return { kind: "vector", symbol };
   if (symbol.kind === "builtin-call") return { kind: "function", symbol };
+  if (symbol.kind === "texture") return { kind: "texture", valueType: symbol.valueType, symbol };
   if (symbol.kind === "shared" || symbol.kind === "constant") {
     return {
       kind: symbol.dimensions && symbol.dimensions.length > 0 ? "array" : "scalar",
@@ -739,6 +795,9 @@ function forEachExpressionChild(
     case "number":
     case "string":
     case "identifier":
+      return;
+    case "cast":
+      visit(expression.expression);
       return;
     case "member":
       visit(expression.object);
