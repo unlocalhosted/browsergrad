@@ -67,6 +67,8 @@ Modeled memory spaces:
 
 - Global pointer params: storage buffers in WebGPU, typed arrays in reference.
 - Scalar params: packed uniform buffer in WebGPU, JS numbers in reference.
+- Fixed thread-local arrays: function-scope WGSL arrays, per-thread typed arrays
+  in reference.
 - Fixed `__shared__` arrays: workgroup memory in WGSL, per-block arrays in
   reference.
 - Dynamic shared memory: launch metadata decides size; unsupported sizes get a

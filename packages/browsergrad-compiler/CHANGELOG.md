@@ -34,3 +34,5 @@
   coverage baselines fail on regression.
 - Browser WebGPU benchmarks now fail on validation errors and accept optional
   prepared-dispatch ratio thresholds for machine-local perf gates.
+- Fixed thread-local arrays now run through CPU reference and WGSL/WebGPU
+  lowering.

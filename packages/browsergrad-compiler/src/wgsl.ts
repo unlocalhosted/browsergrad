@@ -383,6 +383,7 @@ function emitStatement(
         if (!isEmittedPointerVar(statement, context)) return [];
         return [`${prefix}var ${statement.name}: u32${statement.init ? ` = ${emitExpression(statement.init, context)}` : " = 0u"};`];
       }
+      if (statement.dimensions.length > 0) return [`${prefix}var ${statement.name}: ${emitLocalArrayType(statement)};`];
       return [`${prefix}var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitExpression(statement.init, context)}` : ""};`];
     case "dim3":
       return [];
@@ -442,6 +443,7 @@ function emitInlineAsmStatement(
 
 function emitForVar(statement: CudaLiteVarDecl, context: EmitContext): string {
   if (statement.pointer) return `var ${statement.name}: u32${statement.init ? ` = ${emitExpression(statement.init, context)}` : " = 0u"}`;
+  if (statement.dimensions.length > 0) return `var ${statement.name}: ${emitLocalArrayType(statement)}`;
   return `var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitExpression(statement.init, context)}` : ""}`;
 }
 
@@ -974,6 +976,14 @@ function noopCallComment(expression: CudaLiteExpression): string | undefined {
 
 function emitSharedType(statement: CudaLiteVarDecl, ir: KernelIrModule): string {
   let type = ir.atomicShared.includes(statement.name) ? `atomic<${wgslScalar(statement.valueType)}>` : wgslScalar(statement.valueType);
+  for (let i = statement.dimensions.length - 1; i >= 0; i--) {
+    type = `array<${type}, ${statement.dimensions[i]!}>`;
+  }
+  return type;
+}
+
+function emitLocalArrayType(statement: CudaLiteVarDecl): string {
+  let type = wgslScalar(statement.valueType);
   for (let i = statement.dimensions.length - 1; i >= 0; i--) {
     type = `array<${type}, ${statement.dimensions[i]!}>`;
   }

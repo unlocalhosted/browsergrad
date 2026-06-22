@@ -51,6 +51,18 @@ __global__ void tiled(const float* A, const float* B, float* C, int N) {
 }
 `;
 
+const LOCAL_ARRAY = `
+__global__ void localArray(float* out) {
+  int i = threadIdx.x;
+  float tmp[2][2];
+  tmp[0][0] = (float)i;
+  tmp[0][1] = tmp[0][0] + 1.0;
+  tmp[1][0] = tmp[0][1] + 1.0;
+  tmp[1][1] = tmp[1][0] + 1.0;
+  out[i] = tmp[1][1];
+}
+`;
+
 const COMPLEX_MULTIPLY = `
 __global__ void multiplyFreqDomain(cufftComplex *A, const cufftComplex *B, int N) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -183,6 +195,17 @@ describe("real WebGPU — CUDA-lite compiler", () => {
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
     expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
+  });
+
+  it("runs fixed thread-local arrays through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(LOCAL_ARRAY, { workgroupSize: [4, 1, 1] });
+    const input = { buffers: { out: new Float32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
   it("runs compiled SAXPY over resident WebGPU buffers without forced readback", async () => {

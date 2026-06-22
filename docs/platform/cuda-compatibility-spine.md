@@ -66,6 +66,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
   offset updates, DevicePool aliasing across host-lifted child launches,
   positive pointer-offset child launches via generated base-offset uniforms, and
   conservative host-lifted peer copies through a typed WebGPU copy dispatch.
+  Fixed thread-local arrays lower to per-thread WGSL function arrays and CPU
+  reference typed arrays.
 - Hot-loop dispatch can keep both caller buffers and compiler-generated
   execution sequences resident: `residentBuffers` avoids upload/readback churn,
   and prepared compiler/WebGPU runners avoid rebuilding pipelines and bind

@@ -195,8 +195,8 @@ export function analyzeCudaLite(
           if (statement.pointer && !isSupportedLocalPointer(statement, scope)) {
             diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.span));
           }
-          if (statement.storage === "local" && statement.dimensions.length > 0) {
-            diagnostics.push(error("unsupported-local-array", "local arrays are not supported in CUDA-lite v0; use fixed __shared__ arrays or scalar locals", statement.span));
+          if (statement.storage === "local" && statement.dimensions.length > 0 && statement.init) {
+            diagnostics.push(error("unsupported-local-array-init", "local array initializers are not supported in CUDA-lite yet", statement.span));
           }
           if (statement.dynamicShared && !resolvedSharedDimensions(statement, options)) {
             diagnostics.push(error("dynamic-shared-memory", "__shared__ arrays must have fixed dimensions", statement.span));
@@ -1048,7 +1048,7 @@ function validateNonCallExpression(
           ? { kind: "complex", valueType: target.valueType, symbol: target.symbol }
           : { kind: "scalar", valueType: target.valueType, symbol: target.symbol };
       }
-      diagnostics.push(error("unsupported-index-target", "only pointer parameters and fixed __shared__ arrays can be indexed", expression.span));
+      diagnostics.push(error("unsupported-index-target", "only pointer parameters, local arrays, fixed __shared__ arrays, and constants can be indexed", expression.span));
       return { kind: "unknown" };
     }
     case "unary": {
@@ -1170,6 +1170,14 @@ function expressionInfoForIdentifier(
   if (symbol.kind === "cooperative-group") return { kind: "unknown", symbol };
   if (symbol.kind === "texture") return { kind: "texture", valueType: symbol.valueType, symbol };
   if (symbol.valueType === "surface2d") return { kind: "surface", valueType: symbol.valueType, symbol };
+  if (symbol.kind === "local" && symbol.dimensions && symbol.dimensions.length > 0) {
+    return {
+      kind: "array",
+      valueType: symbol.valueType,
+      dimensions: symbol.dimensions,
+      symbol,
+    };
+  }
   if (symbol.kind === "shared" || symbol.kind === "constant") {
     if (symbol.valueType === "complex64" && (!symbol.dimensions || symbol.dimensions.length === 0)) {
       return { kind: "complex", valueType: symbol.valueType, symbol };

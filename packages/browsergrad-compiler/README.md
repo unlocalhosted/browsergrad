@@ -64,6 +64,8 @@ const gpu = await runCompiledKernelWebGpu(await createDevice(), compiled, input,
 Examples live in `examples/`: SAXPY, guarded map, and shared-memory tiled
 matmul. The emitted WGSL is intentionally inspectable so labs can show source,
 bindings, workgroup size, shared memory, and barriers directly.
+Fixed thread-local arrays lower to WGSL function arrays and CPU-reference typed
+arrays, so small per-thread scratch patterns do not need shared memory.
 
 For hot WebGPU paths, pass caller-owned buffers through `residentBuffers` and
 set `readback: []`. This keeps data on GPU across compiler-dispatched kernels;

@@ -56,6 +56,18 @@ __global__ void tiled(const float* A, const float* B, float* C, int N) {
 }
 `;
 
+const LOCAL_ARRAY = `
+__global__ void localArray(float* out) {
+  int i = threadIdx.x;
+  float tmp[2][2];
+  tmp[0][0] = (float)i;
+  tmp[0][1] = tmp[0][0] + 1.0;
+  tmp[1][0] = tmp[0][1] + 1.0;
+  tmp[1][1] = tmp[1][0] + 1.0;
+  out[i] = tmp[1][1];
+}
+`;
+
 const DEVICE_POOL_ALLOC = `
 __global__ void poolKernel(DevicePool* dp, float* out, int N) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -123,6 +135,19 @@ describe("CUDA-lite compiler", () => {
 
     expect([...result.buffers.y as Float32Array]).toEqual([12, 24, 36, 48]);
     expect(result.trace.some((thread) => thread.writes.length > 0)).toBe(true);
+  });
+
+  it("lowers fixed thread-local arrays through reference and WGSL", () => {
+    const compiled = compileCudaLiteKernel(LOCAL_ARRAY, { workgroupSize: [4, 1, 1] });
+    expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
+    expect(compiled.wgsl).toContain("var tmp: array<array<f32, 2>, 2>;");
+
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+    expect([...result.buffers.out as Float32Array]).toEqual([3, 4, 5, 6]);
   });
 
   it("runs a shared-memory tiled matmul reference and emits barriers", () => {
@@ -266,12 +291,12 @@ __global__ void bad(float* x, float* x) {
 }`));
     expect(duplicate.diagnostics.map((diagnostic) => diagnostic.code)).toContain("duplicate-symbol");
 
-    const localArray = analyzeCudaLite(parseCudaLite(`
+    const localArrayInit = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(float* x) {
-  float tmp[2];
+  float tmp[2] = 1.0;
   if (threadIdx.x < 1) { x[0] = 1.0; }
 }`));
-    expect(localArray.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-local-array");
+    expect(localArrayInit.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-local-array-init");
 
     const localPointer = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(float* x) {

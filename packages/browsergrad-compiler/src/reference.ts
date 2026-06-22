@@ -18,7 +18,7 @@ import {
 } from "./types.js";
 
 type EvalValue = number | ComplexValue | PoolPointerValue;
-type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue | ComplexValue | PoolPointerValue;
+type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue | ComplexValue | PoolPointerValue | LocalArrayValue;
 interface Vector3 {
   readonly x: number;
   readonly y: number;
@@ -84,6 +84,13 @@ interface MemoryPoolValue {
 }
 
 interface SharedArrayValue {
+  readonly dimensions: readonly number[];
+  readonly valueType: CudaLiteScalarType;
+  readonly data: WgslTypedArray;
+}
+
+interface LocalArrayValue {
+  readonly kind: "local-array";
   readonly dimensions: readonly number[];
   readonly valueType: CudaLiteScalarType;
   readonly data: WgslTypedArray;
@@ -418,6 +425,10 @@ function execVar(statement: CudaLiteVarDecl, context: ThreadContext): void {
   if (statement.storage === "shared") return;
   if (statement.pointer) {
     context.locals.set(statement.name, resolvePointerInitializer(statement, context));
+    return;
+  }
+  if (statement.dimensions.length > 0) {
+    context.locals.set(statement.name, allocateLocalArray(statement));
     return;
   }
   context.locals.set(statement.name, statement.init ? evalExpression(statement.init, context) : zeroLocalValue(statement.valueType));
@@ -1132,6 +1143,9 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
       ...(alias.valueType === undefined ? {} : { valueType: alias.valueType }),
     };
   }
+  if (isLocalArray(alias)) {
+    return { name: cursor.name, space: "local", index: flattenIndex(alias.dimensions, chain) };
+  }
   const shared = context.shared.get(cursor.name);
   if (shared) {
     return { name: cursor.name, space: "shared", index: flattenIndex(shared.dimensions, chain) };
@@ -1187,7 +1201,14 @@ function resolvePointerInitializer(statement: CudaLiteVarDecl, context: ThreadCo
 }
 
 function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
-  if (lvalue.space === "local") return projectField(readIdentifier(lvalue.name, context), lvalue);
+  if (lvalue.space === "local") {
+    if (lvalue.index === undefined) return projectField(readIdentifier(lvalue.name, context), lvalue);
+    const local = context.locals.get(lvalue.name);
+    if (!isLocalArray(local)) throw compilerFailure(`'${lvalue.name}' is not a local array`);
+    const storageIndex = local.valueType === "complex64" ? lvalue.index * 2 : lvalue.index;
+    const ok = storageIndex >= 0 && storageIndex < local.data.length && (local.valueType !== "complex64" || storageIndex + 1 < local.data.length);
+    return ok ? readBufferValue(local.data, storageIndex, local.valueType, lvalue.field) : 0;
+  }
   if (lvalue.index === undefined) throw compilerFailure(`missing index for '${lvalue.name}'`);
   if (lvalue.space === "buffer") {
     const buffer = context.buffers.get(lvalue.name);
@@ -1234,6 +1255,14 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
 
 function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): void {
   if (lvalue.space === "local") {
+    if (lvalue.index !== undefined) {
+      const local = context.locals.get(lvalue.name);
+      if (!isLocalArray(local)) throw compilerFailure(`'${lvalue.name}' is not a local array`);
+      const storageIndex = local.valueType === "complex64" ? lvalue.index * 2 : lvalue.index;
+      const ok = storageIndex >= 0 && storageIndex < local.data.length && (local.valueType !== "complex64" || storageIndex + 1 < local.data.length);
+      if (ok) writeBufferValue(local.data, storageIndex, local.valueType, lvalue.field, value);
+      return;
+    }
     if (lvalue.field) {
       const current = readIdentifier(lvalue.name, context);
       if (!isComplex(current)) throw compilerFailure(`'${lvalue.name}' is not complex`);
@@ -1293,6 +1322,29 @@ function allocateShared(declarations: readonly CudaLiteVarDecl[]): Map<string, S
     shared.set(declaration.name, { dimensions: declaration.dimensions, valueType: declaration.valueType, data });
   }
   return shared;
+}
+
+function allocateLocalArray(declaration: CudaLiteVarDecl): LocalArrayValue {
+  return {
+    kind: "local-array",
+    dimensions: declaration.dimensions,
+    valueType: declaration.valueType,
+    data: allocateTypedArray(declaration.valueType, declaration.dimensions),
+  };
+}
+
+function allocateTypedArray(valueType: CudaLiteScalarType, dimensions: readonly number[]): WgslTypedArray {
+  const elements = dimensions.reduce((product, item) => product * item, 1);
+  const length = valueType === "complex64" ? elements * 2 : elements;
+  return valueType === "int"
+    ? new Int32Array(length)
+    : valueType === "uint"
+      ? new Uint32Array(length)
+      : valueType === "bool"
+        ? new Uint32Array(length)
+        : valueType === "half"
+          ? new Float16Array(length)
+          : new Float32Array(length);
 }
 
 function readBufferValue(
@@ -1571,6 +1623,13 @@ function isComplex(value: LocalValue | EvalValue | undefined): value is ComplexV
     typeof value !== "number" &&
     "kind" in value &&
     value.kind === "complex64";
+}
+
+function isLocalArray(value: LocalValue | undefined): value is LocalArrayValue {
+  return value !== undefined &&
+    typeof value !== "number" &&
+    "kind" in value &&
+    value.kind === "local-array";
 }
 
 function isPoolPointer(value: LocalValue | EvalValue | undefined): value is PoolPointerValue {
