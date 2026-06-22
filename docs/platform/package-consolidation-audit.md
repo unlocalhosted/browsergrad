@@ -11,6 +11,7 @@ assignments, and course ports are benchmark probes over that library.
 | `browsergrad-grad` | Keep as a real seam | Eager PyTorch-shaped Python library. Deleting it would mix tensor/autograd teaching source into runtime or JIT. |
 | `browsergrad-jit` | Keep as a real seam | Lazy UOp IR, realization, symbolic backward, codegen, and backend integration. Separate from eager `grad` by architecture and release cadence. |
 | `browsergrad-kernels` | Keep as a real seam | WGSL/WebGPU, CPU references, CUDA-shaped simulator/lowering, and browser GPU bridge. Python-agnostic GPU package. |
+| `browsergrad-compiler` | Keep as a real seam | CUDA-lite frontend, semantic analysis, Kernel IR, WGSL emission, CPU reference interpreter, and WebGPU execution planning. Deleting it would bloat `kernels` with parser/analyzer/runtime orchestration concerns. |
 | `browsergrad-primitives` | Keep as a real seam | Owns small generic references, comparators, fixtures, simulators, parsers, data-cleaning helpers, tokenizer references, hosted-training fixtures, and RL math. The previous small shard packages were shallow: deleting them concentrated complexity instead of spreading it. |
 | `browsergrad-dogfood` | Private verification package | Not product surface. Keeps cross-package and published-module compatibility checks out of shipped libraries. |
 
@@ -36,6 +37,7 @@ runtime      = host execution and lab/profile preflight
 grad         = eager Python tensor/autograd library
 jit          = lazy Python IR/compiler library
 kernels      = WebGPU/WGSL and CUDA-shaped browser GPU core
+compiler     = CUDA-lite parser/analyzer/IR/WGSL/runtime planning
 primitives   = small generic browser-safe references
 dogfood      = private release verification
 ```

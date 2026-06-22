@@ -71,6 +71,10 @@ power backend, not the first dependency.
 The compiler package includes SAXPY, guarded-map, and tiled-matmul examples;
 profiles should declare `cuda-lite-compiler` when they depend on this authoring
 path rather than handwritten WGSL.
+For hot loops, the low-level WGSL runner exposes prepared sequences and resident
+storage buffers, while the compiler exposes `prepareCompiledKernelWebGpu()` over
+the same execution plans. Platform labs should use the prepared path when launch
+shape and scalar params are stable, then materialize only requested readbacks.
 
 This core should be independent from Pyodide. Python assignments may call it
 through registered JS modules, but JS/WGSL labs should run without Python.
@@ -80,11 +84,12 @@ through registered JS modules, but JS/WGSL labs should run without Python.
 1. WGSL-first kernel labs with CPU oracles.
 2. CUDA-shaped 1D program IR with simulator and WGSL lowering.
 3. Native Dawn/gpu.cpp-style runner for CI and local benchmarking.
-4. Kernel tracing artifacts: source, bindings, workgroups, timing, output
+4. Resident buffers plus prepared dispatch sequences for hot-loop timing.
+5. Kernel tracing artifacts: source, bindings, workgroups, timing, output
    previews.
-5. CUDA-lite syntax for teaching simple kernels via PRD-019.
-6. Worker-mesh collectives for distributed systems labs.
-7. Pattern-specific kernels such as FlashAttention once the simple core is
+6. CUDA-lite syntax for teaching simple kernels via PRD-019.
+7. Worker-mesh collectives for distributed systems labs.
+8. Pattern-specific kernels such as FlashAttention once the simple core is
    boring and stable.
 
 ## Compatibility Posture

@@ -35,6 +35,12 @@ Public APIs:
   `single-dispatch`, `grid-sync-phases`, `host-dynamic-launch`, or
   `host-peer-copy`. Platform preflight should use this interface instead of
   duplicating runner heuristics.
+- `prepareCompiledKernelWebGpu(device, compiled, input, launch)` prepares the
+  same executable WebGPU plan once and reruns it over resident buffers. Use it
+  for hot loops with fixed launch shape, scalar params, and bindings.
+- `normalizeCudaWebGpuReadbackNames(compiled, names)` maps logical compiler
+  readback names, such as `DevicePool* dp` -> `dp`, to internal WGSL storage
+  bindings. Platform code should not depend on backing buffer names.
 
 Rule: do not add assignment-specific fixes. Add semantic primitives, reference
 truth, WGSL lowering, browser tests, and corpus audit evidence.
@@ -54,6 +60,10 @@ Current corpus gate (`node scripts/audit-cuda-lite-corpus.mjs /tmp/CUDA-120-DAYS
   offset updates, DevicePool aliasing across host-lifted child launches,
   positive pointer-offset child launches via generated base-offset uniforms, and
   conservative host-lifted peer copies through a typed WebGPU copy dispatch.
+- Hot-loop dispatch can keep both caller buffers and compiler-generated
+  execution sequences resident: `residentBuffers` avoids upload/readback churn,
+  and prepared compiler/WebGPU runners avoid rebuilding pipelines and bind
+  groups between iterations.
 - Device-side launches now parse into IR and can run in CPU reference when
   `referenceDynamicParallelism` is enabled. WebGPU can host-lift conservative
   child launches into a multi-dispatch sequence when the parent launch has one
@@ -91,3 +101,6 @@ Performance gate:
   It reports JSON plus optional markdown for compile hot paths, CPU reference
   execution, host-lifted dynamic planning, and peer-copy planning. Treat the
   numbers as regression evidence, not universal pass/fail thresholds.
+- Browser/WebGPU hot-loop perf should compare one-shot execution against
+  `prepareCompiledKernelWebGpu()` over resident buffers. Keep this as measured
+  evidence, not prose claims.
