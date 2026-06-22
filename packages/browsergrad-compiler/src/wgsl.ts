@@ -3,6 +3,7 @@ import {
   type WgslKernelBindingInput,
   type WgslKernelProgram,
 } from "@unlocalhosted/browsergrad-kernels";
+import { collectExternalDevicePoolNames } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
 import {
   CudaLiteCompilerError,
@@ -251,7 +252,10 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
       binding: offsetBinding,
     });
   }
-  const externalPoolNames = collectExternalPoolNames(ir);
+  const externalPoolNames = collectExternalDevicePoolNames(
+    ir.body,
+    new Set(ir.params.filter(isDevicePoolParam).map((param) => param.name)),
+  );
   for (const poolName of externalPoolNames) {
     const dataBinding = bindings.length;
     bindingByName.set(poolDataName(poolName), dataBinding);
@@ -570,58 +574,6 @@ function poolPointerForAllocationCall(call: CudaLiteCallExpression): PoolPointer
     return { poolName: pool.argument.name };
   }
   return pool?.kind === "identifier" ? { poolName: pool.name } : undefined;
-}
-
-function collectExternalPoolNames(ir: KernelIrModule): readonly string[] {
-  const paramPools = new Set(ir.params.filter(isDevicePoolParam).map((param) => param.name));
-  const pools = new Set<string>();
-  const visitExpression = (expression: CudaLiteExpression): void => {
-    if (expression.kind === "call") {
-      const alias = poolPointerForAllocationCall(expression);
-      if (alias && !alias.rawBuffer && !paramPools.has(alias.poolName)) pools.add(alias.poolName);
-      visitExpression(expression.callee);
-      for (const arg of expression.args) visitExpression(arg);
-      return;
-    }
-    if (expression.kind === "cast") visitExpression(expression.expression);
-    else if (expression.kind === "member") visitExpression(expression.object);
-    else if (expression.kind === "index") {
-      visitExpression(expression.target);
-      visitExpression(expression.index);
-    } else if (expression.kind === "unary" || expression.kind === "update") visitExpression(expression.argument);
-    else if (expression.kind === "binary") {
-      visitExpression(expression.left);
-      visitExpression(expression.right);
-    } else if (expression.kind === "conditional") {
-      visitExpression(expression.condition);
-      visitExpression(expression.consequent);
-      visitExpression(expression.alternate);
-    } else if (expression.kind === "assignment") {
-      visitExpression(expression.left);
-      visitExpression(expression.right);
-    }
-  };
-  const walk = (items: readonly CudaLiteStatement[]): void => {
-    for (const item of items) {
-      if (item.kind === "var" && item.init) visitExpression(item.init);
-      if (item.kind === "expr") visitExpression(item.expression);
-      if (item.kind === "if") {
-        visitExpression(item.condition);
-        walk(item.consequent);
-        if (item.alternate) walk(item.alternate);
-      }
-      if (item.kind === "for") {
-        if (item.init?.kind === "var" && item.init.init) visitExpression(item.init.init);
-        else if (item.init && item.init.kind !== "var") visitExpression(item.init);
-        if (item.condition) visitExpression(item.condition);
-        if (item.update) visitExpression(item.update);
-        walk(item.body);
-      }
-      if (item.kind === "return" && item.value) visitExpression(item.value);
-    }
-  };
-  walk(ir.body);
-  return [...pools].sort();
 }
 
 function collectRawPoolAllocators(statements: readonly CudaLiteStatement[]): readonly RawPoolAllocator[] {

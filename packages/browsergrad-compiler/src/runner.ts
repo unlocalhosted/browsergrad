@@ -3,6 +3,7 @@ import {
   type KernelDevice,
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
+import { collectExternalDevicePoolNames } from "./ast_queries.js";
 import { analyzeCudaLite, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
 import { createCudaLoweringPlan } from "./compatibility.js";
 import { parseCudaLite } from "./parser.js";
@@ -13,8 +14,6 @@ import {
   type CompiledCudaLiteKernel,
   type CompiledKernelInput,
   type CompileCudaLiteOptions,
-  type CudaLiteExpression,
-  type CudaLiteStatement,
   type KernelLaunch,
   type ReferenceKernelResult,
 } from "./types.js";
@@ -72,7 +71,7 @@ export async function runCompiledKernelWebGpu(
       ...compiled.ir.params
         .filter((param) => (param.pointer && !param.constant) || param.valueType === "surface2d")
         .map((param) => param.valueType === "devicepool" ? poolDataName(param.name) : param.name),
-      ...collectExternalPoolNames(compiled.ir.body).map(poolDataName),
+      ...collectExternalDevicePoolNames(compiled.ir.body).map(poolDataName),
     ];
   const result = await runWgslKernelProgram(
     device,
@@ -184,7 +183,7 @@ function memoryPoolBufferInputs(
   const out: Record<string, WgslTypedArray> = {};
   for (const pool of [
     ...compiled.ir.params.filter(isDevicePoolParam).map((param) => ({ name: param.name, span: param.span })),
-    ...collectExternalPoolNames(compiled.ir.body).map((name) => ({ name, span: compiled.ir.body[0]?.span ?? compiled.ir.params[0]?.span ?? { start: 0, end: 0, line: 1, column: 1 } })),
+    ...collectExternalDevicePoolNames(compiled.ir.body).map((name) => ({ name, span: compiled.ir.body[0]?.span ?? compiled.ir.params[0]?.span ?? { start: 0, end: 0, line: 1, column: 1 } })),
   ]) {
     const value = input.memoryPools?.[pool.name];
     if (!value) {
@@ -227,7 +226,7 @@ function normalizePoolReadback(
     const data = buffers[poolDataName(pool.name)];
     if (data) out[pool.name] = data;
   }
-  for (const poolName of collectExternalPoolNames(compiled.ir.body)) {
+  for (const poolName of collectExternalDevicePoolNames(compiled.ir.body)) {
     const data = buffers[poolDataName(poolName)];
     if (data) out[poolName] = data;
   }
@@ -256,64 +255,6 @@ function constantBufferInputs(
 
 function isDevicePoolParam(param: { readonly pointer: boolean; readonly valueType: string }): boolean {
   return param.pointer && param.valueType === "devicepool";
-}
-
-function collectExternalPoolNames(statements: readonly CudaLiteStatement[]): readonly string[] {
-  const pools = new Set<string>();
-  const visit = (expression: CudaLiteExpression): void => {
-    if (expression.kind === "call") {
-      const callName = expression.kind === "call" && expression.callee.kind === "identifier"
-        ? expression.callee.name
-        : undefined;
-      if ((callName === "deviceAllocate" || callName === "streamOrderedAllocate") && expression.args.length === 2) {
-        const first = expression.args[0];
-        if (first?.kind === "unary" && first.operator === "&" && first.argument.kind === "identifier") {
-          pools.add(first.argument.name);
-        }
-      }
-      visit(expression.callee);
-      for (const arg of expression.args) visit(arg);
-      return;
-    }
-    if (expression.kind === "cast") visit(expression.expression);
-    else if (expression.kind === "member") visit(expression.object);
-    else if (expression.kind === "index") {
-      visit(expression.target);
-      visit(expression.index);
-    } else if (expression.kind === "unary" || expression.kind === "update") visit(expression.argument);
-    else if (expression.kind === "binary") {
-      visit(expression.left);
-      visit(expression.right);
-    } else if (expression.kind === "conditional") {
-      visit(expression.condition);
-      visit(expression.consequent);
-      visit(expression.alternate);
-    } else if (expression.kind === "assignment") {
-      visit(expression.left);
-      visit(expression.right);
-    }
-  };
-  const walk = (items: readonly CudaLiteStatement[]): void => {
-    for (const item of items) {
-      if (item.kind === "var" && item.init) visit(item.init);
-      if (item.kind === "expr") visit(item.expression);
-      if (item.kind === "if") {
-        visit(item.condition);
-        walk(item.consequent);
-        if (item.alternate) walk(item.alternate);
-      }
-      if (item.kind === "for") {
-        if (item.init?.kind === "var" && item.init.init) visit(item.init.init);
-        else if (item.init && item.init.kind !== "var") visit(item.init);
-        if (item.condition) visit(item.condition);
-        if (item.update) visit(item.update);
-        walk(item.body);
-      }
-      if (item.kind === "return" && item.value) visit(item.value);
-    }
-  };
-  walk(statements);
-  return [...pools].sort();
 }
 
 function poolDataName(name: string): string {
