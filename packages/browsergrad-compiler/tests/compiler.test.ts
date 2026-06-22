@@ -108,9 +108,9 @@ __global__ void bad(const float* x) {
     const constAnalysis = analyzeCudaLite(constWrite);
     expect(constAnalysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("const-pointer-write");
 
-    const unsupportedF32Atomic = parseCudaLite(`
+const unsupportedF32Atomic = parseCudaLite(`
 __global__ void bad(float* x) {
-  if (threadIdx.x < 1) { atomicMax(&x[0], 1.0); }
+  if (threadIdx.x < 1) { atomicMin(&x[0], 1.0); }
 }`);
     const atomicAnalysis = analyzeCudaLite(unsupportedF32Atomic);
     expect(atomicAnalysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-atomic-f32");
@@ -168,7 +168,7 @@ __global__ void exactLaunch(float* x) {
   it("classifies CUDA compatibility gaps by semantic feature", () => {
     const unsupported = analyzeCudaLite(parseCudaLite(`
 __global__ void unsupported(float* x) {
-  if (threadIdx.x < 1) { atomicMax(&x[0], 1.0f); }
+  if (threadIdx.x < 1) { atomicMin(&x[0], 1.0f); }
 }`));
     const plan = createCudaLoweringPlan(unsupported.diagnostics);
 
@@ -614,6 +614,30 @@ __global__ void surfaceWrite(cudaSurfaceObject_t outputSurf, int width, int heig
     expect(compiled.wgsl).toContain("var<storage, read_write> outputSurf: array<f32>;");
     expect(compiled.wgsl).toContain("bg_surf2dwrite_outputSurf");
     expect([...result.buffers.outputSurf as Float32Array]).toEqual([2, 4, 6, 8]);
+  });
+
+  it("lowers f32 atomic max helpers through CAS semantics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void maxKernel(const float *input, float *result, int N) {
+  int idx = threadIdx.x;
+  if (idx < N) {
+    atomicMaxFloat(result, input[idx]);
+  }
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          input: new Float32Array([1, 9, 3, 7]),
+          result: new Float32Array([2]),
+        },
+        scalars: { N: 4 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_atomicMax_f32");
+    expect([...result.buffers.result as Float32Array]).toEqual([9]);
   });
 
   it("parses dynamic extern shared memory as a clear unsupported diagnostic", () => {

@@ -97,6 +97,10 @@ export function emitKernelIrWgsl(
     lines.push("");
     lines.push(...emitFloatAtomicAddHelper());
   }
+  if (usesFloatAtomicMax(ir)) {
+    lines.push("");
+    lines.push(...emitFloatAtomicMaxHelper());
+  }
   if (usesCurand(ir)) {
     lines.push("");
     lines.push(...emitCurandHelpers());
@@ -521,6 +525,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return emitAtomicCall("atomicMin", expression, context, args);
     case "atomicMax":
       return emitAtomicCall("atomicMax", expression, context, args);
+    case "atomicMaxFloat":
+      return emitAtomicCall("atomicMax", expression, context, args);
     case "atomicExch":
       return emitAtomicCall("atomicExchange", expression, context, args);
     case "atomicCAS": {
@@ -596,6 +602,9 @@ function emitAtomicCall(
     if (wgslName === "atomicAdd" && targetParam?.valueType === "float") {
       return `bg_atomicAdd_f32(&${targetExpression}, ${valueExpression})`;
     }
+    if (wgslName === "atomicMax" && targetParam?.valueType === "float") {
+      return `bg_atomicMax_f32(&${targetExpression}, ${valueExpression})`;
+    }
     if (wgslName === "atomicExchange" && targetParam?.valueType === "float") {
       return `bitcast<f32>(atomicExchange(&${targetExpression}, bitcast<u32>(${valueExpression})))`;
     }
@@ -606,6 +615,9 @@ function emitAtomicCall(
     const valueExpression = emitExpression(value, context);
     if (wgslName === "atomicAdd" && targetParam?.valueType === "float") {
       return `bg_atomicAdd_f32(&${target.name}[0], ${valueExpression})`;
+    }
+    if (wgslName === "atomicMax" && targetParam?.valueType === "float") {
+      return `bg_atomicMax_f32(&${target.name}[0], ${valueExpression})`;
     }
     if (wgslName === "atomicExchange" && targetParam?.valueType === "float") {
       return `bitcast<f32>(atomicExchange(&${target.name}[0], bitcast<u32>(${valueExpression})))`;
@@ -707,6 +719,27 @@ function emitFloatAtomicAddHelper(): string[] {
   ];
 }
 
+function emitFloatAtomicMaxHelper(): string[] {
+  return [
+    "fn bg_atomicMax_f32(ptr_value: ptr<storage, atomic<u32>, read_write>, value: f32) -> f32 {",
+    "  var old_bits = atomicLoad(ptr_value);",
+    "  loop {",
+    "    let old_value = bitcast<f32>(old_bits);",
+    "    let new_value = max(old_value, value);",
+    "    let new_bits = bitcast<u32>(new_value);",
+    "    if (new_bits == old_bits) {",
+    "      return old_value;",
+    "    }",
+    "    let result = atomicCompareExchangeWeak(ptr_value, old_bits, new_bits);",
+    "    if (result.exchanged) {",
+    "      return old_value;",
+    "    }",
+    "    old_bits = result.old_value;",
+    "  }",
+    "}",
+  ];
+}
+
 function emitCurandHelpers(): string[] {
   return [
     "fn bg_curand_next(state: ptr<function, u32>) -> u32 {",
@@ -733,7 +766,15 @@ function storageElementType(param: CudaLiteParam, ir: KernelIrModule): string {
 }
 
 function usesFloatAtomicAdd(ir: KernelIrModule): boolean {
-  return ir.params.some((param) => param.pointer && param.valueType === "float" && ir.atomicParams.includes(param.name));
+  return ir.params.some((param) => param.pointer && param.valueType === "float" && ir.atomicParams.includes(param.name)) &&
+    (statementsUseCall(ir.body, new Set(["atomicAdd"])) ||
+      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicAdd"]))));
+}
+
+function usesFloatAtomicMax(ir: KernelIrModule): boolean {
+  return ir.params.some((param) => param.pointer && param.valueType === "float" && ir.atomicParams.includes(param.name)) &&
+    (statementsUseCall(ir.body, new Set(["atomicMax", "atomicMaxFloat"])) ||
+      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMax", "atomicMaxFloat"]))));
 }
 
 function usesCurand(ir: KernelIrModule): boolean {

@@ -37,6 +37,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["atomicSub", [2, 2]],
   ["atomicMin", [2, 2]],
   ["atomicMax", [2, 2]],
+  ["atomicMaxFloat", [2, 2]],
   ["atomicExch", [2, 2]],
   ["atomicCAS", [3, 3]],
   ["tex2D", [3, 3]],
@@ -802,7 +803,7 @@ function validateAtomicBuiltin(
       }
     } else if (!param?.pointer) {
       diagnostics.push(error("unsupported-atomic-target", "atomicAdd target must be a pointer parameter element", targetExpression.span));
-    } else if (param.valueType === "float" && (callName === "atomicAdd" || callName === "atomicExch")) {
+    } else if (param.valueType === "float" && (callName === "atomicAdd" || callName === "atomicExch" || callName === "atomicMax" || callName === "atomicMaxFloat")) {
       atomicParams.add(param.name);
       if (param.constant) {
         diagnostics.push(error("const-pointer-write", `cannot ${callName} through const pointer '${param.name}'`, expression.span));
@@ -826,6 +827,7 @@ function isAtomicBuiltin(callName: string): boolean {
     callName === "atomicSub" ||
     callName === "atomicMin" ||
     callName === "atomicMax" ||
+    callName === "atomicMaxFloat" ||
     callName === "atomicExch" ||
     callName === "atomicCAS";
 }

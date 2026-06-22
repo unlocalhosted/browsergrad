@@ -82,6 +82,15 @@ __global__ void surfaceWrite(cudaSurfaceObject_t outputSurf, int width, int heig
 }
 `;
 
+const ATOMIC_MAX_FLOAT = `
+__global__ void maxKernel(const float *input, float *result, int N) {
+  int idx = threadIdx.x;
+  if (idx < N) {
+    atomicMaxFloat(result, input[idx]);
+  }
+}
+`;
+
 async function checkDevice(): Promise<DeviceCheck> {
   if (typeof navigator === "undefined" || !("gpu" in navigator)) {
     return { available: false, reason: "navigator.gpu undefined" };
@@ -306,6 +315,22 @@ __global__ void atomic_exchange(float* x, float* out) {
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
     expect([...actual.buffers.outputSurf as Float32Array]).toEqual([...expected.buffers.outputSurf as Float32Array]);
+  });
+
+  it("runs f32 atomic max through WebGPU CAS loop", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(ATOMIC_MAX_FLOAT, { workgroupSize: [4, 1, 1] });
+    const input = {
+      buffers: {
+        input: new Float32Array([1, 9, 3, 7]),
+        result: new Float32Array([2]),
+      },
+      scalars: { N: 4 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.result as Float32Array][0]).toBeCloseTo(9);
   });
 
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {

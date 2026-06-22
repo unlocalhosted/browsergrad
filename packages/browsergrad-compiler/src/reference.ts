@@ -481,7 +481,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (name === "atomicMin") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => Math.min(current, value));
   }
-  if (name === "atomicMax") {
+  if (name === "atomicMax" || name === "atomicMaxFloat") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => Math.max(current, value));
   }
   if (name === "atomicExch") {
