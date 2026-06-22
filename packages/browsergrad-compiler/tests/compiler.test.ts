@@ -8,6 +8,7 @@ import {
   createCudaLoweringPlan,
   createCudaPeerCopyPlan,
   createCudaRuntimePlan,
+  createCudaWebGpuExecutionPlan,
   describeCudaDiagnostic,
   formatCudaLiteDiagnostics,
   parseCudaLite,
@@ -668,6 +669,85 @@ __global__ void parent(float *dst, float *src) {
     expect(plan.referenceAvailable).toBe(true);
   });
 
+  it("builds explicit WebGPU execution plans for native dispatch and host lifts", () => {
+    const single = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
+    const singlePlan = createCudaWebGpuExecutionPlan(
+      single,
+      {
+        buffers: {
+          x: new Float32Array([1, 2]),
+          y: new Float32Array([10, 20]),
+        },
+        scalars: { a: 2, n: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    );
+    expect(singlePlan).toMatchObject({ supported: true, kind: "single-dispatch" });
+    if (singlePlan.supported) {
+      expect(singlePlan.steps).toHaveLength(1);
+      expect(singlePlan.input.readback).toContain("y");
+    }
+
+    const peer = compileCudaLiteKernel(`
+__global__ void peerCopy(float *dst, const float *src, int n) {
+  if (threadIdx.x == 0) {
+    cudaMemcpyPeerAsync(dst + 1, 1, src, 0, sizeof(float) * n, 0);
+  }
+}`, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const peerPlan = createCudaWebGpuExecutionPlan(
+      peer,
+      {
+        buffers: {
+          dst: new Float32Array(4),
+          src: new Float32Array([2.5, 3.5]),
+        },
+        scalars: { n: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    expect(peerPlan).toMatchObject({ supported: true, kind: "host-peer-copy" });
+    if (peerPlan.supported) {
+      expect(peerPlan.steps.map((step) => step.program.name)).toEqual(["peerCopy", "bg_peer_copy_float"]);
+    }
+
+    const dynamic = compileCudaLiteKernel(`
+__global__ void child(float *dst, int n) {
+  int idx = threadIdx.x;
+  if (idx < n) { dst[idx] += 1.0f; }
+}
+__global__ void parent(float *x, int n) {
+  if (threadIdx.x < 1) {
+    dim3 grid(1);
+    dim3 block(n);
+    child<<<grid, block>>>(x, n);
+    cudaDeviceSynchronize();
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const dynamicInput = { buffers: { x: new Float32Array([1, 2]) }, scalars: { n: 2 } };
+    const dynamicLaunch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const dynamicWithoutCompiler = createCudaWebGpuExecutionPlan(dynamic, dynamicInput, dynamicLaunch);
+    expect(dynamicWithoutCompiler).toMatchObject({
+      supported: false,
+      reason: "dynamic child compiler unavailable for WebGPU host orchestration",
+    });
+
+    const dynamicPlan = createCudaWebGpuExecutionPlan(dynamic, dynamicInput, dynamicLaunch, {
+      compileKernel: compileCudaLiteKernel,
+    });
+    expect(dynamicPlan).toMatchObject({ supported: true, kind: "host-dynamic-launch" });
+    if (dynamicPlan.supported) {
+      expect(dynamicPlan.steps).toHaveLength(2);
+      expect(dynamicPlan.steps[1]?.storageAliases).toEqual({ dst: "x" });
+    }
+  });
+
   it("plans safe top-level grid sync as WebGPU dispatch phases", () => {
     const compiled = compileCudaLiteKernel(`
 namespace cg = cooperative_groups;
@@ -692,6 +772,18 @@ __global__ void gridPhases(float *scratch, float *out) {
         "gridPhases_grid_phase_1",
       ]);
     }
+    const executionPlan = createCudaWebGpuExecutionPlan(
+      compiled,
+      {
+        buffers: {
+          scratch: new Float32Array(2),
+          out: new Float32Array(1),
+        },
+      },
+      { gridDim: [2, 1, 1], blockDim: [1, 1, 1] },
+    );
+    expect(executionPlan).toMatchObject({ supported: true, kind: "grid-sync-phases" });
+    if (executionPlan.supported) expect(executionPlan.steps).toHaveLength(2);
   });
 
   it("rejects grid sync phase splitting when private locals cross phases", () => {

@@ -76,6 +76,13 @@ export {
   type CudaRuntimeOperationKind,
   type CudaRuntimePlan,
 } from "./runtime_plan.js";
+export {
+  createCudaWebGpuExecutionPlan,
+  normalizeCudaWebGpuReadback,
+  type CudaWebGpuExecutionPlan,
+  type CudaWebGpuExecutionPlanKind,
+  type CudaWebGpuExecutionPlanOptions,
+} from "./webgpu_orchestration.js";
 export { emitKernelIrWgsl, type EmitKernelIrWgslOptions, type KernelIrWgslOutput } from "./wgsl.js";
 export {
   compileCudaLiteKernel,

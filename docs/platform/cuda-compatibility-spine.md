@@ -30,6 +30,11 @@ Public APIs:
 - `createCudaRuntimePlan(compiled)` reports runtime operations that need host
   orchestration before single-dispatch WebGPU can run: device launches,
   device sync, peer copies, and grid sync.
+- `createCudaWebGpuExecutionPlan(compiled, input, launch, { compileKernel })`
+  returns the exact executable WebGPU plan kind and sequence steps:
+  `single-dispatch`, `grid-sync-phases`, `host-dynamic-launch`, or
+  `host-peer-copy`. Platform preflight should use this interface instead of
+  duplicating runner heuristics.
 
 Rule: do not add assignment-specific fixes. Add semantic primitives, reference
 truth, WGSL lowering, browser tests, and corpus audit evidence.

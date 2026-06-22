@@ -25,7 +25,7 @@ Compatibility vocabulary:
 import { createDevice } from "@unlocalhosted/browsergrad-kernels";
 import {
   compileCudaLiteKernel,
-  createCudaHostDynamicLaunchPlan,
+  createCudaWebGpuExecutionPlan,
   runCompiledKernelReference,
   runCompiledKernelWebGpu,
 } from "@unlocalhosted/browsergrad-compiler";
@@ -52,6 +52,8 @@ const input = {
 const launch = { gridDim: [1, 1, 1], blockDim: [8, 1, 1] } as const;
 
 const reference = runCompiledKernelReference(compiled, input, launch);
+const plan = createCudaWebGpuExecutionPlan(compiled, input, launch);
+console.log(plan.supported && plan.kind);
 const gpu = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 ```
 
@@ -162,6 +164,11 @@ compatibility gaps by semantic family instead of raw parser messages.
 Use `createCudaRuntimePlan(compiled)` to see which kernels need host
 orchestration (`device-launch`, `device-sync`, `peer-copy`, `grid-sync`) before
 trying WebGPU single-dispatch execution.
+Use `createCudaWebGpuExecutionPlan(compiled, input, launch, { compileKernel })`
+to inspect the exact executable WebGPU plan before running: `single-dispatch`,
+`grid-sync-phases`, `host-dynamic-launch`, or `host-peer-copy`. The runner uses
+the same plan interface internally, so platform preflight and execution share
+one source of truth.
 
 ## Browser Testing
 

@@ -13,7 +13,10 @@
 - Added composed host orchestration for child dispatches whose child kernel
   performs a host-liftable peer copy.
 - Added `createCudaRuntimePlan()`, `createCudaGridSyncPhasePlan()`,
-  `createCudaHostDynamicLaunchPlan()`, and `createCudaPeerCopyPlan()` for
-  platform/rubric preflight.
+  `createCudaHostDynamicLaunchPlan()`, `createCudaPeerCopyPlan()`, and
+  `createCudaWebGpuExecutionPlan()` for platform/rubric preflight.
+- Refactored WebGPU execution through an explicit plan interface so native
+  dispatch, grid-sync phases, dynamic child launches, and peer-copy lifts share
+  one runner path.
 - Added `pnpm bench` benchmark harness for compiler, CPU reference, and
   orchestration planner timing.
