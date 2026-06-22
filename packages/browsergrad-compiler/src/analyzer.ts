@@ -752,19 +752,27 @@ function validateDevicePointerArgument(
   walkExpression: ExpressionWalker,
 ): void {
   const info = walkExpression(arg, scope);
-  if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "unknown") {
+  const root = rootIdentifier(arg);
+  const rootSymbol = root ? lookupSymbol(root, scope, arg.span) : undefined;
+  const sharedArrayDecay = rootSymbol?.kind === "shared" &&
+    rootSymbol.dimensions !== undefined &&
+    rootSymbol.dimensions.length === 1 &&
+    info.kind === "array";
+  if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "unknown" && !sharedArrayDecay) {
     diagnostics.push(error("unsupported-device-pointer-param", `device pointer parameter '${param.name}' expects a pointer argument`, arg.span));
     return;
   }
-  const root = rootIdentifier(arg);
-  const rootSymbol = root ? lookupSymbol(root, scope, arg.span) : undefined;
-  if (rootSymbol?.kind === "shared" || rootSymbol?.kind === "constant") {
+  if (rootSymbol?.kind === "shared" && rootSymbol.dimensions && rootSymbol.dimensions.length > 1) {
+    diagnostics.push(error("unsupported-device-pointer-param", `device pointer parameter '${param.name}' only supports one-dimensional shared arrays`, arg.span));
+  }
+  if (rootSymbol?.kind === "constant") {
     diagnostics.push(error("unsupported-device-pointer-param", `device pointer parameter '${param.name}' expects storage-buffer memory`, arg.span));
   }
   if (rootSymbol?.pointer && rootSymbol.constant && !param.constant) {
     diagnostics.push(error("const-pointer-write", `cannot pass const pointer '${root}' to writable device pointer parameter '${param.name}'`, arg.span));
   }
-  if (info.valueType && info.valueType !== param.valueType) {
+  const actualValueType = info.valueType ?? rootSymbol?.valueType;
+  if (actualValueType && actualValueType !== param.valueType) {
     diagnostics.push(error("unsupported-device-pointer-param", `device pointer parameter '${param.name}' expects ${param.valueType} pointer`, arg.span));
   }
 }

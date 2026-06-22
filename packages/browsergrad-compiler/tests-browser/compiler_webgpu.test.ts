@@ -101,6 +101,24 @@ __global__ void helperKernel(const float* x, float* y, float a, int n) {
 }
 `;
 
+const SHARED_POINTER_HELPERS = `
+__device__ float readTile(float* tile, int offset) {
+  return tile[offset];
+}
+
+__device__ void writeTile(float* tile, int offset, float value) {
+  tile[offset] = value;
+}
+
+__global__ void sharedHelper(float* out) {
+  __shared__ float tile[4];
+  int tid = threadIdx.x;
+  writeTile(tile, tid, (float)(tid + 1));
+  __syncthreads();
+  out[tid] = readTile(tile, 3 - tid);
+}
+`;
+
 const COMPLEX_MULTIPLY = `
 __global__ void multiplyFreqDomain(cufftComplex *A, const cufftComplex *B, int N) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -280,6 +298,17 @@ describe("real WebGPU — CUDA-lite compiler", () => {
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
     expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
+  });
+
+  it("runs device helper functions with shared pointer params through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(SHARED_POINTER_HELPERS, { workgroupSize: [4, 1, 1] });
+    const input = { buffers: { out: new Float32Array(4) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
   it("runs compiled SAXPY over resident WebGPU buffers without forced readback", async () => {

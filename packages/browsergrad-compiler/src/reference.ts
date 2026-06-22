@@ -556,6 +556,7 @@ function pointerArgumentValue(
   }
   if (arg.kind === "identifier") {
     if (context.buffers.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "buffer", index: 0 } };
+    if (context.shared.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "shared", index: 0 } };
     if (context.memoryPools.has(arg.name)) return { kind: "pool-pointer", poolName: arg.name, byteOffset: 0, valueType };
     const local = context.locals.get(arg.name);
     if (isPoolPointer(local)) return { ...local, valueType };

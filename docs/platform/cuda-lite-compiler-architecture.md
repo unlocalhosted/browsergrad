@@ -69,10 +69,11 @@ If a feature needs support in multiple files, add it in this order:
 Modeled memory spaces:
 
 - Global pointer params: storage buffers in WebGPU, typed arrays in reference.
-- Storage pointer params passed into `__device__` helpers lower to a compact
-  WGSL `{ buffer id, base index }` ABI plus generated typed read/write helpers.
-  Reference execution uses the same address model, so helper calls preserve
-  pointer offsets instead of copying arrays.
+- Storage pointer params and one-dimensional `__shared__` arrays passed into
+  `__device__` helpers lower to a compact WGSL `{ memory id, base index }` ABI
+  plus generated typed read/write helpers. Reference execution uses the same
+  address model, so helper calls preserve pointer offsets instead of copying
+  arrays.
 - Scalar params: packed uniform buffer in WebGPU, JS numbers in reference.
 - Fixed thread-local arrays: function-scope WGSL arrays, per-thread typed arrays
   in reference.

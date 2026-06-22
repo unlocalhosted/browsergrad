@@ -116,6 +116,24 @@ __global__ void helperKernel(const float* x, float* y, float a, int n) {
 }
 `;
 
+const SHARED_POINTER_HELPERS = `
+__device__ float readTile(float* tile, int offset) {
+  return tile[offset];
+}
+
+__device__ void writeTile(float* tile, int offset, float value) {
+  tile[offset] = value;
+}
+
+__global__ void sharedHelper(float* out) {
+  __shared__ float tile[4];
+  int tid = threadIdx.x;
+  writeTile(tile, tid, (float)(tid + 1));
+  __syncthreads();
+  out[tid] = readTile(tile, 3 - tid);
+}
+`;
+
 const EXTERNAL_POOL_ALLOC = `
 __global__ void externalPoolKernel(float* out) {
   float* ptr = (float*) deviceAllocate(&g_pool, sizeof(float));
@@ -220,6 +238,20 @@ __global__ void kernel(const float* x) {
   addAt(x);
 }
 `)).toThrow(CudaLiteCompilerError);
+  });
+
+  it("lowers one-dimensional shared memory through helper pointer params", () => {
+    const compiled = compileCudaLiteKernel(SHARED_POINTER_HELPERS, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("case 1u: { return tile[index]; }");
+    expect(compiled.wgsl).toContain("case 1u: { tile[index] = value; return; }");
+    expect(compiled.wgsl).toContain("writeTile(1u, 0u, tid");
+    expect([...result.buffers.out as Float32Array]).toEqual([4, 3, 2, 1]);
   });
 
   it("lowers fixed thread-local arrays through reference and WGSL", () => {

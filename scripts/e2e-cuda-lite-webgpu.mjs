@@ -130,6 +130,20 @@ __global__ void helperKernel(const float* x, float* y, float a, int n) {
     addAt(y, idx, a * loadAt(x + 1, idx));
   }
 }`,
+  sharedPointerHelpers: `
+__device__ float readTile(float* tile, int offset) {
+  return tile[offset];
+}
+__device__ void writeTile(float* tile, int offset, float value) {
+  tile[offset] = value;
+}
+__global__ void sharedHelper(float* out) {
+  __shared__ float tile[4];
+  int tid = threadIdx.x;
+  writeTile(tile, tid, (float)(tid + 1));
+  __syncthreads();
+  out[tid] = readTile(tile, 3 - tid);
+}`,
 };
 
 const html = String.raw`<!doctype html>
@@ -359,6 +373,18 @@ const html = String.raw`<!doctype html>
               scalars: { a: 2, n: 3 },
             }),
             output: "y",
+          },
+          {
+            name: "device-function:shared-pointer-helpers",
+            source: SOURCES.sharedPointerHelpers,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+            }),
+            output: "out",
           },
         ];
       }
