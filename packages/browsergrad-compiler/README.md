@@ -134,8 +134,9 @@ inside the reference interpreter. `runCompiledKernelWebGpu` can host-lift
 conservative peer copies into a typed WebGPU copy dispatch when the call is
 single-invocation guarded, source/destination are named `Float32Array`,
 `Int32Array`, or `Uint32Array` buffers, offsets are non-negative and
-host-evaluable, and byte count is element-aligned. Mixed buffer types, pools,
-device-derived counts, and parent side effects after copy remain reference-only.
+host-evaluable, and byte count is element-aligned. The same peer-copy lift can
+compose after a host-lifted child dispatch. Mixed buffer types, pools,
+device-derived counts, and side effects after copy remain reference-only.
 
 ## Cooperative Grid Sync
 

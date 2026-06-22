@@ -182,8 +182,6 @@ function unsupportedHostLiftChildRuntime(kernel: CudaLiteKernel): string | undef
   let reason: string | undefined;
   walkCudaLiteExpressions(kernel.body, (expression) => {
     if (reason || expression.kind !== "call") return;
-    const name = expressionName(expression.callee);
-    if (name === "cudaMemcpyPeerAsync") reason = `child kernel '${kernel.name}' requires peer-copy orchestration`;
     if (isGridSyncCall(expression)) reason = `child kernel '${kernel.name}' requires grid-sync orchestration`;
   });
   return reason;

@@ -112,18 +112,7 @@ async function tryRunHostLiftedPeerCopy(
     ...(parentInput.uniforms === undefined ? {} : { uniforms: parentInput.uniforms }),
   }];
 
-  for (const copy of plan.copies) {
-    const program = definePeerCopyProgram(copy);
-    steps.push({
-      program,
-      launch: { dispatchCount: [Math.max(copy.elementCount, 1), 1, 1] },
-      storageAliases: {
-        bg_peer_dst: copy.dstRoot,
-        bg_peer_src: copy.srcRoot,
-      },
-      uniforms: { params: packPeerCopyParams(copy) },
-    });
-  }
+  appendPeerCopySteps(steps, plan.copies);
 
   const result = await runWgslKernelProgramSequence(
     device,
@@ -176,6 +165,24 @@ function packPeerCopyParams(copy: CudaPeerCopyOperation): Uint8Array {
   return bytes;
 }
 
+function appendPeerCopySteps(
+  steps: WgslKernelSequenceStep[],
+  copies: readonly CudaPeerCopyOperation[],
+  storageAliases: Readonly<Record<string, string>> = {},
+): void {
+  for (const copy of copies) {
+    steps.push({
+      program: definePeerCopyProgram(copy),
+      launch: { dispatchCount: [Math.max(copy.elementCount, 1), 1, 1] },
+      storageAliases: {
+        bg_peer_dst: storageAliases[copy.dstRoot] ?? copy.dstRoot,
+        bg_peer_src: storageAliases[copy.srcRoot] ?? copy.srcRoot,
+      },
+      uniforms: { params: packPeerCopyParams(copy) },
+    });
+  }
+}
+
 async function tryRunHostLiftedDynamicLaunch(
   device: KernelDevice,
   compiled: CompiledCudaLiteKernel,
@@ -198,6 +205,7 @@ async function tryRunHostLiftedDynamicLaunch(
       childCompiled = compileCudaLiteKernel(compiled.ast.source, {
         kernelName: item.kernel.name,
         features: featureOptionsFor(compiled.ir.requiredFeatures),
+        referenceCudaRuntime: true,
         workgroupSize: item.blockDim,
         pointerBaseOffsets: item.pointerBaseOffsets,
       });
@@ -205,17 +213,23 @@ async function tryRunHostLiftedDynamicLaunch(
       return undefined;
     }
     const childRuntime = createCudaRuntimePlan(childCompiled);
-    if (!childRuntime.operations.every((operation) => operation.kind === "device-sync")) return undefined;
+    if (!childRuntime.operations.every((operation) => operation.kind === "device-sync" || operation.kind === "peer-copy")) return undefined;
     const childWgslInput = createWgslRunInput(childCompiled, item.input);
     for (const [name, value] of Object.entries(childWgslInput.buffers)) {
       buffers[item.storageAliases[name] ?? name] = value;
     }
+    const childLaunch = { gridDim: item.gridDim, blockDim: item.blockDim };
     steps.push({
       program: childCompiled.wgslProgram,
-      launch: { dispatchCount: dispatchCountForLaunch({ gridDim: item.gridDim, blockDim: item.blockDim }) },
+      launch: { dispatchCount: dispatchCountForLaunch(childLaunch) },
       storageAliases: item.storageAliases,
       ...(childWgslInput.uniforms === undefined ? {} : { uniforms: childWgslInput.uniforms }),
     });
+    if (childRuntime.operations.some((operation) => operation.kind === "peer-copy")) {
+      const peerCopyPlan = createCudaPeerCopyPlan(childCompiled, item.input, childLaunch);
+      if (!peerCopyPlan.supported) return undefined;
+      appendPeerCopySteps(steps, peerCopyPlan.copies, item.storageAliases);
+    }
   }
 
   const result = await runWgslKernelProgramSequence(

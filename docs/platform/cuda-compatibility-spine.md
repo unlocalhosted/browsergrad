@@ -55,9 +55,10 @@ Current corpus gate (`node scripts/audit-cuda-lite-corpus.mjs /tmp/CUDA-120-DAYS
   workgroup, the child block size is statically known, pointer args alias the
   same named storage buffers, and child scalar launch args are host-evaluable.
   DevicePool pointer params alias their pool data/offset bindings, and positive
-  pointer-offset args lower to base-offset uniforms. Per-thread launch queues,
-  recursive launches, negative pointer offsets, and device-derived launch args
-  remain reference-only.
+  pointer-offset args lower to base-offset uniforms. Child kernels may also
+  contain single-invocation guarded peer copies when that copy itself is
+  host-liftable. Per-thread launch queues, recursive launches, negative pointer
+  offsets, and device-derived launch args remain reference-only.
 - CUDA runtime calls such as `cudaDeviceSynchronize` and `cudaMemcpyPeerAsync`
   classify as runtime orchestration gaps. Standalone `cudaDeviceSynchronize()`
   is a WebGPU-safe no-op because dispatch completion is host-managed. Peer

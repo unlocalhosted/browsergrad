@@ -1195,6 +1195,42 @@ __global__ void parent(float *x, int n) {
     expect(plan.launches.map((item) => item.kernel.name)).toEqual(["addOne", "scaleTwo"]);
   });
 
+  it("plans dynamic child launches whose child performs host-liftable peer copy", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(float *dst, const float *src, int n) {
+  if (threadIdx.x == 0) {
+    cudaMemcpyPeerAsync(dst + 1, 1, src, 0, sizeof(float) * n, 0);
+  }
+}
+__global__ void parent(float *dst, const float *src, int n) {
+  if (threadIdx.x < 1) {
+    dim3 grid(1);
+    dim3 block(1);
+    child<<<grid, block>>>(dst, src, n);
+    cudaDeviceSynchronize();
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        dst: new Float32Array([0, 0, 0, 0]),
+        src: new Float32Array([2.5, 3.5]),
+      },
+      scalars: { n: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const plan = createCudaHostDynamicLaunchPlan(compiled, input, launch);
+    const result = runCompiledKernelReference(compiled, input, launch);
+
+    expect(plan.supported).toBe(true);
+    expect(plan.launches[0]?.kernel.name).toBe("child");
+    expect([...result.buffers.dst as Float32Array]).toEqual([0, 2.5, 3.5, 0]);
+  });
+
   it("plans pointer-offset dynamic launches as pointer base uniforms", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void child(float *out) {

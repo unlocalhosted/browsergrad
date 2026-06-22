@@ -173,7 +173,11 @@ function hostDynamicPlanCompiles(parentCompiled, dynamicPlan) {
         pointerBaseOffsets: launch.pointerBaseOffsets,
       });
       const childRuntime = createCudaRuntimePlan(childCompiled);
-      if (!childRuntime.operations.every((operation) => operation.kind === "device-sync")) return false;
+      if (!childRuntime.operations.every((operation) => operation.kind === "device-sync" || operation.kind === "peer-copy")) return false;
+      if (childRuntime.operations.some((operation) => operation.kind === "peer-copy")) {
+        const peerCopyPlan = createCudaPeerCopyPlan(childCompiled, launch.input, { gridDim: launch.gridDim, blockDim: launch.blockDim });
+        if (!peerCopyPlan.supported) return false;
+      }
     }
     return true;
   } catch {

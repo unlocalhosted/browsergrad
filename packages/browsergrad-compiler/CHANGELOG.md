@@ -10,6 +10,8 @@
 - Added DevicePool aliasing and positive pointer-offset support for host-lifted
   dynamic launches, plus conservative host-lifted `cudaMemcpyPeerAsync` typed
   buffer copies.
+- Added composed host orchestration for child dispatches whose child kernel
+  performs a host-liftable peer copy.
 - Added `createCudaRuntimePlan()`, `createCudaGridSyncPhasePlan()`,
   `createCudaHostDynamicLaunchPlan()`, and `createCudaPeerCopyPlan()` for
   platform/rubric preflight.
