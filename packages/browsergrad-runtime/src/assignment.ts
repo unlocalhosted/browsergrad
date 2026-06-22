@@ -1624,6 +1624,37 @@ export async function runAssignmentJavascriptProfile(
   return { report, run };
 }
 
+export async function runVerifiedAssignmentJavascriptProfile(
+  profile: AssignmentProfile,
+  environment: AssignmentCapabilityEnvironment,
+  contents: AssignmentMountContents,
+  rubric: AssignmentJavascriptRubric,
+  options: AssignmentJavascriptRubricRunOptions = {},
+): Promise<AssignmentJavascriptProfileRunResult> {
+  const report = createAssignmentPreflightReport(profile, environment);
+  const handoff = await createVerifiedAssignmentPlatformHandoff(
+    profile,
+    report,
+    contents,
+  );
+  if (handoff.nextAction !== "run-javascript") {
+    const details = handoff.messages.length > 0
+      ? `: ${handoff.messages.join("; ")}`
+      : "";
+    throw new BrowsergradError(
+      `cannot run verified JavaScript profile; ${handoff.summary}${details}`,
+    );
+  }
+
+  return runAssignmentJavascriptProfile(
+    profile,
+    environment,
+    contents,
+    rubric,
+    options,
+  );
+}
+
 function missingAssignmentJavascriptOracles(
   profile: AssignmentProfile,
   oracles: Readonly<Record<string, unknown>> | undefined,

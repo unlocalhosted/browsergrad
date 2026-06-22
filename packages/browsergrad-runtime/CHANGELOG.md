@@ -100,6 +100,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   options)` runs a full profile-driven JavaScript assignment path: preflight,
   route validation, mount readiness, declared-oracle preflight,
   oracle/substrate wiring, and rubric execution.
+- `runVerifiedAssignmentJavascriptProfile(profile, environment, contents,
+  rubric, options)` runs the same JavaScript assignment path only after verified
+  platform handoff permits `run-javascript`, blocking stale dataset fixtures
+  before rubric execution.
 - JavaScript rubric contexts now expose `ctx.readBytes(path)` for binary
   mounted fixtures.
 - JavaScript rubric contexts now expose `ctx.substrate(name)` for browser

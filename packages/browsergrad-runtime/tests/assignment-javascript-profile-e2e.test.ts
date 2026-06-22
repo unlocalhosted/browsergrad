@@ -4,6 +4,7 @@ import {
   createAssignmentCapabilityEnvironment,
   parseAssignmentProfile,
   runAssignmentJavascriptProfile,
+  runVerifiedAssignmentJavascriptProfile,
   type AssignmentJavascriptRubric,
 } from "../src/index";
 import { simulation } from "@unlocalhosted/browsergrad-primitives";
@@ -191,6 +192,59 @@ describe("profile-driven JavaScript assignment e2e", () => {
         },
       }),
     ]);
+  });
+
+  it("blocks verified JavaScript profile runs before rubric execution when dataset hashes drift", async () => {
+    const parsed = parseAssignmentProfile({
+      ...GPU_PUZZLES_PROFILE,
+      datasets: [
+        {
+          name: "cases",
+          url: "https://example.invalid/gpu-puzzles/cases.txt",
+          hash:
+            "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        },
+      ],
+    });
+    expect(parsed).toMatchObject({ ok: true });
+    if (!parsed.ok) return;
+
+    const environment = createAssignmentCapabilityEnvironment({
+      browserCapabilities: ["kernel-visualizer", "webgpu", "wgsl-kernel"],
+    });
+    const files = {
+      "/assignments/gpu-puzzles/rubric.js":
+        "export default function rubric(ctx) { return ctx.id; }",
+    };
+    const oracle: GpuPuzzleOracle = { simulateCuda1DGrid };
+    let called = false;
+    const rubric: AssignmentJavascriptRubric = () => {
+      called = true;
+    };
+
+    await expect(
+      runVerifiedAssignmentJavascriptProfile(
+        parsed.profile,
+        environment,
+        { files, datasets: { cases: "abcd" } },
+        rubric,
+        { oracles: { _bg_cuda_concepts: oracle } },
+      ),
+    ).rejects.toThrow("dataset hash mismatch: cases");
+    expect(called).toBe(false);
+
+    await expect(
+      runVerifiedAssignmentJavascriptProfile(
+        parsed.profile,
+        environment,
+        { files, datasets: { cases: "abc" } },
+        rubric,
+        { oracles: { _bg_cuda_concepts: oracle } },
+      ),
+    ).resolves.toMatchObject({
+      run: { assertions: [], artifacts: [] },
+    });
+    expect(called).toBe(true);
   });
 
   it("runs the CS149 A1 profile through preflight, mounts, declared oracles, and JS assertions", async () => {

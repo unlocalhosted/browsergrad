@@ -196,6 +196,7 @@ import {
   runAssignmentJavascriptProfile,
   runAssignmentJavascriptRubric,
   runAssignmentRubric,
+  runVerifiedAssignmentJavascriptProfile,
 } from "@unlocalhosted/browsergrad-runtime";
 
 const parsed = parseAssignmentProfile(profileJson);
@@ -285,10 +286,13 @@ const run = await runAssignmentRubric(session, plan, {
 });
 console.log(run.mount.writtenPaths, run.exec.assertions);
 
-const jsRun = await runAssignmentJavascriptProfile(
+const jsRun = await runVerifiedAssignmentJavascriptProfile(
   parsed.profile,
   environment,
-  { files: { [report.plan.files.rubricPath]: rubricSource } },
+  {
+    files: { [report.plan.files.rubricPath]: rubricSource },
+    datasets: { tiny: tinyFixtureText },
+  },
   importedRubric,
   { oracles: { _bg_cpu_parallelism: cs149Oracle } },
 );
@@ -322,6 +326,9 @@ profile and wants BrowserGrad to own preflight, route validation, mount
 collection, declared-oracle preflight, oracle/substrate wiring, and rubric
 execution in one call. The runner rejects missing profile-declared JS oracles
 before invoking the rubric, so broken platform wiring cannot silently pass.
+Use `runVerifiedAssignmentJavascriptProfile()` for JS-routed labs with declared
+dataset hashes. It runs the same profile path only after verified handoff says
+`nextAction: "run-javascript"`, so stale fixtures block before rubric code runs.
 For `external` routes, `createAssignmentExternalRunnerRequest(plan)` returns the
 native/hosted runner handoff: selected external capabilities, resolved files,
 timeouts, behavioral gates, a `BROWSERGRAD_*` environment map, mount plan, and

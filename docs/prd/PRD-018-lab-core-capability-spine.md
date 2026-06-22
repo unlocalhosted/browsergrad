@@ -179,6 +179,11 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   dataset hash verification to the same launch-panel contract and blocks runner
   actions with `nextAction: "verify-content"` when declared hashes are invalid,
   unsupported, missing, or mismatched.
+- Verified JavaScript launch guarantee:
+  `runVerifiedAssignmentJavascriptProfile(profile, environment, contents,
+  rubric, options?)` enforces that verified handoff before JS rubric execution,
+  so a platform cannot accidentally bypass fixture hash checks by calling the
+  profile runner directly.
 - Platform issue-draft guarantee:
   `createAssignmentPlatformIssueDraft(profile, handoff)` turns a generic
   BrowserGrad handoff into deterministic issue title/body/labels content so
@@ -402,6 +407,9 @@ curriculum profiles and handoff docs absorb course-specific adapters.
 - Later RED test: verified platform handoff blocks launch when present fixture
   contents fail declared dataset hash checks, including benchmark profiles with
   placeholder hashes.
+- Later RED test: verified JavaScript profile runner rejects mismatched dataset
+  hashes before invoking the rubric callback, then runs the same profile when
+  fixture contents match.
 - Later RED test: platform issue draft helper turns a handoff into deterministic
   title/body/labels content for downstream tracker posting, including hash-check
   details when the handoff was verified.

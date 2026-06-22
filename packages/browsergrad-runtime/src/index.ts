@@ -88,6 +88,7 @@ export {
   runAssignmentJavascriptProfile,
   runAssignmentJavascriptRubric,
   runAssignmentRubric,
+  runVerifiedAssignmentJavascriptProfile,
   verifyAssignmentMountContentHashes,
   type AssignmentProfile,
   type AssignmentProfileMetadata,

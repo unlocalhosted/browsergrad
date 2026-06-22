@@ -105,6 +105,10 @@ wants one profile-driven call that builds preflight, validates the JavaScript
 route, mounts declared contents, preflights declared JS oracles, wires
 oracles/substrates, and runs the rubric. CS149 A1 and GPU Puzzles have e2e
 tests proving this route with simulator/kernel oracles.
+Use `runVerifiedAssignmentJavascriptProfile()` for JS-routed labs after file
+and dataset contents are available. It requires verified handoff to permit
+`run-javascript`, so stale or wrong dataset fixtures fail before rubric code can
+observe them.
 Kernel-style JS rubrics can use `createKernelRubric()` from
 `@unlocalhosted/browsergrad-kernels` to compare tensors against CPU references
 and forward pass/fail assertions into the BrowserGrad JS rubric context. Use

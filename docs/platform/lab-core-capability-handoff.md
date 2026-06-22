@@ -363,9 +363,10 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     Binary fixtures can be verified after staging with `Session.fs.readBytes`.
     Dataset hashes should be verified before staging with
     `verifyAssignmentMountContentHashes`.
-16. For runnable JavaScript labs, import the rubric module and call
-    `runAssignmentJavascriptProfile()` for full profile-driven runs or
-    `runAssignmentJavascriptRubric()` when the platform already owns preflight.
+18. For runnable JavaScript labs, import the rubric module and call
+    `runVerifiedAssignmentJavascriptProfile()` once fixture contents are
+    available, or `runAssignmentJavascriptRubric()` when the platform already
+    owns preflight and hash enforcement.
     JS rubrics read binary fixtures with `ctx.readBytes(path)`. Kernel labs can use
     `@unlocalhosted/browsergrad-kernels` `createBrowsergradKernelRubric(ctx)` to
     compare WGSL outputs against CPU references and emit BrowserGrad assertions.

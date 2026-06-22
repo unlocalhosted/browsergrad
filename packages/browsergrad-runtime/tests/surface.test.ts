@@ -3,6 +3,7 @@ import {
   BrowsergradError,
   createSession,
   runAssignmentJavascriptProfile,
+  runVerifiedAssignmentJavascriptProfile,
   type Artifact,
   type ArtifactImage,
   type ArtifactJson,
@@ -31,6 +32,10 @@ describe("public surface", () => {
 
   it("exports profile-level JavaScript assignment runner", () => {
     expect(typeof runAssignmentJavascriptProfile).toBe("function");
+  });
+
+  it("exports verified profile-level JavaScript assignment runner", () => {
+    expect(typeof runVerifiedAssignmentJavascriptProfile).toBe("function");
   });
 
   it("exports BrowsergradError as a constructable error subclass", () => {
