@@ -11,6 +11,7 @@ import {
   createCudaWebGpuExecutionPlan,
   describeCudaDiagnostic,
   formatCudaLiteDiagnostics,
+  normalizeCudaWebGpuReadbackNames,
   parseCudaLite,
   runCompiledKernelReference,
   runCompiledKernelWebGpu,
@@ -772,6 +773,25 @@ __global__ void parent(float *x, int n) {
       expect(dynamicPlan.steps).toHaveLength(2);
       expect(dynamicPlan.steps[1]?.storageAliases).toEqual({ dst: "x" });
     }
+  });
+
+  it("maps logical DevicePool readback names to internal storage bindings", () => {
+    const compiled = compileCudaLiteKernel(DEVICE_POOL_ALLOC, { workgroupSize: [2, 1, 1] });
+    expect(normalizeCudaWebGpuReadbackNames(compiled, ["dp", "out", "dp"])).toEqual(["dp_pool", "out"]);
+
+    const plan = createCudaWebGpuExecutionPlan(
+      compiled,
+      {
+        buffers: { out: new Float32Array(2) },
+        memoryPools: { dp: { data: new Uint32Array(2), offset: new Uint32Array([0]) } },
+        scalars: { N: 2 },
+        readback: ["dp"],
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(plan).toMatchObject({ supported: true });
+    if (plan.supported) expect(plan.input.readback).toEqual(["dp_pool"]);
   });
 
   it("plans safe top-level grid sync as WebGPU dispatch phases", () => {

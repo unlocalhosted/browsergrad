@@ -22,5 +22,7 @@
   platform callers can keep storage buffers on GPU and opt out of readback.
 - Added `prepareCompiledKernelWebGpu()` for hot-loop compiler dispatch over
   resident buffers without rebuilding pipelines and bind groups each iteration.
+- Added logical compiler readback-name normalization so `DevicePool* dp`
+  callers can request `"dp"` instead of internal WGSL storage names.
 - Added `pnpm bench` benchmark harness for compiler, CPU reference, and
   orchestration planner timing.

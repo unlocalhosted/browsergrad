@@ -806,13 +806,41 @@ __global__ void atomic_exchange(float* x, float* out) {
       buffers: { out: new Float32Array(2) },
       memoryPools: { dp: { data: new Uint32Array(2), offset: new Uint32Array([0]) } },
       scalars: { N: 2 },
+      readback: ["dp"],
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
-    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+    expect(actual.buffers.out).toBeUndefined();
     expect([...actual.buffers.dp as Uint32Array]).toEqual([...expected.buffers.dp as Uint32Array]);
+  });
+
+  it("maps prepared logical DevicePool readback names through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const compiled = compileCudaLiteKernel(DEVICE_POOL_ALLOC, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(2) },
+      memoryPools: { dp: { data: new Uint32Array(2), offset: new Uint32Array([0]) } },
+      scalars: { N: 2 },
+      readback: [],
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, {
+      buffers: { out: new Float32Array(2) },
+      memoryPools: { dp: { data: new Uint32Array(2), offset: new Uint32Array([0]) } },
+      scalars: { N: 2 },
+    }, launch);
+    const prepared = await prepareCompiledKernelWebGpu(device, compiled, input, launch);
+
+    try {
+      const actual = await prepared.run({ readback: ["dp"] });
+      expect(actual.buffers.out).toBeUndefined();
+      expect([...actual.buffers.dp as Uint32Array]).toEqual([...expected.buffers.dp as Uint32Array]);
+    } finally {
+      prepared.destroy();
+    }
   });
 
   it("runs raw pointer pool allocation through WebGPU atomics", async () => {

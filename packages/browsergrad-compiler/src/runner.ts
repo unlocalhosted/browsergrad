@@ -13,6 +13,7 @@ import { emitKernelIrWgsl } from "./wgsl.js";
 import {
   createCudaWebGpuExecutionPlan,
   normalizeCudaWebGpuReadback,
+  normalizeCudaWebGpuReadbackNames,
   type CudaWebGpuExecutionPlanKind,
 } from "./webgpu_orchestration.js";
 import {
@@ -124,13 +125,21 @@ class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
   }
 
   async run(options?: PreparedCompiledKernelWebGpuRunOptions): Promise<ReferenceKernelResult> {
-    const result = await this.prepared.run(options);
+    const result = await this.prepared.run(normalizePreparedRunOptions(this.compiled, options));
     return { buffers: normalizeCudaWebGpuReadback(this.compiled, result.buffers), trace: [] };
   }
 
   destroy(): void {
     this.prepared.destroy();
   }
+}
+
+function normalizePreparedRunOptions(
+  compiled: CompiledCudaLiteKernel,
+  options: PreparedCompiledKernelWebGpuRunOptions | undefined,
+): PreparedCompiledKernelWebGpuRunOptions | undefined {
+  if (options?.readback === undefined) return options;
+  return { readback: normalizeCudaWebGpuReadbackNames(compiled, options.readback) };
 }
 
 function validateLaunch(launch: KernelLaunch, workgroupSize: readonly [number, number, number]): void {

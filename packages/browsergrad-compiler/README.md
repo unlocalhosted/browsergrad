@@ -66,6 +66,8 @@ For hot WebGPU paths, pass caller-owned buffers through `residentBuffers` and
 set `readback: []`. This keeps data on GPU across compiler-dispatched kernels;
 use `readWgslStorageBuffer()` from `@unlocalhosted/browsergrad-kernels` at the
 actual materialization boundary.
+Readback names are logical compiler names: use `"dp"` for a `DevicePool* dp`
+input, not its internal WGSL backing buffer name.
 
 If launch shape, scalar params, and bindings stay fixed across iterations, use
 `prepareCompiledKernelWebGpu()` once. It prebuilds the WebGPU sequence, pipelines,
@@ -192,6 +194,9 @@ to inspect the exact executable WebGPU plan before running: `single-dispatch`,
 `grid-sync-phases`, `host-dynamic-launch`, or `host-peer-copy`. The runner uses
 the same plan interface internally, so platform preflight and execution share
 one source of truth.
+Use `normalizeCudaWebGpuReadbackNames(compiled, names)` if platform code needs
+to inspect the internal WGSL storage readbacks that correspond to logical
+compiler names.
 
 ## Browser Testing
 

@@ -78,6 +78,7 @@ export {
 } from "./runtime_plan.js";
 export {
   createCudaWebGpuExecutionPlan,
+  normalizeCudaWebGpuReadbackNames,
   normalizeCudaWebGpuReadback,
   type CudaWebGpuExecutionPlan,
   type CudaWebGpuExecutionPlanKind,

@@ -101,6 +101,20 @@ export function normalizeCudaWebGpuReadback(
   return out;
 }
 
+export function normalizeCudaWebGpuReadbackNames(
+  compiled: CompiledCudaLiteKernel,
+  names: readonly string[],
+): readonly string[] {
+  const aliases = new Map<string, string>();
+  for (const pool of compiled.ir.params.filter(isDevicePoolParam)) {
+    aliases.set(pool.name, poolDataName(pool.name));
+  }
+  for (const poolName of collectExternalDevicePoolNames(compiled.ir.body)) {
+    aliases.set(poolName, poolDataName(poolName));
+  }
+  return [...new Set(names.map((name) => aliases.get(name) ?? name))];
+}
+
 function createGridSyncWebGpuPlan(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
@@ -394,13 +408,14 @@ function createWgslRunInput(
     ...memoryPoolBufferInputs(compiled, input),
     ...constantBufferInputs(compiled, input),
   };
-  const readback = input.readback ??
-    [
+  const readback = input.readback === undefined
+    ? [
       ...compiled.ir.params
         .filter((param) => (param.pointer && !param.constant) || param.valueType === "surface2d")
         .map((param) => param.valueType === "devicepool" ? poolDataName(param.name) : param.name),
       ...collectExternalDevicePoolNames(compiled.ir.body).map(poolDataName),
-    ];
+    ]
+    : normalizeCudaWebGpuReadbackNames(compiled, input.readback);
   return {
     buffers,
     ...(input.residentBuffers === undefined ? {} : { residentBuffers: input.residentBuffers }),
