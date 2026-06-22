@@ -104,6 +104,34 @@ describe("real WebGPU — CUDA-lite compiler", () => {
     expect([...actual.buffers.C as Float32Array]).toEqual([...expected.buffers.C as Float32Array]);
   });
 
+  it("runs compiled constant memory through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__constant__ float scaleFactor;
+__constant__ float coeffs[2];
+__global__ void constant_scale(const float* x, float* y, int n) {
+  int idx = threadIdx.x;
+  if (idx < n) { y[idx] = x[idx] * scaleFactor * coeffs[idx]; }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        x: new Float32Array([1, 2]),
+        y: new Float32Array(2),
+      },
+      constants: {
+        scaleFactor: 3,
+        coeffs: new Float32Array([10, 20]),
+      },
+      scalars: { n: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
+  });
+
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

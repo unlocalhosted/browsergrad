@@ -9,6 +9,7 @@ import {
   type CudaLiteAssignmentExpression,
   type CudaLiteCallExpression,
   type CudaLiteExpression,
+  type CudaLiteGlobalConstant,
   type CudaLiteParam,
   type CudaLiteScalarType,
   type CudaLiteStatement,
@@ -53,12 +54,18 @@ export function emitKernelIrWgsl(
     );
   }
 
-  const scalarParams = ir.params.filter((param) => !param.pointer);
-  if (scalarParams.length > 0) {
+  for (const constant of ir.constants.filter((constant) => constant.dimensions.length > 0)) {
+    lines.push(
+      `@group(0) @binding(${context.bindingFor(constant.name)}) var<storage, read> ${constant.name}: ${emitConstantArrayType(constant)};`,
+    );
+  }
+
+  const uniformScalars = context.uniformScalars;
+  if (uniformScalars.length > 0) {
     lines.push("struct Params {");
-    for (const param of scalarParams) {
-      const align = param.valueType === "half" ? "@align(4) " : "";
-      lines.push(`  ${align}${param.name}: ${wgslScalar(param.valueType)},`);
+    for (const scalar of uniformScalars) {
+      const align = scalar.valueType === "half" ? "@align(4) " : "";
+      lines.push(`  ${align}${scalar.name}: ${wgslScalar(scalar.valueType)},`);
     }
     lines.push("};");
     lines.push(`@group(0) @binding(${context.paramsBinding}) var<uniform> params: Params;`);
@@ -94,8 +101,10 @@ interface EmitContext {
   readonly ir: KernelIrModule;
   readonly bindings: readonly WgslKernelBindingInput[];
   readonly paramsBinding?: number;
+  readonly uniformScalars: readonly { readonly name: string; readonly valueType: CudaLiteScalarType }[];
   bindingFor(name: string): number;
   paramFor(name: string): CudaLiteParam | undefined;
+  isUniformScalar(name: string): boolean;
 }
 
 type EmitMode = "value" | "lvalue";
@@ -114,13 +123,28 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
       binding,
     });
   }
-  const scalarParams = ir.params.filter((param) => !param.pointer);
-  const paramsBinding = scalarParams.length > 0 ? bindings.length : undefined;
+  for (const constant of ir.constants.filter((constant) => constant.dimensions.length > 0)) {
+    const binding = bindings.length;
+    bindingByName.set(constant.name, binding);
+    bindings.push({
+      kind: "storage",
+      name: constant.name,
+      valueType: wgslBindingType(constant.valueType),
+      access: "read",
+      binding,
+    });
+  }
+  const uniformScalars = [
+    ...ir.params.filter((param) => !param.pointer).map((param) => ({ name: param.name, valueType: param.valueType })),
+    ...ir.constants.filter((constant) => constant.dimensions.length === 0).map((constant) => ({ name: constant.name, valueType: constant.valueType })),
+  ];
+  const uniformScalarNames = new Set(uniformScalars.map((scalar) => scalar.name));
+  const paramsBinding = uniformScalars.length > 0 ? bindings.length : undefined;
   if (paramsBinding !== undefined) {
     bindings.push({
       kind: "uniform",
       name: "params",
-      byteLength: Math.max(16, scalarParams.length * 4),
+      byteLength: Math.max(16, uniformScalars.length * 4),
       binding: paramsBinding,
     });
   }
@@ -128,6 +152,7 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
     ir,
     bindings,
     ...(paramsBinding === undefined ? {} : { paramsBinding }),
+    uniformScalars,
     bindingFor(name) {
       const binding = bindingByName.get(name);
       if (binding === undefined) throw featureError("missing-wgsl-binding", `missing WGSL binding for '${name}'`);
@@ -135,6 +160,9 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
     },
     paramFor(name) {
       return ir.params.find((param) => param.name === name);
+    },
+    isUniformScalar(name) {
+      return uniformScalarNames.has(name);
     },
   };
 }
@@ -227,7 +255,7 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
 function emitIdentifier(name: string, context: EmitContext): string {
   if (name === "threadIdx" || name === "blockIdx" || name === "blockDim" || name === "gridDim") return name;
   const param = context.paramFor(name);
-  if (param && !param.pointer) return `params.${name}`;
+  if ((param && !param.pointer) || context.isUniformScalar(name)) return `params.${name}`;
   return name;
 }
 
@@ -309,6 +337,14 @@ function emitSharedType(statement: CudaLiteVarDecl): string {
   let type = wgslScalar(statement.valueType);
   for (let i = statement.dimensions.length - 1; i >= 0; i--) {
     type = `array<${type}, ${statement.dimensions[i]!}>`;
+  }
+  return type;
+}
+
+function emitConstantArrayType(constant: CudaLiteGlobalConstant): string {
+  let type = wgslScalar(constant.valueType);
+  for (let i = constant.dimensions.length - 1; i >= 0; i--) {
+    type = `array<${type}, ${constant.dimensions[i]!}>`;
   }
   return type;
 }

@@ -3,6 +3,8 @@ import {
   CudaLiteCompilerError,
   analyzeCudaLite,
   compileCudaLiteKernel,
+  createCudaLoweringPlan,
+  describeCudaDiagnostic,
   formatCudaLiteDiagnostics,
   parseCudaLite,
   runCompiledKernelReference,
@@ -153,6 +155,27 @@ __global__ void exactLaunch(float* x) {
       code: "unguarded-write",
       severity: "warning",
     }));
+    expect(compiled.loweringPlan.canRunOnGpu).toBe(true);
+  });
+
+  it("classifies CUDA compatibility gaps by semantic feature", () => {
+    const unsupported = analyzeCudaLite(parseCudaLite(`
+__global__ void unsupported(float* x) {
+  if (threadIdx.x < 1) { atomicAdd(&x[0], 1.0f); }
+}`));
+    const plan = createCudaLoweringPlan(unsupported.diagnostics);
+
+    expect(plan.canRunOnGpu).toBe(false);
+    expect(plan.referenceAvailable).toBe(true);
+    expect(plan.unsupported).toContainEqual(expect.objectContaining({
+      code: "unsupported-atomic-f32",
+      family: "atomic",
+      lowering: "unsupported",
+    }));
+    expect(describeCudaDiagnostic({
+      code: "unsupported-call",
+      message: "unsupported CUDA-lite call 'tex2D'",
+    })).toMatchObject({ family: "texture" });
   });
 
   it("rejects semantic gaps before WGSL/runtime execution", () => {
@@ -353,6 +376,56 @@ __global__ void declarationList(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([1]);
     expect(compiled.wgsl).toContain("var row");
     expect(compiled.wgsl).toContain("var col");
+  });
+
+  it("lowers CUDA constant scalar memory as readonly uniform input", () => {
+    const compiled = compileCudaLiteKernel(`
+__constant__ float scaleFactor;
+__global__ void scale(const float *x, float *y, int n) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < n) { y[idx] = x[idx] * scaleFactor; }
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([1, 2, 3, 4]),
+          y: new Float32Array(4),
+        },
+        constants: { scaleFactor: 3 },
+        scalars: { n: 4 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.ir.constants.map((constant) => constant.name)).toEqual(["scaleFactor"]);
+    expect(compiled.wgsl).toContain("scaleFactor: f32");
+    expect(compiled.wgsl).toContain("params.scaleFactor");
+    expect([...result.buffers.y as Float32Array]).toEqual([3, 6, 9, 12]);
+  });
+
+  it("lowers CUDA constant arrays as readonly storage inputs", () => {
+    const compiled = compileCudaLiteKernel(`
+__constant__ float coeffs[2];
+__global__ void apply(float *x) {
+  int idx = threadIdx.x;
+  if (idx < 2) { x[idx] = x[idx] * coeffs[idx]; }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { x: new Float32Array([2, 4]) },
+        constants: { coeffs: new Float32Array([10, 20]) },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<storage, read> coeffs: array<f32, 2>");
+    expect(compiled.wgslProgram.bindings).toContainEqual(expect.objectContaining({
+      name: "coeffs",
+      access: "read",
+    }));
+    expect([...result.buffers.x as Float32Array]).toEqual([20, 80]);
   });
 
   it("formats diagnostics with source snippets", () => {

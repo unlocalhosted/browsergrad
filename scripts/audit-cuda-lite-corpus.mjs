@@ -11,7 +11,7 @@ if (!corpusPathArg) {
 
 const corpusRoot = path.resolve(corpusPathArg);
 const compilerUrl = pathToFileURL(path.resolve("packages/browsergrad-compiler/dist/index.js")).href;
-const { compileCudaLiteKernel } = await import(compilerUrl);
+const { compileCudaLiteKernel, describeCudaDiagnostic } = await import(compilerUrl);
 const CUDA_HINT_RE = /__global__|cuda[A-Z]|<<<|threadIdx|blockIdx|__shared__/;
 
 const files = listFiles(corpusRoot)
@@ -30,11 +30,12 @@ for (const file of files) {
   codeBlocks += blocks.length;
   for (const [blockIndex, block] of blocks.entries()) {
     const blockDefines = collectObjectDefines(block.code);
+    const blockConstants = collectConstantDeclarations(block.code);
     const effectiveDefines = blockDefines.size === 0 ? carriedDefines : blockDefines;
     if (CUDA_HINT_RE.test(block.code)) cudaBlocks++;
     const kernels = extractKernelDefinitions(block.code);
     for (const [kernelIndex, rawKernel] of kernels.entries()) {
-      const source = kernelSourceWithDefineContext(rawKernel, effectiveDefines);
+      const source = kernelSourceWithContext(rawKernel, effectiveDefines, blockConstants);
       try {
         compileCudaLiteKernel(source, {
           features: { "shader-f16": true, subgroups: true },
@@ -43,12 +44,19 @@ for (const file of files) {
         });
         results.push({ file, block: blockIndex + 1, kernel: kernelIndex + 1, ok: true });
       } catch (error) {
+        const diagnostic = error?.diagnostics?.[0];
+        const feature = diagnostic
+          ? describeCudaDiagnostic(diagnostic)
+          : undefined;
         results.push({
           file,
           block: blockIndex + 1,
           kernel: kernelIndex + 1,
           ok: false,
-          error: error?.diagnostics?.[0]?.code ?? error?.name ?? "error",
+          error: diagnostic?.code ?? error?.name ?? "error",
+          family: feature?.family ?? "unknown",
+          feature: feature?.label ?? "Unknown compatibility gap",
+          lowering: feature?.lowering ?? "unsupported",
           message: String(error?.message ?? error).split("\n")[0],
         });
       }
@@ -66,13 +74,15 @@ const summary = {
   ok: results.length - failures.length,
   fail: failures.length,
   errors: countBy(failures, (failure) => failure.error),
+  families: countBy(failures, (failure) => failure.family),
+  lowering: countBy(failures, (failure) => failure.lowering),
 };
 
 console.log(JSON.stringify(summary, null, 2));
 if (failures.length > 0) {
   console.log("\nfirst failures:");
   for (const failure of failures.slice(0, 80)) {
-    console.log(`${failure.file} block ${failure.block} kernel ${failure.kernel}: ${failure.error}: ${failure.message}`);
+    console.log(`${failure.file} block ${failure.block} kernel ${failure.kernel}: ${failure.family}/${failure.error}: ${failure.message}`);
   }
 }
 
@@ -138,12 +148,12 @@ function extractKernelDefinitions(source) {
   return kernels;
 }
 
-function kernelSourceWithDefineContext(kernel, definesByName) {
+function kernelSourceWithContext(kernel, definesByName, constantDeclarations) {
   const params = new Set(kernelParamNames(kernel));
   const defines = [...definesByName]
     .filter(([name]) => !params.has(name))
     .map(([name, value]) => `#define ${name} ${value}`);
-  return `${defines.join("\n")}\n${kernel}`;
+  return `${defines.join("\n")}\n${constantDeclarations.join("\n")}\n${kernel}`;
 }
 
 function collectObjectDefines(source) {
@@ -164,6 +174,15 @@ function mergeCarriedDefines(previous, next) {
     if (/^[A-Z_][A-Z0-9_]{1,}$/u.test(name)) merged.set(name, value);
   }
   return merged;
+}
+
+function collectConstantDeclarations(source) {
+  const clean = stripComments(source);
+  const declarations = [];
+  const re = /__constant__\s+[^;]+;/g;
+  let match;
+  while ((match = re.exec(clean))) declarations.push(match[0]);
+  return declarations;
 }
 
 function kernelParamNames(kernel) {

@@ -5,6 +5,7 @@ import {
   type CudaLiteBinaryExpression,
   type CudaLiteExpression,
   type CudaLiteForStatement,
+  type CudaLiteGlobalConstant,
   type CudaLiteIfStatement,
   type CudaLiteKernel,
   type CudaLiteMemberExpression,
@@ -56,15 +57,37 @@ class Parser {
   }
 
   parseModule(): CudaLiteModule {
+    const constants: CudaLiteGlobalConstant[] = [];
     const kernels: CudaLiteKernel[] = [];
     while (!this.match("<eof>")) {
-      kernels.push(this.parseKernel());
+      if (this.match("__constant__")) constants.push(this.parseGlobalConstant());
+      else kernels.push(this.parseKernel());
     }
     return {
       kind: "module",
       source: this.source,
+      constants,
       kernels,
       span: { start: 0, end: this.source.length, line: 1, column: 1 },
+    };
+  }
+
+  private parseGlobalConstant(): CudaLiteGlobalConstant {
+    const start = this.expect("__constant__").span;
+    const valueType = this.parseType();
+    const name = this.expectIdentifier("constant name");
+    const dimensions: number[] = [];
+    while (this.consumeIf("[")) {
+      if (!this.match("]")) dimensions.push(this.parseArrayDimension());
+      this.expect("]");
+    }
+    const end = this.expect(";").span;
+    return {
+      kind: "constant",
+      valueType,
+      name: name.value,
+      dimensions,
+      span: mergeSpans(start, end),
     };
   }
 

@@ -12,6 +12,13 @@ CUDA-lite source -> BrowserGrad Kernel IR -> WGSL -> WebGPU
 This package is independent of Pyodide. It uses
 `@unlocalhosted/browsergrad-kernels` for WGSL dispatch.
 
+Compatibility vocabulary:
+
+- **native lowering**: CUDA primitive lowers directly to WGSL/WebGPU.
+- **GPU polyfill lowering**: CUDA primitive lowers into one or more real WebGPU passes.
+- **CPU reference**: correctness and teaching trace, not primary runtime.
+- **unsupported diagnostic**: no honest lowering exists yet.
+
 ## Quick Start
 
 ```ts
@@ -33,6 +40,7 @@ __global__ void saxpy(const float* x, float* y, float a, int n) {
 const compiled = compileCudaLiteKernel(source, {
   workgroupSize: [8, 1, 1],
 });
+console.log(compiled.loweringPlan.canRunOnGpu);
 const input = {
   buffers: {
     x: new Float32Array([1, 2, 3, 4]),
@@ -49,6 +57,9 @@ const gpu = await runCompiledKernelWebGpu(await createDevice(), compiled, input,
 Examples live in `examples/`: SAXPY, guarded map, and shared-memory tiled
 matmul. The emitted WGSL is intentionally inspectable so labs can show source,
 bindings, workgroup size, shared memory, and barriers directly.
+
+Use `createCudaLoweringPlan(diagnostics)` and `describeCudaDiagnostic()` to group
+compatibility gaps by semantic family instead of raw parser messages.
 
 ## Browser Testing
 

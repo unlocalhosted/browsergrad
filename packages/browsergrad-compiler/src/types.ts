@@ -2,6 +2,7 @@ import type {
   WgslKernelProgram,
   WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
+import type { CudaLoweringPlan } from "./compatibility.js";
 
 export interface SourceSpan {
   readonly start: number;
@@ -33,7 +34,16 @@ export class CudaLiteCompilerError extends Error {
 export interface CudaLiteModule {
   readonly kind: "module";
   readonly source: string;
+  readonly constants: readonly CudaLiteGlobalConstant[];
   readonly kernels: readonly CudaLiteKernel[];
+  readonly span: SourceSpan;
+}
+
+export interface CudaLiteGlobalConstant {
+  readonly kind: "constant";
+  readonly valueType: Exclude<CudaLiteScalarType, "void">;
+  readonly name: string;
+  readonly dimensions: readonly number[];
   readonly span: SourceSpan;
 }
 
@@ -225,6 +235,7 @@ export interface CudaLiteAnalyzeOptions {
 
 export interface CudaLiteAnalysis {
   readonly kernel: CudaLiteKernel;
+  readonly constants: readonly CudaLiteGlobalConstant[];
   readonly diagnostics: readonly CudaLiteDiagnostic[];
   readonly requiredFeatures: readonly string[];
   readonly atomicParams: readonly string[];
@@ -233,6 +244,7 @@ export interface CudaLiteAnalysis {
 export interface KernelIrModule {
   readonly name: string;
   readonly params: readonly CudaLiteParam[];
+  readonly constants: readonly CudaLiteGlobalConstant[];
   readonly body: readonly CudaLiteStatement[];
   readonly sharedDeclarations: readonly CudaLiteVarDecl[];
   readonly requiredFeatures: readonly string[];
@@ -249,6 +261,7 @@ export interface CompiledCudaLiteKernel {
   readonly wgsl: string;
   readonly wgslProgram: WgslKernelProgram;
   readonly diagnostics: readonly CudaLiteDiagnostic[];
+  readonly loweringPlan: CudaLoweringPlan;
 }
 
 export interface KernelLaunch {
@@ -258,6 +271,7 @@ export interface KernelLaunch {
 
 export interface CompiledKernelInput {
   readonly buffers: Readonly<Record<string, WgslTypedArray>>;
+  readonly constants?: Readonly<Record<string, number | WgslTypedArray>>;
   readonly scalars?: Readonly<Record<string, number>>;
   readonly readback?: readonly string[];
 }

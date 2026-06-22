@@ -13,6 +13,7 @@ export {
   type CudaLiteDiagnostic,
   type CudaLiteExpression,
   type CudaLiteForStatement,
+  type CudaLiteGlobalConstant,
   type CudaLiteIdentifier,
   type CudaLiteIfStatement,
   type CudaLiteIndexExpression,
@@ -39,6 +40,16 @@ export {
 
 export { parseCudaLite } from "./parser.js";
 export { analyzeCudaLite, lowerCudaLiteToKernelIr } from "./analyzer.js";
+export {
+  classifyCudaCompatibilityFamily,
+  createCudaLoweringPlan,
+  describeCudaDiagnostic,
+  getCudaFeatureRegistry,
+  type CudaCompatibilityFamily,
+  type CudaFeatureRecord,
+  type CudaLoweringKind,
+  type CudaLoweringPlan,
+} from "./compatibility.js";
 export { formatCudaLiteDiagnostics } from "./diagnostics.js";
 export { emitKernelIrWgsl, type EmitKernelIrWgslOptions, type KernelIrWgslOutput } from "./wgsl.js";
 export {

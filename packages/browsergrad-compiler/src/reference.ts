@@ -21,7 +21,7 @@ interface Vector3 {
 
 interface LValue {
   readonly name: string;
-  readonly space: "local" | "buffer" | "shared";
+  readonly space: "local" | "buffer" | "shared" | "constant";
   readonly index?: number;
 }
 
@@ -31,6 +31,8 @@ interface ThreadContext {
   readonly blockDim: Vector3;
   readonly gridDim: Vector3;
   readonly buffers: Map<string, WgslTypedArray>;
+  readonly constants: Map<string, number | WgslTypedArray>;
+  readonly constantDimensions: Map<string, readonly number[]>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly locals: Map<string, LocalValue>;
   readonly shared: Map<string, SharedArrayValue>;
@@ -62,13 +64,15 @@ export function runCompiledKernelReference(
   validateLaunch(launch, compiled.ir.workgroupSize);
   validateInputs(compiled, input);
   const buffers = cloneBuffers(input.buffers);
+  const constants = cloneConstants(input.constants ?? {});
+  const constantDimensions = new Map(compiled.ir.constants.map((constant) => [constant.name, constant.dimensions]));
   const scalars = input.scalars ?? {};
   const traces: MutableTrace[] = [];
 
   for (let bz = 0; bz < launch.gridDim[2]; bz++) {
     for (let by = 0; by < launch.gridDim[1]; by++) {
       for (let bx = 0; bx < launch.gridDim[0]; bx++) {
-        runBlock(compiled, buffers, scalars, {
+        runBlock(compiled, buffers, constants, constantDimensions, scalars, {
           x: bx,
           y: by,
           z: bz,
@@ -91,6 +95,8 @@ export function runCompiledKernelReference(
 function runBlock(
   compiled: CompiledCudaLiteKernel,
   buffers: Map<string, WgslTypedArray>,
+  constants: Map<string, number | WgslTypedArray>,
+  constantDimensions: Map<string, readonly number[]>,
   scalars: Readonly<Record<string, number>>,
   blockIdx: Vector3,
   blockDim: Vector3,
@@ -119,6 +125,8 @@ function runBlock(
           blockDim,
           gridDim,
           buffers,
+          constants,
+          constantDimensions,
           scalars,
           locals: new Map(),
           shared,
@@ -257,6 +265,10 @@ function readIdentifier(name: string, context: ThreadContext): LocalValue {
   if (name === "blockDim") return context.blockDim;
   if (name === "gridDim") return context.gridDim;
   if (context.locals.has(name)) return context.locals.get(name)!;
+  if (context.constants.has(name)) {
+    const value = context.constants.get(name)!;
+    if (typeof value === "number") return value;
+  }
   if (Object.prototype.hasOwnProperty.call(context.scalars, name)) return context.scalars[name]!;
   throw compilerFailure(`unknown identifier '${name}'`);
 }
@@ -390,6 +402,11 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
   if (shared) {
     return { name: cursor.name, space: "shared", index: flattenIndex(shared.dimensions, chain) };
   }
+  const constant = context.constants.get(cursor.name);
+  if (constant && typeof constant !== "number") {
+    const dimensions = contextConstantDimensions(cursor.name, context);
+    return { name: cursor.name, space: "constant", index: flattenIndex(dimensions, chain) };
+  }
   if (context.buffers.has(cursor.name)) {
     if (chain.length !== 1) throw compilerFailure(`buffer '${cursor.name}' expects one-dimensional indexing`);
     return { name: cursor.name, space: "buffer", index: chain[0]! };
@@ -407,6 +424,14 @@ function readLValue(lvalue: LValue, context: ThreadContext): number {
     const value = ok ? Number(buffer[lvalue.index]!) : 0;
     context.trace.reads.push({ name: lvalue.name, index: lvalue.index, value, ok });
     return value;
+  }
+  if (lvalue.space === "constant") {
+    const value = context.constants.get(lvalue.name);
+    if (!value || typeof value === "number") throw compilerFailure(`missing constant buffer '${lvalue.name}'`);
+    const ok = lvalue.index >= 0 && lvalue.index < value.length;
+    const read = ok ? Number(value[lvalue.index]!) : 0;
+    context.trace.reads.push({ name: lvalue.name, index: lvalue.index, value: read, ok });
+    return read;
   }
   const shared = context.shared.get(lvalue.name);
   if (!shared) throw compilerFailure(`missing shared array '${lvalue.name}'`);
@@ -430,6 +455,7 @@ function writeLValue(lvalue: LValue, value: number, context: ThreadContext): voi
     context.trace.writes.push({ name: lvalue.name, index: lvalue.index, value, ok });
     return;
   }
+  if (lvalue.space === "constant") throw compilerFailure(`cannot write constant memory '${lvalue.name}'`);
   const shared = context.shared.get(lvalue.name);
   if (!shared) throw compilerFailure(`missing shared array '${lvalue.name}'`);
   const ok = lvalue.index >= 0 && lvalue.index < shared.data.length;
@@ -476,6 +502,16 @@ function cloneBuffers(
   const out = new Map<string, WgslTypedArray>();
   for (const [name, buffer] of Object.entries(buffers)) {
     out.set(name, cloneTypedArray(buffer));
+  }
+  return out;
+}
+
+function cloneConstants(
+  constants: Readonly<Record<string, number | WgslTypedArray>>,
+): Map<string, number | WgslTypedArray> {
+  const out = new Map<string, number | WgslTypedArray>();
+  for (const [name, value] of Object.entries(constants)) {
+    out.set(name, typeof value === "number" ? value : cloneTypedArray(value));
   }
   return out;
 }
@@ -542,6 +578,39 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
     } else if (input.scalars?.[param.name] === undefined) {
       throw compilerFailure(`missing scalar input '${param.name}'`);
     }
+  }
+  for (const constant of compiled.ir.constants) {
+    const value = input.constants?.[constant.name];
+    if (value === undefined) throw compilerFailure(`missing constant input '${constant.name}'`);
+    if (constant.dimensions.length === 0) {
+      if (typeof value !== "number") throw compilerFailure(`constant '${constant.name}' expects number`);
+    } else {
+      if (typeof value === "number") throw compilerFailure(`constant '${constant.name}' expects typed array`);
+      validateTypedConstant(constant.name, constant.valueType, value);
+      const expected = constant.dimensions.reduce((product, dimension) => product * dimension, 1);
+      if (value.length < expected) throw compilerFailure(`constant '${constant.name}' expects at least ${expected} elements`);
+    }
+  }
+}
+
+function contextConstantDimensions(name: string, context: ThreadContext): readonly number[] {
+  const dimensions = context.constantDimensions.get(name);
+  if (!dimensions) throw compilerFailure(`constant dimensions unavailable for '${name}'`);
+  return dimensions;
+}
+
+function validateTypedConstant(name: string, valueType: string, value: WgslTypedArray): void {
+  if (valueType === "int" && !(value instanceof Int32Array)) {
+    throw compilerFailure(`constant '${name}' expects Int32Array`);
+  }
+  if (valueType === "uint" && !(value instanceof Uint32Array)) {
+    throw compilerFailure(`constant '${name}' expects Uint32Array`);
+  }
+  if (valueType === "float" && !(value instanceof Float32Array)) {
+    throw compilerFailure(`constant '${name}' expects Float32Array`);
+  }
+  if (valueType === "half" && !(value instanceof Float16Array)) {
+    throw compilerFailure(`constant '${name}' expects Float16Array`);
   }
 }
 

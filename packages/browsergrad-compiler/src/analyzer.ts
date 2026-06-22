@@ -4,6 +4,7 @@ import {
   type CudaLiteAnalyzeOptions,
   type CudaLiteDiagnostic,
   type CudaLiteExpression,
+  type CudaLiteGlobalConstant,
   type CudaLiteKernel,
   type CudaLiteModule,
   type CudaLiteParam,
@@ -64,7 +65,7 @@ type ValueType = Exclude<CudaLiteScalarType, "void">;
 
 interface SymbolInfo {
   readonly name: string;
-  readonly kind: "param" | "local" | "shared" | "builtin-vector" | "builtin-call";
+  readonly kind: "param" | "local" | "shared" | "constant" | "builtin-vector" | "builtin-call";
   readonly valueType?: ValueType;
   readonly pointer?: boolean;
   readonly constant?: boolean;
@@ -95,6 +96,10 @@ export function analyzeCudaLite(
   const params = new Map(kernel.params.map((param) => [param.name, param]));
   const declaredNames = new Set<string>();
   const rootScope = createScope();
+
+  for (const constant of ast.constants) {
+    declareConstant(constant, rootScope, declaredNames, requiredFeatures, diagnostics);
+  }
 
   for (const param of kernel.params) {
     if (declaredNames.has(param.name)) {
@@ -233,6 +238,7 @@ export function analyzeCudaLite(
 
   return {
     kernel,
+    constants: ast.constants,
     diagnostics,
     requiredFeatures: [...requiredFeatures].sort(),
     atomicParams: [...atomicParams].sort(),
@@ -258,6 +264,7 @@ export function lowerAnalyzedCudaLiteToKernelIr(
   return {
     name: analysis.kernel.name,
     params: analysis.kernel.params,
+    constants: analysis.constants,
     body: analysis.kernel.body,
     sharedDeclarations: collectSharedDeclarations(analysis.kernel.body, options),
     requiredFeatures: analysis.requiredFeatures,
@@ -286,6 +293,34 @@ function selectKernel(ast: CudaLiteModule, kernelName: string | undefined): Cuda
     }]);
   }
   return kernel;
+}
+
+function declareConstant(
+  constant: CudaLiteGlobalConstant,
+  rootScope: Scope,
+  declaredNames: Set<string>,
+  requiredFeatures: Set<string>,
+  diagnostics: CudaLiteDiagnostic[],
+): void {
+  if (declaredNames.has(constant.name)) {
+    diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${constant.name}'`, constant.span));
+  }
+  validateDeclaredSymbolName(constant.name, constant.span, diagnostics);
+  declaredNames.add(constant.name);
+  rootScope.symbols.set(constant.name, {
+    name: constant.name,
+    kind: "constant",
+    valueType: constant.valueType,
+    dimensions: constant.dimensions,
+    constant: true,
+    span: constant.span,
+  });
+  if (constant.valueType === "half") requiredFeatures.add("shader-f16");
+  for (const dimension of constant.dimensions) {
+    if (!Number.isInteger(dimension) || dimension <= 0) {
+      diagnostics.push(error("invalid-array-dimension", "array dimensions must be positive integer literals", constant.span));
+    }
+  }
 }
 
 type ExpressionWalker = (expression: CudaLiteExpression, scope: Scope) => ExpressionInfo;
@@ -488,6 +523,12 @@ function validateLValueExpression(
   }
   if (expression.kind === "index") {
     const info = walkExpression(expression, scope);
+    const root = rootIdentifier(expression);
+    const symbol = root ? lookupSymbol(root, scope, expression.span) : undefined;
+    if (symbol?.kind === "constant") {
+      diagnostics.push(error("const-pointer-write", `cannot write to constant memory '${root}'`, expression.span));
+      return;
+    }
     if (info.kind !== "scalar") {
       diagnostics.push(error("invalid-assignment-target", "assignment target must resolve to a scalar element", expression.span));
     }
@@ -509,7 +550,7 @@ function expressionInfoForIdentifier(
   }
   if (symbol.kind === "builtin-vector") return { kind: "vector", symbol };
   if (symbol.kind === "builtin-call") return { kind: "function", symbol };
-  if (symbol.kind === "shared") {
+  if (symbol.kind === "shared" || symbol.kind === "constant") {
     return {
       kind: symbol.dimensions && symbol.dimensions.length > 0 ? "array" : "scalar",
       valueType: symbol.valueType,
