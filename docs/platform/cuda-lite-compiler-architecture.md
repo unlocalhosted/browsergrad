@@ -164,6 +164,9 @@ Hot-loop rules:
 - For host-orchestrated prepared plans, replan scalar updates and compare
   topology before writing per-step uniforms. Never mutate prepared dispatch
   counts or aliases implicitly.
+- Prepared host-orchestrated replanning uses a bounded child-kernel compile
+  cache; keep it enabled for hot loops unless deterministic compile-count
+  instrumentation matters more than throughput.
 - Use `awaitCompletion: true` for no-readback timing and watchdog gates.
 
 ## Compatibility Growth

@@ -101,3 +101,6 @@
 - Added `createCudaLiteCompilerCache()` and deterministic compile cache keys
   for bounded LRU reuse of parsed/analyzed/lowered/WGSL compiler outputs in
   platform hot paths.
+- Prepared WebGPU host-orchestrated runs now reuse a bounded child-kernel
+  compile cache during scalar-update replanning, avoiding repeated child
+  parse/analyze/lower work in hot loops.

@@ -120,6 +120,8 @@ export {
   prepareCompiledKernelWebGpu,
   runCompiledKernelReference,
   runCompiledKernelWebGpu,
+  type CompiledKernelWebGpuExecutionOptions,
   type PreparedCompiledKernelWebGpu,
   type PreparedCompiledKernelWebGpuRunOptions,
+  type PrepareCompiledKernelWebGpuOptions,
 } from "./runner.js";

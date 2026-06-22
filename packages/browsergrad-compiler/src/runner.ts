@@ -7,6 +7,7 @@ import {
 } from "@unlocalhosted/browsergrad-kernels";
 import { analyzeCudaLite, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
 import { createCudaLoweringPlan } from "./compatibility.js";
+import { createCudaLiteCompileCacheKey } from "./cache-key.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import { parseCudaLite } from "./parser.js";
 import { runCompiledKernelReference } from "./reference.js";
@@ -31,6 +32,14 @@ import { formatCudaLiteDiagnostics } from "./diagnostics.js";
 
 type SupportedCudaWebGpuExecutionPlan = Extract<CudaWebGpuExecutionPlan, { readonly supported: true }>;
 
+export interface CompiledKernelWebGpuExecutionOptions {
+  readonly compileKernel?: (
+    source: string,
+    options?: CompileCudaLiteOptions,
+  ) => CompiledCudaLiteKernel;
+  readonly childCompileCacheMaxEntries?: number;
+}
+
 export interface PreparedCompiledKernelWebGpuRunOptions {
   readonly readback?: readonly string[];
   readonly awaitCompletion?: boolean;
@@ -43,6 +52,8 @@ export interface PreparedCompiledKernelWebGpu {
   run(options?: PreparedCompiledKernelWebGpuRunOptions): Promise<ReferenceKernelResult>;
   destroy(): void;
 }
+
+export type PrepareCompiledKernelWebGpuOptions = CompiledKernelWebGpuExecutionOptions;
 
 export function compileCudaLiteKernel(
   source: string,
@@ -98,15 +109,49 @@ export function compileCudaLiteKernelForWebGpu(
 
 export { runCompiledKernelReference };
 
+function createCachedWebGpuChildCompiler(
+  options: CompiledKernelWebGpuExecutionOptions,
+): NonNullable<CompiledKernelWebGpuExecutionOptions["compileKernel"]> {
+  const compile = options.compileKernel ?? compileCudaLiteKernelForWebGpu;
+  const maxEntries = options.childCompileCacheMaxEntries ?? 64;
+  if (!Number.isInteger(maxEntries) || maxEntries < 0) {
+    throw new RangeError("childCompileCacheMaxEntries must be a non-negative integer");
+  }
+  if (maxEntries === 0) {
+    return (source, compileOptions) => compile(source, cudaLiteWebGpuCompileOptions(compileOptions));
+  }
+  const cache = new Map<string, CompiledCudaLiteKernel>();
+  return (source, compileOptions = {}) => {
+    const webGpuOptions = cudaLiteWebGpuCompileOptions(compileOptions);
+    const key = createCudaLiteCompileCacheKey(source, webGpuOptions);
+    const cached = cache.get(key);
+    if (cached) {
+      cache.delete(key);
+      cache.set(key, cached);
+      return cached;
+    }
+    const compiled = compile(source, webGpuOptions);
+    cache.set(key, compiled);
+    while (cache.size > maxEntries) {
+      const oldest = cache.keys().next().value;
+      if (oldest === undefined) break;
+      cache.delete(oldest);
+    }
+    return compiled;
+  };
+}
+
 export async function runCompiledKernelWebGpu(
   device: KernelDevice,
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
   launch: KernelLaunch,
+  options: CompiledKernelWebGpuExecutionOptions = {},
 ): Promise<ReferenceKernelResult> {
   validateCudaKernelLaunch(launch, compiled.ir.workgroupSize);
+  const compileKernel = createCachedWebGpuChildCompiler(options);
   const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, {
-    compileKernel: compileCudaLiteKernelForWebGpu,
+    compileKernel,
   });
   if (!executionPlan.supported) {
     throw new CudaLiteCompilerError(executionPlan.reason, executionPlan.diagnostics);
@@ -124,10 +169,12 @@ export async function prepareCompiledKernelWebGpu(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
   launch: KernelLaunch,
+  options: PrepareCompiledKernelWebGpuOptions = {},
 ): Promise<PreparedCompiledKernelWebGpu> {
   validateCudaKernelLaunch(launch, compiled.ir.workgroupSize);
+  const compileKernel = createCachedWebGpuChildCompiler(options);
   const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, {
-    compileKernel: compileCudaLiteKernelForWebGpu,
+    compileKernel,
   });
   if (!executionPlan.supported) {
     throw new CudaLiteCompilerError(executionPlan.reason, executionPlan.diagnostics);
@@ -137,7 +184,7 @@ export async function prepareCompiledKernelWebGpu(
     executionPlan.steps,
     executionPlan.input,
   );
-  return new PreparedCompiledKernelWebGpuImpl(compiled, executionPlan.kind, input, launch, executionPlan, prepared);
+  return new PreparedCompiledKernelWebGpuImpl(compiled, executionPlan.kind, input, launch, executionPlan, prepared, compileKernel);
 }
 
 class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
@@ -151,6 +198,7 @@ class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
     private readonly launch: KernelLaunch,
     private readonly executionPlan: SupportedCudaWebGpuExecutionPlan,
     private readonly prepared: WgslPreparedKernelSequence,
+    private readonly compileKernel: NonNullable<CompiledKernelWebGpuExecutionOptions["compileKernel"]>,
   ) {
     this.stepCount = prepared.stepCount;
   }
@@ -164,7 +212,14 @@ class PreparedCompiledKernelWebGpuImpl implements PreparedCompiledKernelWebGpu {
         span: { start: 0, end: 0, line: 1, column: 1 },
       }]);
     }
-    const result = await this.prepared.run(normalizePreparedRunOptions(this.compiled, this.input, this.launch, this.executionPlan, options));
+    const result = await this.prepared.run(normalizePreparedRunOptions(
+      this.compiled,
+      this.input,
+      this.launch,
+      this.executionPlan,
+      this.compileKernel,
+      options,
+    ));
     return { buffers: normalizeCudaWebGpuReadback(this.compiled, result.buffers), trace: [] };
   }
 
@@ -180,6 +235,7 @@ function normalizePreparedRunOptions(
   input: CompiledKernelInput,
   launch: KernelLaunch,
   initialPlan: SupportedCudaWebGpuExecutionPlan,
+  compileKernel: NonNullable<CompiledKernelWebGpuExecutionOptions["compileKernel"]>,
   options: PreparedCompiledKernelWebGpuRunOptions | undefined,
 ): WgslPreparedKernelSequenceRunOptions | undefined {
   if (!options) return undefined;
@@ -204,7 +260,7 @@ function normalizePreparedRunOptions(
       return out;
     }
     const nextPlan = createCudaWebGpuExecutionPlan(compiled, nextInput, launch, {
-      compileKernel: compileCudaLiteKernelForWebGpu,
+      compileKernel,
     });
     if (!nextPlan.supported) throw new CudaLiteCompilerError(nextPlan.reason, nextPlan.diagnostics);
     validatePreparedPlanTopology(initialPlan, nextPlan);

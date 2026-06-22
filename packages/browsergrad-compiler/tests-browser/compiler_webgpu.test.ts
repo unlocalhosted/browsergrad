@@ -9,6 +9,7 @@ import {
   writeWgslStorageBuffer,
 } from "@unlocalhosted/browsergrad-kernels";
 import {
+  compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   prepareCompiledKernelWebGpu,
   runCompiledKernelReference,
@@ -838,6 +839,11 @@ __global__ void parent(float *x, int n) {
       referenceDynamicParallelism: true,
       workgroupSize: [1, 1, 1],
     });
+    let childCompileCount = 0;
+    const compileKernel = (childSource: string, options?: Parameters<typeof compileCudaLiteKernelForWebGpu>[1]) => {
+      childCompileCount++;
+      return compileCudaLiteKernelForWebGpu(childSource, options);
+    };
     const x = createWgslStorageBuffer(device, {
       valueType: "f32",
       data: new Float32Array([1, 2]),
@@ -853,19 +859,23 @@ __global__ void parent(float *x, int n) {
         readback: [],
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      { compileKernel },
     );
 
     try {
       expect(prepared.kind).toBe("host-dynamic-launch");
       expect(prepared.stepCount).toBe(1);
+      expect(childCompileCount).toBe(1);
 
       const first = await prepared.run();
+      expect(childCompileCount).toBe(1);
       expect(first.buffers).toEqual({});
       const firstReadback = await readWgslStorageBuffer(device, x);
       expect([...firstReadback as Float32Array]).toEqual([2, 3]);
 
       writeWgslStorageBuffer(device, x, new Float32Array([4, 5]));
       const second = await prepared.run({ scalars: { n: 1 }, readback: ["x"], awaitCompletion: true });
+      expect(childCompileCount).toBe(1);
       expect([...second.buffers.x as Float32Array]).toEqual([5, 5]);
     } finally {
       prepared.destroy();
