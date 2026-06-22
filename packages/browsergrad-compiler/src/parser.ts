@@ -5,11 +5,13 @@ import {
   type CudaLiteBinaryExpression,
   type CudaLiteCastExpression,
   type CudaLiteDeviceFunction,
+  type CudaLiteDim3Decl,
   type CudaLiteExpression,
   type CudaLiteForStatement,
   type CudaLiteGlobalConstant,
   type CudaLiteIfStatement,
   type CudaLiteKernel,
+  type CudaLiteKernelLaunchStatement,
   type CudaLiteMemberExpression,
   type CudaLiteModule,
   type CudaLiteParam,
@@ -225,6 +227,8 @@ class Parser {
     if (this.match("for")) return [this.parseFor()];
     if (this.match("return")) return [this.parseReturn()];
     if (this.match("continue")) return [this.parseContinue()];
+    if (this.match("dim3")) return [this.parseDim3Decl()];
+    if (this.startsKernelLaunch()) return [this.parseKernelLaunch()];
     if (this.startsVarDecl()) return this.parseVarDeclList(true);
     const expression = this.parseExpression();
     const end = this.expect(";");
@@ -285,6 +289,32 @@ class Parser {
     const start = this.expect("continue").span;
     const end = this.expect(";");
     return { kind: "continue", span: mergeSpans(start, end.span) };
+  }
+
+  private parseDim3Decl(): CudaLiteDim3Decl {
+    const start = this.expect("dim3").span;
+    const name = this.expectIdentifier("dim3 variable name");
+    if (this.match("(")) this.skipBalanced("(", ")");
+    const end = this.expect(";").span;
+    return {
+      kind: "dim3",
+      name: name.value,
+      span: mergeSpans(start, end),
+    };
+  }
+
+  private parseKernelLaunch(): CudaLiteKernelLaunchStatement {
+    const name = this.expectIdentifier("kernel launch callee");
+    this.expect("<<");
+    this.expect("<");
+    this.skipUntilTripleChevronClose();
+    this.skipBalanced("(", ")");
+    const end = this.expect(";").span;
+    return {
+      kind: "kernel-launch",
+      callee: name.value,
+      span: mergeSpans(name.span, end),
+    };
   }
 
   private parseBodyAsStatements(): readonly CudaLiteStatement[] {
@@ -471,6 +501,12 @@ class Parser {
     return sawDevice;
   }
 
+  private startsKernelLaunch(): boolean {
+    return this.peek().kind === "identifier" &&
+      this.tokens[this.index + 1]?.value === "<<" &&
+      this.tokens[this.index + 2]?.value === "<";
+  }
+
   private expectTextureDimension(): Token {
     if (this.peek().kind === "number") {
       const token = this.advance();
@@ -567,6 +603,26 @@ class Parser {
 
   private match(value: string): boolean {
     return this.peek().value === value;
+  }
+
+  private skipBalanced(open: string, close: string): void {
+    this.expect(open);
+    let depth = 1;
+    while (depth > 0) {
+      if (this.match("<eof>")) this.fail(`expected '${close}'`, this.peek().span);
+      const token = this.advance();
+      if (token.value === open) depth++;
+      else if (token.value === close) depth--;
+    }
+  }
+
+  private skipUntilTripleChevronClose(): void {
+    while (!(this.peek().value === ">>" && this.tokens[this.index + 1]?.value === ">")) {
+      if (this.match("<eof>")) this.fail("expected '>>>'", this.peek().span);
+      this.advance();
+    }
+    this.expect(">>");
+    this.expect(">");
   }
 
   private peek(): Token {

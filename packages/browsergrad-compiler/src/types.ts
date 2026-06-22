@@ -84,6 +84,8 @@ export interface CudaLiteParam {
 
 export type CudaLiteStatement =
   | CudaLiteVarDecl
+  | CudaLiteDim3Decl
+  | CudaLiteKernelLaunchStatement
   | CudaLiteIfStatement
   | CudaLiteForStatement
   | CudaLiteExprStatement
@@ -98,6 +100,18 @@ export interface CudaLiteVarDecl {
   readonly name: string;
   readonly dimensions: readonly number[];
   readonly init?: CudaLiteExpression;
+  readonly span: SourceSpan;
+}
+
+export interface CudaLiteDim3Decl {
+  readonly kind: "dim3";
+  readonly name: string;
+  readonly span: SourceSpan;
+}
+
+export interface CudaLiteKernelLaunchStatement {
+  readonly kind: "kernel-launch";
+  readonly callee: string;
   readonly span: SourceSpan;
 }
 

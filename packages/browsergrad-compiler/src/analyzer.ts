@@ -193,6 +193,26 @@ export function analyzeCudaLite(
             if (statement.init) walkExpression(statement.init, scope);
             if (statement.init) validateSideEffectPlacement(statement.init, false, diagnostics);
           break;
+        case "dim3":
+          if (names.has(statement.name)) {
+            diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${statement.name}'`, statement.span));
+          }
+          validateDeclaredSymbolName(statement.name, statement.span, diagnostics);
+          names.add(statement.name);
+          scope.symbols.set(statement.name, {
+            name: statement.name,
+            kind: "local",
+            valueType: "uint",
+            span: statement.span,
+          });
+          break;
+        case "kernel-launch":
+          diagnostics.push(error(
+            "unsupported-dynamic-parallelism",
+            `device-side kernel launch '${statement.callee}<<<...>>>' is not lowered in CUDA-lite v0`,
+            statement.span,
+          ));
+          break;
         case "expr":
           if (isBarrierCall(statement.expression)) {
             validateBarrierStatement(statement.expression, diagnostics);

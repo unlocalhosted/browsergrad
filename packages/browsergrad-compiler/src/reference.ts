@@ -180,6 +180,10 @@ function* execStatements(
       case "var":
         execVar(statement, context);
         break;
+      case "dim3":
+        break;
+      case "kernel-launch":
+        break;
       case "expr":
         if (isBarrier(statement.expression)) {
           yield "barrier";

@@ -218,6 +218,10 @@ function emitStatement(
       if (statement.storage === "shared") return [];
       if (statement.pointer) return [];
       return [`${prefix}var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitExpression(statement.init, context)}` : ""};`];
+    case "dim3":
+      return [];
+    case "kernel-launch":
+      return [`${prefix}// device-side launch omitted: ${statement.callee}<<<...>>>`];
     case "expr":
       if (isNoopCall(statement.expression)) return [`${prefix}// printf omitted: WebGPU has no device stdout`];
       if (isBarrierCall(statement.expression)) return [`${prefix}workgroupBarrier();`];
@@ -330,6 +334,7 @@ function collectPointerAliases(statements: readonly CudaLiteStatement[]): Readon
         const alias = pointerAliasForVar(item);
         if (alias) aliases.set(item.name, alias);
       }
+      if (item.kind === "dim3" || item.kind === "kernel-launch") continue;
       if (item.kind === "if") {
         walk(item.consequent);
         if (item.alternate) walk(item.alternate);

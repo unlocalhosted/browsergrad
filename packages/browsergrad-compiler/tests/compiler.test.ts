@@ -365,6 +365,23 @@ __global__ void dynamicShared(float *x) {
     expect(analysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("dynamic-shared-memory");
   });
 
+  it("parses device-side kernel launches as a runtime compatibility gap", () => {
+    const analysis = analyzeCudaLite(parseCudaLite(`
+__global__ void child(float *x) { if (threadIdx.x < 1) { x[0] = 1.0f; } }
+__global__ void parent(float *x) {
+  if (threadIdx.x < 1) {
+    dim3 block(1, 1, 1);
+    dim3 grid(1, 1, 1);
+    child<<<grid, block>>>(x);
+    cudaDeviceSynchronize();
+  }
+}`), { kernelName: "parent" });
+
+    expect(analysis.diagnostics).toContainEqual(expect.objectContaining({
+      code: "unsupported-dynamic-parallelism",
+    }));
+  });
+
   it("lowers named dynamic extern shared memory when launch metadata supplies its size", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void dynamicShared(float *x) {
