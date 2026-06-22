@@ -179,6 +179,26 @@ __global__ void atomic_mark(int* visited, int* out) {
     expect([...actual.buffers.out as Int32Array].filter((value) => value === 0)).toHaveLength(1);
   });
 
+  it("runs compiled float atomicAdd through the WebGPU CAS polyfill", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void atomic_sum(const float* input, float* result) {
+  int idx = threadIdx.x;
+  if (idx < 2) { atomicAdd(&result[0], input[idx]); }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        input: new Float32Array([1.5, 2.25]),
+        result: new Float32Array([10]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.result as Float32Array][0]).toBeCloseTo(13.75);
+  });
+
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

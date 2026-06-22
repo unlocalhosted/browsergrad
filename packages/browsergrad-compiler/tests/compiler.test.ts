@@ -108,11 +108,11 @@ __global__ void bad(const float* x) {
     const constAnalysis = analyzeCudaLite(constWrite);
     expect(constAnalysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("const-pointer-write");
 
-    const f32Atomic = parseCudaLite(`
+    const unsupportedF32Atomic = parseCudaLite(`
 __global__ void bad(float* x) {
-  if (threadIdx.x < 1) { atomicAdd(&x[0], 1.0); }
+  if (threadIdx.x < 1) { atomicMax(&x[0], 1.0); }
 }`);
-    const atomicAnalysis = analyzeCudaLite(f32Atomic);
+    const atomicAnalysis = analyzeCudaLite(unsupportedF32Atomic);
     expect(atomicAnalysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-atomic-f32");
 
     const divergentBarrier = parseCudaLite(`
@@ -168,7 +168,7 @@ __global__ void exactLaunch(float* x) {
   it("classifies CUDA compatibility gaps by semantic feature", () => {
     const unsupported = analyzeCudaLite(parseCudaLite(`
 __global__ void unsupported(float* x) {
-  if (threadIdx.x < 1) { atomicAdd(&x[0], 1.0f); }
+  if (threadIdx.x < 1) { atomicMax(&x[0], 1.0f); }
 }`));
     const plan = createCudaLoweringPlan(unsupported.diagnostics);
 
@@ -708,6 +708,29 @@ __global__ void atomic_read(int* x) {
     expect(compiled.wgsl).toContain("var<storage, read_write> x: array<atomic<i32>>;");
     expect(compiled.wgsl).toContain("atomicAdd(&x[0], 1);");
     expect(compiled.wgsl).toContain("atomicStore(&x[1], atomicLoad(&x[0]));");
+  });
+
+  it("supports CUDA float atomicAdd with a WGSL CAS loop", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void atomic_sum(const float* input, float* result) {
+  int idx = threadIdx.x;
+  if (idx < 2) { atomicAdd(&result[0], input[idx]); }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          input: new Float32Array([1.5, 2.25]),
+          result: new Float32Array([10]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<storage, read_write> result: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("fn bg_atomicAdd_f32");
+    expect(compiled.wgsl).toContain("bitcast<f32>(old_bits)");
+    expect([...result.buffers.result as Float32Array]).toEqual([13.75]);
   });
 
   it("supports CUDA pointer-form atomicAdd on integer buffers", () => {

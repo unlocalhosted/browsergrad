@@ -48,8 +48,7 @@ export function emitKernelIrWgsl(
 
   for (const param of ir.params.filter((param) => param.pointer)) {
     const access = param.constant ? "read" : "read_write";
-    const atomic = ir.atomicParams.includes(param.name);
-    const element = atomic ? `atomic<${wgslScalar(param.valueType)}>` : wgslScalar(param.valueType);
+    const element = storageElementType(param, ir);
     lines.push(
       `@group(0) @binding(${context.bindingFor(param.name)}) var<storage, ${access}> ${param.name}: array<${element}>;`,
     );
@@ -83,6 +82,10 @@ export function emitKernelIrWgsl(
   if (ir.textures.length > 0) {
     lines.push("");
     for (const texture of ir.textures) lines.push(...emitTextureHelper(texture.name));
+  }
+  if (usesFloatAtomicAdd(ir)) {
+    lines.push("");
+    lines.push(...emitFloatAtomicAddHelper());
   }
 
   for (const fn of ir.functions) {
@@ -296,7 +299,8 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       const root = rootIdentifier(expression);
       const param = root ? context.paramFor(root) : undefined;
       if (mode === "value" && param && context.ir.atomicParams.includes(param.name)) {
-        return `atomicLoad(&${access})`;
+        const loaded = `atomicLoad(&${access})`;
+        return param.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
       }
       return access;
     }
@@ -440,14 +444,25 @@ function emitAtomicCall(
   context: EmitContext,
   args: readonly string[],
 ): string {
-      const target = expression.args[0];
-      const value = expression.args[1];
-      if (target?.kind === "unary" && target.operator === "&" && value) {
-    return `${wgslName}(&${emitExpression(target.argument, context, "lvalue")}, ${emitExpression(value, context)})`;
-      }
-      if (target?.kind === "identifier" && value) {
-    return `${wgslName}(&${target.name}[0], ${emitExpression(value, context)})`;
-      }
+  const target = expression.args[0];
+  const value = expression.args[1];
+  if (target?.kind === "unary" && target.operator === "&" && value) {
+    const targetParam = atomicTargetParam(target.argument, context);
+    const targetExpression = emitExpression(target.argument, context, "lvalue");
+    const valueExpression = emitExpression(value, context);
+    if (wgslName === "atomicAdd" && targetParam?.valueType === "float") {
+      return `bg_atomicAdd_f32(&${targetExpression}, ${valueExpression})`;
+    }
+    return `${wgslName}(&${targetExpression}, ${valueExpression})`;
+  }
+  if (target?.kind === "identifier" && value) {
+    const targetParam = context.paramFor(target.name);
+    const valueExpression = emitExpression(value, context);
+    if (wgslName === "atomicAdd" && targetParam?.valueType === "float") {
+      return `bg_atomicAdd_f32(&${target.name}[0], ${valueExpression})`;
+    }
+    return `${wgslName}(&${target.name}[0], ${valueExpression})`;
+  }
   return `${wgslName}(${args.join(", ")})`;
 }
 
@@ -457,8 +472,13 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   if (param && context.ir.atomicParams.includes(param.name)) {
     const value = emitExpression(expression.right, context);
     const target = emitExpression(expression.left, context, "lvalue");
-    if (expression.operator === "=") return `atomicStore(&${target}, ${value})`;
-    if (expression.operator === "+=") return `atomicAdd(&${target}, ${value})`;
+    if (param.valueType === "float") {
+      if (expression.operator === "=") return `atomicStore(&${target}, bitcast<u32>(${value}))`;
+      if (expression.operator === "+=") return `bg_atomicAdd_f32(&${target}, ${value})`;
+    } else {
+      if (expression.operator === "=") return `atomicStore(&${target}, ${value})`;
+      if (expression.operator === "+=") return `atomicAdd(&${target}, ${value})`;
+    }
   }
   const left = emitExpression(expression.left, context, "lvalue");
   const right = emitExpression(expression.right, context);
@@ -500,6 +520,38 @@ function emitTextureHelper(name: string): string[] {
     `  return textureLoad(${name}, coord, 0).r;`,
     "}",
   ];
+}
+
+function emitFloatAtomicAddHelper(): string[] {
+  return [
+    "fn bg_atomicAdd_f32(ptr_value: ptr<storage, atomic<u32>, read_write>, value: f32) -> f32 {",
+    "  var old_bits = atomicLoad(ptr_value);",
+    "  loop {",
+    "    let old_value = bitcast<f32>(old_bits);",
+    "    let new_bits = bitcast<u32>(old_value + value);",
+    "    let result = atomicCompareExchangeWeak(ptr_value, old_bits, new_bits);",
+    "    if (result.exchanged) {",
+    "      return old_value;",
+    "    }",
+    "    old_bits = result.old_value;",
+    "  }",
+    "}",
+  ];
+}
+
+function storageElementType(param: CudaLiteParam, ir: KernelIrModule): string {
+  if (!ir.atomicParams.includes(param.name)) return wgslScalar(param.valueType);
+  if (param.valueType === "float") return "atomic<u32>";
+  return `atomic<${wgslScalar(param.valueType)}>`;
+}
+
+function usesFloatAtomicAdd(ir: KernelIrModule): boolean {
+  return ir.params.some((param) => param.pointer && param.valueType === "float" && ir.atomicParams.includes(param.name));
+}
+
+function atomicTargetParam(expression: CudaLiteExpression, context: EmitContext): CudaLiteParam | undefined {
+  const root = rootIdentifier(expression);
+  return root ? context.paramFor(root) : undefined;
 }
 
 function functionBodyHasReturn(statements: readonly CudaLiteStatement[]): boolean {

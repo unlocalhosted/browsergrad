@@ -574,6 +574,7 @@ function validateAtomicBuiltin(
   walkExpression: ExpressionWalker,
 ): void {
   const target = expression.args[0];
+  const callName = expressionName(expression.callee);
   const targetExpression = atomicTargetExpression(target);
   if (!targetExpression) {
     diagnostics.push(error("atomic-address-required", "atomicAdd first argument must be a pointer parameter or address like &x[i]", expression.span));
@@ -586,8 +587,13 @@ function validateAtomicBuiltin(
     const param = targetName ? params.get(targetName) : undefined;
     if (!param?.pointer) {
       diagnostics.push(error("unsupported-atomic-target", "atomicAdd target must be a pointer parameter element", targetExpression.span));
+    } else if (param.valueType === "float" && callName === "atomicAdd") {
+      atomicParams.add(param.name);
+      if (param.constant) {
+        diagnostics.push(error("const-pointer-write", `cannot atomicAdd through const pointer '${param.name}'`, expression.span));
+      }
     } else if (param.valueType === "float" || param.valueType === "half") {
-      diagnostics.push(error("unsupported-atomic-f32", "atomicAdd is only supported for int/uint pointers in CUDA-lite v0", expression.span));
+      diagnostics.push(error("unsupported-atomic-f32", "only atomicAdd is supported for float pointers in CUDA-lite v0", expression.span));
     } else {
       atomicParams.add(param.name);
       if (param.constant) {
