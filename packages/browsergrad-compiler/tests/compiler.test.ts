@@ -143,6 +143,39 @@ __global__ void bad(float* x) {
     expect(invalidShared.diagnostics.map((diagnostic) => diagnostic.code)).toContain("invalid-array-dimension");
   });
 
+  it("rejects semantic gaps before WGSL/runtime execution", () => {
+    const unknownSymbol = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(float* x) {
+  if (threadIdx.x < 1) { x[0] = missing + 1.0; }
+}`));
+    expect(unknownSymbol.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unknown-symbol");
+
+    const unsupportedCall = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(float* x) {
+  if (threadIdx.x < 1) { x[0] = sinf(x[0]); }
+}`));
+    expect(unsupportedCall.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-call");
+
+    const scalarParamWrite = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(float* x, int n) {
+  if (threadIdx.x < 1) { n = 2; x[0] = 1.0; }
+}`));
+    expect(scalarParamWrite.diagnostics.map((diagnostic) => diagnostic.code)).toContain("parameter-assignment");
+
+    const scopedLocal = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(float* x) {
+  if (threadIdx.x < 1) { float tmp = 1.0; }
+  if (threadIdx.x < 1) { x[0] = tmp; }
+}`));
+    expect(scopedLocal.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unknown-symbol");
+
+    const badAtomicAddress = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(int* x) {
+  if (threadIdx.x < 1) { atomicAdd(x[0], 1); }
+}`));
+    expect(badAtomicAddress.diagnostics.map((diagnostic) => diagnostic.code)).toContain("atomic-address-required");
+  });
+
   it("rejects parser edge cases with clear errors", () => {
     expect(() => parseCudaLite(`
 __global__ void bad(float* x) {
@@ -224,5 +257,19 @@ __global__ void reduce(float* x) {
   if (threadIdx.x < 1) { x[0] = bg_subgroup_add(x[0]); }
 }`;
     expect(() => compileCudaLiteKernel(subgroupSource)).toThrow(CudaLiteCompilerError);
+  });
+
+  it("emits atomic storage buffers with explicit load/store operations", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void atomic_read(int* x) {
+  if (threadIdx.x < 1) {
+    atomicAdd(&x[0], 1);
+    x[1] = x[0];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("var<storage, read_write> x: array<atomic<i32>>;");
+    expect(compiled.wgsl).toContain("atomicAdd(&x[0], 1);");
+    expect(compiled.wgsl).toContain("atomicStore(&x[1], atomicLoad(&x[0]));");
   });
 });

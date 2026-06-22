@@ -97,6 +97,8 @@ interface EmitContext {
   paramFor(name: string): CudaLiteParam | undefined;
 }
 
+type EmitMode = "value" | "lvalue";
+
 function createEmitContext(ir: KernelIrModule): EmitContext {
   const bindings: WgslKernelBindingInput[] = [];
   const bindingByName = new Map<string, number>();
@@ -179,7 +181,7 @@ function emitForVar(statement: CudaLiteVarDecl, context: EmitContext): string {
   return `var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitExpression(statement.init, context)}` : ""}`;
 }
 
-function emitExpression(expression: CudaLiteExpression, context: EmitContext): string {
+function emitExpression(expression: CudaLiteExpression, context: EmitContext, mode: EmitMode = "value"): string {
   switch (expression.kind) {
     case "number":
       return expression.raw.includes(".") ? expression.raw : `${expression.raw}`;
@@ -187,12 +189,19 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext): s
       return emitIdentifier(expression.name, context);
     case "member":
       return emitMember(expression, context);
-    case "index":
-      return `${emitExpression(expression.target, context)}[${emitExpression(expression.index, context)}]`;
+    case "index": {
+      const access = `${emitExpression(expression.target, context)}[${emitExpression(expression.index, context)}]`;
+      const root = rootIdentifier(expression);
+      const param = root ? context.paramFor(root) : undefined;
+      if (mode === "value" && param && context.ir.atomicParams.includes(param.name)) {
+        return `atomicLoad(&${access})`;
+      }
+      return access;
+    }
     case "call":
       return emitCall(expression, context);
     case "unary":
-      if (expression.operator === "&") return `&${emitExpression(expression.argument, context)}`;
+      if (expression.operator === "&") return `&${emitExpression(expression.argument, context, "lvalue")}`;
       return `(${expression.operator}${emitExpression(expression.argument, context)})`;
     case "binary":
       return `(${emitExpression(expression.left, context)} ${expression.operator} ${emitExpression(expression.right, context)})`;
@@ -200,8 +209,8 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext): s
       return emitAssignment(expression, context);
     case "update":
       return expression.prefix
-        ? `${expression.operator}${emitExpression(expression.argument, context)}`
-        : `${emitExpression(expression.argument, context)}${expression.operator}`;
+        ? `${expression.operator}${emitExpression(expression.argument, context, "lvalue")}`
+        : `${emitExpression(expression.argument, context, "lvalue")}${expression.operator}`;
   }
 }
 
@@ -246,8 +255,14 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return `${name}(${args.join(", ")})`;
     case "bg_subgroup_add":
       return `subgroupAdd(${args.join(", ")})`;
-    case "atomicAdd":
+    case "atomicAdd": {
+      const target = expression.args[0];
+      const value = expression.args[1];
+      if (target?.kind === "unary" && target.operator === "&" && value) {
+        return `atomicAdd(&${emitExpression(target.argument, context, "lvalue")}, ${emitExpression(value, context)})`;
+      }
       return `atomicAdd(${args.join(", ")})`;
+    }
     default:
       return `${emitExpression(expression.callee, context)}(${args.join(", ")})`;
   }
@@ -258,11 +273,11 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   const param = root ? context.paramFor(root) : undefined;
   if (param && context.ir.atomicParams.includes(param.name)) {
     const value = emitExpression(expression.right, context);
-    const target = emitExpression(expression.left, context);
+    const target = emitExpression(expression.left, context, "lvalue");
     if (expression.operator === "=") return `atomicStore(&${target}, ${value})`;
     if (expression.operator === "+=") return `atomicAdd(&${target}, ${value})`;
   }
-  return `${emitExpression(expression.left, context)} ${expression.operator} ${emitExpression(expression.right, context)}`;
+  return `${emitExpression(expression.left, context, "lvalue")} ${expression.operator} ${emitExpression(expression.right, context)}`;
 }
 
 function isBarrierCall(expression: CudaLiteExpression): boolean {
