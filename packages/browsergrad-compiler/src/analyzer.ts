@@ -166,7 +166,7 @@ export function analyzeCudaLite(
         case "var":
           declareVar(statement, scope);
           if (statement.valueType === "half") requiredFeatures.add("shader-f16");
-          if (statement.pointer) {
+          if (statement.pointer && !isSupportedSharedPointerAlias(statement, scope)) {
             diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.span));
           }
           if (statement.storage === "local" && statement.dimensions.length > 0) {
@@ -211,7 +211,7 @@ export function analyzeCudaLite(
           if (statement.init?.kind === "var") {
             declareVar(statement.init, loopScope);
             if (statement.init.valueType === "half") requiredFeatures.add("shader-f16");
-            if (statement.init.pointer) {
+            if (statement.init.pointer && !isSupportedSharedPointerAlias(statement.init, loopScope)) {
               diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.init.span));
             }
             if (statement.init.init) walkExpression(statement.init.init, loopScope);
@@ -361,6 +361,16 @@ function declareTexture(
     valueType: texture.valueType,
     span: texture.span,
   });
+}
+
+function isSupportedSharedPointerAlias(statement: CudaLiteVarDecl, scope: Scope): boolean {
+  if (!statement.pointer || statement.storage !== "local") return false;
+  if (statement.init?.kind !== "unary" || statement.init.operator !== "&") return false;
+  if (statement.init.argument.kind !== "index" || statement.init.argument.target.kind !== "identifier") return false;
+  const root = statement.init.argument.target.name;
+  if (!root) return false;
+  const symbol = lookupSymbol(root, scope, statement.init.argument.span);
+  return symbol?.kind === "shared" && symbol.valueType === statement.valueType;
 }
 
 type ExpressionWalker = (expression: CudaLiteExpression, scope: Scope) => ExpressionInfo;

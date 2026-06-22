@@ -114,6 +114,12 @@ interface EmitContext {
   bindingFor(name: string): number;
   paramFor(name: string): CudaLiteParam | undefined;
   isUniformScalar(name: string): boolean;
+  pointerAliasFor(name: string): PointerAlias | undefined;
+}
+
+interface PointerAlias {
+  readonly rootName: string;
+  readonly baseIndex: CudaLiteExpression;
 }
 
 type EmitMode = "value" | "lvalue";
@@ -158,6 +164,7 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
     ...ir.constants.filter((constant) => constant.dimensions.length === 0).map((constant) => ({ name: constant.name, valueType: constant.valueType })),
   ];
   const uniformScalarNames = new Set(uniformScalars.map((scalar) => scalar.name));
+  const pointerAliases = collectPointerAliases(ir.body);
   const paramsBinding = uniformScalars.length > 0 ? bindings.length : undefined;
   if (paramsBinding !== undefined) {
     bindings.push({
@@ -183,6 +190,9 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
     isUniformScalar(name) {
       return uniformScalarNames.has(name);
     },
+    pointerAliasFor(name) {
+      return pointerAliases.get(name);
+    },
   };
 }
 
@@ -195,6 +205,7 @@ function emitStatement(
   switch (statement.kind) {
     case "var":
       if (statement.storage === "shared") return [];
+      if (statement.pointer) return [];
       return [`${prefix}var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitExpression(statement.init, context)}` : ""};`];
     case "expr":
       if (isNoopCall(statement.expression)) return [`${prefix}// printf omitted: WebGPU has no device stdout`];
@@ -247,6 +258,12 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
     case "member":
       return emitMember(expression, context);
     case "index": {
+      if (expression.target.kind === "identifier") {
+        const alias = context.pointerAliasFor(expression.target.name);
+        if (alias) {
+          return `${alias.rootName}[(${emitExpression(alias.baseIndex, context)}) + (${emitExpression(expression.index, context)})]`;
+        }
+      }
       const access = `${emitExpression(expression.target, context)}[${emitExpression(expression.index, context)}]`;
       const root = rootIdentifier(expression);
       const param = root ? context.paramFor(root) : undefined;
@@ -271,6 +288,36 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
         ? `${expression.operator}${emitExpression(expression.argument, context, "lvalue")}`
         : `${emitExpression(expression.argument, context, "lvalue")}${expression.operator}`;
   }
+}
+
+function collectPointerAliases(statements: readonly CudaLiteStatement[]): ReadonlyMap<string, PointerAlias> {
+  const aliases = new Map<string, PointerAlias>();
+  const walk = (items: readonly CudaLiteStatement[]): void => {
+    for (const item of items) {
+      if (item.kind === "var" && item.pointer) {
+        const alias = pointerAliasForVar(item);
+        if (alias) aliases.set(item.name, alias);
+      }
+      if (item.kind === "if") {
+        walk(item.consequent);
+        if (item.alternate) walk(item.alternate);
+      }
+      if (item.kind === "for") walk(item.body);
+    }
+  };
+  walk(statements);
+  return aliases;
+}
+
+function pointerAliasForVar(statement: CudaLiteVarDecl): PointerAlias | undefined {
+  const init = statement.init;
+  if (init?.kind !== "unary" || init.operator !== "&") return undefined;
+  const target = init.argument;
+  if (target.kind !== "index" || target.target.kind !== "identifier") return undefined;
+  return {
+    rootName: target.target.name,
+    baseIndex: target.index,
+  };
 }
 
 function emitIdentifier(name: string, context: EmitContext): string {

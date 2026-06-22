@@ -345,6 +345,33 @@ __global__ void dynamicShared(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([5, 3]);
   });
 
+  it("lowers local shared-memory pointer aliases as fixed shared offsets", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void splitShared(float *x) {
+  extern __shared__ float sdataA[];
+  float* sdataB = &sdataA[2];
+  int tid = threadIdx.x;
+  if (tid < 2) {
+    sdataA[tid] = x[tid];
+    sdataB[tid] = x[tid + 2];
+  }
+  __syncthreads();
+  if (tid < 1) { x[0] = sdataA[1] + sdataB[1]; }
+}`, {
+      workgroupSize: [2, 1, 1],
+      dynamicSharedMemory: { sdataA: 4 },
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([1, 2, 3, 4]) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).not.toContain("var sdataB");
+    expect(compiled.wgsl).toContain("sdataA[(2) + (tid)]");
+    expect([...result.buffers.x as Float32Array]).toEqual([6, 2, 3, 4]);
+  });
+
   it("evaluates integer constant expressions in shared array dimensions", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void padded(float *x) {

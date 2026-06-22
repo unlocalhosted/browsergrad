@@ -12,11 +12,16 @@ import {
   type ReferenceKernelResult,
 } from "./types.js";
 
-type LocalValue = number | Vector3;
+type LocalValue = number | Vector3 | AddressValue;
 interface Vector3 {
   readonly x: number;
   readonly y: number;
   readonly z: number;
+}
+
+interface AddressValue {
+  readonly kind: "address";
+  readonly target: LValue;
 }
 
 interface LValue {
@@ -208,6 +213,10 @@ function* execStatements(
 
 function execVar(statement: CudaLiteVarDecl, context: ThreadContext): void {
   if (statement.storage === "shared") return;
+  if (statement.pointer) {
+    context.locals.set(statement.name, resolvePointerInitializer(statement, context));
+    return;
+  }
   context.locals.set(statement.name, statement.init ? evalExpression(statement.init, context) : 0);
 }
 
@@ -267,7 +276,7 @@ function readExpressionObject(expression: CudaLiteExpression, context: ThreadCon
     throw compilerFailure("member access only supports CUDA-lite builtin vectors");
   }
   const value = readIdentifier(expression.name, context);
-  if (typeof value === "number") throw compilerFailure(`'${expression.name}' is not a vector`);
+  if (typeof value === "number" || "kind" in value) throw compilerFailure(`'${expression.name}' is not a vector`);
   return value;
 }
 
@@ -454,6 +463,15 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
     cursor = cursor.target;
   }
   if (cursor.kind !== "identifier") throw compilerFailure("unsupported lvalue");
+  const alias = context.locals.get(cursor.name);
+  if (alias && typeof alias !== "number" && "kind" in alias && alias.kind === "address") {
+    if (chain.length !== 1) throw compilerFailure(`pointer alias '${cursor.name}' expects one-dimensional indexing`);
+    return {
+      name: alias.target.name,
+      space: alias.target.space,
+      index: (alias.target.index ?? 0) + chain[0]!,
+    };
+  }
   const shared = context.shared.get(cursor.name);
   if (shared) {
     return { name: cursor.name, space: "shared", index: flattenIndex(shared.dimensions, chain) };
@@ -468,6 +486,17 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
     return { name: cursor.name, space: "buffer", index: chain[0]! };
   }
   throw compilerFailure(`unknown lvalue '${cursor.name}'`);
+}
+
+function resolvePointerInitializer(statement: CudaLiteVarDecl, context: ThreadContext): AddressValue {
+  if (statement.init?.kind !== "unary" || statement.init.operator !== "&") {
+    throw compilerFailure(`pointer '${statement.name}' must initialize from an address`);
+  }
+  const target = resolveLValue(statement.init.argument, context);
+  if (target.space !== "shared") {
+    throw compilerFailure(`pointer '${statement.name}' can only alias shared memory in CUDA-lite v0`);
+  }
+  return { kind: "address", target };
 }
 
 function readLValue(lvalue: LValue, context: ThreadContext): number {
@@ -582,7 +611,7 @@ function vectorFromTuple(value: readonly [number, number, number]): Vector3 {
 
 function valueAsNumber(value: LocalValue, name: string): number {
   if (typeof value === "number") return value;
-  throw compilerFailure(`'${name}' is a vector, not a scalar`);
+  throw compilerFailure(`'${name}' is not a scalar`);
 }
 
 function truthy(value: number): boolean {
