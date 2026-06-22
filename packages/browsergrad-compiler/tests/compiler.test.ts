@@ -378,6 +378,17 @@ __global__ void declarationList(float *x) {
     expect(compiled.wgsl).toContain("var col");
   });
 
+  it("accepts CUDA launch bounds as kernel metadata", () => {
+    const compiled = compileCudaLiteKernel(`
+__launch_bounds__(128, 2)
+__global__ void bounded(float *x) {
+  if (threadIdx.x < 1) { x[0] = 1.0f; }
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.ir.name).toBe("bounded");
+    expect(compiled.wgsl).toContain("@workgroup_size(1, 1, 1)");
+  });
+
   it("lowers CUDA constant scalar memory as readonly uniform input", () => {
     const compiled = compileCudaLiteKernel(`
 __constant__ float scaleFactor;

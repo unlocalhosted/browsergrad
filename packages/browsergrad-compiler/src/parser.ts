@@ -92,7 +92,9 @@ class Parser {
   }
 
   private parseKernel(): CudaLiteKernel {
+    this.consumeKernelAttributes();
     const start = this.expect("__global__").span;
+    this.consumeKernelAttributes();
     this.expect("void");
     const name = this.expectIdentifier("kernel name");
     this.expect("(");
@@ -106,6 +108,18 @@ class Parser {
       body,
       span: mergeSpans(start, body.at(-1)?.span ?? name.span),
     };
+  }
+
+  private consumeKernelAttributes(): void {
+    while (this.consumeIf("__launch_bounds__")) {
+      this.expect("(");
+      if (!this.match(")")) {
+        do {
+          this.parseExpression();
+        } while (this.consumeIf(","));
+      }
+      this.expect(")");
+    }
   }
 
   private parseParams(): readonly CudaLiteParam[] {
