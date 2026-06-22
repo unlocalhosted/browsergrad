@@ -1,11 +1,54 @@
 import { describe, expect, it } from "vitest";
 import {
   defineCuda1DProgram,
+  defineKernel1DProgram,
   emitCuda1DProgramWgsl,
+  emitKernel1DProgramWgsl,
+  runKernel1DProgramReference,
   simulateCuda1DProgram,
 } from "../src/index";
 
 describe("CUDA-shaped 1D kernel programs", () => {
+  it("lets callers author one BrowserGrad kernel program without CUDA naming", () => {
+    const program = defineKernel1DProgram({
+      name: "double_guarded",
+      inputLength: 4,
+      outputLength: 4,
+      launch: { blocks: 1, threadsPerBlock: 8 },
+      body: [
+        {
+          op: "if",
+          condition: {
+            op: "lt",
+            left: { op: "threadId" },
+            right: { op: "inputLength" },
+          },
+          body: [
+            {
+              op: "write",
+              index: { op: "threadId" },
+              value: {
+                op: "mul",
+                left: { op: "read", index: { op: "threadId" } },
+                right: { op: "literal", value: 2 },
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = runKernel1DProgramReference(program, {
+      initialInput: [1, 2, 3, 4],
+    });
+    const wgsl = emitKernel1DProgramWgsl(program);
+
+    expect(result.output).toEqual([2, 4, 6, 8]);
+    expect(result.violations).toEqual([]);
+    expect(wgsl).toContain("BrowserGrad Kernel1D program: double_guarded");
+    expect(wgsl).toContain("@workgroup_size(8)");
+  });
+
   it("lets callers author one small CUDA-shaped program for simulation and WGSL lowering", () => {
     const program = defineCuda1DProgram({
       name: "add_ten_guarded",

@@ -373,20 +373,29 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     CS336 A2 FlashAttention labs can use `referenceFlashAttention()` and
     `referenceFlashAttentionBackward()` for output, log-sum-exp, and Q/K/V
     gradient fixtures.
-    GPU Puzzles and CS149 A3 CUDA concept labs can use
-    `simulateCuda1DGrid()`, `referenceSaxpy()`,
+    GPU Puzzles and CS149 A3 kernel concept labs can use
+    `runThreadGrid()`, `referenceSaxpy()`,
     `referenceExclusiveScan()`, `referenceFindRepeats()`, and
     `referenceOrderedCircleRender()` for
     map/guard/SAXPY/scan/find-repeats/renderer-ordering fixtures and
-    out-of-bounds guard diagnostics. Use `defineCuda1DProgram()` and
-    `runCuda1DProgramWebGpu()` for `wgsl_lowering_smoke` fixtures. This is the
-    current HipScript-inspired CUDA-shaped path: simulator trace, WGSL lowering,
-    then real browser WebGPU dispatch when available.
+    out-of-bounds guard diagnostics. Use `defineKernel1DProgram()` and
+    `runKernel1DProgramWebGpu()` for `wgsl_lowering_smoke` fixtures.
+    `simulateCuda1DGrid()` and `defineCuda1DProgram()` remain compatibility
+    aliases when a rubric intentionally uses CUDA vocabulary. This is the
+    current HipScript-inspired path: BrowserGrad-owned Kernel1D IR first,
+    CUDA/HIP-like syntax as a frontend, WGSL lowering, then real browser WebGPU
+    dispatch when available.
     CraftingAttention now has a platform e2e that loads
     `docs/internal/gpu-puzzles.profile.json`, calls
     `runVerifiedAssignmentJavascriptProfile()`, wires the `_bg_cuda_concepts`
-    oracle from `@unlocalhosted/browsergrad-kernels`, and verifies the
-    profile's JS route/assertion/artifact path end to end.
+    oracle from `@unlocalhosted/browsergrad-kernels`, calls the generic
+    `runThreadGrid()` surface, and verifies the profile's JS
+    route/assertion/artifact path end to end.
+    CraftingAttention also has a platform e2e that loads
+    `docs/internal/cs336-assignment2-systems.profile.json`, proves the A2
+    profile selects Pyodide when browser-safe simulator/oracle capabilities are
+    present, blocks launch on placeholder fixture hashes, and checks the
+    FlashAttention forward/backward oracle path.
     Simulator-backed labs can use `@unlocalhosted/browsergrad-primitives`
     `simulation.createDeterministicMesh()` or `simulation.createTaskGraphSimulator()` for event-trace
     rubrics before real Worker execution exists. CS149 A2 task-graph labs can

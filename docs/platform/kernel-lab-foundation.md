@@ -48,15 +48,19 @@ First shipped BrowserGrad primitive: `@unlocalhosted/browsergrad-kernels`
 exports `createKernelRubric()`, a CPU-only assertion collector for JS/WebGPU
 rubrics. It checks tensor shape/value closeness with tolerances, records compact
 failure details, and can forward directly into BrowserGrad JS rubric callbacks.
-The same package now exports CUDA-shaped concept oracles such as
-`simulateCuda1DGrid()`, which gives GPU Puzzles/CS149-style labs thread/block
+The same package now exports the BrowserGrad-owned thread-grid executor
+`runThreadGrid()`, which gives GPU Puzzles/CS149-style labs thread/block
 traces, guard diagnostics, and deterministic outputs before WGSL lowering.
-The next shipped primitive is `defineCuda1DProgram()`: one small CUDA-shaped 1D
-program description can run through `simulateCuda1DProgram()` and
-`emitCuda1DProgramWgsl()`, then dispatch through `runCuda1DProgramWebGpu()`
+`simulateCuda1DGrid()` remains a compatibility alias for assignments that teach
+CUDA vocabulary directly.
+The next shipped primitive is `defineKernel1DProgram()`: one small Kernel1D
+program description can run through `runKernel1DProgramReference()` and
+`emitKernel1DProgramWgsl()`, then dispatch through `runKernel1DProgramWebGpu()`
 when a browser adapter exists. It now supports scalar params and `outputRead`
-expressions for SAXPY-like kernels. This keeps the HipScript direction alive
-without making browser LLVM the first dependency.
+expressions for SAXPY-like kernels. `defineCuda1DProgram()` and friends remain
+compatibility aliases. This keeps the HipScript direction alive by making
+CUDA/HIP-like syntax a frontend over our core, without making browser LLVM the
+first dependency.
 
 This core should be independent from Pyodide. Python assignments may call it
 through registered JS modules, but JS/WGSL labs should run without Python.

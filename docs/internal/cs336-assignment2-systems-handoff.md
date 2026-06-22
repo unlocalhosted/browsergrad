@@ -90,9 +90,13 @@ Future slice:
 
 ## Platform Gaps To Track
 
-- Platform JS oracle wiring for `referenceFlashAttention()` and
-  `referenceFlashAttentionBackward()` through the `_bg_attention_math`
-  profile module in A2 rubrics.
+- Platform e2e proof now loads the real A2 profile in CraftingAttention,
+  selects the Pyodide route, blocks launch on placeholder dataset hashes, and
+  verifies `referenceFlashAttention()` plus `referenceFlashAttentionBackward()`
+  through `@unlocalhosted/browsergrad-kernels`.
+- Remaining A2 Python-rubric work: profile-local JS bridge methods for
+  `referenceFlashAttention()` and `referenceFlashAttentionBackward()` through
+  `_bg_attention_math` once the real rubric file is mounted.
 - Distributed simulator API for rank-local model copies, collectives, FSDP
   sharding, and sharded optimizer state through the `_bg_distributed_training`
   profile module.

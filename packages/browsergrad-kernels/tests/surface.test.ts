@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   createDevice,
   defineCuda1DProgram,
+  defineKernel1DProgram,
   emitCuda1DProgramWgsl,
+  emitKernel1DProgramWgsl,
   kernels,
   KernelError,
   reference,
@@ -13,6 +15,9 @@ import {
   referenceOrderedCircleRender,
   referenceSaxpy,
   runCuda1DProgramWebGpu,
+  runKernel1DProgramReference,
+  runKernel1DProgramWebGpu,
+  runThreadGrid,
   simulateCuda1DGrid,
   simulateCuda1DProgram,
   tensor,
@@ -35,9 +40,14 @@ describe("public surface", () => {
     expect(typeof reference).toBe("object");
     expect(typeof kernels).toBe("object");
     expect(typeof defineCuda1DProgram).toBe("function");
+    expect(typeof defineKernel1DProgram).toBe("function");
     expect(typeof simulateCuda1DProgram).toBe("function");
+    expect(typeof runKernel1DProgramReference).toBe("function");
     expect(typeof emitCuda1DProgramWgsl).toBe("function");
+    expect(typeof emitKernel1DProgramWgsl).toBe("function");
     expect(typeof runCuda1DProgramWebGpu).toBe("function");
+    expect(typeof runKernel1DProgramWebGpu).toBe("function");
+    expect(typeof runThreadGrid).toBe("function");
     expect(typeof simulateCuda1DGrid).toBe("function");
     expect(typeof referenceSaxpy).toBe("function");
     expect(typeof referenceExclusiveScan).toBe("function");

@@ -61,6 +61,15 @@ export interface Cuda1DGridResult {
   readonly violations: readonly Cuda1DViolation[];
 }
 
+export type ThreadGridInput = Cuda1DGridInput;
+export type ThreadGridKernel = Cuda1DKernel;
+export type ThreadGridContext = Cuda1DThreadContext;
+export type ThreadGridTrace = Cuda1DThreadTrace;
+export type ThreadGridMemoryAccess = Cuda1DMemoryAccess;
+export type ThreadGridViolation = Cuda1DViolation;
+export type ThreadGridStats = Cuda1DGridStats;
+export type ThreadGridResult = Cuda1DGridResult;
+
 export interface SaxpyInput {
   readonly a: number;
   readonly x: readonly number[];
@@ -90,7 +99,7 @@ export interface OrderedCircleRenderResult {
   readonly pixels: readonly number[];
 }
 
-export function simulateCuda1DGrid(input: Cuda1DGridInput): Cuda1DGridResult {
+export function runThreadGrid(input: ThreadGridInput): ThreadGridResult {
   const inputLength = validateNonNegativeInteger(input.inputLength, "inputLength");
   const outputLength = validateNonNegativeInteger(input.outputLength, "outputLength");
   const threadsPerBlock = validatePositiveInteger(
@@ -197,6 +206,14 @@ export function simulateCuda1DGrid(input: Cuda1DGridInput): Cuda1DGridResult {
     trace: trace.map(cloneTrace),
     violations: violations.map((violation) => ({ ...violation })),
   };
+}
+
+/**
+ * @deprecated Use `runThreadGrid()`. This alias remains for CUDA-shaped
+ * teaching labs and older GPU Puzzles rubrics.
+ */
+export function simulateCuda1DGrid(input: Cuda1DGridInput): Cuda1DGridResult {
+  return runThreadGrid(input);
 }
 
 export function referenceSaxpy(input: SaxpyInput): number[] {

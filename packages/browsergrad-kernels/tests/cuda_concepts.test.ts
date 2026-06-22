@@ -4,10 +4,29 @@ import {
   referenceFindRepeats,
   referenceOrderedCircleRender,
   referenceSaxpy,
+  runThreadGrid,
   simulateCuda1DGrid,
 } from "../src/index";
 
 describe("CUDA-shaped concept oracles", () => {
+  it("runs the generic BrowserGrad thread-grid executor without CUDA naming", () => {
+    const result = runThreadGrid({
+      inputLength: 4,
+      outputLength: 4,
+      threadsPerBlock: 2,
+      blocks: 2,
+      initialInput: [0, 1, 2, 3],
+      kernel(thread) {
+        const i = thread.globalThreadId;
+        thread.write(i, thread.read(i) + 100);
+      },
+    });
+
+    expect(result.output).toEqual([100, 101, 102, 103]);
+    expect(result.stats.launchedThreads).toBe(4);
+    expect(result.violations).toEqual([]);
+  });
+
   it("runs GPU Puzzles-style map kernels with thread/block traces", () => {
     const result = simulateCuda1DGrid({
       inputLength: 4,

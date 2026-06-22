@@ -20,8 +20,9 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
 | `layernorm` | Along last axis, optional gamma/beta | ✅ |
 | `attention` | Composed 3-kernel SDPA | ✅ |
 | `referenceFlashAttention` / `referenceFlashAttentionBackward` | Pure-JS FlashAttention oracle with output, log-sum-exp, and Q/K/V gradients | ✅ |
-| `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` / `runCuda1DProgramWebGpu` | CUDA-shaped 1D kernel IR with simulator, WGSL lowering, and browser WebGPU dispatch | ✅ |
-| `simulateCuda1DGrid`, `referenceSaxpy`, `referenceExclusiveScan`, `referenceFindRepeats`, `referenceOrderedCircleRender` | CUDA-shaped teaching references for GPU Puzzles and CS149 A3 browser rubrics | ✅ |
+| `defineKernel1DProgram` / `runKernel1DProgramReference` / `emitKernel1DProgramWgsl` / `runKernel1DProgramWebGpu` | BrowserGrad-owned 1D kernel IR with reference executor, WGSL lowering, and browser WebGPU dispatch | ✅ |
+| `runThreadGrid`, `referenceSaxpy`, `referenceExclusiveScan`, `referenceFindRepeats`, `referenceOrderedCircleRender` | Thread-grid teaching references for GPU Puzzles and CS149 A3 browser rubrics | ✅ |
+| `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` / `runCuda1DProgramWebGpu` / `simulateCuda1DGrid` | CUDA-shaped compatibility aliases for labs and rubrics that teach CUDA vocabulary | ✅ |
 | `flashAttentionDirect` | Flash Attention v2 forward, online softmax. **Known numerical issue on real Metal — tracked.** | ⚠️ |
 | `fusedElementwiseDirect` | Runtime WGSL codegen for arbitrary elementwise chains | ✅ |
 
@@ -67,26 +68,27 @@ the upstream test's saved-LSE contract; the backward oracle recomputes softmax
 probabilities and returns Q/K/V gradients without requiring PyTorch autograd,
 Triton, or CUDA.
 
-For GPU Puzzles and CS149 A3-style CUDA concept rubrics, import
-`simulateCuda1DGrid()`, `referenceSaxpy()`, and `referenceExclusiveScan()`.
-`simulateCuda1DGrid()` runs a browser-safe CUDA-shaped 1D thread/block callback,
-records per-thread reads/writes, and reports out-of-bounds access instead of
-hiding missing guards. It is a correctness and pedagogy oracle, not a native
-CUDA performance runner.
+For GPU Puzzles and CS149 A3-style kernel-concept rubrics, import
+`runThreadGrid()`, `referenceSaxpy()`, and `referenceExclusiveScan()`.
+`runThreadGrid()` runs a browser-safe 1D thread/block callback, records
+per-thread reads/writes, and reports out-of-bounds access instead of hiding
+missing guards. It is a correctness and pedagogy oracle, not a native CUDA
+performance runner. `simulateCuda1DGrid()` remains as a compatibility alias for
+rubrics that intentionally use CUDA vocabulary.
 
-For a more durable author-once path, define a tiny CUDA-shaped 1D program and
+For a durable author-once path, define a tiny BrowserGrad Kernel1D program and
 run it through both adapters:
 
 ```ts
 import {
   createDevice,
-  defineCuda1DProgram,
-  emitCuda1DProgramWgsl,
-  runCuda1DProgramWebGpu,
-  simulateCuda1DProgram,
+  defineKernel1DProgram,
+  emitKernel1DProgramWgsl,
+  runKernel1DProgramReference,
+  runKernel1DProgramWebGpu,
 } from "@unlocalhosted/browsergrad-kernels";
 
-const program = defineCuda1DProgram({
+const program = defineKernel1DProgram({
   name: "saxpy_guarded",
   inputLength: 4,
   outputLength: 4,
@@ -111,22 +113,23 @@ const program = defineCuda1DProgram({
   }],
 });
 
-const simulated = simulateCuda1DProgram(program, {
+const simulated = runKernel1DProgramReference(program, {
   initialInput: [1, 2, 3, 4],
   initialOutput: [10, 20, 30, 40],
 });
-const wgsl = emitCuda1DProgramWgsl(program);
+const wgsl = emitKernel1DProgramWgsl(program);
 const device = await createDevice();
-const gpu = await runCuda1DProgramWebGpu(device, program, {
+const gpu = await runKernel1DProgramWebGpu(device, program, {
   initialInput: [1, 2, 3, 4],
   initialOutput: [10, 20, 30, 40],
 });
 ```
 
-This is the first HipScript-inspired kernel-authoring seam: explicit grid/thread
-semantics, scalar params, input/output buffer reads, deterministic simulator
-trace, WGSL source generation, and real browser WebGPU dispatch without
-shipping a browser LLVM toolchain.
+This is the first HipScript-inspired kernel-authoring spine: BrowserGrad owns
+the small IR and reference executor, then CUDA/HIP-like syntax can grow as a
+frontend. The shipped path already has explicit grid/thread semantics, scalar
+params, input/output buffer reads, deterministic traces, WGSL source generation,
+and real browser WebGPU dispatch without shipping a browser LLVM toolchain.
 
 ### Kernel rubric assertions
 

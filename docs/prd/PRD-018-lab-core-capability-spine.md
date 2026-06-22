@@ -253,20 +253,25 @@ curriculum profiles and handoff docs absorb course-specific adapters.
 - A2 runtime proof guarantee: the CS336 A2 profile registers generic
   `_bg_attention_math` and `_bg_distributed_training` profile glue, and runtime
   integration proves a Python rubric can call FlashAttention forward and DDP
-  gradient synchronization references through Pyodide.
-- CUDA-concept oracle guarantee: `@unlocalhosted/browsergrad-kernels` exports
-  `simulateCuda1DGrid()`, `referenceSaxpy()`, `referenceExclusiveScan()`, and
+  gradient synchronization references through Pyodide. CraftingAttention also
+  loads the real A2 benchmark profile, selects the Pyodide route, blocks launch
+  on placeholder fixture hashes, and verifies FlashAttention forward/backward
+  oracle outputs through the platform e2e suite.
+- Thread-grid oracle guarantee: `@unlocalhosted/browsergrad-kernels` exports
+  `runThreadGrid()`, `referenceSaxpy()`, `referenceExclusiveScan()`, and
   `referenceFindRepeats()`, plus `referenceOrderedCircleRender()` so GPU
-  Puzzles and CS149 A3-style rubrics can check CUDA-shaped map/guard, SAXPY,
+  Puzzles and CS149 A3-style rubrics can check map/guard, SAXPY,
   scan/find-repeats, renderer ordering, thread/block traces, and out-of-bounds
-  memory behavior before native CUDA runners are available.
-- CUDA-shaped program guarantee: `@unlocalhosted/browsergrad-kernels` exports
-  `defineCuda1DProgram()`, `simulateCuda1DProgram()`, and
-  `emitCuda1DProgramWgsl()`, plus `runCuda1DProgramWebGpu()` so one small
-  grid/thread program can be simulated, lowered to WGSL, and dispatched on a
-  real browser `GPUDevice` when available. It supports scalar params and
-  `outputRead` expressions, which proves a first CS149 A3 SAXPY-like kernel
-  shape. This is the pragmatic HipScript/gpu.cpp-inspired path: small explicit
+  memory behavior before native CUDA runners are available. `simulateCuda1DGrid()`
+  remains a compatibility alias for CUDA-vocabulary rubrics.
+- Kernel1D program guarantee: `@unlocalhosted/browsergrad-kernels` exports
+  `defineKernel1DProgram()`, `runKernel1DProgramReference()`, and
+  `emitKernel1DProgramWgsl()`, plus `runKernel1DProgramWebGpu()` so one small
+  grid/thread program can be executed by the reference runner, lowered to WGSL,
+  and dispatched on a real browser `GPUDevice` when available. It supports
+  scalar params and `outputRead` expressions, which proves a first CS149 A3
+  SAXPY-like kernel shape. CUDA-shaped names remain compatibility aliases. This
+  is the pragmatic HipScript/gpu.cpp-inspired path: small explicit BrowserGrad
   kernel IR now, heavier compiler compatibility later.
 - Kernel-runtime bridge guarantee: `createBrowsergradKernelRubric(ctx)` adapts
   kernel tensor checks to `runAssignmentJavascriptRubric()` contexts, and a

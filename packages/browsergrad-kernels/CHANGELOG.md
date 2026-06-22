@@ -9,6 +9,11 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- `runThreadGrid()`, `defineKernel1DProgram()`,
+  `runKernel1DProgramReference()`, `emitKernel1DProgramWgsl()`, and
+  `runKernel1DProgramWebGpu()` expose the generic BrowserGrad kernel-authoring
+  surface. CUDA-shaped names remain compatibility aliases for labs that teach
+  CUDA/HIP vocabulary.
 - `defineCuda1DProgram()`, `simulateCuda1DProgram()`, and
   `emitCuda1DProgramWgsl()` provide a tiny CUDA-shaped 1D program IR that can
   run through a deterministic simulator and lower to WGSL. It now supports

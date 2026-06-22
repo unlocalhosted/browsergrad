@@ -124,17 +124,19 @@ CS336 A2-style FlashAttention rubrics can use
 checks that include output, saved log-sum-exp, and Q/K/V gradients before native
 Triton/CUDA paths are available. Register a profile-local module such as
 `_bg_attention_math` when Python rubrics need JSON-string bridge methods.
-GPU Puzzles and CS149 A3-style CUDA concept rubrics can use the same package's
-`simulateCuda1DGrid()`, `referenceSaxpy()`, `referenceExclusiveScan()`, and
-`referenceFindRepeats()` for `cuda-compatible-subset` fixture checks. Use
+GPU Puzzles and CS149 A3-style kernel concept rubrics can use the same
+package's `runThreadGrid()`, `referenceSaxpy()`, `referenceExclusiveScan()`,
+and `referenceFindRepeats()` for `cuda-compatible-subset` fixture checks. Use
 `referenceOrderedCircleRender()` for renderer-ordering fixtures where circle
-input order determines alpha blending. Use `defineCuda1DProgram()`,
-`simulateCuda1DProgram()`, `emitCuda1DProgramWgsl()`, and
-`runCuda1DProgramWebGpu()` for author-once CUDA-shaped 1D kernels that need
-scalar params, input reads, output reads, WGSL source generation, and browser
-WebGPU dispatch. The grid simulator records thread/block ids, global
-reads/writes, and out-of-bounds accesses so missing guards fail as teaching
-feedback before native CUDA runners exist.
+input order determines alpha blending. Use `defineKernel1DProgram()`,
+`runKernel1DProgramReference()`, `emitKernel1DProgramWgsl()`, and
+`runKernel1DProgramWebGpu()` for author-once 1D kernels that need scalar params,
+input reads, output reads, WGSL source generation, and browser WebGPU dispatch.
+`simulateCuda1DGrid()`, `defineCuda1DProgram()`, and related CUDA names remain
+compatibility aliases for rubrics that intentionally teach CUDA vocabulary. The
+thread-grid executor records thread/block ids, global reads/writes, and
+out-of-bounds accesses so missing guards fail as teaching feedback before
+native CUDA runners exist.
 Distributed or systems-style JS rubrics can use `simulation.createDeterministicMesh()`
 from `@unlocalhosted/browsergrad-primitives` to model worker ranks, barriers,
 broadcasts, point-to-point messages, and `allReduce` results as deterministic

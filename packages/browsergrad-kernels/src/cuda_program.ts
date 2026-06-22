@@ -1,5 +1,5 @@
 import {
-  simulateCuda1DGrid,
+  runThreadGrid,
   type Cuda1DGridResult,
   type Cuda1DThreadContext,
 } from "./cuda_concepts.js";
@@ -63,6 +63,23 @@ export interface Cuda1DProgramRunInput {
   readonly initialOutput?: readonly number[];
 }
 
+export type Kernel1DProgramInput = Cuda1DProgramInput;
+export type Kernel1DProgram = Cuda1DProgram;
+export type Kernel1DLaunch = Cuda1DLaunch;
+export type Kernel1DStatement = Cuda1DStatement;
+export type Kernel1DWriteStatement = Cuda1DWriteStatement;
+export type Kernel1DIfStatement = Cuda1DIfStatement;
+export type Kernel1DExpression = Cuda1DExpression;
+export type Kernel1DCondition = Cuda1DCondition;
+export type Kernel1DProgramRunInput = Cuda1DProgramRunInput;
+export type Kernel1DProgramReferenceResult = Cuda1DGridResult;
+
+export function defineKernel1DProgram(
+  input: Kernel1DProgramInput,
+): Kernel1DProgram {
+  return defineCuda1DProgram(input);
+}
+
 export function defineCuda1DProgram(input: Cuda1DProgramInput): Cuda1DProgram {
   validateIdentifier(input.name, "name");
   validateNonNegativeInteger(input.inputLength, "inputLength");
@@ -93,7 +110,14 @@ export function simulateCuda1DProgram(
   program: Cuda1DProgram,
   input: Cuda1DProgramRunInput = {},
 ): Cuda1DGridResult {
-  return simulateCuda1DGrid({
+  return runKernel1DProgramReference(program, input);
+}
+
+export function runKernel1DProgramReference(
+  program: Kernel1DProgram,
+  input: Kernel1DProgramRunInput = {},
+): Kernel1DProgramReferenceResult {
+  return runThreadGrid({
     inputLength: program.inputLength,
     outputLength: program.outputLength,
     blocks: program.launch.blocks,
@@ -107,6 +131,10 @@ export function simulateCuda1DProgram(
 }
 
 export function emitCuda1DProgramWgsl(program: Cuda1DProgram): string {
+  return emitKernel1DProgramWgsl(program);
+}
+
+export function emitKernel1DProgramWgsl(program: Kernel1DProgram): string {
   const body = emitStatements(program.body, 1);
   const parameterNames = Object.keys(program.parameters ?? {}).sort();
   const parameterLines =
@@ -120,7 +148,7 @@ export function emitCuda1DProgramWgsl(program: Cuda1DProgram): string {
           "",
         ];
   return [
-    `// BrowserGrad CUDA-shaped 1D program: ${program.name}`,
+    `// BrowserGrad Kernel1D program: ${program.name}`,
     "@group(0) @binding(0) var<storage, read> inputBuffer: array<f32>;",
     "@group(0) @binding(1) var<storage, read_write> outputBuffer: array<f32>;",
     ...parameterLines,
@@ -141,6 +169,14 @@ export async function runCuda1DProgramWebGpu(
   program: Cuda1DProgram,
   input: Cuda1DProgramRunInput = {},
 ): Promise<Float32Array> {
+  return runKernel1DProgramWebGpu(device, program, input);
+}
+
+export async function runKernel1DProgramWebGpu(
+  device: KernelDevice,
+  program: Kernel1DProgram,
+  input: Kernel1DProgramRunInput = {},
+): Promise<Float32Array> {
   const initialInput = Float32Array.from(
     materializeVector(input.initialInput, program.inputLength, "initialInput"),
   );
@@ -158,8 +194,8 @@ export async function runCuda1DProgramWebGpu(
   return dispatch(
     device,
     {
-      name: `cuda-1d-program-${program.name}`,
-      wgsl: emitCuda1DProgramWgsl(program),
+      name: `kernel-1d-program-${program.name}`,
+      wgsl: emitKernel1DProgramWgsl(program),
       workgroupSize: [program.launch.threadsPerBlock, 1, 1],
     },
     {
