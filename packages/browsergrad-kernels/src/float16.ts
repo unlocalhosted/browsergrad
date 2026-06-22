@@ -20,21 +20,29 @@ export function float32ToFloat16Bits(value: number): number {
 
   if (exponent === 0xff) return sign | (mantissa === 0 ? 0x7c00 : 0x7e00);
 
-  const halfExponent = exponent - 127 + 15;
-  if (halfExponent >= 0x1f) return sign | 0x7c00;
-  if (halfExponent <= 0) {
-    if (halfExponent < -10) return sign;
-    const subnormal = (mantissa | 0x800000) >>> (1 - halfExponent);
-    return sign | ((subnormal + 0x1000) >>> 13);
+  const unbiasedExponent = exponent - 127;
+  if (unbiasedExponent > 15) return sign | 0x7c00;
+
+  if (unbiasedExponent >= -14) {
+    let halfExponent = unbiasedExponent + 15;
+    let halfMantissa = roundShiftRightToEven(mantissa, 13);
+    if (halfMantissa === 0x400) {
+      halfMantissa = 0;
+      halfExponent++;
+      if (halfExponent >= 0x1f) return sign | 0x7c00;
+    }
+    return sign | (halfExponent << 10) | halfMantissa;
   }
 
-  return sign | (halfExponent << 10) | ((mantissa + 0x1000) >>> 13);
+  const subnormalMantissa = roundShiftRightToEven(mantissa | 0x800000, -unbiasedExponent - 1);
+  return sign | subnormalMantissa;
 }
 
 export function float16BitsToFloat32(bits: number): number {
-  const sign = (bits & 0x8000) === 0 ? 1 : -1;
-  const exponent = (bits >>> 10) & 0x1f;
-  const mantissa = bits & 0x03ff;
+  const half = bits & 0xffff;
+  const sign = (half & 0x8000) === 0 ? 1 : -1;
+  const exponent = (half >>> 10) & 0x1f;
+  const mantissa = half & 0x03ff;
   if (exponent === 0) return sign * (mantissa === 0 ? 0 : 2 ** -14 * (mantissa / 1024));
   if (exponent === 0x1f) return mantissa === 0 ? sign * Infinity : NaN;
   return sign * 2 ** (exponent - 15) * (1 + mantissa / 1024);
@@ -167,4 +175,14 @@ function normalizeSliceIndex(index: number, length: number): number {
 
 function assertNonNegativeInteger(value: number, name: string): void {
   if (!Number.isInteger(value) || value < 0) throw new RangeError(`${name} must be a non-negative integer`);
+}
+
+function roundShiftRightToEven(value: number, shift: number): number {
+  if (shift <= 0) return value;
+  if (shift > 24) return 0;
+  const quotient = value >>> shift;
+  const remainderMask = (1 << shift) - 1;
+  const remainder = value & remainderMask;
+  const halfway = 1 << (shift - 1);
+  return quotient + (remainder > halfway || (remainder === halfway && (quotient & 1) === 1) ? 1 : 0);
 }

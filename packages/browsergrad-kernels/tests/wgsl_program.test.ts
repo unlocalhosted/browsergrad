@@ -49,6 +49,22 @@ describe("generic WGSL kernel programs", () => {
     expect([...fromBytes]).toEqual([1.5, 3]);
   });
 
+  it("rounds float32 to float16 bits with IEEE edge behavior", () => {
+    expect(float32ToFloat16Bits(0)).toBe(0x0000);
+    expect(float32ToFloat16Bits(-0)).toBe(0x8000);
+    expect(float32ToFloat16Bits(1)).toBe(0x3c00);
+    expect(float32ToFloat16Bits(65504)).toBe(0x7bff);
+    expect(float32ToFloat16Bits(Infinity)).toBe(0x7c00);
+    expect(float32ToFloat16Bits(-Infinity)).toBe(0xfc00);
+    expect(float32ToFloat16Bits(2 ** -24)).toBe(0x0001);
+    expect(float32ToFloat16Bits(2 ** -25)).toBe(0x0000);
+    expect(float32ToFloat16Bits(2 ** -25 + 2 ** -35)).toBe(0x0001);
+    expect(float32ToFloat16Bits(1 + 2 ** -11)).toBe(0x3c00);
+    expect(float32ToFloat16Bits(1 + 3 * 2 ** -11)).toBe(0x3c02);
+    expect(Number.isNaN(float16BitsToFloat32(float32ToFloat16Bits(NaN)))).toBe(true);
+    expect(Object.is(float16BitsToFloat32(0x8000), -0)).toBe(true);
+  });
+
   it("keeps global Float16Array install explicit", () => {
     const target = globalThis as typeof globalThis & { Float16Array?: unknown };
     const original = Object.getOwnPropertyDescriptor(target, "Float16Array");
