@@ -62,6 +62,13 @@ compatibility aliases. This keeps the HipScript direction alive by making
 CUDA/HIP-like syntax a frontend over our core, without making browser LLVM the
 first dependency.
 
+PRD-019 adds the next layer: `@unlocalhosted/browsergrad-compiler`, a
+BrowserGrad-owned CUDA-lite compiler that parses learner source, validates a
+small supported subset, lowers into Kernel IR, emits WGSL, and runs both a
+lockstep CPU reference and real WebGPU dispatch. This is the default path for
+browser-native GPU programming. A HipScript-style LLVM backend remains a future
+power backend, not the first dependency.
+
 This core should be independent from Pyodide. Python assignments may call it
 through registered JS modules, but JS/WGSL labs should run without Python.
 
@@ -72,7 +79,7 @@ through registered JS modules, but JS/WGSL labs should run without Python.
 3. Native Dawn/gpu.cpp-style runner for CI and local benchmarking.
 4. Kernel tracing artifacts: source, bindings, workgroups, timing, output
    previews.
-5. CUDA-lite syntax for teaching simple kernels.
+5. CUDA-lite syntax for teaching simple kernels via PRD-019.
 6. Worker-mesh collectives for distributed systems labs.
 7. Pattern-specific kernels such as FlashAttention once the simple core is
    boring and stable.
