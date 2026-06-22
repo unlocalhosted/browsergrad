@@ -1,0 +1,287 @@
+# PRD-020 — Real-World CUDA Compatibility Ladder
+
+## Problem Statement
+
+BrowserGrad can now run a large curated CUDA-learning corpus, but fresh
+real-world CUDA repositories show a different failure mode: not missing GPU
+dispatch, but CUDA/C++ intake. `CUDA-120-DAYS--CHALLENGE` is fully runnable
+through strict WGSL or host-orchestrated WebGPU, while NVIDIA `cuda-samples`,
+Karpathy `llm.c`, and LeetCUDA mostly fail before Kernel IR because realistic
+files carry macros, templates, vector pack idioms, half intrinsics, host binding
+glue, and library-shaped helper code around otherwise teachable kernels.
+
+The platform vision needs more than one course corpus. We need a repeatable
+compatibility ladder that takes arbitrary educational CUDA repos, audits them
+without repo-specific patches, classifies gaps by semantic family, and advances
+generic BrowserGrad compiler primitives only when they help multiple kernels or
+teach a first-principles GPU concept.
+
+## Solution
+
+Add a corpus-driven compatibility program for `@unlocalhosted/browsergrad-compiler`.
+The program keeps LeetCUDA, NVIDIA `cuda-samples`, Karpathy `llm.c`, and
+`CUDA-120-DAYS--CHALLENGE` as pressure corpora; turns their failures into
+stable semantic gap reports; and implements generic primitives in ladder order:
+source normalization, CUDA math/half intrinsics, vector pack memory views,
+constexpr/template specialization for simple kernels, warp/subgroup lowering,
+and selected runtime/library islands.
+
+This PRD is intentionally planning-only. It records the research, coverage
+truth, first vertical slice, and test gates before more compiler code lands.
+No support should be added because a file path contains `LeetCUDA`; support is
+valid only when it is a reusable CUDA primitive with parser, analyzer,
+reference, WGSL, browser, and corpus evidence.
+
+## User Stories
+
+1. As a learner, I want LeetCUDA-style elementwise, activation, reduction, and matmul kernels to run in the browser, so that I can practice real CUDA lessons without installing CUDA.
+2. As a lab author, I want a corpus coverage report with semantic gap families, so that I can choose assignments based on what BrowserGrad honestly supports today.
+3. As a compiler contributor, I want corpus failures minimized into generic CUDA primitives, so that I can improve the compiler without adding repo-specific hacks.
+4. As a platform maintainer, I want coverage thresholds per corpus, so that new compiler work cannot silently regress CUDA-120 while chasing LeetCUDA or `llm.c`.
+5. As a learner debugging a kernel, I want unsupported macros, half intrinsics, vector packs, templates, and warp calls to produce source-spanned diagnostics, so that I know what CUDA concept is outside the browser subset.
+6. As a performance-minded user, I want vectorized load/store idioms such as `float4` and `half2` to lower to efficient WebGPU memory operations when safe, so that browser kernels do not become toy scalar-only exercises.
+7. As a curriculum builder, I want one compatibility vocabulary across CS149, CS336, LeetCUDA, CUDA samples, and custom labs, so that the platform does not become a pile of course adapters.
+8. As a future researcher, I want deep modules around source normalization and intrinsic lowering, so that later Triton-like or LLVM-backed frontends can reuse the same Kernel IR and test oracles.
+
+## Research Dossier
+
+Repo exploration:
+
+- Current compiler architecture already separates lexer/parser, analyzer,
+  Kernel IR, CPU reference, WGSL emitter, runtime planning, WebGPU orchestration,
+  and compatibility families. This PRD should extend those seams, not bypass
+  them.
+- `docs/platform/cuda-compatibility-spine.md` says every CUDA gap maps to a
+  family: `frontend`, `memory`, `atomic`, `texture`, `subgroup`, `library`,
+  `runtime`, `feature`, or `safety`.
+- Current `CUDA-120-DAYS--CHALLENGE` gate reports `240/240` WebGPU-runnable
+  kernel definitions: `225/240` strict direct WGSL and `15/240` host-orchestrated
+  real WebGPU.
+
+Local corpus audits on 2026-06-23:
+
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `21` direct
+  WebGPU-runnable, `336` hard gaps. Main failures: parser/frontend gaps,
+  texture/vector types, `clock_t`, `half2`, `double`, templates, and runtime
+  library shape.
+- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `3` direct
+  WebGPU-runnable, `145` gaps. Main failures: frontend macro/type shape,
+  `floatX` aliases, parser C++-isms, and one common math intrinsic gap around
+  `fma`.
+- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `3` direct
+  WebGPU-runnable in the current strict audit. A local unshipped experiment that
+  compiles each kernel with only launched sibling kernels raised that to `31/293`,
+  which strongly suggests source/context normalization is the first ladder rung.
+
+External sources:
+
+- LeetCUDA is a broad educational CUDA kernel repository with many deep-learning
+  kernels and PyTorch extension bindings:
+  https://github.com/xlite-dev/LeetCUDA
+- NVIDIA CUDA C++ Programming Guide documents CUDA execution, memory, warp
+  functions, cooperative groups, inline assembly, and the C++ programming model
+  that real corpora use:
+  https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
+- NVIDIA CUDA Math API documents half and half2 intrinsics such as arithmetic
+  and comparison operations that appear in LeetCUDA:
+  https://docs.nvidia.com/cuda/cuda-math-api/
+- WGSL is the browser-native target and includes workgroup memory, barriers,
+  atomics, and feature-gated shader capabilities:
+  https://www.w3.org/TR/WGSL/
+- Chrome WebGPU subgroups require explicit WGSL enablement and are now a real
+  browser feature surface, not merely a future idea:
+  https://developer.chrome.com/blog/new-in-webgpu-134
+- Chrome WebGPU compatibility mode broadens hardware reach while constraining
+  available features, so compiler diagnostics must stay feature-gated:
+  https://developer.chrome.com/blog/new-in-webgpu-146
+- CUTLASS/CuTe shows the modern CUDA frontier for template-heavy tensor-core
+  code. BrowserGrad should learn from its motifs, but full C++ template
+  compatibility is not the first ladder rung:
+  https://docs.nvidia.com/cutlass/
+
+What this changes:
+
+- We should stop measuring only curated lab corpora. Every compiler milestone
+  needs one curated gate and at least one hostile real-world corpus gate.
+- The next work is not "make LeetCUDA pass." It is a generic compatibility
+  ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
+- The most valuable first code slice is frontend/context normalization plus
+  reusable intrinsic tables, not another runtime orchestration feature.
+
+## Grill Decisions
+
+Question: What is the smallest vertical slice that proves this idea end-to-end
+without closing the door on broader CUDA compatibility?
+
+Recommended answer: Add LeetCUDA as a named audit corpus, implement generic
+single-kernel context isolation in the audit/compiler intake path, then add a
+small CUDA intrinsic table for `fma`/`fmaf` and scalar half arithmetic/comparison
+calls. This should improve coverage without touching any LeetCUDA file names.
+
+Decision: Accept this as the first implementation slice for PRD-020.
+
+Question: Should the compiler parse full CUDA C++ templates now?
+
+Recommended answer: No. Start with constexpr-like template parameter
+specialization for simple kernels after context normalization works. Full C++
+template parsing belongs to a later compatibility backend or a dedicated
+front-end module.
+
+Decision: Template support starts as bounded specialization, not general C++.
+
+Question: Should vector pack macros such as `FLOAT4(x)` and `HALF2(x)` be
+treated as parser hacks?
+
+Recommended answer: No. Treat them as memory-view primitives: reinterpret-load,
+reinterpret-store, lane access, alignment diagnostics, and WebGPU lowering. The
+macro spelling is only one source form.
+
+Decision: Add vector pack support through a semantic memory-view abstraction.
+
+Question: Should unsupported CUTLASS/CuTe/MMA code be rejected permanently?
+
+Recommended answer: No. Keep it as an expansion track. First support explicit
+educational kernels; later explore motif lowering for `wmma`, `mma`, and WGMMA
+patterns when the frontend and vector memory model are stronger.
+
+Decision: MMA/CuTe is future compatibility pressure, not v1 of this ladder.
+
+Question: Should corpus audit scripts hide unsupported kernels to make numbers
+look better?
+
+Recommended answer: No. The audit may classify non-kernel host binding glue,
+docs, and pseudocode separately, but every extracted CUDA kernel should either
+compile, become reference/WebGPU liftable, or produce a stable blocker.
+
+Decision: Coverage reports stay honest and machine-readable.
+
+## Novelty Reach
+
+- Browser-native CUDA corpus normalizer: a source-intake stage that builds a
+  minimal kernel compilation unit from macros, constants, called device helpers,
+  launched sibling kernels, and relevant type aliases. This is lighter than a C++
+  compiler but stronger than regex extraction.
+- Semantic vector pack ABI: represent `float4`, `int4`, `half2`, and 128-bit
+  load/store idioms as IR memory views with alignment and lane semantics, then
+  lower safe cases to WGSL vectors or scalarized storage operations.
+- Intrinsic ledger: model CUDA math, half, warp, atomic, and runtime intrinsics
+  as a data-driven table with analyzer arity/type rules, CPU reference semantics,
+  WGSL lowering, required WebGPU features, and fallback classification.
+- Corpus delta dashboard: each PRD slice records before/after counts per corpus
+  and per semantic family. This keeps "Carmack-style" progress empirical rather
+  than vibe-based.
+- Motif lowering research lane: for future CUTLASS/CuTe-like code, detect
+  recognizable tensor-core/tiling motifs and lower the educational intent to
+  BrowserGrad IR, instead of trying to embed an entire native C++ compiler in
+  the default browser path.
+
+## Implementation Decisions
+
+- Add LeetCUDA to the dogfood corpus matrix as an external pressure corpus,
+  alongside CUDA-120, NVIDIA `cuda-samples`, and `llm.c`.
+- Extend the corpus audit output with stable corpus identity: repo URL, commit,
+  kernel count, direct WebGPU count, host-orchestrated count, reference-only
+  count, hard gaps, error codes, and semantic families.
+- Add thresholds per corpus. CUDA-120 should stay at `240/240`
+  WebGPU-runnable. LeetCUDA, samples, and `llm.c` begin as non-blocking report
+  gates, then graduate to minimum thresholds after the first compatibility
+  slice lands.
+- Build a source normalizer module as a deep module. It should create a minimal
+  compilation unit for one kernel and include only relevant context: safe object
+  macros, expression macros, constants, type aliases, called device helpers,
+  and actually launched sibling kernels.
+- Keep unsafe or not-yet-modeled macros loud. `reinterpret_cast`-style macros
+  should become a memory-view diagnostic or memory-view IR primitive, not raw
+  token expansion that poisons unrelated kernels.
+- Build an intrinsic ledger as a deep module. Initial rows should include
+  `fma`, `fmaf`, scalar half conversion/arithmetic/comparison functions, and
+  then expand to half2 and warp calls.
+- Add vector pack memory views after scalar half intrinsics. `float4` and
+  `half2` support should include reference semantics, WGSL lowering, and
+  diagnostics for unsupported alignment or aliasing.
+- Add bounded template/constexpr specialization only after context
+  normalization and vector pack semantics are tested.
+- Preserve package boundaries. Compiler owns CUDA semantics and IR. Kernels
+  package owns WebGPU device dispatch. Platform/craftingattention consumes
+  compiler capability reports but does not duplicate compatibility heuristics.
+- Treat all corpus changes as generic primitives. No file-name, repo-name, or
+  assignment-name branches in compiler behavior.
+
+Suggested implementation chunks:
+
+1. PRD-020 and corpus registry docs.
+2. Corpus audit registry plus LeetCUDA report gate.
+3. Minimal-kernel context isolation and source-normalizer tests.
+4. Intrinsic ledger for `fma`/`fmaf` and scalar half intrinsics.
+5. Vector pack memory-view IR for `float4` and `half2`.
+6. Bounded template/constexpr specialization for common educational kernels.
+7. Warp/subgroup lowering expansion for reduction-heavy kernels.
+8. Corpus dashboard and threshold graduation.
+
+## Testing Decisions
+
+- Test external behavior: a kernel either compiles to source-spanned IR, runs in
+  CPU reference, runs on real WebGPU, or produces a stable diagnostic. Avoid
+  tests that pin parser implementation details unless they protect a public
+  diagnostic.
+- Add source-normalizer fixtures for mixed files containing multiple kernels,
+  sibling kernels, safe macros, unsafe macros, constants, device helpers, and
+  host binding glue.
+- Add intrinsic-ledger tests that assert arity, feature gates, reference output,
+  WGSL output, and unsupported fallback classification for each intrinsic row.
+- Add reference tests for half scalar math with the existing float16 array
+  helper so CI does not depend on native `Float16Array` availability.
+- Add browser tests for at least one f32 intrinsic kernel and one `shader-f16`
+  kernel when the browser exposes the feature. Feature absence should skip with
+  a deterministic reason.
+- Add vector pack tests with scalar fallback equivalence first, then WebGPU
+  emission checks once memory-view lowering lands.
+- Add corpus regression gates:
+  `audit:cuda-120` remains blocking;
+  `audit:corpus /tmp/browsergrad-corpora/LeetCUDA` reports first, then enforces
+  a minimum after the first slice;
+  `cuda-samples` and `llm.c` remain report-only until their first primitives
+  have landed.
+- Add before/after numbers to docs for every coherent chunk. A compatibility
+  claim without corpus delta is not accepted.
+
+Acceptance criteria for the first slice:
+
+- Working tree has a PRD and corpus registry update before implementation.
+- LeetCUDA audit can be run by a documented command and records repo commit.
+- Current LeetCUDA baseline is recorded as `3/293` direct/WebGPU-runnable.
+- Context isolation improves coverage without repo-specific branching and has
+  unit tests.
+- At least one broad intrinsic gap from `llm.c` or LeetCUDA lands with parser,
+  analyzer, reference, WGSL, and test coverage.
+- CUDA-120 remains `240/240` WebGPU-runnable.
+
+## Out of Scope
+
+- Full CUDA C++ compatibility.
+- Full CUTLASS/CuTe, `wmma`, WGMMA, tensor-core, or cooperative matrix support.
+- Running PyTorch C++ extension host binding code in the browser.
+- Native CUDA performance parity.
+- Repo-specific transformations keyed on LeetCUDA, `llm.c`, or NVIDIA samples.
+- Silent CPU fallback presented as GPU execution.
+- Replacing BrowserGrad IR with LLVM/chipStar/clspv as the default path.
+
+## Further Notes
+
+The LeetCUDA result is useful precisely because it is bad today. It proves the
+next frontier is CUDA dialect compatibility, not another hand-picked example.
+The first slice should be small enough to ship with confidence, but the ladder
+should stay ambitious: every unsupported CUDA idiom becomes a named primitive,
+a clear diagnostic, or a deliberate future research lane.
+
+References used in this PRD:
+
+- https://github.com/xlite-dev/LeetCUDA
+- https://github.com/NVIDIA/cuda-samples
+- https://github.com/karpathy/llm.c
+- https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
+- https://docs.nvidia.com/cuda/cuda-math-api/
+- https://docs.nvidia.com/cutlass/
+- https://www.w3.org/TR/WGSL/
+- https://developer.chrome.com/blog/new-in-webgpu-134
+- https://developer.chrome.com/blog/new-in-webgpu-146

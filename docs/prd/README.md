@@ -35,6 +35,8 @@ Every PRD includes: background with cited evidence, user stories, architecture (
 
 - [PRD-017 — Research-gated PRD workflow](PRD-017-research-gated-prd-workflow.md)
 - [PRD-018 — Lab core capability spine](PRD-018-lab-core-capability-spine.md)
+- [PRD-019 — BrowserGrad GPU compiler](PRD-019-browsergrad-gpu-compiler.md)
+- [PRD-020 — Real-world CUDA compatibility ladder](PRD-020-real-world-cuda-compatibility-ladder.md)
 
 ## How to use these PRDs
 
