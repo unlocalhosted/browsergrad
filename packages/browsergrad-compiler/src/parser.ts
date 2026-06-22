@@ -4,6 +4,8 @@ import {
   type CudaLiteAssignmentExpression,
   type CudaLiteBinaryExpression,
   type CudaLiteCastExpression,
+  type CudaLiteCooperativeGroupDecl,
+  type CudaLiteCooperativeGroupKind,
   type CudaLiteDeviceFunction,
   type CudaLiteDim3Decl,
   type CudaLiteExpression,
@@ -12,7 +14,6 @@ import {
   type CudaLiteIfStatement,
   type CudaLiteKernel,
   type CudaLiteKernelLaunchStatement,
-  type CudaLiteMemberExpression,
   type CudaLiteModule,
   type CudaLiteParam,
   type CudaLiteScalarType,
@@ -69,6 +70,7 @@ class Parser {
     while (!this.match("<eof>")) {
       if (this.match("__constant__")) constants.push(this.parseGlobalConstant());
       else if (this.match("texture")) textures.push(this.parseTexture2D());
+      else if (this.match("namespace")) this.skipNamespaceAliasDecl();
       else if (this.startsDeviceFunction()) functions.push(this.parseDeviceFunction());
       else kernels.push(this.parseKernel());
     }
@@ -228,6 +230,7 @@ class Parser {
     if (this.match("return")) return [this.parseReturn()];
     if (this.match("continue")) return [this.parseContinue()];
     if (this.match("dim3")) return [this.parseDim3Decl()];
+    if (this.startsCooperativeGroupDecl()) return [this.parseCooperativeGroupDecl()];
     if (this.startsKernelLaunch()) return [this.parseKernelLaunch()];
     if (this.startsVarDecl()) return this.parseVarDeclList(true);
     const expression = this.parseExpression();
@@ -299,6 +302,43 @@ class Parser {
     return {
       kind: "dim3",
       name: name.value,
+      span: mergeSpans(start, end),
+    };
+  }
+
+  private parseCooperativeGroupDecl(): CudaLiteCooperativeGroupDecl {
+    const start = this.peek().span;
+    let name: Token;
+    let groupKind: CudaLiteCooperativeGroupKind;
+    let tileSize: number | undefined;
+    if (this.consumeIf("auto")) {
+      name = this.expectIdentifier("cooperative group variable name");
+      this.expect("=");
+      this.consumeNamespaceQualifier();
+      this.expect("tiled_partition");
+      this.expect("<");
+      tileSize = this.parseTemplateIntegerArgument();
+      this.expect(">");
+      this.skipBalanced("(", ")");
+      groupKind = "tile";
+    } else {
+      this.consumeNamespaceQualifier();
+      const type = this.expectIdentifier("cooperative group type");
+      groupKind = type.value === "thread_block" ? "block" : type.value === "grid_group" ? "grid" : "tile";
+      name = this.expectIdentifier("cooperative group variable name");
+      if (this.consumeIf("=")) {
+        while (!this.match(";")) {
+          if (this.match("<eof>")) this.fail("expected ';'", this.peek().span);
+          this.advance();
+        }
+      }
+    }
+    const end = this.expect(";").span;
+    return {
+      kind: "cooperative-group",
+      groupKind,
+      name: name.value,
+      ...(tileSize === undefined ? {} : { tileSize }),
       span: mergeSpans(start, end),
     };
   }
@@ -419,13 +459,10 @@ class Parser {
     while (true) {
       if (this.consumeIf(".")) {
         const property = this.expectIdentifier("member property");
-        if (property.value !== "x" && property.value !== "y" && property.value !== "z") {
-          this.fail(`unsupported vector member: ${property.value}`, property.span);
-        }
         expression = {
           kind: "member",
           object: expression,
-          property: property.value as CudaLiteMemberExpression["property"],
+          property: property.value,
           span: mergeSpans(expression.span, property.span),
         };
         continue;
@@ -505,6 +542,16 @@ class Parser {
     return this.peek().kind === "identifier" &&
       this.tokens[this.index + 1]?.value === "<<" &&
       this.tokens[this.index + 2]?.value === "<";
+  }
+
+  private startsCooperativeGroupDecl(): boolean {
+    if (this.match("auto")) {
+      return this.tokens[this.index + 2]?.value === "=" &&
+        this.tokens.slice(this.index + 3, this.index + 8).some((token) => token.value === "tiled_partition");
+    }
+    return this.peek().kind === "identifier" &&
+      this.tokens[this.index + 1]?.value === "::" &&
+      (this.tokens[this.index + 2]?.value === "thread_block" || this.tokens[this.index + 2]?.value === "grid_group");
   }
 
   private expectTextureDimension(): Token {
@@ -590,6 +637,14 @@ class Parser {
     return value;
   }
 
+  private parseTemplateIntegerArgument(): number {
+    const token = this.parseNumberLiteral("template integer argument");
+    if (!Number.isInteger(token.value) || token.value <= 0) {
+      this.fail("template argument must be a positive integer", token.span);
+    }
+    return token.value;
+  }
+
   private expect(value: string): Token {
     const token = this.peek();
     if (token.value !== value) this.fail(`expected '${value}'`, token.span);
@@ -623,6 +678,23 @@ class Parser {
     }
     this.expect(">>");
     this.expect(">");
+  }
+
+  private consumeNamespaceQualifier(): void {
+    this.expectIdentifier("namespace alias");
+    this.expect("::");
+  }
+
+  private skipNamespaceAliasDecl(): void {
+    this.expect("namespace");
+    this.expectIdentifier("namespace alias");
+    this.expect("=");
+    this.expectIdentifier("namespace target");
+    while (!this.match(";")) {
+      if (this.match("<eof>")) this.fail("expected ';'", this.peek().span);
+      this.advance();
+    }
+    this.expect(";");
   }
 
   private peek(): Token {

@@ -85,6 +85,7 @@ export interface CudaLiteParam {
 export type CudaLiteStatement =
   | CudaLiteVarDecl
   | CudaLiteDim3Decl
+  | CudaLiteCooperativeGroupDecl
   | CudaLiteKernelLaunchStatement
   | CudaLiteIfStatement
   | CudaLiteForStatement
@@ -106,6 +107,16 @@ export interface CudaLiteVarDecl {
 export interface CudaLiteDim3Decl {
   readonly kind: "dim3";
   readonly name: string;
+  readonly span: SourceSpan;
+}
+
+export type CudaLiteCooperativeGroupKind = "block" | "grid" | "tile";
+
+export interface CudaLiteCooperativeGroupDecl {
+  readonly kind: "cooperative-group";
+  readonly groupKind: CudaLiteCooperativeGroupKind;
+  readonly name: string;
+  readonly tileSize?: number;
   readonly span: SourceSpan;
 }
 
@@ -193,7 +204,7 @@ export interface CudaLiteCastExpression {
 export interface CudaLiteMemberExpression {
   readonly kind: "member";
   readonly object: CudaLiteExpression;
-  readonly property: "x" | "y" | "z";
+  readonly property: string;
   readonly span: SourceSpan;
 }
 

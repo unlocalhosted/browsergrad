@@ -8,6 +8,7 @@ import {
   CudaLiteCompilerError,
   type CudaLiteAssignmentExpression,
   type CudaLiteCallExpression,
+  type CudaLiteCooperativeGroupDecl,
   type CudaLiteDeviceFunction,
   type CudaLiteExpression,
   type CudaLiteGlobalConstant,
@@ -125,6 +126,7 @@ interface EmitContext {
   paramFor(name: string): CudaLiteParam | undefined;
   isUniformScalar(name: string): boolean;
   pointerAliasFor(name: string): PointerAlias | undefined;
+  cooperativeGroupFor(name: string): CudaLiteCooperativeGroupDecl | undefined;
 }
 
 interface PointerAlias {
@@ -175,6 +177,7 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
   ];
   const uniformScalarNames = new Set(uniformScalars.map((scalar) => scalar.name));
   const pointerAliases = collectPointerAliases(ir.body);
+  const cooperativeGroups = collectCooperativeGroups(ir.body);
   const paramsBinding = uniformScalars.length > 0 ? bindings.length : undefined;
   if (paramsBinding !== undefined) {
     bindings.push({
@@ -204,6 +207,9 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
     pointerAliasFor(name) {
       return pointerAliases.get(name);
     },
+    cooperativeGroupFor(name) {
+      return cooperativeGroups.get(name);
+    },
   };
 }
 
@@ -219,6 +225,8 @@ function emitStatement(
       if (statement.pointer) return [];
       return [`${prefix}var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitExpression(statement.init, context)}` : ""};`];
     case "dim3":
+      return [];
+    case "cooperative-group":
       return [];
     case "kernel-launch":
       return [`${prefix}// device-side launch omitted: ${statement.callee}<<<...>>>`];
@@ -334,7 +342,7 @@ function collectPointerAliases(statements: readonly CudaLiteStatement[]): Readon
         const alias = pointerAliasForVar(item);
         if (alias) aliases.set(item.name, alias);
       }
-      if (item.kind === "dim3" || item.kind === "kernel-launch") continue;
+      if (item.kind === "dim3" || item.kind === "cooperative-group" || item.kind === "kernel-launch") continue;
       if (item.kind === "if") {
         walk(item.consequent);
         if (item.alternate) walk(item.alternate);
@@ -344,6 +352,22 @@ function collectPointerAliases(statements: readonly CudaLiteStatement[]): Readon
   };
   walk(statements);
   return aliases;
+}
+
+function collectCooperativeGroups(statements: readonly CudaLiteStatement[]): ReadonlyMap<string, CudaLiteCooperativeGroupDecl> {
+  const groups = new Map<string, CudaLiteCooperativeGroupDecl>();
+  const walk = (items: readonly CudaLiteStatement[]): void => {
+    for (const item of items) {
+      if (item.kind === "cooperative-group") groups.set(item.name, item);
+      if (item.kind === "if") {
+        walk(item.consequent);
+        if (item.alternate) walk(item.alternate);
+      }
+      if (item.kind === "for") walk(item.body);
+    }
+  };
+  walk(statements);
+  return groups;
 }
 
 function pointerAliasForVar(statement: CudaLiteVarDecl): PointerAlias | undefined {
@@ -384,6 +408,8 @@ function emitMember(expression: Extract<CudaLiteExpression, { kind: "member" }>,
 function emitCall(expression: CudaLiteCallExpression, context: EmitContext): string {
   const name = expressionName(expression.callee);
   const args = expression.args.map((arg) => emitExpression(arg, context));
+  const cooperativeGroupCall = emitCooperativeGroupCall(expression, context);
+  if (cooperativeGroupCall !== undefined) return cooperativeGroupCall;
   if (name && context.deviceFunctionNames.has(name)) {
     return `${name}(${[...args, "local_id", "workgroup_id", "num_workgroups"].join(", ")})`;
   }
@@ -441,6 +467,31 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     default:
       return `${emitExpression(expression.callee, context)}(${args.join(", ")})`;
   }
+}
+
+function emitCooperativeGroupCall(expression: CudaLiteCallExpression, context: EmitContext): string | undefined {
+  const callee = expression.callee;
+  if (callee.kind !== "member" || callee.object.kind !== "identifier") return undefined;
+  const group = context.cooperativeGroupFor(callee.object.name);
+  if (!group) return undefined;
+  if (callee.property === "sync") {
+    return group.groupKind === "block" ? "workgroupBarrier()" : "0";
+  }
+  if (callee.property === "size") {
+    if (group.groupKind === "tile") return String(group.tileSize ?? 32);
+    return String(context.ir.workgroupSize[0] * context.ir.workgroupSize[1] * context.ir.workgroupSize[2]);
+  }
+  if (callee.property === "thread_rank") {
+    const localRank = "i32(local_id.x)";
+    if (group.groupKind === "tile") return `(${localRank} % ${group.tileSize ?? 32})`;
+    return localRank;
+  }
+  if (callee.property === "shfl_down") {
+    const value = expression.args[0] ? emitExpression(expression.args[0], context) : "0";
+    const offset = expression.args[1] ? emitExpression(expression.args[1], context) : "0";
+    return `subgroupShuffleDown(${value}, u32(${offset}))`;
+  }
+  return undefined;
 }
 
 function emitAtomicCall(

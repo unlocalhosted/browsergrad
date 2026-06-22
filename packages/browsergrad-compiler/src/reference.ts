@@ -3,6 +3,7 @@ import {
   CudaLiteCompilerError,
   type CompiledCudaLiteKernel,
   type CompiledKernelInput,
+  type CudaLiteCooperativeGroupDecl,
   type CudaLiteDeviceFunction,
   type CudaLiteExpression,
   type CudaLiteStatement,
@@ -13,7 +14,7 @@ import {
   type ReferenceKernelResult,
 } from "./types.js";
 
-type LocalValue = number | Vector3 | AddressValue;
+type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue;
 interface Vector3 {
   readonly x: number;
   readonly y: number;
@@ -23,6 +24,12 @@ interface Vector3 {
 interface AddressValue {
   readonly kind: "address";
   readonly target: LValue;
+}
+
+interface CooperativeGroupValue {
+  readonly kind: "cooperative-group";
+  readonly groupKind: CudaLiteCooperativeGroupDecl["groupKind"];
+  readonly tileSize?: number;
 }
 
 interface LValue {
@@ -182,6 +189,13 @@ function* execStatements(
         break;
       case "dim3":
         break;
+      case "cooperative-group":
+        context.locals.set(statement.name, {
+          kind: "cooperative-group",
+          groupKind: statement.groupKind,
+          ...(statement.tileSize === undefined ? {} : { tileSize: statement.tileSize }),
+        });
+        break;
       case "kernel-launch":
         break;
       case "expr":
@@ -243,7 +257,10 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
       return castNumber(expression.valueType, evalExpression(expression.expression, context));
     case "member": {
       const object = readExpressionObject(expression.object, context);
-      return object[expression.property];
+      if (expression.property === "x") return object.x;
+      if (expression.property === "y") return object.y;
+      if (expression.property === "z") return object.z;
+      throw compilerFailure(`unsupported vector member '${expression.property}'`);
     }
     case "index": {
       const lvalue = resolveLValue(expression, context);
@@ -387,6 +404,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   const name = expression.kind === "call" && expression.callee.kind === "identifier"
     ? expression.callee.name
     : undefined;
+  const cooperativeGroupCall = evalCooperativeGroupCall(expression, context);
+  if (cooperativeGroupCall !== undefined) return cooperativeGroupCall;
   if (name === "printf") return 0;
   if (name === "atomicAdd") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => current + value);
@@ -451,6 +470,29 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     default:
       throw compilerFailure(`unsupported call '${name ?? "<expr>"}'`);
   }
+}
+
+function evalCooperativeGroupCall(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: ThreadContext,
+): number | undefined {
+  const callee = expression.callee;
+  if (callee.kind !== "member" || callee.object.kind !== "identifier") return undefined;
+  const value = context.locals.get(callee.object.name);
+  if (!isCooperativeGroup(value)) return undefined;
+  const args = expression.args.map((arg) => evalExpression(arg, context));
+  if (callee.property === "sync") return 0;
+  if (callee.property === "size") {
+    if (value.groupKind === "tile") return value.tileSize ?? 32;
+    return context.blockDim.x * context.blockDim.y * context.blockDim.z;
+  }
+  if (callee.property === "thread_rank") {
+    const localRank = context.threadIdx.x;
+    if (value.groupKind === "tile") return localRank % (value.tileSize ?? 32);
+    return localRank;
+  }
+  if (callee.property === "shfl_down") return args[0] ?? 0;
+  return undefined;
 }
 
 function evalDeviceFunction(fn: CudaLiteDeviceFunction, args: readonly number[], context: ThreadContext): number {
@@ -648,6 +690,13 @@ function vectorFromTuple(value: readonly [number, number, number]): Vector3 {
 function valueAsNumber(value: LocalValue, name: string): number {
   if (typeof value === "number") return value;
   throw compilerFailure(`'${name}' is not a scalar`);
+}
+
+function isCooperativeGroup(value: LocalValue | undefined): value is CooperativeGroupValue {
+  return value !== undefined &&
+    typeof value !== "number" &&
+    "kind" in value &&
+    value.kind === "cooperative-group";
 }
 
 function truthy(value: number): boolean {

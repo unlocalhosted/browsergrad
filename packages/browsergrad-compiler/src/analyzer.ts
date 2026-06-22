@@ -2,6 +2,7 @@ import {
   CudaLiteCompilerError,
   type CudaLiteAnalysis,
   type CudaLiteAnalyzeOptions,
+  type CudaLiteCooperativeGroupKind,
   type CudaLiteDeviceFunction,
   type CudaLiteDiagnostic,
   type CudaLiteExpression,
@@ -78,10 +79,12 @@ type ValueType = Exclude<CudaLiteScalarType, "void">;
 
 interface SymbolInfo {
   readonly name: string;
-  readonly kind: "param" | "local" | "shared" | "constant" | "texture" | "device-function" | "builtin-vector" | "builtin-call";
+  readonly kind: "param" | "local" | "shared" | "constant" | "texture" | "cooperative-group" | "device-function" | "builtin-vector" | "builtin-call";
   readonly valueType?: ValueType;
   readonly returnType?: CudaLiteScalarType;
   readonly params?: readonly CudaLiteParam[];
+  readonly groupKind?: CudaLiteCooperativeGroupKind;
+  readonly tileSize?: number;
   readonly pointer?: boolean;
   readonly constant?: boolean;
   readonly dimensions?: readonly number[];
@@ -203,6 +206,20 @@ export function analyzeCudaLite(
             name: statement.name,
             kind: "local",
             valueType: "uint",
+            span: statement.span,
+          });
+          break;
+        case "cooperative-group":
+          if (names.has(statement.name)) {
+            diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${statement.name}'`, statement.span));
+          }
+          validateDeclaredSymbolName(statement.name, statement.span, diagnostics);
+          names.add(statement.name);
+          scope.symbols.set(statement.name, {
+            name: statement.name,
+            kind: "cooperative-group",
+            groupKind: statement.groupKind,
+            ...(statement.tileSize === undefined ? {} : { tileSize: statement.tileSize }),
             span: statement.span,
           });
           break;
@@ -464,6 +481,10 @@ function validateCallExpression(
   walkExpression: ExpressionWalker,
 ): ExpressionInfo {
   const callName = expressionName(expression.callee);
+  const cooperativeCall = cooperativeGroupCall(expression, scope);
+  if (cooperativeCall) {
+    return validateCooperativeGroupCall(expression, cooperativeCall, requiredFeatures, diagnostics, walkExpression, scope);
+  }
   if (!callName) {
     diagnostics.push(error("unsupported-call", "CUDA-lite v0 only supports direct builtin calls", expression.span));
     for (const arg of expression.args) walkExpression(arg, scope);
@@ -563,6 +584,58 @@ function validateDeviceFunctionCall(
   }
   if (symbol.returnType === undefined || symbol.returnType === "void") return { kind: "unknown" };
   return { kind: "scalar", valueType: symbol.returnType };
+}
+
+function validateCooperativeGroupCall(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  call: { readonly symbol: SymbolInfo; readonly method: string },
+  requiredFeatures: Set<string>,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+  scope: Scope,
+): ExpressionInfo {
+  const { symbol, method } = call;
+  if (symbol.groupKind === "grid" && method === "sync") {
+    diagnostics.push(error("unsupported-cooperative-groups", "grid.sync() requires cooperative launch/runtime support", expression.span));
+    return { kind: "scalar" };
+  }
+  if (method === "sync") {
+    if (expression.args.length !== 0) diagnostics.push(error("invalid-call-arity", `${method} expects 0 arguments`, expression.span));
+    return { kind: "scalar" };
+  }
+  if (method === "size") {
+    if (expression.args.length !== 0) diagnostics.push(error("invalid-call-arity", `${method} expects 0 arguments`, expression.span));
+    return { kind: "scalar", valueType: "int" };
+  }
+  if (method === "thread_rank") {
+    if (expression.args.length !== 0) diagnostics.push(error("invalid-call-arity", `${method} expects 0 arguments`, expression.span));
+    return { kind: "scalar", valueType: "int" };
+  }
+  if (method === "shfl_down") {
+    requiredFeatures.add("subgroups");
+    if (expression.args.length !== 2) diagnostics.push(error("invalid-call-arity", "shfl_down expects 2 arguments", expression.span));
+    let valueType: ValueType | undefined;
+    for (const [index, arg] of expression.args.entries()) {
+      const info = walkExpression(arg, scope);
+      validateScalarOperand(info, arg.span, diagnostics);
+      if (index === 0) valueType = info.valueType;
+    }
+    return { kind: "scalar", valueType };
+  }
+  diagnostics.push(error("unsupported-cooperative-groups", `unsupported cooperative group method '${method}'`, expression.span));
+  for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+  return { kind: "unknown" };
+}
+
+function cooperativeGroupCall(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  scope: Scope,
+): { readonly symbol: SymbolInfo; readonly method: string } | undefined {
+  const callee = expression.callee;
+  if (callee.kind !== "member" || callee.object.kind !== "identifier") return undefined;
+  const symbol = lookupSymbol(callee.object.name, scope, callee.object.span);
+  if (symbol?.kind !== "cooperative-group") return undefined;
+  return { symbol, method: callee.property };
 }
 
 function validateTex2D(
@@ -670,8 +743,12 @@ function validateNonCallExpression(
     }
     case "member": {
       const object = walkExpression(expression.object, scope);
+      if (object.kind === "unknown") return { kind: "unknown" };
       if (object.kind !== "vector") {
         diagnostics.push(error("unsupported-member-target", "member access is only supported on CUDA-lite builtin vectors", expression.span));
+      }
+      if (expression.property !== "x" && expression.property !== "y" && expression.property !== "z") {
+        diagnostics.push(error("unsupported-member-target", `unsupported vector member '${expression.property}'`, expression.span));
       }
       return { kind: "scalar", valueType: "int" };
     }
@@ -780,6 +857,7 @@ function expressionInfoForIdentifier(
   if (symbol.kind === "builtin-vector") return { kind: "vector", symbol };
   if (symbol.kind === "builtin-call") return { kind: "function", symbol };
   if (symbol.kind === "device-function") return { kind: "function", symbol };
+  if (symbol.kind === "cooperative-group") return { kind: "unknown", symbol };
   if (symbol.kind === "texture") return { kind: "texture", valueType: symbol.valueType, symbol };
   if (symbol.kind === "shared" || symbol.kind === "constant") {
     return {

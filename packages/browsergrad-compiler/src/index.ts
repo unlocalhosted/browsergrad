@@ -11,6 +11,8 @@ export {
   type CudaLiteCallExpression,
   type CudaLiteConditionalExpression,
   type CudaLiteContinueStatement,
+  type CudaLiteCooperativeGroupDecl,
+  type CudaLiteCooperativeGroupKind,
   type CudaLiteDeviceFunction,
   type CudaLiteDiagnostic,
   type CudaLiteDim3Decl,

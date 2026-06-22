@@ -355,6 +355,55 @@ __global__ void warpKernel(const float *input, float *output) {
     expect(compiled.wgsl).toContain("warpReduceSum(val, local_id, workgroup_id, num_workgroups)");
   });
 
+  it("lowers cooperative-group block and tiled primitives to WebGPU primitives", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void tileReduce(const float *input, float *output) {
+  cg::thread_block block = cg::this_thread_block();
+  auto tile16 = cg::tiled_partition<16>(block);
+  int tid = threadIdx.x;
+  float val = input[tid];
+  for (int offset = tile16.size() / 2; offset > 0; offset >>= 1) {
+    val += tile16.shfl_down(val, offset);
+  }
+  if (tile16.thread_rank() == 0) { output[0] = val; }
+  block.sync();
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [32, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          input: new Float32Array(32).fill(1),
+          output: new Float32Array(1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [32, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("enable subgroups;");
+    expect(compiled.wgsl).toContain("subgroupShuffleDown(val, u32(offset))");
+    expect(compiled.wgsl).toContain("(i32(local_id.x) % 16)");
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+    expect([...result.buffers.output as Float32Array]).toEqual([16]);
+  });
+
+  it("classifies grid-wide cooperative sync as an explicit runtime gap", () => {
+    const analysis = analyzeCudaLite(parseCudaLite(`
+namespace cg = cooperative_groups;
+__global__ void gridSync(float *x) {
+  cg::grid_group grid = cg::this_grid();
+  grid.sync();
+  if (threadIdx.x < 1) { x[0] = 1.0f; }
+}`));
+
+    expect(analysis.diagnostics).toContainEqual(expect.objectContaining({
+      code: "unsupported-cooperative-groups",
+    }));
+  });
+
   it("parses dynamic extern shared memory as a clear unsupported diagnostic", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void dynamicShared(float *x) {
