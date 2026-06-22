@@ -47,4 +47,52 @@ describe("CUDA-shaped 1D kernel programs", () => {
     expect(wgsl).toContain("if (i < inputLength) {");
     expect(wgsl).toContain("outputBuffer[i] = (inputBuffer[i] + 10.0);");
   });
+
+  it("supports CS149 A3-style SAXPY through params and output reads", () => {
+    const program = defineCuda1DProgram({
+      name: "saxpy",
+      inputLength: 4,
+      outputLength: 4,
+      parameters: { a: 2 },
+      launch: { blocks: 1, threadsPerBlock: 8 },
+      body: [
+        {
+          op: "if",
+          condition: {
+            op: "lt",
+            left: { op: "threadId" },
+            right: { op: "outputLength" },
+          },
+          body: [
+            {
+              op: "write",
+              index: { op: "threadId" },
+              value: {
+                op: "add",
+                left: {
+                  op: "mul",
+                  left: { op: "param", name: "a" },
+                  right: { op: "read", index: { op: "threadId" } },
+                },
+                right: { op: "outputRead", index: { op: "threadId" } },
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = simulateCuda1DProgram(program, {
+      initialInput: [1, 2, 3, 4],
+      initialOutput: [10, 20, 30, 40],
+    });
+    const wgsl = emitCuda1DProgramWgsl(program);
+
+    expect(result.output).toEqual([12, 24, 36, 48]);
+    expect(result.violations).toEqual([]);
+    expect(wgsl).toContain("struct Params {");
+    expect(wgsl).toContain("a: f32,");
+    expect(wgsl).toContain("@group(0) @binding(2) var<uniform> params: Params;");
+    expect(wgsl).toContain("outputBuffer[i] = ((params.a * inputBuffer[i]) + outputBuffer[i]);");
+  });
 });

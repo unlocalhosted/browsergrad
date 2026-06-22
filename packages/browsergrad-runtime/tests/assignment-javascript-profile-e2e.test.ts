@@ -8,11 +8,14 @@ import {
 } from "../src/index";
 import { simulation } from "@unlocalhosted/browsergrad-primitives";
 import {
+  defineCuda1DProgram,
+  emitCuda1DProgramWgsl,
   referenceExclusiveScan,
   referenceFindRepeats,
   referenceOrderedCircleRender,
   referenceSaxpy,
   simulateCuda1DGrid,
+  simulateCuda1DProgram,
 } from "@unlocalhosted/browsergrad-kernels";
 
 interface CpuParallelismOracle {
@@ -30,11 +33,14 @@ interface GpuPuzzleOracle {
 }
 
 interface CudaConceptsReference {
+  defineCuda1DProgram: typeof defineCuda1DProgram;
+  emitCuda1DProgramWgsl: typeof emitCuda1DProgramWgsl;
   referenceExclusiveScan: typeof referenceExclusiveScan;
   referenceFindRepeats: typeof referenceFindRepeats;
   referenceOrderedCircleRender: typeof referenceOrderedCircleRender;
   referenceSaxpy: typeof referenceSaxpy;
   simulateCuda1DGrid: typeof simulateCuda1DGrid;
+  simulateCuda1DProgram: typeof simulateCuda1DProgram;
 }
 
 const CS149_A1_PROFILE = JSON.parse(
@@ -386,11 +392,14 @@ describe("profile-driven JavaScript assignment e2e", () => {
       },
     };
     const reference: CudaConceptsReference = {
+      defineCuda1DProgram,
+      emitCuda1DProgramWgsl,
       referenceExclusiveScan,
       referenceFindRepeats,
       referenceOrderedCircleRender,
       referenceSaxpy,
       simulateCuda1DGrid,
+      simulateCuda1DProgram,
     };
     const rubric: AssignmentJavascriptRubric = (ctx) => {
       const cuda = ctx.oracle<CudaConceptsReference>("_bg_cuda_concepts");
@@ -401,6 +410,43 @@ describe("profile-driven JavaScript assignment e2e", () => {
       });
       const scan = cuda.referenceExclusiveScan([3, 1, 4, 1, 5]);
       const repeats = cuda.referenceFindRepeats([7, 7, 1, 4, 4, 4]);
+      const saxpyProgram = cuda.defineCuda1DProgram({
+        name: "saxpy",
+        inputLength: 4,
+        outputLength: 4,
+        parameters: { a: 2 },
+        launch: { blocks: 1, threadsPerBlock: 8 },
+        body: [
+          {
+            op: "if",
+            condition: {
+              op: "lt",
+              left: { op: "threadId" },
+              right: { op: "outputLength" },
+            },
+            body: [
+              {
+                op: "write",
+                index: { op: "threadId" },
+                value: {
+                  op: "add",
+                  left: {
+                    op: "mul",
+                    left: { op: "param", name: "a" },
+                    right: { op: "read", index: { op: "threadId" } },
+                  },
+                  right: { op: "outputRead", index: { op: "threadId" } },
+                },
+              },
+            ],
+          },
+        ],
+      });
+      const loweredSaxpy = cuda.simulateCuda1DProgram(saxpyProgram, {
+        initialInput: [1, 2, 3, 4],
+        initialOutput: [10, 20, 30, 40],
+      });
+      const wgsl = cuda.emitCuda1DProgramWgsl(saxpyProgram);
       const rendered = cuda.referenceOrderedCircleRender({
         width: 1,
         height: 1,
@@ -427,7 +473,9 @@ describe("profile-driven JavaScript assignment e2e", () => {
 
       if (
         !ctx.allowedTests.includes("saxpy_correctness") ||
+        !ctx.allowedTests.includes("wgsl_lowering_smoke") ||
         saxpy.join(",") !== "12,24,36,48" ||
+        loweredSaxpy.output.join(",") !== "12,24,36,48" ||
         scan.join(",") !== "0,3,4,8,9" ||
         repeats.join(",") !== "0,3,4" ||
         rendered.pixels.join(",") !== "0.125,0.25,0.5" ||
@@ -436,6 +484,7 @@ describe("profile-driven JavaScript assignment e2e", () => {
         ctx.assertFail("cs149-a3-cuda-concepts", "CS149 A3 CUDA concept mismatch", {
           expected: {
             saxpy: [12, 24, 36, 48],
+            loweredSaxpy: [12, 24, 36, 48],
             scan: [0, 3, 4, 8, 9],
             repeats: [0, 3, 4],
             renderedPixel: [0.125, 0.25, 0.5],
@@ -443,6 +492,7 @@ describe("profile-driven JavaScript assignment e2e", () => {
           },
           actual: {
             saxpy,
+            loweredSaxpy: loweredSaxpy.output,
             scan,
             repeats,
             renderedPixel: rendered.pixels,
@@ -453,6 +503,7 @@ describe("profile-driven JavaScript assignment e2e", () => {
       }
 
       ctx.assertPass("saxpy_correctness");
+      ctx.assertPass("wgsl_lowering_smoke");
       ctx.assertPass("exclusive_scan_correctness");
       ctx.assertPass("renderer_ordering_correctness");
       ctx.assertPass("kernel_memory_bounds");
@@ -462,6 +513,7 @@ describe("profile-driven JavaScript assignment e2e", () => {
         globalWrites: guard.stats.globalWrites,
         renderedPixel: rendered.pixels,
         repeatCount: repeats.length,
+        wgslHasParams: wgsl.includes("var<uniform> params"),
       });
     };
 
@@ -477,6 +529,7 @@ describe("profile-driven JavaScript assignment e2e", () => {
     expect(result.report.readiness.status).toBe("runnable");
     expect(result.run.assertions).toEqual([
       { kind: "pass", name: "saxpy_correctness" },
+      { kind: "pass", name: "wgsl_lowering_smoke" },
       { kind: "pass", name: "exclusive_scan_correctness" },
       { kind: "pass", name: "renderer_ordering_correctness" },
       { kind: "pass", name: "kernel_memory_bounds" },
@@ -491,6 +544,7 @@ describe("profile-driven JavaScript assignment e2e", () => {
           globalWrites: 4,
           renderedPixel: [0.125, 0.25, 0.5],
           repeatCount: 3,
+          wgslHasParams: true,
         },
       }),
     ]);

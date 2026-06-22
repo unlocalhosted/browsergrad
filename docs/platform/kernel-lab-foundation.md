@@ -53,8 +53,9 @@ The same package now exports CUDA-shaped concept oracles such as
 traces, guard diagnostics, and deterministic outputs before WGSL lowering.
 The next shipped primitive is `defineCuda1DProgram()`: one small CUDA-shaped 1D
 program description can run through `simulateCuda1DProgram()` and
-`emitCuda1DProgramWgsl()`. This keeps the HipScript direction alive without
-making browser LLVM the first dependency.
+`emitCuda1DProgramWgsl()`. It now supports scalar params and `outputRead`
+expressions for SAXPY-like kernels. This keeps the HipScript direction alive
+without making browser LLVM the first dependency.
 
 This core should be independent from Pyodide. Python assignments may call it
 through registered JS modules, but JS/WGSL labs should run without Python.

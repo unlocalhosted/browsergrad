@@ -17,14 +17,17 @@ First browser-safe slice:
     the scan/find-repeats part of the assignment.
   - `referenceOrderedCircleRender()` to check renderer ordering fixtures with
     deterministic normalized circle geometry and ordered alpha blending.
+  - `defineCuda1DProgram()`, `simulateCuda1DProgram()`, and
+    `emitCuda1DProgramWgsl()` to prove the same guarded SAXPY-like 1D program
+    can run through simulator trace and WGSL source generation.
   - `simulateCuda1DGrid()` to check 1D thread/block indexing, guard behavior,
     and out-of-bounds access before native CUDA execution exists.
 - Proven BrowserGrad route:
   - `packages/browsergrad-runtime/tests/assignment-javascript-profile-e2e.test.ts`
     loads this profile, registers `_bg_cuda_concepts`, and passes
-    `saxpy_correctness`, `exclusive_scan_correctness`, and
-    `renderer_ordering_correctness`, and `kernel_memory_bounds` through the
-    generic kernel concept reference.
+    `saxpy_correctness`, `wgsl_lowering_smoke`,
+    `exclusive_scan_correctness`, `renderer_ordering_correctness`, and
+    `kernel_memory_bounds` through the generic kernel concept reference.
 
 ## Upstream Signals
 
@@ -49,13 +52,15 @@ Crafting Attention should:
 1. Load `cs149-assignment3.profile.json` and route through
    `runAssignmentJavascriptProfile()`.
 2. Register `_bg_cuda_concepts` with the CUDA-concept helpers.
-3. Start with `saxpy_correctness`, `exclusive_scan_correctness`, and
+3. Start with `saxpy_correctness`, `exclusive_scan_correctness`,
    `renderer_ordering_correctness`, and `kernel_memory_bounds`.
 4. Add `find_repeats` fixtures through `referenceFindRepeats()` when authoring
    scan labs.
-5. Keep `performance_rubric_smoke` informational until WebGPU/native timing
+5. Use `wgsl_lowering_smoke` for author-once CUDA-shaped kernels before real
+   WebGPU dispatch; scalar params and `outputRead` cover the first SAXPY shape.
+6. Keep `performance_rubric_smoke` informational until WebGPU/native timing
    fixtures are calibrated.
-6. Keep native CUDA as an explicit external runner, not hidden BrowserGrad
+7. Keep native CUDA as an explicit external runner, not hidden BrowserGrad
    behavior.
 
 ## Required Fixture Shape
@@ -66,6 +71,9 @@ Crafting Attention should:
   `input[i] === input[i + 1]`.
 - Renderer-ordering fixtures: image size, background RGB, ordered circles with
   normalized center/radius/color/alpha, and expected flat RGB pixels.
+- WGSL-lowering fixtures: small `Cuda1DProgram` with launch shape, params,
+  input/output initial buffers, expected simulator output, and expected WGSL
+  source markers.
 - Memory-bounds fixtures: launch shape, input/output lengths, expected
   violations.
 

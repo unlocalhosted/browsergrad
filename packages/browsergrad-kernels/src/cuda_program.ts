@@ -9,6 +9,7 @@ export interface Cuda1DProgramInput {
   readonly name: string;
   readonly inputLength: number;
   readonly outputLength: number;
+  readonly parameters?: Readonly<Record<string, number>>;
   readonly launch: Cuda1DLaunch;
   readonly body: readonly Cuda1DStatement[];
 }
@@ -43,7 +44,9 @@ export type Cuda1DExpression =
   | { readonly op: "threadId" }
   | { readonly op: "inputLength" }
   | { readonly op: "outputLength" }
+  | { readonly op: "param"; readonly name: string }
   | { readonly op: "read"; readonly index: Cuda1DExpression }
+  | { readonly op: "outputRead"; readonly index: Cuda1DExpression }
   | { readonly op: "add"; readonly left: Cuda1DExpression; readonly right: Cuda1DExpression }
   | { readonly op: "sub"; readonly left: Cuda1DExpression; readonly right: Cuda1DExpression }
   | { readonly op: "mul"; readonly left: Cuda1DExpression; readonly right: Cuda1DExpression }
@@ -71,10 +74,12 @@ export function defineCuda1DProgram(input: Cuda1DProgramInput): Cuda1DProgram {
   if (input.body.length === 0) {
     throw new KernelError("Cuda1DProgram body must contain at least one statement");
   }
+  const parameters = validateParameters(input.parameters ?? {});
   return {
     name: input.name,
     inputLength: input.inputLength,
     outputLength: input.outputLength,
+    parameters,
     launch: {
       blocks: input.launch.blocks,
       threadsPerBlock: input.launch.threadsPerBlock,
@@ -95,17 +100,29 @@ export function simulateCuda1DProgram(
     ...(input.initialInput !== undefined ? { initialInput: input.initialInput } : {}),
     ...(input.initialOutput !== undefined ? { initialOutput: input.initialOutput } : {}),
     kernel(context) {
-      executeStatements(program.body, context);
+      executeStatements(program.body, context, program.parameters ?? {});
     },
   });
 }
 
 export function emitCuda1DProgramWgsl(program: Cuda1DProgram): string {
   const body = emitStatements(program.body, 1);
+  const parameterNames = Object.keys(program.parameters ?? {}).sort();
+  const parameterLines =
+    parameterNames.length === 0
+      ? []
+      : [
+          "struct Params {",
+          ...parameterNames.map((name) => `  ${name}: f32,`),
+          "};",
+          "@group(0) @binding(2) var<uniform> params: Params;",
+          "",
+        ];
   return [
     `// BrowserGrad CUDA-shaped 1D program: ${program.name}`,
     "@group(0) @binding(0) var<storage, read> inputBuffer: array<f32>;",
     "@group(0) @binding(1) var<storage, read_write> outputBuffer: array<f32>;",
+    ...parameterLines,
     "",
     `@compute @workgroup_size(${program.launch.threadsPerBlock})`,
     "fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {",
@@ -121,18 +138,19 @@ export function emitCuda1DProgramWgsl(program: Cuda1DProgram): string {
 function executeStatements(
   statements: readonly Cuda1DStatement[],
   context: Cuda1DThreadContext,
+  parameters: Readonly<Record<string, number>>,
 ): void {
   for (const statement of statements) {
     switch (statement.op) {
       case "write":
         context.write(
-          evaluateIndexExpression(statement.index, context),
-          evaluateExpression(statement.value, context),
+          evaluateIndexExpression(statement.index, context, parameters),
+          evaluateExpression(statement.value, context, parameters),
         );
         break;
       case "if":
-        if (evaluateCondition(statement.condition, context)) {
-          executeStatements(statement.body, context);
+        if (evaluateCondition(statement.condition, context, parameters)) {
+          executeStatements(statement.body, context, parameters);
         }
         break;
     }
@@ -142,9 +160,10 @@ function executeStatements(
 function evaluateCondition(
   condition: Cuda1DCondition,
   context: Cuda1DThreadContext,
+  parameters: Readonly<Record<string, number>>,
 ): boolean {
-  const left = evaluateExpression(condition.left, context);
-  const right = evaluateExpression(condition.right, context);
+  const left = evaluateExpression(condition.left, context, parameters);
+  const right = evaluateExpression(condition.right, context, parameters);
   switch (condition.op) {
     case "lt":
       return left < right;
@@ -158,13 +177,18 @@ function evaluateCondition(
 function evaluateIndexExpression(
   expression: Cuda1DExpression,
   context: Cuda1DThreadContext,
+  parameters: Readonly<Record<string, number>>,
 ): number {
-  return validateInteger(evaluateExpression(expression, context), "memory index");
+  return validateInteger(
+    evaluateExpression(expression, context, parameters),
+    "memory index",
+  );
 }
 
 function evaluateExpression(
   expression: Cuda1DExpression,
   context: Cuda1DThreadContext,
+  parameters: Readonly<Record<string, number>>,
 ): number {
   switch (expression.op) {
     case "literal":
@@ -175,20 +199,26 @@ function evaluateExpression(
       return context.inputLength;
     case "outputLength":
       return context.outputLength;
+    case "param":
+      return readParameter(parameters, expression.name);
     case "read":
-      return context.read(evaluateIndexExpression(expression.index, context));
+      return context.read(evaluateIndexExpression(expression.index, context, parameters));
+    case "outputRead":
+      return context.readOutput(
+        evaluateIndexExpression(expression.index, context, parameters),
+      );
     case "add":
-      return evaluateExpression(expression.left, context) +
-        evaluateExpression(expression.right, context);
+      return evaluateExpression(expression.left, context, parameters) +
+        evaluateExpression(expression.right, context, parameters);
     case "sub":
-      return evaluateExpression(expression.left, context) -
-        evaluateExpression(expression.right, context);
+      return evaluateExpression(expression.left, context, parameters) -
+        evaluateExpression(expression.right, context, parameters);
     case "mul":
-      return evaluateExpression(expression.left, context) *
-        evaluateExpression(expression.right, context);
+      return evaluateExpression(expression.left, context, parameters) *
+        evaluateExpression(expression.right, context, parameters);
     case "div":
-      return evaluateExpression(expression.left, context) /
-        evaluateExpression(expression.right, context);
+      return evaluateExpression(expression.left, context, parameters) /
+        evaluateExpression(expression.right, context, parameters);
   }
 }
 
@@ -250,8 +280,12 @@ function emitExpression(
       return "inputLength";
     case "outputLength":
       return "outputLength";
+    case "param":
+      return `params.${expression.name}`;
     case "read":
       return `inputBuffer[${emitIndexExpression(expression.index)}]`;
+    case "outputRead":
+      return `outputBuffer[${emitIndexExpression(expression.index)}]`;
     case "add":
       return `(${emitExpression(expression.left, usage)} + ${emitExpression(expression.right, usage)})`;
     case "sub":
@@ -296,8 +330,12 @@ function cloneExpression(expression: Cuda1DExpression): Cuda1DExpression {
     case "inputLength":
     case "outputLength":
       return { op: expression.op };
+    case "param":
+      return { op: "param", name: expression.name };
     case "read":
       return { op: "read", index: cloneExpression(expression.index) };
+    case "outputRead":
+      return { op: "outputRead", index: cloneExpression(expression.index) };
     case "add":
     case "sub":
     case "mul":
@@ -319,6 +357,31 @@ function emitF32Literal(value: number): string {
 function emitU32Literal(value: number): string {
   const integer = validateNonNegativeInteger(value, "literal index");
   return `${integer}u`;
+}
+
+function validateParameters(
+  parameters: Readonly<Record<string, number>>,
+): Readonly<Record<string, number>> {
+  const out: Record<string, number> = {};
+  for (const [name, value] of Object.entries(parameters).sort(([a], [b]) =>
+    a.localeCompare(b),
+  )) {
+    validateIdentifier(name, "parameter name");
+    out[name] = validateFiniteNumber(value, `parameters.${name}`);
+  }
+  return out;
+}
+
+function readParameter(
+  parameters: Readonly<Record<string, number>>,
+  name: string,
+): number {
+  validateIdentifier(name, "parameter name");
+  const value = parameters[name];
+  if (value === undefined) {
+    throw new KernelError(`missing Cuda1DProgram parameter: ${name}`);
+  }
+  return value;
 }
 
 function validateIdentifier(value: string, name: string): string {

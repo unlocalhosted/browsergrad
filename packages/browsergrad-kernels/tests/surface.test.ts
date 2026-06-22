@@ -7,8 +7,10 @@ import {
   KernelError,
   reference,
   referenceExclusiveScan,
+  referenceFindRepeats,
   referenceFlashAttention,
   referenceFlashAttentionBackward,
+  referenceOrderedCircleRender,
   referenceSaxpy,
   simulateCuda1DGrid,
   simulateCuda1DProgram,
@@ -37,6 +39,8 @@ describe("public surface", () => {
     expect(typeof simulateCuda1DGrid).toBe("function");
     expect(typeof referenceSaxpy).toBe("function");
     expect(typeof referenceExclusiveScan).toBe("function");
+    expect(typeof referenceFindRepeats).toBe("function");
+    expect(typeof referenceOrderedCircleRender).toBe("function");
     expect(typeof referenceFlashAttention).toBe("function");
     expect(typeof referenceFlashAttentionBackward).toBe("function");
   });

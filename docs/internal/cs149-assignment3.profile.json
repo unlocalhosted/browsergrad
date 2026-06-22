@@ -27,6 +27,7 @@
     "exclusive_scan_correctness",
     "renderer_ordering_correctness",
     "kernel_memory_bounds",
+    "wgsl_lowering_smoke",
     "performance_rubric_smoke"
   ],
   "oracles": [

@@ -11,10 +11,12 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - `defineCuda1DProgram()`, `simulateCuda1DProgram()`, and
   `emitCuda1DProgramWgsl()` provide a tiny CUDA-shaped 1D program IR that can
-  run through a deterministic simulator and lower to WGSL.
-- `simulateCuda1DGrid()`, `referenceSaxpy()`, and
-  `referenceExclusiveScan()` provide CUDA-shaped browser-safe oracles for GPU
-  Puzzles and CS149 A3-style rubrics.
+  run through a deterministic simulator and lower to WGSL. It now supports
+  scalar params and `outputRead` expressions for A3-style SAXPY.
+- `simulateCuda1DGrid()`, `referenceSaxpy()`, `referenceExclusiveScan()`,
+  `referenceFindRepeats()`, and `referenceOrderedCircleRender()` provide
+  CUDA-shaped browser-safe references for GPU Puzzles and CS149 A3-style
+  rubrics.
 - `referenceFlashAttention()` returns browser-safe FlashAttention output plus
   log-sum-exp tensors for CS336 A2-style forward/LSE rubric checks.
 - `referenceFlashAttentionBackward()` recomputes Q/K/V gradients for

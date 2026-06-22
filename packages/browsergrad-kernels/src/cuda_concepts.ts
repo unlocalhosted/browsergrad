@@ -20,6 +20,7 @@ export interface Cuda1DThreadContext {
   readonly inputLength: number;
   readonly outputLength: number;
   read(index: number): number;
+  readOutput(index: number): number;
   write(index: number, value: number): void;
 }
 
@@ -28,6 +29,7 @@ export interface Cuda1DThreadTrace {
   readonly blockIdxX: number;
   readonly threadIdxX: number;
   readonly reads: readonly Cuda1DMemoryAccess[];
+  readonly outputReads: readonly Cuda1DMemoryAccess[];
   readonly writes: readonly Cuda1DMemoryAccess[];
 }
 
@@ -105,6 +107,7 @@ export function simulateCuda1DGrid(input: Cuda1DGridInput): Cuda1DGridResult {
     for (let threadIdxX = 0; threadIdxX < threadsPerBlock; threadIdxX++) {
       const globalThreadId = blockIdxX * threadsPerBlock + threadIdxX;
       const reads: Cuda1DMemoryAccess[] = [];
+      const outputReads: Cuda1DMemoryAccess[] = [];
       const writes: Cuda1DMemoryAccess[] = [];
       const context: Cuda1DThreadContext = {
         blockIdxX,
@@ -126,6 +129,16 @@ export function simulateCuda1DGrid(input: Cuda1DGridInput): Cuda1DGridResult {
           }
           const value = initialInput[normalized]!;
           reads.push({ index: normalized, ok: true, value });
+          return value;
+        },
+        readOutput(index) {
+          const normalized = validateMemoryIndex(index, "output read index");
+          if (normalized < 0 || normalized >= outputLength) {
+            outputReads.push({ index: normalized, ok: false });
+            return 0;
+          }
+          const value = output[normalized]!;
+          outputReads.push({ index: normalized, ok: true, value });
           return value;
         },
         write(index, value) {
@@ -151,6 +164,7 @@ export function simulateCuda1DGrid(input: Cuda1DGridInput): Cuda1DGridResult {
         blockIdxX,
         threadIdxX,
         reads,
+        outputReads,
         writes,
       });
     }
@@ -161,7 +175,10 @@ export function simulateCuda1DGrid(input: Cuda1DGridInput): Cuda1DGridResult {
     stats: {
       launchedThreads: blocks * threadsPerBlock,
       activeThreads: trace.filter(
-        (event) => event.reads.length > 0 || event.writes.length > 0,
+        (event) =>
+          event.reads.length > 0 ||
+          event.outputReads.length > 0 ||
+          event.writes.length > 0,
       ).length,
       globalReads: trace.reduce(
         (count, event) => count + event.reads.filter((access) => access.ok).length,
@@ -346,6 +363,7 @@ function cloneTrace(event: Cuda1DThreadTrace): Cuda1DThreadTrace {
     blockIdxX: event.blockIdxX,
     threadIdxX: event.threadIdxX,
     reads: event.reads.map((access) => ({ ...access })),
+    outputReads: event.outputReads.map((access) => ({ ...access })),
     writes: event.writes.map((access) => ({ ...access })),
   };
 }

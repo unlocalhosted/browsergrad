@@ -97,7 +97,9 @@ For every lab profile, the platform should:
     `referenceExclusiveScan()`, `referenceFindRepeats()`, and
     `referenceOrderedCircleRender()` for browser-safe
     map/guard/SAXPY/scan/find-repeats/renderer-ordering checks before native
-    CUDA runners exist.
+    CUDA runners exist. `defineCuda1DProgram()`, `simulateCuda1DProgram()`,
+    and `emitCuda1DProgramWgsl()` cover the first author-once
+    simulator-plus-WGSL path.
     Snapshot-backed labs can use `@unlocalhosted/browsergrad-primitives`
     `createSnapshotComparator()` to compare small JSON/numeric fixtures and emit
     deterministic mismatch paths.
@@ -183,6 +185,8 @@ The first reusable CUDA-concept substrate lives in
 `referenceSaxpy()`, `referenceExclusiveScan()`, and
 `referenceFindRepeats()`, plus `referenceOrderedCircleRender()` for labs that choose
 `cuda-compatible-subset`, `wgsl-kernel`, or `performance-rubric` paths.
+Its `Cuda1DProgram` supports scalar params and `outputRead` expressions so
+SAXPY-like programs can simulate and lower to WGSL from one description.
 The same primitive facade provides the first reusable CS149 CPU/SIMD substrate:
 clamped-exp lane-mask simulation, vector array-sum reduction traces, and static
 contiguous/cyclic work partitioning for labs that choose `simd-simulator`,
@@ -353,7 +357,8 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     `referenceExclusiveScan()`, `referenceFindRepeats()`, and
     `referenceOrderedCircleRender()` for
     map/guard/SAXPY/scan/find-repeats/renderer-ordering fixtures and
-    out-of-bounds guard diagnostics. This is the current HipScript-inspired
+    out-of-bounds guard diagnostics. Use `defineCuda1DProgram()` for
+    `wgsl_lowering_smoke` fixtures. This is the current HipScript-inspired
     CUDA-shaped path: simulator trace first, WGSL/WebGPU lowering next.
     Simulator-backed labs can use `@unlocalhosted/browsergrad-primitives`
     `simulation.createDeterministicMesh()` or `simulation.createTaskGraphSimulator()` for event-trace
