@@ -73,6 +73,9 @@
 - Added `cudaLiteFeatureOptionsFromKernelFeatures()` and
   `compileCudaLiteOptionsFromKernelFeatures()` so platforms can feed
   `detectKernelFeatures()` results directly into CUDA-lite compile gates.
+- Accepted common C/CUDA integer aliases (`signed`, `unsigned`, `short`,
+  `long`, `long long`, `size_t`, fixed-width 32/64-bit aliases, and
+  `uintptr_t`) as CUDA-lite `i32`/`u32` spellings for learner kernels.
 - Added `summarizeCudaWebGpuExecutionPlan()` so platforms can distinguish direct
   WebGPU, host-orchestrated WebGPU, and unsupported plans without misusing the
   conservative lowering plan.

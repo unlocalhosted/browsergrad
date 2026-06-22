@@ -90,6 +90,11 @@ arrays, so small per-thread scratch patterns do not need shared memory.
 Common CUDA float math helpers lower natively in both WGSL and CPU reference:
 `sqrtf`, `expf`, `logf`, `fabsf`, `floorf`, `ceilf`, `roundf`, `truncf`,
 `sinf`, `cosf`, `tanf`, `powf`, `fminf`, and `fmaxf`.
+Common C/CUDA integer spellings are accepted for learner kernels: `signed`,
+`unsigned`, `short`, `long`, `long long`, `size_t`, `int32_t`, `uint32_t`,
+`int64_t`, `uint64_t`, and `uintptr_t`. Current WebGPU lowering maps them onto
+WGSL `i32`/`u32`; true 64-bit integer semantics remain a future polyfill or
+backend capability.
 
 For hot WebGPU paths, pass caller-owned buffers through `residentBuffers` and
 set `readback: []`. This keeps data on GPU across compiler-dispatched kernels;

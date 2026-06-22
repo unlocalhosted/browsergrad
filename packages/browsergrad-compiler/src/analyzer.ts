@@ -1322,6 +1322,15 @@ function sizeofType(typeName: string): number | undefined {
     case "int":
     case "uint":
     case "unsigned":
+    case "signed":
+    case "long":
+    case "short":
+    case "size_t":
+    case "int32_t":
+    case "uint32_t":
+    case "int64_t":
+    case "uint64_t":
+    case "uintptr_t":
       return 4;
     case "half":
     case "__half":

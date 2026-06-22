@@ -27,6 +27,24 @@ import {
 } from "./types.js";
 
 const TYPE_KEYWORDS = new Set(["float", "int", "uint", "half", "bool"]);
+const TYPE_START_KEYWORDS = new Set([
+  ...TYPE_KEYWORDS,
+  "unsigned",
+  "signed",
+  "long",
+  "short",
+  "size_t",
+  "int32_t",
+  "uint32_t",
+  "int64_t",
+  "uint64_t",
+  "uintptr_t",
+  "curandState_t",
+  "cufftComplex",
+  "cudaSurfaceObject_t",
+  "DevicePool",
+  "void",
+]);
 const ASSIGNMENT = new Set(["=", "+=", "-=", "*=", "/=", "<<=", ">>="]);
 const BINARY_PRECEDENCE = new Map<string, number>([
   ["||", 2],
@@ -493,6 +511,7 @@ class Parser {
     const token = this.peek();
     if (this.startsScalarCast()) {
       const start = this.expect("(").span;
+      this.consumeIf("const");
       const valueType = this.parseType();
       const pointer = this.consumeIf("*") !== undefined;
       this.expect(")");
@@ -584,16 +603,10 @@ class Parser {
 
   private startsScalarCast(): boolean {
     if (!this.match("(")) return false;
-    const typeToken = this.tokens[this.index + 1];
-    const maybeStar = this.tokens[this.index + 2];
-    const closeToken = maybeStar?.value === "*" ? this.tokens[this.index + 3] : maybeStar;
-    if (typeToken === undefined || closeToken === undefined || closeToken.value !== ")") return false;
-    if (typeToken.value === "unsigned") return true;
-    if (typeToken.value === "size_t") return true;
-    if (typeToken.value === "void") return true;
-    if (typeToken.value === "DevicePool") return true;
-    if (typeToken.value === "cufftComplex") return true;
-    return TYPE_KEYWORDS.has(typeToken.value);
+    const typeEndIndex = this.typeEndIndex(this.index + 1);
+    if (typeEndIndex === undefined) return false;
+    const closeIndex = this.tokens[typeEndIndex]?.value === "*" ? typeEndIndex + 1 : typeEndIndex;
+    return this.tokens[closeIndex]?.value === ")";
   }
 
   private startsDeviceFunction(): boolean {
@@ -640,16 +653,24 @@ class Parser {
   private parseType(): Exclude<CudaLiteScalarType, "void"> {
     const token = this.expectIdentifier("type");
     if (token.value === "unsigned") {
-      if (this.consumeIf("int")) return "uint";
-      if (this.consumeIf("long")) {
-        if (this.consumeIf("long")) {
-          return "uint";
-        }
-        return "uint";
-      }
+      this.consumeIntegerWidthSuffix();
       return "uint";
     }
+    if (token.value === "signed") {
+      this.consumeIntegerWidthSuffix();
+      return "int";
+    }
+    if (token.value === "long") {
+      this.consumeIf("long");
+      return "int";
+    }
+    if (token.value === "short") {
+      this.consumeIf("int");
+      return "int";
+    }
     if (token.value === "size_t") return "uint";
+    if (token.value === "int32_t" || token.value === "int64_t") return "int";
+    if (token.value === "uint32_t" || token.value === "uint64_t" || token.value === "uintptr_t") return "uint";
     if (token.value === "curandState_t") return "uint";
     if (token.value === "cufftComplex") return "complex64";
     if (token.value === "cudaSurfaceObject_t") return "surface2d";
@@ -666,13 +687,36 @@ class Parser {
 
   private startsVarDecl(): boolean {
     if (this.match("__shared__") || this.match("extern")) return true;
-    if (this.match("unsigned")) return true;
-    if (this.match("size_t")) return true;
-    if (this.match("curandState_t")) return true;
-    if (this.match("cufftComplex")) return true;
-    if (this.match("DevicePool")) return true;
-    if (this.match("void")) return true;
-    return TYPE_KEYWORDS.has(this.peek().value);
+    return TYPE_START_KEYWORDS.has(this.peek().value);
+  }
+
+  private consumeIntegerWidthSuffix(): void {
+    if (this.consumeIf("int")) return;
+    if (this.consumeIf("short")) {
+      this.consumeIf("int");
+      return;
+    }
+    if (this.consumeIf("long")) {
+      this.consumeIf("long");
+      return;
+    }
+  }
+
+  private typeEndIndex(startIndex: number): number | undefined {
+    let index = startIndex;
+    if (this.tokens[index]?.value === "const") index++;
+    const value = this.tokens[index]?.value;
+    if (value === "unsigned" || value === "signed") {
+      index++;
+      if (this.tokens[index]?.value === "int") return index + 1;
+      if (this.tokens[index]?.value === "short") return this.tokens[index + 1]?.value === "int" ? index + 2 : index + 1;
+      if (this.tokens[index]?.value === "long") return this.tokens[index + 1]?.value === "long" ? index + 2 : index + 1;
+      return index;
+    }
+    if (value === "long") return this.tokens[index + 1]?.value === "long" ? index + 2 : index + 1;
+    if (value === "short") return this.tokens[index + 1]?.value === "int" ? index + 2 : index + 1;
+    if (value !== undefined && TYPE_START_KEYWORDS.has(value)) return index + 1;
+    return undefined;
   }
 
   private consumeStorageQualifier(): { readonly storage: "local" | "shared"; readonly dynamicShared: boolean } {

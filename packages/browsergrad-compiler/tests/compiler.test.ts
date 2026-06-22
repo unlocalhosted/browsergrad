@@ -282,6 +282,41 @@ __global__ void sizeKernel(uint* out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([4]);
   });
 
+  it("accepts common C integer aliases as CUDA-lite i32/u32 scalars", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void integerAliases(int32_t *signedOut, uint32_t *unsignedOut, signed int n) {
+  int idx = threadIdx.x;
+  long long signedWide = (long long)idx - 2;
+  signed short small = (signed short)n;
+  unsigned long long unsignedWide = (unsigned long long)n + (uint64_t)idx;
+  uintptr_t ptrValue = (uintptr_t)unsignedWide;
+  uint32_t bytes = (uint32_t)sizeof(long);
+  int64_t signedAlias = (int64_t)signedWide + (int32_t)small;
+  if (idx < 2) {
+    signedOut[idx] = signedAlias;
+    unsignedOut[idx] = ptrValue + bytes;
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          signedOut: new Int32Array(2),
+          unsignedOut: new Uint32Array(2),
+        },
+        scalars: { n: 5 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var signedWide: i32");
+    expect(compiled.wgsl).toContain("var unsignedWide: u32");
+    expect(compiled.wgsl).toContain("var ptrValue: u32");
+    expect(compiled.wgsl).toContain("var bytes: u32 = u32(u32(4))");
+    expect([...result.buffers.signedOut as Int32Array]).toEqual([3, 4]);
+    expect([...result.buffers.unsignedOut as Uint32Array]).toEqual([9, 10]);
+  });
+
   it("returns stable diagnostics for unsupported unsafe cases", () => {
     const constWrite = parseCudaLite(`
 __global__ void bad(const float* x) {
