@@ -254,6 +254,33 @@ __global__ void kernel(const float* x) {
     expect([...result.buffers.out as Float32Array]).toEqual([4, 3, 2, 1]);
   });
 
+  it("reports precise diagnostics for unsupported helper pointer arguments", () => {
+    const mismatch = analyzeCudaLite(parseCudaLite(`
+__device__ void useInt(int* ptr) {}
+
+__global__ void kernel(float* x) {
+  useInt(x);
+}
+`));
+    expect(mismatch.diagnostics).toContainEqual(expect.objectContaining({
+      code: "unsupported-device-pointer-param",
+      message: "device pointer parameter 'ptr' expects int pointer",
+    }));
+
+    const multiDimensionalShared = analyzeCudaLite(parseCudaLite(`
+__device__ void useTile(float* ptr) {}
+
+__global__ void kernel() {
+  __shared__ float tile[2][2];
+  useTile(&tile[0][0]);
+}
+`));
+    expect(multiDimensionalShared.diagnostics).toContainEqual(expect.objectContaining({
+      code: "unsupported-device-pointer-param",
+      message: "device pointer parameter 'ptr' only supports one-dimensional shared arrays",
+    }));
+  });
+
   it("lowers fixed thread-local arrays through reference and WGSL", () => {
     const compiled = compileCudaLiteKernel(LOCAL_ARRAY, { workgroupSize: [4, 1, 1] });
     expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
