@@ -363,9 +363,9 @@ __global__ void parent(float *x, int n) {
     if (!deviceCheck.available) return;
     const source = `
 namespace cg = cooperative_groups;
-__global__ void gridSync(float *scratch, float *out) {
+__global__ void gridSync(float *scratch, float *out, float scale) {
   cg::grid_group grid = cg::this_grid();
-  scratch[blockIdx.x] = (float)blockIdx.x + 1.0f;
+  scratch[blockIdx.x] = ((float)blockIdx.x + 1.0f) * scale;
   grid.sync();
   if (blockIdx.x == 0 && threadIdx.x == 0) {
     out[0] = scratch[0] + scratch[1];
@@ -380,6 +380,7 @@ __global__ void gridSync(float *scratch, float *out) {
         scratch: new Float32Array(2),
         out: new Float32Array(1),
       },
+      scalars: { scale: 1 },
     };
     const launch = { gridDim: [2, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
@@ -393,9 +394,9 @@ __global__ void gridSync(float *scratch, float *out) {
     const device = await createDevice();
     const source = `
 namespace cg = cooperative_groups;
-__global__ void gridSync(float *scratch, float *out) {
+__global__ void gridSync(float *scratch, float *out, float scale) {
   cg::grid_group grid = cg::this_grid();
-  scratch[blockIdx.x] = (float)blockIdx.x + 1.0f;
+  scratch[blockIdx.x] = ((float)blockIdx.x + 1.0f) * scale;
   grid.sync();
   if (blockIdx.x == 0 && threadIdx.x == 0) {
     out[0] = scratch[0] + scratch[1];
@@ -418,6 +419,7 @@ __global__ void gridSync(float *scratch, float *out) {
     const input = {
       buffers: {},
       residentBuffers: { scratch, out },
+      scalars: { scale: 1 },
       readback: [],
     };
     const launch = { gridDim: [2, 1, 1] as const, blockDim: [1, 1, 1] as const };
@@ -426,6 +428,7 @@ __global__ void gridSync(float *scratch, float *out) {
         scratch: new Float32Array(2),
         out: new Float32Array(1),
       },
+      scalars: { scale: 1 },
     }, launch);
     const prepared = await prepareCompiledKernelWebGpu(device, compiled, input, launch);
 
@@ -440,8 +443,8 @@ __global__ void gridSync(float *scratch, float *out) {
 
       writeWgslStorageBuffer(device, scratch, new Float32Array([0, 0]));
       writeWgslStorageBuffer(device, out, new Float32Array([0]));
-      const second = await prepared.run({ readback: ["out"] });
-      expect([...second.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+      const second = await prepared.run({ scalars: { scale: 2 }, readback: ["out"] });
+      expect([...second.buffers.out as Float32Array]).toEqual([6]);
     } finally {
       prepared.destroy();
       destroyWgslStorageBuffer(scratch);
