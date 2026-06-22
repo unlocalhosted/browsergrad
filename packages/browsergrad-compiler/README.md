@@ -222,8 +222,11 @@ compileCudaLiteKernel(source, {
 ```
 
 `cudaMemcpy`, `cudaMemcpyAsync`, and `cudaMemcpyPeerAsync` copy bytes inside the
-reference interpreter. `runCompiledKernelWebGpu` can host-lift conservative
-device-to-device copies into a typed WebGPU copy dispatch when the call is
+reference interpreter. CUDA stream/event lifecycle, record, and synchronize
+calls are modeled as host-managed ordering points; they do not create browser
+CUDA streams, but they let common async-copy examples compile and run honestly.
+`runCompiledKernelWebGpu` can host-lift conservative device-to-device copies
+into a typed WebGPU copy dispatch when the call is
 single-invocation guarded, source/destination are named `Float32Array`,
 `Int32Array`, `Uint32Array`, or matching resident GPU buffers, offsets are
 non-negative and host-evaluable, byte count is element-aligned, and the copy

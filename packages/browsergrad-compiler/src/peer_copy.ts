@@ -287,7 +287,17 @@ function containsPeerCopyCall(statements: readonly CudaLiteStatement[]): boolean
 function isHostNoopExpression(expression: CudaLiteExpression): boolean {
   if (expression.kind !== "call") return false;
   const name = expressionName(expression.callee);
-  return name === "cudaDeviceSynchronize" || name === "printf";
+  return name === "cudaDeviceSynchronize" ||
+    name === "cudaStreamCreate" ||
+    name === "cudaStreamCreateWithFlags" ||
+    name === "cudaStreamDestroy" ||
+    name === "cudaStreamSynchronize" ||
+    name === "cudaEventCreate" ||
+    name === "cudaEventCreateWithFlags" ||
+    name === "cudaEventDestroy" ||
+    name === "cudaEventRecord" ||
+    name === "cudaEventSynchronize" ||
+    name === "printf";
 }
 
 function cudaRuntimeCopyShape(

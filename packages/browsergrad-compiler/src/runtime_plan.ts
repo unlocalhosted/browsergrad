@@ -127,11 +127,11 @@ function runtimeOperationForExpression(
 ): CudaRuntimeOperation | undefined {
   if (expression.kind !== "call") return undefined;
   if (expression.callee.kind === "identifier") {
-    if (expression.callee.name === "cudaDeviceSynchronize") {
+    if (isHostManagedRuntimeNoopCall(expression.callee.name)) {
       return {
         kind: "device-sync",
         span: expression.span,
-        label: "cudaDeviceSynchronize()",
+        label: `${expression.callee.name}()`,
       };
     }
     if (isCudaRuntimeCopyCall(expression.callee.name)) {
@@ -159,6 +159,19 @@ function runtimeOperationForExpression(
 
 function isCudaRuntimeCopyCall(name: string): boolean {
   return name === "cudaMemcpy" || name === "cudaMemcpyAsync" || name === "cudaMemcpyPeerAsync";
+}
+
+function isHostManagedRuntimeNoopCall(name: string): boolean {
+  return name === "cudaDeviceSynchronize" ||
+    name === "cudaStreamCreate" ||
+    name === "cudaStreamCreateWithFlags" ||
+    name === "cudaStreamDestroy" ||
+    name === "cudaStreamSynchronize" ||
+    name === "cudaEventCreate" ||
+    name === "cudaEventCreateWithFlags" ||
+    name === "cudaEventDestroy" ||
+    name === "cudaEventRecord" ||
+    name === "cudaEventSynchronize";
 }
 
 function collectCooperativeGroups(

@@ -86,6 +86,15 @@ const peerCopyProgramCache = new Map<CudaPeerCopyOperation["valueType"], WgslKer
 const DEFAULT_MAX_HOST_DYNAMIC_LAUNCH_DEPTH = 8;
 const HOST_SIDE_EFFECT_FREE_CALLS = new Set([
   "cudaDeviceSynchronize",
+  "cudaStreamCreate",
+  "cudaStreamCreateWithFlags",
+  "cudaStreamDestroy",
+  "cudaStreamSynchronize",
+  "cudaEventCreate",
+  "cudaEventCreateWithFlags",
+  "cudaEventDestroy",
+  "cudaEventRecord",
+  "cudaEventSynchronize",
   "deviceAllocate",
   "expf",
   "fmaxf",

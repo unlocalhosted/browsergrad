@@ -60,10 +60,29 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["curand_init", [4, 4]],
   ["curand_uniform", [1, 1]],
   ["cudaDeviceSynchronize", [0, 0]],
+  ["cudaStreamCreate", [1, 1]],
+  ["cudaStreamCreateWithFlags", [2, 2]],
+  ["cudaStreamDestroy", [1, 1]],
+  ["cudaStreamSynchronize", [1, 1]],
+  ["cudaEventCreate", [1, 1]],
+  ["cudaEventCreateWithFlags", [2, 2]],
+  ["cudaEventDestroy", [1, 1]],
+  ["cudaEventRecord", [1, 2]],
+  ["cudaEventSynchronize", [1, 1]],
   ["cudaMemcpy", [4, 4]],
   ["cudaMemcpyAsync", [5, 5]],
   ["cudaMemcpyPeerAsync", [6, 6]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
+]);
+const CUDA_RUNTIME_CONSTANTS = new Set([
+  "cudaEventDefault",
+  "cudaEventDisableTiming",
+  "cudaEventInterprocess",
+  "cudaEventBlockingSync",
+  "cudaStreamDefault",
+  "cudaStreamNonBlocking",
+  "cudaMemcpyDeviceToDevice",
+  "cudaMemcpyDefault",
 ]);
 const WGSL_RESERVED_WORDS = new Set([
   "alias",
@@ -647,8 +666,8 @@ function validateCallExpression(
     }
     return { kind: "scalar" };
   }
-  if (callName === "cudaDeviceSynchronize") {
-    validateRuntimeCall(expression, "cudaDeviceSynchronize() requires explicit runtime orchestration", diagnostics, walkExpression, scope, options);
+  if (isHostManagedRuntimeNoopCall(callName)) {
+    validateRuntimeCall(expression, `${callName}() is host-managed in CUDA-lite WebGPU execution`, diagnostics, walkExpression, scope, options);
     return { kind: "scalar", valueType: "int" };
   }
   if (isCudaRuntimeCopyCall(callName)) {
@@ -757,6 +776,19 @@ function validateRuntimeCopyCall(
 
 function isCudaRuntimeCopyCall(callName: string): boolean {
   return callName === "cudaMemcpy" || callName === "cudaMemcpyAsync" || callName === "cudaMemcpyPeerAsync";
+}
+
+function isHostManagedRuntimeNoopCall(callName: string): boolean {
+  return callName === "cudaDeviceSynchronize" ||
+    callName === "cudaStreamCreate" ||
+    callName === "cudaStreamCreateWithFlags" ||
+    callName === "cudaStreamDestroy" ||
+    callName === "cudaStreamSynchronize" ||
+    callName === "cudaEventCreate" ||
+    callName === "cudaEventCreateWithFlags" ||
+    callName === "cudaEventDestroy" ||
+    callName === "cudaEventRecord" ||
+    callName === "cudaEventSynchronize";
 }
 
 function supportedCudaMemcpyKind(expression: CudaLiteExpression | undefined): boolean {
@@ -1294,6 +1326,7 @@ function expressionInfoForIdentifier(
 ): ExpressionInfo {
   const symbol = lookupSymbol(name, scope, span);
   if (!symbol && name === "nullptr") return { kind: "scalar", valueType: "voidptr" };
+  if (!symbol && CUDA_RUNTIME_CONSTANTS.has(name)) return { kind: "scalar", valueType: "uint" };
   if (!symbol) {
     diagnostics.push(error("unknown-symbol", `unknown CUDA-lite symbol '${name}'`, span));
     return { kind: "unknown" };

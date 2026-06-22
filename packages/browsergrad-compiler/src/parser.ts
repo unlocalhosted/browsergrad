@@ -42,6 +42,8 @@ const TYPE_START_KEYWORDS = new Set([
   "curandState_t",
   "cufftComplex",
   "cudaSurfaceObject_t",
+  "cudaEvent_t",
+  "cudaStream_t",
   "DevicePool",
   "void",
 ]);
@@ -674,6 +676,7 @@ class Parser {
     if (token.value === "curandState_t") return "uint";
     if (token.value === "cufftComplex") return "complex64";
     if (token.value === "cudaSurfaceObject_t") return "surface2d";
+    if (token.value === "cudaEvent_t" || token.value === "cudaStream_t") return "uint";
     if (token.value === "DevicePool") return "devicepool";
     if (token.value === "void") return "voidptr";
     if (!TYPE_KEYWORDS.has(token.value)) this.fail(`unsupported CUDA-lite type: ${token.value}`, token.span);

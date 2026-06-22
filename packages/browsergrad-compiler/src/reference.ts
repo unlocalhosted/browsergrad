@@ -933,7 +933,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   const cooperativeGroupCall = evalCooperativeGroupCall(expression, context);
   if (cooperativeGroupCall !== undefined) return cooperativeGroupCall;
   if (name === "printf") return 0;
-  if (name === "cudaDeviceSynchronize") return 0;
+  if (name !== undefined && isHostManagedRuntimeNoopCall(name)) return 0;
   if (name === "cudaMemcpy" || name === "cudaMemcpyAsync" || name === "cudaMemcpyPeerAsync") {
     execCudaRuntimeCopy(expression, context);
     return 0;
@@ -1089,8 +1089,21 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     case "__shfl_xor_sync":
       return args[1] ?? 0;
     default:
-      throw compilerFailure(`unsupported call '${name ?? "<expr>"}'`);
-  }
+  throw compilerFailure(`unsupported call '${name ?? "<expr>"}'`);
+}
+
+function isHostManagedRuntimeNoopCall(name: string): boolean {
+  return name === "cudaDeviceSynchronize" ||
+    name === "cudaStreamCreate" ||
+    name === "cudaStreamCreateWithFlags" ||
+    name === "cudaStreamDestroy" ||
+    name === "cudaStreamSynchronize" ||
+    name === "cudaEventCreate" ||
+    name === "cudaEventCreateWithFlags" ||
+    name === "cudaEventDestroy" ||
+    name === "cudaEventRecord" ||
+    name === "cudaEventSynchronize";
+}
 }
 
 function poolNameFromAllocatorArg(expression: CudaLiteExpression | undefined, context: ThreadContext): string | undefined {

@@ -47,9 +47,18 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
 }`,
   runtimeCopy: `
 __global__ void runtimeCopy(float *dst, const float *src, int n) {
+  cudaStream_t stream;
+  cudaEvent_t event;
   if (threadIdx.x == 0) {
+    cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking);
+    cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
     cudaMemcpy(dst + 1, src, sizeof(float) * n, cudaMemcpyDeviceToDevice);
-    cudaMemcpyAsync(dst + 3, src + 1, sizeof(float), cudaMemcpyDefault, 0);
+    cudaMemcpyAsync(dst + 3, src + 1, sizeof(float), cudaMemcpyDefault, stream);
+    cudaEventRecord(event, stream);
+    cudaEventSynchronize(event);
+    cudaStreamSynchronize(stream);
+    cudaEventDestroy(event);
+    cudaStreamDestroy(stream);
   }
 }`,
   dynamicLaunch: `

@@ -106,6 +106,9 @@ Supported layers:
 - Device launches and runtime copies are runtime operations. They may be
   host-lifted only when `webgpu_orchestration.ts` can build a complete,
   deterministic sequence.
+- Stream/event create, destroy, record, and synchronize calls are modeled as
+  host-managed ordering no-ops. They preserve source compatibility for async
+  copy lessons without pretending WebGPU exposes CUDA stream semantics.
 - Host-dynamic launch planning can expand parent invocations with CUDA builtin
   coordinates and flatten recursive child launches, but bounded caps protect the
   browser from runaway launch trees.

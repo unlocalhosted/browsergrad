@@ -108,3 +108,5 @@
   host-dynamic expansion/depth caps and validate cap values before planning.
 - Host-copy orchestration now supports `cudaMemcpy` and `cudaMemcpyAsync`
   device-to-device copies alongside `cudaMemcpyPeerAsync`.
+- CUDA stream/event lifecycle, record, and synchronize calls now parse and run
+  as host-managed ordering no-ops for async-copy examples.

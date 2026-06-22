@@ -1024,6 +1024,15 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "__syncthreads":
       return "workgroupBarrier()";
     case "cudaDeviceSynchronize":
+    case "cudaStreamCreate":
+    case "cudaStreamCreateWithFlags":
+    case "cudaStreamDestroy":
+    case "cudaStreamSynchronize":
+    case "cudaEventCreate":
+    case "cudaEventCreateWithFlags":
+    case "cudaEventDestroy":
+    case "cudaEventRecord":
+    case "cudaEventSynchronize":
       return "0";
     case "cudaMemcpy":
       return "0";
@@ -1286,6 +1295,16 @@ function noopCallComment(expression: CudaLiteExpression): string | undefined {
       return "printf omitted: WebGPU has no device stdout";
     case "cudaDeviceSynchronize":
       return "cudaDeviceSynchronize omitted: WebGPU dispatch completion is host-managed";
+    case "cudaStreamCreate":
+    case "cudaStreamCreateWithFlags":
+    case "cudaStreamDestroy":
+    case "cudaStreamSynchronize":
+    case "cudaEventCreate":
+    case "cudaEventCreateWithFlags":
+    case "cudaEventDestroy":
+    case "cudaEventRecord":
+    case "cudaEventSynchronize":
+      return `${expressionName(expression.callee)} omitted: WebGPU stream/event orchestration is host-managed`;
     case "cudaMemcpy":
       return "cudaMemcpy omitted: WebGPU copy orchestration is host-managed";
     case "cudaMemcpyAsync":

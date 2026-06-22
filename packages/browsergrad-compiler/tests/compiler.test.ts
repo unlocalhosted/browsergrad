@@ -965,9 +965,18 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
   it("runs cudaMemcpy and cudaMemcpyAsync through the host-copy planner", () => {
     const source = `
 __global__ void runtimeCopy(float *dst, const float *src, int n) {
+  cudaStream_t stream;
+  cudaEvent_t event;
   if (threadIdx.x == 0) {
+    cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking);
+    cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
     cudaMemcpy(dst + 1, src, sizeof(float) * n, cudaMemcpyDeviceToDevice);
-    cudaMemcpyAsync(dst + 3, src + 1, sizeof(float), cudaMemcpyDefault, 0);
+    cudaMemcpyAsync(dst + 3, src + 1, sizeof(float), cudaMemcpyDefault, stream);
+    cudaEventRecord(event, stream);
+    cudaEventSynchronize(event);
+    cudaStreamSynchronize(stream);
+    cudaEventDestroy(event);
+    cudaStreamDestroy(stream);
   }
 }`;
     const compiled = compileCudaLiteKernel(source, {
@@ -984,8 +993,20 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const result = runCompiledKernelReference(compiled, input, launch);
     const plan = createCudaRuntimeCopyPlan(compiled, input, launch);
+    const runtimePlan = createCudaRuntimePlan(compiled);
 
     expect([...result.buffers.dst as Float32Array]).toEqual([0, 2.5, 3.5, 3.5]);
+    expect(runtimePlan.operations.map((operation) => operation.kind)).toEqual([
+      "device-sync",
+      "device-sync",
+      "runtime-copy",
+      "runtime-copy",
+      "device-sync",
+      "device-sync",
+      "device-sync",
+      "device-sync",
+      "device-sync",
+    ]);
     expect(plan.supported).toBe(true);
     expect(plan.copies.map((copy) => ({
       dstOffset: copy.dstOffset,
