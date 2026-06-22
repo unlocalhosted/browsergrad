@@ -37,9 +37,9 @@ truth, WGSL lowering, browser tests, and corpus audit evidence.
 Current corpus gate (`node scripts/audit-cuda-lite-corpus.mjs /tmp/CUDA-120-DAYS--CHALLENGE`):
 
 - `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/243` real code-kernel
-  definitions compile as single-dispatch WGSL/WebGPU. Another `2/243` are
+  definitions compile as single-dispatch WGSL/WebGPU. Another `10/243` are
   real-GPU runnable through WebGPU orchestration lifts (`grid-sync-phases`),
-  for `227/243` total WebGPU coverage. `15/243` remain true reference-only,
+  for `235/243` total WebGPU coverage. `7/243` remain true reference-only,
   and `1/243` remains a hard gap after filtering docs/pseudocode.
 - `referenceFallbackOk` is `17/243`: kernels whose semantics are understood by
   CPU reference. `referenceOnlyOk` is stricter and excludes kernels now runnable
@@ -57,7 +57,10 @@ Current corpus gate (`node scripts/audit-cuda-lite-corpus.mjs /tmp/CUDA-120-DAYS
   rejects until host/device orchestration lands.
 - Cooperative `grid.sync()` can run in CPU reference with `referenceGridSync`.
   Safe top-level uniform `grid.sync()` also runs on real WebGPU as multiple
-  dispatch phases over shared GPU buffers. Non-uniform sync, private locals
-  crossing phases, or shared-memory state crossing phases remain reference-only.
+  dispatch phases over shared GPU buffers. Pure launch-derived locals are
+  replayed in later phases, and shared memory can be reused after sync when the
+  phase rewrites it before any read. Non-uniform sync, non-replayable private
+  locals crossing phases, or shared-memory read-before-rewrite remain
+  reference-only.
 - Remaining failures group cleanly: dynamic parallelism/runtime launches,
   cooperative groups/grid sync, and one incomplete pseudocode symbol.

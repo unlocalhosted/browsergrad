@@ -689,7 +689,7 @@ __global__ void gridPhases(float *scratch, float *out) {
 namespace cg = cooperative_groups;
 __global__ void badGridPhase(float *out) {
   cg::grid_group grid = cg::this_grid();
-  float carry = blockIdx.x + 1;
+  float carry = out[blockIdx.x];
   grid.sync();
   if (blockIdx.x == 0 && threadIdx.x == 0) { out[0] = carry; }
 }`, {
@@ -700,6 +700,52 @@ __global__ void badGridPhase(float *out) {
 
     expect(plan.supported).toBe(false);
     if (!plan.supported) expect(plan.reason).toContain("private thread state");
+  });
+
+  it("plans grid sync phases when shared memory is rewritten after sync", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void sharedReuse(float *out) {
+  cg::grid_group grid = cg::this_grid();
+  __shared__ float tile[2];
+  int tid = threadIdx.x;
+  tile[tid] = (float)(blockIdx.x * 2 + tid + 1);
+  __syncthreads();
+  if (tid == 0) { out[blockIdx.x] = tile[0] + tile[1]; }
+  grid.sync();
+  if (blockIdx.x == 0) {
+    tile[tid] = out[tid];
+    __syncthreads();
+    if (tid == 0) { out[0] = tile[0] + tile[1]; }
+  }
+}`, {
+      referenceGridSync: true,
+      workgroupSize: [2, 1, 1],
+    });
+    const plan = createCudaGridSyncPhasePlan(compiled.ir);
+
+    expect(plan.supported).toBe(true);
+    if (plan.supported) expect(plan.modules).toHaveLength(2);
+  });
+
+  it("rejects grid sync phases when shared memory is read before rewrite", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void sharedCarry(float *out) {
+  cg::grid_group grid = cg::this_grid();
+  __shared__ float tile[2];
+  int tid = threadIdx.x;
+  tile[tid] = (float)(tid + 1);
+  grid.sync();
+  if (tid == 0) { out[0] = tile[0]; }
+}`, {
+      referenceGridSync: true,
+      workgroupSize: [2, 1, 1],
+    });
+    const plan = createCudaGridSyncPhasePlan(compiled.ir);
+
+    expect(plan.supported).toBe(false);
+    if (!plan.supported) expect(plan.reason).toContain("read before rewrite");
   });
 
   it("supports cooperative-group shuffle variants and linear thread ranks", () => {

@@ -224,6 +224,36 @@ __global__ void gridSync(float *scratch, float *out) {
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs grid.sync phases when shared memory is rewritten after sync", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+namespace cg = cooperative_groups;
+__global__ void sharedReuse(float *out) {
+  cg::grid_group grid = cg::this_grid();
+  __shared__ float tile[2];
+  int tid = threadIdx.x;
+  tile[tid] = (float)(blockIdx.x * 2 + tid + 1);
+  __syncthreads();
+  if (tid == 0) { out[blockIdx.x] = tile[0] + tile[1]; }
+  grid.sync();
+  if (blockIdx.x == 0) {
+    tile[tid] = out[tid];
+    __syncthreads();
+    if (tid == 0) { out[0] = tile[0] + tile[1]; }
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      referenceGridSync: true,
+      workgroupSize: [2, 1, 1],
+    });
+    const input = { buffers: { out: new Float32Array(2) } };
+    const launch = { gridDim: [2, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
   it("runs standalone cudaDeviceSynchronize as a WebGPU no-op", async () => {
     if (!deviceCheck.available) return;
     const source = `
