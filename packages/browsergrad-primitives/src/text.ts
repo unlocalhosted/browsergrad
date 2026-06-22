@@ -85,6 +85,12 @@ interface PairCount {
   count: number;
 }
 
+interface MergeRule {
+  readonly left: number;
+  readonly right: number;
+  readonly merged: number;
+}
+
 export function trainByteBpe(
   input: string,
   options: TrainByteBpeOptions,
@@ -93,7 +99,7 @@ export function trainByteBpe(
     throw new Error("vocabSize must be a non-negative integer");
   }
 
-  const specialTokens = [...(options.specialTokens ?? [])];
+  const specialTokens = normalizeSpecialTokens(options.specialTokens ?? []);
   const pretokenizerPattern =
     options.pretokenizerPattern ?? GPT2_PRETOKENIZER_PATTERN;
   const vocab = createInitialVocabulary(specialTokens);
@@ -143,6 +149,7 @@ export function encodeByteBpe(
   const out: number[] = [];
   const byteToId = buildByteToId(model.vocab);
   const specialTokenIds = buildSpecialTokenIds(model);
+  const mergeRules = buildMergeRules(model, byteToId);
   const pattern = new RegExp(model.pretokenizerPattern, "gu");
 
   for (const segment of splitPreservingSpecialTokens(text, model.specialTokens)) {
@@ -161,7 +168,7 @@ export function encodeByteBpe(
       if (pretoken.length === 0) continue;
       const bytes = UTF8_ENCODER.encode(pretoken);
       let ids = [...bytes];
-      ids = applyMerges(ids, model, byteToId);
+      ids = applyMergeRules(ids, mergeRules);
       out.push(...ids);
     }
   }
@@ -203,7 +210,7 @@ export function serializeByteBpeModel(
   return {
     vocab,
     merges: model.merges.map(([left, right]) => [[...left], [...right]]),
-    specialTokens: [...model.specialTokens],
+    specialTokens: normalizeSpecialTokens(model.specialTokens),
     pretokenizerPattern: model.pretokenizerPattern,
   };
 }
@@ -594,16 +601,12 @@ function compareBytes(a: Uint8Array, b: Uint8Array): number {
   return a.length - b.length;
 }
 
-function applyMerges(
-  ids: readonly number[],
+function buildMergeRules(
   model: ByteBpeModel,
   byteToId: ReadonlyMap<string, number>,
-): number[] {
-  let current = [...ids];
+): readonly MergeRule[] {
   const firstMergeId = 256 + model.specialTokens.length;
-  for (let mergeIndex = 0; mergeIndex < model.merges.length; mergeIndex++) {
-    const pair = model.merges[mergeIndex];
-    if (!pair) continue;
+  return model.merges.map((pair, mergeIndex) => {
     const [leftBytes, rightBytes] = pair;
     const leftId = byteToId.get(bytesKey(leftBytes));
     const rightId = byteToId.get(bytesKey(rightBytes));
@@ -614,13 +617,22 @@ function applyMerges(
     if (!model.vocab.has(mergedId)) {
       throw new Error(`model merge id ${mergedId} is missing from vocabulary`);
     }
+    return { left: leftId, right: rightId, merged: mergedId };
+  });
+}
 
+function applyMergeRules(
+  ids: readonly number[],
+  mergeRules: readonly MergeRule[],
+): number[] {
+  let current = [...ids];
+  for (const rule of mergeRules) {
     const next: number[] = [];
     for (let i = 0; i < current.length; i++) {
       const token = current[i];
       const following = current[i + 1];
-      if (token === leftId && following === rightId) {
-        next.push(mergedId);
+      if (token === rule.left && following === rule.right) {
+        next.push(rule.merged);
         i += 1;
       } else if (token !== undefined) {
         next.push(token);
@@ -636,6 +648,22 @@ function buildByteToId(vocab: ReadonlyMap<number, Uint8Array>): Map<string, numb
   for (const [id, bytes] of [...vocab.entries()].sort((a, b) => a[0] - b[0])) {
     const key = bytesKey(bytes);
     if (!out.has(key)) out.set(key, id);
+  }
+  return out;
+}
+
+function normalizeSpecialTokens(tokens: readonly string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const token of tokens) {
+    if (token.length === 0) {
+      throw new Error("special tokens must be non-empty");
+    }
+    if (seen.has(token)) {
+      throw new Error(`duplicate special token: ${token}`);
+    }
+    seen.add(token);
+    out.push(token);
   }
   return out;
 }

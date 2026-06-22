@@ -47,4 +47,14 @@ describe("trainByteBpe", () => {
     expect(model.merges).toEqual([]);
     expect([...model.vocab.keys()]).toEqual([0, 1]);
   });
+
+  it("rejects empty and duplicate special tokens", () => {
+    expect(() =>
+      trainByteBpe("abc", { vocabSize: 260, specialTokens: [""] }),
+    ).toThrow(/special tokens must be non-empty/);
+
+    expect(() =>
+      trainByteBpe("abc", { vocabSize: 260, specialTokens: ["<x>", "<x>"] }),
+    ).toThrow(/duplicate special token/);
+  });
 });
