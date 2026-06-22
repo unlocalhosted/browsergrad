@@ -36,6 +36,8 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
   `readWgslStorageBuffer()` — caller-owned resident storage buffers for generic
   WGSL programs. Use `residentBuffers` with `runWgslKernelProgramSequence()` to
   avoid per-call upload and skip readback with `readback: []`.
+- `prepareWgslKernelProgramSequence()` — prebuilds pipelines and bind groups
+  once, then reruns the same WGSL sequence over resident buffers for hot loops.
 
 ## Install
 
@@ -173,6 +175,19 @@ await runWgslKernelProgram(
 );
 
 const out = await readWgslStorageBuffer(device, x);
+```
+
+For repeated dispatches, prepare the sequence once:
+
+```ts
+const prepared = await prepareWgslKernelProgramSequence(
+  device,
+  [{ program, launch: { dispatchCount: [4, 1, 1] } }],
+  { buffers: {}, residentBuffers: { x }, readback: [] },
+);
+await prepared.run();
+await prepared.run({ readback: [] });
+prepared.destroy();
 ```
 
 ### Kernel rubric assertions

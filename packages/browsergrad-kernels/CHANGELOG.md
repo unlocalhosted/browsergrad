@@ -38,6 +38,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `createWgslStorageBuffer()`, `writeWgslStorageBuffer()`, `readWgslStorageBuffer()`, and
   `residentBuffers` let generic WGSL callers keep `GPUBuffer`s alive across
   dispatches and opt out of readback with `readback: []`.
+- `prepareWgslKernelProgramSequence()` prebuilds pipelines and bind groups for
+  reusable hot-loop WGSL sequences over resident buffers.
 
 ## [0.1.1] — 2026-06-02
 

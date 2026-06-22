@@ -4,6 +4,7 @@ import {
   createWgslStorageBuffer,
   defineWgslKernelProgram,
   destroyWgslStorageBuffer,
+  prepareWgslKernelProgramSequence,
   readWgslStorageBuffer,
   runWgslKernelProgram,
   runWgslKernelProgramSequence,
@@ -342,6 +343,49 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       const second = await readWgslStorageBuffer(device, x);
       expect([...second as Float32Array]).toEqual([4, 10, 12, 16]);
     } finally {
+      destroyWgslStorageBuffer(x);
+    }
+  });
+
+  it("reuses a prepared WGSL sequence across resident-buffer runs", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const program = defineWgslKernelProgram({
+      name: "prepared_resident_scale",
+      workgroupSize: [4, 1, 1],
+      bindings: [{ kind: "storage", name: "x", valueType: "f32", access: "read_write" }],
+      wgsl: `
+@group(0) @binding(0) var<storage, read_write> x: array<f32>;
+@compute @workgroup_size(4, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < arrayLength(&x)) { x[gid.x] = x[gid.x] * 3.0; }
+}`,
+    });
+    const x = createWgslStorageBuffer(device, {
+      valueType: "f32",
+      data: new Float32Array([1, 2, 3, 4]),
+      label: "prepared-resident-x",
+    });
+    const prepared = await prepareWgslKernelProgramSequence(
+      device,
+      [{ program, launch: { dispatchCount: [4, 1, 1] } }],
+      { buffers: {}, residentBuffers: { x }, readback: [] },
+    );
+
+    try {
+      expect(prepared.stepCount).toBe(1);
+
+      const first = await prepared.run();
+      expect(first.buffers).toEqual({});
+      const firstReadback = await readWgslStorageBuffer(device, x);
+      expect([...firstReadback as Float32Array]).toEqual([3, 6, 9, 12]);
+
+      writeWgslStorageBuffer(device, x, new Float32Array([2, 4, 6, 8]));
+      await prepared.run({ readback: [] });
+      const secondReadback = await readWgslStorageBuffer(device, x);
+      expect([...secondReadback as Float32Array]).toEqual([6, 12, 18, 24]);
+    } finally {
+      prepared.destroy();
       destroyWgslStorageBuffer(x);
     }
   });

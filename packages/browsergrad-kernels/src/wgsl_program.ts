@@ -111,10 +111,24 @@ export interface WgslKernelRunResult {
   readonly buffers: Readonly<Record<string, WgslTypedArray>>;
 }
 
+export interface WgslPreparedKernelSequenceRunOptions {
+  readonly readback?: readonly string[];
+}
+
+export interface WgslPreparedKernelSequence {
+  readonly stepCount: number;
+  run(options?: WgslPreparedKernelSequenceRunOptions): Promise<WgslKernelRunResult>;
+  destroy(): void;
+}
+
 interface CachedWgslPipeline {
   readonly pipeline: GPUComputePipeline;
   readonly bindGroupLayout: GPUBindGroupLayout;
 }
+
+type KernelDeviceImpl = ReturnType<typeof asImpl>;
+type PreparedStorageBuffer = { binding: WgslStorageBinding; buffer: GPUBuffer; byteLength: number; owned: boolean };
+type PreparedExecutableStep = { pipeline: GPUComputePipeline; bindGroup: GPUBindGroup; program: WgslKernelProgram };
 
 const WGSL_PIPELINE_CACHE_LIMIT = 128;
 const WGSL_PIPELINE_CACHE = new WeakMap<GPUDevice, Map<string, Promise<CachedWgslPipeline>>>();
@@ -310,6 +324,19 @@ export async function runWgslKernelProgramSequence(
   steps: readonly WgslKernelSequenceStep[],
   input: WgslKernelRunInput,
 ): Promise<WgslKernelRunResult> {
+  const prepared = await prepareWgslKernelProgramSequence(device, steps, input);
+  try {
+    return await prepared.run();
+  } finally {
+    prepared.destroy();
+  }
+}
+
+export async function prepareWgslKernelProgramSequence(
+  device: KernelDevice,
+  steps: readonly WgslKernelSequenceStep[],
+  input: WgslKernelRunInput,
+): Promise<WgslPreparedKernelSequence> {
   if (steps.length === 0) throw new KernelError("WGSL program sequence must contain at least one step");
   const impl = asImpl(device);
   const gpu = impl.gpu;
@@ -323,12 +350,11 @@ export async function runWgslKernelProgramSequence(
         .map(({ step, binding }) => storageBufferNameForStep(step, binding.name)),
   );
 
-  const storageBuffers = new Map<string, { binding: WgslStorageBinding; buffer: GPUBuffer; byteLength: number; owned: boolean }>();
+  const storageBuffers = new Map<string, PreparedStorageBuffer>();
   const uniformBuffers: GPUBuffer[] = [];
   const uniformBuffersByStep = new Map<string, GPUBuffer>();
   const textures: GPUTexture[] = [];
   const textureViewsByName = new Map<string, GPUTextureView>();
-  const readBuffers = new Set<GPUBuffer>();
 
   try {
     for (const binding of collectStorageBindings(steps)) {
@@ -400,7 +426,7 @@ export async function runWgslKernelProgramSequence(
         textureViewsByName.set(binding.name, view);
     }
 
-    const executableSteps = [];
+    const executableSteps: PreparedExecutableStep[] = [];
     for (let stepIndex = 0; stepIndex < programs.length; stepIndex++) {
       const program = programs[stepIndex]!;
       const { layoutEntries, bindGroupEntries } = bindGroupInputsForProgram(
@@ -417,12 +443,46 @@ export async function runWgslKernelProgramSequence(
       executableSteps.push({ pipeline, bindGroup, program });
     }
 
-    const encoder = gpu.createCommandEncoder({
-      label: `bg-wgsl-sequence-${programs.map((program) => program.name).join("-")}`,
-    });
-    for (let i = 0; i < executableSteps.length; i++) {
-      const step = executableSteps[i]!;
-      const dispatchCount = dispatchCounts[i]!;
+    return new PreparedWgslKernelSequenceImpl(
+      impl,
+      dispatchCounts,
+      storageBuffers,
+      uniformBuffers,
+      textures,
+      executableSteps,
+      readbackNames,
+      `bg-wgsl-sequence-${programs.map((program) => program.name).join("-")}`,
+    );
+  } catch (error) {
+    destroyPreparedResources(storageBuffers, uniformBuffers, textures);
+    throw error;
+  }
+}
+
+class PreparedWgslKernelSequenceImpl implements WgslPreparedKernelSequence {
+  readonly stepCount: number;
+  private destroyed = false;
+
+  constructor(
+    private readonly impl: KernelDeviceImpl,
+    private readonly dispatchCounts: readonly (readonly [number, number, number])[],
+    private readonly storageBuffers: Map<string, PreparedStorageBuffer>,
+    private readonly uniformBuffers: readonly GPUBuffer[],
+    private readonly textures: readonly GPUTexture[],
+    private readonly executableSteps: readonly PreparedExecutableStep[],
+    private readonly defaultReadbackNames: ReadonlySet<string>,
+    private readonly label: string,
+  ) {
+    this.stepCount = executableSteps.length;
+  }
+
+  async run(options: WgslPreparedKernelSequenceRunOptions = {}): Promise<WgslKernelRunResult> {
+    if (this.destroyed) throw new KernelError("prepared WGSL sequence has been destroyed");
+    const gpu = this.impl.gpu;
+    const encoder = gpu.createCommandEncoder({ label: this.label });
+    for (let i = 0; i < this.executableSteps.length; i++) {
+      const step = this.executableSteps[i]!;
+      const dispatchCount = this.dispatchCounts[i]!;
       const pass = encoder.beginComputePass({ label: `bg-wgsl-${step.program.name}-step-${i}` });
       pass.setPipeline(step.pipeline);
       pass.setBindGroup(0, step.bindGroup);
@@ -434,49 +494,71 @@ export async function runWgslKernelProgramSequence(
       pass.end();
     }
 
+    const readbackNames = new Set(options.readback ?? this.defaultReadbackNames);
+    const readBuffers = new Set<GPUBuffer>();
     const reads: Array<{ name: string; binding: WgslStorageBinding; readBuffer: GPUBuffer; byteLength: number }> = [];
-    for (const name of readbackNames) {
-      const entry = storageBuffers.get(name);
-      if (!entry) throw new KernelError(`readback buffer is not a storage binding: ${name}`);
-      const readBuffer = gpu.createBuffer({
-        size: alignTo(entry.byteLength, 4),
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-      });
-      readBuffers.add(readBuffer);
-      encoder.copyBufferToBuffer(entry.buffer, 0, readBuffer, 0, alignTo(entry.byteLength, 4));
-      reads.push({ name, binding: entry.binding, readBuffer, byteLength: entry.byteLength });
-    }
+    try {
+      for (const name of readbackNames) {
+        const entry = this.storageBuffers.get(name);
+        if (!entry) throw new KernelError(`readback buffer is not a storage binding: ${name}`);
+        const readBuffer = gpu.createBuffer({
+          size: alignTo(entry.byteLength, 4),
+          usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        });
+        readBuffers.add(readBuffer);
+        encoder.copyBufferToBuffer(entry.buffer, 0, readBuffer, 0, alignTo(entry.byteLength, 4));
+        reads.push({ name, binding: entry.binding, readBuffer, byteLength: entry.byteLength });
+      }
 
-    gpu.queue.submit([encoder.finish()]);
-    const output: Record<string, WgslTypedArray> = {};
-    const mapResults = await Promise.allSettled(reads.map((read) => read.readBuffer.mapAsync(GPUMapMode.READ)));
-    const failedMap = mapResults.find((result): result is PromiseRejectedResult => result.status === "rejected");
-    if (failedMap) {
-      for (let i = 0; i < mapResults.length; i++) {
-        if (mapResults[i]?.status === "fulfilled") reads[i]?.readBuffer.unmap();
-      }
-      throw failedMap.reason;
+      gpu.queue.submit([encoder.finish()]);
+      const output = await collectReadbacks(reads);
+      for (let i = 0; i < this.stepCount; i++) this.impl.recordInvocation();
+      return { buffers: output };
+    } finally {
+      for (const readBuffer of readBuffers) readBuffer.destroy();
     }
-    for (const read of reads) {
-      try {
-        const bytes = read.readBuffer.getMappedRange(0, read.byteLength).slice(0);
-        output[read.name] = typedArrayFromBytes(read.binding.valueType, bytes);
-      } finally {
-        read.readBuffer.unmap();
-      }
-      read.readBuffer.destroy();
-      readBuffers.delete(read.readBuffer);
-    }
-    for (let i = 0; i < steps.length; i++) impl.recordInvocation();
-    return { buffers: output };
-  } finally {
-    for (const readBuffer of readBuffers) readBuffer.destroy();
-    for (const entry of storageBuffers.values()) {
-      if (entry.owned) entry.buffer.destroy();
-    }
-    for (const buffer of uniformBuffers) buffer.destroy();
-    for (const texture of textures) texture.destroy();
   }
+
+  destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    destroyPreparedResources(this.storageBuffers, this.uniformBuffers, this.textures);
+  }
+}
+
+async function collectReadbacks(
+  reads: readonly { readonly name: string; readonly binding: WgslStorageBinding; readonly readBuffer: GPUBuffer; readonly byteLength: number }[],
+): Promise<Record<string, WgslTypedArray>> {
+  const output: Record<string, WgslTypedArray> = {};
+  const mapResults = await Promise.allSettled(reads.map((read) => read.readBuffer.mapAsync(GPUMapMode.READ)));
+  const failedMap = mapResults.find((result): result is PromiseRejectedResult => result.status === "rejected");
+  if (failedMap) {
+    for (let i = 0; i < mapResults.length; i++) {
+      if (mapResults[i]?.status === "fulfilled") reads[i]?.readBuffer.unmap();
+    }
+    throw failedMap.reason;
+  }
+  for (const read of reads) {
+    try {
+      const bytes = read.readBuffer.getMappedRange(0, read.byteLength).slice(0);
+      output[read.name] = typedArrayFromBytes(read.binding.valueType, bytes);
+    } finally {
+      read.readBuffer.unmap();
+    }
+  }
+  return output;
+}
+
+function destroyPreparedResources(
+  storageBuffers: ReadonlyMap<string, PreparedStorageBuffer>,
+  uniformBuffers: readonly GPUBuffer[],
+  textures: readonly GPUTexture[],
+): void {
+  for (const entry of storageBuffers.values()) {
+    if (entry.owned) entry.buffer.destroy();
+  }
+  for (const buffer of uniformBuffers) buffer.destroy();
+  for (const texture of textures) texture.destroy();
 }
 
 function collectStorageBindings(steps: readonly WgslKernelSequenceStep[]): readonly WgslStorageBinding[] {
