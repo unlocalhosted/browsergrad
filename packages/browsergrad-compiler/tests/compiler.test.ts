@@ -404,6 +404,39 @@ __global__ void gridSync(float *x) {
     }));
   });
 
+  it("supports cooperative-group shuffle variants and linear thread ranks", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void tileScan(const float *input, float *output) {
+  cg::thread_block block = cg::this_thread_block();
+  auto tile8 = cg::tiled_partition<8>(block);
+  int rank = tile8.thread_rank();
+  float val = input[rank];
+  val += tile8.shfl_up(val, 1);
+  val += tile8.shfl_xor(val, 2);
+  tile8.sync();
+  if (rank == 0) { output[0] = val; }
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [8, 4, 1],
+    });
+
+    expect(compiled.wgsl).toContain("subgroupShuffleUp(val, u32(1))");
+    expect(compiled.wgsl).toContain("subgroupShuffleXor(val, u32(2))");
+    expect(compiled.wgsl).toContain("(i32(local_id.x + local_id.y * 8u) % 8)");
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+  });
+
+  it("allows loop-local variable names to be reused in independent loop scopes", () => {
+    const analysis = analyzeCudaLite(parseCudaLite(`
+__global__ void scopedLoops(float *x) {
+  for (int s = 1; s > 0; s >>= 1) { x[0] += 1.0f; }
+  for (int s = 1; s > 0; s >>= 1) { x[0] += 1.0f; }
+}`));
+
+    expect(analysis.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("duplicate-symbol");
+  });
+
   it("parses dynamic extern shared memory as a clear unsupported diagnostic", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void dynamicShared(float *x) {

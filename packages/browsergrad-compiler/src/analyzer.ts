@@ -247,16 +247,17 @@ export function analyzeCudaLite(
           validateSideEffectPlacement(statement.condition, false, diagnostics);
           walkExpression(statement.condition, scope);
           const divergent = expressionIsDivergent(statement.condition, params);
-          walkStatements(statement.consequent, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth, loopDepth, names);
+          walkStatements(statement.consequent, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth, loopDepth, new Set(names));
           if (statement.alternate) {
-            walkStatements(statement.alternate, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth, loopDepth, names);
+            walkStatements(statement.alternate, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth, loopDepth, new Set(names));
           }
           break;
         }
         case "for": {
           const loopScope = createScope(scope);
+          const loopNames = new Set(names);
           if (statement.init?.kind === "var") {
-            declareVar(statement.init, loopScope, names);
+            declareVar(statement.init, loopScope, loopNames);
             if (statement.init.valueType === "half") requiredFeatures.add("shader-f16");
             if (statement.init.pointer && !isSupportedSharedPointerAlias(statement.init, loopScope)) {
               diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.init.span));
@@ -272,7 +273,7 @@ export function analyzeCudaLite(
           if (statement.update) validateSideEffectPlacement(statement.update, true, diagnostics);
           if (statement.update) walkExpression(statement.update, loopScope);
           const divergent = statement.condition ? expressionIsDivergent(statement.condition, params) : false;
-          walkStatements(statement.body, loopScope, guardDepth, divergent ? divergentDepth + 1 : divergentDepth, loopDepth + 1, names);
+          walkStatements(statement.body, loopScope, guardDepth, divergent ? divergentDepth + 1 : divergentDepth, loopDepth + 1, loopNames);
           break;
         }
         case "return":
@@ -611,9 +612,9 @@ function validateCooperativeGroupCall(
     if (expression.args.length !== 0) diagnostics.push(error("invalid-call-arity", `${method} expects 0 arguments`, expression.span));
     return { kind: "scalar", valueType: "int" };
   }
-  if (method === "shfl_down") {
+  if (method === "shfl_down" || method === "shfl_up" || method === "shfl_xor") {
     requiredFeatures.add("subgroups");
-    if (expression.args.length !== 2) diagnostics.push(error("invalid-call-arity", "shfl_down expects 2 arguments", expression.span));
+    if (expression.args.length !== 2) diagnostics.push(error("invalid-call-arity", `${method} expects 2 arguments`, expression.span));
     let valueType: ValueType | undefined;
     for (const [index, arg] of expression.args.entries()) {
       const info = walkExpression(arg, scope);

@@ -475,23 +475,35 @@ function emitCooperativeGroupCall(expression: CudaLiteCallExpression, context: E
   const group = context.cooperativeGroupFor(callee.object.name);
   if (!group) return undefined;
   if (callee.property === "sync") {
-    return group.groupKind === "block" ? "workgroupBarrier()" : "0";
+    return group.groupKind === "grid" ? "0" : "workgroupBarrier()";
   }
   if (callee.property === "size") {
     if (group.groupKind === "tile") return String(group.tileSize ?? 32);
     return String(context.ir.workgroupSize[0] * context.ir.workgroupSize[1] * context.ir.workgroupSize[2]);
   }
   if (callee.property === "thread_rank") {
-    const localRank = "i32(local_id.x)";
+    const localRank = emitLocalLinearRank(context);
     if (group.groupKind === "tile") return `(${localRank} % ${group.tileSize ?? 32})`;
     return localRank;
   }
-  if (callee.property === "shfl_down") {
+  if (callee.property === "shfl_down" || callee.property === "shfl_up" || callee.property === "shfl_xor") {
     const value = expression.args[0] ? emitExpression(expression.args[0], context) : "0";
     const offset = expression.args[1] ? emitExpression(expression.args[1], context) : "0";
-    return `subgroupShuffleDown(${value}, u32(${offset}))`;
+    const intrinsic = callee.property === "shfl_up"
+      ? "subgroupShuffleUp"
+      : callee.property === "shfl_xor"
+        ? "subgroupShuffleXor"
+        : "subgroupShuffleDown";
+    return `${intrinsic}(${value}, u32(${offset}))`;
   }
   return undefined;
+}
+
+function emitLocalLinearRank(context: EmitContext): string {
+  const [, y, z] = context.ir.workgroupSize;
+  if (y === 1 && z === 1) return "i32(local_id.x)";
+  if (z === 1) return `i32(local_id.x + local_id.y * ${context.ir.workgroupSize[0]}u)`;
+  return `i32(local_id.x + local_id.y * ${context.ir.workgroupSize[0]}u + local_id.z * ${context.ir.workgroupSize[0] * context.ir.workgroupSize[1]}u)`;
 }
 
 function emitAtomicCall(

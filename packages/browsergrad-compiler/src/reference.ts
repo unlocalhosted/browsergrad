@@ -487,12 +487,18 @@ function evalCooperativeGroupCall(
     return context.blockDim.x * context.blockDim.y * context.blockDim.z;
   }
   if (callee.property === "thread_rank") {
-    const localRank = context.threadIdx.x;
+    const localRank = localLinearRank(context);
     if (value.groupKind === "tile") return localRank % (value.tileSize ?? 32);
     return localRank;
   }
-  if (callee.property === "shfl_down") return args[0] ?? 0;
+  if (callee.property === "shfl_down" || callee.property === "shfl_up" || callee.property === "shfl_xor") return args[0] ?? 0;
   return undefined;
+}
+
+function localLinearRank(context: ThreadContext): number {
+  return context.threadIdx.x +
+    context.threadIdx.y * context.blockDim.x +
+    context.threadIdx.z * context.blockDim.x * context.blockDim.y;
 }
 
 function evalDeviceFunction(fn: CudaLiteDeviceFunction, args: readonly number[], context: ThreadContext): number {
