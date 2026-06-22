@@ -278,15 +278,15 @@ __global__ void syncOnly(float *x) {
   it("runs host-lifted dynamic child launch through WebGPU sequence", async () => {
     if (!deviceCheck.available) return;
     const source = `
-__global__ void child(float *dst) {
+__global__ void child(float *dst, int n) {
   int idx = threadIdx.x;
-  if (idx < 2) { dst[idx] += 1.0f; }
+  if (idx < n) { dst[idx] += 1.0f; }
 }
-__global__ void parent(float *x) {
+__global__ void parent(float *x, int n) {
   if (threadIdx.x < 1) {
     dim3 grid(1);
-    dim3 block(2);
-    child<<<grid, block>>>(x);
+    dim3 block(n);
+    child<<<grid, block>>>(x, n);
     cudaDeviceSynchronize();
   }
 }`;
@@ -295,7 +295,7 @@ __global__ void parent(float *x) {
       referenceDynamicParallelism: true,
       workgroupSize: [1, 1, 1],
     });
-    const input = { buffers: { x: new Float32Array([1, 2]) } };
+    const input = { buffers: { x: new Float32Array([1, 2]) }, scalars: { n: 2 } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
