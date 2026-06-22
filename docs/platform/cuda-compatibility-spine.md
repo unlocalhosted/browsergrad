@@ -61,13 +61,14 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
 ```
 
 - `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/240` real code-kernel
-  definitions compile as single-dispatch WGSL/WebGPU. Another `10/240` are
-  real-GPU runnable through WebGPU orchestration lifts (`grid-sync-phases`),
-  for `235/240` total WebGPU coverage. `5/240` remain true reference-only,
-  and `0/240` remain hard gaps after filtering docs/pseudocode placeholders.
+  definitions compile as single-dispatch WGSL/WebGPU. Another `14/240` are
+  real-GPU runnable through WebGPU orchestration lifts (`grid-sync-phases` and
+  `host-dynamic-launch`), for `239/240` total WebGPU coverage. `1/240` remains
+  reference-only and `0/240` remain hard gaps after filtering docs/pseudocode
+  placeholders.
 - `referenceFallbackOk` is `15/240`: kernels whose semantics are understood by
-  CPU reference. `referenceOnlyOk` is stricter and excludes kernels now runnable
-  on real WebGPU through orchestration.
+  CPU reference or host/WebGPU orchestration. `referenceOnlyOk` is stricter and
+  excludes kernels now runnable on real WebGPU through orchestration.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, WebGPU atomic
   offset updates, DevicePool aliasing across host-lifted child launches,
@@ -87,14 +88,15 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
   submission.
 - Device-side launches now parse into IR and can run in CPU reference when
   `referenceDynamicParallelism` is enabled. WebGPU can host-lift conservative
-  child launches into a multi-dispatch sequence when the parent launch has one
-  workgroup, the child block size is statically known, pointer args alias the
-  same named storage buffers, and child scalar launch args are host-evaluable.
-  DevicePool pointer params alias their pool data/offset bindings, and positive
-  pointer-offset args lower to base-offset uniforms. Child kernels may also
-  contain single-invocation guarded peer copies when that copy itself is
-  host-liftable. Per-thread launch queues, recursive launches, negative pointer
-  offsets, and device-derived launch args remain reference-only.
+  child launches into a multi-dispatch sequence when parent invocations, launch
+  branches, child block sizes, pointer args, and scalar args are host-evaluable.
+  Parent invocations expand with CUDA builtin coordinates up to a cap, recursive
+  launches flatten up to a depth cap, and inactive host-evaluable launch
+  branches use single dispatch. DevicePool pointer params alias their pool
+  data/offset bindings, and positive pointer-offset args lower to base-offset
+  uniforms. Unknown branch guards before launch, negative pointer offsets,
+  device-derived launch args, and parent side effects after launch remain
+  reference-only.
 - CUDA runtime calls such as `cudaDeviceSynchronize` and `cudaMemcpyPeerAsync`
   classify as runtime orchestration gaps. Standalone `cudaDeviceSynchronize()`
   is a WebGPU-safe no-op because dispatch completion is host-managed. Peer

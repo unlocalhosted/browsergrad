@@ -142,21 +142,23 @@ compileCudaLiteKernel(source, {
 memory pools.
 
 `runCompiledKernelWebGpu` can host-lift conservative child launches into a real
-WebGPU dispatch sequence when the parent launch has one workgroup, the child
-block size is host-evaluable, pointer args alias named storage buffers, and
-child scalar args come from host-evaluable expressions. Named `DevicePool*`
-arguments alias their backing pool data/offset bindings, and positive pointer
-offsets such as `out + 1` lower to generated base-offset uniforms so WebGPU
-bindings stay whole-buffer and alignment-safe. Inspect this before dispatching:
+WebGPU dispatch sequence when parent invocations, launch branches, child block
+sizes, pointer args, and scalar args are host-evaluable. Parent invocations are
+expanded with CUDA builtin coordinates up to a deterministic cap, recursive
+dynamic launches are flattened up to a depth cap, and inactive host-evaluable
+launch branches fall back to single dispatch. Named `DevicePool*` arguments
+alias their backing pool data/offset bindings, and positive pointer offsets
+such as `out + 1` lower to generated base-offset uniforms so WebGPU bindings
+stay whole-buffer and alignment-safe. Inspect this before dispatching:
 
 ```ts
 const plan = createCudaHostDynamicLaunchPlan(compiled, input, launch);
 console.log(plan.supported, plan.reason);
 ```
 
-Recursive launches, device-derived launch args, per-thread launch queues,
-negative pointer offsets, and parent side effects after launch stay
-reference-only so GPU output is never silently wrong.
+Device-derived launch args, unknown branch guards before a launch, negative
+pointer offsets, and parent side effects after launch stay reference-only so GPU
+output is never silently wrong.
 
 ## CUDA Runtime Reference Calls
 

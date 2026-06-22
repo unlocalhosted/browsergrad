@@ -50,16 +50,19 @@ for (const file of files) {
     if (CUDA_HINT_RE.test(block.code)) cudaBlocks++;
     const kernels = extractKernelDefinitions(block.code);
     for (const [kernelIndex, rawKernel] of kernels.entries()) {
-      const source = kernelSourceWithContext(rawKernel, effectiveDefines, blockFunctionDefines, blockDeviceFunctions, blockConstants, blockTextures);
+      const kernelName = kernelDefinitionName(rawKernel);
+      const siblingKernels = kernels.filter((kernel) => kernel !== rawKernel);
+      const source = kernelSourceWithContext(rawKernel, siblingKernels, effectiveDefines, blockFunctionDefines, blockDeviceFunctions, blockConstants, blockTextures);
       try {
         compileCudaLiteKernel(source, {
+          kernelName,
           features: { "shader-f16": true, subgroups: true },
           workgroupSize: [256, 1, 1],
           dynamicSharedMemory: inferDynamicSharedMemory(source),
         });
         results.push({ file, block: blockIndex + 1, kernel: kernelIndex + 1, ok: true });
       } catch (error) {
-        const fallback = classifyReferenceFallback(source);
+        const fallback = classifyReferenceFallback(source, kernelName);
         const diagnostic = error?.diagnostics?.[0];
         const feature = diagnostic
           ? describeCudaDiagnostic(diagnostic)
@@ -102,7 +105,7 @@ const summary = {
   ok: results.length - failures.length,
   webGpuSingleDispatchOk: results.length - failures.length,
   webGpuLiftedOk: failures.filter((failure) => failure.webGpuLiftOk).length,
-  hostDynamicLiftableOk: failures.filter((failure) => failure.webGpuLiftKind === "host-dynamic-launches").length,
+  hostDynamicLiftableOk: failures.filter((failure) => failure.webGpuLiftKind === "host-dynamic-launch").length,
   webGpuTotalOk: results.length - failures.length + failures.filter((failure) => failure.webGpuLiftOk).length,
   fail: failures.length,
   referenceFallbackOk: failures.filter((failure) => failure.referenceOk).length,
@@ -141,9 +144,10 @@ if (expectationFailures.length > 0) {
   process.exit(1);
 }
 
-function classifyReferenceFallback(source) {
+function classifyReferenceFallback(source, kernelName) {
   try {
     const compiled = compileCudaLiteKernel(source, {
+      kernelName,
       features: { "shader-f16": true, subgroups: true },
       workgroupSize: [256, 1, 1],
       dynamicSharedMemory: inferDynamicSharedMemory(source),
@@ -227,7 +231,16 @@ function syntheticInputFor(compiled) {
       ? syntheticScalarForName(constant.name)
       : syntheticBufferForType(constant.valueType);
   }
+  for (const poolName of externalDevicePoolNamesFromSource(compiled.ast.source)) {
+    memoryPools[poolName] ??= { data: new Uint32Array(4096), offset: new Uint32Array([0]) };
+  }
   return { buffers, scalars, constants, memoryPools };
+}
+
+function externalDevicePoolNamesFromSource(source) {
+  return [...source.matchAll(/\b(?:deviceAllocate|streamOrderedAllocate)\s*\(\s*&\s*([A-Za-z_][A-Za-z0-9_]*)/g)]
+    .map((match) => match[1])
+    .filter(Boolean);
 }
 
 function syntheticBufferForType(type) {
@@ -369,7 +382,7 @@ function isPortableScalarDeviceFunction(signature, source) {
   return true;
 }
 
-function kernelSourceWithContext(kernel, definesByName, functionDeclarations, deviceFunctions, constantDeclarations, textureDeclarations) {
+function kernelSourceWithContext(kernel, siblingKernels, definesByName, functionDeclarations, deviceFunctions, constantDeclarations, textureDeclarations) {
   const params = new Set(kernelParamNames(kernel));
   const defines = [...definesByName]
     .filter(([name]) => !params.has(name))
@@ -377,7 +390,11 @@ function kernelSourceWithContext(kernel, definesByName, functionDeclarations, de
   const referencedDeviceFunctions = deviceFunctions
     .filter((fn) => new RegExp(`\\b${escapeRegExp(fn.name)}\\s*\\(`, "u").test(kernel))
     .map((fn) => fn.source);
-  return `${defines.join("\n")}\n${functionDeclarations.join("\n")}\n${referencedDeviceFunctions.join("\n")}\n${constantDeclarations.join("\n")}\n${textureDeclarations.join("\n")}\n${kernel}`;
+  return `${defines.join("\n")}\n${functionDeclarations.join("\n")}\n${referencedDeviceFunctions.join("\n")}\n${constantDeclarations.join("\n")}\n${textureDeclarations.join("\n")}\n${siblingKernels.join("\n")}\n${kernel}`;
+}
+
+function kernelDefinitionName(kernel) {
+  return /__global__\s+void\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/u.exec(kernel)?.[1];
 }
 
 function collectObjectDefines(source) {

@@ -1354,6 +1354,152 @@ __global__ void parent(float *x, int n) {
     });
   });
 
+  it("plans host-expanded per-invocation dynamic launches with builtin coordinates", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(float *dst, int value) {
+  if (threadIdx.x < 1) { dst[0] = (float)value; }
+}
+__global__ void parent(float *out, int limit) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= limit) return;
+  int value = idx;
+  if (idx > 1) {
+    value = value + 10;
+  }
+  dim3 grid(1);
+  dim3 block(1);
+  child<<<grid, block>>>(out + idx, value);
+  cudaDeviceSynchronize();
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [4, 1, 1],
+    });
+    const input = {
+      buffers: { out: new Float32Array([0, 0, 0, 0]) },
+      scalars: { limit: 3 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const plan = createCudaHostDynamicLaunchPlan(compiled, input, launch);
+
+    expect(plan.supported).toBe(true);
+    expect(plan.launches).toHaveLength(3);
+    expect(plan.launches.map((item) => item.pointerBaseOffsets.dst ?? 0)).toEqual([0, 1, 2]);
+    expect(plan.launches.map((item) => item.input.scalars?.value)).toEqual([0, 1, 12]);
+
+    const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, {
+      compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options),
+    });
+    expect(executionPlan).toMatchObject({
+      supported: true,
+      kind: "host-dynamic-launch",
+    });
+    expect(executionPlan.supported && executionPlan.steps).toHaveLength(4);
+  });
+
+  it("caps host-expanded dynamic launches before building huge plans", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(float *dst) {
+  if (threadIdx.x < 1) { dst[0] = 1.0f; }
+}
+__global__ void parent(float *out) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  dim3 grid(1);
+  dim3 block(1);
+  child<<<grid, block>>>(out + idx);
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [4, 1, 1],
+    });
+    const plan = createCudaHostDynamicLaunchPlan(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      { maxHostExpandedParentInvocations: 2 },
+    );
+
+    expect(plan.supported).toBe(false);
+    expect(plan.blocker).toMatchObject({
+      code: "too-many-parent-invocations",
+      message: "host-expanded dynamic launch needs 4 parent invocations; max is 2",
+    });
+  });
+
+  it("treats host-evaluable inactive dynamic launches as single dispatch", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(float *dst) {
+  if (threadIdx.x < 1) { dst[0] = 1.0f; }
+}
+__global__ void parent(float *out, int enabled) {
+  if (enabled != 0) {
+    dim3 grid(1);
+    dim3 block(1);
+    child<<<grid, block>>>(out);
+    cudaDeviceSynchronize();
+  }
+  out[0] += 2.0f;
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const executionPlan = createCudaWebGpuExecutionPlan(
+      compiled,
+      { buffers: { out: new Float32Array([0]) }, scalars: { enabled: 0 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      { compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options) },
+    );
+
+    expect(executionPlan).toMatchObject({
+      supported: true,
+      kind: "single-dispatch",
+    });
+  });
+
+  it("flattens recursive host-dynamic launches with a depth cap", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(float *dst, int value) {
+  if (threadIdx.x < 1) { dst[0] += (float)value; }
+}
+__global__ void parent(float *out, int n) {
+  dim3 grid(1);
+  dim3 block(1);
+  child<<<grid, block>>>(out, n);
+  cudaDeviceSynchronize();
+  if (n > 1) {
+    parent<<<grid, block>>>(out, n - 1);
+    cudaDeviceSynchronize();
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = { buffers: { out: new Float32Array([0]) }, scalars: { n: 2 } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, {
+      compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options),
+    });
+
+    expect(executionPlan).toMatchObject({
+      supported: true,
+      kind: "host-dynamic-launch",
+    });
+    expect(executionPlan.supported && executionPlan.steps).toHaveLength(4);
+
+    const capped = createCudaWebGpuExecutionPlan(compiled, input, launch, {
+      compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options),
+      maxHostDynamicLaunchDepth: 1,
+    });
+    expect(capped).toMatchObject({
+      supported: false,
+      blockers: [{
+        code: "host-dynamic-launch-depth-exceeded",
+      }],
+    });
+  });
+
   it("plans host-liftable dynamic launches with DevicePool aliases", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void child(DevicePool *childPool, float *dst) {

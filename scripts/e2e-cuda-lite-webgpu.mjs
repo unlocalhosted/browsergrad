@@ -58,6 +58,20 @@ __global__ void parent(float *x, int n) {
     cudaDeviceSynchronize();
   }
 }`,
+  recursiveDynamicLaunch: `
+__global__ void child(float *dst, int value) {
+  if (threadIdx.x < 1) { dst[0] += (float)value; }
+}
+__global__ void parent(float *out, int n) {
+  dim3 grid(1);
+  dim3 block(1);
+  child<<<grid, block>>>(out, n);
+  cudaDeviceSynchronize();
+  if (n > 1) {
+    parent<<<grid, block>>>(out, n - 1);
+    cudaDeviceSynchronize();
+  }
+}`,
 };
 
 const html = String.raw`<!doctype html>
@@ -208,6 +222,19 @@ const html = String.raw`<!doctype html>
               scalars: { n: 2 },
             }),
             output: "x",
+          },
+          {
+            name: "runtime:recursive-host-dynamic-launch",
+            source: SOURCES.recursiveDynamicLaunch,
+            options: { kernelName: "parent", referenceDynamicParallelism: true, workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array([0]),
+              },
+              scalars: { n: 2 },
+            }),
+            output: "out",
           },
         ];
       }

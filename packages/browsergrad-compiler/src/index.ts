@@ -68,6 +68,7 @@ export {
   type CudaHostDynamicLaunchBlocker,
   type CudaHostDynamicLaunchBlockerCode,
   type CudaHostDynamicLaunchPlan,
+  type CudaHostDynamicLaunchPlanOptions,
 } from "./dynamic_launch.js";
 export {
   createCudaPeerCopyPlan,

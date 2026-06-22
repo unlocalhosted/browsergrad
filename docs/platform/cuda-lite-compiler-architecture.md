@@ -99,6 +99,9 @@ Supported layers:
 - Device launches and peer copies are runtime operations. They may be
   host-lifted only when `webgpu_orchestration.ts` can build a complete,
   deterministic sequence.
+- Host-dynamic launch planning can expand parent invocations with CUDA builtin
+  coordinates and flatten recursive child launches, but bounded caps protect the
+  browser from runaway launch trees.
 
 Rules:
 

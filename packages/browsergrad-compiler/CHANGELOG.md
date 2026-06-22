@@ -56,3 +56,6 @@
   and WebGPU runners reject invalid grid/block dimensions consistently.
 - `createCudaWebGpuExecutionPlan()` now returns `launch` blockers for invalid
   launch shapes before building dispatch plans.
+- Host dynamic launch planning now expands parent invocations with CUDA builtin
+  coordinates, supports recursive host-dynamic flattening with a depth cap, and
+  raises the CUDA-120 WebGPU audit baseline to `239/240`.

@@ -1,5 +1,4 @@
 import type { WgslResidentBuffer, WgslTypedArray } from "@unlocalhosted/browsergrad-kernels";
-import { walkCudaLiteExpressions } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
 import {
   evaluateHostNumber,
@@ -37,15 +36,18 @@ export interface CudaHostDynamicLaunchBlocker {
 export type CudaHostDynamicLaunchBlockerCode =
   | "no-device-launch"
   | "mixed-runtime-operations"
-  | "parent-grid-not-single"
+  | "too-many-parent-invocations"
   | "no-host-liftable-launch"
   | "unknown-child-kernel"
   | "child-runtime-unsupported"
   | "child-launch-dimensions-not-host-evaluable"
   | "child-arguments-not-host-evaluable"
   | "unsafe-parent-side-effects"
-  | "branch-not-host-evaluable"
-  | "parent-not-single-invocation";
+  | "branch-not-host-evaluable";
+
+export interface CudaHostDynamicLaunchPlanOptions {
+  readonly maxHostExpandedParentInvocations?: number;
+}
 
 export interface CudaHostDynamicLaunch {
   readonly statement: CudaLiteKernelLaunchStatement;
@@ -69,11 +71,13 @@ interface HostLiftedLaunchCollection {
 }
 
 type MemoryPoolInput = NonNullable<CompiledKernelInput["memoryPools"]>[string];
+const DEFAULT_MAX_HOST_EXPANDED_PARENT_INVOCATIONS = 4096;
 
 export function createCudaHostDynamicLaunchPlan(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
   launch: KernelLaunch,
+  options: CudaHostDynamicLaunchPlanOptions = {},
 ): CudaHostDynamicLaunchPlan {
   const runtimePlan = createCudaRuntimePlan(compiled);
   if (!runtimePlan.operations.some((operation) => operation.kind === "device-launch")) {
@@ -82,27 +86,27 @@ export function createCudaHostDynamicLaunchPlan(
   if (!runtimePlan.operations.every((operation) => operation.kind === "device-launch" || operation.kind === "device-sync")) {
     return unsupported("mixed-runtime-operations", "runtime operations besides device launch/device sync require reference runtime");
   }
-  if (launch.gridDim.some((axis) => axis !== 1)) {
-    return unsupported("parent-grid-not-single", "parent gridDim must be [1, 1, 1] for host-lifted dynamic launch");
+  const parentInvocations = launch.gridDim[0] * launch.gridDim[1] * launch.gridDim[2] *
+    launch.blockDim[0] * launch.blockDim[1] * launch.blockDim[2];
+  const maxParentInvocations = options.maxHostExpandedParentInvocations ?? DEFAULT_MAX_HOST_EXPANDED_PARENT_INVOCATIONS;
+  if (parentInvocations > maxParentInvocations) {
+    return unsupported(
+      "too-many-parent-invocations",
+      `host-expanded dynamic launch needs ${parentInvocations} parent invocations; max is ${maxParentInvocations}`,
+    );
   }
 
   const launchCollection = collectHostLiftedLaunches(compiled.ir.body, input, launch);
   const launches = launchCollection.launches;
   if (launches.length === 0) {
-    return unsupportedWithBlocker(
-      launchCollection.blocker ?? {
-        code: "no-host-liftable-launch",
-        message: launchCollection.reason ?? "no host-liftable device-side launches",
-      },
-    );
+    if (!launchCollection.blocker) return { supported: true, launches: [] };
+    return unsupportedWithBlocker(launchCollection.blocker);
   }
 
   const planned: CudaHostDynamicLaunch[] = [];
   for (const item of launches) {
     const childKernel = compiled.ast.kernels.find((kernel) => kernel.name === item.statement.callee);
     if (!childKernel) return unsupported("unknown-child-kernel", `unknown dynamic kernel '${item.statement.callee}'`);
-    const childRuntimeGap = unsupportedHostLiftChildRuntime(childKernel);
-    if (childRuntimeGap) return unsupportedWithBlocker(childRuntimeGap);
     const childBlock = evaluateLaunchVector(item.statement.block, item.env, input);
     const childGrid = evaluateLaunchVector(item.statement.grid, item.env, input);
     if (!childBlock || !childGrid) return unsupported("child-launch-dimensions-not-host-evaluable", "child launch dimensions must be host-evaluable");
@@ -135,8 +139,6 @@ function collectHostLiftedLaunches(
   launch: KernelLaunch,
 ): HostLiftedLaunchCollection {
   const out: HostLiftedLaunch[] = [];
-  const initial = new Map<string, HostEvalValue>();
-  const parentHasSingleInvocation = launch.gridDim.every((axis) => axis === 1) && launch.blockDim.every((axis) => axis === 1);
   let unsafeBlocker: CudaHostDynamicLaunchBlocker | undefined;
   const markUnsafe = (code: CudaHostDynamicLaunchBlockerCode, message: string): void => {
     unsafeBlocker ??= { code, message };
@@ -144,8 +146,7 @@ function collectHostLiftedLaunches(
   const visit = (
     items: readonly CudaLiteStatement[],
     env: ReadonlyMap<string, HostEvalValue>,
-    singleInvocationGuard: boolean,
-  ): boolean => {
+  ): { readonly containsLaunch: boolean; readonly returned: boolean; readonly env: ReadonlyMap<string, HostEvalValue> } => {
     let current = new Map(env);
     let containsLaunch = false;
     for (let index = 0; index < items.length; index++) {
@@ -157,48 +158,99 @@ function collectHostLiftedLaunches(
       }
       if (item.kind === "var" && !item.pointer && item.storage === "local" && item.init) {
         const value = evaluateHostNumber(item.init, current, input);
-        if (value !== undefined) current.set(item.name, value);
+        if (value !== undefined) current.set(item.name, coerceHostScalar(item.valueType, value));
         continue;
       }
       if (item.kind === "if") {
         const before = out.length;
-        if (isSingleInvocationGuard(item.condition)) {
-          containsLaunch = visit(item.consequent, current, true) || containsLaunch;
-          if (out.length > before && hasParentSideEffectsAfterLaunch(items.slice(index + 1))) {
-            markUnsafe("unsafe-parent-side-effects", "parent side effects after device-side launch cannot be replayed in host-lifted sequence");
-          }
-          continue;
-        }
         const condition = evaluateHostNumber(item.condition, current, input);
         if (condition === undefined) {
-          if (containsKernelLaunch(item.consequent) || containsKernelLaunch(item.alternate ?? [])) {
+          if (isSingleInvocationGuard(item.condition)) {
+            const result = visit(item.consequent, current);
+            containsLaunch = result.containsLaunch || containsLaunch;
+            if (out.length > before && hasParentSideEffectsAfterLaunch(items.slice(index + 1))) {
+              markUnsafe("unsafe-parent-side-effects", "parent side effects after device-side launch cannot be replayed in host-lifted sequence");
+            }
+            if (result.returned) return { containsLaunch, returned: true, env: result.env };
+            continue;
+          }
+          if (
+            containsKernelLaunch(item.consequent) ||
+            containsKernelLaunch(item.alternate ?? []) ||
+            containsKernelLaunch(items.slice(index + 1))
+          ) {
             markUnsafe("branch-not-host-evaluable", "device-side launch branch condition must be host-evaluable or a single-invocation guard");
           }
-          return containsLaunch;
+          return { containsLaunch, returned: false, env: current };
         }
-        containsLaunch = visit(condition !== 0 ? item.consequent : item.alternate ?? [], current, singleInvocationGuard) || containsLaunch;
+        const result = visit(condition !== 0 ? item.consequent : item.alternate ?? [], current);
+        containsLaunch = result.containsLaunch || containsLaunch;
+        current = new Map(result.env);
         if (out.length > before && hasParentSideEffectsAfterLaunch(items.slice(index + 1))) {
           markUnsafe("unsafe-parent-side-effects", "parent side effects after device-side launch cannot be replayed in host-lifted sequence");
         }
+        if (result.returned) return { containsLaunch, returned: true, env: current };
         continue;
       }
+      if (item.kind === "expr") {
+        applyHostExpressionEffect(item.expression, current, input);
+        continue;
+      }
+      if (item.kind === "return") return { containsLaunch, returned: true, env: current };
       if (item.kind === "kernel-launch") {
-        if (!(singleInvocationGuard || parentHasSingleInvocation)) {
-          markUnsafe("parent-not-single-invocation", "device-side launch must be single-invocation guarded or parent launch must be one thread");
+        if (hasParentSideEffectsAfterLaunch(items.slice(index + 1))) {
+          markUnsafe("unsafe-parent-side-effects", "parent side effects after device-side launch cannot be replayed in host-lifted sequence");
         }
-        else {
-          if (hasParentSideEffectsAfterLaunch(items.slice(index + 1))) {
-            markUnsafe("unsafe-parent-side-effects", "parent side effects after device-side launch cannot be replayed in host-lifted sequence");
+        out.push({ statement: item, env: current });
+        containsLaunch = true;
+      }
+    }
+    return { containsLaunch, returned: false, env: current };
+  };
+  forEachParentInvocation(launch, (env) => {
+    if (!unsafeBlocker) visit(statements, env);
+  });
+  return unsafeBlocker ? { launches: [], reason: unsafeBlocker.message, blocker: unsafeBlocker } : { launches: out };
+}
+
+function coerceHostScalar(valueType: CudaLiteParam["valueType"], value: number): number {
+  if (valueType === "int" || valueType === "uint" || valueType === "bool") return Math.trunc(value);
+  return value;
+}
+
+function applyHostExpressionEffect(
+  expression: CudaLiteExpression,
+  env: Map<string, HostEvalValue>,
+  input: CompiledKernelInput,
+): void {
+  if (expression.kind !== "assignment" || expression.left.kind !== "identifier") return;
+  if (expression.operator !== "=") return;
+  const value = evaluateHostNumber(expression.right, env, input);
+  if (value !== undefined) env.set(expression.left.name, value);
+}
+
+function forEachParentInvocation(
+  launch: KernelLaunch,
+  visit: (env: ReadonlyMap<string, HostEvalValue>) => void,
+): void {
+  for (let bz = 0; bz < launch.gridDim[2]; bz++) {
+    for (let by = 0; by < launch.gridDim[1]; by++) {
+      for (let bx = 0; bx < launch.gridDim[0]; bx++) {
+        for (let tz = 0; tz < launch.blockDim[2]; tz++) {
+          for (let ty = 0; ty < launch.blockDim[1]; ty++) {
+            for (let tx = 0; tx < launch.blockDim[0]; tx++) {
+              visit(new Map<string, HostEvalValue>([
+                ["blockIdx", [bx, by, bz]],
+                ["threadIdx", [tx, ty, tz]],
+                ["blockDim", launch.blockDim],
+                ["gridDim", launch.gridDim],
+              ]));
+            }
           }
-          out.push({ statement: item, env: current });
-          containsLaunch = true;
         }
       }
     }
-    return containsLaunch;
-  };
-  visit(statements, initial, parentHasSingleInvocation);
-  return unsafeBlocker ? { launches: [], reason: unsafeBlocker.message, blocker: unsafeBlocker } : { launches: out };
+  }
 }
 
 function hasParentSideEffectsAfterLaunch(statements: readonly CudaLiteStatement[]): boolean {
@@ -228,21 +280,6 @@ function hasParentSideEffectsAfterLaunch(statements: readonly CudaLiteStatement[
   return false;
 }
 
-function unsupportedHostLiftChildRuntime(kernel: CudaLiteKernel): CudaHostDynamicLaunchBlocker | undefined {
-  if (containsKernelLaunch(kernel.body)) {
-    return {
-      code: "child-runtime-unsupported",
-      message: `child kernel '${kernel.name}' contains nested device-side launches`,
-    };
-  }
-  let message: string | undefined;
-  walkCudaLiteExpressions(kernel.body, (expression) => {
-    if (message || expression.kind !== "call") return;
-    if (isGridSyncCall(expression)) message = `child kernel '${kernel.name}' requires grid-sync orchestration`;
-  });
-  return message ? { code: "child-runtime-unsupported", message } : undefined;
-}
-
 function containsKernelLaunch(statements: readonly CudaLiteStatement[]): boolean {
   for (const statement of statements) {
     if (statement.kind === "kernel-launch") return true;
@@ -250,12 +287,6 @@ function containsKernelLaunch(statements: readonly CudaLiteStatement[]): boolean
     if (statement.kind === "for" && containsKernelLaunch(statement.body)) return true;
   }
   return false;
-}
-
-function isGridSyncCall(expression: CudaLiteExpression): boolean {
-  return expression.kind === "call" &&
-    expression.callee.kind === "member" &&
-    expression.callee.property === "sync";
 }
 
 function isHostNoopExpression(expression: CudaLiteExpression): boolean {

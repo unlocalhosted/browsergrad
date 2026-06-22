@@ -3,6 +3,7 @@ import {
   type WgslKernelProgram,
   type WgslKernelRunInput,
   type WgslKernelSequenceStep,
+  type WgslResidentBuffer,
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames } from "./ast_queries.js";
@@ -60,9 +61,13 @@ export interface CudaWebGpuExecutionPlanOptions {
     source: string,
     options?: CompileCudaLiteOptions,
   ) => CompiledCudaLiteKernel;
+  readonly maxHostExpandedParentInvocations?: number;
+  readonly maxHostDynamicLaunchDepth?: number;
+  readonly hostDynamicLaunchDepth?: number;
 }
 
 const peerCopyProgramCache = new Map<CudaPeerCopyOperation["valueType"], WgslKernelProgram>();
+const DEFAULT_MAX_HOST_DYNAMIC_LAUNCH_DEPTH = 8;
 
 export function createCudaWebGpuExecutionPlan(
   compiled: CompiledCudaLiteKernel,
@@ -90,15 +95,35 @@ export function createCudaWebGpuExecutionPlan(
     blockers.push(webGpuBlocker("grid-sync", "grid-sync-phase-unsupported", gridSyncPhasePlan.reason));
   }
 
-  const hostDynamicPlan = createCudaHostDynamicLaunchPlan(compiled, input, launch);
-  const dynamicLaunchPlan = createHostLiftedDynamicWebGpuPlan(compiled, input, launch, options, hostDynamicPlan);
-  if (dynamicLaunchPlan) return dynamicLaunchPlan;
-  if (runtimePlan.operations.some((operation) => operation.kind === "device-launch") && !hostDynamicPlan.supported) {
-    blockers.push(webGpuBlocker(
-      "device-launch",
-      hostDynamicPlan.blocker?.code ?? "host-dynamic-launch-unsupported",
-      hostDynamicPlan.reason ?? "host-lifted dynamic launch unsupported",
-    ));
+  if (runtimePlan.operations.some((operation) => operation.kind === "device-launch")) {
+    const depth = options.hostDynamicLaunchDepth ?? 0;
+    const maxDepth = options.maxHostDynamicLaunchDepth ?? DEFAULT_MAX_HOST_DYNAMIC_LAUNCH_DEPTH;
+    if (depth >= maxDepth) {
+      blockers.push(webGpuBlocker(
+        "device-launch",
+        "host-dynamic-launch-depth-exceeded",
+        `host dynamic launch depth exceeded ${maxDepth}`,
+      ));
+    } else {
+      const hostDynamicPlan = createCudaHostDynamicLaunchPlan(
+        compiled,
+        input,
+        launch,
+        options.maxHostExpandedParentInvocations === undefined
+          ? {}
+          : { maxHostExpandedParentInvocations: options.maxHostExpandedParentInvocations },
+      );
+      const dynamicLaunchPlan = createHostLiftedDynamicWebGpuPlan(compiled, input, launch, options, hostDynamicPlan);
+      if (dynamicLaunchPlan) return dynamicLaunchPlan;
+      if (hostDynamicPlan.supported && hostDynamicPlan.launches.length === 0) return createSingleDispatchWebGpuPlan(compiled, input, launch);
+      if (!hostDynamicPlan.supported) {
+        blockers.push(webGpuBlocker(
+          "device-launch",
+          hostDynamicPlan.blocker?.code ?? "host-dynamic-launch-unsupported",
+          hostDynamicPlan.reason ?? "host-lifted dynamic launch unsupported",
+        ));
+      }
+    }
   }
 
   const peerCopyRuntimePlan = createCudaPeerCopyPlan(compiled, input, launch);
@@ -235,39 +260,24 @@ function createHostLiftedDynamicWebGpuPlan(
         webGpuBlocker("device-launch", "dynamic-child-compile-failed", `dynamic child kernel '${item.kernel.name}' could not be compiled for WebGPU`),
       ]);
     }
-    const childRuntime = createCudaRuntimePlan(childCompiled);
-    if (!childRuntime.operations.every((operation) => operation.kind === "device-sync" || operation.kind === "peer-copy")) {
+    const childLaunch = { gridDim: item.gridDim, blockDim: item.blockDim };
+    const childExecutionPlan = createCudaWebGpuExecutionPlan(
+      childCompiled,
+      item.input,
+      childLaunch,
+      childExecutionPlanOptions(options),
+    );
+    if (!childExecutionPlan.supported) {
+      const firstBlocker = childExecutionPlan.blockers[0];
       return unsupportedWebGpuPlan(compiled, [
-        webGpuBlocker("device-launch", "dynamic-child-runtime-unsupported", `dynamic child kernel '${item.kernel.name}' needs unsupported runtime orchestration`),
+        webGpuBlocker(
+          firstBlocker?.kind ?? "device-launch",
+          firstBlocker?.code ?? "dynamic-child-runtime-unsupported",
+          firstBlocker?.message ?? `dynamic child kernel '${item.kernel.name}' needs unsupported runtime orchestration`,
+        ),
       ]);
     }
-    const childWgslInput = createWgslRunInput(childCompiled, item.input);
-    for (const [name, value] of Object.entries(childWgslInput.buffers)) {
-      buffers[item.storageAliases[name] ?? name] = value;
-    }
-    for (const [name, value] of Object.entries(childWgslInput.residentBuffers ?? {})) {
-      residentBuffers[item.storageAliases[name] ?? name] = value;
-    }
-    const childLaunch = { gridDim: item.gridDim, blockDim: item.blockDim };
-    steps.push({
-      program: childCompiled.wgslProgram,
-      launch: { dispatchCount: dispatchCountForLaunch(childLaunch) },
-      storageAliases: item.storageAliases,
-      ...(childWgslInput.uniforms === undefined ? {} : { uniforms: childWgslInput.uniforms }),
-    });
-    if (childRuntime.operations.some((operation) => operation.kind === "peer-copy")) {
-      const peerCopyPlan = createCudaPeerCopyPlan(childCompiled, item.input, childLaunch);
-      if (!peerCopyPlan.supported) {
-        return unsupportedWebGpuPlan(compiled, [
-          webGpuBlocker(
-            "peer-copy",
-            peerCopyPlan.blocker?.code ?? "host-peer-copy-unsupported",
-            peerCopyPlan.reason ?? `dynamic child kernel '${item.kernel.name}' contains unsupported peer copy`,
-          ),
-        ]);
-      }
-      appendPeerCopySteps(steps, peerCopyPlan.copies, item.storageAliases);
-    }
+    appendExecutionPlanWithAliases(steps, buffers, residentBuffers, childExecutionPlan, item.storageAliases);
   }
 
   return {
@@ -281,6 +291,48 @@ function createHostLiftedDynamicWebGpuPlan(
       ...(parentInput.readback === undefined ? {} : { readback: parentInput.readback }),
     },
   };
+}
+
+function childExecutionPlanOptions(options: CudaWebGpuExecutionPlanOptions): CudaWebGpuExecutionPlanOptions {
+  return {
+    ...(options.compileKernel === undefined ? {} : { compileKernel: options.compileKernel }),
+    ...(options.maxHostExpandedParentInvocations === undefined ? {} : { maxHostExpandedParentInvocations: options.maxHostExpandedParentInvocations }),
+    ...(options.maxHostDynamicLaunchDepth === undefined ? {} : { maxHostDynamicLaunchDepth: options.maxHostDynamicLaunchDepth }),
+    hostDynamicLaunchDepth: (options.hostDynamicLaunchDepth ?? 0) + 1,
+  };
+}
+
+function appendExecutionPlanWithAliases(
+  steps: WgslKernelSequenceStep[],
+  buffers: Record<string, WgslTypedArray>,
+  residentBuffers: Record<string, WgslResidentBuffer>,
+  plan: Extract<CudaWebGpuExecutionPlan, { readonly supported: true }>,
+  aliases: Readonly<Record<string, string>>,
+): void {
+  for (const [name, value] of Object.entries(plan.input.buffers)) {
+    buffers[aliases[name] ?? name] = value;
+  }
+  for (const [name, value] of Object.entries(plan.input.residentBuffers ?? {})) {
+    residentBuffers[aliases[name] ?? name] = value;
+  }
+  for (const step of plan.steps) {
+    const storageAliases = composeStorageAliases(step.storageAliases, aliases);
+    steps.push({
+      ...step,
+      ...(storageAliases === undefined ? {} : { storageAliases }),
+    });
+  }
+}
+
+function composeStorageAliases(
+  stepAliases: Readonly<Record<string, string>> | undefined,
+  parentAliases: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> | undefined {
+  const out: Record<string, string> = { ...parentAliases };
+  for (const [from, to] of Object.entries(stepAliases ?? {})) {
+    out[from] = parentAliases[to] ?? to;
+  }
+  return Object.keys(out).length === 0 ? undefined : out;
 }
 
 function createSingleDispatchWebGpuPlan(
@@ -456,6 +508,8 @@ function getOrCompileDynamicChild(
     const compiled = compileKernel(parent.ast.source, {
       kernelName: item.kernel.name,
       features: featureOptionsFor(parent.ir.requiredFeatures),
+      referenceDynamicParallelism: true,
+      referenceGridSync: true,
       referenceCudaRuntime: true,
       workgroupSize: item.blockDim,
       pointerBaseOffsets: item.pointerBaseOffsets,
