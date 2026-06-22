@@ -188,6 +188,19 @@ __global__ void bad(float* x) {
   if (threadIdx.x < 1) { x[0] = 1.0; }
 }`));
     expect(barrierArity.diagnostics.map((diagnostic) => diagnostic.code)).toContain("invalid-call-arity");
+
+    const reservedName = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(float* var) {
+  if (threadIdx.x < 1) { var[0] = 1.0; }
+}`));
+    expect(reservedName.diagnostics.map((diagnostic) => diagnostic.code)).toContain("reserved-symbol");
+
+    const builtinShadow = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(float* x) {
+  float threadIdx = 0.0;
+  if (blockIdx.x < 1) { x[0] = threadIdx; }
+}`));
+    expect(builtinShadow.diagnostics.map((diagnostic) => diagnostic.code)).toContain("reserved-symbol");
   });
 
   it("rejects parser edge cases with clear errors", () => {

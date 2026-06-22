@@ -26,6 +26,38 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["bg_subgroup_add", [1, 1]],
   ["atomicAdd", [2, 2]],
 ]);
+const WGSL_RESERVED_WORDS = new Set([
+  "alias",
+  "array",
+  "atomic",
+  "bitcast",
+  "bool",
+  "break",
+  "case",
+  "const",
+  "continue",
+  "default",
+  "discard",
+  "else",
+  "enable",
+  "false",
+  "fn",
+  "for",
+  "f16",
+  "f32",
+  "i32",
+  "if",
+  "let",
+  "loop",
+  "override",
+  "return",
+  "struct",
+  "switch",
+  "true",
+  "u32",
+  "var",
+  "while",
+]);
 
 type ValueType = Exclude<CudaLiteScalarType, "void">;
 
@@ -67,6 +99,7 @@ export function analyzeCudaLite(
     if (declaredNames.has(param.name)) {
       diagnostics.push(error("duplicate-symbol", `duplicate parameter '${param.name}'`, param.span));
     }
+    validateDeclaredSymbolName(param.name, param.span, diagnostics);
     declaredNames.add(param.name);
     rootScope.symbols.set(param.name, {
       name: param.name,
@@ -83,6 +116,7 @@ export function analyzeCudaLite(
     if (declaredNames.has(statement.name)) {
       diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${statement.name}'`, statement.span));
     }
+    validateDeclaredSymbolName(statement.name, statement.span, diagnostics);
     declaredNames.add(statement.name);
     scope.symbols.set(statement.name, {
       name: statement.name,
@@ -486,6 +520,20 @@ function validateExpressionStatement(
   }
   if (guardDepth === 0) {
     diagnostics.push(error("unguarded-write", `write to pointer '${root}' must be guarded in CUDA-lite v0`, expression.span));
+  }
+}
+
+function validateDeclaredSymbolName(
+  name: string,
+  span: SourceSpan,
+  diagnostics: CudaLiteDiagnostic[],
+): void {
+  if (BUILTIN_VECTORS.has(name) || BUILTIN_CALLS.has(name)) {
+    diagnostics.push(error("reserved-symbol", `symbol '${name}' conflicts with a CUDA-lite builtin`, span));
+    return;
+  }
+  if (WGSL_RESERVED_WORDS.has(name)) {
+    diagnostics.push(error("reserved-symbol", `symbol '${name}' is reserved by WGSL output`, span));
   }
 }
 
