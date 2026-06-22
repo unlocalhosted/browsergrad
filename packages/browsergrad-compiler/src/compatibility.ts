@@ -130,7 +130,7 @@ function inferFeatureFromDiagnostic(
   if (/cooperative|thread_block|tiled_partition|shfl|warp|subgroup/u.test(message)) {
     return feature(diagnostic.code, "subgroup", "Warp/group compatibility gap", "unsupported", false, true, message);
   }
-  if (/<<<|cudaDeviceSynchronize|dynamic parallel/u.test(message)) {
+  if (/<<<|cudaDeviceSynchronize|cudaMemcpy|cudaStream|cudaEvent|dynamic parallel/u.test(message)) {
     return feature(diagnostic.code, "runtime", "CUDA runtime compatibility gap", "unsupported", false, true, message);
   }
   if (/__constant__|constant/u.test(message)) {

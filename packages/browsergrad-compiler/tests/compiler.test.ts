@@ -312,6 +312,10 @@ __global__ void unsupported(float* x) {
       code: "unsupported-call",
       message: "unsupported CUDA-lite call 'tex2D'",
     })).toMatchObject({ family: "texture" });
+    expect(describeCudaDiagnostic({
+      code: "unsupported-call",
+      message: "unsupported CUDA-lite call 'cudaMemcpyPeerAsync'",
+    })).toMatchObject({ family: "runtime" });
   });
 
   it("rejects semantic gaps before WGSL/runtime execution", () => {
