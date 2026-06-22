@@ -417,53 +417,69 @@ curriculum profiles and handoff docs absorb course-specific adapters.
 ## Testing Decisions
 
 - Follow tracer-bullet TDD. Do not write a broad imagined suite first.
-- First RED test: capability preflight accepts all-of and any-of gates and
-  reports missing alternatives through the public runtime API.
-- Second RED test: malformed capability gate options produce profile parse
-  errors instead of silently passing unusable gate specs.
-- Third RED test: required capabilities are de-duplicated deterministically and
-  ignore non-capability behavioral gates.
-- Later RED test: capability environment construction de-duplicates browser,
-  simulated, and external groups, sorts them deterministically, and gives
-  browser-native support precedence when the same capability appears in multiple
-  groups.
-- Later RED test: capability catalog construction returns sorted cross-profile
-  entries and distinguishes required capabilities from alternative groups.
-- Later RED test: runner-route construction maps Python rubrics to Pyodide, JS
-  rubrics to the browser-native runner, external-only readiness to external
-  launch, failed readiness to blocked, and unknown rubric kinds to unsupported.
-- Later benchmark test: CS336 Assignment 5 and CS149GPT profile drafts produce
+Implemented proof ledger:
+
+- Capability preflight accepts all-of and any-of gates, reports missing
+  alternatives through the public runtime API, rejects malformed capability gate
+  options during profile parsing, and de-duplicates required capabilities while
+  ignoring non-capability behavioral gates.
+- Capability environment construction de-duplicates browser, simulated, and
+  external groups, sorts them deterministically, and gives browser-native
+  support precedence when the same capability appears in multiple groups.
+- Capability catalog construction returns sorted cross-profile entries and
+  distinguishes required capabilities from alternative groups.
+- Runner-route construction maps Python rubrics to Pyodide, JS rubrics to the
+  browser-native runner, external-only readiness to external launch, failed
+  readiness to blocked, and unknown rubric kinds to unsupported.
+- CS336 Assignment 5 and CS149GPT profile drafts produce
   `externalRunnerRequest` objects under external capability environments.
   CS149GPT now also has a browser-first platform proof for attention math and
   memory behavior before the external C++ runner exists.
-- Later RED test: batch benchmark matrix helper returns one flattened row per
-  profile and marks the matrix not-ok when required content or datasets are
-  missing, without duplicating preflight semantics in platform code. Matrix rows
-  include capability gate details so platform dashboards can render selected and
+- Batch benchmark matrix helper returns one flattened row per profile and marks
+  the matrix not-ok when required content or datasets are missing, without
+  duplicating preflight semantics in platform code. Matrix rows include
+  capability gate details so platform dashboards can render selected and
   missing alternatives directly.
-- Later RED test: verified benchmark matrix helper marks rows not-ok when
-  required dataset contents exist but declared SHA-256 hashes mismatch, and
-  reports per-dataset hash status without writing to `Session.fs`.
-- Later RED test: platform handoff helper returns a deterministic `nextAction`
-  and renderable messages for missing-content benchmark profiles, then switches
-  to the concrete runner action once required content is present.
-- Later RED test: verified platform handoff blocks launch when present fixture
-  contents fail declared dataset hash checks, including benchmark profiles with
-  placeholder hashes.
-- Later RED test: verified JavaScript profile runner rejects mismatched dataset
-  hashes before invoking the rubric callback, then runs the same profile when
-  fixture contents match.
-- Platform integration proof: CraftingAttention loads the real GPU Puzzles
-  benchmark profile, routes it through `runVerifiedAssignmentJavascriptProfile`,
-  and supplies the CUDA-shaped oracle from the generic kernels package instead
-  of resurrecting assignment-specific package names.
-- Later RED test: platform issue draft helper turns a handoff into deterministic
+- Verified benchmark matrix helper marks rows not-ok when required dataset
+  contents exist but declared SHA-256 hashes mismatch, and reports per-dataset
+  hash status without writing to `Session.fs`.
+- Platform handoff helper returns a deterministic `nextAction` and renderable
+  messages for missing-content benchmark profiles, then switches to the concrete
+  runner action once required content is present.
+- Verified platform handoff blocks launch when present fixture contents fail
+  declared dataset hash checks, including benchmark profiles with placeholder
+  hashes.
+- Verified JavaScript profile runner rejects mismatched dataset hashes before
+  invoking the rubric callback, then runs the same profile when fixture contents
+  match.
+- Platform issue draft helper turns a handoff into deterministic
   title/body/labels content for downstream tracker posting, including hash-check
   details when the handoff was verified.
-- Run focused package tests:
-  - `pnpm --filter @unlocalhosted/browsergrad-runtime test -- assignment`
-  - `pnpm --filter @unlocalhosted/browsergrad-runtime typecheck`
-- Run `pnpm validate:prd docs/prd/PRD-018-lab-core-capability-spine.md`.
+- CraftingAttention platform proof loads real benchmark profiles and consumes
+  BrowserGrad oracles through end-to-end tests:
+  - CS336 A2 Systems: Pyodide route, placeholder hash blocking, FlashAttention
+    forward/backward oracle.
+  - CS336 A3 Scaling: hosted training fixture, scheduler, scaling-law oracle.
+  - CS336 A4 Data: data/classifier route, placeholder hash blocking, PII,
+    exact/near dedupe, Gopher quality, visible HTML extraction.
+  - CS336 A5 Alignment: RL/loss/parser route, placeholder hash blocking, DPO,
+    MMLU/GSM8K parsing, rollout reward, GRPO/GSPO loss behavior.
+  - GPU Puzzles: `runVerifiedAssignmentJavascriptProfile()` with generic
+    `runThreadGrid()`.
+  - CS149 A1: CPU/SIMD/static-work simulator proof.
+  - CS149 A2: task-graph simulator proof.
+  - CS149 A3: generic `Kernel1D`/`runThreadGrid()` kernel concept proof.
+  - CS149GPT: Pyodide JS module bridge for attention optimization oracles.
+
+Required gates before shipping PRD-018 slices:
+
+- `pnpm --filter @unlocalhosted/browsergrad-runtime test -- assignment`
+- `pnpm --filter @unlocalhosted/browsergrad-runtime typecheck`
+- `pnpm --filter @unlocalhosted/browsergrad-kernels test`
+- `pnpm --filter @unlocalhosted/browsergrad-kernels build`
+- `pnpm validate:prd docs/prd/PRD-018-lab-core-capability-spine.md`
+- CraftingAttention BrowserGrad platform suite:
+  `npx vitest run src/lib/pyodide/browsergrad-assignment-capabilities.e2e.test.ts src/content/essential-pytorch/essential-pytorch-bridge/e2e.test.ts src/lib/pyodide/browsergrad-integration.test.ts`
 - Acceptance criteria:
   - PRD validates under the research-gated linter.
   - Runtime public API exports the capability helpers and types.
