@@ -1,0 +1,105 @@
+import { beforeAll, describe, expect, it } from "vitest";
+import { createDevice } from "@unlocalhosted/browsergrad-kernels";
+import {
+  compileCudaLiteKernel,
+  runCompiledKernelReference,
+  runCompiledKernelWebGpu,
+} from "../src/index";
+
+interface DeviceCheck {
+  readonly available: boolean;
+  readonly reason?: string;
+}
+
+const SAXPY = `
+__global__ void saxpy(const float* x, float* y, float a, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    y[i] = a * x[i] + y[i];
+  }
+}
+`;
+
+const TILED_MATMUL = `
+__global__ void tiled(const float* A, const float* B, float* C, int N) {
+  __shared__ float As[2][2];
+  __shared__ float Bs[2][2];
+  int tx = threadIdx.x;
+  int ty = threadIdx.y;
+  int row = blockIdx.y * blockDim.y + ty;
+  int col = blockIdx.x * blockDim.x + tx;
+  float acc = 0.0;
+  for (int t = 0; t < N; t += 2) {
+    if (row < N && (t + tx) < N) { As[ty][tx] = A[row * N + t + tx]; }
+    if (col < N && (t + ty) < N) { Bs[ty][tx] = B[(t + ty) * N + col]; }
+    __syncthreads();
+    for (int k = 0; k < 2; k++) {
+      if ((t + k) < N) { acc += As[ty][k] * Bs[k][tx]; }
+    }
+    __syncthreads();
+  }
+  if (row < N && col < N) { C[row * N + col] = acc; }
+}
+`;
+
+async function checkDevice(): Promise<DeviceCheck> {
+  if (typeof navigator === "undefined" || !("gpu" in navigator)) {
+    return { available: false, reason: "navigator.gpu undefined" };
+  }
+  try {
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) return { available: false, reason: "no GPU adapter" };
+    return { available: true };
+  } catch (error) {
+    return {
+      available: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+describe("real WebGPU — CUDA-lite compiler", () => {
+  let deviceCheck: DeviceCheck;
+
+  beforeAll(async () => {
+    deviceCheck = await checkDevice();
+    if (!deviceCheck.available) {
+      console.warn(`[skip] WebGPU not available: ${deviceCheck.reason}`);
+    }
+  });
+
+  it("runs compiled SAXPY through WebGPU and matches the reference", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
+    const input = {
+      buffers: {
+        x: new Float32Array([1, 2, 3, 4]),
+        y: new Float32Array([10, 20, 30, 40]),
+      },
+      scalars: { a: 2, n: 4 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [8, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
+  });
+
+  it("runs compiled shared-memory tiled matmul through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(TILED_MATMUL, { workgroupSize: [2, 2, 1] });
+    const input = {
+      buffers: {
+        A: new Float32Array([1, 2, 3, 4]),
+        B: new Float32Array([5, 6, 7, 8]),
+        C: new Float32Array(4),
+      },
+      scalars: { N: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 2, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.C as Float32Array]).toEqual([...expected.buffers.C as Float32Array]);
+  });
+});

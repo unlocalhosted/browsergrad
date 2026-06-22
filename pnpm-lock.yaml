@@ -8,6 +8,37 @@ importers:
 
   .: {}
 
+  packages/browsergrad-compiler:
+    dependencies:
+      '@unlocalhosted/browsergrad-kernels':
+        specifier: workspace:*
+        version: link:../browsergrad-kernels
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.12.4
+      '@vitest/browser':
+        specifier: ^4.1.7
+        version: 4.1.7(vite@8.0.14(@types/node@24.12.4))(vitest@4.1.7)
+      '@vitest/browser-playwright':
+        specifier: ^4.1.7
+        version: 4.1.7(playwright@1.60.0)(vite@8.0.14(@types/node@24.12.4))(vitest@4.1.7)
+      '@webgpu/types':
+        specifier: ^0.1.50
+        version: 0.1.70
+      oxlint:
+        specifier: ^1.0.0
+        version: 1.66.0
+      playwright:
+        specifier: ^1.60.0
+        version: 1.60.0
+      typescript:
+        specifier: ~6.0.0
+        version: 6.0.3
+      vitest:
+        specifier: ^4.0.0
+        version: 4.1.7(@types/node@24.12.4)(@vitest/browser-playwright@4.1.7)(vite@8.0.14(@types/node@24.12.4))
+
   packages/browsergrad-grad:
     devDependencies:
       '@types/node':
