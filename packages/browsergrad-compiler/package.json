@@ -44,6 +44,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "bench": "pnpm run build && node ../../scripts/benchmark-cuda-lite-compiler.mjs",
     "test:watch": "vitest",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:browser:open": "vitest --config vitest.browser.config.ts --watch --browser.headless=false",

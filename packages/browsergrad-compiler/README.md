@@ -172,3 +172,14 @@ pnpm test:browser:open
 `test:browser:open` keeps Chromium open for inspection; quit with `q`. If the
 Vitest browser watch rerun path reports an orchestrator-session error, restart
 the command instead of trusting that rerun.
+
+## Performance Harness
+
+```bash
+pnpm --filter @unlocalhosted/browsergrad-compiler bench -- --markdown /tmp/bg-cuda-lite-bench.md
+```
+
+The harness emits stable JSON timing for compile, CPU reference, dynamic-launch
+planning, and peer-copy planning paths. It is data-only: no fixed threshold is
+portable across laptops, browsers, and CI runners. Use median/p95 deltas across
+commits to catch regressions before promoting platform perf rubrics.

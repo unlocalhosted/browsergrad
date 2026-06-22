@@ -13,3 +13,5 @@
 - Added `createCudaRuntimePlan()`, `createCudaGridSyncPhasePlan()`,
   `createCudaHostDynamicLaunchPlan()`, and `createCudaPeerCopyPlan()` for
   platform/rubric preflight.
+- Added `pnpm bench` benchmark harness for compiler, CPU reference, and
+  orchestration planner timing.

@@ -74,3 +74,11 @@ Current corpus gate (`node scripts/audit-cuda-lite-corpus.mjs /tmp/CUDA-120-DAYS
   reference-only.
 - Remaining failures group cleanly: dynamic parallelism/runtime launches,
   cooperative groups/grid sync, and one incomplete pseudocode symbol.
+
+Performance gate:
+
+- Compiler/runtime perf is tracked by
+  `pnpm --filter @unlocalhosted/browsergrad-compiler bench -- --markdown /tmp/bg-cuda-lite-bench.md`.
+  It reports JSON plus optional markdown for compile hot paths, CPU reference
+  execution, host-lifted dynamic planning, and peer-copy planning. Treat the
+  numbers as regression evidence, not universal pass/fail thresholds.
