@@ -20,7 +20,7 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
 | `layernorm` | Along last axis, optional gamma/beta | ✅ |
 | `attention` | Composed 3-kernel SDPA | ✅ |
 | `referenceFlashAttention` / `referenceFlashAttentionBackward` | Pure-JS FlashAttention oracle with output, log-sum-exp, and Q/K/V gradients | ✅ |
-| `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` | CUDA-shaped 1D kernel IR with simulator and WGSL lowering | ✅ |
+| `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` / `runCuda1DProgramWebGpu` | CUDA-shaped 1D kernel IR with simulator, WGSL lowering, and browser WebGPU dispatch | ✅ |
 | `simulateCuda1DGrid`, `referenceSaxpy`, `referenceExclusiveScan`, `referenceFindRepeats`, `referenceOrderedCircleRender` | CUDA-shaped teaching references for GPU Puzzles and CS149 A3 browser rubrics | ✅ |
 | `flashAttentionDirect` | Flash Attention v2 forward, online softmax. **Known numerical issue on real Metal — tracked.** | ⚠️ |
 | `fusedElementwiseDirect` | Runtime WGSL codegen for arbitrary elementwise chains | ✅ |
@@ -79,8 +79,10 @@ run it through both adapters:
 
 ```ts
 import {
+  createDevice,
   defineCuda1DProgram,
   emitCuda1DProgramWgsl,
+  runCuda1DProgramWebGpu,
   simulateCuda1DProgram,
 } from "@unlocalhosted/browsergrad-kernels";
 
@@ -114,11 +116,17 @@ const simulated = simulateCuda1DProgram(program, {
   initialOutput: [10, 20, 30, 40],
 });
 const wgsl = emitCuda1DProgramWgsl(program);
+const device = await createDevice();
+const gpu = await runCuda1DProgramWebGpu(device, program, {
+  initialInput: [1, 2, 3, 4],
+  initialOutput: [10, 20, 30, 40],
+});
 ```
 
 This is the first HipScript-inspired kernel-authoring seam: explicit grid/thread
 semantics, scalar params, input/output buffer reads, deterministic simulator
-trace, and WGSL source generation without shipping a browser LLVM toolchain.
+trace, WGSL source generation, and real browser WebGPU dispatch without
+shipping a browser LLVM toolchain.
 
 ### Kernel rubric assertions
 

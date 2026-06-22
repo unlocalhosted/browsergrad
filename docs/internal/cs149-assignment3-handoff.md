@@ -19,7 +19,8 @@ First browser-safe slice:
     deterministic normalized circle geometry and ordered alpha blending.
   - `defineCuda1DProgram()`, `simulateCuda1DProgram()`, and
     `emitCuda1DProgramWgsl()` to prove the same guarded SAXPY-like 1D program
-    can run through simulator trace and WGSL source generation.
+    can run through simulator trace, WGSL source generation, and
+    `runCuda1DProgramWebGpu()` browser dispatch.
   - `simulateCuda1DGrid()` to check 1D thread/block indexing, guard behavior,
     and out-of-bounds access before native CUDA execution exists.
 - Proven BrowserGrad route:
@@ -56,8 +57,10 @@ Crafting Attention should:
    `renderer_ordering_correctness`, and `kernel_memory_bounds`.
 4. Add `find_repeats` fixtures through `referenceFindRepeats()` when authoring
    scan labs.
-5. Use `wgsl_lowering_smoke` for author-once CUDA-shaped kernels before real
-   WebGPU dispatch; scalar params and `outputRead` cover the first SAXPY shape.
+5. Use `wgsl_lowering_smoke` for author-once CUDA-shaped kernels: scalar params
+   and `outputRead` cover the first SAXPY shape, and
+   `runCuda1DProgramWebGpu()` covers real WebGPU dispatch when an adapter
+   exists.
 6. Keep `performance_rubric_smoke` informational until WebGPU/native timing
    fixtures are calibrated.
 7. Keep native CUDA as an explicit external runner, not hidden BrowserGrad
@@ -74,6 +77,8 @@ Crafting Attention should:
 - WGSL-lowering fixtures: small `Cuda1DProgram` with launch shape, params,
   input/output initial buffers, expected simulator output, and expected WGSL
   source markers.
+- WebGPU-dispatch fixtures: the same `Cuda1DProgram`, expected output, and a
+  clear unavailable path when `navigator.gpu` or a GPU adapter is missing.
 - Memory-bounds fixtures: launch shape, input/output lengths, expected
   violations.
 

@@ -12,6 +12,7 @@ import {
   referenceFlashAttentionBackward,
   referenceOrderedCircleRender,
   referenceSaxpy,
+  runCuda1DProgramWebGpu,
   simulateCuda1DGrid,
   simulateCuda1DProgram,
   tensor,
@@ -36,6 +37,7 @@ describe("public surface", () => {
     expect(typeof defineCuda1DProgram).toBe("function");
     expect(typeof simulateCuda1DProgram).toBe("function");
     expect(typeof emitCuda1DProgramWgsl).toBe("function");
+    expect(typeof runCuda1DProgramWebGpu).toBe("function");
     expect(typeof simulateCuda1DGrid).toBe("function");
     expect(typeof referenceSaxpy).toBe("function");
     expect(typeof referenceExclusiveScan).toBe("function");

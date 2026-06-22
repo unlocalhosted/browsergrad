@@ -13,6 +13,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `emitCuda1DProgramWgsl()` provide a tiny CUDA-shaped 1D program IR that can
   run through a deterministic simulator and lower to WGSL. It now supports
   scalar params and `outputRead` expressions for A3-style SAXPY.
+- `runCuda1DProgramWebGpu()` dispatches emitted `Cuda1DProgram` WGSL through a
+  real browser `GPUDevice`; browser tests skip clearly when no adapter exists.
 - `simulateCuda1DGrid()`, `referenceSaxpy()`, `referenceExclusiveScan()`,
   `referenceFindRepeats()`, and `referenceOrderedCircleRender()` provide
   CUDA-shaped browser-safe references for GPU Puzzles and CS149 A3-style

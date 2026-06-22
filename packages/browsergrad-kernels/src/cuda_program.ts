@@ -3,7 +3,8 @@ import {
   type Cuda1DGridResult,
   type Cuda1DThreadContext,
 } from "./cuda_concepts.js";
-import { KernelError } from "./types.js";
+import { dispatch } from "./runner.js";
+import { KernelError, type KernelDevice } from "./types.js";
 
 export interface Cuda1DProgramInput {
   readonly name: string;
@@ -133,6 +134,54 @@ export function emitCuda1DProgramWgsl(program: Cuda1DProgram): string {
     "}",
     "",
   ].join("\n");
+}
+
+export async function runCuda1DProgramWebGpu(
+  device: KernelDevice,
+  program: Cuda1DProgram,
+  input: Cuda1DProgramRunInput = {},
+): Promise<Float32Array> {
+  const initialInput = Float32Array.from(
+    materializeVector(input.initialInput, program.inputLength, "initialInput"),
+  );
+  const initialOutput =
+    input.initialOutput === undefined
+      ? undefined
+      : Float32Array.from(
+          materializeVector(input.initialOutput, program.outputLength, "initialOutput"),
+        );
+  const parameterNames = Object.keys(program.parameters ?? {}).sort();
+  const params = Float32Array.from(
+    parameterNames.map((name) => readParameter(program.parameters ?? {}, name)),
+  );
+
+  return dispatch(
+    device,
+    {
+      name: `cuda-1d-program-${program.name}`,
+      wgsl: emitCuda1DProgramWgsl(program),
+      workgroupSize: [program.launch.threadsPerBlock, 1, 1],
+    },
+    {
+      inputs: [initialInput],
+      outputLength: program.outputLength,
+      params,
+      ...(initialOutput ? { initialOutput } : {}),
+      dispatchCount: [
+        program.launch.blocks * program.launch.threadsPerBlock,
+        1,
+        1,
+      ],
+      cacheKeySuffix: [
+        program.name,
+        program.inputLength,
+        program.outputLength,
+        program.launch.blocks,
+        program.launch.threadsPerBlock,
+        parameterNames.join(","),
+      ].join(":"),
+    },
+  );
 }
 
 function executeStatements(
@@ -382,6 +431,20 @@ function readParameter(
     throw new KernelError(`missing Cuda1DProgram parameter: ${name}`);
   }
   return value;
+}
+
+function materializeVector(
+  values: readonly number[] | undefined,
+  length: number,
+  name: string,
+): number[] {
+  if (values === undefined) return Array.from({ length }, () => 0);
+  if (values.length !== length) {
+    throw new KernelError(`${name} length must be ${length}`);
+  }
+  return values.map((value, index) =>
+    validateFiniteNumber(value, `${name}[${index}]`),
+  );
 }
 
 function validateIdentifier(value: string, name: string): string {

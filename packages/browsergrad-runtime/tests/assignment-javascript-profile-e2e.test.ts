@@ -14,6 +14,7 @@ import {
   referenceFindRepeats,
   referenceOrderedCircleRender,
   referenceSaxpy,
+  runCuda1DProgramWebGpu,
   simulateCuda1DGrid,
   simulateCuda1DProgram,
 } from "@unlocalhosted/browsergrad-kernels";
@@ -39,6 +40,7 @@ interface CudaConceptsReference {
   referenceFindRepeats: typeof referenceFindRepeats;
   referenceOrderedCircleRender: typeof referenceOrderedCircleRender;
   referenceSaxpy: typeof referenceSaxpy;
+  runCuda1DProgramWebGpu: typeof runCuda1DProgramWebGpu;
   simulateCuda1DGrid: typeof simulateCuda1DGrid;
   simulateCuda1DProgram: typeof simulateCuda1DProgram;
 }
@@ -398,6 +400,7 @@ describe("profile-driven JavaScript assignment e2e", () => {
       referenceFindRepeats,
       referenceOrderedCircleRender,
       referenceSaxpy,
+      runCuda1DProgramWebGpu,
       simulateCuda1DGrid,
       simulateCuda1DProgram,
     };
@@ -476,6 +479,7 @@ describe("profile-driven JavaScript assignment e2e", () => {
         !ctx.allowedTests.includes("wgsl_lowering_smoke") ||
         saxpy.join(",") !== "12,24,36,48" ||
         loweredSaxpy.output.join(",") !== "12,24,36,48" ||
+        typeof cuda.runCuda1DProgramWebGpu !== "function" ||
         scan.join(",") !== "0,3,4,8,9" ||
         repeats.join(",") !== "0,3,4" ||
         rendered.pixels.join(",") !== "0.125,0.25,0.5" ||
@@ -485,6 +489,7 @@ describe("profile-driven JavaScript assignment e2e", () => {
           expected: {
             saxpy: [12, 24, 36, 48],
             loweredSaxpy: [12, 24, 36, 48],
+            webgpuRunner: "function",
             scan: [0, 3, 4, 8, 9],
             repeats: [0, 3, 4],
             renderedPixel: [0.125, 0.25, 0.5],
@@ -493,6 +498,7 @@ describe("profile-driven JavaScript assignment e2e", () => {
           actual: {
             saxpy,
             loweredSaxpy: loweredSaxpy.output,
+            webgpuRunner: typeof cuda.runCuda1DProgramWebGpu,
             scan,
             repeats,
             renderedPixel: rendered.pixels,

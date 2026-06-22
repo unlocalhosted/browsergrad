@@ -53,7 +53,8 @@ The same package now exports CUDA-shaped concept oracles such as
 traces, guard diagnostics, and deterministic outputs before WGSL lowering.
 The next shipped primitive is `defineCuda1DProgram()`: one small CUDA-shaped 1D
 program description can run through `simulateCuda1DProgram()` and
-`emitCuda1DProgramWgsl()`. It now supports scalar params and `outputRead`
+`emitCuda1DProgramWgsl()`, then dispatch through `runCuda1DProgramWebGpu()`
+when a browser adapter exists. It now supports scalar params and `outputRead`
 expressions for SAXPY-like kernels. This keeps the HipScript direction alive
 without making browser LLVM the first dependency.
 

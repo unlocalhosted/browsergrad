@@ -32,8 +32,10 @@ export interface DispatchOptions {
   readonly inputs: readonly Float32Array[];
   /** Length is the number of f32 elements in the output. */
   readonly outputLength: number;
-  /** Uniform params packed as u32 by the kernel. May be empty. */
-  readonly params: Uint32Array;
+  /** Uniform params packed as raw bytes by the caller. May be empty. */
+  readonly params: Uint32Array | Float32Array;
+  /** Optional initial output contents for kernels that read/write one buffer. */
+  readonly initialOutput?: Float32Array;
   /** Global dispatch count `[x, y, z]`. The runner divides by workgroupSize internally. */
   readonly dispatchCount: readonly [number, number, number];
   /** A unique-per-parameter-shape suffix appended to the cache key. */
@@ -99,8 +101,23 @@ export async function dispatch(
   const outputByteLength = opts.outputLength * 4;
   const outputBuffer = gpu.createBuffer({
     size: alignTo(outputByteLength, 4),
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+    usage:
+      GPUBufferUsage.STORAGE |
+      GPUBufferUsage.COPY_SRC |
+      GPUBufferUsage.COPY_DST,
   });
+  if (opts.initialOutput) {
+    if (opts.initialOutput.length !== opts.outputLength) {
+      throw new KernelError("initialOutput length must match outputLength");
+    }
+    gpu.queue.writeBuffer(
+      outputBuffer,
+      0,
+      opts.initialOutput.buffer,
+      opts.initialOutput.byteOffset,
+      opts.initialOutput.byteLength,
+    );
+  }
 
   let paramsBuffer: GPUBuffer | null = null;
   if (hasParams) {

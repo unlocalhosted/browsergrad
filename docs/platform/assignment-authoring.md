@@ -110,9 +110,10 @@ GPU Puzzles and CS149 A3-style CUDA concept rubrics can use the same package's
 `referenceFindRepeats()` for `cuda-compatible-subset` fixture checks. Use
 `referenceOrderedCircleRender()` for renderer-ordering fixtures where circle
 input order determines alpha blending. Use `defineCuda1DProgram()`,
-`simulateCuda1DProgram()`, and `emitCuda1DProgramWgsl()` for author-once
-CUDA-shaped 1D kernels that need scalar params, input reads, output reads, and
-WGSL source generation. The grid simulator records thread/block ids, global
+`simulateCuda1DProgram()`, `emitCuda1DProgramWgsl()`, and
+`runCuda1DProgramWebGpu()` for author-once CUDA-shaped 1D kernels that need
+scalar params, input reads, output reads, WGSL source generation, and browser
+WebGPU dispatch. The grid simulator records thread/block ids, global
 reads/writes, and out-of-bounds accesses so missing guards fail as teaching
 feedback before native CUDA runners exist.
 Distributed or systems-style JS rubrics can use `simulation.createDeterministicMesh()`
