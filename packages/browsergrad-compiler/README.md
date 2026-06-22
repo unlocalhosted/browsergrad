@@ -19,6 +19,9 @@ Compatibility vocabulary:
 - **CPU reference**: correctness and teaching trace, not primary runtime.
 - **unsupported diagnostic**: no honest lowering exists yet.
 
+Low-level extension boundaries live in
+[`docs/platform/cuda-lite-compiler-architecture.md`](../../docs/platform/cuda-lite-compiler-architecture.md).
+
 ## Quick Start
 
 ```ts

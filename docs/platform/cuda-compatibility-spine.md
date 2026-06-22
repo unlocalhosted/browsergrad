@@ -44,6 +44,8 @@ Public APIs:
 
 Rule: do not add assignment-specific fixes. Add semantic primitives, reference
 truth, WGSL lowering, browser tests, and corpus audit evidence.
+For file-level boundaries and extension order, see
+[CUDA-lite Compiler Architecture](./cuda-lite-compiler-architecture.md).
 
 Current corpus gate:
 
