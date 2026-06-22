@@ -382,6 +382,11 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     `runCuda1DProgramWebGpu()` for `wgsl_lowering_smoke` fixtures. This is the
     current HipScript-inspired CUDA-shaped path: simulator trace, WGSL lowering,
     then real browser WebGPU dispatch when available.
+    CraftingAttention now has a platform e2e that loads
+    `docs/internal/gpu-puzzles.profile.json`, calls
+    `runVerifiedAssignmentJavascriptProfile()`, wires the `_bg_cuda_concepts`
+    oracle from `@unlocalhosted/browsergrad-kernels`, and verifies the
+    profile's JS route/assertion/artifact path end to end.
     Simulator-backed labs can use `@unlocalhosted/browsergrad-primitives`
     `simulation.createDeterministicMesh()` or `simulation.createTaskGraphSimulator()` for event-trace
     rubrics before real Worker execution exists. CS149 A2 task-graph labs can

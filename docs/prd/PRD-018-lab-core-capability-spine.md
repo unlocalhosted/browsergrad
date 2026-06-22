@@ -410,6 +410,10 @@ curriculum profiles and handoff docs absorb course-specific adapters.
 - Later RED test: verified JavaScript profile runner rejects mismatched dataset
   hashes before invoking the rubric callback, then runs the same profile when
   fixture contents match.
+- Platform integration proof: CraftingAttention loads the real GPU Puzzles
+  benchmark profile, routes it through `runVerifiedAssignmentJavascriptProfile`,
+  and supplies the CUDA-shaped oracle from the generic kernels package instead
+  of resurrecting assignment-specific package names.
 - Later RED test: platform issue draft helper turns a handoff into deterministic
   title/body/labels content for downstream tracker posting, including hash-check
   details when the handoff was verified.
