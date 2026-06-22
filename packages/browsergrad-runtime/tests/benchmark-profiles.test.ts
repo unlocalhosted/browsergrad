@@ -7,6 +7,7 @@ import {
   createAssignmentBenchmarkPreflightMatrix,
   createAssignmentDatasetCachePlan,
   createAssignmentPlatformHandoff,
+  createAssignmentPlatformIssueDraft,
   createAssignmentPreflightReport,
   createAssignmentRunPlan,
   createVerifiedAssignmentPlatformHandoff,
@@ -333,6 +334,17 @@ describe("benchmark assignment profiles", () => {
       expect(handoff.messages[0]).toBe(
         `missing required file: ${report.plan.files.rubricPath}`,
       );
+      const draft = createAssignmentPlatformIssueDraft(result.profile, handoff);
+      expect(draft.title).toMatch(/^BrowserGrad handoff: /);
+      expect(draft.labels).toEqual(
+        expect.arrayContaining([
+          "browsergrad-handoff",
+          `next:${handoff.nextAction}`,
+          `readiness:${handoff.readinessStatus}`,
+          `runner:${handoff.runnerTarget}`,
+        ]),
+      );
+      expect(draft.body).toContain(`- Profile: ${result.profile.id}`);
     }
   });
 

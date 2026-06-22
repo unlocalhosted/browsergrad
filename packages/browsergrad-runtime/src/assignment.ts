@@ -247,6 +247,12 @@ export interface AssignmentVerifiedPlatformHandoff
   readonly hashChecks: readonly AssignmentMountHashCheck[];
 }
 
+export interface AssignmentPlatformIssueDraft {
+  readonly title: string;
+  readonly body: string;
+  readonly labels: readonly string[];
+}
+
 export interface AssignmentVerifiedBenchmarkPreflightRow
   extends AssignmentBenchmarkPreflightRow {
   readonly hashOk: boolean;
@@ -868,6 +874,52 @@ export async function createVerifiedAssignmentPlatformHandoff(
   };
 }
 
+export function createAssignmentPlatformIssueDraft(
+  profile: AssignmentProfile,
+  handoff: AssignmentPlatformHandoff,
+): AssignmentPlatformIssueDraft {
+  const assignmentName = profile.metadata?.title ?? profile.id;
+  return {
+    title: `BrowserGrad handoff: ${assignmentName}`,
+    labels: [
+      "browsergrad-handoff",
+      `next:${handoff.nextAction}`,
+      `readiness:${handoff.readinessStatus}`,
+      `runner:${handoff.runnerTarget}`,
+    ],
+    body: [
+      "## BrowserGrad Handoff",
+      "",
+      `- Assignment: ${assignmentName}`,
+      `- Profile: ${profile.id}`,
+      ...(profile.metadata?.source_url
+        ? [`- Source: ${profile.metadata.source_url}`]
+        : []),
+      `- Readiness: ${handoff.readinessStatus}`,
+      `- Runner: ${handoff.runnerTarget}`,
+      `- Next action: ${handoff.nextAction}`,
+      `- Launchable: ${handoff.launchable ? "yes" : "no"}`,
+      "",
+      "## Messages",
+      "",
+      ...markdownListOrNone(handoff.messages),
+      "",
+      "## Missing Content",
+      "",
+      ...markdownListOrNone([
+        ...handoff.missingRequiredFiles.map((path) => `Required file: ${path}`),
+        ...handoff.missingDatasets.map((name) => `Dataset: ${name}`),
+      ]),
+      "",
+      "## Capabilities",
+      "",
+      `- Selected: ${humanList(handoff.selectedCapabilities)}`,
+      `- Simulated: ${humanList(handoff.simulatedCapabilities)}`,
+      `- External: ${humanList(handoff.externalCapabilities)}`,
+    ].join("\n"),
+  };
+}
+
 export async function createVerifiedAssignmentBenchmarkPreflightMatrix(
   profiles: readonly AssignmentProfile[],
   environment: AssignmentCapabilityEnvironment,
@@ -970,6 +1022,14 @@ function assignmentPlatformHashMessages(
     .filter((check) => !check.ok)
     .map((check) => `dataset hash ${check.status}: ${check.name}`);
   return messages.length > 0 ? messages : ["dataset hash verification failed"];
+}
+
+function markdownListOrNone(items: readonly string[]): string[] {
+  return items.length > 0 ? items.map((item) => `- ${item}`) : ["- none"];
+}
+
+function humanList(items: readonly string[]): string {
+  return items.length > 0 ? items.join(", ") : "none";
 }
 
 function createAssignmentBenchmarkPreflightRow(

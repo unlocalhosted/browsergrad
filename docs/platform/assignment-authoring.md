@@ -48,6 +48,9 @@ are safe to render directly. Prefer
 `createVerifiedAssignmentPlatformHandoff(profile, report, contents?)` once
 fixture contents are available; it blocks launch on invalid, unsupported,
 missing, or mismatched dataset hashes.
+Use `createAssignmentPlatformIssueDraft(profile, handoff)` to create a stable
+issue title/body/labels payload for each lab handoff or implementation slice.
+BrowserGrad returns the draft; the platform or agent decides where to post it.
 Use `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
 when a platform needs one dashboard/checklist row per benchmark assignment. It
 returns flattened readiness, route, capability, content-gap, cache-strategy, and

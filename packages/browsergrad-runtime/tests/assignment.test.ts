@@ -9,6 +9,7 @@ import {
   createAssignmentBenchmarkPreflightMatrix,
   createVerifiedAssignmentBenchmarkPreflightMatrix,
   createAssignmentPlatformHandoff,
+  createAssignmentPlatformIssueDraft,
   createVerifiedAssignmentPlatformHandoff,
   createAssignmentPreflightReport,
   createAssignmentMountPreflightReport,
@@ -423,6 +424,66 @@ describe("parseAssignmentProfile", () => {
         messages: ["ready for Pyodide rubric runner"],
       }),
     );
+  });
+
+  it("creates a platform issue draft from a handoff", () => {
+    const result = parseAssignmentProfile({
+      ...VALID_PROFILE,
+      gates: [
+        {
+          name: "python_runtime",
+          kind: "capability",
+          options: { requires: ["pyodide"] },
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const report = createAssignmentPreflightReport(
+      result.profile,
+      createAssignmentCapabilityEnvironment({ browserCapabilities: ["pyodide"] }),
+    );
+    const handoff = createAssignmentPlatformHandoff(result.profile, report, {
+      files: {},
+    });
+
+    expect(createAssignmentPlatformIssueDraft(result.profile, handoff)).toEqual({
+      title: "BrowserGrad handoff: Stanford CS336 Assignment 1: Basics",
+      labels: [
+        "browsergrad-handoff",
+        "next:mount-content",
+        "readiness:runnable",
+        "runner:pyodide",
+      ],
+      body: [
+        "## BrowserGrad Handoff",
+        "",
+        "- Assignment: Stanford CS336 Assignment 1: Basics",
+        "- Profile: cs336-assignment1",
+        "- Source: https://github.com/stanford-cs336/assignment1-basics",
+        "- Readiness: runnable",
+        "- Runner: pyodide",
+        "- Next action: mount-content",
+        "- Launchable: no",
+        "",
+        "## Messages",
+        "",
+        "- missing required file: /assignments/cs336-assignment1/rubric.py",
+        "- missing dataset: tiny",
+        "",
+        "## Missing Content",
+        "",
+        "- Required file: /assignments/cs336-assignment1/rubric.py",
+        "- Dataset: tiny",
+        "",
+        "## Capabilities",
+        "",
+        "- Selected: pyodide",
+        "- Simulated: none",
+        "- External: none",
+      ].join("\n"),
+    });
   });
 
   it("creates a cross-profile capability catalog for platform substrate triage", () => {

@@ -53,6 +53,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   dataset hash checks to that launch-panel handoff and blocks launch with
   `nextAction: "verify-content"` when declared fixture hashes are missing,
   invalid, unsupported, or mismatched.
+- `createAssignmentPlatformIssueDraft(profile, handoff)` turns any platform
+  handoff into a deterministic issue title/body/labels payload for downstream
+  lab rollout queues.
 - `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
   batch-flattens profile preflight into platform-ready benchmark rows with
   readiness, route, capability, mount-content, cache-strategy, and external

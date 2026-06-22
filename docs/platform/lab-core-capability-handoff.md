@@ -132,7 +132,9 @@ For every lab profile, the platform should:
     `browsergrad.forbidden_read_gate(name, text)` so eager `read()` or
     `readlines()` calls fail while incremental line reads still work.
 22. Log one `unlocalhosted/craftingattention` issue for each platform handoff or
-    implementation slice.
+    implementation slice. Use `createAssignmentPlatformIssueDraft(profile,
+    handoff)` when a BrowserGrad handoff object exists, then post the returned
+    title/body/labels to the issue tracker.
 
 ## Capability Vocabulary
 
@@ -296,6 +298,10 @@ For each handoff or implementation slice, create a craftingattention issue with:
 - Fixture/mount expectations.
 - Rubric/oracle expectations.
 - Acceptance checks the platform can run.
+
+BrowserGrad can draft this payload with
+`createAssignmentPlatformIssueDraft(profile, handoff)`. The draft is deliberately
+tracker-agnostic: it contains title, body, and labels only.
 
 Use the issue title pattern:
 

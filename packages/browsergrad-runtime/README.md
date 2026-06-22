@@ -181,6 +181,7 @@ import {
   createAssignmentCapabilityCatalog,
   createAssignmentBenchmarkPreflightMatrix,
   createAssignmentPlatformHandoff,
+  createAssignmentPlatformIssueDraft,
   createVerifiedAssignmentPlatformHandoff,
   createVerifiedAssignmentBenchmarkPreflightMatrix,
   createAssignmentDatasetCachePlan,
@@ -221,6 +222,10 @@ const verifiedHandoff = await createVerifiedAssignmentPlatformHandoff(
     datasets: { tiny: tinyFixtureText },
   },
 );
+const issueDraft = createAssignmentPlatformIssueDraft(
+  parsed.profile,
+  verifiedHandoff,
+);
 const matrix = createAssignmentBenchmarkPreflightMatrix(
   [parsed.profile],
   environment,
@@ -255,6 +260,7 @@ console.log(readiness.status, rubricKind, mounts.files, mounts.datasets);
 console.log(route.target, report.runnerRoute.target, report.mountPlan.files, datasetCache.datasets);
 console.log(handoff.nextAction, handoff.launchable, handoff.messages);
 console.log(verifiedHandoff.nextAction, verifiedHandoff.hashOk, verifiedHandoff.hashChecks);
+console.log(issueDraft.title, issueDraft.labels);
 console.log(matrix.rows[0]?.readinessStatus, matrix.rows[0]?.contentOk);
 console.log(matrix.rows[0]?.gates.map((gate) => [gate.name, gate.status, gate.selectedCapabilities]));
 console.log(verifiedMatrix.rows[0]?.hashOk, verifiedMatrix.rows[0]?.hashChecks);
@@ -339,6 +345,10 @@ Use `createVerifiedAssignmentPlatformHandoff(profile, report, contents?)` for
 launch buttons after fixture contents are available; it adds `hashOk` and
 `hashChecks`, and returns `nextAction: "verify-content"` when declared dataset
 hashes fail.
+Use `createAssignmentPlatformIssueDraft(profile, handoff)` to turn a launch
+handoff into a deterministic issue title/body/labels payload for downstream
+platform queues such as Crafting Attention. BrowserGrad only drafts content; it
+does not call a tracker API.
 `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
 batch-flattens those same preflight decisions into platform-ready rows:
 readiness status, runner target, rubric kind, required/selected/missing

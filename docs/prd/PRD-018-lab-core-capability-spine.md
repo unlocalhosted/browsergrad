@@ -179,6 +179,11 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   dataset hash verification to the same launch-panel contract and blocks runner
   actions with `nextAction: "verify-content"` when declared hashes are invalid,
   unsupported, missing, or mismatched.
+- Platform issue-draft guarantee:
+  `createAssignmentPlatformIssueDraft(profile, handoff)` turns a generic
+  BrowserGrad handoff into deterministic issue title/body/labels content so
+  platform agents can log lab rollout issues without tracker-specific runtime
+  code.
 - Benchmark-matrix guarantee:
   `createAssignmentBenchmarkPreflightMatrix(profiles, environment, contents?)`
   turns many profile reports into platform-ready rows with readiness, runner,
@@ -397,6 +402,8 @@ curriculum profiles and handoff docs absorb course-specific adapters.
 - Later RED test: verified platform handoff blocks launch when present fixture
   contents fail declared dataset hash checks, including benchmark profiles with
   placeholder hashes.
+- Later RED test: platform issue draft helper turns a handoff into deterministic
+  title/body/labels content for downstream tracker posting.
 - Run focused package tests:
   - `pnpm --filter @unlocalhosted/browsergrad-runtime test -- assignment`
   - `pnpm --filter @unlocalhosted/browsergrad-runtime typecheck`
