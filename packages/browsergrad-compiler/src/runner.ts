@@ -232,12 +232,12 @@ function stepUniformUpdatesForPlan(
 }
 
 function programTopologyKey(program: SupportedCudaWebGpuExecutionPlan["steps"][number]["program"]): string {
-  return JSON.stringify({
-    name: program.name,
-    wgsl: program.wgsl,
-    bindings: program.bindings,
-    workgroupSize: program.workgroupSize,
-  });
+  return [
+    program.name,
+    hashString(program.wgsl),
+    program.workgroupSize.join(","),
+    program.bindings.map(bindingTopologyKey).join("|"),
+  ].join("::");
 }
 
 function sameTuple(left: readonly [number, number, number], right: readonly [number, number, number]): boolean {
@@ -248,9 +248,13 @@ function sameRecord(
   left: Readonly<Record<string, string>> | undefined,
   right: Readonly<Record<string, string>> | undefined,
 ): boolean {
-  const leftEntries = Object.entries(left ?? {}).sort(([a], [b]) => a.localeCompare(b));
-  const rightEntries = Object.entries(right ?? {}).sort(([a], [b]) => a.localeCompare(b));
-  return JSON.stringify(leftEntries) === JSON.stringify(rightEntries);
+  const leftEntries = Object.entries(left ?? {});
+  const rightEntries = Object.entries(right ?? {});
+  if (leftEntries.length !== rightEntries.length) return false;
+  for (const [key, value] of leftEntries) {
+    if (right?.[key] !== value) return false;
+  }
+  return true;
 }
 
 function throwPreparedTopologyChanged(message: string): never {
@@ -260,6 +264,27 @@ function throwPreparedTopologyChanged(message: string): never {
     message,
     span: { start: 0, end: 0, line: 1, column: 1 },
   }]);
+}
+
+function bindingTopologyKey(
+  binding: SupportedCudaWebGpuExecutionPlan["steps"][number]["program"]["bindings"][number],
+): string {
+  if (binding.kind === "storage") {
+    return `s:${binding.binding}:${binding.name}:${binding.valueType}:${binding.access}`;
+  }
+  if (binding.kind === "uniform") {
+    return `u:${binding.binding}:${binding.name}:${binding.byteLength ?? ""}`;
+  }
+  return `t:${binding.binding}:${binding.name}:${binding.valueType}`;
+}
+
+function hashString(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
 }
 
 function validateLaunch(launch: KernelLaunch, workgroupSize: readonly [number, number, number]): void {

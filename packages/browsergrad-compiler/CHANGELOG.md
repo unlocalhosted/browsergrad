@@ -39,6 +39,8 @@
 - Prepared compiler scalar updates now support fixed-topology host-dynamic and
   host-peer-copy plans through per-step uniform updates, with deterministic
   rejection when scalar changes alter plan topology.
+- Prepared scalar-update topology checks now use compact WGSL/binding
+  signatures instead of JSON stringifying full programs.
 - Host-lifted peer-copy planning now supports resident GPU buffers and rejects
   copies that exceed source or destination capacity before dispatch.
 - Unsupported WebGPU execution plans now expose stable `blockers[]` entries
