@@ -199,6 +199,26 @@ __global__ void atomic_sum(const float* input, float* result) {
     expect([...actual.buffers.result as Float32Array][0]).toBeCloseTo(13.75);
   });
 
+  it("runs compiled float atomicExch through WebGPU bitcast atomics", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void atomic_exchange(float* x, float* out) {
+  if (threadIdx.x < 1) { out[0] = atomicExch(&x[0], 7.5f); }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        x: new Float32Array([2.5]),
+        out: new Float32Array(1),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.x as Float32Array][0]).toBeCloseTo(7.5);
+    expect([...actual.buffers.out as Float32Array][0]).toBeCloseTo(2.5);
+  });
+
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

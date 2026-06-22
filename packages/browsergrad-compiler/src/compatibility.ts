@@ -41,7 +41,7 @@ const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("parse-error", "frontend", "Unsupported CUDA/C++ syntax", "unsupported", false, false, "Parser stopped before semantic IR."),
   feature("unsupported-call", "library", "Unsupported CUDA/device call", "unsupported", false, true, "Add semantic builtin or library island."),
   feature("unknown-symbol", "frontend", "Unknown symbol", "unsupported", false, false, "Missing declaration, constant memory, helper, or macro context."),
-  feature("unsupported-atomic-f32", "atomic", "Unsupported float atomic", "unsupported", false, true, "Float atomicAdd has a CAS polyfill; other float atomics still need lowering."),
+  feature("unsupported-atomic-f32", "atomic", "Unsupported float atomic", "unsupported", false, true, "Float atomicAdd/atomicExch have WGSL polyfills; other float atomics still need lowering."),
   feature("unsupported-atomic-target", "atomic", "Unsupported atomic target", "unsupported", false, true, "Atomic must target modeled memory."),
   feature("atomic-address-required", "atomic", "Atomic address form required", "unsupported", false, true, "CUDA address semantics not recoverable from value form."),
   feature("dynamic-shared-memory", "memory", "Dynamic shared memory", "native", true, true, "Supported when launch metadata supplies element count."),

@@ -733,6 +733,27 @@ __global__ void atomic_sum(const float* input, float* result) {
     expect([...result.buffers.result as Float32Array]).toEqual([13.75]);
   });
 
+  it("supports CUDA float atomicExch through u32 bitcasts", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void atomic_exchange(float* x, float* out) {
+  if (threadIdx.x < 1) { out[0] = atomicExch(&x[0], 7.5f); }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([2.5]),
+          out: new Float32Array(1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bitcast<f32>(atomicExchange(&x[0], bitcast<u32>(7.5)))");
+    expect([...result.buffers.x as Float32Array]).toEqual([7.5]);
+    expect([...result.buffers.out as Float32Array]).toEqual([2.5]);
+  });
+
   it("supports CUDA pointer-form atomicAdd on integer buffers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomic_count(int* x) {

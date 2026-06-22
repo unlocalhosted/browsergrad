@@ -587,13 +587,13 @@ function validateAtomicBuiltin(
     const param = targetName ? params.get(targetName) : undefined;
     if (!param?.pointer) {
       diagnostics.push(error("unsupported-atomic-target", "atomicAdd target must be a pointer parameter element", targetExpression.span));
-    } else if (param.valueType === "float" && callName === "atomicAdd") {
+    } else if (param.valueType === "float" && (callName === "atomicAdd" || callName === "atomicExch")) {
       atomicParams.add(param.name);
       if (param.constant) {
-        diagnostics.push(error("const-pointer-write", `cannot atomicAdd through const pointer '${param.name}'`, expression.span));
+        diagnostics.push(error("const-pointer-write", `cannot ${callName} through const pointer '${param.name}'`, expression.span));
       }
     } else if (param.valueType === "float" || param.valueType === "half") {
-      diagnostics.push(error("unsupported-atomic-f32", "only atomicAdd is supported for float pointers in CUDA-lite v0", expression.span));
+      diagnostics.push(error("unsupported-atomic-f32", "only atomicAdd/atomicExch are supported for float pointers in CUDA-lite v0", expression.span));
     } else {
       atomicParams.add(param.name);
       if (param.constant) {

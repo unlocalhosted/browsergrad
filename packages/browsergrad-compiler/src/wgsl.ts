@@ -453,6 +453,9 @@ function emitAtomicCall(
     if (wgslName === "atomicAdd" && targetParam?.valueType === "float") {
       return `bg_atomicAdd_f32(&${targetExpression}, ${valueExpression})`;
     }
+    if (wgslName === "atomicExchange" && targetParam?.valueType === "float") {
+      return `bitcast<f32>(atomicExchange(&${targetExpression}, bitcast<u32>(${valueExpression})))`;
+    }
     return `${wgslName}(&${targetExpression}, ${valueExpression})`;
   }
   if (target?.kind === "identifier" && value) {
@@ -460,6 +463,9 @@ function emitAtomicCall(
     const valueExpression = emitExpression(value, context);
     if (wgslName === "atomicAdd" && targetParam?.valueType === "float") {
       return `bg_atomicAdd_f32(&${target.name}[0], ${valueExpression})`;
+    }
+    if (wgslName === "atomicExchange" && targetParam?.valueType === "float") {
+      return `bitcast<f32>(atomicExchange(&${target.name}[0], bitcast<u32>(${valueExpression})))`;
     }
     return `${wgslName}(&${target.name}[0], ${valueExpression})`;
   }
