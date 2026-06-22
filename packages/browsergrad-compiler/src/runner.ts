@@ -14,6 +14,7 @@ import {
   type KernelLaunch,
   type ReferenceKernelResult,
 } from "./types.js";
+import { formatCudaLiteDiagnostics } from "./diagnostics.js";
 
 export function compileCudaLiteKernel(
   source: string,
@@ -23,7 +24,10 @@ export function compileCudaLiteKernel(
   const analysis = analyzeCudaLite(ast, options);
   const errors = analysis.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
   if (errors.length > 0) {
-    throw new CudaLiteCompilerError("CUDA-lite compile failed", errors);
+    throw new CudaLiteCompilerError(
+      `CUDA-lite compile failed\n${formatCudaLiteDiagnostics(source, errors)}`,
+      errors,
+    );
   }
   const ir = lowerCudaLiteToKernelIr(ast, options);
   const emitted = emitKernelIrWgsl(

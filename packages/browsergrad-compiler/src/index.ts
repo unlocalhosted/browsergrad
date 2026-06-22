@@ -35,6 +35,7 @@ export {
 
 export { parseCudaLite } from "./parser.js";
 export { analyzeCudaLite, lowerCudaLiteToKernelIr } from "./analyzer.js";
+export { formatCudaLiteDiagnostics } from "./diagnostics.js";
 export { emitKernelIrWgsl, type EmitKernelIrWgslOptions, type KernelIrWgslOutput } from "./wgsl.js";
 export {
   compileCudaLiteKernel,

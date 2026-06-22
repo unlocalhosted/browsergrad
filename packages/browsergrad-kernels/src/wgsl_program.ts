@@ -65,6 +65,14 @@ export interface WgslKernelRunResult {
   readonly buffers: Readonly<Record<string, WgslTypedArray>>;
 }
 
+interface CachedWgslPipeline {
+  readonly pipeline: GPUComputePipeline;
+  readonly bindGroupLayout: GPUBindGroupLayout;
+}
+
+const WGSL_PIPELINE_CACHE_LIMIT = 128;
+const WGSL_PIPELINE_CACHE = new WeakMap<GPUDevice, Map<string, Promise<CachedWgslPipeline>>>();
+
 export async function detectKernelFeatures(
   adapterOrDevice?: GPUAdapter | GPUDevice | KernelDevice,
 ): Promise<KernelFeatureSet> {
@@ -202,8 +210,7 @@ export async function runWgslKernelProgram(
       }
     }
 
-    const bindGroupLayout = gpu.createBindGroupLayout({ entries: layoutEntries });
-    const pipeline = await createPipeline(gpu, program, bindGroupLayout);
+    const { pipeline, bindGroupLayout } = await getOrCreatePipeline(gpu, program, layoutEntries);
     const bindGroup = gpu.createBindGroup({
       layout: bindGroupLayout,
       entries: bindGroupEntries,
@@ -248,11 +255,42 @@ export async function runWgslKernelProgram(
   }
 }
 
+async function getOrCreatePipeline(
+  gpu: GPUDevice,
+  program: WgslKernelProgram,
+  layoutEntries: readonly GPUBindGroupLayoutEntry[],
+): Promise<CachedWgslPipeline> {
+  const cacheKey = [
+    program.name,
+    hashString(program.wgsl),
+    program.workgroupSize.join(","),
+    layoutSignature(layoutEntries),
+  ].join("::");
+  let cache = WGSL_PIPELINE_CACHE.get(gpu);
+  if (!cache) {
+    cache = new Map();
+    WGSL_PIPELINE_CACHE.set(gpu, cache);
+  }
+  const existing = cache.get(cacheKey);
+  if (existing) return existing;
+  if (cache.size >= WGSL_PIPELINE_CACHE_LIMIT) {
+    const firstKey = cache.keys().next().value;
+    if (firstKey !== undefined) cache.delete(firstKey);
+  }
+  const promise = createPipeline(gpu, program, layoutEntries).catch((error: unknown) => {
+    cache.delete(cacheKey);
+    throw error;
+  });
+  cache.set(cacheKey, promise);
+  return promise;
+}
+
 async function createPipeline(
   gpu: GPUDevice,
   program: WgslKernelProgram,
-  bindGroupLayout: GPUBindGroupLayout,
-): Promise<GPUComputePipeline> {
+  layoutEntries: readonly GPUBindGroupLayoutEntry[],
+): Promise<CachedWgslPipeline> {
+  const bindGroupLayout = gpu.createBindGroupLayout({ entries: [...layoutEntries] });
   const shaderModule = gpu.createShaderModule({ code: program.wgsl });
   const compilationInfo = "getCompilationInfo" in shaderModule
     ? await shaderModule.getCompilationInfo()
@@ -265,10 +303,11 @@ async function createPipeline(
     );
   }
   try {
-    return await gpu.createComputePipelineAsync({
+    const pipeline = await gpu.createComputePipelineAsync({
       layout: gpu.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
       compute: { module: shaderModule, entryPoint: "main" },
     });
+    return { pipeline, bindGroupLayout };
   } catch (error) {
     const detail = messages.length > 0
       ? formatCompilationMessages(messages)
@@ -383,6 +422,24 @@ function formatCompilationMessages(messages: readonly GPUCompilationMessage[]): 
       return `${message.type} ${loc} ${message.message}`;
     })
     .join("; ");
+}
+
+function layoutSignature(entries: readonly GPUBindGroupLayoutEntry[]): string {
+  return entries
+    .map((entry) => {
+      const type = entry.buffer?.type ?? "none";
+      return `${entry.binding}:${type}`;
+    })
+    .join("|");
+}
+
+function hashString(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
 }
 
 function alignTo(value: number, align: number): number {

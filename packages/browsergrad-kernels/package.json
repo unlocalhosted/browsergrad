@@ -50,6 +50,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:browser": "vitest run --config vitest.browser.config.ts",
+    "test:browser:open": "vitest --config vitest.browser.config.ts --watch --browser.headless=false",
     "lint": "oxlint src",
     "clean": "rm -rf dist *.tsbuildinfo",
     "prepublishOnly": "pnpm run build && pnpm run test"

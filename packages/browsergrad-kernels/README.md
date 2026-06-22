@@ -227,6 +227,8 @@ pnpm test:browser
 ```
 
 Launches Chromium via Playwright with WebGPU enabled. Runs against a real `GPUDevice`. On macOS the browser is headed (Metal driver only exposed when visible); on Linux CI set `BG_BROWSER_HEADLESS=1`.
+Use `pnpm test:browser:open` when you want the browser window to stay open for
+inspection; quit with `q`.
 
 7 scenarios: adapter info, naive vs tiled matmul, residency contract (3 uploads + 1 readback chained matmul), fused-elementwise codegen output matches NumPy semantics, FA-v2 (known-issue advisory), end-to-end `WebGpuRealizerBridge.matmul`.
 

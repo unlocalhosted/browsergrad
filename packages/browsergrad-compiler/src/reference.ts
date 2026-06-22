@@ -58,6 +58,7 @@ export function runCompiledKernelReference(
   launch: KernelLaunch,
 ): ReferenceKernelResult {
   validateLaunch(launch, compiled.ir.workgroupSize);
+  validateInputs(compiled, input);
   const buffers = cloneBuffers(input.buffers);
   const scalars = input.scalars ?? {};
   const traces: MutableTrace[] = [];
@@ -482,6 +483,26 @@ function validateLaunch(launch: KernelLaunch, workgroupSize: readonly [number, n
     }
     if (grid === undefined || !Number.isInteger(grid) || grid <= 0) {
       throw compilerFailure("launch.gridDim values must be positive integers");
+    }
+  }
+}
+
+function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelInput): void {
+  for (const param of compiled.ir.params) {
+    if (param.pointer) {
+      const buffer = input.buffers[param.name];
+      if (!buffer) throw compilerFailure(`missing buffer input '${param.name}'`);
+      if (param.valueType === "int" && !(buffer instanceof Int32Array)) {
+        throw compilerFailure(`buffer '${param.name}' expects Int32Array`);
+      }
+      if (param.valueType === "uint" && !(buffer instanceof Uint32Array)) {
+        throw compilerFailure(`buffer '${param.name}' expects Uint32Array`);
+      }
+      if ((param.valueType === "float" || param.valueType === "half") && !(buffer instanceof Float32Array)) {
+        throw compilerFailure(`buffer '${param.name}' expects Float32Array`);
+      }
+    } else if (input.scalars?.[param.name] === undefined) {
+      throw compilerFailure(`missing scalar input '${param.name}'`);
     }
   }
 }

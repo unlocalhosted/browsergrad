@@ -3,6 +3,7 @@ import {
   CudaLiteCompilerError,
   analyzeCudaLite,
   compileCudaLiteKernel,
+  formatCudaLiteDiagnostics,
   parseCudaLite,
   runCompiledKernelReference,
 } from "../src/index";
@@ -118,6 +119,78 @@ __global__ void bad(float* x) {
 }`);
     const barrierAnalysis = analyzeCudaLite(divergentBarrier);
     expect(barrierAnalysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-barrier");
+  });
+
+  it("hardens symbol and array validation", () => {
+    const duplicate = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(float* x, float* x) {
+  if (threadIdx.x < 1) { x[0] = 1.0; }
+}`));
+    expect(duplicate.diagnostics.map((diagnostic) => diagnostic.code)).toContain("duplicate-symbol");
+
+    const localArray = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(float* x) {
+  float tmp[2];
+  if (threadIdx.x < 1) { x[0] = 1.0; }
+}`));
+    expect(localArray.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-local-array");
+
+    const invalidShared = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(float* x) {
+  __shared__ float tile[0];
+  if (threadIdx.x < 1) { x[0] = 1.0; }
+}`));
+    expect(invalidShared.diagnostics.map((diagnostic) => diagnostic.code)).toContain("invalid-array-dimension");
+  });
+
+  it("formats diagnostics with source snippets", () => {
+    const analysis = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(const float* x) {
+  if (threadIdx.x < 1) { x[0] = 1.0; }
+}`));
+    const formatted = formatCudaLiteDiagnostics(
+      `
+__global__ void bad(const float* x) {
+  if (threadIdx.x < 1) { x[0] = 1.0; }
+}`,
+      analysis.diagnostics,
+    );
+
+    expect(formatted).toContain("ERROR const-pointer-write");
+    expect(formatted).toContain("x[0] = 1.0");
+    expect(formatted).toContain("^");
+  });
+
+  it("hardens reference inputs before execution", () => {
+    const compiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
+
+    expect(() =>
+      runCompiledKernelReference(
+        compiled,
+        {
+          buffers: {
+            x: new Float32Array([1, 2, 3, 4]),
+            y: new Float32Array([10, 20, 30, 40]),
+          },
+          scalars: { a: 2 },
+        },
+        { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+      ),
+    ).toThrow(/missing scalar input 'n'/);
+
+    expect(() =>
+      runCompiledKernelReference(
+        compiled,
+        {
+          buffers: {
+            x: new Int32Array([1, 2, 3, 4]),
+            y: new Float32Array([10, 20, 30, 40]),
+          },
+          scalars: { a: 2, n: 4 },
+        },
+        { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+      ),
+    ).toThrow(/buffer 'x' expects Float32Array/);
   });
 
   it("feature-gates half and subgroup intrinsics", () => {

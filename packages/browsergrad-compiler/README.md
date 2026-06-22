@@ -49,3 +49,14 @@ const gpu = await runCompiledKernelWebGpu(await createDevice(), compiled, input,
 Examples live in `examples/`: SAXPY, guarded map, and shared-memory tiled
 matmul. The emitted WGSL is intentionally inspectable so labs can show source,
 bindings, workgroup size, shared memory, and barriers directly.
+
+## Browser Testing
+
+```bash
+pnpm test:browser
+pnpm test:browser:open
+```
+
+`test:browser:open` keeps Chromium open for inspection; quit with `q`. If the
+Vitest browser watch rerun path reports an orchestrator-session error, restart
+the command instead of trusting that rerun.

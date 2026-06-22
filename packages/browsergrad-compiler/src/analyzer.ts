@@ -24,8 +24,13 @@ export function analyzeCudaLite(
   const requiredFeatures = new Set<string>();
   const atomicParams = new Set<string>();
   const params = new Map(kernel.params.map((param) => [param.name, param]));
+  const declaredNames = new Set<string>();
 
   for (const param of kernel.params) {
+    if (declaredNames.has(param.name)) {
+      diagnostics.push(error("duplicate-symbol", `duplicate parameter '${param.name}'`, param.span));
+    }
+    declaredNames.add(param.name);
     if (param.valueType === "half") requiredFeatures.add("shader-f16");
   }
 
@@ -60,9 +65,21 @@ export function analyzeCudaLite(
     for (const statement of statements) {
       switch (statement.kind) {
         case "var":
+          if (declaredNames.has(statement.name)) {
+            diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${statement.name}'`, statement.span));
+          }
+          declaredNames.add(statement.name);
           if (statement.valueType === "half") requiredFeatures.add("shader-f16");
+          if (statement.storage === "local" && statement.dimensions.length > 0) {
+            diagnostics.push(error("unsupported-local-array", "local arrays are not supported in CUDA-lite v0; use fixed __shared__ arrays or scalar locals", statement.span));
+          }
           if (statement.storage === "shared" && statement.dimensions.length === 0) {
             diagnostics.push(error("dynamic-shared-memory", "__shared__ arrays must have fixed dimensions", statement.span));
+          }
+          for (const dimension of statement.dimensions) {
+            if (!Number.isInteger(dimension) || dimension <= 0) {
+              diagnostics.push(error("invalid-array-dimension", "array dimensions must be positive integer literals", statement.span));
+            }
           }
           if (statement.init) walkExpression(statement.init);
           break;
