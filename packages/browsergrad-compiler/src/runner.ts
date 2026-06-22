@@ -6,7 +6,7 @@ import {
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames } from "./ast_queries.js";
-import { analyzeCudaLite, lowerAnalyzedCudaLiteToKernelIr, rootIdentifier } from "./analyzer.js";
+import { analyzeCudaLite, expressionName, lowerAnalyzedCudaLiteToKernelIr, rootIdentifier } from "./analyzer.js";
 import { createCudaLoweringPlan } from "./compatibility.js";
 import { parseCudaLite } from "./parser.js";
 import { runCompiledKernelReference } from "./reference.js";
@@ -170,13 +170,16 @@ function collectHostLiftedLaunches(
   const out: HostLiftedLaunch[] = [];
   const initial = new Map<string, HostEvalValue>();
   const parentHasSingleInvocation = launch.gridDim.every((axis) => axis === 1) && launch.blockDim.every((axis) => axis === 1);
+  let unsafe = false;
   const visit = (
     items: readonly CudaLiteStatement[],
     env: ReadonlyMap<string, HostEvalValue>,
     singleInvocationGuard: boolean,
-  ): void => {
+  ): boolean => {
     let current = new Map(env);
-    for (const item of items) {
+    let containsLaunch = false;
+    for (let index = 0; index < items.length; index++) {
+      const item = items[index]!;
       if (item.kind === "dim3") {
         const value = evaluateVectorExpressions(item.args, current, input);
         if (value) current.set(item.name, value);
@@ -188,22 +191,63 @@ function collectHostLiftedLaunches(
         continue;
       }
       if (item.kind === "if") {
+        const before = out.length;
         if (isSingleInvocationGuard(item.condition)) {
-          visit(item.consequent, current, true);
+          containsLaunch = visit(item.consequent, current, true) || containsLaunch;
+          if (out.length > before && hasHostSideEffects(items.slice(index + 1))) unsafe = true;
           continue;
         }
         const condition = evaluateHostNumber(item.condition, current, input);
-        if (condition === undefined) return;
-        visit(condition !== 0 ? item.consequent : item.alternate ?? [], current, singleInvocationGuard);
+        if (condition === undefined) return containsLaunch;
+        containsLaunch = visit(condition !== 0 ? item.consequent : item.alternate ?? [], current, singleInvocationGuard) || containsLaunch;
+        if (out.length > before && hasHostSideEffects(items.slice(index + 1))) unsafe = true;
         continue;
       }
       if (item.kind === "kernel-launch") {
-        if (singleInvocationGuard || parentHasSingleInvocation) out.push({ statement: item, env: current });
+        if (!(singleInvocationGuard || parentHasSingleInvocation)) unsafe = true;
+        else {
+          if (hasHostSideEffects(items.slice(index + 1))) unsafe = true;
+          out.push({ statement: item, env: current });
+          containsLaunch = true;
+        }
       }
     }
+    return containsLaunch;
   };
   visit(statements, initial, parentHasSingleInvocation);
-  return out;
+  return unsafe ? [] : out;
+}
+
+function hasHostSideEffects(statements: readonly CudaLiteStatement[]): boolean {
+  for (const statement of statements) {
+    switch (statement.kind) {
+      case "dim3":
+      case "cooperative-group":
+        continue;
+      case "expr":
+        if (isHostNoopExpression(statement.expression)) continue;
+        return true;
+      case "if":
+        if (hasHostSideEffects(statement.consequent) || hasHostSideEffects(statement.alternate ?? [])) return true;
+        continue;
+      case "var":
+        if (statement.storage === "local" && !statement.pointer) continue;
+        return true;
+      case "kernel-launch":
+      case "asm":
+      case "for":
+      case "return":
+      case "continue":
+        return true;
+    }
+  }
+  return false;
+}
+
+function isHostNoopExpression(expression: CudaLiteExpression): boolean {
+  if (expression.kind !== "call") return false;
+  const name = expressionName(expression.callee);
+  return name === "cudaDeviceSynchronize" || name === "printf";
 }
 
 function createChildKernelInput(

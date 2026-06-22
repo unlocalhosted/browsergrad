@@ -1094,6 +1094,32 @@ __global__ void parent(float *out) {
     )).rejects.toThrow("CUDA runtime orchestration is reference-only");
   });
 
+  it("keeps dynamic launches with parent side effects after launch reference-only", async () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(float *x) {
+  if (threadIdx.x < 1) { x[0] = 2.0f; }
+}
+__global__ void parent(float *x) {
+  if (threadIdx.x < 1) {
+    dim3 grid(1);
+    dim3 block(1);
+    child<<<grid, block>>>(x);
+    x[0] = 3.0f;
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+
+    await expect(runCompiledKernelWebGpu(
+      {} as never,
+      compiled,
+      { buffers: { x: new Float32Array([0]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    )).rejects.toThrow("CUDA runtime orchestration is reference-only");
+  });
+
   it("treats standalone cudaDeviceSynchronize as a WebGPU-safe no-op", () => {
     const source = `
 __global__ void syncOnly(float *x) {
