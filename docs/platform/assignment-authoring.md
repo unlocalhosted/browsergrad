@@ -106,10 +106,11 @@ checks that include output, saved log-sum-exp, and Q/K/V gradients before native
 Triton/CUDA paths are available. Register a profile-local module such as
 `_bg_attention_math` when Python rubrics need JSON-string bridge methods.
 GPU Puzzles and CS149 A3-style CUDA concept rubrics can use the same package's
-`simulateCuda1DGrid()`, `referenceSaxpy()`, and `referenceExclusiveScan()` for
-`cuda-compatible-subset` fixture checks. The grid simulator records
-thread/block ids, global reads/writes, and out-of-bounds accesses so missing
-guards fail as teaching feedback before native CUDA runners exist.
+`simulateCuda1DGrid()`, `referenceSaxpy()`, `referenceExclusiveScan()`, and
+`referenceFindRepeats()` for `cuda-compatible-subset` fixture checks. The grid
+simulator records thread/block ids, global reads/writes, and out-of-bounds
+accesses so missing guards fail as teaching feedback before native CUDA runners
+exist.
 Distributed or systems-style JS rubrics can use `simulation.createDeterministicMesh()`
 from `@unlocalhosted/browsergrad-primitives` to model worker ranks, barriers,
 broadcasts, point-to-point messages, and `allReduce` results as deterministic

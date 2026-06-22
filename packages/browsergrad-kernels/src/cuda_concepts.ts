@@ -180,6 +180,17 @@ export function referenceExclusiveScan(values: readonly number[]): number[] {
   return out;
 }
 
+export function referenceFindRepeats(values: readonly number[]): number[] {
+  const input = validateNumberList(values, "values");
+  const repeatedAt: number[] = [];
+  for (let index = 0; index < input.length - 1; index++) {
+    if (input[index] === input[index + 1]) {
+      repeatedAt.push(index);
+    }
+  }
+  return repeatedAt;
+}
+
 function validatePositiveInteger(value: number, name: string): number {
   if (!Number.isInteger(value) || value <= 0) {
     throw new KernelError(`${name} must be a positive integer`);

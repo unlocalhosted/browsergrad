@@ -101,6 +101,7 @@ export {
 
 export {
   referenceExclusiveScan,
+  referenceFindRepeats,
   referenceSaxpy,
   simulateCuda1DGrid,
   type Cuda1DGridInput,

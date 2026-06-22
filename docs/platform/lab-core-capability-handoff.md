@@ -93,9 +93,9 @@ For every lab profile, the platform should:
     browser-safe output/LSE/backward checks before Triton/CUDA execution is
     available.
     GPU Puzzles and CS149 A3 CUDA concept labs can use
-    `simulateCuda1DGrid()`, `referenceSaxpy()`, and
-    `referenceExclusiveScan()` for browser-safe map/guard/SAXPY/scan checks
-    before native CUDA runners exist.
+    `simulateCuda1DGrid()`, `referenceSaxpy()`,
+    `referenceExclusiveScan()`, and `referenceFindRepeats()` for browser-safe
+    map/guard/SAXPY/scan/find-repeats checks before native CUDA runners exist.
     Snapshot-backed labs can use `@unlocalhosted/browsergrad-primitives`
     `createSnapshotComparator()` to compare small JSON/numeric fixtures and emit
     deterministic mismatch paths.
@@ -173,11 +173,13 @@ The first reusable small-helper substrate is
 `@unlocalhosted/browsergrad-primitives`: it provides deterministic mesh event
 traces, task-graph traces, DDP/FSDP/sharded-optimizer simulators,
 JSON/numeric snapshot comparators, fixture-scale data filters, hosted-training
-fixtures, scaling-law fitting, and RL/math references. Leaf packages remain
-implementation shards, but platform handoffs should teach the facade first.
+fixtures, scaling-law fitting, and RL/math references. Platform handoffs should
+teach this facade first; split a new package only after a real packaging or
+adapter seam appears.
 The first reusable CUDA-concept substrate lives in
 `@unlocalhosted/browsergrad-kernels`: it provides `simulateCuda1DGrid()`,
-`referenceSaxpy()`, and `referenceExclusiveScan()` for labs that choose
+`referenceSaxpy()`, `referenceExclusiveScan()`, and
+`referenceFindRepeats()` for labs that choose
 `cuda-compatible-subset`, `wgsl-kernel`, or `performance-rubric` paths.
 The same primitive facade provides the first reusable CS149 CPU/SIMD substrate:
 clamped-exp lane-mask simulation, vector array-sum reduction traces, and static
@@ -345,9 +347,10 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     `referenceFlashAttentionBackward()` for output, log-sum-exp, and Q/K/V
     gradient fixtures.
     GPU Puzzles and CS149 A3 CUDA concept labs can use
-    `simulateCuda1DGrid()`, `referenceSaxpy()`, and
-    `referenceExclusiveScan()` for map/guard/SAXPY/scan fixtures and
-    out-of-bounds guard diagnostics. This is the current HipScript-inspired
+    `simulateCuda1DGrid()`, `referenceSaxpy()`,
+    `referenceExclusiveScan()`, and `referenceFindRepeats()` for
+    map/guard/SAXPY/scan/find-repeats fixtures and out-of-bounds guard
+    diagnostics. This is the current HipScript-inspired
     CUDA-shaped path: simulator trace first, WGSL/WebGPU lowering next.
     Simulator-backed labs can use `@unlocalhosted/browsergrad-primitives`
     `simulation.createDeterministicMesh()` or `simulation.createTaskGraphSimulator()` for event-trace

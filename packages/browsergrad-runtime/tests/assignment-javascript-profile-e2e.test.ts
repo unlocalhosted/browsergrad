@@ -7,7 +7,12 @@ import {
   type AssignmentJavascriptRubric,
 } from "../src/index";
 import { simulation } from "@unlocalhosted/browsergrad-primitives";
-import { simulateCuda1DGrid } from "../../browsergrad-kernels/src/cuda_concepts";
+import {
+  referenceExclusiveScan,
+  referenceFindRepeats,
+  referenceSaxpy,
+  simulateCuda1DGrid,
+} from "@unlocalhosted/browsergrad-kernels";
 
 interface CpuParallelismOracle {
   simulateVectorizedClampedExp: typeof simulation.simulateVectorizedClampedExp;
@@ -23,6 +28,13 @@ interface GpuPuzzleOracle {
   simulateCuda1DGrid: typeof simulateCuda1DGrid;
 }
 
+interface CudaConceptsReference {
+  referenceExclusiveScan: typeof referenceExclusiveScan;
+  referenceFindRepeats: typeof referenceFindRepeats;
+  referenceSaxpy: typeof referenceSaxpy;
+  simulateCuda1DGrid: typeof simulateCuda1DGrid;
+}
+
 const CS149_A1_PROFILE = JSON.parse(
   readFileSync(
     new URL("../../../docs/internal/cs149-assignment1.profile.json", import.meta.url),
@@ -33,6 +45,13 @@ const CS149_A1_PROFILE = JSON.parse(
 const CS149_A2_PROFILE = JSON.parse(
   readFileSync(
     new URL("../../../docs/internal/cs149-assignment2.profile.json", import.meta.url),
+    "utf8",
+  ),
+);
+
+const CS149_A3_PROFILE = JSON.parse(
+  readFileSync(
+    new URL("../../../docs/internal/cs149-assignment3.profile.json", import.meta.url),
     "utf8",
   ),
 );
@@ -340,6 +359,113 @@ describe("profile-driven JavaScript assignment e2e", () => {
           readiness: "simulated",
           makespan: 6,
           starts: 3,
+        },
+      }),
+    ]);
+  });
+
+  it("runs the CS149 A3 profile with generic CUDA concept references", async () => {
+    const parsed = parseAssignmentProfile(CS149_A3_PROFILE);
+    expect(parsed).toMatchObject({ ok: true });
+    if (!parsed.ok) return;
+
+    const environment = createAssignmentCapabilityEnvironment({
+      browserCapabilities: [
+        "cuda-compatible-subset",
+        "performance-rubric",
+        "webgpu",
+        "wgsl-kernel",
+      ],
+    });
+    const contents = {
+      files: {
+        "/assignments/cs149-assignment3/rubric.js":
+          "export default async function rubric(ctx) { return ctx.id; }",
+      },
+    };
+    const reference: CudaConceptsReference = {
+      referenceExclusiveScan,
+      referenceFindRepeats,
+      referenceSaxpy,
+      simulateCuda1DGrid,
+    };
+    const rubric: AssignmentJavascriptRubric = (ctx) => {
+      const cuda = ctx.oracle<CudaConceptsReference>("_bg_cuda_concepts");
+      const saxpy = cuda.referenceSaxpy({
+        a: 2,
+        x: [1, 2, 3, 4],
+        y: [10, 20, 30, 40],
+      });
+      const scan = cuda.referenceExclusiveScan([3, 1, 4, 1, 5]);
+      const repeats = cuda.referenceFindRepeats([7, 7, 1, 4, 4, 4]);
+      const guard = cuda.simulateCuda1DGrid({
+        inputLength: 4,
+        outputLength: 4,
+        threadsPerBlock: 8,
+        blocks: 1,
+        initialInput: [0, 1, 2, 3],
+        kernel(thread) {
+          const i = thread.globalThreadId;
+          if (i < thread.inputLength) {
+            thread.write(i, thread.read(i) + 1);
+          }
+        },
+      });
+
+      if (
+        !ctx.allowedTests.includes("saxpy_correctness") ||
+        saxpy.join(",") !== "12,24,36,48" ||
+        scan.join(",") !== "0,3,4,8,9" ||
+        repeats.join(",") !== "0,3,4" ||
+        guard.violations.length !== 0
+      ) {
+        ctx.assertFail("cs149-a3-cuda-concepts", "CS149 A3 CUDA concept mismatch", {
+          expected: {
+            saxpy: [12, 24, 36, 48],
+            scan: [0, 3, 4, 8, 9],
+            repeats: [0, 3, 4],
+            guardViolations: 0,
+          },
+          actual: { saxpy, scan, repeats, guardViolations: guard.violations },
+        });
+        return;
+      }
+
+      ctx.assertPass("saxpy_correctness");
+      ctx.assertPass("exclusive_scan_correctness");
+      ctx.assertPass("kernel_memory_bounds");
+      ctx.emitJson("cs149-a3-summary", {
+        readiness: "browser-kernel-concepts",
+        guardThreads: guard.stats.launchedThreads,
+        globalWrites: guard.stats.globalWrites,
+        repeatCount: repeats.length,
+      });
+    };
+
+    const result = await runAssignmentJavascriptProfile(
+      parsed.profile,
+      environment,
+      contents,
+      rubric,
+      { oracles: { _bg_cuda_concepts: reference } },
+    );
+
+    expect(result.report.runnerRoute.target).toBe("javascript");
+    expect(result.report.readiness.status).toBe("runnable");
+    expect(result.run.assertions).toEqual([
+      { kind: "pass", name: "saxpy_correctness" },
+      { kind: "pass", name: "exclusive_scan_correctness" },
+      { kind: "pass", name: "kernel_memory_bounds" },
+    ]);
+    expect(result.run.artifacts).toEqual([
+      expect.objectContaining({
+        kind: "json",
+        name: "cs149-a3-summary",
+        data: {
+          readiness: "browser-kernel-concepts",
+          guardThreads: 8,
+          globalWrites: 4,
+          repeatCount: 3,
         },
       }),
     ]);

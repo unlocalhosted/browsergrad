@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   referenceExclusiveScan,
+  referenceFindRepeats,
   referenceSaxpy,
   simulateCuda1DGrid,
 } from "../src/index";
@@ -77,5 +78,6 @@ describe("CUDA-shaped concept oracles", () => {
       36,
     ]);
     expect(referenceExclusiveScan([3, 1, 4, 1, 5])).toEqual([0, 3, 4, 8, 9]);
+    expect(referenceFindRepeats([3, 3, 1, 4, 4, 4, 2])).toEqual([0, 3, 4]);
   });
 });

@@ -230,10 +230,10 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   integration proves a Python rubric can call FlashAttention forward and DDP
   gradient synchronization references through Pyodide.
 - CUDA-concept oracle guarantee: `@unlocalhosted/browsergrad-kernels` exports
-  `simulateCuda1DGrid()`, `referenceSaxpy()`, and `referenceExclusiveScan()` so
-  GPU Puzzles and CS149 A3-style rubrics can check CUDA-shaped map/guard,
-  SAXPY, scan, thread/block traces, and out-of-bounds memory behavior before
-  native CUDA runners are available.
+  `simulateCuda1DGrid()`, `referenceSaxpy()`, `referenceExclusiveScan()`, and
+  `referenceFindRepeats()` so GPU Puzzles and CS149 A3-style rubrics can check
+  CUDA-shaped map/guard, SAXPY, scan/find-repeats, thread/block traces, and
+  out-of-bounds memory behavior before native CUDA runners are available.
 - CUDA-shaped program guarantee: `@unlocalhosted/browsergrad-kernels` exports
   `defineCuda1DProgram()`, `simulateCuda1DProgram()`, and
   `emitCuda1DProgramWgsl()` so one small grid/thread program can be simulated
@@ -245,9 +245,9 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   BrowserGrad's JS rubric runner.
 - Primitive-facade guarantee: `@unlocalhosted/browsergrad-primitives` is the
   canonical small-helper interface for text, data, evaluation, scaling,
-  simulation, and RL/math references. Existing leaf primitive packages remain
-  implementation shards; new lab/profile guidance should consume the facade
-  unless a bundle or release constraint requires a leaf package.
+  simulation, and RL/math references. The previous leaf primitive packages were
+  collapsed into this facade; new lab/profile guidance should consume the
+  facade unless a bundle or release constraint proves a real split.
 - Profile-adapter locality guarantee: Python/Pyodide bridge wrappers that only
   translate primitive references into snake_case or JSON-string methods live in
   runtime/profile glue. They are not exported as primitive package interfaces.
@@ -255,8 +255,8 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   preflight, validates the JavaScript route, mounts declared contents, wires
   oracles/substrates, and runs browser-native rubrics from a full assignment
   profile. It rejects missing profile-declared JS oracles before invoking the
-  rubric. Runtime e2e coverage proves CS149 A1 and GPU Puzzles can execute this
-  way with simulator/kernel oracles.
+  rubric. Runtime e2e coverage proves CS149 A1, CS149 A2, CS149 A3, and GPU
+  Puzzles can execute this way with simulator/kernel references.
 - Simulator-core guarantee: `@unlocalhosted/browsergrad-primitives` exports
   `simulation.createDeterministicMesh()` so JS rubrics and platform references can model
   browser-safe rank meshes, barriers, broadcasts, point-to-point messages, and
