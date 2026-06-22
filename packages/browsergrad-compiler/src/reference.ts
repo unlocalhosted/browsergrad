@@ -51,7 +51,8 @@ interface MutableTrace {
   readonly sharedWrites: KernelMemoryAccess[];
 }
 
-type BarrierGenerator = Generator<"barrier", void, void>;
+type ExecControl = "return" | "continue";
+type BarrierGenerator = Generator<"barrier", ExecControl | void, void>;
 
 export function runCompiledKernelReference(
   compiled: CompiledCudaLiteKernel,
@@ -166,9 +167,11 @@ function* execStatements(
         break;
       case "if":
         if (truthy(evalExpression(statement.condition, context))) {
-          yield* execStatements(statement.consequent, context);
+          const control = yield* execStatements(statement.consequent, context);
+          if (control) return control;
         } else if (statement.alternate) {
-          yield* execStatements(statement.alternate, context);
+          const control = yield* execStatements(statement.alternate, context);
+          if (control) return control;
         }
         break;
       case "for":
@@ -177,10 +180,16 @@ function* execStatements(
           else evalExpression(statement.init, context);
         }
         while (statement.condition ? truthy(evalExpression(statement.condition, context)) : true) {
-          yield* execStatements(statement.body, context);
+          const control = yield* execStatements(statement.body, context);
+          if (control === "return") return control;
           if (statement.update) evalExpression(statement.update, context);
         }
         break;
+      case "return":
+        if (statement.value) evalExpression(statement.value, context);
+        return "return";
+      case "continue":
+        return "continue";
     }
   }
 }
@@ -194,6 +203,8 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
   switch (expression.kind) {
     case "number":
       return expression.value;
+    case "string":
+      return 0;
     case "identifier":
       return valueAsNumber(readIdentifier(expression.name, context), expression.name);
     case "member": {
@@ -213,6 +224,10 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
     }
     case "binary":
       return evalBinary(expression.operator, expression.left, expression.right, context);
+    case "conditional":
+      return truthy(evalExpression(expression.condition, context))
+        ? evalExpression(expression.consequent, context)
+        : evalExpression(expression.alternate, context);
     case "assignment":
       return evalAssignment(expression.operator, expression.left, expression.right, context);
     case "update": {
@@ -271,6 +286,16 @@ function evalBinary(
       return left / right;
     case "%":
       return left % right;
+    case "<<":
+      return Math.trunc(left) << Math.trunc(right);
+    case ">>":
+      return Math.trunc(left) >> Math.trunc(right);
+    case "&":
+      return Math.trunc(left) & Math.trunc(right);
+    case "^":
+      return Math.trunc(left) ^ Math.trunc(right);
+    case "|":
+      return Math.trunc(left) | Math.trunc(right);
     case "<":
       return left < right ? 1 : 0;
     case "<=":
@@ -301,11 +326,15 @@ function evalAssignment(
     ? right
     : operator === "+="
       ? current + right
-      : operator === "-="
-        ? current - right
-        : operator === "*="
-          ? current * right
-          : current / right;
+    : operator === "-="
+      ? current - right
+      : operator === "*="
+        ? current * right
+        : operator === "/="
+          ? current / right
+          : operator === "<<="
+            ? Math.trunc(current) << Math.trunc(right)
+            : Math.trunc(current) >> Math.trunc(right);
   writeLValue(lvalue, value, context);
   return value;
 }
@@ -314,6 +343,16 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   const name = expression.kind === "call" && expression.callee.kind === "identifier"
     ? expression.callee.name
     : undefined;
+  if (name === "printf") return 0;
+  if (name === "atomicAdd") {
+    const first = expression.args[0];
+    if (!first) throw compilerFailure("atomicAdd expects target");
+    const target = first.kind === "unary" && first.operator === "&" ? first.argument : first;
+    const lvalue = resolveLValue(target, context);
+    const current = readLValue(lvalue, context);
+    writeLValue(lvalue, current + evalExpression(expression.args[1]!, context), context);
+    return current;
+  }
   const args = expression.args.map((arg) => evalExpression(arg, context));
   switch (name) {
     case "__syncthreads":
@@ -330,23 +369,16 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       return Math.log(args[0] ?? 0);
     case "bg_subgroup_add":
       return args[0] ?? 0;
-    case "atomicAdd": {
-      const first = expression.args[0];
-      if (!first || first.kind !== "unary" || first.operator !== "&") {
-        throw compilerFailure("atomicAdd expects address-of target");
-      }
-      const lvalue = resolveLValue(first.argument, context);
-      const current = readLValue(lvalue, context);
-      writeLValue(lvalue, current + (args[1] ?? 0), context);
-      return current;
-    }
     default:
       throw compilerFailure(`unsupported call '${name ?? "<expr>"}'`);
   }
 }
 
 function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): LValue {
-  if (expression.kind === "identifier") return { name: expression.name, space: "local" };
+  if (expression.kind === "identifier") {
+    if (context.buffers.has(expression.name)) return { name: expression.name, space: "buffer", index: 0 };
+    return { name: expression.name, space: "local" };
+  }
   const chain: number[] = [];
   let cursor: CudaLiteExpression = expression;
   while (cursor.kind === "index") {

@@ -150,6 +150,7 @@ function emitStatement(
       if (statement.storage === "shared") return [];
       return [`${prefix}var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitExpression(statement.init, context)}` : ""};`];
     case "expr":
+      if (isNoopCall(statement.expression)) return [`${prefix}// printf omitted: WebGPU has no device stdout`];
       if (isBarrierCall(statement.expression)) return [`${prefix}workgroupBarrier();`];
       return [`${prefix}${emitExpression(statement.expression, context)};`];
     case "if": {
@@ -175,6 +176,10 @@ function emitStatement(
       lines.push(`${prefix}}`);
       return lines;
     }
+    case "return":
+      return [`${prefix}return;`];
+    case "continue":
+      return [`${prefix}continue;`];
   }
 }
 
@@ -186,6 +191,8 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
   switch (expression.kind) {
     case "number":
       return expression.raw.includes(".") ? expression.raw : `${expression.raw}`;
+    case "string":
+      return expression.raw;
     case "identifier":
       return emitIdentifier(expression.name, context);
     case "member":
@@ -206,6 +213,8 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       return `(${expression.operator}${emitExpression(expression.argument, context)})`;
     case "binary":
       return `(${emitExpression(expression.left, context)} ${expression.operator} ${emitExpression(expression.right, context)})`;
+    case "conditional":
+      return `select(${emitExpression(expression.alternate, context)}, ${emitExpression(expression.consequent, context)}, ${emitExpression(expression.condition, context)})`;
     case "assignment":
       return emitAssignment(expression, context);
     case "update":
@@ -262,6 +271,9 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       if (target?.kind === "unary" && target.operator === "&" && value) {
         return `atomicAdd(&${emitExpression(target.argument, context, "lvalue")}, ${emitExpression(value, context)})`;
       }
+      if (target?.kind === "identifier" && value) {
+        return `atomicAdd(&${target.name}[0], ${emitExpression(value, context)})`;
+      }
       return `atomicAdd(${args.join(", ")})`;
     }
     default:
@@ -278,11 +290,19 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
     if (expression.operator === "=") return `atomicStore(&${target}, ${value})`;
     if (expression.operator === "+=") return `atomicAdd(&${target}, ${value})`;
   }
-  return `${emitExpression(expression.left, context, "lvalue")} ${expression.operator} ${emitExpression(expression.right, context)}`;
+  const left = emitExpression(expression.left, context, "lvalue");
+  const right = emitExpression(expression.right, context);
+  if (expression.operator === "<<=") return `${left} = (${left} << ${right})`;
+  if (expression.operator === ">>=") return `${left} = (${left} >> ${right})`;
+  return `${left} ${expression.operator} ${right}`;
 }
 
 function isBarrierCall(expression: CudaLiteExpression): boolean {
   return expression.kind === "call" && expressionName(expression.callee) === "__syncthreads";
+}
+
+function isNoopCall(expression: CudaLiteExpression): boolean {
+  return expression.kind === "call" && expressionName(expression.callee) === "printf";
 }
 
 function emitSharedType(statement: CudaLiteVarDecl): string {

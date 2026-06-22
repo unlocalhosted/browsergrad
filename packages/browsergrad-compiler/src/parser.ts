@@ -19,21 +19,26 @@ import {
 } from "./types.js";
 
 const TYPE_KEYWORDS = new Set(["float", "int", "uint", "half"]);
-const ASSIGNMENT = new Set(["=", "+=", "-=", "*=", "/="]);
+const ASSIGNMENT = new Set(["=", "+=", "-=", "*=", "/=", "<<=", ">>="]);
 const BINARY_PRECEDENCE = new Map<string, number>([
   ["||", 2],
   ["&&", 3],
-  ["==", 4],
-  ["!=", 4],
-  ["<", 5],
-  ["<=", 5],
-  [">", 5],
-  [">=", 5],
-  ["+", 6],
-  ["-", 6],
-  ["*", 7],
-  ["/", 7],
-  ["%", 7],
+  ["|", 4],
+  ["^", 5],
+  ["&", 6],
+  ["==", 7],
+  ["!=", 7],
+  ["<", 8],
+  ["<=", 8],
+  [">", 8],
+  [">=", 8],
+  ["<<", 9],
+  [">>", 9],
+  ["+", 10],
+  ["-", 10],
+  ["*", 11],
+  ["/", 11],
+  ["%", 11],
 ]);
 
 export function parseCudaLite(source: string): CudaLiteModule {
@@ -88,7 +93,9 @@ class Parser {
       const constant = this.consumeIf("const") !== undefined;
       const type = this.parseType();
       const pointer = this.consumeIf("*") !== undefined;
+      this.consumeTypeQualifiers();
       const name = this.expectIdentifier("parameter name");
+      this.consumeTypeQualifiers();
       params.push({
         name: name.value,
         valueType: type,
@@ -114,6 +121,8 @@ class Parser {
     }
     if (this.match("if")) return this.parseIf();
     if (this.match("for")) return this.parseFor();
+    if (this.match("return")) return this.parseReturn();
+    if (this.match("continue")) return this.parseContinue();
     if (this.startsVarDecl()) return this.parseVarDecl(true);
     const expression = this.parseExpression();
     const end = this.expect(";");
@@ -159,6 +168,23 @@ class Parser {
     };
   }
 
+  private parseReturn(): CudaLiteStatement {
+    const start = this.expect("return").span;
+    const value = this.match(";") ? undefined : this.parseExpression();
+    const end = this.expect(";");
+    return {
+      kind: "return",
+      ...(value === undefined ? {} : { value }),
+      span: mergeSpans(start, end.span),
+    };
+  }
+
+  private parseContinue(): CudaLiteStatement {
+    const start = this.expect("continue").span;
+    const end = this.expect(";");
+    return { kind: "continue", span: mergeSpans(start, end.span) };
+  }
+
   private parseBodyAsStatements(): readonly CudaLiteStatement[] {
     if (this.match("{")) return this.parseBlock();
     return [this.parseStatement()];
@@ -166,13 +192,15 @@ class Parser {
 
   private parseVarDecl(expectSemicolon: boolean): CudaLiteVarDecl {
     const start = this.peek().span;
-    const storage = this.consumeIf("__shared__") ? "shared" : "local";
+    const storage = this.consumeStorageQualifier();
     const valueType = this.parseType();
     const name = this.expectIdentifier("variable name");
     const dimensions: number[] = [];
     while (this.consumeIf("[")) {
-      const size = this.parseNumberLiteral("array size");
-      dimensions.push(size.value);
+      if (!this.match("]")) {
+        const size = this.parseNumberLiteral("array size");
+        dimensions.push(size.value);
+      }
       this.expect("]");
     }
     const init = this.consumeIf("=") ? this.parseExpression() : undefined;
@@ -195,6 +223,14 @@ class Parser {
         const op = this.advance().value as CudaLiteAssignmentExpression["operator"];
         const right = this.parseExpression(1);
         left = { kind: "assignment", operator: op, left, right, span: mergeSpans(left.span, right.span) };
+        continue;
+      }
+      if (this.match("?") && minPrecedence <= 1) {
+        this.expect("?");
+        const consequent = this.parseExpression();
+        this.expect(":");
+        const alternate = this.parseExpression(1);
+        left = { kind: "conditional", condition: left, consequent, alternate, span: mergeSpans(left.span, alternate.span) };
         continue;
       }
       const precedence = BINARY_PRECEDENCE.get(this.peek().value);
@@ -270,19 +306,52 @@ class Parser {
       const token = this.parseNumberLiteral("numeric literal");
       return { kind: "number", value: token.value, raw: token.raw, span: token.span };
     }
+    if (this.peek().kind === "string") {
+      const token = this.advance();
+      return { kind: "string", value: token.value.slice(1, -1), raw: token.value, span: token.span };
+    }
     const ident = this.expectIdentifier("expression");
     return { kind: "identifier", name: ident.value, span: ident.span };
   }
 
   private parseType(): Exclude<CudaLiteScalarType, "void"> {
     const token = this.expectIdentifier("type");
+    if (token.value === "unsigned") {
+      if (this.consumeIf("int")) return "uint";
+      if (this.consumeIf("long")) {
+        if (this.consumeIf("long")) {
+          this.fail("unsupported CUDA-lite type: unsigned long long", token.span);
+        }
+        this.fail("unsupported CUDA-lite type: unsigned long", token.span);
+      }
+      return "uint";
+    }
+    if (token.value === "size_t") return "uint";
     if (!TYPE_KEYWORDS.has(token.value)) this.fail(`unsupported CUDA-lite type: ${token.value}`, token.span);
     return token.value as Exclude<CudaLiteScalarType, "void">;
   }
 
   private startsVarDecl(): boolean {
-    if (this.match("__shared__")) return true;
+    if (this.match("__shared__") || this.match("extern")) return true;
+    if (this.match("unsigned")) return true;
     return TYPE_KEYWORDS.has(this.peek().value);
+  }
+
+  private consumeStorageQualifier(): "local" | "shared" {
+    const external = this.consumeIf("extern") !== undefined;
+    if (this.consumeIf("__shared__")) return "shared";
+    if (external) this.fail("extern is only supported with __shared__ declarations", this.previous().span);
+    return "local";
+  }
+
+  private consumeTypeQualifiers(): void {
+    while (
+      this.consumeIf("__restrict__") ||
+      this.consumeIf("__restrict") ||
+      this.consumeIf("restrict")
+    ) {
+      // accepted CUDA pointer qualifiers; no CUDA-lite semantic effect
+    }
   }
 
   private expectIdentifier(label: string): Token {
@@ -299,9 +368,10 @@ class Parser {
 
   private parseNumberLiteral(label: string): { readonly value: number; readonly raw: string; readonly span: SourceSpan } {
     const token = this.expectNumber(label);
-    const value = Number(token.value);
+    const rawNumber = token.value.replace(/[A-Za-z]+$/u, "");
+    const value = Number(rawNumber);
     if (!Number.isFinite(value)) this.fail(`invalid ${label}: ${token.value}`, token.span);
-    return { value, raw: token.value, span: token.span };
+    return { value, raw: rawNumber, span: token.span };
   }
 
   private expect(value: string): Token {

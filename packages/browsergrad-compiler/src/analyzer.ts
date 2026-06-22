@@ -25,6 +25,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["max", [2, 2]],
   ["bg_subgroup_add", [1, 1]],
   ["atomicAdd", [2, 2]],
+  ["printf", [1, Number.POSITIVE_INFINITY]],
 ]);
 const WGSL_RESERVED_WORDS = new Set([
   "alias",
@@ -77,7 +78,7 @@ interface Scope {
 }
 
 interface ExpressionInfo {
-  readonly kind: "scalar" | "pointer" | "array" | "vector" | "function" | "address" | "unknown";
+  readonly kind: "scalar" | "pointer" | "array" | "vector" | "function" | "address" | "string" | "unknown";
   readonly valueType?: ValueType | undefined;
   readonly dimensions?: readonly number[] | undefined;
   readonly symbol?: SymbolInfo | undefined;
@@ -139,6 +140,7 @@ export function analyzeCudaLite(
     scope: Scope,
     guardDepth: number,
     divergentDepth: number,
+    loopDepth: number,
   ): void => {
     for (const statement of statements) {
       switch (statement.kind) {
@@ -156,8 +158,8 @@ export function analyzeCudaLite(
               diagnostics.push(error("invalid-array-dimension", "array dimensions must be positive integer literals", statement.span));
             }
           }
-          if (statement.init) walkExpression(statement.init, scope);
-          if (statement.init) validateSideEffectPlacement(statement.init, false, diagnostics);
+            if (statement.init) walkExpression(statement.init, scope);
+            if (statement.init) validateSideEffectPlacement(statement.init, false, diagnostics);
           break;
         case "expr":
           if (isBarrierCall(statement.expression)) {
@@ -176,9 +178,9 @@ export function analyzeCudaLite(
           validateSideEffectPlacement(statement.condition, false, diagnostics);
           walkExpression(statement.condition, scope);
           const divergent = expressionIsDivergent(statement.condition, params);
-          walkStatements(statement.consequent, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth);
+          walkStatements(statement.consequent, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth, loopDepth);
           if (statement.alternate) {
-            walkStatements(statement.alternate, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth);
+            walkStatements(statement.alternate, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth, loopDepth);
           }
           break;
         }
@@ -198,14 +200,25 @@ export function analyzeCudaLite(
           if (statement.update) validateSideEffectPlacement(statement.update, true, diagnostics);
           if (statement.update) walkExpression(statement.update, loopScope);
           const divergent = statement.condition ? expressionIsDivergent(statement.condition, params) : false;
-          walkStatements(statement.body, loopScope, guardDepth, divergent ? divergentDepth + 1 : divergentDepth);
+          walkStatements(statement.body, loopScope, guardDepth, divergent ? divergentDepth + 1 : divergentDepth, loopDepth + 1);
           break;
         }
+        case "return":
+          if (statement.value) {
+            validateSideEffectPlacement(statement.value, false, diagnostics);
+            validateScalarOperand(walkExpression(statement.value, scope), statement.value.span, diagnostics);
+          }
+          break;
+        case "continue":
+          if (loopDepth === 0) {
+            diagnostics.push(error("continue-outside-loop", "continue can only appear inside a for-loop", statement.span));
+          }
+          break;
       }
     }
   };
 
-  walkStatements(kernel.body, rootScope, 0, 0);
+  walkStatements(kernel.body, rootScope, 0, 0, 0);
 
   if (requiredFeatures.has("shader-f16") && !options.features?.["shader-f16"]) {
     diagnostics.push(error("missing-feature-shader-f16", "half requires WebGPU shader-f16 support", kernel.span));
@@ -312,6 +325,13 @@ function validateCallExpression(
   if (callName === "__syncthreads") {
     diagnostics.push(error("barrier-expression", "__syncthreads() must be used as a standalone statement", expression.span));
   }
+  if (callName === "printf") {
+    for (const arg of expression.args.slice(1)) {
+      const info = walkExpression(arg, scope);
+      validateScalarOperand(info, arg.span, diagnostics);
+    }
+    return { kind: "scalar" };
+  }
   if (callName === "atomicAdd") {
     validateAtomicAdd(expression, scope, params, atomicParams, diagnostics, walkExpression);
     return { kind: "scalar" };
@@ -334,15 +354,18 @@ function validateAtomicAdd(
 ): void {
   const target = expression.args[0];
   const addend = expression.args[1];
-  if (!target || target.kind !== "unary" || target.operator !== "&") {
-    diagnostics.push(error("atomic-address-required", "atomicAdd first argument must be an address like &x[i]", expression.span));
+  const targetExpression = atomicTargetExpression(target);
+  if (!targetExpression) {
+    diagnostics.push(error("atomic-address-required", "atomicAdd first argument must be a pointer parameter or address like &x[i]", expression.span));
     if (target) walkExpression(target, scope);
   } else {
-    validateLValueExpression(target.argument, scope, diagnostics, walkExpression);
-    const targetName = rootIdentifier(target.argument);
+    if (targetExpression.kind !== "identifier") {
+      validateLValueExpression(targetExpression, scope, diagnostics, walkExpression);
+    }
+    const targetName = rootIdentifier(targetExpression);
     const param = targetName ? params.get(targetName) : undefined;
     if (!param?.pointer) {
-      diagnostics.push(error("unsupported-atomic-target", "atomicAdd target must be a pointer parameter element", target.span));
+      diagnostics.push(error("unsupported-atomic-target", "atomicAdd target must be a pointer parameter element", targetExpression.span));
     } else if (param.valueType === "float" || param.valueType === "half") {
       diagnostics.push(error("unsupported-atomic-f32", "atomicAdd is only supported for int/uint pointers in CUDA-lite v0", expression.span));
     } else {
@@ -358,6 +381,15 @@ function validateAtomicAdd(
   for (const extra of expression.args.slice(2)) walkExpression(extra, scope);
 }
 
+function atomicTargetExpression(
+  target: CudaLiteExpression | undefined,
+): CudaLiteExpression | undefined {
+  if (!target) return undefined;
+  if (target.kind === "unary" && target.operator === "&") return target.argument;
+  if (target.kind === "identifier") return target;
+  return undefined;
+}
+
 function validateNonCallExpression(
   expression: CudaLiteExpression,
   scope: Scope,
@@ -367,6 +399,8 @@ function validateNonCallExpression(
   switch (expression.kind) {
     case "number":
       return { kind: "scalar" };
+    case "string":
+      return { kind: "string" };
     case "identifier":
       return expressionInfoForIdentifier(expression.name, expression.span, scope, diagnostics);
     case "member": {
@@ -409,6 +443,12 @@ function validateNonCallExpression(
       const right = walkExpression(expression.right, scope);
       validateScalarOperand(left, expression.left.span, diagnostics);
       validateScalarOperand(right, expression.right.span, diagnostics);
+      return { kind: "scalar" };
+    }
+    case "conditional": {
+      validateScalarOperand(walkExpression(expression.condition, scope), expression.condition.span, diagnostics);
+      validateScalarOperand(walkExpression(expression.consequent, scope), expression.consequent.span, diagnostics);
+      validateScalarOperand(walkExpression(expression.alternate, scope), expression.alternate.span, diagnostics);
       return { kind: "scalar" };
     }
     case "assignment": {
@@ -617,6 +657,7 @@ function forEachExpressionChild(
 ): void {
   switch (expression.kind) {
     case "number":
+    case "string":
     case "identifier":
       return;
     case "member":
@@ -638,6 +679,11 @@ function forEachExpressionChild(
     case "assignment":
       visit(expression.left);
       visit(expression.right);
+      return;
+    case "conditional":
+      visit(expression.condition);
+      visit(expression.consequent);
+      visit(expression.alternate);
       return;
   }
 }

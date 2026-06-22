@@ -32,6 +32,17 @@ describe("generic WGSL kernel programs", () => {
     expect(program.bindings[0]).toMatchObject({ kind: "storage", valueType: "f16" });
   });
 
+  it("allows compute programs with no bindings", () => {
+    const program = defineWgslKernelProgram({
+      name: "control_only",
+      wgsl: "@compute @workgroup_size(1) fn main() { return; }",
+      workgroupSize: [1, 1, 1],
+      bindings: [],
+    });
+
+    expect(program.bindings).toEqual([]);
+  });
+
   it("rejects duplicate names and invalid workgroups", () => {
     expect(() =>
       defineWgslKernelProgram({

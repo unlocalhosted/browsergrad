@@ -1,6 +1,6 @@
 import type { SourceSpan } from "./types.js";
 
-export type TokenKind = "identifier" | "number" | "punctuator" | "eof";
+export type TokenKind = "identifier" | "number" | "string" | "punctuator" | "eof";
 
 export interface Token {
   readonly kind: TokenKind;
@@ -55,6 +55,10 @@ export function tokenizeCudaLite(source: string): readonly Token[] {
       }
       continue;
     }
+    if (char === "#") {
+      while (index < source.length && source[index] !== "\n") advance();
+      continue;
+    }
 
     const start = index;
     const startLine = line;
@@ -67,9 +71,31 @@ export function tokenizeCudaLite(source: string): readonly Token[] {
       tokens.push({ kind: "identifier", value, span: span(start, index, startLine, startColumn) });
       continue;
     }
+    if (char === "\"") {
+      let value = advance();
+      let escaped = false;
+      while (index < source.length) {
+        const next = advance();
+        value += next;
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (next === "\\") {
+          escaped = true;
+          continue;
+        }
+        if (next === "\"") break;
+      }
+      tokens.push({ kind: "string", value, span: span(start, index, startLine, startColumn) });
+      continue;
+    }
     if (/[0-9]/.test(char) || (char === "." && /[0-9]/.test(source[index + 1] ?? ""))) {
       let value = "";
       while (index < source.length && /[0-9.]/.test(source[index]!)) {
+        value += advance();
+      }
+      while (index < source.length && /[A-Za-z]/.test(source[index]!)) {
         value += advance();
       }
       tokens.push({ kind: "number", value, span: span(start, index, startLine, startColumn) });
@@ -85,7 +111,7 @@ export function tokenizeCudaLite(source: string): readonly Token[] {
       tokens.push({ kind: "punctuator", value: three, span: span(start, index, startLine, startColumn) });
       continue;
     }
-    if (["<=", ">=", "==", "!=", "&&", "||", "+=", "-=", "*=", "/=", "++", "--"].includes(two)) {
+    if (["<=", ">=", "==", "!=", "&&", "||", "+=", "-=", "*=", "/=", "++", "--", "<<", ">>"].includes(two)) {
       advance();
       advance();
       tokens.push({ kind: "punctuator", value: two, span: span(start, index, startLine, startColumn) });

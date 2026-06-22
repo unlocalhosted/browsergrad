@@ -57,7 +57,9 @@ export type CudaLiteStatement =
   | CudaLiteVarDecl
   | CudaLiteIfStatement
   | CudaLiteForStatement
-  | CudaLiteExprStatement;
+  | CudaLiteExprStatement
+  | CudaLiteReturnStatement
+  | CudaLiteContinueStatement;
 
 export interface CudaLiteVarDecl {
   readonly kind: "var";
@@ -92,20 +94,40 @@ export interface CudaLiteExprStatement {
   readonly span: SourceSpan;
 }
 
+export interface CudaLiteReturnStatement {
+  readonly kind: "return";
+  readonly value?: CudaLiteExpression;
+  readonly span: SourceSpan;
+}
+
+export interface CudaLiteContinueStatement {
+  readonly kind: "continue";
+  readonly span: SourceSpan;
+}
+
 export type CudaLiteExpression =
   | CudaLiteNumberLiteral
+  | CudaLiteStringLiteral
   | CudaLiteIdentifier
   | CudaLiteMemberExpression
   | CudaLiteIndexExpression
   | CudaLiteCallExpression
   | CudaLiteUnaryExpression
   | CudaLiteBinaryExpression
+  | CudaLiteConditionalExpression
   | CudaLiteAssignmentExpression
   | CudaLiteUpdateExpression;
 
 export interface CudaLiteNumberLiteral {
   readonly kind: "number";
   readonly value: number;
+  readonly raw: string;
+  readonly span: SourceSpan;
+}
+
+export interface CudaLiteStringLiteral {
+  readonly kind: "string";
+  readonly value: string;
   readonly raw: string;
   readonly span: SourceSpan;
 }
@@ -146,15 +168,41 @@ export interface CudaLiteUnaryExpression {
 
 export interface CudaLiteBinaryExpression {
   readonly kind: "binary";
-  readonly operator: "+" | "-" | "*" | "/" | "%" | "<" | "<=" | ">" | ">=" | "==" | "!=" | "&&" | "||";
+  readonly operator:
+    | "+"
+    | "-"
+    | "*"
+    | "/"
+    | "%"
+    | "<<"
+    | ">>"
+    | "&"
+    | "^"
+    | "|"
+    | "<"
+    | "<="
+    | ">"
+    | ">="
+    | "=="
+    | "!="
+    | "&&"
+    | "||";
   readonly left: CudaLiteExpression;
   readonly right: CudaLiteExpression;
   readonly span: SourceSpan;
 }
 
+export interface CudaLiteConditionalExpression {
+  readonly kind: "conditional";
+  readonly condition: CudaLiteExpression;
+  readonly consequent: CudaLiteExpression;
+  readonly alternate: CudaLiteExpression;
+  readonly span: SourceSpan;
+}
+
 export interface CudaLiteAssignmentExpression {
   readonly kind: "assignment";
-  readonly operator: "=" | "+=" | "-=" | "*=" | "/=";
+  readonly operator: "=" | "+=" | "-=" | "*=" | "/=" | "<<=" | ">>=";
   readonly left: CudaLiteExpression;
   readonly right: CudaLiteExpression;
   readonly span: SourceSpan;

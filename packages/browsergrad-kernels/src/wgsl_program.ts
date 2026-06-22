@@ -104,9 +104,6 @@ export function defineWgslKernelProgram(
     throw new KernelError("WGSL program source must not be empty");
   }
   const workgroupSize = validateWorkgroupSize(input.workgroupSize);
-  if (input.bindings.length === 0) {
-    throw new KernelError("WGSL program must declare at least one binding");
-  }
 
   const seenNames = new Set<string>();
   const seenBindings = new Set<number>();

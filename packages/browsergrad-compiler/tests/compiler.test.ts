@@ -230,6 +230,55 @@ __global__ void bad(float* x) {
 }`)).toThrow(/invalid numeric literal/);
   });
 
+  it("accepts common CUDA lesson syntax in the CUDA-lite subset", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void lessonSyntax(const float *__restrict__ input, float *output, unsigned int n) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  int lane = threadIdx.x & 31;
+  int warp = threadIdx.x >> 5;
+  if (idx >= n) return;
+  if (idx < n) {
+    float value = input[idx] + ((input[idx] > 0.0f) ? 0.5f : -0.5f);
+    #pragma unroll
+    for (int i = 0; i < 2U; i++) {
+      if (i == 0) continue;
+      value += 1.0f;
+    }
+    warp >>= 1;
+    output[idx] = value + lane + warp;
+  }
+}`, { workgroupSize: [32, 1, 1] });
+
+    expect(compiled.wgsl).toContain("& 31");
+    expect(compiled.wgsl).toContain(">> 5");
+    expect(compiled.wgsl).toContain("select");
+    expect(compiled.wgsl).toContain("return;");
+    expect(compiled.wgsl).toContain("continue;");
+    expect(compiled.ir.params.map((param) => [param.name, param.valueType])).toContainEqual(["n", "uint"]);
+  });
+
+  it("compiles stdout-only teaching kernels as no-op WebGPU programs", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void hello() {
+  if (threadIdx.x == 0) {
+    printf("hello %d\\n", threadIdx.x);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgslProgram.bindings).toEqual([]);
+    expect(compiled.wgsl).toContain("printf omitted");
+  });
+
+  it("parses dynamic extern shared memory as a clear unsupported diagnostic", () => {
+    const analysis = analyzeCudaLite(parseCudaLite(`
+__global__ void dynamicShared(float *x) {
+  extern __shared__ float scratch[];
+  if (threadIdx.x < 1) { scratch[threadIdx.x] = x[0]; }
+}`));
+
+    expect(analysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("dynamic-shared-memory");
+  });
+
   it("formats diagnostics with source snippets", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(const float* x) {
@@ -334,5 +383,20 @@ __global__ void atomic_read(int* x) {
     expect(compiled.wgsl).toContain("var<storage, read_write> x: array<atomic<i32>>;");
     expect(compiled.wgsl).toContain("atomicAdd(&x[0], 1);");
     expect(compiled.wgsl).toContain("atomicStore(&x[1], atomicLoad(&x[0]));");
+  });
+
+  it("supports CUDA pointer-form atomicAdd on integer buffers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void atomic_count(int* x) {
+  if (threadIdx.x < 1) { atomicAdd(x, 1); }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Int32Array([41]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("atomicAdd(&x[0], 1);");
+    expect([...result.buffers.x as Int32Array]).toEqual([42]);
   });
 });
