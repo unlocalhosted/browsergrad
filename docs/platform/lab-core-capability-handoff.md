@@ -430,7 +430,11 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     hosted API mock, scheduler fairness, and scaling-law fixture checks.
     BrowserGrad runtime integration now proves a Python rubric can call the
     A3 profile's declared `_bg_scaling_api` JS oracle through Pyodide while
-    that oracle is backed by the primitive facade.
+    that oracle is backed by the primitive facade. CraftingAttention also has a
+    platform e2e that loads `docs/internal/cs336-assignment3-scaling.profile.json`,
+    selects the Pyodide route with a simulated scheduler capability, and checks
+    hosted API, scheduler, and scaling-law primitives through the platform's
+    package-loading path.
     CS336 A5 alignment labs can use
     `@unlocalhosted/browsergrad-primitives` for DPO, parser, reward,
     group-normalized advantage, policy-gradient, and masked aggregation checks.

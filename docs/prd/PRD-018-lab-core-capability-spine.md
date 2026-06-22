@@ -341,7 +341,11 @@ curriculum profiles and handoff docs absorb course-specific adapters.
   `createHostedTrainingApiFixture()`, `selectExperimentsForDispatch()`, and
   `fitPowerLawScalingLaw()` so CS336 A3-style hosted API, scheduler, and
   scaling-law rubrics can run fixture-scale browser-safe checks before a real
-  FastAPI/Postgres/JAX/Modal service enters the loop.
+  FastAPI/Postgres/JAX/Modal service enters the loop. CraftingAttention loads
+  the real A3 benchmark profile, selects the Pyodide route with hosted
+  API/server/scaling capabilities plus a simulated scheduler, and verifies
+  hosted API budget/duplicate/final-submission behavior, dispatch fairness, and
+  power-law projection through the platform e2e suite.
 - RL-reference guarantee: `@unlocalhosted/browsergrad-primitives` exports
   `rl.computePerInstanceDpoLoss()`, `rl.parseMmluResponse()`,
   `rl.parseGsm8kResponse()`, `rl.computeRolloutRewards()`,

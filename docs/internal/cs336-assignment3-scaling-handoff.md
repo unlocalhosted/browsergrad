@@ -78,6 +78,10 @@ External-only:
 craftingattention should:
 
 1. Import `@unlocalhosted/browsergrad-primitives` in the assignment-profile E2E.
+   This is now proven: CraftingAttention loads the real
+   `cs336-assignment3-scaling.profile.json`, selects the Pyodide route with a
+   simulated scheduler capability, and exercises hosted API, scheduler, and
+   scaling-law primitives through the platform e2e suite.
 2. Register the scaling reference through `runAssignmentJavascriptRubric()` or
    Pyodide JS module bridge.
 3. Mount small JSON fixtures for training configs, queued/running experiments,
