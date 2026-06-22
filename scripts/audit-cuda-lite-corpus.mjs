@@ -49,6 +49,7 @@ for (const file of files) {
         });
         results.push({ file, block: blockIndex + 1, kernel: kernelIndex + 1, ok: true });
       } catch (error) {
+        const referenceOk = canCompileReferenceOnly(source);
         const diagnostic = error?.diagnostics?.[0];
         const feature = diagnostic
           ? describeCudaDiagnostic(diagnostic)
@@ -63,6 +64,7 @@ for (const file of files) {
           feature: feature?.label ?? "Unknown compatibility gap",
           lowering: feature?.lowering ?? "unsupported",
           message: String(error?.message ?? error).split("\n")[0],
+          referenceOk,
         });
       }
     }
@@ -83,6 +85,8 @@ const summary = {
   totalKernelDefinitions: results.length,
   ok: results.length - failures.length,
   fail: failures.length,
+  referenceOnlyOk: failures.filter((failure) => failure.referenceOk).length,
+  hardFail: failures.filter((failure) => !failure.referenceOk).length,
   errors: countBy(failures, (failure) => failure.error),
   families: countBy(failures, (failure) => failure.family),
   lowering: countBy(failures, (failure) => failure.lowering),
@@ -92,7 +96,23 @@ console.log(JSON.stringify(summary, null, 2));
 if (failures.length > 0) {
   console.log("\nfirst failures:");
   for (const failure of failures.slice(0, 80)) {
-    console.log(`${failure.file} block ${failure.block} kernel ${failure.kernel}: ${failure.family}/${failure.error}: ${failure.message}`);
+    const reference = failure.referenceOk ? " [reference-ok]" : "";
+    console.log(`${failure.file} block ${failure.block} kernel ${failure.kernel}: ${failure.family}/${failure.error}${reference}: ${failure.message}`);
+  }
+}
+
+function canCompileReferenceOnly(source) {
+  try {
+    compileCudaLiteKernel(source, {
+      features: { "shader-f16": true, subgroups: true },
+      workgroupSize: [256, 1, 1],
+      dynamicSharedMemory: inferDynamicSharedMemory(source),
+      referenceDynamicParallelism: true,
+      referenceGridSync: true,
+    });
+    return true;
+  } catch {
+    return false;
   }
 }
 

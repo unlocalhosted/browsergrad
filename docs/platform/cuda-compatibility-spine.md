@@ -34,8 +34,8 @@ truth, WGSL lowering, browser tests, and corpus audit evidence.
 Current corpus gate:
 
 - `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/243` real code-kernel
-  definitions compile after filtering documentation diagrams and ellipsis
-  placeholder kernels.
+  definitions compile for GPU. Another `15/243` compile as explicit
+  reference-only coverage, leaving `3` hard gaps after filtering docs/pseudocode.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, and WebGPU
   atomic offset updates.
