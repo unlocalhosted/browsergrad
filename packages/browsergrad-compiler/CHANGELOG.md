@@ -54,3 +54,5 @@
   dispatch.
 - Added shared launch-shape diagnostics so platform preflight, CPU reference,
   and WebGPU runners reject invalid grid/block dimensions consistently.
+- `createCudaWebGpuExecutionPlan()` now returns `launch` blockers for invalid
+  launch shapes before building dispatch plans.

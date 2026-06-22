@@ -206,7 +206,9 @@ trying WebGPU single-dispatch execution.
 Use `createCudaLaunchValidationDiagnostics(launch, compiled.ir.workgroupSize)`
 or `validateCudaKernelLaunch()` to preflight launch shape before selecting CPU
 reference or WebGPU execution. Reference and WebGPU runners use the same
-validator, so bad grid/block dimensions fail with the same diagnostic codes.
+validator, and `createCudaWebGpuExecutionPlan()` reports the same failures as
+`launch` blockers. Bad grid/block dimensions fail with the same diagnostic
+codes across planning and execution.
 Use `createCudaWebGpuExecutionPlan(compiled, input, launch, { compileKernel })`
 to inspect the exact executable WebGPU plan before running: `single-dispatch`,
 `grid-sync-phases`, `host-dynamic-launch`, or `host-peer-copy`. The runner uses

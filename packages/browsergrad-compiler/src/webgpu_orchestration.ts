@@ -7,6 +7,7 @@ import {
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames } from "./ast_queries.js";
 import { createCudaHostDynamicLaunchPlan } from "./dynamic_launch.js";
+import { createCudaLaunchValidationDiagnostics } from "./launch.js";
 import { createCudaPeerCopyPlan, type CudaPeerCopyOperation } from "./peer_copy.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
@@ -28,6 +29,7 @@ export type CudaWebGpuExecutionPlanKind =
   | "host-peer-copy";
 
 export type CudaWebGpuExecutionBlockerKind =
+  | "launch"
   | "grid-sync"
   | "device-launch"
   | "peer-copy"
@@ -68,6 +70,16 @@ export function createCudaWebGpuExecutionPlan(
   launch: KernelLaunch,
   options: CudaWebGpuExecutionPlanOptions = {},
 ): CudaWebGpuExecutionPlan {
+  const launchDiagnostics = createCudaLaunchValidationDiagnostics(launch, compiled.ir.workgroupSize);
+  if (launchDiagnostics.length > 0) {
+    const launchBlockers = launchDiagnostics.map((diagnostic) => webGpuBlocker("launch", diagnostic.code, diagnostic.message));
+    return {
+      supported: false,
+      reason: formatWebGpuBlockers(launchBlockers),
+      blockers: launchBlockers,
+      diagnostics: launchDiagnostics,
+    };
+  }
   const runtimePlan = createCudaRuntimePlan(compiled);
   const blockers: CudaWebGpuExecutionBlocker[] = [];
 

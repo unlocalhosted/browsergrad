@@ -122,6 +122,9 @@ Rules:
 
 Prepared execution uses the same plan. `prepareCompiledKernelWebGpu()` must not
 create a second planning path.
+Launch-shape validation also lives at this boundary: invalid grid/block
+dimensions return unsupported `launch` blockers before any dispatch plan is
+built.
 
 Hot-loop rules:
 

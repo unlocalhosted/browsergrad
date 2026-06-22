@@ -858,6 +858,13 @@ __global__ void parent(float *x, int n) {
       code: "launch-grid-dim-invalid",
       message: "launch.gridDim[0] must be a positive integer",
     }));
+    expect(createCudaWebGpuExecutionPlan(compiled, input, badGrid)).toMatchObject({
+      supported: false,
+      blockers: [{
+        kind: "launch",
+        code: "launch-grid-dim-invalid",
+      }],
+    });
     expect(() => validateCudaKernelLaunch(badBlock, compiled.ir.workgroupSize)).toThrow(CudaLiteCompilerError);
     expect(() => runCompiledKernelReference(compiled, input, badGrid)).toThrow("launch.gridDim[0] must be a positive integer");
     await expect(runCompiledKernelWebGpu(
