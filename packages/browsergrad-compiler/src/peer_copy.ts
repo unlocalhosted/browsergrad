@@ -33,6 +33,11 @@ export interface CudaPeerCopyOperation {
   readonly valueType: "float" | "int" | "uint";
 }
 
+interface HostPeerCopyCollection {
+  readonly copies: readonly CudaPeerCopyOperation[];
+  readonly reason?: string;
+}
+
 export function createCudaPeerCopyPlan(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
@@ -45,7 +50,9 @@ export function createCudaPeerCopyPlan(
   if (!runtimePlan.operations.every((operation) => operation.kind === "peer-copy" || operation.kind === "device-sync")) {
     return unsupported("runtime operations besides peer-copy/device sync require reference runtime");
   }
-  const copies = collectHostPeerCopies(compiled.ir.body, input, launch);
+  const copyCollection = collectHostPeerCopies(compiled.ir.body, input, launch);
+  const copies = copyCollection.copies;
+  if (copyCollection.reason) return unsupported(copyCollection.reason);
   if (copies.length === 0) return unsupported("no host-liftable peer-copy operations");
   return { supported: true, copies };
 }
@@ -58,10 +65,13 @@ function collectHostPeerCopies(
   statements: readonly CudaLiteStatement[],
   input: CompiledKernelInput,
   launch: KernelLaunch,
-): readonly CudaPeerCopyOperation[] {
+): HostPeerCopyCollection {
   const out: CudaPeerCopyOperation[] = [];
   const parentHasSingleInvocation = launch.gridDim.every((axis) => axis === 1) && launch.blockDim.every((axis) => axis === 1);
-  let unsafe = false;
+  let unsafeReason: string | undefined;
+  const markUnsafe = (reason: string): void => {
+    unsafeReason ??= reason;
+  };
 
   const visit = (
     items: readonly CudaLiteStatement[],
@@ -86,21 +96,36 @@ function collectHostPeerCopies(
         const before = out.length;
         if (isSingleInvocationGuard(item.condition)) {
           containsPeerCopy = visit(item.consequent, current, true) || containsPeerCopy;
-          if (out.length > before && hasParentSideEffectsAfterPeerCopy(items.slice(index + 1))) unsafe = true;
+          if (out.length > before && hasParentSideEffectsAfterPeerCopy(items.slice(index + 1))) {
+            markUnsafe("parent side effects after peer copy cannot be replayed in host-lifted sequence");
+          }
           continue;
         }
         const condition = evaluateHostNumber(item.condition, current, input);
-        if (condition === undefined) return containsPeerCopy;
+        if (condition === undefined) {
+          if (containsPeerCopyCall(item.consequent) || containsPeerCopyCall(item.alternate ?? [])) {
+            markUnsafe("peer-copy branch condition must be host-evaluable or a single-invocation guard");
+          }
+          return containsPeerCopy;
+        }
         containsPeerCopy = visit(condition !== 0 ? item.consequent : item.alternate ?? [], current, singleInvocationGuard) || containsPeerCopy;
-        if (out.length > before && hasParentSideEffectsAfterPeerCopy(items.slice(index + 1))) unsafe = true;
+        if (out.length > before && hasParentSideEffectsAfterPeerCopy(items.slice(index + 1))) {
+          markUnsafe("parent side effects after peer copy cannot be replayed in host-lifted sequence");
+        }
         continue;
       }
       if (item.kind === "expr" && isPeerCopyCall(item.expression)) {
-        if (!(singleInvocationGuard || parentHasSingleInvocation)) unsafe = true;
-        else if (hasParentSideEffectsAfterPeerCopy(items.slice(index + 1))) unsafe = true;
+        if (!(singleInvocationGuard || parentHasSingleInvocation)) {
+          markUnsafe("peer copy must be single-invocation guarded or parent launch must be one thread");
+        }
+        else if (hasParentSideEffectsAfterPeerCopy(items.slice(index + 1))) {
+          markUnsafe("parent side effects after peer copy cannot be replayed in host-lifted sequence");
+        }
         else {
           const operation = createPeerCopyOperation(item.expression, current, input);
-          if (!operation) unsafe = true;
+          if (!operation) {
+            markUnsafe("peer-copy arguments must resolve to typed buffer aliases, non-negative offsets, and element-aligned byte count");
+          }
           else {
             out.push(operation);
             containsPeerCopy = true;
@@ -112,7 +137,7 @@ function collectHostPeerCopies(
   };
 
   visit(statements, new Map(), parentHasSingleInvocation);
-  return unsafe ? [] : out;
+  return unsafeReason ? { copies: [], reason: unsafeReason } : { copies: out };
 }
 
 function createPeerCopyOperation(
@@ -182,6 +207,15 @@ function hasParentSideEffectsAfterPeerCopy(statements: readonly CudaLiteStatemen
 
 function isPeerCopyCall(expression: CudaLiteExpression): expression is CudaLiteCallExpression {
   return expression.kind === "call" && expressionName(expression.callee) === "cudaMemcpyPeerAsync";
+}
+
+function containsPeerCopyCall(statements: readonly CudaLiteStatement[]): boolean {
+  for (const statement of statements) {
+    if (statement.kind === "expr" && isPeerCopyCall(statement.expression)) return true;
+    if (statement.kind === "if" && (containsPeerCopyCall(statement.consequent) || containsPeerCopyCall(statement.alternate ?? []))) return true;
+    if (statement.kind === "for" && containsPeerCopyCall(statement.body)) return true;
+  }
+  return false;
 }
 
 function isHostNoopExpression(expression: CudaLiteExpression): boolean {

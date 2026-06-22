@@ -634,6 +634,32 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
     });
   });
 
+  it("explains why unsafe peer-copy lifts stay reference-only", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void peerCopyBad(float *dst, const float *src) {
+  if (threadIdx.x == 0) {
+    cudaMemcpyPeerAsync(dst, 0, src, 0, sizeof(float), 0);
+    dst[0] = 9.0f;
+  }
+}`, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const plan = createCudaPeerCopyPlan(
+      compiled,
+      {
+        buffers: {
+          dst: new Float32Array(1),
+          src: new Float32Array([2.5]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(plan.supported).toBe(false);
+    expect(plan.reason).toContain("parent side effects after peer copy");
+  });
+
   it("summarizes runtime orchestration gaps without course-specific logic", () => {
     const compiled = compileCudaLiteKernel(`
 namespace cg = cooperative_groups;
@@ -1407,7 +1433,7 @@ __global__ void parent(float *x) {
     );
 
     expect(plan.supported).toBe(false);
-    expect(plan.reason).toContain("no host-liftable");
+    expect(plan.reason).toContain("parent side effects after device-side launch");
     await expect(runCompiledKernelWebGpu(
       {} as never,
       compiled,

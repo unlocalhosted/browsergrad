@@ -43,6 +43,11 @@ interface HostLiftedLaunch {
   readonly env: ReadonlyMap<string, HostEvalValue>;
 }
 
+interface HostLiftedLaunchCollection {
+  readonly launches: readonly HostLiftedLaunch[];
+  readonly reason?: string;
+}
+
 type MemoryPoolInput = NonNullable<CompiledKernelInput["memoryPools"]>[string];
 
 export function createCudaHostDynamicLaunchPlan(
@@ -61,8 +66,9 @@ export function createCudaHostDynamicLaunchPlan(
     return unsupported("parent gridDim must be [1, 1, 1] for host-lifted dynamic launch");
   }
 
-  const launches = collectHostLiftedLaunches(compiled.ir.body, input, launch);
-  if (launches.length === 0) return unsupported("no host-liftable device-side launches");
+  const launchCollection = collectHostLiftedLaunches(compiled.ir.body, input, launch);
+  const launches = launchCollection.launches;
+  if (launches.length === 0) return unsupported(launchCollection.reason ?? "no host-liftable device-side launches");
 
   const planned: CudaHostDynamicLaunch[] = [];
   for (const item of launches) {
@@ -96,11 +102,14 @@ function collectHostLiftedLaunches(
   statements: readonly CudaLiteStatement[],
   input: CompiledKernelInput,
   launch: KernelLaunch,
-): readonly HostLiftedLaunch[] {
+): HostLiftedLaunchCollection {
   const out: HostLiftedLaunch[] = [];
   const initial = new Map<string, HostEvalValue>();
   const parentHasSingleInvocation = launch.gridDim.every((axis) => axis === 1) && launch.blockDim.every((axis) => axis === 1);
-  let unsafe = false;
+  let unsafeReason: string | undefined;
+  const markUnsafe = (reason: string): void => {
+    unsafeReason ??= reason;
+  };
   const visit = (
     items: readonly CudaLiteStatement[],
     env: ReadonlyMap<string, HostEvalValue>,
@@ -124,19 +133,32 @@ function collectHostLiftedLaunches(
         const before = out.length;
         if (isSingleInvocationGuard(item.condition)) {
           containsLaunch = visit(item.consequent, current, true) || containsLaunch;
-          if (out.length > before && hasParentSideEffectsAfterLaunch(items.slice(index + 1))) unsafe = true;
+          if (out.length > before && hasParentSideEffectsAfterLaunch(items.slice(index + 1))) {
+            markUnsafe("parent side effects after device-side launch cannot be replayed in host-lifted sequence");
+          }
           continue;
         }
         const condition = evaluateHostNumber(item.condition, current, input);
-        if (condition === undefined) return containsLaunch;
+        if (condition === undefined) {
+          if (containsKernelLaunch(item.consequent) || containsKernelLaunch(item.alternate ?? [])) {
+            markUnsafe("device-side launch branch condition must be host-evaluable or a single-invocation guard");
+          }
+          return containsLaunch;
+        }
         containsLaunch = visit(condition !== 0 ? item.consequent : item.alternate ?? [], current, singleInvocationGuard) || containsLaunch;
-        if (out.length > before && hasParentSideEffectsAfterLaunch(items.slice(index + 1))) unsafe = true;
+        if (out.length > before && hasParentSideEffectsAfterLaunch(items.slice(index + 1))) {
+          markUnsafe("parent side effects after device-side launch cannot be replayed in host-lifted sequence");
+        }
         continue;
       }
       if (item.kind === "kernel-launch") {
-        if (!(singleInvocationGuard || parentHasSingleInvocation)) unsafe = true;
+        if (!(singleInvocationGuard || parentHasSingleInvocation)) {
+          markUnsafe("device-side launch must be single-invocation guarded or parent launch must be one thread");
+        }
         else {
-          if (hasParentSideEffectsAfterLaunch(items.slice(index + 1))) unsafe = true;
+          if (hasParentSideEffectsAfterLaunch(items.slice(index + 1))) {
+            markUnsafe("parent side effects after device-side launch cannot be replayed in host-lifted sequence");
+          }
           out.push({ statement: item, env: current });
           containsLaunch = true;
         }
@@ -145,7 +167,7 @@ function collectHostLiftedLaunches(
     return containsLaunch;
   };
   visit(statements, initial, parentHasSingleInvocation);
-  return unsafe ? [] : out;
+  return unsafeReason ? { launches: [], reason: unsafeReason } : { launches: out };
 }
 
 function hasParentSideEffectsAfterLaunch(statements: readonly CudaLiteStatement[]): boolean {
