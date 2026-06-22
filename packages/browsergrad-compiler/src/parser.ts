@@ -4,6 +4,7 @@ import {
   type CudaLiteAssignmentExpression,
   type CudaLiteBinaryExpression,
   type CudaLiteCastExpression,
+  type CudaLiteDeviceFunction,
   type CudaLiteExpression,
   type CudaLiteForStatement,
   type CudaLiteGlobalConstant,
@@ -61,10 +62,12 @@ class Parser {
   parseModule(): CudaLiteModule {
     const constants: CudaLiteGlobalConstant[] = [];
     const textures: CudaLiteTexture2D[] = [];
+    const functions: CudaLiteDeviceFunction[] = [];
     const kernels: CudaLiteKernel[] = [];
     while (!this.match("<eof>")) {
       if (this.match("__constant__")) constants.push(this.parseGlobalConstant());
       else if (this.match("texture")) textures.push(this.parseTexture2D());
+      else if (this.startsDeviceFunction()) functions.push(this.parseDeviceFunction());
       else kernels.push(this.parseKernel());
     }
     return {
@@ -72,6 +75,7 @@ class Parser {
       source: this.source,
       constants,
       textures,
+      functions,
       kernels,
       span: { start: 0, end: this.source.length, line: 1, column: 1 },
     };
@@ -122,6 +126,24 @@ class Parser {
     };
   }
 
+  private parseDeviceFunction(): CudaLiteDeviceFunction {
+    const start = this.consumeDeviceFunctionAttributes();
+    const returnType = this.parseReturnType();
+    const name = this.expectIdentifier("device function name");
+    this.expect("(");
+    const params = this.parseParams();
+    this.expect(")");
+    const body = this.parseBlock();
+    return {
+      kind: "device-function",
+      name: name.value,
+      returnType,
+      params,
+      body,
+      span: mergeSpans(start, body.at(-1)?.span ?? name.span),
+    };
+  }
+
   private parseKernel(): CudaLiteKernel {
     this.consumeKernelAttributes();
     const start = this.expect("__global__").span;
@@ -151,6 +173,18 @@ class Parser {
       }
       this.expect(")");
     }
+  }
+
+  private consumeDeviceFunctionAttributes(): SourceSpan {
+    let start: SourceSpan | undefined;
+    let sawDevice = false;
+    while (this.match("__inline__") || this.match("inline") || this.match("__device__") || this.match("__forceinline__")) {
+      const token = this.advance();
+      start ??= token.span;
+      if (token.value === "__device__") sawDevice = true;
+    }
+    if (!sawDevice) this.fail("expected __device__ function attribute", start ?? this.peek().span);
+    return start ?? this.peek().span;
   }
 
   private parseParams(): readonly CudaLiteParam[] {
@@ -421,6 +455,22 @@ class Parser {
     return TYPE_KEYWORDS.has(typeToken.value);
   }
 
+  private startsDeviceFunction(): boolean {
+    let index = this.index;
+    let sawDevice = false;
+    while (true) {
+      const token = this.tokens[index];
+      if (!token) return false;
+      if (token.value === "__device__") sawDevice = true;
+      if (token.value === "__inline__" || token.value === "inline" || token.value === "__device__" || token.value === "__forceinline__") {
+        index++;
+        continue;
+      }
+      break;
+    }
+    return sawDevice;
+  }
+
   private expectTextureDimension(): Token {
     if (this.peek().kind === "number") {
       const token = this.advance();
@@ -445,6 +495,11 @@ class Parser {
     if (token.value === "size_t") return "uint";
     if (!TYPE_KEYWORDS.has(token.value)) this.fail(`unsupported CUDA-lite type: ${token.value}`, token.span);
     return token.value as Exclude<CudaLiteScalarType, "void">;
+  }
+
+  private parseReturnType(): CudaLiteScalarType {
+    if (this.consumeIf("void")) return "void";
+    return this.parseType();
   }
 
   private startsVarDecl(): boolean {

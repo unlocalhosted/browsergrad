@@ -2,6 +2,7 @@ import {
   CudaLiteCompilerError,
   type CudaLiteAnalysis,
   type CudaLiteAnalyzeOptions,
+  type CudaLiteDeviceFunction,
   type CudaLiteDiagnostic,
   type CudaLiteExpression,
   type CudaLiteGlobalConstant,
@@ -25,6 +26,9 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["logf", [1, 1]],
   ["__half2float", [1, 1]],
   ["__float2half", [1, 1]],
+  ["__shfl_down_sync", [3, 4]],
+  ["__shfl_up_sync", [3, 4]],
+  ["__shfl_xor_sync", [3, 4]],
   ["min", [2, 2]],
   ["max", [2, 2]],
   ["bg_subgroup_add", [1, 1]],
@@ -74,8 +78,10 @@ type ValueType = Exclude<CudaLiteScalarType, "void">;
 
 interface SymbolInfo {
   readonly name: string;
-  readonly kind: "param" | "local" | "shared" | "constant" | "texture" | "builtin-vector" | "builtin-call";
+  readonly kind: "param" | "local" | "shared" | "constant" | "texture" | "device-function" | "builtin-vector" | "builtin-call";
   readonly valueType?: ValueType;
+  readonly returnType?: CudaLiteScalarType;
+  readonly params?: readonly CudaLiteParam[];
   readonly pointer?: boolean;
   readonly constant?: boolean;
   readonly dimensions?: readonly number[];
@@ -112,6 +118,9 @@ export function analyzeCudaLite(
   for (const texture of ast.textures) {
     declareTexture(texture, rootScope, declaredNames, diagnostics);
   }
+  for (const fn of ast.functions) {
+    declareDeviceFunction(fn, rootScope, declaredNames, requiredFeatures, diagnostics);
+  }
 
   for (const param of kernel.params) {
     if (declaredNames.has(param.name)) {
@@ -130,13 +139,13 @@ export function analyzeCudaLite(
     if (param.valueType === "half") requiredFeatures.add("shader-f16");
   }
 
-  const declareVar = (statement: CudaLiteVarDecl, scope: Scope): void => {
+  const declareVar = (statement: CudaLiteVarDecl, scope: Scope, names: Set<string>): void => {
     const dimensions = resolvedSharedDimensions(statement, options) ?? statement.dimensions;
-    if (declaredNames.has(statement.name)) {
+    if (names.has(statement.name)) {
       diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${statement.name}'`, statement.span));
     }
     validateDeclaredSymbolName(statement.name, statement.span, diagnostics);
-    declaredNames.add(statement.name);
+    names.add(statement.name);
     scope.symbols.set(statement.name, {
       name: statement.name,
       kind: statement.storage === "shared" ? "shared" : "local",
@@ -160,11 +169,12 @@ export function analyzeCudaLite(
     guardDepth: number,
     divergentDepth: number,
     loopDepth: number,
+    names: Set<string>,
   ): void => {
     for (const statement of statements) {
       switch (statement.kind) {
         case "var":
-          declareVar(statement, scope);
+          declareVar(statement, scope, names);
           if (statement.valueType === "half") requiredFeatures.add("shader-f16");
           if (statement.pointer && !isSupportedSharedPointerAlias(statement, scope)) {
             diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.span));
@@ -200,16 +210,16 @@ export function analyzeCudaLite(
           validateSideEffectPlacement(statement.condition, false, diagnostics);
           walkExpression(statement.condition, scope);
           const divergent = expressionIsDivergent(statement.condition, params);
-          walkStatements(statement.consequent, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth, loopDepth);
+          walkStatements(statement.consequent, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth, loopDepth, names);
           if (statement.alternate) {
-            walkStatements(statement.alternate, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth, loopDepth);
+            walkStatements(statement.alternate, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth, loopDepth, names);
           }
           break;
         }
         case "for": {
           const loopScope = createScope(scope);
           if (statement.init?.kind === "var") {
-            declareVar(statement.init, loopScope);
+            declareVar(statement.init, loopScope, names);
             if (statement.init.valueType === "half") requiredFeatures.add("shader-f16");
             if (statement.init.pointer && !isSupportedSharedPointerAlias(statement.init, loopScope)) {
               diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.init.span));
@@ -225,7 +235,7 @@ export function analyzeCudaLite(
           if (statement.update) validateSideEffectPlacement(statement.update, true, diagnostics);
           if (statement.update) walkExpression(statement.update, loopScope);
           const divergent = statement.condition ? expressionIsDivergent(statement.condition, params) : false;
-          walkStatements(statement.body, loopScope, guardDepth, divergent ? divergentDepth + 1 : divergentDepth, loopDepth + 1);
+          walkStatements(statement.body, loopScope, guardDepth, divergent ? divergentDepth + 1 : divergentDepth, loopDepth + 1, names);
           break;
         }
         case "return":
@@ -243,7 +253,32 @@ export function analyzeCudaLite(
     }
   };
 
-  walkStatements(kernel.body, rootScope, 0, 0, 0);
+  for (const fn of ast.functions) {
+    const functionScope = createScope(rootScope);
+    const functionDeclaredNames = new Set(declaredNames);
+    for (const param of fn.params) {
+      if (functionDeclaredNames.has(param.name)) {
+        diagnostics.push(error("duplicate-symbol", `duplicate parameter '${param.name}'`, param.span));
+      }
+      validateDeclaredSymbolName(param.name, param.span, diagnostics);
+      functionDeclaredNames.add(param.name);
+      functionScope.symbols.set(param.name, {
+        name: param.name,
+        kind: "local",
+        valueType: param.valueType,
+        pointer: param.pointer,
+        constant: param.constant,
+        span: param.span,
+      });
+      if (param.valueType === "half") requiredFeatures.add("shader-f16");
+      if (param.pointer) {
+        diagnostics.push(error("unsupported-device-pointer-param", "CUDA-lite device functions only support scalar params in v0", param.span));
+      }
+    }
+    walkStatements(fn.body, functionScope, 0, 0, 0, functionDeclaredNames);
+  }
+
+  walkStatements(kernel.body, rootScope, 0, 0, 0, declaredNames);
 
   if (requiredFeatures.has("shader-f16") && !options.features?.["shader-f16"]) {
     diagnostics.push(error("missing-feature-shader-f16", "half requires WebGPU shader-f16 support", kernel.span));
@@ -259,6 +294,7 @@ export function analyzeCudaLite(
     kernel,
     constants: ast.constants,
     textures: ast.textures,
+    functions: ast.functions,
     diagnostics,
     requiredFeatures: [...requiredFeatures].sort(),
     atomicParams: [...atomicParams].sort(),
@@ -286,6 +322,7 @@ export function lowerAnalyzedCudaLiteToKernelIr(
     params: analysis.kernel.params,
     constants: analysis.constants,
     textures: analysis.textures,
+    functions: analysis.functions,
     body: analysis.kernel.body,
     sharedDeclarations: collectSharedDeclarations(analysis.kernel.body, options),
     requiredFeatures: analysis.requiredFeatures,
@@ -363,6 +400,28 @@ function declareTexture(
   });
 }
 
+function declareDeviceFunction(
+  fn: CudaLiteDeviceFunction,
+  rootScope: Scope,
+  declaredNames: Set<string>,
+  requiredFeatures: Set<string>,
+  diagnostics: CudaLiteDiagnostic[],
+): void {
+  if (declaredNames.has(fn.name)) {
+    diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${fn.name}'`, fn.span));
+  }
+  validateDeclaredSymbolName(fn.name, fn.span, diagnostics);
+  declaredNames.add(fn.name);
+  rootScope.symbols.set(fn.name, {
+    name: fn.name,
+    kind: "device-function",
+    returnType: fn.returnType,
+    params: fn.params,
+    span: fn.span,
+  });
+  if (fn.returnType === "half") requiredFeatures.add("shader-f16");
+}
+
 function isSupportedSharedPointerAlias(statement: CudaLiteVarDecl, scope: Scope): boolean {
   if (!statement.pointer || statement.storage !== "local") return false;
   if (statement.init?.kind !== "unary" || statement.init.operator !== "&") return false;
@@ -389,6 +448,11 @@ function validateCallExpression(
     diagnostics.push(error("unsupported-call", "CUDA-lite v0 only supports direct builtin calls", expression.span));
     for (const arg of expression.args) walkExpression(arg, scope);
     return { kind: "unknown" };
+  }
+
+  const calleeSymbol = lookupSymbol(callName, scope, expression.callee.span);
+  if (calleeSymbol?.kind === "device-function") {
+    return validateDeviceFunctionCall(expression, calleeSymbol, diagnostics, walkExpression, scope);
   }
 
   const arity = BUILTIN_CALLS.get(callName);
@@ -432,6 +496,16 @@ function validateCallExpression(
       valueType: callName === "__half2float" ? "float" : "half",
     };
   }
+  if (isShuffleBuiltin(callName)) {
+    requiredFeatures.add("subgroups");
+    let valueType: ValueType | undefined;
+    for (const [index, arg] of expression.args.entries()) {
+      const info = walkExpression(arg, scope);
+      validateScalarOperand(info, arg.span, diagnostics);
+      if (index === 1) valueType = info.valueType;
+    }
+    return { kind: "scalar", valueType };
+  }
   if (callName === "tex2D") {
     validateTex2D(expression, scope, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "float" };
@@ -442,6 +516,33 @@ function validateCallExpression(
     validateScalarOperand(info, arg.span, diagnostics);
   }
   return { kind: "scalar" };
+}
+
+function validateDeviceFunctionCall(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  symbol: SymbolInfo,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+  scope: Scope,
+): ExpressionInfo {
+  const fnParams = symbol.params ?? [];
+  if (expression.args.length !== fnParams.length) {
+    diagnostics.push(error(
+      "invalid-call-arity",
+      `${symbol.name} expects ${fnParams.length} argument${fnParams.length === 1 ? "" : "s"}`,
+      expression.span,
+    ));
+  }
+  for (const [index, arg] of expression.args.entries()) {
+    const info = walkExpression(arg, scope);
+    validateScalarOperand(info, arg.span, diagnostics);
+    const param = fnParams[index];
+    if (param?.pointer) {
+      diagnostics.push(error("unsupported-device-pointer-param", "CUDA-lite device function calls only support scalar params in v0", arg.span));
+    }
+  }
+  if (symbol.returnType === undefined || symbol.returnType === "void") return { kind: "unknown" };
+  return { kind: "scalar", valueType: symbol.returnType };
 }
 
 function validateTex2D(
@@ -506,6 +607,12 @@ function isAtomicBuiltin(callName: string): boolean {
     callName === "atomicMax" ||
     callName === "atomicExch" ||
     callName === "atomicCAS";
+}
+
+function isShuffleBuiltin(callName: string): boolean {
+  return callName === "__shfl_down_sync" ||
+    callName === "__shfl_up_sync" ||
+    callName === "__shfl_xor_sync";
 }
 
 function atomicTargetExpression(
@@ -646,6 +753,7 @@ function expressionInfoForIdentifier(
   }
   if (symbol.kind === "builtin-vector") return { kind: "vector", symbol };
   if (symbol.kind === "builtin-call") return { kind: "function", symbol };
+  if (symbol.kind === "device-function") return { kind: "function", symbol };
   if (symbol.kind === "texture") return { kind: "texture", valueType: symbol.valueType, symbol };
   if (symbol.kind === "shared" || symbol.kind === "constant") {
     return {

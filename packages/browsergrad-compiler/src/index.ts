@@ -11,6 +11,7 @@ export {
   type CudaLiteCallExpression,
   type CudaLiteConditionalExpression,
   type CudaLiteContinueStatement,
+  type CudaLiteDeviceFunction,
   type CudaLiteDiagnostic,
   type CudaLiteExpression,
   type CudaLiteForStatement,

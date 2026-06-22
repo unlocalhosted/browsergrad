@@ -3,6 +3,7 @@ import {
   CudaLiteCompilerError,
   type CompiledCudaLiteKernel,
   type CompiledKernelInput,
+  type CudaLiteDeviceFunction,
   type CudaLiteExpression,
   type CudaLiteStatement,
   type CudaLiteVarDecl,
@@ -39,6 +40,7 @@ interface ThreadContext {
   readonly constants: Map<string, number | WgslTypedArray>;
   readonly constantDimensions: Map<string, readonly number[]>;
   readonly textures: NonNullable<CompiledKernelInput["textures"]>;
+  readonly functions: ReadonlyMap<string, CudaLiteDeviceFunction>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly locals: Map<string, LocalValue>;
   readonly shared: Map<string, SharedArrayValue>;
@@ -59,7 +61,7 @@ interface MutableTrace {
   readonly sharedWrites: KernelMemoryAccess[];
 }
 
-type ExecControl = "return" | "continue";
+type ExecControl = { readonly kind: "return"; readonly value?: number } | { readonly kind: "continue" };
 type BarrierGenerator = Generator<"barrier", ExecControl | void, void>;
 
 export function runCompiledKernelReference(
@@ -73,13 +75,14 @@ export function runCompiledKernelReference(
   const constants = cloneConstants(input.constants ?? {});
   const constantDimensions = new Map(compiled.ir.constants.map((constant) => [constant.name, constant.dimensions]));
   const textures = input.textures ?? {};
+  const functions = new Map(compiled.ir.functions.map((fn) => [fn.name, fn]));
   const scalars = input.scalars ?? {};
   const traces: MutableTrace[] = [];
 
   for (let bz = 0; bz < launch.gridDim[2]; bz++) {
     for (let by = 0; by < launch.gridDim[1]; by++) {
       for (let bx = 0; bx < launch.gridDim[0]; bx++) {
-        runBlock(compiled, buffers, constants, constantDimensions, textures, scalars, {
+        runBlock(compiled, buffers, constants, constantDimensions, textures, functions, scalars, {
           x: bx,
           y: by,
           z: bz,
@@ -105,6 +108,7 @@ function runBlock(
   constants: Map<string, number | WgslTypedArray>,
   constantDimensions: Map<string, readonly number[]>,
   textures: NonNullable<CompiledKernelInput["textures"]>,
+  functions: ReadonlyMap<string, CudaLiteDeviceFunction>,
   scalars: Readonly<Record<string, number>>,
   blockIdx: Vector3,
   blockDim: Vector3,
@@ -136,6 +140,7 @@ function runBlock(
           constants,
           constantDimensions,
           textures,
+          functions,
           scalars,
           locals: new Map(),
           shared,
@@ -198,15 +203,17 @@ function* execStatements(
         }
         while (statement.condition ? truthy(evalExpression(statement.condition, context)) : true) {
           const control = yield* execStatements(statement.body, context);
-          if (control === "return") return control;
+          if (control?.kind === "return") return control;
           if (statement.update) evalExpression(statement.update, context);
         }
         break;
       case "return":
-        if (statement.value) evalExpression(statement.value, context);
-        return "return";
+        return {
+          kind: "return",
+          ...(statement.value === undefined ? {} : { value: evalExpression(statement.value, context) }),
+        };
       case "continue":
-        return "continue";
+        return { kind: "continue" };
     }
   }
 }
@@ -413,6 +420,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     return texture.data[y * texture.width + x] ?? 0;
   }
   const args = expression.args.map((arg) => evalExpression(arg, context));
+  const deviceFunction = name ? context.functions.get(name) : undefined;
+  if (deviceFunction) return evalDeviceFunction(deviceFunction, args, context);
   switch (name) {
     case "__syncthreads":
       return 0;
@@ -431,8 +440,31 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       return args[0] ?? 0;
     case "bg_subgroup_add":
       return args[0] ?? 0;
+    case "__shfl_down_sync":
+    case "__shfl_up_sync":
+    case "__shfl_xor_sync":
+      return args[1] ?? 0;
     default:
       throw compilerFailure(`unsupported call '${name ?? "<expr>"}'`);
+  }
+}
+
+function evalDeviceFunction(fn: CudaLiteDeviceFunction, args: readonly number[], context: ThreadContext): number {
+  const locals = new Map<string, LocalValue>();
+  for (const [index, param] of fn.params.entries()) locals.set(param.name, args[index] ?? 0);
+  const fnContext: ThreadContext = {
+    ...context,
+    locals,
+  };
+  const generator = execStatements(fn.body, fnContext);
+  while (true) {
+    const next = generator.next();
+    if (next.done) {
+      const control = next.value;
+      if (control?.kind === "return") return control.value ?? 0;
+      return 0;
+    }
+    throw compilerFailure(`device function '${fn.name}' cannot contain __syncthreads()`);
   }
 }
 

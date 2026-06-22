@@ -37,6 +37,7 @@ export interface CudaLiteModule {
   readonly source: string;
   readonly constants: readonly CudaLiteGlobalConstant[];
   readonly textures: readonly CudaLiteTexture2D[];
+  readonly functions: readonly CudaLiteDeviceFunction[];
   readonly kernels: readonly CudaLiteKernel[];
   readonly span: SourceSpan;
 }
@@ -59,6 +60,15 @@ export interface CudaLiteTexture2D {
 export interface CudaLiteKernel {
   readonly kind: "kernel";
   readonly name: string;
+  readonly params: readonly CudaLiteParam[];
+  readonly body: readonly CudaLiteStatement[];
+  readonly span: SourceSpan;
+}
+
+export interface CudaLiteDeviceFunction {
+  readonly kind: "device-function";
+  readonly name: string;
+  readonly returnType: CudaLiteScalarType;
   readonly params: readonly CudaLiteParam[];
   readonly body: readonly CudaLiteStatement[];
   readonly span: SourceSpan;
@@ -255,6 +265,7 @@ export interface CudaLiteAnalysis {
   readonly kernel: CudaLiteKernel;
   readonly constants: readonly CudaLiteGlobalConstant[];
   readonly textures: readonly CudaLiteTexture2D[];
+  readonly functions: readonly CudaLiteDeviceFunction[];
   readonly diagnostics: readonly CudaLiteDiagnostic[];
   readonly requiredFeatures: readonly string[];
   readonly atomicParams: readonly string[];
@@ -265,6 +276,7 @@ export interface KernelIrModule {
   readonly params: readonly CudaLiteParam[];
   readonly constants: readonly CudaLiteGlobalConstant[];
   readonly textures: readonly CudaLiteTexture2D[];
+  readonly functions: readonly CudaLiteDeviceFunction[];
   readonly body: readonly CudaLiteStatement[];
   readonly sharedDeclarations: readonly CudaLiteVarDecl[];
   readonly requiredFeatures: readonly string[];

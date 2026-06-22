@@ -8,6 +8,7 @@ import {
   CudaLiteCompilerError,
   type CudaLiteAssignmentExpression,
   type CudaLiteCallExpression,
+  type CudaLiteDeviceFunction,
   type CudaLiteExpression,
   type CudaLiteGlobalConstant,
   type CudaLiteParam,
@@ -84,6 +85,11 @@ export function emitKernelIrWgsl(
     for (const texture of ir.textures) lines.push(...emitTextureHelper(texture.name));
   }
 
+  for (const fn of ir.functions) {
+    lines.push("");
+    lines.push(...emitDeviceFunction(fn, context));
+  }
+
   lines.push("");
   lines.push(`@compute @workgroup_size(${ir.workgroupSize.join(", ")})`);
   lines.push("fn main(");
@@ -111,6 +117,7 @@ interface EmitContext {
   readonly bindings: readonly WgslKernelBindingInput[];
   readonly paramsBinding?: number;
   readonly uniformScalars: readonly { readonly name: string; readonly valueType: CudaLiteScalarType }[];
+  readonly deviceFunctionNames: ReadonlySet<string>;
   bindingFor(name: string): number;
   paramFor(name: string): CudaLiteParam | undefined;
   isUniformScalar(name: string): boolean;
@@ -179,6 +186,7 @@ function createEmitContext(ir: KernelIrModule): EmitContext {
     bindings,
     ...(paramsBinding === undefined ? {} : { paramsBinding }),
     uniformScalars,
+    deviceFunctionNames: new Set(ir.functions.map((fn) => fn.name)),
     bindingFor(name) {
       const binding = bindingByName.get(name);
       if (binding === undefined) throw featureError("missing-wgsl-binding", `missing WGSL binding for '${name}'`);
@@ -235,7 +243,7 @@ function emitStatement(
       return lines;
     }
     case "return":
-      return [`${prefix}return;`];
+      return [`${prefix}${statement.value ? `return ${emitExpression(statement.value, context)};` : "return;"}`];
     case "continue":
       return [`${prefix}continue;`];
   }
@@ -243,6 +251,26 @@ function emitStatement(
 
 function emitForVar(statement: CudaLiteVarDecl, context: EmitContext): string {
   return `var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitExpression(statement.init, context)}` : ""}`;
+}
+
+function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): string[] {
+  const params = [
+    ...fn.params.map((param) => `${param.name}_arg: ${wgslScalar(param.valueType)}`),
+    "local_id: vec3<u32>",
+    "workgroup_id: vec3<u32>",
+    "num_workgroups: vec3<u32>",
+  ];
+  const returnType = fn.returnType === "void" ? "" : ` -> ${wgslScalar(fn.returnType)}`;
+  const lines = [`fn ${fn.name}(${params.join(", ")})${returnType} {`];
+  for (const param of fn.params) {
+    lines.push(`  var ${param.name}: ${wgslScalar(param.valueType)} = ${param.name}_arg;`);
+  }
+  lines.push(...fn.body.flatMap((statement) => emitStatement(statement, context, 1)));
+  if (fn.returnType !== "void" && !functionBodyHasReturn(fn.body)) {
+    lines.push(`  return ${zeroValue(fn.returnType)};`);
+  }
+  lines.push("}");
+  return lines;
 }
 
 function emitExpression(expression: CudaLiteExpression, context: EmitContext, mode: EmitMode = "value"): string {
@@ -347,6 +375,9 @@ function emitMember(expression: Extract<CudaLiteExpression, { kind: "member" }>,
 function emitCall(expression: CudaLiteCallExpression, context: EmitContext): string {
   const name = expressionName(expression.callee);
   const args = expression.args.map((arg) => emitExpression(arg, context));
+  if (name && context.deviceFunctionNames.has(name)) {
+    return `${name}(${[...args, "local_id", "workgroup_id", "num_workgroups"].join(", ")})`;
+  }
   switch (name) {
     case "__syncthreads":
       return "workgroupBarrier()";
@@ -365,6 +396,12 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return `${name}(${args.join(", ")})`;
     case "bg_subgroup_add":
       return `subgroupAdd(${args.join(", ")})`;
+    case "__shfl_down_sync":
+      return `subgroupShuffleDown(${args[1] ?? "0"}, u32(${args[2] ?? "0"}))`;
+    case "__shfl_up_sync":
+      return `subgroupShuffleUp(${args[1] ?? "0"}, u32(${args[2] ?? "0"}))`;
+    case "__shfl_xor_sync":
+      return `subgroupShuffleXor(${args[1] ?? "0"}, u32(${args[2] ?? "0"}))`;
     case "tex2D":
       if (expression.args.length === 3 && expression.args[0]?.kind === "identifier") {
         return `bg_tex2d_${expression.args[0].name}(${emitExpression(expression.args[1]!, context)}, ${emitExpression(expression.args[2]!, context)})`;
@@ -463,6 +500,23 @@ function emitTextureHelper(name: string): string[] {
     `  return textureLoad(${name}, coord, 0).r;`,
     "}",
   ];
+}
+
+function functionBodyHasReturn(statements: readonly CudaLiteStatement[]): boolean {
+  for (const statement of statements) {
+    if (statement.kind === "return") return true;
+    if (statement.kind === "if" && (functionBodyHasReturn(statement.consequent) || (statement.alternate && functionBodyHasReturn(statement.alternate)))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function zeroValue(type: CudaLiteScalarType): string {
+  if (type === "float") return "0.0";
+  if (type === "half") return "f16(0.0)";
+  if (type === "uint") return "0u";
+  return "0";
 }
 
 function wgslScalar(type: CudaLiteScalarType): string {

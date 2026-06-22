@@ -31,13 +31,14 @@ for (const file of files) {
   for (const [blockIndex, block] of blocks.entries()) {
     const blockDefines = collectObjectDefines(block.code);
     const blockFunctionDefines = collectFunctionDefines(block.code);
+    const blockDeviceFunctions = collectScalarDeviceFunctions(block.code);
     const blockConstants = collectConstantDeclarations(block.code);
     const blockTextures = collectTextureDeclarations(block.code);
     const effectiveDefines = blockDefines.size === 0 ? carriedDefines : blockDefines;
     if (CUDA_HINT_RE.test(block.code)) cudaBlocks++;
     const kernels = extractKernelDefinitions(block.code);
     for (const [kernelIndex, rawKernel] of kernels.entries()) {
-      const source = kernelSourceWithContext(rawKernel, effectiveDefines, blockFunctionDefines, blockConstants, blockTextures);
+      const source = kernelSourceWithContext(rawKernel, effectiveDefines, blockFunctionDefines, blockDeviceFunctions, blockConstants, blockTextures);
       try {
         compileCudaLiteKernel(source, {
           features: { "shader-f16": true, subgroups: true },
@@ -150,12 +151,61 @@ function extractKernelDefinitions(source) {
   return kernels;
 }
 
-function kernelSourceWithContext(kernel, definesByName, functionDeclarations, constantDeclarations, textureDeclarations) {
+function collectScalarDeviceFunctions(source) {
+  const clean = stripComments(source);
+  const functions = [];
+  let index = 0;
+  while (true) {
+    const device = clean.indexOf("__device__", index);
+    if (device < 0) break;
+    let start = device;
+    const before = clean.slice(Math.max(0, device - 32), device);
+    const inline = /(?:__inline__|inline|__forceinline__)\s*$/u.exec(before);
+    if (inline) start = device - inline[0].length;
+    const brace = clean.indexOf("{", device);
+    const semicolon = clean.indexOf(";", device);
+    if (brace < 0) break;
+    if (semicolon >= 0 && semicolon < brace) {
+      index = semicolon + 1;
+      continue;
+    }
+    let depth = 0;
+    let end = -1;
+    for (let cursor = brace; cursor < clean.length; cursor++) {
+      if (clean[cursor] === "{") depth++;
+      else if (clean[cursor] === "}") {
+        depth--;
+        if (depth === 0) {
+          end = cursor + 1;
+          break;
+        }
+      }
+    }
+    if (end < 0) break;
+    const fn = clean.slice(start, end);
+    const signature = fn.slice(0, fn.indexOf("{"));
+    const name = /(?:float|int|uint|half|unsigned\s+int|void)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/u.exec(signature)?.[1];
+    if (name && isPortableScalarDeviceFunction(signature, fn)) functions.push({ name, source: fn });
+    index = end;
+  }
+  return functions;
+}
+
+function isPortableScalarDeviceFunction(signature, source) {
+  if (/\*/u.test(signature)) return false;
+  if (/\bdo\b|reinterpret|static_cast|__float_as_int|__int_as_float/u.test(source)) return false;
+  return true;
+}
+
+function kernelSourceWithContext(kernel, definesByName, functionDeclarations, deviceFunctions, constantDeclarations, textureDeclarations) {
   const params = new Set(kernelParamNames(kernel));
   const defines = [...definesByName]
     .filter(([name]) => !params.has(name))
     .map(([name, value]) => `#define ${name} ${value}`);
-  return `${defines.join("\n")}\n${functionDeclarations.join("\n")}\n${constantDeclarations.join("\n")}\n${textureDeclarations.join("\n")}\n${kernel}`;
+  const referencedDeviceFunctions = deviceFunctions
+    .filter((fn) => new RegExp(`\\b${escapeRegExp(fn.name)}\\s*\\(`, "u").test(kernel))
+    .map((fn) => fn.source);
+  return `${defines.join("\n")}\n${functionDeclarations.join("\n")}\n${referencedDeviceFunctions.join("\n")}\n${constantDeclarations.join("\n")}\n${textureDeclarations.join("\n")}\n${kernel}`;
 }
 
 function collectObjectDefines(source) {
@@ -232,6 +282,10 @@ function stripLineComment(line) {
     if (char === "/" && line[index + 1] === "/") return line.slice(0, index);
   }
   return line;
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function inferDynamicSharedMemory(source) {

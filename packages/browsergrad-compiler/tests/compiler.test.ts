@@ -313,6 +313,48 @@ __global__ void hello() {
     expect(compiled.wgsl).toContain("printf omitted");
   });
 
+  it("lowers scalar __device__ helper functions", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float addOne(float value) {
+  return value + 1.0f;
+}
+__global__ void helperKernel(float *x) {
+  if (threadIdx.x < 1) { x[0] = addOne(x[0]); }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([2]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.ir.functions.map((fn) => fn.name)).toEqual(["addOne"]);
+    expect(compiled.wgsl).toContain("fn addOne(value_arg: f32");
+    expect(compiled.wgsl).toContain("return (value + 1.0);");
+    expect([...result.buffers.x as Float32Array]).toEqual([3]);
+  });
+
+  it("lowers CUDA warp shuffle helpers to subgroup intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__inline__ __device__ float warpReduceSum(float val) {
+  unsigned int mask = 0xffffffff;
+  val += __shfl_down_sync(mask, val, 16, 32);
+  return val;
+}
+__global__ void warpKernel(const float *input, float *output) {
+  int laneId = threadIdx.x & 31;
+  float val = input[threadIdx.x];
+  val = warpReduceSum(val);
+  if (laneId == 0) { output[0] = val; }
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [32, 1, 1],
+    });
+
+    expect(compiled.wgsl).toContain("enable subgroups;");
+    expect(compiled.wgsl).toContain("subgroupShuffleDown(val, u32(16))");
+    expect(compiled.wgsl).toContain("warpReduceSum(val, local_id, workgroup_id, num_workgroups)");
+  });
+
   it("parses dynamic extern shared memory as a clear unsupported diagnostic", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void dynamicShared(float *x) {
