@@ -131,6 +131,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.12.4
+      '@unlocalhosted/browsergrad-compiler':
+        specifier: workspace:*
+        version: link:../browsergrad-compiler
       '@unlocalhosted/browsergrad-kernels':
         specifier: workspace:*
         version: link:../browsergrad-kernels

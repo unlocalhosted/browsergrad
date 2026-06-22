@@ -19,6 +19,10 @@ import {
   simulateCuda1DGrid,
   simulateCuda1DProgram,
 } from "@unlocalhosted/browsergrad-kernels";
+import {
+  compileCudaLiteKernel,
+  runCompiledKernelReference,
+} from "@unlocalhosted/browsergrad-compiler";
 
 interface CpuParallelismOracle {
   simulateVectorizedClampedExp: typeof simulation.simulateVectorizedClampedExp;
@@ -44,6 +48,11 @@ interface CudaConceptsReference {
   runCuda1DProgramWebGpu: typeof runCuda1DProgramWebGpu;
   simulateCuda1DGrid: typeof simulateCuda1DGrid;
   simulateCuda1DProgram: typeof simulateCuda1DProgram;
+}
+
+interface CudaLiteCompilerReference {
+  compileCudaLiteKernel: typeof compileCudaLiteKernel;
+  runCompiledKernelReference: typeof runCompiledKernelReference;
 }
 
 const CS149_A1_PROFILE = JSON.parse(
@@ -605,6 +614,123 @@ describe("profile-driven JavaScript assignment e2e", () => {
           renderedPixel: [0.125, 0.25, 0.5],
           repeatCount: 3,
           wgslHasParams: true,
+        },
+      }),
+    ]);
+  });
+
+  it("runs the CS149 A3 profile through the CUDA-lite compiler capability", async () => {
+    const parsed = parseAssignmentProfile(CS149_A3_PROFILE);
+    expect(parsed).toMatchObject({ ok: true });
+    if (!parsed.ok) return;
+
+    const environment = createAssignmentCapabilityEnvironment({
+      browserCapabilities: [
+        "cuda-compatible-subset",
+        "cuda-lite-compiler",
+        "performance-rubric",
+        "webgpu",
+      ],
+    });
+    const contents = {
+      files: {
+        "/assignments/cs149-assignment3/rubric.js":
+          "export default async function rubric(ctx) { return ctx.id; }",
+      },
+    };
+    const compiler: CudaLiteCompilerReference = {
+      compileCudaLiteKernel,
+      runCompiledKernelReference,
+    };
+    const rubric: AssignmentJavascriptRubric = (ctx) => {
+      const cuda = ctx.oracle<CudaLiteCompilerReference>("_bg_cuda_concepts");
+      const compiled = cuda.compileCudaLiteKernel(
+        `
+__global__ void saxpy(const float* x, float* y, float a, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    y[i] = a * x[i] + y[i];
+  }
+}
+`,
+        { workgroupSize: [4, 1, 1] },
+      );
+      const result = cuda.runCompiledKernelReference(
+        compiled,
+        {
+          buffers: {
+            x: new Float32Array([1, 2, 3, 4]),
+            y: new Float32Array([10, 20, 30, 40]),
+          },
+          scalars: { a: 2, n: 4 },
+        },
+        { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+      );
+      const y = Array.from(result.buffers.y as Float32Array);
+
+      if (
+        !ctx.allowedTests.includes("saxpy_correctness") ||
+        !ctx.allowedTests.includes("performance_rubric_smoke") ||
+        y.join(",") !== "12,24,36,48" ||
+        !compiled.wgsl.includes("@compute")
+      ) {
+        ctx.assertFail(
+          "cs149-a3-cuda-lite-compiler",
+          "CUDA-lite compiler oracle mismatch",
+          {
+            expected: { y: [12, 24, 36, 48], wgsl: "@compute" },
+            actual: { y, wgslPrefix: compiled.wgsl.slice(0, 80) },
+          },
+        );
+        return;
+      }
+
+      ctx.assertPass("saxpy_correctness");
+      ctx.assertPass("wgsl_lowering_smoke");
+      ctx.assertPass("performance_rubric_smoke");
+      ctx.emitJson("cs149-a3-cuda-lite-summary", {
+        selectedPath: "cuda-lite-compiler",
+        output: y,
+        bindingCount: compiled.wgslProgram.bindings.length,
+      });
+    };
+
+    const result = await runAssignmentJavascriptProfile(
+      parsed.profile,
+      environment,
+      contents,
+      rubric,
+      { oracles: { _bg_cuda_concepts: compiler } },
+    );
+
+    expect(result.report.runnerRoute.target).toBe("javascript");
+    expect(result.report.readiness.status).toBe("runnable");
+    expect(result.report.readiness.selectedCapabilities).toEqual([
+      "cuda-compatible-subset",
+      "cuda-lite-compiler",
+      "performance-rubric",
+      "webgpu",
+    ]);
+    expect(result.run.mount).toEqual({
+      writtenPaths: ["/assignments/cs149-assignment3/rubric.js"],
+      skippedOptionalPaths: [
+        "/assignments/cs149-assignment3/starter",
+        "/assignments/cs149-assignment3/reference.js",
+      ],
+    });
+    expect(result.run.assertions).toEqual([
+      { kind: "pass", name: "saxpy_correctness" },
+      { kind: "pass", name: "wgsl_lowering_smoke" },
+      { kind: "pass", name: "performance_rubric_smoke" },
+    ]);
+    expect(result.run.artifacts).toEqual([
+      expect.objectContaining({
+        kind: "json",
+        name: "cs149-a3-cuda-lite-summary",
+        data: {
+          selectedPath: "cuda-lite-compiler",
+          output: [12, 24, 36, 48],
+          bindingCount: 3,
         },
       }),
     ]);

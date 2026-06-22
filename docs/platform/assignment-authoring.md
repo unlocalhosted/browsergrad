@@ -182,6 +182,9 @@ input reads, output reads, WGSL source generation, and browser WebGPU dispatch.
 Use the `cuda-lite-compiler` capability when rubrics accept learner CUDA-lite
 source through `@unlocalhosted/browsergrad-compiler` rather than handwritten
 WGSL only.
+Runtime e2e coverage exercises a CS149 A3-style profile with `_bg_cuda_concepts`
+backed by the compiler package, proving platform profile wiring without making
+the runtime package production-depend on the compiler.
 `simulateCuda1DGrid()`, `defineCuda1DProgram()`, and related CUDA names remain
 compatibility aliases for rubrics that intentionally teach CUDA vocabulary. The
 thread-grid executor records thread/block ids, global reads/writes, and

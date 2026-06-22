@@ -111,6 +111,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   mounted fixtures.
 - JavaScript rubric contexts now expose `ctx.substrate(name)` for browser
   resources such as WebGPU adapters/devices supplied by the platform.
+- Profile-driven JavaScript assignment coverage now proves a
+  `cuda-lite-compiler` capability route can call the compiler oracle without a
+  runtime production dependency on the compiler package.
 
 ## [0.1.1] — 2026-05-25
 
