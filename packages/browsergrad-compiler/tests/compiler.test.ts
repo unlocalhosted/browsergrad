@@ -590,6 +590,47 @@ __global__ void gridSync(float *scratch, float *out) {
     )).rejects.toThrow("CUDA runtime orchestration is reference-only");
   });
 
+  it("runs cudaMemcpyPeerAsync in CPU reference when explicitly enabled", async () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void peerCopy(float *dst, const float *src, int n) {
+  if (threadIdx.x == 0) {
+    cudaMemcpyPeerAsync(dst + 1, 1, src, 0, sizeof(float) * n, 0);
+  }
+}`, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          dst: new Float32Array([0, 0, 0, 0]),
+          src: new Float32Array([2.5, 3.5]),
+        },
+        scalars: { n: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics).toContainEqual(expect.objectContaining({
+      code: "unsupported-cuda-runtime",
+      severity: "warning",
+    }));
+    expect([...result.buffers.dst as Float32Array]).toEqual([0, 2.5, 3.5, 0]);
+    await expect(runCompiledKernelWebGpu(
+      {} as never,
+      compiled,
+      {
+        buffers: {
+          dst: new Float32Array(4),
+          src: new Float32Array([2.5, 3.5]),
+        },
+        scalars: { n: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    )).rejects.toThrow("CUDA runtime orchestration is reference-only");
+  });
+
   it("supports cooperative-group shuffle variants and linear thread ranks", () => {
     const compiled = compileCudaLiteKernel(`
 namespace cg = cooperative_groups;

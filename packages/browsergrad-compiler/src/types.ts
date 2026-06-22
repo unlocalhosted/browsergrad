@@ -301,6 +301,7 @@ export interface CudaLiteAnalyzeOptions {
   readonly dynamicSharedMemory?: Readonly<Record<string, number>>;
   readonly referenceDynamicParallelism?: boolean;
   readonly referenceGridSync?: boolean;
+  readonly referenceCudaRuntime?: boolean;
 }
 
 export interface CudaLiteAnalysis {

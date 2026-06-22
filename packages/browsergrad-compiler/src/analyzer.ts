@@ -604,6 +604,7 @@ function validateCallExpression(
     return { kind: "scalar" };
   }
   if (callName === "cudaDeviceSynchronize" || callName === "cudaMemcpyPeerAsync") {
+    const referenceRuntime = options.referenceCudaRuntime || options.referenceDynamicParallelism;
     diagnostics.push({
       ...error(
         "unsupported-cuda-runtime",
@@ -612,7 +613,7 @@ function validateCallExpression(
           : `${callName}() requires CUDA runtime peer-copy orchestration`,
         expression.span,
       ),
-      severity: callName === "cudaDeviceSynchronize" && options.referenceDynamicParallelism ? "warning" : "error",
+      severity: referenceRuntime ? "warning" : "error",
     });
     for (const arg of expression.args) walkExpression(arg, scope);
     return { kind: "scalar", valueType: "int" };

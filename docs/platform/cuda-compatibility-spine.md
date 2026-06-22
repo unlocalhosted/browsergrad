@@ -34,8 +34,8 @@ truth, WGSL lowering, browser tests, and corpus audit evidence.
 Current corpus gate:
 
 - `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/243` real code-kernel
-  definitions compile for GPU. Another `16/243` compile as explicit
-  reference-only coverage, leaving `2` hard gaps after filtering docs/pseudocode.
+  definitions compile for GPU. Another `17/243` compile as explicit
+  reference-only coverage, leaving `1` hard gap after filtering docs/pseudocode.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, and WebGPU
   atomic offset updates.
@@ -43,7 +43,9 @@ Current corpus gate:
   `referenceDynamicParallelism` is enabled; WebGPU still rejects them until
   host-side multi-dispatch orchestration lands.
 - CUDA runtime calls such as `cudaDeviceSynchronize` and `cudaMemcpyPeerAsync`
-  classify as runtime orchestration gaps, not generic unsupported calls.
+  classify as runtime orchestration gaps. Peer copies can run in CPU reference
+  with `referenceCudaRuntime`; WebGPU still rejects until host/device
+  orchestration lands.
 - Cooperative `grid.sync()` can run in CPU reference with `referenceGridSync`;
   WebGPU still rejects until cooperative launch or host multi-dispatch lowering.
 - Remaining failures group cleanly: dynamic parallelism/runtime launches,

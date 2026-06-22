@@ -101,6 +101,21 @@ compileCudaLiteKernel(source, {
 memory pools. `runCompiledKernelWebGpu` rejects these kernels until host-side
 multi-dispatch orchestration exists, so GPU output is never silently wrong.
 
+## CUDA Runtime Reference Calls
+
+Some runtime orchestration calls have CPU reference truth before GPU lowering.
+Peer copies are byte-accurate over modeled buffers/pools when explicitly enabled:
+
+```ts
+compileCudaLiteKernel(source, {
+  referenceCudaRuntime: true,
+});
+```
+
+`cudaMemcpyPeerAsync(dst, dstDevice, src, srcDevice, bytes, stream)` copies bytes
+inside the reference interpreter. WebGPU still rejects these kernels until
+BrowserGrad owns host/device orchestration for runtime calls.
+
 ## Cooperative Grid Sync
 
 `cg::grid_group::sync()` is also reference-only for now:

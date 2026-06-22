@@ -109,6 +109,7 @@ function canCompileReferenceOnly(source) {
       dynamicSharedMemory: inferDynamicSharedMemory(source),
       referenceDynamicParallelism: true,
       referenceGridSync: true,
+      referenceCudaRuntime: true,
     });
     return true;
   } catch {

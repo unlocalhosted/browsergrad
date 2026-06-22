@@ -510,6 +510,9 @@ function pointerArgumentValue(
 ): LocalValue {
   const offset = pointerOffsetArgumentValue(arg, valueType, context);
   if (offset) return offset;
+  if (arg.kind === "unary" && arg.operator === "&") {
+    return { kind: "address", target: resolveLValue(arg.argument, context) };
+  }
   if (arg.kind === "identifier") {
     if (context.buffers.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "buffer", index: 0 } };
     const local = context.locals.get(arg.name);
@@ -540,6 +543,120 @@ function pointerOffsetArgumentValue(
         index: (left.target.index ?? 0) + Math.trunc(delta),
       },
     };
+  }
+  return undefined;
+}
+
+function execCudaMemcpyPeerAsync(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: ThreadContext,
+): void {
+  const dst = expression.args[0];
+  const src = expression.args[2];
+  const count = expression.args[4];
+  if (!dst || !src || !count) throw compilerFailure("cudaMemcpyPeerAsync expects dst, src, and byte count");
+  const dstView = pointerBytesForCopy(dst, context);
+  const srcView = pointerBytesForCopy(src, context);
+  const byteCount = Math.max(0, Math.trunc(evalNumber(count, context)));
+  if (srcView.byteOffset < 0 || dstView.byteOffset < 0) return;
+  const readable = Math.max(0, Math.min(byteCount, srcView.bytes.byteLength - srcView.byteOffset));
+  const writable = Math.max(0, Math.min(readable, dstView.bytes.byteLength - dstView.byteOffset));
+  if (writable <= 0) return;
+  const copied = srcView.bytes.slice(srcView.byteOffset, srcView.byteOffset + writable);
+  dstView.bytes.set(copied, dstView.byteOffset);
+  context.trace.reads.push({ name: srcView.name, index: srcView.byteOffset, value: writable, ok: writable === byteCount });
+  context.trace.writes.push({ name: dstView.name, index: dstView.byteOffset, value: writable, ok: writable === byteCount });
+}
+
+interface PointerByteView {
+  readonly name: string;
+  readonly bytes: Uint8Array;
+  readonly byteOffset: number;
+}
+
+function pointerBytesForCopy(expression: CudaLiteExpression, context: ThreadContext): PointerByteView {
+  const valueType = pointerValueTypeForExpression(expression, context);
+  const pointer = pointerArgumentValue(expression, valueType, context);
+  if (isPoolPointer(pointer)) {
+    if (pointer.rawBuffer) {
+      const buffer = context.buffers.get(pointer.poolName);
+      if (!buffer) throw compilerFailure(`missing raw pool buffer '${pointer.poolName}'`);
+      return { name: pointer.poolName, bytes: byteView(buffer), byteOffset: pointer.byteOffset };
+    }
+    const pool = context.memoryPools.get(pointer.poolName);
+    if (!pool) throw compilerFailure(`missing memory pool '${pointer.poolName}'`);
+    return { name: pointer.poolName, bytes: byteView(pool.data), byteOffset: pointer.byteOffset };
+  }
+  if (typeof pointer === "number" || !("kind" in pointer) || pointer.kind !== "address") {
+    throw compilerFailure("cudaMemcpyPeerAsync expects pointer arguments");
+  }
+  return lvalueByteView(pointer.target, valueType, context);
+}
+
+function lvalueByteView(
+  lvalue: LValue,
+  valueType: CudaLiteScalarType,
+  context: ThreadContext,
+): PointerByteView {
+  const index = lvalue.index ?? 0;
+  if (lvalue.space === "buffer") {
+    const buffer = context.buffers.get(lvalue.name);
+    if (!buffer) throw compilerFailure(`missing buffer '${lvalue.name}'`);
+    return { name: lvalue.name, bytes: byteView(buffer), byteOffset: index * elementByteSize(valueType) };
+  }
+  if (lvalue.space === "shared") {
+    const shared = context.shared.get(lvalue.name);
+    if (!shared) throw compilerFailure(`missing shared array '${lvalue.name}'`);
+    return { name: lvalue.name, bytes: byteView(shared.data), byteOffset: index * elementByteSize(shared.valueType) };
+  }
+  if (lvalue.space === "pool") {
+    const pool = context.memoryPools.get(lvalue.name);
+    const buffer = context.buffers.get(lvalue.name);
+    if (!pool && !buffer) throw compilerFailure(`missing memory pool '${lvalue.name}'`);
+    return { name: lvalue.name, bytes: byteView(pool ? pool.data : buffer!), byteOffset: index * 4 };
+  }
+  throw compilerFailure(`cudaMemcpyPeerAsync cannot copy from ${lvalue.space} '${lvalue.name}'`);
+}
+
+function pointerValueTypeForExpression(
+  expression: CudaLiteExpression,
+  context: ThreadContext,
+): CudaLiteScalarType {
+  if (expression.kind === "cast" && expression.pointer) return expression.valueType;
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    return pointerValueTypeForExpression(expression.left, context);
+  }
+  if (expression.kind === "unary" && expression.operator === "&") {
+    const root = rootIdentifierFromExpression(expression.argument);
+    return root ? context.valueTypes.get(root) ?? "uint" : "uint";
+  }
+  if (expression.kind === "identifier") {
+    const local = context.locals.get(expression.name);
+    if (isPoolPointer(local) && local.valueType) return local.valueType;
+    return context.valueTypes.get(expression.name) ?? "uint";
+  }
+  const root = rootIdentifierFromExpression(expression);
+  return root ? context.valueTypes.get(root) ?? "uint" : "uint";
+}
+
+function byteView(buffer: WgslTypedArray): Uint8Array {
+  return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+}
+
+function elementByteSize(valueType: CudaLiteScalarType): number {
+  if (valueType === "half") return 2;
+  if (valueType === "complex64") return 8;
+  return 4;
+}
+
+function rootIdentifierFromExpression(expression: CudaLiteExpression): string | undefined {
+  if (expression.kind === "identifier") return expression.name;
+  if (expression.kind === "index") return rootIdentifierFromExpression(expression.target);
+  if (expression.kind === "member") return rootIdentifierFromExpression(expression.object);
+  if (expression.kind === "cast") return rootIdentifierFromExpression(expression.expression);
+  if (expression.kind === "unary") return rootIdentifierFromExpression(expression.argument);
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    return rootIdentifierFromExpression(expression.left);
   }
   return undefined;
 }
@@ -753,7 +870,10 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (cooperativeGroupCall !== undefined) return cooperativeGroupCall;
   if (name === "printf") return 0;
   if (name === "cudaDeviceSynchronize") return 0;
-  if (name === "cudaMemcpyPeerAsync") throw compilerFailure("cudaMemcpyPeerAsync is not available in CPU reference");
+  if (name === "cudaMemcpyPeerAsync") {
+    execCudaMemcpyPeerAsync(expression, context);
+    return 0;
+  }
   if (name === "deviceAllocate" || name === "streamOrderedAllocate") {
     if (expression.args.length === 4) {
       const baseRef = expression.args[0];
