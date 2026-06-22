@@ -400,8 +400,13 @@ After PRD-018 lands, craftingattention should add a preflight panel that:
     `simulation.createDeterministicMesh()` or `simulation.createTaskGraphSimulator()` for event-trace
     rubrics before real Worker execution exists. CS149 A2 task-graph labs can
     use `_bg_task_graph` to preserve dependency and worker-assignment semantics
-    before real C++/pthread execution exists. CS336 A2 systems labs can also
-    use the DDP/FSDP/sharded-optimizer simulator helpers for gradient averaging,
+    before real C++/pthread execution exists. CraftingAttention now has a
+    platform e2e that loads `docs/internal/cs149-assignment2.profile.json`,
+    routes the profile through `runVerifiedAssignmentJavascriptProfile()`, and
+    verifies sync launch, chunked work, equal-duration parallel starts, async
+    dependency batches, deterministic root/left/right scheduling, and cycle
+    rejection with `_bg_task_graph`. CS336 A2 systems labs can also use the
+    DDP/FSDP/sharded-optimizer simulator helpers for gradient averaging,
     all-gather/reduce-scatter, and AdamW state-sharding checks.
     BrowserGrad runtime integration now proves a Python rubric can call the
     A2 profile's `_bg_attention_math` and `_bg_distributed_training` JS modules

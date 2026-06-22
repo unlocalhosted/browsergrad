@@ -299,7 +299,12 @@ curriculum profiles and handoff docs absorb course-specific adapters.
 - Task-graph runtime proof guarantee: the CS149 A2 profile registers generic
   `_bg_task_graph` profile glue, and runtime integration proves a JavaScript
   rubric can call deterministic task graph scheduling references through the
-  profile runner.
+  profile runner. CraftingAttention also loads the real A2 benchmark profile
+  through `runVerifiedAssignmentJavascriptProfile()`, wires
+  `_bg_task_graph`, and proves sync launch, chunked independent tasks,
+  equal-duration parallel starts, async dependency batches, deterministic
+  root/left/right scheduling events, and cycle rejection through the platform
+  e2e suite.
 - Distributed-training simulator guarantee: the same package exports
   `simulation.simulateDdpGradientSynchronization()`,
   `simulation.simulateFsdpParameterSharding()`,
@@ -320,7 +325,8 @@ curriculum profiles and handoff docs absorb course-specific adapters.
 - Task-graph guarantee: the same package exports
   `simulation.createTaskGraphSimulator()` so CS149-style task-system rubrics can model
   dependency readiness, deterministic worker assignment, task start/finish
-  order, and makespan without relying on browser Worker timing.
+  order, makespan, and invalid dependency cycles without relying on browser
+  Worker timing.
 - Snapshot-comparator guarantee: `@unlocalhosted/browsergrad-primitives`
   exports `compareSnapshot()` and `createSnapshotComparator()` so CS336
   A2/A5-style rubrics

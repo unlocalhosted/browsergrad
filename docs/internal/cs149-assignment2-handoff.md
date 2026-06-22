@@ -37,6 +37,17 @@ BrowserGrad package identity.
 
 - Mount rubric/starter files under `/assignments/cs149-assignment2`.
 - Provide `_bg_task_graph` to JavaScript rubrics.
+- Keep the platform proof wired through
+  `runVerifiedAssignmentJavascriptProfile()` against the real
+  `cs149-assignment2.profile.json`, not a hand-written local fixture. The
+  CraftingAttention e2e suite should prove:
+  - `simple_test_sync`: single task completes with makespan `1`.
+  - `mandelbrot_chunked`: independent chunk tasks fill a fixed worker pool.
+  - `ping_pong_equal`: equal-duration ready tasks start together on separate
+    workers.
+  - `super_light_async`: dependent async batches preserve completion order.
+  - `task_graph_dependencies`: root/left/right dependency graph has makespan
+    `6`, deterministic start/finish events, and cycle rejection.
 - Render failures as task-graph feedback, for example:
   - `dependent task started before parent finished`
   - `task graph makespan mismatch`
