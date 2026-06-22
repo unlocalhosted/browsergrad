@@ -32,6 +32,10 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
 - `runDirect(device, desc, opts)` — `GPUBuffer`-in / `GPUBuffer`-out dispatch. The realizer-tier path; no host round-trip per op.
 - `materializeFloat32(device, buffer, byteLength)` — read a `GPUBuffer` back to a `Float32Array` (the single readback at the realize boundary).
 - `uploadFloat32(device, data)` — upload a typed array into a fresh `GPUBuffer`.
+- `createWgslStorageBuffer()` / `readWgslStorageBuffer()` — caller-owned
+  resident storage buffers for generic WGSL programs. Use `residentBuffers`
+  with `runWgslKernelProgramSequence()` to avoid per-call upload and skip
+  readback with `readback: []`.
 
 ## Install
 
@@ -130,6 +134,44 @@ the small IR and reference executor, then CUDA/HIP-like syntax can grow as a
 frontend. The shipped path already has explicit grid/thread semantics, scalar
 params, input/output buffer reads, deterministic traces, WGSL source generation,
 and real browser WebGPU dispatch without shipping a browser LLVM toolchain.
+
+For hot WGSL paths, keep storage buffers resident:
+
+```ts
+import {
+  createDevice,
+  createWgslStorageBuffer,
+  defineWgslKernelProgram,
+  readWgslStorageBuffer,
+  runWgslKernelProgram,
+} from "@unlocalhosted/browsergrad-kernels";
+
+const device = await createDevice();
+const program = defineWgslKernelProgram({
+  name: "inc",
+  workgroupSize: [4, 1, 1],
+  bindings: [{ kind: "storage", name: "x", valueType: "f32" }],
+  wgsl: `
+@group(0) @binding(0) var<storage, read_write> x: array<f32>;
+@compute @workgroup_size(4, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < arrayLength(&x)) { x[gid.x] = x[gid.x] + 1.0; }
+}`,
+});
+const x = createWgslStorageBuffer(device, {
+  valueType: "f32",
+  data: new Float32Array([1, 2, 3, 4]),
+});
+
+await runWgslKernelProgram(
+  device,
+  program,
+  { buffers: {}, residentBuffers: { x }, readback: [] },
+  { dispatchCount: [4, 1, 1] },
+);
+
+const out = await readWgslStorageBuffer(device, x);
+```
 
 ### Kernel rubric assertions
 

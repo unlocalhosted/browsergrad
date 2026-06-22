@@ -76,8 +76,11 @@ export {
 } from "./runner.js";
 
 export {
+  createWgslStorageBuffer,
   defineWgslKernelProgram,
+  destroyWgslStorageBuffer,
   detectKernelFeatures,
+  readWgslStorageBuffer,
   runWgslKernelProgram,
   runWgslKernelProgramSequence,
   type KernelFeatureSet,
@@ -90,8 +93,10 @@ export {
   type WgslKernelRunInput,
   type WgslKernelRunResult,
   type WgslKernelSequenceStep,
+  type WgslResidentBuffer,
   type WgslStorageAccess,
   type WgslStorageBindingInput,
+  type WgslStorageBufferDescriptor,
   type WgslTexture2DBindingInput,
   type WgslTexture2DInput,
   type WgslTypedArray,

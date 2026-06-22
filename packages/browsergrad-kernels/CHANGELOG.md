@@ -35,6 +35,9 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `expected` / `actual` strings for BrowserGrad-style assertion callbacks.
 - `createBrowsergradKernelRubric(target)` adapts kernel rubric assertions to a
   BrowserGrad JS rubric context or any compatible assertion target.
+- `createWgslStorageBuffer()`, `readWgslStorageBuffer()`, and
+  `residentBuffers` let generic WGSL callers keep `GPUBuffer`s alive across
+  dispatches and opt out of readback with `readback: []`.
 
 ## [0.1.1] — 2026-06-02
 

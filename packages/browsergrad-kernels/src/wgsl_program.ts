@@ -12,6 +12,20 @@ export interface WgslFloat16Array extends ArrayBufferView {
 }
 export type WgslTypedArray = WgslFloat16Array | Float32Array | Int32Array | Uint32Array;
 
+export interface WgslResidentBuffer {
+  readonly buffer: GPUBuffer;
+  readonly byteLength: number;
+  readonly valueType: WgslValueType;
+}
+
+export interface WgslStorageBufferDescriptor {
+  readonly valueType: WgslValueType;
+  readonly byteLength?: number;
+  readonly data?: WgslTypedArray;
+  readonly usage?: GPUBufferUsageFlags;
+  readonly label?: string;
+}
+
 export interface KernelFeatureSet {
   readonly webgpu: boolean;
   readonly shaderF16: boolean;
@@ -70,6 +84,7 @@ export interface WgslKernelProgram {
 
 export interface WgslKernelRunInput {
   readonly buffers: Readonly<Record<string, WgslTypedArray>>;
+  readonly residentBuffers?: Readonly<Record<string, WgslResidentBuffer>>;
   readonly textures?: Readonly<Record<string, WgslTexture2DInput>>;
   readonly uniforms?: Readonly<Record<string, ArrayBuffer | ArrayBufferView>>;
   readonly readback?: readonly string[];
@@ -189,6 +204,83 @@ export async function runWgslKernelProgram(
   return runWgslKernelProgramSequence(device, [{ program, launch }], input);
 }
 
+export function createWgslStorageBuffer(
+  device: KernelDevice,
+  descriptor: WgslStorageBufferDescriptor,
+): WgslResidentBuffer {
+  const impl = asImpl(device);
+  const gpu = impl.gpu;
+  const byteLength = descriptor.byteLength ?? descriptor.data?.byteLength;
+  if (byteLength === undefined) {
+    throw new KernelError("storage buffer descriptor requires byteLength or data");
+  }
+  const logicalByteLength = validateResidentByteLength(byteLength, descriptor.label ?? "resident");
+  validateResidentValueByteLength(logicalByteLength, descriptor.valueType, descriptor.label ?? "resident");
+  if (descriptor.data) {
+    validateTypedArray(descriptor.data, {
+      kind: "storage",
+      name: descriptor.label ?? "resident",
+      valueType: descriptor.valueType,
+      access: "read_write",
+      binding: 0,
+    });
+    if (descriptor.data.byteLength > logicalByteLength) {
+      throw new KernelError("storage buffer data exceeds descriptor byteLength");
+    }
+  }
+  const buffer = gpu.createBuffer({
+    ...(descriptor.label === undefined ? {} : { label: descriptor.label }),
+    size: alignTo(logicalByteLength, 4),
+    usage:
+      GPUBufferUsage.STORAGE |
+      GPUBufferUsage.COPY_DST |
+      GPUBufferUsage.COPY_SRC |
+      (descriptor.usage ?? 0),
+  });
+  if (descriptor.data) {
+    const upload = bytesForGpuWrite(descriptor.data, alignTo(logicalByteLength, 4));
+    gpu.queue.writeBuffer(buffer, 0, upload.buffer, upload.byteOffset, upload.byteLength);
+  }
+  return {
+    buffer,
+    byteLength: logicalByteLength,
+    valueType: descriptor.valueType,
+  };
+}
+
+export async function readWgslStorageBuffer(
+  device: KernelDevice,
+  resident: WgslResidentBuffer,
+): Promise<WgslTypedArray> {
+  validateResidentBuffer(resident, "resident");
+  const impl = asImpl(device);
+  const gpu = impl.gpu;
+  const readBuffer = gpu.createBuffer({
+    size: alignTo(resident.byteLength, 4),
+    usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+  });
+  try {
+    const encoder = gpu.createCommandEncoder({ label: "bg-wgsl-read-resident" });
+    encoder.copyBufferToBuffer(resident.buffer, 0, readBuffer, 0, alignTo(resident.byteLength, 4));
+    gpu.queue.submit([encoder.finish()]);
+    await readBuffer.mapAsync(GPUMapMode.READ);
+    try {
+      const bytes = readBuffer
+        .getMappedRange(0, alignTo(resident.byteLength, 4))
+        .slice(0, resident.byteLength);
+      return typedArrayFromBytes(resident.valueType, bytes);
+    } finally {
+      readBuffer.unmap();
+    }
+  } finally {
+    readBuffer.destroy();
+  }
+}
+
+export function destroyWgslStorageBuffer(resident: WgslResidentBuffer): void {
+  resident.buffer.destroy();
+}
+
 export async function runWgslKernelProgramSequence(
   device: KernelDevice,
   steps: readonly WgslKernelSequenceStep[],
@@ -207,7 +299,7 @@ export async function runWgslKernelProgramSequence(
         .map(({ step, binding }) => storageBufferNameForStep(step, binding.name)),
   );
 
-  const storageBuffers = new Map<string, { binding: WgslStorageBinding; buffer: GPUBuffer; byteLength: number }>();
+  const storageBuffers = new Map<string, { binding: WgslStorageBinding; buffer: GPUBuffer; byteLength: number; owned: boolean }>();
   const uniformBuffers: GPUBuffer[] = [];
   const uniformBuffersByStep = new Map<string, GPUBuffer>();
   const textures: GPUTexture[] = [];
@@ -216,7 +308,16 @@ export async function runWgslKernelProgramSequence(
 
   try {
     for (const binding of collectStorageBindings(steps)) {
+      const resident = input.residentBuffers?.[binding.name];
       const data = input.buffers[binding.name];
+      if (resident && data) {
+        throw new KernelError(`storage buffer ${binding.name} provided as both typed array and resident GPU buffer`);
+      }
+      if (resident) {
+        validateResidentStorageBuffer(resident, binding);
+        storageBuffers.set(binding.name, { binding, buffer: resident.buffer, byteLength: resident.byteLength, owned: false });
+        continue;
+      }
       if (!data) throw new KernelError(`missing storage buffer input: ${binding.name}`);
       validateTypedArray(data, binding);
       const byteLength = validateStorageByteLength(data.byteLength, binding.name);
@@ -226,7 +327,7 @@ export async function runWgslKernelProgramSequence(
       });
       const upload = bytesForGpuWrite(data, byteLength);
       gpu.queue.writeBuffer(buffer, 0, upload.buffer, upload.byteOffset, upload.byteLength);
-      storageBuffers.set(binding.name, { binding, buffer, byteLength: data.byteLength });
+      storageBuffers.set(binding.name, { binding, buffer, byteLength: data.byteLength, owned: true });
     }
 
     for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
@@ -339,7 +440,9 @@ export async function runWgslKernelProgramSequence(
     return { buffers: output };
   } finally {
     for (const readBuffer of readBuffers) readBuffer.destroy();
-    for (const entry of storageBuffers.values()) entry.buffer.destroy();
+    for (const entry of storageBuffers.values()) {
+      if (entry.owned) entry.buffer.destroy();
+    }
     for (const buffer of uniformBuffers) buffer.destroy();
     for (const texture of textures) texture.destroy();
   }
@@ -570,6 +673,36 @@ function validateTypedArray(data: WgslTypedArray, binding: Extract<WgslKernelBin
   }
   if (binding.valueType === "u32" && !(data instanceof Uint32Array)) {
     throw new KernelError(`storage buffer ${binding.name} expects Uint32Array`);
+  }
+}
+
+function validateResidentStorageBuffer(resident: WgslResidentBuffer, binding: WgslStorageBinding): void {
+  validateResidentBuffer(resident, binding.name);
+  if (resident.valueType !== binding.valueType) {
+    throw new KernelError(`storage buffer ${binding.name} expects ${binding.valueType}, got ${resident.valueType}`);
+  }
+}
+
+function validateResidentBuffer(resident: WgslResidentBuffer, name: string): void {
+  validateValueType(resident.valueType, name);
+  validateResidentByteLength(resident.byteLength, name);
+  validateResidentValueByteLength(resident.byteLength, resident.valueType, name);
+  if (!resident.buffer) {
+    throw new KernelError(`storage buffer ${name} requires a GPUBuffer`);
+  }
+}
+
+function validateResidentByteLength(byteLength: number, name: string): number {
+  if (!Number.isInteger(byteLength) || byteLength <= 0) {
+    throw new KernelError(`storage buffer ${name} must not be empty`);
+  }
+  return byteLength;
+}
+
+function validateResidentValueByteLength(byteLength: number, type: WgslValueType, name: string): void {
+  const divisor = type === "f16" ? 2 : 4;
+  if (byteLength % divisor !== 0) {
+    throw new KernelError(`storage buffer ${name} byteLength must be a multiple of ${divisor} for ${type}`);
   }
 }
 
