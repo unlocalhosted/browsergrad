@@ -1,8 +1,17 @@
-type JsonPrimitive = string | number | boolean | null;
-type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
-interface JsonObject {
-  readonly [key: string]: JsonValue;
-}
+import { ScalingApiError } from "./scaling-error.js";
+import type { JsonObject, JsonValue } from "./scaling-types.js";
+
+export { ScalingApiError } from "./scaling-error.js";
+export { selectExperimentsForDispatch } from "./scaling-dispatch.js";
+export { fitPowerLawScalingLaw } from "./scaling-power-law.js";
+export type {
+  DispatchExperiment,
+  DispatchSelection,
+  DispatchSelectorOptions,
+  JsonObject,
+  PowerLawFitOptions,
+  PowerLawScalingFit,
+} from "./scaling-types.js";
 
 interface BudgetSummary {
   readonly used_seconds: number;
@@ -96,54 +105,6 @@ interface HostedTrainingCore {
     predictedFinalLoss: number,
   ): FinalSubmissionResponse;
   getFinalSubmission(apiKey: string): FinalSubmissionResponse | null;
-}
-
-interface DispatchExperiment {
-  readonly id: number | string;
-  readonly userId: string;
-  readonly training_config: JsonObject;
-  readonly status: {
-    readonly status_type: string;
-    readonly queued_at?: string;
-  };
-}
-
-interface DispatchSelection<T extends DispatchExperiment> {
-  readonly experiments: readonly T[];
-  readonly currentlyRunningJobs: number;
-  readonly zeroRunningUserExperiments: number;
-}
-
-interface DispatchSelectorOptions {
-  readonly maxConcurrentWorkers: number;
-}
-
-interface PowerLawScalingFit {
-  readonly x: string;
-  readonly y: string;
-  readonly slope: number;
-  readonly intercept: number;
-  readonly exponent: number;
-  readonly multiplier: number;
-  readonly rSquared: number;
-  predict(x: number): number;
-}
-
-interface PowerLawFitOptions {
-  readonly x: string;
-  readonly y: string;
-}
-
-class ScalingApiError extends Error {
-  readonly status: number;
-  readonly detail: string;
-
-  constructor(status: number, detail: string) {
-    super(detail);
-    this.name = "ScalingApiError";
-    this.status = status;
-    this.detail = detail;
-  }
 }
 
 interface UserRecord {
@@ -293,151 +254,6 @@ function createHostedTrainingCore(
   };
 }
 
-function selectExperimentsForDispatch<T extends DispatchExperiment>(
-  experiments: readonly T[],
-  options: DispatchSelectorOptions,
-): DispatchSelection<T> {
-  if (
-    !Number.isInteger(options.maxConcurrentWorkers) ||
-    options.maxConcurrentWorkers < 0
-  ) {
-    throw new ScalingApiError(400, "maxConcurrentWorkers must be a non-negative integer");
-  }
-
-  const runningCounts = new Map<string, number>();
-  let currentlyRunningJobs = 0;
-  for (const experiment of experiments) {
-    if (experiment.status.status_type !== "running") continue;
-    currentlyRunningJobs += 1;
-    runningCounts.set(
-      experiment.userId,
-      (runningCounts.get(experiment.userId) ?? 0) + 1,
-    );
-  }
-
-  const capacity = Math.max(options.maxConcurrentWorkers - currentlyRunningJobs, 0);
-  if (capacity === 0) {
-    return {
-      experiments: [],
-      currentlyRunningJobs,
-      zeroRunningUserExperiments: 0,
-    };
-  }
-
-  const queuedByUser = new Map<string, T[]>();
-  for (const experiment of experiments) {
-    if (experiment.status.status_type !== "queued") continue;
-    const queuedAt = experiment.status.queued_at;
-    if (!queuedAt) {
-      throw new ScalingApiError(400, "queued experiments require status.queued_at");
-    }
-    const existing = queuedByUser.get(experiment.userId) ?? [];
-    existing.push(experiment);
-    queuedByUser.set(experiment.userId, existing);
-  }
-
-  type Ranked = {
-    readonly experiment: T;
-    readonly effectiveRunningCount: number;
-    readonly queuedAtMs: number;
-  };
-  const ranked: Ranked[] = [];
-  for (const [user, queued] of queuedByUser) {
-    const sorted = [...queued].sort(compareQueuedExperiments);
-    const initialRunningCount = runningCounts.get(user) ?? 0;
-    for (let index = 0; index < sorted.length; index++) {
-      const experiment = sorted[index];
-      if (!experiment) continue;
-      ranked.push({
-        experiment,
-        effectiveRunningCount: initialRunningCount + index,
-        queuedAtMs: queuedAtMs(experiment),
-      });
-    }
-  }
-
-  const selected = ranked
-    .sort((left, right) => {
-      const runningDelta =
-        left.effectiveRunningCount - right.effectiveRunningCount;
-      if (runningDelta !== 0) return runningDelta;
-      const timeDelta = left.queuedAtMs - right.queuedAtMs;
-      if (timeDelta !== 0) return timeDelta;
-      return compareExperimentId(left.experiment.id, right.experiment.id);
-    })
-    .slice(0, capacity);
-
-  return {
-    experiments: selected.map((item) => item.experiment),
-    currentlyRunningJobs,
-    zeroRunningUserExperiments: selected.filter(
-      (item) => item.effectiveRunningCount === 0,
-    ).length,
-  };
-}
-
-function fitPowerLawScalingLaw<T extends Record<string, number>>(
-  samples: readonly T[],
-  options: PowerLawFitOptions,
-): PowerLawScalingFit {
-  if (samples.length < 2) {
-    throw new ScalingApiError(400, "at least two samples are required");
-  }
-
-  const points = samples.map((sample, index) => {
-    const x = positiveSampleValue(sample, options.x, index);
-    const y = positiveSampleValue(sample, options.y, index);
-    return {
-      logX: Math.log(x),
-      logY: Math.log(y),
-    };
-  });
-  const meanX = mean(points.map((point) => point.logX));
-  const meanY = mean(points.map((point) => point.logY));
-  let covariance = 0;
-  let varianceX = 0;
-  for (const point of points) {
-    const dx = point.logX - meanX;
-    covariance += dx * (point.logY - meanY);
-    varianceX += dx * dx;
-  }
-  if (varianceX === 0) {
-    throw new ScalingApiError(400, `${options.x} values must not all match`);
-  }
-  const slope = covariance / varianceX;
-  const intercept = meanY - slope * meanX;
-  const predictions = points.map((point) => intercept + slope * point.logX);
-  const residualSumSquares = points.reduce((sum, point, index) => {
-    const prediction = predictions[index];
-    if (prediction === undefined) return sum;
-    const residual = point.logY - prediction;
-    return sum + residual * residual;
-  }, 0);
-  const totalSumSquares = points.reduce((sum, point) => {
-    const centered = point.logY - meanY;
-    return sum + centered * centered;
-  }, 0);
-  const rSquared =
-    totalSumSquares === 0 ? 1 : 1 - residualSumSquares / totalSumSquares;
-  const multiplier = Math.exp(intercept);
-
-  return {
-    x: options.x,
-    y: options.y,
-    slope,
-    intercept,
-    exponent: slope,
-    multiplier,
-    rSquared,
-    predict(x) {
-      if (!Number.isFinite(x) || x <= 0) {
-        throw new ScalingApiError(400, `${options.x} must be positive`);
-      }
-      return multiplier * x ** slope;
-    },
-  };
-}
-
 function experimentResponse(experiment: ExperimentRecord): ExperimentResponse {
   return {
     experiment_id: experiment.experimentId,
@@ -501,50 +317,6 @@ function cloneJsonObject(value: JsonObject): JsonObject {
   return JSON.parse(JSON.stringify(value)) as JsonObject;
 }
 
-function compareQueuedExperiments<T extends DispatchExperiment>(
-  left: T,
-  right: T,
-): number {
-  const timeDelta = queuedAtMs(left) - queuedAtMs(right);
-  if (timeDelta !== 0) return timeDelta;
-  return compareExperimentId(left.id, right.id);
-}
-
-function queuedAtMs(experiment: DispatchExperiment): number {
-  const value = experiment.status.queued_at;
-  if (!value) {
-    throw new ScalingApiError(400, "queued experiments require status.queued_at");
-  }
-  const ms = Date.parse(value);
-  if (!Number.isFinite(ms)) {
-    throw new ScalingApiError(400, "status.queued_at must be an ISO timestamp");
-  }
-  return ms;
-}
-
-function compareExperimentId(left: number | string, right: number | string): number {
-  if (typeof left === "number" && typeof right === "number") {
-    return left - right;
-  }
-  return String(left).localeCompare(String(right));
-}
-
-function positiveSampleValue<T extends Record<string, number>>(
-  sample: T,
-  field: string,
-  index: number,
-): number {
-  const value = sample[field];
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    throw new ScalingApiError(400, `samples[${index}].${field} must be positive`);
-  }
-  return value;
-}
-
-function mean(values: readonly number[]): number {
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
-}
-
 function canonicalJson(value: JsonValue): string {
   if (value === null || typeof value !== "object") {
     return JSON.stringify(value);
@@ -557,19 +329,6 @@ function canonicalJson(value: JsonValue): string {
     .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key] ?? null)}`)
     .join(",")}}`;
 }
-
-
-export {
-  fitPowerLawScalingLaw,
-  ScalingApiError,
-  selectExperimentsForDispatch,
-  type DispatchExperiment,
-  type DispatchSelection,
-  type DispatchSelectorOptions,
-  type JsonObject,
-  type PowerLawFitOptions,
-  type PowerLawScalingFit,
-};
 
 export interface HostedTrainingUser {
   readonly userId: string;
