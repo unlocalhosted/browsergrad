@@ -110,23 +110,23 @@ class Parser {
   private parseBlock(): readonly CudaLiteStatement[] {
     this.expect("{");
     const statements: CudaLiteStatement[] = [];
-    while (!this.match("}")) statements.push(this.parseStatement());
+    while (!this.match("}")) statements.push(...this.parseStatementEntry());
     this.expect("}");
     return statements;
   }
 
-  private parseStatement(): CudaLiteStatement {
+  private parseStatementEntry(): readonly CudaLiteStatement[] {
     if (this.match("{")) {
       this.fail("standalone blocks are not supported in CUDA-lite v0", this.peek().span);
     }
-    if (this.match("if")) return this.parseIf();
-    if (this.match("for")) return this.parseFor();
-    if (this.match("return")) return this.parseReturn();
-    if (this.match("continue")) return this.parseContinue();
-    if (this.startsVarDecl()) return this.parseVarDecl(true);
+    if (this.match("if")) return [this.parseIf()];
+    if (this.match("for")) return [this.parseFor()];
+    if (this.match("return")) return [this.parseReturn()];
+    if (this.match("continue")) return [this.parseContinue()];
+    if (this.startsVarDecl()) return this.parseVarDeclList(true);
     const expression = this.parseExpression();
     const end = this.expect(";");
-    return { kind: "expr", expression, span: mergeSpans(expression.span, end.span) };
+    return [{ kind: "expr", expression, span: mergeSpans(expression.span, end.span) }];
   }
 
   private parseIf(): CudaLiteIfStatement {
@@ -187,33 +187,48 @@ class Parser {
 
   private parseBodyAsStatements(): readonly CudaLiteStatement[] {
     if (this.match("{")) return this.parseBlock();
-    return [this.parseStatement()];
+    return this.parseStatementEntry();
   }
 
   private parseVarDecl(expectSemicolon: boolean): CudaLiteVarDecl {
+    const declarations = this.parseVarDeclList(expectSemicolon);
+    if (declarations.length !== 1) {
+      this.fail("multiple for-init declarations are not supported in CUDA-lite v0", declarations[1]?.span ?? declarations[0]!.span);
+    }
+    return declarations[0]!;
+  }
+
+  private parseVarDeclList(expectSemicolon: boolean): readonly CudaLiteVarDecl[] {
     const start = this.peek().span;
     const storage = this.consumeStorageQualifier();
     const valueType = this.parseType();
-    const name = this.expectIdentifier("variable name");
-    const dimensions: number[] = [];
-    while (this.consumeIf("[")) {
-      if (!this.match("]")) {
-        const size = this.parseNumberLiteral("array size");
-        dimensions.push(size.value);
+    const declarations: CudaLiteVarDecl[] = [];
+    do {
+      const name = this.expectIdentifier("variable name");
+      const dimensions: number[] = [];
+      while (this.consumeIf("[")) {
+        if (!this.match("]")) {
+          const size = this.parseArrayDimension();
+          dimensions.push(size);
+        }
+        this.expect("]");
       }
-      this.expect("]");
-    }
-    const init = this.consumeIf("=") ? this.parseExpression() : undefined;
-    const end = expectSemicolon ? this.expect(";").span : (init?.span ?? name.span);
-    return {
-      kind: "var",
-      storage,
-      valueType,
-      name: name.value,
-      dimensions,
-      ...(init === undefined ? {} : { init }),
-      span: mergeSpans(start, end),
-    };
+      const init = this.consumeIf("=") ? this.parseExpression() : undefined;
+      declarations.push({
+        kind: "var",
+        storage,
+        valueType,
+        name: name.value,
+        dimensions,
+        ...(init === undefined ? {} : { init }),
+        span: mergeSpans(start, init?.span ?? name.span),
+      });
+    } while (this.consumeIf(","));
+    const end = expectSemicolon ? this.expect(";").span : (declarations.at(-1)?.span ?? start);
+    return declarations.map((declaration) => ({
+      ...declaration,
+      span: mergeSpans(declaration.span, end),
+    }));
   }
 
   private parseExpression(minPrecedence = 1): CudaLiteExpression {
@@ -374,6 +389,15 @@ class Parser {
     return { value, raw: rawNumber, span: token.span };
   }
 
+  private parseArrayDimension(): number {
+    const expression = this.parseExpression();
+    const value = evaluateIntegerConstantExpression(expression);
+    if (value === undefined) {
+      this.fail("array size must be an integer constant expression", expression.span);
+    }
+    return value;
+  }
+
   private expect(value: string): Token {
     const token = this.peek();
     if (token.value !== value) this.fail(`expected '${value}'`, token.span);
@@ -418,4 +442,43 @@ export function mergeSpans(left: SourceSpan, right: SourceSpan): SourceSpan {
     line: left.line,
     column: left.column,
   };
+}
+
+function evaluateIntegerConstantExpression(expression: CudaLiteExpression): number | undefined {
+  switch (expression.kind) {
+    case "number":
+      return Number.isInteger(expression.value) ? expression.value : undefined;
+    case "unary": {
+      const value = evaluateIntegerConstantExpression(expression.argument);
+      if (value === undefined) return undefined;
+      if (expression.operator === "+") return value;
+      if (expression.operator === "-") return -value;
+      return undefined;
+    }
+    case "binary": {
+      const left = evaluateIntegerConstantExpression(expression.left);
+      const right = evaluateIntegerConstantExpression(expression.right);
+      if (left === undefined || right === undefined) return undefined;
+      switch (expression.operator) {
+        case "+":
+          return left + right;
+        case "-":
+          return left - right;
+        case "*":
+          return left * right;
+        case "/":
+          return right === 0 ? undefined : Math.trunc(left / right);
+        case "%":
+          return right === 0 ? undefined : left % right;
+        case "<<":
+          return left << right;
+        case ">>":
+          return left >> right;
+        default:
+          return undefined;
+      }
+    }
+    default:
+      return undefined;
+  }
 }

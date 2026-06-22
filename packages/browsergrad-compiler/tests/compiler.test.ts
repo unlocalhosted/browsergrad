@@ -313,6 +313,48 @@ __global__ void dynamicShared(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([5, 3]);
   });
 
+  it("evaluates integer constant expressions in shared array dimensions", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void padded(float *x) {
+  __shared__ float tile[16][16 + 1];
+  int tid = threadIdx.x;
+  if (tid < 1) { tile[0][0] = x[0]; x[0] = tile[0][0]; }
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("array<array<f32, 17>, 16>");
+  });
+
+  it("expands object-like macro constants before parsing", () => {
+    const compiled = compileCudaLiteKernel(`
+#define TILE_DIM 16 // trailing comments are ignored
+#define PADDED_TILE (TILE_DIM + 1)
+__global__ void padded(float *x) {
+  __shared__ float tile[TILE_DIM][PADDED_TILE];
+  int tid = threadIdx.x * TILE_DIM;
+  if (tid < 1) { tile[0][0] = x[0]; x[0] = tile[0][0]; }
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("array<array<f32, 17>, 16>");
+    expect(compiled.wgsl).toContain("* 16");
+  });
+
+  it("parses C-style declaration lists as sequential locals", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void declarationList(float *x) {
+  int row = threadIdx.y, col = threadIdx.x;
+  if (row < 1 && col < 1) { x[0] = row + col + 1.0f; }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([0]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.x as Float32Array]).toEqual([1]);
+    expect(compiled.wgsl).toContain("var row");
+    expect(compiled.wgsl).toContain("var col");
+  });
+
   it("formats diagnostics with source snippets", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(const float* x) {

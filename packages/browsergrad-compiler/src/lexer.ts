@@ -9,6 +9,15 @@ export interface Token {
 }
 
 export function tokenizeCudaLite(source: string): readonly Token[] {
+  return scanCudaLiteTokens(source, collectObjectLikeDefines(source));
+}
+
+function scanCudaLiteTokens(
+  source: string,
+  macros: ReadonlyMap<string, string>,
+  expansionStack: readonly string[] = [],
+  expansionSpan?: SourceSpan,
+): readonly Token[] {
   const tokens: Token[] = [];
   let index = 0;
   let line = 1;
@@ -20,6 +29,9 @@ export function tokenizeCudaLite(source: string): readonly Token[] {
     line: startLine,
     column: startColumn,
   });
+
+  const tokenSpan = (start: number, end: number, startLine: number, startColumn: number): SourceSpan =>
+    expansionSpan ?? span(start, end, startLine, startColumn);
 
   const advance = (): string => {
     const char = source[index] ?? "";
@@ -68,7 +80,18 @@ export function tokenizeCudaLite(source: string): readonly Token[] {
       while (index < source.length && /[A-Za-z0-9_]/.test(source[index]!)) {
         value += advance();
       }
-      tokens.push({ kind: "identifier", value, span: span(start, index, startLine, startColumn) });
+      const macroValue = macros.get(value);
+      if (macroValue !== undefined && !expansionStack.includes(value)) {
+        const expanded = scanCudaLiteTokens(
+          macroValue,
+          macros,
+          [...expansionStack, value],
+          tokenSpan(start, index, startLine, startColumn),
+        ).filter((token) => token.kind !== "eof");
+        tokens.push(...expanded);
+      } else {
+        tokens.push({ kind: "identifier", value, span: tokenSpan(start, index, startLine, startColumn) });
+      }
       continue;
     }
     if (char === "\"") {
@@ -87,7 +110,7 @@ export function tokenizeCudaLite(source: string): readonly Token[] {
         }
         if (next === "\"") break;
       }
-      tokens.push({ kind: "string", value, span: span(start, index, startLine, startColumn) });
+      tokens.push({ kind: "string", value, span: tokenSpan(start, index, startLine, startColumn) });
       continue;
     }
     if (/[0-9]/.test(char) || (char === "." && /[0-9]/.test(source[index + 1] ?? ""))) {
@@ -98,7 +121,7 @@ export function tokenizeCudaLite(source: string): readonly Token[] {
       while (index < source.length && /[A-Za-z]/.test(source[index]!)) {
         value += advance();
       }
-      tokens.push({ kind: "number", value, span: span(start, index, startLine, startColumn) });
+      tokens.push({ kind: "number", value, span: tokenSpan(start, index, startLine, startColumn) });
       continue;
     }
 
@@ -108,23 +131,61 @@ export function tokenizeCudaLite(source: string): readonly Token[] {
       advance();
       advance();
       advance();
-      tokens.push({ kind: "punctuator", value: three, span: span(start, index, startLine, startColumn) });
+      tokens.push({ kind: "punctuator", value: three, span: tokenSpan(start, index, startLine, startColumn) });
       continue;
     }
     if (["<=", ">=", "==", "!=", "&&", "||", "+=", "-=", "*=", "/=", "++", "--", "<<", ">>"].includes(two)) {
       advance();
       advance();
-      tokens.push({ kind: "punctuator", value: two, span: span(start, index, startLine, startColumn) });
+      tokens.push({ kind: "punctuator", value: two, span: tokenSpan(start, index, startLine, startColumn) });
       continue;
     }
     advance();
-    tokens.push({ kind: "punctuator", value: char, span: span(start, index, startLine, startColumn) });
+    tokens.push({ kind: "punctuator", value: char, span: tokenSpan(start, index, startLine, startColumn) });
   }
 
   tokens.push({
     kind: "eof",
     value: "<eof>",
-    span: { start: source.length, end: source.length, line, column },
+    span: expansionSpan ?? { start: source.length, end: source.length, line, column },
   });
   return tokens;
+}
+
+function collectObjectLikeDefines(source: string): ReadonlyMap<string, string> {
+  const macros = new Map<string, string>();
+  for (const line of source.split(/\r?\n/u)) {
+    const stripped = stripLineComment(line);
+    const match = /^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)(?!\()\s+(.+?)\s*$/u.exec(stripped);
+    if (match === null) continue;
+    const [, name, replacement] = match;
+    if (name === undefined || replacement === undefined) continue;
+    const trimmed = replacement.trim();
+    if (trimmed.length > 0) macros.set(name, trimmed);
+  }
+  return macros;
+}
+
+function stripLineComment(line: string): string {
+  let escaped = false;
+  let inString = false;
+  for (let index = 0; index < line.length - 1; index++) {
+    const char = line[index]!;
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === "/" && line[index + 1] === "/") return line.slice(0, index);
+  }
+  return line;
 }
