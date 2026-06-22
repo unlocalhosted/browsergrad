@@ -107,6 +107,13 @@ export {
 } from "./webgpu_orchestration.js";
 export { emitKernelIrWgsl, type EmitKernelIrWgslOptions, type KernelIrWgslOutput } from "./wgsl.js";
 export {
+  createCudaLiteCompileCacheKey,
+  createCudaLiteCompilerCache,
+  type CudaLiteCompilerCache,
+  type CudaLiteCompilerCacheOptions,
+  type CudaLiteCompilerCacheStats,
+} from "./cache.js";
+export {
   compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   cudaLiteWebGpuCompileOptions,

@@ -28,6 +28,7 @@ Low-level extension boundaries live in
 import { createDevice, detectKernelFeatures } from "@unlocalhosted/browsergrad-kernels";
 import {
   compileCudaLiteOptionsFromKernelFeatures,
+  createCudaLiteCompilerCache,
   compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   createCudaWebGpuExecutionPlan,
@@ -47,11 +48,15 @@ __global__ void saxpy(const float* x, float* y, float a, int n) {
 
 const device = await createDevice();
 const features = await detectKernelFeatures(device);
-const compiled = compileCudaLiteKernel(
+const compilerCache = createCudaLiteCompilerCache({
+  maxEntries: 128,
+  compileOptions: compileCudaLiteOptionsFromKernelFeatures(features),
+});
+const compiled = compilerCache.compile(
   source,
-  compileCudaLiteOptionsFromKernelFeatures(features, {
+  {
     workgroupSize: [8, 1, 1],
-  }),
+  },
 );
 console.log(compiled.loweringPlan.canRunOnGpu);
 const input = {
@@ -87,6 +92,10 @@ host-orchestrated WebGPU plans such as grid-sync phases, host peer copy, or
 host-lifted dynamic launches.
 Fixed thread-local arrays lower to WGSL function arrays and CPU-reference typed
 arrays, so small per-thread scratch patterns do not need shared memory.
+Use `createCudaLiteCompilerCache()` for platform/rubric hot paths that compile
+the same source repeatedly. It uses deterministic option keys plus bounded LRU
+eviction; set `maxEntries: 0` to preserve the same call shape while disabling
+caching.
 Common CUDA float math helpers lower natively in both WGSL and CPU reference:
 `sqrtf`, `expf`, `logf`, `fabsf`, `floorf`, `ceilf`, `roundf`, `truncf`,
 `sinf`, `cosf`, `tanf`, `powf`, `fminf`, and `fmaxf`.

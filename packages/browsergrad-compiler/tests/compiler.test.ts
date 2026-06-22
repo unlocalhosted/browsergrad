@@ -4,6 +4,8 @@ import {
   CudaLiteCompilerError,
   analyzeCudaLite,
   compileCudaLiteOptionsFromKernelFeatures,
+  createCudaLiteCompileCacheKey,
+  createCudaLiteCompilerCache,
   compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   createCudaGridSyncPhasePlan,
@@ -192,6 +194,54 @@ describe("CUDA-lite compiler", () => {
 
     expect([...result.buffers.y as Float32Array]).toEqual([12, 24, 36, 48]);
     expect(result.trace.some((thread) => thread.writes.length > 0)).toBe(true);
+  });
+
+  it("caches compiled kernels with deterministic option keys and LRU eviction", () => {
+    let compileCount = 0;
+    const cache = createCudaLiteCompilerCache({
+      maxEntries: 2,
+      compile(source, options) {
+        compileCount++;
+        return compileCudaLiteKernel(source, options);
+      },
+    });
+
+    const first = cache.compile(SAXPY, { workgroupSize: [8, 1, 1] });
+    const second = cache.compile(SAXPY, { workgroupSize: [8, 1, 1] });
+    const third = cache.compile(SAXPY, { workgroupSize: [4, 1, 1] });
+    const fourth = cache.compile(LOCAL_ARRAY, { workgroupSize: [4, 1, 1] });
+
+    expect(second).toBe(first);
+    expect(third).not.toBe(first);
+    expect(cache.size).toBe(2);
+    expect(cache.stats).toEqual({ hits: 1, misses: 3, evictions: 1, entries: 2 });
+    expect(compileCount).toBe(3);
+    expect(cache.get(SAXPY, { workgroupSize: [8, 1, 1] })).toBeUndefined();
+    expect(cache.get(SAXPY, { workgroupSize: [4, 1, 1] })).toBe(third);
+    expect(cache.get(LOCAL_ARRAY, { workgroupSize: [4, 1, 1] })).toBe(fourth);
+  });
+
+  it("supports default compile options and zero-entry cache mode", () => {
+    const defaulted = createCudaLiteCompilerCache({
+      compileOptions: { workgroupSize: [8, 1, 1] },
+    });
+    const compiled = defaulted.compile(SAXPY);
+    expect(compiled.ir.workgroupSize).toEqual([8, 1, 1]);
+    expect(defaulted.compile(SAXPY)).toBe(compiled);
+
+    const disabled = createCudaLiteCompilerCache({ maxEntries: 0 });
+    expect(disabled.compile(SAXPY)).not.toBe(disabled.compile(SAXPY));
+    expect(disabled.stats).toEqual({ hits: 0, misses: 2, evictions: 0, entries: 0 });
+  });
+
+  it("creates stable compile cache keys independent of option property order", () => {
+    expect(createCudaLiteCompileCacheKey(SAXPY, {
+      features: { subgroups: true, "shader-f16": true },
+      workgroupSize: [8, 1, 1],
+    })).toBe(createCudaLiteCompileCacheKey(SAXPY, {
+      workgroupSize: [8, 1, 1],
+      features: { "shader-f16": true, subgroups: true },
+    }));
   });
 
   it("lowers device helper functions with storage pointer params", () => {

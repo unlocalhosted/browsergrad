@@ -154,6 +154,9 @@ built.
 
 Hot-loop rules:
 
+- Cache compile results with `createCudaLiteCompilerCache()` at assignment,
+  rubric, or editor-session scope. Keep cache bounded; compiled outputs are
+  source/option immutable by contract.
 - Use resident buffers to avoid upload/readback churn.
 - Use prepared WGSL sequences to avoid pipeline/bind-group rebuilds.
 - Use scalar uniform updates only when launch shape and binding topology remain

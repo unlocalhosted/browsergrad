@@ -98,3 +98,6 @@
   pointer params for `float`/`int`/`uint`/`half`, lowering pointer args to a
   compact `{ memory id, base index }` ABI in WGSL and matching address values
   in the CPU reference interpreter.
+- Added `createCudaLiteCompilerCache()` and deterministic compile cache keys
+  for bounded LRU reuse of parsed/analyzed/lowered/WGSL compiler outputs in
+  platform hot paths.
