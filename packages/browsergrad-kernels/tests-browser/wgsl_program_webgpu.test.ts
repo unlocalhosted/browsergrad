@@ -153,4 +153,52 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     expect([...result.buffers.x as Float32Array]).toEqual([4, 6, 8, 10]);
   });
+
+  it("runs sequence steps with same uniform binding name but different values", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const fill = defineWgslKernelProgram({
+      name: "seq_uniform_fill",
+      workgroupSize: [4, 1, 1],
+      bindings: [
+        { kind: "storage", name: "x", valueType: "f32", access: "read_write", binding: 0 },
+        { kind: "uniform", name: "params", byteLength: 16, binding: 1 },
+      ],
+      wgsl: `
+struct Params { value: f32 };
+@group(0) @binding(0) var<storage, read_write> x: array<f32>;
+@group(0) @binding(1) var<uniform> params: Params;
+@compute @workgroup_size(4, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < arrayLength(&x)) { x[gid.x] = params.value; }
+}`,
+    });
+    const affine = defineWgslKernelProgram({
+      name: "seq_uniform_affine",
+      workgroupSize: [4, 1, 1],
+      bindings: [
+        { kind: "storage", name: "x", valueType: "f32", access: "read_write", binding: 0 },
+        { kind: "uniform", name: "params", byteLength: 16, binding: 1 },
+      ],
+      wgsl: `
+struct Params { scale: f32, bias: f32 };
+@group(0) @binding(0) var<storage, read_write> x: array<f32>;
+@group(0) @binding(1) var<uniform> params: Params;
+@compute @workgroup_size(4, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x < arrayLength(&x)) { x[gid.x] = x[gid.x] * params.scale + params.bias; }
+}`,
+    });
+
+    const result = await runWgslKernelProgramSequence(
+      device,
+      [
+        { program: fill, launch: { dispatchCount: [4, 1, 1] }, uniforms: { params: new Float32Array([3]) } },
+        { program: affine, launch: { dispatchCount: [4, 1, 1] }, uniforms: { params: new Float32Array([2, 1]) } },
+      ],
+      { buffers: { x: new Float32Array(4) } },
+    );
+
+    expect([...result.buffers.x as Float32Array]).toEqual([7, 7, 7, 7]);
+  });
 });

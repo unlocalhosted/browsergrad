@@ -88,6 +88,7 @@ export interface WgslKernelLaunch {
 export interface WgslKernelSequenceStep {
   readonly program: WgslKernelProgram;
   readonly launch: WgslKernelLaunch;
+  readonly uniforms?: Readonly<Record<string, ArrayBuffer | ArrayBufferView>>;
 }
 
 export interface WgslKernelRunResult {
@@ -207,7 +208,7 @@ export async function runWgslKernelProgramSequence(
 
   const storageBuffers = new Map<string, { binding: WgslStorageBinding; buffer: GPUBuffer; byteLength: number }>();
   const uniformBuffers: GPUBuffer[] = [];
-  const uniformBuffersByName = new Map<string, GPUBuffer>();
+  const uniformBuffersByStep = new Map<string, GPUBuffer>();
   const textures: GPUTexture[] = [];
   const textureViewsByName = new Map<string, GPUTextureView>();
   const readBuffers = new Set<GPUBuffer>();
@@ -227,17 +228,20 @@ export async function runWgslKernelProgramSequence(
       storageBuffers.set(binding.name, { binding, buffer, byteLength: data.byteLength });
     }
 
-    for (const binding of collectUniformBindings(programs)) {
-        const data = input.uniforms?.[binding.name];
-        if (!data) throw new KernelError(`missing uniform input: ${binding.name}`);
+    for (let stepIndex = 0; stepIndex < steps.length; stepIndex++) {
+      const step = steps[stepIndex]!;
+      for (const binding of step.program.bindings) {
+        if (binding.kind !== "uniform") continue;
+        const data = step.uniforms?.[binding.name] ?? input.uniforms?.[binding.name];
+        if (!data) throw new KernelError(`missing uniform input for step ${stepIndex}: ${binding.name}`);
         const bytes = bytesFromBufferSource(data);
         if (binding.byteLength !== undefined && bytes.byteLength > binding.byteLength) {
           throw new KernelError(
-            `uniform ${binding.name} has ${bytes.byteLength} bytes; expected at most ${binding.byteLength}`,
+            `uniform ${binding.name} for step ${stepIndex} has ${bytes.byteLength} bytes; expected at most ${binding.byteLength}`,
           );
         }
         if (binding.byteLength === undefined && bytes.byteLength === 0) {
-          throw new KernelError(`uniform ${binding.name} must not be empty`);
+          throw new KernelError(`uniform ${binding.name} for step ${stepIndex} must not be empty`);
         }
         const buffer = gpu.createBuffer({
           size: alignTo(binding.byteLength ?? bytes.byteLength, 16),
@@ -245,7 +249,8 @@ export async function runWgslKernelProgramSequence(
         });
         gpu.queue.writeBuffer(buffer, 0, bytes.buffer, bytes.byteOffset, bytes.byteLength);
         uniformBuffers.push(buffer);
-        uniformBuffersByName.set(binding.name, buffer);
+        uniformBuffersByStep.set(sequenceUniformKey(stepIndex, binding.name), buffer);
+      }
     }
 
     for (const binding of collectTextureBindings(programs)) {
@@ -270,11 +275,12 @@ export async function runWgslKernelProgramSequence(
     }
 
     const executableSteps = [];
-    for (const program of programs) {
+    for (let stepIndex = 0; stepIndex < programs.length; stepIndex++) {
+      const program = programs[stepIndex]!;
       const { layoutEntries, bindGroupEntries } = bindGroupInputsForProgram(
         program,
         storageBuffers,
-        uniformBuffersByName,
+        uniformBuffersForStep(uniformBuffersByStep, stepIndex),
         textureViewsByName,
       );
       const { pipeline, bindGroupLayout } = await getOrCreatePipeline(gpu, program, layoutEntries);
@@ -360,26 +366,6 @@ function collectStorageBindings(programs: readonly WgslKernelProgram[]): readonl
   return [...byName.values()];
 }
 
-function collectUniformBindings(programs: readonly WgslKernelProgram[]): readonly Extract<WgslKernelBinding, { kind: "uniform" }>[] {
-  const byName = new Map<string, Extract<WgslKernelBinding, { kind: "uniform" }>>();
-  for (const program of programs) {
-    for (const binding of program.bindings) {
-      if (binding.kind !== "uniform") continue;
-      const existing = byName.get(binding.name);
-      if (!existing) {
-        byName.set(binding.name, binding);
-        continue;
-      }
-      const byteLength = Math.max(existing.byteLength ?? 0, binding.byteLength ?? 0);
-      byName.set(binding.name, {
-        ...existing,
-        ...(byteLength === 0 ? {} : { byteLength }),
-      });
-    }
-  }
-  return [...byName.values()];
-}
-
 function collectTextureBindings(programs: readonly WgslKernelProgram[]): readonly Extract<WgslKernelBinding, { kind: "texture2d" }>[] {
   const byName = new Map<string, Extract<WgslKernelBinding, { kind: "texture2d" }>>();
   for (const program of programs) {
@@ -389,6 +375,22 @@ function collectTextureBindings(programs: readonly WgslKernelProgram[]): readonl
     }
   }
   return [...byName.values()];
+}
+
+function sequenceUniformKey(stepIndex: number, name: string): string {
+  return `${stepIndex}\0${name}`;
+}
+
+function uniformBuffersForStep(
+  uniformBuffersByStep: ReadonlyMap<string, GPUBuffer>,
+  stepIndex: number,
+): ReadonlyMap<string, GPUBuffer> {
+  const buffers = new Map<string, GPUBuffer>();
+  const prefix = `${stepIndex}\0`;
+  for (const [key, buffer] of uniformBuffersByStep) {
+    if (key.startsWith(prefix)) buffers.set(key.slice(prefix.length), buffer);
+  }
+  return buffers;
 }
 
 function bindGroupInputsForProgram(
