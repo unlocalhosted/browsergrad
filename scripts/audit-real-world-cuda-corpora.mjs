@@ -44,8 +44,8 @@ const corpora = [
     path: path.join(corpusRoot, "llm.c"),
     expectations: {
       total: 148,
-      webgpuMin: 18,
-      hardFailMax: 130,
+      webgpuMin: 20,
+      hardFailMax: 128,
     },
   },
   {

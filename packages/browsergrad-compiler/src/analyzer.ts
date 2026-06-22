@@ -59,6 +59,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaMemcpy", [4, 4]],
   ["cudaMemcpyAsync", [5, 5]],
   ["cudaMemcpyPeerAsync", [6, 6]],
+  ["__ldcs", [1, 1]],
+  ["__stcs", [2, 2]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
 ]);
 const WGSL_RESERVED_WORDS = new Set([
@@ -654,6 +656,27 @@ function validateCallExpression(
   if (isAtomicBuiltin(callName)) {
     validateAtomicBuiltin(expression, scope, params, atomicParams, atomicShared, diagnostics, walkExpression);
     return { kind: "scalar" };
+  }
+  if (callName === "__ldcs") {
+    const arg = expression.args[0];
+    if (!arg) return { kind: "unknown" };
+    const info = walkExpression(arg, scope);
+    if (info.kind !== "pointer" && info.kind !== "pool-pointer" && info.kind !== "address" && info.kind !== "unknown") {
+      diagnostics.push(error("unsupported-cache-hint-address", "__ldcs expects a pointer expression", arg.span));
+    }
+    return { kind: "scalar", valueType: info.valueType };
+  }
+  if (callName === "__stcs") {
+    const target = expression.args[0];
+    const value = expression.args[1];
+    if (target) {
+      const info = walkExpression(target, scope);
+      if (info.kind !== "pointer" && info.kind !== "pool-pointer" && info.kind !== "address" && info.kind !== "unknown") {
+        diagnostics.push(error("unsupported-cache-hint-address", "__stcs expects a pointer expression", target.span));
+      }
+    }
+    if (value) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
+    return { kind: "scalar", valueType: "voidptr" };
   }
   const intrinsic = CUDA_INTRINSICS_BY_NAME.get(callName);
   if (intrinsic) {

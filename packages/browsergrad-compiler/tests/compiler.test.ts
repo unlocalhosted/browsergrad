@@ -1496,6 +1496,26 @@ __global__ void constants(float* out, uint* kinds) {
     expect([...result.buffers.kinds as Uint32Array]).toEqual([4]);
   });
 
+  it("lowers CUDA cache-hint loads and stores as plain pointer memory ops", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void cache_hint(const float* x, float* y) {
+  int idx = threadIdx.x;
+  if (idx < 2) {
+    float value = __ldcs(x + idx);
+    __stcs(y + idx, value + 1.0f);
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([2, 4]), y: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_ptr_read_f32");
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32");
+    expect([...result.buffers.y as Float32Array]).toEqual([3, 5]);
+  });
+
   it("lowers CUDA device cuRAND state to deterministic browser RNG helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void monteCarloPiKernel(unsigned long long *counts, int totalPoints, unsigned long long seed) {

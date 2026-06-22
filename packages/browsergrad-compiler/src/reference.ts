@@ -1041,6 +1041,18 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     writeLValue(lvalue, next, context);
     return (next + 1) * 2.3283064365386963e-10;
   }
+  if (name === "__ldcs") {
+    const target = expression.args[0];
+    if (!target) throw compilerFailure("__ldcs expects pointer argument");
+    return readLValue(resolvePointerArgument(target, context), context);
+  }
+  if (name === "__stcs") {
+    const target = expression.args[0];
+    const value = expression.args[1];
+    if (!target || !value) throw compilerFailure("__stcs expects pointer and value arguments");
+    writeLValue(resolvePointerArgument(target, context), evalExpression(value, context), context);
+    return 0;
+  }
   const deviceFunction = name ? context.functions.get(name) : undefined;
   if (deviceFunction) return evalDeviceFunction(
     deviceFunction,
@@ -1176,6 +1188,22 @@ function resolveAddressArgument(expression: CudaLiteExpression, context: ThreadC
     throw compilerFailure("expected address argument");
   }
   return resolveLValue(expression.argument, context);
+}
+
+function resolvePointerArgument(expression: CudaLiteExpression, context: ThreadContext): LValue {
+  if (expression.kind === "unary" && expression.operator === "&") return resolveLValue(expression.argument, context);
+  const valueType = pointerValueTypeForExpression(expression, context);
+  const pointer = pointerArgumentValue(expression, valueType, context);
+  if (isPoolPointer(pointer)) {
+    return {
+      name: pointer.poolName,
+      space: "pool",
+      index: Math.trunc(pointer.byteOffset / elementByteSize(valueType)),
+      valueType,
+    };
+  }
+  if (typeof pointer !== "number" && "kind" in pointer && pointer.kind === "address") return pointer.target;
+  throw compilerFailure("expected pointer argument");
 }
 
 function curandNext(state: number): number {

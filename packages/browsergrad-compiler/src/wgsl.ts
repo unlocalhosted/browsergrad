@@ -533,11 +533,16 @@ function withDevicePointerParams(
 }
 
 function usesDevicePointerParams(ir: KernelIrModule): boolean {
-  return ir.functions.some((fn) => fn.params.some((param) => param.pointer));
+  return ir.functions.some((fn) => fn.params.some((param) => param.pointer)) ||
+    statementsUseCall(ir.body, new Set(["__ldcs", "__stcs"])) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["__ldcs", "__stcs"])));
 }
 
 function emitDevicePointerHelpers(ir: KernelIrModule, context: EmitContext): string[] {
-  const types = [...new Set(ir.functions.flatMap((fn) => fn.params.filter((param) => param.pointer).map((param) => param.valueType)))];
+  const types = [...new Set([
+    ...ir.params.filter((param) => param.pointer && !isDevicePoolParam(param)).map((param) => param.valueType),
+    ...ir.functions.flatMap((fn) => fn.params.filter((param) => param.pointer).map((param) => param.valueType)),
+  ])];
   return types.flatMap((type) => emitDevicePointerHelper(type, ir, context));
 }
 
@@ -674,6 +679,16 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
     };
   }
   return undefined;
+}
+
+function devicePointerValueTypeForExpression(expression: CudaLiteExpression, context: EmitContext): CudaLiteScalarType {
+  const root = rootIdentifier(expression);
+  if (root) {
+    const param = context.devicePointerParamFor(root) ?? context.paramFor(root);
+    if (param?.pointer) return param.valueType;
+  }
+  if (expression.kind === "cast" && expression.pointer) return expression.valueType;
+  return "float";
 }
 
 function devicePointerParamForIndex(
@@ -1030,6 +1045,23 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   const args = expression.args.map((arg) => emitExpression(arg, context));
   const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
   if (intrinsic?.emitWgsl) return intrinsic.emitWgsl(args);
+  if (name === "__ldcs") {
+    const target = expression.args[0];
+    if (!target) return "0";
+    const parts = devicePointerArgumentParts(target, context);
+    if (!parts) throw featureError("unsupported-device-pointer-param", "__ldcs expects a storage pointer or derived storage address");
+    const valueType = devicePointerValueTypeForExpression(target, context);
+    return `${pointerReadHelperName(valueType)}(${parts.buffer}, ${parts.base})`;
+  }
+  if (name === "__stcs") {
+    const target = expression.args[0];
+    const value = expression.args[1];
+    if (!target || !value) return "0";
+    const parts = devicePointerArgumentParts(target, context);
+    if (!parts) throw featureError("unsupported-device-pointer-param", "__stcs expects a storage pointer or derived storage address");
+    const valueType = devicePointerValueTypeForExpression(target, context);
+    return `${pointerWriteHelperName(valueType)}(${parts.buffer}, ${parts.base}, ${emitExpression(value, context)})`;
+  }
   switch (name) {
     case "__syncthreads":
       return "workgroupBarrier()";

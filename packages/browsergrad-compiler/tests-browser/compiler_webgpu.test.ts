@@ -309,6 +309,25 @@ __global__ void namedConstants(float* out, uint* kinds) {
     expect([...actual.buffers.out as Float32Array][0]).toBeCloseTo([...expected.buffers.out as Float32Array][0]!, 6);
   });
 
+  it("runs CUDA cache-hint pointer loads and stores through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void cacheHint(const float* x, float* y) {
+  int idx = threadIdx.x;
+  if (idx < 2) {
+    float value = __ldcs(x + idx);
+    __stcs(y + idx, value + 1.0f);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [2, 1, 1] });
+    const input = { buffers: { x: new Float32Array([2, 4]), y: new Float32Array(2) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
+  });
+
   it("runs device helper functions with storage pointer params through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(DEVICE_POINTER_HELPERS, { workgroupSize: [4, 1, 1] });
