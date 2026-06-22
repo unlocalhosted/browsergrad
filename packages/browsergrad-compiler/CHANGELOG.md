@@ -18,5 +18,7 @@
 - Refactored WebGPU execution through an explicit plan interface so native
   dispatch, grid-sync phases, dynamic child launches, and peer-copy lifts share
   one runner path.
+- Added `residentBuffers` pass-through for compiler WebGPU execution so
+  platform callers can keep storage buffers on GPU and opt out of readback.
 - Added `pnpm bench` benchmark harness for compiler, CPU reference, and
   orchestration planner timing.

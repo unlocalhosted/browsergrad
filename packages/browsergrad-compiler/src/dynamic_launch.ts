@@ -1,4 +1,4 @@
-import type { WgslTypedArray } from "@unlocalhosted/browsergrad-kernels";
+import type { WgslResidentBuffer, WgslTypedArray } from "@unlocalhosted/browsergrad-kernels";
 import { walkCudaLiteExpressions } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
 import {
@@ -242,6 +242,7 @@ function createChildKernelInput(
 } | undefined {
   const scalars: Record<string, number> = {};
   const buffers: Record<string, WgslTypedArray> = {};
+  const residentBuffers: Record<string, WgslResidentBuffer> = {};
   const memoryPools: Record<string, MemoryPoolInput> = {};
   const storageAliases: Record<string, string> = {};
   const pointerBaseOffsets: Record<string, number> = {};
@@ -266,8 +267,11 @@ function createChildKernelInput(
       if (pointer.offset < 0) return undefined;
       const root = pointer.root;
       const buffer = input.buffers[root];
-      if (!buffer) return undefined;
-      buffers[param.name] = buffer;
+      const resident = input.residentBuffers?.[root];
+      if (buffer && resident) return undefined;
+      if (buffer) buffers[param.name] = buffer;
+      else if (resident) residentBuffers[param.name] = resident;
+      else return undefined;
       if (root !== param.name) storageAliases[param.name] = root;
       if (pointer.offset !== 0) pointerBaseOffsets[param.name] = pointer.offset;
     } else {
@@ -280,6 +284,7 @@ function createChildKernelInput(
     input: {
       ...input,
       buffers,
+      ...(Object.keys(residentBuffers).length === 0 ? {} : { residentBuffers }),
       memoryPools: { ...input.memoryPools, ...memoryPools },
       scalars: { ...input.scalars, ...scalars },
     },

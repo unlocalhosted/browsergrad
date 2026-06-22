@@ -1,6 +1,7 @@
 import type {
   WgslTexture2DInput,
   WgslKernelProgram,
+  WgslResidentBuffer,
   WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import type { CudaLoweringPlan } from "./compatibility.js";
@@ -351,6 +352,7 @@ export interface KernelLaunch {
 
 export interface CompiledKernelInput {
   readonly buffers: Readonly<Record<string, WgslTypedArray>>;
+  readonly residentBuffers?: Readonly<Record<string, WgslResidentBuffer>>;
   readonly constants?: Readonly<Record<string, number | WgslTypedArray>>;
   readonly textures?: Readonly<Record<string, WgslTexture2DInput>>;
   readonly surfaces?: Readonly<Record<string, WgslTexture2DInput>>;

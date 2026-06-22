@@ -145,6 +145,7 @@ function createHostLiftedPeerCopyWebGpuPlan(
     steps,
     input: {
       buffers: { ...parentInput.buffers },
+      ...(parentInput.residentBuffers === undefined ? {} : { residentBuffers: parentInput.residentBuffers }),
       ...(parentInput.textures === undefined ? {} : { textures: parentInput.textures }),
       ...(parentInput.readback === undefined ? {} : { readback: parentInput.readback }),
     },
@@ -172,6 +173,7 @@ function createHostLiftedDynamicWebGpuPlan(
 
   const parentInput = createWgslRunInput(compiled, input);
   const buffers: Record<string, WgslTypedArray> = { ...parentInput.buffers };
+  const residentBuffers = { ...parentInput.residentBuffers };
   const steps: WgslKernelSequenceStep[] = [{
     program: compiled.wgslProgram,
     launch: { dispatchCount: dispatchCountForLaunch(launch) },
@@ -193,6 +195,9 @@ function createHostLiftedDynamicWebGpuPlan(
     for (const [name, value] of Object.entries(childWgslInput.buffers)) {
       buffers[item.storageAliases[name] ?? name] = value;
     }
+    for (const [name, value] of Object.entries(childWgslInput.residentBuffers ?? {})) {
+      residentBuffers[item.storageAliases[name] ?? name] = value;
+    }
     const childLaunch = { gridDim: item.gridDim, blockDim: item.blockDim };
     steps.push({
       program: childCompiled.wgslProgram,
@@ -213,6 +218,7 @@ function createHostLiftedDynamicWebGpuPlan(
     steps,
     input: {
       buffers,
+      ...(Object.keys(residentBuffers).length === 0 ? {} : { residentBuffers }),
       ...(parentInput.textures === undefined ? {} : { textures: parentInput.textures }),
       ...(parentInput.readback === undefined ? {} : { readback: parentInput.readback }),
     },
@@ -397,6 +403,7 @@ function createWgslRunInput(
     ];
   return {
     buffers,
+    ...(input.residentBuffers === undefined ? {} : { residentBuffers: input.residentBuffers }),
     ...(input.textures === undefined ? {} : { textures: input.textures }),
     ...(uniforms.byteLength === 0 ? {} : { uniforms: { params: uniforms } }),
     readback,

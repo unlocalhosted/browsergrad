@@ -1,5 +1,11 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { createDevice, detectKernelFeatures } from "@unlocalhosted/browsergrad-kernels";
+import {
+  createDevice,
+  createWgslStorageBuffer,
+  destroyWgslStorageBuffer,
+  detectKernelFeatures,
+  readWgslStorageBuffer,
+} from "@unlocalhosted/browsergrad-kernels";
 import {
   compileCudaLiteKernel,
   runCompiledKernelReference,
@@ -177,6 +183,43 @@ describe("real WebGPU — CUDA-lite compiler", () => {
     expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
   });
 
+  it("runs compiled SAXPY over resident WebGPU buffers without forced readback", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const compiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
+    const x = createWgslStorageBuffer(device, {
+      valueType: "f32",
+      data: new Float32Array([1, 2, 3, 4]),
+      label: "compiler-resident-x",
+    });
+    const y = createWgslStorageBuffer(device, {
+      valueType: "f32",
+      data: new Float32Array([10, 20, 30, 40]),
+      label: "compiler-resident-y",
+    });
+
+    try {
+      const actual = await runCompiledKernelWebGpu(
+        device,
+        compiled,
+        {
+          buffers: {},
+          residentBuffers: { x, y },
+          scalars: { a: 2, n: 4 },
+          readback: [],
+        },
+        { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+      );
+      expect(actual.buffers).toEqual({});
+
+      const yReadback = await readWgslStorageBuffer(device, y);
+      expect([...yReadback as Float32Array]).toEqual([12, 24, 36, 48]);
+    } finally {
+      destroyWgslStorageBuffer(x);
+      destroyWgslStorageBuffer(y);
+    }
+  });
+
   it("runs compiled shared-memory tiled matmul through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(TILED_MATMUL, { workgroupSize: [2, 2, 1] });
@@ -327,6 +370,54 @@ __global__ void parent(float *x, int n) {
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
     expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
+  });
+
+  it("runs host-lifted dynamic child launch over resident WebGPU buffers", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const source = `
+__global__ void child(float *dst, int n) {
+  int idx = threadIdx.x;
+  if (idx < n) { dst[idx] += 1.0f; }
+}
+__global__ void parent(float *x, int n) {
+  if (threadIdx.x < 1) {
+    dim3 grid(1);
+    dim3 block(n);
+    child<<<grid, block>>>(x, n);
+    cudaDeviceSynchronize();
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const x = createWgslStorageBuffer(device, {
+      valueType: "f32",
+      data: new Float32Array([1, 2]),
+      label: "compiler-resident-dynamic-x",
+    });
+
+    try {
+      const actual = await runCompiledKernelWebGpu(
+        device,
+        compiled,
+        {
+          buffers: {},
+          residentBuffers: { x },
+          scalars: { n: 2 },
+          readback: [],
+        },
+        { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      );
+      expect(actual.buffers).toEqual({});
+
+      const xReadback = await readWgslStorageBuffer(device, x);
+      expect([...xReadback as Float32Array]).toEqual([2, 3]);
+    } finally {
+      destroyWgslStorageBuffer(x);
+    }
   });
 
   it("runs host-lifted dynamic child launch with DevicePool alias through WebGPU sequence", async () => {

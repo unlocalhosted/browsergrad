@@ -61,6 +61,11 @@ Examples live in `examples/`: SAXPY, guarded map, and shared-memory tiled
 matmul. The emitted WGSL is intentionally inspectable so labs can show source,
 bindings, workgroup size, shared memory, and barriers directly.
 
+For hot WebGPU paths, pass caller-owned buffers through `residentBuffers` and
+set `readback: []`. This keeps data on GPU across compiler-dispatched kernels;
+use `readWgslStorageBuffer()` from `@unlocalhosted/browsergrad-kernels` at the
+actual materialization boundary.
+
 ## CUDA Memory Pools
 
 The compiler lowers simple bump allocators to real WebGPU atomics:
