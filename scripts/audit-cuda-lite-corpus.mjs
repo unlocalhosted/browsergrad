@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { createKernelCompilationUnit, kernelDefinitionName } from "./cuda-lite-source-normalizer.mjs";
 
 const { corpusPathArg, details, expectations, firstFailureLimit, help } = parseArgs(process.argv.slice(2));
 if (help) {
@@ -53,7 +54,15 @@ for (const file of files) {
     for (const [kernelIndex, rawKernel] of kernels.entries()) {
       const kernelName = kernelDefinitionName(rawKernel);
       const siblingKernels = kernels.filter((kernel) => kernel !== rawKernel);
-      const source = kernelSourceWithContext(rawKernel, siblingKernels, effectiveDefines, blockFunctionDefines, blockDeviceFunctions, blockConstants, blockTextures);
+      const source = createKernelCompilationUnit({
+        kernel: rawKernel,
+        siblingKernels,
+        definesByName: effectiveDefines,
+        functionDeclarations: blockFunctionDefines,
+        deviceFunctions: blockDeviceFunctions,
+        constantDeclarations: blockConstants,
+        textureDeclarations: blockTextures,
+      });
       try {
         compileCudaLiteKernel(source, {
           kernelName,
@@ -395,21 +404,6 @@ function isLaunchTargetDeviceFunction(source, name, fn) {
   return true;
 }
 
-function kernelSourceWithContext(kernel, siblingKernels, definesByName, functionDeclarations, deviceFunctions, constantDeclarations, textureDeclarations) {
-  const params = new Set(kernelParamNames(kernel));
-  const defines = [...definesByName]
-    .filter(([name]) => !params.has(name))
-    .map(([name, value]) => `#define ${name} ${value}`);
-  const referencedDeviceFunctions = deviceFunctions
-    .filter((fn) => new RegExp(`\\b${escapeRegExp(fn.name)}\\s*(?:\\(|<<\\s*<)`, "u").test(kernel))
-    .map((fn) => fn.source);
-  return `${defines.join("\n")}\n${functionDeclarations.join("\n")}\n${referencedDeviceFunctions.join("\n")}\n${constantDeclarations.join("\n")}\n${textureDeclarations.join("\n")}\n${siblingKernels.join("\n")}\n${kernel}`;
-}
-
-function kernelDefinitionName(kernel) {
-  return /__global__\s+void\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/u.exec(kernel)?.[1];
-}
-
 function collectObjectDefines(source) {
   const defines = new Map();
   for (const line of source.split(/\r?\n/u)) {
@@ -455,15 +449,6 @@ function collectTextureDeclarations(source) {
   let match;
   while ((match = re.exec(clean))) declarations.push(match[0]);
   return declarations;
-}
-
-function kernelParamNames(kernel) {
-  const signature = /__global__\s+(?:void\s+[A-Za-z_][A-Za-z0-9_]*\s*)?\(([\s\S]*?)\)\s*\{/u.exec(kernel);
-  if (signature === null) return [];
-  return signature[1]
-    .split(",")
-    .map((param) => /([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[[^\]]*\])?\s*$/u.exec(param.trim())?.[1])
-    .filter(Boolean);
 }
 
 function stripLineComment(line) {

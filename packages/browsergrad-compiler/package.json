@@ -44,6 +44,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:source-normalizer": "node ../../scripts/test-cuda-lite-source-normalizer.mjs",
     "bench": "node ../../scripts/run-cuda-lite-tool.mjs bench",
     "bench:browser": "node ../../scripts/run-cuda-lite-tool.mjs bench:browser",
     "e2e:webgpu": "node ../../scripts/run-cuda-lite-tool.mjs e2e:webgpu",

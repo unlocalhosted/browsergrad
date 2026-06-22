@@ -60,18 +60,18 @@ Repo exploration:
 
 Local corpus audits on 2026-06-23:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `21` direct
-  WebGPU-runnable, `336` hard gaps. Main failures: parser/frontend gaps,
-  texture/vector types, `clock_t`, `half2`, `double`, templates, and runtime
-  library shape.
-- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `3` direct
-  WebGPU-runnable, `145` gaps. Main failures: frontend macro/type shape,
-  `floatX` aliases, parser C++-isms, and one common math intrinsic gap around
-  `fma`.
-- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `3` direct
-  WebGPU-runnable in the current strict audit. A local unshipped experiment that
-  compiles each kernel with only launched sibling kernels raised that to `31/293`,
-  which strongly suggests source/context normalization is the first ladder rung.
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `35` direct
+  WebGPU-runnable after source/context normalization, and `322` hard gaps. Main
+  failures: parser/frontend gaps, texture/vector types, `clock_t`, `half2`,
+  `double`, templates, and runtime library shape.
+- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `13` direct
+  WebGPU-runnable after source/context normalization, and `135` hard gaps. Main
+  failures: frontend macro/type shape, `floatX` aliases, parser C++-isms, and
+  common math intrinsic gaps around `fma`-family calls.
+- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `31` direct
+  WebGPU-runnable after source/context normalization, and `262` hard gaps.
+  The pre-normalizer baseline was `3/293`, which proved context isolation was
+  the first ladder rung.
 
 External sources:
 
@@ -252,15 +252,15 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=21` WebGPU-runnable, and `<=336` hard gaps.
-- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=3`
-  WebGPU-runnable, and `<=145` hard gaps.
+  `>=35` WebGPU-runnable, and `<=322` hard gaps.
+- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=13`
+  WebGPU-runnable, and `<=135` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
-  `>=3` WebGPU-runnable, and `<=290` hard gaps.
+  `>=31` WebGPU-runnable, and `<=262` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
   unit tests.
-- Source/context normalization raises LeetCUDA to `>=31/293` WebGPU-runnable
-  before that higher threshold is promoted into the hard gate.
+- Source/context normalization stays generic: no repo-name, file-name, or
+  assignment-name branching.
 - At least one broad intrinsic gap from `llm.c` or LeetCUDA lands with parser,
   analyzer, reference, WGSL, and test coverage.
 - CUDA-120 remains `240/240` WebGPU-runnable.
