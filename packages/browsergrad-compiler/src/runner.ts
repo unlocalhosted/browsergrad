@@ -8,6 +8,7 @@ import { analyzeCudaLite, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js"
 import { createCudaLoweringPlan } from "./compatibility.js";
 import { parseCudaLite } from "./parser.js";
 import { runCompiledKernelReference } from "./reference.js";
+import { createCudaRuntimePlan } from "./runtime_plan.js";
 import { emitKernelIrWgsl } from "./wgsl.js";
 import {
   CudaLiteCompilerError,
@@ -100,10 +101,15 @@ function rejectReferenceOnlyRuntime(compiled: CompiledCudaLiteKernel): void {
     item.code === "unsupported-cooperative-groups"
   );
   if (!diagnostic) return;
-  throw new CudaLiteCompilerError("CUDA runtime orchestration is reference-only; WebGPU host orchestration is not implemented yet", [{
+  const runtimePlan = createCudaRuntimePlan(compiled);
+  const labels = [...new Set(runtimePlan.operations.map((operation) => operation.kind))].join(", ");
+  const message = labels.length > 0
+    ? `CUDA runtime orchestration is reference-only (${labels}); WebGPU host orchestration is not implemented yet`
+    : "CUDA runtime orchestration is reference-only; WebGPU host orchestration is not implemented yet";
+  throw new CudaLiteCompilerError(message, [{
     ...diagnostic,
     severity: "error",
-    message: "CUDA runtime orchestration is reference-only; WebGPU host orchestration is not implemented yet",
+    message,
   }]);
 }
 

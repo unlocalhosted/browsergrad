@@ -588,7 +588,7 @@ __global__ void gridSync(float *scratch, float *out) {
         },
       },
       { gridDim: [2, 1, 1], blockDim: [1, 1, 1] },
-    )).rejects.toThrow("CUDA runtime orchestration is reference-only");
+    )).rejects.toThrow("grid-sync");
   });
 
   it("runs cudaMemcpyPeerAsync in CPU reference when explicitly enabled", async () => {
@@ -629,7 +629,7 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
         scalars: { n: 2 },
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
-    )).rejects.toThrow("CUDA runtime orchestration is reference-only");
+    )).rejects.toThrow("peer-copy");
   });
 
   it("summarizes runtime orchestration gaps without course-specific logic", () => {
