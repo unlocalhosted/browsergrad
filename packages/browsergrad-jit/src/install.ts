@@ -103,7 +103,16 @@ function pythonStringLiteral(source: string): string {
     );
   }
   const bytes = new TextEncoder().encode(source);
-  const latin1 = String.fromCharCode(...bytes);
+  const latin1 = bytesToLatin1(bytes);
   const b64 = globalThis.btoa(latin1);
   return `__import__("base64").b64decode(${JSON.stringify(b64)}).decode("utf-8")`;
+}
+
+function bytesToLatin1(bytes: Uint8Array): string {
+  const chunkSize = 0x8000;
+  let out = "";
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    out += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return out;
 }
