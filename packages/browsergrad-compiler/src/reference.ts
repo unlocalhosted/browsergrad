@@ -79,6 +79,7 @@ interface LValue {
   readonly space: "local" | "buffer" | "shared" | "constant" | "pool";
   readonly index?: number;
   readonly field?: "x" | "y" | "z" | "w";
+  readonly fieldIndex?: number;
   readonly valueType?: CudaLiteScalarType;
   readonly rawStorageIndex?: boolean;
 }
@@ -835,6 +836,7 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
         throw compilerFailure(`unsupported complex member '${expression.property}'`);
       }
       if (isCudaVectorValue(object)) {
+        if (expression.property === "size") return cudaVectorLaneCount(object.valueType);
         const index = cudaVectorFieldIndex(object.valueType, expression.property);
         if (index !== undefined) return object.lanes[index] ?? 0;
         throw compilerFailure(`unsupported ${object.valueType} member '${expression.property}'`);
@@ -1594,6 +1596,10 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
       ...(alias.valueType === undefined ? {} : { valueType: alias.valueType }),
     };
   }
+  if (isCudaVectorValue(alias)) {
+    if (chain.length !== 1) throw compilerFailure(`CUDA vector '${cursor.name}' expects one-dimensional indexing`);
+    return { name: cursor.name, space: "local", fieldIndex: chain[0]!, valueType: alias.valueType };
+  }
   if (isLocalArray(alias)) {
     return { name: cursor.name, space: "local", index: flattenIndex(alias.dimensions, chain) };
   }
@@ -1762,12 +1768,13 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
       if (ok) writeBufferValue(local.data, storageIndex, valueType, lvalue.field, value);
       return;
     }
-    if (lvalue.field) {
+    if (lvalue.field || lvalue.fieldIndex !== undefined) {
       const current = readIdentifier(lvalue.name, context);
       if (isComplex(current)) {
-        context.locals.set(lvalue.name, { ...current, [lvalue.field]: valueAsNumber(value, lvalue.name) });
+        if (lvalue.fieldIndex !== undefined) throw compilerFailure(`'${lvalue.name}' is not a CUDA vector`);
+        context.locals.set(lvalue.name, { ...current, [lvalue.field!]: valueAsNumber(value, lvalue.name) });
       } else if (isCudaVectorValue(current)) {
-        const field = cudaVectorFieldIndex(current.valueType, lvalue.field);
+        const field = lvalue.fieldIndex ?? cudaVectorFieldIndex(current.valueType, lvalue.field!);
         if (field === undefined) throw compilerFailure(`unsupported ${current.valueType} member '${lvalue.field}'`);
         const lanes = [...current.lanes];
         lanes[field] = valueAsNumber(value, lvalue.name);
@@ -2314,6 +2321,10 @@ function isAddress(value: LocalValue | EvalValue | undefined): value is AddressV
 }
 
 function projectField(value: LocalValue, lvalue: LValue): EvalValue {
+  if (lvalue.fieldIndex !== undefined) {
+    if (!isCudaVectorValue(value)) throw compilerFailure(`'${lvalue.name}' is not a CUDA vector`);
+    return value.lanes[lvalue.fieldIndex] ?? 0;
+  }
   if (!lvalue.field) {
     if (isComplex(value)) return value;
     if (isCudaVectorValue(value)) return value;

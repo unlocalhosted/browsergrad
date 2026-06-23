@@ -1,4 +1,11 @@
-const SEMANTIC_BUILTIN_DEVICE_HELPERS = new Set(["vec_at"]);
+const SEMANTIC_BUILTIN_DEVICE_HELPERS = new Set([
+  "vec_at",
+  "load128",
+  "load128cs",
+  "store128",
+  "store128cs",
+  "store128cg",
+]);
 
 export function createKernelCompilationUnit({
   kernel,
@@ -42,7 +49,7 @@ export function createKernelCompilationUnit({
     const name = functionDefineName(declaration);
     return name !== undefined && sourceMentionsIdentifier(macroScope, name);
   });
-  return [
+  const unit = [
     defines.join("\n"),
     functionMacros.join("\n"),
     referencedDeviceFunctions.map((fn) => fn.source).join("\n"),
@@ -51,6 +58,7 @@ export function createKernelCompilationUnit({
     referencedSiblingKernels.join("\n"),
     stripKernelLaunchTemplateArguments(specializedKernel),
   ].filter((part) => part.trim().length > 0).join("\n");
+  return normalizeCppTemplateCarrierSyntax(normalizePacked128MemoryHelpers(unit));
 }
 
 export function kernelDefinitionName(kernel) {
@@ -71,6 +79,9 @@ export function collectKernelTemplateArguments(source) {
   }
   for (const propagated of collectWrapperPropagatedTemplateArguments(source)) {
     addCandidate(propagated.name, propagated.args);
+  }
+  for (const inferred of collectLaunchInferredTemplateArguments(source)) {
+    addCandidate(inferred.name, inferred.args);
   }
   return candidates;
 }
@@ -276,6 +287,83 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map()) {
   return supported.has(type) ? type : undefined;
 }
 
+function normalizeCppTemplateCarrierSyntax(source) {
+  return source
+    .replace(/\bstd\s*::\s*bool_constant\s*<\s*(true|false)\s*>\s*\{\s*\}/gu, "$1")
+    .replace(/\bstd\s*::\s*bool_constant\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>\s*(?=[,)])/gu, (_match, name) => `bool __bg_bool_constant_${name}`);
+}
+
+function normalizePacked128MemoryHelpers(source) {
+  const helper = /\b(load128cs|load128|store128cs|store128cg|store128)\s*\(/gu;
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = helper.exec(source)) !== null) {
+    const name = match[1];
+    const open = source.indexOf("(", match.index + name.length);
+    const close = findBalanced(source, open, "(", ")");
+    if (name === undefined || open < 0 || close === undefined) {
+      helper.lastIndex = match.index + 1;
+      continue;
+    }
+    const args = splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim());
+    const replacement = packed128HelperReplacement(name, args, source);
+    if (replacement === undefined) {
+      helper.lastIndex = close + 1;
+      continue;
+    }
+    out += source.slice(cursor, match.index);
+    out += replacement;
+    cursor = close + 1;
+    helper.lastIndex = close + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function packed128HelperReplacement(name, args, source) {
+  const pointer = args[0];
+  if (pointer === undefined || pointer.length === 0) return undefined;
+  const vectorType = inferPacked128PointerVectorType(pointer, source);
+  if (vectorType === undefined) return undefined;
+  if (name === "load128" || name === "load128cs") {
+    return `reinterpret_cast<${vectorType} *>(${pointer})[0]`;
+  }
+  const value = args[1];
+  if (value === undefined || value.length === 0) return undefined;
+  return `(reinterpret_cast<${vectorType} *>(${pointer})[0] = ${value})`;
+}
+
+function inferPacked128PointerVectorType(pointer, source) {
+  const base = pointerBaseIdentifier(pointer);
+  if (base === undefined) return undefined;
+  const symbols = collectVisiblePointerTypes(source);
+  const defines = collectObjectDefines(source);
+  let type = symbols.get(base);
+  if (type === undefined) return undefined;
+  type = defines.get(type) ?? type;
+  if (type === "float") return "float4";
+  if (type === "int") return "int4";
+  if (type === "uint") return "uint4";
+  return undefined;
+}
+
+function pointerBaseIdentifier(pointer) {
+  const expression = pointer
+    .replace(/\breinterpret_cast\s*<[^>]+>\s*\(/gu, "(")
+    .replace(/\b(?:const|volatile)\b/gu, " ")
+    .trim();
+  return /(?:^|[^A-Za-z0-9_])([A-Za-z_][A-Za-z0-9_]*)\b/u.exec(expression)?.[1];
+}
+
+function collectObjectDefines(source) {
+  const defines = new Map();
+  for (const line of source.split(/\r?\n/u)) {
+    const match = /^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)(?!\()\s+([A-Za-z_][A-Za-z0-9_]*)\s*$/u.exec(line);
+    if (match?.[1] !== undefined && match[2] !== undefined) defines.set(match[1], match[2]);
+  }
+  return defines;
+}
+
 function substituteTemplateTypes(source, typeEnv) {
   if (typeEnv.size === 0) return source;
   return source.replace(/\b[A-Za-z_][A-Za-z0-9_]*\b/gu, (name) => typeEnv.get(name) ?? name);
@@ -375,6 +463,146 @@ function collectWrapperPropagatedTemplateArguments(source) {
   return propagated;
 }
 
+function collectLaunchInferredTemplateArguments(source) {
+  const inferred = [];
+  const kernels = new Map(scanTemplatedKernelDefinitions(source).map((kernel) => [kernel.name, kernel]));
+  for (const launch of scanKernelLaunchCalls(source)) {
+    const kernel = kernels.get(launch.name);
+    if (kernel === undefined) continue;
+    const args = inferKernelTemplateArgs(kernel, launch, source);
+    if (args.some((arg) => arg !== undefined)) {
+      inferred.push({ name: launch.name, args: args.map((arg) => arg ?? "") });
+    }
+  }
+  return inferred;
+}
+
+function scanTemplatedKernelDefinitions(source) {
+  return scanTemplatedFunctionDefinitions(source)
+    .filter((fn) => /\b__global__\b/u.test(fn.signature))
+    .map((fn) => ({
+      ...fn,
+      kernelParams: parseKernelSignatureParams(fn.signature),
+    }));
+}
+
+function scanKernelLaunchCalls(source) {
+  const calls = [];
+  let index = 0;
+  while (index < source.length) {
+    const match = /([A-Za-z_][A-Za-z0-9_]*)\s*<<</gu.exec(source.slice(index));
+    if (match === null) break;
+    const name = match[1];
+    const nameStart = index + match.index;
+    const launchOpen = source.indexOf("<<<", nameStart + name.length);
+    const launchClose = findCudaLaunchClose(source, launchOpen);
+    if (!name || launchOpen < 0 || launchClose === undefined) {
+      index = nameStart + 1;
+      continue;
+    }
+    const argsOpen = skipWhitespace(source, launchClose + 3);
+    if (source[argsOpen] !== "(") {
+      index = launchClose + 3;
+      continue;
+    }
+    const argsClose = findBalanced(source, argsOpen, "(", ")");
+    if (argsClose === undefined) {
+      index = argsOpen + 1;
+      continue;
+    }
+    calls.push({
+      name,
+      args: splitTopLevel(source.slice(argsOpen + 1, argsClose)).map((arg) => arg.trim()),
+      start: nameStart,
+    });
+    index = argsClose + 1;
+  }
+  return calls;
+}
+
+function findCudaLaunchClose(source, launchOpen) {
+  if (launchOpen < 0) return undefined;
+  let angle = 0;
+  for (let index = launchOpen; index < source.length - 2; index++) {
+    const three = source.slice(index, index + 3);
+    if (three === "<<<") {
+      angle++;
+      index += 2;
+      continue;
+    }
+    if (three === ">>>") {
+      angle--;
+      if (angle === 0) return index;
+      index += 2;
+    }
+  }
+  return undefined;
+}
+
+function inferKernelTemplateArgs(kernel, launch, source) {
+  const env = new Map();
+  const symbols = collectVisiblePointerTypes(source.slice(0, launch.start));
+  for (let index = 0; index < kernel.kernelParams.length; index++) {
+    const param = kernel.kernelParams[index];
+    const arg = launch.args[index];
+    if (param === undefined || arg === undefined) continue;
+    if (param.templateType !== undefined) {
+      const type = inferArgumentPointerType(arg, symbols);
+      if (type !== undefined) env.set(param.templateType, type);
+    }
+    if (param.boolConstantTemplate !== undefined) {
+      const value = inferBoolConstantArgument(arg, symbols);
+      if (value !== undefined) env.set(param.boolConstantTemplate, value);
+    }
+  }
+  return kernel.templateParams.map((param) => param.kind === "type" || param.kind === "value" ? env.get(param.name) : undefined);
+}
+
+function parseKernelSignatureParams(signature) {
+  const open = signature.indexOf("(");
+  const params = balancedParenContents(signature, open);
+  if (params === undefined || params.trim().length === 0) return [];
+  return splitTopLevel(params).map(parseKernelParamForInference);
+}
+
+function parseKernelParamForInference(param) {
+  const boolCarrier = /\bstd\s*::\s*bool_constant\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>/u.exec(param)?.[1];
+  const withoutQualifiers = param
+    .replace(/\b(?:const|volatile|__restrict__|__restrict|restrict)\b/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const pointer = /^([A-Za-z_][A-Za-z0-9_:]*)\s*\*/u.exec(withoutQualifiers)?.[1];
+  return {
+    ...(pointer === undefined ? {} : { templateType: pointer }),
+    ...(boolCarrier === undefined ? {} : { boolConstantTemplate: boolCarrier }),
+  };
+}
+
+function collectVisiblePointerTypes(source) {
+  const symbols = new Map();
+  const re = /\b(?:const\s+)?([A-Za-z_][A-Za-z0-9_:]*)\s*(?:\*\s*)+\s*([A-Za-z_][A-Za-z0-9_]*)\b/gu;
+  for (const match of source.matchAll(re)) {
+    const [, type, name] = match;
+    if (type && name) symbols.set(name, type);
+  }
+  return symbols;
+}
+
+function inferArgumentPointerType(arg, symbols) {
+  const cast = /^\(\s*(?:const\s+)?([A-Za-z_][A-Za-z0-9_:]*)\s*\*\s*\)/u.exec(arg)?.[1];
+  if (cast !== undefined) return cast;
+  const name = /^[A-Za-z_][A-Za-z0-9_]*/u.exec(arg.trim())?.[0];
+  return name === undefined ? undefined : symbols.get(name);
+}
+
+function inferBoolConstantArgument(arg) {
+  const explicit = /\bstd\s*::\s*bool_constant\s*<\s*(true|false)\s*>\s*\{\s*\}/u.exec(arg)?.[1];
+  if (explicit !== undefined) return explicit;
+  if (/^\s*true\s*$/u.test(arg)) return "true";
+  if (/^\s*false\s*$/u.test(arg)) return "false";
+  return undefined;
+}
+
 function scanTemplatedFunctionDefinitions(source) {
   const definitions = [];
   let index = 0;
@@ -401,6 +629,7 @@ function scanTemplatedFunctionDefinitions(source) {
     }
     definitions.push({
       name,
+      signature,
       templateParams: splitTopLevel(source.slice(open + 1, close)).map(parseTemplateParam).filter(Boolean),
       body: source.slice(brace + 1, end),
     });

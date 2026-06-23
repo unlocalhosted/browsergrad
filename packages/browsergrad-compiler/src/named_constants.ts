@@ -34,6 +34,16 @@ export const CUDA_NAMED_CONSTANTS = new Map<string, CudaNamedConstant>([
   ["cudaStreamNonBlocking", uintConstant(1)],
   ["cudaMemcpyDeviceToDevice", uintConstant(3)],
   ["cudaMemcpyDefault", uintConstant(4)],
+  ["float2::size", intConstant(2)],
+  ["float3::size", intConstant(3)],
+  ["float4::size", intConstant(4)],
+  ["int2::size", intConstant(2)],
+  ["int3::size", intConstant(3)],
+  ["int4::size", intConstant(4)],
+  ["uint2::size", intConstant(2)],
+  ["uint3::size", intConstant(3)],
+  ["uint4::size", intConstant(4)],
+  ["half2::size", intConstant(2)],
 ]);
 
 function floatConstant(value: number, wgsl: string): CudaNamedConstant {

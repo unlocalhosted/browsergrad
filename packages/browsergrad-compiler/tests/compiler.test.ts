@@ -1717,6 +1717,29 @@ __global__ void vectorSaxpy(float a, const float4* x, const float4* y, float4* z
     expect([...result.buffers.z as Float32Array]).toEqual([12, 22, 33, 46, 60, 66, 77, 90]);
   });
 
+  it("maps CUDA Packed128 float aliases onto vector storage views", () => {
+    const compiled = compileCudaLiteKernel(`
+typedef float floatX;
+typedef Packed128<floatX> x128;
+__global__ void packed128_alias(const float* input, float* output) {
+  int idx = threadIdx.x * x128::size;
+  x128 value = reinterpret_cast<x128 *>(input + idx)[0];
+  x128 next;
+  for (int lane = 0; lane < value.size; lane++) {
+    next[lane] = value[lane] + 1.0f;
+  }
+  reinterpret_cast<x128 *>(output + idx)[0] = next;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { input: new Float32Array([1, 2, 3, 4]), output: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("vec4<f32>");
+    expect([...result.buffers.output as Float32Array]).toEqual([2, 3, 4, 5]);
+  });
+
   it("lowers dynamic CUDA vector lane access", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void dynamicLane(float *out, int lane) {

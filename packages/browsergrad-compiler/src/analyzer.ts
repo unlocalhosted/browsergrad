@@ -1593,6 +1593,7 @@ function validateNonCallExpression(
         return { kind: "scalar", valueType: "float" };
       }
       if (isCudaVectorType(object.valueType)) {
+        if (expression.property === "size") return { kind: "scalar", valueType: "int" };
         const field = cudaVectorFieldIndex(object.valueType, expression.property);
         if (field === undefined) {
           diagnostics.push(error("unsupported-vector-member", `unsupported ${object.valueType} member '${expression.property}'`, expression.span));
@@ -1610,6 +1611,10 @@ function validateNonCallExpression(
     case "index": {
       const target = walkExpression(expression.target, scope);
       validateScalarOperand(walkExpression(expression.index, scope), expression.index.span, diagnostics);
+      if (target.kind === "vector") {
+        const scalar = isCudaVectorType(target.valueType) ? cudaVectorScalarType(target.valueType) : "int";
+        return { kind: "scalar", valueType: scalar };
+      }
       if (target.kind === "pointer") {
         if (isCudaVectorType(target.valueType)) {
           return { kind: "vector", valueType: target.valueType, symbol: target.symbol };

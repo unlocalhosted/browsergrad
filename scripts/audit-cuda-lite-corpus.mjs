@@ -573,7 +573,16 @@ function normalizeAliasType(sourceType, defines) {
     .replace(/\b(?:const|volatile|__restrict__|__restrict|restrict)\b/gu, "")
     .replace(/\s+/gu, " ")
     .trim();
-  if (type.endsWith("*") || type.includes("<") || type.includes(">") || type.includes("(") || type.includes(")")) return undefined;
+  if (type.endsWith("*") || type.includes("(") || type.includes(")")) return undefined;
+  const packed = /^Packed128\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>$/u.exec(type)?.[1];
+  if (packed !== undefined) {
+    const elementType = defines.get(packed) ?? packed;
+    if (elementType === "float") return "float4";
+    if (elementType === "int") return "int4";
+    if (elementType === "uint") return "uint4";
+    return undefined;
+  }
+  if (type.includes("<") || type.includes(">")) return undefined;
   if (type === "unsigned int" || type === "unsigned") return "uint";
   if (type === "signed int" || type === "signed") return "int";
   if (type === "long long" || type === "long" || type === "short" || type === "short int") return "int";

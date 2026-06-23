@@ -218,6 +218,31 @@ void host(float *out) {
 }
 
 {
+  const kernel = `
+template <typename OutFloat, bool Atomic>
+__global__ void inferred_kernel(OutFloat *out, const float *in, std::bool_constant<Atomic>) {
+  if constexpr (!Atomic) {
+    out[0] = (OutFloat)in[0];
+  }
+}`;
+  const wrapper = `
+void host(float *out, const float *in) {
+  inferred_kernel<<<1, 1>>>(out, in, std::bool_constant<false>{});
+}`;
+  const launches = collectKernelTemplateArguments(`${kernel}\n${wrapper}`);
+  assert.deepEqual(launches.get("inferred_kernel"), ["float", "false"]);
+  const source = createKernelCompilationUnit({
+    kernel,
+    definesByName: new Map([["OutFloat", "999"]]),
+    templateArgumentsByKernelName: launches,
+  });
+  assert.match(source, /template <typename OutFloat = float, bool Atomic = 0>/u);
+  assert.match(source, /__global__ void inferred_kernel\(float \*out, const float \*in, bool __bg_bool_constant_Atomic\)/u);
+  assert.match(source, /out\[0\] = \(float\)in\[0\];/u);
+  assert.doesNotMatch(source, /#define OutFloat 999/u);
+}
+
+{
   const source = createKernelCompilationUnit({
     kernel: `
 __global__ void kernel(float *in, float *out, int ld) {
@@ -274,6 +299,28 @@ __global__ void kernel(float4 *input, float *out) {
   });
   assert.match(source, /vec_at\(value, 2\)/u);
   assert.doesNotMatch(source, /reinterpret_cast/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void packed(float *out, const float *in) {
+  int idx = threadIdx.x * x128::size;
+  x128 value = load128cs(in + idx);
+  store128cs(out + idx, value);
+}`,
+    definesByName: new Map([["x128", "float4"]]),
+    deviceFunctions: [
+      { name: "load128cs", source: "__device__ Packed128<ElementType> load128cs(const ElementType* address) { return Packed128<ElementType>{}; }" },
+      { name: "store128cs", source: "__device__ void store128cs(ElementType* target, Packed128<ElementType> value) { }" },
+    ],
+  });
+  assert.match(source, /#define x128 float4/u);
+  assert.match(source, /reinterpret_cast<float4 \*>\(in \+ idx\)\[0\]/u);
+  assert.match(source, /\(reinterpret_cast<float4 \*>\(out \+ idx\)\[0\] = value\)/u);
+  assert.doesNotMatch(source, /__device__ Packed128/u);
+  assert.doesNotMatch(source, /\bload128cs\s*\(/u);
+  assert.doesNotMatch(source, /\bstore128cs\s*\(/u);
 }
 
 console.log("cuda-lite source normalizer tests ok");
