@@ -144,6 +144,7 @@ function createAuditBlockContext(includeContext, blockCode, carriedDefines) {
     dynamicLaunchTargets: collectDynamicLaunchTargetDeviceFunctions(`${includeContext}\n${blockCode}`),
     constantDeclarations: collectConstantDeclarations(`${includeContext}\n${blockCode}`),
     textureDeclarations: collectTextureDeclarations(`${includeContext}\n${blockCode}`),
+    recordDeclarations: collectPodRecordDeclarations(`${includeContext}\n${blockCode}`),
     sharedDeclarations: collectTranslationUnitSharedDeclarations(declarationContext),
     templateArguments: collectKernelTemplateArguments(`${includeContext}\n${blockCode}`),
   };
@@ -165,6 +166,7 @@ function compileKernelFromAuditContext(rawKernel, kernels, kernelName, context) 
     deviceFunctions: context.deviceFunctions,
     constantDeclarations: context.constantDeclarations,
     textureDeclarations: context.textureDeclarations,
+    recordDeclarations: context.recordDeclarations,
     sharedDeclarations: context.sharedDeclarations,
   });
   try {
@@ -185,7 +187,7 @@ function shouldRetryWithReverseContext(error) {
   if (diagnostic === undefined) return false;
   if (diagnostic.code === "unknown-symbol") return true;
   if (diagnostic.code !== "parse-error") return false;
-  return /unsupported CUDA-lite type|unknown CUDA-lite symbol|expected type/u.test(diagnostic.message ?? "");
+  return /unsupported CUDA-lite type|unknown CUDA-lite symbol|expected type|expected ';'|expected expression/u.test(diagnostic.message ?? "");
 }
 
 const failures = results.filter((result) => !result.ok);
@@ -951,6 +953,15 @@ function collectTextureDeclarations(source) {
   const clean = stripComments(source);
   const declarations = [];
   const re = /texture\s*<[^;]+>\s*[A-Za-z_][A-Za-z0-9_]*\s*;/g;
+  let match;
+  while ((match = re.exec(clean))) declarations.push(match[0]);
+  return declarations;
+}
+
+function collectPodRecordDeclarations(source) {
+  const clean = stripComments(source);
+  const declarations = [];
+  const re = /\b(?:typedef\s+)?struct(?:\s+(?:__align__|alignas)\s*\([^)]*\))*\s*(?:[A-Za-z_][A-Za-z0-9_]*)?\s*\{[\s\S]*?\}\s*(?:[A-Za-z_][A-Za-z0-9_]*)?\s*;/g;
   let match;
   while ((match = re.exec(clean))) declarations.push(match[0]);
   return declarations;

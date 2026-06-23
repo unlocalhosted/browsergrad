@@ -1950,8 +1950,16 @@ function validateNonCallExpression(
     }
     case "conditional": {
       validateScalarOperand(walkExpression(expression.condition, scope), expression.condition.span, diagnostics);
-      validateScalarOperand(walkExpression(expression.consequent, scope), expression.consequent.span, diagnostics);
-      validateScalarOperand(walkExpression(expression.alternate, scope), expression.alternate.span, diagnostics);
+      const consequent = walkExpression(expression.consequent, scope);
+      const alternate = walkExpression(expression.alternate, scope);
+      if (consequent.kind === "vector" || alternate.kind === "vector") {
+        if (consequent.kind !== "vector" || alternate.kind !== "vector" || consequent.valueType !== alternate.valueType) {
+          diagnostics.push(error("unsupported-vector-argument", "conditional CUDA vector expressions require matching vector branches", expression.span));
+        }
+        return { kind: "vector", valueType: consequent.valueType ?? alternate.valueType };
+      }
+      validateScalarOperand(consequent, expression.consequent.span, diagnostics);
+      validateScalarOperand(alternate, expression.alternate.span, diagnostics);
       return { kind: "scalar" };
     }
     case "sequence": {

@@ -2550,7 +2550,13 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
               ? `(${read} / ${right})`
               : expression.operator === "<<="
                 ? `(${read} << ${right})`
-                : `(${read} >> ${right})`;
+                : expression.operator === ">>="
+                  ? `(${read} >> ${right})`
+                  : expression.operator === "&="
+                    ? `(${read} & ${right})`
+                    : expression.operator === "|="
+                      ? `(${read} | ${right})`
+                      : `(${read} ^ ${right})`;
     return `${pointerWriteHelperName(pointerLvalue.valueType)}(${pointerLvalue.buffer}, ${pointerLvalue.index}, ${value})`;
   }
   const root = rootIdentifier(expression.left);
@@ -2585,6 +2591,9 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   const right = emitExpression(expression.right, context);
   if (expression.operator === "<<=") return `${left} = (${left} << ${right})`;
   if (expression.operator === ">>=") return `${left} = (${left} >> ${right})`;
+  if (expression.operator === "&=") return `${left} = (${left} & ${right})`;
+  if (expression.operator === "|=") return `${left} = (${left} | ${right})`;
+  if (expression.operator === "^=") return `${left} = (${left} ^ ${right})`;
   return `${left} ${expression.operator} ${right}`;
 }
 

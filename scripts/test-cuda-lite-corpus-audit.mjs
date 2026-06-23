@@ -15,11 +15,26 @@ typedef unsigned int TColor;
 __device__ TColor make_color(float value) {
   return (TColor)value;
 }
+
+typedef struct {
+  float x;
+  float y;
+} Pair;
+
+__device__ Pair make_pair(float value) {
+  Pair pair = {value, value + 1.0f};
+  return pair;
+}
 `);
   fs.writeFileSync(path.join(tmpRoot, "kernel.cuh"), `
 __global__ void Copy(TColor *dst) {
   int i = threadIdx.x;
   dst[i] = make_color((float)i);
+}
+
+__global__ void PairCopy(float *dst) {
+  Pair pair = make_pair(dst[0]);
+  dst[0] = pair.x + pair.y;
 }
 `);
   fs.writeFileSync(path.join(tmpRoot, "main.cu"), `
@@ -28,6 +43,10 @@ __global__ void Copy(TColor *dst) {
 
 void launch(TColor *dst) {
   Copy<<<1, 32>>>(dst);
+}
+
+void launch_pair(float *dst) {
+  PairCopy<<<1, 1>>>(dst);
 }
 `);
 
@@ -42,8 +61,8 @@ void launch(TColor *dst) {
     process.exit(result.status ?? 1);
   }
   const report = JSON.parse(result.stdout.slice(result.stdout.indexOf("{")));
-  assertEqual(report.summary.totalKernelDefinitions, 1, "total kernel count");
-  assertEqual(report.summary.webGpuRunnableOk, 1, "reverse include kernel WebGPU runnable");
+  assertEqual(report.summary.totalKernelDefinitions, 2, "total kernel count");
+  assertEqual(report.summary.webGpuRunnableOk, 2, "reverse include kernel WebGPU runnable");
   assertEqual(report.summary.hardFail, 0, "reverse include hard gaps");
   console.log("cuda-lite corpus audit tests passed");
 } finally {

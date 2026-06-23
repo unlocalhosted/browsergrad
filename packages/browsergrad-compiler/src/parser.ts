@@ -88,7 +88,7 @@ const TYPE_START_KEYWORDS = new Set([
   "DevicePool",
   "void",
 ]);
-const ASSIGNMENT = new Set(["=", "+=", "-=", "*=", "/=", "<<=", ">>="]);
+const ASSIGNMENT = new Set(["=", "+=", "-=", "*=", "/=", "<<=", ">>=", "&=", "|=", "^="]);
 const BINARY_PRECEDENCE = new Map<string, number>([
   ["||", 2],
   ["&&", 3],
@@ -740,7 +740,7 @@ class Parser {
     const storageInfo = this.consumeStorageQualifier();
     this.consumeIf("static");
     const constexpr = this.consumeIf("constexpr") !== undefined;
-    this.consumeCvQualifiers();
+    const constQualified = this.consumeCvQualifiers();
     this.consumeCudaDeclAttributes();
     const valueType = this.parseType();
     this.consumeCvQualifiers();
@@ -764,7 +764,7 @@ class Parser {
         : this.match("(")
           ? this.parseConstructorInitializerExpression(valueType)
           : undefined;
-      if (constexpr && init !== undefined) {
+      if ((constexpr || constQualified) && init !== undefined && dimensions.length === 0 && !pointer) {
         const value = this.evaluateIntegerConstantExpression(init);
         if (value !== undefined) this.recordIntegerConstant(name.value, value);
       }

@@ -19,6 +19,7 @@ export function createKernelCompilationUnit({
   constantDeclarations = [],
   textureDeclarations = [],
   sharedDeclarations = [],
+  recordDeclarations = [],
 }) {
   const aliasContext = [
     kernel,
@@ -26,6 +27,7 @@ export function createKernelCompilationUnit({
     ...functionDeclarations,
     ...deviceFunctions.map((fn) => fn.source),
     ...constantDeclarations,
+    ...recordDeclarations,
   ].join("\n");
   const aliasDefines = collectTypeAliasDefines(aliasContext, definesByName);
   const carrierDefines = collectCarrierMemberDefines(aliasContext, mergeDefineMaps(definesByName, aliasDefines));
@@ -84,6 +86,12 @@ export function createKernelCompilationUnit({
     ...referencedDeviceFunctions.map((fn) => fn.source),
     ...referencedSiblingKernels,
   ].join("\n");
+  const referencedRecordDeclarations = recordDeclarations.filter((declaration) => {
+    const name = recordDeclarationName(declaration);
+    return name !== undefined &&
+      sourceMentionsIdentifier(macroScope, name) &&
+      podRecordDeclarationVectorAlias(declaration, effectiveDefines) !== undefined;
+  });
   const functionMacros = functionDeclarations.filter((declaration) => {
     const name = functionDefineName(declaration);
     return name !== undefined && sourceMentionsIdentifier(macroScope, name);
@@ -98,11 +106,18 @@ export function createKernelCompilationUnit({
     referencedDeviceFunctions.map((fn) => fn.source).join("\n"),
     constantDeclarations.join("\n"),
     textureDeclarations.join("\n"),
+    referencedRecordDeclarations.join("\n"),
     referencedSiblingKernels.join("\n"),
     kernelWithSharedDeclarations,
   ].filter((part) => part.trim().length > 0).join("\n"));
   const withCarrierMembers = normalizeCarrierMemberReferences(unit, effectiveDefines);
-  return normalizeCppTemplateCarrierSyntax(normalizeSimpleLocalLambdas(normalizeBlockReduceHelpers(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(stripSupportedTypeAliasDeclarations(withCarrierMembers, effectiveDefines)))))));
+  const withPodRecords = normalizePodRecordVectorAliases(withCarrierMembers, effectiveDefines);
+  const withNumericDefines = normalizeNumericObjectDefines(
+    withPodRecords,
+    effectiveDefines,
+    new Set([...params, ...templateNames]),
+  );
+  return normalizeCppTemplateCarrierSyntax(normalizeSimpleLocalLambdas(normalizeBlockReduceHelpers(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(stripSupportedTypeAliasDeclarations(withNumericDefines, effectiveDefines)))))));
 }
 
 export function collectCudaLiteContextDefines(source) {
@@ -356,6 +371,18 @@ function functionDefineName(declaration) {
   return /^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/u.exec(declaration)?.[1];
 }
 
+function recordDeclarationName(declaration) {
+  const match = /\b(?:typedef\s+)?struct(?:\s+(?:__align__|alignas)\s*\([^)]*\))*\s*([A-Za-z_][A-Za-z0-9_]*)?\s*\{[\s\S]*?\}\s*([A-Za-z_][A-Za-z0-9_]*)?\s*;/u.exec(declaration);
+  return match?.[2] ?? match?.[1];
+}
+
+function podRecordDeclarationVectorAlias(declaration, definesByName) {
+  const name = recordDeclarationName(declaration);
+  if (name === undefined) return undefined;
+  return collectPodRecordVectorAliases(declaration, definesByName)
+    .find((record) => record.name === name)?.vectorType;
+}
+
 function kernelParamNames(kernel) {
   return (kernelSignature(kernel)?.params ?? "")
     .split(",")
@@ -548,6 +575,25 @@ function numericTemplateDefines(definesByName) {
   return values;
 }
 
+function normalizeNumericObjectDefines(source, definesByName, blockedNames = new Set()) {
+  const entries = [...numericTemplateDefines(definesByName)]
+    .filter(([name]) => isMacroIdentifier(name) && !blockedNames.has(name))
+    .sort((a, b) => b[0].length - a[0].length);
+  if (entries.length === 0) return source;
+  const localBlocked = new Set(blockedNames);
+  return source.split(/\r?\n/u).map((line) => {
+    if (/^\s*#/u.test(line)) return line;
+    const declared = collectDeclaredIdentifiers(line, definesByName);
+    let out = line;
+    for (const [name, value] of entries) {
+      if (localBlocked.has(name) || declared.has(name)) continue;
+      out = out.replace(new RegExp(`\\b${escapeRegExp(name)}\\b`, "gu"), value);
+    }
+    for (const name of declared) localBlocked.add(name);
+    return out;
+  }).join("\n");
+}
+
 function resolveTemplateDefineValue(value, definesByName) {
   const trimmed = value.trim();
   return definesByName.get(trimmed) ?? trimmed;
@@ -621,6 +667,115 @@ function normalizeCarrierMemberReferences(source, definesByName) {
     out = out.replace(re, value);
   }
   return out;
+}
+
+function normalizePodRecordVectorAliases(source, definesByName = new Map()) {
+  const records = collectPodRecordVectorAliases(source, definesByName);
+  if (records.length === 0) return source;
+  let out = source;
+  for (const record of records) out = out.replace(record.declaration, "");
+  for (const record of records) out = rewritePodRecordConstructors(out, record);
+  for (const record of records) out = rewritePodRecordMemberAccess(out, record);
+  for (const record of records) {
+    out = out.replace(new RegExp(`\\b${escapeRegExp(record.name)}\\b`, "gu"), record.vectorType);
+  }
+  return out;
+}
+
+function collectPodRecordVectorAliases(source, definesByName = new Map()) {
+  const out = [];
+  const re = /\b(?:typedef\s+)?struct(?:\s+(?:__align__|alignas)\s*\([^)]*\))*\s*([A-Za-z_][A-Za-z0-9_]*)?\s*\{([\s\S]*?)\}\s*([A-Za-z_][A-Za-z0-9_]*)?\s*;/gu;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const declaration = match[0];
+    const tagName = match[1];
+    const body = match[2] ?? "";
+    const aliasName = match[3];
+    const name = aliasName ?? tagName;
+    if (!name || /\(|\)|\b(?:public|private|protected|operator)\b/u.test(body)) continue;
+    const fields = parsePodRecordFields(body, definesByName);
+    if (fields === undefined) continue;
+    const vectorType = podRecordVectorType(fields);
+    if (vectorType === undefined) continue;
+    out.push({ name, fields, vectorType, declaration });
+  }
+  return out;
+}
+
+function parsePodRecordFields(body, definesByName) {
+  const fields = [];
+  for (const raw of body.split(";")) {
+    const line = raw.replace(/\/\/[^\n\r]*/gu, "").trim();
+    if (line.length === 0) continue;
+    if (/[(){}]/u.test(line)) return undefined;
+    const match = /^(?:const\s+|volatile\s+)*([A-Za-z_][A-Za-z0-9_]*(?:\s+[A-Za-z_][A-Za-z0-9_]*)?)\s+([A-Za-z_][A-Za-z0-9_]*)$/u.exec(line);
+    if (match?.[1] === undefined || match[2] === undefined) return undefined;
+    const valueType = normalizeTemplateTypeArgument(match[1], definesByName);
+    if (!isPodRecordScalarType(valueType)) return undefined;
+    fields.push({ name: match[2], valueType });
+  }
+  return fields.length >= 2 && fields.length <= 4 ? fields : undefined;
+}
+
+function podRecordVectorType(fields) {
+  const first = fields[0]?.valueType;
+  if (!first || !fields.every((field) => field.valueType === first)) return undefined;
+  if (first === "float") return `float${fields.length}`;
+  if (first === "int") return `int${fields.length}`;
+  if (first === "uint") return `uint${fields.length}`;
+  if (first === "half" && fields.length === 2) return "half2";
+  return undefined;
+}
+
+function isPodRecordScalarType(valueType) {
+  return valueType === "float" || valueType === "int" || valueType === "uint" || valueType === "half";
+}
+
+function rewritePodRecordConstructors(source, record) {
+  const re = new RegExp(`\\b${escapeRegExp(record.name)}\\s*\\{`, "gu");
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const open = source.indexOf("{", match.index);
+    const close = findBalanced(source, open, "{", "}");
+    if (close === undefined) {
+      re.lastIndex = match.index + record.name.length;
+      continue;
+    }
+    const args = splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim()).filter(Boolean);
+    out += source.slice(cursor, match.index);
+    out += `make_${record.vectorType}(${args.join(", ")})`;
+    cursor = close + 1;
+    re.lastIndex = close + 1;
+  }
+  out += source.slice(cursor);
+  return out;
+}
+
+function rewritePodRecordMemberAccess(source, record) {
+  const variables = collectPodRecordVariableNames(source, record.name);
+  if (variables.size === 0) return source;
+  let out = source;
+  for (const [fieldIndex, field] of record.fields.entries()) {
+    const vectorField = ["x", "y", "z", "w"][fieldIndex];
+    if (!field?.name || !vectorField) continue;
+    for (const variable of variables) {
+      const re = new RegExp(`\\b${escapeRegExp(variable)}\\b((?:\\s*\\[[^\\]]+\\])*)\\s*\\.\\s*${escapeRegExp(field.name)}\\b`, "gu");
+      out = out.replace(re, (_match, indexes) => `${variable}${indexes}.${vectorField}`);
+    }
+  }
+  return out;
+}
+
+function collectPodRecordVariableNames(source, recordName) {
+  const names = new Set();
+  const declarationRe = new RegExp(`(?:^|[^A-Za-z0-9_])(?:const\\s+)?${escapeRegExp(recordName)}\\s*(?:&\\s*|\\*\\s*)?([A-Za-z_][A-Za-z0-9_]*)`, "gu");
+  let match;
+  while ((match = declarationRe.exec(source)) !== null) {
+    if (match[1] !== undefined && !["struct", "return"].includes(match[1])) names.add(match[1]);
+  }
+  return names;
 }
 
 function normalizeLineContinuations(source) {

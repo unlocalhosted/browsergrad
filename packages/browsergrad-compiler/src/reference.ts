@@ -1291,7 +1291,13 @@ function evalAssignment(
           ? current / rightNumber
           : operator === "<<="
             ? Math.trunc(current) << Math.trunc(rightNumber)
-            : Math.trunc(current) >> Math.trunc(rightNumber);
+            : operator === ">>="
+              ? Math.trunc(current) >> Math.trunc(rightNumber)
+              : operator === "&="
+                ? Math.trunc(current) & Math.trunc(rightNumber)
+                : operator === "|="
+                  ? Math.trunc(current) | Math.trunc(rightNumber)
+                  : Math.trunc(current) ^ Math.trunc(rightNumber);
   writeLValue(lvalue, value, context);
   return value;
 }

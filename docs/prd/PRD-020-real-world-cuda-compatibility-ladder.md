@@ -60,7 +60,7 @@ Repo exploration:
 
 Local corpus audits on 2026-06-23:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `196` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `197` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -99,13 +99,15 @@ Local corpus audits on 2026-06-23:
   `surf2Dread` surface loads, plus vector reinterpret memory-view helpers
   through the device pointer ABI, plus subgroup ballot/coalesced-group vote
   primitives and CUDA `__popc`, plus reverse translation-unit alias/helper
-  context for header-only kernels, with `161`
+  context for header-only kernels, POD-record vector alias lowering, numeric
+  object-macro folding, local const/template integer dimension folding, and
+  scalar bitwise compound assignments, with `160`
   hard gaps.
   Main failures:
   parser/frontend gaps, texture/vector
   operators, remaining `half2` intrinsics, `double`, templates, and
   runtime library shape.
-- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `106` direct
+- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `107` direct
   WebGPU-runnable after source/context normalization, intrinsic-ledger
   expansion, CUDA/C named constants, CUDA cache-hint memory builtins, local
   header context, simple C++ alias / constexpr intake, and typed storage
@@ -126,12 +128,14 @@ Local corpus audits on 2026-06-23:
   memory-view helpers through the device pointer ABI, multi-dimensional shared
   helper pointer params, and semantic `blockReduce<warpReduce*>` lowering, plus
   C line-continuation folding, simple statement-lambda inlining, scalar
-  template helper inference, shadow-safe context defines, and CUDA `break`,
-  with `42`
+  template helper inference, shadow-safe context defines, CUDA `break`,
+  POD-record vector alias lowering, numeric object-macro folding, local
+  const/template integer dimension folding, and scalar bitwise compound
+  assignments, with `41`
   hard gaps. Main
   failures: frontend macro/type shape, parser C++-isms, typed feature gaps
   such as bf16, and remaining library/front-end gaps.
-- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `200` direct
+- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `203` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, local header context, and
   simple C++ alias / constexpr intake plus `FLOAT4(x)`-style typed storage
@@ -147,7 +151,10 @@ Local corpus audits on 2026-06-23:
   carrier alias/constexpr folding, qualifier-macro helper discovery, and
   unsupported inline-PTX section parsing, fewer raw parser gaps, and
   multi-dimensional shared-memory address lowering for
-  `__cvta_generic_to_shared`, with `93` hard gaps.
+  `__cvta_generic_to_shared`, plus homogeneous POD-record lowering into CUDA
+  vectors, safe numeric object-macro folding, local const/template integer
+  dimension folding, and scalar bitwise compound assignments, with `90` hard
+  gaps.
   The pre-normalizer baseline was `3/293`, which proved context isolation was
   the first ladder rung.
 
@@ -334,11 +341,11 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=196` WebGPU-runnable, and `<=161` hard gaps.
-- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=106`
-  WebGPU-runnable, and `<=42` hard gaps.
+  `>=197` WebGPU-runnable, and `<=160` hard gaps.
+- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=107`
+  WebGPU-runnable, and `<=41` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
-  `>=200` WebGPU-runnable, and `<=93` hard gaps.
+  `>=203` WebGPU-runnable, and `<=90` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
   unit tests.
 - Intrinsic-ledger expansion improves coverage through generic CUDA math and

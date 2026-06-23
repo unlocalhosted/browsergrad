@@ -529,7 +529,7 @@ __global__ void kernel(float *out) {
     definesByName: new Map([["BLOCK_SIZE", "8"]]),
     sharedDeclarations: ["__shared__ float Scratch[BLOCK_SIZE];"],
   });
-  assert.match(source, /__shared__ float Scratch\[BLOCK_SIZE\];/u);
+  assert.match(source, /__shared__ float Scratch\[8\];/u);
   assert.match(source, /Scratch\[threadIdx\.x\] = out\[threadIdx\.x\]/u);
 }
 
@@ -801,6 +801,28 @@ __global__ void line_continuation_and_shadow(float *out, int n) {
 {
   const source = createKernelCompilationUnit({
     kernel: `
+template <const int NUM_THREADS = 256>
+__global__ void numeric_define_const_dim(float *out, int N) {
+  const int WARP_NUM = NUM_THREADS / WARP_SIZE;
+  __shared__ float scratch[WARP_NUM];
+  int WARP_SIZE = threadIdx.x;
+  if (WARP_SIZE < N) out[WARP_SIZE] = scratch[0];
+}`,
+    definesByName: new Map([
+      ["WARP_SIZE", "32"],
+      ["N", "999"],
+    ]),
+  });
+  assert.doesNotMatch(source, /#define WARP_SIZE 32/u);
+  assert.doesNotMatch(source, /#define N 999/u);
+  assert.match(source, /const int WARP_NUM = NUM_THREADS \/ 32;/u);
+  assert.match(source, /int WARP_SIZE = threadIdx\.x;/u);
+  assert.match(source, /if \(WARP_SIZE < N\)/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 __global__ void lambda_inline(float *out, int n) {
   auto apply = [&](int j){
     out[j] = out[j] + 1.0f;
@@ -828,6 +850,42 @@ __global__ void templated_scalar_helper(float *out, int n) {
   assert.match(source, /template<class T = int>/u);
   assert.match(source, /__device__ int ceil_div\(int dividend, int divisor\)/u);
   assert.doesNotMatch(source, /\bT\s+dividend/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+struct __align__(8) MD {
+  float m;
+  float d;
+};
+
+__device__ MD reduce_md(MD value, MD other) {
+  bool pick = value.m > other.m;
+  MD bigger = pick ? value : other;
+  MD smaller = pick ? other : value;
+  MD result;
+  result.d = bigger.d + smaller.d * __expf(smaller.m - bigger.m);
+  result.m = bigger.m;
+  return result;
+}
+
+__global__ void pod_record(float *out) {
+  MD value = {out[0], 1.0f};
+  MD other = MD{-1.0f, 2.0f};
+  __shared__ MD shared[1];
+  shared[0] = reduce_md(value, other);
+  out[0] = shared[0].m + shared[0].d;
+}`,
+  });
+  assert.doesNotMatch(source, /\bstruct\s+__align__\s*\([^)]*\)\s+MD/u);
+  assert.doesNotMatch(source, /\bMD\b/u);
+  assert.match(source, /__device__ float2 reduce_md\(float2 value, float2 other\)/u);
+  assert.match(source, /float2 bigger = pick \? value : other;/u);
+  assert.match(source, /result\.y = bigger\.y \+ smaller\.y \* __expf\(smaller\.x - bigger\.x\);/u);
+  assert.match(source, /__shared__ float2 shared\[1\];/u);
+  assert.match(source, /make_float2\(-1\.0f, 2\.0f\)/u);
+  assert.match(source, /out\[0\] = shared\[0\]\.x \+ shared\[0\]\.y;/u);
 }
 
 console.log("cuda-lite source normalizer tests ok");

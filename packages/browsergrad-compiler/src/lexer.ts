@@ -174,7 +174,7 @@ function scanCudaLiteTokens(
       tokens.push({ kind: "punctuator", value: three, span: tokenSpan(start, index, startLine, startColumn) });
       continue;
     }
-    if (["<=", ">=", "==", "!=", "&&", "||", "+=", "-=", "*=", "/=", "++", "--", "<<", ">>", "::"].includes(two)) {
+    if (["<=", ">=", "==", "!=", "&&", "||", "+=", "-=", "*=", "/=", "&=", "|=", "^=", "++", "--", "<<", ">>", "::"].includes(two)) {
       advance();
       advance();
       tokens.push({ kind: "punctuator", value: two, span: tokenSpan(start, index, startLine, startColumn) });

@@ -4498,6 +4498,76 @@ __global__ void reserved_names(float* array, float* out) {
     expect(compiled.wgsl).not.toContain("var var:");
   });
 
+  it("supports vector conditionals used by POD-record lowering", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float2 reduce_md(float2 value, float2 other) {
+  bool pick = value.x > other.x;
+  float2 bigger = pick ? value : other;
+  float2 smaller = pick ? other : value;
+  float2 result;
+  result.y = bigger.y + smaller.y * __expf(smaller.x - bigger.x);
+  result.x = bigger.x;
+  return result;
+}
+
+__global__ void lowered_record(float* out) {
+  float2 value = make_float2(out[0], 1.0f);
+  float2 other = make_float2(-1.0f, 2.0f);
+  __shared__ float2 shared[1];
+  shared[0] = reduce_md(value, other);
+  if (threadIdx.x == 0) out[0] = shared[0].x + shared[0].y;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array([3]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(4 + 2 * Math.exp(-4));
+    expect(compiled.wgsl).toContain("select(other, value, pick)");
+    expect(compiled.wgsl).toContain("var<workgroup> shared: array<vec2<f32>, 1>;");
+  });
+
+  it("uses local const integer expressions in later array dimensions", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void local_const_dim(float* out) {
+  const int WIDTH = 2;
+  __shared__ float scratch[WIDTH];
+  scratch[threadIdx.x] = out[threadIdx.x];
+  __syncthreads();
+  if (threadIdx.x == 0) out[0] = scratch[0] + scratch[1];
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array([2, 5]) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([7, 5]);
+    expect(compiled.wgsl).toContain("var<workgroup> scratch: array<f32, 2>;");
+  });
+
+  it("supports scalar bitwise compound assignments", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void bitwise_compound(int* out) {
+  int value = 6;
+  value ^= 3;
+  value |= 8;
+  value &= 14;
+  out[0] = value;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Int32Array]).toEqual([12]);
+    expect(compiled.wgsl).toContain("value = (value ^ 3)");
+    expect(compiled.wgsl).toContain("value = (value | 8)");
+    expect(compiled.wgsl).toContain("value = (value & 14)");
+  });
+
   it("supports mutable CUDA pointer rebasing", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void pointer_rebase(uint* x, uint* out, int offset) {

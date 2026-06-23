@@ -72,12 +72,12 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   excludes kernels now runnable on real WebGPU through orchestration; current
   baseline is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=196`
-  WebGPU-runnable, and `<=161` hard gaps;
-  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=106`
-  WebGPU-runnable, and `<=42` hard gaps;
-  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=200`
-  WebGPU-runnable, and `<=93` hard gaps. The aggregate gate also verifies
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=197`
+  WebGPU-runnable, and `<=160` hard gaps;
+  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=107`
+  WebGPU-runnable, and `<=41` hard gaps;
+  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=203`
+  WebGPU-runnable, and `<=90` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, WebGPU atomic
@@ -112,6 +112,11 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   that reference them, and simple preprocessor branches inside selected kernel
   bodies are pruned with C `#if`/`#ifdef` semantics without changing corpus
   kernel census or included-header context.
+  Homogeneous POD structs with two to four scalar fields lower to CUDA vector
+  aliases before parse, safe numeric object macros fold into code without
+  breaking parameter/local shadows, local const/template integer expressions
+  feed later fixed array dimensions, and scalar bitwise compound assignments
+  (`&=`, `|=`, `^=`) lower through parser, reference, and WGSL.
   Fixed thread-local arrays lower to per-thread WGSL function arrays and CPU
   reference typed arrays.
 - Hot-loop dispatch can keep both caller buffers and compiler-generated

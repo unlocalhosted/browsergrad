@@ -341,7 +341,7 @@ export interface CudaLiteSequenceExpression {
 
 export interface CudaLiteAssignmentExpression {
   readonly kind: "assignment";
-  readonly operator: "=" | "+=" | "-=" | "*=" | "/=" | "<<=" | ">>=";
+  readonly operator: "=" | "+=" | "-=" | "*=" | "/=" | "<<=" | ">>=" | "&=" | "|=" | "^=";
   readonly left: CudaLiteExpression;
   readonly right: CudaLiteExpression;
   readonly span: SourceSpan;
