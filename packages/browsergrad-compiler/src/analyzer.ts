@@ -38,6 +38,17 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__shfl_down_sync", [3, 4]],
   ["__shfl_up_sync", [3, 4]],
   ["__shfl_xor_sync", [3, 4]],
+  ["warpReduceSum", [1, 1]],
+  ["warpReduceMax", [1, 1]],
+  ["warpReduceMin", [1, 1]],
+  ["warp_reduce_sum", [1, 1]],
+  ["warp_reduce_max", [1, 1]],
+  ["warp_reduce_min", [1, 1]],
+  ["warp_reduce_sum_f32", [1, 1]],
+  ["warp_reduce_max_f32", [1, 1]],
+  ["warp_reduce_sum_f16", [1, 1]],
+  ["warp_reduce_sum_f16_f16", [1, 1]],
+  ["warp_reduce_sum_f16_f32", [1, 1]],
   ["min", [2, 2]],
   ["max", [2, 2]],
   ["bg_subgroup_add", [1, 1]],
@@ -73,6 +84,19 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__stcs", [2, 2]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
   ...[...CUDA_VECTOR_TYPES].map(([type, info]) => [`make_${type}`, [info.lanes, info.lanes]] as const),
+]);
+const SHADOWABLE_BUILTIN_CALLS = new Set([
+  "warpReduceSum",
+  "warpReduceMax",
+  "warpReduceMin",
+  "warp_reduce_sum",
+  "warp_reduce_max",
+  "warp_reduce_min",
+  "warp_reduce_sum_f32",
+  "warp_reduce_max_f32",
+  "warp_reduce_sum_f16",
+  "warp_reduce_sum_f16_f16",
+  "warp_reduce_sum_f16_f32",
 ]);
 const WGSL_RESERVED_WORDS = new Set([
   "alias",
@@ -787,16 +811,20 @@ function validateCallExpression(
     }
     return { kind: "vector", valueType: "half2" };
   }
-  if (callName === "__half22float2") {
+  if (callName === "__half22float2" || callName === "__float22half2_rn") {
     requiredFeatures.add("shader-f16");
+    const expectedType = callName === "__half22float2" ? "half2" : "float2";
+    const returnType = callName === "__half22float2" ? "float2" : "half2";
     const arg = expression.args[0];
     if (arg) {
       const info = walkExpression(arg, scope);
       if (info.kind !== "vector" && info.kind !== "unknown") {
-        diagnostics.push(error("unsupported-vector-argument", "__half22float2 expects half2 argument", arg.span));
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects ${expectedType} argument`, arg.span));
+      } else if (info.kind === "vector" && info.valueType !== expectedType) {
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects ${expectedType} argument`, arg.span));
       }
     }
-    return { kind: "vector", valueType: "float2" };
+    return { kind: "vector", valueType: returnType };
   }
   const intrinsic = CUDA_INTRINSICS_BY_NAME.get(callName);
   if (intrinsic) {
@@ -821,6 +849,14 @@ function validateCallExpression(
       if (index === 1) valueType = info.valueType;
     }
     return { kind: "scalar", valueType };
+  }
+  if (isWarpReductionBuiltin(callName)) {
+    requiredFeatures.add("subgroups");
+    const arg = expression.args[0];
+    if (!arg) return { kind: "unknown" };
+    const info = walkExpression(arg, scope);
+    validateScalarOperand(info, arg.span, diagnostics);
+    return { kind: "scalar", valueType: warpReductionReturnType(callName, info.valueType) };
   }
   if (callName === "tex2D") {
     validateTex2D(expression, scope, diagnostics, walkExpression);
@@ -1348,6 +1384,28 @@ function isShuffleBuiltin(callName: string): boolean {
     callName === "__shfl_xor_sync";
 }
 
+function isWarpReductionBuiltin(callName: string): boolean {
+  return callName === "warpReduceSum" ||
+    callName === "warpReduceMax" ||
+    callName === "warpReduceMin" ||
+    callName === "warp_reduce_sum" ||
+    callName === "warp_reduce_max" ||
+    callName === "warp_reduce_min" ||
+    callName === "warp_reduce_sum_f32" ||
+    callName === "warp_reduce_max_f32" ||
+    callName === "warp_reduce_sum_f16" ||
+    callName === "warp_reduce_sum_f16_f16" ||
+    callName === "warp_reduce_sum_f16_f32";
+}
+
+function warpReductionReturnType(callName: string, valueType: ValueType | undefined): ValueType | undefined {
+  if (callName.endsWith("_f32")) return "float";
+  if (callName.endsWith("_f16")) return "half";
+  if (callName.endsWith("_f16_f16")) return "half";
+  if (callName.endsWith("_f16_f32")) return "float";
+  return valueType;
+}
+
 function atomicTargetExpression(
   target: CudaLiteExpression | undefined,
 ): CudaLiteExpression | undefined {
@@ -1673,7 +1731,7 @@ function validateDeclaredSymbolName(
   span: SourceSpan,
   diagnostics: CudaLiteDiagnostic[],
 ): void {
-  if (BUILTIN_VECTORS.has(name) || BUILTIN_CALLS.has(name)) {
+  if (BUILTIN_VECTORS.has(name) || (BUILTIN_CALLS.has(name) && !SHADOWABLE_BUILTIN_CALLS.has(name))) {
     diagnostics.push(error("reserved-symbol", `symbol '${name}' conflicts with a CUDA-lite builtin`, span));
     return;
   }

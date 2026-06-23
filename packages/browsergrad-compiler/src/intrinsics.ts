@@ -60,7 +60,9 @@ const HALF_FEATURES = ["shader-f16"] as const;
 const HALF_INTRINSICS = [
   intrinsic("__half2float", [1, 1], "float", (args) => args[0] ?? 0, (args) => `f32(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__float2half", [1, 1], "half", (args) => roundHalf(args[0] ?? 0), (args) => `f16(${args.join(", ")})`, HALF_FEATURES),
+  intrinsic("__float2half_rn", [1, 1], "half", (args) => roundHalf(args[0] ?? 0), (args) => `f16(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__int2half_rn", [1, 1], "half", (args) => roundHalf(args[0] ?? 0), (args) => `f16(${args.join(", ")})`, HALF_FEATURES),
+  intrinsic("hrsqrt", [1, 1], "half", (args) => roundHalf(1 / Math.sqrt(args[0] ?? 0)), (args) => `f16(inverseSqrt(f32(${args[0] ?? "0"})))`, HALF_FEATURES),
   intrinsic("__hneg", [1, 1], "half", (args) => roundHalf(-(args[0] ?? 0)), (args) => `(-${args[0] ?? "0"})`, HALF_FEATURES),
   intrinsic("__hadd", [2, 2], "half", (args) => roundHalf((args[0] ?? 0) + (args[1] ?? 0)), (args) => `(${args[0] ?? "0"} + ${args[1] ?? "0"})`, HALF_FEATURES),
   intrinsic("__hsub", [2, 2], "half", (args) => roundHalf((args[0] ?? 0) - (args[1] ?? 0)), (args) => `(${args[0] ?? "0"} - ${args[1] ?? "0"})`, HALF_FEATURES),
@@ -82,6 +84,7 @@ const HALF_INTRINSICS = [
   intrinsic("__hmin2", [2, 2], "half2", () => 0, (args) => `min(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__hmax2", [2, 2], "half2", () => 0, (args) => `max(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__half22float2", [1, 1], "float2", () => 0, (args) => `vec2<f32>(${args[0] ?? "vec2<f16>()"})`, HALF_FEATURES),
+  intrinsic("__float22half2_rn", [1, 1], "half2", () => 0, (args) => `vec2<f16>(${args[0] ?? "vec2<f32>()"})`, HALF_FEATURES),
 ] as const;
 
 export const CUDA_INTRINSICS: readonly CudaIntrinsic[] = [

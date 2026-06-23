@@ -1761,6 +1761,37 @@ __global__ void intrinsic_pack(half2 *h, float2 *f, float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([6]);
   });
 
+  it("lowers warp reduction aliases and half conversion aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void reduction_alias_pack(const float *x, half2 *h, float *out) {
+  int i = threadIdx.x;
+  float sum = warp_reduce_sum_f32(x[i]);
+  float maxv = warpReduceMax(sum);
+  float minv = warp_reduce_min(maxv);
+  h[0] = __float22half2_rn(make_float2(sum, maxv));
+  out[i] = minv + __half2float(hrsqrt(__float2half_rn(4.0f)));
+}`, { features: { "shader-f16": true, subgroups: true }, workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([3]),
+          h: createWgslFloat16Array(2),
+          out: new Float32Array(1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.ir.requiredFeatures).toEqual(expect.arrayContaining(["shader-f16", "subgroups"]));
+    expect(compiled.wgsl).toContain("subgroupAdd(");
+    expect(compiled.wgsl).toContain("subgroupMax(");
+    expect(compiled.wgsl).toContain("subgroupMin(");
+    expect(compiled.wgsl).toContain("vec2<f16>");
+    expect(Array.from(result.buffers.h as ArrayLike<number>)).toEqual([3, 3]);
+    expect([...result.buffers.out as Float32Array]).toEqual([3.5]);
+  });
+
   it("feature-gates half2 behind shader-f16", () => {
     expect(() => compileCudaLiteKernel(`
 __global__ void half2Gate(half2 *x) {

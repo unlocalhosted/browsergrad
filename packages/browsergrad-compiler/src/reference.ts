@@ -1158,6 +1158,10 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
     return { kind: "cuda-vector", valueType: "float2", lanes: value.lanes };
   }
+  if (name === "__float22half2_rn") {
+    const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "float2");
+    return { kind: "cuda-vector", valueType: "half2", lanes: value.lanes.map((lane) => roundHalf(lane ?? 0)) };
+  }
   const deviceFunction = name ? context.functions.get(name) : undefined;
   if (deviceFunction) return evalDeviceFunction(
     deviceFunction,
@@ -1183,6 +1187,18 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     case "__shfl_up_sync":
     case "__shfl_xor_sync":
       return args[1] ?? 0;
+    case "warpReduceSum":
+    case "warpReduceMax":
+    case "warpReduceMin":
+    case "warp_reduce_sum":
+    case "warp_reduce_max":
+    case "warp_reduce_min":
+    case "warp_reduce_sum_f32":
+    case "warp_reduce_max_f32":
+    case "warp_reduce_sum_f16":
+    case "warp_reduce_sum_f16_f16":
+    case "warp_reduce_sum_f16_f32":
+      return args[0] ?? 0;
     default:
       throw compilerFailure(`unsupported call '${name ?? "<expr>"}'`);
   }

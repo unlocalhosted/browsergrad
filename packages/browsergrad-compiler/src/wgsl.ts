@@ -1260,6 +1260,20 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return `${name}(${args.join(", ")})`;
     case "bg_subgroup_add":
       return `subgroupAdd(${args.join(", ")})`;
+    case "warpReduceSum":
+    case "warp_reduce_sum":
+    case "warp_reduce_sum_f32":
+    case "warp_reduce_sum_f16":
+    case "warp_reduce_sum_f16_f16":
+    case "warp_reduce_sum_f16_f32":
+      return `subgroupAdd(${args[0] ?? "0"})`;
+    case "warpReduceMax":
+    case "warp_reduce_max":
+    case "warp_reduce_max_f32":
+      return `subgroupMax(${args[0] ?? "0"})`;
+    case "warpReduceMin":
+    case "warp_reduce_min":
+      return `subgroupMin(${args[0] ?? "0"})`;
     case "__shfl_sync":
       return `subgroupShuffle(${args[1] ?? "0"}, u32(${args[2] ?? "0"}))`;
     case "__shfl_down_sync":

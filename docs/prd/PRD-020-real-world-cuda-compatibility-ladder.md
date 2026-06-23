@@ -79,7 +79,7 @@ Local corpus audits on 2026-06-23:
   `float4` lane reads plus local array initializer intake, with `99` hard
   gaps. Main failures: frontend macro/type shape, `floatX` aliases, parser
   C++-isms, and remaining library/front-end gaps.
-- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `147` direct
+- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `186` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, local header context, and
   simple C++ alias / constexpr intake plus `FLOAT4(x)`-style typed storage
@@ -87,8 +87,8 @@ Local corpus audits on 2026-06-23:
   template specialization plus `half2` f16 vector storage and braced vector
   initializers, static shared declarations, flexible device helper attributes,
   `half2` arithmetic intrinsics, builtin infinity lowering, and standalone C
-  block scopes plus CUDA shuffle/fence/conversion intrinsics, with `129` hard
-  gaps.
+  block scopes plus CUDA shuffle/fence/conversion intrinsics, and generic warp
+  reduction aliases plus CUDA half conversion aliases, with `107` hard gaps.
   The pre-normalizer baseline was `3/293`, which proved context isolation was
   the first ladder rung.
 
@@ -275,7 +275,7 @@ Acceptance criteria for the first slice:
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=49`
   WebGPU-runnable, and `<=99` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
-  `>=164` WebGPU-runnable, and `<=129` hard gaps.
+  `>=186` WebGPU-runnable, and `<=107` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
   unit tests.
 - Intrinsic-ledger expansion improves coverage through generic CUDA math and
