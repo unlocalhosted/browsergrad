@@ -2808,6 +2808,26 @@ __global__ void templated(float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([1]);
   });
 
+  it("supports bool template defaults as constant expressions", () => {
+    const compiled = compileCudaLiteKernel(`
+template <const int TILE = 4, const bool UseBias = true>
+__global__ void templatedBool(float *out) {
+  __shared__ float scratch[TILE];
+  int tid = threadIdx.x;
+  if (tid < TILE) scratch[tid] = UseBias ? float(tid + 1) : float(tid);
+  __syncthreads();
+  if (tid == 0) out[0] = scratch[3];
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.ir.sharedDeclarations[0]?.dimensions).toEqual([4]);
+    expect([...result.buffers.out as Float32Array]).toEqual([4]);
+  });
+
   it("expands expression-style function macros before parsing", () => {
     const compiled = compileCudaLiteKernel(`
 #define IDX2C(i,j,ld) (((j)*(ld))+(i))

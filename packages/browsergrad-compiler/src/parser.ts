@@ -288,7 +288,13 @@ class Parser {
     const start = this.peek().span;
     this.consumeIf("const");
     const typeToken = this.peek();
-    if (typeToken.value === "int" || typeToken.value === "uint" || typeToken.value === "unsigned" || typeToken.value === "size_t") {
+    if (
+      typeToken.value === "int" ||
+      typeToken.value === "uint" ||
+      typeToken.value === "unsigned" ||
+      typeToken.value === "size_t" ||
+      typeToken.value === "bool"
+    ) {
       this.parseType();
       const name = this.expectIdentifier("template parameter name");
       if (!this.consumeIf("=")) return undefined;
@@ -980,6 +986,8 @@ class Parser {
   }
 
   private lookupIntegerConstant(name: string): number | undefined {
+    if (name === "true") return 1;
+    if (name === "false") return 0;
     for (let index = this.integerConstantScopes.length - 1; index >= 0; index--) {
       const value = this.integerConstantScopes[index]?.get(name);
       if (value !== undefined) return value;

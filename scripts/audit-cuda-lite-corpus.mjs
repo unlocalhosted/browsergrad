@@ -2,7 +2,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { createKernelCompilationUnit, kernelDefinitionName } from "./cuda-lite-source-normalizer.mjs";
+import {
+  collectKernelTemplateArguments,
+  createKernelCompilationUnit,
+  kernelDefinitionName,
+} from "./cuda-lite-source-normalizer.mjs";
 
 const { corpusPathArg, details, expectations, firstFailureLimit, help } = parseArgs(process.argv.slice(2));
 if (help) {
@@ -50,6 +54,7 @@ for (const file of files) {
     const blockDeviceFunctions = collectPortableDeviceFunctions(`${includeContext}\n${block.code}`);
     const blockConstants = collectConstantDeclarations(`${includeContext}\n${block.code}`);
     const blockTextures = collectTextureDeclarations(`${includeContext}\n${block.code}`);
+    const blockTemplateArguments = collectKernelTemplateArguments(`${includeContext}\n${block.code}`);
     const effectiveDefines = mergeDefineMaps(carriedDefines, blockDefines);
     if (CUDA_HINT_RE.test(block.code)) cudaBlocks++;
     const kernels = extractKernelDefinitions(block.code);
@@ -60,6 +65,7 @@ for (const file of files) {
         kernel: rawKernel,
         siblingKernels,
         definesByName: effectiveDefines,
+        templateArgumentsByKernelName: blockTemplateArguments,
         functionDeclarations: blockFunctionDefines,
         deviceFunctions: blockDeviceFunctions,
         constantDeclarations: blockConstants,

@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { createKernelCompilationUnit, kernelDefinitionName } from "./cuda-lite-source-normalizer.mjs";
+import {
+  collectKernelTemplateArguments,
+  createKernelCompilationUnit,
+  kernelDefinitionName,
+} from "./cuda-lite-source-normalizer.mjs";
 
 const scalarKernel = `
 __global__ void add(float *a, float *b, float *c, int N) {
@@ -106,6 +110,35 @@ __global__ void __launch_bounds__(WARP_SIZE * kTiles)
   });
   assert.doesNotMatch(source, /#define N 1024/u);
   assert.match(source, /#define BLOCK 256/u);
+}
+
+{
+  const child = `
+template <const int K, const bool UseBias>
+__global__ void child(float *out) {
+  __shared__ float tile[K];
+  int idx = threadIdx.x;
+  if (idx < K) out[idx] = UseBias ? tile[idx] + 1.0f : tile[idx];
+}`;
+  const parent = `
+__global__ void parent(float *out) {
+  child<16, true><<<1, 16>>>(out);
+}`;
+  const launches = collectKernelTemplateArguments(`${child}\n${parent}`);
+  assert.deepEqual(launches.get("child"), ["16", "true"]);
+  const source = createKernelCompilationUnit({
+    kernel: parent,
+    siblingKernels: [child],
+    definesByName: new Map([
+      ["K", "999"],
+      ["UseBias", "0"],
+    ]),
+    templateArgumentsByKernelName: launches,
+  });
+  assert.match(source, /template <const int K = 16, const bool UseBias = 1>/u);
+  assert.match(source, /child<<<1, 16>>>\(out\);/u);
+  assert.doesNotMatch(source, /#define K 999/u);
+  assert.doesNotMatch(source, /#define UseBias 0/u);
 }
 
 {
