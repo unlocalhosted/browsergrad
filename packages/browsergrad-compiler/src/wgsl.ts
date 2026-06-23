@@ -925,6 +925,7 @@ function emitPointerStorageRead(
       : emitVectorStorageReadAt(name, viewType, index);
   }
   const access = `${name}[${index}]`;
+  if (param.valueType === "bool") return `(${access} != 0u)`;
   if (!ir.atomicParams.includes(param.name)) return access;
   const loaded = `atomicLoad(&${access})`;
   return param.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
@@ -945,6 +946,7 @@ function emitPointerStorageWrite(
       : emitVectorStorageWriteAt(name, viewType, index, value);
   }
   const access = `${name}[${index}]`;
+  if (param.valueType === "bool") return `${access} = select(0u, 1u, ${value})`;
   if (!ir.atomicParams.includes(param.name)) return `${access} = ${value}`;
   if (param.valueType === "float") return `atomicStore(&${access}, bitcast<u32>(${value}))`;
   return `atomicStore(&${access}, ${value})`;
@@ -1298,6 +1300,7 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
         return emitVectorStorageRead(context.nameFor(root!), param.valueType, index);
       }
       const access = `${emitExpression(expression.target, context, "lvalue")}[${index}]`;
+      if (mode === "value" && param?.valueType === "bool") return `(${access} != 0u)`;
       if (mode === "value" && param && context.ir.atomicParams.includes(param.name)) {
         const loaded = `atomicLoad(&${access})`;
         return param.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
@@ -2725,6 +2728,9 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   }
   const left = emitExpression(expression.left, context, "lvalue");
   const right = emitExpression(expression.right, context);
+  if (param?.valueType === "bool" && expression.left.kind === "index") {
+    if (expression.operator === "=") return `${left} = select(0u, 1u, ${right})`;
+  }
   if (expression.operator === "<<=") return `${left} = (${left} << ${right})`;
   if (expression.operator === ">>=") return `${left} = (${left} >> ${right})`;
   if (expression.operator === "&=") return `${left} = (${left} & ${right})`;
@@ -3429,6 +3435,7 @@ function emitCurandHelpers(): string[] {
 
 function storageElementType(param: CudaLiteParam, ir: KernelIrModule): string {
   if (isCudaVectorType(param.valueType)) return wgslScalar(cudaVectorScalarType(param.valueType) ?? "float");
+  if (param.valueType === "bool") return "u32";
   if (!ir.atomicParams.includes(param.name)) return wgslScalar(param.valueType);
   if (param.valueType === "float") return "atomic<u32>";
   return `atomic<${wgslScalar(param.valueType)}>`;

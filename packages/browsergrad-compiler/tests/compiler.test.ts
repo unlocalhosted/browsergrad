@@ -1751,6 +1751,31 @@ __global__ void boolKernel(int *data, int N,) {
     expect([...result.buffers.data as Int32Array]).toEqual([11, -8, 13, -6]);
   });
 
+  it("supports u32-backed bool pointer parameters", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void boolPointer(bool *flags, int *out) {
+  int idx = threadIdx.x;
+  bool active = flags[idx];
+  if (active) {
+    out[idx] = 1;
+    flags[idx + 2] = false;
+  } else {
+    out[idx] = 0;
+    flags[idx + 2] = true;
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { flags: new Uint32Array([1, 0, 1, 1]), out: new Int32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<storage, read_write> flags: array<u32>;");
+    expect(compiled.wgsl).toContain("var active: bool = (flags[idx] != 0u);");
+    expect([...result.buffers.out as Int32Array]).toEqual([1, 0]);
+    expect([...result.buffers.flags as Uint32Array]).toEqual([1, 0, 0, 1]);
+  });
+
   it("lowers common CUDA float math builtins to WGSL and reference math", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void mathy(float *x, float *out) {

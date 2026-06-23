@@ -204,9 +204,6 @@ export function analyzeCudaLite(
     declaredNames.add(param.name);
     rootScope.symbols.set(param.name, symbolForParam(param, "param"));
     if (requiresShaderF16(param.valueType)) requiredFeatures.add("shader-f16");
-    if (param.valueType === "bool" && param.pointer) {
-      diagnostics.push(error("unsupported-bool-pointer", "bool pointer parameters are not supported in CUDA-lite v0", param.span));
-    }
   }
 
   const declareVar = (statement: CudaLiteVarDecl, scope: Scope, names: Set<string>): void => {

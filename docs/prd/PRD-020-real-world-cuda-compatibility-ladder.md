@@ -60,7 +60,7 @@ Repo exploration:
 
 Local corpus audits on 2026-06-24:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `206` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `207` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -104,7 +104,7 @@ Local corpus audits on 2026-06-24:
   scalar bitwise compound assignments, default kernel parameter initializer
   intake, CUDA cache-hint load/store family lowering, conservative unresolved
   template type fallback for pointer parameters, and signed `ptrdiff_t` index
-  alias intake, with `151`
+  alias intake, plus u32-backed `bool*` storage ABI support, with `150`
   hard gaps.
   Main failures:
   parser/frontend gaps, texture/vector
@@ -206,8 +206,8 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
-- The current live aggregate gate is `788/1038` WebGPU-runnable across the four
-  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `206/357`, `llm.c`
+- The current live aggregate gate is `789/1038` WebGPU-runnable across the four
+  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `207/357`, `llm.c`
   `125/148`, and LeetCUDA `217/293`.
 
 ## Grill Decisions
@@ -354,7 +354,7 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=206` WebGPU-runnable, and `<=151` hard gaps.
+  `>=207` WebGPU-runnable, and `<=150` hard gaps.
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=125`
   WebGPU-runnable, and `<=23` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
@@ -378,6 +378,9 @@ Acceptance criteria for the first slice:
 - CUDA vector storage types `float2/3/4`, `int2/3/4`, and `uint2/3/4` lower
   through one semantic vector ABI with scalar storage buffers, lane
   member access, `make_*` constructors, CPU reference, and WebGPU coverage.
+- CUDA `bool*` pointer params use a u32-backed storage ABI with bool
+  decode/encode at loads and stores, preserving browser host-shareable layout
+  instead of emitting invalid WGSL storage `bool` arrays.
 - Simple C++ intake supports scalar/vector `typedef` / `using` aliases,
   local quoted header context in audits, `constexpr` integer expressions in
   array dimensions and template arguments, CUDA `static` kernel qualifiers,
