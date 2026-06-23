@@ -476,4 +476,26 @@ __global__ void packed(float *out, const float *in) {
   assert.doesNotMatch(source, /\bstore128cs\s*\(/u);
 }
 
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void async_copy(float *out, float *in) {
+  __shared__ float tile[4];
+  CP_ASYNC_CG(tile, in, 16);
+  CP_ASYNC_COMMIT_GROUP();
+  CP_ASYNC_WAIT_GROUP(0);
+  out[threadIdx.x] = tile[threadIdx.x];
+}`,
+    functionDeclarations: [
+      '#define CP_ASYNC_CG(dst, src, bytes) asm volatile("cp.async.cg.shared.global.L2::128B [%0], [%1], %2;\\n" ::"r"(dst), "l"(src), "n"(bytes))',
+      '#define CP_ASYNC_COMMIT_GROUP() asm volatile("cp.async.commit_group;\\n" ::)',
+      '#define CP_ASYNC_WAIT_GROUP(n) asm volatile("cp.async.wait_group %0;\\n" ::"n"(n))',
+    ],
+  });
+  assert.match(source, /#define CP_ASYNC_CG\(dst, src, bytes\) CP_ASYNC_CG\(dst, src, bytes\)/u);
+  assert.match(source, /#define CP_ASYNC_COMMIT_GROUP\(\) CP_ASYNC_COMMIT_GROUP\(\)/u);
+  assert.match(source, /#define CP_ASYNC_WAIT_GROUP\(n\) CP_ASYNC_WAIT_GROUP\(n\)/u);
+  assert.doesNotMatch(source, /asm volatile/u);
+}
+
 console.log("cuda-lite source normalizer tests ok");

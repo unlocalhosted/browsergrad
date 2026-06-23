@@ -67,7 +67,7 @@ export function createKernelCompilationUnit({
   });
   const unit = [
     defines.join("\n"),
-    functionMacros.join("\n"),
+    functionMacros.map(normalizeFunctionMacro).join("\n"),
     referencedDeviceFunctions.map((fn) => fn.source).join("\n"),
     constantDeclarations.join("\n"),
     textureDeclarations.join("\n"),
@@ -75,6 +75,27 @@ export function createKernelCompilationUnit({
     stripKnownTemplateCallArguments(stripKernelLaunchTemplateArguments(specializedKernel), referencedDeviceFunctionNames),
   ].filter((part) => part.trim().length > 0).join("\n");
   return normalizeCppTemplateCarrierSyntax(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(unit))));
+}
+
+function normalizeFunctionMacro(macro) {
+  const cpAsync = semanticCpAsyncMacro(macro);
+  return cpAsync ?? macro;
+}
+
+function semanticCpAsyncMacro(macro) {
+  const match = /^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s+([\s\S]+)$/u.exec(macro);
+  if (!match) return undefined;
+  const [, name, paramsSource, body] = match;
+  if (!name || paramsSource === undefined || !body) return undefined;
+  const params = splitTopLevel(paramsSource).map((param) => param.trim()).filter(Boolean);
+  const bodyLower = body.toLowerCase();
+  if (/\bcp\.async\.(?:ca|cg|bulk)\b/u.test(bodyLower) && params.length >= 3) {
+    return `#define ${name}(${params.join(", ")}) CP_ASYNC_${bodyLower.includes("cp.async.ca") ? "CA" : bodyLower.includes("cp.async.bulk") ? "BULK" : "CG"}(${params[0]}, ${params[1]}, ${params[2]})`;
+  }
+  if (/\bcp\.async\.commit_group\b/u.test(bodyLower)) return `#define ${name}() CP_ASYNC_COMMIT_GROUP()`;
+  if (/\bcp\.async\.wait_all\b/u.test(bodyLower)) return `#define ${name}() CP_ASYNC_WAIT_ALL()`;
+  if (/\bcp\.async\.wait_group\b/u.test(bodyLower) && params.length >= 1) return `#define ${name}(${params[0]}) CP_ASYNC_WAIT_GROUP(${params[0]})`;
+  return undefined;
 }
 
 export function kernelDefinitionName(kernel) {

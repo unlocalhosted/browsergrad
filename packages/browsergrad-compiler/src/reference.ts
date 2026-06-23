@@ -431,7 +431,9 @@ function* execStatements(
         execInlineAsm(statement, context);
         break;
       case "expr":
-        if (isBarrier(statement.expression)) {
+        if (execCpAsyncStatement(statement.expression, context)) {
+          break;
+        } else if (isBarrier(statement.expression)) {
           yield "barrier";
         } else if (cooperativeSyncKind(statement.expression, context) === "grid") {
           yield "grid-barrier";
@@ -500,6 +502,58 @@ function execInlineAsm(
   const a = evalNumber(statement.inputs[0]!, context);
   const b = evalNumber(statement.inputs[1]!, context);
   writeLValue(target, current + a * b, context);
+}
+
+function execCpAsyncStatement(expression: CudaLiteExpression, context: ThreadContext): boolean {
+  if (expression.kind !== "call") return false;
+  const name = expressionNameForReference(expression.callee);
+  if (isCpAsyncFenceCall(name)) return true;
+  if (!isCpAsyncCopyCall(name)) return false;
+  const [dst, src, bytes] = expression.args;
+  if (!dst || !src) return true;
+  let dstLvalue: LValue;
+  let srcLvalue: LValue;
+  try {
+    dstLvalue = resolvePointerArgument(dst, context);
+    srcLvalue = resolvePointerArgument(src, context);
+  } catch {
+    return true;
+  }
+  const valueType = pointerValueTypeForExpression(src, context);
+  const count = cpAsyncElementCount(bytes, valueType, context);
+  for (let index = 0; index < count; index++) {
+    writeLValue(offsetLValue(dstLvalue, index, valueType), readLValue(offsetLValue(srcLvalue, index, valueType), context), context);
+  }
+  return true;
+}
+
+function isCpAsyncCopyCall(name: string | undefined): boolean {
+  return name === "CP_ASYNC_CA" || name === "CP_ASYNC_CG" || name === "CP_ASYNC_BULK";
+}
+
+function isCpAsyncFenceCall(name: string | undefined): boolean {
+  return name === "CP_ASYNC_COMMIT_GROUP" ||
+    name === "CP_ASYNC_WAIT_ALL" ||
+    name === "CP_ASYNC_WAIT_GROUP" ||
+    name === "CP_ASYNC_BULK_COMMIT_GROUP" ||
+    name === "CP_ASYNC_BULK_WAIT_ALL" ||
+    name === "CP_ASYNC_BULK_WAIT_GROUP";
+}
+
+function cpAsyncElementCount(bytes: CudaLiteExpression | undefined, valueType: CudaLiteScalarType, context: ThreadContext): number {
+  const byteCount = bytes === undefined ? elementByteSize(valueType) : Math.trunc(evalNumber(bytes, context));
+  const elementBytes = elementByteSize(valueType);
+  if (elementBytes <= 0) return 1;
+  return Math.max(1, Math.min(16, Math.floor(byteCount / elementBytes)));
+}
+
+function offsetLValue(lvalue: LValue, elementOffset: number, valueType: CudaLiteScalarType): LValue {
+  const stride = lvalue.rawStorageIndex ? valueStorageWidth(valueType) : 1;
+  return {
+    ...lvalue,
+    index: (lvalue.index ?? 0) + elementOffset * stride,
+    valueType,
+  };
 }
 
 function execVar(statement: CudaLiteVarDecl, context: ThreadContext): void {
@@ -1281,9 +1335,16 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     if (!target) throw compilerFailure("__cvta_generic_to_shared expects pointer argument");
     return lvalueStorageIndex(resolvePointerArgument(target, context), context);
   }
+  if (isCpAsyncCopyCall(name) || isCpAsyncFenceCall(name)) return 0;
   const vectorConstructor = name ? cudaVectorConstructorType(name) : undefined;
   if (vectorConstructor) {
-    return { kind: "cuda-vector", valueType: vectorConstructor, lanes: expression.args.map((arg) => evalNumber(arg, context)) };
+    const lanes = expression.args.map((arg) => evalNumber(arg, context));
+    const scalar = lanes[0] ?? 0;
+    return {
+      kind: "cuda-vector",
+      valueType: vectorConstructor,
+      lanes: lanes.length === 1 ? Array(cudaVectorLaneCount(vectorConstructor)).fill(scalar) : lanes,
+    };
   }
   if (isHalf2Intrinsic(name)) {
     const left = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");

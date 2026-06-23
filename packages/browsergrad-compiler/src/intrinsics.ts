@@ -49,6 +49,7 @@ const FLOAT_UNARY = [
   intrinsic("coshf", [1, 1], "float", (args) => Math.cosh(args[0] ?? 0), (args) => `cosh(${args.join(", ")})`),
   intrinsic("rsqrtf", [1, 1], "float", (args) => 1 / Math.sqrt(args[0] ?? 0), (args) => `inverseSqrt(${args.join(", ")})`),
   intrinsic("__saturatef", [1, 1], "float", (args) => Math.min(1, Math.max(0, args[0] ?? 0)), (args) => `clamp(${args[0] ?? "0"}, 0.0, 1.0)`),
+  intrinsic("wmma::__float_to_tf32", [1, 1], "float", (args) => args[0] ?? 0, (args) => `f32(${args[0] ?? "0"})`),
 ] as const;
 
 const FLOAT_INTRINSICS = [
@@ -68,7 +69,15 @@ const FLOAT_INTRINSICS = [
 ] as const;
 
 const INTEGER_INTRINSICS = [
+  intrinsic("abs", [1, 1], "argument1", (args) => Math.abs(Math.trunc(args[0] ?? 0)), (args) => `abs(${args[0] ?? "0"})`),
   intrinsic("__clz", [1, 1], "int", (args) => Math.clz32(args[0] ?? 0), (args) => `i32(countLeadingZeros(u32(${args[0] ?? "0"})))`),
+  intrinsic("__ffs", [1, 1], "int", (args) => {
+    const value = (Math.trunc(args[0] ?? 0) >>> 0);
+    return value === 0 ? 0 : 32 - Math.clz32(value & -value);
+  }, (args) => {
+    const value = args[0] ?? "0";
+    return `select((i32(countTrailingZeros(u32(${value}))) + 1), 0, (u32(${value}) == 0u))`;
+  }),
   intrinsic("__mul24", [2, 2], "int", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0), (args) => `(i32(${args[0] ?? "0"}) * i32(${args[1] ?? "0"}))`),
   intrinsic("__umul24", [2, 2], "uint", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0) >>> 0, (args) => `(u32(${args[0] ?? "0"}) * u32(${args[1] ?? "0"}))`),
   intrinsic("umin", [2, 2], "uint", (args) => Math.min(args[0] ?? 0, args[1] ?? 0) >>> 0, (args) => `min(u32(${args[0] ?? "0"}), u32(${args[1] ?? "0"}))`),

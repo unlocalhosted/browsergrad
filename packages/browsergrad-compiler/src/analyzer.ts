@@ -97,12 +97,21 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__ldcs", [1, 1]],
   ["__stcs", [2, 2]],
   ["__cvta_generic_to_shared", [1, 1]],
+  ["CP_ASYNC_CA", [3, 3]],
+  ["CP_ASYNC_CG", [3, 3]],
+  ["CP_ASYNC_BULK", [3, 3]],
+  ["CP_ASYNC_COMMIT_GROUP", [0, 0]],
+  ["CP_ASYNC_WAIT_ALL", [0, 0]],
+  ["CP_ASYNC_WAIT_GROUP", [1, 1]],
+  ["CP_ASYNC_BULK_COMMIT_GROUP", [0, 0]],
+  ["CP_ASYNC_BULK_WAIT_ALL", [0, 0]],
+  ["CP_ASYNC_BULK_WAIT_GROUP", [1, 1]],
   ["clock", [0, 0]],
   ["clock64", [0, 0]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
   ...[...CUDA_VECTOR_CONSTRUCTORS].map(([name, type]) => {
     const info = CUDA_VECTOR_TYPES.get(type);
-    return [name, [info?.lanes ?? 1, info?.lanes ?? 1]] as const;
+    return [name, [1, info?.lanes ?? 1]] as const;
   }),
 ]);
 const SHADOWABLE_BUILTIN_CALLS = new Set([
@@ -904,6 +913,14 @@ function validateCallExpression(
     }
     return { kind: "scalar", valueType: "uint" };
   }
+  if (isCpAsyncCopyCall(callName)) {
+    validateCpAsyncCopy(expression, scope, diagnostics, walkExpression);
+    return { kind: "scalar", valueType: "voidptr" };
+  }
+  if (isCpAsyncFenceCall(callName)) {
+    for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return { kind: "scalar", valueType: "voidptr" };
+  }
   if (callName === "clock") {
     return { kind: "scalar", valueType: "uint" };
   }
@@ -1032,6 +1049,41 @@ function isHalf2Intrinsic(name: string): boolean {
 
 function isFillRegsBuiltin(name: string): boolean {
   return name === "fill_1D_regs" || name === "fill_2D_regs" || name === "fill_3D_regs";
+}
+
+function isCpAsyncCopyCall(name: string): boolean {
+  return name === "CP_ASYNC_CA" || name === "CP_ASYNC_CG" || name === "CP_ASYNC_BULK";
+}
+
+function isCpAsyncFenceCall(name: string): boolean {
+  return name === "CP_ASYNC_COMMIT_GROUP" ||
+    name === "CP_ASYNC_WAIT_ALL" ||
+    name === "CP_ASYNC_WAIT_GROUP" ||
+    name === "CP_ASYNC_BULK_COMMIT_GROUP" ||
+    name === "CP_ASYNC_BULK_WAIT_ALL" ||
+    name === "CP_ASYNC_BULK_WAIT_GROUP";
+}
+
+function validateCpAsyncCopy(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const [dst, src, bytes] = expression.args;
+  if (dst !== undefined) {
+    const info = walkExpression(dst, scope);
+    if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "array" && info.kind !== "scalar" && info.kind !== "unknown") {
+      diagnostics.push(error("unsupported-cache-hint-address", "cp.async destination expects shared pointer or byte offset", dst.span));
+    }
+  }
+  if (src !== undefined) {
+    const info = walkExpression(src, scope);
+    if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "array" && info.kind !== "unknown") {
+      diagnostics.push(error("unsupported-cache-hint-address", "cp.async source expects pointer expression", src.span));
+    }
+  }
+  if (bytes !== undefined) validateScalarOperand(walkExpression(bytes, scope), bytes.span, diagnostics);
 }
 
 function validateFillRegs(

@@ -72,12 +72,12 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   excludes kernels now runnable on real WebGPU through orchestration; current
   baseline is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=83`
-  WebGPU-runnable, and `<=274` hard gaps;
-  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=45`
-  WebGPU-runnable, and `<=103` hard gaps;
-  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=100`
-  WebGPU-runnable, and `<=193` hard gaps. The aggregate gate also verifies
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=129`
+  WebGPU-runnable, and `<=228` hard gaps;
+  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=64`
+  WebGPU-runnable, and `<=84` hard gaps;
+  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=194`
+  WebGPU-runnable, and `<=99` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, WebGPU atomic

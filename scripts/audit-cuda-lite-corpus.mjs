@@ -719,11 +719,27 @@ function collectConstantDeclarations(source) {
 
 function collectFunctionDefines(source) {
   const out = [];
-  for (const line of source.split(/\r?\n/u)) {
+  for (const line of logicalPreprocessorLines(source)) {
     const stripped = stripLineComment(line);
     if (/^\s*#define\s+[A-Za-z_][A-Za-z0-9_]*\([^)]*\)\s+.+/u.test(stripped)) out.push(stripped.trim());
   }
   return out;
+}
+
+function logicalPreprocessorLines(source) {
+  const lines = [];
+  let current = "";
+  for (const raw of source.split(/\r?\n/u)) {
+    const line = current.length === 0 ? raw : `${current} ${raw.trimStart()}`;
+    if (/\\\s*$/u.test(line)) {
+      current = line.replace(/\\\s*$/u, "").trimEnd();
+      continue;
+    }
+    lines.push(line);
+    current = "";
+  }
+  if (current.length > 0) lines.push(current);
+  return lines;
 }
 
 function collectTextureDeclarations(source) {

@@ -1639,18 +1639,22 @@ __global__ void intIntrinsics(int *x, uint *out) {
     out[2] = __umul24(uint(x[0]), 4u);
     out[3] = umin(7u, 3u);
     out[4] = uint(ceil_div(x[0], 2));
+    out[5] = uint(__ffs(0u));
+    out[6] = uint(__ffs(8u));
+    out[7] = uint(abs(-7));
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { x: new Int32Array([5]), out: new Uint32Array(5) } },
+      { buffers: { x: new Int32Array([5]), out: new Uint32Array(8) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
     expect(compiled.wgsl).toContain("countLeadingZeros");
+    expect(compiled.wgsl).toContain("countTrailingZeros");
     expect(compiled.wgsl).toContain("min(u32(7), u32(3))");
     expect(compiled.wgsl).toContain("0;");
-    expect([...result.buffers.out as Uint32Array]).toEqual([29, 15, 20, 3, 3]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([29, 15, 20, 3, 3, 0, 4, 7]);
   });
 
   it("recognizes CUDA/C numeric named constants", () => {
@@ -1763,6 +1767,24 @@ __global__ void packed128_alias(const float* input, float* output) {
 
     expect(compiled.wgsl).toContain("vec4<f32>");
     expect([...result.buffers.output as Float32Array]).toEqual([2, 3, 4, 5]);
+  });
+
+  it("supports CUDA vector scalar constructors", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void vector_splat(float4 *out, uint4 *kinds) {
+  out[0] = make_float4(2.5f);
+  kinds[0] = make_uint4(7u);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4), kinds: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("vec4<f32>(2.5, 2.5, 2.5, 2.5)");
+    expect(compiled.wgsl).toContain("vec4<u32>(7, 7, 7, 7)");
+    expect([...result.buffers.out as Float32Array]).toEqual([2.5, 2.5, 2.5, 2.5]);
+    expect([...result.buffers.kinds as Uint32Array]).toEqual([7, 7, 7, 7]);
   });
 
   it("maps CUDA byte-vector aliases onto canonical uint vector values", () => {
@@ -2026,6 +2048,29 @@ __global__ void sharedVector(const float4* x, float4* y) {
     expect(compiled.wgsl).toContain("var<workgroup> tile: array<vec4<f32>, 2>;");
     expect(compiled.wgsl).toContain("bg_ptr_read_f32x4");
     expect([...result.buffers.y as Float32Array]).toEqual([10, 20, 30, 41, 1, 2, 3, 5]);
+  });
+
+  it("lowers cp.async pointer-form copies to synchronous shared-memory copies", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void async_copy(const float *input, float *output) {
+  __shared__ float tile[4];
+  if (threadIdx.x < 1) {
+    CP_ASYNC_CG(tile, input, 16);
+    CP_ASYNC_COMMIT_GROUP();
+    CP_ASYNC_WAIT_GROUP(0);
+  }
+  __syncthreads();
+  output[threadIdx.x] = tile[threadIdx.x] + 1.0f;
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { input: new Float32Array([1, 2, 3, 4]), output: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32");
+    expect(compiled.wgsl).toContain("workgroupBarrier()");
+    expect([...result.buffers.output as Float32Array]).toEqual([2, 3, 4, 5]);
   });
 
   it("lowers CUDA device cuRAND state to deterministic browser RNG helpers", () => {

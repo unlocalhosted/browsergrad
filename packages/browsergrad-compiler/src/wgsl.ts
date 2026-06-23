@@ -10,6 +10,7 @@ import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
 import {
+  CUDA_VECTOR_TYPES,
   cudaVectorConstructorType,
   cudaVectorFieldIndex,
   cudaVectorLaneCount,
@@ -486,6 +487,10 @@ function emitStatement(
       return [`${prefix}${emitInlineAsmStatement(statement, context)};`];
     case "expr":
       {
+        const cpAsync = emitCpAsyncStatement(statement.expression, context, indentLevel);
+        if (cpAsync) return cpAsync;
+      }
+      {
         const noopComment = noopCallComment(statement.expression);
         if (noopComment) return [`${prefix}// ${noopComment}`];
       }
@@ -609,9 +614,10 @@ function withDevicePointerParams(
 }
 
 function usesDevicePointerParams(ir: KernelIrModule): boolean {
+  const devicePointerCalls = new Set(["__ldcs", "__stcs", "CP_ASYNC_CA", "CP_ASYNC_CG", "CP_ASYNC_BULK"]);
   return ir.functions.some((fn) => fn.params.some((param) => param.pointer)) ||
-    statementsUseCall(ir.body, new Set(["__ldcs", "__stcs"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["__ldcs", "__stcs"])));
+    statementsUseCall(ir.body, devicePointerCalls) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, devicePointerCalls));
 }
 
 function emitDevicePointerHelpers(ir: KernelIrModule, context: EmitContext): string[] {
@@ -1071,6 +1077,65 @@ function emitFillRegsStatement(
   return emitLocalArrayFill(target.name, array.dimensions, emitExpression(value, context), indentLevel);
 }
 
+function emitCpAsyncStatement(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  if (expression.kind !== "call") return undefined;
+  const name = expressionName(expression.callee);
+  const prefix = indent(indentLevel);
+  if (isCpAsyncFenceCall(name)) return [`${prefix}workgroupBarrier();`];
+  if (!isCpAsyncCopyCall(name)) return undefined;
+  const [dst, src, bytes] = expression.args;
+  if (!dst || !src) return [`${prefix}// cp.async omitted: missing pointer operand`];
+  const dstParts = devicePointerArgumentParts(dst, context);
+  const srcParts = devicePointerArgumentParts(src, context);
+  if (!dstParts || !srcParts) return [`${prefix}// cp.async byte-address copy omitted: ${name}`];
+  const valueType = devicePointerValueTypeForExpression(src, context);
+  const count = cpAsyncElementCount(bytes, valueType);
+  const lines: string[] = [];
+  for (let index = 0; index < count; index++) {
+    const srcIndex = index === 0 ? srcParts.base : `(${srcParts.base} + ${index}u)`;
+    const dstIndex = index === 0 ? dstParts.base : `(${dstParts.base} + ${index}u)`;
+    lines.push(`${prefix}${pointerWriteHelperName(valueType)}(${dstParts.buffer}, ${dstIndex}, ${pointerReadHelperName(valueType)}(${srcParts.buffer}, ${srcIndex}));`);
+  }
+  return lines;
+}
+
+function isCpAsyncCopyCall(name: string | undefined): boolean {
+  return name === "CP_ASYNC_CA" || name === "CP_ASYNC_CG" || name === "CP_ASYNC_BULK";
+}
+
+function isCpAsyncFenceCall(name: string | undefined): boolean {
+  return name === "CP_ASYNC_COMMIT_GROUP" ||
+    name === "CP_ASYNC_WAIT_ALL" ||
+    name === "CP_ASYNC_WAIT_GROUP" ||
+    name === "CP_ASYNC_BULK_COMMIT_GROUP" ||
+    name === "CP_ASYNC_BULK_WAIT_ALL" ||
+    name === "CP_ASYNC_BULK_WAIT_GROUP";
+}
+
+function cpAsyncElementCount(bytes: CudaLiteExpression | undefined, valueType: CudaLiteScalarType): number {
+  if (bytes?.kind !== "number") return 1;
+  const elementBytes = wgslElementByteSize(valueType);
+  if (elementBytes <= 0) return 1;
+  return Math.max(1, Math.min(16, Math.floor(bytes.value / elementBytes)));
+}
+
+function wgslElementByteSize(valueType: CudaLiteScalarType): number {
+  if (valueType === "half") return 2;
+  if (isCudaVectorType(valueType)) return cudaVectorLaneCount(valueType) * wgslElementByteSize(cudaVectorScalarType(valueType) ?? "float");
+  return 4;
+}
+
+function emitVectorConstructor(vectorType: CudaLiteScalarType, args: readonly string[]): string {
+  const info = CUDA_VECTOR_TYPES.get(vectorType as never);
+  if (!info) return `${wgslScalar(vectorType)}(${args.join(", ")})`;
+  if (args.length === 1) return `${wgslScalar(vectorType)}(${Array(info.lanes).fill(args[0] ?? "0").join(", ")})`;
+  return `${wgslScalar(vectorType)}(${args.join(", ")})`;
+}
+
 function emitLocalArrayFill(
   name: string,
   dimensions: readonly number[],
@@ -1453,7 +1518,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
   if (intrinsic?.emitWgsl) return intrinsic.emitWgsl(args);
   const vectorConstructor = name ? cudaVectorConstructorType(name) : undefined;
-  if (vectorConstructor) return `${wgslScalar(vectorConstructor)}(${args.join(", ")})`;
+  if (vectorConstructor) return emitVectorConstructor(vectorConstructor, args);
   if (name === "__ldcs") {
     const target = expression.args[0];
     if (!target) return "0";
@@ -1478,6 +1543,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     if (!parts) throw featureError("unsupported-device-pointer-param", "__cvta_generic_to_shared expects a storage or shared pointer");
     return `u32(${parts.base})`;
   }
+  if (isCpAsyncCopyCall(name) || isCpAsyncFenceCall(name)) return "0";
   switch (name) {
     case "__syncthreads":
       return "workgroupBarrier()";

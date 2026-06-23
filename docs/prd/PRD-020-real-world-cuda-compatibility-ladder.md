@@ -60,7 +60,7 @@ Repo exploration:
 
 Local corpus audits on 2026-06-23:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `125` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `129` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -76,7 +76,9 @@ Local corpus audits on 2026-06-23:
   vote intrinsics, and `__sincosf` source lowering, with multiline templated
   launch detection, call-shaped pointer-parameter device-helper intake,
   define-backed device-helper template defaults, and dynamic-launch target
-  context for host orchestration, with `232` hard gaps.
+  context for host orchestration, with CUDA integer/vector intrinsic additions,
+  scalar vector-constructor splats, and semantic `cp.async` source
+  normalization, with `228` hard gaps.
   Main failures:
   parser/frontend gaps, texture/vector
   operators, remaining `half2` intrinsics, `double`, templates, and
@@ -98,7 +100,7 @@ Local corpus audits on 2026-06-23:
   define-backed device-helper template defaults, with `84` hard gaps. Main
   failures: frontend macro/type shape, `floatX` aliases, parser C++-isms, and
   remaining library/front-end gaps.
-- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `193` direct
+- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `194` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, local header context, and
   simple C++ alias / constexpr intake plus `FLOAT4(x)`-style typed storage
@@ -109,7 +111,9 @@ Local corpus audits on 2026-06-23:
   block scopes plus CUDA shuffle/fence/conversion intrinsics, and generic warp
   reduction aliases plus CUDA half conversion aliases, object-macro device
   helper discovery, POSIX/C math constants, call-shaped helper intake, and
-  define-backed device-helper template defaults, with `100` hard gaps.
+  define-backed device-helper template defaults, with semantic `cp.async`
+  source normalization and synchronous pointer-form lowering, with `99` hard
+  gaps.
   The pre-normalizer baseline was `3/293`, which proved context isolation was
   the first ladder rung.
 
@@ -292,11 +296,11 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=125` WebGPU-runnable, and `<=232` hard gaps.
+  `>=129` WebGPU-runnable, and `<=228` hard gaps.
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=64`
   WebGPU-runnable, and `<=84` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
-  `>=193` WebGPU-runnable, and `<=100` hard gaps.
+  `>=194` WebGPU-runnable, and `<=99` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
   unit tests.
 - Intrinsic-ledger expansion improves coverage through generic CUDA math and
