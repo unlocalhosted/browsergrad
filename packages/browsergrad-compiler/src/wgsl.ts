@@ -220,6 +220,7 @@ interface EmitContext {
 interface PointerAlias {
   readonly rootName: string;
   readonly baseIndex: CudaLiteExpression;
+  readonly valueType?: CudaLiteScalarType;
 }
 
 interface PoolPointerAlias {
@@ -814,6 +815,10 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
     case "member":
       return emitMember(expression, context);
     case "index": {
+      const storageView = storageViewLValue(expression, context);
+      if (storageView && isCudaVectorType(storageView.valueType)) {
+        return emitVectorStorageReadAt(storageView.name, storageView.valueType, storageView.index);
+      }
       const poolAccess = poolAccessForIndex(expression, context);
       if (poolAccess) return emitPoolRead(poolAccess, context);
       const pointerParam = devicePointerParamForIndex(expression, context);
@@ -823,6 +828,10 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       if (expression.target.kind === "identifier") {
         const alias = context.pointerAliasFor(expression.target.name);
         if (alias) {
+          if (alias.valueType && isCudaVectorType(alias.valueType)) {
+            const index = emitStorageViewIndex(alias.rootName, alias.baseIndex, expression.index, alias.valueType, context);
+            return emitVectorStorageReadAt(alias.rootName, alias.valueType, index);
+          }
           return `${alias.rootName}[${emitPointerAliasIndex(alias, expression.index, context)}]`;
         }
       }
@@ -1025,6 +1034,8 @@ function collectCooperativeGroups(statements: readonly CudaLiteStatement[]): Rea
 
 function pointerAliasForVar(statement: CudaLiteVarDecl): PointerAlias | undefined {
   const init = statement.init;
+  const view = pointerAliasForPointerExpression(init, statement.valueType);
+  if (view) return view;
   if (init?.kind !== "unary" || init.operator !== "&") return undefined;
   const target = init.argument;
   if (target.kind !== "index" || target.target.kind !== "identifier") return undefined;
@@ -1034,10 +1045,76 @@ function pointerAliasForVar(statement: CudaLiteVarDecl): PointerAlias | undefine
   };
 }
 
+function pointerAliasForPointerExpression(
+  expression: CudaLiteExpression | undefined,
+  valueType: CudaLiteScalarType,
+): PointerAlias | undefined {
+  if (!expression) return undefined;
+  if (expression.kind === "cast" && expression.pointer) return pointerAliasForPointerExpression(expression.expression, valueType);
+  if (expression.kind === "unary" && expression.operator === "&") {
+    const target = expression.argument;
+    if (target.kind === "index" && target.target.kind === "identifier") {
+      return { rootName: target.target.name, baseIndex: target.index, valueType };
+    }
+    if (target.kind === "identifier") {
+      return { rootName: target.name, baseIndex: zeroExpression(target.span), valueType };
+    }
+    return undefined;
+  }
+  if (expression.kind === "identifier") {
+    return { rootName: expression.name, baseIndex: zeroExpression(expression.span), valueType };
+  }
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    const base = pointerAliasForPointerExpression(expression.left, valueType);
+    if (!base) return undefined;
+    return {
+      ...base,
+      baseIndex: expression.operator === "+"
+        ? { kind: "binary", operator: "+", left: base.baseIndex, right: expression.right, span: expression.span }
+        : { kind: "binary", operator: "-", left: base.baseIndex, right: expression.right, span: expression.span },
+    };
+  }
+  return undefined;
+}
+
 function emitPointerAliasIndex(alias: PointerAlias, index: CudaLiteExpression, context: EmitContext): string {
   const base = context.pointerBaseOffsetFieldFor(alias.rootName);
   if (!base) return `(${emitExpression(alias.baseIndex, context)}) + (${emitExpression(index, context)})`;
   return `(params.${base} + u32(${emitExpression(alias.baseIndex, context)}) + u32(${emitExpression(index, context)}))`;
+}
+
+function emitStorageViewIndex(
+  rootName: string,
+  baseIndex: CudaLiteExpression,
+  index: CudaLiteExpression,
+  valueType: CudaLiteScalarType,
+  context: EmitContext,
+): string {
+  const base = context.pointerBaseOffsetFieldFor(rootName);
+  const prefix = base
+    ? `params.${base} + u32(${emitExpression(baseIndex, context)})`
+    : `u32(${emitExpression(baseIndex, context)})`;
+  const lanes = cudaVectorLaneCount(valueType);
+  return `(${prefix} + (u32(${emitExpression(index, context)}) * ${lanes}u))`;
+}
+
+function emitVectorStorageReadAt(name: string, type: CudaLiteScalarType, storageIndex: string): string {
+  const lanes = cudaVectorLaneCount(type);
+  const values = Array.from({ length: lanes }, (_, lane) => `${name}[${storageIndex} + ${lane}u]`);
+  return `${wgslScalar(type)}(${values.join(", ")})`;
+}
+
+function emitVectorStorageWriteAt(name: string, type: CudaLiteScalarType, storageIndex: string, value: string): string {
+  const lanes = cudaVectorLaneCount(type);
+  return Array.from({ length: lanes }, (_, lane) => `${name}[${storageIndex} + ${lane}u] = ${value}.${vectorFieldName(lane)}`).join("; ");
+}
+
+function emitVectorStorageFieldWriteAt(name: string, storageIndex: string, fieldIndex: number, value: string): string {
+  return `${name}[${storageIndex} + ${fieldIndex}u] = ${value}`;
+}
+
+function zeroExpression(span: CudaLiteExpression["span"]): CudaLiteExpression {
+  return { kind: "number", value: 0, raw: "0", span };
 }
 
 function emitPointerIndex(rootName: string, index: CudaLiteExpression, context: EmitContext): string {
@@ -1340,6 +1417,24 @@ function emitAtomicCall(
 }
 
 function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string {
+  const storageView = storageViewLValue(expression.left, context);
+  if (storageView && isCudaVectorType(storageView.valueType)) {
+    const right = emitExpression(expression.right, context);
+    if (storageView.field) {
+      const current = `${storageView.name}[${storageView.index} + ${storageView.fieldIndex ?? 0}u]`;
+      if (expression.operator !== "=") {
+        const op = expression.operator.slice(0, -1);
+        return `${current} = (${current} ${op} ${right})`;
+      }
+      return emitVectorStorageFieldWriteAt(storageView.name, storageView.index, storageView.fieldIndex ?? 0, right);
+    }
+    if (expression.operator !== "=") {
+      const current = emitVectorStorageReadAt(storageView.name, storageView.valueType, storageView.index);
+      const op = expression.operator.slice(0, -1);
+      return emitVectorStorageWriteAt(storageView.name, storageView.valueType, storageView.index, `(${current} ${op} ${right})`);
+    }
+    return emitVectorStorageWriteAt(storageView.name, storageView.valueType, storageView.index, right);
+  }
   const poolAccess = poolAccessForIndex(expression.left, context);
   if (poolAccess) return emitPoolAssignment(poolAccess, expression.operator, expression.right, context);
   const vectorAssignment = emitVectorAssignment(expression, context);
@@ -1440,6 +1535,53 @@ function vectorStorageLValue(expression: CudaLiteExpression, context: EmitContex
   if (!field) return base;
   const fieldIndex = cudaVectorFieldIndex(param.valueType, field);
   return fieldIndex === undefined ? undefined : { ...base, field, fieldIndex };
+}
+
+function storageViewLValue(expression: CudaLiteExpression, context: EmitContext): VectorStorageLValue | undefined {
+  let target = expression;
+  let field: string | undefined;
+  if (expression.kind === "member") {
+    field = expression.property;
+    target = expression.object;
+  }
+  if (target.kind !== "index") return undefined;
+  const view = storageViewForPointerExpression(target.target, target.index, context);
+  if (!view || !isCudaVectorType(view.valueType)) return undefined;
+  const base = {
+    name: view.rootName,
+    valueType: view.valueType,
+    index: view.index,
+    lanes: cudaVectorLaneCount(view.valueType),
+  };
+  if (!field) return base;
+  const fieldIndex = cudaVectorFieldIndex(view.valueType, field);
+  return fieldIndex === undefined ? undefined : { ...base, field, fieldIndex };
+}
+
+function storageViewForPointerExpression(
+  pointer: CudaLiteExpression,
+  index: CudaLiteExpression,
+  context: EmitContext,
+): { readonly rootName: string; readonly valueType: CudaLiteScalarType; readonly index: string } | undefined {
+  if (pointer.kind === "cast" && pointer.pointer) {
+    const alias = pointerAliasForPointerExpression(pointer.expression, pointer.valueType);
+    if (!alias) return undefined;
+    return {
+      rootName: alias.rootName,
+      valueType: pointer.valueType,
+      index: emitStorageViewIndex(alias.rootName, alias.baseIndex, index, pointer.valueType, context),
+    };
+  }
+  if (pointer.kind === "identifier") {
+    const alias = context.pointerAliasFor(pointer.name);
+    if (!alias?.valueType) return undefined;
+    return {
+      rootName: alias.rootName,
+      valueType: alias.valueType,
+      index: emitStorageViewIndex(alias.rootName, alias.baseIndex, index, alias.valueType, context),
+    };
+  }
+  return undefined;
 }
 
 function isBarrierCall(expression: CudaLiteExpression): boolean {

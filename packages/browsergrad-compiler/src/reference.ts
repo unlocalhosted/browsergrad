@@ -76,6 +76,7 @@ interface LValue {
   readonly index?: number;
   readonly field?: "x" | "y" | "z" | "w";
   readonly valueType?: CudaLiteScalarType;
+  readonly rawStorageIndex?: boolean;
 }
 
 interface ThreadContext {
@@ -564,6 +565,21 @@ function pointerArgumentValue(
   valueType: CudaLiteScalarType,
   context: ThreadContext,
 ): LocalValue {
+  if (arg.kind === "cast" && arg.pointer) {
+    const pointer = pointerArgumentValue(arg.expression, arg.valueType, context);
+    if (isPoolPointer(pointer)) return { ...pointer, valueType: arg.valueType };
+    if (isAddress(pointer)) {
+      return {
+        kind: "address",
+        target: {
+          ...pointer.target,
+          index: lvalueStorageIndex(pointer.target, context),
+          valueType: arg.valueType,
+          rawStorageIndex: true,
+        },
+      };
+    }
+  }
   const offset = pointerOffsetArgumentValue(arg, valueType, context);
   if (offset) return offset;
   if (arg.kind === "unary" && arg.operator === "&") {
@@ -579,6 +595,7 @@ function pointerArgumentValue(
   }
   const value = evalExpression(arg, context);
   if (isPoolPointer(value)) return { ...value, valueType };
+  if (isAddress(value)) return value;
   throw compilerFailure("unsupported dynamic kernel pointer argument");
 }
 
@@ -1284,6 +1301,8 @@ function curandNext(state: number): number {
 }
 
 function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): LValue {
+  const pointerCast = resolvePointerCastLValue(expression, context);
+  if (pointerCast) return pointerCast;
   const pool = resolvePoolLValue(expression, context);
   if (pool) return pool;
   if (expression.kind === "member") {
@@ -1311,10 +1330,13 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
   const alias = context.locals.get(cursor.name);
   if (alias && typeof alias !== "number" && "kind" in alias && alias.kind === "address") {
     if (chain.length !== 1) throw compilerFailure(`pointer alias '${cursor.name}' expects one-dimensional indexing`);
+    const index = (alias.target.index ?? 0) + chain[0]! * valueStorageWidth(alias.target.valueType);
     return {
       name: alias.target.name,
       space: alias.target.space,
-      index: (alias.target.index ?? 0) + chain[0]!,
+      index,
+      ...(alias.target.valueType === undefined ? {} : { valueType: alias.target.valueType }),
+      ...(alias.target.rawStorageIndex ? { rawStorageIndex: true } : {}),
     };
   }
   if (isPoolPointer(alias)) {
@@ -1345,6 +1367,45 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
   throw compilerFailure(`unknown lvalue '${cursor.name}'`);
 }
 
+function resolvePointerCastLValue(expression: CudaLiteExpression, context: ThreadContext): LValue | undefined {
+  if (expression.kind !== "index") return undefined;
+  const target = expression.target;
+  if (target.kind !== "cast" || !target.pointer) return undefined;
+  const pointer = pointerArgumentValue(target.expression, target.valueType, context);
+  const index = Math.trunc(evalNumber(expression.index, context)) * valueStorageWidth(target.valueType);
+  if (isPoolPointer(pointer)) {
+    return {
+      name: pointer.poolName,
+      space: "pool",
+      index: Math.trunc(pointer.byteOffset / 4) + index,
+      valueType: target.valueType,
+    };
+  }
+  if (typeof pointer !== "number" && "kind" in pointer && pointer.kind === "address") {
+    return {
+      name: pointer.target.name,
+      space: pointer.target.space,
+      index: lvalueStorageIndex(pointer.target, context) + index,
+      valueType: target.valueType,
+      rawStorageIndex: true,
+    };
+  }
+  throw compilerFailure("pointer cast expects a pointer argument");
+}
+
+function lvalueStorageIndex(lvalue: LValue, context: ThreadContext): number {
+  if (lvalue.index === undefined) return 0;
+  if (lvalue.rawStorageIndex) return lvalue.index;
+  if (lvalue.valueType) return lvalue.index * valueStorageWidth(lvalue.valueType);
+  if (lvalue.space === "shared") return lvalue.index * valueStorageWidth(context.shared.get(lvalue.name)?.valueType);
+  if (lvalue.space === "buffer" || lvalue.space === "constant") return lvalue.index * valueStorageWidth(context.valueTypes.get(lvalue.name));
+  if (lvalue.space === "local") {
+    const local = context.locals.get(lvalue.name);
+    return lvalue.index * valueStorageWidth(isLocalArray(local) ? local.valueType : undefined);
+  }
+  return lvalue.index;
+}
+
 function resolvePoolLValue(expression: CudaLiteExpression, context: ThreadContext): LValue | undefined {
   if (expression.kind !== "index") return undefined;
   const target = expression.target;
@@ -1369,16 +1430,17 @@ function resolvePoolLValue(expression: CudaLiteExpression, context: ThreadContex
 function resolvePointerInitializer(statement: CudaLiteVarDecl, context: ThreadContext): AddressValue | PoolPointerValue {
   const init = statement.init;
   if (!init) return { kind: "pool-pointer", poolName: "", byteOffset: -1 };
-  if (init?.kind === "call" || (init?.kind === "cast" && init.pointer) || init?.kind === "identifier") {
-    const value = evalExpression(init, context);
+  if (init?.kind === "call" || (init?.kind === "cast" && init.pointer) || init?.kind === "identifier" || init?.kind === "binary") {
+    const value = pointerArgumentValue(init, statement.valueType, context);
     if (isPoolPointer(value)) return value;
+    if (typeof value !== "number" && "kind" in value && value.kind === "address") return value;
   }
   if (init?.kind !== "unary" || init.operator !== "&") {
     throw compilerFailure(`pointer '${statement.name}' must initialize from an address`);
   }
   const target = resolveLValue(init.argument, context);
-  if (target.space !== "shared") {
-    throw compilerFailure(`pointer '${statement.name}' can only alias shared memory in CUDA-lite v0`);
+  if (target.space !== "shared" && target.space !== "buffer") {
+    throw compilerFailure(`pointer '${statement.name}' can only alias storage or shared memory in CUDA-lite v0`);
   }
   return { kind: "address", target };
 }
@@ -1388,17 +1450,18 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
     if (lvalue.index === undefined) return projectField(readIdentifier(lvalue.name, context), lvalue);
     const local = context.locals.get(lvalue.name);
     if (!isLocalArray(local)) throw compilerFailure(`'${lvalue.name}' is not a local array`);
-    const storageIndex = lvalue.index * valueStorageWidth(local.valueType);
-    const width = valueStorageWidth(local.valueType);
+    const valueType = lvalue.valueType ?? local.valueType;
+    const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
+    const width = valueStorageWidth(valueType);
     const ok = storageIndex >= 0 && storageIndex + width - 1 < local.data.length;
-    return ok ? readBufferValue(local.data, storageIndex, local.valueType, lvalue.field) : 0;
+    return ok ? readBufferValue(local.data, storageIndex, valueType, lvalue.field) : 0;
   }
   if (lvalue.index === undefined) throw compilerFailure(`missing index for '${lvalue.name}'`);
   if (lvalue.space === "buffer") {
     const buffer = context.buffers.get(lvalue.name);
     if (!buffer) throw compilerFailure(`missing buffer '${lvalue.name}'`);
-    const valueType = context.valueTypes.get(lvalue.name);
-    const storageIndex = lvalue.index * valueStorageWidth(valueType);
+    const valueType = lvalue.valueType ?? context.valueTypes.get(lvalue.name);
+    const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
     const width = valueStorageWidth(valueType);
     const ok = storageIndex >= 0 && storageIndex + width - 1 < buffer.length;
     const value = ok ? readBufferValue(buffer, storageIndex, valueType, lvalue.field) : 0;
@@ -1408,8 +1471,8 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
   if (lvalue.space === "constant") {
     const value = context.constants.get(lvalue.name);
     if (!value || typeof value === "number") throw compilerFailure(`missing constant buffer '${lvalue.name}'`);
-    const valueType = context.valueTypes.get(lvalue.name);
-    const storageIndex = lvalue.index * valueStorageWidth(valueType);
+    const valueType = lvalue.valueType ?? context.valueTypes.get(lvalue.name);
+    const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
     const width = valueStorageWidth(valueType);
     const ok = storageIndex >= 0 && storageIndex + width - 1 < value.length;
     const read = ok ? readBufferValue(value, storageIndex, valueType, lvalue.field) : 0;
@@ -1432,10 +1495,11 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
   }
   const shared = context.shared.get(lvalue.name);
   if (!shared) throw compilerFailure(`missing shared array '${lvalue.name}'`);
-  const storageIndex = lvalue.index * valueStorageWidth(shared.valueType);
-  const width = valueStorageWidth(shared.valueType);
+  const valueType = lvalue.valueType ?? shared.valueType;
+  const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
+  const width = valueStorageWidth(valueType);
   const ok = storageIndex >= 0 && storageIndex + width - 1 < shared.data.length;
-  const value = ok ? readBufferValue(shared.data, storageIndex, shared.valueType, lvalue.field) : 0;
+  const value = ok ? readBufferValue(shared.data, storageIndex, valueType, lvalue.field) : 0;
   context.trace.sharedReads.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
   return value;
 }
@@ -1445,10 +1509,11 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
     if (lvalue.index !== undefined) {
       const local = context.locals.get(lvalue.name);
       if (!isLocalArray(local)) throw compilerFailure(`'${lvalue.name}' is not a local array`);
-      const storageIndex = lvalue.index * valueStorageWidth(local.valueType);
-      const width = valueStorageWidth(local.valueType);
+      const valueType = lvalue.valueType ?? local.valueType;
+      const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
+      const width = valueStorageWidth(valueType);
       const ok = storageIndex >= 0 && storageIndex + width - 1 < local.data.length;
-      if (ok) writeBufferValue(local.data, storageIndex, local.valueType, lvalue.field, value);
+      if (ok) writeBufferValue(local.data, storageIndex, valueType, lvalue.field, value);
       return;
     }
     if (lvalue.field) {
@@ -1473,8 +1538,8 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
   if (lvalue.space === "buffer") {
     const buffer = context.buffers.get(lvalue.name);
     if (!buffer) throw compilerFailure(`missing buffer '${lvalue.name}'`);
-    const valueType = context.valueTypes.get(lvalue.name);
-    const storageIndex = lvalue.index * valueStorageWidth(valueType);
+    const valueType = lvalue.valueType ?? context.valueTypes.get(lvalue.name);
+    const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
     const width = valueStorageWidth(valueType);
     const ok = storageIndex >= 0 && storageIndex + width - 1 < buffer.length;
     if (ok) writeBufferValue(buffer, storageIndex, valueType, lvalue.field, value);
@@ -1497,10 +1562,11 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
   }
   const shared = context.shared.get(lvalue.name);
   if (!shared) throw compilerFailure(`missing shared array '${lvalue.name}'`);
-  const storageIndex = lvalue.index * valueStorageWidth(shared.valueType);
-  const width = valueStorageWidth(shared.valueType);
+  const valueType = lvalue.valueType ?? shared.valueType;
+  const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
+  const width = valueStorageWidth(valueType);
   const ok = storageIndex >= 0 && storageIndex + width - 1 < shared.data.length;
-  if (ok) writeBufferValue(shared.data, storageIndex, shared.valueType, lvalue.field, value);
+  if (ok) writeBufferValue(shared.data, storageIndex, valueType, lvalue.field, value);
   context.trace.sharedWrites.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
 }
 

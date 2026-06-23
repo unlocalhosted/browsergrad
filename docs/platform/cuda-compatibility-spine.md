@@ -72,12 +72,12 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   excludes kernels now runnable on real WebGPU through orchestration; current
   baseline is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=62`
-  WebGPU-runnable, and `<=295` hard gaps;
-  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=31`
-  WebGPU-runnable, and `<=117` hard gaps;
-  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=52`
-  WebGPU-runnable, and `<=241` hard gaps. The aggregate gate also verifies
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=63`
+  WebGPU-runnable, and `<=294` hard gaps;
+  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=43`
+  WebGPU-runnable, and `<=105` hard gaps;
+  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=83`
+  WebGPU-runnable, and `<=210` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, WebGPU atomic
@@ -88,6 +88,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   header context for corpus audits, CUDA `static` kernel qualifiers, and
   late `__launch_bounds__` placement, plus cooperative-groups namespace
   call forms such as `cg::sync(block)` and `cg::reduce(tile, value, op)`,
+  C++ `reinterpret_cast<T*>` / `static_cast<T*>` pointer casts for typed
+  scalarized storage views such as `FLOAT4(x)` and local pointer aliases,
   positive pointer-offset child launches via generated base-offset uniforms,
   expanded order-stable DevicePool allocation launches, launched `__device__`
   child functions, and conservative host-lifted peer copies through a typed

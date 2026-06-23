@@ -114,6 +114,10 @@ CUDA vector storage types `float2/3/4`, `int2/3/4`, and `uint2/3/4` lower
 through a scalar storage ABI with `make_*` constructors and lane member access.
 This keeps caller buffers as ordinary typed arrays while still emitting vector
 values inside WGSL and the CPU reference interpreter.
+CUDA/C++ pointer casts such as `reinterpret_cast<float4 *>(&x[i])` lower as
+typed storage views over that same scalar ABI. Macro spellings like `FLOAT4(x)`
+work when they expand to the standard cast/index idiom; BrowserGrad models the
+memory view, not the macro name.
 Simple C++ intake accepts scalar/vector `typedef` and `using` aliases,
 `constexpr` integer expressions in array dimensions and template integer
 arguments, `static` kernel qualifiers, late `__launch_bounds__` placement, and

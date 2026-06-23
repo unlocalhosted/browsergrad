@@ -550,8 +550,39 @@ function isSupportedSharedPointerAlias(statement: CudaLiteVarDecl, scope: Scope)
 
 function isSupportedLocalPointer(statement: CudaLiteVarDecl, scope: Scope): boolean {
   if (isSupportedSharedPointerAlias(statement, scope)) return true;
+  if (isSupportedStoragePointerInitializer(statement, scope)) return true;
   if (!statement.pointer || statement.storage !== "local") return false;
   return isSupportedPoolPointerInitializer(statement.init, scope);
+}
+
+function isSupportedStoragePointerInitializer(statement: CudaLiteVarDecl, scope: Scope): boolean {
+  if (!statement.pointer || statement.storage !== "local") return false;
+  const source = pointerSourceType(statement.init, scope);
+  return source !== undefined && pointerTypesCompatible(statement.valueType, source);
+}
+
+function pointerSourceType(expression: CudaLiteExpression | undefined, scope: Scope): ValueType | undefined {
+  if (!expression) return undefined;
+  if (expression.kind === "cast" && expression.pointer) return pointerSourceType(expression.expression, scope);
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    return pointerSourceType(expression.left, scope);
+  }
+  if (expression.kind === "unary" && expression.operator === "&") {
+    const root = rootIdentifier(expression.argument);
+    const symbol = root ? lookupSymbol(root, scope, expression.argument.span) : undefined;
+    return symbol?.valueType;
+  }
+  if (expression.kind !== "identifier") return undefined;
+  const symbol = lookupSymbol(expression.name, scope, expression.span);
+  return symbol?.pointer ? symbol.valueType : undefined;
+}
+
+function pointerTypesCompatible(target: ValueType, source: ValueType): boolean {
+  if (target === source) return true;
+  const targetScalar = cudaVectorScalarType(target);
+  if (targetScalar && targetScalar === source) return true;
+  const sourceScalar = cudaVectorScalarType(source);
+  return sourceScalar !== undefined && sourceScalar === target;
 }
 
 function isSupportedPoolPointerInitializer(init: CudaLiteExpression | undefined, scope: Scope): boolean {
@@ -1248,10 +1279,12 @@ function validateNonCallExpression(
     case "cast": {
       const info = walkExpression(expression.expression, scope);
       if (expression.pointer) {
-        if (info.kind !== "scalar" && info.kind !== "pointer" && info.kind !== "pool-pointer" && info.kind !== "unknown") {
+        if (info.kind !== "scalar" && info.kind !== "pointer" && info.kind !== "pool-pointer" && info.kind !== "address" && info.kind !== "unknown") {
           diagnostics.push(error("unsupported-pointer-cast", "pointer cast expects scalar or pointer expression", expression.expression.span));
         }
-        return { kind: "pool-pointer", valueType: expression.valueType };
+        return info.kind === "pool-pointer"
+          ? { kind: "pool-pointer", valueType: expression.valueType }
+          : { kind: "pointer", valueType: expression.valueType, symbol: info.symbol };
       }
       validateScalarOperand(info, expression.expression.span, diagnostics);
       return { kind: "scalar", valueType: expression.valueType };
@@ -1723,9 +1756,11 @@ export function expressionName(expression: CudaLiteExpression): string | undefin
 
 export function rootIdentifier(expression: CudaLiteExpression): string | undefined {
   if (expression.kind === "identifier") return expression.name;
+  if (expression.kind === "cast") return rootIdentifier(expression.expression);
   if (expression.kind === "index") return rootIdentifier(expression.target);
   if (expression.kind === "member") return rootIdentifier(expression.object);
   if (expression.kind === "unary" && expression.operator === "&") return rootIdentifier(expression.argument);
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) return rootIdentifier(expression.left);
   return undefined;
 }
 

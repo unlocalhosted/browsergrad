@@ -531,7 +531,7 @@ __global__ void bad(float* x) {
 
     const localPointer = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(float* x) {
-  float* y = &x[0];
+  int* y = &x[0];
   if (threadIdx.x < 1) { x[0] = 1.0; }
 }`));
     expect(localPointer.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-local-pointer");
@@ -1578,6 +1578,73 @@ __global__ void vectorSaxpy(float a, const float4* x, const float4* y, float4* z
     expect(compiled.wgsl).toContain("var<storage, read> x: array<f32>;");
     expect(compiled.wgsl).toContain("vec4<f32>");
     expect([...result.buffers.z as Float32Array]).toEqual([12, 22, 33, 46, 60, 66, 77, 90]);
+  });
+
+  it("lowers reinterpret_cast vector memory views over scalar storage", () => {
+    const compiled = compileCudaLiteKernel(`
+#define FLOAT4(value) (reinterpret_cast<float4 *>(&(value))[0])
+__global__ void addPacked(float *a, float *b, float *c, int n) {
+  int idx = 4 * threadIdx.x;
+  if ((idx + 3) < n) {
+    float4 av = FLOAT4(a[idx]);
+    float4 bv = FLOAT4(b[idx]);
+    float4 cv;
+    cv.x = av.x + bv.x;
+    cv.y = av.y + bv.y;
+    cv.z = av.z + bv.z;
+    cv.w = av.w + bv.w;
+    FLOAT4(c[idx]) = cv;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          a: new Float32Array([1, 2, 3, 4]),
+          b: new Float32Array([10, 20, 30, 40]),
+          c: new Float32Array(4),
+        },
+        scalars: { n: 4 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("vec4<f32>(a[");
+    expect(compiled.wgsl).toContain("c[");
+    expect([...result.buffers.c as Float32Array]).toEqual([11, 22, 33, 44]);
+  });
+
+  it("lowers local typed storage pointer views without emitting pointer vars", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void addPackedAlias(float *a, float *b, float *c) {
+  int idx = 4 * threadIdx.x;
+  float4 *ap = reinterpret_cast<float4 *>(&a[idx]);
+  float4 *bp = reinterpret_cast<float4 *>(&b[idx]);
+  float4 *cp = reinterpret_cast<float4 *>(&c[idx]);
+  float4 av = ap[0];
+  float4 bv = bp[0];
+  float4 cv;
+  cv.x = av.x + bv.x;
+  cv.y = av.y + bv.y;
+  cv.z = av.z + bv.z;
+  cv.w = av.w + bv.w;
+  cp[0] = cv;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          a: new Float32Array([2, 4, 6, 8]),
+          b: new Float32Array([1, 3, 5, 7]),
+          c: new Float32Array(4),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).not.toContain("var ap");
+    expect(compiled.wgsl).toContain("vec4<f32>(a[");
+    expect([...result.buffers.c as Float32Array]).toEqual([3, 7, 11, 15]);
   });
 
   it("keeps CUDA vector shared arrays as logical vec storage", () => {

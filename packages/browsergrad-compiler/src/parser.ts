@@ -572,7 +572,9 @@ class Parser {
       const argument = this.parsePrefix();
       return { kind: "update", operator: op, argument, prefix: true, span: mergeSpans(token.span, argument.span) };
     }
-    let expression = this.parsePrimary();
+    let expression = this.startsCxxCast()
+      ? this.parseCxxCastExpression()
+      : this.parsePrimary();
     while (true) {
       this.consumeTemplateArgumentsBeforeCall();
       if (this.match("{")) {
@@ -608,6 +610,27 @@ class Parser {
       break;
     }
     return expression;
+  }
+
+  private parseCxxCastExpression(): CudaLiteExpression {
+    const start = this.advance().span;
+    this.expect("<");
+    this.consumeIf("const");
+    const valueType = this.parseType();
+    this.consumeIf("const");
+    const pointer = this.consumeIf("*") !== undefined;
+    this.consumeIf("const");
+    this.expect(">");
+    this.expect("(");
+    const expression = this.parseExpression();
+    const end = this.expect(")").span;
+    return {
+      kind: "cast",
+      valueType,
+      ...(pointer ? { pointer: true } : {}),
+      expression,
+      span: mergeSpans(start, end),
+    } satisfies CudaLiteCastExpression;
   }
 
   private parsePrimary(): CudaLiteExpression {
@@ -657,6 +680,13 @@ class Parser {
     if (typeEndIndex === undefined) return false;
     const closeIndex = this.tokens[typeEndIndex]?.value === "*" ? typeEndIndex + 1 : typeEndIndex;
     return this.tokens[closeIndex]?.value === ")";
+  }
+
+  private startsCxxCast(): boolean {
+    const token = this.peek();
+    return token.kind === "identifier" &&
+      (token.value === "reinterpret_cast" || token.value === "static_cast" || token.value === "const_cast") &&
+      this.tokens[this.index + 1]?.value === "<";
   }
 
   private startsDeviceFunction(): boolean {
