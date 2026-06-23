@@ -399,6 +399,7 @@ function statementNeedsParentDispatch(statement: CudaLiteStatement): boolean {
     case "kernel-launch":
     case "return":
     case "continue":
+    case "break":
       return false;
     case "asm":
       return true;

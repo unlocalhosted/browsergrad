@@ -386,7 +386,12 @@ export function analyzeCudaLite(
           break;
         case "continue":
           if (loopDepth === 0) {
-            diagnostics.push(error("continue-outside-loop", "continue can only appear inside a for-loop", statement.span));
+            diagnostics.push(error("continue-outside-loop", "continue can only appear inside a loop", statement.span));
+          }
+          break;
+        case "break":
+          if (loopDepth === 0) {
+            diagnostics.push(error("break-outside-loop", "break can only appear inside a loop", statement.span));
           }
           break;
       }

@@ -104,7 +104,7 @@ Local corpus audits on 2026-06-23:
   parser/frontend gaps, texture/vector
   operators, remaining `half2` intrinsics, `double`, templates, and
   runtime library shape.
-- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `100` direct
+- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `106` direct
   WebGPU-runnable after source/context normalization, intrinsic-ledger
   expansion, CUDA/C named constants, CUDA cache-hint memory builtins, local
   header context, simple C++ alias / constexpr intake, and typed storage
@@ -123,8 +123,10 @@ Local corpus audits on 2026-06-23:
   const pointer rebasing plus pointer/null comparison semantics, generic
   dereferenced local pointer/address value typing, vector reinterpret
   memory-view helpers through the device pointer ABI, multi-dimensional shared
-  helper pointer params, and semantic `blockReduce<warpReduce*>` lowering, with
-  `48`
+  helper pointer params, and semantic `blockReduce<warpReduce*>` lowering, plus
+  C line-continuation folding, simple statement-lambda inlining, scalar
+  template helper inference, shadow-safe context defines, and CUDA `break`,
+  with `42`
   hard gaps. Main
   failures: frontend macro/type shape, parser C++-isms, typed feature gaps
   such as bf16, and remaining library/front-end gaps.
@@ -332,8 +334,8 @@ Acceptance criteria for the first slice:
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
   `>=194` WebGPU-runnable, and `<=163` hard gaps.
-- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=100`
-  WebGPU-runnable, and `<=48` hard gaps.
+- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=106`
+  WebGPU-runnable, and `<=42` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
   `>=200` WebGPU-runnable, and `<=93` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has

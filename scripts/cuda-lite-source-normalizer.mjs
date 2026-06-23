@@ -56,8 +56,13 @@ export function createKernelCompilationUnit({
     ...referencedSiblingKernelsRaw.flatMap((sibling) => templateParameterNames(sibling)),
     ...referencedDeviceFunctionsRaw.flatMap((fn) => templateParameterNames(fn.source)),
   ]);
+  const shadowedMacroNames = collectDeclaredIdentifiers([
+    specializedKernel,
+    ...referencedSiblingKernelsRaw,
+    ...referencedDeviceFunctionsRaw.map((fn) => fn.source),
+  ].join("\n"), effectiveDefines);
   const defines = [...effectiveDefines]
-    .filter(([name]) => isMacroIdentifier(name) && !params.has(name) && !templateNames.has(name))
+    .filter(([name]) => isMacroIdentifier(name) && !params.has(name) && !templateNames.has(name) && !shadowedMacroNames.has(name))
     .map(([name, value]) => `#define ${name} ${value}`);
   const referencedDeviceFunctions = referencedDeviceFunctionsRaw
     .map((fn) => ({
@@ -87,7 +92,7 @@ export function createKernelCompilationUnit({
     stripKnownTemplateCallArguments(stripKernelLaunchTemplateArguments(specializedKernel), referencedDeviceFunctionNames),
     sharedDeclarations,
   );
-  const unit = [
+  const unit = normalizeLineContinuations([
     defines.join("\n"),
     functionMacros.map(normalizeFunctionMacro).join("\n"),
     referencedDeviceFunctions.map((fn) => fn.source).join("\n"),
@@ -95,9 +100,9 @@ export function createKernelCompilationUnit({
     textureDeclarations.join("\n"),
     referencedSiblingKernels.join("\n"),
     kernelWithSharedDeclarations,
-  ].filter((part) => part.trim().length > 0).join("\n");
+  ].filter((part) => part.trim().length > 0).join("\n"));
   const withCarrierMembers = normalizeCarrierMemberReferences(unit, effectiveDefines);
-  return normalizeCppTemplateCarrierSyntax(normalizeBlockReduceHelpers(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(stripSupportedTypeAliasDeclarations(withCarrierMembers, effectiveDefines))))));
+  return normalizeCppTemplateCarrierSyntax(normalizeSimpleLocalLambdas(normalizeBlockReduceHelpers(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(stripSupportedTypeAliasDeclarations(withCarrierMembers, effectiveDefines)))))));
 }
 
 export function collectCudaLiteContextDefines(source) {
@@ -613,6 +618,93 @@ function normalizeCarrierMemberReferences(source, definesByName) {
     if (!owner || !member) continue;
     const re = new RegExp(`(?:\\btypename\\s+)?\\b${escapeRegExp(owner)}\\s*::\\s*${escapeRegExp(member)}\\b`, "gu");
     out = out.replace(re, value);
+  }
+  return out;
+}
+
+function normalizeLineContinuations(source) {
+  return source.replace(/\\\r?\n\s*/gu, " ");
+}
+
+function normalizeSimpleLocalLambdas(source) {
+  let out = source;
+  let cursor = 0;
+  while (cursor < out.length) {
+    const match = /\bauto\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\[\s*&?\s*\]\s*/gu.exec(out.slice(cursor));
+    if (match === null) break;
+    const declStart = cursor + match.index;
+    const name = match[1];
+    if (name === undefined) break;
+    const paramsOpen = skipWhitespace(out, declStart + match[0].length);
+    const paramsClose = findBalanced(out, paramsOpen, "(", ")");
+    if (paramsClose === undefined) {
+      cursor = declStart + 1;
+      continue;
+    }
+    const bodyOpen = skipWhitespace(out, paramsClose + 1);
+    const bodyClose = findBalanced(out, bodyOpen, "{", "}");
+    const semi = bodyClose === undefined ? undefined : skipWhitespace(out, bodyClose + 1);
+    if (bodyClose === undefined || out[semi] !== ";") {
+      cursor = declStart + 1;
+      continue;
+    }
+    const params = splitTopLevel(out.slice(paramsOpen + 1, paramsClose)).map((param) => param.trim()).filter(Boolean);
+    const body = out.slice(bodyOpen + 1, bodyClose).trim();
+    if (params.length === 0 || params.some((param) => lambdaParamName(param) === undefined) || /\breturn\b/u.test(body)) {
+      cursor = semi + 1;
+      continue;
+    }
+    const before = out.slice(0, declStart);
+    const after = out.slice(semi + 1);
+    out = before + inlineSimpleLambdaCalls(after, name, params, body);
+    cursor = before.length;
+  }
+  return out;
+}
+
+function inlineSimpleLambdaCalls(source, name, params, body) {
+  const re = new RegExp(`\\b${escapeRegExp(name)}\\s*\\(`, "gu");
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const open = source.indexOf("(", match.index + name.length);
+    const close = findBalanced(source, open, "(", ")");
+    if (close === undefined) {
+      re.lastIndex = match.index + name.length;
+      continue;
+    }
+    const semi = skipWhitespace(source, close + 1);
+    if (source[semi] !== ";") {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    const args = splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim());
+    if (args.length !== params.length) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    out += source.slice(cursor, match.index);
+    out += `{ ${params.map((param, index) => `${param} = ${args[index] ?? "0"}`).join("; ")}; ${body} }`;
+    cursor = semi + 1;
+    re.lastIndex = semi + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function lambdaParamName(param) {
+  return /([A-Za-z_][A-Za-z0-9_]*)\s*$/.exec(param.replace(/=[\s\S]*$/u, "").trim())?.[1];
+}
+
+function collectDeclaredIdentifiers(source, definesByName = new Map()) {
+  const clean = stripCommentsAndStrings(source);
+  const out = new Set();
+  const re = /(?:^|[;{}\n(])\s*(?:const\s+|constexpr\s+|static\s+|volatile\s+|__shared__\s+|extern\s+)*(?:unsigned\s+|signed\s+|long\s+|short\s+)?([A-Za-z_][A-Za-z0-9_:]*)\s*(?:[*&]\s*)?([A-Za-z_][A-Za-z0-9_]*)\b/gu;
+  for (const match of clean.matchAll(re)) {
+    const [, rawType, name] = match;
+    if (!rawType || !name) continue;
+    if (normalizeTemplateTypeArgument(definesByName.get(rawType) ?? rawType, definesByName) === undefined) continue;
+    out.add(name);
   }
   return out;
 }
@@ -1213,13 +1305,17 @@ function scanFunctionCallReferences(source) {
 
 function inferTemplatedFunctionCallArgs(fn, call, source, definesByName = new Map()) {
   const env = new Map();
-  const params = parseKernelSignatureParams(fn.signature);
-  const symbols = collectVisiblePointerTypes(source.slice(0, call.start), definesByName);
+  const params = parseFunctionSignatureParams(fn.signature, fn.templateParams);
+  const visibleSource = source.slice(0, call.start);
+  const pointerSymbols = collectVisiblePointerTypes(visibleSource, definesByName);
+  const valueSymbols = collectVisibleValueTypes(visibleSource, definesByName);
   for (let index = 0; index < params.length; index++) {
     const param = params[index];
     const arg = call.args[index];
     if (param === undefined || arg === undefined || param.templateType === undefined) continue;
-    const type = inferArgumentPointerType(arg, symbols);
+    const type = param.pointer
+      ? inferArgumentPointerType(arg, pointerSymbols)
+      : inferArgumentValueType(arg, valueSymbols, definesByName);
     if (type !== undefined) env.set(param.templateType, type);
   }
   return fn.templateParams.map((param) => param.kind === "type" || param.kind === "value" ? env.get(param.name) : undefined);
@@ -1339,6 +1435,14 @@ function parseKernelSignatureParams(signature) {
   return splitTopLevel(params).map(parseKernelParamForInference);
 }
 
+function parseFunctionSignatureParams(signature, templateParams = []) {
+  const open = signature.indexOf("(");
+  const params = balancedParenContents(signature, open);
+  if (params === undefined || params.trim().length === 0) return [];
+  const templateTypeNames = new Set(templateParams.filter((param) => param.kind === "type").map((param) => param.name));
+  return splitTopLevel(params).map((param) => parseFunctionParamForInference(param, templateTypeNames));
+}
+
 function parseKernelParamForInference(param) {
   const boolCarrier = /\bstd\s*::\s*bool_constant\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>/u.exec(param)?.[1];
   const withoutQualifiers = param
@@ -1352,6 +1456,18 @@ function parseKernelParamForInference(param) {
   };
 }
 
+function parseFunctionParamForInference(param, templateTypeNames) {
+  const withoutQualifiers = param
+    .replace(/\b(?:const|volatile|__restrict__|__restrict|restrict)\b/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const pointer = /^([A-Za-z_][A-Za-z0-9_:]*)\s*\*/u.exec(withoutQualifiers)?.[1];
+  if (pointer !== undefined && templateTypeNames.has(pointer)) return { templateType: pointer, pointer: true };
+  const scalar = /^([A-Za-z_][A-Za-z0-9_:]*)\s+[A-Za-z_][A-Za-z0-9_]*\b/u.exec(withoutQualifiers)?.[1];
+  if (scalar !== undefined && templateTypeNames.has(scalar)) return { templateType: scalar, pointer: false };
+  return {};
+}
+
 function collectVisiblePointerTypes(source, initialDefines = new Map()) {
   const symbols = new Map();
   const defines = mergeDefineMaps(initialDefines, collectObjectDefines(source));
@@ -1363,11 +1479,44 @@ function collectVisiblePointerTypes(source, initialDefines = new Map()) {
   return symbols;
 }
 
+function collectVisibleValueTypes(source, initialDefines = new Map()) {
+  const symbols = new Map();
+  const defines = mergeDefineMaps(initialDefines, collectObjectDefines(source));
+  const re = /\b(?:const\s+|constexpr\s+|static\s+|volatile\s+)*([A-Za-z_][A-Za-z0-9_:]*)\s+([A-Za-z_][A-Za-z0-9_]*)\b(?!\s*\()/gu;
+  for (const match of source.matchAll(re)) {
+    const [, rawType, name] = match;
+    if (!rawType || !name) continue;
+    const normalized = normalizeTemplateTypeArgument(defines.get(rawType) ?? rawType, defines);
+    if (normalized !== undefined) symbols.set(name, normalized);
+  }
+  return symbols;
+}
+
 function inferArgumentPointerType(arg, symbols) {
   const cast = /^\(\s*(?:const\s+)?([A-Za-z_][A-Za-z0-9_:]*)\s*\*\s*\)/u.exec(arg)?.[1];
   if (cast !== undefined) return cast;
   const name = /^[A-Za-z_][A-Za-z0-9_]*/u.exec(arg.trim())?.[0];
   return name === undefined ? undefined : symbols.get(name);
+}
+
+function inferArgumentValueType(arg, symbols, definesByName = new Map()) {
+  const expression = arg.trim();
+  const cast = /^\(\s*([A-Za-z_][A-Za-z0-9_:]*)\s*\)/u.exec(expression)?.[1];
+  if (cast !== undefined) {
+    const normalized = normalizeTemplateTypeArgument(definesByName.get(cast) ?? cast, definesByName);
+    if (normalized !== undefined) return normalized;
+  }
+  if (/\b[0-9]+(?:\.[0-9]*)?(?:[eE][+-]?[0-9]+)?f\b/u.test(expression) || /\b[0-9]+\.[0-9]*(?:[eE][+-]?[0-9]+)?\b/u.test(expression)) return "float";
+  if (/^\s*(?:0x[0-9A-Fa-f]+u?|\d+u)\s*$/u.test(expression)) return "uint";
+  const names = [...expression.matchAll(/\b[A-Za-z_][A-Za-z0-9_]*\b/gu)].map((match) => match[0]);
+  const types = names
+    .map((name) => symbols.get(name) ?? normalizeTemplateTypeArgument(definesByName.get(name) ?? name, definesByName))
+    .filter(Boolean);
+  if (types.includes("float") || types.includes("half")) return "float";
+  if (types.includes("uint")) return "uint";
+  if (types.includes("int")) return "int";
+  if (/^[0-9A-Fa-fxXuUlL\s()+\-*/%<>=!&|^?:.]+$/u.test(expression)) return "int";
+  return undefined;
 }
 
 function inferBoolConstantArgument(arg) {
@@ -1455,6 +1604,10 @@ function scanTemplatedCallReferences(source) {
 
 function collectDeviceFunctionTemplateArguments(sources, names, definesByName = new Map()) {
   const out = new Map();
+  const templatedFunctions = new Map();
+  for (const source of sources) {
+    for (const fn of scanTemplatedFunctionDefinitions(source)) templatedFunctions.set(fn.name, fn);
+  }
   for (const source of sources) {
     const env = templateDefaultEnvironment(source, definesByName);
     for (const call of scanTemplatedCallReferences(source)) {
@@ -1465,6 +1618,14 @@ function collectDeviceFunctionTemplateArguments(sources, names, definesByName = 
       if (previous === undefined || templateArgumentScore(args) > templateArgumentScore(previous)) {
         out.set(call.name, args);
       }
+    }
+    for (const call of scanFunctionCallReferences(source)) {
+      if (!names.has(call.name) || out.has(call.name)) continue;
+      const fn = templatedFunctions.get(call.name);
+      if (fn === undefined) continue;
+      const args = inferTemplatedFunctionCallArgs(fn, call, source, definesByName).map((arg) => arg ?? "");
+      if (templateArgumentScore(args) === 0) continue;
+      out.set(call.name, args);
     }
   }
   return out;

@@ -266,6 +266,7 @@ function hasParentSideEffectsAfterPeerCopy(statements: readonly CudaLiteStatemen
       case "kernel-launch":
       case "return":
       case "continue":
+      case "break":
         return true;
     }
   }

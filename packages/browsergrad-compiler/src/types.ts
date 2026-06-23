@@ -119,7 +119,8 @@ export type CudaLiteStatement =
   | CudaLiteWhileStatement
   | CudaLiteExprStatement
   | CudaLiteReturnStatement
-  | CudaLiteContinueStatement;
+  | CudaLiteContinueStatement
+  | CudaLiteBreakStatement;
 
 export interface CudaLiteVarDecl {
   readonly kind: "var";
@@ -211,6 +212,11 @@ export interface CudaLiteReturnStatement {
 
 export interface CudaLiteContinueStatement {
   readonly kind: "continue";
+  readonly span: SourceSpan;
+}
+
+export interface CudaLiteBreakStatement {
+  readonly kind: "break";
   readonly span: SourceSpan;
 }
 

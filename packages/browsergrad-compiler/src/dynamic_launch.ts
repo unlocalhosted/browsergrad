@@ -405,6 +405,7 @@ function hasParentSideEffectsAfterLaunch(statements: readonly CudaLiteStatement[
       case "while":
       case "return":
       case "continue":
+      case "break":
         return true;
     }
   }

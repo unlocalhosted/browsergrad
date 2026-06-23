@@ -651,6 +651,8 @@ function emitStatement(
       return [`${prefix}${statement.value ? `return ${emitExpression(statement.value, context)};` : "return;"}`];
     case "continue":
       return [`${prefix}continue;`];
+    case "break":
+      return [`${prefix}break;`];
   }
 }
 

@@ -134,7 +134,7 @@ interface MutableTrace {
   readonly sharedWrites: KernelMemoryAccess[];
 }
 
-type ExecControl = { readonly kind: "return"; readonly value?: EvalValue } | { readonly kind: "continue" };
+type ExecControl = { readonly kind: "return"; readonly value?: EvalValue } | { readonly kind: "continue" } | { readonly kind: "break" };
 type BarrierKind = "barrier" | "grid-barrier";
 type BarrierGenerator = Generator<BarrierKind, ExecControl | void, void>;
 
@@ -463,6 +463,7 @@ function* execStatements(
         while (statement.condition ? truthy(evalNumber(statement.condition, context)) : true) {
           const control = yield* execStatements(statement.body, context);
           if (control?.kind === "return") return control;
+          if (control?.kind === "break") break;
           if (statement.update) evalExpression(statement.update, context);
         }
         break;
@@ -470,6 +471,7 @@ function* execStatements(
         while (truthy(evalNumber(statement.condition, context))) {
           const control = yield* execStatements(statement.body, context);
           if (control?.kind === "return") return control;
+          if (control?.kind === "break") break;
         }
         break;
       case "return":
@@ -479,6 +481,8 @@ function* execStatements(
         };
       case "continue":
         return { kind: "continue" };
+      case "break":
+        return { kind: "break" };
     }
   }
 }

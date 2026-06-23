@@ -780,4 +780,54 @@ __global__ void macro_calls_helper(float *out) {
   assert.match(source, /__device__ void helper/u);
 }
 
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void line_continuation_and_shadow(float *out, int n) {
+  int idx = \\
+    (blockIdx.x * blockDim.x)
+    + threadIdx.x;
+  int block_size = blockDim.x;
+  if (idx < n) { out[idx] = (float)block_size; }
+}`,
+    definesByName: new Map([["block_size", "512"]]),
+  });
+  assert.doesNotMatch(source, /#define block_size/u);
+  assert.doesNotMatch(source, /\\/u);
+  assert.match(source, /int idx =\s+\(blockIdx\.x \* blockDim\.x\)/u);
+  assert.match(source, /int block_size = blockDim\.x/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void lambda_inline(float *out, int n) {
+  auto apply = [&](int j){
+    out[j] = out[j] + 1.0f;
+  };
+  int idx = threadIdx.x;
+  if (idx < n) { apply(idx); }
+}`,
+  });
+  assert.doesNotMatch(source, /\bauto\s+apply/u);
+  assert.doesNotMatch(source, /\bapply\s*\(/u);
+  assert.match(source, /\{\s*int j = idx;\s*out\[j\] = out\[j\] \+ 1\.0f;/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void templated_scalar_helper(float *out, int n) {
+  int blocks = ceil_div(n + 1, 4);
+  out[threadIdx.x] = (float)blocks;
+}`,
+    deviceFunctions: [
+      { name: "ceil_div", source: "template<class T> __device__ T ceil_div(T dividend, T divisor) { return (dividend + divisor - 1) / divisor; }" },
+    ],
+  });
+  assert.match(source, /template<class T = int>/u);
+  assert.match(source, /__device__ int ceil_div\(int dividend, int divisor\)/u);
+  assert.doesNotMatch(source, /\bT\s+dividend/u);
+}
+
 console.log("cuda-lite source normalizer tests ok");

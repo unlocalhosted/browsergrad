@@ -838,6 +838,26 @@ __global__ void whileLoop(int *out) {
     expect([...result.buffers.out as Int32Array]).toEqual([13]);
   });
 
+  it("lowers CUDA loop breaks", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void breakLoop(int *out) {
+  int acc = 0;
+  for (int i = 0; i < 8; i++) {
+    if (i == 4) break;
+    acc += i;
+  }
+  out[0] = acc;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("break;");
+    expect([...result.buffers.out as Int32Array]).toEqual([6]);
+  });
+
   it("compiles stdout-only teaching kernels as no-op WebGPU programs", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void hello() {

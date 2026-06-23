@@ -554,6 +554,7 @@ function firstSharedAccessesByName(
         case "kernel-launch":
         case "asm":
         case "continue":
+        case "break":
           break;
       }
     }

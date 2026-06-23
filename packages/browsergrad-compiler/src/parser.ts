@@ -417,6 +417,7 @@ class Parser {
     if (this.match("while")) return [this.parseWhile()];
     if (this.match("return")) return [this.parseReturn()];
     if (this.match("continue")) return [this.parseContinue()];
+    if (this.match("break")) return [this.parseBreak()];
     if (this.match("namespace")) {
       this.skipNamespaceAliasDecl();
       return [];
@@ -536,6 +537,12 @@ class Parser {
     const start = this.expect("continue").span;
     const end = this.expect(";");
     return { kind: "continue", span: mergeSpans(start, end.span) };
+  }
+
+  private parseBreak(): CudaLiteStatement {
+    const start = this.expect("break").span;
+    const end = this.expect(";");
+    return { kind: "break", span: mergeSpans(start, end.span) };
   }
 
   private parseDim3Decl(): CudaLiteDim3Decl {
