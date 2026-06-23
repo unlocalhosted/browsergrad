@@ -160,6 +160,31 @@ __global__ void kernel(float *in, float *out, int ld) {
 {
   const source = createKernelCompilationUnit({
     kernel: `
+__global__ void kernel(float *in, float *out) {
+  out[0] = GELU_OPS(in[0]);
+}`,
+    definesByName: new Map([
+      ["GELU_OPS", "gelu_tanh_approximate"],
+    ]),
+    deviceFunctions: [
+      {
+        name: "gelu_tanh_approximate",
+        source: "__device__ float gelu_tanh_approximate(float x) { return x * 0.5f; }",
+      },
+      {
+        name: "unused_activation",
+        source: "__device__ float unused_activation(float x) { return x; }",
+      },
+    ],
+  });
+  assert.match(source, /gelu_tanh_approximate\(float x\)/u);
+  assert.match(source, /#define GELU_OPS gelu_tanh_approximate/u);
+  assert.doesNotMatch(source, /unused_activation/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 __global__ void kernel(float4 *input, float *out) {
   float4 value = input[0];
   out[0] = vec_at(value, 2);

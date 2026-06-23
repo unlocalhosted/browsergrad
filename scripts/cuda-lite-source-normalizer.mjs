@@ -12,7 +12,7 @@ export function createKernelCompilationUnit({
 }) {
   const specializedKernel = specializeTemplateFromLaunchContext(kernel, templateArgumentsByKernelName);
   const params = new Set(kernelParamNames(specializedKernel));
-  const referencedDeviceFunctionsRaw = referencedDeviceFunctionClosure(specializedKernel, deviceFunctions);
+  const referencedDeviceFunctionsRaw = referencedDeviceFunctionClosure(specializedKernel, deviceFunctions, definesByName);
   const referencedSiblingKernelsRaw = siblingKernels.filter((sibling) => {
     const name = kernelDefinitionName(sibling);
     return name !== undefined && sourceLaunchesKernel(specializedKernel, name);
@@ -66,7 +66,7 @@ export function collectKernelTemplateArguments(source) {
   return launches;
 }
 
-function referencedDeviceFunctionClosure(kernel, deviceFunctions) {
+function referencedDeviceFunctionClosure(kernel, deviceFunctions, definesByName = new Map()) {
   const byName = new Map(deviceFunctions.map((fn) => [fn.name, fn]));
   const included = new Map();
   const pending = [kernel];
@@ -74,12 +74,33 @@ function referencedDeviceFunctionClosure(kernel, deviceFunctions) {
     const source = pending.pop();
     for (const [name, fn] of byName) {
       if (SEMANTIC_BUILTIN_DEVICE_HELPERS.has(name)) continue;
-      if (included.has(name) || !sourceMentionsIdentifier(source, name)) continue;
+      if (included.has(name) || !sourceMentionsIdentifierThroughDefines(source, name, definesByName)) continue;
       included.set(name, fn);
       pending.push(fn.source);
     }
   }
   return [...included.values()];
+}
+
+function sourceMentionsIdentifierThroughDefines(source, name, definesByName) {
+  if (sourceMentionsIdentifier(source, name)) return true;
+  const visited = new Set();
+  const pending = [];
+  for (const [defineName, value] of definesByName) {
+    if (!sourceMentionsIdentifier(source, defineName)) continue;
+    visited.add(defineName);
+    pending.push(value);
+  }
+  while (pending.length > 0) {
+    const value = pending.pop();
+    if (sourceMentionsIdentifier(value, name)) return true;
+    for (const [defineName, nextValue] of definesByName) {
+      if (visited.has(defineName) || !sourceMentionsIdentifier(value, defineName)) continue;
+      visited.add(defineName);
+      pending.push(nextValue);
+    }
+  }
+  return false;
 }
 
 function sourceLaunchesKernel(source, name) {
