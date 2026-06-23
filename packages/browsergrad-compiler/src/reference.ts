@@ -1899,6 +1899,9 @@ function deviceFunctionArgs(
     if (!arg) return zeroParamLocalValue(param);
     if (param.cooperativeGroupKind !== undefined) return cooperativeGroupArgumentValue(arg, param, context);
     if (!param.pointer) {
+      if (isCudaVectorType(param.valueType) && arg.kind === "initializer") {
+        return evalInitializerVector(arg, param.valueType, context);
+      }
       const value = evalExpression(arg, context);
       if (isCudaVectorType(param.valueType)) return value;
       return castNumber(param.valueType, valueAsNumber(value, param.name));
@@ -1907,6 +1910,22 @@ function deviceFunctionArgs(
     if (isAddress(value) || isPoolPointer(value)) return value;
     throw compilerFailure(`device pointer parameter '${param.name}' expects a pointer argument`);
   });
+}
+
+function evalInitializerVector(
+  expression: Extract<CudaLiteExpression, { kind: "initializer" }>,
+  valueType: CudaLiteVectorType,
+  context: ThreadContext,
+): CudaVectorValue {
+  const lanes = expression.elements.map((element) => roundVectorLane(valueType, evalNumber(element, context)));
+  const scalar = lanes[0] ?? 0;
+  return {
+    kind: "cuda-vector",
+    valueType,
+    lanes: lanes.length === 1
+      ? Array.from({ length: cudaVectorLaneCount(valueType) }, () => scalar)
+      : lanes,
+  };
 }
 
 function evalDeviceFunction(fn: CudaLiteDeviceFunction, args: readonly EvalValue[], context: ThreadContext): EvalValue {

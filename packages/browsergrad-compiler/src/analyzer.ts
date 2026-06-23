@@ -1314,6 +1314,9 @@ function validateDeviceFunctionCall(
     }
     const info = walkExpression(arg, scope);
     if (isCudaVectorType(param?.valueType)) {
+      if (arg.kind === "initializer") {
+        continue;
+      }
       if (info.kind !== "vector" && info.kind !== "unknown") {
         diagnostics.push(error("unsupported-vector-argument", `device parameter '${param.name}' expects ${param.valueType}`, arg.span));
       }

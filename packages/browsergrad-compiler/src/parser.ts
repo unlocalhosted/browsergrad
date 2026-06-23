@@ -65,6 +65,7 @@ const TYPE_KEYWORDS = new Set([
 ]);
 const TYPE_START_KEYWORDS = new Set([
   ...TYPE_KEYWORDS,
+  "double",
   "char2",
   "char3",
   "char4",
@@ -421,6 +422,7 @@ class Parser {
   }
 
   private parseStatementEntry(): readonly CudaLiteStatement[] {
+    if (this.consumeIf(";")) return [];
     if (this.match("{")) return [this.parseStandaloneBlock()];
     if (this.match("if")) return [this.parseIf()];
     if (this.match("for")) return [this.parseFor()];
@@ -996,6 +998,7 @@ class Parser {
   }
 
   private parsePrimary(): CudaLiteExpression {
+    if (this.match("{")) return this.parseBracedInitializer();
     if (this.match("(")) {
       this.expect("(");
       const expression = this.parseExpression();

@@ -2354,6 +2354,12 @@ function emitExpressionAsValueType(
   valueType: CudaLiteScalarType,
   context: EmitContext,
 ): string {
+  if (expression.kind === "initializer" && isCudaVectorType(valueType)) {
+    return emitVectorConstructor(
+      valueType,
+      expression.elements.map((element) => emitExpressionAsValueType(element, cudaVectorScalarType(valueType) ?? "float", context)),
+    );
+  }
   const value = emitExpression(expression, context);
   if (valueType === "void") return value;
   if (expressionValueTypeForEmit(expression, context) === valueType) return value;

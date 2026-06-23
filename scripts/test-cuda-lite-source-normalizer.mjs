@@ -938,6 +938,53 @@ __global__ void canonical_type_kernel(Value *out, const Value *input, Layout lay
 {
   const source = createKernelCompilationUnit({
     kernel: `
+__global__ void for_scope_shadow(uint *out, uint stride) {
+  for (uint stride = 4; stride > 0; stride >>= 1) {
+    out[stride] = stride;
+  }
+  out[0] = stride;
+}`,
+  });
+  assert.match(source, /for \(uint __bg_for_stride_0 = 4;__bg_for_stride_0 > 0;__bg_for_stride_0 >>= 1\)/u);
+  assert.match(source, /out\[__bg_for_stride_0\] = __bg_for_stride_0;/u);
+  assert.match(source, /out\[0\] = stride;/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void side_effect_canonical(unsigned int *data, int *out, int max_depth, int depth) {
+  unsigned int *lptr = data;
+  unsigned int *rptr = data + 3;
+  unsigned int rval = *rptr;
+  unsigned int lval = *lptr;
+  if (++depth >= max_depth) {
+    out[0] = depth;
+  }
+  *lptr++ = rval;
+  *rptr-- = lval;
+}`,
+  });
+  assert.match(source, /depth\+\+;\s*if \(depth >= max_depth\)/u);
+  assert.match(source, /\*lptr = rval;\s*lptr\+\+;/u);
+  assert.match(source, /\*rptr = lval;\s*rptr--;/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void deref_prefix(int *ptr, int *out) {
+  if (--(*ptr) == 0) {
+    out[0] = *ptr;
+  }
+}`,
+  });
+  assert.match(source, /\*ptr -= 1;\s*if \(\*ptr == 0\)/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 struct __align__(8) MD {
   float m;
   float d;

@@ -117,7 +117,7 @@ export function createKernelCompilationUnit({
     effectiveDefines,
     new Set([...params, ...templateNames]),
   );
-  return normalizeCppTemplateCarrierSyntax(normalizeSimpleStatementMacros(normalizeSimpleLocalLambdas(normalizeBlockReduceHelpers(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(normalizeVectorStaticConstructors(stripSupportedTypeAliasDeclarations(withNumericDefines, effectiveDefines), effectiveDefines))))))));
+  return normalizeCppTemplateCarrierSyntax(normalizeForLoopScopedVariables(normalizeSideEffectExpressions(normalizeSimpleStatementMacros(normalizeSimpleLocalLambdas(normalizeBlockReduceHelpers(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(normalizeVectorStaticConstructors(stripSupportedTypeAliasDeclarations(withNumericDefines, effectiveDefines), effectiveDefines))))))))));
 }
 
 export function collectCudaLiteContextDefines(source) {
@@ -714,6 +714,122 @@ function normalizeSimpleStatementMacros(source) {
     let out = line;
     for (const macro of macros) out = replaceSimpleStatementMacroCalls(out, macro);
     return out;
+  }).join("\n");
+}
+
+function normalizeSideEffectExpressions(source) {
+  return normalizePostfixPointerAssignments(normalizePrefixUpdateConditions(source));
+}
+
+function normalizeForLoopScopedVariables(source) {
+  let out = "";
+  let cursor = 0;
+  let renameIndex = 0;
+  const re = /\bfor\s*\(/gu;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const open = source.indexOf("(", match.index);
+    const close = findBalanced(source, open, "(", ")");
+    if (open < 0 || close === undefined) {
+      re.lastIndex = match.index + 3;
+      continue;
+    }
+    const bodyStart = skipWhitespace(source, close + 1);
+    const bodyEnd = source[bodyStart] === "{"
+      ? findBalanced(source, bodyStart, "{", "}")
+      : source.indexOf(";", bodyStart);
+    if (bodyEnd === undefined || bodyEnd < 0) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    const header = source.slice(open + 1, close);
+    const parts = splitTopLevel(header, ";");
+    if (parts.length !== 3) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    const init = parts[0] ?? "";
+    const initMatch = /^(\s*(?:const\s+|volatile\s+)*(?:unsigned\s+int|unsigned|uint|int|float|size_t|ptrdiff_t)\s+)([A-Za-z_][A-Za-z0-9_]*)([\s\S]*)$/u.exec(init);
+    if (initMatch?.[1] === undefined || initMatch[2] === undefined || initMatch[3] === undefined) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    const originalName = initMatch[2];
+    if (originalName.length <= 1) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    const scopedName = `__bg_for_${originalName}_${renameIndex++}`;
+    const renamedHeader = [
+      `${initMatch[1]}${scopedName}${replaceIdentifier(initMatch[3], originalName, scopedName)}`,
+      replaceIdentifier(parts[1] ?? "", originalName, scopedName),
+      replaceIdentifier(parts[2] ?? "", originalName, scopedName),
+    ].join(";");
+    const body = source.slice(bodyStart, bodyEnd + 1);
+    out += source.slice(cursor, open + 1);
+    out += renamedHeader;
+    out += source.slice(close, bodyStart);
+    out += replaceIdentifier(body, originalName, scopedName);
+    cursor = bodyEnd + 1;
+    re.lastIndex = cursor;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function replaceIdentifier(source, from, to) {
+  return source.replace(new RegExp(`\\b${escapeRegExp(from)}\\b`, "gu"), to);
+}
+
+function normalizePrefixUpdateConditions(source) {
+  let out = "";
+  let cursor = 0;
+  const re = /\bif\s*\(/gu;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const open = source.indexOf("(", match.index);
+    const close = findBalanced(source, open, "(", ")");
+    if (open < 0 || close === undefined) {
+      re.lastIndex = match.index + 2;
+      continue;
+    }
+    const condition = source.slice(open + 1, close).trim();
+    const normalized = normalizePrefixUpdateCondition(condition);
+    if (normalized === undefined) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    out += source.slice(cursor, match.index);
+    out += `${normalized.prologue}\nif (${normalized.condition})`;
+    cursor = close + 1;
+    re.lastIndex = close + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function normalizePrefixUpdateCondition(condition) {
+  const identifier = /^(?<op>\+\+|--)\s*(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?<rest>(?:[!<>=]=|[<>=])[\s\S]+)$/u.exec(condition);
+  if (identifier?.groups?.op && identifier.groups.name && identifier.groups.rest) {
+    return {
+      prologue: `${identifier.groups.name}${identifier.groups.op};`,
+      condition: `${identifier.groups.name} ${identifier.groups.rest.trim()}`,
+    };
+  }
+  const deref = /^(?<op>\+\+|--)\s*\(\s*(?<target>\*[^)]+)\s*\)\s*(?<rest>(?:[!<>=]=|[<>=])[\s\S]+)$/u.exec(condition);
+  if (deref?.groups?.op && deref.groups.target && deref.groups.rest) {
+    return {
+      prologue: `${deref.groups.target.trim()} ${deref.groups.op === "++" ? "+=" : "-="} 1;`,
+      condition: `${deref.groups.target.trim()} ${deref.groups.rest.trim()}`,
+    };
+  }
+  return undefined;
+}
+
+function normalizePostfixPointerAssignments(source) {
+  return source.split(/\r?\n/u).map((line) => {
+    const match = /^(\s*)\*(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?<op>\+\+|--)\s*=\s*(?<value>.+?);\s*$/u.exec(line);
+    if (match?.groups?.name === undefined || match.groups.op === undefined || match.groups.value === undefined) return line;
+    const indent = match[1] ?? "";
+    return `${indent}*${match.groups.name} = ${match.groups.value.trim()};\n${indent}${match.groups.name}${match.groups.op};`;
   }).join("\n");
 }
 
@@ -2252,24 +2368,25 @@ function parseTemplatedCallee(source) {
   };
 }
 
-function splitTopLevel(source) {
+function splitTopLevel(source, separator = ",") {
   const parts = [];
   let start = 0;
   let angle = 0;
   let paren = 0;
   let bracket = 0;
   let brace = 0;
+  const trackAngles = separator !== ";";
   for (let index = 0; index < source.length; index++) {
     const char = source[index];
-    if (char === "<") angle++;
-    else if (char === ">") angle = Math.max(0, angle - 1);
+    if (trackAngles && char === "<") angle++;
+    else if (trackAngles && char === ">") angle = Math.max(0, angle - 1);
     else if (char === "(") paren++;
     else if (char === ")") paren = Math.max(0, paren - 1);
     else if (char === "[") bracket++;
     else if (char === "]") bracket = Math.max(0, bracket - 1);
     else if (char === "{") brace++;
     else if (char === "}") brace = Math.max(0, brace - 1);
-    else if (char === "," && angle === 0 && paren === 0 && bracket === 0 && brace === 0) {
+    else if (char === separator && angle === 0 && paren === 0 && bracket === 0 && brace === 0) {
       parts.push(source.slice(start, index).trim());
       start = index + 1;
     }

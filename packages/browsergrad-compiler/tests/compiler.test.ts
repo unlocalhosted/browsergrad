@@ -861,6 +861,53 @@ __global__ void whileLoop(int *out) {
     expect([...result.buffers.out as Int32Array]).toEqual([13]);
   });
 
+  it("accepts empty CUDA statement bodies", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void emptyWhile(int *latch, int *out) {
+  while (latch[0] < 1)
+    ;
+  out[0] = 7;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { latch: new Int32Array([1]), out: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("while ((latch[0] < 1))");
+    expect([...result.buffers.out as Int32Array]).toEqual([7]);
+  });
+
+  it("passes braced CUDA vector initializer arguments to device helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float2 pick_max(float2 a, float2 b) {
+  return a.x > b.x ? a : b;
+}
+__global__ void vectorArg(float *x, float *out) {
+  float2 v;
+  v.x = 1.0f;
+  v.y = 2.0f;
+  float2 best = pick_max(v, { x[0], 4.0f });
+  out[0] = best.x + best.y;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([3]), out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("pick_max(v, vec2<f32>(x[0], f32(4.0))");
+    expect([...result.buffers.out as Float32Array]).toEqual([7]);
+  });
+
+  it("classifies double declarations as an explicit unsupported f64 gap", () => {
+    expect(() => parseCudaLite(`
+__global__ void doubleGap(float *out) {
+  double sum = 0.0;
+  out[0] = (float)sum;
+}`)).toThrow("unsupported CUDA-lite type: double");
+  });
+
   it("lowers CUDA loop breaks", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void breakLoop(int *out) {
