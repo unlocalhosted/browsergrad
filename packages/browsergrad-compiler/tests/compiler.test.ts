@@ -1560,6 +1560,30 @@ __global__ void mathy(float *x, float *out) {
     expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
   });
 
+  it("lowers C math aliases used in CUDA snippets", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void c_math_aliases(float *x, float *out) {
+  float value = x[0];
+  out[0] = fabs(value) + exp(value) + log(fabs(value) + 1.0f) +
+    pow(fabs(value), 2.0f) + fmin(value, 1.0f) + fmax(value, -1.0f) +
+    __sinf(value) + __cosf(value) + __tanf(value);
+}`, { workgroupSize: [1, 1, 1] });
+    const value = -0.25;
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([value]), out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const expected = Math.abs(value) + Math.exp(value) + Math.log(Math.abs(value) + 1) +
+      Math.pow(Math.abs(value), 2) + Math.min(value, 1) + Math.max(value, -1) +
+      Math.sin(value) + Math.cos(value) + Math.tan(value);
+
+    expect(compiled.wgsl).toContain("abs(value)");
+    expect(compiled.wgsl).toContain("exp(value)");
+    expect(compiled.wgsl).toContain("pow(abs(value), 2.0)");
+    expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(expected, 5);
+  });
+
   it("lowers CUDA integer and assert intrinsics", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void intIntrinsics(int *x, uint *out) {

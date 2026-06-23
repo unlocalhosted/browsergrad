@@ -78,6 +78,27 @@ __global__ void kernel(float *out) {
 }
 
 {
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void kernel(int *out) {
+  out[0] = templated_helper(7);
+}`,
+    deviceFunctions: [
+      {
+        name: "templated_helper",
+        source: `
+template <const int kStep = 8>
+static __device__ __forceinline__ int templated_helper(int value) {
+  return value + kStep;
+}`,
+      },
+    ],
+  });
+  assert.match(source, /template <const int kStep = 8>/u);
+  assert.match(source, /static __device__ __forceinline__ int templated_helper/u);
+}
+
+{
   const launchBoundsKernel = `
 __global__ void __launch_bounds__(WARP_SIZE * kTiles)
     bounded(float *out, const float *in, int N) {

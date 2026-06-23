@@ -30,6 +30,15 @@ const {
 } = await import(compilerUrl);
 const CUDA_HINT_RE = /__global__|cuda[A-Z]|<<<|threadIdx|blockIdx|__shared__/;
 const NON_CODE_BLOCK_LANG_RE = /^(?:mermaid|flowchart|graphviz|dot|plantuml|text|txt)$/iu;
+const CUDA_SYSTEM_DEFINES = new Map([
+  ["UINT_MAX", "0xffffffffu"],
+  ["INT_MAX", "2147483647"],
+  ["INT_MIN", "(-2147483647 - 1)"],
+  ["CUDART_PI_F", "3.141592654f"],
+  ["CUDART_2PI_F", "6.283185307f"],
+  ["CUDART_PIO2_F", "1.570796327f"],
+  ["CUDART_PIO4_F", "0.785398163f"],
+]);
 
 const files = listFiles(corpusRoot)
   .filter((file) => /\.(?:md|markdown|cu|cuh|cpp|cc|cxx|h|hpp)$/i.test(file))
@@ -55,7 +64,7 @@ for (const file of files) {
     const blockConstants = collectConstantDeclarations(`${includeContext}\n${block.code}`);
     const blockTextures = collectTextureDeclarations(`${includeContext}\n${block.code}`);
     const blockTemplateArguments = collectKernelTemplateArguments(`${includeContext}\n${block.code}`);
-    const effectiveDefines = mergeDefineMaps(carriedDefines, blockDefines);
+    const effectiveDefines = mergeDefineMaps(CUDA_SYSTEM_DEFINES, carriedDefines, blockDefines);
     if (CUDA_HINT_RE.test(block.code)) cudaBlocks++;
     const kernels = extractKernelDefinitions(block.code);
     for (const [kernelIndex, rawKernel] of kernels.entries()) {
@@ -350,7 +359,7 @@ function extractKernelDefinitions(source) {
       }
     }
     if (end < 0) break;
-    const kernel = clean.slice(withTemplatePrefixStart(clean, start), end);
+    const kernel = clean.slice(withCudaDeclarationPrefixStart(clean, start), end);
     if (!isPlaceholderKernel(kernel)) kernels.push(kernel);
     index = end;
   }
@@ -361,6 +370,29 @@ function withTemplatePrefixStart(source, start) {
   const prefix = source.slice(0, start);
   const match = /template\s*<[^;{}]*>\s*$/u.exec(prefix);
   return match ? start - match[0].length : start;
+}
+
+function withCudaDeclarationPrefixStart(source, start) {
+  let cursor = start;
+  while (true) {
+    const beforeWhitespace = skipBackwardWhitespace(source, cursor);
+    const match = /(?:static|inline|__inline__|__forceinline__|__host__)\s*$/u.exec(source.slice(0, beforeWhitespace));
+    if (match === null) break;
+    const candidate = beforeWhitespace - match[0].trimEnd().length;
+    if (candidate < 0 || !isIdentifierBoundary(source[candidate - 1])) break;
+    cursor = candidate;
+  }
+  return withTemplatePrefixStart(source, cursor);
+}
+
+function skipBackwardWhitespace(source, index) {
+  let cursor = index;
+  while (cursor > 0 && /\s/u.test(source[cursor - 1])) cursor--;
+  return cursor;
+}
+
+function isIdentifierBoundary(char) {
+  return char === undefined || !/[A-Za-z0-9_]/u.test(char);
 }
 
 function sourceWithoutCudaFunctionBodies(source) {
@@ -383,7 +415,8 @@ function sourceWithoutCudaFunctionBodies(source) {
       index = semicolon >= 0 ? semicolon + 1 : clean.length;
       continue;
     }
-    out += clean.slice(index, start);
+    const declarationStart = withCudaDeclarationPrefixStart(clean, start);
+    out += clean.slice(index, declarationStart);
     let depth = 0;
     let end = -1;
     for (let cursor = brace; cursor < clean.length; cursor++) {
@@ -454,10 +487,7 @@ function collectPortableDeviceFunctions(source) {
   while (true) {
     const device = clean.indexOf("__device__", index);
     if (device < 0) break;
-    let start = device;
-    const before = clean.slice(Math.max(0, device - 32), device);
-    const inline = /(?:__inline__|inline|__forceinline__)\s*$/u.exec(before);
-    if (inline) start = device - inline[0].length;
+    let start = withCudaDeclarationPrefixStart(clean, device);
     const brace = clean.indexOf("{", device);
     const semicolon = clean.indexOf(";", device);
     if (brace < 0) break;
@@ -478,7 +508,6 @@ function collectPortableDeviceFunctions(source) {
       }
     }
     if (end < 0) break;
-    start = withTemplatePrefixStart(clean, start);
     const fn = clean.slice(start, end);
     const signature = fn.slice(0, fn.indexOf("{"));
     const name = /(?:float|int|uint|half|unsigned\s+int|void)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/u.exec(signature)?.[1];
