@@ -26,6 +26,7 @@ import {
   type SourceSpan,
 } from "./types.js";
 import { CUDA_VECTOR_TYPES } from "./vector_types.js";
+import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 
 const TYPE_KEYWORDS = new Set(["float", "int", "uint", "half", "__half", "bool", ...CUDA_VECTOR_TYPES.keys()]);
 const TYPE_START_KEYWORDS = new Set([
@@ -97,6 +98,16 @@ class Parser {
       else if (this.match("texture")) textures.push(this.parseTexture2D());
       else if (this.match("namespace")) this.skipNamespaceAliasDecl();
       else if (this.match("typedef") || this.match("using")) this.skipSimpleDeclaration();
+      else if (this.match("template")) {
+        const templateConstants = this.parseTemplateIntegerDefaults();
+        this.integerConstantScopes.push(templateConstants);
+        try {
+          if (this.startsDeviceFunction()) functions.push(this.parseDeviceFunction());
+          else kernels.push(this.parseKernel());
+        } finally {
+          this.integerConstantScopes.pop();
+        }
+      }
       else if (this.startsDeviceFunction()) functions.push(this.parseDeviceFunction());
       else kernels.push(this.parseKernel());
     }
@@ -256,6 +267,64 @@ class Parser {
       });
     } while (this.consumeIf(","));
     return params;
+  }
+
+  private parseTemplateIntegerDefaults(): Map<string, number> {
+    const constants = new Map<string, number>();
+    this.expect("template");
+    this.expect("<");
+    if (!this.match(">")) {
+      do {
+        const parsed = this.parseTemplateParameterDefault();
+        if (parsed) constants.set(parsed.name, parsed.value);
+      } while (this.consumeIf(","));
+    }
+    this.expect(">");
+    return constants;
+  }
+
+  private parseTemplateParameterDefault(): { readonly name: string; readonly value: number } | undefined {
+    const start = this.peek().span;
+    this.consumeIf("const");
+    const typeToken = this.peek();
+    if (typeToken.value === "int" || typeToken.value === "uint" || typeToken.value === "unsigned" || typeToken.value === "size_t") {
+      this.parseType();
+      const name = this.expectIdentifier("template parameter name");
+      if (!this.consumeIf("=")) return undefined;
+      this.templateArgumentDepth++;
+      let expression: CudaLiteExpression;
+      try {
+        expression = this.parseExpression();
+      } finally {
+        this.templateArgumentDepth--;
+      }
+      const value = this.evaluateIntegerConstantExpression(expression);
+      if (value === undefined || !Number.isInteger(value)) {
+        this.fail("template default must be an integer constant expression", expression.span);
+      }
+      return { name: name.value, value };
+    }
+    this.skipTemplateParameter(start);
+    return undefined;
+  }
+
+  private skipTemplateParameter(start: SourceSpan): void {
+    let depth = 0;
+    while (!this.match("<eof>")) {
+      if (depth === 0 && (this.match(",") || this.match(">"))) return;
+      const value = this.advance().value;
+      if (value === "<") depth++;
+      else if (value === ">") {
+        if (depth === 0) {
+          this.index--;
+          return;
+        }
+        depth--;
+      } else if (value === ">>") {
+        depth = Math.max(0, depth - 2);
+      }
+    }
+    this.fail("unterminated template parameter list", start);
   }
 
   private parseBlock(): readonly CudaLiteStatement[] {
@@ -572,6 +641,7 @@ class Parser {
       const argument = this.parsePrefix();
       return { kind: "update", operator: op, argument, prefix: true, span: mergeSpans(token.span, argument.span) };
     }
+    if (this.startsFunctionalCast()) return this.parseFunctionalCastExpression();
     let expression = this.startsCxxCast()
       ? this.parseCxxCastExpression()
       : this.parsePrimary();
@@ -633,6 +703,20 @@ class Parser {
     } satisfies CudaLiteCastExpression;
   }
 
+  private parseFunctionalCastExpression(): CudaLiteExpression {
+    const start = this.peek().span;
+    const valueType = this.parseType();
+    this.expect("(");
+    const expression = this.parseExpression();
+    const end = this.expect(")").span;
+    return {
+      kind: "cast",
+      valueType,
+      expression,
+      span: mergeSpans(start, end),
+    } satisfies CudaLiteCastExpression;
+  }
+
   private parsePrimary(): CudaLiteExpression {
     if (this.match("(")) {
       this.expect("(");
@@ -655,6 +739,10 @@ class Parser {
       const part = this.expectIdentifier("qualified expression");
       name += `::${part.value}`;
       end = part.span;
+    }
+    const constant = this.lookupIntegerConstant(name);
+    if (constant !== undefined) {
+      return { kind: "number", value: constant, raw: String(constant), span: mergeSpans(ident.span, end) };
     }
     return { kind: "identifier", name, span: mergeSpans(ident.span, end) };
   }
@@ -687,6 +775,12 @@ class Parser {
     return token.kind === "identifier" &&
       (token.value === "reinterpret_cast" || token.value === "static_cast" || token.value === "const_cast") &&
       this.tokens[this.index + 1]?.value === "<";
+  }
+
+  private startsFunctionalCast(): boolean {
+    return this.peek().kind === "identifier" &&
+      TYPE_KEYWORDS.has(this.peek().value) &&
+      this.tokens[this.index + 1]?.value === "(";
   }
 
   private startsDeviceFunction(): boolean {
@@ -888,6 +982,8 @@ class Parser {
       const value = this.integerConstantScopes[index]?.get(name);
       if (value !== undefined) return value;
     }
+    const named = CUDA_NAMED_CONSTANTS.get(name);
+    if (named && Number.isSafeInteger(named.value)) return named.value;
     return undefined;
   }
 

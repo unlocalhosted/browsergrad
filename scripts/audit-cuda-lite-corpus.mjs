@@ -338,11 +338,17 @@ function extractKernelDefinitions(source) {
       }
     }
     if (end < 0) break;
-    const kernel = clean.slice(start, end);
+    const kernel = clean.slice(withTemplatePrefixStart(clean, start), end);
     if (!isPlaceholderKernel(kernel)) kernels.push(kernel);
     index = end;
   }
   return kernels;
+}
+
+function withTemplatePrefixStart(source, start) {
+  const prefix = source.slice(0, start);
+  const match = /template\s*<[^;{}]*>\s*$/u.exec(prefix);
+  return match ? start - match[0].length : start;
 }
 
 function sourceWithoutCudaFunctionBodies(source) {
@@ -460,6 +466,7 @@ function collectPortableDeviceFunctions(source) {
       }
     }
     if (end < 0) break;
+    start = withTemplatePrefixStart(clean, start);
     const fn = clean.slice(start, end);
     const signature = fn.slice(0, fn.indexOf("{"));
     const name = /(?:float|int|uint|half|unsigned\s+int|void)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/u.exec(signature)?.[1];

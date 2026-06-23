@@ -11,6 +11,8 @@ export const CUDA_NAMED_CONSTANTS = new Map<string, CudaNamedConstant>([
   ["NAN", floatConstant(Number.NaN, "bg_f32_nan()")],
   ["FLT_MAX", floatConstant(3.4028234663852886e38, "3.4028234663852886e38")],
   ["M_PI", floatConstant(Math.PI, "3.141592653589793")],
+  ["warpSize", intConstant(32)],
+  ["NULL", { valueType: "voidptr", value: 0, wgsl: "0u" }],
   ["cudaEventDefault", uintConstant(0)],
   ["cudaEventDisableTiming", uintConstant(2)],
   ["cudaEventInterprocess", uintConstant(4)],
@@ -23,6 +25,10 @@ export const CUDA_NAMED_CONSTANTS = new Map<string, CudaNamedConstant>([
 
 function floatConstant(value: number, wgsl: string): CudaNamedConstant {
   return { valueType: "float", value, wgsl };
+}
+
+function intConstant(value: number): CudaNamedConstant {
+  return { valueType: "int", value, wgsl: `${value}` };
 }
 
 function uintConstant(value: number): CudaNamedConstant {

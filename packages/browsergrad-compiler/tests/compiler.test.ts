@@ -1502,17 +1502,21 @@ __global__ void mathy(float *x, float *out) {
   it("recognizes CUDA/C numeric named constants", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void constants(float* out, uint* kinds) {
+  __shared__ float tile[warpSize / 16];
   if (threadIdx.x < 1) {
     out[0] = INFINITY;
     out[1] = -FLT_MAX;
     out[2] = M_PI;
     out[3] = NAN;
+    tile[0] = (NULL == 0) ? 7.0f : 0.0f;
+    out[4] = tile[0];
     kinds[0] = cudaMemcpyDeviceToDevice + cudaStreamNonBlocking;
+    kinds[1] = warpSize;
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { out: new Float32Array(4), kinds: new Uint32Array(1) } },
+      { buffers: { out: new Float32Array(5), kinds: new Uint32Array(2) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
     const out = [...result.buffers.out as Float32Array];
@@ -1524,7 +1528,8 @@ __global__ void constants(float* out, uint* kinds) {
     expect(out[1]).toBeLessThan(-3e38);
     expect(out[2]).toBeCloseTo(Math.PI, 6);
     expect(Number.isNaN(out[3])).toBe(true);
-    expect([...result.buffers.kinds as Uint32Array]).toEqual([4]);
+    expect(out[4]).toBe(7);
+    expect([...result.buffers.kinds as Uint32Array]).toEqual([4, 32]);
   });
 
   it("lowers CUDA cache-hint loads and stores as plain pointer memory ops", () => {
@@ -2737,6 +2742,36 @@ __global__ static void __launch_bounds__(WARP_SIZE * 2) boundedAlias(scalar_t *o
     expect(compiled.ir.params.map((param) => [param.name, param.valueType])).toContainEqual(["n", "uint"]);
     expect(compiled.wgsl).toContain("array<f32, 16>");
     expect([...result.buffers.out as Float32Array].slice(0, 3)).toEqual([16, 17, 0]);
+  });
+
+  it("supports bounded integer template defaults in kernels and helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+#define WARP_SIZE 32
+template <const int kWarpSize = WARP_SIZE>
+__device__ __forceinline__ float reduce_default(float value) {
+  for (int mask = kWarpSize >> 1; mask >= 1; mask >>= 1) {
+    value = value + 0.0f;
+  }
+  return value;
+}
+template <const int NUM_THREADS = 64>
+__global__ void templated(float *out) {
+  constexpr int NUM_WARPS = (NUM_THREADS + WARP_SIZE - 1) / WARP_SIZE;
+  __shared__ float scratch[NUM_WARPS];
+  int tid = threadIdx.x;
+  if (tid < NUM_WARPS) { scratch[tid] = reduce_default<WARP_SIZE>(float(tid)); }
+  __syncthreads();
+  if (tid == 0) { out[0] = scratch[1]; }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.ir.sharedDeclarations[0]?.dimensions).toEqual([2]);
+    expect(compiled.wgsl).toContain("var<workgroup> scratch: array<f32, 2>;");
+    expect([...result.buffers.out as Float32Array]).toEqual([1]);
   });
 
   it("expands expression-style function macros before parsing", () => {

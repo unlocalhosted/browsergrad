@@ -123,6 +123,10 @@ Simple C++ intake accepts scalar/vector `typedef` and `using` aliases,
 arguments, `static` kernel qualifiers, late `__launch_bounds__` placement, and
 `static_assert` statements. This is bounded CUDA/C++ normalization, not full
 C++ template compatibility.
+Bounded integer template defaults such as `template <const int N = 256>` are
+accepted on kernels and device helpers when the default is an integer constant
+expression. Functional scalar casts such as `float(i)` lower to CUDA-lite casts.
+Named CUDA constants include `warpSize` and `NULL`.
 Cooperative-groups syntax supports both member calls and namespace calls:
 `block.sync()`, `tile.shfl_down(value, offset)`, `cg::sync(block)`, and
 tile-scoped `cg::reduce(tile, value, cg::plus<T>{})` / `cg::greater<T>{}`.
