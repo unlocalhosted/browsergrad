@@ -3261,6 +3261,27 @@ __global__ void padded(float *x) {
     expect(compiled.wgsl).toContain("array<array<f32, 17>, 16>");
   });
 
+  it("folds sizeof and alignof in integer constant expressions", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void layoutConsts(float *x) {
+  constexpr int lanes = sizeof(float4) / sizeof(float);
+  __shared__ float tile[alignof(float4) == 16 ? lanes : 1];
+  int tid = threadIdx.x;
+  if (tid < lanes) {
+    tile[tid] = x[tid];
+    x[tid] = tile[tid] + (float)alignof(float4);
+  }
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([1, 2, 3, 4]) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("array<f32, 4>");
+    expect([...result.buffers.x as Float32Array]).toEqual([17, 18, 19, 20]);
+  });
+
   it("expands object-like macro constants before parsing", () => {
     const compiled = compileCudaLiteKernel(`
 #define TILE_DIM 16 // trailing comments are ignored

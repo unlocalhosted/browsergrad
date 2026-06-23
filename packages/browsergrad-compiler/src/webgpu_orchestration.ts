@@ -101,6 +101,7 @@ const HOST_SIDE_EFFECT_FREE_CALLS = new Set([
   "min",
   "printf",
   "sizeof",
+  "alignof",
   "streamOrderedAllocate",
   ...CUDA_INTRINSICS.map((intrinsic) => intrinsic.name),
 ]);

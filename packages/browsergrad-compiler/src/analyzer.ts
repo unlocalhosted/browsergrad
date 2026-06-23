@@ -22,6 +22,7 @@ import {
 import { collectKernelLaunchCallees } from "./ast_queries.js";
 import { CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
+import { sizeofCudaType } from "./type_layout.js";
 import {
   CUDA_VECTOR_TYPES,
   CUDA_VECTOR_CONSTRUCTORS,
@@ -79,6 +80,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["tex2D", [3, 3]],
   ["surf2Dwrite", [4, 5]],
   ["sizeof", [1, 1]],
+  ["alignof", [1, 1]],
   ["vec_at", [2, 2]],
   ["deviceAllocate", [2, 4]],
   ["streamOrderedAllocate", [2, 4]],
@@ -1003,7 +1005,7 @@ function validateCallExpression(
     validateSurf2DWrite(expression, scope, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "float" };
   }
-  if (callName === "sizeof") {
+  if (callName === "sizeof" || callName === "alignof") {
     validateSizeof(expression, diagnostics);
     return { kind: "scalar", valueType: "uint" };
   }
@@ -1447,8 +1449,8 @@ function validateSizeof(
   diagnostics: CudaLiteDiagnostic[],
 ): void {
   const target = expression.args[0];
-  if (target?.kind !== "identifier" || sizeofType(target.name) === undefined) {
-    diagnostics.push(error("unsupported-sizeof", "sizeof only supports CUDA-lite scalar types", target?.span ?? expression.span));
+  if (target?.kind !== "identifier" || sizeofCudaType(target.name) === undefined) {
+    diagnostics.push(error("unsupported-sizeof", "sizeof/alignof only support CUDA-lite scalar types", target?.span ?? expression.span));
   }
 }
 
@@ -2014,46 +2016,6 @@ function validateDeclaredSymbolName(
 
 function isInlineAsmFma(template: string): boolean {
   return /\bfma\.rn\.f32\b/u.test(template);
-}
-
-function sizeofType(typeName: string): number | undefined {
-  switch (typeName) {
-    case "float":
-    case "int":
-    case "uint":
-    case "unsigned":
-    case "signed":
-    case "long":
-    case "short":
-    case "size_t":
-    case "int32_t":
-    case "uint32_t":
-    case "int64_t":
-    case "uint64_t":
-    case "uintptr_t":
-      return 4;
-    case "half":
-    case "__half":
-      return 2;
-    case "bool":
-      return 4;
-    case "cufftComplex":
-      return 8;
-    case "float2":
-    case "int2":
-    case "uint2":
-      return 8;
-    case "float3":
-    case "int3":
-    case "uint3":
-      return 12;
-    case "float4":
-    case "int4":
-    case "uint4":
-      return 16;
-    default:
-      return undefined;
-  }
 }
 
 function validateSideEffectPlacement(

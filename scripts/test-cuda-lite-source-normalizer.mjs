@@ -479,6 +479,56 @@ __global__ void packed(float *out, const float *in) {
 {
   const source = createKernelCompilationUnit({
     kernel: `
+typedef float floatX;
+typedef Packed128<floatX> x128;
+__global__ void packed_alias(floatX *out, const floatX *in) {
+  constexpr int lanes = sizeof(float4) / sizeof(float);
+  int idx = threadIdx.x * x128::size;
+  x128 value = load128cs(in + idx);
+  store128cs(out + idx, value);
+}`,
+    deviceFunctions: [
+      { name: "load128cs", source: "__device__ Packed128<ElementType> load128cs(const ElementType* address) { return Packed128<ElementType>{}; }" },
+      { name: "store128cs", source: "__device__ void store128cs(ElementType* target, Packed128<ElementType> value) { }" },
+    ],
+  });
+  assert.match(source, /#define floatX float/u);
+  assert.match(source, /#define x128 float4/u);
+  assert.match(source, /reinterpret_cast<float4 \*>\(in \+ idx\)\[0\]/u);
+  assert.doesNotMatch(source, /Packed128/u);
+}
+
+{
+  const kernel = `
+template <typename T, int Block>
+__global__ void alias_template(T *out) {
+  __shared__ T tile[Block / (sizeof(float4) / sizeof(float))];
+  out[threadIdx.x] = (T)alignof(float4);
+}`;
+  const wrapper = `
+using scalar_t = float;
+template <typename T, int Block>
+void launch_alias_template(T *out) {
+  alias_template<T, Block><<<1, Block>>>(out);
+}
+void run(float *out) {
+  launch_alias_template<scalar_t, 128>(out);
+}`;
+  const launches = collectKernelTemplateArguments(`${kernel}\n${wrapper}`);
+  assert.deepEqual(launches.get("alias_template"), ["float", "128"]);
+  const source = createKernelCompilationUnit({
+    kernel,
+    templateArgumentsByKernelName: launches,
+  });
+  assert.match(source, /template <typename T = float, int Block = 128>/u);
+  assert.match(source, /__global__ void alias_template\(float \*out\)/u);
+  assert.match(source, /__shared__ float tile\[Block \/ \(sizeof\(float4\) \/ sizeof\(float\)\)\];/u);
+  assert.match(source, /\(float\)alignof\(float4\)/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 __global__ void async_copy(float *out, float *in) {
   __shared__ float tile[4];
   CP_ASYNC_CG(tile, in, 16);
@@ -496,6 +546,19 @@ __global__ void async_copy(float *out, float *in) {
   assert.match(source, /#define CP_ASYNC_COMMIT_GROUP\(\) CP_ASYNC_COMMIT_GROUP\(\)/u);
   assert.match(source, /#define CP_ASYNC_WAIT_GROUP\(n\) CP_ASYNC_WAIT_GROUP\(n\)/u);
   assert.doesNotMatch(source, /asm volatile/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void local_constexpr(float *out) {
+  constexpr int BM = 32;
+  __shared__ float tile[BM];
+  out[threadIdx.x] = tile[threadIdx.x];
+}`,
+  });
+  assert.doesNotMatch(source, /#define BM 32/u);
+  assert.match(source, /constexpr int BM = 32;/u);
 }
 
 console.log("cuda-lite source normalizer tests ok");

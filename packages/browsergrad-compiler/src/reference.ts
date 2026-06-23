@@ -9,6 +9,7 @@ import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./as
 import { CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
+import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
   cudaVectorConstructorType,
   cudaVectorFieldIndex,
@@ -1298,7 +1299,11 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   }
   if (name === "sizeof") {
     const target = expression.args[0];
-    return target?.kind === "identifier" ? sizeofType(target.name) : 4;
+    return target?.kind === "identifier" ? sizeofCudaType(target.name) ?? 4 : 4;
+  }
+  if (name === "alignof") {
+    const target = expression.args[0];
+    return target?.kind === "identifier" ? alignofCudaType(target.name) ?? 4 : 4;
   }
   if (name === "vec_at") {
     const vector = expression.args[0];
@@ -2481,18 +2486,6 @@ function zeroParamLocalValue(param: CudaLiteParam): EvalValue {
 function valueStorageWidth(type: CudaLiteScalarType | undefined): number {
   if (isCudaVectorType(type)) return cudaVectorLaneCount(type);
   return type === "complex64" ? 2 : 1;
-}
-
-function sizeofType(typeName: string): number {
-  switch (typeName) {
-    case "half":
-    case "__half":
-      return 2;
-    case "cufftComplex":
-      return 8;
-    default:
-      return 4;
-  }
 }
 
 function traceValue(value: EvalValue): number {

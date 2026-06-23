@@ -9,6 +9,7 @@ import { CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
+import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
   CUDA_VECTOR_TYPES,
   cudaVectorConstructorType,
@@ -1646,7 +1647,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       }
       return "0u";
     case "sizeof":
-      if (expression.args[0]?.kind === "identifier") return String(sizeofType(expression.args[0].name));
+      if (expression.args[0]?.kind === "identifier") return String(sizeofCudaType(expression.args[0].name) ?? 4);
+      return "4";
+    case "alignof":
+      if (expression.args[0]?.kind === "identifier") return String(alignofCudaType(expression.args[0].name) ?? 4);
       return "4";
     case "vec_at":
       return `(${args[0] ?? "vec4<f32>()"}[u32(${args[1] ?? "0"})])`;
@@ -2834,18 +2838,6 @@ function surfaceWidthField(name: string): string {
 
 function surfaceHeightField(name: string): string {
   return `${name}_height`;
-}
-
-function sizeofType(typeName: string): number {
-  switch (typeName) {
-    case "half":
-    case "__half":
-      return 2;
-    case "cufftComplex":
-      return 8;
-    default:
-      return 4;
-  }
 }
 
 function indent(level: number): string {

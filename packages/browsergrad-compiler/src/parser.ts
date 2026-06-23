@@ -1,4 +1,5 @@
 import { tokenizeCudaLite, type Token } from "./lexer.js";
+import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
   CudaLiteCompilerError,
   type CudaLiteAssignmentExpression,
@@ -1446,6 +1447,14 @@ function evaluateIntegerConstantExpression(
       const condition = evaluateIntegerConstantExpression(expression.condition, lookupIdentifier);
       if (condition === undefined) return undefined;
       return evaluateIntegerConstantExpression(condition !== 0 ? expression.consequent : expression.alternate, lookupIdentifier);
+    }
+    case "call": {
+      if (expression.callee.kind !== "identifier") return undefined;
+      const target = expression.args[0];
+      if (target?.kind !== "identifier") return undefined;
+      if (expression.callee.name === "sizeof") return sizeofCudaType(target.name);
+      if (expression.callee.name === "alignof") return alignofCudaType(target.name);
+      return undefined;
     }
     default:
       return undefined;

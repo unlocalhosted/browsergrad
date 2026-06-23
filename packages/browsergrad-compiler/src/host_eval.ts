@@ -1,4 +1,5 @@
 import { expressionName } from "./analyzer.js";
+import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import type { CompiledKernelInput, CudaLiteExpression } from "./types.js";
 
 export interface HostEvalPoolPointer {
@@ -56,7 +57,10 @@ export function evaluateHostNumber(
       return evaluateHostNumber(expression.expression, env, input);
     case "call":
       if (expressionName(expression.callee) === "sizeof" && expression.args[0]?.kind === "identifier") {
-        return sizeofType(expression.args[0].name);
+        return sizeofCudaType(expression.args[0].name) ?? 4;
+      }
+      if (expressionName(expression.callee) === "alignof" && expression.args[0]?.kind === "identifier") {
+        return alignofCudaType(expression.args[0].name) ?? 4;
       }
       return undefined;
     case "member": {
@@ -169,18 +173,5 @@ function flipComparison(operator: string): string {
     case ">": return "<";
     case ">=": return "<=";
     default: return operator;
-  }
-}
-
-function sizeofType(typeName: string): number {
-  switch (typeName) {
-    case "half": return 2;
-    case "float":
-    case "int":
-    case "uint":
-    case "unsigned":
-    case "size_t":
-    default:
-      return 4;
   }
 }

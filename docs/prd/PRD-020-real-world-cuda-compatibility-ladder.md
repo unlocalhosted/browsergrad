@@ -60,7 +60,7 @@ Repo exploration:
 
 Local corpus audits on 2026-06-23:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `148` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `149` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -83,7 +83,9 @@ Local corpus audits on 2026-06-23:
   declarator qualifier/attribute intake, constructor-style vector locals,
   shadowable `lerp`, and `atomicExch_system`, with cooperative-group helper
   parameter handles, conservative `__syncwarp` lowering, and CUDA half2
-  conversion aliases, plus real CUDA `while` statement lowering, with `209`
+  conversion aliases, real CUDA `while` statement lowering, and alias-backed
+  value template argument resolution with shared `sizeof`/`alignof` layout
+  folding, with `208`
   hard gaps.
   Main failures:
   parser/frontend gaps, texture/vector
@@ -303,7 +305,7 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=148` WebGPU-runnable, and `<=209` hard gaps.
+  `>=149` WebGPU-runnable, and `<=208` hard gaps.
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=65`
   WebGPU-runnable, and `<=83` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
