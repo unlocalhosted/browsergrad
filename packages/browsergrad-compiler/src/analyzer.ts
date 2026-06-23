@@ -891,7 +891,7 @@ function validateCallExpression(
     const target = expression.args[0];
     if (!target) return { kind: "unknown" };
     const info = walkExpression(target, scope);
-    if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "unknown") {
+    if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "array" && info.kind !== "unknown") {
       diagnostics.push(error("unsupported-cache-hint-address", "__cvta_generic_to_shared expects a pointer expression", target.span));
     }
     return { kind: "scalar", valueType: "uint" };

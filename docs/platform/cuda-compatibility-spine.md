@@ -76,8 +76,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   WebGPU-runnable, and `<=165` hard gaps;
   `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=78`
   WebGPU-runnable, and `<=70` hard gaps;
-  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=194`
-  WebGPU-runnable, and `<=99` hard gaps. The aggregate gate also verifies
+  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=200`
+  WebGPU-runnable, and `<=93` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, WebGPU atomic
@@ -92,7 +92,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   call forms such as `cg::sync(block)` and `cg::reduce(tile, value, op)`,
   C++ `reinterpret_cast<T*>` / `static_cast<T*>` pointer casts for typed
   scalarized storage views such as `FLOAT4(x)` and local pointer aliases,
-  bounded integer template defaults on kernels/device helpers, safe named
+  bounded integer template defaults on kernels/device helpers, multi-dimensional
+  shared-memory address lowering for `__cvta_generic_to_shared`, safe named
   constants such as `warpSize` and `NULL`,
   fast CUDA math/bit intrinsics such as `__saturatef`, `__fdividef`, `__clz`,
   `__mul24`, and `__umul24`,

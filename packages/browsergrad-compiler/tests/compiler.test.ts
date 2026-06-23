@@ -4225,6 +4225,26 @@ __global__ void address_math(uint* out, int n) {
     expect(compiled.wgsl).toContain("regs[fill_regs_0][fill_regs_1] = 3.0;");
   });
 
+  it("lowers shared address conversion for multi-dimensional shared lvalues", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void nested_shared_address(uint* out) {
+  __shared__ float tile[2][3][4];
+  if (threadIdx.x == 0) {
+    out[0] = __cvta_generic_to_shared(tile);
+    out[1] = __cvta_generic_to_shared(&tile[1][2][3]);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Uint32Array]).toEqual([0, 23]);
+    expect(compiled.wgsl).toContain("out[0] = u32(0u)");
+    expect(compiled.wgsl).toContain("out[1] = u32(((u32(1) * 12u) + (u32(2) * 4u) + u32(3)))");
+  });
+
   it("lowers CUDA assignment expression chains as ordered statements", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void chained_assign(float* x, float* out) {

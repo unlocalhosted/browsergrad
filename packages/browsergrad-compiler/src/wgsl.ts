@@ -1871,6 +1871,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   if (name === "__cvta_generic_to_shared") {
     const target = expression.args[0];
     if (!target) return "0u";
+    const sharedIndex = emitSharedAddressIndex(target, context);
+    if (sharedIndex) return `u32(${sharedIndex})`;
     const parts = devicePointerArgumentParts(target, context);
     if (!parts) throw featureError("unsupported-device-pointer-param", "__cvta_generic_to_shared expects a storage or shared pointer");
     return `u32(${parts.base})`;
@@ -2741,6 +2743,27 @@ function emitSurfaceHelper(name: string, context: EmitContext): string[] {
     "  }",
     "}",
   ];
+}
+
+function emitSharedAddressIndex(expression: CudaLiteExpression, context: EmitContext): string | undefined {
+  const target = expression.kind === "unary" && expression.operator === "&" ? expression.argument : expression;
+  const indexes: CudaLiteExpression[] = [];
+  let cursor = target;
+  while (cursor.kind === "index") {
+    indexes.unshift(cursor.index);
+    cursor = cursor.target;
+  }
+  if (cursor.kind !== "identifier") return undefined;
+  const declaration = context.ir.sharedDeclarations.find((item) => item.name === cursor.name);
+  if (!declaration) return undefined;
+  if (indexes.length === 0) return "0u";
+  const terms: string[] = [];
+  for (let i = 0; i < indexes.length; i++) {
+    const stride = declaration.dimensions.slice(i + 1).reduce((product, dimension) => product * dimension, 1);
+    const value = `u32(${emitExpression(indexes[i]!, context)})`;
+    terms.push(stride === 1 ? value : `(${value} * ${stride}u)`);
+  }
+  return terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
 }
 
 interface PoolAccess {
