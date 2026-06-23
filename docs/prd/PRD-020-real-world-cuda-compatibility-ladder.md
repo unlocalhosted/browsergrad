@@ -60,17 +60,18 @@ Repo exploration:
 
 Local corpus audits on 2026-06-23:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `85` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `92` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
   `reinterpret_cast<T*>` storage views, bounded CUDA template constants, and
   fast math/bit intrinsics plus 2D float texture-object lowering and
   launch-context template specialization plus `half2` f16 vector storage, with
-  `272` hard gaps. Main failures: parser/frontend gaps, texture/vector
+  mutable pointer-parameter rebasing, with `265` hard gaps. Main failures:
+  parser/frontend gaps, texture/vector
   operators, `clock_t`, remaining `half2` intrinsics, `double`, templates, and
   runtime library shape.
-- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `55` direct
+- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `58` direct
   WebGPU-runnable after source/context normalization, intrinsic-ledger
   expansion, CUDA/C named constants, CUDA cache-hint memory builtins, local
   header context, simple C++ alias / constexpr intake, and typed storage
@@ -79,7 +80,9 @@ Local corpus audits on 2026-06-23:
   `float4` lane reads plus local array initializer intake, local pointer-alias
   cache-hint loads, shared-array pointer decay, explicit 32-bit pointer
   reinterprets, alias-aware atomics, and CUDA `atomicInc` / `atomicDec`
-  semantics, with `93` hard gaps. Main
+  semantics plus stricter constant hygiene and CUDA helper intrinsics such as
+  `div_ceil`, fixed register fills, shared-address conversion, and mutable
+  pointer-parameter rebasing, with `90` hard gaps. Main
   failures: frontend macro/type shape, `floatX` aliases, parser C++-isms, and
   remaining library/front-end gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `192` direct
@@ -275,9 +278,9 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=85` WebGPU-runnable, and `<=272` hard gaps.
-- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=55`
-  WebGPU-runnable, and `<=93` hard gaps.
+  `>=92` WebGPU-runnable, and `<=265` hard gaps.
+- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=58`
+  WebGPU-runnable, and `<=90` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
   `>=192` WebGPU-runnable, and `<=101` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
@@ -305,6 +308,9 @@ Acceptance criteria for the first slice:
   special.
 - Local typed pointer aliases such as `float4* p = reinterpret_cast<float4*>(&x[i])`
   lower as storage views without emitting fake pointer storage variables.
+- Mutable CUDA pointer parameters such as `p += offset`, `p -= offset`, and
+  `p++` lower through one pointer-base model in analyzer, CPU reference, WGSL
+  emission, atomics/device-pointer argument paths, and corpus audit gates.
 - Bounded integer template defaults on kernels and device helpers are preserved
   by corpus extraction and compile into integer constant expressions. This
   includes `template <const int N = ...>` defaults, functional scalar casts such

@@ -1585,7 +1585,7 @@ __global__ void intIntrinsics(int *x, uint *out) {
   it("recognizes CUDA/C numeric named constants", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void constants(float* out, uint* kinds) {
-  __shared__ float tile[warpSize / 16];
+  __shared__ float tile[WARP_SIZE / 16];
   if (threadIdx.x < 1) {
     out[0] = INFINITY;
     out[1] = -FLT_MAX;
@@ -1595,7 +1595,7 @@ __global__ void constants(float* out, uint* kinds) {
     out[4] = tile[0];
     out[5] = M_SQRT2 * M_2_SQRTPI * 0.5f + M_SQRT1_2;
     kinds[0] = cudaMemcpyDeviceToDevice + cudaStreamNonBlocking;
-    kinds[1] = warpSize;
+    kinds[1] = warpSize + WARP_SIZE;
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
@@ -1614,7 +1614,7 @@ __global__ void constants(float* out, uint* kinds) {
     expect(Number.isNaN(out[3])).toBe(true);
     expect(out[4]).toBe(7);
     expect(out[5]).toBeCloseTo(Math.SQRT2 * (2 / Math.sqrt(Math.PI)) * 0.5 + Math.SQRT1_2, 6);
-    expect([...result.buffers.kinds as Uint32Array]).toEqual([4, 32]);
+    expect([...result.buffers.kinds as Uint32Array]).toEqual([4, 64]);
   });
 
   it("lowers CUDA cache-hint loads and stores as plain pointer memory ops", () => {
@@ -3594,5 +3594,54 @@ __global__ void shared_counter(uint* out) {
     expect(compiled.wgsl).toContain("var<workgroup> counter: array<atomic<u32>, 1>;");
     expect(compiled.wgsl).toContain("bg_atomicInc_workgroup_u32(&counter[0], u32(1))");
     expect(compiled.wgsl).toContain("bg_atomicDec_workgroup_u32(&counter[0], u32(1))");
+  });
+
+  it("supports CUDA div_ceil and shared address conversion helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void address_math(uint* out, int n) {
+  __shared__ float smem[8];
+  float regs[2][2];
+  float* tile = &smem[4];
+  if (threadIdx.x == 0) {
+    fill_2D_regs<float, 2, 2>(regs, 3.0f);
+    out[0] = uint(div_ceil(n, 4));
+    out[1] = __cvta_generic_to_shared(tile);
+    out[2] = uint(regs[1][1]);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(3) }, scalars: { n: 17 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Uint32Array]).toEqual([5, 4, 3]);
+    expect(compiled.wgsl).toContain("(((params.n + 4) - 1) / 4)");
+    expect(compiled.wgsl).toContain("out[1] = u32((0u + u32(4)))");
+    expect(compiled.wgsl).toContain("regs[fill_regs_0][fill_regs_1] = 3.0;");
+  });
+
+  it("supports mutable CUDA pointer rebasing", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void pointer_rebase(uint* x, uint* out, int offset) {
+  x += offset;
+  if (threadIdx.x == 0) {
+    out[0] = x[0];
+    x -= 1;
+    out[1] = x[0];
+    x++;
+    out[2] = *x;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Uint32Array([10, 20, 30, 40]), out: new Uint32Array(3) }, scalars: { offset: 2 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Uint32Array]).toEqual([30, 20, 30]);
+    expect(compiled.wgsl).toContain("var bg_x_base: u32 = 0u;");
+    expect(compiled.wgsl).toContain("bg_x_base = (bg_x_base + u32(params.offset));");
+    expect(compiled.wgsl).toContain("x[(bg_x_base + u32(0))]");
   });
 });

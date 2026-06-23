@@ -2,6 +2,7 @@ import {
   CudaLiteCompilerError,
   type CudaLiteAnalysis,
   type CudaLiteAnalyzeOptions,
+  type CudaLiteAssignmentExpression,
   type CudaLiteCooperativeGroupKind,
   type CudaLiteDeviceFunction,
   type CudaLiteDiagnostic,
@@ -12,6 +13,7 @@ import {
   type CudaLiteParam,
   type CudaLiteScalarType,
   type CudaLiteStatement,
+  type CudaLiteUpdateExpression,
   type CudaLiteTexture2D,
   type CudaLiteVarDecl,
   type KernelIrModule,
@@ -51,6 +53,10 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["warp_reduce_sum_f16_f32", [1, 1]],
   ["min", [2, 2]],
   ["max", [2, 2]],
+  ["div_ceil", [2, 2]],
+  ["fill_1D_regs", [2, 2]],
+  ["fill_2D_regs", [2, 2]],
+  ["fill_3D_regs", [2, 2]],
   ["bg_subgroup_add", [1, 1]],
   ["atomicAdd", [2, 2]],
   ["atomicSub", [2, 2]],
@@ -84,6 +90,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaMemcpyPeerAsync", [6, 6]],
   ["__ldcs", [1, 1]],
   ["__stcs", [2, 2]],
+  ["__cvta_generic_to_shared", [1, 1]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
   ...[...CUDA_VECTOR_TYPES].map(([type, info]) => [`make_${type}`, [info.lanes, info.lanes]] as const),
 ]);
@@ -855,6 +862,19 @@ function validateCallExpression(
     if (value) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
     return { kind: "scalar", valueType: "voidptr" };
   }
+  if (callName === "__cvta_generic_to_shared") {
+    const target = expression.args[0];
+    if (!target) return { kind: "unknown" };
+    const info = walkExpression(target, scope);
+    if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "unknown") {
+      diagnostics.push(error("unsupported-cache-hint-address", "__cvta_generic_to_shared expects a pointer expression", target.span));
+    }
+    return { kind: "scalar", valueType: "uint" };
+  }
+  if (isFillRegsBuiltin(callName)) {
+    validateFillRegs(expression, scope, diagnostics, walkExpression);
+    return { kind: "scalar", valueType: "voidptr" };
+  }
   const vectorConstructor = cudaVectorConstructorType(callName);
   if (vectorConstructor) {
     for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
@@ -969,6 +989,25 @@ function isHalf2Intrinsic(name: string): boolean {
     name === "__hmul2" ||
     name === "__hmin2" ||
     name === "__hmax2";
+}
+
+function isFillRegsBuiltin(name: string): boolean {
+  return name === "fill_1D_regs" || name === "fill_2D_regs" || name === "fill_3D_regs";
+}
+
+function validateFillRegs(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const target = expression.args[0];
+  const value = expression.args[1];
+  const info = target ? walkExpression(target, scope) : undefined;
+  if (info?.kind !== "array" && info?.kind !== "unknown") {
+    diagnostics.push(error("unsupported-local-array-fill", "fill_*D_regs expects a fixed local array", target?.span ?? expression.span));
+  }
+  if (value) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
 }
 
 function validateRuntimeCall(
@@ -1609,7 +1648,7 @@ function validateNonCallExpression(
       return { kind: "scalar" };
     }
     case "assignment": {
-      validateLValueExpression(expression.left, scope, diagnostics, walkExpression);
+      validateLValueExpression(expression.left, scope, diagnostics, walkExpression, expression.operator);
       const left = walkExpression(expression.left, scope);
       const right = walkExpression(expression.right, scope);
       if (left.kind === "complex") {
@@ -1626,7 +1665,7 @@ function validateNonCallExpression(
       return { kind: "scalar" };
     }
     case "update": {
-      validateLValueExpression(expression.argument, scope, diagnostics, walkExpression);
+      validateLValueExpression(expression.argument, scope, diagnostics, walkExpression, expression.operator);
       return { kind: "scalar" };
     }
     case "call":
@@ -1639,6 +1678,7 @@ function validateLValueExpression(
   scope: Scope,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
+  operator?: CudaLiteAssignmentExpression["operator"] | CudaLiteUpdateExpression["operator"],
 ): void {
   if (expression.kind === "identifier") {
     const symbol = lookupSymbol(expression.name, scope, expression.span);
@@ -1651,6 +1691,7 @@ function validateLValueExpression(
       diagnostics.push(error("parameter-assignment", `cannot assign to scalar parameter '${expression.name}'`, expression.span));
       return;
     }
+    if (symbol.kind === "param" && symbol.pointer && isPointerRebaseOperator(operator)) return;
     diagnostics.push(error("invalid-assignment-target", "assignment target must be a local variable, pointer element, or shared element", expression.span));
     return;
   }
@@ -1687,6 +1728,12 @@ function validateLValueExpression(
     }
   }
   diagnostics.push(error("invalid-assignment-target", "assignment target must be a local variable, pointer element, or shared element", expression.span));
+}
+
+function isPointerRebaseOperator(
+  operator: CudaLiteAssignmentExpression["operator"] | CudaLiteUpdateExpression["operator"] | undefined,
+): boolean {
+  return operator === "+=" || operator === "-=" || operator === "++" || operator === "--";
 }
 
 function expressionInfoForIdentifier(

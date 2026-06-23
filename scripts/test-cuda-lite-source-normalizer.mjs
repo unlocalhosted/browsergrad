@@ -142,6 +142,39 @@ __global__ void parent(float *out) {
 }
 
 {
+  const kernel = `
+template <const int HeadDim, const int Tile, const int Stage>
+__global__ void templated_kernel(float *out) {
+  float tmp[Tile][Stage];
+  out[0] = tmp[0][0] + HeadDim;
+}`;
+  const wrapper = `
+template <const int HeadDim, const int Stage>
+void launch_templated_kernel(float *out) {
+  constexpr int Tile = (HeadDim < 128) ? 4 : 8;
+  templated_kernel<HeadDim, Tile, Stage><<<1, 1>>>(out);
+}
+void host(float *out) {
+  launch_templated_kernel<64, 2>(out);
+}`;
+  const launches = collectKernelTemplateArguments(`${kernel}\n${wrapper}`);
+  assert.deepEqual(launches.get("templated_kernel"), ["64", "4", "2"]);
+  const source = createKernelCompilationUnit({
+    kernel,
+    definesByName: new Map([
+      ["HeadDim", "999"],
+      ["Tile", "999"],
+      ["Stage", "999"],
+    ]),
+    templateArgumentsByKernelName: launches,
+  });
+  assert.match(source, /template <const int HeadDim = 64, const int Tile = 4, const int Stage = 2>/u);
+  assert.doesNotMatch(source, /#define HeadDim 999/u);
+  assert.doesNotMatch(source, /#define Tile 999/u);
+  assert.doesNotMatch(source, /#define Stage 999/u);
+}
+
+{
   const source = createKernelCompilationUnit({
     kernel: `
 __global__ void kernel(float *in, float *out, int ld) {

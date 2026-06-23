@@ -58,12 +58,21 @@ export function kernelDefinitionName(kernel) {
 }
 
 export function collectKernelTemplateArguments(source) {
-  const launches = new Map();
+  const candidates = new Map();
+  const addCandidate = (name, args) => {
+    if (args.length === 0) return;
+    const previous = candidates.get(name);
+    if (previous === undefined || templateArgumentScore(args) > templateArgumentScore(previous)) {
+      candidates.set(name, args);
+    }
+  };
   for (const launch of scanTemplatedKernelReferences(source)) {
-    if (launch.args.length === 0) continue;
-    if (!launches.has(launch.name)) launches.set(launch.name, launch.args);
+    addCandidate(launch.name, launch.args);
   }
-  return launches;
+  for (const propagated of collectWrapperPropagatedTemplateArguments(source)) {
+    addCandidate(propagated.name, propagated.args);
+  }
+  return candidates;
 }
 
 function referencedDeviceFunctionClosure(kernel, deviceFunctions, definesByName = new Map()) {
@@ -293,6 +302,161 @@ function scanTemplatedKernelReferences(source) {
   }
   refs.push(...scanCudaFuncSetAttributeTemplateReferences(source));
   return refs;
+}
+
+function collectWrapperPropagatedTemplateArguments(source) {
+  const propagated = [];
+  const calls = scanTemplatedCallReferences(source);
+  for (const fn of scanTemplatedFunctionDefinitions(source)) {
+    const fnCalls = calls.filter((call) => call.name === fn.name && call.args.length > 0);
+    if (fnCalls.length === 0) continue;
+    const kernelRefs = scanTemplatedKernelReferences(fn.body);
+    if (kernelRefs.length === 0) continue;
+    for (const call of fnCalls) {
+      const env = templateEnvironment(fn.templateParams, call.args);
+      if (env.size === 0) continue;
+      extendEnvironmentWithConstexprs(env, fn.body);
+      for (const ref of kernelRefs) {
+        const args = ref.args.map((arg) => substituteTemplateArgument(arg, env));
+        if (templateArgumentScore(args) === 0) continue;
+        propagated.push({ name: ref.name, args });
+      }
+    }
+  }
+  return propagated;
+}
+
+function scanTemplatedFunctionDefinitions(source) {
+  const definitions = [];
+  let index = 0;
+  while (index < source.length) {
+    const match = /\btemplate\s*</u.exec(source.slice(index));
+    if (match === null) break;
+    const templateStart = index + match.index;
+    const open = source.indexOf("<", templateStart);
+    const close = findBalanced(source, open, "<", ">");
+    if (close === undefined) break;
+    const brace = source.indexOf("{", close + 1);
+    const semicolon = source.indexOf(";", close + 1);
+    if (brace < 0) break;
+    if (semicolon >= 0 && semicolon < brace) {
+      index = semicolon + 1;
+      continue;
+    }
+    const signature = source.slice(close + 1, brace);
+    const name = templatedFunctionName(signature);
+    const end = findBalanced(source, brace, "{", "}");
+    if (name === undefined || end === undefined) {
+      index = close + 1;
+      continue;
+    }
+    definitions.push({
+      name,
+      templateParams: splitTopLevel(source.slice(open + 1, close)).map(parseTemplateParam).filter(Boolean),
+      body: source.slice(brace + 1, end),
+    });
+    index = end + 1;
+  }
+  return definitions;
+}
+
+function templatedFunctionName(signature) {
+  const open = signature.lastIndexOf("(");
+  if (open < 0) return undefined;
+  const before = signature.slice(0, open).trim();
+  return /([A-Za-z_][A-Za-z0-9_]*)\s*$/u.exec(before)?.[1];
+}
+
+function scanTemplatedCallReferences(source) {
+  const refs = [];
+  let index = 0;
+  while (index < source.length) {
+    const ident = /[A-Za-z_][A-Za-z0-9_]*/u.exec(source.slice(index));
+    if (ident === null) break;
+    const nameStart = index + ident.index;
+    const name = ident[0];
+    index = nameStart + name.length;
+    if (name === "template") continue;
+    const templateStart = skipWhitespace(source, index);
+    if (source[templateStart] !== "<") continue;
+    const templateEnd = findBalanced(source, templateStart, "<", ">");
+    if (templateEnd === undefined) continue;
+    const afterTemplate = skipWhitespace(source, templateEnd + 1);
+    if (source.slice(afterTemplate, afterTemplate + 3) === "<<<") {
+      index = afterTemplate + 3;
+      continue;
+    }
+    if (source[afterTemplate] !== "(") {
+      index = templateEnd + 1;
+      continue;
+    }
+    refs.push({
+      name,
+      args: splitTopLevel(source.slice(templateStart + 1, templateEnd)).map((arg) => arg.trim()),
+    });
+    index = afterTemplate + 1;
+  }
+  return refs;
+}
+
+function templateEnvironment(params, args) {
+  const env = new Map();
+  let argIndex = 0;
+  for (const param of params) {
+    const arg = args[argIndex++];
+    if (!param || arg === undefined) continue;
+    if (param.kind === "value") {
+      const normalized = normalizeTemplateValueArgument(arg, param.valueType);
+      if (normalized !== undefined) env.set(param.name, normalized);
+    } else if (param.kind === "type" && /^[A-Za-z_][A-Za-z0-9_:]*$/u.test(arg.trim())) {
+      env.set(param.name, arg.trim());
+    }
+  }
+  return env;
+}
+
+function extendEnvironmentWithConstexprs(env, body) {
+  const re = /\bconstexpr\s+(?:const\s+)?(?:int|uint|unsigned\s+int|size_t|bool)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);/gu;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const match of body.matchAll(re)) {
+      const [, name, expression] = match;
+      if (!name || !expression || env.has(name)) continue;
+      const value = evaluateTemplateIntegerExpression(expression, env);
+      if (value === undefined) continue;
+      env.set(name, value);
+      changed = true;
+    }
+  }
+}
+
+function substituteTemplateArgument(arg, env) {
+  const value = evaluateTemplateIntegerExpression(arg, env);
+  if (value !== undefined) return value;
+  return arg.replace(/\b[A-Za-z_][A-Za-z0-9_]*\b/gu, (name) => env.get(name) ?? name).trim();
+}
+
+function evaluateTemplateIntegerExpression(expression, env) {
+  const substituted = expression
+    .replace(/\btrue\b/gu, "1")
+    .replace(/\bfalse\b/gu, "0")
+    .replace(/\b[A-Za-z_][A-Za-z0-9_]*\b/gu, (name) => env.get(name) ?? `__unknown_${name}`);
+  if (/__unknown_/u.test(substituted)) return undefined;
+  const normalized = substituted.replace(/([0-9])(?:u|U|l|L)+\b/gu, "$1");
+  if (!/^[0-9A-Fa-fxX\s()+\-*/%<>=!&|^?:.]+$/u.test(normalized)) return undefined;
+  try {
+    const result = Function(`"use strict"; return (${normalized});`)();
+    if (typeof result === "boolean") return result ? "1" : "0";
+    if (Number.isFinite(result) && Number.isInteger(result)) return String(result);
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function templateArgumentScore(args) {
+  return args.reduce((score, arg) => score + (normalizeTemplateValueArgument(arg, "int") === undefined ? 0 : 1), 0);
 }
 
 function scanCudaFuncSetAttributeTemplateReferences(source) {

@@ -24,6 +24,7 @@ export const CUDA_NAMED_CONSTANTS = new Map<string, CudaNamedConstant>([
   ["M_SQRT2", floatConstant(Math.SQRT2, "1.4142135623730951")],
   ["M_SQRT1_2", floatConstant(Math.SQRT1_2, "0.7071067811865476")],
   ["warpSize", intConstant(32)],
+  ["WARP_SIZE", intConstant(32)],
   ["NULL", { valueType: "voidptr", value: 0, wgsl: "0u" }],
   ["cudaEventDefault", uintConstant(0)],
   ["cudaEventDisableTiming", uintConstant(2)],

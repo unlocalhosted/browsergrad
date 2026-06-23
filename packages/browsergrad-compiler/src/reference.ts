@@ -597,11 +597,12 @@ function pointerArgumentValue(
     return { kind: "address", target: resolveLValue(arg.argument, context) };
   }
   if (arg.kind === "identifier") {
+    const local = context.locals.get(arg.name);
+    if (isPoolPointer(local)) return { ...local, valueType };
+    if (isAddress(local)) return local;
     if (context.buffers.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "buffer", index: 0 } };
     if (context.shared.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "shared", index: 0 } };
     if (context.memoryPools.has(arg.name)) return { kind: "pool-pointer", poolName: arg.name, byteOffset: 0, valueType };
-    const local = context.locals.get(arg.name);
-    if (isPoolPointer(local)) return { ...local, valueType };
     if (local && typeof local !== "number") return local;
   }
   const value = evalExpression(arg, context);
@@ -839,6 +840,8 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
     case "assignment":
       return evalAssignment(expression.operator, expression.left, expression.right, context);
     case "update": {
+      const pointerRebase = evalPointerRebaseUpdate(expression, context);
+      if (pointerRebase) return pointerRebase;
       const lvalue = resolveLValue(expression.argument, context);
       const current = readLValue(lvalue, context);
       const currentNumber = valueAsNumber(current, lvalue.name);
@@ -853,10 +856,10 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
 
 function evalDeref(expression: CudaLiteExpression, context: ThreadContext): EvalValue {
   if (expression.kind === "identifier") {
-    if (context.buffers.has(expression.name)) return readLValue({ name: expression.name, space: "buffer", index: 0 }, context);
     const local = context.locals.get(expression.name);
     if (isAddress(local)) return readLValue(local.target, context);
     if (isPoolPointer(local)) return readLValue({ name: local.poolName, space: "pool", index: Math.trunc(local.byteOffset / 4), valueType: "float" }, context);
+    if (context.buffers.has(expression.name)) return readLValue({ name: expression.name, space: "buffer", index: 0 }, context);
   }
   if (expression.kind === "cast" && expression.pointer) {
     const pointer = valueAsPoolPointer(evalExpression(expression.expression, context), "pool pointer");
@@ -967,6 +970,8 @@ function evalAssignment(
   rightExpression: CudaLiteExpression,
   context: ThreadContext,
 ): EvalValue {
+  const pointerRebase = evalPointerRebaseAssignment(operator, leftExpression, rightExpression, context);
+  if (pointerRebase) return pointerRebase;
   const lvalue = resolveLValue(leftExpression, context);
   const right = evalExpression(rightExpression, context);
   if (isPoolPointer(right)) {
@@ -1008,6 +1013,74 @@ function evalAssignment(
   return value;
 }
 
+function evalPointerRebaseAssignment(
+  operator: string,
+  leftExpression: CudaLiteExpression,
+  rightExpression: CudaLiteExpression,
+  context: ThreadContext,
+): AddressValue | PoolPointerValue | undefined {
+  if (leftExpression.kind !== "identifier" || (operator !== "+=" && operator !== "-=")) return undefined;
+  const current = mutablePointerValue(leftExpression.name, context);
+  if (!current) return undefined;
+  const valueType = pointerValueTypeForExpression(leftExpression, context);
+  const delta = Math.trunc(evalNumber(rightExpression, context)) * (operator === "+=" ? 1 : -1);
+  const next = offsetPointerValue(current, delta, valueType);
+  context.locals.set(leftExpression.name, next);
+  return next;
+}
+
+function evalPointerRebaseUpdate(
+  expression: Extract<CudaLiteExpression, { kind: "update" }>,
+  context: ThreadContext,
+): AddressValue | PoolPointerValue | undefined {
+  if (expression.argument.kind !== "identifier") return undefined;
+  const current = mutablePointerValue(expression.argument.name, context);
+  if (!current) return undefined;
+  const valueType = pointerValueTypeForExpression(expression.argument, context);
+  const next = offsetPointerValue(current, expression.operator === "++" ? 1 : -1, valueType);
+  context.locals.set(expression.argument.name, next);
+  return expression.prefix ? next : current;
+}
+
+function mutablePointerValue(name: string, context: ThreadContext): AddressValue | PoolPointerValue | undefined {
+  const local = context.locals.get(name);
+  if (isAddress(local) || isPoolPointer(local)) return local;
+  const valueType = context.valueTypes.get(name);
+  if (context.buffers.has(name)) return { kind: "address", target: { name, space: "buffer", index: 0, ...(valueType ? { valueType } : {}) } };
+  if (context.shared.has(name)) return { kind: "address", target: { name, space: "shared", index: 0, ...(valueType ? { valueType } : {}) } };
+  if (context.memoryPools.has(name)) return { kind: "pool-pointer", poolName: name, byteOffset: 0, ...(valueType ? { valueType } : {}) };
+  return undefined;
+}
+
+function offsetPointerValue(
+  value: AddressValue | PoolPointerValue,
+  delta: number,
+  valueType: CudaLiteScalarType,
+): AddressValue | PoolPointerValue {
+  if (isPoolPointer(value)) return { ...value, byteOffset: value.byteOffset + delta * elementByteSize(valueType), valueType };
+  const storageDelta = value.target.rawStorageIndex ? delta * valueStorageWidth(valueType) : delta;
+  return {
+    kind: "address",
+    target: {
+      ...value.target,
+      index: (value.target.index ?? 0) + storageDelta,
+      valueType: value.target.valueType ?? valueType,
+    },
+  };
+}
+
+function fillLocalArray(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): void {
+  const target = expression.args[0];
+  const value = expression.args[1];
+  if (target?.kind !== "identifier" || !value) throw compilerFailure("fill_*D_regs expects local array and value");
+  const local = context.locals.get(target.name);
+  if (!isLocalArray(local)) throw compilerFailure(`'${target.name}' is not a local array`);
+  const fill = evalExpression(value, context);
+  for (let index = 0; index < local.data.length; index += valueStorageWidth(local.valueType)) {
+    writeBufferValue(local.data, index, local.valueType, undefined, fill);
+  }
+}
+
 function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): EvalValue {
   const name = expression.kind === "call" && expression.callee.kind === "identifier"
     ? expression.callee.name
@@ -1015,6 +1088,15 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   const cooperativeGroupCall = evalCooperativeGroupCall(expression, context);
   if (cooperativeGroupCall !== undefined) return cooperativeGroupCall;
   if (name === "printf") return 0;
+  if (name === "div_ceil") {
+    const numerator = evalNumber(expression.args[0]!, context);
+    const denominator = evalNumber(expression.args[1]!, context);
+    return denominator === 0 ? 0 : Math.trunc((numerator + denominator - 1) / denominator);
+  }
+  if (name === "fill_1D_regs" || name === "fill_2D_regs" || name === "fill_3D_regs") {
+    fillLocalArray(expression, context);
+    return 0;
+  }
   if (name !== undefined && isHostManagedRuntimeNoopCall(name)) return 0;
   if (name === "cudaMemcpy" || name === "cudaMemcpyAsync" || name === "cudaMemcpyPeerAsync") {
     execCudaRuntimeCopy(expression, context);
@@ -1152,6 +1234,11 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     if (!target || !value) throw compilerFailure("__stcs expects pointer and value arguments");
     writeLValue(resolvePointerArgument(target, context), evalExpression(value, context), context);
     return 0;
+  }
+  if (name === "__cvta_generic_to_shared") {
+    const target = expression.args[0];
+    if (!target) throw compilerFailure("__cvta_generic_to_shared expects pointer argument");
+    return lvalueStorageIndex(resolvePointerArgument(target, context), context);
   }
   const vectorConstructor = name ? cudaVectorConstructorType(name) : undefined;
   if (vectorConstructor) {

@@ -3,7 +3,7 @@ import {
   type WgslKernelBindingInput,
   type WgslKernelProgram,
 } from "@unlocalhosted/browsergrad-kernels";
-import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./ast_queries.js";
+import { collectExternalDevicePoolNames, collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
 import { CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
@@ -183,6 +183,11 @@ export function emitKernelIrWgsl(
   lines.push("  @builtin(workgroup_id) workgroup_id: vec3<u32>,");
   lines.push("  @builtin(num_workgroups) num_workgroups: vec3<u32>");
   lines.push(") {");
+  for (const name of context.mutablePointerBases) {
+    const baseField = context.pointerBaseOffsetFieldFor(name);
+    const baseName = context.mutablePointerBaseFor(name);
+    if (baseName) lines.push(`  var ${baseName}: u32 = ${baseField ? `params.${baseField}` : "0u"};`);
+  }
   lines.push(...ir.body.flatMap((statement) => emitStatement(statement, context, 1)));
   lines.push("}");
 
@@ -217,7 +222,10 @@ interface EmitContext {
   pointerBaseOffsetFieldFor(name: string): string | undefined;
   readonly rawPoolAllocators: readonly RawPoolAllocator[];
   readonly externalPoolNames: readonly string[];
+  readonly mutablePointerBases: readonly string[];
+  mutablePointerBaseFor(name: string): string | undefined;
   isLocalName(name: string): boolean;
+  localArrayFor(name: string): CudaLiteVarDecl | undefined;
   cooperativeGroupFor(name: string): CudaLiteCooperativeGroupDecl | undefined;
   surfaceWidthField(name: string): string;
 }
@@ -351,10 +359,15 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
   const uniformScalarNames = new Set(uniformScalars.map((scalar) => scalar.name));
   const uniformScalarTypes = new Map(uniformScalars.map((scalar) => [scalar.name, scalar.valueType] as const));
   const pointerAliases = collectPointerAliases(ir.body);
+  const mutablePointerBases = collectMutableStoragePointerBases(
+    ir.body,
+    new Set(storagePointerParams.map((param) => param.name)),
+  );
   const poolPointers = collectPoolPointers(ir.body);
   const rawPoolAllocators = collectRawPoolAllocators(ir.body);
   const cooperativeGroups = collectCooperativeGroups(ir.body);
   const localNames = collectLocalNames(ir.body);
+  const localArrays = collectLocalArrays(ir.body);
   const paramsBinding = uniformScalars.length > 0 ? bindings.length : undefined;
   if (paramsBinding !== undefined) {
     bindings.push({
@@ -410,8 +423,15 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
     },
     rawPoolAllocators,
     externalPoolNames,
+    mutablePointerBases,
+    mutablePointerBaseFor(name) {
+      return mutablePointerBases.includes(name) ? `bg_${name}_base` : undefined;
+    },
     isLocalName(name) {
       return localNames.has(name);
+    },
+    localArrayFor(name) {
+      return localArrays.get(name);
     },
     cooperativeGroupFor(name) {
       return cooperativeGroups.get(name);
@@ -460,6 +480,10 @@ function emitStatement(
       {
         const noopComment = noopCallComment(statement.expression);
         if (noopComment) return [`${prefix}// ${noopComment}`];
+      }
+      {
+        const fill = emitFillRegsStatement(statement.expression, context, indentLevel);
+        if (fill) return fill;
       }
       if (isBarrierCall(statement.expression)) return [`${prefix}workgroupBarrier();`];
       return [`${prefix}${emitExpression(statement.expression, context)};`];
@@ -566,6 +590,9 @@ function withDevicePointerParams(
     },
     devicePointerParamFor(name) {
       return pointerParams.get(name) ?? context.devicePointerParamFor(name);
+    },
+    mutablePointerBaseFor(name) {
+      return pointerParams.has(name) ? `${name}_base` : context.mutablePointerBaseFor(name);
     },
   };
 }
@@ -726,8 +753,7 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
     const storageId = context.storagePointerIdFor(expression.name);
     const storageParam = context.paramFor(expression.name);
     if (storageId !== undefined && storageParam?.pointer) {
-      const baseField = context.pointerBaseOffsetFieldFor(expression.name);
-      return { buffer: `${storageId}u`, base: baseField ? `params.${baseField}` : "0u" };
+      return { buffer: `${storageId}u`, base: pointerBaseExpression(expression.name, context) ?? "0u" };
     }
     const sharedId = context.sharedPointerIdFor(expression.name);
     if (sharedId !== undefined) return { buffer: `${sharedId}u`, base: "0u" };
@@ -905,10 +931,13 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       return `select(${emitExpression(expression.alternate, context)}, ${emitExpression(expression.consequent, context)}, ${emitExpression(expression.condition, context)})`;
     case "assignment":
       return emitAssignment(expression, context);
-    case "update":
+    case "update": {
+      const pointerRebase = emitPointerRebaseUpdate(expression, context);
+      if (pointerRebase) return pointerRebase;
       return expression.prefix
         ? `${expression.operator}${emitExpression(expression.argument, context, "lvalue")}`
         : `${emitExpression(expression.argument, context, "lvalue")}${expression.operator}`;
+    }
   }
 }
 
@@ -931,6 +960,63 @@ function collectLocalNames(statements: readonly CudaLiteStatement[]): ReadonlySe
   return names;
 }
 
+function collectLocalArrays(statements: readonly CudaLiteStatement[]): ReadonlyMap<string, CudaLiteVarDecl> {
+  const arrays = new Map<string, CudaLiteVarDecl>();
+  const walk = (items: readonly CudaLiteStatement[]): void => {
+    for (const item of items) {
+      if (item.kind === "var" && item.storage === "local" && item.dimensions.length > 0) arrays.set(item.name, item);
+      if (item.kind === "if") {
+        walk(item.consequent);
+        if (item.alternate) walk(item.alternate);
+      }
+      if (item.kind === "for") {
+        if (item.init?.kind === "var" && item.init.storage === "local" && item.init.dimensions.length > 0) {
+          arrays.set(item.init.name, item.init);
+        }
+        walk(item.body);
+      }
+      if (item.kind === "block") walk(item.body);
+    }
+  };
+  walk(statements);
+  return arrays;
+}
+
+function emitFillRegsStatement(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  if (expression.kind !== "call") return undefined;
+  const name = expressionName(expression.callee);
+  if (name !== "fill_1D_regs" && name !== "fill_2D_regs" && name !== "fill_3D_regs") return undefined;
+  const target = expression.args[0];
+  const value = expression.args[1];
+  if (target?.kind !== "identifier" || !value) return undefined;
+  const array = context.localArrayFor(target.name);
+  if (!array) return undefined;
+  return emitLocalArrayFill(target.name, array.dimensions, emitExpression(value, context), indentLevel);
+}
+
+function emitLocalArrayFill(
+  name: string,
+  dimensions: readonly number[],
+  value: string,
+  indentLevel: number,
+  indexes: readonly string[] = [],
+): string[] {
+  if (indexes.length === dimensions.length) {
+    return [`${indent(indentLevel)}${name}${indexes.map((index) => `[${index}]`).join("")} = ${value};`];
+  }
+  const loopName = `fill_${name}_${indexes.length}`;
+  const lines = [
+    `${indent(indentLevel)}for (var ${loopName}: i32 = 0; ${loopName} < ${dimensions[indexes.length] ?? 0}; ${loopName} = ${loopName} + 1) {`,
+  ];
+  lines.push(...emitLocalArrayFill(name, dimensions, value, indentLevel + 1, [...indexes, loopName]));
+  lines.push(`${indent(indentLevel)}}`);
+  return lines;
+}
+
 function collectPointerAliases(statements: readonly CudaLiteStatement[]): ReadonlyMap<string, PointerAlias> {
   const aliases = new Map<string, PointerAlias>();
   const walk = (items: readonly CudaLiteStatement[]): void => {
@@ -949,6 +1035,25 @@ function collectPointerAliases(statements: readonly CudaLiteStatement[]): Readon
   };
   walk(statements);
   return aliases;
+}
+
+function collectMutableStoragePointerBases(
+  statements: readonly CudaLiteStatement[],
+  pointerParamNames: ReadonlySet<string>,
+): readonly string[] {
+  const names = new Set<string>();
+  walkCudaLiteExpressions(statements, (expression) => {
+    if (expression.kind === "assignment" && expression.left.kind === "identifier") {
+      if ((expression.operator === "+=" || expression.operator === "-=") && pointerParamNames.has(expression.left.name)) {
+        names.add(expression.left.name);
+      }
+      return;
+    }
+    if (expression.kind === "update" && expression.argument.kind === "identifier") {
+      if (pointerParamNames.has(expression.argument.name)) names.add(expression.argument.name);
+    }
+  });
+  return [...names].sort();
 }
 
 function collectPoolPointers(statements: readonly CudaLiteStatement[]): ReadonlyMap<string, PoolPointerAlias> {
@@ -1120,9 +1225,9 @@ function pointerAliasForPointerExpression(
 }
 
 function emitPointerAliasIndex(alias: PointerAlias, index: CudaLiteExpression, context: EmitContext): string {
-  const base = context.pointerBaseOffsetFieldFor(alias.rootName);
+  const base = pointerBaseExpression(alias.rootName, context);
   if (!base) return `(${emitExpression(alias.baseIndex, context)}) + (${emitExpression(index, context)})`;
-  return `(params.${base} + u32(${emitExpression(alias.baseIndex, context)}) + u32(${emitExpression(index, context)}))`;
+  return `(${base} + u32(${emitExpression(alias.baseIndex, context)}) + u32(${emitExpression(index, context)}))`;
 }
 
 function emitStorageViewIndex(
@@ -1132,9 +1237,9 @@ function emitStorageViewIndex(
   valueType: CudaLiteScalarType,
   context: EmitContext,
 ): string {
-  const base = context.pointerBaseOffsetFieldFor(rootName);
+  const base = pointerBaseExpression(rootName, context);
   const prefix = base
-    ? `params.${base} + u32(${emitExpression(baseIndex, context)})`
+    ? `${base} + u32(${emitExpression(baseIndex, context)})`
     : `u32(${emitExpression(baseIndex, context)})`;
   const lanes = cudaVectorLaneCount(valueType);
   return `(${prefix} + (u32(${emitExpression(index, context)}) * ${lanes}u))`;
@@ -1160,9 +1265,16 @@ function zeroExpression(span: CudaLiteExpression["span"]): CudaLiteExpression {
 }
 
 function emitPointerIndex(rootName: string, index: CudaLiteExpression, context: EmitContext): string {
-  const base = context.pointerBaseOffsetFieldFor(rootName);
+  const base = pointerBaseExpression(rootName, context);
   if (!base) return emitExpression(index, context);
-  return `(params.${base} + u32(${emitExpression(index, context)}))`;
+  return `(${base} + u32(${emitExpression(index, context)}))`;
+}
+
+function pointerBaseExpression(rootName: string, context: EmitContext): string | undefined {
+  const mutable = context.mutablePointerBaseFor(rootName);
+  if (mutable) return mutable;
+  const base = context.pointerBaseOffsetFieldFor(rootName);
+  return base ? `params.${base}` : undefined;
 }
 
 function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "value"): string {
@@ -1187,7 +1299,7 @@ function emitDeref(expression: CudaLiteExpression, context: EmitContext): string
       return `${pointerReadHelperName(pointerParam.valueType)}(${expression.name}_buffer, ${expression.name}_base)`;
     }
     const param = context.paramFor(expression.name);
-    const access = `${expression.name}[0]`;
+    const access = `${expression.name}[${emitPointerIndex(expression.name, zeroExpression(expression.span), context)}]`;
     if (param && context.ir.atomicParams.includes(param.name)) {
       const loaded = `atomicLoad(&${access})`;
       return param.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
@@ -1260,6 +1372,13 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     const valueType = devicePointerValueTypeForExpression(target, context);
     return `${pointerWriteHelperName(valueType)}(${parts.buffer}, ${parts.base}, ${emitExpression(value, context)})`;
   }
+  if (name === "__cvta_generic_to_shared") {
+    const target = expression.args[0];
+    if (!target) return "0u";
+    const parts = devicePointerArgumentParts(target, context);
+    if (!parts) throw featureError("unsupported-device-pointer-param", "__cvta_generic_to_shared expects a storage or shared pointer");
+    return `u32(${parts.base})`;
+  }
   switch (name) {
     case "__syncthreads":
       return "workgroupBarrier()";
@@ -1285,6 +1404,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "min":
     case "max":
       return `${name}(${args.join(", ")})`;
+    case "div_ceil":
+      return `(((${args[0] ?? "0"} + ${args[1] ?? "1"}) - 1) / ${args[1] ?? "1"})`;
     case "bg_subgroup_add":
       return `subgroupAdd(${args.join(", ")})`;
     case "warpReduceSum":
@@ -1499,8 +1620,9 @@ function emitAtomicTarget(
     if (param?.pointer) {
       const info = atomicStorageInfo(target.name, context);
       if (!info) return undefined;
+      const index = emitPointerIndex(target.name, zeroExpression(target.span), context);
       return {
-        address: `&${target.name}[0]`,
+        address: `&${target.name}[${index}]`,
         rootName: target.name,
         valueType: param.valueType,
         storageScalar: info.storageScalar,
@@ -1606,6 +1728,8 @@ function integerAtomicLoopHelperName(kind: "Inc" | "Dec", target: AtomicTargetIn
 }
 
 function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string {
+  const pointerRebase = emitPointerRebaseAssignment(expression, context);
+  if (pointerRebase) return pointerRebase;
   const storageView = storageViewLValue(expression.left, context);
   if (storageView && isCudaVectorType(storageView.valueType)) {
     const right = emitExpression(expression.right, context);
@@ -1673,6 +1797,22 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   if (expression.operator === "<<=") return `${left} = (${left} << ${right})`;
   if (expression.operator === ">>=") return `${left} = (${left} >> ${right})`;
   return `${left} ${expression.operator} ${right}`;
+}
+
+function emitPointerRebaseAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string | undefined {
+  if (expression.left.kind !== "identifier") return undefined;
+  const base = context.mutablePointerBaseFor(expression.left.name);
+  if (!base || (expression.operator !== "+=" && expression.operator !== "-=")) return undefined;
+  const delta = `u32(${emitExpression(expression.right, context)})`;
+  const op = expression.operator === "+=" ? "+" : "-";
+  return `${base} = (${base} ${op} ${delta})`;
+}
+
+function emitPointerRebaseUpdate(expression: CudaLiteExpression, context: EmitContext): string | undefined {
+  if (expression.kind !== "update" || expression.argument.kind !== "identifier") return undefined;
+  const base = context.mutablePointerBaseFor(expression.argument.name);
+  if (!base) return undefined;
+  return `${base} = (${base} ${expression.operator === "++" ? "+" : "-"} 1u)`;
 }
 
 function emitVectorAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string | undefined {
