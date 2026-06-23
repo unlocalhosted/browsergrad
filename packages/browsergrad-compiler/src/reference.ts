@@ -26,6 +26,7 @@ import {
   type CudaLiteExpression,
   type CudaLiteGlobalConstant,
   type CudaLiteKernel,
+  type CudaLiteParam,
   type CudaLiteScalarType,
   type CudaLiteStatement,
   type CudaLiteVarDecl,
@@ -35,7 +36,7 @@ import {
   type ReferenceKernelResult,
 } from "./types.js";
 
-type EvalValue = number | AddressValue | ComplexValue | CudaVectorValue | PoolPointerValue;
+type EvalValue = number | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue;
 type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue | LocalArrayValue;
 interface Vector3 {
   readonly x: number;
@@ -585,10 +586,12 @@ function execKernelLaunch(
     const arg = statement.args[index];
     childValueTypes.set(param.name, param.valueType);
     if (!arg) {
-      locals.set(param.name, zeroLocalValue(param.valueType));
+      locals.set(param.name, zeroParamLocalValue(param));
       continue;
     }
-    if (param.pointer) {
+    if (param.cooperativeGroupKind !== undefined) {
+      locals.set(param.name, cooperativeGroupArgumentValue(arg, param, context));
+    } else if (param.pointer) {
       locals.set(param.name, pointerArgumentValue(arg, param.valueType, context));
     } else {
       locals.set(param.name, evalNumber(arg, context));
@@ -1364,6 +1367,20 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "float2");
     return { kind: "cuda-vector", valueType: "half2", lanes: value.lanes.map((lane) => roundHalf(lane ?? 0)) };
   }
+  if (name === "__float2half2_rn") {
+    const value = roundHalf(evalNumber(expression.args[0]!, context));
+    return { kind: "cuda-vector", valueType: "half2", lanes: [value, value] };
+  }
+  if (name === "__floats2half2_rn") {
+    return {
+      kind: "cuda-vector",
+      valueType: "half2",
+      lanes: [
+        roundHalf(evalNumber(expression.args[0]!, context)),
+        roundHalf(evalNumber(expression.args[1]!, context)),
+      ],
+    };
+  }
   const deviceFunction = name ? context.functions.get(name) : undefined;
   if (deviceFunction) return evalDeviceFunction(
     deviceFunction,
@@ -1375,6 +1392,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (intrinsic?.evaluate) return intrinsic.evaluate(args);
   switch (name) {
     case "__syncthreads":
+    case "__syncwarp":
       return 0;
     case "__threadfence":
       return 0;
@@ -1547,7 +1565,8 @@ function deviceFunctionArgs(
 ): readonly EvalValue[] {
   return fn.params.map((param, index) => {
     const arg = args[index];
-    if (!arg) return 0;
+    if (!arg) return zeroParamLocalValue(param);
+    if (param.cooperativeGroupKind !== undefined) return cooperativeGroupArgumentValue(arg, param, context);
     if (!param.pointer) {
       const value = evalExpression(arg, context);
       if (isCudaVectorType(param.valueType)) return value;
@@ -1561,7 +1580,7 @@ function deviceFunctionArgs(
 
 function evalDeviceFunction(fn: CudaLiteDeviceFunction, args: readonly EvalValue[], context: ThreadContext): EvalValue {
   const locals = new Map<string, LocalValue>();
-  for (const [index, param] of fn.params.entries()) locals.set(param.name, args[index] ?? zeroLocalValue(param.valueType));
+  for (const [index, param] of fn.params.entries()) locals.set(param.name, args[index] ?? zeroParamLocalValue(param));
   const fnContext: ThreadContext = {
     ...context,
     locals,
@@ -1576,6 +1595,20 @@ function evalDeviceFunction(fn: CudaLiteDeviceFunction, args: readonly EvalValue
     }
     throw compilerFailure(`device function '${fn.name}' cannot contain __syncthreads()`);
   }
+}
+
+function cooperativeGroupArgumentValue(
+  arg: CudaLiteExpression,
+  param: CudaLiteParam,
+  context: ThreadContext,
+): CooperativeGroupValue {
+  const value = arg.kind === "identifier" ? readIdentifier(arg.name, context) : evalExpression(arg, context);
+  if (isCooperativeGroup(value)) return value;
+  return {
+    kind: "cooperative-group",
+    groupKind: param.cooperativeGroupKind ?? "block",
+    ...(param.tileSize === undefined ? {} : { tileSize: param.tileSize }),
+  };
 }
 
 function evalAtomicReadModifyWrite(
@@ -2071,7 +2104,7 @@ function flattenIndex(dimensions: readonly number[], indices: readonly number[])
 function isBarrier(expression: CudaLiteExpression): boolean {
   return expression.kind === "call" &&
     expression.callee.kind === "identifier" &&
-    expression.callee.name === "__syncthreads";
+    (expression.callee.name === "__syncthreads" || expression.callee.name === "__syncwarp");
 }
 
 function cooperativeSyncKind(expression: CudaLiteExpression, context: ThreadContext): "block" | "grid" | undefined {
@@ -2428,6 +2461,17 @@ function zeroLocalValue(type: CudaLiteScalarType): EvalValue {
   return 0;
 }
 
+function zeroParamLocalValue(param: CudaLiteParam): EvalValue {
+  if (param.cooperativeGroupKind !== undefined) {
+    return {
+      kind: "cooperative-group",
+      groupKind: param.cooperativeGroupKind,
+      ...(param.tileSize === undefined ? {} : { tileSize: param.tileSize }),
+    };
+  }
+  return zeroLocalValue(param.valueType);
+}
+
 function valueStorageWidth(type: CudaLiteScalarType | undefined): number {
   if (isCudaVectorType(type)) return cudaVectorLaneCount(type);
   return type === "complex64" ? 2 : 1;
@@ -2449,6 +2493,7 @@ function traceValue(value: EvalValue): number {
   if (isPoolPointer(value)) return valueAsNumber(value, "pool pointer");
   if (isAddress(value)) return value.target.index ?? 0;
   if (isCudaVectorValue(value)) return value.lanes[0] ?? 0;
+  if (isCooperativeGroup(value)) return 0;
   return isComplex(value) ? value.x : value;
 }
 

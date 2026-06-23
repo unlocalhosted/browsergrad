@@ -307,9 +307,10 @@ class Parser {
       const startToken = this.peek();
       this.consumeCudaDeclAttributes();
       let constant = this.consumeCvQualifiers();
-      const type = this.parseType();
+      const cooperativeGroup = this.parseCooperativeGroupParamType();
+      const type = cooperativeGroup === undefined ? this.parseType() : "uint";
       constant = this.consumeCvQualifiers() || constant;
-      const pointer = this.consumeIf("*") !== undefined;
+      const pointer = cooperativeGroup === undefined && this.consumeIf("*") !== undefined;
       this.consumeIf("&");
       this.consumeTypeQualifiers();
       this.consumeCudaDeclAttributes();
@@ -322,6 +323,10 @@ class Parser {
         valueType: type,
         pointer,
         constant,
+        ...(cooperativeGroup === undefined ? {} : {
+          cooperativeGroupKind: cooperativeGroup.groupKind,
+          ...(cooperativeGroup.tileSize === undefined ? {} : { tileSize: cooperativeGroup.tileSize }),
+        }),
         span: mergeSpans(startToken.span, name.span),
       });
     } while (this.consumeIf(","));
@@ -540,7 +545,7 @@ class Parser {
       this.skipBalanced("(", ")");
       groupKind = "tile";
     } else {
-      this.consumeNamespaceQualifier();
+      if (this.tokens[this.index + 1]?.value === "::") this.consumeNamespaceQualifier();
       const type = this.expectIdentifier("cooperative group type");
       groupKind = type.value === "thread_block" ? "block" : type.value === "grid_group" ? "grid" : "tile";
       if (type.value === "thread_block_tile") {
@@ -563,6 +568,23 @@ class Parser {
       name: name.value,
       ...(tileSize === undefined ? {} : { tileSize }),
       span: mergeSpans(start, end),
+    };
+  }
+
+  private parseCooperativeGroupParamType(): { readonly groupKind: CudaLiteCooperativeGroupKind; readonly tileSize?: number } | undefined {
+    if (!this.startsCooperativeGroupType()) return undefined;
+    if (this.tokens[this.index + 1]?.value === "::") this.consumeNamespaceQualifier();
+    const type = this.expectIdentifier("cooperative group type");
+    const groupKind = type.value === "thread_block" ? "block" : type.value === "grid_group" ? "grid" : "tile";
+    let tileSize: number | undefined;
+    if (type.value === "thread_block_tile") {
+      this.expect("<");
+      tileSize = this.parseTemplateIntegerArgument();
+      this.expect(">");
+    }
+    return {
+      groupKind,
+      ...(tileSize === undefined ? {} : { tileSize }),
     };
   }
 
@@ -980,11 +1002,14 @@ class Parser {
       return this.tokens[this.index + 2]?.value === "=" &&
         this.tokens.slice(this.index + 3, this.index + 8).some((token) => token.value === "tiled_partition");
     }
-    return this.peek().kind === "identifier" &&
-      this.tokens[this.index + 1]?.value === "::" &&
-      (this.tokens[this.index + 2]?.value === "thread_block" ||
-        this.tokens[this.index + 2]?.value === "grid_group" ||
-        this.tokens[this.index + 2]?.value === "thread_block_tile");
+    return this.startsCooperativeGroupType();
+  }
+
+  private startsCooperativeGroupType(index = this.index): boolean {
+    if (this.tokens[index]?.kind !== "identifier") return false;
+    const typeIndex = this.tokens[index + 1]?.value === "::" ? index + 2 : index;
+    const type = this.tokens[typeIndex]?.value;
+    return type === "thread_block" || type === "grid_group" || type === "thread_block_tile";
   }
 
   private expectTextureDimension(): Token {

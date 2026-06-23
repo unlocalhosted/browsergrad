@@ -102,6 +102,8 @@ export interface CudaLiteParam {
   readonly valueType: Exclude<CudaLiteScalarType, "void">;
   readonly pointer: boolean;
   readonly constant: boolean;
+  readonly cooperativeGroupKind?: CudaLiteCooperativeGroupKind;
+  readonly tileSize?: number;
   readonly span: SourceSpan;
 }
 

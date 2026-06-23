@@ -854,6 +854,34 @@ __global__ void tileReduce(const float *input, float *output) {
     expect([...result.buffers.output as Float32Array]).toEqual([16]);
   });
 
+  it("passes cooperative-group handles through device helper parameters", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__device__ int block_rank(cg::thread_block block) {
+  return block.thread_rank();
+}
+__device__ int tile_rank(cg::thread_block_tile<8> tile) {
+  return tile.thread_rank();
+}
+__global__ void groupParam(int *out) {
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_block_tile<8> tile = cg::tiled_partition<8>(block);
+  out[threadIdx.x] = block_rank(block) + tile_rank(tile);
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [2, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn block_rank(local_id: vec3<u32>");
+    expect(compiled.wgsl).toContain("fn tile_rank(local_id: vec3<u32>");
+    expect([...result.buffers.out as Int32Array]).toEqual([0, 2]);
+  });
+
   it("classifies grid-wide cooperative sync as an explicit runtime gap", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 namespace cg = cooperative_groups;
@@ -1965,6 +1993,7 @@ __global__ void half2Ops(const half2 *x, const half2 *y, half2 *out) {
     const compiled = compileCudaLiteKernel(`
 __global__ void intrinsic_pack(half2 *h, float2 *f, float *out) {
   int lane = __shfl_sync(0xffffffff, threadIdx.x, 0);
+  __syncwarp(0xffffffff);
   __threadfence();
   half2 value = make_half2(__int2half_rn(lane + 1), __int2half_rn(4));
   h[0] = value;
@@ -1985,6 +2014,7 @@ __global__ void intrinsic_pack(half2 *h, float2 *f, float *out) {
 
     expect(compiled.ir.requiredFeatures).toEqual(expect.arrayContaining(["shader-f16", "subgroups"]));
     expect(compiled.wgsl).toContain("subgroupShuffle(");
+    expect(compiled.wgsl).toContain("workgroupBarrier()");
     expect(compiled.wgsl).toContain("storageBarrier()");
     expect([...result.buffers.f as Float32Array]).toEqual([1, 4]);
     expect([...result.buffers.out as Float32Array]).toEqual([6]);
@@ -1997,7 +2027,8 @@ __global__ void reduction_alias_pack(const float *x, half2 *h, float *out) {
   float sum = warp_reduce_sum_f32(x[i]);
   float maxv = warpReduceMax(sum);
   float minv = warp_reduce_min(maxv);
-  h[0] = __float22half2_rn(make_float2(sum, maxv));
+  h[0] = __hadd2(__float22half2_rn(make_float2(sum, maxv)), __floats2half2_rn(1.0f, 2.0f));
+  h[1] = __float2half2_rn(3.0f);
   out[i] = minv + __half2float(hrsqrt(__float2half_rn(4.0f)));
 }`, { features: { "shader-f16": true, subgroups: true }, workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
@@ -2005,7 +2036,7 @@ __global__ void reduction_alias_pack(const float *x, half2 *h, float *out) {
       {
         buffers: {
           x: new Float32Array([3]),
-          h: createWgslFloat16Array(2),
+          h: createWgslFloat16Array(4),
           out: new Float32Array(1),
         },
       },
@@ -2017,7 +2048,7 @@ __global__ void reduction_alias_pack(const float *x, half2 *h, float *out) {
     expect(compiled.wgsl).toContain("subgroupMax(");
     expect(compiled.wgsl).toContain("subgroupMin(");
     expect(compiled.wgsl).toContain("vec2<f16>");
-    expect(Array.from(result.buffers.h as ArrayLike<number>)).toEqual([3, 3]);
+    expect(Array.from(result.buffers.h as ArrayLike<number>)).toEqual([4, 5, 3, 3]);
     expect([...result.buffers.out as Float32Array]).toEqual([3.5]);
   });
 

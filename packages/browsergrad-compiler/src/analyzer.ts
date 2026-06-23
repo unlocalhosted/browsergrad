@@ -36,6 +36,7 @@ const BUILTIN_VECTORS = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]
 const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ...CUDA_INTRINSICS.map((intrinsic) => [intrinsic.name, intrinsic.arity] as const),
   ["__syncthreads", [0, 0]],
+  ["__syncwarp", [0, 1]],
   ["__threadfence", [0, 0]],
   ["__shfl_sync", [3, 4]],
   ["__shfl_down_sync", [3, 4]],
@@ -226,14 +227,7 @@ export function analyzeCudaLite(
     }
     validateDeclaredSymbolName(param.name, param.span, diagnostics);
     declaredNames.add(param.name);
-    rootScope.symbols.set(param.name, {
-      name: param.name,
-      kind: "param",
-      valueType: param.valueType,
-      pointer: param.pointer,
-      constant: param.constant,
-      span: param.span,
-    });
+    rootScope.symbols.set(param.name, symbolForParam(param, "param"));
     if (requiresShaderF16(param.valueType)) requiredFeatures.add("shader-f16");
     if (param.valueType === "bool" && param.pointer) {
       diagnostics.push(error("unsupported-bool-pointer", "bool pointer parameters are not supported in CUDA-lite v0", param.span));
@@ -356,7 +350,7 @@ export function analyzeCudaLite(
           if (isBarrierCall(statement.expression)) {
             validateBarrierStatement(statement.expression, diagnostics);
             if (divergentDepth > 0) {
-              diagnostics.push(error("divergent-barrier", "__syncthreads() cannot appear in divergent control flow", statement.span));
+              diagnostics.push(error("divergent-barrier", `${expressionName(statement.expression.callee) ?? "barrier"}() cannot appear in divergent control flow`, statement.span));
             }
             break;
           } else {
@@ -432,14 +426,7 @@ export function analyzeCudaLite(
       }
       validateDeclaredSymbolName(param.name, param.span, diagnostics);
       functionDeclaredNames.add(param.name);
-      functionScope.symbols.set(param.name, {
-        name: param.name,
-        kind: "local",
-        valueType: param.valueType,
-        pointer: param.pointer,
-        constant: param.constant,
-        span: param.span,
-      });
+      functionScope.symbols.set(param.name, symbolForParam(param, "local"));
       if (requiresShaderF16(param.valueType)) requiredFeatures.add("shader-f16");
     }
     walkStatements(fn.body, functionScope, 0, 0, 0, functionDeclaredNames);
@@ -862,8 +849,8 @@ function validateCallExpression(
   }
 
   if (callName === "bg_subgroup_add") requiredFeatures.add("subgroups");
-  if (callName === "__syncthreads") {
-    diagnostics.push(error("barrier-expression", "__syncthreads() must be used as a standalone statement", expression.span));
+  if (callName === "__syncthreads" || callName === "__syncwarp") {
+    diagnostics.push(error("barrier-expression", `${callName}() must be used as a standalone statement`, expression.span));
   }
   if (callName === "printf") {
     for (const arg of expression.args.slice(1)) {
@@ -963,6 +950,11 @@ function validateCallExpression(
       }
     }
     return { kind: "vector", valueType: returnType };
+  }
+  if (callName === "__float2half2_rn" || callName === "__floats2half2_rn") {
+    requiredFeatures.add("shader-f16");
+    for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return { kind: "vector", valueType: "half2" };
   }
   const intrinsic = CUDA_INTRINSICS_BY_NAME.get(callName);
   if (intrinsic) {
@@ -1193,6 +1185,10 @@ function validateDeviceFunctionCall(
   }
   for (const [index, arg] of expression.args.entries()) {
     const param = fnParams[index];
+    if (param?.cooperativeGroupKind !== undefined) {
+      validateCooperativeGroupArgument(arg, param, scope, diagnostics);
+      continue;
+    }
     if (param?.pointer) {
       validateDevicePointerArgument(arg, param, scope, diagnostics, walkExpression);
       continue;
@@ -1210,6 +1206,43 @@ function validateDeviceFunctionCall(
   return isCudaVectorType(symbol.returnType)
     ? { kind: "vector", valueType: symbol.returnType }
     : { kind: "scalar", valueType: symbol.returnType };
+}
+
+function symbolForParam(param: CudaLiteParam, kind: "param" | "local"): SymbolInfo {
+  if (param.cooperativeGroupKind !== undefined) {
+    return {
+      name: param.name,
+      kind: "cooperative-group",
+      groupKind: param.cooperativeGroupKind,
+      ...(param.tileSize === undefined ? {} : { tileSize: param.tileSize }),
+      span: param.span,
+    };
+  }
+  return {
+    name: param.name,
+    kind,
+    valueType: param.valueType,
+    pointer: param.pointer,
+    constant: param.constant,
+    span: param.span,
+  };
+}
+
+function validateCooperativeGroupArgument(
+  arg: CudaLiteExpression,
+  param: CudaLiteParam,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+): void {
+  const name = rootIdentifier(arg);
+  const symbol = name ? lookupSymbol(name, scope, arg.span) : undefined;
+  if (symbol?.kind !== "cooperative-group") {
+    diagnostics.push(error("unsupported-cooperative-groups", `device parameter '${param.name}' expects a cooperative group argument`, arg.span));
+    return;
+  }
+  if (param.cooperativeGroupKind !== symbol.groupKind) {
+    diagnostics.push(error("unsupported-cooperative-groups", `device parameter '${param.name}' expects ${param.cooperativeGroupKind} cooperative group`, arg.span));
+  }
 }
 
 function validateDevicePointerArgument(
@@ -2040,8 +2073,10 @@ function validateBarrierStatement(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
   diagnostics: CudaLiteDiagnostic[],
 ): void {
-  if (expression.args.length !== 0) {
-    diagnostics.push(error("invalid-call-arity", "__syncthreads expects 0 arguments", expression.span));
+  const name = expressionName(expression.callee) ?? "barrier";
+  const maxArgs = name === "__syncwarp" ? 1 : 0;
+  if (expression.args.length > maxArgs) {
+    diagnostics.push(error("invalid-call-arity", `${name} expects ${maxArgs === 0 ? "0" : "0-1"} arguments`, expression.span));
   }
 }
 
@@ -2096,7 +2131,9 @@ function expressionIsDivergent(
 }
 
 function isBarrierCall(expression: CudaLiteExpression): expression is Extract<CudaLiteExpression, { kind: "call" }> {
-  return expression.kind === "call" && expressionName(expression.callee) === "__syncthreads";
+  if (expression.kind !== "call") return false;
+  const name = expressionName(expression.callee);
+  return name === "__syncthreads" || name === "__syncwarp";
 }
 
 function forEachExpressionChild(

@@ -562,15 +562,25 @@ function emitLocalInit(statement: CudaLiteVarDecl, context: EmitContext): string
 }
 
 function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): string[] {
+  const cooperativeParams = new Map(fn.params
+    .filter((param) => param.cooperativeGroupKind !== undefined)
+    .map((param) => [param.name, cooperativeGroupForParam(param)] as const));
   const functionContext = withDevicePointerParams(
-    context,
+    {
+      ...context,
+      cooperativeGroupFor(name) {
+        return cooperativeParams.get(name) ?? context.cooperativeGroupFor(name);
+      },
+    },
     fn.params.filter((param) => param.pointer),
     new Set([...fn.params.map((param) => param.name), ...collectLocalNames(fn.body)]),
   );
   const params = [
     ...fn.params.flatMap((param) => param.pointer
       ? [`${param.name}_buffer_arg: u32`, `${param.name}_base_arg: u32`]
-      : [`${param.name}_arg: ${wgslScalar(param.valueType)}`]),
+      : param.cooperativeGroupKind !== undefined
+        ? []
+        : [`${param.name}_arg: ${wgslScalar(param.valueType)}`]),
     "local_id: vec3<u32>",
     "workgroup_id: vec3<u32>",
     "num_workgroups: vec3<u32>",
@@ -581,6 +591,8 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
     if (param.pointer) {
       lines.push(`  var ${param.name}_buffer: u32 = ${param.name}_buffer_arg;`);
       lines.push(`  var ${param.name}_base: u32 = ${param.name}_base_arg;`);
+    } else if (param.cooperativeGroupKind !== undefined) {
+      continue;
     } else {
       lines.push(`  var ${param.name}: ${wgslScalar(param.valueType)} = ${param.name}_arg;`);
     }
@@ -1507,6 +1519,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   if (deviceFunction) {
     const args = deviceFunction.params.flatMap((param, index) => {
       const arg = expression.args[index];
+      if (param.cooperativeGroupKind !== undefined) return [];
       if (!arg) return param.pointer ? ["0u", "0u"] : [zeroValue(param.valueType)];
       return param.pointer
         ? emitDevicePointerArgument(arg, context)
@@ -1546,6 +1559,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   if (isCpAsyncCopyCall(name) || isCpAsyncFenceCall(name)) return "0";
   switch (name) {
     case "__syncthreads":
+    case "__syncwarp":
       return "workgroupBarrier()";
     case "__threadfence":
       return "storageBarrier()";
@@ -1738,6 +1752,16 @@ function emitCooperativeNamespaceCall(expression: CudaLiteCallExpression, contex
   const op = expression.args[2] ? expressionName(expression.args[2]) : undefined;
   if (op?.endsWith("::greater")) return `subgroupMax(${value})`;
   return `subgroupAdd(${value})`;
+}
+
+function cooperativeGroupForParam(param: CudaLiteParam): CudaLiteCooperativeGroupDecl {
+  return {
+    kind: "cooperative-group",
+    groupKind: param.cooperativeGroupKind ?? "block",
+    name: param.name,
+    ...(param.tileSize === undefined ? {} : { tileSize: param.tileSize }),
+    span: param.span,
+  };
 }
 
 function emitLocalLinearRank(context: EmitContext): string {
@@ -2130,7 +2154,9 @@ function storageViewForPointerExpression(
 }
 
 function isBarrierCall(expression: CudaLiteExpression): boolean {
-  return expression.kind === "call" && expressionName(expression.callee) === "__syncthreads";
+  if (expression.kind !== "call") return false;
+  const name = expressionName(expression.callee);
+  return name === "__syncthreads" || name === "__syncwarp";
 }
 
 function noopCallComment(expression: CudaLiteExpression): string | undefined {
