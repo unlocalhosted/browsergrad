@@ -1591,7 +1591,9 @@ function validateAtomicBuiltin(
     diagnostics.push(error("atomic-address-required", `${callName ?? "atomic operation"} first argument must be a pointer parameter or address like &x[i]`, expression.span));
     if (target) walkExpression(target, scope);
   } else {
-    if (targetExpression.kind !== "identifier") {
+    if (isPointerAddressExpression(targetExpression)) {
+      validatePointerInitializerExpression(targetExpression, scope, diagnostics, walkExpression);
+    } else if (targetExpression.kind !== "identifier") {
       validateLValueExpression(targetExpression, scope, diagnostics, walkExpression);
     }
     const targetName = rootIdentifier(targetExpression);
@@ -1601,8 +1603,10 @@ function validateAtomicBuiltin(
     const storageSymbol = storageRoot ? lookupSymbol(storageRoot, scope, targetExpression.span) : undefined;
     const targetType = symbol?.valueType ?? storageSymbol?.valueType;
     if (storageSymbol?.kind === "shared") {
-      if (targetType === "float" || targetType === "half" || targetType === "bool" || targetType === "complex64") {
-        diagnostics.push(error("unsupported-atomic-target", "shared atomics support int/uint targets in CUDA-lite v0", targetExpression.span));
+      if (targetType === "float" && isSupportedFloatAtomic(callName)) {
+        atomicShared.add(storageSymbol.name);
+      } else if (targetType === "half" || targetType === "bool" || targetType === "complex64" || targetType === "float") {
+        diagnostics.push(error("unsupported-atomic-target", "shared atomics support int/uint targets and CAS-backed float add/sub/min/max/exch in CUDA-lite", targetExpression.span));
       } else {
         atomicShared.add(storageSymbol.name);
       }
@@ -1668,6 +1672,19 @@ function isAtomicBuiltin(callName: string): boolean {
     callName === "atomicCAS_system";
 }
 
+function isSupportedFloatAtomic(callName: string | undefined): boolean {
+  return callName === "atomicAdd" ||
+    callName === "atomicAdd_system" ||
+    callName === "atomicSub" ||
+    callName === "atomicMin" ||
+    callName === "atomicMin_system" ||
+    callName === "atomicMax" ||
+    callName === "atomicMax_system" ||
+    callName === "atomicMaxFloat" ||
+    callName === "atomicExch" ||
+    callName === "atomicExch_system";
+}
+
 function isShuffleBuiltin(callName: string): boolean {
   return callName === "__shfl_sync" ||
     callName === "__shfl_down_sync" ||
@@ -1709,7 +1726,13 @@ function atomicTargetExpression(
   if (target.kind === "cast" && target.pointer) return atomicTargetExpression(target.expression);
   if (target.kind === "unary" && target.operator === "&") return target.argument;
   if (target.kind === "identifier") return target;
+  if (target.kind === "binary" && (target.operator === "+" || target.operator === "-")) return target;
   return undefined;
+}
+
+function isPointerAddressExpression(expression: CudaLiteExpression): boolean {
+  if (expression.kind === "cast" && expression.pointer) return true;
+  return expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-");
 }
 
 function validateNonCallExpression(

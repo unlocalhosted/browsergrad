@@ -1920,6 +1920,26 @@ __global__ void packed128_alias(const float* input, float* output) {
     expect([...result.buffers.output as Float32Array]).toEqual([2, 3, 4, 5]);
   });
 
+  it("accepts local C++ aliases and constexpr const declarations", () => {
+    const compiled = compileCudaLiteKernel(`
+typedef float floatX;
+__global__ void local_cpp_shapes(const floatX* input, floatX* output) {
+  using x128 = Packed128<floatX>;
+  constexpr const int Lanes = 4;
+  int idx = threadIdx.x * Lanes;
+  x128 value = reinterpret_cast<x128 *>(input + idx)[0];
+  output[idx] = value[0] + Lanes;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { input: new Float32Array([2, 3, 4, 5]), output: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("vec4<f32>");
+    expect([...result.buffers.output as Float32Array]).toEqual([6, 0, 0, 0]);
+  });
+
   it("supports CUDA vector scalar constructors", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void vector_splat(float4 *out, uint4 *kinds) {
@@ -3420,6 +3440,28 @@ __global__ void sharedScalar(int *out) {
     expect([...result.buffers.out as Int32Array]).toEqual([9]);
   });
 
+  it("supports CAS-backed float atomics in shared memory", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sharedFloatAtomic(float *out) {
+  __shared__ float acc[1];
+  if (threadIdx.x == 0) { acc[0] = 0.0f; }
+  __syncthreads();
+  atomicAdd(&acc[0], 1.5f);
+  __syncthreads();
+  if (threadIdx.x == 0) { out[0] = acc[0]; }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<workgroup> acc: array<atomic<u32>, 1>;");
+    expect(compiled.wgsl).toContain("fn bg_atomicAdd_f32_workgroup");
+    expect(compiled.wgsl).toContain("bitcast<f32>(atomicLoad(&acc[0]))");
+    expect([...result.buffers.out as Float32Array]).toEqual([3]);
+  });
+
   it("evaluates integer constant expressions in shared array dimensions", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void padded(float *x) {
@@ -4124,17 +4166,19 @@ __global__ void atomic_count(int* x) {
   if (threadIdx.x < 1) {
     atomicAdd_system(x, 1);
     atomicExch_system(x, 42);
+    atomicAdd(x + 1, 3);
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { x: new Int32Array([41]) } },
+      { buffers: { x: new Int32Array([41, 0]) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
     expect(compiled.wgsl).toContain("atomicAdd(&x[0], 1);");
     expect(compiled.wgsl).toContain("atomicExchange(&x[0], 42);");
-    expect([...result.buffers.x as Int32Array]).toEqual([42]);
+    expect(compiled.wgsl).toContain("atomicAdd(&x[(0u + u32(1))], 3);");
+    expect([...result.buffers.x as Int32Array]).toEqual([42, 3]);
   });
 
   it("supports CUDA integer atomic exchange and compare-swap", () => {

@@ -148,19 +148,35 @@ export function emitKernelIrWgsl(
   }
   if (usesFloatAtomicAdd(ir)) {
     lines.push("");
-    lines.push(...emitFloatAtomicAddHelper());
+    lines.push(...emitFloatAtomicAddHelper("storage"));
+  }
+  if (usesSharedFloatAtomicAdd(ir)) {
+    lines.push("");
+    lines.push(...emitFloatAtomicAddHelper("workgroup"));
   }
   if (usesFloatAtomicSub(ir)) {
     lines.push("");
-    lines.push(...emitFloatAtomicSubHelper());
+    lines.push(...emitFloatAtomicSubHelper("storage"));
+  }
+  if (usesSharedFloatAtomicSub(ir)) {
+    lines.push("");
+    lines.push(...emitFloatAtomicSubHelper("workgroup"));
   }
   if (usesFloatAtomicMin(ir)) {
     lines.push("");
-    lines.push(...emitFloatAtomicMinHelper());
+    lines.push(...emitFloatAtomicMinHelper("storage"));
+  }
+  if (usesSharedFloatAtomicMin(ir)) {
+    lines.push("");
+    lines.push(...emitFloatAtomicMinHelper("workgroup"));
   }
   if (usesFloatAtomicMax(ir)) {
     lines.push("");
-    lines.push(...emitFloatAtomicMaxHelper());
+    lines.push(...emitFloatAtomicMaxHelper("storage"));
+  }
+  if (usesSharedFloatAtomicMax(ir)) {
+    lines.push("");
+    lines.push(...emitFloatAtomicMaxHelper("workgroup"));
   }
   if (usesAtomicIncDec(ir)) {
     lines.push("");
@@ -902,7 +918,9 @@ function emitSharedPointerRead(
 ): string {
   if (isCudaVectorType(viewType) && shared.valueType !== viewType) return emitSharedVectorFlatRead(shared, index, viewType, context);
   const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, index);
-  return ir.atomicShared.includes(shared.name) ? `atomicLoad(&${access})` : access;
+  if (!ir.atomicShared.includes(shared.name)) return access;
+  const loaded = `atomicLoad(&${access})`;
+  return shared.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
 }
 
 function emitSharedPointerWrite(
@@ -915,7 +933,8 @@ function emitSharedPointerWrite(
 ): string {
   if (isCudaVectorType(viewType) && shared.valueType !== viewType) return emitSharedVectorFlatWrite(shared, index, value, viewType, context);
   const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, index);
-  return ir.atomicShared.includes(shared.name) ? `atomicStore(&${access}, ${value})` : `${access} = ${value}`;
+  if (!ir.atomicShared.includes(shared.name)) return `${access} = ${value}`;
+  return shared.valueType === "float" ? `atomicStore(&${access}, bitcast<u32>(${value}))` : `atomicStore(&${access}, ${value})`;
 }
 
 function emitSharedFlatAccess(name: string, dimensions: readonly number[], index: string): string {
@@ -1190,7 +1209,11 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
         const loaded = `atomicLoad(&${access})`;
         return param.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
       }
-      if (mode === "value" && root && context.isAtomicShared(root)) return `atomicLoad(&${access})`;
+      if (mode === "value" && root && context.isAtomicShared(root)) {
+        const shared = sharedDeclarationFor(root, context);
+        const loaded = `atomicLoad(&${access})`;
+        return shared?.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
+      }
       return access;
     }
     case "call":
@@ -1792,7 +1815,11 @@ function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "va
   const namedConstant = CUDA_NAMED_CONSTANTS.get(name);
   if (namedConstant) return namedConstant.wgsl;
   if (name === "threadIdx" || name === "blockIdx" || name === "blockDim" || name === "gridDim") return name;
-  if (context.isAtomicShared(name) && mode === "value") return `atomicLoad(&${context.nameFor(name)})`;
+  if (context.isAtomicShared(name) && mode === "value") {
+    const shared = sharedDeclarationFor(name, context);
+    const loaded = `atomicLoad(&${context.nameFor(name)})`;
+    return shared?.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
+  }
   if (context.isLocalName(name)) return context.nameFor(name);
   const param = context.paramFor(name);
   const uniformType = context.uniformScalarTypeFor(name);
@@ -1800,6 +1827,10 @@ function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "va
     return uniformType === "bool" ? `(params.${context.nameFor(name)} != 0u)` : `params.${context.nameFor(name)}`;
   }
   return context.nameFor(name);
+}
+
+function sharedDeclarationFor(name: string, context: EmitContext): CudaLiteVarDecl | undefined {
+  return context.ir.sharedDeclarations.find((item) => item.name === name);
 }
 
 function emitDeref(expression: CudaLiteExpression, context: EmitContext): string {
@@ -2252,16 +2283,16 @@ function emitAtomicCall(
       return `${integerAtomicLoopHelperName("Dec", atomicTarget)}(${atomicTarget.address}, u32(${valueExpression}))`;
     }
     if (wgslName === "atomicAdd" && atomicTarget.valueType === "float") {
-      return `bg_atomicAdd_f32(${atomicTarget.address}, ${valueExpression})`;
+      return `${floatAtomicHelperName("Add", atomicTarget.addressSpace)}(${atomicTarget.address}, ${valueExpression})`;
     }
     if (wgslName === "atomicSub" && atomicTarget.valueType === "float") {
-      return `bg_atomicSub_f32(${atomicTarget.address}, ${valueExpression})`;
+      return `${floatAtomicHelperName("Sub", atomicTarget.addressSpace)}(${atomicTarget.address}, ${valueExpression})`;
     }
     if (wgslName === "atomicMin" && atomicTarget.valueType === "float") {
-      return `bg_atomicMin_f32(${atomicTarget.address}, ${valueExpression})`;
+      return `${floatAtomicHelperName("Min", atomicTarget.addressSpace)}(${atomicTarget.address}, ${valueExpression})`;
     }
     if (wgslName === "atomicMax" && atomicTarget.valueType === "float") {
-      return `bg_atomicMax_f32(${atomicTarget.address}, ${valueExpression})`;
+      return `${floatAtomicHelperName("Max", atomicTarget.addressSpace)}(${atomicTarget.address}, ${valueExpression})`;
     }
     if (wgslName === "atomicExchange" && atomicTarget.valueType === "float") {
       return `bitcast<f32>(atomicExchange(${atomicTarget.address}, bitcast<u32>(${valueExpression})))`;
@@ -2309,6 +2340,19 @@ function emitAtomicTarget(
         addressSpace: info.addressSpace,
       };
     }
+  }
+  const pointerParts = devicePointerArgumentParts(target, context);
+  const root = rootIdentifier(target);
+  const rootName = root ? resolveAtomicRootName(root, context) : undefined;
+  const info = rootName ? atomicStorageInfo(rootName, context) : undefined;
+  if (pointerParts && rootName && info) {
+    return {
+      address: `&${rootName}[${pointerParts.base}]`,
+      rootName,
+      valueType: atomicExpressionValueType(target, rootName, context) ?? info.valueType,
+      storageScalar: info.storageScalar,
+      addressSpace: info.addressSpace,
+    };
   }
   return undefined;
 }
@@ -2472,9 +2516,16 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   if (root && context.isAtomicShared(root)) {
     const value = emitExpression(expression.right, context);
     const target = emitExpression(expression.left, context, "lvalue");
-    if (expression.operator === "=") return `atomicStore(&${target}, ${value})`;
-    if (expression.operator === "+=") return `atomicAdd(&${target}, ${value})`;
-    if (expression.operator === "-=") return `atomicSub(&${target}, ${value})`;
+    const shared = sharedDeclarationFor(root, context);
+    if (shared?.valueType === "float") {
+      if (expression.operator === "=") return `atomicStore(&${target}, bitcast<u32>(${value}))`;
+      if (expression.operator === "+=") return `bg_atomicAdd_f32_workgroup(&${target}, ${value})`;
+      if (expression.operator === "-=") return `bg_atomicSub_f32_workgroup(&${target}, ${value})`;
+    } else {
+      if (expression.operator === "=") return `atomicStore(&${target}, ${value})`;
+      if (expression.operator === "+=") return `atomicAdd(&${target}, ${value})`;
+      if (expression.operator === "-=") return `atomicSub(&${target}, ${value})`;
+    }
   }
   if (param && context.ir.atomicParams.includes(param.name)) {
     const value = emitExpression(expression.right, context);
@@ -2695,7 +2746,9 @@ function noopCallComment(expression: CudaLiteExpression): string | undefined {
 }
 
 function emitSharedType(statement: CudaLiteVarDecl, ir: KernelIrModule): string {
-  let type = ir.atomicShared.includes(statement.name) ? `atomic<${wgslScalar(statement.valueType)}>` : wgslScalar(statement.valueType);
+  let type = ir.atomicShared.includes(statement.name)
+    ? `atomic<${statement.valueType === "float" ? "u32" : wgslScalar(statement.valueType)}>`
+    : wgslScalar(statement.valueType);
   for (let i = statement.dimensions.length - 1; i >= 0; i--) {
     type = `array<${type}, ${statement.dimensions[i]!}>`;
   }
@@ -3008,9 +3061,14 @@ function emitRawPoolHelper(allocator: RawPoolAllocator): string[] {
   ];
 }
 
-function emitFloatAtomicAddHelper(): string[] {
+function floatAtomicHelperName(kind: "Add" | "Sub" | "Min" | "Max", addressSpace: "storage" | "workgroup"): string {
+  return addressSpace === "storage" ? `bg_atomic${kind}_f32` : `bg_atomic${kind}_f32_workgroup`;
+}
+
+function emitFloatAtomicAddHelper(addressSpace: "storage" | "workgroup"): string[] {
+  const name = floatAtomicHelperName("Add", addressSpace);
   return [
-    "fn bg_atomicAdd_f32(ptr_value: ptr<storage, atomic<u32>, read_write>, value: f32) -> f32 {",
+    `fn ${name}(ptr_value: ptr<${addressSpace}, atomic<u32>, read_write>, value: f32) -> f32 {`,
     "  var old_bits = atomicLoad(ptr_value);",
     "  loop {",
     "    let old_value = bitcast<f32>(old_bits);",
@@ -3025,9 +3083,10 @@ function emitFloatAtomicAddHelper(): string[] {
   ];
 }
 
-function emitFloatAtomicSubHelper(): string[] {
+function emitFloatAtomicSubHelper(addressSpace: "storage" | "workgroup"): string[] {
+  const name = floatAtomicHelperName("Sub", addressSpace);
   return [
-    "fn bg_atomicSub_f32(ptr_value: ptr<storage, atomic<u32>, read_write>, value: f32) -> f32 {",
+    `fn ${name}(ptr_value: ptr<${addressSpace}, atomic<u32>, read_write>, value: f32) -> f32 {`,
     "  var old_bits = atomicLoad(ptr_value);",
     "  loop {",
     "    let old_value = bitcast<f32>(old_bits);",
@@ -3042,9 +3101,10 @@ function emitFloatAtomicSubHelper(): string[] {
   ];
 }
 
-function emitFloatAtomicMinHelper(): string[] {
+function emitFloatAtomicMinHelper(addressSpace: "storage" | "workgroup"): string[] {
+  const name = floatAtomicHelperName("Min", addressSpace);
   return [
-    "fn bg_atomicMin_f32(ptr_value: ptr<storage, atomic<u32>, read_write>, value: f32) -> f32 {",
+    `fn ${name}(ptr_value: ptr<${addressSpace}, atomic<u32>, read_write>, value: f32) -> f32 {`,
     "  var old_bits = atomicLoad(ptr_value);",
     "  loop {",
     "    let old_value = bitcast<f32>(old_bits);",
@@ -3063,9 +3123,10 @@ function emitFloatAtomicMinHelper(): string[] {
   ];
 }
 
-function emitFloatAtomicMaxHelper(): string[] {
+function emitFloatAtomicMaxHelper(addressSpace: "storage" | "workgroup"): string[] {
+  const name = floatAtomicHelperName("Max", addressSpace);
   return [
-    "fn bg_atomicMax_f32(ptr_value: ptr<storage, atomic<u32>, read_write>, value: f32) -> f32 {",
+    `fn ${name}(ptr_value: ptr<${addressSpace}, atomic<u32>, read_write>, value: f32) -> f32 {`,
     "  var old_bits = atomicLoad(ptr_value);",
     "  loop {",
     "    let old_value = bitcast<f32>(old_bits);",
@@ -3176,8 +3237,20 @@ function usesFloatAtomicAdd(ir: KernelIrModule): boolean {
       ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicAdd", "atomicAdd_system"]))));
 }
 
+function usesSharedFloatAtomicAdd(ir: KernelIrModule): boolean {
+  return hasAtomicSharedFloat(ir) &&
+    (statementsUseCall(ir.body, new Set(["atomicAdd", "atomicAdd_system"])) ||
+      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicAdd", "atomicAdd_system"]))));
+}
+
 function usesFloatAtomicSub(ir: KernelIrModule): boolean {
   return ir.params.some((param) => param.pointer && param.valueType === "float" && ir.atomicParams.includes(param.name)) &&
+    (statementsUseCall(ir.body, new Set(["atomicSub"])) ||
+      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicSub"]))));
+}
+
+function usesSharedFloatAtomicSub(ir: KernelIrModule): boolean {
+  return hasAtomicSharedFloat(ir) &&
     (statementsUseCall(ir.body, new Set(["atomicSub"])) ||
       ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicSub"]))));
 }
@@ -3188,10 +3261,26 @@ function usesFloatAtomicMin(ir: KernelIrModule): boolean {
       ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMin", "atomicMin_system"]))));
 }
 
+function usesSharedFloatAtomicMin(ir: KernelIrModule): boolean {
+  return hasAtomicSharedFloat(ir) &&
+    (statementsUseCall(ir.body, new Set(["atomicMin", "atomicMin_system"])) ||
+      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMin", "atomicMin_system"]))));
+}
+
 function usesFloatAtomicMax(ir: KernelIrModule): boolean {
   return ir.params.some((param) => param.pointer && param.valueType === "float" && ir.atomicParams.includes(param.name)) &&
     (statementsUseCall(ir.body, new Set(["atomicMax", "atomicMax_system", "atomicMaxFloat"])) ||
       ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMax", "atomicMax_system", "atomicMaxFloat"]))));
+}
+
+function usesSharedFloatAtomicMax(ir: KernelIrModule): boolean {
+  return hasAtomicSharedFloat(ir) &&
+    (statementsUseCall(ir.body, new Set(["atomicMax", "atomicMax_system", "atomicMaxFloat"])) ||
+      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMax", "atomicMax_system", "atomicMaxFloat"]))));
+}
+
+function hasAtomicSharedFloat(ir: KernelIrModule): boolean {
+  return ir.sharedDeclarations.some((shared) => shared.valueType === "float" && ir.atomicShared.includes(shared.name));
 }
 
 function usesAtomicIncDec(ir: KernelIrModule): boolean {

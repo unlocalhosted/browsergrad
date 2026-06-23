@@ -425,6 +425,10 @@ class Parser {
       this.skipSimpleDeclaration();
       return [];
     }
+    if (this.match("typedef") || this.match("using")) {
+      this.skipSimpleDeclaration();
+      return [];
+    }
     if (this.match("dim3")) return [this.parseDim3Decl()];
     if (this.startsCooperativeGroupDecl()) return [this.parseCooperativeGroupDecl()];
     if (this.startsKernelLaunch()) return [this.parseKernelLaunch()];

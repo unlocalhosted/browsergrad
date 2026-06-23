@@ -27,12 +27,17 @@ export function createKernelCompilationUnit({
     ...deviceFunctions.map((fn) => fn.source),
     ...constantDeclarations,
   ].join("\n");
-  const aliasDefines = collectTypeAliasDefines(aliasContext);
+  const aliasDefines = collectTypeAliasDefines(aliasContext, definesByName);
   const carrierDefines = collectCarrierMemberDefines(aliasContext, mergeDefineMaps(definesByName, aliasDefines));
   const effectiveDefines = mergeDefineMaps(definesByName, aliasDefines, carrierDefines);
   const specializedKernel = specializeTemplateFromLaunchContext(kernel, templateArgumentsByKernelName, effectiveDefines);
   const params = new Set(kernelParamNames(specializedKernel));
-  const referencedDeviceFunctionsRaw = referencedDeviceFunctionClosure(specializedKernel, deviceFunctions, effectiveDefines);
+  const functionDefineBodies = collectFunctionDefineBodies(functionDeclarations);
+  const referencedDeviceFunctionsRaw = referencedDeviceFunctionClosure(
+    specializedKernel,
+    deviceFunctions,
+    mergeDefineMaps(effectiveDefines, functionDefineBodies),
+  );
   const referencedDeviceFunctionNames = new Set(referencedDeviceFunctionsRaw.map((fn) => fn.name));
   const deviceTemplateArgumentsByName = collectDeviceFunctionTemplateArguments(
     [
@@ -92,7 +97,7 @@ export function createKernelCompilationUnit({
     kernelWithSharedDeclarations,
   ].filter((part) => part.trim().length > 0).join("\n");
   const withCarrierMembers = normalizeCarrierMemberReferences(unit, effectiveDefines);
-  return normalizeCppTemplateCarrierSyntax(normalizeBlockReduceHelpers(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(stripSupportedTypeAliasDeclarations(withCarrierMembers))))));
+  return normalizeCppTemplateCarrierSyntax(normalizeBlockReduceHelpers(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(stripSupportedTypeAliasDeclarations(withCarrierMembers, effectiveDefines))))));
 }
 
 export function collectCudaLiteContextDefines(source) {
@@ -542,7 +547,7 @@ function resolveTemplateDefineValue(value, definesByName) {
   return definesByName.get(trimmed) ?? trimmed;
 }
 
-function normalizeTemplateTypeArgument(arg, definesByName = new Map()) {
+function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = new Set()) {
   if (arg === undefined) return undefined;
   let type = arg.trim()
     .replace(/\b(?:const|volatile|typename|class|struct)\b/gu, " ")
@@ -552,7 +557,7 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map()) {
   if (type.length === 0 || type.includes("(") || type.includes(")")) return undefined;
   const packed = /^Packed128\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>$/u.exec(type)?.[1];
   if (packed !== undefined) {
-    const elementType = normalizeTemplateTypeArgument(definesByName.get(packed) ?? packed, definesByName);
+    const elementType = normalizeTemplateTypeArgument(definesByName.get(packed) ?? packed, definesByName, new Set([...seen, packed]));
     if (elementType === "float") return "float4";
     if (elementType === "int") return "int4";
     if (elementType === "uint") return "uint4";
@@ -561,7 +566,8 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map()) {
   if (type.includes("<") || type.includes(">")) return undefined;
   const mapped = definesByName.get(type);
   if (mapped && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(mapped)) {
-    const normalized = normalizeTemplateTypeArgument(mapped, definesByName);
+    if (seen.has(type) || mapped === type) return undefined;
+    const normalized = normalizeTemplateTypeArgument(mapped, definesByName, new Set([...seen, type]));
     if (normalized !== undefined) return normalized;
     type = mapped;
   }
@@ -790,11 +796,24 @@ function collectObjectDefines(source) {
   return defines;
 }
 
-function collectTypeAliasDefines(source) {
-  const defines = new Map();
+function collectTypeAliasDefines(source, initialDefines = new Map()) {
+  const defines = new Map(initialDefines);
+  const out = new Map();
   for (const line of source.split(/\r?\n/u)) {
     const alias = parseSimpleTypeAlias(stripLineComment(line), defines);
-    if (alias !== undefined) defines.set(alias.name, alias.value);
+    if (alias !== undefined) {
+      defines.set(alias.name, alias.value);
+      out.set(alias.name, alias.value);
+    }
+  }
+  return out;
+}
+
+function collectFunctionDefineBodies(functionDeclarations) {
+  const defines = new Map();
+  for (const declaration of functionDeclarations) {
+    const match = /^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s+([\s\S]+)$/u.exec(declaration);
+    if (match?.[1] !== undefined && match[2] !== undefined) defines.set(match[1], match[2].trim());
   }
   return defines;
 }
@@ -928,8 +947,8 @@ function parseSimpleTypeAlias(line, defines) {
   return undefined;
 }
 
-function stripSupportedTypeAliasDeclarations(source) {
-  const defines = new Map();
+function stripSupportedTypeAliasDeclarations(source, initialDefines = new Map()) {
+  const defines = new Map(initialDefines);
   return source
     .split(/\r?\n/u)
     .filter((line) => {
@@ -1119,11 +1138,19 @@ function dedupeTemplateRefs(refs) {
 function collectWrapperPropagatedTemplateArguments(source, definesByName = new Map()) {
   const propagated = [];
   const calls = scanTemplatedCallReferences(source);
+  const ordinaryCalls = scanFunctionCallReferences(source);
+  const templatedKernels = new Map(scanTemplatedKernelDefinitions(source).map((kernel) => [kernel.name, kernel]));
   for (const fn of scanTemplatedFunctionDefinitions(source)) {
-    const fnCalls = calls.filter((call) => call.name === fn.name && call.args.length > 0);
+    const fnCalls = [
+      ...calls.filter((call) => call.name === fn.name && call.args.length > 0)
+        .map((call) => ({ args: call.args, start: call.start, explicit: true })),
+      ...ordinaryCalls.filter((call) => call.name === fn.name && call.args.length > 0)
+        .map((call) => ({ args: inferTemplatedFunctionCallArgs(fn, call, source, definesByName), start: call.start, explicit: false })),
+    ].filter((call) => call.args.some((arg) => arg !== undefined && arg !== ""));
     if (fnCalls.length === 0) continue;
     const kernelRefs = scanTemplatedKernelReferences(fn.body);
-    if (kernelRefs.length === 0) continue;
+    const kernelLaunches = scanKernelLaunchCalls(fn.body);
+    if (kernelRefs.length === 0 && kernelLaunches.length === 0) continue;
     for (const call of fnCalls) {
       const env = templateEnvironment(fn.templateParams, call.args, definesByName);
       if (env.size === 0) continue;
@@ -1133,9 +1160,69 @@ function collectWrapperPropagatedTemplateArguments(source, definesByName = new M
         if (templateArgumentScore(args) === 0) continue;
         propagated.push({ name: ref.name, args });
       }
+      for (const launch of kernelLaunches) {
+        const kernel = templatedKernels.get(launch.name);
+        if (kernel === undefined) continue;
+        const symbols = substituteVisiblePointerTypes(
+          collectVisiblePointerTypes(`${fn.signature}\n${fn.body.slice(0, launch.start)}`, definesByName),
+          env,
+          definesByName,
+        );
+        const args = inferKernelTemplateArgsFromSymbols(kernel, launch, symbols, definesByName);
+        if (templateArgumentScore(args) === 0) continue;
+        propagated.push({ name: launch.name, args });
+      }
     }
   }
   return propagated;
+}
+
+function scanFunctionCallReferences(source) {
+  const calls = [];
+  let index = 0;
+  while (index < source.length) {
+    const ident = /[A-Za-z_][A-Za-z0-9_]*/u.exec(source.slice(index));
+    if (ident === null) break;
+    const nameStart = index + ident.index;
+    const name = ident[0];
+    index = nameStart + name.length;
+    if (["if", "for", "while", "switch", "return", "sizeof", "alignof", "template"].includes(name)) continue;
+    const open = skipWhitespace(source, index);
+    if (source[open] !== "(") continue;
+    const close = findBalanced(source, open, "(", ")");
+    if (close === undefined) continue;
+    const after = skipWhitespace(source, close + 1);
+    if (source[after] === "{" || source.slice(after, after + 3) === ">>>") {
+      index = close + 1;
+      continue;
+    }
+    const before = source.slice(Math.max(0, nameStart - 24), nameStart);
+    if (/\b(?:__global__|__device__|__host__|void|float|int|uint|size_t|bool)\s*$/u.test(before)) {
+      index = close + 1;
+      continue;
+    }
+    calls.push({
+      name,
+      args: splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim()),
+      start: nameStart,
+    });
+    index = close + 1;
+  }
+  return calls;
+}
+
+function inferTemplatedFunctionCallArgs(fn, call, source, definesByName = new Map()) {
+  const env = new Map();
+  const params = parseKernelSignatureParams(fn.signature);
+  const symbols = collectVisiblePointerTypes(source.slice(0, call.start), definesByName);
+  for (let index = 0; index < params.length; index++) {
+    const param = params[index];
+    const arg = call.args[index];
+    if (param === undefined || arg === undefined || param.templateType === undefined) continue;
+    const type = inferArgumentPointerType(arg, symbols);
+    if (type !== undefined) env.set(param.templateType, type);
+  }
+  return fn.templateParams.map((param) => param.kind === "type" || param.kind === "value" ? env.get(param.name) : undefined);
 }
 
 function collectLaunchInferredTemplateArguments(source, definesByName = new Map()) {
@@ -1215,8 +1302,12 @@ function findCudaLaunchClose(source, launchOpen) {
 }
 
 function inferKernelTemplateArgs(kernel, launch, source, definesByName = new Map()) {
-  const env = new Map();
   const symbols = collectVisiblePointerTypes(source.slice(0, launch.start), definesByName);
+  return inferKernelTemplateArgsFromSymbols(kernel, launch, symbols, definesByName);
+}
+
+function inferKernelTemplateArgsFromSymbols(kernel, launch, symbols, definesByName = new Map()) {
+  const env = new Map();
   for (let index = 0; index < kernel.kernelParams.length; index++) {
     const param = kernel.kernelParams[index];
     const arg = launch.args[index];
@@ -1231,6 +1322,14 @@ function inferKernelTemplateArgs(kernel, launch, source, definesByName = new Map
     }
   }
   return kernel.templateParams.map((param) => param.kind === "type" || param.kind === "value" ? env.get(param.name) : undefined);
+}
+
+function substituteVisiblePointerTypes(symbols, env, definesByName = new Map()) {
+  const out = new Map();
+  for (const [name, type] of symbols) {
+    out.set(name, substituteTemplateArgument(type, env, definesByName));
+  }
+  return out;
 }
 
 function parseKernelSignatureParams(signature) {
@@ -1347,6 +1446,7 @@ function scanTemplatedCallReferences(source) {
     refs.push({
       name,
       args: splitTopLevel(source.slice(templateStart + 1, templateEnd)).map((arg) => arg.trim()),
+      start: nameStart,
     });
     index = afterTemplate + 1;
   }

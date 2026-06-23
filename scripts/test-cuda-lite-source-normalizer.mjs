@@ -664,6 +664,33 @@ void host(half *out) {
 }
 
 {
+  const wrapperSource = `
+typedef float floatX;
+template<class T>
+__global__ void typed_kernel(float *out, const T *values) {
+  out[threadIdx.x] = (float)values[threadIdx.x];
+}
+template<typename T>
+void launch_typed(float *out, const T *values) {
+  typed_kernel<<<1, 256>>>(out, values);
+}
+void host(float *out, const floatX *values) {
+  launch_typed(out, values);
+}`;
+  const defines = new Map([["floatX", "float"]]);
+  const launches = collectKernelTemplateArguments(wrapperSource);
+  assert.deepEqual(launches.get("typed_kernel"), ["float"]);
+  const kernel = /template<class T>[\s\S]*?^\}/mu.exec(wrapperSource)?.[0];
+  assert.ok(kernel);
+  const source = createKernelCompilationUnit({
+    kernel,
+    definesByName: defines,
+    templateArgumentsByKernelName: launches,
+  });
+  assert.match(source, /__global__ void typed_kernel\(float \*out, const float \*values\)/u);
+}
+
+{
   const packedSource = `
 template<class ElementType>
 struct alignas(16) Packed128 {
@@ -719,6 +746,38 @@ __global__ void local_constexpr(float *out) {
   });
   assert.doesNotMatch(source, /#define BM 32/u);
   assert.match(source, /constexpr int BM = 32;/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void packed_local_alias(const floatX *input, floatX *output) {
+  using x128 = Packed128<floatX>;
+  int idx = threadIdx.x * x128::size;
+  x128 value = load128cs(input + idx);
+  store128cs(output + idx, value);
+}`,
+    definesByName: new Map([["floatX", "float"]]),
+  });
+  assert.match(source, /#define x128 float4/u);
+  assert.match(source, /reinterpret_cast<float4 \*>\(input \+ idx\)\[0\]/u);
+  assert.doesNotMatch(source, /using x128/u);
+  assert.doesNotMatch(source, /Packed128/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void macro_calls_helper(float *out) {
+  BG_APPLY(out[threadIdx.x]);
+}`,
+    functionDeclarations: ["#define BG_APPLY(value) helper(value)"],
+    deviceFunctions: [
+      { name: "helper", source: "__device__ void helper(float &value) { value = value + 1.0f; }" },
+    ],
+  });
+  assert.match(source, /#define BG_APPLY\(value\) helper\(value\)/u);
+  assert.match(source, /__device__ void helper/u);
 }
 
 console.log("cuda-lite source normalizer tests ok");
