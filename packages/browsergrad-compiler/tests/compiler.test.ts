@@ -1855,7 +1855,7 @@ __global__ void surfaceWrite(cudaSurfaceObject_t outputSurf, int width, int heig
   int y = threadIdx.y;
   if (x < width && y < height) {
     float value = tex2D(texRef, (float)x + 0.5f, (float)y + 0.5f);
-    surf2Dwrite(value * 2.0f, outputSurf, x * sizeof(float), y);
+    surf2Dwrite(value * 2.0f, outputSurf, x * sizeof(float), y, cudaBoundaryModeTrap);
   }
 }`, { workgroupSize: [2, 2, 1] });
     const result = runCompiledKernelReference(
@@ -2938,6 +2938,34 @@ __global__ void sample(float *out, int width) {
       name: "texRef",
     }));
     expect([...result.buffers.out as Float32Array]).toEqual([4, 8]);
+  });
+
+  it("lowers CUDA texture object params and templated tex2D reads", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sample(float *out, int width, cudaTextureObject_t tex) {
+  int x = threadIdx.x;
+  if (x < width) {
+    out[x] = tex2D<float>(tex, (float)x + 0.5f, 0.5f);
+  }
+}`, { workgroupSize: [3, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(3) },
+        textures: { tex: { width: 3, height: 1, data: new Float32Array([2, 4, 6]) } },
+        scalars: { width: 3 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
+    );
+
+    expect(compiled.ir.params.find((param) => param.name === "tex")?.valueType).toBe("texture2d");
+    expect(compiled.wgsl).toContain("var tex: texture_2d<f32>;");
+    expect(compiled.wgsl).toContain("bg_tex2d_tex");
+    expect(compiled.wgslProgram.bindings).toContainEqual(expect.objectContaining({
+      kind: "texture2d",
+      name: "tex",
+    }));
+    expect([...result.buffers.out as Float32Array]).toEqual([2, 4, 6]);
   });
 
   it("formats diagnostics with source snippets", () => {

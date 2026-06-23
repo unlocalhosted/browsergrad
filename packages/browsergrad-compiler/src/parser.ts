@@ -43,6 +43,7 @@ const TYPE_START_KEYWORDS = new Set([
   "uintptr_t",
   "curandState_t",
   "cufftComplex",
+  "cudaTextureObject_t",
   "cudaSurfaceObject_t",
   "cudaEvent_t",
   "cudaStream_t",
@@ -849,6 +850,7 @@ class Parser {
     if (token.value === "uint32_t" || token.value === "uint64_t" || token.value === "uintptr_t") return "uint";
     if (token.value === "curandState_t") return "uint";
     if (token.value === "cufftComplex") return "complex64";
+    if (token.value === "cudaTextureObject_t") return "texture2d";
     if (token.value === "cudaSurfaceObject_t") return "surface2d";
     if (token.value === "cudaEvent_t" || token.value === "cudaStream_t") return "uint";
     if (token.value === "DevicePool") return "devicepool";

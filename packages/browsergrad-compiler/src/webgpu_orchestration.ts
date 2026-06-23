@@ -740,7 +740,7 @@ export function packCudaWebGpuUniformParams(
   input: CompiledKernelInput,
 ): Uint8Array {
   const scalarParams = [
-    ...compiled.ir.params.filter((param) => !param.pointer && param.valueType !== "surface2d"),
+    ...compiled.ir.params.filter((param) => !param.pointer && param.valueType !== "surface2d" && param.valueType !== "texture2d"),
     ...compiled.ir.constants.filter((constant) => constant.dimensions.length === 0),
     ...compiled.ir.params.filter((param) => param.valueType === "surface2d").flatMap((param) => [
       { name: `${param.name}_width`, valueType: "uint" as const, surface: param.name, span: param.span },

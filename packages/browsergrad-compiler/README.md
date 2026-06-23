@@ -112,6 +112,10 @@ analyzer, CPU-reference, and WGSL path.
 CUDA cache-hint memory builtins `__ldcs` and `__stcs` lower as ordinary storage
 pointer loads/stores; BrowserGrad preserves semantics and intentionally ignores
 the cache placement hint on WebGPU.
+CUDA 2D float texture references and `cudaTextureObject_t` kernel params lower
+to named WebGPU `texture_2d<f32>` bindings. `tex2D<float>(tex, x, y)` uses the
+same CPU-reference and WGSL path; true bindless handles, layered/3D textures,
+samplers, and non-float texture formats remain explicit compatibility gaps.
 CUDA vector storage types `float2/3/4`, `int2/3/4`, and `uint2/3/4` lower
 through a scalar storage ABI with `make_*` constructors and lane member access.
 This keeps caller buffers as ordinary typed arrays while still emitting vector

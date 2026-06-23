@@ -29,6 +29,7 @@ export type CudaLiteScalarType =
   | "uint2"
   | "uint3"
   | "uint4"
+  | "texture2d"
   | "surface2d"
   | "devicepool"
   | "voidptr"

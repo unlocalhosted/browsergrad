@@ -55,6 +55,7 @@ export function emitKernelIrWgsl(
   }
 
   const context = createEmitContext(ir, options);
+  const textures = textureBindings(ir);
   const lines: string[] = [];
   if (ir.requiredFeatures.includes("shader-f16")) lines.push("enable f16;");
   if (ir.requiredFeatures.includes("subgroups")) lines.push("enable subgroups;");
@@ -96,7 +97,7 @@ export function emitKernelIrWgsl(
     );
   }
 
-  for (const texture of ir.textures) {
+  for (const texture of textures) {
     lines.push(`@group(0) @binding(${context.bindingFor(texture.name)}) var ${texture.name}: texture_2d<f32>;`);
   }
 
@@ -115,9 +116,9 @@ export function emitKernelIrWgsl(
     lines.push(`var<workgroup> ${shared.name}: ${emitSharedType(shared, ir)};`);
   }
 
-  if (ir.textures.length > 0) {
+  if (textures.length > 0) {
     lines.push("");
-    for (const texture of ir.textures) lines.push(...emitTextureHelper(texture.name));
+    for (const texture of textures) lines.push(...emitTextureHelper(texture.name));
   }
   for (const surface of ir.params.filter(isSurfaceParam)) {
     lines.push("");
@@ -240,6 +241,7 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
   const bindings: WgslKernelBindingInput[] = [];
   const bindingByName = new Map<string, number>();
   const storagePointerParams = ir.params.filter((param) => param.pointer && !isDevicePoolParam(param));
+  const textures = textureBindings(ir);
   const storagePointerIds = new Map(storagePointerParams.map((param, index) => [param.name, index] as const));
   const sharedPointerIds = new Map(ir.sharedDeclarations
     .filter((shared) => shared.dimensions.length === 1)
@@ -321,7 +323,7 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
       binding,
     });
   }
-  for (const texture of ir.textures) {
+  for (const texture of textures) {
     const binding = bindings.length;
     bindingByName.set(texture.name, binding);
     bindings.push({
@@ -332,7 +334,7 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
     });
   }
   const uniformScalars = [
-    ...ir.params.filter((param) => !param.pointer && !isSurfaceParam(param)).map((param) => ({ name: param.name, valueType: param.valueType })),
+    ...ir.params.filter((param) => !param.pointer && !isSurfaceParam(param) && !isTextureParam(param)).map((param) => ({ name: param.name, valueType: param.valueType })),
     ...ir.constants.filter((constant) => constant.dimensions.length === 0).map((constant) => ({ name: constant.name, valueType: constant.valueType })),
     ...ir.params.filter(isSurfaceParam).flatMap((param) => [
       { name: surfaceWidthField(param.name), valueType: "uint" as const },
@@ -1255,7 +1257,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       }
       return `tex2D(${args.join(", ")})`;
     case "surf2Dwrite":
-      if (expression.args.length === 4 && expression.args[1]?.kind === "identifier") {
+      if (expression.args.length >= 4 && expression.args[1]?.kind === "identifier") {
         return `bg_surf2dwrite_${expression.args[1].name}(${emitExpression(expression.args[0]!, context)}, ${emitExpression(expression.args[2]!, context)}, ${emitExpression(expression.args[3]!, context)})`;
       }
       return `surf2Dwrite(${args.join(", ")})`;
@@ -2055,7 +2057,7 @@ function zeroValue(type: CudaLiteScalarType): string {
   if (type === "uint") return "0u";
   if (type === "bool") return "false";
   if (type === "complex64") return "vec2<f32>(0.0, 0.0)";
-  if (type === "surface2d" || type === "devicepool" || type === "voidptr") return "0u";
+  if (type === "texture2d" || type === "surface2d" || type === "devicepool" || type === "voidptr") return "0u";
   return "0";
 }
 
@@ -2077,6 +2079,7 @@ function wgslScalar(type: CudaLiteScalarType): string {
       return "bool";
     case "complex64":
       return "vec2<f32>";
+    case "texture2d":
     case "surface2d":
     case "devicepool":
     case "voidptr":
@@ -2089,7 +2092,7 @@ function wgslScalar(type: CudaLiteScalarType): string {
 function wgslUniformScalar(type: CudaLiteScalarType): string {
   if (isCudaVectorType(type)) return wgslScalar(type);
   if (type === "complex64") return "vec2<f32>";
-  if (type === "surface2d" || type === "devicepool" || type === "voidptr") return "u32";
+  if (type === "texture2d" || type === "surface2d" || type === "devicepool" || type === "voidptr") return "u32";
   return type === "bool" ? "u32" : wgslScalar(type);
 }
 
@@ -2103,6 +2106,7 @@ function wgslBindingType(type: CudaLiteScalarType): "f16" | "f32" | "i32" | "u32
   if (type === "uint") return "u32";
   if (type === "bool") return "u32";
   if (type === "complex64") return "f32";
+  if (type === "texture2d") return "f32";
   if (type === "surface2d") return "f32";
   if (type === "devicepool" || type === "voidptr") return "u32";
   return "f32";
@@ -2110,6 +2114,17 @@ function wgslBindingType(type: CudaLiteScalarType): "f16" | "f32" | "i32" | "u32
 
 function isSurfaceParam(param: CudaLiteParam): boolean {
   return param.valueType === "surface2d";
+}
+
+function isTextureParam(param: CudaLiteParam): boolean {
+  return param.valueType === "texture2d";
+}
+
+function textureBindings(ir: KernelIrModule): readonly { readonly name: string }[] {
+  return [
+    ...ir.textures.map((texture) => ({ name: texture.name })),
+    ...ir.params.filter(isTextureParam).map((param) => ({ name: param.name })),
+  ];
 }
 
 function isDevicePoolParam(param: CudaLiteParam): boolean {

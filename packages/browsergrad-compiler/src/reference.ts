@@ -2026,7 +2026,11 @@ function freezeTrace(trace: MutableTrace): KernelThreadTrace {
 
 function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelInput): void {
   for (const param of compiled.ir.params) {
-    if (param.valueType === "surface2d") {
+    if (param.valueType === "texture2d") {
+      const texture = input.textures?.[param.name];
+      if (!texture) throw compilerFailure(`missing texture input '${param.name}'`);
+      validateSurfaceInput(`texture ${param.name}`, texture);
+    } else if (param.valueType === "surface2d") {
       const surface = input.surfaces?.[param.name];
       if (!surface) throw compilerFailure(`missing surface input '${param.name}'`);
       validateSurfaceInput(param.name, surface);

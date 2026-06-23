@@ -231,6 +231,7 @@ function syntheticInputFor(compiled) {
   const buffers = {};
   const constants = {};
   const memoryPools = {};
+  const textures = {};
   for (const param of compiled.ir.params) {
     if (param.pointer) {
       if (param.valueType === "devicepool") {
@@ -238,6 +239,8 @@ function syntheticInputFor(compiled) {
       } else {
         buffers[param.name] = syntheticBufferForType(param.valueType);
       }
+    } else if (param.valueType === "texture2d") {
+      textures[param.name] = { width: 64, height: 64, data: new Float32Array(64 * 64) };
     } else {
       scalars[param.name] = syntheticScalarForName(param.name);
     }
@@ -247,10 +250,13 @@ function syntheticInputFor(compiled) {
       ? syntheticScalarForName(constant.name)
       : syntheticBufferForType(constant.valueType);
   }
+  for (const texture of compiled.ir.textures) {
+    textures[texture.name] = { width: 64, height: 64, data: new Float32Array(64 * 64) };
+  }
   for (const poolName of externalDevicePoolNamesFromSource(compiled.ast.source)) {
     memoryPools[poolName] ??= { data: new Uint32Array(4096), offset: new Uint32Array([0]) };
   }
-  return { buffers, scalars, constants, memoryPools };
+  return { buffers, scalars, constants, memoryPools, textures };
 }
 
 function externalDevicePoolNamesFromSource(source) {

@@ -60,12 +60,13 @@ Repo exploration:
 
 Local corpus audits on 2026-06-23:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `69` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `83` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
   `reinterpret_cast<T*>` storage views, bounded CUDA template constants, and
-  fast math/bit intrinsics, and `288` hard gaps. Main
+  fast math/bit intrinsics plus 2D float texture-object lowering, and `274`
+  hard gaps. Main
   failures: parser/frontend gaps, texture/vector types, `clock_t`, `half2`,
   `double`, templates, and runtime library shape.
 - `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `45` direct
@@ -262,7 +263,7 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=69` WebGPU-runnable, and `<=288` hard gaps.
+  `>=83` WebGPU-runnable, and `<=274` hard gaps.
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=45`
   WebGPU-runnable, and `<=103` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
@@ -299,6 +300,9 @@ Acceptance criteria for the first slice:
 - CUDA fast math/bit intrinsic ledger includes `__saturatef`, `__fdividef`,
   `__expf`, `__logf`, `rsqrtf`, `__clz`, `__mul24`, `__umul24`, and `assert`
   with parser/analyzer, CPU reference, WGSL, and test coverage.
+- CUDA 2D float texture-object lowering maps `cudaTextureObject_t` params and
+  `tex2D<float>` calls to named WebGPU texture bindings with CPU-reference,
+  WGSL, and browser test coverage.
 - Source/context normalization stays generic: no repo-name, file-name, or
   assignment-name branching.
 - At least one broad intrinsic gap from `llm.c` or LeetCUDA lands with parser,

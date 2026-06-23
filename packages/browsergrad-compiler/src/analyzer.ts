@@ -47,7 +47,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["atomicExch", [2, 2]],
   ["atomicCAS", [3, 3]],
   ["tex2D", [3, 3]],
-  ["surf2Dwrite", [4, 4]],
+  ["surf2Dwrite", [4, 5]],
   ["sizeof", [1, 1]],
   ["deviceAllocate", [2, 4]],
   ["streamOrderedAllocate", [2, 4]],
@@ -1049,7 +1049,7 @@ function validateTex2D(
     diagnostics.push(error("unsupported-texture", "tex2D first argument must be a texture reference", expression.span));
   } else {
     const symbol = lookupSymbol(texture.name, scope, texture.span);
-    if (symbol?.kind !== "texture") {
+    if (symbol?.kind !== "texture" && symbol?.valueType !== "texture2d") {
       diagnostics.push(error("unsupported-texture", `tex2D target '${texture.name}' is not a texture reference`, texture.span));
     }
   }
@@ -1481,6 +1481,7 @@ function expressionInfoForIdentifier(
   if (symbol.kind === "device-function") return { kind: "function", symbol };
   if (symbol.kind === "cooperative-group") return { kind: "unknown", symbol };
   if (symbol.kind === "texture") return { kind: "texture", valueType: symbol.valueType, symbol };
+  if (symbol.valueType === "texture2d") return { kind: "texture", valueType: symbol.valueType, symbol };
   if (symbol.valueType === "surface2d") return { kind: "surface", valueType: symbol.valueType, symbol };
   if (symbol.kind === "local" && symbol.dimensions && symbol.dimensions.length > 0) {
     return {

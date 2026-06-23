@@ -160,7 +160,7 @@ __global__ void surfaceWrite(cudaSurfaceObject_t outputSurf, int width, int heig
   int y = threadIdx.y;
   if (x < width && y < height) {
     float value = tex2D(texRef, (float)x + 0.5f, (float)y + 0.5f);
-    surf2Dwrite(value * 2.0f, outputSurf, x * sizeof(float), y);
+    surf2Dwrite(value * 2.0f, outputSurf, x * sizeof(float), y, cudaBoundaryModeTrap);
   }
 }
 `;
@@ -1279,6 +1279,28 @@ __global__ void texture_sample(float* out, int width) {
     const input = {
       buffers: { out: new Float32Array(4) },
       textures: { texRef: { width: 4, height: 1, data: new Float32Array([3, 5, 7, 11]) } },
+      scalars: { width: 4 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
+  it("runs compiled texture object reads through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void texture_object_sample(float* out, int width, cudaTextureObject_t tex) {
+  int x = threadIdx.x;
+  if (x < width) {
+    out[x] = tex2D<float>(tex, (float)x + 0.5f, 0.5f);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [4, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(4) },
+      textures: { tex: { width: 4, height: 1, data: new Float32Array([13, 17, 19, 23]) } },
       scalars: { width: 4 },
     };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
