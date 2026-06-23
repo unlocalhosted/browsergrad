@@ -62,6 +62,7 @@ const PORTABLE_POINTER_BASE_TYPES = new Set([
 const files = listFiles(corpusRoot)
   .filter((file) => /\.(?:md|markdown|cu|cuh|cpp|cc|cxx|h|hpp)$/i.test(file))
   .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+const corpusContext = createCorpusContext(corpusRoot, files);
 
 const results = [];
 let codeBlocks = 0;
@@ -69,55 +70,36 @@ let cudaBlocks = 0;
 
 for (const file of files) {
   const absolute = path.join(corpusRoot, file);
-  const text = fs.readFileSync(absolute, "utf8");
-  const includeContext = collectLocalIncludeSources(absolute, corpusRoot).join("\n");
+  const text = corpusContext.read(absolute);
+  const directIncludeContext = corpusContext.directSources(absolute).join("\n");
+  const reverseIncludeContext = corpusContext.reverseSources(absolute).join("\n");
   const blocks = markdownBlocks(text, file);
   let carriedDefines = new Map();
   codeBlocks += blocks.length;
   for (const [blockIndex, block] of blocks.entries()) {
     if (isNonKernelCodeBlock(block)) continue;
-    const declarationContext = `${sourceWithoutCudaFunctionBodies(includeContext)}\n${sourceWithoutCudaFunctionBodies(block.code)}`;
-    const blockDefines = collectCudaLiteContextDefines(declarationContext);
-    const blockFunctionDefines = collectFunctionDefines(`${includeContext}\n${block.code}`);
-    const blockDeviceFunctions = collectPortableDeviceFunctions(`${includeContext}\n${block.code}`);
-    const blockDynamicLaunchTargets = collectDynamicLaunchTargetDeviceFunctions(`${includeContext}\n${block.code}`);
-    const blockConstants = collectConstantDeclarations(`${includeContext}\n${block.code}`);
-    const blockTextures = collectTextureDeclarations(`${includeContext}\n${block.code}`);
-    const blockSharedDeclarations = collectTranslationUnitSharedDeclarations(declarationContext);
-    const blockTemplateArguments = collectKernelTemplateArguments(`${includeContext}\n${block.code}`);
-    const effectiveDefines = mergeDefineMaps(CUDA_SYSTEM_DEFINES, carriedDefines, blockDefines);
+    const directContext = createAuditBlockContext(directIncludeContext, block.code, carriedDefines);
+    const reverseContext = reverseIncludeContext.trim().length > 0
+      ? createAuditBlockContext(`${directIncludeContext}\n${reverseIncludeContext}`, block.code, carriedDefines)
+      : undefined;
     if (CUDA_HINT_RE.test(block.code)) cudaBlocks++;
     const kernels = extractKernelDefinitions(block.code);
     for (const [kernelIndex, rawKernel] of kernels.entries()) {
       const kernelName = kernelDefinitionName(rawKernel);
-      const kernel = pruneCudaPreprocessorBranches(rawKernel, effectiveDefines);
-      const siblingKernels = [
-        ...kernels.filter((candidate) => candidate !== rawKernel)
-          .map((candidate) => pruneCudaPreprocessorBranches(candidate, effectiveDefines)),
-        ...blockDynamicLaunchTargets,
-      ];
-      const source = createKernelCompilationUnit({
-        kernel,
-        siblingKernels,
-        definesByName: effectiveDefines,
-        templateArgumentsByKernelName: blockTemplateArguments,
-        functionDeclarations: blockFunctionDefines,
-        deviceFunctions: blockDeviceFunctions,
-        constantDeclarations: blockConstants,
-        textureDeclarations: blockTextures,
-        sharedDeclarations: blockSharedDeclarations,
-      });
-      try {
-        compileCudaLiteKernel(source, {
-          kernelName,
-          features: { "shader-f16": true, subgroups: true },
-          workgroupSize: [256, 1, 1],
-          dynamicSharedMemory: inferDynamicSharedMemory(source),
-        });
+      const directAttempt = compileKernelFromAuditContext(rawKernel, kernels, kernelName, directContext);
+      if (directAttempt.ok) {
         results.push({ file, block: blockIndex + 1, kernel: kernelIndex + 1, ok: true });
-      } catch (error) {
-        const fallback = classifyReferenceFallback(source, kernelName);
-        const diagnostic = error?.diagnostics?.[0];
+        continue;
+      }
+      if (reverseContext !== undefined && shouldRetryWithReverseContext(directAttempt.error)) {
+        const reverseAttempt = compileKernelFromAuditContext(rawKernel, kernels, kernelName, reverseContext);
+        if (reverseAttempt.ok) {
+          results.push({ file, block: blockIndex + 1, kernel: kernelIndex + 1, ok: true });
+          continue;
+        }
+      }
+      const fallback = classifyReferenceFallback(directAttempt.source, kernelName);
+      const diagnostic = directAttempt.error?.diagnostics?.[0];
         const feature = diagnostic
           ? describeCudaDiagnostic(diagnostic)
           : undefined;
@@ -132,7 +114,7 @@ for (const file of files) {
           feature: feature?.label ?? "Unknown compatibility gap",
           lowering: feature?.lowering ?? "unsupported",
           message: diagnostic?.message ?? String(error?.message ?? error).split("\n")[0],
-          ...(includeSources ? { source } : {}),
+          ...(includeSources ? { source: directAttempt.source } : {}),
           referenceOk: fallback.referenceOk,
           webGpuLiftOk: fallback.webGpuLiftOk,
           webGpuLiftKind: fallback.webGpuLiftKind,
@@ -140,9 +122,8 @@ for (const file of files) {
           webGpuLiftBlockerKind: fallback.webGpuLiftBlockerKind,
           webGpuLiftBlockerCode: fallback.webGpuLiftBlockerCode,
         });
-      }
     }
-    carriedDefines = mergeCarriedDefines(carriedDefines, blockDefines);
+    carriedDefines = mergeCarriedDefines(carriedDefines, directContext.blockDefines);
   }
 }
 
@@ -150,6 +131,61 @@ function isNonKernelCodeBlock(block) {
   if (NON_CODE_BLOCK_LANG_RE.test(block.lang)) return true;
   if (/^\s*(?:\/\/\s*)?Pseudocode solution\b/iu.test(block.code)) return true;
   return /^\s*(?:flowchart|graph)\s+(?:LR|RL|TB|TD|BT)\b/iu.test(block.code);
+}
+
+function createAuditBlockContext(includeContext, blockCode, carriedDefines) {
+  const declarationContext = `${sourceWithoutCudaFunctionBodies(includeContext)}\n${sourceWithoutCudaFunctionBodies(blockCode)}`;
+  const blockDefines = collectCudaLiteContextDefines(declarationContext);
+  return {
+    blockDefines,
+    effectiveDefines: mergeDefineMaps(CUDA_SYSTEM_DEFINES, carriedDefines, blockDefines),
+    functionDeclarations: collectFunctionDefines(`${includeContext}\n${blockCode}`),
+    deviceFunctions: collectPortableDeviceFunctions(`${includeContext}\n${blockCode}`),
+    dynamicLaunchTargets: collectDynamicLaunchTargetDeviceFunctions(`${includeContext}\n${blockCode}`),
+    constantDeclarations: collectConstantDeclarations(`${includeContext}\n${blockCode}`),
+    textureDeclarations: collectTextureDeclarations(`${includeContext}\n${blockCode}`),
+    sharedDeclarations: collectTranslationUnitSharedDeclarations(declarationContext),
+    templateArguments: collectKernelTemplateArguments(`${includeContext}\n${blockCode}`),
+  };
+}
+
+function compileKernelFromAuditContext(rawKernel, kernels, kernelName, context) {
+  const kernel = pruneCudaPreprocessorBranches(rawKernel, context.effectiveDefines);
+  const siblingKernels = [
+    ...kernels.filter((candidate) => candidate !== rawKernel)
+      .map((candidate) => pruneCudaPreprocessorBranches(candidate, context.effectiveDefines)),
+    ...context.dynamicLaunchTargets,
+  ];
+  const source = createKernelCompilationUnit({
+    kernel,
+    siblingKernels,
+    definesByName: context.effectiveDefines,
+    templateArgumentsByKernelName: context.templateArguments,
+    functionDeclarations: context.functionDeclarations,
+    deviceFunctions: context.deviceFunctions,
+    constantDeclarations: context.constantDeclarations,
+    textureDeclarations: context.textureDeclarations,
+    sharedDeclarations: context.sharedDeclarations,
+  });
+  try {
+    compileCudaLiteKernel(source, {
+      kernelName,
+      features: { "shader-f16": true, subgroups: true },
+      workgroupSize: [256, 1, 1],
+      dynamicSharedMemory: inferDynamicSharedMemory(source),
+    });
+    return { ok: true, source };
+  } catch (error) {
+    return { ok: false, source, error };
+  }
+}
+
+function shouldRetryWithReverseContext(error) {
+  const diagnostic = error?.diagnostics?.[0];
+  if (diagnostic === undefined) return false;
+  if (diagnostic.code === "unknown-symbol") return true;
+  if (diagnostic.code !== "parse-error") return false;
+  return /unsupported CUDA-lite type|unknown CUDA-lite symbol|expected type/u.test(diagnostic.message ?? "");
 }
 
 const failures = results.filter((result) => !result.ok);
@@ -489,28 +525,144 @@ function expandCudaQualifierMacros(source) {
     .join("\n");
 }
 
-function collectLocalIncludeSources(absoluteFile, root, seen = new Set()) {
+function createCorpusContext(root, files) {
+  const sourceCache = new Map();
+  const includeGraph = new Map();
+  const reverseIncludeGraph = new Map();
+  const read = (absoluteFile) => {
+    const resolved = path.resolve(absoluteFile);
+    const cached = sourceCache.get(resolved);
+    if (cached !== undefined) return cached;
+    let source = "";
+    try {
+      source = fs.readFileSync(resolved, "utf8");
+    } catch {
+      // Optional headers outside small educational corpora are ignored.
+    }
+    sourceCache.set(resolved, source);
+    return source;
+  };
+  const includesFor = (absoluteFile) => {
+    const resolvedFile = path.resolve(absoluteFile);
+    const cached = includeGraph.get(resolvedFile);
+    if (cached !== undefined) return cached;
+    const source = read(resolvedFile);
+    const includes = [];
+    for (const includeName of localIncludeNames(source)) {
+      const resolved = resolveLocalInclude(resolvedFile, root, includeName);
+      if (!resolved) continue;
+      includes.push(resolved);
+    }
+    const unique = uniqueResolved(includes);
+    includeGraph.set(resolvedFile, unique);
+    return unique;
+  };
+  for (const file of files) {
+    const absoluteFile = path.resolve(root, file);
+    const source = read(absoluteFile);
+    for (const includeName of localIncludeNames(source)) {
+      const resolved = resolveLocalInclude(absoluteFile, root, includeName);
+      if (!resolved) continue;
+      const reverse = reverseIncludeGraph.get(resolved) ?? [];
+      reverse.push(absoluteFile);
+      reverseIncludeGraph.set(resolved, reverse);
+    }
+    includesFor(absoluteFile);
+  }
+  return {
+    read,
+    directSources(absoluteFile) {
+      return uniqueStrings(collectTransitiveIncludeSources(path.resolve(absoluteFile), includesFor, read));
+    },
+    reverseSources(absoluteFile) {
+      return uniqueStrings(collectReverseTranslationUnitSources(
+        path.resolve(absoluteFile),
+        root,
+        includesFor,
+        reverseIncludeGraph,
+        read,
+      ));
+    },
+  };
+}
+
+function localIncludeNames(source) {
+  return [...source.matchAll(/^\s*#include\s+"([^"]+)"/gm)]
+    .map((match) => match[1])
+    .filter(Boolean);
+}
+
+function collectTransitiveIncludeSources(absoluteFile, includesFor, read, seen = new Set()) {
   if (seen.has(absoluteFile)) return [];
   seen.add(absoluteFile);
-  let source;
-  try {
-    source = fs.readFileSync(absoluteFile, "utf8");
-  } catch {
-    return [];
-  }
   const out = [];
+  for (const included of includesFor(absoluteFile)) {
+    if (seen.has(included)) continue;
+    out.push(...collectTransitiveIncludeSources(included, includesFor, read, seen));
+    out.push(read(included));
+  }
+  return out;
+}
+
+function collectReverseTranslationUnitSources(absoluteFile, root, includesFor, reverseIncludeGraph, read) {
+  const out = [];
+  const seenFiles = new Set([absoluteFile]);
+  const pending = [...(reverseIncludeGraph.get(absoluteFile) ?? [])].map((file) => ({ file, target: absoluteFile }));
+  while (pending.length > 0 && seenFiles.size <= 32) {
+    const item = pending.shift();
+    const includer = item?.file;
+    const target = item?.target;
+    if (includer === undefined || seenFiles.has(includer)) continue;
+    if (target === undefined) continue;
+    seenFiles.add(includer);
+    for (const source of collectPrefixIncludeSources(includer, target, root, includesFor, read)) {
+      out.push(source);
+    }
+    const prefix = sourcePrefixBeforeResolvedInclude(includer, target, root, read);
+    if (prefix !== undefined) out.push(prefix);
+    for (const next of reverseIncludeGraph.get(includer) ?? []) {
+      if (!seenFiles.has(next)) pending.push({ file: next, target: includer });
+    }
+  }
+  return out;
+}
+
+function collectPrefixIncludeSources(includer, target, root, includesFor, read) {
+  const prefix = sourcePrefixBeforeResolvedInclude(includer, target, root, read);
+  if (prefix === undefined) return [];
+  const out = [];
+  const seen = new Set([target]);
+  for (const includeName of localIncludeNames(prefix)) {
+    const resolved = resolveLocalInclude(includer, root, includeName);
+    if (!resolved || seen.has(resolved)) continue;
+    out.push(...collectTransitiveIncludeSources(resolved, includesFor, read, seen));
+    out.push(read(resolved));
+  }
+  return out;
+}
+
+function sourcePrefixBeforeResolvedInclude(includer, target, root, read) {
+  const source = read(includer);
   for (const match of source.matchAll(/^\s*#include\s+"([^"]+)"/gm)) {
     const includeName = match[1];
     if (!includeName) continue;
-    const resolved = resolveLocalInclude(absoluteFile, root, includeName);
-    if (!resolved || seen.has(resolved)) continue;
-    const nested = collectLocalIncludeSources(resolved, root, seen);
-    out.push(...nested);
-    try {
-      out.push(fs.readFileSync(resolved, "utf8"));
-    } catch {
-      // ignore unreadable optional local headers
-    }
+    const resolved = resolveLocalInclude(includer, root, includeName);
+    if (resolved === target) return source.slice(0, match.index);
+  }
+  return undefined;
+}
+
+function uniqueResolved(files) {
+  return [...new Set(files.map((file) => path.resolve(file)))];
+}
+
+function uniqueStrings(values) {
+  const seen = new Set();
+  const out = [];
+  for (const value of values) {
+    if (value.trim().length === 0 || seen.has(value)) continue;
+    seen.add(value);
+    out.push(value);
   }
   return out;
 }

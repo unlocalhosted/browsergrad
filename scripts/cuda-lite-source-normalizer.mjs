@@ -477,6 +477,7 @@ function splitTemplateParamDefault(param) {
 }
 
 function normalizeTemplateValueArgument(arg, valueType) {
+  if (arg === undefined) return undefined;
   const value = arg.trim().replace(/[uUlL]+$/u, "");
   if (valueType === "bool") {
     if (value === "true") return "1";
@@ -1889,6 +1890,7 @@ function alignofType(typeName) {
 
 function templateArgumentScore(args) {
   return args.reduce((score, arg) => {
+    if (arg === undefined) return score;
     if (normalizeTemplateTypeArgument(arg) !== undefined) return score + 2;
     if (normalizeTemplateValueArgument(arg, "int") !== undefined) return score + 1;
     return score;
