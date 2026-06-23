@@ -508,16 +508,37 @@ function collectLocalIncludeSources(absoluteFile, root, seen = new Set()) {
 }
 
 function resolveLocalInclude(absoluteFile, root, includeName) {
-  const candidates = [
-    path.resolve(path.dirname(absoluteFile), includeName),
-    path.resolve(root, includeName),
-  ];
+  const candidates = localIncludeCandidates(absoluteFile, root, includeName);
   for (const candidate of candidates) {
     const relative = path.relative(root, candidate);
     if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
     if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
   }
   return undefined;
+}
+
+function localIncludeCandidates(absoluteFile, root, includeName) {
+  const out = [];
+  const seen = new Set();
+  const add = (candidate) => {
+    const resolved = path.resolve(candidate);
+    if (seen.has(resolved)) return;
+    seen.add(resolved);
+    out.push(resolved);
+  };
+  let dir = path.dirname(absoluteFile);
+  const resolvedRoot = path.resolve(root);
+  while (true) {
+    add(path.join(dir, includeName));
+    add(path.join(dir, "include", includeName));
+    add(path.join(dir, "utils", includeName));
+    if (dir === resolvedRoot) break;
+    const parent = path.dirname(dir);
+    if (parent === dir || path.relative(resolvedRoot, parent).startsWith("..")) break;
+    dir = parent;
+  }
+  add(path.join(resolvedRoot, includeName));
+  return out;
 }
 
 function isPlaceholderKernel(kernel) {

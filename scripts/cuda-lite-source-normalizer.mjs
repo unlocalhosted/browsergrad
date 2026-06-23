@@ -5,6 +5,7 @@ const SEMANTIC_BUILTIN_DEVICE_HELPERS = new Set([
   "store128",
   "store128cs",
   "store128cg",
+  "div_ceil",
 ]);
 
 export function createKernelCompilationUnit({

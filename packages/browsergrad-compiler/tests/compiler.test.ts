@@ -660,12 +660,6 @@ __global__ void bad(float* x) {
 }`));
     expect(barrierArity.diagnostics.map((diagnostic) => diagnostic.code)).toContain("invalid-call-arity");
 
-    const reservedName = analyzeCudaLite(parseCudaLite(`
-__global__ void bad(float* var) {
-  if (threadIdx.x < 1) { var[0] = 1.0; }
-}`));
-    expect(reservedName.diagnostics.map((diagnostic) => diagnostic.code)).toContain("reserved-symbol");
-
     const builtinShadow = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(float* x) {
   float threadIdx = 0.0;
@@ -1718,7 +1712,8 @@ __global__ void shadow_lerp(float *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("fn lerp(");
+    expect(compiled.wgsl).toContain("fn bg_lerp(");
+    expect(compiled.wgsl).toContain("bg_lerp(f32(2.0), f32(6.0), f32(0.25)");
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(8.25, 5);
   });
 
@@ -4054,6 +4049,61 @@ __global__ void address_math(uint* out, int n) {
     expect(compiled.wgsl).toContain("(((params.n + 4) - 1) / 4)");
     expect(compiled.wgsl).toContain("out[1] = u32((0u + u32(4)))");
     expect(compiled.wgsl).toContain("regs[fill_regs_0][fill_regs_1] = 3.0;");
+  });
+
+  it("lowers CUDA assignment expression chains as ordered statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void chained_assign(float* x, float* out) {
+  __shared__ float sdata[4];
+  int tid = threadIdx.x;
+  float mySum = x[tid];
+  sdata[tid] = mySum;
+  __syncthreads();
+  if (tid == 0) {
+    sdata[tid] = mySum = mySum + sdata[tid + 1];
+    out[0] = mySum;
+    out[1] = sdata[0];
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([2, 5]), out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([7, 7]);
+    expect(compiled.wgsl).toContain("mySum = (mySum + sdata[(tid + 1)]);");
+    expect(compiled.wgsl).toContain("sdata[tid] = mySum;");
+  });
+
+  it("keeps nested updates out of expression contexts", () => {
+    expect(() => compileCudaLiteKernel(`
+__global__ void bad_update(float* out) {
+  int i = 0;
+  out[0] = i++;
+}`)).toThrow(/side-effect-expression/u);
+  });
+
+  it("alpha-renames WGSL reserved and builtin-shadowing CUDA symbols", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void reserved_names(float* array, float* out) {
+  float var = array[0];
+  float exp = var + 2.0f;
+  if (threadIdx.x == 0) {
+    out[0] = exp;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { array: new Float32Array([3]), out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([5]);
+    expect(compiled.wgsl).toContain("var<storage, read_write> bg_array: array<f32>;");
+    expect(compiled.wgsl).toContain("var bg_var: f32 = bg_array[0];");
+    expect(compiled.wgsl).toContain("var bg_exp: f32 = (bg_var + 2.0);");
+    expect(compiled.wgsl).not.toContain("var var:");
   });
 
   it("supports mutable CUDA pointer rebasing", () => {

@@ -68,34 +68,38 @@ export function emitKernelIrWgsl(
     const access = param.constant ? "read" : "read_write";
     const element = storageElementType(param, ir);
     lines.push(
-      `@group(0) @binding(${context.bindingFor(param.name)}) var<storage, ${access}> ${param.name}: array<${element}>;`,
+      `@group(0) @binding(${context.bindingFor(param.name)}) var<storage, ${access}> ${context.nameFor(param.name)}: array<${element}>;`,
     );
   }
   for (const surface of ir.params.filter(isSurfaceParam)) {
     lines.push(
-      `@group(0) @binding(${context.bindingFor(surface.name)}) var<storage, read_write> ${surface.name}: array<f32>;`,
+      `@group(0) @binding(${context.bindingFor(surface.name)}) var<storage, read_write> ${context.nameFor(surface.name)}: array<f32>;`,
     );
   }
   for (const pool of ir.params.filter(isDevicePoolParam)) {
+    const dataName = poolDataName(pool.name);
+    const offsetName = poolOffsetName(pool.name);
     lines.push(
-      `@group(0) @binding(${context.bindingFor(poolDataName(pool.name))}) var<storage, read_write> ${poolDataName(pool.name)}: array<u32>;`,
+      `@group(0) @binding(${context.bindingFor(dataName)}) var<storage, read_write> ${context.nameFor(dataName)}: array<u32>;`,
     );
     lines.push(
-      `@group(0) @binding(${context.bindingFor(poolOffsetName(pool.name))}) var<storage, read_write> ${poolOffsetName(pool.name)}: atomic<u32>;`,
+      `@group(0) @binding(${context.bindingFor(offsetName)}) var<storage, read_write> ${context.nameFor(offsetName)}: atomic<u32>;`,
     );
   }
   for (const poolName of context.externalPoolNames) {
+    const dataName = poolDataName(poolName);
+    const offsetName = poolOffsetName(poolName);
     lines.push(
-      `@group(0) @binding(${context.bindingFor(poolDataName(poolName))}) var<storage, read_write> ${poolDataName(poolName)}: array<u32>;`,
+      `@group(0) @binding(${context.bindingFor(dataName)}) var<storage, read_write> ${context.nameFor(dataName)}: array<u32>;`,
     );
     lines.push(
-      `@group(0) @binding(${context.bindingFor(poolOffsetName(poolName))}) var<storage, read_write> ${poolOffsetName(poolName)}: atomic<u32>;`,
+      `@group(0) @binding(${context.bindingFor(offsetName)}) var<storage, read_write> ${context.nameFor(offsetName)}: atomic<u32>;`,
     );
   }
 
   for (const constant of ir.constants.filter((constant) => constant.dimensions.length > 0 && constant.init === undefined)) {
     lines.push(
-      `@group(0) @binding(${context.bindingFor(constant.name)}) var<storage, read> ${constant.name}: ${emitConstantArrayType(constant)};`,
+      `@group(0) @binding(${context.bindingFor(constant.name)}) var<storage, read> ${context.nameFor(constant.name)}: ${emitConstantArrayType(constant)};`,
     );
   }
   for (const constant of ir.constants.filter((constant) => constant.init !== undefined)) {
@@ -103,7 +107,7 @@ export function emitKernelIrWgsl(
   }
 
   for (const texture of textures) {
-    lines.push(`@group(0) @binding(${context.bindingFor(texture.name)}) var ${texture.name}: texture_2d<f32>;`);
+    lines.push(`@group(0) @binding(${context.bindingFor(texture.name)}) var ${context.nameFor(texture.name)}: texture_2d<f32>;`);
   }
 
   const uniformScalars = context.uniformScalars;
@@ -111,31 +115,31 @@ export function emitKernelIrWgsl(
     lines.push("struct Params {");
     for (const scalar of uniformScalars) {
       const align = scalar.valueType === "half" ? "@align(4) " : "";
-      lines.push(`  ${align}${scalar.name}: ${wgslUniformScalar(scalar.valueType)},`);
+      lines.push(`  ${align}${context.nameFor(scalar.name)}: ${wgslUniformScalar(scalar.valueType)},`);
     }
     lines.push("};");
     lines.push(`@group(0) @binding(${context.paramsBinding}) var<uniform> params: Params;`);
   }
 
   for (const shared of ir.sharedDeclarations) {
-    lines.push(`var<workgroup> ${shared.name}: ${emitSharedType(shared, ir)};`);
+    lines.push(`var<workgroup> ${context.nameFor(shared.name)}: ${emitSharedType(shared, ir)};`);
   }
 
   if (textures.length > 0) {
     lines.push("");
-    for (const texture of textures) lines.push(...emitTextureHelper(texture.name));
+    for (const texture of textures) lines.push(...emitTextureHelper(texture.name, context));
   }
   for (const surface of ir.params.filter(isSurfaceParam)) {
     lines.push("");
-    lines.push(...emitSurfaceHelper(surface.name));
+    lines.push(...emitSurfaceHelper(surface.name, context));
   }
   for (const pool of ir.params.filter(isDevicePoolParam)) {
     lines.push("");
-    lines.push(...emitPoolHelper(pool.name));
+    lines.push(...emitPoolHelper(pool.name, context));
   }
   for (const poolName of context.externalPoolNames) {
     lines.push("");
-    lines.push(...emitPoolHelper(poolName));
+    lines.push(...emitPoolHelper(poolName, context));
   }
   for (const allocator of context.rawPoolAllocators) {
     lines.push("");
@@ -191,7 +195,7 @@ export function emitKernelIrWgsl(
   for (const name of context.mutablePointerBases) {
     const baseField = context.pointerBaseOffsetFieldFor(name);
     const baseName = context.mutablePointerBaseFor(name);
-    if (baseName) lines.push(`  var ${baseName}: u32 = ${baseField ? `params.${baseField}` : "0u"};`);
+    if (baseName) lines.push(`  var ${baseName}: u32 = ${baseField ? `params.${context.nameFor(baseField)}` : "0u"};`);
   }
   lines.push(...ir.body.flatMap((statement) => emitStatement(statement, context, 1)));
   lines.push("}");
@@ -234,6 +238,7 @@ interface EmitContext {
   localArrayFor(name: string): CudaLiteVarDecl | undefined;
   cooperativeGroupFor(name: string): CudaLiteCooperativeGroupDecl | undefined;
   surfaceWidthField(name: string): string;
+  nameFor(name: string): string;
 }
 
 interface PointerAlias {
@@ -254,6 +259,45 @@ interface RawPoolAllocator {
 }
 
 type EmitMode = "value" | "lvalue";
+
+const WGSL_RESERVED_IDENTIFIERS = new Set([
+  "alias",
+  "array",
+  "atomic",
+  "bitcast",
+  "bool",
+  "break",
+  "case",
+  "const",
+  "continue",
+  "default",
+  "discard",
+  "else",
+  "enable",
+  "false",
+  "fn",
+  "for",
+  "f16",
+  "f32",
+  "i32",
+  "if",
+  "let",
+  "loop",
+  "override",
+  "return",
+  "struct",
+  "switch",
+  "true",
+  "u32",
+  "var",
+  "while",
+  "main",
+  "params",
+  "global_id",
+  "local_id",
+  "workgroup_id",
+  "num_workgroups",
+]);
 
 function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions = {}): EmitContext {
   const bindings: WgslKernelBindingInput[] = [];
@@ -375,6 +419,7 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
   const localNames = collectLocalNames(ir.body);
   const localValueTypes = collectLocalValueTypes(ir.body);
   const localArrays = collectLocalArrays(ir.body);
+  const wgslNames = createWgslNameMap(collectWgslDeclaredNames(ir, localNames, externalPoolNames));
   const paramsBinding = uniformScalars.length > 0 ? bindings.length : undefined;
   if (paramsBinding !== undefined) {
     bindings.push({
@@ -449,7 +494,57 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
     surfaceWidthField(name) {
       return surfaceWidthField(name);
     },
+    nameFor(name) {
+      return wgslNames.get(name) ?? name;
+    },
   };
+}
+
+function collectWgslDeclaredNames(
+  ir: KernelIrModule,
+  localNames: ReadonlySet<string>,
+  externalPoolNames: readonly string[],
+): readonly string[] {
+  return [
+    ir.name,
+    ...ir.params.map((param) => param.name),
+    ...ir.constants.map((constant) => constant.name),
+    ...ir.textures.map((texture) => texture.name),
+    ...ir.sharedDeclarations.map((shared) => shared.name),
+    ...ir.functions.flatMap((fn) => [
+      fn.name,
+      ...fn.params.map((param) => param.name),
+      ...collectLocalNames(fn.body),
+    ]),
+    ...localNames,
+    ...externalPoolNames,
+    ...externalPoolNames.flatMap((name) => [poolDataName(name), poolOffsetName(name)]),
+  ];
+}
+
+function createWgslNameMap(names: readonly string[]): ReadonlyMap<string, string> {
+  const used = new Set([...WGSL_RESERVED_IDENTIFIERS, ...CUDA_INTRINSICS_BY_NAME.keys()]);
+  const out = new Map<string, string>();
+  for (const name of names) {
+    if (out.has(name)) continue;
+    const candidate = safeWgslIdentifier(name);
+    if (!used.has(candidate)) {
+      used.add(candidate);
+      out.set(name, candidate);
+      continue;
+    }
+    let index = 0;
+    let renamed = `bg_${candidate}`;
+    while (used.has(renamed)) renamed = `bg_${candidate}_${++index}`;
+    used.add(renamed);
+    out.set(name, renamed);
+  }
+  return out;
+}
+
+function safeWgslIdentifier(name: string): string {
+  const cleaned = name.replace(/[^A-Za-z0-9_]/gu, "_");
+  return /^[A-Za-z_]/u.test(cleaned) ? cleaned : `bg_${cleaned}`;
 }
 
 function emitStatement(
@@ -469,15 +564,15 @@ function emitStatement(
       if (statement.storage === "shared") return [];
       if (statement.pointer) {
         if (!isEmittedPointerVar(statement, context)) return [];
-        return [`${prefix}var ${statement.name}: u32${statement.init ? ` = ${emitExpression(statement.init, context)}` : " = 0u"};`];
+        return [`${prefix}var ${context.nameFor(statement.name)}: u32${statement.init ? ` = ${emitExpression(statement.init, context)}` : " = 0u"};`];
       }
       if (statement.dimensions.length > 0) {
         return [
-          `${prefix}var ${statement.name}: ${emitLocalArrayType(statement)};`,
+          `${prefix}var ${context.nameFor(statement.name)}: ${emitLocalArrayType(statement)};`,
           ...emitLocalArrayInitializer(statement, context, indentLevel),
         ];
       }
-      return [`${prefix}var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitLocalInit(statement, context)}` : ""};`];
+      return [`${prefix}var ${context.nameFor(statement.name)}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitLocalInit(statement, context)}` : ""};`];
     case "dim3":
       return [];
     case "cooperative-group":
@@ -500,6 +595,9 @@ function emitStatement(
         if (fill) return fill;
       }
       if (isBarrierCall(statement.expression)) return [`${prefix}workgroupBarrier();`];
+      if (statement.expression.kind === "assignment") {
+        return emitAssignmentStatement(statement.expression, context, indentLevel);
+      }
       return [`${prefix}${emitExpression(statement.expression, context)};`];
     case "if": {
       const lines = [`${prefix}if (${emitExpression(statement.condition, context)}) {`];
@@ -568,9 +666,9 @@ function emitInlineAsmStatement(
 }
 
 function emitForVar(statement: CudaLiteVarDecl, context: EmitContext): string {
-  if (statement.pointer) return `var ${statement.name}: u32${statement.init ? ` = ${emitExpression(statement.init, context)}` : " = 0u"}`;
-  if (statement.dimensions.length > 0) return `var ${statement.name}: ${emitLocalArrayType(statement)}`;
-  return `var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitLocalInit(statement, context)}` : ""}`;
+  if (statement.pointer) return `var ${context.nameFor(statement.name)}: u32${statement.init ? ` = ${emitExpression(statement.init, context)}` : " = 0u"}`;
+  if (statement.dimensions.length > 0) return `var ${context.nameFor(statement.name)}: ${emitLocalArrayType(statement)}`;
+  return `var ${context.nameFor(statement.name)}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitLocalInit(statement, context)}` : ""}`;
 }
 
 function emitLocalInit(statement: CudaLiteVarDecl, context: EmitContext): string {
@@ -595,24 +693,24 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
   );
   const params = [
     ...fn.params.flatMap((param) => param.pointer
-      ? [`${param.name}_buffer_arg: u32`, `${param.name}_base_arg: u32`]
+      ? [`${context.nameFor(`${param.name}_buffer_arg`)}: u32`, `${context.nameFor(`${param.name}_base_arg`)}: u32`]
       : param.cooperativeGroupKind !== undefined
         ? []
-        : [`${param.name}_arg: ${wgslScalar(param.valueType)}`]),
+        : [`${context.nameFor(`${param.name}_arg`)}: ${wgslScalar(param.valueType)}`]),
     "local_id: vec3<u32>",
     "workgroup_id: vec3<u32>",
     "num_workgroups: vec3<u32>",
   ];
   const returnType = fn.returnType === "void" ? "" : ` -> ${wgslScalar(fn.returnType)}`;
-  const lines = [`fn ${fn.name}(${params.join(", ")})${returnType} {`];
+  const lines = [`fn ${context.nameFor(fn.name)}(${params.join(", ")})${returnType} {`];
   for (const param of fn.params) {
     if (param.pointer) {
-      lines.push(`  var ${param.name}_buffer: u32 = ${param.name}_buffer_arg;`);
-      lines.push(`  var ${param.name}_base: u32 = ${param.name}_base_arg;`);
+      lines.push(`  var ${context.nameFor(`${param.name}_buffer`)}: u32 = ${context.nameFor(`${param.name}_buffer_arg`)};`);
+      lines.push(`  var ${context.nameFor(`${param.name}_base`)}: u32 = ${context.nameFor(`${param.name}_base_arg`)};`);
     } else if (param.cooperativeGroupKind !== undefined) {
       continue;
     } else {
-      lines.push(`  var ${param.name}: ${wgslScalar(param.valueType)} = ${param.name}_arg;`);
+      lines.push(`  var ${context.nameFor(param.name)}: ${wgslScalar(param.valueType)} = ${context.nameFor(`${param.name}_arg`)};`);
     }
   }
   lines.push(...fn.body.flatMap((statement) => emitStatement(statement, functionContext, 1)));
@@ -638,7 +736,7 @@ function withDevicePointerParams(
       return pointerParams.get(name) ?? context.devicePointerParamFor(name);
     },
     mutablePointerBaseFor(name) {
-      return pointerParams.has(name) ? `${name}_base` : context.mutablePointerBaseFor(name);
+      return pointerParams.has(name) ? context.nameFor(`${name}_base`) : context.mutablePointerBaseFor(name);
     },
   };
 }
@@ -679,12 +777,12 @@ function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, c
   for (const param of storageParams) {
     const id = context.storagePointerIdFor(param.name);
     if (id === undefined) continue;
-    lines.push(`    case ${id}u: { return ${emitPointerStorageRead(param, "index", ir)}; }`);
+    lines.push(`    case ${id}u: { return ${emitPointerStorageRead(param, "index", ir, context)}; }`);
   }
   for (const shared of sharedDeclarations) {
     const id = context.sharedPointerIdFor(shared.name);
     if (id === undefined) continue;
-    lines.push(`    case ${id}u: { return ${emitSharedPointerRead(shared, "index", ir)}; }`);
+    lines.push(`    case ${id}u: { return ${emitSharedPointerRead(shared, "index", ir, context)}; }`);
   }
   lines.push(`    default: { return ${zeroValue(type)}; }`);
   lines.push("  }");
@@ -695,12 +793,12 @@ function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, c
   for (const param of storageParams.filter((param) => !param.constant)) {
     const id = context.storagePointerIdFor(param.name);
     if (id === undefined) continue;
-    lines.push(`    case ${id}u: { ${emitPointerStorageWrite(param, "index", "value", ir)}; return; }`);
+    lines.push(`    case ${id}u: { ${emitPointerStorageWrite(param, "index", "value", ir, context)}; return; }`);
   }
   for (const shared of sharedDeclarations) {
     const id = context.sharedPointerIdFor(shared.name);
     if (id === undefined) continue;
-    lines.push(`    case ${id}u: { ${emitSharedPointerWrite(shared, "index", "value", ir)}; return; }`);
+    lines.push(`    case ${id}u: { ${emitSharedPointerWrite(shared, "index", "value", ir, context)}; return; }`);
   }
   lines.push("    default: { return; }");
   lines.push("  }");
@@ -712,17 +810,19 @@ function isDevicePointerHelperType(type: CudaLiteScalarType): boolean {
   return type === "float" || type === "int" || type === "uint" || type === "half" || isCudaVectorType(type);
 }
 
-function emitPointerStorageRead(param: CudaLiteParam, index: string, ir: KernelIrModule): string {
-  if (isCudaVectorType(param.valueType)) return emitVectorStorageRead(param.name, param.valueType, index);
-  const access = `${param.name}[${index}]`;
+function emitPointerStorageRead(param: CudaLiteParam, index: string, ir: KernelIrModule, context: EmitContext): string {
+  const name = context.nameFor(param.name);
+  if (isCudaVectorType(param.valueType)) return emitVectorStorageRead(name, param.valueType, index);
+  const access = `${name}[${index}]`;
   if (!ir.atomicParams.includes(param.name)) return access;
   const loaded = `atomicLoad(&${access})`;
   return param.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
 }
 
-function emitPointerStorageWrite(param: CudaLiteParam, index: string, value: string, ir: KernelIrModule): string {
-  if (isCudaVectorType(param.valueType)) return emitVectorStorageWrite(param.name, param.valueType, index, value);
-  const access = `${param.name}[${index}]`;
+function emitPointerStorageWrite(param: CudaLiteParam, index: string, value: string, ir: KernelIrModule, context: EmitContext): string {
+  const name = context.nameFor(param.name);
+  if (isCudaVectorType(param.valueType)) return emitVectorStorageWrite(name, param.valueType, index, value);
+  const access = `${name}[${index}]`;
   if (!ir.atomicParams.includes(param.name)) return `${access} = ${value}`;
   if (param.valueType === "float") return `atomicStore(&${access}, bitcast<u32>(${value}))`;
   return `atomicStore(&${access}, ${value})`;
@@ -756,13 +856,13 @@ function vectorFieldName(index: number): string {
   return index === 0 ? "x" : index === 1 ? "y" : index === 2 ? "z" : "w";
 }
 
-function emitSharedPointerRead(shared: CudaLiteVarDecl, index: string, ir: KernelIrModule): string {
-  const access = `${shared.name}[${index}]`;
+function emitSharedPointerRead(shared: CudaLiteVarDecl, index: string, ir: KernelIrModule, context: EmitContext): string {
+  const access = `${context.nameFor(shared.name)}[${index}]`;
   return ir.atomicShared.includes(shared.name) ? `atomicLoad(&${access})` : access;
 }
 
-function emitSharedPointerWrite(shared: CudaLiteVarDecl, index: string, value: string, ir: KernelIrModule): string {
-  const access = `${shared.name}[${index}]`;
+function emitSharedPointerWrite(shared: CudaLiteVarDecl, index: string, value: string, ir: KernelIrModule, context: EmitContext): string {
+  const access = `${context.nameFor(shared.name)}[${index}]`;
   return ir.atomicShared.includes(shared.name) ? `atomicStore(&${access}, ${value})` : `${access} = ${value}`;
 }
 
@@ -933,27 +1033,27 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       if (expression.target.kind === "identifier") {
         const localType = context.localValueTypeFor(expression.target.name);
         if (isCudaVectorType(localType)) {
-          return `${expression.target.name}[u32(${emitExpression(expression.index, context)})]`;
+          return `${context.nameFor(expression.target.name)}[u32(${emitExpression(expression.index, context)})]`;
         }
       }
       const storageView = storageViewLValue(expression, context);
       if (storageView && isCudaVectorType(storageView.valueType)) {
-        return emitVectorStorageReadAt(storageView.name, storageView.valueType, storageView.index);
+        return emitVectorStorageReadAt(context.nameFor(storageView.name), storageView.valueType, storageView.index);
       }
       const poolAccess = poolAccessForIndex(expression, context);
       if (poolAccess) return emitPoolRead(poolAccess, context);
       const pointerParam = devicePointerParamForIndex(expression, context);
       if (pointerParam) {
-        return `${pointerReadHelperName(pointerParam.valueType)}(${pointerParam.name}_buffer, ${devicePointerIndexExpression(pointerParam.name, expression.index, context)})`;
+        return `${pointerReadHelperName(pointerParam.valueType)}(${context.nameFor(`${pointerParam.name}_buffer`)}, ${devicePointerIndexExpression(pointerParam.name, expression.index, context)})`;
       }
       if (expression.target.kind === "identifier") {
         const alias = context.pointerAliasFor(expression.target.name);
         if (alias) {
           if (alias.valueType && isCudaVectorType(alias.valueType)) {
             const index = emitStorageViewIndex(alias.rootName, alias.baseIndex, expression.index, alias.valueType, context);
-            return emitVectorStorageReadAt(alias.rootName, alias.valueType, index);
+            return emitVectorStorageReadAt(context.nameFor(alias.rootName), alias.valueType, index);
           }
-          return `${alias.rootName}[${emitPointerAliasIndex(alias, expression.index, context)}]`;
+          return `${context.nameFor(alias.rootName)}[${emitPointerAliasIndex(alias, expression.index, context)}]`;
         }
       }
       const root = rootIdentifier(expression);
@@ -962,7 +1062,7 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
         : emitExpression(expression.index, context);
       const param = root ? context.paramFor(root) : undefined;
       if (mode === "value" && param && isCudaVectorType(param.valueType) && expression.target.kind === "identifier") {
-        return emitVectorStorageRead(root!, param.valueType, index);
+        return emitVectorStorageRead(context.nameFor(root!), param.valueType, index);
       }
       const access = `${emitExpression(expression.target, context, "lvalue")}[${index}]`;
       if (mode === "value" && param && context.ir.atomicParams.includes(param.name)) {
@@ -1024,6 +1124,19 @@ function emitForLoopWithContinuing(
 
 function sequenceItems(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
   return expression.kind === "sequence" ? expression.expressions : [expression];
+}
+
+function emitAssignmentStatement(
+  expression: CudaLiteAssignmentExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const prefix = indent(indentLevel);
+  if (expression.right.kind !== "assignment") return [`${prefix}${emitAssignment(expression, context)};`];
+  return [
+    ...emitAssignmentStatement(expression.right, context, indentLevel),
+    `${prefix}${emitAssignment({ ...expression, right: expression.right.left }, context)};`,
+  ];
 }
 
 function collectLocalNames(statements: readonly CudaLiteStatement[]): ReadonlySet<string> {
@@ -1104,7 +1217,7 @@ function emitFillRegsStatement(
   if (target?.kind !== "identifier" || !value) return undefined;
   const array = context.localArrayFor(target.name);
   if (!array) return undefined;
-  return emitLocalArrayFill(target.name, array.dimensions, emitExpression(value, context), indentLevel);
+  return emitLocalArrayFill(context.nameFor(target.name), array.dimensions, emitExpression(value, context), indentLevel);
 }
 
 function emitCpAsyncStatement(
@@ -1444,7 +1557,7 @@ function pointerBaseExpression(rootName: string, context: EmitContext): string |
   const mutable = context.mutablePointerBaseFor(rootName);
   if (mutable) return mutable;
   const base = context.pointerBaseOffsetFieldFor(rootName);
-  return base ? `params.${base}` : undefined;
+  return base ? `params.${context.nameFor(base)}` : undefined;
 }
 
 function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "value"): string {
@@ -1452,24 +1565,24 @@ function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "va
   const namedConstant = CUDA_NAMED_CONSTANTS.get(name);
   if (namedConstant) return namedConstant.wgsl;
   if (name === "threadIdx" || name === "blockIdx" || name === "blockDim" || name === "gridDim") return name;
-  if (context.isAtomicShared(name) && mode === "value") return `atomicLoad(&${name})`;
-  if (context.isLocalName(name)) return name;
+  if (context.isAtomicShared(name) && mode === "value") return `atomicLoad(&${context.nameFor(name)})`;
+  if (context.isLocalName(name)) return context.nameFor(name);
   const param = context.paramFor(name);
   const uniformType = context.uniformScalarTypeFor(name);
   if ((param && !param.pointer && !isSurfaceParam(param)) || context.isUniformScalar(name)) {
-    return uniformType === "bool" ? `(params.${name} != 0u)` : `params.${name}`;
+    return uniformType === "bool" ? `(params.${context.nameFor(name)} != 0u)` : `params.${context.nameFor(name)}`;
   }
-  return name;
+  return context.nameFor(name);
 }
 
 function emitDeref(expression: CudaLiteExpression, context: EmitContext): string {
   if (expression.kind === "identifier") {
     const pointerParam = context.devicePointerParamFor(expression.name);
     if (pointerParam) {
-      return `${pointerReadHelperName(pointerParam.valueType)}(${expression.name}_buffer, ${expression.name}_base)`;
+      return `${pointerReadHelperName(pointerParam.valueType)}(${context.nameFor(`${expression.name}_buffer`)}, ${context.nameFor(`${expression.name}_base`)})`;
     }
     const param = context.paramFor(expression.name);
-    const access = `${expression.name}[${emitPointerIndex(expression.name, zeroExpression(expression.span), context)}]`;
+    const access = `${context.nameFor(expression.name)}[${emitPointerIndex(expression.name, zeroExpression(expression.span), context)}]`;
     if (param && context.ir.atomicParams.includes(param.name)) {
       const loaded = `atomicLoad(&${access})`;
       return param.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
@@ -1543,7 +1656,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
         ? emitDevicePointerArgument(arg, context)
         : [emitExpressionAsValueType(arg, param.valueType, context)];
     });
-    return `${name}(${[...args, "local_id", "workgroup_id", "num_workgroups"].join(", ")})`;
+    return `${context.nameFor(name ?? deviceFunction.name)}(${[...args, "local_id", "workgroup_id", "num_workgroups"].join(", ")})`;
   }
   const args = expression.args.map((arg) => emitExpression(arg, context));
   const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
@@ -2235,7 +2348,7 @@ function emitLocalArrayInitializer(
   const prefix = indent(indentLevel);
   const totalElements = statement.dimensions.reduce((product, item) => product * item, 1);
   return elements.slice(0, totalElements).map((element, flatIndex) =>
-    `${prefix}${emitLocalArrayElementAccess(statement.name, statement.dimensions, flatIndex)} = ${emitExpression(element, context)};`
+    `${prefix}${emitLocalArrayElementAccess(context.nameFor(statement.name), statement.dimensions, flatIndex)} = ${emitExpression(element, context)};`
   );
 }
 
@@ -2266,7 +2379,7 @@ function emitConstantArrayType(constant: CudaLiteGlobalConstant): string {
 function emitInitializedConstant(constant: CudaLiteGlobalConstant, context: EmitContext): string {
   if (!constant.init) throw featureError("invalid-constant-initializer", `constant '${constant.name}' has no initializer`);
   if (constant.dimensions.length === 0) {
-    return `const ${constant.name}: ${wgslScalar(constant.valueType)} = ${emitConstantInitializerExpression(constant.init, context)};`;
+    return `const ${context.nameFor(constant.name)}: ${wgslScalar(constant.valueType)} = ${emitConstantInitializerExpression(constant.init, context)};`;
   }
   const type = emitConstantArrayType(constant);
   const total = constant.dimensions.reduce((product, dimension) => product * dimension, 1);
@@ -2274,7 +2387,7 @@ function emitInitializedConstant(constant: CudaLiteGlobalConstant, context: Emit
     .slice(0, total)
     .map((expression) => emitConstantInitializerExpression(expression, context));
   while (values.length < total) values.push(zeroValue(constant.valueType));
-  return `const ${constant.name}: ${type} = ${type}(${values.join(", ")});`;
+  return `const ${context.nameFor(constant.name)}: ${type} = ${type}(${values.join(", ")});`;
 }
 
 function emitConstantInitializerExpression(expression: CudaLiteExpression, context: EmitContext): string {
@@ -2284,24 +2397,26 @@ function emitConstantInitializerExpression(expression: CudaLiteExpression, conte
   return emitExpression(expression, context);
 }
 
-function emitTextureHelper(name: string): string[] {
+function emitTextureHelper(name: string, context: EmitContext): string[] {
+  const safeName = context.nameFor(name);
   return [
     `fn bg_tex2d_${name}(x: f32, y: f32) -> f32 {`,
-    `  let dims = textureDimensions(${name});`,
+    `  let dims = textureDimensions(${safeName});`,
     "  let max_coord = vec2<i32>(i32(dims.x) - 1, i32(dims.y) - 1);",
     "  let coord = clamp(vec2<i32>(i32(floor(x)), i32(floor(y))), vec2<i32>(0, 0), max_coord);",
-    `  return textureLoad(${name}, coord, 0).r;`,
+    `  return textureLoad(${safeName}, coord, 0).r;`,
     "}",
   ];
 }
 
-function emitSurfaceHelper(name: string): string[] {
+function emitSurfaceHelper(name: string, context: EmitContext): string[] {
+  const safeName = context.nameFor(name);
   return [
     `fn bg_surf2dwrite_${name}(value: f32, x_bytes: i32, y: i32) {`,
     "  let x = x_bytes / 4;",
-    `  let index = y * i32(params.${surfaceWidthField(name)}) + x;`,
-    `  if (index >= 0 && index < i32(arrayLength(&${name}))) {`,
-    `    ${name}[index] = value;`,
+    `  let index = y * i32(params.${context.nameFor(surfaceWidthField(name))}) + x;`,
+    `  if (index >= 0 && index < i32(arrayLength(&${safeName}))) {`,
+    `    ${safeName}[index] = value;`,
     "  }",
     "}",
   ];
@@ -2380,7 +2495,7 @@ function emitPoolAssignment(
 
 function poolRawAccess(access: PoolAccess, context: EmitContext): string {
   const name = access.rawBuffer ? access.poolName : poolDataName(access.poolName);
-  return `${name}[${poolWordIndex(access, context)}]`;
+  return `${context.nameFor(name)}[${poolWordIndex(access, context)}]`;
 }
 
 function poolWordIndex(access: PoolAccess, context: EmitContext): string {
@@ -2410,11 +2525,13 @@ function encodePoolWord(type: CudaLiteScalarType, value: string): string {
   return `u32(${value})`;
 }
 
-function emitPoolHelper(name: string): string[] {
+function emitPoolHelper(name: string, context: EmitContext): string[] {
+  const dataName = context.nameFor(poolDataName(name));
+  const offsetName = context.nameFor(poolOffsetName(name));
   return [
     `fn bg_pool_alloc_${name}(size_bytes: u32) -> u32 {`,
-    `  let old = atomicAdd(&${poolOffsetName(name)}, size_bytes);`,
-    `  let capacity = arrayLength(&${poolDataName(name)}) * 4u;`,
+    `  let old = atomicAdd(&${offsetName}, size_bytes);`,
+    `  let capacity = arrayLength(&${dataName}) * 4u;`,
     "  if ((old + size_bytes) > capacity) {",
     "    return 0u;",
     "  }",

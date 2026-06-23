@@ -440,6 +440,23 @@ __global__ void kernel(float *in, float *out) {
 {
   const source = createKernelCompilationUnit({
     kernel: `
+__global__ void kernel(int *out, int n) {
+  out[0] = div_ceil(n, 4);
+}`,
+    deviceFunctions: [
+      {
+        name: "div_ceil",
+        source: "__device__ __host__ inline int div_ceil(int a, int b) { return (a % b != 0) ? (a / b + 1) : (a / b); }",
+      },
+    ],
+  });
+  assert.match(source, /div_ceil\(n, 4\)/u);
+  assert.doesNotMatch(source, /int div_ceil\(int a/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 __global__ void kernel(float4 *input, float *out) {
   float4 value = input[0];
   out[0] = vec_at(value, 2);

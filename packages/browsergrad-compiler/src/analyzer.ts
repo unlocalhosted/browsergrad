@@ -119,53 +119,6 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
     return [name, [1, info?.lanes ?? 1]] as const;
   }),
 ]);
-const SHADOWABLE_BUILTIN_CALLS = new Set([
-  "lerp",
-  "warpReduceSum",
-  "warpReduceMax",
-  "warpReduceMin",
-  "warp_reduce_sum",
-  "warp_reduce_max",
-  "warp_reduce_min",
-  "warp_reduce_sum_f32",
-  "warp_reduce_max_f32",
-  "warp_reduce_sum_f16",
-  "warp_reduce_sum_f16_f16",
-  "warp_reduce_sum_f16_f32",
-]);
-const WGSL_RESERVED_WORDS = new Set([
-  "alias",
-  "array",
-  "atomic",
-  "bitcast",
-  "bool",
-  "break",
-  "case",
-  "const",
-  "continue",
-  "default",
-  "discard",
-  "else",
-  "enable",
-  "false",
-  "fn",
-  "for",
-  "f16",
-  "f32",
-  "i32",
-  "if",
-  "let",
-  "loop",
-  "override",
-  "return",
-  "struct",
-  "switch",
-  "true",
-  "u32",
-  "var",
-  "while",
-]);
-
 type ValueType = Exclude<CudaLiteScalarType, "void">;
 
 interface SymbolInfo {
@@ -854,6 +807,11 @@ function validateCallExpression(
   const calleeSymbol = lookupSymbol(callName, scope, expression.callee.span);
   if (calleeSymbol?.kind === "device-function") {
     return validateDeviceFunctionCall(expression, calleeSymbol, diagnostics, walkExpression, scope);
+  }
+  if (calleeSymbol && calleeSymbol.kind !== "builtin-call") {
+    diagnostics.push(error("unsupported-call", `CUDA-lite symbol '${callName}' is not callable`, expression.callee.span));
+    for (const arg of expression.args) walkExpression(arg, scope);
+    return { kind: "unknown" };
   }
 
   const arity = BUILTIN_CALLS.get(callName);
@@ -2020,12 +1978,8 @@ function validateDeclaredSymbolName(
   span: SourceSpan,
   diagnostics: CudaLiteDiagnostic[],
 ): void {
-  if (BUILTIN_VECTORS.has(name) || (BUILTIN_CALLS.has(name) && !SHADOWABLE_BUILTIN_CALLS.has(name))) {
+  if (BUILTIN_VECTORS.has(name)) {
     diagnostics.push(error("reserved-symbol", `symbol '${name}' conflicts with a CUDA-lite builtin`, span));
-    return;
-  }
-  if (WGSL_RESERVED_WORDS.has(name)) {
-    diagnostics.push(error("reserved-symbol", `symbol '${name}' is reserved by WGSL output`, span));
   }
 }
 
@@ -2046,6 +2000,10 @@ function validateSideEffectPlacement(
   allowRootSideEffect: boolean,
   diagnostics: CudaLiteDiagnostic[],
 ): void {
+  if (allowRootSideEffect && expression.kind === "assignment") {
+    validateAssignmentStatementSideEffects(expression, diagnostics);
+    return;
+  }
   const visit = (node: CudaLiteExpression, root: boolean): void => {
     if ((node.kind === "assignment" || node.kind === "update") && !(allowRootSideEffect && root)) {
       diagnostics.push(error(
@@ -2059,6 +2017,32 @@ function validateSideEffectPlacement(
     });
   };
   visit(expression, true);
+}
+
+function validateAssignmentStatementSideEffects(
+  expression: CudaLiteAssignmentExpression,
+  diagnostics: CudaLiteDiagnostic[],
+): void {
+  const visitNoSideEffect = (node: CudaLiteExpression): void => {
+    if (node.kind === "assignment" || node.kind === "update") {
+      diagnostics.push(error(
+        "side-effect-expression",
+        "assignments and ++/-- must be standalone statements or for-loop clauses",
+        node.span,
+      ));
+      return;
+    }
+    forEachExpressionChild(node, visitNoSideEffect);
+  };
+  let cursor: CudaLiteAssignmentExpression = expression;
+  while (true) {
+    visitNoSideEffect(cursor.left);
+    if (cursor.right.kind !== "assignment") {
+      visitNoSideEffect(cursor.right);
+      return;
+    }
+    cursor = cursor.right;
+  }
 }
 
 function validateBarrierStatement(
