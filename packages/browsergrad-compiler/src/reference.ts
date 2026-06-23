@@ -1251,7 +1251,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       return old === 0 || old > limit ? limit : (old - 1) >>> 0;
     });
   }
-  if (name === "atomicExch") {
+  if (name === "atomicExch" || name === "atomicExch_system") {
     return evalAtomicReadModifyWrite(expression, context, (_current, value) => value);
   }
   if (name === "atomicCAS") {

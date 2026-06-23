@@ -73,6 +73,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["atomicInc", [2, 2]],
   ["atomicDec", [2, 2]],
   ["atomicExch", [2, 2]],
+  ["atomicExch_system", [2, 2]],
   ["atomicCAS", [3, 3]],
   ["tex2D", [3, 3]],
   ["surf2Dwrite", [4, 5]],
@@ -116,6 +117,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   }),
 ]);
 const SHADOWABLE_BUILTIN_CALLS = new Set([
+  "lerp",
   "warpReduceSum",
   "warpReduceMax",
   "warpReduceMin",
@@ -1541,7 +1543,8 @@ function validateAtomicBuiltin(
       callName === "atomicMin" ||
       callName === "atomicMax" ||
       callName === "atomicMaxFloat" ||
-      callName === "atomicExch"
+      callName === "atomicExch" ||
+      callName === "atomicExch_system"
     )) {
       atomicParams.add(param.name);
       if (param.constant) {
@@ -1579,6 +1582,7 @@ function isAtomicBuiltin(callName: string): boolean {
     callName === "atomicInc" ||
     callName === "atomicDec" ||
     callName === "atomicExch" ||
+    callName === "atomicExch_system" ||
     callName === "atomicCAS";
 }
 

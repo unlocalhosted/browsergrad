@@ -66,6 +66,7 @@ const FLOAT_INTRINSICS = [
   intrinsic("fma", [3, 3], "float", (args) => (args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0), (args) => `fma(${args.join(", ")})`),
   intrinsic("fmaf", [3, 3], "float", (args) => (args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0), (args) => `fma(${args.join(", ")})`),
   intrinsic("__fmaf_rn", [3, 3], "float", (args) => (args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0), (args) => `fma(${args.join(", ")})`),
+  intrinsic("lerp", [3, 3], "float", (args) => (args[0] ?? 0) + (args[2] ?? 0) * ((args[1] ?? 0) - (args[0] ?? 0)), (args) => `fma(${args[2] ?? "0"}, (${args[1] ?? "0"} - ${args[0] ?? "0"}), ${args[0] ?? "0"})`),
 ] as const;
 
 const INTEGER_INTRINSICS = [

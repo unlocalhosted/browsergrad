@@ -305,12 +305,17 @@ class Parser {
     do {
       if (this.match(")")) break;
       const startToken = this.peek();
-      const constant = this.consumeCvQualifiers();
+      this.consumeCudaDeclAttributes();
+      let constant = this.consumeCvQualifiers();
       const type = this.parseType();
+      constant = this.consumeCvQualifiers() || constant;
       const pointer = this.consumeIf("*") !== undefined;
       this.consumeIf("&");
       this.consumeTypeQualifiers();
-      const name = this.expectIdentifier("parameter name");
+      this.consumeCudaDeclAttributes();
+      const name = this.match(",") || this.match(")")
+        ? { value: `__bg_unused_param_${params.length}`, span: this.previous().span }
+        : this.expectIdentifier("parameter name");
       this.consumeTypeQualifiers();
       params.push({
         name: name.value,
@@ -631,15 +636,21 @@ class Parser {
 
   private parseVarDeclList(expectSemicolon: boolean): readonly CudaLiteVarDecl[] {
     const start = this.peek().span;
+    this.consumeCudaDeclAttributes();
     this.consumeIf("static");
     const storageInfo = this.consumeStorageQualifier();
     this.consumeIf("static");
     const constexpr = this.consumeIf("constexpr") !== undefined;
     this.consumeCvQualifiers();
+    this.consumeCudaDeclAttributes();
     const valueType = this.parseType();
+    this.consumeCvQualifiers();
     const declarations: CudaLiteVarDecl[] = [];
     do {
+      this.consumeCudaDeclAttributes();
       const pointer = this.consumeIf("*") !== undefined;
+      this.consumeTypeQualifiers();
+      this.consumeCudaDeclAttributes();
       const name = this.expectIdentifier("variable name");
       const dimensions: number[] = [];
       while (this.consumeIf("[")) {
@@ -649,7 +660,11 @@ class Parser {
         }
         this.expect("]");
       }
-      const init = this.consumeIf("=") ? this.parseInitializerExpression(valueType, dimensions) : undefined;
+      const init = this.consumeIf("=")
+        ? this.parseInitializerExpression(valueType, dimensions)
+        : this.match("(")
+          ? this.parseConstructorInitializerExpression(valueType)
+          : undefined;
       if (constexpr && init !== undefined) {
         const value = this.evaluateIntegerConstantExpression(init);
         if (value !== undefined) this.recordIntegerConstant(name.value, value);
@@ -671,6 +686,22 @@ class Parser {
       ...declaration,
       span: mergeSpans(declaration.span, end),
     }));
+  }
+
+  private parseConstructorInitializerExpression(valueType: Exclude<CudaLiteScalarType, "void">): CudaLiteExpression {
+    const start = this.expect("(").span;
+    const { args, end } = this.parseArgumentListAfterOpen();
+    if (isCudaVectorType(valueType)) {
+      return {
+        kind: "call",
+        callee: { kind: "identifier", name: `make_${valueType}`, span: start },
+        args,
+        span: mergeSpans(start, end),
+      };
+    }
+    if (args.length === 0) return { kind: "number", value: 0, raw: "0", span: mergeSpans(start, end) };
+    if (args.length === 1) return args[0]!;
+    this.fail("scalar constructor initializer expects at most one value", mergeSpans(start, end));
   }
 
   private parseInitializerExpression(valueType: Exclude<CudaLiteScalarType, "void">, dimensions: readonly number[]): CudaLiteExpression {
@@ -1011,6 +1042,14 @@ class Parser {
 
   private startsVarDecl(): boolean {
     if (this.match("__shared__") || this.match("extern")) return true;
+    const attrEndIndex = this.cudaDeclAttributesEndIndex(this.index);
+    if (attrEndIndex !== this.index) {
+      const value = this.tokens[attrEndIndex]?.value;
+      const nextValue = this.tokens[attrEndIndex + 1]?.value;
+      return TYPE_START_KEYWORDS.has(value ?? "") ||
+        (value === "static" && TYPE_START_KEYWORDS.has(nextValue ?? "")) ||
+        (this.isCvQualifier(value) && TYPE_START_KEYWORDS.has(nextValue ?? ""));
+    }
     if (this.match("static")) return this.tokens[this.index + 1]?.value === "__shared__" ||
       this.tokens[this.index + 1]?.value === "constexpr" ||
       TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "");
@@ -1067,6 +1106,39 @@ class Parser {
     ) {
       // accepted CUDA pointer qualifiers; no CUDA-lite semantic effect
     }
+  }
+
+  private consumeCudaDeclAttributes(): void {
+    while (true) {
+      if (this.consumeIf("__align__") || this.consumeIf("alignas")) {
+        this.skipBalanced("(", ")");
+        continue;
+      }
+      if (this.consumeIf("__grid_constant__")) continue;
+      break;
+    }
+  }
+
+  private cudaDeclAttributesEndIndex(startIndex: number): number {
+    let index = startIndex;
+    while (this.isCudaDeclAttributeAt(index)) {
+      index++;
+      if (this.tokens[index]?.value !== "(") continue;
+      let depth = 1;
+      index++;
+      while (depth > 0 && index < this.tokens.length) {
+        const value = this.tokens[index]?.value;
+        if (value === "(") depth++;
+        else if (value === ")") depth--;
+        index++;
+      }
+    }
+    return index;
+  }
+
+  private isCudaDeclAttributeAt(index: number): boolean {
+    const value = this.tokens[index]?.value;
+    return value === "__align__" || value === "alignas" || value === "__grid_constant__";
   }
 
   private consumeCvQualifiers(): boolean {

@@ -1634,7 +1634,7 @@ __global__ void c_math_aliases(float *x, float *out) {
   float value = x[0];
   out[0] = fabs(value) + exp(value) + log(fabs(value) + 1.0f) +
     pow(fabs(value), 2.0f) + fmin(value, 1.0f) + fmax(value, -1.0f) +
-    __sinf(value) + __cosf(value) + __tanf(value);
+    __sinf(value) + __cosf(value) + __tanf(value) + lerp(2.0f, 6.0f, 0.25f);
 }`, { workgroupSize: [1, 1, 1] });
     const value = -0.25;
     const result = runCompiledKernelReference(
@@ -1644,12 +1644,31 @@ __global__ void c_math_aliases(float *x, float *out) {
     );
     const expected = Math.abs(value) + Math.exp(value) + Math.log(Math.abs(value) + 1) +
       Math.pow(Math.abs(value), 2) + Math.min(value, 1) + Math.max(value, -1) +
-      Math.sin(value) + Math.cos(value) + Math.tan(value);
+      Math.sin(value) + Math.cos(value) + Math.tan(value) + 3;
 
     expect(compiled.wgsl).toContain("abs(value)");
     expect(compiled.wgsl).toContain("exp(value)");
     expect(compiled.wgsl).toContain("pow(abs(value), 2.0)");
+    expect(compiled.wgsl).toContain("fma(0.25, (6.0 - 2.0), 2.0)");
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(expected, 5);
+  });
+
+  it("lets user device functions shadow CUDA math aliases when CUDA source defines them", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float lerp(float a, float b, float t) {
+  return a + b + t;
+}
+__global__ void shadow_lerp(float *out) {
+  out[0] = lerp(2.0f, 6.0f, 0.25f);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn lerp(");
+    expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(8.25, 5);
   });
 
   it("lowers CUDA integer and assert intrinsics", () => {
@@ -1847,6 +1866,35 @@ __global__ void synthetic_clock(clock_t *out) {
 
     expect(compiled.wgsl).toContain("workgroup_id.x * 104729u");
     expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3, 0, 1, 2, 3]);
+  });
+
+  it("accepts CUDA declarator qualifiers, alignment attrs, and constructor-style vector locals", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void decl_frontend(float const *const input, float *const out, size_t const n) {
+  __shared__ __align__(16) float4 tile[1];
+  int i = threadIdx.x;
+  if (uint(i) < n) {
+    alignas(16) float scalar(2.0f);
+    float4 value(1.0f, 2.0f, 3.0f, 4.0f);
+    tile[0] = value;
+    out[i] = input[i] + scalar + tile[0].x + tile[0].w;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          input: new Float32Array([3]),
+          out: new Float32Array(1),
+        },
+        scalars: { n: 1 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<workgroup> tile: array<vec4<f32>, 1>;");
+    expect(compiled.wgsl).toContain("vec4<f32>(1.0, 2.0, 3.0, 4.0)");
+    expect([...result.buffers.out as Float32Array]).toEqual([10]);
   });
 
   it("lowers dynamic CUDA vector lane access", () => {
@@ -3731,7 +3779,10 @@ __global__ void atomic_exchange(float* x, float* out) {
   it("supports CUDA pointer-form atomicAdd on integer buffers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomic_count(int* x) {
-  if (threadIdx.x < 1) { atomicAdd_system(x, 1); }
+  if (threadIdx.x < 1) {
+    atomicAdd_system(x, 1);
+    atomicExch_system(x, 42);
+  }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
@@ -3740,6 +3791,7 @@ __global__ void atomic_count(int* x) {
     );
 
     expect(compiled.wgsl).toContain("atomicAdd(&x[0], 1);");
+    expect(compiled.wgsl).toContain("atomicExchange(&x[0], 42);");
     expect([...result.buffers.x as Int32Array]).toEqual([42]);
   });
 

@@ -1656,6 +1656,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "atomicDec":
       return emitAtomicCall("atomicDec", expression, context, args);
     case "atomicExch":
+    case "atomicExch_system":
       return emitAtomicCall("atomicExchange", expression, context, args);
     case "atomicCAS": {
       const target = expression.args[0];
