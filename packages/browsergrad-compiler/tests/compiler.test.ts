@@ -3363,6 +3363,11 @@ __global__ void padded(float *x) {
   });
 
   it("normalizes simple C++ aliases and CUDA kernel qualifiers before parsing", () => {
+    expect(compileCudaLiteKernel(`
+static __global__ void staticFirst(int *out) {
+  out[0] = 1;
+}`).ir.name).toBe("staticFirst");
+
     const compiled = compileCudaLiteKernel(`
 #define WARP_SIZE 32
 typedef float scalar_t;

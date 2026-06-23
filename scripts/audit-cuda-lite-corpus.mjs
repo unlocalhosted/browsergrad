@@ -7,6 +7,7 @@ import {
   collectKernelTemplateArguments,
   createKernelCompilationUnit,
   kernelDefinitionName,
+  pruneCudaPreprocessorBranches,
 } from "./cuda-lite-source-normalizer.mjs";
 
 const { corpusPathArg, details, expectations, firstFailureLimit, help } = parseArgs(process.argv.slice(2));
@@ -88,12 +89,14 @@ for (const file of files) {
     const kernels = extractKernelDefinitions(block.code);
     for (const [kernelIndex, rawKernel] of kernels.entries()) {
       const kernelName = kernelDefinitionName(rawKernel);
+      const kernel = pruneCudaPreprocessorBranches(rawKernel, effectiveDefines);
       const siblingKernels = [
-        ...kernels.filter((kernel) => kernel !== rawKernel),
+        ...kernels.filter((candidate) => candidate !== rawKernel)
+          .map((candidate) => pruneCudaPreprocessorBranches(candidate, effectiveDefines)),
         ...blockDynamicLaunchTargets,
       ];
       const source = createKernelCompilationUnit({
-        kernel: rawKernel,
+        kernel,
         siblingKernels,
         definesByName: effectiveDefines,
         templateArgumentsByKernelName: blockTemplateArguments,

@@ -5,6 +5,7 @@ import {
   collectKernelTemplateArguments,
   createKernelCompilationUnit,
   kernelDefinitionName,
+  pruneCudaPreprocessorBranches,
 } from "./cuda-lite-source-normalizer.mjs";
 
 const scalarKernel = `
@@ -19,6 +20,48 @@ __global__ void add4(float *a, float *b, float *c, int N) {
   float4 av = FLOAT4(a[idx]);
   c[idx] = av.x + b[idx];
 }`;
+
+{
+  const source = `
+#define ENABLE_FAST 1
+#if ENABLE_FAST && defined(ENABLE_FAST)
+__device__ float helper(float x) { return x + 1.0f; }
+#else
+__device__ broken_t helper(float x) { return x; }
+#endif
+#ifndef ENABLE_SLOW
+__device__ float keep(float x) { return helper(x); }
+#endif
+__global__ void kernel(float *out) { out[0] = keep(1.0f); }`;
+  const pruned = pruneCudaPreprocessorBranches(source);
+  assert.match(pruned, /float helper\(float x\)/u);
+  assert.match(pruned, /float keep\(float x\)/u);
+  assert.doesNotMatch(pruned, /broken_t/u);
+}
+
+{
+  const source = `
+#if UNKNOWN_FEATURE
+__device__ unknown_t maybe(float x) { return x; }
+#else
+__device__ float fallback(float x) { return x; }
+#endif`;
+  const pruned = pruneCudaPreprocessorBranches(source);
+  assert.doesNotMatch(pruned, /unknown_t maybe/u);
+  assert.match(pruned, /float fallback/u);
+}
+
+{
+  const source = `
+#if MODE
+__device__ unknown_t maybe(float x) { return x; }
+#else
+__device__ float fallback(float x) { return x; }
+#endif`;
+  const pruned = pruneCudaPreprocessorBranches(source, new Map([["MODE", "runtime_flag()"]]));
+  assert.match(pruned, /unknown_t maybe/u);
+  assert.match(pruned, /float fallback/u);
+}
 
 {
   const source = createKernelCompilationUnit({

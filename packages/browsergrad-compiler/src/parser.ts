@@ -236,6 +236,7 @@ class Parser {
 
   private parseKernel(): CudaLiteKernel {
     this.consumeKernelAttributes();
+    this.consumeKernelQualifiers();
     const start = this.expect("__global__").span;
     this.consumeKernelAttributes();
     this.consumeKernelQualifiers();

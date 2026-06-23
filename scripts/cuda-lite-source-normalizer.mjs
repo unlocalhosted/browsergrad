@@ -98,6 +98,114 @@ export function collectCudaLiteContextDefines(source) {
   return collectObjectDefines(source);
 }
 
+export function pruneCudaPreprocessorBranches(source, definesByName = new Map()) {
+  const defines = new Map(definesByName);
+  const frames = [];
+  const out = [];
+  const isIncluded = () => frames.every((frame) => frame.include);
+  for (const line of source.split(/\r?\n/u)) {
+    const directive = /^\s*#\s*(if|ifdef|ifndef|elif|else|endif|define|undef)\b(.*)$/u.exec(line);
+    if (directive === null) {
+      if (isIncluded()) out.push(line);
+      continue;
+    }
+    const keyword = directive[1];
+    const rest = (directive[2] ?? "").trim();
+    if (keyword === "if" || keyword === "ifdef" || keyword === "ifndef") {
+      const parentInclude = isIncluded();
+      const condition = keyword === "ifdef"
+        ? defines.has(rest.split(/\s+/u)[0] ?? "")
+        : keyword === "ifndef"
+          ? !defines.has(rest.split(/\s+/u)[0] ?? "")
+          : evaluatePreprocessorCondition(rest, defines);
+      if (condition === undefined && parentInclude) {
+        frames.push({ parentInclude, include: true, mode: "unknown", taken: false });
+      } else {
+        frames.push({
+          parentInclude,
+          include: parentInclude && condition === true,
+          mode: "known",
+          taken: condition === true,
+        });
+      }
+      continue;
+    }
+    if (keyword === "elif") {
+      const frame = frames.at(-1);
+      if (frame === undefined) continue;
+      if (frame.mode === "unknown") {
+        frame.include = frame.parentInclude;
+        continue;
+      }
+      if (frame.taken) {
+        frame.include = false;
+        continue;
+      }
+      const condition = evaluatePreprocessorCondition(rest, defines);
+      if (condition === undefined) {
+        frame.mode = "unknown";
+        frame.include = frame.parentInclude;
+      } else {
+        frame.include = frame.parentInclude && condition === true;
+        frame.taken = condition === true;
+      }
+      continue;
+    }
+    if (keyword === "else") {
+      const frame = frames.at(-1);
+      if (frame === undefined) continue;
+      frame.include = frame.mode === "unknown" ? frame.parentInclude : frame.parentInclude && !frame.taken;
+      frame.taken = true;
+      continue;
+    }
+    if (keyword === "endif") {
+      frames.pop();
+      continue;
+    }
+    if (isIncluded()) {
+      if (keyword === "define") {
+        const match = /^([A-Za-z_][A-Za-z0-9_]*)(?!\()\s+(.+?)\s*$/u.exec(rest);
+        if (match?.[1] !== undefined && match[2] !== undefined) defines.set(match[1], match[2].trim());
+      } else if (keyword === "undef") {
+        const name = /^([A-Za-z_][A-Za-z0-9_]*)/u.exec(rest)?.[1];
+        if (name !== undefined) defines.delete(name);
+      }
+      out.push(line);
+    }
+  }
+  return out.join("\n");
+}
+
+function evaluatePreprocessorCondition(expression, defines) {
+  let unknown = false;
+  let expr = expression
+    .replace(/\bdefined\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/gu, (_match, name) => defines.has(name) ? "1" : "0")
+    .replace(/\bdefined\s+([A-Za-z_][A-Za-z0-9_]*)/gu, (_match, name) => defines.has(name) ? "1" : "0")
+    .replace(/\b([A-Za-z_][A-Za-z0-9_]*)\b/gu, (match, name) => {
+      const value = defines.get(name);
+      if (value === undefined) return "0";
+      const normalized = normalizePreprocessorDefineValue(value);
+      if (normalized === undefined) {
+        unknown = true;
+        return match;
+      }
+      return normalized;
+    })
+    .replace(/(?<![=!<>])!(?!=)/gu, "!")
+    .replace(/\b(0[xX][0-9A-Fa-f]+|[0-9]+)[uUlL]*/gu, "$1");
+  if (unknown || /[^0-9A-Fa-fxX\s()+\-*/%<>=!&|^?:.]/u.test(expr)) return undefined;
+  expr = expr.replace(/\b0+([0-9])/gu, "$1");
+  const value = evaluateIntegerExpression(expr);
+  return value === undefined ? undefined : value !== 0;
+}
+
+function normalizePreprocessorDefineValue(value) {
+  const trimmed = String(value).trim();
+  if (/^(?:true|false)$/u.test(trimmed)) return trimmed === "true" ? "1" : "0";
+  if (!/^[0-9A-Fa-fxXuUlL\s()+\-*/%<>=!&|^?:.]+$/u.test(trimmed)) return undefined;
+  return trimmed.replace(/\b(0[xX][0-9A-Fa-f]+|[0-9]+)[uUlL]*/gu, "$1");
+}
+
 function normalizeFunctionMacro(macro) {
   const cpAsync = semanticCpAsyncMacro(macro);
   return cpAsync ?? macro;
@@ -1292,14 +1400,137 @@ function evaluateTemplateIntegerExpression(expression, env) {
   if (/__unknown_/u.test(substituted)) return undefined;
   const normalized = substituted.replace(/([0-9])(?:u|U|l|L)+\b/gu, "$1");
   if (!/^[0-9A-Fa-fxX\s()+\-*/%<>=!&|^?:.]+$/u.test(normalized)) return undefined;
-  try {
-    const result = Function(`"use strict"; return (${normalized});`)();
-    if (typeof result === "boolean") return result ? "1" : "0";
-    if (Number.isFinite(result) && Number.isInteger(result)) return String(result);
-  } catch {
-    return undefined;
+  const result = evaluateIntegerExpression(normalized);
+  return result === undefined ? undefined : String(result);
+}
+
+const INTEGER_EXPRESSION_PRECEDENCE = new Map([
+  ["||", 1],
+  ["&&", 2],
+  ["|", 3],
+  ["^", 4],
+  ["&", 5],
+  ["==", 6],
+  ["!=", 6],
+  ["<", 7],
+  ["<=", 7],
+  [">", 7],
+  [">=", 7],
+  ["<<", 8],
+  [">>", 8],
+  ["+", 9],
+  ["-", 9],
+  ["*", 10],
+  ["/", 10],
+  ["%", 10],
+]);
+
+function evaluateIntegerExpression(expression) {
+  const tokens = tokenizeIntegerExpression(expression);
+  if (tokens === undefined) return undefined;
+  const parser = {
+    index: 0,
+    peek: () => tokens[parser.index],
+    advance: () => tokens[parser.index++],
+  };
+  const value = parseIntegerExpression(parser, 0);
+  return value !== undefined && parser.index === tokens.length && Number.isFinite(value)
+    ? Math.trunc(value)
+    : undefined;
+}
+
+function tokenizeIntegerExpression(expression) {
+  const tokens = [];
+  let index = 0;
+  const punctuators = ["||", "&&", "==", "!=", "<=", ">=", "<<", ">>", "+", "-", "*", "/", "%", "<", ">", "&", "|", "^", "!", "~", "?", ":", "(", ")"];
+  while (index < expression.length) {
+    const char = expression[index];
+    if (/\s/u.test(char ?? "")) {
+      index++;
+      continue;
+    }
+    const number = /^(?:0[xX][0-9A-Fa-f]+|[0-9]+)/u.exec(expression.slice(index))?.[0];
+    if (number !== undefined) {
+      tokens.push({ kind: "number", value: Number(number) });
+      index += number.length;
+      continue;
+    }
+    const op = punctuators.find((item) => expression.startsWith(item, index));
+    if (op === undefined) return undefined;
+    tokens.push({ kind: "op", value: op });
+    index += op.length;
+  }
+  return tokens;
+}
+
+function parseIntegerExpression(parser, minPrecedence) {
+  let left = parseIntegerPrefix(parser);
+  if (left === undefined) return undefined;
+  while (true) {
+    const token = parser.peek();
+    if (token?.kind !== "op") break;
+    if (token.value === "?" && minPrecedence <= 0) {
+      parser.advance();
+      const consequent = parseIntegerExpression(parser, 0);
+      if (consequent === undefined || parser.advance()?.value !== ":") return undefined;
+      const alternate = parseIntegerExpression(parser, 0);
+      if (alternate === undefined) return undefined;
+      left = left !== 0 ? consequent : alternate;
+      continue;
+    }
+    const precedence = INTEGER_EXPRESSION_PRECEDENCE.get(token.value);
+    if (precedence === undefined || precedence < minPrecedence) break;
+    parser.advance();
+    const right = parseIntegerExpression(parser, precedence + 1);
+    if (right === undefined) return undefined;
+    left = applyIntegerBinaryOperator(token.value, left, right);
+    if (left === undefined) return undefined;
+  }
+  return left;
+}
+
+function parseIntegerPrefix(parser) {
+  const token = parser.advance();
+  if (token === undefined) return undefined;
+  if (token.kind === "number") return token.value;
+  if (token.kind !== "op") return undefined;
+  if (token.value === "(") {
+    const value = parseIntegerExpression(parser, 0);
+    return value !== undefined && parser.advance()?.value === ")" ? value : undefined;
+  }
+  if (token.value === "+" || token.value === "-" || token.value === "!" || token.value === "~") {
+    const value = parseIntegerPrefix(parser);
+    if (value === undefined) return undefined;
+    if (token.value === "+") return value;
+    if (token.value === "-") return -value;
+    if (token.value === "!") return value === 0 ? 1 : 0;
+    return ~Math.trunc(value);
   }
   return undefined;
+}
+
+function applyIntegerBinaryOperator(operator, left, right) {
+  switch (operator) {
+    case "||": return left !== 0 || right !== 0 ? 1 : 0;
+    case "&&": return left !== 0 && right !== 0 ? 1 : 0;
+    case "|": return Math.trunc(left) | Math.trunc(right);
+    case "^": return Math.trunc(left) ^ Math.trunc(right);
+    case "&": return Math.trunc(left) & Math.trunc(right);
+    case "==": return left === right ? 1 : 0;
+    case "!=": return left !== right ? 1 : 0;
+    case "<": return left < right ? 1 : 0;
+    case "<=": return left <= right ? 1 : 0;
+    case ">": return left > right ? 1 : 0;
+    case ">=": return left >= right ? 1 : 0;
+    case "<<": return Math.trunc(left) << Math.trunc(right);
+    case ">>": return Math.trunc(left) >> Math.trunc(right);
+    case "+": return left + right;
+    case "-": return left - right;
+    case "*": return left * right;
+    case "/": return right === 0 ? undefined : Math.trunc(left / right);
+    case "%": return right === 0 ? undefined : Math.trunc(left) % Math.trunc(right);
+    default: return undefined;
+  }
 }
 
 function sizeofType(typeName) {
