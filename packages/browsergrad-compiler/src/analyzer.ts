@@ -125,6 +125,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["CP_ASYNC_BULK_WAIT_GROUP", [1, 1]],
   ["clock", [0, 0]],
   ["clock64", [0, 0]],
+  ["__builtin_assume_aligned", [2, 2]],
+  ["ct::assume_aligned", [1, 2]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
   ...[...CUDA_VECTOR_CONSTRUCTORS].map(([name, type]) => {
     const info = CUDA_VECTOR_TYPES.get(type);
@@ -664,6 +666,12 @@ function validatePointerInitializerExpression(
     validateScalarOperand(walkExpression(expression.right, scope), expression.right.span, diagnostics);
     return;
   }
+  if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
+    const pointer = expression.args[0];
+    if (pointer) validatePointerInitializerExpression(pointer, scope, diagnostics, walkExpression);
+    for (const arg of expression.args.slice(1)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return;
+  }
   if (expression.kind === "unary" && expression.operator === "&") {
     validateLValueExpression(expression.argument, scope, diagnostics, walkExpression);
     return;
@@ -694,6 +702,9 @@ function pointerSourceType(expression: CudaLiteExpression | undefined, scope: Sc
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
     return pointerSourceType(expression.left, scope);
   }
+  if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
+    return pointerSourceType(expression.args[0], scope);
+  }
   if (expression.kind === "unary" && expression.operator === "&") {
     const root = rootIdentifier(expression.argument);
     const symbol = root ? lookupSymbol(root, scope, expression.argument.span) : undefined;
@@ -707,15 +718,19 @@ function pointerSourceType(expression: CudaLiteExpression | undefined, scope: Sc
 
 function pointerTypesCompatible(target: ValueType, source: ValueType, allowWordReinterpret = false): boolean {
   if (target === source) return true;
-  if (allowWordReinterpret && isWordScalarPointerType(target) && isWordScalarPointerType(source)) return true;
+  if (allowWordReinterpret && isWordAddressablePointerType(target) && isWordAddressablePointerType(source)) return true;
   const targetScalar = cudaVectorScalarType(target);
   if (targetScalar && targetScalar === source) return true;
   const sourceScalar = cudaVectorScalarType(source);
   return sourceScalar !== undefined && sourceScalar === target;
 }
 
-function isWordScalarPointerType(type: ValueType): boolean {
-  return type === "float" || type === "int" || type === "uint";
+function isWordAddressablePointerType(type: ValueType): boolean {
+  return type === "float" ||
+    type === "int" ||
+    type === "uint" ||
+    type === "half" ||
+    isCudaVectorType(type);
 }
 
 function hasExplicitPointerCast(expression: CudaLiteExpression | undefined): boolean {
@@ -723,6 +738,9 @@ function hasExplicitPointerCast(expression: CudaLiteExpression | undefined): boo
   if (expression.kind === "cast" && expression.pointer) return true;
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
     return hasExplicitPointerCast(expression.left);
+  }
+  if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
+    return hasExplicitPointerCast(expression.args[0]);
   }
   return false;
 }
@@ -864,6 +882,9 @@ function validateCallExpression(
   if (isAtomicBuiltin(callName)) {
     validateAtomicBuiltin(expression, scope, params, atomicParams, atomicShared, diagnostics, walkExpression);
     return { kind: "scalar" };
+  }
+  if (isPointerIdentityCall(callName)) {
+    return validatePointerIdentityCall(expression, callName, scope, diagnostics, walkExpression);
   }
   if (callName === "__ldcs") {
     const arg = expression.args[0];
@@ -1044,6 +1065,29 @@ function validateCallExpression(
     validateScalarOperand(info, arg.span, diagnostics);
   }
   return { kind: "scalar" };
+}
+
+function isPointerIdentityCall(callName: string | undefined): boolean {
+  return callName === "__builtin_assume_aligned" || callName === "ct::assume_aligned";
+}
+
+function validatePointerIdentityCall(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  callName: string,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): ExpressionInfo {
+  const pointer = expression.args[0];
+  if (!pointer) return { kind: "unknown" };
+  const info = walkExpression(pointer, scope);
+  if (info.kind !== "pointer" && info.kind !== "pool-pointer" && info.kind !== "address" && info.kind !== "unknown") {
+    diagnostics.push(error("unsupported-device-pointer-param", `${callName} expects a pointer expression`, pointer.span));
+  }
+  for (const arg of expression.args.slice(1)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+  return info.kind === "pointer" || info.kind === "pool-pointer"
+    ? info
+    : { kind: "pointer", valueType: info.valueType ?? "float", symbol: info.symbol };
 }
 
 function isHalf2Intrinsic(name: string): boolean {

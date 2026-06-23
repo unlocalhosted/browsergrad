@@ -64,6 +64,7 @@ const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("unsupported-cuda-runtime-copy-kind", "runtime", "CUDA runtime copy kind", "unsupported", false, true, "Only modeled device-to-device runtime copies can be host-lifted."),
   feature("unsupported-cufft", "library", "cuFFT library island", "unsupported", false, true, "Future WGSL FFT library lowering."),
   feature("unsupported-curand", "library", "cuRAND library island", "unsupported", false, true, "Future counter RNG library lowering."),
+  feature("unsupported-inline-asm", "subgroup", "Unsupported inline PTX", "unsupported", false, false, "Inline PTX requires modeled instruction semantics before reference or WGSL lowering."),
 ];
 
 const FEATURE_REGISTRY = new Map(BUILTIN_FEATURES.map((entry) => [entry.code, entry]));
@@ -119,6 +120,18 @@ function inferFeatureFromDiagnostic(
   diagnostic: Pick<CudaLiteDiagnostic, "code" | "message">,
 ): CudaFeatureRecord {
   const message = diagnostic.message;
+  if (/inline PTX|asm|mma\.|wgmma|cp\.async/u.test(message)) {
+    return feature(diagnostic.code, "subgroup", "Inline PTX/MMA compatibility gap", "unsupported", false, false, message);
+  }
+  if (/\bdouble\b|unsupported CUDA-lite type: Real\b/u.test(message)) {
+    return feature(diagnostic.code, "feature", "CUDA f64 compatibility gap", "unsupported", false, false, message);
+  }
+  if (/bfloat|__nv_bfloat/u.test(message)) {
+    return feature(diagnostic.code, "feature", "CUDA bf16 compatibility gap", "unsupported", false, false, message);
+  }
+  if (/fp8|__nv_fp8/u.test(message)) {
+    return feature(diagnostic.code, "feature", "CUDA fp8 compatibility gap", "unsupported", false, false, message);
+  }
   if (/atomic/u.test(message)) {
     return feature(diagnostic.code, "atomic", "Atomic compatibility gap", "unsupported", false, true, message);
   }

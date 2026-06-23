@@ -10,13 +10,13 @@ import {
   pruneCudaPreprocessorBranches,
 } from "./cuda-lite-source-normalizer.mjs";
 
-const { corpusPathArg, details, expectations, firstFailureLimit, help } = parseArgs(process.argv.slice(2));
+const { corpusPathArg, details, expectations, firstFailureLimit, help, includeSources } = parseArgs(process.argv.slice(2));
 if (help) {
-  console.log("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--expect-total N] [--expect-webgpu-min N] [--expect-hard-fail-max N]");
+  console.log("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--expect-total N] [--expect-webgpu-min N] [--expect-hard-fail-max N]");
   process.exit(0);
 }
 if (!corpusPathArg) {
-  console.error("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--expect-total N] [--expect-webgpu-min N] [--expect-hard-fail-max N]");
+  console.error("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--expect-total N] [--expect-webgpu-min N] [--expect-hard-fail-max N]");
   process.exit(2);
 }
 
@@ -125,12 +125,14 @@ for (const file of files) {
           file,
           block: blockIndex + 1,
           kernel: kernelIndex + 1,
+          kernelName,
           ok: false,
           error: diagnostic?.code ?? error?.name ?? "error",
           family: feature?.family ?? "unknown",
           feature: feature?.label ?? "Unknown compatibility gap",
           lowering: feature?.lowering ?? "unsupported",
           message: diagnostic?.message ?? String(error?.message ?? error).split("\n")[0],
+          ...(includeSources ? { source } : {}),
           referenceOk: fallback.referenceOk,
           webGpuLiftOk: fallback.webGpuLiftOk,
           webGpuLiftKind: fallback.webGpuLiftKind,
@@ -855,6 +857,7 @@ function countBy(items, keyFn) {
 function parseArgs(args) {
   let corpusPathArg;
   let details = false;
+  let includeSources = false;
   const expectations = {};
   let firstFailureLimit = 80;
   let help = false;
@@ -863,6 +866,11 @@ function parseArgs(args) {
     if (arg === "--") continue;
     if (arg === "--details" || arg === "--json") {
       details = true;
+      continue;
+    }
+    if (arg === "--sources") {
+      details = true;
+      includeSources = true;
       continue;
     }
     if (arg === "--limit") {
@@ -900,7 +908,7 @@ function parseArgs(args) {
     console.error(`unexpected argument: ${arg}`);
     process.exit(2);
   }
-  return { corpusPathArg, details, expectations, firstFailureLimit, help };
+  return { corpusPathArg, details, expectations, firstFailureLimit, help, includeSources };
 }
 
 function parseExpectationArg(arg, args, index) {

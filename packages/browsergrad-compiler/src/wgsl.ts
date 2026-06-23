@@ -1003,6 +1003,10 @@ function emitDevicePointerArgument(expression: CudaLiteExpression, context: Emit
 }
 
 function devicePointerArgumentParts(expression: CudaLiteExpression, context: EmitContext): DevicePointerParts | undefined {
+  if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
+    const pointer = expression.args[0];
+    return pointer ? devicePointerArgumentParts(pointer, context) : undefined;
+  }
   if (expression.kind === "identifier") {
     const pointerParam = context.devicePointerParamFor(expression.name);
     if (pointerParam) return { buffer: `${expression.name}_buffer`, base: `${expression.name}_base` };
@@ -1077,6 +1081,10 @@ function sharedPointerArgumentParts(expression: CudaLiteExpression, context: Emi
 
 function devicePointerValueTypeForExpression(expression: CudaLiteExpression, context: EmitContext): CudaLiteScalarType {
   if (expression.kind === "cast" && expression.pointer) return expression.valueType;
+  if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
+    const pointer = expression.args[0];
+    return pointer ? devicePointerValueTypeForExpression(pointer, context) : "float";
+  }
   const root = rootIdentifier(expression);
   if (root) {
     const alias = context.pointerAliasFor(root);
@@ -1630,6 +1638,9 @@ function pointerAliasForPointerExpression(
 ): PointerAlias | undefined {
   if (!expression) return undefined;
   if (expression.kind === "cast" && expression.pointer) return pointerAliasForPointerExpression(expression.expression, valueType);
+  if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
+    return pointerAliasForPointerExpression(expression.args[0], valueType);
+  }
   if (expression.kind === "unary" && expression.operator === "&") {
     const target = expression.argument;
     if (target.kind === "index" && target.target.kind === "identifier") {
@@ -1654,6 +1665,10 @@ function pointerAliasForPointerExpression(
     };
   }
   return undefined;
+}
+
+function isPointerIdentityCall(name: string | undefined): boolean {
+  return name === "__builtin_assume_aligned" || name === "ct::assume_aligned";
 }
 
 function emitPointerAliasIndex(alias: PointerAlias, index: CudaLiteExpression, context: EmitContext): string {
@@ -1993,6 +2008,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   if (intrinsic?.emitWgsl) return intrinsic.emitWgsl(args);
   const vectorConstructor = name ? cudaVectorConstructorType(name) : undefined;
   if (vectorConstructor) return emitVectorConstructor(vectorConstructor, args);
+  if (isPointerIdentityCall(name)) return expression.args[0] ? emitExpression(expression.args[0], context) : "0u";
   if (name === "__ldcs") {
     const target = expression.args[0];
     if (!target) return "0";

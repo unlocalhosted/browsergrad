@@ -103,7 +103,7 @@ Local corpus audits on 2026-06-23:
   parser/frontend gaps, texture/vector
   operators, remaining `half2` intrinsics, `double`, templates, and
   runtime library shape.
-- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `83` direct
+- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `100` direct
   WebGPU-runnable after source/context normalization, intrinsic-ledger
   expansion, CUDA/C named constants, CUDA cache-hint memory builtins, local
   header context, simple C++ alias / constexpr intake, and typed storage
@@ -123,10 +123,10 @@ Local corpus audits on 2026-06-23:
   dereferenced local pointer/address value typing, vector reinterpret
   memory-view helpers through the device pointer ABI, multi-dimensional shared
   helper pointer params, and semantic `blockReduce<warpReduce*>` lowering, with
-  `65`
+  `48`
   hard gaps. Main
-  failures: frontend macro/type shape, `floatX` aliases, parser C++-isms, and
-  remaining library/front-end gaps.
+  failures: frontend macro/type shape, parser C++-isms, typed feature gaps
+  such as bf16, and remaining library/front-end gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `200` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, local header context, and
@@ -331,8 +331,8 @@ Acceptance criteria for the first slice:
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
   `>=193` WebGPU-runnable, and `<=164` hard gaps.
-- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=83`
-  WebGPU-runnable, and `<=65` hard gaps.
+- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=100`
+  WebGPU-runnable, and `<=48` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
   `>=200` WebGPU-runnable, and `<=93` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has

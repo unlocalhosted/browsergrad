@@ -566,6 +566,10 @@ function isCpAsyncFenceCall(name: string | undefined): boolean {
     name === "CP_ASYNC_BULK_WAIT_GROUP";
 }
 
+function isPointerIdentityCall(name: string | undefined): boolean {
+  return name === "__builtin_assume_aligned" || name === "ct::assume_aligned";
+}
+
 function cpAsyncElementCount(bytes: CudaLiteExpression | undefined, valueType: CudaLiteScalarType, context: ThreadContext): number {
   const byteCount = bytes === undefined ? elementByteSize(valueType) : Math.trunc(evalNumber(bytes, context));
   const elementBytes = elementByteSize(valueType);
@@ -684,6 +688,11 @@ function pointerArgumentValue(
   valueType: CudaLiteScalarType,
   context: ThreadContext,
 ): LocalValue {
+  if (arg.kind === "call" && isPointerIdentityCall(expressionName(arg.callee))) {
+    const pointer = arg.args[0];
+    if (!pointer) throw compilerFailure("pointer identity call expects pointer argument");
+    return pointerArgumentValue(pointer, valueType, context);
+  }
   if (arg.kind === "cast" && arg.pointer) {
     const pointer = pointerArgumentValue(arg.expression, arg.valueType, context);
     if (isPoolPointer(pointer)) return { ...pointer, valueType: arg.valueType };
@@ -829,6 +838,10 @@ function pointerValueTypeForExpression(
   context: ThreadContext,
 ): CudaLiteScalarType {
   if (expression.kind === "cast" && expression.pointer) return expression.valueType;
+  if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
+    const pointer = expression.args[0];
+    return pointer ? pointerValueTypeForExpression(pointer, context) : "float";
+  }
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
     return pointerValueTypeForExpression(expression.left, context);
   }
@@ -1555,6 +1568,13 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const target = expression.args[0];
     if (!target) throw compilerFailure("__cvta_generic_to_shared expects pointer argument");
     return lvalueStorageIndex(resolvePointerArgument(target, context), context);
+  }
+  if (isPointerIdentityCall(name)) {
+    const pointer = expression.args[0];
+    if (!pointer) throw compilerFailure("pointer identity call expects pointer argument");
+    const value = pointerArgumentValue(pointer, pointerValueTypeForExpression(pointer, context), context);
+    if (typeof value === "number" || isAddress(value) || isPoolPointer(value)) return value;
+    throw compilerFailure("pointer identity call expects pointer argument");
   }
   if (isCpAsyncCopyCall(name) || isCpAsyncFenceCall(name)) return 0;
   const vectorConstructor = name ? cudaVectorConstructorType(name) : undefined;

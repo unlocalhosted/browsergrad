@@ -611,6 +611,21 @@ __global__ void bad(float* x) {
 }`));
     expect(localPointer.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-local-pointer");
 
+    const modeledLocalPointer = compileCudaLiteKernel(`
+__global__ void ok(float* x, float* out) {
+  int i = threadIdx.x;
+  float* y = x + i;
+  if (i < 1) { out[0] = y[0]; }
+}`);
+    expect(modeledLocalPointer.loweringPlan.canRunOnGpu).toBe(true);
+
+    const alignedPointer = compileCudaLiteKernel(`
+__global__ void aligned(float* x, float* out) {
+  float* y = (float*)__builtin_assume_aligned(x + threadIdx.x, 16);
+  if (threadIdx.x < 1) { out[0] = y[0]; }
+}`);
+    expect(alignedPointer.loweringPlan.canRunOnGpu).toBe(true);
+
     const invalidShared = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(float* x) {
   __shared__ float tile[0];
@@ -654,6 +669,18 @@ __global__ void unsupported(float* x) {
       code: "unsupported-call",
       message: "unsupported CUDA-lite call 'cudaMemcpyPeerAsync'",
     })).toMatchObject({ family: "runtime" });
+    expect(describeCudaDiagnostic({
+      code: "unsupported-inline-asm",
+      message: "only fma.rn.f32, laneid, and bfind.u32 inline PTX are supported in CUDA-lite v0",
+    })).toMatchObject({ family: "subgroup", referenceRuns: false });
+    expect(describeCudaDiagnostic({
+      code: "parse-error",
+      message: "unsupported CUDA-lite type: double",
+    })).toMatchObject({ family: "feature", referenceRuns: false });
+    expect(describeCudaDiagnostic({
+      code: "parse-error",
+      message: "unsupported CUDA-lite type: __nv_bfloat16",
+    })).toMatchObject({ family: "feature", referenceRuns: false });
   });
 
   it("rejects semantic gaps before WGSL/runtime execution", () => {
