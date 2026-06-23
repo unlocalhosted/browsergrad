@@ -1398,6 +1398,42 @@ __global__ void namespaceTileReduce(const float *input, float *output) {
     expect([...result.buffers.output as Float32Array]).toEqual([8]);
   });
 
+  it("accepts C++ namespace aliases inside kernel bodies", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void kernelLocalNamespace(float *out) {
+  namespace cg = cooperative_groups;
+  using namespace cooperative_groups;
+  out[0] = 1.0f;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([1]);
+  });
+
+  it("lowers cooperative tile meta group size and rank", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void tileMeta(int *out) {
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_block_tile<4> tile = cg::tiled_partition<4>(block);
+  int rank = tile.thread_rank();
+  int lane = threadIdx.x;
+  out[lane] = tile.meta_group_size() * 10 + tile.meta_group_rank() + rank * 100;
+}`, { workgroupSize: [8, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(8) } },
+      { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("/ 4)");
+    expect([...result.buffers.out as Int32Array]).toEqual([20, 120, 220, 320, 21, 121, 221, 321]);
+  });
+
   it("allows loop-local variable names to be reused in independent loop scopes", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void scopedLoops(float *x) {
@@ -1617,6 +1653,22 @@ __global__ void vectorSaxpy(float a, const float4* x, const float4* y, float4* z
     expect(compiled.wgsl).toContain("var<storage, read> x: array<f32>;");
     expect(compiled.wgsl).toContain("vec4<f32>");
     expect([...result.buffers.z as Float32Array]).toEqual([12, 22, 33, 46, 60, 66, 77, 90]);
+  });
+
+  it("lowers dynamic CUDA vector lane access", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void dynamicLane(float *out, int lane) {
+  float4 value = make_float4(2.0f, 4.0f, 6.0f, 8.0f);
+  out[0] = vec_at(value, lane);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) }, scalars: { lane: 2 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("[u32(params.lane)]");
+    expect([...result.buffers.out as Float32Array]).toEqual([6]);
   });
 
   it("lowers reinterpret_cast vector memory views over scalar storage", () => {

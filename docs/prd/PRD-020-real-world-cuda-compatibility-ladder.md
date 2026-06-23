@@ -69,13 +69,15 @@ Local corpus audits on 2026-06-23:
   launch-context template specialization, with `273` hard gaps. Main
   failures: parser/frontend gaps, texture/vector types, `clock_t`, `half2`,
   `double`, templates, and runtime library shape.
-- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `45` direct
+- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `48` direct
   WebGPU-runnable after source/context normalization, intrinsic-ledger
   expansion, CUDA/C named constants, CUDA cache-hint memory builtins, local
   header context, simple C++ alias / constexpr intake, and typed storage
-  pointer aliases plus `warpSize` / `NULL` named constants, with `103` hard
-  gaps. Main failures: frontend macro/type shape, `floatX` aliases, parser
-  C++-isms, and remaining library/front-end gaps.
+  pointer aliases plus `warpSize` / `NULL` named constants, in-kernel
+  namespace aliases, cooperative tile meta-group queries, and dynamic
+  `float4` lane reads, with `100` hard gaps. Main failures: frontend
+  macro/type shape, `floatX` aliases, parser C++-isms, and remaining
+  library/front-end gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `104` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, local header context, and
@@ -265,8 +267,8 @@ Acceptance criteria for the first slice:
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
   `>=84` WebGPU-runnable, and `<=273` hard gaps.
-- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=45`
-  WebGPU-runnable, and `<=103` hard gaps.
+- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=48`
+  WebGPU-runnable, and `<=100` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
   `>=104` WebGPU-runnable, and `<=189` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has

@@ -157,4 +157,22 @@ __global__ void kernel(float *in, float *out, int ld) {
   assert.doesNotMatch(source, /#define FLOAT4/u);
 }
 
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void kernel(float4 *input, float *out) {
+  float4 value = input[0];
+  out[0] = vec_at(value, 2);
+}`,
+    deviceFunctions: [
+      {
+        name: "vec_at",
+        source: "__device__ float vec_at(const float4& vec, int index) { return reinterpret_cast<const float*>(&vec)[index]; }",
+      },
+    ],
+  });
+  assert.match(source, /vec_at\(value, 2\)/u);
+  assert.doesNotMatch(source, /reinterpret_cast/u);
+}
+
 console.log("cuda-lite source normalizer tests ok");

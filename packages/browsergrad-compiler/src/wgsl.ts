@@ -1276,6 +1276,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "sizeof":
       if (expression.args[0]?.kind === "identifier") return String(sizeofType(expression.args[0].name));
       return "4";
+    case "vec_at":
+      return `(${args[0] ?? "vec4<f32>()"}[u32(${args[1] ?? "0"})])`;
     case "curand_init":
       return `bg_curand_init(u32(${args[0] ?? "0"}), u32(${args[1] ?? "0"}), u32(${args[2] ?? "0"}), ${args[3] ?? "&state"})`;
     case "curand_uniform":
@@ -1327,6 +1329,15 @@ function emitCooperativeGroupCall(expression: CudaLiteCallExpression, context: E
     const localRank = emitLocalLinearRank(context);
     if (group.groupKind === "tile") return `(${localRank} % ${group.tileSize ?? 32})`;
     return localRank;
+  }
+  if (callee.property === "meta_group_size") {
+    if (group.groupKind !== "tile") return "1";
+    const blockSize = context.ir.workgroupSize[0] * context.ir.workgroupSize[1] * context.ir.workgroupSize[2];
+    return String(Math.ceil(blockSize / (group.tileSize ?? 32)));
+  }
+  if (callee.property === "meta_group_rank") {
+    if (group.groupKind !== "tile") return "0";
+    return `(${emitLocalLinearRank(context)} / ${group.tileSize ?? 32})`;
   }
   if (callee.property === "shfl_down" || callee.property === "shfl_up" || callee.property === "shfl_xor") {
     const value = expression.args[0] ? emitExpression(expression.args[0], context) : "0";

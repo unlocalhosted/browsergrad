@@ -352,6 +352,14 @@ class Parser {
     if (this.match("for")) return [this.parseFor()];
     if (this.match("return")) return [this.parseReturn()];
     if (this.match("continue")) return [this.parseContinue()];
+    if (this.match("namespace")) {
+      this.skipNamespaceAliasDecl();
+      return [];
+    }
+    if (this.match("using") && this.tokens[this.index + 1]?.value === "namespace") {
+      this.skipSimpleDeclaration();
+      return [];
+    }
     if (this.match("dim3")) return [this.parseDim3Decl()];
     if (this.startsCooperativeGroupDecl()) return [this.parseCooperativeGroupDecl()];
     if (this.startsKernelLaunch()) return [this.parseKernelLaunch()];

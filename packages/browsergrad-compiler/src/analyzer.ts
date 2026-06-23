@@ -49,6 +49,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["tex2D", [3, 3]],
   ["surf2Dwrite", [4, 5]],
   ["sizeof", [1, 1]],
+  ["vec_at", [2, 2]],
   ["deviceAllocate", [2, 4]],
   ["streamOrderedAllocate", [2, 4]],
   ["curand_init", [4, 4]],
@@ -767,6 +768,20 @@ function validateCallExpression(
     validateSizeof(expression, diagnostics);
     return { kind: "scalar", valueType: "uint" };
   }
+  if (callName === "vec_at") {
+    const vector = expression.args[0];
+    const index = expression.args[1];
+    const vectorInfo = vector ? walkExpression(vector, scope) : undefined;
+    const vectorType = vectorInfo?.valueType;
+    if (!isCudaVectorType(vectorType)) {
+      diagnostics.push(error("unsupported-vector-member", "vec_at expects a CUDA vector value", vector?.span ?? expression.span));
+    }
+    if (index) validateScalarOperand(walkExpression(index, scope), index.span, diagnostics);
+    return {
+      kind: "scalar",
+      valueType: isCudaVectorType(vectorType) ? cudaVectorScalarType(vectorType) : undefined,
+    };
+  }
   if (callName === "deviceAllocate" || callName === "streamOrderedAllocate") {
     validatePoolAllocate(expression, scope, atomicParams, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "voidptr" };
@@ -954,6 +969,10 @@ function validateCooperativeGroupCall(
     return { kind: "scalar", valueType: "int" };
   }
   if (method === "thread_rank") {
+    if (expression.args.length !== 0) diagnostics.push(error("invalid-call-arity", `${method} expects 0 arguments`, expression.span));
+    return { kind: "scalar", valueType: "int" };
+  }
+  if (method === "meta_group_size" || method === "meta_group_rank") {
     if (expression.args.length !== 0) diagnostics.push(error("invalid-call-arity", `${method} expects 0 arguments`, expression.span));
     return { kind: "scalar", valueType: "int" };
   }

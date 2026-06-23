@@ -1084,6 +1084,15 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const target = expression.args[0];
     return target?.kind === "identifier" ? sizeofType(target.name) : 4;
   }
+  if (name === "vec_at") {
+    const vector = expression.args[0];
+    const index = expression.args[1];
+    if (!vector || !index) throw compilerFailure("vec_at expects vector and index arguments");
+    const value = evalExpression(vector, context);
+    if (!isCudaVectorValue(value)) throw compilerFailure("vec_at expects a CUDA vector value");
+    const lane = Math.max(0, Math.min(value.lanes.length - 1, Math.trunc(evalNumber(index, context))));
+    return value.lanes[lane] ?? 0;
+  }
   if (name === "curand_init") {
     const state = expression.args[3];
     if (!state) throw compilerFailure("curand_init expects state address");
@@ -1190,6 +1199,15 @@ function evalCooperativeGroupCall(
     const localRank = localLinearRank(context);
     if (value.groupKind === "tile") return localRank % (value.tileSize ?? 32);
     return localRank;
+  }
+  if (callee.property === "meta_group_size") {
+    if (value.groupKind !== "tile") return 1;
+    const blockSize = context.blockDim.x * context.blockDim.y * context.blockDim.z;
+    return Math.ceil(blockSize / (value.tileSize ?? 32));
+  }
+  if (callee.property === "meta_group_rank") {
+    if (value.groupKind !== "tile") return 0;
+    return Math.floor(localLinearRank(context) / (value.tileSize ?? 32));
   }
   if (callee.property === "shfl_down" || callee.property === "shfl_up" || callee.property === "shfl_xor") return valueAsNumber(args[0] ?? 0, "shuffle value");
   return undefined;

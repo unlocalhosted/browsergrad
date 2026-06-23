@@ -1,3 +1,5 @@
+const SEMANTIC_BUILTIN_DEVICE_HELPERS = new Set(["vec_at"]);
+
 export function createKernelCompilationUnit({
   kernel,
   siblingKernels = [],
@@ -71,6 +73,7 @@ function referencedDeviceFunctionClosure(kernel, deviceFunctions) {
   while (pending.length > 0) {
     const source = pending.pop();
     for (const [name, fn] of byName) {
+      if (SEMANTIC_BUILTIN_DEVICE_HELPERS.has(name)) continue;
       if (included.has(name) || !sourceMentionsIdentifier(source, name)) continue;
       included.set(name, fn);
       pending.push(fn.source);
