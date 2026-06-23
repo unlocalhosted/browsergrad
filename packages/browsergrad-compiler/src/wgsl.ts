@@ -501,6 +501,9 @@ function emitStatement(
       return lines;
     }
     case "for": {
+      if (statement.update?.kind === "sequence" || statement.init?.kind === "sequence") {
+        return emitForLoopWithContinuing(statement, context, indentLevel);
+      }
       const init = statement.init?.kind === "var"
         ? emitForVar(statement.init, context)
         : statement.init
@@ -941,7 +944,39 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
         ? `${expression.operator}${emitExpression(expression.argument, context, "lvalue")}`
         : `${emitExpression(expression.argument, context, "lvalue")}${expression.operator}`;
     }
+    case "sequence":
+      throw featureError("unsupported-sequence-expression", "comma expressions are only supported in for-loop clauses");
   }
+}
+
+function emitForLoopWithContinuing(
+  statement: Extract<CudaLiteStatement, { kind: "for" }>,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const prefix = indent(indentLevel);
+  const lines: string[] = [];
+  if (statement.init?.kind === "var") {
+    lines.push(`${prefix}${emitForVar(statement.init, context)};`);
+  } else if (statement.init) {
+    for (const expression of sequenceItems(statement.init)) lines.push(`${prefix}${emitExpression(expression, context)};`);
+  }
+  lines.push(`${prefix}loop {`);
+  if (statement.condition) lines.push(`${indent(indentLevel + 1)}if (!(${emitExpression(statement.condition, context)})) { break; }`);
+  lines.push(...statement.body.flatMap((child) => emitStatement(child, context, indentLevel + 1)));
+  if (statement.update) {
+    lines.push(`${indent(indentLevel + 1)}continuing {`);
+    for (const expression of sequenceItems(statement.update)) {
+      lines.push(`${indent(indentLevel + 2)}${emitExpression(expression, context)};`);
+    }
+    lines.push(`${indent(indentLevel + 1)}}`);
+  }
+  lines.push(`${prefix}}`);
+  return lines;
+}
+
+function sequenceItems(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
+  return expression.kind === "sequence" ? expression.expressions : [expression];
 }
 
 function collectLocalNames(statements: readonly CudaLiteStatement[]): ReadonlySet<string> {
@@ -1141,6 +1176,8 @@ function collectRawPoolAllocators(statements: readonly CudaLiteStatement[]): rea
     } else if (expression.kind === "assignment") {
       visitExpression(expression.left);
       visitExpression(expression.right);
+    } else if (expression.kind === "sequence") {
+      for (const item of expression.expressions) visitExpression(item);
     }
   };
   const walk = (items: readonly CudaLiteStatement[]): void => {
@@ -2452,6 +2489,7 @@ function expressionUsesCall(expression: CudaLiteExpression, names: ReadonlySet<s
       expressionUsesCall(expression.alternate, names);
   }
   if (expression.kind === "assignment") return expressionUsesCall(expression.left, names) || expressionUsesCall(expression.right, names);
+  if (expression.kind === "sequence") return expression.expressions.some((item) => expressionUsesCall(item, names));
   return false;
 }
 
@@ -2468,6 +2506,7 @@ function expressionUsesIdentifier(expression: CudaLiteExpression, names: Readonl
       expressionUsesIdentifier(expression.alternate, names);
   }
   if (expression.kind === "assignment") return expressionUsesIdentifier(expression.left, names) || expressionUsesIdentifier(expression.right, names);
+  if (expression.kind === "sequence") return expression.expressions.some((item) => expressionUsesIdentifier(item, names));
   if (expression.kind === "call") {
     return expressionUsesIdentifier(expression.callee, names) ||
       expression.args.some((arg) => expressionUsesIdentifier(arg, names));

@@ -1457,6 +1457,28 @@ __global__ void scopedLoops(float *x) {
     expect(analysis.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("duplicate-symbol");
   });
 
+  it("lowers C-style multiple for-init declarations", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void multiFor(int *out) {
+  int acc = 0;
+  for (int i = 0, j = 3; i < 3; i++, j--) {
+    acc += i + j;
+  }
+  out[0] = acc;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var i: i32 = 0;");
+    expect(compiled.wgsl).toContain("var j: i32 = 3;");
+    expect(compiled.wgsl).toContain("loop {");
+    expect(compiled.wgsl).toContain("continuing {");
+    expect([...result.buffers.out as Int32Array]).toEqual([9]);
+  });
+
   it("supports bool locals and trailing commas in kernel parameter lists", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void boolKernel(int *data, int N,) {

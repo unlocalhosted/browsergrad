@@ -196,6 +196,28 @@ void host(float *out) {
 }
 
 {
+  const kernel = `
+template <typename T, const int Width>
+__global__ void typed_kernel(T *out) {
+  T value = (T)Width;
+  out[0] = value;
+}`;
+  const launcher = `
+void host(float *out) {
+  typed_kernel<float, 4><<<1, 1>>>(out);
+}`;
+  const launches = collectKernelTemplateArguments(`${kernel}\n${launcher}`);
+  assert.deepEqual(launches.get("typed_kernel"), ["float", "4"]);
+  const source = createKernelCompilationUnit({
+    kernel,
+    templateArgumentsByKernelName: launches,
+  });
+  assert.match(source, /template <typename T = float, const int Width = 4>/u);
+  assert.match(source, /__global__ void typed_kernel\(float \*out\)/u);
+  assert.match(source, /float value = \(float\)Width;/u);
+}
+
+{
   const source = createKernelCompilationUnit({
     kernel: `
 __global__ void kernel(float *in, float *out, int ld) {

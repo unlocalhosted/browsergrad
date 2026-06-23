@@ -438,6 +438,8 @@ function expressionNeedsParentDispatch(expression: CudaLiteExpression): boolean 
       return expression.argument.kind !== "identifier";
     case "assignment":
       return expression.left.kind !== "identifier" || expressionNeedsParentDispatch(expression.right);
+    case "sequence":
+      return expression.expressions.some(expressionNeedsParentDispatch);
     case "call": {
       const name = expression.callee.kind === "identifier" ? expression.callee.name : undefined;
       if (name !== undefined && HOST_SIDE_EFFECT_FREE_CALLS.has(name)) {

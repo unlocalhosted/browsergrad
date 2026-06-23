@@ -367,6 +367,8 @@ function isReplayableExpression(
       return isReplayableExpression(expression.condition, globals, replayableLocals) &&
         isReplayableExpression(expression.consequent, globals, replayableLocals) &&
         isReplayableExpression(expression.alternate, globals, replayableLocals);
+    case "sequence":
+      return false;
     case "index":
     case "call":
     case "assignment":
@@ -432,6 +434,9 @@ function identifiersReferencedByExpression(expression: CudaLiteExpression): Read
       case "assignment":
         visit(item.left);
         visit(item.right);
+        return;
+      case "sequence":
+        for (const expression of item.expressions) visit(expression);
         return;
     }
   };
@@ -507,6 +512,9 @@ function firstSharedAccessesByName(
         record(expression.argument, "read");
         visitLvalueIndexes(expression.argument);
         record(expression.argument, "write");
+        return;
+      case "sequence":
+        for (const item of expression.expressions) visitExpression(item);
         return;
     }
   };

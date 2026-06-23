@@ -415,20 +415,26 @@ class Parser {
     };
   }
 
-  private parseFor(): CudaLiteForStatement {
+  private parseFor(): CudaLiteForStatement | CudaLiteBlockStatement {
     const start = this.expect("for").span;
     this.expect("(");
     let init: CudaLiteVarDecl | CudaLiteExpression | undefined;
+    let initDeclarations: readonly CudaLiteVarDecl[] | undefined;
     if (!this.match(";")) {
-      init = this.startsVarDecl() ? this.parseVarDecl(false) : this.parseExpression();
+      if (this.startsVarDecl()) {
+        initDeclarations = this.parseVarDeclList(false);
+        init = initDeclarations.length === 1 ? initDeclarations[0] : undefined;
+      } else {
+        init = this.parseExpressionSequence();
+      }
     }
     this.expect(";");
     const condition = this.match(";") ? undefined : this.parseExpression();
     this.expect(";");
-    const update = this.match(")") ? undefined : this.parseExpression();
+    const update = this.match(")") ? undefined : this.parseExpressionSequence();
     this.expect(")");
     const body = this.parseBodyAsStatements();
-    return {
+    const statement: CudaLiteForStatement = {
       kind: "for",
       ...(init === undefined ? {} : { init }),
       ...(condition === undefined ? {} : { condition }),
@@ -436,6 +442,17 @@ class Parser {
       body,
       span: mergeSpans(start, body.at(-1)?.span ?? update?.span ?? condition?.span ?? start),
     };
+    if (initDeclarations !== undefined && initDeclarations.length > 1) {
+      return {
+        kind: "block",
+        body: [
+          ...initDeclarations,
+          statement,
+        ],
+        span: mergeSpans(start, statement.span),
+      };
+    }
+    return statement;
   }
 
   private parseReturn(): CudaLiteStatement {
@@ -578,14 +595,6 @@ class Parser {
     return this.parseStatementEntry();
   }
 
-  private parseVarDecl(expectSemicolon: boolean): CudaLiteVarDecl {
-    const declarations = this.parseVarDeclList(expectSemicolon);
-    if (declarations.length !== 1) {
-      this.fail("multiple for-init declarations are not supported in CUDA-lite v0", declarations[1]?.span ?? declarations[0]!.span);
-    }
-    return declarations[0]!;
-  }
-
   private parseVarDeclList(expectSemicolon: boolean): readonly CudaLiteVarDecl[] {
     const start = this.peek().span;
     this.consumeIf("static");
@@ -690,6 +699,17 @@ class Parser {
       left = { kind: "binary", operator: op, left, right, span: mergeSpans(left.span, right.span) };
     }
     return left;
+  }
+
+  private parseExpressionSequence(): CudaLiteExpression {
+    const expressions = [this.parseExpression()];
+    while (this.consumeIf(",")) expressions.push(this.parseExpression());
+    if (expressions.length === 1) return expressions[0]!;
+    return {
+      kind: "sequence",
+      expressions,
+      span: mergeSpans(expressions[0]!.span, expressions.at(-1)!.span),
+    };
   }
 
   private parsePrefix(): CudaLiteExpression {

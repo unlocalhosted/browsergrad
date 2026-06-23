@@ -1675,6 +1675,11 @@ function validateNonCallExpression(
       validateScalarOperand(walkExpression(expression.alternate, scope), expression.alternate.span, diagnostics);
       return { kind: "scalar" };
     }
+    case "sequence": {
+      let info: ExpressionInfo = { kind: "scalar" };
+      for (const item of expression.expressions) info = walkExpression(item, scope);
+      return info;
+    }
     case "assignment": {
       validateLValueExpression(expression.left, scope, diagnostics, walkExpression, expression.operator);
       const left = walkExpression(expression.left, scope);
@@ -1943,7 +1948,7 @@ function validateSideEffectPlacement(
       ));
     }
     forEachExpressionChild(node, (child) => {
-      visit(child, false);
+      visit(child, allowRootSideEffect && root && node.kind === "sequence");
     });
   };
   visit(expression, true);
@@ -2051,6 +2056,9 @@ function forEachExpressionChild(
       visit(expression.condition);
       visit(expression.consequent);
       visit(expression.alternate);
+      return;
+    case "sequence":
+      for (const item of expression.expressions) visit(item);
       return;
   }
 }

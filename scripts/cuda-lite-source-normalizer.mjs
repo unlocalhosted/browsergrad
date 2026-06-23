@@ -10,7 +10,7 @@ export function createKernelCompilationUnit({
   constantDeclarations = [],
   textureDeclarations = [],
 }) {
-  const specializedKernel = specializeTemplateFromLaunchContext(kernel, templateArgumentsByKernelName);
+  const specializedKernel = specializeTemplateFromLaunchContext(kernel, templateArgumentsByKernelName, definesByName);
   const params = new Set(kernelParamNames(specializedKernel));
   const referencedDeviceFunctionsRaw = referencedDeviceFunctionClosure(specializedKernel, deviceFunctions, definesByName);
   const referencedSiblingKernelsRaw = siblingKernels.filter((sibling) => {
@@ -28,10 +28,10 @@ export function createKernelCompilationUnit({
   const referencedDeviceFunctions = referencedDeviceFunctionsRaw
     .map((fn) => ({
       ...fn,
-      source: stripKernelLaunchTemplateArguments(specializeTemplateFromLaunchContext(fn.source, templateArgumentsByKernelName)),
+      source: stripKernelLaunchTemplateArguments(specializeTemplateFromLaunchContext(fn.source, templateArgumentsByKernelName, definesByName)),
     }));
   const referencedSiblingKernels = referencedSiblingKernelsRaw.map((sibling) => stripKernelLaunchTemplateArguments(
-    specializeTemplateFromLaunchContext(sibling, templateArgumentsByKernelName),
+    specializeTemplateFromLaunchContext(sibling, templateArgumentsByKernelName, definesByName),
   ));
   const macroScope = [
     specializedKernel,
@@ -147,15 +147,15 @@ function kernelSignature(kernel) {
   return params === undefined ? undefined : { name: undefined, params };
 }
 
-function specializeTemplateFromLaunchContext(source, templateArgumentsByKernelName) {
+function specializeTemplateFromLaunchContext(source, templateArgumentsByKernelName, definesByName = new Map()) {
   const name = kernelDefinitionName(source);
   if (name === undefined) return source;
   const args = templateArgumentsByKernelName.get(name);
   if (args === undefined || args.length === 0) return source;
-  return rewriteFirstTemplateHeader(source, args);
+  return rewriteFirstTemplateHeader(source, args, definesByName);
 }
 
-function rewriteFirstTemplateHeader(source, args) {
+function rewriteFirstTemplateHeader(source, args, definesByName = new Map()) {
   const templateStart = source.search(/\btemplate\s*</u);
   if (templateStart < 0) return source;
   const open = source.indexOf("<", templateStart);
@@ -163,16 +163,25 @@ function rewriteFirstTemplateHeader(source, args) {
   if (close === undefined) return source;
   const params = splitTopLevel(source.slice(open + 1, close));
   if (params.length === 0) return source;
-  const rewritten = params.map((param, index) => rewriteTemplateParam(param, args[index])).join(", ");
-  return `${source.slice(0, open + 1)}${rewritten}${source.slice(close)}`;
+  const parsedParams = params.map(parseTemplateParam);
+  const typeEnv = templateTypeEnvironment(parsedParams, args, definesByName);
+  const rewritten = params.map((param, index) => rewriteTemplateParam(param, args[index], definesByName)).join(", ");
+  const body = substituteTemplateTypes(source.slice(close), typeEnv);
+  return `${source.slice(0, open + 1)}${rewritten}${body}`;
 }
 
-function rewriteTemplateParam(param, arg) {
+function rewriteTemplateParam(param, arg, definesByName = new Map()) {
   if (arg === undefined) return param.trim();
   const cleaned = param.trim();
   if (cleaned.length === 0) return cleaned;
   const parsed = parseTemplateParam(cleaned);
-  if (parsed === undefined || parsed.kind !== "value") return cleaned;
+  if (parsed === undefined) return cleaned;
+  if (parsed.kind === "type") {
+    const value = normalizeTemplateTypeArgument(arg, definesByName);
+    if (value === undefined) return cleaned;
+    if (parsed.defaultStart === undefined) return `${cleaned} = ${value}`;
+    return `${cleaned.slice(0, parsed.defaultStart).trimEnd()} = ${value}`;
+  }
   const value = normalizeTemplateValueArgument(arg, parsed.valueType);
   if (value === undefined) return cleaned;
   if (parsed.defaultStart === undefined) return `${cleaned} = ${value}`;
@@ -192,11 +201,12 @@ function parseTemplateParam(param) {
       name: valueMatch[1],
       valueType: /\bbool\b/u.test(head) ? "bool" : "int",
       defaultStart: withoutDefault.defaultStart,
+      source: param,
     };
   }
   const typeMatch = /^(?:typename|class)\s+([A-Za-z_][A-Za-z0-9_]*)$/u.exec(head);
   if (typeMatch?.[1] !== undefined) {
-    return { kind: "type", name: typeMatch[1], defaultStart: withoutDefault.defaultStart };
+    return { kind: "type", name: typeMatch[1], defaultStart: withoutDefault.defaultStart, source: param };
   }
   return undefined;
 }
@@ -230,6 +240,45 @@ function normalizeTemplateValueArgument(arg, valueType) {
   if (/^[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*$/u.test(value)) return undefined;
   if (!/^[0-9A-Fa-fxX\s()+\-*/%<>&|^?:.]+$/u.test(value)) return undefined;
   return value;
+}
+
+function templateTypeEnvironment(params, args, definesByName = new Map()) {
+  const env = new Map();
+  for (let index = 0; index < params.length; index++) {
+    const param = params[index];
+    if (param?.kind !== "type") continue;
+    const value = normalizeTemplateTypeArgument(args[index] ?? templateParamDefaultValue(param), definesByName);
+    if (value !== undefined) env.set(param.name, value);
+  }
+  return env;
+}
+
+function templateParamDefaultValue(param) {
+  if (param.defaultStart === undefined || param.source === undefined) return undefined;
+  return param.source.slice(param.defaultStart + 1).trim();
+}
+
+function normalizeTemplateTypeArgument(arg, definesByName = new Map()) {
+  if (arg === undefined) return undefined;
+  let type = arg.trim()
+    .replace(/\b(?:const|volatile|typename|class|struct)\b/gu, " ")
+    .replace(/[&*]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (type.length === 0 || type.includes("<") || type.includes(">") || type.includes("(") || type.includes(")")) return undefined;
+  const mapped = definesByName.get(type);
+  if (mapped && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(mapped)) type = mapped;
+  if (type === "__half") return "half";
+  if (type === "unsigned int" || type === "unsigned") return "uint";
+  if (type === "signed int" || type === "signed") return "int";
+  if (type === "long long" || type === "long" || type === "short" || type === "short int") return "int";
+  const supported = new Set(["float", "int", "uint", "half", "bool", "float2", "float3", "float4", "half2", "int2", "int3", "int4", "uint2", "uint3", "uint4"]);
+  return supported.has(type) ? type : undefined;
+}
+
+function substituteTemplateTypes(source, typeEnv) {
+  if (typeEnv.size === 0) return source;
+  return source.replace(/\b[A-Za-z_][A-Za-z0-9_]*\b/gu, (name) => typeEnv.get(name) ?? name);
 }
 
 function templateParameterNames(source) {

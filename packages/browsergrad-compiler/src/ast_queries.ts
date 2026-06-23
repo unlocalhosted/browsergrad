@@ -105,6 +105,8 @@ function walkExpression(
   } else if (expression.kind === "assignment") {
     walkExpression(expression.left, visit);
     walkExpression(expression.right, visit);
+  } else if (expression.kind === "sequence") {
+    for (const item of expression.expressions) walkExpression(item, visit);
   }
 }
 

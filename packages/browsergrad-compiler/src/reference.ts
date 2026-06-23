@@ -399,8 +399,14 @@ function* execStatements(
   for (const statement of statements) {
     switch (statement.kind) {
       case "block": {
+        const outerNames = new Set(context.locals.keys());
+        const blockNames = blockScopedNames(statement.body);
         const locals = new Map(context.locals);
         const result = yield* execStatements(statement.body, { ...context, locals });
+        for (const name of outerNames) {
+          if (blockNames.has(name)) continue;
+          if (locals.has(name)) context.locals.set(name, locals.get(name)!);
+        }
         if (result) return result;
         break;
       }
@@ -463,6 +469,19 @@ function* execStatements(
         return { kind: "continue" };
     }
   }
+}
+
+function blockScopedNames(statements: readonly CudaLiteStatement[]): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const statement of statements) {
+    if ((statement.kind === "var" && statement.storage === "local") || statement.kind === "dim3" || statement.kind === "cooperative-group") {
+      names.add(statement.name);
+    }
+    if (statement.kind === "for" && statement.init?.kind === "var" && statement.init.storage === "local") {
+      names.add(statement.init.name);
+    }
+  }
+  return names;
 }
 
 function execInlineAsm(
@@ -854,6 +873,11 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
       const next = expression.operator === "++" ? currentNumber + 1 : currentNumber - 1;
       writeLValue(lvalue, next, context);
       return expression.prefix ? next : currentNumber;
+    }
+    case "sequence": {
+      let value: EvalValue = 0;
+      for (const item of expression.expressions) value = evalExpression(item, context);
+      return value;
     }
     case "call":
       return evalCall(expression, context);
@@ -2208,6 +2232,7 @@ function usesGridSync(statements: readonly CudaLiteStatement[]): boolean {
     if (expression.kind === "binary") return visitExpression(expression.left) || visitExpression(expression.right);
     if (expression.kind === "conditional") return visitExpression(expression.condition) || visitExpression(expression.consequent) || visitExpression(expression.alternate);
     if (expression.kind === "assignment") return visitExpression(expression.left) || visitExpression(expression.right);
+    if (expression.kind === "sequence") return expression.expressions.some(visitExpression);
     return false;
   };
   const walk = (items: readonly CudaLiteStatement[]): boolean => {

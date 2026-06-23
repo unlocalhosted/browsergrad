@@ -84,6 +84,11 @@ export function evaluateHostNumber(
       if (condition === undefined) return undefined;
       return evaluateHostNumber(condition !== 0 ? expression.consequent : expression.alternate, env, input);
     }
+    case "sequence": {
+      let value: number | undefined;
+      for (const item of expression.expressions) value = evaluateHostNumber(item, env, input);
+      return value;
+    }
     default:
       return undefined;
   }

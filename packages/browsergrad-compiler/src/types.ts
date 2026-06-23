@@ -216,6 +216,7 @@ export type CudaLiteExpression =
   | CudaLiteUnaryExpression
   | CudaLiteBinaryExpression
   | CudaLiteConditionalExpression
+  | CudaLiteSequenceExpression
   | CudaLiteAssignmentExpression
   | CudaLiteUpdateExpression;
 
@@ -312,6 +313,12 @@ export interface CudaLiteConditionalExpression {
   readonly condition: CudaLiteExpression;
   readonly consequent: CudaLiteExpression;
   readonly alternate: CudaLiteExpression;
+  readonly span: SourceSpan;
+}
+
+export interface CudaLiteSequenceExpression {
+  readonly kind: "sequence";
+  readonly expressions: readonly CudaLiteExpression[];
   readonly span: SourceSpan;
 }
 
