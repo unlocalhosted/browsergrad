@@ -72,10 +72,10 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   excludes kernels now runnable on real WebGPU through orchestration; current
   baseline is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=151`
-  WebGPU-runnable, and `<=206` hard gaps;
-  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=65`
-  WebGPU-runnable, and `<=83` hard gaps;
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=152`
+  WebGPU-runnable, and `<=205` hard gaps;
+  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=66`
+  WebGPU-runnable, and `<=82` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=194`
   WebGPU-runnable, and `<=99` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.

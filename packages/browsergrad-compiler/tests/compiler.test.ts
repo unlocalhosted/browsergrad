@@ -2329,6 +2329,59 @@ __global__ void laneId(int *out) {
     expect([...result.buffers.out as Int32Array]).toEqual([0, 1, 2, 3]);
   });
 
+  it("lowers inline PTX bfind.u32 statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int bfind(unsigned int word) {
+  unsigned int ret;
+  asm volatile("bfind.u32 %0, %1;" : "=r"(ret) : "r"(word));
+  return ret;
+}
+__global__ void bfindKernel(uint *out, uint *input) {
+  int idx = threadIdx.x;
+  out[idx] = bfind(input[idx]);
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(4), input: new Uint32Array([0, 1, 16, 0x80000000]) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("countLeadingZeros");
+    expect([...result.buffers.out as Uint32Array]).toEqual([0xffffffff, 0, 4, 31]);
+  });
+
+  it("parses adjacent-string inline PTX with multiple outputs as an unsupported semantic gap", () => {
+    expect(() => compileCudaLiteKernel(`
+__global__ void mmaCarrier(uint *out, uint *in) {
+  uint a = in[0];
+  uint b = in[1];
+  uint c = 0;
+  uint d = 0;
+  asm volatile(
+    "mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16 {%0, %1}, "
+    "{%2, %3}, {%4, %5}, {%6, %7};\\n"
+    : "=r"(c), "=r"(d)
+    : "r"(a), "r"(b), "r"(a), "r"(b), "r"(c), "r"(d));
+  out[0] = c + d;
+}`)).toThrow(/unsupported-inline-asm/u);
+  });
+
+  it("parses inline PTX with empty output sections as an unsupported semantic gap", () => {
+    expect(() => compileCudaLiteKernel(`
+__global__ void emptyAsm(float *out, float *in) {
+  asm volatile("cp.async.commit_group;\\n" ::);
+  out[threadIdx.x] = in[threadIdx.x];
+}`)).toThrow(/unsupported-inline-asm/u);
+  });
+
+  it("parses inline PTX clobber sections as an unsupported semantic gap", () => {
+    expect(() => compileCudaLiteKernel(`
+__global__ void clobberAsm(float *out, float *in) {
+  asm volatile("wgmma.fence.sync.aligned;\\n" ::: "memory");
+  out[threadIdx.x] = in[threadIdx.x];
+}`)).toThrow(/unsupported-inline-asm/u);
+  });
+
   it("parses anonymous CUDA lambda kernel bodies", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ (cufftComplex *data, int N) {

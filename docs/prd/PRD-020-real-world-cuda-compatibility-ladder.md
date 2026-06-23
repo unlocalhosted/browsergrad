@@ -60,7 +60,7 @@ Repo exploration:
 
 Local corpus audits on 2026-06-23:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `151` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `152` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -85,13 +85,14 @@ Local corpus audits on 2026-06-23:
   parameter handles, conservative `__syncwarp` lowering, and CUDA half2
   conversion aliases, real CUDA `while` statement lowering, alias-backed
   value template argument resolution with shared `sizeof`/`alignof` layout
-  folding, and output-only inline PTX `laneid` lowering, with `206`
+  folding, output-only inline PTX `laneid` lowering, and PTX `bfind.u32`
+  lowering, with `205`
   hard gaps.
   Main failures:
   parser/frontend gaps, texture/vector
   operators, remaining `half2` intrinsics, `double`, templates, and
   runtime library shape.
-- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `65` direct
+- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `66` direct
   WebGPU-runnable after source/context normalization, intrinsic-ledger
   expansion, CUDA/C named constants, CUDA cache-hint memory builtins, local
   header context, simple C++ alias / constexpr intake, and typed storage
@@ -106,7 +107,8 @@ Local corpus audits on 2026-06-23:
   128-bit load/store helper normalization, vector `.size`, and local vector
   dynamic lane read/write semantics, plus call-shaped helper intake and
   define-backed device-helper template defaults, plus conservative
-  `__syncwarp` lowering, with `83` hard gaps. Main
+  `__syncwarp` lowering plus header-carried `Packed128<float>::size` folding,
+  with `82` hard gaps. Main
   failures: frontend macro/type shape, `floatX` aliases, parser C++-isms, and
   remaining library/front-end gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `194` direct
@@ -121,8 +123,10 @@ Local corpus audits on 2026-06-23:
   reduction aliases plus CUDA half conversion aliases, object-macro device
   helper discovery, POSIX/C math constants, call-shaped helper intake, and
   define-backed device-helper template defaults, with semantic `cp.async`
-  source normalization and synchronous pointer-form lowering, with `99` hard
-  gaps.
+  source normalization, synchronous pointer-form lowering, bounded dependent
+  carrier alias/constexpr folding, qualifier-macro helper discovery, and
+  unsupported inline-PTX section parsing, with `99` hard gaps and fewer raw
+  parser gaps.
   The pre-normalizer baseline was `3/293`, which proved context isolation was
   the first ladder rung.
 
@@ -138,6 +142,10 @@ External sources:
 - NVIDIA CUDA Math API documents half and half2 intrinsics such as arithmetic
   and comparison operations that appear in LeetCUDA:
   https://docs.nvidia.com/cuda/cuda-math-api/
+- NVIDIA PTX ISA documents inline PTX instruction semantics including
+  `bfind.u32`, which BrowserGrad lowers into the reference interpreter and
+  WGSL:
+  https://docs.nvidia.com/cuda/parallel-thread-execution/index.html
 - WGSL is the browser-native target and includes workgroup memory, barriers,
   atomics, and feature-gated shader capabilities:
   https://www.w3.org/TR/WGSL/
@@ -305,9 +313,9 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=151` WebGPU-runnable, and `<=206` hard gaps.
-- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=65`
-  WebGPU-runnable, and `<=83` hard gaps.
+  `>=152` WebGPU-runnable, and `<=205` hard gaps.
+- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=66`
+  WebGPU-runnable, and `<=82` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
   `>=194` WebGPU-runnable, and `<=99` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has

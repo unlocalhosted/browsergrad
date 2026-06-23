@@ -501,8 +501,18 @@ function execInlineAsm(
 ): void {
   if (/\bmov\.u32\b/u.test(statement.template) && /%%laneid\b/u.test(statement.template)) {
     if (statement.inputs.length !== 0) throw compilerFailure("laneid inline asm expects no inputs");
+    if (statement.output === undefined) throw compilerFailure("laneid inline asm expects an output operand");
     const target = resolveLValue(statement.output, context);
     writeLValue(target, localLinearRank(context) % 32, context);
+    return;
+  }
+  if (/\bbfind\.u32\b/u.test(statement.template)) {
+    if (statement.inputs.length !== 1) throw compilerFailure("bfind.u32 inline asm expects one input");
+    if (statement.output === undefined) throw compilerFailure("bfind.u32 inline asm expects an output operand");
+    const value = evalExpression(statement.inputs[0]!, context);
+    const bits = valueAsNumber(value, "bfind.u32") >>> 0;
+    const found = bits === 0 ? 0xffffffff : 31 - Math.clz32(bits);
+    writeLValue(resolveLValue(statement.output, context), found, context);
     return;
   }
   if (!/\bfma\.rn\.f32\b/u.test(statement.template)) {
@@ -511,6 +521,7 @@ function execInlineAsm(
   if (statement.inputs.length !== 2) {
     throw compilerFailure("fma.rn.f32 inline asm expects two inputs");
   }
+  if (statement.output === undefined) throw compilerFailure("fma.rn.f32 inline asm expects an output operand");
   const target = resolveLValue(statement.output, context);
   const current = valueAsNumber(readLValue(target, context), target.name);
   const a = evalNumber(statement.inputs[0]!, context);

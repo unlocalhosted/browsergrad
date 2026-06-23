@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import {
+  collectCudaLiteContextDefines,
   collectKernelTemplateArguments,
   createKernelCompilationUnit,
   kernelDefinitionName,
@@ -524,6 +525,69 @@ void run(float *out) {
   assert.match(source, /__global__ void alias_template\(float \*out\)/u);
   assert.match(source, /__shared__ float tile\[Block \/ \(sizeof\(float4\) \/ sizeof\(float\)\)\];/u);
   assert.match(source, /\(float\)alignof\(float4\)/u);
+}
+
+{
+  const carrierSource = `
+template <typename T_, int Warps>
+struct alignas(16) HgemvConfig {
+  using T = T_;
+  static constexpr int NumThreads = Warps * 32;
+  static constexpr int BlockM = 16 * Warps;
+};
+using config = HgemvConfig<half, 4>;
+template <typename Config_>
+__global__ void carrier_kernel(typename Config_::T *out) {
+  constexpr int block_m = Config_::BlockM;
+  __shared__ typename Config_::T tile[Config_::NumThreads];
+  out[threadIdx.x] = tile[threadIdx.x] + (typename Config_::T)block_m;
+}
+void host(half *out) {
+  carrier_kernel<config><<<1, config::NumThreads>>>(out);
+}`;
+  const defines = collectCudaLiteContextDefines(carrierSource);
+  assert.equal(defines.get("config::T"), "half");
+  assert.equal(defines.get("config::NumThreads"), "128");
+  assert.equal(defines.get("config::BlockM"), "64");
+  const launches = collectKernelTemplateArguments(carrierSource);
+  assert.deepEqual(launches.get("carrier_kernel"), ["config"]);
+  const kernelStart = carrierSource.indexOf("template <typename Config_>");
+  const kernelEnd = carrierSource.indexOf("\n}", carrierSource.indexOf("out[threadIdx.x]"));
+  const kernel = kernelStart >= 0 && kernelEnd >= 0 ? carrierSource.slice(kernelStart, kernelEnd + 2) : undefined;
+  assert.ok(kernel);
+  const source = createKernelCompilationUnit({
+    kernel,
+    definesByName: defines,
+    templateArgumentsByKernelName: launches,
+  });
+  assert.match(source, /__global__ void carrier_kernel\(half \*out\)/u);
+  assert.match(source, /constexpr int block_m = 64;/u);
+  assert.match(source, /__shared__ half tile\[128\];/u);
+  assert.doesNotMatch(source, /Config_::/u);
+  assert.doesNotMatch(source, /config::/u);
+}
+
+{
+  const packedSource = `
+template<class ElementType>
+struct alignas(16) Packed128 {
+  static constexpr const int size = sizeof(int4) / sizeof(ElementType);
+  ElementType payload[size];
+};
+typedef Packed128<float> f128;
+__global__ void packed_size(float *out) {
+  float accum[f128::size];
+  out[threadIdx.x] = accum[0] + f128::size;
+}`;
+  const defines = collectCudaLiteContextDefines(packedSource);
+  assert.equal(defines.get("f128"), "float4");
+  assert.equal(defines.get("f128::size"), "4");
+  const source = createKernelCompilationUnit({
+    kernel: /__global__ void packed_size[\s\S]*$/u.exec(packedSource)?.[0],
+    definesByName: defines,
+  });
+  assert.match(source, /float accum\[4\];/u);
+  assert.match(source, /out\[threadIdx\.x\] = accum\[0\] \+ 4;/u);
 }
 
 {

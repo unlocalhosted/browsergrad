@@ -633,25 +633,60 @@ class Parser {
     const start = this.expect("asm").span;
     this.consumeIf("volatile");
     this.expect("(");
-    const template = this.expectString("inline assembly template");
-    this.expect(":");
-    const output = this.parseAsmOperand();
+    const template = this.parseAsmTemplate();
     const inputs: CudaLiteExpression[] = [];
-    if (this.consumeIf(":")) {
-      if (!this.match(")")) {
-        do inputs.push(this.parseAsmOperand());
-        while (this.consumeIf(","));
+    let outputs: CudaLiteExpression[] = [];
+    if (this.consumeIf("::")) {
+      if (this.consumeIf(":")) {
+        this.parseAsmClobberList();
+      } else if (!this.match(")")) {
+        inputs.push(...this.parseAsmOperandList());
+        if (this.consumeIf(":")) this.parseAsmClobberList();
       }
+    } else {
+      this.expect(":");
+      outputs = this.match(":") || this.match(")") ? [] : this.parseAsmOperandList();
+      if (this.consumeIf(":") && !this.match(")")) {
+        if (this.match(":")) {
+          // empty input section before clobbers
+        } else {
+          inputs.push(...this.parseAsmOperandList());
+        }
+      }
+      if (this.consumeIf(":")) this.parseAsmClobberList();
     }
     this.expect(")");
     const end = this.expect(";").span;
     return {
       kind: "asm",
-      template: template.value.slice(1, -1),
-      output,
+      template,
+      ...(outputs[0] === undefined ? {} : { output: outputs[0] }),
       inputs,
       span: mergeSpans(start, end),
     };
+  }
+
+  private parseAsmTemplate(): string {
+    let template = "";
+    do {
+      const token = this.expectString("inline assembly template");
+      template += token.value.slice(1, -1);
+    } while (this.peek().kind === "string");
+    return template;
+  }
+
+  private parseAsmOperandList(): CudaLiteExpression[] {
+    const operands: CudaLiteExpression[] = [];
+    do operands.push(this.parseAsmOperand());
+    while (this.consumeIf(","));
+    return operands;
+  }
+
+  private parseAsmClobberList(): void {
+    if (this.match(")")) return;
+    do {
+      this.expectString("inline assembly clobber");
+    } while (this.consumeIf(","));
   }
 
   private parseAsmOperand(): CudaLiteExpression {

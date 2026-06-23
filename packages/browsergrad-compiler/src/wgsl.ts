@@ -549,11 +549,19 @@ function emitInlineAsmStatement(
   statement: Extract<CudaLiteStatement, { kind: "asm" }>,
   context: EmitContext,
 ): string {
-  if (/\bmov\.u32\b/u.test(statement.template) && /%%laneid\b/u.test(statement.template) && statement.inputs.length === 0) {
+  if (
+    /\bmov\.u32\b/u.test(statement.template) &&
+    /%%laneid\b/u.test(statement.template) &&
+    statement.inputs.length === 0 &&
+    statement.output !== undefined
+  ) {
     return `${emitExpression(statement.output, context)} = ${emitLocalLinearRank(context)} % 32`;
   }
-  if (!/\bfma\.rn\.f32\b/u.test(statement.template) || statement.inputs.length !== 2) {
-    throw featureError("unsupported-inline-asm", "only fma.rn.f32 and laneid inline PTX are supported in WGSL output");
+  if (/\bbfind\.u32\b/u.test(statement.template) && statement.inputs.length === 1 && statement.output !== undefined) {
+    return `${emitExpression(statement.output, context)} = (31u - countLeadingZeros(u32(${emitExpression(statement.inputs[0]!, context)})))`;
+  }
+  if (!/\bfma\.rn\.f32\b/u.test(statement.template) || statement.inputs.length !== 2 || statement.output === undefined) {
+    throw featureError("unsupported-inline-asm", "only fma.rn.f32, laneid, and bfind.u32 inline PTX are supported in WGSL output");
   }
   const target = emitExpression(statement.output, context);
   return `${target} = fma(${emitExpression(statement.inputs[0]!, context)}, ${emitExpression(statement.inputs[1]!, context)}, ${target})`;
@@ -2674,7 +2682,7 @@ function statementsUseIdentifier(statements: readonly CudaLiteStatement[], names
     )) return true;
     if (statement.kind === "dim3" && statement.args.some((expression) => expressionUsesIdentifier(expression, names))) return true;
     if (statement.kind === "asm" && (
-      expressionUsesIdentifier(statement.output, names) ||
+      (statement.output ? expressionUsesIdentifier(statement.output, names) : false) ||
       statement.inputs.some((expression) => expressionUsesIdentifier(expression, names))
     )) return true;
   }

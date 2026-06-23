@@ -24,7 +24,9 @@ export function createKernelCompilationUnit({
     ...deviceFunctions.map((fn) => fn.source),
     ...constantDeclarations,
   ].join("\n");
-  const effectiveDefines = mergeDefineMaps(definesByName, collectTypeAliasDefines(aliasContext));
+  const aliasDefines = collectTypeAliasDefines(aliasContext);
+  const carrierDefines = collectCarrierMemberDefines(aliasContext, mergeDefineMaps(definesByName, aliasDefines));
+  const effectiveDefines = mergeDefineMaps(definesByName, aliasDefines, carrierDefines);
   const specializedKernel = specializeTemplateFromLaunchContext(kernel, templateArgumentsByKernelName, effectiveDefines);
   const params = new Set(kernelParamNames(specializedKernel));
   const referencedDeviceFunctionsRaw = referencedDeviceFunctionClosure(specializedKernel, deviceFunctions, effectiveDefines);
@@ -47,7 +49,7 @@ export function createKernelCompilationUnit({
     ...referencedDeviceFunctionsRaw.flatMap((fn) => templateParameterNames(fn.source)),
   ]);
   const defines = [...effectiveDefines]
-    .filter(([name]) => !params.has(name) && !templateNames.has(name))
+    .filter(([name]) => isMacroIdentifier(name) && !params.has(name) && !templateNames.has(name))
     .map(([name, value]) => `#define ${name} ${value}`);
   const referencedDeviceFunctions = referencedDeviceFunctionsRaw
     .map((fn) => ({
@@ -82,7 +84,12 @@ export function createKernelCompilationUnit({
     referencedSiblingKernels.join("\n"),
     stripKnownTemplateCallArguments(stripKernelLaunchTemplateArguments(specializedKernel), referencedDeviceFunctionNames),
   ].filter((part) => part.trim().length > 0).join("\n");
-  return normalizeCppTemplateCarrierSyntax(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(stripSupportedTypeAliasDeclarations(unit)))));
+  const withCarrierMembers = normalizeCarrierMemberReferences(unit, effectiveDefines);
+  return normalizeCppTemplateCarrierSyntax(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(stripSupportedTypeAliasDeclarations(withCarrierMembers)))));
+}
+
+export function collectCudaLiteContextDefines(source) {
+  return collectObjectDefines(source);
 }
 
 function normalizeFunctionMacro(macro) {
@@ -191,6 +198,10 @@ function sourceLaunchesKernel(source, name) {
 
 function sourceMentionsIdentifier(source, name) {
   return new RegExp(`\\b${escapeRegExp(name)}\\b`, "u").test(source);
+}
+
+function isMacroIdentifier(name) {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/u.test(name);
 }
 
 function functionDefineName(declaration) {
@@ -334,8 +345,10 @@ function templateTypeEnvironment(params, args, definesByName = new Map()) {
   for (let index = 0; index < params.length; index++) {
     const param = params[index];
     if (param?.kind !== "type") continue;
-    const value = normalizeTemplateTypeArgument(args[index] ?? templateParamDefaultValue(param), definesByName);
+    const raw = args[index] ?? templateParamDefaultValue(param);
+    const value = normalizeTemplateTypeArgument(raw, definesByName);
     if (value !== undefined) env.set(param.name, value);
+    else if (raw !== undefined && isKnownCarrierAlias(raw, definesByName)) env.set(param.name, raw.trim());
   }
   return env;
 }
@@ -414,7 +427,7 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map()) {
     if (normalized !== undefined) return normalized;
     type = mapped;
   }
-  if (type === "__half") return "half";
+  if (type === "__half" || type === "half_t") return "half";
   if (type === "unsigned int" || type === "unsigned") return "uint";
   if (type === "unsigned char" || type === "uchar" || type === "uint8_t") return "uint";
   if (type === "signed int" || type === "signed") return "int";
@@ -443,6 +456,21 @@ function normalizeCppTemplateCarrierSyntax(source) {
   return source
     .replace(/\bstd\s*::\s*bool_constant\s*<\s*(true|false)\s*>\s*\{\s*\}/gu, "$1")
     .replace(/\bstd\s*::\s*bool_constant\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>\s*(?=[,)])/gu, (_match, name) => `bool __bg_bool_constant_${name}`);
+}
+
+function normalizeCarrierMemberReferences(source, definesByName) {
+  const entries = [...definesByName]
+    .filter(([name]) => /^[A-Za-z_][A-Za-z0-9_]*::[A-Za-z_][A-Za-z0-9_]*$/u.test(name))
+    .sort((a, b) => b[0].length - a[0].length);
+  if (entries.length === 0) return source;
+  let out = source;
+  for (const [name, value] of entries) {
+    const [owner, member] = name.split("::");
+    if (!owner || !member) continue;
+    const re = new RegExp(`(?:\\btypename\\s+)?\\b${escapeRegExp(owner)}\\s*::\\s*${escapeRegExp(member)}\\b`, "gu");
+    out = out.replace(re, value);
+  }
+  return out;
 }
 
 function normalizeSharedMemoryHelpers(source) {
@@ -581,6 +609,7 @@ function collectObjectDefines(source) {
     const constant = parseSimpleIntegerConstant(stripped);
     if (constant !== undefined) defines.set(constant.name, constant.value);
   }
+  for (const [name, value] of collectCarrierMemberDefines(source, defines)) defines.set(name, value);
   return defines;
 }
 
@@ -591,6 +620,119 @@ function collectTypeAliasDefines(source) {
     if (alias !== undefined) defines.set(alias.name, alias.value);
   }
   return defines;
+}
+
+function collectCarrierMemberDefines(source, initialDefines = new Map()) {
+  const out = new Map();
+  const carriers = scanTemplateStructCarriers(source);
+  if (carriers.size === 0) return out;
+  const aliases = scanCarrierAliases(source);
+  for (const alias of aliases) {
+    const carrier = carriers.get(alias.templateName);
+    if (carrier === undefined) continue;
+    const env = templateEnvironment(carrier.params, alias.args, mergeDefineMaps(initialDefines, out));
+    if (env.size === 0) continue;
+    const memberEnv = new Map(env);
+    for (const member of carrier.members) {
+      if (member.kind === "type") {
+        const substituted = substituteTemplateArgument(member.value, memberEnv, mergeDefineMaps(initialDefines, out));
+        const normalized = normalizeTemplateTypeArgument(substituted, mergeDefineMaps(initialDefines, out));
+        if (normalized === undefined) continue;
+        out.set(`${alias.name}::${member.name}`, normalized);
+        memberEnv.set(member.name, normalized);
+        continue;
+      }
+      const value = evaluateTemplateIntegerExpression(member.value, memberEnv);
+      if (value === undefined) continue;
+      out.set(`${alias.name}::${member.name}`, value);
+      memberEnv.set(member.name, value);
+    }
+  }
+  return out;
+}
+
+function scanTemplateStructCarriers(source) {
+  const carriers = new Map();
+  let index = 0;
+  while (index < source.length) {
+    const match = /\btemplate\s*</u.exec(source.slice(index));
+    if (match === null) break;
+    const templateStart = index + match.index;
+    const open = source.indexOf("<", templateStart);
+    const close = findBalanced(source, open, "<", ">");
+    if (close === undefined) break;
+    const afterTemplate = skipWhitespace(source, close + 1);
+    const structMatch = /^(?:struct|class)\s+(?:alignas\s*\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)/u.exec(source.slice(afterTemplate));
+    if (structMatch?.[1] === undefined) {
+      index = close + 1;
+      continue;
+    }
+    const brace = source.indexOf("{", afterTemplate + structMatch[0].length);
+    const end = findBalanced(source, brace, "{", "}");
+    if (brace < 0 || end === undefined) {
+      index = close + 1;
+      continue;
+    }
+    carriers.set(structMatch[1], {
+      name: structMatch[1],
+      params: splitTopLevel(source.slice(open + 1, close)).map(parseTemplateParam).filter(Boolean),
+      members: scanCarrierMembers(source.slice(brace + 1, end)),
+    });
+    index = end + 1;
+  }
+  return carriers;
+}
+
+function scanCarrierMembers(body) {
+  const members = [];
+  for (const match of body.matchAll(/\busing\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);/gu)) {
+    const [, name, value] = match;
+    if (name && value) members.push({ kind: "type", name, value: value.trim() });
+  }
+  for (const match of body.matchAll(/\bstatic\s+constexpr\s+(?:const\s+)?(?:int|uint|unsigned\s+int|size_t|bool)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);/gu)) {
+    const [, name, value] = match;
+    if (name && value) members.push({ kind: "value", name, value: value.trim() });
+  }
+  return members;
+}
+
+function scanCarrierAliases(source) {
+  const aliases = [];
+  let index = 0;
+  while (index < source.length) {
+    const match = /\busing\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\s*<|\btypedef\s+([A-Za-z_][A-Za-z0-9_]*)\s*</u.exec(source.slice(index));
+    if (match === null) break;
+    const start = index + match.index;
+    const usingName = match[1];
+    const usingTemplateName = match[2];
+    const typedefTemplateName = match[3];
+    const templateName = usingTemplateName ?? typedefTemplateName;
+    const open = source.indexOf("<", start + match[0].length - 1);
+    const close = findBalanced(source, open, "<", ">");
+    const semi = close === undefined ? -1 : skipWhitespace(source, close + 1);
+    const typedefName = close === undefined ? undefined : /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*;/u.exec(source.slice(close + 1))?.[1];
+    const name = usingName ?? typedefName;
+    if (name && templateName && close !== undefined && source[semi + (typedefName === undefined ? 0 : typedefName.length)] === ";") {
+      aliases.push({
+        name,
+        templateName,
+        args: splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim()),
+      });
+      index = (typedefName === undefined ? semi : semi + typedefName.length) + 1;
+      continue;
+    }
+    index = start + 1;
+  }
+  return aliases;
+}
+
+function isKnownCarrierAlias(raw, definesByName) {
+  const alias = raw.trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(alias)) return false;
+  for (const name of definesByName.keys()) {
+    if (name.startsWith(`${alias}::`)) return true;
+  }
+  return false;
 }
 
 function parseSimpleTypeAlias(line, defines) {
@@ -1110,7 +1252,8 @@ function resolveTemplateArgument(arg, definesByName) {
 
 function evaluateTemplateIntegerExpression(expression, env) {
   const withTypeLayout = expression.replace(/\b(sizeof|alignof)\s*\(\s*([A-Za-z_][A-Za-z0-9_:]*)\s*\)/gu, (_match, op, typeName) => {
-    const size = op === "sizeof" ? sizeofType(typeName) : alignofType(typeName);
+    const concreteType = env.get(typeName) ?? typeName;
+    const size = op === "sizeof" ? sizeofType(concreteType) : alignofType(concreteType);
     return size === undefined ? `__unknown_${op}_${typeName}` : String(size);
   });
   const substituted = withTypeLayout

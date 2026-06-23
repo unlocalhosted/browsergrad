@@ -41,7 +41,7 @@ export function walkCudaLiteExpressions(
       }
     }
     if (statement.kind === "asm") {
-      walkExpression(statement.output, visitExpression);
+      if (statement.output) walkExpression(statement.output, visitExpression);
       for (const input of statement.inputs) walkExpression(input, visitExpression);
     }
     if (statement.kind === "expr") walkExpression(statement.expression, visitExpression);

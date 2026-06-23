@@ -799,16 +799,26 @@ function validateInlineAsmStatement(
 ): void {
   const fma = isInlineAsmFma(statement.template);
   const laneId = isInlineAsmLaneId(statement.template);
-  if (!fma && !laneId) {
-    diagnostics.push(error("unsupported-inline-asm", "only fma.rn.f32 and laneid inline PTX are supported in CUDA-lite v0", statement.span));
+  const bfindU32 = isInlineAsmBfindU32(statement.template);
+  if (!fma && !laneId && !bfindU32) {
+    diagnostics.push(error("unsupported-inline-asm", "only fma.rn.f32, laneid, and bfind.u32 inline PTX are supported in CUDA-lite v0", statement.span));
   }
-  validateLValueExpression(statement.output, scope, diagnostics, walkExpression);
-  validateScalarOperand(walkExpression(statement.output, scope), statement.output.span, diagnostics);
-  if (fma && statement.inputs.length !== 2) {
+  const outputInfo = statement.output === undefined ? undefined : walkExpression(statement.output, scope);
+  if (statement.output !== undefined) {
+    validateLValueExpression(statement.output, scope, diagnostics, walkExpression);
+    validateScalarOperand(outputInfo!, statement.output.span, diagnostics);
+  }
+  if (fma && (statement.output === undefined || statement.inputs.length !== 2)) {
     diagnostics.push(error("invalid-inline-asm-operands", "fma.rn.f32 inline PTX expects exactly two input operands", statement.span));
   }
-  if (laneId && statement.inputs.length !== 0) {
+  if (laneId && (statement.output === undefined || statement.inputs.length !== 0)) {
     diagnostics.push(error("invalid-inline-asm-operands", "laneid inline PTX expects no input operands", statement.span));
+  }
+  if (bfindU32 && (statement.output === undefined || statement.inputs.length !== 1)) {
+    diagnostics.push(error("invalid-inline-asm-operands", "bfind.u32 inline PTX expects one input operand", statement.span));
+  }
+  if (bfindU32 && outputInfo?.valueType !== undefined && outputInfo.valueType !== "uint") {
+    diagnostics.push(error("invalid-inline-asm-operands", "bfind.u32 inline PTX writes a uint output operand", statement.output?.span ?? statement.span));
   }
   for (const input of statement.inputs) {
     validateScalarOperand(walkExpression(input, scope), input.span, diagnostics);
@@ -2025,6 +2035,10 @@ function isInlineAsmFma(template: string): boolean {
 
 function isInlineAsmLaneId(template: string): boolean {
   return /\bmov\.u32\b/u.test(template) && /%%laneid\b/u.test(template);
+}
+
+function isInlineAsmBfindU32(template: string): boolean {
+  return /\bbfind\.u32\b/u.test(template);
 }
 
 function validateSideEffectPlacement(

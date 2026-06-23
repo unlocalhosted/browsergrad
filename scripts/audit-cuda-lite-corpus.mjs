@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import {
+  collectCudaLiteContextDefines,
   collectKernelTemplateArguments,
   createKernelCompilationUnit,
   kernelDefinitionName,
@@ -74,7 +75,7 @@ for (const file of files) {
   for (const [blockIndex, block] of blocks.entries()) {
     if (isNonKernelCodeBlock(block)) continue;
     const declarationContext = `${sourceWithoutCudaFunctionBodies(includeContext)}\n${sourceWithoutCudaFunctionBodies(block.code)}`;
-    const blockDefines = collectObjectDefines(declarationContext);
+    const blockDefines = collectCudaLiteContextDefines(declarationContext);
     const blockFunctionDefines = collectFunctionDefines(`${includeContext}\n${block.code}`);
     const blockDeviceFunctions = collectPortableDeviceFunctions(`${includeContext}\n${block.code}`);
     const blockDynamicLaunchTargets = collectDynamicLaunchTargetDeviceFunctions(`${includeContext}\n${block.code}`);
@@ -420,7 +421,7 @@ function isIdentifierBoundary(char) {
 }
 
 function sourceWithoutCudaFunctionBodies(source) {
-  const clean = stripComments(source);
+  const clean = expandCudaQualifierMacros(stripComments(source));
   let out = "";
   let index = 0;
   while (true) {
@@ -456,6 +457,28 @@ function sourceWithoutCudaFunctionBodies(source) {
     if (end < 0) return out;
     index = end;
   }
+}
+
+function expandCudaQualifierMacros(source) {
+  const defines = collectCudaLiteContextDefines(source);
+  const replacements = [...defines]
+    .filter(([name, value]) =>
+      /^[A-Za-z_][A-Za-z0-9_]*$/u.test(name) &&
+      /\b__(?:device|host|forceinline)__\b|\b(?:inline|__inline__)\b/u.test(value) &&
+      /^[A-Za-z0-9_\s]+$/u.test(value))
+    .sort((a, b) => b[0].length - a[0].length);
+  if (replacements.length === 0) return source;
+  return source
+    .split(/\r?\n/u)
+    .map((line) => {
+      if (/^\s*#/u.test(line)) return line;
+      let out = line;
+      for (const [name, value] of replacements) {
+        out = out.replace(new RegExp(`\\b${escapeRegExp(name)}\\b`, "gu"), value);
+      }
+      return out;
+    })
+    .join("\n");
 }
 
 function collectLocalIncludeSources(absoluteFile, root, seen = new Set()) {
@@ -505,7 +528,7 @@ function isPlaceholderKernel(kernel) {
 }
 
 function collectPortableDeviceFunctions(source) {
-  const clean = stripComments(source);
+  const clean = expandCudaQualifierMacros(stripComments(source));
   const functions = [];
   let index = 0;
   while (true) {
@@ -544,7 +567,7 @@ function collectPortableDeviceFunctions(source) {
 }
 
 function collectDynamicLaunchTargetDeviceFunctions(source) {
-  const clean = stripComments(source);
+  const clean = expandCudaQualifierMacros(stripComments(source));
   return collectCudaFunctionBodies(clean, "__device__")
     .filter((fn) => {
       const signature = fn.slice(0, fn.indexOf("{"));
