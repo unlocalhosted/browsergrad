@@ -431,7 +431,12 @@ function emitStatement(
         if (!isEmittedPointerVar(statement, context)) return [];
         return [`${prefix}var ${statement.name}: u32${statement.init ? ` = ${emitExpression(statement.init, context)}` : " = 0u"};`];
       }
-      if (statement.dimensions.length > 0) return [`${prefix}var ${statement.name}: ${emitLocalArrayType(statement)};`];
+      if (statement.dimensions.length > 0) {
+        return [
+          `${prefix}var ${statement.name}: ${emitLocalArrayType(statement)};`,
+          ...emitLocalArrayInitializer(statement, context, indentLevel),
+        ];
+      }
       return [`${prefix}var ${statement.name}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitLocalInit(statement, context)}` : ""};`];
     case "dim3":
       return [];
@@ -809,6 +814,8 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       return expression.raw.includes(".") ? expression.raw : `${expression.raw}`;
     case "string":
       return expression.raw;
+    case "initializer":
+      throw featureError("unsupported-local-array-init", "braced initializer is only valid in a declaration");
     case "identifier":
       return emitIdentifier(expression.name, context, mode);
     case "cast":
@@ -1643,6 +1650,37 @@ function emitLocalArrayType(statement: CudaLiteVarDecl): string {
     type = `array<${type}, ${statement.dimensions[i]!}>`;
   }
   return type;
+}
+
+function emitLocalArrayInitializer(
+  statement: CudaLiteVarDecl,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  if (!statement.init) return [];
+  const elements = flattenInitializerExpressions(statement.init);
+  if (elements.length === 0) return [];
+  const prefix = indent(indentLevel);
+  const totalElements = statement.dimensions.reduce((product, item) => product * item, 1);
+  return elements.slice(0, totalElements).map((element, flatIndex) =>
+    `${prefix}${emitLocalArrayElementAccess(statement.name, statement.dimensions, flatIndex)} = ${emitExpression(element, context)};`
+  );
+}
+
+function flattenInitializerExpressions(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
+  if (expression.kind !== "initializer") return [expression];
+  return expression.elements.flatMap((element) => flattenInitializerExpressions(element));
+}
+
+function emitLocalArrayElementAccess(name: string, dimensions: readonly number[], flatIndex: number): string {
+  let remainder = flatIndex;
+  const indices: number[] = [];
+  for (let i = dimensions.length - 1; i >= 0; i--) {
+    const size = dimensions[i]!;
+    indices.unshift(remainder % size);
+    remainder = Math.trunc(remainder / size);
+  }
+  return indices.reduce((expr, index) => `${expr}[${index}]`, name);
 }
 
 function emitConstantArrayType(constant: CudaLiteGlobalConstant): string {

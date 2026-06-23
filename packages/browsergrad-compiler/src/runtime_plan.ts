@@ -349,6 +349,8 @@ function isReplayableExpression(
     case "number":
     case "string":
       return true;
+    case "initializer":
+      return expression.elements.every((element) => isReplayableExpression(element, globals, replayableLocals));
     case "identifier":
       return globals.has(expression.name) || replayableLocals.has(expression.name);
     case "member":

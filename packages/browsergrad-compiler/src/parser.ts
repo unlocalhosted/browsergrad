@@ -13,6 +13,7 @@ import {
   type CudaLiteForStatement,
   type CudaLiteGlobalConstant,
   type CudaLiteIfStatement,
+  type CudaLiteInitializerExpression,
   type CudaLiteKernel,
   type CudaLiteKernelLaunchStatement,
   type CudaLiteModule,
@@ -237,7 +238,14 @@ class Parser {
   private consumeDeviceFunctionAttributes(): SourceSpan {
     let start: SourceSpan | undefined;
     let sawDevice = false;
-    while (this.match("__inline__") || this.match("inline") || this.match("__device__") || this.match("__forceinline__")) {
+    while (
+      this.match("static") ||
+      this.match("__inline__") ||
+      this.match("inline") ||
+      this.match("__device__") ||
+      this.match("__host__") ||
+      this.match("__forceinline__")
+    ) {
       const token = this.advance();
       start ??= token.span;
       if (token.value === "__device__") sawDevice = true;
@@ -560,6 +568,7 @@ class Parser {
 
   private parseVarDeclList(expectSemicolon: boolean): readonly CudaLiteVarDecl[] {
     const start = this.peek().span;
+    this.consumeIf("static");
     const storageInfo = this.consumeStorageQualifier();
     this.consumeIf("static");
     const constexpr = this.consumeIf("constexpr") !== undefined;
@@ -577,7 +586,7 @@ class Parser {
         }
         this.expect("]");
       }
-      const init = this.consumeIf("=") ? this.parseInitializerExpression(valueType) : undefined;
+      const init = this.consumeIf("=") ? this.parseInitializerExpression(valueType, dimensions) : undefined;
       if (constexpr && init !== undefined) {
         const value = this.evaluateIntegerConstantExpression(init);
         if (value !== undefined) this.recordIntegerConstant(name.value, value);
@@ -601,22 +610,36 @@ class Parser {
     }));
   }
 
-  private parseInitializerExpression(valueType: Exclude<CudaLiteScalarType, "void">): CudaLiteExpression {
+  private parseInitializerExpression(valueType: Exclude<CudaLiteScalarType, "void">, dimensions: readonly number[]): CudaLiteExpression {
     if (!this.match("{")) return this.parseExpression();
+    const initializer = this.parseBracedInitializer();
+    if (dimensions.length > 0) return initializer;
+    if (isCudaVectorType(valueType)) {
+      return {
+        kind: "call",
+        callee: { kind: "identifier", name: `make_${valueType}`, span: initializer.span },
+        args: initializer.elements,
+        span: initializer.span,
+      };
+    }
+    if (initializer.elements.length === 0) {
+      return { kind: "number", value: 0, raw: "0", span: initializer.span };
+    }
+    if (initializer.elements.length === 1) return initializer.elements[0]!;
+    this.fail("scalar braced initializer expects at most one value", initializer.span);
+  }
+
+  private parseBracedInitializer(): CudaLiteInitializerExpression {
     const start = this.expect("{").span;
     const args: CudaLiteExpression[] = [];
     if (!this.match("}")) {
-      do args.push(this.parseExpression());
+      do args.push(this.match("{") ? this.parseBracedInitializer() : this.parseExpression());
       while (this.consumeIf(","));
     }
     const end = this.expect("}").span;
-    if (!isCudaVectorType(valueType)) {
-      this.fail("braced initializers are only supported for CUDA vector values", mergeSpans(start, end));
-    }
     return {
-      kind: "call",
-      callee: { kind: "identifier", name: `make_${valueType}`, span: start },
-      args,
+      kind: "initializer",
+      elements: args,
       span: mergeSpans(start, end),
     };
   }
@@ -825,7 +848,14 @@ class Parser {
       const token = this.tokens[index];
       if (!token) return false;
       if (token.value === "__device__") sawDevice = true;
-      if (token.value === "__inline__" || token.value === "inline" || token.value === "__device__" || token.value === "__forceinline__") {
+      if (
+        token.value === "static" ||
+        token.value === "__inline__" ||
+        token.value === "inline" ||
+        token.value === "__device__" ||
+        token.value === "__host__" ||
+        token.value === "__forceinline__"
+      ) {
         index++;
         continue;
       }
@@ -901,7 +931,8 @@ class Parser {
 
   private startsVarDecl(): boolean {
     if (this.match("__shared__") || this.match("extern")) return true;
-    if (this.match("static")) return this.tokens[this.index + 1]?.value === "constexpr" ||
+    if (this.match("static")) return this.tokens[this.index + 1]?.value === "__shared__" ||
+      this.tokens[this.index + 1]?.value === "constexpr" ||
       TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "");
     if (this.match("constexpr")) return TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "") ||
       (this.tokens[this.index + 1]?.value === "const" && TYPE_START_KEYWORDS.has(this.tokens[this.index + 2]?.value ?? ""));

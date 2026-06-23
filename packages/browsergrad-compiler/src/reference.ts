@@ -1,5 +1,7 @@
 import {
   createWgslFloat16Array,
+  float16BitsToFloat32,
+  float32ToFloat16Bits,
   isWgslFloat16Array,
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
@@ -475,7 +477,9 @@ function execVar(statement: CudaLiteVarDecl, context: ThreadContext): void {
     return;
   }
   if (statement.dimensions.length > 0) {
-    context.locals.set(statement.name, allocateLocalArray(statement));
+    const localArray = allocateLocalArray(statement);
+    if (statement.init) initializeLocalArray(localArray, statement.init, context);
+    context.locals.set(statement.name, localArray);
     return;
   }
   context.locals.set(statement.name, statement.init ? evalExpression(statement.init, context) : zeroLocalValue(statement.valueType));
@@ -776,6 +780,8 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
       return expression.value;
     case "string":
       return 0;
+    case "initializer":
+      throw compilerFailure("braced initializer is only valid in a declaration");
     case "identifier": {
       const value = readIdentifier(expression.name, context);
       if (isComplex(value)) return value;
@@ -1132,6 +1138,16 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (vectorConstructor) {
     return { kind: "cuda-vector", valueType: vectorConstructor, lanes: expression.args.map((arg) => evalNumber(arg, context)) };
   }
+  if (isHalf2Intrinsic(name)) {
+    const left = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
+    const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "half2");
+    const op = half2IntrinsicOperator(name);
+    return {
+      kind: "cuda-vector",
+      valueType: "half2",
+      lanes: left.lanes.map((value, index) => roundHalf(op(value ?? 0, right.lanes[index] ?? 0))),
+    };
+  }
   const deviceFunction = name ? context.functions.get(name) : undefined;
   if (deviceFunction) return evalDeviceFunction(
     deviceFunction,
@@ -1157,6 +1173,35 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     default:
       throw compilerFailure(`unsupported call '${name ?? "<expr>"}'`);
   }
+}
+
+function isHalf2Intrinsic(name: string | undefined): boolean {
+  return name === "__hadd2" ||
+    name === "__hsub2" ||
+    name === "__hmul2" ||
+    name === "__hmin2" ||
+    name === "__hmax2";
+}
+
+function half2IntrinsicOperator(name: string | undefined): (left: number, right: number) => number {
+  switch (name) {
+    case "__hadd2":
+      return (left, right) => left + right;
+    case "__hsub2":
+      return (left, right) => left - right;
+    case "__hmul2":
+      return (left, right) => left * right;
+    case "__hmin2":
+      return Math.min;
+    case "__hmax2":
+      return Math.max;
+    default:
+      throw compilerFailure(`unsupported half2 intrinsic '${name ?? "<expr>"}'`);
+  }
+}
+
+function roundHalf(value: number): number {
+  return float16BitsToFloat32(float32ToFloat16Bits(value));
 }
 
 function isHostManagedRuntimeNoopCall(name: string): boolean {
@@ -1620,6 +1665,26 @@ function allocateLocalArray(declaration: CudaLiteVarDecl): LocalArrayValue {
     valueType: declaration.valueType,
     data: allocateTypedArray(declaration.valueType, declaration.dimensions),
   };
+}
+
+function initializeLocalArray(
+  array: LocalArrayValue,
+  initializer: CudaLiteExpression,
+  context: ThreadContext,
+): void {
+  const elements = flattenInitializerExpressions(initializer);
+  const width = valueStorageWidth(array.valueType);
+  const capacity = array.data.length;
+  for (let elementIndex = 0; elementIndex < elements.length; elementIndex++) {
+    const storageIndex = elementIndex * width;
+    if (storageIndex + width > capacity) break;
+    writeBufferValue(array.data, storageIndex, array.valueType, undefined, evalExpression(elements[elementIndex]!, context));
+  }
+}
+
+function flattenInitializerExpressions(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
+  if (expression.kind !== "initializer") return [expression];
+  return expression.elements.flatMap((element) => flattenInitializerExpressions(element));
 }
 
 function allocateTypedArray(valueType: CudaLiteScalarType, dimensions: readonly number[]): WgslTypedArray {

@@ -222,7 +222,7 @@ export function analyzeCudaLite(
             diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.span));
           }
           if (statement.storage === "local" && statement.dimensions.length > 0 && statement.init) {
-            diagnostics.push(error("unsupported-local-array-init", "local array initializers are not supported in CUDA-lite yet", statement.span));
+            validateArrayInitializer(statement, scope, diagnostics, walkExpression);
           }
           if (statement.dynamicShared && !resolvedSharedDimensions(statement, options)) {
             diagnostics.push(error("dynamic-shared-memory", "__shared__ arrays must have fixed dimensions", statement.span));
@@ -232,7 +232,7 @@ export function analyzeCudaLite(
               diagnostics.push(error("invalid-array-dimension", "array dimensions must be positive integer literals", statement.span));
             }
           }
-            if (statement.init) walkExpression(statement.init, scope);
+          if (statement.init && statement.dimensions.length === 0) walkExpression(statement.init, scope);
             if (statement.init) validateSideEffectPlacement(statement.init, false, diagnostics);
           break;
         case "dim3":
@@ -311,7 +311,10 @@ export function analyzeCudaLite(
             if (statement.init.pointer && !isSupportedLocalPointer(statement.init, loopScope)) {
               diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.init.span));
             }
-            if (statement.init.init) walkExpression(statement.init.init, loopScope);
+            if (statement.init.dimensions.length > 0 && statement.init.init) {
+              validateArrayInitializer(statement.init, loopScope, diagnostics, walkExpression);
+            }
+            if (statement.init.init && statement.init.dimensions.length === 0) walkExpression(statement.init.init, loopScope);
             if (statement.init.init) validateSideEffectPlacement(statement.init.init, false, diagnostics);
           } else if (statement.init) {
             validateSideEffectPlacement(statement.init, true, diagnostics);
@@ -546,6 +549,34 @@ function declareDeviceFunction(
   }
 }
 
+function validateArrayInitializer(
+  statement: CudaLiteVarDecl,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  if (!statement.init) return;
+  if (statement.init.kind !== "initializer") {
+    diagnostics.push(error("unsupported-local-array-init", "local array initializers must use CUDA/C braced initializer syntax", statement.init.span));
+    return;
+  }
+  for (const element of flattenInitializerExpressions(statement.init)) {
+    const info = walkExpression(element, scope);
+    if (isCudaVectorType(statement.valueType)) {
+      if (info.kind !== "vector" && info.kind !== "unknown") {
+        diagnostics.push(error("unsupported-vector-argument", "CUDA vector array initializer expects vector values", element.span));
+      }
+    } else {
+      validateScalarOperand(info, element.span, diagnostics);
+    }
+  }
+}
+
+function flattenInitializerExpressions(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
+  if (expression.kind !== "initializer") return [expression];
+  return expression.elements.flatMap((element) => flattenInitializerExpressions(element));
+}
+
 function isSupportedSharedPointerAlias(statement: CudaLiteVarDecl, scope: Scope): boolean {
   if (!statement.pointer || statement.storage !== "local") return false;
   if (statement.init?.kind !== "unary" || statement.init.operator !== "&") return false;
@@ -739,6 +770,16 @@ function validateCallExpression(
     for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
     return { kind: "vector", valueType: vectorConstructor };
   }
+  if (isHalf2Intrinsic(callName)) {
+    requiredFeatures.add("shader-f16");
+    for (const arg of expression.args) {
+      const info = walkExpression(arg, scope);
+      if (info.kind !== "vector" && info.kind !== "unknown") {
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects half2 arguments`, arg.span));
+      }
+    }
+    return { kind: "vector", valueType: "half2" };
+  }
   const intrinsic = CUDA_INTRINSICS_BY_NAME.get(callName);
   if (intrinsic) {
     for (const feature of intrinsic.requiredFeatures ?? []) requiredFeatures.add(feature);
@@ -807,6 +848,14 @@ function validateCallExpression(
     validateScalarOperand(info, arg.span, diagnostics);
   }
   return { kind: "scalar" };
+}
+
+function isHalf2Intrinsic(name: string): boolean {
+  return name === "__hadd2" ||
+    name === "__hsub2" ||
+    name === "__hmul2" ||
+    name === "__hmin2" ||
+    name === "__hmax2";
 }
 
 function validateRuntimeCall(
@@ -1300,6 +1349,11 @@ function validateNonCallExpression(
       return { kind: "scalar" };
     case "string":
       return { kind: "string" };
+    case "initializer":
+      for (const element of flattenInitializerExpressions(expression)) {
+        validateScalarOperand(walkExpression(element, scope), element.span, diagnostics);
+      }
+      return { kind: "unknown" };
     case "identifier":
       return expressionInfoForIdentifier(expression.name, expression.span, scope, diagnostics);
     case "cast": {
@@ -1744,6 +1798,9 @@ function forEachExpressionChild(
     case "number":
     case "string":
     case "identifier":
+      return;
+    case "initializer":
+      for (const element of expression.elements) visit(element);
       return;
     case "cast":
       visit(expression.expression);

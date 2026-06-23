@@ -416,6 +416,8 @@ function expressionNeedsParentDispatch(expression: CudaLiteExpression): boolean 
     case "string":
     case "identifier":
       return false;
+    case "initializer":
+      return expression.elements.some(expressionNeedsParentDispatch);
     case "cast":
       return expressionNeedsParentDispatch(expression.expression);
     case "member":

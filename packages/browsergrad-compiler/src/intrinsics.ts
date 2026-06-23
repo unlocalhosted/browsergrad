@@ -38,6 +38,8 @@ const FLOAT_UNARY = [
 
 const FLOAT_INTRINSICS = [
   ...FLOAT_UNARY,
+  intrinsic("__builtin_inff", [0, 0], "float", () => Infinity, () => "bitcast<f32>(0x7f800000u)"),
+  intrinsic("__builtin_huge_valf", [0, 0], "float", () => Infinity, () => "bitcast<f32>(0x7f800000u)"),
   intrinsic("__fdividef", [2, 2], "float", (args) => (args[0] ?? 0) / (args[1] ?? 0), (args) => `(${args[0] ?? "0"} / ${args[1] ?? "1"})`),
   intrinsic("powf", [2, 2], "float", (args) => Math.pow(args[0] ?? 0, args[1] ?? 0), (args) => `pow(${args.join(", ")})`),
   intrinsic("fminf", [2, 2], "float", (args) => Math.min(args[0] ?? 0, args[1] ?? 0), (args) => `min(${args.join(", ")})`),
@@ -72,6 +74,11 @@ const HALF_INTRINSICS = [
   intrinsic("__hge", [2, 2], "bool", (args) => orderedCompare(args, (a, b) => a >= b), (args) => `(${args[0] ?? "0"} >= ${args[1] ?? "0"})`, HALF_FEATURES),
   intrinsic("__hlt", [2, 2], "bool", (args) => orderedCompare(args, (a, b) => a < b), (args) => `(${args[0] ?? "0"} < ${args[1] ?? "0"})`, HALF_FEATURES),
   intrinsic("__hle", [2, 2], "bool", (args) => orderedCompare(args, (a, b) => a <= b), (args) => `(${args[0] ?? "0"} <= ${args[1] ?? "0"})`, HALF_FEATURES),
+  intrinsic("__hadd2", [2, 2], "half2", () => 0, (args) => `(${args[0] ?? "vec2<f16>()"} + ${args[1] ?? "vec2<f16>()"})`, HALF_FEATURES),
+  intrinsic("__hsub2", [2, 2], "half2", () => 0, (args) => `(${args[0] ?? "vec2<f16>()"} - ${args[1] ?? "vec2<f16>()"})`, HALF_FEATURES),
+  intrinsic("__hmul2", [2, 2], "half2", () => 0, (args) => `(${args[0] ?? "vec2<f16>()"} * ${args[1] ?? "vec2<f16>()"})`, HALF_FEATURES),
+  intrinsic("__hmin2", [2, 2], "half2", () => 0, (args) => `min(${args.join(", ")})`, HALF_FEATURES),
+  intrinsic("__hmax2", [2, 2], "half2", () => 0, (args) => `max(${args.join(", ")})`, HALF_FEATURES),
 ] as const;
 
 export const CUDA_INTRINSICS: readonly CudaIntrinsic[] = [

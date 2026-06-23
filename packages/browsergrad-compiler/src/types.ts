@@ -199,6 +199,7 @@ export interface CudaLiteContinueStatement {
 export type CudaLiteExpression =
   | CudaLiteNumberLiteral
   | CudaLiteStringLiteral
+  | CudaLiteInitializerExpression
   | CudaLiteIdentifier
   | CudaLiteCastExpression
   | CudaLiteMemberExpression
@@ -221,6 +222,12 @@ export interface CudaLiteStringLiteral {
   readonly kind: "string";
   readonly value: string;
   readonly raw: string;
+  readonly span: SourceSpan;
+}
+
+export interface CudaLiteInitializerExpression {
+  readonly kind: "initializer";
+  readonly elements: readonly CudaLiteExpression[];
   readonly span: SourceSpan;
 }
 

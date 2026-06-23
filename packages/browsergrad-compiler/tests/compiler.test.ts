@@ -1696,6 +1696,29 @@ __global__ void half2Add(const half2 *x, half2 *y) {
     expect(Array.from(result.buffers.y as ArrayLike<number>)).toEqual([4, 7]);
   });
 
+  it("lowers CUDA half2 arithmetic intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void half2Ops(const half2 *x, const half2 *y, half2 *out) {
+  half2 sum = __hadd2(x[0], y[0]);
+  half2 prod = __hmul2(sum, make_half2(__float2half(2.0f), __float2half(0.5f)));
+  out[0] = __hmax2(prod, make_half2(__float2half(5.0f), __float2half(5.0f)));
+}`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: createWgslFloat16Array([1, 8]),
+          y: createWgslFloat16Array([2, 4]),
+          out: createWgslFloat16Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("max(");
+    expect(Array.from(result.buffers.out as ArrayLike<number>)).toEqual([6, 6]);
+  });
+
   it("feature-gates half2 behind shader-f16", () => {
     expect(() => compileCudaLiteKernel(`
 __global__ void half2Gate(half2 *x) {
@@ -2759,6 +2782,43 @@ __global__ void dynamicShared(float *x) {
 
     expect(compiled.wgsl).toContain("var<workgroup> scratch: array<f32, 2>;");
     expect([...result.buffers.x as Float32Array]).toEqual([5, 3]);
+  });
+
+  it("lowers static shared declarations and scalar local-array initializers", () => {
+    const compiled = compileCudaLiteKernel(`
+static __device__ __forceinline__ float scale(float x) { return x * 2.0f; }
+__global__ void init_arrays(float *out) {
+  static __shared__ float shared[2];
+  float vals[2][2] = {1.0f, 2.0f, 3.0f};
+  int tid = threadIdx.x;
+  if (tid < 2) { shared[tid] = vals[tid][0] + vals[tid][1]; }
+  __syncthreads();
+  if (tid < 1) { out[0] = scale(shared[0] + shared[1]); }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<workgroup> shared: array<f32, 2>;");
+    expect(compiled.wgsl).toContain("vals[0][0] = 1.0;");
+    expect([...result.buffers.out as Float32Array]).toEqual([12]);
+  });
+
+  it("lowers builtin infinity macros emitted by CUDA headers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void builtin_inf(float *out) {
+  out[0] = -__builtin_inff();
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bitcast<f32>(0x7f800000u)");
+    expect([...result.buffers.out as Float32Array]).toEqual([-Infinity]);
   });
 
   it("lowers local shared-memory pointer aliases as fixed shared offsets", () => {
