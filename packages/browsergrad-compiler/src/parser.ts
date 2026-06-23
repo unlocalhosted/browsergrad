@@ -36,6 +36,12 @@ const CUDA_SCALAR_TYPE_ALIASES = new Map<string, Exclude<CudaLiteScalarType, "vo
   ["uchar", "uint"],
   ["uint8_t", "uint"],
   ["clock_t", "uint"],
+  ["size_type", "uint"],
+  ["curandState", "uint"],
+  ["CUtexObject", "uint"],
+  ["CUtensorMap", "uint"],
+  ["cudaGraphConditionalHandle", "uint"],
+  ["__nv_fp8_storage_t", "uint"],
 ]);
 const TYPE_KEYWORDS = new Set([
   "float",
@@ -299,7 +305,7 @@ class Parser {
     do {
       if (this.match(")")) break;
       const startToken = this.peek();
-      const constant = this.consumeIf("const") !== undefined;
+      const constant = this.consumeCvQualifiers();
       const type = this.parseType();
       const pointer = this.consumeIf("*") !== undefined;
       this.consumeIf("&");
@@ -629,7 +635,7 @@ class Parser {
     const storageInfo = this.consumeStorageQualifier();
     this.consumeIf("static");
     const constexpr = this.consumeIf("constexpr") !== undefined;
-    this.consumeIf("const");
+    this.consumeCvQualifiers();
     const valueType = this.parseType();
     const declarations: CudaLiteVarDecl[] = [];
     do {
@@ -1009,8 +1015,8 @@ class Parser {
       this.tokens[this.index + 1]?.value === "constexpr" ||
       TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "");
     if (this.match("constexpr")) return TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "") ||
-      (this.tokens[this.index + 1]?.value === "const" && TYPE_START_KEYWORDS.has(this.tokens[this.index + 2]?.value ?? ""));
-    if (this.match("const")) return TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "");
+      (this.isCvQualifier(this.tokens[this.index + 1]?.value) && TYPE_START_KEYWORDS.has(this.tokens[this.index + 2]?.value ?? ""));
+    if (this.isCvQualifier(this.peek().value)) return TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "");
     return TYPE_START_KEYWORDS.has(this.peek().value);
   }
 
@@ -1028,7 +1034,7 @@ class Parser {
 
   private typeEndIndex(startIndex: number): number | undefined {
     let index = startIndex;
-    if (this.tokens[index]?.value === "const") index++;
+    while (this.isCvQualifier(this.tokens[index]?.value)) index++;
     const value = this.tokens[index]?.value;
     if (value === "unsigned" || value === "signed") {
       index++;
@@ -1053,12 +1059,31 @@ class Parser {
 
   private consumeTypeQualifiers(): void {
     while (
+      this.consumeIf("const") ||
+      this.consumeIf("volatile") ||
       this.consumeIf("__restrict__") ||
       this.consumeIf("__restrict") ||
       this.consumeIf("restrict")
     ) {
       // accepted CUDA pointer qualifiers; no CUDA-lite semantic effect
     }
+  }
+
+  private consumeCvQualifiers(): boolean {
+    let constant = false;
+    while (true) {
+      if (this.consumeIf("const")) {
+        constant = true;
+        continue;
+      }
+      if (this.consumeIf("volatile")) continue;
+      break;
+    }
+    return constant;
+  }
+
+  private isCvQualifier(value: string | undefined): boolean {
+    return value === "const" || value === "volatile";
   }
 
   private expectIdentifier(label: string): Token {

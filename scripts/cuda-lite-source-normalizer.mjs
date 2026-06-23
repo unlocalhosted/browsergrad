@@ -391,7 +391,15 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map()) {
   if (type === "unsigned char" || type === "uchar" || type === "uint8_t") return "uint";
   if (type === "signed int" || type === "signed") return "int";
   if (type === "signed char" || type === "char" || type === "int8_t") return "int";
-  if (type === "clock_t") return "uint";
+  if (
+    type === "clock_t" ||
+    type === "size_type" ||
+    type === "curandState" ||
+    type === "CUtexObject" ||
+    type === "CUtensorMap" ||
+    type === "cudaGraphConditionalHandle" ||
+    type === "__nv_fp8_storage_t"
+  ) return "uint";
   if (type === "long long" || type === "long" || type === "short" || type === "short int") return "int";
   if (type === "uchar2") return "uint2";
   if (type === "uchar3") return "uint3";

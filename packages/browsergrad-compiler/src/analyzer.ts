@@ -62,6 +62,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["fill_3D_regs", [2, 2]],
   ["bg_subgroup_add", [1, 1]],
   ["atomicAdd", [2, 2]],
+  ["atomicAdd_system", [2, 2]],
   ["atomicSub", [2, 2]],
   ["atomicMin", [2, 2]],
   ["atomicMax", [2, 2]],
@@ -1535,6 +1536,7 @@ function validateAtomicBuiltin(
       diagnostics.push(error("unsupported-atomic-target", `${callName ?? "atomic operation"} target must resolve to storage or shared memory`, targetExpression.span));
     } else if (targetType === "float" && (
       callName === "atomicAdd" ||
+      callName === "atomicAdd_system" ||
       callName === "atomicSub" ||
       callName === "atomicMin" ||
       callName === "atomicMax" ||
@@ -1566,6 +1568,7 @@ function atomicStorageRoot(name: string, scope: Scope, span: SourceSpan): string
 
 function isAtomicBuiltin(callName: string): boolean {
   return callName === "atomicAdd" ||
+    callName === "atomicAdd_system" ||
     callName === "atomicSub" ||
     callName === "atomicMin" ||
     callName === "atomicMax" ||

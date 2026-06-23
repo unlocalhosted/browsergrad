@@ -492,6 +492,30 @@ __global__ void integerAliases(int32_t *signedOut, uint32_t *unsignedOut, signed
     expect([...result.buffers.unsignedOut as Uint32Array]).toEqual([9, 10]);
   });
 
+  it("accepts CUDA opaque/index aliases and volatile qualifiers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void cudaAliasKernel(volatile size_type *out, curandState *state, CUtensorMap map, cudaGraphConditionalHandle handle) {
+  volatile size_type idx = threadIdx.x;
+  if (idx < 1) {
+    out[0] = idx + map + handle + state[0];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(1),
+          state: new Uint32Array([5]),
+        },
+        scalars: { map: 7, handle: 11 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.ir.params.map((param) => [param.name, param.valueType])).toContainEqual(["map", "uint"]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([23]);
+  });
+
   it("returns stable diagnostics for unsupported unsafe cases", () => {
     const constWrite = parseCudaLite(`
 __global__ void bad(const float* x) {
@@ -1642,11 +1666,13 @@ __global__ void intIntrinsics(int *x, uint *out) {
     out[5] = uint(__ffs(0u));
     out[6] = uint(__ffs(8u));
     out[7] = uint(abs(-7));
+    out[8] = UMUL(6u, 7u);
+    out[9] = UMAD(6u, 7u, 2u);
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { x: new Int32Array([5]), out: new Uint32Array(8) } },
+      { buffers: { x: new Int32Array([5]), out: new Uint32Array(10) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
@@ -1654,7 +1680,7 @@ __global__ void intIntrinsics(int *x, uint *out) {
     expect(compiled.wgsl).toContain("countTrailingZeros");
     expect(compiled.wgsl).toContain("min(u32(7), u32(3))");
     expect(compiled.wgsl).toContain("0;");
-    expect([...result.buffers.out as Uint32Array]).toEqual([29, 15, 20, 3, 3, 0, 4, 7]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([29, 15, 20, 3, 3, 0, 4, 7, 42, 44]);
   });
 
   it("recognizes CUDA/C numeric named constants", () => {
@@ -3705,7 +3731,7 @@ __global__ void atomic_exchange(float* x, float* out) {
   it("supports CUDA pointer-form atomicAdd on integer buffers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomic_count(int* x) {
-  if (threadIdx.x < 1) { atomicAdd(x, 1); }
+  if (threadIdx.x < 1) { atomicAdd_system(x, 1); }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,

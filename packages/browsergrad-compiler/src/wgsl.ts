@@ -1635,6 +1635,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "curand_uniform":
       return `bg_curand_uniform(${args[0] ?? "&state"})`;
     case "atomicAdd":
+    case "atomicAdd_system":
       return emitAtomicCall("atomicAdd", expression, context, args);
     case "atomicSub":
       return emitAtomicCall("atomicSub", expression, context, args);
@@ -2550,8 +2551,8 @@ function storageElementType(param: CudaLiteParam, ir: KernelIrModule): string {
 
 function usesFloatAtomicAdd(ir: KernelIrModule): boolean {
   return ir.params.some((param) => param.pointer && param.valueType === "float" && ir.atomicParams.includes(param.name)) &&
-    (statementsUseCall(ir.body, new Set(["atomicAdd"])) ||
-      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicAdd"]))));
+    (statementsUseCall(ir.body, new Set(["atomicAdd", "atomicAdd_system"])) ||
+      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicAdd", "atomicAdd_system"]))));
 }
 
 function usesFloatAtomicSub(ir: KernelIrModule): boolean {

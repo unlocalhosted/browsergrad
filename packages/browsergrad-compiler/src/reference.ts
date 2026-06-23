@@ -1216,7 +1216,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     }
     return { kind: "pool-pointer", poolName, byteOffset: oldOffset };
   }
-  if (name === "atomicAdd") {
+  if (name === "atomicAdd" || name === "atomicAdd_system") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => current + value);
   }
   if (name === "atomicSub") {
