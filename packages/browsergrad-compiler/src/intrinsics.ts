@@ -19,7 +19,9 @@ const FLOAT_UNARY = [
   intrinsic("sqrt", [1, 1], "float", (args) => Math.sqrt(args[0] ?? 0), (args) => `sqrt(${args.join(", ")})`),
   intrinsic("sqrtf", [1, 1], "float", (args) => Math.sqrt(args[0] ?? 0), (args) => `sqrt(${args.join(", ")})`),
   intrinsic("expf", [1, 1], "float", (args) => Math.exp(args[0] ?? 0), (args) => `exp(${args.join(", ")})`),
+  intrinsic("__expf", [1, 1], "float", (args) => Math.exp(args[0] ?? 0), (args) => `exp(${args.join(", ")})`),
   intrinsic("logf", [1, 1], "float", (args) => Math.log(args[0] ?? 0), (args) => `log(${args.join(", ")})`),
+  intrinsic("__logf", [1, 1], "float", (args) => Math.log(args[0] ?? 0), (args) => `log(${args.join(", ")})`),
   intrinsic("fabsf", [1, 1], "float", (args) => Math.abs(args[0] ?? 0), (args) => `abs(${args.join(", ")})`),
   intrinsic("floorf", [1, 1], "float", (args) => Math.floor(args[0] ?? 0), (args) => `floor(${args.join(", ")})`),
   intrinsic("ceilf", [1, 1], "float", (args) => Math.ceil(args[0] ?? 0), (args) => `ceil(${args.join(", ")})`),
@@ -30,15 +32,25 @@ const FLOAT_UNARY = [
   intrinsic("tanf", [1, 1], "float", (args) => Math.tan(args[0] ?? 0), (args) => `tan(${args.join(", ")})`),
   intrinsic("tanhf", [1, 1], "float", (args) => Math.tanh(args[0] ?? 0), (args) => `tanh(${args.join(", ")})`),
   intrinsic("coshf", [1, 1], "float", (args) => Math.cosh(args[0] ?? 0), (args) => `cosh(${args.join(", ")})`),
+  intrinsic("rsqrtf", [1, 1], "float", (args) => 1 / Math.sqrt(args[0] ?? 0), (args) => `inverseSqrt(${args.join(", ")})`),
+  intrinsic("__saturatef", [1, 1], "float", (args) => Math.min(1, Math.max(0, args[0] ?? 0)), (args) => `clamp(${args[0] ?? "0"}, 0.0, 1.0)`),
 ] as const;
 
 const FLOAT_INTRINSICS = [
   ...FLOAT_UNARY,
+  intrinsic("__fdividef", [2, 2], "float", (args) => (args[0] ?? 0) / (args[1] ?? 0), (args) => `(${args[0] ?? "0"} / ${args[1] ?? "1"})`),
   intrinsic("powf", [2, 2], "float", (args) => Math.pow(args[0] ?? 0, args[1] ?? 0), (args) => `pow(${args.join(", ")})`),
   intrinsic("fminf", [2, 2], "float", (args) => Math.min(args[0] ?? 0, args[1] ?? 0), (args) => `min(${args.join(", ")})`),
   intrinsic("fmaxf", [2, 2], "float", (args) => Math.max(args[0] ?? 0, args[1] ?? 0), (args) => `max(${args.join(", ")})`),
   intrinsic("fma", [3, 3], "float", (args) => (args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0), (args) => `fma(${args.join(", ")})`),
   intrinsic("fmaf", [3, 3], "float", (args) => (args[0] ?? 0) * (args[1] ?? 0) + (args[2] ?? 0), (args) => `fma(${args.join(", ")})`),
+] as const;
+
+const INTEGER_INTRINSICS = [
+  intrinsic("__clz", [1, 1], "int", (args) => Math.clz32(args[0] ?? 0), (args) => `i32(countLeadingZeros(u32(${args[0] ?? "0"})))`),
+  intrinsic("__mul24", [2, 2], "int", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0), (args) => `(i32(${args[0] ?? "0"}) * i32(${args[1] ?? "0"}))`),
+  intrinsic("__umul24", [2, 2], "uint", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0) >>> 0, (args) => `(u32(${args[0] ?? "0"}) * u32(${args[1] ?? "0"}))`),
+  intrinsic("assert", [1, 1], "int", () => 0, () => "0"),
 ] as const;
 
 const HALF_FEATURES = ["shader-f16"] as const;
@@ -64,6 +76,7 @@ const HALF_INTRINSICS = [
 
 export const CUDA_INTRINSICS: readonly CudaIntrinsic[] = [
   ...FLOAT_INTRINSICS,
+  ...INTEGER_INTRINSICS,
   ...HALF_INTRINSICS,
 ];
 

@@ -1446,9 +1446,14 @@ __global__ void mathy(float *x, float *out) {
       coshf(value) +
       sqrt(fabsf(value)) +
       sqrtf(fabsf(value)) +
+      rsqrtf(fabsf(value) + 1.0f) +
+      __saturatef(value) +
+      __expf(value) +
+      __logf(fabsf(value) + 1.0f) +
       powf(fabsf(value), 2.0f) +
       fminf(value, 1.0f) +
       fmaxf(value, -1.0f) +
+      __fdividef(value, 2.0f) +
       fma(value, 2.0f, 1.0f) +
       fmaf(value, -1.0f, 0.5f);
   }
@@ -1471,6 +1476,8 @@ __global__ void mathy(float *x, float *out) {
     expect(compiled.wgsl).toContain("tanh(value)");
     expect(compiled.wgsl).toContain("cosh(value)");
     expect(compiled.wgsl).toContain("sqrt(abs(value))");
+    expect(compiled.wgsl).toContain("inverseSqrt((abs(value) + 1.0))");
+    expect(compiled.wgsl).toContain("clamp(value, 0.0, 1.0)");
     expect(compiled.wgsl).toContain("pow(abs(value), 2.0)");
     expect(compiled.wgsl).toContain("min(value, 1.0)");
     expect(compiled.wgsl).toContain("max(value, (-1.0))");
@@ -1489,14 +1496,41 @@ __global__ void mathy(float *x, float *out) {
       Math.cosh(value) +
       Math.sqrt(Math.abs(value)) +
       Math.sqrt(Math.abs(value)) +
+      (1 / Math.sqrt(Math.abs(value) + 1)) +
+      Math.min(1, Math.max(0, value)) +
+      Math.exp(value) +
+      Math.log(Math.abs(value) + 1) +
       Math.pow(Math.abs(value), 2) +
       Math.min(value, 1) +
       Math.max(value, -1) +
+      (value / 2) +
       (value * 2 + 1) +
       (value * -1 + 0.5)
     );
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(expected[0]!, 5);
     expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
+  });
+
+  it("lowers CUDA integer and assert intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void intIntrinsics(int *x, uint *out) {
+  int idx = threadIdx.x;
+  if (idx < 1) {
+    assert(x[0] >= 0);
+    out[0] = uint(__clz(uint(x[0])));
+    out[1] = uint(__mul24(x[0], 3));
+    out[2] = __umul24(uint(x[0]), 4u);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Int32Array([5]), out: new Uint32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("countLeadingZeros");
+    expect(compiled.wgsl).toContain("0;");
+    expect([...result.buffers.out as Uint32Array]).toEqual([29, 15, 20]);
   });
 
   it("recognizes CUDA/C numeric named constants", () => {
