@@ -7,7 +7,7 @@ import {
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./ast_queries.js";
 import { expressionName } from "./analyzer.js";
-import { CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
+import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
@@ -1585,15 +1585,15 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     writeLValue(lvalue, next, context);
     return (next + 1) * 2.3283064365386963e-10;
   }
-  if (name === "__ldcs") {
+  if (name !== undefined && CUDA_CACHE_HINT_LOADS.has(name)) {
     const target = expression.args[0];
-    if (!target) throw compilerFailure("__ldcs expects pointer argument");
+    if (!target) throw compilerFailure(`${name} expects pointer argument`);
     return readLValue(resolvePointerArgument(target, context), context);
   }
-  if (name === "__stcs") {
+  if (name !== undefined && CUDA_CACHE_HINT_STORES.has(name)) {
     const target = expression.args[0];
     const value = expression.args[1];
-    if (!target || !value) throw compilerFailure("__stcs expects pointer and value arguments");
+    if (!target || !value) throw compilerFailure(`${name} expects pointer and value arguments`);
     writeLValue(resolvePointerArgument(target, context), evalExpression(value, context), context);
     return 0;
   }
@@ -1727,6 +1727,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     case "warp_reduce_sum_f16":
     case "warp_reduce_sum_f16_f16":
     case "warp_reduce_sum_f16_f32":
+    case "warp_reduce_sum_i8_i32":
+    case "warp_reduce_sum_i32_i32":
     case "blockReduce":
       return args[0] ?? 0;
     default:

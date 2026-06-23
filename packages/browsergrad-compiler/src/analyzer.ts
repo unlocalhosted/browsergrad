@@ -20,7 +20,7 @@ import {
   type SourceSpan,
 } from "./types.js";
 import { collectKernelLaunchCallees } from "./ast_queries.js";
-import { CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
+import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { sizeofCudaType } from "./type_layout.js";
 import {
@@ -58,6 +58,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["warp_reduce_sum_f16", [1, 1]],
   ["warp_reduce_sum_f16_f16", [1, 1]],
   ["warp_reduce_sum_f16_f32", [1, 1]],
+  ["warp_reduce_sum_i8_i32", [1, 1]],
+  ["warp_reduce_sum_i32_i32", [1, 1]],
   ["blockReduce", [1, 3]],
   ["min", [2, 2]],
   ["max", [2, 2]],
@@ -113,8 +115,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaMemcpy", [4, 4]],
   ["cudaMemcpyAsync", [5, 5]],
   ["cudaMemcpyPeerAsync", [6, 6]],
-  ["__ldcs", [1, 1]],
-  ["__stcs", [2, 2]],
+  ...[...CUDA_CACHE_HINT_LOADS].map((name) => [name, [1, 1]] as const),
+  ...[...CUDA_CACHE_HINT_STORES].map((name) => [name, [2, 2]] as const),
   ["__cvta_generic_to_shared", [1, 1]],
   ["CP_ASYNC_CA", [3, 3]],
   ["CP_ASYNC_CG", [3, 3]],
@@ -904,24 +906,24 @@ function validateCallExpression(
   if (isPointerIdentityCall(callName)) {
     return validatePointerIdentityCall(expression, callName, scope, diagnostics, walkExpression);
   }
-  if (callName === "__ldcs") {
+  if (CUDA_CACHE_HINT_LOADS.has(callName)) {
     const arg = expression.args[0];
     if (!arg) return { kind: "unknown" };
     const info = validateReadPointerOperand(arg, scope, walkExpression);
     if (info.kind !== "pointer" && info.kind !== "pool-pointer" && info.kind !== "address" && info.kind !== "unknown") {
-      diagnostics.push(error("unsupported-cache-hint-address", "__ldcs expects a pointer expression", arg.span));
+      diagnostics.push(error("unsupported-cache-hint-address", `${callName} expects a pointer expression`, arg.span));
     }
     return isCudaVectorType(info.valueType)
       ? { kind: "vector", valueType: info.valueType }
       : { kind: "scalar", valueType: info.valueType };
   }
-  if (callName === "__stcs") {
+  if (CUDA_CACHE_HINT_STORES.has(callName)) {
     const target = expression.args[0];
     const value = expression.args[1];
     if (target) {
       const info = walkExpression(target, scope);
       if (info.kind !== "pointer" && info.kind !== "pool-pointer" && info.kind !== "address" && info.kind !== "unknown") {
-        diagnostics.push(error("unsupported-cache-hint-address", "__stcs expects a pointer expression", target.span));
+        diagnostics.push(error("unsupported-cache-hint-address", `${callName} expects a pointer expression`, target.span));
       }
     }
     if (value) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
@@ -1810,10 +1812,13 @@ function isWarpReductionBuiltin(callName: string): boolean {
     callName === "warp_reduce_sum_f16" ||
     callName === "warp_reduce_sum_f16_f16" ||
     callName === "warp_reduce_sum_f16_f32" ||
+    callName === "warp_reduce_sum_i8_i32" ||
+    callName === "warp_reduce_sum_i32_i32" ||
     callName === "blockReduce";
 }
 
 function warpReductionReturnType(callName: string, valueType: ValueType | undefined): ValueType | undefined {
+  if (callName.endsWith("_i32")) return "int";
   if (callName.endsWith("_f32")) return "float";
   if (callName.endsWith("_f16")) return "half";
   if (callName.endsWith("_f16_f16")) return "half";

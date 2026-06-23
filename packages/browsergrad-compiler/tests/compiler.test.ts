@@ -1947,8 +1947,8 @@ __global__ void cache_hint(const float* x, float* y) {
   if (idx < 2) {
     const float* base = x + 1;
     float value = __ldcs(base + idx);
-    float direct = __ldcs(&x[idx]);
-    __stcs(y + idx, value + direct + 1.0f);
+    float direct = __ldcg(&x[idx]);
+    __stcg(y + idx, value + direct + 1.0f);
   }
 }`, { workgroupSize: [2, 1, 1] });
     const result = runCompiledKernelReference(
@@ -1960,6 +1960,34 @@ __global__ void cache_hint(const float* x, float* y) {
     expect(compiled.wgsl).toContain("bg_ptr_read_f32");
     expect(compiled.wgsl).toContain("bg_ptr_write_f32");
     expect([...result.buffers.y as Float32Array]).toEqual([3, 7]);
+  });
+
+  it("accepts CUDA default kernel parameter initializers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void optional_output(int *data, int width, int *partial_sums = NULL) {
+  int idx = threadIdx.x;
+  if (idx < width) {
+    data[idx] = data[idx] + 1;
+  }
+  if (partial_sums != NULL && idx == 0) {
+    partial_sums[0] = data[0];
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          data: new Int32Array([3, 4]),
+          partial_sums: new Int32Array(1),
+        },
+        scalars: { width: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.ir.params.map((param) => param.name)).toEqual(["data", "width", "partial_sums"]);
+    expect([...result.buffers.data as Int32Array]).toEqual([4, 5]);
+    expect([...result.buffers.partial_sums as Int32Array]).toEqual([4]);
   });
 
   it("lowers CUDA float4 values as scalar storage memory views", () => {
@@ -2252,6 +2280,29 @@ __global__ void reduction_alias_pack(const float *x, half2 *h, float *out) {
     expect(compiled.wgsl).toContain("vec2<f16>");
     expect(Array.from(result.buffers.h as ArrayLike<number>)).toEqual([4, 5, 3, 3]);
     expect([...result.buffers.out as Float32Array]).toEqual([3.5]);
+  });
+
+  it("lowers integer warp reduction aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void reduce_int_alias(const int *x, int *out) {
+  int i = threadIdx.x;
+  int sum = warp_reduce_sum_i8_i32(x[i]);
+  out[i] = warp_reduce_sum_i32_i32(sum);
+}`, { features: { subgroups: true }, workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Int32Array([7]),
+          out: new Int32Array(1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.ir.requiredFeatures).toContain("subgroups");
+    expect(compiled.wgsl).toContain("subgroupAdd(");
+    expect([...result.buffers.out as Int32Array]).toEqual([7]);
   });
 
   it("feature-gates half2 behind shader-f16", () => {

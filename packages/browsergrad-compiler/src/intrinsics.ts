@@ -15,6 +15,22 @@ export interface CudaIntrinsic {
   readonly emitWgsl?: (args: readonly string[]) => string;
 }
 
+export const CUDA_CACHE_HINT_LOADS: ReadonlySet<string> = new Set([
+  "__ldca",
+  "__ldcg",
+  "__ldcs",
+  "__ldcv",
+  "__ldg",
+  "__ldlu",
+]);
+
+export const CUDA_CACHE_HINT_STORES: ReadonlySet<string> = new Set([
+  "__stcg",
+  "__stcs",
+  "__stwb",
+  "__stwt",
+]);
+
 const FLOAT_UNARY = [
   intrinsic("sqrt", [1, 1], "float", (args) => Math.sqrt(args[0] ?? 0), (args) => `sqrt(${args.join(", ")})`),
   intrinsic("sqrtf", [1, 1], "float", (args) => Math.sqrt(args[0] ?? 0), (args) => `sqrt(${args.join(", ")})`),

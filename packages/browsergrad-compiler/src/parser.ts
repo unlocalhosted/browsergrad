@@ -328,6 +328,7 @@ class Parser {
         ? { value: `__bg_unused_param_${params.length}`, span: this.previous().span }
         : this.expectIdentifier("parameter name");
       this.consumeTypeQualifiers();
+      if (this.consumeIf("=")) this.skipParamDefaultExpression();
       params.push({
         name: name.value,
         valueType: type,
@@ -1443,6 +1444,28 @@ class Parser {
       this.advance();
     }
     this.expect(";");
+  }
+
+  private skipParamDefaultExpression(): void {
+    let parenDepth = 0;
+    let bracketDepth = 0;
+    let braceDepth = 0;
+    let angleDepth = 0;
+    while (true) {
+      const value = this.peek().value;
+      if (value === "<eof>") this.fail("expected parameter default expression", this.peek().span);
+      if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0 && angleDepth === 0 && (value === "," || value === ")")) return;
+      const token = this.advance();
+      if (token.value === "(") parenDepth++;
+      else if (token.value === ")" && parenDepth > 0) parenDepth--;
+      else if (token.value === "[") bracketDepth++;
+      else if (token.value === "]" && bracketDepth > 0) bracketDepth--;
+      else if (token.value === "{") braceDepth++;
+      else if (token.value === "}" && braceDepth > 0) braceDepth--;
+      else if (token.value === "<") angleDepth++;
+      else if (token.value === ">" && angleDepth > 0) angleDepth--;
+      else if (token.value === ">>" && angleDepth > 0) angleDepth = Math.max(0, angleDepth - 2);
+    }
   }
 
   private peek(): Token {

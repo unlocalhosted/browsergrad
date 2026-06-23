@@ -5,7 +5,7 @@ import {
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames, collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
-import { CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
+import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
@@ -819,7 +819,13 @@ function withDevicePointerParams(
 }
 
 function usesDevicePointerParams(ir: KernelIrModule): boolean {
-  const devicePointerCalls = new Set(["__ldcs", "__stcs", "CP_ASYNC_CA", "CP_ASYNC_CG", "CP_ASYNC_BULK"]);
+  const devicePointerCalls = new Set([
+    ...CUDA_CACHE_HINT_LOADS,
+    ...CUDA_CACHE_HINT_STORES,
+    "CP_ASYNC_CA",
+    "CP_ASYNC_CG",
+    "CP_ASYNC_BULK",
+  ]);
   return ir.functions.some((fn) => fn.params.some((param) => param.pointer)) ||
     statementsUseCall(ir.body, devicePointerCalls) ||
     ir.functions.some((fn) => statementsUseCall(fn.body, devicePointerCalls));
@@ -2145,20 +2151,20 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   if (vectorConstructor) return emitVectorConstructor(vectorConstructor, args);
   if (name === "__halves2bfloat162") return `${wgslScalar("bf162")}(${args.join(", ")})`;
   if (isPointerIdentityCall(name)) return expression.args[0] ? emitExpression(expression.args[0], context) : "0u";
-  if (name === "__ldcs") {
+  if (name !== undefined && CUDA_CACHE_HINT_LOADS.has(name)) {
     const target = expression.args[0];
     if (!target) return "0";
     const parts = devicePointerArgumentParts(target, context);
-    if (!parts) throw featureError("unsupported-device-pointer-param", "__ldcs expects a storage pointer or derived storage address");
+    if (!parts) throw featureError("unsupported-device-pointer-param", `${name} expects a storage pointer or derived storage address`);
     const valueType = devicePointerValueTypeForExpression(target, context);
     return `${pointerReadHelperName(valueType)}(${parts.buffer}, ${parts.base})`;
   }
-  if (name === "__stcs") {
+  if (name !== undefined && CUDA_CACHE_HINT_STORES.has(name)) {
     const target = expression.args[0];
     const value = expression.args[1];
     if (!target || !value) return "0";
     const parts = devicePointerArgumentParts(target, context);
-    if (!parts) throw featureError("unsupported-device-pointer-param", "__stcs expects a storage pointer or derived storage address");
+    if (!parts) throw featureError("unsupported-device-pointer-param", `${name} expects a storage pointer or derived storage address`);
     const valueType = devicePointerValueTypeForExpression(target, context);
     return `${pointerWriteHelperName(valueType)}(${parts.buffer}, ${parts.base}, ${emitExpression(value, context)})`;
   }
@@ -2214,6 +2220,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "warp_reduce_sum_f16":
     case "warp_reduce_sum_f16_f16":
     case "warp_reduce_sum_f16_f32":
+    case "warp_reduce_sum_i8_i32":
+    case "warp_reduce_sum_i32_i32":
     case "blockReduce":
       return `subgroupAdd(${args[0] ?? "0"})`;
     case "warpReduceMax":
