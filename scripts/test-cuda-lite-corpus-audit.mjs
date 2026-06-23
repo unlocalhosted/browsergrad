@@ -25,6 +25,36 @@ __device__ Pair make_pair(float value) {
   Pair pair = {value, value + 1.0f};
   return pair;
 }
+
+struct SoftmaxParams {
+  float Scale;
+  float Offset;
+};
+
+namespace cg = cooperative_groups;
+
+__device__ SoftmaxParams prepare_softmax_like(cg::thread_block_tile<32>& tile, const float *input) {
+  SoftmaxParams params = {(float)tile.size(), input[tile.thread_rank()]};
+  return params;
+}
+
+template<class T>
+__device__ float sum_range_like(const T* data, size_t count) {
+  size_t index = threadIdx.x;
+  float accumulator = 0.0f;
+  for (size_t i = index; i < count; i += blockDim.x) {
+    accumulator += (float)data[i];
+  }
+  return accumulator;
+}
+
+template<typename Td, typename Ts>
+__device__ Td cast_value_like(Ts val);
+
+template<>
+__device__ float cast_value_like<float, float>(float val) {
+  return val;
+}
 `);
   fs.writeFileSync(path.join(tmpRoot, "kernel.cuh"), `
 __global__ void Copy(TColor *dst) {
@@ -35,6 +65,22 @@ __global__ void Copy(TColor *dst) {
 __global__ void PairCopy(float *dst) {
   Pair pair = make_pair(dst[0]);
   dst[0] = pair.x + pair.y;
+}
+
+__global__ void GroupHelper(const float *input, float *out) {
+  namespace cg = cooperative_groups;
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_block_tile<32> tile = cg::tiled_partition<32>(block);
+  SoftmaxParams params = prepare_softmax_like(tile, input);
+  out[threadIdx.x] = params.Scale + params.Offset;
+}
+
+__global__ void TemplateHelper(float *out, const float *data, size_t count) {
+  out[threadIdx.x] = sum_range_like(data, count);
+}
+
+__global__ void TemplateSpecializationHelper(float *out, const float *data) {
+  out[threadIdx.x] = cast_value_like<float, float>(data[threadIdx.x]);
 }
 `);
   fs.writeFileSync(path.join(tmpRoot, "main.cu"), `
@@ -47,6 +93,18 @@ void launch(TColor *dst) {
 
 void launch_pair(float *dst) {
   PairCopy<<<1, 1>>>(dst);
+}
+
+void launch_group(const float *input, float *out) {
+  GroupHelper<<<1, 32>>>(input, out);
+}
+
+void launch_template(float *out, const float *data, size_t count) {
+  TemplateHelper<<<1, 32>>>(out, data, count);
+}
+
+void launch_template_specialization(float *out, const float *data) {
+  TemplateSpecializationHelper<<<1, 32>>>(out, data);
 }
 `);
 
@@ -61,8 +119,8 @@ void launch_pair(float *dst) {
     process.exit(result.status ?? 1);
   }
   const report = JSON.parse(result.stdout.slice(result.stdout.indexOf("{")));
-  assertEqual(report.summary.totalKernelDefinitions, 2, "total kernel count");
-  assertEqual(report.summary.webGpuRunnableOk, 2, "reverse include kernel WebGPU runnable");
+  assertEqual(report.summary.totalKernelDefinitions, 5, "total kernel count");
+  assertEqual(report.summary.webGpuRunnableOk, 5, "reverse include kernel WebGPU runnable");
   assertEqual(report.summary.hardFail, 0, "reverse include hard gaps");
   console.log("cuda-lite corpus audit tests passed");
 } finally {

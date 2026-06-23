@@ -47,6 +47,7 @@ const PORTABLE_POINTER_BASE_TYPES = new Set([
   "uint",
   "half",
   "half2",
+  "bf16",
   "bool",
   "float2",
   "float3",
@@ -134,19 +135,23 @@ function isNonKernelCodeBlock(block) {
 }
 
 function createAuditBlockContext(includeContext, blockCode, carriedDefines) {
+  const source = `${includeContext}\n${blockCode}`;
   const declarationContext = `${sourceWithoutCudaFunctionBodies(includeContext)}\n${sourceWithoutCudaFunctionBodies(blockCode)}`;
   const blockDefines = collectCudaLiteContextDefines(declarationContext);
+  const effectiveDefines = mergeDefineMaps(CUDA_SYSTEM_DEFINES, carriedDefines, blockDefines);
+  const recordDeclarations = collectPodRecordDeclarations(source);
+  const recordNames = new Set(recordDeclarations.map(recordDeclarationName).filter((name) => name !== undefined));
   return {
     blockDefines,
-    effectiveDefines: mergeDefineMaps(CUDA_SYSTEM_DEFINES, carriedDefines, blockDefines),
-    functionDeclarations: collectFunctionDefines(`${includeContext}\n${blockCode}`),
-    deviceFunctions: collectPortableDeviceFunctions(`${includeContext}\n${blockCode}`),
-    dynamicLaunchTargets: collectDynamicLaunchTargetDeviceFunctions(`${includeContext}\n${blockCode}`),
-    constantDeclarations: collectConstantDeclarations(`${includeContext}\n${blockCode}`),
-    textureDeclarations: collectTextureDeclarations(`${includeContext}\n${blockCode}`),
-    recordDeclarations: collectPodRecordDeclarations(`${includeContext}\n${blockCode}`),
+    effectiveDefines,
+    functionDeclarations: collectFunctionDefines(source),
+    deviceFunctions: collectPortableDeviceFunctions(source, recordNames, effectiveDefines),
+    dynamicLaunchTargets: collectDynamicLaunchTargetDeviceFunctions(source),
+    constantDeclarations: collectConstantDeclarations(source),
+    textureDeclarations: collectTextureDeclarations(source),
+    recordDeclarations,
     sharedDeclarations: collectTranslationUnitSharedDeclarations(declarationContext),
-    templateArguments: collectKernelTemplateArguments(`${includeContext}\n${blockCode}`),
+    templateArguments: collectKernelTemplateArguments(source),
   };
 }
 
@@ -186,6 +191,7 @@ function shouldRetryWithReverseContext(error) {
   const diagnostic = error?.diagnostics?.[0];
   if (diagnostic === undefined) return false;
   if (diagnostic.code === "unknown-symbol") return true;
+  if (diagnostic.code === "unsupported-call" && /unsupported CUDA-lite call/u.test(diagnostic.message ?? "")) return true;
   if (diagnostic.code !== "parse-error") return false;
   return /unsupported CUDA-lite type|unknown CUDA-lite symbol|expected type|expected ';'|expected expression/u.test(diagnostic.message ?? "");
 }
@@ -710,7 +716,7 @@ function isPlaceholderKernel(kernel) {
     /\bsome[A-Z][A-Za-z0-9_]*\b/u.test(stripComments(kernel));
 }
 
-function collectPortableDeviceFunctions(source) {
+function collectPortableDeviceFunctions(source, recordNames = new Set(), definesByName = new Map()) {
   const clean = expandCudaQualifierMacros(stripComments(source));
   const functions = [];
   let index = 0;
@@ -741,7 +747,7 @@ function collectPortableDeviceFunctions(source) {
     const fn = clean.slice(start, end);
     const signature = fn.slice(0, fn.indexOf("{"));
     const name = cudaFunctionDefinitionName(signature);
-    if (name && !sourceLaunchesDeviceFunction(clean, name) && isPortableDeviceFunctionCandidate(signature, fn, name)) {
+    if (name && !sourceLaunchesDeviceFunction(clean, name) && isPortableDeviceFunctionCandidate(signature, fn, name, recordNames, definesByName)) {
       functions.push({ name, source: fn });
     }
     index = end;
@@ -765,13 +771,15 @@ function cudaFunctionDefinitionName(signature) {
   if (open < 0) return undefined;
   const before = signature.slice(0, open).trim();
   if (/\boperator\b/u.test(before)) return undefined;
-  const name = /([A-Za-z_][A-Za-z0-9_]*)\s*$/u.exec(before)?.[1];
+  const name = /([A-Za-z_][A-Za-z0-9_]*)\s*(?:<[^<>]*>)?\s*$/u.exec(before)?.[1];
   if (name === undefined || ["if", "for", "while", "switch", "return"].includes(name)) return undefined;
   return name;
 }
 
-function isPortableDeviceFunctionCandidate(signature, source, name) {
-  return isPortableScalarDeviceFunction(signature, source) || isPortablePointerDeviceFunction(signature, source, name);
+function isPortableDeviceFunctionCandidate(signature, source, name, recordNames = new Set(), definesByName = new Map()) {
+  return isPortableScalarDeviceFunction(signature, source) ||
+    isPortablePointerDeviceFunction(signature, source, name, recordNames, definesByName) ||
+    isPortableReferenceDeviceFunction(signature, source, name, recordNames, definesByName);
 }
 
 function isPortableScalarDeviceFunction(signature, source) {
@@ -780,19 +788,48 @@ function isPortableScalarDeviceFunction(signature, source) {
   return true;
 }
 
-function isPortablePointerDeviceFunction(signature, source, name) {
+function isPortablePointerDeviceFunction(signature, source, name, recordNames = new Set(), definesByName = new Map()) {
   if (!/\*/u.test(signature)) return false;
-  if (!hasSupportedDeviceReturnShape(signature, name)) return false;
+  if (!hasSupportedDeviceReturnShape(signature, name, recordNames, definesByName)) return false;
   if (/\bvoid\s*\*/u.test(signature)) return false;
   const pointerBases = pointerBaseTypes(signature);
+  const templateTypeParams = templateTypeParamNames(signature);
   if (pointerBases.length === 0) return false;
-  if (!pointerBases.every((type) => PORTABLE_POINTER_BASE_TYPES.has(normalizePointerBaseType(type)))) return false;
+  if (!pointerBases.every((type) => isPortableBaseType(type, templateTypeParams, definesByName))) return false;
   if (/\bdo\b|__float_as_int|__int_as_float/u.test(source)) return false;
   return true;
 }
 
+function isPortableReferenceDeviceFunction(signature, source, name, recordNames = new Set(), definesByName = new Map()) {
+  if (!/&/u.test(signature)) return false;
+  if (!hasSupportedDeviceReturnShape(signature, name, recordNames, definesByName)) return false;
+  const referenceBases = referenceBaseTypes(signature);
+  const templateTypeParams = templateTypeParamNames(signature);
+  if (referenceBases.length === 0) return false;
+  if (!referenceBases.every((type) => isPortableBaseType(type, templateTypeParams, definesByName))) return false;
+  if (/\bdo\b|__float_as_int|__int_as_float/u.test(source)) return false;
+  return true;
+}
+
+function isPortableBaseType(type, templateTypeParams = new Set(), definesByName = new Map()) {
+  const normalized = normalizePortableBaseType(type, definesByName);
+  return PORTABLE_POINTER_BASE_TYPES.has(normalized) || templateTypeParams.has(normalized);
+}
+
+function templateTypeParamNames(signature) {
+  const match = /^\s*template\s*<([^>]*)>/u.exec(signature);
+  if (match?.[1] === undefined) return new Set();
+  const names = new Set();
+  for (const param of match[1].split(",")) {
+    const type = /\b(?:typename|class)\s+([A-Za-z_][A-Za-z0-9_]*)/u.exec(param.trim())?.[1];
+    if (type !== undefined) names.add(type);
+  }
+  return names;
+}
+
 function pointerBaseTypes(signature) {
-  const cleaned = signature
+  const cleaned = stripCooperativeGroupParamTypes(signature)
+    .replace(/^\s*template\s*<[^>]*>\s*/u, " ")
     .replace(/\b(?:const|volatile|__restrict__|__restrict|restrict|static|inline|__forceinline__|__device__|__host__)\b/gu, " ")
     .replace(/\s+/gu, " ");
   const types = [];
@@ -802,18 +839,58 @@ function pointerBaseTypes(signature) {
   return types;
 }
 
-function normalizePointerBaseType(type) {
+function referenceBaseTypes(signature) {
+  const cleaned = stripCooperativeGroupParamTypes(signature)
+    .replace(/^\s*template\s*<[^>]*>\s*/u, " ")
+    .replace(/\b(?:const|volatile|__restrict__|__restrict|restrict|static|inline|__forceinline__|__device__|__host__)\b/gu, " ")
+    .replace(/\s+/gu, " ");
+  const types = [];
+  for (const match of cleaned.matchAll(/([A-Za-z_][A-Za-z0-9_]*(?:\s+[A-Za-z_][A-Za-z0-9_]*)?)\s*&/gu)) {
+    if (match[1] !== undefined) types.push(match[1].trim());
+  }
+  return types;
+}
+
+function stripCooperativeGroupParamTypes(signature) {
+  return signature.replace(
+    /\b(?:(?:cg|cooperative_groups)::)?(?:thread_block_tile\s*<[^>]+>|thread_block|grid_group|coalesced_group)\s*&?\s+[A-Za-z_][A-Za-z0-9_]*/gu,
+    " ",
+  );
+}
+
+function normalizePortableBaseType(type, _definesByName = new Map(), _seen = new Set()) {
   if (type === "unsigned int" || type === "unsigned") return "uint";
   if (type === "unsigned char" || type === "uchar" || type === "uint8_t") return "uint";
   if (type === "signed int" || type === "signed") return "int";
   if (type === "signed char" || type === "char" || type === "int8_t") return "int";
   if (type === "clock_t") return "uint";
+  if (type === "size_t") return "uint";
+  if (type === "ptrdiff_t") return "int";
   if (type === "__half") return "half";
+  if (type === "__nv_bfloat16" || type === "nv_bfloat16") return "bf16";
   return type;
 }
 
-function hasSupportedDeviceReturnShape(signature, name) {
-  return new RegExp(`(?:^|\\s)(?:void|bool|float|half|float2|float3|float4|half2|int|int2|int3|int4|uint|uint2|uint3|uint4|unsigned\\s+int|signed\\s+int|clock_t|size_t)\\s+${escapeRegExp(name)}\\s*\\(`, "u").test(signature);
+function hasSupportedDeviceReturnShape(signature, name, recordNames = new Set(), definesByName = new Map()) {
+  const open = signature.lastIndexOf("(");
+  if (open < 0) return false;
+  const before = signature.slice(0, open).trim();
+  const nameSuffix = new RegExp(`\\b${escapeRegExp(name)}\\s*(?:<[^<>]*>)?\\s*$`, "u");
+  if (!nameSuffix.test(before)) return false;
+  const returnType = before
+    .replace(nameSuffix, "")
+    .replace(/^\s*template\s*<[^>]*>\s*/u, " ")
+    .replace(/\b(?:static|inline|__inline__|__forceinline__|__device__|__host__|const|volatile)\b/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (returnType === "void") return true;
+  const normalized = normalizePortableBaseType(returnType, definesByName);
+  return PORTABLE_POINTER_BASE_TYPES.has(normalized) || recordNames.has(returnType);
+}
+
+function recordDeclarationName(declaration) {
+  const match = /\b(?:typedef\s+)?struct(?:\s+(?:__align__|alignas)\s*\([^)]*\))*\s*([A-Za-z_][A-Za-z0-9_]*)?\s*\{[\s\S]*?\}\s*([A-Za-z_][A-Za-z0-9_]*)?\s*;/u.exec(declaration);
+  return match?.[2] ?? match?.[1];
 }
 
 function sourceLaunchesDeviceFunction(source, name) {

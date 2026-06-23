@@ -952,22 +952,24 @@ __global__ void voteKernel(uint *input, uint *out) {
   out[1] = __all_sync(mask, input[1]);
   out[2] = __ballot_sync(mask, input[0]);
   out[3] = __popc(out[2]);
+  out[4] = __reduce_add_sync(mask, input[0]);
 }`, {
       features: { subgroups: true },
       workgroupSize: [1, 1, 1],
     });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { input: new Uint32Array([7, 0]), out: new Uint32Array(4) } },
+      { buffers: { input: new Uint32Array([7, 0]), out: new Uint32Array(5) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
     expect(compiled.wgsl).toContain("subgroupAny");
     expect(compiled.wgsl).toContain("subgroupAll");
     expect(compiled.wgsl).toContain("subgroupBallot");
+    expect(compiled.wgsl).toContain("subgroupAdd");
     expect(compiled.wgsl).toContain("countOneBits");
     expect(compiled.ir.requiredFeatures).toContain("subgroups");
-    expect([...result.buffers.out as Uint32Array]).toEqual([1, 0, 1, 1]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 0, 1, 1, 7]);
   });
 
   it("lowers cooperative-group block and tiled primitives to WebGPU primitives", () => {

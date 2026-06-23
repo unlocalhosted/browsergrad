@@ -110,7 +110,7 @@ Local corpus audits on 2026-06-24:
   parser/frontend gaps, texture/vector
   operators, remaining `half2` intrinsics, `double`, templates, and
   runtime library shape.
-- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `119` direct
+- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `125` direct
   WebGPU-runnable after source/context normalization, intrinsic-ledger
   expansion, CUDA/C named constants, CUDA cache-hint memory builtins, local
   header context, simple C++ alias / constexpr intake, and typed storage
@@ -137,7 +137,10 @@ Local corpus audits on 2026-06-24:
   assignments, CUDA bf16 logical type/intrinsic intake, `__trap`, unary
   bitwise-not, mutable local storage-pointer handles, CUDA cache-hint
   load/store family lowering, conservative unresolved template type fallback
-  for pointer parameters, and signed `ptrdiff_t` index alias intake, with `29`
+  for pointer parameters, signed `ptrdiff_t` index alias intake, template-aware
+  portable device-helper closure, POD-return cooperative-group reference helper
+  intake, explicit template-id device specialization discovery, and CUDA
+  `__reduce_add_sync` subgroup lowering, with `23`
   hard gaps. Main
   failures: frontend macro/type shape, parser C++-isms, and remaining
   library/front-end gaps.
@@ -203,9 +206,9 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
-- The current live aggregate gate is `782/1038` WebGPU-runnable across the four
+- The current live aggregate gate is `788/1038` WebGPU-runnable across the four
   pinned corpora: CUDA-120 `240/240`, `cuda-samples` `206/357`, `llm.c`
-  `119/148`, and LeetCUDA `217/293`.
+  `125/148`, and LeetCUDA `217/293`.
 
 ## Grill Decisions
 
@@ -352,8 +355,8 @@ Acceptance criteria for the first slice:
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
   `>=206` WebGPU-runnable, and `<=151` hard gaps.
-- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=119`
-  WebGPU-runnable, and `<=29` hard gaps.
+- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=125`
+  WebGPU-runnable, and `<=23` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
   `>=217` WebGPU-runnable, and `<=76` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
@@ -407,6 +410,11 @@ Acceptance criteria for the first slice:
   conservative audit instantiation to a scalar storage type such as `float`.
   Non-pointer layout/object params stay unresolved so CUTE-style layout
   compatibility is not faked.
+- Corpus audit helper discovery follows template-aware device-helper closure:
+  POD-return helpers, cooperative-group reference params, ordinary templated
+  pointer helpers, and explicit template-id specializations such as
+  `cast_value<float, float>` are included only through reusable source
+  structure, never repo/file-name branching.
 - CUDA signed index aliases such as `ptrdiff_t` lower through parser, layout,
   source normalization, reference execution, and WGSL as signed `i32` browser
   index scalars.
@@ -421,6 +429,8 @@ Acceptance criteria for the first slice:
 - CUDA warp-reduction aliases include integer variants such as
   `warp_reduce_sum_i8_i32` and `warp_reduce_sum_i32_i32`, lowering through the
   same subgroup/reference path as existing float/half aliases.
+- CUDA masked warp reduction intrinsic `__reduce_add_sync(mask, value)` lowers
+  through analyzer feature gating, CPU reference, and WGSL `subgroupAdd(value)`.
 - CUDA 2D float texture-object lowering maps `cudaTextureObject_t` params,
   scalar `tex2D<float>` calls, typed texture-vector reads such as
   `tex2D<float4>` / `tex2D<uchar4>`, and multi-channel WebGPU texture uploads

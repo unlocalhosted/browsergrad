@@ -1716,6 +1716,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       return truthy(args[1] ?? 0) ? 1 : 0;
     case "__ballot_sync":
       return truthy(args[1] ?? 0) ? 1 : 0;
+    case "__reduce_add_sync":
+      return args[1] ?? 0;
     case "warpReduceSum":
     case "warpReduceMax":
     case "warpReduceMin":

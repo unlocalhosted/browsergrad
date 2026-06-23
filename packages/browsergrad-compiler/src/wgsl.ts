@@ -2224,6 +2224,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "warp_reduce_sum_i32_i32":
     case "blockReduce":
       return `subgroupAdd(${args[0] ?? "0"})`;
+    case "__reduce_add_sync":
+      return `subgroupAdd(${args[1] ?? "0"})`;
     case "warpReduceMax":
     case "warp_reduce_max":
     case "warp_reduce_max_f32":

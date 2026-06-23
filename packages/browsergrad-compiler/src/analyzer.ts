@@ -47,6 +47,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__any_sync", [2, 2]],
   ["__all_sync", [2, 2]],
   ["__ballot_sync", [2, 2]],
+  ["__reduce_add_sync", [2, 2]],
   ["warpReduceSum", [1, 1]],
   ["warpReduceMax", [1, 1]],
   ["warpReduceMin", [1, 1]],
@@ -1040,6 +1041,16 @@ function validateCallExpression(
     }
     return { kind: "scalar", valueType: isVoteBuiltin(callName) ? "uint" : valueType };
   }
+  if (isMaskedWarpReductionBuiltin(callName)) {
+    requiredFeatures.add("subgroups");
+    let valueType: ValueType | undefined;
+    for (const [index, arg] of expression.args.entries()) {
+      const info = walkExpression(arg, scope);
+      validateScalarOperand(info, arg.span, diagnostics);
+      if (index === 1) valueType = info.valueType;
+    }
+    return { kind: "scalar", valueType };
+  }
   if (isWarpReductionBuiltin(callName)) {
     requiredFeatures.add("subgroups");
     const arg = expression.args[0];
@@ -1798,6 +1809,10 @@ function isShuffleBuiltin(callName: string): boolean {
 
 function isVoteBuiltin(callName: string): boolean {
   return callName === "__any_sync" || callName === "__all_sync" || callName === "__ballot_sync";
+}
+
+function isMaskedWarpReductionBuiltin(callName: string): boolean {
+  return callName === "__reduce_add_sync";
 }
 
 function isWarpReductionBuiltin(callName: string): boolean {
