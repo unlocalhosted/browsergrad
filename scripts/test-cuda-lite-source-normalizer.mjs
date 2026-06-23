@@ -317,6 +317,25 @@ __global__ void sharedmem_get_pointer(T *input, T *output) {
 {
   const source = createKernelCompilationUnit({
     kernel: `
+__global__ void kernel(float *out, float phase) {
+  float2 value = make_float2(0.0f, 0.0f);
+  twiddle(value, phase);
+  out[0] = value.x + value.y;
+}`,
+    deviceFunctions: [
+      {
+        name: "twiddle",
+        source: "__device__ void twiddle(float2 &value, float phase) { __sincosf(phase, &value.y, &value.x); }",
+      },
+    ],
+  });
+  assert.match(source, /value\.y = sinf\(phase\); value\.x = cosf\(phase\)/u);
+  assert.doesNotMatch(source, /__sincosf/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 __global__ void kernel(float *in, float *out) {
   out[0] = GELU_OPS(in[0]);
 }`,

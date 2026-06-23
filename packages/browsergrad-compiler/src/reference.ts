@@ -1324,6 +1324,13 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
         context.threadIdx.x +
         context.threadIdx.y * 31 +
         context.threadIdx.z * 7;
+    case "clock64":
+      return context.blockIdx.x * 104729 +
+        context.blockIdx.y * 1009 +
+        context.blockIdx.z * 97 +
+        context.threadIdx.x +
+        context.threadIdx.y * 31 +
+        context.threadIdx.z * 7;
     case "min":
       return Math.min(...args);
     case "max":
@@ -1335,6 +1342,9 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     case "__shfl_up_sync":
     case "__shfl_xor_sync":
       return args[1] ?? 0;
+    case "__any_sync":
+    case "__all_sync":
+      return truthy(args[1] ?? 0) ? 1 : 0;
     case "warpReduceSum":
     case "warpReduceMax":
     case "warpReduceMin":

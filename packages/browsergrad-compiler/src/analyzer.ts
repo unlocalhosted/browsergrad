@@ -41,6 +41,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__shfl_down_sync", [3, 4]],
   ["__shfl_up_sync", [3, 4]],
   ["__shfl_xor_sync", [3, 4]],
+  ["__any_sync", [2, 2]],
+  ["__all_sync", [2, 2]],
   ["warpReduceSum", [1, 1]],
   ["warpReduceMax", [1, 1]],
   ["warpReduceMin", [1, 1]],
@@ -96,6 +98,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__stcs", [2, 2]],
   ["__cvta_generic_to_shared", [1, 1]],
   ["clock", [0, 0]],
+  ["clock64", [0, 0]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
   ...[...CUDA_VECTOR_CONSTRUCTORS].map(([name, type]) => {
     const info = CUDA_VECTOR_TYPES.get(type);
@@ -904,6 +907,9 @@ function validateCallExpression(
   if (callName === "clock") {
     return { kind: "scalar", valueType: "uint" };
   }
+  if (callName === "clock64") {
+    return { kind: "scalar", valueType: "uint" };
+  }
   if (isFillRegsBuiltin(callName)) {
     validateFillRegs(expression, scope, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "voidptr" };
@@ -952,7 +958,7 @@ function validateCallExpression(
       valueType: intrinsic.returnType === "argument1" ? argumentValueType : intrinsic.returnType,
     };
   }
-  if (isShuffleBuiltin(callName)) {
+  if (isShuffleBuiltin(callName) || isVoteBuiltin(callName)) {
     requiredFeatures.add("subgroups");
     let valueType: ValueType | undefined;
     for (const [index, arg] of expression.args.entries()) {
@@ -960,7 +966,7 @@ function validateCallExpression(
       validateScalarOperand(info, arg.span, diagnostics);
       if (index === 1) valueType = info.valueType;
     }
-    return { kind: "scalar", valueType };
+    return { kind: "scalar", valueType: isVoteBuiltin(callName) ? "uint" : valueType };
   }
   if (isWarpReductionBuiltin(callName)) {
     requiredFeatures.add("subgroups");
@@ -1526,6 +1532,10 @@ function isShuffleBuiltin(callName: string): boolean {
     callName === "__shfl_down_sync" ||
     callName === "__shfl_up_sync" ||
     callName === "__shfl_xor_sync";
+}
+
+function isVoteBuiltin(callName: string): boolean {
+  return callName === "__any_sync" || callName === "__all_sync";
 }
 
 function isWarpReductionBuiltin(callName: string): boolean {

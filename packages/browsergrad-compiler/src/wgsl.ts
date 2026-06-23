@@ -1485,6 +1485,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return "storageBarrier()";
     case "clock":
       return "(workgroup_id.x * 104729u + workgroup_id.y * 1009u + workgroup_id.z * 97u + local_id.x + local_id.y * 31u + local_id.z * 7u)";
+    case "clock64":
+      return "(workgroup_id.x * 104729u + workgroup_id.y * 1009u + workgroup_id.z * 97u + local_id.x + local_id.y * 31u + local_id.z * 7u)";
     case "cudaDeviceSynchronize":
     case "cudaStreamCreate":
     case "cudaStreamCreateWithFlags":
@@ -1531,6 +1533,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return `subgroupShuffleUp(${args[1] ?? "0"}, u32(${args[2] ?? "0"}))`;
     case "__shfl_xor_sync":
       return `subgroupShuffleXor(${args[1] ?? "0"}, u32(${args[2] ?? "0"}))`;
+    case "__any_sync":
+      return `select(0u, 1u, subgroupAny((${args[1] ?? "0"}) != 0))`;
+    case "__all_sync":
+      return `select(0u, 1u, subgroupAll((${args[1] ?? "0"}) != 0))`;
     case "tex2D":
       if (expression.args.length === 3 && expression.args[0]?.kind === "identifier") {
         return `bg_tex2d_${expression.args[0].name}(${emitExpression(expression.args[1]!, context)}, ${emitExpression(expression.args[2]!, context)})`;

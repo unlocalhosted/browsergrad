@@ -71,6 +71,12 @@ const INTEGER_INTRINSICS = [
   intrinsic("__clz", [1, 1], "int", (args) => Math.clz32(args[0] ?? 0), (args) => `i32(countLeadingZeros(u32(${args[0] ?? "0"})))`),
   intrinsic("__mul24", [2, 2], "int", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0), (args) => `(i32(${args[0] ?? "0"}) * i32(${args[1] ?? "0"}))`),
   intrinsic("__umul24", [2, 2], "uint", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0) >>> 0, (args) => `(u32(${args[0] ?? "0"}) * u32(${args[1] ?? "0"}))`),
+  intrinsic("umin", [2, 2], "uint", (args) => Math.min(args[0] ?? 0, args[1] ?? 0) >>> 0, (args) => `min(u32(${args[0] ?? "0"}), u32(${args[1] ?? "0"}))`),
+  intrinsic("ceil_div", [2, 2], "argument1", (args) => {
+    const divisor = Math.trunc(args[1] ?? 1);
+    if (divisor === 0) return 0;
+    return Math.trunc((Math.trunc(args[0] ?? 0) + divisor - 1) / divisor);
+  }, (args) => `(((${args[0] ?? "0"} + ${args[1] ?? "1"}) - 1) / ${args[1] ?? "1"})`),
   intrinsic("assert", [1, 1], "int", () => 0, () => "0"),
 ] as const;
 

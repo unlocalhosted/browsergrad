@@ -773,6 +773,28 @@ __global__ void warpKernel(const float *input, float *output) {
     expect(compiled.wgsl).toContain("warpReduceSum(val, local_id, workgroup_id, num_workgroups)");
   });
 
+  it("lowers CUDA warp vote helpers to subgroup predicates", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void voteKernel(uint *input, uint *out) {
+  uint mask = 0xffffffffu;
+  out[0] = __any_sync(mask, input[0]);
+  out[1] = __all_sync(mask, input[1]);
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [1, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { input: new Uint32Array([7, 0]), out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("subgroupAny");
+    expect(compiled.wgsl).toContain("subgroupAll");
+    expect(compiled.ir.requiredFeatures).toContain("subgroups");
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 0]);
+  });
+
   it("lowers cooperative-group block and tiled primitives to WebGPU primitives", () => {
     const compiled = compileCudaLiteKernel(`
 namespace cg = cooperative_groups;
@@ -1615,17 +1637,20 @@ __global__ void intIntrinsics(int *x, uint *out) {
     out[0] = uint(__clz(uint(x[0])));
     out[1] = uint(__mul24(x[0], 3));
     out[2] = __umul24(uint(x[0]), 4u);
+    out[3] = umin(7u, 3u);
+    out[4] = uint(ceil_div(x[0], 2));
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { x: new Int32Array([5]), out: new Uint32Array(3) } },
+      { buffers: { x: new Int32Array([5]), out: new Uint32Array(5) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
     expect(compiled.wgsl).toContain("countLeadingZeros");
+    expect(compiled.wgsl).toContain("min(u32(7), u32(3))");
     expect(compiled.wgsl).toContain("0;");
-    expect([...result.buffers.out as Uint32Array]).toEqual([29, 15, 20]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([29, 15, 20, 3, 3]);
   });
 
   it("recognizes CUDA/C numeric named constants", () => {
@@ -1760,19 +1785,20 @@ __global__ void byte_vectors(int *out) {
     expect([...result.buffers.out as Int32Array]).toEqual([6]);
   });
 
-  it("lowers CUDA clock_t and clock() to deterministic synthetic counters", () => {
+  it("lowers CUDA clock_t, clock(), and clock64() to deterministic synthetic counters", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void synthetic_clock(clock_t *out) {
   out[threadIdx.x] = clock();
+  out[threadIdx.x + 4] = clock64();
 }`, { workgroupSize: [4, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { out: new Uint32Array(4) } },
+      { buffers: { out: new Uint32Array(8) } },
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
     expect(compiled.wgsl).toContain("workgroup_id.x * 104729u");
-    expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3, 0, 1, 2, 3]);
   });
 
   it("lowers dynamic CUDA vector lane access", () => {

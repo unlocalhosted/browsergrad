@@ -58,7 +58,7 @@ export function createKernelCompilationUnit({
     referencedSiblingKernels.join("\n"),
     stripKernelLaunchTemplateArguments(specializedKernel),
   ].filter((part) => part.trim().length > 0).join("\n");
-  return normalizeCppTemplateCarrierSyntax(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(unit)));
+  return normalizeCppTemplateCarrierSyntax(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(unit))));
 }
 
 export function kernelDefinitionName(kernel) {
@@ -313,6 +313,49 @@ function normalizeSharedMemoryHelpers(source) {
       /\b([A-Za-z_][A-Za-z0-9_]*)\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*SharedMemory\s*<\s*\1\s*>\s*\(\s*\)\s*;/gu,
       "extern __shared__ $1 $2[];",
     );
+}
+
+function normalizeSincosHelpers(source) {
+  const helper = /\b__sincosf\s*\(/gu;
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = helper.exec(source)) !== null) {
+    const open = source.indexOf("(", match.index);
+    const close = findBalanced(source, open, "(", ")");
+    if (open < 0 || close === undefined) {
+      helper.lastIndex = match.index + 1;
+      continue;
+    }
+    const args = splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim());
+    const replacement = sincosReplacement(args);
+    if (replacement === undefined) {
+      helper.lastIndex = close + 1;
+      continue;
+    }
+    out += source.slice(cursor, match.index);
+    out += replacement;
+    cursor = close + 1;
+    helper.lastIndex = close + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function sincosReplacement(args) {
+  const [phase, sinTarget, cosTarget] = args;
+  const sinLvalue = addressTarget(sinTarget);
+  const cosLvalue = addressTarget(cosTarget);
+  if (!phase || !sinLvalue || !cosLvalue) return undefined;
+  return `${sinLvalue} = sinf(${phase}); ${cosLvalue} = cosf(${phase})`;
+}
+
+function addressTarget(expression) {
+  if (expression === undefined) return undefined;
+  const trimmed = expression.trim();
+  if (!trimmed.startsWith("&")) return undefined;
+  const target = trimmed.slice(1).trim();
+  if (/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*(?:\[[^\]]+\])?$/u.test(target)) return target;
+  return undefined;
 }
 
 function normalizePacked128MemoryHelpers(source) {
