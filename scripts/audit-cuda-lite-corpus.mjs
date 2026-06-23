@@ -81,6 +81,7 @@ for (const file of files) {
     const blockDynamicLaunchTargets = collectDynamicLaunchTargetDeviceFunctions(`${includeContext}\n${block.code}`);
     const blockConstants = collectConstantDeclarations(`${includeContext}\n${block.code}`);
     const blockTextures = collectTextureDeclarations(`${includeContext}\n${block.code}`);
+    const blockSharedDeclarations = collectTranslationUnitSharedDeclarations(declarationContext);
     const blockTemplateArguments = collectKernelTemplateArguments(`${includeContext}\n${block.code}`);
     const effectiveDefines = mergeDefineMaps(CUDA_SYSTEM_DEFINES, carriedDefines, blockDefines);
     if (CUDA_HINT_RE.test(block.code)) cudaBlocks++;
@@ -100,6 +101,7 @@ for (const file of files) {
         deviceFunctions: blockDeviceFunctions,
         constantDeclarations: blockConstants,
         textureDeclarations: blockTextures,
+        sharedDeclarations: blockSharedDeclarations,
       });
       try {
         compileCudaLiteKernel(source, {
@@ -790,6 +792,15 @@ function collectTextureDeclarations(source) {
   const clean = stripComments(source);
   const declarations = [];
   const re = /texture\s*<[^;]+>\s*[A-Za-z_][A-Za-z0-9_]*\s*;/g;
+  let match;
+  while ((match = re.exec(clean))) declarations.push(match[0]);
+  return declarations;
+}
+
+function collectTranslationUnitSharedDeclarations(source) {
+  const clean = stripComments(source);
+  const declarations = [];
+  const re = /\b__shared__\s+(?:float|int|unsigned\s+int|uint|half|__half|bool|char|unsigned\s+char|uchar)\s+[A-Za-z_][A-Za-z0-9_]*\s*\[[^\]]+\]\s*;/g;
   let match;
   while ((match = re.exec(clean))) declarations.push(match[0]);
   return declarations;

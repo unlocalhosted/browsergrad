@@ -72,8 +72,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   excludes kernels now runnable on real WebGPU through orchestration; current
   baseline is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=158`
-  WebGPU-runnable, and `<=199` hard gaps;
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=160`
+  WebGPU-runnable, and `<=197` hard gaps;
   `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=66`
   WebGPU-runnable, and `<=82` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=194`
@@ -101,7 +101,9 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   WebGPU copy dispatch. C-style assignment-chain statements lower into ordered
   WGSL writes, and WGSL output alpha-renames CUDA source symbols such as
   `array`, `var`, and builtin-shadowing locals without changing public input
-  names.
+  names. Translation-unit `__shared__` scratch arrays are injected into kernels
+  that reference them, preserving local included-header context without
+  repo-specific branches.
   Fixed thread-local arrays lower to per-thread WGSL function arrays and CPU
   reference typed arrays.
 - Hot-loop dispatch can keep both caller buffers and compiler-generated

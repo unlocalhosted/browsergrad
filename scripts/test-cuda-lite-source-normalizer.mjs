@@ -457,6 +457,21 @@ __global__ void kernel(int *out, int n) {
 {
   const source = createKernelCompilationUnit({
     kernel: `
+__global__ void kernel(float *out) {
+  Scratch[threadIdx.x] = out[threadIdx.x];
+  __syncthreads();
+  out[threadIdx.x] = Scratch[threadIdx.x];
+}`,
+    definesByName: new Map([["BLOCK_SIZE", "8"]]),
+    sharedDeclarations: ["__shared__ float Scratch[BLOCK_SIZE];"],
+  });
+  assert.match(source, /__shared__ float Scratch\[BLOCK_SIZE\];/u);
+  assert.match(source, /Scratch\[threadIdx\.x\] = out\[threadIdx\.x\]/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 __global__ void kernel(float4 *input, float *out) {
   float4 value = input[0];
   out[0] = vec_at(value, 2);

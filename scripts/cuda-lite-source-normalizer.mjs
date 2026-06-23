@@ -17,6 +17,7 @@ export function createKernelCompilationUnit({
   deviceFunctions = [],
   constantDeclarations = [],
   textureDeclarations = [],
+  sharedDeclarations = [],
 }) {
   const aliasContext = [
     kernel,
@@ -76,6 +77,10 @@ export function createKernelCompilationUnit({
     const name = functionDefineName(declaration);
     return name !== undefined && sourceMentionsIdentifier(macroScope, name);
   });
+  const kernelWithSharedDeclarations = injectSharedDeclarationsIntoKernel(
+    stripKnownTemplateCallArguments(stripKernelLaunchTemplateArguments(specializedKernel), referencedDeviceFunctionNames),
+    sharedDeclarations,
+  );
   const unit = [
     defines.join("\n"),
     functionMacros.map(normalizeFunctionMacro).join("\n"),
@@ -83,7 +88,7 @@ export function createKernelCompilationUnit({
     constantDeclarations.join("\n"),
     textureDeclarations.join("\n"),
     referencedSiblingKernels.join("\n"),
-    stripKnownTemplateCallArguments(stripKernelLaunchTemplateArguments(specializedKernel), referencedDeviceFunctionNames),
+    kernelWithSharedDeclarations,
   ].filter((part) => part.trim().length > 0).join("\n");
   const withCarrierMembers = normalizeCarrierMemberReferences(unit, effectiveDefines);
   return normalizeCppTemplateCarrierSyntax(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(stripSupportedTypeAliasDeclarations(withCarrierMembers)))));
@@ -96,6 +101,29 @@ export function collectCudaLiteContextDefines(source) {
 function normalizeFunctionMacro(macro) {
   const cpAsync = semanticCpAsyncMacro(macro);
   return cpAsync ?? macro;
+}
+
+function injectSharedDeclarationsIntoKernel(kernel, sharedDeclarations) {
+  if (sharedDeclarations.length === 0) return kernel;
+  const needed = sharedDeclarations
+    .filter((declaration) => {
+      const name = sharedDeclarationName(declaration);
+      return name !== undefined &&
+        sourceMentionsIdentifier(kernel, name) &&
+        !kernelDeclaresSharedName(kernel, name);
+    });
+  if (needed.length === 0) return kernel;
+  const open = kernel.indexOf("{");
+  if (open < 0) return kernel;
+  return `${kernel.slice(0, open + 1)}\n${needed.map((declaration) => `  ${declaration.trim()}`).join("\n")}${kernel.slice(open + 1)}`;
+}
+
+function sharedDeclarationName(declaration) {
+  return /\b__shared__\s+[\w\s]+?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[/u.exec(declaration)?.[1];
+}
+
+function kernelDeclaresSharedName(kernel, name) {
+  return new RegExp(`\\b__shared__\\s+[\\w\\s]+?\\s+${escapeRegExp(name)}\\s*\\[`, "u").test(kernel);
 }
 
 function semanticCpAsyncMacro(macro) {
