@@ -17,6 +17,7 @@ import {
   cudaVectorLaneCount,
   cudaVectorScalarType,
   isCudaVectorType,
+  type CudaLiteVectorType,
 } from "./vector_types.js";
 import {
   CudaLiteCompilerError,
@@ -1081,6 +1082,8 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
     case "binary": {
       const pointerComparison = emitPointerComparison(expression, context);
       if (pointerComparison) return pointerComparison;
+      const vectorArithmetic = emitVectorArithmetic(expression, context);
+      if (vectorArithmetic) return vectorArithmetic;
       return `(${emitExpression(expression.left, context)} ${expression.operator} ${emitExpression(expression.right, context)})`;
     }
     case "conditional":
@@ -1735,6 +1738,7 @@ function expressionValueTypeForEmit(expression: CudaLiteExpression, context: Emi
   if (expression.kind === "cast") return expression.valueType;
   if (expression.kind === "call") {
     const name = expressionName(expression.callee);
+    if (name === "tex2D") return expression.templateValueType ?? "float";
     return name ? cudaVectorConstructorType(name) : undefined;
   }
   if (expression.kind === "index") {
@@ -1743,7 +1747,54 @@ function expressionValueTypeForEmit(expression: CudaLiteExpression, context: Emi
     return expressionValueTypeForEmit(expression.target, context);
   }
   if (expression.kind === "member") return expressionValueTypeForEmit(expression.object, context);
+  if (expression.kind === "binary") return vectorArithmeticTypeForEmit(expression, context);
   return undefined;
+}
+
+function vectorArithmeticTypeForEmit(
+  expression: Extract<CudaLiteExpression, { kind: "binary" }>,
+  context: EmitContext,
+): CudaLiteVectorType | undefined {
+  if (!isVectorArithmeticOperator(expression.operator)) return undefined;
+  const left = expressionValueTypeForEmit(expression.left, context);
+  const right = expressionValueTypeForEmit(expression.right, context);
+  if (isCudaVectorType(left) && isCudaVectorType(right)) return left === right ? left : undefined;
+  if (isCudaVectorType(left)) return left;
+  return isCudaVectorType(right) ? right : undefined;
+}
+
+function emitVectorArithmetic(
+  expression: Extract<CudaLiteExpression, { kind: "binary" }>,
+  context: EmitContext,
+): string | undefined {
+  const vectorType = vectorArithmeticTypeForEmit(expression, context);
+  if (!vectorType) return undefined;
+  const left = emitExpressionAsVectorOperand(expression.left, vectorType, context);
+  const right = emitExpressionAsVectorOperand(expression.right, vectorType, context);
+  return `(${left} ${expression.operator} ${right})`;
+}
+
+function emitExpressionAsVectorOperand(
+  expression: CudaLiteExpression,
+  vectorType: CudaLiteVectorType,
+  context: EmitContext,
+): string {
+  const value = emitExpression(expression, context);
+  return expressionValueTypeForEmit(expression, context) === vectorType
+    ? value
+    : emitVectorSplat(vectorType, castExpressionToVectorScalar(value, vectorType));
+}
+
+function castExpressionToVectorScalar(value: string, vectorType: CudaLiteScalarType): string {
+  return `${wgslScalar(cudaVectorScalarType(vectorType) ?? "float")}(${value})`;
+}
+
+function emitVectorSplat(vectorType: CudaLiteScalarType, value: string): string {
+  return `${wgslScalar(vectorType)}(${Array.from({ length: cudaVectorLaneCount(vectorType) }, () => value).join(", ")})`;
+}
+
+function isVectorArithmeticOperator(operator: string): boolean {
+  return operator === "+" || operator === "-" || operator === "*" || operator === "/";
 }
 
 function emitCall(expression: CudaLiteCallExpression, context: EmitContext): string {
@@ -1854,7 +1905,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return `select(0u, 1u, subgroupAll((${args[1] ?? "0"}) != 0))`;
     case "tex2D":
       if (expression.args.length === 3 && expression.args[0]?.kind === "identifier") {
-        return `bg_tex2d_${expression.args[0].name}(${emitExpression(expression.args[1]!, context)}, ${emitExpression(expression.args[2]!, context)})`;
+        const suffix = textureReadHelperSuffix(expression.templateValueType);
+        return `bg_tex2d_${suffix}_${expression.args[0].name}(${emitExpression(expression.args[1]!, context)}, ${emitExpression(expression.args[2]!, context)})`;
       }
       return `tex2D(${args.join(", ")})`;
     case "surf2Dwrite":
@@ -1941,6 +1993,7 @@ function emitExpressionAsValueType(
   const value = emitExpression(expression, context);
   if (valueType === "void") return value;
   if (expressionValueTypeForEmit(expression, context) === valueType) return value;
+  if (isCudaVectorType(valueType)) return emitVectorSplat(valueType, castExpressionToVectorScalar(value, valueType));
   if (valueType === "bool") return `(${value} != 0)`;
   return `${wgslScalar(valueType)}(${value})`;
 }
@@ -2209,12 +2262,15 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
     if (expression.operator !== "=") {
       const current = emitVectorStorageReadAt(storageView.name, storageView.valueType, storageView.index);
       const op = expression.operator.slice(0, -1);
-      return emitVectorStorageWriteAt(storageView.name, storageView.valueType, storageView.index, `(${current} ${op} ${right})`);
+      const vectorRight = emitExpressionAsVectorOperand(expression.right, storageView.valueType as CudaLiteVectorType, context);
+      return emitVectorStorageWriteAt(storageView.name, storageView.valueType, storageView.index, `(${current} ${op} ${vectorRight})`);
     }
     return emitVectorStorageWriteAt(storageView.name, storageView.valueType, storageView.index, right);
   }
   const poolAccess = poolAccessForIndex(expression.left, context);
   if (poolAccess) return emitPoolAssignment(poolAccess, expression.operator, expression.right, context);
+  const localVectorWholeAssignment = emitLocalVectorAssignment(expression, context);
+  if (localVectorWholeAssignment) return localVectorWholeAssignment;
   const vectorAssignment = emitVectorAssignment(expression, context);
   if (vectorAssignment) return vectorAssignment;
   const pointerLvalue = devicePointerLValue(expression.left, context);
@@ -2276,6 +2332,18 @@ function emitLocalVectorIndexAssignment(expression: CudaLiteAssignmentExpression
   return `${name} = ${emitVectorLaneSet(name, type, index, value)}`;
 }
 
+function emitLocalVectorAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string | undefined {
+  if (expression.left.kind !== "identifier") return undefined;
+  const name = expression.left.name;
+  const type = context.localValueTypeFor(name);
+  if (!isCudaVectorType(type) || expression.operator === "=") return undefined;
+  const op = expression.operator.slice(0, -1);
+  if (!isVectorArithmeticOperator(op)) return undefined;
+  const left = context.nameFor(name);
+  const right = emitExpressionAsVectorOperand(expression.right, type, context);
+  return `${left} = (${left} ${op} ${right})`;
+}
+
 function emitVectorLaneSet(name: string, type: CudaLiteScalarType, index: string, value: string): string {
   const scalar = wgslScalar(cudaVectorScalarType(type) ?? "float");
   const values = Array.from({ length: cudaVectorLaneCount(type) }, (_, lane) => {
@@ -2316,7 +2384,8 @@ function emitVectorAssignment(expression: CudaLiteAssignmentExpression, context:
   if (expression.operator !== "=") {
     const current = emitVectorStorageRead(direct.name, direct.valueType, direct.index);
     const op = expression.operator.slice(0, -1);
-    return emitVectorStorageWrite(direct.name, direct.valueType, direct.index, `(${current} ${op} ${right})`);
+    const vectorRight = emitExpressionAsVectorOperand(expression.right, direct.valueType as CudaLiteVectorType, context);
+    return emitVectorStorageWrite(direct.name, direct.valueType, direct.index, `(${current} ${op} ${vectorRight})`);
   }
   return emitVectorStorageWrite(direct.name, direct.valueType, direct.index, right);
 }
@@ -2511,14 +2580,68 @@ function emitConstantInitializerExpression(expression: CudaLiteExpression, conte
 
 function emitTextureHelper(name: string, context: EmitContext): string[] {
   const safeName = context.nameFor(name);
-  return [
-    `fn bg_tex2d_${name}(x: f32, y: f32) -> f32 {`,
+  const lines = [
+    `fn bg_tex2d_coord_${name}(x: f32, y: f32) -> vec2<i32> {`,
     `  let dims = textureDimensions(${safeName});`,
     "  let max_coord = vec2<i32>(i32(dims.x) - 1, i32(dims.y) - 1);",
-    "  let coord = clamp(vec2<i32>(i32(floor(x)), i32(floor(y))), vec2<i32>(0, 0), max_coord);",
-    `  return textureLoad(${safeName}, coord, 0).r;`,
+    "  return clamp(vec2<i32>(i32(floor(x)), i32(floor(y))), vec2<i32>(0, 0), max_coord);",
     "}",
+    `fn bg_tex2d_f32_${name}(x: f32, y: f32) -> f32 {`,
+    `  return textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0).r;`,
+    "}",
+    `fn bg_tex2d_float2_${name}(x: f32, y: f32) -> vec2<f32> {`,
+    `  return textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0).xy;`,
+    "}",
+    `fn bg_tex2d_float3_${name}(x: f32, y: f32) -> vec3<f32> {`,
+    `  return textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0).xyz;`,
+    "}",
+    `fn bg_tex2d_float4_${name}(x: f32, y: f32) -> vec4<f32> {`,
+    `  return textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0);`,
+    "}",
+    `fn bg_tex2d_int_${name}(x: f32, y: f32) -> i32 {`,
+    `  return i32(textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0).r);`,
+    "}",
+    `fn bg_tex2d_uint_${name}(x: f32, y: f32) -> u32 {`,
+    `  return u32(textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0).r);`,
+    "}",
+    ...emitTextureVectorCastHelpers(name, safeName, ["int2", "int3", "int4", "uint2", "uint3", "uint4"]),
   ];
+  if (context.ir.requiredFeatures.includes("shader-f16")) {
+    lines.push(
+      `fn bg_tex2d_half_${name}(x: f32, y: f32) -> f16 {`,
+      `  return f16(textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0).r);`,
+      "}",
+      `fn bg_tex2d_half2_${name}(x: f32, y: f32) -> vec2<f16> {`,
+      `  return vec2<f16>(textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0).xy);`,
+      "}",
+    );
+  }
+  return lines;
+}
+
+function textureReadHelperSuffix(valueType: CudaLiteScalarType | undefined): string {
+  if (valueType === "int" || valueType === "uint") return valueType;
+  if (valueType === "half" || valueType === "half2") return valueType;
+  if (isCudaVectorType(valueType)) return valueType;
+  return "f32";
+}
+
+function emitTextureVectorCastHelpers(
+  name: string,
+  safeName: string,
+  valueTypes: readonly CudaLiteVectorType[],
+): string[] {
+  return valueTypes.flatMap((valueType) => {
+    const fields = ["x", "y", "z", "w"].slice(0, cudaVectorLaneCount(valueType));
+    const scalarType = wgslScalar(cudaVectorScalarType(valueType) ?? "float");
+    const values = fields.map((field) => `${scalarType}(value.${field})`).join(", ");
+    return [
+      `fn bg_tex2d_${valueType}_${name}(x: f32, y: f32) -> ${wgslScalar(valueType)} {`,
+      `  let value = textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0);`,
+      `  return ${wgslScalar(valueType)}(${values});`,
+      "}",
+    ];
+  });
 }
 
 function emitSurfaceHelper(name: string, context: EmitContext): string[] {

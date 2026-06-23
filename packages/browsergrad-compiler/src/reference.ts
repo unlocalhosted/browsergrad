@@ -996,14 +996,20 @@ function evalVectorBinary(
   if (operator !== "+" && operator !== "-" && operator !== "*" && operator !== "/") return undefined;
   const leftType = vectorExpressionType(leftExpression, context);
   const rightType = vectorExpressionType(rightExpression, context);
-  if (!leftType || leftType !== rightType) return undefined;
-  const left = valueAsCudaVector(evalExpression(leftExpression, context), leftType);
-  const right = valueAsCudaVector(evalExpression(rightExpression, context), rightType);
+  if (!leftType && !rightType) return undefined;
+  if (leftType && rightType && leftType !== rightType) return undefined;
+  const valueType = leftType ?? rightType!;
+  const left = leftType
+    ? valueAsCudaVector(evalExpression(leftExpression, context), valueType)
+    : vectorSplat(valueType, evalNumber(leftExpression, context));
+  const right = rightType
+    ? valueAsCudaVector(evalExpression(rightExpression, context), valueType)
+    : vectorSplat(valueType, evalNumber(rightExpression, context));
   return {
     kind: "cuda-vector",
-    valueType: leftType,
+    valueType,
     lanes: left.lanes.map((value, index) => roundVectorLane(
-      leftType,
+      valueType,
       operator === "+"
         ? (value ?? 0) + (right.lanes[index] ?? 0)
         : operator === "-"
@@ -1033,6 +1039,7 @@ function vectorExpressionType(
     const name = expressionName(expression.callee);
     const constructor = name ? cudaVectorConstructorType(name) : undefined;
     if (constructor) return constructor;
+    if (name === "tex2D" && isCudaVectorType(expression.templateValueType)) return expression.templateValueType;
     if (isHalf2Intrinsic(name) || name === "__float22half2_rn" || name === "__float2half2_rn" || name === "__floats2half2_rn") return "half2";
     if (name === "__half22float2") return "float2";
   }
@@ -1040,13 +1047,26 @@ function vectorExpressionType(
     if (expression.operator !== "+" && expression.operator !== "-" && expression.operator !== "*" && expression.operator !== "/") return undefined;
     const left = vectorExpressionType(expression.left, context);
     const right = vectorExpressionType(expression.right, context);
-    return left && left === right ? left : undefined;
+    if (left && right) return left === right ? left : undefined;
+    return left ?? right;
   }
   return undefined;
 }
 
+function vectorSplat(valueType: CudaLiteVectorType, value: number): CudaVectorValue {
+  return {
+    kind: "cuda-vector",
+    valueType,
+    lanes: Array.from({ length: cudaVectorLaneCount(valueType) }, () => roundVectorLane(valueType, value)),
+  };
+}
+
 function roundVectorLane(valueType: CudaLiteVectorType, value: number): number {
-  return cudaVectorScalarType(valueType) === "half" ? roundHalf(value) : value;
+  const scalar = cudaVectorScalarType(valueType);
+  if (scalar === "half") return roundHalf(value);
+  if (scalar === "int") return Math.trunc(value) | 0;
+  if (scalar === "uint") return Math.trunc(value) >>> 0;
+  return value;
 }
 
 function castNumber(type: Exclude<CudaLiteScalarType, "void">, value: number): EvalValue {
@@ -1215,7 +1235,13 @@ function evalAssignment(
     return right;
   }
   if (isCudaVectorValue(right)) {
-    if (operator !== "=") throw compilerFailure("CUDA vector values only support assignment");
+    if (operator !== "=") {
+      const current = readLValue(lvalue, context);
+      if (!isCudaVectorValue(current)) throw compilerFailure("CUDA vector compound assignment expects a CUDA vector target");
+      const value = applyVectorOperator(operator, current, right);
+      writeLValue(lvalue, value, context);
+      return value;
+    }
     writeLValue(lvalue, right, context);
     return right;
   }
@@ -1225,6 +1251,14 @@ function evalAssignment(
     return right;
   }
   const rightNumber = valueAsNumber(right, lvalue.name);
+  if (operator !== "=") {
+    const currentValue = readLValue(lvalue, context);
+    if (isCudaVectorValue(currentValue)) {
+      const value = applyVectorOperator(operator, currentValue, vectorSplat(currentValue.valueType, rightNumber));
+      writeLValue(lvalue, value, context);
+      return value;
+    }
+  }
   const current = operator === "=" ? 0 : valueAsNumber(readLValue(lvalue, context), lvalue.name);
   const value: number = operator === "="
     ? rightNumber
@@ -1241,6 +1275,28 @@ function evalAssignment(
             : Math.trunc(current) >> Math.trunc(rightNumber);
   writeLValue(lvalue, value, context);
   return value;
+}
+
+function applyVectorOperator(operator: string, current: CudaVectorValue, right: CudaVectorValue): CudaVectorValue {
+  if (current.valueType !== right.valueType) throw compilerFailure("CUDA vector compound assignment expects matching vector types");
+  if (operator !== "+=" && operator !== "-=" && operator !== "*=" && operator !== "/=") {
+    throw compilerFailure("CUDA vector compound assignment supports +=, -=, *=, and /=");
+  }
+  const op = operator.slice(0, -1);
+  return {
+    kind: "cuda-vector",
+    valueType: current.valueType,
+    lanes: current.lanes.map((value, index) => roundVectorLane(
+      current.valueType,
+      op === "+"
+        ? (value ?? 0) + (right.lanes[index] ?? 0)
+        : op === "-"
+          ? (value ?? 0) - (right.lanes[index] ?? 0)
+          : op === "*"
+            ? (value ?? 0) * (right.lanes[index] ?? 0)
+            : (value ?? 0) / (right.lanes[index] ?? 1),
+    )),
+  };
 }
 
 function evalPointerRebaseAssignment(
@@ -1415,7 +1471,9 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     if (!texture) throw compilerFailure(`missing texture input '${textureRef.name}'`);
     const x = Math.max(0, Math.min(texture.width - 1, Math.floor(evalNumber(expression.args[1]!, context))));
     const y = Math.max(0, Math.min(texture.height - 1, Math.floor(evalNumber(expression.args[2]!, context))));
-    return texture.data[y * texture.width + x] ?? 0;
+    const valueType = expression.templateValueType ?? "float";
+    if (isCudaVectorType(valueType)) return readTextureVector(texture, x, y, valueType);
+    return texture.data[(y * texture.width + x) * textureChannels(texture)] ?? 0;
   }
   if (name === "surf2Dwrite") {
     const surfaceRef = expression.args[1];
@@ -1635,6 +1693,25 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaEventDestroy" ||
     name === "cudaEventRecord" ||
     name === "cudaEventSynchronize";
+}
+
+function readTextureVector(
+  texture: { readonly width: number; readonly data: Float32Array; readonly channels?: number },
+  x: number,
+  y: number,
+  valueType: CudaLiteVectorType,
+): CudaVectorValue {
+  const channels = textureChannels(texture);
+  const base = (y * texture.width + x) * channels;
+  const lanes = Array.from({ length: cudaVectorLaneCount(valueType) }, (_, lane) => {
+    if (lane < channels) return texture.data[base + lane] ?? 0;
+    return lane === 3 ? 1 : 0;
+  });
+  return { kind: "cuda-vector", valueType, lanes };
+}
+
+function textureChannels(texture: { readonly width: number; readonly data: Float32Array; readonly channels?: number }): number {
+  return texture.channels === 2 || texture.channels === 4 ? texture.channels : 1;
 }
 
 function poolNameFromAllocatorArg(expression: CudaLiteExpression | undefined, context: ThreadContext): string | undefined {

@@ -993,7 +993,8 @@ function validateCallExpression(
   }
   if (callName === "tex2D") {
     validateTex2D(expression, scope, diagnostics, walkExpression);
-    return { kind: "scalar", valueType: "float" };
+    if (requiresShaderF16(expression.templateValueType)) requiredFeatures.add("shader-f16");
+    return expressionInfoForTextureRead(expression);
   }
   if (callName === "surf2Dwrite") {
     validateSurf2DWrite(expression, scope, diagnostics, walkExpression);
@@ -1402,6 +1403,9 @@ function validateTex2D(
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
 ): void {
+  if (!isSupportedTextureReadType(expression.templateValueType)) {
+    diagnostics.push(error("unsupported-texture", "tex2D currently supports float/int/uint, half, float2/3/4, int2/3/4, uint2/3/4, and half2 reads", expression.span));
+  }
   const texture = expression.args[0];
   if (texture?.kind !== "identifier") {
     diagnostics.push(error("unsupported-texture", "tex2D first argument must be a texture reference", expression.span));
@@ -1803,6 +1807,16 @@ function validateNonCallExpression(
         if (cudaVectorScalarType(left.valueType) === "half") requiredFeatures.add("shader-f16");
         return { kind: "vector", valueType: left.valueType };
       }
+      const vectorArithmetic = vectorArithmeticInfo(
+        expression.operator,
+        left,
+        right,
+        expression.left,
+        expression.right,
+        diagnostics,
+        requiredFeatures,
+      );
+      if (vectorArithmetic) return vectorArithmetic;
       if ((expression.operator === "==" || expression.operator === "!=") && pointerComparable(left, right, expression.left, expression.right)) {
         return { kind: "scalar", valueType: "bool" };
       }
@@ -1830,8 +1844,13 @@ function validateNonCallExpression(
           diagnostics.push(error("unsupported-scalar-expression", "complex assignment expects a complex value", expression.right.span));
         }
       } else if (left.kind === "vector") {
-        if (right.kind !== "vector" && right.kind !== "unknown") {
+        if (expression.operator === "=" && right.kind !== "vector" && right.kind !== "unknown") {
           diagnostics.push(error("unsupported-vector-assignment", "CUDA vector assignment expects a CUDA vector value", expression.right.span));
+        } else if (expression.operator !== "=") {
+          const op = assignmentArithmeticOperator(expression.operator);
+          if (!op || !vectorArithmeticInfo(op, left, right, expression.left, expression.right, diagnostics, requiredFeatures)) {
+            diagnostics.push(error("unsupported-vector-assignment", "CUDA vector compound assignment expects a scalar or matching CUDA vector value", expression.right.span));
+          }
         }
       } else {
         validateScalarOperand(right, expression.right.span, diagnostics);
@@ -2001,6 +2020,68 @@ function isNullPointerLiteral(expression: CudaLiteExpression): boolean {
 
 function isVectorArithmeticOperator(operator: string): boolean {
   return operator === "+" || operator === "-" || operator === "*" || operator === "/";
+}
+
+function assignmentArithmeticOperator(operator: CudaLiteAssignmentExpression["operator"]): "+" | "-" | "*" | "/" | undefined {
+  if (operator === "+=") return "+";
+  if (operator === "-=") return "-";
+  if (operator === "*=") return "*";
+  if (operator === "/=") return "/";
+  return undefined;
+}
+
+function expressionInfoForTextureRead(expression: Extract<CudaLiteExpression, { kind: "call" }>): ExpressionInfo {
+  const valueType = expression.templateValueType ?? "float";
+  return isCudaVectorType(valueType)
+    ? { kind: "vector", valueType }
+    : { kind: "scalar", valueType };
+}
+
+function vectorArithmeticInfo(
+  operator: string,
+  left: ExpressionInfo,
+  right: ExpressionInfo,
+  leftExpression: CudaLiteExpression,
+  rightExpression: CudaLiteExpression,
+  diagnostics: CudaLiteDiagnostic[],
+  requiredFeatures: Set<string>,
+): ExpressionInfo | undefined {
+  if (!isVectorArithmeticOperator(operator)) return undefined;
+  const leftVectorType = left.kind === "vector" && isCudaVectorType(left.valueType) ? left.valueType : undefined;
+  const rightVectorType = right.kind === "vector" && isCudaVectorType(right.valueType) ? right.valueType : undefined;
+  if (!leftVectorType && !rightVectorType) return undefined;
+  if (leftVectorType && rightVectorType) {
+    if (leftVectorType !== rightVectorType) {
+      diagnostics.push(error("unsupported-vector-argument", "vector arithmetic expects matching CUDA vector types", leftExpression.span));
+      return { kind: "unknown" };
+    }
+    if (cudaVectorScalarType(leftVectorType) === "half") requiredFeatures.add("shader-f16");
+    return { kind: "vector", valueType: leftVectorType };
+  }
+  const vectorType = leftVectorType ?? rightVectorType!;
+  const scalarInfo = leftVectorType ? right : left;
+  const scalarExpression = leftVectorType ? rightExpression : leftExpression;
+  validateScalarOperand(scalarInfo, scalarExpression.span, diagnostics);
+  if (cudaVectorScalarType(vectorType) === "half") requiredFeatures.add("shader-f16");
+  return { kind: "vector", valueType: vectorType };
+}
+
+function isSupportedTextureReadType(type: CudaLiteScalarType | undefined): boolean {
+  return type === undefined ||
+    type === "float" ||
+    type === "int" ||
+    type === "uint" ||
+    type === "half" ||
+    type === "half2" ||
+    type === "float2" ||
+    type === "float3" ||
+    type === "float4" ||
+    type === "int2" ||
+    type === "int3" ||
+    type === "int4" ||
+    type === "uint2" ||
+    type === "uint3" ||
+    type === "uint4";
 }
 
 function lookupSymbol(name: string, scope: Scope, span: SourceSpan): SymbolInfo | undefined {

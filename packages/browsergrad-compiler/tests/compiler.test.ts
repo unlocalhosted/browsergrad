@@ -3629,7 +3629,7 @@ __global__ void sample(float *out, int width) {
 
     expect(compiled.ir.textures.map((texture) => texture.name)).toEqual(["texRef"]);
     expect(compiled.wgsl).toContain("var texRef: texture_2d<f32>;");
-    expect(compiled.wgsl).toContain("bg_tex2d_texRef");
+    expect(compiled.wgsl).toContain("bg_tex2d_f32_texRef");
     expect(compiled.wgslProgram.bindings).toContainEqual(expect.objectContaining({
       kind: "texture2d",
       name: "texRef",
@@ -3657,12 +3657,58 @@ __global__ void sample(float *out, int width, cudaTextureObject_t tex) {
 
     expect(compiled.ir.params.find((param) => param.name === "tex")?.valueType).toBe("texture2d");
     expect(compiled.wgsl).toContain("var tex: texture_2d<f32>;");
-    expect(compiled.wgsl).toContain("bg_tex2d_tex");
+    expect(compiled.wgsl).toContain("bg_tex2d_f32_tex");
     expect(compiled.wgslProgram.bindings).toContainEqual(expect.objectContaining({
       kind: "texture2d",
       name: "tex",
     }));
     expect([...result.buffers.out as Float32Array]).toEqual([2, 4, 6]);
+  });
+
+  it("lowers typed CUDA tex2D vector reads and vector-scalar math", () => {
+    const compiled = compileCudaLiteKernel(`
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void sample(float4 *out) {
+  float4 t = make_float4(1.0f);
+  t += tex2D<float4>(texRef, 0.5f, 0.5f);
+  t = t * 0.5f;
+  out[0] = t;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(4) },
+        textures: {
+          texRef: { width: 1, height: 1, channels: 4, data: new Float32Array([1, 2, 3, 4]) },
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_tex2d_float4_texRef");
+    expect(compiled.wgsl).toContain("vec4<f32>(f32(0.5)");
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 1.5, 2, 2.5]);
+  });
+
+  it("lowers CUDA alias typed texture reads through integer vector casts", () => {
+    const compiled = compileCudaLiteKernel(`
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void sample(uint4 *out) {
+  out[0] = tex2D<uchar4>(texRef, 0.5f, 0.5f);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Uint32Array(4) },
+        textures: {
+          texRef: { width: 1, height: 1, channels: 4, data: new Float32Array([1, 2, 3, 255]) },
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_tex2d_uint4_texRef");
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 2, 3, 255]);
   });
 
   it("formats diagnostics with source snippets", () => {

@@ -121,6 +121,44 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
   });
 
+  it("runs multi-channel f32 texture2d bindings", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const program = defineWgslKernelProgram({
+      name: "texture_rgba_copy",
+      workgroupSize: [1, 1, 1],
+      bindings: [
+        { kind: "texture2d", name: "image", valueType: "f32", binding: 0 },
+        { kind: "storage", name: "out", valueType: "f32", access: "read_write", binding: 1 },
+      ],
+      wgsl: `
+@group(0) @binding(0) var image: texture_2d<f32>;
+@group(0) @binding(1) var<storage, read_write> out: array<f32>;
+@compute @workgroup_size(1, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let value = textureLoad(image, vec2<i32>(0, 0), 0);
+  out[0] = value.x;
+  out[1] = value.y;
+  out[2] = value.z;
+  out[3] = value.w;
+}`,
+    });
+
+    const result = await runWgslKernelProgram(
+      device,
+      program,
+      {
+        textures: {
+          image: { width: 1, height: 1, channels: 4, data: new Float32Array([1, 2, 3, 4]) },
+        },
+        buffers: { out: new Float32Array(4) },
+      },
+      { dispatchCount: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
+  });
+
   it("runs a sequence over shared GPU buffers without intermediate readback", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

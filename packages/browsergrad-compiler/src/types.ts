@@ -282,6 +282,7 @@ export interface CudaLiteCallExpression {
   readonly kind: "call";
   readonly callee: CudaLiteExpression;
   readonly args: readonly CudaLiteExpression[];
+  readonly templateValueType?: Exclude<CudaLiteScalarType, "void">;
   readonly span: SourceSpan;
 }
 

@@ -885,7 +885,7 @@ class Parser {
       ? this.parseCxxCastExpression()
       : this.parsePrimary();
     while (true) {
-      this.consumeTemplateArgumentsBeforeCall();
+      const templateValueType = this.consumeTemplateArgumentsBeforeCall();
       if (this.match("{")) {
         this.skipBalanced("{", "}");
         continue;
@@ -908,7 +908,13 @@ class Parser {
       }
       if (this.consumeIf("(")) {
         const { args, end } = this.parseArgumentListAfterOpen();
-        expression = { kind: "call", callee: expression, args, span: mergeSpans(expression.span, end) };
+        expression = {
+          kind: "call",
+          callee: expression,
+          args,
+          ...(templateValueType === undefined ? {} : { templateValueType }),
+          span: mergeSpans(expression.span, end),
+        };
         continue;
       }
       if (["++", "--"].includes(this.peek().value)) {
@@ -1333,13 +1339,33 @@ class Parser {
     }
   }
 
-  private consumeTemplateArgumentsBeforeCall(): void {
-    if (!this.match("<")) return;
+  private consumeTemplateArgumentsBeforeCall(): Exclude<CudaLiteScalarType, "void"> | undefined {
+    if (!this.match("<")) return undefined;
     const endIndex = this.findTemplateArgumentEnd(this.index);
-    if (endIndex === undefined) return;
+    if (endIndex === undefined) return undefined;
     const next = this.tokens[endIndex + 1]?.value;
-    if (next !== "(" && next !== "{") return;
+    if (next !== "(" && next !== "{") return undefined;
+    const valueType = this.templateArgumentValueType(this.index, endIndex);
     this.index = endIndex + 1;
+    return valueType;
+  }
+
+  private templateArgumentValueType(startIndex: number, endIndex: number): Exclude<CudaLiteScalarType, "void"> | undefined {
+    const originalIndex = this.index;
+    const originalDepth = this.templateArgumentDepth;
+    try {
+      this.index = startIndex + 1;
+      this.templateArgumentDepth++;
+      this.consumeIf("const");
+      const valueType = this.parseType();
+      this.consumeIf("const");
+      return this.index === endIndex ? valueType : undefined;
+    } catch {
+      return undefined;
+    } finally {
+      this.index = originalIndex;
+      this.templateArgumentDepth = originalDepth;
+    }
   }
 
   private findTemplateArgumentEnd(startIndex: number): number | undefined {

@@ -107,6 +107,7 @@ export interface WgslTexture2DInput {
   readonly width: number;
   readonly height: number;
   readonly data: Float32Array;
+  readonly channels?: 1 | 2 | 4;
 }
 
 export interface WgslKernelLaunch {
@@ -429,7 +430,7 @@ export async function prepareWgslKernelProgramSequence(
         validateTexture2DInput(textureInput, binding.name);
         const texture = gpu.createTexture({
           size: { width: textureInput.width, height: textureInput.height },
-          format: "r32float",
+          format: textureFormat(textureInput),
           usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
         });
         const bytes = paddedTextureRows(textureInput);
@@ -974,25 +975,43 @@ function uniqueValueTypes(valueTypes: readonly WgslValueType[]): readonly WgslVa
 function validateTexture2DInput(input: WgslTexture2DInput, name: string): void {
   validatePositiveInteger(input.width, `${name}.width`);
   validatePositiveInteger(input.height, `${name}.height`);
+  validateTextureChannelCount(input.channels, name);
   if (!(input.data instanceof Float32Array)) {
     throw new KernelError(`texture ${name} expects Float32Array data`);
   }
-  const expected = input.width * input.height;
+  const expected = input.width * input.height * textureChannelCount(input);
   if (input.data.length < expected) {
-    throw new KernelError(`texture ${name} expects at least ${expected} texels`);
+    throw new KernelError(`texture ${name} expects at least ${expected} float values`);
   }
 }
 
 function paddedTextureRows(input: WgslTexture2DInput): { readonly data: Uint8Array; readonly bytesPerRow: number } {
-  const sourceRowBytes = input.width * Float32Array.BYTES_PER_ELEMENT;
+  const channels = textureChannelCount(input);
+  const sourceRowBytes = input.width * channels * Float32Array.BYTES_PER_ELEMENT;
   const bytesPerRow = alignTo(sourceRowBytes, 256);
   const out = new Uint8Array(bytesPerRow * input.height);
-  const source = new Uint8Array(input.data.buffer, input.data.byteOffset, input.width * input.height * Float32Array.BYTES_PER_ELEMENT);
+  const source = new Uint8Array(input.data.buffer, input.data.byteOffset, input.width * input.height * channels * Float32Array.BYTES_PER_ELEMENT);
   for (let row = 0; row < input.height; row++) {
     const sourceStart = row * sourceRowBytes;
     out.set(source.subarray(sourceStart, sourceStart + sourceRowBytes), row * bytesPerRow);
   }
   return { data: out, bytesPerRow };
+}
+
+function validateTextureChannelCount(channels: number | undefined, name: string): void {
+  if (channels === undefined || channels === 1 || channels === 2 || channels === 4) return;
+  throw new KernelError(`texture ${name} channels must be 1, 2, or 4`);
+}
+
+function textureChannelCount(input: WgslTexture2DInput): 1 | 2 | 4 {
+  return input.channels ?? 1;
+}
+
+function textureFormat(input: WgslTexture2DInput): GPUTextureFormat {
+  const channels = textureChannelCount(input);
+  if (channels === 2) return "rg32float";
+  if (channels === 4) return "rgba32float";
+  return "r32float";
 }
 
 function validateStorageByteLength(byteLength: number, name: string): number {
