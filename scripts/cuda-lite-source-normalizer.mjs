@@ -409,13 +409,13 @@ function specializeTemplateFromLaunchContext(source, templateArgumentsByKernelNa
   const name = kernelDefinitionName(source);
   if (name === undefined) return source;
   const args = templateArgumentsByKernelName.get(name);
-  if (args === undefined || args.length === 0) return source;
+  if (args === undefined || args.length === 0) return rewriteFirstTemplateHeader(source, [], definesByName);
   return rewriteFirstTemplateHeader(source, args, definesByName);
 }
 
 function specializeDeviceFunctionFromCallContext(source, args, definesByName = new Map()) {
   const defaults = templateHeaderDefaultArguments(source, definesByName);
-  if ((args === undefined || args.length === 0) && defaults.length === 0) return source;
+  if ((args === undefined || args.length === 0) && defaults.length === 0) return rewriteFirstTemplateHeader(source, [], definesByName);
   const merged = defaults.map((value, index) => args?.[index] ?? value);
   if (args !== undefined) {
     for (let index = 0; index < args.length; index++) merged[index] = args[index];
@@ -432,10 +432,51 @@ function rewriteFirstTemplateHeader(source, args, definesByName = new Map()) {
   const params = splitTopLevel(source.slice(open + 1, close));
   if (params.length === 0) return source;
   const parsedParams = params.map(parseTemplateParam);
-  const typeEnv = templateTypeEnvironment(parsedParams, args, definesByName);
-  const rewritten = params.map((param, index) => rewriteTemplateParam(param, args[index], definesByName)).join(", ");
+  const effectiveArgs = canonicalTemplateFallbackArguments(source.slice(close + 1), parsedParams, args, definesByName);
+  const typeEnv = templateTypeEnvironment(parsedParams, effectiveArgs, definesByName);
+  const rewritten = params.map((param, index) => rewriteTemplateParam(param, effectiveArgs[index], definesByName)).join(", ");
   const body = substituteTemplateTypes(source.slice(close), typeEnv);
   return `${source.slice(0, open + 1)}${rewritten}${body}`;
+}
+
+function canonicalTemplateFallbackArguments(sourceTail, parsedParams, args, definesByName = new Map()) {
+  const out = [...args];
+  for (let index = 0; index < parsedParams.length; index++) {
+    const param = parsedParams[index];
+    if (
+      param?.kind !== "type" ||
+      (hasConcreteTemplateArgument(out[index]) && String(out[index]).trim() !== param.name) ||
+      templateParamDefaultValue(param) !== undefined
+    ) continue;
+    if (templateTypeParamUsedAsPointerParam(sourceTail, param.name)) out[index] = canonicalTemplatePointerType(sourceTail, definesByName);
+  }
+  return out;
+}
+
+function hasConcreteTemplateArgument(value) {
+  return value !== undefined && String(value).trim().length > 0;
+}
+
+function templateTypeParamUsedAsPointerParam(sourceTail, name) {
+  const signatureEnd = sourceTail.indexOf("{");
+  if (signatureEnd < 0) return false;
+  const signature = sourceTail.slice(0, signatureEnd);
+  const open = signature.indexOf("(");
+  const params = balancedParenContents(signature, open);
+  if (params === undefined) return false;
+  return splitTopLevel(params).some((param) => {
+    const cleaned = param
+      .replace(/\b(?:const|volatile|__restrict__|__restrict|restrict)\b/gu, " ")
+      .replace(/\s+/gu, " ")
+      .trim();
+    const escaped = escapeRegExp(name);
+    return new RegExp(`^${escaped}\\s*(?:\\*|&)|^${escaped}\\s+[*&]`, "u").test(cleaned);
+  });
+}
+
+function canonicalTemplatePointerType(sourceTail, definesByName = new Map()) {
+  const candidate = normalizeTemplateTypeArgument(definesByName.get("floatX") ?? "float", definesByName);
+  return candidate === "half" || candidate === "bf16" ? "float" : candidate ?? "float";
 }
 
 function rewriteTemplateParam(param, arg, definesByName = new Map()) {
@@ -467,7 +508,7 @@ function parseTemplateParam(param) {
     .replace(/\b(?:const|constexpr)\b/gu, " ")
     .replace(/\s+/gu, " ")
     .trim();
-  const valueMatch = /^(?:(?:unsigned\s+)?(?:int|long|short)|uint|size_t|bool)\s+([A-Za-z_][A-Za-z0-9_]*)$/u.exec(head);
+  const valueMatch = /^(?:(?:unsigned\s+)?(?:int|long|short)|uint|size_t|ptrdiff_t|bool)\s+([A-Za-z_][A-Za-z0-9_]*)$/u.exec(head);
   if (valueMatch?.[1] !== undefined) {
     return {
       kind: "value",
@@ -639,7 +680,7 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
     type === "__nv_fp8x2_storage_t" ||
     type === "__nv_fp8x4_storage_t"
   ) return "uint";
-  if (type === "long long" || type === "long" || type === "short" || type === "short int") return "int";
+  if (type === "long long" || type === "long" || type === "short" || type === "short int" || type === "ptrdiff_t") return "int";
   if (type === "uchar2") return "uint2";
   if (type === "uchar3") return "uint3";
   if (type === "uchar4") return "uint4";
@@ -1264,7 +1305,7 @@ function scanCarrierMembers(body) {
     const [, name, value] = match;
     if (name && value) members.push({ kind: "type", name, value: value.trim() });
   }
-  for (const match of body.matchAll(/\bstatic\s+constexpr\s+(?:const\s+)?(?:int|uint|unsigned\s+int|size_t|bool)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);/gu)) {
+  for (const match of body.matchAll(/\bstatic\s+constexpr\s+(?:const\s+)?(?:int|uint|unsigned\s+int|size_t|ptrdiff_t|bool)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);/gu)) {
     const [, name, value] = match;
     if (name && value) members.push({ kind: "value", name, value: value.trim() });
   }
@@ -1340,7 +1381,7 @@ function stripSupportedTypeAliasDeclarations(source, initialDefines = new Map())
 }
 
 function parseSimpleIntegerConstant(line) {
-  const match = /^\s*((?:(?:static|constexpr|const)\s+)*)(?:int|uint|unsigned\s+int|size_t)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([0-9A-Fa-fxXuUlL\s()+\-*/%<>&|^?:.]+)\s*;\s*$/u.exec(line);
+  const match = /^\s*((?:(?:static|constexpr|const)\s+)*)(?:int|uint|unsigned\s+int|size_t|ptrdiff_t)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([0-9A-Fa-fxXuUlL\s()+\-*/%<>&|^?:.]+)\s*;\s*$/u.exec(line);
   if (match === null) return undefined;
   const [, qualifiers, name, value] = match;
   if (!name || !value || !/\b(?:const|constexpr)\b/u.test(qualifiers ?? "")) return undefined;
@@ -1576,7 +1617,7 @@ function scanFunctionCallReferences(source) {
       continue;
     }
     const before = source.slice(Math.max(0, nameStart - 24), nameStart);
-    if (/\b(?:__global__|__device__|__host__|void|float|int|uint|size_t|bool)\s*$/u.test(before)) {
+    if (/\b(?:__global__|__device__|__host__|void|float|int|uint|size_t|ptrdiff_t|bool)\s*$/u.test(before)) {
       index = close + 1;
       continue;
     }
@@ -2147,6 +2188,7 @@ function sizeofType(typeName) {
     case "long":
     case "long long":
     case "size_t":
+    case "ptrdiff_t":
     case "clock_t":
     case "bool":
       return 4;

@@ -924,6 +924,20 @@ __global__ void templated_scalar_helper(float *out, int n) {
 {
   const source = createKernelCompilationUnit({
     kernel: `
+template <typename Value, typename Layout>
+__global__ void canonical_type_kernel(Value *out, const Value *input, Layout layout) {
+  int idx = threadIdx.x;
+  out[idx] = input[idx] + (Value)1;
+}`,
+  });
+  assert.match(source, /template <typename Value = float, typename Layout>/u);
+  assert.match(source, /__global__ void canonical_type_kernel\(float \*out, const float \*input, Layout layout\)/u);
+  assert.doesNotMatch(source, /Layout = float/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 struct __align__(8) MD {
   float m;
   float d;

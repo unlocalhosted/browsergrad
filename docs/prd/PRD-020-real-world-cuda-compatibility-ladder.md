@@ -60,7 +60,7 @@ Repo exploration:
 
 Local corpus audits on 2026-06-24:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `205` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `206` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -102,13 +102,15 @@ Local corpus audits on 2026-06-24:
   context for header-only kernels, POD-record vector alias lowering, numeric
   object-macro folding, local const/template integer dimension folding, and
   scalar bitwise compound assignments, default kernel parameter initializer
-  intake, and CUDA cache-hint load/store family lowering, with `152`
+  intake, CUDA cache-hint load/store family lowering, conservative unresolved
+  template type fallback for pointer parameters, and signed `ptrdiff_t` index
+  alias intake, with `151`
   hard gaps.
   Main failures:
   parser/frontend gaps, texture/vector
   operators, remaining `half2` intrinsics, `double`, templates, and
   runtime library shape.
-- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `117` direct
+- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `119` direct
   WebGPU-runnable after source/context normalization, intrinsic-ledger
   expansion, CUDA/C named constants, CUDA cache-hint memory builtins, local
   header context, simple C++ alias / constexpr intake, and typed storage
@@ -133,8 +135,9 @@ Local corpus audits on 2026-06-24:
   POD-record vector alias lowering, numeric object-macro folding, local
   const/template integer dimension folding, scalar bitwise compound
   assignments, CUDA bf16 logical type/intrinsic intake, `__trap`, unary
-  bitwise-not, mutable local storage-pointer handles, and CUDA cache-hint
-  load/store family lowering, with `31`
+  bitwise-not, mutable local storage-pointer handles, CUDA cache-hint
+  load/store family lowering, conservative unresolved template type fallback
+  for pointer parameters, and signed `ptrdiff_t` index alias intake, with `29`
   hard gaps. Main
   failures: frontend macro/type shape, parser C++-isms, and remaining
   library/front-end gaps.
@@ -200,9 +203,9 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
-- The current live aggregate gate is `779/1038` WebGPU-runnable across the four
-  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `205/357`, `llm.c`
-  `117/148`, and LeetCUDA `217/293`.
+- The current live aggregate gate is `782/1038` WebGPU-runnable across the four
+  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `206/357`, `llm.c`
+  `119/148`, and LeetCUDA `217/293`.
 
 ## Grill Decisions
 
@@ -348,9 +351,9 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=205` WebGPU-runnable, and `<=152` hard gaps.
-- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=117`
-  WebGPU-runnable, and `<=31` hard gaps.
+  `>=206` WebGPU-runnable, and `<=151` hard gaps.
+- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=119`
+  WebGPU-runnable, and `<=29` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
   `>=217` WebGPU-runnable, and `<=76` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
@@ -400,6 +403,13 @@ Acceptance criteria for the first slice:
   as `float(i)`, and parser-safe named integer constants such as `warpSize`.
 - CUDA default kernel parameter initializers such as `int *partial = NULL` are
   accepted by parser intake without changing required runtime bindings.
+- Unresolved template type params used as pointer or reference parameters get a
+  conservative audit instantiation to a scalar storage type such as `float`.
+  Non-pointer layout/object params stay unresolved so CUTE-style layout
+  compatibility is not faked.
+- CUDA signed index aliases such as `ptrdiff_t` lower through parser, layout,
+  source normalization, reference execution, and WGSL as signed `i32` browser
+  index scalars.
 - CUDA fast math/bit intrinsic ledger includes `__saturatef`, `__fdividef`,
   `__expf`, `__logf`, `rsqrtf`, `__clz`, `__mul24`, `__umul24`, and `assert`
   with parser/analyzer, CPU reference, WGSL, and test coverage.

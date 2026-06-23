@@ -514,12 +514,13 @@ __global__ void integerAliases(int32_t *signedOut, uint32_t *unsignedOut, signed
   int idx = threadIdx.x;
   long long signedWide = (long long)idx - 2;
   signed short small = (signed short)n;
+  ptrdiff_t stride = (ptrdiff_t)idx;
   unsigned long long unsignedWide = (unsigned long long)n + (uint64_t)idx;
   uintptr_t ptrValue = (uintptr_t)unsignedWide;
   uint32_t bytes = (uint32_t)sizeof(long);
   int64_t signedAlias = (int64_t)signedWide + (int32_t)small;
   if (idx < 2) {
-    signedOut[idx] = signedAlias;
+    signedOut[idx] = signedAlias + stride;
     unsignedOut[idx] = ptrValue + bytes;
   }
 }`, { workgroupSize: [2, 1, 1] });
@@ -536,10 +537,11 @@ __global__ void integerAliases(int32_t *signedOut, uint32_t *unsignedOut, signed
     );
 
     expect(compiled.wgsl).toContain("var signedWide: i32");
+    expect(compiled.wgsl).toContain("var stride: i32");
     expect(compiled.wgsl).toContain("var unsignedWide: u32");
     expect(compiled.wgsl).toContain("var ptrValue: u32");
     expect(compiled.wgsl).toContain("var bytes: u32 = u32(u32(4))");
-    expect([...result.buffers.signedOut as Int32Array]).toEqual([3, 4]);
+    expect([...result.buffers.signedOut as Int32Array]).toEqual([3, 5]);
     expect([...result.buffers.unsignedOut as Uint32Array]).toEqual([9, 10]);
   });
 

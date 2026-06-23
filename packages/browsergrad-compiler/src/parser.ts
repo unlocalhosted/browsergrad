@@ -35,6 +35,7 @@ import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 const CUDA_SCALAR_TYPE_ALIASES = new Map<string, Exclude<CudaLiteScalarType, "void">>([
   ["char", "int"],
   ["int8_t", "int"],
+  ["ptrdiff_t", "int"],
   ["uchar", "uint"],
   ["uint8_t", "uint"],
   ["clock_t", "uint"],
@@ -81,6 +82,7 @@ const TYPE_START_KEYWORDS = new Set([
   "long",
   "short",
   "size_t",
+  "ptrdiff_t",
   "int32_t",
   "uint32_t",
   "int64_t",
@@ -1133,6 +1135,7 @@ class Parser {
       return "int";
     }
     if (token.value === "size_t") return "uint";
+    if (token.value === "ptrdiff_t") return "int";
     if (token.value === "int32_t" || token.value === "int64_t") return "int";
     if (token.value === "uint32_t" || token.value === "uint64_t" || token.value === "uintptr_t") return "uint";
     if (token.value === "curandState_t") return "uint";

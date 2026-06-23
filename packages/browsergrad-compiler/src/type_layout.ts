@@ -29,6 +29,7 @@ const TYPE_SIZE_BYTES = new Map<string, number>([
   ["long long", 4],
   ["long long int", 4],
   ["size_t", 4],
+  ["ptrdiff_t", 4],
   ["int32_t", 4],
   ["uint32_t", 4],
   ["int64_t", 4],
