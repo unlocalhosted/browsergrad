@@ -1060,14 +1060,27 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (name === "atomicMax" || name === "atomicMaxFloat") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => Math.max(current, value));
   }
+  if (name === "atomicInc") {
+    return evalAtomicReadModifyWrite(expression, context, (current, value) => {
+      const old = current >>> 0;
+      const limit = value >>> 0;
+      return old >= limit ? 0 : (old + 1) >>> 0;
+    });
+  }
+  if (name === "atomicDec") {
+    return evalAtomicReadModifyWrite(expression, context, (current, value) => {
+      const old = current >>> 0;
+      const limit = value >>> 0;
+      return old === 0 || old > limit ? limit : (old - 1) >>> 0;
+    });
+  }
   if (name === "atomicExch") {
     return evalAtomicReadModifyWrite(expression, context, (_current, value) => value);
   }
   if (name === "atomicCAS") {
     const first = expression.args[0];
     if (!first) throw compilerFailure("atomicCAS expects target");
-    const target = first.kind === "unary" && first.operator === "&" ? first.argument : first;
-    const lvalue = resolveLValue(target, context);
+    const lvalue = resolveAtomicTarget(first, context);
     const current = valueAsNumber(readLValue(lvalue, context), lvalue.name);
     const compare = evalNumber(expression.args[1]!, context);
     const value = evalNumber(expression.args[2]!, context);
@@ -1362,12 +1375,22 @@ function evalAtomicReadModifyWrite(
 ): number {
   const first = expression.args[0];
   if (!first) throw compilerFailure("atomic operation expects target");
-  const target = first.kind === "unary" && first.operator === "&" ? first.argument : first;
-  const lvalue = resolveLValue(target, context);
+  const lvalue = resolveAtomicTarget(first, context);
   const current = valueAsNumber(readLValue(lvalue, context), lvalue.name);
   const value = evalNumber(expression.args[1]!, context);
   writeLValue(lvalue, op(current, value), context);
   return current;
+}
+
+function resolveAtomicTarget(expression: CudaLiteExpression, context: ThreadContext): LValue {
+  if (expression.kind === "cast" && expression.pointer) {
+    const pointer = pointerArgumentValue(expression, expression.valueType, context);
+    if (isAddress(pointer)) return pointer.target;
+  }
+  if (expression.kind === "unary" && expression.operator === "&") return resolveLValue(expression.argument, context);
+  const pointer = pointerArgumentValue(expression, pointerValueTypeForExpression(expression, context), context);
+  if (isAddress(pointer)) return pointer.target;
+  throw compilerFailure("atomic operation expects storage or shared address");
 }
 
 function resolveAddressArgument(expression: CudaLiteExpression, context: ThreadContext): LValue {

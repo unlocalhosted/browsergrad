@@ -3542,4 +3542,57 @@ __global__ void atomic_more(int* x, int* out) {
     expect(compiled.wgsl).toContain("atomicMin(&x[1], 3)");
     expect(compiled.wgsl).toContain("atomicSub(&x[1], 1)");
   });
+
+  it("supports CUDA atomic inc/dec and atomics through pointer aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void alias_atomic(float* scratch, const float* values, uint* out) {
+  if (threadIdx.x == 0) {
+    float* accum = scratch;
+    uint* flag = (uint*)(scratch + 2);
+    out[0] = atomicInc(flag, 2);
+    out[1] = atomicDec(flag, 2);
+    atomicAdd(&accum[0], values[0]);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          scratch: new Float32Array([10, 0, 1]),
+          values: new Float32Array([1.5]),
+          out: new Uint32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.scratch as Float32Array]).toEqual([11.5, 0, 1]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 2]);
+    expect(compiled.wgsl).toContain("fn bg_atomicInc_storage_u32");
+    expect(compiled.wgsl).toContain("fn bg_atomicDec_storage_u32");
+    expect(compiled.wgsl).toContain("bg_atomicInc_storage_u32(&scratch[");
+    expect(compiled.wgsl).toContain("bg_atomicAdd_f32(&scratch[");
+  });
+
+  it("supports CUDA atomic inc/dec on shared integer memory", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void shared_counter(uint* out) {
+  __shared__ uint counter[1];
+  if (threadIdx.x == 0) {
+    counter[0] = 1;
+    out[0] = atomicInc(&counter[0], 1);
+    out[1] = atomicDec(&counter[0], 1);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 0]);
+    expect(compiled.wgsl).toContain("var<workgroup> counter: array<atomic<u32>, 1>;");
+    expect(compiled.wgsl).toContain("bg_atomicInc_workgroup_u32(&counter[0], u32(1))");
+    expect(compiled.wgsl).toContain("bg_atomicDec_workgroup_u32(&counter[0], u32(1))");
+  });
 });

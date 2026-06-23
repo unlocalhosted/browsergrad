@@ -57,6 +57,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["atomicMin", [2, 2]],
   ["atomicMax", [2, 2]],
   ["atomicMaxFloat", [2, 2]],
+  ["atomicInc", [2, 2]],
+  ["atomicDec", [2, 2]],
   ["atomicExch", [2, 2]],
   ["atomicCAS", [3, 3]],
   ["tex2D", [3, 3]],
@@ -143,6 +145,7 @@ interface SymbolInfo {
   readonly tileSize?: number;
   readonly pointer?: boolean;
   readonly constant?: boolean;
+  readonly pointerRoot?: string;
   readonly dimensions?: readonly number[];
   readonly span: SourceSpan;
 }
@@ -209,6 +212,7 @@ export function analyzeCudaLite(
 
   const declareVar = (statement: CudaLiteVarDecl, scope: Scope, names: Set<string>): void => {
     const dimensions = resolvedSharedDimensions(statement, options) ?? statement.dimensions;
+    const pointerRoot = statement.pointer ? pointerRootForInitializer(statement.init, scope) : undefined;
     if (names.has(statement.name)) {
       diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${statement.name}'`, statement.span));
     }
@@ -219,6 +223,7 @@ export function analyzeCudaLite(
       kind: statement.storage === "shared" ? "shared" : "local",
       valueType: statement.valueType,
       pointer: statement.pointer,
+      ...(pointerRoot ? { pointerRoot } : {}),
       dimensions,
       span: statement.span,
     });
@@ -660,7 +665,14 @@ function validatePointerInitializerExpression(
 function isSupportedStoragePointerInitializer(statement: CudaLiteVarDecl, scope: Scope): boolean {
   if (!statement.pointer || statement.storage !== "local") return false;
   const source = pointerSourceType(statement.init, scope);
-  return source !== undefined && pointerTypesCompatible(statement.valueType, source);
+  return source !== undefined && pointerTypesCompatible(statement.valueType, source, hasExplicitPointerCast(statement.init));
+}
+
+function pointerRootForInitializer(expression: CudaLiteExpression | undefined, scope: Scope): string | undefined {
+  const root = expression ? rootIdentifier(expression) : undefined;
+  if (!root) return undefined;
+  const symbol = lookupSymbol(root, scope, expression?.span ?? { start: 0, end: 0, line: 1, column: 1 });
+  return symbol?.pointerRoot ?? root;
 }
 
 function pointerSourceType(expression: CudaLiteExpression | undefined, scope: Scope): ValueType | undefined {
@@ -680,12 +692,26 @@ function pointerSourceType(expression: CudaLiteExpression | undefined, scope: Sc
   return symbol?.pointer ? symbol.valueType : undefined;
 }
 
-function pointerTypesCompatible(target: ValueType, source: ValueType): boolean {
+function pointerTypesCompatible(target: ValueType, source: ValueType, allowWordReinterpret = false): boolean {
   if (target === source) return true;
+  if (allowWordReinterpret && isWordScalarPointerType(target) && isWordScalarPointerType(source)) return true;
   const targetScalar = cudaVectorScalarType(target);
   if (targetScalar && targetScalar === source) return true;
   const sourceScalar = cudaVectorScalarType(source);
   return sourceScalar !== undefined && sourceScalar === target;
+}
+
+function isWordScalarPointerType(type: ValueType): boolean {
+  return type === "float" || type === "int" || type === "uint";
+}
+
+function hasExplicitPointerCast(expression: CudaLiteExpression | undefined): boolean {
+  if (!expression) return false;
+  if (expression.kind === "cast" && expression.pointer) return true;
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    return hasExplicitPointerCast(expression.left);
+  }
+  return false;
 }
 
 function isSupportedPoolPointerInitializer(init: CudaLiteExpression | undefined, scope: Scope): boolean {
@@ -1357,24 +1383,27 @@ function validateAtomicBuiltin(
   const callName = expressionName(expression.callee);
   const targetExpression = atomicTargetExpression(target);
   if (!targetExpression) {
-    diagnostics.push(error("atomic-address-required", "atomicAdd first argument must be a pointer parameter or address like &x[i]", expression.span));
+    diagnostics.push(error("atomic-address-required", `${callName ?? "atomic operation"} first argument must be a pointer parameter or address like &x[i]`, expression.span));
     if (target) walkExpression(target, scope);
   } else {
     if (targetExpression.kind !== "identifier") {
       validateLValueExpression(targetExpression, scope, diagnostics, walkExpression);
     }
     const targetName = rootIdentifier(targetExpression);
-    const param = targetName ? params.get(targetName) : undefined;
+    const storageRoot = targetName ? atomicStorageRoot(targetName, scope, targetExpression.span) : undefined;
+    const param = storageRoot ? params.get(storageRoot) : undefined;
     const symbol = targetName ? lookupSymbol(targetName, scope, targetExpression.span) : undefined;
-    if (symbol?.kind === "shared") {
-      if (symbol.valueType === "float" || symbol.valueType === "half" || symbol.valueType === "bool") {
+    const storageSymbol = storageRoot ? lookupSymbol(storageRoot, scope, targetExpression.span) : undefined;
+    const targetType = symbol?.valueType ?? storageSymbol?.valueType;
+    if (storageSymbol?.kind === "shared") {
+      if (targetType === "float" || targetType === "half" || targetType === "bool" || targetType === "complex64") {
         diagnostics.push(error("unsupported-atomic-target", "shared atomics support int/uint targets in CUDA-lite v0", targetExpression.span));
       } else {
-        atomicShared.add(symbol.name);
+        atomicShared.add(storageSymbol.name);
       }
     } else if (!param?.pointer) {
-      diagnostics.push(error("unsupported-atomic-target", "atomicAdd target must be a pointer parameter element", targetExpression.span));
-    } else if (param.valueType === "float" && (
+      diagnostics.push(error("unsupported-atomic-target", `${callName ?? "atomic operation"} target must resolve to storage or shared memory`, targetExpression.span));
+    } else if (targetType === "float" && (
       callName === "atomicAdd" ||
       callName === "atomicSub" ||
       callName === "atomicMin" ||
@@ -1386,12 +1415,12 @@ function validateAtomicBuiltin(
       if (param.constant) {
         diagnostics.push(error("const-pointer-write", `cannot ${callName} through const pointer '${param.name}'`, expression.span));
       }
-    } else if (param.valueType === "float" || param.valueType === "half" || param.valueType === "complex64") {
+    } else if (targetType === "float" || targetType === "half" || targetType === "complex64") {
       diagnostics.push(error("unsupported-atomic-f32", "unsupported float atomic operation in CUDA-lite v0", expression.span));
     } else {
       atomicParams.add(param.name);
       if (param.constant) {
-        diagnostics.push(error("const-pointer-write", `cannot atomicAdd through const pointer '${param.name}'`, expression.span));
+        diagnostics.push(error("const-pointer-write", `cannot ${callName ?? "atomic operation"} through const pointer '${param.name}'`, expression.span));
       }
     }
   }
@@ -1400,12 +1429,19 @@ function validateAtomicBuiltin(
   }
 }
 
+function atomicStorageRoot(name: string, scope: Scope, span: SourceSpan): string {
+  const symbol = lookupSymbol(name, scope, span);
+  return symbol?.pointerRoot ?? name;
+}
+
 function isAtomicBuiltin(callName: string): boolean {
   return callName === "atomicAdd" ||
     callName === "atomicSub" ||
     callName === "atomicMin" ||
     callName === "atomicMax" ||
     callName === "atomicMaxFloat" ||
+    callName === "atomicInc" ||
+    callName === "atomicDec" ||
     callName === "atomicExch" ||
     callName === "atomicCAS";
 }
@@ -1443,6 +1479,7 @@ function atomicTargetExpression(
   target: CudaLiteExpression | undefined,
 ): CudaLiteExpression | undefined {
   if (!target) return undefined;
+  if (target.kind === "cast" && target.pointer) return atomicTargetExpression(target.expression);
   if (target.kind === "unary" && target.operator === "&") return target.argument;
   if (target.kind === "identifier") return target;
   return undefined;

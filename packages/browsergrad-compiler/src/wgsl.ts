@@ -152,6 +152,10 @@ export function emitKernelIrWgsl(
     lines.push("");
     lines.push(...emitFloatAtomicMaxHelper());
   }
+  if (usesAtomicIncDec(ir)) {
+    lines.push("");
+    lines.push(...emitIntegerAtomicLoopHelpers());
+  }
   if (usesCurand(ir)) {
     lines.push("");
     lines.push(...emitCurandHelpers());
@@ -697,6 +701,14 @@ interface DevicePointerLValue {
   readonly buffer: string;
   readonly index: string;
   readonly valueType: CudaLiteScalarType;
+}
+
+interface AtomicTargetInfo {
+  readonly address: string;
+  readonly rootName: string;
+  readonly valueType: CudaLiteScalarType;
+  readonly storageScalar: "i32" | "u32";
+  readonly addressSpace: "storage" | "workgroup";
 }
 
 function emitDevicePointerArgument(expression: CudaLiteExpression, context: EmitContext): readonly [string, string] {
@@ -1338,17 +1350,19 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return emitAtomicCall("atomicMax", expression, context, args);
     case "atomicMaxFloat":
       return emitAtomicCall("atomicMax", expression, context, args);
+    case "atomicInc":
+      return emitAtomicCall("atomicInc", expression, context, args);
+    case "atomicDec":
+      return emitAtomicCall("atomicDec", expression, context, args);
     case "atomicExch":
       return emitAtomicCall("atomicExchange", expression, context, args);
     case "atomicCAS": {
       const target = expression.args[0];
       const compare = expression.args[1];
       const value = expression.args[2];
-      if (target?.kind === "unary" && target.operator === "&" && compare && value) {
-        return `atomicCompareExchangeWeak(&${emitExpression(target.argument, context, "lvalue")}, ${emitExpression(compare, context)}, ${emitExpression(value, context)}).old_value`;
-      }
-      if (target?.kind === "identifier" && compare && value) {
-        return `atomicCompareExchangeWeak(&${target.name}[0], ${emitExpression(compare, context)}, ${emitExpression(value, context)}).old_value`;
+      const atomicTarget = emitAtomicTarget(target, context);
+      if (atomicTarget && compare && value) {
+        return `atomicCompareExchangeWeak(${atomicTarget.address}, ${emitExpression(compare, context)}, ${emitExpression(value, context)}).old_value`;
       }
       return `atomicCompareExchangeWeak(${args.join(", ")}).old_value`;
     }
@@ -1427,52 +1441,168 @@ function emitAtomicCall(
 ): string {
   const target = expression.args[0];
   const value = expression.args[1];
-  if (target?.kind === "unary" && target.operator === "&" && value) {
-    const targetParam = atomicTargetParam(target.argument, context);
-    const targetExpression = emitExpression(target.argument, context, "lvalue");
+  const atomicTarget = emitAtomicTarget(target, context);
+  if (atomicTarget && value) {
     const valueExpression = emitExpression(value, context);
-    const sharedRoot = rootIdentifier(target.argument);
-    if (sharedRoot && context.isAtomicShared(sharedRoot)) {
-      return `${wgslName}(&${targetExpression}, ${valueExpression})`;
+    if (wgslName === "atomicInc") {
+      return `${integerAtomicLoopHelperName("Inc", atomicTarget)}(${atomicTarget.address}, u32(${valueExpression}))`;
     }
-    if (wgslName === "atomicAdd" && targetParam?.valueType === "float") {
-      return `bg_atomicAdd_f32(&${targetExpression}, ${valueExpression})`;
+    if (wgslName === "atomicDec") {
+      return `${integerAtomicLoopHelperName("Dec", atomicTarget)}(${atomicTarget.address}, u32(${valueExpression}))`;
     }
-    if (wgslName === "atomicSub" && targetParam?.valueType === "float") {
-      return `bg_atomicSub_f32(&${targetExpression}, ${valueExpression})`;
+    if (wgslName === "atomicAdd" && atomicTarget.valueType === "float") {
+      return `bg_atomicAdd_f32(${atomicTarget.address}, ${valueExpression})`;
     }
-    if (wgslName === "atomicMin" && targetParam?.valueType === "float") {
-      return `bg_atomicMin_f32(&${targetExpression}, ${valueExpression})`;
+    if (wgslName === "atomicSub" && atomicTarget.valueType === "float") {
+      return `bg_atomicSub_f32(${atomicTarget.address}, ${valueExpression})`;
     }
-    if (wgslName === "atomicMax" && targetParam?.valueType === "float") {
-      return `bg_atomicMax_f32(&${targetExpression}, ${valueExpression})`;
+    if (wgslName === "atomicMin" && atomicTarget.valueType === "float") {
+      return `bg_atomicMin_f32(${atomicTarget.address}, ${valueExpression})`;
     }
-    if (wgslName === "atomicExchange" && targetParam?.valueType === "float") {
-      return `bitcast<f32>(atomicExchange(&${targetExpression}, bitcast<u32>(${valueExpression})))`;
+    if (wgslName === "atomicMax" && atomicTarget.valueType === "float") {
+      return `bg_atomicMax_f32(${atomicTarget.address}, ${valueExpression})`;
     }
-    return `${wgslName}(&${targetExpression}, ${valueExpression})`;
-  }
-  if (target?.kind === "identifier" && value) {
-    const targetParam = context.paramFor(target.name);
-    const valueExpression = emitExpression(value, context);
-    if (wgslName === "atomicAdd" && targetParam?.valueType === "float") {
-      return `bg_atomicAdd_f32(&${target.name}[0], ${valueExpression})`;
+    if (wgslName === "atomicExchange" && atomicTarget.valueType === "float") {
+      return `bitcast<f32>(atomicExchange(${atomicTarget.address}, bitcast<u32>(${valueExpression})))`;
     }
-    if (wgslName === "atomicSub" && targetParam?.valueType === "float") {
-      return `bg_atomicSub_f32(&${target.name}[0], ${valueExpression})`;
-    }
-    if (wgslName === "atomicMin" && targetParam?.valueType === "float") {
-      return `bg_atomicMin_f32(&${target.name}[0], ${valueExpression})`;
-    }
-    if (wgslName === "atomicMax" && targetParam?.valueType === "float") {
-      return `bg_atomicMax_f32(&${target.name}[0], ${valueExpression})`;
-    }
-    if (wgslName === "atomicExchange" && targetParam?.valueType === "float") {
-      return `bitcast<f32>(atomicExchange(&${target.name}[0], bitcast<u32>(${valueExpression})))`;
-    }
-    return `${wgslName}(&${target.name}[0], ${valueExpression})`;
+    return `${wgslName}(${atomicTarget.address}, ${valueExpression})`;
   }
   return `${wgslName}(${args.join(", ")})`;
+}
+
+function emitAtomicTarget(
+  target: CudaLiteExpression | undefined,
+  context: EmitContext,
+): AtomicTargetInfo | undefined {
+  if (!target) return undefined;
+  if (target.kind === "cast" && target.pointer) {
+    const inner = emitAtomicTarget(target.expression, context);
+    return inner ? { ...inner, valueType: target.valueType } : undefined;
+  }
+  if (target.kind === "unary" && target.operator === "&") return emitAtomicAddressTarget(target.argument, context);
+  if (target.kind === "identifier") {
+    const alias = flattenedPointerAlias(target.name, target.span, context);
+    if (alias) {
+      const rootName = resolveAtomicRootName(alias.rootName, context);
+      const info = atomicStorageInfo(rootName, context);
+      if (!info) return undefined;
+      const index = emitPointerAliasIndex(alias, zeroExpression(target.span), context);
+      return {
+        address: `&${rootName}[${index}]`,
+        rootName,
+        valueType: alias.valueType ?? info.valueType,
+        storageScalar: info.storageScalar,
+        addressSpace: info.addressSpace,
+      };
+    }
+    const param = context.paramFor(target.name);
+    if (param?.pointer) {
+      const info = atomicStorageInfo(target.name, context);
+      if (!info) return undefined;
+      return {
+        address: `&${target.name}[0]`,
+        rootName: target.name,
+        valueType: param.valueType,
+        storageScalar: info.storageScalar,
+        addressSpace: info.addressSpace,
+      };
+    }
+  }
+  return undefined;
+}
+
+function emitAtomicAddressTarget(expression: CudaLiteExpression, context: EmitContext): AtomicTargetInfo | undefined {
+  const rootName = atomicExpressionRootName(expression, context);
+  if (!rootName) return undefined;
+  const info = atomicStorageInfo(rootName, context);
+  if (!info) return undefined;
+  return {
+    address: `&${emitExpression(expression, context, "lvalue")}`,
+    rootName,
+    valueType: atomicExpressionValueType(expression, rootName, context) ?? info.valueType,
+    storageScalar: info.storageScalar,
+    addressSpace: info.addressSpace,
+  };
+}
+
+function atomicExpressionRootName(expression: CudaLiteExpression, context: EmitContext): string | undefined {
+  const root = rootIdentifier(expression);
+  return root ? resolveAtomicRootName(root, context) : undefined;
+}
+
+function atomicExpressionValueType(
+  expression: CudaLiteExpression,
+  rootName: string,
+  context: EmitContext,
+): CudaLiteScalarType | undefined {
+  const root = rootIdentifier(expression);
+  if (root) {
+    const alias = context.pointerAliasFor(root);
+    if (alias?.valueType) return alias.valueType;
+    const direct = context.paramFor(root);
+    if (direct?.pointer) return direct.valueType;
+  }
+  return atomicStorageInfo(rootName, context)?.valueType;
+}
+
+function resolveAtomicRootName(name: string, context: EmitContext, seen: ReadonlySet<string> = new Set()): string {
+  if (seen.has(name)) return name;
+  const alias = context.pointerAliasFor(name);
+  if (!alias) return name;
+  return resolveAtomicRootName(alias.rootName, context, new Set([...seen, name]));
+}
+
+function flattenedPointerAlias(
+  name: string,
+  span: CudaLiteExpression["span"],
+  context: EmitContext,
+  seen: ReadonlySet<string> = new Set(),
+): PointerAlias | undefined {
+  if (seen.has(name)) return undefined;
+  const alias = context.pointerAliasFor(name);
+  if (!alias) return undefined;
+  const parent = flattenedPointerAlias(alias.rootName, span, context, new Set([...seen, name]));
+  if (!parent) return alias;
+  const valueType = alias.valueType ?? parent.valueType;
+  return {
+    rootName: parent.rootName,
+    ...(valueType === undefined ? {} : { valueType }),
+    baseIndex: {
+      kind: "binary",
+      operator: "+",
+      left: parent.baseIndex,
+      right: alias.baseIndex,
+      span,
+    },
+  };
+}
+
+function atomicStorageInfo(
+  rootName: string,
+  context: EmitContext,
+): { readonly valueType: CudaLiteScalarType; readonly storageScalar: "i32" | "u32"; readonly addressSpace: "storage" | "workgroup" } | undefined {
+  const param = context.paramFor(rootName);
+  if (param?.pointer && context.ir.atomicParams.includes(rootName)) {
+    return {
+      valueType: param.valueType,
+      storageScalar: param.valueType === "int" ? "i32" : "u32",
+      addressSpace: "storage",
+    };
+  }
+  if (context.isAtomicShared(rootName)) {
+    const shared = context.ir.sharedDeclarations.find((item) => item.name === rootName);
+    if (!shared) return undefined;
+    return {
+      valueType: shared.valueType,
+      storageScalar: shared.valueType === "int" ? "i32" : "u32",
+      addressSpace: "workgroup",
+    };
+  }
+  return undefined;
+}
+
+function integerAtomicLoopHelperName(kind: "Inc" | "Dec", target: AtomicTargetInfo): string {
+  return `bg_atomic${kind}_${target.addressSpace}_${target.storageScalar}`;
 }
 
 function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string {
@@ -1957,6 +2087,66 @@ function emitFloatAtomicMaxHelper(): string[] {
   ];
 }
 
+function emitIntegerAtomicLoopHelpers(): string[] {
+  return [
+    ...emitIntegerAtomicIncHelper("storage", "u32"),
+    "",
+    ...emitIntegerAtomicIncHelper("storage", "i32"),
+    "",
+    ...emitIntegerAtomicIncHelper("workgroup", "u32"),
+    "",
+    ...emitIntegerAtomicIncHelper("workgroup", "i32"),
+    "",
+    ...emitIntegerAtomicDecHelper("storage", "u32"),
+    "",
+    ...emitIntegerAtomicDecHelper("storage", "i32"),
+    "",
+    ...emitIntegerAtomicDecHelper("workgroup", "u32"),
+    "",
+    ...emitIntegerAtomicDecHelper("workgroup", "i32"),
+  ];
+}
+
+function emitIntegerAtomicIncHelper(addressSpace: "storage" | "workgroup", scalar: "i32" | "u32"): string[] {
+  const name = `bg_atomicInc_${addressSpace}_${scalar}`;
+  const load = scalar === "u32" ? "atomicLoad(ptr_value)" : "bitcast<u32>(atomicLoad(ptr_value))";
+  const compare = scalar === "u32" ? "old_bits" : "bitcast<i32>(old_bits)";
+  const store = scalar === "u32" ? "next_bits" : "bitcast<i32>(next_bits)";
+  return [
+    `fn ${name}(ptr_value: ptr<${addressSpace}, atomic<${scalar}>, read_write>, limit: u32) -> u32 {`,
+    `  var old_bits = ${load};`,
+    "  loop {",
+    "    let next_bits = select(old_bits + 1u, 0u, old_bits >= limit);",
+    `    let result = atomicCompareExchangeWeak(ptr_value, ${compare}, ${store});`,
+    "    if (result.exchanged) {",
+    "      return old_bits;",
+    "    }",
+    `    old_bits = ${scalar === "u32" ? "result.old_value" : "bitcast<u32>(result.old_value)"};`,
+    "  }",
+    "}",
+  ];
+}
+
+function emitIntegerAtomicDecHelper(addressSpace: "storage" | "workgroup", scalar: "i32" | "u32"): string[] {
+  const name = `bg_atomicDec_${addressSpace}_${scalar}`;
+  const load = scalar === "u32" ? "atomicLoad(ptr_value)" : "bitcast<u32>(atomicLoad(ptr_value))";
+  const compare = scalar === "u32" ? "old_bits" : "bitcast<i32>(old_bits)";
+  const store = scalar === "u32" ? "next_bits" : "bitcast<i32>(next_bits)";
+  return [
+    `fn ${name}(ptr_value: ptr<${addressSpace}, atomic<${scalar}>, read_write>, limit: u32) -> u32 {`,
+    `  var old_bits = ${load};`,
+    "  loop {",
+    "    let next_bits = select(old_bits - 1u, limit, old_bits == 0u || old_bits > limit);",
+    `    let result = atomicCompareExchangeWeak(ptr_value, ${compare}, ${store});`,
+    "    if (result.exchanged) {",
+    "      return old_bits;",
+    "    }",
+    `    old_bits = ${scalar === "u32" ? "result.old_value" : "bitcast<u32>(result.old_value)"};`,
+    "  }",
+    "}",
+  ];
+}
+
 function emitCurandHelpers(): string[] {
   return [
     "fn bg_curand_next(state: ptr<function, u32>) -> u32 {",
@@ -2005,6 +2195,11 @@ function usesFloatAtomicMax(ir: KernelIrModule): boolean {
   return ir.params.some((param) => param.pointer && param.valueType === "float" && ir.atomicParams.includes(param.name)) &&
     (statementsUseCall(ir.body, new Set(["atomicMax", "atomicMaxFloat"])) ||
       ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMax", "atomicMaxFloat"]))));
+}
+
+function usesAtomicIncDec(ir: KernelIrModule): boolean {
+  return statementsUseCall(ir.body, new Set(["atomicInc", "atomicDec"])) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicInc", "atomicDec"])));
 }
 
 function usesCurand(ir: KernelIrModule): boolean {
@@ -2121,11 +2316,6 @@ function emitSpecialFloatConstantHelpers(): readonly string[] {
     "  return bitcast<f32>(bits);",
     "}",
   ];
-}
-
-function atomicTargetParam(expression: CudaLiteExpression, context: EmitContext): CudaLiteParam | undefined {
-  const root = rootIdentifier(expression);
-  return root ? context.paramFor(root) : undefined;
 }
 
 function functionBodyHasReturn(statements: readonly CudaLiteStatement[]): boolean {
