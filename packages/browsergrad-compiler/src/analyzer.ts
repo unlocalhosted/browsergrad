@@ -86,6 +86,9 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["atomicCAS", [3, 3]],
   ["atomicCAS_system", [3, 3]],
   ["tex2D", [3, 3]],
+  ["tex2DLod", [4, 4]],
+  ["tex1Dfetch", [2, 2]],
+  ["surf2Dread", [4, 5]],
   ["surf2Dwrite", [4, 5]],
   ["sizeof", [1, 1]],
   ["alignof", [1, 1]],
@@ -991,10 +994,14 @@ function validateCallExpression(
     validateScalarOperand(info, arg.span, diagnostics);
     return { kind: "scalar", valueType: warpReductionReturnType(callName, info.valueType) };
   }
-  if (callName === "tex2D") {
-    validateTex2D(expression, scope, diagnostics, walkExpression);
+  if (callName === "tex2D" || callName === "tex2DLod" || callName === "tex1Dfetch") {
+    validateTextureRead(expression, callName, scope, diagnostics, walkExpression);
     if (requiresShaderF16(expression.templateValueType)) requiredFeatures.add("shader-f16");
     return expressionInfoForTextureRead(expression);
+  }
+  if (callName === "surf2Dread") {
+    validateSurf2DRead(expression, scope, diagnostics, walkExpression);
+    return { kind: "scalar", valueType: "voidptr" };
   }
   if (callName === "surf2Dwrite") {
     validateSurf2DWrite(expression, scope, diagnostics, walkExpression);
@@ -1397,25 +1404,52 @@ function cooperativeNamespaceCall(
   return { symbol, method, groupArg };
 }
 
-function validateTex2D(
+function validateTextureRead(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  callName: string,
   scope: Scope,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
 ): void {
   if (!isSupportedTextureReadType(expression.templateValueType)) {
-    diagnostics.push(error("unsupported-texture", "tex2D currently supports float/int/uint, half, float2/3/4, int2/3/4, uint2/3/4, and half2 reads", expression.span));
+    diagnostics.push(error("unsupported-texture", `${callName} currently supports float/int/uint, half, float2/3/4, int2/3/4, uint2/3/4, and half2 reads`, expression.span));
   }
   const texture = expression.args[0];
   if (texture?.kind !== "identifier") {
-    diagnostics.push(error("unsupported-texture", "tex2D first argument must be a texture reference", expression.span));
+    diagnostics.push(error("unsupported-texture", `${callName} first argument must be a texture reference`, expression.span));
   } else {
     const symbol = lookupSymbol(texture.name, scope, texture.span);
     if (symbol?.kind !== "texture" && symbol?.valueType !== "texture2d") {
-      diagnostics.push(error("unsupported-texture", `tex2D target '${texture.name}' is not a texture reference`, texture.span));
+      diagnostics.push(error("unsupported-texture", `${callName} target '${texture.name}' is not a texture reference`, texture.span));
     }
   }
-  for (const coord of expression.args.slice(1)) {
+  const coords = callName === "tex1Dfetch" ? expression.args.slice(1, 2) : expression.args.slice(1);
+  for (const coord of coords) {
+    validateScalarOperand(walkExpression(coord, scope), coord.span, diagnostics);
+  }
+}
+
+function validateSurf2DRead(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const target = expression.args[0];
+  if (target) {
+    const lvalue = target.kind === "unary" && target.operator === "&" ? target.argument : target;
+    validateLValueExpression(lvalue, scope, diagnostics, walkExpression);
+  }
+  const surface = expression.args[1];
+  if (surface?.kind !== "identifier") {
+    diagnostics.push(error("unsupported-texture", "surf2Dread second argument must be a surface reference", expression.span));
+  } else {
+    const symbol = lookupSymbol(surface.name, scope, surface.span);
+    if (symbol?.valueType !== "surface2d") {
+      diagnostics.push(error("unsupported-texture", `surf2Dread target '${surface.name}' is not a surface reference`, surface.span));
+    }
+  }
+  for (const coord of expression.args.slice(2, 4)) {
     validateScalarOperand(walkExpression(coord, scope), coord.span, diagnostics);
   }
 }
@@ -1786,7 +1820,10 @@ function validateNonCallExpression(
           diagnostics.push(error("unsupported-deref-target", "unary * expects a pointer expression", expression.argument.span));
           return { kind: "unknown" };
         }
-        return { kind: "scalar", valueType: info.valueType };
+        if (isCudaVectorType(info.valueType)) return { kind: "vector", valueType: info.valueType, symbol: info.symbol };
+        return info.valueType === "complex64"
+          ? { kind: "complex", valueType: info.valueType, symbol: info.symbol }
+          : { kind: "scalar", valueType: info.valueType, symbol: info.symbol };
       }
       const info = walkExpression(expression.argument, scope);
       validateScalarOperand(info, expression.argument.span, diagnostics);
@@ -1919,6 +1956,19 @@ function validateLValueExpression(
       }
       return;
     }
+  }
+  if (expression.kind === "unary" && expression.operator === "*") {
+    const info = walkExpression(expression.argument, scope);
+    if (info.kind !== "pointer" && info.kind !== "pool-pointer" && info.kind !== "address" && info.kind !== "unknown") {
+      diagnostics.push(error("unsupported-deref-target", "unary * expects a pointer expression", expression.argument.span));
+      return;
+    }
+    const root = rootIdentifier(expression);
+    const symbol = root ? lookupSymbol(root, scope, expression.span) : undefined;
+    if (symbol?.pointer && symbol.constant) {
+      diagnostics.push(error("const-pointer-write", `cannot write through const pointer '${root}'`, expression.span));
+    }
+    return;
   }
   diagnostics.push(error("invalid-assignment-target", "assignment target must be a local variable, pointer element, or shared element", expression.span));
 }
@@ -2319,7 +2369,7 @@ export function rootIdentifier(expression: CudaLiteExpression): string | undefin
   if (expression.kind === "cast") return rootIdentifier(expression.expression);
   if (expression.kind === "index") return rootIdentifier(expression.target);
   if (expression.kind === "member") return rootIdentifier(expression.object);
-  if (expression.kind === "unary" && expression.operator === "&") return rootIdentifier(expression.argument);
+  if (expression.kind === "unary" && (expression.operator === "&" || expression.operator === "*")) return rootIdentifier(expression.argument);
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) return rootIdentifier(expression.left);
   return undefined;
 }

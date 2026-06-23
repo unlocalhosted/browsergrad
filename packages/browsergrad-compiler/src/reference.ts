@@ -708,8 +708,8 @@ function pointerArgumentValue(
     const local = context.locals.get(arg.name);
     if (isPoolPointer(local)) return { ...local, valueType };
     if (isAddress(local)) return local;
-    if (context.buffers.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "buffer", index: 0 } };
-    if (context.shared.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "shared", index: 0 } };
+    if (context.buffers.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "buffer", index: 0, valueType } };
+    if (context.shared.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "shared", index: 0, valueType } };
     if (context.memoryPools.has(arg.name)) return { kind: "pool-pointer", poolName: arg.name, byteOffset: 0, valueType };
     if (local && typeof local !== "number") return local;
   }
@@ -839,6 +839,7 @@ function pointerValueTypeForExpression(
   if (expression.kind === "identifier") {
     const local = context.locals.get(expression.name);
     if (isPoolPointer(local) && local.valueType) return local.valueType;
+    if (isAddress(local) && local.target.valueType) return local.target.valueType;
     return context.valueTypes.get(expression.name) ?? "uint";
   }
   const root = rootIdentifierFromExpression(expression);
@@ -853,6 +854,7 @@ function expressionValueType(expression: CudaLiteExpression, context: ThreadCont
     return context.valueTypes.get(expression.name);
   }
   if (expression.kind === "index") return pointerValueTypeForExpression(expression.target, context);
+  if (expression.kind === "unary" && expression.operator === "*") return pointerValueTypeForExpression(expression.argument, context);
   if (expression.kind === "call") {
     const name = expressionNameForReference(expression.callee);
     return name ? cudaVectorConstructorType(name) : undefined;
@@ -970,17 +972,7 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
 }
 
 function evalDeref(expression: CudaLiteExpression, context: ThreadContext): EvalValue {
-  if (expression.kind === "identifier") {
-    const local = context.locals.get(expression.name);
-    if (isAddress(local)) return readLValue(local.target, context);
-    if (isPoolPointer(local)) return readLValue({ name: local.poolName, space: "pool", index: Math.trunc(local.byteOffset / 4), valueType: "float" }, context);
-    if (context.buffers.has(expression.name)) return readLValue({ name: expression.name, space: "buffer", index: 0 }, context);
-  }
-  if (expression.kind === "cast" && expression.pointer) {
-    const pointer = valueAsPoolPointer(evalExpression(expression.expression, context), "pool pointer");
-    return readLValue({ name: pointer.poolName, space: "pool", index: Math.trunc(pointer.byteOffset / 4), valueType: expression.valueType }, context);
-  }
-  throw compilerFailure("unsupported pointer dereference");
+  return readLValue(resolvePointerArgument(expression, context), context);
 }
 
 function evalNumber(expression: CudaLiteExpression, context: ThreadContext): number {
@@ -1039,7 +1031,9 @@ function vectorExpressionType(
     const name = expressionName(expression.callee);
     const constructor = name ? cudaVectorConstructorType(name) : undefined;
     if (constructor) return constructor;
-    if (name === "tex2D" && isCudaVectorType(expression.templateValueType)) return expression.templateValueType;
+    if ((name === "tex2D" || name === "tex2DLod" || name === "tex1Dfetch") && isCudaVectorType(expression.templateValueType)) {
+      return expression.templateValueType;
+    }
     if (isHalf2Intrinsic(name) || name === "__float22half2_rn" || name === "__float2half2_rn" || name === "__floats2half2_rn") return "half2";
     if (name === "__half22float2") return "float2";
   }
@@ -1464,16 +1458,37 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     if (Math.trunc(current) === Math.trunc(compare)) writeLValue(lvalue, value, context);
     return current;
   }
-  if (name === "tex2D") {
+  if (name === "tex2D" || name === "tex2DLod" || name === "tex1Dfetch") {
     const textureRef = expression.args[0];
-    if (textureRef?.kind !== "identifier") throw compilerFailure("tex2D expects texture reference");
+    if (textureRef?.kind !== "identifier") throw compilerFailure(`${name} expects texture reference`);
     const texture = context.textures[textureRef.name];
     if (!texture) throw compilerFailure(`missing texture input '${textureRef.name}'`);
     const x = Math.max(0, Math.min(texture.width - 1, Math.floor(evalNumber(expression.args[1]!, context))));
-    const y = Math.max(0, Math.min(texture.height - 1, Math.floor(evalNumber(expression.args[2]!, context))));
+    const y = name === "tex1Dfetch"
+      ? 0
+      : Math.max(0, Math.min(texture.height - 1, Math.floor(evalNumber(expression.args[2]!, context))));
     const valueType = expression.templateValueType ?? "float";
     if (isCudaVectorType(valueType)) return readTextureVector(texture, x, y, valueType);
     return texture.data[(y * texture.width + x) * textureChannels(texture)] ?? 0;
+  }
+  if (name === "surf2Dread") {
+    const target = expression.args[0];
+    const surfaceRef = expression.args[1];
+    if (!target) throw compilerFailure("surf2Dread expects output target");
+    if (surfaceRef?.kind !== "identifier") throw compilerFailure("surf2Dread expects surface reference");
+    const surface = context.surfaces[surfaceRef.name];
+    if (!surface) throw compilerFailure(`missing surface input '${surfaceRef.name}'`);
+    const x = Math.trunc(evalNumber(expression.args[2]!, context) / 4);
+    const y = Math.trunc(evalNumber(expression.args[3]!, context));
+    const index = y * surface.width + x;
+    const ok = x >= 0 && y >= 0 && x < surface.width && y < surface.height && index < surface.data.length;
+    const value = ok ? surface.data[index] ?? 0 : 0;
+    const lvalue = target.kind === "unary" && target.operator === "&"
+      ? resolveLValue(target.argument, context)
+      : resolveLValue(target, context);
+    writeLValue(lvalue, value, context);
+    context.trace.reads.push({ name: surfaceRef.name, index, value, ok });
+    return 0;
   }
   if (name === "surf2Dwrite") {
     const surfaceRef = expression.args[1];
@@ -1899,6 +1914,9 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
   if (pointerCast) return pointerCast;
   const pool = resolvePoolLValue(expression, context);
   if (pool) return pool;
+  if (expression.kind === "unary" && expression.operator === "*") {
+    return resolvePointerArgument(expression.argument, context);
+  }
   if (expression.kind === "member") {
     if (expression.property !== "x" && expression.property !== "y") {
       const info = expressionValueType(expression.object, context);
@@ -1930,7 +1948,7 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
       space: alias.target.space,
       index,
       ...(alias.target.valueType === undefined ? {} : { valueType: alias.target.valueType }),
-      ...(alias.target.rawStorageIndex ? { rawStorageIndex: true } : {}),
+      rawStorageIndex: true,
     };
   }
   if (isPoolPointer(alias)) {
@@ -2031,7 +2049,9 @@ function resolvePointerInitializer(statement: CudaLiteVarDecl, context: ThreadCo
   if (init?.kind === "call" || (init?.kind === "cast" && init.pointer) || init?.kind === "identifier" || init?.kind === "binary") {
     const value = pointerArgumentValue(init, statement.valueType, context);
     if (isPoolPointer(value)) return value;
-    if (typeof value !== "number" && "kind" in value && value.kind === "address") return value;
+    if (typeof value !== "number" && "kind" in value && value.kind === "address") {
+      return { ...value, target: { ...value.target, valueType: value.target.valueType ?? statement.valueType } };
+    }
   }
   if (init?.kind !== "unary" || init.operator !== "&") {
     throw compilerFailure(`pointer '${statement.name}' must initialize from an address`);
@@ -2040,7 +2060,7 @@ function resolvePointerInitializer(statement: CudaLiteVarDecl, context: ThreadCo
   if (target.space !== "shared" && target.space !== "buffer") {
     throw compilerFailure(`pointer '${statement.name}' can only alias storage or shared memory in CUDA-lite v0`);
   }
-  return { kind: "address", target };
+  return { kind: "address", target: { ...target, valueType: target.valueType ?? statement.valueType } };
 }
 
 function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {

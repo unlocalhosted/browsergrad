@@ -876,6 +876,7 @@ interface DevicePointerLValue {
   readonly buffer: string;
   readonly index: string;
   readonly valueType: CudaLiteScalarType;
+  readonly fieldIndex?: number;
 }
 
 interface AtomicTargetInfo {
@@ -974,22 +975,30 @@ function devicePointerIndexExpression(
 }
 
 function devicePointerLValue(expression: CudaLiteExpression, context: EmitContext): DevicePointerLValue | undefined {
-  if (expression.kind === "index" && expression.target.kind === "identifier") {
-    const param = context.devicePointerParamFor(expression.target.name);
-    if (!param) return undefined;
+  if (expression.kind === "member") {
+    const base = devicePointerLValue(expression.object, context);
+    if (!base || !isCudaVectorType(base.valueType)) return undefined;
+    const fieldIndex = cudaVectorFieldIndex(base.valueType, expression.property);
+    return fieldIndex === undefined ? undefined : { ...base, fieldIndex };
+  }
+  if (expression.kind === "index") {
+    if (expression.target.kind === "identifier" && !context.devicePointerParamFor(expression.target.name)) return undefined;
+    const parts = devicePointerArgumentParts(expression.target, context);
+    if (!parts) return undefined;
+    const valueType = devicePointerValueTypeForExpression(expression.target, context);
     return {
-      buffer: `${expression.target.name}_buffer`,
-      index: devicePointerIndexExpression(expression.target.name, expression.index, context),
-      valueType: param.valueType,
+      buffer: parts.buffer,
+      index: `(${parts.base} + u32(${emitExpression(expression.index, context)}))`,
+      valueType,
     };
   }
-  if (expression.kind === "unary" && expression.operator === "*" && expression.argument.kind === "identifier") {
-    const param = context.devicePointerParamFor(expression.argument.name);
-    if (!param) return undefined;
+  if (expression.kind === "unary" && expression.operator === "*") {
+    const parts = devicePointerArgumentParts(expression.argument, context);
+    if (!parts) return undefined;
     return {
-      buffer: `${expression.argument.name}_buffer`,
-      index: `${expression.argument.name}_base`,
-      valueType: param.valueType,
+      buffer: parts.buffer,
+      index: parts.base,
+      valueType: devicePointerValueTypeForExpression(expression.argument, context),
     };
   }
   return undefined;
@@ -1684,26 +1693,40 @@ function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "va
 
 function emitDeref(expression: CudaLiteExpression, context: EmitContext): string {
   if (expression.kind === "identifier") {
-    const pointerParam = context.devicePointerParamFor(expression.name);
-    if (pointerParam) {
-      return `${pointerReadHelperName(pointerParam.valueType)}(${context.nameFor(`${expression.name}_buffer`)}, ${context.nameFor(`${expression.name}_base`)})`;
+    const alias = context.pointerAliasFor(expression.name);
+    if (alias) {
+      return `${context.nameFor(alias.rootName)}[${emitPointerAliasIndex(alias, zeroExpression(expression.span), context)}]`;
     }
     const param = context.paramFor(expression.name);
-    const access = `${context.nameFor(expression.name)}[${emitPointerIndex(expression.name, zeroExpression(expression.span), context)}]`;
-    if (param && context.ir.atomicParams.includes(param.name)) {
-      const loaded = `atomicLoad(&${access})`;
-      return param.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
+    if (param?.pointer && !context.devicePointerParamFor(expression.name)) {
+      const access = `${context.nameFor(expression.name)}[${emitPointerIndex(expression.name, zeroExpression(expression.span), context)}]`;
+      if (context.ir.atomicParams.includes(param.name)) {
+        const loaded = `atomicLoad(&${access})`;
+        return param.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
+      }
+      return access;
     }
-    return access;
   }
   if (expression.kind === "cast" && expression.pointer) {
-    return emitPoolRead({
-      poolName: poolPointerExpressionInfo(expression.expression, context)?.poolName ?? "",
-      pointerExpression: expression.expression,
-      indexExpression: { kind: "number", value: 0, raw: "0", span: expression.span },
-      valueType: expression.valueType,
-      ...(poolPointerExpressionInfo(expression.expression, context)?.rawBuffer ? { rawBuffer: true } : {}),
-    }, context);
+    const poolPointer = poolPointerExpressionInfo(expression.expression, context);
+    if (poolPointer) {
+      return emitPoolRead({
+        poolName: poolPointer.poolName,
+        pointerExpression: expression.expression,
+        indexExpression: { kind: "number", value: 0, raw: "0", span: expression.span },
+        valueType: expression.valueType,
+        ...(poolPointer.rawBuffer ? { rawBuffer: true } : {}),
+      }, context);
+    }
+  }
+  const storageView = storageViewForPointerExpression(expression, zeroExpression(expression.span), context);
+  if (storageView && isCudaVectorType(storageView.valueType)) {
+    return emitVectorStorageReadAt(context.nameFor(storageView.rootName), storageView.valueType, storageView.index);
+  }
+  const parts = devicePointerArgumentParts(expression, context);
+  if (parts) {
+    const valueType = devicePointerValueTypeForExpression(expression, context);
+    return `${pointerReadHelperName(valueType)}(${parts.buffer}, ${parts.base})`;
   }
   return `*${emitExpression(expression, context)}`;
 }
@@ -1712,6 +1735,10 @@ function emitMember(expression: Extract<CudaLiteExpression, { kind: "member" }>,
   if (expression.property === "size") {
     const valueType = expressionValueTypeForEmit(expression.object, context);
     if (isCudaVectorType(valueType)) return String(cudaVectorLaneCount(valueType));
+  }
+  const storageView = storageViewLValue(expression, context);
+  if (storageView?.fieldIndex !== undefined) {
+    return `${context.nameFor(storageView.name)}[${storageView.index} + ${storageView.fieldIndex}u]`;
   }
   const objectName = expressionName(expression.object);
   const axisIndex = expression.property === "x" ? 0 : expression.property === "y" ? 1 : 2;
@@ -1738,7 +1765,7 @@ function expressionValueTypeForEmit(expression: CudaLiteExpression, context: Emi
   if (expression.kind === "cast") return expression.valueType;
   if (expression.kind === "call") {
     const name = expressionName(expression.callee);
-    if (name === "tex2D") return expression.templateValueType ?? "float";
+    if (name === "tex2D" || name === "tex2DLod" || name === "tex1Dfetch") return expression.templateValueType ?? "float";
     return name ? cudaVectorConstructorType(name) : undefined;
   }
   if (expression.kind === "index") {
@@ -1746,7 +1773,13 @@ function expressionValueTypeForEmit(expression: CudaLiteExpression, context: Emi
     if (storageView) return storageView.valueType;
     return expressionValueTypeForEmit(expression.target, context);
   }
-  if (expression.kind === "member") return expressionValueTypeForEmit(expression.object, context);
+  if (expression.kind === "member") {
+    if (expression.property === "size") return "int";
+    const objectType = expressionValueTypeForEmit(expression.object, context);
+    if (isCudaVectorType(objectType)) return cudaVectorScalarType(objectType);
+    if (objectType === "complex64") return "float";
+    return objectType;
+  }
   if (expression.kind === "binary") return vectorArithmeticTypeForEmit(expression, context);
   return undefined;
 }
@@ -1904,11 +1937,28 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "__all_sync":
       return `select(0u, 1u, subgroupAll((${args[1] ?? "0"}) != 0))`;
     case "tex2D":
-      if (expression.args.length === 3 && expression.args[0]?.kind === "identifier") {
+    case "tex2DLod":
+      if (expression.args.length >= 3 && expression.args[0]?.kind === "identifier") {
         const suffix = textureReadHelperSuffix(expression.templateValueType);
         return `bg_tex2d_${suffix}_${expression.args[0].name}(${emitExpression(expression.args[1]!, context)}, ${emitExpression(expression.args[2]!, context)})`;
       }
-      return `tex2D(${args.join(", ")})`;
+      return `${name}(${args.join(", ")})`;
+    case "tex1Dfetch":
+      if (expression.args.length === 2 && expression.args[0]?.kind === "identifier") {
+        const suffix = textureReadHelperSuffix(expression.templateValueType);
+        return `bg_tex2d_${suffix}_${expression.args[0].name}(${emitExpression(expression.args[1]!, context)}, 0.0)`;
+      }
+      return `tex1Dfetch(${args.join(", ")})`;
+    case "surf2Dread":
+      if (expression.args.length >= 4 && expression.args[1]?.kind === "identifier") {
+        const target = expression.args[0]!;
+        const lvalue = target.kind === "unary" && target.operator === "&" ? target.argument : target;
+        const targetType = expressionValueTypeForEmit(lvalue, context) ?? "float";
+        const read = `bg_surf2dread_${expression.args[1].name}(${emitExpression(expression.args[2]!, context)}, ${emitExpression(expression.args[3]!, context)})`;
+        const value = targetType === "float" ? read : `${wgslScalar(targetType)}(${read})`;
+        return `${emitExpression(lvalue, context, "lvalue")} = ${value}`;
+      }
+      return `surf2Dread(${args.join(", ")})`;
     case "surf2Dwrite":
       if (expression.args.length >= 4 && expression.args[1]?.kind === "identifier") {
         return `bg_surf2dwrite_${expression.args[1].name}(${emitExpression(expression.args[0]!, context)}, ${emitExpression(expression.args[2]!, context)}, ${emitExpression(expression.args[3]!, context)})`;
@@ -2277,6 +2327,17 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   if (pointerLvalue) {
     const right = emitExpression(expression.right, context);
     const read = `${pointerReadHelperName(pointerLvalue.valueType)}(${pointerLvalue.buffer}, ${pointerLvalue.index})`;
+    if (pointerLvalue.fieldIndex !== undefined) {
+      if (!isCudaVectorType(pointerLvalue.valueType)) {
+        throw featureError("unsupported-vector-assignment", "member assignment through pointer expects a CUDA vector pointer");
+      }
+      const field = vectorFieldName(pointerLvalue.fieldIndex);
+      const currentLane = `${read}.${field}`;
+      const laneValue = expression.operator === "="
+        ? right
+        : `(${currentLane} ${expression.operator.slice(0, -1)} ${right})`;
+      return `${pointerWriteHelperName(pointerLvalue.valueType)}(${pointerLvalue.buffer}, ${pointerLvalue.index}, ${emitVectorLaneSetExpression(read, pointerLvalue.valueType, pointerLvalue.fieldIndex, laneValue)})`;
+    }
     const value = expression.operator === "="
       ? right
       : expression.operator === "+="
@@ -2345,10 +2406,15 @@ function emitLocalVectorAssignment(expression: CudaLiteAssignmentExpression, con
 }
 
 function emitVectorLaneSet(name: string, type: CudaLiteScalarType, index: string, value: string): string {
+  return emitVectorLaneSetExpression(name, type, index, value);
+}
+
+function emitVectorLaneSetExpression(base: string, type: CudaLiteScalarType, index: string | number, value: string): string {
   const scalar = wgslScalar(cudaVectorScalarType(type) ?? "float");
+  const indexExpression = typeof index === "number" ? `${index}u` : index;
   const values = Array.from({ length: cudaVectorLaneCount(type) }, (_, lane) => {
-    const current = `${name}.${vectorFieldName(lane)}`;
-    return `select(${current}, ${scalar}(${value}), ${index} == ${lane}u)`;
+    const current = `(${base}).${vectorFieldName(lane)}`;
+    return `select(${current}, ${scalar}(${value}), ${indexExpression} == ${lane}u)`;
   });
   return `${wgslScalar(type)}(${values.join(", ")})`;
 }
@@ -2428,8 +2494,11 @@ function storageViewLValue(expression: CudaLiteExpression, context: EmitContext)
     field = expression.property;
     target = expression.object;
   }
-  if (target.kind !== "index") return undefined;
-  const view = storageViewForPointerExpression(target.target, target.index, context);
+  const view = target.kind === "index"
+    ? storageViewForPointerExpression(target.target, target.index, context)
+    : target.kind === "unary" && target.operator === "*"
+      ? storageViewForPointerExpression(target.argument, zeroExpression(target.span), context)
+      : undefined;
   if (!view || !isCudaVectorType(view.valueType)) return undefined;
   const base = {
     name: view.rootName,
@@ -2459,6 +2528,15 @@ function storageViewForPointerExpression(
   if (pointer.kind === "identifier") {
     const alias = context.pointerAliasFor(pointer.name);
     if (!alias?.valueType) return undefined;
+    return {
+      rootName: alias.rootName,
+      valueType: alias.valueType,
+      index: emitStorageViewIndex(alias.rootName, alias.baseIndex, index, alias.valueType, context),
+    };
+  }
+  const valueType = devicePointerValueTypeForExpression(pointer, context);
+  const alias = pointerAliasForPointerExpression(pointer, valueType);
+  if (alias?.valueType) {
     return {
       rootName: alias.rootName,
       valueType: alias.valueType,
@@ -2647,6 +2725,14 @@ function emitTextureVectorCastHelpers(
 function emitSurfaceHelper(name: string, context: EmitContext): string[] {
   const safeName = context.nameFor(name);
   return [
+    `fn bg_surf2dread_${name}(x_bytes: i32, y: i32) -> f32 {`,
+    "  let x = x_bytes / 4;",
+    `  let index = y * i32(params.${context.nameFor(surfaceWidthField(name))}) + x;`,
+    `  if (index >= 0 && index < i32(arrayLength(&${safeName}))) {`,
+    `    return ${safeName}[index];`,
+    "  }",
+    "  return 0.0;",
+    "}",
     `fn bg_surf2dwrite_${name}(value: f32, x_bytes: i32, y: i32) {`,
     "  let x = x_bytes / 4;",
     `  let index = y * i32(params.${context.nameFor(surfaceWidthField(name))}) + x;`,

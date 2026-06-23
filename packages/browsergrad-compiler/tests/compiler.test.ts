@@ -2150,6 +2150,44 @@ __global__ void addPackedAlias(float *a, float *b, float *c) {
     expect([...result.buffers.c as Float32Array]).toEqual([3, 7, 11, 15]);
   });
 
+  it("lowers generic pointer dereference lvalues and rebased kernel params", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void derefWrite(float *x) {
+  x += 1;
+  *x = *x + 3.0f;
+  float *p = x + 1;
+  *p = *p + 5.0f;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([1, 2, 3]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_x_base = (bg_x_base + u32(1))");
+    expect(compiled.wgsl).not.toContain("var p");
+    expect([...result.buffers.x as Float32Array]).toEqual([1, 5, 8]);
+  });
+
+  it("lowers vector member writes through dereferenced reinterpret views", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void vectorDeref(float *x, float *out) {
+  float4 *p = reinterpret_cast<float4 *>(&x[0]);
+  (*p).z = (*p).x + (*p).y;
+  out[0] = (*p).z;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([2, 4, 0, 8]), out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_f32x4");
+    expect(compiled.wgsl).toMatch(/x\[[^\n]+ \+ 2u\] =/u);
+    expect([...result.buffers.x as Float32Array]).toEqual([2, 4, 6, 8]);
+    expect([...result.buffers.out as Float32Array]).toEqual([6]);
+  });
+
   it("keeps CUDA vector shared arrays as logical vec storage", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ inline float4 load_float4(float4* tile, int i) {
@@ -3709,6 +3747,52 @@ __global__ void sample(uint4 *out) {
 
     expect(compiled.wgsl).toContain("bg_tex2d_uint4_texRef");
     expect([...result.buffers.out as Uint32Array]).toEqual([1, 2, 3, 255]);
+  });
+
+  it("lowers CUDA texture fetch aliases without repo-specific rewrites", () => {
+    const compiled = compileCudaLiteKernel(`
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void sample(float4 *vecOut, float *scalarOut) {
+  vecOut[0] = tex2DLod<float4>(texRef, 0.5f, 0.5f, 0.0f);
+  scalarOut[0] = tex1Dfetch<float>(texRef, 1);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          vecOut: new Float32Array(4),
+          scalarOut: new Float32Array(1),
+        },
+        textures: {
+          texRef: { width: 2, height: 1, channels: 4, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_tex2d_float4_texRef");
+    expect([...result.buffers.vecOut as Float32Array]).toEqual([1, 2, 3, 4]);
+    expect([...result.buffers.scalarOut as Float32Array]).toEqual([5]);
+  });
+
+  it("lowers CUDA surf2Dread into guarded surface buffer loads", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void readSurface(uint *out, cudaSurfaceObject_t surf) {
+  uint value = 0;
+  surf2Dread(&value, surf, 4, 0);
+  out[0] = value;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Uint32Array(1) },
+        surfaces: { surf: { width: 2, height: 1, data: new Float32Array([3, 9]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_surf2dread_surf");
+    expect([...result.buffers.out as Uint32Array]).toEqual([9]);
   });
 
   it("formats diagnostics with source snippets", () => {

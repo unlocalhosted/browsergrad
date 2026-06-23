@@ -72,10 +72,10 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   excludes kernels now runnable on real WebGPU through orchestration; current
   baseline is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=179`
-  WebGPU-runnable, and `<=178` hard gaps;
-  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=77`
-  WebGPU-runnable, and `<=71` hard gaps;
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=192`
+  WebGPU-runnable, and `<=165` hard gaps;
+  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=78`
+  WebGPU-runnable, and `<=70` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=194`
   WebGPU-runnable, and `<=99` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
@@ -83,6 +83,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   with integer offset counters, casted pool pointer reads/writes, WebGPU atomic
   offset updates, DevicePool aliasing across host-lifted child launches,
   CUDA cache-hint memory builtins lowered as plain storage pointer memory ops,
+  generic unary pointer dereference lvalues, alias-preserving vector member
+  writes, `tex2DLod` / `tex1Dfetch` texture aliases, guarded `surf2Dread`,
   scalarized CUDA vector storage views for `float2/3/4`, `int2/3/4`, and
   `uint2/3/4`, simple C++ alias and constexpr integer intake, local quoted
   header context for corpus audits, CUDA `static` kernel qualifiers, and
