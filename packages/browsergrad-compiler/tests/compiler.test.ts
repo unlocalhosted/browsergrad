@@ -1926,7 +1926,8 @@ __global__ void cache_hint(const float* x, float* y) {
   if (idx < 2) {
     const float* base = x + 1;
     float value = __ldcs(base + idx);
-    __stcs(y + idx, value + 1.0f);
+    float direct = __ldcs(&x[idx]);
+    __stcs(y + idx, value + direct + 1.0f);
   }
 }`, { workgroupSize: [2, 1, 1] });
     const result = runCompiledKernelReference(
@@ -1937,7 +1938,7 @@ __global__ void cache_hint(const float* x, float* y) {
 
     expect(compiled.wgsl).toContain("bg_ptr_read_f32");
     expect(compiled.wgsl).toContain("bg_ptr_write_f32");
-    expect([...result.buffers.y as Float32Array]).toEqual([3, 5]);
+    expect([...result.buffers.y as Float32Array]).toEqual([3, 7]);
   });
 
   it("lowers CUDA float4 values as scalar storage memory views", () => {
@@ -4149,6 +4150,40 @@ __global__ void half_convert(const half* input, half* output, int* flag) {
     expect([...result.buffers.flag as Int32Array]).toEqual([1]);
   });
 
+  it("lowers CUDA fp8 storage conversions through explicit helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void fp8_convert(const uint* input, half* output, uint* encoded, int* as_int) {
+  int idx = threadIdx.x;
+  if (idx < 1) {
+    half e4m3 = __nv_cvt_fp8_to_halfraw(input[0], __NV_E4M3);
+    output[0] = e4m3;
+    encoded[0] = __nv_cvt_float_to_fp8(__half2float(e4m3), __NV_SATFINITE, __NV_E4M3);
+    as_int[0] = __half2int_rz(e4m3);
+  }
+}`, {
+      features: { "shader-f16": true },
+      workgroupSize: [1, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          input: new Uint32Array([0x3c]),
+          output: createWgslFloat16Array(1),
+          encoded: new Uint32Array(1),
+          as_int: new Int32Array(1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_fp8_to_f32");
+    expect(compiled.wgsl).toContain("fn bg_f32_to_fp8");
+    expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([1.5]);
+    expect([...result.buffers.encoded as Uint32Array]).toEqual([0x3c]);
+    expect([...result.buffers.as_int as Int32Array]).toEqual([1]);
+  });
+
   it("lowers scalar CUDA half arithmetic and comparison intrinsics", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void half_ops(const __half* input, half* output, int* flags) {
@@ -4566,6 +4601,23 @@ __global__ void bitwise_compound(int* out) {
     expect(compiled.wgsl).toContain("value = (value ^ 3)");
     expect(compiled.wgsl).toContain("value = (value | 8)");
     expect(compiled.wgsl).toContain("value = (value & 14)");
+  });
+
+  it("lowers vector pack static constructors after source normalization", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void vector_static(float* out) {
+  float4 zero = make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+  float4 one = make_float4(1.0f, 1.0f, 1.0f, 1.0f);
+  out[threadIdx.x] = zero[threadIdx.x] + one[threadIdx.x];
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 1, 1, 1]);
+    expect(compiled.wgsl).toContain("var zero: vec4<f32> = vec4<f32>(0.0, 0.0, 0.0, 0.0);");
   });
 
   it("supports mutable CUDA pointer rebasing", () => {

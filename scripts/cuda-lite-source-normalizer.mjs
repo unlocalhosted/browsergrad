@@ -117,7 +117,7 @@ export function createKernelCompilationUnit({
     effectiveDefines,
     new Set([...params, ...templateNames]),
   );
-  return normalizeCppTemplateCarrierSyntax(normalizeSimpleLocalLambdas(normalizeBlockReduceHelpers(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(stripSupportedTypeAliasDeclarations(withNumericDefines, effectiveDefines)))))));
+  return normalizeCppTemplateCarrierSyntax(normalizeSimpleStatementMacros(normalizeSimpleLocalLambdas(normalizeBlockReduceHelpers(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(normalizeVectorStaticConstructors(stripSupportedTypeAliasDeclarations(withNumericDefines, effectiveDefines), effectiveDefines))))))));
 }
 
 export function collectCudaLiteContextDefines(source) {
@@ -342,7 +342,7 @@ function sourceCallsFunctionThroughDefines(source, name, definesByName) {
 }
 
 function sourceCallsFunction(source, name) {
-  if (new RegExp(`\\b${escapeRegExp(name)}\\s*\\(`, "u").test(source)) return true;
+  if (new RegExp(`(?:^|[^:A-Za-z0-9_])${escapeRegExp(name)}\\s*\\(`, "u").test(source)) return true;
   return scanTemplatedCallReferences(source).some((call) => call.name === name);
 }
 
@@ -635,7 +635,9 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
     type === "CUtexObject" ||
     type === "CUtensorMap" ||
     type === "cudaGraphConditionalHandle" ||
-    type === "__nv_fp8_storage_t"
+    type === "__nv_fp8_storage_t" ||
+    type === "__nv_fp8x2_storage_t" ||
+    type === "__nv_fp8x4_storage_t"
   ) return "uint";
   if (type === "long long" || type === "long" || type === "short" || type === "short int") return "int";
   if (type === "uchar2") return "uint2";
@@ -652,6 +654,62 @@ function normalizeCppTemplateCarrierSyntax(source) {
   return source
     .replace(/\bstd\s*::\s*bool_constant\s*<\s*(true|false)\s*>\s*\{\s*\}/gu, "$1")
     .replace(/\bstd\s*::\s*bool_constant\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>\s*(?=[,)])/gu, (_match, name) => `bool __bg_bool_constant_${name}`);
+}
+
+function normalizeSimpleStatementMacros(source) {
+  const macros = [];
+  for (const line of source.split(/\r?\n/u)) {
+    const match = /^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s+(.+?)\s*$/u.exec(stripLineComment(line));
+    if (match?.[1] === undefined || match[2] === undefined || match[3] === undefined) continue;
+    const body = match[3].trim();
+    if (!body.includes(";") || !body.includes("=") || /[#{}\\]/u.test(body)) continue;
+    const params = splitTopLevel(match[2]).map((param) => param.trim()).filter(Boolean);
+    if (params.length === 0) continue;
+    macros.push({ name: match[1], params, body });
+  }
+  if (macros.length === 0) return source;
+  return source.split(/\r?\n/u).map((line) => {
+    if (/^\s*#/u.test(line)) return line;
+    let out = line;
+    for (const macro of macros) out = replaceSimpleStatementMacroCalls(out, macro);
+    return out;
+  }).join("\n");
+}
+
+function replaceSimpleStatementMacroCalls(line, macro) {
+  const re = new RegExp(`\\b${escapeRegExp(macro.name)}\\s*\\(`, "gu");
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(line)) !== null) {
+    const open = line.indexOf("(", match.index + macro.name.length);
+    const close = findBalanced(line, open, "(", ")");
+    if (open < 0 || close === undefined) {
+      re.lastIndex = match.index + macro.name.length;
+      continue;
+    }
+    const args = splitTopLevel(line.slice(open + 1, close)).map((arg) => arg.trim());
+    if (args.length !== macro.params.length) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    const after = line.slice(close + 1).match(/^\s*;/u);
+    const expansion = expandSimpleStatementMacro(macro, args);
+    out += line.slice(cursor, match.index);
+    out += expansion;
+    cursor = close + 1 + (after?.[0]?.length ?? 0);
+    re.lastIndex = cursor;
+  }
+  return cursor === 0 ? line : out + line.slice(cursor);
+}
+
+function expandSimpleStatementMacro(macro, args) {
+  let body = macro.body;
+  for (const [index, param] of macro.params.entries()) {
+    const arg = args[index] ?? "";
+    body = body.replace(new RegExp(`\\b${escapeRegExp(param)}\\b`, "gu"), arg);
+  }
+  return body.endsWith(";") ? body : `${body};`;
 }
 
 function normalizeCarrierMemberReferences(source, definesByName) {
@@ -961,6 +1019,16 @@ function addressTarget(expression) {
 }
 
 function normalizePacked128MemoryHelpers(source) {
+  let current = source;
+  for (let pass = 0; pass < 4; pass++) {
+    const next = normalizePacked128MemoryHelpersOnce(current);
+    if (next === current) return current;
+    current = next;
+  }
+  return current;
+}
+
+function normalizePacked128MemoryHelpersOnce(source) {
   const helper = /\b(load128cs|load128|store128cs|store128cg|store128)\s*\(/gu;
   let out = "";
   let cursor = 0;
@@ -998,6 +1066,69 @@ function packed128HelperReplacement(name, args, source) {
   const value = args[1];
   if (value === undefined || value.length === 0) return undefined;
   return `(reinterpret_cast<${vectorType} *>(${pointer})[0] = ${value})`;
+}
+
+function normalizeVectorStaticConstructors(source, definesByName = new Map()) {
+  const aliases = new Map();
+  for (const vectorType of [
+    "float2", "float3", "float4", "half2",
+    "int2", "int3", "int4", "uint2", "uint3", "uint4",
+  ]) {
+    aliases.set(vectorType, vectorType);
+  }
+  for (const [name, value] of definesByName) {
+    if (!isMacroIdentifier(name)) continue;
+    const vectorType = normalizeTemplateTypeArgument(value, definesByName);
+    if (vectorType !== undefined && supportedVectorStaticType(vectorType)) aliases.set(name, vectorType);
+  }
+  let out = source;
+  for (const [alias, vectorType] of [...aliases].sort((a, b) => b[0].length - a[0].length)) {
+    out = out.replace(new RegExp(`\\b${escapeRegExp(alias)}\\s*::\\s*zeros\\s*\\(\\s*\\)`, "gu"), vectorSplatConstructor(vectorType, vectorZeroLiteral(vectorType)));
+    out = rewriteVectorConstantConstructors(out, alias, vectorType);
+  }
+  return out;
+}
+
+function supportedVectorStaticType(vectorType) {
+  return vectorLaneCount(vectorType) !== undefined;
+}
+
+function rewriteVectorConstantConstructors(source, alias, vectorType) {
+  const re = new RegExp(`\\b${escapeRegExp(alias)}\\s*::\\s*constant\\s*\\(`, "gu");
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const open = source.indexOf("(", match.index);
+    const close = findBalanced(source, open, "(", ")");
+    if (open < 0 || close === undefined) {
+      re.lastIndex = match.index + alias.length;
+      continue;
+    }
+    const value = source.slice(open + 1, close).trim() || vectorZeroLiteral(vectorType);
+    out += source.slice(cursor, match.index);
+    out += vectorSplatConstructor(vectorType, value);
+    cursor = close + 1;
+    re.lastIndex = close + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function vectorSplatConstructor(vectorType, value) {
+  const lanes = vectorLaneCount(vectorType);
+  return `make_${vectorType}(${Array.from({ length: lanes ?? 0 }, () => value).join(", ")})`;
+}
+
+function vectorZeroLiteral(vectorType) {
+  if (vectorType.startsWith("half")) return "__float2half(0.0f)";
+  if (vectorType.startsWith("float")) return "0.0f";
+  return "0";
+}
+
+function vectorLaneCount(vectorType) {
+  if (vectorType === "half2") return 2;
+  const match = /^(?:float|int|uint)([234])$/u.exec(vectorType);
+  return match?.[1] === undefined ? undefined : Number(match[1]);
 }
 
 function inferPacked128PointerVectorType(pointer, source) {
@@ -1627,7 +1758,7 @@ function parseFunctionParamForInference(param, templateTypeNames) {
 function collectVisiblePointerTypes(source, initialDefines = new Map()) {
   const symbols = new Map();
   const defines = mergeDefineMaps(initialDefines, collectObjectDefines(source));
-  const re = /\b(?:const\s+)?([A-Za-z_][A-Za-z0-9_:]*)\s*(?:\*\s*)+\s*([A-Za-z_][A-Za-z0-9_]*)\b/gu;
+  const re = /\b(?:(?:const|volatile)\s+)*([A-Za-z_][A-Za-z0-9_:]*)\s*(?:\*\s*(?:(?:const|volatile|__restrict__|__restrict|restrict)\s+)*)+\s*([A-Za-z_][A-Za-z0-9_]*)\b/gu;
   for (const match of source.matchAll(re)) {
     const [, type, name] = match;
     if (type && name) symbols.set(name, normalizeTemplateTypeArgument(defines.get(type) ?? type, defines) ?? type);

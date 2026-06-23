@@ -905,7 +905,7 @@ function validateCallExpression(
   if (callName === "__ldcs") {
     const arg = expression.args[0];
     if (!arg) return { kind: "unknown" };
-    const info = walkExpression(arg, scope);
+    const info = validateReadPointerOperand(arg, scope, walkExpression);
     if (info.kind !== "pointer" && info.kind !== "pool-pointer" && info.kind !== "address" && info.kind !== "unknown") {
       diagnostics.push(error("unsupported-cache-hint-address", "__ldcs expects a pointer expression", arg.span));
     }
@@ -1081,6 +1081,18 @@ function validateCallExpression(
     validateScalarOperand(info, arg.span, diagnostics);
   }
   return { kind: "scalar" };
+}
+
+function validateReadPointerOperand(
+  expression: CudaLiteExpression,
+  scope: Scope,
+  walkExpression: ExpressionWalker,
+): ExpressionInfo {
+  if (expression.kind === "unary" && expression.operator === "&") {
+    const info = walkExpression(expression.argument, scope);
+    return { kind: "address", valueType: info.valueType, symbol: info.symbol };
+  }
+  return walkExpression(expression, scope);
 }
 
 function isPointerIdentityCall(callName: string | undefined): boolean {

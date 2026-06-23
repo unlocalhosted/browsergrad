@@ -190,6 +190,10 @@ export function emitKernelIrWgsl(
     lines.push("");
     lines.push(...emitSpecialFloatConstantHelpers());
   }
+  if (usesFp8Intrinsics(ir)) {
+    lines.push("");
+    lines.push(...emitFp8Helpers());
+  }
   if (usesDevicePointerParams(ir)) {
     lines.push("");
     lines.push(...emitDevicePointerHelpers(ir, context));
@@ -3350,6 +3354,12 @@ function usesSpecialFloatNamedConstants(ir: KernelIrModule): boolean {
     ir.functions.some((fn) => statementsUseIdentifier(fn.body, names));
 }
 
+function usesFp8Intrinsics(ir: KernelIrModule): boolean {
+  const names = new Set(["__nv_cvt_fp8_to_halfraw", "__nv_cvt_float_to_fp8"]);
+  return statementsUseCall(ir.body, names) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+}
+
 function statementsUseCall(statements: readonly CudaLiteStatement[], names: ReadonlySet<string>): boolean {
   for (const statement of statements) {
     if (statement.kind === "expr" && expressionUsesCall(statement.expression, names)) return true;
@@ -3453,6 +3463,73 @@ function emitSpecialFloatConstantHelpers(): readonly string[] {
     "fn bg_f32_nan() -> f32 {",
     "  var bits: u32 = 0x7fc00000u;",
     "  return bitcast<f32>(bits);",
+    "}",
+  ];
+}
+
+function emitFp8Helpers(): readonly string[] {
+  return [
+    "fn bg_fp8_to_f32(bits_raw: u32, mode: u32) -> f32 {",
+    "  let bits = bits_raw & 0xffu;",
+    "  let sign = select(1.0, -1.0, (bits & 0x80u) != 0u);",
+    "  if (mode == 1u) {",
+    "    let exp_bits = (bits >> 2u) & 0x1fu;",
+    "    let mant = bits & 0x03u;",
+    "    if (exp_bits == 0u && mant == 0u) { return sign * 0.0; }",
+    "    if (exp_bits == 0u) { return sign * f32(mant) * exp2(-16.0); }",
+    "    if (exp_bits == 0x1fu) { return select(sign * bitcast<f32>(0x7f800000u), bitcast<f32>(0x7fc00000u), mant != 0u); }",
+    "    return sign * (1.0 + f32(mant) / 4.0) * exp2(f32(i32(exp_bits) - 15));",
+    "  }",
+    "  let exp_bits = (bits >> 3u) & 0x0fu;",
+    "  let mant = bits & 0x07u;",
+    "  if (exp_bits == 0u && mant == 0u) { return sign * 0.0; }",
+    "  if (exp_bits == 0u) { return sign * f32(mant) * exp2(-9.0); }",
+    "  if (exp_bits == 0x0fu && mant == 0x07u) { return bitcast<f32>(0x7fc00000u); }",
+    "  return sign * (1.0 + f32(mant) / 8.0) * exp2(f32(i32(exp_bits) - 7));",
+    "}",
+    "",
+    "fn bg_round_even(x: f32) -> u32 {",
+    "  let base = floor(x);",
+    "  let diff = x - base;",
+    "  if (diff < 0.5) { return u32(base); }",
+    "  if (diff > 0.5) { return u32(base + 1.0); }",
+    "  let even = (u32(base) & 1u) == 0u;",
+    "  return select(u32(base + 1.0), u32(base), even);",
+    "}",
+    "",
+    "fn bg_f32_to_fp8_format(value: f32, saturate: u32, mantissa_bits: u32, bias: i32, max_exponent: u32, max_mantissa: u32, nan_bits: u32, inf_bits: u32) -> u32 {",
+    "  if (value != value) { return nan_bits; }",
+    "  let sign_bit = select(0u, 0x80u, bitcast<u32>(value) >> 31u != 0u);",
+    "  var magnitude = abs(value);",
+    "  if (magnitude == 0.0) { return sign_bit; }",
+    "  let mantissa_scale = f32(1u << mantissa_bits);",
+    "  let max_finite = (1.0 + f32(max_mantissa) / mantissa_scale) * exp2(f32(i32(max_exponent) - bias));",
+    "  if (magnitude > max_finite) {",
+    "    if (saturate == 1u) { magnitude = max_finite; }",
+    "    else { return sign_bit | inf_bits; }",
+    "  }",
+    "  let raw_exp = i32(floor(log2(magnitude)));",
+    "  var exp_bits = raw_exp + bias;",
+    "  if (exp_bits <= 0) {",
+    "    let mant = min(max_mantissa, bg_round_even(magnitude / exp2(f32(1 - bias)) * mantissa_scale));",
+    "    return sign_bit | mant;",
+    "  }",
+    "  var mant = bg_round_even((magnitude / exp2(f32(raw_exp)) - 1.0) * mantissa_scale);",
+    "  if (mant == (1u << mantissa_bits)) {",
+    "    exp_bits = exp_bits + 1;",
+    "    mant = 0u;",
+    "  }",
+    "  if (exp_bits > i32(max_exponent) || (exp_bits == i32(max_exponent) && mant > max_mantissa)) {",
+    "    if (saturate != 1u) { return sign_bit | inf_bits; }",
+    "    exp_bits = i32(max_exponent);",
+    "    mant = max_mantissa;",
+    "  }",
+    "  return sign_bit | (u32(exp_bits) << mantissa_bits) | mant;",
+    "}",
+    "",
+    "fn bg_f32_to_fp8(value: f32, saturate: u32, mode: u32) -> u32 {",
+    "  if (mode == 1u) { return bg_f32_to_fp8_format(value, saturate, 2u, 15, 30u, 3u, 0x7fu, 0x7cu); }",
+    "  return bg_f32_to_fp8_format(value, saturate, 3u, 7, 15u, 6u, 0x7fu, 0x7fu);",
     "}",
   ];
 }

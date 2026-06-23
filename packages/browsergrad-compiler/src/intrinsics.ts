@@ -99,6 +99,7 @@ const HALF_INTRINSICS = [
   intrinsic("__float2half", [1, 1], "half", (args) => roundHalf(args[0] ?? 0), (args) => `f16(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__float2half_rn", [1, 1], "half", (args) => roundHalf(args[0] ?? 0), (args) => `f16(${args.join(", ")})`, HALF_FEATURES),
   intrinsic("__int2half_rn", [1, 1], "half", (args) => roundHalf(args[0] ?? 0), (args) => `f16(${args.join(", ")})`, HALF_FEATURES),
+  intrinsic("__half2int_rz", [1, 1], "int", (args) => Math.trunc(args[0] ?? 0), (args) => `i32(${args[0] ?? "0"})`, HALF_FEATURES),
   intrinsic("hrsqrt", [1, 1], "half", (args) => roundHalf(1 / Math.sqrt(args[0] ?? 0)), (args) => `f16(inverseSqrt(f32(${args[0] ?? "0"})))`, HALF_FEATURES),
   intrinsic("__hneg", [1, 1], "half", (args) => roundHalf(-(args[0] ?? 0)), (args) => `(-${args[0] ?? "0"})`, HALF_FEATURES),
   intrinsic("__hadd", [2, 2], "half", (args) => roundHalf((args[0] ?? 0) + (args[1] ?? 0)), (args) => `(${args[0] ?? "0"} + ${args[1] ?? "0"})`, HALF_FEATURES),
@@ -129,10 +130,16 @@ const HALF_INTRINSICS = [
   intrinsic("__floats2half2_rn", [2, 2], "half2", () => 0, (args) => `vec2<f16>(f16(${args[0] ?? "0"}), f16(${args[1] ?? "0"}))`, HALF_FEATURES),
 ] as const;
 
+const FP8_INTRINSICS = [
+  intrinsic("__nv_cvt_fp8_to_halfraw", [2, 2], "half", (args) => roundHalf(fp8ToFloat32(args[0] ?? 0, args[1] ?? 0)), (args) => `f16(bg_fp8_to_f32(u32(${args[0] ?? "0"}), u32(${args[1] ?? "0"})))`, HALF_FEATURES),
+  intrinsic("__nv_cvt_float_to_fp8", [3, 3], "uint", (args) => float32ToFp8(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0), (args) => `bg_f32_to_fp8(f32(${args[0] ?? "0"}), u32(${args[1] ?? "0"}), u32(${args[2] ?? "0"}))`),
+] as const;
+
 export const CUDA_INTRINSICS: readonly CudaIntrinsic[] = [
   ...FLOAT_INTRINSICS,
   ...INTEGER_INTRINSICS,
   ...HALF_INTRINSICS,
+  ...FP8_INTRINSICS,
 ];
 
 export const CUDA_INTRINSICS_BY_NAME = new Map(CUDA_INTRINSICS.map((intrinsic) => [intrinsic.name, intrinsic]));
@@ -170,4 +177,85 @@ function popCount32(value: number): number {
   bits -= (bits >>> 1) & 0x55555555;
   bits = (bits & 0x33333333) + ((bits >>> 2) & 0x33333333);
   return (((bits + (bits >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
+}
+
+function fp8ToFloat32(bits: number, mode: number): number {
+  const value = Math.trunc(bits) & 0xff;
+  const sign = (value & 0x80) === 0 ? 1 : -1;
+  if ((Math.trunc(mode) >>> 0) === 1) return fp8E5M2ToFloat32(value, sign);
+  return fp8E4M3ToFloat32(value, sign);
+}
+
+function fp8E4M3ToFloat32(value: number, sign: number): number {
+  const exponent = (value >>> 3) & 0x0f;
+  const mantissa = value & 0x07;
+  if (exponent === 0 && mantissa === 0) return sign < 0 ? -0 : 0;
+  if (exponent === 0) return sign * mantissa * 2 ** -9;
+  if (exponent === 0x0f && mantissa === 0x07) return Number.NaN;
+  return sign * (1 + mantissa / 8) * 2 ** (exponent - 7);
+}
+
+function fp8E5M2ToFloat32(value: number, sign: number): number {
+  const exponent = (value >>> 2) & 0x1f;
+  const mantissa = value & 0x03;
+  if (exponent === 0 && mantissa === 0) return sign < 0 ? -0 : 0;
+  if (exponent === 0) return sign * mantissa * 2 ** -16;
+  if (exponent === 0x1f) return mantissa === 0 ? sign * Infinity : Number.NaN;
+  return sign * (1 + mantissa / 4) * 2 ** (exponent - 15);
+}
+
+function float32ToFp8(value: number, saturate: number, mode: number): number {
+  return (Math.trunc(mode) >>> 0) === 1
+    ? float32ToFp8Format(value, saturate, { mantissaBits: 2, exponentBits: 5, bias: 15, maxExponent: 30, maxMantissa: 3, nanBits: 0x7f, infBits: 0x7c })
+    : float32ToFp8Format(value, saturate, { mantissaBits: 3, exponentBits: 4, bias: 7, maxExponent: 15, maxMantissa: 6, nanBits: 0x7f });
+}
+
+function float32ToFp8Format(
+  value: number,
+  saturate: number,
+  format: {
+    readonly mantissaBits: number;
+    readonly exponentBits: number;
+    readonly bias: number;
+    readonly maxExponent: number;
+    readonly maxMantissa: number;
+    readonly nanBits: number;
+    readonly infBits?: number;
+  },
+): number {
+  if (Number.isNaN(value)) return format.nanBits;
+  const signBit = Object.is(value, -0) || value < 0 ? 0x80 : 0;
+  let magnitude = Math.abs(value);
+  if (magnitude === 0) return signBit;
+  const maxFinite = (1 + format.maxMantissa / (1 << format.mantissaBits)) * 2 ** (format.maxExponent - format.bias);
+  if (magnitude > maxFinite) {
+    if ((Math.trunc(saturate) >>> 0) === 1) magnitude = maxFinite;
+    else return signBit | (format.infBits ?? format.nanBits);
+  }
+  const rawExponent = Math.floor(Math.log2(magnitude));
+  let exponent = rawExponent + format.bias;
+  const mantissaScale = 1 << format.mantissaBits;
+  if (exponent <= 0) {
+    const mantissa = Math.max(0, Math.min(format.maxMantissa, roundTiesToEven(magnitude / 2 ** (1 - format.bias) * mantissaScale)));
+    return signBit | mantissa;
+  }
+  let mantissa = roundTiesToEven((magnitude / 2 ** rawExponent - 1) * mantissaScale);
+  if (mantissa === mantissaScale) {
+    exponent++;
+    mantissa = 0;
+  }
+  if (exponent > format.maxExponent || (exponent === format.maxExponent && mantissa > format.maxMantissa)) {
+    if ((Math.trunc(saturate) >>> 0) !== 1) return signBit | (format.infBits ?? format.nanBits);
+    exponent = format.maxExponent;
+    mantissa = format.maxMantissa;
+  }
+  return signBit | (exponent << format.mantissaBits) | mantissa;
+}
+
+function roundTiesToEven(value: number): number {
+  const floor = Math.floor(value);
+  const diff = value - floor;
+  if (diff < 0.5) return floor;
+  if (diff > 0.5) return floor + 1;
+  return floor % 2 === 0 ? floor : floor + 1;
 }

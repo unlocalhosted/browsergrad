@@ -596,6 +596,75 @@ __global__ void packed_alias(floatX *out, const floatX *in) {
 }
 
 {
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void restrict_packed(float* __restrict__ out, const float* __restrict__ in) {
+  int idx = threadIdx.x * 4;
+  float4 value = load128(in + idx);
+  store128(out + idx, value);
+}`,
+    deviceFunctions: [
+      { name: "load128", source: "__device__ Packed128<ElementType> load128(const ElementType* address) { return Packed128<ElementType>{}; }" },
+      { name: "store128", source: "__device__ void store128(ElementType* target, Packed128<ElementType> value) { }" },
+    ],
+  });
+  assert.match(source, /reinterpret_cast<float4 \*>\(in \+ idx\)\[0\]/u);
+  assert.match(source, /\(reinterpret_cast<float4 \*>\(out \+ idx\)\[0\] = value\)/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void nested_packed(float* out, const float* in) {
+  int idx = threadIdx.x * 4;
+  store128(out + idx, load128(in + idx));
+}`,
+    deviceFunctions: [
+      { name: "load128", source: "__device__ Packed128<ElementType> load128(const ElementType* address) { return Packed128<ElementType>{}; }" },
+      { name: "store128", source: "__device__ void store128(ElementType* target, Packed128<ElementType> value) { }" },
+    ],
+  });
+  assert.match(source, /\(reinterpret_cast<float4 \*>\(out \+ idx\)\[0\] = reinterpret_cast<float4 \*>\(in \+ idx\)\[0\]\)/u);
+  assert.doesNotMatch(source, /\b(?:load128|store128)\s*\(/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+typedef float floatX;
+typedef Packed128<floatX> x128;
+__global__ void packed_static(floatX *out) {
+  x128 zero = x128::zeros();
+  x128 one = x128::constant(1.0f);
+  out[threadIdx.x] = zero[threadIdx.x] + one[threadIdx.x];
+}`,
+    deviceFunctions: [
+      { name: "zeros", source: "__device__ static Packed128 zeros() { return constant(0); }" },
+      { name: "constant", source: "__device__ static Packed128 constant(ElementType value) { Packed128 result; return result; }" },
+    ],
+  });
+  assert.match(source, /x128 zero = make_float4\(0\.0f, 0\.0f, 0\.0f, 0\.0f\);/u);
+  assert.match(source, /x128 one = make_float4\(1\.0f, 1\.0f, 1\.0f, 1\.0f\);/u);
+  assert.doesNotMatch(source, /__device__ static Packed128/u);
+  assert.doesNotMatch(source, /::zeros|::constant/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+#define SET_PAIR(dst, src) (dst).x = (src).x + 1.0f; (dst).y = (src).y + 2.0f;
+__global__ void statement_macro(float2 *out, float2 *in) {
+  float2 x = in[threadIdx.x];
+  float2 y;
+  SET_PAIR(y, x);
+  out[threadIdx.x] = y;
+}`,
+  });
+  assert.match(source, /\(y\)\.x = \(x\)\.x \+ 1\.0f; \(y\)\.y = \(x\)\.y \+ 2\.0f;/u);
+  assert.doesNotMatch(source, /\bSET_PAIR\s*\(y, x\)/u);
+}
+
+{
   const kernel = `
 template <typename T, int Block>
 __global__ void alias_template(T *out) {

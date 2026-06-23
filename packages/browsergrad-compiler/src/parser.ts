@@ -44,6 +44,8 @@ const CUDA_SCALAR_TYPE_ALIASES = new Map<string, Exclude<CudaLiteScalarType, "vo
   ["CUtensorMap", "uint"],
   ["cudaGraphConditionalHandle", "uint"],
   ["__nv_fp8_storage_t", "uint"],
+  ["__nv_fp8x2_storage_t", "uint"],
+  ["__nv_fp8x4_storage_t", "uint"],
 ]);
 const TYPE_KEYWORDS = new Set([
   "float",
