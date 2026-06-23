@@ -77,17 +77,28 @@ function kernelParamNames(kernel) {
 function kernelSignature(kernel) {
   const header = kernel.slice(0, kernel.indexOf("{") < 0 ? kernel.length : kernel.indexOf("{"));
   const match = /__global__[\s\S]*?\bvoid\b\s*(?:(?:__launch_bounds__)\s*\([^)]*\)\s*)*(?:static\s+|extern\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/u.exec(header);
-  if (match?.[1] === undefined || match.index === undefined) return undefined;
-  const open = header.indexOf("(", match.index + match[0].length - 1);
+  if (match?.[1] !== undefined && match.index !== undefined) {
+    const open = header.indexOf("(", match.index + match[0].length - 1);
+    const params = balancedParenContents(header, open);
+    return params === undefined ? undefined : { name: match[1], params };
+  }
+  const globalIndex = header.indexOf("__global__");
+  if (globalIndex < 0) return undefined;
+  const open = header.indexOf("(", globalIndex + "__global__".length);
+  const params = balancedParenContents(header, open);
+  return params === undefined ? undefined : { name: undefined, params };
+}
+
+function balancedParenContents(source, open) {
   if (open < 0) return undefined;
   let depth = 0;
-  for (let index = open; index < header.length; index++) {
-    const char = header[index];
+  for (let index = open; index < source.length; index++) {
+    const char = source[index];
     if (char === "(") depth++;
     else if (char === ")") {
       depth--;
       if (depth === 0) {
-        return { name: match[1], params: header.slice(open + 1, index) };
+        return source.slice(open + 1, index);
       }
     }
   }

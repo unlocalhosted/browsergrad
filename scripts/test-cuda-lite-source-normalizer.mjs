@@ -95,6 +95,22 @@ __global__ void __launch_bounds__(WARP_SIZE * kTiles)
 {
   const source = createKernelCompilationUnit({
     kernel: `
+[] __global__ (float *data, int N) {
+  int idx = threadIdx.x;
+  if (idx < N) data[idx] = 0.0f;
+}`,
+    definesByName: new Map([
+      ["N", "1024"],
+      ["BLOCK", "256"],
+    ]),
+  });
+  assert.doesNotMatch(source, /#define N 1024/u);
+  assert.match(source, /#define BLOCK 256/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 __global__ void kernel(float *in, float *out, int ld) {
   int row = threadIdx.x;
   out[0] = in[IDX2C(row, 0, ld)];
