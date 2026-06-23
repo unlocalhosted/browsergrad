@@ -78,6 +78,58 @@ __global__ void kernel(float *out) {
 }
 
 {
+  const source = `
+template <uint sortDir>
+__global__ void sample(uint *out) { out[0] = sortDir; }
+void launch(uint *out) {
+  sample<1U>
+      <<<1, 1>>>(out);
+  sample<0U>
+      <<<1, 1>>>(out);
+}`;
+  const launches = collectKernelTemplateArguments(source);
+  assert.deepEqual(launches.get("sample"), ["1U"]);
+}
+
+{
+  const kernel = `
+template <uint sortDir>
+__global__ void ranks(uint *data, uint *out) {
+  out[0] = binarySearchExclusive<sortDir>(data[0], data, 16, 8);
+}`;
+  const source = createKernelCompilationUnit({
+    kernel,
+    templateArgumentsByKernelName: new Map([["ranks", ["1U"]]]),
+    deviceFunctions: [
+      {
+        name: "binarySearchExclusive",
+        source: `
+template <uint sortDir>
+__device__ uint binarySearchExclusive(uint val, uint *data, uint L, uint stride) {
+  uint pos = 0;
+  for (; stride > 0; stride >>= 1) {
+    uint newPos = umin(pos + stride, L);
+    if ((sortDir && (data[newPos - 1] < val)) || (!sortDir && (data[newPos - 1] > val))) {
+      pos = newPos;
+    }
+  }
+  return pos;
+}`,
+      },
+      {
+        name: "unusedPointerHelper",
+        source: "__device__ uint unusedPointerHelper(uint *data) { return data[0]; }",
+      },
+    ],
+  });
+  assert.match(source, /template <uint sortDir = 1>/u);
+  assert.match(source, /uint binarySearchExclusive\(uint val, uint \*data/u);
+  assert.match(source, /binarySearchExclusive\(data\[0\], data, 16, 8\)/u);
+  assert.doesNotMatch(source, /unusedPointerHelper/u);
+  assert.doesNotMatch(source, /binarySearchExclusive<sortDir>/u);
+}
+
+{
   const source = createKernelCompilationUnit({
     kernel: `
 __global__ void kernel(int *out) {
@@ -96,6 +148,32 @@ static __device__ __forceinline__ int templated_helper(int value) {
   });
   assert.match(source, /template <const int kStep = 8>/u);
   assert.match(source, /static __device__ __forceinline__ int templated_helper/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void kernel(float *out) {
+  out[0] = warp_reduce_sum<WARP_SIZE>(1.0f);
+}`,
+    definesByName: new Map([["WARP_SIZE", "32"]]),
+    deviceFunctions: [
+      {
+        name: "warp_reduce_sum",
+        source: `
+template <const int kWarpSize = WARP_SIZE, typename T = float>
+__device__ __forceinline__ T warp_reduce_sum(T val) {
+  for (int mask = kWarpSize >> 1; mask >= 1; mask >>= 1) val += mask;
+  return val;
+}`,
+      },
+    ],
+  });
+  assert.match(source, /template <const int kWarpSize = 32, typename T = float>/u);
+  assert.match(source, /__device__ __forceinline__ float warp_reduce_sum\(float val\)/u);
+  assert.match(source, /warp_reduce_sum\(1\.0f\)/u);
+  assert.doesNotMatch(source, /\bT\s+(?:val|tmp|value)\b/u);
+  assert.doesNotMatch(source, /warp_reduce_sum<WARP_SIZE>/u);
 }
 
 {

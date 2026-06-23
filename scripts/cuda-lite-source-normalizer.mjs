@@ -20,6 +20,15 @@ export function createKernelCompilationUnit({
   const specializedKernel = specializeTemplateFromLaunchContext(kernel, templateArgumentsByKernelName, definesByName);
   const params = new Set(kernelParamNames(specializedKernel));
   const referencedDeviceFunctionsRaw = referencedDeviceFunctionClosure(specializedKernel, deviceFunctions, definesByName);
+  const referencedDeviceFunctionNames = new Set(referencedDeviceFunctionsRaw.map((fn) => fn.name));
+  const deviceTemplateArgumentsByName = collectDeviceFunctionTemplateArguments(
+    [
+      specializedKernel,
+      ...referencedDeviceFunctionsRaw.map((fn) => fn.source),
+    ],
+    referencedDeviceFunctionNames,
+    definesByName,
+  );
   const referencedSiblingKernelsRaw = siblingKernels.filter((sibling) => {
     const name = kernelDefinitionName(sibling);
     return name !== undefined && sourceLaunchesKernel(specializedKernel, name);
@@ -35,7 +44,14 @@ export function createKernelCompilationUnit({
   const referencedDeviceFunctions = referencedDeviceFunctionsRaw
     .map((fn) => ({
       ...fn,
-      source: stripKernelLaunchTemplateArguments(specializeTemplateFromLaunchContext(fn.source, templateArgumentsByKernelName, definesByName)),
+      source: stripKnownTemplateCallArguments(
+        stripKernelLaunchTemplateArguments(specializeDeviceFunctionFromCallContext(
+          fn.source,
+          deviceTemplateArgumentsByName.get(fn.name),
+          definesByName,
+        )),
+        referencedDeviceFunctionNames,
+      ),
     }));
   const referencedSiblingKernels = referencedSiblingKernelsRaw.map((sibling) => stripKernelLaunchTemplateArguments(
     specializeTemplateFromLaunchContext(sibling, templateArgumentsByKernelName, definesByName),
@@ -56,7 +72,7 @@ export function createKernelCompilationUnit({
     constantDeclarations.join("\n"),
     textureDeclarations.join("\n"),
     referencedSiblingKernels.join("\n"),
-    stripKernelLaunchTemplateArguments(specializedKernel),
+    stripKnownTemplateCallArguments(stripKernelLaunchTemplateArguments(specializedKernel), referencedDeviceFunctionNames),
   ].filter((part) => part.trim().length > 0).join("\n");
   return normalizeCppTemplateCarrierSyntax(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(unit))));
 }
@@ -94,7 +110,7 @@ function referencedDeviceFunctionClosure(kernel, deviceFunctions, definesByName 
     const source = pending.pop();
     for (const [name, fn] of byName) {
       if (SEMANTIC_BUILTIN_DEVICE_HELPERS.has(name)) continue;
-      if (included.has(name) || !sourceMentionsIdentifierThroughDefines(source, name, definesByName)) continue;
+      if (included.has(name) || !sourceCallsFunctionThroughDefines(source, name, definesByName)) continue;
       included.set(name, fn);
       pending.push(fn.source);
     }
@@ -102,18 +118,19 @@ function referencedDeviceFunctionClosure(kernel, deviceFunctions, definesByName 
   return [...included.values()];
 }
 
-function sourceMentionsIdentifierThroughDefines(source, name, definesByName) {
-  if (sourceMentionsIdentifier(source, name)) return true;
+function sourceCallsFunctionThroughDefines(source, name, definesByName) {
+  const cleanSource = stripCommentsAndStrings(source);
+  if (sourceCallsFunction(cleanSource, name)) return true;
   const visited = new Set();
   const pending = [];
   for (const [defineName, value] of definesByName) {
-    if (!sourceMentionsIdentifier(source, defineName)) continue;
+    if (!sourceCallsFunction(cleanSource, defineName)) continue;
     visited.add(defineName);
     pending.push(value);
   }
   while (pending.length > 0) {
-    const value = pending.pop();
-    if (sourceMentionsIdentifier(value, name)) return true;
+    const value = stripCommentsAndStrings(pending.pop());
+    if (sourceCallsFunction(value, name) || sourceMentionsIdentifier(value, name)) return true;
     for (const [defineName, nextValue] of definesByName) {
       if (visited.has(defineName) || !sourceMentionsIdentifier(value, defineName)) continue;
       visited.add(defineName);
@@ -121,6 +138,19 @@ function sourceMentionsIdentifierThroughDefines(source, name, definesByName) {
     }
   }
   return false;
+}
+
+function sourceCallsFunction(source, name) {
+  if (new RegExp(`\\b${escapeRegExp(name)}\\s*\\(`, "u").test(source)) return true;
+  return scanTemplatedCallReferences(source).some((call) => call.name === name);
+}
+
+function stripCommentsAndStrings(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//gu, " ")
+    .replace(/\/\/[^\n\r]*/gu, " ")
+    .replace(/"(?:\\.|[^"\\])*"/gu, "\"\"")
+    .replace(/'(?:\\.|[^'\\])*'/gu, "''");
 }
 
 function sourceLaunchesKernel(source, name) {
@@ -164,6 +194,16 @@ function specializeTemplateFromLaunchContext(source, templateArgumentsByKernelNa
   const args = templateArgumentsByKernelName.get(name);
   if (args === undefined || args.length === 0) return source;
   return rewriteFirstTemplateHeader(source, args, definesByName);
+}
+
+function specializeDeviceFunctionFromCallContext(source, args, definesByName = new Map()) {
+  const defaults = templateHeaderDefaultArguments(source, definesByName);
+  if ((args === undefined || args.length === 0) && defaults.length === 0) return source;
+  const merged = defaults.map((value, index) => args?.[index] ?? value);
+  if (args !== undefined) {
+    for (let index = 0; index < args.length; index++) merged[index] = args[index];
+  }
+  return rewriteFirstTemplateHeader(source, merged, definesByName);
 }
 
 function rewriteFirstTemplateHeader(source, args, definesByName = new Map()) {
@@ -264,9 +304,55 @@ function templateTypeEnvironment(params, args, definesByName = new Map()) {
   return env;
 }
 
+function templateDefaultEnvironment(source, definesByName = new Map()) {
+  const env = new Map();
+  for (const [name, value] of numericTemplateDefines(definesByName)) env.set(name, value);
+  for (const header of templateHeaders(source)) {
+    for (const paramSource of splitTopLevel(header)) {
+      const param = parseTemplateParam(paramSource);
+      if (param === undefined) continue;
+      const raw = templateParamDefaultValue(param);
+      if (raw === undefined) continue;
+      const value = param.kind === "type"
+        ? normalizeTemplateTypeArgument(raw, definesByName)
+        : normalizeTemplateValueArgument(raw, param.valueType);
+      if (value !== undefined) env.set(param.name, value);
+    }
+  }
+  return env;
+}
+
+function templateHeaderDefaultArguments(source, definesByName = new Map()) {
+  const header = templateHeaders(source)[0];
+  if (header === undefined) return [];
+  return splitTopLevel(header).map((paramSource) => {
+    const param = parseTemplateParam(paramSource);
+    if (param === undefined) return undefined;
+    const raw = templateParamDefaultValue(param);
+    if (raw === undefined) return undefined;
+    return param.kind === "type"
+      ? normalizeTemplateTypeArgument(raw, definesByName)
+      : normalizeTemplateValueArgument(resolveTemplateDefineValue(raw, definesByName), param.valueType);
+  });
+}
+
 function templateParamDefaultValue(param) {
   if (param.defaultStart === undefined || param.source === undefined) return undefined;
   return param.source.slice(param.defaultStart + 1).trim();
+}
+
+function numericTemplateDefines(definesByName) {
+  const values = new Map();
+  for (const [name, raw] of definesByName) {
+    const normalized = normalizeTemplateValueArgument(String(raw), "int");
+    if (normalized !== undefined) values.set(name, normalized);
+  }
+  return values;
+}
+
+function resolveTemplateDefineValue(value, definesByName) {
+  const trimmed = value.trim();
+  return definesByName.get(trimmed) ?? trimmed;
 }
 
 function normalizeTemplateTypeArgument(arg, definesByName = new Map()) {
@@ -474,8 +560,38 @@ function stripKernelLaunchTemplateArguments(source) {
   return out;
 }
 
+function stripKnownTemplateCallArguments(source, names) {
+  let out = source;
+  for (const name of names) out = stripTemplateCallArgumentsForName(out, name);
+  return out;
+}
+
+function stripTemplateCallArgumentsForName(source, name) {
+  const re = new RegExp(`\\b${escapeRegExp(name)}\\s*<`, "gu");
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const templateStart = source.indexOf("<", match.index + name.length);
+    const templateEnd = findBalanced(source, templateStart, "<", ">");
+    if (templateEnd === undefined) {
+      re.lastIndex = match.index + name.length;
+      continue;
+    }
+    const afterTemplate = skipWhitespace(source, templateEnd + 1);
+    if (source[afterTemplate] !== "(") {
+      re.lastIndex = templateEnd + 1;
+      continue;
+    }
+    out += source.slice(cursor, templateStart);
+    cursor = templateEnd + 1;
+    re.lastIndex = templateEnd + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
 function scanTemplatedKernelReferences(source) {
-  const refs = [];
+  const refs = scanRegexTemplatedKernelLaunches(source);
   let index = 0;
   while (index < source.length) {
     const ident = /[A-Za-z_][A-Za-z0-9_]*/u.exec(source.slice(index));
@@ -503,7 +619,39 @@ function scanTemplatedKernelReferences(source) {
     index = templateEnd + 1;
   }
   refs.push(...scanCudaFuncSetAttributeTemplateReferences(source));
+  return dedupeTemplateRefs(refs);
+}
+
+function scanRegexTemplatedKernelLaunches(source) {
+  const refs = [];
+  const re = /\b([A-Za-z_][A-Za-z0-9_]*)\s*</gu;
+  for (const match of source.matchAll(re)) {
+    const name = match[1];
+    if (name === undefined || name === "template") continue;
+    const templateStart = source.indexOf("<", match.index + name.length);
+    const templateEnd = findBalanced(source, templateStart, "<", ">");
+    if (templateEnd === undefined) continue;
+    const afterTemplate = skipWhitespace(source, templateEnd + 1);
+    if (source.slice(afterTemplate, afterTemplate + 3) !== "<<<") continue;
+    refs.push({
+      kind: "launch",
+      name,
+      args: splitTopLevel(source.slice(templateStart + 1, templateEnd)).map((arg) => arg.trim()),
+      templateStart,
+      templateEnd,
+    });
+  }
   return refs;
+}
+
+function dedupeTemplateRefs(refs) {
+  const seen = new Set();
+  return refs.filter((ref) => {
+    const key = `${ref.kind}:${ref.name}:${ref.templateStart}:${ref.templateEnd}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function collectWrapperPropagatedTemplateArguments(source) {
@@ -740,6 +888,23 @@ function scanTemplatedCallReferences(source) {
     index = afterTemplate + 1;
   }
   return refs;
+}
+
+function collectDeviceFunctionTemplateArguments(sources, names, definesByName = new Map()) {
+  const out = new Map();
+  for (const source of sources) {
+    const env = templateDefaultEnvironment(source, definesByName);
+    for (const call of scanTemplatedCallReferences(source)) {
+      if (!names.has(call.name)) continue;
+      const args = call.args.map((arg) => substituteTemplateArgument(arg, env));
+      if (templateArgumentScore(args) === 0) continue;
+      const previous = out.get(call.name);
+      if (previous === undefined || templateArgumentScore(args) > templateArgumentScore(previous)) {
+        out.set(call.name, args);
+      }
+    }
+  }
+  return out;
 }
 
 function templateEnvironment(params, args) {

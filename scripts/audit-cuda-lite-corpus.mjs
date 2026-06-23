@@ -39,6 +39,22 @@ const CUDA_SYSTEM_DEFINES = new Map([
   ["CUDART_PIO2_F", "1.570796327f"],
   ["CUDART_PIO4_F", "0.785398163f"],
 ]);
+const PORTABLE_POINTER_BASE_TYPES = new Set([
+  "float",
+  "int",
+  "uint",
+  "half",
+  "bool",
+  "float2",
+  "float3",
+  "float4",
+  "int2",
+  "int3",
+  "int4",
+  "uint2",
+  "uint3",
+  "uint4",
+]);
 
 const files = listFiles(corpusRoot)
   .filter((file) => /\.(?:md|markdown|cu|cuh|cpp|cc|cxx|h|hpp)$/i.test(file))
@@ -61,6 +77,7 @@ for (const file of files) {
     const blockDefines = collectObjectDefines(declarationContext);
     const blockFunctionDefines = collectFunctionDefines(`${includeContext}\n${block.code}`);
     const blockDeviceFunctions = collectPortableDeviceFunctions(`${includeContext}\n${block.code}`);
+    const blockDynamicLaunchTargets = collectDynamicLaunchTargetDeviceFunctions(`${includeContext}\n${block.code}`);
     const blockConstants = collectConstantDeclarations(`${includeContext}\n${block.code}`);
     const blockTextures = collectTextureDeclarations(`${includeContext}\n${block.code}`);
     const blockTemplateArguments = collectKernelTemplateArguments(`${includeContext}\n${block.code}`);
@@ -69,7 +86,10 @@ for (const file of files) {
     const kernels = extractKernelDefinitions(block.code);
     for (const [kernelIndex, rawKernel] of kernels.entries()) {
       const kernelName = kernelDefinitionName(rawKernel);
-      const siblingKernels = kernels.filter((kernel) => kernel !== rawKernel);
+      const siblingKernels = [
+        ...kernels.filter((kernel) => kernel !== rawKernel),
+        ...blockDynamicLaunchTargets,
+      ];
       const source = createKernelCompilationUnit({
         kernel: rawKernel,
         siblingKernels,
@@ -334,13 +354,18 @@ function stripComments(source) {
 
 function extractKernelDefinitions(source) {
   const clean = stripComments(source);
-  const kernels = [];
+  return collectCudaFunctionBodies(clean, "__global__")
+    .filter((kernel) => !isPlaceholderKernel(kernel));
+}
+
+function collectCudaFunctionBodies(source, marker) {
   let index = 0;
+  const bodies = [];
   while (true) {
-    const start = clean.indexOf("__global__", index);
+    const start = source.indexOf(marker, index);
     if (start < 0) break;
-    const brace = clean.indexOf("{", start);
-    const semicolon = clean.indexOf(";", start);
+    const brace = source.indexOf("{", start);
+    const semicolon = source.indexOf(";", start);
     if (brace < 0) break;
     if (semicolon >= 0 && semicolon < brace) {
       index = semicolon + 1;
@@ -348,9 +373,9 @@ function extractKernelDefinitions(source) {
     }
     let depth = 0;
     let end = -1;
-    for (let cursor = brace; cursor < clean.length; cursor++) {
-      if (clean[cursor] === "{") depth++;
-      else if (clean[cursor] === "}") {
+    for (let cursor = brace; cursor < source.length; cursor++) {
+      if (source[cursor] === "{") depth++;
+      else if (source[cursor] === "}") {
         depth--;
         if (depth === 0) {
           end = cursor + 1;
@@ -359,11 +384,10 @@ function extractKernelDefinitions(source) {
       }
     }
     if (end < 0) break;
-    const kernel = clean.slice(withCudaDeclarationPrefixStart(clean, start), end);
-    if (!isPlaceholderKernel(kernel)) kernels.push(kernel);
+    bodies.push(source.slice(withCudaDeclarationPrefixStart(source, start), end));
     index = end;
   }
-  return kernels;
+  return bodies;
 }
 
 function withTemplatePrefixStart(source, start) {
@@ -510,13 +534,38 @@ function collectPortableDeviceFunctions(source) {
     if (end < 0) break;
     const fn = clean.slice(start, end);
     const signature = fn.slice(0, fn.indexOf("{"));
-    const name = /(?:float|int|uint|half|unsigned\s+int|void)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/u.exec(signature)?.[1];
-    if (name && (isPortableScalarDeviceFunction(signature, fn) || isLaunchTargetDeviceFunction(clean, name, fn))) {
+    const name = cudaFunctionDefinitionName(signature);
+    if (name && !sourceLaunchesDeviceFunction(clean, name) && isPortableDeviceFunctionCandidate(signature, fn, name)) {
       functions.push({ name, source: fn });
     }
     index = end;
   }
   return functions;
+}
+
+function collectDynamicLaunchTargetDeviceFunctions(source) {
+  const clean = stripComments(source);
+  return collectCudaFunctionBodies(clean, "__device__")
+    .filter((fn) => {
+      const signature = fn.slice(0, fn.indexOf("{"));
+      const name = cudaFunctionDefinitionName(signature);
+      return name !== undefined && sourceLaunchesDeviceFunction(clean, name);
+    })
+    .map((fn) => fn.replace(/\b__device__\b/u, "__global__"));
+}
+
+function cudaFunctionDefinitionName(signature) {
+  const open = signature.lastIndexOf("(");
+  if (open < 0) return undefined;
+  const before = signature.slice(0, open).trim();
+  if (/\boperator\b/u.test(before)) return undefined;
+  const name = /([A-Za-z_][A-Za-z0-9_]*)\s*$/u.exec(before)?.[1];
+  if (name === undefined || ["if", "for", "while", "switch", "return"].includes(name)) return undefined;
+  return name;
+}
+
+function isPortableDeviceFunctionCandidate(signature, source, name) {
+  return isPortableScalarDeviceFunction(signature, source) || isPortablePointerDeviceFunction(signature, source, name);
 }
 
 function isPortableScalarDeviceFunction(signature, source) {
@@ -525,10 +574,43 @@ function isPortableScalarDeviceFunction(signature, source) {
   return true;
 }
 
-function isLaunchTargetDeviceFunction(source, name, fn) {
-  if (!new RegExp(`\\b${escapeRegExp(name)}\\s*<<\\s*<`, "u").test(source)) return false;
-  if (/\bdo\b|reinterpret|static_cast|__float_as_int|__int_as_float/u.test(fn)) return false;
+function isPortablePointerDeviceFunction(signature, source, name) {
+  if (!/\*/u.test(signature)) return false;
+  if (!hasSupportedDeviceReturnShape(signature, name)) return false;
+  if (/\bvoid\s*\*/u.test(signature)) return false;
+  const pointerBases = pointerBaseTypes(signature);
+  if (pointerBases.length === 0) return false;
+  if (!pointerBases.every((type) => PORTABLE_POINTER_BASE_TYPES.has(normalizePointerBaseType(type)))) return false;
+  if (/\bdo\b|reinterpret|static_cast|__float_as_int|__int_as_float/u.test(source)) return false;
   return true;
+}
+
+function pointerBaseTypes(signature) {
+  const cleaned = signature
+    .replace(/\b(?:const|volatile|__restrict__|__restrict|restrict|static|inline|__forceinline__|__device__|__host__)\b/gu, " ")
+    .replace(/\s+/gu, " ");
+  const types = [];
+  for (const match of cleaned.matchAll(/([A-Za-z_][A-Za-z0-9_]*(?:\s+[A-Za-z_][A-Za-z0-9_]*)?)\s*\*/gu)) {
+    if (match[1] !== undefined) types.push(match[1].trim());
+  }
+  return types;
+}
+
+function normalizePointerBaseType(type) {
+  if (type === "unsigned int" || type === "unsigned") return "uint";
+  if (type === "unsigned char" || type === "uchar" || type === "uint8_t") return "uint";
+  if (type === "signed int" || type === "signed") return "int";
+  if (type === "signed char" || type === "char" || type === "int8_t") return "int";
+  if (type === "__half") return "half";
+  return type;
+}
+
+function hasSupportedDeviceReturnShape(signature, name) {
+  return new RegExp(`(?:^|\\s)(?:void|bool|float|half|int|uint|unsigned\\s+int|signed\\s+int|clock_t|size_t)\\s+${escapeRegExp(name)}\\s*\\(`, "u").test(signature);
+}
+
+function sourceLaunchesDeviceFunction(source, name) {
+  return new RegExp(`\\b${escapeRegExp(name)}\\s*<<\\s*<`, "u").test(source);
 }
 
 function collectObjectDefines(source) {
