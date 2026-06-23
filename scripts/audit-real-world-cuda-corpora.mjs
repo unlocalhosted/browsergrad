@@ -44,8 +44,8 @@ const corpora = [
     path: path.join(corpusRoot, "llm.c"),
     expectations: {
       total: 148,
-      webgpuMin: 83,
-      hardFailMax: 65,
+      webgpuMin: 100,
+      hardFailMax: 48,
     },
   },
   {
@@ -78,7 +78,8 @@ for (const corpus of selected) {
   console.log(`\n== ${corpus.name} @ ${corpus.commit.slice(0, 7)} ==`);
   try {
     if (!options.skipFetch) ensureCorpus(corpus);
-    const summary = runAudit(corpus, options.limit);
+    const audit = runAudit(corpus, options);
+    const summary = audit.summary ?? audit;
     const record = {
       corpus: {
         id: corpus.id,
@@ -88,6 +89,7 @@ for (const corpus of selected) {
         path: corpus.path,
       },
       summary,
+      ...(audit.failures === undefined ? {} : { failures: audit.failures }),
     };
     records.push(record);
     console.log(JSON.stringify(record, null, 2));
@@ -130,12 +132,14 @@ function ensureCorpus(corpus) {
   }
 }
 
-function runAudit(corpus, limit) {
+function runAudit(corpus, options) {
   const args = [
     path.join(scriptDir, "audit-cuda-lite-corpus.mjs"),
     corpus.path,
     "--limit",
-    String(limit),
+    String(options.limit),
+    ...(options.details ? ["--details"] : []),
+    ...(options.includeSources ? ["--sources"] : []),
     ...expectationArgs(corpus.expectations),
   ];
   const result = spawnSync(process.execPath, args, {
@@ -145,14 +149,14 @@ function runAudit(corpus, limit) {
   });
   if (result.error) throw result.error;
   if (result.stderr) process.stderr.write(result.stderr);
-  const summary = parseSummary(result.stdout, corpus.id);
+  const audit = parseAuditResult(result.stdout, corpus.id);
   if (result.status !== 0) {
     throw new Error(`${corpus.id} audit failed expectation checks`);
   }
-  return summary;
+  return audit;
 }
 
-function parseSummary(stdout, id) {
+function parseAuditResult(stdout, id) {
   const jsonStart = stdout.indexOf("{");
   const jsonEnd = stdout.lastIndexOf("}");
   if (jsonStart < 0 || jsonEnd < jsonStart) {
@@ -175,6 +179,8 @@ function parseArgs(args) {
   const only = new Set();
   let skipFetch = false;
   let limit = 0;
+  let details = false;
+  let includeSources = false;
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === "--only") {
@@ -191,6 +197,15 @@ function parseArgs(args) {
       skipFetch = true;
       continue;
     }
+    if (arg === "--details" || arg === "--json") {
+      details = true;
+      continue;
+    }
+    if (arg === "--sources") {
+      details = true;
+      includeSources = true;
+      continue;
+    }
     if (arg === "--limit") {
       limit = parseLimit(args[++index]);
       continue;
@@ -200,12 +215,12 @@ function parseArgs(args) {
       continue;
     }
     if (arg === "--help" || arg === "-h") {
-      console.log(`usage: node scripts/audit-real-world-cuda-corpora.mjs [--only ${corpora.map((corpus) => corpus.id).join("|")}] [--skip-fetch] [--limit N]`);
+      console.log(`usage: node scripts/audit-real-world-cuda-corpora.mjs [--only ${corpora.map((corpus) => corpus.id).join("|")}] [--skip-fetch] [--limit N] [--details] [--sources]`);
       process.exit(0);
     }
     throw new Error(`unexpected argument: ${arg}`);
   }
-  return { only, skipFetch, limit };
+  return { only, skipFetch, limit, details, includeSources };
 }
 
 function parseLimit(raw) {
