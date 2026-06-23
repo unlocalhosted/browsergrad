@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { createKernelCompilationUnit } from "./cuda-lite-source-normalizer.mjs";
+import { createKernelCompilationUnit, kernelDefinitionName } from "./cuda-lite-source-normalizer.mjs";
 
 const scalarKernel = `
 __global__ void add(float *a, float *b, float *c, int N) {
@@ -71,6 +71,25 @@ __global__ void kernel(float *out) {
   assert.match(source, /float foo/u);
   assert.match(source, /float bar/u);
   assert.doesNotMatch(source, /float baz/u);
+}
+
+{
+  const launchBoundsKernel = `
+__global__ void __launch_bounds__(WARP_SIZE * kTiles)
+    bounded(float *out, const float *in, int N) {
+  int idx = threadIdx.x;
+  if (idx < N) out[idx] = in[idx];
+}`;
+  assert.equal(kernelDefinitionName(launchBoundsKernel), "bounded");
+  const source = createKernelCompilationUnit({
+    kernel: launchBoundsKernel,
+    definesByName: new Map([
+      ["WARP_SIZE", "32"],
+      ["N", "999"],
+    ]),
+  });
+  assert.match(source, /#define WARP_SIZE 32/u);
+  assert.doesNotMatch(source, /#define N 999/u);
 }
 
 {

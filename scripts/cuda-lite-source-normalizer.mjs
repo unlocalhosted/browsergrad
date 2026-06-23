@@ -37,7 +37,7 @@ export function createKernelCompilationUnit({
 }
 
 export function kernelDefinitionName(kernel) {
-  return /__global__\s+void\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/u.exec(kernel)?.[1];
+  return kernelSignature(kernel)?.name;
 }
 
 function referencedDeviceFunctionClosure(kernel, deviceFunctions) {
@@ -68,12 +68,30 @@ function functionDefineName(declaration) {
 }
 
 function kernelParamNames(kernel) {
-  const signature = /__global__\s+(?:void\s+[A-Za-z_][A-Za-z0-9_]*\s*)?\(([\s\S]*?)\)\s*\{/u.exec(kernel);
-  if (signature === null) return [];
-  return signature[1]
+  return (kernelSignature(kernel)?.params ?? "")
     .split(",")
     .map((param) => /([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[[^\]]*\])?\s*$/u.exec(param.trim())?.[1])
     .filter(Boolean);
+}
+
+function kernelSignature(kernel) {
+  const header = kernel.slice(0, kernel.indexOf("{") < 0 ? kernel.length : kernel.indexOf("{"));
+  const match = /__global__[\s\S]*?\bvoid\b\s*(?:(?:__launch_bounds__)\s*\([^)]*\)\s*)*(?:static\s+|extern\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/u.exec(header);
+  if (match?.[1] === undefined || match.index === undefined) return undefined;
+  const open = header.indexOf("(", match.index + match[0].length - 1);
+  if (open < 0) return undefined;
+  let depth = 0;
+  for (let index = open; index < header.length; index++) {
+    const char = header[index];
+    if (char === "(") depth++;
+    else if (char === ")") {
+      depth--;
+      if (depth === 0) {
+        return { name: match[1], params: header.slice(open + 1, index) };
+      }
+    }
+  }
+  return undefined;
 }
 
 function escapeRegExp(value) {
