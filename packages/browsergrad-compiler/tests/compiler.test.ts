@@ -1732,6 +1732,35 @@ __global__ void half2Ops(const half2 *x, const half2 *y, half2 *out) {
     expect(Array.from(result.buffers.out as ArrayLike<number>)).toEqual([6, 6]);
   });
 
+  it("lowers CUDA shuffle, fence, and conversion intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void intrinsic_pack(half2 *h, float2 *f, float *out) {
+  int lane = __shfl_sync(0xffffffff, threadIdx.x, 0);
+  __threadfence();
+  half2 value = make_half2(__int2half_rn(lane + 1), __int2half_rn(4));
+  h[0] = value;
+  f[0] = __half22float2(value);
+  out[0] = __fmaf_rn(f[0].x, 2.0f, f[0].y);
+}`, { features: { "shader-f16": true, subgroups: true }, workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          h: createWgslFloat16Array(2),
+          f: new Float32Array(2),
+          out: new Float32Array(1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.ir.requiredFeatures).toEqual(expect.arrayContaining(["shader-f16", "subgroups"]));
+    expect(compiled.wgsl).toContain("subgroupShuffle(");
+    expect(compiled.wgsl).toContain("storageBarrier()");
+    expect([...result.buffers.f as Float32Array]).toEqual([1, 4]);
+    expect([...result.buffers.out as Float32Array]).toEqual([6]);
+  });
+
   it("feature-gates half2 behind shader-f16", () => {
     expect(() => compileCudaLiteKernel(`
 __global__ void half2Gate(half2 *x) {

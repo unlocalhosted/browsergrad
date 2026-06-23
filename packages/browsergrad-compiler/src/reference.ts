@@ -1154,6 +1154,10 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       lanes: left.lanes.map((value, index) => roundHalf(op(value ?? 0, right.lanes[index] ?? 0))),
     };
   }
+  if (name === "__half22float2") {
+    const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
+    return { kind: "cuda-vector", valueType: "float2", lanes: value.lanes };
+  }
   const deviceFunction = name ? context.functions.get(name) : undefined;
   if (deviceFunction) return evalDeviceFunction(
     deviceFunction,
@@ -1166,12 +1170,15 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   switch (name) {
     case "__syncthreads":
       return 0;
+    case "__threadfence":
+      return 0;
     case "min":
       return Math.min(...args);
     case "max":
       return Math.max(...args);
     case "bg_subgroup_add":
       return args[0] ?? 0;
+    case "__shfl_sync":
     case "__shfl_down_sync":
     case "__shfl_up_sync":
     case "__shfl_xor_sync":

@@ -33,6 +33,8 @@ const BUILTIN_VECTORS = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]
 const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ...CUDA_INTRINSICS.map((intrinsic) => [intrinsic.name, intrinsic.arity] as const),
   ["__syncthreads", [0, 0]],
+  ["__threadfence", [0, 0]],
+  ["__shfl_sync", [3, 4]],
   ["__shfl_down_sync", [3, 4]],
   ["__shfl_up_sync", [3, 4]],
   ["__shfl_xor_sync", [3, 4]],
@@ -785,6 +787,17 @@ function validateCallExpression(
     }
     return { kind: "vector", valueType: "half2" };
   }
+  if (callName === "__half22float2") {
+    requiredFeatures.add("shader-f16");
+    const arg = expression.args[0];
+    if (arg) {
+      const info = walkExpression(arg, scope);
+      if (info.kind !== "vector" && info.kind !== "unknown") {
+        diagnostics.push(error("unsupported-vector-argument", "__half22float2 expects half2 argument", arg.span));
+      }
+    }
+    return { kind: "vector", valueType: "float2" };
+  }
   const intrinsic = CUDA_INTRINSICS_BY_NAME.get(callName);
   if (intrinsic) {
     for (const feature of intrinsic.requiredFeatures ?? []) requiredFeatures.add(feature);
@@ -1329,7 +1342,8 @@ function isAtomicBuiltin(callName: string): boolean {
 }
 
 function isShuffleBuiltin(callName: string): boolean {
-  return callName === "__shfl_down_sync" ||
+  return callName === "__shfl_sync" ||
+    callName === "__shfl_down_sync" ||
     callName === "__shfl_up_sync" ||
     callName === "__shfl_xor_sync";
 }

@@ -1236,6 +1236,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   switch (name) {
     case "__syncthreads":
       return "workgroupBarrier()";
+    case "__threadfence":
+      return "storageBarrier()";
     case "cudaDeviceSynchronize":
     case "cudaStreamCreate":
     case "cudaStreamCreateWithFlags":
@@ -1258,6 +1260,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return `${name}(${args.join(", ")})`;
     case "bg_subgroup_add":
       return `subgroupAdd(${args.join(", ")})`;
+    case "__shfl_sync":
+      return `subgroupShuffle(${args[1] ?? "0"}, u32(${args[2] ?? "0"}))`;
     case "__shfl_down_sync":
       return `subgroupShuffleDown(${args[1] ?? "0"}, u32(${args[2] ?? "0"}))`;
     case "__shfl_up_sync":
