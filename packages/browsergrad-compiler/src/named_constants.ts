@@ -43,6 +43,12 @@ export const CUDA_NAMED_CONSTANTS = new Map<string, CudaNamedConstant>([
   ["uint2::size", intConstant(2)],
   ["uint3::size", intConstant(3)],
   ["uint4::size", intConstant(4)],
+  ["char2::size", intConstant(2)],
+  ["char3::size", intConstant(3)],
+  ["char4::size", intConstant(4)],
+  ["uchar2::size", intConstant(2)],
+  ["uchar3::size", intConstant(3)],
+  ["uchar4::size", intConstant(4)],
   ["half2::size", intConstant(2)],
 ]);
 

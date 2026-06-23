@@ -27,12 +27,40 @@ import {
   type CudaLiteVarDecl,
   type SourceSpan,
 } from "./types.js";
-import { CUDA_VECTOR_TYPES, isCudaVectorType } from "./vector_types.js";
+import { CUDA_VECTOR_TYPES, cudaVectorTypeAlias, isCudaVectorType } from "./vector_types.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 
-const TYPE_KEYWORDS = new Set(["float", "int", "uint", "half", "__half", "bool", ...CUDA_VECTOR_TYPES.keys()]);
+const CUDA_SCALAR_TYPE_ALIASES = new Map<string, Exclude<CudaLiteScalarType, "void">>([
+  ["char", "int"],
+  ["int8_t", "int"],
+  ["uchar", "uint"],
+  ["uint8_t", "uint"],
+  ["clock_t", "uint"],
+]);
+const TYPE_KEYWORDS = new Set([
+  "float",
+  "int",
+  "uint",
+  "half",
+  "__half",
+  "bool",
+  ...CUDA_SCALAR_TYPE_ALIASES.keys(),
+  ...CUDA_VECTOR_TYPES.keys(),
+]);
 const TYPE_START_KEYWORDS = new Set([
   ...TYPE_KEYWORDS,
+  "char2",
+  "char3",
+  "char4",
+  "uchar2",
+  "uchar3",
+  "uchar4",
+  "uint8_t2",
+  "uint8_t3",
+  "uint8_t4",
+  "int8_t2",
+  "int8_t3",
+  "int8_t4",
   "unsigned",
   "signed",
   "long",
@@ -934,10 +962,12 @@ class Parser {
   private parseType(): Exclude<CudaLiteScalarType, "void"> {
     const token = this.expectIdentifier("type");
     if (token.value === "unsigned") {
+      if (this.consumeIf("char")) return "uint";
       this.consumeIntegerWidthSuffix();
       return "uint";
     }
     if (token.value === "signed") {
+      if (this.consumeIf("char")) return "int";
       this.consumeIntegerWidthSuffix();
       return "int";
     }
@@ -960,6 +990,10 @@ class Parser {
     if (token.value === "DevicePool") return "devicepool";
     if (token.value === "void") return "voidptr";
     if (token.value === "__half") return "half";
+    const scalarAlias = CUDA_SCALAR_TYPE_ALIASES.get(token.value);
+    if (scalarAlias !== undefined) return scalarAlias;
+    const vectorAlias = cudaVectorTypeAlias(token.value);
+    if (vectorAlias !== undefined) return vectorAlias;
     if (!TYPE_KEYWORDS.has(token.value)) this.fail(`unsupported CUDA-lite type: ${token.value}`, token.span);
     return token.value as Exclude<CudaLiteScalarType, "void">;
   }
@@ -999,6 +1033,7 @@ class Parser {
     if (value === "unsigned" || value === "signed") {
       index++;
       if (this.tokens[index]?.value === "int") return index + 1;
+      if (this.tokens[index]?.value === "char") return index + 1;
       if (this.tokens[index]?.value === "short") return this.tokens[index + 1]?.value === "int" ? index + 2 : index + 1;
       if (this.tokens[index]?.value === "long") return this.tokens[index + 1]?.value === "long" ? index + 2 : index + 1;
       return index;

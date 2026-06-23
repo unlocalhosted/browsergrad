@@ -1740,6 +1740,41 @@ __global__ void packed128_alias(const float* input, float* output) {
     expect([...result.buffers.output as Float32Array]).toEqual([2, 3, 4, 5]);
   });
 
+  it("maps CUDA byte-vector aliases onto canonical uint vector values", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ inline int rgbToInt(float r, float g, float b) {
+  return (int)(r + g + b);
+}
+__global__ void byte_vectors(int *out) {
+  uchar4 color = make_uchar4(1, 2, 3, 4);
+  out[0] = rgbToInt(color.z, color.y, color.x);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("vec4<u32>(1, 2, 3, 4)");
+    expect(compiled.wgsl).toContain("rgbToInt(f32(color.z), f32(color.y), f32(color.x)");
+    expect([...result.buffers.out as Int32Array]).toEqual([6]);
+  });
+
+  it("lowers CUDA clock_t and clock() to deterministic synthetic counters", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void synthetic_clock(clock_t *out) {
+  out[threadIdx.x] = clock();
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("workgroup_id.x * 104729u");
+    expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3]);
+  });
+
   it("lowers dynamic CUDA vector lane access", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void dynamicLane(float *out, int lane) {

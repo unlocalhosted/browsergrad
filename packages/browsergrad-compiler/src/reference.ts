@@ -1317,6 +1317,13 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       return 0;
     case "__threadfence":
       return 0;
+    case "clock":
+      return context.blockIdx.x * 104729 +
+        context.blockIdx.y * 1009 +
+        context.blockIdx.z * 97 +
+        context.threadIdx.x +
+        context.threadIdx.y * 31 +
+        context.threadIdx.z * 7;
     case "min":
       return Math.min(...args);
     case "max":
@@ -1470,7 +1477,11 @@ function deviceFunctionArgs(
   return fn.params.map((param, index) => {
     const arg = args[index];
     if (!arg) return 0;
-    if (!param.pointer) return evalExpression(arg, context);
+    if (!param.pointer) {
+      const value = evalExpression(arg, context);
+      if (isCudaVectorType(param.valueType)) return value;
+      return castNumber(param.valueType, valueAsNumber(value, param.name));
+    }
     const value = pointerArgumentValue(arg, param.valueType, context);
     if (isAddress(value) || isPoolPointer(value)) return value;
     throw compilerFailure(`device pointer parameter '${param.name}' expects a pointer argument`);

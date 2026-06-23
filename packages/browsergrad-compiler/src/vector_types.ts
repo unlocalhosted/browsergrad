@@ -31,8 +31,32 @@ export const CUDA_VECTOR_TYPES: ReadonlyMap<CudaLiteVectorType, CudaVectorTypeIn
   ["uint4", { scalarType: "uint", lanes: 4, fields: ["x", "y", "z", "w"] }],
 ]);
 
+export const CUDA_VECTOR_TYPE_ALIASES: ReadonlyMap<string, CudaLiteVectorType> = new Map([
+  ["char2", "int2"],
+  ["char3", "int3"],
+  ["char4", "int4"],
+  ["uchar2", "uint2"],
+  ["uchar3", "uint3"],
+  ["uchar4", "uint4"],
+  ["uint8_t2", "uint2"],
+  ["uint8_t3", "uint3"],
+  ["uint8_t4", "uint4"],
+  ["int8_t2", "int2"],
+  ["int8_t3", "int3"],
+  ["int8_t4", "int4"],
+]);
+
+export const CUDA_VECTOR_CONSTRUCTORS: ReadonlyMap<string, CudaLiteVectorType> = new Map([
+  ...[...CUDA_VECTOR_TYPES.keys()].map((type) => [`make_${type}`, type] as const),
+  ...[...CUDA_VECTOR_TYPE_ALIASES].map(([alias, type]) => [`make_${alias}`, type] as const),
+]);
+
 export function isCudaVectorType(type: CudaLiteScalarType | string | undefined): type is CudaLiteVectorType {
   return type !== undefined && CUDA_VECTOR_TYPES.has(type as CudaLiteVectorType);
+}
+
+export function cudaVectorTypeAlias(type: string | undefined): CudaLiteVectorType | undefined {
+  return type === undefined ? undefined : CUDA_VECTOR_TYPE_ALIASES.get(type);
 }
 
 export function cudaVectorTypeInfo(type: CudaLiteScalarType): CudaVectorTypeInfo | undefined {
@@ -55,8 +79,5 @@ export function cudaVectorFieldIndex(type: CudaLiteScalarType, field: string): n
 }
 
 export function cudaVectorConstructorType(name: string): CudaLiteVectorType | undefined {
-  const match = /^make_(float|int|uint)([234])$/u.exec(name) ?? /^make_(half)(2)$/u.exec(name);
-  if (!match) return undefined;
-  const type = `${match[1]}${match[2]}` as CudaLiteVectorType;
-  return CUDA_VECTOR_TYPES.has(type) ? type : undefined;
+  return CUDA_VECTOR_CONSTRUCTORS.get(name);
 }

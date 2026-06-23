@@ -1445,7 +1445,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       if (!arg) return param.pointer ? ["0u", "0u"] : [zeroValue(param.valueType)];
       return param.pointer
         ? emitDevicePointerArgument(arg, context)
-        : [emitExpression(arg, context)];
+        : [emitExpressionAsValueType(arg, param.valueType, context)];
     });
     return `${name}(${[...args, "local_id", "workgroup_id", "num_workgroups"].join(", ")})`;
   }
@@ -1483,6 +1483,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return "workgroupBarrier()";
     case "__threadfence":
       return "storageBarrier()";
+    case "clock":
+      return "(workgroup_id.x * 104729u + workgroup_id.y * 1009u + workgroup_id.z * 97u + local_id.x + local_id.y * 31u + local_id.z * 7u)";
     case "cudaDeviceSynchronize":
     case "cudaStreamCreate":
     case "cudaStreamCreateWithFlags":
@@ -1595,6 +1597,18 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     default:
       return `${emitExpression(expression.callee, context)}(${args.join(", ")})`;
   }
+}
+
+function emitExpressionAsValueType(
+  expression: CudaLiteExpression,
+  valueType: CudaLiteScalarType,
+  context: EmitContext,
+): string {
+  const value = emitExpression(expression, context);
+  if (valueType === "void") return value;
+  if (expressionValueTypeForEmit(expression, context) === valueType) return value;
+  if (valueType === "bool") return `(${value} != 0)`;
+  return `${wgslScalar(valueType)}(${value})`;
 }
 
 function emitCooperativeGroupCall(expression: CudaLiteCallExpression, context: EmitContext): string | undefined {

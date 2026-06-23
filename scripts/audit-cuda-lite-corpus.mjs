@@ -584,10 +584,19 @@ function normalizeAliasType(sourceType, defines) {
   }
   if (type.includes("<") || type.includes(">")) return undefined;
   if (type === "unsigned int" || type === "unsigned") return "uint";
+  if (type === "unsigned char" || type === "uchar" || type === "uint8_t") return "uint";
   if (type === "signed int" || type === "signed") return "int";
+  if (type === "signed char" || type === "char" || type === "int8_t") return "int";
+  if (type === "clock_t") return "uint";
   if (type === "long long" || type === "long" || type === "short" || type === "short int") return "int";
   const mapped = defines.get(type);
   if (mapped && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(mapped)) type = mapped;
+  if (type === "uchar2") return "uint2";
+  if (type === "uchar3") return "uint3";
+  if (type === "uchar4") return "uint4";
+  if (type === "char2") return "int2";
+  if (type === "char3") return "int3";
+  if (type === "char4") return "int4";
   const supported = new Set(["float", "int", "uint", "half", "__half", "bool", "float2", "float3", "float4", "half2", "int2", "int3", "int4", "uint2", "uint3", "uint4"]);
   return supported.has(type) ? type : undefined;
 }

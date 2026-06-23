@@ -24,6 +24,7 @@ import { CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import {
   CUDA_VECTOR_TYPES,
+  CUDA_VECTOR_CONSTRUCTORS,
   cudaVectorConstructorType,
   cudaVectorFieldIndex,
   cudaVectorScalarType,
@@ -94,8 +95,12 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__ldcs", [1, 1]],
   ["__stcs", [2, 2]],
   ["__cvta_generic_to_shared", [1, 1]],
+  ["clock", [0, 0]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
-  ...[...CUDA_VECTOR_TYPES].map(([type, info]) => [`make_${type}`, [info.lanes, info.lanes]] as const),
+  ...[...CUDA_VECTOR_CONSTRUCTORS].map(([name, type]) => {
+    const info = CUDA_VECTOR_TYPES.get(type);
+    return [name, [info?.lanes ?? 1, info?.lanes ?? 1]] as const;
+  }),
 ]);
 const SHADOWABLE_BUILTIN_CALLS = new Set([
   "warpReduceSum",
@@ -894,6 +899,9 @@ function validateCallExpression(
     if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "unknown") {
       diagnostics.push(error("unsupported-cache-hint-address", "__cvta_generic_to_shared expects a pointer expression", target.span));
     }
+    return { kind: "scalar", valueType: "uint" };
+  }
+  if (callName === "clock") {
     return { kind: "scalar", valueType: "uint" };
   }
   if (isFillRegsBuiltin(callName)) {
