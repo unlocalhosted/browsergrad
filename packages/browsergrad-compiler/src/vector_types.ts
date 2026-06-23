@@ -4,6 +4,7 @@ export type CudaLiteVectorType =
   | "float2"
   | "float3"
   | "float4"
+  | "half2"
   | "int2"
   | "int3"
   | "int4"
@@ -12,7 +13,7 @@ export type CudaLiteVectorType =
   | "uint4";
 
 export interface CudaVectorTypeInfo {
-  readonly scalarType: "float" | "int" | "uint";
+  readonly scalarType: "float" | "half" | "int" | "uint";
   readonly lanes: 2 | 3 | 4;
   readonly fields: readonly string[];
 }
@@ -21,6 +22,7 @@ export const CUDA_VECTOR_TYPES: ReadonlyMap<CudaLiteVectorType, CudaVectorTypeIn
   ["float2", { scalarType: "float", lanes: 2, fields: ["x", "y"] }],
   ["float3", { scalarType: "float", lanes: 3, fields: ["x", "y", "z"] }],
   ["float4", { scalarType: "float", lanes: 4, fields: ["x", "y", "z", "w"] }],
+  ["half2", { scalarType: "half", lanes: 2, fields: ["x", "y"] }],
   ["int2", { scalarType: "int", lanes: 2, fields: ["x", "y"] }],
   ["int3", { scalarType: "int", lanes: 3, fields: ["x", "y", "z"] }],
   ["int4", { scalarType: "int", lanes: 4, fields: ["x", "y", "z", "w"] }],
@@ -41,7 +43,7 @@ export function cudaVectorLaneCount(type: CudaLiteScalarType | undefined): numbe
   return cudaVectorTypeInfo(type as CudaLiteScalarType)?.lanes ?? 1;
 }
 
-export function cudaVectorScalarType(type: CudaLiteScalarType): "float" | "int" | "uint" | undefined {
+export function cudaVectorScalarType(type: CudaLiteScalarType): "float" | "half" | "int" | "uint" | undefined {
   return cudaVectorTypeInfo(type)?.scalarType;
 }
 
@@ -53,7 +55,7 @@ export function cudaVectorFieldIndex(type: CudaLiteScalarType, field: string): n
 }
 
 export function cudaVectorConstructorType(name: string): CudaLiteVectorType | undefined {
-  const match = /^make_(float|int|uint)([234])$/u.exec(name);
+  const match = /^make_(float|int|uint)([234])$/u.exec(name) ?? /^make_(half)(2)$/u.exec(name);
   if (!match) return undefined;
   const type = `${match[1]}${match[2]}` as CudaLiteVectorType;
   return CUDA_VECTOR_TYPES.has(type) ? type : undefined;

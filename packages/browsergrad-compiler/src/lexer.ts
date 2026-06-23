@@ -299,7 +299,7 @@ function normalizeAliasType(sourceType: string | undefined, defines: ReadonlyMap
   if (type === "long long" || type === "long" || type === "short" || type === "short int") return "int";
   const mapped = defines.get(type);
   if (mapped !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(mapped)) type = mapped;
-  const supported = new Set(["float", "int", "uint", "half", "__half", "bool", "float2", "float3", "float4", "int2", "int3", "int4", "uint2", "uint3", "uint4"]);
+  const supported = new Set(["float", "int", "uint", "half", "__half", "bool", "float2", "float3", "float4", "half2", "int2", "int3", "int4", "uint2", "uint3", "uint4"]);
   return supported.has(type) ? type : undefined;
 }
 

@@ -1671,6 +1671,38 @@ __global__ void dynamicLane(float *out, int lane) {
     expect([...result.buffers.out as Float32Array]).toEqual([6]);
   });
 
+  it("lowers CUDA half2 values as f16 vector storage views", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void half2Add(const half2 *x, half2 *y) {
+  int i = threadIdx.x;
+  half2 bias = {__float2half(1.0f), __float2half(2.0f)};
+  half2 value = x[i];
+  y[i] = make_half2(value.x + bias.x, value.y + bias.y);
+}`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: createWgslFloat16Array([3, 5]),
+          y: createWgslFloat16Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.ir.requiredFeatures).toContain("shader-f16");
+    expect(compiled.wgsl).toContain("enable f16;");
+    expect(compiled.wgsl).toContain("vec2<f16>");
+    expect(Array.from(result.buffers.y as ArrayLike<number>)).toEqual([4, 7]);
+  });
+
+  it("feature-gates half2 behind shader-f16", () => {
+    expect(() => compileCudaLiteKernel(`
+__global__ void half2Gate(half2 *x) {
+  x[0] = make_half2(__float2half(1.0f), __float2half(2.0f));
+}`, { features: { "shader-f16": false }, workgroupSize: [1, 1, 1] })).toThrow(/half requires WebGPU shader-f16 support/);
+  });
+
   it("lowers reinterpret_cast vector memory views over scalar storage", () => {
     const compiled = compileCudaLiteKernel(`
 #define FLOAT4(value) (reinterpret_cast<float4 *>(&(value))[0])

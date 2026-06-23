@@ -2110,7 +2110,7 @@ function wgslUniformScalar(type: CudaLiteScalarType): string {
 function wgslBindingType(type: CudaLiteScalarType): "f16" | "f32" | "i32" | "u32" {
   if (isCudaVectorType(type)) {
     const scalar = cudaVectorScalarType(type);
-    return scalar === "int" ? "i32" : scalar === "uint" ? "u32" : "f32";
+    return scalar === "int" ? "i32" : scalar === "uint" ? "u32" : scalar === "half" ? "f16" : "f32";
   }
   if (type === "half") return "f16";
   if (type === "int") return "i32";

@@ -11,6 +11,7 @@ import {
   cudaVectorConstructorType,
   cudaVectorFieldIndex,
   cudaVectorLaneCount,
+  cudaVectorScalarType,
   isCudaVectorType,
   type CudaLiteVectorType,
 } from "./vector_types.js";
@@ -747,7 +748,11 @@ function byteView(buffer: WgslTypedArray): Uint8Array {
 
 function elementByteSize(valueType: CudaLiteScalarType): number {
   const vector = cudaVectorLaneCount(valueType);
-  if (vector > 1) return vector * 4;
+  if (vector > 1) return vector * scalarByteSize(cudaVectorScalarType(valueType));
+  return scalarByteSize(valueType);
+}
+
+function scalarByteSize(valueType: CudaLiteScalarType | undefined): number {
   if (valueType === "half") return 2;
   if (valueType === "complex64") return 8;
   return 4;
@@ -1593,13 +1598,14 @@ function allocateShared(declarations: readonly CudaLiteVarDecl[]): Map<string, S
   for (const declaration of declarations) {
     const elements = declaration.dimensions.reduce((product, item) => product * item, 1);
     const length = elements * valueStorageWidth(declaration.valueType);
-    const data = declaration.valueType === "int"
+    const scalarType = cudaVectorScalarType(declaration.valueType);
+    const data = declaration.valueType === "int" || scalarType === "int"
       ? new Int32Array(length)
-      : declaration.valueType === "uint"
+      : declaration.valueType === "uint" || scalarType === "uint"
         ? new Uint32Array(length)
-        : declaration.valueType === "bool"
+      : declaration.valueType === "bool"
           ? new Uint32Array(length)
-          : declaration.valueType === "half"
+          : declaration.valueType === "half" || scalarType === "half"
             ? createWgslFloat16Array(length)
             : new Float32Array(length);
     shared.set(declaration.name, { dimensions: declaration.dimensions, valueType: declaration.valueType, data });
@@ -1619,13 +1625,14 @@ function allocateLocalArray(declaration: CudaLiteVarDecl): LocalArrayValue {
 function allocateTypedArray(valueType: CudaLiteScalarType, dimensions: readonly number[]): WgslTypedArray {
   const elements = dimensions.reduce((product, item) => product * item, 1);
   const length = elements * valueStorageWidth(valueType);
-  return valueType === "int"
+  const scalarType = cudaVectorScalarType(valueType);
+  return valueType === "int" || scalarType === "int"
     ? new Int32Array(length)
-    : valueType === "uint"
+    : valueType === "uint" || scalarType === "uint"
       ? new Uint32Array(length)
       : valueType === "bool"
         ? new Uint32Array(length)
-        : valueType === "half"
+        : valueType === "half" || scalarType === "half"
           ? createWgslFloat16Array(length)
           : new Float32Array(length);
 }
@@ -2059,16 +2066,17 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
     } else if (param.pointer) {
       const buffer = input.buffers[param.name];
       if (!buffer) throw compilerFailure(`missing buffer input '${param.name}'`);
-      if (param.valueType === "int" && !(buffer instanceof Int32Array)) {
+      const scalarType = cudaVectorScalarType(param.valueType);
+      if ((param.valueType === "int" || scalarType === "int") && !(buffer instanceof Int32Array)) {
         throw compilerFailure(`buffer '${param.name}' expects Int32Array`);
       }
-      if (param.valueType === "uint" && !(buffer instanceof Uint32Array)) {
+      if ((param.valueType === "uint" || scalarType === "uint") && !(buffer instanceof Uint32Array)) {
         throw compilerFailure(`buffer '${param.name}' expects Uint32Array`);
       }
-      if (param.valueType === "float" && !(buffer instanceof Float32Array)) {
+      if ((param.valueType === "float" || scalarType === "float") && !(buffer instanceof Float32Array)) {
         throw compilerFailure(`buffer '${param.name}' expects Float32Array`);
       }
-      if (param.valueType === "half" && !isWgslFloat16Array(buffer)) {
+      if ((param.valueType === "half" || scalarType === "half") && !isWgslFloat16Array(buffer)) {
         throw compilerFailure(`buffer '${param.name}' expects Float16Array`);
       }
       if (param.valueType === "bool" && !(buffer instanceof Uint32Array)) {
@@ -2127,16 +2135,17 @@ function contextConstantDimensions(name: string, context: ThreadContext): readon
 }
 
 function validateTypedConstant(name: string, valueType: string, value: WgslTypedArray): void {
-  if (valueType === "int" && !(value instanceof Int32Array)) {
+  const scalarType = cudaVectorScalarType(valueType as CudaLiteScalarType);
+  if ((valueType === "int" || scalarType === "int") && !(value instanceof Int32Array)) {
     throw compilerFailure(`constant '${name}' expects Int32Array`);
   }
-  if (valueType === "uint" && !(value instanceof Uint32Array)) {
+  if ((valueType === "uint" || scalarType === "uint") && !(value instanceof Uint32Array)) {
     throw compilerFailure(`constant '${name}' expects Uint32Array`);
   }
-  if (valueType === "float" && !(value instanceof Float32Array)) {
+  if ((valueType === "float" || scalarType === "float") && !(value instanceof Float32Array)) {
     throw compilerFailure(`constant '${name}' expects Float32Array`);
   }
-  if (valueType === "half" && !isWgslFloat16Array(value)) {
+  if ((valueType === "half" || scalarType === "half") && !isWgslFloat16Array(value)) {
     throw compilerFailure(`constant '${name}' expects Float16Array`);
   }
   if (valueType === "bool" && !(value instanceof Uint32Array)) {

@@ -1558,4 +1558,34 @@ __global__ void half_inc(half* x) {
 
     expect(Array.from(actual.buffers.x as Iterable<number>)).toEqual(Array.from(expected.buffers.x as Iterable<number>));
   });
+
+  it("runs compiled half2 vector storage when the browser exposes shader-f16", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const features = await detectKernelFeatures(device);
+    if (!features.shaderF16 || !features.float16Array) return;
+
+    const source = `
+__global__ void half2_add(const half2* x, half2* y) {
+  int i = threadIdx.x;
+  half2 value = x[i];
+  half2 bias = {__float2half(1.0f), __float2half(2.0f)};
+  y[i] = make_half2(value.x + bias.x, value.y + bias.y);
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      features: { "shader-f16": true },
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        x: createWgslFloat16Array([3, 5]),
+        y: createWgslFloat16Array(2),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(device, compiled, input, launch);
+
+    expect(Array.from(actual.buffers.y as Iterable<number>)).toEqual(Array.from(expected.buffers.y as Iterable<number>));
+  });
 });

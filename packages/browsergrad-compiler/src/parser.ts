@@ -25,7 +25,7 @@ import {
   type CudaLiteVarDecl,
   type SourceSpan,
 } from "./types.js";
-import { CUDA_VECTOR_TYPES } from "./vector_types.js";
+import { CUDA_VECTOR_TYPES, isCudaVectorType } from "./vector_types.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 
 const TYPE_KEYWORDS = new Set(["float", "int", "uint", "half", "__half", "bool", ...CUDA_VECTOR_TYPES.keys()]);
@@ -577,7 +577,7 @@ class Parser {
         }
         this.expect("]");
       }
-      const init = this.consumeIf("=") ? this.parseExpression() : undefined;
+      const init = this.consumeIf("=") ? this.parseInitializerExpression(valueType) : undefined;
       if (constexpr && init !== undefined) {
         const value = this.evaluateIntegerConstantExpression(init);
         if (value !== undefined) this.recordIntegerConstant(name.value, value);
@@ -599,6 +599,26 @@ class Parser {
       ...declaration,
       span: mergeSpans(declaration.span, end),
     }));
+  }
+
+  private parseInitializerExpression(valueType: Exclude<CudaLiteScalarType, "void">): CudaLiteExpression {
+    if (!this.match("{")) return this.parseExpression();
+    const start = this.expect("{").span;
+    const args: CudaLiteExpression[] = [];
+    if (!this.match("}")) {
+      do args.push(this.parseExpression());
+      while (this.consumeIf(","));
+    }
+    const end = this.expect("}").span;
+    if (!isCudaVectorType(valueType)) {
+      this.fail("braced initializers are only supported for CUDA vector values", mergeSpans(start, end));
+    }
+    return {
+      kind: "call",
+      callee: { kind: "identifier", name: `make_${valueType}`, span: start },
+      args,
+      span: mergeSpans(start, end),
+    };
   }
 
   private parseExpression(minPrecedence = 1): CudaLiteExpression {

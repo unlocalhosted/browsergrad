@@ -175,7 +175,7 @@ export function analyzeCudaLite(
       constant: param.constant,
       span: param.span,
     });
-    if (param.valueType === "half") requiredFeatures.add("shader-f16");
+    if (requiresShaderF16(param.valueType)) requiredFeatures.add("shader-f16");
     if (param.valueType === "bool" && param.pointer) {
       diagnostics.push(error("unsupported-bool-pointer", "bool pointer parameters are not supported in CUDA-lite v0", param.span));
     }
@@ -217,7 +217,7 @@ export function analyzeCudaLite(
       switch (statement.kind) {
         case "var":
           declareVar(statement, scope, names);
-          if (statement.valueType === "half") requiredFeatures.add("shader-f16");
+          if (requiresShaderF16(statement.valueType)) requiredFeatures.add("shader-f16");
           if (statement.pointer && !isSupportedLocalPointer(statement, scope)) {
             diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.span));
           }
@@ -307,7 +307,7 @@ export function analyzeCudaLite(
           const loopNames = new Set(names);
           if (statement.init?.kind === "var") {
             declareVar(statement.init, loopScope, loopNames);
-            if (statement.init.valueType === "half") requiredFeatures.add("shader-f16");
+            if (requiresShaderF16(statement.init.valueType)) requiredFeatures.add("shader-f16");
             if (statement.init.pointer && !isSupportedLocalPointer(statement.init, loopScope)) {
               diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.init.span));
             }
@@ -361,7 +361,7 @@ export function analyzeCudaLite(
         constant: param.constant,
         span: param.span,
       });
-      if (param.valueType === "half") requiredFeatures.add("shader-f16");
+      if (requiresShaderF16(param.valueType)) requiredFeatures.add("shader-f16");
     }
     walkStatements(fn.body, functionScope, 0, 0, 0, functionDeclaredNames);
   }
@@ -449,6 +449,10 @@ function selectKernel(
   }]);
 }
 
+function requiresShaderF16(type: CudaLiteScalarType | undefined): boolean {
+  return type === "half" || cudaVectorScalarType(type as CudaLiteScalarType) === "half";
+}
+
 function launchedDeviceFunctionNames(ast: CudaLiteModule): ReadonlySet<string> {
   const names = new Set<string>();
   for (const kernel of ast.kernels) {
@@ -490,7 +494,7 @@ function declareConstant(
     constant: true,
     span: constant.span,
   });
-  if (constant.valueType === "half") requiredFeatures.add("shader-f16");
+  if (requiresShaderF16(constant.valueType)) requiredFeatures.add("shader-f16");
   for (const dimension of constant.dimensions) {
     if (!Number.isInteger(dimension) || dimension <= 0) {
       diagnostics.push(error("invalid-array-dimension", "array dimensions must be positive integer literals", constant.span));
@@ -536,7 +540,10 @@ function declareDeviceFunction(
     params: fn.params,
     span: fn.span,
   });
-  if (fn.returnType === "half") requiredFeatures.add("shader-f16");
+  if (requiresShaderF16(fn.returnType)) requiredFeatures.add("shader-f16");
+  for (const param of fn.params) {
+    if (requiresShaderF16(param.valueType)) requiredFeatures.add("shader-f16");
+  }
 }
 
 function isSupportedSharedPointerAlias(statement: CudaLiteVarDecl, scope: Scope): boolean {

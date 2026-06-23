@@ -18,6 +18,7 @@ export type CudaLiteScalarType =
   | "int"
   | "uint"
   | "half"
+  | "half2"
   | "bool"
   | "complex64"
   | "float2"
