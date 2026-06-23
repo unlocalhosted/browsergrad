@@ -39,6 +39,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__syncthreads", [0, 0]],
   ["__syncwarp", [0, 1]],
   ["__threadfence", [0, 0]],
+  ["__trap", [0, 0]],
   ["__shfl_sync", [3, 4]],
   ["__shfl_down_sync", [3, 4]],
   ["__shfl_up_sync", [3, 4]],
@@ -128,6 +129,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["clock64", [0, 0]],
   ["__builtin_assume_aligned", [2, 2]],
   ["ct::assume_aligned", [1, 2]],
+  ["__halves2bfloat162", [2, 2]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
   ...[...CUDA_VECTOR_CONSTRUCTORS].map(([name, type]) => {
     const info = CUDA_VECTOR_TYPES.get(type);
@@ -948,6 +950,9 @@ function validateCallExpression(
   if (callName === "clock64") {
     return { kind: "scalar", valueType: "uint" };
   }
+  if (callName === "__trap") {
+    return { kind: "scalar", valueType: "int" };
+  }
   if (isFillRegsBuiltin(callName)) {
     validateFillRegs(expression, scope, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "voidptr" };
@@ -956,6 +961,15 @@ function validateCallExpression(
   if (vectorConstructor) {
     for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
     return { kind: "vector", valueType: vectorConstructor };
+  }
+  if (callName === "__halves2bfloat162") {
+    for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return { kind: "vector", valueType: "bf162" };
+  }
+  if (isBfloat16ScalarArithmetic(callName)) {
+    const infos = expression.args.map((arg) => walkExpression(arg, scope));
+    for (const [index, info] of infos.entries()) validateScalarOperand(info, expression.args[index]!.span, diagnostics);
+    if (infos.some((info) => info.valueType === "bf16")) return { kind: "scalar", valueType: "bf16" };
   }
   if (isHalf2Intrinsic(callName)) {
     requiredFeatures.add("shader-f16");
@@ -1125,6 +1139,16 @@ function isHalf2Intrinsic(name: string): boolean {
     name === "__hfma2" ||
     name === "__hmin2" ||
     name === "__hmax2";
+}
+
+function isBfloat16ScalarArithmetic(name: string): boolean {
+  return name === "__hadd" ||
+    name === "__hsub" ||
+    name === "__hmul" ||
+    name === "__hdiv" ||
+    name === "__hfma" ||
+    name === "__hmin" ||
+    name === "__hmax";
 }
 
 function isFillRegsBuiltin(name: string): boolean {
@@ -1995,6 +2019,16 @@ function validateNonCallExpression(
           if (!op || !vectorArithmeticInfo(op, left, right, expression.left, expression.right, diagnostics, requiredFeatures)) {
             diagnostics.push(error("unsupported-vector-assignment", "CUDA vector compound assignment expects a scalar or matching CUDA vector value", expression.right.span));
           }
+        }
+      } else if (left.kind === "pointer") {
+        if (expression.operator === "=") {
+          if (right.kind !== "pointer" && right.kind !== "pool-pointer" && right.kind !== "address" && right.kind !== "unknown") {
+            diagnostics.push(error("unsupported-pointer-assignment", "CUDA pointer assignment expects a pointer value", expression.right.span));
+          }
+        } else if (isPointerRebaseOperator(expression.operator)) {
+          validateScalarOperand(right, expression.right.span, diagnostics);
+        } else {
+          diagnostics.push(error("unsupported-pointer-assignment", "CUDA pointer compound assignment supports =, +=, and -=", expression.right.span));
         }
       } else {
         validateScalarOperand(right, expression.right.span, diagnostics);

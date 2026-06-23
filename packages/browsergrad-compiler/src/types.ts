@@ -19,6 +19,8 @@ export type CudaLiteScalarType =
   | "uint"
   | "half"
   | "half2"
+  | "bf16"
+  | "bf162"
   | "bool"
   | "complex64"
   | "float2"
@@ -294,7 +296,7 @@ export interface CudaLiteCallExpression {
 
 export interface CudaLiteUnaryExpression {
   readonly kind: "unary";
-  readonly operator: "-" | "+" | "!" | "&" | "*";
+  readonly operator: "-" | "+" | "!" | "~" | "&" | "*";
   readonly argument: CudaLiteExpression;
   readonly span: SourceSpan;
 }

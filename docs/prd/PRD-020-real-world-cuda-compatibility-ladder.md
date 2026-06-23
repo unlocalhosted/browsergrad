@@ -58,9 +58,9 @@ Repo exploration:
   kernel definitions: `225/240` strict direct WGSL and `15/240` host-orchestrated
   real WebGPU.
 
-Local corpus audits on 2026-06-23:
+Local corpus audits on 2026-06-24:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `197` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `204` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -101,13 +101,13 @@ Local corpus audits on 2026-06-23:
   primitives and CUDA `__popc`, plus reverse translation-unit alias/helper
   context for header-only kernels, POD-record vector alias lowering, numeric
   object-macro folding, local const/template integer dimension folding, and
-  scalar bitwise compound assignments, with `160`
+  scalar bitwise compound assignments, with `153`
   hard gaps.
   Main failures:
   parser/frontend gaps, texture/vector
   operators, remaining `half2` intrinsics, `double`, templates, and
   runtime library shape.
-- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `107` direct
+- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `116` direct
   WebGPU-runnable after source/context normalization, intrinsic-ledger
   expansion, CUDA/C named constants, CUDA cache-hint memory builtins, local
   header context, simple C++ alias / constexpr intake, and typed storage
@@ -130,12 +130,13 @@ Local corpus audits on 2026-06-23:
   C line-continuation folding, simple statement-lambda inlining, scalar
   template helper inference, shadow-safe context defines, CUDA `break`,
   POD-record vector alias lowering, numeric object-macro folding, local
-  const/template integer dimension folding, and scalar bitwise compound
-  assignments, with `41`
+  const/template integer dimension folding, scalar bitwise compound
+  assignments, CUDA bf16 logical type/intrinsic intake, `__trap`, unary
+  bitwise-not, and mutable local storage-pointer handles, with `32`
   hard gaps. Main
-  failures: frontend macro/type shape, parser C++-isms, typed feature gaps
-  such as bf16, and remaining library/front-end gaps.
-- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `203` direct
+  failures: frontend macro/type shape, parser C++-isms, and remaining
+  library/front-end gaps.
+- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `216` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, local header context, and
   simple C++ alias / constexpr intake plus `FLOAT4(x)`-style typed storage
@@ -153,8 +154,8 @@ Local corpus audits on 2026-06-23:
   multi-dimensional shared-memory address lowering for
   `__cvta_generic_to_shared`, plus homogeneous POD-record lowering into CUDA
   vectors, safe numeric object-macro folding, local const/template integer
-  dimension folding, and scalar bitwise compound assignments, with `90` hard
-  gaps.
+  dimension folding, scalar bitwise compound assignments, and CUDA bf16
+  logical type/intrinsic intake, with `77` hard gaps.
   The pre-normalizer baseline was `3/293`, which proved context isolation was
   the first ladder rung.
 
@@ -196,6 +197,9 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
+- The current live aggregate gate is `776/1038` WebGPU-runnable across the four
+  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `204/357`, `llm.c`
+  `116/148`, and LeetCUDA `216/293`.
 
 ## Grill Decisions
 
@@ -341,11 +345,11 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=197` WebGPU-runnable, and `<=160` hard gaps.
-- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=107`
-  WebGPU-runnable, and `<=41` hard gaps.
+  `>=204` WebGPU-runnable, and `<=153` hard gaps.
+- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=116`
+  WebGPU-runnable, and `<=32` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
-  `>=203` WebGPU-runnable, and `<=90` hard gaps.
+  `>=216` WebGPU-runnable, and `<=77` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
   unit tests.
 - Intrinsic-ledger expansion improves coverage through generic CUDA math and
@@ -378,6 +382,11 @@ Acceptance criteria for the first slice:
   special.
 - Local typed pointer aliases such as `float4* p = reinterpret_cast<float4*>(&x[i])`
   lower as storage views without emitting fake pointer storage variables.
+- Mutable local storage-pointer aliases such as
+  `const float* p = input + i; p = other + j; out[i] = p[0];` lower through one
+  pointer-handle model. Static aliases stay optimized away; mutable aliases
+  track modeled storage buffer plus element base in parser/analyzer/reference
+  and WGSL.
 - Mutable CUDA pointer parameters such as `p += offset`, `p -= offset`, and
   `p++` lower through one pointer-base model in analyzer, CPU reference, WGSL
   emission, atomics/device-pointer argument paths, and corpus audit gates.
@@ -388,6 +397,11 @@ Acceptance criteria for the first slice:
 - CUDA fast math/bit intrinsic ledger includes `__saturatef`, `__fdividef`,
   `__expf`, `__logf`, `rsqrtf`, `__clz`, `__mul24`, `__umul24`, and `assert`
   with parser/analyzer, CPU reference, WGSL, and test coverage.
+- CUDA bf16 intake includes `__nv_bfloat16`, `nv_bfloat16`, `__nv_bfloat162`,
+  `__float2bfloat16*`, `__bfloat162float`, `__ushort_as_bfloat16`, and
+  `__halves2bfloat162` with rounded reference semantics and WGSL f32 lowering.
+  Packed `u32` bf16 storage ABI remains the next hardening gate before calling
+  bf16 native-like.
 - CUDA 2D float texture-object lowering maps `cudaTextureObject_t` params,
   scalar `tex2D<float>` calls, typed texture-vector reads such as
   `tex2D<float4>` / `tex2D<uchar4>`, and multi-channel WebGPU texture uploads

@@ -900,6 +900,7 @@ function elementByteSize(valueType: CudaLiteScalarType): number {
 
 function scalarByteSize(valueType: CudaLiteScalarType | undefined): number {
   if (valueType === "half") return 2;
+  if (valueType === "bf16") return 2;
   if (valueType === "complex64") return 8;
   return 4;
 }
@@ -965,6 +966,7 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
       const value = evalNumber(expression.argument, context);
       if (expression.operator === "-") return -value;
       if (expression.operator === "+") return value;
+      if (expression.operator === "~") return ~Math.trunc(value);
       return truthy(value) ? 0 : 1;
     }
     case "binary":
@@ -1083,6 +1085,7 @@ function vectorSplat(valueType: CudaLiteVectorType, value: number): CudaVectorVa
 function roundVectorLane(valueType: CudaLiteVectorType, value: number): number {
   const scalar = cudaVectorScalarType(valueType);
   if (scalar === "half") return roundHalf(value);
+  if (scalar === "bf16") return roundBfloat16(value);
   if (scalar === "int") return Math.trunc(value) | 0;
   if (scalar === "uint") return Math.trunc(value) >>> 0;
   return value;
@@ -1092,6 +1095,7 @@ function castNumber(type: Exclude<CudaLiteScalarType, "void">, value: number): E
   if (type === "int") return Math.trunc(value) | 0;
   if (type === "uint") return Math.trunc(value) >>> 0;
   if (type === "bool") return truthy(value) ? 1 : 0;
+  if (type === "bf16") return roundBfloat16(value);
   if (type === "complex64") return { kind: "complex64", x: value, y: 0 };
   return value;
 }
@@ -1241,6 +1245,17 @@ function evalAssignment(
 ): EvalValue {
   const pointerRebase = evalPointerRebaseAssignment(operator, leftExpression, rightExpression, context);
   if (pointerRebase) return pointerRebase;
+  if (operator === "=" && leftExpression.kind === "identifier") {
+    const currentPointer = context.locals.get(leftExpression.name);
+    if (isAddress(currentPointer) || isPoolPointer(currentPointer)) {
+      const valueType = pointerValueTypeForExpression(leftExpression, context);
+      const next = pointerArgumentValue(rightExpression, valueType, context);
+      if (isAddress(next) || isPoolPointer(next) || typeof next === "number") {
+        context.locals.set(leftExpression.name, next);
+        return next;
+      }
+    }
+  }
   const lvalue = resolveLValue(leftExpression, context);
   const right = evalExpression(rightExpression, context);
   if (isPoolPointer(right)) {
@@ -1605,6 +1620,16 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       lanes: lanes.length === 1 ? Array(cudaVectorLaneCount(vectorConstructor)).fill(scalar) : lanes,
     };
   }
+  if (name === "__halves2bfloat162") {
+    return {
+      kind: "cuda-vector",
+      valueType: "bf162",
+      lanes: [
+        roundBfloat16(evalNumber(expression.args[0]!, context)),
+        roundBfloat16(evalNumber(expression.args[1]!, context)),
+      ],
+    };
+  }
   if (isHalf2Intrinsic(name)) {
     const left = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
     const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "half2");
@@ -1658,6 +1683,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     case "__syncwarp":
       return 0;
     case "__threadfence":
+      return 0;
+    case "__trap":
       return 0;
     case "clock":
       return context.blockIdx.x * 104729 +
@@ -1736,6 +1763,16 @@ function half2IntrinsicOperator(name: string | undefined): (left: number, right:
 
 function roundHalf(value: number): number {
   return float16BitsToFloat32(float32ToFloat16Bits(value));
+}
+
+const f32Scratch = new Float32Array(1);
+const u32Scratch = new Uint32Array(f32Scratch.buffer);
+
+function roundBfloat16(value: number): number {
+  f32Scratch[0] = value;
+  const bits = u32Scratch[0] ?? 0;
+  u32Scratch[0] = (bits + 0x8000) & 0xffff0000;
+  return f32Scratch[0] ?? 0;
 }
 
 function isHostManagedRuntimeNoopCall(name: string): boolean {
@@ -2353,7 +2390,9 @@ function writeBufferValue(
     for (let lane = 0; lane < cudaVectorLaneCount(valueType); lane++) buffer[storageIndex + lane] = vector.lanes[lane] ?? 0;
     return;
   }
-  buffer[storageIndex] = valueAsNumber(value, "write value");
+  buffer[storageIndex] = valueType === "bf16"
+    ? roundBfloat16(valueAsNumber(value, "write value"))
+    : valueAsNumber(value, "write value");
 }
 
 function readPoolValue(
@@ -2830,7 +2869,7 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
       if ((param.valueType === "uint" || scalarType === "uint") && !(buffer instanceof Uint32Array)) {
         throw compilerFailure(`buffer '${param.name}' expects Uint32Array`);
       }
-      if ((param.valueType === "float" || scalarType === "float") && !(buffer instanceof Float32Array)) {
+      if ((param.valueType === "float" || param.valueType === "bf16" || scalarType === "float" || scalarType === "bf16") && !(buffer instanceof Float32Array)) {
         throw compilerFailure(`buffer '${param.name}' expects Float32Array`);
       }
       if ((param.valueType === "half" || scalarType === "half") && !isWgslFloat16Array(buffer)) {
@@ -2900,7 +2939,7 @@ function validateTypedConstant(name: string, valueType: string, value: WgslTyped
   if ((valueType === "uint" || scalarType === "uint") && !(value instanceof Uint32Array)) {
     throw compilerFailure(`constant '${name}' expects Uint32Array`);
   }
-  if ((valueType === "float" || scalarType === "float") && !(value instanceof Float32Array)) {
+  if ((valueType === "float" || valueType === "bf16" || scalarType === "float" || scalarType === "bf16") && !(value instanceof Float32Array)) {
     throw compilerFailure(`constant '${name}' expects Float32Array`);
   }
   if ((valueType === "half" || scalarType === "half") && !isWgslFloat16Array(value)) {

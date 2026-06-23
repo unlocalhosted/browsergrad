@@ -46,6 +46,8 @@ const CUDA_SCALAR_TYPE_ALIASES = new Map<string, Exclude<CudaLiteScalarType, "vo
   ["__nv_fp8_storage_t", "uint"],
   ["__nv_fp8x2_storage_t", "uint"],
   ["__nv_fp8x4_storage_t", "uint"],
+  ["__nv_bfloat16", "bf16"],
+  ["nv_bfloat16", "bf16"],
 ]);
 const TYPE_KEYWORDS = new Set([
   "float",
@@ -53,6 +55,9 @@ const TYPE_KEYWORDS = new Set([
   "uint",
   "half",
   "__half",
+  "bf16",
+  "bf162",
+  "__nv_bfloat162",
   "bool",
   ...CUDA_SCALAR_TYPE_ALIASES.keys(),
   ...CUDA_VECTOR_TYPES.keys(),
@@ -895,7 +900,7 @@ class Parser {
         span: mergeSpans(start, expression.span),
       } satisfies CudaLiteCastExpression;
     }
-    if (["-", "+", "!", "&", "*"].includes(token.value)) {
+    if (["-", "+", "!", "~", "&", "*"].includes(token.value)) {
       const op = this.advance().value as CudaLiteUnaryExpression["operator"];
       const argument = this.parsePrefix();
       return { kind: "unary", operator: op, argument, span: mergeSpans(token.span, argument.span) };
@@ -1137,6 +1142,7 @@ class Parser {
     if (token.value === "DevicePool") return "devicepool";
     if (token.value === "void") return "voidptr";
     if (token.value === "__half") return "half";
+    if (token.value === "__nv_bfloat162") return "bf162";
     const scalarAlias = CUDA_SCALAR_TYPE_ALIASES.get(token.value);
     if (scalarAlias !== undefined) return scalarAlias;
     const vectorAlias = cudaVectorTypeAlias(token.value);

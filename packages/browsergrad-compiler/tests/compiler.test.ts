@@ -619,6 +619,31 @@ __global__ void ok(float* x, float* out) {
 }`);
     expect(modeledLocalPointer.loweringPlan.canRunOnGpu).toBe(true);
 
+    const mutableLocalPointer = compileCudaLiteKernel(`
+__global__ void mutable_local_ptr(const float* a, float* b, float* out) {
+  int i = threadIdx.x;
+  const float* p = a + i;
+  if (i < 1) {
+    out[0] = p[0];
+    p = b + i;
+    out[1] = p[0];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const mutableLocalPointerResult = runCompiledKernelReference(
+      mutableLocalPointer,
+      {
+        buffers: {
+          a: new Float32Array([2]),
+          b: new Float32Array([5]),
+          out: new Float32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    expect([...mutableLocalPointerResult.buffers.out as Float32Array]).toEqual([2, 5]);
+    expect(mutableLocalPointer.wgsl).toContain("var p_buffer: u32");
+    expect(mutableLocalPointer.wgsl).toContain("p_buffer = 1u;");
+
     const alignedPointer = compileCudaLiteKernel(`
 __global__ void aligned(float* x, float* out) {
   float* y = (float*)__builtin_assume_aligned(x + threadIdx.x, 16);
@@ -676,10 +701,6 @@ __global__ void unsupported(float* x) {
     expect(describeCudaDiagnostic({
       code: "parse-error",
       message: "unsupported CUDA-lite type: double",
-    })).toMatchObject({ family: "feature", referenceRuns: false });
-    expect(describeCudaDiagnostic({
-      code: "parse-error",
-      message: "unsupported CUDA-lite type: __nv_bfloat16",
     })).toMatchObject({ family: "feature", referenceRuns: false });
   });
 
@@ -4182,6 +4203,54 @@ __global__ void fp8_convert(const uint* input, half* output, uint* encoded, int*
     expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([1.5]);
     expect([...result.buffers.encoded as Uint32Array]).toEqual([0x3c]);
     expect([...result.buffers.as_int as Int32Array]).toEqual([1]);
+  });
+
+  it("lowers CUDA bf16 values as rounded f32 browser storage", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void bf16_convert(const __nv_bfloat16* input, __nv_bfloat16* output, float* as_float) {
+  int idx = threadIdx.x;
+  if (idx < 1) {
+    __nv_bfloat16 a = input[0];
+    __nv_bfloat16 b = __float2bfloat16(0.1f);
+    __nv_bfloat162 pair = __halves2bfloat162(a, b);
+    output[0] = __hadd(pair.x, pair.y);
+    as_float[0] = __bfloat162float(output[0]);
+  }
+}`, {
+      workgroupSize: [1, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          input: new Float32Array([1.5]),
+          output: new Float32Array(1),
+          as_float: new Float32Array(1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.ir.requiredFeatures).not.toContain("shader-f16");
+    expect(compiled.wgsl).toContain("vec2<f32>");
+    expect([...result.buffers.output as Float32Array][0]).toBeCloseTo(1.6015625);
+    expect([...result.buffers.as_float as Float32Array][0]).toBeCloseTo(1.6015625);
+  });
+
+  it("lowers CUDA bitwise not and trap no-op control paths", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void bitwise_not_and_trap(int* out) {
+  if (threadIdx.x == 99) { __trap(); }
+  out[0] = ~(4 - 1);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Int32Array]).toEqual([-4]);
+    expect(compiled.wgsl).toContain("~(4 - 1)");
   });
 
   it("lowers scalar CUDA half arithmetic and comparison intrinsics", () => {

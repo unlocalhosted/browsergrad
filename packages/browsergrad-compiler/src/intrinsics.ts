@@ -130,6 +130,13 @@ const HALF_INTRINSICS = [
   intrinsic("__floats2half2_rn", [2, 2], "half2", () => 0, (args) => `vec2<f16>(f16(${args[0] ?? "0"}), f16(${args[1] ?? "0"}))`, HALF_FEATURES),
 ] as const;
 
+const BF16_INTRINSICS = [
+  intrinsic("__bfloat162float", [1, 1], "float", (args) => args[0] ?? 0, (args) => `f32(${args[0] ?? "0"})`),
+  intrinsic("__float2bfloat16", [1, 1], "bf16", (args) => roundBfloat16(args[0] ?? 0), (args) => wgslRoundBfloat16(args[0] ?? "0")),
+  intrinsic("__float2bfloat16_rn", [1, 1], "bf16", (args) => roundBfloat16(args[0] ?? 0), (args) => wgslRoundBfloat16(args[0] ?? "0")),
+  intrinsic("__ushort_as_bfloat16", [1, 1], "bf16", (args) => bfloat16BitsToFloat32(args[0] ?? 0), (args) => `bitcast<f32>(u32(${args[0] ?? "0"}) << 16u)`),
+] as const;
+
 const FP8_INTRINSICS = [
   intrinsic("__nv_cvt_fp8_to_halfraw", [2, 2], "half", (args) => roundHalf(fp8ToFloat32(args[0] ?? 0, args[1] ?? 0)), (args) => `f16(bg_fp8_to_f32(u32(${args[0] ?? "0"}), u32(${args[1] ?? "0"})))`, HALF_FEATURES),
   intrinsic("__nv_cvt_float_to_fp8", [3, 3], "uint", (args) => float32ToFp8(args[0] ?? 0, args[1] ?? 0, args[2] ?? 0), (args) => `bg_f32_to_fp8(f32(${args[0] ?? "0"}), u32(${args[1] ?? "0"}), u32(${args[2] ?? "0"}))`),
@@ -139,6 +146,7 @@ export const CUDA_INTRINSICS: readonly CudaIntrinsic[] = [
   ...FLOAT_INTRINSICS,
   ...INTEGER_INTRINSICS,
   ...HALF_INTRINSICS,
+  ...BF16_INTRINSICS,
   ...FP8_INTRINSICS,
 ];
 
@@ -164,6 +172,26 @@ function intrinsic(
 
 function roundHalf(value: number): number {
   return float16BitsToFloat32(float32ToFloat16Bits(value));
+}
+
+const f32Scratch = new Float32Array(1);
+const u32Scratch = new Uint32Array(f32Scratch.buffer);
+
+function roundBfloat16(value: number): number {
+  f32Scratch[0] = value;
+  const bits = u32Scratch[0] ?? 0;
+  const rounded = (bits + 0x8000) & 0xffff0000;
+  u32Scratch[0] = rounded >>> 0;
+  return f32Scratch[0] ?? 0;
+}
+
+function bfloat16BitsToFloat32(bits: number): number {
+  u32Scratch[0] = (Math.trunc(bits) & 0xffff) << 16;
+  return f32Scratch[0] ?? 0;
+}
+
+function wgslRoundBfloat16(value: string): string {
+  return `bitcast<f32>((bitcast<u32>(f32(${value})) + 0x8000u) & 0xffff0000u)`;
 }
 
 function orderedCompare(args: readonly number[], compare: (a: number, b: number) => boolean): number {
