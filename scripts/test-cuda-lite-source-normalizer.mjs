@@ -219,6 +219,31 @@ void host(float *out) {
 
 {
   const kernel = `
+template <class T>
+__global__ void typed_from_wrapper(T *out) {
+  out[0] = (T)1;
+}`;
+  const wrapper = `
+template <class T>
+void launch_typed_from_wrapper(T *out) {
+  typed_from_wrapper<T><<<1, 1>>>(out);
+}
+void run(float *out) {
+  launch_typed_from_wrapper<float>(out);
+}`;
+  const launches = collectKernelTemplateArguments(`${kernel}\n${wrapper}`);
+  assert.deepEqual(launches.get("typed_from_wrapper"), ["float"]);
+  const source = createKernelCompilationUnit({
+    kernel,
+    templateArgumentsByKernelName: launches,
+  });
+  assert.match(source, /__global__ void typed_from_wrapper\(float \*out\)/u);
+  assert.match(source, /template <class T = float>/u);
+  assert.doesNotMatch(source, /\(T\)1/u);
+}
+
+{
+  const kernel = `
 template <typename OutFloat, bool Atomic>
 __global__ void inferred_kernel(OutFloat *out, const float *in, std::bool_constant<Atomic>) {
   if constexpr (!Atomic) {
@@ -256,6 +281,37 @@ __global__ void kernel(float *in, float *out, int ld) {
   });
   assert.match(source, /#define IDX2C/u);
   assert.doesNotMatch(source, /#define FLOAT4/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+template <class T>
+__global__ void reduce(T *input, T *output) {
+  T *scratch = SharedMemory<T>();
+  scratch[threadIdx.x] = input[threadIdx.x];
+  output[0] = scratch[0];
+}`,
+    templateArgumentsByKernelName: new Map([["reduce", ["float"]]]),
+  });
+  assert.match(source, /extern __shared__ float scratch\[\];/u);
+  assert.doesNotMatch(source, /SharedMemory/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+template <class T>
+__global__ void sharedmem_get_pointer(T *input, T *output) {
+  SharedMemory<T> smem;
+  T *scratch = smem.getPointer();
+  scratch[threadIdx.x] = input[threadIdx.x];
+  output[0] = scratch[0];
+}`,
+    templateArgumentsByKernelName: new Map([["sharedmem_get_pointer", ["float"]]]),
+  });
+  assert.match(source, /extern __shared__ float scratch\[\];/u);
+  assert.doesNotMatch(source, /getPointer/u);
 }
 
 {

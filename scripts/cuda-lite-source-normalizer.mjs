@@ -58,7 +58,7 @@ export function createKernelCompilationUnit({
     referencedSiblingKernels.join("\n"),
     stripKernelLaunchTemplateArguments(specializedKernel),
   ].filter((part) => part.trim().length > 0).join("\n");
-  return normalizeCppTemplateCarrierSyntax(normalizePacked128MemoryHelpers(unit));
+  return normalizeCppTemplateCarrierSyntax(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(unit)));
 }
 
 export function kernelDefinitionName(kernel) {
@@ -300,6 +300,19 @@ function normalizeCppTemplateCarrierSyntax(source) {
   return source
     .replace(/\bstd\s*::\s*bool_constant\s*<\s*(true|false)\s*>\s*\{\s*\}/gu, "$1")
     .replace(/\bstd\s*::\s*bool_constant\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>\s*(?=[,)])/gu, (_match, name) => `bool __bg_bool_constant_${name}`);
+}
+
+function normalizeSharedMemoryHelpers(source) {
+  return source
+    .replace(
+      /\bSharedMemory\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>\s+([A-Za-z_][A-Za-z0-9_]*)\s*;\s*([A-Za-z_][A-Za-z0-9_]*)\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\2\s*\.\s*getPointer\s*\(\s*\)\s*;/gu,
+      (_match, templateType, _helperName, pointerType, pointerName) =>
+        templateType === pointerType ? `extern __shared__ ${templateType} ${pointerName}[];` : _match,
+    )
+    .replace(
+      /\b([A-Za-z_][A-Za-z0-9_]*)\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*SharedMemory\s*<\s*\1\s*>\s*\(\s*\)\s*;/gu,
+      "extern __shared__ $1 $2[];",
+    );
 }
 
 function normalizePacked128MemoryHelpers(source) {
@@ -743,7 +756,11 @@ function evaluateTemplateIntegerExpression(expression, env) {
 }
 
 function templateArgumentScore(args) {
-  return args.reduce((score, arg) => score + (normalizeTemplateValueArgument(arg, "int") === undefined ? 0 : 1), 0);
+  return args.reduce((score, arg) => {
+    if (normalizeTemplateTypeArgument(arg) !== undefined) return score + 2;
+    if (normalizeTemplateValueArgument(arg, "int") !== undefined) return score + 1;
+    return score;
+  }, 0);
 }
 
 function scanCudaFuncSetAttributeTemplateReferences(source) {
