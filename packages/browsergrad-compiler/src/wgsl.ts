@@ -425,6 +425,12 @@ function emitStatement(
 ): string[] {
   const prefix = indent(indentLevel);
   switch (statement.kind) {
+    case "block": {
+      const lines = [`${prefix}{`];
+      lines.push(...statement.body.flatMap((child) => emitStatement(child, context, indentLevel + 1)));
+      lines.push(`${prefix}}`);
+      return lines;
+    }
     case "var":
       if (statement.storage === "shared") return [];
       if (statement.pointer) {

@@ -666,15 +666,28 @@ __global__ void bad(float* x) {
   it("rejects parser edge cases with clear errors", () => {
     expect(() => parseCudaLite(`
 __global__ void bad(float* x) {
-  {
-    x[0] = 1.0;
-  }
-}`)).toThrow(/standalone blocks/);
-
-    expect(() => parseCudaLite(`
-__global__ void bad(float* x) {
   if (threadIdx.x < 1) { x[0] = 1.2.3; }
 }`)).toThrow(/invalid numeric literal/);
+  });
+
+  it("lowers standalone C block scopes", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void scoped(float* x) {
+  int value = 1;
+  {
+    int value = 4;
+    x[0] = (float)value;
+  }
+  x[1] = (float)value;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("{\n    var value: i32 = 4;");
+    expect([...result.buffers.x as Float32Array]).toEqual([4, 1]);
   });
 
   it("accepts common CUDA lesson syntax in the CUDA-lite subset", () => {

@@ -86,8 +86,8 @@ Local corpus audits on 2026-06-23:
   views, bounded integer template defaults, and concrete launch-context
   template specialization plus `half2` f16 vector storage and braced vector
   initializers, static shared declarations, flexible device helper attributes,
-  `half2` arithmetic intrinsics, and builtin infinity lowering, with `146`
-  hard gaps.
+  `half2` arithmetic intrinsics, builtin infinity lowering, and standalone C
+  block scopes, with `142` hard gaps.
   The pre-normalizer baseline was `3/293`, which proved context isolation was
   the first ladder rung.
 
@@ -274,7 +274,7 @@ Acceptance criteria for the first slice:
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=49`
   WebGPU-runnable, and `<=99` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
-  `>=147` WebGPU-runnable, and `<=146` hard gaps.
+  `>=151` WebGPU-runnable, and `<=142` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
   unit tests.
 - Intrinsic-ledger expansion improves coverage through generic CUDA math and

@@ -389,6 +389,8 @@ function hostDynamicParentDispatchNeeded(statements: readonly CudaLiteStatement[
 
 function statementNeedsParentDispatch(statement: CudaLiteStatement): boolean {
   switch (statement.kind) {
+    case "block":
+      return statement.body.some(statementNeedsParentDispatch);
     case "var":
       return statement.init === undefined ? false : expressionNeedsParentDispatch(statement.init);
     case "dim3":

@@ -4,6 +4,7 @@ import {
   type CudaLiteAssignmentExpression,
   type CudaLiteAsmStatement,
   type CudaLiteBinaryExpression,
+  type CudaLiteBlockStatement,
   type CudaLiteCastExpression,
   type CudaLiteCooperativeGroupDecl,
   type CudaLiteCooperativeGroupKind,
@@ -353,9 +354,7 @@ class Parser {
   }
 
   private parseStatementEntry(): readonly CudaLiteStatement[] {
-    if (this.match("{")) {
-      this.fail("standalone blocks are not supported in CUDA-lite v0", this.peek().span);
-    }
+    if (this.match("{")) return [this.parseStandaloneBlock()];
     if (this.match("if")) return [this.parseIf()];
     if (this.match("for")) return [this.parseFor()];
     if (this.match("return")) return [this.parseReturn()];
@@ -377,6 +376,16 @@ class Parser {
     const expression = this.parseExpression();
     const end = this.expect(";");
     return [{ kind: "expr", expression, span: mergeSpans(expression.span, end.span) }];
+  }
+
+  private parseStandaloneBlock(): CudaLiteBlockStatement {
+    const start = this.peek().span;
+    const body = this.parseBlock();
+    return {
+      kind: "block",
+      body,
+      span: mergeSpans(start, body.at(-1)?.span ?? start),
+    };
   }
 
   private parseIf(): CudaLiteIfStatement {

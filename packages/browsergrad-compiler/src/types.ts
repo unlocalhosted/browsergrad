@@ -106,6 +106,7 @@ export interface CudaLiteParam {
 
 export type CudaLiteStatement =
   | CudaLiteVarDecl
+  | CudaLiteBlockStatement
   | CudaLiteDim3Decl
   | CudaLiteCooperativeGroupDecl
   | CudaLiteKernelLaunchStatement
@@ -125,6 +126,12 @@ export interface CudaLiteVarDecl {
   readonly dimensions: readonly number[];
   readonly dynamicShared?: boolean;
   readonly init?: CudaLiteExpression;
+  readonly span: SourceSpan;
+}
+
+export interface CudaLiteBlockStatement {
+  readonly kind: "block";
+  readonly body: readonly CudaLiteStatement[];
   readonly span: SourceSpan;
 }
 

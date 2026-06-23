@@ -215,6 +215,11 @@ export function analyzeCudaLite(
   ): void => {
     for (const statement of statements) {
       switch (statement.kind) {
+        case "block": {
+          const blockScope = createScope(scope);
+          walkStatements(statement.body, blockScope, guardDepth, divergentDepth, loopDepth, new Set());
+          break;
+        }
         case "var":
           declareVar(statement, scope, names);
           if (requiresShaderF16(statement.valueType)) requiredFeatures.add("shader-f16");

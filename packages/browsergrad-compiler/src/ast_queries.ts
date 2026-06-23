@@ -30,6 +30,7 @@ export function walkCudaLiteExpressions(
   visitExpression: (expression: CudaLiteExpression) => void,
 ): void {
   for (const statement of statements) {
+    if (statement.kind === "block") walkCudaLiteExpressions(statement.body, visitExpression);
     if (statement.kind === "var" && statement.init) walkExpression(statement.init, visitExpression);
     if (statement.kind === "dim3") {
       for (const arg of statement.args) walkExpression(arg, visitExpression);
@@ -71,6 +72,7 @@ export function walkCudaLiteStatements(
       if (statement.alternate) walkCudaLiteStatements(statement.alternate, visitStatement);
     }
     if (statement.kind === "for") walkCudaLiteStatements(statement.body, visitStatement);
+    if (statement.kind === "block") walkCudaLiteStatements(statement.body, visitStatement);
   }
 }
 
@@ -82,6 +84,8 @@ function walkExpression(
   if (expression.kind === "call") {
     walkExpression(expression.callee, visit);
     for (const arg of expression.args) walkExpression(arg, visit);
+  } else if (expression.kind === "initializer") {
+    for (const element of expression.elements) walkExpression(element, visit);
   } else if (expression.kind === "cast") {
     walkExpression(expression.expression, visit);
   } else if (expression.kind === "member") {

@@ -392,6 +392,12 @@ function* execStatements(
 ): BarrierGenerator {
   for (const statement of statements) {
     switch (statement.kind) {
+      case "block": {
+        const locals = new Map(context.locals);
+        const result = yield* execStatements(statement.body, { ...context, locals });
+        if (result) return result;
+        break;
+      }
       case "var":
         execVar(statement, context);
         break;
