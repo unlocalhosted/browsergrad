@@ -526,6 +526,12 @@ function emitStatement(
       lines.push(`${prefix}}`);
       return lines;
     }
+    case "while": {
+      const lines = [`${prefix}while (${emitExpression(statement.condition, context)}) {`];
+      lines.push(...statement.body.flatMap((child) => emitStatement(child, context, indentLevel + 1)));
+      lines.push(`${prefix}}`);
+      return lines;
+    }
     case "return":
       return [`${prefix}${statement.value ? `return ${emitExpression(statement.value, context)};` : "return;"}`];
     case "continue":

@@ -398,6 +398,13 @@ export function analyzeCudaLite(
           walkStatements(statement.body, loopScope, guardDepth, divergent ? divergentDepth + 1 : divergentDepth, loopDepth + 1, loopNames);
           break;
         }
+        case "while": {
+          validateSideEffectPlacement(statement.condition, false, diagnostics);
+          walkExpression(statement.condition, scope);
+          const divergent = expressionIsDivergent(statement.condition, params);
+          walkStatements(statement.body, createScope(scope), guardDepth, divergent ? divergentDepth + 1 : divergentDepth, loopDepth + 1, new Set(names));
+          break;
+        }
         case "return":
           if (statement.value) {
             validateSideEffectPlacement(statement.value, false, diagnostics);

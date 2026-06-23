@@ -25,6 +25,7 @@ import {
   type CudaLiteUnaryExpression,
   type CudaLiteUpdateExpression,
   type CudaLiteVarDecl,
+  type CudaLiteWhileStatement,
   type SourceSpan,
 } from "./types.js";
 import { CUDA_VECTOR_TYPES, cudaVectorTypeAlias, isCudaVectorType } from "./vector_types.js";
@@ -411,6 +412,7 @@ class Parser {
     if (this.match("{")) return [this.parseStandaloneBlock()];
     if (this.match("if")) return [this.parseIf()];
     if (this.match("for")) return [this.parseFor()];
+    if (this.match("while")) return [this.parseWhile()];
     if (this.match("return")) return [this.parseReturn()];
     if (this.match("continue")) return [this.parseContinue()];
     if (this.match("namespace")) {
@@ -497,6 +499,20 @@ class Parser {
       };
     }
     return statement;
+  }
+
+  private parseWhile(): CudaLiteWhileStatement {
+    const start = this.expect("while").span;
+    this.expect("(");
+    const condition = this.parseExpression();
+    this.expect(")");
+    const body = this.parseBodyAsStatements();
+    return {
+      kind: "while",
+      condition,
+      body,
+      span: mergeSpans(start, body.at(-1)?.span ?? condition.span),
+    };
   }
 
   private parseReturn(): CudaLiteStatement {

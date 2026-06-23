@@ -542,6 +542,10 @@ function firstSharedAccessesByName(
           visit(item.body);
           if (item.update) visitExpression(item.update);
           break;
+        case "while":
+          visitExpression(item.condition);
+          visit(item.body);
+          break;
         case "return":
           if (item.value) visitExpression(item.value);
           break;

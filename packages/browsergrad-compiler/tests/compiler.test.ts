@@ -743,6 +743,29 @@ __global__ void lessonSyntax(const float *__restrict__ input, float *output, uns
     expect(compiled.ir.params.map((param) => [param.name, param.valueType])).toContainEqual(["n", "uint"]);
   });
 
+  it("lowers canonical CUDA while loops with continue", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void whileLoop(int *out) {
+  int i = 0;
+  int acc = 0;
+  while (i < 5) {
+    i++;
+    if (i == 2) continue;
+    acc += i;
+  }
+  out[0] = acc;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("while ((i < 5))");
+    expect(compiled.wgsl).toContain("continue;");
+    expect([...result.buffers.out as Int32Array]).toEqual([13]);
+  });
+
   it("compiles stdout-only teaching kernels as no-op WebGPU programs", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void hello() {

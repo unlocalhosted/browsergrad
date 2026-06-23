@@ -408,6 +408,7 @@ function statementNeedsParentDispatch(statement: CudaLiteStatement): boolean {
         statement.consequent.some(statementNeedsParentDispatch) ||
         (statement.alternate?.some(statementNeedsParentDispatch) ?? false);
     case "for":
+    case "while":
       return true;
   }
 }

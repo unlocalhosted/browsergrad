@@ -402,6 +402,7 @@ function hasParentSideEffectsAfterLaunch(statements: readonly CudaLiteStatement[
         continue;
       case "asm":
       case "for":
+      case "while":
       case "return":
       case "continue":
         return true;

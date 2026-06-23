@@ -116,6 +116,7 @@ export type CudaLiteStatement =
   | CudaLiteAsmStatement
   | CudaLiteIfStatement
   | CudaLiteForStatement
+  | CudaLiteWhileStatement
   | CudaLiteExprStatement
   | CudaLiteReturnStatement
   | CudaLiteContinueStatement;
@@ -185,6 +186,13 @@ export interface CudaLiteForStatement {
   readonly init?: CudaLiteVarDecl | CudaLiteExpression;
   readonly condition?: CudaLiteExpression;
   readonly update?: CudaLiteExpression;
+  readonly body: readonly CudaLiteStatement[];
+  readonly span: SourceSpan;
+}
+
+export interface CudaLiteWhileStatement {
+  readonly kind: "while";
+  readonly condition: CudaLiteExpression;
   readonly body: readonly CudaLiteStatement[];
   readonly span: SourceSpan;
 }

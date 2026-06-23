@@ -464,6 +464,12 @@ function* execStatements(
           if (statement.update) evalExpression(statement.update, context);
         }
         break;
+      case "while":
+        while (truthy(evalNumber(statement.condition, context))) {
+          const control = yield* execStatements(statement.body, context);
+          if (control?.kind === "return") return control;
+        }
+        break;
       case "return":
         return {
           kind: "return",

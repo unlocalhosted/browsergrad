@@ -262,6 +262,7 @@ function hasParentSideEffectsAfterPeerCopy(statements: readonly CudaLiteStatemen
         return true;
       case "asm":
       case "for":
+      case "while":
       case "kernel-launch":
       case "return":
       case "continue":
