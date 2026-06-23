@@ -263,7 +263,10 @@ export function analyzeCudaLite(
               diagnostics.push(error("invalid-array-dimension", "array dimensions must be positive integer literals", statement.span));
             }
           }
-          if (statement.init && statement.dimensions.length === 0) walkExpression(statement.init, scope);
+          if (statement.init && statement.dimensions.length === 0) {
+            if (statement.pointer) validatePointerInitializerExpression(statement.init, scope, diagnostics, walkExpression);
+            else walkExpression(statement.init, scope);
+          }
             if (statement.init) validateSideEffectPlacement(statement.init, false, diagnostics);
           break;
         case "dim3":
@@ -345,7 +348,10 @@ export function analyzeCudaLite(
             if (statement.init.dimensions.length > 0 && statement.init.init) {
               validateArrayInitializer(statement.init, loopScope, diagnostics, walkExpression);
             }
-            if (statement.init.init && statement.init.dimensions.length === 0) walkExpression(statement.init.init, loopScope);
+            if (statement.init.init && statement.init.dimensions.length === 0) {
+              if (statement.init.pointer) validatePointerInitializerExpression(statement.init.init, loopScope, diagnostics, walkExpression);
+              else walkExpression(statement.init.init, loopScope);
+            }
             if (statement.init.init) validateSideEffectPlacement(statement.init.init, false, diagnostics);
           } else if (statement.init) {
             validateSideEffectPlacement(statement.init, true, diagnostics);
@@ -625,6 +631,32 @@ function isSupportedLocalPointer(statement: CudaLiteVarDecl, scope: Scope): bool
   return isSupportedPoolPointerInitializer(statement.init, scope);
 }
 
+function validatePointerInitializerExpression(
+  expression: CudaLiteExpression,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  if (expression.kind === "cast" && expression.pointer) {
+    validatePointerInitializerExpression(expression.expression, scope, diagnostics, walkExpression);
+    return;
+  }
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    validatePointerInitializerExpression(expression.left, scope, diagnostics, walkExpression);
+    validateScalarOperand(walkExpression(expression.right, scope), expression.right.span, diagnostics);
+    return;
+  }
+  if (expression.kind === "unary" && expression.operator === "&") {
+    validateLValueExpression(expression.argument, scope, diagnostics, walkExpression);
+    return;
+  }
+  if (expression.kind === "identifier") {
+    expressionInfoForIdentifier(expression.name, expression.span, scope, diagnostics);
+    return;
+  }
+  walkExpression(expression, scope);
+}
+
 function isSupportedStoragePointerInitializer(statement: CudaLiteVarDecl, scope: Scope): boolean {
   if (!statement.pointer || statement.storage !== "local") return false;
   const source = pointerSourceType(statement.init, scope);
@@ -644,6 +676,7 @@ function pointerSourceType(expression: CudaLiteExpression | undefined, scope: Sc
   }
   if (expression.kind !== "identifier") return undefined;
   const symbol = lookupSymbol(expression.name, scope, expression.span);
+  if (symbol?.kind === "shared") return symbol.valueType;
   return symbol?.pointer ? symbol.valueType : undefined;
 }
 

@@ -719,6 +719,19 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
     }
     const sharedId = context.sharedPointerIdFor(expression.name);
     if (sharedId !== undefined) return { buffer: `${sharedId}u`, base: "0u" };
+    const alias = context.pointerAliasFor(expression.name);
+    if (alias) {
+      const target = devicePointerArgumentParts({
+        kind: "identifier",
+        name: alias.rootName,
+        span: expression.span,
+      }, context);
+      if (!target) return undefined;
+      return {
+        buffer: target.buffer,
+        base: `(${target.base} + u32(${emitExpression(alias.baseIndex, context)}))`,
+      };
+    }
   }
   if (expression.kind === "cast" && expression.pointer) {
     return devicePointerArgumentParts(expression.expression, context);
@@ -748,6 +761,8 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
 function devicePointerValueTypeForExpression(expression: CudaLiteExpression, context: EmitContext): CudaLiteScalarType {
   const root = rootIdentifier(expression);
   if (root) {
+    const alias = context.pointerAliasFor(root);
+    if (alias?.valueType) return alias.valueType;
     const param = context.devicePointerParamFor(root) ?? context.paramFor(root);
     if (param?.pointer) return param.valueType;
   }

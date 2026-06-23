@@ -1622,13 +1622,14 @@ __global__ void constants(float* out, uint* kinds) {
 __global__ void cache_hint(const float* x, float* y) {
   int idx = threadIdx.x;
   if (idx < 2) {
-    float value = __ldcs(x + idx);
+    const float* base = x + 1;
+    float value = __ldcs(base + idx);
     __stcs(y + idx, value + 1.0f);
   }
 }`, { workgroupSize: [2, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { x: new Float32Array([2, 4]), y: new Float32Array(2) } },
+      { buffers: { x: new Float32Array([0, 2, 4]), y: new Float32Array(2) } },
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
@@ -2900,7 +2901,7 @@ __global__ void builtin_inf(float *out) {
     const compiled = compileCudaLiteKernel(`
 __global__ void splitShared(float *x) {
   extern __shared__ float sdataA[];
-  float* sdataB = &sdataA[2];
+  float* sdataB = sdataA + 2;
   int tid = threadIdx.x;
   if (tid < 2) {
     sdataA[tid] = x[tid];
@@ -2919,7 +2920,7 @@ __global__ void splitShared(float *x) {
     );
 
     expect(compiled.wgsl).not.toContain("var sdataB");
-    expect(compiled.wgsl).toContain("sdataA[(2) + (tid)]");
+    expect(compiled.wgsl).toContain("sdataA[((0 + 2)) + (tid)]");
     expect([...result.buffers.x as Float32Array]).toEqual([6, 2, 3, 4]);
   });
 
@@ -3045,6 +3046,32 @@ __global__ void templatedBool(float *out) {
 
     expect(compiled.ir.sharedDeclarations[0]?.dimensions).toEqual([4]);
     expect([...result.buffers.out as Float32Array]).toEqual([4]);
+  });
+
+  it("accepts C++ if constexpr in templated CUDA helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+template <const int STEP = 8>
+__device__ __forceinline__ int swizzle(int i, int j) {
+  if constexpr (STEP == 8) {
+    return (((j >> 3) ^ (i >> 2)) % 2) << 3;
+  } else {
+    return (((j >> 2) ^ (i >> 2)) % 4) << 2;
+  }
+}
+__global__ void constexprIf(int *out) {
+  constexpr int WIDTH = 8;
+  int scratch[(WIDTH == 8) ? 2 : 1];
+  scratch[0] = swizzle<8>(4, 8);
+  if (threadIdx.x < 1) out[0] = scratch[0];
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("if ((8 == 8))");
+    expect([...result.buffers.out as Int32Array]).toEqual([0]);
   });
 
   it("expands expression-style function macros before parsing", () => {

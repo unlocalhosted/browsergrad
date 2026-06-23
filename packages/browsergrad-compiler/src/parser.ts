@@ -390,6 +390,7 @@ class Parser {
 
   private parseIf(): CudaLiteIfStatement {
     const start = this.expect("if").span;
+    this.consumeIf("constexpr");
     this.expect("(");
     const condition = this.parseExpression();
     this.expect(")");
@@ -1212,9 +1213,36 @@ function evaluateIntegerConstantExpression(
           return left << right;
         case ">>":
           return left >> right;
+        case "<":
+          return left < right ? 1 : 0;
+        case "<=":
+          return left <= right ? 1 : 0;
+        case ">":
+          return left > right ? 1 : 0;
+        case ">=":
+          return left >= right ? 1 : 0;
+        case "==":
+          return left === right ? 1 : 0;
+        case "!=":
+          return left !== right ? 1 : 0;
+        case "&&":
+          return left !== 0 && right !== 0 ? 1 : 0;
+        case "||":
+          return left !== 0 || right !== 0 ? 1 : 0;
+        case "&":
+          return left & right;
+        case "|":
+          return left | right;
+        case "^":
+          return left ^ right;
         default:
           return undefined;
       }
+    }
+    case "conditional": {
+      const condition = evaluateIntegerConstantExpression(expression.condition, lookupIdentifier);
+      if (condition === undefined) return undefined;
+      return evaluateIntegerConstantExpression(condition !== 0 ? expression.consequent : expression.alternate, lookupIdentifier);
     }
     default:
       return undefined;
