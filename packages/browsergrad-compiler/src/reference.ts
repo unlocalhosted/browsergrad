@@ -1660,6 +1660,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     case "warp_reduce_sum_f16":
     case "warp_reduce_sum_f16_f16":
     case "warp_reduce_sum_f16_f32":
+    case "blockReduce":
       return args[0] ?? 0;
     default:
       throw compilerFailure(`unsupported call '${name ?? "<expr>"}'`);

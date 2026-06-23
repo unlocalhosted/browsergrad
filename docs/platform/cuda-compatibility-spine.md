@@ -72,10 +72,10 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   excludes kernels now runnable on real WebGPU through orchestration; current
   baseline is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=192`
-  WebGPU-runnable, and `<=165` hard gaps;
-  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=78`
-  WebGPU-runnable, and `<=70` hard gaps;
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=193`
+  WebGPU-runnable, and `<=164` hard gaps;
+  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=83`
+  WebGPU-runnable, and `<=65` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=200`
   WebGPU-runnable, and `<=93` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
@@ -93,7 +93,9 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   C++ `reinterpret_cast<T*>` / `static_cast<T*>` pointer casts for typed
   scalarized storage views such as `FLOAT4(x)` and local pointer aliases,
   bounded integer template defaults on kernels/device helpers, multi-dimensional
-  shared-memory address lowering for `__cvta_generic_to_shared`, safe named
+  shared-memory address lowering for `__cvta_generic_to_shared` and helper
+  pointer params, vector reinterpret memory-view helpers through the device
+  pointer ABI, semantic `blockReduce<warpReduce*>` lowering, safe named
   constants such as `warpSize` and `NULL`,
   fast CUDA math/bit intrinsics such as `__saturatef`, `__fdividef`, `__clz`,
   `__mul24`, and `__umul24`,

@@ -483,6 +483,27 @@ __global__ void kernel(float *in, float *out) {
 {
   const source = createKernelCompilationUnit({
     kernel: `
+__global__ void kernel(float *out, float value) {
+  out[0] = blockReduce<warpReduceMax>(value, false, -INFINITY);
+}`,
+    deviceFunctions: [
+      {
+        name: "blockReduce",
+        source: `
+template<class Reducer>
+__device__ inline float blockReduce(float value, bool final_sync, float out_of_bounds) {
+  return value;
+}`,
+      },
+    ],
+  });
+  assert.match(source, /out\[0\] = warpReduceMax\(value\);/u);
+  assert.doesNotMatch(source, /__device__ inline float blockReduce/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 __global__ void kernel(int *out, int n) {
   out[0] = div_ceil(n, 4);
 }`,

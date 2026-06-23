@@ -56,6 +56,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["warp_reduce_sum_f16", [1, 1]],
   ["warp_reduce_sum_f16_f16", [1, 1]],
   ["warp_reduce_sum_f16_f32", [1, 1]],
+  ["blockReduce", [1, 3]],
   ["min", [2, 2]],
   ["max", [2, 2]],
   ["div_ceil", [2, 2]],
@@ -1269,14 +1270,10 @@ function validateDevicePointerArgument(
   const rootSymbol = root ? lookupSymbol(root, scope, arg.span) : undefined;
   const sharedArrayDecay = rootSymbol?.kind === "shared" &&
     rootSymbol.dimensions !== undefined &&
-    rootSymbol.dimensions.length === 1 &&
     info.kind === "array";
   if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "unknown" && !sharedArrayDecay) {
     diagnostics.push(error("unsupported-device-pointer-param", `device pointer parameter '${param.name}' expects a pointer argument`, arg.span));
     return;
-  }
-  if (rootSymbol?.kind === "shared" && rootSymbol.dimensions && rootSymbol.dimensions.length > 1) {
-    diagnostics.push(error("unsupported-device-pointer-param", `device pointer parameter '${param.name}' only supports one-dimensional shared arrays`, arg.span));
   }
   if (rootSymbol?.kind === "constant") {
     diagnostics.push(error("unsupported-device-pointer-param", `device pointer parameter '${param.name}' expects storage-buffer memory`, arg.span));
@@ -1693,7 +1690,8 @@ function isWarpReductionBuiltin(callName: string): boolean {
     callName === "warp_reduce_max_f32" ||
     callName === "warp_reduce_sum_f16" ||
     callName === "warp_reduce_sum_f16_f16" ||
-    callName === "warp_reduce_sum_f16_f32";
+    callName === "warp_reduce_sum_f16_f32" ||
+    callName === "blockReduce";
 }
 
 function warpReductionReturnType(callName: string, valueType: ValueType | undefined): ValueType | undefined {

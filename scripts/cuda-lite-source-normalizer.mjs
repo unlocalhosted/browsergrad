@@ -6,6 +6,7 @@ const SEMANTIC_BUILTIN_DEVICE_HELPERS = new Set([
   "store128cs",
   "store128cg",
   "div_ceil",
+  "blockReduce",
 ]);
 
 export function createKernelCompilationUnit({
@@ -91,7 +92,7 @@ export function createKernelCompilationUnit({
     kernelWithSharedDeclarations,
   ].filter((part) => part.trim().length > 0).join("\n");
   const withCarrierMembers = normalizeCarrierMemberReferences(unit, effectiveDefines);
-  return normalizeCppTemplateCarrierSyntax(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(stripSupportedTypeAliasDeclarations(withCarrierMembers)))));
+  return normalizeCppTemplateCarrierSyntax(normalizeBlockReduceHelpers(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(stripSupportedTypeAliasDeclarations(withCarrierMembers))))));
 }
 
 export function collectCudaLiteContextDefines(source) {
@@ -647,6 +648,45 @@ function normalizeSincosHelpers(source) {
     helper.lastIndex = close + 1;
   }
   return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function normalizeBlockReduceHelpers(source) {
+  const helper = /\bblockReduce\s*</gu;
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = helper.exec(source)) !== null) {
+    const templateStart = source.indexOf("<", match.index);
+    const templateEnd = findBalanced(source, templateStart, "<", ">");
+    if (templateStart < 0 || templateEnd === undefined) {
+      helper.lastIndex = match.index + 1;
+      continue;
+    }
+    const open = skipWhitespace(source, templateEnd + 1);
+    const close = source[open] === "(" ? findBalanced(source, open, "(", ")") : undefined;
+    if (close === undefined) {
+      helper.lastIndex = templateEnd + 1;
+      continue;
+    }
+    const reducer = normalizeBlockReducerName(source.slice(templateStart + 1, templateEnd).trim());
+    const args = splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim()).filter(Boolean);
+    if (reducer === undefined || args.length === 0) {
+      helper.lastIndex = close + 1;
+      continue;
+    }
+    out += source.slice(cursor, match.index);
+    out += `${reducer}(${args[0]})`;
+    cursor = close + 1;
+    helper.lastIndex = close + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function normalizeBlockReducerName(name) {
+  if (/^(?:warpReduceSum|warp_reduce_sum|warp_reduce_sum_f32|warp_reduce_sum_f16|warp_reduce_sum_f16_f16|warp_reduce_sum_f16_f32)$/u.test(name)) return name;
+  if (/^(?:warpReduceMax|warp_reduce_max|warp_reduce_max_f32)$/u.test(name)) return name;
+  if (/^(?:warpReduceMin|warp_reduce_min)$/u.test(name)) return name;
+  return undefined;
 }
 
 function sincosReplacement(args) {

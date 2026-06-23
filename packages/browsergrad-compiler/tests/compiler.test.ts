@@ -268,6 +268,38 @@ describe("CUDA-lite compiler", () => {
     expect([...result.buffers.y as Float32Array]).toEqual([14, 26, 38]);
   });
 
+  it("lowers vector reinterpret memory-view helpers through the pointer ABI", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ float4 ld_vec(const float* address) {
+  return *reinterpret_cast<const float4*>(address);
+}
+
+__device__ void st_vec(float* address, float4 val) {
+  *reinterpret_cast<float4*>(address) = val;
+}
+
+__global__ void vector_helper(float* out, const float* inp) {
+  float4 value = ld_vec(inp);
+  value.y += 10.0f;
+  st_vec(out, value);
+}`, {
+      features: { "shader-f16": true, subgroups: true },
+      workgroupSize: [1, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4), inp: new Float32Array([1, 2, 3, 4]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("return bg_ptr_read_f32x4(address_buffer, address_base);");
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32x4(address_buffer, address_base, val);");
+    expect(compiled.wgsl).toContain("case 1u: { return vec4<f32>(inp[index + 0u], inp[index + 1u], inp[index + 2u], inp[index + 3u]); }");
+    expect(compiled.wgsl).toContain("case 0u: { out[index + 0u] = value.x; out[index + 1u] = value.y; out[index + 2u] = value.z; out[index + 3u] = value.w; return; }");
+    expect(compiled.wgsl).not.toContain("address[");
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 12, 3, 4]);
+  });
+
   it("rejects writes through const device helper pointer params", () => {
     expect(() => compileCudaLiteKernel(`
 __device__ void bad(const float* x) {
@@ -306,6 +338,38 @@ __global__ void kernel(const float* x) {
     expect([...result.buffers.out as Float32Array]).toEqual([4, 3, 2, 1]);
   });
 
+  it("lowers multi-dimensional shared memory through helper pointer params", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float readTile(float* ptr, int i) {
+  return ptr[i];
+}
+
+__device__ void writeTile(float* ptr, int i, float value) {
+  ptr[i] = value;
+}
+
+__global__ void shared_pointer_2d(float* out) {
+  __shared__ float tile[2][3];
+  int tid = threadIdx.x;
+  if (tid < 6) {
+    writeTile(&tile[0][0], tid, 3.0f);
+  }
+  __syncthreads();
+  if (tid < 6) {
+    out[tid] = readTile(&tile[0][0], tid);
+  }
+}`, { workgroupSize: [6, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(6) } },
+      { gridDim: [1, 1, 1], blockDim: [6, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("case 1u: { return tile[(((index) / 3u) % 2u)][(index % 3u)]; }");
+    expect(compiled.wgsl).toContain("case 1u: { tile[(((index) / 3u) % 2u)][(index % 3u)] = value; return; }");
+    expect([...result.buffers.out as Float32Array]).toEqual([3, 3, 3, 3, 3, 3]);
+  });
+
   it("reports precise diagnostics for unsupported helper pointer arguments", () => {
     const mismatch = analyzeCudaLite(parseCudaLite(`
 __device__ void useInt(int* ptr) {}
@@ -317,19 +381,6 @@ __global__ void kernel(float* x) {
     expect(mismatch.diagnostics).toContainEqual(expect.objectContaining({
       code: "unsupported-device-pointer-param",
       message: "device pointer parameter 'ptr' expects int pointer",
-    }));
-
-    const multiDimensionalShared = analyzeCudaLite(parseCudaLite(`
-__device__ void useTile(float* ptr) {}
-
-__global__ void kernel() {
-  __shared__ float tile[2][2];
-  useTile(&tile[0][0]);
-}
-`));
-    expect(multiDimensionalShared.diagnostics).toContainEqual(expect.objectContaining({
-      code: "unsupported-device-pointer-param",
-      message: "device pointer parameter 'ptr' only supports one-dimensional shared arrays",
     }));
   });
 
@@ -812,6 +863,15 @@ __global__ void warpKernel(const float *input, float *output) {
     expect(compiled.wgsl).toContain("enable subgroups;");
     expect(compiled.wgsl).toContain("subgroupShuffleDown(val, u32(16))");
     expect(compiled.wgsl).toContain("warpReduceSum(val, local_id, workgroup_id, num_workgroups)");
+  });
+
+  it("lowers semantic block reductions as subgroup reductions", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void kernel(float* out, float value) {
+  out[0] = blockReduce(value, false, 0.0f);
+}`, { features: { subgroups: true } });
+
+    expect(compiled.wgsl).toContain("out[0] = subgroupAdd(params.value)");
   });
 
   it("lowers CUDA warp vote helpers to subgroup predicates", () => {

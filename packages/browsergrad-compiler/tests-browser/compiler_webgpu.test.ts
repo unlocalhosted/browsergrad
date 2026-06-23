@@ -126,6 +126,22 @@ __global__ void sharedHelper(float* out) {
 }
 `;
 
+const VECTOR_MEMORY_VIEW_HELPERS = `
+__device__ float4 ld_vec(const float* address) {
+  return *reinterpret_cast<const float4*>(address);
+}
+
+__device__ void st_vec(float* address, float4 val) {
+  *reinterpret_cast<float4*>(address) = val;
+}
+
+__global__ void vectorHelper(float* out, const float* inp) {
+  float4 value = ld_vec(inp);
+  value.y += 10.0f;
+  st_vec(out, value);
+}
+`;
+
 const COMPLEX_MULTIPLY = `
 __global__ void multiplyFreqDomain(cufftComplex *A, const cufftComplex *B, int N) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -410,6 +426,25 @@ __global__ void sharedVector(const float4* x, float4* y) {
     const compiled = compileCudaLiteKernel(SHARED_POINTER_HELPERS, { workgroupSize: [4, 1, 1] });
     const input = { buffers: { out: new Float32Array(4) } };
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
+  it("runs vector memory-view helper functions through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernelForWebGpu(VECTOR_MEMORY_VIEW_HELPERS, {
+      features: { "shader-f16": true, subgroups: true },
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        out: new Float32Array(4),
+        inp: new Float32Array([1, 2, 3, 4]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 

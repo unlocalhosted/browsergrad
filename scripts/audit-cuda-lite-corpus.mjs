@@ -631,7 +631,7 @@ function isPortablePointerDeviceFunction(signature, source, name) {
   const pointerBases = pointerBaseTypes(signature);
   if (pointerBases.length === 0) return false;
   if (!pointerBases.every((type) => PORTABLE_POINTER_BASE_TYPES.has(normalizePointerBaseType(type)))) return false;
-  if (/\bdo\b|reinterpret|static_cast|__float_as_int|__int_as_float/u.test(source)) return false;
+  if (/\bdo\b|__float_as_int|__int_as_float/u.test(source)) return false;
   return true;
 }
 
@@ -657,7 +657,7 @@ function normalizePointerBaseType(type) {
 }
 
 function hasSupportedDeviceReturnShape(signature, name) {
-  return new RegExp(`(?:^|\\s)(?:void|bool|float|half|int|uint|unsigned\\s+int|signed\\s+int|clock_t|size_t)\\s+${escapeRegExp(name)}\\s*\\(`, "u").test(signature);
+  return new RegExp(`(?:^|\\s)(?:void|bool|float|half|float2|float3|float4|half2|int|int2|int3|int4|uint|uint2|uint3|uint4|unsigned\\s+int|signed\\s+int|clock_t|size_t)\\s+${escapeRegExp(name)}\\s*\\(`, "u").test(signature);
 }
 
 function sourceLaunchesDeviceFunction(source, name) {

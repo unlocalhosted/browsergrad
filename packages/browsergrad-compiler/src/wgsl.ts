@@ -307,7 +307,6 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
   const textures = textureBindings(ir);
   const storagePointerIds = new Map(storagePointerParams.map((param, index) => [param.name, index] as const));
   const sharedPointerIds = new Map(ir.sharedDeclarations
-    .filter((shared) => shared.dimensions.length === 1)
     .map((shared, index) => [shared.name, storagePointerParams.length + index] as const));
   for (const param of storagePointerParams) {
     const binding = bindings.length;
@@ -750,11 +749,23 @@ function usesDevicePointerParams(ir: KernelIrModule): boolean {
 }
 
 function emitDevicePointerHelpers(ir: KernelIrModule, context: EmitContext): string[] {
-  const types = [...new Set([
+  const types = [...devicePointerHelperTypes(ir)];
+  return types.flatMap((type) => emitDevicePointerHelper(type, ir, context));
+}
+
+function devicePointerHelperTypes(ir: KernelIrModule): ReadonlySet<CudaLiteScalarType> {
+  const types = new Set<CudaLiteScalarType>([
     ...ir.params.filter((param) => param.pointer && !isDevicePoolParam(param)).map((param) => param.valueType),
     ...ir.functions.flatMap((fn) => fn.params.filter((param) => param.pointer).map((param) => param.valueType)),
-  ])];
-  return types.flatMap((type) => emitDevicePointerHelper(type, ir, context));
+  ]);
+  for (const statements of [ir.body, ...ir.functions.map((fn) => fn.body)]) {
+    walkCudaLiteExpressions(statements, (expression) => {
+      if (expression.kind === "cast" && expression.pointer && isDevicePointerHelperType(expression.valueType)) {
+        types.add(expression.valueType);
+      }
+    });
+  }
+  return types;
 }
 
 function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, context: EmitContext): string[] {
@@ -764,11 +775,10 @@ function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, c
   const storageParams = ir.params.filter((param) =>
     param.pointer &&
     !isDevicePoolParam(param) &&
-    param.valueType === type
+    isPointerHelperCompatibleStorage(type, param.valueType)
   );
   const sharedDeclarations = ir.sharedDeclarations.filter((shared) =>
-    shared.valueType === type &&
-    shared.dimensions.length === 1
+    isPointerHelperCompatibleStorage(type, shared.valueType)
   );
   const scalar = wgslScalar(type);
   const lines = [
@@ -778,12 +788,12 @@ function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, c
   for (const param of storageParams) {
     const id = context.storagePointerIdFor(param.name);
     if (id === undefined) continue;
-    lines.push(`    case ${id}u: { return ${emitPointerStorageRead(param, "index", ir, context)}; }`);
+    lines.push(`    case ${id}u: { return ${emitPointerStorageRead(param, "index", ir, context, type)}; }`);
   }
   for (const shared of sharedDeclarations) {
     const id = context.sharedPointerIdFor(shared.name);
     if (id === undefined) continue;
-    lines.push(`    case ${id}u: { return ${emitSharedPointerRead(shared, "index", ir, context)}; }`);
+    lines.push(`    case ${id}u: { return ${emitSharedPointerRead(shared, "index", ir, context, type)}; }`);
   }
   lines.push(`    default: { return ${zeroValue(type)}; }`);
   lines.push("  }");
@@ -794,12 +804,12 @@ function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, c
   for (const param of storageParams.filter((param) => !param.constant)) {
     const id = context.storagePointerIdFor(param.name);
     if (id === undefined) continue;
-    lines.push(`    case ${id}u: { ${emitPointerStorageWrite(param, "index", "value", ir, context)}; return; }`);
+    lines.push(`    case ${id}u: { ${emitPointerStorageWrite(param, "index", "value", ir, context, type)}; return; }`);
   }
   for (const shared of sharedDeclarations) {
     const id = context.sharedPointerIdFor(shared.name);
     if (id === undefined) continue;
-    lines.push(`    case ${id}u: { ${emitSharedPointerWrite(shared, "index", "value", ir, context)}; return; }`);
+    lines.push(`    case ${id}u: { ${emitSharedPointerWrite(shared, "index", "value", ir, context, type)}; return; }`);
   }
   lines.push("    default: { return; }");
   lines.push("  }");
@@ -811,18 +821,44 @@ function isDevicePointerHelperType(type: CudaLiteScalarType): boolean {
   return type === "float" || type === "int" || type === "uint" || type === "half" || isCudaVectorType(type);
 }
 
-function emitPointerStorageRead(param: CudaLiteParam, index: string, ir: KernelIrModule, context: EmitContext): string {
+function isPointerHelperCompatibleStorage(helperType: CudaLiteScalarType, storageType: CudaLiteScalarType): boolean {
+  if (helperType === storageType) return true;
+  return isCudaVectorType(helperType) && cudaVectorScalarType(helperType) === storageType;
+}
+
+function emitPointerStorageRead(
+  param: CudaLiteParam,
+  index: string,
+  ir: KernelIrModule,
+  context: EmitContext,
+  viewType: CudaLiteScalarType = param.valueType,
+): string {
   const name = context.nameFor(param.name);
-  if (isCudaVectorType(param.valueType)) return emitVectorStorageRead(name, param.valueType, index);
+  if (isCudaVectorType(viewType)) {
+    return param.valueType === viewType
+      ? emitVectorStorageRead(name, viewType, index)
+      : emitVectorStorageReadAt(name, viewType, index);
+  }
   const access = `${name}[${index}]`;
   if (!ir.atomicParams.includes(param.name)) return access;
   const loaded = `atomicLoad(&${access})`;
   return param.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
 }
 
-function emitPointerStorageWrite(param: CudaLiteParam, index: string, value: string, ir: KernelIrModule, context: EmitContext): string {
+function emitPointerStorageWrite(
+  param: CudaLiteParam,
+  index: string,
+  value: string,
+  ir: KernelIrModule,
+  context: EmitContext,
+  viewType: CudaLiteScalarType = param.valueType,
+): string {
   const name = context.nameFor(param.name);
-  if (isCudaVectorType(param.valueType)) return emitVectorStorageWrite(name, param.valueType, index, value);
+  if (isCudaVectorType(viewType)) {
+    return param.valueType === viewType
+      ? emitVectorStorageWrite(name, viewType, index, value)
+      : emitVectorStorageWriteAt(name, viewType, index, value);
+  }
   const access = `${name}[${index}]`;
   if (!ir.atomicParams.includes(param.name)) return `${access} = ${value}`;
   if (param.valueType === "float") return `atomicStore(&${access}, bitcast<u32>(${value}))`;
@@ -857,14 +893,66 @@ function vectorFieldName(index: number): string {
   return index === 0 ? "x" : index === 1 ? "y" : index === 2 ? "z" : "w";
 }
 
-function emitSharedPointerRead(shared: CudaLiteVarDecl, index: string, ir: KernelIrModule, context: EmitContext): string {
-  const access = `${context.nameFor(shared.name)}[${index}]`;
+function emitSharedPointerRead(
+  shared: CudaLiteVarDecl,
+  index: string,
+  ir: KernelIrModule,
+  context: EmitContext,
+  viewType: CudaLiteScalarType = shared.valueType,
+): string {
+  if (isCudaVectorType(viewType) && shared.valueType !== viewType) return emitSharedVectorFlatRead(shared, index, viewType, context);
+  const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, index);
   return ir.atomicShared.includes(shared.name) ? `atomicLoad(&${access})` : access;
 }
 
-function emitSharedPointerWrite(shared: CudaLiteVarDecl, index: string, value: string, ir: KernelIrModule, context: EmitContext): string {
-  const access = `${context.nameFor(shared.name)}[${index}]`;
+function emitSharedPointerWrite(
+  shared: CudaLiteVarDecl,
+  index: string,
+  value: string,
+  ir: KernelIrModule,
+  context: EmitContext,
+  viewType: CudaLiteScalarType = shared.valueType,
+): string {
+  if (isCudaVectorType(viewType) && shared.valueType !== viewType) return emitSharedVectorFlatWrite(shared, index, value, viewType, context);
+  const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, index);
   return ir.atomicShared.includes(shared.name) ? `atomicStore(&${access}, ${value})` : `${access} = ${value}`;
+}
+
+function emitSharedFlatAccess(name: string, dimensions: readonly number[], index: string): string {
+  if (dimensions.length <= 1) return `${name}[${index}]`;
+  return dimensions.reduce((expr, dimension, axis) => {
+    const stride = dimensions.slice(axis + 1).reduce((product, item) => product * item, 1);
+    const axisIndex = stride === 1
+      ? `(${index} % ${dimension}u)`
+      : `(((${index}) / ${stride}u) % ${dimension}u)`;
+    return `${expr}[${axisIndex}]`;
+  }, name);
+}
+
+function emitSharedVectorFlatRead(
+  shared: CudaLiteVarDecl,
+  index: string,
+  viewType: CudaLiteScalarType,
+  context: EmitContext,
+): string {
+  const lanes = cudaVectorLaneCount(viewType);
+  const values = Array.from({ length: lanes }, (_, lane) =>
+    emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, `(${index} + ${lane}u)`)
+  );
+  return `${wgslScalar(viewType)}(${values.join(", ")})`;
+}
+
+function emitSharedVectorFlatWrite(
+  shared: CudaLiteVarDecl,
+  index: string,
+  value: string,
+  viewType: CudaLiteScalarType,
+  context: EmitContext,
+): string {
+  const lanes = cudaVectorLaneCount(viewType);
+  return Array.from({ length: lanes }, (_, lane) =>
+    `${emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, `(${index} + ${lane}u)`)} = ${value}.${vectorFieldName(lane)}`
+  ).join("; ");
 }
 
 interface DevicePointerParts {
@@ -924,6 +1012,8 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
     return devicePointerArgumentParts(expression.expression, context);
   }
   if (expression.kind === "unary" && expression.operator === "&" && expression.argument.kind === "index") {
+    const shared = sharedPointerArgumentParts(expression.argument, context);
+    if (shared) return shared;
     const target = devicePointerArgumentParts(expression.argument.target, context);
     if (!target) return undefined;
     return {
@@ -945,7 +1035,29 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
   return undefined;
 }
 
+function sharedPointerArgumentParts(expression: CudaLiteExpression, context: EmitContext): DevicePointerParts | undefined {
+  const indexes: CudaLiteExpression[] = [];
+  let cursor = expression;
+  while (cursor.kind === "index") {
+    indexes.unshift(cursor.index);
+    cursor = cursor.target;
+  }
+  if (cursor.kind !== "identifier") return undefined;
+  const id = context.sharedPointerIdFor(cursor.name);
+  if (id === undefined) return undefined;
+  const declaration = context.ir.sharedDeclarations.find((item) => item.name === cursor.name);
+  if (!declaration) return undefined;
+  if (indexes.length === 0) return { buffer: `${id}u`, base: "0u" };
+  const terms = indexes.map((index, axis) => {
+    const stride = declaration.dimensions.slice(axis + 1).reduce((product, dimension) => product * dimension, 1);
+    const value = `u32(${emitExpression(index, context)})`;
+    return stride === 1 ? value : `(${value} * ${stride}u)`;
+  });
+  return { buffer: `${id}u`, base: terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})` };
+}
+
 function devicePointerValueTypeForExpression(expression: CudaLiteExpression, context: EmitContext): CudaLiteScalarType {
+  if (expression.kind === "cast" && expression.pointer) return expression.valueType;
   const root = rootIdentifier(expression);
   if (root) {
     const alias = context.pointerAliasFor(root);
@@ -953,7 +1065,6 @@ function devicePointerValueTypeForExpression(expression: CudaLiteExpression, con
     const param = context.devicePointerParamFor(root) ?? context.paramFor(root);
     if (param?.pointer) return param.valueType;
   }
-  if (expression.kind === "cast" && expression.pointer) return expression.valueType;
   return "float";
 }
 
@@ -1918,6 +2029,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "warp_reduce_sum_f16":
     case "warp_reduce_sum_f16_f16":
     case "warp_reduce_sum_f16_f32":
+    case "blockReduce":
       return `subgroupAdd(${args[0] ?? "0"})`;
     case "warpReduceMax":
     case "warp_reduce_max":
@@ -2520,7 +2632,7 @@ function storageViewForPointerExpression(
 ): { readonly rootName: string; readonly valueType: CudaLiteScalarType; readonly index: string } | undefined {
   if (pointer.kind === "cast" && pointer.pointer) {
     const alias = pointerAliasForPointerExpression(pointer.expression, pointer.valueType);
-    if (!alias) return undefined;
+    if (!alias || context.devicePointerParamFor(alias.rootName)) return undefined;
     return {
       rootName: alias.rootName,
       valueType: pointer.valueType,
@@ -2529,7 +2641,7 @@ function storageViewForPointerExpression(
   }
   if (pointer.kind === "identifier") {
     const alias = context.pointerAliasFor(pointer.name);
-    if (!alias?.valueType) return undefined;
+    if (!alias?.valueType || context.devicePointerParamFor(alias.rootName)) return undefined;
     return {
       rootName: alias.rootName,
       valueType: alias.valueType,
@@ -2538,7 +2650,7 @@ function storageViewForPointerExpression(
   }
   const valueType = devicePointerValueTypeForExpression(pointer, context);
   const alias = pointerAliasForPointerExpression(pointer, valueType);
-  if (alias?.valueType) {
+  if (alias?.valueType && !context.devicePointerParamFor(alias.rootName)) {
     return {
       rootName: alias.rootName,
       valueType: alias.valueType,
