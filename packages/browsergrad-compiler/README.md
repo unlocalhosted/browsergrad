@@ -114,6 +114,11 @@ CUDA vector storage types `float2/3/4`, `int2/3/4`, and `uint2/3/4` lower
 through a scalar storage ABI with `make_*` constructors and lane member access.
 This keeps caller buffers as ordinary typed arrays while still emitting vector
 values inside WGSL and the CPU reference interpreter.
+Simple C++ intake accepts scalar/vector `typedef` and `using` aliases,
+`constexpr` integer expressions in array dimensions and template integer
+arguments, `static` kernel qualifiers, late `__launch_bounds__` placement, and
+`static_assert` statements. This is bounded CUDA/C++ normalization, not full
+C++ template compatibility.
 Common C/CUDA integer spellings are accepted for learner kernels: `signed`,
 `unsigned`, `short`, `long`, `long long`, `size_t`, `int32_t`, `uint32_t`,
 `int64_t`, `uint64_t`, and `uintptr_t`. Current WebGPU lowering maps them onto

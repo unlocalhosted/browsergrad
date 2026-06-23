@@ -2615,6 +2615,32 @@ __global__ void padded(float *x) {
     expect(compiled.wgsl).toContain("* 16");
   });
 
+  it("normalizes simple C++ aliases and CUDA kernel qualifiers before parsing", () => {
+    const compiled = compileCudaLiteKernel(`
+#define WARP_SIZE 32
+typedef float scalar_t;
+using count_t = unsigned int;
+__global__ static void __launch_bounds__(WARP_SIZE * 2) boundedAlias(scalar_t *out, count_t n) {
+  static_assert(WARP_SIZE == 32);
+  constexpr int TILE = WARP_SIZE / 2;
+  __shared__ scalar_t tile[TILE];
+  int idx = threadIdx.x;
+  if (idx < n && idx < TILE) {
+    tile[idx] = (scalar_t)idx;
+    out[idx] = tile[idx] + (scalar_t)TILE;
+  }
+}`, { workgroupSize: [16, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(16) }, scalars: { n: 2 } },
+      { gridDim: [1, 1, 1], blockDim: [16, 1, 1] },
+    );
+
+    expect(compiled.ir.params.map((param) => [param.name, param.valueType])).toContainEqual(["n", "uint"]);
+    expect(compiled.wgsl).toContain("array<f32, 16>");
+    expect([...result.buffers.out as Float32Array].slice(0, 3)).toEqual([16, 17, 0]);
+  });
+
   it("expands expression-style function macros before parsing", () => {
     const compiled = compileCudaLiteKernel(`
 #define IDX2C(i,j,ld) (((j)*(ld))+(i))

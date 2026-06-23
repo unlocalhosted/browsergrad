@@ -79,6 +79,8 @@ class Parser {
   private readonly tokens: readonly Token[];
   private index = 0;
   private anonymousKernelIndex = 0;
+  private readonly integerConstantScopes: Map<string, number>[] = [new Map()];
+  private templateArgumentDepth = 0;
 
   constructor(source: string) {
     this.source = source;
@@ -94,6 +96,7 @@ class Parser {
       if (this.match("__constant__")) constants.push(this.parseGlobalConstant());
       else if (this.match("texture")) textures.push(this.parseTexture2D());
       else if (this.match("namespace")) this.skipNamespaceAliasDecl();
+      else if (this.match("typedef") || this.match("using")) this.skipSimpleDeclaration();
       else if (this.startsDeviceFunction()) functions.push(this.parseDeviceFunction());
       else kernels.push(this.parseKernel());
     }
@@ -175,6 +178,7 @@ class Parser {
     this.consumeKernelAttributes();
     const start = this.expect("__global__").span;
     this.consumeKernelAttributes();
+    this.consumeKernelQualifiers();
     let name: string;
     let nameSpan = start;
     if (this.match("(")) {
@@ -182,6 +186,7 @@ class Parser {
       name = `anonymous_kernel_${this.anonymousKernelIndex}`;
     } else {
       this.expect("void");
+      this.consumeKernelAttributes();
       const nameToken = this.expectIdentifier("kernel name");
       name = nameToken.value;
       nameSpan = nameToken.span;
@@ -208,6 +213,12 @@ class Parser {
         } while (this.consumeIf(","));
       }
       this.expect(")");
+    }
+  }
+
+  private consumeKernelQualifiers(): void {
+    while (this.consumeIf("static") || this.consumeIf("extern")) {
+      // CUDA samples sometimes spell kernels as `__global__ static void`.
     }
   }
 
@@ -249,9 +260,11 @@ class Parser {
 
   private parseBlock(): readonly CudaLiteStatement[] {
     this.expect("{");
+    this.integerConstantScopes.push(new Map());
     const statements: CudaLiteStatement[] = [];
     while (!this.match("}")) statements.push(...this.parseStatementEntry());
     this.expect("}");
+    this.integerConstantScopes.pop();
     return statements;
   }
 
@@ -267,6 +280,7 @@ class Parser {
     if (this.startsCooperativeGroupDecl()) return [this.parseCooperativeGroupDecl()];
     if (this.startsKernelLaunch()) return [this.parseKernelLaunch()];
     if (this.match("asm")) return [this.parseAsmStatement()];
+    if (this.match("static_assert")) return this.parseStaticAssert();
     if (this.startsVarDecl()) return this.parseVarDeclList(true);
     const expression = this.parseExpression();
     const end = this.expect(";");
@@ -435,6 +449,13 @@ class Parser {
     return expression;
   }
 
+  private parseStaticAssert(): readonly CudaLiteStatement[] {
+    this.expect("static_assert");
+    this.skipBalanced("(", ")");
+    this.expect(";");
+    return [];
+  }
+
   private parseBodyAsStatements(): readonly CudaLiteStatement[] {
     if (this.match("{")) return this.parseBlock();
     return this.parseStatementEntry();
@@ -451,6 +472,8 @@ class Parser {
   private parseVarDeclList(expectSemicolon: boolean): readonly CudaLiteVarDecl[] {
     const start = this.peek().span;
     const storageInfo = this.consumeStorageQualifier();
+    this.consumeIf("static");
+    const constexpr = this.consumeIf("constexpr") !== undefined;
     this.consumeIf("const");
     const valueType = this.parseType();
     const declarations: CudaLiteVarDecl[] = [];
@@ -466,6 +489,10 @@ class Parser {
         this.expect("]");
       }
       const init = this.consumeIf("=") ? this.parseExpression() : undefined;
+      if (constexpr && init !== undefined) {
+        const value = this.evaluateIntegerConstantExpression(init);
+        if (value !== undefined) this.recordIntegerConstant(name.value, value);
+      }
       declarations.push({
         kind: "var",
         storage: storageInfo.storage,
@@ -489,6 +516,7 @@ class Parser {
     let left = this.parsePrefix();
     while (true) {
       if (this.peek().value === ">>" && this.tokens[this.index + 1]?.value === ">") break;
+      if (this.templateArgumentDepth > 0 && this.peek().value === ">") break;
       if (ASSIGNMENT.has(this.peek().value) && minPrecedence <= 1) {
         const op = this.advance().value as CudaLiteAssignmentExpression["operator"];
         const right = this.parseExpression(1);
@@ -694,6 +722,10 @@ class Parser {
 
   private startsVarDecl(): boolean {
     if (this.match("__shared__") || this.match("extern")) return true;
+    if (this.match("static")) return this.tokens[this.index + 1]?.value === "constexpr" ||
+      TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "");
+    if (this.match("constexpr")) return TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "") ||
+      (this.tokens[this.index + 1]?.value === "const" && TYPE_START_KEYWORDS.has(this.tokens[this.index + 2]?.value ?? ""));
     if (this.match("const")) return TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "");
     return TYPE_START_KEYWORDS.has(this.peek().value);
   }
@@ -772,7 +804,7 @@ class Parser {
 
   private parseArrayDimension(): number {
     const expression = this.parseExpression();
-    const value = evaluateIntegerConstantExpression(expression);
+    const value = this.evaluateIntegerConstantExpression(expression);
     if (value === undefined) {
       this.fail("array size must be an integer constant expression", expression.span);
     }
@@ -780,11 +812,34 @@ class Parser {
   }
 
   private parseTemplateIntegerArgument(): number {
-    const token = this.parseNumberLiteral("template integer argument");
-    if (!Number.isInteger(token.value) || token.value <= 0) {
-      this.fail("template argument must be a positive integer", token.span);
+    this.templateArgumentDepth++;
+    let expression: CudaLiteExpression;
+    try {
+      expression = this.parseExpression();
+    } finally {
+      this.templateArgumentDepth--;
     }
-    return token.value;
+    const value = this.evaluateIntegerConstantExpression(expression);
+    if (value === undefined || !Number.isInteger(value) || value <= 0) {
+      this.fail("template argument must be a positive integer", expression.span);
+    }
+    return value;
+  }
+
+  private evaluateIntegerConstantExpression(expression: CudaLiteExpression): number | undefined {
+    return evaluateIntegerConstantExpression(expression, (name) => this.lookupIntegerConstant(name));
+  }
+
+  private recordIntegerConstant(name: string, value: number): void {
+    this.integerConstantScopes.at(-1)?.set(name, value);
+  }
+
+  private lookupIntegerConstant(name: string): number | undefined {
+    for (let index = this.integerConstantScopes.length - 1; index >= 0; index--) {
+      const value = this.integerConstantScopes[index]?.get(name);
+      if (value !== undefined) return value;
+    }
+    return undefined;
   }
 
   private expect(value: string): Token {
@@ -830,6 +885,14 @@ class Parser {
     this.expect(";");
   }
 
+  private skipSimpleDeclaration(): void {
+    while (!this.match(";")) {
+      if (this.match("<eof>")) this.fail("expected ';'", this.peek().span);
+      this.advance();
+    }
+    this.expect(";");
+  }
+
   private peek(): Token {
     return this.tokens[this.index]!;
   }
@@ -861,20 +924,25 @@ export function mergeSpans(left: SourceSpan, right: SourceSpan): SourceSpan {
   };
 }
 
-function evaluateIntegerConstantExpression(expression: CudaLiteExpression): number | undefined {
+function evaluateIntegerConstantExpression(
+  expression: CudaLiteExpression,
+  lookupIdentifier: (name: string) => number | undefined,
+): number | undefined {
   switch (expression.kind) {
     case "number":
       return Number.isInteger(expression.value) ? expression.value : undefined;
+    case "identifier":
+      return lookupIdentifier(expression.name);
     case "unary": {
-      const value = evaluateIntegerConstantExpression(expression.argument);
+      const value = evaluateIntegerConstantExpression(expression.argument, lookupIdentifier);
       if (value === undefined) return undefined;
       if (expression.operator === "+") return value;
       if (expression.operator === "-") return -value;
       return undefined;
     }
     case "binary": {
-      const left = evaluateIntegerConstantExpression(expression.left);
-      const right = evaluateIntegerConstantExpression(expression.right);
+      const left = evaluateIntegerConstantExpression(expression.left, lookupIdentifier);
+      const right = evaluateIntegerConstantExpression(expression.right, lookupIdentifier);
       if (left === undefined || right === undefined) return undefined;
       switch (expression.operator) {
         case "+":

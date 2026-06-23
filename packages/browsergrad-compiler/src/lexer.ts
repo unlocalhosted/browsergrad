@@ -256,13 +256,51 @@ function collectMacroDefinitions(source: string): MacroDefinitions {
       continue;
     }
     const objectMatch = /^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)(?!\()\s+(.+?)\s*$/u.exec(stripped);
-    if (objectMatch === null) continue;
-    const [, name, replacement] = objectMatch;
-    if (name === undefined || replacement === undefined) continue;
-    const trimmed = replacement.trim();
-    if (trimmed.length > 0) objects.set(name, trimmed);
+    if (objectMatch !== null) {
+      const [, name, replacement] = objectMatch;
+      if (name === undefined || replacement === undefined) continue;
+      const trimmed = replacement.trim();
+      if (trimmed.length > 0) objects.set(name, trimmed);
+      continue;
+    }
+    const alias = parseSimpleTypeAlias(stripped, objects);
+    if (alias !== undefined) objects.set(alias.name, alias.value);
   }
   return { objects, functions };
+}
+
+function parseSimpleTypeAlias(
+  line: string,
+  defines: ReadonlyMap<string, string>,
+): { readonly name: string; readonly value: string } | undefined {
+  const typedefMatch = /^\s*typedef\s+(.+?)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;\s*$/u.exec(line);
+  if (typedefMatch !== null) {
+    const [, sourceType, alias] = typedefMatch;
+    const value = normalizeAliasType(sourceType, defines);
+    return value && alias ? { name: alias, value } : undefined;
+  }
+  const usingMatch = /^\s*using\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*;\s*$/u.exec(line);
+  if (usingMatch !== null) {
+    const [, alias, sourceType] = usingMatch;
+    const value = normalizeAliasType(sourceType, defines);
+    return value && alias ? { name: alias, value } : undefined;
+  }
+  return undefined;
+}
+
+function normalizeAliasType(sourceType: string | undefined, defines: ReadonlyMap<string, string>): string | undefined {
+  let type = sourceType
+    ?.replace(/\b(?:const|volatile|__restrict__|__restrict|restrict)\b/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!type || type.endsWith("*") || /[<>()]/u.test(type)) return undefined;
+  if (type === "unsigned int" || type === "unsigned") return "uint";
+  if (type === "signed int" || type === "signed") return "int";
+  if (type === "long long" || type === "long" || type === "short" || type === "short int") return "int";
+  const mapped = defines.get(type);
+  if (mapped !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(mapped)) type = mapped;
+  const supported = new Set(["float", "int", "uint", "half", "__half", "bool", "float2", "float3", "float4", "int2", "int3", "int4", "uint2", "uint3", "uint4"]);
+  return supported.has(type) ? type : undefined;
 }
 
 function expandFunctionLikeMacro(macro: FunctionLikeMacro, args: readonly string[]): string {

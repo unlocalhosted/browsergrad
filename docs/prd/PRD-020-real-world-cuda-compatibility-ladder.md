@@ -60,19 +60,22 @@ Repo exploration:
 
 Local corpus audits on 2026-06-23:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `47` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `51` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
-  expansion and scalarized CUDA vector storage views, and `310` hard gaps. Main
+  expansion, scalarized CUDA vector storage views, and simple C++ alias /
+  constexpr intake, and `306` hard gaps. Main
   failures: parser/frontend gaps, texture/vector types, `clock_t`, `half2`,
   `double`, templates, and runtime library shape.
-- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `20` direct
+- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `31` direct
   WebGPU-runnable after source/context normalization, intrinsic-ledger
-  expansion, CUDA/C named constants, and CUDA cache-hint memory builtins, with
-  `128` hard gaps. Main failures: frontend macro/type shape, `floatX` aliases,
-  parser C++-isms, and remaining library/front-end gaps.
-- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `45` direct
+  expansion, CUDA/C named constants, CUDA cache-hint memory builtins, local
+  header context, and simple C++ alias / constexpr intake, with `117` hard
+  gaps. Main failures: frontend macro/type shape, `floatX` aliases, parser
+  C++-isms, and remaining library/front-end gaps.
+- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `52` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
-  expansion and scalarized CUDA vector storage views, and `248` hard gaps.
+  expansion, scalarized CUDA vector storage views, local header context, and
+  simple C++ alias / constexpr intake, and `241` hard gaps.
   The pre-normalizer baseline was `3/293`, which proved context isolation was
   the first ladder rung.
 
@@ -255,11 +258,11 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=47` WebGPU-runnable, and `<=310` hard gaps.
-- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=20`
-  WebGPU-runnable, and `<=128` hard gaps.
+  `>=51` WebGPU-runnable, and `<=306` hard gaps.
+- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=31`
+  WebGPU-runnable, and `<=117` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
-  `>=45` WebGPU-runnable, and `<=248` hard gaps.
+  `>=52` WebGPU-runnable, and `<=241` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
   unit tests.
 - Intrinsic-ledger expansion improves coverage through generic CUDA math and
@@ -271,6 +274,10 @@ Acceptance criteria for the first slice:
 - CUDA vector storage types `float2/3/4`, `int2/3/4`, and `uint2/3/4` lower
   through one semantic vector ABI with scalar storage buffers, lane
   member access, `make_*` constructors, CPU reference, and WebGPU coverage.
+- Simple C++ intake supports scalar/vector `typedef` / `using` aliases,
+  local quoted header context in audits, `constexpr` integer expressions in
+  array dimensions and template arguments, CUDA `static` kernel qualifiers,
+  late `__launch_bounds__` placement, and ignored `static_assert` checks.
 - Source/context normalization stays generic: no repo-name, file-name, or
   assignment-name branching.
 - At least one broad intrinsic gap from `llm.c` or LeetCUDA lands with parser,

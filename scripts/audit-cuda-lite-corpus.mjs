@@ -38,17 +38,19 @@ let cudaBlocks = 0;
 for (const file of files) {
   const absolute = path.join(corpusRoot, file);
   const text = fs.readFileSync(absolute, "utf8");
+  const includeContext = collectLocalIncludeSources(absolute, corpusRoot).join("\n");
   const blocks = markdownBlocks(text, file);
   let carriedDefines = new Map();
   codeBlocks += blocks.length;
   for (const [blockIndex, block] of blocks.entries()) {
     if (isNonKernelCodeBlock(block)) continue;
-    const blockDefines = collectObjectDefines(block.code);
-    const blockFunctionDefines = collectFunctionDefines(block.code);
-    const blockDeviceFunctions = collectPortableDeviceFunctions(block.code);
-    const blockConstants = collectConstantDeclarations(block.code);
-    const blockTextures = collectTextureDeclarations(block.code);
-    const effectiveDefines = blockDefines.size === 0 ? carriedDefines : blockDefines;
+    const declarationContext = `${sourceWithoutCudaFunctionBodies(includeContext)}\n${sourceWithoutCudaFunctionBodies(block.code)}`;
+    const blockDefines = collectObjectDefines(declarationContext);
+    const blockFunctionDefines = collectFunctionDefines(`${includeContext}\n${block.code}`);
+    const blockDeviceFunctions = collectPortableDeviceFunctions(`${includeContext}\n${block.code}`);
+    const blockConstants = collectConstantDeclarations(`${includeContext}\n${block.code}`);
+    const blockTextures = collectTextureDeclarations(`${includeContext}\n${block.code}`);
+    const effectiveDefines = mergeDefineMaps(carriedDefines, blockDefines);
     if (CUDA_HINT_RE.test(block.code)) cudaBlocks++;
     const kernels = extractKernelDefinitions(block.code);
     for (const [kernelIndex, rawKernel] of kernels.entries()) {
@@ -343,6 +345,83 @@ function extractKernelDefinitions(source) {
   return kernels;
 }
 
+function sourceWithoutCudaFunctionBodies(source) {
+  const clean = stripComments(source);
+  let out = "";
+  let index = 0;
+  while (true) {
+    const globalStart = clean.indexOf("__global__", index);
+    const deviceStart = clean.indexOf("__device__", index);
+    const starts = [globalStart, deviceStart].filter((item) => item >= 0);
+    const start = starts.length === 0 ? -1 : Math.min(...starts);
+    if (start < 0) {
+      out += clean.slice(index);
+      return out;
+    }
+    const brace = clean.indexOf("{", start);
+    const semicolon = clean.indexOf(";", start);
+    if (brace < 0 || (semicolon >= 0 && semicolon < brace)) {
+      out += clean.slice(index, semicolon >= 0 ? semicolon + 1 : clean.length);
+      index = semicolon >= 0 ? semicolon + 1 : clean.length;
+      continue;
+    }
+    out += clean.slice(index, start);
+    let depth = 0;
+    let end = -1;
+    for (let cursor = brace; cursor < clean.length; cursor++) {
+      if (clean[cursor] === "{") depth++;
+      else if (clean[cursor] === "}") {
+        depth--;
+        if (depth === 0) {
+          end = cursor + 1;
+          break;
+        }
+      }
+    }
+    if (end < 0) return out;
+    index = end;
+  }
+}
+
+function collectLocalIncludeSources(absoluteFile, root, seen = new Set()) {
+  if (seen.has(absoluteFile)) return [];
+  seen.add(absoluteFile);
+  let source;
+  try {
+    source = fs.readFileSync(absoluteFile, "utf8");
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const match of source.matchAll(/^\s*#include\s+"([^"]+)"/gm)) {
+    const includeName = match[1];
+    if (!includeName) continue;
+    const resolved = resolveLocalInclude(absoluteFile, root, includeName);
+    if (!resolved || seen.has(resolved)) continue;
+    const nested = collectLocalIncludeSources(resolved, root, seen);
+    out.push(...nested);
+    try {
+      out.push(fs.readFileSync(resolved, "utf8"));
+    } catch {
+      // ignore unreadable optional local headers
+    }
+  }
+  return out;
+}
+
+function resolveLocalInclude(absoluteFile, root, includeName) {
+  const candidates = [
+    path.resolve(path.dirname(absoluteFile), includeName),
+    path.resolve(root, includeName),
+  ];
+  for (const candidate of candidates) {
+    const relative = path.relative(root, candidate);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+  }
+  return undefined;
+}
+
 function isPlaceholderKernel(kernel) {
   const signature = kernel.slice(0, kernel.indexOf("{"));
   return /\(\s*\.\.\.\s*\)/u.test(signature) ||
@@ -409,11 +488,67 @@ function collectObjectDefines(source) {
   for (const line of source.split(/\r?\n/u)) {
     const stripped = stripLineComment(line);
     const match = /^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)(?!\()\s+(.+?)\s*$/u.exec(stripped);
-    if (match === null) continue;
-    const [, name, value] = match;
-    if (name !== undefined && value !== undefined) defines.set(name, value.trim());
+    if (match !== null) {
+      const [, name, value] = match;
+      if (name !== undefined && value !== undefined) defines.set(name, value.trim());
+      continue;
+    }
+    const alias = parseSimpleTypeAlias(stripped, defines);
+    if (alias !== undefined) {
+      defines.set(alias.name, alias.value);
+      continue;
+    }
+    const constant = parseSimpleIntegerConstant(stripped);
+    if (constant !== undefined) defines.set(constant.name, constant.value);
   }
   return defines;
+}
+
+function parseSimpleTypeAlias(line, defines) {
+  const typedefMatch = /^\s*typedef\s+(.+?)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;\s*$/u.exec(line);
+  if (typedefMatch !== null) {
+    const [, sourceType, alias] = typedefMatch;
+    const value = normalizeAliasType(sourceType, defines);
+    return value && alias ? { name: alias, value } : undefined;
+  }
+  const usingMatch = /^\s*using\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*;\s*$/u.exec(line);
+  if (usingMatch !== null) {
+    const [, alias, sourceType] = usingMatch;
+    const value = normalizeAliasType(sourceType, defines);
+    return value && alias ? { name: alias, value } : undefined;
+  }
+  return undefined;
+}
+
+function normalizeAliasType(sourceType, defines) {
+  let type = sourceType
+    .replace(/\b(?:const|volatile|__restrict__|__restrict|restrict)\b/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (type.endsWith("*") || type.includes("<") || type.includes(">") || type.includes("(") || type.includes(")")) return undefined;
+  if (type === "unsigned int" || type === "unsigned") return "uint";
+  if (type === "signed int" || type === "signed") return "int";
+  if (type === "long long" || type === "long" || type === "short" || type === "short int") return "int";
+  const mapped = defines.get(type);
+  if (mapped && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(mapped)) type = mapped;
+  const supported = new Set(["float", "int", "uint", "half", "__half", "bool", "float2", "float3", "float4", "int2", "int3", "int4", "uint2", "uint3", "uint4"]);
+  return supported.has(type) ? type : undefined;
+}
+
+function parseSimpleIntegerConstant(line) {
+  const match = /^\s*(?:(?:static|constexpr|const)\s+)*(?:int|uint|unsigned\s+int|size_t)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([0-9A-Fa-fxXuUlL\s()+\-*/%<>&|^]+)\s*;\s*$/u.exec(line);
+  if (match === null) return undefined;
+  const [, name, value] = match;
+  if (!name || !value) return undefined;
+  return { name, value: value.trim() };
+}
+
+function mergeDefineMaps(...maps) {
+  const merged = new Map();
+  for (const map of maps) {
+    for (const [name, value] of map) merged.set(name, value);
+  }
+  return merged;
 }
 
 function mergeCarriedDefines(previous, next) {
