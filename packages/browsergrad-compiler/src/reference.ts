@@ -6,6 +6,7 @@ import {
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./ast_queries.js";
+import { expressionName } from "./analyzer.js";
 import { CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
@@ -940,7 +941,8 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
       return truthy(value) ? 0 : 1;
     }
     case "binary":
-      return evalBinary(expression.operator, expression.left, expression.right, context);
+      return evalVectorBinary(expression.operator, expression.left, expression.right, context) ??
+        evalBinary(expression.operator, expression.left, expression.right, context);
     case "conditional":
       return truthy(evalNumber(expression.condition, context))
         ? evalExpression(expression.consequent, context)
@@ -983,6 +985,68 @@ function evalDeref(expression: CudaLiteExpression, context: ThreadContext): Eval
 
 function evalNumber(expression: CudaLiteExpression, context: ThreadContext): number {
   return valueAsNumber(evalExpression(expression, context), expression.kind);
+}
+
+function evalVectorBinary(
+  operator: string,
+  leftExpression: CudaLiteExpression,
+  rightExpression: CudaLiteExpression,
+  context: ThreadContext,
+): CudaVectorValue | undefined {
+  if (operator !== "+" && operator !== "-" && operator !== "*" && operator !== "/") return undefined;
+  const leftType = vectorExpressionType(leftExpression, context);
+  const rightType = vectorExpressionType(rightExpression, context);
+  if (!leftType || leftType !== rightType) return undefined;
+  const left = valueAsCudaVector(evalExpression(leftExpression, context), leftType);
+  const right = valueAsCudaVector(evalExpression(rightExpression, context), rightType);
+  return {
+    kind: "cuda-vector",
+    valueType: leftType,
+    lanes: left.lanes.map((value, index) => roundVectorLane(
+      leftType,
+      operator === "+"
+        ? (value ?? 0) + (right.lanes[index] ?? 0)
+        : operator === "-"
+          ? (value ?? 0) - (right.lanes[index] ?? 0)
+          : operator === "*"
+            ? (value ?? 0) * (right.lanes[index] ?? 0)
+            : (value ?? 0) / (right.lanes[index] ?? 1),
+    )),
+  };
+}
+
+function vectorExpressionType(
+  expression: CudaLiteExpression,
+  context: ThreadContext,
+): CudaLiteVectorType | undefined {
+  if (expression.kind === "identifier") {
+    const local = context.locals.get(expression.name);
+    if (isCudaVectorValue(local)) return local.valueType;
+    const type = context.valueTypes.get(expression.name);
+    return isCudaVectorType(type) ? type : undefined;
+  }
+  if (expression.kind === "index") {
+    const type = pointerValueTypeForExpression(expression.target, context);
+    return isCudaVectorType(type) ? type : undefined;
+  }
+  if (expression.kind === "call") {
+    const name = expressionName(expression.callee);
+    const constructor = name ? cudaVectorConstructorType(name) : undefined;
+    if (constructor) return constructor;
+    if (isHalf2Intrinsic(name) || name === "__float22half2_rn" || name === "__float2half2_rn" || name === "__floats2half2_rn") return "half2";
+    if (name === "__half22float2") return "float2";
+  }
+  if (expression.kind === "binary") {
+    if (expression.operator !== "+" && expression.operator !== "-" && expression.operator !== "*" && expression.operator !== "/") return undefined;
+    const left = vectorExpressionType(expression.left, context);
+    const right = vectorExpressionType(expression.right, context);
+    return left && left === right ? left : undefined;
+  }
+  return undefined;
+}
+
+function roundVectorLane(valueType: CudaLiteVectorType, value: number): number {
+  return cudaVectorScalarType(valueType) === "half" ? roundHalf(value) : value;
 }
 
 function castNumber(type: Exclude<CudaLiteScalarType, "void">, value: number): EvalValue {
@@ -1031,6 +1095,8 @@ function evalBinary(
   rightExpression: CudaLiteExpression,
   context: ThreadContext,
 ): number {
+  const pointerEquality = evalPointerEquality(operator, leftExpression, rightExpression, context);
+  if (pointerEquality !== undefined) return pointerEquality;
   if (operator === "&&") {
     return truthy(evalNumber(leftExpression, context)) && truthy(evalNumber(rightExpression, context)) ? 1 : 0;
   }
@@ -1075,6 +1141,57 @@ function evalBinary(
     default:
       throw compilerFailure(`unsupported binary operator '${operator}'`);
   }
+}
+
+function evalPointerEquality(
+  operator: string,
+  leftExpression: CudaLiteExpression,
+  rightExpression: CudaLiteExpression,
+  context: ThreadContext,
+): number | undefined {
+  if (operator !== "==" && operator !== "!=") return undefined;
+  const left = pointerValueForEquality(leftExpression, context);
+  const right = pointerValueForEquality(rightExpression, context);
+  if (left === undefined || right === undefined) return undefined;
+  const equal = pointerIdentity(left) === pointerIdentity(right);
+  return operator === "==" ? (equal ? 1 : 0) : (equal ? 0 : 1);
+}
+
+function pointerValueForEquality(expression: CudaLiteExpression, context: ThreadContext): EvalValue | undefined {
+  if (expression.kind === "number") return expression.value === 0 ? 0 : undefined;
+  if (expression.kind === "identifier") {
+    if (expression.name === "nullptr") return { kind: "pool-pointer", poolName: "", byteOffset: -1 };
+    const namedConstant = CUDA_NAMED_CONSTANTS.get(expression.name);
+    if (namedConstant?.valueType === "voidptr" && namedConstant.value === 0) return 0;
+    const pointer = mutablePointerValue(expression.name, context);
+    if (pointer) return pointer;
+    return undefined;
+  }
+  if (
+    (expression.kind === "cast" && expression.pointer) ||
+    expression.kind === "binary" ||
+    (expression.kind === "unary" && expression.operator === "&")
+  ) {
+    try {
+      const pointer = pointerArgumentValue(expression, pointerValueTypeForExpression(expression, context), context);
+      if (isAddress(pointer) || isPoolPointer(pointer) || typeof pointer === "number") return pointer;
+      return undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function pointerIdentity(value: EvalValue): string {
+  if (typeof value === "number") return Math.trunc(value) === 0 ? "null" : `scalar:${Math.trunc(value)}`;
+  if (isAddress(value)) return `${value.target.space}:${value.target.name}:${value.target.index ?? 0}`;
+  if (isPoolPointer(value)) {
+    return value.byteOffset < 0 || value.poolName.length === 0
+      ? "null"
+      : `pool:${value.poolName}:${value.byteOffset}`;
+  }
+  return "unknown";
 }
 
 function evalAssignment(
@@ -1249,29 +1366,29 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (name === "atomicSub") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => current - value);
   }
-  if (name === "atomicMin") {
+  if (name === "atomicMin" || name === "atomicMin_system") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => Math.min(current, value));
   }
-  if (name === "atomicMax" || name === "atomicMaxFloat") {
+  if (name === "atomicMax" || name === "atomicMax_system" || name === "atomicMaxFloat") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => Math.max(current, value));
   }
-  if (name === "atomicAnd") {
+  if (name === "atomicAnd" || name === "atomicAnd_system") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => Math.trunc(current) & Math.trunc(value));
   }
-  if (name === "atomicOr") {
+  if (name === "atomicOr" || name === "atomicOr_system") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => Math.trunc(current) | Math.trunc(value));
   }
-  if (name === "atomicXor") {
+  if (name === "atomicXor" || name === "atomicXor_system") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => Math.trunc(current) ^ Math.trunc(value));
   }
-  if (name === "atomicInc") {
+  if (name === "atomicInc" || name === "atomicInc_system") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => {
       const old = current >>> 0;
       const limit = value >>> 0;
       return old >= limit ? 0 : (old + 1) >>> 0;
     });
   }
-  if (name === "atomicDec") {
+  if (name === "atomicDec" || name === "atomicDec_system") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => {
       const old = current >>> 0;
       const limit = value >>> 0;
@@ -1281,7 +1398,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (name === "atomicExch" || name === "atomicExch_system") {
     return evalAtomicReadModifyWrite(expression, context, (_current, value) => value);
   }
-  if (name === "atomicCAS") {
+  if (name === "atomicCAS" || name === "atomicCAS_system") {
     const first = expression.args[0];
     if (!first) throw compilerFailure("atomicCAS expects target");
     const lvalue = resolveAtomicTarget(first, context);
@@ -1380,16 +1497,23 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (isHalf2Intrinsic(name)) {
     const left = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
     const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "half2");
+    const addend = name === "__hfma2"
+      ? valueAsCudaVector(evalExpression(expression.args[2]!, context), "half2")
+      : undefined;
     const op = half2IntrinsicOperator(name);
     return {
       kind: "cuda-vector",
       valueType: "half2",
-      lanes: left.lanes.map((value, index) => roundHalf(op(value ?? 0, right.lanes[index] ?? 0))),
+      lanes: left.lanes.map((value, index) => roundHalf(op(value ?? 0, right.lanes[index] ?? 0) + (addend?.lanes[index] ?? 0))),
     };
   }
   if (name === "__half22float2") {
     const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
     return { kind: "cuda-vector", valueType: "float2", lanes: value.lanes };
+  }
+  if (name === "__low2float" || name === "__high2float") {
+    const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
+    return value.lanes[name === "__low2float" ? 0 : 1] ?? 0;
   }
   if (name === "__float22half2_rn") {
     const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "float2");
@@ -1473,6 +1597,7 @@ function isHalf2Intrinsic(name: string | undefined): boolean {
   return name === "__hadd2" ||
     name === "__hsub2" ||
     name === "__hmul2" ||
+    name === "__hfma2" ||
     name === "__hmin2" ||
     name === "__hmax2";
 }
@@ -1484,6 +1609,7 @@ function half2IntrinsicOperator(name: string | undefined): (left: number, right:
     case "__hsub2":
       return (left, right) => left - right;
     case "__hmul2":
+    case "__hfma2":
       return (left, right) => left * right;
     case "__hmin2":
       return Math.min;

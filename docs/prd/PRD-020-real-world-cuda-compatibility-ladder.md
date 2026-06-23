@@ -60,7 +60,7 @@ Repo exploration:
 
 Local corpus audits on 2026-06-23:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `170` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `175` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -89,13 +89,16 @@ Local corpus audits on 2026-06-23:
   lowering, plus C-style assignment-chain statement lowering and deterministic
   WGSL alpha-renaming for source symbols that collide with output identifiers,
   and translation-unit `__shared__` scratch-array injection plus conservative
-  in-kernel `#if`/`#ifdef` branch pruning and `static __global__` intake, with `187`
+  in-kernel `#if`/`#ifdef` branch pruning and `static __global__` intake, plus
+  pointer/null identity lowering, broader CUDA system-scope atomic aliases,
+  `clock_t*` helper intake, and `half2` f16 FMA/lane extraction plus native
+  vector arithmetic, with `182`
   hard gaps.
   Main failures:
   parser/frontend gaps, texture/vector
   operators, remaining `half2` intrinsics, `double`, templates, and
   runtime library shape.
-- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `66` direct
+- `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `77` direct
   WebGPU-runnable after source/context normalization, intrinsic-ledger
   expansion, CUDA/C named constants, CUDA cache-hint memory builtins, local
   header context, simple C++ alias / constexpr intake, and typed storage
@@ -111,7 +114,8 @@ Local corpus audits on 2026-06-23:
   dynamic lane read/write semantics, plus call-shaped helper intake and
   define-backed device-helper template defaults, plus conservative
   `__syncwarp` lowering plus header-carried `Packed128<float>::size` folding,
-  with `82` hard gaps. Main
+  and const pointer rebasing plus pointer/null comparison semantics, with `71`
+  hard gaps. Main
   failures: frontend macro/type shape, `floatX` aliases, parser C++-isms, and
   remaining library/front-end gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `194` direct
@@ -316,9 +320,9 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=170` WebGPU-runnable, and `<=187` hard gaps.
-- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=66`
-  WebGPU-runnable, and `<=82` hard gaps.
+  `>=175` WebGPU-runnable, and `<=182` hard gaps.
+- `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=77`
+  WebGPU-runnable, and `<=71` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
   `>=194` WebGPU-runnable, and `<=99` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has

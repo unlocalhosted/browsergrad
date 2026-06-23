@@ -46,6 +46,7 @@ const PORTABLE_POINTER_BASE_TYPES = new Set([
   "int",
   "uint",
   "half",
+  "half2",
   "bool",
   "float2",
   "float3",
@@ -650,6 +651,7 @@ function normalizePointerBaseType(type) {
   if (type === "unsigned char" || type === "uchar" || type === "uint8_t") return "uint";
   if (type === "signed int" || type === "signed") return "int";
   if (type === "signed char" || type === "char" || type === "int8_t") return "int";
+  if (type === "clock_t") return "uint";
   if (type === "__half") return "half";
   return type;
 }

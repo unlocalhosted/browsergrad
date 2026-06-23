@@ -1986,10 +1986,13 @@ __global__ void half2Add(const half2 *x, half2 *y) {
 
   it("lowers CUDA half2 arithmetic intrinsics", () => {
     const compiled = compileCudaLiteKernel(`
-__global__ void half2Ops(const half2 *x, const half2 *y, half2 *out) {
+__global__ void half2Ops(const half2 *x, const half2 *y, half2 *out, float *scalar) {
   half2 sum = __hadd2(x[0], y[0]);
   half2 prod = __hmul2(sum, make_half2(__float2half(2.0f), __float2half(0.5f)));
   out[0] = __hmax2(prod, make_half2(__float2half(5.0f), __float2half(5.0f)));
+  half2 fused = __hfma2(x[0], y[0], make_half2(__float2half(1.0f), __float2half(2.0f)));
+  out[1] = x[0] * y[0] + fused;
+  scalar[0] = __low2float(fused) + __high2float(fused);
 }`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
@@ -1997,14 +2000,17 @@ __global__ void half2Ops(const half2 *x, const half2 *y, half2 *out) {
         buffers: {
           x: createWgslFloat16Array([1, 8]),
           y: createWgslFloat16Array([2, 4]),
-          out: createWgslFloat16Array(2),
+          out: createWgslFloat16Array(4),
+          scalar: new Float32Array(1),
         },
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
     expect(compiled.wgsl).toContain("max(");
-    expect(Array.from(result.buffers.out as ArrayLike<number>)).toEqual([6, 6]);
+    expect(compiled.wgsl).toContain("fma(");
+    expect(Array.from(result.buffers.out as ArrayLike<number>)).toEqual([6, 6, 5, 66]);
+    expect([...result.buffers.scalar as Float32Array]).toEqual([37]);
   });
 
   it("lowers CUDA shuffle, fence, and conversion intrinsics", () => {
@@ -3978,6 +3984,39 @@ __global__ void atomic_more(int* x, int* out) {
     expect(compiled.wgsl).toContain("atomicXor(&x[2], 0x3)");
   });
 
+  it("supports CUDA system-scope integer atomic aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void atomic_system_aliases(int* x, int* out) {
+  if (threadIdx.x == 0) {
+    out[0] = atomicMax_system(&x[0], 5);
+    out[1] = atomicMin_system(&x[0], 3);
+    out[2] = atomicAnd_system(&x[1], 0x6);
+    out[3] = atomicOr_system(&x[1], 0x8);
+    out[4] = atomicXor_system(&x[1], 0x3);
+    out[5] = atomicInc_system((uint*)&x[2], 2);
+    out[6] = atomicDec_system((uint*)&x[2], 2);
+    out[7] = atomicCAS_system(&x[3], 9, 11);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Int32Array([4, 7, 1, 9]),
+          out: new Int32Array(8),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.x as Int32Array]).toEqual([3, 13, 1, 11]);
+    expect([...result.buffers.out as Int32Array]).toEqual([4, 5, 7, 6, 14, 1, 2, 9]);
+    expect(compiled.wgsl).toContain("atomicMax(&x[0], 5)");
+    expect(compiled.wgsl).toContain("atomicMin(&x[0], 3)");
+    expect(compiled.wgsl).toContain("bg_atomicInc_storage_u32");
+    expect(compiled.wgsl).toContain("atomicCompareExchangeWeak(&x[3], 9, 11).old_value");
+  });
+
   it("supports CUDA atomic inc/dec and atomics through pointer aliases", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void alias_atomic(float* scratch, const float* values, uint* out) {
@@ -4133,5 +4172,50 @@ __global__ void pointer_rebase(uint* x, uint* out, int offset) {
     expect(compiled.wgsl).toContain("var bg_x_base: u32 = 0u;");
     expect(compiled.wgsl).toContain("bg_x_base = (bg_x_base + u32(params.offset));");
     expect(compiled.wgsl).toContain("x[(bg_x_base + u32(0))]");
+
+    const constPointee = compileCudaLiteKernel(`
+__global__ void const_pointer_rebase(const uint* x, uint* out, int offset) {
+  x += offset;
+  if (threadIdx.x == 0) out[0] = *x;
+}`, { workgroupSize: [1, 1, 1] });
+    const constPointeeResult = runCompiledKernelReference(
+      constPointee,
+      { buffers: { x: new Uint32Array([10, 20, 30]), out: new Uint32Array(1) }, scalars: { offset: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    expect([...constPointeeResult.buffers.out as Uint32Array]).toEqual([20]);
+
+    const nullGuard = compileCudaLiteKernel(`
+__global__ void pointer_null_guard(const uint* x, uint* out) {
+  if (x != NULL) out[0] = x[0];
+  if (x == nullptr) out[1] = 99u;
+}`, { workgroupSize: [1, 1, 1] });
+    const nullGuardResult = runCompiledKernelReference(
+      nullGuard,
+      { buffers: { x: new Uint32Array([42]), out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    expect([...nullGuardResult.buffers.out as Uint32Array]).toEqual([42, 0]);
+    expect(nullGuard.wgsl).toContain("if (true) {");
+    expect(nullGuard.wgsl).toContain("if (false) {");
+
+    const pointerIdentity = compileCudaLiteKernel(`
+__global__ void pointer_identity(uint* x, uint* y, uint* out) {
+  if (x != y) out[0] = 1u;
+  if (x == x) out[1] = 2u;
+}`, { workgroupSize: [1, 1, 1] });
+    const pointerIdentityResult = runCompiledKernelReference(
+      pointerIdentity,
+      { buffers: { x: new Uint32Array([1]), y: new Uint32Array([1]), out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    expect([...pointerIdentityResult.buffers.out as Uint32Array]).toEqual([1, 2]);
+    expect(pointerIdentity.wgsl).toContain("((0u == 1u) && (0u == 0u))");
+
+    const constWrite = analyzeCudaLite(parseCudaLite(`
+__global__ void bad_const_write(const uint* x) {
+  if (threadIdx.x == 0) x[0] = 1u;
+}`));
+    expect(constWrite.diagnostics.map((diagnostic) => diagnostic.code)).toContain("const-pointer-write");
   });
 });

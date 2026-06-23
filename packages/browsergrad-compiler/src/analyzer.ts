@@ -67,16 +67,24 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["atomicAdd_system", [2, 2]],
   ["atomicSub", [2, 2]],
   ["atomicMin", [2, 2]],
+  ["atomicMin_system", [2, 2]],
   ["atomicMax", [2, 2]],
+  ["atomicMax_system", [2, 2]],
   ["atomicMaxFloat", [2, 2]],
   ["atomicAnd", [2, 2]],
+  ["atomicAnd_system", [2, 2]],
   ["atomicOr", [2, 2]],
+  ["atomicOr_system", [2, 2]],
   ["atomicXor", [2, 2]],
+  ["atomicXor_system", [2, 2]],
   ["atomicInc", [2, 2]],
+  ["atomicInc_system", [2, 2]],
   ["atomicDec", [2, 2]],
+  ["atomicDec_system", [2, 2]],
   ["atomicExch", [2, 2]],
   ["atomicExch_system", [2, 2]],
   ["atomicCAS", [3, 3]],
+  ["atomicCAS_system", [3, 3]],
   ["tex2D", [3, 3]],
   ["surf2Dwrite", [4, 5]],
   ["sizeof", [1, 1]],
@@ -212,7 +220,7 @@ export function analyzeCudaLite(
     if (expression.kind === "call") {
       return validateCallExpression(expression, scope, params, atomicParams, atomicShared, requiredFeatures, diagnostics, walkExpression, options);
     }
-    return validateNonCallExpression(expression, scope, diagnostics, walkExpression);
+    return validateNonCallExpression(expression, scope, diagnostics, walkExpression, requiredFeatures);
   };
 
   for (const constant of ast.constants) {
@@ -933,6 +941,19 @@ function validateCallExpression(
     }
     return { kind: "vector", valueType: returnType };
   }
+  if (callName === "__low2float" || callName === "__high2float") {
+    requiredFeatures.add("shader-f16");
+    const arg = expression.args[0];
+    if (arg) {
+      const info = walkExpression(arg, scope);
+      if (info.kind !== "vector" && info.kind !== "unknown") {
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects half2 argument`, arg.span));
+      } else if (info.kind === "vector" && info.valueType !== "half2") {
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects half2 argument`, arg.span));
+      }
+    }
+    return { kind: "scalar", valueType: "float" };
+  }
   if (callName === "__float2half2_rn" || callName === "__floats2half2_rn") {
     requiredFeatures.add("shader-f16");
     for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
@@ -1020,6 +1041,7 @@ function isHalf2Intrinsic(name: string): boolean {
   return name === "__hadd2" ||
     name === "__hsub2" ||
     name === "__hmul2" ||
+    name === "__hfma2" ||
     name === "__hmin2" ||
     name === "__hmax2";
 }
@@ -1556,7 +1578,9 @@ function validateAtomicBuiltin(
       callName === "atomicAdd_system" ||
       callName === "atomicSub" ||
       callName === "atomicMin" ||
+      callName === "atomicMin_system" ||
       callName === "atomicMax" ||
+      callName === "atomicMax_system" ||
       callName === "atomicMaxFloat" ||
       callName === "atomicExch" ||
       callName === "atomicExch_system"
@@ -1589,16 +1613,24 @@ function isAtomicBuiltin(callName: string): boolean {
     callName === "atomicAdd_system" ||
     callName === "atomicSub" ||
     callName === "atomicMin" ||
+    callName === "atomicMin_system" ||
     callName === "atomicMax" ||
+    callName === "atomicMax_system" ||
     callName === "atomicMaxFloat" ||
     callName === "atomicAnd" ||
+    callName === "atomicAnd_system" ||
     callName === "atomicOr" ||
+    callName === "atomicOr_system" ||
     callName === "atomicXor" ||
+    callName === "atomicXor_system" ||
     callName === "atomicInc" ||
+    callName === "atomicInc_system" ||
     callName === "atomicDec" ||
+    callName === "atomicDec_system" ||
     callName === "atomicExch" ||
     callName === "atomicExch_system" ||
-    callName === "atomicCAS";
+    callName === "atomicCAS" ||
+    callName === "atomicCAS_system";
 }
 
 function isShuffleBuiltin(callName: string): boolean {
@@ -1649,6 +1681,7 @@ function validateNonCallExpression(
   scope: Scope,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
+  requiredFeatures: Set<string>,
 ): ExpressionInfo {
   switch (expression.kind) {
     case "number":
@@ -1761,6 +1794,17 @@ function validateNonCallExpression(
       if ((expression.operator === "+" || expression.operator === "-") && (left.kind === "pointer" || left.kind === "pool-pointer")) {
         validateScalarOperand(right, expression.right.span, diagnostics);
         return left;
+      }
+      if (isVectorArithmeticOperator(expression.operator) && left.kind === "vector" && right.kind === "vector") {
+        if (!left.valueType || !right.valueType || left.valueType !== right.valueType) {
+          diagnostics.push(error("unsupported-vector-argument", "vector arithmetic expects matching CUDA vector types", expression.span));
+          return { kind: "unknown" };
+        }
+        if (cudaVectorScalarType(left.valueType) === "half") requiredFeatures.add("shader-f16");
+        return { kind: "vector", valueType: left.valueType };
+      }
+      if ((expression.operator === "==" || expression.operator === "!=") && pointerComparable(left, right, expression.left, expression.right)) {
+        return { kind: "scalar", valueType: "bool" };
       }
       validateScalarOperand(left, expression.left.span, diagnostics);
       validateScalarOperand(right, expression.right.span, diagnostics);
@@ -1934,6 +1978,31 @@ function validateScalarOperand(
   diagnostics.push(error("unsupported-scalar-expression", "expression must resolve to a scalar value", span));
 }
 
+function pointerComparable(
+  left: ExpressionInfo,
+  right: ExpressionInfo,
+  leftExpression: CudaLiteExpression,
+  rightExpression: CudaLiteExpression,
+): boolean {
+  if (isPointerLikeInfo(left) && isPointerLikeInfo(right)) return true;
+  if (isPointerLikeInfo(left) && isNullPointerLiteral(rightExpression)) return true;
+  return isPointerLikeInfo(right) && isNullPointerLiteral(leftExpression);
+}
+
+function isPointerLikeInfo(info: ExpressionInfo): boolean {
+  if (info.kind === "pointer" || info.kind === "pool-pointer" || info.kind === "address") return true;
+  return info.kind === "scalar" && info.valueType === "voidptr";
+}
+
+function isNullPointerLiteral(expression: CudaLiteExpression): boolean {
+  if (expression.kind === "number") return expression.value === 0;
+  return expression.kind === "identifier" && (expression.name === "nullptr" || expression.name === "NULL");
+}
+
+function isVectorArithmeticOperator(operator: string): boolean {
+  return operator === "+" || operator === "-" || operator === "*" || operator === "/";
+}
+
 function lookupSymbol(name: string, scope: Scope, span: SourceSpan): SymbolInfo | undefined {
   let cursor: Scope | undefined = scope;
   while (cursor) {
@@ -1965,6 +2034,7 @@ function validateExpressionStatement(
   if (!root) return;
   const param = params.get(root);
   if (!param?.pointer) return;
+  if (expression.left.kind === "identifier" && isPointerRebaseOperator(expression.operator)) return;
   if (param.constant) {
     diagnostics.push(error("const-pointer-write", `cannot write through const pointer '${root}'`, expression.span));
   }

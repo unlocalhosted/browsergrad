@@ -1078,8 +1078,11 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       if (expression.operator === "&") return `&${emitExpression(expression.argument, context, "lvalue")}`;
       if (expression.operator === "*") return emitDeref(expression.argument, context);
       return `(${expression.operator}${emitExpression(expression.argument, context)})`;
-    case "binary":
+    case "binary": {
+      const pointerComparison = emitPointerComparison(expression, context);
+      if (pointerComparison) return pointerComparison;
       return `(${emitExpression(expression.left, context)} ${expression.operator} ${emitExpression(expression.right, context)})`;
+    }
     case "conditional":
       return `select(${emitExpression(expression.alternate, context)}, ${emitExpression(expression.consequent, context)}, ${emitExpression(expression.condition, context)})`;
     case "assignment":
@@ -1560,6 +1563,107 @@ function pointerBaseExpression(rootName: string, context: EmitContext): string |
   return base ? `params.${context.nameFor(base)}` : undefined;
 }
 
+interface PointerComparisonTerm {
+  readonly kind: "static" | "token" | "address";
+  readonly value?: string;
+  readonly buffer?: string;
+  readonly base?: string;
+  readonly pointerish: boolean;
+  readonly nullish: boolean;
+  readonly symbol?: string;
+}
+
+function emitPointerComparison(
+  expression: Extract<CudaLiteExpression, { kind: "binary" }>,
+  context: EmitContext,
+): string | undefined {
+  if (expression.operator !== "==" && expression.operator !== "!=") return undefined;
+  const left = pointerComparisonTerm(expression.left, context);
+  const right = pointerComparisonTerm(expression.right, context);
+  if (!left || !right) return undefined;
+  if (!left.pointerish && !right.pointerish && !left.nullish && !right.nullish) return undefined;
+
+  if (left.kind === "static" && right.kind === "static") {
+    const equal = staticPointerTermEqual(left, right);
+    if (equal === undefined) {
+      throw featureError(
+        "unsupported-pointer-pointer-comparison",
+        "WGSL output supports pointer comparison only against NULL/nullptr or the same pointer symbol",
+      );
+    }
+    return expression.operator === "==" ? String(equal) : String(!equal);
+  }
+
+  if (left.kind === "address" && right.kind === "address") {
+    const equal = `((${left.buffer} == ${right.buffer}) && (${left.base} == ${right.base}))`;
+    return expression.operator === "==" ? equal : `(!${equal})`;
+  }
+
+  if (left.kind === "token" && right.kind === "token") {
+    return `(${left.value} ${expression.operator} ${right.value})`;
+  }
+
+  const token = left.kind === "token" ? left : right.kind === "token" ? right : undefined;
+  const address = left.kind === "address" ? left : right.kind === "address" ? right : undefined;
+  const stat = left.kind === "static" ? left : right.kind === "static" ? right : undefined;
+  if (token && stat?.nullish) {
+    return `(${token.value} ${expression.operator} 0u)`;
+  }
+  if (address && stat?.nullish) {
+    return expression.operator === "==" ? "false" : "true";
+  }
+  throw featureError(
+    "unsupported-pointer-pointer-comparison",
+    "WGSL output supports pointer comparison only inside the same pointer address model",
+  );
+}
+
+function staticPointerTermEqual(left: PointerComparisonTerm, right: PointerComparisonTerm): boolean | undefined {
+  if (left.nullish || right.nullish) return left.nullish === right.nullish && left.value === right.value;
+  if (left.symbol && right.symbol && left.symbol === right.symbol) return true;
+  return undefined;
+}
+
+function pointerComparisonTerm(expression: CudaLiteExpression, context: EmitContext): PointerComparisonTerm | undefined {
+  if (expression.kind === "identifier") {
+    if (expression.name === "nullptr") return { kind: "static", value: "null", pointerish: false, nullish: true };
+    const namedConstant = CUDA_NAMED_CONSTANTS.get(expression.name);
+    if (namedConstant?.valueType === "voidptr" && namedConstant.value === 0) {
+      return { kind: "static", value: "null", pointerish: false, nullish: true };
+    }
+    if (context.poolPointerFor(expression.name)) {
+      return { kind: "token", value: emitIdentifier(expression.name, context), pointerish: true, nullish: false, symbol: expression.name };
+    }
+    const localType = context.localValueTypeFor(expression.name);
+    if (localType === "voidptr") {
+      return { kind: "token", value: emitIdentifier(expression.name, context), pointerish: true, nullish: false, symbol: expression.name };
+    }
+  }
+  if (expression.kind === "number" && expression.value === 0) {
+    return { kind: "static", value: "null", pointerish: false, nullish: true };
+  }
+  if (expression.kind === "cast" && expression.pointer) {
+    return pointerComparisonTerm(expression.expression, context);
+  }
+  if (expression.kind === "call") {
+    const pool = poolPointerForAllocationCall(expression);
+    if (pool) return { kind: "token", value: emitCall(expression, context), pointerish: true, nullish: false };
+  }
+  const address = devicePointerArgumentParts(expression, context);
+  if (address) {
+    const symbol = expressionName(expression);
+    return {
+      kind: "address",
+      buffer: address.buffer,
+      base: address.base,
+      pointerish: true,
+      nullish: false,
+      ...(symbol === undefined ? {} : { symbol }),
+    };
+  }
+  return undefined;
+}
+
 function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "value"): string {
   if (name === "nullptr") return "0u";
   const namedConstant = CUDA_NAMED_CONSTANTS.get(name);
@@ -1788,25 +1892,33 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "atomicSub":
       return emitAtomicCall("atomicSub", expression, context, args);
     case "atomicMin":
+    case "atomicMin_system":
       return emitAtomicCall("atomicMin", expression, context, args);
     case "atomicMax":
+    case "atomicMax_system":
       return emitAtomicCall("atomicMax", expression, context, args);
     case "atomicMaxFloat":
       return emitAtomicCall("atomicMax", expression, context, args);
     case "atomicAnd":
+    case "atomicAnd_system":
       return emitAtomicCall("atomicAnd", expression, context, args);
     case "atomicOr":
+    case "atomicOr_system":
       return emitAtomicCall("atomicOr", expression, context, args);
     case "atomicXor":
+    case "atomicXor_system":
       return emitAtomicCall("atomicXor", expression, context, args);
     case "atomicInc":
+    case "atomicInc_system":
       return emitAtomicCall("atomicInc", expression, context, args);
     case "atomicDec":
+    case "atomicDec_system":
       return emitAtomicCall("atomicDec", expression, context, args);
     case "atomicExch":
     case "atomicExch_system":
       return emitAtomicCall("atomicExchange", expression, context, args);
-    case "atomicCAS": {
+    case "atomicCAS":
+    case "atomicCAS_system": {
       const target = expression.args[0];
       const compare = expression.args[1];
       const value = expression.args[2];
@@ -2728,19 +2840,19 @@ function usesFloatAtomicSub(ir: KernelIrModule): boolean {
 
 function usesFloatAtomicMin(ir: KernelIrModule): boolean {
   return ir.params.some((param) => param.pointer && param.valueType === "float" && ir.atomicParams.includes(param.name)) &&
-    (statementsUseCall(ir.body, new Set(["atomicMin"])) ||
-      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMin"]))));
+    (statementsUseCall(ir.body, new Set(["atomicMin", "atomicMin_system"])) ||
+      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMin", "atomicMin_system"]))));
 }
 
 function usesFloatAtomicMax(ir: KernelIrModule): boolean {
   return ir.params.some((param) => param.pointer && param.valueType === "float" && ir.atomicParams.includes(param.name)) &&
-    (statementsUseCall(ir.body, new Set(["atomicMax", "atomicMaxFloat"])) ||
-      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMax", "atomicMaxFloat"]))));
+    (statementsUseCall(ir.body, new Set(["atomicMax", "atomicMax_system", "atomicMaxFloat"])) ||
+      ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMax", "atomicMax_system", "atomicMaxFloat"]))));
 }
 
 function usesAtomicIncDec(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["atomicInc", "atomicDec"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicInc", "atomicDec"])));
+  return statementsUseCall(ir.body, new Set(["atomicInc", "atomicInc_system", "atomicDec", "atomicDec_system"])) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicInc", "atomicInc_system", "atomicDec", "atomicDec_system"])));
 }
 
 function usesCurand(ir: KernelIrModule): boolean {
