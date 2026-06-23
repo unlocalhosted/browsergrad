@@ -32,8 +32,8 @@ const corpora = [
     path: path.join(corpusRoot, "cuda-samples"),
     expectations: {
       total: 357,
-      webgpuMin: 51,
-      hardFailMax: 306,
+      webgpuMin: 62,
+      hardFailMax: 295,
     },
   },
   {

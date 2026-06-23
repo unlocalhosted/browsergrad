@@ -148,7 +148,8 @@ function runtimeOperationForExpression(
     expression.callee.object.kind !== "identifier" ||
     cooperativeGroups.get(expression.callee.object.name) !== "grid"
   ) {
-    return undefined;
+    const group = namespaceSyncGroupName(expression);
+    if (!group || cooperativeGroups.get(group) !== "grid") return undefined;
   }
   return {
     kind: "grid-sync",
@@ -190,11 +191,20 @@ function isGridSyncStatement(
 ): boolean {
   if (statement.kind !== "expr") return false;
   const expression = statement.expression;
+  if (expression.kind !== "call") return false;
+  const namespaceGroup = namespaceSyncGroupName(expression);
+  if (namespaceGroup) return cooperativeGroups.get(namespaceGroup) === "grid";
   return expression.kind === "call" &&
     expression.callee.kind === "member" &&
     expression.callee.property === "sync" &&
     expression.callee.object.kind === "identifier" &&
     cooperativeGroups.get(expression.callee.object.name) === "grid";
+}
+
+function namespaceSyncGroupName(expression: CudaLiteExpression): string | undefined {
+  if (expression.kind !== "call" || expression.callee.kind !== "identifier" || !expression.callee.name.endsWith("::sync")) return undefined;
+  const group = expression.args[0];
+  return group?.kind === "identifier" ? group.name : undefined;
 }
 
 function validateGridSyncPhaseSafety(

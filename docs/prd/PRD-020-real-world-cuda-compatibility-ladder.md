@@ -60,10 +60,11 @@ Repo exploration:
 
 Local corpus audits on 2026-06-23:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `51` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `62` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
-  constexpr intake, and `306` hard gaps. Main
+  constexpr intake plus cooperative-groups namespace call forms, and `295` hard
+  gaps. Main
   failures: parser/frontend gaps, texture/vector types, `clock_t`, `half2`,
   `double`, templates, and runtime library shape.
 - `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `31` direct
@@ -258,7 +259,7 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=51` WebGPU-runnable, and `<=306` hard gaps.
+  `>=62` WebGPU-runnable, and `<=295` hard gaps.
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=31`
   WebGPU-runnable, and `<=117` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
@@ -278,6 +279,9 @@ Acceptance criteria for the first slice:
   local quoted header context in audits, `constexpr` integer expressions in
   array dimensions and template arguments, CUDA `static` kernel qualifiers,
   late `__launch_bounds__` placement, and ignored `static_assert` checks.
+- Cooperative-groups namespace calls parse and lower for `cg::sync(block)`,
+  `cg::sync(grid)` runtime planning, and tile-scoped `cg::reduce(tile, value,
+  cg::plus<T>{})` / `cg::greater<T>{}` forms.
 - Source/context normalization stays generic: no repo-name, file-name, or
   assignment-name branching.
 - At least one broad intrinsic gap from `llm.c` or LeetCUDA lands with parser,

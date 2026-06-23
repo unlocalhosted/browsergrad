@@ -614,6 +614,10 @@ function validateCallExpression(
   options: CudaLiteAnalyzeOptions,
 ): ExpressionInfo {
   const callName = expressionName(expression.callee);
+  const namespaceCooperativeCall = cooperativeNamespaceCall(expression, scope);
+  if (namespaceCooperativeCall) {
+    return validateCooperativeNamespaceCall(expression, namespaceCooperativeCall, requiredFeatures, diagnostics, walkExpression, scope, options);
+  }
   const cooperativeCall = cooperativeGroupCall(expression, scope);
   if (cooperativeCall) {
     return validateCooperativeGroupCall(expression, cooperativeCall, requiredFeatures, diagnostics, walkExpression, scope, options);
@@ -938,6 +942,42 @@ function validateCooperativeGroupCall(
   return { kind: "unknown" };
 }
 
+function validateCooperativeNamespaceCall(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  call: { readonly symbol: SymbolInfo; readonly method: string; readonly groupArg: CudaLiteExpression },
+  requiredFeatures: Set<string>,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+  scope: Scope,
+  options: CudaLiteAnalyzeOptions,
+): ExpressionInfo {
+  const { symbol, method, groupArg } = call;
+  if (method === "sync") {
+    if (expression.args.length !== 1) diagnostics.push(error("invalid-call-arity", "cg::sync expects 1 argument", expression.span));
+    if (symbol.groupKind === "grid") {
+      diagnostics.push({
+        ...error("unsupported-cooperative-groups", "cg::sync(grid) requires explicit runtime orchestration", expression.span),
+        severity: options.referenceGridSync ? "warning" : "error",
+      });
+    }
+    return { kind: "scalar" };
+  }
+  if (method === "reduce") {
+    requiredFeatures.add("subgroups");
+    if (expression.args.length !== 3) diagnostics.push(error("invalid-call-arity", "cg::reduce expects 3 arguments", expression.span));
+    if (symbol.groupKind !== "tile") {
+      diagnostics.push(error("unsupported-cooperative-groups", "cg::reduce currently supports thread_block_tile groups", groupArg.span));
+    }
+    const value = expression.args[1];
+    if (!value) return { kind: "unknown" };
+    const info = walkExpression(value, scope);
+    validateScalarOperand(info, value.span, diagnostics);
+    return { kind: "scalar", valueType: info.valueType };
+  }
+  diagnostics.push(error("unsupported-cooperative-groups", `unsupported cooperative group call 'cg::${method}'`, expression.span));
+  return { kind: "unknown" };
+}
+
 function cooperativeGroupCall(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
   scope: Scope,
@@ -947,6 +987,24 @@ function cooperativeGroupCall(
   const symbol = lookupSymbol(callee.object.name, scope, callee.object.span);
   if (symbol?.kind !== "cooperative-group") return undefined;
   return { symbol, method: callee.property };
+}
+
+function cooperativeNamespaceCall(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  scope: Scope,
+): { readonly symbol: SymbolInfo; readonly method: string; readonly groupArg: CudaLiteExpression } | undefined {
+  const callName = expressionName(expression.callee);
+  const method = callName?.endsWith("::sync")
+    ? "sync"
+    : callName?.endsWith("::reduce")
+      ? "reduce"
+      : undefined;
+  if (!method) return undefined;
+  const groupArg = expression.args[0];
+  if (groupArg?.kind !== "identifier") return undefined;
+  const symbol = lookupSymbol(groupArg.name, scope, groupArg.span);
+  if (symbol?.kind !== "cooperative-group") return undefined;
+  return { symbol, method, groupArg };
 }
 
 function validateTex2D(

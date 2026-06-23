@@ -1367,6 +1367,37 @@ __global__ void tileScan(const float *input, float *output) {
     expect(compiled.wgsl).toContain("workgroupBarrier();");
   });
 
+  it("supports namespace-form cooperative-group sync and tile reduce", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void namespaceTileReduce(const float *input, float *output) {
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_block_tile<8> tile = cg::tiled_partition<8>(block);
+  int rank = tile.thread_rank();
+  float value = input[rank];
+  float sum = cg::reduce(tile, value, cg::plus<float>{});
+  if (rank == 0) { output[0] = sum; }
+  cg::sync(block);
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [8, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          input: new Float32Array(8).fill(1),
+          output: new Float32Array(1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("subgroupAdd(value)");
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+    expect([...result.buffers.output as Float32Array]).toEqual([8]);
+  });
+
   it("allows loop-local variable names to be reused in independent loop scopes", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void scopedLoops(float *x) {

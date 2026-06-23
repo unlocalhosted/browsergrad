@@ -119,6 +119,9 @@ Simple C++ intake accepts scalar/vector `typedef` and `using` aliases,
 arguments, `static` kernel qualifiers, late `__launch_bounds__` placement, and
 `static_assert` statements. This is bounded CUDA/C++ normalization, not full
 C++ template compatibility.
+Cooperative-groups syntax supports both member calls and namespace calls:
+`block.sync()`, `tile.shfl_down(value, offset)`, `cg::sync(block)`, and
+tile-scoped `cg::reduce(tile, value, cg::plus<T>{})` / `cg::greater<T>{}`.
 Common C/CUDA integer spellings are accepted for learner kernels: `signed`,
 `unsigned`, `short`, `long`, `long long`, `size_t`, `int32_t`, `uint32_t`,
 `int64_t`, `uint64_t`, and `uintptr_t`. Current WebGPU lowering maps them onto

@@ -1231,6 +1231,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
 }
 
 function emitCooperativeGroupCall(expression: CudaLiteCallExpression, context: EmitContext): string | undefined {
+  const namespaceCall = emitCooperativeNamespaceCall(expression, context);
+  if (namespaceCall !== undefined) return namespaceCall;
   const callee = expression.callee;
   if (callee.kind !== "member" || callee.object.kind !== "identifier") return undefined;
   const group = context.cooperativeGroupFor(callee.object.name);
@@ -1258,6 +1260,20 @@ function emitCooperativeGroupCall(expression: CudaLiteCallExpression, context: E
     return `${intrinsic}(${value}, u32(${offset}))`;
   }
   return undefined;
+}
+
+function emitCooperativeNamespaceCall(expression: CudaLiteCallExpression, context: EmitContext): string | undefined {
+  const name = expressionName(expression.callee);
+  if (!name?.endsWith("::sync") && !name?.endsWith("::reduce")) return undefined;
+  const groupArg = expression.args[0];
+  if (groupArg?.kind !== "identifier") return undefined;
+  const group = context.cooperativeGroupFor(groupArg.name);
+  if (!group) return undefined;
+  if (name.endsWith("::sync")) return group.groupKind === "grid" ? "0" : "workgroupBarrier()";
+  const value = expression.args[1] ? emitExpression(expression.args[1], context) : "0";
+  const op = expression.args[2] ? expressionName(expression.args[2]) : undefined;
+  if (op?.endsWith("::greater")) return `subgroupMax(${value})`;
+  return `subgroupAdd(${value})`;
 }
 
 function emitLocalLinearRank(context: EmitContext): string {

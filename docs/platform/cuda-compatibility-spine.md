@@ -72,8 +72,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   excludes kernels now runnable on real WebGPU through orchestration; current
   baseline is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=51`
-  WebGPU-runnable, and `<=306` hard gaps;
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=62`
+  WebGPU-runnable, and `<=295` hard gaps;
   `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=31`
   WebGPU-runnable, and `<=117` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=52`
@@ -86,7 +86,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   scalarized CUDA vector storage views for `float2/3/4`, `int2/3/4`, and
   `uint2/3/4`, simple C++ alias and constexpr integer intake, local quoted
   header context for corpus audits, CUDA `static` kernel qualifiers, and
-  late `__launch_bounds__` placement,
+  late `__launch_bounds__` placement, plus cooperative-groups namespace
+  call forms such as `cg::sync(block)` and `cg::reduce(tile, value, op)`,
   positive pointer-offset child launches via generated base-offset uniforms,
   expanded order-stable DevicePool allocation launches, launched `__device__`
   child functions, and conservative host-lifted peer copies through a typed

@@ -375,6 +375,11 @@ class Parser {
       this.consumeNamespaceQualifier();
       const type = this.expectIdentifier("cooperative group type");
       groupKind = type.value === "thread_block" ? "block" : type.value === "grid_group" ? "grid" : "tile";
+      if (type.value === "thread_block_tile") {
+        this.expect("<");
+        tileSize = this.parseTemplateIntegerArgument();
+        this.expect(">");
+      }
       name = this.expectIdentifier("cooperative group variable name");
       if (this.consumeIf("=")) {
         while (!this.match(";")) {
@@ -569,6 +574,11 @@ class Parser {
     }
     let expression = this.parsePrimary();
     while (true) {
+      this.consumeTemplateArgumentsBeforeCall();
+      if (this.match("{")) {
+        this.skipBalanced("{", "}");
+        continue;
+      }
       if (this.consumeIf(".")) {
         const property = this.expectIdentifier("member property");
         expression = {
@@ -616,7 +626,14 @@ class Parser {
       return { kind: "string", value: token.value.slice(1, -1), raw: token.value, span: token.span };
     }
     const ident = this.expectIdentifier("expression");
-    return { kind: "identifier", name: ident.value, span: ident.span };
+    let name = ident.value;
+    let end = ident.span;
+    while (this.consumeIf("::")) {
+      const part = this.expectIdentifier("qualified expression");
+      name += `::${part.value}`;
+      end = part.span;
+    }
+    return { kind: "identifier", name, span: mergeSpans(ident.span, end) };
   }
 
   private parseArgumentList(): readonly CudaLiteExpression[] {
@@ -671,7 +688,9 @@ class Parser {
     }
     return this.peek().kind === "identifier" &&
       this.tokens[this.index + 1]?.value === "::" &&
-      (this.tokens[this.index + 2]?.value === "thread_block" || this.tokens[this.index + 2]?.value === "grid_group");
+      (this.tokens[this.index + 2]?.value === "thread_block" ||
+        this.tokens[this.index + 2]?.value === "grid_group" ||
+        this.tokens[this.index + 2]?.value === "thread_block_tile");
   }
 
   private expectTextureDimension(): Token {
@@ -866,6 +885,36 @@ class Parser {
       if (token.value === open) depth++;
       else if (token.value === close) depth--;
     }
+  }
+
+  private consumeTemplateArgumentsBeforeCall(): void {
+    if (!this.match("<")) return;
+    const endIndex = this.findTemplateArgumentEnd(this.index);
+    if (endIndex === undefined) return;
+    const next = this.tokens[endIndex + 1]?.value;
+    if (next !== "(" && next !== "{") return;
+    this.index = endIndex + 1;
+  }
+
+  private findTemplateArgumentEnd(startIndex: number): number | undefined {
+    let depth = 0;
+    for (let index = startIndex; index < this.tokens.length; index++) {
+      const value = this.tokens[index]?.value;
+      if (value === "<") {
+        depth++;
+        continue;
+      }
+      if (value === ">") {
+        depth--;
+      } else if (value === ">>") {
+        depth -= 2;
+      } else if (value === "<eof>" || value === ";" || value === "{") {
+        return undefined;
+      }
+      if (depth === 0) return index;
+      if (depth < 0) return undefined;
+    }
+    return undefined;
   }
 
   private consumeNamespaceQualifier(): void {

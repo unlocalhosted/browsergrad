@@ -1157,6 +1157,8 @@ function evalCooperativeGroupCall(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
   context: ThreadContext,
 ): number | undefined {
+  const namespaceCall = evalCooperativeNamespaceCall(expression, context);
+  if (namespaceCall !== undefined) return namespaceCall;
   const callee = expression.callee;
   if (callee.kind !== "member" || callee.object.kind !== "identifier") return undefined;
   const value = context.locals.get(callee.object.name);
@@ -1174,6 +1176,29 @@ function evalCooperativeGroupCall(
   }
   if (callee.property === "shfl_down" || callee.property === "shfl_up" || callee.property === "shfl_xor") return valueAsNumber(args[0] ?? 0, "shuffle value");
   return undefined;
+}
+
+function evalCooperativeNamespaceCall(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: ThreadContext,
+): number | undefined {
+  const name = expressionNameForReference(expression.callee);
+  if (!name?.endsWith("::sync") && !name?.endsWith("::reduce")) return undefined;
+  const groupArg = expression.args[0];
+  if (groupArg?.kind !== "identifier") return undefined;
+  const value = context.locals.get(groupArg.name);
+  if (!isCooperativeGroup(value)) return undefined;
+  if (name.endsWith("::sync")) return 0;
+  const reduced = expression.args[1];
+  const item = reduced ? evalNumber(reduced, context) : 0;
+  const op = expression.args[2] ? expressionNameForReference(expression.args[2]) : undefined;
+  if (op?.endsWith("::plus")) {
+    const size = value.groupKind === "tile"
+      ? value.tileSize ?? 32
+      : context.blockDim.x * context.blockDim.y * context.blockDim.z;
+    return item * size;
+  }
+  return item;
 }
 
 function localLinearRank(context: ThreadContext): number {
@@ -1627,6 +1652,13 @@ function isBarrier(expression: CudaLiteExpression): boolean {
 }
 
 function cooperativeSyncKind(expression: CudaLiteExpression, context: ThreadContext): "block" | "grid" | undefined {
+  if (expression.kind === "call" && expressionNameForReference(expression.callee)?.endsWith("::sync")) {
+    const groupArg = expression.args[0];
+    if (groupArg?.kind !== "identifier") return undefined;
+    const group = context.locals.get(groupArg.name);
+    if (!isCooperativeGroup(group)) return undefined;
+    return group.groupKind === "grid" ? "grid" : "block";
+  }
   if (expression.kind !== "call" || expression.callee.kind !== "member" || expression.callee.property !== "sync") return undefined;
   if (expression.callee.object.kind !== "identifier") return undefined;
   const value = context.locals.get(expression.callee.object.name);
