@@ -499,6 +499,12 @@ function execInlineAsm(
   statement: Extract<CudaLiteStatement, { kind: "asm" }>,
   context: ThreadContext,
 ): void {
+  if (/\bmov\.u32\b/u.test(statement.template) && /%%laneid\b/u.test(statement.template)) {
+    if (statement.inputs.length !== 0) throw compilerFailure("laneid inline asm expects no inputs");
+    const target = resolveLValue(statement.output, context);
+    writeLValue(target, localLinearRank(context) % 32, context);
+    return;
+  }
   if (!/\bfma\.rn\.f32\b/u.test(statement.template)) {
     throw compilerFailure("unsupported inline asm template");
   }

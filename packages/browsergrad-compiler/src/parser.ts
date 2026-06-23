@@ -636,11 +636,12 @@ class Parser {
     const template = this.expectString("inline assembly template");
     this.expect(":");
     const output = this.parseAsmOperand();
-    this.expect(":");
     const inputs: CudaLiteExpression[] = [];
-    if (!this.match(")")) {
-      do inputs.push(this.parseAsmOperand());
-      while (this.consumeIf(","));
+    if (this.consumeIf(":")) {
+      if (!this.match(")")) {
+        do inputs.push(this.parseAsmOperand());
+        while (this.consumeIf(","));
+      }
     }
     this.expect(")");
     const end = this.expect(";").span;

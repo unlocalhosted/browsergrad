@@ -549,8 +549,11 @@ function emitInlineAsmStatement(
   statement: Extract<CudaLiteStatement, { kind: "asm" }>,
   context: EmitContext,
 ): string {
+  if (/\bmov\.u32\b/u.test(statement.template) && /%%laneid\b/u.test(statement.template) && statement.inputs.length === 0) {
+    return `${emitExpression(statement.output, context)} = ${emitLocalLinearRank(context)} % 32`;
+  }
   if (!/\bfma\.rn\.f32\b/u.test(statement.template) || statement.inputs.length !== 2) {
-    throw featureError("unsupported-inline-asm", "only fma.rn.f32 inline PTX is supported in WGSL output");
+    throw featureError("unsupported-inline-asm", "only fma.rn.f32 and laneid inline PTX are supported in WGSL output");
   }
   const target = emitExpression(statement.output, context);
   return `${target} = fma(${emitExpression(statement.inputs[0]!, context)}, ${emitExpression(statement.inputs[1]!, context)}, ${target})`;

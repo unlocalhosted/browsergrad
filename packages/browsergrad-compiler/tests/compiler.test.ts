@@ -2311,6 +2311,24 @@ __global__ void asmFma(const float *A, const float *B, float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([18, 35]);
   });
 
+  it("lowers output-only inline PTX lane id statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void laneId(int *out) {
+  int idx = threadIdx.x;
+  unsigned int laneid;
+  asm("mov.u32 %0, %%laneid;" : "=r"(laneid));
+  out[idx] = laneid;
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("% 32");
+    expect([...result.buffers.out as Int32Array]).toEqual([0, 1, 2, 3]);
+  });
+
   it("parses anonymous CUDA lambda kernel bodies", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ (cufftComplex *data, int N) {
