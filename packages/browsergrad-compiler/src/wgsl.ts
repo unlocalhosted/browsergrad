@@ -669,13 +669,23 @@ function emitInlineAsmStatement(
     statement.inputs.length === 0 &&
     statement.output !== undefined
   ) {
-    return `${emitExpression(statement.output, context)} = ${emitLocalLinearRank(context)} % 32`;
+    return `${emitExpression(statement.output, context)} = ${emitInlineU32Output(statement.output, `u32(${emitLocalLinearRank(context)} % 32)`, context)}`;
+  }
+  if (
+    /\bmov\.u32\b/u.test(statement.template) &&
+    /%%lanemask_lt\b/u.test(statement.template) &&
+    statement.inputs.length === 0 &&
+    statement.output !== undefined
+  ) {
+    const lane = `u32(${emitLocalLinearRank(context)} & 31)`;
+    const mask = `select(0u, ((1u << ${lane}) - 1u), ${lane} > 0u)`;
+    return `${emitExpression(statement.output, context)} = ${emitInlineU32Output(statement.output, mask, context)}`;
   }
   if (/\bbfind\.u32\b/u.test(statement.template) && statement.inputs.length === 1 && statement.output !== undefined) {
     return `${emitExpression(statement.output, context)} = (31u - countLeadingZeros(u32(${emitExpression(statement.inputs[0]!, context)})))`;
   }
   if (!/\bfma\.rn\.f32\b/u.test(statement.template) || statement.inputs.length !== 2 || statement.output === undefined) {
-    throw featureError("unsupported-inline-asm", "only fma.rn.f32, laneid, and bfind.u32 inline PTX are supported in WGSL output");
+    throw featureError("unsupported-inline-asm", "only fma.rn.f32, laneid, lanemask_lt, and bfind.u32 inline PTX are supported in WGSL output");
   }
   const target = emitExpression(statement.output, context);
   return `${target} = fma(${emitExpression(statement.inputs[0]!, context)}, ${emitExpression(statement.inputs[1]!, context)}, ${target})`;
@@ -2097,6 +2107,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return `select(0u, 1u, subgroupAny((${args[1] ?? "0"}) != 0))`;
     case "__all_sync":
       return `select(0u, 1u, subgroupAll((${args[1] ?? "0"}) != 0))`;
+    case "__ballot_sync":
+      return `subgroupBallot((${args[1] ?? "0"}) != 0).x`;
     case "tex2D":
     case "tex2DLod":
       if (expression.args.length >= 3 && expression.args[0]?.kind === "identifier") {
@@ -2237,15 +2249,21 @@ function emitCooperativeGroupCall(expression: CudaLiteCallExpression, context: E
     if (group.groupKind !== "tile") return "0";
     return `(${emitLocalLinearRank(context)} / ${group.tileSize ?? 32})`;
   }
-  if (callee.property === "shfl_down" || callee.property === "shfl_up" || callee.property === "shfl_xor") {
+  if (callee.property === "shfl" || callee.property === "shfl_down" || callee.property === "shfl_up" || callee.property === "shfl_xor") {
     const value = expression.args[0] ? emitExpression(expression.args[0], context) : "0";
     const offset = expression.args[1] ? emitExpression(expression.args[1], context) : "0";
-    const intrinsic = callee.property === "shfl_up"
+    const intrinsic = callee.property === "shfl"
+      ? "subgroupShuffle"
+      : callee.property === "shfl_up"
       ? "subgroupShuffleUp"
       : callee.property === "shfl_xor"
         ? "subgroupShuffleXor"
         : "subgroupShuffleDown";
     return `${intrinsic}(${value}, u32(${offset}))`;
+  }
+  if (callee.property === "ballot") {
+    const predicate = expression.args[0] ? emitExpression(expression.args[0], context) : "0";
+    return `subgroupBallot((${predicate}) != 0).x`;
   }
   return undefined;
 }
@@ -2279,6 +2297,12 @@ function emitLocalLinearRank(context: EmitContext): string {
   if (y === 1 && z === 1) return "i32(local_id.x)";
   if (z === 1) return `i32(local_id.x + local_id.y * ${context.ir.workgroupSize[0]}u)`;
   return `i32(local_id.x + local_id.y * ${context.ir.workgroupSize[0]}u + local_id.z * ${context.ir.workgroupSize[0] * context.ir.workgroupSize[1]}u)`;
+}
+
+function emitInlineU32Output(target: CudaLiteExpression, expression: string, context: EmitContext): string {
+  const valueType = expressionValueTypeForEmit(target, context);
+  if (valueType === "int") return `i32(${expression})`;
+  return expression;
 }
 
 function emitAtomicCall(

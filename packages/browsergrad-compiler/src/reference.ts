@@ -507,6 +507,14 @@ function execInlineAsm(
     writeLValue(target, localLinearRank(context) % 32, context);
     return;
   }
+  if (/\bmov\.u32\b/u.test(statement.template) && /%%lanemask_lt\b/u.test(statement.template)) {
+    if (statement.inputs.length !== 0) throw compilerFailure("lanemask_lt inline asm expects no inputs");
+    if (statement.output === undefined) throw compilerFailure("lanemask_lt inline asm expects an output operand");
+    const lane = localLinearRank(context) & 31;
+    const mask = lane === 0 ? 0 : (1 << lane) - 1;
+    writeLValue(resolveLValue(statement.output, context), mask >>> 0, context);
+    return;
+  }
   if (/\bbfind\.u32\b/u.test(statement.template)) {
     if (statement.inputs.length !== 1) throw compilerFailure("bfind.u32 inline asm expects one input");
     if (statement.output === undefined) throw compilerFailure("bfind.u32 inline asm expects an output operand");
@@ -1669,6 +1677,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     case "__any_sync":
     case "__all_sync":
       return truthy(args[1] ?? 0) ? 1 : 0;
+    case "__ballot_sync":
+      return truthy(args[1] ?? 0) ? 1 : 0;
     case "warpReduceSum":
     case "warpReduceMax":
     case "warpReduceMin":
@@ -1792,7 +1802,10 @@ function evalCooperativeGroupCall(
     if (value.groupKind !== "tile") return 0;
     return Math.floor(localLinearRank(context) / (value.tileSize ?? 32));
   }
-  if (callee.property === "shfl_down" || callee.property === "shfl_up" || callee.property === "shfl_xor") return valueAsNumber(args[0] ?? 0, "shuffle value");
+  if (callee.property === "shfl" || callee.property === "shfl_down" || callee.property === "shfl_up" || callee.property === "shfl_xor") {
+    return valueAsNumber(args[0] ?? 0, "shuffle value");
+  }
+  if (callee.property === "ballot") return truthy(args[0] ?? 0) ? 1 : 0;
   return undefined;
 }
 

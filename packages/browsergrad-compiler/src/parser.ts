@@ -560,12 +560,20 @@ class Parser {
       name = this.expectIdentifier("cooperative group variable name");
       this.expect("=");
       this.consumeNamespaceQualifier();
-      this.expect("tiled_partition");
-      this.expect("<");
-      tileSize = this.parseTemplateIntegerArgument();
-      this.expect(">");
-      this.skipBalanced("(", ")");
-      groupKind = "tile";
+      const factory = this.expectIdentifier("cooperative group factory");
+      if (factory.value === "tiled_partition") {
+        this.expect("<");
+        tileSize = this.parseTemplateIntegerArgument();
+        this.expect(">");
+        this.skipBalanced("(", ")");
+        groupKind = "tile";
+      } else if (factory.value === "coalesced_threads") {
+        this.skipBalanced("(", ")");
+        groupKind = "tile";
+        tileSize = 32;
+      } else {
+        this.fail("unsupported cooperative group factory", factory.span);
+      }
     } else {
       if (this.tokens[this.index + 1]?.value === "::") this.consumeNamespaceQualifier();
       const type = this.expectIdentifier("cooperative group type");
@@ -574,6 +582,8 @@ class Parser {
         this.expect("<");
         tileSize = this.parseTemplateIntegerArgument();
         this.expect(">");
+      } else if (type.value === "coalesced_group") {
+        tileSize = 32;
       }
       name = this.expectIdentifier("cooperative group variable name");
       if (this.consumeIf("=")) {
@@ -603,6 +613,8 @@ class Parser {
       this.expect("<");
       tileSize = this.parseTemplateIntegerArgument();
       this.expect(">");
+    } else if (type.value === "coalesced_group") {
+      tileSize = 32;
     }
     return {
       groupKind,
@@ -1064,7 +1076,7 @@ class Parser {
   private startsCooperativeGroupDecl(): boolean {
     if (this.match("auto")) {
       return this.tokens[this.index + 2]?.value === "=" &&
-        this.tokens.slice(this.index + 3, this.index + 8).some((token) => token.value === "tiled_partition");
+        this.tokens.slice(this.index + 3, this.index + 8).some((token) => token.value === "tiled_partition" || token.value === "coalesced_threads");
     }
     return this.startsCooperativeGroupType();
   }
@@ -1073,7 +1085,7 @@ class Parser {
     if (this.tokens[index]?.kind !== "identifier") return false;
     const typeIndex = this.tokens[index + 1]?.value === "::" ? index + 2 : index;
     const type = this.tokens[typeIndex]?.value;
-    return type === "thread_block" || type === "grid_group" || type === "thread_block_tile";
+    return type === "thread_block" || type === "grid_group" || type === "thread_block_tile" || type === "coalesced_group";
   }
 
   private expectTextureDimension(): Token {

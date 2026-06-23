@@ -907,20 +907,24 @@ __global__ void voteKernel(uint *input, uint *out) {
   uint mask = 0xffffffffu;
   out[0] = __any_sync(mask, input[0]);
   out[1] = __all_sync(mask, input[1]);
+  out[2] = __ballot_sync(mask, input[0]);
+  out[3] = __popc(out[2]);
 }`, {
       features: { subgroups: true },
       workgroupSize: [1, 1, 1],
     });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { input: new Uint32Array([7, 0]), out: new Uint32Array(2) } },
+      { buffers: { input: new Uint32Array([7, 0]), out: new Uint32Array(4) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
     expect(compiled.wgsl).toContain("subgroupAny");
     expect(compiled.wgsl).toContain("subgroupAll");
+    expect(compiled.wgsl).toContain("subgroupBallot");
+    expect(compiled.wgsl).toContain("countOneBits");
     expect(compiled.ir.requiredFeatures).toContain("subgroups");
-    expect([...result.buffers.out as Uint32Array]).toEqual([1, 0]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 0, 1, 1]);
   });
 
   it("lowers cooperative-group block and tiled primitives to WebGPU primitives", () => {
@@ -1556,6 +1560,31 @@ __global__ void tileScan(const float *input, float *output) {
     expect(compiled.wgsl).toContain("subgroupShuffleXor(val, u32(2))");
     expect(compiled.wgsl).toContain("(i32(local_id.x + local_id.y * 8u) % 8)");
     expect(compiled.wgsl).toContain("workgroupBarrier();");
+  });
+
+  it("supports coalesced-group ballot, shfl, and popcount primitives", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void coalescedVote(uint *flags, uint *out) {
+  cg::coalesced_group group = cg::coalesced_threads();
+  uint vote = group.ballot(flags[threadIdx.x]);
+  uint first = group.shfl(threadIdx.x, 0);
+  out[threadIdx.x] = __popc(vote) + first;
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [1, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { flags: new Uint32Array([1]), out: new Uint32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("subgroupBallot");
+    expect(compiled.wgsl).toContain("subgroupShuffle");
+    expect(compiled.wgsl).toContain("countOneBits");
+    expect(compiled.ir.requiredFeatures).toContain("subgroups");
+    expect([...result.buffers.out as Uint32Array]).toEqual([1]);
   });
 
   it("supports namespace-form cooperative-group sync and tile reduce", () => {
@@ -2473,6 +2502,24 @@ __global__ void laneId(int *out) {
 
     expect(compiled.wgsl).toContain("% 32");
     expect([...result.buffers.out as Int32Array]).toEqual([0, 1, 2, 3]);
+  });
+
+  it("lowers output-only inline PTX lanemask_lt statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void laneMaskLt(uint *out) {
+  int idx = threadIdx.x;
+  unsigned int mask;
+  asm("mov.u32 %0, %%lanemask_lt;" : "=r"(mask));
+  out[idx] = mask;
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("1u <<");
+    expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 3, 7]);
   });
 
   it("lowers inline PTX bfind.u32 statements", () => {

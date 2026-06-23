@@ -79,6 +79,7 @@ const INTEGER_INTRINSICS = [
     const value = args[0] ?? "0";
     return `select((i32(countTrailingZeros(u32(${value}))) + 1), 0, (u32(${value}) == 0u))`;
   }),
+  intrinsic("__popc", [1, 1], "int", (args) => popCount32(args[0] ?? 0), (args) => `i32(countOneBits(u32(${args[0] ?? "0"})))`),
   intrinsic("__mul24", [2, 2], "int", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0), (args) => `(i32(${args[0] ?? "0"}) * i32(${args[1] ?? "0"}))`),
   intrinsic("__umul24", [2, 2], "uint", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0) >>> 0, (args) => `(u32(${args[0] ?? "0"}) * u32(${args[1] ?? "0"}))`),
   intrinsic("UMUL", [2, 2], "uint", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0) >>> 0, (args) => `(u32(${args[0] ?? "0"}) * u32(${args[1] ?? "0"}))`),
@@ -162,4 +163,11 @@ function orderedCompare(args: readonly number[], compare: (a: number, b: number)
   const a = args[0] ?? 0;
   const b = args[1] ?? 0;
   return !Number.isNaN(a) && !Number.isNaN(b) && compare(a, b) ? 1 : 0;
+}
+
+function popCount32(value: number): number {
+  let bits = Math.trunc(value) >>> 0;
+  bits -= (bits >>> 1) & 0x55555555;
+  bits = (bits & 0x33333333) + ((bits >>> 2) & 0x33333333);
+  return (((bits + (bits >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
 }

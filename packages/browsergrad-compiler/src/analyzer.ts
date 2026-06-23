@@ -45,6 +45,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__shfl_xor_sync", [3, 4]],
   ["__any_sync", [2, 2]],
   ["__all_sync", [2, 2]],
+  ["__ballot_sync", [2, 2]],
   ["warpReduceSum", [1, 1]],
   ["warpReduceMax", [1, 1]],
   ["warpReduceMin", [1, 1]],
@@ -782,9 +783,10 @@ function validateInlineAsmStatement(
 ): void {
   const fma = isInlineAsmFma(statement.template);
   const laneId = isInlineAsmLaneId(statement.template);
+  const laneMaskLt = isInlineAsmLaneMaskLt(statement.template);
   const bfindU32 = isInlineAsmBfindU32(statement.template);
-  if (!fma && !laneId && !bfindU32) {
-    diagnostics.push(error("unsupported-inline-asm", "only fma.rn.f32, laneid, and bfind.u32 inline PTX are supported in CUDA-lite v0", statement.span));
+  if (!fma && !laneId && !laneMaskLt && !bfindU32) {
+    diagnostics.push(error("unsupported-inline-asm", "only fma.rn.f32, laneid, lanemask_lt, and bfind.u32 inline PTX are supported in CUDA-lite v0", statement.span));
   }
   const outputInfo = statement.output === undefined ? undefined : walkExpression(statement.output, scope);
   if (statement.output !== undefined) {
@@ -796,6 +798,15 @@ function validateInlineAsmStatement(
   }
   if (laneId && (statement.output === undefined || statement.inputs.length !== 0)) {
     diagnostics.push(error("invalid-inline-asm-operands", "laneid inline PTX expects no input operands", statement.span));
+  }
+  if (laneId && outputInfo?.valueType !== undefined && outputInfo.valueType !== "uint" && outputInfo.valueType !== "int") {
+    diagnostics.push(error("invalid-inline-asm-operands", "laneid inline PTX writes an integer output operand", statement.output?.span ?? statement.span));
+  }
+  if (laneMaskLt && (statement.output === undefined || statement.inputs.length !== 0)) {
+    diagnostics.push(error("invalid-inline-asm-operands", "lanemask_lt inline PTX expects no input operands", statement.span));
+  }
+  if (laneMaskLt && outputInfo?.valueType !== undefined && outputInfo.valueType !== "uint" && outputInfo.valueType !== "int") {
+    diagnostics.push(error("invalid-inline-asm-operands", "lanemask_lt inline PTX writes an integer output operand", statement.output?.span ?? statement.span));
   }
   if (bfindU32 && (statement.output === undefined || statement.inputs.length !== 1)) {
     diagnostics.push(error("invalid-inline-asm-operands", "bfind.u32 inline PTX expects one input operand", statement.span));
@@ -1364,7 +1375,7 @@ function validateCooperativeGroupCall(
     if (expression.args.length !== 0) diagnostics.push(error("invalid-call-arity", `${method} expects 0 arguments`, expression.span));
     return { kind: "scalar", valueType: "int" };
   }
-  if (method === "shfl_down" || method === "shfl_up" || method === "shfl_xor") {
+  if (method === "shfl" || method === "shfl_down" || method === "shfl_up" || method === "shfl_xor") {
     requiredFeatures.add("subgroups");
     if (expression.args.length !== 2) diagnostics.push(error("invalid-call-arity", `${method} expects 2 arguments`, expression.span));
     let valueType: ValueType | undefined;
@@ -1374,6 +1385,12 @@ function validateCooperativeGroupCall(
       if (index === 0) valueType = info.valueType;
     }
     return { kind: "scalar", valueType };
+  }
+  if (method === "ballot") {
+    requiredFeatures.add("subgroups");
+    if (expression.args.length !== 1) diagnostics.push(error("invalid-call-arity", "ballot expects 1 argument", expression.span));
+    for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return { kind: "scalar", valueType: "uint" };
   }
   diagnostics.push(error("unsupported-cooperative-groups", `unsupported cooperative group method '${method}'`, expression.span));
   for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
@@ -1737,7 +1754,7 @@ function isShuffleBuiltin(callName: string): boolean {
 }
 
 function isVoteBuiltin(callName: string): boolean {
-  return callName === "__any_sync" || callName === "__all_sync";
+  return callName === "__any_sync" || callName === "__all_sync" || callName === "__ballot_sync";
 }
 
 function isWarpReductionBuiltin(callName: string): boolean {
@@ -2255,6 +2272,10 @@ function isInlineAsmFma(template: string): boolean {
 
 function isInlineAsmLaneId(template: string): boolean {
   return /\bmov\.u32\b/u.test(template) && /%%laneid\b/u.test(template);
+}
+
+function isInlineAsmLaneMaskLt(template: string): boolean {
+  return /\bmov\.u32\b/u.test(template) && /%%lanemask_lt\b/u.test(template);
 }
 
 function isInlineAsmBfindU32(template: string): boolean {
