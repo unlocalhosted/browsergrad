@@ -91,10 +91,13 @@ export function emitKernelIrWgsl(
     );
   }
 
-  for (const constant of ir.constants.filter((constant) => constant.dimensions.length > 0)) {
+  for (const constant of ir.constants.filter((constant) => constant.dimensions.length > 0 && constant.init === undefined)) {
     lines.push(
       `@group(0) @binding(${context.bindingFor(constant.name)}) var<storage, read> ${constant.name}: ${emitConstantArrayType(constant)};`,
     );
+  }
+  for (const constant of ir.constants.filter((constant) => constant.init !== undefined)) {
+    lines.push(emitInitializedConstant(constant, context));
   }
 
   for (const texture of textures) {
@@ -324,7 +327,7 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
       binding: offsetBinding,
     });
   }
-  for (const constant of ir.constants.filter((constant) => constant.dimensions.length > 0)) {
+  for (const constant of ir.constants.filter((constant) => constant.dimensions.length > 0 && constant.init === undefined)) {
     const binding = bindings.length;
     bindingByName.set(constant.name, binding);
     bindings.push({
@@ -347,7 +350,7 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
   }
   const uniformScalars = [
     ...ir.params.filter((param) => !param.pointer && !isSurfaceParam(param) && !isTextureParam(param)).map((param) => ({ name: param.name, valueType: param.valueType })),
-    ...ir.constants.filter((constant) => constant.dimensions.length === 0).map((constant) => ({ name: constant.name, valueType: constant.valueType })),
+    ...ir.constants.filter((constant) => constant.dimensions.length === 0 && constant.init === undefined).map((constant) => ({ name: constant.name, valueType: constant.valueType })),
     ...ir.params.filter(isSurfaceParam).flatMap((param) => [
       { name: surfaceWidthField(param.name), valueType: "uint" as const },
       { name: surfaceHeightField(param.name), valueType: "uint" as const },
@@ -1471,6 +1474,12 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return emitAtomicCall("atomicMax", expression, context, args);
     case "atomicMaxFloat":
       return emitAtomicCall("atomicMax", expression, context, args);
+    case "atomicAnd":
+      return emitAtomicCall("atomicAnd", expression, context, args);
+    case "atomicOr":
+      return emitAtomicCall("atomicOr", expression, context, args);
+    case "atomicXor":
+      return emitAtomicCall("atomicXor", expression, context, args);
     case "atomicInc":
       return emitAtomicCall("atomicInc", expression, context, args);
     case "atomicDec":
@@ -1998,6 +2007,27 @@ function emitConstantArrayType(constant: CudaLiteGlobalConstant): string {
     type = `array<${type}, ${constant.dimensions[i]!}>`;
   }
   return type;
+}
+
+function emitInitializedConstant(constant: CudaLiteGlobalConstant, context: EmitContext): string {
+  if (!constant.init) throw featureError("invalid-constant-initializer", `constant '${constant.name}' has no initializer`);
+  if (constant.dimensions.length === 0) {
+    return `const ${constant.name}: ${wgslScalar(constant.valueType)} = ${emitConstantInitializerExpression(constant.init, context)};`;
+  }
+  const type = emitConstantArrayType(constant);
+  const total = constant.dimensions.reduce((product, dimension) => product * dimension, 1);
+  const values = flattenInitializerExpressions(constant.init)
+    .slice(0, total)
+    .map((expression) => emitConstantInitializerExpression(expression, context));
+  while (values.length < total) values.push(zeroValue(constant.valueType));
+  return `const ${constant.name}: ${type} = ${type}(${values.join(", ")});`;
+}
+
+function emitConstantInitializerExpression(expression: CudaLiteExpression, context: EmitContext): string {
+  if (expression.kind === "initializer") {
+    throw featureError("invalid-constant-initializer", "nested constant initializer must be flattened before WGSL emission");
+  }
+  return emitExpression(expression, context);
 }
 
 function emitTextureHelper(name: string): string[] {

@@ -54,6 +54,7 @@ const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("unsupported-local-array-init", "memory", "Local array initializers", "unsupported", false, true, "Local array initializer lowering not modeled yet."),
   feature("unsupported-local-pointer", "memory", "Local pointer aliases", "unsupported", false, true, "Future pointer alias lowering into modeled memory."),
   feature("invalid-array-dimension", "memory", "Invalid array dimension", "unsupported", false, false, "Requires positive constant dimensions."),
+  feature("invalid-constant-initializer", "memory", "Invalid constant initializer", "unsupported", false, false, "Constant memory initializers must be numeric constants."),
   feature("unguarded-write", "safety", "Unguarded pointer write", "native", true, true, "Compiler warning; launch/rubric may enforce bounds discipline."),
   feature("unsupported-constant-memory", "memory", "Constant memory", "unsupported", false, true, "Future readonly binding lowering."),
   feature("unsupported-texture", "texture", "Texture/surface access", "unsupported", false, true, "Future texture binding lowering."),

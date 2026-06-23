@@ -156,9 +156,18 @@ class Parser {
     const valueType = this.parseType();
     const name = this.expectIdentifier("constant name");
     const dimensions: number[] = [];
+    let inferredArrayDimension = false;
     while (this.consumeIf("[")) {
       if (!this.match("]")) dimensions.push(this.parseArrayDimension());
+      else inferredArrayDimension = true;
       this.expect("]");
+    }
+    const init = this.consumeIf("=")
+      ? this.parseInitializerExpression(valueType, inferredArrayDimension && dimensions.length === 0 ? [1] : dimensions)
+      : undefined;
+    if (inferredArrayDimension) {
+      if (!init) this.fail("unsized constant arrays require an initializer", name.span);
+      dimensions.push(flattenInitializerExpressions(init).length);
     }
     const end = this.expect(";").span;
     return {
@@ -166,6 +175,7 @@ class Parser {
       valueType,
       name: name.value,
       dimensions,
+      ...(init === undefined ? {} : { init }),
       span: mergeSpans(start, end),
     };
   }
@@ -1247,4 +1257,9 @@ function evaluateIntegerConstantExpression(
     default:
       return undefined;
   }
+}
+
+function flattenInitializerExpressions(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
+  if (expression.kind !== "initializer") return [expression];
+  return expression.elements.flatMap((element) => flattenInitializerExpressions(element));
 }

@@ -745,7 +745,7 @@ export function packCudaWebGpuUniformParams(
 ): Uint8Array {
   const scalarParams = [
     ...compiled.ir.params.filter((param) => !param.pointer && param.valueType !== "surface2d" && param.valueType !== "texture2d"),
-    ...compiled.ir.constants.filter((constant) => constant.dimensions.length === 0),
+    ...compiled.ir.constants.filter((constant) => constant.dimensions.length === 0 && constant.init === undefined),
     ...compiled.ir.params.filter((param) => param.valueType === "surface2d").flatMap((param) => [
       { name: `${param.name}_width`, valueType: "uint" as const, surface: param.name, span: param.span },
       { name: `${param.name}_height`, valueType: "uint" as const, surface: param.name, span: param.span },
@@ -882,7 +882,7 @@ function constantBufferInputs(
   input: CompiledKernelInput,
 ): Record<string, WgslTypedArray> {
   const out: Record<string, WgslTypedArray> = {};
-  for (const constant of compiled.ir.constants.filter((item) => item.dimensions.length > 0)) {
+  for (const constant of compiled.ir.constants.filter((item) => item.dimensions.length > 0 && item.init === undefined)) {
     const value = input.constants?.[constant.name];
     if (!value || typeof value === "number") {
       throw new CudaLiteCompilerError(`missing constant buffer '${constant.name}'`, [{

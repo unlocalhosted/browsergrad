@@ -63,6 +63,9 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["atomicMin", [2, 2]],
   ["atomicMax", [2, 2]],
   ["atomicMaxFloat", [2, 2]],
+  ["atomicAnd", [2, 2]],
+  ["atomicOr", [2, 2]],
+  ["atomicXor", [2, 2]],
   ["atomicInc", [2, 2]],
   ["atomicDec", [2, 2]],
   ["atomicExch", [2, 2]],
@@ -242,6 +245,10 @@ export function analyzeCudaLite(
     }
     return validateNonCallExpression(expression, scope, diagnostics, walkExpression);
   };
+
+  for (const constant of ast.constants) {
+    validateGlobalConstantInitializer(constant, rootScope, diagnostics, walkExpression);
+  }
 
   const walkStatements = (
     statements: readonly CudaLiteStatement[],
@@ -552,6 +559,24 @@ function declareConstant(
       diagnostics.push(error("invalid-array-dimension", "array dimensions must be positive integer literals", constant.span));
     }
   }
+}
+
+function validateGlobalConstantInitializer(
+  constant: CudaLiteGlobalConstant,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  if (!constant.init) return;
+  const values = flattenInitializerExpressions(constant.init);
+  if (constant.dimensions.length === 0 && values.length > 1) {
+    diagnostics.push(error("invalid-constant-initializer", `constant '${constant.name}' scalar initializer must have one value`, constant.init.span));
+  }
+  const expected = constant.dimensions.reduce((product, dimension) => product * dimension, 1);
+  if (constant.dimensions.length > 0 && values.length > expected) {
+    diagnostics.push(error("invalid-constant-initializer", `constant '${constant.name}' initializer has more than ${expected} values`, constant.init.span));
+  }
+  for (const value of values) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
 }
 
 function declareTexture(
@@ -1479,6 +1504,9 @@ function isAtomicBuiltin(callName: string): boolean {
     callName === "atomicMin" ||
     callName === "atomicMax" ||
     callName === "atomicMaxFloat" ||
+    callName === "atomicAnd" ||
+    callName === "atomicOr" ||
+    callName === "atomicXor" ||
     callName === "atomicInc" ||
     callName === "atomicDec" ||
     callName === "atomicExch" ||

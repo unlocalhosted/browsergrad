@@ -69,6 +69,7 @@ export interface CudaLiteGlobalConstant {
   readonly valueType: Exclude<CudaLiteScalarType, "void">;
   readonly name: string;
   readonly dimensions: readonly number[];
+  readonly init?: CudaLiteExpression;
   readonly span: SourceSpan;
 }
 

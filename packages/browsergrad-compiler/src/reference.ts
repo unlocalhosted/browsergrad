@@ -24,6 +24,7 @@ import {
   type CudaLiteCooperativeGroupDecl,
   type CudaLiteDeviceFunction,
   type CudaLiteExpression,
+  type CudaLiteGlobalConstant,
   type CudaLiteKernel,
   type CudaLiteScalarType,
   type CudaLiteStatement,
@@ -142,6 +143,11 @@ export function runCompiledKernelReference(
   validateInputs(compiled, input);
   const buffers = cloneBuffers(input.buffers);
   const constants = cloneConstants(input.constants ?? {});
+  for (const constant of compiled.ir.constants) {
+    if (constant.init !== undefined && !constants.has(constant.name)) {
+      constants.set(constant.name, constantInitialValue(constant));
+    }
+  }
   const constantDimensions = new Map(compiled.ir.constants.map((constant) => [constant.name, constant.dimensions]));
   const textures = input.textures ?? {};
   const surfaces = cloneSurfaces(input.surfaces ?? {});
@@ -1142,6 +1148,15 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (name === "atomicMax" || name === "atomicMaxFloat") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => Math.max(current, value));
   }
+  if (name === "atomicAnd") {
+    return evalAtomicReadModifyWrite(expression, context, (current, value) => Math.trunc(current) & Math.trunc(value));
+  }
+  if (name === "atomicOr") {
+    return evalAtomicReadModifyWrite(expression, context, (current, value) => Math.trunc(current) | Math.trunc(value));
+  }
+  if (name === "atomicXor") {
+    return evalAtomicReadModifyWrite(expression, context, (current, value) => Math.trunc(current) ^ Math.trunc(value));
+  }
   if (name === "atomicInc") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => {
       const old = current >>> 0;
@@ -2008,6 +2023,98 @@ function cloneConstants(
   return out;
 }
 
+function constantInitialValue(constant: CudaLiteGlobalConstant): number | WgslTypedArray {
+  if (!constant.init) throw compilerFailure(`constant '${constant.name}' has no initializer`);
+  const values = flattenConstantInitializer(constant.init).map(evaluateConstantNumber);
+  if (constant.dimensions.length === 0) return values[0] ?? 0;
+  const total = constant.dimensions.reduce((product, dimension) => product * dimension, 1);
+  const padded = Array.from({ length: total }, (_, index) => values[index] ?? 0);
+  if (constant.valueType === "int") return Int32Array.from(padded.map((value) => Math.trunc(value)));
+  if (constant.valueType === "uint" || constant.valueType === "bool" || constant.valueType === "voidptr") {
+    return Uint32Array.from(padded.map((value) => Math.trunc(value) >>> 0));
+  }
+  if (constant.valueType === "half") return createWgslFloat16Array(padded);
+  if (constant.valueType === "float") return Float32Array.from(padded);
+  if (constant.valueType === "complex64") return Float32Array.from(padded);
+  return Float32Array.from(padded);
+}
+
+function flattenConstantInitializer(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
+  if (expression.kind !== "initializer") return [expression];
+  return expression.elements.flatMap((element) => flattenConstantInitializer(element));
+}
+
+function evaluateConstantNumber(expression: CudaLiteExpression): number {
+  switch (expression.kind) {
+    case "number":
+      return expression.value;
+    case "identifier": {
+      const named = CUDA_NAMED_CONSTANTS.get(expression.name);
+      if (named) return named.value;
+      throw compilerFailure(`constant initializer unknown symbol '${expression.name}'`);
+    }
+    case "cast":
+      return valueAsNumber(castNumber(expression.valueType, evaluateConstantNumber(expression.expression)), "constant initializer");
+    case "unary": {
+      const value = evaluateConstantNumber(expression.argument);
+      if (expression.operator === "-") return -value;
+      if (expression.operator === "+") return value;
+      return truthy(value) ? 0 : 1;
+    }
+    case "binary":
+      return evalConstantBinary(expression.operator, evaluateConstantNumber(expression.left), evaluateConstantNumber(expression.right));
+    case "conditional":
+      return truthy(evaluateConstantNumber(expression.condition))
+        ? evaluateConstantNumber(expression.consequent)
+        : evaluateConstantNumber(expression.alternate);
+    default:
+      throw compilerFailure("constant initializer must be a numeric constant expression");
+  }
+}
+
+function evalConstantBinary(operator: string, left: number, right: number): number {
+  switch (operator) {
+    case "+":
+      return left + right;
+    case "-":
+      return left - right;
+    case "*":
+      return left * right;
+    case "/":
+      return right === 0 ? 0 : left / right;
+    case "%":
+      return right === 0 ? 0 : left % right;
+    case "<<":
+      return Math.trunc(left) << Math.trunc(right);
+    case ">>":
+      return Math.trunc(left) >> Math.trunc(right);
+    case "&":
+      return Math.trunc(left) & Math.trunc(right);
+    case "^":
+      return Math.trunc(left) ^ Math.trunc(right);
+    case "|":
+      return Math.trunc(left) | Math.trunc(right);
+    case "<":
+      return left < right ? 1 : 0;
+    case "<=":
+      return left <= right ? 1 : 0;
+    case ">":
+      return left > right ? 1 : 0;
+    case ">=":
+      return left >= right ? 1 : 0;
+    case "==":
+      return left === right ? 1 : 0;
+    case "!=":
+      return left !== right ? 1 : 0;
+    case "&&":
+      return truthy(left) && truthy(right) ? 1 : 0;
+    case "||":
+      return truthy(left) || truthy(right) ? 1 : 0;
+    default:
+      throw compilerFailure(`unsupported constant initializer operator '${operator}'`);
+  }
+}
+
 function cloneTypedArray<T extends WgslTypedArray>(value: T): T {
   return value.slice() as T;
 }
@@ -2294,6 +2401,7 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
     }
   }
   for (const constant of compiled.ir.constants) {
+    if (constant.init !== undefined) continue;
     const value = input.constants?.[constant.name];
     if (value === undefined) throw compilerFailure(`missing constant input '${constant.name}'`);
     if (constant.dimensions.length === 0) {

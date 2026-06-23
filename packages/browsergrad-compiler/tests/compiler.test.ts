@@ -3177,6 +3177,36 @@ __global__ void apply(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([20, 80]);
   });
 
+  it("embeds initialized CUDA constant memory", () => {
+    const compiled = compileCudaLiteKernel(`
+__constant__ float scale = 0.5f;
+__constant__ short coeffs[] = {2, 3, 5};
+__global__ void apply(float *x, int *out) {
+  int idx = threadIdx.x;
+  if (idx < 3) {
+    x[idx] = x[idx] * scale;
+    out[idx] = coeffs[idx];
+  }
+}`, { workgroupSize: [3, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { x: new Float32Array([4, 8, 12]), out: new Int32Array(3) },
+      },
+      { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
+    );
+
+    expect(compiled.ir.constants.map((constant) => [constant.name, constant.dimensions])).toEqual([
+      ["scale", []],
+      ["coeffs", [3]],
+    ]);
+    expect(compiled.wgsl).toContain("const scale: f32 = 0.5;");
+    expect(compiled.wgsl).toContain("const coeffs: array<i32, 3> = array<i32, 3>(2, 3, 5);");
+    expect(compiled.wgslProgram.bindings.map((binding) => binding.name)).not.toContain("coeffs");
+    expect([...result.buffers.x as Float32Array]).toEqual([2, 4, 6]);
+    expect([...result.buffers.out as Int32Array]).toEqual([2, 3, 5]);
+  });
+
   it("lowers CUDA texture references and tex2D reads", () => {
     const compiled = compileCudaLiteKernel(`
 texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
@@ -3521,26 +3551,32 @@ __global__ void atomic_more(int* x, int* out) {
     out[2] = atomicMax(&x[1], 5);
     out[3] = atomicMin(&x[1], 3);
     out[4] = atomicSub(&x[1], 1);
+    out[5] = atomicAnd(&x[2], 0x6);
+    out[6] = atomicOr(&x[2], 0x8);
+    out[7] = atomicXor(&x[2], 0x3);
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
       {
         buffers: {
-          x: new Int32Array([2, 4]),
-          out: new Int32Array(5),
+          x: new Int32Array([2, 4, 7]),
+          out: new Int32Array(8),
         },
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect([...result.buffers.x as Int32Array]).toEqual([9, 2]);
-    expect([...result.buffers.out as Int32Array]).toEqual([2, 7, 4, 5, 3]);
+    expect([...result.buffers.x as Int32Array]).toEqual([9, 2, 13]);
+    expect([...result.buffers.out as Int32Array]).toEqual([2, 7, 4, 5, 3, 7, 6, 14]);
     expect(compiled.wgsl).toContain("atomicExchange(&x[0], 7)");
     expect(compiled.wgsl).toContain("atomicCompareExchangeWeak(&x[0], 7, 9).old_value");
     expect(compiled.wgsl).toContain("atomicMax(&x[1], 5)");
     expect(compiled.wgsl).toContain("atomicMin(&x[1], 3)");
     expect(compiled.wgsl).toContain("atomicSub(&x[1], 1)");
+    expect(compiled.wgsl).toContain("atomicAnd(&x[2], 0x6)");
+    expect(compiled.wgsl).toContain("atomicOr(&x[2], 0x8)");
+    expect(compiled.wgsl).toContain("atomicXor(&x[2], 0x3)");
   });
 
   it("supports CUDA atomic inc/dec and atomics through pointer aliases", () => {
