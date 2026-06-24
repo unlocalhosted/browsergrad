@@ -4735,6 +4735,53 @@ __global__ void apply(float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([7]);
   });
 
+  it("supports local read pointers into CUDA constant arrays", () => {
+    const compiled = compileCudaLiteKernel(`
+__constant__ uint table[2][2];
+__global__ void apply(uint *out) {
+  uint *row = &table[threadIdx.y][0];
+  out[threadIdx.x] = row[threadIdx.x];
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Uint32Array(2) },
+        constants: { table: new Uint32Array([3, 5, 7, 11]) },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<storage, read> table: array<array<u32, 2>, 2>;");
+    expect(compiled.wgsl).toContain("var row_buffer: u32 = 1u;");
+    expect(compiled.wgsl).toContain("var row_base: u32 = ((u32(i32(local_id.y)) * 2u) + u32(0));");
+    expect([...result.buffers.out as Uint32Array]).toEqual([3, 5]);
+
+    const oneDimensional = compileCudaLiteKernel(`
+__constant__ uint coeffs[2];
+__global__ void one_dim(uint *out) {
+  uint *row = &coeffs[0];
+  out[threadIdx.x] = row[threadIdx.x];
+}`, { workgroupSize: [2, 1, 1] });
+    const oneDimensionalResult = runCompiledKernelReference(
+      oneDimensional,
+      {
+        buffers: { out: new Uint32Array(2) },
+        constants: { coeffs: new Uint32Array([13, 17]) },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    expect(oneDimensional.wgsl).toContain("var row_base: u32 = u32(0);");
+    expect([...oneDimensionalResult.buffers.out as Uint32Array]).toEqual([13, 17]);
+
+    const write = analyzeCudaLite(parseCudaLite(`
+__constant__ uint table[2][2];
+__global__ void bad() {
+  uint *row = &table[threadIdx.y][0];
+  row[threadIdx.x] = 1u;
+}`));
+    expect(write.diagnostics.map((diagnostic) => diagnostic.code)).toContain("const-pointer-write");
+  });
+
   it("rejects CUDA constant array decay to writable device pointer arguments", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __constant__ float coeffs[3];
@@ -5791,7 +5838,8 @@ __global__ void address_math(uint* out, int n) {
 
     expect([...result.buffers.out as Uint32Array]).toEqual([5, 4, 3]);
     expect(compiled.wgsl).toContain("(((params.n + 4) - 1) / 4)");
-    expect(compiled.wgsl).toContain("out[1] = u32((0u + u32(4)))");
+    expect(compiled.wgsl).toContain("var tile_base: u32 = u32(4);");
+    expect(compiled.wgsl).toContain("out[1] = u32(tile_base);");
     expect(compiled.wgsl).toContain("regs[fill_regs_0][fill_regs_1] = 3.0;");
   });
 

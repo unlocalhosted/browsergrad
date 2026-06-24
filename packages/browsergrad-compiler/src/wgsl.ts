@@ -490,7 +490,8 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
   ];
   const uniformScalarNames = new Set(uniformScalars.map((scalar) => scalar.name));
   const uniformScalarTypes = new Map(uniformScalars.map((scalar) => [scalar.name, scalar.valueType] as const));
-  const localPointerHandles = collectLocalPointerHandles(ir.body);
+  const structuredPointerRoots = structuredPointerHandleRoots(ir);
+  const localPointerHandles = collectLocalPointerHandles(ir.body, undefined, structuredPointerRoots);
   const pointerAliases = collectPointerAliases(ir.body, new Set(localPointerHandles.keys()));
   const mutablePointerBases = collectMutableStoragePointerBases(
     ir.body,
@@ -612,6 +613,7 @@ function collectWgslDeclaredNames(
   localNames: ReadonlySet<string>,
   externalPoolNames: readonly string[],
 ): readonly string[] {
+  const structuredPointerRoots = structuredPointerHandleRoots(ir);
   return [
     ir.name,
     ...ir.params.map((param) => param.name),
@@ -624,17 +626,20 @@ function collectWgslDeclaredNames(
       ...fn.params.map((param) => param.name),
       ...collectCooperativeGroupGeneratedNames(fn.params),
       ...collectLocalNames(fn.body),
-      ...collectLocalPointerHandleGeneratedNames(fn.body),
+      ...collectLocalPointerHandleGeneratedNames(fn.body, structuredPointerRoots),
     ]),
     ...localNames,
-    ...collectLocalPointerHandleGeneratedNames(ir.body),
+    ...collectLocalPointerHandleGeneratedNames(ir.body, structuredPointerRoots),
     ...externalPoolNames,
     ...externalPoolNames.flatMap((name) => [poolDataName(name), poolOffsetName(name)]),
   ];
 }
 
-function collectLocalPointerHandleGeneratedNames(statements: readonly CudaLiteStatement[]): readonly string[] {
-  return [...collectLocalPointerHandles(statements).keys()].flatMap((name) => [`${name}_buffer`, `${name}_base`]);
+function collectLocalPointerHandleGeneratedNames(
+  statements: readonly CudaLiteStatement[],
+  structuredPointerRoots: ReadonlySet<string> = new Set(),
+): readonly string[] {
+  return [...collectLocalPointerHandles(statements, undefined, structuredPointerRoots).keys()].flatMap((name) => [`${name}_buffer`, `${name}_base`]);
 }
 
 function collectCooperativeGroupGeneratedNames(params: readonly CudaLiteParam[]): readonly string[] {
@@ -910,7 +915,7 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
   const functionPointerParams = new Set(fn.params
     .filter((param) => param.pointer && usesFunctionLocalPointerParam(fn, param, context.ir))
     .map((param) => param.name));
-  const functionLocalPointerHandles = collectLocalPointerHandles(fn.body);
+  const functionLocalPointerHandles = collectLocalPointerHandles(fn.body, undefined, structuredPointerHandleRoots(context.ir));
   const functionContext = withDevicePointerParams(
     {
       ...context,
@@ -1614,6 +1619,8 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
     if (global) return global;
     const shared = sharedPointerArgumentParts(expression.argument, context);
     if (shared) return shared;
+    const constant = constantPointerArgumentParts(expression.argument, context);
+    if (constant) return constant;
     const target = devicePointerArgumentParts(expression.argument.target, context);
     if (!target) return undefined;
     return {
@@ -1626,6 +1633,8 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
     if (sharedId !== undefined) return { buffer: `${sharedId}u`, base: "0u" };
     const globalId = context.deviceGlobalPointerIdFor(expression.argument.name);
     if (globalId !== undefined) return { buffer: `${globalId}u`, base: "0u" };
+    const constantId = context.constantPointerIdFor(expression.argument.name);
+    if (constantId !== undefined) return { buffer: `${constantId}u`, base: "0u" };
   }
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
     const target = devicePointerArgumentParts(expression.left, context);
@@ -1639,6 +1648,28 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
     };
   }
   return undefined;
+}
+
+function constantPointerArgumentParts(expression: CudaLiteExpression, context: EmitContext): DevicePointerParts | undefined {
+  const indexes: CudaLiteExpression[] = [];
+  let cursor = expression;
+  while (cursor.kind === "index") {
+    indexes.unshift(cursor.index);
+    cursor = cursor.target;
+  }
+  if (cursor.kind !== "identifier") return undefined;
+  const id = context.constantPointerIdFor(cursor.name);
+  if (id === undefined) return undefined;
+  const constant = context.ir.constants.find((item) => item.name === cursor.name);
+  if (!constant) return undefined;
+  if (indexes.length === 0) return { buffer: `${id}u`, base: "0u" };
+  const dimensions = constant.dimensions.length === 0 ? [1] : constant.dimensions;
+  const terms = indexes.map((index, axis) => {
+    const stride = dimensions.slice(axis + 1).reduce((product, dimension) => product * dimension, 1);
+    const value = `u32(${emitExpression(index, context)})`;
+    return stride === 1 ? value : `(${value} * ${stride}u)`;
+  });
+  return { buffer: `${id}u`, base: terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})` };
 }
 
 function sharedPointerArgumentParts(expression: CudaLiteExpression, context: EmitContext): DevicePointerParts | undefined {
@@ -2339,12 +2370,21 @@ function emitLocalArrayFill(
   return lines;
 }
 
-function collectLocalPointerHandles(statements: readonly CudaLiteStatement[]): ReadonlyMap<string, CudaLiteVarDecl> {
+function collectLocalPointerHandles(
+  statements: readonly CudaLiteStatement[],
+  poolPointers: ReadonlyMap<string, PoolPointerAlias> = collectPoolPointers(statements),
+  structuredPointerRoots: ReadonlySet<string> = new Set(),
+): ReadonlyMap<string, CudaLiteVarDecl> {
   const mutableNames = collectMutableLocalPointerNames(statements);
   const handles = new Map<string, CudaLiteVarDecl>();
+  const needsHandle = (statement: CudaLiteVarDecl): boolean =>
+    statement.pointer &&
+    statement.storage === "local" &&
+    !poolPointers.has(statement.name) &&
+    (mutableNames.has(statement.name) || needsStructuredAddressHandle(statement.init, structuredPointerRoots));
   const walk = (items: readonly CudaLiteStatement[]): void => {
     for (const item of items) {
-      if (item.kind === "var" && item.pointer && item.storage === "local" && mutableNames.has(item.name)) {
+      if (item.kind === "var" && needsHandle(item)) {
         handles.set(item.name, item);
       }
       if (item.kind === "if") {
@@ -2352,7 +2392,7 @@ function collectLocalPointerHandles(statements: readonly CudaLiteStatement[]): R
         if (item.alternate) walk(item.alternate);
       }
       if (item.kind === "for") {
-        if (item.init?.kind === "var" && item.init.pointer && item.init.storage === "local" && mutableNames.has(item.init.name)) {
+        if (item.init?.kind === "var" && needsHandle(item.init)) {
           handles.set(item.init.name, item.init);
         }
         walk(item.body);
@@ -2362,6 +2402,30 @@ function collectLocalPointerHandles(statements: readonly CudaLiteStatement[]): R
   };
   walk(statements);
   return handles;
+}
+
+function structuredPointerHandleRoots(ir: KernelIrModule): ReadonlySet<string> {
+  return new Set([
+    ...ir.constants.map((constant) => constant.name),
+    ...ir.deviceGlobals.map((global) => global.name),
+    ...ir.sharedDeclarations.map((shared) => shared.name),
+  ]);
+}
+
+function needsStructuredAddressHandle(
+  expression: CudaLiteExpression | undefined,
+  structuredPointerRoots: ReadonlySet<string>,
+): boolean {
+  if (!expression) return false;
+  if (expression.kind === "cast" && expression.pointer) return needsStructuredAddressHandle(expression.expression, structuredPointerRoots);
+  if (expression.kind !== "unary" || expression.operator !== "&") return false;
+  let depth = 0;
+  let cursor = expression.argument;
+  while (cursor.kind === "index") {
+    depth++;
+    cursor = cursor.target;
+  }
+  return depth > 0 && cursor.kind === "identifier" && structuredPointerRoots.has(cursor.name);
 }
 
 function collectMutableLocalPointerNames(statements: readonly CudaLiteStatement[]): ReadonlySet<string> {

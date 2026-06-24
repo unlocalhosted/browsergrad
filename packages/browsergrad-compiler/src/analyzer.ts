@@ -1034,7 +1034,7 @@ function validatePointerInitializerExpression(
     return;
   }
   if (expression.kind === "unary" && expression.operator === "&") {
-    validateLValueExpression(expression.argument, scope, diagnostics, walkExpression);
+    validateAddressOfExpression(expression.argument, scope, diagnostics, walkExpression);
     return;
   }
   if (expression.kind === "identifier") {
@@ -2792,8 +2792,9 @@ function validateLValueExpression(
     const info = walkExpression(expression, scope);
     const root = rootIdentifier(expression);
     const symbol = root ? lookupSymbol(root, scope, expression.span) : undefined;
-    if (symbol?.kind === "constant") {
-      diagnostics.push(error("const-pointer-write", `cannot write to constant memory '${root}'`, expression.span));
+    const rootTarget = symbol?.pointerRoot ? lookupSymbol(symbol.pointerRoot, scope, expression.span) : symbol;
+    if (rootTarget?.kind === "constant") {
+      diagnostics.push(error("const-pointer-write", `cannot write to constant memory '${symbol?.pointerRoot ?? root}'`, expression.span));
       return;
     }
     if (symbol?.pointer && symbol.constant) {
@@ -2828,6 +2829,11 @@ function validateLValueExpression(
     }
     const root = rootIdentifier(expression);
     const symbol = root ? lookupSymbol(root, scope, expression.span) : undefined;
+    const rootTarget = symbol?.pointerRoot ? lookupSymbol(symbol.pointerRoot, scope, expression.span) : symbol;
+    if (rootTarget?.kind === "constant") {
+      diagnostics.push(error("const-pointer-write", `cannot write to constant memory '${symbol?.pointerRoot ?? root}'`, expression.span));
+      return;
+    }
     if (symbol?.pointer && symbol.constant) {
       diagnostics.push(error("const-pointer-write", `cannot write through const pointer '${root}'`, expression.span));
     }

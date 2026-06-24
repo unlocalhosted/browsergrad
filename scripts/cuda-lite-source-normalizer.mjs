@@ -532,7 +532,7 @@ function trailingDeclaratorName(declaration) {
     .replace(/=[\s\S]*$/u, "")
     .replace(/;\s*$/u, "")
     .trim();
-  return /(?:^|[\s*&])([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[[^\]]*\])?\s*$/u.exec(withoutInitializer)?.[1];
+  return /(?:^|[\s*&])([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[[^\]]*\])*\s*$/u.exec(withoutInitializer)?.[1];
 }
 
 function isMacroIdentifier(name) {

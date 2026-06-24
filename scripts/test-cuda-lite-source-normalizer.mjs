@@ -1865,4 +1865,20 @@ __global__ void ignore_unused_context(uint* out) {
   assert.doesNotMatch(source, /unusedTexture/u);
 }
 
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void reachable_constant_table(uint* out) {
+  uint *row = &c_Table[threadIdx.y][0];
+  out[0] = row[threadIdx.x];
+}`,
+    constantDeclarations: [
+      "__constant__ unsigned int c_Table[3][31];",
+      "__constant__ unsigned int unusedTable[4][4];",
+    ],
+  });
+  assert.match(source, /__constant__ unsigned int c_Table\[3\]\[31\];/u);
+  assert.doesNotMatch(source, /unusedTable/u);
+}
+
 console.log("cuda-lite source normalizer tests ok");

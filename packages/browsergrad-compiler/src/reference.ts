@@ -2693,8 +2693,8 @@ function resolvePointerInitializer(statement: CudaLiteVarDecl, context: ThreadCo
     throw compilerFailure(`pointer '${statement.name}' must initialize from an address`);
   }
   const target = resolveLValue(init.argument, context);
-  if (target.space !== "shared" && target.space !== "buffer" && target.space !== "device-global") {
-    throw compilerFailure(`pointer '${statement.name}' can only alias storage, device global, or shared memory in CUDA-lite v0`);
+  if (target.space !== "shared" && target.space !== "buffer" && target.space !== "device-global" && target.space !== "constant") {
+    throw compilerFailure(`pointer '${statement.name}' can only alias storage, device global, constant, or shared memory in CUDA-lite v0`);
   }
   return { kind: "address", target: { ...target, valueType: target.valueType ?? statement.valueType } };
 }
