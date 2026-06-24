@@ -1518,6 +1518,12 @@ function validateCooperativeGroupArgument(
     diagnostics.push(error("unsupported-cooperative-groups", `device parameter '${param.name}' expects a cooperative group argument`, arg.span));
     return;
   }
+  if (param.cooperativeGroupKind === "thread") {
+    if (symbol.groupKind === "grid") {
+      diagnostics.push(error("unsupported-cooperative-groups", `device parameter '${param.name}' expects block or tile cooperative group`, arg.span));
+    }
+    return;
+  }
   if (param.cooperativeGroupKind !== symbol.groupKind) {
     diagnostics.push(error("unsupported-cooperative-groups", `device parameter '${param.name}' expects ${param.cooperativeGroupKind} cooperative group`, arg.span));
   }

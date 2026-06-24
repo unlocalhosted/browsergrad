@@ -150,13 +150,14 @@ export interface CudaLiteDim3Decl {
   readonly span: SourceSpan;
 }
 
-export type CudaLiteCooperativeGroupKind = "block" | "grid" | "tile";
+export type CudaLiteCooperativeGroupKind = "block" | "grid" | "tile" | "thread";
 
 export interface CudaLiteCooperativeGroupDecl {
   readonly kind: "cooperative-group";
   readonly groupKind: CudaLiteCooperativeGroupKind;
   readonly name: string;
   readonly tileSize?: number;
+  readonly dynamicTileSizeName?: string;
   readonly span: SourceSpan;
 }
 

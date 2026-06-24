@@ -41,7 +41,8 @@ const CUDA_SCALAR_TYPE_ALIASES = new Map<string, Exclude<CudaLiteScalarType, "vo
   ["clock_t", "uint"],
   ["size_type", "uint"],
   ["curandState", "uint"],
-  ["CUtexObject", "uint"],
+  ["CUtexObject", "texture2d"],
+  ["CUsurfObject", "surface2d"],
   ["CUtensorMap", "uint"],
   ["cudaGraphConditionalHandle", "uint"],
   ["__nv_fp8_storage_t", "uint"],
@@ -89,6 +90,8 @@ const TYPE_START_KEYWORDS = new Set([
   "int64_t",
   "uint64_t",
   "uintptr_t",
+  "auto",
+  "std",
   "curandState_t",
   "cufftComplex",
   "cudaTextureObject_t",
@@ -596,7 +599,7 @@ class Parser {
     } else {
       if (this.tokens[this.index + 1]?.value === "::") this.consumeNamespaceQualifier();
       const type = this.expectIdentifier("cooperative group type");
-      groupKind = type.value === "thread_block" ? "block" : type.value === "grid_group" ? "grid" : "tile";
+      groupKind = type.value === "thread_group" ? "thread" : type.value === "thread_block" ? "block" : type.value === "grid_group" ? "grid" : "tile";
       if (type.value === "thread_block_tile") {
         this.expect("<");
         tileSize = this.parseTemplateIntegerArgument();
@@ -626,7 +629,7 @@ class Parser {
     if (!this.startsCooperativeGroupType()) return undefined;
     if (this.tokens[this.index + 1]?.value === "::") this.consumeNamespaceQualifier();
     const type = this.expectIdentifier("cooperative group type");
-    const groupKind = type.value === "thread_block" ? "block" : type.value === "grid_group" ? "grid" : "tile";
+    const groupKind = type.value === "thread_group" ? "thread" : type.value === "thread_block" ? "block" : type.value === "grid_group" ? "grid" : "tile";
     let tileSize: number | undefined;
     if (type.value === "thread_block_tile") {
       this.expect("<");
@@ -922,6 +925,20 @@ class Parser {
     while (true) {
       const templateValueType = this.consumeTemplateArgumentsBeforeCall();
       if (this.match("{")) {
+        const valueType = expression.kind === "identifier" ? cxxBraceConstructorType(expression.name) : undefined;
+        if (valueType !== undefined) {
+          const start = expression.span;
+          this.expect("{");
+          const value = this.parseExpression();
+          const end = this.expect("}").span;
+          expression = {
+            kind: "cast",
+            valueType,
+            expression: value,
+            span: mergeSpans(start, end),
+          } satisfies CudaLiteCastExpression;
+          continue;
+        }
         this.skipBalanced("{", "}");
         continue;
       }
@@ -1010,8 +1027,17 @@ class Parser {
       return { kind: "number", value: token.value, raw: token.raw, span: token.span };
     }
     if (this.peek().kind === "string") {
-      const token = this.advance();
-      return { kind: "string", value: token.value.slice(1, -1), raw: token.value, span: token.span };
+      const start = this.peek().span;
+      const rawParts: string[] = [];
+      const valueParts: string[] = [];
+      let end = start;
+      do {
+        const token = this.advance();
+        rawParts.push(token.value);
+        valueParts.push(token.value.slice(1, -1));
+        end = token.span;
+      } while (this.peek().kind === "string");
+      return { kind: "string", value: valueParts.join(""), raw: rawParts.join(" "), span: mergeSpans(start, end) };
     }
     const ident = this.expectIdentifier("expression");
     let name = ident.value;
@@ -1105,7 +1131,7 @@ class Parser {
     if (this.tokens[index]?.kind !== "identifier") return false;
     const typeIndex = this.tokens[index + 1]?.value === "::" ? index + 2 : index;
     const type = this.tokens[typeIndex]?.value;
-    return type === "thread_block" || type === "grid_group" || type === "thread_block_tile" || type === "coalesced_group";
+    return type === "thread_block" || type === "thread_group" || type === "grid_group" || type === "thread_block_tile" || type === "coalesced_group";
   }
 
   private expectTextureDimension(): Token {
@@ -1119,6 +1145,12 @@ class Parser {
 
   private parseType(): Exclude<CudaLiteScalarType, "void"> {
     const token = this.expectIdentifier("type");
+    if (token.value === "std" && this.consumeIf("::")) {
+      const type = this.expectIdentifier("std type");
+      if (type.value === "size_t") return "uint";
+      this.fail(`unsupported CUDA-lite std type: std::${type.value}`, token.span);
+    }
+    if (token.value === "auto") return "int";
     if (token.value === "unsigned") {
       if (this.consumeIf("char")) return "uint";
       this.consumeIntegerWidthSuffix();
@@ -1582,6 +1614,14 @@ function evaluateIntegerConstantExpression(
     default:
       return undefined;
   }
+}
+
+function cxxBraceConstructorType(name: string): Exclude<CudaLiteScalarType, "void"> | undefined {
+  if (name === "__half" || name === "half") return "half";
+  if (name === "__nv_bfloat16" || name === "nv_bfloat16" || name === "bf16") return "bf16";
+  const alias = CUDA_SCALAR_TYPE_ALIASES.get(name);
+  if (alias === "texture2d" || alias === "surface2d" || alias === "devicepool" || alias === "voidptr") return undefined;
+  return alias;
 }
 
 function flattenInitializerExpressions(expression: CudaLiteExpression): readonly CudaLiteExpression[] {

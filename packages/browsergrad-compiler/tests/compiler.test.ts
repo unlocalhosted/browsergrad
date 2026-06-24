@@ -980,6 +980,35 @@ __global__ void hello() {
     expect(compiled.wgsl).toContain("printf omitted");
   });
 
+  it("parses adjacent C string literals in stdout-only calls", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void hello() {
+  printf("hello %d "
+         "world\\n", threadIdx.x);
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("printf omitted");
+  });
+
+  it("parses scalar C++ aliases and brace scalar constructors", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void scalarCppIntake(float *out, half *halfOut, std::size_t n) {
+  auto idx = blockIdx.x * blockDim.x + threadIdx.x;
+  std::size_t total = n;
+  if (idx < total) {
+    out[idx] = float(idx);
+    halfOut[idx] = __half{float(idx) / 32.0f};
+  }
+}`, {
+      features: { "shader-f16": true },
+      workgroupSize: [2, 1, 1],
+    });
+
+    expect(compiled.wgsl).toContain("var idx: i32");
+    expect(compiled.wgsl).toContain("var total: u32");
+    expect(compiled.wgsl).toContain("halfOut[idx] = f16");
+  });
+
   it("lowers scalar __device__ helper functions", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ float addOne(float value) {
@@ -1120,6 +1149,31 @@ __global__ void groupParam(int *out) {
     expect(compiled.wgsl).toContain("fn block_rank(local_id: vec3<u32>");
     expect(compiled.wgsl).toContain("fn tile_rank(local_id: vec3<u32>");
     expect([...result.buffers.out as Int32Array]).toEqual([0, 2]);
+  });
+
+  it("parses bare CUDA thread_group helper parameters as block handles", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ int sumReduction(thread_group g, int *scratch, int value) {
+  int lane = g.thread_rank();
+  scratch[lane] = value;
+  g.sync();
+  return scratch[lane] + g.size();
+}
+__global__ void bareThreadGroup(int *out) {
+  __shared__ int scratch[4];
+  cg::thread_block block = cg::this_thread_block();
+  auto tile2 = cg::tiled_partition<2>(block);
+  out[threadIdx.x] = sumReduction(block, scratch, threadIdx.x);
+  out[threadIdx.x + 4] = sumReduction(tile2, scratch, threadIdx.x);
+}`, {
+      workgroupSize: [4, 1, 1],
+    });
+
+    expect(compiled.wgsl).toContain("fn sumReduction");
+    expect(compiled.wgsl).toContain("g_tile_size_arg");
+    expect(compiled.wgsl).toContain("sumReduction(4u");
+    expect(compiled.wgsl).toContain("sumReduction(2u");
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
   });
 
   it("classifies grid-wide cooperative sync as an explicit runtime gap", () => {
@@ -4279,6 +4333,25 @@ __global__ void sample(float *out, int width, cudaTextureObject_t tex) {
     expect([...result.buffers.out as Float32Array]).toEqual([2, 4, 6]);
   });
 
+  it("lowers CUDA driver texture object aliases as texture params", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sample(float *out, CUtexObject tex) {
+  int x = threadIdx.x;
+  out[x] = tex2D<float>(tex, (float)x + 0.5f, 0.5f);
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(2) },
+        textures: { tex: { width: 2, height: 1, data: new Float32Array([7, 11]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.ir.params.find((param) => param.name === "tex")?.valueType).toBe("texture2d");
+    expect([...result.buffers.out as Float32Array]).toEqual([7, 11]);
+  });
+
   it("lowers typed CUDA tex2D vector reads and vector-scalar math", () => {
     const compiled = compileCudaLiteKernel(`
 texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
@@ -4369,6 +4442,24 @@ __global__ void readSurface(uint *out, cudaSurfaceObject_t surf) {
 
     expect(compiled.wgsl).toContain("fn bg_surf2dread_surf");
     expect([...result.buffers.out as Uint32Array]).toEqual([9]);
+  });
+
+  it("lowers CUDA driver surface object aliases as surface params", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void writeSurface(CUsurfObject surf) {
+  surf2Dwrite(13u, surf, 4, 0);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {},
+        surfaces: { surf: { width: 2, height: 1, data: new Float32Array([3, 9]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.ir.params.find((param) => param.name === "surf")?.valueType).toBe("surface2d");
+    expect([...result.buffers.surf as Float32Array]).toEqual([3, 13]);
   });
 
   it("formats diagnostics with source snippets", () => {

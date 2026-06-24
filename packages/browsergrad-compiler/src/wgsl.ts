@@ -549,6 +549,7 @@ function collectWgslDeclaredNames(
     ...ir.functions.flatMap((fn) => [
       fn.name,
       ...fn.params.map((param) => param.name),
+      ...collectCooperativeGroupGeneratedNames(fn.params),
       ...collectLocalNames(fn.body),
       ...collectLocalPointerHandleGeneratedNames(fn.body),
     ]),
@@ -561,6 +562,12 @@ function collectWgslDeclaredNames(
 
 function collectLocalPointerHandleGeneratedNames(statements: readonly CudaLiteStatement[]): readonly string[] {
   return [...collectLocalPointerHandles(statements).keys()].flatMap((name) => [`${name}_buffer`, `${name}_base`]);
+}
+
+function collectCooperativeGroupGeneratedNames(params: readonly CudaLiteParam[]): readonly string[] {
+  return params
+    .filter((param) => param.cooperativeGroupKind === "thread")
+    .flatMap((param) => [`${param.name}_tile_size`, `${param.name}_tile_size_arg`]);
 }
 
 function createWgslNameMap(names: readonly string[]): ReadonlyMap<string, string> {
@@ -777,7 +784,7 @@ function emitLocalInit(statement: CudaLiteVarDecl, context: EmitContext): string
 function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): string[] {
   const cooperativeParams = new Map(fn.params
     .filter((param) => param.cooperativeGroupKind !== undefined)
-    .map((param) => [param.name, cooperativeGroupForParam(param)] as const));
+    .map((param) => [param.name, cooperativeGroupForParam(param, context)] as const));
   const functionLocalPointerHandles = collectLocalPointerHandles(fn.body);
   const functionContext = withDevicePointerParams(
     {
@@ -796,7 +803,9 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
     ...fn.params.flatMap((param) => param.pointer
       ? [`${context.nameFor(`${param.name}_buffer_arg`)}: u32`, `${context.nameFor(`${param.name}_base_arg`)}: u32`]
       : param.cooperativeGroupKind !== undefined
-        ? []
+        ? param.cooperativeGroupKind === "thread"
+          ? [`${context.nameFor(`${param.name}_tile_size_arg`)}: u32`]
+          : []
         : [`${context.nameFor(`${param.name}_arg`)}: ${wgslScalar(param.valueType)}`]),
     "local_id: vec3<u32>",
     "workgroup_id: vec3<u32>",
@@ -809,6 +818,9 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
       lines.push(`  var ${context.nameFor(`${param.name}_buffer`)}: u32 = ${context.nameFor(`${param.name}_buffer_arg`)};`);
       lines.push(`  var ${context.nameFor(`${param.name}_base`)}: u32 = ${context.nameFor(`${param.name}_base_arg`)};`);
     } else if (param.cooperativeGroupKind !== undefined) {
+      if (param.cooperativeGroupKind === "thread") {
+        lines.push(`  let ${context.nameFor(`${param.name}_tile_size`)}: u32 = ${context.nameFor(`${param.name}_tile_size_arg`)};`);
+      }
       continue;
     } else {
       lines.push(`  var ${context.nameFor(param.name)}: ${wgslScalar(param.valueType)} = ${context.nameFor(`${param.name}_arg`)};`);
@@ -2312,7 +2324,11 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   if (deviceFunction) {
     const args = deviceFunction.params.flatMap((param, index) => {
       const arg = expression.args[index];
-      if (param.cooperativeGroupKind !== undefined) return [];
+      if (param.cooperativeGroupKind !== undefined) {
+        return param.cooperativeGroupKind === "thread"
+          ? [emitCooperativeGroupTileSizeArgument(arg, context)]
+          : [];
+      }
       if (!arg) return param.pointer ? ["0u", "0u"] : [zeroValue(param.valueType)];
       return param.pointer
         ? emitDevicePointerArgument(arg, context)
@@ -2534,6 +2550,19 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   }
 }
 
+function emitCooperativeGroupTileSizeArgument(
+  arg: CudaLiteExpression | undefined,
+  context: EmitContext,
+): string {
+  const blockSize = `${context.ir.workgroupSize[0] * context.ir.workgroupSize[1] * context.ir.workgroupSize[2]}u`;
+  if (arg?.kind !== "identifier") return blockSize;
+  const group = context.cooperativeGroupFor(arg.name);
+  if (!group) return blockSize;
+  if (group.groupKind === "tile") return `${group.tileSize ?? 32}u`;
+  if (group.groupKind === "thread" && group.dynamicTileSizeName) return group.dynamicTileSizeName;
+  return blockSize;
+}
+
 function emitExpressionAsValueType(
   expression: CudaLiteExpression,
   valueType: CudaLiteScalarType,
@@ -2566,20 +2595,27 @@ function emitCooperativeGroupCall(expression: CudaLiteCallExpression, context: E
     return group.groupKind === "grid" ? "0" : "workgroupBarrier()";
   }
   if (callee.property === "size") {
+    if (group.groupKind === "thread" && group.dynamicTileSizeName) return `i32(${group.dynamicTileSizeName})`;
     if (group.groupKind === "tile") return String(group.tileSize ?? 32);
     return String(context.ir.workgroupSize[0] * context.ir.workgroupSize[1] * context.ir.workgroupSize[2]);
   }
   if (callee.property === "thread_rank") {
     const localRank = emitLocalLinearRank(context);
+    if (group.groupKind === "thread" && group.dynamicTileSizeName) return `(${localRank} % i32(${group.dynamicTileSizeName}))`;
     if (group.groupKind === "tile") return `(${localRank} % ${group.tileSize ?? 32})`;
     return localRank;
   }
   if (callee.property === "meta_group_size") {
+    if (group.groupKind === "thread" && group.dynamicTileSizeName) {
+      const blockSize = context.ir.workgroupSize[0] * context.ir.workgroupSize[1] * context.ir.workgroupSize[2];
+      return `i32((${blockSize}u + ${group.dynamicTileSizeName} - 1u) / ${group.dynamicTileSizeName})`;
+    }
     if (group.groupKind !== "tile") return "1";
     const blockSize = context.ir.workgroupSize[0] * context.ir.workgroupSize[1] * context.ir.workgroupSize[2];
     return String(Math.ceil(blockSize / (group.tileSize ?? 32)));
   }
   if (callee.property === "meta_group_rank") {
+    if (group.groupKind === "thread" && group.dynamicTileSizeName) return `(${emitLocalLinearRank(context)} / i32(${group.dynamicTileSizeName}))`;
     if (group.groupKind !== "tile") return "0";
     return `(${emitLocalLinearRank(context)} / ${group.tileSize ?? 32})`;
   }
@@ -2616,12 +2652,13 @@ function emitCooperativeNamespaceCall(expression: CudaLiteCallExpression, contex
   return `subgroupAdd(${value})`;
 }
 
-function cooperativeGroupForParam(param: CudaLiteParam): CudaLiteCooperativeGroupDecl {
+function cooperativeGroupForParam(param: CudaLiteParam, context: EmitContext): CudaLiteCooperativeGroupDecl {
   return {
     kind: "cooperative-group",
     groupKind: param.cooperativeGroupKind ?? "block",
     name: param.name,
     ...(param.tileSize === undefined ? {} : { tileSize: param.tileSize }),
+    ...(param.cooperativeGroupKind === "thread" ? { dynamicTileSizeName: context.nameFor(`${param.name}_tile_size`) } : {}),
     span: param.span,
   };
 }

@@ -816,13 +816,14 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
     type === "size_t" ||
     type === "size_type" ||
     type === "curandState" ||
-    type === "CUtexObject" ||
     type === "CUtensorMap" ||
     type === "cudaGraphConditionalHandle" ||
     type === "__nv_fp8_storage_t" ||
     type === "__nv_fp8x2_storage_t" ||
     type === "__nv_fp8x4_storage_t"
   ) return "uint";
+  if (type === "CUtexObject") return "cudaTextureObject_t";
+  if (type === "CUsurfObject") return "cudaSurfaceObject_t";
   if (type === "long long" || type === "long" || type === "short" || type === "short int" || type === "ptrdiff_t") return "int";
   if (type === "uchar2") return "uint2";
   if (type === "uchar3") return "uint3";
