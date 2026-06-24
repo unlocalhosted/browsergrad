@@ -184,6 +184,7 @@ export interface CudaLiteAsmStatement {
   readonly kind: "asm";
   readonly template: string;
   readonly output?: CudaLiteExpression;
+  readonly outputs?: readonly CudaLiteExpression[];
   readonly inputs: readonly CudaLiteExpression[];
   readonly span: SourceSpan;
 }

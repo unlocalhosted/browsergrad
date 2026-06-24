@@ -10,6 +10,7 @@ import { expressionName, rootIdentifier } from "./analyzer.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
+import { classifyInlineAsm } from "./ptx_tile_ops.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
   cudaVectorConstructorType,
@@ -531,54 +532,108 @@ function execInlineAsm(
   statement: Extract<CudaLiteStatement, { kind: "asm" }>,
   context: ThreadContext,
 ): void {
-  if (/\bmov\.u32\b/u.test(statement.template) && /%%laneid\b/u.test(statement.template)) {
+  const op = classifyInlineAsm(statement.template);
+  const outputs = statement.outputs ?? (statement.output === undefined ? [] : [statement.output]);
+  if (op?.kind === "laneid") {
     if (statement.inputs.length !== 0) throw compilerFailure("laneid inline asm expects no inputs");
-    if (statement.output === undefined) throw compilerFailure("laneid inline asm expects an output operand");
-    const target = resolveLValue(statement.output, context);
+    if (outputs.length !== 1) throw compilerFailure("laneid inline asm expects one output operand");
+    const target = resolveLValue(outputs[0]!, context);
     writeLValue(target, localLinearRank(context) % 32, context);
     return;
   }
-  if (/\bmov\.u32\b/u.test(statement.template) && /%%lanemask_lt\b/u.test(statement.template)) {
+  if (op?.kind === "lanemask-lt") {
     if (statement.inputs.length !== 0) throw compilerFailure("lanemask_lt inline asm expects no inputs");
-    if (statement.output === undefined) throw compilerFailure("lanemask_lt inline asm expects an output operand");
+    if (outputs.length !== 1) throw compilerFailure("lanemask_lt inline asm expects one output operand");
     const lane = localLinearRank(context) & 31;
     const mask = lane === 0 ? 0 : (1 << lane) - 1;
-    writeLValue(resolveLValue(statement.output, context), mask >>> 0, context);
+    writeLValue(resolveLValue(outputs[0]!, context), mask >>> 0, context);
     return;
   }
-  if (/\bbfind\.u32\b/u.test(statement.template)) {
+  if (op?.kind === "bfind-u32") {
     if (statement.inputs.length !== 1) throw compilerFailure("bfind.u32 inline asm expects one input");
-    if (statement.output === undefined) throw compilerFailure("bfind.u32 inline asm expects an output operand");
+    if (outputs.length !== 1) throw compilerFailure("bfind.u32 inline asm expects one output operand");
     const value = evalExpression(statement.inputs[0]!, context);
     const bits = valueAsNumber(value, "bfind.u32") >>> 0;
     const found = bits === 0 ? 0xffffffff : 31 - Math.clz32(bits);
-    writeLValue(resolveLValue(statement.output, context), found, context);
+    writeLValue(resolveLValue(outputs[0]!, context), found, context);
     return;
   }
-  if (/\bvabsdiff4\.u32\.u32\.u32\.add\b/u.test(statement.template)) {
+  if (op?.kind === "u8x4-sad-add") {
     if (statement.inputs.length !== 3) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
-    if (statement.output === undefined) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects an output operand");
+    if (outputs.length !== 1) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects one output operand");
     const a = evalNumber(statement.inputs[0]!, context) >>> 0;
     const b = evalNumber(statement.inputs[1]!, context) >>> 0;
     let out = evalNumber(statement.inputs[2]!, context) >>> 0;
     for (let lane = 0; lane < 4; lane++) {
       out = (out + Math.abs(((a >>> (lane * 8)) & 0xff) - ((b >>> (lane * 8)) & 0xff))) >>> 0;
     }
-    writeLValue(resolveLValue(statement.output, context), out >>> 0, context);
+    writeLValue(resolveLValue(outputs[0]!, context), out >>> 0, context);
     return;
   }
-  if (!/\bfma\.rn\.f32\b/u.test(statement.template)) {
+  if (op?.kind === "ldmatrix") {
+    if (statement.inputs.length !== 1 || outputs.length !== op.matrices) {
+      throw compilerFailure(`ldmatrix.x${op.matrices} inline asm operand mismatch`);
+    }
+    const base = evalNumber(statement.inputs[0]!, context) >>> 0;
+    for (let index = 0; index < outputs.length; index++) {
+      const tag = op.transposed ? 0x80000000 : 0;
+      writeLValue(resolveLValue(outputs[index]!, context), (tag + base + index * 2) >>> 0, context);
+    }
+    return;
+  }
+  if (op?.kind === "mma-m16n8k16") {
+    execMmaM16N8K16(statement, outputs, op.accumulator, context);
+    return;
+  }
+  if (op?.kind !== "fma-rn-f32") {
     throw compilerFailure("unsupported inline asm template");
   }
   if (statement.inputs.length !== 2) {
     throw compilerFailure("fma.rn.f32 inline asm expects two inputs");
   }
-  if (statement.output === undefined) throw compilerFailure("fma.rn.f32 inline asm expects an output operand");
-  const target = resolveLValue(statement.output, context);
+  if (outputs.length !== 1) throw compilerFailure("fma.rn.f32 inline asm expects one output operand");
+  const target = resolveLValue(outputs[0]!, context);
   const current = valueAsNumber(readLValue(target, context), target.name);
   const a = evalNumber(statement.inputs[0]!, context);
   const b = evalNumber(statement.inputs[1]!, context);
   writeLValue(target, current + a * b, context);
+}
+
+function execMmaM16N8K16(
+  statement: Extract<CudaLiteStatement, { kind: "asm" }>,
+  outputs: readonly CudaLiteExpression[],
+  accumulator: "f16" | "f32",
+  context: ThreadContext,
+): void {
+  const inputs = statement.inputs.map((input) => evalNumber(input, context) >>> 0);
+  if (accumulator === "f16") {
+    if (outputs.length !== 2 || inputs.length !== 8) throw compilerFailure("mma.m16n8k16 f16 inline asm operand mismatch");
+    for (let index = 0; index < outputs.length; index++) {
+      const a = inputs[index % 4]!;
+      const b = inputs[4 + (index % 2)]!;
+      const c = inputs[6 + index]!;
+      writeLValue(resolveLValue(outputs[index]!, context), mmaHalf2Carrier(a, b, c), context);
+    }
+    return;
+  }
+  if (outputs.length !== 4 || inputs.length !== 10) throw compilerFailure("mma.m16n8k16 f32 inline asm operand mismatch");
+  for (let index = 0; index < outputs.length; index++) {
+    const a = inputs[index % 4]!;
+    const b = inputs[4 + (index % 2)]!;
+    const c = evalNumber(statement.inputs[6 + index]!, context);
+    const prod = unpackHalfLane(a, 0) * unpackHalfLane(b, 0) + unpackHalfLane(a, 1) * unpackHalfLane(b, 1);
+    writeLValue(resolveLValue(outputs[index]!, context), c + prod, context);
+  }
+}
+
+function mmaHalf2Carrier(a: number, b: number, c: number): number {
+  const lane0 = unpackHalfLane(c, 0) + unpackHalfLane(a, 0) * unpackHalfLane(b, 0);
+  const lane1 = unpackHalfLane(c, 1) + unpackHalfLane(a, 1) * unpackHalfLane(b, 1);
+  return (float32ToFloat16Bits(lane0) | (float32ToFloat16Bits(lane1) << 16)) >>> 0;
+}
+
+function unpackHalfLane(value: number, lane: 0 | 1): number {
+  return float16BitsToFloat32((value >>> (lane * 16)) & 0xffff);
 }
 
 function execCpAsyncStatement(expression: CudaLiteExpression, context: ThreadContext): boolean {

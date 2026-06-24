@@ -9,6 +9,7 @@ import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME 
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
+import { classifyInlineAsm, inlineAsmSupportedList } from "./ptx_tile_ops.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
 import {
   CUDA_VECTOR_TYPES,
@@ -681,7 +682,9 @@ function emitStatement(
     case "kernel-launch":
       return [`${prefix}// device-side launch omitted: ${statement.callee}<<<...>>>`];
     case "asm":
-      return [`${prefix}${emitInlineAsmStatement(statement, context)};`];
+      return emitInlineAsmStatement(statement, context)
+        .split("\n")
+        .map((line) => `${prefix}${line};`);
     case "expr":
       {
         const cpAsync = emitCpAsyncStatement(statement.expression, context, indentLevel);
@@ -750,35 +753,67 @@ function emitInlineAsmStatement(
   statement: Extract<CudaLiteStatement, { kind: "asm" }>,
   context: EmitContext,
 ): string {
-  if (
-    /\bmov\.u32\b/u.test(statement.template) &&
-    /%%laneid\b/u.test(statement.template) &&
-    statement.inputs.length === 0 &&
-    statement.output !== undefined
-  ) {
-    return `${emitExpression(statement.output, context)} = ${emitInlineU32Output(statement.output, `u32(${emitLocalLinearRank(context)} % 32)`, context)}`;
+  const op = classifyInlineAsm(statement.template);
+  const outputs = statement.outputs ?? (statement.output === undefined ? [] : [statement.output]);
+  if (op?.kind === "laneid" && statement.inputs.length === 0 && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `u32(${emitLocalLinearRank(context)} % 32)`, context)}`;
   }
-  if (
-    /\bmov\.u32\b/u.test(statement.template) &&
-    /%%lanemask_lt\b/u.test(statement.template) &&
-    statement.inputs.length === 0 &&
-    statement.output !== undefined
-  ) {
+  if (op?.kind === "lanemask-lt" && statement.inputs.length === 0 && outputs.length === 1) {
     const lane = `u32(${emitLocalLinearRank(context)} & 31)`;
     const mask = `select(0u, ((1u << ${lane}) - 1u), ${lane} > 0u)`;
-    return `${emitExpression(statement.output, context)} = ${emitInlineU32Output(statement.output, mask, context)}`;
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, mask, context)}`;
   }
-  if (/\bbfind\.u32\b/u.test(statement.template) && statement.inputs.length === 1 && statement.output !== undefined) {
-    return `${emitExpression(statement.output, context)} = (31u - countLeadingZeros(u32(${emitExpression(statement.inputs[0]!, context)})))`;
+  if (op?.kind === "bfind-u32" && statement.inputs.length === 1 && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = (31u - countLeadingZeros(u32(${emitExpression(statement.inputs[0]!, context)})))`;
   }
-  if (/\bvabsdiff4\.u32\.u32\.u32\.add\b/u.test(statement.template) && statement.inputs.length === 3 && statement.output !== undefined) {
-    return `${emitExpression(statement.output, context)} = ${emitInlineU32Output(statement.output, emitU8x4SadAddExpression(statement.inputs, context), context)}`;
+  if (op?.kind === "u8x4-sad-add" && statement.inputs.length === 3 && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, emitU8x4SadAddExpression(statement.inputs, context), context)}`;
   }
-  if (!/\bfma\.rn\.f32\b/u.test(statement.template) || statement.inputs.length !== 2 || statement.output === undefined) {
-    throw featureError("unsupported-inline-asm", "only fma.rn.f32, laneid, lanemask_lt, bfind.u32, and vabsdiff4.u32.u32.u32.add inline PTX are supported in WGSL output");
+  if (op?.kind === "ldmatrix" && statement.inputs.length === 1 && outputs.length === op.matrices) {
+    const base = `u32(${emitExpression(statement.inputs[0]!, context)})`;
+    const tag = op.transposed ? "0x80000000u" : "0u";
+    return outputs.map((output, index) => {
+      const carrier = `(${tag} + ${base} + ${index * 2}u)`;
+      return `${emitExpression(output, context)} = ${emitInlineU32Output(output, carrier, context)}`;
+    }).join("\n");
   }
-  const target = emitExpression(statement.output, context);
+  if (op?.kind === "mma-m16n8k16") {
+    return emitMmaM16N8K16Statement(statement, outputs, op.accumulator, context);
+  }
+  if (op?.kind !== "fma-rn-f32" || statement.inputs.length !== 2 || outputs.length !== 1) {
+    throw featureError("unsupported-inline-asm", `only ${inlineAsmSupportedList()} inline PTX are supported in WGSL output`);
+  }
+  const target = emitExpression(outputs[0]!, context);
   return `${target} = fma(${emitExpression(statement.inputs[0]!, context)}, ${emitExpression(statement.inputs[1]!, context)}, ${target})`;
+}
+
+function emitMmaM16N8K16Statement(
+  statement: Extract<CudaLiteStatement, { kind: "asm" }>,
+  outputs: readonly CudaLiteExpression[],
+  accumulator: "f16" | "f32",
+  context: EmitContext,
+): string {
+  if (accumulator === "f16") {
+    if (outputs.length !== 2 || statement.inputs.length !== 8) {
+      throw featureError("invalid-inline-asm-operands", "mma.m16n8k16 f16 inline PTX operand mismatch");
+    }
+    return outputs.map((output, index) => {
+      const a = `u32(${emitExpression(statement.inputs[index % 4]!, context)})`;
+      const b = `u32(${emitExpression(statement.inputs[4 + (index % 2)]!, context)})`;
+      const c = `u32(${emitExpression(statement.inputs[6 + index]!, context)})`;
+      const value = `pack2x16float(unpack2x16float(${c}) + (unpack2x16float(${a}) * unpack2x16float(${b})))`;
+      return `${emitExpression(output, context)} = ${emitInlineU32Output(output, value, context)}`;
+    }).join("\n");
+  }
+  if (outputs.length !== 4 || statement.inputs.length !== 10) {
+    throw featureError("invalid-inline-asm-operands", "mma.m16n8k16 f32 inline PTX operand mismatch");
+  }
+  return outputs.map((output, index) => {
+    const a = `u32(${emitExpression(statement.inputs[index % 4]!, context)})`;
+    const b = `u32(${emitExpression(statement.inputs[4 + (index % 2)]!, context)})`;
+    const c = emitExpression(statement.inputs[6 + index]!, context);
+    return `${emitExpression(output, context)} = (${c} + dot(unpack2x16float(${a}), unpack2x16float(${b})))`;
+  }).join("\n");
 }
 
 function emitU8x4SadAddExpression(inputs: readonly CudaLiteExpression[], context: EmitContext): string {

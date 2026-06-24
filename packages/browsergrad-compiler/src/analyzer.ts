@@ -23,6 +23,7 @@ import {
 import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
+import { classifyInlineAsm, inlineAsmSupportedList } from "./ptx_tile_ops.js";
 import { sizeofCudaType } from "./type_layout.js";
 import {
   CUDA_VECTOR_TYPES,
@@ -954,45 +955,61 @@ function validateInlineAsmStatement(
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
 ): void {
-  const fma = isInlineAsmFma(statement.template);
-  const laneId = isInlineAsmLaneId(statement.template);
-  const laneMaskLt = isInlineAsmLaneMaskLt(statement.template);
-  const bfindU32 = isInlineAsmBfindU32(statement.template);
-  const sadAdd = isInlineAsmU8x4SadAdd(statement.template);
-  if (!fma && !laneId && !laneMaskLt && !bfindU32 && !sadAdd) {
-    diagnostics.push(error("unsupported-inline-asm", "only fma.rn.f32, laneid, lanemask_lt, bfind.u32, and vabsdiff4.u32.u32.u32.add inline PTX are supported in CUDA-lite v0", statement.span));
+  const op = classifyInlineAsm(statement.template);
+  const outputs = statement.outputs ?? (statement.output === undefined ? [] : [statement.output]);
+  if (!op) {
+    diagnostics.push(error("unsupported-inline-asm", `only ${inlineAsmSupportedList()} inline PTX are supported in CUDA-lite v0`, statement.span));
   }
-  const outputInfo = statement.output === undefined ? undefined : walkExpression(statement.output, scope);
-  if (statement.output !== undefined) {
-    validateLValueExpression(statement.output, scope, diagnostics, walkExpression);
-    validateScalarOperand(outputInfo!, statement.output.span, diagnostics);
+  const outputInfos = outputs.map((output) => walkExpression(output, scope));
+  for (let index = 0; index < outputs.length; index++) {
+    const output = outputs[index]!;
+    validateLValueExpression(output, scope, diagnostics, walkExpression);
+    validateScalarOperand(outputInfos[index]!, output.span, diagnostics);
   }
-  if (fma && (statement.output === undefined || statement.inputs.length !== 2)) {
-    diagnostics.push(error("invalid-inline-asm-operands", "fma.rn.f32 inline PTX expects exactly two input operands", statement.span));
+  if (op?.kind === "fma-rn-f32" && (outputs.length !== 1 || statement.inputs.length !== 2)) {
+    diagnostics.push(error("invalid-inline-asm-operands", "fma.rn.f32 inline PTX expects one output operand and exactly two input operands", statement.span));
   }
-  if (laneId && (statement.output === undefined || statement.inputs.length !== 0)) {
-    diagnostics.push(error("invalid-inline-asm-operands", "laneid inline PTX expects no input operands", statement.span));
+  if (op?.kind === "laneid" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
+    diagnostics.push(error("invalid-inline-asm-operands", "laneid inline PTX expects one output operand and no input operands", statement.span));
   }
-  if (laneId && outputInfo?.valueType !== undefined && outputInfo.valueType !== "uint" && outputInfo.valueType !== "int") {
-    diagnostics.push(error("invalid-inline-asm-operands", "laneid inline PTX writes an integer output operand", statement.output?.span ?? statement.span));
+  if (op?.kind === "laneid" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
+    diagnostics.push(error("invalid-inline-asm-operands", "laneid inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
-  if (laneMaskLt && (statement.output === undefined || statement.inputs.length !== 0)) {
-    diagnostics.push(error("invalid-inline-asm-operands", "lanemask_lt inline PTX expects no input operands", statement.span));
+  if (op?.kind === "lanemask-lt" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
+    diagnostics.push(error("invalid-inline-asm-operands", "lanemask_lt inline PTX expects one output operand and no input operands", statement.span));
   }
-  if (laneMaskLt && outputInfo?.valueType !== undefined && outputInfo.valueType !== "uint" && outputInfo.valueType !== "int") {
-    diagnostics.push(error("invalid-inline-asm-operands", "lanemask_lt inline PTX writes an integer output operand", statement.output?.span ?? statement.span));
+  if (op?.kind === "lanemask-lt" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
+    diagnostics.push(error("invalid-inline-asm-operands", "lanemask_lt inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
-  if (bfindU32 && (statement.output === undefined || statement.inputs.length !== 1)) {
-    diagnostics.push(error("invalid-inline-asm-operands", "bfind.u32 inline PTX expects one input operand", statement.span));
+  if (op?.kind === "bfind-u32" && (outputs.length !== 1 || statement.inputs.length !== 1)) {
+    diagnostics.push(error("invalid-inline-asm-operands", "bfind.u32 inline PTX expects one output operand and one input operand", statement.span));
   }
-  if (bfindU32 && outputInfo?.valueType !== undefined && outputInfo.valueType !== "uint") {
-    diagnostics.push(error("invalid-inline-asm-operands", "bfind.u32 inline PTX writes a uint output operand", statement.output?.span ?? statement.span));
+  if (op?.kind === "bfind-u32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint") {
+    diagnostics.push(error("invalid-inline-asm-operands", "bfind.u32 inline PTX writes a uint output operand", outputs[0]?.span ?? statement.span));
   }
-  if (sadAdd && (statement.output === undefined || statement.inputs.length !== 3)) {
-    diagnostics.push(error("invalid-inline-asm-operands", "vabsdiff4.u32.u32.u32.add inline PTX expects three input operands", statement.span));
+  if (op?.kind === "u8x4-sad-add" && (outputs.length !== 1 || statement.inputs.length !== 3)) {
+    diagnostics.push(error("invalid-inline-asm-operands", "vabsdiff4.u32.u32.u32.add inline PTX expects one output operand and three input operands", statement.span));
   }
-  if (sadAdd && outputInfo?.valueType !== undefined && outputInfo.valueType !== "uint" && outputInfo.valueType !== "int") {
-    diagnostics.push(error("invalid-inline-asm-operands", "vabsdiff4.u32.u32.u32.add inline PTX writes an integer output operand", statement.output?.span ?? statement.span));
+  if (op?.kind === "u8x4-sad-add" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
+    diagnostics.push(error("invalid-inline-asm-operands", "vabsdiff4.u32.u32.u32.add inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
+  }
+  if (op?.kind === "ldmatrix") {
+    if (outputs.length !== op.matrices || statement.inputs.length !== 1) {
+      diagnostics.push(error("invalid-inline-asm-operands", `ldmatrix.x${op.matrices} inline PTX expects ${op.matrices} output operand(s) and one shared-address input operand`, statement.span));
+    }
+    for (let index = 0; index < outputs.length; index++) {
+      const type = outputInfos[index]?.valueType;
+      if (type !== undefined && type !== "uint" && type !== "int") {
+        diagnostics.push(error("invalid-inline-asm-operands", "ldmatrix inline PTX writes integer register carrier operands", outputs[index]?.span ?? statement.span));
+      }
+    }
+  }
+  if (op?.kind === "mma-m16n8k16") {
+    const outputCount = op.accumulator === "f32" ? 4 : 2;
+    const inputCount = op.accumulator === "f32" ? 10 : 8;
+    if (outputs.length !== outputCount || statement.inputs.length !== inputCount) {
+      diagnostics.push(error("invalid-inline-asm-operands", `mma.m16n8k16 ${op.accumulator} inline PTX expects ${outputCount} output operand(s) and ${inputCount} input operands`, statement.span));
+    }
   }
   for (const input of statement.inputs) {
     validateScalarOperand(walkExpression(input, scope), input.span, diagnostics);
@@ -2776,26 +2793,6 @@ function validateDeclaredSymbolName(
   if (BUILTIN_VECTORS.has(name)) {
     diagnostics.push(error("reserved-symbol", `symbol '${name}' conflicts with a CUDA-lite builtin`, span));
   }
-}
-
-function isInlineAsmFma(template: string): boolean {
-  return /\bfma\.rn\.f32\b/u.test(template);
-}
-
-function isInlineAsmLaneId(template: string): boolean {
-  return /\bmov\.u32\b/u.test(template) && /%%laneid\b/u.test(template);
-}
-
-function isInlineAsmLaneMaskLt(template: string): boolean {
-  return /\bmov\.u32\b/u.test(template) && /%%lanemask_lt\b/u.test(template);
-}
-
-function isInlineAsmBfindU32(template: string): boolean {
-  return /\bbfind\.u32\b/u.test(template);
-}
-
-function isInlineAsmU8x4SadAdd(template: string): boolean {
-  return /\bvabsdiff4\.u32\.u32\.u32\.add\b/u.test(template);
 }
 
 function validateSideEffectPlacement(

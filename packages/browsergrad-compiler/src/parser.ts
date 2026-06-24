@@ -753,6 +753,7 @@ class Parser {
       kind: "asm",
       template,
       ...(outputs[0] === undefined ? {} : { output: outputs[0] }),
+      ...(outputs.length === 0 ? {} : { outputs }),
       inputs,
       span: mergeSpans(start, end),
     };

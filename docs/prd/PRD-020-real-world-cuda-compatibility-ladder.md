@@ -190,7 +190,7 @@ Local corpus audits on 2026-06-24:
   cache-load assignment expansion into lane-wise stores, plus custom
   CUDA-vector `cg::reduce` lowering through scalar subgroup shuffle-XOR loops,
   with `0` hard gaps.
-- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `218` direct
+- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `235` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, local header context, and
   simple C++ alias / constexpr intake plus `FLOAT4(x)`-style typed storage
@@ -211,7 +211,11 @@ Local corpus audits on 2026-06-24:
   dimension folding, scalar bitwise compound assignments, CUDA bf16
   logical type/intrinsic intake plus integer warp-reduction aliases, and C++
   std math aliases such as `std::isinf` /
-  `std::numeric_limits<float>::infinity()`, with `75` hard gaps.
+  `std::numeric_limits<float>::infinity()`, plus a shared inline-PTX classifier
+  and multi-output register-carrier ABI for `ldmatrix` and
+  `mma.sync.m16n8k16` in CPU reference and WGSL. This is intentionally a v0
+  register-carrier model, not full lane/layout-accurate tensor-core simulation
+  yet, with `58` hard gaps.
   The pre-normalizer baseline was `3/293`, which proved context isolation was
   the first ladder rung.
 
@@ -253,9 +257,9 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
-- The current live aggregate gate is `888/1038` WebGPU-runnable across the four
+- The current live aggregate gate is `905/1038` WebGPU-runnable across the four
   pinned corpora: CUDA-120 `240/240`, `cuda-samples` `282/357`, `llm.c`
-  `148/148`, and LeetCUDA `218/293`.
+  `148/148`, and LeetCUDA `235/293`.
 
 ## Grill Decisions
 
@@ -405,7 +409,7 @@ Acceptance criteria for the first slice:
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions,
   `>=148` WebGPU-runnable, and `0` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
-  `>=218` WebGPU-runnable, and `<=75` hard gaps.
+  `>=235` WebGPU-runnable, and `<=58` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
   unit tests.
 - Intrinsic-ledger expansion improves coverage through generic CUDA math and

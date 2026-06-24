@@ -3144,20 +3144,55 @@ __global__ void sad4(uint *out, uint *a, uint *b) {
     expect([...result.buffers.out as Uint32Array]).toEqual([18, 263, 16, 261]);
   });
 
-  it("parses adjacent-string inline PTX with multiple outputs as an unsupported semantic gap", () => {
-    expect(() => compileCudaLiteKernel(`
-__global__ void mmaCarrier(uint *out, uint *in) {
-  uint a = in[0];
-  uint b = in[1];
-  uint c = 0;
-  uint d = 0;
+  it("lowers adjacent-string inline PTX mma carriers with multiple outputs", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void mmaCarrier(uint *out) {
+  uint a0 = 0x3c003c00u;
+  uint a1 = 0x3c003c00u;
+  uint a2 = 0x3c003c00u;
+  uint a3 = 0x3c003c00u;
+  uint b0 = 0x40004000u;
+  uint b1 = 0x40004000u;
+  uint c = 0u;
+  uint d = 0u;
   asm volatile(
     "mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16 {%0, %1}, "
     "{%2, %3}, {%4, %5}, {%6, %7};\\n"
     : "=r"(c), "=r"(d)
-    : "r"(a), "r"(b), "r"(a), "r"(b), "r"(c), "r"(d));
-  out[0] = c + d;
-}`)).toThrow(/unsupported-inline-asm/u);
+    : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(c), "r"(d));
+  out[0] = c;
+  out[1] = d;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("pack2x16float");
+    expect([...result.buffers.out as Uint32Array]).toEqual([0x40004000, 0x40004000]);
+  });
+
+  it("lowers multi-output ldmatrix carriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void ldmatrixCarrier(uint *out) {
+  uint a = 0u;
+  uint b = 0u;
+  uint addr = 5u;
+  asm volatile("ldmatrix.sync.aligned.x2.m8n8.shared.b16 {%0, %1}, [%2];\\n"
+    : "=r"(a), "=r"(b)
+    : "r"(addr));
+  out[0] = a;
+  out[1] = b;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("u32(addr) + 0u");
+    expect([...result.buffers.out as Uint32Array]).toEqual([5, 7]);
   });
 
   it("parses inline PTX with empty output sections as an unsupported semantic gap", () => {
