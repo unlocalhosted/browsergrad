@@ -246,6 +246,21 @@ __global__ void packed_shared(bf16 *out, const bf16 *input, int C) {
 }
 
 {
+  const source = `
+using fn_ptr = void(*)(float*);
+template<fn_ptr fn>
+__global__ void symbol_kernel(float* out) { fn(out); }
+template<fn_ptr fn>
+void launch_symbol_kernel(float* out) {
+  symbol_kernel<fn><<<1, 1>>>(out);
+}
+__device__ void concrete_symbol(float* out) { out[0] = 1.0f; }
+void host(float* out) { launch_symbol_kernel<concrete_symbol>(out); }`;
+  const launches = collectKernelTemplateArguments(source);
+  assert.deepEqual(launches.get("symbol_kernel"), ["concrete_symbol"]);
+}
+
+{
   const launchBoundsKernel = `
 __global__ void __launch_bounds__(WARP_SIZE * kTiles)
     bounded(float *out, const float *in, int N) {

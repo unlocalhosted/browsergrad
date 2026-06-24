@@ -330,11 +330,17 @@ export function kernelDefinitionName(kernel) {
 export function collectKernelTemplateArguments(source) {
   const definesByName = collectObjectDefines(source);
   const candidates = new Map();
+  const kernelTemplateParamNames = new Map(
+    scanTemplatedKernelDefinitions(source).map((kernel) => [
+      kernel.name,
+      kernel.templateParams.map((param) => param.name),
+    ]),
+  );
   const addCandidate = (name, args) => {
     if (args.length === 0) return;
     const normalizedArgs = args.map((arg) => resolveTemplateArgument(arg, definesByName));
     const previous = candidates.get(name);
-    if (previous === undefined || templateArgumentScore(normalizedArgs) > templateArgumentScore(previous)) {
+    if (shouldReplaceTemplateCandidate(previous, normalizedArgs, kernelTemplateParamNames.get(name))) {
       candidates.set(name, normalizedArgs);
     }
   };
@@ -344,10 +350,47 @@ export function collectKernelTemplateArguments(source) {
   for (const propagated of collectWrapperPropagatedTemplateArguments(source, definesByName)) {
     addCandidate(propagated.name, propagated.args);
   }
+  for (const propagated of collectSymbolWrapperTemplateArguments(source, definesByName)) {
+    addCandidate(propagated.name, propagated.args);
+  }
+  for (const propagated of collectSimpleSymbolWrapperTemplateArguments(source, definesByName)) {
+    addCandidate(propagated.name, propagated.args);
+  }
   for (const inferred of collectLaunchInferredTemplateArguments(source, definesByName)) {
     addCandidate(inferred.name, inferred.args);
   }
   return candidates;
+}
+
+function shouldReplaceTemplateCandidate(previous, next, paramNames = []) {
+  if (previous === undefined) return true;
+  const nextScore = templateArgumentScore(next);
+  const previousScore = templateArgumentScore(previous);
+  if (nextScore > previousScore) return true;
+  if (nextScore === previousScore && previous.some((arg, index) => isTemplateSymbolDowngrade(arg, next[index]))) return false;
+  return nextScore === previousScore &&
+    previous.some((arg, index) => isTemplateSymbolRefinement(arg, next[index], paramNames[index]));
+}
+
+function isTemplateParamEcho(args, paramNames) {
+  return args.some((arg, index) => {
+    const paramName = paramNames[index];
+    return paramName !== undefined && arg === paramName;
+  });
+}
+
+function isTemplateSymbolRefinement(previous, next, paramName) {
+  if (previous === undefined || next === undefined || previous === next) return false;
+  if (paramName !== undefined && previous === paramName && templateArgumentScore([next]) > 0) return true;
+  if (!isTemplateSymbolArgument(previous) || !isTemplateSymbolArgument(next)) return false;
+  return String(next).startsWith(`${previous}_`);
+}
+
+function isTemplateSymbolDowngrade(previous, next) {
+  return isTemplateSymbolArgument(previous) &&
+    isTemplateSymbolArgument(next) &&
+    previous !== next &&
+    String(previous).startsWith(`${next}_`);
 }
 
 function referencedDeviceFunctionClosure(kernel, deviceFunctions, definesByName = new Map()) {
@@ -557,6 +600,12 @@ function rewriteTemplateParam(param, arg, definesByName = new Map()) {
     if (parsed.defaultStart === undefined) return `${cleaned} = ${value}`;
     return `${cleaned.slice(0, parsed.defaultStart).trimEnd()} = ${value}`;
   }
+  if (parsed.kind === "symbol") {
+    const value = normalizeTemplateSymbolArgument(arg);
+    if (value === undefined) return cleaned;
+    if (parsed.defaultStart === undefined) return `${cleaned} = ${value}`;
+    return `${cleaned.slice(0, parsed.defaultStart).trimEnd()} = ${value}`;
+  }
   const value = normalizeTemplateValueArgument(arg, parsed.valueType);
   const resolvedValue = normalizeTemplateValueArgument(resolveTemplateDefineValue(arg, definesByName), parsed.valueType);
   if (resolvedValue !== undefined) {
@@ -587,6 +636,10 @@ function parseTemplateParam(param) {
   const typeMatch = /^(?:typename|class)\s+([A-Za-z_][A-Za-z0-9_]*)$/u.exec(head);
   if (typeMatch?.[1] !== undefined) {
     return { kind: "type", name: typeMatch[1], defaultStart: withoutDefault.defaultStart, source: param };
+  }
+  const symbolMatch = /^[A-Za-z_][A-Za-z0-9_:]*\s+([A-Za-z_][A-Za-z0-9_]*)$/u.exec(head);
+  if (symbolMatch?.[1] !== undefined) {
+    return { kind: "symbol", name: symbolMatch[1], defaultStart: withoutDefault.defaultStart, source: param };
   }
   return undefined;
 }
@@ -623,6 +676,12 @@ function normalizeTemplateValueArgument(arg, valueType) {
   return value;
 }
 
+function normalizeTemplateSymbolArgument(arg) {
+  if (arg === undefined) return undefined;
+  const value = arg.trim();
+  return isTemplateSymbolArgument(value) ? value : undefined;
+}
+
 function templateTypeEnvironment(params, args, definesByName = new Map()) {
   const env = new Map();
   for (let index = 0; index < params.length; index++) {
@@ -640,9 +699,11 @@ function templateValueEnvironment(params, args, definesByName = new Map()) {
   const env = new Map();
   for (let index = 0; index < params.length; index++) {
     const param = params[index];
-    if (param?.kind !== "value") continue;
+    if (param?.kind !== "value" && param?.kind !== "symbol") continue;
     const raw = args[index] ?? templateParamDefaultValue(param);
-    const value = raw === undefined ? undefined : normalizeTemplateValueArgument(resolveTemplateDefineValue(raw, definesByName), param.valueType);
+    const value = raw === undefined ? undefined : param.kind === "symbol"
+      ? normalizeTemplateSymbolArgument(resolveTemplateDefineValue(raw, definesByName))
+      : normalizeTemplateValueArgument(resolveTemplateDefineValue(raw, definesByName), param.valueType);
     if (value !== undefined) env.set(param.name, value);
   }
   return env;
@@ -2810,6 +2871,68 @@ function collectWrapperPropagatedTemplateArguments(source, definesByName = new M
   return propagated;
 }
 
+function collectSymbolWrapperTemplateArguments(source, definesByName = new Map()) {
+  const propagated = [];
+  const calls = scanTemplatedCallReferences(source);
+  for (const fn of scanTemplatedFunctionDefinitions(source)) {
+    const symbolParams = fn.templateParams
+      .map((param, index) => ({ param, index }))
+      .filter((entry) => entry.param.kind === "symbol");
+    if (symbolParams.length === 0) continue;
+    const wrapperCalls = calls.filter((call) => call.name === fn.name && call.args.length > 0);
+    if (wrapperCalls.length === 0) continue;
+    const kernelRefs = scanTemplatedKernelReferences(fn.body).filter((ref) =>
+      ref.args.some((arg) => symbolParams.some(({ param }) => arg === param.name)));
+    if (kernelRefs.length === 0) continue;
+    for (const call of wrapperCalls) {
+      for (const ref of kernelRefs) {
+        const args = ref.args.map((arg) => {
+          const entry = symbolParams.find(({ param }) => param.name === arg);
+          if (entry === undefined) return substituteTemplateArgument(arg, new Map(), definesByName);
+          return normalizeTemplateSymbolArgument(resolveTemplateDefineValue(call.args[entry.index], definesByName));
+        });
+        if (templateArgumentScore(args) > 0) propagated.push({ name: ref.name, args });
+      }
+    }
+  }
+  return propagated;
+}
+
+function collectSimpleSymbolWrapperTemplateArguments(source, definesByName = new Map()) {
+  const propagated = [];
+  const wrapperRe = /\btemplate\s*<\s*([A-Za-z_][A-Za-z0-9_:]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*>\s*[\s\S]{0,320}?\b([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*\{/gu;
+  let match;
+  while ((match = wrapperRe.exec(source)) !== null) {
+    const symbolName = match[2];
+    const wrapperName = match[3];
+    const brace = source.indexOf("{", match.index);
+    const end = findBalanced(source, brace, "{", "}");
+    if (symbolName === undefined || wrapperName === undefined || brace < 0 || end === undefined) {
+      wrapperRe.lastIndex = match.index + 1;
+      continue;
+    }
+    const body = source.slice(brace + 1, end);
+    const refs = scanTemplatedKernelReferences(body).filter((ref) => ref.args.includes(symbolName));
+    if (refs.length === 0) {
+      wrapperRe.lastIndex = end + 1;
+      continue;
+    }
+    const callRe = new RegExp(`\\b${escapeRegExp(wrapperName)}\\s*<\\s*([A-Za-z_][A-Za-z0-9_:]*)\\s*>\\s*\\(`, "gu");
+    for (const call of source.matchAll(callRe)) {
+      const value = normalizeTemplateSymbolArgument(resolveTemplateDefineValue(call[1], definesByName));
+      if (value === undefined || value === symbolName) continue;
+      for (const ref of refs) {
+        propagated.push({
+          name: ref.name,
+          args: ref.args.map((arg) => arg === symbolName ? value : substituteTemplateArgument(arg, new Map(), definesByName)),
+        });
+      }
+    }
+    wrapperRe.lastIndex = end + 1;
+  }
+  return propagated;
+}
+
 function scanFunctionCallReferences(source) {
   const calls = [];
   let index = 0;
@@ -2859,7 +2982,7 @@ function inferTemplatedFunctionCallArgs(fn, call, source, definesByName = new Ma
       : inferArgumentValueType(arg, valueSymbols, definesByName);
     if (type !== undefined) env.set(param.templateType, type);
   }
-  return fn.templateParams.map((param) => param.kind === "type" || param.kind === "value" ? env.get(param.name) : undefined);
+  return fn.templateParams.map((param) => param.kind === "type" || param.kind === "value" || param.kind === "symbol" ? env.get(param.name) : undefined);
 }
 
 function collectLaunchInferredTemplateArguments(source, definesByName = new Map()) {
@@ -2958,7 +3081,7 @@ function inferKernelTemplateArgsFromSymbols(kernel, launch, symbols, definesByNa
       if (value !== undefined) env.set(param.boolConstantTemplate, value);
     }
   }
-  return kernel.templateParams.map((param) => param.kind === "type" || param.kind === "value" ? env.get(param.name) : undefined);
+  return kernel.templateParams.map((param) => param.kind === "type" || param.kind === "value" || param.kind === "symbol" ? env.get(param.name) : undefined);
 }
 
 function substituteVisiblePointerTypes(symbols, env, definesByName = new Map()) {
@@ -3180,6 +3303,9 @@ function templateEnvironment(params, args, definesByName = new Map()) {
     if (!param || arg === undefined) continue;
     if (param.kind === "value") {
       const normalized = normalizeTemplateValueArgument(resolveTemplateDefineValue(arg, definesByName), param.valueType);
+      if (normalized !== undefined) env.set(param.name, normalized);
+    } else if (param.kind === "symbol") {
+      const normalized = normalizeTemplateSymbolArgument(resolveTemplateDefineValue(arg, definesByName));
       if (normalized !== undefined) env.set(param.name, normalized);
     } else if (param.kind === "type" && /^[A-Za-z_][A-Za-z0-9_:]*$/u.test(arg.trim())) {
       env.set(param.name, resolveTemplateTypeAliasArgument(arg, definesByName));
@@ -3434,8 +3560,13 @@ function templateArgumentScore(args) {
     if (arg === undefined) return score;
     if (normalizeTemplateTypeArgument(arg) !== undefined) return score + 2;
     if (normalizeTemplateValueArgument(arg, "int") !== undefined) return score + 1;
+    if (isTemplateSymbolArgument(arg)) return score + 1;
     return score;
   }, 0);
+}
+
+function isTemplateSymbolArgument(arg) {
+  return /^[A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)*$/u.test(String(arg).trim());
 }
 
 function scanCudaFuncSetAttributeTemplateReferences(source) {
