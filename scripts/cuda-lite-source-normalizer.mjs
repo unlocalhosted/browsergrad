@@ -1,4 +1,6 @@
 const SEMANTIC_BUILTIN_DEVICE_HELPERS = new Set([
+  "min",
+  "max",
   "vec_at",
   "load128",
   "load128cs",
@@ -135,7 +137,8 @@ export function createKernelCompilationUnit({
     kernelWithSharedDeclarations,
   ].filter((part) => part.trim().length > 0).join("\n"));
   const withCarrierMembers = normalizeCarrierMemberReferences(unit, effectiveDefines);
-  const withScalarizedRecords = normalizeScalarizedPodRecords(withCarrierMembers, effectiveDefines);
+  const withVectorCarrierAliases = normalizeCudaVectorCarrierAliases(withCarrierMembers, effectiveDefines);
+  const withScalarizedRecords = normalizeScalarizedPodRecords(withVectorCarrierAliases, effectiveDefines);
   const withPodRecords = normalizePodRecordVectorAliases(withScalarizedRecords, effectiveDefines);
   const withNumericDefines = normalizeNumericObjectDefines(
     withPodRecords,
@@ -543,10 +546,17 @@ function canonicalTemplateFallbackArguments(sourceTail, parsedParams, args, defi
   const out = [...args];
   for (let index = 0; index < parsedParams.length; index++) {
     const param = parsedParams[index];
-    if (param === undefined || templateParamDefaultValue(param) !== undefined) continue;
+    if (param === undefined) continue;
+    const hasDefault = templateParamDefaultValue(param) !== undefined;
+    const unresolvedSelfArgument = hasConcreteTemplateArgument(out[index]) && String(out[index]).trim() === param.name;
+    if (hasDefault && !unresolvedSelfArgument) continue;
     if (hasConcreteTemplateArgument(out[index]) && String(out[index]).trim() !== param.name) continue;
     if (param.kind === "type") {
-      if (templateTypeParamUsedAsPointerParam(sourceTail, param.name)) out[index] = canonicalTemplatePointerType(sourceTail, definesByName);
+      if (templateTypeParamUsedAsPointerParam(sourceTail, param.name)) out[index] = canonicalTemplatePointerType(sourceTail, param.name, definesByName);
+      else {
+        const scalarType = canonicalTemplateScalarType(sourceTail, param.name, definesByName);
+        if (scalarType !== undefined) out[index] = scalarType;
+      }
       continue;
     }
     const value = canonicalTemplateValueArgument(sourceTail, param.name, definesByName);
@@ -576,9 +586,54 @@ function templateTypeParamUsedAsPointerParam(sourceTail, name) {
   });
 }
 
-function canonicalTemplatePointerType(sourceTail, definesByName = new Map()) {
+function canonicalTemplatePointerType(sourceTail, name, definesByName = new Map()) {
+  const pointerParams = templateTypePointerParamNames(sourceTail, name);
+  if (pointerParams.some((param) => /(?:count|num|size|len|idx|index|offset|addr|tid|id|mask|flag)/iu.test(param))) return "uint";
   const candidate = normalizeTemplateTypeArgument(definesByName.get("floatX") ?? "float", definesByName);
   return candidate === "half" || candidate === "bf16" ? "float" : candidate ?? "float";
+}
+
+function templateTypePointerParamNames(sourceTail, name) {
+  const signatureEnd = sourceTail.indexOf("{");
+  if (signatureEnd < 0) return [];
+  const signature = sourceTail.slice(0, signatureEnd);
+  const open = signature.indexOf("(");
+  const params = balancedParenContents(signature, open);
+  if (params === undefined) return [];
+  const escaped = escapeRegExp(name);
+  return splitTopLevel(params).flatMap((param) => {
+    const cleaned = param
+      .replace(/\b(?:const|volatile|__restrict__|__restrict|restrict)\b/gu, " ")
+      .replace(/\s+/gu, " ")
+      .trim();
+    const match = new RegExp(`^${escaped}\\s*(?:\\*|&)\\s*([A-Za-z_][A-Za-z0-9_]*)\\b|^${escaped}\\s+[*&]\\s*([A-Za-z_][A-Za-z0-9_]*)\\b`, "u").exec(cleaned);
+    return match?.[1] ?? match?.[2] ?? [];
+  });
+}
+
+function canonicalTemplateScalarType(sourceTail, name, definesByName = new Map()) {
+  const params = templateTypeScalarParamNames(sourceTail, name);
+  if (params.length === 0) return undefined;
+  if (params.some((param) => /(?:count|num|size|len|idx|index|offset|addr|tid|id|mask|flag)/iu.test(param))) return "uint";
+  return undefined;
+}
+
+function templateTypeScalarParamNames(sourceTail, name) {
+  const signatureEnd = sourceTail.indexOf("{");
+  if (signatureEnd < 0) return [];
+  const signature = sourceTail.slice(0, signatureEnd);
+  const open = signature.indexOf("(");
+  const params = balancedParenContents(signature, open);
+  if (params === undefined) return [];
+  const escaped = escapeRegExp(name);
+  return splitTopLevel(params).flatMap((param) => {
+    const cleaned = param
+      .replace(/\b(?:const|volatile|__restrict__|__restrict|restrict)\b/gu, " ")
+      .replace(/\s+/gu, " ")
+      .trim();
+    if (new RegExp(`^${escaped}\\s*(?:\\*|&)|^${escaped}\\s+[*&]`, "u").test(cleaned)) return [];
+    return new RegExp(`^${escaped}\\s+([A-Za-z_][A-Za-z0-9_]*)\\b`, "u").exec(cleaned)?.[1] ?? [];
+  });
 }
 
 function canonicalTemplateValueArgument(sourceTail, name, definesByName = new Map()) {
@@ -871,7 +926,9 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
   if (type === "__nv_bfloat16" || type === "nv_bfloat16") return "bf16";
   if (type === "unsigned int" || type === "unsigned") return "uint";
   if (type === "unsigned char" || type === "uchar" || type === "uint8_t") return "uint";
+  if (type === "unsigned short" || type === "unsigned short int") return "uint";
   if (type === "signed int" || type === "signed") return "int";
+  if (type === "signed short" || type === "signed short int") return "int";
   if (type === "int64_t" || type === "int32_t") return "int";
   if (type === "uint64_t" || type === "uint32_t" || type === "uintptr_t") return "uint";
   if (type === "signed char" || type === "char" || type === "int8_t") return "int";
@@ -880,6 +937,13 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
     type === "size_t" ||
     type === "size_type" ||
     type === "curandState" ||
+    type === "curandState_t" ||
+    type === "curandStateSobol32" ||
+    type === "curandStateSobol32_t" ||
+    type === "curandStateSobol64" ||
+    type === "curandStateSobol64_t" ||
+    type === "curandDirectionVectors32_t" ||
+    type === "curandDirectionVectors64_t" ||
     type === "CUtensorMap" ||
     type === "cudaGraphConditionalHandle" ||
     type === "__nv_fp8_storage_t" ||
@@ -1270,6 +1334,16 @@ function normalizeCarrierMemberReferences(source, definesByName) {
     out = out.replace(re, value);
   }
   return out;
+}
+
+function normalizeCudaVectorCarrierAliases(source, definesByName = new Map()) {
+  return source.replace(/\b(?:typename\s+)?vec([234])\s*<\s*([A-Za-z_][A-Za-z0-9_:]*)\s*>\s*::\s*(?:Type|float)\b/gu, (match, lanes, rawType) => {
+    const scalar = normalizeTemplateTypeArgument(definesByName.get(rawType) ?? rawType, definesByName);
+    if (scalar === "float" || scalar === "double") return `float${lanes}`;
+    if (scalar === "int") return `int${lanes}`;
+    if (scalar === "uint") return `uint${lanes}`;
+    return match;
+  });
 }
 
 function normalizePodRecordVectorAliases(source, definesByName = new Map()) {
@@ -2730,6 +2804,11 @@ function parseSimpleTypeAlias(line, defines) {
     const value = normalizeArrayAliasType(sourceType, rawLength, defines);
     return value && alias ? { name: alias, value } : undefined;
   }
+  const functionPointerTypedefMatch = /^\s*typedef\s+[\s\S]+?\(\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*\([^;]*\)\s*;\s*$/u.exec(line);
+  if (functionPointerTypedefMatch !== null) {
+    const alias = functionPointerTypedefMatch[1];
+    return alias ? { name: alias, value: "uint" } : undefined;
+  }
   const typedefMatch = /^\s*typedef\s+(.+?)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;\s*$/u.exec(line);
   if (typedefMatch !== null) {
     const [, sourceType, alias] = typedefMatch;
@@ -3254,7 +3333,8 @@ function parseFunctionParamForInference(param, templateTypeNames) {
 function collectVisiblePointerTypes(source, initialDefines = new Map()) {
   const symbols = new Map();
   const defines = mergeDefineMaps(initialDefines, collectObjectDefines(source));
-  const re = /\b(?:(?:const|volatile)\s+)*([A-Za-z_][A-Za-z0-9_:]*)\s*(?:\*\s*(?:(?:const|volatile|__restrict__|__restrict|restrict)\s+)*)+\s*([A-Za-z_][A-Za-z0-9_]*)\b/gu;
+  const typePattern = "(?:(?:unsigned|signed)\\s+(?:char|short|int|long)|long\\s+long|[A-Za-z_][A-Za-z0-9_:]*)";
+  const re = new RegExp(`\\b(?:(?:const|volatile)\\s+)*(${typePattern})\\s*(?:\\*\\s*(?:(?:const|volatile|__restrict__|__restrict|restrict)\\s+)*)+\\s*([A-Za-z_][A-Za-z0-9_]*)\\b`, "gu");
   for (const match of source.matchAll(re)) {
     const [, type, name] = match;
     if (type && name) symbols.set(name, normalizeTemplateTypeArgument(defines.get(type) ?? type, defines) ?? type);
@@ -3265,7 +3345,8 @@ function collectVisiblePointerTypes(source, initialDefines = new Map()) {
 function collectVisibleValueTypes(source, initialDefines = new Map()) {
   const symbols = new Map();
   const defines = mergeDefineMaps(initialDefines, collectObjectDefines(source));
-  const re = /\b(?:const\s+|constexpr\s+|static\s+|volatile\s+)*([A-Za-z_][A-Za-z0-9_:]*)\s+([A-Za-z_][A-Za-z0-9_]*)\b(?!\s*\()/gu;
+  const typePattern = "(?:(?:unsigned|signed)\\s+(?:char|short|int|long)|long\\s+long|[A-Za-z_][A-Za-z0-9_:]*)";
+  const re = new RegExp(`\\b(?:const\\s+|constexpr\\s+|static\\s+|volatile\\s+)*(${typePattern})\\s+([A-Za-z_][A-Za-z0-9_]*)\\b(?!\\s*\\()`, "gu");
   for (const match of source.matchAll(re)) {
     const [, rawType, name] = match;
     if (!rawType || !name) continue;

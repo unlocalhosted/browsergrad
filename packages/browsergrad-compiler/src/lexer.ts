@@ -305,12 +305,21 @@ function normalizeAliasType(sourceType: string | undefined, defines: ReadonlyMap
   if (/[<>]/u.test(type)) return undefined;
   if (type === "unsigned int" || type === "unsigned") return "uint";
   if (type === "unsigned char" || type === "uchar" || type === "uint8_t") return "uint";
+  if (type === "unsigned short" || type === "unsigned short int") return "uint";
   if (type === "signed int" || type === "signed") return "int";
+  if (type === "signed short" || type === "signed short int") return "int";
   if (type === "signed char" || type === "char" || type === "int8_t") return "int";
   if (
     type === "clock_t" ||
     type === "size_type" ||
     type === "curandState" ||
+    type === "curandState_t" ||
+    type === "curandStateSobol32" ||
+    type === "curandStateSobol32_t" ||
+    type === "curandStateSobol64" ||
+    type === "curandStateSobol64_t" ||
+    type === "curandDirectionVectors32_t" ||
+    type === "curandDirectionVectors64_t" ||
     type === "CUtexObject" ||
     type === "CUtensorMap" ||
     type === "cudaGraphConditionalHandle" ||

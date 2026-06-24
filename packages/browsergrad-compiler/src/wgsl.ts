@@ -190,6 +190,10 @@ export function emitKernelIrWgsl(
     lines.push("");
     lines.push(...emitCurandHelpers());
   }
+  if (usesFrexp(ir)) {
+    lines.push("");
+    lines.push(...emitFrexpHelpers());
+  }
   if (usesSpecialFloatNamedConstants(ir)) {
     lines.push("");
     lines.push(...emitSpecialFloatConstantHelpers());
@@ -801,6 +805,9 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
   const cooperativeParams = new Map(fn.params
     .filter((param) => param.cooperativeGroupKind !== undefined)
     .map((param) => [param.name, cooperativeGroupForParam(param, context)] as const));
+  const functionPointerParams = new Set(fn.params
+    .filter((param) => param.pointer && usesFunctionLocalPointerParam(fn, param, context.ir))
+    .map((param) => param.name));
   const functionLocalPointerHandles = collectLocalPointerHandles(fn.body);
   const functionContext = withDevicePointerParams(
     {
@@ -812,12 +819,14 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
         return cooperativeParams.get(name) ?? context.cooperativeGroupFor(name);
       },
     },
-    fn.params.filter((param) => param.pointer),
+    fn.params.filter((param) => param.pointer && !functionPointerParams.has(param.name)),
     new Set([...fn.params.map((param) => param.name), ...collectLocalNames(fn.body)]),
   );
   const params = [
     ...fn.params.flatMap((param) => param.pointer
-      ? [`${context.nameFor(`${param.name}_buffer_arg`)}: u32`, `${context.nameFor(`${param.name}_base_arg`)}: u32`]
+      ? functionPointerParams.has(param.name)
+        ? [`${context.nameFor(param.name)}: ptr<function, ${wgslScalar(param.valueType)}>`]
+        : [`${context.nameFor(`${param.name}_buffer_arg`)}: u32`, `${context.nameFor(`${param.name}_base_arg`)}: u32`]
       : param.cooperativeGroupKind !== undefined
         ? param.cooperativeGroupKind === "thread"
           ? [`${context.nameFor(`${param.name}_tile_size_arg`)}: u32`]
@@ -833,6 +842,7 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
   const lines = [`fn ${context.nameFor(fn.name)}(${params.join(", ")})${returnType} {`];
   for (const param of fn.params) {
     if (param.pointer) {
+      if (functionPointerParams.has(param.name)) continue;
       lines.push(`  var ${context.nameFor(`${param.name}_buffer`)}: u32 = ${context.nameFor(`${param.name}_buffer_arg`)};`);
       lines.push(`  var ${context.nameFor(`${param.name}_base`)}: u32 = ${context.nameFor(`${param.name}_base_arg`)};`);
     } else if (param.cooperativeGroupKind !== undefined) {
@@ -872,6 +882,33 @@ function withDevicePointerParams(
       return pointerParams.has(name) ? context.nameFor(`${name}_base`) : context.mutablePointerBaseFor(name);
     },
   };
+}
+
+function usesFunctionLocalPointerParam(
+  fn: CudaLiteDeviceFunction,
+  param: CudaLiteParam,
+  ir: KernelIrModule,
+): boolean {
+  if (!param.pointer) return false;
+  const paramIndex = fn.params.findIndex((item) => item.name === param.name);
+  if (paramIndex < 0) return false;
+  let sawCall = false;
+  let allCallsUseLocalAddress = true;
+  for (const statements of [ir.body, ...ir.functions.map((item) => item.body)]) {
+    walkCudaLiteExpressions(statements, (expression) => {
+      if (!allCallsUseLocalAddress || expression.kind !== "call" || expressionName(expression.callee) !== fn.name) return;
+      sawCall = true;
+      const arg = expression.args[paramIndex];
+      if (!arg || !isFunctionLocalPointerArgument(arg)) allCallsUseLocalAddress = false;
+    });
+  }
+  return sawCall && allCallsUseLocalAddress;
+}
+
+function isFunctionLocalPointerArgument(expression: CudaLiteExpression): boolean {
+  return expression.kind === "unary" &&
+    expression.operator === "&" &&
+    expression.argument.kind === "identifier";
 }
 
 function usesDevicePointerParams(ir: KernelIrModule): boolean {
@@ -2350,6 +2387,12 @@ function emitVectorMinMaxCall(
   return `${op}(${expression.args.map((arg) => emitExpressionAsVectorOperand(arg, vectorType, context)).join(", ")})`;
 }
 
+function emitFrexpCall(expression: CudaLiteCallExpression, context: EmitContext): string {
+  const value = expression.args[0] ? emitExpressionAsValueType(expression.args[0], "float", context) : "0.0";
+  const exponent = expression.args[1] ? emitExpression(expression.args[1], context) : "&__bg_missing_frexp_exp";
+  return `bg_frexp(${value}, ${exponent})`;
+}
+
 function castExpressionToVectorScalar(value: string, vectorType: CudaLiteScalarType): string {
   return `${wgslScalar(cudaVectorScalarType(vectorType) ?? "float")}(${value})`;
 }
@@ -2378,7 +2421,9 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       if (param.valueType === "texture2d") return [emitTextureArgument(arg, context)];
       if (!arg) return param.pointer ? ["0u", "0u"] : [zeroValue(param.valueType)];
       return param.pointer
-        ? emitDevicePointerArgument(arg, context)
+        ? usesFunctionLocalPointerParam(deviceFunction, param, context.ir)
+          ? [emitExpression(arg, context)]
+          : emitDevicePointerArgument(arg, context)
         : [emitExpressionAsValueType(arg, param.valueType, context)];
     });
     return `${context.nameFor(name ?? deviceFunction.name)}(${[...args, "local_id", "workgroup_id", "num_workgroups"].join(", ")})`;
@@ -2386,6 +2431,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   const args = expression.args.map((arg) => emitExpression(arg, context));
   const vectorMinMax = emitVectorMinMaxCall(expression, name, context);
   if (vectorMinMax !== undefined) return vectorMinMax;
+  if (name === "frexp" || name === "frexpf") return emitFrexpCall(expression, context);
   const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
   if (intrinsic?.emitWgsl) return intrinsic.emitWgsl(args);
   const vectorConstructor = name ? cudaVectorConstructorType(name) : undefined;
@@ -3955,6 +4001,20 @@ function emitCurandHelpers(): string[] {
   ];
 }
 
+function emitFrexpHelpers(): string[] {
+  return [
+    "fn bg_frexp(value: f32, exponent_out: ptr<function, i32>) -> f32 {",
+    "  if (value == 0.0 || isNan(value) || isInf(value)) {",
+    "    *exponent_out = 0;",
+    "    return value;",
+    "  }",
+    "  let exponent = i32(floor(log2(abs(value)))) + 1;",
+    "  *exponent_out = exponent;",
+    "  return value / exp2(f32(exponent));",
+    "}",
+  ];
+}
+
 function storageElementType(param: CudaLiteParam, ir: KernelIrModule): string {
   if (isCudaVectorType(param.valueType)) return wgslScalar(cudaVectorScalarType(param.valueType) ?? "float");
   if (param.valueType === "bool") return "u32";
@@ -4023,6 +4083,11 @@ function usesAtomicIncDec(ir: KernelIrModule): boolean {
 function usesCurand(ir: KernelIrModule): boolean {
   return statementsUseCall(ir.body, new Set(["curand_init", "curand_uniform"])) ||
     ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["curand_init", "curand_uniform"])));
+}
+
+function usesFrexp(ir: KernelIrModule): boolean {
+  return statementsUseCall(ir.body, new Set(["frexp", "frexpf"])) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["frexp", "frexpf"])));
 }
 
 function usesSpecialFloatNamedConstants(ir: KernelIrModule): boolean {

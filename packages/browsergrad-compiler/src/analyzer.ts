@@ -64,6 +64,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["blockReduce", [1, 3]],
   ["min", [2, 2]],
   ["max", [2, 2]],
+  ["frexp", [2, 2]],
+  ["frexpf", [2, 2]],
   ["div_ceil", [2, 2]],
   ["fill_1D_regs", [2, 2]],
   ["fill_2D_regs", [2, 2]],
@@ -1141,6 +1143,10 @@ function validateCallExpression(
   }
   const vectorMath = validateVectorMinMaxCall(expression, callName, scope, diagnostics, requiredFeatures, walkExpression);
   if (vectorMath) return vectorMath;
+  if (callName === "frexp" || callName === "frexpf") {
+    validateFrexp(expression, scope, diagnostics, walkExpression);
+    return { kind: "scalar", valueType: "float" };
+  }
   const intrinsic = CUDA_INTRINSICS_BY_NAME.get(callName);
   if (intrinsic) {
     for (const feature of intrinsic.requiredFeatures ?? []) requiredFeatures.add(feature);
@@ -1260,6 +1266,26 @@ function validateVectorMinMaxCall(
   }
   if (cudaVectorScalarType(vectorType) === "half") requiredFeatures.add("shader-f16");
   return { kind: "vector", valueType: vectorType };
+}
+
+function validateFrexp(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const value = expression.args[0];
+  const exponent = expression.args[1];
+  if (value) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
+  if (!exponent) return;
+  const info = validateReadPointerExpression(exponent, scope, diagnostics, walkExpression);
+  if (info.kind !== "address" && info.kind !== "unknown") {
+    diagnostics.push(error("unsupported-frexp-exponent", "frexp exponent must be an addressable local int", exponent.span));
+    return;
+  }
+  if (info.valueType !== undefined && info.valueType !== "int") {
+    diagnostics.push(error("unsupported-frexp-exponent", "frexp exponent must point to int storage", exponent.span));
+  }
 }
 
 function validateReadPointerOperand(

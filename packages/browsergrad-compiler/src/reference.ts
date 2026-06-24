@@ -91,6 +91,7 @@ interface LValue {
   readonly fieldIndex?: number;
   readonly valueType?: CudaLiteScalarType;
   readonly rawStorageIndex?: boolean;
+  readonly locals?: Map<string, LocalValue>;
 }
 
 interface ThreadContext {
@@ -749,7 +750,7 @@ function pointerArgumentValue(
   const offset = pointerOffsetArgumentValue(arg, valueType, context);
   if (offset) return offset;
   if (arg.kind === "unary" && arg.operator === "&") {
-    const target = resolveLValue(arg.argument, context);
+    const target = withLocalScope(resolveLValue(arg.argument, context), context);
     return { kind: "address", target: { ...target, valueType: target.valueType ?? valueType } };
   }
   if (arg.kind === "identifier") {
@@ -991,7 +992,7 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
       return readLValue(lvalue, context);
     }
     case "unary": {
-      if (expression.operator === "&") return { kind: "address", target: resolveLValue(expression.argument, context) };
+      if (expression.operator === "&") return { kind: "address", target: withLocalScope(resolveLValue(expression.argument, context), context) };
       if (expression.operator === "*") return evalDeref(expression.argument, context);
       const value = evalNumber(expression.argument, context);
       if (expression.operator === "-") return -value;
@@ -1145,6 +1146,10 @@ function readMemberObject(expression: CudaLiteExpression, context: ThreadContext
 }
 
 function readIdentifier(name: string, context: ThreadContext): LocalValue {
+  return readIdentifierFrom(name, context, context.locals);
+}
+
+function readIdentifierFrom(name: string, context: ThreadContext, locals: ReadonlyMap<string, LocalValue>): LocalValue {
   if (name === "nullptr") return { kind: "pool-pointer", poolName: "", byteOffset: -1 };
   const namedConstant = CUDA_NAMED_CONSTANTS.get(name);
   if (namedConstant) return namedConstant.value;
@@ -1152,7 +1157,7 @@ function readIdentifier(name: string, context: ThreadContext): LocalValue {
   if (name === "blockIdx") return context.blockIdx;
   if (name === "blockDim") return context.blockDim;
   if (name === "gridDim") return context.gridDim;
-  if (context.locals.has(name)) return context.locals.get(name)!;
+  if (locals.has(name)) return locals.get(name)!;
   if (Object.prototype.hasOwnProperty.call(context.textures, name)) return { kind: "texture-handle", name };
   if (context.shared.has(name)) return readLValue({ name, space: "shared", index: 0 }, context);
   if (context.constants.has(name)) {
@@ -1763,6 +1768,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   );
   const vectorMinMax = evalVectorMinMaxCall(name, expression, context);
   if (vectorMinMax !== undefined) return vectorMinMax;
+  if (name === "frexp" || name === "frexpf") return evalFrexp(expression, context);
   const args = expression.args.map((arg) => evalNumber(arg, context));
   const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
   if (intrinsic?.evaluate) return intrinsic.evaluate(args);
@@ -1893,6 +1899,18 @@ function readTextureVector(
     return lane === 3 ? 1 : 0;
   });
   return { kind: "cuda-vector", valueType, lanes };
+}
+
+function evalFrexp(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): number {
+  const value = evalNumber(expression.args[0]!, context);
+  const exponentTarget = resolvePointerArgument(expression.args[1]!, context);
+  if (value === 0 || !Number.isFinite(value)) {
+    writeLValue(exponentTarget, 0, context);
+    return value;
+  }
+  const exponent = Math.floor(Math.log2(Math.abs(value))) + 1;
+  writeLValue(exponentTarget, exponent, context);
+  return value / 2 ** exponent;
 }
 
 function evalVectorMinMaxCall(
@@ -2161,11 +2179,11 @@ function resolveAddressArgument(expression: CudaLiteExpression, context: ThreadC
   if (expression.kind !== "unary" || expression.operator !== "&") {
     throw compilerFailure("expected address argument");
   }
-  return resolveLValue(expression.argument, context);
+  return withLocalScope(resolveLValue(expression.argument, context), context);
 }
 
 function resolvePointerArgument(expression: CudaLiteExpression, context: ThreadContext): LValue {
-  if (expression.kind === "unary" && expression.operator === "&") return resolveLValue(expression.argument, context);
+  if (expression.kind === "unary" && expression.operator === "&") return withLocalScope(resolveLValue(expression.argument, context), context);
   const valueType = pointerValueTypeForExpression(expression, context);
   const pointer = pointerArgumentValue(expression, valueType, context);
   if (isPoolPointer(pointer)) {
@@ -2178,6 +2196,10 @@ function resolvePointerArgument(expression: CudaLiteExpression, context: ThreadC
   }
   if (typeof pointer !== "number" && "kind" in pointer && pointer.kind === "address") return pointer.target;
   throw compilerFailure("expected pointer argument");
+}
+
+function withLocalScope(lvalue: LValue, context: ThreadContext): LValue {
+  return lvalue.space === "local" ? { ...lvalue, locals: context.locals } : lvalue;
 }
 
 function curandNext(state: number): number {
@@ -2341,8 +2363,9 @@ function resolvePointerInitializer(statement: CudaLiteVarDecl, context: ThreadCo
 
 function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
   if (lvalue.space === "local") {
-    if (lvalue.index === undefined) return projectField(readIdentifier(lvalue.name, context), lvalue);
-    const local = context.locals.get(lvalue.name);
+    const locals = lvalue.locals ?? context.locals;
+    if (lvalue.index === undefined) return projectField(readIdentifierFrom(lvalue.name, context, locals), lvalue);
+    const local = locals.get(lvalue.name);
     if (!isLocalArray(local)) throw compilerFailure(`'${lvalue.name}' is not a local array`);
     const valueType = lvalue.valueType ?? local.valueType;
     const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
@@ -2400,8 +2423,9 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
 
 function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): void {
   if (lvalue.space === "local") {
+    const locals = lvalue.locals ?? context.locals;
     if (lvalue.index !== undefined) {
-      const local = context.locals.get(lvalue.name);
+      const local = locals.get(lvalue.name);
       if (!isLocalArray(local)) throw compilerFailure(`'${lvalue.name}' is not a local array`);
       const valueType = lvalue.valueType ?? local.valueType;
       const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
@@ -2411,21 +2435,21 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
       return;
     }
     if (lvalue.field || lvalue.fieldIndex !== undefined) {
-      const current = readIdentifier(lvalue.name, context);
+      const current = readIdentifierFrom(lvalue.name, context, locals);
       if (isComplex(current)) {
         if (lvalue.fieldIndex !== undefined) throw compilerFailure(`'${lvalue.name}' is not a CUDA vector`);
-        context.locals.set(lvalue.name, { ...current, [lvalue.field!]: valueAsNumber(value, lvalue.name) });
+        locals.set(lvalue.name, { ...current, [lvalue.field!]: valueAsNumber(value, lvalue.name) });
       } else if (isCudaVectorValue(current)) {
         const field = lvalue.fieldIndex ?? cudaVectorFieldIndex(current.valueType, lvalue.field!);
         if (field === undefined) throw compilerFailure(`unsupported ${current.valueType} member '${lvalue.field}'`);
         const lanes = [...current.lanes];
         lanes[field] = valueAsNumber(value, lvalue.name);
-        context.locals.set(lvalue.name, { ...current, lanes });
+        locals.set(lvalue.name, { ...current, lanes });
       } else {
         throw compilerFailure(`'${lvalue.name}' is not complex or CUDA vector`);
       }
     } else {
-      context.locals.set(lvalue.name, value);
+      locals.set(lvalue.name, value);
     }
     return;
   }

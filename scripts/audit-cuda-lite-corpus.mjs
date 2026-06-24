@@ -60,6 +60,8 @@ const PORTABLE_POINTER_BASE_TYPES = new Set([
   "uint4",
 ]);
 const SEMANTIC_BUILTIN_DEVICE_HELPERS = new Set([
+  "min",
+  "max",
   "__ldcs",
   "__stcs",
   "__ldg",

@@ -294,6 +294,31 @@ __global__ void conditionalPointer(float *out, const float *fallback, const floa
     expect([...result.buffers.out as Float32Array]).toEqual([7]);
   });
 
+  it("lowers device helper local scalar out params as WGSL function pointers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void bounds(float x, float *lo, float *hi) {
+  *lo = x - 1.0f;
+  *hi = x + 1.0f;
+}
+
+__global__ void writeBounds(float *out) {
+  float lo = 0.0f;
+  float hi = 0.0f;
+  bounds(3.0f, &lo, &hi);
+  out[0] = lo;
+  out[1] = hi;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("lo: ptr<function, f32>");
+    expect(compiled.wgsl).toContain("*lo =");
+    expect([...result.buffers.out as Float32Array]).toEqual([2, 4]);
+  });
+
   it("lowers vector reinterpret memory-view helpers through the pointer ABI", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ float4 ld_vec(const float* address) {
@@ -573,10 +598,10 @@ __global__ void integerAliases(int32_t *signedOut, uint32_t *unsignedOut, signed
 
   it("accepts CUDA opaque/index aliases and volatile qualifiers", () => {
     const compiled = compileCudaLiteKernel(`
-__global__ void cudaAliasKernel(volatile size_type *out, curandState *state, CUtensorMap map, cudaGraphConditionalHandle handle) {
+__global__ void cudaAliasKernel(volatile size_type *out, curandState *state, curandStateSobol64 *sobol, curandDirectionVectors64_t direction, CUtensorMap map, cudaGraphConditionalHandle handle) {
   volatile size_type idx = threadIdx.x;
   if (idx < 1) {
-    out[0] = idx + map + handle + state[0];
+    out[0] = idx + map + handle + state[0] + sobol[0] + direction;
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
@@ -585,14 +610,16 @@ __global__ void cudaAliasKernel(volatile size_type *out, curandState *state, CUt
         buffers: {
           out: new Uint32Array(1),
           state: new Uint32Array([5]),
+          sobol: new Uint32Array([13]),
         },
-        scalars: { map: 7, handle: 11 },
+        scalars: { direction: 17, map: 7, handle: 11 },
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
     expect(compiled.ir.params.map((param) => [param.name, param.valueType])).toContainEqual(["map", "uint"]);
-    expect([...result.buffers.out as Uint32Array]).toEqual([23]);
+    expect(compiled.ir.params.map((param) => [param.name, param.valueType])).toContainEqual(["direction", "uint"]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([53]);
   });
 
   it("allows C++ block scopes to shadow outer CUDA symbols", () => {
@@ -2116,6 +2143,26 @@ __global__ void c_math_aliases(float *x, float *out) {
     expect(compiled.wgsl).toContain("pow(abs(value), 2.0)");
     expect(compiled.wgsl).toContain("fma(0.25, (6.0 - 2.0), 2.0)");
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(expected, 5);
+  });
+
+  it("lowers C frexp exponent out params", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void frexpKernel(float *out, int *expOut) {
+  int exponent = 0;
+  float mantissa = frexp(9.0f, &exponent);
+  out[0] = mantissa;
+  expOut[0] = exponent;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1), expOut: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_frexp(");
+    expect(compiled.wgsl).toContain("bg_frexp(f32(9.0), &exponent)");
+    expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(0.5625, 6);
+    expect([...result.buffers.expOut as Int32Array]).toEqual([4]);
   });
 
   it("lets user device functions shadow CUDA math aliases when CUDA source defines them", () => {

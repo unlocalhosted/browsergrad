@@ -76,8 +76,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   excludes kernels now runnable on real WebGPU through orchestration; current
   baseline is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=264`
-  WebGPU-runnable, and `<=93` hard gaps;
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=269`
+  WebGPU-runnable, and `<=88` hard gaps;
   `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=148`
   WebGPU-runnable, and `0` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=218`
@@ -152,6 +152,12 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   scalar pointer packs.
   Custom CUDA-vector `cg::reduce` calls lower through scalar subgroup
   shuffle-XOR loops backed by user device merge helpers.
+  Device helper calls can now pass local scalar out-params through WGSL
+  function pointers, CUDA opaque RNG handles parse as u32-backed handles,
+  function-pointer typedefs normalize as opaque handles, scalar template
+  count/index params fall back to numeric integer types, C `frexp` writes local
+  exponent outputs in reference and WGSL, and `typename vecN<T>::Type` carrier
+  aliases normalize into CUDA vector types.
   Fixed thread-local arrays lower to per-thread WGSL function arrays and CPU
   reference typed arrays. Source normalization now also supplies conservative
   block-size defaults for unresolved launch-bound template value params and

@@ -41,6 +41,13 @@ const CUDA_SCALAR_TYPE_ALIASES = new Map<string, Exclude<CudaLiteScalarType, "vo
   ["clock_t", "uint"],
   ["size_type", "uint"],
   ["curandState", "uint"],
+  ["curandState_t", "uint"],
+  ["curandStateSobol32", "uint"],
+  ["curandStateSobol32_t", "uint"],
+  ["curandStateSobol64", "uint"],
+  ["curandStateSobol64_t", "uint"],
+  ["curandDirectionVectors32_t", "uint"],
+  ["curandDirectionVectors64_t", "uint"],
   ["CUtexObject", "texture2d"],
   ["CUsurfObject", "surface2d"],
   ["CUtensorMap", "uint"],
@@ -1173,7 +1180,15 @@ class Parser {
     if (token.value === "ptrdiff_t") return "int";
     if (token.value === "int32_t" || token.value === "int64_t") return "int";
     if (token.value === "uint32_t" || token.value === "uint64_t" || token.value === "uintptr_t") return "uint";
-    if (token.value === "curandState_t") return "uint";
+  if (
+    token.value === "curandState_t" ||
+    token.value === "curandStateSobol32" ||
+    token.value === "curandStateSobol32_t" ||
+    token.value === "curandStateSobol64" ||
+    token.value === "curandStateSobol64_t" ||
+    token.value === "curandDirectionVectors32_t" ||
+    token.value === "curandDirectionVectors64_t"
+  ) return "uint";
     if (token.value === "cufftComplex") return "complex64";
     if (token.value === "cudaTextureObject_t") return "texture2d";
     if (token.value === "cudaSurfaceObject_t") return "surface2d";

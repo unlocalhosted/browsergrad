@@ -839,6 +839,18 @@ void host(half *out) {
 }
 
 {
+  const source = createKernelCompilationUnit({
+    kernel: `
+template <typename T = float>
+__global__ void vector_carrier_kernel(typename vec4<T>::Type *out, typename vec3<T>::Type value) {
+  out[threadIdx.x] = { value.x, value.y, value.z, 1.0f };
+}`,
+  });
+  assert.match(source, /__global__ void vector_carrier_kernel\(float4 \*out, float3 value\)/u);
+  assert.doesNotMatch(source, /typename vec/u);
+}
+
+{
   const wrapperSource = `
 typedef float floatX;
 template<class T>
@@ -1039,6 +1051,65 @@ __global__ void canonical_type_kernel(Value *out, const Value *input, Layout lay
   assert.match(source, /template <typename Value = float, typename Layout>/u);
   assert.match(source, /__global__ void canonical_type_kernel\(float \*out, const float \*input, Layout layout\)/u);
   assert.doesNotMatch(source, /Layout = float/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    functionDeclarations: [
+      "typedef unsigned int TColor;",
+      "typedef unsigned char (*pointFunction_t)(unsigned char, float);",
+    ],
+    kernel: `
+__global__ void alias_intake_kernel(TColor *out, pointFunction_t fn) {
+  out[threadIdx.x] = (TColor)threadIdx.x;
+}`,
+  });
+  assert.match(source, /__global__ void alias_intake_kernel\(uint \*out, uint fn\)/u);
+  assert.match(source, /out\[threadIdx\.x\] = \(uint\)threadIdx\.x;/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void inferred_scalar_template(uint *out, unsigned short *scratch) {
+  unsigned int count = threadIdx.x;
+  sink(out, scratch, count);
+}`,
+    deviceFunctions: [
+      {
+        name: "sink",
+        source: `
+template <class S, class T>
+__device__ void sink(T *out, unsigned short *scratch, const S count) {
+  out[0] = (T)(count + scratch[0]);
+}`,
+      },
+    ],
+  });
+  assert.match(source, /template <class S = uint, class T = uint>/u);
+  assert.match(source, /__device__ void sink\(uint \*out, unsigned short \*scratch, const uint count\)/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void semantic_min_kernel(float *out) {
+  out[0] = min(1.0f, 2.0f);
+}`,
+    deviceFunctions: [
+      {
+        name: "min",
+        source: `
+__host__ __device__
+T
+min(const T &lhs, const T &rhs) {
+  return (lhs < rhs) ? lhs : rhs;
+}`,
+      },
+    ],
+  });
+  assert.match(source, /out\[0\] = min\(1\.0f, 2\.0f\);/u);
+  assert.doesNotMatch(source, /\bT\s+min/u);
 }
 
 {
