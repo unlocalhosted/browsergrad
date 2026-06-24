@@ -118,28 +118,29 @@ for (const file of files) {
       }
       const fallback = classifyReferenceFallback(directAttempt.source, kernelName);
       const diagnostic = directAttempt.error?.diagnostics?.[0];
-        const feature = diagnostic
-          ? describeCudaDiagnostic(diagnostic)
-          : undefined;
-        results.push({
-          file,
-          block: blockIndex + 1,
-          kernel: kernelIndex + 1,
-          kernelName,
-          ok: false,
-          error: diagnostic?.code ?? error?.name ?? "error",
-          family: feature?.family ?? "unknown",
-          feature: feature?.label ?? "Unknown compatibility gap",
-          lowering: feature?.lowering ?? "unsupported",
-          message: diagnostic?.message ?? String(error?.message ?? error).split("\n")[0],
-          ...(includeSources ? { source: directAttempt.source } : {}),
-          referenceOk: fallback.referenceOk,
-          webGpuLiftOk: fallback.webGpuLiftOk,
-          webGpuLiftKind: fallback.webGpuLiftKind,
-          webGpuLiftBlocker: fallback.webGpuLiftBlocker,
-          webGpuLiftBlockerKind: fallback.webGpuLiftBlockerKind,
-          webGpuLiftBlockerCode: fallback.webGpuLiftBlockerCode,
-        });
+      const feature = diagnostic
+        ? describeCudaDiagnostic(diagnostic)
+        : undefined;
+      const error = directAttempt.error;
+      results.push({
+        file,
+        block: blockIndex + 1,
+        kernel: kernelIndex + 1,
+        kernelName,
+        ok: false,
+        error: diagnostic?.code ?? error?.name ?? "error",
+        family: feature?.family ?? "unknown",
+        feature: feature?.label ?? "Unknown compatibility gap",
+        lowering: feature?.lowering ?? "unsupported",
+        message: diagnostic?.message ?? String(error?.message ?? error).split("\n")[0],
+        ...(includeSources ? { source: directAttempt.source } : {}),
+        referenceOk: fallback.referenceOk,
+        webGpuLiftOk: fallback.webGpuLiftOk,
+        webGpuLiftKind: fallback.webGpuLiftKind,
+        webGpuLiftBlocker: fallback.webGpuLiftBlocker,
+        webGpuLiftBlockerKind: fallback.webGpuLiftBlockerKind,
+        webGpuLiftBlockerCode: fallback.webGpuLiftBlockerCode,
+      });
     }
     carriedDefines = mergeCarriedDefines(carriedDefines, directContext.blockDefines);
   }

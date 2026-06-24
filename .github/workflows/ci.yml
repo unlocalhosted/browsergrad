@@ -49,6 +49,12 @@ jobs:
       - run: pnpm -r build
       - run: pnpm -r test
 
+      - name: Run compiler typecheck
+        run: pnpm --filter @unlocalhosted/browsergrad-compiler typecheck
+
+      - name: Run compiler lint
+        run: pnpm --filter @unlocalhosted/browsergrad-compiler lint
+
   integration:
     name: Pyodide integration tests
     runs-on: ubuntu-latest
@@ -102,3 +108,6 @@ jobs:
         run: pnpm --filter @unlocalhosted/browsergrad-kernels test:browser
         continue-on-error: true # Linux SwiftShader path is still flaky;
                                 # don't gate every PR on it until stable
+
+      - name: Run compiler browser suite
+        run: pnpm --filter @unlocalhosted/browsergrad-compiler test:browser

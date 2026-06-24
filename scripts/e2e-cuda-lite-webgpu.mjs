@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
+import { corpusById, corpusFixturePath, cudaLiteCorpusExecutionFixtures } from "./cuda-lite-corpus-registry.mjs";
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i++) {
@@ -25,6 +27,7 @@ const { createServer } = await import(pathToFileURL(packageRequire.resolve("vite
 const playwright = await import(pathToFileURL(packageRequire.resolve("playwright")).href);
 const chromium = playwright.chromium ?? playwright.default?.chromium;
 if (!chromium) throw new Error("could not load Playwright chromium");
+if (requireCorpusFixtures) verifyCorpusFixtureCheckouts();
 
 const examplesRoot = path.join(root, "packages/browsergrad-compiler/examples");
 const sources = {
@@ -209,6 +212,10 @@ __global__ void reciprocalIntrinsic(float *x, float *out) {
 }`,
   ...loadCorpusExecutionSources(),
 };
+const corpusFixtureNamesBySourceKey = Object.fromEntries(
+  cudaLiteCorpusExecutionFixtures.map((fixture) => [fixture.sourceKey, fixture.caseName]),
+);
+const expectedCorpusFixtureNames = cudaLiteCorpusExecutionFixtures.map((fixture) => fixture.caseName);
 
 const html = String.raw`<!doctype html>
 <html>
@@ -231,6 +238,8 @@ const html = String.raw`<!doctype html>
       } from "@unlocalhosted/browsergrad-compiler";
 
       const SOURCES = ${JSON.stringify(sources)};
+      const CORPUS_FIXTURE_NAMES = ${JSON.stringify(corpusFixtureNamesBySourceKey)};
+      const EXPECTED_CORPUS_FIXTURE_NAMES = ${JSON.stringify(expectedCorpusFixtureNames)};
 
       window.__bgRunE2e = async () => {
         if (!navigator.gpu) {
@@ -267,13 +276,6 @@ const html = String.raw`<!doctype html>
 
         const failed = cases.filter((item) => !item.ok);
         const corpusFixtureCases = cases.filter((item) => item.name.startsWith("corpus:"));
-        const expectedCorpusFixtureNames = [
-          "corpus:cuda-120:vectorAddKernel",
-          "corpus:cuda-samples:vectorAdd",
-          "corpus:llm.c:add_bias",
-          "corpus:llm.c:set_vector",
-          "corpus:LeetCUDA:elementwise_add_f32_kernel",
-        ];
         const loadedCorpusFixtureNames = new Set(corpusFixtureCases.map((item) => item.name));
         return {
           available: true,
@@ -281,8 +283,8 @@ const html = String.raw`<!doctype html>
           corpusFixtureCases: corpusFixtureCases.length,
           corpusFixturePassed: corpusFixtureCases.filter((item) => item.ok).length,
           corpusFixtureFailed: corpusFixtureCases.filter((item) => !item.ok).length,
-          expectedCorpusFixtureNames,
-          missingCorpusFixtureNames: expectedCorpusFixtureNames.filter((name) => !loadedCorpusFixtureNames.has(name)),
+          expectedCorpusFixtureNames: EXPECTED_CORPUS_FIXTURE_NAMES,
+          missingCorpusFixtureNames: EXPECTED_CORPUS_FIXTURE_NAMES.filter((name) => !loadedCorpusFixtureNames.has(name)),
           passed: cases.length - failed.length,
           failed: failed.length,
         };
@@ -519,7 +521,7 @@ const html = String.raw`<!doctype html>
         ];
         if (SOURCES.corpusCuda120VectorAddKernel) {
           cases.push({
-            name: "corpus:cuda-120:vectorAddKernel",
+            name: CORPUS_FIXTURE_NAMES.corpusCuda120VectorAddKernel,
             source: SOURCES.corpusCuda120VectorAddKernel,
             options: { workgroupSize: [8, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
@@ -536,7 +538,7 @@ const html = String.raw`<!doctype html>
         }
         if (SOURCES.corpusCudaSamplesVectorAdd) {
           cases.push({
-            name: "corpus:cuda-samples:vectorAdd",
+            name: CORPUS_FIXTURE_NAMES.corpusCudaSamplesVectorAdd,
             source: SOURCES.corpusCudaSamplesVectorAdd,
             options: { workgroupSize: [8, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
@@ -553,7 +555,7 @@ const html = String.raw`<!doctype html>
         }
         if (SOURCES.corpusLlmAddBias) {
           cases.push({
-            name: "corpus:llm.c:add_bias",
+            name: CORPUS_FIXTURE_NAMES.corpusLlmAddBias,
             source: SOURCES.corpusLlmAddBias,
             options: { workgroupSize: [8, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
@@ -569,7 +571,7 @@ const html = String.raw`<!doctype html>
         }
         if (SOURCES.corpusLlmSetVector) {
           cases.push({
-            name: "corpus:llm.c:set_vector",
+            name: CORPUS_FIXTURE_NAMES.corpusLlmSetVector,
             source: SOURCES.corpusLlmSetVector,
             options: { workgroupSize: [8, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
@@ -584,7 +586,7 @@ const html = String.raw`<!doctype html>
         }
         if (SOURCES.corpusLeetCudaElementwiseAddF32) {
           cases.push({
-            name: "corpus:LeetCUDA:elementwise_add_f32_kernel",
+            name: CORPUS_FIXTURE_NAMES.corpusLeetCudaElementwiseAddF32,
             source: SOURCES.corpusLeetCudaElementwiseAddF32,
             options: { workgroupSize: [8, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
@@ -772,32 +774,36 @@ function markdownReport(data) {
 
 function loadCorpusExecutionSources() {
   const out = {};
-  const cuda120 = extractGlobalKernelFromFile(
-    "/tmp/CUDA-120-DAYS--CHALLENGE/daily-updates/day-23-Asynchronous-Memory-Copy.md",
-    "vectorAddKernel",
-  );
-  if (cuda120) out.corpusCuda120VectorAddKernel = cuda120;
-  const cudaSamplesVectorAdd = extractGlobalKernelFromFile(
-    "/tmp/browsergrad-corpora/cuda-samples/cpp/0_Introduction/vectorAdd/vectorAdd.cu",
-    "vectorAdd",
-  );
-  if (cudaSamplesVectorAdd) out.corpusCudaSamplesVectorAdd = cudaSamplesVectorAdd;
-  const llmAddBias = extractGlobalKernelFromFile(
-    "/tmp/browsergrad-corpora/llm.c/dev/cuda/matmul_forward.cu",
-    "add_bias",
-  );
-  if (llmAddBias) out.corpusLlmAddBias = llmAddBias;
-  const llmSetVector = extractGlobalKernelFromFile(
-    "/tmp/browsergrad-corpora/llm.c/dev/cuda/nccl_all_reduce.cu",
-    "set_vector",
-  );
-  if (llmSetVector) out.corpusLlmSetVector = llmSetVector;
-  const leetCudaElementwiseAddF32 = extractGlobalKernelFromFile(
-    "/tmp/browsergrad-corpora/LeetCUDA/kernels/elementwise/elementwise.cu",
-    "elementwise_add_f32_kernel",
-  );
-  if (leetCudaElementwiseAddF32) out.corpusLeetCudaElementwiseAddF32 = leetCudaElementwiseAddF32;
+  for (const fixture of cudaLiteCorpusExecutionFixtures) {
+    const source = extractGlobalKernelFromFile(corpusFixturePath(fixture), fixture.kernelName);
+    if (source) out[fixture.sourceKey] = source;
+  }
   return out;
+}
+
+function verifyCorpusFixtureCheckouts() {
+  const seen = new Set();
+  for (const fixture of cudaLiteCorpusExecutionFixtures) {
+    if (seen.has(fixture.corpusId)) continue;
+    seen.add(fixture.corpusId);
+    const corpus = corpusById(fixture.corpusId);
+    const gitDir = path.join(corpus.path, ".git");
+    if (!fs.existsSync(gitDir)) {
+      throw new Error(`${corpus.id} expected pinned git checkout at ${corpus.path}`);
+    }
+    const result = spawnSync("git", ["-C", corpus.path, "rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      throw new Error(`${corpus.id} could not verify pinned checkout: ${result.stderr}`);
+    }
+    const actual = result.stdout.trim();
+    if (actual !== corpus.commit) {
+      throw new Error(`${corpus.id} expected ${corpus.commit}, got ${actual}`);
+    }
+  }
 }
 
 function extractGlobalKernelFromFile(filePath, name) {

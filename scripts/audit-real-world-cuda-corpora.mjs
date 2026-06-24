@@ -3,69 +3,14 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { cudaLiteCorpora } from "./cuda-lite-corpus-registry.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "..");
-const corpusRoot = process.env.BROWSERGRAD_CUDA_CORPUS_ROOT ??
-  "/tmp/browsergrad-corpora";
-
-const corpora = [
-  {
-    id: "cuda-120",
-    name: "CUDA-120-DAYS--CHALLENGE",
-    repo: "https://github.com/AdepojuJeremy/CUDA-120-DAYS--CHALLENGE.git",
-    commit: "fd2987a2b1a4e506629ae9beb22ee6434da2d414",
-    path: "/tmp/CUDA-120-DAYS--CHALLENGE",
-    expectations: {
-      total: 240,
-      okMin: 225,
-      compileCodegenMin: 240,
-      referenceOnlyMax: 0,
-      hardFailMax: 0,
-    },
-  },
-  {
-    id: "cuda-samples",
-    name: "NVIDIA/cuda-samples",
-    repo: "https://github.com/NVIDIA/cuda-samples.git",
-    commit: "b7c5481c556c3fe98db060207ecaa41a4b9a9abc",
-    path: path.join(corpusRoot, "cuda-samples"),
-    expectations: {
-      total: 357,
-      compileCodegenMin: 303,
-      hardFailMax: 53,
-    },
-  },
-  {
-    id: "llm.c",
-    name: "karpathy/llm.c",
-    repo: "https://github.com/karpathy/llm.c.git",
-    commit: "f1e2ace651495b74ae22d45d1723443fd00ecd3a",
-    path: path.join(corpusRoot, "llm.c"),
-    expectations: {
-      total: 148,
-      compileCodegenMin: 148,
-      hardFailMax: 0,
-    },
-  },
-  {
-    id: "leetcuda",
-    name: "xlite-dev/LeetCUDA",
-    repo: "https://github.com/xlite-dev/LeetCUDA.git",
-    commit: "c5dde9a653d077d71445bcbf822d4bf13672a69e",
-    path: path.join(corpusRoot, "LeetCUDA"),
-    expectations: {
-      total: 293,
-      compileCodegenMin: 278,
-      hardFailMax: 15,
-    },
-  },
-];
-
 const options = parseArgs(process.argv.slice(2));
 const selected = options.only.size === 0
-  ? corpora
-  : corpora.filter((corpus) => options.only.has(corpus.id));
+  ? cudaLiteCorpora
+  : cudaLiteCorpora.filter((corpus) => options.only.has(corpus.id));
 if (selected.length === 0) {
   console.error(`no matching corpora for --only (${[...options.only].join(", ")})`);
   process.exit(2);
@@ -77,7 +22,8 @@ const failures = [];
 for (const corpus of selected) {
   console.log(`\n== ${corpus.name} @ ${corpus.commit.slice(0, 7)} ==`);
   try {
-    if (!options.skipFetch) ensureCorpus(corpus);
+    if (options.skipFetch) verifyCorpus(corpus);
+    else ensureCorpus(corpus);
     const audit = runAudit(corpus, options);
     const summary = audit.summary ?? audit;
     const record = {
@@ -129,6 +75,17 @@ function ensureCorpus(corpus) {
   const actual = runCapture("git", ["-C", corpus.path, "rev-parse", "HEAD"], root).trim();
   if (actual !== corpus.commit) {
     throw new Error(`${corpus.id} expected ${corpus.commit}, got ${actual}`);
+  }
+}
+
+function verifyCorpus(corpus) {
+  const gitDir = path.join(corpus.path, ".git");
+  if (!existsSync(gitDir)) {
+    throw new Error(`${corpus.id} expected pinned git checkout at ${corpus.path}; run without --skip-fetch first`);
+  }
+  const actual = runCapture("git", ["-C", corpus.path, "rev-parse", "HEAD"], root).trim();
+  if (actual !== corpus.commit) {
+    throw new Error(`${corpus.id} expected ${corpus.commit}, got ${actual}; run without --skip-fetch to refresh`);
   }
 }
 
@@ -216,7 +173,7 @@ function parseArgs(args) {
       continue;
     }
     if (arg === "--help" || arg === "-h") {
-      console.log(`usage: node scripts/audit-real-world-cuda-corpora.mjs [--only ${corpora.map((corpus) => corpus.id).join("|")}] [--skip-fetch] [--limit N] [--details] [--sources]`);
+      console.log(`usage: node scripts/audit-real-world-cuda-corpora.mjs [--only ${cudaLiteCorpora.map((corpus) => corpus.id).join("|")}] [--skip-fetch] [--limit N] [--details] [--sources]`);
       process.exit(0);
     }
     throw new Error(`unexpected argument: ${arg}`);

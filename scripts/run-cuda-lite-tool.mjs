@@ -80,6 +80,7 @@ async function removeStaleLock(dir) {
       await rm(dir, { recursive: true, force: true });
       return;
     }
+    if (owner?.pid !== undefined) return;
     const info = await stat(dir);
     if (Date.now() - info.mtimeMs > staleLockMs) {
       await rm(dir, { recursive: true, force: true });
