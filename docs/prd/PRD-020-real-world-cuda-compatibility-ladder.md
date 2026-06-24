@@ -60,7 +60,7 @@ Repo exploration:
 
 Local corpus audits on 2026-06-24:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `291` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `292` direct
   compile/codegen-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -144,7 +144,7 @@ Local corpus audits on 2026-06-24:
   `cuda::std::uint32_t` functional casts, iterative file-scope constexpr
   folding, and semantics-preserving prefix-update `while` canonicalization,
   native `do while` lowering, and deterministic `%globaltimer` inline PTX,
-  with `65` hard gaps.
+  with `64` hard gaps.
   Main failures:
   parser/frontend gaps, texture/vector
   operators, remaining `half2` intrinsics, templates, and runtime library
@@ -193,7 +193,7 @@ Local corpus audits on 2026-06-24:
   cache-load assignment expansion into lane-wise stores, plus custom
   CUDA-vector `cg::reduce` lowering through scalar subgroup shuffle-XOR loops,
   with `0` hard gaps.
-- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `273` direct
+- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `275` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, local header context, and
   simple C++ alias / constexpr intake plus `FLOAT4(x)`-style typed storage
@@ -203,7 +203,8 @@ Local corpus audits on 2026-06-24:
   `half2` arithmetic intrinsics, builtin infinity lowering, and standalone C
   block scopes plus CUDA shuffle/fence/conversion intrinsics, generic warp
   reduction aliases, CUDA half conversion aliases, object-macro device
-  helpers, and scalarized WMMA fragment/load/mma/store lowering,
+  helpers, scalarized WMMA fragment/load/mma/store lowering, tf32 fragment
+  aliases, and fragment `.x[]` / `.num_elements` lane access,
   helper discovery, POSIX/C math constants, call-shaped helper intake, and
   define-backed device-helper template defaults, with semantic `cp.async`
   source normalization, synchronous pointer-form lowering, bounded dependent
@@ -265,9 +266,9 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
-- The current live aggregate gate is `952/1038` compile/codegen-runnable across the four
-  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `291/357`, `llm.c`
-  `148/148`, and LeetCUDA `273/293`.
+- The current live aggregate gate is `955/1038` compile/codegen-runnable across the four
+  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `292/357`, `llm.c`
+  `148/148`, and LeetCUDA `275/293`.
 
 ## Grill Decisions
 
@@ -414,11 +415,11 @@ Acceptance criteria for the first slice:
   compile/codegen-runnable count, hard-gap count, error codes, semantic
   families, and explicit `executionTierCounts`.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=291` compile/codegen-runnable, and `<=65` hard gaps.
+  `>=292` compile/codegen-runnable, and `<=64` hard gaps.
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions,
   `>=148` compile/codegen-runnable, and `0` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
-  `>=273` compile/codegen-runnable, and `<=20` hard gaps.
+  `>=275` compile/codegen-runnable, and `<=18` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
   unit tests.
 - Intrinsic-ledger expansion improves coverage through generic CUDA math and

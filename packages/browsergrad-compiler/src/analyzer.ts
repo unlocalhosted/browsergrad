@@ -25,6 +25,7 @@ import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queri
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import {
   type WmmaBuiltin,
+  matrixTileElementCount,
   matrixTileReference,
   normalizeMatrixTileLayout,
   normalizeMatrixTileRole,
@@ -2534,6 +2535,8 @@ function validateNonCallExpression(
       return { kind: "scalar", valueType: expression.valueType };
     }
     case "member": {
+      const matrixMember = validateMatrixTileMemberExpression(expression, scope, diagnostics, walkExpression);
+      if (matrixMember) return matrixMember;
       const object = walkExpression(expression.object, scope);
       if (object.kind === "unknown") return { kind: "unknown" };
       if (object.kind === "complex") {
@@ -2730,6 +2733,36 @@ function validateNonCallExpression(
     case "call":
       return { kind: "unknown" };
   }
+}
+
+function validateMatrixTileMemberExpression(
+  expression: Extract<CudaLiteExpression, { kind: "member" }>,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): ExpressionInfo | undefined {
+  const ref = matrixTileReference(expression.object);
+  if (!ref) return undefined;
+  const symbol = lookupSymbol(ref.root, scope, expression.span);
+  if (!symbol?.matrixTile) return undefined;
+  for (const index of ref.indices) validateScalarOperand(walkExpression(index, scope), index.span, diagnostics);
+  const dimensions = symbol.dimensions ?? [];
+  if (ref.indices.length !== dimensions.length) {
+    diagnostics.push(error("invalid-wmma-fragment-index", `WMMA fragment '${ref.root}' expects ${dimensions.length} leading index${dimensions.length === 1 ? "" : "es"} before member access`, expression.span));
+  }
+  const spec = resolveMatrixTileSpec(symbol.matrixTile);
+  if (!spec) return { kind: "unknown" };
+  if (expression.property === "num_elements") return { kind: "scalar", valueType: "int" };
+  if (expression.property === "x") {
+    return {
+      kind: "array",
+      valueType: spec.valueType,
+      dimensions: [matrixTileElementCount(spec)],
+      symbol,
+    };
+  }
+  diagnostics.push(error("unsupported-wmma-fragment-member", `unsupported WMMA fragment member '${expression.property}'`, expression.span));
+  return { kind: "unknown" };
 }
 
 function validateLValueExpression(

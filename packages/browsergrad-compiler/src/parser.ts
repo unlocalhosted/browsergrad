@@ -793,7 +793,13 @@ class Parser {
       };
     } catch {
       this.index = startIndex;
-      return this.parseQualifiedName("WMMA fragment value type");
+      const qualified = this.parseQualifiedName("WMMA fragment value type");
+      return {
+        ...qualified,
+        ...((qualified.name === "wmma::precision::tf32" || qualified.name === "nvcuda::wmma::precision::tf32")
+          ? { valueType: "float" as const }
+          : {}),
+      };
     }
   }
 
@@ -929,7 +935,7 @@ class Parser {
     const matrixTile = this.startsWmmaFragmentType() || this.match("wmma") || this.match("nvcuda")
       ? this.parseWmmaFragmentType()
       : undefined;
-    const valueType = matrixTile?.valueType ?? this.parseType();
+    const valueType = matrixTile ? matrixTile.valueType ?? "float" : this.parseType();
     this.consumeCvQualifiers();
     const declarations: CudaLiteVarDecl[] = [];
     do {

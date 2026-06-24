@@ -1579,6 +1579,9 @@ __global__ void wmma_toy(float* A, float* B, float* C) {
   wmma::load_matrix_sync(a, A, 2);
   wmma::load_matrix_sync(b, B, 2);
   wmma::mma_sync(c, a, b, c);
+  for (int t = 0; t < c.num_elements; t++) {
+    c.x[t] = c.x[t] + 1.0f;
+  }
   wmma::store_matrix_sync(C, c, 2, wmma::mem_row_major);
 }`;
     const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });

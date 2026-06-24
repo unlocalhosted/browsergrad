@@ -1073,6 +1073,8 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
       }
       return castNumber(expression.valueType, evalNumber(expression.expression, context));
     case "member": {
+      const matrixMember = evalMatrixTileMember(expression, context);
+      if (matrixMember !== undefined) return matrixMember;
       const object = readMemberObject(expression.object, context);
       if (isComplex(object)) {
         if (expression.property === "x") return object.x;
@@ -2502,6 +2504,8 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
   if (pointerCast) return pointerCast;
   const pool = resolvePoolLValue(expression, context);
   if (pool) return pool;
+  const matrixLane = resolveMatrixTileLaneLValue(expression, context);
+  if (matrixLane) return matrixLane;
   if (expression.kind === "unary" && expression.operator === "*") {
     return resolvePointerArgument(expression.argument, context);
   }
@@ -2575,6 +2579,43 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
     return { name: cursor.name, space: "buffer", index: chain[0]! };
   }
   throw compilerFailure(`unknown lvalue '${cursor.name}'`);
+}
+
+function evalMatrixTileMember(
+  expression: Extract<CudaLiteExpression, { kind: "member" }>,
+  context: ThreadContext,
+): EvalValue | undefined {
+  const ref = matrixTileReference(expression.object);
+  if (!ref) return undefined;
+  const local = context.locals.get(ref.root);
+  if (!isLocalArray(local) || !local.matrixTile) return undefined;
+  const spec = resolveMatrixTileSpec(local.matrixTile);
+  if (!spec) throw compilerFailure(`WMMA fragment '${ref.root}' has invalid metadata`);
+  if (expression.property === "num_elements") return matrixTileElementCount(spec);
+  if (expression.property === "x") throw compilerFailure("WMMA fragment lane storage requires indexed access");
+  throw compilerFailure(`unsupported WMMA fragment member '${expression.property}'`);
+}
+
+function resolveMatrixTileLaneLValue(expression: CudaLiteExpression, context: ThreadContext): LValue | undefined {
+  if (expression.kind !== "index" || expression.target.kind !== "member" || expression.target.property !== "x") return undefined;
+  const ref = matrixTileReference(expression.target.object);
+  if (!ref) return undefined;
+  const local = context.locals.get(ref.root);
+  if (!isLocalArray(local) || !local.matrixTile) return undefined;
+  const spec = resolveMatrixTileSpec(local.matrixTile);
+  if (!spec) throw compilerFailure(`WMMA fragment '${ref.root}' has invalid metadata`);
+  const leadingDimensions = local.matrixTileArrayDimensions ?? [];
+  const leadingIndices = ref.indices.map((index) => Math.trunc(evalNumber(index, context)));
+  const leading = flattenMatrixTileLeadingIndex(leadingDimensions, leadingIndices);
+  if (leading < 0) throw compilerFailure(`WMMA fragment '${ref.root}' expects ${leadingDimensions.length} leading indices`);
+  const lane = Math.trunc(evalNumber(expression.index, context));
+  return {
+    name: ref.root,
+    space: "local",
+    index: leading * matrixTileElementCount(spec) + lane,
+    valueType: spec.valueType,
+    rawStorageIndex: true,
+  };
 }
 
 function resolvePointerCastLValue(expression: CudaLiteExpression, context: ThreadContext): LValue | undefined {

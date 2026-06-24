@@ -1804,6 +1804,8 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
     case "member":
       return emitMember(expression, context);
     case "index": {
+      const matrixLane = emitMatrixTileLaneAccessExpression(expression, context);
+      if (matrixLane) return matrixLane;
       if (expression.target.kind === "identifier") {
         const localType = context.localValueTypeFor(expression.target.name);
         if (isCudaVectorType(localType)) {
@@ -2830,6 +2832,8 @@ function emitDeref(expression: CudaLiteExpression, context: EmitContext): string
 }
 
 function emitMember(expression: Extract<CudaLiteExpression, { kind: "member" }>, context: EmitContext): string {
+  const matrixMember = emitMatrixTileMemberExpression(expression, context);
+  if (matrixMember) return matrixMember;
   if (expression.property === "size") {
     const valueType = expressionValueTypeForEmit(expression.object, context);
     if (isCudaVectorType(valueType)) return String(cudaVectorLaneCount(valueType));
@@ -2852,6 +2856,37 @@ function emitMember(expression: Extract<CudaLiteExpression, { kind: "member" }>,
     default:
       return `${emitExpression(expression.object, context)}.${expression.property}`;
   }
+}
+
+function emitMatrixTileMemberExpression(
+  expression: Extract<CudaLiteExpression, { kind: "member" }>,
+  context: EmitContext,
+): string | undefined {
+  const ref = matrixTileReference(expression.object);
+  if (!ref) return undefined;
+  const declaration = context.localArrayFor(ref.root);
+  const spec = declaration?.matrixTile ? resolveMatrixTileSpec(declaration.matrixTile) : undefined;
+  if (!declaration || !spec) return undefined;
+  if (expression.property === "num_elements") return String(matrixTileElementCount(spec));
+  if (expression.property === "x") throw featureError("unsupported-wmma-fragment-member", "WMMA fragment lane storage requires indexed access");
+  throw featureError("unsupported-wmma-fragment-member", `unsupported WMMA fragment member '${expression.property}'`);
+}
+
+function emitMatrixTileLaneAccessExpression(
+  expression: Extract<CudaLiteExpression, { kind: "index" }>,
+  context: EmitContext,
+): string | undefined {
+  if (expression.target.kind !== "member" || expression.target.property !== "x") return undefined;
+  const ref = matrixTileReference(expression.target.object);
+  if (!ref) return undefined;
+  const declaration = context.localArrayFor(ref.root);
+  const spec = declaration?.matrixTile ? resolveMatrixTileSpec(declaration.matrixTile) : undefined;
+  if (!declaration || !spec) return undefined;
+  const base = emitMatrixTileBase(ref.indices, declaration.dimensions, matrixTileElementCount(spec), context);
+  const lane = `u32(${emitExpression(expression.index, context)})`;
+  return base === "0u"
+    ? `${context.nameFor(ref.root)}[${lane}]`
+    : `${context.nameFor(ref.root)}[(${base} + ${lane})]`;
 }
 
 function expressionValueTypeForEmit(expression: CudaLiteExpression, context: EmitContext): CudaLiteScalarType | undefined {
