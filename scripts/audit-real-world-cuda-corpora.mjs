@@ -56,8 +56,8 @@ const corpora = [
     path: path.join(corpusRoot, "LeetCUDA"),
     expectations: {
       total: 293,
-      webgpuMin: 275,
-      hardFailMax: 18,
+      webgpuMin: 277,
+      hardFailMax: 16,
     },
   },
 ];

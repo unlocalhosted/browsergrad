@@ -169,28 +169,30 @@ export function createKernelCompilationUnit({
     kernelWithSharedDeclarations,
   ].filter((part) => part.trim().length > 0).join("\n"));
   const withCarrierMembers = normalizeCarrierMemberReferences(unit, effectiveDefines);
-  const withVectorCarrierAliases = normalizeCudaVectorCarrierAliases(withCarrierMembers, effectiveDefines);
+  const postCarrierAliasDefines = collectTypeAliasDefines(withCarrierMembers, effectiveDefines);
+  const postCarrierDefines = mergeDefineMaps(effectiveDefines, postCarrierAliasDefines);
+  const withVectorCarrierAliases = normalizeCudaVectorCarrierAliases(withCarrierMembers, postCarrierDefines);
   const withDeviceReferences = normalizeDeviceReferenceParams(withVectorCarrierAliases);
-  const withScalarizedRecords = normalizeScalarizedPodRecords(withDeviceReferences, effectiveDefines);
-  const withPodRecords = normalizePodRecordVectorAliases(withScalarizedRecords, effectiveDefines);
+  const withScalarizedRecords = normalizeScalarizedPodRecords(withDeviceReferences, postCarrierDefines);
+  const withPodRecords = normalizePodRecordVectorAliases(withScalarizedRecords, postCarrierDefines);
   const withNumericDefines = normalizeNumericObjectDefines(
     withPodRecords,
-    effectiveDefines,
+    postCarrierDefines,
     new Set([...params, ...templateNames]),
   );
   const withCudaPipeline = normalizeCudaPipelineAsync(withNumericDefines);
   const withTypeDefines = normalizeSupportedTypeDefineReferences(
     withCudaPipeline,
-    effectiveDefines,
+    postCarrierDefines,
     new Set([...params, ...templateNames]),
   );
   const withCooperativeGroupHelpers = normalizeCooperativeGroupHelperParams(withTypeDefines);
   const withVectorCooperativeReductions = normalizeVectorCooperativeReductions(withCooperativeGroupHelpers);
   const withStdMathAliases = normalizeStdMathAliases(withVectorCooperativeReductions);
-  const withoutSupportedAliases = stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withStdMathAliases, effectiveDefines));
-  const withVectorConstructors = normalizeVectorStaticConstructors(withoutSupportedAliases, effectiveDefines);
+  const withoutSupportedAliases = stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withStdMathAliases, postCarrierDefines));
+  const withVectorConstructors = normalizeVectorStaticConstructors(withoutSupportedAliases, postCarrierDefines);
   const withVectorLength = normalizeCudaVectorLength(withVectorConstructors);
-  const withWidePacks = normalizeWidePacked128Aliases(withVectorLength, effectiveDefines);
+  const withWidePacks = normalizeWidePacked128Aliases(withVectorLength, postCarrierDefines);
   const withPackedHelpers = normalizePacked128MemoryHelpers(withWidePacks);
   const withSharedHelpers = normalizeSharedMemoryHelpers(withPackedHelpers);
   const withSincosHelpers = normalizeSincosHelpers(withSharedHelpers);
@@ -204,7 +206,7 @@ export function createKernelCompilationUnit({
   const withStatementMacros = normalizeSimpleStatementMacros(withLegacyArithmeticMacros);
   const withSideEffects = normalizeSideEffectExpressions(withStatementMacros);
   const withScopedForVariables = normalizeForLoopScopedVariables(withSideEffects);
-  const withTemplateFallbacks = normalizeTemplateValueFallbacks(withScopedForVariables, effectiveDefines);
+  const withTemplateFallbacks = normalizeTemplateValueFallbacks(withScopedForVariables, postCarrierDefines);
   return normalizeCppTemplateCarrierSyntax(withTemplateFallbacks);
 }
 
@@ -386,7 +388,8 @@ export function collectKernelTemplateArguments(source) {
     }
   };
   for (const launch of scanTemplatedKernelReferences(source)) {
-    addCandidate(launch.name, launch.args);
+    const visibleConstants = collectVisibleIntegerConstants(source.slice(0, launch.templateStart), definesByName);
+    addCandidate(launch.name, launch.args.map((arg) => substituteTemplateArgument(arg, visibleConstants, definesByName)));
   }
   for (const propagated of collectWrapperPropagatedTemplateArguments(source, definesByName)) {
     addCandidate(propagated.name, propagated.args);
@@ -423,6 +426,7 @@ function isTemplateParamEcho(args, paramNames) {
 function isTemplateSymbolRefinement(previous, next, paramName) {
   if (previous === undefined || next === undefined || previous === next) return false;
   if (paramName !== undefined && previous === paramName && templateArgumentScore([next]) > 0) return true;
+  if (isTemplateSymbolArgument(previous) && !isTemplateSymbolArgument(next) && templateArgumentScore([next]) > 0) return true;
   if (!isTemplateSymbolArgument(previous) || !isTemplateSymbolArgument(next)) return false;
   return String(next).startsWith(`${previous}_`);
 }
@@ -3353,27 +3357,34 @@ function collectCarrierMemberDefines(source, initialDefines = new Map()) {
   if (carriers.size === 0) return out;
   const aliases = scanCarrierAliases(source);
   for (const alias of aliases) {
-    const carrier = carriers.get(alias.templateName);
-    if (carrier === undefined) continue;
-    const env = templateEnvironment(carrier.params, alias.args, mergeDefineMaps(initialDefines, out));
-    if (env.size === 0) continue;
-    const memberEnv = new Map(env);
-    for (const member of carrier.members) {
-      if (member.kind === "type") {
-        const substituted = substituteTemplateArgument(member.value, memberEnv, mergeDefineMaps(initialDefines, out));
-        const normalized = normalizeTemplateTypeArgument(substituted, mergeDefineMaps(initialDefines, out));
-        if (normalized === undefined) continue;
-        out.set(`${alias.name}::${member.name}`, normalized);
-        memberEnv.set(member.name, normalized);
-        continue;
-      }
-      const value = evaluateTemplateIntegerExpression(member.value, memberEnv);
-      if (value === undefined) continue;
-      out.set(`${alias.name}::${member.name}`, value);
-      memberEnv.set(member.name, value);
-    }
+    collectCarrierMemberDefinesForAlias(out, carriers, alias, initialDefines);
+  }
+  for (const alias of scanInstantiatedCarrierAliases(source, initialDefines)) {
+    collectCarrierMemberDefinesForAlias(out, carriers, alias, initialDefines);
   }
   return out;
+}
+
+function collectCarrierMemberDefinesForAlias(out, carriers, alias, initialDefines) {
+  const carrier = carriers.get(alias.templateName);
+  if (carrier === undefined) return;
+  const env = templateEnvironment(carrier.params, alias.args, mergeDefineMaps(initialDefines, out));
+  if (env.size === 0) return;
+  const memberEnv = new Map(env);
+  for (const member of carrier.members) {
+    if (member.kind === "type") {
+      const substituted = substituteTemplateArgument(member.value, memberEnv, mergeDefineMaps(initialDefines, out));
+      const normalized = normalizeTemplateTypeArgument(substituted, mergeDefineMaps(initialDefines, out));
+      if (normalized === undefined) continue;
+      out.set(`${alias.name}::${member.name}`, normalized);
+      memberEnv.set(member.name, normalized);
+      continue;
+    }
+    const value = evaluateTemplateIntegerExpression(member.value, memberEnv);
+    if (value === undefined) continue;
+    out.set(`${alias.name}::${member.name}`, value);
+    memberEnv.set(member.name, value);
+  }
 }
 
 function scanTemplateStructCarriers(source) {
@@ -3447,6 +3458,28 @@ function scanCarrierAliases(source) {
       continue;
     }
     index = start + 1;
+  }
+  return aliases;
+}
+
+function scanInstantiatedCarrierAliases(source, definesByName = new Map()) {
+  const aliases = [];
+  const calls = scanTemplatedCallReferences(source);
+  if (calls.length === 0) return aliases;
+  const functions = scanTemplatedFunctionDefinitions(source);
+  for (const fn of functions) {
+    const matchingCalls = calls.filter((call) => call.name === fn.name && call.args.length > 0);
+    if (matchingCalls.length === 0) continue;
+    for (const call of matchingCalls) {
+      const env = templateEnvironment(fn.templateParams, call.args, definesByName);
+      if (env.size === 0) continue;
+      for (const alias of scanCarrierAliases(fn.body)) {
+        aliases.push({
+          ...alias,
+          args: alias.args.map((arg) => substituteTemplateArgument(arg, env, definesByName)),
+        });
+      }
+    }
   }
   return aliases;
 }
@@ -3735,7 +3768,7 @@ function collectWrapperPropagatedTemplateArguments(source, definesByName = new M
     for (const call of fnCalls) {
       const env = templateEnvironment(fn.templateParams, call.args, definesByName);
       if (env.size === 0) continue;
-      extendEnvironmentWithConstexprs(env, fn.body);
+      extendEnvironmentWithConstexprs(env, fn.body, definesByName);
       for (const ref of kernelRefs) {
         const args = ref.args.map((arg) => substituteTemplateArgument(arg, env, definesByName));
         if (templateArgumentScore(args) === 0) continue;
@@ -4233,20 +4266,51 @@ function templateEnvironment(params, args, definesByName = new Map()) {
   return env;
 }
 
-function extendEnvironmentWithConstexprs(env, body) {
-  const re = /\bconstexpr\s+(?:const\s+)?(?:int|uint|unsigned\s+int|size_t|bool)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);/gu;
+function extendEnvironmentWithConstexprs(env, body, definesByName = new Map()) {
+  for (const [name, value] of numericTemplateDefines(mergeDefineMaps(definesByName, env))) env.set(name, value);
   let changed = true;
   while (changed) {
     changed = false;
-    for (const match of body.matchAll(re)) {
-      const [, name, expression] = match;
-      if (!name || !expression || env.has(name)) continue;
+    for (const { name, expression } of scanConstexprIntegerDeclarations(body)) {
+      if (env.has(name)) continue;
       const value = evaluateTemplateIntegerExpression(expression, env);
       if (value === undefined) continue;
       env.set(name, value);
       changed = true;
     }
   }
+}
+
+function collectVisibleIntegerConstants(source, definesByName = new Map()) {
+  const env = numericTemplateDefines(definesByName);
+  for (const [name, value] of numericTemplateDefines(env)) env.set(name, value);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const { name, expression } of scanConstexprIntegerDeclarations(source)) {
+      if (env.has(name)) continue;
+      const value = evaluateTemplateIntegerExpression(expression, env);
+      if (value === undefined) continue;
+      env.set(name, value);
+      changed = true;
+    }
+  }
+  return env;
+}
+
+function scanConstexprIntegerDeclarations(source) {
+  const declarations = [];
+  const re = /\b(?:constexpr|const|static)\s+(?:const\s+)?(?:int|uint|unsigned\s+int|size_t|ptrdiff_t|bool)\s+([^;]+);/gu;
+  for (const match of source.matchAll(re)) {
+    const tail = match[1];
+    if (!tail) continue;
+    for (const declarator of splitTopLevel(tail)) {
+      const parsed = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([\s\S]+?)\s*$/u.exec(declarator);
+      if (parsed?.[1] === undefined || parsed[2] === undefined) continue;
+      declarations.push({ name: parsed[1], expression: parsed[2].trim() });
+    }
+  }
+  return declarations;
 }
 
 function substituteTemplateArgument(arg, env, definesByName = new Map()) {

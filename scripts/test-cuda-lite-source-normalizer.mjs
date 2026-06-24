@@ -144,7 +144,26 @@ void launch(uint *out) {
       <<<1, 1>>>(out);
 }`;
   const launches = collectKernelTemplateArguments(source);
-  assert.deepEqual(launches.get("sample"), ["1U"]);
+  assert.deepEqual(launches.get("sample"), ["1"]);
+}
+
+{
+  const source = `
+template <int A, int B, int C>
+__global__ void dependent(int *out) { out[0] = A + B + C; }
+
+template <int HeadDim>
+void launch_dependent(int *out) {
+  constexpr int LocalB = HeadDim / 8;
+  constexpr int LocalC = 2 * LocalB;
+  dependent<HeadDim, LocalB, LocalC><<<1, 32>>>(out);
+}
+
+void launch(int *out) {
+  launch_dependent<64>(out);
+}`;
+  const launches = collectKernelTemplateArguments(source);
+  assert.deepEqual(launches.get("dependent"), ["64", "8", "16"]);
 }
 
 {
@@ -230,6 +249,58 @@ __device__ __forceinline__ T warp_reduce_sum(T val) {
   assert.match(source, /warp_reduce_sum\(1\.0f\)/u);
   assert.doesNotMatch(source, /\bT\s+(?:val|tmp|value)\b/u);
   assert.doesNotMatch(source, /warp_reduce_sum<WARP_SIZE>/u);
+}
+
+{
+  const fullSource = `
+template <typename T_, int Block_>
+struct KernelConfig {
+  using T = T_;
+  static constexpr int Block = Block_;
+};
+
+template <typename Config_>
+__global__ void configured_kernel(typename Config_::T *out) {
+  using T = typename Config_::T;
+  constexpr int Block = Config_::Block;
+  out[threadIdx.x] = static_cast<T>(Block);
+}
+
+template <int Block>
+void launch_configured(half_t *out) {
+  using config = KernelConfig<half_t, Block>;
+  configured_kernel<config><<<1, Block>>>(out);
+}
+
+void launch(half_t *out) {
+  launch_configured<64>(out);
+}`;
+  const kernel = fullSource.slice(fullSource.indexOf("template <typename Config_>"), fullSource.indexOf("template <int Block>")).trim();
+  const source = createKernelCompilationUnit({
+    kernel,
+    functionDeclarations: [fullSource],
+    templateArgumentsByKernelName: collectKernelTemplateArguments(fullSource),
+  });
+  assert.match(source, /template <typename Config_>/u);
+  assert.match(source, /__global__ void configured_kernel\(half \*out\)/u);
+  assert.match(source, /constexpr int Block = 64;/u);
+  assert.match(source, /static_cast<half>\(Block\)/u);
+  assert.doesNotMatch(source, /\bT\s+[A-Za-z_]/u);
+  assert.doesNotMatch(source, /Config_::/u);
+}
+
+{
+  const source = `
+template <int A, int B>
+__global__ void direct_dependent(int *out) { out[0] = A + B; }
+
+void launch(int *out) {
+  constexpr int Base = 64;
+  constexpr int Derived = Base / 8;
+  direct_dependent<Base, Derived><<<1, 32>>>(out);
+}`;
+  const launches = collectKernelTemplateArguments(source);
+  assert.deepEqual(launches.get("direct_dependent"), ["64", "8"]);
 }
 
 {
@@ -365,7 +436,7 @@ __global__ void parent(float *out) {
   child<16, true><<<1, 16>>>(out);
 }`;
   const launches = collectKernelTemplateArguments(`${child}\n${parent}`);
-  assert.deepEqual(launches.get("child"), ["16", "true"]);
+  assert.deepEqual(launches.get("child"), ["16", "1"]);
   const source = createKernelCompilationUnit({
     kernel: parent,
     siblingKernels: [child],
