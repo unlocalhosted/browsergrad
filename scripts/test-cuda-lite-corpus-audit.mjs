@@ -120,6 +120,9 @@ void launch_template_specialization(float *out, const float *data) {
   }
   const report = JSON.parse(result.stdout.slice(result.stdout.indexOf("{")));
   assertEqual(report.summary.totalKernelDefinitions, 5, "total kernel count");
+  assertEqual(report.summary.corpusKernelExecution, "compile-only", "corpus execution mode");
+  assertEqual(report.summary.webGpuCompiledOk, 5, "reverse include kernel WebGPU compiled");
+  assertEqual(report.summary.fixtureBackedExecutionOk, 0, "fixture-backed execution count");
   assertEqual(report.summary.webGpuRunnableOk, 5, "reverse include kernel WebGPU runnable");
   assertEqual(report.summary.hardFail, 0, "reverse include hard gaps");
   console.log("cuda-lite corpus audit tests passed");

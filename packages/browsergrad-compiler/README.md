@@ -348,14 +348,19 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
 ```
 
 `audit:corpus` extracts CUDA-shaped kernels from Markdown/CUDA/C++ files and
-reports single-dispatch WebGPU coverage, host-lifted WebGPU coverage, CPU
-reference fallbacks, and hard gaps. Failure details include WebGPU blocker
-kind/code/message. Threshold flags make corpus coverage regressions fail fast
-instead of living only in docs.
-`directLoweringOk` means strict one-pass WGSL compile. `webGpuRunnableOk` also
-counts host-orchestrated WebGPU plans such as grid-sync phases and dynamic
+reports compile/lowering coverage: strict single-dispatch WGSL compile,
+host-lifted WebGPU plan compile, CPU reference fallbacks, and hard gaps. It does
+not execute every external corpus kernel because most corpora do not carry
+portable launch fixtures and expected outputs. Failure details include WebGPU
+blocker kind/code/message. Threshold flags make corpus compile coverage
+regressions fail fast instead of living only in docs.
+`directLoweringOk` means strict one-pass WGSL compile. `webGpuRunnableOk` is a
+legacy name for `webGpuCompiledOk`: it counts kernels that compile to direct
+WGSL or host-orchestrated WebGPU plans such as grid-sync phases and dynamic
 launch lifts. The legacy `ok` and `fail` fields remain as strict direct-lowering
-metrics for older scripts.
+metrics for older scripts. Real execution proof lives in fixture-backed tests
+such as `pnpm --filter @unlocalhosted/browsergrad-compiler test:browser` and
+`scripts/e2e-cuda-lite-webgpu.mjs`.
 
 ## Performance Harness
 
