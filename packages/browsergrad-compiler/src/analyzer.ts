@@ -691,6 +691,51 @@ function validatePointerInitializerExpression(
   walkExpression(expression, scope);
 }
 
+function validateReadPointerExpression(
+  expression: CudaLiteExpression,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): ExpressionInfo {
+  if (expression.kind === "cast" && expression.pointer) {
+    return validateReadPointerExpression(expression.expression, scope, diagnostics, walkExpression);
+  }
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    const info = validateReadPointerExpression(expression.left, scope, diagnostics, walkExpression);
+    validateScalarOperand(walkExpression(expression.right, scope), expression.right.span, diagnostics);
+    return info;
+  }
+  if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
+    const pointer = expression.args[0];
+    const info = pointer === undefined
+      ? { kind: "unknown" as const }
+      : validateReadPointerExpression(pointer, scope, diagnostics, walkExpression);
+    for (const arg of expression.args.slice(1)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return info;
+  }
+  if (expression.kind === "unary" && expression.operator === "&") {
+    return validateAddressOfExpression(expression.argument, scope, diagnostics, walkExpression);
+  }
+  return walkExpression(expression, scope);
+}
+
+function validateAddressOfExpression(
+  expression: CudaLiteExpression,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): ExpressionInfo {
+  const info = walkExpression(expression, scope);
+  const addressable = expression.kind === "identifier" ||
+    expression.kind === "index" ||
+    expression.kind === "member" ||
+    (expression.kind === "unary" && expression.operator === "*");
+  if (!addressable && info.kind !== "unknown") {
+    diagnostics.push(error("invalid-address-target", "address-of expects an addressable CUDA expression", expression.span));
+  }
+  return { kind: "address", valueType: info.valueType, symbol: info.symbol };
+}
+
 function isSupportedStoragePointerInitializer(statement: CudaLiteVarDecl, scope: Scope): boolean {
   if (!statement.pointer || statement.storage !== "local") return false;
   const source = pointerSourceType(statement.init, scope);
@@ -1204,7 +1249,7 @@ function validateCpAsyncCopy(
     }
   }
   if (src !== undefined) {
-    const info = walkExpression(src, scope);
+    const info = validateReadPointerExpression(src, scope, diagnostics, walkExpression);
     if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "array" && info.kind !== "unknown") {
       diagnostics.push(error("unsupported-cache-hint-address", "cp.async source expects pointer expression", src.span));
     }

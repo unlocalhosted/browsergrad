@@ -1177,4 +1177,28 @@ __global__ void packed_half(floatX *out, const floatX *inp) {
   assert.match(source, /for \(int k = 0; k < 8; \+\+k\)/u);
 }
 
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void async_pipeline(float* out, const float* in) {
+  __shared__ alignas(alignof(float4)) float tile[16];
+  const auto shape4 = cuda::aligned_size_t<alignof(float4)>(sizeof(float4));
+  cuda::pipeline<cuda::thread_scope_thread> pipe = cuda::make_pipeline();
+  pipe.producer_acquire();
+  cuda::memcpy_async(&tile[threadIdx.x * 4], &in[threadIdx.x * 4], shape4, pipe);
+  pipe.producer_commit();
+  pipe.consumer_wait();
+  __syncthreads();
+  out[threadIdx.x] = tile[threadIdx.x];
+  pipe.consumer_release();
+}`,
+  });
+  assert.match(source, /const int shape4 = 16;/u);
+  assert.doesNotMatch(source, /cuda::pipeline/u);
+  assert.doesNotMatch(source, /cuda::memcpy_async/u);
+  assert.match(source, /CP_ASYNC_CG\(&tile\[threadIdx\.x \* 4\], &in\[threadIdx\.x \* 4\], 16\);/u);
+  assert.match(source, /CP_ASYNC_COMMIT_GROUP\(\);/u);
+  assert.match(source, /CP_ASYNC_WAIT_GROUP\(0\);/u);
+}
+
 console.log("cuda-lite source normalizer tests ok");

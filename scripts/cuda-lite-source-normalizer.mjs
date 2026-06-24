@@ -124,7 +124,8 @@ export function createKernelCompilationUnit({
     effectiveDefines,
     new Set([...params, ...templateNames]),
   );
-  const withoutSupportedAliases = stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withNumericDefines, effectiveDefines));
+  const withCudaPipeline = normalizeCudaPipelineAsync(withNumericDefines);
+  const withoutSupportedAliases = stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withCudaPipeline, effectiveDefines));
   const withVectorConstructors = normalizeVectorStaticConstructors(withoutSupportedAliases, effectiveDefines);
   const withWidePacks = normalizeWidePacked128Aliases(withVectorConstructors, effectiveDefines);
   const withPackedHelpers = normalizePacked128MemoryHelpers(withWidePacks);
@@ -1629,6 +1630,86 @@ function widePacked128PointerLane(pointer, lane) {
     return offset.length === 0 ? `${base}[${lane}]` : `${base}[(${offset}) + ${lane}]`;
   }
   return `(${pointer})[${lane}]`;
+}
+
+function normalizeCudaPipelineAsync(source) {
+  const alignedSizes = collectCudaAlignedSizeConstants(source);
+  let out = source.replace(
+    /\b(?:const\s+)?auto\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*cuda::aligned_size_t\s*<\s*alignof\s*\(\s*([^)]+?)\s*\)\s*>\s*\(\s*sizeof\s*\(\s*([^)]+?)\s*\)\s*\)\s*;/gu,
+    (_match, name, _alignType, sizeType) => `const int ${name} = ${cudaTypeByteSize(sizeType) ?? 4};`,
+  );
+  out = out.replace(
+    /\b__shared__\s+cuda::pipeline_shared_state\s*<[^;]+>\s+[A-Za-z_][A-Za-z0-9_]*\s*;/gu,
+    "",
+  );
+  out = out.replace(
+    /\bauto\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*cg::this_thread_block\s*\(\s*\)\s*;/gu,
+    "cg::thread_block $1 = cg::this_thread_block();",
+  );
+  out = out.replace(
+    /\b(?:const\s+)?auto\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[^;]*?cuda::pipeline_role::[A-Za-z_][A-Za-z0-9_:]*\s*;/gu,
+    "const int $1 = 0;",
+  );
+  out = out.replace(
+    /\bcuda::pipeline\s*<[^;=]+>\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*cuda::make_pipeline\s*\([^;]*\)\s*;/gu,
+    "int $1 = 0;",
+  );
+  out = out.replace(
+    /\bauto\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*cuda::make_pipeline\s*\([^;]*\)\s*;/gu,
+    "int $1 = 0;",
+  );
+  out = rewriteCudaMemcpyAsync(out, alignedSizes);
+  out = out.replace(/\b[A-Za-z_][A-Za-z0-9_]*\s*\.\s*producer_acquire\s*\(\s*\)\s*;/gu, "");
+  out = out.replace(/\b[A-Za-z_][A-Za-z0-9_]*\s*\.\s*producer_commit\s*\(\s*\)\s*;/gu, "CP_ASYNC_COMMIT_GROUP();");
+  out = out.replace(/\b[A-Za-z_][A-Za-z0-9_]*\s*\.\s*consumer_wait\s*\(\s*\)\s*;/gu, "CP_ASYNC_WAIT_GROUP(0);");
+  out = out.replace(/\b[A-Za-z_][A-Za-z0-9_]*\s*\.\s*consumer_release\s*\(\s*\)\s*;/gu, "");
+  return out;
+}
+
+function collectCudaAlignedSizeConstants(source) {
+  const constants = new Map();
+  const re = /\b(?:const\s+)?auto\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*cuda::aligned_size_t\s*<\s*alignof\s*\(\s*([^)]+?)\s*\)\s*>\s*\(\s*sizeof\s*\(\s*([^)]+?)\s*\)\s*\)\s*;/gu;
+  for (const match of source.matchAll(re)) {
+    const name = match[1];
+    const sizeType = match[3];
+    const size = cudaTypeByteSize(sizeType);
+    if (name !== undefined && size !== undefined) constants.set(name, size);
+  }
+  return constants;
+}
+
+function rewriteCudaMemcpyAsync(source, alignedSizes) {
+  return replaceBalancedCall(source, /\bcuda::memcpy_async\s*\(/gu, (_match, open, close) => {
+    const args = splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim());
+    const dst = args[0];
+    const src = args[1];
+    const bytes = cudaMemcpyAsyncByteCount(args[2], alignedSizes);
+    if (dst === undefined || src === undefined) return undefined;
+    return `CP_ASYNC_CG(${dst}, ${src}, ${bytes})`;
+  });
+}
+
+function cudaMemcpyAsyncByteCount(expression, alignedSizes) {
+  if (expression === undefined) return 4;
+  const trimmed = expression.trim();
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/u.test(trimmed)) return alignedSizes.get(trimmed) ?? trimmed;
+  const sizeof = /^sizeof\s*\(\s*([^)]+?)\s*\)$/u.exec(trimmed);
+  if (sizeof?.[1] !== undefined) return cudaTypeByteSize(sizeof[1]) ?? trimmed;
+  const aligned = /^cuda::aligned_size_t\s*<\s*alignof\s*\(\s*([^)]+?)\s*\)\s*>\s*\(\s*sizeof\s*\(\s*([^)]+?)\s*\)\s*\)$/u.exec(trimmed);
+  if (aligned?.[2] !== undefined) return cudaTypeByteSize(aligned[2]) ?? trimmed;
+  return trimmed;
+}
+
+function cudaTypeByteSize(type) {
+  const normalized = type
+    .replace(/\bconst\b|\bvolatile\b|\b__restrict__\b|\b__restrict\b|\brestrict\b/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (normalized === "float4" || normalized === "int4" || normalized === "uint4") return 16;
+  if (normalized === "float2" || normalized === "int2" || normalized === "uint2" || normalized === "double") return 8;
+  if (normalized === "float" || normalized === "int" || normalized === "uint" || normalized === "unsigned int") return 4;
+  if (normalized === "half" || normalized === "__half" || normalized === "bf16" || normalized === "__nv_bfloat16") return 2;
+  return undefined;
 }
 
 function normalizePacked128MemoryHelpers(source) {

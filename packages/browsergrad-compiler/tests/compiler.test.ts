@@ -2587,7 +2587,7 @@ __global__ void sharedVector(const float4* x, float4* y) {
 __global__ void async_copy(const float *input, float *output) {
   __shared__ float tile[4];
   if (threadIdx.x < 1) {
-    CP_ASYNC_CG(tile, input, 16);
+    CP_ASYNC_CG(&tile[0], &input[0], 16);
     CP_ASYNC_COMMIT_GROUP();
     CP_ASYNC_WAIT_GROUP(0);
   }
