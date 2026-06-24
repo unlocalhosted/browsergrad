@@ -149,7 +149,8 @@ export function createKernelCompilationUnit({
     new Set([...params, ...templateNames]),
   );
   const withCooperativeGroupHelpers = normalizeCooperativeGroupHelperParams(withTypeDefines);
-  const withoutSupportedAliases = stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withCooperativeGroupHelpers, effectiveDefines));
+  const withStdMathAliases = normalizeStdMathAliases(withCooperativeGroupHelpers);
+  const withoutSupportedAliases = stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withStdMathAliases, effectiveDefines));
   const withVectorConstructors = normalizeVectorStaticConstructors(withoutSupportedAliases, effectiveDefines);
   const withVectorLength = normalizeCudaVectorLength(withVectorConstructors);
   const withWidePacks = normalizeWidePacked128Aliases(withVectorLength, effectiveDefines);
@@ -975,6 +976,12 @@ function normalizeSimpleStatementMacros(source) {
 
 function normalizeSideEffectExpressions(source) {
   return normalizePostfixPointerAssignments(normalizePrefixUpdateConditions(source));
+}
+
+function normalizeStdMathAliases(source) {
+  return source
+    .replace(/\bstd\s*::\s*isinf\s*\(/gu, "isinf(")
+    .replace(/\bstd\s*::\s*numeric_limits\s*<\s*(?:float|double)\s*>\s*::\s*infinity\s*\(\s*\)/gu, "INFINITY");
 }
 
 function normalizeCooperativeGroupHelperParams(source) {

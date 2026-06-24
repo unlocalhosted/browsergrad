@@ -76,8 +76,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   WebGPU-runnable, and `<=103` hard gaps;
   `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=145`
   WebGPU-runnable, and `<=3` hard gaps;
-  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=217`
-  WebGPU-runnable, and `<=76` hard gaps. The aggregate gate also verifies
+  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=218`
+  WebGPU-runnable, and `<=75` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, WebGPU atomic
@@ -135,6 +135,9 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   scalarize into lane-addressed shared arrays without leaking source alias names.
   Function-pointer-like template symbols propagate through host wrappers into
   launched kernels so device calls bind concrete helpers.
+  C++ std math aliases such as `std::isinf` and
+  `std::numeric_limits<float>::infinity()` lower to generic CUDA-lite
+  intrinsics/constants.
   Fixed thread-local arrays lower to per-thread WGSL function arrays and CPU
   reference typed arrays. Source normalization now also supplies conservative
   block-size defaults for unresolved launch-bound template value params and

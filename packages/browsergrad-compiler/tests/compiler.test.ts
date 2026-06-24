@@ -2152,13 +2152,14 @@ __global__ void constants(float* out, uint* kinds) {
     tile[0] = (NULL == 0) ? 7.0f : 0.0f;
     out[4] = tile[0];
     out[5] = M_SQRT2 * M_2_SQRTPI * 0.5f + M_SQRT1_2;
+    out[6] = isinf(out[0]) ? 1.0f : 0.0f;
     kinds[0] = cudaMemcpyDeviceToDevice + cudaStreamNonBlocking;
     kinds[1] = warpSize + WARP_SIZE;
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { out: new Float32Array(6), kinds: new Uint32Array(2) } },
+      { buffers: { out: new Float32Array(7), kinds: new Uint32Array(2) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
     const out = [...result.buffers.out as Float32Array];
@@ -2172,6 +2173,7 @@ __global__ void constants(float* out, uint* kinds) {
     expect(Number.isNaN(out[3])).toBe(true);
     expect(out[4]).toBe(7);
     expect(out[5]).toBeCloseTo(Math.SQRT2 * (2 / Math.sqrt(Math.PI)) * 0.5 + Math.SQRT1_2, 6);
+    expect(out[6]).toBe(1);
     expect([...result.buffers.kinds as Uint32Array]).toEqual([4, 64]);
   });
 

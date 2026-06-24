@@ -261,6 +261,19 @@ void host(float* out) { launch_symbol_kernel<concrete_symbol>(out); }`;
 }
 
 {
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void std_math(float *out) {
+  float x = std::numeric_limits<float>::infinity();
+  out[0] = std::isinf(x) ? -x : x;
+}`,
+  });
+  assert.match(source, /float x = INFINITY;/u);
+  assert.match(source, /out\[0\] = isinf\(x\) \? -x : x;/u);
+  assert.doesNotMatch(source, /std::/u);
+}
+
+{
   const launchBoundsKernel = `
 __global__ void __launch_bounds__(WARP_SIZE * kTiles)
     bounded(float *out, const float *in, int N) {
