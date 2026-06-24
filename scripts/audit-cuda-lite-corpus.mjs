@@ -812,7 +812,7 @@ function isPortableDeviceFunctionCandidate(signature, source, name, recordNames 
 
 function isPortableScalarDeviceFunction(signature, source) {
   if (/\*/u.test(signature)) return false;
-  if (/\bdo\b|reinterpret|static_cast|__float_as_int|__int_as_float/u.test(source)) return false;
+  if (/\bdo\b|reinterpret|__float_as_int|__int_as_float/u.test(source)) return false;
   return true;
 }
 
@@ -907,9 +907,11 @@ function normalizePortableBaseType(type, definesByName = new Map(), seen = new S
     normalized = normalizePortableBaseType(mapped, definesByName, new Set([...seen, normalized]));
   }
   if (normalized === "unsigned int" || normalized === "unsigned") return "uint";
+  if (normalized === "unsigned short" || normalized === "unsigned short int" || normalized === "uint16_t") return "uint";
   if (normalized === "unsigned char" || normalized === "uchar" || normalized === "uint8_t") return "uint";
   if (normalized === "uint64_t" || normalized === "uint32_t" || normalized === "uintptr_t") return "uint";
   if (normalized === "signed int" || normalized === "signed") return "int";
+  if (normalized === "signed short" || normalized === "signed short int" || normalized === "short" || normalized === "short int" || normalized === "int16_t") return "int";
   if (normalized === "signed char" || normalized === "char" || normalized === "int8_t") return "int";
   if (normalized === "int64_t" || normalized === "int32_t") return "int";
   if (normalized === "clock_t") return "uint";
