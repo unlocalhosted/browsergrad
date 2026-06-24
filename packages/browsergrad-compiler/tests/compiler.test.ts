@@ -2249,6 +2249,34 @@ __global__ void vector_convert(float4 *input, float3 *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3]);
   });
 
+  it("lowers CUDA helper_math vector operations", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void vector_math(float3 *out, float *scalars) {
+  float3 a = make_float3(3.0f, 4.0f, 0.0f);
+  float3 b = make_float3(0.0f, 1.0f, 2.0f);
+  float3 n = normalize(a);
+  float3 c = cross(a, b);
+  out[0] = make_float3(n.x + c.x, n.y + c.y, n.z + c.z);
+  scalars[0] = dot(a, b);
+  scalars[1] = length(a);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(3), scalars: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("normalize(a)");
+    expect(compiled.wgsl).toContain("cross(a, b)");
+    expect(compiled.wgsl).toContain("dot(a, b)");
+    expect([...result.buffers.scalars as Float32Array]).toEqual([4, 5]);
+    expect([...result.buffers.out as Float32Array]).toEqual([
+      expect.closeTo(8.6),
+      expect.closeTo(-5.2),
+      3,
+    ]);
+  });
+
   it("maps CUDA byte-vector aliases onto canonical uint vector values", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ inline int rgbToInt(float r, float g, float b) {
@@ -4048,6 +4076,44 @@ __global__ void apply(float *x) {
       access: "read",
     }));
     expect([...result.buffers.x as Float32Array]).toEqual([20, 80]);
+  });
+
+  it("decays CUDA constant arrays to readonly device pointer arguments", () => {
+    const compiled = compileCudaLiteKernel(`
+__constant__ float coeffs[3];
+__device__ float pick(const float *ptr, int index) {
+  return ptr[index];
+}
+__global__ void apply(float *out) {
+  out[0] = pick(coeffs, 2);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(1) },
+        constants: { coeffs: new Float32Array([3, 5, 7]) },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<storage, read> coeffs: array<f32, 3>");
+    expect(compiled.wgsl).toContain("return coeffs[index]");
+    expect([...result.buffers.out as Float32Array]).toEqual([7]);
+  });
+
+  it("rejects CUDA constant array decay to writable device pointer arguments", () => {
+    const analysis = analyzeCudaLite(parseCudaLite(`
+__constant__ float coeffs[3];
+__device__ void write(float *ptr) {
+  ptr[0] = 1.0f;
+}
+__global__ void bad() {
+  write(coeffs);
+}`));
+
+    expect(analysis.diagnostics).toContainEqual(expect.objectContaining({
+      code: "unsupported-device-pointer-param",
+    }));
   });
 
   it("embeds initialized CUDA constant memory", () => {

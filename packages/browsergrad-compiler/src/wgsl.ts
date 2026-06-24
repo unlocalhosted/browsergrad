@@ -244,6 +244,7 @@ interface EmitContext {
   devicePointerParamFor(name: string): CudaLiteParam | undefined;
   storagePointerIdFor(name: string): number | undefined;
   sharedPointerIdFor(name: string): number | undefined;
+  constantPointerIdFor(name: string): number | undefined;
   bindingFor(name: string): number;
   paramFor(name: string): CudaLiteParam | undefined;
   isUniformScalar(name: string): boolean;
@@ -329,8 +330,11 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
   const storagePointerParams = ir.params.filter((param) => param.pointer && !isDevicePoolParam(param));
   const textures = textureBindings(ir);
   const storagePointerIds = new Map(storagePointerParams.map((param, index) => [param.name, index] as const));
+  const constantPointerArrays = ir.constants.filter((constant) => constant.dimensions.length > 0 && constant.init === undefined);
   const sharedPointerIds = new Map(ir.sharedDeclarations
     .map((shared, index) => [shared.name, storagePointerParams.length + index] as const));
+  const constantPointerIds = new Map(constantPointerArrays
+    .map((constant, index) => [constant.name, storagePointerParams.length + ir.sharedDeclarations.length + index] as const));
   for (const param of storagePointerParams) {
     const binding = bindings.length;
     bindingByName.set(param.name, binding);
@@ -397,7 +401,7 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
       binding: offsetBinding,
     });
   }
-  for (const constant of ir.constants.filter((constant) => constant.dimensions.length > 0 && constant.init === undefined)) {
+  for (const constant of constantPointerArrays) {
     const binding = bindings.length;
     bindingByName.set(constant.name, binding);
     bindings.push({
@@ -470,6 +474,9 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
     },
     sharedPointerIdFor(name) {
       return sharedPointerIds.get(name);
+    },
+    constantPointerIdFor(name) {
+      return constantPointerIds.get(name);
     },
     bindingFor(name) {
       const binding = bindingByName.get(name);
@@ -867,6 +874,11 @@ function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, c
   const sharedDeclarations = ir.sharedDeclarations.filter((shared) =>
     isPointerHelperCompatibleStorage(type, shared.valueType)
   );
+  const constantArrays = ir.constants.filter((constant) =>
+    constant.dimensions.length > 0 &&
+    constant.init === undefined &&
+    isPointerHelperCompatibleStorage(type, constant.valueType)
+  );
   const scalar = wgslScalar(type);
   const lines = [
     `fn ${pointerReadHelperName(type)}(buffer: u32, index: u32) -> ${scalar} {`,
@@ -881,6 +893,11 @@ function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, c
     const id = context.sharedPointerIdFor(shared.name);
     if (id === undefined) continue;
     lines.push(`    case ${id}u: { return ${emitSharedPointerRead(shared, "index", ir, context, type)}; }`);
+  }
+  for (const constant of constantArrays) {
+    const id = context.constantPointerIdFor(constant.name);
+    if (id === undefined) continue;
+    lines.push(`    case ${id}u: { return ${emitConstantPointerRead(constant, "index", context, type)}; }`);
   }
   lines.push(`    default: { return ${zeroValue(type)}; }`);
   lines.push("  }");
@@ -952,6 +969,16 @@ function emitPointerStorageWrite(
   if (!ir.atomicParams.includes(param.name)) return `${access} = ${value}`;
   if (param.valueType === "float") return `atomicStore(&${access}, bitcast<u32>(${value}))`;
   return `atomicStore(&${access}, ${value})`;
+}
+
+function emitConstantPointerRead(
+  constant: CudaLiteGlobalConstant,
+  index: string,
+  context: EmitContext,
+  viewType: CudaLiteScalarType = constant.valueType,
+): string {
+  if (isCudaVectorType(viewType) && constant.valueType !== viewType) return emitConstantVectorFlatRead(constant, index, viewType, context);
+  return emitSharedFlatAccess(context.nameFor(constant.name), constant.dimensions, index);
 }
 
 function emitVectorStorageRead(name: string, type: CudaLiteScalarType, index: string): string {
@@ -1047,6 +1074,19 @@ function emitSharedVectorFlatWrite(
   ).join("; ");
 }
 
+function emitConstantVectorFlatRead(
+  constant: CudaLiteGlobalConstant,
+  index: string,
+  viewType: CudaLiteScalarType,
+  context: EmitContext,
+): string {
+  const lanes = cudaVectorLaneCount(viewType);
+  const values = Array.from({ length: lanes }, (_, lane) =>
+    emitSharedFlatAccess(context.nameFor(constant.name), constant.dimensions, `(${index} + ${lane}u)`)
+  );
+  return `${wgslScalar(viewType)}(${values.join(", ")})`;
+}
+
 interface DevicePointerParts {
   readonly buffer: string;
   readonly base: string;
@@ -1109,6 +1149,8 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
     }
     const sharedId = context.sharedPointerIdFor(expression.name);
     if (sharedId !== undefined) return { buffer: `${sharedId}u`, base: "0u" };
+    const constantId = context.constantPointerIdFor(expression.name);
+    if (constantId !== undefined) return { buffer: `${constantId}u`, base: "0u" };
     const alias = context.pointerAliasFor(expression.name);
     if (alias) {
       const target = devicePointerArgumentParts({
@@ -2353,6 +2395,14 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return "4";
     case "vec_at":
       return `(${args[0] ?? "vec4<f32>()"}[u32(${args[1] ?? "0"})])`;
+    case "dot":
+      return `dot(${args[0] ?? "vec2<f32>()"}, ${args[1] ?? "vec2<f32>()"})`;
+    case "length":
+      return `length(${args[0] ?? "vec2<f32>()"})`;
+    case "normalize":
+      return `normalize(${args[0] ?? "vec2<f32>()"})`;
+    case "cross":
+      return `cross(${args[0] ?? "vec3<f32>()"}, ${args[1] ?? "vec3<f32>()"})`;
     case "curand_init":
       return `bg_curand_init(u32(${args[0] ?? "0"}), u32(${args[1] ?? "0"}), u32(${args[2] ?? "0"}), ${args[3] ?? "&state"})`;
     case "curand_uniform":

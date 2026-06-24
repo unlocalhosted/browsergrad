@@ -23,6 +23,7 @@ import {
   CudaLiteCompilerError,
   type CompiledCudaLiteKernel,
   type CompiledKernelInput,
+  type CudaLiteCallExpression,
   type CudaLiteCooperativeGroupDecl,
   type CudaLiteDeviceFunction,
   type CudaLiteExpression,
@@ -740,6 +741,8 @@ function pointerArgumentValue(
     if (isAddress(local)) return local;
     if (context.buffers.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "buffer", index: 0, valueType } };
     if (context.shared.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "shared", index: 0, valueType } };
+    const constant = context.constants.get(arg.name);
+    if (constant && typeof constant !== "number") return { kind: "address", target: { name: arg.name, space: "constant", index: 0, valueType } };
     if (context.memoryPools.has(arg.name)) return { kind: "pool-pointer", poolName: arg.name, byteOffset: 0, valueType };
     if (local && typeof local !== "number") return local;
   }
@@ -1706,6 +1709,13 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       ],
     };
   }
+  if (name === "dot") return dotCudaVectors(expression, context);
+  if (name === "length") return Math.sqrt(dotCudaVectors({
+    ...expression,
+    args: [expression.args[0]!, expression.args[0]!],
+  }, context));
+  if (name === "normalize") return normalizeCudaVector(expression, context);
+  if (name === "cross") return crossCudaVectors(expression, context);
   const deviceFunction = name ? context.functions.get(name) : undefined;
   if (deviceFunction) return evalDeviceFunction(
     deviceFunction,
@@ -2793,6 +2803,53 @@ function valueAsComplex(value: LocalValue, name: string): ComplexValue {
 function valueAsCudaVector(value: LocalValue, type: CudaLiteVectorType): CudaVectorValue {
   if (isCudaVectorValue(value) && value.valueType === type) return value;
   throw compilerFailure(`value is not ${type}`);
+}
+
+function callArgAsCudaVector(
+  expression: CudaLiteCallExpression,
+  index: number,
+  context: ThreadContext,
+): CudaVectorValue {
+  const arg = expression.args[index];
+  if (!arg) throw compilerFailure(`${expressionName(expression.callee) ?? "vector math"} expects vector argument`);
+  const value = evalExpression(arg, context);
+  if (!isCudaVectorValue(value)) throw compilerFailure(`${expressionName(expression.callee) ?? "vector math"} expects CUDA vector argument`);
+  return value;
+}
+
+function dotCudaVectors(expression: CudaLiteCallExpression, context: ThreadContext): number {
+  const left = callArgAsCudaVector(expression, 0, context);
+  const right = callArgAsCudaVector(expression, 1, context);
+  if (left.lanes.length !== right.lanes.length) throw compilerFailure("dot expects matching CUDA vector lane counts");
+  return left.lanes.reduce((sum, value, index) => sum + value * (right.lanes[index] ?? 0), 0);
+}
+
+function normalizeCudaVector(expression: CudaLiteCallExpression, context: ThreadContext): CudaVectorValue {
+  const vector = callArgAsCudaVector(expression, 0, context);
+  const length = Math.sqrt(vector.lanes.reduce((sum, value) => sum + value * value, 0));
+  const lanes = length === 0
+    ? vector.lanes.map(() => 0)
+    : vector.lanes.map((value) => value / length);
+  return {
+    kind: "cuda-vector",
+    valueType: vector.valueType,
+    lanes: lanes.map((value) => roundVectorLane(vector.valueType, value)),
+  };
+}
+
+function crossCudaVectors(expression: CudaLiteCallExpression, context: ThreadContext): CudaVectorValue {
+  const left = callArgAsCudaVector(expression, 0, context);
+  const right = callArgAsCudaVector(expression, 1, context);
+  if (left.valueType !== "float3" || right.valueType !== "float3") throw compilerFailure("cross expects float3 arguments");
+  return {
+    kind: "cuda-vector",
+    valueType: "float3",
+    lanes: [
+      (left.lanes[1] ?? 0) * (right.lanes[2] ?? 0) - (left.lanes[2] ?? 0) * (right.lanes[1] ?? 0),
+      (left.lanes[2] ?? 0) * (right.lanes[0] ?? 0) - (left.lanes[0] ?? 0) * (right.lanes[2] ?? 0),
+      (left.lanes[0] ?? 0) * (right.lanes[1] ?? 0) - (left.lanes[1] ?? 0) * (right.lanes[0] ?? 0),
+    ],
+  };
 }
 
 function isComplex(value: LocalValue | EvalValue | undefined): value is ComplexValue {

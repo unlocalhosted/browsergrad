@@ -133,6 +133,10 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__builtin_assume_aligned", [2, 2]],
   ["ct::assume_aligned", [1, 2]],
   ["__halves2bfloat162", [2, 2]],
+  ["dot", [2, 2]],
+  ["length", [1, 1]],
+  ["normalize", [1, 1]],
+  ["cross", [2, 2]],
   ["printf", [1, Number.POSITIVE_INFINITY]],
   ...[...CUDA_VECTOR_CONSTRUCTORS].map(([name, type]) => {
     const info = CUDA_VECTOR_TYPES.get(type);
@@ -1144,6 +1148,9 @@ function validateCallExpression(
       valueType: isCudaVectorType(vectorType) ? cudaVectorScalarType(vectorType) : undefined,
     };
   }
+  if (isVectorMathBuiltin(callName)) {
+    return validateVectorMathBuiltin(expression, callName, diagnostics, walkExpression, scope);
+  }
   if (callName === "deviceAllocate" || callName === "streamOrderedAllocate") {
     validatePoolAllocate(expression, scope, atomicParams, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "voidptr" };
@@ -1174,6 +1181,42 @@ function validateReadPointerOperand(
     return { kind: "address", valueType: info.valueType, symbol: info.symbol };
   }
   return walkExpression(expression, scope);
+}
+
+function isVectorMathBuiltin(name: string): boolean {
+  return name === "dot" || name === "length" || name === "normalize" || name === "cross";
+}
+
+function validateVectorMathBuiltin(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  callName: string,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+  scope: Scope,
+): ExpressionInfo {
+  const infos = expression.args.map((arg) => walkExpression(arg, scope));
+  for (const [index, info] of infos.entries()) {
+    const arg = expression.args[index]!;
+    if (info.kind !== "vector" && info.kind !== "unknown") {
+      diagnostics.push(error("unsupported-vector-argument", `${callName} expects CUDA vector argument`, arg.span));
+      continue;
+    }
+    if (info.kind === "vector" && (!isCudaVectorType(info.valueType) || cudaVectorScalarType(info.valueType) !== "float")) {
+      diagnostics.push(error("unsupported-vector-argument", `${callName} expects float CUDA vector argument`, arg.span));
+    }
+  }
+  const firstType = infos[0]?.valueType;
+  const secondType = infos[1]?.valueType;
+  if ((callName === "dot" || callName === "cross") && isCudaVectorType(firstType) && isCudaVectorType(secondType) && firstType !== secondType) {
+    diagnostics.push(error("unsupported-vector-argument", `${callName} expects matching CUDA vector types`, expression.span));
+  }
+  if (callName === "cross" && firstType !== undefined && firstType !== "float3") {
+    diagnostics.push(error("unsupported-vector-argument", "cross expects float3 arguments", expression.span));
+  }
+  if (callName === "normalize") {
+    return { kind: "vector", valueType: isCudaVectorType(firstType) ? firstType : undefined };
+  }
+  return { kind: "scalar", valueType: "float" };
 }
 
 function isPointerIdentityCall(callName: string | undefined): boolean {
@@ -1437,11 +1480,14 @@ function validateDevicePointerArgument(
   const sharedArrayDecay = rootSymbol?.kind === "shared" &&
     rootSymbol.dimensions !== undefined &&
     info.kind === "array";
-  if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "unknown" && !sharedArrayDecay) {
+  const constantArrayDecay = rootSymbol?.kind === "constant" &&
+    rootSymbol.dimensions !== undefined &&
+    info.kind === "array";
+  if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "unknown" && !sharedArrayDecay && !constantArrayDecay) {
     diagnostics.push(error("unsupported-device-pointer-param", `device pointer parameter '${param.name}' expects a pointer argument`, arg.span));
     return;
   }
-  if (rootSymbol?.kind === "constant") {
+  if (rootSymbol?.kind === "constant" && !(constantArrayDecay && param.constant)) {
     diagnostics.push(error("unsupported-device-pointer-param", `device pointer parameter '${param.name}' expects storage-buffer memory`, arg.span));
   }
   if (rootSymbol?.pointer && rootSymbol.constant && !param.constant) {
