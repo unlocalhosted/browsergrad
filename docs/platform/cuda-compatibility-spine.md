@@ -74,8 +74,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
 - Real-world no-regression gate:
   `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=254`
   WebGPU-runnable, and `<=103` hard gaps;
-  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=143`
-  WebGPU-runnable, and `<=5` hard gaps;
+  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=144`
+  WebGPU-runnable, and `<=4` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=217`
   WebGPU-runnable, and `<=76` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
@@ -131,6 +131,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   CUDA inverse trig aliases and CUDA vector `length(v)` helpers lower to WGSL
   math over scalar/vector primitives. Conditional helper pointer args now use
   C-style pointer truthiness in analyzer, reference, and WGSL lowering.
+  `Packed128<half|bf16>` pointer views over byte-backed shared memory now
+  scalarize into lane-addressed shared arrays without leaking source alias names.
   Fixed thread-local arrays lower to per-thread WGSL function arrays and CPU
   reference typed arrays. Source normalization now also supplies conservative
   block-size defaults for unresolved launch-bound template value params and

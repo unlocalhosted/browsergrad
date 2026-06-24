@@ -1819,13 +1819,19 @@ function normalizeWidePacked128Aliases(source, definesByName = new Map()) {
   const aliases = collectWidePacked128Aliases(source, definesByName);
   if (aliases.size === 0) return source;
   const variables = collectWidePacked128Variables(source, aliases);
+  const pointerAliases = new Map();
+  const sharedByteNames = collectSharedByteNames(source);
   let out = source;
   for (const [alias, info] of [...aliases].sort((a, b) => b[0].length - a[0].length)) {
     out = out.replace(new RegExp(`\\b${escapeRegExp(alias)}\\s*::\\s*size\\b`, "gu"), String(info.lanes));
   }
+  out = rewriteWidePacked128PointerViews(out, aliases, pointerAliases, sharedByteNames);
   out = rewriteWidePacked128LoadDeclarations(out, aliases, variables);
+  out = rewriteWidePacked128IndexedLoadDeclarations(out, aliases, pointerAliases, variables);
+  out = rewriteWidePacked128ZeroDeclarations(out, aliases, variables);
   out = rewriteWidePacked128PlainDeclarations(out, aliases, variables);
   out = rewriteWidePacked128LoadAssignments(out, variables);
+  out = rewriteWidePacked128IndexedStores(out, pointerAliases);
   out = rewriteWidePacked128Stores(out, variables);
   for (const [name, info] of variables) {
     out = out.replace(new RegExp(`\\b${escapeRegExp(name)}\\s*\\.\\s*size\\b`, "gu"), String(info.lanes));
@@ -1856,6 +1862,84 @@ function collectWidePacked128Variables(source, aliases) {
   return variables;
 }
 
+function collectSharedByteNames(source) {
+  const names = new Set();
+  const re = /\bextern\s+__shared__\s+char\s*\*?\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[\s*\])?\s*;/gu;
+  for (const match of source.matchAll(re)) {
+    if (match[1] !== undefined) names.add(match[1]);
+  }
+  return names;
+}
+
+function rewriteWidePacked128PointerViews(source, aliases, pointerAliases, sharedByteNames) {
+  let out = source;
+  const sharedViews = new Map();
+  for (const [alias, info] of aliases) {
+    out = rewriteWidePacked128PointerViewsForAlias(out, alias, info, pointerAliases, sharedByteNames, sharedViews);
+  }
+  for (const [name, info] of sharedViews) {
+    out = out.replace(
+      new RegExp(`\\bextern\\s+__shared__\\s+char\\s*\\*?\\s+${escapeRegExp(name)}\\s*(?:\\[\\s*\\])?\\s*;`, "gu"),
+      `extern __shared__ ${info.scalarType} ${name}[];`,
+    );
+  }
+  return out;
+}
+
+function rewriteWidePacked128PointerViewsForAlias(source, alias, info, pointerAliases, sharedByteNames, sharedViews) {
+  const re = new RegExp(`\\b(const\\s+)?${escapeRegExp(alias)}\\s*\\*\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*reinterpret_cast\\s*<\\s*(?:const\\s+)?${escapeRegExp(alias)}\\s*\\*\\s*>\\s*\\(`, "gu");
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const name = match[2];
+    const open = source.indexOf("(", match.index);
+    const close = findBalanced(source, open, "(", ")");
+    const semi = close === undefined ? -1 : source.indexOf(";", close + 1);
+    if (name === undefined || open < 0 || close === undefined || semi < 0) {
+      re.lastIndex = match.index + 1;
+      continue;
+    }
+    const base = source.slice(open + 1, close).trim();
+    const root = pointerBaseIdentifier(base);
+    const suffix = source.slice(close + 1, semi).trim();
+    const offset = widePacked128PointerViewOffset(suffix);
+    pointerAliases.set(name, info);
+    if (root !== undefined && sharedByteNames.has(root)) sharedViews.set(root, info);
+    out += source.slice(cursor, match.index);
+    out += `${match[1] ?? ""}${info.scalarType}* ${name} = ${widePacked128ScalarPointerExpression(base, offset, info, sharedByteNames)};`;
+    cursor = semi + 1;
+    re.lastIndex = cursor;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function widePacked128PointerViewOffset(suffix) {
+  if (suffix.length === 0) return undefined;
+  const match = /^\+\s*([\s\S]+)$/u.exec(suffix);
+  return match?.[1]?.trim();
+}
+
+function widePacked128ScalarPointerExpression(base, offset, info, sharedByteNames) {
+  const root = pointerBaseIdentifier(base);
+  const scalarBase = root !== undefined && sharedByteNames.has(root)
+    ? (widePacked128BytePointerExpression(base, info) ?? base)
+    : base;
+  if (offset === undefined || offset.length === 0) return scalarBase;
+  return `${scalarBase} + ((${offset}) * ${info.lanes})`;
+}
+
+function widePacked128BytePointerExpression(base, info) {
+  const byteSize = cudaTypeByteSize(info.scalarType) ?? 4;
+  const parts = splitTopLevel(base.replace(/^\(([\s\S]*)\)$/u, "$1"), "+").map((part) => part.trim()).filter(Boolean);
+  const root = parts[0];
+  if (root === undefined || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(root)) return base;
+  if (parts.length === 1) return root;
+  const bytes = parts.slice(1).join(" + ").replace(/\bsizeof\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/gu, (match, type) =>
+    String(cudaTypeByteSize(type) ?? (type === "floatX" ? byteSize : match)));
+  return `${root} + ((${bytes}) / ${byteSize})`;
+}
+
 function rewriteWidePacked128LoadDeclarations(source, aliases, variables) {
   let out = source;
   for (const [alias, info] of aliases) {
@@ -1866,6 +1950,34 @@ function rewriteWidePacked128LoadDeclarations(source, aliases, variables) {
       variables.set(name, info);
       const pointer = out.slice(open + 1, close).trim();
       return emitWidePacked128LoadDeclaration(info, name, pointer);
+    });
+  }
+  return out;
+}
+
+function rewriteWidePacked128IndexedLoadDeclarations(source, aliases, pointerAliases, variables) {
+  let out = source;
+  for (const [alias, info] of aliases) {
+    const re = new RegExp(`\\b(?:const\\s+)?${escapeRegExp(alias)}\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\[`, "gu");
+    out = replaceBalancedIndexStatement(out, re, (current, match, open, close) => {
+      const name = match[1];
+      const pointer = match[2];
+      if (name === undefined || pointer === undefined || pointerAliases.get(pointer) !== info) return undefined;
+      variables.set(name, info);
+      const index = current.slice(open + 1, close).trim();
+      return emitWidePacked128IndexedLoadDeclaration(info, name, pointer, index);
+    });
+  }
+  return out;
+}
+
+function rewriteWidePacked128ZeroDeclarations(source, aliases, variables) {
+  let out = source;
+  for (const [alias, info] of aliases) {
+    const re = new RegExp(`\\b(?:const\\s+)?${escapeRegExp(alias)}\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*${escapeRegExp(alias)}\\s*::\\s*zeros\\s*\\(\\s*\\)\\s*;`, "gu");
+    out = out.replace(re, (_match, name) => {
+      variables.set(name, info);
+      return emitWidePacked128ZeroDeclaration(info, name);
     });
   }
   return out;
@@ -1888,11 +2000,38 @@ function rewriteWidePacked128LoadAssignments(source, variables) {
   return replaceBalancedCall(source, helper, (match, open, close) => {
     const name = match[1];
     if (name === undefined) return undefined;
+    if (!isStandaloneStatementPrefix(source, match.index)) return undefined;
     const info = variables.get(name);
     if (info === undefined) return undefined;
     const pointer = source.slice(open + 1, close).trim();
     return emitWidePacked128LoadAssignments(info, name, pointer);
   });
+}
+
+function isStandaloneStatementPrefix(source, index) {
+  const start = Math.max(
+    source.lastIndexOf(";", index),
+    source.lastIndexOf("{", index),
+    source.lastIndexOf("}", index),
+    source.lastIndexOf("\n", index),
+  ) + 1;
+  return source.slice(start, index).trim().length === 0;
+}
+
+function rewriteWidePacked128IndexedStores(source, pointerAliases) {
+  let out = source;
+  for (const [pointer, info] of pointerAliases) {
+    const re = new RegExp(`\\b${escapeRegExp(pointer)}\\s*\\[`, "gu");
+    out = replaceBalancedIndexStatement(out, re, (current, _match, open, close, semi) => {
+      const index = current.slice(open + 1, close).trim();
+      const rest = current.slice(close + 1, semi).trim();
+      const assignment = /^=\s*([A-Za-z_][A-Za-z0-9_]*)\s*$/u.exec(rest);
+      const value = assignment?.[1];
+      if (value === undefined) return undefined;
+      return emitWidePacked128IndexedStore(info, pointer, index, value);
+    });
+  }
+  return out;
 }
 
 function rewriteWidePacked128Stores(source, variables) {
@@ -1906,6 +2045,31 @@ function rewriteWidePacked128Stores(source, variables) {
     if (info === undefined) return undefined;
     return emitWidePacked128StoreAssignments(info, pointer, value);
   });
+}
+
+function replaceBalancedIndexStatement(source, re, replacer) {
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const open = source.indexOf("[", match.index);
+    const close = findBalanced(source, open, "[", "]");
+    const semi = close === undefined ? -1 : source.indexOf(";", close + 1);
+    if (open < 0 || close === undefined || semi < 0) {
+      re.lastIndex = match.index + 1;
+      continue;
+    }
+    const replacement = replacer(source, match, open, close, semi);
+    if (replacement === undefined) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    out += source.slice(cursor, match.index);
+    out += replacement.endsWith(";") ? replacement : `${replacement};`;
+    cursor = semi + 1;
+    re.lastIndex = cursor;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
 }
 
 function replaceBalancedCall(source, re, replacer) {
@@ -1936,14 +2100,37 @@ function emitWidePacked128LoadDeclaration(info, name, pointer) {
   return `${info.scalarType} ${name}[${info.lanes}]; ${emitWidePacked128LoadAssignments(info, name, pointer)}`;
 }
 
+function emitWidePacked128IndexedLoadDeclaration(info, name, pointer, index) {
+  const base = `(${index}) * ${info.lanes}`;
+  return `${info.scalarType} ${name}[${info.lanes}]; ${Array.from({ length: info.lanes }, (_unused, lane) =>
+    `${name}[${lane}] = ${pointer}[(${base}) + ${lane}]`).join("; ")}`;
+}
+
+function emitWidePacked128ZeroDeclaration(info, name) {
+  const zero = widePacked128ZeroLiteral(info.scalarType);
+  return `${info.scalarType} ${name}[${info.lanes}]; ${Array.from({ length: info.lanes }, (_unused, lane) =>
+    `${name}[${lane}] = ${zero}`).join("; ")};`;
+}
+
 function emitWidePacked128LoadAssignments(info, name, pointer) {
   return Array.from({ length: info.lanes }, (_unused, lane) =>
     `${name}[${lane}] = ${widePacked128PointerLane(pointer, lane)}`).join("; ");
 }
 
+function emitWidePacked128IndexedStore(info, pointer, index, value) {
+  const base = `(${index}) * ${info.lanes}`;
+  return Array.from({ length: info.lanes }, (_unused, lane) =>
+    `${pointer}[(${base}) + ${lane}] = ${value}[${lane}]`).join("; ");
+}
+
 function emitWidePacked128StoreAssignments(info, pointer, value) {
   return Array.from({ length: info.lanes }, (_unused, lane) =>
     `${widePacked128PointerLane(pointer, lane)} = ${value}[${lane}]`).join("; ");
+}
+
+function widePacked128ZeroLiteral(scalarType) {
+  if (scalarType === "half") return "__float2half(0.0f)";
+  return "0.0f";
 }
 
 function widePacked128PointerLane(pointer, lane) {

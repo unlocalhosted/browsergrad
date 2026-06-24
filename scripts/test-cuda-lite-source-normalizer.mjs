@@ -221,6 +221,31 @@ __device__ __forceinline__ T warp_reduce_sum(T val) {
 }
 
 {
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void packed_shared(bf16 *out, const bf16 *input, int C) {
+  extern __shared__ char params[];
+  x128 *tile = reinterpret_cast<x128*>(params);
+  x128 *tail = reinterpret_cast<x128*>(params + C * sizeof(floatX));
+  x128 value = load128(input);
+  tile[threadIdx.x] = value;
+  const x128 cached = tile[threadIdx.x];
+  x128 zero = x128::zeros();
+  tail[0] = zero;
+  out[threadIdx.x] = cached[0];
+}`,
+    definesByName: new Map([["floatX", "bf16"]]),
+  });
+  assert.match(source, /extern __shared__ bf16 params\[\];/u);
+  assert.match(source, /bf16\* tile = params;/u);
+  assert.match(source, /bf16\* tail = params \+ \(\(C \* 2\) \/ 2\);/u);
+  assert.match(source, /tile\[\(\(threadIdx\.x\) \* 8\) \+ 0\] = value\[0\]/u);
+  assert.match(source, /bf16 cached\[8\]; cached\[0\] = tile\[\(\(threadIdx\.x\) \* 8\) \+ 0\]/u);
+  assert.match(source, /bf16 zero\[8\]; zero\[0\] = 0\.0f/u);
+  assert.doesNotMatch(source, /\bx128\b/u);
+}
+
+{
   const launchBoundsKernel = `
 __global__ void __launch_bounds__(WARP_SIZE * kTiles)
     bounded(float *out, const float *in, int N) {
