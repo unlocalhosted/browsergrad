@@ -299,11 +299,11 @@ function injectSharedDeclarationsIntoKernel(kernel, sharedDeclarations) {
 }
 
 function sharedDeclarationName(declaration) {
-  return /\b__shared__\s+[\w\s]+?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[/u.exec(declaration)?.[1];
+  return /\b(?:extern\s+)?__shared__\s+[\w\s]+?\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[/u.exec(declaration)?.[1];
 }
 
 function kernelDeclaresSharedName(kernel, name) {
-  return new RegExp(`\\b__shared__\\s+[\\w\\s]+?\\s+${escapeRegExp(name)}\\s*\\[`, "u").test(kernel);
+  return new RegExp(`\\b(?:extern\\s+)?__shared__\\s+[\\w\\s]+?\\s+${escapeRegExp(name)}\\s*\\[`, "u").test(kernel);
 }
 
 function semanticCpAsyncMacro(macro) {
@@ -749,6 +749,7 @@ function collectSyntheticVectorPackDefines(source, definesByName = new Map()) {
 }
 
 function normalizeTemplateValueFallbacks(source, definesByName = new Map()) {
+  const sourceValueDefaults = templateDefaultEnvironment(source, definesByName);
   return source.replace(/\btemplate\s*<([^<>]*)>/gu, (match, params, offset) => {
     const parsed = splitTopLevel(params).map(parseTemplateParam);
     if (parsed.every((param) => param?.kind !== "value" || templateParamDefaultValue(param) !== undefined)) return match;
@@ -756,7 +757,8 @@ function normalizeTemplateValueFallbacks(source, definesByName = new Map()) {
     const rewritten = splitTopLevel(params).map((param, index) => {
       const parsedParam = parsed[index];
       if (parsedParam?.kind !== "value" || templateParamDefaultValue(parsedParam) !== undefined) return param.trim();
-      const value = canonicalTemplateValueArgument(tail, parsedParam.name, definesByName);
+      const value = sourceValueDefaults.get(parsedParam.name) ??
+        canonicalTemplateValueArgument(tail, parsedParam.name, definesByName);
       return value === undefined ? param.trim() : rewriteTemplateParam(param, value, definesByName);
     });
     return `template <${rewritten.join(", ")}>`;

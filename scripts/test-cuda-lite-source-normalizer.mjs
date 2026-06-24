@@ -1403,4 +1403,44 @@ __global__ void implicit_x128(const floatX* x, floatX* y) {
   assert.match(source, /y\[7\] = value\[7\]/u);
 }
 
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void nested_template_value(uint* out, uint* data) {
+  merge<1>(out, data);
+}`,
+    deviceFunctions: [
+      {
+        name: "merge",
+        source: `
+template <uint sortDir>
+__device__ void merge(uint* out, uint* data) {
+  out[0] = binarySearchInclusive<sortDir>(data[0], data, 4, 2);
+}`,
+      },
+      {
+        name: "binarySearchInclusive",
+        source: `
+template <uint sortDir>
+__device__ uint binarySearchInclusive(uint val, uint* data, uint len, uint stride) {
+  return sortDir ? val : data[0];
+}`,
+      },
+    ],
+  });
+  assert.match(source, /template <uint sortDir = 1>\s*__device__ uint binarySearchInclusive/u);
+  assert.doesNotMatch(source, /template <uint sortDir>\s*__device__ uint binarySearchInclusive/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    sharedDeclarations: ["extern __shared__ unsigned char LocalBlock[];"],
+    kernel: `
+__global__ void uses_translation_unit_shared(uint* out) {
+  out[threadIdx.x] = LocalBlock[threadIdx.x];
+}`,
+  });
+  assert.match(source, /extern __shared__ unsigned char LocalBlock\[\];/u);
+}
+
 console.log("cuda-lite source normalizer tests ok");

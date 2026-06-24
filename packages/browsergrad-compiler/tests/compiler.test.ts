@@ -3766,6 +3766,29 @@ __global__ void dynamicShared(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([5, 3]);
   });
 
+  it("lowers dynamic extern shared memory declared inside device helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint reduce_one(uint value) {
+  extern __shared__ uint sdata[];
+  sdata[threadIdx.x] = value;
+  return sdata[threadIdx.x];
+}
+__global__ void helperDynamicShared(uint *out) {
+  if (threadIdx.x < 2) { out[threadIdx.x] = reduce_one((uint)(threadIdx.x + 3)); }
+}`, {
+      workgroupSize: [2, 1, 1],
+      dynamicSharedMemory: { sdata: 2 },
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<workgroup> sdata: array<u32, 2>;");
+    expect([...result.buffers.out as Uint32Array]).toEqual([3, 4]);
+  });
+
   it("lowers static shared declarations and scalar local-array initializers", () => {
     const compiled = compileCudaLiteKernel(`
 static __device__ __forceinline__ float scale(float x) { return x * 2.0f; }
@@ -4837,6 +4860,28 @@ __global__ void helper_shared_atomic(uint* out) {
     expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32");
     expect(compiled.wgsl).toContain("case 1u: { return atomicAdd(&counts[index], value); }");
     expect([...result.buffers.out as Uint32Array]).toEqual([5]);
+  });
+
+  it("passes shared array offsets to device pointer helper parameters", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void copy_one(float* out, float* src) {
+  out[0] = src[0];
+}
+__global__ void shared_pointer_decay(float* out) {
+  __shared__ float tile[4];
+  if (threadIdx.x == 0) {
+    tile[1] = 3.5f;
+    copy_one(out, tile + 1);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("copy_one(0u, 0u, 1u, (0u + u32(1))");
+    expect([...result.buffers.out as Float32Array]).toEqual([3.5]);
   });
 
   it("supports CUDA integer atomic exchange and compare-swap", () => {

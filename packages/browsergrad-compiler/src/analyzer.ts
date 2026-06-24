@@ -425,7 +425,7 @@ export function analyzeCudaLite(
   }
 
   walkStatements(kernel.body, rootScope, 0, 0, 0, declaredNames);
-  const sharedDeclarations = collectSharedDeclarations(kernel.body, options);
+  const sharedDeclarations = collectSharedDeclarationsFromBodies([kernel.body, ...ast.functions.map((fn) => fn.body)], options);
   for (const type of atomicDevicePointerTypes) {
     for (const param of kernel.params) {
       if (param.pointer && !param.constant && isDevicePointerAtomicMemoryCompatible(type, param.valueType)) {
@@ -484,7 +484,7 @@ export function lowerAnalyzedCudaLiteToKernelIr(
     textures: analysis.textures,
     functions: analysis.functions,
     body: analysis.kernel.body,
-    sharedDeclarations: collectSharedDeclarations(analysis.kernel.body, options),
+    sharedDeclarations: collectSharedDeclarationsFromBodies([analysis.kernel.body, ...analysis.functions.map((fn) => fn.body)], options),
     requiredFeatures: analysis.requiredFeatures,
     atomicParams: analysis.atomicParams,
     atomicShared: analysis.atomicShared,
@@ -2163,6 +2163,10 @@ function validateNonCallExpression(
         validateScalarOperand(right, expression.right.span, diagnostics);
         return left;
       }
+      if ((expression.operator === "+" || expression.operator === "-") && left.kind === "array") {
+        validateScalarOperand(right, expression.right.span, diagnostics);
+        return { kind: "pointer", valueType: left.valueType, symbol: left.symbol };
+      }
       if (isVectorArithmeticOperator(expression.operator) && left.kind === "vector" && right.kind === "vector") {
         if (!left.valueType || !right.valueType || left.valueType !== right.valueType) {
           diagnostics.push(error("unsupported-vector-argument", "vector arithmetic expects matching CUDA vector types", expression.span));
@@ -2661,6 +2665,19 @@ function collectSharedDeclarations(
   };
   walk(statements);
   return declarations;
+}
+
+function collectSharedDeclarationsFromBodies(
+  bodies: readonly (readonly CudaLiteStatement[])[],
+  options: CudaLiteAnalyzeOptions,
+): readonly CudaLiteVarDecl[] {
+  const declarations = new Map<string, CudaLiteVarDecl>();
+  for (const body of bodies) {
+    for (const declaration of collectSharedDeclarations(body, options)) {
+      if (!declarations.has(declaration.name)) declarations.set(declaration.name, declaration);
+    }
+  }
+  return [...declarations.values()];
 }
 
 function resolvedSharedDimensions(
