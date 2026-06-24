@@ -721,7 +721,7 @@ function pointerArgumentValue(
   if (isNullPointerLiteral(arg)) return { kind: "pool-pointer", poolName: "", byteOffset: -1, valueType };
   if (arg.kind === "conditional") {
     return pointerArgumentValue(
-      truthy(evalNumber(arg.condition, context)) ? arg.consequent : arg.alternate,
+      evalTruthiness(arg.condition, context, valueType) ? arg.consequent : arg.alternate,
       valueType,
       context,
     );
@@ -1255,6 +1255,17 @@ function pointerValueForEquality(expression: CudaLiteExpression, context: Thread
     }
   }
   return undefined;
+}
+
+function evalTruthiness(expression: CudaLiteExpression, context: ThreadContext, pointerValueType: CudaLiteScalarType = "voidptr"): boolean {
+  try {
+    const pointer = pointerArgumentValue(expression, pointerValueType, context);
+    if (isAddress(pointer)) return true;
+    if (isPoolPointer(pointer)) return pointer.byteOffset >= 0 && pointer.poolName.length > 0;
+  } catch {
+    // Fall through to scalar truthiness.
+  }
+  return truthy(evalNumber(expression, context));
 }
 
 function isNullPointerLiteral(expression: CudaLiteExpression): boolean {

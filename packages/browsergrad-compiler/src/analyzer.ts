@@ -2243,7 +2243,8 @@ function validateNonCallExpression(
       return { kind: "scalar" };
     }
     case "conditional": {
-      validateScalarOperand(walkExpression(expression.condition, scope), expression.condition.span, diagnostics);
+      const condition = walkExpression(expression.condition, scope);
+      if (!isPointerLikeInfo(condition)) validateScalarOperand(condition, expression.condition.span, diagnostics);
       const consequent = walkExpression(expression.consequent, scope);
       const alternate = walkExpression(expression.alternate, scope);
       const pointer = conditionalPointerInfo(expression, consequent, alternate, diagnostics);

@@ -268,6 +268,32 @@ describe("CUDA-lite compiler", () => {
     expect([...result.buffers.y as Float32Array]).toEqual([14, 26, 38]);
   });
 
+  it("supports conditional storage pointer arguments to device helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void copyOne(float *target, const float *fallback, const float *source) {
+  float value = source != NULL ? source[0] : fallback[0];
+  target[0] = value;
+}
+__global__ void conditionalPointer(float *out, const float *fallback, const float *maybeSource, int useSource) {
+  copyOne(out, fallback, useSource ? maybeSource : NULL);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Float32Array(1),
+          fallback: new Float32Array([2]),
+          maybeSource: new Float32Array([7]),
+        },
+        scalars: { useSource: 1 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("select(4294967295u, 2u");
+    expect([...result.buffers.out as Float32Array]).toEqual([7]);
+  });
+
   it("lowers vector reinterpret memory-view helpers through the pointer ABI", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ float4 ld_vec(const float* address) {
@@ -4800,7 +4826,7 @@ __global__ void conditional_pointer(float* target, float* fallback, int enabled)
     expect([...disabled.buffers.target as Float32Array]).toEqual([0]);
     expect([...disabled.buffers.fallback as Float32Array]).toEqual([4]);
     expect(compiled.wgsl).toContain("4294967295u");
-    expect(compiled.wgsl).toContain("select(4294967295u, 0u, params.enabled)");
+    expect(compiled.wgsl).toContain("select(4294967295u, 0u, (params.enabled != 0))");
   });
 
   it("lowers CUDA bitwise not and trap no-op control paths", () => {

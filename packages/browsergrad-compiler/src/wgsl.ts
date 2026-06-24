@@ -1214,7 +1214,7 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
     const consequent = devicePointerArgumentParts(expression.consequent, context);
     const alternate = devicePointerArgumentParts(expression.alternate, context);
     if (!consequent || !alternate) return undefined;
-    const condition = emitExpression(expression.condition, context);
+    const condition = emitTruthinessExpression(expression.condition, context);
     return {
       buffer: `select(${alternate.buffer}, ${consequent.buffer}, ${condition})`,
       base: `select(${alternate.base}, ${consequent.base}, ${condition})`,
@@ -1302,6 +1302,14 @@ function sharedPointerArgumentParts(expression: CudaLiteExpression, context: Emi
     return stride === 1 ? value : `(${value} * ${stride}u)`;
   });
   return { buffer: `${id}u`, base: terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})` };
+}
+
+function emitTruthinessExpression(expression: CudaLiteExpression, context: EmitContext): string {
+  const pointer = devicePointerArgumentParts(expression, context);
+  if (pointer) return `(${pointer.buffer} != ${NULL_DEVICE_POINTER_BUFFER})`;
+  const value = emitExpression(expression, context);
+  if (expressionValueTypeForEmit(expression, context) === "bool") return value;
+  return `(${value} != 0)`;
 }
 
 function devicePointerValueTypeForExpression(expression: CudaLiteExpression, context: EmitContext): CudaLiteScalarType {
