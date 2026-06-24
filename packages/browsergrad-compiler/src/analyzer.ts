@@ -805,7 +805,8 @@ function pointerTypesCompatible(target: ValueType, source: ValueType, allowWordR
   const targetScalar = cudaVectorScalarType(target);
   if (targetScalar && targetScalar === source) return true;
   const sourceScalar = cudaVectorScalarType(source);
-  return sourceScalar !== undefined && sourceScalar === target;
+  if (sourceScalar !== undefined && sourceScalar === target) return true;
+  return scalarizedStorageTypesCompatible(target, source) || scalarizedStorageTypesCompatible(source, target);
 }
 
 function isWordAddressablePointerType(type: ValueType): boolean {
@@ -814,6 +815,13 @@ function isWordAddressablePointerType(type: ValueType): boolean {
     type === "uint" ||
     type === "half" ||
     isCudaVectorType(type);
+}
+
+function scalarizedStorageTypesCompatible(target: ValueType, source: ValueType): boolean {
+  return (target === "float" && source === "bf16") ||
+    (target === "bf16" && source === "float") ||
+    (target === "float" && source === "half") ||
+    (target === "half" && source === "float");
 }
 
 function hasExplicitPointerCast(expression: CudaLiteExpression | undefined): boolean {
@@ -1527,7 +1535,7 @@ function validateDevicePointerArgument(
     diagnostics.push(error("const-pointer-write", `cannot pass const pointer '${root}' to writable device pointer parameter '${param.name}'`, arg.span));
   }
   const actualValueType = info.valueType ?? rootSymbol?.valueType;
-  if (actualValueType && actualValueType !== param.valueType) {
+  if (actualValueType && !pointerTypesCompatible(param.valueType, actualValueType, hasExplicitPointerCast(arg))) {
     diagnostics.push(error("unsupported-device-pointer-param", `device pointer parameter '${param.name}' expects ${param.valueType} pointer`, arg.span));
   }
 }

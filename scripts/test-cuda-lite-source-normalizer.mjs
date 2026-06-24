@@ -1338,4 +1338,69 @@ __global__ void constant_record(float* out) {
   assert.match(source, /return cudaParams__gravity\.x \+ \(float\)cudaParams__count;/u);
 }
 
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+template<int BlockSize>
+__global__ void __launch_bounds__(BlockSize) block_sized(float* out) {
+  __shared__ float scratch[BlockSize];
+  scratch[threadIdx.x] = 1.0f;
+  out[threadIdx.x] = scratch[threadIdx.x];
+}`,
+  });
+  assert.match(source, /template\s*<int BlockSize = 256>/u);
+  assert.match(source, /__shared__ float scratch\[256\]/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void atomic_forward(float* out) {
+  addX(&out[threadIdx.x], 1.0f);
+}`,
+    deviceFunctions: [
+      {
+        name: "addX",
+        source: "__device__ void addX(float* addr, float value) { atomicAdd(addr, value); }",
+      },
+    ],
+  });
+  assert.doesNotMatch(source, /\bvoid addX\b/u);
+  assert.match(source, /atomicAdd\(&out\[threadIdx\.x\], 1\.0f\);/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void store_forward(float* out) {
+  float tmp[1] = {0.0f};
+  assignX(2.0f, &tmp[0], 123u);
+  out[0] = tmp[0];
+}`,
+    deviceFunctions: [
+      {
+        name: "assignX",
+        source: "__device__ __forceinline__ void assignX(float value, float* out, unsigned int seed) { *out = value; }",
+      },
+    ],
+  });
+  assert.doesNotMatch(source, /\bvoid assignX\b/u);
+  assert.match(source, /\(tmp\[0\] = 2\.0f\);/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    definesByName: new Map([["floatX", "bf16"]]),
+    kernel: `
+__global__ void implicit_x128(const floatX* x, floatX* y) {
+  x128 value = load128(x);
+  store128(y, value);
+}`,
+  });
+  assert.doesNotMatch(source, /\bx128\b/u);
+  assert.match(source, /bf16 value\[8\]/u);
+  assert.match(source, /value\[7\] = x\[7\]/u);
+  assert.match(source, /y\[7\] = value\[7\]/u);
+}
+
 console.log("cuda-lite source normalizer tests ok");

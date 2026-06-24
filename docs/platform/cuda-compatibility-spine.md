@@ -74,8 +74,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
 - Real-world no-regression gate:
   `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=240`
   WebGPU-runnable, and `<=117` hard gaps;
-  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=138`
-  WebGPU-runnable, and `<=10` hard gaps;
+  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=142`
+  WebGPU-runnable, and `<=6` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=217`
   WebGPU-runnable, and `<=76` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
@@ -123,7 +123,11 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   CUDA inverse trig aliases and CUDA vector `length(v)` helpers lower to WGSL
   math over scalar/vector primitives.
   Fixed thread-local arrays lower to per-thread WGSL function arrays and CPU
-  reference typed arrays.
+  reference typed arrays. Source normalization now also supplies conservative
+  block-size defaults for unresolved launch-bound template value params and
+  inlines simple device helper wrappers that forward to CUDA atomics or pointer
+  stores, so learner kernels can keep small correctness wrappers without
+  requiring a broader device-pointer ABI.
 - Hot-loop dispatch can keep both caller buffers and compiler-generated
   execution sequences resident: `residentBuffers` avoids upload/readback churn,
   and prepared compiler/WebGPU runners avoid rebuilding pipelines and bind

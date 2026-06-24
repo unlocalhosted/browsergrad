@@ -52,7 +52,8 @@ export function createKernelCompilationUnit({
   ].join("\n");
   const aliasDefines = collectTypeAliasDefines(aliasContext, definesByName);
   const carrierDefines = collectCarrierMemberDefines(aliasContext, mergeDefineMaps(definesByName, aliasDefines));
-  const effectiveDefines = mergeDefineMaps(definesByName, aliasDefines, carrierDefines);
+  const syntheticPackDefines = collectSyntheticVectorPackDefines(aliasContext, mergeDefineMaps(definesByName, aliasDefines, carrierDefines));
+  const effectiveDefines = mergeDefineMaps(definesByName, aliasDefines, carrierDefines, syntheticPackDefines);
   const specializedKernel = specializeTemplateFromLaunchContext(kernel, templateArgumentsByKernelName, effectiveDefines);
   const params = new Set(kernelParamNames(specializedKernel));
   const functionDefineBodies = collectFunctionDefineBodies(functionDeclarations);
@@ -144,7 +145,7 @@ export function createKernelCompilationUnit({
   const withCudaPipeline = normalizeCudaPipelineAsync(withNumericDefines);
   const withTypeDefines = normalizeSupportedTypeDefineReferences(
     withCudaPipeline,
-    aliasDefines,
+    effectiveDefines,
     new Set([...params, ...templateNames]),
   );
   const withoutSupportedAliases = stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withTypeDefines, effectiveDefines));
@@ -155,11 +156,14 @@ export function createKernelCompilationUnit({
   const withSharedHelpers = normalizeSharedMemoryHelpers(withPackedHelpers);
   const withSincosHelpers = normalizeSincosHelpers(withSharedHelpers);
   const withBlockReduce = normalizeBlockReduceHelpers(withSincosHelpers);
-  const withLambdas = normalizeSimpleLocalLambdas(withBlockReduce);
+  const withAtomicForwarders = normalizeAtomicForwarderHelpers(withBlockReduce);
+  const withPointerStoreForwarders = normalizePointerStoreForwarderHelpers(withAtomicForwarders);
+  const withLambdas = normalizeSimpleLocalLambdas(withPointerStoreForwarders);
   const withStatementMacros = normalizeSimpleStatementMacros(withLambdas);
   const withSideEffects = normalizeSideEffectExpressions(withStatementMacros);
   const withScopedForVariables = normalizeForLoopScopedVariables(withSideEffects);
-  return normalizeCppTemplateCarrierSyntax(withScopedForVariables);
+  const withTemplateFallbacks = normalizeTemplateValueFallbacks(withScopedForVariables, effectiveDefines);
+  return normalizeCppTemplateCarrierSyntax(withTemplateFallbacks);
 }
 
 export function collectCudaLiteContextDefines(source) {
@@ -493,12 +497,14 @@ function canonicalTemplateFallbackArguments(sourceTail, parsedParams, args, defi
   const out = [...args];
   for (let index = 0; index < parsedParams.length; index++) {
     const param = parsedParams[index];
-    if (
-      param?.kind !== "type" ||
-      (hasConcreteTemplateArgument(out[index]) && String(out[index]).trim() !== param.name) ||
-      templateParamDefaultValue(param) !== undefined
-    ) continue;
-    if (templateTypeParamUsedAsPointerParam(sourceTail, param.name)) out[index] = canonicalTemplatePointerType(sourceTail, definesByName);
+    if (param === undefined || templateParamDefaultValue(param) !== undefined) continue;
+    if (hasConcreteTemplateArgument(out[index]) && String(out[index]).trim() !== param.name) continue;
+    if (param.kind === "type") {
+      if (templateTypeParamUsedAsPointerParam(sourceTail, param.name)) out[index] = canonicalTemplatePointerType(sourceTail, definesByName);
+      continue;
+    }
+    const value = canonicalTemplateValueArgument(sourceTail, param.name, definesByName);
+    if (value !== undefined) out[index] = value;
   }
   return out;
 }
@@ -527,6 +533,15 @@ function templateTypeParamUsedAsPointerParam(sourceTail, name) {
 function canonicalTemplatePointerType(sourceTail, definesByName = new Map()) {
   const candidate = normalizeTemplateTypeArgument(definesByName.get("floatX") ?? "float", definesByName);
   return candidate === "half" || candidate === "bf16" ? "float" : candidate ?? "float";
+}
+
+function canonicalTemplateValueArgument(sourceTail, name, definesByName = new Map()) {
+  const escaped = escapeRegExp(name);
+  const launchBounds = new RegExp(`\\b__launch_bounds__\\s*\\(\\s*${escaped}\\b`, "u").test(sourceTail);
+  const sharedSized = new RegExp(`\\b__shared__\\b[\\s\\S]{0,160}\\[\\s*${escaped}\\s*\\]`, "u").test(sourceTail);
+  if (!launchBounds && !sharedSized && !/\bblock/i.test(name)) return undefined;
+  const blockSize = normalizeTemplateValueArgument(definesByName.get("block_size") ?? definesByName.get("BLOCK_SIZE") ?? "256", "int");
+  return blockSize === undefined ? undefined : String(blockSize);
 }
 
 function rewriteTemplateParam(param, arg, definesByName = new Map()) {
@@ -721,6 +736,37 @@ function normalizeSupportedTypeDefineReferences(source, definesByName, blockedNa
     for (const name of declared) localBlocked.add(name);
     return out;
   }).join("\n");
+}
+
+function collectSyntheticVectorPackDefines(source, definesByName = new Map()) {
+  const out = new Map();
+  if (!sourceMentionsIdentifier(source, "x128") || definesByName.has("x128")) return out;
+  const floatX = normalizeTemplateTypeArgument(definesByName.get("floatX") ?? "float", definesByName);
+  if (floatX === "bf16") out.set("x128", "__bg_pack128_bf168");
+  else if (floatX === "half") out.set("x128", "__bg_pack128_half8");
+  else out.set("x128", "float4");
+  return out;
+}
+
+function normalizeTemplateValueFallbacks(source, definesByName = new Map()) {
+  return source.replace(/\btemplate\s*<([^<>]*)>/gu, (match, params, offset) => {
+    const parsed = splitTopLevel(params).map(parseTemplateParam);
+    if (parsed.every((param) => param?.kind !== "value" || templateParamDefaultValue(param) !== undefined)) return match;
+    const tail = source.slice(offset + match.length, nextTemplateDeclaration(source, offset + match.length));
+    const rewritten = splitTopLevel(params).map((param, index) => {
+      const parsedParam = parsed[index];
+      if (parsedParam?.kind !== "value" || templateParamDefaultValue(parsedParam) !== undefined) return param.trim();
+      const value = canonicalTemplateValueArgument(tail, parsedParam.name, definesByName);
+      return value === undefined ? param.trim() : rewriteTemplateParam(param, value, definesByName);
+    });
+    return `template <${rewritten.join(", ")}>`;
+  });
+}
+
+function nextTemplateDeclaration(source, start) {
+  const rest = source.slice(start);
+  const next = rest.search(/\btemplate\s*</u);
+  return next > 0 ? start + next : source.length;
 }
 
 function resolveTemplateDefineValue(value, definesByName) {
@@ -1589,6 +1635,82 @@ function normalizeBlockReduceHelpers(source) {
     helper.lastIndex = close + 1;
   }
   return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function normalizeAtomicForwarderHelpers(source) {
+  const helpers = collectAtomicForwarderHelpers(source);
+  if (helpers.size === 0) return source;
+  let out = source;
+  for (const [name, builtin] of helpers) {
+    out = out.replace(builtin.definition, "");
+    out = rewriteSimpleCallName(out, name, builtin.target);
+  }
+  return out;
+}
+
+function collectAtomicForwarderHelpers(source) {
+  const helpers = new Map();
+  const re = /(?:template\s*<[^<>]*>\s*)?(?:__device__|__host__|__forceinline__|__inline__|inline|static|\s)+void\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(([^;{}]*)\)\s*;\s*\}/gu;
+  for (const match of source.matchAll(re)) {
+    const [definition, name, paramsSource, target, argsSource] = match;
+    if (!definition || !name || !paramsSource || !target || !argsSource || !isAtomicBuiltinName(target)) continue;
+    const params = splitTopLevel(paramsSource).map((param) => /([A-Za-z_][A-Za-z0-9_]*)\s*$/.exec(param.trim())?.[1]).filter(Boolean);
+    const args = splitTopLevel(argsSource).map((arg) => arg.trim());
+    if (params.length === 0 || params.length !== args.length) continue;
+    if (!args.every((arg, index) => arg === params[index])) continue;
+    helpers.set(name, { target, definition });
+  }
+  return helpers;
+}
+
+function isAtomicBuiltinName(name) {
+  return /^atomic(?:Add|Add_system|Sub|Min|Min_system|Max|Max_system|MaxFloat|And|And_system|Or|Or_system|Xor|Xor_system|Inc|Inc_system|Dec|Dec_system|Exch|Exch_system|CAS|CAS_system)$/u.test(name);
+}
+
+function rewriteSimpleCallName(source, name, replacement) {
+  return source.replace(new RegExp(`\\b${escapeRegExp(name)}\\s*\\(`, "gu"), `${replacement}(`);
+}
+
+function normalizePointerStoreForwarderHelpers(source) {
+  const helpers = collectPointerStoreForwarderHelpers(source);
+  if (helpers.size === 0) return source;
+  let out = source;
+  for (const [name, helper] of helpers) {
+    out = out.replace(helper.definition, "");
+    out = rewritePointerStoreForwarderCalls(out, name, helper);
+  }
+  return out;
+}
+
+function collectPointerStoreForwarderHelpers(source) {
+  const helpers = new Map();
+  const re = /(?:template\s*<[^<>]*>\s*)?(?:__device__|__host__|__forceinline__|__inline__|inline|static|\s)+void\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*\{\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\s*;\s*\}/gu;
+  for (const match of source.matchAll(re)) {
+    const [definition, name, paramsSource, pointerName, valueName] = match;
+    if (!definition || !name || !paramsSource || !pointerName || !valueName) continue;
+    const params = splitTopLevel(paramsSource).map((param) => ({
+      name: /([A-Za-z_][A-Za-z0-9_]*)\s*$/.exec(param.trim())?.[1],
+      pointer: /\*/u.test(param),
+    }));
+    const valueIndex = params.findIndex((param) => param.name === valueName && !param.pointer);
+    const pointerIndex = params.findIndex((param) => param.name === pointerName && param.pointer);
+    if (valueIndex < 0 || pointerIndex < 0) continue;
+    helpers.set(name, { definition, valueIndex, pointerIndex });
+  }
+  return helpers;
+}
+
+function rewritePointerStoreForwarderCalls(source, name, helper) {
+  const re = new RegExp(`\\b${escapeRegExp(name)}\\s*\\(`, "gu");
+  return replaceBalancedCall(source, re, (_match, open, close) => {
+    const args = splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim());
+    const value = args[helper.valueIndex];
+    const pointer = args[helper.pointerIndex];
+    if (!value || !pointer?.startsWith("&")) return undefined;
+    const target = pointer.slice(1).trim();
+    if (target.length === 0) return undefined;
+    return `(${target} = ${value})`;
+  });
 }
 
 function normalizeBlockReducerName(name) {
