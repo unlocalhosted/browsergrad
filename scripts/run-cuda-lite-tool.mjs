@@ -16,6 +16,7 @@ const tools = {
   "e2e:webgpu": { script: "e2e-cuda-lite-webgpu.mjs" },
   "audit:corpus": { script: "audit-cuda-lite-corpus.mjs" },
   "audit:real-world-cuda": { script: "audit-real-world-cuda-corpora.mjs" },
+  "verify:real-world-cuda": { script: "verify-real-world-cuda.mjs" },
   "audit:cuda-120": {
     script: "audit-real-world-cuda-corpora.mjs",
     args: [

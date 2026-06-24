@@ -59,6 +59,7 @@ Current corpus gate:
 ```sh
 pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
 pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
+pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --skip-fetch --require-webgpu
 ```
 
 - `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/240` real code-kernel
@@ -86,6 +87,10 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
 - Corpus audits now emit `executionTierCounts` so platform code can distinguish
   compile/codegen coverage from fixture-backed browser execution and
   output-verified readback.
+- `verify:real-world-cuda` is the combined hardware-backed gate: it runs the
+  pinned full-corpus compile/codegen audit, then runs exact external corpus
+  fixtures through real Chromium/WebGPU with output comparison. Use
+  `--require-webgpu` in CI lanes where missing WebGPU must fail.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, WebGPU atomic
   offset updates, DevicePool aliasing across host-lifted child launches,

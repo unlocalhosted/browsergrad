@@ -433,6 +433,10 @@ Acceptance criteria for the first slice:
 - Working tree has a PRD and corpus registry update before implementation.
 - Real-world corpus audit can be run by
   `pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda`.
+- Combined truth gate can be run by
+  `pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --skip-fetch --require-webgpu`;
+  it executes full-corpus compile/codegen audit plus exact-kernel browser
+  WebGPU fixture e2e.
 - The audit wrapper fetches or verifies pinned corpus commits before running.
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   compile/codegen-runnable count, hard-gap count, error codes, semantic

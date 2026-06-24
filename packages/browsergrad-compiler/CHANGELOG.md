@@ -58,6 +58,8 @@
 - `e2e:webgpu:corpus` now requires output-verified real WebGPU fixtures from
   CUDA-120, NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA when corpus fixtures
   are required.
+- Added `verify:real-world-cuda`, a combined gate that runs pinned corpus
+  compile/codegen audit plus exact-kernel browser/WebGPU corpus fixture e2e.
 - Added shared launch-shape diagnostics so platform preflight, CPU reference,
   and WebGPU runners reject invalid grid/block dimensions consistently.
 - `createCudaWebGpuExecutionPlan()` now returns `launch` blockers for invalid

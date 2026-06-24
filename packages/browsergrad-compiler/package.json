@@ -52,6 +52,7 @@
     "e2e:webgpu:corpus": "node ../../scripts/run-cuda-lite-tool.mjs e2e:webgpu -- --require-corpus-fixtures",
     "audit:corpus": "node ../../scripts/run-cuda-lite-tool.mjs audit:corpus",
     "audit:real-world-cuda": "node ../../scripts/run-cuda-lite-tool.mjs audit:real-world-cuda",
+    "verify:real-world-cuda": "node ../../scripts/run-cuda-lite-tool.mjs verify:real-world-cuda",
     "audit:cuda-120": "node ../../scripts/run-cuda-lite-tool.mjs audit:cuda-120",
     "test:watch": "vitest",
     "test:browser": "vitest run --config vitest.browser.config.ts",

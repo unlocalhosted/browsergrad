@@ -339,6 +339,7 @@ pnpm test:browser
 pnpm test:browser:open
 pnpm e2e:webgpu
 pnpm e2e:webgpu:corpus -- --require-webgpu
+pnpm verify:real-world-cuda -- --skip-fetch --require-webgpu
 ```
 
 `test:browser:open` keeps Chromium open for inspection; quit with `q`. If the
@@ -357,12 +358,16 @@ with readback comparisons. Required fixture names currently cover CUDA-120
 Compiler e2e, corpus, and benchmark package scripts use
 `scripts/run-cuda-lite-tool.mjs`, which locks build + tool execution so parallel
 invocations cannot import a partially rebuilt `dist/` tree.
+`verify:real-world-cuda` is the combined truth gate: it runs the pinned
+real-world compile/codegen audit and then the exact-kernel browser/WebGPU corpus
+fixture e2e.
 
 ## Corpus Audit
 
 ```bash
 pnpm --filter @unlocalhosted/browsergrad-compiler audit:corpus -- /path/to/cuda-corpus --expect-webgpu-min 10
 pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
+pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
 ```
 
 `audit:corpus` extracts CUDA-shaped kernels from Markdown/CUDA/C++ files and
