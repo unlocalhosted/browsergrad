@@ -3898,6 +3898,28 @@ __global__ void helperDynamicShared(uint *out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([3, 4]);
   });
 
+  it("lowers bf16 dynamic extern shared memory when launch metadata supplies its size", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void dynamicBf16(bf16 *out, const bf16 *in) {
+  extern __shared__ bf16 params[];
+  int tid = threadIdx.x;
+  if (tid < 2) { params[tid] = in[tid]; }
+  __syncthreads();
+  if (tid < 1) { out[0] = params[0] + params[1]; }
+}`, {
+      workgroupSize: [2, 1, 1],
+      dynamicSharedMemory: { params: 2 },
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(2), in: new Float32Array([2, 3]) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<workgroup> bg_params: array<f32, 2>;");
+    expect([...result.buffers.out as Float32Array]).toEqual([5, 0]);
+  });
+
   it("lowers static shared declarations and scalar local-array initializers", () => {
     const compiled = compileCudaLiteKernel(`
 static __device__ __forceinline__ float scale(float x) { return x * 2.0f; }

@@ -1121,7 +1121,7 @@ function escapeRegExp(value) {
 
 function inferDynamicSharedMemory(source) {
   const out = {};
-  for (const match of source.matchAll(/extern\s+__shared__\s+(?:float|int|unsigned\s+int|uint|half|__half|bool|char|unsigned\s+char|uchar)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*]/g)) {
+  for (const match of source.matchAll(/extern\s+__shared__\s+(?:float|int|unsigned\s+int|uint|half|__half|bf16|__nv_bfloat16|bool|char|unsigned\s+char|uchar)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*]/g)) {
     out[match[1]] = 256;
   }
   return out;

@@ -274,6 +274,19 @@ __global__ void std_math(float *out) {
 }
 
 {
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void scalar_pack_load(bf16 *out, const bf16 *in, int i) {
+  bf16 *slot = out;
+  slot[i / 8] = load128(in + i);
+}`,
+  });
+  assert.match(source, /slot\[\(\(i \/ 8\) \* 8\) \+ 0\] = in\[\(i\) \+ 0\]/u);
+  assert.match(source, /slot\[\(\(i \/ 8\) \* 8\) \+ 7\] = in\[\(i\) \+ 7\]/u);
+  assert.doesNotMatch(source, /\bload128\s*\(/u);
+}
+
+{
   const launchBoundsKernel = `
 __global__ void __launch_bounds__(WARP_SIZE * kTiles)
     bounded(float *out, const float *in, int N) {

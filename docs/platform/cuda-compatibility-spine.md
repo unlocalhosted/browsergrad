@@ -74,8 +74,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
 - Real-world no-regression gate:
   `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=254`
   WebGPU-runnable, and `<=103` hard gaps;
-  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=145`
-  WebGPU-runnable, and `<=3` hard gaps;
+  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=147`
+  WebGPU-runnable, and `<=1` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=218`
   WebGPU-runnable, and `<=75` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
@@ -138,6 +138,9 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   C++ std math aliases such as `std::isinf` and
   `std::numeric_limits<float>::infinity()` lower to generic CUDA-lite
   intrinsics/constants.
+  Dynamic extern shared-memory inference includes bf16 storage, and scalar
+  128-bit cache-load assignments expand into lane-wise stores for 2/4-byte
+  scalar pointer packs.
   Fixed thread-local arrays lower to per-thread WGSL function arrays and CPU
   reference typed arrays. Source normalization now also supplies conservative
   block-size defaults for unresolved launch-bound template value params and

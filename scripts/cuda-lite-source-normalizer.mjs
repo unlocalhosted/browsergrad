@@ -2302,6 +2302,8 @@ function normalizePacked128MemoryHelpers(source) {
 }
 
 function normalizePacked128MemoryHelpersOnce(source) {
+  const withScalarLoadAssignments = rewritePacked128ScalarLoadAssignments(source);
+  if (withScalarLoadAssignments !== source) return withScalarLoadAssignments;
   const helper = /\b(load128cs|load128|store128cs|store128cg|store128)\s*\(/gu;
   let out = "";
   let cursor = 0;
@@ -2326,6 +2328,65 @@ function normalizePacked128MemoryHelpersOnce(source) {
     helper.lastIndex = close + 1;
   }
   return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function rewritePacked128ScalarLoadAssignments(source) {
+  const symbols = collectVisiblePointerTypes(source);
+  const re = /\b([A-Za-z_][A-Za-z0-9_]*)\s*\[([^\]\n;]+)\]\s*=\s*(load128cs|load128)\s*\(/gu;
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const target = match[1];
+    const index = match[2]?.trim();
+    const helperName = match[3];
+    const open = source.indexOf("(", match.index + match[0].length - 1);
+    const close = findBalanced(source, open, "(", ")");
+    if (target === undefined || index === undefined || helperName === undefined || open < 0 || close === undefined) {
+      re.lastIndex = match.index + 1;
+      continue;
+    }
+    const args = splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim());
+    const pointer = args[0];
+    if (pointer === undefined || pointer.length === 0) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    const targetInfo = packed128ScalarPointerInfo(target, symbols);
+    const pointerInfo = packed128ScalarPointerInfo(pointerBaseIdentifier(pointer), symbols);
+    if (targetInfo === undefined || pointerInfo === undefined || targetInfo.scalarType !== pointerInfo.scalarType) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    out += source.slice(cursor, match.index);
+    out += emitPacked128ScalarLoadAssignments(target, index, pointer, targetInfo.lanes);
+    cursor = close + 1;
+    re.lastIndex = close + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function packed128ScalarPointerInfo(name, symbols) {
+  if (name === undefined) return undefined;
+  const type = normalizePackedScalarType(symbols.get(name));
+  const size = type === undefined ? undefined : cudaTypeByteSize(type);
+  if (type === undefined || size === undefined || size <= 0 || size > 16 || 16 % size !== 0) return undefined;
+  if (!["float", "int", "uint", "half", "bf16"].includes(type)) return undefined;
+  return { scalarType: type, lanes: 16 / size };
+}
+
+function normalizePackedScalarType(type) {
+  if (type === undefined) return undefined;
+  if (type === "__half") return "half";
+  if (type === "__nv_bfloat16") return "bf16";
+  if (type === "unsigned int") return "uint";
+  return type;
+}
+
+function emitPacked128ScalarLoadAssignments(target, index, pointer, lanes) {
+  const base = `(${index}) * ${lanes}`;
+  return Array.from({ length: lanes }, (_unused, lane) =>
+    `${target}[(${base}) + ${lane}] = ${widePacked128PointerLane(pointer, lane)}`).join("; ");
 }
 
 function packed128HelperReplacement(name, args, source) {
