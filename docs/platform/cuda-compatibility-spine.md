@@ -72,8 +72,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   excludes kernels now runnable on real WebGPU through orchestration; current
   baseline is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=229`
-  WebGPU-runnable, and `<=128` hard gaps;
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=230`
+  WebGPU-runnable, and `<=127` hard gaps;
   `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=131`
   WebGPU-runnable, and `<=17` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=217`
@@ -120,6 +120,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   Scalarized POD record values/storage params, constant-record reachability,
   macro-sized record arrays, DirectX-style float-vector fields, and C-style
   array typedef vector aliases now desugar into existing scalar/vector IR.
+  CUDA inverse trig aliases and CUDA vector `length(v)` helpers lower to WGSL
+  math over scalar/vector primitives.
   Fixed thread-local arrays lower to per-thread WGSL function arrays and CPU
   reference typed arrays.
 - Hot-loop dispatch can keep both caller buffers and compiler-generated

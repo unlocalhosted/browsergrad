@@ -149,7 +149,8 @@ export function createKernelCompilationUnit({
   );
   const withoutSupportedAliases = stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withTypeDefines, effectiveDefines));
   const withVectorConstructors = normalizeVectorStaticConstructors(withoutSupportedAliases, effectiveDefines);
-  const withWidePacks = normalizeWidePacked128Aliases(withVectorConstructors, effectiveDefines);
+  const withVectorLength = normalizeCudaVectorLength(withVectorConstructors);
+  const withWidePacks = normalizeWidePacked128Aliases(withVectorLength, effectiveDefines);
   const withPackedHelpers = normalizePacked128MemoryHelpers(withWidePacks);
   const withSharedHelpers = normalizeSharedMemoryHelpers(withPackedHelpers);
   const withSincosHelpers = normalizeSincosHelpers(withSharedHelpers);
@@ -793,6 +794,33 @@ function normalizeCppTemplateCarrierSyntax(source) {
     .replace(/\bstd\s*::\s*bool_constant\s*<\s*(true|false|[01])\s*>\s*\{\s*\}/gu, (_match, value) => value === "1" ? "true" : value === "0" ? "false" : value)
     .replace(/\bstd\s*::\s*bool_constant\s*<\s*([A-Za-z_][A-Za-z0-9_]*|[01])\s*>\s*(?=[,)])/gu, (_match, name) => `bool __bg_bool_constant_${name}`);
   return rewriteBoolTemplateCarriers(withBoolCarriers);
+}
+
+function normalizeCudaVectorLength(source) {
+  const vectorSymbols = collectCudaVectorValueSymbols(source);
+  if (vectorSymbols.size === 0 || !/\blength\s*\(/u.test(source)) return source;
+  return source.replace(/\blength\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)/gu, (match, name) => {
+    if (typeof name !== "string") return match;
+    const lanes = vectorSymbols.get(name);
+    if (lanes === undefined) return match;
+    const terms = ["x", "y", "z", "w"]
+      .slice(0, lanes)
+      .map((lane) => `${name}.${lane} * ${name}.${lane}`);
+    return `sqrtf(${terms.join(" + ")})`;
+  });
+}
+
+function collectCudaVectorValueSymbols(source) {
+  const symbols = new Map();
+  const declarationRe = /\b(float[234])\s+([A-Za-z_][A-Za-z0-9_]*)\b(?!\s*\()/gu;
+  let match;
+  while ((match = declarationRe.exec(source)) !== null) {
+    const type = match[1];
+    const name = match[2];
+    if (type === undefined || name === undefined) continue;
+    symbols.set(name, Number(type.at(-1)));
+  }
+  return symbols;
 }
 
 function rewriteBoolTemplateCarriers(source) {

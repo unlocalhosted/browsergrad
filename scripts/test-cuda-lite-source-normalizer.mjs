@@ -1269,6 +1269,18 @@ __global__ void array_alias(vec2* points, float* out) {
 
 {
   const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void vector_length(float3* input, float* out) {
+  float3 rel = input[threadIdx.x] - make_float3(1.0f, 2.0f, 3.0f);
+  out[threadIdx.x] = length(rel);
+}`,
+  });
+  assert.doesNotMatch(source, /\blength\s*\(/u);
+  assert.match(source, /sqrtf\(rel\.x \* rel\.x \+ rel\.y \* rel\.y \+ rel\.z \* rel\.z\)/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
     recordDeclarations: ["struct Vertex { float4 position; float2 uv; };"],
     kernel: `
 __global__ void record_storage_param(Vertex* vertices, const Vertex* src) {

@@ -1854,6 +1854,9 @@ __global__ void mathy(float *x, float *out) {
       sinf(value) +
       cosf(value) +
       tanf(value) +
+      asinf(__saturatef(value)) +
+      acosf(__saturatef(value)) +
+      atanf(value) +
       tanhf(value) +
       coshf(value) +
       sqrt(fabsf(value)) +
@@ -1863,6 +1866,7 @@ __global__ void mathy(float *x, float *out) {
       __expf(value) +
       __logf(fabsf(value) + 1.0f) +
       powf(fabsf(value), 2.0f) +
+      atan2f(value, 2.0f) +
       fminf(value, 1.0f) +
       fmaxf(value, -1.0f) +
       __fdividef(value, 2.0f) +
@@ -1885,6 +1889,10 @@ __global__ void mathy(float *x, float *out) {
     expect(compiled.wgsl).toContain("sin(value)");
     expect(compiled.wgsl).toContain("cos(value)");
     expect(compiled.wgsl).toContain("tan(value)");
+    expect(compiled.wgsl).toContain("asin(clamp(value, 0.0, 1.0))");
+    expect(compiled.wgsl).toContain("acos(clamp(value, 0.0, 1.0))");
+    expect(compiled.wgsl).toContain("atan(value)");
+    expect(compiled.wgsl).toContain("atan2(value, 2.0)");
     expect(compiled.wgsl).toContain("tanh(value)");
     expect(compiled.wgsl).toContain("cosh(value)");
     expect(compiled.wgsl).toContain("sqrt(abs(value))");
@@ -1904,6 +1912,9 @@ __global__ void mathy(float *x, float *out) {
       Math.sin(value) +
       Math.cos(value) +
       Math.tan(value) +
+      Math.asin(Math.min(1, Math.max(0, value))) +
+      Math.acos(Math.min(1, Math.max(0, value))) +
+      Math.atan(value) +
       Math.tanh(value) +
       Math.cosh(value) +
       Math.sqrt(Math.abs(value)) +
@@ -1913,6 +1924,7 @@ __global__ void mathy(float *x, float *out) {
       Math.exp(value) +
       Math.log(Math.abs(value) + 1) +
       Math.pow(Math.abs(value), 2) +
+      Math.atan2(value, 2) +
       Math.min(value, 1) +
       Math.max(value, -1) +
       (value / 2) +
