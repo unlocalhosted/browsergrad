@@ -200,7 +200,7 @@ Local corpus audits on 2026-06-24:
   cache-load assignment expansion into lane-wise stores, plus custom
   CUDA-vector `cg::reduce` lowering through scalar subgroup shuffle-XOR loops,
   with `0` hard gaps.
-- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `277` direct
+- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `278` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, local header context, and
   simple C++ alias / constexpr intake plus `FLOAT4(x)`-style typed storage
@@ -231,9 +231,9 @@ Local corpus audits on 2026-06-24:
   intrinsic table, closing the post-PTX flash-attention math gap. Shared-memory
   pipeline template params such as stage count, padding, and warp-swizzle flags
   get conservative defaults only inside shared/pipeline contexts. Dependent
-  `typename Config::T` carrier aliases and visible local `constexpr` template
-  launch arguments now fold through the generic source normalizer, leaving `16`
-  hard gaps.
+  `typename Config::T` carrier aliases, visible local `constexpr` template
+  launch arguments, and rank-1 CUTE affine tensor tiles now fold through the
+  generic source normalizer, leaving `15` hard gaps.
   The pre-normalizer baseline was `3/293`, which proved context isolation was
   the first ladder rung.
 
@@ -275,9 +275,9 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
-- The current live aggregate gate is `968/1038` compile/codegen-runnable across the four
+- The current live aggregate gate is `969/1038` compile/codegen-runnable across the four
   pinned corpora: CUDA-120 `240/240`, `cuda-samples` `303/357`, `llm.c`
-  `148/148`, and LeetCUDA `277/293`.
+  `148/148`, and LeetCUDA `278/293`.
 
 ## Grill Decisions
 
@@ -428,7 +428,7 @@ Acceptance criteria for the first slice:
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions,
   `>=148` compile/codegen-runnable, and `0` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
-  `>=277` compile/codegen-runnable, and `<=16` hard gaps.
+  `>=278` compile/codegen-runnable, and `<=15` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
   unit tests.
 - Intrinsic-ledger expansion improves coverage through generic CUDA math and

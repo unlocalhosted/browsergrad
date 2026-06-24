@@ -329,6 +329,44 @@ __global__ void packed_shared(bf16 *out, const bf16 *input, int C) {
 }
 
 {
+  const source = createKernelCompilationUnit({
+    kernel: `
+template <int kNumElemPerThread = 8>
+__global__ void cute_affine(half *z, int num, const half *x, const half *y, half a, half b, half c) {
+  int idx = threadIdx.x + blockIdx.x * blockDim.x;
+  if (idx >= num / kNumElemPerThread) return;
+  Tensor tz = make_tensor(make_gmem_ptr(z), make_shape(num));
+  Tensor tx = make_tensor(make_gmem_ptr(x), make_shape(num));
+  Tensor ty = make_tensor(make_gmem_ptr(y), make_shape(num));
+  Tensor tzr = local_tile(tz, make_shape(Int<kNumElemPerThread>{}), make_coord(idx));
+  Tensor txr = local_tile(tx, make_shape(Int<kNumElemPerThread>{}), make_coord(idx));
+  Tensor tyr = local_tile(ty, make_shape(Int<kNumElemPerThread>{}), make_coord(idx));
+  Tensor txR = make_tensor_like(txr);
+  Tensor tyR = make_tensor_like(tyr);
+  Tensor tzR = make_tensor_like(tzr);
+  copy(txr, txR);
+  copy(tyr, tyR);
+  half2 a2 = {a, a};
+  half2 b2 = {b, b};
+  half2 c2 = {c, c};
+  auto tzR2 = recast<half2>(tzR);
+  auto txR2 = recast<half2>(txR);
+  auto tyR2 = recast<half2>(tyR);
+  for (int i = 0; i < size(tzR2); ++i) {
+    tzR2(i) = txR2(i) * a2 + (tyR2(i) * b2 + c2);
+  }
+  auto tzRx = recast<half>(tzR2);
+  copy(tzRx, tzr);
+}`,
+    templateArgumentsByKernelName: new Map([["cute_affine", ["8"]]]),
+  });
+  assert.match(source, /for \(int __bg_for___bg_cute_i_0 = 0;__bg_for___bg_cute_i_0 < 8;\+\+__bg_for___bg_cute_i_0\)/u);
+  assert.match(source, /z\[__bg_cute_pos\] = x\[__bg_cute_pos\] \* a \+ \(y\[__bg_cute_pos\] \* b \+ c\);/u);
+  assert.doesNotMatch(source, /\bTensor\b/u);
+  assert.doesNotMatch(source, /\brecast\s*</u);
+}
+
+{
   const source = `
 using fn_ptr = void(*)(float*);
 template<fn_ptr fn>

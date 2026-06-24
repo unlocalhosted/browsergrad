@@ -201,7 +201,8 @@ export function createKernelCompilationUnit({
   const withPointerStoreForwarders = normalizePointerStoreForwarderHelpers(withAtomicForwarders);
   const withLocalPointerHelpers = normalizeLocalPointerDeviceFunctionCalls(withPointerStoreForwarders);
   const withLambdas = normalizeSimpleLocalLambdas(withLocalPointerHelpers);
-  const withExpressionMacros = normalizeSimpleExpressionMacros(withLambdas);
+  const withCuteTiles = normalizeCute1dAffineTileCopies(withLambdas);
+  const withExpressionMacros = normalizeSimpleExpressionMacros(withCuteTiles);
   const withLegacyArithmeticMacros = normalizeLegacyCudaArithmeticMacros(withExpressionMacros);
   const withStatementMacros = normalizeSimpleStatementMacros(withLegacyArithmeticMacros);
   const withSideEffects = normalizeSideEffectExpressions(withStatementMacros);
@@ -1972,6 +1973,126 @@ function normalizeSimpleExpressionMacros(source) {
     .split(/\r?\n/u)
     .filter((line) => !macros.some((macro) => functionDefineName(line) === macro.name))
     .join("\n");
+}
+
+function normalizeCute1dAffineTileCopies(source) {
+  if (!/\b(?:Tensor|auto)\b[\s\S]*\blocal_tile\s*\(/u.test(source) || !/\brecast\s*</u.test(source)) return source;
+  let out = source;
+  let cursor = 0;
+  while (cursor < out.length) {
+    const startMatch = /\bTensor\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*make_tensor\s*\(/gu.exec(out.slice(cursor));
+    if (startMatch === null) break;
+    const start = cursor + startMatch.index;
+    const finalCopy = findCuteFinalTileCopy(out, start);
+    if (finalCopy === undefined) {
+      cursor = start + startMatch[0].length;
+      continue;
+    }
+    const segment = out.slice(start, finalCopy.end);
+    const replacement = lowerCute1dAffineTileSegment(segment);
+    if (replacement === undefined) {
+      cursor = start + startMatch[0].length;
+      continue;
+    }
+    out = `${out.slice(0, start)}${replacement}${out.slice(finalCopy.end)}`;
+    cursor = start + replacement.length;
+  }
+  return out;
+}
+
+function findCuteFinalTileCopy(source, start) {
+  const copyRe = /\bcopy\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;/gu;
+  copyRe.lastIndex = start;
+  let match;
+  while ((match = copyRe.exec(source)) !== null) {
+    const prefix = source.slice(start, match.index);
+    if (!/\brecast\s*<\s*(?:half|float)\s*>\s*\(/u.test(prefix)) continue;
+    return { end: copyRe.lastIndex };
+  }
+  return undefined;
+}
+
+function lowerCute1dAffineTileSegment(segment) {
+  const baseTensors = new Map();
+  const baseRe = /\bTensor\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*make_tensor\s*\(\s*make_gmem_ptr\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*,\s*make_shape\s*\(([^)]*)\)\s*\)\s*;/gu;
+  for (const match of segment.matchAll(baseRe)) {
+    if (match[1] && match[2]) baseTensors.set(match[1], { pointer: match[2], shape: (match[3] ?? "").trim() });
+  }
+  if (baseTensors.size === 0) return undefined;
+
+  const tiles = new Map();
+  const tileRe = /\bTensor\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*local_tile\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*make_shape\s*\(\s*Int<([^>]+)>\s*\{\s*\}\s*\)\s*,\s*make_coord\s*\(([^)]*)\)\s*\)\s*;/gu;
+  for (const match of segment.matchAll(tileRe)) {
+    const name = match[1];
+    const base = match[2];
+    const rawLength = match[3];
+    const coord = match[4];
+    const baseInfo = base === undefined ? undefined : baseTensors.get(base);
+    const length = rawLength === undefined ? undefined : evaluateTemplateIntegerExpression(rawLength, new Map());
+    if (!name || !baseInfo || length === undefined || coord === undefined) continue;
+    tiles.set(name, { pointer: baseInfo.pointer, length, coord: coord.trim() });
+  }
+  if (tiles.size === 0) return undefined;
+
+  const registers = new Map();
+  for (const match of segment.matchAll(/\bTensor\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*make_tensor_like\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;/gu)) {
+    if (match[1] && match[2]) registers.set(match[1], match[2]);
+  }
+
+  const recasts = new Map();
+  for (const match of segment.matchAll(/\bauto\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*recast\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;/gu)) {
+    if (match[1] && match[2] && match[3]) recasts.set(match[1], { type: match[2], source: match[3] });
+  }
+
+  const scalarVectors = new Map();
+  for (const match of segment.matchAll(/\b(?:half2|float2)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*\2\s*\}\s*;/gu)) {
+    if (match[1] && match[2]) scalarVectors.set(match[1], match[2]);
+  }
+
+  const finalCopy = [...segment.matchAll(/\bcopy\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;/gu)].at(-1);
+  const finalHalfAlias = finalCopy?.[1];
+  const outTileName = finalCopy?.[2];
+  const outTile = outTileName === undefined ? undefined : tiles.get(outTileName);
+  const outVectorAlias = finalHalfAlias === undefined ? undefined : recasts.get(finalHalfAlias)?.source;
+  if (!outTile || outVectorAlias === undefined) return undefined;
+
+  const forMatch = /for\s*\(\s*int\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*0\s*;\s*\1\s*<\s*size\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;[^)]*\)\s*\{([\s\S]*?)\}/u.exec(segment);
+  if (forMatch?.[1] === undefined || forMatch[2] === undefined || forMatch[3] === undefined) return undefined;
+  const loopIndex = forMatch[1];
+  const loopAlias = forMatch[2];
+  const loopBody = forMatch[3];
+  if (loopAlias !== outVectorAlias) return undefined;
+  const assignment = new RegExp(`\\b${escapeRegExp(outVectorAlias)}\\s*\\(\\s*${escapeRegExp(loopIndex)}\\s*\\)\\s*=\\s*([^;]+);`, "u").exec(loopBody);
+  const rhs = assignment?.[1];
+  if (rhs === undefined) return undefined;
+
+  const aliasPointers = new Map();
+  for (const [alias, recast] of recasts) {
+    if (recast.type !== "half2" && recast.type !== "float2") continue;
+    const regSource = registers.get(recast.source);
+    const tile = regSource === undefined ? undefined : tiles.get(regSource);
+    if (tile !== undefined) aliasPointers.set(alias, tile.pointer);
+  }
+  if (!aliasPointers.has(outVectorAlias)) aliasPointers.set(outVectorAlias, outTile.pointer);
+
+  const item = "__bg_cute_i";
+  const pos = "__bg_cute_pos";
+  let scalarExpression = rhs;
+  for (const [alias, pointer] of aliasPointers) {
+    scalarExpression = scalarExpression.replace(new RegExp(`\\b${escapeRegExp(alias)}\\s*\\(\\s*${escapeRegExp(loopIndex)}\\s*\\)`, "gu"), `${pointer}[${pos}]`);
+  }
+  for (const [vectorName, scalarName] of scalarVectors) {
+    scalarExpression = scalarExpression.replace(new RegExp(`\\b${escapeRegExp(vectorName)}\\b`, "gu"), scalarName);
+  }
+  if (/\b[A-Za-z_][A-Za-z0-9_]*\s*\(/u.test(scalarExpression)) return undefined;
+
+  const offset = `((${outTile.coord}) * ${outTile.length})`;
+  return [
+    `for (int ${item} = 0; ${item} < ${outTile.length}; ++${item}) {`,
+    `  int ${pos} = ${offset} + ${item};`,
+    `  ${outTile.pointer}[${pos}] = ${scalarExpression};`,
+    "}",
+  ].join("\n");
 }
 
 function collectSimpleExpressionMacros(source) {
