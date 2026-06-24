@@ -138,7 +138,8 @@ export function createKernelCompilationUnit({
   ].filter((part) => part.trim().length > 0).join("\n"));
   const withCarrierMembers = normalizeCarrierMemberReferences(unit, effectiveDefines);
   const withVectorCarrierAliases = normalizeCudaVectorCarrierAliases(withCarrierMembers, effectiveDefines);
-  const withScalarizedRecords = normalizeScalarizedPodRecords(withVectorCarrierAliases, effectiveDefines);
+  const withDeviceReferences = normalizeDeviceReferenceParams(withVectorCarrierAliases);
+  const withScalarizedRecords = normalizeScalarizedPodRecords(withDeviceReferences, effectiveDefines);
   const withPodRecords = normalizePodRecordVectorAliases(withScalarizedRecords, effectiveDefines);
   const withNumericDefines = normalizeNumericObjectDefines(
     withPodRecords,
@@ -1874,6 +1875,235 @@ function normalizeSincosHelpers(source) {
     helper.lastIndex = close + 1;
   }
   return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function normalizeDeviceReferenceParams(source) {
+  const functions = scanDeviceReferenceFunctions(source);
+  if (functions.length === 0) return source;
+  const withReferenceCalls = rewriteDeviceReferenceCalls(source, functions);
+  return rewriteDeviceReferenceDefinitions(withReferenceCalls);
+}
+
+function rewriteDeviceReferenceDefinitions(source) {
+  const functions = scanDeviceReferenceFunctions(source);
+  if (functions.length === 0) return source;
+  let out = "";
+  let cursor = 0;
+  for (const fn of functions) {
+    out += source.slice(cursor, fn.paramsStart);
+    out += fn.params.map((param) => param.reference === undefined
+      ? param.source
+      : `${param.reference.type} *${param.reference.name}${param.reference.defaultValue ?? ""}`
+    ).join(", ");
+    out += source.slice(fn.paramsEnd, fn.bodyStart + 1);
+    out += rewriteReferenceParamBody(source.slice(fn.bodyStart + 1, fn.bodyEnd), new Set(fn.params
+      .map((param) => param.reference?.name)
+      .filter(Boolean)));
+    cursor = fn.bodyEnd;
+  }
+  return out + source.slice(cursor);
+}
+
+function rewriteDeviceReferenceCalls(source, functions) {
+  let out = source;
+  for (const fn of functions) {
+    const referenceIndexes = fn.params
+      .map((param, index) => param.reference === undefined ? -1 : index)
+      .filter((index) => index >= 0);
+    if (referenceIndexes.length === 0) continue;
+    const re = new RegExp(`\\b${escapeRegExp(fn.name)}\\s*\\(`, "gu");
+    out = replaceBalancedCall(out, re, (match, open, close) => {
+      if (isInsideCommentOrString(out, match.index) || looksLikeFunctionDefinitionCall(out, match.index, close)) return undefined;
+      const args = splitTopLevel(out.slice(open + 1, close)).map((arg) => arg.trim());
+      if (args.length !== fn.params.length) return undefined;
+      for (const index of referenceIndexes) {
+        const arg = args[index];
+        if (arg === undefined || arg.length === 0 || arg.startsWith("&")) continue;
+        args[index] = referenceArgument(arg);
+      }
+      return `${fn.name}(${args.join(", ")})`;
+    });
+  }
+  return out;
+}
+
+function scanDeviceReferenceFunctions(source) {
+  return scanDeviceFunctions(source).map((fn) => ({
+    ...fn,
+    params: fn.params.map((param) => {
+      const parsed = parseDeviceReferenceParam(param);
+      if (parsed.reference === undefined) return parsed;
+      return referenceParamNeedsPointerRewrite(fn.body, parsed.reference.name) ? parsed : { source: param };
+    }),
+  })).filter((fn) => fn.params.some((param) => param.reference !== undefined));
+}
+
+function scanDeviceFunctions(source) {
+  const functions = [];
+  let index = 0;
+  while (index < source.length) {
+    const match = /\b__device__\b/u.exec(source.slice(index));
+    if (match === null) break;
+    const deviceStart = index + match.index;
+    const open = source.indexOf("(", deviceStart);
+    const close = findBalanced(source, open, "(", ")");
+    if (open < 0 || close === undefined) {
+      index = deviceStart + "__device__".length;
+      continue;
+    }
+    const signature = source.slice(deviceStart, open);
+    const name = /([A-Za-z_][A-Za-z0-9_]*)\s*$/u.exec(signature)?.[1];
+    const afterParams = skipWhitespace(source, close + 1);
+    if (name === undefined || source[afterParams] !== "{") {
+      index = close + 1;
+      continue;
+    }
+    const end = findBalanced(source, afterParams, "{", "}");
+    if (end === undefined) {
+      index = close + 1;
+      continue;
+    }
+    functions.push({
+      name,
+      paramsStart: open + 1,
+      paramsEnd: close,
+      bodyStart: afterParams,
+      bodyEnd: end,
+      body: source.slice(afterParams + 1, end),
+      params: splitTopLevel(source.slice(open + 1, close)),
+    });
+    index = end + 1;
+  }
+  return functions;
+}
+
+function parseDeviceReferenceParam(source) {
+  const defaultMatch = /\s*=\s*[\s\S]*$/u.exec(source);
+  const defaultValue = defaultMatch?.[0];
+  const core = (defaultValue === undefined ? source : source.slice(0, defaultMatch.index)).trim();
+  if (!/(^|[^&])&([^&]|$)/u.test(core)) return { source };
+  const match = /^([\s\S]*?)&\s*([A-Za-z_][A-Za-z0-9_]*)\s*$/u.exec(core);
+  if (match?.[1] === undefined || match[2] === undefined) return { source };
+  const type = match[1].trim();
+  if (type.length === 0 || type.includes("*")) return { source };
+  if (!isIntegerReferenceRewriteType(type)) return { source };
+  return {
+    source,
+    reference: {
+      type,
+      name: match[2],
+      ...(defaultValue === undefined ? {} : { defaultValue }),
+    },
+  };
+}
+
+function referenceParamNeedsPointerRewrite(body, name) {
+  return new RegExp(`\\batomic[A-Za-z0-9_]*\\s*\\([^;{}]*&\\s*${escapeRegExp(name)}\\b`, "u")
+    .test(stripCommentsAndStrings(body));
+}
+
+function isIntegerReferenceRewriteType(type) {
+  const normalized = type
+    .replace(/\b(?:volatile|register|__restrict__|restrict)\b/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (/\bconst\b/u.test(normalized)) return false;
+  return /^(?:u?int|unsigned|signed|unsigned int|signed int|uint32_t|int32_t)$/u.test(normalized);
+}
+
+function rewriteReferenceParamBody(body, referenceNames) {
+  if (referenceNames.size === 0) return body;
+  let out = "";
+  let cursor = 0;
+  let index = 0;
+  while (index < body.length) {
+    const skipped = skipTrivia(body, index);
+    if (skipped !== index) {
+      index = skipped;
+      continue;
+    }
+    if (body[index] === "&" && body[index + 1] !== "&") {
+      const nameStart = skipWhitespace(body, index + 1);
+      const name = readIdentifierAt(body, nameStart);
+      if (name !== undefined && referenceNames.has(name.value)) {
+        out += body.slice(cursor, index);
+        out += name.value;
+        cursor = name.end;
+        index = name.end;
+        continue;
+      }
+    }
+    const name = readIdentifierAt(body, index);
+    if (name !== undefined) {
+      if (referenceNames.has(name.value)) {
+        out += body.slice(cursor, index);
+        out += `(*${name.value})`;
+        cursor = name.end;
+      }
+      index = name.end;
+      continue;
+    }
+    index++;
+  }
+  return cursor === 0 ? body : out + body.slice(cursor);
+}
+
+function referenceArgument(arg) {
+  return /^[A-Za-z_][A-Za-z0-9_]*(?:\s*(?:\[[^\]]+\]|\.[A-Za-z_][A-Za-z0-9_]*))*$/u.test(arg) ||
+    /^\*\s*[A-Za-z_][A-Za-z0-9_]*$/u.test(arg)
+    ? `&${arg}`
+    : `&(${arg})`;
+}
+
+function looksLikeFunctionDefinitionCall(source, nameStart, close) {
+  if (source[skipWhitespace(source, close + 1)] !== "{") return false;
+  const lineStart = source.lastIndexOf("\n", nameStart) + 1;
+  return /\b__device__\b/u.test(source.slice(lineStart, nameStart));
+}
+
+function isInsideCommentOrString(source, target) {
+  let index = 0;
+  while (index < target) {
+    const skipped = skipTrivia(source, index);
+    if (skipped !== index) {
+      if (target < skipped) return true;
+      index = skipped;
+      continue;
+    }
+    index++;
+  }
+  return false;
+}
+
+function skipTrivia(source, index) {
+  if (source[index] === "/" && source[index + 1] === "/") {
+    const end = source.indexOf("\n", index + 2);
+    return end < 0 ? source.length : end;
+  }
+  if (source[index] === "/" && source[index + 1] === "*") {
+    const end = source.indexOf("*/", index + 2);
+    return end < 0 ? source.length : end + 2;
+  }
+  if (source[index] === "\"" || source[index] === "'") {
+    const quote = source[index];
+    let cursor = index + 1;
+    while (cursor < source.length) {
+      if (source[cursor] === "\\") {
+        cursor += 2;
+        continue;
+      }
+      if (source[cursor] === quote) return cursor + 1;
+      cursor++;
+    }
+    return source.length;
+  }
+  return index;
+}
+
+function readIdentifierAt(source, index) {
+  const match = /^[A-Za-z_][A-Za-z0-9_]*/u.exec(source.slice(index));
+  if (match === null) return undefined;
+  return { value: match[0], end: index + match[0].length };
 }
 
 function normalizeBlockReduceHelpers(source) {

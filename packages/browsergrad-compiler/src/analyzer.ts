@@ -2095,8 +2095,10 @@ function isSupportedDevicePointerAtomic(
   callName: string | undefined,
   targetType: CudaLiteScalarType,
 ): boolean {
-  return (callName === "atomicAdd" || callName === "atomicAdd_system") &&
-    (targetType === "float" || targetType === "int" || targetType === "uint");
+  if (targetType !== "float" && targetType !== "int" && targetType !== "uint") return false;
+  if (callName === "atomicAdd" || callName === "atomicAdd_system") return true;
+  if (callName === "atomicExch" || callName === "atomicExch_system") return true;
+  return (callName === "atomicCAS" || callName === "atomicCAS_system") && targetType !== "float";
 }
 
 function isDevicePointerAtomicMemoryCompatible(

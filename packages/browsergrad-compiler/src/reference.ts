@@ -1301,7 +1301,7 @@ function evalAssignment(
   const pointerRebase = evalPointerRebaseAssignment(operator, leftExpression, rightExpression, context);
   if (pointerRebase) return pointerRebase;
   if (operator === "=" && leftExpression.kind === "identifier") {
-    const currentPointer = mutablePointerValue(leftExpression.name, context);
+    const currentPointer = mutableRebindablePointerValue(leftExpression.name, context);
     if (isAddress(currentPointer) || isPoolPointer(currentPointer)) {
       const valueType = pointerValueTypeForExpression(leftExpression, context);
       try {
@@ -1405,7 +1405,7 @@ function evalPointerRebaseAssignment(
   context: ThreadContext,
 ): AddressValue | PoolPointerValue | undefined {
   if (leftExpression.kind !== "identifier" || (operator !== "+=" && operator !== "-=")) return undefined;
-  const current = mutablePointerValue(leftExpression.name, context);
+  const current = mutableRebindablePointerValue(leftExpression.name, context);
   if (!current) return undefined;
   const valueType = pointerValueTypeForExpression(leftExpression, context);
   const delta = Math.trunc(evalNumber(rightExpression, context)) * (operator === "+=" ? 1 : -1);
@@ -1419,7 +1419,7 @@ function evalPointerRebaseUpdate(
   context: ThreadContext,
 ): AddressValue | PoolPointerValue | undefined {
   if (expression.argument.kind !== "identifier") return undefined;
-  const current = mutablePointerValue(expression.argument.name, context);
+  const current = mutableRebindablePointerValue(expression.argument.name, context);
   if (!current) return undefined;
   const valueType = pointerValueTypeForExpression(expression.argument, context);
   const next = offsetPointerValue(current, expression.operator === "++" ? 1 : -1, valueType);
@@ -1434,6 +1434,14 @@ function mutablePointerValue(name: string, context: ThreadContext): AddressValue
   if (context.buffers.has(name)) return { kind: "address", target: { name, space: "buffer", index: 0, ...(valueType ? { valueType } : {}) } };
   if (context.shared.has(name)) return { kind: "address", target: { name, space: "shared", index: 0, ...(valueType ? { valueType } : {}) } };
   if (context.memoryPools.has(name)) return { kind: "pool-pointer", poolName: name, byteOffset: 0, ...(valueType ? { valueType } : {}) };
+  return undefined;
+}
+
+function mutableRebindablePointerValue(name: string, context: ThreadContext): AddressValue | PoolPointerValue | undefined {
+  const local = context.locals.get(name);
+  if (isAddress(local) || isPoolPointer(local)) return local;
+  if (context.buffers.has(name) && context.valueTypes.has(name)) return mutablePointerValue(name, context);
+  if (context.memoryPools.has(name)) return mutablePointerValue(name, context);
   return undefined;
 }
 

@@ -5224,6 +5224,55 @@ __global__ void helper_shared_atomic(uint* out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([5]);
   });
 
+  it("supports pointer-form atomic exchange against shared scalars", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void mark_u32(uint* target, uint value) {
+  atomicExch(target, value);
+}
+__global__ void helper_shared_scalar_exchange(uint* out) {
+  __shared__ uint flag;
+  if (threadIdx.x == 0) {
+    flag = 0u;
+    mark_u32(&flag, 7u);
+    out[0] = flag;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicExchange_u32");
+    expect(compiled.wgsl).toContain("case 1u: { return atomicExchange(&flag, value); }");
+    expect([...result.buffers.out as Uint32Array]).toEqual([7]);
+  });
+
+  it("supports pointer-form atomic compare-swap against storage and shared memory", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint cas_u32(uint* target, uint compare, uint value) {
+  return atomicCAS(target, compare, value);
+}
+__global__ void helper_pointer_cas(uint* out, uint* storage) {
+  __shared__ uint flag;
+  if (threadIdx.x == 0) {
+    flag = 3u;
+    out[0] = cas_u32(storage, 2u, 9u);
+    out[1] = storage[0];
+    out[2] = cas_u32(&flag, 3u, 11u);
+    out[3] = flag;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(4), storage: new Uint32Array([2]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicCompareExchange_u32");
+    expect([...result.buffers.out as Uint32Array]).toEqual([2, 9, 3, 11]);
+  });
+
   it("passes shared array offsets to device pointer helper parameters", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ void copy_one(float* out, float* src) {

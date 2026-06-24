@@ -60,7 +60,7 @@ Repo exploration:
 
 Local corpus audits on 2026-06-24:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `269` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `271` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -132,7 +132,10 @@ Local corpus audits on 2026-06-24:
   CUDA opaque RNG handle aliases, function-pointer typedef intake,
   numeric scalar-template fallback for count/index params, C `frexp` exponent
   out-params, and `typename vecN<T>::Type` vector-carrier alias lowering,
-  with `88` hard
+  plus conservative mutable integer reference-param lowering for pointer-form
+  atomics, device-pointer `atomicExch` / `atomicCAS` helper dispatch, and
+  reference-runtime pointer-rebinding hardening for shared scalars,
+  with `86` hard
   gaps.
   Main failures:
   parser/frontend gaps, texture/vector
@@ -245,8 +248,8 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
-- The current live aggregate gate is `875/1038` WebGPU-runnable across the four
-  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `269/357`, `llm.c`
+- The current live aggregate gate is `877/1038` WebGPU-runnable across the four
+  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `271/357`, `llm.c`
   `148/148`, and LeetCUDA `218/293`.
 
 ## Grill Decisions
@@ -393,7 +396,7 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=269` WebGPU-runnable, and `<=88` hard gaps.
+  `>=271` WebGPU-runnable, and `<=86` hard gaps.
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions,
   `>=148` WebGPU-runnable, and `0` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,

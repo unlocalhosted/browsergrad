@@ -892,6 +892,7 @@ function usesFunctionLocalPointerParam(
   if (!param.pointer) return false;
   const paramIndex = fn.params.findIndex((item) => item.name === param.name);
   if (paramIndex < 0) return false;
+  const sharedNames = new Set(ir.sharedDeclarations.map((shared) => shared.name));
   let sawCall = false;
   let allCallsUseLocalAddress = true;
   for (const statements of [ir.body, ...ir.functions.map((item) => item.body)]) {
@@ -899,16 +900,17 @@ function usesFunctionLocalPointerParam(
       if (!allCallsUseLocalAddress || expression.kind !== "call" || expressionName(expression.callee) !== fn.name) return;
       sawCall = true;
       const arg = expression.args[paramIndex];
-      if (!arg || !isFunctionLocalPointerArgument(arg)) allCallsUseLocalAddress = false;
+      if (!arg || !isFunctionLocalPointerArgument(arg, sharedNames)) allCallsUseLocalAddress = false;
     });
   }
   return sawCall && allCallsUseLocalAddress;
 }
 
-function isFunctionLocalPointerArgument(expression: CudaLiteExpression): boolean {
+function isFunctionLocalPointerArgument(expression: CudaLiteExpression, sharedNames: ReadonlySet<string>): boolean {
   return expression.kind === "unary" &&
     expression.operator === "&" &&
-    expression.argument.kind === "identifier";
+    expression.argument.kind === "identifier" &&
+    !sharedNames.has(expression.argument.name);
 }
 
 function usesDevicePointerParams(ir: KernelIrModule): boolean {
@@ -1006,6 +1008,14 @@ function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, c
     lines.push("");
     lines.push(...emitDevicePointerAtomicAddHelper(type, ir, context));
   }
+  if (isDevicePointerAtomicExchangeType(type) && usesDevicePointerAtomicExchange(ir)) {
+    lines.push("");
+    lines.push(...emitDevicePointerAtomicExchangeHelper(type, ir, context));
+  }
+  if (isDevicePointerAtomicCasType(type) && usesDevicePointerAtomicCas(ir)) {
+    lines.push("");
+    lines.push(...emitDevicePointerAtomicCasHelper(type, ir, context));
+  }
   return lines;
 }
 
@@ -1017,9 +1027,27 @@ function isDevicePointerAtomicAddType(type: CudaLiteScalarType): type is "float"
   return type === "float" || type === "int" || type === "uint";
 }
 
+function isDevicePointerAtomicExchangeType(type: CudaLiteScalarType): type is "float" | "int" | "uint" {
+  return type === "float" || type === "int" || type === "uint";
+}
+
+function isDevicePointerAtomicCasType(type: CudaLiteScalarType): type is "int" | "uint" {
+  return type === "int" || type === "uint";
+}
+
 function usesDevicePointerAtomicAdd(ir: KernelIrModule): boolean {
   const atomicAdds = new Set(["atomicAdd", "atomicAdd_system"]);
   return statementsUseCall(ir.body, atomicAdds) || ir.functions.some((fn) => statementsUseCall(fn.body, atomicAdds));
+}
+
+function usesDevicePointerAtomicExchange(ir: KernelIrModule): boolean {
+  const atomicExchanges = new Set(["atomicExch", "atomicExch_system"]);
+  return statementsUseCall(ir.body, atomicExchanges) || ir.functions.some((fn) => statementsUseCall(fn.body, atomicExchanges));
+}
+
+function usesDevicePointerAtomicCas(ir: KernelIrModule): boolean {
+  const atomicCas = new Set(["atomicCAS", "atomicCAS_system"]);
+  return statementsUseCall(ir.body, atomicCas) || ir.functions.some((fn) => statementsUseCall(fn.body, atomicCas));
 }
 
 function emitDevicePointerAtomicAddHelper(
@@ -1058,6 +1086,78 @@ function emitDevicePointerAtomicAddHelper(
   return lines;
 }
 
+function emitDevicePointerAtomicExchangeHelper(
+  type: "float" | "int" | "uint",
+  ir: KernelIrModule,
+  context: EmitContext,
+): string[] {
+  const scalar = wgslScalar(type);
+  const lines = [
+    `fn ${pointerAtomicExchangeHelperName(type)}(buffer: u32, index: u32, value: ${scalar}) -> ${scalar} {`,
+    "  switch buffer {",
+  ];
+  for (const param of ir.params.filter((param) =>
+    param.pointer &&
+    !param.constant &&
+    param.valueType === type &&
+    ir.atomicParams.includes(param.name)
+  )) {
+    const id = context.storagePointerIdFor(param.name);
+    if (id === undefined) continue;
+    const access = `${context.nameFor(param.name)}[index]`;
+    lines.push(`    case ${id}u: { return ${emitAtomicExchangeAtAddress(type, `&${access}`, "value")}; }`);
+  }
+  for (const shared of ir.sharedDeclarations.filter((shared) =>
+    shared.valueType === type &&
+    ir.atomicShared.includes(shared.name)
+  )) {
+    const id = context.sharedPointerIdFor(shared.name);
+    if (id === undefined) continue;
+    const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, "index");
+    lines.push(`    case ${id}u: { return ${emitAtomicExchangeAtAddress(type, `&${access}`, "value")}; }`);
+  }
+  lines.push(`    default: { return ${zeroValue(type)}; }`);
+  lines.push("  }");
+  lines.push("}");
+  return lines;
+}
+
+function emitDevicePointerAtomicCasHelper(
+  type: "int" | "uint",
+  ir: KernelIrModule,
+  context: EmitContext,
+): string[] {
+  const scalar = wgslScalar(type);
+  const lines = [
+    `fn ${pointerAtomicCasHelperName(type)}(buffer: u32, index: u32, compare: ${scalar}, value: ${scalar}) -> ${scalar} {`,
+    "  switch buffer {",
+  ];
+  for (const param of ir.params.filter((param) =>
+    param.pointer &&
+    !param.constant &&
+    param.valueType === type &&
+    ir.atomicParams.includes(param.name)
+  )) {
+    const id = context.storagePointerIdFor(param.name);
+    if (id === undefined) continue;
+    const access = `${context.nameFor(param.name)}[index]`;
+    lines.push(`    case ${id}u: { return atomicCompareExchangeWeak(&${access}, compare, value).old_value; }`);
+  }
+  for (const shared of ir.sharedDeclarations.filter((shared) =>
+    shared.valueType === type &&
+    ir.atomicShared.includes(shared.name)
+  )) {
+    const id = context.sharedPointerIdFor(shared.name);
+    if (id === undefined) continue;
+    const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, "index");
+    lines.push(`    case ${id}u: { return atomicCompareExchangeWeak(&${access}, compare, value).old_value; }`);
+  }
+  lines.push(`    default: { return ${zeroValue(type)}; }`);
+  lines.push("  }");
+  lines.push("}");
+  return lines;
+}
+
 function emitAtomicAddAtAddress(
   type: "float" | "int" | "uint",
   addressSpace: "storage" | "workgroup",
@@ -1067,6 +1167,12 @@ function emitAtomicAddAtAddress(
   return type === "float"
     ? `${floatAtomicHelperName("Add", addressSpace)}(${address}, ${value})`
     : `atomicAdd(${address}, ${value})`;
+}
+
+function emitAtomicExchangeAtAddress(type: "float" | "int" | "uint", address: string, value: string): string {
+  return type === "float"
+    ? `bitcast<f32>(atomicExchange(${address}, bitcast<u32>(${value})))`
+    : `atomicExchange(${address}, ${value})`;
 }
 
 function isPointerHelperCompatibleStorage(helperType: CudaLiteScalarType, storageType: CudaLiteScalarType): boolean {
@@ -1182,6 +1288,7 @@ function emitSharedPointerWrite(
 }
 
 function emitSharedFlatAccess(name: string, dimensions: readonly number[], index: string): string {
+  if (dimensions.length === 0) return name;
   if (dimensions.length <= 1) return `${name}[${index}]`;
   return dimensions.reduce((expr, dimension, axis) => {
     const stride = dimensions.slice(axis + 1).reduce((product, item) => product * item, 1);
@@ -1322,6 +1429,10 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
       base: `(${target.base} + u32(${emitExpression(expression.argument.index, context)}))`,
     };
   }
+  if (expression.kind === "unary" && expression.operator === "&" && expression.argument.kind === "identifier") {
+    const sharedId = context.sharedPointerIdFor(expression.argument.name);
+    if (sharedId !== undefined) return { buffer: `${sharedId}u`, base: "0u" };
+  }
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
     const target = devicePointerArgumentParts(expression.left, context);
     if (!target) return undefined;
@@ -1445,6 +1556,14 @@ function pointerWriteHelperName(type: CudaLiteScalarType): string {
 
 function pointerAtomicAddHelperName(type: "float" | "int" | "uint"): string {
   return `bg_ptr_atomicAdd_${pointerHelperTypeName(type)}`;
+}
+
+function pointerAtomicExchangeHelperName(type: "float" | "int" | "uint"): string {
+  return `bg_ptr_atomicExchange_${pointerHelperTypeName(type)}`;
+}
+
+function pointerAtomicCasHelperName(type: "int" | "uint"): string {
+  return `bg_ptr_atomicCompareExchange_${pointerHelperTypeName(type)}`;
 }
 
 function pointerHelperTypeName(type: CudaLiteScalarType): string {
@@ -2663,6 +2782,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       if (atomicTarget && compare && value) {
         return `atomicCompareExchangeWeak(${atomicTarget.address}, ${emitExpression(compare, context)}, ${emitExpression(value, context)}).old_value`;
       }
+      const pointerAtomic = emitDevicePointerAtomicCasCall(target, compare, value, context);
+      if (pointerAtomic) return pointerAtomic;
       return `atomicCompareExchangeWeak(${args.join(", ")}).old_value`;
     }
     default:
@@ -2902,23 +3023,42 @@ function emitAtomicCall(
     }
     return `${wgslName}(${atomicTarget.address}, ${valueExpression})`;
   }
-  const pointerAtomic = emitDevicePointerAtomicAddCall(wgslName, target, value, context);
+  const pointerAtomic = emitDevicePointerAtomicCall(wgslName, target, value, context);
   if (pointerAtomic) return pointerAtomic;
   return `${wgslName}(${args.join(", ")})`;
 }
 
-function emitDevicePointerAtomicAddCall(
+function emitDevicePointerAtomicCall(
   wgslName: string,
   target: CudaLiteExpression | undefined,
   value: CudaLiteExpression | undefined,
   context: EmitContext,
 ): string | undefined {
-  if (wgslName !== "atomicAdd" || !target || !value) return undefined;
+  if (!target || !value) return undefined;
   const parts = devicePointerArgumentParts(target, context);
   if (!parts) return undefined;
   const valueType = devicePointerValueTypeForExpression(target, context);
-  if (!isDevicePointerAtomicAddType(valueType)) return undefined;
-  return `${pointerAtomicAddHelperName(valueType)}(${parts.buffer}, ${parts.base}, ${emitExpression(value, context)})`;
+  if (wgslName === "atomicAdd" && isDevicePointerAtomicAddType(valueType)) {
+    return `${pointerAtomicAddHelperName(valueType)}(${parts.buffer}, ${parts.base}, ${emitExpression(value, context)})`;
+  }
+  if (wgslName === "atomicExchange" && isDevicePointerAtomicExchangeType(valueType)) {
+    return `${pointerAtomicExchangeHelperName(valueType)}(${parts.buffer}, ${parts.base}, ${emitExpression(value, context)})`;
+  }
+  return undefined;
+}
+
+function emitDevicePointerAtomicCasCall(
+  target: CudaLiteExpression | undefined,
+  compare: CudaLiteExpression | undefined,
+  value: CudaLiteExpression | undefined,
+  context: EmitContext,
+): string | undefined {
+  if (!target || !compare || !value) return undefined;
+  const parts = devicePointerArgumentParts(target, context);
+  if (!parts) return undefined;
+  const valueType = devicePointerValueTypeForExpression(target, context);
+  if (!isDevicePointerAtomicCasType(valueType)) return undefined;
+  return `${pointerAtomicCasHelperName(valueType)}(${parts.buffer}, ${parts.base}, ${emitExpression(compare, context)}, ${emitExpression(value, context)})`;
 }
 
 function emitAtomicTarget(

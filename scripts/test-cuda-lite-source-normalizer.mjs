@@ -1620,4 +1620,52 @@ __global__ void uses_translation_unit_shared(uint* out) {
   assert.match(source, /extern __shared__ unsigned char LocalBlock\[\];/u);
 }
 
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void ref_atomic(uint* out) {
+  __shared__ unsigned int flag;
+  if (threadIdx.x == 0) flag = 0u;
+  mark(flag, 1);
+  out[0] = flag;
+}`,
+    deviceFunctions: [
+      {
+        name: "mark",
+        source: `
+__device__ void mark(unsigned int &flag, int value) {
+  if (value > 0) atomicExch(&flag, 1u);
+}`,
+      },
+    ],
+  });
+  assert.match(source, /void mark\(unsigned int \*flag, int value\)/u);
+  assert.match(source, /mark\(&flag, 1\)/u);
+  assert.match(source, /atomicExch\(flag, 1u\)/u);
+  assert.doesNotMatch(source, /unsigned int &flag/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void skip_float_ref(float2* out) {
+  float2 twiddle;
+  fill(twiddle);
+  out[0] = twiddle;
+}`,
+    deviceFunctions: [
+      {
+        name: "fill",
+        source: `
+__device__ void fill(float2 &twiddle) {
+  __sincosf(1.0f, &twiddle.x, &twiddle.y);
+}`,
+      },
+    ],
+  });
+  assert.match(source, /float2 &twiddle/u);
+  assert.match(source, /twiddle\.x = sinf\(1\.0f\); twiddle\.y = cosf\(1\.0f\);/u);
+  assert.doesNotMatch(source, /\(\*twiddle\)/u);
+}
+
 console.log("cuda-lite source normalizer tests ok");
