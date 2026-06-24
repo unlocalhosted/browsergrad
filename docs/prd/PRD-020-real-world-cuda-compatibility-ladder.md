@@ -60,7 +60,7 @@ Repo exploration:
 
 Local corpus audits on 2026-06-24:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `239` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `240` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -113,8 +113,9 @@ Local corpus audits on 2026-06-24:
   translation-unit constant-record reachability, self-alias-safe field typing,
   macro-sized record arrays, DirectX-style float vector field aliases, and
   C-style array typedef vector aliases, plus CUDA inverse trig aliases and
-  vector `length(v)` helper lowering, and explicit opt-in f64-to-f32
-  compatibility lowering for educational WebGPU runs, with `118` hard gaps.
+  vector `length(v)` helper lowering, explicit opt-in f64-to-f32 compatibility
+  lowering for educational WebGPU runs, and `__usad4` plus
+  `vabsdiff4.u32.u32.u32.add` byte-lane SAD lowering, with `117` hard gaps.
   Main failures:
   parser/frontend gaps, texture/vector
   operators, remaining `half2` intrinsics, templates, and runtime library
@@ -219,8 +220,8 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
-- The current live aggregate gate is `838/1038` WebGPU-runnable across the four
-  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `239/357`, `llm.c`
+- The current live aggregate gate is `839/1038` WebGPU-runnable across the four
+  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `240/357`, `llm.c`
   `138/148`, and LeetCUDA `217/293`.
 
 ## Grill Decisions
@@ -367,7 +368,7 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=239` WebGPU-runnable, and `<=118` hard gaps.
+  `>=240` WebGPU-runnable, and `<=117` hard gaps.
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions, `>=138`
   WebGPU-runnable, and `<=10` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
@@ -391,6 +392,9 @@ Acceptance criteria for the first slice:
 - CUDA `double` is accepted only behind `f64Mode: "f32"` compatibility lowering,
   emits `f64-lowered-to-f32`, uses f32 storage/WGSL/reference ABI, and remains
   unsupported by default so labs cannot accidentally claim true f64 behavior.
+- CUDA u8x4 sum-of-absolute-differences lowers through both `__usad4(a, b, c)`
+  and `vabsdiff4.u32.u32.u32.add` inline PTX, with analyzer validation, CPU
+  reference semantics, WGSL emission, and corpus gate evidence.
 - CUDA vector storage types `float2/3/4`, `int2/3/4`, and `uint2/3/4` lower
   through one semantic vector ABI with scalar storage buffers, lane
   member access, `make_*` constructors, CPU reference, and WebGPU coverage.

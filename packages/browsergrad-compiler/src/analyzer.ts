@@ -867,8 +867,9 @@ function validateInlineAsmStatement(
   const laneId = isInlineAsmLaneId(statement.template);
   const laneMaskLt = isInlineAsmLaneMaskLt(statement.template);
   const bfindU32 = isInlineAsmBfindU32(statement.template);
-  if (!fma && !laneId && !laneMaskLt && !bfindU32) {
-    diagnostics.push(error("unsupported-inline-asm", "only fma.rn.f32, laneid, lanemask_lt, and bfind.u32 inline PTX are supported in CUDA-lite v0", statement.span));
+  const sadAdd = isInlineAsmU8x4SadAdd(statement.template);
+  if (!fma && !laneId && !laneMaskLt && !bfindU32 && !sadAdd) {
+    diagnostics.push(error("unsupported-inline-asm", "only fma.rn.f32, laneid, lanemask_lt, bfind.u32, and vabsdiff4.u32.u32.u32.add inline PTX are supported in CUDA-lite v0", statement.span));
   }
   const outputInfo = statement.output === undefined ? undefined : walkExpression(statement.output, scope);
   if (statement.output !== undefined) {
@@ -895,6 +896,12 @@ function validateInlineAsmStatement(
   }
   if (bfindU32 && outputInfo?.valueType !== undefined && outputInfo.valueType !== "uint") {
     diagnostics.push(error("invalid-inline-asm-operands", "bfind.u32 inline PTX writes a uint output operand", statement.output?.span ?? statement.span));
+  }
+  if (sadAdd && (statement.output === undefined || statement.inputs.length !== 3)) {
+    diagnostics.push(error("invalid-inline-asm-operands", "vabsdiff4.u32.u32.u32.add inline PTX expects three input operands", statement.span));
+  }
+  if (sadAdd && outputInfo?.valueType !== undefined && outputInfo.valueType !== "uint" && outputInfo.valueType !== "int") {
+    diagnostics.push(error("invalid-inline-asm-operands", "vabsdiff4.u32.u32.u32.add inline PTX writes an integer output operand", statement.output?.span ?? statement.span));
   }
   for (const input of statement.inputs) {
     validateScalarOperand(walkExpression(input, scope), input.span, diagnostics);
@@ -2519,6 +2526,10 @@ function isInlineAsmLaneMaskLt(template: string): boolean {
 
 function isInlineAsmBfindU32(template: string): boolean {
   return /\bbfind\.u32\b/u.test(template);
+}
+
+function isInlineAsmU8x4SadAdd(template: string): boolean {
+  return /\bvabsdiff4\.u32\.u32\.u32\.add\b/u.test(template);
 }
 
 function validateSideEffectPlacement(

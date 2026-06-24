@@ -101,6 +101,7 @@ Common CUDA float math helpers lower natively in both WGSL and CPU reference:
 `truncf`, `sinf`, `cosf`, `tanf`, `tanhf`, `coshf`, `powf`, `fminf`,
 `fmaxf`, `fma`, `fmaf`, `rsqrtf`, `__expf`, `__logf`, `__saturatef`, and
 `__fdividef`. Integer CUDA helpers include `__clz`, `__mul24`, and `__umul24`;
+`__usad4` lowers as byte-lane sum-of-absolute-differences plus add.
 `assert(expr)` is accepted as a no-op runtime check in browser kernels.
 Scalar half helpers lower behind `shader-f16`: `__half2float`, `__float2half`,
 `hexp`, `__hadd`, `__hsub`, `__hmul`, `__hdiv`, `__hneg`, `__hfma`,

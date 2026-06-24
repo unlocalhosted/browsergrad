@@ -64,6 +64,7 @@ const SEMANTIC_BUILTIN_DEVICE_HELPERS = new Set([
   "__stcs",
   "__ldg",
   "__stcg",
+  "__usad4",
   "vec_at",
   "load128",
   "load128cs",

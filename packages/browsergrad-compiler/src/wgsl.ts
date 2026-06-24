@@ -712,11 +712,26 @@ function emitInlineAsmStatement(
   if (/\bbfind\.u32\b/u.test(statement.template) && statement.inputs.length === 1 && statement.output !== undefined) {
     return `${emitExpression(statement.output, context)} = (31u - countLeadingZeros(u32(${emitExpression(statement.inputs[0]!, context)})))`;
   }
+  if (/\bvabsdiff4\.u32\.u32\.u32\.add\b/u.test(statement.template) && statement.inputs.length === 3 && statement.output !== undefined) {
+    return `${emitExpression(statement.output, context)} = ${emitInlineU32Output(statement.output, emitU8x4SadAddExpression(statement.inputs, context), context)}`;
+  }
   if (!/\bfma\.rn\.f32\b/u.test(statement.template) || statement.inputs.length !== 2 || statement.output === undefined) {
-    throw featureError("unsupported-inline-asm", "only fma.rn.f32, laneid, lanemask_lt, and bfind.u32 inline PTX are supported in WGSL output");
+    throw featureError("unsupported-inline-asm", "only fma.rn.f32, laneid, lanemask_lt, bfind.u32, and vabsdiff4.u32.u32.u32.add inline PTX are supported in WGSL output");
   }
   const target = emitExpression(statement.output, context);
   return `${target} = fma(${emitExpression(statement.inputs[0]!, context)}, ${emitExpression(statement.inputs[1]!, context)}, ${target})`;
+}
+
+function emitU8x4SadAddExpression(inputs: readonly CudaLiteExpression[], context: EmitContext): string {
+  const a = `u32(${emitExpression(inputs[0]!, context)})`;
+  const b = `u32(${emitExpression(inputs[1]!, context)})`;
+  const c = `u32(${emitExpression(inputs[2]!, context)})`;
+  const lanes = [0, 8, 16, 24].map((shift) => {
+    const left = `((${a} >> ${shift}u) & 0xffu)`;
+    const right = `((${b} >> ${shift}u) & 0xffu)`;
+    return `(max(${left}, ${right}) - min(${left}, ${right}))`;
+  });
+  return `(${c} + ${lanes.join(" + ")})`;
 }
 
 function emitForVar(statement: CudaLiteVarDecl, context: EmitContext): string {

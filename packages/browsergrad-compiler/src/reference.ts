@@ -529,6 +529,18 @@ function execInlineAsm(
     writeLValue(resolveLValue(statement.output, context), found, context);
     return;
   }
+  if (/\bvabsdiff4\.u32\.u32\.u32\.add\b/u.test(statement.template)) {
+    if (statement.inputs.length !== 3) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects three inputs");
+    if (statement.output === undefined) throw compilerFailure("vabsdiff4.u32.u32.u32.add inline asm expects an output operand");
+    const a = evalNumber(statement.inputs[0]!, context) >>> 0;
+    const b = evalNumber(statement.inputs[1]!, context) >>> 0;
+    let out = evalNumber(statement.inputs[2]!, context) >>> 0;
+    for (let lane = 0; lane < 4; lane++) {
+      out = (out + Math.abs(((a >>> (lane * 8)) & 0xff) - ((b >>> (lane * 8)) & 0xff))) >>> 0;
+    }
+    writeLValue(resolveLValue(statement.output, context), out >>> 0, context);
+    return;
+  }
   if (!/\bfma\.rn\.f32\b/u.test(statement.template)) {
     throw compilerFailure("unsupported inline asm template");
   }

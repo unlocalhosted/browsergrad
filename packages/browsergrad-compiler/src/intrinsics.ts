@@ -106,6 +106,7 @@ const INTEGER_INTRINSICS = [
   intrinsic("__popc", [1, 1], "int", (args) => popCount32(args[0] ?? 0), (args) => `i32(countOneBits(u32(${args[0] ?? "0"})))`),
   intrinsic("__mul24", [2, 2], "int", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0), (args) => `(i32(${args[0] ?? "0"}) * i32(${args[1] ?? "0"}))`),
   intrinsic("__umul24", [2, 2], "uint", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0) >>> 0, (args) => `(u32(${args[0] ?? "0"}) * u32(${args[1] ?? "0"}))`),
+  intrinsic("__usad4", [2, 3], "uint", evalU8x4SadAdd, emitU8x4SadAdd),
   intrinsic("UMUL", [2, 2], "uint", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0) >>> 0, (args) => `(u32(${args[0] ?? "0"}) * u32(${args[1] ?? "0"}))`),
   intrinsic("UMAD", [3, 3], "uint", (args) => (Math.imul(args[0] ?? 0, args[1] ?? 0) + (args[2] ?? 0)) >>> 0, (args) => `((u32(${args[0] ?? "0"}) * u32(${args[1] ?? "0"})) + u32(${args[2] ?? "0"}))`),
   intrinsic("umin", [2, 2], "uint", (args) => Math.min(args[0] ?? 0, args[1] ?? 0) >>> 0, (args) => `min(u32(${args[0] ?? "0"}), u32(${args[1] ?? "0"}))`),
@@ -229,6 +230,28 @@ function popCount32(value: number): number {
   bits -= (bits >>> 1) & 0x55555555;
   bits = (bits & 0x33333333) + ((bits >>> 2) & 0x33333333);
   return (((bits + (bits >>> 4)) & 0x0f0f0f0f) * 0x01010101) >>> 24;
+}
+
+function evalU8x4SadAdd(args: readonly number[]): number {
+  const a = Math.trunc(args[0] ?? 0) >>> 0;
+  const b = Math.trunc(args[1] ?? 0) >>> 0;
+  let out = Math.trunc(args[2] ?? 0) >>> 0;
+  for (let lane = 0; lane < 4; lane++) {
+    out = (out + Math.abs(((a >>> (lane * 8)) & 0xff) - ((b >>> (lane * 8)) & 0xff))) >>> 0;
+  }
+  return out >>> 0;
+}
+
+function emitU8x4SadAdd(args: readonly string[]): string {
+  const a = `u32(${args[0] ?? "0"})`;
+  const b = `u32(${args[1] ?? "0"})`;
+  const c = `u32(${args[2] ?? "0"})`;
+  const lanes = [0, 8, 16, 24].map((shift) => {
+    const left = `(${a} >> ${shift}u) & 0xffu`;
+    const right = `(${b} >> ${shift}u) & 0xffu`;
+    return `(max(${left}, ${right}) - min(${left}, ${right}))`;
+  });
+  return `(${c} + ${lanes.join(" + ")})`;
 }
 
 function fp8ToFloat32(bits: number, mode: number): number {

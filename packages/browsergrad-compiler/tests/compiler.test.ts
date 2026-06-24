@@ -2852,6 +2852,36 @@ __global__ void bfindKernel(uint *out, uint *input) {
     expect([...result.buffers.out as Uint32Array]).toEqual([0xffffffff, 0, 4, 31]);
   });
 
+  it("lowers CUDA u8x4 SAD intrinsics and inline PTX", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int sad_ptx(unsigned int a, unsigned int b, unsigned int c) {
+  unsigned int ret;
+  asm("vabsdiff4.u32.u32.u32.add %0, %1, %2, %3;"
+      : "=r"(ret)
+      : "r"(a), "r"(b), "r"(c));
+  return ret;
+}
+__global__ void sad4(uint *out, uint *a, uint *b) {
+  int idx = threadIdx.x;
+  out[idx] = __usad4(a[idx], b[idx], 7u);
+  out[idx + 2] = sad_ptx(a[idx], b[idx], 5u);
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(4),
+          a: new Uint32Array([0x01020304, 0xff001020]),
+          b: new Uint32Array([0x05010108, 0x0f000020]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("0xffu");
+    expect([...result.buffers.out as Uint32Array]).toEqual([18, 263, 16, 261]);
+  });
+
   it("parses adjacent-string inline PTX with multiple outputs as an unsupported semantic gap", () => {
     expect(() => compileCudaLiteKernel(`
 __global__ void mmaCarrier(uint *out, uint *in) {
