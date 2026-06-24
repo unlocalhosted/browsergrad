@@ -404,6 +404,7 @@ function hasParentSideEffectsAfterLaunch(statements: readonly CudaLiteStatement[
       case "asm":
       case "for":
       case "while":
+      case "do-while":
       case "return":
       case "continue":
       case "break":
@@ -425,7 +426,7 @@ function containsKernelLaunch(statements: readonly CudaLiteStatement[]): boolean
   for (const statement of statements) {
     if (statement.kind === "kernel-launch") return true;
     if (statement.kind === "if" && (containsKernelLaunch(statement.consequent) || containsKernelLaunch(statement.alternate ?? []))) return true;
-    if (statement.kind === "for" && containsKernelLaunch(statement.body)) return true;
+    if ((statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while" || statement.kind === "block") && containsKernelLaunch(statement.body)) return true;
   }
   return false;
 }

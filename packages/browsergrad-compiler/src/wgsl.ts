@@ -735,6 +735,13 @@ function emitStatement(
       lines.push(`${prefix}}`);
       return lines;
     }
+    case "do-while": {
+      const lines = [`${prefix}loop {`];
+      lines.push(...statement.body.flatMap((child) => emitStatement(child, context, indentLevel + 1)));
+      lines.push(`${indent(indentLevel + 1)}if (!(${emitExpression(statement.condition, context)})) { break; }`);
+      lines.push(`${prefix}}`);
+      return lines;
+    }
     case "return":
       return [`${prefix}${statement.value ? `return ${emitExpression(statement.value, context)};` : "return;"}`];
     case "continue":
@@ -762,6 +769,10 @@ function emitInlineAsmStatement(
     const lane = `u32(${emitLocalLinearRank(context)} & 31)`;
     const mask = `select(0u, ((1u << ${lane}) - 1u), ${lane} > 0u)`;
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, mask, context)}`;
+  }
+  if (op?.kind === "globaltimer-u64" && statement.inputs.length === 0 && outputs.length === 1) {
+    const tick = `u32((global_id.x * ${context.ir.workgroupSize[0]}u) + ${emitLocalLinearRank(context)})`;
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, tick, context)}`;
   }
   if (op?.kind === "bfind-u32" && statement.inputs.length === 1 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = (31u - countLeadingZeros(u32(${emitExpression(statement.inputs[0]!, context)})))`;
@@ -1922,6 +1933,7 @@ function collectLocalNames(statements: readonly CudaLiteStatement[]): ReadonlySe
         if (item.init?.kind === "var") names.add(item.init.name);
         walk(item.body);
       }
+      if (item.kind === "while" || item.kind === "do-while" || item.kind === "block") walk(item.body);
     }
   };
   walk(statements);
@@ -1943,7 +1955,7 @@ function collectLocalArrays(statements: readonly CudaLiteStatement[]): ReadonlyM
         }
         walk(item.body);
       }
-      if (item.kind === "block") walk(item.body);
+      if (item.kind === "while" || item.kind === "do-while" || item.kind === "block") walk(item.body);
     }
   };
   walk(statements);
@@ -1967,7 +1979,7 @@ function collectLocalValueTypes(statements: readonly CudaLiteStatement[]): Reado
         }
         walk(item.body);
       }
-      if (item.kind === "block") walk(item.body);
+      if (item.kind === "while" || item.kind === "do-while" || item.kind === "block") walk(item.body);
     }
   };
   walk(statements);
@@ -2104,7 +2116,7 @@ function collectLocalPointerHandles(statements: readonly CudaLiteStatement[]): R
         }
         walk(item.body);
       }
-      if (item.kind === "block") walk(item.body);
+      if (item.kind === "while" || item.kind === "do-while" || item.kind === "block") walk(item.body);
     }
   };
   walk(statements);
@@ -2123,7 +2135,7 @@ function collectMutableLocalPointerNames(statements: readonly CudaLiteStatement[
         if (item.alternate) walkStatements(item.alternate);
       }
       if (item.kind === "for") walkStatements(item.body);
-      if (item.kind === "block") walkStatements(item.body);
+      if (item.kind === "while" || item.kind === "do-while" || item.kind === "block") walkStatements(item.body);
     }
   };
   walkStatements(statements);
@@ -2154,7 +2166,7 @@ function collectPointerAliases(
         walk(item.consequent);
         if (item.alternate) walk(item.alternate);
       }
-      if (item.kind === "for") walk(item.body);
+      if (item.kind === "for" || item.kind === "while" || item.kind === "do-while" || item.kind === "block") walk(item.body);
     }
   };
   walk(statements);
@@ -2199,6 +2211,7 @@ function collectPoolPointers(statements: readonly CudaLiteStatement[]): Readonly
         }
         walk(item.body);
       }
+      if (item.kind === "while" || item.kind === "do-while" || item.kind === "block") walk(item.body);
     }
   };
   walk(statements);
@@ -2282,6 +2295,11 @@ function collectRawPoolAllocators(statements: readonly CudaLiteStatement[]): rea
         if (item.update) visitExpression(item.update);
         walk(item.body);
       }
+      if (item.kind === "while" || item.kind === "do-while") {
+        walk(item.body);
+        visitExpression(item.condition);
+      }
+      if (item.kind === "block") walk(item.body);
       if (item.kind === "return" && item.value) visitExpression(item.value);
     }
   };
@@ -2298,7 +2316,7 @@ function collectCooperativeGroups(statements: readonly CudaLiteStatement[]): Rea
         walk(item.consequent);
         if (item.alternate) walk(item.alternate);
       }
-      if (item.kind === "for") walk(item.body);
+      if (item.kind === "for" || item.kind === "while" || item.kind === "do-while" || item.kind === "block") walk(item.body);
     }
   };
   walk(statements);
@@ -4504,6 +4522,11 @@ function statementsUseCall(statements: readonly CudaLiteStatement[], names: Read
       (statement.update ? expressionUsesCall(statement.update, names) : false) ||
       statementsUseCall(statement.body, names)
     )) return true;
+    if ((statement.kind === "while" || statement.kind === "do-while") && (
+      expressionUsesCall(statement.condition, names) ||
+      statementsUseCall(statement.body, names)
+    )) return true;
+    if (statement.kind === "block" && statementsUseCall(statement.body, names)) return true;
     if (statement.kind === "return" && statement.value && expressionUsesCall(statement.value, names)) return true;
   }
   return false;
@@ -4525,6 +4548,11 @@ function statementsUseIdentifier(statements: readonly CudaLiteStatement[], names
       (statement.update ? expressionUsesIdentifier(statement.update, names) : false) ||
       statementsUseIdentifier(statement.body, names)
     )) return true;
+    if ((statement.kind === "while" || statement.kind === "do-while") && (
+      expressionUsesIdentifier(statement.condition, names) ||
+      statementsUseIdentifier(statement.body, names)
+    )) return true;
+    if (statement.kind === "block" && statementsUseIdentifier(statement.body, names)) return true;
     if (statement.kind === "return" && statement.value && expressionUsesIdentifier(statement.value, names)) return true;
     if (statement.kind === "kernel-launch" && (
       statement.grid.some((expression) => expressionUsesIdentifier(expression, names)) ||

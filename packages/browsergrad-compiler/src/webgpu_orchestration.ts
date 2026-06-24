@@ -414,6 +414,7 @@ function statementNeedsParentDispatch(statement: CudaLiteStatement): boolean {
         (statement.alternate?.some(statementNeedsParentDispatch) ?? false);
     case "for":
     case "while":
+    case "do-while":
       return true;
   }
 }

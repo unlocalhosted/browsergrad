@@ -834,7 +834,7 @@ function isPortableDeviceFunctionCandidate(signature, source, name, recordNames 
 
 function isPortableScalarDeviceFunction(signature, source) {
   if (/\*/u.test(signature)) return false;
-  if (/\bdo\b|reinterpret|__float_as_int|__int_as_float/u.test(source)) return false;
+  if (/reinterpret|__float_as_int|__int_as_float/u.test(source)) return false;
   return true;
 }
 
@@ -846,7 +846,7 @@ function isPortablePointerDeviceFunction(signature, source, name, recordNames = 
   const templateTypeParams = templateTypeParamNames(signature);
   if (pointerBases.length === 0) return false;
   if (!pointerBases.every((type) => isPortableBaseType(type, templateTypeParams, definesByName))) return false;
-  if (/\bdo\b|__float_as_int|__int_as_float/u.test(source)) return false;
+  if (/__float_as_int|__int_as_float/u.test(source)) return false;
   return true;
 }
 
@@ -857,7 +857,7 @@ function isPortableReferenceDeviceFunction(signature, source, name, recordNames 
   const templateTypeParams = templateTypeParamNames(signature);
   if (referenceBases.length === 0) return false;
   if (!referenceBases.every((type) => isPortableBaseType(type, templateTypeParams, definesByName))) return false;
-  if (/\bdo\b|__float_as_int|__int_as_float/u.test(source)) return false;
+  if (/__float_as_int|__int_as_float/u.test(source)) return false;
   return true;
 }
 

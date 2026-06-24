@@ -548,6 +548,10 @@ function firstSharedAccessesByName(
           visitExpression(item.condition);
           visit(item.body);
           break;
+        case "do-while":
+          visit(item.body);
+          visitExpression(item.condition);
+          break;
         case "return":
           if (item.value) visitExpression(item.value);
           break;
@@ -598,6 +602,8 @@ function visitStatements(
       visitStatements(statement.consequent, visit);
       if (statement.alternate) visitStatements(statement.alternate, visit);
     }
-    if (statement.kind === "for") visitStatements(statement.body, visit);
+    if (statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while" || statement.kind === "block") {
+      visitStatements(statement.body, visit);
+    }
   }
 }

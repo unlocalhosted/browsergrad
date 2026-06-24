@@ -263,6 +263,7 @@ function hasParentSideEffectsAfterPeerCopy(statements: readonly CudaLiteStatemen
       case "asm":
       case "for":
       case "while":
+      case "do-while":
       case "kernel-launch":
       case "return":
       case "continue":
@@ -281,7 +282,7 @@ function containsPeerCopyCall(statements: readonly CudaLiteStatement[]): boolean
   for (const statement of statements) {
     if (statement.kind === "expr" && isPeerCopyCall(statement.expression)) return true;
     if (statement.kind === "if" && (containsPeerCopyCall(statement.consequent) || containsPeerCopyCall(statement.alternate ?? []))) return true;
-    if (statement.kind === "for" && containsPeerCopyCall(statement.body)) return true;
+    if ((statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while" || statement.kind === "block") && containsPeerCopyCall(statement.body)) return true;
   }
   return false;
 }

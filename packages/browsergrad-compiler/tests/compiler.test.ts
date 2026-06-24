@@ -1013,6 +1013,38 @@ __global__ void whileLoop(int *out) {
     expect([...result.buffers.out as Int32Array]).toEqual([13]);
   });
 
+  it("lowers CUDA do-while loops and rejects unsupported do-while continue", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void doWhileLoop(int *out) {
+  int i = 0;
+  int acc = 0;
+  do {
+    acc += i;
+    i++;
+  } while (i < 4);
+  out[0] = acc;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const unsupported = analyzeCudaLite(parseCudaLite(`
+__global__ void unsupportedDoContinue(int *out) {
+  int i = 0;
+  do {
+    i++;
+    if (i == 1) continue;
+  } while (i < 2);
+  out[0] = i;
+}`));
+
+    expect(compiled.wgsl).toContain("loop {");
+    expect(compiled.wgsl).toContain("if (!((i < 4))) { break; }");
+    expect([...result.buffers.out as Int32Array]).toEqual([6]);
+    expect(unsupported.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-do-while-continue");
+  });
+
   it("accepts empty CUDA statement bodies", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void emptyWhile(int *latch, int *out) {
@@ -3140,6 +3172,26 @@ __global__ void laneMaskLt(uint *out) {
 
     expect(compiled.wgsl).toContain("1u <<");
     expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 3, 7]);
+  });
+
+  it("lowers output-only inline PTX globaltimer statements deterministically", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned long long read_clock() {
+  unsigned long long t;
+  asm volatile("mov.u64 %0, %globaltimer;" : "=l"(t));
+  return t;
+}
+__global__ void globalTimer(uint *out) {
+  out[threadIdx.x] = (uint)read_clock();
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("global_id.x");
+    expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3]);
   });
 
   it("lowers inline PTX bfind.u32 statements", () => {

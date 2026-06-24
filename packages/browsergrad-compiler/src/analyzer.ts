@@ -402,6 +402,16 @@ export function analyzeCudaLite(
           walkStatements(statement.body, createScope(scope), guardDepth, divergent ? divergentDepth + 1 : divergentDepth, loopDepth + 1, new Set());
           break;
         }
+        case "do-while": {
+          validateSideEffectPlacement(statement.condition, false, diagnostics);
+          walkExpression(statement.condition, scope);
+          if (hasContinueTargetingDoWhile(statement.body)) {
+            diagnostics.push(error("unsupported-do-while-continue", "continue inside do-while is not supported until WGSL continuing-condition lowering is explicit", statement.span));
+          }
+          const divergent = expressionIsDivergent(statement.condition, params);
+          walkStatements(statement.body, createScope(scope), guardDepth, divergent ? divergentDepth + 1 : divergentDepth, loopDepth + 1, new Set());
+          break;
+        }
         case "return":
           if (statement.value) {
             validateSideEffectPlacement(statement.value, false, diagnostics);
@@ -980,6 +990,12 @@ function validateInlineAsmStatement(
   }
   if (op?.kind === "lanemask-lt" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
     diagnostics.push(error("invalid-inline-asm-operands", "lanemask_lt inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
+  }
+  if (op?.kind === "globaltimer-u64" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
+    diagnostics.push(error("invalid-inline-asm-operands", "globaltimer inline PTX expects one output operand and no input operands", statement.span));
+  }
+  if (op?.kind === "globaltimer-u64" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
+    diagnostics.push(error("invalid-inline-asm-operands", "globaltimer inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "bfind-u32" && (outputs.length !== 1 || statement.inputs.length !== 1)) {
     diagnostics.push(error("invalid-inline-asm-operands", "bfind.u32 inline PTX expects one output operand and one input operand", statement.span));
@@ -2872,6 +2888,21 @@ function validateBarrierStatement(
   }
 }
 
+function hasContinueTargetingDoWhile(statements: readonly CudaLiteStatement[]): boolean {
+  for (const statement of statements) {
+    if (statement.kind === "continue") return true;
+    if (statement.kind === "block" && hasContinueTargetingDoWhile(statement.body)) return true;
+    if (statement.kind === "if") {
+      if (hasContinueTargetingDoWhile(statement.consequent)) return true;
+      if (statement.alternate && hasContinueTargetingDoWhile(statement.alternate)) return true;
+    }
+    if (statement.kind === "do-while" && hasContinueTargetingDoWhile(statement.body)) return true;
+    // A continue inside these bodies targets the nested loop, not the enclosing do-while.
+    if (statement.kind === "for" || statement.kind === "while") continue;
+  }
+  return false;
+}
+
 function collectSharedDeclarations(
   statements: readonly CudaLiteStatement[],
   options: CudaLiteAnalyzeOptions,
@@ -2887,7 +2918,7 @@ function collectSharedDeclarations(
         walk(item.consequent);
         if (item.alternate) walk(item.alternate);
       }
-      if (item.kind === "for") walk(item.body);
+      if (item.kind === "for" || item.kind === "while" || item.kind === "do-while" || item.kind === "block") walk(item.body);
     }
   };
   walk(statements);

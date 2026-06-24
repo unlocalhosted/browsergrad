@@ -502,6 +502,13 @@ function* execStatements(
           if (control?.kind === "break") break;
         }
         break;
+      case "do-while":
+        do {
+          const control = yield* execStatements(statement.body, context);
+          if (control?.kind === "return") return control;
+          if (control?.kind === "break") break;
+        } while (truthy(evalNumber(statement.condition, context)));
+        break;
       case "return":
         return {
           kind: "return",
@@ -547,6 +554,13 @@ function execInlineAsm(
     const lane = localLinearRank(context) & 31;
     const mask = lane === 0 ? 0 : (1 << lane) - 1;
     writeLValue(resolveLValue(outputs[0]!, context), mask >>> 0, context);
+    return;
+  }
+  if (op?.kind === "globaltimer-u64") {
+    if (statement.inputs.length !== 0) throw compilerFailure("globaltimer inline asm expects no inputs");
+    if (outputs.length !== 1) throw compilerFailure("globaltimer inline asm expects one output operand");
+    const tick = (context.blockIdx.x * context.blockDim.x + localLinearRank(context)) >>> 0;
+    writeLValue(resolveLValue(outputs[0]!, context), tick, context);
     return;
   }
   if (op?.kind === "bfind-u32") {
@@ -3035,7 +3049,7 @@ function sharedDeclarationsFor(
         visit(item.consequent);
         if (item.alternate) visit(item.alternate);
       }
-      if (item.kind === "for") visit(item.body);
+      if (item.kind === "for" || item.kind === "while" || item.kind === "do-while" || item.kind === "block") visit(item.body);
     }
   };
   visit(statements);
@@ -3079,6 +3093,10 @@ function usesGridSync(statements: readonly CudaLiteStatement[]): boolean {
         if (item.update && visitExpression(item.update)) return true;
         if (walk(item.body)) return true;
       }
+      if (item.kind === "while" || item.kind === "do-while") {
+        if (visitExpression(item.condition) || walk(item.body)) return true;
+      }
+      if (item.kind === "block" && walk(item.body)) return true;
       if (item.kind === "return" && item.value && visitExpression(item.value)) return true;
     }
     return false;

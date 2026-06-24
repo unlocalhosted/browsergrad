@@ -2,6 +2,7 @@ export type InlineAsmOp =
   | { readonly kind: "fma-rn-f32" }
   | { readonly kind: "laneid" }
   | { readonly kind: "lanemask-lt" }
+  | { readonly kind: "globaltimer-u64" }
   | { readonly kind: "bfind-u32" }
   | { readonly kind: "u8x4-sad-add" }
   | {
@@ -17,6 +18,7 @@ export type InlineAsmOp =
 export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   if (/\bmov\.u32\b/u.test(template) && /%%laneid\b/u.test(template)) return { kind: "laneid" };
   if (/\bmov\.u32\b/u.test(template) && /%%lanemask_lt\b/u.test(template)) return { kind: "lanemask-lt" };
+  if (/\bmov\.u64\b/u.test(template) && /%globaltimer\b/u.test(template)) return { kind: "globaltimer-u64" };
   if (/\bbfind\.u32\b/u.test(template)) return { kind: "bfind-u32" };
   if (/\bvabsdiff4\.u32\.u32\.u32\.add\b/u.test(template)) return { kind: "u8x4-sad-add" };
   if (/\bfma\.rn\.f32\b/u.test(template)) return { kind: "fma-rn-f32" };
@@ -43,6 +45,7 @@ export function inlineAsmSupportedList(): string {
     "fma.rn.f32",
     "laneid",
     "lanemask_lt",
+    "globaltimer",
     "bfind.u32",
     "vabsdiff4.u32.u32.u32.add",
     "ldmatrix.sync.aligned.x{1,2,4}.m8n8.shared.b16",

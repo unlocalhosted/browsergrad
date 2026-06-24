@@ -57,6 +57,10 @@ export function walkCudaLiteExpressions(
       if (statement.update) walkExpression(statement.update, visitExpression);
       walkCudaLiteExpressions(statement.body, visitExpression);
     }
+    if (statement.kind === "while" || statement.kind === "do-while") {
+      walkExpression(statement.condition, visitExpression);
+      walkCudaLiteExpressions(statement.body, visitExpression);
+    }
     if (statement.kind === "return" && statement.value) walkExpression(statement.value, visitExpression);
   }
 }
@@ -72,6 +76,7 @@ export function walkCudaLiteStatements(
       if (statement.alternate) walkCudaLiteStatements(statement.alternate, visitStatement);
     }
     if (statement.kind === "for") walkCudaLiteStatements(statement.body, visitStatement);
+    if (statement.kind === "while" || statement.kind === "do-while") walkCudaLiteStatements(statement.body, visitStatement);
     if (statement.kind === "block") walkCudaLiteStatements(statement.body, visitStatement);
   }
 }

@@ -12,6 +12,7 @@ import {
   type CudaLiteDeviceFunction,
   type CudaLiteDeviceGlobal,
   type CudaLiteDim3Decl,
+  type CudaLiteDoWhileStatement,
   type CudaLiteExpression,
   type CudaLiteForStatement,
   type CudaLiteGlobalConstant,
@@ -485,6 +486,7 @@ class Parser {
     if (this.match("if")) return [this.parseIf()];
     if (this.match("for")) return [this.parseFor()];
     if (this.match("while")) return [this.parseWhile()];
+    if (this.match("do")) return [this.parseDoWhile()];
     if (this.match("return")) return [this.parseReturn()];
     if (this.match("continue")) return [this.parseContinue()];
     if (this.match("break")) return [this.parseBreak()];
@@ -589,6 +591,22 @@ class Parser {
       condition,
       body,
       span: mergeSpans(start, body.at(-1)?.span ?? condition.span),
+    };
+  }
+
+  private parseDoWhile(): CudaLiteDoWhileStatement {
+    const start = this.expect("do").span;
+    const body = this.parseBodyAsStatements();
+    this.expect("while");
+    this.expect("(");
+    const condition = this.parseExpression();
+    this.expect(")");
+    const end = this.expect(";").span;
+    return {
+      kind: "do-while",
+      condition,
+      body,
+      span: mergeSpans(start, end),
     };
   }
 
