@@ -184,6 +184,7 @@ export function analyzeCudaLite(
   const requiredFeatures = new Set<string>();
   const atomicParams = new Set<string>();
   const atomicShared = new Set<string>();
+  const atomicDevicePointerTypes = new Set<CudaLiteScalarType>();
   const params = new Map(kernel.params.map((param) => [param.name, param]));
   const declaredNames = new Set<string>();
   const rootScope = createScope();
@@ -233,7 +234,7 @@ export function analyzeCudaLite(
 
   const walkExpression = (expression: CudaLiteExpression, scope: Scope): ExpressionInfo => {
     if (expression.kind === "call") {
-      return validateCallExpression(expression, scope, params, atomicParams, atomicShared, requiredFeatures, diagnostics, walkExpression, options);
+      return validateCallExpression(expression, scope, params, atomicParams, atomicShared, atomicDevicePointerTypes, requiredFeatures, diagnostics, walkExpression, options);
     }
     return validateNonCallExpression(expression, scope, diagnostics, walkExpression, requiredFeatures);
   };
@@ -424,6 +425,19 @@ export function analyzeCudaLite(
   }
 
   walkStatements(kernel.body, rootScope, 0, 0, 0, declaredNames);
+  const sharedDeclarations = collectSharedDeclarations(kernel.body, options);
+  for (const type of atomicDevicePointerTypes) {
+    for (const param of kernel.params) {
+      if (param.pointer && !param.constant && isDevicePointerAtomicMemoryCompatible(type, param.valueType)) {
+        atomicParams.add(param.name);
+      }
+    }
+    for (const shared of sharedDeclarations) {
+      if (isDevicePointerAtomicMemoryCompatible(type, shared.valueType)) {
+        atomicShared.add(shared.name);
+      }
+    }
+  }
 
   if (requiredFeatures.has("shader-f16") && !options.features?.["shader-f16"]) {
     diagnostics.push(error("missing-feature-shader-f16", "half requires WebGPU shader-f16 support", kernel.span));
@@ -922,6 +936,7 @@ function validateCallExpression(
   params: ReadonlyMap<string, CudaLiteParam>,
   atomicParams: Set<string>,
   atomicShared: Set<string>,
+  atomicDevicePointerTypes: Set<CudaLiteScalarType>,
   requiredFeatures: Set<string>,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
@@ -988,7 +1003,7 @@ function validateCallExpression(
     return { kind: "scalar", valueType: "int" };
   }
   if (isAtomicBuiltin(callName)) {
-    validateAtomicBuiltin(expression, scope, params, atomicParams, atomicShared, diagnostics, walkExpression);
+    validateAtomicBuiltin(expression, scope, params, atomicParams, atomicShared, atomicDevicePointerTypes, diagnostics, walkExpression);
     return { kind: "scalar" };
   }
   if (isPointerIdentityCall(callName)) {
@@ -1840,6 +1855,7 @@ function validateAtomicBuiltin(
   params: ReadonlyMap<string, CudaLiteParam>,
   atomicParams: Set<string>,
   atomicShared: Set<string>,
+  atomicDevicePointerTypes: Set<CudaLiteScalarType>,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
 ): void {
@@ -1868,6 +1884,15 @@ function validateAtomicBuiltin(
         diagnostics.push(error("unsupported-atomic-target", "shared atomics support int/uint targets and CAS-backed float add/sub/min/max/exch in CUDA-lite", targetExpression.span));
       } else {
         atomicShared.add(storageSymbol.name);
+      }
+    } else if (!param?.pointer && symbol?.kind === "local" && symbol.pointer) {
+      if (symbol.constant) {
+        diagnostics.push(error("const-pointer-write", `cannot ${callName ?? "atomic operation"} through const pointer '${symbol.name}'`, expression.span));
+      }
+      if (targetType && isSupportedDevicePointerAtomic(callName, targetType)) {
+        atomicDevicePointerTypes.add(targetType);
+      } else {
+        diagnostics.push(error("unsupported-atomic-target", `${callName ?? "atomic operation"} through device pointer supports int/uint add and CAS-backed float add in CUDA-lite`, targetExpression.span));
       }
     } else if (!param?.pointer) {
       diagnostics.push(error("unsupported-atomic-target", `${callName ?? "atomic operation"} target must resolve to storage or shared memory`, targetExpression.span));
@@ -1942,6 +1967,21 @@ function isSupportedFloatAtomic(callName: string | undefined): boolean {
     callName === "atomicMaxFloat" ||
     callName === "atomicExch" ||
     callName === "atomicExch_system";
+}
+
+function isSupportedDevicePointerAtomic(
+  callName: string | undefined,
+  targetType: CudaLiteScalarType,
+): boolean {
+  return (callName === "atomicAdd" || callName === "atomicAdd_system") &&
+    (targetType === "float" || targetType === "int" || targetType === "uint");
+}
+
+function isDevicePointerAtomicMemoryCompatible(
+  pointerType: CudaLiteScalarType,
+  memoryType: CudaLiteScalarType,
+): boolean {
+  return pointerType === memoryType && (memoryType === "float" || memoryType === "int" || memoryType === "uint");
 }
 
 function isShuffleBuiltin(callName: string): boolean {

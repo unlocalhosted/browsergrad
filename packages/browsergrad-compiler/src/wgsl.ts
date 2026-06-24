@@ -933,11 +933,71 @@ function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, c
   lines.push("    default: { return; }");
   lines.push("  }");
   lines.push("}");
+  if (isDevicePointerAtomicAddType(type) && usesDevicePointerAtomicAdd(ir)) {
+    lines.push("");
+    lines.push(...emitDevicePointerAtomicAddHelper(type, ir, context));
+  }
   return lines;
 }
 
 function isDevicePointerHelperType(type: CudaLiteScalarType): boolean {
   return type === "float" || type === "double" || type === "int" || type === "uint" || type === "half" || type === "bf16" || isCudaVectorType(type);
+}
+
+function isDevicePointerAtomicAddType(type: CudaLiteScalarType): type is "float" | "int" | "uint" {
+  return type === "float" || type === "int" || type === "uint";
+}
+
+function usesDevicePointerAtomicAdd(ir: KernelIrModule): boolean {
+  const atomicAdds = new Set(["atomicAdd", "atomicAdd_system"]);
+  return statementsUseCall(ir.body, atomicAdds) || ir.functions.some((fn) => statementsUseCall(fn.body, atomicAdds));
+}
+
+function emitDevicePointerAtomicAddHelper(
+  type: "float" | "int" | "uint",
+  ir: KernelIrModule,
+  context: EmitContext,
+): string[] {
+  const scalar = wgslScalar(type);
+  const lines = [
+    `fn ${pointerAtomicAddHelperName(type)}(buffer: u32, index: u32, value: ${scalar}) -> ${scalar} {`,
+    "  switch buffer {",
+  ];
+  for (const param of ir.params.filter((param) =>
+    param.pointer &&
+    !param.constant &&
+    param.valueType === type &&
+    ir.atomicParams.includes(param.name)
+  )) {
+    const id = context.storagePointerIdFor(param.name);
+    if (id === undefined) continue;
+    const access = `${context.nameFor(param.name)}[index]`;
+    lines.push(`    case ${id}u: { return ${emitAtomicAddAtAddress(type, "storage", `&${access}`, "value")}; }`);
+  }
+  for (const shared of ir.sharedDeclarations.filter((shared) =>
+    shared.valueType === type &&
+    ir.atomicShared.includes(shared.name)
+  )) {
+    const id = context.sharedPointerIdFor(shared.name);
+    if (id === undefined) continue;
+    const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, "index");
+    lines.push(`    case ${id}u: { return ${emitAtomicAddAtAddress(type, "workgroup", `&${access}`, "value")}; }`);
+  }
+  lines.push(`    default: { return ${zeroValue(type)}; }`);
+  lines.push("  }");
+  lines.push("}");
+  return lines;
+}
+
+function emitAtomicAddAtAddress(
+  type: "float" | "int" | "uint",
+  addressSpace: "storage" | "workgroup",
+  address: string,
+  value: string,
+): string {
+  return type === "float"
+    ? `${floatAtomicHelperName("Add", addressSpace)}(${address}, ${value})`
+    : `atomicAdd(${address}, ${value})`;
 }
 
 function isPointerHelperCompatibleStorage(helperType: CudaLiteScalarType, storageType: CudaLiteScalarType): boolean {
@@ -1304,6 +1364,10 @@ function pointerReadHelperName(type: CudaLiteScalarType): string {
 
 function pointerWriteHelperName(type: CudaLiteScalarType): string {
   return `bg_ptr_write_${pointerHelperTypeName(type)}`;
+}
+
+function pointerAtomicAddHelperName(type: "float" | "int" | "uint"): string {
+  return `bg_ptr_atomicAdd_${pointerHelperTypeName(type)}`;
 }
 
 function pointerHelperTypeName(type: CudaLiteScalarType): string {
@@ -2609,7 +2673,23 @@ function emitAtomicCall(
     }
     return `${wgslName}(${atomicTarget.address}, ${valueExpression})`;
   }
+  const pointerAtomic = emitDevicePointerAtomicAddCall(wgslName, target, value, context);
+  if (pointerAtomic) return pointerAtomic;
   return `${wgslName}(${args.join(", ")})`;
+}
+
+function emitDevicePointerAtomicAddCall(
+  wgslName: string,
+  target: CudaLiteExpression | undefined,
+  value: CudaLiteExpression | undefined,
+  context: EmitContext,
+): string | undefined {
+  if (wgslName !== "atomicAdd" || !target || !value) return undefined;
+  const parts = devicePointerArgumentParts(target, context);
+  if (!parts) return undefined;
+  const valueType = devicePointerValueTypeForExpression(target, context);
+  if (!isDevicePointerAtomicAddType(valueType)) return undefined;
+  return `${pointerAtomicAddHelperName(valueType)}(${parts.buffer}, ${parts.base}, ${emitExpression(value, context)})`;
 }
 
 function emitAtomicTarget(

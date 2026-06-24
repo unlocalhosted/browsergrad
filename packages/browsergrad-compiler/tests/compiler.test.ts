@@ -4781,6 +4781,64 @@ __global__ void atomic_count(int* x) {
     expect([...result.buffers.x as Int32Array]).toEqual([42, 3]);
   });
 
+  it("supports atomicAdd through device pointer helper parameters", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void add_i32(int* target, int value) {
+  atomicAdd(target, value);
+}
+__device__ void add_f32(float* target, float value) {
+  atomicAdd(target, value);
+}
+__global__ void helper_atomic(int* xi, float* xf, const float* values) {
+  if (threadIdx.x == 0) {
+    add_i32(xi + 1, 3);
+    add_f32(xf, values[0]);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          xi: new Int32Array([0, 4]),
+          xf: new Float32Array([2.5]),
+          values: new Float32Array([1.25]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_i32");
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_f32");
+    expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_i32(target_buffer, target_base, value)");
+    expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_f32(target_buffer, target_base, value)");
+    expect([...result.buffers.xi as Int32Array]).toEqual([0, 7]);
+    expect([...result.buffers.xf as Float32Array]).toEqual([3.75]);
+  });
+
+  it("supports atomicAdd through device pointer helper parameters to shared memory", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void add_u32(uint* target, uint value) {
+  atomicAdd(target, value);
+}
+__global__ void helper_shared_atomic(uint* out) {
+  __shared__ uint counts[2];
+  if (threadIdx.x == 0) {
+    counts[0] = 1u;
+    add_u32(&counts[0], 4u);
+    out[0] = counts[0];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32");
+    expect(compiled.wgsl).toContain("case 1u: { return atomicAdd(&counts[index], value); }");
+    expect([...result.buffers.out as Uint32Array]).toEqual([5]);
+  });
+
   it("supports CUDA integer atomic exchange and compare-swap", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomic_more(int* x, int* out) {

@@ -72,8 +72,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   excludes kernels now runnable on real WebGPU through orchestration; current
   baseline is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=240`
-  WebGPU-runnable, and `<=117` hard gaps;
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=242`
+  WebGPU-runnable, and `<=115` hard gaps;
   `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=142`
   WebGPU-runnable, and `<=6` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=217`
@@ -87,8 +87,9 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   writes, `tex2DLod` / `tex1Dfetch` texture aliases, guarded `surf2Dread`,
   scalarized CUDA vector storage views for `float2/3/4`, `int2/3/4`, and
   `uint2/3/4`, simple C++ alias and constexpr integer intake, local quoted
-  header context for corpus audits, CUDA `static` kernel qualifiers, and
-  late `__launch_bounds__` placement, plus cooperative-groups namespace
+  header context for corpus audits, CUDA `static` kernel qualifiers, modeled
+  device-pointer `atomicAdd` helper dispatch through storage/shared buffer ids,
+  and late `__launch_bounds__` placement, plus cooperative-groups namespace
   call forms such as `cg::sync(block)` and `cg::reduce(tile, value, op)`,
   C++ `reinterpret_cast<T*>` / `static_cast<T*>` pointer casts for typed
   scalarized storage views such as `FLOAT4(x)` and local pointer aliases,
