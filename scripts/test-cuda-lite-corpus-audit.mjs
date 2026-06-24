@@ -12,6 +12,11 @@ try {
   fs.writeFileSync(path.join(tmpRoot, "defs.h"), `
 typedef unsigned int TColor;
 
+class DeviceBox {
+public:
+  __device__ ~DeviceBox() {}
+};
+
 __device__ TColor make_color(float value) {
   return (TColor)value;
 }

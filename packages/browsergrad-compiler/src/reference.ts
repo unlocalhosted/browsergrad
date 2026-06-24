@@ -1218,6 +1218,25 @@ function vectorSplat(valueType: CudaLiteVectorType, value: number): CudaVectorVa
   };
 }
 
+function vectorConstructorLanes(
+  valueType: CudaLiteVectorType,
+  args: readonly CudaLiteExpression[],
+  context: ThreadContext,
+): readonly number[] {
+  const lanes: number[] = [];
+  const targetScalar = cudaVectorScalarType(valueType);
+  for (const arg of args) {
+    const value = evalExpression(arg, context);
+    if (isCudaVectorValue(value) && cudaVectorScalarType(value.valueType) === targetScalar) {
+      lanes.push(...value.lanes);
+    } else {
+      lanes.push(valueAsNumber(value, "vector constructor"));
+    }
+  }
+  return Array.from({ length: cudaVectorLaneCount(valueType) }, (_unused, index) =>
+    roundVectorLane(valueType, lanes[index] ?? 0));
+}
+
 function roundVectorLane(valueType: CudaLiteVectorType, value: number): number {
   const scalar = cudaVectorScalarType(valueType);
   if (scalar === "half") return roundHalf(value);
@@ -1269,6 +1288,10 @@ function readIdentifierFrom(name: string, context: ThreadContext, locals: Readon
   if (context.constants.has(name)) {
     const value = context.constants.get(name)!;
     if (typeof value === "number") return value;
+    const valueType = context.valueTypes.get(name);
+    if (isCudaVectorType(valueType) || valueType === "complex64") {
+      return readLValue({ name, space: "constant", index: 0, valueType }, context);
+    }
   }
   if (Object.prototype.hasOwnProperty.call(context.scalars, name)) return context.scalars[name]!;
   throw compilerFailure(`unknown identifier '${name}'`);
@@ -1990,7 +2013,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
         lanes: Array(cudaVectorLaneCount(vectorConstructor)).fill(roundVectorLane(vectorConstructor, scalar)),
       };
     }
-    const lanes = expression.args.map((arg) => roundVectorLane(vectorConstructor, evalNumber(arg, context)));
+    const lanes = vectorConstructorLanes(vectorConstructor, expression.args, context);
     return {
       kind: "cuda-vector",
       valueType: vectorConstructor,
@@ -3072,6 +3095,9 @@ function cloneDeviceGlobals(
 function constantInitialValue(constant: CudaLiteGlobalConstant): number | WgslTypedArray {
   if (!constant.init) throw compilerFailure(`constant '${constant.name}' has no initializer`);
   const values = flattenConstantInitializer(constant.init).map(evaluateConstantNumber);
+  if (constant.dimensions.length === 0 && isCudaVectorType(constant.valueType)) {
+    return typedVectorConstantValues(constant.valueType, values);
+  }
   if (constant.dimensions.length === 0) return values[0] ?? 0;
   const total = constant.dimensions.reduce((product, dimension) => product * dimension, 1);
   const padded = Array.from({ length: total }, (_, index) => values[index] ?? 0);
@@ -3083,6 +3109,15 @@ function constantInitialValue(constant: CudaLiteGlobalConstant): number | WgslTy
   if (constant.valueType === "float" || constant.valueType === "double") return Float32Array.from(padded);
   if (constant.valueType === "complex64") return Float32Array.from(padded);
   return Float32Array.from(padded);
+}
+
+function typedVectorConstantValues(valueType: CudaLiteScalarType, values: readonly number[]): WgslTypedArray {
+  const lanes = Array.from({ length: cudaVectorLaneCount(valueType) }, (_, index) => values[index] ?? 0);
+  const scalar = cudaVectorScalarType(valueType);
+  if (scalar === "int") return Int32Array.from(lanes.map((value) => Math.trunc(value)));
+  if (scalar === "uint") return Uint32Array.from(lanes.map((value) => Math.trunc(value) >>> 0));
+  if (scalar === "half") return createWgslFloat16Array(lanes);
+  return Float32Array.from(lanes);
 }
 
 function deviceGlobalInitialValue(global: CudaLiteDeviceGlobal): WgslTypedArray {
@@ -3314,11 +3349,15 @@ function valueAsPoolPointer(value: EvalValue, name: string): PoolPointerValue {
 
 function valueAsComplex(value: LocalValue, name: string): ComplexValue {
   if (isComplex(value)) return value;
+  if (isCudaVectorValue(value) && value.valueType === "float2") {
+    return { kind: "complex64", x: value.lanes[0] ?? 0, y: value.lanes[1] ?? 0 };
+  }
   throw compilerFailure(`'${name}' is not complex`);
 }
 
 function valueAsCudaVector(value: LocalValue, type: CudaLiteVectorType): CudaVectorValue {
   if (isCudaVectorValue(value) && value.valueType === type) return value;
+  if (type === "float2" && isComplex(value)) return { kind: "cuda-vector", valueType: "float2", lanes: [value.x, value.y] };
   throw compilerFailure(`value is not ${type}`);
 }
 
@@ -3543,7 +3582,12 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
     if (constant.init !== undefined) continue;
     const value = input.constants?.[constant.name];
     if (value === undefined) throw compilerFailure(`missing constant input '${constant.name}'`);
-    if (constant.dimensions.length === 0) {
+    if (constant.dimensions.length === 0 && isCudaVectorType(constant.valueType)) {
+      if (typeof value === "number") throw compilerFailure(`constant '${constant.name}' expects typed array`);
+      validateTypedConstant(constant.name, constant.valueType, value);
+      const expected = cudaVectorLaneCount(constant.valueType);
+      if (value.length < expected) throw compilerFailure(`constant '${constant.name}' expects at least ${expected} elements`);
+    } else if (constant.dimensions.length === 0) {
       if (typeof value !== "number") throw compilerFailure(`constant '${constant.name}' expects number`);
     } else {
       if (typeof value === "number") throw compilerFailure(`constant '${constant.name}' expects typed array`);

@@ -2666,6 +2666,22 @@ __global__ void vector_convert(float4 *input, float3 *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3]);
   });
 
+  it("supports CUDA vector constructors with vector prefix and scalar tail", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void pack(float4 *out) {
+  float3 xyz = make_float3(2.0f, 3.0f, 5.0f);
+  out[0] = make_float4(xyz, 7.0f);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("vec4<f32>(f32(xyz.x), f32(xyz.y), f32(xyz.z), f32(7.0))");
+    expect([...result.buffers.out as Float32Array]).toEqual([2, 3, 5, 7]);
+  });
+
   it("lowers CUDA helper_math vector operations", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void vector_math(float3 *out, float *scalars) {
@@ -3159,6 +3175,35 @@ __global__ void multiplyFreqDomain(cufftComplex *A, const cufftComplex *B, int N
     expect(compiled.wgsl).toContain("var c: vec2<f32>");
     expect(compiled.wgsl).toContain("A[idx] = c");
     expect([...result.buffers.A as Float32Array]).toEqual([-7, 16, -11, 52]);
+  });
+
+  it("passes cufftComplex values through CUDA float2 helper functions", () => {
+    const compiled = compileCudaLiteKernel(`
+static __device__ __host__ inline float2 ComplexScale(float2 a, float s) {
+  return make_float2(a.x * s, a.y * s);
+}
+static __device__ __host__ inline float2 ComplexMul(float2 a, float2 b) {
+  return make_float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x);
+}
+__global__ void pointwise(cufftComplex *a, cufftComplex *b, float scale) {
+  int i = threadIdx.x;
+  a[i] = ComplexScale(ComplexMul(a[i], b[i]), scale);
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          a: new Float32Array([1, 2, 3, 4]),
+          b: new Float32Array([5, 6, 7, 8]),
+        },
+        scalars: { scale: 0.5 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn ComplexMul");
+    expect(compiled.wgsl).toContain("a[i] = ComplexScale");
+    expect([...result.buffers.a as Float32Array]).toEqual([-3.5, 8, -5.5, 26]);
   });
 
   it("lowers supported inline PTX fma statements", () => {
@@ -4710,6 +4755,29 @@ __global__ void apply(float *x) {
       access: "read",
     }));
     expect([...result.buffers.x as Float32Array]).toEqual([20, 80]);
+  });
+
+  it("lowers scalar CUDA vector constants as scalarized readonly storage inputs", () => {
+    const compiled = compileCudaLiteKernel(`
+__constant__ float3 collider;
+__global__ void apply(float *out) {
+  float3 bias = make_float3(1.0f, 2.0f, 3.0f);
+  float3 value = collider + bias;
+  out[threadIdx.x] = vec_at(value, threadIdx.x);
+}`, { workgroupSize: [3, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(3) },
+        constants: { collider: new Float32Array([10, 20, 30]) },
+      },
+      { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<storage, read> collider: array<f32, 3>;");
+    expect(compiled.wgsl).toContain("vec3<f32>(collider[(u32(0u) * 3u) + 0u]");
+    expect(compiled.wgsl).not.toContain("params.collider");
+    expect([...result.buffers.out as Float32Array]).toEqual([11, 22, 33]);
   });
 
   it("decays CUDA constant arrays to readonly device pointer arguments", () => {

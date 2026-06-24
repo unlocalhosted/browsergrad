@@ -118,7 +118,7 @@ export function emitKernelIrWgsl(
     );
   }
 
-  for (const constant of ir.constants.filter((constant) => constant.dimensions.length > 0 && constant.init === undefined)) {
+  for (const constant of ir.constants.filter(isExternalConstantBinding)) {
     lines.push(
       `@group(0) @binding(${context.bindingFor(constant.name)}) var<storage, read> ${context.nameFor(constant.name)}: ${emitConstantArrayType(constant)};`,
     );
@@ -374,7 +374,7 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
   const textures = textureBindings(ir);
   const storagePointerIds = new Map(storagePointerParams.map((param, index) => [param.name, index] as const));
   const deviceGlobalPointerIds = new Map(ir.deviceGlobals.map((global, index) => [global.name, storagePointerParams.length + index] as const));
-  const constantPointerArrays = ir.constants.filter((constant) => constant.dimensions.length > 0 && constant.init === undefined);
+  const constantPointerArrays = ir.constants.filter(isExternalConstantBinding);
   const sharedPointerIds = new Map(ir.sharedDeclarations
     .map((shared, index) => [shared.name, storagePointerParams.length + ir.deviceGlobals.length + index] as const));
   const constantPointerIds = new Map(constantPointerArrays
@@ -479,7 +479,9 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
   }
   const uniformScalars = [
     ...ir.params.filter((param) => !param.pointer && !isSurfaceParam(param) && !isTextureParam(param)).map((param) => ({ name: param.name, valueType: param.valueType })),
-    ...ir.constants.filter((constant) => constant.dimensions.length === 0 && constant.init === undefined).map((constant) => ({ name: constant.name, valueType: constant.valueType })),
+    ...ir.constants
+      .filter((constant) => constant.dimensions.length === 0 && constant.init === undefined && !isCudaVectorType(constant.valueType))
+      .map((constant) => ({ name: constant.name, valueType: constant.valueType })),
     ...ir.params.filter(isSurfaceParam).flatMap((param) => [
       { name: surfaceWidthField(param.name), valueType: "uint" as const },
       { name: surfaceHeightField(param.name), valueType: "uint" as const },
@@ -1420,8 +1422,12 @@ function emitConstantPointerRead(
   context: EmitContext,
   viewType: CudaLiteScalarType = constant.valueType,
 ): string {
-  if (isCudaVectorType(viewType) && constant.valueType !== viewType) return emitConstantVectorFlatRead(constant, index, viewType, context);
-  return emitSharedFlatAccess(context.nameFor(constant.name), constant.dimensions, index);
+  if (isCudaVectorType(viewType)) {
+    return constant.valueType === viewType
+      ? emitVectorStorageRead(context.nameFor(constant.name), viewType, index)
+      : emitConstantVectorFlatRead(constant, index, viewType, context);
+  }
+  return emitSharedFlatAccess(context.nameFor(constant.name), externalConstantDimensions(constant), index);
 }
 
 function emitVectorStorageRead(name: string, type: CudaLiteScalarType, index: string): string {
@@ -1526,7 +1532,7 @@ function emitConstantVectorFlatRead(
 ): string {
   const lanes = cudaVectorLaneCount(viewType);
   const values = Array.from({ length: lanes }, (_, lane) =>
-    emitSharedFlatAccess(context.nameFor(constant.name), constant.dimensions, `(${index} + ${lane}u)`)
+    emitSharedFlatAccess(context.nameFor(constant.name), externalConstantDimensions(constant), `(${index} + ${lane}u)`)
   );
   return `${wgslScalar(viewType)}(${values.join(", ")})`;
 }
@@ -2351,6 +2357,31 @@ function emitVectorConversionConstructor(
   return `${wgslScalar(targetType)}(${lanes.join(", ")})`;
 }
 
+function emitMixedVectorConstructor(
+  targetType: CudaLiteVectorType,
+  expressions: readonly CudaLiteExpression[],
+  context: EmitContext,
+): string {
+  if (!expressions.some((expression) => isCudaVectorType(expressionValueTypeForEmit(expression, context)))) {
+    return emitVectorConstructor(targetType, expressions.map((expression) => emitExpression(expression, context)));
+  }
+  const lanes: string[] = [];
+  const targetScalar = cudaVectorScalarType(targetType) ?? "float";
+  for (const expression of expressions) {
+    const sourceType = expressionValueTypeForEmit(expression, context);
+    const value = emitExpression(expression, context);
+    if (isCudaVectorType(sourceType) && cudaVectorScalarType(sourceType) === targetScalar) {
+      for (let lane = 0; lane < cudaVectorLaneCount(sourceType); lane++) {
+        lanes.push(castExpressionToVectorScalar(`${value}.${vectorFieldName(lane)}`, targetType));
+      }
+    } else {
+      lanes.push(castExpressionToVectorScalar(value, targetType));
+    }
+  }
+  while (lanes.length < cudaVectorLaneCount(targetType)) lanes.push(zeroValue(targetScalar));
+  return `${wgslScalar(targetType)}(${lanes.slice(0, cudaVectorLaneCount(targetType)).join(", ")})`;
+}
+
 function emitLocalArrayFill(
   name: string,
   dimensions: readonly number[],
@@ -2881,6 +2912,10 @@ function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "va
     if (mode === "lvalue") return `${context.nameFor(name)}[0u]`;
     return emitDeviceGlobalPointerRead(global, "0u", context.ir, context);
   }
+  const constant = context.ir.constants.find((item) => item.name === name);
+  if (constant && isExternalConstantBinding(constant) && constant.dimensions.length === 0) {
+    return emitConstantPointerRead(constant, "0u", context);
+  }
   const param = context.paramFor(name);
   if ((param && !param.pointer && !isSurfaceParam(param)) || context.isUniformScalar(name)) {
     return emitUniformScalarRead(name, context);
@@ -3001,6 +3036,7 @@ function expressionValueTypeForEmit(expression: CudaLiteExpression, context: Emi
     return context.localValueTypeFor(expression.name) ??
       context.paramFor(expression.name)?.valueType ??
       context.deviceGlobalFor(expression.name)?.valueType ??
+      context.ir.constants.find((item) => item.name === expression.name)?.valueType ??
       context.uniformScalarTypeFor(expression.name);
   }
   if (expression.kind === "cast") return expression.valueType;
@@ -3129,7 +3165,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   if (vectorConstructor) {
     return expression.args.length === 1
       ? emitVectorConversionConstructor(vectorConstructor, expression.args[0]!, context)
-      : emitVectorConstructor(vectorConstructor, args);
+      : emitMixedVectorConstructor(vectorConstructor, expression.args, context);
   }
   if (name === "__halves2bfloat162") return `${wgslScalar("bf162")}(${args.join(", ")})`;
   if (isPointerIdentityCall(name)) return expression.args[0] ? emitExpression(expression.args[0], context) : "0u";
@@ -4189,11 +4225,24 @@ function emitLocalArrayElementAccess(name: string, dimensions: readonly number[]
 }
 
 function emitConstantArrayType(constant: CudaLiteGlobalConstant): string {
-  let type = wgslScalar(constant.valueType);
-  for (let i = constant.dimensions.length - 1; i >= 0; i--) {
-    type = `array<${type}, ${constant.dimensions[i]!}>`;
+  let type = wgslScalar(cudaVectorScalarType(constant.valueType) ?? constant.valueType);
+  const dimensions = externalConstantDimensions(constant);
+  for (let i = dimensions.length - 1; i >= 0; i--) {
+    type = `array<${type}, ${dimensions[i]!}>`;
   }
   return type;
+}
+
+function isExternalConstantBinding(constant: CudaLiteGlobalConstant): boolean {
+  return constant.init === undefined && (constant.dimensions.length > 0 || isCudaVectorType(constant.valueType));
+}
+
+function externalConstantDimensions(constant: CudaLiteGlobalConstant): readonly number[] {
+  if (!isCudaVectorType(constant.valueType)) return constant.dimensions;
+  const elements = constant.dimensions.length === 0
+    ? 1
+    : constant.dimensions.reduce((product, dimension) => product * dimension, 1);
+  return [elements * cudaVectorLaneCount(constant.valueType)];
 }
 
 function emitInitializedConstant(constant: CudaLiteGlobalConstant, context: EmitContext): string {

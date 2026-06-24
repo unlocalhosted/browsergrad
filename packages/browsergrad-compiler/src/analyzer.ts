@@ -40,8 +40,10 @@ import {
   CUDA_VECTOR_CONSTRUCTORS,
   cudaVectorConstructorType,
   cudaVectorFieldIndex,
+  cudaVectorLaneCount,
   cudaVectorScalarType,
   isCudaVectorType,
+  type CudaLiteVectorType,
 } from "./vector_types.js";
 
 const DEFAULT_WORKGROUP_SIZE: readonly [number, number, number] = [256, 1, 1];
@@ -1399,19 +1401,7 @@ function validateCallExpression(
   }
   const vectorConstructor = cudaVectorConstructorType(callName);
   if (vectorConstructor) {
-    const targetScalar = cudaVectorScalarType(vectorConstructor);
-    for (const arg of expression.args) {
-      const info = walkExpression(arg, scope);
-      if (
-        expression.args.length === 1 &&
-        info.kind === "vector" &&
-        isCudaVectorType(info.valueType) &&
-        cudaVectorScalarType(info.valueType) === targetScalar
-      ) {
-        continue;
-      }
-      validateScalarOperand(info, arg.span, diagnostics);
-    }
+    validateVectorConstructorArgs(vectorConstructor, expression, scope, diagnostics, walkExpression);
     return { kind: "vector", valueType: vectorConstructor };
   }
   if (callName === "__halves2bfloat162") {
@@ -1832,6 +1822,30 @@ function supportedCudaMemcpyKind(expression: CudaLiteExpression | undefined): bo
   return false;
 }
 
+function validateVectorConstructorArgs(
+  vectorConstructor: CudaLiteVectorType,
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const targetScalar = cudaVectorScalarType(vectorConstructor);
+  let laneCount = 0;
+  for (const arg of expression.args) {
+    const info = walkExpression(arg, scope);
+    if (info.kind === "vector" && isCudaVectorType(info.valueType) && cudaVectorScalarType(info.valueType) === targetScalar) {
+      laneCount += cudaVectorLaneCount(info.valueType);
+      continue;
+    }
+    validateScalarOperand(info, arg.span, diagnostics);
+    laneCount++;
+  }
+  const targetLanes = cudaVectorLaneCount(vectorConstructor);
+  if (expression.args.length > 1 && laneCount > targetLanes) {
+    diagnostics.push(error("invalid-call-arity", `${expressionName(expression.callee) ?? "vector constructor"} provides ${laneCount} lanes for ${targetLanes}-lane ${vectorConstructor}`, expression.span));
+  }
+}
+
 function validateDeviceFunctionCall(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
   symbol: SymbolInfo,
@@ -1873,6 +1887,9 @@ function validateDeviceFunctionCall(
       if (arg.kind === "initializer") {
         continue;
       }
+      if (isFloat2ComplexCompatible(param.valueType, info)) {
+        continue;
+      }
       if (info.kind !== "vector" && info.kind !== "unknown") {
         diagnostics.push(error("unsupported-vector-argument", `device parameter '${param.name}' expects ${param.valueType}`, arg.span));
       }
@@ -1884,6 +1901,10 @@ function validateDeviceFunctionCall(
   return isCudaVectorType(symbol.returnType)
     ? { kind: "vector", valueType: symbol.returnType }
     : { kind: "scalar", valueType: symbol.returnType };
+}
+
+function isFloat2ComplexCompatible(expected: CudaLiteScalarType | undefined, info: ExpressionInfo): boolean {
+  return expected === "float2" && (info.kind === "complex" || (info.kind === "vector" && info.valueType === "float2"));
 }
 
 function deviceFunctionUsesGroupReduce(symbol: SymbolInfo, paramName: string): boolean {
@@ -2698,11 +2719,11 @@ function validateNonCallExpression(
       const left = walkExpression(expression.left, scope);
       const right = walkExpression(expression.right, scope);
       if (left.kind === "complex") {
-        if (right.kind !== "complex" && right.kind !== "unknown") {
+        if (right.kind !== "complex" && right.kind !== "unknown" && !isFloat2ComplexCompatible("float2", right)) {
           diagnostics.push(error("unsupported-scalar-expression", "complex assignment expects a complex value", expression.right.span));
         }
       } else if (left.kind === "vector") {
-        if (expression.operator === "=" && right.kind !== "vector" && right.kind !== "unknown") {
+        if (expression.operator === "=" && right.kind !== "vector" && right.kind !== "unknown" && !isFloat2ComplexCompatible(left.valueType, right)) {
           diagnostics.push(error("unsupported-vector-assignment", "CUDA vector assignment expects a CUDA vector value", expression.right.span));
         } else if (expression.operator !== "=") {
           const op = assignmentArithmeticOperator(expression.operator);
@@ -2881,6 +2902,9 @@ function expressionInfoForIdentifier(
   if (symbol.kind === "shared" || symbol.kind === "constant" || symbol.kind === "device-global") {
     if (symbol.valueType === "complex64" && (!symbol.dimensions || symbol.dimensions.length === 0)) {
       return { kind: "complex", valueType: symbol.valueType, symbol };
+    }
+    if (isCudaVectorType(symbol.valueType) && (!symbol.dimensions || symbol.dimensions.length === 0)) {
+      return { kind: "vector", valueType: symbol.valueType, symbol };
     }
     return {
       kind: symbol.dimensions && symbol.dimensions.length > 0 ? "array" : "scalar",

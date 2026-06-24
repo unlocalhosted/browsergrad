@@ -373,7 +373,7 @@ function syntheticInputFor(compiled) {
     }
   }
   for (const constant of compiled.ir.constants) {
-    constants[constant.name] = constant.dimensions.length === 0
+    constants[constant.name] = constant.dimensions.length === 0 && !isCudaVectorTypeName(constant.valueType)
       ? syntheticScalarForName(constant.name)
       : syntheticBufferForType(constant.valueType);
   }
@@ -402,6 +402,10 @@ function syntheticBufferForType(type, length = 4096) {
   if (type === "int") return new Int32Array(length);
   if (type === "uint" || type === "voidptr" || type === "bool") return new Uint32Array(length);
   return new Float32Array(length);
+}
+
+function isCudaVectorTypeName(type) {
+  return /^(?:float|int|uint)[234]$|^half2$|^bf162$/u.test(type);
 }
 
 function syntheticScalarForName(name) {
@@ -827,9 +831,26 @@ function cudaFunctionDefinitionName(signature) {
 }
 
 function isPortableDeviceFunctionCandidate(signature, source, name, recordNames = new Set(), definesByName = new Map()) {
+  if (isCudaMemberFunctionLike(signature, name)) return false;
   return isPortableScalarDeviceFunction(signature, source) ||
     isPortablePointerDeviceFunction(signature, source, name, recordNames, definesByName) ||
     isPortableReferenceDeviceFunction(signature, source, name, recordNames, definesByName);
+}
+
+function isCudaMemberFunctionLike(signature, name) {
+  const open = signature.lastIndexOf("(");
+  if (open < 0) return true;
+  const before = signature.slice(0, open).trim();
+  if (new RegExp(`~\\s*${escapeRegExp(name)}\\s*(?:<[^<>]*>)?\\s*$`, "u").test(before)) return true;
+  if (new RegExp(`::\\s*${escapeRegExp(name)}\\s*(?:<[^<>]*>)?\\s*$`, "u").test(before)) return true;
+  const nameSuffix = new RegExp(`\\b${escapeRegExp(name)}\\s*(?:<[^<>]*>)?\\s*$`, "u");
+  const returnType = before
+    .replace(nameSuffix, "")
+    .replace(/^\s*template\s*<[^>]*>\s*/u, " ")
+    .replace(/\b(?:static|inline|__inline__|__forceinline__|__device__|__host__|constexpr|const|volatile)\b/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return returnType.length === 0;
 }
 
 function isPortableScalarDeviceFunction(signature, source) {
