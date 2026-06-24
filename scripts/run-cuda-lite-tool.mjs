@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -74,12 +74,36 @@ async function withLock(dir, fn) {
 
 async function removeStaleLock(dir) {
   try {
+    const owner = await readLockOwner(dir);
+    if (owner?.pid !== undefined && !isProcessAlive(owner.pid)) {
+      await rm(dir, { recursive: true, force: true });
+      return;
+    }
     const info = await stat(dir);
     if (Date.now() - info.mtimeMs > staleLockMs) {
       await rm(dir, { recursive: true, force: true });
     }
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
+  }
+}
+
+async function readLockOwner(dir) {
+  try {
+    const raw = await readFile(path.join(dir, "owner.json"), "utf8");
+    const owner = JSON.parse(raw);
+    return Number.isInteger(owner?.pid) && owner.pid > 0 ? { pid: owner.pid } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
   }
 }
 
