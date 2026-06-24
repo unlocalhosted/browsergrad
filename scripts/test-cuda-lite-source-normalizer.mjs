@@ -1544,6 +1544,20 @@ __global__ void __launch_bounds__(BlockSize) block_sized(float* out) {
 {
   const source = createKernelCompilationUnit({
     kernel: `
+template <const int K_STAGE, const int A_PAD, const bool WARP_SWIZZLE>
+__global__ void staged_scratch(float* out) {
+  extern __shared__ half smem[];
+  half* next = smem + K_STAGE * (64 + A_PAD);
+  out[0] = (float)K_STAGE + (float)A_PAD + (float)WARP_SWIZZLE + (float)(next != nullptr);
+}`,
+  });
+  assert.match(source, /template\s*<const int K_STAGE = 2, const int A_PAD = 0, const bool WARP_SWIZZLE = 0>/u);
+  assert.match(source, /half\* next = smem \+ 2 \* \(64 \+ 0\)/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 __global__ void atomic_forward(float* out) {
   addX(&out[threadIdx.x], 1.0f);
 }`,

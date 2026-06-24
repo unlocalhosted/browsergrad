@@ -646,9 +646,20 @@ function canonicalTemplateValueArgument(sourceTail, name, definesByName = new Ma
   const escaped = escapeRegExp(name);
   const launchBounds = new RegExp(`\\b__launch_bounds__\\s*\\(\\s*${escaped}\\b`, "u").test(sourceTail);
   const sharedSized = new RegExp(`\\b__shared__\\b[\\s\\S]{0,160}\\[\\s*${escaped}\\s*\\]`, "u").test(sourceTail);
+  const sharedPipelineContext = sharedSized ||
+    /\b(?:extern\s+)?__shared__\b|cp\.async|ldmatrix|mma\.sync|wgmma|pipeline|smem|shared/iu.test(sourceTail);
+  const sharedPipelineFallback = sharedPipelineContext ? canonicalSharedPipelineTemplateValue(name) : undefined;
+  if (sharedPipelineFallback !== undefined) return sharedPipelineFallback;
   if (!launchBounds && !sharedSized && !/\bblock/i.test(name)) return undefined;
   const blockSize = normalizeTemplateValueArgument(definesByName.get("block_size") ?? definesByName.get("BLOCK_SIZE") ?? "256", "int");
   return blockSize === undefined ? undefined : String(blockSize);
+}
+
+function canonicalSharedPipelineTemplateValue(name) {
+  if (/(?:^|_)(?:k)?stage(?:s)?$/iu.test(name) || /(?:^|_)num_?stages?$/iu.test(name)) return "2";
+  if (/(?:^|_)(?:a_?|b_?)?pad(?:ding)?$/iu.test(name)) return "0";
+  if (/(?:^|_)warp_?swizzle$/iu.test(name)) return "0";
+  return undefined;
 }
 
 function rewriteTemplateParam(param, arg, definesByName = new Map()) {
