@@ -4447,6 +4447,50 @@ __global__ void bf16_cache_hint(const __nv_bfloat16* input, __nv_bfloat16* outpu
     expect([...result.buffers.output as Float32Array]).toEqual([2.5, 3.5]);
   });
 
+  it("passes nullable conditional storage pointers into device helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void maybe_store(float* target, float* fallback, float value) {
+  if (target != NULL) {
+    target[0] = value;
+  } else {
+    fallback[0] = value + 1.0f;
+  }
+}
+
+__global__ void conditional_pointer(float* target, float* fallback, int enabled) {
+  maybe_store(enabled ? target : NULL, fallback, 3.0f);
+}`, { workgroupSize: [1, 1, 1] });
+    const enabled = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          target: new Float32Array(1),
+          fallback: new Float32Array(1),
+        },
+        scalars: { enabled: 1 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const disabled = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          target: new Float32Array(1),
+          fallback: new Float32Array(1),
+        },
+        scalars: { enabled: 0 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...enabled.buffers.target as Float32Array]).toEqual([3]);
+    expect([...enabled.buffers.fallback as Float32Array]).toEqual([0]);
+    expect([...disabled.buffers.target as Float32Array]).toEqual([0]);
+    expect([...disabled.buffers.fallback as Float32Array]).toEqual([4]);
+    expect(compiled.wgsl).toContain("4294967295u");
+    expect(compiled.wgsl).toContain("select(4294967295u, 0u, params.enabled)");
+  });
+
   it("lowers CUDA bitwise not and trap no-op control paths", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void bitwise_not_and_trap(int* out) {
@@ -4933,6 +4977,22 @@ __global__ void const_pointer_rebase(const uint* x, uint* out, int offset) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
     expect([...constPointeeResult.buffers.out as Uint32Array]).toEqual([20]);
+
+    const assignmentRebase = compileCudaLiteKernel(`
+__global__ void assign_pointer_rebase(uint* x, uint* out, int offset) {
+  x = &x[offset];
+  out[0] = x[0];
+  x = x + 1;
+  out[1] = *x;
+}`, { workgroupSize: [1, 1, 1] });
+    const assignmentRebaseResult = runCompiledKernelReference(
+      assignmentRebase,
+      { buffers: { x: new Uint32Array([10, 20, 30]), out: new Uint32Array(2) }, scalars: { offset: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    expect([...assignmentRebaseResult.buffers.out as Uint32Array]).toEqual([20, 30]);
+    expect(assignmentRebase.wgsl).toContain("bg_x_base = (bg_x_base + u32(params.offset));");
+    expect(assignmentRebase.wgsl).toContain("bg_x_base = (bg_x_base + u32(1));");
 
     const nullGuard = compileCudaLiteKernel(`
 __global__ void pointer_null_guard(const uint* x, uint* out) {

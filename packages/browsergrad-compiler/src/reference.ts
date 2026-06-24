@@ -700,6 +700,14 @@ function pointerArgumentValue(
   valueType: CudaLiteScalarType,
   context: ThreadContext,
 ): LocalValue {
+  if (isNullPointerLiteral(arg)) return { kind: "pool-pointer", poolName: "", byteOffset: -1, valueType };
+  if (arg.kind === "conditional") {
+    return pointerArgumentValue(
+      truthy(evalNumber(arg.condition, context)) ? arg.consequent : arg.alternate,
+      valueType,
+      context,
+    );
+  }
   if (arg.kind === "call" && isPointerIdentityCall(expressionName(arg.callee))) {
     const pointer = arg.args[0];
     if (!pointer) throw compilerFailure("pointer identity call expects pointer argument");
@@ -723,7 +731,8 @@ function pointerArgumentValue(
   const offset = pointerOffsetArgumentValue(arg, valueType, context);
   if (offset) return offset;
   if (arg.kind === "unary" && arg.operator === "&") {
-    return { kind: "address", target: resolveLValue(arg.argument, context) };
+    const target = resolveLValue(arg.argument, context);
+    return { kind: "address", target: { ...target, valueType: target.valueType ?? valueType } };
   }
   if (arg.kind === "identifier") {
     const local = context.locals.get(arg.name);
@@ -1226,6 +1235,14 @@ function pointerValueForEquality(expression: CudaLiteExpression, context: Thread
   return undefined;
 }
 
+function isNullPointerLiteral(expression: CudaLiteExpression): boolean {
+  if (expression.kind === "number") return expression.value === 0;
+  if (expression.kind !== "identifier") return false;
+  if (expression.name === "nullptr" || expression.name === "NULL") return true;
+  const namedConstant = CUDA_NAMED_CONSTANTS.get(expression.name);
+  return namedConstant?.valueType === "voidptr" && namedConstant.value === 0;
+}
+
 function pointerIdentity(value: EvalValue): string {
   if (typeof value === "number") return Math.trunc(value) === 0 ? "null" : `scalar:${Math.trunc(value)}`;
   if (isAddress(value)) return `${value.target.space}:${value.target.name}:${value.target.index ?? 0}`;
@@ -1246,13 +1263,17 @@ function evalAssignment(
   const pointerRebase = evalPointerRebaseAssignment(operator, leftExpression, rightExpression, context);
   if (pointerRebase) return pointerRebase;
   if (operator === "=" && leftExpression.kind === "identifier") {
-    const currentPointer = context.locals.get(leftExpression.name);
+    const currentPointer = mutablePointerValue(leftExpression.name, context);
     if (isAddress(currentPointer) || isPoolPointer(currentPointer)) {
       const valueType = pointerValueTypeForExpression(leftExpression, context);
-      const next = pointerArgumentValue(rightExpression, valueType, context);
-      if (isAddress(next) || isPoolPointer(next) || typeof next === "number") {
-        context.locals.set(leftExpression.name, next);
-        return next;
+      try {
+        const next = pointerArgumentValue(rightExpression, valueType, context);
+        if (isAddress(next) || isPoolPointer(next) || typeof next === "number") {
+          context.locals.set(leftExpression.name, next);
+          return next;
+        }
+      } catch {
+        // Not a pointer RHS; fall through to ordinary scalar/vector assignment.
       }
     }
   }
@@ -2062,12 +2083,13 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
   const alias = context.locals.get(cursor.name);
   if (alias && typeof alias !== "number" && "kind" in alias && alias.kind === "address") {
     if (chain.length !== 1) throw compilerFailure(`pointer alias '${cursor.name}' expects one-dimensional indexing`);
-    const index = (alias.target.index ?? 0) + chain[0]! * valueStorageWidth(alias.target.valueType);
+    const valueType = alias.target.valueType;
+    const index = lvalueStorageIndex(alias.target, context) + chain[0]! * valueStorageWidth(valueType);
     return {
       name: alias.target.name,
       space: alias.target.space,
       index,
-      ...(alias.target.valueType === undefined ? {} : { valueType: alias.target.valueType }),
+      ...(valueType === undefined ? {} : { valueType }),
       rawStorageIndex: true,
     };
   }

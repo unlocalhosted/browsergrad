@@ -36,6 +36,8 @@ import {
   type SourceSpan,
 } from "./types.js";
 
+const NULL_DEVICE_POINTER_BUFFER = "4294967295u";
+
 export interface EmitKernelIrWgslOptions {
   readonly features?: CudaLiteFeatureOptions;
   readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
@@ -1074,6 +1076,19 @@ function emitDevicePointerArgument(expression: CudaLiteExpression, context: Emit
 }
 
 function devicePointerArgumentParts(expression: CudaLiteExpression, context: EmitContext): DevicePointerParts | undefined {
+  if (isNullPointerExpression(expression)) {
+    return { buffer: NULL_DEVICE_POINTER_BUFFER, base: "0u" };
+  }
+  if (expression.kind === "conditional") {
+    const consequent = devicePointerArgumentParts(expression.consequent, context);
+    const alternate = devicePointerArgumentParts(expression.alternate, context);
+    if (!consequent || !alternate) return undefined;
+    const condition = emitExpression(expression.condition, context);
+    return {
+      buffer: `select(${alternate.buffer}, ${consequent.buffer}, ${condition})`,
+      base: `select(${alternate.base}, ${consequent.base}, ${condition})`,
+    };
+  }
   if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
     const pointer = expression.args[0];
     return pointer ? devicePointerArgumentParts(pointer, context) : undefined;
@@ -1157,6 +1172,11 @@ function sharedPointerArgumentParts(expression: CudaLiteExpression, context: Emi
 }
 
 function devicePointerValueTypeForExpression(expression: CudaLiteExpression, context: EmitContext): CudaLiteScalarType {
+  if (expression.kind === "conditional") {
+    return isNullPointerExpression(expression.consequent)
+      ? devicePointerValueTypeForExpression(expression.alternate, context)
+      : devicePointerValueTypeForExpression(expression.consequent, context);
+  }
   if (expression.kind === "cast" && expression.pointer) return expression.valueType;
   if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
     const pointer = expression.args[0];
@@ -1643,7 +1663,7 @@ function collectMutableStoragePointerBases(
   const names = new Set<string>();
   walkCudaLiteExpressions(statements, (expression) => {
     if (expression.kind === "assignment" && expression.left.kind === "identifier") {
-      if ((expression.operator === "+=" || expression.operator === "-=") && pointerParamNames.has(expression.left.name)) {
+      if ((expression.operator === "=" || expression.operator === "+=" || expression.operator === "-=") && pointerParamNames.has(expression.left.name)) {
         names.add(expression.left.name);
       }
       return;
@@ -1932,7 +1952,13 @@ function emitPointerComparison(
     return `(${token.value} ${expression.operator} 0u)`;
   }
   if (address && stat?.nullish) {
-    return expression.operator === "==" ? "false" : "true";
+    const buffer = address.buffer ?? "0u";
+    if (/^\d+u$/u.test(buffer)) {
+      const equal = buffer === NULL_DEVICE_POINTER_BUFFER;
+      return expression.operator === "==" ? String(equal) : String(!equal);
+    }
+    const equal = `(${buffer} == ${NULL_DEVICE_POINTER_BUFFER})`;
+    return expression.operator === "==" ? equal : `(!${equal})`;
   }
   throw featureError(
     "unsupported-pointer-pointer-comparison",
@@ -1944,6 +1970,14 @@ function staticPointerTermEqual(left: PointerComparisonTerm, right: PointerCompa
   if (left.nullish || right.nullish) return left.nullish === right.nullish && left.value === right.value;
   if (left.symbol && right.symbol && left.symbol === right.symbol) return true;
   return undefined;
+}
+
+function isNullPointerExpression(expression: CudaLiteExpression): boolean {
+  if (expression.kind === "number") return expression.value === 0;
+  if (expression.kind !== "identifier") return false;
+  if (expression.name === "nullptr" || expression.name === "NULL") return true;
+  const namedConstant = CUDA_NAMED_CONSTANTS.get(expression.name);
+  return namedConstant?.valueType === "voidptr" && namedConstant.value === 0;
 }
 
 function pointerComparisonTerm(expression: CudaLiteExpression, context: EmitContext): PointerComparisonTerm | undefined {
@@ -2825,7 +2859,17 @@ function emitPointerRebaseAssignment(expression: CudaLiteAssignmentExpression, c
     return undefined;
   }
   const base = context.mutablePointerBaseFor(expression.left.name);
-  if (!base || (expression.operator !== "+=" && expression.operator !== "-=")) return undefined;
+  if (!base) return undefined;
+  if (expression.operator === "=") {
+    const parts = devicePointerArgumentParts(expression.right, context);
+    if (!parts) throw featureError("unsupported-pointer-assignment", "CUDA pointer assignment expects a modeled storage or shared pointer");
+    const expectedBuffer = context.storagePointerIdFor(expression.left.name);
+    if (expectedBuffer !== undefined && parts.buffer !== `${expectedBuffer}u`) {
+      throw featureError("unsupported-pointer-assignment", "storage pointer parameter assignment must stay within the same buffer");
+    }
+    return `${base} = ${parts.base}`;
+  }
+  if (expression.operator !== "+=" && expression.operator !== "-=") return undefined;
   const delta = `u32(${emitExpression(expression.right, context)})`;
   const op = expression.operator === "+=" ? "+" : "-";
   return `${base} = (${base} ${op} ${delta})`;

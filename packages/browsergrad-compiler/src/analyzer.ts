@@ -2020,6 +2020,8 @@ function validateNonCallExpression(
       validateScalarOperand(walkExpression(expression.condition, scope), expression.condition.span, diagnostics);
       const consequent = walkExpression(expression.consequent, scope);
       const alternate = walkExpression(expression.alternate, scope);
+      const pointer = conditionalPointerInfo(expression, consequent, alternate, diagnostics);
+      if (pointer) return pointer;
       if (consequent.kind === "vector" || alternate.kind === "vector") {
         if (consequent.kind !== "vector" || alternate.kind !== "vector" || consequent.valueType !== alternate.valueType) {
           diagnostics.push(error("unsupported-vector-argument", "conditional CUDA vector expressions require matching vector branches", expression.span));
@@ -2094,7 +2096,7 @@ function validateLValueExpression(
       diagnostics.push(error("parameter-assignment", `cannot assign to scalar parameter '${expression.name}'`, expression.span));
       return;
     }
-    if (symbol.kind === "param" && symbol.pointer && isPointerRebaseOperator(operator)) return;
+    if (symbol.kind === "param" && symbol.pointer && (operator === "=" || isPointerRebaseOperator(operator))) return;
     diagnostics.push(error("invalid-assignment-target", "assignment target must be a local variable, pointer element, or shared element", expression.span));
     return;
   }
@@ -2229,6 +2231,35 @@ function pointerComparable(
   if (isPointerLikeInfo(left) && isPointerLikeInfo(right)) return true;
   if (isPointerLikeInfo(left) && isNullPointerLiteral(rightExpression)) return true;
   return isPointerLikeInfo(right) && isNullPointerLiteral(leftExpression);
+}
+
+function conditionalPointerInfo(
+  expression: Extract<CudaLiteExpression, { kind: "conditional" }>,
+  consequent: ExpressionInfo,
+  alternate: ExpressionInfo,
+  diagnostics: CudaLiteDiagnostic[],
+): ExpressionInfo | undefined {
+  const consequentPointer = isPointerLikeInfo(consequent);
+  const alternatePointer = isPointerLikeInfo(alternate);
+  const consequentNull = isNullPointerLiteral(expression.consequent);
+  const alternateNull = isNullPointerLiteral(expression.alternate);
+  if (!consequentPointer && !alternatePointer) return undefined;
+  if (!consequentPointer && !consequentNull) return undefined;
+  if (!alternatePointer && !alternateNull) return undefined;
+  const valueType = consequent.valueType ?? alternate.valueType;
+  if (
+    consequentPointer &&
+    alternatePointer &&
+    consequent.valueType !== undefined &&
+    alternate.valueType !== undefined &&
+    consequent.valueType !== alternate.valueType
+  ) {
+    diagnostics.push(error("unsupported-pointer-conditional", "conditional pointer expressions require matching pointer value types", expression.span));
+  }
+  return {
+    kind: consequentPointer ? consequent.kind : alternate.kind,
+    ...(valueType === undefined ? {} : { valueType }),
+  };
 }
 
 function isPointerLikeInfo(info: ExpressionInfo): boolean {
