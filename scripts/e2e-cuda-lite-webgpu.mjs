@@ -162,6 +162,20 @@ __global__ void sharedHelper(float* out) {
   __syncthreads();
   out[tid] = readTile(tile, 3 - tid);
 }`,
+  deviceGlobalStorage: `
+__device__ unsigned int counter = 0;
+__device__ float values[4];
+
+__device__ void setValue(float* ptr, int index, float value) {
+  ptr[index] = value;
+}
+
+__global__ void deviceGlobalStorage(float* out, uint* old) {
+  int tid = threadIdx.x;
+  old[tid] = atomicAdd(&counter, 1u);
+  setValue(values, tid, (float)(tid + 1));
+  out[tid] = values[tid];
+}`,
   ...loadCorpusExecutionSources(),
 };
 
@@ -419,6 +433,19 @@ const html = String.raw`<!doctype html>
             input: () => ({
               buffers: {
                 out: new Float32Array(4),
+              },
+            }),
+            output: "out",
+          },
+          {
+            name: "device-function:device-global-storage",
+            source: SOURCES.deviceGlobalStorage,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+                old: new Uint32Array(4),
               },
             }),
             output: "out",

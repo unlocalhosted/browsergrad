@@ -336,6 +336,7 @@ function hostDynamicLaunchOrderSignature(launch: CudaHostDynamicLaunch): string 
     scalars: sortedScalarRecord(launch.input.scalars ?? {}),
     storageAliases: sortedStringRecord(launch.storageAliases),
     bufferNames: Object.keys(launch.input.buffers).sort(),
+    deviceGlobalNames: Object.keys(launch.input.deviceGlobals ?? {}).sort(),
     residentBufferNames: Object.keys(launch.input.residentBuffers ?? {}).sort(),
     memoryPoolNames: Object.keys(launch.input.memoryPools ?? {}).sort(),
     pointerOffsetNames: Object.keys(launch.pointerBaseOffsets).sort(),
@@ -492,9 +493,11 @@ function createChildKernelInput(
       if (pointer.offset < 0) return undefined;
       const root = pointer.root;
       const buffer = input.buffers[root];
+      const global = input.deviceGlobals?.[root];
       const resident = input.residentBuffers?.[root];
-      if (buffer && resident) return undefined;
+      if ((buffer || global) && resident) return undefined;
       if (buffer) buffers[param.name] = buffer;
+      else if (global) buffers[param.name] = global;
       else if (resident) residentBuffers[param.name] = resident;
       else return undefined;
       if (root !== param.name) storageAliases[param.name] = root;

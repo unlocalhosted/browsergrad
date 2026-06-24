@@ -165,6 +165,7 @@ function createAuditBlockContext(includeContext, blockCode, carriedDefines) {
     deviceFunctions: collectPortableDeviceFunctions(source, recordNames, effectiveDefines),
     dynamicLaunchTargets: collectDynamicLaunchTargetDeviceFunctions(source),
     constantDeclarations: collectConstantDeclarations(source),
+    deviceGlobalDeclarations: collectDeviceGlobalDeclarations(source),
     textureDeclarations: collectTextureDeclarations(source),
     recordDeclarations,
     sharedDeclarations: collectTranslationUnitSharedDeclarations(declarationContext),
@@ -187,6 +188,7 @@ function compileKernelFromAuditContext(rawKernel, kernels, kernelName, context) 
     functionDeclarations: context.functionDeclarations,
     deviceFunctions: context.deviceFunctions,
     constantDeclarations: context.constantDeclarations,
+    deviceGlobalDeclarations: context.deviceGlobalDeclarations,
     textureDeclarations: context.textureDeclarations,
     recordDeclarations: context.recordDeclarations,
     sharedDeclarations: context.sharedDeclarations,
@@ -341,6 +343,7 @@ function syntheticInputFor(compiled) {
   const scalars = {};
   const buffers = {};
   const constants = {};
+  const deviceGlobals = {};
   const memoryPools = {};
   const textures = {};
   for (const param of compiled.ir.params) {
@@ -361,13 +364,19 @@ function syntheticInputFor(compiled) {
       ? syntheticScalarForName(constant.name)
       : syntheticBufferForType(constant.valueType);
   }
+  for (const global of compiled.ir.deviceGlobals) {
+    const length = global.dimensions.length === 0
+      ? 1
+      : global.dimensions.reduce((product, dimension) => product * dimension, 1);
+    deviceGlobals[global.name] = syntheticBufferForType(global.valueType, length);
+  }
   for (const texture of compiled.ir.textures) {
     textures[texture.name] = { width: 64, height: 64, data: new Float32Array(64 * 64) };
   }
   for (const poolName of externalDevicePoolNamesFromSource(compiled.ast.source)) {
     memoryPools[poolName] ??= { data: new Uint32Array(4096), offset: new Uint32Array([0]) };
   }
-  return { buffers, scalars, constants, memoryPools, textures };
+  return { buffers, scalars, constants, deviceGlobals, memoryPools, textures };
 }
 
 function externalDevicePoolNamesFromSource(source) {
@@ -376,10 +385,10 @@ function externalDevicePoolNamesFromSource(source) {
     .filter(Boolean);
 }
 
-function syntheticBufferForType(type) {
-  if (type === "int") return new Int32Array(4096);
-  if (type === "uint" || type === "voidptr") return new Uint32Array(4096);
-  return new Float32Array(4096);
+function syntheticBufferForType(type, length = 4096) {
+  if (type === "int") return new Int32Array(length);
+  if (type === "uint" || type === "voidptr" || type === "bool") return new Uint32Array(length);
+  return new Float32Array(length);
 }
 
 function syntheticScalarForName(name) {
@@ -1049,6 +1058,21 @@ function collectConstantDeclarations(source) {
   const re = /__constant__\s+[^;]+;/g;
   let match;
   while ((match = re.exec(clean))) declarations.push(match[0]);
+  return declarations;
+}
+
+function collectDeviceGlobalDeclarations(source) {
+  const clean = stripComments(source);
+  const declarations = [];
+  const re = /(?:\bstatic\s+)?__device__\s+(?:static\s+)?[^;{}]+;/g;
+  let match;
+  while ((match = re.exec(clean))) {
+    const declaration = match[0].trim();
+    if (/\b__shared__\b/u.test(declaration)) continue;
+    if (/\b__host__\b|\b__global__\b/u.test(declaration)) continue;
+    if (/[A-Za-z_][A-Za-z0-9_]*\s*\([^;]*\)\s*;$/u.test(declaration)) continue;
+    declarations.push(declaration);
+  }
   return declarations;
 }
 

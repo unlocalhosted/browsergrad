@@ -40,6 +40,18 @@ __global__ void kernel(float *out) { out[0] = keep(1.0f); }`;
 }
 
 {
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void kernel(uint *out) {
+  out[0] = numErrors;
+}`,
+    deviceGlobalDeclarations: ["__device__ static unsigned int numErrors = 3;"],
+  });
+  assert.match(source, /__device__ static unsigned int numErrors = 3;/u);
+  assert.match(source, /out\[0\] = numErrors/u);
+}
+
+{
   const source = `
 #if UNKNOWN_FEATURE
 __device__ unknown_t maybe(float x) { return x; }

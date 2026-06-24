@@ -10,6 +10,7 @@ import {
   type CudaLiteCooperativeGroupDecl,
   type CudaLiteCooperativeGroupKind,
   type CudaLiteDeviceFunction,
+  type CudaLiteDeviceGlobal,
   type CudaLiteDim3Decl,
   type CudaLiteExpression,
   type CudaLiteForStatement,
@@ -149,6 +150,7 @@ class Parser {
 
   parseModule(): CudaLiteModule {
     const constants: CudaLiteGlobalConstant[] = [];
+    const deviceGlobals: CudaLiteDeviceGlobal[] = [];
     const textures: CudaLiteTexture2D[] = [];
     const functions: CudaLiteDeviceFunction[] = [];
     const kernels: CudaLiteKernel[] = [];
@@ -162,11 +164,13 @@ class Parser {
         this.integerConstantScopes.push(templateConstants);
         try {
           if (this.startsDeviceFunction()) functions.push(this.parseDeviceFunction());
+          else if (this.startsDeviceGlobal()) deviceGlobals.push(...this.parseDeviceGlobals());
           else kernels.push(this.parseKernel());
         } finally {
           this.integerConstantScopes.pop();
         }
       }
+      else if (this.startsDeviceGlobal()) deviceGlobals.push(...this.parseDeviceGlobals());
       else if (this.startsDeviceFunction()) functions.push(this.parseDeviceFunction());
       else kernels.push(this.parseKernel());
     }
@@ -174,6 +178,7 @@ class Parser {
       kind: "module",
       source: this.source,
       constants,
+      deviceGlobals,
       textures,
       functions,
       kernels,
@@ -234,6 +239,47 @@ class Parser {
       ...(init === undefined ? {} : { init }),
       span: mergeSpans(start, end),
     };
+  }
+
+  private parseDeviceGlobals(): readonly CudaLiteDeviceGlobal[] {
+    const start = this.consumeDeviceGlobalQualifiers();
+    const valueType = this.parseType();
+    const declarations: CudaLiteDeviceGlobal[] = [];
+    do {
+      this.consumeCudaDeclAttributes();
+      const pointer = this.consumeIf("*") !== undefined;
+      this.consumeTypeQualifiers();
+      this.consumeCudaDeclAttributes();
+      const name = this.expectIdentifier("device global name");
+      if (pointer) this.fail("device global pointers are not supported in CUDA-lite yet", name.span);
+      const dimensions: number[] = [];
+      let inferredArrayDimension = false;
+      while (this.consumeIf("[")) {
+        if (!this.match("]")) dimensions.push(this.parseArrayDimension());
+        else inferredArrayDimension = true;
+        this.expect("]");
+      }
+      const init = this.consumeIf("=")
+        ? this.parseInitializerExpression(valueType, inferredArrayDimension && dimensions.length === 0 ? [1] : dimensions)
+        : undefined;
+      if (inferredArrayDimension) {
+        if (!init) this.fail("unsized device global arrays require an initializer", name.span);
+        dimensions.push(flattenInitializerExpressions(init).length);
+      }
+      declarations.push({
+        kind: "device-global",
+        valueType,
+        name: name.value,
+        dimensions,
+        ...(init === undefined ? {} : { init }),
+        span: mergeSpans(start, init?.span ?? name.span),
+      });
+    } while (this.consumeIf(","));
+    const end = this.expect(";").span;
+    return declarations.map((declaration) => ({
+      ...declaration,
+      span: mergeSpans(declaration.span, end),
+    }));
   }
 
   private parseDeviceFunction(): CudaLiteDeviceFunction {
@@ -1098,14 +1144,27 @@ class Parser {
   }
 
   private startsDeviceFunction(): boolean {
+    const nameIndex = this.deviceDeclarationNameIndex();
+    return nameIndex !== undefined && this.tokens[nameIndex + 1]?.value === "(";
+  }
+
+  private startsDeviceGlobal(): boolean {
+    const nameIndex = this.deviceDeclarationNameIndex();
+    if (nameIndex === undefined) return false;
+    const next = this.tokens[nameIndex + 1]?.value;
+    return next !== "(";
+  }
+
+  private deviceDeclarationNameIndex(): number | undefined {
     let index = this.index;
     let sawDevice = false;
     while (true) {
       const token = this.tokens[index];
-      if (!token) return false;
+      if (!token) return undefined;
       if (token.value === "__device__") sawDevice = true;
       if (
         token.value === "static" ||
+        token.value === "extern" ||
         token.value === "__inline__" ||
         token.value === "inline" ||
         token.value === "__device__" ||
@@ -1117,7 +1176,41 @@ class Parser {
       }
       break;
     }
-    return sawDevice;
+    if (!sawDevice) return undefined;
+    const typeEnd = this.typeEndIndex(index);
+    if (typeEnd === undefined) return undefined;
+    index = typeEnd;
+    while (true) {
+      const value = this.tokens[index]?.value;
+      if (
+        value === "*" ||
+        value === "const" ||
+        value === "volatile" ||
+        value === "__restrict__" ||
+        value === "__restrict" ||
+        value === "restrict"
+      ) {
+        index++;
+        continue;
+      }
+      break;
+    }
+    return this.tokens[index]?.kind === "identifier" ? index : undefined;
+  }
+
+  private consumeDeviceGlobalQualifiers(): SourceSpan {
+    let start: SourceSpan | undefined;
+    let sawDevice = false;
+    while (this.match("static") || this.match("extern") || this.match("__device__")) {
+      const token = this.advance();
+      start ??= token.span;
+      if (token.value === "__device__") sawDevice = true;
+    }
+    if (!sawDevice) this.fail("expected __device__ global attribute", start ?? this.peek().span);
+    while (this.consumeIf("static") || this.consumeIf("extern")) {
+      // accepted linkage qualifiers; no CUDA-lite semantic effect
+    }
+    return start ?? this.peek().span;
   }
 
   private startsKernelLaunch(): boolean {

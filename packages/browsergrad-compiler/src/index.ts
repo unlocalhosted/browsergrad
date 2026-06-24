@@ -14,6 +14,7 @@ export {
   type CudaLiteCooperativeGroupDecl,
   type CudaLiteCooperativeGroupKind,
   type CudaLiteDeviceFunction,
+  type CudaLiteDeviceGlobal,
   type CudaLiteDiagnostic,
   type CudaLiteDim3Decl,
   type CudaLiteExpression,

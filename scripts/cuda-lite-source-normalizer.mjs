@@ -28,6 +28,7 @@ export function createKernelCompilationUnit({
   functionDeclarations = [],
   deviceFunctions = [],
   constantDeclarations = [],
+  deviceGlobalDeclarations = [],
   textureDeclarations = [],
   sharedDeclarations = [],
   recordDeclarations = [],
@@ -38,6 +39,7 @@ export function createKernelCompilationUnit({
     ...functionDeclarations,
     ...deviceFunctions.map((fn) => fn.source),
     ...constantDeclarations,
+    ...deviceGlobalDeclarations,
   ].join("\n");
   const builtinRecordDeclarations = CUDA_BUILTIN_RECORD_DECLARATIONS.filter((declaration) => {
     const name = recordDeclarationName(declaration);
@@ -50,6 +52,7 @@ export function createKernelCompilationUnit({
     ...functionDeclarations,
     ...deviceFunctions.map((fn) => fn.source),
     ...constantDeclarations,
+    ...deviceGlobalDeclarations,
     ...availableRecordDeclarations,
   ].join("\n");
   const aliasDefines = collectTypeAliasDefines(aliasContext, definesByName);
@@ -110,6 +113,7 @@ export function createKernelCompilationUnit({
     ...referencedDeviceFunctions.map((fn) => fn.source),
     ...referencedSiblingKernels,
     ...constantDeclarations,
+    ...deviceGlobalDeclarations,
   ].join("\n");
   const referencedRecordDeclarations = availableRecordDeclarations.filter((declaration) => {
     const name = recordDeclarationName(declaration);
@@ -131,6 +135,7 @@ export function createKernelCompilationUnit({
     functionMacros.map(normalizeFunctionMacro).join("\n"),
     referencedDeviceFunctions.map((fn) => fn.source).join("\n"),
     constantDeclarations.join("\n"),
+    deviceGlobalDeclarations.join("\n"),
     textureDeclarations.join("\n"),
     referencedRecordDeclarations.join("\n"),
     referencedSiblingKernels.join("\n"),

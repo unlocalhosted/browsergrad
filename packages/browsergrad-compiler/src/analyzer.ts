@@ -5,6 +5,7 @@ import {
   type CudaLiteAssignmentExpression,
   type CudaLiteCooperativeGroupKind,
   type CudaLiteDeviceFunction,
+  type CudaLiteDeviceGlobal,
   type CudaLiteDiagnostic,
   type CudaLiteExpression,
   type CudaLiteGlobalConstant,
@@ -155,7 +156,7 @@ type ValueType = Exclude<CudaLiteScalarType, "void">;
 
 interface SymbolInfo {
   readonly name: string;
-  readonly kind: "param" | "local" | "shared" | "constant" | "texture" | "cooperative-group" | "device-function" | "builtin-vector" | "builtin-call";
+  readonly kind: "param" | "local" | "shared" | "constant" | "device-global" | "texture" | "cooperative-group" | "device-function" | "builtin-vector" | "builtin-call";
   readonly valueType?: ValueType;
   readonly returnType?: CudaLiteScalarType;
   readonly params?: readonly CudaLiteParam[];
@@ -193,6 +194,7 @@ export function analyzeCudaLite(
   const requiredFeatures = new Set<string>();
   const atomicParams = new Set<string>();
   const atomicShared = new Set<string>();
+  const atomicDeviceGlobals = new Set<string>();
   const atomicDevicePointerTypes = new Set<CudaLiteScalarType>();
   const params = new Map(kernel.params.map((param) => [param.name, param]));
   const declaredNames = new Set<string>();
@@ -200,6 +202,9 @@ export function analyzeCudaLite(
 
   for (const constant of ast.constants) {
     declareConstant(constant, rootScope, declaredNames, requiredFeatures, diagnostics, options);
+  }
+  for (const global of ast.deviceGlobals) {
+    declareDeviceGlobal(global, rootScope, declaredNames, requiredFeatures, diagnostics, options);
   }
   for (const texture of ast.textures) {
     declareTexture(texture, rootScope, declaredNames, diagnostics);
@@ -243,13 +248,16 @@ export function analyzeCudaLite(
 
   const walkExpression = (expression: CudaLiteExpression, scope: Scope): ExpressionInfo => {
     if (expression.kind === "call") {
-      return validateCallExpression(expression, scope, params, atomicParams, atomicShared, atomicDevicePointerTypes, requiredFeatures, diagnostics, walkExpression, options);
+      return validateCallExpression(expression, scope, params, atomicParams, atomicShared, atomicDeviceGlobals, atomicDevicePointerTypes, requiredFeatures, diagnostics, walkExpression, options);
     }
     return validateNonCallExpression(expression, scope, diagnostics, walkExpression, requiredFeatures);
   };
 
   for (const constant of ast.constants) {
     validateGlobalConstantInitializer(constant, rootScope, diagnostics, walkExpression);
+  }
+  for (const global of ast.deviceGlobals) {
+    validateDeviceGlobalInitializer(global, rootScope, diagnostics, walkExpression);
   }
 
   const walkStatements = (
@@ -461,12 +469,14 @@ export function analyzeCudaLite(
   return {
     kernel,
     constants: ast.constants,
+    deviceGlobals: ast.deviceGlobals,
     textures: ast.textures,
     functions: ast.functions,
     diagnostics,
     requiredFeatures: [...requiredFeatures].sort(),
     atomicParams: [...atomicParams].sort(),
     atomicShared: [...atomicShared].sort(),
+    atomicDeviceGlobals: [...atomicDeviceGlobals].sort(),
   };
 }
 
@@ -490,6 +500,7 @@ export function lowerAnalyzedCudaLiteToKernelIr(
     name: analysis.kernel.name,
     params: analysis.kernel.params,
     constants: analysis.constants,
+    deviceGlobals: analysis.deviceGlobals,
     textures: analysis.textures,
     functions: analysis.functions,
     body: analysis.kernel.body,
@@ -497,6 +508,7 @@ export function lowerAnalyzedCudaLiteToKernelIr(
     requiredFeatures: analysis.requiredFeatures,
     atomicParams: analysis.atomicParams,
     atomicShared: analysis.atomicShared,
+    atomicDeviceGlobals: analysis.atomicDeviceGlobals,
     workgroupSize: normalizeWorkgroupSize(options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE),
   };
 }
@@ -602,6 +614,35 @@ function declareConstant(
   }
 }
 
+function declareDeviceGlobal(
+  global: CudaLiteDeviceGlobal,
+  rootScope: Scope,
+  declaredNames: Set<string>,
+  requiredFeatures: Set<string>,
+  diagnostics: CudaLiteDiagnostic[],
+  options: CudaLiteAnalyzeOptions,
+): void {
+  if (declaredNames.has(global.name)) {
+    diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${global.name}'`, global.span));
+  }
+  validateDeclaredSymbolName(global.name, global.span, diagnostics);
+  declaredNames.add(global.name);
+  rootScope.symbols.set(global.name, {
+    name: global.name,
+    kind: "device-global",
+    valueType: global.valueType,
+    dimensions: global.dimensions,
+    span: global.span,
+  });
+  if (requiresShaderF16(global.valueType)) requiredFeatures.add("shader-f16");
+  validateF64Type(global.valueType, global.span, diagnostics, options);
+  for (const dimension of global.dimensions) {
+    if (!Number.isInteger(dimension) || dimension <= 0) {
+      diagnostics.push(error("invalid-array-dimension", "array dimensions must be positive integer literals", global.span));
+    }
+  }
+}
+
 function validateGlobalConstantInitializer(
   constant: CudaLiteGlobalConstant,
   scope: Scope,
@@ -616,6 +657,24 @@ function validateGlobalConstantInitializer(
   const expected = constant.dimensions.reduce((product, dimension) => product * dimension, 1);
   if (constant.dimensions.length > 0 && values.length > expected) {
     diagnostics.push(error("invalid-constant-initializer", `constant '${constant.name}' initializer has more than ${expected} values`, constant.init.span));
+  }
+  for (const value of values) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
+}
+
+function validateDeviceGlobalInitializer(
+  global: CudaLiteDeviceGlobal,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  if (!global.init) return;
+  const values = flattenInitializerExpressions(global.init);
+  if (global.dimensions.length === 0 && values.length > 1) {
+    diagnostics.push(error("invalid-device-global-initializer", `device global '${global.name}' scalar initializer must have one value`, global.init.span));
+  }
+  const expected = global.dimensions.reduce((product, dimension) => product * dimension, 1);
+  if (global.dimensions.length > 0 && values.length > expected) {
+    diagnostics.push(error("invalid-device-global-initializer", `device global '${global.name}' initializer has more than ${expected} values`, global.init.span));
   }
   for (const value of values) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
 }
@@ -819,7 +878,7 @@ function pointerSourceType(expression: CudaLiteExpression | undefined, scope: Sc
   }
   if (expression.kind !== "identifier") return undefined;
   const symbol = lookupSymbol(expression.name, scope, expression.span);
-  if (symbol?.kind === "shared") return symbol.valueType;
+  if (symbol?.kind === "shared" || symbol?.kind === "device-global") return symbol.valueType;
   return symbol?.pointer ? symbol.valueType : undefined;
 }
 
@@ -946,6 +1005,7 @@ function validateCallExpression(
   params: ReadonlyMap<string, CudaLiteParam>,
   atomicParams: Set<string>,
   atomicShared: Set<string>,
+  atomicDeviceGlobals: Set<string>,
   atomicDevicePointerTypes: Set<CudaLiteScalarType>,
   requiredFeatures: Set<string>,
   diagnostics: CudaLiteDiagnostic[],
@@ -1013,7 +1073,7 @@ function validateCallExpression(
     return { kind: "scalar", valueType: "int" };
   }
   if (isAtomicBuiltin(callName)) {
-    validateAtomicBuiltin(expression, scope, params, atomicParams, atomicShared, atomicDevicePointerTypes, diagnostics, walkExpression);
+    validateAtomicBuiltin(expression, scope, params, atomicParams, atomicShared, atomicDeviceGlobals, atomicDevicePointerTypes, diagnostics, walkExpression);
     return { kind: "scalar" };
   }
   if (isPointerIdentityCall(callName)) {
@@ -1651,7 +1711,10 @@ function validateDevicePointerArgument(
   const constantArrayDecay = rootSymbol?.kind === "constant" &&
     rootSymbol.dimensions !== undefined &&
     info.kind === "array";
-  if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "unknown" && !sharedArrayDecay && !constantArrayDecay) {
+  const globalArrayDecay = rootSymbol?.kind === "device-global" &&
+    rootSymbol.dimensions !== undefined &&
+    info.kind === "array";
+  if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "unknown" && !sharedArrayDecay && !constantArrayDecay && !globalArrayDecay) {
     diagnostics.push(error("unsupported-device-pointer-param", `device pointer parameter '${param.name}' expects a pointer argument`, arg.span));
     return;
   }
@@ -1977,6 +2040,7 @@ function validateAtomicBuiltin(
   params: ReadonlyMap<string, CudaLiteParam>,
   atomicParams: Set<string>,
   atomicShared: Set<string>,
+  atomicDeviceGlobals: Set<string>,
   atomicDevicePointerTypes: Set<CudaLiteScalarType>,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
@@ -2006,6 +2070,14 @@ function validateAtomicBuiltin(
         diagnostics.push(error("unsupported-atomic-target", "shared atomics support int/uint targets and CAS-backed float add/sub/min/max/exch in CUDA-lite", targetExpression.span));
       } else {
         atomicShared.add(storageSymbol.name);
+      }
+    } else if (storageSymbol?.kind === "device-global") {
+      if (targetType === "float" && isSupportedFloatAtomic(callName)) {
+        atomicDeviceGlobals.add(storageSymbol.name);
+      } else if (targetType === "half" || targetType === "bool" || targetType === "complex64" || targetType === "float") {
+        diagnostics.push(error("unsupported-atomic-target", "device global atomics support int/uint targets and CAS-backed float add/sub/min/max/exch in CUDA-lite", targetExpression.span));
+      } else {
+        atomicDeviceGlobals.add(storageSymbol.name);
       }
     } else if (!param?.pointer && symbol?.kind === "local" && symbol.pointer) {
       if (symbol.constant) {
@@ -2257,7 +2329,7 @@ function validateNonCallExpression(
           ? { kind: "complex", valueType: target.valueType, symbol: target.symbol }
           : { kind: "scalar", valueType: target.valueType, symbol: target.symbol };
       }
-      diagnostics.push(error("unsupported-index-target", "only pointer parameters, local arrays, fixed __shared__ arrays, and constants can be indexed", expression.span));
+      diagnostics.push(error("unsupported-index-target", "only pointer parameters, local arrays, fixed __shared__ arrays, constants, and device globals can be indexed", expression.span));
       return { kind: "unknown" };
     }
     case "unary": {
@@ -2393,13 +2465,13 @@ function validateLValueExpression(
       diagnostics.push(error("unknown-symbol", `unknown CUDA-lite symbol '${expression.name}'`, expression.span));
       return;
     }
-    if (symbol.kind === "local" || symbol.kind === "shared") return;
+    if (symbol.kind === "local" || symbol.kind === "shared" || symbol.kind === "device-global") return;
     if (symbol.kind === "param" && !symbol.pointer) {
       diagnostics.push(error("parameter-assignment", `cannot assign to scalar parameter '${expression.name}'`, expression.span));
       return;
     }
     if (symbol.kind === "param" && symbol.pointer && (operator === "=" || isPointerRebaseOperator(operator))) return;
-    diagnostics.push(error("invalid-assignment-target", "assignment target must be a local variable, pointer element, or shared element", expression.span));
+    diagnostics.push(error("invalid-assignment-target", "assignment target must be a local variable, pointer element, shared element, or device global", expression.span));
     return;
   }
   if (expression.kind === "index") {
@@ -2447,7 +2519,7 @@ function validateLValueExpression(
     }
     return;
   }
-  diagnostics.push(error("invalid-assignment-target", "assignment target must be a local variable, pointer element, or shared element", expression.span));
+  diagnostics.push(error("invalid-assignment-target", "assignment target must be a local variable, pointer element, shared element, or device global", expression.span));
 }
 
 function isPointerRebaseOperator(
@@ -2485,7 +2557,7 @@ function expressionInfoForIdentifier(
       symbol,
     };
   }
-  if (symbol.kind === "shared" || symbol.kind === "constant") {
+  if (symbol.kind === "shared" || symbol.kind === "constant" || symbol.kind === "device-global") {
     if (symbol.valueType === "complex64" && (!symbol.dimensions || symbol.dimensions.length === 0)) {
       return { kind: "complex", valueType: symbol.valueType, symbol };
     }

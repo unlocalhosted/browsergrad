@@ -1,4 +1,5 @@
 import {
+  createWgslFloat16Array,
   defineWgslKernelProgram,
   float32ToFloat16Bits,
   type WgslKernelProgram,
@@ -11,6 +12,7 @@ import {
 import { collectExternalDevicePoolNames } from "./ast_queries.js";
 import { createCudaHostDynamicLaunchPlan } from "./dynamic_launch.js";
 import { CUDA_INTRINSICS } from "./intrinsics.js";
+import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { createCudaLaunchValidationDiagnostics } from "./launch.js";
 import { createCudaPeerCopyPlan, type CudaPeerCopyOperation } from "./peer_copy.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
@@ -23,6 +25,7 @@ import {
   type CompiledKernelInput,
   type CompileCudaLiteOptions,
   type CudaLiteDiagnostic,
+  type CudaLiteDeviceGlobal,
   type CudaLiteExpression,
   type CudaLiteStatement,
   type KernelLaunch,
@@ -707,6 +710,7 @@ function createWgslRunInput(
     ...surfaceBufferInputs(compiled, input),
     ...memoryPoolBufferInputs(compiled, input),
     ...constantBufferInputs(compiled, input),
+    ...deviceGlobalBufferInputs(compiled, input),
   };
   const storageMetadata = memoryPoolStorageMetadata(compiled);
   const readback = input.readback === undefined
@@ -714,6 +718,7 @@ function createWgslRunInput(
       ...compiled.ir.params
         .filter((param) => (param.pointer && !param.constant) || param.valueType === "surface2d")
         .map((param) => param.valueType === "devicepool" ? poolDataName(param.name) : param.name),
+      ...compiled.ir.deviceGlobals.map((global) => global.name),
       ...collectExternalDevicePoolNames(compiled.ir.body).map(poolDataName),
     ]
     : normalizeCudaWebGpuReadbackNames(compiled, input.readback);
@@ -900,6 +905,97 @@ function constantBufferInputs(
     out[constant.name] = value;
   }
   return out;
+}
+
+function deviceGlobalBufferInputs(
+  compiled: CompiledCudaLiteKernel,
+  input: CompiledKernelInput,
+): Record<string, WgslTypedArray> {
+  const out: Record<string, WgslTypedArray> = {};
+  for (const global of compiled.ir.deviceGlobals) {
+    out[global.name] = input.deviceGlobals?.[global.name] ?? deviceGlobalInitialValue(global);
+  }
+  return out;
+}
+
+function deviceGlobalInitialValue(global: CudaLiteDeviceGlobal): WgslTypedArray {
+  const total = global.dimensions.length === 0
+    ? 1
+    : global.dimensions.reduce((product, dimension) => product * dimension, 1);
+  const values = global.init === undefined
+    ? []
+    : flattenInitializer(global.init).map(evaluateInitializerNumber);
+  const padded = Array.from({ length: total }, (_, index) => values[index] ?? 0);
+  if (global.valueType === "int") return Int32Array.from(padded.map((value) => Math.trunc(value)));
+  if (global.valueType === "uint" || global.valueType === "bool" || global.valueType === "voidptr") {
+    return Uint32Array.from(padded.map((value) => Math.trunc(value) >>> 0));
+  }
+  if (global.valueType === "half") return createWgslFloat16Array(padded);
+  if (global.valueType === "float" || global.valueType === "double") return Float32Array.from(padded);
+  if (global.valueType === "complex64") return Float32Array.from(padded);
+  return Float32Array.from(padded);
+}
+
+function flattenInitializer(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
+  if (expression.kind !== "initializer") return [expression];
+  return expression.elements.flatMap((element) => flattenInitializer(element));
+}
+
+function evaluateInitializerNumber(expression: CudaLiteExpression): number {
+  switch (expression.kind) {
+    case "number":
+      return expression.value;
+    case "identifier": {
+      const named = CUDA_NAMED_CONSTANTS.get(expression.name);
+      if (named) return named.value;
+      throw new CudaLiteCompilerError(`device global initializer unknown symbol '${expression.name}'`, [{
+        code: "invalid-device-global-initializer",
+        severity: "error",
+        message: `device global initializer unknown symbol '${expression.name}'`,
+        span: expression.span,
+      }]);
+    }
+    case "cast":
+      return evaluateInitializerNumber(expression.expression);
+    case "unary": {
+      const value = evaluateInitializerNumber(expression.argument);
+      if (expression.operator === "-") return -value;
+      if (expression.operator === "+") return value;
+      if (expression.operator === "!") return value === 0 ? 1 : 0;
+      if (expression.operator === "~") return ~Math.trunc(value);
+      break;
+    }
+    case "binary": {
+      const left = evaluateInitializerNumber(expression.left);
+      const right = evaluateInitializerNumber(expression.right);
+      switch (expression.operator) {
+        case "+": return left + right;
+        case "-": return left - right;
+        case "*": return left * right;
+        case "/": return right === 0 ? 0 : left / right;
+        case "%": return right === 0 ? 0 : left % right;
+        case "<<": return Math.trunc(left) << Math.trunc(right);
+        case ">>": return Math.trunc(left) >> Math.trunc(right);
+        case "&": return Math.trunc(left) & Math.trunc(right);
+        case "|": return Math.trunc(left) | Math.trunc(right);
+        case "^": return Math.trunc(left) ^ Math.trunc(right);
+        case "==": return left === right ? 1 : 0;
+        case "!=": return left !== right ? 1 : 0;
+        case "<": return left < right ? 1 : 0;
+        case "<=": return left <= right ? 1 : 0;
+        case ">": return left > right ? 1 : 0;
+        case ">=": return left >= right ? 1 : 0;
+        case "&&": return left !== 0 && right !== 0 ? 1 : 0;
+        case "||": return left !== 0 || right !== 0 ? 1 : 0;
+      }
+    }
+  }
+  throw new CudaLiteCompilerError("device global initializer must be numeric", [{
+    code: "invalid-device-global-initializer",
+    severity: "error",
+    message: "device global initializer must be numeric",
+    span: expression.span,
+  }]);
 }
 
 function isDevicePoolParam(param: { readonly pointer: boolean; readonly valueType: string }): boolean {

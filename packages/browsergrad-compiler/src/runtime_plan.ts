@@ -218,6 +218,7 @@ function validateGridSyncPhaseSafety(
   const globals = new Set([
     ...ir.params.map((param) => param.name),
     ...ir.constants.map((constant) => constant.name),
+    ...ir.deviceGlobals.map((global) => global.name),
     ...ir.textures.map((texture) => texture.name),
     ...ir.functions.map((fn) => fn.name),
     "threadIdx",
@@ -275,6 +276,7 @@ function replayableDeclarationsForPhases(
   const globals = new Set([
     ...ir.params.map((param) => param.name),
     ...ir.constants.map((constant) => constant.name),
+    ...ir.deviceGlobals.map((global) => global.name),
     ...ir.textures.map((texture) => texture.name),
     ...ir.functions.map((fn) => fn.name),
     "threadIdx",

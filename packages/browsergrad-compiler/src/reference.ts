@@ -26,6 +26,7 @@ import {
   type CudaLiteCallExpression,
   type CudaLiteCooperativeGroupDecl,
   type CudaLiteDeviceFunction,
+  type CudaLiteDeviceGlobal,
   type CudaLiteExpression,
   type CudaLiteGlobalConstant,
   type CudaLiteKernel,
@@ -85,7 +86,7 @@ interface TextureHandleValue {
 
 interface LValue {
   readonly name: string;
-  readonly space: "local" | "buffer" | "shared" | "constant" | "pool";
+  readonly space: "local" | "buffer" | "shared" | "constant" | "device-global" | "pool";
   readonly index?: number;
   readonly field?: "x" | "y" | "z" | "w";
   readonly fieldIndex?: number;
@@ -102,6 +103,8 @@ interface ThreadContext {
   readonly buffers: Map<string, WgslTypedArray>;
   readonly constants: Map<string, number | WgslTypedArray>;
   readonly constantDimensions: Map<string, readonly number[]>;
+  readonly deviceGlobals: Map<string, WgslTypedArray>;
+  readonly deviceGlobalDimensions: Map<string, readonly number[]>;
   readonly textures: NonNullable<CompiledKernelInput["textures"]>;
   readonly surfaces: NonNullable<CompiledKernelInput["surfaces"]>;
   readonly memoryPools: Map<string, MemoryPoolValue>;
@@ -160,6 +163,13 @@ export function runCompiledKernelReference(
     }
   }
   const constantDimensions = new Map(compiled.ir.constants.map((constant) => [constant.name, constant.dimensions]));
+  const deviceGlobals = cloneDeviceGlobals(input.deviceGlobals ?? {});
+  for (const global of compiled.ir.deviceGlobals) {
+    if (!deviceGlobals.has(global.name)) {
+      deviceGlobals.set(global.name, deviceGlobalInitialValue(global));
+    }
+  }
+  const deviceGlobalDimensions = new Map(compiled.ir.deviceGlobals.map((global) => [global.name, global.dimensions]));
   const textures = input.textures ?? {};
   const surfaces = cloneSurfaces(input.surfaces ?? {});
   const memoryPools = cloneMemoryPools(input.memoryPools ?? {});
@@ -169,16 +179,17 @@ export function runCompiledKernelReference(
   const valueTypes = new Map<string, CudaLiteScalarType>([
     ...compiled.ir.params.map((param) => [param.name, param.valueType] as const),
     ...compiled.ir.constants.map((constant) => [constant.name, constant.valueType] as const),
+    ...compiled.ir.deviceGlobals.map((global) => [global.name, global.valueType] as const),
   ]);
   const traces: MutableTrace[] = [];
 
   if (usesGridSync(compiled.ir.body)) {
-    runGrid(compiled.ir.body, compiled, buffers, constants, constantDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, vectorFromTuple(launch.blockDim), vectorFromTuple(launch.gridDim), traces);
+    runGrid(compiled.ir.body, compiled, buffers, constants, constantDimensions, deviceGlobals, deviceGlobalDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, vectorFromTuple(launch.blockDim), vectorFromTuple(launch.gridDim), traces);
   } else {
     for (let bz = 0; bz < launch.gridDim[2]; bz++) {
       for (let by = 0; by < launch.gridDim[1]; by++) {
         for (let bx = 0; bx < launch.gridDim[0]; bx++) {
-          runBlock(compiled.ir.body, compiled, buffers, constants, constantDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, {
+          runBlock(compiled.ir.body, compiled, buffers, constants, constantDimensions, deviceGlobals, deviceGlobalDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, {
             x: bx,
             y: by,
             z: bz,
@@ -191,11 +202,12 @@ export function runCompiledKernelReference(
   const readback = input.readback ??
     [
       ...compiled.ir.params.filter((param) => (param.pointer && !param.constant) || param.valueType === "surface2d").map((param) => param.name),
+      ...compiled.ir.deviceGlobals.map((global) => global.name),
       ...collectExternalDevicePoolNames(compiled.ir.body),
     ];
   const result: Record<string, WgslTypedArray> = {};
   for (const name of readback) {
-    const buffer = buffers.get(name) ?? surfaces[name]?.data ?? memoryPools.get(name)?.data;
+    const buffer = buffers.get(name) ?? deviceGlobals.get(name) ?? surfaces[name]?.data ?? memoryPools.get(name)?.data;
     if (!buffer) throw compilerFailure(`missing readback buffer '${name}'`);
     result[name] = cloneTypedArray(buffer);
   }
@@ -233,6 +245,8 @@ function runBlock(
   buffers: Map<string, WgslTypedArray>,
   constants: Map<string, number | WgslTypedArray>,
   constantDimensions: Map<string, readonly number[]>,
+  deviceGlobals: Map<string, WgslTypedArray>,
+  deviceGlobalDimensions: Map<string, readonly number[]>,
   textures: NonNullable<CompiledKernelInput["textures"]>,
   surfaces: NonNullable<CompiledKernelInput["surfaces"]>,
   memoryPools: Map<string, MemoryPoolValue>,
@@ -269,6 +283,8 @@ function runBlock(
           buffers,
           constants,
           constantDimensions,
+          deviceGlobals,
+          deviceGlobalDimensions,
           textures,
           surfaces,
           memoryPools,
@@ -311,6 +327,8 @@ function runGrid(
   buffers: Map<string, WgslTypedArray>,
   constants: Map<string, number | WgslTypedArray>,
   constantDimensions: Map<string, readonly number[]>,
+  deviceGlobals: Map<string, WgslTypedArray>,
+  deviceGlobalDimensions: Map<string, readonly number[]>,
   textures: NonNullable<CompiledKernelInput["textures"]>,
   surfaces: NonNullable<CompiledKernelInput["surfaces"]>,
   memoryPools: Map<string, MemoryPoolValue>,
@@ -353,6 +371,8 @@ function runGrid(
                 buffers,
                 constants,
                 constantDimensions,
+                deviceGlobals,
+                deviceGlobalDimensions,
                 textures,
                 surfaces,
                 memoryPools,
@@ -759,6 +779,7 @@ function pointerArgumentValue(
     if (isAddress(local)) return local;
     if (context.buffers.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "buffer", index: 0, valueType } };
     if (context.shared.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "shared", index: 0, valueType } };
+    if (context.deviceGlobals.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "device-global", index: 0, valueType } };
     const constant = context.constants.get(arg.name);
     if (constant && typeof constant !== "number") return { kind: "address", target: { name: arg.name, space: "constant", index: 0, valueType } };
     if (context.memoryPools.has(arg.name)) return { kind: "pool-pointer", poolName: arg.name, byteOffset: 0, valueType };
@@ -856,9 +877,9 @@ function lvalueByteView(
   context: ThreadContext,
 ): PointerByteView {
   const index = lvalue.index ?? 0;
-  if (lvalue.space === "buffer") {
-    const buffer = context.buffers.get(lvalue.name);
-    if (!buffer) throw compilerFailure(`missing buffer '${lvalue.name}'`);
+  if (lvalue.space === "buffer" || lvalue.space === "device-global") {
+    const buffer = lvalue.space === "device-global" ? context.deviceGlobals.get(lvalue.name) : context.buffers.get(lvalue.name);
+    if (!buffer) throw compilerFailure(`missing ${lvalue.space === "device-global" ? "device global" : "buffer"} '${lvalue.name}'`);
     return { name: lvalue.name, bytes: byteView(buffer), byteOffset: index * elementByteSize(valueType) };
   }
   if (lvalue.space === "shared") {
@@ -1160,6 +1181,7 @@ function readIdentifierFrom(name: string, context: ThreadContext, locals: Readon
   if (locals.has(name)) return locals.get(name)!;
   if (Object.prototype.hasOwnProperty.call(context.textures, name)) return { kind: "texture-handle", name };
   if (context.shared.has(name)) return readLValue({ name, space: "shared", index: 0 }, context);
+  if (context.deviceGlobals.has(name)) return readLValue({ name, space: "device-global", index: 0 }, context);
   if (context.constants.has(name)) {
     const value = context.constants.get(name)!;
     if (typeof value === "number") return value;
@@ -2235,6 +2257,7 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
   if (expression.kind === "identifier") {
     if (context.buffers.has(expression.name)) return { name: expression.name, space: "buffer", index: 0 };
     if (context.shared.has(expression.name)) return { name: expression.name, space: "shared", index: 0 };
+    if (context.deviceGlobals.has(expression.name)) return { name: expression.name, space: "device-global", index: 0 };
     return { name: expression.name, space: "local" };
   }
   const chain: number[] = [];
@@ -2276,6 +2299,10 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
   const shared = context.shared.get(cursor.name);
   if (shared) {
     return { name: cursor.name, space: "shared", index: flattenIndex(shared.dimensions, chain) };
+  }
+  if (context.deviceGlobals.has(cursor.name)) {
+    const dimensions = contextDeviceGlobalDimensions(cursor.name, context);
+    return { name: cursor.name, space: "device-global", index: flattenIndex(dimensions, chain) };
   }
   const constant = context.constants.get(cursor.name);
   if (constant && typeof constant !== "number") {
@@ -2320,7 +2347,7 @@ function lvalueStorageIndex(lvalue: LValue, context: ThreadContext): number {
   if (lvalue.rawStorageIndex) return lvalue.index;
   if (lvalue.valueType) return lvalue.index * valueStorageWidth(lvalue.valueType);
   if (lvalue.space === "shared") return lvalue.index * valueStorageWidth(context.shared.get(lvalue.name)?.valueType);
-  if (lvalue.space === "buffer" || lvalue.space === "constant") return lvalue.index * valueStorageWidth(context.valueTypes.get(lvalue.name));
+  if (lvalue.space === "buffer" || lvalue.space === "constant" || lvalue.space === "device-global") return lvalue.index * valueStorageWidth(context.valueTypes.get(lvalue.name));
   if (lvalue.space === "local") {
     const local = context.locals.get(lvalue.name);
     return lvalue.index * valueStorageWidth(isLocalArray(local) ? local.valueType : undefined);
@@ -2363,8 +2390,8 @@ function resolvePointerInitializer(statement: CudaLiteVarDecl, context: ThreadCo
     throw compilerFailure(`pointer '${statement.name}' must initialize from an address`);
   }
   const target = resolveLValue(init.argument, context);
-  if (target.space !== "shared" && target.space !== "buffer") {
-    throw compilerFailure(`pointer '${statement.name}' can only alias storage or shared memory in CUDA-lite v0`);
+  if (target.space !== "shared" && target.space !== "buffer" && target.space !== "device-global") {
+    throw compilerFailure(`pointer '${statement.name}' can only alias storage, device global, or shared memory in CUDA-lite v0`);
   }
   return { kind: "address", target: { ...target, valueType: target.valueType ?? statement.valueType } };
 }
@@ -2382,9 +2409,9 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
     return ok ? readBufferValue(local.data, storageIndex, valueType, lvalue.field) : 0;
   }
   if (lvalue.index === undefined) throw compilerFailure(`missing index for '${lvalue.name}'`);
-  if (lvalue.space === "buffer") {
-    const buffer = context.buffers.get(lvalue.name);
-    if (!buffer) throw compilerFailure(`missing buffer '${lvalue.name}'`);
+  if (lvalue.space === "buffer" || lvalue.space === "device-global") {
+    const buffer = lvalue.space === "device-global" ? context.deviceGlobals.get(lvalue.name) : context.buffers.get(lvalue.name);
+    if (!buffer) throw compilerFailure(`missing ${lvalue.space === "device-global" ? "device global" : "buffer"} '${lvalue.name}'`);
     const valueType = lvalue.valueType ?? context.valueTypes.get(lvalue.name);
     const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
     const width = valueStorageWidth(valueType);
@@ -2462,9 +2489,9 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
     return;
   }
   if (lvalue.index === undefined) throw compilerFailure(`missing index for '${lvalue.name}'`);
-  if (lvalue.space === "buffer") {
-    const buffer = context.buffers.get(lvalue.name);
-    if (!buffer) throw compilerFailure(`missing buffer '${lvalue.name}'`);
+  if (lvalue.space === "buffer" || lvalue.space === "device-global") {
+    const buffer = lvalue.space === "device-global" ? context.deviceGlobals.get(lvalue.name) : context.buffers.get(lvalue.name);
+    if (!buffer) throw compilerFailure(`missing ${lvalue.space === "device-global" ? "device global" : "buffer"} '${lvalue.name}'`);
     const valueType = lvalue.valueType ?? context.valueTypes.get(lvalue.name);
     const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
     const width = valueStorageWidth(valueType);
@@ -2730,6 +2757,14 @@ function cloneConstants(
   return out;
 }
 
+function cloneDeviceGlobals(
+  globals: Readonly<Record<string, WgslTypedArray>>,
+): Map<string, WgslTypedArray> {
+  const out = new Map<string, WgslTypedArray>();
+  for (const [name, value] of Object.entries(globals)) out.set(name, cloneTypedArray(value));
+  return out;
+}
+
 function constantInitialValue(constant: CudaLiteGlobalConstant): number | WgslTypedArray {
   if (!constant.init) throw compilerFailure(`constant '${constant.name}' has no initializer`);
   const values = flattenConstantInitializer(constant.init).map(evaluateConstantNumber);
@@ -2743,6 +2778,24 @@ function constantInitialValue(constant: CudaLiteGlobalConstant): number | WgslTy
   if (constant.valueType === "half") return createWgslFloat16Array(padded);
   if (constant.valueType === "float" || constant.valueType === "double") return Float32Array.from(padded);
   if (constant.valueType === "complex64") return Float32Array.from(padded);
+  return Float32Array.from(padded);
+}
+
+function deviceGlobalInitialValue(global: CudaLiteDeviceGlobal): WgslTypedArray {
+  const total = global.dimensions.length === 0
+    ? 1
+    : global.dimensions.reduce((product, dimension) => product * dimension, 1);
+  const values = global.init === undefined
+    ? []
+    : flattenConstantInitializer(global.init).map(evaluateConstantNumber);
+  const padded = Array.from({ length: total }, (_, index) => values[index] ?? 0);
+  if (global.valueType === "int") return Int32Array.from(padded.map((value) => Math.trunc(value)));
+  if (global.valueType === "uint" || global.valueType === "bool" || global.valueType === "voidptr") {
+    return Uint32Array.from(padded.map((value) => Math.trunc(value) >>> 0));
+  }
+  if (global.valueType === "half") return createWgslFloat16Array(padded);
+  if (global.valueType === "float" || global.valueType === "double") return Float32Array.from(padded);
+  if (global.valueType === "complex64") return Float32Array.from(padded);
   return Float32Array.from(padded);
 }
 
@@ -3191,6 +3244,13 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
       if (value.length < expected) throw compilerFailure(`constant '${constant.name}' expects at least ${expected} elements`);
     }
   }
+  for (const global of compiled.ir.deviceGlobals) {
+    const value = input.deviceGlobals?.[global.name];
+    if (value === undefined) continue;
+    validateTypedDeviceGlobal(global.name, global.valueType, value);
+    const expected = global.dimensions.length === 0 ? 1 : global.dimensions.reduce((product, dimension) => product * dimension, 1);
+    if (value.length < expected) throw compilerFailure(`device global '${global.name}' expects at least ${expected} elements`);
+  }
   for (const texture of compiled.ir.textures) {
     const value = input.textures?.[texture.name];
     if (!value) throw compilerFailure(`missing texture input '${texture.name}'`);
@@ -3224,6 +3284,12 @@ function contextConstantDimensions(name: string, context: ThreadContext): readon
   return dimensions;
 }
 
+function contextDeviceGlobalDimensions(name: string, context: ThreadContext): readonly number[] {
+  const dimensions = context.deviceGlobalDimensions.get(name);
+  if (!dimensions) throw compilerFailure(`device global dimensions unavailable for '${name}'`);
+  return dimensions.length === 0 ? [1] : dimensions;
+}
+
 function validateTypedConstant(name: string, valueType: string, value: WgslTypedArray): void {
   const scalarType = cudaVectorScalarType(valueType as CudaLiteScalarType);
   if ((valueType === "int" || scalarType === "int") && !(value instanceof Int32Array)) {
@@ -3243,6 +3309,25 @@ function validateTypedConstant(name: string, valueType: string, value: WgslTyped
   }
   if (valueType === "complex64" && !(value instanceof Float32Array)) {
     throw compilerFailure(`constant '${name}' expects interleaved Float32Array`);
+  }
+}
+
+function validateTypedDeviceGlobal(name: string, valueType: string, value: WgslTypedArray): void {
+  const scalarType = cudaVectorScalarType(valueType as CudaLiteScalarType);
+  if ((valueType === "int" || scalarType === "int") && !(value instanceof Int32Array)) {
+    throw compilerFailure(`device global '${name}' expects Int32Array`);
+  }
+  if ((valueType === "uint" || scalarType === "uint" || valueType === "bool" || valueType === "voidptr") && !(value instanceof Uint32Array)) {
+    throw compilerFailure(`device global '${name}' expects Uint32Array`);
+  }
+  if ((valueType === "float" || valueType === "double" || valueType === "bf16" || scalarType === "float" || scalarType === "bf16") && !(value instanceof Float32Array)) {
+    throw compilerFailure(`device global '${name}' expects Float32Array`);
+  }
+  if ((valueType === "half" || scalarType === "half") && !isWgslFloat16Array(value)) {
+    throw compilerFailure(`device global '${name}' expects Float16Array`);
+  }
+  if (valueType === "complex64" && !(value instanceof Float32Array)) {
+    throw compilerFailure(`device global '${name}' expects interleaved Float32Array`);
   }
 }
 

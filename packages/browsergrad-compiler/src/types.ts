@@ -61,6 +61,7 @@ export interface CudaLiteModule {
   readonly kind: "module";
   readonly source: string;
   readonly constants: readonly CudaLiteGlobalConstant[];
+  readonly deviceGlobals: readonly CudaLiteDeviceGlobal[];
   readonly textures: readonly CudaLiteTexture2D[];
   readonly functions: readonly CudaLiteDeviceFunction[];
   readonly kernels: readonly CudaLiteKernel[];
@@ -69,6 +70,15 @@ export interface CudaLiteModule {
 
 export interface CudaLiteGlobalConstant {
   readonly kind: "constant";
+  readonly valueType: Exclude<CudaLiteScalarType, "void">;
+  readonly name: string;
+  readonly dimensions: readonly number[];
+  readonly init?: CudaLiteExpression;
+  readonly span: SourceSpan;
+}
+
+export interface CudaLiteDeviceGlobal {
+  readonly kind: "device-global";
   readonly valueType: Exclude<CudaLiteScalarType, "void">;
   readonly name: string;
   readonly dimensions: readonly number[];
@@ -376,18 +386,21 @@ export interface CudaLiteAnalyzeOptions {
 export interface CudaLiteAnalysis {
   readonly kernel: CudaLiteKernel;
   readonly constants: readonly CudaLiteGlobalConstant[];
+  readonly deviceGlobals: readonly CudaLiteDeviceGlobal[];
   readonly textures: readonly CudaLiteTexture2D[];
   readonly functions: readonly CudaLiteDeviceFunction[];
   readonly diagnostics: readonly CudaLiteDiagnostic[];
   readonly requiredFeatures: readonly string[];
   readonly atomicParams: readonly string[];
   readonly atomicShared: readonly string[];
+  readonly atomicDeviceGlobals: readonly string[];
 }
 
 export interface KernelIrModule {
   readonly name: string;
   readonly params: readonly CudaLiteParam[];
   readonly constants: readonly CudaLiteGlobalConstant[];
+  readonly deviceGlobals: readonly CudaLiteDeviceGlobal[];
   readonly textures: readonly CudaLiteTexture2D[];
   readonly functions: readonly CudaLiteDeviceFunction[];
   readonly body: readonly CudaLiteStatement[];
@@ -395,6 +408,7 @@ export interface KernelIrModule {
   readonly requiredFeatures: readonly string[];
   readonly atomicParams: readonly string[];
   readonly atomicShared: readonly string[];
+  readonly atomicDeviceGlobals: readonly string[];
   readonly workgroupSize: readonly [number, number, number];
 }
 
@@ -422,6 +436,7 @@ export interface CompiledKernelInput {
   readonly buffers: Readonly<Record<string, WgslTypedArray>>;
   readonly residentBuffers?: Readonly<Record<string, WgslResidentBuffer>>;
   readonly constants?: Readonly<Record<string, number | WgslTypedArray>>;
+  readonly deviceGlobals?: Readonly<Record<string, WgslTypedArray>>;
   readonly textures?: Readonly<Record<string, WgslTexture2DInput>>;
   readonly surfaces?: Readonly<Record<string, WgslTexture2DInput>>;
   readonly memoryPools?: Readonly<Record<string, CudaLiteMemoryPoolInput>>;

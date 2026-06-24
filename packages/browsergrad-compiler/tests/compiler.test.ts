@@ -389,6 +389,84 @@ __global__ void kernel(const float* x) {
     expect([...result.buffers.out as Float32Array]).toEqual([4, 3, 2, 1]);
   });
 
+  it("supports mutable __device__ scalar globals", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ static unsigned int numErrors = 2, errorFound = 0;
+
+__global__ void globals_scalar(uint* data, uint* out) {
+  if (data[0] != 7u && errorFound == 0u) {
+    numErrors += 1u;
+    errorFound = 1u;
+  }
+  out[0] = numErrors;
+  out[1] = errorFound;
+}`, { workgroupSize: [1, 1, 1] });
+
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { data: new Uint32Array([5]), out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.ast.deviceGlobals.map((global) => global.name)).toEqual(["numErrors", "errorFound"]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([3, 1]);
+    expect([...result.buffers.numErrors as Uint32Array]).toEqual([3]);
+    expect([...result.buffers.errorFound as Uint32Array]).toEqual([1]);
+    expect(compiled.wgsl).toContain("var<storage, read_write> numErrors: array<u32>;");
+    expect(compiled.wgsl).toContain("var<storage, read_write> errorFound: array<u32>;");
+    expect(compiled.wgsl).toContain("numErrors[0u] += 1");
+  });
+
+  it("supports __device__ arrays as storage-backed device pointer arguments", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float d_CallValue[4];
+
+__device__ void setCallValue(float* values, int index, float value) {
+  values[index] = value;
+}
+
+__global__ void globals_array(float* out) {
+  int i = threadIdx.x;
+  setCallValue(d_CallValue, i, (float)i + 0.5f);
+  out[i] = d_CallValue[i];
+}`, { workgroupSize: [4, 1, 1] });
+
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([0.5, 1.5, 2.5, 3.5]);
+    expect([...result.buffers.d_CallValue as Float32Array]).toEqual([0.5, 1.5, 2.5, 3.5]);
+    expect(compiled.wgsl).toContain("var<storage, read_write> d_CallValue: array<f32>;");
+    expect(compiled.wgsl).toContain("setCallValue(1u, 0u, i");
+    expect(compiled.wgsl).toContain("case 1u: { return d_CallValue[index]; }");
+    expect(compiled.wgsl).toContain("case 1u: { d_CallValue[index] = value; return; }");
+  });
+
+  it("supports atomic operations on __device__ globals", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int counter = 0;
+
+__global__ void globals_atomic(uint* out) {
+  int i = threadIdx.x;
+  out[i] = atomicAdd(&counter, 1u);
+}`, { workgroupSize: [4, 1, 1] });
+
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3]);
+    expect([...result.buffers.counter as Uint32Array]).toEqual([4]);
+    expect(compiled.ir.atomicDeviceGlobals).toEqual(["counter"]);
+    expect(compiled.wgsl).toContain("var<storage, read_write> counter: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("atomicAdd(&counter[0u], 1)");
+  });
+
   it("lowers multi-dimensional shared memory through helper pointer params", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ float readTile(float* ptr, int i) {

@@ -27,6 +27,7 @@ import {
   type CudaLiteDeviceFunction,
   type CudaLiteExpression,
   type CudaLiteFeatureOptions,
+  type CudaLiteDeviceGlobal,
   type CudaLiteGlobalConstant,
   type CudaLiteParam,
   type CudaLiteScalarType,
@@ -72,6 +73,12 @@ export function emitKernelIrWgsl(
     const element = storageElementType(param, ir);
     lines.push(
       `@group(0) @binding(${context.bindingFor(param.name)}) var<storage, ${access}> ${context.nameFor(param.name)}: array<${element}>;`,
+    );
+  }
+  for (const global of ir.deviceGlobals) {
+    const element = deviceGlobalStorageElementType(global, ir);
+    lines.push(
+      `@group(0) @binding(${context.bindingFor(global.name)}) var<storage, read_write> ${context.nameFor(global.name)}: array<${element}>;`,
     );
   }
   for (const surface of ir.params.filter(isSurfaceParam)) {
@@ -254,11 +261,14 @@ interface EmitContext {
   storagePointerIdFor(name: string): number | undefined;
   sharedPointerIdFor(name: string): number | undefined;
   constantPointerIdFor(name: string): number | undefined;
+  deviceGlobalPointerIdFor(name: string): number | undefined;
   bindingFor(name: string): number;
   paramFor(name: string): CudaLiteParam | undefined;
+  deviceGlobalFor(name: string): CudaLiteDeviceGlobal | undefined;
   isUniformScalar(name: string): boolean;
   uniformScalarTypeFor(name: string): CudaLiteScalarType | undefined;
   isAtomicShared(name: string): boolean;
+  isAtomicDeviceGlobal(name: string): boolean;
   pointerAliasFor(name: string): PointerAlias | undefined;
   localPointerHandleFor(name: string): CudaLiteVarDecl | undefined;
   poolPointerFor(name: string): PoolPointerAlias | undefined;
@@ -348,11 +358,12 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
   const storagePointerParams = ir.params.filter((param) => param.pointer && !isDevicePoolParam(param) && !isSurfaceParam(param) && !isTextureParam(param));
   const textures = textureBindings(ir);
   const storagePointerIds = new Map(storagePointerParams.map((param, index) => [param.name, index] as const));
+  const deviceGlobalPointerIds = new Map(ir.deviceGlobals.map((global, index) => [global.name, storagePointerParams.length + index] as const));
   const constantPointerArrays = ir.constants.filter((constant) => constant.dimensions.length > 0 && constant.init === undefined);
   const sharedPointerIds = new Map(ir.sharedDeclarations
-    .map((shared, index) => [shared.name, storagePointerParams.length + index] as const));
+    .map((shared, index) => [shared.name, storagePointerParams.length + ir.deviceGlobals.length + index] as const));
   const constantPointerIds = new Map(constantPointerArrays
-    .map((constant, index) => [constant.name, storagePointerParams.length + ir.sharedDeclarations.length + index] as const));
+    .map((constant, index) => [constant.name, storagePointerParams.length + ir.deviceGlobals.length + ir.sharedDeclarations.length + index] as const));
   for (const param of storagePointerParams) {
     const binding = bindings.length;
     bindingByName.set(param.name, binding);
@@ -361,6 +372,17 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
       name: param.name,
       valueType: wgslBindingType(param.valueType),
       access: param.constant ? "read" : "read_write",
+      binding,
+    });
+  }
+  for (const global of ir.deviceGlobals) {
+    const binding = bindings.length;
+    bindingByName.set(global.name, binding);
+    bindings.push({
+      kind: "storage",
+      name: global.name,
+      valueType: wgslBindingType(global.valueType),
+      access: "read_write",
       binding,
     });
   }
@@ -497,6 +519,9 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
     constantPointerIdFor(name) {
       return constantPointerIds.get(name);
     },
+    deviceGlobalPointerIdFor(name) {
+      return deviceGlobalPointerIds.get(name);
+    },
     bindingFor(name) {
       const binding = bindingByName.get(name);
       if (binding === undefined) throw featureError("missing-wgsl-binding", `missing WGSL binding for '${name}'`);
@@ -504,6 +529,9 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
     },
     paramFor(name) {
       return ir.params.find((param) => param.name === name);
+    },
+    deviceGlobalFor(name) {
+      return ir.deviceGlobals.find((global) => global.name === name);
     },
     isUniformScalar(name) {
       return uniformScalarNames.has(name);
@@ -513,6 +541,9 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
     },
     isAtomicShared(name) {
       return ir.atomicShared.includes(name);
+    },
+    isAtomicDeviceGlobal(name) {
+      return ir.atomicDeviceGlobals.includes(name);
     },
     pointerAliasFor(name) {
       return pointerAliases.get(name);
@@ -564,6 +595,7 @@ function collectWgslDeclaredNames(
     ir.name,
     ...ir.params.map((param) => param.name),
     ...ir.constants.map((constant) => constant.name),
+    ...ir.deviceGlobals.map((global) => global.name),
     ...ir.textures.map((texture) => texture.name),
     ...ir.sharedDeclarations.map((shared) => shared.name),
     ...ir.functions.flatMap((fn) => [
@@ -934,6 +966,7 @@ function emitDevicePointerHelpers(ir: KernelIrModule, context: EmitContext): str
 function devicePointerHelperTypes(ir: KernelIrModule): ReadonlySet<CudaLiteScalarType> {
   const types = new Set<CudaLiteScalarType>([
     ...ir.params.filter((param) => param.pointer && !isDevicePoolParam(param)).map((param) => param.valueType),
+    ...ir.deviceGlobals.map((global) => global.valueType),
     ...ir.functions.flatMap((fn) => fn.params.filter((param) => param.pointer).map((param) => param.valueType)),
     ...[...collectLocalPointerHandles(ir.body).values()].map((item) => item.valueType),
     ...ir.functions.flatMap((fn) => [...collectLocalPointerHandles(fn.body).values()].map((item) => item.valueType)),
@@ -960,6 +993,9 @@ function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, c
   const sharedDeclarations = ir.sharedDeclarations.filter((shared) =>
     isPointerHelperCompatibleStorage(type, shared.valueType)
   );
+  const deviceGlobals = ir.deviceGlobals.filter((global) =>
+    isPointerHelperCompatibleStorage(type, global.valueType)
+  );
   const constantArrays = ir.constants.filter((constant) =>
     constant.dimensions.length > 0 &&
     constant.init === undefined &&
@@ -979,6 +1015,11 @@ function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, c
     const id = context.sharedPointerIdFor(shared.name);
     if (id === undefined) continue;
     lines.push(`    case ${id}u: { return ${emitSharedPointerRead(shared, "index", ir, context, type)}; }`);
+  }
+  for (const global of deviceGlobals) {
+    const id = context.deviceGlobalPointerIdFor(global.name);
+    if (id === undefined) continue;
+    lines.push(`    case ${id}u: { return ${emitDeviceGlobalPointerRead(global, "index", ir, context, type)}; }`);
   }
   for (const constant of constantArrays) {
     const id = context.constantPointerIdFor(constant.name);
@@ -1000,6 +1041,11 @@ function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, c
     const id = context.sharedPointerIdFor(shared.name);
     if (id === undefined) continue;
     lines.push(`    case ${id}u: { ${emitSharedPointerWrite(shared, "index", "value", ir, context, type)}; return; }`);
+  }
+  for (const global of deviceGlobals) {
+    const id = context.deviceGlobalPointerIdFor(global.name);
+    if (id === undefined) continue;
+    lines.push(`    case ${id}u: { ${emitDeviceGlobalPointerWrite(global, "index", "value", ir, context, type)}; return; }`);
   }
   lines.push("    default: { return; }");
   lines.push("  }");
@@ -1080,6 +1126,15 @@ function emitDevicePointerAtomicAddHelper(
     const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, "index");
     lines.push(`    case ${id}u: { return ${emitAtomicAddAtAddress(type, "workgroup", `&${access}`, "value")}; }`);
   }
+  for (const global of ir.deviceGlobals.filter((global) =>
+    global.valueType === type &&
+    ir.atomicDeviceGlobals.includes(global.name)
+  )) {
+    const id = context.deviceGlobalPointerIdFor(global.name);
+    if (id === undefined) continue;
+    const access = `${context.nameFor(global.name)}[index]`;
+    lines.push(`    case ${id}u: { return ${emitAtomicAddAtAddress(type, "storage", `&${access}`, "value")}; }`);
+  }
   lines.push(`    default: { return ${zeroValue(type)}; }`);
   lines.push("  }");
   lines.push("}");
@@ -1116,6 +1171,15 @@ function emitDevicePointerAtomicExchangeHelper(
     const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, "index");
     lines.push(`    case ${id}u: { return ${emitAtomicExchangeAtAddress(type, `&${access}`, "value")}; }`);
   }
+  for (const global of ir.deviceGlobals.filter((global) =>
+    global.valueType === type &&
+    ir.atomicDeviceGlobals.includes(global.name)
+  )) {
+    const id = context.deviceGlobalPointerIdFor(global.name);
+    if (id === undefined) continue;
+    const access = `${context.nameFor(global.name)}[index]`;
+    lines.push(`    case ${id}u: { return ${emitAtomicExchangeAtAddress(type, `&${access}`, "value")}; }`);
+  }
   lines.push(`    default: { return ${zeroValue(type)}; }`);
   lines.push("  }");
   lines.push("}");
@@ -1150,6 +1214,15 @@ function emitDevicePointerAtomicCasHelper(
     const id = context.sharedPointerIdFor(shared.name);
     if (id === undefined) continue;
     const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, "index");
+    lines.push(`    case ${id}u: { return atomicCompareExchangeWeak(&${access}, compare, value).old_value; }`);
+  }
+  for (const global of ir.deviceGlobals.filter((global) =>
+    global.valueType === type &&
+    ir.atomicDeviceGlobals.includes(global.name)
+  )) {
+    const id = context.deviceGlobalPointerIdFor(global.name);
+    if (id === undefined) continue;
+    const access = `${context.nameFor(global.name)}[index]`;
     lines.push(`    case ${id}u: { return atomicCompareExchangeWeak(&${access}, compare, value).old_value; }`);
   }
   lines.push(`    default: { return ${zeroValue(type)}; }`);
@@ -1218,6 +1291,47 @@ function emitPointerStorageWrite(
   if (param.valueType === "bool") return `${access} = select(0u, 1u, ${value})`;
   if (!ir.atomicParams.includes(param.name)) return `${access} = ${value}`;
   if (param.valueType === "float") return `atomicStore(&${access}, bitcast<u32>(${value}))`;
+  return `atomicStore(&${access}, ${value})`;
+}
+
+function emitDeviceGlobalPointerRead(
+  global: CudaLiteDeviceGlobal,
+  index: string,
+  ir: KernelIrModule,
+  context: EmitContext,
+  viewType: CudaLiteScalarType = global.valueType,
+): string {
+  const name = context.nameFor(global.name);
+  if (isCudaVectorType(viewType)) {
+    return global.valueType === viewType
+      ? emitVectorStorageRead(name, viewType, index)
+      : emitVectorStorageReadAt(name, viewType, index);
+  }
+  const access = `${name}[${index}]`;
+  if (global.valueType === "bool") return `(${access} != 0u)`;
+  if (!ir.atomicDeviceGlobals.includes(global.name)) return access;
+  const loaded = `atomicLoad(&${access})`;
+  return global.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
+}
+
+function emitDeviceGlobalPointerWrite(
+  global: CudaLiteDeviceGlobal,
+  index: string,
+  value: string,
+  ir: KernelIrModule,
+  context: EmitContext,
+  viewType: CudaLiteScalarType = global.valueType,
+): string {
+  const name = context.nameFor(global.name);
+  if (isCudaVectorType(viewType)) {
+    return global.valueType === viewType
+      ? emitVectorStorageWrite(name, viewType, index, value)
+      : emitVectorStorageWriteAt(name, viewType, index, value);
+  }
+  const access = `${name}[${index}]`;
+  if (global.valueType === "bool") return `${access} = select(0u, 1u, ${value})`;
+  if (!ir.atomicDeviceGlobals.includes(global.name)) return `${access} = ${value}`;
+  if (global.valueType === "float") return `atomicStore(&${access}, bitcast<u32>(${value}))`;
   return `atomicStore(&${access}, ${value})`;
 }
 
@@ -1400,6 +1514,8 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
     }
     const sharedId = context.sharedPointerIdFor(expression.name);
     if (sharedId !== undefined) return { buffer: `${sharedId}u`, base: "0u" };
+    const globalId = context.deviceGlobalPointerIdFor(expression.name);
+    if (globalId !== undefined) return { buffer: `${globalId}u`, base: "0u" };
     const constantId = context.constantPointerIdFor(expression.name);
     if (constantId !== undefined) return { buffer: `${constantId}u`, base: "0u" };
     const alias = context.pointerAliasFor(expression.name);
@@ -1420,6 +1536,8 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
     return devicePointerArgumentParts(expression.expression, context);
   }
   if (expression.kind === "unary" && expression.operator === "&" && expression.argument.kind === "index") {
+    const global = deviceGlobalPointerArgumentParts(expression.argument, context);
+    if (global) return global;
     const shared = sharedPointerArgumentParts(expression.argument, context);
     if (shared) return shared;
     const target = devicePointerArgumentParts(expression.argument.target, context);
@@ -1432,6 +1550,8 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
   if (expression.kind === "unary" && expression.operator === "&" && expression.argument.kind === "identifier") {
     const sharedId = context.sharedPointerIdFor(expression.argument.name);
     if (sharedId !== undefined) return { buffer: `${sharedId}u`, base: "0u" };
+    const globalId = context.deviceGlobalPointerIdFor(expression.argument.name);
+    if (globalId !== undefined) return { buffer: `${globalId}u`, base: "0u" };
   }
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
     const target = devicePointerArgumentParts(expression.left, context);
@@ -1468,6 +1588,28 @@ function sharedPointerArgumentParts(expression: CudaLiteExpression, context: Emi
   return { buffer: `${id}u`, base: terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})` };
 }
 
+function deviceGlobalPointerArgumentParts(expression: CudaLiteExpression, context: EmitContext): DevicePointerParts | undefined {
+  const indexes: CudaLiteExpression[] = [];
+  let cursor = expression;
+  while (cursor.kind === "index") {
+    indexes.unshift(cursor.index);
+    cursor = cursor.target;
+  }
+  if (cursor.kind !== "identifier") return undefined;
+  const id = context.deviceGlobalPointerIdFor(cursor.name);
+  if (id === undefined) return undefined;
+  const global = context.deviceGlobalFor(cursor.name);
+  if (!global) return undefined;
+  if (indexes.length === 0) return { buffer: `${id}u`, base: "0u" };
+  const dimensions = global.dimensions.length === 0 ? [1] : global.dimensions;
+  const terms = indexes.map((index, axis) => {
+    const stride = dimensions.slice(axis + 1).reduce((product, dimension) => product * dimension, 1);
+    const value = `u32(${emitExpression(index, context)})`;
+    return stride === 1 ? value : `(${value} * ${stride}u)`;
+  });
+  return { buffer: `${id}u`, base: terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})` };
+}
+
 function emitTruthinessExpression(expression: CudaLiteExpression, context: EmitContext): string {
   const pointer = devicePointerArgumentParts(expression, context);
   if (pointer) return `(${pointer.buffer} != ${NULL_DEVICE_POINTER_BUFFER})`;
@@ -1495,6 +1637,8 @@ function devicePointerValueTypeForExpression(expression: CudaLiteExpression, con
     if (alias?.valueType) return alias.valueType;
     const param = context.devicePointerParamFor(root) ?? context.paramFor(root);
     if (param?.pointer) return param.valueType;
+    const global = context.deviceGlobalFor(root);
+    if (global) return global.valueType;
   }
   return "float";
 }
@@ -1634,8 +1778,14 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
         ? emitPointerIndex(root, expression.index, context)
         : emitExpression(expression.index, context);
       const param = root ? context.paramFor(root) : undefined;
+      const global = root ? context.deviceGlobalFor(root) : undefined;
       if (mode === "value" && param && isCudaVectorType(param.valueType) && expression.target.kind === "identifier") {
         return emitVectorStorageRead(context.nameFor(root!), param.valueType, index);
+      }
+      if (global && expression.target.kind === "identifier") {
+        return mode === "value"
+          ? emitDeviceGlobalPointerRead(global, index, context.ir, context)
+          : `${context.nameFor(root!)}[${index}]`;
       }
       const access = `${emitExpression(expression.target, context, "lvalue")}[${index}]`;
       if (mode === "value" && param?.valueType === "bool") return `(${access} != 0u)`;
@@ -2323,6 +2473,9 @@ function pointerComparisonTerm(expression: CudaLiteExpression, context: EmitCont
     const pool = poolPointerForAllocationCall(expression);
     if (pool) return { kind: "token", value: emitCall(expression, context), pointerish: true, nullish: false };
   }
+  if (expression.kind === "identifier" && context.deviceGlobalFor(expression.name)?.dimensions.length === 0) {
+    return undefined;
+  }
   const address = devicePointerArgumentParts(expression, context);
   if (address) {
     const symbol = expressionName(expression);
@@ -2349,6 +2502,11 @@ function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "va
     return shared?.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
   }
   if (context.isLocalName(name)) return context.nameFor(name);
+  const global = context.deviceGlobalFor(name);
+  if (global) {
+    if (mode === "lvalue") return `${context.nameFor(name)}[0u]`;
+    return emitDeviceGlobalPointerRead(global, "0u", context.ir, context);
+  }
   const param = context.paramFor(name);
   const uniformType = context.uniformScalarTypeFor(name);
   if ((param && !param.pointer && !isSurfaceParam(param)) || context.isUniformScalar(name)) {
@@ -2430,6 +2588,7 @@ function expressionValueTypeForEmit(expression: CudaLiteExpression, context: Emi
   if (expression.kind === "identifier") {
     return context.localValueTypeFor(expression.name) ??
       context.paramFor(expression.name)?.valueType ??
+      context.deviceGlobalFor(expression.name)?.valueType ??
       context.uniformScalarTypeFor(expression.name);
   }
   if (expression.kind === "cast") return expression.valueType;
@@ -3203,6 +3362,15 @@ function atomicStorageInfo(
       addressSpace: "workgroup",
     };
   }
+  if (context.isAtomicDeviceGlobal(rootName)) {
+    const global = context.deviceGlobalFor(rootName);
+    if (!global) return undefined;
+    return {
+      valueType: global.valueType,
+      storageScalar: global.valueType === "int" ? "i32" : "u32",
+      addressSpace: "storage",
+    };
+  }
   return undefined;
 }
 
@@ -3278,6 +3446,7 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   }
   const root = rootIdentifier(expression.left);
   const param = root ? context.paramFor(root) : undefined;
+  const global = root ? context.deviceGlobalFor(root) : undefined;
   if (root && context.isAtomicShared(root)) {
     const value = emitExpression(expression.right, context);
     const target = emitExpression(expression.left, context, "lvalue");
@@ -3304,9 +3473,22 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
       if (expression.operator === "+=") return `atomicAdd(&${target}, ${value})`;
     }
   }
+  if (global && context.ir.atomicDeviceGlobals.includes(global.name)) {
+    const value = emitExpression(expression.right, context);
+    const target = emitExpression(expression.left, context, "lvalue");
+    if (global.valueType === "float") {
+      if (expression.operator === "=") return `atomicStore(&${target}, bitcast<u32>(${value}))`;
+      if (expression.operator === "+=") return `bg_atomicAdd_f32(&${target}, ${value})`;
+      if (expression.operator === "-=") return `bg_atomicSub_f32(&${target}, ${value})`;
+    } else {
+      if (expression.operator === "=") return `atomicStore(&${target}, ${value})`;
+      if (expression.operator === "+=") return `atomicAdd(&${target}, ${value})`;
+      if (expression.operator === "-=") return `atomicSub(&${target}, ${value})`;
+    }
+  }
   const left = emitExpression(expression.left, context, "lvalue");
   const right = emitExpression(expression.right, context);
-  if (param?.valueType === "bool" && expression.left.kind === "index") {
+  if ((param?.valueType === "bool" || global?.valueType === "bool") && (expression.left.kind === "index" || expression.left.kind === "identifier")) {
     if (expression.operator === "=") return `${left} = select(0u, 1u, ${right})`;
   }
   if (expression.operator === "<<=") return `${left} = (${left} << ${right})`;
@@ -4163,8 +4345,16 @@ function storageElementType(param: CudaLiteParam, ir: KernelIrModule): string {
   return `atomic<${wgslScalar(param.valueType)}>`;
 }
 
+function deviceGlobalStorageElementType(global: CudaLiteDeviceGlobal, ir: KernelIrModule): string {
+  if (isCudaVectorType(global.valueType)) return wgslScalar(cudaVectorScalarType(global.valueType) ?? "float");
+  if (global.valueType === "bool") return "u32";
+  if (!ir.atomicDeviceGlobals.includes(global.name)) return wgslScalar(global.valueType);
+  if (global.valueType === "float") return "atomic<u32>";
+  return `atomic<${wgslScalar(global.valueType)}>`;
+}
+
 function usesFloatAtomicAdd(ir: KernelIrModule): boolean {
-  return ir.params.some((param) => param.pointer && param.valueType === "float" && ir.atomicParams.includes(param.name)) &&
+  return hasAtomicStorageFloat(ir) &&
     (statementsUseCall(ir.body, new Set(["atomicAdd", "atomicAdd_system"])) ||
       ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicAdd", "atomicAdd_system"]))));
 }
@@ -4176,7 +4366,7 @@ function usesSharedFloatAtomicAdd(ir: KernelIrModule): boolean {
 }
 
 function usesFloatAtomicSub(ir: KernelIrModule): boolean {
-  return ir.params.some((param) => param.pointer && param.valueType === "float" && ir.atomicParams.includes(param.name)) &&
+  return hasAtomicStorageFloat(ir) &&
     (statementsUseCall(ir.body, new Set(["atomicSub"])) ||
       ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicSub"]))));
 }
@@ -4188,7 +4378,7 @@ function usesSharedFloatAtomicSub(ir: KernelIrModule): boolean {
 }
 
 function usesFloatAtomicMin(ir: KernelIrModule): boolean {
-  return ir.params.some((param) => param.pointer && param.valueType === "float" && ir.atomicParams.includes(param.name)) &&
+  return hasAtomicStorageFloat(ir) &&
     (statementsUseCall(ir.body, new Set(["atomicMin", "atomicMin_system"])) ||
       ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMin", "atomicMin_system"]))));
 }
@@ -4200,7 +4390,7 @@ function usesSharedFloatAtomicMin(ir: KernelIrModule): boolean {
 }
 
 function usesFloatAtomicMax(ir: KernelIrModule): boolean {
-  return ir.params.some((param) => param.pointer && param.valueType === "float" && ir.atomicParams.includes(param.name)) &&
+  return hasAtomicStorageFloat(ir) &&
     (statementsUseCall(ir.body, new Set(["atomicMax", "atomicMax_system", "atomicMaxFloat"])) ||
       ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicMax", "atomicMax_system", "atomicMaxFloat"]))));
 }
@@ -4213,6 +4403,11 @@ function usesSharedFloatAtomicMax(ir: KernelIrModule): boolean {
 
 function hasAtomicSharedFloat(ir: KernelIrModule): boolean {
   return ir.sharedDeclarations.some((shared) => shared.valueType === "float" && ir.atomicShared.includes(shared.name));
+}
+
+function hasAtomicStorageFloat(ir: KernelIrModule): boolean {
+  return ir.params.some((param) => param.pointer && param.valueType === "float" && ir.atomicParams.includes(param.name)) ||
+    ir.deviceGlobals.some((global) => global.valueType === "float" && ir.atomicDeviceGlobals.includes(global.name));
 }
 
 function usesAtomicIncDec(ir: KernelIrModule): boolean {
