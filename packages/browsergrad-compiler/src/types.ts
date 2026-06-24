@@ -120,6 +120,27 @@ export interface CudaLiteParam {
   readonly span: SourceSpan;
 }
 
+export interface CudaLiteStaticIntegerMetadata {
+  readonly value?: number;
+  readonly span: SourceSpan;
+}
+
+export interface CudaLiteMatrixTileMetadata {
+  readonly kind: "matrix-tile";
+  readonly source: "wmma-fragment";
+  readonly role: string;
+  readonly roleSpan: SourceSpan;
+  readonly m: CudaLiteStaticIntegerMetadata;
+  readonly n: CudaLiteStaticIntegerMetadata;
+  readonly k: CudaLiteStaticIntegerMetadata;
+  readonly valueTypeName: string;
+  readonly valueTypeSpan: SourceSpan;
+  readonly valueType?: Exclude<CudaLiteScalarType, "void">;
+  readonly layout?: string;
+  readonly layoutSpan?: SourceSpan;
+  readonly span: SourceSpan;
+}
+
 export type CudaLiteStatement =
   | CudaLiteVarDecl
   | CudaLiteBlockStatement
@@ -143,6 +164,7 @@ export interface CudaLiteVarDecl {
   readonly pointer: boolean;
   readonly name: string;
   readonly dimensions: readonly number[];
+  readonly matrixTile?: CudaLiteMatrixTileMetadata;
   readonly dynamicShared?: boolean;
   readonly init?: CudaLiteExpression;
   readonly span: SourceSpan;

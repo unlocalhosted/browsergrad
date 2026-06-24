@@ -193,7 +193,7 @@ Local corpus audits on 2026-06-24:
   cache-load assignment expansion into lane-wise stores, plus custom
   CUDA-vector `cg::reduce` lowering through scalar subgroup shuffle-XOR loops,
   with `0` hard gaps.
-- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `264` direct
+- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `273` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, local header context, and
   simple C++ alias / constexpr intake plus `FLOAT4(x)`-style typed storage
@@ -201,8 +201,9 @@ Local corpus audits on 2026-06-24:
   template specialization plus `half2` f16 vector storage and braced vector
   initializers, static shared declarations, flexible device helper attributes,
   `half2` arithmetic intrinsics, builtin infinity lowering, and standalone C
-  block scopes plus CUDA shuffle/fence/conversion intrinsics, and generic warp
-  reduction aliases plus CUDA half conversion aliases, object-macro device
+  block scopes plus CUDA shuffle/fence/conversion intrinsics, generic warp
+  reduction aliases, CUDA half conversion aliases, object-macro device
+  helpers, and scalarized WMMA fragment/load/mma/store lowering,
   helper discovery, POSIX/C math constants, call-shaped helper intake, and
   define-backed device-helper template defaults, with semantic `cp.async`
   source normalization, synchronous pointer-form lowering, bounded dependent
@@ -264,9 +265,9 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
-- The current live aggregate gate is `943/1038` compile/codegen-runnable across the four
+- The current live aggregate gate is `952/1038` compile/codegen-runnable across the four
   pinned corpora: CUDA-120 `240/240`, `cuda-samples` `291/357`, `llm.c`
-  `148/148`, and LeetCUDA `264/293`.
+  `148/148`, and LeetCUDA `273/293`.
 
 ## Grill Decisions
 
@@ -417,7 +418,7 @@ Acceptance criteria for the first slice:
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions,
   `>=148` compile/codegen-runnable, and `0` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
-  `>=264` compile/codegen-runnable, and `<=29` hard gaps.
+  `>=273` compile/codegen-runnable, and `<=20` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
   unit tests.
 - Intrinsic-ledger expansion improves coverage through generic CUDA math and
@@ -517,7 +518,8 @@ Acceptance criteria for the first slice:
 ## Out of Scope
 
 - Full CUDA C++ compatibility.
-- Full CUTLASS/CuTe, `wmma`, WGMMA, tensor-core, or cooperative matrix support.
+- Full CUTLASS/CuTe, WGMMA, tensor-core performance, or lane-accurate NVIDIA
+  cooperative-matrix fragment layout.
 - Running PyTorch C++ extension host binding code in the browser.
 - Native CUDA performance parity.
 - Repo-specific transformations keyed on LeetCUDA, `llm.c`, or NVIDIA samples.

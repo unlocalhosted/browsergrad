@@ -80,8 +80,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   compile/codegen-runnable, and `<=65` hard gaps;
   `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=148`
   compile/codegen-runnable, and `0` hard gaps;
-  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=264`
-  compile/codegen-runnable, and `<=29` hard gaps. The aggregate gate also verifies
+  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=273`
+  compile/codegen-runnable, and `<=20` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
 - Corpus audits now emit `executionTierCounts` so platform code can distinguish
   compile/codegen coverage from fixture-backed browser execution and

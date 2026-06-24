@@ -20,9 +20,11 @@ import {
   type CudaLiteInitializerExpression,
   type CudaLiteKernel,
   type CudaLiteKernelLaunchStatement,
+  type CudaLiteMatrixTileMetadata,
   type CudaLiteModule,
   type CudaLiteParam,
   type CudaLiteScalarType,
+  type CudaLiteStaticIntegerMetadata,
   type CudaLiteStatement,
   type CudaLiteTexture2D,
   type CudaLiteUnaryExpression,
@@ -717,6 +719,99 @@ class Parser {
     };
   }
 
+  private parseWmmaFragmentType(): CudaLiteMatrixTileMetadata {
+    const start = this.peek().span;
+    this.consumeWmmaFragmentTypeName();
+    this.expect("<");
+    const role = this.parseQualifiedName("WMMA fragment role");
+    this.expect(",");
+    const m = this.parseStaticIntegerTemplateArgument();
+    this.expect(",");
+    const n = this.parseStaticIntegerTemplateArgument();
+    this.expect(",");
+    const k = this.parseStaticIntegerTemplateArgument();
+    this.expect(",");
+    const valueType = this.parseWmmaValueType();
+    let layout: { readonly name: string; readonly span: SourceSpan } | undefined;
+    if (this.consumeIf(",")) layout = this.parseQualifiedName("WMMA fragment layout");
+    const end = this.expect(">").span;
+    return {
+      kind: "matrix-tile",
+      source: "wmma-fragment",
+      role: role.name,
+      roleSpan: role.span,
+      m,
+      n,
+      k,
+      valueTypeName: valueType.name,
+      valueTypeSpan: valueType.span,
+      ...(valueType.valueType === undefined ? {} : { valueType: valueType.valueType }),
+      ...(layout === undefined ? {} : { layout: layout.name, layoutSpan: layout.span }),
+      span: mergeSpans(start, end),
+    };
+  }
+
+  private consumeWmmaFragmentTypeName(): void {
+    if (this.match("nvcuda")) {
+      this.expect("nvcuda");
+      this.expect("::");
+    }
+    this.expect("wmma");
+    this.expect("::");
+    this.expect("fragment");
+  }
+
+  private parseStaticIntegerTemplateArgument(): CudaLiteStaticIntegerMetadata {
+    this.templateArgumentDepth++;
+    let expression: CudaLiteExpression;
+    try {
+      expression = this.parseExpression();
+    } finally {
+      this.templateArgumentDepth--;
+    }
+    const value = this.evaluateIntegerConstantExpression(expression);
+    return {
+      ...(value === undefined ? {} : { value }),
+      span: expression.span,
+    };
+  }
+
+  private parseWmmaValueType(): {
+    readonly name: string;
+    readonly valueType?: Exclude<CudaLiteScalarType, "void">;
+    readonly span: SourceSpan;
+  } {
+    const startIndex = this.index;
+    const start = this.peek().span;
+    try {
+      const valueType = this.parseType();
+      const end = this.previous().span;
+      return {
+        name: this.source.slice(start.start, end.end).trim() || this.tokens.slice(startIndex, this.index).map((token) => token.value).join(""),
+        valueType,
+        span: mergeSpans(start, end),
+      };
+    } catch {
+      this.index = startIndex;
+      return this.parseQualifiedName("WMMA fragment value type");
+    }
+  }
+
+  private parseQualifiedName(label: string): { readonly name: string; readonly span: SourceSpan } {
+    const start = this.expectIdentifier(label);
+    let name = start.value;
+    let end = start.span;
+    while (this.consumeIf("::")) {
+      const part = this.expectIdentifier(label);
+      name += `::${part.value}`;
+      end = part.span;
+    }
+    return {
+      name,
+      span: mergeSpans(start.span, end),
+    };
+  }
+
   private parseKernelLaunch(): CudaLiteKernelLaunchStatement {
     const name = this.expectIdentifier("kernel launch callee");
     this.expect("<<");
@@ -831,7 +926,10 @@ class Parser {
     const constexpr = this.consumeIf("constexpr") !== undefined;
     const constQualified = this.consumeCvQualifiers();
     this.consumeCudaDeclAttributes();
-    const valueType = this.parseType();
+    const matrixTile = this.startsWmmaFragmentType() || this.match("wmma") || this.match("nvcuda")
+      ? this.parseWmmaFragmentType()
+      : undefined;
+    const valueType = matrixTile?.valueType ?? this.parseType();
     this.consumeCvQualifiers();
     const declarations: CudaLiteVarDecl[] = [];
     do {
@@ -864,6 +962,7 @@ class Parser {
         pointer,
         name: name.value,
         dimensions,
+        ...(matrixTile === undefined ? {} : { matrixTile }),
         ...(storageInfo.dynamicShared ? { dynamicShared: true } : {}),
         ...(init === undefined ? {} : { init }),
         span: mergeSpans(start, init?.span ?? name.span),
@@ -1256,6 +1355,19 @@ class Parser {
     return type === "thread_block" || type === "thread_group" || type === "grid_group" || type === "thread_block_tile" || type === "coalesced_group";
   }
 
+  private startsWmmaFragmentType(index = this.index): boolean {
+    if (
+      this.tokens[index]?.value === "wmma" &&
+      this.tokens[index + 1]?.value === "::" &&
+      this.tokens[index + 2]?.value === "fragment"
+    ) return true;
+    return this.tokens[index]?.value === "nvcuda" &&
+      this.tokens[index + 1]?.value === "::" &&
+      this.tokens[index + 2]?.value === "wmma" &&
+      this.tokens[index + 3]?.value === "::" &&
+      this.tokens[index + 4]?.value === "fragment";
+  }
+
   private expectTextureDimension(): Token {
     if (this.peek().kind === "number") {
       const token = this.advance();
@@ -1336,17 +1448,22 @@ class Parser {
     if (attrEndIndex !== this.index) {
       const value = this.tokens[attrEndIndex]?.value;
       const nextValue = this.tokens[attrEndIndex + 1]?.value;
-      return TYPE_START_KEYWORDS.has(value ?? "") ||
-        (value === "static" && TYPE_START_KEYWORDS.has(nextValue ?? "")) ||
-        (this.isCvQualifier(value) && TYPE_START_KEYWORDS.has(nextValue ?? ""));
+      return this.startsWmmaFragmentType(attrEndIndex) ||
+        TYPE_START_KEYWORDS.has(value ?? "") ||
+        (value === "static" && (this.startsWmmaFragmentType(attrEndIndex + 1) || TYPE_START_KEYWORDS.has(nextValue ?? ""))) ||
+        (this.isCvQualifier(value) && (this.startsWmmaFragmentType(attrEndIndex + 1) || TYPE_START_KEYWORDS.has(nextValue ?? "")));
     }
     if (this.match("static")) return this.tokens[this.index + 1]?.value === "__shared__" ||
       this.tokens[this.index + 1]?.value === "constexpr" ||
+      this.startsWmmaFragmentType(this.index + 1) ||
       TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "");
-    if (this.match("constexpr")) return TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "") ||
-      (this.isCvQualifier(this.tokens[this.index + 1]?.value) && TYPE_START_KEYWORDS.has(this.tokens[this.index + 2]?.value ?? ""));
-    if (this.isCvQualifier(this.peek().value)) return TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "");
-    return TYPE_START_KEYWORDS.has(this.peek().value);
+    if (this.match("constexpr")) return this.startsWmmaFragmentType(this.index + 1) ||
+      TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "") ||
+      (this.isCvQualifier(this.tokens[this.index + 1]?.value) &&
+        (this.startsWmmaFragmentType(this.index + 2) || TYPE_START_KEYWORDS.has(this.tokens[this.index + 2]?.value ?? "")));
+    if (this.isCvQualifier(this.peek().value)) return this.startsWmmaFragmentType(this.index + 1) ||
+      TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "");
+    return this.startsWmmaFragmentType() || TYPE_START_KEYWORDS.has(this.peek().value);
   }
 
   private consumeIntegerWidthSuffix(): void {
@@ -1387,6 +1504,22 @@ class Parser {
     }
     if (value === "long") return this.tokens[index + 1]?.value === "long" ? index + 2 : index + 1;
     if (value === "short") return this.tokens[index + 1]?.value === "int" ? index + 2 : index + 1;
+    if (this.startsWmmaFragmentType(index)) {
+      let cursor = index + (value === "nvcuda" ? 5 : 3);
+      if (this.tokens[cursor]?.value !== "<") return undefined;
+      let depth = 0;
+      while (cursor < this.tokens.length) {
+        const token = this.tokens[cursor]?.value;
+        if (token === "<") depth++;
+        else if (token === ">") depth--;
+        else if (token === ">>") depth -= 2;
+        else if (token === "<eof>" || token === ";") return undefined;
+        cursor++;
+        if (depth === 0) return cursor;
+        if (depth < 0) return undefined;
+      }
+      return undefined;
+    }
     if (value !== undefined && TYPE_START_KEYWORDS.has(value)) return index + 1;
     return undefined;
   }

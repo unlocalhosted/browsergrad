@@ -10,6 +10,7 @@ import {
   type CudaLiteExpression,
   type CudaLiteGlobalConstant,
   type CudaLiteKernel,
+  type CudaLiteMatrixTileMetadata,
   type CudaLiteModule,
   type CudaLiteParam,
   type CudaLiteScalarType,
@@ -22,6 +23,14 @@ import {
 } from "./types.js";
 import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
+import {
+  type WmmaBuiltin,
+  matrixTileReference,
+  normalizeMatrixTileLayout,
+  normalizeMatrixTileRole,
+  resolveMatrixTileSpec,
+  wmmaBuiltinName,
+} from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { classifyInlineAsm, inlineAsmSupportedList } from "./ptx_tile_ops.js";
 import { sizeofCudaType } from "./type_layout.js";
@@ -36,6 +45,7 @@ import {
 
 const DEFAULT_WORKGROUP_SIZE: readonly [number, number, number] = [256, 1, 1];
 const BUILTIN_VECTORS = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]);
+const WMMA_FRAGMENT_VALUE_TYPES = new Set(["float", "half"]);
 const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ...CUDA_INTRINSICS.map((intrinsic) => [intrinsic.name, intrinsic.arity] as const),
   ["__syncthreads", [0, 0]],
@@ -72,6 +82,14 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["fill_1D_regs", [2, 2]],
   ["fill_2D_regs", [2, 2]],
   ["fill_3D_regs", [2, 2]],
+  ["wmma::fill_fragment", [2, 2]],
+  ["nvcuda::wmma::fill_fragment", [2, 2]],
+  ["wmma::load_matrix_sync", [3, 4]],
+  ["nvcuda::wmma::load_matrix_sync", [3, 4]],
+  ["wmma::mma_sync", [4, 4]],
+  ["nvcuda::wmma::mma_sync", [4, 4]],
+  ["wmma::store_matrix_sync", [4, 4]],
+  ["nvcuda::wmma::store_matrix_sync", [4, 4]],
   ["bg_subgroup_add", [1, 1]],
   ["atomicAdd", [2, 2]],
   ["atomicAdd_system", [2, 2]],
@@ -168,6 +186,7 @@ interface SymbolInfo {
   readonly constant?: boolean;
   readonly pointerRoot?: string;
   readonly dimensions?: readonly number[];
+  readonly matrixTile?: CudaLiteMatrixTileMetadata;
   readonly span: SourceSpan;
 }
 
@@ -177,10 +196,11 @@ interface Scope {
 }
 
 interface ExpressionInfo {
-  readonly kind: "scalar" | "complex" | "pool-pointer" | "pointer" | "array" | "texture" | "surface" | "vector" | "function" | "address" | "string" | "unknown";
+  readonly kind: "scalar" | "complex" | "pool-pointer" | "pointer" | "array" | "texture" | "surface" | "vector" | "function" | "address" | "string" | "matrix-tile" | "unknown";
   readonly valueType?: ValueType | undefined;
   readonly dimensions?: readonly number[] | undefined;
   readonly symbol?: SymbolInfo | undefined;
+  readonly matrixTile?: CudaLiteMatrixTileMetadata | undefined;
 }
 
 export function analyzeCudaLite(
@@ -242,9 +262,11 @@ export function analyzeCudaLite(
       pointer: statement.pointer,
       ...(pointerRoot ? { pointerRoot } : {}),
       dimensions,
+      ...(statement.matrixTile === undefined ? {} : { matrixTile: statement.matrixTile }),
       span: statement.span,
     });
-    validateF64Type(statement.valueType, statement.span, diagnostics, options);
+    if (statement.matrixTile) validateMatrixTileDeclaration(statement, requiredFeatures, diagnostics);
+    else validateF64Type(statement.valueType, statement.span, diagnostics, options);
   };
 
   const walkExpression = (expression: CudaLiteExpression, scope: Scope): ExpressionInfo => {
@@ -278,11 +300,11 @@ export function analyzeCudaLite(
         }
         case "var":
           declareVar(statement, scope, names);
-          if (requiresShaderF16(statement.valueType)) requiredFeatures.add("shader-f16");
-          if (statement.pointer && !isSupportedLocalPointer(statement, scope)) {
+          if (!statement.matrixTile && requiresShaderF16(statement.valueType)) requiredFeatures.add("shader-f16");
+          if (!statement.matrixTile && statement.pointer && !isSupportedLocalPointer(statement, scope)) {
             diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.span));
           }
-          if (statement.storage === "local" && statement.dimensions.length > 0 && statement.init) {
+          if (!statement.matrixTile && statement.storage === "local" && statement.dimensions.length > 0 && statement.init) {
             validateArrayInitializer(statement, scope, diagnostics, walkExpression);
           }
           if (statement.dynamicShared && !resolvedSharedDimensions(statement, options)) {
@@ -293,7 +315,7 @@ export function analyzeCudaLite(
               diagnostics.push(error("invalid-array-dimension", "array dimensions must be positive integer literals", statement.span));
             }
           }
-          if (statement.init && statement.dimensions.length === 0) {
+          if (!statement.matrixTile && statement.init && statement.dimensions.length === 0) {
             if (statement.pointer) validatePointerInitializerExpression(statement.init, scope, diagnostics, walkExpression);
             else walkExpression(statement.init, scope);
           }
@@ -371,14 +393,14 @@ export function analyzeCudaLite(
           const loopNames = new Set<string>();
           if (statement.init?.kind === "var") {
             declareVar(statement.init, loopScope, loopNames);
-            if (requiresShaderF16(statement.init.valueType)) requiredFeatures.add("shader-f16");
-            if (statement.init.pointer && !isSupportedLocalPointer(statement.init, loopScope)) {
+            if (!statement.init.matrixTile && requiresShaderF16(statement.init.valueType)) requiredFeatures.add("shader-f16");
+            if (!statement.init.matrixTile && statement.init.pointer && !isSupportedLocalPointer(statement.init, loopScope)) {
               diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.init.span));
             }
-            if (statement.init.dimensions.length > 0 && statement.init.init) {
+            if (!statement.init.matrixTile && statement.init.dimensions.length > 0 && statement.init.init) {
               validateArrayInitializer(statement.init, loopScope, diagnostics, walkExpression);
             }
-            if (statement.init.init && statement.init.dimensions.length === 0) {
+            if (!statement.init.matrixTile && statement.init.init && statement.init.dimensions.length === 0) {
               if (statement.init.pointer) validatePointerInitializerExpression(statement.init.init, loopScope, diagnostics, walkExpression);
               else walkExpression(statement.init.init, loopScope);
             }
@@ -572,6 +594,212 @@ function validateF64Type(
     return;
   }
   diagnostics.push(error("unsupported-f64", "double requires f64Mode: \"f32\" compatibility lowering; true f64 is not available in WebGPU", span));
+}
+
+function validateMatrixTileDeclaration(
+  statement: CudaLiteVarDecl,
+  requiredFeatures: Set<string>,
+  diagnostics: CudaLiteDiagnostic[],
+): void {
+  const tile = statement.matrixTile;
+  if (!tile) return;
+  if (statement.storage !== "local") {
+    diagnostics.push(error("unsupported-wmma-fragment-storage", "WMMA fragments are supported only as local variables in CUDA-lite metadata", statement.span));
+  }
+  if (statement.pointer) {
+    diagnostics.push(error("unsupported-wmma-fragment-pointer", "WMMA fragment pointer declarations are not supported in CUDA-lite", statement.span));
+  }
+  if (statement.init) {
+    diagnostics.push(error("unsupported-wmma-fragment-init", "WMMA fragment initializers are not supported in CUDA-lite", statement.init.span));
+  }
+  validateMatrixTileExtent(statement.name, "M", tile.m, diagnostics);
+  validateMatrixTileExtent(statement.name, "N", tile.n, diagnostics);
+  validateMatrixTileExtent(statement.name, "K", tile.k, diagnostics);
+
+  const role = normalizeMatrixTileRole(tile.role);
+  if (role === undefined) {
+    diagnostics.push(error("unsupported-wmma-fragment-role", `WMMA fragment '${statement.name}' role '${tile.role}' is unsupported; supported roles: accumulator, matrix_a, matrix_b`, tile.roleSpan));
+  }
+
+  const layout = normalizeMatrixTileLayout(tile.layout);
+  if (role === "matrix_a" || role === "matrix_b") {
+    if (layout === undefined) {
+      diagnostics.push(error("missing-wmma-fragment-layout", `WMMA fragment '${statement.name}' role '${role}' requires row_major or col_major layout`, tile.span));
+    } else if (layout !== "row_major" && layout !== "col_major") {
+      diagnostics.push(error("unsupported-wmma-fragment-layout", `WMMA fragment '${statement.name}' layout '${tile.layout}' is unsupported; supported layouts: row_major, col_major`, tile.layoutSpan ?? tile.span));
+    }
+  } else if (role === "accumulator" && layout !== undefined) {
+    diagnostics.push(error("unsupported-wmma-fragment-layout", `WMMA accumulator fragment '${statement.name}' must not declare row/col layout`, tile.layoutSpan ?? tile.span));
+  } else if (layout !== undefined && layout !== "row_major" && layout !== "col_major") {
+    diagnostics.push(error("unsupported-wmma-fragment-layout", `WMMA fragment '${statement.name}' layout '${tile.layout}' is unsupported; supported layouts: row_major, col_major`, tile.layoutSpan ?? tile.span));
+  }
+
+  if (tile.valueType === "half") requiredFeatures.add("shader-f16");
+  if (tile.valueType === undefined || !WMMA_FRAGMENT_VALUE_TYPES.has(tile.valueType)) {
+    diagnostics.push(error("unsupported-wmma-fragment-value-type", `WMMA fragment '${statement.name}' value type '${tile.valueTypeName}' is unsupported; supported value types: float, half`, tile.valueTypeSpan));
+  }
+}
+
+function validateMatrixTileExtent(
+  name: string,
+  label: "M" | "N" | "K",
+  extent: CudaLiteMatrixTileMetadata["m"],
+  diagnostics: CudaLiteDiagnostic[],
+): void {
+  if (extent.value === undefined || !Number.isInteger(extent.value) || extent.value <= 0) {
+    diagnostics.push(error("invalid-wmma-fragment-shape", `WMMA fragment '${name}' ${label} must be a positive integer constant expression`, extent.span));
+  }
+}
+
+interface MatrixTileOperandInfo {
+  readonly symbol: SymbolInfo;
+  readonly spec: NonNullable<ReturnType<typeof resolveMatrixTileSpec>>;
+}
+
+function validateWmmaBuiltin(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  builtin: WmmaBuiltin,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): ExpressionInfo {
+  switch (builtin) {
+    case "fill_fragment": {
+      const fragment = validateWmmaFragmentOperand(expression.args[0], scope, diagnostics, walkExpression, "wmma::fill_fragment");
+      const value = expression.args[1];
+      if (value) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
+      return { kind: "scalar", valueType: fragment?.spec.valueType };
+    }
+    case "load_matrix_sync": {
+      const fragment = validateWmmaFragmentOperand(expression.args[0], scope, diagnostics, walkExpression, "wmma::load_matrix_sync");
+      if (fragment && fragment.spec.role !== "matrix_a" && fragment.spec.role !== "matrix_b" && fragment.spec.role !== "accumulator") {
+        diagnostics.push(error("unsupported-wmma-fragment-role", "wmma::load_matrix_sync expects a matrix or accumulator fragment", expression.args[0]?.span ?? expression.span));
+      }
+      validatePointerLikeOperand(expression.args[1], scope, diagnostics, walkExpression, "wmma::load_matrix_sync source");
+      validateOptionalScalarOperand(expression.args[2], scope, diagnostics, walkExpression);
+      validateOptionalWmmaLayoutOperand(expression.args[3], diagnostics, "load");
+      return { kind: "scalar", valueType: fragment?.spec.valueType };
+    }
+    case "mma_sync": {
+      const dst = validateWmmaFragmentOperand(expression.args[0], scope, diagnostics, walkExpression, "wmma::mma_sync destination");
+      const a = validateWmmaFragmentOperand(expression.args[1], scope, diagnostics, walkExpression, "wmma::mma_sync A");
+      const b = validateWmmaFragmentOperand(expression.args[2], scope, diagnostics, walkExpression, "wmma::mma_sync B");
+      const c = validateWmmaFragmentOperand(expression.args[3], scope, diagnostics, walkExpression, "wmma::mma_sync accumulator");
+      if (dst && dst.spec.role !== "accumulator") {
+        diagnostics.push(error("unsupported-wmma-fragment-role", "wmma::mma_sync destination must be an accumulator fragment", expression.args[0]?.span ?? expression.span));
+      }
+      if (a && a.spec.role !== "matrix_a") {
+        diagnostics.push(error("unsupported-wmma-fragment-role", "wmma::mma_sync A operand must be a matrix_a fragment", expression.args[1]?.span ?? expression.span));
+      }
+      if (b && b.spec.role !== "matrix_b") {
+        diagnostics.push(error("unsupported-wmma-fragment-role", "wmma::mma_sync B operand must be a matrix_b fragment", expression.args[2]?.span ?? expression.span));
+      }
+      if (c && c.spec.role !== "accumulator") {
+        diagnostics.push(error("unsupported-wmma-fragment-role", "wmma::mma_sync C operand must be an accumulator fragment", expression.args[3]?.span ?? expression.span));
+      }
+      validateWmmaMmaShape(dst, a, b, c, expression.span, diagnostics);
+      return { kind: "scalar", valueType: dst?.spec.valueType };
+    }
+    case "store_matrix_sync": {
+      validatePointerLikeOperand(expression.args[0], scope, diagnostics, walkExpression, "wmma::store_matrix_sync destination");
+      const fragment = validateWmmaFragmentOperand(expression.args[1], scope, diagnostics, walkExpression, "wmma::store_matrix_sync fragment");
+      validateOptionalScalarOperand(expression.args[2], scope, diagnostics, walkExpression);
+      validateOptionalWmmaLayoutOperand(expression.args[3], diagnostics, "store");
+      return { kind: "scalar", valueType: fragment?.spec.valueType };
+    }
+  }
+}
+
+function validateWmmaFragmentOperand(
+  expression: CudaLiteExpression | undefined,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+  label: string,
+): MatrixTileOperandInfo | undefined {
+  if (!expression) return undefined;
+  const ref = matrixTileReference(expression);
+  if (!ref) {
+    diagnostics.push(error("unsupported-wmma-fragment-operand", `${label} expects a WMMA fragment variable`, expression.span));
+    return undefined;
+  }
+  for (const index of ref.indices) validateScalarOperand(walkExpression(index, scope), index.span, diagnostics);
+  const symbol = lookupSymbol(ref.root, scope, expression.span);
+  if (!symbol?.matrixTile) {
+    diagnostics.push(error("unsupported-wmma-fragment-operand", `${label} expects a WMMA fragment variable`, expression.span));
+    return undefined;
+  }
+  const dimensions = symbol.dimensions ?? [];
+  if (ref.indices.length !== dimensions.length) {
+    diagnostics.push(error("invalid-wmma-fragment-index", `WMMA fragment '${ref.root}' expects ${dimensions.length} leading index${dimensions.length === 1 ? "" : "es"} before use`, expression.span));
+  }
+  const spec = resolveMatrixTileSpec(symbol.matrixTile);
+  if (!spec) return undefined;
+  return { symbol, spec };
+}
+
+function validatePointerLikeOperand(
+  expression: CudaLiteExpression | undefined,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+  label: string,
+): void {
+  if (!expression) return;
+  const info = walkExpression(expression, scope);
+  if (
+    info.kind !== "pointer" &&
+    info.kind !== "pool-pointer" &&
+    info.kind !== "address" &&
+    info.kind !== "array" &&
+    info.kind !== "unknown"
+  ) {
+    diagnostics.push(error("unsupported-wmma-pointer-operand", `${label} expects a pointer, address, or array expression`, expression.span));
+  }
+}
+
+function validateOptionalScalarOperand(
+  expression: CudaLiteExpression | undefined,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  if (!expression) return;
+  validateScalarOperand(walkExpression(expression, scope), expression.span, diagnostics);
+}
+
+function validateOptionalWmmaLayoutOperand(
+  expression: CudaLiteExpression | undefined,
+  diagnostics: CudaLiteDiagnostic[],
+  mode: "load" | "store",
+): void {
+  if (!expression) return;
+  const name = expressionName(expression);
+  const layout = normalizeMatrixTileLayout(name);
+  if (layout === undefined) {
+    diagnostics.push(error("unsupported-wmma-layout-operand", "WMMA layout operand must be a wmma row/col layout constant", expression.span));
+    return;
+  }
+  if (mode === "store" && layout !== "mem_row_major" && layout !== "mem_col_major" && layout !== "row_major" && layout !== "col_major") {
+    diagnostics.push(error("unsupported-wmma-layout-operand", "wmma::store_matrix_sync layout must be row/col memory layout", expression.span));
+  }
+}
+
+function validateWmmaMmaShape(
+  dst: MatrixTileOperandInfo | undefined,
+  a: MatrixTileOperandInfo | undefined,
+  b: MatrixTileOperandInfo | undefined,
+  c: MatrixTileOperandInfo | undefined,
+  span: SourceSpan,
+  diagnostics: CudaLiteDiagnostic[],
+): void {
+  if (!dst || !a || !b || !c) return;
+  if (dst.spec.m !== c.spec.m || dst.spec.n !== c.spec.n || dst.spec.k !== c.spec.k) {
+    diagnostics.push(error("wmma-shape-mismatch", "wmma::mma_sync destination and accumulator fragments must have matching tile shape", span));
+  }
+  if (dst.spec.m !== a.spec.m || dst.spec.k !== a.spec.k || dst.spec.n !== b.spec.n || dst.spec.k !== b.spec.k) {
+    diagnostics.push(error("wmma-shape-mismatch", "wmma::mma_sync matrix fragment shapes must match accumulator M/N/K", span));
+  }
 }
 
 function launchedDeviceFunctionNames(ast: CudaLiteModule): ReadonlySet<string> {
@@ -1085,6 +1313,9 @@ function validateCallExpression(
       expression.span,
     ));
   }
+
+  const wmma = wmmaBuiltinName(callName);
+  if (wmma) return validateWmmaBuiltin(expression, wmma, scope, diagnostics, walkExpression);
 
   if (callName === "bg_subgroup_add") requiredFeatures.add("subgroups");
   if (callName === "__syncthreads" || callName === "__syncwarp") {
@@ -2514,6 +2745,10 @@ function validateLValueExpression(
       diagnostics.push(error("unknown-symbol", `unknown CUDA-lite symbol '${expression.name}'`, expression.span));
       return;
     }
+    if (symbol.matrixTile) {
+      diagnostics.push(error("unsupported-wmma-fragment-use", "WMMA fragments must be used through supported wmma::* operations", expression.span));
+      return;
+    }
     if (symbol.kind === "local" || symbol.kind === "shared" || symbol.kind === "device-global") return;
     if (symbol.kind === "param" && !symbol.pointer) {
       diagnostics.push(error("parameter-assignment", `cannot assign to scalar parameter '${expression.name}'`, expression.span));
@@ -2598,6 +2833,7 @@ function expressionInfoForIdentifier(
   if (symbol.kind === "texture") return { kind: "texture", valueType: symbol.valueType, symbol };
   if (symbol.valueType === "texture2d") return { kind: "texture", valueType: symbol.valueType, symbol };
   if (symbol.valueType === "surface2d") return { kind: "surface", valueType: symbol.valueType, symbol };
+  if (symbol.matrixTile) return { kind: "matrix-tile", valueType: symbol.valueType, symbol, matrixTile: symbol.matrixTile };
   if (symbol.kind === "local" && symbol.dimensions && symbol.dimensions.length > 0) {
     return {
       kind: "array",
@@ -2640,6 +2876,10 @@ function validateScalarOperand(
   diagnostics: CudaLiteDiagnostic[],
 ): void {
   if (info.kind === "scalar" || info.kind === "unknown") return;
+  if (info.kind === "matrix-tile") {
+    diagnostics.push(error("unsupported-wmma-fragment-use", "WMMA fragments must be used through supported wmma::* operations", span));
+    return;
+  }
   if (info.kind === "pool-pointer") return;
   if (info.kind === "pointer" && info.symbol?.kind === "local") return;
   diagnostics.push(error("unsupported-scalar-expression", "expression must resolve to a scalar value", span));

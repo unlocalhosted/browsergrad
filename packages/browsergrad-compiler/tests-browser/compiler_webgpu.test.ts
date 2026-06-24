@@ -1568,6 +1568,34 @@ __global__ void atomic_exchange(float* x, float* out) {
     expect([...actual.buffers.g_pool as Uint32Array]).toEqual([...expected.buffers.g_pool as Uint32Array]);
   });
 
+  it("runs scalarized WMMA fragments on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void wmma_toy(float* A, float* B, float* C) {
+  wmma::fragment<wmma::matrix_a, 2, 2, 2, float, wmma::row_major> a;
+  wmma::fragment<wmma::matrix_b, 2, 2, 2, float, wmma::row_major> b;
+  wmma::fragment<wmma::accumulator, 2, 2, 2, float> c;
+  wmma::fill_fragment(c, 0.0f);
+  wmma::load_matrix_sync(a, A, 2);
+  wmma::load_matrix_sync(b, B, 2);
+  wmma::mma_sync(c, a, b, c);
+  wmma::store_matrix_sync(C, c, 2, wmma::mem_row_major);
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        A: new Float32Array([1, 2, 3, 4]),
+        B: new Float32Array([5, 6, 7, 8]),
+        C: new Float32Array(4),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.C as Float32Array]).toEqual([...expected.buffers.C as Float32Array]);
+  });
+
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

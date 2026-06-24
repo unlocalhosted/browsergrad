@@ -9,6 +9,17 @@ import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./as
 import { expressionName, rootIdentifier } from "./analyzer.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { validateCudaKernelLaunch } from "./launch.js";
+import {
+  type MatrixTileLayout,
+  type MatrixTileResolvedSpec,
+  flattenMatrixTileLeadingIndex,
+  matrixTileElementCount,
+  matrixTileReference,
+  matrixTileStorageDimensions,
+  normalizeMatrixTileLayout,
+  resolveMatrixTileSpec,
+  wmmaBuiltinName,
+} from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { classifyInlineAsm } from "./ptx_tile_ops.js";
 import { alignofCudaType, sizeofCudaType } from "./type_layout.js";
@@ -134,6 +145,8 @@ interface LocalArrayValue {
   readonly dimensions: readonly number[];
   readonly valueType: CudaLiteScalarType;
   readonly data: WgslTypedArray;
+  readonly matrixTile?: CudaLiteVarDecl["matrixTile"];
+  readonly matrixTileArrayDimensions?: readonly number[];
 }
 
 interface MutableTrace {
@@ -712,7 +725,7 @@ function execVar(statement: CudaLiteVarDecl, context: ThreadContext): void {
     context.locals.set(statement.name, resolvePointerInitializer(statement, context));
     return;
   }
-  if (statement.dimensions.length > 0) {
+  if (statement.dimensions.length > 0 || statement.matrixTile) {
     const localArray = allocateLocalArray(statement);
     if (statement.init) initializeLocalArray(localArray, statement.init, context);
     context.locals.set(statement.name, localArray);
@@ -1604,12 +1617,152 @@ function fillLocalArray(expression: Extract<CudaLiteExpression, { kind: "call" }
   }
 }
 
+interface MatrixTileRuntimeValue {
+  readonly local: LocalArrayValue;
+  readonly spec: MatrixTileResolvedSpec;
+  readonly base: number;
+}
+
+function execWmmaBuiltin(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  builtin: NonNullable<ReturnType<typeof wmmaBuiltinName>>,
+  context: ThreadContext,
+): void {
+  switch (builtin) {
+    case "fill_fragment":
+      execWmmaFillFragment(expression, context);
+      return;
+    case "load_matrix_sync":
+      execWmmaLoadMatrixSync(expression, context);
+      return;
+    case "mma_sync":
+      execWmmaMmaSync(expression, context);
+      return;
+    case "store_matrix_sync":
+      execWmmaStoreMatrixSync(expression, context);
+      return;
+  }
+}
+
+function execWmmaFillFragment(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): void {
+  const tile = resolveMatrixTileRuntime(expression.args[0], context, "wmma::fill_fragment");
+  const value = evalExpression(expression.args[1]!, context);
+  for (let index = 0; index < matrixTileElementCount(tile.spec); index++) {
+    writeMatrixTileElement(tile, index, value);
+  }
+}
+
+function execWmmaLoadMatrixSync(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): void {
+  const tile = resolveMatrixTileRuntime(expression.args[0], context, "wmma::load_matrix_sync");
+  const source = resolvePointerArgument(expression.args[1]!, context);
+  const stride = Math.trunc(evalNumber(expression.args[2]!, context));
+  const layout = matrixTileLayoutForCall(expression.args[3], tile.spec.layout ?? "row_major");
+  const [rows, cols] = matrixTileRowsCols(tile.spec);
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const srcIndex = matrixTileMemoryIndex(row, col, stride, layout);
+      const value = readLValue(offsetLValue(source, srcIndex, tile.spec.valueType), context);
+      writeMatrixTileElement(tile, row * cols + col, value);
+    }
+  }
+}
+
+function execWmmaMmaSync(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): void {
+  const dst = resolveMatrixTileRuntime(expression.args[0], context, "wmma::mma_sync destination");
+  const a = resolveMatrixTileRuntime(expression.args[1], context, "wmma::mma_sync A");
+  const b = resolveMatrixTileRuntime(expression.args[2], context, "wmma::mma_sync B");
+  const c = resolveMatrixTileRuntime(expression.args[3], context, "wmma::mma_sync accumulator");
+  for (let row = 0; row < dst.spec.m; row++) {
+    for (let col = 0; col < dst.spec.n; col++) {
+      let sum = valueAsNumber(readMatrixTileElement(c, row * dst.spec.n + col), "wmma accumulator");
+      for (let kk = 0; kk < dst.spec.k; kk++) {
+        const av = valueAsNumber(readMatrixTileElement(a, row * dst.spec.k + kk), "wmma A");
+        const bv = valueAsNumber(readMatrixTileElement(b, kk * dst.spec.n + col), "wmma B");
+        sum += av * bv;
+      }
+      writeMatrixTileElement(dst, row * dst.spec.n + col, sum);
+    }
+  }
+}
+
+function execWmmaStoreMatrixSync(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): void {
+  const target = resolvePointerArgument(expression.args[0]!, context);
+  const tile = resolveMatrixTileRuntime(expression.args[1], context, "wmma::store_matrix_sync");
+  const stride = Math.trunc(evalNumber(expression.args[2]!, context));
+  const layout = matrixTileLayoutForCall(expression.args[3], "mem_row_major");
+  const [rows, cols] = matrixTileRowsCols(tile.spec);
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      const dstIndex = matrixTileMemoryIndex(row, col, stride, layout);
+      const value = readMatrixTileElement(tile, row * cols + col);
+      writeLValue(offsetLValue(target, dstIndex, tile.spec.valueType), value, context);
+    }
+  }
+}
+
+function resolveMatrixTileRuntime(
+  expression: CudaLiteExpression | undefined,
+  context: ThreadContext,
+  label: string,
+): MatrixTileRuntimeValue {
+  if (!expression) throw compilerFailure(`${label} expects WMMA fragment argument`);
+  const ref = matrixTileReference(expression);
+  if (!ref) throw compilerFailure(`${label} expects WMMA fragment argument`);
+  const local = context.locals.get(ref.root);
+  if (!isLocalArray(local) || !local.matrixTile) throw compilerFailure(`'${ref.root}' is not a WMMA fragment`);
+  const spec = resolveMatrixTileSpec(local.matrixTile);
+  if (!spec) throw compilerFailure(`WMMA fragment '${ref.root}' has invalid metadata`);
+  const leadingDimensions = local.matrixTileArrayDimensions ?? [];
+  const leadingIndices = ref.indices.map((index) => Math.trunc(evalNumber(index, context)));
+  const leading = flattenMatrixTileLeadingIndex(leadingDimensions, leadingIndices);
+  if (leading < 0) throw compilerFailure(`WMMA fragment '${ref.root}' expects ${leadingDimensions.length} leading indices`);
+  return {
+    local,
+    spec,
+    base: leading * matrixTileElementCount(spec),
+  };
+}
+
+function readMatrixTileElement(tile: MatrixTileRuntimeValue, index: number): EvalValue {
+  return readBufferValue(tile.local.data, tile.base + index, tile.local.valueType, undefined);
+}
+
+function writeMatrixTileElement(tile: MatrixTileRuntimeValue, index: number, value: EvalValue): void {
+  writeBufferValue(tile.local.data, tile.base + index, tile.local.valueType, undefined, value);
+}
+
+function matrixTileRowsCols(tile: MatrixTileResolvedSpec): readonly [number, number] {
+  if (tile.role === "matrix_a") return [tile.m, tile.k];
+  if (tile.role === "matrix_b") return [tile.k, tile.n];
+  return [tile.m, tile.n];
+}
+
+function matrixTileMemoryIndex(row: number, col: number, stride: number, layout: MatrixTileLayout): number {
+  return layout === "col_major" || layout === "mem_col_major"
+    ? col * stride + row
+    : row * stride + col;
+}
+
+function matrixTileLayoutForCall(
+  expression: CudaLiteExpression | undefined,
+  fallback: MatrixTileLayout,
+): MatrixTileLayout {
+  if (!expression) return fallback;
+  const layout = normalizeMatrixTileLayout(expressionName(expression));
+  return layout ?? fallback;
+}
+
 function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): EvalValue {
   const name = expression.kind === "call" && expression.callee.kind === "identifier"
     ? expression.callee.name
     : undefined;
   const cooperativeGroupCall = evalCooperativeGroupCall(expression, context);
   if (cooperativeGroupCall !== undefined) return cooperativeGroupCall;
+  const wmma = wmmaBuiltinName(name);
+  if (wmma) {
+    execWmmaBuiltin(expression, wmma, context);
+    return 0;
+  }
   if (name === "printf") return 0;
   if (name === "div_ceil") {
     const numerator = evalNumber(expression.args[0]!, context);
@@ -2655,9 +2808,10 @@ function allocateShared(declarations: readonly CudaLiteVarDecl[]): Map<string, S
 function allocateLocalArray(declaration: CudaLiteVarDecl): LocalArrayValue {
   return {
     kind: "local-array",
-    dimensions: declaration.dimensions,
+    dimensions: matrixTileStorageDimensions(declaration),
     valueType: declaration.valueType,
-    data: allocateTypedArray(declaration.valueType, declaration.dimensions),
+    data: allocateTypedArray(declaration.valueType, matrixTileStorageDimensions(declaration)),
+    ...(declaration.matrixTile === undefined ? {} : { matrixTile: declaration.matrixTile, matrixTileArrayDimensions: declaration.dimensions }),
   };
 }
 

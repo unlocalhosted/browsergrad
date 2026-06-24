@@ -5967,4 +5967,57 @@ __global__ void bad_const_write(const uint* x) {
 }`));
     expect(constWrite.diagnostics.map((diagnostic) => diagnostic.code)).toContain("const-pointer-write");
   });
+
+  it("lowers WMMA fragments through scalarized cooperative matrix primitives", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void wmma_toy(float* A, float* B, float* C) {
+  wmma::fragment<wmma::matrix_a, 2, 2, 2, float, wmma::row_major> a;
+  wmma::fragment<wmma::matrix_b, 2, 2, 2, float, wmma::row_major> b;
+  wmma::fragment<wmma::accumulator, 2, 2, 2, float> c;
+  wmma::fill_fragment(c, 0.0f);
+  wmma::load_matrix_sync(a, A, 2);
+  wmma::load_matrix_sync(b, B, 2);
+  wmma::mma_sync(c, a, b, c);
+  wmma::store_matrix_sync(C, c, 2, wmma::mem_row_major);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          A: new Float32Array([1, 2, 3, 4]),
+          B: new Float32Array([5, 6, 7, 8]),
+          C: new Float32Array(4),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.C as Float32Array]).toEqual([19, 22, 43, 50]);
+    expect(compiled.wgsl).toContain("var a: array<f32, 4>;");
+    expect(compiled.wgsl).toContain("var bg_wmma_sum_");
+    expect(compiled.wgsl).toContain("write_f32");
+  });
+
+  it("validates WMMA fragment metadata and f16 requirements", () => {
+    const half = analyzeCudaLite(parseCudaLite(`
+__global__ void half_wmma(half* A) {
+  wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a;
+  wmma::load_matrix_sync(a, A, 16);
+}`));
+    expect(half.requiredFeatures).toContain("shader-f16");
+
+    const bad = analyzeCudaLite(parseCudaLite(`
+__global__ void bad_wmma(float* A) {
+  wmma::fragment<wmma::matrix_a, 0, 16, 16, float> a;
+  wmma::fragment<wmma::matrix_b, 16, 16, 16, int, wmma::row_major> b;
+  wmma::fragment<wmma::accumulator, 16, 16, 16, float, wmma::row_major> c;
+  wmma::fill_fragment(A, 0.0f);
+}`));
+    const codes = bad.diagnostics.map((diagnostic) => diagnostic.code);
+    expect(codes).toContain("invalid-wmma-fragment-shape");
+    expect(codes).toContain("missing-wmma-fragment-layout");
+    expect(codes).toContain("unsupported-wmma-fragment-value-type");
+    expect(codes).toContain("unsupported-wmma-fragment-layout");
+    expect(codes).toContain("unsupported-wmma-fragment-operand");
+  });
 });

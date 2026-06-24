@@ -130,6 +130,12 @@ Simple C++ intake accepts scalar/vector `typedef` and `using` aliases,
 arguments, `static` kernel qualifiers, late `__launch_bounds__` placement, and
 `static_assert` statements. This is bounded CUDA/C++ normalization, not full
 C++ template compatibility.
+WMMA fragments are accepted as scalarized cooperative-matrix primitives:
+`wmma::fragment`, `wmma::fill_fragment`, `wmma::load_matrix_sync`,
+`wmma::mma_sync`, and `wmma::store_matrix_sync` lower through CPU reference and
+WGSL for small educational matrix tiles. This preserves learner-visible
+semantics and browser execution; it does not claim Tensor Core performance or
+lane-accurate NVIDIA fragment layout.
 Bounded integer template defaults such as `template <const int N = 256>` are
 accepted on kernels and device helpers when the default is an integer constant
 expression. Functional scalar casts such as `float(i)` lower to CUDA-lite casts.

@@ -6,6 +6,16 @@ import {
 import { collectExternalDevicePoolNames, collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
+import {
+  type MatrixTileLayout,
+  type MatrixTileResolvedSpec,
+  matrixTileElementCount,
+  matrixTileReference,
+  matrixTileStorageDimensions,
+  normalizeMatrixTileLayout,
+  resolveMatrixTileSpec,
+  wmmaBuiltinName,
+} from "./matrix_tiles.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
@@ -668,7 +678,7 @@ function emitStatement(
         if (!isEmittedPointerVar(statement, context)) return [];
         return [`${prefix}var ${context.nameFor(statement.name)}: u32${statement.init ? ` = ${emitExpression(statement.init, context)}` : " = 0u"};`];
       }
-      if (statement.dimensions.length > 0) {
+      if (statement.dimensions.length > 0 || statement.matrixTile) {
         return [
           `${prefix}var ${context.nameFor(statement.name)}: ${emitLocalArrayType(statement)};`,
           ...emitLocalArrayInitializer(statement, context, indentLevel),
@@ -686,6 +696,10 @@ function emitStatement(
         .split("\n")
         .map((line) => `${prefix}${line};`);
     case "expr":
+      {
+        const wmma = emitWmmaStatement(statement.expression, context, indentLevel);
+        if (wmma) return wmma;
+      }
       {
         const cpAsync = emitCpAsyncStatement(statement.expression, context, indentLevel);
         if (cpAsync) return cpAsync;
@@ -998,6 +1012,10 @@ function usesDevicePointerParams(ir: KernelIrModule): boolean {
     "CP_ASYNC_CA",
     "CP_ASYNC_CG",
     "CP_ASYNC_BULK",
+    "wmma::load_matrix_sync",
+    "nvcuda::wmma::load_matrix_sync",
+    "wmma::store_matrix_sync",
+    "nvcuda::wmma::store_matrix_sync",
   ]);
   return ir.functions.some((fn) => fn.params.some((param) => param.pointer)) ||
     statementsUseCall(ir.body, devicePointerCalls) ||
@@ -1944,13 +1962,13 @@ function collectLocalArrays(statements: readonly CudaLiteStatement[]): ReadonlyM
   const arrays = new Map<string, CudaLiteVarDecl>();
   const walk = (items: readonly CudaLiteStatement[]): void => {
     for (const item of items) {
-      if (item.kind === "var" && item.storage === "local" && item.dimensions.length > 0) arrays.set(item.name, item);
+      if (item.kind === "var" && item.storage === "local" && (item.dimensions.length > 0 || item.matrixTile)) arrays.set(item.name, item);
       if (item.kind === "if") {
         walk(item.consequent);
         if (item.alternate) walk(item.alternate);
       }
       if (item.kind === "for") {
-        if (item.init?.kind === "var" && item.init.storage === "local" && item.init.dimensions.length > 0) {
+        if (item.init?.kind === "var" && item.init.storage === "local" && (item.init.dimensions.length > 0 || item.init.matrixTile)) {
           arrays.set(item.init.name, item.init);
         }
         walk(item.body);
@@ -2000,6 +2018,189 @@ function emitFillRegsStatement(
   const array = context.localArrayFor(target.name);
   if (!array) return undefined;
   return emitLocalArrayFill(context.nameFor(target.name), array.dimensions, emitExpression(value, context), indentLevel);
+}
+
+interface EmittedMatrixTile {
+  readonly name: string;
+  readonly spec: MatrixTileResolvedSpec;
+  readonly base: string;
+}
+
+function emitWmmaStatement(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  if (expression.kind !== "call") return undefined;
+  const builtin = wmmaBuiltinName(expressionName(expression.callee));
+  if (!builtin) return undefined;
+  switch (builtin) {
+    case "fill_fragment":
+      return emitWmmaFillFragment(expression, context, indentLevel);
+    case "load_matrix_sync":
+      return emitWmmaLoadMatrixSync(expression, context, indentLevel);
+    case "mma_sync":
+      return emitWmmaMmaSync(expression, context, indentLevel);
+    case "store_matrix_sync":
+      return emitWmmaStoreMatrixSync(expression, context, indentLevel);
+  }
+}
+
+function emitWmmaFillFragment(
+  expression: CudaLiteCallExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const tile = emitMatrixTileRef(expression.args[0], context, "wmma::fill_fragment");
+  const value = emitMatrixTileValueForStore(emitExpression(expression.args[1]!, context), tile.spec);
+  const index = `bg_wmma_i_${indentLevel}`;
+  const prefix = indent(indentLevel);
+  return [
+    `${prefix}for (var ${index}: u32 = 0u; ${index} < ${matrixTileElementCount(tile.spec)}u; ${index} = ${index} + 1u) {`,
+    `${indent(indentLevel + 1)}${emitMatrixTileAccess(tile, index)} = ${value};`,
+    `${prefix}}`,
+  ];
+}
+
+function emitWmmaLoadMatrixSync(
+  expression: CudaLiteCallExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const tile = emitMatrixTileRef(expression.args[0], context, "wmma::load_matrix_sync");
+  const source = devicePointerArgumentParts(expression.args[1]!, context);
+  if (!source) throw featureError("unsupported-wmma-pointer-operand", "wmma::load_matrix_sync source expects storage/shared pointer");
+  const stride = `u32(${emitExpression(expression.args[2]!, context)})`;
+  const layout = emitMatrixTileLayoutForCall(expression.args[3], tile.spec.layout ?? "row_major");
+  const [rows, cols] = matrixTileRowsCols(tile.spec);
+  const row = `bg_wmma_row_${indentLevel}`;
+  const col = `bg_wmma_col_${indentLevel}`;
+  const prefix = indent(indentLevel);
+  const memIndex = emitMatrixTileMemoryIndex(row, col, stride, layout);
+  const tileIndex = `(${row} * ${cols}u + ${col})`;
+  const read = `${pointerReadHelperName(tile.spec.valueType)}(${source.buffer}, (${source.base} + ${memIndex}))`;
+  return [
+    `${prefix}for (var ${row}: u32 = 0u; ${row} < ${rows}u; ${row} = ${row} + 1u) {`,
+    `${indent(indentLevel + 1)}for (var ${col}: u32 = 0u; ${col} < ${cols}u; ${col} = ${col} + 1u) {`,
+    `${indent(indentLevel + 2)}${emitMatrixTileAccess(tile, tileIndex)} = ${emitMatrixTileValueForStore(read, tile.spec)};`,
+    `${indent(indentLevel + 1)}}`,
+    `${prefix}}`,
+  ];
+}
+
+function emitWmmaMmaSync(
+  expression: CudaLiteCallExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const dst = emitMatrixTileRef(expression.args[0], context, "wmma::mma_sync destination");
+  const a = emitMatrixTileRef(expression.args[1], context, "wmma::mma_sync A");
+  const b = emitMatrixTileRef(expression.args[2], context, "wmma::mma_sync B");
+  const c = emitMatrixTileRef(expression.args[3], context, "wmma::mma_sync accumulator");
+  const row = `bg_wmma_row_${indentLevel}`;
+  const col = `bg_wmma_col_${indentLevel}`;
+  const kk = `bg_wmma_k_${indentLevel}`;
+  const sum = `bg_wmma_sum_${indentLevel}`;
+  const prefix = indent(indentLevel);
+  const dstIndex = `(${row} * ${dst.spec.n}u + ${col})`;
+  const aIndex = `(${row} * ${dst.spec.k}u + ${kk})`;
+  const bIndex = `(${kk} * ${dst.spec.n}u + ${col})`;
+  return [
+    `${prefix}for (var ${row}: u32 = 0u; ${row} < ${dst.spec.m}u; ${row} = ${row} + 1u) {`,
+    `${indent(indentLevel + 1)}for (var ${col}: u32 = 0u; ${col} < ${dst.spec.n}u; ${col} = ${col} + 1u) {`,
+    `${indent(indentLevel + 2)}var ${sum}: f32 = f32(${emitMatrixTileAccess(c, dstIndex)});`,
+    `${indent(indentLevel + 2)}for (var ${kk}: u32 = 0u; ${kk} < ${dst.spec.k}u; ${kk} = ${kk} + 1u) {`,
+    `${indent(indentLevel + 3)}${sum} = ${sum} + f32(${emitMatrixTileAccess(a, aIndex)}) * f32(${emitMatrixTileAccess(b, bIndex)});`,
+    `${indent(indentLevel + 2)}}`,
+    `${indent(indentLevel + 2)}${emitMatrixTileAccess(dst, dstIndex)} = ${emitMatrixTileValueForStore(sum, dst.spec)};`,
+    `${indent(indentLevel + 1)}}`,
+    `${prefix}}`,
+  ];
+}
+
+function emitWmmaStoreMatrixSync(
+  expression: CudaLiteCallExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const target = devicePointerArgumentParts(expression.args[0]!, context);
+  if (!target) throw featureError("unsupported-wmma-pointer-operand", "wmma::store_matrix_sync destination expects storage/shared pointer");
+  const tile = emitMatrixTileRef(expression.args[1], context, "wmma::store_matrix_sync fragment");
+  const stride = `u32(${emitExpression(expression.args[2]!, context)})`;
+  const layout = emitMatrixTileLayoutForCall(expression.args[3], "mem_row_major");
+  const [rows, cols] = matrixTileRowsCols(tile.spec);
+  const row = `bg_wmma_row_${indentLevel}`;
+  const col = `bg_wmma_col_${indentLevel}`;
+  const prefix = indent(indentLevel);
+  const memIndex = emitMatrixTileMemoryIndex(row, col, stride, layout);
+  const tileIndex = `(${row} * ${cols}u + ${col})`;
+  return [
+    `${prefix}for (var ${row}: u32 = 0u; ${row} < ${rows}u; ${row} = ${row} + 1u) {`,
+    `${indent(indentLevel + 1)}for (var ${col}: u32 = 0u; ${col} < ${cols}u; ${col} = ${col} + 1u) {`,
+    `${indent(indentLevel + 2)}${pointerWriteHelperName(tile.spec.valueType)}(${target.buffer}, (${target.base} + ${memIndex}), ${emitMatrixTileAccess(tile, tileIndex)});`,
+    `${indent(indentLevel + 1)}}`,
+    `${prefix}}`,
+  ];
+}
+
+function emitMatrixTileRef(
+  expression: CudaLiteExpression | undefined,
+  context: EmitContext,
+  label: string,
+): EmittedMatrixTile {
+  if (!expression) throw featureError("unsupported-wmma-fragment-operand", `${label} expects WMMA fragment argument`);
+  const ref = matrixTileReference(expression);
+  if (!ref) throw featureError("unsupported-wmma-fragment-operand", `${label} expects WMMA fragment argument`);
+  const declaration = context.localArrayFor(ref.root);
+  const spec = declaration?.matrixTile ? resolveMatrixTileSpec(declaration.matrixTile) : undefined;
+  if (!declaration || !spec) throw featureError("unsupported-wmma-fragment-operand", `'${ref.root}' is not a WMMA fragment`);
+  const count = matrixTileElementCount(spec);
+  const base = emitMatrixTileBase(ref.indices, declaration.dimensions, count, context);
+  return { name: context.nameFor(ref.root), spec, base };
+}
+
+function emitMatrixTileBase(
+  indices: readonly CudaLiteExpression[],
+  dimensions: readonly number[],
+  elementCount: number,
+  context: EmitContext,
+): string {
+  if (indices.length !== dimensions.length) return "0u";
+  if (indices.length === 0) return "0u";
+  const terms = indices.map((index, axis) => {
+    const stride = dimensions.slice(axis + 1).reduce((product, dimension) => product * dimension, elementCount);
+    const value = `u32(${emitExpression(index, context)})`;
+    return stride === 1 ? value : `(${value} * ${stride}u)`;
+  });
+  return terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
+}
+
+function emitMatrixTileAccess(tile: EmittedMatrixTile, index: string): string {
+  return tile.base === "0u" ? `${tile.name}[${index}]` : `${tile.name}[(${tile.base} + ${index})]`;
+}
+
+function matrixTileRowsCols(tile: MatrixTileResolvedSpec): readonly [number, number] {
+  if (tile.role === "matrix_a") return [tile.m, tile.k];
+  if (tile.role === "matrix_b") return [tile.k, tile.n];
+  return [tile.m, tile.n];
+}
+
+function emitMatrixTileMemoryIndex(row: string, col: string, stride: string, layout: MatrixTileLayout): string {
+  return layout === "col_major" || layout === "mem_col_major"
+    ? `(${col} * ${stride} + ${row})`
+    : `(${row} * ${stride} + ${col})`;
+}
+
+function emitMatrixTileLayoutForCall(
+  expression: CudaLiteExpression | undefined,
+  fallback: MatrixTileLayout,
+): MatrixTileLayout {
+  if (!expression) return fallback;
+  return normalizeMatrixTileLayout(expressionName(expression)) ?? fallback;
+}
+
+function emitMatrixTileValueForStore(value: string, tile: MatrixTileResolvedSpec): string {
+  return tile.valueType === "half" ? `f16(${value})` : value;
 }
 
 function emitCpAsyncStatement(
@@ -2756,6 +2957,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   const name = expressionName(expression.callee);
   const cooperativeGroupCall = emitCooperativeGroupCall(expression, context);
   if (cooperativeGroupCall !== undefined) return cooperativeGroupCall;
+  if (wmmaBuiltinName(name)) return "0";
   const deviceFunction = name ? context.deviceFunctionFor(name) : undefined;
   if (deviceFunction) {
     const args = deviceFunction.params.flatMap((param, index) => {
@@ -3805,8 +4007,9 @@ function emitSharedType(statement: CudaLiteVarDecl, ir: KernelIrModule): string 
 
 function emitLocalArrayType(statement: CudaLiteVarDecl): string {
   let type = wgslScalar(statement.valueType);
-  for (let i = statement.dimensions.length - 1; i >= 0; i--) {
-    type = `array<${type}, ${statement.dimensions[i]!}>`;
+  const dimensions = matrixTileStorageDimensions(statement);
+  for (let i = dimensions.length - 1; i >= 0; i--) {
+    type = `array<${type}, ${dimensions[i]!}>`;
   }
   return type;
 }
