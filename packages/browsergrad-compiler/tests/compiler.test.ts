@@ -3138,6 +3138,25 @@ __global__ void curandDoubleKernel(float *out) {
     expect([...result.buffers.out as Float32Array].every((value) => value > 0 && value <= 1)).toBe(true);
   });
 
+  it("lowers CUDA normal cuRAND draws through the deterministic browser RNG island", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void curandNormalKernel(float *out) {
+  curandState_t state;
+  curand_init(17ULL, threadIdx.x, 3, &state);
+  float x = curand_normal(&state);
+  double y = curand_normal_double(&state);
+  out[threadIdx.x] = x + (float)y;
+}`, { workgroupSize: [4, 1, 1], f64Mode: "f32" });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_curand_normal");
+    expect([...result.buffers.out as Float32Array].every((value) => Number.isFinite(value))).toBe(true);
+  });
+
   it("supports cufftComplex buffers as interleaved complex64 values", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void magnitudeKernel(cufftComplex *data, float *mag, int N) {

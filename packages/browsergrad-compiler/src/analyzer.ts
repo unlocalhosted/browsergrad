@@ -135,6 +135,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["curand_init", [4, 4]],
   ["curand_uniform", [1, 1]],
   ["curand_uniform_double", [1, 1]],
+  ["curand_normal", [1, 1]],
+  ["curand_normal_double", [1, 1]],
   ["cudaDeviceSynchronize", [0, 0]],
   ["cudaStreamCreate", [1, 1]],
   ["cudaStreamCreateWithFlags", [2, 2]],
@@ -1547,8 +1549,13 @@ function validateCallExpression(
     validateCurandInit(expression, diagnostics, walkExpression, scope);
     return { kind: "scalar", valueType: "uint" };
   }
-  if (callName === "curand_uniform" || callName === "curand_uniform_double") {
-    validateCurandUniform(expression, diagnostics, walkExpression, scope);
+  if (
+    callName === "curand_uniform" ||
+    callName === "curand_uniform_double" ||
+    callName === "curand_normal" ||
+    callName === "curand_normal_double"
+  ) {
+    validateCurandStateAddress(expression, callName, diagnostics, walkExpression, scope);
     return { kind: "scalar", valueType: "float" };
   }
 
@@ -2307,8 +2314,9 @@ function validateCurandInit(
   }
 }
 
-function validateCurandUniform(
+function validateCurandStateAddress(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  callName: string,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
   scope: Scope,
@@ -2317,7 +2325,7 @@ function validateCurandUniform(
   if (!state) return;
   const info = walkExpression(state, scope);
   if (info.kind !== "address") {
-    diagnostics.push(error("curand-state-address", "curand_uniform expects a state address", state.span));
+    diagnostics.push(error("curand-state-address", `${callName} expects a state address`, state.span));
   }
 }
 

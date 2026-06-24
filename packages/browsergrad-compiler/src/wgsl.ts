@@ -3351,6 +3351,9 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "curand_uniform":
     case "curand_uniform_double":
       return `bg_curand_uniform(${args[0] ?? "&state"})`;
+    case "curand_normal":
+    case "curand_normal_double":
+      return `bg_curand_normal(${args[0] ?? "&state"})`;
     case "atomicAdd":
     case "atomicAdd_system":
       return emitAtomicCall("atomicAdd", expression, context, args);
@@ -4785,6 +4788,11 @@ function emitCurandHelpers(): string[] {
     "  let bits = bg_curand_next(state);",
     "  return (f32(bits) + 1.0) * 2.3283064365386963e-10;",
     "}",
+    "fn bg_curand_normal(state: ptr<function, u32>) -> f32 {",
+    "  let u1 = max(bg_curand_uniform(state), 1.1754943508222875e-38);",
+    "  let u2 = bg_curand_uniform(state);",
+    "  return sqrt(-2.0 * log(u1)) * cos(6.283185307179586 * u2);",
+    "}",
   ];
 }
 
@@ -4881,8 +4889,9 @@ function usesAtomicIncDec(ir: KernelIrModule): boolean {
 }
 
 function usesCurand(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["curand_init", "curand_uniform", "curand_uniform_double"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["curand_init", "curand_uniform", "curand_uniform_double"])));
+  const curandCalls = new Set(["curand_init", "curand_uniform", "curand_uniform_double", "curand_normal", "curand_normal_double"]);
+  return statementsUseCall(ir.body, curandCalls) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, curandCalls));
 }
 
 function usesFrexp(ir: KernelIrModule): boolean {
