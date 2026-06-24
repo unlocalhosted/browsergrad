@@ -14,6 +14,10 @@ const WIDE_PACKED128_TYPES = new Map([
   ["__bg_pack128_bf168", { scalarType: "bf16", lanes: 8 }],
 ]);
 
+const CUDA_BUILTIN_RECORD_DECLARATIONS = [
+  "struct cudaExtent { size_t width; size_t height; size_t depth; };",
+];
+
 export function createKernelCompilationUnit({
   kernel,
   siblingKernels = [],
@@ -26,13 +30,25 @@ export function createKernelCompilationUnit({
   sharedDeclarations = [],
   recordDeclarations = [],
 }) {
+  const recordContext = [
+    kernel,
+    ...siblingKernels,
+    ...functionDeclarations,
+    ...deviceFunctions.map((fn) => fn.source),
+    ...constantDeclarations,
+  ].join("\n");
+  const builtinRecordDeclarations = CUDA_BUILTIN_RECORD_DECLARATIONS.filter((declaration) => {
+    const name = recordDeclarationName(declaration);
+    return name !== undefined && sourceMentionsIdentifier(recordContext, name);
+  });
+  const availableRecordDeclarations = [...builtinRecordDeclarations, ...recordDeclarations];
   const aliasContext = [
     kernel,
     ...siblingKernels,
     ...functionDeclarations,
     ...deviceFunctions.map((fn) => fn.source),
     ...constantDeclarations,
-    ...recordDeclarations,
+    ...availableRecordDeclarations,
   ].join("\n");
   const aliasDefines = collectTypeAliasDefines(aliasContext, definesByName);
   const carrierDefines = collectCarrierMemberDefines(aliasContext, mergeDefineMaps(definesByName, aliasDefines));
@@ -91,7 +107,7 @@ export function createKernelCompilationUnit({
     ...referencedDeviceFunctions.map((fn) => fn.source),
     ...referencedSiblingKernels,
   ].join("\n");
-  const referencedRecordDeclarations = recordDeclarations.filter((declaration) => {
+  const referencedRecordDeclarations = availableRecordDeclarations.filter((declaration) => {
     const name = recordDeclarationName(declaration);
     return name !== undefined &&
       sourceMentionsIdentifier(macroScope, name) &&
@@ -720,6 +736,7 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
   if (type === "signed char" || type === "char" || type === "int8_t") return "int";
   if (
     type === "clock_t" ||
+    type === "size_t" ||
     type === "size_type" ||
     type === "curandState" ||
     type === "CUtexObject" ||
@@ -1063,7 +1080,7 @@ function rewriteScalarizedRecordConstants(source, record, symbols) {
 }
 
 function rewriteScalarizedRecordFunctionSignatures(source, record, symbols, functionExpansions) {
-  const re = /\b__device__[\s\S]*?\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/gu;
+  const re = /\b__(?:device|global)__[\s\S]*?\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/gu;
   let out = "";
   let cursor = 0;
   let match;
@@ -1111,10 +1128,10 @@ function rewriteScalarizedRecordFunctionSignatures(source, record, symbols, func
 
 function expandScalarizedRecordParam(param, record) {
   if (param.includes("*")) return undefined;
-  const re = new RegExp(`^\\s*((?:(?:const|volatile|__restrict__|__restrict|restrict)\\s+)*)${escapeRegExp(record.name)}\\s*(&)?\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*$`, "u");
+  const re = new RegExp(`^\\s*((?:(?:const|volatile|__restrict__|__restrict|restrict|__grid_constant__)\\s+)*)${escapeRegExp(record.name)}\\s*(&)?\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*$`, "u");
   const match = re.exec(param);
   if (match === null || match[3] === undefined) return undefined;
-  const qualifiers = (match[1] ?? "").replace(/\b(?:__restrict__|__restrict|restrict)\b/gu, "").replace(/\s+/gu, " ").trim();
+  const qualifiers = (match[1] ?? "").replace(/\b(?:__restrict__|__restrict|restrict|__grid_constant__)\b/gu, "").replace(/\s+/gu, " ").trim();
   const byRef = match[2] !== undefined;
   if (byRef && !/\bconst\b/u.test(qualifiers)) return undefined;
   const name = match[3];

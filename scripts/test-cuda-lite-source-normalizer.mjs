@@ -1214,4 +1214,30 @@ __global__ void bool_template_carrier(float* out, const float* in, bool __bg_boo
   assert.match(source, /if constexpr \(!__bg_bool_constant_UseAuxBuffer\)/u);
 }
 
+{
+  const source = createKernelCompilationUnit({
+    recordDeclarations: ["struct Ray { float length; float3 dir; };"],
+    kernel: `
+__global__ void pod_value_param(float* out, const Ray ray) {
+  out[0] = ray.length + ray.dir.x;
+}`,
+  });
+  assert.doesNotMatch(source, /\bRay\b/u);
+  assert.match(source, /float ray__length/u);
+  assert.match(source, /float3 ray__dir/u);
+  assert.match(source, /out\[0\] = ray__length \+ ray__dir\.x;/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void extent_param(uint* out, cudaExtent volumeSize) {
+  out[0] = volumeSize.width + volumeSize.height + volumeSize.depth;
+}`,
+  });
+  assert.doesNotMatch(source, /\bcudaExtent\b/u);
+  assert.match(source, /uint3 volumeSize/u);
+  assert.match(source, /volumeSize\.x \+ volumeSize\.y \+ volumeSize\.z/u);
+}
+
 console.log("cuda-lite source normalizer tests ok");
