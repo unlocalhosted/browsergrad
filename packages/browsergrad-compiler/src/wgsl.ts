@@ -67,7 +67,7 @@ export function emitKernelIrWgsl(
   if (lines.length > 0) lines.push("");
   lines.push(`// BrowserGrad CUDA-lite kernel: ${ir.name}`);
 
-  for (const param of ir.params.filter((param) => param.pointer && !isDevicePoolParam(param))) {
+  for (const param of ir.params.filter((param) => param.pointer && !isDevicePoolParam(param) && !isSurfaceParam(param) && !isTextureParam(param))) {
     const access = param.constant ? "read" : "read_write";
     const element = storageElementType(param, ir);
     lines.push(
@@ -129,6 +129,8 @@ export function emitKernelIrWgsl(
   }
 
   if (textures.length > 0) {
+    lines.push("");
+    lines.push(...emitCubeTextureAtlasHelpers());
     lines.push("");
     for (const texture of textures) lines.push(...emitTextureHelper(texture.name, context));
   }
@@ -339,7 +341,7 @@ const WGSL_RESERVED_IDENTIFIERS = new Set([
 function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions = {}): EmitContext {
   const bindings: WgslKernelBindingInput[] = [];
   const bindingByName = new Map<string, number>();
-  const storagePointerParams = ir.params.filter((param) => param.pointer && !isDevicePoolParam(param));
+  const storagePointerParams = ir.params.filter((param) => param.pointer && !isDevicePoolParam(param) && !isSurfaceParam(param) && !isTextureParam(param));
   const textures = textureBindings(ir);
   const storagePointerIds = new Map(storagePointerParams.map((param, index) => [param.name, index] as const));
   const constantPointerArrays = ir.constants.filter((constant) => constant.dimensions.length > 0 && constant.init === undefined);
@@ -2277,7 +2279,11 @@ function expressionValueTypeForEmit(expression: CudaLiteExpression, context: Emi
   if (expression.kind === "cast") return expression.valueType;
   if (expression.kind === "call") {
     const name = expressionName(expression.callee);
-    if (name === "tex2D" || name === "tex2DLod" || name === "tex1Dfetch") return expression.templateValueType ?? "float";
+    if (name !== undefined && isTextureReadCall(name)) return expression.templateValueType ?? "float";
+    if (name !== undefined) {
+      const fn = context.deviceFunctionFor(name);
+      if (fn) return fn.returnType;
+    }
     return name ? cudaVectorConstructorType(name) : undefined;
   }
   if (expression.kind === "index") {
@@ -2330,6 +2336,20 @@ function emitExpressionAsVectorOperand(
     : emitVectorSplat(vectorType, castExpressionToVectorScalar(value, vectorType));
 }
 
+function emitVectorMinMaxCall(
+  expression: CudaLiteCallExpression,
+  name: string | undefined,
+  context: EmitContext,
+): string | undefined {
+  if (name !== "min" && name !== "max" && name !== "fminf" && name !== "fmaxf") return undefined;
+  const vectorType = expression.args
+    .map((arg) => expressionValueTypeForEmit(arg, context))
+    .find(isCudaVectorType);
+  if (!vectorType) return undefined;
+  const op = name === "min" || name === "fminf" ? "min" : "max";
+  return `${op}(${expression.args.map((arg) => emitExpressionAsVectorOperand(arg, vectorType, context)).join(", ")})`;
+}
+
 function castExpressionToVectorScalar(value: string, vectorType: CudaLiteScalarType): string {
   return `${wgslScalar(cudaVectorScalarType(vectorType) ?? "float")}(${value})`;
 }
@@ -2364,6 +2384,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     return `${context.nameFor(name ?? deviceFunction.name)}(${[...args, "local_id", "workgroup_id", "num_workgroups"].join(", ")})`;
   }
   const args = expression.args.map((arg) => emitExpression(arg, context));
+  const vectorMinMax = emitVectorMinMaxCall(expression, name, context);
+  if (vectorMinMax !== undefined) return vectorMinMax;
   const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
   if (intrinsic?.emitWgsl) return intrinsic.emitWgsl(args);
   const vectorConstructor = name ? cudaVectorConstructorType(name) : undefined;
@@ -2470,50 +2492,59 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return `select(0u, 1u, subgroupAll((${args[1] ?? "0"}) != 0))`;
     case "__ballot_sync":
       return `subgroupBallot((${args[1] ?? "0"}) != 0).x`;
+    case "tex1D":
+    case "tex1Dfetch":
     case "tex2D":
     case "tex2DLod":
-      if (expression.args.length >= 3 && expression.args[0]?.kind === "identifier") {
+    case "tex2DLayered":
+    case "tex3D":
+    case "texCubemap":
+      if (expression.args.length >= 2 && expression.args[0]?.kind === "identifier") {
+        const textureArgs = textureReadArgsForEmit(expression, context);
         if (isTextureBindingName(expression.args[0].name, context)) {
           const suffix = textureReadHelperSuffix(expression.templateValueType);
-          return `bg_tex2d_${suffix}_${expression.args[0].name}(${emitExpression(expression.args[1]!, context)}, ${emitExpression(expression.args[2]!, context)})`;
+          return `bg_tex2d_${suffix}_${expression.args[0].name}(${textureArgs.join(", ")})`;
         }
         return emitTextureReadExpression(
           emitTextureArgument(expression.args[0], context),
-          emitExpression(expression.args[1]!, context),
-          emitExpression(expression.args[2]!, context),
+          textureArgs,
           expression.templateValueType,
         );
       }
       return `${name}(${args.join(", ")})`;
-    case "tex1Dfetch":
-      if (expression.args.length === 2 && expression.args[0]?.kind === "identifier") {
-        if (isTextureBindingName(expression.args[0].name, context)) {
-          const suffix = textureReadHelperSuffix(expression.templateValueType);
-          return `bg_tex2d_${suffix}_${expression.args[0].name}(${emitExpression(expression.args[1]!, context)}, 0.0)`;
-        }
-        return emitTextureReadExpression(
-          emitTextureArgument(expression.args[0], context),
-          emitExpression(expression.args[1]!, context),
-          "0.0",
-          expression.templateValueType,
-        );
-      }
-      return `tex1Dfetch(${args.join(", ")})`;
     case "surf2Dread":
-      if (expression.args.length >= 4 && expression.args[1]?.kind === "identifier") {
+      if (expression.args.length === 3) {
+        const surfaceName = rootIdentifier(expression.args[0]!);
+        if (!surfaceName) return `surf2Dread(${args.join(", ")})`;
+        const targetType = expression.templateValueType ?? "float";
+        const read = `bg_surf2dread_${surfaceName}(${emitExpression(expression.args[1]!, context)}, ${emitExpression(expression.args[2]!, context)})`;
+        return targetType === "float" ? read : `${wgslScalar(targetType)}(${read})`;
+      }
+      if (expression.args.length >= 4) {
+        const surfaceName = rootIdentifier(expression.args[1]!);
+        if (!surfaceName) return `surf2Dread(${args.join(", ")})`;
         const target = expression.args[0]!;
         const lvalue = target.kind === "unary" && target.operator === "&" ? target.argument : target;
         const targetType = expressionValueTypeForEmit(lvalue, context) ?? "float";
-        const read = `bg_surf2dread_${expression.args[1].name}(${emitExpression(expression.args[2]!, context)}, ${emitExpression(expression.args[3]!, context)})`;
+        const read = `bg_surf2dread_${surfaceName}(${emitExpression(expression.args[2]!, context)}, ${emitExpression(expression.args[3]!, context)})`;
         const value = targetType === "float" ? read : `${wgslScalar(targetType)}(${read})`;
         return `${emitExpression(lvalue, context, "lvalue")} = ${value}`;
       }
       return `surf2Dread(${args.join(", ")})`;
     case "surf2Dwrite":
-      if (expression.args.length >= 4 && expression.args[1]?.kind === "identifier") {
-        return `bg_surf2dwrite_${expression.args[1].name}(${emitExpression(expression.args[0]!, context)}, ${emitExpression(expression.args[2]!, context)}, ${emitExpression(expression.args[3]!, context)})`;
+    case "surf1Dwrite":
+    case "surf2DLayeredwrite":
+      if (expression.args.length >= 3) {
+        const surfaceName = rootIdentifier(expression.args[1]!);
+        if (!surfaceName) return `${name}(${args.join(", ")})`;
+        const y = name === "surf1Dwrite"
+          ? "0"
+          : name === "surf2DLayeredwrite"
+            ? `(${emitExpression(expression.args[3]!, context)} + ${emitExpression(expression.args[4]!, context)})`
+            : emitExpression(expression.args[3]!, context);
+        return emitSurfaceWriteExpression(surfaceName, expression.args[0]!, expression.args[2]!, y, context);
       }
-      return `surf2Dwrite(${args.join(", ")})`;
+      return `${name}(${args.join(", ")})`;
     case "deviceAllocate":
     case "streamOrderedAllocate":
       if (expression.args.length === 4 && expression.args[0]?.kind === "identifier" && expression.args[1]?.kind === "identifier") {
@@ -3444,6 +3475,38 @@ function emitTextureHelper(name: string, context: EmitContext): string[] {
   return lines;
 }
 
+function emitCubeTextureAtlasHelpers(): string[] {
+  return [
+    "fn bg_cube_face(x: f32, y: f32, z: f32) -> f32 {",
+    "  let ax = abs(x);",
+    "  let ay = abs(y);",
+    "  let az = abs(z);",
+    "  if (ax >= ay && ax >= az) {",
+    "    return select(1.0, 0.0, x >= 0.0);",
+    "  }",
+    "  if (ay >= az) {",
+    "    return select(3.0, 2.0, y >= 0.0);",
+    "  }",
+    "  return select(5.0, 4.0, z >= 0.0);",
+    "}",
+    "fn bg_cube_u(x: f32, y: f32, z: f32) -> f32 {",
+    "  let ax = max(abs(x), 0.000001);",
+    "  let ay = max(abs(y), 0.000001);",
+    "  let az = max(abs(z), 0.000001);",
+    "  if (ax >= ay && ax >= az) { return z / ax; }",
+    "  return x / max(ay, az);",
+    "}",
+    "fn bg_cube_v(x: f32, y: f32, z: f32) -> f32 {",
+    "  let ax = max(abs(x), 0.000001);",
+    "  let ay = max(abs(y), 0.000001);",
+    "  let az = max(abs(z), 0.000001);",
+    "  if (ax >= ay && ax >= az) { return y / ax; }",
+    "  if (ay >= az) { return z / ay; }",
+    "  return y / az;",
+    "}",
+  ];
+}
+
 function textureReadHelperSuffix(valueType: CudaLiteScalarType | undefined): string {
   if (valueType === "int" || valueType === "uint") return valueType;
   if (valueType === "half" || valueType === "half2") return valueType;
@@ -3455,6 +3518,40 @@ function isTextureBindingName(name: string, context: EmitContext): boolean {
   return textureBindings(context.ir).some((texture) => texture.name === name);
 }
 
+function isTextureReadCall(name: string): boolean {
+  return name === "tex1D" ||
+    name === "tex1Dfetch" ||
+    name === "tex2D" ||
+    name === "tex2DLod" ||
+    name === "tex2DLayered" ||
+    name === "tex3D" ||
+    name === "texCubemap";
+}
+
+function textureReadArgsForEmit(expression: CudaLiteCallExpression, context: EmitContext): readonly [string, string] {
+  const name = expressionName(expression.callee);
+  const x = textureCoordForEmit(expression.args[1], context);
+  if (name === "tex1D" || name === "tex1Dfetch") return [x, "0.0"];
+  const y = textureCoordForEmit(expression.args[2], context);
+  if (name === "tex2D" || name === "tex2DLod") return [x, y];
+  if (name === "tex2DLayered" || name === "tex3D") {
+    return [x, `(${y} + ${textureCoordForEmit(expression.args[3], context)})`];
+  }
+  if (name === "texCubemap") {
+    const z = textureCoordForEmit(expression.args[3], context);
+    const texture = emitTextureArgument(expression.args[0], context);
+    const width = `f32(textureDimensions(${texture}).x)`;
+    const localX = `((bg_cube_u(${x}, ${y}, ${z}) + 1.0) * 0.5 * (${width} - 1.0))`;
+    const localY = `((bg_cube_v(${x}, ${y}, ${z}) + 1.0) * 0.5 * (${width} - 1.0) + bg_cube_face(${x}, ${y}, ${z}) * ${width})`;
+    return [localX, localY];
+  }
+  return [x, y];
+}
+
+function textureCoordForEmit(expression: CudaLiteExpression | undefined, context: EmitContext): string {
+  return expression ? `f32(${emitExpression(expression, context)})` : "0.0";
+}
+
 function emitTextureArgument(expression: CudaLiteExpression | undefined, context: EmitContext): string {
   if (expression?.kind === "identifier") return context.nameFor(expression.name);
   if (expression) return emitExpression(expression, context);
@@ -3463,10 +3560,10 @@ function emitTextureArgument(expression: CudaLiteExpression | undefined, context
 
 function emitTextureReadExpression(
   texture: string,
-  x: string,
-  y: string,
+  coordArgs: readonly [string, string],
   valueType: CudaLiteScalarType | undefined,
 ): string {
+  const [x, y] = coordArgs;
   const coord = `clamp(vec2<i32>(i32(floor(${x})), i32(floor(${y}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1))`;
   const value = `textureLoad(${texture}, ${coord}, 0)`;
   if (valueType === "float2") return `${value}.xy`;
@@ -3482,6 +3579,27 @@ function emitTextureReadExpression(
     return `${wgslScalar(valueType)}(${fields.map((field) => `${scalarType}(${value}.${field})`).join(", ")})`;
   }
   return `${value}.r`;
+}
+
+function emitSurfaceWriteExpression(
+  surfaceName: string,
+  valueExpression: CudaLiteExpression,
+  xBytesExpression: CudaLiteExpression,
+  y: string,
+  context: EmitContext,
+): string {
+  const valueType = expressionValueTypeForEmit(valueExpression, context);
+  if (isCudaVectorType(valueType)) {
+    const value = emitExpression(valueExpression, context);
+    const fields = ["x", "y", "z", "w"].slice(0, cudaVectorLaneCount(valueType));
+    return [
+      ...fields.map((field, index) =>
+        `bg_surf2dwrite_${surfaceName}(f32(${value}.${field}), (${emitExpression(xBytesExpression, context)} + ${index * 4}), ${y})`,
+      ),
+      "0",
+    ].join("; ");
+  }
+  return `bg_surf2dwrite_${surfaceName}(${emitExpressionAsValueType(valueExpression, "float", context)}, ${emitExpression(xBytesExpression, context)}, ${y})`;
 }
 
 function emitTextureVectorCastHelpers(

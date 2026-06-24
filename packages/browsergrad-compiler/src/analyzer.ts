@@ -91,11 +91,17 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["atomicExch_system", [2, 2]],
   ["atomicCAS", [3, 3]],
   ["atomicCAS_system", [3, 3]],
+  ["tex1D", [2, 2]],
   ["tex2D", [3, 3]],
   ["tex2DLod", [4, 4]],
   ["tex1Dfetch", [2, 2]],
-  ["surf2Dread", [4, 5]],
+  ["tex2DLayered", [4, 4]],
+  ["tex3D", [4, 4]],
+  ["texCubemap", [4, 4]],
+  ["surf2Dread", [3, 5]],
   ["surf2Dwrite", [4, 5]],
+  ["surf1Dwrite", [3, 4]],
+  ["surf2DLayeredwrite", [5, 6]],
   ["sizeof", [1, 1]],
   ["alignof", [1, 1]],
   ["vec_at", [2, 2]],
@@ -1133,6 +1139,8 @@ function validateCallExpression(
     for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
     return { kind: "vector", valueType: "half2" };
   }
+  const vectorMath = validateVectorMinMaxCall(expression, callName, scope, diagnostics, requiredFeatures, walkExpression);
+  if (vectorMath) return vectorMath;
   const intrinsic = CUDA_INTRINSICS_BY_NAME.get(callName);
   if (intrinsic) {
     for (const feature of intrinsic.requiredFeatures ?? []) requiredFeatures.add(feature);
@@ -1175,17 +1183,17 @@ function validateCallExpression(
     validateScalarOperand(info, arg.span, diagnostics);
     return { kind: "scalar", valueType: warpReductionReturnType(callName, info.valueType) };
   }
-  if (callName === "tex2D" || callName === "tex2DLod" || callName === "tex1Dfetch") {
+  if (isTextureReadCall(callName)) {
     validateTextureRead(expression, callName, scope, diagnostics, walkExpression);
     if (requiresShaderF16(expression.templateValueType)) requiredFeatures.add("shader-f16");
     return expressionInfoForTextureRead(expression);
   }
   if (callName === "surf2Dread") {
     validateSurf2DRead(expression, scope, diagnostics, walkExpression);
-    return { kind: "scalar", valueType: "voidptr" };
+    return expression.args.length <= 3 ? expressionInfoForTextureRead(expression) : { kind: "scalar", valueType: "voidptr" };
   }
-  if (callName === "surf2Dwrite") {
-    validateSurf2DWrite(expression, scope, diagnostics, walkExpression);
+  if (callName === "surf2Dwrite" || callName === "surf1Dwrite" || callName === "surf2DLayeredwrite") {
+    validateSurf2DWrite(expression, callName, scope, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "float" };
   }
   if (callName === "sizeof" || callName === "alignof") {
@@ -1227,6 +1235,31 @@ function validateCallExpression(
     validateScalarOperand(info, arg.span, diagnostics);
   }
   return { kind: "scalar" };
+}
+
+function validateVectorMinMaxCall(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  callName: string,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  requiredFeatures: Set<string>,
+  walkExpression: ExpressionWalker,
+): ExpressionInfo | undefined {
+  if (callName !== "min" && callName !== "max" && callName !== "fminf" && callName !== "fmaxf") return undefined;
+  const infos = expression.args.map((arg) => walkExpression(arg, scope));
+  const vectorType = infos.find((info) => info.kind === "vector" && isCudaVectorType(info.valueType))?.valueType;
+  if (!isCudaVectorType(vectorType)) return undefined;
+  for (const [index, info] of infos.entries()) {
+    if (info.kind === "vector") {
+      if (info.valueType !== vectorType) {
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects matching CUDA vector types`, expression.args[index]?.span ?? expression.span));
+      }
+    } else {
+      validateScalarOperand(info, expression.args[index]?.span ?? expression.span, diagnostics);
+    }
+  }
+  if (cudaVectorScalarType(vectorType) === "half") requiredFeatures.add("shader-f16");
+  return { kind: "vector", valueType: vectorType };
 }
 
 function validateReadPointerOperand(
@@ -1370,7 +1403,10 @@ function validateFillRegs(
   if (info?.kind !== "array" && info?.kind !== "unknown") {
     diagnostics.push(error("unsupported-local-array-fill", "fill_*D_regs expects a fixed local array", target?.span ?? expression.span));
   }
-  if (value) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
+  if (value) {
+    const info = walkExpression(value, scope);
+    if (info.kind !== "vector") validateScalarOperand(info, value.span, diagnostics);
+  }
 }
 
 function validateRuntimeCall(
@@ -1745,7 +1781,7 @@ function validateTextureRead(
       diagnostics.push(error("unsupported-texture", `${callName} target '${texture.name}' is not a texture reference`, texture.span));
     }
   }
-  const coords = callName === "tex1Dfetch" ? expression.args.slice(1, 2) : expression.args.slice(1);
+  const coords = textureCoordinateArgs(expression, callName);
   for (const coord of coords) {
     validateScalarOperand(walkExpression(coord, scope), coord.span, diagnostics);
   }
@@ -1757,27 +1793,30 @@ function validateSurf2DRead(
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
 ): void {
-  const target = expression.args[0];
+  const returnForm = expression.args.length <= 3;
+  const target = returnForm ? undefined : expression.args[0];
   if (target) {
     const lvalue = target.kind === "unary" && target.operator === "&" ? target.argument : target;
     validateLValueExpression(lvalue, scope, diagnostics, walkExpression);
   }
-  const surface = expression.args[1];
-  if (surface?.kind !== "identifier") {
-    diagnostics.push(error("unsupported-texture", "surf2Dread second argument must be a surface reference", expression.span));
+  const surface = returnForm ? expression.args[0] : expression.args[1];
+  const surfaceName = surface ? rootIdentifier(surface) : undefined;
+  if (!surfaceName) {
+    diagnostics.push(error("unsupported-texture", returnForm ? "surf2Dread first argument must be a surface reference" : "surf2Dread second argument must be a surface reference", expression.span));
   } else {
-    const symbol = lookupSymbol(surface.name, scope, surface.span);
+    const symbol = lookupSymbol(surfaceName, scope, surface?.span ?? expression.span);
     if (symbol?.valueType !== "surface2d") {
-      diagnostics.push(error("unsupported-texture", `surf2Dread target '${surface.name}' is not a surface reference`, surface.span));
+      diagnostics.push(error("unsupported-texture", `surf2Dread target '${surfaceName}' is not a surface reference`, surface?.span ?? expression.span));
     }
   }
-  for (const coord of expression.args.slice(2, 4)) {
+  for (const coord of returnForm ? expression.args.slice(1, 3) : expression.args.slice(2, 4)) {
     validateScalarOperand(walkExpression(coord, scope), coord.span, diagnostics);
   }
 }
 
 function validateSurf2DWrite(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  callName: string,
   scope: Scope,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
@@ -1786,17 +1825,23 @@ function validateSurf2DWrite(
   const surface = expression.args[1];
   const xBytes = expression.args[2];
   const y = expression.args[3];
-  if (value) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
-  if (surface?.kind !== "identifier") {
+  const layer = callName === "surf2DLayeredwrite" ? expression.args[4] : undefined;
+  if (value) {
+    const info = walkExpression(value, scope);
+    if (info.kind !== "vector") validateScalarOperand(info, value.span, diagnostics);
+  }
+  const surfaceName = surface ? rootIdentifier(surface) : undefined;
+  if (!surfaceName) {
     diagnostics.push(error("unsupported-surface", "surf2Dwrite second argument must be a surface object", expression.span));
   } else {
-    const symbol = lookupSymbol(surface.name, scope, surface.span);
+    const symbol = lookupSymbol(surfaceName, scope, surface?.span ?? expression.span);
     if (symbol?.valueType !== "surface2d") {
-      diagnostics.push(error("unsupported-surface", `surf2Dwrite target '${surface.name}' is not a cudaSurfaceObject_t parameter`, surface.span));
+      diagnostics.push(error("unsupported-surface", `surf2Dwrite target '${surfaceName}' is not a cudaSurfaceObject_t parameter`, surface?.span ?? expression.span));
     }
   }
   if (xBytes) validateScalarOperand(walkExpression(xBytes, scope), xBytes.span, diagnostics);
   if (y) validateScalarOperand(walkExpression(y, scope), y.span, diagnostics);
+  if (layer) validateScalarOperand(walkExpression(layer, scope), layer.span, diagnostics);
 }
 
 function validateSizeof(
@@ -2295,7 +2340,8 @@ function validateNonCallExpression(
       } else {
         validateScalarOperand(right, expression.right.span, diagnostics);
       }
-      return { kind: "scalar" };
+      if (left.kind === "vector" || left.kind === "complex" || left.kind === "pointer" || left.kind === "pool-pointer") return left;
+      return { kind: "scalar", valueType: left.valueType };
     }
     case "update": {
       validateLValueExpression(expression.argument, scope, diagnostics, walkExpression, expression.operator);
@@ -2517,6 +2563,22 @@ function expressionInfoForTextureRead(expression: Extract<CudaLiteExpression, { 
   return isCudaVectorType(valueType)
     ? { kind: "vector", valueType }
     : { kind: "scalar", valueType };
+}
+
+function isTextureReadCall(name: string): boolean {
+  return name === "tex1D" ||
+    name === "tex1Dfetch" ||
+    name === "tex2D" ||
+    name === "tex2DLod" ||
+    name === "tex2DLayered" ||
+    name === "tex3D" ||
+    name === "texCubemap";
+}
+
+function textureCoordinateArgs(expression: Extract<CudaLiteExpression, { kind: "call" }>, callName: string): readonly CudaLiteExpression[] {
+  if (callName === "tex1D" || callName === "tex1Dfetch") return expression.args.slice(1, 2);
+  if (callName === "tex2DLod") return expression.args.slice(1, 3);
+  return expression.args.slice(1);
 }
 
 function vectorArithmeticInfo(

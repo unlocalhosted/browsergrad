@@ -4505,6 +4505,49 @@ __global__ void sample(float4 *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([1, 1.5, 2, 2.5]);
   });
 
+  it("lowers CUDA helper_math vector min/max overloads", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void clampVector(float4 *out) {
+  float4 a = make_float4(-1.0f, 2.0f, 8.0f, 300.0f);
+  float4 b = fminf(a, make_float4(255.0f));
+  out[0] = fmaxf(b, 0.0f);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("min(");
+    expect(compiled.wgsl).toContain("max(");
+    expect([...result.buffers.out as Float32Array]).toEqual([0, 2, 8, 255]);
+  });
+
+  it("lowers vector assignment chains and POD-field aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void vectorChain(float4 *x, float4 *y, float *out) {
+  float4 value = make_float4(2.0f, 3.0f, 5.0f, 7.0f);
+  x[0] = y[0] = value;
+  float4 record = x[0];
+  out[0] = record.S + record.X + record.MuByT + record.VBySqrtT;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array(4),
+          y: new Float32Array(4),
+          out: new Float32Array(1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 5, 7]);
+    expect([...result.buffers.y as Float32Array]).toEqual([2, 3, 5, 7]);
+    expect([...result.buffers.out as Float32Array]).toEqual([17]);
+  });
+
   it("lowers CUDA alias typed texture reads through integer vector casts", () => {
     const compiled = compileCudaLiteKernel(`
 texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
@@ -4552,6 +4595,41 @@ __global__ void sample(float4 *vecOut, float *scalarOut) {
     expect([...result.buffers.scalarOut as Float32Array]).toEqual([5]);
   });
 
+  it("lowers CUDA 1D, layered, 3D, and cubemap texture calls through texture atlas helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sample(float4 *vecOut, float *scalarOut, cudaTextureObject_t tex) {
+  scalarOut[0] = tex1D<float>(tex, 1.0f);
+  scalarOut[1] = tex2DLayered<float>(tex, 0.0f, 1.0f, 1.0f);
+  scalarOut[2] = tex3D<float>(tex, 2.0f, 1.0f, 1.0f);
+  scalarOut[3] = texCubemap<float>(tex, 1.0f, 0.0f, 0.0f);
+  vecOut[0] = tex1D<float4>(tex, 0.0f);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          vecOut: new Float32Array(4),
+          scalarOut: new Float32Array(4),
+        },
+        textures: {
+          tex: {
+            width: 4,
+            height: 24,
+            channels: 4,
+            data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+          },
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_cube_face");
+    expect(compiled.wgsl).toContain("bg_cube_u");
+    expect(compiled.wgsl).toContain("bg_tex2d_float4_tex");
+    expect([...result.buffers.scalarOut as Float32Array]).toEqual([5, 33, 41, 21]);
+    expect([...result.buffers.vecOut as Float32Array]).toEqual([1, 2, 3, 4]);
+  });
+
   it("lowers CUDA surf2Dread into guarded surface buffer loads", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void readSurface(uint *out, cudaSurfaceObject_t surf) {
@@ -4569,6 +4647,24 @@ __global__ void readSurface(uint *out, cudaSurfaceObject_t surf) {
     );
 
     expect(compiled.wgsl).toContain("fn bg_surf2dread_surf");
+    expect([...result.buffers.out as Uint32Array]).toEqual([9]);
+  });
+
+  it("lowers templated surf2Dread return-form calls", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void readSurface(uint *out, cudaSurfaceObject_t surf) {
+  out[0] = surf2Dread<unsigned int>(surf, 4, 0);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Uint32Array(1) },
+        surfaces: { surf: { width: 2, height: 1, data: new Float32Array([3, 9]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_surf2dread_surf");
     expect([...result.buffers.out as Uint32Array]).toEqual([9]);
   });
 

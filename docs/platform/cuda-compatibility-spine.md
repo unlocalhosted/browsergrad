@@ -76,8 +76,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   excludes kernels now runnable on real WebGPU through orchestration; current
   baseline is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=254`
-  WebGPU-runnable, and `<=103` hard gaps;
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=264`
+  WebGPU-runnable, and `<=93` hard gaps;
   `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=148`
   WebGPU-runnable, and `0` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=218`
@@ -113,7 +113,12 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   `__mul24`, and `__umul24`,
   CUDA 2D float texture-object params / `tex2D<float>` lowering, typed
   texture-vector reads such as `tex2D<float4>` / `tex2D<uchar4>`, and
-  multi-channel WebGPU texture uploads,
+  multi-channel WebGPU texture uploads, plus atlas-backed `tex1D`,
+  `tex2DLayered`, `tex3D`, and `texCubemap` point-sampling over WebGPU
+  `texture_2d`,
+  templated `surf2Dread<T>` return-form loads, scalarized `surf1Dwrite` /
+  `surf2DLayeredwrite` surface writes, vector min/max overloads, CUDA vector
+  assignment chains, and POD-style vector field aliases,
   positive pointer-offset child launches via generated base-offset uniforms,
   expanded order-stable DevicePool allocation launches, launched `__device__`
   child functions, and conservative host-lifted peer copies through a typed

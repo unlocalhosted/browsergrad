@@ -77,8 +77,21 @@ export function cudaVectorFieldIndex(type: CudaLiteScalarType, field: string): n
   const info = cudaVectorTypeInfo(type);
   if (!info) return undefined;
   const index = info.fields.indexOf(field);
-  return index < 0 ? undefined : index;
+  if (index >= 0) return index;
+  const alias = CUDA_VECTOR_FIELD_ALIASES.get(field);
+  return alias !== undefined && alias < info.lanes ? alias : undefined;
 }
+
+const CUDA_VECTOR_FIELD_ALIASES: ReadonlyMap<string, number> = new Map([
+  ["r", 0],
+  ["g", 1],
+  ["b", 2],
+  ["a", 3],
+  ["S", 0],
+  ["X", 1],
+  ["MuByT", 2],
+  ["VBySqrtT", 3],
+]);
 
 export function cudaVectorConstructorType(name: string): CudaLiteVectorType | undefined {
   return CUDA_VECTOR_CONSTRUCTORS.get(name);

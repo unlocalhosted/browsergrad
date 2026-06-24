@@ -6,7 +6,7 @@ import {
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./ast_queries.js";
-import { expressionName } from "./analyzer.js";
+import { expressionName, rootIdentifier } from "./analyzer.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
@@ -1088,7 +1088,7 @@ function vectorExpressionType(
     const name = expressionName(expression.callee);
     const constructor = name ? cudaVectorConstructorType(name) : undefined;
     if (constructor) return constructor;
-    if ((name === "tex2D" || name === "tex2DLod" || name === "tex1Dfetch") && isCudaVectorType(expression.templateValueType)) {
+    if (name !== undefined && isTextureReadCall(name) && isCudaVectorType(expression.templateValueType)) {
       return expression.templateValueType;
     }
     if (isHalf2Intrinsic(name) || name === "__float22half2_rn" || name === "__float2half2_rn" || name === "__floats2half2_rn") return "half2";
@@ -1558,50 +1558,59 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     if (Math.trunc(current) === Math.trunc(compare)) writeLValue(lvalue, value, context);
     return current;
   }
-  if (name === "tex2D" || name === "tex2DLod" || name === "tex1Dfetch") {
+  if (name !== undefined && isTextureReadCall(name)) {
     const textureName = textureNameFromExpression(expression.args[0], context);
     if (!textureName) throw compilerFailure(`${name} expects texture reference`);
     const texture = context.textures[textureName];
     if (!texture) throw compilerFailure(`missing texture input '${textureName}'`);
-    const x = Math.max(0, Math.min(texture.width - 1, Math.floor(evalNumber(expression.args[1]!, context))));
-    const y = name === "tex1Dfetch"
-      ? 0
-      : Math.max(0, Math.min(texture.height - 1, Math.floor(evalNumber(expression.args[2]!, context))));
+    const [x, y] = textureAtlasCoord(expression, name, texture, context);
     const valueType = expression.templateValueType ?? "float";
     if (isCudaVectorType(valueType)) return readTextureVector(texture, x, y, valueType);
     return texture.data[(y * texture.width + x) * textureChannels(texture)] ?? 0;
   }
   if (name === "surf2Dread") {
-    const target = expression.args[0];
-    const surfaceRef = expression.args[1];
-    if (!target) throw compilerFailure("surf2Dread expects output target");
-    if (surfaceRef?.kind !== "identifier") throw compilerFailure("surf2Dread expects surface reference");
-    const surface = context.surfaces[surfaceRef.name];
-    if (!surface) throw compilerFailure(`missing surface input '${surfaceRef.name}'`);
-    const x = Math.trunc(evalNumber(expression.args[2]!, context) / 4);
-    const y = Math.trunc(evalNumber(expression.args[3]!, context));
+    const returnForm = expression.args.length <= 3;
+    const target = returnForm ? undefined : expression.args[0];
+    const surfaceRef = returnForm ? expression.args[0] : expression.args[1];
+    if (!returnForm && !target) throw compilerFailure("surf2Dread expects output target");
+    const surfaceName = surfaceRef ? rootIdentifier(surfaceRef) : undefined;
+    if (!surfaceName) throw compilerFailure("surf2Dread expects surface reference");
+    const surface = context.surfaces[surfaceName];
+    if (!surface) throw compilerFailure(`missing surface input '${surfaceName}'`);
+    const xArg = returnForm ? expression.args[1] : expression.args[2];
+    const yArg = returnForm ? expression.args[2] : expression.args[3];
+    const x = Math.trunc(evalNumber(xArg!, context) / 4);
+    const y = Math.trunc(evalNumber(yArg!, context));
     const index = y * surface.width + x;
     const ok = x >= 0 && y >= 0 && x < surface.width && y < surface.height && index < surface.data.length;
     const value = ok ? surface.data[index] ?? 0 : 0;
-    const lvalue = target.kind === "unary" && target.operator === "&"
-      ? resolveLValue(target.argument, context)
-      : resolveLValue(target, context);
-    writeLValue(lvalue, value, context);
-    context.trace.reads.push({ name: surfaceRef.name, index, value, ok });
-    return 0;
+    if (target) {
+      const lvalue = target.kind === "unary" && target.operator === "&"
+        ? resolveLValue(target.argument, context)
+        : resolveLValue(target, context);
+      writeLValue(lvalue, value, context);
+    }
+    context.trace.reads.push({ name: surfaceName, index, value, ok });
+    return returnForm ? value : 0;
   }
-  if (name === "surf2Dwrite") {
+  if (name === "surf2Dwrite" || name === "surf1Dwrite" || name === "surf2DLayeredwrite") {
     const surfaceRef = expression.args[1];
-    if (surfaceRef?.kind !== "identifier") throw compilerFailure("surf2Dwrite expects surface reference");
-    const surface = context.surfaces[surfaceRef.name];
-    if (!surface) throw compilerFailure(`missing surface input '${surfaceRef.name}'`);
-    const value = evalNumber(expression.args[0]!, context);
+    const surfaceName = surfaceRef ? rootIdentifier(surfaceRef) : undefined;
+    if (!surfaceName) throw compilerFailure("surf2Dwrite expects surface reference");
+    const surface = context.surfaces[surfaceName];
+    if (!surface) throw compilerFailure(`missing surface input '${surfaceName}'`);
+    const value = evalExpression(expression.args[0]!, context);
     const x = Math.trunc(evalNumber(expression.args[2]!, context) / 4);
-    const y = Math.trunc(evalNumber(expression.args[3]!, context));
-    const index = y * surface.width + x;
-    const ok = x >= 0 && y >= 0 && x < surface.width && y < surface.height && index < surface.data.length;
-    if (ok) surface.data[index] = value;
-    context.trace.writes.push({ name: surfaceRef.name, index, value, ok });
+    const yBase = name === "surf1Dwrite" ? 0 : Math.trunc(evalNumber(expression.args[3]!, context));
+    const layer = name === "surf2DLayeredwrite" ? Math.trunc(evalNumber(expression.args[4]!, context)) : 0;
+    const y = yBase + layer;
+    const lanes = isCudaVectorValue(value) ? value.lanes : [valueAsNumber(value, "surface write value")];
+    for (const [lane, laneValue] of lanes.entries()) {
+      const index = y * surface.width + x + lane;
+      const ok = x >= 0 && y >= 0 && index >= 0 && index < surface.data.length;
+      if (ok) surface.data[index] = laneValue ?? 0;
+      context.trace.writes.push({ name: surfaceName, index, value: laneValue ?? 0, ok });
+    }
     return 0;
   }
   if (name === "sizeof") {
@@ -1752,6 +1761,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     deviceFunctionArgs(deviceFunction, expression.args, context),
     context,
   );
+  const vectorMinMax = evalVectorMinMaxCall(name, expression, context);
+  if (vectorMinMax !== undefined) return vectorMinMax;
   const args = expression.args.map((arg) => evalNumber(arg, context));
   const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
   if (intrinsic?.evaluate) return intrinsic.evaluate(args);
@@ -1882,6 +1893,76 @@ function readTextureVector(
     return lane === 3 ? 1 : 0;
   });
   return { kind: "cuda-vector", valueType, lanes };
+}
+
+function evalVectorMinMaxCall(
+  name: string | undefined,
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: ThreadContext,
+): CudaVectorValue | undefined {
+  if (name !== "min" && name !== "max" && name !== "fminf" && name !== "fmaxf") return undefined;
+  const values = expression.args.map((arg) => evalExpression(arg, context));
+  const vector = values.find(isCudaVectorValue);
+  if (!vector) return undefined;
+  const op = name === "min" || name === "fminf" ? Math.min : Math.max;
+  return {
+    kind: "cuda-vector",
+    valueType: vector.valueType,
+    lanes: vector.lanes.map((lane, index) => {
+      const otherValue = values.find((value) => value !== vector);
+      const other = isCudaVectorValue(otherValue)
+        ? otherValue.lanes[index] ?? 0
+        : valueAsNumber(otherValue ?? 0, name);
+      return roundVectorLane(vector.valueType, op(lane ?? 0, other));
+    }),
+  };
+}
+
+function textureAtlasCoord(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  name: string,
+  texture: { readonly width: number; readonly height: number },
+  context: ThreadContext,
+): readonly [number, number] {
+  const x = evalNumber(expression.args[1]!, context);
+  if (name === "tex1D" || name === "tex1Dfetch") return [clampTexCoord(x, texture.width), 0];
+  const y = evalNumber(expression.args[2]!, context);
+  if (name === "tex2D" || name === "tex2DLod") return [
+    clampTexCoord(x, texture.width),
+    clampTexCoord(y, texture.height),
+  ];
+  if (name === "tex2DLayered" || name === "tex3D") {
+    const layer = evalNumber(expression.args[3]!, context);
+    const yy = clampTexCoord(y + layer, texture.height);
+    return [clampTexCoord(x, texture.width), yy];
+  }
+  if (name === "texCubemap") {
+    const z = evalNumber(expression.args[3]!, context);
+    const ax = Math.abs(x);
+    const ay = Math.abs(y);
+    const az = Math.abs(z);
+    const face = ax >= ay && ax >= az ? (x >= 0 ? 0 : 1) : ay >= az ? (y >= 0 ? 2 : 3) : (z >= 0 ? 4 : 5);
+    const u = ax >= ay && ax >= az ? z / Math.max(ax, 1e-6) : x / Math.max(ay >= az ? ay : az, 1e-6);
+    const v = ax >= ay && ax >= az ? y / Math.max(ax, 1e-6) : ay >= az ? z / Math.max(ay, 1e-6) : y / Math.max(az, 1e-6);
+    const px = ((u + 1) * 0.5) * (texture.width - 1);
+    const py = ((v + 1) * 0.5) * (texture.width - 1) + face * texture.width;
+    return [clampTexCoord(px, texture.width), clampTexCoord(py, texture.height)];
+  }
+  return [0, 0];
+}
+
+function clampTexCoord(value: number, extent: number): number {
+  return Math.max(0, Math.min(extent - 1, Math.floor(value)));
+}
+
+function isTextureReadCall(name: string): boolean {
+  return name === "tex1D" ||
+    name === "tex1Dfetch" ||
+    name === "tex2D" ||
+    name === "tex2DLod" ||
+    name === "tex2DLayered" ||
+    name === "tex3D" ||
+    name === "texCubemap";
 }
 
 function textureChannels(texture: { readonly width: number; readonly data: Float32Array; readonly channels?: number }): number {
