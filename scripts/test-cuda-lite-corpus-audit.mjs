@@ -82,6 +82,20 @@ __global__ void TemplateHelper(float *out, const float *data, size_t count) {
 __global__ void TemplateSpecializationHelper(float *out, const float *data) {
   out[threadIdx.x] = cast_value_like<float, float>(data[threadIdx.x]);
 }
+
+__global__ void DynamicVectorShared(uchar4 *out) {
+  extern __shared__ uchar4 scratch[];
+  int i = threadIdx.x;
+  scratch[i] = make_uchar4((uint)i, (uint)(i + 1), (uint)(i + 2), (uint)(i + 3));
+  out[i] = scratch[i];
+}
+
+__global__ void DynamicAlignedByteShared(float *out) {
+  extern __shared__ __align__(16) unsigned char bytes[];
+  bytes[threadIdx.x] = (unsigned char)threadIdx.x;
+  __syncthreads();
+  if (threadIdx.x == 0) out[0] = (float)bytes[1];
+}
 `);
   fs.writeFileSync(path.join(tmpRoot, "main.cu"), `
 #include "defs.h"
@@ -106,6 +120,14 @@ void launch_template(float *out, const float *data, size_t count) {
 void launch_template_specialization(float *out, const float *data) {
   TemplateSpecializationHelper<<<1, 32>>>(out, data);
 }
+
+void launch_dynamic_vector(uchar4 *out) {
+  DynamicVectorShared<<<1, 32, 512>>>(out);
+}
+
+void launch_dynamic_aligned(float *out) {
+  DynamicAlignedByteShared<<<1, 32, 512>>>(out);
+}
 `);
 
   const result = spawnSync("node", ["scripts/audit-cuda-lite-corpus.mjs", tmpRoot, "--details"], {
@@ -119,11 +141,11 @@ void launch_template_specialization(float *out, const float *data) {
     process.exit(result.status ?? 1);
   }
   const report = JSON.parse(result.stdout.slice(result.stdout.indexOf("{")));
-  assertEqual(report.summary.totalKernelDefinitions, 5, "total kernel count");
+  assertEqual(report.summary.totalKernelDefinitions, 7, "total kernel count");
   assertEqual(report.summary.corpusKernelExecution, "compile-only", "corpus execution mode");
-  assertEqual(report.summary.webGpuCompiledOk, 5, "reverse include kernel WebGPU compiled");
+  assertEqual(report.summary.webGpuCompiledOk, 7, "reverse include kernel WebGPU compiled");
   assertEqual(report.summary.fixtureBackedExecutionOk, 0, "fixture-backed execution count");
-  assertEqual(report.summary.webGpuRunnableOk, 5, "reverse include kernel WebGPU runnable");
+  assertEqual(report.summary.webGpuRunnableOk, 7, "reverse include kernel WebGPU runnable");
   assertEqual(report.summary.hardFail, 0, "reverse include hard gaps");
   console.log("cuda-lite corpus audit tests passed");
 } finally {
