@@ -59,6 +59,20 @@ const PORTABLE_POINTER_BASE_TYPES = new Set([
   "uint3",
   "uint4",
 ]);
+const SEMANTIC_BUILTIN_DEVICE_HELPERS = new Set([
+  "__ldcs",
+  "__stcs",
+  "__ldg",
+  "__stcg",
+  "vec_at",
+  "load128",
+  "load128cs",
+  "store128",
+  "store128cs",
+  "store128cg",
+  "div_ceil",
+  "blockReduce",
+]);
 
 const files = listFiles(corpusRoot)
   .filter((file) => /\.(?:md|markdown|cu|cuh|cpp|cc|cxx|h|hpp)$/i.test(file))
@@ -747,7 +761,12 @@ function collectPortableDeviceFunctions(source, recordNames = new Set(), defines
     const fn = clean.slice(start, end);
     const signature = fn.slice(0, fn.indexOf("{"));
     const name = cudaFunctionDefinitionName(signature);
-    if (name && !sourceLaunchesDeviceFunction(clean, name) && isPortableDeviceFunctionCandidate(signature, fn, name, recordNames, definesByName)) {
+    if (
+      name &&
+      !SEMANTIC_BUILTIN_DEVICE_HELPERS.has(name) &&
+      !sourceLaunchesDeviceFunction(clean, name) &&
+      isPortableDeviceFunctionCandidate(signature, fn, name, recordNames, definesByName)
+    ) {
       functions.push({ name, source: fn });
     }
     index = end;
@@ -858,19 +877,38 @@ function stripCooperativeGroupParamTypes(signature) {
   );
 }
 
-function normalizePortableBaseType(type, _definesByName = new Map(), _seen = new Set()) {
-  if (type === "unsigned int" || type === "unsigned") return "uint";
-  if (type === "unsigned char" || type === "uchar" || type === "uint8_t") return "uint";
-  if (type === "uint64_t" || type === "uint32_t" || type === "uintptr_t") return "uint";
-  if (type === "signed int" || type === "signed") return "int";
-  if (type === "signed char" || type === "char" || type === "int8_t") return "int";
-  if (type === "int64_t" || type === "int32_t") return "int";
-  if (type === "clock_t") return "uint";
-  if (type === "size_t") return "uint";
-  if (type === "ptrdiff_t") return "int";
-  if (type === "__half") return "half";
-  if (type === "__nv_bfloat16" || type === "nv_bfloat16") return "bf16";
-  return type;
+function normalizePortableBaseType(type, definesByName = new Map(), seen = new Set()) {
+  let normalized = type
+    .replace(/\b(?:const|volatile|typename|class|struct)\b/gu, " ")
+    .replace(/[&*]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const packed = /^Packed128\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>$/u.exec(normalized)?.[1];
+  if (packed !== undefined) {
+    const elementType = normalizePortableBaseType(definesByName.get(packed) ?? packed, definesByName, new Set([...seen, packed]));
+    if (elementType === "float") return "float4";
+    if (elementType === "int") return "int4";
+    if (elementType === "uint") return "uint4";
+    if (elementType === "half") return "half";
+    if (elementType === "bf16") return "bf16";
+    return normalized;
+  }
+  const mapped = definesByName.get(normalized);
+  if (mapped && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(mapped) && mapped !== normalized && !seen.has(normalized)) {
+    normalized = normalizePortableBaseType(mapped, definesByName, new Set([...seen, normalized]));
+  }
+  if (normalized === "unsigned int" || normalized === "unsigned") return "uint";
+  if (normalized === "unsigned char" || normalized === "uchar" || normalized === "uint8_t") return "uint";
+  if (normalized === "uint64_t" || normalized === "uint32_t" || normalized === "uintptr_t") return "uint";
+  if (normalized === "signed int" || normalized === "signed") return "int";
+  if (normalized === "signed char" || normalized === "char" || normalized === "int8_t") return "int";
+  if (normalized === "int64_t" || normalized === "int32_t") return "int";
+  if (normalized === "clock_t") return "uint";
+  if (normalized === "size_t") return "uint";
+  if (normalized === "ptrdiff_t") return "int";
+  if (normalized === "__half") return "half";
+  if (normalized === "__nv_bfloat16" || normalized === "nv_bfloat16") return "bf16";
+  return normalized;
 }
 
 function hasSupportedDeviceReturnShape(signature, name, recordNames = new Set(), definesByName = new Map()) {
@@ -944,7 +982,7 @@ function normalizeAliasType(sourceType, defines) {
   if (type.endsWith("*") || type.includes("(") || type.includes(")")) return undefined;
   const packed = /^Packed128\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>$/u.exec(type)?.[1];
   if (packed !== undefined) {
-    const elementType = defines.get(packed) ?? packed;
+    const elementType = normalizePortableBaseType(defines.get(packed) ?? packed, defines);
     if (elementType === "float") return "float4";
     if (elementType === "int") return "int4";
     if (elementType === "uint") return "uint4";
@@ -965,7 +1003,7 @@ function normalizeAliasType(sourceType, defines) {
   if (type === "char2") return "int2";
   if (type === "char3") return "int3";
   if (type === "char4") return "int4";
-  const supported = new Set(["float", "int", "uint", "half", "__half", "bool", "float2", "float3", "float4", "half2", "int2", "int3", "int4", "uint2", "uint3", "uint4"]);
+  const supported = new Set(["float", "int", "uint", "half", "__half", "bf16", "bool", "float2", "float3", "float4", "half2", "int2", "int3", "int4", "uint2", "uint3", "uint4"]);
   return supported.has(type) ? type : undefined;
 }
 

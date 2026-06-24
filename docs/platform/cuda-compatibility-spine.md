@@ -74,8 +74,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
 - Real-world no-regression gate:
   `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=230`
   WebGPU-runnable, and `<=127` hard gaps;
-  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=131`
-  WebGPU-runnable, and `<=17` hard gaps;
+  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=134`
+  WebGPU-runnable, and `<=14` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=217`
   WebGPU-runnable, and `<=76` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
