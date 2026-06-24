@@ -1857,6 +1857,34 @@ __global__ void helperTileReduce(int *out) {
     expect([...result.buffers.out as Int32Array]).toEqual([4]);
   });
 
+  it("lowers custom vector cooperative reductions through scalar subgroup shuffles", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__device__ float2 merge_pair(float2 a, float2 b) {
+  return make_float2(a.x + b.x, a.y + b.y);
+}
+__global__ void vectorTileReduce(float2 *out) {
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_block_tile<32> tile = cg::tiled_partition<32>(block);
+  float2 value = out[0];
+  float2 total = cg::reduce(tile, value, merge_pair);
+  if (threadIdx.x == 0) { out[0] = total; }
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [1, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array([2, 3]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_cg_reduce_merge_pair_float2_32");
+    expect(compiled.wgsl).toContain("subgroupShuffleXor(value.x, offset)");
+    expect(compiled.wgsl).toContain("value = merge_pair(value, vec2<f32>");
+    expect([...result.buffers.out as Float32Array]).toEqual([2, 3]);
+  });
+
   it("accepts C++ namespace aliases inside kernel bodies", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void kernelLocalNamespace(float *out) {

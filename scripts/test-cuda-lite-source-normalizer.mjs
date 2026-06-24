@@ -287,6 +287,25 @@ __global__ void scalar_pack_load(bf16 *out, const bf16 *in, int i) {
 }
 
 {
+  const source = createKernelCompilationUnit({
+    kernel: `
+namespace cg = cooperative_groups;
+__device__ float2 merge_pair(float2 a, float2 b) { return make_float2(a.x + b.x, a.y + b.y); }
+__global__ void vector_reduce(float2 *out) {
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_block_tile<32> warp = cg::tiled_partition<32>(block);
+  float2 value = make_float2(out[0].x, out[0].y);
+  float2 total = cg::reduce(warp, value, merge_pair);
+  out[0] = total;
+}`,
+  });
+  assert.match(source, /float2 total = value;/u);
+  assert.match(source, /__bg_for___bg_cg_reduce_offset_0_0 = 16/u);
+  assert.match(source, /total = merge_pair\(total, make_float2\(__shfl_xor_sync\(0xffffffff, total\.x/u);
+  assert.doesNotMatch(source, /float2 total = cg::reduce/u);
+}
+
+{
   const launchBoundsKernel = `
 __global__ void __launch_bounds__(WARP_SIZE * kTiles)
     bounded(float *out, const float *in, int N) {

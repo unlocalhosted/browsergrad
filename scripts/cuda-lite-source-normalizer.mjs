@@ -149,7 +149,8 @@ export function createKernelCompilationUnit({
     new Set([...params, ...templateNames]),
   );
   const withCooperativeGroupHelpers = normalizeCooperativeGroupHelperParams(withTypeDefines);
-  const withStdMathAliases = normalizeStdMathAliases(withCooperativeGroupHelpers);
+  const withVectorCooperativeReductions = normalizeVectorCooperativeReductions(withCooperativeGroupHelpers);
+  const withStdMathAliases = normalizeStdMathAliases(withVectorCooperativeReductions);
   const withoutSupportedAliases = stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withStdMathAliases, effectiveDefines));
   const withVectorConstructors = normalizeVectorStaticConstructors(withoutSupportedAliases, effectiveDefines);
   const withVectorLength = normalizeCudaVectorLength(withVectorConstructors);
@@ -982,6 +983,56 @@ function normalizeStdMathAliases(source) {
   return source
     .replace(/\bstd\s*::\s*isinf\s*\(/gu, "isinf(")
     .replace(/\bstd\s*::\s*numeric_limits\s*<\s*(?:float|double)\s*>\s*::\s*infinity\s*\(\s*\)/gu, "INFINITY");
+}
+
+function normalizeVectorCooperativeReductions(source) {
+  const re = /\b(float[234]|int[234]|uint[234])\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:cg|cooperative_groups)\s*::\s*reduce\s*\(/gu;
+  let out = "";
+  let cursor = 0;
+  let counter = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const vectorType = match[1];
+    const target = match[2];
+    const open = source.indexOf("(", match.index);
+    const close = findBalanced(source, open, "(", ")");
+    if (!vectorType || !target || open < 0 || close === undefined) {
+      re.lastIndex = match.index + 1;
+      continue;
+    }
+    let end = close + 1;
+    while (/\s/u.test(source[end] ?? "")) end++;
+    if (source[end] !== ";") {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    const args = splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim());
+    if (args.length !== 3 || args.some((arg) => arg.length === 0)) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    const replacement = emitVectorCooperativeReduction(vectorType, target, args[1], args[2], counter++);
+    out += source.slice(cursor, match.index);
+    out += replacement;
+    cursor = end + 1;
+    re.lastIndex = end + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function emitVectorCooperativeReduction(vectorType, target, value, op, counter) {
+  const lanes = vectorLaneCount(vectorType);
+  if (lanes === undefined) return `${vectorType} ${target} = ${value};`;
+  const fields = ["x", "y", "z", "w"].slice(0, lanes);
+  const offset = `__bg_cg_reduce_offset_${counter}`;
+  const shuffled = `make_${vectorType}(${fields.map((field) =>
+    `__shfl_xor_sync(0xffffffff, ${target}.${field}, ${offset})`).join(", ")})`;
+  return [
+    `${vectorType} ${target} = ${value};`,
+    `for (int ${offset} = 16; ${offset} > 0; ${offset} /= 2) {`,
+    `  ${target} = ${op}(${target}, ${shuffled});`,
+    "}",
+  ].join(" ");
 }
 
 function normalizeCooperativeGroupHelperParams(source) {

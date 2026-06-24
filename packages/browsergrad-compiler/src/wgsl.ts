@@ -202,10 +202,13 @@ export function emitKernelIrWgsl(
   }
 
   const emittedFunctions = functionsToEmit(ir);
-  for (const fn of emittedFunctions) {
+  const functionLines = emittedFunctions.flatMap((fn) => ["", ...emitDeviceFunction(fn, context)]);
+  const mainBodyLines = ir.body.flatMap((statement) => emitStatement(statement, context, 1));
+  for (const helper of context.vectorCooperativeReduceHelpers.values()) {
     lines.push("");
-    lines.push(...emitDeviceFunction(fn, context));
+    lines.push(...emitVectorCooperativeReduceHelper(helper, context));
   }
+  lines.push(...functionLines);
 
   lines.push("");
   lines.push(`@compute @workgroup_size(${ir.workgroupSize.join(", ")})`);
@@ -220,7 +223,7 @@ export function emitKernelIrWgsl(
     const baseName = context.mutablePointerBaseFor(name);
     if (baseName) lines.push(`  var ${baseName}: u32 = ${baseField ? `params.${context.nameFor(baseField)}` : "0u"};`);
   }
-  lines.push(...ir.body.flatMap((statement) => emitStatement(statement, context, 1)));
+  lines.push(...mainBodyLines);
   lines.push("}");
 
   return {
@@ -257,6 +260,7 @@ interface EmitContext {
   readonly rawPoolAllocators: readonly RawPoolAllocator[];
   readonly externalPoolNames: readonly string[];
   readonly mutablePointerBases: readonly string[];
+  readonly vectorCooperativeReduceHelpers: Map<string, VectorCooperativeReduceHelper>;
   mutablePointerBaseFor(name: string): string | undefined;
   isLocalName(name: string): boolean;
   localValueTypeFor(name: string): CudaLiteScalarType | undefined;
@@ -264,6 +268,14 @@ interface EmitContext {
   cooperativeGroupFor(name: string): CudaLiteCooperativeGroupDecl | undefined;
   surfaceWidthField(name: string): string;
   nameFor(name: string): string;
+}
+
+interface VectorCooperativeReduceHelper {
+  readonly key: string;
+  readonly name: string;
+  readonly opName: string;
+  readonly valueType: CudaLiteVectorType;
+  readonly tileSize: number;
 }
 
 interface PointerAlias {
@@ -448,6 +460,7 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
   const localValueTypes = collectLocalValueTypes(ir.body);
   const localArrays = collectLocalArrays(ir.body);
   const wgslNames = createWgslNameMap(collectWgslDeclaredNames(ir, localNames, externalPoolNames));
+  const vectorCooperativeReduceHelpers = new Map<string, VectorCooperativeReduceHelper>();
   const paramsBinding = uniformScalars.length > 0 ? bindings.length : undefined;
   if (paramsBinding !== undefined) {
     bindings.push({
@@ -510,6 +523,7 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
     rawPoolAllocators,
     externalPoolNames,
     mutablePointerBases,
+    vectorCooperativeReduceHelpers,
     mutablePointerBaseFor(name) {
       if (localPointerHandles.has(name)) return wgslNames.get(`${name}_base`) ?? `${name}_base`;
       return mutablePointerBases.includes(name) ? `bg_${name}_base` : undefined;
@@ -2675,10 +2689,77 @@ function emitCooperativeNamespaceCall(expression: CudaLiteCallExpression, contex
   const group = context.cooperativeGroupFor(groupArg.name);
   if (!group) return undefined;
   if (name.endsWith("::sync")) return group.groupKind === "grid" ? "0" : "workgroupBarrier()";
+  const vectorReduce = emitVectorCooperativeNamespaceReduce(expression, group, context);
+  if (vectorReduce !== undefined) return vectorReduce;
   const value = expression.args[1] ? emitExpression(expression.args[1], context) : "0";
   const op = cooperativeReductionOpName(expression.args[2]);
   if (op?.endsWith("::greater")) return `subgroupMax(${value})`;
   return `subgroupAdd(${value})`;
+}
+
+function emitVectorCooperativeNamespaceReduce(
+  expression: CudaLiteCallExpression,
+  group: CudaLiteCooperativeGroupDecl,
+  context: EmitContext,
+): string | undefined {
+  const valueExpression = expression.args[1];
+  const opExpression = expression.args[2];
+  if (!valueExpression) return undefined;
+  const valueType = expressionValueTypeForEmit(valueExpression, context);
+  if (!isCudaVectorType(valueType)) return undefined;
+  const opName = opExpression ? expressionName(opExpression) : undefined;
+  const op = opName ? context.deviceFunctionFor(opName) : undefined;
+  if (!op || op.returnType !== valueType) {
+    throw featureError("unsupported-cooperative-groups", "vector cg::reduce expects a device helper returning the same CUDA vector type");
+  }
+  const tileSize = group.groupKind === "tile" ? group.tileSize ?? 32 : 32;
+  const helper = registerVectorCooperativeReduceHelper(context, op.name, valueType, tileSize);
+  return `${helper.name}(${emitExpression(valueExpression, context)}, local_id, workgroup_id, num_workgroups)`;
+}
+
+function registerVectorCooperativeReduceHelper(
+  context: EmitContext,
+  opName: string,
+  valueType: CudaLiteVectorType,
+  tileSize: number,
+): VectorCooperativeReduceHelper {
+  const key = `${opName}:${valueType}:${tileSize}`;
+  const existing = context.vectorCooperativeReduceHelpers.get(key);
+  if (existing) return existing;
+  const helper = {
+    key,
+    name: `bg_cg_reduce_${sanitizeWgslIdentifier(opName)}_${valueType}_${tileSize}`,
+    opName,
+    valueType,
+    tileSize,
+  };
+  context.vectorCooperativeReduceHelpers.set(key, helper);
+  return helper;
+}
+
+function emitVectorCooperativeReduceHelper(
+  helper: VectorCooperativeReduceHelper,
+  context: EmitContext,
+): string[] {
+  const type = wgslScalar(helper.valueType);
+  const fields = ["x", "y", "z", "w"].slice(0, cudaVectorLaneCount(helper.valueType));
+  const start = Math.max(1, Math.floor(helper.tileSize / 2));
+  const shuffled = `${type}(${fields.map((field) => `subgroupShuffleXor(value.${field}, offset)`).join(", ")})`;
+  return [
+    `fn ${helper.name}(value_arg: ${type}, local_id: vec3<u32>, workgroup_id: vec3<u32>, num_workgroups: vec3<u32>) -> ${type} {`,
+    `  var value: ${type} = value_arg;`,
+    `  var offset: u32 = ${start}u;`,
+    "  while (offset > 0u) {",
+    `    value = ${context.nameFor(helper.opName)}(value, ${shuffled}, local_id, workgroup_id, num_workgroups);`,
+    "    offset = offset / 2u;",
+    "  }",
+    "  return value;",
+    "}",
+  ];
+}
+
+function sanitizeWgslIdentifier(value: string): string {
+  return value.replace(/[^A-Za-z0-9_]/gu, "_");
 }
 
 function cooperativeReductionOpName(expression: CudaLiteExpression | undefined): string | undefined {

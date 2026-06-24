@@ -1689,6 +1689,7 @@ function validateCooperativeNamespaceCall(
     const value = expression.args[1];
     if (!value) return { kind: "unknown" };
     const info = walkExpression(value, scope);
+    if (info.kind === "vector" && isCudaVectorType(info.valueType)) return { kind: "vector", valueType: info.valueType };
     validateScalarOperand(info, value.span, diagnostics);
     return { kind: "scalar", valueType: info.valueType };
   }

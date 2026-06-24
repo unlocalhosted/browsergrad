@@ -1903,7 +1903,7 @@ function poolNameFromAllocatorArg(expression: CudaLiteExpression | undefined, co
 function evalCooperativeGroupCall(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
   context: ThreadContext,
-): number | undefined {
+): EvalValue | undefined {
   const namespaceCall = evalCooperativeNamespaceCall(expression, context);
   if (namespaceCall !== undefined) return namespaceCall;
   const callee = expression.callee;
@@ -1940,20 +1940,23 @@ function evalCooperativeGroupCall(
 function evalCooperativeNamespaceCall(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
   context: ThreadContext,
-): number | undefined {
+): EvalValue | undefined {
   const name = expressionNameForReference(expression.callee);
   if (!name?.endsWith("::sync") && !name?.endsWith("::reduce")) return undefined;
   const groupArg = expression.args[0];
   if (groupArg?.kind !== "identifier") return undefined;
-  const value = context.locals.get(groupArg.name);
-  if (!isCooperativeGroup(value)) return undefined;
+  const groupValue = context.locals.get(groupArg.name);
+  if (!isCooperativeGroup(groupValue)) return undefined;
   if (name.endsWith("::sync")) return 0;
   const reduced = expression.args[1];
-  const item = reduced ? evalNumber(reduced, context) : 0;
+  if (!reduced) return 0;
+  const reducedValue = evalExpression(reduced, context);
+  if (isCudaVectorValue(reducedValue)) return reducedValue;
+  const item = valueAsNumber(reducedValue, "cooperative reduce value");
   const op = cooperativeReductionOpName(expression.args[2]);
   if (op?.endsWith("::plus")) {
-    const size = value.groupKind === "tile"
-      ? value.tileSize ?? 32
+    const size = groupValue.groupKind === "tile"
+      ? groupValue.tileSize ?? 32
       : context.blockDim.x * context.blockDim.y * context.blockDim.z;
     return item * size;
   }
