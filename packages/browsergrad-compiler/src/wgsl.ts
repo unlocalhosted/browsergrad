@@ -247,6 +247,9 @@ export function emitKernelIrWgsl(
     const baseName = context.mutablePointerBaseFor(name);
     if (baseName) lines.push(`  var ${baseName}: u32 = ${baseField ? `params.${context.nameFor(baseField)}` : "0u"};`);
   }
+  for (const param of context.mutableScalarParams) {
+    lines.push(`  var ${context.nameFor(param.name)}: ${wgslScalar(param.valueType)} = ${emitUniformScalarRead(param.name, context)};`);
+  }
   lines.push(...mainBodyLines);
   lines.push("}");
 
@@ -266,6 +269,7 @@ interface EmitContext {
   readonly bindings: readonly WgslKernelBindingInput[];
   readonly paramsBinding?: number;
   readonly uniformScalars: readonly { readonly name: string; readonly valueType: CudaLiteScalarType }[];
+  readonly mutableScalarParams: readonly CudaLiteParam[];
   readonly deviceFunctionNames: ReadonlySet<string>;
   deviceFunctionFor(name: string): CudaLiteDeviceFunction | undefined;
   devicePointerParamFor(name: string): CudaLiteParam | undefined;
@@ -495,8 +499,13 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
   const poolPointers = collectPoolPointers(ir.body);
   const rawPoolAllocators = collectRawPoolAllocators(ir.body);
   const cooperativeGroups = collectCooperativeGroups(ir.body);
-  const localNames = collectLocalNames(ir.body);
-  const localValueTypes = collectLocalValueTypes(ir.body);
+  const mutableScalarParams = collectMutableScalarParams(ir.body, ir.params);
+  const localNames = new Set([
+    ...collectLocalNames(ir.body),
+    ...mutableScalarParams.map((param) => param.name),
+  ]);
+  const localValueTypes = new Map(collectLocalValueTypes(ir.body));
+  for (const param of mutableScalarParams) localValueTypes.set(param.name, param.valueType);
   const localArrays = collectLocalArrays(ir.body);
   const wgslNames = createWgslNameMap(collectWgslDeclaredNames(ir, localNames, externalPoolNames));
   const vectorCooperativeReduceHelpers = new Map<string, VectorCooperativeReduceHelper>();
@@ -514,6 +523,7 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
     bindings,
     ...(paramsBinding === undefined ? {} : { paramsBinding }),
     uniformScalars,
+    mutableScalarParams,
     deviceFunctionNames: new Set(ir.functions.map((fn) => fn.name)),
     deviceFunctionFor(name) {
       return ir.functions.find((fn) => fn.name === name);
@@ -1960,6 +1970,34 @@ function collectLocalNames(statements: readonly CudaLiteStatement[]): ReadonlySe
   return names;
 }
 
+function collectMutableScalarParams(
+  statements: readonly CudaLiteStatement[],
+  params: readonly CudaLiteParam[],
+): readonly CudaLiteParam[] {
+  const paramByName = new Map(params.filter(isMutableKernelValueParam).map((param) => [param.name, param] as const));
+  const mutated = new Set<string>();
+  walkCudaLiteExpressions(statements, (expression) => {
+    const name = mutatedIdentifierName(expression);
+    if (name && paramByName.has(name)) mutated.add(name);
+  });
+  return params.filter((param) => mutated.has(param.name));
+}
+
+function mutatedIdentifierName(expression: CudaLiteExpression): string | undefined {
+  if (expression.kind === "assignment" && expression.left.kind === "identifier") return expression.left.name;
+  if (expression.kind === "update" && expression.argument.kind === "identifier") return expression.argument.name;
+  return undefined;
+}
+
+function isMutableKernelValueParam(param: CudaLiteParam): boolean {
+  return !param.pointer &&
+    param.cooperativeGroupKind === undefined &&
+    !isSurfaceParam(param) &&
+    !isTextureParam(param) &&
+    param.valueType !== "devicepool" &&
+    param.valueType !== "voidptr";
+}
+
 function collectLocalArrays(statements: readonly CudaLiteStatement[]): ReadonlyMap<string, CudaLiteVarDecl> {
   const arrays = new Map<string, CudaLiteVarDecl>();
   const walk = (items: readonly CudaLiteStatement[]): void => {
@@ -2780,11 +2818,16 @@ function emitIdentifier(name: string, context: EmitContext, mode: EmitMode = "va
     return emitDeviceGlobalPointerRead(global, "0u", context.ir, context);
   }
   const param = context.paramFor(name);
-  const uniformType = context.uniformScalarTypeFor(name);
   if ((param && !param.pointer && !isSurfaceParam(param)) || context.isUniformScalar(name)) {
-    return uniformType === "bool" ? `(params.${context.nameFor(name)} != 0u)` : `params.${context.nameFor(name)}`;
+    return emitUniformScalarRead(name, context);
   }
   return context.nameFor(name);
+}
+
+function emitUniformScalarRead(name: string, context: EmitContext): string {
+  return context.uniformScalarTypeFor(name) === "bool"
+    ? `(params.${context.nameFor(name)} != 0u)`
+    : `params.${context.nameFor(name)}`;
 }
 
 function sharedDeclarationFor(name: string, context: EmitContext): CudaLiteVarDecl | undefined {
@@ -3794,7 +3837,8 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   }
   const left = emitExpression(expression.left, context, "lvalue");
   const right = emitExpression(expression.right, context);
-  if ((param?.valueType === "bool" || global?.valueType === "bool") && (expression.left.kind === "index" || expression.left.kind === "identifier")) {
+  const scalarParamLocal = root !== undefined && param?.pointer === false && context.isLocalName(root);
+  if (((param?.valueType === "bool" && !scalarParamLocal) || global?.valueType === "bool") && (expression.left.kind === "index" || expression.left.kind === "identifier")) {
     if (expression.operator === "=") return `${left} = select(0u, 1u, ${right})`;
   }
   if (expression.operator === "<<=") return `${left} = (${left} << ${right})`;

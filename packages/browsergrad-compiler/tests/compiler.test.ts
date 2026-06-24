@@ -198,6 +198,33 @@ describe("CUDA-lite compiler", () => {
     expect(result.trace.some((thread) => thread.writes.length > 0)).toBe(true);
   });
 
+  it("treats scalar kernel parameters as mutable per-thread locals", () => {
+    const source = `
+__global__ void mutateParams(float* out, float alpha, float beta, int n, bool enabled) {
+  beta /= alpha;
+  n += 1;
+  enabled = !enabled;
+  if (threadIdx.x == 0) {
+    out[0] = enabled ? -1.0f : beta + (float)n;
+  }
+}
+`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(1) },
+        scalars: { alpha: 2, beta: 8, n: 3, enabled: 1 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([8]);
+    expect(compiled.wgsl).toContain("var beta: f32 = params.beta;");
+    expect(compiled.wgsl).toContain("var n: i32 = params.n;");
+    expect(compiled.wgsl).toContain("var enabled: bool = (params.enabled != 0u);");
+  });
+
   it("caches compiled kernels with deterministic option keys and LRU eviction", () => {
     let compileCount = 0;
     const cache = createCudaLiteCompilerCache({
@@ -621,6 +648,28 @@ __global__ void derefKernel(const int* n, float* out) {
     expect([...result.buffers.out as Float32Array]).toEqual([1]);
   });
 
+  it("supports NULL-initialized local pointers that rebind to storage", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void nullablePointer(float* out, int n) {
+  float *p = NULL;
+  int i = threadIdx.x;
+  if (i < n) {
+    p = out + i;
+    *p = (float)(i + 1);
+  }
+}
+`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) }, scalars: { n: 3 } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var p_buffer: u32 = 4294967295u;");
+    expect(compiled.wgsl).toContain("var p_base: u32 = 0u;");
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 0]);
+  });
+
   it("supports local size_t declarations as uint scalars", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void sizeKernel(uint* out) {
@@ -886,7 +935,7 @@ __global__ void bad(float* dst, float* src, int device) {
 __global__ void bad(float* x, int n) {
   if (threadIdx.x < 1) { n = 2; x[0] = 1.0; }
 }`));
-    expect(scalarParamWrite.diagnostics.map((diagnostic) => diagnostic.code)).toContain("parameter-assignment");
+    expect(scalarParamWrite.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("parameter-assignment");
 
     const scopedLocal = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(float* x) {

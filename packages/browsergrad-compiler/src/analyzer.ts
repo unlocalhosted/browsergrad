@@ -1161,8 +1161,8 @@ function hasExplicitPointerCast(expression: CudaLiteExpression | undefined): boo
 
 function isSupportedPoolPointerInitializer(init: CudaLiteExpression | undefined, scope: Scope): boolean {
   if (!init) return true;
+  if (isNullPointerLiteral(init)) return true;
   if (init.kind === "identifier") {
-    if (init.name === "nullptr") return true;
     const symbol = lookupSymbol(init.name, scope, init.span);
     return symbol?.kind === "local" && symbol.pointer === true;
   }
@@ -2783,10 +2783,7 @@ function validateLValueExpression(
       return;
     }
     if (symbol.kind === "local" || symbol.kind === "shared" || symbol.kind === "device-global") return;
-    if (symbol.kind === "param" && !symbol.pointer) {
-      diagnostics.push(error("parameter-assignment", `cannot assign to scalar parameter '${expression.name}'`, expression.span));
-      return;
-    }
+    if (symbol.kind === "param" && !symbol.pointer) return;
     if (symbol.kind === "param" && symbol.pointer && (operator === "=" || isPointerRebaseOperator(operator))) return;
     diagnostics.push(error("invalid-assignment-target", "assignment target must be a local variable, pointer element, shared element, or device global", expression.span));
     return;
