@@ -200,6 +200,13 @@ __global__ void ptxTileCarrier(uint *out) {
   out[0] = c;
   out[1] = d;
 }`,
+  reciprocalIntrinsic: `
+__global__ void reciprocalIntrinsic(float *x, float *out) {
+  int idx = threadIdx.x;
+  if (idx < 4) {
+    out[idx] = __frcp_rn(x[idx] + 1.0f);
+  }
+}`,
   ...loadCorpusExecutionSources(),
 };
 
@@ -482,6 +489,19 @@ const html = String.raw`<!doctype html>
             input: () => ({
               buffers: {
                 out: new Uint32Array(2),
+              },
+            }),
+            output: "out",
+          },
+          {
+            name: "intrinsic:reciprocal",
+            source: SOURCES.reciprocalIntrinsic,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                x: new Float32Array([1, 3, 7, 15]),
+                out: new Float32Array(4),
               },
             }),
             output: "out",
