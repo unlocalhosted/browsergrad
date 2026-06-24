@@ -2124,6 +2124,7 @@ __global__ void mathy(float *x, float *out) {
       coshf(value) +
       sqrt(fabsf(value)) +
       sqrtf(fabsf(value)) +
+      rsqrt(fabsf(value) + 2.0f) +
       rsqrtf(fabsf(value) + 1.0f) +
       __frcp_rn(value + 3.0f) +
       __saturatef(value) +
@@ -2160,6 +2161,7 @@ __global__ void mathy(float *x, float *out) {
     expect(compiled.wgsl).toContain("tanh(value)");
     expect(compiled.wgsl).toContain("cosh(value)");
     expect(compiled.wgsl).toContain("sqrt(abs(value))");
+    expect(compiled.wgsl).toContain("inverseSqrt((abs(value) + 2.0))");
     expect(compiled.wgsl).toContain("inverseSqrt((abs(value) + 1.0))");
     expect(compiled.wgsl).toContain("(1.0 / (value + 3.0))");
     expect(compiled.wgsl).toContain("clamp(value, 0.0, 1.0)");
@@ -2184,6 +2186,7 @@ __global__ void mathy(float *x, float *out) {
       Math.cosh(value) +
       Math.sqrt(Math.abs(value)) +
       Math.sqrt(Math.abs(value)) +
+      (1 / Math.sqrt(Math.abs(value) + 2)) +
       (1 / Math.sqrt(Math.abs(value) + 1)) +
       (1 / (value + 3)) +
       Math.min(1, Math.max(0, value)) +
@@ -2281,11 +2284,12 @@ __global__ void intIntrinsics(int *x, uint *out) {
     out[7] = uint(abs(-7));
     out[8] = UMUL(6u, 7u);
     out[9] = UMAD(6u, 7u, 2u);
+    out[10] = uint(IMAD(6, 7, -2));
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { x: new Int32Array([5]), out: new Uint32Array(10) } },
+      { buffers: { x: new Int32Array([5]), out: new Uint32Array(11) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
@@ -2293,7 +2297,38 @@ __global__ void intIntrinsics(int *x, uint *out) {
     expect(compiled.wgsl).toContain("countTrailingZeros");
     expect(compiled.wgsl).toContain("min(u32(7), u32(3))");
     expect(compiled.wgsl).toContain("0;");
-    expect([...result.buffers.out as Uint32Array]).toEqual([29, 15, 20, 3, 3, 0, 4, 7, 42, 44]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([29, 15, 20, 3, 3, 0, 4, 7, 42, 44, 40]);
+  });
+
+  it("lowers CUDA float/integer bitcast intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void bitcast_intrinsics(float *x, uint *bits, int *signed_bits, float *roundtrip) {
+  float value = x[0];
+  bits[0] = __float_as_uint(value);
+  signed_bits[0] = __float_as_int(value);
+  roundtrip[0] = __uint_as_float(bits[0]);
+  roundtrip[1] = __int_as_float(signed_bits[0]);
+}`, { workgroupSize: [1, 1, 1] });
+    const input = new Float32Array([-3.5]);
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: input,
+          bits: new Uint32Array(1),
+          signed_bits: new Int32Array(1),
+          roundtrip: new Float32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bitcast<u32>(f32(value))");
+    expect(compiled.wgsl).toContain("bitcast<i32>(f32(value))");
+    expect(compiled.wgsl).toContain("bitcast<f32>(u32(bits[0]))");
+    expect([...result.buffers.bits as Uint32Array]).toEqual([0xc0600000]);
+    expect([...result.buffers.signed_bits as Int32Array]).toEqual([-1067450368]);
+    expect([...result.buffers.roundtrip as Float32Array]).toEqual([-3.5, -3.5]);
   });
 
   it("recognizes CUDA/C numeric named constants", () => {
@@ -4131,6 +4166,26 @@ __global__ void init_arrays(float *out) {
     expect(compiled.wgsl).toContain("var<workgroup> shared: array<f32, 2>;");
     expect(compiled.wgsl).toContain("vals[0][0] = 1.0;");
     expect([...result.buffers.out as Float32Array]).toEqual([12]);
+  });
+
+  it("accepts host/device constexpr helper qualifiers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ __host__ constexpr unsigned int mix(unsigned int x, unsigned int seed) {
+  x += seed;
+  x ^= (x >> 9);
+  return x;
+}
+__global__ void host_device_constexpr_helper(uint *out) {
+  out[0] = mix(512u, 7u);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn mix");
+    expect([...result.buffers.out as Uint32Array]).toEqual([518]);
   });
 
   it("lowers builtin infinity macros emitted by CUDA headers", () => {

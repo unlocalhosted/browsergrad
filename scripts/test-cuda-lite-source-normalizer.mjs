@@ -1702,6 +1702,87 @@ __global__ void keep_member_size(uint* out) {
 {
   const source = createKernelCompilationUnit({
     kernel: `
+template <typename T = float>
+__global__ void use_vec_carrier(float4* oldPos, float3* out) {
+  float4 position = oldPos[threadIdx.x];
+  out[threadIdx.x] = computeBodyAccel<float>(position, oldPos, 1);
+}`,
+    deviceFunctions: [
+      {
+        name: "getSofteningSquared",
+        source: `
+template <typename T>
+__device__ T getSofteningSquared() { return T(1); }`,
+      },
+      {
+        name: "getSofteningSquared",
+        source: `
+template <> __device__ double getSofteningSquared<double>() { return 2.0; }`,
+      },
+      {
+        name: "bodyBodyInteraction",
+        source: `
+template <typename T>
+__device__ typename vec3<T>::Type
+bodyBodyInteraction(typename vec3<T>::Type ai, typename vec4<T>::Type bi, typename vec4<T>::Type bj) {
+  typename vec3<T>::Type r;
+  T distSqr = getSofteningSquared<T>();
+  r.x = ai.x + bi.x + bj.x + distSqr;
+  return r;
+}`,
+      },
+      {
+        name: "computeBodyAccel",
+        source: `
+template <typename T>
+__device__ typename vec3<T>::Type
+computeBodyAccel(typename vec4<T>::Type bodyPos, typename vec4<T>::Type *positions, int numTiles) {
+  typename vec3<T>::Type acc = {0.0f, 0.0f, 0.0f};
+  acc = bodyBodyInteraction<T>(acc, bodyPos, positions[0]);
+  acc.x += float(numTiles);
+  return acc;
+}`,
+      },
+    ],
+  });
+  assert.match(source, /__device__ float\s+getSofteningSquared\(\)/u);
+  assert.match(source, /__device__ float3\s+bodyBodyInteraction\(float3 ai, float4 bi, float4 bj\)/u);
+  assert.match(source, /__device__ float3\s+computeBodyAccel\(float4 bodyPos, float4 \*positions, int numTiles\)/u);
+  assert.match(source, /float3 acc = \{0\.0f, 0\.0f, 0\.0f\};/u);
+  assert.match(source, /computeBodyAccel\(position, oldPos, 1\)/u);
+  assert.doesNotMatch(source, /typename vec/u);
+  assert.doesNotMatch(source, /template\s*<\s*>/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void inline_pointer_helper(float* x, bf16* out, uint seed) {
+  bf16 tmp[1];
+  stochastic_rounding(x[0], &tmp[0], seed);
+  out[0] = tmp[0];
+}`,
+    deviceFunctions: [
+      {
+        name: "stochastic_rounding",
+        source: `
+__device__ __forceinline__ void stochastic_rounding(float in, bf16 *out, unsigned int seed) {
+  unsigned int bits = __float_as_uint(in);
+  bits += seed;
+  *out = __float2bfloat16_rn(__uint_as_float(bits));
+}`,
+      },
+    ],
+  });
+  assert.doesNotMatch(source, /__device__ __forceinline__ void stochastic_rounding/u);
+  assert.match(source, /float __bg_in = x\[0\];/u);
+  assert.match(source, /unsigned int __bg_seed = seed;/u);
+  assert.match(source, /tmp\[0\] = __float2bfloat16_rn/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 __global__ void ref_atomic(uint* out) {
   __shared__ unsigned int flag;
   if (threadIdx.x == 0) flag = 0u;

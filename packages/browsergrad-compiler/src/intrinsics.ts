@@ -70,6 +70,7 @@ const FLOAT_UNARY = [
   intrinsic("cosh", [1, 1], "float", (args) => Math.cosh(args[0] ?? 0), (args) => `cosh(${args.join(", ")})`),
   intrinsic("coshf", [1, 1], "float", (args) => Math.cosh(args[0] ?? 0), (args) => `cosh(${args.join(", ")})`),
   intrinsic("isinf", [1, 1], "bool", (args) => Number.isFinite(args[0] ?? 0) || Number.isNaN(args[0] ?? 0) ? 0 : 1, (args) => `isInf(${args[0] ?? "0"})`),
+  intrinsic("rsqrt", [1, 1], "float", (args) => 1 / Math.sqrt(args[0] ?? 0), (args) => `inverseSqrt(${args.join(", ")})`),
   intrinsic("rsqrtf", [1, 1], "float", (args) => 1 / Math.sqrt(args[0] ?? 0), (args) => `inverseSqrt(${args.join(", ")})`),
   intrinsic("__frcp_rn", [1, 1], "float", (args) => 1 / (args[0] ?? 0), (args) => `(1.0 / ${args[0] ?? "1.0"})`),
   intrinsic("__saturatef", [1, 1], "float", (args) => Math.min(1, Math.max(0, args[0] ?? 0)), (args) => `clamp(${args[0] ?? "0"}, 0.0, 1.0)`),
@@ -80,6 +81,8 @@ const FLOAT_INTRINSICS = [
   ...FLOAT_UNARY,
   intrinsic("__builtin_inff", [0, 0], "float", () => Infinity, () => "bitcast<f32>(0x7f800000u)"),
   intrinsic("__builtin_huge_valf", [0, 0], "float", () => Infinity, () => "bitcast<f32>(0x7f800000u)"),
+  intrinsic("__uint_as_float", [1, 1], "float", (args) => uintBitsToFloat32(args[0] ?? 0), (args) => `bitcast<f32>(u32(${args[0] ?? "0"}))`),
+  intrinsic("__int_as_float", [1, 1], "float", (args) => uintBitsToFloat32(args[0] ?? 0), (args) => `bitcast<f32>(i32(${args[0] ?? "0"}))`),
   intrinsic("__fdividef", [2, 2], "float", (args) => (args[0] ?? 0) / (args[1] ?? 0), (args) => `(${args[0] ?? "0"} / ${args[1] ?? "1"})`),
   intrinsic("pow", [2, 2], "float", (args) => Math.pow(args[0] ?? 0, args[1] ?? 0), (args) => `pow(${args.join(", ")})`),
   intrinsic("powf", [2, 2], "float", (args) => Math.pow(args[0] ?? 0, args[1] ?? 0), (args) => `pow(${args.join(", ")})`),
@@ -108,7 +111,10 @@ const INTEGER_INTRINSICS = [
   intrinsic("__popc", [1, 1], "int", (args) => popCount32(args[0] ?? 0), (args) => `i32(countOneBits(u32(${args[0] ?? "0"})))`),
   intrinsic("__mul24", [2, 2], "int", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0), (args) => `(i32(${args[0] ?? "0"}) * i32(${args[1] ?? "0"}))`),
   intrinsic("__umul24", [2, 2], "uint", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0) >>> 0, (args) => `(u32(${args[0] ?? "0"}) * u32(${args[1] ?? "0"}))`),
+  intrinsic("__float_as_int", [1, 1], "int", (args) => float32ToIntBits(args[0] ?? 0), (args) => `bitcast<i32>(f32(${args[0] ?? "0"}))`),
+  intrinsic("__float_as_uint", [1, 1], "uint", (args) => float32ToUintBits(args[0] ?? 0), (args) => `bitcast<u32>(f32(${args[0] ?? "0"}))`),
   intrinsic("__usad4", [2, 3], "uint", evalU8x4SadAdd, emitU8x4SadAdd),
+  intrinsic("IMAD", [3, 3], "int", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0) + (args[2] ?? 0), (args) => `((i32(${args[0] ?? "0"}) * i32(${args[1] ?? "0"})) + i32(${args[2] ?? "0"}))`),
   intrinsic("UMUL", [2, 2], "uint", (args) => Math.imul(args[0] ?? 0, args[1] ?? 0) >>> 0, (args) => `(u32(${args[0] ?? "0"}) * u32(${args[1] ?? "0"}))`),
   intrinsic("UMAD", [3, 3], "uint", (args) => (Math.imul(args[0] ?? 0, args[1] ?? 0) + (args[2] ?? 0)) >>> 0, (args) => `((u32(${args[0] ?? "0"}) * u32(${args[1] ?? "0"})) + u32(${args[2] ?? "0"}))`),
   intrinsic("umin", [2, 2], "uint", (args) => Math.min(args[0] ?? 0, args[1] ?? 0) >>> 0, (args) => `min(u32(${args[0] ?? "0"}), u32(${args[1] ?? "0"}))`),
@@ -214,6 +220,20 @@ function roundBfloat16(value: number): number {
 
 function bfloat16BitsToFloat32(bits: number): number {
   u32Scratch[0] = (Math.trunc(bits) & 0xffff) << 16;
+  return f32Scratch[0] ?? 0;
+}
+
+function float32ToUintBits(value: number): number {
+  f32Scratch[0] = value;
+  return u32Scratch[0] ?? 0;
+}
+
+function float32ToIntBits(value: number): number {
+  return float32ToUintBits(value) | 0;
+}
+
+function uintBitsToFloat32(bits: number): number {
+  u32Scratch[0] = Math.trunc(bits) >>> 0;
   return f32Scratch[0] ?? 0;
 }
 

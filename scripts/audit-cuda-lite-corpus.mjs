@@ -901,6 +901,16 @@ function normalizePortableBaseType(type, definesByName = new Map(), seen = new S
     .replace(/[&*]/gu, " ")
     .replace(/\s+/gu, " ")
     .trim();
+  const vectorCarrier = /^vec([234])\s*<\s*([A-Za-z_][A-Za-z0-9_:]*)\s*>\s*::\s*(Type|float|double|int|uint|half)$/u.exec(normalized);
+  if (vectorCarrier?.[1] !== undefined && vectorCarrier[2] !== undefined && vectorCarrier[3] !== undefined) {
+    const scalar = vectorCarrier[3] === "Type"
+      ? normalizePortableBaseType(definesByName.get(vectorCarrier[2]) ?? vectorCarrier[2], definesByName, new Set([...seen, vectorCarrier[2]]))
+      : vectorCarrier[3];
+    if (scalar === "float" || scalar === "double") return `float${vectorCarrier[1]}`;
+    if (scalar === "int" || scalar === "uint") return `${scalar}${vectorCarrier[1]}`;
+    if (scalar === "half" && vectorCarrier[1] === "2") return "half2";
+    return scalar;
+  }
   const packed = /^Packed128\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>$/u.exec(normalized)?.[1];
   if (packed !== undefined) {
     const elementType = normalizePortableBaseType(definesByName.get(packed) ?? packed, definesByName, new Set([...seen, packed]));
@@ -945,7 +955,8 @@ function hasSupportedDeviceReturnShape(signature, name, recordNames = new Set(),
     .trim();
   if (returnType === "void") return true;
   const normalized = normalizePortableBaseType(returnType, definesByName);
-  return PORTABLE_POINTER_BASE_TYPES.has(normalized) || recordNames.has(returnType);
+  const templateTypeParams = templateTypeParamNames(signature);
+  return PORTABLE_POINTER_BASE_TYPES.has(normalized) || templateTypeParams.has(normalized) || recordNames.has(returnType);
 }
 
 function recordDeclarationName(declaration) {

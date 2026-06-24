@@ -359,7 +359,8 @@ class Parser {
       this.match("inline") ||
       this.match("__device__") ||
       this.match("__host__") ||
-      this.match("__forceinline__")
+      this.match("__forceinline__") ||
+      this.match("constexpr")
     ) {
       const token = this.advance();
       start ??= token.span;
@@ -1171,7 +1172,8 @@ class Parser {
         token.value === "inline" ||
         token.value === "__device__" ||
         token.value === "__host__" ||
-        token.value === "__forceinline__"
+        token.value === "__forceinline__" ||
+        token.value === "constexpr"
       ) {
         index++;
         continue;

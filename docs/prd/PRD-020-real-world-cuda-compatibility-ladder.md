@@ -60,7 +60,7 @@ Repo exploration:
 
 Local corpus audits on 2026-06-24:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `284` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `288` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -143,7 +143,7 @@ Local corpus audits on 2026-06-24:
   plus C pointer-distance lowering, qualified `std::size_t` /
   `cuda::std::uint32_t` functional casts, iterative file-scope constexpr
   folding, and semantics-preserving prefix-update `while` canonicalization,
-  with `72` hard
+  with `68` hard
   gaps.
   Main failures:
   parser/frontend gaps, texture/vector
@@ -264,8 +264,8 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
-- The current live aggregate gate is `936/1038` WebGPU-runnable across the four
-  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `284/357`, `llm.c`
+- The current live aggregate gate is `940/1038` WebGPU-runnable across the four
+  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `288/357`, `llm.c`
   `148/148`, and LeetCUDA `264/293`.
 
 ## Grill Decisions
@@ -412,7 +412,7 @@ Acceptance criteria for the first slice:
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   WebGPU-runnable count, hard-gap count, error codes, and semantic families.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=284` WebGPU-runnable, and `<=72` hard gaps.
+  `>=288` WebGPU-runnable, and `<=68` hard gaps.
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions,
   `>=148` WebGPU-runnable, and `0` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,

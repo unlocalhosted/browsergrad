@@ -177,7 +177,8 @@ export function createKernelCompilationUnit({
   const withBlockReduce = normalizeBlockReduceHelpers(withSincosHelpers);
   const withAtomicForwarders = normalizeAtomicForwarderHelpers(withBlockReduce);
   const withPointerStoreForwarders = normalizePointerStoreForwarderHelpers(withAtomicForwarders);
-  const withLambdas = normalizeSimpleLocalLambdas(withPointerStoreForwarders);
+  const withLocalPointerHelpers = normalizeLocalPointerDeviceFunctionCalls(withPointerStoreForwarders);
+  const withLambdas = normalizeSimpleLocalLambdas(withLocalPointerHelpers);
   const withStatementMacros = normalizeSimpleStatementMacros(withLambdas);
   const withSideEffects = normalizeSideEffectExpressions(withStatementMacros);
   const withScopedForVariables = normalizeForLoopScopedVariables(withSideEffects);
@@ -412,7 +413,19 @@ function isTemplateSymbolDowngrade(previous, next) {
 }
 
 function referencedDeviceFunctionClosure(kernel, deviceFunctions, definesByName = new Map()) {
-  const byName = new Map(deviceFunctions.map((fn) => [fn.name, fn]));
+  const byName = new Map();
+  for (const fn of deviceFunctions) {
+    const previous = byName.get(fn.name);
+    const previousExplicit = previous !== undefined && isExplicitTemplateSpecialization(previous.source);
+    const currentExplicit = isExplicitTemplateSpecialization(fn.source);
+    if (
+      previous === undefined ||
+      (previousExplicit && !currentExplicit) ||
+      (previousExplicit === currentExplicit)
+    ) {
+      byName.set(fn.name, fn);
+    }
+  }
   const included = new Map();
   const pending = [kernel];
   while (pending.length > 0) {
@@ -425,6 +438,10 @@ function referencedDeviceFunctionClosure(kernel, deviceFunctions, definesByName 
     }
   }
   return [...included.values()];
+}
+
+function isExplicitTemplateSpecialization(source) {
+  return /^\s*template\s*<\s*>/u.test(source);
 }
 
 function sourceCallsFunctionThroughDefines(source, name, definesByName) {
@@ -939,6 +956,16 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
     .replace(/\s+/gu, " ")
     .trim();
   if (type.length === 0 || type.includes("(") || type.includes(")")) return undefined;
+  const vectorCarrier = /^vec([234])\s*<\s*([A-Za-z_][A-Za-z0-9_:]*)\s*>\s*::\s*(Type|float|double|int|uint|half)$/u.exec(type);
+  if (vectorCarrier?.[1] !== undefined && vectorCarrier[2] !== undefined && vectorCarrier[3] !== undefined) {
+    const scalar = vectorCarrier[3] === "Type"
+      ? normalizeTemplateTypeArgument(definesByName.get(vectorCarrier[2]) ?? vectorCarrier[2], definesByName, new Set([...seen, vectorCarrier[2]]))
+      : vectorCarrier[3];
+    if (scalar === "float" || scalar === "double") return `float${vectorCarrier[1]}`;
+    if (scalar === "int" || scalar === "uint") return `${scalar}${vectorCarrier[1]}`;
+    if (scalar === "half" && vectorCarrier[1] === "2") return "half2";
+    return undefined;
+  }
   const packed = /^Packed128\s*<\s*([A-Za-z_][A-Za-z0-9_]*)\s*>$/u.exec(type)?.[1];
   if (packed !== undefined) {
     const elementType = normalizeTemplateTypeArgument(definesByName.get(packed) ?? packed, definesByName, new Set([...seen, packed]));
@@ -1420,11 +1447,14 @@ function normalizeCarrierMemberReferences(source, definesByName) {
 }
 
 function normalizeCudaVectorCarrierAliases(source, definesByName = new Map()) {
-  return source.replace(/\b(?:typename\s+)?vec([234])\s*<\s*([A-Za-z_][A-Za-z0-9_:]*)\s*>\s*::\s*(?:Type|float)\b/gu, (match, lanes, rawType) => {
-    const scalar = normalizeTemplateTypeArgument(definesByName.get(rawType) ?? rawType, definesByName);
+  return source.replace(/\b(?:typename\s+)?vec([234])\s*<\s*([A-Za-z_][A-Za-z0-9_:]*)\s*>\s*::\s*(Type|float|double|int|uint|half)\b/gu, (match, lanes, rawType, member) => {
+    const scalar = member === "Type"
+      ? normalizeTemplateTypeArgument(definesByName.get(rawType) ?? rawType, definesByName)
+      : member;
     if (scalar === "float" || scalar === "double") return `float${lanes}`;
     if (scalar === "int") return `int${lanes}`;
     if (scalar === "uint") return `uint${lanes}`;
+    if (scalar === "half" && lanes === "2") return "half2";
     return match;
   });
 }
@@ -2298,6 +2328,148 @@ function rewritePointerStoreForwarderCalls(source, name, helper) {
     if (target.length === 0) return undefined;
     return `(${target} = ${value})`;
   });
+}
+
+function normalizeLocalPointerDeviceFunctionCalls(source) {
+  const helpers = collectLocalPointerDeviceFunctionHelpers(source);
+  if (helpers.size === 0) return source;
+  let out = source;
+  for (const [name, helper] of helpers) {
+    const rewritten = rewriteLocalPointerDeviceFunctionCalls(out, name, helper);
+    if (rewritten !== out) out = rewritten.replace(helper.definition, "");
+  }
+  return out;
+}
+
+function collectLocalPointerDeviceFunctionHelpers(source) {
+  const helpers = new Map();
+  let index = 0;
+  while (index < source.length) {
+    const device = source.indexOf("__device__", index);
+    if (device < 0) break;
+    const start = localDeviceFunctionPrefixStart(source, device);
+    const brace = source.indexOf("{", device);
+    const semicolon = source.indexOf(";", device);
+    if (brace < 0) break;
+    if (semicolon >= 0 && semicolon < brace) {
+      index = semicolon + 1;
+      continue;
+    }
+    const end = findBalanced(source, brace, "{", "}");
+    if (end === undefined) break;
+    const definition = source.slice(start, end + 1);
+    const signature = source.slice(start, brace);
+    const name = localVoidDeviceFunctionName(signature);
+    const params = localDeviceFunctionParams(signature);
+    if (
+      name !== undefined &&
+      params.length > 0 &&
+      params.some((param) => param.pointer) &&
+      isInlineableLocalPointerHelperBody(source.slice(brace + 1, end), params)
+    ) {
+      helpers.set(name, { definition, params, body: source.slice(brace + 1, end) });
+    }
+    index = end + 1;
+  }
+  return helpers;
+}
+
+function localDeviceFunctionPrefixStart(source, device) {
+  let cursor = device;
+  while (true) {
+    const beforeWhitespace = skipBackwardWhitespace(source, cursor);
+    const match = /(?:template\s*<[^<>]*>|static|inline|__inline__|__forceinline__|__host__|constexpr)\s*$/u.exec(source.slice(0, beforeWhitespace));
+    if (match === null) break;
+    cursor = beforeWhitespace - match[0].trimEnd().length;
+  }
+  return cursor;
+}
+
+function skipBackwardWhitespace(source, index) {
+  let cursor = index;
+  while (cursor > 0 && /\s/u.test(source[cursor - 1])) cursor--;
+  return cursor;
+}
+
+function localVoidDeviceFunctionName(signature) {
+  const open = signature.lastIndexOf("(");
+  if (open < 0) return undefined;
+  const before = signature.slice(0, open)
+    .replace(/\b(?:template\s*<[^<>]*>|static|inline|__inline__|__forceinline__|__host__|__device__|constexpr)\b/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return /^void\s+([A-Za-z_][A-Za-z0-9_]*)$/u.exec(before)?.[1];
+}
+
+function localDeviceFunctionParams(signature) {
+  const open = signature.lastIndexOf("(");
+  const paramsSource = balancedParenContents(signature, open);
+  if (paramsSource === undefined || paramsSource.trim().length === 0) return [];
+  return splitTopLevel(paramsSource).map(parseLocalDeviceFunctionParam).filter(Boolean);
+}
+
+function parseLocalDeviceFunctionParam(param) {
+  const cleaned = param
+    .replace(/\b(?:const|volatile|__restrict__|__restrict|restrict)\b/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const name = /([A-Za-z_][A-Za-z0-9_]*)\s*$/.exec(cleaned)?.[1];
+  if (name === undefined) return undefined;
+  const head = cleaned.slice(0, cleaned.length - name.length).trim();
+  const pointer = head.includes("*");
+  const type = head.replace(/\*/gu, " ").replace(/\s+/gu, " ").trim();
+  if (type.length === 0 || type.includes("&")) return undefined;
+  return { name, type, pointer };
+}
+
+function isInlineableLocalPointerHelperBody(body, params) {
+  if (/\b(?:return|__syncthreads|__syncwarp|asm)\b/u.test(body)) return false;
+  for (const param of params.filter((item) => item.pointer)) {
+    const uses = body.match(new RegExp(`\\b${escapeRegExp(param.name)}\\b`, "gu")) ?? [];
+    const derefs = body.match(new RegExp(`\\*\\s*${escapeRegExp(param.name)}\\b`, "gu")) ?? [];
+    if (uses.length !== derefs.length) return false;
+  }
+  return true;
+}
+
+function rewriteLocalPointerDeviceFunctionCalls(source, name, helper) {
+  const re = new RegExp(`\\b${escapeRegExp(name)}\\s*\\(`, "gu");
+  return replaceBalancedCall(source, re, (_match, open, close) => {
+    const args = splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim());
+    if (args.length !== helper.params.length) return undefined;
+    const pointerTargets = new Map();
+    for (const [index, param] of helper.params.entries()) {
+      if (!param.pointer) continue;
+      const target = addressTarget(args[index]);
+      if (target === undefined) return undefined;
+      pointerTargets.set(param.name, target);
+    }
+    return inlineLocalPointerDeviceFunctionBody(helper, args, pointerTargets);
+  });
+}
+
+function inlineLocalPointerDeviceFunctionBody(helper, args, pointerTargets) {
+  const scalarParams = helper.params
+    .map((param, index) => ({ param, index }))
+    .filter(({ param }) => !param.pointer);
+  const locals = scalarParams.map(({ param, index }) => ({
+    name: `__bg_${param.name}`,
+    type: param.type,
+    value: args[index] ?? "0",
+  }));
+  let body = helper.body.trim();
+  for (const [name, target] of pointerTargets) {
+    body = body.replace(new RegExp(`\\*\\s*${escapeRegExp(name)}\\b`, "gu"), target);
+  }
+  for (const local of locals) {
+    body = body.replace(new RegExp(`\\b${escapeRegExp(local.name.replace(/^__bg_/u, ""))}\\b`, "gu"), local.name);
+  }
+  if ([...pointerTargets.keys()].some((name) => new RegExp(`\\b${escapeRegExp(name)}\\b`, "u").test(body))) return undefined;
+  return `{\n${locals.map((local) => `  ${local.type} ${local.name} = ${local.value};`).join("\n")}\n${indentBlock(body, "  ")}\n}`;
+}
+
+function indentBlock(source, prefix) {
+  return source.split(/\r?\n/u).map((line) => line.trim().length === 0 ? "" : `${prefix}${line}`).join("\n");
 }
 
 function normalizeBlockReducerName(name) {
@@ -3820,10 +3992,7 @@ function collectDeviceFunctionTemplateArguments(sources, names, definesByName = 
       if (!names.has(call.name)) continue;
       const args = call.args.map((arg) => substituteTemplateArgument(arg, env, definesByName));
       if (templateArgumentScore(args) === 0) continue;
-      const previous = out.get(call.name);
-      if (previous === undefined || templateArgumentScore(args) > templateArgumentScore(previous)) {
-        out.set(call.name, args);
-      }
+      setTemplateArgumentsIfBetter(out, call.name, args);
     }
     for (const call of scanFunctionCallReferences(source)) {
       if (!names.has(call.name) || out.has(call.name)) continue;
@@ -3831,10 +4000,43 @@ function collectDeviceFunctionTemplateArguments(sources, names, definesByName = 
       if (fn === undefined) continue;
       const args = inferTemplatedFunctionCallArgs(fn, call, source, definesByName).map((arg) => arg ?? "");
       if (templateArgumentScore(args) === 0) continue;
-      out.set(call.name, args);
+      setTemplateArgumentsIfBetter(out, call.name, args);
+    }
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const fn of templatedFunctions.values()) {
+      const fnArgs = out.get(fn.name);
+      if (fnArgs === undefined || templateArgumentScore(fnArgs) === 0) continue;
+      const typeEnv = templateEnvironment(fn.templateParams, fnArgs, definesByName);
+      const valueEnv = templateValueEnvironment(fn.templateParams, fnArgs, definesByName);
+      if (typeEnv.size === 0 && valueEnv.size === 0) continue;
+      const body = substituteTemplateValues(substituteTemplateTypes(fn.body, typeEnv), valueEnv);
+      for (const call of scanTemplatedCallReferences(body)) {
+        if (!names.has(call.name)) continue;
+        const args = call.args.map((arg) => substituteTemplateArgument(arg, mergeDefineMaps(definesByName, typeEnv, valueEnv), definesByName));
+        if (templateArgumentScore(args) === 0) continue;
+        changed = setTemplateArgumentsIfBetter(out, call.name, args) || changed;
+      }
+      for (const call of scanFunctionCallReferences(body)) {
+        if (!names.has(call.name) || out.has(call.name)) continue;
+        const target = templatedFunctions.get(call.name);
+        if (target === undefined) continue;
+        const args = inferTemplatedFunctionCallArgs(target, call, body, mergeDefineMaps(definesByName, typeEnv, valueEnv)).map((arg) => arg ?? "");
+        if (templateArgumentScore(args) === 0) continue;
+        changed = setTemplateArgumentsIfBetter(out, call.name, args) || changed;
+      }
     }
   }
   return out;
+}
+
+function setTemplateArgumentsIfBetter(out, name, args) {
+  const previous = out.get(name);
+  if (previous !== undefined && templateArgumentScore(previous) >= templateArgumentScore(args)) return false;
+  out.set(name, args);
+  return true;
 }
 
 function templateEnvironment(params, args, definesByName = new Map()) {
