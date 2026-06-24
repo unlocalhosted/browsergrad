@@ -15,6 +15,7 @@ export interface SourceSpan {
 
 export type CudaLiteScalarType =
   | "float"
+  | "double"
   | "int"
   | "uint"
   | "half"
@@ -368,6 +369,7 @@ export interface CudaLiteAnalyzeOptions {
   readonly referenceDynamicParallelism?: boolean;
   readonly referenceGridSync?: boolean;
   readonly referenceCudaRuntime?: boolean;
+  readonly f64Mode?: "reject" | "f32";
 }
 
 export interface CudaLiteAnalysis {

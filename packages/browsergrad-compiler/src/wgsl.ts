@@ -922,7 +922,7 @@ function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, c
 }
 
 function isDevicePointerHelperType(type: CudaLiteScalarType): boolean {
-  return type === "float" || type === "int" || type === "uint" || type === "half" || type === "bf16" || isCudaVectorType(type);
+  return type === "float" || type === "double" || type === "int" || type === "uint" || type === "half" || type === "bf16" || isCudaVectorType(type);
 }
 
 function isPointerHelperCompatibleStorage(helperType: CudaLiteScalarType, storageType: CudaLiteScalarType): boolean {
@@ -1297,6 +1297,7 @@ function pointerHelperTypeName(type: CudaLiteScalarType): string {
     return `${scalar === "float" || scalar === "bf16" ? "f32" : scalar === "int" ? "i32" : scalar === "half" ? "f16" : "u32"}x${cudaVectorLaneCount(type)}`;
   }
   if (type === "float") return "f32";
+  if (type === "double") return "f32";
   if (type === "half") return "f16";
   if (type === "bf16") return "bf16";
   if (type === "int") return "i32";
@@ -3841,6 +3842,7 @@ function wgslScalar(type: CudaLiteScalarType): string {
   }
   switch (type) {
     case "float":
+    case "double":
       return "f32";
     case "int":
       return "i32";
@@ -3878,6 +3880,7 @@ function wgslBindingType(type: CudaLiteScalarType): "f16" | "f32" | "i32" | "u32
   }
   if (type === "half") return "f16";
   if (type === "bf16") return "f32";
+  if (type === "double") return "f32";
   if (type === "int") return "i32";
   if (type === "uint") return "u32";
   if (type === "bool") return "u32";

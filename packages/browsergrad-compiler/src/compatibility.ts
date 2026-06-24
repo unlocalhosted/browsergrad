@@ -65,6 +65,8 @@ const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("unsupported-cufft", "library", "cuFFT library island", "unsupported", false, true, "Future WGSL FFT library lowering."),
   feature("unsupported-curand", "library", "cuRAND library island", "unsupported", false, true, "Future counter RNG library lowering."),
   feature("unsupported-inline-asm", "subgroup", "Unsupported inline PTX", "unsupported", false, false, "Inline PTX requires modeled instruction semantics before reference or WGSL lowering."),
+  feature("unsupported-f64", "feature", "CUDA f64 compatibility gap", "unsupported", false, false, "True f64 is unavailable in WebGPU; opt into f32 compatibility lowering when acceptable."),
+  feature("f64-lowered-to-f32", "feature", "CUDA f64 lowered to f32", "native", true, true, "Compatibility warning: double precision/storage use f32 ABI."),
 ];
 
 const FEATURE_REGISTRY = new Map(BUILTIN_FEATURES.map((entry) => [entry.code, entry]));

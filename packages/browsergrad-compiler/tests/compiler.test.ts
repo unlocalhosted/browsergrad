@@ -718,9 +718,13 @@ __global__ void unsupported(float* x) {
       message: "only fma.rn.f32, laneid, and bfind.u32 inline PTX are supported in CUDA-lite v0",
     })).toMatchObject({ family: "subgroup", referenceRuns: false });
     expect(describeCudaDiagnostic({
-      code: "parse-error",
-      message: "unsupported CUDA-lite type: double",
+      code: "unsupported-f64",
+      message: "double requires f64Mode",
     })).toMatchObject({ family: "feature", referenceRuns: false });
+    expect(describeCudaDiagnostic({
+      code: "f64-lowered-to-f32",
+      message: "double is lowered to f32",
+    })).toMatchObject({ family: "feature", gpuRuns: true, referenceRuns: true });
   });
 
   it("rejects semantic gaps before WGSL/runtime execution", () => {
@@ -917,12 +921,31 @@ __global__ void vectorArg(float *x, float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([7]);
   });
 
-  it("classifies double declarations as an explicit unsupported f64 gap", () => {
-    expect(() => parseCudaLite(`
-__global__ void doubleGap(float *out) {
-  double sum = 0.0;
-  out[0] = (float)sum;
-}`)).toThrow("unsupported CUDA-lite type: double");
+  it("requires explicit f64 compatibility mode before lowering double to f32", () => {
+    const source = `
+__global__ void doubleGap(double *out, double a) {
+  double sum = a + 1.25;
+  out[0] = sum;
+}`;
+    expect(() => compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] })).toThrow(/unsupported-f64/u);
+
+    const compiled = compileCudaLiteKernel(source, {
+      f64Mode: "f32",
+      workgroupSize: [1, 1, 1],
+    });
+    expect(compiled.diagnostics).toContainEqual(expect.objectContaining({
+      code: "f64-lowered-to-f32",
+      severity: "warning",
+    }));
+    expect(compiled.wgsl).toContain("var<storage, read_write> out: array<f32>;");
+    expect(compiled.wgsl).toContain("a: f32");
+
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) }, scalars: { a: 2 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    expect([...result.buffers.out as Float32Array]).toEqual([3.25]);
   });
 
   it("lowers CUDA loop breaks", () => {

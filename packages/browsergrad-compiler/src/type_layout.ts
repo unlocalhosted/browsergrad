@@ -18,6 +18,7 @@ const TYPE_SIZE_BYTES = new Map<string, number>([
   ["bf162", 4],
   ["__nv_bfloat162", 4],
   ["float", 4],
+  ["double", 4],
   ["int", 4],
   ["uint", 4],
   ["unsigned", 4],

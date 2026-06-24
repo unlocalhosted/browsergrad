@@ -189,14 +189,14 @@ export function analyzeCudaLite(
   const rootScope = createScope();
 
   for (const constant of ast.constants) {
-    declareConstant(constant, rootScope, declaredNames, requiredFeatures, diagnostics);
+    declareConstant(constant, rootScope, declaredNames, requiredFeatures, diagnostics, options);
   }
   for (const texture of ast.textures) {
     declareTexture(texture, rootScope, declaredNames, diagnostics);
   }
   for (const fn of ast.functions) {
     if (selectedDeviceFunctionAsKernel && fn.name === kernel.name) continue;
-    declareDeviceFunction(fn, rootScope, declaredNames, requiredFeatures, diagnostics);
+    declareDeviceFunction(fn, rootScope, declaredNames, requiredFeatures, diagnostics, options);
   }
   const rootDeclaredNames = new Set(declaredNames);
 
@@ -208,6 +208,7 @@ export function analyzeCudaLite(
     declaredNames.add(param.name);
     rootScope.symbols.set(param.name, symbolForParam(param, "param"));
     if (requiresShaderF16(param.valueType)) requiredFeatures.add("shader-f16");
+    validateF64Type(param.valueType, param.span, diagnostics, options);
   }
 
   const declareVar = (statement: CudaLiteVarDecl, scope: Scope, names: Set<string>): void => {
@@ -227,6 +228,7 @@ export function analyzeCudaLite(
       dimensions,
       span: statement.span,
     });
+    validateF64Type(statement.valueType, statement.span, diagnostics, options);
   };
 
   const walkExpression = (expression: CudaLiteExpression, scope: Scope): ExpressionInfo => {
@@ -416,6 +418,7 @@ export function analyzeCudaLite(
       functionDeclaredNames.add(param.name);
       functionScope.symbols.set(param.name, symbolForParam(param, "local"));
       if (requiresShaderF16(param.valueType)) requiredFeatures.add("shader-f16");
+      validateF64Type(param.valueType, param.span, diagnostics, options);
     }
     walkStatements(fn.body, functionScope, 0, 0, 0, functionDeclaredNames);
   }
@@ -507,6 +510,24 @@ function requiresShaderF16(type: CudaLiteScalarType | undefined): boolean {
   return type === "half" || cudaVectorScalarType(type as CudaLiteScalarType) === "half";
 }
 
+function validateF64Type(
+  type: CudaLiteScalarType | undefined,
+  span: SourceSpan,
+  diagnostics: CudaLiteDiagnostic[],
+  options: CudaLiteAnalyzeOptions,
+): void {
+  if (type !== "double") return;
+  if (options.f64Mode === "f32") {
+    diagnostics.push(warning(
+      "f64-lowered-to-f32",
+      "double is lowered to f32 in CUDA-lite f64 compatibility mode; precision and storage ABI are f32",
+      span,
+    ));
+    return;
+  }
+  diagnostics.push(error("unsupported-f64", "double requires f64Mode: \"f32\" compatibility lowering; true f64 is not available in WebGPU", span));
+}
+
 function launchedDeviceFunctionNames(ast: CudaLiteModule): ReadonlySet<string> {
   const names = new Set<string>();
   for (const kernel of ast.kernels) {
@@ -534,6 +555,7 @@ function declareConstant(
   declaredNames: Set<string>,
   requiredFeatures: Set<string>,
   diagnostics: CudaLiteDiagnostic[],
+  options: CudaLiteAnalyzeOptions,
 ): void {
   if (declaredNames.has(constant.name)) {
     diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${constant.name}'`, constant.span));
@@ -549,6 +571,7 @@ function declareConstant(
     span: constant.span,
   });
   if (requiresShaderF16(constant.valueType)) requiredFeatures.add("shader-f16");
+  validateF64Type(constant.valueType, constant.span, diagnostics, options);
   for (const dimension of constant.dimensions) {
     if (!Number.isInteger(dimension) || dimension <= 0) {
       diagnostics.push(error("invalid-array-dimension", "array dimensions must be positive integer literals", constant.span));
@@ -599,6 +622,7 @@ function declareDeviceFunction(
   declaredNames: Set<string>,
   requiredFeatures: Set<string>,
   diagnostics: CudaLiteDiagnostic[],
+  options: CudaLiteAnalyzeOptions,
 ): void {
   if (declaredNames.has(fn.name)) {
     diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${fn.name}'`, fn.span));
@@ -613,8 +637,10 @@ function declareDeviceFunction(
     span: fn.span,
   });
   if (requiresShaderF16(fn.returnType)) requiredFeatures.add("shader-f16");
+  validateF64Type(fn.returnType, fn.span, diagnostics, options);
   for (const param of fn.params) {
     if (requiresShaderF16(param.valueType)) requiredFeatures.add("shader-f16");
+    validateF64Type(param.valueType, param.span, diagnostics, options);
   }
 }
 

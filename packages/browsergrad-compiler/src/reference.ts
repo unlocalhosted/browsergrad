@@ -2585,7 +2585,7 @@ function constantInitialValue(constant: CudaLiteGlobalConstant): number | WgslTy
     return Uint32Array.from(padded.map((value) => Math.trunc(value) >>> 0));
   }
   if (constant.valueType === "half") return createWgslFloat16Array(padded);
-  if (constant.valueType === "float") return Float32Array.from(padded);
+  if (constant.valueType === "float" || constant.valueType === "double") return Float32Array.from(padded);
   if (constant.valueType === "complex64") return Float32Array.from(padded);
   return Float32Array.from(padded);
 }
@@ -2987,7 +2987,7 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
       if ((param.valueType === "uint" || scalarType === "uint") && !(buffer instanceof Uint32Array)) {
         throw compilerFailure(`buffer '${param.name}' expects Uint32Array`);
       }
-      if ((param.valueType === "float" || param.valueType === "bf16" || scalarType === "float" || scalarType === "bf16") && !(buffer instanceof Float32Array)) {
+      if ((param.valueType === "float" || param.valueType === "double" || param.valueType === "bf16" || scalarType === "float" || scalarType === "bf16") && !(buffer instanceof Float32Array)) {
         throw compilerFailure(`buffer '${param.name}' expects Float32Array`);
       }
       if ((param.valueType === "half" || scalarType === "half") && !isWgslFloat16Array(buffer)) {
@@ -3057,7 +3057,7 @@ function validateTypedConstant(name: string, valueType: string, value: WgslTyped
   if ((valueType === "uint" || scalarType === "uint") && !(value instanceof Uint32Array)) {
     throw compilerFailure(`constant '${name}' expects Uint32Array`);
   }
-  if ((valueType === "float" || valueType === "bf16" || scalarType === "float" || scalarType === "bf16") && !(value instanceof Float32Array)) {
+  if ((valueType === "float" || valueType === "double" || valueType === "bf16" || scalarType === "float" || scalarType === "bf16") && !(value instanceof Float32Array)) {
     throw compilerFailure(`constant '${name}' expects Float32Array`);
   }
   if ((valueType === "half" || scalarType === "half") && !isWgslFloat16Array(value)) {

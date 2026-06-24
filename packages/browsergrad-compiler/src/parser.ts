@@ -52,6 +52,7 @@ const CUDA_SCALAR_TYPE_ALIASES = new Map<string, Exclude<CudaLiteScalarType, "vo
 ]);
 const TYPE_KEYWORDS = new Set([
   "float",
+  "double",
   "int",
   "uint",
   "half",
@@ -65,7 +66,6 @@ const TYPE_KEYWORDS = new Set([
 ]);
 const TYPE_START_KEYWORDS = new Set([
   ...TYPE_KEYWORDS,
-  "double",
   "char2",
   "char3",
   "char4",

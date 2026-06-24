@@ -141,6 +141,10 @@ Common C/CUDA integer spellings are accepted for learner kernels: `signed`,
 `int64_t`, `uint64_t`, and `uintptr_t`. Current WebGPU lowering maps them onto
 WGSL `i32`/`u32`; true 64-bit integer semantics remain a future polyfill or
 backend capability.
+CUDA `double` remains rejected by default because WebGPU/WGSL has no native f64.
+For educational kernels where f32 precision is acceptable, pass
+`{ f64Mode: "f32" }`; the compiler emits `f64-lowered-to-f32`, uses f32
+storage/WGSL/reference ABI, and keeps the precision loss visible to rubrics.
 
 For hot WebGPU paths, pass caller-owned buffers through `residentBuffers` and
 set `readback: []`. This keeps data on GPU across compiler-dispatched kernels;

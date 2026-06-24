@@ -192,6 +192,7 @@ function compileKernelFromAuditContext(rawKernel, kernels, kernelName, context) 
     compileCudaLiteKernel(source, {
       kernelName,
       features: { "shader-f16": true, subgroups: true },
+      f64Mode: "f32",
       workgroupSize: [256, 1, 1],
       dynamicSharedMemory: inferDynamicSharedMemory(source),
     });
