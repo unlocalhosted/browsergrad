@@ -326,6 +326,7 @@ compiler names.
 pnpm test:browser
 pnpm test:browser:open
 pnpm e2e:webgpu
+pnpm e2e:webgpu:corpus -- --require-webgpu
 ```
 
 `test:browser:open` keeps Chromium open for inspection; quit with `q`. If the
@@ -336,6 +337,9 @@ the command instead of trusting that rerun.
 orchestration probes against both `runCompiledKernelReference()` and real
 WebGPU. It covers SAXPY, guarded map, tiled matmul, grid-sync phases, host
 runtime copy, host dynamic launch, and prepared resident dispatch.
+`e2e:webgpu:corpus` additionally requires fixture-backed corpus kernels loaded
+from pinned local corpora under `/tmp` and executes them through real WebGPU
+with readback comparisons.
 Compiler e2e, corpus, and benchmark package scripts use
 `scripts/run-cuda-lite-tool.mjs`, which locks build + tool execution so parallel
 invocations cannot import a partially rebuilt `dist/` tree.

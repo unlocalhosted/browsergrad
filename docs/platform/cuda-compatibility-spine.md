@@ -207,12 +207,17 @@ Current real-browser e2e gate:
 
 ```sh
 pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu
+pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu:corpus -- --require-webgpu
 ```
 
 - Runs compiler examples and runtime-orchestration probes through CPU reference
   and real WebGPU in Chromium, then compares outputs. Covered probes: SAXPY,
   guarded map, tiled matmul, grid-sync phases, host runtime copy, host dynamic
   launch, and prepared resident dispatch.
+- `e2e:webgpu:corpus` also requires pinned local corpora under `/tmp`, extracts
+  exact external kernels, dispatches them in Chromium/WebGPU, and compares GPU
+  readbacks to CPU reference. Current fixture set: CUDA-120 `vectorAddKernel`,
+  `llm.c` `add_bias`, and `llm.c` `set_vector`.
 - Use `-- --require-webgpu` on machines where absence of WebGPU should fail CI.
 
 Performance gate:

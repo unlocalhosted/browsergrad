@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 const args = new Map();
 for (let i = 2; i < process.argv.length; i++) {
   const key = process.argv[i];
+  if (key === "--") continue;
   const value = process.argv[i + 1];
   if (!key?.startsWith("--")) continue;
   args.set(key, value?.startsWith("--") || value === undefined ? "true" : value);
@@ -15,6 +16,7 @@ for (let i = 2; i < process.argv.length; i++) {
 
 const headed = args.get("--headed") === "true";
 const requireWebGpu = args.get("--require-webgpu") === "true";
+const requireCorpusFixtures = args.get("--require-corpus-fixtures") === "true";
 const markdownPath = args.get("--markdown");
 
 const root = findRepoRoot(process.cwd());
@@ -160,6 +162,7 @@ __global__ void sharedHelper(float* out) {
   __syncthreads();
   out[tid] = readTile(tile, 3 - tid);
 }`,
+  ...loadCorpusExecutionSources(),
 };
 
 const html = String.raw`<!doctype html>
@@ -218,16 +221,20 @@ const html = String.raw`<!doctype html>
         });
 
         const failed = cases.filter((item) => !item.ok);
+        const corpusFixtureCases = cases.filter((item) => item.name.startsWith("corpus:"));
         return {
           available: true,
           cases,
+          corpusFixtureCases: corpusFixtureCases.length,
+          corpusFixturePassed: corpusFixtureCases.filter((item) => item.ok).length,
+          corpusFixtureFailed: corpusFixtureCases.filter((item) => !item.ok).length,
           passed: cases.length - failed.length,
           failed: failed.length,
         };
       };
 
       function caseSpecs() {
-        return [
+        const cases = [
           {
             name: "example:saxpy",
             source: SOURCES.saxpy,
@@ -417,6 +424,55 @@ const html = String.raw`<!doctype html>
             output: "out",
           },
         ];
+        if (SOURCES.corpusCuda120VectorAddKernel) {
+          cases.push({
+            name: "corpus:cuda-120:vectorAddKernel",
+            source: SOURCES.corpusCuda120VectorAddKernel,
+            options: { workgroupSize: [8, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+            input: () => ({
+              buffers: {
+                A: new Float32Array([1, 2, 3, 4]),
+                B: new Float32Array([10, 20, 30, 40]),
+                C: new Float32Array(4),
+              },
+              scalars: { N: 4 },
+            }),
+            output: "C",
+          });
+        }
+        if (SOURCES.corpusLlmAddBias) {
+          cases.push({
+            name: "corpus:llm.c:add_bias",
+            source: SOURCES.corpusLlmAddBias,
+            options: { workgroupSize: [8, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array([1, 2, 3, 4, 5, 6]),
+                bias: new Float32Array([0.5, 1.5, -2]),
+              },
+              scalars: { B: 1, T: 2, OC: 3 },
+            }),
+            output: "out",
+          });
+        }
+        if (SOURCES.corpusLlmSetVector) {
+          cases.push({
+            name: "corpus:llm.c:set_vector",
+            source: SOURCES.corpusLlmSetVector,
+            options: { workgroupSize: [8, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+            input: () => ({
+              buffers: {
+                data: new Float32Array(4),
+              },
+              scalars: { N: 4, value: 7 },
+            }),
+            output: "data",
+          });
+        }
+        return cases;
       }
 
       async function runReferenceWebGpuCase(device, spec) {
@@ -550,6 +606,9 @@ try {
   if (requireWebGpu && !report.available) {
     throw new Error(`WebGPU unavailable: ${report.reason ?? "unknown"}`);
   }
+  if (report.available && requireCorpusFixtures && report.corpusFixtureCases === 0) {
+    throw new Error("No corpus execution fixtures were loaded from /tmp corpora");
+  }
   console.log(JSON.stringify(report, null, 2));
   if (report.available && report.failed > 0) {
     throw new Error(`CUDA-lite WebGPU e2e failed ${report.failed} case(s)`);
@@ -580,7 +639,62 @@ function markdownReport(data) {
     lines.push(`| \`${item.name}\` | \`${item.plan}\` | \`${item.output}\` | ${item.maxAbsDiff} | \`${item.ok}\` | ${item.ms} |`);
   }
   lines.push("", `Passed: \`${data.passed}\`, failed: \`${data.failed}\``, "");
+  lines.push(`Corpus fixtures: \`${data.corpusFixturePassed ?? 0}/${data.corpusFixtureCases ?? 0}\``, "");
   return `${lines.join("\n")}\n`;
+}
+
+function loadCorpusExecutionSources() {
+  const out = {};
+  const cuda120 = extractGlobalKernelFromFile(
+    "/tmp/CUDA-120-DAYS--CHALLENGE/daily-updates/day-23-Asynchronous-Memory-Copy.md",
+    "vectorAddKernel",
+  );
+  if (cuda120) out.corpusCuda120VectorAddKernel = cuda120;
+  const llmAddBias = extractGlobalKernelFromFile(
+    "/tmp/browsergrad-corpora/llm.c/dev/cuda/matmul_forward.cu",
+    "add_bias",
+  );
+  if (llmAddBias) out.corpusLlmAddBias = llmAddBias;
+  const llmSetVector = extractGlobalKernelFromFile(
+    "/tmp/browsergrad-corpora/llm.c/dev/cuda/nccl_all_reduce.cu",
+    "set_vector",
+  );
+  if (llmSetVector) out.corpusLlmSetVector = llmSetVector;
+  return out;
+}
+
+function extractGlobalKernelFromFile(filePath, name) {
+  if (!fs.existsSync(filePath)) return undefined;
+  return extractGlobalKernel(fs.readFileSync(filePath, "utf8"), name);
+}
+
+function extractGlobalKernel(source, name) {
+  const re = new RegExp(`__global__\\s+void\\s+${escapeRegExp(name)}\\s*\\(`, "u");
+  const match = re.exec(source);
+  if (!match) return undefined;
+  const start = match.index;
+  const bodyStart = source.indexOf("{", match.index);
+  if (bodyStart < 0) return undefined;
+  const end = findBalanced(source, bodyStart, "{", "}");
+  if (end === undefined) return undefined;
+  return source.slice(start, end + 1);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function findBalanced(source, openIndex, open, close) {
+  let depth = 0;
+  for (let index = openIndex; index < source.length; index++) {
+    const char = source[index];
+    if (char === open) depth++;
+    if (char === close) {
+      depth--;
+      if (depth === 0) return index;
+    }
+  }
+  return undefined;
 }
 
 function findRepoRoot(start) {
