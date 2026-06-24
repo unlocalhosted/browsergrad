@@ -1612,12 +1612,28 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (isCpAsyncCopyCall(name) || isCpAsyncFenceCall(name)) return 0;
   const vectorConstructor = name ? cudaVectorConstructorType(name) : undefined;
   if (vectorConstructor) {
-    const lanes = expression.args.map((arg) => evalNumber(arg, context));
-    const scalar = lanes[0] ?? 0;
+    if (expression.args.length === 1) {
+      const value = evalExpression(expression.args[0]!, context);
+      if (isCudaVectorValue(value) && cudaVectorScalarType(value.valueType) === cudaVectorScalarType(vectorConstructor)) {
+        return {
+          kind: "cuda-vector",
+          valueType: vectorConstructor,
+          lanes: Array.from({ length: cudaVectorLaneCount(vectorConstructor) }, (_unused, index) =>
+            roundVectorLane(vectorConstructor, value.lanes[index] ?? 0)),
+        };
+      }
+      const scalar = valueAsNumber(value, name ?? "vector constructor");
+      return {
+        kind: "cuda-vector",
+        valueType: vectorConstructor,
+        lanes: Array(cudaVectorLaneCount(vectorConstructor)).fill(roundVectorLane(vectorConstructor, scalar)),
+      };
+    }
+    const lanes = expression.args.map((arg) => roundVectorLane(vectorConstructor, evalNumber(arg, context)));
     return {
       kind: "cuda-vector",
       valueType: vectorConstructor,
-      lanes: lanes.length === 1 ? Array(cudaVectorLaneCount(vectorConstructor)).fill(scalar) : lanes,
+      lanes,
     };
   }
   if (name === "__halves2bfloat162") {

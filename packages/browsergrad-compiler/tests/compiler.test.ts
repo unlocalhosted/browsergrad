@@ -2154,10 +2154,29 @@ __global__ void vector_splat(float4 *out, uint4 *kinds) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("vec4<f32>(2.5, 2.5, 2.5, 2.5)");
-    expect(compiled.wgsl).toContain("vec4<u32>(7, 7, 7, 7)");
+    expect(compiled.wgsl).toContain("vec4<f32>(f32(2.5), f32(2.5), f32(2.5), f32(2.5))");
+    expect(compiled.wgsl).toContain("vec4<u32>(u32(7), u32(7), u32(7), u32(7))");
     expect([...result.buffers.out as Float32Array]).toEqual([2.5, 2.5, 2.5, 2.5]);
     expect([...result.buffers.kinds as Uint32Array]).toEqual([7, 7, 7, 7]);
+  });
+
+  it("supports CUDA vector-to-vector conversion constructors", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float3 trim(float4 value) {
+  return make_float3(value);
+}
+__global__ void vector_convert(float4 *input, float3 *out) {
+  float4 value = input[0];
+  out[0] = trim(value);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { input: new Float32Array([1, 2, 3, 4]), out: new Float32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("vec3<f32>(value.x, value.y, value.z)");
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3]);
   });
 
   it("maps CUDA byte-vector aliases onto canonical uint vector values", () => {

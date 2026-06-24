@@ -336,7 +336,7 @@ void host(float *out) {
   });
   assert.match(source, /template <typename T = float, const int Width = 4>/u);
   assert.match(source, /__global__ void typed_kernel\(float \*out\)/u);
-  assert.match(source, /float value = \(float\)Width;/u);
+  assert.match(source, /float value = \(float\)4;/u);
 }
 
 {
@@ -384,7 +384,7 @@ void host(float *out, const float *in) {
     templateArgumentsByKernelName: launches,
   });
   assert.match(source, /template <typename OutFloat = float, bool Atomic = 0>/u);
-  assert.match(source, /__global__ void inferred_kernel\(float \*out, const float \*in, bool __bg_bool_constant_Atomic\)/u);
+  assert.match(source, /__global__ void inferred_kernel\(float \*out, const float \*in, bool __bg_bool_constant_0\)/u);
   assert.match(source, /out\[0\] = \(float\)in\[0\];/u);
   assert.doesNotMatch(source, /#define OutFloat 999/u);
 }
@@ -688,7 +688,7 @@ void run(float *out) {
   });
   assert.match(source, /template <typename T = float, int Block = 128>/u);
   assert.match(source, /__global__ void alias_template\(float \*out\)/u);
-  assert.match(source, /__shared__ float tile\[Block \/ \(sizeof\(float4\) \/ sizeof\(float\)\)\];/u);
+  assert.match(source, /__shared__ float tile\[128 \/ \(sizeof\(float4\) \/ sizeof\(float\)\)\];/u);
   assert.match(source, /\(float\)alignof\(float4\)/u);
 }
 
@@ -884,7 +884,7 @@ __global__ void numeric_define_const_dim(float *out, int N) {
   });
   assert.doesNotMatch(source, /#define WARP_SIZE 32/u);
   assert.doesNotMatch(source, /#define N 999/u);
-  assert.match(source, /const int WARP_NUM = NUM_THREADS \/ 32;/u);
+  assert.match(source, /const int WARP_NUM = 256 \/ 32;/u);
   assert.match(source, /int WARP_SIZE = threadIdx\.x;/u);
   assert.match(source, /if \(WARP_SIZE < N\)/u);
 }
@@ -1016,6 +1016,137 @@ __global__ void pod_record(float *out) {
   assert.match(source, /__shared__ float2 shared\[1\];/u);
   assert.match(source, /make_float2\(-1\.0f, 2\.0f\)/u);
   assert.match(source, /out\[0\] = shared\[0\]\.x \+ shared\[0\]\.y;/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+struct Ray {
+  float3 o;
+  float3 d;
+};
+
+__device__ int intersectBox(Ray r, float3 boxmin, float *tnear) {
+  float3 invR = make_float3(1.0f) / r.d;
+  float3 tbot = invR * (boxmin - r.o);
+  *tnear = tbot.x;
+  return tbot.x > 0.0f;
+}
+
+__global__ void ray_record(float *out) {
+  Ray eyeRay;
+  eyeRay.o = make_float3(out[0], 0.0f, 0.0f);
+  eyeRay.d = make_float3(1.0f, 0.0f, 0.0f);
+  float tnear;
+  int hit = intersectBox(eyeRay, eyeRay.d, &tnear);
+  out[0] = tnear + hit;
+}`,
+    recordDeclarations: [
+      `struct Ray {
+  float3 o;
+  float3 d;
+};`,
+    ],
+    deviceFunctions: [
+      {
+        name: "intersectBox",
+        source: `__device__ int intersectBox(Ray r, float3 boxmin, float *tnear) {
+  float3 invR = make_float3(1.0f) / r.d;
+  float3 tbot = invR * (boxmin - r.o);
+  *tnear = tbot.x;
+  return tbot.x > 0.0f;
+}`,
+      },
+    ],
+  });
+  assert.doesNotMatch(source, /\bstruct\s+Ray\b/u);
+  assert.doesNotMatch(source, /\bRay\b/u);
+  assert.match(source, /__device__ int intersectBox\(float3 r__o, float3 r__d, float3 boxmin, float \*tnear\)/u);
+  assert.match(source, /float3 invR = make_float3\(1\.0f\) \/ r__d;/u);
+  assert.match(source, /float3 eyeRay__o;\s*float3 eyeRay__d;/u);
+  assert.match(source, /eyeRay__o = make_float3/u);
+  assert.match(source, /int hit = intersectBox\(eyeRay__o, eyeRay__d, eyeRay__d, &tnear\);/u);
+}
+
+{
+  const enumTemplateSource = `
+enum Mode {
+  MODE_A = 0,
+  MODE_B = 1,
+};
+template <int MODE>
+__device__ float pick(float x, float y) {
+  return MODE == MODE_A ? x : y;
+}
+__global__ void enum_template(float *out) {
+  out[0] = pick<MODE_B>(1.0f, 2.0f);
+}`;
+  const source = createKernelCompilationUnit({
+    kernel: /__global__ void enum_template[\s\S]*$/u.exec(enumTemplateSource)?.[0],
+    definesByName: collectCudaLiteContextDefines(enumTemplateSource),
+    deviceFunctions: [
+      {
+        name: "pick",
+        source: `template <int MODE>
+__device__ float pick(float x, float y) {
+  return MODE == MODE_A ? x : y;
+}`,
+      },
+    ],
+  });
+  assert.match(source, /#define MODE_A 0/u);
+  assert.match(source, /#define MODE_B 1/u);
+  assert.match(source, /template <int MODE = 1>/u);
+  assert.match(source, /return 1 == 0 \? x : y;/u);
+  assert.doesNotMatch(source, /\benum\s+Mode\b/u);
+  assert.match(source, /out\[0\] = pick\(1\.0f, 2\.0f\);/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+typedef struct {
+  float4 m[3];
+} float3x4;
+__constant__ float3x4 c_invViewMatrix;
+
+__device__ float4 mul(const float3x4 &M, const float4 &v) {
+  float4 r;
+  r.x = dot(v, M.m[0]);
+  r.y = dot(v, M.m[1]);
+  r.z = dot(v, M.m[2]);
+  r.w = 1.0f;
+  return r;
+}
+
+__global__ void matrix_record(float4 *out) {
+  out[0] = mul(c_invViewMatrix, make_float4(0.0f, 0.0f, 0.0f, 1.0f));
+}`,
+    recordDeclarations: [
+      `typedef struct {
+  float4 m[3];
+} float3x4;`,
+    ],
+    constantDeclarations: ["__constant__ float3x4 c_invViewMatrix;"],
+    deviceFunctions: [
+      {
+        name: "mul",
+        source: `__device__ float4 mul(const float3x4 &M, const float4 &v) {
+  float4 r;
+  r.x = dot(v, M.m[0]);
+  r.y = dot(v, M.m[1]);
+  r.z = dot(v, M.m[2]);
+  r.w = 1.0f;
+  return r;
+}`,
+      },
+    ],
+  });
+  assert.doesNotMatch(source, /\bfloat3x4\b/u);
+  assert.match(source, /__constant__ float4 c_invViewMatrix\[3\];/u);
+  assert.match(source, /__device__ float4 mul\(const float4 \*M__m, const float4 &v\)/u);
+  assert.match(source, /r\.x = dot\(v, M__m\[0\]\);/u);
+  assert.match(source, /out\[0\] = mul\(c_invViewMatrix, make_float4/u);
 }
 
 console.log("cuda-lite source normalizer tests ok");

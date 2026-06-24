@@ -1525,6 +1525,23 @@ function emitVectorConstructor(vectorType: CudaLiteScalarType, args: readonly st
   return `${wgslScalar(vectorType)}(${args.join(", ")})`;
 }
 
+function emitVectorConversionConstructor(
+  targetType: CudaLiteVectorType,
+  expression: CudaLiteExpression,
+  context: EmitContext,
+): string {
+  const sourceType = expressionValueTypeForEmit(expression, context);
+  if (!isCudaVectorType(sourceType) || cudaVectorScalarType(sourceType) !== cudaVectorScalarType(targetType)) {
+    return emitVectorSplat(targetType, castExpressionToVectorScalar(emitExpression(expression, context), targetType));
+  }
+  const value = emitExpression(expression, context);
+  const fields = ["x", "y", "z", "w"];
+  const scalar = cudaVectorScalarType(targetType) ?? "float";
+  const lanes = Array.from({ length: cudaVectorLaneCount(targetType) }, (_unused, index) =>
+    index < cudaVectorLaneCount(sourceType) ? `${value}.${fields[index]!}` : zeroValue(scalar));
+  return `${wgslScalar(targetType)}(${lanes.join(", ")})`;
+}
+
 function emitLocalArrayFill(
   name: string,
   dimensions: readonly number[],
@@ -2151,7 +2168,11 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
   if (intrinsic?.emitWgsl) return intrinsic.emitWgsl(args);
   const vectorConstructor = name ? cudaVectorConstructorType(name) : undefined;
-  if (vectorConstructor) return emitVectorConstructor(vectorConstructor, args);
+  if (vectorConstructor) {
+    return expression.args.length === 1
+      ? emitVectorConversionConstructor(vectorConstructor, expression.args[0]!, context)
+      : emitVectorConstructor(vectorConstructor, args);
+  }
   if (name === "__halves2bfloat162") return `${wgslScalar("bf162")}(${args.join(", ")})`;
   if (isPointerIdentityCall(name)) return expression.args[0] ? emitExpression(expression.args[0], context) : "0u";
   if (name !== undefined && CUDA_CACHE_HINT_LOADS.has(name)) {
@@ -2363,7 +2384,9 @@ function emitExpressionAsValueType(
   const value = emitExpression(expression, context);
   if (valueType === "void") return value;
   if (expressionValueTypeForEmit(expression, context) === valueType) return value;
-  if (isCudaVectorType(valueType)) return emitVectorSplat(valueType, castExpressionToVectorScalar(value, valueType));
+  if (isCudaVectorType(valueType)) return expressionValueTypeForEmit(expression, context) !== undefined
+    ? emitVectorConversionConstructor(valueType, expression, context)
+    : emitVectorSplat(valueType, castExpressionToVectorScalar(value, valueType));
   if (valueType === "bool") return `(${value} != 0)`;
   return `${wgslScalar(valueType)}(${value})`;
 }

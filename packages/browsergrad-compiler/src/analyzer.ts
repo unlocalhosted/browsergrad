@@ -959,7 +959,19 @@ function validateCallExpression(
   }
   const vectorConstructor = cudaVectorConstructorType(callName);
   if (vectorConstructor) {
-    for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    const targetScalar = cudaVectorScalarType(vectorConstructor);
+    for (const arg of expression.args) {
+      const info = walkExpression(arg, scope);
+      if (
+        expression.args.length === 1 &&
+        info.kind === "vector" &&
+        isCudaVectorType(info.valueType) &&
+        cudaVectorScalarType(info.valueType) === targetScalar
+      ) {
+        continue;
+      }
+      validateScalarOperand(info, arg.span, diagnostics);
+    }
     return { kind: "vector", valueType: vectorConstructor };
   }
   if (callName === "__halves2bfloat162") {
