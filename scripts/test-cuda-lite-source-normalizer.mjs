@@ -1828,4 +1828,41 @@ __device__ void fill(float2 &twiddle) {
   assert.doesNotMatch(source, /\(\*twiddle\)/u);
 }
 
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void reachable_device_global(uint* out) {
+  out[0] = activeGlobal;
+}`,
+    deviceGlobalDeclarations: [
+      "__device__ blockFunction_t unusedFunctionTable[2];",
+      "__device__ unsigned int activeGlobal = 7u;",
+    ],
+  });
+  assert.match(source, /__device__ unsigned int activeGlobal = 7u;/u);
+  assert.doesNotMatch(source, /unusedFunctionTable/u);
+  assert.doesNotMatch(source, /blockFunction_t/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void ignore_unused_context(uint* out) {
+  out[0] = 1u;
+}`,
+    constantDeclarations: [
+      "__constant__ short unusedTable[] = {1, 2, 3};",
+    ],
+    deviceGlobalDeclarations: [
+      "__device__ virtualTable_t unusedVirtualDispatch;",
+    ],
+    textureDeclarations: [
+      "texture<float, 2, cudaReadModeElementType> unusedTexture;",
+    ],
+  });
+  assert.doesNotMatch(source, /unusedTable/u);
+  assert.doesNotMatch(source, /unusedVirtualDispatch/u);
+  assert.doesNotMatch(source, /unusedTexture/u);
+}
+
 console.log("cuda-lite source normalizer tests ok");

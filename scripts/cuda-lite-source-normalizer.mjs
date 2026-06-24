@@ -115,12 +115,32 @@ export function createKernelCompilationUnit({
   const referencedSiblingKernels = referencedSiblingKernelsRaw.map((sibling) => stripKernelLaunchTemplateArguments(
     specializeTemplateFromLaunchContext(sibling, templateArgumentsByKernelName, effectiveDefines),
   ));
+  const reachableDeclarationScope = [
+    specializedKernel,
+    ...referencedDeviceFunctions.map((fn) => fn.source),
+    ...referencedSiblingKernels,
+  ].join("\n");
+  const referencedConstantDeclarations = reachableDeclarations(
+    constantDeclarations,
+    constantDeclarationName,
+    reachableDeclarationScope,
+  );
+  const referencedDeviceGlobalDeclarations = reachableDeclarations(
+    deviceGlobalDeclarations,
+    deviceGlobalDeclarationName,
+    reachableDeclarationScope,
+  );
+  const referencedTextureDeclarations = reachableDeclarations(
+    textureDeclarations,
+    textureDeclarationName,
+    reachableDeclarationScope,
+  );
   const normalizedMacroScope = [
     specializedKernel,
     ...referencedDeviceFunctions.map((fn) => fn.source),
     ...referencedSiblingKernels,
-    ...constantDeclarations,
-    ...deviceGlobalDeclarations,
+    ...referencedConstantDeclarations,
+    ...referencedDeviceGlobalDeclarations,
   ].join("\n");
   const referencedRecordDeclarations = availableRecordDeclarations.filter((declaration) => {
     const name = recordDeclarationName(declaration);
@@ -141,9 +161,9 @@ export function createKernelCompilationUnit({
     defines.join("\n"),
     functionMacros.map(normalizeFunctionMacro).join("\n"),
     referencedDeviceFunctions.map((fn) => fn.source).join("\n"),
-    constantDeclarations.join("\n"),
-    deviceGlobalDeclarations.join("\n"),
-    textureDeclarations.join("\n"),
+    referencedConstantDeclarations.join("\n"),
+    referencedDeviceGlobalDeclarations.join("\n"),
+    referencedTextureDeclarations.join("\n"),
     referencedRecordDeclarations.join("\n"),
     referencedSiblingKernels.join("\n"),
     kernelWithSharedDeclarations,
@@ -486,6 +506,33 @@ function sourceLaunchesKernel(source, name) {
 
 function sourceMentionsIdentifier(source, name) {
   return new RegExp(`\\b${escapeRegExp(name)}\\b`, "u").test(source);
+}
+
+function reachableDeclarations(declarations, nameOf, source) {
+  return declarations.filter((declaration) => {
+    const name = nameOf(declaration);
+    return name !== undefined && sourceMentionsIdentifier(source, name);
+  });
+}
+
+function constantDeclarationName(declaration) {
+  return trailingDeclaratorName(declaration.replace(/\b__constant__\b/u, " "));
+}
+
+function deviceGlobalDeclarationName(declaration) {
+  return trailingDeclaratorName(declaration.replace(/\b(?:static\s+)?__device__\b/u, " "));
+}
+
+function textureDeclarationName(declaration) {
+  return /\b([A-Za-z_][A-Za-z0-9_]*)\s*;\s*$/u.exec(declaration)?.[1];
+}
+
+function trailingDeclaratorName(declaration) {
+  const withoutInitializer = declaration
+    .replace(/=[\s\S]*$/u, "")
+    .replace(/;\s*$/u, "")
+    .trim();
+  return /(?:^|[\s*&])([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[[^\]]*\])?\s*$/u.exec(withoutInitializer)?.[1];
 }
 
 function isMacroIdentifier(name) {

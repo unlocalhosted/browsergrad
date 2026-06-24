@@ -96,6 +96,13 @@ __global__ void DynamicAlignedByteShared(float *out) {
   __syncthreads();
   if (threadIdx.x == 0) out[0] = (float)bytes[1];
 }
+
+__global__ void DynamicLateQualifierShared(float *out) {
+  extern double __shared__ values[];
+  values[threadIdx.x] = (double)threadIdx.x;
+  __syncthreads();
+  if (threadIdx.x == 0) out[0] = (float)values[1];
+}
 `);
   fs.writeFileSync(path.join(tmpRoot, "main.cu"), `
 #include "defs.h"
@@ -128,6 +135,10 @@ void launch_dynamic_vector(uchar4 *out) {
 void launch_dynamic_aligned(float *out) {
   DynamicAlignedByteShared<<<1, 32, 512>>>(out);
 }
+
+void launch_dynamic_late(float *out) {
+  DynamicLateQualifierShared<<<1, 32, 512>>>(out);
+}
 `);
 
   const result = spawnSync("node", ["scripts/audit-cuda-lite-corpus.mjs", tmpRoot, "--details"], {
@@ -141,16 +152,16 @@ void launch_dynamic_aligned(float *out) {
     process.exit(result.status ?? 1);
   }
   const report = JSON.parse(result.stdout.slice(result.stdout.indexOf("{")));
-  assertEqual(report.summary.totalKernelDefinitions, 7, "total kernel count");
+  assertEqual(report.summary.totalKernelDefinitions, 8, "total kernel count");
   assertEqual(report.summary.corpusKernelExecution, "compile-only", "corpus execution mode");
   assertEqual(report.summary.corpusExecutionMode, "compile-only", "corpus execution mode alias");
-  assertEqual(report.summary.executionTierCounts.compileCodegenOnlyOk, 7, "compile/codegen-only tier count");
+  assertEqual(report.summary.executionTierCounts.compileCodegenOnlyOk, 8, "compile/codegen-only tier count");
   assertEqual(report.summary.executionTierCounts.fixtureBackedExecutedOk, 0, "fixture execution tier count");
   assertEqual(report.summary.executionTierCounts.browserWebGpuExecutedOk, 0, "browser execution tier count");
   assertEqual(report.summary.executionTierCounts.outputVerifiedOk, 0, "output verified tier count");
-  assertEqual(report.summary.webGpuCompiledOk, 7, "reverse include kernel WebGPU compiled");
+  assertEqual(report.summary.webGpuCompiledOk, 8, "reverse include kernel WebGPU compiled");
   assertEqual(report.summary.fixtureBackedExecutionOk, 0, "fixture-backed execution count");
-  assertEqual(report.summary.webGpuRunnableOk, 7, "reverse include kernel WebGPU runnable");
+  assertEqual(report.summary.webGpuRunnableOk, 8, "reverse include kernel WebGPU runnable");
   assertEqual(report.summary.hardFail, 0, "reverse include hard gaps");
   console.log("cuda-lite corpus audit tests passed");
 } finally {

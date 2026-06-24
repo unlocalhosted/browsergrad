@@ -76,8 +76,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   excludes kernels now runnable on real WebGPU through orchestration; current
   baseline is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=292`
-  compile/codegen-runnable, and `<=64` hard gaps;
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=296`
+  compile/codegen-runnable, and `<=60` hard gaps;
   `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=148`
   compile/codegen-runnable, and `0` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=275`
@@ -150,9 +150,10 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   C++ std math aliases such as `std::isinf` and
   `std::numeric_limits<float>::infinity()` lower to generic CUDA-lite
   intrinsics/constants.
-  Dynamic extern shared-memory inference includes bf16 storage, and scalar
-  128-bit cache-load assignments expand into lane-wise stores for 2/4-byte
-  scalar pointer packs.
+  Dynamic extern shared-memory inference includes bf16 storage, late
+  `extern T __shared__ name[]` qualifier order, and trailing fixed dimensions
+  such as `extern __shared__ T name[][N]`; scalar 128-bit cache-load
+  assignments expand into lane-wise stores for 2/4-byte scalar pointer packs.
   Custom CUDA-vector `cg::reduce` calls lower through scalar subgroup
   shuffle-XOR loops backed by user device merge helpers.
   Device helper calls can now pass local scalar out-params through WGSL

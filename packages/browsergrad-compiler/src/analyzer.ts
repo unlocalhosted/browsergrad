@@ -3215,10 +3215,11 @@ function resolvedSharedDimensions(
   statement: CudaLiteVarDecl,
   options: CudaLiteAnalyzeOptions,
 ): readonly number[] | undefined {
-  if (statement.storage !== "shared" || !statement.dynamicShared || statement.dimensions.length > 0) return undefined;
+  if (statement.storage !== "shared" || !statement.dynamicShared) return undefined;
   const elements = options.dynamicSharedMemory?.[statement.name];
   if (elements === undefined) return undefined;
-  return [positiveInteger(elements, `dynamicSharedMemory.${statement.name}`)];
+  const leading = positiveInteger(elements, `dynamicSharedMemory.${statement.name}`);
+  return statement.dimensions.length === 0 ? [leading] : [leading, ...statement.dimensions];
 }
 
 function expressionIsDivergent(

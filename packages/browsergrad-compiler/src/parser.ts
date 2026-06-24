@@ -927,16 +927,23 @@ class Parser {
     const start = this.peek().span;
     this.consumeCudaDeclAttributes();
     this.consumeIf("static");
-    const storageInfo = this.consumeStorageQualifier();
+    let storageInfo = this.consumeStorageQualifier();
     this.consumeIf("static");
     const constexpr = this.consumeIf("constexpr") !== undefined;
     const constQualified = this.consumeCvQualifiers();
+    if (this.consumeIf("__shared__")) {
+      storageInfo = { storage: "shared", dynamicShared: storageInfo.external || storageInfo.dynamicShared, external: false };
+    }
     this.consumeCudaDeclAttributes();
     const matrixTile = this.startsWmmaFragmentType() || this.match("wmma") || this.match("nvcuda")
       ? this.parseWmmaFragmentType()
       : undefined;
     const valueType = matrixTile ? matrixTile.valueType ?? "float" : this.parseType();
     this.consumeCvQualifiers();
+    if (this.consumeIf("__shared__")) {
+      storageInfo = { storage: "shared", dynamicShared: storageInfo.external || storageInfo.dynamicShared, external: false };
+    }
+    if (storageInfo.external) this.fail("extern is only supported with __shared__ declarations", this.previous().span);
     const declarations: CudaLiteVarDecl[] = [];
     do {
       this.consumeCudaDeclAttributes();
@@ -1408,6 +1415,7 @@ class Parser {
     }
     if (token.value === "long") {
       this.consumeIf("long");
+      this.consumeIf("int");
       return "int";
     }
     if (token.value === "short") {
@@ -1457,7 +1465,7 @@ class Parser {
       return this.startsWmmaFragmentType(attrEndIndex) ||
         TYPE_START_KEYWORDS.has(value ?? "") ||
         (value === "static" && (this.startsWmmaFragmentType(attrEndIndex + 1) || TYPE_START_KEYWORDS.has(nextValue ?? ""))) ||
-        (this.isCvQualifier(value) && (this.startsWmmaFragmentType(attrEndIndex + 1) || TYPE_START_KEYWORDS.has(nextValue ?? "")));
+        (this.isCvQualifier(value) && (nextValue === "__shared__" || this.startsWmmaFragmentType(attrEndIndex + 1) || TYPE_START_KEYWORDS.has(nextValue ?? "")));
     }
     if (this.match("static")) return this.tokens[this.index + 1]?.value === "__shared__" ||
       this.tokens[this.index + 1]?.value === "constexpr" ||
@@ -1467,7 +1475,8 @@ class Parser {
       TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "") ||
       (this.isCvQualifier(this.tokens[this.index + 1]?.value) &&
         (this.startsWmmaFragmentType(this.index + 2) || TYPE_START_KEYWORDS.has(this.tokens[this.index + 2]?.value ?? "")));
-    if (this.isCvQualifier(this.peek().value)) return this.startsWmmaFragmentType(this.index + 1) ||
+    if (this.isCvQualifier(this.peek().value)) return this.tokens[this.index + 1]?.value === "__shared__" ||
+      this.startsWmmaFragmentType(this.index + 1) ||
       TYPE_START_KEYWORDS.has(this.tokens[this.index + 1]?.value ?? "");
     return this.startsWmmaFragmentType() || TYPE_START_KEYWORDS.has(this.peek().value);
   }
@@ -1480,6 +1489,7 @@ class Parser {
     }
     if (this.consumeIf("long")) {
       this.consumeIf("long");
+      this.consumeIf("int");
       return;
     }
   }
@@ -1547,11 +1557,10 @@ class Parser {
       value === "uintptr_t";
   }
 
-  private consumeStorageQualifier(): { readonly storage: "local" | "shared"; readonly dynamicShared: boolean } {
+  private consumeStorageQualifier(): { readonly storage: "local" | "shared"; readonly dynamicShared: boolean; readonly external: boolean } {
     const external = this.consumeIf("extern") !== undefined;
-    if (this.consumeIf("__shared__")) return { storage: "shared", dynamicShared: external };
-    if (external) this.fail("extern is only supported with __shared__ declarations", this.previous().span);
-    return { storage: "local", dynamicShared: false };
+    if (this.consumeIf("__shared__")) return { storage: "shared", dynamicShared: external, external: false };
+    return { storage: "local", dynamicShared: false, external };
   }
 
   private consumeTypeQualifiers(): void {

@@ -642,15 +642,17 @@ __global__ void sizeKernel(uint* out) {
 __global__ void integerAliases(int32_t *signedOut, uint32_t *unsignedOut, signed int n) {
   int idx = threadIdx.x;
   long long signedWide = (long long)idx - 2;
+  long long int signedWideInt = signedWide + 1;
   signed short small = (signed short)n;
   ptrdiff_t stride = (ptrdiff_t)idx;
   unsigned long long unsignedWide = (unsigned long long)n + (uint64_t)idx;
+  unsigned long long int unsignedWideInt = unsignedWide + 1u;
   uintptr_t ptrValue = (uintptr_t)unsignedWide;
   uint32_t bytes = (uint32_t)sizeof(long);
-  int64_t signedAlias = (int64_t)signedWide + (int32_t)small;
+  int64_t signedAlias = (int64_t)signedWideInt + (int32_t)small;
   if (idx < 2) {
     signedOut[idx] = signedAlias + stride;
-    unsignedOut[idx] = ptrValue + bytes;
+    unsignedOut[idx] = unsignedWideInt + ptrValue + bytes;
   }
 }`, { workgroupSize: [2, 1, 1] });
     const result = runCompiledKernelReference(
@@ -670,8 +672,8 @@ __global__ void integerAliases(int32_t *signedOut, uint32_t *unsignedOut, signed
     expect(compiled.wgsl).toContain("var unsignedWide: u32");
     expect(compiled.wgsl).toContain("var ptrValue: u32");
     expect(compiled.wgsl).toContain("var bytes: u32 = u32(u32(4))");
-    expect([...result.buffers.signedOut as Int32Array]).toEqual([3, 5]);
-    expect([...result.buffers.unsignedOut as Uint32Array]).toEqual([9, 10]);
+    expect([...result.buffers.signedOut as Int32Array]).toEqual([4, 6]);
+    expect([...result.buffers.unsignedOut as Uint32Array]).toEqual([15, 17]);
   });
 
   it("accepts CUDA opaque/index aliases and volatile qualifiers", () => {
@@ -4162,6 +4164,73 @@ __global__ void dynamicShared(float *x) {
 
     expect(compiled.wgsl).toContain("var<workgroup> scratch: array<f32, 2>;");
     expect([...result.buffers.x as Float32Array]).toEqual([5, 3]);
+  });
+
+  it("lowers CUDA alternate extern shared qualifier order", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void dynamicSharedLateQualifier(float *x) {
+  extern double __shared__ scratch[];
+  int tid = threadIdx.x;
+  if (tid < 2) { scratch[tid] = (double)x[tid]; }
+  __syncthreads();
+  if (tid < 1) { x[0] = (float)(scratch[0] + scratch[1]); }
+}`, {
+      workgroupSize: [2, 1, 1],
+      dynamicSharedMemory: { scratch: 2 },
+      f64Mode: "f32",
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([2, 3]) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<workgroup> scratch: array<f32, 2>;");
+    expect([...result.buffers.x as Float32Array]).toEqual([5, 3]);
+  });
+
+  it("lowers dynamic extern shared memory with trailing fixed dimensions", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void dynamicShared2d(float *x) {
+  extern __shared__ float scratch[][2];
+  int tid = threadIdx.x;
+  if (tid < 2) {
+    scratch[tid][0] = x[tid];
+    scratch[tid][1] = x[tid] + 1.0f;
+  }
+  __syncthreads();
+  if (tid < 1) { x[0] = scratch[0][1] + scratch[1][1]; }
+}`, {
+      workgroupSize: [2, 1, 1],
+      dynamicSharedMemory: { scratch: 2 },
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([2, 3]) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<workgroup> scratch: array<array<f32, 2>, 2>;");
+    expect([...result.buffers.x as Float32Array]).toEqual([7, 3]);
+  });
+
+  it("accepts volatile shared-memory qualifier order", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void volatileShared(float *out) {
+  volatile __shared__ float scratch[2];
+  int tid = threadIdx.x;
+  if (tid < 2) { scratch[tid] = out[tid]; }
+  __syncthreads();
+  if (tid < 1) { out[0] = scratch[0] + scratch[1]; }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array([2, 3]) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<workgroup> scratch: array<f32, 2>;");
+    expect([...result.buffers.out as Float32Array]).toEqual([5, 3]);
   });
 
   it("lowers dynamic extern shared memory declared inside device helpers", () => {
