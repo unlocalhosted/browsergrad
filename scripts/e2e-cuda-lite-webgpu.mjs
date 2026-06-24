@@ -267,12 +267,22 @@ const html = String.raw`<!doctype html>
 
         const failed = cases.filter((item) => !item.ok);
         const corpusFixtureCases = cases.filter((item) => item.name.startsWith("corpus:"));
+        const expectedCorpusFixtureNames = [
+          "corpus:cuda-120:vectorAddKernel",
+          "corpus:cuda-samples:vectorAdd",
+          "corpus:llm.c:add_bias",
+          "corpus:llm.c:set_vector",
+          "corpus:LeetCUDA:elementwise_add_f32_kernel",
+        ];
+        const loadedCorpusFixtureNames = new Set(corpusFixtureCases.map((item) => item.name));
         return {
           available: true,
           cases,
           corpusFixtureCases: corpusFixtureCases.length,
           corpusFixturePassed: corpusFixtureCases.filter((item) => item.ok).length,
           corpusFixtureFailed: corpusFixtureCases.filter((item) => !item.ok).length,
+          expectedCorpusFixtureNames,
+          missingCorpusFixtureNames: expectedCorpusFixtureNames.filter((name) => !loadedCorpusFixtureNames.has(name)),
           passed: cases.length - failed.length,
           failed: failed.length,
         };
@@ -524,6 +534,23 @@ const html = String.raw`<!doctype html>
             output: "C",
           });
         }
+        if (SOURCES.corpusCudaSamplesVectorAdd) {
+          cases.push({
+            name: "corpus:cuda-samples:vectorAdd",
+            source: SOURCES.corpusCudaSamplesVectorAdd,
+            options: { workgroupSize: [8, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+            input: () => ({
+              buffers: {
+                A: new Float32Array([1, 2, 3, 4]),
+                B: new Float32Array([10, 20, 30, 40]),
+                C: new Float32Array(4),
+              },
+              scalars: { numElements: 4 },
+            }),
+            output: "C",
+          });
+        }
         if (SOURCES.corpusLlmAddBias) {
           cases.push({
             name: "corpus:llm.c:add_bias",
@@ -553,6 +580,23 @@ const html = String.raw`<!doctype html>
               scalars: { N: 4, value: 7 },
             }),
             output: "data",
+          });
+        }
+        if (SOURCES.corpusLeetCudaElementwiseAddF32) {
+          cases.push({
+            name: "corpus:LeetCUDA:elementwise_add_f32_kernel",
+            source: SOURCES.corpusLeetCudaElementwiseAddF32,
+            options: { workgroupSize: [8, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+            input: () => ({
+              buffers: {
+                a: new Float32Array([1, 2, 3, 4]),
+                b: new Float32Array([10, 20, 30, 40]),
+                c: new Float32Array(4),
+              },
+              scalars: { N: 4 },
+            }),
+            output: "c",
           });
         }
         return cases;
@@ -689,8 +733,8 @@ try {
   if (requireWebGpu && !report.available) {
     throw new Error(`WebGPU unavailable: ${report.reason ?? "unknown"}`);
   }
-  if (report.available && requireCorpusFixtures && report.corpusFixtureCases === 0) {
-    throw new Error("No corpus execution fixtures were loaded from /tmp corpora");
+  if (report.available && requireCorpusFixtures && (report.missingCorpusFixtureNames?.length ?? 0) > 0) {
+    throw new Error(`Missing corpus execution fixtures from /tmp corpora: ${report.missingCorpusFixtureNames.join(", ")}`);
   }
   console.log(JSON.stringify(report, null, 2));
   if (report.available && report.failed > 0) {
@@ -733,6 +777,11 @@ function loadCorpusExecutionSources() {
     "vectorAddKernel",
   );
   if (cuda120) out.corpusCuda120VectorAddKernel = cuda120;
+  const cudaSamplesVectorAdd = extractGlobalKernelFromFile(
+    "/tmp/browsergrad-corpora/cuda-samples/cpp/0_Introduction/vectorAdd/vectorAdd.cu",
+    "vectorAdd",
+  );
+  if (cudaSamplesVectorAdd) out.corpusCudaSamplesVectorAdd = cudaSamplesVectorAdd;
   const llmAddBias = extractGlobalKernelFromFile(
     "/tmp/browsergrad-corpora/llm.c/dev/cuda/matmul_forward.cu",
     "add_bias",
@@ -743,6 +792,11 @@ function loadCorpusExecutionSources() {
     "set_vector",
   );
   if (llmSetVector) out.corpusLlmSetVector = llmSetVector;
+  const leetCudaElementwiseAddF32 = extractGlobalKernelFromFile(
+    "/tmp/browsergrad-corpora/LeetCUDA/kernels/elementwise/elementwise.cu",
+    "elementwise_add_f32_kernel",
+  );
+  if (leetCudaElementwiseAddF32) out.corpusLeetCudaElementwiseAddF32 = leetCudaElementwiseAddF32;
   return out;
 }
 

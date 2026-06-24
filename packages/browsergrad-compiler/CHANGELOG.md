@@ -32,6 +32,9 @@
   orchestration planner timing.
 - Added corpus-audit threshold flags and `audit:cuda-120` so CUDA corpus
   coverage baselines fail on regression.
+- Corpus audit now reports `compileCodegenOk` / `compileCodegenGaps` and
+  treats `webGpuRunnableOk` as a legacy alias, making compile-plan coverage
+  distinct from fixture-backed real WebGPU execution.
 - Browser WebGPU benchmarks now fail on validation errors and accept optional
   prepared-dispatch ratio thresholds for machine-local perf gates.
 - Fixed thread-local arrays now run through CPU reference and WGSL/WebGPU
@@ -52,6 +55,9 @@
 - Added `e2e:webgpu`, a real-browser reference-vs-WebGPU proof for examples,
   grid-sync phases, host runtime copy, host dynamic launch, and prepared resident
   dispatch.
+- `e2e:webgpu:corpus` now requires output-verified real WebGPU fixtures from
+  CUDA-120, NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA when corpus fixtures
+  are required.
 - Added shared launch-shape diagnostics so platform preflight, CPU reference,
   and WebGPU runners reject invalid grid/block dimensions consistently.
 - `createCudaWebGpuExecutionPlan()` now returns `launch` blockers for invalid

@@ -65,12 +65,12 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   definitions compile as strict direct-lowering WGSL/WebGPU
   (`directLoweringOk`). Another `15/240` are
   real-GPU runnable through WebGPU orchestration lifts (`grid-sync-phases` and
-  `host-dynamic-launch`), for `240/240` `webGpuRunnableOk`. `0/240` remain
+  `host-dynamic-launch`), for `240/240` `compileCodegenOk`. `0/240` remain
   reference-only and `0/240` remain hard gaps after filtering docs/pseudocode.
 - Corpus audit is compile/lowering evidence, not fixture execution for every
-  external kernel. `webGpuRunnableOk` is kept for compatibility but is now also
-  reported as `webGpuCompiledOk`; fixture-backed execution belongs in browser
-  tests and `scripts/e2e-cuda-lite-webgpu.mjs`.
+  external kernel. `webGpuRunnableOk` is kept only as a legacy alias for
+  `compileCodegenOk` / `webGpuCompiledOk`; fixture-backed execution belongs in
+  browser tests and `scripts/e2e-cuda-lite-webgpu.mjs`.
 - `referenceFallbackOk` is `15/240`: kernels whose semantics are understood by
   CPU reference or host/WebGPU orchestration. `referenceOnlyOk` is stricter and
   excludes kernels now runnable on real WebGPU through orchestration; current
@@ -249,7 +249,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu:corpus -- --require
 - `e2e:webgpu:corpus` also requires pinned local corpora under `/tmp`, extracts
   exact external kernels, dispatches them in Chromium/WebGPU, and compares GPU
   readbacks to CPU reference. Current fixture set: CUDA-120 `vectorAddKernel`,
-  `llm.c` `add_bias`, and `llm.c` `set_vector`.
+  NVIDIA `cuda-samples` `vectorAdd`, `llm.c` `add_bias`, `llm.c`
+  `set_vector`, and LeetCUDA `elementwise_add_f32_kernel`.
 - Use `-- --require-webgpu` on machines where absence of WebGPU should fail CI.
 
 Performance gate:

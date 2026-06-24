@@ -351,7 +351,9 @@ WebGPU. It covers SAXPY, guarded map, tiled matmul, grid-sync phases, host
 runtime copy, host dynamic launch, and prepared resident dispatch.
 `e2e:webgpu:corpus` additionally requires fixture-backed corpus kernels loaded
 from pinned local corpora under `/tmp` and executes them through real WebGPU
-with readback comparisons.
+with readback comparisons. Required fixture names currently cover CUDA-120
+`vectorAddKernel`, NVIDIA `cuda-samples` `vectorAdd`, `llm.c` `add_bias`,
+`llm.c` `set_vector`, and LeetCUDA `elementwise_add_f32_kernel`.
 Compiler e2e, corpus, and benchmark package scripts use
 `scripts/run-cuda-lite-tool.mjs`, which locks build + tool execution so parallel
 invocations cannot import a partially rebuilt `dist/` tree.
@@ -370,14 +372,14 @@ not execute every external corpus kernel because most corpora do not carry
 portable launch fixtures and expected outputs. Failure details include WebGPU
 blocker kind/code/message. Threshold flags make corpus compile coverage
 regressions fail fast instead of living only in docs.
-`directLoweringOk` means strict one-pass WGSL compile. `webGpuRunnableOk` is a
-legacy name for `webGpuCompiledOk`: it counts kernels that compile to direct
-WGSL or host-orchestrated WebGPU plans such as grid-sync phases and dynamic
-launch lifts. The legacy `ok` and `fail` fields remain as strict direct-lowering
-metrics for older scripts. New consumers should prefer `executionTierCounts`:
-`compileCodegenOnlyOk`, `fixtureBackedExecutedOk`, `browserWebGpuExecutedOk`,
-and `outputVerifiedOk`. Real execution proof lives in fixture-backed tests such
-as `pnpm --filter @unlocalhosted/browsergrad-compiler test:browser` and
+`directLoweringOk` means strict one-pass WGSL compile. `compileCodegenOk` means
+direct WGSL compile or host-orchestrated WebGPU plan compile, such as grid-sync
+phases and dynamic launch lifts. `webGpuRunnableOk` remains as a legacy alias
+for `compileCodegenOk`; new consumers should not treat it as output-verified
+execution. Prefer `executionTierCounts`: `compileCodegenOnlyOk`,
+`fixtureBackedExecutedOk`, `browserWebGpuExecutedOk`, and `outputVerifiedOk`.
+Real execution proof lives in fixture-backed tests such as
+`pnpm --filter @unlocalhosted/browsergrad-compiler test:browser` and
 `scripts/e2e-cuda-lite-webgpu.mjs`.
 
 ## Performance Harness

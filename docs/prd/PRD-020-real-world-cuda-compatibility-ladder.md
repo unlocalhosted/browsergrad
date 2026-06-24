@@ -54,9 +54,10 @@ Repo exploration:
 - `docs/platform/cuda-compatibility-spine.md` says every CUDA gap maps to a
   family: `frontend`, `memory`, `atomic`, `texture`, `subgroup`, `library`,
   `runtime`, `feature`, or `safety`.
-- Current `CUDA-120-DAYS--CHALLENGE` gate reports `240/240` WebGPU-runnable
-  kernel definitions: `225/240` strict direct WGSL and `15/240` host-orchestrated
-  real WebGPU.
+- Current `CUDA-120-DAYS--CHALLENGE` audit reports `240/240`
+  compile/codegen-runnable kernel definitions: `225/240` strict direct WGSL and
+  `15/240` host-orchestrated WebGPU plans. Output-verified execution is covered
+  by browser e2e fixtures, not by full-corpus audit rows.
 
 Local corpus audits on 2026-06-24:
 
@@ -157,7 +158,7 @@ Local corpus audits on 2026-06-24:
   operators, remaining `half2` intrinsics, templates, and runtime library
   shape.
 - `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `148` direct
-  WebGPU-runnable after source/context normalization, intrinsic-ledger
+  compile/codegen-runnable after source/context normalization, intrinsic-ledger
   expansion, CUDA/C named constants, CUDA cache-hint memory builtins, local
   header context, simple C++ alias / constexpr intake, and typed storage
   pointer aliases plus `warpSize` / `NULL` named constants, in-kernel
@@ -201,7 +202,7 @@ Local corpus audits on 2026-06-24:
   CUDA-vector `cg::reduce` lowering through scalar subgroup shuffle-XOR loops,
   with `0` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `278` direct
-  WebGPU-runnable after source/context normalization plus intrinsic-ledger
+  compile/codegen-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, local header context, and
   simple C++ alias / constexpr intake plus `FLOAT4(x)`-style typed storage
   views, bounded integer template defaults, and concrete launch-context
@@ -279,6 +280,19 @@ What this changes:
   pinned corpora: CUDA-120 `240/240`, `cuda-samples` `303/357`, `llm.c`
   `148/148`, and LeetCUDA `278/293`.
 
+Coverage tier glossary:
+
+- `compileCodegenOk`: corpus source parses, analyzes, lowers, and emits direct
+  WGSL or a host-orchestrated WebGPU execution plan. This is the full-corpus
+  regression gate.
+- `fixtureBackedExecutedOk`: explicit launch inputs exist and the kernel was
+  executed against those fixtures.
+- `browserWebGpuExecutedOk`: fixture execution happened in Chromium/WebGPU.
+- `outputVerifiedOk`: GPU readback matched expected output or CPU reference.
+- Legacy `webGpuRunnableOk` / `webGpuTotalOk` fields mean `compileCodegenOk`
+  until removed in a later breaking schema revision; consumers should not treat
+  them as output-verified execution.
+
 ## Grill Decisions
 
 Question: What is the smallest vertical slice that proves this idea end-to-end
@@ -354,9 +368,9 @@ Decision: Coverage reports stay honest and machine-readable.
   kernel count, direct WebGPU count, host-orchestrated count, reference-only
   count, hard gaps, error codes, and semantic families.
 - Add thresholds per corpus. CUDA-120 should stay at `240/240`
-  WebGPU-runnable. LeetCUDA, samples, and `llm.c` are hard no-regression gates
-  from their measured baselines, then graduate to higher minimums after generic
-  compatibility primitives land.
+  compile/codegen-runnable with `0` hard gaps. LeetCUDA, samples, and `llm.c`
+  are hard no-regression gates from their measured baselines, then graduate to
+  higher minimums after generic compatibility primitives land.
 - Build a source normalizer module as a deep module. It should create a minimal
   compilation unit for one kernel and include only relevant context: safe object
   macros, expression macros, constants, type aliases, called device helpers,
@@ -523,7 +537,10 @@ Acceptance criteria for the first slice:
   assignment-name branching.
 - At least one broad intrinsic gap from `llm.c` or LeetCUDA lands with parser,
   analyzer, reference, WGSL, and test coverage.
-- CUDA-120 remains `240/240` WebGPU-runnable.
+- CUDA-120 remains `240/240` compile/codegen-runnable with `0` hard gaps.
+- Browser e2e corpus fixture coverage proves real WebGPU execution for at
+  least one exact kernel from each pinned external corpus: CUDA-120,
+  NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA.
 
 ## Out of Scope
 

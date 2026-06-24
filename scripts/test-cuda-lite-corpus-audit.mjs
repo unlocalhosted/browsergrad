@@ -169,15 +169,17 @@ void launch_dynamic_late(float *out) {
   }
   const report = JSON.parse(result.stdout.slice(result.stdout.indexOf("{")));
   assertEqual(report.summary.totalKernelDefinitions, 9, "total kernel count");
-  assertEqual(report.summary.corpusKernelExecution, "compile-only", "corpus execution mode");
-  assertEqual(report.summary.corpusExecutionMode, "compile-only", "corpus execution mode alias");
+  assertEqual(report.summary.corpusKernelExecution, "compile-codegen-only", "corpus execution mode");
+  assertEqual(report.summary.corpusExecutionMode, "compile-codegen-only", "corpus execution mode alias");
   assertEqual(report.summary.executionTierCounts.compileCodegenOnlyOk, 9, "compile/codegen-only tier count");
   assertEqual(report.summary.executionTierCounts.fixtureBackedExecutedOk, 0, "fixture execution tier count");
   assertEqual(report.summary.executionTierCounts.browserWebGpuExecutedOk, 0, "browser execution tier count");
   assertEqual(report.summary.executionTierCounts.outputVerifiedOk, 0, "output verified tier count");
   assertEqual(report.summary.webGpuCompiledOk, 9, "reverse include kernel WebGPU compiled");
+  assertEqual(report.summary.compileCodegenOk, 9, "reverse include kernel compile/codegen count");
+  assertEqual(report.summary.compileCodegenGaps, 0, "reverse include kernel compile/codegen gaps");
   assertEqual(report.summary.fixtureBackedExecutionOk, 0, "fixture-backed execution count");
-  assertEqual(report.summary.webGpuRunnableOk, 9, "reverse include kernel WebGPU runnable");
+  assertEqual(report.summary.webGpuRunnableOk, 9, "reverse include legacy compile/codegen alias");
   assertEqual(report.summary.hardFail, 0, "reverse include hard gaps");
   console.log("cuda-lite corpus audit tests passed");
 } finally {

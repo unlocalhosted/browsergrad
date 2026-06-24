@@ -12,11 +12,11 @@ import {
 
 const { corpusPathArg, details, expectations, firstFailureLimit, help, includeSources } = parseArgs(process.argv.slice(2));
 if (help) {
-  console.log("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--expect-total N] [--expect-webgpu-min N] [--expect-hard-fail-max N]");
+  console.log("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--expect-total N] [--expect-compile-codegen-min N] [--expect-hard-fail-max N]");
   process.exit(0);
 }
 if (!corpusPathArg) {
-  console.error("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--expect-total N] [--expect-webgpu-min N] [--expect-hard-fail-max N]");
+  console.error("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--expect-total N] [--expect-compile-codegen-min N] [--expect-hard-fail-max N]");
   process.exit(2);
 }
 
@@ -245,16 +245,17 @@ function shouldRetryWithReverseContext(error) {
 const failures = results.filter((result) => !result.ok);
 const directLoweringOk = results.length - failures.length;
 const webGpuLiftedOk = failures.filter((failure) => failure.webGpuLiftOk).length;
-const webGpuRunnableOk = directLoweringOk + webGpuLiftedOk;
+const compileCodegenOk = directLoweringOk + webGpuLiftedOk;
+const compileCodegenGaps = results.length - compileCodegenOk;
 const summary = {
   files: files.length,
   codeBlocks,
   cudaBlocks,
   totalKernelDefinitions: results.length,
-  corpusKernelExecution: "compile-only",
-  corpusExecutionMode: "compile-only",
+  corpusKernelExecution: "compile-codegen-only",
+  corpusExecutionMode: "compile-codegen-only",
   executionTierCounts: {
-    compileCodegenOnlyOk: webGpuRunnableOk,
+    compileCodegenOnlyOk: compileCodegenOk,
     fixtureBackedExecutedOk: 0,
     browserWebGpuExecutedOk: 0,
     outputVerifiedOk: 0,
@@ -268,16 +269,20 @@ const summary = {
   fixtureBackedExecutionOk: 0,
   webGpuDirectCompiledOk: directLoweringOk,
   webGpuHostPlanCompiledOk: webGpuLiftedOk,
-  webGpuCompiledOk: webGpuRunnableOk,
+  webGpuCompiledOk: compileCodegenOk,
+  compileCodegenOk,
+  compileCodegenGaps,
+  compileCodegenOnlyOk: compileCodegenOk,
+  compileCodegenOnlyGaps: compileCodegenGaps,
   directLoweringOk,
   strictCompileGaps: failures.length,
-  webGpuRunnableOk,
+  webGpuRunnableOk: compileCodegenOk,
   webGpuHostOrchestratedOk: webGpuLiftedOk,
   ok: directLoweringOk,
   webGpuSingleDispatchOk: directLoweringOk,
   webGpuLiftedOk,
   hostDynamicLiftableOk: failures.filter((failure) => failure.webGpuLiftKind === "host-dynamic-launch").length,
-  webGpuTotalOk: webGpuRunnableOk,
+  webGpuTotalOk: compileCodegenOk,
   fail: failures.length,
   referenceFallbackOk: failures.filter((failure) => failure.referenceOk).length,
   referenceOnlyOk: failures.filter((failure) => failure.referenceOk && !failure.webGpuLiftOk).length,
@@ -1344,6 +1349,7 @@ function parseExpectationArg(arg, args, index) {
     "--expect-ok-min": "okMin",
     "--expect-single-dispatch-min": "webGpuSingleDispatchMin",
     "--expect-webgpu-lifted-min": "webGpuLiftedMin",
+    "--expect-compile-codegen-min": "compileCodegenMin",
     "--expect-webgpu-min": "webGpuTotalMin",
     "--expect-reference-fallback-min": "referenceFallbackMin",
     "--expect-reference-only-max": "referenceOnlyMax",
@@ -1377,6 +1383,7 @@ function checkExpectations(summary, expectations) {
   minExpectation(failures, summary.ok, expectations.okMin, "ok");
   minExpectation(failures, summary.webGpuSingleDispatchOk, expectations.webGpuSingleDispatchMin, "webGpuSingleDispatchOk");
   minExpectation(failures, summary.webGpuLiftedOk, expectations.webGpuLiftedMin, "webGpuLiftedOk");
+  minExpectation(failures, summary.compileCodegenOk, expectations.compileCodegenMin, "compileCodegenOk");
   minExpectation(failures, summary.webGpuTotalOk, expectations.webGpuTotalMin, "webGpuTotalOk");
   minExpectation(failures, summary.referenceFallbackOk, expectations.referenceFallbackMin, "referenceFallbackOk");
   maxExpectation(failures, summary.referenceOnlyOk, expectations.referenceOnlyMax, "referenceOnlyOk");

@@ -19,7 +19,7 @@ const corpora = [
     expectations: {
       total: 240,
       okMin: 225,
-      webgpuMin: 240,
+      compileCodegenMin: 240,
       referenceOnlyMax: 0,
       hardFailMax: 0,
     },
@@ -32,7 +32,7 @@ const corpora = [
     path: path.join(corpusRoot, "cuda-samples"),
     expectations: {
       total: 357,
-      webgpuMin: 303,
+      compileCodegenMin: 303,
       hardFailMax: 53,
     },
   },
@@ -44,7 +44,7 @@ const corpora = [
     path: path.join(corpusRoot, "llm.c"),
     expectations: {
       total: 148,
-      webgpuMin: 148,
+      compileCodegenMin: 148,
       hardFailMax: 0,
     },
   },
@@ -56,7 +56,7 @@ const corpora = [
     path: path.join(corpusRoot, "LeetCUDA"),
     expectations: {
       total: 293,
-      webgpuMin: 278,
+      compileCodegenMin: 278,
       hardFailMax: 15,
     },
   },
@@ -169,6 +169,7 @@ function expectationArgs(expectations) {
   const args = [];
   if (expectations.total !== undefined) args.push("--expect-total", String(expectations.total));
   if (expectations.okMin !== undefined) args.push("--expect-ok-min", String(expectations.okMin));
+  if (expectations.compileCodegenMin !== undefined) args.push("--expect-compile-codegen-min", String(expectations.compileCodegenMin));
   if (expectations.webgpuMin !== undefined) args.push("--expect-webgpu-min", String(expectations.webgpuMin));
   if (expectations.referenceOnlyMax !== undefined) args.push("--expect-reference-only-max", String(expectations.referenceOnlyMax));
   if (expectations.hardFailMax !== undefined) args.push("--expect-hard-fail-max", String(expectations.hardFailMax));

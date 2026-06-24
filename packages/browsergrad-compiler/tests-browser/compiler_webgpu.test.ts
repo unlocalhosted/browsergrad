@@ -1369,6 +1369,31 @@ __global__ void atomic_mark(int* visited, int* out) {
     expect([...actual.buffers.out as Int32Array].filter((value) => value === 0)).toHaveLength(1);
   });
 
+  it("runs compiled integer bitwise atomics through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void atomic_bits(int* x, int* old) {
+  if (threadIdx.x < 1) {
+    old[0] = atomicAnd(&x[0], 0x6);
+    old[1] = atomicOr(&x[1], 0x8);
+    old[2] = atomicXor(&x[2], 0x3);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        x: new Int32Array([0x7, 0x1, 0x5]),
+        old: new Int32Array(3),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.x as Int32Array]).toEqual([...expected.buffers.x as Int32Array]);
+    expect([...actual.buffers.old as Int32Array]).toEqual([...expected.buffers.old as Int32Array]);
+  });
+
   it("runs compiled float atomicAdd through the WebGPU CAS polyfill", async () => {
     if (!deviceCheck.available) return;
     const source = `
