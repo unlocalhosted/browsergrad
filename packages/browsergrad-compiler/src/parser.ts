@@ -100,6 +100,7 @@ const TYPE_START_KEYWORDS = new Set([
   "uintptr_t",
   "auto",
   "std",
+  "cuda",
   "curandState_t",
   "cufftComplex",
   "cudaTextureObject_t",
@@ -1139,9 +1140,9 @@ class Parser {
   }
 
   private startsFunctionalCast(): boolean {
-    return this.peek().kind === "identifier" &&
-      TYPE_KEYWORDS.has(this.peek().value) &&
-      this.tokens[this.index + 1]?.value === "(";
+    if (this.peek().kind !== "identifier") return false;
+    const typeEndIndex = this.typeEndIndex(this.index);
+    return typeEndIndex !== undefined && this.tokens[typeEndIndex]?.value === "(";
   }
 
   private startsDeviceFunction(): boolean {
@@ -1247,9 +1248,14 @@ class Parser {
   private parseType(): Exclude<CudaLiteScalarType, "void"> {
     const token = this.expectIdentifier("type");
     if (token.value === "std" && this.consumeIf("::")) {
-      const type = this.expectIdentifier("std type");
-      if (type.value === "size_t") return "uint";
-      this.fail(`unsupported CUDA-lite std type: std::${type.value}`, token.span);
+      return this.parseStdType(token.span, "std");
+    }
+    if (token.value === "cuda" && this.consumeIf("::")) {
+      const namespace = this.expectIdentifier("cuda namespace");
+      if (namespace.value === "std" && this.consumeIf("::")) {
+        return this.parseStdType(token.span, "cuda::std");
+      }
+      this.fail(`unsupported CUDA-lite cuda type namespace: cuda::${namespace.value}`, token.span);
     }
     if (token.value === "auto") return "int";
     if (token.value === "unsigned") {
@@ -1339,6 +1345,18 @@ class Parser {
     let index = startIndex;
     while (this.isCvQualifier(this.tokens[index]?.value)) index++;
     const value = this.tokens[index]?.value;
+    if (value === "std" && this.tokens[index + 1]?.value === "::" && this.isSupportedStdType(this.tokens[index + 2]?.value)) {
+      return index + 3;
+    }
+    if (
+      value === "cuda" &&
+      this.tokens[index + 1]?.value === "::" &&
+      this.tokens[index + 2]?.value === "std" &&
+      this.tokens[index + 3]?.value === "::" &&
+      this.isSupportedStdType(this.tokens[index + 4]?.value)
+    ) {
+      return index + 5;
+    }
     if (value === "unsigned" || value === "signed") {
       index++;
       if (this.tokens[index]?.value === "int") return index + 1;
@@ -1351,6 +1369,23 @@ class Parser {
     if (value === "short") return this.tokens[index + 1]?.value === "int" ? index + 2 : index + 1;
     if (value !== undefined && TYPE_START_KEYWORDS.has(value)) return index + 1;
     return undefined;
+  }
+
+  private parseStdType(start: SourceSpan, namespace: "std" | "cuda::std"): Exclude<CudaLiteScalarType, "void"> {
+    const type = this.expectIdentifier(`${namespace} type`);
+    if (type.value === "size_t" || type.value === "uint32_t" || type.value === "uint64_t" || type.value === "uintptr_t") return "uint";
+    if (type.value === "ptrdiff_t" || type.value === "int32_t" || type.value === "int64_t") return "int";
+    this.fail(`unsupported CUDA-lite std type: ${namespace}::${type.value}`, start);
+  }
+
+  private isSupportedStdType(value: string | undefined): boolean {
+    return value === "size_t" ||
+      value === "ptrdiff_t" ||
+      value === "int32_t" ||
+      value === "uint32_t" ||
+      value === "int64_t" ||
+      value === "uint64_t" ||
+      value === "uintptr_t";
   }
 
   private consumeStorageQualifier(): { readonly storage: "local" | "shared"; readonly dynamicShared: boolean } {

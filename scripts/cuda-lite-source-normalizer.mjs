@@ -90,8 +90,15 @@ export function createKernelCompilationUnit({
     ...referencedSiblingKernelsRaw,
     ...referencedDeviceFunctionsRaw.map((fn) => fn.source),
   ].join("\n"), effectiveDefines);
+  const macroScope = [
+    specializedKernel,
+    ...referencedDeviceFunctionsRaw.map((fn) => fn.source),
+    ...referencedSiblingKernelsRaw,
+    ...constantDeclarations,
+    ...deviceGlobalDeclarations,
+  ].join("\n");
   const defines = [...effectiveDefines]
-    .filter(([name, value]) => isMacroIdentifier(name) && !WIDE_PACKED128_TYPES.has(value) && !params.has(name) && !templateNames.has(name) && !shadowedMacroNames.has(name))
+    .filter(([name, value]) => isMacroIdentifier(name) && !WIDE_PACKED128_TYPES.has(value) && !params.has(name) && !templateNames.has(name) && !shadowedMacroNames.has(name) && !sourceUsesMemberName(macroScope, name))
     .map(([name, value]) => `#define ${name} ${value}`);
   const referencedDeviceFunctions = referencedDeviceFunctionsRaw
     .map((fn) => ({
@@ -108,7 +115,7 @@ export function createKernelCompilationUnit({
   const referencedSiblingKernels = referencedSiblingKernelsRaw.map((sibling) => stripKernelLaunchTemplateArguments(
     specializeTemplateFromLaunchContext(sibling, templateArgumentsByKernelName, effectiveDefines),
   ));
-  const macroScope = [
+  const normalizedMacroScope = [
     specializedKernel,
     ...referencedDeviceFunctions.map((fn) => fn.source),
     ...referencedSiblingKernels,
@@ -118,13 +125,13 @@ export function createKernelCompilationUnit({
   const referencedRecordDeclarations = availableRecordDeclarations.filter((declaration) => {
     const name = recordDeclarationName(declaration);
     return name !== undefined &&
-      sourceMentionsIdentifier(macroScope, name) &&
+      sourceMentionsIdentifier(normalizedMacroScope, name) &&
       (podRecordDeclarationVectorAlias(declaration, effectiveDefines) !== undefined ||
         scalarizedPodRecordDeclaration(declaration, effectiveDefines) !== undefined);
   });
   const functionMacros = functionDeclarations.filter((declaration) => {
     const name = functionDefineName(declaration);
-    return name !== undefined && sourceMentionsIdentifier(macroScope, name);
+    return name !== undefined && sourceMentionsIdentifier(normalizedMacroScope, name);
   });
   const kernelWithSharedDeclarations = injectSharedDeclarationsIntoKernel(
     stripKnownTemplateCallArguments(stripKernelLaunchTemplateArguments(specializedKernel), referencedDeviceFunctionNames),
@@ -827,9 +834,21 @@ function templateParamDefaultValue(param) {
 
 function numericTemplateDefines(definesByName) {
   const values = new Map();
-  for (const [name, raw] of definesByName) {
-    const normalized = normalizeTemplateValueArgument(String(raw), "int");
-    if (normalized !== undefined) values.set(name, normalized);
+  for (let pass = 0; pass < definesByName.size; pass++) {
+    let changed = false;
+    const env = mergeDefineMaps(definesByName, values);
+    for (const [name, raw] of definesByName) {
+      if (values.has(name)) continue;
+      const normalizedSource = normalizeConstexprIntegerExpression(String(raw));
+      const direct = normalizeTemplateValueArgument(normalizedSource, "int");
+      const evaluated = evaluateTemplateIntegerExpression(normalizedSource, env);
+      const normalized = evaluated ?? direct;
+      if (normalized !== undefined) {
+        values.set(name, normalized);
+        changed = true;
+      }
+    }
+    if (!changed) break;
   }
   return values;
 }
@@ -846,7 +865,7 @@ function normalizeNumericObjectDefines(source, definesByName, blockedNames = new
     let out = line;
     for (const [name, value] of entries) {
       if (localBlocked.has(name) || declared.has(name)) continue;
-      out = out.replace(new RegExp(`\\b${escapeRegExp(name)}\\b`, "gu"), value);
+      out = out.replace(new RegExp(`(?<![.:])\\b${escapeRegExp(name)}\\b(?!\\s*\\()`, "gu"), value);
     }
     for (const name of declared) localBlocked.add(name);
     return out;
@@ -1057,7 +1076,7 @@ function normalizeSimpleStatementMacros(source) {
 }
 
 function normalizeSideEffectExpressions(source) {
-  return normalizePostfixPointerAssignments(normalizePrefixUpdateConditions(source));
+  return normalizePostfixPointerAssignments(normalizePrefixUpdateConditions(normalizeWhilePrefixUpdateConditions(source)));
 }
 
 function normalizeStdMathAliases(source) {
@@ -1275,7 +1294,54 @@ function normalizePrefixUpdateConditions(source) {
   return cursor === 0 ? source : out + source.slice(cursor);
 }
 
+function normalizeWhilePrefixUpdateConditions(source) {
+  let out = "";
+  let cursor = 0;
+  const re = /\bwhile\s*\(/gu;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const open = source.indexOf("(", match.index);
+    const close = findBalanced(source, open, "(", ")");
+    if (open < 0 || close === undefined) {
+      re.lastIndex = match.index + 5;
+      continue;
+    }
+    const condition = source.slice(open + 1, close).trim();
+    const normalized = normalizePrefixUpdateCondition(condition);
+    if (normalized === undefined) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    let bodyStart = close + 1;
+    while (/\s/u.test(source[bodyStart] ?? "")) bodyStart++;
+    if (source[bodyStart] !== "{") {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    const bodyEnd = findBalanced(source, bodyStart, "{", "}");
+    if (bodyEnd === undefined) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    const lineStart = source.lastIndexOf("\n", match.index) + 1;
+    const indent = /^[ \t]*/u.exec(source.slice(lineStart, match.index))?.[0] ?? "";
+    const body = source.slice(bodyStart + 1, bodyEnd);
+    out += source.slice(cursor, match.index);
+    out += `while (true) {\n${indent}  ${normalized.prologue}\n${indent}  if (!(${normalized.condition})) break;${body}\n${indent}}`;
+    cursor = bodyEnd + 1;
+    re.lastIndex = bodyEnd + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
 function normalizePrefixUpdateCondition(condition) {
+  const logical = /^(?<op>\+\+|--)\s*(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*&&\s*(?<rest>[\s\S]+)$/u.exec(condition);
+  if (logical?.groups?.op && logical.groups.name && logical.groups.rest) {
+    return {
+      prologue: `${logical.groups.name}${logical.groups.op};`,
+      condition: `${logical.groups.name} && ${logical.groups.rest.trim()}`,
+    };
+  }
   const identifier = /^(?<op>\+\+|--)\s*(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?<rest>(?:[!<>=]=|[<>=])[\s\S]+)$/u.exec(condition);
   if (identifier?.groups?.op && identifier.groups.name && identifier.groups.rest) {
     return {
@@ -1852,6 +1918,10 @@ function collectDeclaredIdentifiers(source, definesByName = new Map()) {
     out.add(name);
   }
   return out;
+}
+
+function sourceUsesMemberName(source, name) {
+  return new RegExp(`[.:]\\s*${escapeRegExp(name)}\\b`, "u").test(stripCommentsAndStrings(source));
 }
 
 function normalizeSharedMemoryHelpers(source) {
@@ -3099,11 +3169,37 @@ function stripSupportedEnumDeclarations(source) {
 }
 
 function parseSimpleIntegerConstant(line) {
-  const match = /^\s*((?:(?:static|constexpr|const)\s+)*)(?:int|uint|unsigned\s+int|size_t|ptrdiff_t)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([0-9A-Fa-fxXuUlL\s()+\-*/%<>&|^?:.]+)\s*;\s*$/u.exec(line);
+  const match = /^\s*((?:(?:static|constexpr|const)\s+)*)(?:(?:cuda\s*::\s*)?std\s*::\s*)?(?:int|uint|unsigned\s+int|size_t|ptrdiff_t|uint32_t|uint64_t|int32_t|int64_t)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z0-9_:,\s()+\-*/%<>&|^?:.]+)\s*;\s*$/u.exec(line);
   if (match === null) return undefined;
   const [, qualifiers, name, value] = match;
   if (!name || !value || !/\b(?:const|constexpr)\b/u.test(qualifiers ?? "")) return undefined;
-  return { name, value: value.trim() };
+  return { name, value: normalizeConstexprIntegerExpression(value) };
+}
+
+function normalizeConstexprIntegerExpression(raw) {
+  let out = raw
+    .replace(/\b(?:cuda\s*::\s*)?std\s*::\s*(?:size_t|ptrdiff_t|uint32_t|uint64_t|int32_t|int64_t)\s*\(/gu, "(")
+    .replace(/\(\s*(?:(?:cuda\s*::\s*)?std\s*::\s*)?(?:size_t|ptrdiff_t|uint32_t|uint64_t|int32_t|int64_t)\s*\)/gu, "")
+    .trim();
+  let cursor = 0;
+  while (cursor < out.length) {
+    const match = /\bcmax\s*\(/gu.exec(out.slice(cursor));
+    if (match === null) break;
+    const start = cursor + match.index;
+    const open = out.indexOf("(", start);
+    const close = findBalanced(out, open, "(", ")");
+    if (open < 0 || close === undefined) break;
+    const args = splitTopLevel(out.slice(open + 1, close));
+    if (args.length !== 2 || args[0] === undefined || args[1] === undefined) {
+      cursor = close + 1;
+      continue;
+    }
+    const left = args[0].trim();
+    const right = args[1].trim();
+    out = `${out.slice(0, start)}((${left}) > (${right}) ? (${left}) : (${right}))${out.slice(close + 1)}`;
+    cursor = start;
+  }
+  return out;
 }
 
 function stripLineComment(line) {

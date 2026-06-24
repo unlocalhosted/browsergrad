@@ -1028,7 +1028,7 @@ function normalizeAliasType(sourceType, defines) {
 }
 
 function parseSimpleIntegerConstant(line) {
-  const match = /^\s*((?:(?:static|constexpr|const)\s+)*)(?:int|uint|unsigned\s+int|size_t)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([0-9A-Fa-fxXuUlL\s()+\-*/%<>&|^]+)\s*;\s*$/u.exec(line);
+  const match = /^\s*((?:(?:static|constexpr|const)\s+)*)(?:(?:cuda\s*::\s*)?std\s*::\s*)?(?:int|uint|unsigned\s+int|size_t|ptrdiff_t|uint32_t|uint64_t|int32_t|int64_t)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z0-9_:,\s()+\-*/%<>&|^?:.]+)\s*;\s*$/u.exec(line);
   if (match === null) return undefined;
   const [, qualifiers, name, value] = match;
   if (!name || !value) return undefined;

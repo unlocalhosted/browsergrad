@@ -5704,6 +5704,26 @@ __global__ void bitwise_compound(int* out) {
     expect(compiled.wgsl).toContain("value = (value & 14)");
   });
 
+  it("supports qualified std scalar aliases and functional casts", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void qualified_std_casts(float* out, int q) {
+  std::size_t a = std::size_t(q) * 2;
+  cuda::std::uint32_t b = cuda::std::uint32_t(a + 1);
+  std::ptrdiff_t c = (std::ptrdiff_t)blockIdx.x + 3;
+  out[0] = float(a + b + c);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) }, scalars: { q: 2 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([12]);
+    expect(compiled.wgsl).toContain("var a: u32 = u32((u32(params.q) * 2));");
+    expect(compiled.wgsl).toContain("var b: u32 = u32(u32((a + 1)));");
+    expect(compiled.wgsl).toContain("var c: i32 = (i32(i32(workgroup_id.x)) + 3);");
+  });
+
   it("lowers vector pack static constructors after source normalization", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void vector_static(float* out) {
@@ -5798,6 +5818,30 @@ __global__ void pointer_identity(uint* x, uint* y, uint* out) {
     );
     expect([...pointerIdentityResult.buffers.out as Uint32Array]).toEqual([1, 2]);
     expect(pointerIdentity.wgsl).toContain("((0u == 1u) && (0u == 0u))");
+
+    const pointerDistance = compileCudaLiteKernel(`
+__global__ void pointer_distance(uint* data, int* out, int left) {
+  uint* lptr = data + left;
+  uint* rptr = &data[3];
+  int nright = rptr - data;
+  int width = rptr - lptr;
+  out[0] = nright;
+  out[1] = width;
+}`, { workgroupSize: [1, 1, 1] });
+    const pointerDistanceResult = runCompiledKernelReference(
+      pointerDistance,
+      { buffers: { data: new Uint32Array([10, 20, 30, 40]), out: new Int32Array(2) }, scalars: { left: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    expect([...pointerDistanceResult.buffers.out as Int32Array]).toEqual([3, 2]);
+    expect(pointerDistance.wgsl).toContain("i32(");
+    expect(pointerDistance.wgsl).toContain("var width: i32 = (i32((0u + u32(3))) - i32((0u + u32((0 + params.left)))));");
+
+    const mismatchedPointerDistance = analyzeCudaLite(parseCudaLite(`
+__global__ void bad_pointer_distance(uint* a, float* b, int* out) {
+  out[0] = a - b;
+}`));
+    expect(mismatchedPointerDistance.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-pointer-difference");
 
     const constWrite = analyzeCudaLite(parseCudaLite(`
 __global__ void bad_const_write(const uint* x) {

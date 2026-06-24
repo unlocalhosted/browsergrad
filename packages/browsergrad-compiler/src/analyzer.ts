@@ -2372,6 +2372,22 @@ function validateNonCallExpression(
     case "binary": {
       const left = walkExpression(expression.left, scope);
       const right = walkExpression(expression.right, scope);
+      if (expression.operator === "-" && isPointerLikeInfo(left) && isPointerLikeInfo(right)) {
+        if (
+          left.valueType !== undefined &&
+          right.valueType !== undefined &&
+          left.valueType !== "voidptr" &&
+          right.valueType !== "voidptr" &&
+          left.valueType !== right.valueType
+        ) {
+          diagnostics.push(error(
+            "unsupported-pointer-difference",
+            "pointer difference expects matching pointee types",
+            expression.span,
+          ));
+        }
+        return { kind: "scalar", valueType: "int" };
+      }
       if ((expression.operator === "+" || expression.operator === "-") && (left.kind === "pointer" || left.kind === "pool-pointer")) {
         validateScalarOperand(right, expression.right.span, diagnostics);
         return left;

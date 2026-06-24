@@ -1647,6 +1647,59 @@ __global__ void uses_translation_unit_shared(uint* out) {
 }
 
 {
+  const context = `
+constexpr int BATCH = 1;
+constexpr int Q_HEADS = 8;
+constexpr int SEQ_LEN = 64;
+constexpr int HEAD_DIM = 64;
+constexpr int HALF_ROPE_DIM = HEAD_DIM / 2;
+constexpr int COS_BS = 1;
+constexpr std::size_t Q_SIZE = (std::size_t)BATCH * Q_HEADS * SEQ_LEN * HEAD_DIM;
+constexpr std::size_t COS_SIZE = (std::size_t)COS_BS * SEQ_LEN * HALF_ROPE_DIM;
+constexpr std::size_t cmax(std::size_t a, std::size_t b) { return a > b ? a : b; }
+constexpr std::size_t INIT_N = cmax(Q_SIZE, COS_SIZE);`;
+  const source = createKernelCompilationUnit({
+    definesByName: collectCudaLiteContextDefines(context),
+    kernel: `
+__global__ void uses_constexpr_sizes(uint* out) {
+  std::size_t tid = (std::size_t)blockIdx.x * blockDim.x + threadIdx.x;
+  if (tid < Q_SIZE) out[0] = INIT_N;
+}`,
+  });
+  assert.match(source, /if \(tid < 32768\)/u);
+  assert.match(source, /out\[0\] = 32768;/u);
+  assert.doesNotMatch(source.slice(source.indexOf("__global__")), /\bQ_SIZE\b/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void while_prefix_update(uint* out, int limit) {
+  int i = limit;
+  while (--i && (out[0] < 4u)) {
+    out[0] += 1u;
+  }
+}`,
+  });
+  assert.match(source, /while \(true\) \{\n\s+i--;\n\s+if \(!\(i && \(out\[0\] < 4u\)\)\) break;/u);
+  assert.doesNotMatch(source, /while \(--i/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    definesByName: new Map([["size", "4"]]),
+    kernel: `
+__global__ void keep_member_size(uint* out) {
+  if (warp.size() < size) out[0] = size;
+}`,
+  });
+  assert.match(source, /warp\.size\(\) < 4/u);
+  assert.match(source, /out\[0\] = 4;/u);
+  assert.doesNotMatch(source, /^#define size\b/mu);
+  assert.doesNotMatch(source, /warp\.4/u);
+}
+
+{
   const source = createKernelCompilationUnit({
     kernel: `
 __global__ void ref_atomic(uint* out) {

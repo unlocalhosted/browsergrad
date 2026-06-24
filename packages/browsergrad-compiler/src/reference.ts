@@ -1253,6 +1253,8 @@ function evalBinary(
 ): number {
   const pointerEquality = evalPointerEquality(operator, leftExpression, rightExpression, context);
   if (pointerEquality !== undefined) return pointerEquality;
+  const pointerDifference = evalPointerDifference(operator, leftExpression, rightExpression, context);
+  if (pointerDifference !== undefined) return pointerDifference;
   if (operator === "&&") {
     return truthy(evalNumber(leftExpression, context)) && truthy(evalNumber(rightExpression, context)) ? 1 : 0;
   }
@@ -1297,6 +1299,43 @@ function evalBinary(
     default:
       throw compilerFailure(`unsupported binary operator '${operator}'`);
   }
+}
+
+function evalPointerDifference(
+  operator: string,
+  leftExpression: CudaLiteExpression,
+  rightExpression: CudaLiteExpression,
+  context: ThreadContext,
+): number | undefined {
+  if (operator !== "-") return undefined;
+  const valueType = pointerValueTypeForExpression(leftExpression, context);
+  const left = pointerValueForDifference(leftExpression, valueType, context);
+  const right = pointerValueForDifference(rightExpression, valueType, context);
+  if (left === undefined || right === undefined) return undefined;
+  if (isPoolPointer(left) && isPoolPointer(right)) {
+    if (left.poolName !== right.poolName || Boolean(left.rawBuffer) !== Boolean(right.rawBuffer)) return 0;
+    return Math.trunc((left.byteOffset - right.byteOffset) / elementByteSize(valueType));
+  }
+  if (isAddress(left) && isAddress(right)) {
+    if (left.target.name !== right.target.name || left.target.space !== right.target.space) return 0;
+    const width = left.target.rawStorageIndex || right.target.rawStorageIndex ? valueStorageWidth(valueType) : 1;
+    return Math.trunc(((left.target.index ?? 0) - (right.target.index ?? 0)) / width);
+  }
+  return 0;
+}
+
+function pointerValueForDifference(
+  expression: CudaLiteExpression,
+  valueType: CudaLiteScalarType,
+  context: ThreadContext,
+): AddressValue | PoolPointerValue | undefined {
+  try {
+    const pointer = pointerArgumentValue(expression, valueType, context);
+    if (isAddress(pointer) || isPoolPointer(pointer)) return pointer;
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 function evalPointerEquality(

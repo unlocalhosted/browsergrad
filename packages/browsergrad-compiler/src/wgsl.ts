@@ -1844,6 +1844,8 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
     case "binary": {
       const pointerComparison = emitPointerComparison(expression, context);
       if (pointerComparison) return pointerComparison;
+      const pointerDifference = emitPointerDifference(expression, context);
+      if (pointerDifference) return pointerDifference;
       const vectorArithmetic = emitVectorArithmetic(expression, context);
       if (vectorArithmetic) return vectorArithmetic;
       return `(${emitExpression(expression.left, context)} ${expression.operator} ${emitExpression(expression.right, context)})`;
@@ -2467,6 +2469,20 @@ function emitPointerComparison(
     "unsupported-pointer-pointer-comparison",
     "WGSL output supports pointer comparison only inside the same pointer address model",
   );
+}
+
+function emitPointerDifference(
+  expression: Extract<CudaLiteExpression, { kind: "binary" }>,
+  context: EmitContext,
+): string | undefined {
+  if (expression.operator !== "-") return undefined;
+  const left = devicePointerArgumentParts(expression.left, context);
+  const right = devicePointerArgumentParts(expression.right, context);
+  if (!left || !right) return undefined;
+  const diff = `(i32(${left.base}) - i32(${right.base}))`;
+  return left.buffer === right.buffer
+    ? diff
+    : `select(0, ${diff}, (${left.buffer} == ${right.buffer}))`;
 }
 
 function staticPointerTermEqual(left: PointerComparisonTerm, right: PointerComparisonTerm): boolean | undefined {
