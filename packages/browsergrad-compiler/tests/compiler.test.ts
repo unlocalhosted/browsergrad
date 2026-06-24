@@ -2142,6 +2142,47 @@ __global__ void local_cpp_shapes(const floatX* input, floatX* output) {
     expect([...result.buffers.output as Float32Array]).toEqual([6, 0, 0, 0]);
   });
 
+  it("runs scalarized wide half pack loads and stores", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void half_pack(const half* input, half* output) {
+  int idx = threadIdx.x * 8;
+  half packed_in[8];
+  half packed_out[8];
+  packed_in[0] = input[idx + 0];
+  packed_in[1] = input[idx + 1];
+  packed_in[2] = input[idx + 2];
+  packed_in[3] = input[idx + 3];
+  packed_in[4] = input[idx + 4];
+  packed_in[5] = input[idx + 5];
+  packed_in[6] = input[idx + 6];
+  packed_in[7] = input[idx + 7];
+  for (int lane = 0; lane < 8; lane++) {
+    packed_out[lane] = __float2half(__half2float(packed_in[lane]) + 1.0f);
+  }
+  output[idx + 0] = packed_out[0];
+  output[idx + 1] = packed_out[1];
+  output[idx + 2] = packed_out[2];
+  output[idx + 3] = packed_out[3];
+  output[idx + 4] = packed_out[4];
+  output[idx + 5] = packed_out[5];
+  output[idx + 6] = packed_out[6];
+  output[idx + 7] = packed_out[7];
+}`, { features: { "shader-f16": true }, workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          input: createWgslFloat16Array([1, 2, 3, 4, 5, 6, 7, 8]),
+          output: createWgslFloat16Array(8),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var packed_in: array<f16, 8>;");
+    expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([2, 3, 4, 5, 6, 7, 8, 9]);
+  });
+
   it("supports CUDA vector scalar constructors", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void vector_splat(float4 *out, uint4 *kinds) {
@@ -4381,6 +4422,29 @@ __global__ void bf16_convert(const __nv_bfloat16* input, __nv_bfloat16* output, 
     expect(compiled.wgsl).toContain("vec2<f32>");
     expect([...result.buffers.output as Float32Array][0]).toBeCloseTo(1.6015625);
     expect([...result.buffers.as_float as Float32Array][0]).toBeCloseTo(1.6015625);
+  });
+
+  it("supports CUDA cache-hint pointer helpers for bf16 storage", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void bf16_cache_hint(const __nv_bfloat16* input, __nv_bfloat16* output) {
+  int idx = threadIdx.x;
+  __nv_bfloat16 value = __ldcs(input + idx);
+  __stcs(output + idx, __float2bfloat16(__bfloat162float(value) + 1.0f));
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          input: new Float32Array([1.5, 2.5]),
+          output: new Float32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_ptr_read_bf16");
+    expect(compiled.wgsl).toContain("bg_ptr_write_bf16");
+    expect([...result.buffers.output as Float32Array]).toEqual([2.5, 3.5]);
   });
 
   it("lowers CUDA bitwise not and trap no-op control paths", () => {

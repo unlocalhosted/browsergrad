@@ -9,6 +9,11 @@ const SEMANTIC_BUILTIN_DEVICE_HELPERS = new Set([
   "blockReduce",
 ]);
 
+const WIDE_PACKED128_TYPES = new Map([
+  ["__bg_pack128_half8", { scalarType: "half", lanes: 8 }],
+  ["__bg_pack128_bf168", { scalarType: "bf16", lanes: 8 }],
+]);
+
 export function createKernelCompilationUnit({
   kernel,
   siblingKernels = [],
@@ -64,7 +69,7 @@ export function createKernelCompilationUnit({
     ...referencedDeviceFunctionsRaw.map((fn) => fn.source),
   ].join("\n"), effectiveDefines);
   const defines = [...effectiveDefines]
-    .filter(([name]) => isMacroIdentifier(name) && !params.has(name) && !templateNames.has(name) && !shadowedMacroNames.has(name))
+    .filter(([name, value]) => isMacroIdentifier(name) && !WIDE_PACKED128_TYPES.has(value) && !params.has(name) && !templateNames.has(name) && !shadowedMacroNames.has(name))
     .map(([name, value]) => `#define ${name} ${value}`);
   const referencedDeviceFunctions = referencedDeviceFunctionsRaw
     .map((fn) => ({
@@ -119,7 +124,18 @@ export function createKernelCompilationUnit({
     effectiveDefines,
     new Set([...params, ...templateNames]),
   );
-  return normalizeCppTemplateCarrierSyntax(normalizeForLoopScopedVariables(normalizeSideEffectExpressions(normalizeSimpleStatementMacros(normalizeSimpleLocalLambdas(normalizeBlockReduceHelpers(normalizeSincosHelpers(normalizeSharedMemoryHelpers(normalizePacked128MemoryHelpers(normalizeVectorStaticConstructors(stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withNumericDefines, effectiveDefines)), effectiveDefines))))))))));
+  const withoutSupportedAliases = stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withNumericDefines, effectiveDefines));
+  const withVectorConstructors = normalizeVectorStaticConstructors(withoutSupportedAliases, effectiveDefines);
+  const withWidePacks = normalizeWidePacked128Aliases(withVectorConstructors, effectiveDefines);
+  const withPackedHelpers = normalizePacked128MemoryHelpers(withWidePacks);
+  const withSharedHelpers = normalizeSharedMemoryHelpers(withPackedHelpers);
+  const withSincosHelpers = normalizeSincosHelpers(withSharedHelpers);
+  const withBlockReduce = normalizeBlockReduceHelpers(withSincosHelpers);
+  const withLambdas = normalizeSimpleLocalLambdas(withBlockReduce);
+  const withStatementMacros = normalizeSimpleStatementMacros(withLambdas);
+  const withSideEffects = normalizeSideEffectExpressions(withStatementMacros);
+  const withScopedForVariables = normalizeForLoopScopedVariables(withSideEffects);
+  return normalizeCppTemplateCarrierSyntax(withScopedForVariables);
 }
 
 export function collectCudaLiteContextDefines(source) {
@@ -681,6 +697,8 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
     if (elementType === "float") return "float4";
     if (elementType === "int") return "int4";
     if (elementType === "uint") return "uint4";
+    if (elementType === "half") return "__bg_pack128_half8";
+    if (elementType === "bf16") return "__bg_pack128_bf168";
     return undefined;
   }
   if (type.includes("<") || type.includes(">")) return undefined;
@@ -692,6 +710,7 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
     type = mapped;
   }
   if (type === "__half" || type === "half_t") return "half";
+  if (type === "__nv_bfloat16" || type === "nv_bfloat16") return "bf16";
   if (type === "unsigned int" || type === "unsigned") return "uint";
   if (type === "unsigned char" || type === "uchar" || type === "uint8_t") return "uint";
   if (type === "signed int" || type === "signed") return "int";
@@ -714,7 +733,7 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
   if (type === "char2") return "int2";
   if (type === "char3") return "int3";
   if (type === "char4") return "int4";
-  const supported = new Set(["float", "int", "uint", "half", "bool", "float2", "float3", "float4", "half2", "int2", "int3", "int4", "uint2", "uint3", "uint4"]);
+  const supported = new Set(["float", "int", "uint", "half", "bf16", "bool", "float2", "float3", "float4", "half2", "int2", "int3", "int4", "uint2", "uint3", "uint4"]);
   return supported.has(type) ? type : undefined;
 }
 
@@ -1469,6 +1488,147 @@ function addressTarget(expression) {
   const target = trimmed.slice(1).trim();
   if (/^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*(?:\[[^\]]+\])?$/u.test(target)) return target;
   return undefined;
+}
+
+function normalizeWidePacked128Aliases(source, definesByName = new Map()) {
+  const aliases = collectWidePacked128Aliases(source, definesByName);
+  if (aliases.size === 0) return source;
+  const variables = collectWidePacked128Variables(source, aliases);
+  let out = source;
+  for (const [alias, info] of [...aliases].sort((a, b) => b[0].length - a[0].length)) {
+    out = out.replace(new RegExp(`\\b${escapeRegExp(alias)}\\s*::\\s*size\\b`, "gu"), String(info.lanes));
+  }
+  out = rewriteWidePacked128LoadDeclarations(out, aliases, variables);
+  out = rewriteWidePacked128PlainDeclarations(out, aliases, variables);
+  out = rewriteWidePacked128LoadAssignments(out, variables);
+  out = rewriteWidePacked128Stores(out, variables);
+  for (const [name, info] of variables) {
+    out = out.replace(new RegExp(`\\b${escapeRegExp(name)}\\s*\\.\\s*size\\b`, "gu"), String(info.lanes));
+  }
+  return out;
+}
+
+function collectWidePacked128Aliases(source, definesByName = new Map()) {
+  const aliases = new Map();
+  const defines = mergeDefineMaps(definesByName, collectTypeAliasDefines(source, definesByName), collectObjectDefines(source));
+  for (const [name, value] of defines) {
+    if (!isMacroIdentifier(name)) continue;
+    const info = WIDE_PACKED128_TYPES.get(value);
+    if (info !== undefined) aliases.set(name, info);
+  }
+  return aliases;
+}
+
+function collectWidePacked128Variables(source, aliases) {
+  const variables = new Map();
+  for (const [alias, info] of aliases) {
+    const re = new RegExp(`\\b(?:const\\s+)?${escapeRegExp(alias)}\\s+(?!\\*)([A-Za-z_][A-Za-z0-9_]*)\\b`, "gu");
+    for (const match of source.matchAll(re)) {
+      const name = match[1];
+      if (name !== undefined) variables.set(name, info);
+    }
+  }
+  return variables;
+}
+
+function rewriteWidePacked128LoadDeclarations(source, aliases, variables) {
+  let out = source;
+  for (const [alias, info] of aliases) {
+    const re = new RegExp(`\\b(?:const\\s+)?${escapeRegExp(alias)}\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*(load128cs|load128)\\s*\\(`, "gu");
+    out = replaceBalancedCall(out, re, (match, open, close) => {
+      const name = match[1];
+      if (name === undefined) return undefined;
+      variables.set(name, info);
+      const pointer = out.slice(open + 1, close).trim();
+      return emitWidePacked128LoadDeclaration(info, name, pointer);
+    });
+  }
+  return out;
+}
+
+function rewriteWidePacked128PlainDeclarations(source, aliases, variables) {
+  let out = source;
+  for (const [alias, info] of aliases) {
+    const declaration = new RegExp(`\\b(?:const\\s+)?${escapeRegExp(alias)}\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*;`, "gu");
+    out = out.replace(declaration, (_match, name) => {
+      variables.set(name, info);
+      return `${info.scalarType} ${name}[${info.lanes}];`;
+    });
+  }
+  return out;
+}
+
+function rewriteWidePacked128LoadAssignments(source, variables) {
+  const helper = /\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(load128cs|load128)\s*\(/gu;
+  return replaceBalancedCall(source, helper, (match, open, close) => {
+    const name = match[1];
+    if (name === undefined) return undefined;
+    const info = variables.get(name);
+    if (info === undefined) return undefined;
+    const pointer = source.slice(open + 1, close).trim();
+    return emitWidePacked128LoadAssignments(info, name, pointer);
+  });
+}
+
+function rewriteWidePacked128Stores(source, variables) {
+  const helper = /\b(store128cs|store128cg|store128)\s*\(/gu;
+  return replaceBalancedCall(source, helper, (_match, open, close) => {
+    const args = splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim());
+    const pointer = args[0];
+    const value = args[1];
+    if (pointer === undefined || value === undefined) return undefined;
+    const info = /^[A-Za-z_][A-Za-z0-9_]*$/u.test(value) ? variables.get(value) : undefined;
+    if (info === undefined) return undefined;
+    return emitWidePacked128StoreAssignments(info, pointer, value);
+  });
+}
+
+function replaceBalancedCall(source, re, replacer) {
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const open = source.indexOf("(", match.index);
+    const close = findBalanced(source, open, "(", ")");
+    if (open < 0 || close === undefined) {
+      re.lastIndex = match.index + 1;
+      continue;
+    }
+    const replacement = replacer(match, open, close);
+    if (replacement === undefined) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    out += source.slice(cursor, match.index);
+    out += replacement;
+    cursor = close + 1;
+    re.lastIndex = close + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function emitWidePacked128LoadDeclaration(info, name, pointer) {
+  return `${info.scalarType} ${name}[${info.lanes}]; ${emitWidePacked128LoadAssignments(info, name, pointer)}`;
+}
+
+function emitWidePacked128LoadAssignments(info, name, pointer) {
+  return Array.from({ length: info.lanes }, (_unused, lane) =>
+    `${name}[${lane}] = ${widePacked128PointerLane(pointer, lane)}`).join("; ");
+}
+
+function emitWidePacked128StoreAssignments(info, pointer, value) {
+  return Array.from({ length: info.lanes }, (_unused, lane) =>
+    `${widePacked128PointerLane(pointer, lane)} = ${value}[${lane}]`).join("; ");
+}
+
+function widePacked128PointerLane(pointer, lane) {
+  const parts = splitTopLevel(pointer.replace(/^\(([\s\S]*)\)$/u, "$1"), "+").map((part) => part.trim()).filter(Boolean);
+  const base = parts[0];
+  if (base !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(base)) {
+    const offset = parts.slice(1).join(" + ");
+    return offset.length === 0 ? `${base}[${lane}]` : `${base}[(${offset}) + ${lane}]`;
+  }
+  return `(${pointer})[${lane}]`;
 }
 
 function normalizePacked128MemoryHelpers(source) {

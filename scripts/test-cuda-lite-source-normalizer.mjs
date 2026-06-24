@@ -1149,4 +1149,32 @@ __global__ void matrix_record(float4 *out) {
   assert.match(source, /out\[0\] = mul\(c_invViewMatrix, make_float4/u);
 }
 
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+typedef half floatX;
+typedef Packed128<floatX> x128;
+__global__ void packed_half(floatX *out, const floatX *inp) {
+  int idx = threadIdx.x * x128::size;
+  x128 packed_out;
+  x128 packed_inp = load128cs(inp + idx);
+  for (int k = 0; k < packed_inp.size; ++k) {
+    packed_out[k] = (floatX)((float)packed_inp[k] + 1.0f);
+  }
+  store128(out + idx, packed_out);
+}`,
+    definesByName: new Map([
+      ["floatX", "half"],
+      ["x128", "__bg_pack128_half8"],
+      ["x128::size", "8"],
+    ]),
+  });
+  assert.doesNotMatch(source, /\bx128\b/u);
+  assert.match(source, /half packed_out\[8\];/u);
+  assert.match(source, /half packed_inp\[8\]; packed_inp\[0\] = inp\[\(idx\) \+ 0\]/u);
+  assert.match(source, /packed_inp\[7\] = inp\[\(idx\) \+ 7\]/u);
+  assert.match(source, /out\[\(idx\) \+ 7\] = packed_out\[7\]/u);
+  assert.match(source, /for \(int k = 0; k < 8; \+\+k\)/u);
+}
+
 console.log("cuda-lite source normalizer tests ok");

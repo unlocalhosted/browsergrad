@@ -903,7 +903,7 @@ function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, c
 }
 
 function isDevicePointerHelperType(type: CudaLiteScalarType): boolean {
-  return type === "float" || type === "int" || type === "uint" || type === "half" || isCudaVectorType(type);
+  return type === "float" || type === "int" || type === "uint" || type === "half" || type === "bf16" || isCudaVectorType(type);
 }
 
 function isPointerHelperCompatibleStorage(helperType: CudaLiteScalarType, storageType: CudaLiteScalarType): boolean {
@@ -1236,7 +1236,7 @@ function pointerHelperTypeName(type: CudaLiteScalarType): string {
   }
   if (type === "float") return "f32";
   if (type === "half") return "f16";
-  if (type === "bf16") return "f32";
+  if (type === "bf16") return "bf16";
   if (type === "int") return "i32";
   if (type === "uint") return "u32";
   return type;
