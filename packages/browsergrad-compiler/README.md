@@ -362,8 +362,10 @@ regressions fail fast instead of living only in docs.
 legacy name for `webGpuCompiledOk`: it counts kernels that compile to direct
 WGSL or host-orchestrated WebGPU plans such as grid-sync phases and dynamic
 launch lifts. The legacy `ok` and `fail` fields remain as strict direct-lowering
-metrics for older scripts. Real execution proof lives in fixture-backed tests
-such as `pnpm --filter @unlocalhosted/browsergrad-compiler test:browser` and
+metrics for older scripts. New consumers should prefer `executionTierCounts`:
+`compileCodegenOnlyOk`, `fixtureBackedExecutedOk`, `browserWebGpuExecutedOk`,
+and `outputVerifiedOk`. Real execution proof lives in fixture-backed tests such
+as `pnpm --filter @unlocalhosted/browsergrad-compiler test:browser` and
 `scripts/e2e-cuda-lite-webgpu.mjs`.
 
 ## Performance Harness

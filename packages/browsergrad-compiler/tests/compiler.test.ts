@@ -2135,6 +2135,10 @@ __global__ void mathy(float *x, float *out) {
       fminf(value, 1.0f) +
       fmaxf(value, -1.0f) +
       __fdividef(value, 2.0f) +
+      __fadd_rn(value, 2.0f) +
+      __fsub_rn(value, 2.0f) +
+      __fmul_rn(value, 2.0f) +
+      __fdiv_rn(value, 2.0f) +
       fma(value, 2.0f, 1.0f) +
       fmaf(value, -1.0f, 0.5f);
   }
@@ -2168,6 +2172,9 @@ __global__ void mathy(float *x, float *out) {
     expect(compiled.wgsl).toContain("pow(abs(value), 2.0)");
     expect(compiled.wgsl).toContain("min(value, 1.0)");
     expect(compiled.wgsl).toContain("max(value, (-1.0))");
+    expect(compiled.wgsl).toContain("(value + 2.0)");
+    expect(compiled.wgsl).toContain("(value - 2.0)");
+    expect(compiled.wgsl).toContain("(value * 2.0)");
     expect(compiled.wgsl).toContain("fma(value, 2.0, 1.0)");
     expect(compiled.wgsl).toContain("fma(value, (-1.0), 0.5)");
     const expected = [...input].map((value) =>
@@ -2196,6 +2203,10 @@ __global__ void mathy(float *x, float *out) {
       Math.atan2(value, 2) +
       Math.min(value, 1) +
       Math.max(value, -1) +
+      (value / 2) +
+      (value + 2) +
+      (value - 2) +
+      (value * 2) +
       (value / 2) +
       (value * 2 + 1) +
       (value * -1 + 0.5)

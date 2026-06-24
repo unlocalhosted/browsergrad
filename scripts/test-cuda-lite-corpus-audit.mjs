@@ -143,6 +143,11 @@ void launch_dynamic_aligned(float *out) {
   const report = JSON.parse(result.stdout.slice(result.stdout.indexOf("{")));
   assertEqual(report.summary.totalKernelDefinitions, 7, "total kernel count");
   assertEqual(report.summary.corpusKernelExecution, "compile-only", "corpus execution mode");
+  assertEqual(report.summary.corpusExecutionMode, "compile-only", "corpus execution mode alias");
+  assertEqual(report.summary.executionTierCounts.compileCodegenOnlyOk, 7, "compile/codegen-only tier count");
+  assertEqual(report.summary.executionTierCounts.fixtureBackedExecutedOk, 0, "fixture execution tier count");
+  assertEqual(report.summary.executionTierCounts.browserWebGpuExecutedOk, 0, "browser execution tier count");
+  assertEqual(report.summary.executionTierCounts.outputVerifiedOk, 0, "output verified tier count");
   assertEqual(report.summary.webGpuCompiledOk, 7, "reverse include kernel WebGPU compiled");
   assertEqual(report.summary.fixtureBackedExecutionOk, 0, "fixture-backed execution count");
   assertEqual(report.summary.webGpuRunnableOk, 7, "reverse include kernel WebGPU runnable");
