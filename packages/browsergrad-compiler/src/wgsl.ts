@@ -3349,6 +3349,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "curand_init":
       return `bg_curand_init(u32(${args[0] ?? "0"}), u32(${args[1] ?? "0"}), u32(${args[2] ?? "0"}), ${args[3] ?? "&state"})`;
     case "curand_uniform":
+    case "curand_uniform_double":
       return `bg_curand_uniform(${args[0] ?? "&state"})`;
     case "atomicAdd":
     case "atomicAdd_system":
@@ -4880,8 +4881,8 @@ function usesAtomicIncDec(ir: KernelIrModule): boolean {
 }
 
 function usesCurand(ir: KernelIrModule): boolean {
-  return statementsUseCall(ir.body, new Set(["curand_init", "curand_uniform"])) ||
-    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["curand_init", "curand_uniform"])));
+  return statementsUseCall(ir.body, new Set(["curand_init", "curand_uniform", "curand_uniform_double"])) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["curand_init", "curand_uniform", "curand_uniform_double"])));
 }
 
 function usesFrexp(ir: KernelIrModule): boolean {

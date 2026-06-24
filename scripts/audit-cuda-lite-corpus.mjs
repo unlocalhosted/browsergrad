@@ -96,9 +96,9 @@ for (const file of files) {
   codeBlocks += blocks.length;
   for (const [blockIndex, block] of blocks.entries()) {
     if (isNonKernelCodeBlock(block)) continue;
-    const directContext = createAuditBlockContext(directIncludeContext, block.code, carriedDefines);
+    const directContext = createAuditBlockContext(directIncludeContext, block.code, carriedDefines, corpusContext.globalDefines);
     const reverseContext = reverseIncludeContext.trim().length > 0
-      ? createAuditBlockContext(`${directIncludeContext}\n${reverseIncludeContext}`, block.code, carriedDefines)
+      ? createAuditBlockContext(`${directIncludeContext}\n${reverseIncludeContext}`, block.code, carriedDefines, corpusContext.globalDefines)
       : undefined;
     if (CUDA_HINT_RE.test(block.code)) cudaBlocks++;
     const kernels = extractKernelDefinitions(block.code);
@@ -151,11 +151,12 @@ function isNonKernelCodeBlock(block) {
   return /^\s*(?:flowchart|graph)\s+(?:LR|RL|TB|TD|BT)\b/iu.test(block.code);
 }
 
-function createAuditBlockContext(includeContext, blockCode, carriedDefines) {
+function createAuditBlockContext(includeContext, blockCode, carriedDefines, corpusGlobalDefines = new Map()) {
   const source = `${includeContext}\n${blockCode}`;
   const declarationContext = `${sourceWithoutCudaFunctionBodies(includeContext)}\n${sourceWithoutCudaFunctionBodies(blockCode)}`;
   const blockDefines = collectCudaLiteContextDefines(declarationContext);
-  const effectiveDefines = mergeDefineMaps(CUDA_SYSTEM_DEFINES, carriedDefines, blockDefines);
+  const referencedCorpusDefines = reachableCorpusDefines(corpusGlobalDefines, source);
+  const effectiveDefines = mergeDefineMaps(CUDA_SYSTEM_DEFINES, referencedCorpusDefines, carriedDefines, blockDefines);
   const recordDeclarations = collectPodRecordDeclarations(source);
   const recordNames = new Set(recordDeclarations.map(recordDeclarationName).filter((name) => name !== undefined));
   return {
@@ -171,6 +172,31 @@ function createAuditBlockContext(includeContext, blockCode, carriedDefines) {
     sharedDeclarations: collectTranslationUnitSharedDeclarations(declarationContext),
     templateArguments: collectKernelTemplateArguments(source),
   };
+}
+
+function reachableCorpusDefines(defines, source) {
+  if (defines.size === 0) return defines;
+  const clean = stripComments(source);
+  const out = new Map();
+  const pending = [];
+  for (const name of defines.keys()) {
+    if (mentionsIdentifier(clean, name)) pending.push(name);
+  }
+  while (pending.length > 0) {
+    const name = pending.pop();
+    if (name === undefined || out.has(name)) continue;
+    const value = defines.get(name);
+    if (value === undefined) continue;
+    out.set(name, value);
+    for (const next of defines.keys()) {
+      if (!out.has(next) && mentionsIdentifier(String(value), next)) pending.push(next);
+    }
+  }
+  return out;
+}
+
+function mentionsIdentifier(source, name) {
+  return new RegExp(`\\b${escapeRegExp(name)}\\b`, "u").test(source);
 }
 
 function compileKernelFromAuditContext(rawKernel, kernels, kernelName, context) {
@@ -626,7 +652,9 @@ function createCorpusContext(root, files) {
     }
     includesFor(absoluteFile);
   }
+  const globalDefines = collectCorpusGlobalDefines(files, root, read);
   return {
+    globalDefines,
     read,
     directSources(absoluteFile) {
       return uniqueStrings(collectTransitiveIncludeSources(path.resolve(absoluteFile), includesFor, read));
@@ -641,6 +669,37 @@ function createCorpusContext(root, files) {
       ));
     },
   };
+}
+
+function collectCorpusGlobalDefines(files, root, read) {
+  const values = new Map();
+  const conflicts = new Set();
+  for (const file of files) {
+    const defines = new Map();
+    for (const raw of read(path.resolve(root, file)).split(/\r?\n/u)) {
+      const line = stripLineComment(raw);
+      const alias = parseSimpleTypeAlias(line, defines);
+      if (alias === undefined) continue;
+      defines.set(alias.name, alias.value);
+      if (!isPortableGlobalTypeAlias(alias.value)) continue;
+      addUniqueCorpusDefine(values, conflicts, alias.name, alias.value);
+    }
+  }
+  return values;
+}
+
+function addUniqueCorpusDefine(values, conflicts, name, value) {
+  const previous = values.get(name);
+  if (previous !== undefined && previous !== value) {
+    values.delete(name);
+    conflicts.add(name);
+    return;
+  }
+  if (!conflicts.has(name)) values.set(name, value);
+}
+
+function isPortableGlobalTypeAlias(value) {
+  return PORTABLE_POINTER_BASE_TYPES.has(value) || value === "complex64" || value === "texture2d" || value === "surface2d";
 }
 
 function localIncludeNames(source) {

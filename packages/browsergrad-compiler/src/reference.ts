@@ -1961,9 +1961,9 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     writeLValue(resolveAddressArgument(state, context), initialized, context);
     return 0;
   }
-  if (name === "curand_uniform") {
+  if (name === "curand_uniform" || name === "curand_uniform_double") {
     const state = expression.args[0];
-    if (!state) throw compilerFailure("curand_uniform expects state address");
+    if (!state) throw compilerFailure(`${name} expects state address`);
     const lvalue = resolveAddressArgument(state, context);
     const next = curandNext(valueAsNumber(readLValue(lvalue, context), lvalue.name) >>> 0);
     writeLValue(lvalue, next, context);

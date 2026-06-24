@@ -3120,6 +3120,24 @@ __global__ void monteCarloPiKernel(unsigned long long *counts, int totalPoints, 
     expect([...result.buffers.counts as Uint32Array].every((value) => value === 0 || value === 1)).toBe(true);
   });
 
+  it("lowers CUDA double cuRAND uniform to the deterministic browser RNG island", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void curandDoubleKernel(float *out) {
+  curandState_t state;
+  curand_init(7ULL, threadIdx.x, 0, &state);
+  double x = curand_uniform_double(&state);
+  out[threadIdx.x] = (float)x;
+}`, { workgroupSize: [4, 1, 1], f64Mode: "f32" });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_curand_uniform");
+    expect([...result.buffers.out as Float32Array].every((value) => value > 0 && value <= 1)).toBe(true);
+  });
+
   it("supports cufftComplex buffers as interleaved complex64 values", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void magnitudeKernel(cufftComplex *data, float *mag, int N) {

@@ -519,7 +519,8 @@ __global__ void kernel(float *in, float *out, int ld) {
       "#define FLOAT4(value) (reinterpret_cast<float4 *>(&(value))[0])",
     ],
   });
-  assert.match(source, /#define IDX2C/u);
+  assert.doesNotMatch(source, /#define IDX2C/u);
+  assert.match(source, /out\[0\] = in\[\(\(\(\(0\)\)\*\(\(ld\)\)\)\+\(\(row\)\)\)\];/u);
   assert.doesNotMatch(source, /#define FLOAT4/u);
 }
 
@@ -770,6 +771,34 @@ __global__ void packed_static(floatX *out) {
 {
   const source = createKernelCompilationUnit({
     kernel: `
+#define FMUL(x, y) (__mul24(x, y))
+#define FMUL(x, y) ((x) * (y))
+#define IMAD(a, b, c) (((a) * (b)) + (c))
+__global__ void expression_macro(float *src, int stride) {
+  src += IMAD(blockIdx.y, stride, threadIdx.x);
+  src[0] = FMUL(src[0], 2.0f);
+}`,
+  });
+  assert.doesNotMatch(source, /^\s*#define\s+FMUL/mu);
+  assert.doesNotMatch(source, /\b(?:FMUL|IMAD)\s*\(/u);
+  assert.match(source, /src \+= \(\(\(\(blockIdx\.y\)\) \* \(\(stride\)\)\) \+ \(\(threadIdx\.x\)\)\);/u);
+  assert.match(source, /src\[0\] = \(\(\(src\[0\]\)\) \* \(\(2\.0f\)\)\);/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void missing_legacy_macro(float *dst, int width) {
+  dst[IMAD(blockIdx.y, width, threadIdx.x)] = FMUL(dst[0], 2.0f);
+}`,
+  });
+  assert.doesNotMatch(source, /\b(?:FMUL|IMAD)\s*\(/u);
+  assert.match(source, /dst\[\(\(\(blockIdx\.y\) \* \(width\)\) \+ \(threadIdx\.x\)\)\]/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 #define SET_PAIR(dst, src) (dst).x = (src).x + 1.0f; (dst).y = (src).y + 2.0f;
 __global__ void statement_macro(float2 *out, float2 *in) {
   float2 x = in[threadIdx.x];
@@ -975,7 +1004,8 @@ __global__ void macro_calls_helper(float *out) {
       { name: "helper", source: "__device__ void helper(float &value) { value = value + 1.0f; }" },
     ],
   });
-  assert.match(source, /#define BG_APPLY\(value\) helper\(value\)/u);
+  assert.doesNotMatch(source, /#define BG_APPLY/u);
+  assert.match(source, /helper\(\(out\[threadIdx\.x\]\)\);/u);
   assert.match(source, /__device__ void helper/u);
 }
 

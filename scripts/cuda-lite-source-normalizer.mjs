@@ -199,7 +199,9 @@ export function createKernelCompilationUnit({
   const withPointerStoreForwarders = normalizePointerStoreForwarderHelpers(withAtomicForwarders);
   const withLocalPointerHelpers = normalizeLocalPointerDeviceFunctionCalls(withPointerStoreForwarders);
   const withLambdas = normalizeSimpleLocalLambdas(withLocalPointerHelpers);
-  const withStatementMacros = normalizeSimpleStatementMacros(withLambdas);
+  const withExpressionMacros = normalizeSimpleExpressionMacros(withLambdas);
+  const withLegacyArithmeticMacros = normalizeLegacyCudaArithmeticMacros(withExpressionMacros);
+  const withStatementMacros = normalizeSimpleStatementMacros(withLegacyArithmeticMacros);
   const withSideEffects = normalizeSideEffectExpressions(withStatementMacros);
   const withScopedForVariables = normalizeForLoopScopedVariables(withSideEffects);
   const withTemplateFallbacks = normalizeTemplateValueFallbacks(withScopedForVariables, effectiveDefines);
@@ -1454,7 +1456,7 @@ function replaceSimpleStatementMacroCalls(line, macro) {
       re.lastIndex = match.index + macro.name.length;
       continue;
     }
-    const args = splitTopLevel(line.slice(open + 1, close)).map((arg) => arg.trim());
+    const args = splitTopLevelMacroArgs(line.slice(open + 1, close)).map((arg) => arg.trim());
     if (args.length !== macro.params.length) {
       re.lastIndex = close + 1;
       continue;
@@ -1948,6 +1950,132 @@ function normalizeSimpleLocalLambdas(source) {
     cursor = before.length;
   }
   return out;
+}
+
+function normalizeSimpleExpressionMacros(source) {
+  const macros = collectSimpleExpressionMacros(source);
+  if (macros.length === 0) return source;
+  let out = source;
+  for (let pass = 0; pass < 8; pass++) {
+    const next = out
+      .split(/\r?\n/u)
+      .map((line) => /^\s*#/u.test(line) ? line : replaceSimpleExpressionMacroCalls(line, macros))
+      .join("\n");
+    if (next === out) break;
+    out = next;
+  }
+  return out
+    .split(/\r?\n/u)
+    .filter((line) => !macros.some((macro) => functionDefineName(line) === macro.name))
+    .join("\n");
+}
+
+function collectSimpleExpressionMacros(source) {
+  const byName = new Map();
+  for (const line of source.split(/\r?\n/u)) {
+    const macro = parseSimpleExpressionMacro(line);
+    if (macro !== undefined) byName.set(macro.name, macro);
+  }
+  return [...byName.values()];
+}
+
+function parseSimpleExpressionMacro(line) {
+  const match = /^\s*#define\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s+([\s\S]+?)\s*$/u.exec(line);
+  if (match?.[1] === undefined || match[2] === undefined || match[3] === undefined) return undefined;
+  const name = match[1];
+  const params = splitTopLevel(match[2]).map((param) => param.trim()).filter(Boolean);
+  const body = match[3].trim();
+  if (params.length === 0 || params.some((param) => !isMacroIdentifier(param))) return undefined;
+  if (!isSimpleExpressionMacroBody(name, body)) return undefined;
+  return { name, params, body, declaration: line };
+}
+
+function isSimpleExpressionMacroBody(name, body) {
+  if (body.includes(";") || /(?:^|[^\w])asm\s+volatile\b/u.test(body)) return false;
+  if (/[{}]/u.test(body)) return false;
+  if (/\b(?:reinterpret|static|const|dynamic)_cast\s*</u.test(body)) return false;
+  if (new RegExp(`\\b${escapeRegExp(name)}\\s*\\(`, "u").test(body)) return false;
+  return /^[A-Za-z0-9_.$()[\]\s,+\-*/%<>=!&|^~?:]+$/u.test(body);
+}
+
+function replaceSimpleExpressionMacroCalls(line, macros) {
+  let out = line;
+  for (const macro of macros) out = replaceSimpleExpressionMacroCall(out, macro);
+  return out;
+}
+
+function replaceSimpleExpressionMacroCall(line, macro) {
+  const re = new RegExp(`\\b${escapeRegExp(macro.name)}\\s*\\(`, "gu");
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(line)) !== null) {
+    const open = line.indexOf("(", match.index + macro.name.length);
+    const close = findBalanced(line, open, "(", ")");
+    if (open < 0 || close === undefined) {
+      re.lastIndex = match.index + macro.name.length;
+      continue;
+    }
+    const args = splitTopLevelMacroArgs(line.slice(open + 1, close)).map((arg) => arg.trim());
+    if (args.length !== macro.params.length) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    out += line.slice(cursor, match.index);
+    out += expandSimpleExpressionMacro(macro, args);
+    cursor = close + 1;
+    re.lastIndex = close + 1;
+  }
+  return cursor === 0 ? line : out + line.slice(cursor);
+}
+
+function expandSimpleExpressionMacro(macro, args) {
+  let body = macro.body;
+  for (const [index, param] of macro.params.entries()) {
+    const arg = args[index] ?? "";
+    body = body.replace(new RegExp(`\\b${escapeRegExp(param)}\\b`, "gu"), `(${arg})`);
+  }
+  return body;
+}
+
+function splitTopLevelMacroArgs(source) {
+  return splitTopLevel(source, ",", false);
+}
+
+function normalizeLegacyCudaArithmeticMacros(source) {
+  const specs = [
+    { name: "FMUL", arity: 2, expand: (args) => `((${args[0] ?? "0"}) * (${args[1] ?? "0"}))` },
+    { name: "IMUL", arity: 2, expand: (args) => `((${args[0] ?? "0"}) * (${args[1] ?? "0"}))` },
+    { name: "IMAD", arity: 3, expand: (args) => `(((${args[0] ?? "0"}) * (${args[1] ?? "0"})) + (${args[2] ?? "0"}))` },
+  ];
+  let out = source;
+  for (const spec of specs) out = replaceLegacyArithmeticMacroCalls(out, spec);
+  return out;
+}
+
+function replaceLegacyArithmeticMacroCalls(source, spec) {
+  const re = new RegExp(`\\b${spec.name}\\s*\\(`, "gu");
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const open = source.indexOf("(", match.index + spec.name.length);
+    const close = findBalanced(source, open, "(", ")");
+    if (open < 0 || close === undefined) {
+      re.lastIndex = match.index + spec.name.length;
+      continue;
+    }
+    const args = splitTopLevelMacroArgs(source.slice(open + 1, close)).map((arg) => arg.trim());
+    if (args.length !== spec.arity) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    out += source.slice(cursor, match.index);
+    out += spec.expand(args);
+    cursor = close + 1;
+    re.lastIndex = close + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
 }
 
 function inlineSimpleLambdaCalls(source, name, params, body) {
@@ -4387,14 +4515,14 @@ function parseTemplatedCallee(source) {
   };
 }
 
-function splitTopLevel(source, separator = ",") {
+function splitTopLevel(source, separator = ",", trackAnglesOverride = undefined) {
   const parts = [];
   let start = 0;
   let angle = 0;
   let paren = 0;
   let bracket = 0;
   let brace = 0;
-  const trackAngles = separator !== ";";
+  const trackAngles = trackAnglesOverride ?? separator !== ";";
   for (let index = 0; index < source.length; index++) {
     const char = source[index];
     if (trackAngles && char === "<") angle++;

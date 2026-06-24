@@ -134,6 +134,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["streamOrderedAllocate", [2, 4]],
   ["curand_init", [4, 4]],
   ["curand_uniform", [1, 1]],
+  ["curand_uniform_double", [1, 1]],
   ["cudaDeviceSynchronize", [0, 0]],
   ["cudaStreamCreate", [1, 1]],
   ["cudaStreamCreateWithFlags", [2, 2]],
@@ -1546,7 +1547,7 @@ function validateCallExpression(
     validateCurandInit(expression, diagnostics, walkExpression, scope);
     return { kind: "scalar", valueType: "uint" };
   }
-  if (callName === "curand_uniform") {
+  if (callName === "curand_uniform" || callName === "curand_uniform_double") {
     validateCurandUniform(expression, diagnostics, walkExpression, scope);
     return { kind: "scalar", valueType: "float" };
   }
