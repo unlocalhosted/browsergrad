@@ -72,12 +72,12 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   excludes kernels now runnable on real WebGPU through orchestration; current
   baseline is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=197`
-  WebGPU-runnable, and `<=160` hard gaps;
-  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=107`
-  WebGPU-runnable, and `<=41` hard gaps;
-  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=203`
-  WebGPU-runnable, and `<=90` hard gaps. The aggregate gate also verifies
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=229`
+  WebGPU-runnable, and `<=128` hard gaps;
+  `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=131`
+  WebGPU-runnable, and `<=17` hard gaps;
+  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=217`
+  WebGPU-runnable, and `<=76` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, WebGPU atomic
@@ -117,6 +117,9 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   breaking parameter/local shadows, local const/template integer expressions
   feed later fixed array dimensions, and scalar bitwise compound assignments
   (`&=`, `|=`, `^=`) lower through parser, reference, and WGSL.
+  Scalarized POD record values/storage params, constant-record reachability,
+  macro-sized record arrays, DirectX-style float-vector fields, and C-style
+  array typedef vector aliases now desugar into existing scalar/vector IR.
   Fixed thread-local arrays lower to per-thread WGSL function arrays and CPU
   reference typed arrays.
 - Hot-loop dispatch can keep both caller buffers and compiler-generated

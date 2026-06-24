@@ -106,6 +106,7 @@ export function createKernelCompilationUnit({
     specializedKernel,
     ...referencedDeviceFunctions.map((fn) => fn.source),
     ...referencedSiblingKernels,
+    ...constantDeclarations,
   ].join("\n");
   const referencedRecordDeclarations = availableRecordDeclarations.filter((declaration) => {
     const name = recordDeclarationName(declaration);
@@ -141,7 +142,12 @@ export function createKernelCompilationUnit({
     new Set([...params, ...templateNames]),
   );
   const withCudaPipeline = normalizeCudaPipelineAsync(withNumericDefines);
-  const withoutSupportedAliases = stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withCudaPipeline, effectiveDefines));
+  const withTypeDefines = normalizeSupportedTypeDefineReferences(
+    withCudaPipeline,
+    aliasDefines,
+    new Set([...params, ...templateNames]),
+  );
+  const withoutSupportedAliases = stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withTypeDefines, effectiveDefines));
   const withVectorConstructors = normalizeVectorStaticConstructors(withoutSupportedAliases, effectiveDefines);
   const withWidePacks = normalizeWidePacked128Aliases(withVectorConstructors, effectiveDefines);
   const withPackedHelpers = normalizePacked128MemoryHelpers(withWidePacks);
@@ -695,6 +701,27 @@ function normalizeNumericObjectDefines(source, definesByName, blockedNames = new
   }).join("\n");
 }
 
+function normalizeSupportedTypeDefineReferences(source, definesByName, blockedNames = new Set()) {
+  const entries = [...definesByName]
+    .map(([name, value]) => [name, normalizeTemplateTypeArgument(value, definesByName)])
+    .filter(([name, value]) => value !== undefined && value !== name && isMacroIdentifier(name))
+    .filter(([name]) => !new RegExp(`\\b${escapeRegExp(name)}\\s*::`, "u").test(source))
+    .sort((a, b) => b[0].length - a[0].length);
+  if (entries.length === 0) return source;
+  const localBlocked = new Set(blockedNames);
+  return source.split(/\r?\n/u).map((line) => {
+    if (/^\s*#/u.test(line)) return line;
+    const declared = collectDeclaredIdentifiers(line, definesByName);
+    let out = line;
+    for (const [name, value] of entries) {
+      if (localBlocked.has(name) || declared.has(name)) continue;
+      out = out.replace(new RegExp(`\\b${escapeRegExp(name)}\\b`, "gu"), value);
+    }
+    for (const name of declared) localBlocked.add(name);
+    return out;
+  }).join("\n");
+}
+
 function resolveTemplateDefineValue(value, definesByName) {
   const trimmed = value.trim();
   return definesByName.get(trimmed) ?? trimmed;
@@ -721,10 +748,11 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
   if (type.includes("<") || type.includes(">")) return undefined;
   const mapped = definesByName.get(type);
   if (mapped && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(mapped)) {
-    if (seen.has(type) || mapped === type) return undefined;
-    const normalized = normalizeTemplateTypeArgument(mapped, definesByName, new Set([...seen, type]));
-    if (normalized !== undefined) return normalized;
-    type = mapped;
+    if (!seen.has(type) && mapped !== type) {
+      const normalized = normalizeTemplateTypeArgument(mapped, definesByName, new Set([...seen, type]));
+      if (normalized !== undefined) return normalized;
+      type = mapped;
+    }
   }
   if (type === "__half" || type === "half_t") return "half";
   if (type === "__nv_bfloat16" || type === "nv_bfloat16") return "bf16";
@@ -753,6 +781,9 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
   if (type === "char2") return "int2";
   if (type === "char3") return "int3";
   if (type === "char4") return "int4";
+  if (type === "XMFLOAT2") return "float2";
+  if (type === "XMFLOAT3") return "float3";
+  if (type === "XMFLOAT4") return "float4";
   const supported = new Set(["float", "int", "uint", "half", "bf16", "bool", "float2", "float3", "float4", "half2", "int2", "int3", "int4", "uint2", "uint3", "uint4"]);
   return supported.has(type) ? type : undefined;
 }
@@ -1034,7 +1065,7 @@ function parseScalarizedRecordFields(body, definesByName) {
     let consumed = "";
     while ((dimMatch = dimRe.exec(tail)) !== null) {
       const rawDim = dimMatch[1];
-      const resolved = rawDim === undefined ? undefined : Number(definesByName.get(rawDim) ?? rawDim);
+      const resolved = rawDim === undefined ? undefined : resolveScalarizedRecordArrayDimension(rawDim, definesByName);
       if (!Number.isInteger(resolved) || resolved <= 0) return undefined;
       dimensions.push(resolved);
       consumed += dimMatch[0];
@@ -1043,6 +1074,14 @@ function parseScalarizedRecordFields(body, definesByName) {
     fields.push({ name: match[2], valueType, dimensions });
   }
   return fields;
+}
+
+function resolveScalarizedRecordArrayDimension(rawDim, definesByName) {
+  const env = numericTemplateDefines(definesByName);
+  const value = evaluateTemplateIntegerExpression(rawDim, env);
+  if (value === undefined) return undefined;
+  const resolved = Number(value);
+  return Number.isInteger(resolved) ? resolved : undefined;
 }
 
 function isScalarizedRecordFieldType(valueType) {
@@ -1107,7 +1146,7 @@ function rewriteScalarizedRecordFunctionSignatures(source, record, symbols, func
         return [param];
       }
       changed = true;
-      symbols.set(expanded.name, { kind: "param" });
+      symbols.set(expanded.name, { kind: expanded.pointer ? "param-pointer" : "param" });
       expansion.push({ kind: "record", recordName: record.name, record });
       return expanded.params;
     });
@@ -1127,7 +1166,8 @@ function rewriteScalarizedRecordFunctionSignatures(source, record, symbols, func
 }
 
 function expandScalarizedRecordParam(param, record) {
-  if (param.includes("*")) return undefined;
+  const pointerParam = expandScalarizedRecordPointerParam(param, record);
+  if (pointerParam !== undefined) return pointerParam;
   const re = new RegExp(`^\\s*((?:(?:const|volatile|__restrict__|__restrict|restrict|__grid_constant__)\\s+)*)${escapeRegExp(record.name)}\\s*(&)?\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*$`, "u");
   const match = re.exec(param);
   if (match === null || match[3] === undefined) return undefined;
@@ -1138,9 +1178,25 @@ function expandScalarizedRecordParam(param, record) {
   const prefix = qualifiers.length > 0 ? `${qualifiers} ` : "";
   return {
     name,
+    pointer: false,
     params: record.fields.map((field) => field.dimensions.length > 0
       ? `${prefix}${field.valueType} *${recordFieldName(name, field)}`
       : `${prefix}${field.valueType} ${recordFieldName(name, field)}`),
+  };
+}
+
+function expandScalarizedRecordPointerParam(param, record) {
+  if (record.fields.some((field) => field.dimensions.length > 0)) return undefined;
+  const re = new RegExp(`^\\s*((?:(?:const|volatile|__restrict__|__restrict|restrict)\\s+)*)${escapeRegExp(record.name)}\\s*\\*\\s*((?:(?:const|volatile|__restrict__|__restrict|restrict)\\s+)*)?([A-Za-z_][A-Za-z0-9_]*)\\s*$`, "u");
+  const match = re.exec(param);
+  if (match === null || match[3] === undefined) return undefined;
+  const qualifiers = `${match[1] ?? ""} ${match[2] ?? ""}`.replace(/\b(?:__restrict__|__restrict|restrict)\b/gu, "").replace(/\s+/gu, " ").trim();
+  const name = match[3];
+  const prefix = qualifiers.length > 0 ? `${qualifiers} ` : "";
+  return {
+    name,
+    pointer: true,
+    params: record.fields.map((field) => `${prefix}${field.valueType} *${recordFieldName(name, field)}`),
   };
 }
 
@@ -1288,6 +1344,7 @@ function parsePodRecordFields(body, definesByName) {
 }
 
 function podRecordVectorType(fields) {
+  if (fields.length < 2 || fields.length > 4 || fields.some((field) => field.dimensions?.length > 0)) return undefined;
   const first = fields[0]?.valueType;
   if (!first || !fields.every((field) => field.valueType === first)) return undefined;
   if (first === "float") return `float${fields.length}`;
@@ -2072,6 +2129,12 @@ function isKnownCarrierAlias(raw, definesByName) {
 }
 
 function parseSimpleTypeAlias(line, defines) {
+  const arrayTypedefMatch = /^\s*typedef\s+(.+?)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*([0-9]+)\s*\]\s*;\s*$/u.exec(line);
+  if (arrayTypedefMatch !== null) {
+    const [, sourceType, alias, rawLength] = arrayTypedefMatch;
+    const value = normalizeArrayAliasType(sourceType, rawLength, defines);
+    return value && alias ? { name: alias, value } : undefined;
+  }
   const typedefMatch = /^\s*typedef\s+(.+?)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;\s*$/u.exec(line);
   if (typedefMatch !== null) {
     const [, sourceType, alias] = typedefMatch;
@@ -2084,6 +2147,17 @@ function parseSimpleTypeAlias(line, defines) {
     const value = normalizeTemplateTypeArgument(sourceType, defines);
     return value && alias ? { name: alias, value } : undefined;
   }
+  return undefined;
+}
+
+function normalizeArrayAliasType(sourceType, rawLength, defines) {
+  const type = normalizeTemplateTypeArgument(sourceType, defines);
+  const length = Number(rawLength);
+  if (!Number.isInteger(length) || length < 2 || length > 4) return undefined;
+  if (type === "float") return `float${length}`;
+  if (type === "int") return `int${length}`;
+  if (type === "uint") return `uint${length}`;
+  if (type === "half" && length === 2) return "half2";
   return undefined;
 }
 

@@ -1240,4 +1240,90 @@ __global__ void extent_param(uint* out, cudaExtent volumeSize) {
   assert.match(source, /volumeSize\.x \+ volumeSize\.y \+ volumeSize\.z/u);
 }
 
+{
+  const source = createKernelCompilationUnit({
+    definesByName: new Map([["KERNEL_PARAM_LIMIT", "(1024)"]]),
+    recordDeclarations: ["typedef struct { int param[KERNEL_PARAM_LIMIT]; } param_t;"],
+    kernel: `
+__global__ void macro_array_record(__grid_constant__ const param_t p, int* out) {
+  out[0] = p.param[threadIdx.x];
+}`,
+  });
+  assert.doesNotMatch(source, /\bparam_t\b/u);
+  assert.match(source, /const int \*p__param/u);
+  assert.match(source, /out\[0\] = p__param\[threadIdx\.x\];/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+typedef float vec2[2];
+__global__ void array_alias(vec2* points, float* out) {
+  out[0] = points[threadIdx.x].x + points[threadIdx.x].y;
+}`,
+  });
+  assert.doesNotMatch(source.replace(/^#.*$/gmu, ""), /\bvec2\b/u);
+  assert.match(source, /float2\* points/u);
+  assert.match(source, /points\[threadIdx\.x\]\.x \+ points\[threadIdx\.x\]\.y/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    recordDeclarations: ["struct Vertex { float4 position; float2 uv; };"],
+    kernel: `
+__global__ void record_storage_param(Vertex* vertices, const Vertex* src) {
+  int i = threadIdx.x;
+  vertices[i].position.x = src[i].position.x + vertices[i].uv.y;
+}`,
+  });
+  assert.doesNotMatch(source, /\bVertex\b/u);
+  assert.match(source, /float4 \*vertices__position/u);
+  assert.match(source, /float2 \*vertices__uv/u);
+  assert.match(source, /const float4 \*src__position/u);
+  assert.match(source, /const float2 \*src__uv/u);
+  assert.match(source, /vertices__position\[i\]\.x = src__position\[i\]\.x \+ vertices__uv\[i\]\.y;/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    recordDeclarations: ["struct Vertex { XMFLOAT3 position; XMFLOAT4 color; };"],
+    kernel: `
+__global__ void external_vector_record(Vertex* vertices, unsigned int width) {
+  int i = threadIdx.x;
+  vertices[i].position.x = 1.0f;
+  vertices[i].color.w = (float)width;
+}`,
+  });
+  assert.doesNotMatch(source, /\bVertex\b/u);
+  assert.doesNotMatch(source, /\bXMFLOAT[34]\b/u);
+  assert.match(source, /float3 \*vertices__position/u);
+  assert.match(source, /float4 \*vertices__color/u);
+  assert.match(source, /vertices__position\[i\]\.x = 1\.0f;/u);
+  assert.match(source, /vertices__color\[i\]\.w = \(float\)width;/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    recordDeclarations: ["struct SimParams { float3 gravity; uint count; };"],
+    constantDeclarations: ["__constant__ SimParams cudaParams;"],
+    definesByName: new Map([["uint", "uint"]]),
+    deviceFunctions: [
+      {
+        name: "load_gravity",
+        source: `__device__ float load_gravity() {
+  return cudaParams.gravity.x + (float)cudaParams.count;
+}`,
+      },
+    ],
+    kernel: `
+__global__ void constant_record(float* out) {
+  out[0] = load_gravity();
+}`,
+  });
+  assert.doesNotMatch(source, /\bSimParams\b/u);
+  assert.match(source, /__constant__ float3 cudaParams__gravity;/u);
+  assert.match(source, /__constant__ uint cudaParams__count;/u);
+  assert.match(source, /return cudaParams__gravity\.x \+ \(float\)cudaParams__count;/u);
+}
+
 console.log("cuda-lite source normalizer tests ok");
