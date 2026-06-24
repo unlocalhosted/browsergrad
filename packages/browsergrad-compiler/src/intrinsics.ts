@@ -71,6 +71,7 @@ const FLOAT_UNARY = [
   intrinsic("coshf", [1, 1], "float", (args) => Math.cosh(args[0] ?? 0), (args) => `cosh(${args.join(", ")})`),
   intrinsic("isinf", [1, 1], "bool", (args) => Number.isFinite(args[0] ?? 0) || Number.isNaN(args[0] ?? 0) ? 0 : 1, (args) => `isInf(${args[0] ?? "0"})`),
   intrinsic("rsqrtf", [1, 1], "float", (args) => 1 / Math.sqrt(args[0] ?? 0), (args) => `inverseSqrt(${args.join(", ")})`),
+  intrinsic("__frcp_rn", [1, 1], "float", (args) => 1 / (args[0] ?? 0), (args) => `(1.0 / ${args[0] ?? "1.0"})`),
   intrinsic("__saturatef", [1, 1], "float", (args) => Math.min(1, Math.max(0, args[0] ?? 0)), (args) => `clamp(${args[0] ?? "0"}, 0.0, 1.0)`),
   intrinsic("wmma::__float_to_tf32", [1, 1], "float", (args) => args[0] ?? 0, (args) => `f32(${args[0] ?? "0"})`),
 ] as const;

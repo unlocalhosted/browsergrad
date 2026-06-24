@@ -80,8 +80,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   WebGPU-runnable, and `<=75` hard gaps;
   `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=148`
   WebGPU-runnable, and `0` hard gaps;
-  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=235`
-  WebGPU-runnable, and `<=58` hard gaps. The aggregate gate also verifies
+  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=263`
+  WebGPU-runnable, and `<=30` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, WebGPU atomic
@@ -173,7 +173,9 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   and multi-output operand ABI for `ldmatrix` and `mma.sync.m16n8k16`; v0 lowers
   these as deterministic register-carrier semantics in CPU reference and WGSL,
   while full lane/layout-accurate tensor-core simulation remains a later
-  semantic lift.
+  semantic lift. CUDA reciprocal intrinsic `__frcp_rn` lowers through the
+  shared intrinsic table, closing the post-PTX LeetCUDA flash-attention math
+  gap without repo-specific matching.
 - Hot-loop dispatch can keep both caller buffers and compiler-generated
   execution sequences resident: `residentBuffers` avoids upload/readback churn,
   and prepared compiler/WebGPU runners avoid rebuilding pipelines and bind

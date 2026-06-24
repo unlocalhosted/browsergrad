@@ -190,7 +190,7 @@ Local corpus audits on 2026-06-24:
   cache-load assignment expansion into lane-wise stores, plus custom
   CUDA-vector `cg::reduce` lowering through scalar subgroup shuffle-XOR loops,
   with `0` hard gaps.
-- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `235` direct
+- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `263` direct
   WebGPU-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, local header context, and
   simple C++ alias / constexpr intake plus `FLOAT4(x)`-style typed storage
@@ -215,7 +215,9 @@ Local corpus audits on 2026-06-24:
   and multi-output register-carrier ABI for `ldmatrix` and
   `mma.sync.m16n8k16` in CPU reference and WGSL. This is intentionally a v0
   register-carrier model, not full lane/layout-accurate tensor-core simulation
-  yet, with `58` hard gaps.
+  yet. CUDA reciprocal intrinsic `__frcp_rn` now lowers through the shared
+  intrinsic table, closing the post-PTX flash-attention math gap, with `30`
+  hard gaps.
   The pre-normalizer baseline was `3/293`, which proved context isolation was
   the first ladder rung.
 
@@ -257,9 +259,9 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
-- The current live aggregate gate is `905/1038` WebGPU-runnable across the four
+- The current live aggregate gate is `933/1038` WebGPU-runnable across the four
   pinned corpora: CUDA-120 `240/240`, `cuda-samples` `282/357`, `llm.c`
-  `148/148`, and LeetCUDA `235/293`.
+  `148/148`, and LeetCUDA `263/293`.
 
 ## Grill Decisions
 
@@ -409,7 +411,7 @@ Acceptance criteria for the first slice:
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions,
   `>=148` WebGPU-runnable, and `0` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
-  `>=235` WebGPU-runnable, and `<=58` hard gaps.
+  `>=263` WebGPU-runnable, and `<=30` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
   unit tests.
 - Intrinsic-ledger expansion improves coverage through generic CUDA math and
@@ -479,8 +481,9 @@ Acceptance criteria for the first slice:
   source normalization, reference execution, and WGSL as signed `i32` browser
   index scalars.
 - CUDA fast math/bit intrinsic ledger includes `__saturatef`, `__fdividef`,
-  `__expf`, `__logf`, `rsqrtf`, `__clz`, `__mul24`, `__umul24`, and `assert`
-  with parser/analyzer, CPU reference, WGSL, and test coverage.
+  `__frcp_rn`, `__expf`, `__logf`, `rsqrtf`, `__clz`, `__mul24`,
+  `__umul24`, and `assert` with parser/analyzer, CPU reference, WGSL, and test
+  coverage.
 - CUDA bf16 intake includes `__nv_bfloat16`, `nv_bfloat16`, `__nv_bfloat162`,
   `__float2bfloat16*`, `__bfloat162float`, `__ushort_as_bfloat16`, and
   `__halves2bfloat162` with rounded reference semantics and WGSL f32 lowering.

@@ -2125,6 +2125,7 @@ __global__ void mathy(float *x, float *out) {
       sqrt(fabsf(value)) +
       sqrtf(fabsf(value)) +
       rsqrtf(fabsf(value) + 1.0f) +
+      __frcp_rn(value + 3.0f) +
       __saturatef(value) +
       __expf(value) +
       __logf(fabsf(value) + 1.0f) +
@@ -2160,6 +2161,7 @@ __global__ void mathy(float *x, float *out) {
     expect(compiled.wgsl).toContain("cosh(value)");
     expect(compiled.wgsl).toContain("sqrt(abs(value))");
     expect(compiled.wgsl).toContain("inverseSqrt((abs(value) + 1.0))");
+    expect(compiled.wgsl).toContain("(1.0 / (value + 3.0))");
     expect(compiled.wgsl).toContain("clamp(value, 0.0, 1.0)");
     expect(compiled.wgsl).toContain("pow(abs(value), 2.0)");
     expect(compiled.wgsl).toContain("min(value, 1.0)");
@@ -2183,6 +2185,7 @@ __global__ void mathy(float *x, float *out) {
       Math.sqrt(Math.abs(value)) +
       Math.sqrt(Math.abs(value)) +
       (1 / Math.sqrt(Math.abs(value) + 1)) +
+      (1 / (value + 3)) +
       Math.min(1, Math.max(0, value)) +
       Math.exp(value) +
       Math.log(Math.abs(value) + 1) +
