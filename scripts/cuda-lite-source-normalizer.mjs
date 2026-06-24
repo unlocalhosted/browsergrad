@@ -715,6 +715,8 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
   if (type === "unsigned int" || type === "unsigned") return "uint";
   if (type === "unsigned char" || type === "uchar" || type === "uint8_t") return "uint";
   if (type === "signed int" || type === "signed") return "int";
+  if (type === "int64_t" || type === "int32_t") return "int";
+  if (type === "uint64_t" || type === "uint32_t" || type === "uintptr_t") return "uint";
   if (type === "signed char" || type === "char" || type === "int8_t") return "int";
   if (
     type === "clock_t" ||
@@ -739,9 +741,29 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
 }
 
 function normalizeCppTemplateCarrierSyntax(source) {
-  return source
+  const withBoolCarriers = source
     .replace(/\bstd\s*::\s*bool_constant\s*<\s*(true|false|[01])\s*>\s*\{\s*\}/gu, (_match, value) => value === "1" ? "true" : value === "0" ? "false" : value)
     .replace(/\bstd\s*::\s*bool_constant\s*<\s*([A-Za-z_][A-Za-z0-9_]*|[01])\s*>\s*(?=[,)])/gu, (_match, name) => `bool __bg_bool_constant_${name}`);
+  return rewriteBoolTemplateCarriers(withBoolCarriers);
+}
+
+function rewriteBoolTemplateCarriers(source) {
+  const edits = [];
+  for (const match of source.matchAll(/\btemplate\s*<([^>]*)>\s*__global__[\s\S]*?\([^)]*\bbool\s+__bg_bool_constant_([A-Za-z_][A-Za-z0-9_]*)\b[^)]*\)\s*\{/gu)) {
+    const templateParams = match[1] ?? "";
+    const name = match[2];
+    if (!name || !new RegExp(`\\bbool\\s+${escapeRegExp(name)}\\b`, "u").test(templateParams)) continue;
+    const start = match.index ?? 0;
+    const brace = source.indexOf("{", start + match[0].length - 1);
+    const end = findBalanced(source, brace, "{", "}");
+    if (brace < 0 || end === undefined) continue;
+    const body = source.slice(brace + 1, end);
+    const rewritten = body.replace(new RegExp(`\\b${escapeRegExp(name)}\\b`, "gu"), `__bg_bool_constant_${name}`);
+    edits.push({ start: brace + 1, end, value: rewritten });
+  }
+  let out = source;
+  for (const edit of edits.reverse()) out = `${out.slice(0, edit.start)}${edit.value}${out.slice(edit.end)}`;
+  return out;
 }
 
 function normalizeSimpleStatementMacros(source) {

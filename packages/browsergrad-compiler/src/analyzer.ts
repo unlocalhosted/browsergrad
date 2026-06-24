@@ -335,15 +335,15 @@ export function analyzeCudaLite(
           validateSideEffectPlacement(statement.condition, false, diagnostics);
           walkExpression(statement.condition, scope);
           const divergent = expressionIsDivergent(statement.condition, params);
-          walkStatements(statement.consequent, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth, loopDepth, new Set(names));
+          walkStatements(statement.consequent, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth, loopDepth, new Set());
           if (statement.alternate) {
-            walkStatements(statement.alternate, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth, loopDepth, new Set(names));
+            walkStatements(statement.alternate, createScope(scope), guardDepth + 1, divergent ? divergentDepth + 1 : divergentDepth, loopDepth, new Set());
           }
           break;
         }
         case "for": {
           const loopScope = createScope(scope);
-          const loopNames = new Set(names);
+          const loopNames = new Set<string>();
           if (statement.init?.kind === "var") {
             declareVar(statement.init, loopScope, loopNames);
             if (requiresShaderF16(statement.init.valueType)) requiredFeatures.add("shader-f16");
@@ -374,7 +374,7 @@ export function analyzeCudaLite(
           validateSideEffectPlacement(statement.condition, false, diagnostics);
           walkExpression(statement.condition, scope);
           const divergent = expressionIsDivergent(statement.condition, params);
-          walkStatements(statement.body, createScope(scope), guardDepth, divergent ? divergentDepth + 1 : divergentDepth, loopDepth + 1, new Set(names));
+          walkStatements(statement.body, createScope(scope), guardDepth, divergent ? divergentDepth + 1 : divergentDepth, loopDepth + 1, new Set());
           break;
         }
         case "return":

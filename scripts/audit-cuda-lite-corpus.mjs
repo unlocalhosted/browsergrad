@@ -861,8 +861,10 @@ function stripCooperativeGroupParamTypes(signature) {
 function normalizePortableBaseType(type, _definesByName = new Map(), _seen = new Set()) {
   if (type === "unsigned int" || type === "unsigned") return "uint";
   if (type === "unsigned char" || type === "uchar" || type === "uint8_t") return "uint";
+  if (type === "uint64_t" || type === "uint32_t" || type === "uintptr_t") return "uint";
   if (type === "signed int" || type === "signed") return "int";
   if (type === "signed char" || type === "char" || type === "int8_t") return "int";
+  if (type === "int64_t" || type === "int32_t") return "int";
   if (type === "clock_t") return "uint";
   if (type === "size_t") return "uint";
   if (type === "ptrdiff_t") return "int";

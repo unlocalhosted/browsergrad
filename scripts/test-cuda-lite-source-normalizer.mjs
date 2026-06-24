@@ -1201,4 +1201,17 @@ __global__ void async_pipeline(float* out, const float* in) {
   assert.match(source, /CP_ASYNC_WAIT_GROUP\(0\);/u);
 }
 
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+template <typename T = float, bool UseAuxBuffer>
+__global__ void bool_template_carrier(float* out, const float* in, bool __bg_bool_constant_UseAuxBuffer) {
+  if constexpr (!UseAuxBuffer) {
+    out[threadIdx.x] = in[threadIdx.x];
+  }
+}`,
+  });
+  assert.match(source, /if constexpr \(!__bg_bool_constant_UseAuxBuffer\)/u);
+}
+
 console.log("cuda-lite source normalizer tests ok");

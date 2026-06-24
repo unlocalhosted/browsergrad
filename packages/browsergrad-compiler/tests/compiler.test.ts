@@ -569,6 +569,23 @@ __global__ void cudaAliasKernel(volatile size_type *out, curandState *state, CUt
     expect([...result.buffers.out as Uint32Array]).toEqual([23]);
   });
 
+  it("allows C++ block scopes to shadow outer CUDA symbols", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void scopedShadow(const float *wte, float *out) {
+  if (threadIdx.x < 1) {
+    float wte = 3.0f;
+    out[0] = wte;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { wte: new Float32Array([1]), out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([3]);
+  });
+
   it("returns stable diagnostics for unsupported unsafe cases", () => {
     const constWrite = parseCudaLite(`
 __global__ void bad(const float* x) {
