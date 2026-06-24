@@ -1804,6 +1804,33 @@ __global__ void namespaceTileReduce(const float *input, float *output) {
     expect([...result.buffers.output as Float32Array]).toEqual([8]);
   });
 
+  it("passes tile cooperative groups through generic device helper reduce params", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__device__ int reduce_n(int value, cooperative_groups::thread_group tile) {
+  return cg::reduce(tile, value, cg::plus<int>());
+}
+__global__ void helperTileReduce(int *out) {
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_block_tile<4> tile = cg::tiled_partition<4>(block);
+  int value = 1;
+  int sum = reduce_n(value, tile);
+  if (tile.thread_rank() == 0) { out[0] = sum; }
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [4, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("reduce_n(value, 4u");
+    expect(compiled.wgsl).toContain("subgroupAdd(value)");
+    expect([...result.buffers.out as Int32Array]).toEqual([4]);
+  });
+
   it("accepts C++ namespace aliases inside kernel bodies", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void kernelLocalNamespace(float *out) {
@@ -4331,6 +4358,29 @@ __global__ void sample(float *out, int width, cudaTextureObject_t tex) {
       name: "tex",
     }));
     expect([...result.buffers.out as Float32Array]).toEqual([2, 4, 6]);
+  });
+
+  it("passes CUDA texture handles through device helper params", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float sampleAt(cudaTextureObject_t texSrc, float x) {
+  return tex2D<float>(texSrc, x + 0.5f, 0.5f);
+}
+__global__ void sample(float *out, cudaTextureObject_t tex) {
+  int x = threadIdx.x;
+  out[x] = sampleAt(tex, (float)x);
+}`, { workgroupSize: [3, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(3) },
+        textures: { tex: { width: 3, height: 1, data: new Float32Array([3, 6, 9]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn sampleAt(texSrc: texture_2d<f32>");
+    expect(compiled.wgsl).toContain("textureLoad(texSrc");
+    expect([...result.buffers.out as Float32Array]).toEqual([3, 6, 9]);
   });
 
   it("lowers CUDA driver texture object aliases as texture params", () => {

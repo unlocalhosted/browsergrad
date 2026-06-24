@@ -72,8 +72,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   excludes kernels now runnable on real WebGPU through orchestration; current
   baseline is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=249`
-  WebGPU-runnable, and `<=108` hard gaps;
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=254`
+  WebGPU-runnable, and `<=103` hard gaps;
   `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=142`
   WebGPU-runnable, and `<=6` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=217`
@@ -96,7 +96,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
   generic `thread_group` helper-parameter lowering with block/tile metadata,
   adjacent C string literal intake, scalar `std::size_t`/`auto` declarations,
   scalar brace constructors such as `__half{expr}`, and driver API
-  `CUtexObject` / `CUsurfObject` texture-surface aliases,
+  `CUtexObject` / `CUsurfObject` texture-surface aliases, texture-handle
+  device-helper params, and generic tile-reduce helper params,
   C++ `reinterpret_cast<T*>` / `static_cast<T*>` pointer casts for typed
   scalarized storage views such as `FLOAT4(x)` and local pointer aliases,
   bounded integer template defaults on kernels/device helpers, multi-dimensional

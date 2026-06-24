@@ -392,6 +392,27 @@ void host(float *out, const float *in) {
 {
   const source = createKernelCompilationUnit({
     kernel: `
+__global__ void helper_reduce(int *out) {
+  cg::thread_block cta = cg::this_thread_block();
+  cg::thread_block_tile<32> tile = cg::tiled_partition<32>(cta);
+  out[0] = cg_reduce_n(1, tile);
+}`,
+    deviceFunctions: [
+      {
+        name: "cg_reduce_n",
+        source: `template <typename T, typename Group> __device__ T cg_reduce_n(T in, Group &threads) {
+  return cg::reduce(threads, in, cg::plus<T>());
+}`,
+      },
+    ],
+  });
+  assert.match(source, /__device__ int cg_reduce_n\(int in, cooperative_groups::thread_group threads\)/u);
+  assert.doesNotMatch(source, /float &threads/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 __global__ void kernel(float *in, float *out, int ld) {
   int row = threadIdx.x;
   out[0] = in[IDX2C(row, 0, ld)];

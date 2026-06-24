@@ -148,7 +148,8 @@ export function createKernelCompilationUnit({
     effectiveDefines,
     new Set([...params, ...templateNames]),
   );
-  const withoutSupportedAliases = stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withTypeDefines, effectiveDefines));
+  const withCooperativeGroupHelpers = normalizeCooperativeGroupHelperParams(withTypeDefines);
+  const withoutSupportedAliases = stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withCooperativeGroupHelpers, effectiveDefines));
   const withVectorConstructors = normalizeVectorStaticConstructors(withoutSupportedAliases, effectiveDefines);
   const withVectorLength = normalizeCudaVectorLength(withVectorConstructors);
   const withWidePacks = normalizeWidePacked128Aliases(withVectorLength, effectiveDefines);
@@ -913,6 +914,80 @@ function normalizeSimpleStatementMacros(source) {
 
 function normalizeSideEffectExpressions(source) {
   return normalizePostfixPointerAssignments(normalizePrefixUpdateConditions(source));
+}
+
+function normalizeCooperativeGroupHelperParams(source) {
+  let out = "";
+  let cursor = 0;
+  const re = /\b__device__\b/gu;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const open = source.indexOf("{", match.index);
+    if (open < 0) {
+      re.lastIndex = match.index + 10;
+      continue;
+    }
+    const close = findBalanced(source, open, "{", "}");
+    if (close === undefined) {
+      re.lastIndex = open + 1;
+      continue;
+    }
+    const signature = source.slice(match.index, open);
+    const body = source.slice(open, close + 1);
+    if (!/\b(?:cg|cooperative_groups)\s*::\s*reduce\s*\(/u.test(body)) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    const rewritten = rewriteCooperativeGroupReduceSignature(signature, body);
+    if (rewritten === signature) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    out += source.slice(cursor, match.index);
+    out += rewritten;
+    out += body;
+    cursor = close + 1;
+    re.lastIndex = close + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function rewriteCooperativeGroupReduceSignature(signature, body) {
+  const close = signature.lastIndexOf(")");
+  if (close < 0) return signature;
+  const open = matchingOpenParen(signature, close);
+  if (open === undefined) return signature;
+  const params = splitTopLevel(signature.slice(open + 1, close));
+  let changed = false;
+  const rewritten = params.map((param) => {
+    const name = parameterName(param);
+    if (!name || !new RegExp(`\\b(?:cg|cooperative_groups)\\s*::\\s*reduce\\s*\\(\\s*${escapeRegExp(name)}\\b`, "u").test(body)) {
+      return param;
+    }
+    if (/\b(?:thread_group|thread_block|thread_block_tile|coalesced_group)\b/u.test(param)) return param;
+    changed = true;
+    return `cooperative_groups::thread_group ${name}`;
+  });
+  if (!changed) return signature;
+  return `${signature.slice(0, open + 1)}${rewritten.join(", ")}${signature.slice(close)}`;
+}
+
+function matchingOpenParen(source, close) {
+  let depth = 0;
+  for (let i = close; i >= 0; i--) {
+    const ch = source[i];
+    if (ch === ")") depth++;
+    else if (ch === "(") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return undefined;
+}
+
+function parameterName(param) {
+  const cleaned = param.replace(/=[\s\S]*$/u, "").trim();
+  return /(?:^|[\s*&])([A-Za-z_][A-Za-z0-9_]*)\s*$/u.exec(cleaned)?.[1];
 }
 
 function normalizeForLoopScopedVariables(source) {

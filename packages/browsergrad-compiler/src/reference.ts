@@ -39,8 +39,8 @@ import {
   type ReferenceKernelResult,
 } from "./types.js";
 
-type EvalValue = number | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue;
-type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue | LocalArrayValue;
+type EvalValue = number | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue | TextureHandleValue;
+type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue | TextureHandleValue | LocalArrayValue;
 interface Vector3 {
   readonly x: number;
   readonly y: number;
@@ -76,6 +76,11 @@ interface PoolPointerValue {
   readonly byteOffset: number;
   readonly rawBuffer?: boolean;
   readonly valueType?: CudaLiteScalarType;
+}
+
+interface TextureHandleValue {
+  readonly kind: "texture-handle";
+  readonly name: string;
 }
 
 interface LValue {
@@ -954,6 +959,7 @@ function evalExpression(expression: CudaLiteExpression, context: ThreadContext):
       if (isComplex(value)) return value;
       if (isCudaVectorValue(value)) return value;
       if (isPoolPointer(value)) return value;
+      if (isTextureHandle(value)) return value;
       return valueAsNumber(value, expression.name);
     }
     case "cast":
@@ -1147,6 +1153,7 @@ function readIdentifier(name: string, context: ThreadContext): LocalValue {
   if (name === "blockDim") return context.blockDim;
   if (name === "gridDim") return context.gridDim;
   if (context.locals.has(name)) return context.locals.get(name)!;
+  if (Object.prototype.hasOwnProperty.call(context.textures, name)) return { kind: "texture-handle", name };
   if (context.shared.has(name)) return readLValue({ name, space: "shared", index: 0 }, context);
   if (context.constants.has(name)) {
     const value = context.constants.get(name)!;
@@ -1541,10 +1548,10 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     return current;
   }
   if (name === "tex2D" || name === "tex2DLod" || name === "tex1Dfetch") {
-    const textureRef = expression.args[0];
-    if (textureRef?.kind !== "identifier") throw compilerFailure(`${name} expects texture reference`);
-    const texture = context.textures[textureRef.name];
-    if (!texture) throw compilerFailure(`missing texture input '${textureRef.name}'`);
+    const textureName = textureNameFromExpression(expression.args[0], context);
+    if (!textureName) throw compilerFailure(`${name} expects texture reference`);
+    const texture = context.textures[textureName];
+    if (!texture) throw compilerFailure(`missing texture input '${textureName}'`);
     const x = Math.max(0, Math.min(texture.width - 1, Math.floor(evalNumber(expression.args[1]!, context))));
     const y = name === "tex1Dfetch"
       ? 0
@@ -1932,7 +1939,7 @@ function evalCooperativeNamespaceCall(
   if (name.endsWith("::sync")) return 0;
   const reduced = expression.args[1];
   const item = reduced ? evalNumber(reduced, context) : 0;
-  const op = expression.args[2] ? expressionNameForReference(expression.args[2]) : undefined;
+  const op = cooperativeReductionOpName(expression.args[2]);
   if (op?.endsWith("::plus")) {
     const size = value.groupKind === "tile"
       ? value.tileSize ?? 32
@@ -1940,6 +1947,11 @@ function evalCooperativeNamespaceCall(
     return item * size;
   }
   return item;
+}
+
+function cooperativeReductionOpName(expression: CudaLiteExpression | undefined): string | undefined {
+  if (expression?.kind === "call") return expressionNameForReference(expression.callee);
+  return expression === undefined ? undefined : expressionNameForReference(expression);
 }
 
 function localLinearRank(context: ThreadContext): number {
@@ -1957,6 +1969,11 @@ function deviceFunctionArgs(
     const arg = args[index];
     if (!arg) return zeroParamLocalValue(param);
     if (param.cooperativeGroupKind !== undefined) return cooperativeGroupArgumentValue(arg, param, context);
+    if (param.valueType === "texture2d") {
+      const textureName = textureNameFromExpression(arg, context);
+      if (!textureName) throw compilerFailure(`device texture parameter '${param.name}' expects a texture argument`);
+      return { kind: "texture-handle", name: textureName };
+    }
     if (!param.pointer) {
       if (isCudaVectorType(param.valueType) && arg.kind === "initializer") {
         return evalInitializerVector(arg, param.valueType, context);
@@ -2892,6 +2909,24 @@ function isPoolPointer(value: LocalValue | EvalValue | undefined): value is Pool
     value.kind === "pool-pointer";
 }
 
+function isTextureHandle(value: LocalValue | EvalValue | undefined): value is TextureHandleValue {
+  return value !== undefined &&
+    typeof value !== "number" &&
+    "kind" in value &&
+    value.kind === "texture-handle";
+}
+
+function textureNameFromExpression(expression: CudaLiteExpression | undefined, context: ThreadContext): string | undefined {
+  if (expression?.kind === "identifier") {
+    if (Object.prototype.hasOwnProperty.call(context.textures, expression.name)) return expression.name;
+    const value = context.locals.get(expression.name);
+    return isTextureHandle(value) ? value.name : undefined;
+  }
+  if (!expression) return undefined;
+  const value = evalExpression(expression, context);
+  return isTextureHandle(value) ? value.name : undefined;
+}
+
 function isAddress(value: LocalValue | EvalValue | undefined): value is AddressValue {
   return value !== undefined &&
     typeof value !== "number" &&
@@ -2946,6 +2981,7 @@ function traceValue(value: EvalValue): number {
   if (isAddress(value)) return value.target.index ?? 0;
   if (isCudaVectorValue(value)) return value.lanes[0] ?? 0;
   if (isCooperativeGroup(value)) return 0;
+  if (isTextureHandle(value)) return 0;
   return isComplex(value) ? value.x : value;
 }
 

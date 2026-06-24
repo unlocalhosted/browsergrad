@@ -806,6 +806,8 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
         ? param.cooperativeGroupKind === "thread"
           ? [`${context.nameFor(`${param.name}_tile_size_arg`)}: u32`]
           : []
+        : param.valueType === "texture2d"
+          ? [`${context.nameFor(param.name)}: texture_2d<f32>`]
         : [`${context.nameFor(`${param.name}_arg`)}: ${wgslScalar(param.valueType)}`]),
     "local_id: vec3<u32>",
     "workgroup_id: vec3<u32>",
@@ -821,6 +823,8 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
       if (param.cooperativeGroupKind === "thread") {
         lines.push(`  let ${context.nameFor(`${param.name}_tile_size`)}: u32 = ${context.nameFor(`${param.name}_tile_size_arg`)};`);
       }
+      continue;
+    } else if (param.valueType === "texture2d") {
       continue;
     } else {
       lines.push(`  var ${context.nameFor(param.name)}: ${wgslScalar(param.valueType)} = ${context.nameFor(`${param.name}_arg`)};`);
@@ -2329,6 +2333,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
           ? [emitCooperativeGroupTileSizeArgument(arg, context)]
           : [];
       }
+      if (param.valueType === "texture2d") return [emitTextureArgument(arg, context)];
       if (!arg) return param.pointer ? ["0u", "0u"] : [zeroValue(param.valueType)];
       return param.pointer
         ? emitDevicePointerArgument(arg, context)
@@ -2446,14 +2451,30 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "tex2D":
     case "tex2DLod":
       if (expression.args.length >= 3 && expression.args[0]?.kind === "identifier") {
-        const suffix = textureReadHelperSuffix(expression.templateValueType);
-        return `bg_tex2d_${suffix}_${expression.args[0].name}(${emitExpression(expression.args[1]!, context)}, ${emitExpression(expression.args[2]!, context)})`;
+        if (isTextureBindingName(expression.args[0].name, context)) {
+          const suffix = textureReadHelperSuffix(expression.templateValueType);
+          return `bg_tex2d_${suffix}_${expression.args[0].name}(${emitExpression(expression.args[1]!, context)}, ${emitExpression(expression.args[2]!, context)})`;
+        }
+        return emitTextureReadExpression(
+          emitTextureArgument(expression.args[0], context),
+          emitExpression(expression.args[1]!, context),
+          emitExpression(expression.args[2]!, context),
+          expression.templateValueType,
+        );
       }
       return `${name}(${args.join(", ")})`;
     case "tex1Dfetch":
       if (expression.args.length === 2 && expression.args[0]?.kind === "identifier") {
-        const suffix = textureReadHelperSuffix(expression.templateValueType);
-        return `bg_tex2d_${suffix}_${expression.args[0].name}(${emitExpression(expression.args[1]!, context)}, 0.0)`;
+        if (isTextureBindingName(expression.args[0].name, context)) {
+          const suffix = textureReadHelperSuffix(expression.templateValueType);
+          return `bg_tex2d_${suffix}_${expression.args[0].name}(${emitExpression(expression.args[1]!, context)}, 0.0)`;
+        }
+        return emitTextureReadExpression(
+          emitTextureArgument(expression.args[0], context),
+          emitExpression(expression.args[1]!, context),
+          "0.0",
+          expression.templateValueType,
+        );
       }
       return `tex1Dfetch(${args.join(", ")})`;
     case "surf2Dread":
@@ -2647,9 +2668,14 @@ function emitCooperativeNamespaceCall(expression: CudaLiteCallExpression, contex
   if (!group) return undefined;
   if (name.endsWith("::sync")) return group.groupKind === "grid" ? "0" : "workgroupBarrier()";
   const value = expression.args[1] ? emitExpression(expression.args[1], context) : "0";
-  const op = expression.args[2] ? expressionName(expression.args[2]) : undefined;
+  const op = cooperativeReductionOpName(expression.args[2]);
   if (op?.endsWith("::greater")) return `subgroupMax(${value})`;
   return `subgroupAdd(${value})`;
+}
+
+function cooperativeReductionOpName(expression: CudaLiteExpression | undefined): string | undefined {
+  if (expression?.kind === "call") return expressionName(expression.callee);
+  return expression === undefined ? undefined : expressionName(expression);
 }
 
 function cooperativeGroupForParam(param: CudaLiteParam, context: EmitContext): CudaLiteCooperativeGroupDecl {
@@ -3334,6 +3360,39 @@ function textureReadHelperSuffix(valueType: CudaLiteScalarType | undefined): str
   if (valueType === "half" || valueType === "half2") return valueType;
   if (isCudaVectorType(valueType)) return valueType;
   return "f32";
+}
+
+function isTextureBindingName(name: string, context: EmitContext): boolean {
+  return textureBindings(context.ir).some((texture) => texture.name === name);
+}
+
+function emitTextureArgument(expression: CudaLiteExpression | undefined, context: EmitContext): string {
+  if (expression?.kind === "identifier") return context.nameFor(expression.name);
+  if (expression) return emitExpression(expression, context);
+  return "bg_missing_texture";
+}
+
+function emitTextureReadExpression(
+  texture: string,
+  x: string,
+  y: string,
+  valueType: CudaLiteScalarType | undefined,
+): string {
+  const coord = `clamp(vec2<i32>(i32(floor(${x})), i32(floor(${y}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1))`;
+  const value = `textureLoad(${texture}, ${coord}, 0)`;
+  if (valueType === "float2") return `${value}.xy`;
+  if (valueType === "float3") return `${value}.xyz`;
+  if (valueType === "float4") return value;
+  if (valueType === "int") return `i32(${value}.r)`;
+  if (valueType === "uint") return `u32(${value}.r)`;
+  if (valueType === "half") return `f16(${value}.r)`;
+  if (valueType === "half2") return `vec2<f16>(${value}.xy)`;
+  if (isCudaVectorType(valueType)) {
+    const fields = ["x", "y", "z", "w"].slice(0, cudaVectorLaneCount(valueType));
+    const scalarType = wgslScalar(cudaVectorScalarType(valueType) ?? "float");
+    return `${wgslScalar(valueType)}(${fields.map((field) => `${scalarType}(${value}.${field})`).join(", ")})`;
+  }
+  return `${value}.r`;
 }
 
 function emitTextureVectorCastHelpers(

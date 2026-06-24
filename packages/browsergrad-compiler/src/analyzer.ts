@@ -19,7 +19,7 @@ import {
   type KernelIrModule,
   type SourceSpan,
 } from "./types.js";
-import { collectKernelLaunchCallees } from "./ast_queries.js";
+import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { sizeofCudaType } from "./type_layout.js";
@@ -151,6 +151,7 @@ interface SymbolInfo {
   readonly valueType?: ValueType;
   readonly returnType?: CudaLiteScalarType;
   readonly params?: readonly CudaLiteParam[];
+  readonly body?: readonly CudaLiteStatement[];
   readonly groupKind?: CudaLiteCooperativeGroupKind;
   readonly tileSize?: number;
   readonly pointer?: boolean;
@@ -648,6 +649,7 @@ function declareDeviceFunction(
     kind: "device-function",
     returnType: fn.returnType,
     params: fn.params,
+    body: fn.body,
     span: fn.span,
   });
   if (requiresShaderF16(fn.returnType)) requiredFeatures.add("shader-f16");
@@ -1462,6 +1464,17 @@ function validateDeviceFunctionCall(
     const param = fnParams[index];
     if (param?.cooperativeGroupKind !== undefined) {
       validateCooperativeGroupArgument(arg, param, scope, diagnostics);
+      if (param.cooperativeGroupKind === "thread" && deviceFunctionUsesGroupReduce(symbol, param.name)) {
+        const name = rootIdentifier(arg);
+        const group = name ? lookupSymbol(name, scope, arg.span) : undefined;
+        if (group?.kind === "cooperative-group" && group.groupKind !== "tile") {
+          diagnostics.push(error("unsupported-cooperative-groups", `device parameter '${param.name}' is reduced and requires a tile cooperative group`, arg.span));
+        }
+      }
+      continue;
+    }
+    if (param?.valueType === "texture2d" || param?.valueType === "surface2d") {
+      validateDeviceResourceArgument(arg, param, scope, diagnostics, walkExpression);
       continue;
     }
     if (param?.pointer) {
@@ -1484,6 +1497,18 @@ function validateDeviceFunctionCall(
   return isCudaVectorType(symbol.returnType)
     ? { kind: "vector", valueType: symbol.returnType }
     : { kind: "scalar", valueType: symbol.returnType };
+}
+
+function deviceFunctionUsesGroupReduce(symbol: SymbolInfo, paramName: string): boolean {
+  let found = false;
+  walkCudaLiteExpressions(symbol.body ?? [], (expression) => {
+    if (found) return;
+    if (expression.kind === "call" && expressionName(expression.callee)?.endsWith("::reduce")) {
+      const groupArg = expression.args[0];
+      if (groupArg?.kind === "identifier" && groupArg.name === paramName) found = true;
+    }
+  });
+  return found;
 }
 
 function symbolForParam(param: CudaLiteParam, kind: "param" | "local"): SymbolInfo {
@@ -1526,6 +1551,25 @@ function validateCooperativeGroupArgument(
   }
   if (param.cooperativeGroupKind !== symbol.groupKind) {
     diagnostics.push(error("unsupported-cooperative-groups", `device parameter '${param.name}' expects ${param.cooperativeGroupKind} cooperative group`, arg.span));
+  }
+}
+
+function validateDeviceResourceArgument(
+  arg: CudaLiteExpression,
+  param: CudaLiteParam,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const info = walkExpression(arg, scope);
+  if (param.valueType === "texture2d") {
+    if (info.kind !== "texture" && info.kind !== "unknown") {
+      diagnostics.push(error("unsupported-texture", `device parameter '${param.name}' expects a texture argument`, arg.span));
+    }
+    return;
+  }
+  if (param.valueType === "surface2d" && info.kind !== "surface" && info.kind !== "unknown") {
+    diagnostics.push(error("unsupported-surface", `device parameter '${param.name}' expects a surface argument`, arg.span));
   }
 }
 
@@ -1639,8 +1683,8 @@ function validateCooperativeNamespaceCall(
   if (method === "reduce") {
     requiredFeatures.add("subgroups");
     if (expression.args.length !== 3) diagnostics.push(error("invalid-call-arity", "cg::reduce expects 3 arguments", expression.span));
-    if (symbol.groupKind !== "tile") {
-      diagnostics.push(error("unsupported-cooperative-groups", "cg::reduce currently supports thread_block_tile groups", groupArg.span));
+    if (symbol.groupKind !== "tile" && symbol.groupKind !== "thread") {
+      diagnostics.push(error("unsupported-cooperative-groups", "cg::reduce currently supports tile-like cooperative groups", groupArg.span));
     }
     const value = expression.args[1];
     if (!value) return { kind: "unknown" };
