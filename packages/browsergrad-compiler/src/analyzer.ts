@@ -25,10 +25,13 @@ import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queri
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import {
   type WmmaBuiltin,
+  isMatrixTileByteValueType,
+  isMatrixTileFloatValueType,
   matrixTileElementCount,
   matrixTileReference,
   normalizeMatrixTileLayout,
   normalizeMatrixTileRole,
+  normalizeMatrixTileValueType,
   resolveMatrixTileSpec,
   wmmaBuiltinName,
 } from "./matrix_tiles.js";
@@ -48,7 +51,6 @@ import {
 
 const DEFAULT_WORKGROUP_SIZE: readonly [number, number, number] = [256, 1, 1];
 const BUILTIN_VECTORS = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]);
-const WMMA_FRAGMENT_VALUE_TYPES = new Set(["float", "half"]);
 const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ...CUDA_INTRINSICS.map((intrinsic) => [intrinsic.name, intrinsic.arity] as const),
   ["__syncthreads", [0, 0]],
@@ -642,9 +644,22 @@ function validateMatrixTileDeclaration(
     diagnostics.push(error("unsupported-wmma-fragment-layout", `WMMA fragment '${statement.name}' layout '${tile.layout}' is unsupported; supported layouts: row_major, col_major`, tile.layoutSpan ?? tile.span));
   }
 
-  if (tile.valueType === "half") requiredFeatures.add("shader-f16");
-  if (tile.valueType === undefined || !WMMA_FRAGMENT_VALUE_TYPES.has(tile.valueType)) {
-    diagnostics.push(error("unsupported-wmma-fragment-value-type", `WMMA fragment '${statement.name}' value type '${tile.valueTypeName}' is unsupported; supported value types: float, half`, tile.valueTypeSpan));
+  const tileValueType = normalizeMatrixTileValueType(tile.valueTypeName, tile.valueType);
+  if (tileValueType === "f16") requiredFeatures.add("shader-f16");
+  if (tile.valueType === undefined || tileValueType === undefined) {
+    diagnostics.push(error("unsupported-wmma-fragment-value-type", `WMMA fragment '${statement.name}' value type '${tile.valueTypeName}' is unsupported; supported value types: float, half, wmma::precision::tf32, uint8_t/int8_t matrix operands, and int accumulators`, tile.valueTypeSpan));
+  } else if (
+    (role === "matrix_a" || role === "matrix_b") &&
+    !isMatrixTileFloatValueType(tileValueType) &&
+    !isMatrixTileByteValueType(tileValueType)
+  ) {
+    diagnostics.push(error("unsupported-wmma-fragment-value-type", `WMMA fragment '${statement.name}' role '${role}' does not support value type '${tile.valueTypeName}'`, tile.valueTypeSpan));
+  } else if (
+    role === "accumulator" &&
+    !isMatrixTileFloatValueType(tileValueType) &&
+    tileValueType !== "s32"
+  ) {
+    diagnostics.push(error("unsupported-wmma-fragment-value-type", `WMMA accumulator fragment '${statement.name}' does not support value type '${tile.valueTypeName}'`, tile.valueTypeSpan));
   }
 }
 
@@ -706,6 +721,7 @@ function validateWmmaBuiltin(
         diagnostics.push(error("unsupported-wmma-fragment-role", "wmma::mma_sync C operand must be an accumulator fragment", expression.args[3]?.span ?? expression.span));
       }
       validateWmmaMmaShape(dst, a, b, c, expression.span, diagnostics);
+      validateWmmaMmaValueTypes(dst, a, b, c, expression.span, diagnostics);
       return { kind: "scalar", valueType: dst?.spec.valueType };
     }
     case "store_matrix_sync": {
@@ -807,6 +823,40 @@ function validateWmmaMmaShape(
   }
   if (dst.spec.m !== a.spec.m || dst.spec.k !== a.spec.k || dst.spec.n !== b.spec.n || dst.spec.k !== b.spec.k) {
     diagnostics.push(error("wmma-shape-mismatch", "wmma::mma_sync matrix fragment shapes must match accumulator M/N/K", span));
+  }
+}
+
+function validateWmmaMmaValueTypes(
+  dst: MatrixTileOperandInfo | undefined,
+  a: MatrixTileOperandInfo | undefined,
+  b: MatrixTileOperandInfo | undefined,
+  c: MatrixTileOperandInfo | undefined,
+  span: SourceSpan,
+  diagnostics: CudaLiteDiagnostic[],
+): void {
+  if (!dst || !a || !b || !c) return;
+  if (dst.spec.tileValueType !== c.spec.tileValueType) {
+    diagnostics.push(error("wmma-value-type-mismatch", "wmma::mma_sync destination and accumulator fragments must have matching value types", span));
+    return;
+  }
+  const integerInputs = isMatrixTileByteValueType(a.spec.tileValueType) || isMatrixTileByteValueType(b.spec.tileValueType);
+  const integerAccumulator = dst.spec.tileValueType === "s32";
+  if (integerInputs || integerAccumulator) {
+    if (
+      !integerAccumulator ||
+      !isMatrixTileByteValueType(a.spec.tileValueType) ||
+      !isMatrixTileByteValueType(b.spec.tileValueType)
+    ) {
+      diagnostics.push(error("unsupported-wmma-fragment-value-type", "wmma::mma_sync integer mode supports only u8/s8 matrix_a and matrix_b fragments with int accumulator fragments", span));
+    }
+    return;
+  }
+  if (
+    !isMatrixTileFloatValueType(dst.spec.tileValueType) ||
+    !isMatrixTileFloatValueType(a.spec.tileValueType) ||
+    !isMatrixTileFloatValueType(b.spec.tileValueType)
+  ) {
+    diagnostics.push(error("unsupported-wmma-fragment-value-type", "wmma::mma_sync supports float/half/tf32 fragments or u8/s8 fragments with int accumulators", span));
   }
 }
 

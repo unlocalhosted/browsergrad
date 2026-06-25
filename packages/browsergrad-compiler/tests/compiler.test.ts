@@ -6564,6 +6564,38 @@ __global__ void wmma_tf32(float* A, float* C) {
     expect(compiled.wgsl).toContain("f32(a[u32(t)])");
   });
 
+  it("supports WMMA integer matrix operands with int accumulators", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void wmma_imma(uint8_t* A, uint8_t* B, int* C) {
+  wmma::fragment<wmma::matrix_a, 16, 16, 16, uint8_t, wmma::row_major> a;
+  wmma::fragment<wmma::matrix_b, 16, 16, 16, uint8_t, wmma::col_major> b;
+  wmma::fragment<wmma::accumulator, 16, 16, 16, int> c;
+  wmma::fill_fragment(c, 1);
+  wmma::load_matrix_sync(a, A, 16);
+  wmma::load_matrix_sync(b, B, 16);
+  wmma::mma_sync(c, a, b, c);
+  wmma::store_matrix_sync(C, c, 16, wmma::mem_row_major);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          A: new Uint32Array(256).fill(1),
+          B: new Uint32Array(256).fill(2),
+          C: new Int32Array(256),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.C as Int32Array]).toEqual(new Array(256).fill(33));
+    expect(compiled.wgsl).toContain("var a: array<u32, 256>;");
+    expect(compiled.wgsl).toContain("var c: array<i32, 256>;");
+    expect(compiled.wgsl).toContain(": i32 = i32(c[");
+    expect(compiled.wgsl).toContain("i32(u32(a[");
+    expect(compiled.wgsl).toContain("write_i32");
+  });
+
   it("validates WMMA fragment metadata and f16 requirements", () => {
     const half = analyzeCudaLite(parseCudaLite(`
 __global__ void half_wmma(half* A) {
@@ -6585,5 +6617,14 @@ __global__ void bad_wmma(float* A) {
     expect(codes).toContain("unsupported-wmma-fragment-value-type");
     expect(codes).toContain("unsupported-wmma-fragment-layout");
     expect(codes).toContain("unsupported-wmma-fragment-operand");
+
+    const invalidImma = analyzeCudaLite(parseCudaLite(`
+__global__ void bad_imma(uint8_t* A) {
+  wmma::fragment<wmma::matrix_a, 16, 16, 16, int, wmma::row_major> a;
+  wmma::fragment<wmma::matrix_b, 16, 16, 16, uint8_t, wmma::row_major> b;
+  wmma::fragment<wmma::accumulator, 16, 16, 16, uint8_t> c;
+  wmma::mma_sync(c, a, b, c);
+}`));
+    expect(invalidImma.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-wmma-fragment-value-type");
   });
 });

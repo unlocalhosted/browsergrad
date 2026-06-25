@@ -9,6 +9,7 @@ import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME 
 import {
   type MatrixTileLayout,
   type MatrixTileResolvedSpec,
+  isMatrixTileByteValueType,
   matrixTileElementCount,
   matrixTileReference,
   matrixTileStorageDimensions,
@@ -2209,12 +2210,22 @@ function emitWmmaMmaSync(
   const dstIndex = `(${row} * ${dst.spec.n}u + ${col})`;
   const aIndex = `(${row} * ${dst.spec.k}u + ${kk})`;
   const bIndex = `(${kk} * ${dst.spec.n}u + ${col})`;
+  const integerMma = dst.spec.tileValueType === "s32" &&
+    isMatrixTileByteValueType(a.spec.tileValueType) &&
+    isMatrixTileByteValueType(b.spec.tileValueType);
+  const sumType = integerMma ? "i32" : "f32";
+  const sumInit = integerMma
+    ? emitMatrixTileIntegerValue(emitMatrixTileAccess(c, dstIndex), c.spec)
+    : `f32(${emitMatrixTileAccess(c, dstIndex)})`;
+  const multiply = integerMma
+    ? `(${emitMatrixTileIntegerValue(emitMatrixTileAccess(a, aIndex), a.spec)} * ${emitMatrixTileIntegerValue(emitMatrixTileAccess(b, bIndex), b.spec)})`
+    : `f32(${emitMatrixTileAccess(a, aIndex)}) * f32(${emitMatrixTileAccess(b, bIndex)})`;
   return [
     `${prefix}for (var ${row}: u32 = 0u; ${row} < ${dst.spec.m}u; ${row} = ${row} + 1u) {`,
     `${indent(indentLevel + 1)}for (var ${col}: u32 = 0u; ${col} < ${dst.spec.n}u; ${col} = ${col} + 1u) {`,
-    `${indent(indentLevel + 2)}var ${sum}: f32 = f32(${emitMatrixTileAccess(c, dstIndex)});`,
+    `${indent(indentLevel + 2)}var ${sum}: ${sumType} = ${sumInit};`,
     `${indent(indentLevel + 2)}for (var ${kk}: u32 = 0u; ${kk} < ${dst.spec.k}u; ${kk} = ${kk} + 1u) {`,
-    `${indent(indentLevel + 3)}${sum} = ${sum} + f32(${emitMatrixTileAccess(a, aIndex)}) * f32(${emitMatrixTileAccess(b, bIndex)});`,
+    `${indent(indentLevel + 3)}${sum} = ${sum} + ${multiply};`,
     `${indent(indentLevel + 2)}}`,
     `${indent(indentLevel + 2)}${emitMatrixTileAccess(dst, dstIndex)} = ${emitMatrixTileValueForStore(sum, dst.spec)};`,
     `${indent(indentLevel + 1)}}`,
@@ -2304,7 +2315,22 @@ function emitMatrixTileLayoutForCall(
 }
 
 function emitMatrixTileValueForStore(value: string, tile: MatrixTileResolvedSpec): string {
-  return tile.valueType === "half" ? `f16(${value})` : value;
+  switch (tile.tileValueType) {
+    case "f16":
+      return `f16(${value})`;
+    case "u8":
+      return `(u32(${value}) & 0xffu)`;
+    case "s8":
+    case "s32":
+      return `i32(${value})`;
+    default:
+      return value;
+  }
+}
+
+function emitMatrixTileIntegerValue(value: string, tile: MatrixTileResolvedSpec): string {
+  if (tile.tileValueType === "u8") return `i32(u32(${value}) & 0xffu)`;
+  return `i32(${value})`;
 }
 
 function emitCpAsyncStatement(

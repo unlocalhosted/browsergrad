@@ -13,6 +13,7 @@ import {
   type MatrixTileLayout,
   type MatrixTileResolvedSpec,
   flattenMatrixTileLeadingIndex,
+  isMatrixTileByteValueType,
   matrixTileElementCount,
   matrixTileReference,
   matrixTileStorageDimensions,
@@ -1719,13 +1720,23 @@ function execWmmaMmaSync(expression: Extract<CudaLiteExpression, { kind: "call" 
   const c = resolveMatrixTileRuntime(expression.args[3], context, "wmma::mma_sync accumulator");
   for (let row = 0; row < dst.spec.m; row++) {
     for (let col = 0; col < dst.spec.n; col++) {
-      let sum = valueAsNumber(readMatrixTileElement(c, row * dst.spec.n + col), "wmma accumulator");
-      for (let kk = 0; kk < dst.spec.k; kk++) {
-        const av = valueAsNumber(readMatrixTileElement(a, row * dst.spec.k + kk), "wmma A");
-        const bv = valueAsNumber(readMatrixTileElement(b, kk * dst.spec.n + col), "wmma B");
-        sum += av * bv;
+      if (dst.spec.tileValueType === "s32" && isMatrixTileByteValueType(a.spec.tileValueType) && isMatrixTileByteValueType(b.spec.tileValueType)) {
+        let sum = matrixTileIntegerValue(readMatrixTileElement(c, row * dst.spec.n + col), c.spec);
+        for (let kk = 0; kk < dst.spec.k; kk++) {
+          const av = matrixTileIntegerValue(readMatrixTileElement(a, row * dst.spec.k + kk), a.spec);
+          const bv = matrixTileIntegerValue(readMatrixTileElement(b, kk * dst.spec.n + col), b.spec);
+          sum = (sum + Math.imul(av, bv)) | 0;
+        }
+        writeMatrixTileElement(dst, row * dst.spec.n + col, sum);
+      } else {
+        let sum = valueAsNumber(readMatrixTileElement(c, row * dst.spec.n + col), "wmma accumulator");
+        for (let kk = 0; kk < dst.spec.k; kk++) {
+          const av = valueAsNumber(readMatrixTileElement(a, row * dst.spec.k + kk), "wmma A");
+          const bv = valueAsNumber(readMatrixTileElement(b, kk * dst.spec.n + col), "wmma B");
+          sum += av * bv;
+        }
+        writeMatrixTileElement(dst, row * dst.spec.n + col, sum);
       }
-      writeMatrixTileElement(dst, row * dst.spec.n + col, sum);
     }
   }
 }
@@ -1769,11 +1780,31 @@ function resolveMatrixTileRuntime(
 }
 
 function readMatrixTileElement(tile: MatrixTileRuntimeValue, index: number): EvalValue {
-  return readBufferValue(tile.local.data, tile.base + index, tile.local.valueType, undefined);
+  return coerceMatrixTileValue(readBufferValue(tile.local.data, tile.base + index, tile.local.valueType, undefined), tile.spec);
 }
 
 function writeMatrixTileElement(tile: MatrixTileRuntimeValue, index: number, value: EvalValue): void {
-  writeBufferValue(tile.local.data, tile.base + index, tile.local.valueType, undefined, value);
+  writeBufferValue(tile.local.data, tile.base + index, tile.local.valueType, undefined, coerceMatrixTileValue(value, tile.spec));
+}
+
+function coerceMatrixTileValue(value: EvalValue, spec: MatrixTileResolvedSpec): number {
+  const number = valueAsNumber(value, "wmma fragment value");
+  switch (spec.tileValueType) {
+    case "u8":
+      return Math.trunc(number) & 0xff;
+    case "s8": {
+      const byte = Math.trunc(number) & 0xff;
+      return byte >= 0x80 ? byte - 0x100 : byte;
+    }
+    case "s32":
+      return Math.trunc(number) | 0;
+    default:
+      return number;
+  }
+}
+
+function matrixTileIntegerValue(value: EvalValue, spec: MatrixTileResolvedSpec): number {
+  return coerceMatrixTileValue(value, spec) | 0;
 }
 
 function matrixTileRowsCols(tile: MatrixTileResolvedSpec): readonly [number, number] {
