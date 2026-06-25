@@ -35,6 +35,9 @@
 - Corpus audit now reports `compileCodegenOk` / `compileCodegenGaps` and
   treats `webGpuRunnableOk` as a legacy alias, making compile-plan coverage
   distinct from fixture-backed real WebGPU execution.
+- Corpus audit now emits preferred `planCompiledOk` / `planCompileGaps` fields
+  and `legacyAliases` so platform consumers can avoid runnable/executed naming
+  unless browser execution actually happened.
 - Browser WebGPU benchmarks now fail on validation errors and accept optional
   prepared-dispatch ratio thresholds for machine-local perf gates.
 - Fixed thread-local arrays now run through CPU reference and WGSL/WebGPU

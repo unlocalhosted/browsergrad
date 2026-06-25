@@ -378,6 +378,8 @@ exercise fresh package output.
 real-world compile/codegen audit and then the exact-kernel browser/WebGPU corpus
 fixture e2e against both source aliases and built dist exports by default. Use
 `--bundle src`, `--bundle dist`, or `--bundle both` to choose the browser bundle.
+Pinned corpus checkouts must match the expected commit and be clean; dirty
+untracked or modified files fail both audit and browser fixture loading.
 
 ## Corpus Audit
 
@@ -394,12 +396,14 @@ not execute every external corpus kernel because most corpora do not carry
 portable launch fixtures and expected outputs. Failure details include WebGPU
 blocker kind/code/message. Threshold flags make corpus compile coverage
 regressions fail fast instead of living only in docs.
-`directLoweringOk` means strict one-pass WGSL compile. `compileCodegenOk` means
-direct WGSL compile or host-orchestrated WebGPU plan compile, such as grid-sync
-phases and dynamic launch lifts. `webGpuRunnableOk` remains as a legacy alias
-for `compileCodegenOk`; new consumers should not treat it as output-verified
-execution. Prefer `executionTierCounts`: `compileCodegenOnlyOk`,
-`fixtureBackedExecutedOk`, `browserWebGpuExecutedOk`, and `outputVerifiedOk`.
+`directLoweringOk` means strict one-pass WGSL compile. `planCompiledOk` /
+`compileCodegenOk` means direct WGSL compile or host-orchestrated WebGPU plan
+compile, such as grid-sync phases and dynamic launch lifts. `webGpuRunnableOk`
+remains as a legacy alias for `planCompiledOk`; new consumers should not treat
+it as output-verified execution. Prefer `executionTierCounts`:
+`planCompiledOk`, `compileCodegenOnlyOk`, `fixtureBackedExecutedOk`,
+`browserWebGpuExecutedOk`, and `outputVerifiedOk`. `legacyAliases` maps old
+names to preferred fields.
 Real execution proof lives in fixture-backed tests such as
 `pnpm --filter @unlocalhosted/browsergrad-compiler test:browser` and
 `scripts/e2e-cuda-lite-webgpu.mjs`.

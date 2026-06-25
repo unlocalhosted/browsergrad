@@ -76,6 +76,7 @@ function ensureCorpus(corpus) {
   if (actual !== corpus.commit) {
     throw new Error(`${corpus.id} expected ${corpus.commit}, got ${actual}`);
   }
+  assertCorpusClean(corpus);
 }
 
 function verifyCorpus(corpus) {
@@ -86,6 +87,14 @@ function verifyCorpus(corpus) {
   const actual = runCapture("git", ["-C", corpus.path, "rev-parse", "HEAD"], root).trim();
   if (actual !== corpus.commit) {
     throw new Error(`${corpus.id} expected ${corpus.commit}, got ${actual}; run without --skip-fetch to refresh`);
+  }
+  assertCorpusClean(corpus);
+}
+
+function assertCorpusClean(corpus) {
+  const status = runCapture("git", ["-C", corpus.path, "status", "--short", "--untracked-files=all"], root).trim();
+  if (status.length > 0) {
+    throw new Error(`${corpus.id} checkout at ${corpus.path} is dirty; clean or refresh it before auditing:\n${status}`);
   }
 }
 

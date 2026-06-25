@@ -69,9 +69,10 @@ pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --sk
   `host-dynamic-launch`), for `240/240` `compileCodegenOk`. `0/240` remain
   reference-only and `0/240` remain hard gaps after filtering docs/pseudocode.
 - Corpus audit is compile/lowering evidence, not fixture execution for every
-  external kernel. `webGpuRunnableOk` is kept only as a legacy alias for
-  `compileCodegenOk` / `webGpuCompiledOk`; fixture-backed execution belongs in
-  browser tests and `scripts/e2e-cuda-lite-webgpu.mjs`.
+  external kernel. `planCompiledOk` is preferred for compile/codegen evidence.
+  `webGpuRunnableOk` is kept only as a legacy alias for `planCompiledOk`;
+  fixture-backed execution belongs in browser tests and
+  `scripts/e2e-cuda-lite-webgpu.mjs`.
 - `referenceFallbackOk` is `15/240`: kernels whose semantics are understood by
   CPU reference or host/WebGPU orchestration. `referenceOnlyOk` is stricter and
   excludes kernels now runnable on real WebGPU through orchestration; current
@@ -84,13 +85,14 @@ pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --sk
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=278`
   compile/codegen-runnable, and `<=15` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
-- Corpus audits now emit `executionTierCounts` so platform code can distinguish
-  compile/codegen coverage from fixture-backed browser execution and
-  output-verified readback.
+- Corpus audits now emit `executionTierCounts` plus `legacyAliases` so platform
+  code can distinguish compile/codegen coverage from fixture-backed browser
+  execution and output-verified readback without parsing prose.
 - `verify:real-world-cuda` is the combined hardware-backed gate: it runs the
   pinned full-corpus compile/codegen audit, then runs exact external corpus
   fixtures through real Chromium/WebGPU with output comparison. Use
-  `--require-webgpu` in CI lanes where missing WebGPU must fail.
+  `--require-webgpu` in CI lanes where missing WebGPU must fail. Pinned corpus
+  checkouts must match the expected commit and have clean git status.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, WebGPU atomic
   offset updates, DevicePool aliasing across host-lifted child launches,

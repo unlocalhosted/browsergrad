@@ -768,6 +768,18 @@ function verifyCorpusFixtureCheckouts() {
     if (actual !== corpus.commit) {
       throw new Error(`${corpus.id} expected ${corpus.commit}, got ${actual}`);
     }
+    const status = spawnSync("git", ["-C", corpus.path, "status", "--short", "--untracked-files=all"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    if (status.error) throw status.error;
+    if (status.status !== 0) {
+      throw new Error(`${corpus.id} could not verify clean checkout: ${status.stderr}`);
+    }
+    const dirty = status.stdout.trim();
+    if (dirty.length > 0) {
+      throw new Error(`${corpus.id} checkout at ${corpus.path} is dirty; clean or refresh it before browser e2e:\n${dirty}`);
+    }
   }
 }
 

@@ -102,12 +102,16 @@ for (const file of files) {
   codeBlocks += blocks.length;
   for (const [blockIndex, block] of blocks.entries()) {
     if (isNonKernelCodeBlock(block)) continue;
+    if (CUDA_HINT_RE.test(block.code)) cudaBlocks++;
+    const kernels = extractKernelDefinitions(block.code);
+    if (kernels.length === 0) {
+      carriedDefines = mergeCarriedDefines(carriedDefines, collectCudaLiteContextDefines(block.code));
+      continue;
+    }
     const directContext = createAuditBlockContext(directIncludeContext, block.code, carriedDefines, corpusContext.globalDefines);
     const reverseContext = reverseIncludeContext.trim().length > 0
       ? createAuditBlockContext(`${directIncludeContext}\n${reverseIncludeContext}`, block.code, carriedDefines, corpusContext.globalDefines)
       : undefined;
-    if (CUDA_HINT_RE.test(block.code)) cudaBlocks++;
-    const kernels = extractKernelDefinitions(block.code);
     for (const [kernelIndex, rawKernel] of kernels.entries()) {
       const kernelName = kernelDefinitionName(rawKernel);
       const directAttempt = compileKernelFromAuditContext(rawKernel, kernels, kernelName, directContext);
@@ -298,18 +302,31 @@ const summary = {
   corpusKernelExecution: "compile-codegen-only",
   corpusExecutionMode: "compile-codegen-only",
   executionTierCounts: {
+    planCompiledOk: compileCodegenOk,
+    planCompileGaps: compileCodegenGaps,
     compileCodegenOnlyOk: compileCodegenOk,
     fixtureBackedExecutedOk: 0,
     browserWebGpuExecutedOk: 0,
     outputVerifiedOk: 0,
   },
   executionTierNotes: {
+    planCompiledOk: "Parsed, analyzed, lowered, and emitted direct WGSL or a host-orchestrated WebGPU plan.",
+    planCompileGaps: "Extracted kernels that did not compile/codegen into direct WGSL or a host-orchestrated WebGPU plan.",
     compileCodegenOnlyOk: "Parsed, analyzed, lowered, and emitted WGSL or host WebGPU plan from pinned corpus source.",
     fixtureBackedExecutedOk: "Requires explicit input/output fixtures; this corpus audit does not synthesize them.",
     browserWebGpuExecutedOk: "Covered by separate browser E2E gates, not by this corpus audit.",
     outputVerifiedOk: "Covered only when fixture-backed execution compares readback against expected outputs.",
   },
+  legacyAliases: {
+    webGpuRunnableOk: "planCompiledOk",
+    webGpuTotalOk: "planCompiledOk",
+    webGpuCompiledOk: "planCompiledOk",
+  },
   fixtureBackedExecutionOk: 0,
+  browserExecutedOk: 0,
+  outputVerifiedOk: 0,
+  planCompiledOk: compileCodegenOk,
+  planCompileGaps: compileCodegenGaps,
   webGpuDirectCompiledOk: directLoweringOk,
   webGpuHostPlanCompiledOk: webGpuLiftedOk,
   webGpuCompiledOk: compileCodegenOk,
@@ -1417,6 +1434,7 @@ function parseExpectationArg(arg, args, index) {
     "--expect-ok-min": "okMin",
     "--expect-single-dispatch-min": "webGpuSingleDispatchMin",
     "--expect-webgpu-lifted-min": "webGpuLiftedMin",
+    "--expect-plan-compiled-min": "planCompiledMin",
     "--expect-compile-codegen-min": "compileCodegenMin",
     "--expect-webgpu-min": "webGpuTotalMin",
     "--expect-reference-fallback-min": "referenceFallbackMin",
@@ -1451,6 +1469,7 @@ function checkExpectations(summary, expectations) {
   minExpectation(failures, summary.ok, expectations.okMin, "ok");
   minExpectation(failures, summary.webGpuSingleDispatchOk, expectations.webGpuSingleDispatchMin, "webGpuSingleDispatchOk");
   minExpectation(failures, summary.webGpuLiftedOk, expectations.webGpuLiftedMin, "webGpuLiftedOk");
+  minExpectation(failures, summary.planCompiledOk, expectations.planCompiledMin, "planCompiledOk");
   minExpectation(failures, summary.compileCodegenOk, expectations.compileCodegenMin, "compileCodegenOk");
   minExpectation(failures, summary.webGpuTotalOk, expectations.webGpuTotalMin, "webGpuTotalOk");
   minExpectation(failures, summary.referenceFallbackOk, expectations.referenceFallbackMin, "referenceFallbackOk");

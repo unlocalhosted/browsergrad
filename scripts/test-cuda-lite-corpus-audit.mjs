@@ -172,9 +172,16 @@ void launch_dynamic_late(float *out) {
   assertEqual(report.summary.corpusKernelExecution, "compile-codegen-only", "corpus execution mode");
   assertEqual(report.summary.corpusExecutionMode, "compile-codegen-only", "corpus execution mode alias");
   assertEqual(report.summary.executionTierCounts.compileCodegenOnlyOk, 9, "compile/codegen-only tier count");
+  assertEqual(report.summary.executionTierCounts.planCompiledOk, 9, "plan-compiled tier count");
+  assertEqual(report.summary.executionTierCounts.planCompileGaps, 0, "plan-compiled gap count");
   assertEqual(report.summary.executionTierCounts.fixtureBackedExecutedOk, 0, "fixture execution tier count");
   assertEqual(report.summary.executionTierCounts.browserWebGpuExecutedOk, 0, "browser execution tier count");
   assertEqual(report.summary.executionTierCounts.outputVerifiedOk, 0, "output verified tier count");
+  assertEqual(report.summary.planCompiledOk, 9, "plan compiled count");
+  assertEqual(report.summary.planCompileGaps, 0, "plan compiled gaps");
+  assertEqual(report.summary.browserExecutedOk, 0, "browser executed count");
+  assertEqual(report.summary.outputVerifiedOk, 0, "output verified count");
+  assertEqual(report.summary.legacyAliases.webGpuRunnableOk, "planCompiledOk", "legacy runnable alias");
   assertEqual(report.summary.webGpuCompiledOk, 9, "reverse include kernel WebGPU compiled");
   assertEqual(report.summary.compileCodegenOk, 9, "reverse include kernel compile/codegen count");
   assertEqual(report.summary.compileCodegenGaps, 0, "reverse include kernel compile/codegen gaps");

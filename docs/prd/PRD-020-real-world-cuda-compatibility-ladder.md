@@ -285,13 +285,17 @@ Coverage tier glossary:
 - `compileCodegenOk`: corpus source parses, analyzes, lowers, and emits direct
   WGSL or a host-orchestrated WebGPU execution plan. This is the full-corpus
   regression gate.
+- `planCompiledOk`: preferred schema name for the same compile/codegen plan
+  evidence. New platform consumers should read this instead of legacy
+  `webGpuRunnableOk`.
 - `fixtureBackedExecutedOk`: explicit launch inputs exist and the kernel was
   executed against those fixtures.
 - `browserWebGpuExecutedOk`: fixture execution happened in Chromium/WebGPU.
 - `outputVerifiedOk`: GPU readback matched expected output or CPU reference.
-- Legacy `webGpuRunnableOk` / `webGpuTotalOk` fields mean `compileCodegenOk`
+- Legacy `webGpuRunnableOk` / `webGpuTotalOk` fields mean `planCompiledOk`
   until removed in a later breaking schema revision; consumers should not treat
-  them as output-verified execution.
+  them as output-verified execution. Audit JSON includes `legacyAliases` to make
+  that mapping machine-readable.
 
 ## Grill Decisions
 
