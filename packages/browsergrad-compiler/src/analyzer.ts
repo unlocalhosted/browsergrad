@@ -2805,7 +2805,7 @@ function validateLValueExpression(
   if (expression.kind === "identifier") {
     const symbol = lookupSymbol(expression.name, scope, expression.span);
     if (!symbol) {
-      diagnostics.push(error("unknown-symbol", `unknown CUDA-lite symbol '${expression.name}'`, expression.span));
+      diagnostics.push(unknownSymbolDiagnostic(expression.name, scope, expression.span));
       return;
     }
     if (symbol.matrixTile) {
@@ -2889,7 +2889,7 @@ function expressionInfoForIdentifier(
   const namedConstant = !symbol ? CUDA_NAMED_CONSTANTS.get(name) : undefined;
   if (namedConstant) return { kind: "scalar", valueType: namedConstant.valueType };
   if (!symbol) {
-    diagnostics.push(error("unknown-symbol", `unknown CUDA-lite symbol '${name}'`, span));
+    diagnostics.push(unknownSymbolDiagnostic(name, scope, span));
     return { kind: "unknown" };
   }
   if (symbol.kind === "builtin-vector") return { kind: "vector", symbol };
@@ -3096,6 +3096,58 @@ function lookupSymbol(name: string, scope: Scope, span: SourceSpan): SymbolInfo 
   if (BUILTIN_VECTORS.has(name)) return { name, kind: "builtin-vector", span };
   if (BUILTIN_CALLS.has(name)) return { name, kind: "builtin-call", span };
   return undefined;
+}
+
+function unknownSymbolDiagnostic(name: string, scope: Scope, span: SourceSpan): CudaLiteDiagnostic {
+  const nearest = nearestSymbolName(name, scope);
+  const hint = nearest === undefined ? "" : `; nearest visible symbol '${nearest}'`;
+  return error("unknown-symbol", `unknown CUDA-lite symbol '${name}'${hint}`, span);
+}
+
+function nearestSymbolName(name: string, scope: Scope): string | undefined {
+  let best: { readonly name: string; readonly score: number } | undefined;
+  const seen = new Set<string>();
+  let cursor: Scope | undefined = scope;
+  while (cursor) {
+    for (const candidate of cursor.symbols.keys()) {
+      if (seen.has(candidate)) continue;
+      seen.add(candidate);
+      const score = symbolSimilarityScore(name, candidate);
+      if (score <= 0) continue;
+      if (!best || score > best.score || (score === best.score && candidate.length < best.name.length)) {
+        best = { name: candidate, score };
+      }
+    }
+    cursor = cursor.parent;
+  }
+  return best?.score !== undefined && best.score >= 3 ? best.name : undefined;
+}
+
+function symbolSimilarityScore(left: string, right: string): number {
+  if (left === right) return 100;
+  let score = Math.max(0, Math.min(left.length, right.length) - levenshteinDistance(left, right));
+  const leftParts = left.split("_").filter(Boolean);
+  const rightParts = new Set(right.split("_").filter(Boolean));
+  for (const part of leftParts) {
+    if (rightParts.has(part)) score += Math.min(4, part.length);
+  }
+  if (left.at(0) === right.at(0)) score += 1;
+  return score;
+}
+
+function levenshteinDistance(left: string, right: string): number {
+  const previous = Array.from({ length: right.length + 1 }, () => 0);
+  const current = Array.from({ length: right.length + 1 }, () => 0);
+  for (let index = 0; index <= right.length; index++) previous[index] = index;
+  for (let row = 1; row <= left.length; row++) {
+    current[0] = row;
+    for (let column = 1; column <= right.length; column++) {
+      const substitution = previous[column - 1]! + (left[row - 1] === right[column - 1] ? 0 : 1);
+      current[column] = Math.min(previous[column]! + 1, current[column - 1]! + 1, substitution);
+    }
+    for (let index = 0; index <= right.length; index++) previous[index] = current[index]!;
+  }
+  return previous[right.length]!;
 }
 
 function createScope(parent?: Scope): Scope {

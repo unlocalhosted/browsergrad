@@ -239,7 +239,12 @@ Local corpus audits on 2026-06-24:
   launch arguments, and rank-1 CUTE affine tensor tiles now fold through the
   generic source normalizer, plus CuTe rank-2 transpose motif lowering, CuTe
   row-broadcast GEMV motif lowering, and malformed macro-assignment recovery,
-  leaving `7` hard gaps.
+  leaving `7` hard gaps now classified as explicit unsupported primitives:
+  `unsupported-cute-object` for CuTe tensor/tile object graphs,
+  `unsupported-wgmma-tma` for async tensor-core/TMA pipeline objects,
+  `unsupported-dependent-carrier-param` for unresolved dependent C++ carrier
+  params, and one true `unknown-symbol` note-source mismatch with nearest-symbol
+  hinting.
   The pre-normalizer baseline was `3/293`, which proved context isolation was
   the first ladder rung.
 

@@ -39,6 +39,9 @@ export interface CudaLoweringPlan {
 
 const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("parse-error", "frontend", "Unsupported CUDA/C++ syntax", "unsupported", false, false, "Parser stopped before semantic IR."),
+  feature("unsupported-cute-object", "frontend", "Unsupported CuTe object graph", "unsupported", false, false, "Requires modeled tensor/tile object graph before Kernel IR lowering."),
+  feature("unsupported-dependent-carrier-param", "frontend", "Unsupported dependent C++ carrier parameter", "unsupported", false, false, "Requires concrete source/context normalization before CUDA-lite lowering."),
+  feature("unsupported-wgmma-tma", "subgroup", "Unsupported WGMMA/TMA pipeline object", "unsupported", false, false, "Requires modeled async tensor-core pipeline before reference or WGSL lowering."),
   feature("unsupported-call", "library", "Unsupported CUDA/device call", "unsupported", false, true, "Add semantic builtin or library island."),
   feature("unknown-symbol", "frontend", "Unknown symbol", "unsupported", false, false, "Missing declaration, constant memory, helper, or macro context."),
   feature("unsupported-atomic-f32", "atomic", "Unsupported float atomic", "unsupported", false, true, "Float atomicAdd/atomicExch have WGSL polyfills; other float atomics still need lowering."),

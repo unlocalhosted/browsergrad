@@ -153,6 +153,19 @@ function floatBits(value: number): number {
   return new Uint32Array(floats.buffer)[0] ?? 0;
 }
 
+function expectParseDiagnosticCode(source: string, code: string): void {
+  try {
+    parseCudaLite(source);
+  } catch (error) {
+    if (error instanceof CudaLiteCompilerError) {
+      expect(error.diagnostics.map((diagnostic) => diagnostic.code)).toContain(code);
+      return;
+    }
+    throw error;
+  }
+  throw new Error(`Expected parse diagnostic '${code}'`);
+}
+
 describe("CUDA-lite compiler", () => {
   it("parses and compiles SAXPY to WGSL", () => {
     const ast = parseCudaLite(SAXPY);
@@ -907,6 +920,37 @@ __global__ void unsupported(float* x) {
       code: "f64-lowered-to-f32",
       message: "double is lowered to f32",
     })).toMatchObject({ family: "feature", gpuRuns: true, referenceRuns: true });
+    expect(describeCudaDiagnostic({
+      code: "unsupported-cute-object",
+      message: "CuTe C++ object declarations require a modeled tensor/tile object graph before CUDA-lite lowering",
+    })).toMatchObject({ family: "frontend", gpuRuns: false, referenceRuns: false });
+    expect(describeCudaDiagnostic({
+      code: "unsupported-wgmma-tma",
+      message: "WGMMA/TMA object pipeline declarations require a modeled async tensor-core pipeline before CUDA-lite lowering",
+    })).toMatchObject({ family: "subgroup", gpuRuns: false, referenceRuns: false });
+    expect(describeCudaDiagnostic({
+      code: "unsupported-dependent-carrier-param",
+      message: "dependent C++ carrier parameters require concrete source/context normalization before CUDA-lite lowering",
+    })).toMatchObject({ family: "frontend", gpuRuns: false, referenceRuns: false });
+  });
+
+  it("reports unsupported C++ CUDA object-model gaps with stable diagnostic codes", () => {
+    expectParseDiagnosticCode(`
+__global__ void cute(float* out) {
+  TiledCopy tiled_copy;
+  if (threadIdx.x < 1) { out[0] = 0.0f; }
+}`, "unsupported-cute-object");
+
+    expectParseDiagnosticCode(`
+__global__ void wgmma(float* out) {
+  WgmmaSMem<128, 64>& smem = *reinterpret_cast<WgmmaSMem<128, 64>*>(out);
+  if (threadIdx.x < 1) { out[0] = 0.0f; }
+}`, "unsupported-wgmma-tma");
+
+    expectParseDiagnosticCode(`
+__global__ void carrier(float* out, typename GEMM_Traits::Arguments args) {
+  if (threadIdx.x < 1) { out[0] = 0.0f; }
+}`, "unsupported-dependent-carrier-param");
   });
 
   it("rejects semantic gaps before WGSL/runtime execution", () => {
@@ -915,6 +959,16 @@ __global__ void bad(float* x) {
   if (threadIdx.x < 1) { x[0] = missing + 1.0; }
 }`));
     expect(unknownSymbol.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unknown-symbol");
+
+    const unknownWithHint = analyzeCudaLite(parseCudaLite(`
+__global__ void bad(float* x) {
+  __shared__ float reduce_smem[1];
+  if (threadIdx.x < 1) { x[0] = block_smem[0]; }
+}`));
+    expect(unknownWithHint.diagnostics).toContainEqual(expect.objectContaining({
+      code: "unknown-symbol",
+      message: expect.stringContaining("nearest visible symbol 'reduce_smem'"),
+    }));
 
     const unsupportedCall = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(float* x) {

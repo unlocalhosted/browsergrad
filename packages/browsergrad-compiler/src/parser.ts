@@ -114,6 +114,20 @@ const TYPE_START_KEYWORDS = new Set([
   "void",
 ]);
 const ASSIGNMENT = new Set(["=", "+=", "-=", "*=", "/=", "<<=", ">>=", "&=", "|=", "^="]);
+const CUTE_OBJECT_TYPE_NAMES = new Set([
+  "Tensor",
+  "TiledCopy",
+  "TiledMMA",
+  "ThrCopy",
+  "ThrMMA",
+  "Layout",
+  "Shape",
+  "Stride",
+  "Tile",
+  "Copy_Atom",
+  "MMA_Atom",
+]);
+const WGMMA_TMA_TYPE_PATTERN = /(?:^|::)(?:Wgmma|WGMMA|Tma|TMA|Barrier|Pipeline|cuda::barrier|cuda::pipeline)/u;
 const BINARY_PRECEDENCE = new Map<string, number>([
   ["||", 2],
   ["&&", 3],
@@ -381,6 +395,7 @@ class Parser {
       const startToken = this.peek();
       this.consumeCudaDeclAttributes();
       let constant = this.consumeCvQualifiers();
+      this.rejectUnsupportedDependentCarrierParam(startToken.span);
       const cooperativeGroup = this.parseCooperativeGroupParamType();
       const type = cooperativeGroup === undefined ? this.parseType() : "uint";
       constant = this.consumeCvQualifiers() || constant;
@@ -509,6 +524,7 @@ class Parser {
     if (this.startsKernelLaunch()) return [this.parseKernelLaunch()];
     if (this.match("asm")) return [this.parseAsmStatement()];
     if (this.match("static_assert")) return this.parseStaticAssert();
+    this.rejectUnsupportedCudaCppObjectStatement();
     if (this.startsVarDecl()) return this.parseVarDeclList(true);
     const expression = this.parseExpression();
     const end = this.expect(";");
@@ -1481,6 +1497,80 @@ class Parser {
     return this.startsWmmaFragmentType() || TYPE_START_KEYWORDS.has(this.peek().value);
   }
 
+  private rejectUnsupportedDependentCarrierParam(span: SourceSpan): void {
+    if (
+      this.match("typename") ||
+      this.match("class") ||
+      (!this.startsSupportedNamespacedScalarType() &&
+        !this.startsCooperativeGroupType() &&
+        this.peek().kind === "identifier" &&
+        this.tokens[this.index + 1]?.value === "::" &&
+        this.tokens[this.index + 2]?.kind === "identifier")
+    ) {
+      this.fail(
+        "dependent C++ carrier parameters require concrete source/context normalization before CUDA-lite lowering",
+        span,
+        "unsupported-dependent-carrier-param",
+      );
+    }
+  }
+
+  private startsSupportedNamespacedScalarType(): boolean {
+    return (this.peek().value === "std" && this.tokens[this.index + 1]?.value === "::" && this.isSupportedStdType(this.tokens[this.index + 2]?.value)) ||
+      (
+        this.peek().value === "cuda" &&
+        this.tokens[this.index + 1]?.value === "::" &&
+        this.tokens[this.index + 2]?.value === "std" &&
+        this.tokens[this.index + 3]?.value === "::" &&
+        this.isSupportedStdType(this.tokens[this.index + 4]?.value)
+      );
+  }
+
+  private rejectUnsupportedCudaCppObjectStatement(): void {
+    const start = this.peek();
+    if (start.kind !== "identifier") return;
+    const typeEnd = this.unsupportedCppTypeEndIndex(this.index);
+    if (typeEnd === undefined) return;
+    let declaratorIndex = typeEnd;
+    while (
+      this.tokens[declaratorIndex]?.value === "&" ||
+      this.tokens[declaratorIndex]?.value === "*" ||
+      this.isCvQualifier(this.tokens[declaratorIndex]?.value)
+    ) {
+      declaratorIndex++;
+    }
+    if (this.tokens[declaratorIndex]?.kind !== "identifier") return;
+    const typeText = this.tokens.slice(this.index, typeEnd).map((token) => token.value).join("");
+    if (WGMMA_TMA_TYPE_PATTERN.test(typeText)) {
+      this.fail(
+        "WGMMA/TMA object pipeline declarations require a modeled async tensor-core pipeline before CUDA-lite lowering",
+        start.span,
+        "unsupported-wgmma-tma",
+      );
+    }
+    if (CUTE_OBJECT_TYPE_NAMES.has(start.value)) {
+      this.fail(
+        "CuTe C++ object declarations require a modeled tensor/tile object graph before CUDA-lite lowering",
+        start.span,
+        "unsupported-cute-object",
+      );
+    }
+  }
+
+  private unsupportedCppTypeEndIndex(startIndex: number): number | undefined {
+    let index = startIndex;
+    if (this.tokens[index]?.kind !== "identifier") return undefined;
+    index++;
+    while (this.tokens[index]?.value === "::" && this.tokens[index + 1]?.kind === "identifier") index += 2;
+    if (this.tokens[index]?.value === "<") {
+      const templateEnd = this.findTemplateArgumentEnd(index);
+      if (templateEnd === undefined) return undefined;
+      index = templateEnd + 1;
+    }
+    while (this.tokens[index]?.value === "::" && this.tokens[index + 1]?.kind === "identifier") index += 2;
+    return index;
+  }
+
   private consumeIntegerWidthSuffix(): void {
     if (this.consumeIf("int")) return;
     if (this.consumeIf("short")) {
@@ -1830,9 +1920,9 @@ class Parser {
     return this.tokens[this.index++]!;
   }
 
-  private fail(message: string, span: SourceSpan): never {
+  private fail(message: string, span: SourceSpan, code = "parse-error"): never {
     throw new CudaLiteCompilerError(message, [{
-      code: "parse-error",
+      code,
       severity: "error",
       message,
       span,
