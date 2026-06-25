@@ -255,7 +255,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu:corpus -- --require
 - `e2e:webgpu:corpus` also requires pinned local corpora under `/tmp`, extracts
   exact external kernels through the same source-normalized compilation-unit
   path as the corpus audit, dispatches them in Chromium/WebGPU, and compares
-  GPU readbacks to CPU reference. Current fixture set: CUDA-120
+  GPU readbacks to CPU reference. Fixture launch/input/output specs live in
+  `scripts/cuda-lite-corpus-registry.mjs`. Current fixture set: CUDA-120
   `vectorAddKernel`, NVIDIA `cuda-samples` `vectorAdd`, `llm.c` `add_bias`,
   `llm.c` `set_vector`, and LeetCUDA `elementwise_add_f32_kernel`.
 - `e2e:webgpu:dist` runs the browser proof through built package exports. The

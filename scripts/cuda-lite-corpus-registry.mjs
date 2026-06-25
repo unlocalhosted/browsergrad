@@ -63,6 +63,17 @@ export const cudaLiteCorpusExecutionFixtures = [
     corpusId: "cuda-120",
     relativePath: "daily-updates/day-23-Asynchronous-Memory-Copy.md",
     kernelName: "vectorAddKernel",
+    workgroupSize: [8, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    input: {
+      buffers: {
+        A: { type: "Float32Array", data: [1, 2, 3, 4] },
+        B: { type: "Float32Array", data: [10, 20, 30, 40] },
+        C: { type: "Float32Array", length: 4 },
+      },
+      scalars: { N: 4 },
+    },
+    output: "C",
   },
   {
     sourceKey: "corpusCudaSamplesVectorAdd",
@@ -70,6 +81,17 @@ export const cudaLiteCorpusExecutionFixtures = [
     corpusId: "cuda-samples",
     relativePath: "cpp/0_Introduction/vectorAdd/vectorAdd.cu",
     kernelName: "vectorAdd",
+    workgroupSize: [8, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    input: {
+      buffers: {
+        A: { type: "Float32Array", data: [1, 2, 3, 4] },
+        B: { type: "Float32Array", data: [10, 20, 30, 40] },
+        C: { type: "Float32Array", length: 4 },
+      },
+      scalars: { numElements: 4 },
+    },
+    output: "C",
   },
   {
     sourceKey: "corpusLlmAddBias",
@@ -77,6 +99,16 @@ export const cudaLiteCorpusExecutionFixtures = [
     corpusId: "llm.c",
     relativePath: "dev/cuda/matmul_forward.cu",
     kernelName: "add_bias",
+    workgroupSize: [8, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    input: {
+      buffers: {
+        out: { type: "Float32Array", data: [1, 2, 3, 4, 5, 6] },
+        bias: { type: "Float32Array", data: [0.5, 1.5, -2] },
+      },
+      scalars: { B: 1, T: 2, OC: 3 },
+    },
+    output: "out",
   },
   {
     sourceKey: "corpusLlmSetVector",
@@ -84,6 +116,15 @@ export const cudaLiteCorpusExecutionFixtures = [
     corpusId: "llm.c",
     relativePath: "dev/cuda/nccl_all_reduce.cu",
     kernelName: "set_vector",
+    workgroupSize: [8, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    input: {
+      buffers: {
+        data: { type: "Float32Array", length: 4 },
+      },
+      scalars: { N: 4, value: 7 },
+    },
+    output: "data",
   },
   {
     sourceKey: "corpusLeetCudaElementwiseAddF32",
@@ -91,6 +132,17 @@ export const cudaLiteCorpusExecutionFixtures = [
     corpusId: "leetcuda",
     relativePath: "kernels/elementwise/elementwise.cu",
     kernelName: "elementwise_add_f32_kernel",
+    workgroupSize: [8, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    input: {
+      buffers: {
+        a: { type: "Float32Array", data: [1, 2, 3, 4] },
+        b: { type: "Float32Array", data: [10, 20, 30, 40] },
+        c: { type: "Float32Array", length: 4 },
+      },
+      scalars: { N: 4 },
+    },
+    output: "c",
   },
 ];
 

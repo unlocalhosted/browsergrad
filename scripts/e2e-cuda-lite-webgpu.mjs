@@ -213,12 +213,6 @@ __global__ void reciprocalIntrinsic(float *x, float *out) {
 }`,
   ...loadCorpusExecutionSources(),
 };
-const corpusFixtureNamesBySourceKey = Object.fromEntries(
-  cudaLiteCorpusExecutionFixtures.map((fixture) => [fixture.sourceKey, fixture.caseName]),
-);
-const corpusFixtureKernelNamesBySourceKey = Object.fromEntries(
-  cudaLiteCorpusExecutionFixtures.map((fixture) => [fixture.sourceKey, fixture.kernelName]),
-);
 const expectedCorpusFixtureNames = cudaLiteCorpusExecutionFixtures.map((fixture) => fixture.caseName);
 
 const html = String.raw`<!doctype html>
@@ -242,8 +236,7 @@ const html = String.raw`<!doctype html>
       } from "@unlocalhosted/browsergrad-compiler";
 
       const SOURCES = ${JSON.stringify(sources)};
-      const CORPUS_FIXTURE_NAMES = ${JSON.stringify(corpusFixtureNamesBySourceKey)};
-      const CORPUS_FIXTURE_KERNEL_NAMES = ${JSON.stringify(corpusFixtureKernelNamesBySourceKey)};
+      const CORPUS_FIXTURES = ${JSON.stringify(cudaLiteCorpusExecutionFixtures)};
       const EXPECTED_CORPUS_FIXTURE_NAMES = ${JSON.stringify(expectedCorpusFixtureNames)};
 
       window.__bgRunE2e = async () => {
@@ -524,89 +517,37 @@ const html = String.raw`<!doctype html>
             output: "out",
           },
         ];
-        if (SOURCES.corpusCuda120VectorAddKernel) {
+        for (const fixture of CORPUS_FIXTURES) {
+          const source = SOURCES[fixture.sourceKey];
+          if (!source) continue;
           cases.push({
-            name: CORPUS_FIXTURE_NAMES.corpusCuda120VectorAddKernel,
-            source: SOURCES.corpusCuda120VectorAddKernel,
-            options: { kernelName: CORPUS_FIXTURE_KERNEL_NAMES.corpusCuda120VectorAddKernel, workgroupSize: [8, 1, 1] },
-            launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
-            input: () => ({
-              buffers: {
-                A: new Float32Array([1, 2, 3, 4]),
-                B: new Float32Array([10, 20, 30, 40]),
-                C: new Float32Array(4),
-              },
-              scalars: { N: 4 },
-            }),
-            output: "C",
-          });
-        }
-        if (SOURCES.corpusCudaSamplesVectorAdd) {
-          cases.push({
-            name: CORPUS_FIXTURE_NAMES.corpusCudaSamplesVectorAdd,
-            source: SOURCES.corpusCudaSamplesVectorAdd,
-            options: { kernelName: CORPUS_FIXTURE_KERNEL_NAMES.corpusCudaSamplesVectorAdd, workgroupSize: [8, 1, 1] },
-            launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
-            input: () => ({
-              buffers: {
-                A: new Float32Array([1, 2, 3, 4]),
-                B: new Float32Array([10, 20, 30, 40]),
-                C: new Float32Array(4),
-              },
-              scalars: { numElements: 4 },
-            }),
-            output: "C",
-          });
-        }
-        if (SOURCES.corpusLlmAddBias) {
-          cases.push({
-            name: CORPUS_FIXTURE_NAMES.corpusLlmAddBias,
-            source: SOURCES.corpusLlmAddBias,
-            options: { kernelName: CORPUS_FIXTURE_KERNEL_NAMES.corpusLlmAddBias, workgroupSize: [8, 1, 1] },
-            launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
-            input: () => ({
-              buffers: {
-                out: new Float32Array([1, 2, 3, 4, 5, 6]),
-                bias: new Float32Array([0.5, 1.5, -2]),
-              },
-              scalars: { B: 1, T: 2, OC: 3 },
-            }),
-            output: "out",
-          });
-        }
-        if (SOURCES.corpusLlmSetVector) {
-          cases.push({
-            name: CORPUS_FIXTURE_NAMES.corpusLlmSetVector,
-            source: SOURCES.corpusLlmSetVector,
-            options: { kernelName: CORPUS_FIXTURE_KERNEL_NAMES.corpusLlmSetVector, workgroupSize: [8, 1, 1] },
-            launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
-            input: () => ({
-              buffers: {
-                data: new Float32Array(4),
-              },
-              scalars: { N: 4, value: 7 },
-            }),
-            output: "data",
-          });
-        }
-        if (SOURCES.corpusLeetCudaElementwiseAddF32) {
-          cases.push({
-            name: CORPUS_FIXTURE_NAMES.corpusLeetCudaElementwiseAddF32,
-            source: SOURCES.corpusLeetCudaElementwiseAddF32,
-            options: { kernelName: CORPUS_FIXTURE_KERNEL_NAMES.corpusLeetCudaElementwiseAddF32, workgroupSize: [8, 1, 1] },
-            launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
-            input: () => ({
-              buffers: {
-                a: new Float32Array([1, 2, 3, 4]),
-                b: new Float32Array([10, 20, 30, 40]),
-                c: new Float32Array(4),
-              },
-              scalars: { N: 4 },
-            }),
-            output: "c",
+            name: fixture.caseName,
+            source,
+            options: { kernelName: fixture.kernelName, workgroupSize: fixture.workgroupSize },
+            launch: fixture.launch,
+            input: () => materializeFixtureInput(fixture.input),
+            output: fixture.output,
           });
         }
         return cases;
+      }
+
+      function materializeFixtureInput(input) {
+        const buffers = {};
+        for (const [name, spec] of Object.entries(input.buffers ?? {})) {
+          buffers[name] = materializeTypedArray(spec);
+        }
+        return {
+          buffers,
+          scalars: { ...(input.scalars ?? {}) },
+        };
+      }
+
+      function materializeTypedArray(spec) {
+        const Ctor = globalThis[spec.type];
+        if (typeof Ctor !== "function") throw new Error("unsupported fixture typed array: " + spec.type);
+        if (spec.data !== undefined) return new Ctor(spec.data);
+        return new Ctor(spec.length ?? 0);
       }
 
       async function runReferenceWebGpuCase(device, spec) {

@@ -364,6 +364,9 @@ with readback comparisons. Required fixture names currently cover CUDA-120
 Fixture source is emitted through the same corpus-audit normalization path used
 for full-corpus compile/codegen counts, so helper/context handling does not
 silently diverge between audit and browser execution gates.
+Fixture launch shapes, typed-array inputs, scalars, and output names live in
+`scripts/cuda-lite-corpus-registry.mjs`; browser e2e derives corpus cases from
+that registry instead of duplicating per-repo snippets.
 Pass `-- --bundle dist` or use `e2e:webgpu:dist` to run the same browser proof
 against built package exports instead of TS source aliases.
 Compiler e2e, corpus, and benchmark package scripts use
