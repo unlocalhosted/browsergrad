@@ -52,6 +52,27 @@ __global__ void kernel(uint *out) {
 }
 
 {
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void kernel(float *out) {
+  out[0] = helper(1.0f);
+}`,
+    definesByName: new Map([["USE_FAST", "1"]]),
+    deviceFunctions: [{ name: "helper", source: `
+__device__ float helper(float x) {
+#if USE_FAST
+  float value = x + 1.0f;
+#else
+  broken_t value = x;
+#endif
+  return value;
+}` }],
+  });
+  assert.match(source, /float value = x \+ 1.0f;/u);
+  assert.doesNotMatch(source, /broken_t/u);
+}
+
+{
   const source = `
 #if UNKNOWN_FEATURE
 __device__ unknown_t maybe(float x) { return x; }

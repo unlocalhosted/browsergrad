@@ -49,6 +49,10 @@
   literals, accepts conditional local pointer initializers, and permits explicit
   pointer casts over arrays, raising the cuda-samples gate to `315/357` with
   `41` hard gaps.
+- CUDA-lite now decays fixed C array device-helper params, prunes reachable
+  helper `#if/#else` branches before portability checks, accepts initialized
+  scalar CUDA vector constants, and lowers `rintf`, raising the cuda-samples
+  gate to `316/357` with `40` hard gaps.
 - Source normalization now avoids replacing macro parameters inside member
   properties and lowers simple two-short/one-u32 CUDA unions into bitfield
   views, raising the cuda-samples gate to `305/357` with `51` hard gaps.

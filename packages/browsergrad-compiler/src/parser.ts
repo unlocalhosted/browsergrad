@@ -232,7 +232,9 @@ class Parser {
 
   private parseGlobalConstant(): CudaLiteGlobalConstant {
     const start = this.expect("__constant__").span;
+    this.consumeCvQualifiers();
     const valueType = this.parseType();
+    this.consumeCvQualifiers();
     const name = this.expectIdentifier("constant name");
     const dimensions: number[] = [];
     let inferredArrayDimension = false;
@@ -399,7 +401,7 @@ class Parser {
       const cooperativeGroup = this.parseCooperativeGroupParamType();
       const type = cooperativeGroup === undefined ? this.parseType() : "uint";
       constant = this.consumeCvQualifiers() || constant;
-      const pointer = cooperativeGroup === undefined && this.consumeIf("*") !== undefined;
+      let pointer = cooperativeGroup === undefined && this.consumeIf("*") !== undefined;
       const reference = !pointer && this.consumeIf("&") !== undefined;
       this.consumeTypeQualifiers();
       this.consumeCudaDeclAttributes();
@@ -407,6 +409,11 @@ class Parser {
         ? { value: `__bg_unused_param_${params.length}`, span: this.previous().span }
         : this.expectIdentifier("parameter name");
       this.consumeTypeQualifiers();
+      while (this.consumeIf("[")) {
+        pointer = true;
+        if (!this.match("]")) this.parseArrayDimension();
+        this.expect("]");
+      }
       if (this.consumeIf("=")) this.skipParamDefaultExpression();
       params.push({
         name: name.value,

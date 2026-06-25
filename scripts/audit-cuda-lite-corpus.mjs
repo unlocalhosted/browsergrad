@@ -922,7 +922,8 @@ function collectPortableDeviceFunctions(source, recordNames = new Set(), defines
       }
     }
     if (end < 0) break;
-    const fn = clean.slice(start, end);
+    const rawFn = clean.slice(start, end);
+    const fn = pruneCudaPreprocessorBranches(rawFn, definesByName);
     const signature = fn.slice(0, fn.indexOf("{"));
     const name = cudaFunctionDefinitionName(signature);
     if (

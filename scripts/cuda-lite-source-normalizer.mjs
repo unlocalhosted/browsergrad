@@ -179,7 +179,8 @@ export function createKernelCompilationUnit({
     referencedSiblingKernels.join("\n"),
     kernelWithSharedDeclarations,
   ].filter((part) => part.trim().length > 0).join("\n"));
-  const withCarrierMembers = normalizeCarrierMemberReferences(unit, effectiveDefines);
+  const prunedUnit = pruneCudaPreprocessorBranches(unit, effectiveDefines);
+  const withCarrierMembers = normalizeCarrierMemberReferences(prunedUnit, effectiveDefines);
   const postCarrierAliasDefines = collectTypeAliasDefines(withCarrierMembers, effectiveDefines);
   const postCarrierDefines = mergeDefineMaps(effectiveDefines, postCarrierAliasDefines);
   const withVectorCarrierAliases = normalizeCudaVectorCarrierAliases(withCarrierMembers, postCarrierDefines);

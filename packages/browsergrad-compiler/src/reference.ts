@@ -3125,10 +3125,10 @@ function cloneDeviceGlobals(
 
 function constantInitialValue(constant: CudaLiteGlobalConstant): number | WgslTypedArray {
   if (!constant.init) throw compilerFailure(`constant '${constant.name}' has no initializer`);
-  const values = flattenConstantInitializer(constant.init).map(evaluateConstantNumber);
   if (constant.dimensions.length === 0 && isCudaVectorType(constant.valueType)) {
-    return typedVectorConstantValues(constant.valueType, values);
+    return typedVectorConstantValues(constant.valueType, constantVectorInitializerValues(constant.init, constant.valueType));
   }
+  const values = flattenConstantInitializer(constant.init).map(evaluateConstantNumber);
   if (constant.dimensions.length === 0) return values[0] ?? 0;
   const total = constant.dimensions.reduce((product, dimension) => product * dimension, 1);
   const padded = Array.from({ length: total }, (_, index) => values[index] ?? 0);
@@ -3140,6 +3140,16 @@ function constantInitialValue(constant: CudaLiteGlobalConstant): number | WgslTy
   if (constant.valueType === "float" || constant.valueType === "double") return Float32Array.from(padded);
   if (constant.valueType === "complex64") return Float32Array.from(padded);
   return Float32Array.from(padded);
+}
+
+function constantVectorInitializerValues(
+  expression: CudaLiteExpression,
+  valueType: CudaLiteScalarType,
+): readonly number[] {
+  if (expression.kind === "call" && expressionName(expression.callee) === `make_${valueType}`) {
+    return expression.args.map(evaluateConstantNumber);
+  }
+  return flattenConstantInitializer(expression).map(evaluateConstantNumber);
 }
 
 function typedVectorConstantValues(valueType: CudaLiteScalarType, values: readonly number[]): WgslTypedArray {

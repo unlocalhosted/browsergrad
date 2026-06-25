@@ -4367,6 +4367,17 @@ function externalConstantDimensions(constant: CudaLiteGlobalConstant): readonly 
 function emitInitializedConstant(constant: CudaLiteGlobalConstant, context: EmitContext): string {
   if (!constant.init) throw featureError("invalid-constant-initializer", `constant '${constant.name}' has no initializer`);
   if (constant.dimensions.length === 0) {
+    if (isCudaVectorType(constant.valueType)) {
+      if (constant.init.kind !== "initializer") {
+        return `const ${context.nameFor(constant.name)}: ${wgslScalar(constant.valueType)} = ${emitConstantInitializerExpression(constant.init, context)};`;
+      }
+      const lanes = cudaVectorLaneCount(constant.valueType);
+      const values = flattenInitializerExpressions(constant.init)
+        .slice(0, lanes)
+        .map((expression) => emitConstantInitializerExpression(expression, context));
+      while (values.length < lanes) values.push(zeroValue(cudaVectorScalarType(constant.valueType) ?? "float"));
+      return `const ${context.nameFor(constant.name)}: ${wgslScalar(constant.valueType)} = ${wgslScalar(constant.valueType)}(${values.join(", ")});`;
+    }
     return `const ${context.nameFor(constant.name)}: ${wgslScalar(constant.valueType)} = ${emitConstantInitializerExpression(constant.init, context)};`;
   }
   const type = emitConstantArrayType(constant);

@@ -334,6 +334,28 @@ __global__ void conditionalPointer(float *out, const float *fallback, const floa
     expect([...result.buffers.out as Float32Array]).toEqual([7]);
   });
 
+  it("decays fixed C array device-helper params to pointer params", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void copyArrayParam(float out[2], const float src[2]) {
+  out[0] = src[1];
+}
+__global__ void array_param_decay(float *out) {
+  __shared__ float tile[2];
+  if (threadIdx.x == 0) {
+    tile[1] = 6.25f;
+    copyArrayParam(out, tile);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn copyArrayParam(out_buffer_arg: u32, out_base_arg: u32, src_buffer_arg: u32, src_base_arg: u32");
+    expect([...result.buffers.out as Float32Array]).toEqual([6.25]);
+  });
+
   it("lowers device helper local scalar out params as WGSL function pointers", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ void bounds(float x, float *lo, float *hi) {
@@ -2333,6 +2355,7 @@ __global__ void mathy(float *x, float *out) {
       ceilf(value) +
       truncf(value) +
       roundf(value) +
+      rintf(value) +
       sinf(value) +
       cosf(value) +
       tanf(value) +
@@ -2401,6 +2424,7 @@ __global__ void mathy(float *x, float *out) {
       Math.floor(value) +
       Math.ceil(value) +
       Math.trunc(value) +
+      Math.round(value) +
       Math.round(value) +
       Math.sin(value) +
       Math.cos(value) +
@@ -4906,6 +4930,22 @@ __global__ void scale(const float *x, float *y, int n) {
     expect([...result.buffers.y as Float32Array]).toEqual([3, 6, 9, 12]);
   });
 
+  it("accepts const-qualified CUDA constant arrays", () => {
+    const compiled = compileCudaLiteKernel(`
+__constant__ const int table[2] = {3, 5};
+__global__ void const_table(int *out) {
+  if (threadIdx.x < 2) { out[threadIdx.x] = table[threadIdx.x]; }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.ir.constants.map((constant) => constant.name)).toEqual(["table"]);
+    expect([...result.buffers.out as Int32Array]).toEqual([3, 5]);
+  });
+
   it("lowers CUDA constant arrays as readonly storage inputs", () => {
     const compiled = compileCudaLiteKernel(`
 __constant__ float coeffs[2];
@@ -4951,6 +4991,22 @@ __global__ void apply(float *out) {
     expect(compiled.wgsl).toContain("vec3<f32>(collider[(u32(0u) * 3u) + 0u]");
     expect(compiled.wgsl).not.toContain("params.collider");
     expect([...result.buffers.out as Float32Array]).toEqual([11, 22, 33]);
+  });
+
+  it("embeds initialized scalar CUDA vector constants", () => {
+    const compiled = compileCudaLiteKernel(`
+__constant__ float3 metric = {1.0f, 2.0f, 3.0f};
+__global__ void vector_const(float *out) {
+  if (threadIdx.x == 0) { out[0] = metric.x + metric.y + metric.z; }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("const metric: vec3<f32> = vec3<f32>(1.0, 2.0, 3.0)");
+    expect([...result.buffers.out as Float32Array]).toEqual([6]);
   });
 
   it("decays CUDA constant arrays to readonly device pointer arguments", () => {

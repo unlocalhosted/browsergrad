@@ -896,9 +896,19 @@ function validateGlobalConstantInitializer(
   walkExpression: ExpressionWalker,
 ): void {
   if (!constant.init) return;
+  if (constant.dimensions.length === 0 && isCudaVectorType(constant.valueType)) {
+    const info = walkExpression(constant.init, scope);
+    if (info.kind !== "vector" || info.valueType !== constant.valueType) {
+      diagnostics.push(error("invalid-constant-initializer", `constant '${constant.name}' initializer must resolve to ${constant.valueType}`, constant.init.span));
+    }
+    return;
+  }
   const values = flattenInitializerExpressions(constant.init);
-  if (constant.dimensions.length === 0 && values.length > 1) {
+  if (constant.dimensions.length === 0 && values.length > 1 && !isCudaVectorType(constant.valueType)) {
     diagnostics.push(error("invalid-constant-initializer", `constant '${constant.name}' scalar initializer must have one value`, constant.init.span));
+  }
+  if (constant.dimensions.length === 0 && isCudaVectorType(constant.valueType) && values.length > cudaVectorLaneCount(constant.valueType)) {
+    diagnostics.push(error("invalid-constant-initializer", `constant '${constant.name}' vector initializer has more than ${cudaVectorLaneCount(constant.valueType)} values`, constant.init.span));
   }
   const expected = constant.dimensions.reduce((product, dimension) => product * dimension, 1);
   if (constant.dimensions.length > 0 && values.length > expected) {

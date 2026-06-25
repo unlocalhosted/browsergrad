@@ -48,6 +48,7 @@ const FLOAT_UNARY = [
   intrinsic("ceilf", [1, 1], "float", (args) => Math.ceil(args[0] ?? 0), (args) => `ceil(${args.join(", ")})`),
   intrinsic("round", [1, 1], "float", (args) => Math.round(args[0] ?? 0), (args) => `round(${args.join(", ")})`),
   intrinsic("roundf", [1, 1], "float", (args) => Math.round(args[0] ?? 0), (args) => `round(${args.join(", ")})`),
+  intrinsic("rintf", [1, 1], "float", (args) => Math.round(args[0] ?? 0), (args) => `round(${args.join(", ")})`),
   intrinsic("trunc", [1, 1], "float", (args) => Math.trunc(args[0] ?? 0), (args) => `trunc(${args.join(", ")})`),
   intrinsic("truncf", [1, 1], "float", (args) => Math.trunc(args[0] ?? 0), (args) => `trunc(${args.join(", ")})`),
   intrinsic("sin", [1, 1], "float", (args) => Math.sin(args[0] ?? 0), (args) => `sin(${args.join(", ")})`),
