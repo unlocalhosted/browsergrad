@@ -404,6 +404,7 @@ function classifyReferenceFallback(source, kernelName) {
     const compiled = compileCudaLiteKernelForWebGpu(source, {
       kernelName,
       features: { "shader-f16": true, subgroups: true },
+      f64Mode: "f32",
       workgroupSize: [256, 1, 1],
       dynamicSharedMemory: inferDynamicSharedMemory(source),
     });
@@ -438,6 +439,7 @@ function webGpuLiftFor(compiled) {
       compileKernel: (childSource, options = {}) => compileCudaLiteKernelForWebGpu(childSource, {
         ...options,
         features: { "shader-f16": true, subgroups: true, ...options.features },
+        f64Mode: options.f64Mode ?? "f32",
         dynamicSharedMemory: inferDynamicSharedMemory(childSource),
       }),
     },
