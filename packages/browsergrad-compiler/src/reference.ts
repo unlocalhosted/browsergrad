@@ -120,7 +120,7 @@ interface ThreadContext {
   readonly textures: NonNullable<CompiledKernelInput["textures"]>;
   readonly surfaces: NonNullable<CompiledKernelInput["surfaces"]>;
   readonly memoryPools: Map<string, MemoryPoolValue>;
-  readonly functions: ReadonlyMap<string, CudaLiteDeviceFunction>;
+  readonly functions: ReadonlyMap<string, readonly CudaLiteDeviceFunction[]>;
   readonly kernels: ReadonlyMap<string, CudaLiteKernel>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly valueTypes: ReadonlyMap<string, CudaLiteScalarType>;
@@ -187,7 +187,7 @@ export function runCompiledKernelReference(
   const textures = input.textures ?? {};
   const surfaces = cloneSurfaces(input.surfaces ?? {});
   const memoryPools = cloneMemoryPools(input.memoryPools ?? {});
-  const functions = new Map(compiled.ir.functions.map((fn) => [fn.name, fn]));
+  const functions = collectReferenceFunctions(compiled.ir.functions);
   const kernels = collectReferenceKernels(compiled);
   const scalars = input.scalars ?? {};
   const valueTypes = new Map<string, CudaLiteScalarType>([
@@ -243,6 +243,26 @@ function collectReferenceKernels(compiled: CompiledCudaLiteKernel): Map<string, 
   return kernels;
 }
 
+function collectReferenceFunctions(functions: readonly CudaLiteDeviceFunction[]): Map<string, readonly CudaLiteDeviceFunction[]> {
+  const byName = new Map<string, CudaLiteDeviceFunction[]>();
+  for (const fn of functions) {
+    const overloads = byName.get(fn.name);
+    if (overloads) overloads.push(fn);
+    else byName.set(fn.name, [fn]);
+  }
+  return byName;
+}
+
+function resolveReferenceDeviceFunction(
+  functions: ReadonlyMap<string, readonly CudaLiteDeviceFunction[]>,
+  name: string,
+  argCount: number,
+): CudaLiteDeviceFunction | undefined {
+  const overloads = functions.get(name);
+  if (!overloads || overloads.length === 0) return undefined;
+  return overloads.find((fn) => fn.params.length === argCount) ?? overloads[0];
+}
+
 function deviceFunctionAsKernel(fn: CudaLiteDeviceFunction): CudaLiteKernel {
   return {
     kind: "kernel",
@@ -264,7 +284,7 @@ function runBlock(
   textures: NonNullable<CompiledKernelInput["textures"]>,
   surfaces: NonNullable<CompiledKernelInput["surfaces"]>,
   memoryPools: Map<string, MemoryPoolValue>,
-  functions: ReadonlyMap<string, CudaLiteDeviceFunction>,
+  functions: ReadonlyMap<string, readonly CudaLiteDeviceFunction[]>,
   kernels: ReadonlyMap<string, CudaLiteKernel>,
   scalars: Readonly<Record<string, number>>,
   valueTypes: ReadonlyMap<string, CudaLiteScalarType>,
@@ -346,7 +366,7 @@ function runGrid(
   textures: NonNullable<CompiledKernelInput["textures"]>,
   surfaces: NonNullable<CompiledKernelInput["surfaces"]>,
   memoryPools: Map<string, MemoryPoolValue>,
-  functions: ReadonlyMap<string, CudaLiteDeviceFunction>,
+  functions: ReadonlyMap<string, readonly CudaLiteDeviceFunction[]>,
   kernels: ReadonlyMap<string, CudaLiteKernel>,
   scalars: Readonly<Record<string, number>>,
   valueTypes: ReadonlyMap<string, CudaLiteScalarType>,
@@ -2087,7 +2107,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   }, context));
   if (name === "normalize") return normalizeCudaVector(expression, context);
   if (name === "cross") return crossCudaVectors(expression, context);
-  const deviceFunction = name ? context.functions.get(name) : undefined;
+  const deviceFunction = name ? resolveReferenceDeviceFunction(context.functions, name, expression.args.length) : undefined;
   if (deviceFunction) return evalDeviceFunction(
     deviceFunction,
     deviceFunctionArgs(deviceFunction, expression.args, context),

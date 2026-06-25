@@ -1308,6 +1308,34 @@ __global__ void helperKernel(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([3]);
   });
 
+  it("resolves overloaded __device__ helpers by arity", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ int pick(int value) {
+  return value + 1;
+}
+__device__ int pick(int left, int right) {
+  return left + right;
+}
+__global__ void overloadKernel(int *out) {
+  if (threadIdx.x < 1) {
+    out[0] = pick(4);
+    out[1] = pick(4, 5);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.ir.functions.map((fn) => fn.name)).toEqual(["pick", "pick"]);
+    expect(compiled.wgsl).toContain("fn pick__bg_overload_0(");
+    expect(compiled.wgsl).toContain("fn pick__bg_overload_1(");
+    expect(compiled.wgsl).toContain("out[0] = pick__bg_overload_0(4");
+    expect(compiled.wgsl).toContain("out[1] = pick__bg_overload_1(4, 5");
+    expect([...result.buffers.out as Int32Array]).toEqual([5, 9]);
+  });
+
   it("lowers CUDA warp shuffle helpers to subgroup intrinsics", () => {
     const compiled = compileCudaLiteKernel(`
 __inline__ __device__ float warpReduceSum(float val) {

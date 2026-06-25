@@ -186,6 +186,7 @@ interface SymbolInfo {
   readonly returnType?: CudaLiteScalarType;
   readonly params?: readonly CudaLiteParam[];
   readonly body?: readonly CudaLiteStatement[];
+  readonly overloads?: readonly CudaLiteDeviceFunction[];
   readonly groupKind?: CudaLiteCooperativeGroupKind;
   readonly tileSize?: number;
   readonly pointer?: boolean;
@@ -951,25 +952,49 @@ function declareDeviceFunction(
   diagnostics: CudaLiteDiagnostic[],
   options: CudaLiteAnalyzeOptions,
 ): void {
-  if (declaredNames.has(fn.name)) {
+  const existing = rootScope.symbols.get(fn.name);
+  if (existing?.kind === "device-function") {
+    const overloads = existing.overloads ?? [];
+    if (overloads.some((candidate) => deviceFunctionSignatureKey(candidate) === deviceFunctionSignatureKey(fn))) {
+      diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite function overload '${fn.name}'`, fn.span));
+    }
+    rootScope.symbols.set(fn.name, {
+      ...existing,
+      overloads: [...overloads, fn],
+    });
+  } else if (declaredNames.has(fn.name)) {
     diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${fn.name}'`, fn.span));
+  } else {
+    declaredNames.add(fn.name);
+    rootScope.symbols.set(fn.name, {
+      name: fn.name,
+      kind: "device-function",
+      returnType: fn.returnType,
+      params: fn.params,
+      body: fn.body,
+      overloads: [fn],
+      span: fn.span,
+    });
   }
   validateDeclaredSymbolName(fn.name, fn.span, diagnostics);
-  declaredNames.add(fn.name);
-  rootScope.symbols.set(fn.name, {
-    name: fn.name,
-    kind: "device-function",
-    returnType: fn.returnType,
-    params: fn.params,
-    body: fn.body,
-    span: fn.span,
-  });
   if (requiresShaderF16(fn.returnType)) requiredFeatures.add("shader-f16");
   validateF64Type(fn.returnType, fn.span, diagnostics, options);
   for (const param of fn.params) {
     if (requiresShaderF16(param.valueType)) requiredFeatures.add("shader-f16");
     validateF64Type(param.valueType, param.span, diagnostics, options);
   }
+}
+
+function deviceFunctionSignatureKey(fn: CudaLiteDeviceFunction): string {
+  return fn.params.map((param) =>
+    [
+      param.valueType,
+      param.pointer ? "ptr" : param.reference ? "ref" : "value",
+      param.constant ? "const" : "mut",
+      param.cooperativeGroupKind ?? "",
+      param.tileSize ?? "",
+    ].join(":")
+  ).join("|");
 }
 
 function validateArrayInitializer(
@@ -1861,11 +1886,12 @@ function validateDeviceFunctionCall(
   walkExpression: ExpressionWalker,
   scope: Scope,
 ): ExpressionInfo {
-  const fnParams = symbol.params ?? [];
+  const overload = resolveDeviceFunctionOverload(symbol, expression.args.length);
+  const fnParams = overload?.params ?? symbol.params ?? [];
   if (expression.args.length !== fnParams.length) {
     diagnostics.push(error(
       "invalid-call-arity",
-      `${symbol.name} expects ${fnParams.length} argument${fnParams.length === 1 ? "" : "s"}`,
+      deviceFunctionArityMessage(symbol),
       expression.span,
     ));
   }
@@ -1873,7 +1899,7 @@ function validateDeviceFunctionCall(
     const param = fnParams[index];
     if (param?.cooperativeGroupKind !== undefined) {
       validateCooperativeGroupArgument(arg, param, scope, diagnostics);
-      if (param.cooperativeGroupKind === "thread" && deviceFunctionUsesGroupReduce(symbol, param.name)) {
+      if (param.cooperativeGroupKind === "thread" && deviceFunctionUsesGroupReduce(overload ?? symbol, param.name)) {
         const name = rootIdentifier(arg);
         const group = name ? lookupSymbol(name, scope, arg.span) : undefined;
         if (group?.kind === "cooperative-group" && group.groupKind !== "tile") {
@@ -1905,17 +1931,40 @@ function validateDeviceFunctionCall(
     }
     validateScalarOperand(info, arg.span, diagnostics);
   }
-  if (symbol.returnType === undefined || symbol.returnType === "void") return { kind: "unknown" };
-  return isCudaVectorType(symbol.returnType)
-    ? { kind: "vector", valueType: symbol.returnType }
-    : { kind: "scalar", valueType: symbol.returnType };
+  const returnType = overload?.returnType ?? symbol.returnType;
+  if (returnType === undefined || returnType === "void") return { kind: "unknown" };
+  return isCudaVectorType(returnType)
+    ? { kind: "vector", valueType: returnType }
+    : { kind: "scalar", valueType: returnType };
+}
+
+function resolveDeviceFunctionOverload(
+  symbol: SymbolInfo,
+  argCount: number,
+): CudaLiteDeviceFunction | undefined {
+  const overloads = symbol.overloads ?? [];
+  if (overloads.length === 0) return undefined;
+  return overloads.find((fn) => fn.params.length === argCount) ?? overloads[0];
+}
+
+function deviceFunctionArityMessage(symbol: SymbolInfo): string {
+  const overloads = symbol.overloads ?? [];
+  if (overloads.length <= 1) {
+    const count = symbol.params?.length ?? 0;
+    return `${symbol.name} expects ${count} argument${count === 1 ? "" : "s"}`;
+  }
+  const counts = [...new Set(overloads.map((fn) => fn.params.length))].sort((a, b) => a - b);
+  return `${symbol.name} expects ${counts.join(" or ")} arguments`;
 }
 
 function isFloat2ComplexCompatible(expected: CudaLiteScalarType | undefined, info: ExpressionInfo): boolean {
   return expected === "float2" && (info.kind === "complex" || (info.kind === "vector" && info.valueType === "float2"));
 }
 
-function deviceFunctionUsesGroupReduce(symbol: SymbolInfo, paramName: string): boolean {
+function deviceFunctionUsesGroupReduce(
+  symbol: { readonly body?: readonly CudaLiteStatement[] },
+  paramName: string,
+): boolean {
   let found = false;
   walkCudaLiteExpressions(symbol.body ?? [], (expression) => {
     if (found) return;

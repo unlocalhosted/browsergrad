@@ -9,6 +9,15 @@ const SEMANTIC_BUILTIN_DEVICE_HELPERS = new Set([
   "store128cg",
   "div_ceil",
   "blockReduce",
+  "atomicAdd",
+  "atomicSub",
+  "atomicMin",
+  "atomicMax",
+  "atomicAnd",
+  "atomicOr",
+  "atomicXor",
+  "atomicExch",
+  "atomicCAS",
 ]);
 
 const WIDE_PACKED128_TYPES = new Map([
@@ -449,29 +458,113 @@ function isTemplateSymbolDowngrade(previous, next) {
 function referencedDeviceFunctionClosure(kernel, deviceFunctions, definesByName = new Map()) {
   const byName = new Map();
   for (const fn of deviceFunctions) {
-    const previous = byName.get(fn.name);
-    const previousExplicit = previous !== undefined && isExplicitTemplateSpecialization(previous.source);
     const currentExplicit = isExplicitTemplateSpecialization(fn.source);
-    if (
-      previous === undefined ||
-      (previousExplicit && !currentExplicit) ||
-      (previousExplicit === currentExplicit)
-    ) {
-      byName.set(fn.name, fn);
+    const overloads = byName.get(fn.name) ?? new Map();
+    const key = deviceFunctionSignatureShape(fn.source);
+    if (!currentExplicit) {
+      for (const [candidateKey, candidate] of overloads) {
+        if (isExplicitTemplateSpecialization(candidate.source)) overloads.delete(candidateKey);
+      }
+      overloads.set(key, fn);
+      byName.set(fn.name, overloads);
+    } else if (overloads.size === 0 || [...overloads.values()].every((candidate) => isExplicitTemplateSpecialization(candidate.source))) {
+      overloads.set(key, fn);
+      byName.set(fn.name, overloads);
     }
   }
   const included = new Map();
   const pending = [kernel];
   while (pending.length > 0) {
     const source = pending.pop();
-    for (const [name, fn] of byName) {
+    for (const [name, overloadMap] of byName) {
       if (SEMANTIC_BUILTIN_DEVICE_HELPERS.has(name)) continue;
       if (included.has(name) || !sourceCallsFunctionThroughDefines(source, name, definesByName)) continue;
-      included.set(name, fn);
-      pending.push(fn.source);
+      const overloads = selectDeviceFunctionOverloadsForSource(source, name, [...overloadMap.values()], definesByName);
+      included.set(name, overloads);
+      for (const fn of overloads) pending.push(fn.source);
     }
   }
-  return [...included.values()];
+  return [...included.values()].flat();
+}
+
+function deviceFunctionSignatureShape(source) {
+  const brace = source.indexOf("{");
+  return source.slice(0, brace < 0 ? source.length : brace).replace(/\s+/gu, " ").trim();
+}
+
+function selectDeviceFunctionOverloadsForSource(source, name, overloads, definesByName) {
+  const arities = sourceFunctionCallAritiesThroughDefines(source, name, definesByName);
+  const arityList = arities.size === 0 ? [...new Set(overloads.map((fn) => deviceFunctionParamCount(fn.source)))] : [...arities];
+  const selected = [];
+  for (const arity of arityList) {
+    const matches = overloads.filter((fn) => deviceFunctionParamCount(fn.source) === arity);
+    const chosen = matches[matches.length - 1];
+    if (chosen !== undefined) selected.push(chosen);
+  }
+  return selected.length > 0 ? selected : overloads.slice(-1);
+}
+
+function deviceFunctionParamCount(source) {
+  const signature = source.slice(0, source.indexOf("{") < 0 ? source.length : source.indexOf("{"));
+  const open = signature.lastIndexOf("(");
+  if (open < 0) return 0;
+  const close = findBalanced(signature, open, "(", ")") ?? signature.lastIndexOf(")");
+  if (close <= open) return 0;
+  const params = splitTopLevel(signature.slice(open + 1, close)).map((param) => param.trim()).filter(Boolean);
+  return params.length === 1 && params[0] === "void" ? 0 : params.length;
+}
+
+function sourceFunctionCallAritiesThroughDefines(source, name, definesByName) {
+  const cleanSource = stripCommentsAndStrings(source);
+  const out = sourceFunctionCallArities(cleanSource, name);
+  const visited = new Set();
+  const pending = [];
+  for (const defineName of definesByName.keys()) {
+    if (sourceCallsFunction(cleanSource, defineName)) pending.push(defineName);
+  }
+  while (pending.length > 0) {
+    const defineName = pending.pop();
+    if (defineName === undefined || visited.has(defineName)) continue;
+    visited.add(defineName);
+    const value = definesByName.get(defineName);
+    if (value === undefined) continue;
+    for (const arity of sourceFunctionCallArities(String(value), name)) out.add(arity);
+    for (const next of definesByName.keys()) {
+      if (!visited.has(next) && sourceCallsFunction(String(value), next)) pending.push(next);
+    }
+  }
+  return out;
+}
+
+function sourceFunctionCallArities(source, name) {
+  const out = new Set();
+  for (const call of scanFunctionCallReferences(source)) {
+    if (call.name === name) out.add(call.args.length);
+  }
+  for (const call of scanTemplatedFunctionCallReferences(source)) {
+    if (call.name === name) out.add(call.args.length);
+  }
+  return out;
+}
+
+function scanTemplatedFunctionCallReferences(source) {
+  const calls = [];
+  for (const call of scanTemplatedCallReferences(source)) {
+    const templateStart = source.indexOf("<", call.start + call.name.length);
+    if (templateStart < 0) continue;
+    const templateEnd = findBalanced(source, templateStart, "<", ">");
+    if (templateEnd === undefined) continue;
+    const open = skipWhitespace(source, templateEnd + 1);
+    if (source[open] !== "(") continue;
+    const close = findBalanced(source, open, "(", ")");
+    if (close === undefined) continue;
+    calls.push({
+      name: call.name,
+      args: splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim()),
+      start: call.start,
+    });
+  }
+  return calls;
 }
 
 function isExplicitTemplateSpecialization(source) {

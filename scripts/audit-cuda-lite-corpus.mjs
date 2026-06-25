@@ -75,6 +75,15 @@ const SEMANTIC_BUILTIN_DEVICE_HELPERS = new Set([
   "store128cg",
   "div_ceil",
   "blockReduce",
+  "atomicAdd",
+  "atomicSub",
+  "atomicMin",
+  "atomicMax",
+  "atomicAnd",
+  "atomicOr",
+  "atomicXor",
+  "atomicExch",
+  "atomicCAS",
 ]);
 
 const files = listFiles(corpusRoot)

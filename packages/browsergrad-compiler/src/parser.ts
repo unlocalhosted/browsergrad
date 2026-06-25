@@ -400,7 +400,7 @@ class Parser {
       const type = cooperativeGroup === undefined ? this.parseType() : "uint";
       constant = this.consumeCvQualifiers() || constant;
       const pointer = cooperativeGroup === undefined && this.consumeIf("*") !== undefined;
-      this.consumeIf("&");
+      const reference = !pointer && this.consumeIf("&") !== undefined;
       this.consumeTypeQualifiers();
       this.consumeCudaDeclAttributes();
       const name = this.match(",") || this.match(")")
@@ -412,6 +412,7 @@ class Parser {
         name: name.value,
         valueType: type,
         pointer,
+        ...(reference ? { reference: true } : {}),
         constant,
         ...(cooperativeGroup === undefined ? {} : {
           cooperativeGroupKind: cooperativeGroup.groupKind,

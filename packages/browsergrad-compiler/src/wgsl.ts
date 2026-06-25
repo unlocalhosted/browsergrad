@@ -271,7 +271,7 @@ interface EmitContext {
   readonly uniformScalars: readonly { readonly name: string; readonly valueType: CudaLiteScalarType }[];
   readonly mutableScalarParams: readonly CudaLiteParam[];
   readonly deviceFunctionNames: ReadonlySet<string>;
-  deviceFunctionFor(name: string): CudaLiteDeviceFunction | undefined;
+  deviceFunctionFor(name: string, argCount?: number): CudaLiteDeviceFunction | undefined;
   devicePointerParamFor(name: string): CudaLiteParam | undefined;
   storagePointerIdFor(name: string): number | undefined;
   sharedPointerIdFor(name: string): number | undefined;
@@ -530,8 +530,8 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
     uniformScalars,
     mutableScalarParams,
     deviceFunctionNames: new Set(ir.functions.map((fn) => fn.name)),
-    deviceFunctionFor(name) {
-      return ir.functions.find((fn) => fn.name === name);
+    deviceFunctionFor(name, argCount) {
+      return resolveDeviceFunctionForCall(ir, name, argCount);
     },
     devicePointerParamFor() {
       return undefined;
@@ -627,7 +627,7 @@ function collectWgslDeclaredNames(
     ...ir.textures.map((texture) => texture.name),
     ...ir.sharedDeclarations.map((shared) => shared.name),
     ...ir.functions.flatMap((fn) => [
-      fn.name,
+      deviceFunctionLinkName(fn, ir),
       ...fn.params.map((param) => param.name),
       ...collectCooperativeGroupGeneratedNames(fn.params),
       ...collectLocalNames(fn.body),
@@ -638,6 +638,24 @@ function collectWgslDeclaredNames(
     ...externalPoolNames,
     ...externalPoolNames.flatMap((name) => [poolDataName(name), poolOffsetName(name)]),
   ];
+}
+
+function resolveDeviceFunctionForCall(
+  ir: KernelIrModule,
+  name: string,
+  argCount?: number,
+): CudaLiteDeviceFunction | undefined {
+  const overloads = ir.functions.filter((fn) => fn.name === name);
+  if (overloads.length === 0) return undefined;
+  if (argCount === undefined) return overloads[0];
+  return overloads.find((fn) => fn.params.length === argCount) ?? overloads[0];
+}
+
+function deviceFunctionLinkName(fn: CudaLiteDeviceFunction, ir: KernelIrModule): string {
+  const overloads = ir.functions.filter((candidate) => candidate.name === fn.name);
+  if (overloads.length <= 1) return fn.name;
+  const index = overloads.indexOf(fn);
+  return `${fn.name}__bg_overload_${index < 0 ? 0 : index}`;
 }
 
 function collectLocalPointerHandleGeneratedNames(
@@ -951,7 +969,7 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
     "num_workgroups: vec3<u32>",
   ];
   const returnType = fn.returnType === "void" ? "" : ` -> ${wgslScalar(fn.returnType)}`;
-  const lines = [`fn ${context.nameFor(fn.name)}(${params.join(", ")})${returnType} {`];
+  const lines = [`fn ${context.nameFor(deviceFunctionLinkName(fn, context.ir))}(${params.join(", ")})${returnType} {`];
   for (const param of fn.params) {
     if (param.pointer) {
       if (functionPointerParams.has(param.name)) continue;
@@ -3059,7 +3077,7 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
     const name = expressionName(expression.callee);
     if (name !== undefined && isTextureReadCall(name)) return expression.templateValueType ?? "float";
     if (name !== undefined) {
-      const fn = context.deviceFunctionFor(name);
+      const fn = context.deviceFunctionFor(name, expression.args.length);
       if (fn) return fn.returnType;
     }
     return name ? cudaVectorConstructorType(name) : undefined;
@@ -3233,7 +3251,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   const cooperativeGroupCall = emitCooperativeGroupCall(expression, context);
   if (cooperativeGroupCall !== undefined) return cooperativeGroupCall;
   if (wmmaBuiltinName(name)) return "0";
-  const deviceFunction = name ? context.deviceFunctionFor(name) : undefined;
+  const deviceFunction = name ? context.deviceFunctionFor(name, expression.args.length) : undefined;
   if (deviceFunction) {
     const args = deviceFunction.params.flatMap((param, index) => {
       const arg = expression.args[index];
@@ -3250,7 +3268,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
           : emitDevicePointerArgument(arg, context)
         : [emitExpressionAsValueType(arg, param.valueType, context)];
     });
-    return `${context.nameFor(name ?? deviceFunction.name)}(${[...args, "local_id", "workgroup_id", "num_workgroups"].join(", ")})`;
+    return `${context.nameFor(deviceFunctionLinkName(deviceFunction, context.ir))}(${[...args, "local_id", "workgroup_id", "num_workgroups"].join(", ")})`;
   }
   const args = expression.args.map((arg) => emitExpression(arg, context));
   const vectorMinMax = emitVectorMinMaxCall(expression, name, context);
