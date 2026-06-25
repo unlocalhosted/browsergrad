@@ -60,6 +60,9 @@
   are required.
 - Added `verify:real-world-cuda`, a combined gate that runs pinned corpus
   compile/codegen audit plus exact-kernel browser/WebGPU corpus fixture e2e.
+- Real-world WebGPU verification now runs both TS source aliases and built
+  package `dist/` exports by default, with `e2e:webgpu:dist` available for a
+  focused published-surface smoke.
 - Added shared launch-shape diagnostics so platform preflight, CPU reference,
   and WebGPU runners reject invalid grid/block dimensions consistently.
 - `createCudaWebGpuExecutionPlan()` now returns `launch` blockers for invalid

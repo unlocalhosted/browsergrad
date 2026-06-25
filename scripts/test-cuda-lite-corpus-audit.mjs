@@ -181,6 +181,27 @@ void launch_dynamic_late(float *out) {
   assertEqual(report.summary.fixtureBackedExecutionOk, 0, "fixture-backed execution count");
   assertEqual(report.summary.webGpuRunnableOk, 9, "reverse include legacy compile/codegen alias");
   assertEqual(report.summary.hardFail, 0, "reverse include hard gaps");
+
+  const emitted = spawnSync("node", [
+    "scripts/audit-cuda-lite-corpus.mjs",
+    tmpRoot,
+    "--emit-kernel-source",
+    "kernel.cuh",
+    "--kernel-name",
+    "Copy",
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (emitted.status !== 0) {
+    process.stderr.write(emitted.stderr);
+    process.stderr.write(emitted.stdout);
+    process.exit(emitted.status ?? 1);
+  }
+  const emittedSource = JSON.parse(emitted.stdout).source;
+  assertIncludes(emittedSource, "make_color", "emitted normalized source includes helper context");
+  assertIncludes(emittedSource, "__global__ void Copy", "emitted normalized source includes requested kernel");
   console.log("cuda-lite corpus audit tests passed");
 } finally {
   fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -189,5 +210,11 @@ void launch_dynamic_late(float *out) {
 function assertEqual(actual, expected, label) {
   if (actual !== expected) {
     throw new Error(`${label}: expected ${expected}, got ${actual}`);
+  }
+}
+
+function assertIncludes(actual, expected, label) {
+  if (!String(actual).includes(expected)) {
+    throw new Error(`${label}: expected source to include ${expected}`);
   }
 }

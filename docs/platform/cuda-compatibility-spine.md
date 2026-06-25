@@ -244,6 +244,7 @@ Current real-browser e2e gate:
 
 ```sh
 pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu
+pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu:dist
 pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu:corpus -- --require-webgpu
 ```
 
@@ -252,10 +253,14 @@ pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu:corpus -- --require
   guarded map, tiled matmul, grid-sync phases, host runtime copy, host dynamic
   launch, and prepared resident dispatch.
 - `e2e:webgpu:corpus` also requires pinned local corpora under `/tmp`, extracts
-  exact external kernels, dispatches them in Chromium/WebGPU, and compares GPU
-  readbacks to CPU reference. Current fixture set: CUDA-120 `vectorAddKernel`,
-  NVIDIA `cuda-samples` `vectorAdd`, `llm.c` `add_bias`, `llm.c`
-  `set_vector`, and LeetCUDA `elementwise_add_f32_kernel`.
+  exact external kernels through the same source-normalized compilation-unit
+  path as the corpus audit, dispatches them in Chromium/WebGPU, and compares
+  GPU readbacks to CPU reference. Current fixture set: CUDA-120
+  `vectorAddKernel`, NVIDIA `cuda-samples` `vectorAdd`, `llm.c` `add_bias`,
+  `llm.c` `set_vector`, and LeetCUDA `elementwise_add_f32_kernel`.
+- `e2e:webgpu:dist` runs the browser proof through built package exports. The
+  combined `verify:real-world-cuda` gate runs both `src` and `dist` browser
+  bundles unless a narrower `--bundle` is supplied.
 - Use `-- --require-webgpu` on machines where absence of WebGPU should fail CI.
 
 Performance gate:
@@ -271,4 +276,4 @@ Performance gate:
   `prepareCompiledKernelWebGpu()` over resident buffers. Keep this as measured
   evidence, not prose claims; no-readback prepared measurements should use
   `awaitCompletion: true`. Run:
-  `pnpm --filter @unlocalhosted/browsergrad-compiler bench:browser -- --markdown /tmp/bg-cuda-lite-webgpu-bench.md`.
+  `pnpm --filter @unlocalhosted/browsergrad-compiler bench:browser -- --bundle dist --markdown /tmp/bg-cuda-lite-webgpu-bench.md`.

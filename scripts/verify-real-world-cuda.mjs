@@ -14,11 +14,15 @@ run("real-world CUDA compile/codegen audit", [
   String(options.limit),
 ]);
 
-run("real-world CUDA browser fixture e2e", [
-  path.join(scriptDir, "e2e-cuda-lite-webgpu.mjs"),
-  "--require-corpus-fixtures",
-  ...(options.requireWebGpu ? ["--require-webgpu"] : []),
-]);
+for (const bundle of browserBundles(options.bundle)) {
+  run(`real-world CUDA browser fixture e2e (${bundle})`, [
+    path.join(scriptDir, "e2e-cuda-lite-webgpu.mjs"),
+    "--require-corpus-fixtures",
+    "--bundle",
+    bundle,
+    ...(options.requireWebGpu ? ["--require-webgpu"] : []),
+  ]);
+}
 
 console.log("\nreal-world CUDA verification passed");
 
@@ -27,6 +31,7 @@ function parseArgs(args) {
     skipFetch: false,
     requireWebGpu: false,
     limit: 0,
+    bundle: "both",
   };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -46,13 +51,30 @@ function parseArgs(args) {
       options.limit = parseLimit(arg.slice("--limit=".length));
       continue;
     }
+    if (arg === "--bundle") {
+      options.bundle = parseBundle(args[++index]);
+      continue;
+    }
+    if (arg?.startsWith("--bundle=")) {
+      options.bundle = parseBundle(arg.slice("--bundle=".length));
+      continue;
+    }
     if (arg === "--help" || arg === "-h") {
-      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--require-webgpu] [--limit N]");
+      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--require-webgpu] [--limit N] [--bundle src|dist|both]");
       process.exit(0);
     }
     throw new Error(`unexpected argument: ${arg}`);
   }
   return options;
+}
+
+function parseBundle(raw) {
+  if (raw === "src" || raw === "dist" || raw === "both") return raw;
+  throw new Error("--bundle expects src, dist, or both");
+}
+
+function browserBundles(bundle) {
+  return bundle === "both" ? ["src", "dist"] : [bundle];
 }
 
 function parseLimit(raw) {

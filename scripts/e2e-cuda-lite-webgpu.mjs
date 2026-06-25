@@ -4,7 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { corpusById, corpusFixturePath, cudaLiteCorpusExecutionFixtures } from "./cuda-lite-corpus-registry.mjs";
+import { corpusById, cudaLiteCorpusExecutionFixtures } from "./cuda-lite-corpus-registry.mjs";
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i++) {
@@ -20,6 +20,7 @@ const headed = args.get("--headed") === "true";
 const requireWebGpu = args.get("--require-webgpu") === "true";
 const requireCorpusFixtures = args.get("--require-corpus-fixtures") === "true";
 const markdownPath = args.get("--markdown");
+const bundle = parseBundle(args.get("--bundle") ?? "src");
 
 const root = findRepoRoot(process.cwd());
 const packageRequire = createRequire(path.join(root, "packages/browsergrad-compiler/package.json"));
@@ -215,6 +216,9 @@ __global__ void reciprocalIntrinsic(float *x, float *out) {
 const corpusFixtureNamesBySourceKey = Object.fromEntries(
   cudaLiteCorpusExecutionFixtures.map((fixture) => [fixture.sourceKey, fixture.caseName]),
 );
+const corpusFixtureKernelNamesBySourceKey = Object.fromEntries(
+  cudaLiteCorpusExecutionFixtures.map((fixture) => [fixture.sourceKey, fixture.kernelName]),
+);
 const expectedCorpusFixtureNames = cudaLiteCorpusExecutionFixtures.map((fixture) => fixture.caseName);
 
 const html = String.raw`<!doctype html>
@@ -239,6 +243,7 @@ const html = String.raw`<!doctype html>
 
       const SOURCES = ${JSON.stringify(sources)};
       const CORPUS_FIXTURE_NAMES = ${JSON.stringify(corpusFixtureNamesBySourceKey)};
+      const CORPUS_FIXTURE_KERNEL_NAMES = ${JSON.stringify(corpusFixtureKernelNamesBySourceKey)};
       const EXPECTED_CORPUS_FIXTURE_NAMES = ${JSON.stringify(expectedCorpusFixtureNames)};
 
       window.__bgRunE2e = async () => {
@@ -523,7 +528,7 @@ const html = String.raw`<!doctype html>
           cases.push({
             name: CORPUS_FIXTURE_NAMES.corpusCuda120VectorAddKernel,
             source: SOURCES.corpusCuda120VectorAddKernel,
-            options: { workgroupSize: [8, 1, 1] },
+            options: { kernelName: CORPUS_FIXTURE_KERNEL_NAMES.corpusCuda120VectorAddKernel, workgroupSize: [8, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
             input: () => ({
               buffers: {
@@ -540,7 +545,7 @@ const html = String.raw`<!doctype html>
           cases.push({
             name: CORPUS_FIXTURE_NAMES.corpusCudaSamplesVectorAdd,
             source: SOURCES.corpusCudaSamplesVectorAdd,
-            options: { workgroupSize: [8, 1, 1] },
+            options: { kernelName: CORPUS_FIXTURE_KERNEL_NAMES.corpusCudaSamplesVectorAdd, workgroupSize: [8, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
             input: () => ({
               buffers: {
@@ -557,7 +562,7 @@ const html = String.raw`<!doctype html>
           cases.push({
             name: CORPUS_FIXTURE_NAMES.corpusLlmAddBias,
             source: SOURCES.corpusLlmAddBias,
-            options: { workgroupSize: [8, 1, 1] },
+            options: { kernelName: CORPUS_FIXTURE_KERNEL_NAMES.corpusLlmAddBias, workgroupSize: [8, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
             input: () => ({
               buffers: {
@@ -573,7 +578,7 @@ const html = String.raw`<!doctype html>
           cases.push({
             name: CORPUS_FIXTURE_NAMES.corpusLlmSetVector,
             source: SOURCES.corpusLlmSetVector,
-            options: { workgroupSize: [8, 1, 1] },
+            options: { kernelName: CORPUS_FIXTURE_KERNEL_NAMES.corpusLlmSetVector, workgroupSize: [8, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
             input: () => ({
               buffers: {
@@ -588,7 +593,7 @@ const html = String.raw`<!doctype html>
           cases.push({
             name: CORPUS_FIXTURE_NAMES.corpusLeetCudaElementwiseAddF32,
             source: SOURCES.corpusLeetCudaElementwiseAddF32,
-            options: { workgroupSize: [8, 1, 1] },
+            options: { kernelName: CORPUS_FIXTURE_KERNEL_NAMES.corpusLeetCudaElementwiseAddF32, workgroupSize: [8, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
             input: () => ({
               buffers: {
@@ -691,10 +696,7 @@ const server = await createServer({
   logLevel: "error",
   server: { host: "127.0.0.1", port: 0 },
   resolve: {
-    alias: {
-      "@unlocalhosted/browsergrad-kernels": path.join(root, "packages/browsergrad-kernels/src/index.ts"),
-      "@unlocalhosted/browsergrad-compiler": path.join(root, "packages/browsergrad-compiler/src/index.ts"),
-    },
+    alias: moduleAliases(bundle),
   },
   plugins: [{
     name: "browsergrad-cuda-lite-e2e-page",
@@ -729,6 +731,7 @@ try {
   const result = await page.evaluate(() => globalThis.__bgRunE2e());
   const report = {
     tool: "browsergrad-cuda-lite-webgpu-e2e",
+    bundle,
     userAgent: await page.evaluate(() => navigator.userAgent),
     ...result,
   };
@@ -754,6 +757,7 @@ function markdownReport(data) {
   const lines = [
     "# BrowserGrad CUDA-lite WebGPU e2e",
     "",
+    `Bundle: \`${data.bundle ?? "src"}\``,
     `User agent: \`${data.userAgent ?? "unknown"}\``,
     `Available: \`${data.available}\``,
     "",
@@ -775,10 +779,30 @@ function markdownReport(data) {
 function loadCorpusExecutionSources() {
   const out = {};
   for (const fixture of cudaLiteCorpusExecutionFixtures) {
-    const source = extractGlobalKernelFromFile(corpusFixturePath(fixture), fixture.kernelName);
+    const source = loadNormalizedCorpusKernelSource(fixture);
     if (source) out[fixture.sourceKey] = source;
   }
   return out;
+}
+
+function loadNormalizedCorpusKernelSource(fixture) {
+  const corpus = corpusById(fixture.corpusId);
+  const result = spawnSync(process.execPath, [
+    path.join(root, "scripts/audit-cuda-lite-corpus.mjs"),
+    corpus.path,
+    "--emit-kernel-source",
+    fixture.relativePath,
+    "--kernel-name",
+    fixture.kernelName,
+  ], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`could not load normalized corpus fixture ${fixture.caseName}: ${result.stderr || result.stdout}`);
+  }
+  return JSON.parse(result.stdout).source;
 }
 
 function verifyCorpusFixtureCheckouts() {
@@ -806,40 +830,6 @@ function verifyCorpusFixtureCheckouts() {
   }
 }
 
-function extractGlobalKernelFromFile(filePath, name) {
-  if (!fs.existsSync(filePath)) return undefined;
-  return extractGlobalKernel(fs.readFileSync(filePath, "utf8"), name);
-}
-
-function extractGlobalKernel(source, name) {
-  const re = new RegExp(`__global__\\s+void\\s+${escapeRegExp(name)}\\s*\\(`, "u");
-  const match = re.exec(source);
-  if (!match) return undefined;
-  const start = match.index;
-  const bodyStart = source.indexOf("{", match.index);
-  if (bodyStart < 0) return undefined;
-  const end = findBalanced(source, bodyStart, "{", "}");
-  if (end === undefined) return undefined;
-  return source.slice(start, end + 1);
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function findBalanced(source, openIndex, open, close) {
-  let depth = 0;
-  for (let index = openIndex; index < source.length; index++) {
-    const char = source[index];
-    if (char === open) depth++;
-    if (char === close) {
-      depth--;
-      if (depth === 0) return index;
-    }
-  }
-  return undefined;
-}
-
 function findRepoRoot(start) {
   let current = path.resolve(start);
   while (true) {
@@ -848,4 +838,22 @@ function findRepoRoot(start) {
     if (parent === current) return path.resolve(start);
     current = parent;
   }
+}
+
+function parseBundle(value) {
+  if (value === "src" || value === "dist") return value;
+  throw new Error("--bundle expects src or dist");
+}
+
+function moduleAliases(bundleName) {
+  const compilerEntry = bundleName === "dist"
+    ? path.join(root, "packages/browsergrad-compiler/dist/index.js")
+    : path.join(root, "packages/browsergrad-compiler/src/index.ts");
+  const kernelsEntry = bundleName === "dist"
+    ? path.join(root, "packages/browsergrad-kernels/dist/index.js")
+    : path.join(root, "packages/browsergrad-kernels/src/index.ts");
+  return {
+    "@unlocalhosted/browsergrad-kernels": kernelsEntry,
+    "@unlocalhosted/browsergrad-compiler": compilerEntry,
+  };
 }

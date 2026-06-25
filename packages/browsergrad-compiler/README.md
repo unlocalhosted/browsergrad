@@ -338,6 +338,7 @@ compiler names.
 pnpm test:browser
 pnpm test:browser:open
 pnpm e2e:webgpu
+pnpm e2e:webgpu:dist
 pnpm e2e:webgpu:corpus -- --require-webgpu
 pnpm verify:real-world-cuda -- --skip-fetch --require-webgpu
 ```
@@ -355,12 +356,20 @@ from pinned local corpora under `/tmp` and executes them through real WebGPU
 with readback comparisons. Required fixture names currently cover CUDA-120
 `vectorAddKernel`, NVIDIA `cuda-samples` `vectorAdd`, `llm.c` `add_bias`,
 `llm.c` `set_vector`, and LeetCUDA `elementwise_add_f32_kernel`.
+Fixture source is emitted through the same corpus-audit normalization path used
+for full-corpus compile/codegen counts, so helper/context handling does not
+silently diverge between audit and browser execution gates.
+Pass `-- --bundle dist` or use `e2e:webgpu:dist` to run the same browser proof
+against built package exports instead of TS source aliases.
 Compiler e2e, corpus, and benchmark package scripts use
 `scripts/run-cuda-lite-tool.mjs`, which locks build + tool execution so parallel
-invocations cannot import a partially rebuilt `dist/` tree.
+invocations cannot import a partially rebuilt `dist/` tree. The wrapper builds
+`browsergrad-kernels` before `browsergrad-compiler` so dist-bundle browser gates
+exercise fresh package output.
 `verify:real-world-cuda` is the combined truth gate: it runs the pinned
 real-world compile/codegen audit and then the exact-kernel browser/WebGPU corpus
-fixture e2e.
+fixture e2e against both source aliases and built dist exports by default. Use
+`--bundle src`, `--bundle dist`, or `--bundle both` to choose the browser bundle.
 
 ## Corpus Audit
 
@@ -391,7 +400,7 @@ Real execution proof lives in fixture-backed tests such as
 
 ```bash
 pnpm --filter @unlocalhosted/browsergrad-compiler bench -- --markdown /tmp/bg-cuda-lite-bench.md
-pnpm --filter @unlocalhosted/browsergrad-compiler bench:browser -- --markdown /tmp/bg-cuda-lite-webgpu-bench.md
+pnpm --filter @unlocalhosted/browsergrad-compiler bench:browser -- --bundle dist --markdown /tmp/bg-cuda-lite-webgpu-bench.md
 ```
 
 The harness emits stable JSON timing for compile, CPU reference, dynamic-launch

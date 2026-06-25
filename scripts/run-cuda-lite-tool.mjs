@@ -36,6 +36,7 @@ const tool = tools[toolName];
 const forwardedArgs = rawArgs[0] === "--" ? rawArgs.slice(1) : rawArgs;
 
 await withLock(lockDir, async () => {
+  await run(pnpmBin(), ["--filter", "@unlocalhosted/browsergrad-kernels", "run", "build"], root);
   await run(pnpmBin(), ["run", "build"], compilerDir);
   await run(process.execPath, [
     path.join(scriptDir, tool.script),

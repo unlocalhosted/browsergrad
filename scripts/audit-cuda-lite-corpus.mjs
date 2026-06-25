@@ -10,13 +10,13 @@ import {
   pruneCudaPreprocessorBranches,
 } from "./cuda-lite-source-normalizer.mjs";
 
-const { corpusPathArg, details, expectations, firstFailureLimit, help, includeSources } = parseArgs(process.argv.slice(2));
+const { corpusPathArg, details, emitKernelSource, expectations, firstFailureLimit, help, includeSources } = parseArgs(process.argv.slice(2));
 if (help) {
-  console.log("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--expect-total N] [--expect-compile-codegen-min N] [--expect-hard-fail-max N]");
+  console.log("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--emit-kernel-source FILE --kernel-name NAME] [--expect-total N] [--expect-compile-codegen-min N] [--expect-hard-fail-max N]");
   process.exit(0);
 }
 if (!corpusPathArg) {
-  console.error("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--expect-total N] [--expect-compile-codegen-min N] [--expect-hard-fail-max N]");
+  console.error("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--emit-kernel-source FILE --kernel-name NAME] [--expect-total N] [--expect-compile-codegen-min N] [--expect-hard-fail-max N]");
   process.exit(2);
 }
 
@@ -81,6 +81,12 @@ const files = listFiles(corpusRoot)
   .filter((file) => /\.(?:md|markdown|cu|cuh|cpp|cc|cxx|h|hpp)$/i.test(file))
   .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 const corpusContext = createCorpusContext(corpusRoot, files);
+
+if (emitKernelSource !== undefined) {
+  const source = emitKernelCompilationSource(corpusRoot, corpusContext, emitKernelSource.file, emitKernelSource.kernelName);
+  console.log(JSON.stringify({ source }, null, 2));
+  process.exit(0);
+}
 
 const results = [];
 let codeBlocks = 0;
@@ -201,6 +207,22 @@ function mentionsIdentifier(source, name) {
 }
 
 function compileKernelFromAuditContext(rawKernel, kernels, kernelName, context) {
+  const source = sourceFromAuditContext(rawKernel, kernels, kernelName, context);
+  try {
+    compileCudaLiteKernel(source, {
+      kernelName,
+      features: { "shader-f16": true, subgroups: true },
+      f64Mode: "f32",
+      workgroupSize: [256, 1, 1],
+      dynamicSharedMemory: inferDynamicSharedMemory(source),
+    });
+    return { ok: true, source };
+  } catch (error) {
+    return { ok: false, source, error };
+  }
+}
+
+function sourceFromAuditContext(rawKernel, kernels, kernelName, context) {
   const kernel = pruneCudaPreprocessorBranches(rawKernel, context.effectiveDefines);
   const siblingKernels = [
     ...kernels.filter((candidate) => candidate !== rawKernel)
@@ -220,18 +242,38 @@ function compileKernelFromAuditContext(rawKernel, kernels, kernelName, context) 
     recordDeclarations: context.recordDeclarations,
     sharedDeclarations: context.sharedDeclarations,
   });
-  try {
-    compileCudaLiteKernel(source, {
-      kernelName,
-      features: { "shader-f16": true, subgroups: true },
-      f64Mode: "f32",
-      workgroupSize: [256, 1, 1],
-      dynamicSharedMemory: inferDynamicSharedMemory(source),
-    });
-    return { ok: true, source };
-  } catch (error) {
-    return { ok: false, source, error };
+  return source;
+}
+
+function emitKernelCompilationSource(corpusRoot, corpusContext, relativePath, kernelName) {
+  const absolute = path.join(corpusRoot, relativePath);
+  if (!fs.existsSync(absolute)) {
+    throw new Error(`kernel source file not found: ${relativePath}`);
   }
+  const text = corpusContext.read(absolute);
+  const directIncludeContext = corpusContext.directSources(absolute).join("\n");
+  const reverseIncludeContext = corpusContext.reverseSources(absolute).join("\n");
+  const blocks = markdownBlocks(text, relativePath);
+  let carriedDefines = new Map();
+  for (const block of blocks) {
+    if (isNonKernelCodeBlock(block)) continue;
+    const directContext = createAuditBlockContext(directIncludeContext, block.code, carriedDefines, corpusContext.globalDefines);
+    const reverseContext = reverseIncludeContext.trim().length > 0
+      ? createAuditBlockContext(`${directIncludeContext}\n${reverseIncludeContext}`, block.code, carriedDefines, corpusContext.globalDefines)
+      : undefined;
+    const kernels = extractKernelDefinitions(block.code);
+    const rawKernel = kernels.find((candidate) => kernelDefinitionName(candidate) === kernelName);
+    if (rawKernel !== undefined) {
+      const directAttempt = compileKernelFromAuditContext(rawKernel, kernels, kernelName, directContext);
+      if (directAttempt.ok || reverseContext === undefined || !shouldRetryWithReverseContext(directAttempt.error)) {
+        return directAttempt.source;
+      }
+      const reverseAttempt = compileKernelFromAuditContext(rawKernel, kernels, kernelName, reverseContext);
+      return reverseAttempt.source;
+    }
+    carriedDefines = mergeCarriedDefines(carriedDefines, directContext.blockDefines);
+  }
+  throw new Error(`kernel ${kernelName} not found in ${relativePath}`);
 }
 
 function shouldRetryWithReverseContext(error) {
@@ -1291,6 +1333,8 @@ function parseArgs(args) {
   let corpusPathArg;
   let details = false;
   let includeSources = false;
+  let emitKernelFile;
+  let emitKernelName;
   const expectations = {};
   let firstFailureLimit = 80;
   let help = false;
@@ -1304,6 +1348,22 @@ function parseArgs(args) {
     if (arg === "--sources") {
       details = true;
       includeSources = true;
+      continue;
+    }
+    if (arg === "--emit-kernel-source") {
+      emitKernelFile = args[++index];
+      if (!emitKernelFile) {
+        console.error("--emit-kernel-source expects a relative file path");
+        process.exit(2);
+      }
+      continue;
+    }
+    if (arg === "--kernel-name") {
+      emitKernelName = args[++index];
+      if (!emitKernelName) {
+        console.error("--kernel-name expects a CUDA kernel name");
+        process.exit(2);
+      }
       continue;
     }
     if (arg === "--limit") {
@@ -1341,7 +1401,14 @@ function parseArgs(args) {
     console.error(`unexpected argument: ${arg}`);
     process.exit(2);
   }
-  return { corpusPathArg, details, expectations, firstFailureLimit, help, includeSources };
+  const emitKernelSource = emitKernelFile !== undefined || emitKernelName !== undefined
+    ? { file: emitKernelFile, kernelName: emitKernelName }
+    : undefined;
+  if (emitKernelSource !== undefined && (!emitKernelSource.file || !emitKernelSource.kernelName)) {
+    console.error("--emit-kernel-source requires --kernel-name");
+    process.exit(2);
+  }
+  return { corpusPathArg, details, emitKernelSource, expectations, firstFailureLimit, help, includeSources };
 }
 
 function parseExpectationArg(arg, args, index) {

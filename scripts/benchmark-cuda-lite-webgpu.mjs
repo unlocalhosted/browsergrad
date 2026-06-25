@@ -21,6 +21,7 @@ const headed = args.get("--headed") === "true";
 const requireWebGpu = args.get("--require-webgpu") === "true";
 const preparedRatioMax = positiveNumber(args.get("--expect-prepared-ratio-max"));
 const preparedScalarRatioMax = positiveNumber(args.get("--expect-prepared-scalar-ratio-max"));
+const bundle = parseBundle(args.get("--bundle") ?? "src");
 
 const root = findRepoRoot(process.cwd());
 const packageRequire = createRequire(path.join(root, "packages/browsergrad-compiler/package.json"));
@@ -189,10 +190,7 @@ const server = await createServer({
   logLevel: "error",
   server: { host: "127.0.0.1", port: 0 },
   resolve: {
-    alias: {
-      "@unlocalhosted/browsergrad-kernels": path.join(root, "packages/browsergrad-kernels/src/index.ts"),
-      "@unlocalhosted/browsergrad-compiler": path.join(root, "packages/browsergrad-compiler/src/index.ts"),
-    },
+    alias: moduleAliases(bundle),
   },
   plugins: [{
     name: "browsergrad-cuda-lite-bench-page",
@@ -230,6 +228,7 @@ try {
   );
   const report = {
     tool: "browsergrad-cuda-lite-webgpu-benchmark",
+    bundle,
     userAgent: await page.evaluate(() => navigator.userAgent),
     ...result,
   };
@@ -252,6 +251,7 @@ function markdownReport(data) {
   const lines = [
     "# BrowserGrad CUDA-lite WebGPU benchmark",
     "",
+    `Bundle: \`${data.bundle ?? "src"}\``,
     `User agent: \`${data.userAgent ?? "unknown"}\``,
     `Available: \`${data.available}\``,
     `Runs: \`${data.runs}\`, warmup: \`${data.warmup}\`, length: \`${data.length}\``,
@@ -312,4 +312,22 @@ function findRepoRoot(start) {
     dir = path.dirname(dir);
   }
   throw new Error("could not find repo root");
+}
+
+function parseBundle(value) {
+  if (value === "src" || value === "dist") return value;
+  throw new Error("--bundle expects src or dist");
+}
+
+function moduleAliases(bundleName) {
+  const compilerEntry = bundleName === "dist"
+    ? path.join(root, "packages/browsergrad-compiler/dist/index.js")
+    : path.join(root, "packages/browsergrad-compiler/src/index.ts");
+  const kernelsEntry = bundleName === "dist"
+    ? path.join(root, "packages/browsergrad-kernels/dist/index.js")
+    : path.join(root, "packages/browsergrad-kernels/src/index.ts");
+  return {
+    "@unlocalhosted/browsergrad-kernels": kernelsEntry,
+    "@unlocalhosted/browsergrad-compiler": compilerEntry,
+  };
 }

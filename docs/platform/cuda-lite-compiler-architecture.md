@@ -213,9 +213,12 @@ Current WebGPU smoke/perf gate:
 
 ```sh
 pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu
+pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu:dist
 pnpm --filter @unlocalhosted/browsergrad-compiler bench:browser -- --require-webgpu --expect-prepared-ratio-max 10
 ```
 
+`verify:real-world-cuda` runs both source-alias and dist-export browser bundles
+by default, so library consumers are covered in addition to local TS source.
 Use stricter ratio values only on pinned machines. Browser/GPU timing is not
 portable enough for global absolute thresholds.
 
