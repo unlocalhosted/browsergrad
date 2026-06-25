@@ -1185,8 +1185,19 @@ __global__ void vectorArg(float *x, float *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("pick_max(v, vec2<f32>(x[0], f32(4.0))");
+    expect(compiled.wgsl).toContain("pick_max(v, vec2<f32>(x[0], 4.0)");
     expect([...result.buffers.out as Float32Array]).toEqual([7]);
+  });
+
+  it("promotes mixed integer and float scalar expressions for WGSL", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void mixed(float *out, int i, int n) {
+  if (threadIdx.x < 1) {
+    out[0] = 1.0f / powf(10000.0f, 2 * i / (n * 2.0f));
+  }
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("pow(10000.0, (f32((2 * params.i)) / (f32(params.n) * 2.0)))");
   });
 
   it("requires explicit f64 compatibility mode before lowering double to f32", () => {
@@ -2392,7 +2403,7 @@ __global__ void frexpKernel(float *out, int *expOut) {
     );
 
     expect(compiled.wgsl).toContain("fn bg_frexp(");
-    expect(compiled.wgsl).toContain("bg_frexp(f32(9.0), &exponent)");
+    expect(compiled.wgsl).toContain("bg_frexp(9.0, &exponent)");
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(0.5625, 6);
     expect([...result.buffers.expOut as Int32Array]).toEqual([4]);
   });
@@ -2412,7 +2423,7 @@ __global__ void shadow_lerp(float *out) {
     );
 
     expect(compiled.wgsl).toContain("fn bg_lerp(");
-    expect(compiled.wgsl).toContain("bg_lerp(f32(2.0), f32(6.0), f32(0.25)");
+    expect(compiled.wgsl).toContain("bg_lerp(2.0, 6.0, 0.25");
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(8.25, 5);
   });
 

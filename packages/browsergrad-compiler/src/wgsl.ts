@@ -292,6 +292,7 @@ interface EmitContext {
   readonly externalPoolNames: readonly string[];
   readonly mutablePointerBases: readonly string[];
   readonly vectorCooperativeReduceHelpers: Map<string, VectorCooperativeReduceHelper>;
+  readonly expressionValueTypes: WeakMap<CudaLiteExpression, CudaLiteScalarType | undefined>;
   mutablePointerBaseFor(name: string): string | undefined;
   isLocalName(name: string): boolean;
   localValueTypeFor(name: string): CudaLiteScalarType | undefined;
@@ -512,6 +513,7 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
   const localArrays = collectLocalArrays(ir.body);
   const wgslNames = createWgslNameMap(collectWgslDeclaredNames(ir, localNames, externalPoolNames));
   const vectorCooperativeReduceHelpers = new Map<string, VectorCooperativeReduceHelper>();
+  const expressionValueTypes = new WeakMap<CudaLiteExpression, CudaLiteScalarType | undefined>();
   const paramsBinding = uniformScalars.length > 0 ? bindings.length : undefined;
   if (paramsBinding !== undefined) {
     bindings.push({
@@ -585,6 +587,7 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
     externalPoolNames,
     mutablePointerBases,
     vectorCooperativeReduceHelpers,
+    expressionValueTypes,
     mutablePointerBaseFor(name) {
       if (localPointerHandles.has(name)) return wgslNames.get(`${name}_base`) ?? `${name}_base`;
       return mutablePointerBases.includes(name) ? `bg_${name}_base` : undefined;
@@ -1926,7 +1929,7 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       if (pointerDifference) return pointerDifference;
       const vectorArithmetic = emitVectorArithmetic(expression, context);
       if (vectorArithmetic) return vectorArithmetic;
-      return `(${emitExpression(expression.left, context)} ${expression.operator} ${emitExpression(expression.right, context)})`;
+      return emitScalarBinaryExpression(expression, context);
     }
     case "conditional":
       return `select(${emitExpression(expression.alternate, context)}, ${emitExpression(expression.consequent, context)}, ${emitExpression(expression.condition, context)})`;
@@ -3032,6 +3035,18 @@ function emitMatrixTileLaneAccessExpression(
 }
 
 function expressionValueTypeForEmit(expression: CudaLiteExpression, context: EmitContext): CudaLiteScalarType | undefined {
+  if (context.expressionValueTypes.has(expression)) return context.expressionValueTypes.get(expression);
+  const valueType = uncachedExpressionValueTypeForEmit(expression, context);
+  context.expressionValueTypes.set(expression, valueType);
+  return valueType;
+}
+
+function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, context: EmitContext): CudaLiteScalarType | undefined {
+  if (expression.kind === "number") {
+    if (/[.eEfF]/u.test(expression.raw)) return "float";
+    if (/[uU]$/u.test(expression.raw)) return "uint";
+    return "int";
+  }
   if (expression.kind === "identifier") {
     return context.localValueTypeFor(expression.name) ??
       context.paramFor(expression.name)?.valueType ??
@@ -3061,7 +3076,15 @@ function expressionValueTypeForEmit(expression: CudaLiteExpression, context: Emi
     if (objectType === "complex64") return "float";
     return objectType;
   }
-  if (expression.kind === "binary") return vectorArithmeticTypeForEmit(expression, context);
+  if (expression.kind === "binary") {
+    const vectorType = vectorArithmeticTypeForEmit(expression, context);
+    if (vectorType) return vectorType;
+    if (isComparisonOperator(expression.operator) || expression.operator === "&&" || expression.operator === "||") return "bool";
+    return promotedCudaScalarType(
+      expressionValueTypeForEmit(expression.left, context),
+      expressionValueTypeForEmit(expression.right, context),
+    );
+  }
   return undefined;
 }
 
@@ -3086,6 +3109,80 @@ function emitVectorArithmetic(
   const left = emitExpressionAsVectorOperand(expression.left, vectorType, context);
   const right = emitExpressionAsVectorOperand(expression.right, vectorType, context);
   return `(${left} ${expression.operator} ${right})`;
+}
+
+function emitScalarBinaryExpression(
+  expression: Extract<CudaLiteExpression, { kind: "binary" }>,
+  context: EmitContext,
+): string {
+  const target = promotedWgslScalarTypeForBinary(expression, context);
+  const left = target ? emitExpressionAsWgslScalar(expression.left, target, context) : emitExpression(expression.left, context);
+  const right = target ? emitExpressionAsWgslScalar(expression.right, target, context) : emitExpression(expression.right, context);
+  return `(${left} ${expression.operator} ${right})`;
+}
+
+function promotedWgslScalarTypeForBinary(
+  expression: Extract<CudaLiteExpression, { kind: "binary" }>,
+  context: EmitContext,
+): "f32" | "f16" | "i32" | "u32" | undefined {
+  if (!isScalarPromotionOperator(expression.operator)) return undefined;
+  const left = expressionWgslScalarType(expression.left, context);
+  const right = expressionWgslScalarType(expression.right, context);
+  if (left === undefined || right === undefined || left === right) return undefined;
+  if (left === "f32" || right === "f32") return "f32";
+  if (left === "f16" || right === "f16") return "f16";
+  return undefined;
+}
+
+function emitExpressionAsWgslScalar(
+  expression: CudaLiteExpression,
+  target: "f32" | "f16" | "i32" | "u32",
+  context: EmitContext,
+): string {
+  const value = emitExpression(expression, context);
+  return expressionWgslScalarType(expression, context) === target ? value : `${target}(${value})`;
+}
+
+function promotedCudaScalarType(
+  left: CudaLiteScalarType | undefined,
+  right: CudaLiteScalarType | undefined,
+): CudaLiteScalarType | undefined {
+  if (left === undefined || right === undefined) return left ?? right;
+  if (isCudaVectorType(left) || isCudaVectorType(right)) return undefined;
+  const leftWgsl = cudaScalarWgslType(left);
+  const rightWgsl = cudaScalarWgslType(right);
+  if (leftWgsl === "f32" || rightWgsl === "f32") return "float";
+  if (leftWgsl === "f16" || rightWgsl === "f16") return "half";
+  if (leftWgsl === "u32" || rightWgsl === "u32") return "uint";
+  if (leftWgsl === "i32" || rightWgsl === "i32") return "int";
+  if (leftWgsl === "bool" && rightWgsl === "bool") return "bool";
+  return undefined;
+}
+
+function expressionWgslScalarType(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+): "f32" | "f16" | "i32" | "u32" | "bool" | undefined {
+  const valueType = expressionValueTypeForEmit(expression, context);
+  if (valueType === undefined || isCudaVectorType(valueType)) return undefined;
+  return cudaScalarWgslType(valueType);
+}
+
+function cudaScalarWgslType(type: CudaLiteScalarType): "f32" | "f16" | "i32" | "u32" | "bool" | undefined {
+  if (type === "float" || type === "double" || type === "bf16") return "f32";
+  if (type === "half") return "f16";
+  if (type === "int") return "i32";
+  if (type === "uint") return "u32";
+  if (type === "bool") return "bool";
+  return undefined;
+}
+
+function isScalarPromotionOperator(operator: string): boolean {
+  return isVectorArithmeticOperator(operator) || isComparisonOperator(operator);
+}
+
+function isComparisonOperator(operator: string): boolean {
+  return operator === "<" || operator === "<=" || operator === ">" || operator === ">=" || operator === "==" || operator === "!=";
 }
 
 function emitExpressionAsVectorOperand(
