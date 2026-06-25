@@ -51,6 +51,30 @@ from ._errors import JitNotImplementedError, ShapeError, RealizationError
 if TYPE_CHECKING:
     from ._buffer_table import BufferTable
 
+_GRAD_ENABLED = True
+
+
+class no_grad:
+    """Context manager that disables autograd graph construction."""
+
+    def __enter__(self):
+        global _GRAD_ENABLED
+        self._prev = _GRAD_ENABLED
+        _GRAD_ENABLED = False
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        global _GRAD_ENABLED
+        _GRAD_ENABLED = self._prev
+        return False
+
+
+inference_mode = no_grad
+
+
+def _should_track(*proxies: "TensorProxy") -> bool:
+    return _GRAD_ENABLED and any(p.requires_grad for p in proxies)
+
 
 # ---------------------------------------------------------------------------
 # Backward closures.
@@ -206,6 +230,16 @@ class TensorProxy:
     def ndim(self) -> int:
         return len(self._uop.shape)
 
+    @property
+    def is_leaf(self) -> bool:
+        return self._ctx is None
+
+    @property
+    def grad_fn(self) -> Optional[str]:
+        if self._ctx is None:
+            return None
+        return f"BrowserGradBackward(op={self._uop.op})"
+
     def size(self, dim: Optional[int] = None) -> Any:
         if dim is None:
             return self._uop.shape
@@ -297,6 +331,19 @@ class TensorProxy:
             f"dtype={self._uop.dtype}] first {n}: {flat}"
         )
 
+    def detach(self) -> "TensorProxy":
+        """Return a non-grad leaf view over the same lazy value."""
+        return TensorProxy(
+            self._uop,
+            session=self._get_session(),
+            requires_grad=False,
+            ctx=None,
+        )
+
+    def clone(self) -> "TensorProxy":
+        """Return a differentiable value copy."""
+        return self.reshape(self.shape)
+
     # ------------------------------------------------------------------
     # Python protocol methods that DO realize
     # ------------------------------------------------------------------
@@ -355,7 +402,7 @@ class TensorProxy:
             dtype=out_dtype,
             arg=_amp_arg(None),
         )
-        requires = self.requires_grad or rhs.requires_grad
+        requires = _should_track(self, rhs)
         ctx = (
             _BackwardCtx(fn=backward, input_proxies=(self, rhs))
             if requires and backward is not None
@@ -409,9 +456,10 @@ class TensorProxy:
             return (-dy,)
         uop = UOp(op=OP_NEG, inputs=(self._uop,), shape=self._uop.shape,
                   dtype=self._uop.dtype, arg=_amp_arg(None))
-        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if self.requires_grad else None
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
         return TensorProxy(uop, session=self._get_session(),
-                           requires_grad=self.requires_grad, ctx=ctx)
+                           requires_grad=requires, ctx=ctx)
 
     def __pow__(self, exponent: Any) -> "TensorProxy":
         """Universal MSE idiom support: `(pred - target) ** 2`.
@@ -484,7 +532,7 @@ class TensorProxy:
                 dy @ np.swapaxes(b_arr, -1, -2),
                 np.swapaxes(a_arr, -1, -2) @ dy,
             )
-        requires = self.requires_grad or rhs.requires_grad
+        requires = _should_track(self, rhs)
         ctx = _BackwardCtx(fn=_bw, input_proxies=(self, rhs)) if requires else None
         uop = UOp(op=OP_MATMUL, inputs=(self._uop, rhs._uop),
                   shape=out_shape, dtype=dtype, arg=_amp_arg(None))
@@ -536,9 +584,10 @@ class TensorProxy:
         def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
             (x_arr,) = ins
             return (dy * np.exp(x_arr),)
-        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if self.requires_grad else None
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
         return TensorProxy(uop, session=self._get_session(),
-                           requires_grad=self.requires_grad, ctx=ctx)
+                           requires_grad=requires, ctx=ctx)
 
     def log(self) -> "TensorProxy":
         uop = UOp(op=OP_LOG, inputs=(self._uop,), shape=self._uop.shape,
@@ -546,9 +595,10 @@ class TensorProxy:
         def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
             (x_arr,) = ins
             return (dy / x_arr,)
-        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if self.requires_grad else None
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
         return TensorProxy(uop, session=self._get_session(),
-                           requires_grad=self.requires_grad, ctx=ctx)
+                           requires_grad=requires, ctx=ctx)
 
     def _reduce(self, op: str, axis: Any = None, keepdims: bool = False) -> "TensorProxy":
         # Normalize axis to a tuple or None.
@@ -584,7 +634,7 @@ class TensorProxy:
         # Backward for sum/mean is broadcast-of-dy back to input shape.
         # max/min/argmax are non-differentiable on the indices; for max/min
         # we use a "distribute equally among tied positions" rule.
-        if op in ("sum", "mean") and self.requires_grad:
+        if op in ("sum", "mean") and _should_track(self):
             input_shape = self._uop.shape
             n_reduced = 1
             for a in reduced_axes:
@@ -601,9 +651,9 @@ class TensorProxy:
             ctx = _BackwardCtx(fn=_bw, input_proxies=(self,))
         else:
             ctx = None
+        requires = ctx is not None
         return TensorProxy(uop, session=self._get_session(),
-                           requires_grad=(op in ("sum", "mean")) and self.requires_grad,
-                           ctx=ctx)
+                           requires_grad=requires, ctx=ctx)
 
     def sum(self, axis: Any = None, keepdims: bool = False) -> "TensorProxy":
         return self._reduce("sum", axis=axis, keepdims=keepdims)
@@ -650,9 +700,10 @@ class TensorProxy:
         old_shape = self._uop.shape
         def _bw(dy: np.ndarray, _ins) -> Tuple[Optional[np.ndarray], ...]:
             return (dy.reshape(old_shape),)
-        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if self.requires_grad else None
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
         return TensorProxy(uop, session=self._get_session(),
-                           requires_grad=self.requires_grad, ctx=ctx)
+                           requires_grad=requires, ctx=ctx)
 
     def view(self, *shape: Any) -> "TensorProxy":
         return self.reshape(*shape)
@@ -674,9 +725,10 @@ class TensorProxy:
         inv_t = tuple(inv)
         def _bw(dy: np.ndarray, _ins) -> Tuple[Optional[np.ndarray], ...]:
             return (np.transpose(dy, axes=inv_t),)
-        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if self.requires_grad else None
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
         return TensorProxy(uop, session=self._get_session(),
-                           requires_grad=self.requires_grad, ctx=ctx)
+                           requires_grad=requires, ctx=ctx)
 
     @property
     def T(self) -> "TensorProxy":
@@ -691,9 +743,10 @@ class TensorProxy:
         src_dtype = self._uop.dtype
         def _bw(dy: np.ndarray, _ins) -> Tuple[Optional[np.ndarray], ...]:
             return (dy.astype(np.dtype(src_dtype), copy=False),)
-        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if self.requires_grad else None
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
         return TensorProxy(uop, session=self._get_session(),
-                           requires_grad=self.requires_grad, ctx=ctx)
+                           requires_grad=requires, ctx=ctx)
 
     def float(self) -> "TensorProxy":
         return self.cast("float32")
@@ -1056,6 +1109,8 @@ def arange(*args: Any, dtype: str = "int64",
 
 __all__ = [
     "TensorProxy",
+    "no_grad",
+    "inference_mode",
     "from_numpy",
     "tensor",
     "zeros",

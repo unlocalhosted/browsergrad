@@ -3,7 +3,6 @@
 **PyTorch-shaped deep learning in the browser.** Lazy IR with fusion, symbolic backward, AMP, gradient checkpointing, functional transforms, WGSL kernels, ONNX export.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![CI status](https://img.shields.io/badge/tests-427%20passing-brightgreen.svg)](#testing)
 [![browser](https://img.shields.io/badge/runs-in%20the%20browser-blue.svg)](#)
 
 ```python
@@ -27,16 +26,24 @@ for _ in range(100):
     opt.step()
 ```
 
-That code runs unmodified inside Pyodide in a browser tab. Same surface as PyTorch; no CUDA, no native compile step, no install — just `<script type="module">` and a Web Worker.
+That code runs inside Pyodide in a browser tab. BrowserGrad provides a curated
+PyTorch-shaped subset for labs and experiments; unsupported PyTorch APIs fail
+loudly instead of returning wrong values. No CUDA, no native compile step, no
+local Python install — just browser assets and a Web Worker.
 
 ## Why
 
-- **Same API as PyTorch.** `nn.Module`, `optim.Adam`, `nn.functional.cross_entropy`, `.backward()`, `torch.func.{grad, vjp, vmap, functional_call}`, `torch.amp.autocast`, `torch.utils.checkpoint`. Toggle a single flag and existing PyTorch code runs unchanged.
+- **Curated PyTorch-shaped subset.** `nn.Module`, `optim.Adam`,
+  `nn.functional.cross_entropy`, `.backward()`, `torch.func.{grad, vjp,
+  vmap, functional_call}`, `torch.amp.autocast`, `torch.utils.checkpoint`,
+  and `torch.utils.data` for browser-first labs.
 - **Lazy by default.** Arithmetic builds a UOp graph; nothing realizes until you ask for `.numpy()` or call `.backward()`. Enables fusion, AMP cast-insertion, gradient-checkpointing IR rewrites, and pluggable backends.
 - **GPU when you want it.** Plug a WGSL backend via a small bridge protocol. Forward inference runs on the GPU; backward stays correct on NumPy. No CUDA. No driver install.
 - **Real autograd, two paths.** Symbolic VJP rules emit IR; closure backward is the safety net. Verified against finite differences and hand-derived oracles.
 - **Save and ship.** safetensors for weights (returns bytes — browser-friendly), ONNX export for inference graphs (pure-Python proto3 encoder, no protobuf wheel).
-- **Honest about scope.** Per-PRD design reviews kill speculative ambitions before they ship. What's listed is what works. Limitations are listed too.
+- **Honest about scope.** Per-PRD design reviews kill speculative ambitions
+  before they ship. What's listed is what works; limitations are tracked as
+  explicit gaps.
 
 ## Install
 
@@ -90,7 +97,8 @@ x = torch.from_numpy(...)
 g = torch.func.grad(lambda t: (t * t).sum())(x)
 ```
 
-Anything browsergrad doesn't implement raises `AttributeError`, not silent wrong behavior.
+Anything BrowserGrad doesn't implement raises `AttributeError` or a typed
+BrowserGrad error, not silent wrong behavior.
 
 ### Run on real WebGPU
 
@@ -129,17 +137,19 @@ compatibility and release mechanics. New callers should start with
 Workspace tests cover package surfaces, Pyodide integration, and browser WebGPU:
 
 ```sh
-pnpm -r test
-pnpm -r test:integration                                    # 311 Pyodide-in-node tests
-pnpm --filter @unlocalhosted/browsergrad-kernels test:browser    # 7 real-Chromium WebGPU tests
-pnpm --filter @unlocalhosted/browsergrad-compiler verify:compiler
-pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --skip-fetch --require-webgpu
+pnpm -r run build
+pnpm -r run typecheck
+pnpm -r run test
+pnpm -r run lint
+pnpm --filter @unlocalhosted/browsergrad-jit test:integration
+pnpm --filter @unlocalhosted/browsergrad-grad test:integration
+pnpm --filter @unlocalhosted/browsergrad-runtime test:integration
+pnpm --filter @unlocalhosted/browsergrad-kernels test:browser
+pnpm --filter @unlocalhosted/browsergrad-compiler test:browser
+pnpm --filter @unlocalhosted/browsergrad-compiler test:source-normalizer
+pnpm --filter @unlocalhosted/browsergrad-compiler test:audit-corpus
+cd packages/browsergrad-dogfood && pnpm test
 pnpm --filter @unlocalhosted/browsergrad-primitives test
-pnpm --filter @unlocalhosted/browsergrad-simulators test
-pnpm --filter @unlocalhosted/browsergrad-snapshots test
-pnpm --filter @unlocalhosted/browsergrad-data test
-pnpm --filter @unlocalhosted/browsergrad-scaling test
-pnpm --filter @unlocalhosted/browsergrad-alignment test
 ```
 
 The browser-mode suite runs the WGSL kernels and the realizer bridge against an actual `GPUDevice` via Playwright + Chromium. It catches shader-level bugs that NumPy mocks miss.

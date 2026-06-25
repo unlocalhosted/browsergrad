@@ -22,7 +22,7 @@ from ._ir import (
     UOp, OP_WHERE, OP_CONST, OP_CUSTOM, OP_REDUCE, OP_DIV,
 )
 from ._tensor_proxy import (
-    TensorProxy, _BackwardCtx, _to_proxy,
+    TensorProxy, _BackwardCtx, _should_track, _to_proxy,
 )
 from ._errors import ShapeError
 
@@ -48,8 +48,9 @@ def relu(x: TensorProxy) -> TensorProxy:
         (x_arr,) = ins
         return (dy * (x_arr > 0).astype(dy.dtype),)
 
-    ctx = _BackwardCtx(fn=_bw, input_proxies=(x,)) if x.requires_grad else None
-    return TensorProxy(uop, session=sess, requires_grad=x.requires_grad, ctx=ctx)
+    requires = _should_track(x)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=(x,)) if requires else None
+    return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
 
 
 def sigmoid(x: TensorProxy) -> TensorProxy:
@@ -176,8 +177,9 @@ def cross_entropy(logits: TensorProxy, targets: TensorProxy,
         # targets has no gradient.
         return (grad_logits.astype(logits_arr.dtype, copy=False), None)
 
-    ctx = _BackwardCtx(fn=_bw, input_proxies=(logits, targets)) if logits.requires_grad else None
-    return TensorProxy(uop, session=sess, requires_grad=logits.requires_grad, ctx=ctx)
+    requires = _should_track(logits)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=(logits, targets)) if requires else None
+    return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
 
 
 def mse_loss(input: TensorProxy, target: TensorProxy,
@@ -236,8 +238,9 @@ def nll_loss(log_probs: TensorProxy, targets: TensorProxy,
             grad_lp[rows, cols] = -dy
         return (grad_lp.astype(lp_arr.dtype, copy=False), None)
 
-    ctx = _BackwardCtx(fn=_bw, input_proxies=(log_probs, targets)) if log_probs.requires_grad else None
-    return TensorProxy(uop, session=sess, requires_grad=log_probs.requires_grad, ctx=ctx)
+    requires = _should_track(log_probs)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=(log_probs, targets)) if requires else None
+    return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -300,8 +303,9 @@ def dropout(x: TensorProxy, p: float = 0.5, training: bool = True) -> TensorProx
             return (dy.copy(),)
         return ((dy * mask) / (1.0 - p),)
 
-    ctx = _BackwardCtx(fn=_bw, input_proxies=(x,)) if x.requires_grad else None
-    return TensorProxy(uop, session=sess, requires_grad=x.requires_grad, ctx=ctx)
+    requires = _should_track(x)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=(x,)) if requires else None
+    return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
 
 
 __all__ = [

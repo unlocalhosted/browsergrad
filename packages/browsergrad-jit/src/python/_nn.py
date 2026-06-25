@@ -17,10 +17,13 @@ import numpy as np
 
 from ._tensor_proxy import (
     TensorProxy,
+    _BackwardCtx,
+    _should_track,
     from_numpy,
     zeros,
     randn,
 )
+from ._ir import UOp, OP_CUSTOM
 from ._errors import ShapeError
 from . import _functional as F
 
@@ -67,11 +70,11 @@ class Parameter(TensorProxy):
 class Module:
     """Base class. Auto-registers Parameters and Modules assigned as
     attributes. Mirrors torch.nn.Module's essentials: parameters(),
-    train(), eval(), state_dict(), __call__ → forward().
+    buffers(), train(), eval(), state_dict(), __call__ → forward().
 
-    Not a 1:1 PyTorch port — there's no _buffers tracking, no register_*
-    hooks. Those can be layered on if labs request them; the simpler base
-    class is enough for the 0.1.0 conformance bar.
+    Not a 1:1 PyTorch port — there are no register_* hooks yet. Those can be
+    layered on if labs request them; the simpler base class keeps the teaching
+    surface readable.
     """
 
     def __init__(self) -> None:
@@ -79,16 +82,20 @@ class Module:
         # bootstrap attributes — they're storage, not user-assigned params.
         object.__setattr__(self, "_parameters", OrderedDict())
         object.__setattr__(self, "_modules", OrderedDict())
+        object.__setattr__(self, "_buffers", OrderedDict())
         object.__setattr__(self, "training", True)
 
     def __setattr__(self, name: str, value: Any) -> None:
         # Strip the old registration if `name` was a Parameter/Module before.
         params = self.__dict__.get("_parameters")
         modules = self.__dict__.get("_modules")
+        buffers = self.__dict__.get("_buffers")
         if params is not None and name in params:
             del params[name]
         if modules is not None and name in modules:
             del modules[name]
+        if buffers is not None and name in buffers:
+            del buffers[name]
 
         if isinstance(value, Parameter):
             if params is None:
@@ -157,6 +164,31 @@ class Module:
                 child_prefix = (prefix + mod_name + ".") if prefix else (mod_name + ".")
                 yield from m.named_parameters(prefix=child_prefix, recurse=True)
 
+    def register_buffer(self, name: str, value: Any) -> None:
+        if "." in name or not name:
+            raise KeyError(f"invalid buffer name {name!r}")
+        if name in self._parameters or name in self._modules:
+            raise KeyError(f"attribute {name!r} is already registered")
+        arr = np.asarray(value)
+        self._buffers[name] = arr.copy()
+        object.__setattr__(self, name, self._buffers[name])
+
+    def buffers(self, recurse: bool = True) -> Iterator[np.ndarray]:
+        for b in self._buffers.values():
+            yield b
+        if recurse:
+            for m in self._modules.values():
+                yield from m.buffers(recurse=True)
+
+    def named_buffers(self, prefix: str = "",
+                      recurse: bool = True) -> Iterator[Tuple[str, np.ndarray]]:
+        for name, b in self._buffers.items():
+            yield (prefix + name if prefix else name), b
+        if recurse:
+            for mod_name, m in self._modules.items():
+                child_prefix = (prefix + mod_name + ".") if prefix else (mod_name + ".")
+                yield from m.named_buffers(prefix=child_prefix, recurse=True)
+
     def train(self, mode: bool = True) -> "Module":
         object.__setattr__(self, "training", mode)
         for m in self._modules.values():
@@ -167,9 +199,20 @@ class Module:
         return self.train(False)
 
     def state_dict(self) -> dict:
-        return {name: p.numpy() for name, p in self.named_parameters()}
+        state = {name: p.numpy() for name, p in self.named_parameters()}
+        for name, b in self.named_buffers():
+            state[name] = np.array(b, copy=True)
+        return state
 
-    def load_state_dict(self, state: dict) -> None:
+    def load_state_dict(self, state: dict, strict: bool = True) -> None:
+        expected = {name for name, _ in self.named_parameters()}
+        expected.update(name for name, _ in self.named_buffers())
+        if strict:
+            extra = sorted(set(state.keys()) - expected)
+            if extra:
+                raise KeyError(
+                    f"state_dict has unexpected keys {extra!r}. Expected keys: {sorted(expected)}"
+                )
         for name, p in self.named_parameters():
             if name not in state:
                 raise KeyError(
@@ -184,6 +227,17 @@ class Module:
             session = p._get_session()
             session.buffer_table.update(p._uop.inputs[0].arg,
                                         arr.astype(np.dtype(p.dtype), copy=False))
+        for name, b in self.named_buffers():
+            if name not in state:
+                raise KeyError(
+                    f"state_dict missing key {name!r}. Have keys: {list(state)}"
+                )
+            arr = np.asarray(state[name])
+            if arr.shape != b.shape:
+                raise ShapeError(
+                    f"state_dict[{name!r}] shape {arr.shape} != buffer shape {b.shape}"
+                )
+            b[...] = arr.astype(b.dtype, copy=False)
 
     def zero_grad(self) -> None:
         """Reset all parameter gradients. Mirrors optimizer.zero_grad()."""
@@ -274,6 +328,135 @@ class Dropout(Module):
         return F.dropout(x, p=self.p, training=self.training)
 
 
+class BatchNorm1d(Module):
+    """Batch normalization over channel dim for (N, C) or (N, C, L)."""
+
+    def __init__(
+        self,
+        num_features: int,
+        eps: float = 1e-5,
+        momentum: float = 0.1,
+        affine: bool = True,
+        track_running_stats: bool = True,
+    ) -> None:
+        super().__init__()
+        self.num_features = int(num_features)
+        self.eps = float(eps)
+        self.momentum = float(momentum)
+        self.affine = bool(affine)
+        self.track_running_stats = bool(track_running_stats)
+        if self.affine:
+            self.weight = Parameter(from_numpy(
+                np.ones((self.num_features,), dtype=np.float32),
+                requires_grad=True,
+            ))
+            self.bias = Parameter(from_numpy(
+                np.zeros((self.num_features,), dtype=np.float32),
+                requires_grad=True,
+            ))
+        else:
+            self.weight = None
+            self.bias = None
+        if self.track_running_stats:
+            self.register_buffer(
+                "running_mean",
+                np.zeros((self.num_features,), dtype=np.float32),
+            )
+            self.register_buffer(
+                "running_var",
+                np.ones((self.num_features,), dtype=np.float32),
+            )
+        else:
+            self.running_mean = None
+            self.running_var = None
+
+    def forward(self, x: TensorProxy) -> TensorProxy:
+        if x.ndim not in (2, 3):
+            raise ShapeError(
+                f"BatchNorm1d expects 2D (N, C) or 3D (N, C, L); got shape {x.shape}"
+            )
+        if x.shape[1] != self.num_features:
+            raise ShapeError(
+                f"BatchNorm1d expected {self.num_features} channels, got {x.shape[1]}"
+            )
+        reduce_axes = (0,) if x.ndim == 2 else (0, 2)
+        stat_shape = (1, self.num_features) if x.ndim == 2 else (1, self.num_features, 1)
+        training_pass = self.training or not self.track_running_stats
+        sess = x._get_session()
+
+        captured: dict = {}
+
+        def _forward(x_arr: np.ndarray, *affine_arrays: np.ndarray) -> np.ndarray:
+            if training_pass:
+                mean = x_arr.mean(axis=reduce_axes)
+                var = x_arr.var(axis=reduce_axes)
+                if self.training and self.track_running_stats:
+                    m = self.momentum
+                    self.running_mean[...] = (1.0 - m) * self.running_mean + m * mean
+                    self.running_var[...] = (1.0 - m) * self.running_var + m * var
+            else:
+                mean = self.running_mean
+                var = self.running_var
+            inv_std = 1.0 / np.sqrt(var + self.eps)
+            x_hat = (x_arr - mean.reshape(stat_shape)) * inv_std.reshape(stat_shape)
+            captured["x_hat"] = x_hat
+            captured["inv_std"] = inv_std
+            out = x_hat
+            if self.affine:
+                weight_arr, bias_arr = affine_arrays
+                out = out * weight_arr.reshape(stat_shape) + bias_arr.reshape(stat_shape)
+            return out.astype(np.dtype(x.dtype), copy=False)
+
+        input_uops = [x._uop]
+        input_proxies = [x]
+        if self.affine:
+            input_uops.extend([self.weight._uop, self.bias._uop])
+            input_proxies.extend([self.weight, self.bias])
+        uop = UOp(
+            op=OP_CUSTOM,
+            inputs=tuple(input_uops),
+            shape=x.shape,
+            dtype=x.dtype,
+            arg={"fn": _forward, "captures": (), "name": "batch_norm1d"},
+        )
+
+        def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]):
+            x_arr = ins[0]
+            x_hat = captured["x_hat"]
+            inv_std = captured["inv_std"]
+            if self.affine:
+                weight_arr = ins[1]
+                grad_x_hat = dy * weight_arr.reshape(stat_shape)
+                grad_weight = (dy * x_hat).sum(axis=reduce_axes)
+                grad_bias = dy.sum(axis=reduce_axes)
+            else:
+                grad_x_hat = dy
+                grad_weight = None
+                grad_bias = None
+            if training_pass:
+                n_total = float(np.prod([x_arr.shape[a] for a in reduce_axes]))
+                sum_g = grad_x_hat.sum(axis=reduce_axes, keepdims=True)
+                sum_g_xhat = (grad_x_hat * x_hat).sum(axis=reduce_axes, keepdims=True)
+                grad_x = inv_std.reshape(stat_shape) * (
+                    grad_x_hat - sum_g / n_total - x_hat * sum_g_xhat / n_total
+                )
+            else:
+                grad_x = grad_x_hat * inv_std.reshape(stat_shape)
+            if self.affine:
+                return (grad_x, grad_weight, grad_bias)
+            return (grad_x,)
+
+        requires = _should_track(*input_proxies)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=tuple(input_proxies)) if requires else None
+        return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
+
+    def __repr__(self) -> str:
+        return (
+            f"BatchNorm1d({self.num_features}, eps={self.eps}, "
+            f"momentum={self.momentum}, affine={self.affine})"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Sequential — composition
 # ---------------------------------------------------------------------------
@@ -344,6 +527,7 @@ __all__ = [
     "GELU",
     "Softmax",
     "Dropout",
+    "BatchNorm1d",
     "Sequential",
     "MSELoss",
     "CrossEntropyLoss",

@@ -76,6 +76,63 @@ ok
     expect(matches).toBe(true);
   });
 
+  it("BatchNorm1d buffers round-trip through state_dict", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      keys: string[];
+      mean: number[];
+      var: number[];
+      evalClose: boolean;
+      bufferIdentityStable: boolean;
+      extraKeyError: string;
+      missingKeyError: string;
+    }>(`
+import browsergrad_jit as bg
+import numpy as np
+
+src = bg.nn.BatchNorm1d(2, momentum=1.0)
+x = bg.tensor([[1.0, 2.0], [3.0, 6.0]])
+mean_id_before = id(src.running_mean)
+src(x).numpy()
+buffer_identity_stable = mean_id_before == id(src.running_mean)
+dst = bg.nn.BatchNorm1d(2)
+dst.load_state_dict(src.state_dict())
+
+src.eval()
+dst.eval()
+ys = src(x).numpy()
+yd = dst(x).numpy()
+try:
+    dst.load_state_dict({**src.state_dict(), "unexpected": np.zeros(1, dtype=np.float32)})
+    extra_key_error = "none"
+except KeyError as e:
+    extra_key_error = str(e)
+missing = src.state_dict()
+del missing["running_var"]
+try:
+    dst.load_state_dict(missing)
+    missing_key_error = "none"
+except KeyError as e:
+    missing_key_error = str(e)
+{
+    "keys": sorted(src.state_dict().keys()),
+    "mean": dst.running_mean.round(6).tolist(),
+    "var": dst.running_var.round(6).tolist(),
+    "evalClose": bool(np.allclose(ys, yd)),
+    "bufferIdentityStable": buffer_identity_stable,
+    "extraKeyError": extra_key_error,
+    "missingKeyError": missing_key_error,
+}
+`);
+    expect(result.keys).toEqual(["bias", "running_mean", "running_var", "weight"]);
+    expect(result.mean).toEqual([2, 4]);
+    expect(result.var).toEqual([1, 4]);
+    expect(result.evalClose).toBe(true);
+    expect(result.bufferIdentityStable).toBe(true);
+    expect(result.extraKeyError).toContain("unexpected keys");
+    expect(result.missingKeyError).toContain("running_var");
+  });
+
   it("MSE loss decreases over SGD training on a linear regression", async () => {
     const target = await getJitTarget();
     const losses = await target.run<number[]>(`

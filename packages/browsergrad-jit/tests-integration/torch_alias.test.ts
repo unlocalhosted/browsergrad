@@ -84,6 +84,128 @@ t = torch.tensor([1.0, 2.0, 3.0, 4.0])
     expect(result.sumValue).toBe(10.0);
   });
 
+  it("covers curriculum compatibility APIs from issue #5", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      caps: Record<string, boolean>;
+      sigmoid: number[];
+      detachedRequiresGrad: boolean;
+      detachBlocksGrad: boolean;
+      cloneGrad: number[];
+      cloneDtype: string;
+      noGradRequiresGrad: boolean;
+      noGradGradFn: string | null;
+      nestedNoGradRequiresGrad: boolean;
+      afterNoGradRequiresGrad: boolean;
+      bnTrainMean: number;
+      bnEvalMean: number;
+      bnGradShapes: number[][];
+      bn3dShape: number[];
+      bnStateKeys: string[];
+      loadedKeys: string[];
+    }>(`
+import browsergrad_jit as bg
+bg.install_torch_alias()
+import torch, torch.nn as nn
+import numpy as np
+
+caps = {
+  "nn.Dropout": hasattr(nn, "Dropout"),
+  "nn.BatchNorm1d": hasattr(nn, "BatchNorm1d"),
+  "torch.no_grad": hasattr(torch, "no_grad"),
+  "torch.inference_mode": hasattr(torch, "inference_mode"),
+  "torch.save": hasattr(torch, "save"),
+  "torch.load": hasattr(torch, "load"),
+  "torch.sigmoid": hasattr(torch, "sigmoid"),
+}
+
+t = torch.tensor([1.0, -1.0], requires_grad=True)
+caps["Tensor.clone"] = hasattr(t, "clone")
+caps["Tensor.detach"] = hasattr(t, "detach")
+caps["Tensor.is_leaf"] = hasattr(t, "is_leaf")
+caps["Tensor.grad_fn"] = hasattr(t, "grad_fn")
+
+s = torch.sigmoid(torch.tensor([0.0, 2.0])).numpy().round(6).tolist()
+detached = t.detach()
+clone_loss = t.clone().sum()
+clone_loss.backward()
+cloneDtype = torch.tensor([1, 2], dtype=torch.int64).clone().dtype
+detachBlocksGrad = not detached.requires_grad and detached.grad_fn is None and detached.is_leaf
+
+with torch.no_grad():
+    with torch.inference_mode():
+        no_grad_y = t * 3.0
+nestedNoGradRequiresGrad = no_grad_y.requires_grad
+after_no_grad_y = t * 4.0
+afterNoGradRequiresGrad = after_no_grad_y.requires_grad
+
+bn = nn.BatchNorm1d(2, affine=True, momentum=1.0)
+x = torch.tensor([[1.0, 2.0], [3.0, 6.0]], requires_grad=True)
+y_train = bn(x)
+train_mean = float(y_train.numpy().mean())
+(y_train * y_train).mean().backward()
+bn_grad_shapes = [list(x.grad.shape), list(bn.weight.grad.shape), list(bn.bias.grad.shape)]
+bn.eval()
+y_eval = bn(x)
+eval_mean = float(y_eval.numpy().mean())
+bn3 = nn.BatchNorm1d(2, affine=False)
+y3 = bn3(torch.tensor(np.arange(12, dtype=np.float32).reshape(2, 2, 3)))
+
+bn_state = bn.state_dict()
+
+torch.save({"weight": np.asarray([1.0, 2.0], dtype=np.float32)}, "/tmp/bg_jit_state.pt")
+loaded = torch.load("/tmp/bg_jit_state.pt")
+
+{
+  "caps": caps,
+  "sigmoid": s,
+  "detachedRequiresGrad": detached.requires_grad,
+  "detachBlocksGrad": detachBlocksGrad,
+  "cloneGrad": t.grad.numpy().tolist(),
+  "cloneDtype": cloneDtype,
+  "noGradRequiresGrad": no_grad_y.requires_grad,
+  "noGradGradFn": no_grad_y.grad_fn,
+  "nestedNoGradRequiresGrad": nestedNoGradRequiresGrad,
+  "afterNoGradRequiresGrad": afterNoGradRequiresGrad,
+  "bnTrainMean": train_mean,
+  "bnEvalMean": eval_mean,
+  "bnGradShapes": bn_grad_shapes,
+  "bn3dShape": list(y3.shape),
+  "bnStateKeys": sorted(bn_state.keys()),
+  "loadedKeys": sorted(loaded.keys()),
+}
+`);
+    expect(result.caps).toEqual({
+      "nn.Dropout": true,
+      "nn.BatchNorm1d": true,
+      "torch.no_grad": true,
+      "torch.inference_mode": true,
+      "torch.save": true,
+      "torch.load": true,
+      "torch.sigmoid": true,
+      "Tensor.clone": true,
+      "Tensor.detach": true,
+      "Tensor.is_leaf": true,
+      "Tensor.grad_fn": true,
+    });
+    expect(result.sigmoid[0]).toBe(0.5);
+    expect(result.sigmoid[1]).toBeCloseTo(0.880797, 6);
+    expect(result.detachedRequiresGrad).toBe(false);
+    expect(result.detachBlocksGrad).toBe(true);
+    expect(result.cloneGrad).toEqual([1, 1]);
+    expect(result.cloneDtype).toBe("int64");
+    expect(result.noGradRequiresGrad).toBe(false);
+    expect(result.noGradGradFn).toBeUndefined();
+    expect(result.nestedNoGradRequiresGrad).toBe(false);
+    expect(result.afterNoGradRequiresGrad).toBe(true);
+    expect(Math.abs(result.bnTrainMean)).toBeLessThan(1e-6);
+    expect(result.bnEvalMean).toBeCloseTo(0, 5);
+    expect(result.bnGradShapes).toEqual([[2, 2], [2], [2]]);
+    expect(result.bn3dShape).toEqual([2, 2, 3]);
+    expect(result.bnStateKeys).toEqual(["bias", "running_mean", "running_var", "weight"]);
+    expect(result.loadedKeys).toEqual(["weight"]);
+  });
+
   it("is idempotent — re-installing returns cleanly", async () => {
     const target = await getJitTarget();
     const ok = await target.run<boolean>(`

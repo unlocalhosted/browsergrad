@@ -1,6 +1,6 @@
 {
   "name": "@unlocalhosted/browsergrad-jit",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "description": "PyTorch-shaped Python library that traces ops into a UOp IR and realizes through NumPy. The JIT epoch successor to browsergrad-grad — same API surface, lazy by default, designed for downstream fusion / WGSL / WebNN passes. Educational source code, MIT-licensed.",
   "type": "module",
   "license": "MIT",
@@ -60,7 +60,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "oxlint src",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "prepublishOnly": "pnpm run build && pnpm run test"
+    "prepublishOnly": "pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run test"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

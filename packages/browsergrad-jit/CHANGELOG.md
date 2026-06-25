@@ -5,7 +5,38 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/) per the [compatibility
 contract in the README](README.md#compatibility-contract).
 
-## [Unreleased]
+## [0.8.2] — 2026-06-25
+
+### Added
+
+- PyTorch-curriculum compatibility surface:
+  - `torch.sigmoid` top-level alias.
+  - `TensorProxy.clone()`, `TensorProxy.detach()`, `TensorProxy.is_leaf`,
+    and `TensorProxy.grad_fn` metadata.
+  - `torch.no_grad()` and `torch.inference_mode()` contexts.
+  - `nn.BatchNorm1d` for `(N, C)` and `(N, C, L)` inputs, including affine
+    gradients and running-stat buffers in `state_dict()`.
+  - Minimal `torch.save()` / `torch.load()` pickle round-trip for
+    BrowserGrad state-dict-shaped objects.
+  - PyTorch dtype tokens on the `torch` alias (`torch.float32`, `torch.int64`,
+    etc.) without polluting `browsergrad_jit` internals.
+- `nn.Module` buffer support: `register_buffer`, `buffers`, `named_buffers`,
+  and strict buffer handling in `state_dict()` / `load_state_dict()`.
+
+### Fixed
+
+- `load_state_dict(strict=True)` now rejects unexpected keys instead of
+  silently accepting malformed checkpoints.
+- `TensorProxy.clone()` now preserves dtype without relying on arithmetic
+  promotion.
+
+### Known gaps
+
+- `TensorProxy.device`, `TensorProxy.is_contiguous()`, and tensor indexing
+  (`__getitem__`) are still open API gaps tracked in issue #5.
+- Stateful lazy ops such as Dropout and BatchNorm use `CUSTOM` realization
+  paths. They are correct for small curriculum loops, but not yet the final
+  effect model for high-throughput deterministic training.
 
 ## [0.8.1] — 2026-06-02
 

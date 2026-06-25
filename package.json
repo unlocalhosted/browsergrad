@@ -10,6 +10,7 @@
     "test": "pnpm -r run test",
     "typecheck": "pnpm -r run typecheck",
     "lint": "pnpm -r run lint",
+    "verify:release": "node scripts/verify-release.mjs",
     "validate:prd": "node scripts/validate-research-gated-prd.mjs",
     "clean": "pnpm -r run clean && rm -rf node_modules"
   },

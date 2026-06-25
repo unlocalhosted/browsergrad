@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/@unlocalhosted/browsergrad-jit.svg)](https://www.npmjs.com/package/@unlocalhosted/browsergrad-jit)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A PyTorch-shaped Python tensor library that runs in the browser via Pyodide. **Lazy by default** — arithmetic builds a UOp graph; nothing executes until you call `.numpy()`, `.tolist()`, `.item()`, `.backward()`, or `optimizer.step()`.
+A curated PyTorch-shaped Python tensor library that runs in the browser via Pyodide. **Lazy by default** — arithmetic builds a UOp graph; nothing executes until you call `.numpy()`, `.tolist()`, `.item()`, `.backward()`, or `optimizer.step()`.
 
 The IR is the substrate for everything downstream: fusion, symbolic backward, AMP cast-insertion, gradient checkpointing IR rewrites, functional transforms (`grad`/`vjp`/`vmap`/`functional_call`), ONNX export, custom WGSL kernels, and pluggable backends (NumPy today, WebGPU via the realizer bridge).
 
@@ -43,13 +43,39 @@ for _ in range(10):
 - `TensorProxy` (alias `Tensor`) — lazy tensor
 - Factory: `tensor`, `from_numpy`, `zeros`, `ones`, `randn`, `arange`
 - Arithmetic + reductions + shape ops + comparisons + dtype casts
-- Autograd: `requires_grad`, `.backward()`, `.grad`
+- Metadata and graph boundaries: `shape`, `dtype`, `ndim`, `numel`,
+  `requires_grad`, `is_leaf`, `grad_fn`, `detach()`, `clone()`
+- Autograd: `.backward()`, `.grad`
+
+Known tensor gaps: `device`, `is_contiguous()`, and tensor indexing
+(`__getitem__`) are not implemented yet. They fail loudly instead of
+pretending to match PyTorch.
 
 ### Neural networks
 - `nn.Module`, `nn.Sequential`
-- `nn.Linear`, `nn.Dropout`, activation modules
-- `nn.functional`: `relu`, `softmax`, `cross_entropy`, `mse_loss`, `nll_loss`, `linear`
+- `nn.Linear`, `nn.Dropout`, `nn.BatchNorm1d`, activation modules
+- `nn.Module` parameters, buffers, `state_dict()`, `load_state_dict()`,
+  `train()`, `eval()`, `zero_grad()`
+- `nn.functional`: `relu`, `sigmoid`, `tanh`, `gelu`, `softmax`,
+  `cross_entropy`, `mse_loss`, `nll_loss`, `linear`
 - `optim.SGD`, `optim.Adam`, `optim.AdamW`
+
+`BatchNorm1d` supports small curriculum training loops. It currently uses a
+`CUSTOM` realization path because running-stat updates are stateful; that keeps
+the API useful while a future effect-aware IR design handles high-throughput
+stateful training.
+
+### Gradient control
+```python
+with bg.no_grad():
+    validation_logits = model(x)
+
+with bg.inference_mode():
+    probs = bg.sigmoid(validation_logits)
+```
+
+The PyTorch alias exposes the same contexts as `torch.no_grad()` and
+`torch.inference_mode()`.
 
 ### Mixed precision
 ```python
@@ -96,6 +122,10 @@ blob = bg.save_safetensors(state)        # bytes — browser-friendly
 restored = bg.load_safetensors(blob)
 model[0].weight = restored["w1"]          # from_numpy accepts TensorProxy
 ```
+
+The PyTorch alias also exposes minimal `torch.save()` / `torch.load()` for
+pickle-safe BrowserGrad objects such as state dicts. It is not a full PyTorch
+checkpoint compatibility layer.
 
 ### ONNX export
 ```python
@@ -145,7 +175,11 @@ bg.install_torch_alias()
 import torch, torch.nn, torch.func, torch.amp, torch.utils.checkpoint, torch.utils.data
 ```
 
-The shim covers `torch.nn`, `torch.optim`, `torch.nn.functional`, `torch.func`, `torch.amp`, `torch.utils.checkpoint`, and `torch.utils.data`. Anything not implemented raises `AttributeError`, not silent wrong behavior.
+The shim covers the curated BrowserGrad subset of `torch.nn`, `torch.optim`,
+`torch.nn.functional`, `torch.func`, `torch.amp`, `torch.utils.checkpoint`, and
+`torch.utils.data`. It also exposes dtype tokens such as `torch.float32` and
+`torch.int64`, plus `torch.save` / `torch.load` for BrowserGrad state dicts.
+Anything not implemented raises `AttributeError`, not silent wrong behavior.
 
 ## Coexists with browsergrad-grad
 
@@ -166,14 +200,27 @@ Both libraries can be installed in the same Pyodide worker. They mount to distin
 
 Anything in the **Internal** row will break across minor releases. File an issue if you need an internal surface lifted to public.
 
+### Explicit non-goals in current release
+
+- Full PyTorch API parity.
+- CUDA device emulation.
+- GPU-resident backward / optimizer steps. WebGPU realization is forward-only.
+- Tensor layout/stride compatibility for contiguity teaching.
+- PyTorch-native checkpoint file compatibility.
+
 ## Testing
 
 ```sh
 pnpm test                        # surface tests (no Pyodide)
 pnpm test:integration            # Python correctness via Pyodide-in-node
+pnpm run build
+pnpm run typecheck
+pnpm run lint
 ```
 
-170+ integration scenarios cover every public surface (training loops, gradient checkpointing, AMP, ONNX, functional transforms, etc.).
+180 integration scenarios cover the supported public surface (training loops,
+gradient checkpointing, AMP, ONNX, functional transforms, PyTorch alias
+compatibility, etc.).
 
 ## License
 

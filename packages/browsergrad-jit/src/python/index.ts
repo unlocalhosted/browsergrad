@@ -77,6 +77,8 @@ See \`docs/prd/PRD-005-jit-foundation.md\` for the design rationale.
 
 from ._tensor_proxy import (
     TensorProxy,
+    no_grad,
+    inference_mode,
     from_numpy,
     tensor,
     zeros,
@@ -448,13 +450,37 @@ def manual_seed(seed: int) -> None:
     _np.random.seed(seed)
 
 
+def sigmoid(x):
+    return _functional.sigmoid(x)
+
+
+def save(obj, path):
+    """Pickle a browser-safe object to Pyodide's filesystem.
+
+    Intended for state_dict-shaped dicts containing NumPy arrays, scalars, and
+    other pickle-safe educational checkpoint values.
+    """
+    import pickle as _pickle
+    with open(path, "wb") as _f:
+        _pickle.dump(obj, _f)
+
+
+def load(path, **kwargs):
+    """Load an object written by save(). Extra kwargs are accepted for
+    PyTorch-shaped call sites and ignored."""
+    import pickle as _pickle
+    with open(path, "rb") as _f:
+        return _pickle.load(_f)
+
+
 __version__ = "${pkg.version}"
 
 __all__ = [
     "TensorProxy", "Tensor",
     "tensor", "zeros", "ones", "randn", "arange", "from_numpy",
     "Session", "get_default_session", "set_default_session", "new_session",
-    "manual_seed",
+    "manual_seed", "no_grad", "inference_mode",
+    "sigmoid", "save", "load",
     "nn", "optim", "jit", "utils", "amp", "kernels", "func",
     "custom_kernel", "onnx", "lab", "experimental",
     "realize_webgpu", "register_webgpu_bridge", "unregister_webgpu_bridge",

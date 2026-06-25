@@ -73,6 +73,20 @@ def install_torch_alias(*, force: bool = False) -> None:
     for name in browsergrad_jit.__all__:
         setattr(torch_mod, name, getattr(browsergrad_jit, name))
 
+    # PyTorch dtype tokens. Keep these on the alias module only so they do
+    # not shadow Python builtins inside browsergrad_jit's implementation.
+    torch_mod.float32 = "float32"
+    torch_mod.float = "float32"
+    torch_mod.float64 = "float64"
+    torch_mod.double = "float64"
+    torch_mod.float16 = "float16"
+    torch_mod.half = "float16"
+    torch_mod.int64 = "int64"
+    torch_mod.long = "int64"
+    torch_mod.int32 = "int32"
+    torch_mod.int = "int32"
+    torch_mod.bool = "bool"
+
     # Sub-namespaces also need their own sys.modules entries so
     # `import torch.nn`, `import torch.nn.functional`, `import torch.optim`
     # resolve correctly.

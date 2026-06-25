@@ -70,7 +70,7 @@
     "test:watch": "vitest",
     "lint": "oxlint src",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "prepublishOnly": "pnpm run build && pnpm run test"
+    "prepublishOnly": "pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run test"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
