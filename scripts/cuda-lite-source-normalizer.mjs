@@ -147,7 +147,8 @@ export function createKernelCompilationUnit({
     return name !== undefined &&
       sourceMentionsIdentifier(normalizedMacroScope, name) &&
       (podRecordDeclarationVectorAlias(declaration, effectiveDefines) !== undefined ||
-        scalarizedPodRecordDeclaration(declaration, effectiveDefines) !== undefined);
+        scalarizedPodRecordDeclaration(declaration, effectiveDefines) !== undefined ||
+        bitpackedShortUnionDeclaration(declaration) !== undefined);
   });
   const functionMacros = functionDeclarations.filter((declaration) => {
     const name = functionDefineName(declaration);
@@ -175,8 +176,9 @@ export function createKernelCompilationUnit({
   const withDeviceReferences = normalizeDeviceReferenceParams(withVectorCarrierAliases);
   const withScalarizedRecords = normalizeScalarizedPodRecords(withDeviceReferences, postCarrierDefines);
   const withPodRecords = normalizePodRecordVectorAliases(withScalarizedRecords, postCarrierDefines);
+  const withBitpackedUnions = normalizeBitpackedShortUnions(withPodRecords);
   const withNumericDefines = normalizeNumericObjectDefines(
-    withPodRecords,
+    withBitpackedUnions,
     postCarrierDefines,
     new Set([...params, ...templateNames]),
   );
@@ -551,6 +553,8 @@ function functionDefineName(declaration) {
 }
 
 function recordDeclarationName(declaration) {
+  const unionMatch = /\bunion\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{/u.exec(declaration);
+  if (unionMatch?.[1] !== undefined) return unionMatch[1];
   const match = /\b(?:typedef\s+)?struct(?:\s+(?:__align__|alignas)\s*\([^)]*\))*\s*([A-Za-z_][A-Za-z0-9_]*)?\s*\{[\s\S]*?\}\s*([A-Za-z_][A-Za-z0-9_]*)?\s*;/u.exec(declaration);
   return match?.[2] ?? match?.[1];
 }
@@ -567,6 +571,12 @@ function scalarizedPodRecordDeclaration(declaration, definesByName) {
   if (name === undefined) return undefined;
   return collectScalarizedPodRecords(declaration, definesByName)
     .find((record) => record.name === name);
+}
+
+function bitpackedShortUnionDeclaration(declaration) {
+  const name = recordDeclarationName(declaration);
+  if (name === undefined || !/\bunion\b/u.test(declaration)) return undefined;
+  return collectBitpackedShortUnions(declaration).find((record) => record.name === name);
 }
 
 function kernelParamNames(kernel) {
@@ -1917,6 +1927,103 @@ function collectPodRecordVariableNames(source, recordName) {
   return names;
 }
 
+function normalizeBitpackedShortUnions(source) {
+  const unions = collectBitpackedShortUnions(source);
+  if (unions.length === 0) return source;
+  let out = source;
+  for (const union of unions) out = rewriteBitpackedShortUnion(out, union);
+  return out;
+}
+
+function collectBitpackedShortUnions(source) {
+  const out = [];
+  const re = /\bunion\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{\s*struct(?:\s+(?:__align__|alignas)\s*\([^)]*\))*\s*\{\s*(?:signed\s+)?short\s+([A-Za-z_][A-Za-z0-9_]*)\s*;\s*(?:signed\s+)?short\s+([A-Za-z_][A-Za-z0-9_]*)\s*;\s*\}\s*;\s*(?:unsigned\s+int|uint|uint32_t)\s+([A-Za-z_][A-Za-z0-9_]*)\s*;\s*\}\s*;/gu;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const name = match[1];
+    if (name === undefined || match[2] === undefined || match[3] === undefined || match[4] === undefined) continue;
+    out.push({
+      declaration: match[0],
+      highField: match[3],
+      lowField: match[2],
+      name,
+      packedField: match[4],
+    });
+  }
+  return out;
+}
+
+function rewriteBitpackedShortUnion(source, union) {
+  const variables = collectBitpackedShortUnionVariables(source, union.name);
+  if (variables.size === 0) return source.replace(union.declaration, "");
+  let out = source.replace(union.declaration, "");
+  out = rewriteBitpackedShortUnionDeclarations(out, union.name);
+  for (const variable of variables) {
+    out = rewriteBitpackedShortUnionFieldWrites(out, variable, union);
+    out = rewriteBitpackedShortUnionPackedField(out, variable, union);
+    out = rewriteBitpackedShortUnionFieldReads(out, variable, union);
+  }
+  return out;
+}
+
+function collectBitpackedShortUnionVariables(source, unionName) {
+  const variables = new Set();
+  const re = new RegExp(`\\b${escapeRegExp(unionName)}\\s+([^;]+);`, "gu");
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const declarators = match[1];
+    if (typeof declarators !== "string" || /[=*&()[\]{}]/u.test(declarators)) continue;
+    for (const raw of splitTopLevel(declarators).map((item) => item.trim()).filter(Boolean)) {
+      if (/^[A-Za-z_][A-Za-z0-9_]*$/u.test(raw)) variables.add(raw);
+    }
+  }
+  return variables;
+}
+
+function rewriteBitpackedShortUnionDeclarations(source, unionName) {
+  const re = new RegExp(`\\b${escapeRegExp(unionName)}\\s+([^;]+);`, "gu");
+  return source.replace(re, (match, declarators) => {
+    if (typeof declarators !== "string" || /[=*&()[\]{}]/u.test(declarators)) return match;
+    const names = splitTopLevel(declarators).map((item) => item.trim()).filter(Boolean);
+    if (names.length === 0 || names.some((name) => !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name))) return match;
+    return `uint ${names.join(", ")};`;
+  });
+}
+
+function rewriteBitpackedShortUnionFieldWrites(source, variable, union) {
+  let out = rewriteBitpackedShortUnionOneFieldWrite(source, variable, union.lowField, "low");
+  out = rewriteBitpackedShortUnionOneFieldWrite(out, variable, union.highField, "high");
+  return out;
+}
+
+function rewriteBitpackedShortUnionOneFieldWrite(source, variable, field, lane) {
+  const re = new RegExp(`\\b${escapeRegExp(variable)}\\s*\\.\\s*${escapeRegExp(field)}\\s*=\\s*([^;]+);`, "gu");
+  return source.replace(re, (_match, rawValue) => {
+    const value = typeof rawValue === "string" ? rawValue.trim() : "0";
+    if (lane === "low") {
+      return `${variable} = (${variable} & 0xffff0000u) | (uint(${value}) & 0xffffu);`;
+    }
+    return `${variable} = (${variable} & 0x0000ffffu) | ((uint(${value}) & 0xffffu) << 16);`;
+  });
+}
+
+function rewriteBitpackedShortUnionPackedField(source, variable, union) {
+  const fieldRe = new RegExp(`\\b${escapeRegExp(variable)}\\s*\\.\\s*${escapeRegExp(union.packedField)}\\b`, "gu");
+  return source.replace(fieldRe, variable);
+}
+
+function rewriteBitpackedShortUnionFieldReads(source, variable, union) {
+  let out = source.replace(
+    new RegExp(`\\b${escapeRegExp(variable)}\\s*\\.\\s*${escapeRegExp(union.lowField)}\\b`, "gu"),
+    `((int(${variable} << 16)) >> 16)`,
+  );
+  out = out.replace(
+    new RegExp(`\\b${escapeRegExp(variable)}\\s*\\.\\s*${escapeRegExp(union.highField)}\\b`, "gu"),
+    `(int(${variable}) >> 16)`,
+  );
+  return out;
+}
+
 function normalizeLineContinuations(source) {
   return source.replace(/\\\r?\n\s*/gu, " ");
 }
@@ -2158,9 +2265,27 @@ function expandSimpleExpressionMacro(macro, args) {
   let body = macro.body;
   for (const [index, param] of macro.params.entries()) {
     const arg = args[index] ?? "";
-    body = body.replace(new RegExp(`\\b${escapeRegExp(param)}\\b`, "gu"), `(${arg})`);
+    body = replaceMacroParamReference(body, param, `(${arg})`);
   }
   return body;
+}
+
+function replaceMacroParamReference(source, param, replacement) {
+  const re = new RegExp(`\\b${escapeRegExp(param)}\\b`, "gu");
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const before = source[match.index - 1];
+    if (before === "." || before === ":") {
+      re.lastIndex = match.index + param.length;
+      continue;
+    }
+    out += source.slice(cursor, match.index);
+    out += replacement;
+    cursor = match.index + param.length;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
 }
 
 function splitTopLevelMacroArgs(source) {

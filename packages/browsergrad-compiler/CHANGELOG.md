@@ -38,6 +38,9 @@
 - Corpus audit now emits preferred `planCompiledOk` / `planCompileGaps` fields
   and `legacyAliases` so platform consumers can avoid runnable/executed naming
   unless browser execution actually happened.
+- Source normalization now avoids replacing macro parameters inside member
+  properties and lowers simple two-short/one-u32 CUDA unions into bitfield
+  views, raising the cuda-samples gate to `305/357` with `51` hard gaps.
 - Browser WebGPU benchmarks now fail on validation errors and accept optional
   prepared-dispatch ratio thresholds for machine-local perf gates.
 - Fixed thread-local arrays now run through CPU reference and WGSL/WebGPU

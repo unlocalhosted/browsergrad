@@ -87,6 +87,66 @@ __device__ float fallback(float x) { return x; }
 }
 
 {
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void macro_member_props(int *out) {
+  int row = FMUL(threadIdx.y, BLOCK_SIZE) + threadIdx.x;
+  int col = IMAD(blockIdx.x, BLOCK_SIZE, threadIdx.z);
+  out[0] = row + col;
+}`,
+    definesByName: new Map([["BLOCK_SIZE", "8"]]),
+    functionDeclarations: [
+      "#define FMUL(x, y) (__mul24(x, y))",
+      "#define IMAD(a, b, c) (((a) * (b)) + (c))",
+    ],
+  });
+  assert.match(source, /threadIdx\.y/u);
+  assert.match(source, /threadIdx\.x/u);
+  assert.match(source, /blockIdx\.x/u);
+  assert.match(source, /threadIdx\.z/u);
+  assert.doesNotMatch(source, /threadIdx\.\(/u);
+  assert.doesNotMatch(source, /blockIdx\.\(/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void bitpack(uint *input, uint *out) {
+  use_pack(input, out);
+}`,
+    deviceFunctions: [
+      {
+        name: "use_pack",
+        source: `
+__device__ void use_pack(uint *input, uint *out) {
+  PackedShorts a, b;
+  a.hInt = input[0];
+  b.hShort1 = a.hShort2;
+  b.hShort2 = a.hShort1;
+  out[0] = b.hInt;
+}`,
+      },
+    ],
+    recordDeclarations: [
+      `
+union PackedShorts {
+  struct __align__(8) {
+    short hShort1;
+    short hShort2;
+  };
+  unsigned int hInt;
+};`,
+    ],
+  });
+  assert.doesNotMatch(source, /\bunion\s+PackedShorts/u);
+  assert.match(source, /uint a, b;/u);
+  assert.match(source, /a = input\[0\];/u);
+  assert.match(source, /b = \(b & 0xffff0000u\) \| \(uint\(\(int\(a\) >> 16\)\) & 0xffffu\);/u);
+  assert.match(source, /b = \(b & 0x0000ffffu\) \| \(\(uint\(\(\(int\(a << 16\)\) >> 16\)\) & 0xffffu\) << 16\);/u);
+  assert.match(source, /out\[0\] = b;/u);
+}
+
+{
   const parent = `
 __global__ void parent(float *out) {
   child<<<1, 1>>>(out);

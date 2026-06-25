@@ -1285,6 +1285,8 @@ function collectPodRecordDeclarations(source) {
   const re = /\b(?:typedef\s+)?struct(?:\s+(?:__align__|alignas)\s*\([^)]*\))*\s*(?:[A-Za-z_][A-Za-z0-9_]*)?\s*\{[\s\S]*?\}\s*(?:[A-Za-z_][A-Za-z0-9_]*)?\s*;/g;
   let match;
   while ((match = re.exec(clean))) declarations.push(match[0]);
+  const bitpackUnionRe = /\bunion\s+[A-Za-z_][A-Za-z0-9_]*\s*\{\s*struct(?:\s+(?:__align__|alignas)\s*\([^)]*\))*\s*\{\s*(?:signed\s+)?short\s+[A-Za-z_][A-Za-z0-9_]*\s*;\s*(?:signed\s+)?short\s+[A-Za-z_][A-Za-z0-9_]*\s*;\s*\}\s*;\s*(?:unsigned\s+int|uint|uint32_t)\s+[A-Za-z_][A-Za-z0-9_]*\s*;\s*\}\s*;/g;
+  while ((match = bitpackUnionRe.exec(clean))) declarations.push(match[0]);
   return declarations;
 }
 
