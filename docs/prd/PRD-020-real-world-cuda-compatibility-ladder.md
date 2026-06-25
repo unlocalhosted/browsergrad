@@ -61,7 +61,7 @@ Repo exploration:
 
 Local corpus audits on 2026-06-24:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `305` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `308` direct
   compile/codegen-runnable after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -152,9 +152,10 @@ Local corpus audits on 2026-06-24:
   NULL-initialized local pointer rebinding, reachable multidimensional constant
   tables, read-only local pointers into constant memory, scalarized CUDA vector
   constants, mixed vector constructors, and `cufftComplex` / `float2`
-  interop and deterministic cuRAND double-uniform lowering, plus safe
-  function-macro member substitution and bitpacked short-pair union lowering,
-  with `51` hard gaps.
+  interop and deterministic cuRAND double-uniform lowering, safe
+  function-macro member substitution, bitpacked short-pair union lowering,
+  templated POD record scalarization, direct `SharedMemory<T>` lowering, and
+  3-argument cuRAND init normalization, with `48` hard gaps.
   Main failures:
   parser/frontend gaps, texture/vector
   operators, remaining `half2` intrinsics, templates, and runtime library
@@ -278,8 +279,8 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
-- The current live aggregate gate is `969/1038` compile/codegen-runnable across the four
-  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `305/357`, `llm.c`
+- The current live aggregate gate is `974/1038` compile/codegen-runnable across the four
+  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `308/357`, `llm.c`
   `148/148`, and LeetCUDA `278/293`.
 
 Coverage tier glossary:
@@ -448,7 +449,7 @@ Acceptance criteria for the first slice:
   compile/codegen-runnable count, hard-gap count, error codes, semantic
   families, and explicit `executionTierCounts`.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=305` compile/codegen-runnable, and `<=51` hard gaps.
+  `>=308` compile/codegen-runnable, and `<=48` hard gaps.
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions,
   `>=148` compile/codegen-runnable, and `0` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,

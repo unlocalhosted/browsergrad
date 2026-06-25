@@ -147,6 +147,33 @@ union PackedShorts {
 }
 
 {
+  const source = createKernelCompilationUnit({
+    kernel: `
+template <typename Real>
+__global__ void option_kernel(float *out, const AsianOption<Real> *const option) {
+  Real payoff = option->spot - option->strike;
+  if (option->type == AsianOption<Real>::Put) payoff = -payoff;
+  out[0] = payoff;
+}`,
+    templateArgumentsByKernelName: new Map([["option_kernel", ["float"]]]),
+    recordDeclarations: [
+      `
+template <typename Real> struct AsianOption {
+  enum CallPut { Call, Put };
+  Real spot;
+  Real strike;
+  CallPut type;
+};`,
+    ],
+  });
+  assert.doesNotMatch(source, /AsianOption\s*</u);
+  assert.doesNotMatch(source, /\benum\s+CallPut/u);
+  assert.match(source, /float \*out, const float \*option__spot, const float \*option__strike, const int \*option__type/u);
+  assert.match(source, /float payoff = option__spot\[0\] - option__strike\[0\];/u);
+  assert.match(source, /if \(option__type\[0\] == 1\)/u);
+}
+
+{
   const parent = `
 __global__ void parent(float *out) {
   child<<<1, 1>>>(out);
@@ -722,6 +749,34 @@ __global__ void sharedmem_get_pointer(T *input, T *output) {
   });
   assert.match(source, /extern __shared__ float scratch\[\];/u);
   assert.doesNotMatch(source, /getPointer/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+template <class T>
+__global__ void sharedmem_index(T *input, T *output) {
+  SharedMemory<T> scratch;
+  scratch[threadIdx.x] = input[threadIdx.x];
+  output[0] = scratch[0];
+}`,
+    templateArgumentsByKernelName: new Map([["sharedmem_index", ["float"]]]),
+  });
+  assert.match(source, /extern __shared__ float scratch\[\];/u);
+  assert.doesNotMatch(source, /SharedMemory/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+template <typename rngState_t, typename rngDirectionVectors_t>
+__global__ void rng_init(rngState_t *state, rngDirectionVectors_t *direction) {
+  curand_init(direction[0], threadIdx.x, &state[threadIdx.x]);
+}`,
+    templateArgumentsByKernelName: new Map([["rng_init", ["curandStateSobol_sz", "curandDirectionVectors_sz"]]]),
+  });
+  assert.match(source, /template <typename rngState_t = uint, typename rngDirectionVectors_t = uint>/u);
+  assert.match(source, /curand_init\(direction\[0\], threadIdx\.x, 0, &state\[threadIdx\.x\]\);/u);
 }
 
 {

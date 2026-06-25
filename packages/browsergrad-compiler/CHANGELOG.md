@@ -41,6 +41,9 @@
 - Source normalization now avoids replacing macro parameters inside member
   properties and lowers simple two-short/one-u32 CUDA unions into bitfield
   views, raising the cuda-samples gate to `305/357` with `51` hard gaps.
+- Templated POD records, direct `SharedMemory<T>` values, and 3-argument
+  cuRAND init overloads now normalize into the CUDA-lite subset, raising the
+  cuda-samples gate to `308/357` with `48` hard gaps.
 - Browser WebGPU benchmarks now fail on validation errors and accept optional
   prepared-dispatch ratio thresholds for machine-local perf gates.
 - Fixed thread-local arrays now run through CPU reference and WGSL/WebGPU

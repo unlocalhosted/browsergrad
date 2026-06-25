@@ -1118,7 +1118,7 @@ function hasSupportedDeviceReturnShape(signature, name, recordNames = new Set(),
 }
 
 function recordDeclarationName(declaration) {
-  const match = /\b(?:typedef\s+)?struct(?:\s+(?:__align__|alignas)\s*\([^)]*\))*\s*([A-Za-z_][A-Za-z0-9_]*)?\s*\{[\s\S]*?\}\s*([A-Za-z_][A-Za-z0-9_]*)?\s*;/u.exec(declaration);
+  const match = /\b(?:template\s*<[^<>]*>\s*)?(?:typedef\s+)?struct(?:\s+(?:__align__|alignas)\s*\([^)]*\))*\s*([A-Za-z_][A-Za-z0-9_]*)?\s*\{[\s\S]*?\}\s*([A-Za-z_][A-Za-z0-9_]*)?\s*;/u.exec(declaration);
   return match?.[2] ?? match?.[1];
 }
 
@@ -1282,12 +1282,56 @@ function collectTextureDeclarations(source) {
 function collectPodRecordDeclarations(source) {
   const clean = stripComments(source);
   const declarations = [];
-  const re = /\b(?:typedef\s+)?struct(?:\s+(?:__align__|alignas)\s*\([^)]*\))*\s*(?:[A-Za-z_][A-Za-z0-9_]*)?\s*\{[\s\S]*?\}\s*(?:[A-Za-z_][A-Za-z0-9_]*)?\s*;/g;
   let match;
-  while ((match = re.exec(clean))) declarations.push(match[0]);
+  const structRe = /\bstruct\b/g;
+  while ((match = structRe.exec(clean))) {
+    const structStart = match.index;
+    const headerStart = recordStructDeclarationStart(clean, structStart);
+    const brace = clean.indexOf("{", structStart + match[0].length);
+    const semicolon = clean.indexOf(";", structStart + match[0].length);
+    if (brace < 0 || (semicolon >= 0 && semicolon < brace)) {
+      structRe.lastIndex = structStart + match[0].length;
+      continue;
+    }
+    const end = findBalanced(clean, brace, "{", "}");
+    if (end === undefined) {
+      structRe.lastIndex = structStart + match[0].length;
+      continue;
+    }
+    const semi = clean.indexOf(";", end + 1);
+    if (semi < 0) {
+      structRe.lastIndex = end + 1;
+      continue;
+    }
+    declarations.push(clean.slice(headerStart, semi + 1));
+    structRe.lastIndex = semi + 1;
+  }
   const bitpackUnionRe = /\bunion\s+[A-Za-z_][A-Za-z0-9_]*\s*\{\s*struct(?:\s+(?:__align__|alignas)\s*\([^)]*\))*\s*\{\s*(?:signed\s+)?short\s+[A-Za-z_][A-Za-z0-9_]*\s*;\s*(?:signed\s+)?short\s+[A-Za-z_][A-Za-z0-9_]*\s*;\s*\}\s*;\s*(?:unsigned\s+int|uint|uint32_t)\s+[A-Za-z_][A-Za-z0-9_]*\s*;\s*\}\s*;/g;
   while ((match = bitpackUnionRe.exec(clean))) declarations.push(match[0]);
   return declarations;
+}
+
+function recordStructDeclarationStart(source, structStart) {
+  const before = source.slice(0, structStart);
+  const template = /\btemplate\s*<[^<>]*>\s*$/u.exec(before);
+  if (template?.index !== undefined) return template.index;
+  const typedef = /\btypedef\s+$/u.exec(before);
+  if (typedef?.index !== undefined) return typedef.index;
+  return structStart;
+}
+
+function findBalanced(source, open, openChar, closeChar) {
+  if (open < 0 || source[open] !== openChar) return undefined;
+  let depth = 0;
+  for (let index = open; index < source.length; index++) {
+    const char = source[index];
+    if (char === openChar) depth++;
+    else if (char === closeChar) {
+      depth--;
+      if (depth === 0) return index;
+    }
+  }
+  return undefined;
 }
 
 function collectTranslationUnitSharedDeclarations(source) {
