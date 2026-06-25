@@ -17,7 +17,9 @@ browsergrad/
 ├── packages/
 │   ├── browsergrad-runtime/    Pyodide-in-Worker host
 │   ├── browsergrad-kernels/    WGSL kernel catalog
-│   └── browsergrad-grad/       tensor + autograd library
+│   ├── browsergrad-compiler/   CUDA-lite compiler + WebGPU runner
+│   ├── browsergrad-grad/       tensor + autograd library
+│   └── browsergrad-primitives/ browser-safe lab primitives
 ├── package.json                pnpm workspaces
 ├── README.md
 ├── STATUS.md                   current state, supported APIs
@@ -93,6 +95,8 @@ pnpm -F <pkg> test:integration   # integration tests for one package
 - **`browsergrad-runtime`** owns the Pyodide worker. It exposes a stable JS API (`createSession`) and a stable wire protocol between the main thread and the worker. The Python side installs a `browsergrad` module via `PY_PREAMBLE` that lets user Python emit structured assertions and artifacts back to JS.
 
 - **`browsergrad-kernels`** is the WGSL catalog. It depends on nothing. Each kernel ships the WGSL string, a JS dispatcher, AND a pure-JS reference implementation. The reference impls are testable in node; the WGSL impls require WebGPU.
+
+- **`browsergrad-compiler`** owns CUDA-lite semantics: source/context normalization, parser/analyzer, Kernel IR, lockstep CPU reference, WGSL emission, WebGPU runner orchestration, and pinned real-world corpus gates. It consumes `browsergrad-kernels` dispatch helpers; platform code should consume compiler capability reports instead of copying CUDA heuristics.
 
 - **`browsergrad-grad`** is the tensor + autograd library, in Python, embedded as TypeScript string constants. It's installed into a Pyodide target via `installGrad(target)` — duck-typed so it works with the runtime's `Session` OR any other Pyodide setup. Optional `install_torch_alias()` registers a `torch` namespace shim.
 

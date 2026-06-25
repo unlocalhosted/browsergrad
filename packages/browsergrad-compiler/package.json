@@ -54,13 +54,14 @@
     "audit:corpus": "node ../../scripts/run-cuda-lite-tool.mjs audit:corpus",
     "audit:real-world-cuda": "node ../../scripts/run-cuda-lite-tool.mjs audit:real-world-cuda",
     "verify:real-world-cuda": "node ../../scripts/run-cuda-lite-tool.mjs verify:real-world-cuda",
+    "verify:compiler": "pnpm run build && pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run test:source-normalizer && pnpm run test:audit-corpus",
     "audit:cuda-120": "node ../../scripts/run-cuda-lite-tool.mjs audit:cuda-120",
     "test:watch": "vitest",
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:browser:open": "vitest --config vitest.browser.config.ts --watch --browser.headless=false",
     "lint": "oxlint src",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "prepublishOnly": "pnpm run build && pnpm run test"
+    "prepublishOnly": "pnpm run verify:compiler"
   },
   "dependencies": {
     "@unlocalhosted/browsergrad-kernels": "workspace:*"

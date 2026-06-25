@@ -337,6 +337,7 @@ compiler names.
 ```bash
 pnpm test:browser
 pnpm test:browser:open
+pnpm verify:compiler
 pnpm e2e:webgpu
 pnpm e2e:webgpu:dist
 pnpm e2e:webgpu:corpus -- --require-webgpu
@@ -346,6 +347,10 @@ pnpm verify:real-world-cuda -- --skip-fetch --require-webgpu
 `test:browser:open` keeps Chromium open for inspection; quit with `q`. If the
 Vitest browser watch rerun path reports an orchestrator-session error, restart
 the command instead of trusting that rerun.
+
+`verify:compiler` is the local release gate: build, typecheck, lint, unit tests,
+source-normalizer test, and corpus-audit self-test. Real WebGPU/corpus hardware
+proof stays in `verify:real-world-cuda`.
 
 `e2e:webgpu` launches a real browser and runs example kernels plus runtime
 orchestration probes against both `runCompiledKernelReference()` and real

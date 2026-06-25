@@ -22,6 +22,7 @@ Use this as a fast navigation layer before diving into files.
 | `browsergrad-grad` | `packages/browsergrad-grad/README.md` | `src/python/tensor.py`, `src/python/functional.py`, `src/python/optim.py`, `src/python/nn_chunks/`, `src/python/_torch_compat_*.py` | `tests/`, `tests-integration/` |
 | `browsergrad-jit` | `packages/browsergrad-jit/README.md` | `src/python/_ir.py`, `_tensor_proxy.py`, `_realize.py`, `_vjp.py`, `_functional.py`, `_nn.py`, `_optim.py`, `_torch_compat.py` | `tests/`, `tests-integration/` |
 | `browsergrad-kernels` | `packages/browsergrad-kernels/README.md` | `src/realizer.ts`, `src/kernels/` | `tests/`, `tests-browser/` |
+| `browsergrad-compiler` | `packages/browsergrad-compiler/README.md`, `docs/platform/cuda-lite-compiler-architecture.md` | `src/parser.ts`, `src/analyzer.ts`, `src/reference.ts`, `src/wgsl.ts`, `src/runner.ts`, `scripts/cuda-lite-source-normalizer.mjs` | `tests/`, `tests-browser/`, corpus/e2e scripts |
 | `browsergrad-primitives` | `packages/browsergrad-primitives/README.md` | `src/index.ts`, `src/text.ts`, `src/data.ts`, `src/evaluation.ts`, `src/scaling.ts`, `src/simulation.ts`, `src/rl.ts` | `tests/` |
 | `browsergrad-dogfood` | `packages/browsergrad-dogfood/README.md` | `tests-node/`, `tests/` | cross-package published compatibility |
 
@@ -40,6 +41,7 @@ Use this as a fast navigation layer before diving into files.
 | `installGrad` / `installJit` | Mounts Python package sources into Pyodide. |
 | `install_torch_alias()` | Allows PyTorch-shaped imports, but only for supported surfaces. |
 | `bg.register_webgpu_bridge(bridge)` | Connects JIT Python IR to JS/WebGPU kernels. |
+| `compileCudaLiteKernel*()` | Browser-native CUDA-lite frontend to Kernel IR/WGSL/reference/WebGPU. |
 | Lab manifest `requires_browsergrad` | Version gate for platform exercises. |
 
 ## Curriculum Compatibility Pointers
@@ -70,6 +72,8 @@ pnpm --filter @unlocalhosted/browsergrad-jit test
 pnpm --filter @unlocalhosted/browsergrad-jit test:integration
 pnpm --filter @unlocalhosted/browsergrad-kernels test
 pnpm --filter @unlocalhosted/browsergrad-kernels test:browser
+pnpm --filter @unlocalhosted/browsergrad-compiler verify:compiler
+pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --skip-fetch --require-webgpu
 pnpm --filter @unlocalhosted/browsergrad-primitives test
 pnpm --filter @unlocalhosted/browsergrad-dogfood test:node
 ```

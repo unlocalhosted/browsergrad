@@ -44,6 +44,7 @@ That code runs unmodified inside Pyodide in a browser tab. Same surface as PyTor
 npm install @unlocalhosted/browsergrad-runtime pyodide
 npm install @unlocalhosted/browsergrad-jit
 npm install @unlocalhosted/browsergrad-kernels        # optional: WGSL kernels + WebGPU bridge
+npm install @unlocalhosted/browsergrad-compiler       # optional: CUDA-lite -> IR/WGSL/WebGPU
 npm install @unlocalhosted/browsergrad-grad           # optional: eager-autograd alternative
 npm install @unlocalhosted/browsergrad-primitives     # optional: text/data/eval/simulation/RL primitives
 ```
@@ -115,6 +116,7 @@ out = bg.realize_webgpu(x @ w + b)   # tiled GEMM, fused elementwise, custom WGS
 | [`browsergrad-runtime`](./packages/browsergrad-runtime) | Pyodide-in-Worker host. `createSession`, `exec`, structured assertion + artifact protocol, AbortSignal cancellation, optional lab-manifest validator. |
 | [`browsergrad-jit`](./packages/browsergrad-jit) | Lazy-IR PyTorch-shape library. 28-opcode IR, fusion, symbolic VJP, AMP, gradient checkpointing, `bg.func.*`, custom WGSL kernels, ONNX export. |
 | [`browsergrad-kernels`](./packages/browsergrad-kernels) | WGSL compute-shader catalog, CUDA-shaped 1D program authoring, and pure-JS references for attention, tensor kernels, and GPU teaching subsets. |
+| [`browsergrad-compiler`](./packages/browsergrad-compiler) | Browser-native CUDA-lite compiler. Parser/analyzer, Kernel IR, CPU reference, WGSL/WebGPU runner, and pinned real-world CUDA corpus gates. |
 | [`browsergrad-grad`](./packages/browsergrad-grad) | Eager-autograd alternative. PyTorch-flavored, NumPy-backed, closure backward. Stable. |
 | [`browsergrad-primitives`](./packages/browsergrad-primitives) | Canonical small-primitive facade: byte-BPE, streaming gates, data filters, snapshot comparators, hosted-training fixtures, deterministic simulations, and RL/alignment math. |
 
@@ -130,6 +132,8 @@ Workspace tests cover package surfaces, Pyodide integration, and browser WebGPU:
 pnpm -r test
 pnpm -r test:integration                                    # 311 Pyodide-in-node tests
 pnpm --filter @unlocalhosted/browsergrad-kernels test:browser    # 7 real-Chromium WebGPU tests
+pnpm --filter @unlocalhosted/browsergrad-compiler verify:compiler
+pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --skip-fetch --require-webgpu
 pnpm --filter @unlocalhosted/browsergrad-primitives test
 pnpm --filter @unlocalhosted/browsergrad-simulators test
 pnpm --filter @unlocalhosted/browsergrad-snapshots test

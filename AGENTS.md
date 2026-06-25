@@ -6,6 +6,7 @@ This repo is `browsergrad`, a pnpm monorepo for Pyodide-based ML education:
 - `@unlocalhosted/browsergrad-grad`: eager NumPy-backed autograd with a broad PyTorch-shaped teaching surface.
 - `@unlocalhosted/browsergrad-jit`: lazy UOp IR, symbolic backward, fusion, AMP, checkpointing, ONNX, WebGPU realizer bridge.
 - `@unlocalhosted/browsergrad-kernels`: WGSL kernels and the production WebGPU realizer bridge.
+- `@unlocalhosted/browsergrad-compiler`: browser-native CUDA-lite parser/analyzer, Kernel IR, CPU reference, WGSL/WebGPU runner, and real-world corpus gates.
 - `@unlocalhosted/browsergrad-primitives`: canonical facade for small browser-safe primitives: text, data, evaluation, simulation, hosted-training, and RL math.
 - `packages/browsergrad-dogfood`: cross-package and published-module compatibility tests.
 
@@ -35,6 +36,8 @@ pnpm -r run test
 pnpm --filter @unlocalhosted/browsergrad-grad test:integration
 pnpm --filter @unlocalhosted/browsergrad-jit test:integration
 pnpm --filter @unlocalhosted/browsergrad-kernels test:browser
+pnpm --filter @unlocalhosted/browsergrad-compiler verify:compiler
+pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --skip-fetch --require-webgpu
 pnpm --filter @unlocalhosted/browsergrad-primitives test
 pnpm --filter @unlocalhosted/browsergrad-dogfood test:node
 ```

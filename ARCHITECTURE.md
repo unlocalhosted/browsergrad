@@ -33,9 +33,21 @@ How the packages compose, what each layer owns, and why the calls were made the 
 │                            │  │  bg.onnx.*       │    │                                 │
 │                            │  │  bg.custom_kernel│────▶  Runs user-supplied WGSL        │
 └────────────────────────────┘  └──────────────────┘    └─────────────────────────────────┘
+                                                              ▲
+                                                              │ Kernel IR / WGSL dispatch
+                                                ┌─────────────┴───────────────────────┐
+                                                │ @unlocalhosted/browsergrad-compiler │
+                                                │ CUDA-lite parser/analyzer, CPU      │
+                                                │ reference, WGSL emitter, WebGPU     │
+                                                │ runner, corpus compatibility gates  │
+                                                └─────────────────────────────────────┘
 ```
 
 The runtime knows nothing about tensors. The kernels package knows nothing about Python. The two ML libraries pick their own backends — grad is eager NumPy, jit is lazy IR with pluggable realizers. Each piece composes with the others but doesn't depend on them at runtime.
+The compiler owns CUDA-lite semantics and lowers learner kernels to Kernel IR,
+CPU reference execution, WGSL, and real WebGPU dispatch through the kernels
+package. It is course-agnostic; corpus support lives in generic source
+normalization, diagnostics, and compatibility gates.
 
 For the multi-course guided-lab layer that sits above these packages, see
 `docs/platform/curriculum-platform-architecture.md`.
@@ -49,6 +61,14 @@ Owns the lifecycle: Pyodide booted in a Worker, the wire protocol between host a
 
 ### `browsergrad-kernels` — GPU layer
 Owns the WGSL. Every kernel has a JS reference for conformance + a CPU fallback path. A primitives catalog — no tensor library dependency. Also ships `createWebGpuRealizerBridge`, the production WebGPU bridge that `browsergrad-jit` consumes for its WebGPU realizer tier.
+
+### `browsergrad-compiler` — CUDA-lite compiler layer
+Owns CUDA-lite parsing, source/context normalization, semantic analysis,
+Kernel IR lowering, lockstep CPU reference execution, WGSL emission, and
+WebGPU runner orchestration. It consumes `browsergrad-kernels` dispatch helpers
+but keeps CUDA/C++ compatibility heuristics out of platform code. Its
+real-world corpus gates compile/codegen pinned CUDA corpora and execute selected
+fixtures in Chromium/WebGPU against CPU reference outputs.
 
 ### `browsergrad-grad` — eager autograd
 Closure-based reverse-mode autograd in Python. Each op carries a closure that runs at `.backward()` time. NumPy-backed, no IR, no lazy semantics. Stable; designed to be readable source code.
