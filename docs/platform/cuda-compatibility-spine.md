@@ -64,30 +64,31 @@ pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --sk
 
 - `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/240` real code-kernel
   definitions compile as strict direct-lowering WGSL/WebGPU
-  (`directLoweringOk`). Another `15/240` are
-  real-GPU runnable through WebGPU orchestration lifts (`grid-sync-phases` and
-  `host-dynamic-launch`), for `240/240` `compileCodegenOk`. `0/240` remain
+  (`directLoweringOk`). Another `15/240` compile into host-orchestrated WebGPU
+  plans (`grid-sync-phases` and `host-dynamic-launch`), for `240/240`
+  `compileCodegenOk`. `0/240` remain
   reference-only and `0/240` remain hard gaps after filtering docs/pseudocode.
 - Corpus audit is compile/lowering evidence, not fixture execution for every
   external kernel. `planCompiledOk` is preferred for compile/codegen evidence.
-  `webGpuRunnableOk` is kept only as a legacy alias for `planCompiledOk`;
-  fixture-backed execution belongs in browser tests and
-  `scripts/e2e-cuda-lite-webgpu.mjs`.
+  Top-level legacy `webGpuRunnableOk` / `webGpuTotalOk` counters are omitted
+  from audit JSON because they sounded like execution proof. Fixture-backed
+  execution belongs in browser tests and `scripts/e2e-cuda-lite-webgpu.mjs`.
 - `referenceFallbackOk` is `15/240`: kernels whose semantics are understood by
   CPU reference or host/WebGPU orchestration. `referenceOnlyOk` is stricter and
-  excludes kernels now runnable on real WebGPU through orchestration; current
-  baseline is `0/240`.
+  excludes kernels with host-orchestrated WebGPU plan coverage; current baseline
+  is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=308`
-  compile/codegen-runnable, and `<=48` hard gaps;
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=312`
+  compile/codegen-ok, and `<=44` hard gaps;
   `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=148`
-  compile/codegen-runnable, and `0` hard gaps;
+  compile/codegen-ok, and `0` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=286`
-  compile/codegen-runnable, and `<=7` hard gaps. The aggregate gate also verifies
+  compile/codegen-ok, and `<=7` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
-- Corpus audits now emit `executionTierCounts` plus `legacyAliases` so platform
-  code can distinguish compile/codegen coverage from fixture-backed browser
-  execution and output-verified readback without parsing prose.
+- Corpus audits now emit `executionTierCounts` plus
+  `deprecatedCompilePlanAliases` so platform code can distinguish
+  compile/codegen coverage from fixture-backed browser execution and
+  output-verified readback without parsing prose.
 - `verify:real-world-cuda` is the combined hardware-backed gate: it runs the
   pinned full-corpus compile/codegen audit, then runs exact external corpus
   fixtures through real Chromium/WebGPU with output comparison. Use
@@ -236,11 +237,11 @@ pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --sk
 - Remaining failures group cleanly: dynamic parallelism/runtime launches and
   cooperative groups/grid sync.
 - Use `--limit N` to cap printed failures and `--details`/`--json` to emit
-  `{ summary, failures }` with `webGpuLiftBlockerKind`,
-  `webGpuLiftBlockerCode`, and `webGpuLiftBlocker` values. Use threshold flags
-  such as `--expect-webgpu-min`, `--expect-reference-only-max`, and
-  `--expect-hard-fail-max` so feature triage is grounded in executable
-  regression gates instead of prose-only notes.
+  `{ summary, failures }` with `webGpuPlanLiftBlockerKind`,
+  `webGpuPlanLiftBlockerCode`, and `webGpuPlanLiftBlocker` values. Use
+  threshold flags such as `--expect-plan-compiled-min`,
+  `--expect-reference-only-max`, and `--expect-hard-fail-max` so feature triage
+  is grounded in compile/codegen regression gates instead of prose-only notes.
 
 Current real-browser e2e gate:
 

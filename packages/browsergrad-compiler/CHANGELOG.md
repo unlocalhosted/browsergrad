@@ -33,11 +33,16 @@
 - Added corpus-audit threshold flags and `audit:cuda-120` so CUDA corpus
   coverage baselines fail on regression.
 - Corpus audit now reports `compileCodegenOk` / `compileCodegenGaps` and
-  treats `webGpuRunnableOk` as a legacy alias, making compile-plan coverage
-  distinct from fixture-backed real WebGPU execution.
-- Corpus audit now emits preferred `planCompiledOk` / `planCompileGaps` fields
-  and `legacyAliases` so platform consumers can avoid runnable/executed naming
-  unless browser execution actually happened.
+  `planCompiledOk` / `planCompileGaps`, making compile-plan coverage distinct
+  from fixture-backed real WebGPU execution.
+- Corpus audit now omits legacy `webGpuRunnableOk`, `webGpuTotalOk`, and
+  `webGpuCompiledOk` counters from the top-level JSON summary. Deprecated CLI
+  flags still map to `planCompiledOk` for compatibility, and
+  `deprecatedCompilePlanAliases` documents that mapping.
+- Source/context recovery now retries header kernels when fixed local array
+  dimensions need reverse translation-unit defines, and side-effect
+  canonicalization lowers safe `array[idx++]` standalone statements. This raises
+  the cuda-samples gate to `312/357` with `44` hard gaps.
 - Source normalization now avoids replacing macro parameters inside member
   properties and lowers simple two-short/one-u32 CUDA unions into bitfield
   views, raising the cuda-samples gate to `305/357` with `51` hard gaps.
@@ -66,7 +71,7 @@
 - CUDA corpus audit now skips placeholder identifiers such as `someCount`, so
   pseudocode no longer counts as a hard compiler failure.
 - CUDA corpus audit now skips explicit pseudocode solution blocks; CUDA-120
-  real-code baseline is `235/240` WebGPU runnable and `0/240` hard failures.
+  real-code baseline is `235/240` compile/codegen-ok and `0/240` hard failures.
 - Added `e2e:webgpu`, a real-browser reference-vs-WebGPU proof for examples,
   grid-sync phases, host runtime copy, host dynamic launch, and prepared resident
   dispatch.
@@ -84,15 +89,15 @@
   launch shapes before building dispatch plans.
 - Host dynamic launch planning now expands parent invocations with CUDA builtin
   coordinates, supports recursive host-dynamic flattening with a depth cap, and
-  raises the CUDA-120 WebGPU audit baseline to `239/240`.
+  raises the CUDA-120 compile/codegen audit baseline to `239/240`.
 - Host dynamic launch planning can pass single-invocation `DevicePool`
   allocation pointers into child pointer params through pool-data aliases and
   base-offset uniforms.
 - Host dynamic launch planning can now lift expanded `DevicePool` allocations
   when child launches are order-stable except for pointer base offsets.
 - Launched `__device__` functions can now be promoted to child kernels for
-  host-lifted dynamic launches, raising the CUDA-120 WebGPU audit baseline to
-  `240/240`.
+  host-lifted dynamic launches, raising the CUDA-120 compile/codegen audit
+  baseline to `240/240`.
 - Host-dynamic WebGPU plans now elide pure parent replay and seed host-planned
   `DevicePool` offsets once through generic storage metadata, avoiding double
   allocation without adding a no-op anchor dispatch.
@@ -115,8 +120,8 @@
   for platform code that wants host-orchestrated WebGPU plans without manually
   toggling reference/runtime warning flags.
 - CUDA corpus audit output now separates strict direct lowering from total
-  WebGPU runnable coverage with `directLoweringOk`, `strictCompileGaps`, and
-  `webGpuRunnableOk`.
+  compile/codegen coverage with `directLoweringOk`, `strictCompileGaps`, and
+  `planCompiledOk`.
 - Added native WGSL/reference lowering for common CUDA float math builtins:
   `fabsf`, `floorf`, `ceilf`, `roundf`, `truncf`, `sinf`, `cosf`, `tanf`,
   `powf`, `fminf`, and `fmaxf`.

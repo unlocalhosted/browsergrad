@@ -154,11 +154,11 @@ for (const file of files) {
         message: diagnostic?.message ?? String(error?.message ?? error).split("\n")[0],
         ...(includeSources ? { source: directAttempt.source } : {}),
         referenceOk: fallback.referenceOk,
-        webGpuLiftOk: fallback.webGpuLiftOk,
-        webGpuLiftKind: fallback.webGpuLiftKind,
-        webGpuLiftBlocker: fallback.webGpuLiftBlocker,
-        webGpuLiftBlockerKind: fallback.webGpuLiftBlockerKind,
-        webGpuLiftBlockerCode: fallback.webGpuLiftBlockerCode,
+        webGpuPlanLiftOk: fallback.webGpuPlanLiftOk,
+        webGpuPlanLiftKind: fallback.webGpuPlanLiftKind,
+        webGpuPlanLiftBlocker: fallback.webGpuPlanLiftBlocker,
+        webGpuPlanLiftBlockerKind: fallback.webGpuPlanLiftBlockerKind,
+        webGpuPlanLiftBlockerCode: fallback.webGpuPlanLiftBlockerCode,
       });
     }
     carriedDefines = mergeCarriedDefines(carriedDefines, directContext.blockDefines);
@@ -295,13 +295,13 @@ function shouldRetryWithReverseContext(error) {
   if (diagnostic.code === "unknown-symbol") return true;
   if (diagnostic.code === "unsupported-call" && /unsupported CUDA-lite call/u.test(diagnostic.message ?? "")) return true;
   if (diagnostic.code !== "parse-error") return false;
-  return /unsupported CUDA-lite type|unknown CUDA-lite symbol|expected type|expected ';'|expected expression/u.test(diagnostic.message ?? "");
+  return /unsupported CUDA-lite type|unknown CUDA-lite symbol|expected type|expected ';'|expected expression|array size must be an integer constant expression/u.test(diagnostic.message ?? "");
 }
 
 const failures = results.filter((result) => !result.ok);
 const directLoweringOk = results.length - failures.length;
-const webGpuLiftedOk = failures.filter((failure) => failure.webGpuLiftOk).length;
-const compileCodegenOk = directLoweringOk + webGpuLiftedOk;
+const hostPlanCompiledOk = failures.filter((failure) => failure.webGpuPlanLiftOk).length;
+const compileCodegenOk = directLoweringOk + hostPlanCompiledOk;
 const compileCodegenGaps = results.length - compileCodegenOk;
 const summary = {
   files: files.length,
@@ -326,7 +326,7 @@ const summary = {
     browserWebGpuExecutedOk: "Covered by separate browser E2E gates, not by this corpus audit.",
     outputVerifiedOk: "Covered only when fixture-backed execution compares readback against expected outputs.",
   },
-  legacyAliases: {
+  deprecatedCompilePlanAliases: {
     webGpuRunnableOk: "planCompiledOk",
     webGpuTotalOk: "planCompiledOk",
     webGpuCompiledOk: "planCompiledOk",
@@ -337,31 +337,27 @@ const summary = {
   planCompiledOk: compileCodegenOk,
   planCompileGaps: compileCodegenGaps,
   webGpuDirectCompiledOk: directLoweringOk,
-  webGpuHostPlanCompiledOk: webGpuLiftedOk,
-  webGpuCompiledOk: compileCodegenOk,
+  webGpuHostPlanCompiledOk: hostPlanCompiledOk,
+  singleDispatchPlanCompiledOk: directLoweringOk,
+  hostOrchestratedPlanCompiledOk: hostPlanCompiledOk,
   compileCodegenOk,
   compileCodegenGaps,
   compileCodegenOnlyOk: compileCodegenOk,
   compileCodegenOnlyGaps: compileCodegenGaps,
   directLoweringOk,
   strictCompileGaps: failures.length,
-  webGpuRunnableOk: compileCodegenOk,
-  webGpuHostOrchestratedOk: webGpuLiftedOk,
   ok: directLoweringOk,
-  webGpuSingleDispatchOk: directLoweringOk,
-  webGpuLiftedOk,
-  hostDynamicLiftableOk: failures.filter((failure) => failure.webGpuLiftKind === "host-dynamic-launch").length,
-  webGpuTotalOk: compileCodegenOk,
+  hostDynamicLaunchPlanCompiledOk: failures.filter((failure) => failure.webGpuPlanLiftKind === "host-dynamic-launch").length,
   fail: failures.length,
   referenceFallbackOk: failures.filter((failure) => failure.referenceOk).length,
-  referenceOnlyOk: failures.filter((failure) => failure.referenceOk && !failure.webGpuLiftOk).length,
+  referenceOnlyOk: failures.filter((failure) => failure.referenceOk && !failure.webGpuPlanLiftOk).length,
   hardFail: failures.filter((failure) => !failure.referenceOk).length,
   errors: countBy(failures, (failure) => failure.error),
   families: countBy(failures, (failure) => failure.family),
   lowering: countBy(failures, (failure) => failure.lowering),
-  webGpuLiftBlockers: countBy(
-    failures.filter((failure) => failure.referenceOk && !failure.webGpuLiftOk),
-    (failure) => failure.webGpuLiftBlockerCode ?? failure.webGpuLiftBlocker ?? "unknown",
+  webGpuPlanLiftBlockers: countBy(
+    failures.filter((failure) => failure.referenceOk && !failure.webGpuPlanLiftOk),
+    (failure) => failure.webGpuPlanLiftBlockerCode ?? failure.webGpuPlanLiftBlocker ?? "unknown",
   ),
 };
 
@@ -373,10 +369,10 @@ if (details) {
 if (!details && failures.length > 0 && firstFailureLimit > 0) {
   console.log("\nfirst direct-lowering gaps:");
   for (const failure of failures.slice(0, firstFailureLimit)) {
-    const lift = failure.webGpuLiftOk ? ` [webgpu-lift:${failure.webGpuLiftKind}]` : "";
+    const lift = failure.webGpuPlanLiftOk ? ` [webgpu-plan-lift:${failure.webGpuPlanLiftKind}]` : "";
     const reference = failure.referenceOk ? " [reference-ok]" : "";
-    const blocker = failure.referenceOk && !failure.webGpuLiftOk && failure.webGpuLiftBlocker
-      ? ` [webgpu-blocker:${failure.webGpuLiftBlockerCode ?? failure.webGpuLiftBlocker}]`
+    const blocker = failure.referenceOk && !failure.webGpuPlanLiftOk && failure.webGpuPlanLiftBlocker
+      ? ` [webgpu-plan-blocker:${failure.webGpuPlanLiftBlockerCode ?? failure.webGpuPlanLiftBlocker}]`
       : "";
     console.log(`${failure.file} block ${failure.block} kernel ${failure.kernel}: ${failure.family}/${failure.error}${lift}${reference}${blocker}: ${failure.message}`);
   }
@@ -400,20 +396,20 @@ function classifyReferenceFallback(source, kernelName) {
     const lift = webGpuLiftFor(compiled);
     return {
       referenceOk: true,
-      webGpuLiftOk: lift.kind !== undefined,
-      webGpuLiftKind: lift.kind,
-      webGpuLiftBlocker: lift.blocker,
-      webGpuLiftBlockerKind: lift.blockerKind,
-      webGpuLiftBlockerCode: lift.blockerCode,
+      webGpuPlanLiftOk: lift.kind !== undefined,
+      webGpuPlanLiftKind: lift.kind,
+      webGpuPlanLiftBlocker: lift.blocker,
+      webGpuPlanLiftBlockerKind: lift.blockerKind,
+      webGpuPlanLiftBlockerCode: lift.blockerCode,
     };
   } catch (error) {
     return {
       referenceOk: false,
-      webGpuLiftOk: false,
-      webGpuLiftKind: undefined,
-      webGpuLiftBlocker: String(error?.message ?? error).split("\n")[0],
-      webGpuLiftBlockerKind: undefined,
-      webGpuLiftBlockerCode: undefined,
+      webGpuPlanLiftOk: false,
+      webGpuPlanLiftKind: undefined,
+      webGpuPlanLiftBlocker: String(error?.message ?? error).split("\n")[0],
+      webGpuPlanLiftBlockerKind: undefined,
+      webGpuPlanLiftBlockerCode: undefined,
     };
   }
 }
@@ -1487,11 +1483,12 @@ function parseExpectationArg(arg, args, index) {
   const specs = {
     "--expect-total": "totalKernelDefinitions",
     "--expect-ok-min": "okMin",
-    "--expect-single-dispatch-min": "webGpuSingleDispatchMin",
-    "--expect-webgpu-lifted-min": "webGpuLiftedMin",
+    "--expect-single-dispatch-min": "singleDispatchPlanCompiledMin",
+    "--expect-webgpu-lifted-min": "hostOrchestratedPlanCompiledMin",
+    "--expect-host-orchestrated-plan-compiled-min": "hostOrchestratedPlanCompiledMin",
     "--expect-plan-compiled-min": "planCompiledMin",
     "--expect-compile-codegen-min": "compileCodegenMin",
-    "--expect-webgpu-min": "webGpuTotalMin",
+    "--expect-webgpu-min": "planCompiledMin",
     "--expect-reference-fallback-min": "referenceFallbackMin",
     "--expect-reference-only-max": "referenceOnlyMax",
     "--expect-hard-fail-max": "hardFailMax",
@@ -1522,11 +1519,10 @@ function checkExpectations(summary, expectations) {
     failures.push(`totalKernelDefinitions expected ${expectations.totalKernelDefinitions}, got ${summary.totalKernelDefinitions}`);
   }
   minExpectation(failures, summary.ok, expectations.okMin, "ok");
-  minExpectation(failures, summary.webGpuSingleDispatchOk, expectations.webGpuSingleDispatchMin, "webGpuSingleDispatchOk");
-  minExpectation(failures, summary.webGpuLiftedOk, expectations.webGpuLiftedMin, "webGpuLiftedOk");
+  minExpectation(failures, summary.singleDispatchPlanCompiledOk, expectations.singleDispatchPlanCompiledMin, "singleDispatchPlanCompiledOk");
+  minExpectation(failures, summary.hostOrchestratedPlanCompiledOk, expectations.hostOrchestratedPlanCompiledMin, "hostOrchestratedPlanCompiledOk");
   minExpectation(failures, summary.planCompiledOk, expectations.planCompiledMin, "planCompiledOk");
   minExpectation(failures, summary.compileCodegenOk, expectations.compileCodegenMin, "compileCodegenOk");
-  minExpectation(failures, summary.webGpuTotalOk, expectations.webGpuTotalMin, "webGpuTotalOk");
   minExpectation(failures, summary.referenceFallbackOk, expectations.referenceFallbackMin, "referenceFallbackOk");
   maxExpectation(failures, summary.referenceOnlyOk, expectations.referenceOnlyMax, "referenceOnlyOk");
   maxExpectation(failures, summary.hardFail, expectations.hardFailMax, "hardFail");

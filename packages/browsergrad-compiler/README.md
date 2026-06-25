@@ -384,7 +384,7 @@ untracked or modified files fail both audit and browser fixture loading.
 ## Corpus Audit
 
 ```bash
-pnpm --filter @unlocalhosted/browsergrad-compiler audit:corpus -- /path/to/cuda-corpus --expect-webgpu-min 10
+pnpm --filter @unlocalhosted/browsergrad-compiler audit:corpus -- /path/to/cuda-corpus --expect-plan-compiled-min 10
 pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
 pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
 ```
@@ -398,12 +398,13 @@ blocker kind/code/message. Threshold flags make corpus compile coverage
 regressions fail fast instead of living only in docs.
 `directLoweringOk` means strict one-pass WGSL compile. `planCompiledOk` /
 `compileCodegenOk` means direct WGSL compile or host-orchestrated WebGPU plan
-compile, such as grid-sync phases and dynamic launch lifts. `webGpuRunnableOk`
-remains as a legacy alias for `planCompiledOk`; new consumers should not treat
-it as output-verified execution. Prefer `executionTierCounts`:
+compile, such as grid-sync phases and dynamic launch lifts. Top-level legacy
+`webGpuRunnableOk`, `webGpuTotalOk`, and `webGpuCompiledOk` counters are omitted
+because they sounded like output-verified execution. Prefer
+`executionTierCounts`:
 `planCompiledOk`, `compileCodegenOnlyOk`, `fixtureBackedExecutedOk`,
-`browserWebGpuExecutedOk`, and `outputVerifiedOk`. `legacyAliases` maps old
-names to preferred fields.
+`browserWebGpuExecutedOk`, and `outputVerifiedOk`.
+`deprecatedCompilePlanAliases` maps old names to preferred fields for migration.
 Real execution proof lives in fixture-backed tests such as
 `pnpm --filter @unlocalhosted/browsergrad-compiler test:browser` and
 `scripts/e2e-cuda-lite-webgpu.mjs`.

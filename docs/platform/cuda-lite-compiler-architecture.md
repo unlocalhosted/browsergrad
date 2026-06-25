@@ -143,7 +143,7 @@ Rules:
 - unsupported plan with diagnostics.
 
 Use `summarizeCudaWebGpuExecutionPlan()` for platform UI/readiness rows. Do not
-infer WebGPU runnable status from `compiled.loweringPlan.canRunOnGpu` alone:
+infer WebGPU execution readiness from `compiled.loweringPlan.canRunOnGpu` alone:
 that lowering plan is intentionally conservative and marks CUDA runtime gaps as
 unsupported even when `createCudaWebGpuExecutionPlan()` can host-orchestrate real
 WebGPU passes for the same kernel.
@@ -203,7 +203,7 @@ Required before claiming a CUDA feature works:
 - Browser WebGPU test for real dispatch when browser support exists.
 - Corpus audit run for broad compatibility claims.
 
-Current executable corpus gate:
+Current compile/codegen corpus gate:
 
 ```sh
 pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120

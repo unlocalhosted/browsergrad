@@ -2083,6 +2083,30 @@ __global__ void while_prefix_update(uint* out, int limit) {
 
 {
   const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void postfix_index_load(float* out, const float* weights) {
+  int idx = 0;
+  float weight = weights[idx++];
+  out[0] = weight + float(idx);
+}`,
+  });
+  assert.match(source, /float weight = weights\[idx\];\n\s+idx\+\+;/u);
+  assert.doesNotMatch(source, /idx\+\+\]/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void postfix_index_reuse_guard(float* out, const float* weights) {
+  int idx = 0;
+  out[idx] = weights[idx++];
+}`,
+  });
+  assert.match(source, /out\[idx\] = weights\[idx\+\+\];/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
     definesByName: new Map([["size", "4"]]),
     kernel: `
 __global__ void keep_member_size(uint* out) {

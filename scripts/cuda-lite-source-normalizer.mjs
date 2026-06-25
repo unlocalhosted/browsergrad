@@ -1286,7 +1286,9 @@ function normalizeSimpleStatementMacros(source) {
 }
 
 function normalizeSideEffectExpressions(source) {
-  return normalizePostfixPointerAssignments(normalizePrefixUpdateConditions(normalizeWhilePrefixUpdateConditions(source)));
+  return normalizePostfixIndexSideEffects(
+    normalizePostfixPointerAssignments(normalizePrefixUpdateConditions(normalizeWhilePrefixUpdateConditions(source))),
+  );
 }
 
 function normalizeStdMathAliases(source) {
@@ -1575,6 +1577,32 @@ function normalizePostfixPointerAssignments(source) {
     if (match?.groups?.name === undefined || match.groups.op === undefined || match.groups.value === undefined) return line;
     const indent = match[1] ?? "";
     return `${indent}*${match.groups.name} = ${match.groups.value.trim()};\n${indent}${match.groups.name}${match.groups.op};`;
+  }).join("\n");
+}
+
+function normalizePostfixIndexSideEffects(source) {
+  return source.split(/\r?\n/u).map((line) => {
+    const trimmed = line.trim();
+    if (
+      trimmed.length === 0 ||
+      trimmed.startsWith("#") ||
+      /^(?:if|while|for|switch|return)\b/u.test(trimmed) ||
+      (line.match(/;/gu)?.length ?? 0) !== 1 ||
+      !/;\s*$/u.test(line)
+    ) {
+      return line;
+    }
+    const matches = [...line.matchAll(/\[\s*(?<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?<op>\+\+|--)\s*\]/gu)];
+    if (matches.length !== 1) return line;
+    const match = matches[0];
+    const name = match?.groups?.name;
+    const op = match?.groups?.op;
+    if (name === undefined || op === undefined || match.index === undefined) return line;
+    const withoutSideEffect = `${line.slice(0, match.index)}[${name}]${line.slice(match.index + match[0].length)}`;
+    const identifierUses = [...withoutSideEffect.matchAll(new RegExp(`\\b${escapeRegExp(name)}\\b`, "gu"))];
+    if (identifierUses.length !== 1) return line;
+    const indent = /^(\s*)/u.exec(line)?.[1] ?? "";
+    return `${withoutSideEffect}\n${indent}${name}${op};`;
   }).join("\n");
 }
 

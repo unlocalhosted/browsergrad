@@ -179,14 +179,22 @@ void launch_dynamic_late(float *out) {
   assertEqual(report.summary.executionTierCounts.outputVerifiedOk, 0, "output verified tier count");
   assertEqual(report.summary.planCompiledOk, 9, "plan compiled count");
   assertEqual(report.summary.planCompileGaps, 0, "plan compiled gaps");
+  assertEqual(report.summary.singleDispatchPlanCompiledOk, 9, "single-dispatch plan compiled count");
+  assertEqual(report.summary.hostOrchestratedPlanCompiledOk, 0, "host-orchestrated plan compiled count");
   assertEqual(report.summary.browserExecutedOk, 0, "browser executed count");
   assertEqual(report.summary.outputVerifiedOk, 0, "output verified count");
-  assertEqual(report.summary.legacyAliases.webGpuRunnableOk, "planCompiledOk", "legacy runnable alias");
-  assertEqual(report.summary.webGpuCompiledOk, 9, "reverse include kernel WebGPU compiled");
+  assertEqual(report.summary.deprecatedCompilePlanAliases.webGpuRunnableOk, "planCompiledOk", "deprecated runnable alias");
+  assertEqual(report.summary.webGpuDirectCompiledOk, 9, "reverse include kernel direct WGSL compiled");
+  assertEqual(report.summary.webGpuHostPlanCompiledOk, 0, "reverse include kernel host-plan compiled");
   assertEqual(report.summary.compileCodegenOk, 9, "reverse include kernel compile/codegen count");
   assertEqual(report.summary.compileCodegenGaps, 0, "reverse include kernel compile/codegen gaps");
   assertEqual(report.summary.fixtureBackedExecutionOk, 0, "fixture-backed execution count");
-  assertEqual(report.summary.webGpuRunnableOk, 9, "reverse include legacy compile/codegen alias");
+  assertEqual(report.summary.webGpuRunnableOk, undefined, "legacy runnable count omitted from top-level summary");
+  assertEqual(report.summary.webGpuTotalOk, undefined, "legacy total count omitted from top-level summary");
+  assertEqual(report.summary.webGpuCompiledOk, undefined, "legacy compiled count omitted from top-level summary");
+  assertEqual(report.summary.webGpuSingleDispatchOk, undefined, "legacy single-dispatch count omitted from top-level summary");
+  assertEqual(report.summary.webGpuLiftedOk, undefined, "legacy lifted count omitted from top-level summary");
+  assertEqual(report.summary.webGpuHostOrchestratedOk, undefined, "legacy host-orchestrated count omitted from top-level summary");
   assertEqual(report.summary.hardFail, 0, "reverse include hard gaps");
 
   const emitted = spawnSync("node", [

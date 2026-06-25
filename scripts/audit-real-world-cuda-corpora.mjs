@@ -136,7 +136,8 @@ function expectationArgs(expectations) {
   if (expectations.total !== undefined) args.push("--expect-total", String(expectations.total));
   if (expectations.okMin !== undefined) args.push("--expect-ok-min", String(expectations.okMin));
   if (expectations.compileCodegenMin !== undefined) args.push("--expect-compile-codegen-min", String(expectations.compileCodegenMin));
-  if (expectations.webgpuMin !== undefined) args.push("--expect-webgpu-min", String(expectations.webgpuMin));
+  if (expectations.planCompiledMin !== undefined) args.push("--expect-plan-compiled-min", String(expectations.planCompiledMin));
+  if (expectations.webgpuMin !== undefined) args.push("--expect-plan-compiled-min", String(expectations.webgpuMin));
   if (expectations.referenceOnlyMax !== undefined) args.push("--expect-reference-only-max", String(expectations.referenceOnlyMax));
   if (expectations.hardFailMax !== undefined) args.push("--expect-hard-fail-max", String(expectations.hardFailMax));
   return args;
