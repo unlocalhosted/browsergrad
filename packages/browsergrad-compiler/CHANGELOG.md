@@ -47,6 +47,9 @@
 - CuTe rank-2 transpose motifs, row-broadcast GEMV tensor views, and malformed
   macro-assignment recovery now normalize into direct CUDA-lite loops, raising
   the LeetCUDA gate to `286/293` with `7` hard gaps.
+- Source normalizer synthetic names now avoid WGSL-reserved double-underscore
+  prefixes, and the browser fixture suite now executes a LeetCUDA CuTe
+  transpose kernel through real WebGPU.
 - Browser WebGPU benchmarks now fail on validation errors and accept optional
   prepared-dispatch ratio thresholds for machine-local perf gates.
 - Fixed thread-local arrays now run through CPU reference and WGSL/WebGPU

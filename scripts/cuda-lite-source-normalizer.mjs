@@ -12,8 +12,8 @@ const SEMANTIC_BUILTIN_DEVICE_HELPERS = new Set([
 ]);
 
 const WIDE_PACKED128_TYPES = new Map([
-  ["__bg_pack128_half8", { scalarType: "half", lanes: 8 }],
-  ["__bg_pack128_bf168", { scalarType: "bf16", lanes: 8 }],
+  ["bg_pack128_half8", { scalarType: "half", lanes: 8 }],
+  ["bg_pack128_bf168", { scalarType: "bf16", lanes: 8 }],
 ]);
 
 const CUDA_BUILTIN_RECORD_DECLARATIONS = [
@@ -1003,8 +1003,8 @@ function collectSyntheticVectorPackDefines(source, definesByName = new Map()) {
   const out = new Map();
   if (!sourceMentionsIdentifier(source, "x128") || definesByName.has("x128")) return out;
   const floatX = normalizeTemplateTypeArgument(definesByName.get("floatX") ?? "float", definesByName);
-  if (floatX === "bf16") out.set("x128", "__bg_pack128_bf168");
-  else if (floatX === "half") out.set("x128", "__bg_pack128_half8");
+  if (floatX === "bf16") out.set("x128", "bg_pack128_bf168");
+  else if (floatX === "half") out.set("x128", "bg_pack128_half8");
   else out.set("x128", "float4");
   return out;
 }
@@ -1061,8 +1061,8 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
     if (elementType === "float") return "float4";
     if (elementType === "int") return "int4";
     if (elementType === "uint") return "uint4";
-    if (elementType === "half") return "__bg_pack128_half8";
-    if (elementType === "bf16") return "__bg_pack128_bf168";
+    if (elementType === "half") return "bg_pack128_half8";
+    if (elementType === "bf16") return "bg_pack128_bf168";
     return undefined;
   }
   if (type.includes("<") || type.includes(">")) return undefined;
@@ -1122,7 +1122,7 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
 function normalizeCppTemplateCarrierSyntax(source) {
   const withBoolCarriers = source
     .replace(/\bstd\s*::\s*bool_constant\s*<\s*(true|false|[01])\s*>\s*\{\s*\}/gu, (_match, value) => value === "1" ? "true" : value === "0" ? "false" : value)
-    .replace(/\bstd\s*::\s*bool_constant\s*<\s*([A-Za-z_][A-Za-z0-9_]*|[01])\s*>\s*(?=[,)])/gu, (_match, name) => `bool __bg_bool_constant_${name}`);
+    .replace(/\bstd\s*::\s*bool_constant\s*<\s*([A-Za-z_][A-Za-z0-9_]*|[01])\s*>\s*(?=[,)])/gu, (_match, name) => `bool bg_bool_constant_${name}`);
   return rewriteBoolTemplateCarriers(withBoolCarriers);
 }
 
@@ -1155,7 +1155,7 @@ function collectCudaVectorValueSymbols(source) {
 
 function rewriteBoolTemplateCarriers(source) {
   const edits = [];
-  for (const match of source.matchAll(/\btemplate\s*<([^>]*)>\s*__global__[\s\S]*?\([^)]*\bbool\s+__bg_bool_constant_([A-Za-z_][A-Za-z0-9_]*)\b[^)]*\)\s*\{/gu)) {
+  for (const match of source.matchAll(/\btemplate\s*<([^>]*)>\s*__global__[\s\S]*?\([^)]*\bbool\s+bg_bool_constant_([A-Za-z_][A-Za-z0-9_]*)\b[^)]*\)\s*\{/gu)) {
     const templateParams = match[1] ?? "";
     const name = match[2];
     if (!name || !new RegExp(`\\bbool\\s+${escapeRegExp(name)}\\b`, "u").test(templateParams)) continue;
@@ -1164,7 +1164,7 @@ function rewriteBoolTemplateCarriers(source) {
     const end = findBalanced(source, brace, "{", "}");
     if (brace < 0 || end === undefined) continue;
     const body = source.slice(brace + 1, end);
-    const rewritten = body.replace(new RegExp(`\\b${escapeRegExp(name)}\\b`, "gu"), `__bg_bool_constant_${name}`);
+    const rewritten = body.replace(new RegExp(`\\b${escapeRegExp(name)}\\b`, "gu"), `bg_bool_constant_${name}`);
     edits.push({ start: brace + 1, end, value: rewritten });
   }
   let out = source;
@@ -1241,7 +1241,7 @@ function emitVectorCooperativeReduction(vectorType, target, value, op, counter) 
   const lanes = vectorLaneCount(vectorType);
   if (lanes === undefined) return `${vectorType} ${target} = ${value};`;
   const fields = ["x", "y", "z", "w"].slice(0, lanes);
-  const offset = `__bg_cg_reduce_offset_${counter}`;
+  const offset = `bg_cg_reduce_offset_${counter}`;
   const shuffled = `make_${vectorType}(${fields.map((field) =>
     `__shfl_xor_sync(0xffffffff, ${target}.${field}, ${offset})`).join(", ")})`;
   return [
@@ -1364,7 +1364,7 @@ function normalizeForLoopScopedVariables(source) {
       re.lastIndex = close + 1;
       continue;
     }
-    const scopedName = `__bg_for_${originalName}_${renameIndex++}`;
+    const scopedName = `bg_for_${originalName}_${renameIndex++}`;
     const renamedHeader = [
       `${initMatch[1]}${scopedName}${replaceIdentifier(initMatch[3], originalName, scopedName)}`,
       replaceIdentifier(parts[1] ?? "", originalName, scopedName),
@@ -2498,11 +2498,11 @@ function cudaPointerParamValueType(param) {
 
 function cuteRank2TransposeBody(motif) {
   const total = `(${motif.tileRows} * ${motif.tileCols})`;
-  const rowInTile = "__bg_cute_row";
-  const colInTile = "__bg_cute_col";
-  const row = "__bg_cute_m";
-  const col = "__bg_cute_n";
-  const linear = "__bg_cute_linear";
+  const rowInTile = "bg_cute_row";
+  const colInTile = "bg_cute_col";
+  const row = "bg_cute_m";
+  const col = "bg_cute_n";
+  const linear = "bg_cute_linear";
   return [
     `for (int ${linear} = threadIdx.x; ${linear} < ${total}; ${linear} = ${linear} + blockDim.x) {`,
     `  int ${rowInTile} = ${linear} / ${motif.tileCols};`,
@@ -2656,11 +2656,11 @@ function cuteExprIsOne(expr) {
 }
 
 function cuteRowBroadcastGemvBody(motif) {
-  const tid = "__bg_cute_tid";
-  const rowLocal = "__bg_cute_row_local";
-  const row = "__bg_cute_row";
-  const k = "__bg_cute_k";
-  const sum = "__bg_cute_sum";
+  const tid = "bg_cute_tid";
+  const rowLocal = "bg_cute_row_local";
+  const row = "bg_cute_row";
+  const k = "bg_cute_k";
+  const sum = "bg_cute_sum";
   const stride = "((blockDim.x * blockDim.y) * blockDim.z)";
   return [
     `int ${tid} = threadIdx.x + (threadIdx.y * blockDim.x) + (threadIdx.z * blockDim.x * blockDim.y);`,
@@ -2777,8 +2777,8 @@ function lowerCute1dAffineTileSegment(segment) {
   }
   if (!aliasPointers.has(outVectorAlias)) aliasPointers.set(outVectorAlias, outTile.pointer);
 
-  const item = "__bg_cute_i";
-  const pos = "__bg_cute_pos";
+  const item = "bg_cute_i";
+  const pos = "bg_cute_pos";
   let scalarExpression = rhs;
   for (const [alias, pointer] of aliasPointers) {
     scalarExpression = scalarExpression.replace(new RegExp(`\\b${escapeRegExp(alias)}\\s*\\(\\s*${escapeRegExp(loopIndex)}\\s*\\)`, "gu"), `${pointer}[${pos}]`);
@@ -3509,7 +3509,7 @@ function inlineLocalPointerDeviceFunctionBody(helper, args, pointerTargets) {
     .map((param, index) => ({ param, index }))
     .filter(({ param }) => !param.pointer);
   const locals = scalarParams.map(({ param, index }) => ({
-    name: `__bg_${param.name}`,
+    name: `bg_${param.name}`,
     type: param.type,
     value: args[index] ?? "0",
   }));
@@ -3518,7 +3518,7 @@ function inlineLocalPointerDeviceFunctionBody(helper, args, pointerTargets) {
     body = body.replace(new RegExp(`\\*\\s*${escapeRegExp(name)}\\b`, "gu"), target);
   }
   for (const local of locals) {
-    body = body.replace(new RegExp(`\\b${escapeRegExp(local.name.replace(/^__bg_/u, ""))}\\b`, "gu"), local.name);
+    body = body.replace(new RegExp(`\\b${escapeRegExp(local.name.replace(/^bg_/u, ""))}\\b`, "gu"), local.name);
   }
   if ([...pointerTargets.keys()].some((name) => new RegExp(`\\b${escapeRegExp(name)}\\b`, "u").test(body))) return undefined;
   return `{\n${locals.map((local) => `  ${local.type} ${local.name} = ${local.value};`).join("\n")}\n${indentBlock(body, "  ")}\n}`;

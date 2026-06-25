@@ -447,8 +447,8 @@ __global__ void cute_affine(half *z, int num, const half *x, const half *y, half
 }`,
     templateArgumentsByKernelName: new Map([["cute_affine", ["8"]]]),
   });
-  assert.match(source, /for \(int __bg_for___bg_cute_i_0 = 0;__bg_for___bg_cute_i_0 < 8;\+\+__bg_for___bg_cute_i_0\)/u);
-  assert.match(source, /z\[__bg_cute_pos\] = x\[__bg_cute_pos\] \* a \+ \(y\[__bg_cute_pos\] \* b \+ c\);/u);
+  assert.match(source, /for \(int bg_for_bg_cute_i_0 = 0;bg_for_bg_cute_i_0 < 8;\+\+bg_for_bg_cute_i_0\)/u);
+  assert.match(source, /z\[bg_cute_pos\] = x\[bg_cute_pos\] \* a \+ \(y\[bg_cute_pos\] \* b \+ c\);/u);
   assert.doesNotMatch(source, /\bTensor\b/u);
   assert.doesNotMatch(source, /\brecast\s*</u);
 }
@@ -474,8 +474,8 @@ __global__ void cute_transpose_direct(const T *pA, T *pB, int M, int N, ThreadLa
     templateArgumentsByKernelName: new Map([["cute_transpose_direct", ["float", "8", "16"]]]),
   });
   assert.match(source, /__global__ void cute_transpose_direct\(const float \*pA, float \*pB, int M, int N\)/u);
-  assert.match(source, /for \(int __bg_for___bg_cute_linear_0 = threadIdx\.x;__bg_for___bg_cute_linear_0 < \(8 \* 16\);__bg_for___bg_cute_linear_0 = __bg_for___bg_cute_linear_0 \+ blockDim\.x\)/u);
-  assert.match(source, /pB\[\(__bg_cute_n \* M\) \+ __bg_cute_m\] = pA\[\(__bg_cute_m \* N\) \+ __bg_cute_n\];/u);
+  assert.match(source, /for \(int bg_for_bg_cute_linear_0 = threadIdx\.x;bg_for_bg_cute_linear_0 < \(8 \* 16\);bg_for_bg_cute_linear_0 = bg_for_bg_cute_linear_0 \+ blockDim\.x\)/u);
+  assert.match(source, /pB\[\(bg_cute_n \* M\) \+ bg_cute_m\] = pA\[\(bg_cute_m \* N\) \+ bg_cute_n\];/u);
   assert.doesNotMatch(source, /\bThreadLayoutA\b/u);
   assert.doesNotMatch(source, /\bTensor\b/u);
 }
@@ -505,7 +505,7 @@ __global__ void cute_transpose_smem(const T *pA, T *pB, int M, int N, ThreadLayo
     templateArgumentsByKernelName: new Map([["cute_transpose_smem", ["float", "8", "16"]]]),
   });
   assert.match(source, /__global__ void cute_transpose_smem\(const float \*pA, float \*pB, int M, int N\)/u);
-  assert.match(source, /__bg_cute_m = \(\(blockIdx\.x\) \* 8\) \+ __bg_cute_row/u);
+  assert.match(source, /bg_cute_m = \(\(blockIdx\.x\) \* 8\) \+ bg_cute_row/u);
   assert.doesNotMatch(source, /\bSmemLayoutA\b/u);
   assert.doesNotMatch(source, /\bmake_tensor\b/u);
 }
@@ -540,7 +540,7 @@ __global__ void cute_transpose_retile(const T *pA, T *pB, int M, int N, TiledCop
     templateArgumentsByKernelName: new Map([["cute_transpose_retile", ["float", "8", "16"]]]),
   });
   assert.match(source, /__global__ void cute_transpose_retile\(const float \*pA, float \*pB, int M, int N\)/u);
-  assert.match(source, /pB\[\(__bg_cute_n \* M\) \+ __bg_cute_m\] = pA\[\(__bg_cute_m \* N\) \+ __bg_cute_n\];/u);
+  assert.match(source, /pB\[\(bg_cute_n \* M\) \+ bg_cute_m\] = pA\[\(bg_cute_m \* N\) \+ bg_cute_n\];/u);
   assert.doesNotMatch(source, /\bTiledCopyA\b/u);
   assert.doesNotMatch(source, /\bretile_[SD]\b/u);
 }
@@ -576,8 +576,8 @@ __global__ void cute_hgemv(half *Aptr, half *Bptr, half *Cptr, const int M, cons
     templateArgumentsByKernelName: new Map([["cute_hgemv", ["TiledCopy", "4", "16"]]]),
   });
   assert.match(source, /__global__ void cute_hgemv\(half \*Aptr, half \*Bptr, half \*Cptr, const int M, const int K\)/u);
-  assert.match(source, /half __bg_cute_sum = 0\.0f;/u);
-  assert.match(source, /Cptr\[__bg_cute_row\] = __bg_cute_sum;/u);
+  assert.match(source, /half bg_cute_sum = 0\.0f;/u);
+  assert.match(source, /Cptr\[bg_cute_row\] = bg_cute_sum;/u);
   assert.doesNotMatch(source, /\bTiledCopy\b/u);
   assert.doesNotMatch(source, /\bmake_tensor\b/u);
 }
@@ -650,7 +650,7 @@ __global__ void vector_reduce(float2 *out) {
 }`,
   });
   assert.match(source, /float2 total = value;/u);
-  assert.match(source, /__bg_for___bg_cg_reduce_offset_0_0 = 16/u);
+  assert.match(source, /bg_for_bg_cg_reduce_offset_0_0 = 16/u);
   assert.match(source, /total = merge_pair\(total, make_float2\(__shfl_xor_sync\(0xffffffff, total\.x/u);
   assert.doesNotMatch(source, /float2 total = cg::reduce/u);
 }
@@ -819,7 +819,7 @@ void host(float *out, const float *in) {
     templateArgumentsByKernelName: launches,
   });
   assert.match(source, /template <typename OutFloat = float, bool Atomic = 0>/u);
-  assert.match(source, /__global__ void inferred_kernel\(float \*out, const float \*in, bool __bg_bool_constant_0\)/u);
+  assert.match(source, /__global__ void inferred_kernel\(float \*out, const float \*in, bool bg_bool_constant_0\)/u);
   assert.match(source, /out\[0\] = \(float\)in\[0\];/u);
   assert.doesNotMatch(source, /#define OutFloat 999/u);
 }
@@ -1530,8 +1530,8 @@ __global__ void for_scope_shadow(uint *out, uint stride) {
   out[0] = stride;
 }`,
   });
-  assert.match(source, /for \(uint __bg_for_stride_0 = 4;__bg_for_stride_0 > 0;__bg_for_stride_0 >>= 1\)/u);
-  assert.match(source, /out\[__bg_for_stride_0\] = __bg_for_stride_0;/u);
+  assert.match(source, /for \(uint bg_for_stride_0 = 4;bg_for_stride_0 > 0;bg_for_stride_0 >>= 1\)/u);
+  assert.match(source, /out\[bg_for_stride_0\] = bg_for_stride_0;/u);
   assert.match(source, /out\[0\] = stride;/u);
 }
 
@@ -1750,7 +1750,7 @@ __global__ void packed_half(floatX *out, const floatX *inp) {
 }`,
     definesByName: new Map([
       ["floatX", "half"],
-      ["x128", "__bg_pack128_half8"],
+      ["x128", "bg_pack128_half8"],
       ["x128::size", "8"],
     ]),
   });
@@ -1790,13 +1790,13 @@ __global__ void async_pipeline(float* out, const float* in) {
   const source = createKernelCompilationUnit({
     kernel: `
 template <typename T = float, bool UseAuxBuffer>
-__global__ void bool_template_carrier(float* out, const float* in, bool __bg_bool_constant_UseAuxBuffer) {
+__global__ void bool_template_carrier(float* out, const float* in, bool bg_bool_constant_UseAuxBuffer) {
   if constexpr (!UseAuxBuffer) {
     out[threadIdx.x] = in[threadIdx.x];
   }
 }`,
   });
-  assert.match(source, /if constexpr \(!__bg_bool_constant_UseAuxBuffer\)/u);
+  assert.match(source, /if constexpr \(!bg_bool_constant_UseAuxBuffer\)/u);
 }
 
 {
@@ -2171,8 +2171,8 @@ __device__ __forceinline__ void stochastic_rounding(float in, bf16 *out, unsigne
     ],
   });
   assert.doesNotMatch(source, /__device__ __forceinline__ void stochastic_rounding/u);
-  assert.match(source, /float __bg_in = x\[0\];/u);
-  assert.match(source, /unsigned int __bg_seed = seed;/u);
+  assert.match(source, /float bg_in = x\[0\];/u);
+  assert.match(source, /unsigned int bg_seed = seed;/u);
   assert.match(source, /tmp\[0\] = __float2bfloat16_rn/u);
 }
 

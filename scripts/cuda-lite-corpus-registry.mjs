@@ -144,6 +144,23 @@ export const cudaLiteCorpusExecutionFixtures = [
     },
     output: "c",
   },
+  {
+    sourceKey: "corpusLeetCudaCuteTransposeReg",
+    caseName: "corpus:LeetCUDA:mat_transpose_cute_reg_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/mat-transpose/mat_transpose_cute.cu",
+    kernelName: "mat_transpose_cute_reg_kernel",
+    workgroupSize: [64, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [64, 1, 1] },
+    input: {
+      buffers: {
+        pA: { type: "Float32Array", data: [1, 2, 3, 4, 5, 6] },
+        pB: { type: "Float32Array", length: 6 },
+      },
+      scalars: { M: 2, N: 3 },
+    },
+    output: "pB",
+  },
 ];
 
 export function corpusById(id) {
