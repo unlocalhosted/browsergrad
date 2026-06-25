@@ -1934,7 +1934,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     context.trace.reads.push({ name: surfaceName, index, value, ok });
     return returnForm ? value : 0;
   }
-  if (name === "surf2Dwrite" || name === "surf1Dwrite" || name === "surf2DLayeredwrite") {
+  if (name === "surf2Dwrite" || name === "surf1Dwrite" || name === "surf2DLayeredwrite" || name === "surf3Dwrite") {
     const surfaceRef = expression.args[1];
     const surfaceName = surfaceRef ? rootIdentifier(surfaceRef) : undefined;
     if (!surfaceName) throw compilerFailure("surf2Dwrite expects surface reference");
@@ -1944,10 +1944,11 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const x = Math.trunc(evalNumber(expression.args[2]!, context) / 4);
     const yBase = name === "surf1Dwrite" ? 0 : Math.trunc(evalNumber(expression.args[3]!, context));
     const layer = name === "surf2DLayeredwrite" ? Math.trunc(evalNumber(expression.args[4]!, context)) : 0;
+    const z = name === "surf3Dwrite" ? Math.trunc(evalNumber(expression.args[4]!, context)) : 0;
     const y = yBase + layer;
     const lanes = isCudaVectorValue(value) ? value.lanes : [valueAsNumber(value, "surface write value")];
     for (const [lane, laneValue] of lanes.entries()) {
-      const index = y * surface.width + x + lane;
+      const index = ((z * surface.height) + y) * surface.width + x + lane;
       const ok = x >= 0 && y >= 0 && index >= 0 && index < surface.data.length;
       if (ok) surface.data[index] = laneValue ?? 0;
       context.trace.writes.push({ name: surfaceName, index, value: laneValue ?? 0, ok });

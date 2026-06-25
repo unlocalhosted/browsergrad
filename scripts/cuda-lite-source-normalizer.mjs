@@ -235,7 +235,9 @@ export function createKernelCompilationUnit({
   const withCooperativeGroupHelpers = normalizeCooperativeGroupHelperParams(withTypeDefines);
   const withVectorCooperativeReductions = normalizeVectorCooperativeReductions(withCooperativeGroupHelpers);
   const withStdMathAliases = normalizeStdMathAliases(withVectorCooperativeReductions);
-  const withoutSupportedAliases = stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withStdMathAliases, postCarrierDefines));
+  const withStaticTemplateConverters = normalizeStaticTemplateConverters(withStdMathAliases, postCarrierDefines);
+  const withoutTemplateRecords = stripTemplateRecordDeclarations(withStaticTemplateConverters);
+  const withoutSupportedAliases = stripSupportedEnumDeclarations(stripSupportedTypeAliasDeclarations(withoutTemplateRecords, postCarrierDefines));
   const withVectorConstructors = normalizeVectorStaticConstructors(withoutSupportedAliases, postCarrierDefines);
   const withVectorLength = normalizeCudaVectorLength(withVectorConstructors);
   const withWidePacks = normalizeWidePacked128Aliases(withVectorLength, postCarrierDefines);
@@ -1209,6 +1211,7 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
   }
   if (type === "__half" || type === "half_t") return "half";
   if (type === "__nv_bfloat16" || type === "nv_bfloat16") return "bf16";
+  if (type === "double") return "double";
   if (type === "unsigned int" || type === "unsigned") return "uint";
   if (type === "unsigned char" || type === "uchar" || type === "uint8_t") return "uint";
   if (type === "unsigned short" || type === "unsigned short int") return "uint";
@@ -1248,7 +1251,7 @@ function normalizeTemplateTypeArgument(arg, definesByName = new Map(), seen = ne
   if (type === "XMFLOAT2") return "float2";
   if (type === "XMFLOAT3") return "float3";
   if (type === "XMFLOAT4") return "float4";
-  const supported = new Set(["float", "int", "uint", "half", "bf16", "bool", "float2", "float3", "float4", "half2", "int2", "int3", "int4", "uint2", "uint3", "uint4"]);
+  const supported = new Set(["float", "double", "int", "uint", "half", "bf16", "bool", "float2", "float3", "float4", "half2", "int2", "int3", "int4", "uint2", "uint3", "uint4"]);
   return supported.has(type) ? type : undefined;
 }
 
@@ -1335,6 +1338,65 @@ function normalizeStdMathAliases(source) {
   return source
     .replace(/\bstd\s*::\s*isinf\s*\(/gu, "isinf(")
     .replace(/\bstd\s*::\s*numeric_limits\s*<\s*(?:float|double)\s*>\s*::\s*infinity\s*\(\s*\)/gu, "INFINITY");
+}
+
+function normalizeStaticTemplateConverters(source, definesByName = new Map()) {
+  const re = /\b[A-Za-z_][A-Za-z0-9_:]*\s*<[^;{}()]*>\s*::\s*convert\s*\(/gu;
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const openAngle = source.indexOf("<", match.index);
+    const closeAngle = findBalanced(source, openAngle, "<", ">");
+    const openParen = source.indexOf("(", closeAngle ?? match.index);
+    const closeParen = findBalanced(source, openParen, "(", ")");
+    if (closeAngle === undefined || openParen < 0 || closeParen === undefined) {
+      re.lastIndex = match.index + 1;
+      continue;
+    }
+    const rawType = source.slice(openAngle + 1, closeAngle);
+    const valueType = normalizeTemplateTypeArgument(rawType, definesByName);
+    const args = splitTopLevel(source.slice(openParen + 1, closeParen));
+    if (valueType === undefined || args.length !== 1 || args[0]?.length === 0) {
+      re.lastIndex = closeParen + 1;
+      continue;
+    }
+    out += source.slice(cursor, match.index);
+    out += `${valueType}(${args[0]})`;
+    cursor = closeParen + 1;
+    re.lastIndex = closeParen + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function stripTemplateRecordDeclarations(source) {
+  const re = /\btemplate\s*<[^;{}]*>\s*(?:struct|class)\s+[A-Za-z_][A-Za-z0-9_:]*(?:\s*<[^;{}]*>)?\s*\{/gu;
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const open = source.indexOf("{", match.index);
+    const close = findBalanced(source, open, "{", "}");
+    if (close === undefined) {
+      re.lastIndex = match.index + 1;
+      continue;
+    }
+    let end = close + 1;
+    while (/\s/u.test(source[end] ?? "")) end++;
+    if (source[end] !== ";") {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    const body = source.slice(open + 1, close).replace(/\/\/.*$/gmu, "").replace(/\/\*[\s\S]*?\*\//gu, "").trim();
+    if (body.length > 0) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    out += source.slice(cursor, match.index);
+    cursor = end + 1;
+    re.lastIndex = end + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
 }
 
 function normalizeVectorCooperativeReductions(source) {
@@ -1778,6 +1840,7 @@ function normalizeScalarizedPodRecords(source, definesByName = new Map()) {
   const functionExpansions = [];
   for (const record of records) out = rewriteScalarizedRecordFunctionSignatures(out, record, symbolsByRecord.get(record.name), functionExpansions);
   for (const record of records) out = rewriteScalarizedRecordLocalDeclarations(out, record, symbolsByRecord.get(record.name));
+  for (const record of records) out = rewriteScalarizedRecordAssignments(out, record, symbolsByRecord.get(record.name));
   for (const record of records) out = rewriteScalarizedRecordMemberAccess(out, record, symbolsByRecord.get(record.name));
   out = rewriteScalarizedRecordCalls(out, functionExpansions, symbolsByRecord);
   return out;
@@ -1987,6 +2050,7 @@ function resolveScalarizedRecordArrayDimension(rawDim, definesByName) {
 
 function isScalarizedRecordFieldType(valueType) {
   return valueType === "float" ||
+    valueType === "double" ||
     valueType === "int" ||
     valueType === "uint" ||
     valueType === "half" ||
@@ -2113,22 +2177,77 @@ function normalizeScalarizedRecordQualifiers(raw) {
 function rewriteScalarizedRecordLocalDeclarations(source, record, symbols) {
   const re = new RegExp(`(^|[;{}]\\s*)${escapeRegExp(record.name)}\\s+([^;]+);`, "gmu");
   return source.replace(re, (match, prefix, declarators) => {
-    if (typeof declarators !== "string" || /[=*&(){}]/u.test(declarators)) return match;
+    if (typeof declarators !== "string" || /[*&()]/u.test(declarators)) return match;
     const names = splitTopLevel(declarators).map((item) => item.trim()).filter(Boolean);
     if (names.length === 0) return match;
     const expanded = [];
-    for (const rawName of names) {
-      const parsed = /^([A-Za-z_][A-Za-z0-9_]*)((?:\s*\[[^\]]+\])*)$/u.exec(rawName);
-      if (parsed?.[1] === undefined) return match;
-      const name = parsed[1];
-      const outerDimensions = parsed[2] ?? "";
+    for (const rawDeclarator of names) {
+      const parsedDeclarator = parseScalarizedRecordDeclarator(rawDeclarator, record);
+      if (parsedDeclarator === undefined) return match;
+      const { fieldInitializers, name, outerDimensions } = parsedDeclarator;
       symbols.set(name, { kind: "local" });
-      for (const field of record.fields) {
-        expanded.push(`${field.valueType} ${recordFieldName(name, field)}${outerDimensions}${field.dimensions.map((dim) => `[${dim}]`).join("")};`);
+      for (const [fieldIndex, field] of record.fields.entries()) {
+        const initializer = fieldInitializers[fieldIndex];
+        expanded.push(`${field.valueType} ${recordFieldName(name, field)}${outerDimensions}${field.dimensions.map((dim) => `[${dim}]`).join("")}${initializer === undefined ? "" : ` = ${initializer}`};`);
       }
     }
     return `${prefix}${expanded.join(" ")}`;
   });
+}
+
+function parseScalarizedRecordDeclarator(rawDeclarator, record) {
+  const parsed = /^([A-Za-z_][A-Za-z0-9_]*)((?:\s*\[[^\]]+\])*)\s*(?:=\s*(.+))?$/u.exec(rawDeclarator);
+  if (parsed?.[1] === undefined) return undefined;
+  const initializer = parsed[3]?.trim();
+  if (initializer !== undefined && (parsed[2]?.trim().length ?? 0) > 0) return undefined;
+  const fieldInitializers = initializer === undefined ? [] : scalarizedRecordFieldInitializers(initializer, record);
+  if (fieldInitializers === undefined) return undefined;
+  return {
+    name: parsed[1],
+    outerDimensions: parsed[2] ?? "",
+    fieldInitializers,
+  };
+}
+
+function scalarizedRecordFieldInitializers(initializer, record) {
+  const trimmed = initializer.trim();
+  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+    const values = splitTopLevel(trimmed.slice(1, -1)).map((value) => value.trim());
+    return record.fields.map((_field, index) => values[index] ?? "0");
+  }
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/u.test(trimmed)) {
+    return record.fields.map((field) => recordFieldName(trimmed, field));
+  }
+  return undefined;
+}
+
+function rewriteScalarizedRecordAssignments(source, record, symbols) {
+  let out = source;
+  for (const [sourceName, sourceSymbol] of symbols) {
+    if (sourceSymbol.kind !== "local" && sourceSymbol.kind !== "param") continue;
+    for (const [targetName, targetSymbol] of symbols) {
+      if (targetSymbol.kind === "param-pointer") {
+        const indexedRe = new RegExp(`\\b${escapeRegExp(targetName)}\\b((?:\\s*\\[[^\\]]+\\])+)\\s*=\\s*${escapeRegExp(sourceName)}\\s*;`, "gu");
+        out = out.replace(indexedRe, (_match, indexes) => scalarizedRecordFieldStores(record, targetName, indexes, sourceName));
+        const derefRe = new RegExp(`\\*\\s*${escapeRegExp(targetName)}\\s*=\\s*${escapeRegExp(sourceName)}\\s*;`, "gu");
+        out = out.replace(derefRe, scalarizedRecordFieldStores(record, targetName, "[0]", sourceName));
+        continue;
+      }
+      if (targetSymbol.kind === "local" || targetSymbol.kind === "param") {
+        const localRe = new RegExp(`\\b${escapeRegExp(targetName)}\\s*=\\s*${escapeRegExp(sourceName)}\\s*;`, "gu");
+        out = out.replace(localRe, record.fields
+          .map((field) => `${recordFieldName(targetName, field)} = ${recordFieldName(sourceName, field)};`)
+          .join(" "));
+      }
+    }
+  }
+  return out;
+}
+
+function scalarizedRecordFieldStores(record, targetName, indexes, sourceName) {
+  return record.fields
+    .map((field) => `${recordFieldName(targetName, field)}${indexes} = ${recordFieldName(sourceName, field)};`)
+    .join(" ");
 }
 
 function rewriteScalarizedRecordMemberAccess(source, record, symbols) {
@@ -4094,7 +4213,15 @@ function normalizeCudaPipelineAsync(source) {
     "",
   );
   out = out.replace(
+    /\b__shared__\s+(?:cg|cooperative_groups)::block_tile_memory\s*<[^;]+>\s+[A-Za-z_][A-Za-z0-9_]*\s*;/gu,
+    "",
+  );
+  out = out.replace(
     /\bauto\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*cg::this_thread_block\s*\(\s*\)\s*;/gu,
+    "cg::thread_block $1 = cg::this_thread_block();",
+  );
+  out = out.replace(
+    /\bauto\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*cg::this_thread_block\s*\(\s*[A-Za-z_][A-Za-z0-9_]*\s*\)\s*;/gu,
     "cg::thread_block $1 = cg::this_thread_block();",
   );
   out = out.replace(
@@ -4412,7 +4539,7 @@ function collectEnumIntegerConstants(source, initialDefines = new Map()) {
 function collectTypeAliasDefines(source, initialDefines = new Map()) {
   const defines = new Map(initialDefines);
   const out = new Map();
-  for (const line of source.split(/\r?\n/u)) {
+  for (const line of pruneCudaPreprocessorBranches(source, defines).split(/\r?\n/u)) {
     const alias = parseSimpleTypeAlias(stripLineComment(line), defines);
     if (alias !== undefined) {
       defines.set(alias.name, alias.value);

@@ -3669,6 +3669,28 @@ __global__ void surfaceWrite(cudaSurfaceObject_t outputSurf, int width, int heig
     expect([...result.buffers.outputSurf as Float32Array]).toEqual([2, 4, 6, 8]);
   });
 
+  it("lowers cudaSurfaceObject_t surf3Dwrite to z-linearized storage", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void surfaceWrite3d(cudaSurfaceObject_t outputSurf) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  int z = blockIdx.z;
+  surf3Dwrite(float(x + y * 10 + z * 100), outputSurf, x * sizeof(float), y, z);
+}`, { workgroupSize: [2, 2, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {},
+        surfaces: { outputSurf: { width: 2, height: 2, data: new Float32Array(8) } },
+      },
+      { gridDim: [1, 1, 2], blockDim: [2, 2, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_surf2dwrite_outputSurf");
+    expect(compiled.wgsl).toContain("z * i32(params.outputSurf_height)");
+    expect([...result.buffers.outputSurf as Float32Array]).toEqual([0, 1, 10, 11, 100, 101, 110, 111]);
+  });
+
   it("lowers f32 atomic max helpers through CAS semantics", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void maxKernel(const float *input, float *result, int N) {
@@ -5833,6 +5855,29 @@ __global__ void atomic_sum(const float* input, float* result) {
     expect(compiled.wgsl).toContain("fn bg_atomicAdd_f32");
     expect(compiled.wgsl).toContain("bitcast<f32>(old_bits)");
     expect([...result.buffers.result as Float32Array]).toEqual([13.75]);
+  });
+
+  it("supports CUDA double atomicAdd through explicit f32 compatibility lowering", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void addValue(double *result, double value) {
+  atomicAdd(result, value);
+}
+__global__ void atomic_sum(double* result) {
+  addValue(result, 1.5);
+}`, { workgroupSize: [2, 1, 1], f64Mode: "f32" });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          result: new Float32Array([0]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.some((diagnostic) => diagnostic.code === "f64-lowered-to-f32")).toBe(true);
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_f32");
+    expect([...result.buffers.result as Float32Array]).toEqual([3]);
   });
 
   it("supports CUDA float atomicExch through u32 bitcasts", () => {

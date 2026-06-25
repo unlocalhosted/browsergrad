@@ -58,6 +58,11 @@
   defaulted kernel template types into referenced device helpers. CUDA warp
   reduction aliases now accept masked forms and lower the value operand, raising
   the cuda-samples gate to `318/357` with `38` hard gaps.
+- CUDA surface/cooperative-group intake now lowers storage-backed `surf3Dwrite`,
+  removes cooperative-groups `block_tile_memory` scratch carriers, prunes
+  inactive typedef branches before alias collection, and carries double-field
+  POD records plus explicit f64-to-f32 double atomic compatibility, raising the
+  cuda-samples gate to `320/357` with `36` hard gaps.
 - Source normalization now avoids replacing macro parameters inside member
   properties and lowers simple two-short/one-u32 CUDA unions into bitfield
   views, raising the cuda-samples gate to `305/357` with `51` hard gaps.

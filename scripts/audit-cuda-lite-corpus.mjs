@@ -43,6 +43,7 @@ const CUDA_SYSTEM_DEFINES = new Map([
 ]);
 const PORTABLE_POINTER_BASE_TYPES = new Set([
   "float",
+  "double",
   "int",
   "uint",
   "half",

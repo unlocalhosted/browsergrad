@@ -1524,6 +1524,59 @@ __global__ void alias_intake_kernel(TColor *out, pointFunction_t fn) {
 
 {
   const source = createKernelCompilationUnit({
+    definesByName: new Map([["VolumeType", "uint"]]),
+    kernel: `
+template <typename T> struct VolumeTypeInfo
+{
+};
+__global__ void static_template_converter(uint *out, float *input) {
+  out[threadIdx.x] = VolumeTypeInfo<VolumeType>::convert(input[threadIdx.x]);
+}`,
+  });
+  assert.doesNotMatch(source, /template <typename T> struct VolumeTypeInfo/u);
+  assert.match(source, /out\[threadIdx\.x\] = uint\(input\[threadIdx\.x\]\);/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    recordDeclarations: [
+      "typedef struct { double Expected; double Confidence; } __TOptionValue;",
+    ],
+    kernel: `
+__global__ void double_record_kernel(float *out, __TOptionValue *values) {
+  __TOptionValue sum = {0, 0};
+  sum.Expected += 1.0;
+  sum.Confidence += 2.0;
+  values[threadIdx.x] = sum;
+  out[threadIdx.x] = sum.Confidence;
+}`,
+  });
+  assert.doesNotMatch(source, /__TOptionValue/u);
+  assert.match(source, /double sum__Expected = 0;/u);
+  assert.match(source, /double \*values__Expected, double \*values__Confidence/u);
+  assert.match(source, /values__Confidence\[threadIdx\.x\] = sum__Confidence;/u);
+  assert.match(source, /out\[threadIdx\.x\] = sum__Confidence;/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void f64_helper_intake(float *out) {
+  extern double __shared__ scratch[];
+  scratch[threadIdx.x] = 1.0;
+  reduceDouble(scratch);
+  out[threadIdx.x] = scratch[threadIdx.x];
+}`,
+    deviceFunctions: [
+      { name: "reduceDouble", source: "__device__ void reduceDouble(double *scratch) { scratch[0] = scratch[0] + 1.0; }" },
+    ],
+  });
+  assert.match(source, /__device__ void reduceDouble\(double \*scratch\)/u);
+  assert.match(source, /reduceDouble\(scratch\);/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
     kernel: `
 __global__ void inferred_scalar_template(uint *out, unsigned short *scratch) {
   unsigned int count = threadIdx.x;
@@ -1542,6 +1595,21 @@ __device__ void sink(T *out, unsigned short *scratch, const S count) {
   });
   assert.match(source, /template <class S = uint, class T = uint>/u);
   assert.match(source, /__device__ void sink\(uint \*out, unsigned short \*scratch, const uint count\)/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void cooperative_scratch_kernel(int *out) {
+  __shared__ cg::block_tile_memory<1024> scratch;
+  auto cta = cg::this_thread_block(scratch);
+  auto tile = cg::tiled_partition<32>(cta);
+  if (tile.thread_rank() == 0) out[0] = tile.meta_group_size();
+}`,
+  });
+  assert.doesNotMatch(source, /block_tile_memory/u);
+  assert.match(source, /cg::thread_block cta = cg::this_thread_block\(\);/u);
+  assert.match(source, /auto tile = cg::tiled_partition<32>\(cta\);/u);
 }
 
 {
