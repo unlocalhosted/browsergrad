@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { withDirectoryLock } from "./cuda-lite-tool-lock.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "..");
 const compilerDir = path.join(root, "packages/browsergrad-compiler");
 const lockDir = path.join(root, "node_modules/.cache/browsergrad/cuda-lite-tool.lock");
-const staleLockMs = 30 * 60 * 1000;
 
 const tools = {
   bench: { script: "benchmark-cuda-lite-compiler.mjs" },
@@ -35,7 +34,7 @@ if (!toolName || toolName === "--help" || !(toolName in tools)) {
 const tool = tools[toolName];
 const forwardedArgs = rawArgs[0] === "--" ? rawArgs.slice(1) : rawArgs;
 
-await withLock(lockDir, async () => {
+await withDirectoryLock(lockDir, { tool: toolName }, async () => {
   await run(pnpmBin(), ["--filter", "@unlocalhosted/browsergrad-kernels", "run", "build"], root);
   await run(pnpmBin(), ["run", "build"], compilerDir);
   await run(process.execPath, [
@@ -47,71 +46,6 @@ await withLock(lockDir, async () => {
 
 function pnpmBin() {
   return process.platform === "win32" ? "pnpm.cmd" : "pnpm";
-}
-
-async function withLock(dir, fn) {
-  await mkdir(path.dirname(dir), { recursive: true });
-  while (true) {
-    try {
-      await mkdir(dir);
-      await writeFile(path.join(dir, "owner.json"), JSON.stringify({
-        pid: process.pid,
-        createdAt: new Date().toISOString(),
-        tool: toolName,
-      }));
-      break;
-    } catch (error) {
-      if (error?.code !== "EEXIST") throw error;
-      await removeStaleLock(dir);
-      await sleep(75);
-    }
-  }
-
-  try {
-    await fn();
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-}
-
-async function removeStaleLock(dir) {
-  try {
-    const owner = await readLockOwner(dir);
-    if (owner?.pid !== undefined && !isProcessAlive(owner.pid)) {
-      await rm(dir, { recursive: true, force: true });
-      return;
-    }
-    if (owner?.pid !== undefined) return;
-    const info = await stat(dir);
-    if (Date.now() - info.mtimeMs > staleLockMs) {
-      await rm(dir, { recursive: true, force: true });
-    }
-  } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-  }
-}
-
-async function readLockOwner(dir) {
-  try {
-    const raw = await readFile(path.join(dir, "owner.json"), "utf8");
-    const owner = JSON.parse(raw);
-    return Number.isInteger(owner?.pid) && owner.pid > 0 ? { pid: owner.pid } : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function isProcessAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error?.code === "EPERM";
-  }
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function run(command, args, cwd) {
