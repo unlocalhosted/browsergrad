@@ -352,11 +352,11 @@ __device__ __forceinline__ T warp_reduce_sum(T val) {
       },
     ],
   });
-  assert.match(source, /template <const int kWarpSize = 32, typename T = float>/u);
-  assert.match(source, /__device__ __forceinline__ float warp_reduce_sum\(float val\)/u);
   assert.match(source, /warp_reduce_sum\(1\.0f\)/u);
+  assert.doesNotMatch(source, /__device__ __forceinline__.*warp_reduce_sum/u);
   assert.doesNotMatch(source, /\bT\s+(?:val|tmp|value)\b/u);
   assert.doesNotMatch(source, /warp_reduce_sum<WARP_SIZE>/u);
+  assert.doesNotMatch(source, /warp_reduce_sum<32>/u);
 }
 
 {
@@ -1466,6 +1466,31 @@ __global__ void templated_scalar_helper(float *out, int n) {
   assert.match(source, /template<class T = int>/u);
   assert.match(source, /__device__ int ceil_div\(int dividend, int divisor\)/u);
   assert.doesNotMatch(source, /\bT\s+dividend/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+template <class T = float>
+__global__ void defaulted_kernel_template(float *out) {
+  out[0] = project<T>(1.0f, 2.0f);
+}`,
+    deviceFunctions: [
+      {
+        name: "project",
+        source: `
+template <class T>
+__device__ T project(const T x, const T y) {
+  T sum = x + y;
+  return sum;
+}`,
+      },
+    ],
+  });
+  assert.match(source, /template <class T = float>/u);
+  assert.match(source, /__device__ float project\(const float x, const float y\)/u);
+  assert.doesNotMatch(source, /\bT\s+sum/u);
+  assert.match(source, /out\[0\] = project\(1\.0f, 2\.0f\);/u);
 }
 
 {

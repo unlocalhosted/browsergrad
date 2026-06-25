@@ -2172,6 +2172,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     case "warp_reduce_sum_f16_f32":
     case "warp_reduce_sum_i8_i32":
     case "warp_reduce_sum_i32_i32":
+      return args.length === 2 ? args[1] ?? 0 : args[0] ?? 0;
     case "blockReduce":
       return args[0] ?? 0;
     default:

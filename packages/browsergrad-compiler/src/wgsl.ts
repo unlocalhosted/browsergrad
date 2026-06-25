@@ -3355,6 +3355,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "warp_reduce_sum_f16_f32":
     case "warp_reduce_sum_i8_i32":
     case "warp_reduce_sum_i32_i32":
+      return `subgroupAdd(${args.length === 2 ? args[1] ?? "0" : args[0] ?? "0"})`;
     case "blockReduce":
       return `subgroupAdd(${args[0] ?? "0"})`;
     case "__reduce_add_sync":
@@ -3362,10 +3363,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "warpReduceMax":
     case "warp_reduce_max":
     case "warp_reduce_max_f32":
-      return `subgroupMax(${args[0] ?? "0"})`;
+      return `subgroupMax(${args.length === 2 ? args[1] ?? "0" : args[0] ?? "0"})`;
     case "warpReduceMin":
     case "warp_reduce_min":
-      return `subgroupMin(${args[0] ?? "0"})`;
+      return `subgroupMin(${args.length === 2 ? args[1] ?? "0" : args[0] ?? "0"})`;
     case "__shfl_sync":
       return `subgroupShuffle(${args[1] ?? "0"}, u32(${args[2] ?? "0"}))`;
     case "__shfl_down_sync":

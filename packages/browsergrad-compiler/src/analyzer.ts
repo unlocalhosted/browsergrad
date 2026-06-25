@@ -63,19 +63,19 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__all_sync", [2, 2]],
   ["__ballot_sync", [2, 2]],
   ["__reduce_add_sync", [2, 2]],
-  ["warpReduceSum", [1, 1]],
-  ["warpReduceMax", [1, 1]],
-  ["warpReduceMin", [1, 1]],
-  ["warp_reduce_sum", [1, 1]],
-  ["warp_reduce_max", [1, 1]],
-  ["warp_reduce_min", [1, 1]],
-  ["warp_reduce_sum_f32", [1, 1]],
-  ["warp_reduce_max_f32", [1, 1]],
-  ["warp_reduce_sum_f16", [1, 1]],
-  ["warp_reduce_sum_f16_f16", [1, 1]],
-  ["warp_reduce_sum_f16_f32", [1, 1]],
-  ["warp_reduce_sum_i8_i32", [1, 1]],
-  ["warp_reduce_sum_i32_i32", [1, 1]],
+  ["warpReduceSum", [1, 2]],
+  ["warpReduceMax", [1, 2]],
+  ["warpReduceMin", [1, 2]],
+  ["warp_reduce_sum", [1, 2]],
+  ["warp_reduce_max", [1, 2]],
+  ["warp_reduce_min", [1, 2]],
+  ["warp_reduce_sum_f32", [1, 2]],
+  ["warp_reduce_max_f32", [1, 2]],
+  ["warp_reduce_sum_f16", [1, 2]],
+  ["warp_reduce_sum_f16_f16", [1, 2]],
+  ["warp_reduce_sum_f16_f32", [1, 2]],
+  ["warp_reduce_sum_i8_i32", [1, 2]],
+  ["warp_reduce_sum_i32_i32", [1, 2]],
   ["blockReduce", [1, 3]],
   ["min", [2, 2]],
   ["max", [2, 2]],
@@ -1544,8 +1544,12 @@ function validateCallExpression(
   }
   if (isWarpReductionBuiltin(callName)) {
     requiredFeatures.add("subgroups");
-    const arg = expression.args[0];
+    const arg = expression.args.length === 2 ? expression.args[1] : expression.args[0];
     if (!arg) return { kind: "unknown" };
+    if (expression.args.length === 2) {
+      const mask = expression.args[0];
+      if (mask) validateScalarOperand(walkExpression(mask, scope), mask.span, diagnostics);
+    }
     const info = walkExpression(arg, scope);
     validateScalarOperand(info, arg.span, diagnostics);
     return { kind: "scalar", valueType: warpReductionReturnType(callName, info.valueType) };

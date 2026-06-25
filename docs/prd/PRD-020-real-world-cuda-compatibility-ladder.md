@@ -62,7 +62,7 @@ Repo exploration:
 
 Local corpus audits on 2026-06-25:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `316` direct
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `318` direct
   compile/codegen-ok after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -160,7 +160,7 @@ Local corpus audits on 2026-06-25:
   and duplicate-signature helper deduping, plus reverse-context recovery for
   header-local fixed array dimensions, standalone postfix-index
   canonicalization, and mutable local reference aliases to storage elements,
-  with `40` hard gaps.
+  with `38` hard gaps.
   Main failures:
   parser/frontend gaps, texture/vector
   operators, remaining `half2` intrinsics, templates, and runtime library
@@ -291,8 +291,8 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
-- The current live aggregate gate is `990/1038` compile/codegen-ok across the four
-  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `316/357`, `llm.c`
+- The current live aggregate gate is `992/1038` compile/codegen-ok across the four
+  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `318/357`, `llm.c`
   `148/148`, and LeetCUDA `286/293`.
 
 Coverage tier glossary:
@@ -461,7 +461,7 @@ Acceptance criteria for the first slice:
   compile/codegen-ok count, hard-gap count, error codes, semantic
   families, and explicit `executionTierCounts`.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=316` compile/codegen-ok, and `<=40` hard gaps.
+  `>=318` compile/codegen-ok, and `<=38` hard gaps.
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions,
   `>=148` compile/codegen-ok, and `0` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,

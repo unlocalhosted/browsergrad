@@ -75,6 +75,19 @@ const SEMANTIC_BUILTIN_DEVICE_HELPERS = new Set([
   "store128cg",
   "div_ceil",
   "blockReduce",
+  "warpReduceSum",
+  "warpReduceMax",
+  "warpReduceMin",
+  "warp_reduce_sum",
+  "warp_reduce_max",
+  "warp_reduce_min",
+  "warp_reduce_sum_f32",
+  "warp_reduce_max_f32",
+  "warp_reduce_sum_f16",
+  "warp_reduce_sum_f16_f16",
+  "warp_reduce_sum_f16_f32",
+  "warp_reduce_sum_i8_i32",
+  "warp_reduce_sum_i32_i32",
   "atomicAdd",
   "atomicSub",
   "atomicMin",
@@ -895,8 +908,26 @@ function isPlaceholderKernel(kernel) {
 }
 
 function collectPortableDeviceFunctions(source, recordNames = new Set(), definesByName = new Map()) {
-  const clean = expandCudaQualifierMacros(stripComments(source));
+  const helperDefines = mergeDefineMaps(definesByName, new Map([["__CUDACC__", "1"]]));
+  const clean = pruneCudaPreprocessorBranches(expandCudaQualifierMacros(stripComments(source)), helperDefines);
   const functions = [];
+  const seenSignatures = new Set();
+  const maybeAddFunction = (rawFn) => {
+    const fn = pruneCudaPreprocessorBranches(rawFn, helperDefines);
+    const signature = fn.slice(0, fn.indexOf("{"));
+    const name = cudaFunctionDefinitionName(signature);
+    const signatureKey = signature.replace(/\s+/gu, " ").trim();
+    if (
+      name &&
+      !seenSignatures.has(signatureKey) &&
+      !SEMANTIC_BUILTIN_DEVICE_HELPERS.has(name) &&
+      !sourceLaunchesDeviceFunction(clean, name) &&
+      isPortableDeviceFunctionCandidate(signature, fn, name, recordNames, definesByName)
+    ) {
+      seenSignatures.add(signatureKey);
+      functions.push({ name, source: fn });
+    }
+  };
   let index = 0;
   while (true) {
     const device = clean.indexOf("__device__", index);
@@ -923,18 +954,32 @@ function collectPortableDeviceFunctions(source, recordNames = new Set(), defines
     }
     if (end < 0) break;
     const rawFn = clean.slice(start, end);
-    const fn = pruneCudaPreprocessorBranches(rawFn, definesByName);
-    const signature = fn.slice(0, fn.indexOf("{"));
-    const name = cudaFunctionDefinitionName(signature);
-    if (
-      name &&
-      !SEMANTIC_BUILTIN_DEVICE_HELPERS.has(name) &&
-      !sourceLaunchesDeviceFunction(clean, name) &&
-      isPortableDeviceFunctionCandidate(signature, fn, name, recordNames, definesByName)
-    ) {
-      functions.push({ name, source: fn });
-    }
+    maybeAddFunction(rawFn);
     index = end;
+  }
+  for (const rawFn of collectTemplatedDeviceFunctionBodies(clean)) maybeAddFunction(rawFn);
+  return functions;
+}
+
+function collectTemplatedDeviceFunctionBodies(source) {
+  const functions = [];
+  const templateRe = /\btemplate\s*<[^;{}]*>\s*(?:(?:static|inline|__inline__|__forceinline__|__host__)\s+)*__device__\b/gu;
+  let match;
+  while ((match = templateRe.exec(source)) !== null) {
+    const start = match.index;
+    const device = source.indexOf("__device__", start);
+    if (device < 0) continue;
+    const brace = source.indexOf("{", device);
+    const semicolon = source.indexOf(";", device);
+    if (brace < 0) break;
+    if (semicolon >= 0 && semicolon < brace) {
+      templateRe.lastIndex = semicolon + 1;
+      continue;
+    }
+    const end = findBalanced(source, brace, "{", "}");
+    if (end === undefined) break;
+    functions.push(source.slice(start, end + 1));
+    templateRe.lastIndex = end + 1;
   }
   return functions;
 }

@@ -1432,6 +1432,21 @@ __global__ void kernel(float* out, float value) {
     expect(compiled.wgsl).toContain("out[0] = subgroupAdd(params.value)");
   });
 
+  it("lowers masked warp reductions using the value operand", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void kernel(int* out, int value, unsigned int mask) {
+  out[0] = warpReduceSum(mask, value);
+}`, { features: { subgroups: true }, workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(1) }, scalars: { value: 7, mask: 0xffffffff } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("out[0] = subgroupAdd(params.value)");
+    expect([...result.buffers.out as Int32Array]).toEqual([7]);
+  });
+
   it("lowers CUDA warp vote helpers to subgroup predicates", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void voteKernel(uint *input, uint *out) {

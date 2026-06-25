@@ -9,6 +9,19 @@ const SEMANTIC_BUILTIN_DEVICE_HELPERS = new Set([
   "store128cg",
   "div_ceil",
   "blockReduce",
+  "warpReduceSum",
+  "warpReduceMax",
+  "warpReduceMin",
+  "warp_reduce_sum",
+  "warp_reduce_max",
+  "warp_reduce_min",
+  "warp_reduce_sum_f32",
+  "warp_reduce_max_f32",
+  "warp_reduce_sum_f16",
+  "warp_reduce_sum_f16_f16",
+  "warp_reduce_sum_f16_f32",
+  "warp_reduce_sum_i8_i32",
+  "warp_reduce_sum_i32_i32",
   "atomicAdd",
   "atomicSub",
   "atomicMin",
@@ -18,6 +31,22 @@ const SEMANTIC_BUILTIN_DEVICE_HELPERS = new Set([
   "atomicXor",
   "atomicExch",
   "atomicCAS",
+]);
+
+const SEMANTIC_TEMPLATE_CALL_STRIP_HELPERS = new Set([
+  "warpReduceSum",
+  "warpReduceMax",
+  "warpReduceMin",
+  "warp_reduce_sum",
+  "warp_reduce_max",
+  "warp_reduce_min",
+  "warp_reduce_sum_f32",
+  "warp_reduce_max_f32",
+  "warp_reduce_sum_f16",
+  "warp_reduce_sum_f16_f16",
+  "warp_reduce_sum_f16_f32",
+  "warp_reduce_sum_i8_i32",
+  "warp_reduce_sum_i32_i32",
 ]);
 
 const WIDE_PACKED128_TYPES = new Map([
@@ -77,13 +106,14 @@ export function createKernelCompilationUnit({
     mergeDefineMaps(effectiveDefines, functionDefineBodies),
   );
   const referencedDeviceFunctionNames = new Set(referencedDeviceFunctionsRaw.map((fn) => fn.name));
+  const templateInferenceDefines = mergeDefineMaps(effectiveDefines, templateDefaultEnvironment(specializedKernel, effectiveDefines));
   const deviceTemplateArgumentsByName = collectDeviceFunctionTemplateArguments(
     [
       specializedKernel,
       ...referencedDeviceFunctionsRaw.map((fn) => fn.source),
     ],
     referencedDeviceFunctionNames,
-    effectiveDefines,
+    templateInferenceDefines,
   );
   const referencedSiblingKernelsRaw = siblingKernels.filter((sibling) => {
     const name = kernelDefinitionName(sibling);
@@ -116,7 +146,7 @@ export function createKernelCompilationUnit({
         stripKernelLaunchTemplateArguments(specializeDeviceFunctionFromCallContext(
           fn.source,
           deviceTemplateArgumentsByName.get(fn.name),
-          effectiveDefines,
+          templateInferenceDefines,
         )),
         referencedDeviceFunctionNames,
       ),
@@ -165,7 +195,10 @@ export function createKernelCompilationUnit({
     return name !== undefined && sourceMentionsIdentifier(normalizedMacroScope, name);
   });
   const kernelWithSharedDeclarations = injectSharedDeclarationsIntoKernel(
-    stripKnownTemplateCallArguments(stripKernelLaunchTemplateArguments(specializedKernel), referencedDeviceFunctionNames),
+    stripKnownTemplateCallArguments(stripKernelLaunchTemplateArguments(specializedKernel), new Set([
+      ...referencedDeviceFunctionNames,
+      ...SEMANTIC_TEMPLATE_CALL_STRIP_HELPERS,
+    ])),
     sharedDeclarations,
   );
   const unit = normalizeLineContinuations([
@@ -597,6 +630,7 @@ function sourceCallsFunctionThroughDefines(source, name, definesByName) {
 
 function sourceCallsFunction(source, name) {
   if (new RegExp(`(?:^|[^:A-Za-z0-9_])${escapeRegExp(name)}\\s*\\(`, "u").test(source)) return true;
+  if (new RegExp(`(?:^|[^:A-Za-z0-9_])${escapeRegExp(name)}\\s*<[^;{}()]*>\\s*\\(`, "u").test(source)) return true;
   return scanTemplatedCallReferences(source).some((call) => call.name === name);
 }
 
@@ -800,6 +834,8 @@ function templateTypeParamUsedAsPointerParam(sourceTail, name) {
 }
 
 function canonicalTemplatePointerType(sourceTail, name, definesByName = new Map()) {
+  const mapped = normalizeTemplateTypeArgument(definesByName.get(name), definesByName);
+  if (mapped !== undefined) return mapped;
   const pointerParams = templateTypePointerParamNames(sourceTail, name);
   if (/(?:rng|curand|direction)/iu.test(name) || pointerParams.some((param) => /(?:rng|curand|direction|state)/iu.test(param))) return "uint";
   if (pointerParams.some((param) => /(?:count|num|size|len|idx|index|offset|addr|tid|id|mask|flag)/iu.test(param))) return "uint";
@@ -826,6 +862,8 @@ function templateTypePointerParamNames(sourceTail, name) {
 }
 
 function canonicalTemplateScalarType(sourceTail, name, definesByName = new Map()) {
+  const mapped = normalizeTemplateTypeArgument(definesByName.get(name), definesByName);
+  if (mapped !== undefined) return mapped;
   const params = templateTypeScalarParamNames(sourceTail, name);
   if (params.length === 0) return undefined;
   if (params.some((param) => /(?:count|num|size|len|idx|index|offset|addr|tid|id|mask|flag)/iu.test(param))) return "uint";

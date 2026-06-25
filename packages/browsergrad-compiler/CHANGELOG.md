@@ -53,6 +53,11 @@
   helper `#if/#else` branches before portability checks, accepts initialized
   scalar CUDA vector constants, and lowers `rintf`, raising the cuda-samples
   gate to `316/357` with `40` hard gaps.
+- CUDA corpus normalization now evaluates `__CUDACC__` guarded helpers, prunes
+  inactive preprocessor branches before helper collection, and specializes
+  defaulted kernel template types into referenced device helpers. CUDA warp
+  reduction aliases now accept masked forms and lower the value operand, raising
+  the cuda-samples gate to `318/357` with `38` hard gaps.
 - Source normalization now avoids replacing macro parameters inside member
   properties and lowers simple two-short/one-u32 CUDA unions into bitfield
   views, raising the cuda-samples gate to `305/357` with `51` hard gaps.
