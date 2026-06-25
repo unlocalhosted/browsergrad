@@ -1118,6 +1118,13 @@ function validatePointerInitializerExpression(
     validateScalarOperand(walkExpression(expression.right, scope), expression.right.span, diagnostics);
     return;
   }
+  if (expression.kind === "conditional") {
+    const condition = walkExpression(expression.condition, scope);
+    if (!isPointerLikeInfo(condition)) validateScalarOperand(condition, expression.condition.span, diagnostics);
+    validatePointerInitializerExpression(expression.consequent, scope, diagnostics, walkExpression);
+    validatePointerInitializerExpression(expression.alternate, scope, diagnostics, walkExpression);
+    return;
+  }
   if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
     const pointer = expression.args[0];
     if (pointer) validatePointerInitializerExpression(pointer, scope, diagnostics, walkExpression);
@@ -1148,6 +1155,13 @@ function validateReadPointerExpression(
     const info = validateReadPointerExpression(expression.left, scope, diagnostics, walkExpression);
     validateScalarOperand(walkExpression(expression.right, scope), expression.right.span, diagnostics);
     return info;
+  }
+  if (expression.kind === "conditional") {
+    const condition = walkExpression(expression.condition, scope);
+    if (!isPointerLikeInfo(condition)) validateScalarOperand(condition, expression.condition.span, diagnostics);
+    const consequent = validateReadPointerExpression(expression.consequent, scope, diagnostics, walkExpression);
+    const alternate = validateReadPointerExpression(expression.alternate, scope, diagnostics, walkExpression);
+    return conditionalPointerInfo(expression, consequent, alternate, diagnostics) ?? consequent;
   }
   if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
     const pointer = expression.args[0];
@@ -2118,7 +2132,7 @@ function validateDevicePointerArgument(
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
 ): void {
-  const info = walkExpression(arg, scope);
+  const info = validateReadPointerExpression(arg, scope, diagnostics, walkExpression);
   const root = rootIdentifier(arg);
   const rootSymbol = root ? lookupSymbol(root, scope, arg.span) : undefined;
   const sharedArrayDecay = rootSymbol?.kind === "shared" &&
@@ -2755,8 +2769,7 @@ function validateNonCallExpression(
     }
     case "unary": {
       if (expression.operator === "&") {
-        validateLValueExpression(expression.argument, scope, diagnostics, walkExpression);
-        return { kind: "address" };
+        return validateAddressOfExpression(expression.argument, scope, diagnostics, walkExpression);
       }
       if (expression.operator === "*") {
         const info = walkExpression(expression.argument, scope);
@@ -2792,7 +2805,7 @@ function validateNonCallExpression(
         }
         return { kind: "scalar", valueType: "int" };
       }
-      if ((expression.operator === "+" || expression.operator === "-") && (left.kind === "pointer" || left.kind === "pool-pointer")) {
+      if ((expression.operator === "+" || expression.operator === "-") && isPointerLikeInfo(left)) {
         validateScalarOperand(right, expression.right.span, diagnostics);
         return left;
       }

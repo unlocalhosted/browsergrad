@@ -921,7 +921,10 @@ function emitLocalPointerHandleInit(statement: CudaLiteVarDecl, context: EmitCon
   if (!statement.init) return ["0u", "0u"];
   const parts = devicePointerArgumentParts(statement.init, context);
   if (!parts) {
-    throw featureError("unsupported-device-pointer-param", `local pointer '${statement.name}' must initialize from modeled storage or shared memory`);
+    throw featureError(
+      "unsupported-device-pointer-param",
+      `local pointer '${statement.name}' at line ${statement.span.line} must initialize from modeled storage or shared memory`,
+    );
   }
   return [parts.buffer, parts.base];
 }
@@ -2465,7 +2468,9 @@ function collectLocalPointerHandles(
     statement.pointer &&
     statement.storage === "local" &&
     !poolPointers.has(statement.name) &&
-    (mutableNames.has(statement.name) || needsStructuredAddressHandle(statement.init, structuredPointerRoots));
+    (mutableNames.has(statement.name) ||
+      needsStructuredAddressHandle(statement.init, structuredPointerRoots) ||
+      needsDynamicPointerHandle(statement.init));
   const walk = (items: readonly CudaLiteStatement[]): void => {
     for (const item of items) {
       if (item.kind === "var" && needsHandle(item)) {
@@ -2502,6 +2507,13 @@ function needsStructuredAddressHandle(
 ): boolean {
   if (!expression) return false;
   if (expression.kind === "cast" && expression.pointer) return needsStructuredAddressHandle(expression.expression, structuredPointerRoots);
+  if (expression.kind === "conditional") {
+    return needsStructuredAddressHandle(expression.consequent, structuredPointerRoots) ||
+      needsStructuredAddressHandle(expression.alternate, structuredPointerRoots);
+  }
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    return needsStructuredAddressHandle(expression.left, structuredPointerRoots);
+  }
   if (expression.kind !== "unary" || expression.operator !== "&") return false;
   let depth = 0;
   let cursor = expression.argument;
@@ -2510,6 +2522,16 @@ function needsStructuredAddressHandle(
     cursor = cursor.target;
   }
   return depth > 0 && cursor.kind === "identifier" && structuredPointerRoots.has(cursor.name);
+}
+
+function needsDynamicPointerHandle(expression: CudaLiteExpression | undefined): boolean {
+  if (!expression) return false;
+  if (expression.kind === "cast" && expression.pointer) return needsDynamicPointerHandle(expression.expression);
+  if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
+    return needsDynamicPointerHandle(expression.args[0]);
+  }
+  if (expression.kind === "conditional") return true;
+  return false;
 }
 
 function collectMutableLocalPointerNames(statements: readonly CudaLiteStatement[]): ReadonlySet<string> {

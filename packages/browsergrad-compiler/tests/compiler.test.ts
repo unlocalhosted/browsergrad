@@ -705,6 +705,57 @@ __global__ void nullablePointer(float* out, int n) {
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 0]);
   });
 
+  it("supports conditional local read pointers derived from const storage", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void constReadPointer(const float* a, const float* b, float* out, int pick_b) {
+  const float *p = pick_b ? (&b[1] + 1) : (&a[0] + 2);
+  out[0] = *p;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          a: new Float32Array([1, 2, 3]),
+          b: new Float32Array([4, 5, 6]),
+          out: new Float32Array(1),
+        },
+        scalars: { pick_b: 1 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("select(");
+    expect([...result.buffers.out as Float32Array]).toEqual([6]);
+  });
+
+  it("allows const storage addresses for read-only device pointer params", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float read_one(const float* p) {
+  return p[0];
+}
+__global__ void constReadParam(const float* input, float* out) {
+  out[0] = read_one(&input[1]);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { input: new Float32Array([2, 9]), out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("read_one(0u, (0u + u32(1))");
+    expect([...result.buffers.out as Float32Array]).toEqual([9]);
+  });
+
+  it("rejects const storage addresses for writable device pointer params", () => {
+    expect(() => compileCudaLiteKernel(`
+__device__ void write_one(float* p) {
+  p[0] = 1.0f;
+}
+__global__ void constWriteParam(const float* input) {
+  write_one(&input[0]);
+}`, { workgroupSize: [1, 1, 1] })).toThrow(CudaLiteCompilerError);
+  });
+
   it("supports local size_t declarations as uint scalars", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void sizeKernel(uint* out) {

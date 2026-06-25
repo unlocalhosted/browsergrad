@@ -72,6 +72,10 @@
 - CuTe rank-2 transpose motifs, row-broadcast GEMV tensor views, and malformed
   macro-assignment recovery now normalize into direct CUDA-lite loops, raising
   the LeetCUDA gate to `286/293` with `7` hard gaps.
+- CUDA-lite now treats `&const_storage[i]` as a read address until a real write
+  boundary, supports conditional local read pointers over storage buffers, and
+  emits dynamic shared-memory pointer handles for derived addresses, raising the
+  cuda-samples gate to `324/357` with `31` hard gaps.
 - Source normalizer synthetic names now avoid WGSL-reserved double-underscore
   prefixes, and the browser fixture suite now executes all four lifted LeetCUDA
   CuTe transpose variants through real WebGPU.
