@@ -221,7 +221,8 @@ export function createKernelCompilationUnit({
   const withRecoveredMacroStatements = normalizeMissingSemicolonAfterMacroAssignment(withExpressionMacros);
   const withLegacyArithmeticMacros = normalizeLegacyCudaArithmeticMacros(withRecoveredMacroStatements);
   const withStatementMacros = normalizeSimpleStatementMacros(withLegacyArithmeticMacros);
-  const withSideEffects = normalizeSideEffectExpressions(withStatementMacros);
+  const withLocalReferences = normalizeLocalReferenceAliases(withStatementMacros);
+  const withSideEffects = normalizeSideEffectExpressions(withLocalReferences);
   const withScopedForVariables = normalizeForLoopScopedVariables(withSideEffects);
   const withTemplateFallbacks = normalizeTemplateValueFallbacks(withScopedForVariables, postCarrierDefines);
   return normalizeCppTemplateCarrierSyntax(withTemplateFallbacks);
@@ -1604,6 +1605,48 @@ function normalizePostfixIndexSideEffects(source) {
     const indent = /^(\s*)/u.exec(line)?.[1] ?? "";
     return `${withoutSideEffect}\n${indent}${name}${op};`;
   }).join("\n");
+}
+
+function normalizeLocalReferenceAliases(source) {
+  const aliases = new Map();
+  let depth = 0;
+  const declarationRe = /^(\s*)((?:const\s+)?(?:unsigned\s+|signed\s+)?[A-Za-z_][A-Za-z0-9_:<>]*(?:\s+[A-Za-z_][A-Za-z0-9_:<>]*)?)\s*&\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+?\[[^\];]+\](?:\s*\.[A-Za-z_][A-Za-z0-9_]*)?)\s*;\s*$/u;
+  const assignmentRe = /^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+?)\s*;\s*$/u;
+  return source.split(/\r?\n/u).map((line) => {
+    for (const [name, alias] of aliases) {
+      if (alias.depth > depth) aliases.delete(name);
+    }
+    const declaration = declarationRe.exec(line);
+    let rewritten = line;
+    if (declaration?.[1] !== undefined && declaration[2] !== undefined && declaration[3] !== undefined && declaration[4] !== undefined) {
+      const indent = declaration[1];
+      const type = declaration[2].replace(/\bconst\b/gu, " ").replace(/\s+/gu, " ").trim();
+      const name = declaration[3];
+      const target = declaration[4].trim();
+      aliases.set(name, { target, depth });
+      rewritten = `${indent}${type} ${name} = ${target};`;
+    } else {
+      const assignment = assignmentRe.exec(line);
+      const alias = assignment?.[2] === undefined ? undefined : aliases.get(assignment[2]);
+      if (assignment?.[1] !== undefined && assignment[2] !== undefined && assignment[3] !== undefined && alias !== undefined) {
+        const indent = assignment[1];
+        const name = assignment[2];
+        const value = assignment[3].trim();
+        rewritten = `${indent}${alias.target} = ${value};\n${indent}${name} = ${value};`;
+      }
+    }
+    depth += braceDelta(line);
+    return rewritten;
+  }).join("\n");
+}
+
+function braceDelta(line) {
+  let delta = 0;
+  for (const char of stripLineComment(line)) {
+    if (char === "{") delta++;
+    else if (char === "}") delta--;
+  }
+  return delta;
 }
 
 function replaceSimpleStatementMacroCalls(line, macro) {

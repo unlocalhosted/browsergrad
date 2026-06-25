@@ -2107,6 +2107,44 @@ __global__ void postfix_index_reuse_guard(float* out, const float* weights) {
 
 {
   const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void local_reference_alias(const uint* startpoints, const uint* verticesMapping, uint* edges, uint edgesCount) {
+  uint tid = blockIdx.x * blockDim.x + threadIdx.x;
+  if (tid < edgesCount) {
+    uint startpoint = startpoints[tid];
+    uint &endpoint = edges[tid];
+    uint newStartpoint = verticesMapping[startpoint];
+    uint newEndpoint = verticesMapping[endpoint];
+    if (newStartpoint == newEndpoint) {
+      endpoint = 0xffffffff;
+    }
+  }
+}`,
+  });
+  assert.match(source, /uint endpoint = edges\[tid\];/u);
+  assert.match(source, /edges\[tid\] = 0xffffffff;\n\s+endpoint = 0xffffffff;/u);
+  assert.doesNotMatch(source, /uint\s*&\s*endpoint/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void local_reference_alias_scope(uint* edges) {
+  {
+    uint &endpoint = edges[0];
+    endpoint = 1u;
+  }
+  uint endpoint = 0u;
+  endpoint = 2u;
+}`,
+  });
+  assert.match(source, /edges\[0\] = 1u;\n\s+endpoint = 1u;/u);
+  assert.match(source, /uint endpoint = 0u;\n\s+endpoint = 2u;/u);
+  assert.doesNotMatch(source, /edges\[0\] = 2u/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
     definesByName: new Map([["size", "4"]]),
     kernel: `
 __global__ void keep_member_size(uint* out) {

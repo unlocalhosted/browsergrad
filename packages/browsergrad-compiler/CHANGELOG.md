@@ -43,6 +43,8 @@
   dimensions need reverse translation-unit defines, and side-effect
   canonicalization lowers safe `array[idx++]` standalone statements. This raises
   the cuda-samples gate to `312/357` with `44` hard gaps.
+- Source normalization now lowers mutable local scalar references to storage
+  elements, raising the cuda-samples gate to `313/357` with `43` hard gaps.
 - Source normalization now avoids replacing macro parameters inside member
   properties and lowers simple two-short/one-u32 CUDA unions into bitfield
   views, raising the cuda-samples gate to `305/357` with `51` hard gaps.
