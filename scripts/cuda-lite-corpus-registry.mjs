@@ -50,8 +50,8 @@ export const cudaLiteCorpora = [
     path: path.join(corpusRoot, "LeetCUDA"),
     expectations: {
       total: 293,
-      compileCodegenMin: 278,
-      hardFailMax: 15,
+      compileCodegenMin: 286,
+      hardFailMax: 7,
     },
   },
 ];

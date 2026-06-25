@@ -205,9 +205,12 @@ export function createKernelCompilationUnit({
   const withPointerStoreForwarders = normalizePointerStoreForwarderHelpers(withAtomicForwarders);
   const withLocalPointerHelpers = normalizeLocalPointerDeviceFunctionCalls(withPointerStoreForwarders);
   const withLambdas = normalizeSimpleLocalLambdas(withLocalPointerHelpers);
-  const withCuteTiles = normalizeCute1dAffineTileCopies(withLambdas);
+  const withCuteRank2 = normalizeCuteRank2TransposeKernels(withLambdas);
+  const withCuteGemv = normalizeCuteRowBroadcastGemvKernels(withCuteRank2);
+  const withCuteTiles = normalizeCute1dAffineTileCopies(withCuteGemv);
   const withExpressionMacros = normalizeSimpleExpressionMacros(withCuteTiles);
-  const withLegacyArithmeticMacros = normalizeLegacyCudaArithmeticMacros(withExpressionMacros);
+  const withRecoveredMacroStatements = normalizeMissingSemicolonAfterMacroAssignment(withExpressionMacros);
+  const withLegacyArithmeticMacros = normalizeLegacyCudaArithmeticMacros(withRecoveredMacroStatements);
   const withStatementMacros = normalizeSimpleStatementMacros(withLegacyArithmeticMacros);
   const withSideEffects = normalizeSideEffectExpressions(withStatementMacros);
   const withScopedForVariables = normalizeForLoopScopedVariables(withSideEffects);
@@ -2268,6 +2271,412 @@ function normalizeSimpleExpressionMacros(source) {
     .join("\n");
 }
 
+function normalizeCuteRank2TransposeKernels(source) {
+  if (!/\bmake_tensor\s*\(\s*make_gmem_ptr\s*\(/u.test(source) || !/\blocal_tile\s*\(/u.test(source)) return source;
+  if (!/\b(?:copy_if|copy)\s*\(/u.test(source)) return source;
+  let out = "";
+  let cursor = 0;
+  const globalRe = /\b__global__\b/gu;
+  let match;
+  while ((match = globalRe.exec(source)) !== null) {
+    const globalStart = match.index;
+    if (globalStart < cursor) continue;
+    const fn = parseCudaGlobalFunction(source, globalStart);
+    if (fn === undefined) {
+      globalRe.lastIndex = globalStart + "__global__".length;
+      continue;
+    }
+    const replacement = lowerCuteRank2TransposeFunction(fn);
+    if (replacement === undefined) {
+      globalRe.lastIndex = fn.bodyEnd + 1;
+      continue;
+    }
+    out += source.slice(cursor, fn.headerStart);
+    out += replacement;
+    cursor = fn.bodyEnd + 1;
+    globalRe.lastIndex = fn.bodyEnd + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function parseCudaGlobalFunction(source, globalStart) {
+  const open = source.indexOf("(", globalStart + "__global__".length);
+  const close = findBalanced(source, open, "(", ")");
+  if (open < 0 || close === undefined) return undefined;
+  const bodyOpen = skipWhitespace(source, close + 1);
+  if (source[bodyOpen] !== "{") return undefined;
+  const bodyEnd = findBalanced(source, bodyOpen, "{", "}");
+  if (bodyEnd === undefined) return undefined;
+  const signaturePrefix = source.slice(globalStart, open);
+  const name = /([A-Za-z_][A-Za-z0-9_]*)\s*$/u.exec(signaturePrefix)?.[1];
+  if (name === undefined) return undefined;
+  return {
+    headerStart: cudaGlobalHeaderStart(source, globalStart),
+    globalStart,
+    name,
+    signaturePrefix: signaturePrefix.trimEnd(),
+    params: splitTopLevel(source.slice(open + 1, close)).map((param) => param.trim()).filter(Boolean),
+    body: source.slice(bodyOpen + 1, bodyEnd),
+    bodyEnd,
+  };
+}
+
+function cudaGlobalHeaderStart(source, globalStart) {
+  const before = source.slice(0, globalStart);
+  const template = /\btemplate\s*<[^<>]*>\s*$/u.exec(before);
+  return template?.index ?? globalStart;
+}
+
+function lowerCuteRank2TransposeFunction(fn) {
+  const motif = collectCuteRank2TransposeMotif(fn.body);
+  if (motif === undefined) return undefined;
+  const paramsByName = new Map();
+  for (const param of fn.params) {
+    const name = cudaParamName(param);
+    if (name !== undefined && !paramsByName.has(name)) paramsByName.set(name, param);
+  }
+  const keepNames = [motif.inputPointer, motif.outputPointer, motif.rows, motif.cols];
+  const keptParams = [];
+  const seen = new Set();
+  for (const name of keepNames) {
+    if (seen.has(name)) continue;
+    const param = paramsByName.get(name);
+    if (param === undefined) return undefined;
+    keptParams.push(param);
+    seen.add(name);
+  }
+  return [
+    `${fn.signaturePrefix}(${keptParams.join(", ")}) {`,
+    ...cuteRank2TransposeBody(motif).map((line) => `  ${line}`),
+    "}",
+  ].join("\n");
+}
+
+function collectCuteRank2TransposeMotif(body) {
+  const bases = collectCuteRank2GmemTensors(body);
+  if (bases.length < 2) return undefined;
+  const pair = findCuteRank2TransposeTensorPair(bases);
+  if (pair === undefined) return undefined;
+  const tiles = collectCuteRank2Tiles(body);
+  const inputTile = tiles.find((tile) => tile.base === pair.input.name);
+  const outputTile = tiles.find((tile) => tile.base === pair.output.name);
+  if (inputTile === undefined || outputTile === undefined) return undefined;
+  const tileRows = evaluateTemplateIntegerExpression(inputTile.extents[0], new Map());
+  const tileCols = evaluateTemplateIntegerExpression(inputTile.extents[1], new Map());
+  const outputRows = evaluateTemplateIntegerExpression(outputTile.extents[0], new Map());
+  const outputCols = evaluateTemplateIntegerExpression(outputTile.extents[1], new Map());
+  if (tileRows === undefined || tileCols === undefined || outputRows === undefined || outputCols === undefined) return undefined;
+  if (Number(tileRows) !== Number(outputCols) || Number(tileCols) !== Number(outputRows)) return undefined;
+  if (!cuteRank2BodyCopiesBetweenTiles(body, inputTile.name, outputTile.name)) return undefined;
+  const aliases = collectCuteIndexAliases(body);
+  const coords = inputTile.coords.map((coord) => resolveCuteIndexAlias(coord, aliases));
+  if (coords.length !== 2) return undefined;
+  return {
+    inputPointer: pair.input.pointer,
+    outputPointer: pair.output.pointer,
+    rows: pair.input.shape[0],
+    cols: pair.input.shape[1],
+    tileRows: String(tileRows),
+    tileCols: String(tileCols),
+    blockRow: coords[0],
+    blockCol: coords[1],
+  };
+}
+
+function collectCuteRank2GmemTensors(body) {
+  const out = [];
+  const re = /\b(?:auto|Tensor)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*make_tensor\s*\(\s*make_gmem_ptr\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*,\s*make_layout\s*\(\s*make_shape\s*\(([^)]*)\)\s*,\s*GenRowMajor\s*\{\s*\}\s*\)\s*\)\s*;/gu;
+  for (const match of body.matchAll(re)) {
+    if (match[1] === undefined || match[2] === undefined || match[3] === undefined) continue;
+    const shape = splitTopLevel(match[3]).map((item) => item.trim());
+    if (shape.length !== 2 || shape.some((item) => item.length === 0)) continue;
+    out.push({ name: match[1], pointer: match[2], shape });
+  }
+  return out;
+}
+
+function findCuteRank2TransposeTensorPair(bases) {
+  for (const input of bases) {
+    for (const output of bases) {
+      if (input === output) continue;
+      if (input.pointer === output.pointer) continue;
+      if (input.shape[0] === output.shape[1] && input.shape[1] === output.shape[0]) return { input, output };
+    }
+  }
+  return undefined;
+}
+
+function collectCuteRank2Tiles(body) {
+  const out = [];
+  const re = /\b(?:auto|Tensor)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*local_tile\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*make_shape\s*\(\s*Int<([^>]+)>\s*\{\s*\}\s*,\s*Int<([^>]+)>\s*\{\s*\}\s*\)\s*,\s*make_coord\s*\(([^)]*)\)\s*\)\s*;/gu;
+  for (const match of body.matchAll(re)) {
+    if (match[1] === undefined || match[2] === undefined || match[3] === undefined || match[4] === undefined || match[5] === undefined) continue;
+    const coords = splitTopLevel(match[5]).map((item) => item.trim());
+    if (coords.length !== 2 || coords.some((item) => item.length === 0)) continue;
+    out.push({
+      name: match[1],
+      base: match[2],
+      extents: [match[3].trim(), match[4].trim()],
+      coords,
+    });
+  }
+  return out;
+}
+
+function cuteRank2BodyCopiesBetweenTiles(body, inputTileName, outputTileName) {
+  const partitionSources = new Map();
+  const partitionRe = /\b(?:Tensor|auto)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[^;]*\b(?:local_partition|partition_[SD])\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\b[^;]*;/gu;
+  for (const match of body.matchAll(partitionRe)) {
+    if (match[1] !== undefined && match[2] !== undefined) partitionSources.set(match[1], match[2]);
+  }
+  for (const match of body.matchAll(/\b(?:Tensor|auto)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*make_tensor_like\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;/gu)) {
+    if (match[1] !== undefined && match[2] !== undefined) partitionSources.set(match[1], match[2]);
+  }
+  for (const match of body.matchAll(/\b(?:Tensor|auto)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*[^;]*\bretile_[SD]\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;/gu)) {
+    if (match[1] !== undefined && match[2] !== undefined) partitionSources.set(match[1], match[2]);
+  }
+  const sharedTensors = new Set();
+  for (const match of body.matchAll(/\b(?:auto|Tensor)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*make_tensor\s*\(\s*make_smem_ptr\s*\(/gu)) {
+    if (match[1] !== undefined) sharedTensors.add(match[1]);
+  }
+  const resolvesTo = (name, target) => {
+    let current = name;
+    for (let depth = 0; depth < 8; depth++) {
+      if (current === target) return true;
+      const next = partitionSources.get(current);
+      if (next === undefined || next === current) break;
+      current = next;
+    }
+    return false;
+  };
+  const resolvesToShared = (name) => [...sharedTensors].some((shared) => resolvesTo(name, shared));
+  let inputToShared = false;
+  let sharedToOutput = false;
+  for (const match of body.matchAll(/\bcopy(?:_if)?\s*\(([^;]+)\)\s*;/gu)) {
+    const args = splitTopLevel(match[1] ?? "").map((arg) => arg.trim()).filter(Boolean);
+    if (args.length < 2) continue;
+    const source = args.at(-2);
+    const dest = args.at(-1);
+    if (source === undefined || dest === undefined) continue;
+    if (resolvesTo(source, inputTileName) && resolvesTo(dest, outputTileName)) return true;
+    if (resolvesTo(source, inputTileName) && resolvesToShared(dest)) inputToShared = true;
+    if (resolvesToShared(source) && resolvesTo(dest, outputTileName)) sharedToOutput = true;
+  }
+  return inputToShared && sharedToOutput;
+}
+
+function collectCuteIndexAliases(body) {
+  const aliases = new Map();
+  for (const match of body.matchAll(/\bint\s+([^;]*\b(?:blockIdx|threadIdx|blockDim)\.[xyz][^;]*)\s*;/gu)) {
+    const declarators = splitTopLevel(match[1] ?? "").map((item) => item.trim()).filter(Boolean);
+    for (const declarator of declarators) {
+      const parsed = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*((?:blockIdx|threadIdx|blockDim)\.[xyz])$/u.exec(declarator);
+      if (parsed?.[1] !== undefined && parsed[2] !== undefined) aliases.set(parsed[1], parsed[2]);
+    }
+  }
+  return aliases;
+}
+
+function resolveCuteIndexAlias(expr, aliases) {
+  const trimmed = expr.trim();
+  return aliases.get(trimmed) ?? trimmed;
+}
+
+function cudaParamName(param) {
+  return /([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[[^\]]*\])?\s*$/u.exec(param.trim())?.[1];
+}
+
+function cudaPointerParamValueType(param) {
+  if (param === undefined) return undefined;
+  const cleaned = param
+    .replace(/\b(?:const|volatile|__restrict__|__restrict|restrict)\b/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const type = /^([A-Za-z_][A-Za-z0-9_:]*(?:\s+[A-Za-z_][A-Za-z0-9_:]*)*)\s*\*/u.exec(cleaned)?.[1];
+  return type === undefined ? undefined : normalizeTemplateTypeArgument(type) ?? type;
+}
+
+function cuteRank2TransposeBody(motif) {
+  const total = `(${motif.tileRows} * ${motif.tileCols})`;
+  const rowInTile = "__bg_cute_row";
+  const colInTile = "__bg_cute_col";
+  const row = "__bg_cute_m";
+  const col = "__bg_cute_n";
+  const linear = "__bg_cute_linear";
+  return [
+    `for (int ${linear} = threadIdx.x; ${linear} < ${total}; ${linear} = ${linear} + blockDim.x) {`,
+    `  int ${rowInTile} = ${linear} / ${motif.tileCols};`,
+    `  int ${colInTile} = ${linear} % ${motif.tileCols};`,
+    `  int ${row} = ((${motif.blockRow}) * ${motif.tileRows}) + ${rowInTile};`,
+    `  int ${col} = ((${motif.blockCol}) * ${motif.tileCols}) + ${colInTile};`,
+    `  if (${row} < ${motif.rows} && ${col} < ${motif.cols}) {`,
+    `    ${motif.outputPointer}[(${col} * ${motif.rows}) + ${row}] = ${motif.inputPointer}[(${row} * ${motif.cols}) + ${col}];`,
+    "  }",
+    "}",
+  ];
+}
+
+function normalizeCuteRowBroadcastGemvKernels(source) {
+  if (!/\bmake_tensor\s*\(\s*make_gmem_ptr\s*\(/u.test(source) || !/\bmake_stride\s*\(/u.test(source)) return source;
+  if (!/\b(?:warp_reduce_sum_f16|gemm|copy_if)\b/u.test(source)) return source;
+  let out = "";
+  let cursor = 0;
+  const globalRe = /\b__global__\b/gu;
+  let match;
+  while ((match = globalRe.exec(source)) !== null) {
+    const globalStart = match.index;
+    if (globalStart < cursor) continue;
+    const fn = parseCudaGlobalFunction(source, globalStart);
+    if (fn === undefined) {
+      globalRe.lastIndex = globalStart + "__global__".length;
+      continue;
+    }
+    const replacement = lowerCuteRowBroadcastGemvFunction(fn);
+    if (replacement === undefined) {
+      globalRe.lastIndex = fn.bodyEnd + 1;
+      continue;
+    }
+    out += source.slice(cursor, fn.headerStart);
+    out += replacement;
+    cursor = fn.bodyEnd + 1;
+    globalRe.lastIndex = fn.bodyEnd + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function lowerCuteRowBroadcastGemvFunction(fn) {
+  const motif = collectCuteRowBroadcastGemvMotif(fn.body);
+  if (motif === undefined) return undefined;
+  const paramsByName = new Map();
+  for (const param of fn.params) {
+    const name = cudaParamName(param);
+    if (name !== undefined && !paramsByName.has(name)) paramsByName.set(name, param);
+  }
+  const keepNames = [motif.matrixPointer, motif.vectorPointer, motif.outputPointer, motif.rows, motif.cols];
+  const keptParams = [];
+  const seen = new Set();
+  for (const name of keepNames) {
+    if (seen.has(name)) continue;
+    const param = paramsByName.get(name);
+    if (param === undefined) return undefined;
+    keptParams.push(param);
+    seen.add(name);
+  }
+  const valueType = cudaPointerParamValueType(paramsByName.get(motif.outputPointer)) ??
+    cudaPointerParamValueType(paramsByName.get(motif.matrixPointer)) ??
+    "float";
+  return [
+    `${fn.signaturePrefix}(${keptParams.join(", ")}) {`,
+    ...cuteRowBroadcastGemvBody({ ...motif, valueType }).map((line) => `  ${line}`),
+    "}",
+  ].join("\n");
+}
+
+function collectCuteRowBroadcastGemvMotif(body) {
+  const tensors = collectCuteRank2StridedGmemTensors(body);
+  if (tensors.length < 3) return undefined;
+  const matrix = tensors.find((tensor) => tensor.shape[0] !== undefined && tensor.shape[1] !== undefined &&
+    cuteExprEquals(tensor.stride[0], tensor.shape[1]) && cuteExprIsOne(tensor.stride[1]));
+  if (matrix === undefined) return undefined;
+  const vector = tensors.find((tensor) => tensor !== matrix &&
+    tensor.shape[0] === matrix.shape[0] &&
+    tensor.shape[1] === matrix.shape[1] &&
+    cuteExprIsZero(tensor.stride[0]) &&
+    cuteExprIsOne(tensor.stride[1]));
+  const output = tensors.find((tensor) => tensor !== matrix && tensor !== vector &&
+    tensor.shape[0] === matrix.shape[0] &&
+    cuteExprIsOne(tensor.shape[1]) &&
+    cuteExprIsOne(tensor.stride[0]) &&
+    cuteExprIsZero(tensor.stride[1]));
+  if (vector === undefined || output === undefined) return undefined;
+  const env = collectCuteIntegerEnv(body);
+  const blockM = collectCuteTileExtentForBase(body, matrix.name, env);
+  if (blockM === undefined) return undefined;
+  if (!/(?:\bwarp_reduce_sum_f16\s*(?:<[^<>]*>)?|\bgemm)\s*\(/u.test(body)) return undefined;
+  return {
+    matrixPointer: matrix.pointer,
+    vectorPointer: vector.pointer,
+    outputPointer: output.pointer,
+    rows: matrix.shape[0],
+    cols: matrix.shape[1],
+    blockRows: blockM,
+  };
+}
+
+function collectCuteRank2StridedGmemTensors(body) {
+  const out = [];
+  const re = /\b(?:auto|Tensor)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*make_tensor\s*\(\s*make_gmem_ptr\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*,\s*make_layout\s*\(\s*make_shape\s*\(([^)]*)\)\s*,\s*make_stride\s*\(([^)]*)\)\s*\)\s*\)\s*;/gu;
+  for (const match of body.matchAll(re)) {
+    if (match[1] === undefined || match[2] === undefined || match[3] === undefined || match[4] === undefined) continue;
+    const shape = splitTopLevel(match[3]).map(normalizeCuteScalarExpression);
+    const stride = splitTopLevel(match[4]).map(normalizeCuteScalarExpression);
+    if (shape.length !== 2 || stride.length !== 2) continue;
+    out.push({ name: match[1], pointer: match[2], shape, stride });
+  }
+  return out;
+}
+
+function collectCuteTileExtentForBase(body, baseName, env) {
+  const re = /\b(?:auto|Tensor)\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*local_tile\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*make_shape\s*\(\s*Int<([^>]+)>\s*\{\s*\}\s*,\s*Int<([^>]+)>\s*\{\s*\}\s*\)/gu;
+  for (const match of body.matchAll(re)) {
+    if (match[1] !== baseName || match[2] === undefined) continue;
+    const value = evaluateTemplateIntegerExpression(match[2], env);
+    if (value !== undefined) return String(value);
+  }
+  return undefined;
+}
+
+function collectCuteIntegerEnv(body) {
+  const env = new Map();
+  for (const match of body.matchAll(/\b(?:constexpr\s+)?int\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);/gu)) {
+    if (match[1] === undefined || match[2] === undefined) continue;
+    const value = evaluateTemplateIntegerExpression(normalizeCuteScalarExpression(match[2]), env);
+    if (value !== undefined) env.set(match[1], value);
+  }
+  return env;
+}
+
+function normalizeCuteScalarExpression(raw) {
+  return raw
+    .replace(/\bInt\s*<([^<>]+)>\s*\{\s*\}/gu, (_match, expr) => `(${String(expr).trim()})`)
+    .trim();
+}
+
+function cuteExprEquals(left, right) {
+  return normalizeCuteScalarExpression(left) === normalizeCuteScalarExpression(right);
+}
+
+function cuteExprIsZero(expr) {
+  return normalizeCuteScalarExpression(expr) === "0";
+}
+
+function cuteExprIsOne(expr) {
+  const normalized = normalizeCuteScalarExpression(expr).replace(/^\(([\s\S]*)\)$/u, "$1").trim();
+  return normalized === "1";
+}
+
+function cuteRowBroadcastGemvBody(motif) {
+  const tid = "__bg_cute_tid";
+  const rowLocal = "__bg_cute_row_local";
+  const row = "__bg_cute_row";
+  const k = "__bg_cute_k";
+  const sum = "__bg_cute_sum";
+  const stride = "((blockDim.x * blockDim.y) * blockDim.z)";
+  return [
+    `int ${tid} = threadIdx.x + (threadIdx.y * blockDim.x) + (threadIdx.z * blockDim.x * blockDim.y);`,
+    `for (int ${rowLocal} = ${tid}; ${rowLocal} < ${motif.blockRows}; ${rowLocal} = ${rowLocal} + ${stride}) {`,
+    `  int ${row} = (blockIdx.x * ${motif.blockRows}) + ${rowLocal};`,
+    `  if (${row} < ${motif.rows}) {`,
+    `    ${motif.valueType} ${sum} = 0.0f;`,
+    `    for (int ${k} = 0; ${k} < ${motif.cols}; ${k} = ${k} + 1) {`,
+    `      ${sum} = ${sum} + (${motif.matrixPointer}[(${row} * ${motif.cols}) + ${k}] * ${motif.vectorPointer}[${k}]);`,
+    "    }",
+    `    ${motif.outputPointer}[${row}] = ${sum};`,
+    "  }",
+    "}",
+  ];
+}
+
 function normalizeCute1dAffineTileCopies(source) {
   if (!/\b(?:Tensor|auto)\b[\s\S]*\blocal_tile\s*\(/u.test(source) || !/\brecast\s*</u.test(source)) return source;
   let out = source;
@@ -2386,6 +2795,13 @@ function lowerCute1dAffineTileSegment(segment) {
     `  ${outTile.pointer}[${pos}] = ${scalarExpression};`,
     "}",
   ].join("\n");
+}
+
+function normalizeMissingSemicolonAfterMacroAssignment(source) {
+  return source.replace(
+    /(=\s*[A-Z_][A-Z0-9_]*\s*\([^;\n{}]+\))\s+(?=(?:const\s+|volatile\s+)*(?:float|half|bf16|int|uint|bool|double|float[234]|int[234]|uint[234]|half2)\s+[A-Za-z_][A-Za-z0-9_]*\b)/gu,
+    "$1; ",
+  );
 }
 
 function collectSimpleExpressionMacros(source) {

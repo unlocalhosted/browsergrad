@@ -44,6 +44,9 @@
 - Templated POD records, direct `SharedMemory<T>` values, and 3-argument
   cuRAND init overloads now normalize into the CUDA-lite subset, raising the
   cuda-samples gate to `308/357` with `48` hard gaps.
+- CuTe rank-2 transpose motifs, row-broadcast GEMV tensor views, and malformed
+  macro-assignment recovery now normalize into direct CUDA-lite loops, raising
+  the LeetCUDA gate to `286/293` with `7` hard gaps.
 - Browser WebGPU benchmarks now fail on validation errors and accept optional
   prepared-dispatch ratio thresholds for machine-local perf gates.
 - Fixed thread-local arrays now run through CPU reference and WGSL/WebGPU

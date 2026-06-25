@@ -454,6 +454,148 @@ __global__ void cute_affine(half *z, int num, const half *x, const half *y, half
 }
 
 {
+  const source = createKernelCompilationUnit({
+    kernel: `
+template <typename T, int BLK_M, int BLK_N, typename ThreadLayoutA, typename ThreadLayoutB>
+__global__ void cute_transpose_direct(const T *pA, T *pB, int M, int N, ThreadLayoutA tA, ThreadLayoutB tB) {
+  int tx = threadIdx.x;
+  int bx = blockIdx.x, by = blockIdx.y;
+  auto mA = make_tensor(make_gmem_ptr(pA), make_layout(make_shape(M, N), GenRowMajor{}));
+  auto mB = make_tensor(make_gmem_ptr(pB), make_layout(make_shape(N, M), GenRowMajor{}));
+  auto gA = local_tile(mA, make_shape(Int<BLK_M>{}, Int<BLK_N>{}), make_coord(bx, by));
+  auto gB = local_tile(mB, make_shape(Int<BLK_N>{}, Int<BLK_M>{}), make_coord(by, bx));
+  auto cA = local_tile(make_identity_tensor(mA.shape()), make_shape(Int<BLK_M>{}, Int<BLK_N>{}), make_coord(bx, by));
+  Tensor tAgA = local_partition(gA, tA, tx);
+  Tensor tBgB = local_partition(gB, tB, tx);
+  Tensor tAcA = local_partition(cA, tA, tx);
+  Tensor tApA = make_tensor<bool>(tAcA.shape(), tAcA.stride());
+  copy_if(tApA, tAgA, tBgB);
+}`,
+    templateArgumentsByKernelName: new Map([["cute_transpose_direct", ["float", "8", "16"]]]),
+  });
+  assert.match(source, /__global__ void cute_transpose_direct\(const float \*pA, float \*pB, int M, int N\)/u);
+  assert.match(source, /for \(int __bg_for___bg_cute_linear_0 = threadIdx\.x;__bg_for___bg_cute_linear_0 < \(8 \* 16\);__bg_for___bg_cute_linear_0 = __bg_for___bg_cute_linear_0 \+ blockDim\.x\)/u);
+  assert.match(source, /pB\[\(__bg_cute_n \* M\) \+ __bg_cute_m\] = pA\[\(__bg_cute_m \* N\) \+ __bg_cute_n\];/u);
+  assert.doesNotMatch(source, /\bThreadLayoutA\b/u);
+  assert.doesNotMatch(source, /\bTensor\b/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+template <typename T, int BLK_M, int BLK_N, typename ThreadLayoutA, typename ThreadLayoutB, typename SmemLayoutA, typename SmemLayoutB>
+__global__ void cute_transpose_smem(const T *pA, T *pB, int M, int N, ThreadLayoutA tA, ThreadLayoutB tB, SmemLayoutA sA_layout, SmemLayoutB sB_layout) {
+  int tx = threadIdx.x;
+  int bx = blockIdx.x, by = blockIdx.y;
+  auto mA = make_tensor(make_gmem_ptr(pA), make_layout(make_shape(M, N), GenRowMajor{}));
+  auto mB = make_tensor(make_gmem_ptr(pB), make_layout(make_shape(N, M), GenRowMajor{}));
+  auto gA = local_tile(mA, make_shape(Int<BLK_M>{}, Int<BLK_N>{}), make_coord(bx, by));
+  auto gB = local_tile(mB, make_shape(Int<BLK_N>{}, Int<BLK_M>{}), make_coord(by, bx));
+  __shared__ T smem[BLK_M * BLK_N];
+  auto sA = make_tensor(make_smem_ptr(smem), sA_layout);
+  auto sB = make_tensor(make_smem_ptr(smem), sB_layout);
+  Tensor tAgA = local_partition(gA, tA, tx);
+  Tensor tAsA = local_partition(sA, tA, tx);
+  Tensor tBsB = local_partition(sB, tB, tx);
+  Tensor tBgB = local_partition(gB, tB, tx);
+  copy_if(tAgA, tAgA, tAsA);
+  __syncthreads();
+  copy_if(tBgB, tBsB, tBgB);
+}`,
+    templateArgumentsByKernelName: new Map([["cute_transpose_smem", ["float", "8", "16"]]]),
+  });
+  assert.match(source, /__global__ void cute_transpose_smem\(const float \*pA, float \*pB, int M, int N\)/u);
+  assert.match(source, /__bg_cute_m = \(\(blockIdx\.x\) \* 8\) \+ __bg_cute_row/u);
+  assert.doesNotMatch(source, /\bSmemLayoutA\b/u);
+  assert.doesNotMatch(source, /\bmake_tensor\b/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+template <typename T, int BLK_M, int BLK_N, typename TiledCopyA, typename TiledCopyTrans, typename TiledCopyB, typename SmemLayoutB>
+__global__ void cute_transpose_retile(const T *pA, T *pB, int M, int N, TiledCopyA copy_a, TiledCopyTrans copy_trans, TiledCopyB copy_b, SmemLayoutB sB_layout) {
+  int tx = threadIdx.x;
+  int bx = blockIdx.x, by = blockIdx.y;
+  auto mA = make_tensor(make_gmem_ptr(pA), make_layout(make_shape(M, N), GenRowMajor{}));
+  auto mB = make_tensor(make_gmem_ptr(pB), make_layout(make_shape(N, M), GenRowMajor{}));
+  auto gA = local_tile(mA, make_shape(Int<BLK_M>{}, Int<BLK_N>{}), make_coord(bx, by));
+  auto gB = local_tile(mB, make_shape(Int<BLK_N>{}, Int<BLK_M>{}), make_coord(by, bx));
+  __shared__ T smem[BLK_M * BLK_N];
+  auto sB = make_tensor(make_smem_ptr(smem), sB_layout);
+  auto thr_copy_a = copy_a.get_slice(tx);
+  Tensor tAgA = thr_copy_a.partition_S(gA);
+  auto tAsA = make_tensor_like(tAgA);
+  Tensor tAsA_view = thr_copy_a.retile_D(tAsA);
+  copy(copy_a, tAgA, tAsA_view);
+  auto thr_copy_trans = copy_trans.get_slice(tx);
+  auto tAsB = thr_copy_trans.retile_S(tAsA);
+  auto tBsB_trans = thr_copy_trans.partition_D(sB);
+  copy(copy_trans, tAsB, tBsB_trans);
+  auto thr_copy_b = copy_b.get_slice(tx);
+  Tensor tBsB = thr_copy_b.partition_S(sB);
+  Tensor tBgB = thr_copy_b.partition_D(gB);
+  copy(copy_b, tBsB, tBgB);
+}`,
+    templateArgumentsByKernelName: new Map([["cute_transpose_retile", ["float", "8", "16"]]]),
+  });
+  assert.match(source, /__global__ void cute_transpose_retile\(const float \*pA, float \*pB, int M, int N\)/u);
+  assert.match(source, /pB\[\(__bg_cute_n \* M\) \+ __bg_cute_m\] = pA\[\(__bg_cute_m \* N\) \+ __bg_cute_n\];/u);
+  assert.doesNotMatch(source, /\bTiledCopyA\b/u);
+  assert.doesNotMatch(source, /\bretile_[SD]\b/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+template <typename TiledCopy, int BlockM, int BlockK, int WARP_SIZE = 32>
+__global__ void cute_hgemv(half *Aptr, half *Bptr, half *Cptr, const int M, const int K) {
+  using namespace cute;
+  int thrid = threadIdx.x + threadIdx.y * blockDim.x;
+  int blockid = blockIdx.x;
+  int laneid = threadIdx.x % WARP_SIZE;
+  auto A = make_tensor(make_gmem_ptr(Aptr), make_layout(make_shape(M, K), make_stride(K, Int<1>{})));
+  auto B = make_tensor(make_gmem_ptr(Bptr), make_layout(make_shape(M, K), make_stride(0, Int<1>{})));
+  auto C = make_tensor(make_gmem_ptr(Cptr), make_layout(make_shape(M, 1), make_stride(Int<1>{}, 0)));
+  auto gA = local_tile(A, make_shape(Int<BlockM>{}, Int<BlockK>{}), make_coord(blockid, _));
+  auto gB = local_tile(B, make_shape(Int<BlockM>{}, Int<BlockK>{}), make_coord(blockid, _));
+  auto gC = local_tile(C, make_shape(Int<BlockM>{}, Int<1>{}), make_coord(blockid, 0));
+  TiledCopy tiled_copy;
+  auto thr_copy = tiled_copy.get_slice(thrid);
+  auto tAgA = thr_copy.partition_S(gA);
+  auto tBgB = thr_copy.partition_S(gB);
+  auto sum = make_tensor_like(gC(0, _));
+  clear(sum);
+  for (int iter_k = 0; iter_k < size<2>(gA); iter_k++) {
+    copy_if(tiled_copy, tAgA(_, _, _, iter_k), sum);
+    sum(0) += tAgA(0) * tBgB(0);
+  }
+  sum(0) = warp_reduce_sum_f16<WARP_SIZE>(sum(0));
+  copy_if(laneid == 0, sum, gC(0, _));
+}`,
+    templateArgumentsByKernelName: new Map([["cute_hgemv", ["TiledCopy", "4", "16"]]]),
+  });
+  assert.match(source, /__global__ void cute_hgemv\(half \*Aptr, half \*Bptr, half \*Cptr, const int M, const int K\)/u);
+  assert.match(source, /half __bg_cute_sum = 0\.0f;/u);
+  assert.match(source, /Cptr\[__bg_cute_row\] = __bg_cute_sum;/u);
+  assert.doesNotMatch(source, /\bTiledCopy\b/u);
+  assert.doesNotMatch(source, /\bmake_tensor\b/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+#define FLOAT4(value) (reinterpret_cast<float4 *>(&(value))[0])
+__global__ void vec4_recover(float *x, float *y, int N) {
+  int idx = threadIdx.x * 4;
+  float4 reg_x = FLOAT4(x[idx]) float value = idx < N ? reg_x.x : 0.0f;
+  if (idx < N) y[idx] = value;
+}`,
+  });
+  assert.match(source, /float4 reg_x = FLOAT4\(x\[idx\]\); float value = idx < N/u);
+}
+
+{
   const source = `
 using fn_ptr = void(*)(float*);
 template<fn_ptr fn>
