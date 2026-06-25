@@ -2736,7 +2736,7 @@ function resolvePointerInitializer(statement: CudaLiteVarDecl, context: ThreadCo
   const init = statement.init;
   if (!init) return { kind: "pool-pointer", poolName: "", byteOffset: -1 };
   if (isNullPointerLiteral(init)) return { kind: "pool-pointer", poolName: "", byteOffset: -1, valueType: statement.valueType };
-  if (init?.kind === "call" || (init?.kind === "cast" && init.pointer) || init?.kind === "identifier" || init?.kind === "binary") {
+  if (init?.kind === "call" || (init?.kind === "cast" && init.pointer) || init?.kind === "identifier" || init?.kind === "binary" || init?.kind === "conditional") {
     const value = pointerArgumentValue(init, statement.valueType, context);
     if (isPoolPointer(value)) return value;
     if (typeof value !== "number" && "kind" in value && value.kind === "address") {

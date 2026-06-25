@@ -699,6 +699,28 @@ __global__ void sizeKernel(uint* out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([4]);
   });
 
+  it("folds CUDA sizeof type names and C character literals", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void c_layout_literals(uint* out) {
+  if (threadIdx.x == 0) {
+    out[0] = sizeof(unsigned char);
+    out[1] = sizeof(char);
+    out[2] = sizeof(float4);
+    out[3] = '|';
+    out[4] = '\\n';
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(5) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("out[0] = 1");
+    expect(compiled.wgsl).toContain("out[2] = 16");
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 1, 16, 124, 10]);
+  });
+
   it("accepts common C integer aliases as CUDA-lite i32/u32 scalars", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void integerAliases(int32_t *signedOut, uint32_t *unsignedOut, signed int n) {
@@ -832,6 +854,27 @@ __global__ void ok(float* x, float* out) {
   if (i < 1) { out[0] = y[0]; }
 }`);
     expect(modeledLocalPointer.loweringPlan.canRunOnGpu).toBe(true);
+
+    const conditionalLocalPointer = compileCudaLiteKernel(`
+__global__ void conditional_local_ptr(const float* a, const float* b, float* out, int flag) {
+  int i = threadIdx.x;
+  const float* p = flag ? a + i : b + i;
+  if (i < 2) { out[i] = p[0]; }
+}`, { workgroupSize: [2, 1, 1] });
+    const conditionalResult = runCompiledKernelReference(
+      conditionalLocalPointer,
+      {
+        buffers: {
+          a: new Float32Array([1, 2]),
+          b: new Float32Array([3, 4]),
+          out: new Float32Array(2),
+        },
+        scalars: { flag: 0 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    expect(conditionalLocalPointer.loweringPlan.canRunOnGpu).toBe(true);
+    expect([...conditionalResult.buffers.out as Float32Array]).toEqual([3, 4]);
 
     const mutableLocalPointer = compileCudaLiteKernel(`
 __global__ void mutable_local_ptr(const float* a, float* b, float* out) {
@@ -5890,6 +5933,25 @@ __global__ void shared_pointer_decay(float* out) {
 
     expect(compiled.wgsl).toContain("copy_one(0u, 0u, 1u, (0u + u32(1))");
     expect([...result.buffers.out as Float32Array]).toEqual([3.5]);
+  });
+
+  it("supports explicit pointer casts over shared arrays", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void shared_pointer_cast(uint* out) {
+  __shared__ uint tile[4];
+  if (threadIdx.x == 0) {
+    ((uint*)tile)[1] = 9u;
+    out[0] = ((uint*)tile)[1];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.loweringPlan.canRunOnGpu).toBe(true);
+    expect([...result.buffers.out as Uint32Array]).toEqual([9]);
   });
 
   it("supports CUDA integer atomic exchange and compare-swap", () => {

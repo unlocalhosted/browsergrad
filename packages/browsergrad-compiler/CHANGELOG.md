@@ -45,6 +45,10 @@
   the cuda-samples gate to `312/357` with `44` hard gaps.
 - Source normalization now lowers mutable local scalar references to storage
   elements, raising the cuda-samples gate to `313/357` with `43` hard gaps.
+- CUDA-lite now folds `sizeof(type)` for C layout aliases, tokenizes C character
+  literals, accepts conditional local pointer initializers, and permits explicit
+  pointer casts over arrays, raising the cuda-samples gate to `315/357` with
+  `41` hard gaps.
 - Source normalization now avoids replacing macro parameters inside member
   properties and lowers simple two-short/one-u32 CUDA unions into bitfield
   views, raising the cuda-samples gate to `305/357` with `51` hard gaps.

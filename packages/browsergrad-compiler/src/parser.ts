@@ -1096,6 +1096,7 @@ class Parser {
 
   private parsePrefix(): CudaLiteExpression {
     const token = this.peek();
+    if (this.startsSizeofTypeExpression()) return this.parseSizeofTypeExpression();
     if (this.startsScalarCast()) {
       const start = this.expect("(").span;
       this.consumeIf("const");
@@ -1180,6 +1181,35 @@ class Parser {
       break;
     }
     return expression;
+  }
+
+  private startsSizeofTypeExpression(): boolean {
+    if (!this.match("sizeof") || this.tokens[this.index + 1]?.value !== "(") return false;
+    let typeEnd = this.typeEndIndex(this.index + 2);
+    if (typeEnd === undefined) return false;
+    while (this.isCvQualifier(this.tokens[typeEnd]?.value)) typeEnd++;
+    if (this.tokens[typeEnd]?.value === "*") {
+      typeEnd++;
+      while (this.isCvQualifier(this.tokens[typeEnd]?.value)) typeEnd++;
+    }
+    return this.tokens[typeEnd]?.value === ")";
+  }
+
+  private parseSizeofTypeExpression(): CudaLiteExpression {
+    const start = this.expect("sizeof").span;
+    this.expect("(");
+    const typeStart = this.index;
+    const typeEnd = this.typeEndIndex(typeStart);
+    if (typeEnd === undefined) this.fail("sizeof expects a CUDA-lite type", this.peek().span);
+    const typeName = this.tokens.slice(typeStart, typeEnd).map((token) => token.value).join(" ").replace(/\s+::\s+/gu, "::");
+    this.index = typeEnd;
+    while (this.isCvQualifier(this.peek().value)) this.advance();
+    const pointer = this.consumeIf("*") !== undefined;
+    while (this.isCvQualifier(this.peek().value)) this.advance();
+    const end = this.expect(")").span;
+    const value = pointer ? 4 : sizeofCudaType(typeName);
+    if (value === undefined) this.fail(`unsupported sizeof type: ${typeName}`, start);
+    return { kind: "number", value, raw: String(value), span: mergeSpans(start, end) };
   }
 
   private parseCxxCastExpression(): CudaLiteExpression {

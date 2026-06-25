@@ -1135,6 +1135,14 @@ function pointerRootForInitializer(expression: CudaLiteExpression | undefined, s
 function pointerSourceType(expression: CudaLiteExpression | undefined, scope: Scope): ValueType | undefined {
   if (!expression) return undefined;
   if (expression.kind === "cast" && expression.pointer) return pointerSourceType(expression.expression, scope);
+  if (expression.kind === "conditional") {
+    const consequent = pointerSourceType(expression.consequent, scope);
+    const alternate = pointerSourceType(expression.alternate, scope);
+    if (consequent !== undefined && alternate !== undefined) return pointerTypesCompatible(consequent, alternate, true) ? consequent : undefined;
+    if (consequent !== undefined && isNullPointerLiteral(expression.alternate)) return consequent;
+    if (alternate !== undefined && isNullPointerLiteral(expression.consequent)) return alternate;
+    return undefined;
+  }
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
     return pointerSourceType(expression.left, scope);
   }
@@ -2603,7 +2611,7 @@ function validateNonCallExpression(
     case "cast": {
       const info = walkExpression(expression.expression, scope);
       if (expression.pointer) {
-        if (info.kind !== "scalar" && info.kind !== "pointer" && info.kind !== "pool-pointer" && info.kind !== "address" && info.kind !== "unknown") {
+        if (info.kind !== "scalar" && info.kind !== "pointer" && info.kind !== "pool-pointer" && info.kind !== "address" && info.kind !== "array" && info.kind !== "unknown") {
           diagnostics.push(error("unsupported-pointer-cast", "pointer cast expects scalar or pointer expression", expression.expression.span));
         }
         return info.kind === "pool-pointer"

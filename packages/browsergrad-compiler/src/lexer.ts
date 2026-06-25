@@ -139,6 +139,11 @@ function scanCudaLiteTokens(
       tokens.push({ kind: "string", value, span: tokenSpan(start, index, startLine, startColumn) });
       continue;
     }
+    if (char === "'") {
+      const { value } = scanCharacterLiteral();
+      tokens.push({ kind: "number", value: String(value), span: tokenSpan(start, index, startLine, startColumn) });
+      continue;
+    }
     if (/[0-9]/.test(char) || (char === "." && /[0-9]/.test(source[index + 1] ?? ""))) {
       let value = "";
       if (char === "0" && /[xX]/.test(source[index + 1] ?? "")) {
@@ -214,6 +219,18 @@ function scanCudaLiteTokens(
         }
         continue;
       }
+      if (next === "'") {
+        current += next;
+        let escaped = false;
+        while (index < source.length) {
+          const char = advance();
+          current += char;
+          if (escaped) escaped = false;
+          else if (char === "\\") escaped = true;
+          else if (char === "'") break;
+        }
+        continue;
+      }
       if (next === "(") {
         depth++;
         current += next;
@@ -236,6 +253,45 @@ function scanCudaLiteTokens(
       current += next;
     }
     return args;
+  }
+
+  function scanCharacterLiteral(): { readonly value: number } {
+    advance();
+    let value = 0;
+    if (index < source.length) {
+      const next = advance();
+      if (next === "\\") {
+        const escaped = index < source.length ? advance() : "";
+        value = escapedCharacterValue(escaped);
+      } else {
+        value = next.codePointAt(0) ?? 0;
+      }
+    }
+    while (index < source.length) {
+      if (advance() === "'") break;
+    }
+    return { value };
+  }
+}
+
+function escapedCharacterValue(char: string): number {
+  switch (char) {
+    case "0":
+      return 0;
+    case "n":
+      return 10;
+    case "r":
+      return 13;
+    case "t":
+      return 9;
+    case "\\":
+      return 92;
+    case "'":
+      return 39;
+    case "\"":
+      return 34;
+    default:
+      return char.codePointAt(0) ?? 0;
   }
 }
 
