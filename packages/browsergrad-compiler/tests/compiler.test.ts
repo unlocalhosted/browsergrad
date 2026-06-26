@@ -2560,6 +2560,27 @@ __global__ void multiFor(int *out) {
     expect([...result.buffers.out as Int32Array]).toEqual([9]);
   });
 
+  it("lowers prefix and postfix updates to WGSL assignment statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void updateLoop(int *out) {
+  int acc = 0;
+  for (int i = 0, j = 3; i < 3; ++i, j--) {
+    acc += i + j;
+  }
+  out[0] = acc;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("i = (i + 1);");
+    expect(compiled.wgsl).toContain("j = (j - 1);");
+    expect(compiled.wgsl).not.toMatch(/\\+\\+|--/u);
+    expect([...result.buffers.out as Int32Array]).toEqual([9]);
+  });
+
   it("supports bool locals and trailing commas in kernel parameter lists", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void boolKernel(int *data, int N,) {
@@ -2742,6 +2763,23 @@ __global__ void c_math_aliases(float *x, float *out) {
     expect(compiled.wgsl).toContain("pow(abs(value), 2.0)");
     expect(compiled.wgsl).toContain("fma(0.25, (6.0 - 2.0), 2.0)");
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(expected, 5);
+  });
+
+  it("casts integer CUDA math arguments to WGSL float arguments", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void int_math_arg(int n, float *out) {
+  out[0] = sqrtf(n) + expf(n - 2) + fminf(n, 3.5f);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) }, scalars: { n: 4 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("sqrt(f32(params.n))");
+    expect(compiled.wgsl).toContain("exp(f32((params.n - 2)))");
+    expect(compiled.wgsl).toContain("min(f32(params.n), 3.5)");
+    expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(Math.sqrt(4) + Math.exp(2) + 3.5, 5);
   });
 
   it("lowers C frexp exponent out params", () => {

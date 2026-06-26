@@ -2,6 +2,14 @@
 
 ## 0.1.0
 
+- Current corpus audit closes the compatibility ladder at `1038/1038`
+  compile/codegen-ok across CUDA-120, NVIDIA `cuda-samples`, `llm.c`, and
+  LeetCUDA, with `0` hard gaps in the pinned aggregate gate. Real browser
+  corpus e2e now executes `70/70` fixture-backed kernels through WebGPU.
+- WGSL lowering now rewrites CUDA prefix/postfix updates to assignment-form
+  statements and casts integer arguments to CUDA float math intrinsics before
+  emission, covering real `cuda-samples` matrix-multiply and `llm.c` attention
+  kernels without repo-specific branching.
 - Source normalization now folds CuTe `Int<N>{}` launch-context values and
   lowers direct CuTe TN GEMM tensor/tile object graphs into scalar WebGPU matmul.
   It also expands dependent `typename Traits::Arguments` carrier params,
@@ -57,12 +65,12 @@
 - Corpus audit now reports `compileCodegenOk` / `compileCodegenGaps` and
   `planCompiledOk` / `planCompileGaps`, making compile-plan coverage distinct
   from fixture-backed real WebGPU execution.
-- Browser corpus e2e now runs `51` exact kernels from pinned CUDA-120,
+- Browser corpus e2e now runs `70` exact kernels from pinned CUDA-120,
   NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA sources through real WebGPU in
   both source and dist bundles, with CPU-reference readback comparisons.
 - Browser corpus e2e now enforces those real WebGPU fixtures as a no-regression
-  floor: `51` total passing fixtures, with per-corpus minimums of CUDA-120 `2`,
-  NVIDIA `cuda-samples` `8`, `llm.c` `12`, and LeetCUDA `29`.
+  floor: `70` total passing fixtures, with per-corpus minimums of CUDA-120 `2`,
+  NVIDIA `cuda-samples` `10`, `llm.c` `21`, and LeetCUDA `37`.
 - Browser corpus e2e now adds real WebGPU LeetCUDA direct transpose fixtures and
   `llm.c` encoder/cross-entropy-backward transformer fixtures, including a
   regression for local storage-pointer alias dereferences that need WGSL pointer

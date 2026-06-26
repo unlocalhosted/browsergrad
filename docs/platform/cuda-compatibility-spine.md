@@ -78,12 +78,12 @@ pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --sk
   excludes kernels with host-orchestrated WebGPU plan coverage; current baseline
   is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=342`
-  compile/codegen-ok, and `<=12` hard gaps;
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=357`
+  compile/codegen-ok, and `0` hard gaps;
   `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=148`
   compile/codegen-ok, and `0` hard gaps;
-  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=292`
-  compile/codegen-ok, and `<=1` hard gaps. The aggregate gate also verifies
+  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=293`
+  compile/codegen-ok, and `0` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
 - Corpus audits now emit `executionTierCounts` plus
   `compileFeatureProfile` and `deprecatedCompilePlanAliases` so platform code can distinguish
@@ -262,12 +262,13 @@ pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu:corpus -- --require
   exact external kernels through the same source-normalized compilation-unit
   path as the corpus audit, dispatches them in Chromium/WebGPU, and compares
   GPU readbacks to CPU reference. Fixture launch/input/output specs live in
-  `scripts/cuda-lite-corpus-registry.mjs`. Current no-regression floor is `51`
+  `scripts/cuda-lite-corpus-registry.mjs`. Current no-regression floor is `70`
   output-verified real WebGPU corpus fixtures: CUDA-120 `2`, NVIDIA
-  `cuda-samples` `8`, `llm.c` `12`, and LeetCUDA `29`. Coverage includes
-  vector add/scale, cuda-samples Bezier/mdspan/SobelTex, `llm.c` forward and
-  backward transformer kernels, LeetCUDA scalar/vector activations, SGEMM,
-  histogram, RoPE, direct transpose variants, and lifted CuTe transpose motifs.
+  `cuda-samples` `10`, `llm.c` `21`, and LeetCUDA `37`. Coverage includes
+  vector add/scale, cuda-samples Bezier/mdspan/SobelTex/matrix-multiply/scalar
+  product, `llm.c` forward, backward, attention, and optimizer kernels,
+  LeetCUDA scalar/vector activations, SGEMM, histogram, RoPE, direct transpose
+  variants, and lifted CuTe transpose motifs.
   Fixture specs may pin explicit expected readbacks; when present, the gate
   checks both CPU reference and real WebGPU against that expected output instead
   of allowing the two implementations to agree on wrong-code. Current hard

@@ -2153,13 +2153,8 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       return `select(${emitExpression(expression.alternate, context)}, ${emitExpression(expression.consequent, context)}, ${emitExpression(expression.condition, context)})`;
     case "assignment":
       return emitAssignment(expression, context);
-    case "update": {
-      const pointerRebase = emitPointerRebaseUpdate(expression, context);
-      if (pointerRebase) return pointerRebase;
-      return expression.prefix
-        ? `${expression.operator}${emitExpression(expression.argument, context, "lvalue")}`
-        : `${emitExpression(expression.argument, context, "lvalue")}${expression.operator}`;
-    }
+    case "update":
+      return emitUpdateExpression(expression, context);
     case "sequence":
       throw featureError("unsupported-sequence-expression", "comma expressions are only supported in for-loop clauses");
   }
@@ -3556,6 +3551,11 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
       const fn = context.deviceFunctionFor(name, expression.args.length);
       if (fn) return fn.returnType;
     }
+    const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
+    if (intrinsic?.returnType === "argument1") return expression.args[0]
+      ? expressionValueTypeForEmit(expression.args[0], context)
+      : undefined;
+    if (intrinsic?.returnType !== undefined) return intrinsic.returnType;
     if (name === "abs" || name === "min" || name === "max") {
       return expression.args.reduce<CudaLiteScalarType | undefined>(
         (type, arg) => promotedCudaScalarType(type, expressionValueTypeForEmit(arg, context)),
@@ -3597,6 +3597,7 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
       expressionValueTypeForEmit(expression.right, context),
     );
   }
+  if (expression.kind === "unary") return expressionValueTypeForEmit(expression.argument, context);
   return undefined;
 }
 
@@ -3790,7 +3791,12 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   if (vectorLerp !== undefined) return vectorLerp;
   if (name === "frexp" || name === "frexpf") return emitFrexpCall(expression, context);
   const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
-  if (intrinsic?.emitWgsl) return intrinsic.emitWgsl(args);
+  if (intrinsic?.emitWgsl) {
+    const intrinsicArgs = intrinsicNeedsFloatArgs(name)
+      ? expression.args.map((arg) => emitExpressionAsFloatArgument(arg, context))
+      : args;
+    return intrinsic.emitWgsl(intrinsicArgs);
+  }
   const vectorConstructor = name ? cudaVectorConstructorType(name) : undefined;
   if (vectorConstructor) {
     return expression.args.length === 1
@@ -4070,6 +4076,26 @@ function emitExpressionAsValueType(
     : emitVectorSplat(valueType, castExpressionToVectorScalar(value, valueType));
   if (valueType === "bool") return `(${value} != 0)`;
   return `${wgslScalar(valueType)}(${value})`;
+}
+
+const FLOAT_ARG_INTRINSICS = new Set([
+  "sqrt", "sqrtf", "exp", "expf", "__expf", "log", "logf", "__logf",
+  "fabs", "fabsf", "floor", "floorf", "ceil", "ceilf", "round", "roundf",
+  "rintf", "trunc", "truncf", "sin", "sinf", "__sinf", "cos", "cosf",
+  "__cosf", "tan", "tanf", "__tanf", "asin", "asinf", "acos", "acosf",
+  "atan", "atanf", "tanh", "tanhf", "cosh", "coshf", "isinf", "rsqrt",
+  "rsqrtf", "__frcp_rn", "__saturatef", "pow", "powf", "atan2", "atan2f",
+  "fmin", "fminf", "fmax", "fmaxf", "fma", "fmaf", "__fmaf_rn", "lerp",
+]);
+
+function intrinsicNeedsFloatArgs(name: string | undefined): boolean {
+  return name !== undefined && FLOAT_ARG_INTRINSICS.has(name);
+}
+
+function emitExpressionAsFloatArgument(expression: CudaLiteExpression, context: EmitContext): string {
+  return expressionValueTypeForEmit(expression, context) === "float"
+    ? emitExpression(expression, context)
+    : emitExpressionAsValueType(expression, "float", context);
 }
 
 function emitCooperativeGroupCall(expression: CudaLiteCallExpression, context: EmitContext): string | undefined {
@@ -4821,6 +4847,22 @@ function emitPointerRebaseUpdate(expression: CudaLiteExpression, context: EmitCo
   const base = context.mutablePointerBaseFor(expression.argument.name);
   if (!base) return undefined;
   return `${base} = (${base} ${expression.operator === "++" ? "+" : "-"} 1u)`;
+}
+
+function emitUpdateExpression(
+  expression: Extract<CudaLiteExpression, { kind: "update" }>,
+  context: EmitContext,
+): string {
+  const pointerRebase = emitPointerRebaseUpdate(expression, context);
+  if (pointerRebase) return pointerRebase;
+  const target = emitExpression(expression.argument, context, "lvalue");
+  const type = expressionValueTypeForEmit(expression.argument, context);
+  const delta = type === "uint"
+    ? "1u"
+    : type === "float" || type === "double" || type === "half" || type === "bf16"
+      ? "1.0"
+      : "1";
+  return `${target} = (${target} ${expression.operator === "++" ? "+" : "-"} ${delta})`;
 }
 
 function emitVectorAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string | undefined {

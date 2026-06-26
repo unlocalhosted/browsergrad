@@ -62,8 +62,8 @@ Repo exploration:
 
 Local corpus audits on 2026-06-26:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `342`
-  compile/codegen-ok (`341` strict direct WGSL plus `1` host-orchestrated
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `357`
+  compile/codegen-ok (`354` strict direct WGSL plus `3` host-orchestrated
   WebGPU plan) after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -181,11 +181,11 @@ Local corpus audits on 2026-06-26:
   pointer math, plus cooperative-groups `binary_partition` lowering through
   subgroup predicate masks and lockstep reference collectives, plus device-side
   cleanup/stream lifecycle lowering where browser execution owns buffer
-  lifetime and stream ordering, with `16` strict compile gaps and `12` hard gaps.
-  Main failures: C++ object-model declarations that need real constructor /
-  member-call / lifetime modeling, remaining parser/frontend context gaps,
-  grid-wide cooperative-groups orchestration, and dynamic CUDA runtime/library
-  shape.
+  lifetime and stream ordering, plus assignment-form WGSL updates for CUDA
+  prefix/postfix increment loops, with `3` strict compile gaps, `3`
+  host-orchestrated plan lifts, and `0` hard gaps. Remaining non-direct kernels
+  are explicit runtime/cooperative-group orchestration cases, not parser or
+  lowering gaps.
 - `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `148` direct
   compile/codegen-ok after source/context normalization, intrinsic-ledger
   expansion, CUDA/C named constants, CUDA cache-hint memory builtins, local
@@ -230,7 +230,7 @@ Local corpus audits on 2026-06-26:
   cache-load assignment expansion into lane-wise stores, plus custom
   CUDA-vector `cg::reduce` lowering through scalar subgroup shuffle-XOR loops,
   with `0` hard gaps.
-- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `292` direct
+- `xlite-dev/LeetCUDA` at `c5dde9a`: `293` kernel definitions, `293` direct
   compile/codegen-ok after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, local header context, and
   simple C++ alias / constexpr intake plus `FLOAT4(x)`-style typed storage
@@ -271,8 +271,8 @@ Local corpus audits on 2026-06-26:
   scalar softmax-attention WebGPU code, plus WGMMA/TMA tensor-map descriptor
   surrogate lowering for TN matmul into scalar WebGPU code. This descriptor
   surrogate exposes `CUtensorMap*` params as explicit base-buffer params until a
-  richer host-created tensor-map ABI exists. The remaining `1` hard gap is one
-  true `unknown-symbol` note-source mismatch with nearest-symbol hinting.
+  richer host-created tensor-map ABI exists. No hard gaps remain in the pinned
+  corpus audit.
   The pre-normalizer baseline was `3/293`, which proved context isolation was
   the first ladder rung.
 
@@ -314,9 +314,9 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
-- The current live aggregate gate is `1022/1038` compile/codegen-ok across the four
-  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `342/357`, `llm.c`
-  `148/148`, and LeetCUDA `292/293`.
+- The current live aggregate gate is `1038/1038` compile/codegen-ok across the four
+  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `357/357`, `llm.c`
+  `148/148`, and LeetCUDA `293/293`.
 
 Coverage tier glossary:
 
@@ -485,11 +485,11 @@ Acceptance criteria for the first slice:
   families, explicit `executionTierCounts`, and `compileFeatureProfile`
   assumptions for feature-full compile/codegen audits.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=342` compile/codegen-ok, and `<=12` hard gaps.
+  `>=357` compile/codegen-ok, and `0` hard gaps.
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions,
   `>=148` compile/codegen-ok, and `0` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
-  `>=292` compile/codegen-ok, and `<=1` hard gaps.
+  `>=293` compile/codegen-ok, and `0` hard gaps.
 - Context isolation improves coverage without repo-specific branching and has
   unit tests.
 - Intrinsic-ledger expansion improves coverage through generic CUDA math and
@@ -586,10 +586,10 @@ Acceptance criteria for the first slice:
   analyzer, reference, WGSL, and test coverage.
 - CUDA-120 remains `240/240` compile/codegen-ok with `0` hard gaps.
 - Browser e2e corpus fixture coverage proves real WebGPU execution for at
-  least `51` exact kernel launches across the pinned external corpora:
+  least `70` exact kernel launches across the pinned external corpora:
   CUDA-120, NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA.
 - That real-execution floor is enforced per corpus: CUDA-120 `>=2`, NVIDIA
-  `cuda-samples` `>=8`, `llm.c` `>=12`, and LeetCUDA `>=29` passing browser
+  `cuda-samples` `>=10`, `llm.c` `>=21`, and LeetCUDA `>=37` passing browser
   WebGPU fixtures.
 - LeetCUDA vector-pack coverage includes real browser fixtures for scalar and
   `float4` elementwise/activation kernels (`elementwise_add`, ReLU, sigmoid,
@@ -598,7 +598,8 @@ Acceptance criteria for the first slice:
 - LeetCUDA transpose coverage includes real browser fixtures for direct 1D/2D
   scalar and `float4` transpose kernels plus the lifted CuTe transpose motifs,
   so layout/indexing rewrites stay guarded by output-verified GPU readback.
-- `llm.c` fixture coverage includes encoder forward and cross-entropy softmax
+- `llm.c` fixture coverage includes encoder forward/backward, attention
+  query-key/softmax/value/permute/unpermute, AdamW, and cross-entropy softmax
   backward kernels, so local storage-pointer aliases and transformer backward
   indexing stay guarded by output-verified GPU readback.
 - Known-output fixture specs compare CPU reference and real WebGPU readbacks
