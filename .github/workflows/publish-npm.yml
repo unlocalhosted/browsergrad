@@ -32,5 +32,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build workspace
+        run: pnpm -r run build
+
       - name: Publish missing versions
         run: node scripts/publish-missing-npm.mjs
