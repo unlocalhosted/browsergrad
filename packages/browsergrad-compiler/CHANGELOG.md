@@ -35,6 +35,12 @@
 - Corpus audit now reports `compileCodegenOk` / `compileCodegenGaps` and
   `planCompiledOk` / `planCompileGaps`, making compile-plan coverage distinct
   from fixture-backed real WebGPU execution.
+- Browser corpus e2e now runs `29` exact kernels from pinned CUDA-120,
+  NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA sources through real WebGPU in
+  both source and dist bundles, with CPU-reference readback comparisons.
+- CPU reference semantics now preserve C-style integer locals, integer
+  division, and remainder behavior so tensor indexing kernels such as
+  `llm.c` permute and cross-entropy match WGSL execution.
 - Corpus audit now omits legacy `webGpuRunnableOk`, `webGpuTotalOk`, and
   `webGpuCompiledOk` counters from the top-level JSON summary. Deprecated CLI
   flags still map to `planCompiledOk` for compatibility, and

@@ -211,6 +211,27 @@ describe("CUDA-lite compiler", () => {
     expect(result.trace.some((thread) => thread.writes.length > 0)).toBe(true);
   });
 
+  it("uses C-style truncating integer division and remainder in the reference interpreter", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void divmod(int* out, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    out[i] = (i / 2) + (i % 2) * 10;
+  }
+}
+`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Int32Array(4) },
+        scalars: { n: 4 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Int32Array]).toEqual([0, 10, 1, 11]);
+  });
+
   it("treats scalar kernel parameters as mutable per-thread locals", () => {
     const source = `
 __global__ void mutateParams(float* out, float alpha, float beta, int n, bool enabled) {

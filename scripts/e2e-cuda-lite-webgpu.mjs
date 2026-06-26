@@ -258,6 +258,7 @@ const html = String.raw`<!doctype html>
             plan: result.plan,
             ok: result.ok,
             maxAbsDiff: result.maxAbsDiff,
+            ...(result.firstDiff === undefined ? {} : { firstDiff: result.firstDiff }),
             output: spec.output,
             ms: round(performance.now() - start),
           });
@@ -523,7 +524,7 @@ const html = String.raw`<!doctype html>
           cases.push({
             name: fixture.caseName,
             source,
-            options: { kernelName: fixture.kernelName, workgroupSize: fixture.workgroupSize },
+            options: { ...(fixture.options ?? {}), kernelName: fixture.kernelName, workgroupSize: fixture.workgroupSize },
             launch: fixture.launch,
             input: () => materializeFixtureInput(fixture.input),
             output: fixture.output,
@@ -617,11 +618,31 @@ const html = String.raw`<!doctype html>
           return { ok: false, maxAbsDiff: Number.POSITIVE_INFINITY };
         }
         let maxAbsDiff = 0;
+        let firstDiff;
         for (let i = 0; i < expected.length; i++) {
           const diff = Math.abs(Number(expected[i]) - Number(actual[i]));
           if (diff > maxAbsDiff) maxAbsDiff = diff;
+          if (firstDiff === undefined && diff > 1e-5) {
+            firstDiff = {
+              index: i,
+              expected: Number(expected[i]),
+              actual: Number(actual[i]),
+              absDiff: diff,
+            };
+          }
         }
-        return { ok: maxAbsDiff <= 1e-5, maxAbsDiff: round(maxAbsDiff) };
+        return {
+          ok: maxAbsDiff <= 1e-5,
+          maxAbsDiff: round(maxAbsDiff),
+          ...(firstDiff === undefined
+            ? {}
+            : {
+                firstDiff: {
+                  ...firstDiff,
+                  absDiff: round(firstDiff.absDiff),
+                },
+              }),
+        };
       }
 
       function round(value) {

@@ -475,7 +475,8 @@ function* execStatements(
         const outerNames = new Set(context.locals.keys());
         const blockNames = blockScopedNames(statement.body);
         const locals = new Map(context.locals);
-        const result = yield* execStatements(statement.body, { ...context, locals });
+        const valueTypes = new Map(context.valueTypes);
+        const result = yield* execStatements(statement.body, { ...context, locals, valueTypes });
         for (const name of outerNames) {
           if (blockNames.has(name)) continue;
           if (locals.has(name)) context.locals.set(name, locals.get(name)!);
@@ -749,6 +750,7 @@ function offsetLValue(lvalue: LValue, elementOffset: number, valueType: CudaLite
 
 function execVar(statement: CudaLiteVarDecl, context: ThreadContext): void {
   if (statement.storage === "shared") return;
+  setReferenceValueType(context, statement.name, statement.valueType);
   if (statement.pointer && statement.dimensions.length > 0) {
     context.locals.set(statement.name, allocateLocalPointerArray(statement));
     return;
@@ -763,7 +765,12 @@ function execVar(statement: CudaLiteVarDecl, context: ThreadContext): void {
     context.locals.set(statement.name, localArray);
     return;
   }
-  context.locals.set(statement.name, statement.init ? evalExpression(statement.init, context) : zeroLocalValue(statement.valueType));
+  context.locals.set(
+    statement.name,
+    statement.init
+      ? coerceReferenceScalarValue(statement.valueType, evalExpression(statement.init, context), statement.name)
+      : zeroLocalValue(statement.valueType),
+  );
 }
 
 function execKernelLaunch(
@@ -788,7 +795,7 @@ function execKernelLaunch(
     } else if (param.pointer) {
       locals.set(param.name, pointerArgumentValue(arg, param.valueType, context));
     } else {
-      locals.set(param.name, evalNumber(arg, context));
+      locals.set(param.name, coerceReferenceScalarValue(param.valueType, evalExpression(arg, context), param.name));
     }
   }
   for (let bz = 0; bz < gridDim.z; bz++) {
@@ -1055,14 +1062,59 @@ function expressionValueType(expression: CudaLiteExpression, context: ThreadCont
     if (isComplex(local)) return "complex64";
     return context.valueTypes.get(expression.name);
   }
-  if (expression.kind === "index") return pointerValueTypeForExpression(expression.target, context);
+  if (expression.kind === "number") return integerLiteralType(expression.raw) ? "int" : "float";
+  if (expression.kind === "cast") return expression.valueType;
+  if (expression.kind === "index") {
+    if (expression.target.kind === "identifier") {
+      const local = context.locals.get(expression.target.name);
+      if (isCudaVectorValue(local)) return cudaVectorScalarType(local.valueType);
+    }
+    return pointerValueTypeForExpression(expression.target, context);
+  }
   if (expression.kind === "unary" && expression.operator === "*") return pointerValueTypeForExpression(expression.argument, context);
+  if (expression.kind === "unary") return expression.operator === "!" ? "int" : expressionValueType(expression.argument, context);
+  if (expression.kind === "binary") return binaryExpressionValueType(expression, context);
   if (expression.kind === "call") {
     const name = expressionNameForReference(expression.callee);
     return name ? cudaVectorConstructorType(name) : undefined;
   }
   if (expression.kind === "member") return expressionValueType(expression.object, context);
   return undefined;
+}
+
+function integerLiteralType(raw: string): boolean {
+  return !/[.eEfF]/u.test(raw);
+}
+
+function binaryExpressionValueType(expression: Extract<CudaLiteExpression, { readonly kind: "binary" }>, context: ThreadContext): CudaLiteScalarType | undefined {
+  if (
+    expression.operator === "==" ||
+    expression.operator === "!=" ||
+    expression.operator === "<" ||
+    expression.operator === "<=" ||
+    expression.operator === ">" ||
+    expression.operator === ">=" ||
+    expression.operator === "&&" ||
+    expression.operator === "||"
+  ) {
+    return "int";
+  }
+  const left = expressionValueType(expression.left, context);
+  const right = expressionValueType(expression.right, context);
+  if (left === "double" || right === "double") return "double";
+  if (isFloatLikeScalarType(left) || isFloatLikeScalarType(right)) return "float";
+  if (isIntegerScalarType(left) && isIntegerScalarType(right)) {
+    return left === "uint" || right === "uint" ? "uint" : "int";
+  }
+  return left ?? right;
+}
+
+function isFloatLikeScalarType(valueType: CudaLiteScalarType | undefined): boolean {
+  return valueType === "float" || valueType === "half" || valueType === "bf16";
+}
+
+function isIntegerScalarType(valueType: CudaLiteScalarType | undefined): boolean {
+  return valueType === "int" || valueType === "uint" || valueType === "bool";
 }
 
 function byteView(buffer: WgslTypedArray): Uint8Array {
@@ -1231,6 +1283,7 @@ function vectorExpressionType(
     return isCudaVectorType(type) ? type : undefined;
   }
   if (expression.kind === "index") {
+    if (expression.target.kind === "identifier" && isCudaVectorValue(context.locals.get(expression.target.name))) return undefined;
     const type = pointerValueTypeForExpression(expression.target, context);
     return isCudaVectorType(type) ? type : undefined;
   }
@@ -1304,6 +1357,17 @@ function castNumber(type: Exclude<CudaLiteScalarType, "void">, value: number): E
   return value;
 }
 
+function coerceReferenceScalarValue(valueType: CudaLiteScalarType | undefined, value: EvalValue, name: string): EvalValue {
+  if (typeof value !== "number" || valueType === undefined || isCudaVectorType(valueType)) return value;
+  return castNumber(valueType as Exclude<CudaLiteScalarType, "void">, valueAsNumber(value, name));
+}
+
+function setReferenceValueType(context: ThreadContext, name: string, valueType: CudaLiteScalarType): void {
+  if (context.valueTypes instanceof Map) {
+    context.valueTypes.set(name, valueType);
+  }
+}
+
 function readMemberObject(expression: CudaLiteExpression, context: ThreadContext): Vector3 | ComplexValue | CudaVectorValue {
   if (expression.kind === "identifier") {
     const value = readIdentifier(expression.name, context);
@@ -1364,6 +1428,8 @@ function evalBinary(
   }
   const left = evalNumber(leftExpression, context);
   const right = evalNumber(rightExpression, context);
+  const integerOperands = isIntegerScalarType(expressionValueType(leftExpression, context)) &&
+    isIntegerScalarType(expressionValueType(rightExpression, context));
   switch (operator) {
     case "+":
       return left + right;
@@ -1372,9 +1438,9 @@ function evalBinary(
     case "*":
       return left * right;
     case "/":
-      return left / right;
+      return integerOperands ? Math.trunc(Math.trunc(left) / Math.trunc(right)) : left / right;
     case "%":
-      return left % right;
+      return integerOperands ? Math.trunc(left) % Math.trunc(right) : left % right;
     case "<<":
       return Math.trunc(left) << Math.trunc(right);
     case ">>":
@@ -2531,10 +2597,15 @@ function evalInitializerVector(
 
 function evalDeviceFunction(fn: CudaLiteDeviceFunction, args: readonly EvalValue[], context: ThreadContext): EvalValue {
   const locals = new Map<string, LocalValue>();
-  for (const [index, param] of fn.params.entries()) locals.set(param.name, args[index] ?? zeroParamLocalValue(param));
+  const valueTypes = new Map(context.valueTypes);
+  for (const [index, param] of fn.params.entries()) {
+    valueTypes.set(param.name, param.valueType);
+    locals.set(param.name, coerceReferenceScalarValue(param.valueType, args[index] ?? zeroParamLocalValue(param), param.name));
+  }
   const fnContext: ThreadContext = {
     ...context,
     locals,
+    valueTypes,
   };
   const generator = execStatements(fn.body, fnContext);
   while (true) {
@@ -2642,7 +2713,8 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
     if (context.buffers.has(expression.name)) return { name: expression.name, space: "buffer", index: 0 };
     if (context.shared.has(expression.name)) return { name: expression.name, space: "shared", index: 0 };
     if (context.deviceGlobals.has(expression.name)) return { name: expression.name, space: "device-global", index: 0 };
-    return { name: expression.name, space: "local" };
+    const valueType = context.valueTypes.get(expression.name);
+    return { name: expression.name, space: "local", ...(valueType === undefined ? {} : { valueType }) };
   }
   const chain: number[] = [];
   let cursor: CudaLiteExpression = expression;
@@ -2926,7 +2998,8 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
         throw compilerFailure(`'${lvalue.name}' is not complex or CUDA vector`);
       }
     } else {
-      locals.set(lvalue.name, value);
+      const valueType = lvalue.valueType ?? context.valueTypes.get(lvalue.name);
+      locals.set(lvalue.name, coerceReferenceScalarValue(valueType, value, lvalue.name));
     }
     return;
   }
