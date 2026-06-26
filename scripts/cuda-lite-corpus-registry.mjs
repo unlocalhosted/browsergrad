@@ -630,6 +630,91 @@ export const cudaLiteCorpusExecutionFixtures = [
     output: "y",
   },
   {
+    sourceKey: "corpusLeetCudaMatTransposeF32Col2Row",
+    caseName: "corpus:LeetCUDA:mat_transpose_f32_col2row_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/mat-transpose/mat_transpose.cu",
+    kernelName: "mat_transpose_f32_col2row_kernel",
+    workgroupSize: [8, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    input: {
+      buffers: {
+        x: { type: "Float32Array", data: [1, 2, 3, 4, 5, 6, 7, 8] },
+        y: { type: "Float32Array", length: 8 },
+      },
+      scalars: { row: 2, col: 4 },
+    },
+    output: "y",
+  },
+  {
+    sourceKey: "corpusLeetCudaMatTransposeF32Row2Col",
+    caseName: "corpus:LeetCUDA:mat_transpose_f32_row2col_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/mat-transpose/mat_transpose.cu",
+    kernelName: "mat_transpose_f32_row2col_kernel",
+    workgroupSize: [8, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    input: {
+      buffers: {
+        x: { type: "Float32Array", data: [1, 5, 2, 6, 3, 7, 4, 8] },
+        y: { type: "Float32Array", length: 8 },
+      },
+      scalars: { row: 2, col: 4 },
+    },
+    output: "y",
+  },
+  {
+    sourceKey: "corpusLeetCudaMatTransposeF32x4Col2Row",
+    caseName: "corpus:LeetCUDA:mat_transpose_f32x4_col2row_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/mat-transpose/mat_transpose.cu",
+    kernelName: "mat_transpose_f32x4_col2row_kernel",
+    workgroupSize: [2, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    input: {
+      buffers: {
+        x: { type: "Float32Array", data: [1, 2, 3, 4, 5, 6, 7, 8] },
+        y: { type: "Float32Array", length: 8 },
+      },
+      scalars: { row: 2, col: 4 },
+    },
+    output: "y",
+  },
+  {
+    sourceKey: "corpusLeetCudaMatTransposeF32Col2Row2d",
+    caseName: "corpus:LeetCUDA:mat_transpose_f32_col2row2d_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/mat-transpose/mat_transpose.cu",
+    kernelName: "mat_transpose_f32_col2row2d_kernel",
+    workgroupSize: [4, 2, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+    input: {
+      buffers: {
+        x: { type: "Float32Array", data: [1, 2, 3, 4, 5, 6, 7, 8] },
+        y: { type: "Float32Array", length: 8 },
+      },
+      scalars: { row: 2, col: 4 },
+    },
+    output: "y",
+  },
+  {
+    sourceKey: "corpusLeetCudaMatTransposeF32Diagonal2d",
+    caseName: "corpus:LeetCUDA:mat_transpose_f32_diagonal2d_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/mat-transpose/mat_transpose.cu",
+    kernelName: "mat_transpose_f32_diagonal2d_kernel",
+    workgroupSize: [4, 4, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [4, 4, 1] },
+    input: {
+      buffers: {
+        x: { type: "Float32Array", data: Array.from({ length: 16 }, (_value, index) => index + 1) },
+        y: { type: "Float32Array", length: 16 },
+      },
+      scalars: { row: 4, col: 4 },
+    },
+    output: "y",
+  },
+  {
     sourceKey: "corpusLlmGeluForward1",
     caseName: "corpus:llm.c:gelu_forward_kernel1",
     corpusId: "llm.c",
@@ -661,6 +746,25 @@ export const cudaLiteCorpusExecutionFixtures = [
         inp2: { type: "Float32Array", data: [10, 20, 30, 40] },
       },
       scalars: { N: 4 },
+    },
+    output: "out",
+  },
+  {
+    sourceKey: "corpusLlmEncoderForward2",
+    caseName: "corpus:llm.c:encoder_forward_kernel2",
+    corpusId: "llm.c",
+    relativePath: "dev/cuda/encoder_forward.cu",
+    kernelName: "encoder_forward_kernel2",
+    workgroupSize: [8, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    input: {
+      buffers: {
+        out: { type: "Float32Array", length: 6 },
+        inp: { type: "Int32Array", data: [1, 0] },
+        wte: { type: "Float32Array", data: [10, 11, 12, 20, 21, 22] },
+        wpe: { type: "Float32Array", data: [0.5, 1.5, 2.5, -1, -2, -3] },
+      },
+      scalars: { B: 1, T: 2, C: 3 },
     },
     output: "out",
   },
@@ -716,6 +820,25 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { B: 1, T: 2, V: 3 },
     },
     output: "losses",
+  },
+  {
+    sourceKey: "corpusLlmCrossentropySoftmaxBackward1",
+    caseName: "corpus:llm.c:crossentropy_softmax_backward_kernel1",
+    corpusId: "llm.c",
+    relativePath: "dev/cuda/crossentropy_softmax_backward.cu",
+    kernelName: "crossentropy_softmax_backward_kernel1",
+    workgroupSize: [8, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    input: {
+      buffers: {
+        dlogits: { type: "Float32Array", length: 6 },
+        dlosses: { type: "Float32Array", data: [1, 0.5] },
+        probs: { type: "Float32Array", data: [0.1, 0.2, 0.7, 0.5, 0.25, 0.25] },
+        targets: { type: "Int32Array", data: [2, 0] },
+      },
+      scalars: { B: 1, T: 2, V: 3 },
+    },
+    output: "dlogits",
   },
   {
     sourceKey: "corpusLlmGeluBackward1",
@@ -846,12 +969,12 @@ export const cudaLiteCorpusExecutionFixtures = [
 ];
 
 export const cudaLiteCorpusExecutionFixtureBaseline = {
-  totalMin: 44,
+  totalMin: 51,
   byCorpusMin: {
     "cuda-120": 2,
     "cuda-samples": 8,
-    "llm.c": 10,
-    leetcuda: 24,
+    "llm.c": 12,
+    leetcuda: 29,
   },
 };
 

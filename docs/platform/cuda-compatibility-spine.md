@@ -78,8 +78,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --sk
   excludes kernels with host-orchestrated WebGPU plan coverage; current baseline
   is `0/240`.
 - Real-world no-regression gate:
-  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=322`
-  compile/codegen-ok, and `<=33` hard gaps;
+  `NVIDIA/cuda-samples@b7c5481` must stay at `357` kernel definitions, `>=340`
+  compile/codegen-ok, and `<=14` hard gaps;
   `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=148`
   compile/codegen-ok, and `0` hard gaps;
   `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=286`
@@ -259,13 +259,20 @@ pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu:corpus -- --require
   exact external kernels through the same source-normalized compilation-unit
   path as the corpus audit, dispatches them in Chromium/WebGPU, and compares
   GPU readbacks to CPU reference. Fixture launch/input/output specs live in
-  `scripts/cuda-lite-corpus-registry.mjs`. Current fixture set: CUDA-120
-  `vectorAddKernel`, NVIDIA `cuda-samples` `vectorAdd`, `llm.c` `add_bias`,
-  `llm.c` `set_vector`, and LeetCUDA `elementwise_add_f32_kernel`.
+  `scripts/cuda-lite-corpus-registry.mjs`. Current no-regression floor is `51`
+  output-verified real WebGPU corpus fixtures: CUDA-120 `2`, NVIDIA
+  `cuda-samples` `8`, `llm.c` `12`, and LeetCUDA `29`. Coverage includes
+  vector add/scale, cuda-samples Bezier/mdspan/SobelTex, `llm.c` forward and
+  backward transformer kernels, LeetCUDA scalar/vector activations, SGEMM,
+  histogram, RoPE, direct transpose variants, and lifted CuTe transpose motifs.
 - `e2e:webgpu:dist` runs the browser proof through built package exports. The
   combined `verify:real-world-cuda` gate runs both `src` and `dist` browser
   bundles unless a narrower `--bundle` is supplied.
 - Use `-- --require-webgpu` on machines where absence of WebGPU should fail CI.
+- Root `verify:release` and CI's Chromium job run
+  `verify:real-world-cuda -- --require-webgpu`, so full-corpus
+  compile/codegen coverage and exact-kernel real GPU fixtures are both hard
+  regression gates.
 
 Performance gate:
 

@@ -1204,8 +1204,31 @@ function usesDevicePointerParams(ir: KernelIrModule): boolean {
     "nvcuda::wmma::store_matrix_sync",
   ]);
   return ir.functions.some((fn) => fn.params.some((param) => param.pointer)) ||
+    collectLocalPointerHandles(ir.body).size > 0 ||
+    ir.functions.some((fn) => collectLocalPointerHandles(fn.body).size > 0) ||
+    usesLocalPointerAliasDereference(ir.body) ||
+    ir.functions.some((fn) => usesLocalPointerAliasDereference(fn.body)) ||
     statementsUseCall(ir.body, devicePointerCalls) ||
     ir.functions.some((fn) => statementsUseCall(fn.body, devicePointerCalls));
+}
+
+function usesLocalPointerAliasDereference(statements: readonly CudaLiteStatement[]): boolean {
+  const aliases = collectPointerAliases(statements);
+  let used = false;
+  walkCudaLiteExpressions(statements, (expression) => {
+    const alias = expression.kind === "unary" &&
+      expression.operator === "*" &&
+      expression.argument.kind === "identifier"
+      ? aliases.get(expression.argument.name)
+      : undefined;
+    if (
+      alias !== undefined &&
+      !isCudaVectorType(alias.valueType ?? "voidptr")
+    ) {
+      used = true;
+    }
+  });
+  return used;
 }
 
 function emitDevicePointerHelpers(ir: KernelIrModule, context: EmitContext): string[] {
@@ -1321,7 +1344,7 @@ function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, c
 }
 
 function isDevicePointerHelperType(type: CudaLiteScalarType): boolean {
-  return type === "float" || type === "double" || type === "int" || type === "uint" || type === "half" || type === "bf16" || isCudaVectorType(type);
+  return type === "float" || type === "double" || type === "int" || type === "uint" || type === "half" || type === "bf16" || type === "bool" || isCudaVectorType(type);
 }
 
 function isDevicePointerAtomicAddType(type: CudaLiteScalarType): type is "float" | "double" | "int" | "uint" {

@@ -358,15 +358,16 @@ WebGPU. It covers SAXPY, guarded map, tiled matmul, grid-sync phases, host
 runtime copy, host dynamic launch, and prepared resident dispatch.
 `e2e:webgpu:corpus` additionally requires fixture-backed corpus kernels loaded
 from pinned local corpora under `/tmp` and executes them through real WebGPU
-with readback comparisons. Required fixture names currently cover `44` exact
+with readback comparisons. Required fixture names currently cover `51` exact
 kernel launches across CUDA-120, NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA,
-including vector ops, activations, embedding, softmax, cross-entropy, permute,
-matmul, normalization, vector-pack activations, CuTe transpose cases, and
-cuda-samples mdspan row-scale/shared-tile transpose plus SobelTex
-function-pointer/texture kernels.
+including vector ops, activations, embedding, softmax, cross-entropy,
+cross-entropy backward, encoder forward, permute, matmul, normalization,
+vector-pack activations, direct and CuTe transpose cases, and cuda-samples
+mdspan row-scale/shared-tile transpose plus SobelTex function-pointer/texture
+kernels.
 `e2e:webgpu:corpus -- --require-webgpu` enforces this as a no-regression floor:
-at least `44` total passing real WebGPU corpus fixtures, with per-corpus minimums
-of CUDA-120 `2`, NVIDIA `cuda-samples` `8`, `llm.c` `10`, and LeetCUDA `24`.
+at least `51` total passing real WebGPU corpus fixtures, with per-corpus minimums
+of CUDA-120 `2`, NVIDIA `cuda-samples` `8`, `llm.c` `12`, and LeetCUDA `29`.
 Fixture specs can set a per-case tolerance for numerically sensitive
 transcendental kernels while still comparing CPU reference output against real
 WebGPU readback.
@@ -387,6 +388,9 @@ exercise fresh package output.
 real-world compile/codegen audit and then the exact-kernel browser/WebGPU corpus
 fixture e2e against both source aliases and built dist exports by default. Use
 `--bundle src`, `--bundle dist`, or `--bundle both` to choose the browser bundle.
+Root release verification and CI's Chromium job also run this gate with
+`--require-webgpu`, so corpus compile/codegen regressions and fixture-backed
+real GPU regressions fail hard instead of becoming audit notes.
 Pinned corpus checkouts must match the expected commit and be clean; dirty
 untracked or modified files fail both audit and browser fixture loading.
 

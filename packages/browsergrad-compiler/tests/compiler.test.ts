@@ -3445,6 +3445,52 @@ __global__ void derefWrite(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([1, 5, 8]);
   });
 
+  it("emits pointer helpers for local storage-pointer aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void localPointerAliases(float *out, const float *left, const float *right, int n) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < n) {
+    float *dst = out + idx;
+    const float *a = left + idx;
+    const float *b = right + idx;
+    *dst = (float)((float)*a + (float)*b);
+  }
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Float32Array(4),
+          left: new Float32Array([1, 2, 3, 4]),
+          right: new Float32Array([10, 20, 30, 40]),
+        },
+        scalars: { n: 4 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_ptr_read_f32(buffer: u32, index: u32) -> f32");
+    expect(compiled.wgsl).toContain("fn bg_ptr_write_f32(buffer: u32, index: u32, value: f32)");
+    expect([...result.buffers.out as Float32Array]).toEqual([11, 22, 33, 44]);
+  });
+
+  it("emits pointer helpers for bool storage-pointer aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void boolPointerAliases(bool *flags) {
+  int idx = threadIdx.x;
+  bool *slot = flags + idx;
+  *slot = (idx & 1) != 0;
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { flags: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_ptr_write_bool(buffer: u32, index: u32, value: bool)");
+    expect([...result.buffers.flags as Uint32Array]).toEqual([0, 1, 0, 1]);
+  });
+
   it("lowers vector member writes through dereferenced reinterpret views", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void vectorDeref(float *x, float *out) {

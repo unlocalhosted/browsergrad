@@ -83,7 +83,7 @@ jobs:
   browser:
     name: Real WebGPU tests (Chromium)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35
     env:
       BG_BROWSER_HEADLESS: '1'
     steps:
@@ -111,3 +111,6 @@ jobs:
 
       - name: Run compiler browser suite
         run: pnpm --filter @unlocalhosted/browsergrad-compiler test:browser
+
+      - name: Run compiler real-world CUDA gate
+        run: pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --require-webgpu

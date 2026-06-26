@@ -583,15 +583,21 @@ Acceptance criteria for the first slice:
   analyzer, reference, WGSL, and test coverage.
 - CUDA-120 remains `240/240` compile/codegen-ok with `0` hard gaps.
 - Browser e2e corpus fixture coverage proves real WebGPU execution for at
-  least `44` exact kernel launches across the pinned external corpora:
+  least `51` exact kernel launches across the pinned external corpora:
   CUDA-120, NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA.
 - That real-execution floor is enforced per corpus: CUDA-120 `>=2`, NVIDIA
-  `cuda-samples` `>=8`, `llm.c` `>=10`, and LeetCUDA `>=24` passing browser
+  `cuda-samples` `>=8`, `llm.c` `>=12`, and LeetCUDA `>=29` passing browser
   WebGPU fixtures.
 - LeetCUDA vector-pack coverage includes real browser fixtures for scalar and
   `float4` elementwise/activation kernels (`elementwise_add`, ReLU, sigmoid,
   swish, hard-swish, GELU, hardshrink, and ELU), so vector storage views stay
   guarded by output-verified GPU readback, not audit-only lowering.
+- LeetCUDA transpose coverage includes real browser fixtures for direct 1D/2D
+  scalar and `float4` transpose kernels plus the lifted CuTe transpose motifs,
+  so layout/indexing rewrites stay guarded by output-verified GPU readback.
+- `llm.c` fixture coverage includes encoder forward and cross-entropy softmax
+  backward kernels, so local storage-pointer aliases and transformer backward
+  indexing stay guarded by output-verified GPU readback.
 - NVIDIA `cuda-samples` Bezier coverage includes a real browser fixture for
   scalarized pointer-record fixed-array fields (`BezierLine.CP[3]`), so C-style
   struct-of-arrays lowering is guarded by GPU readback.
@@ -602,6 +608,9 @@ Acceptance criteria for the first slice:
   fixture for `SobelTex`, so lowered device function tables, texture reads, and
   signed/unsigned pointer index math are guarded by output-verified WebGPU
   readback.
+- CI and root release verification run `verify:real-world-cuda -- --require-webgpu`,
+  so corpus compile/codegen regressions and exact-kernel real GPU fixture
+  regressions are hard failures, not advisory reports.
 - CPU reference arithmetic preserves C-style integer locals, integer division,
   and remainder behavior so fixture-backed tensor indexing kernels compare
   against real WebGPU execution instead of JS-number semantics.
