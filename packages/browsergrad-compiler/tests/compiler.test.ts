@@ -4570,6 +4570,48 @@ __global__ void parent(DevicePool *pool, int n) {
     expect(plan.launches).toHaveLength(2);
   });
 
+  it("does not elide dynamic launches that allocate external DevicePool memory", () => {
+    const source = `
+__global__ void parentKernel(int N) {
+  size_t size = N * sizeof(float);
+  float *devBuf = (float*) deviceAllocate(&g_pool, size);
+  if (devBuf == nullptr) return;
+  dim3 grid((N + 255) / 256);
+  dim3 block(256);
+  childKernel<<<grid, block>>>(devBuf, N);
+}
+__device__ void childKernel(float *data, int N) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < N) {
+    data[idx] += 3.14f;
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      kernelName: "parentKernel",
+      referenceDynamicParallelism: true,
+      workgroupSize: [2, 1, 1],
+    });
+    const input = {
+      buffers: {},
+      scalars: { N: 2 },
+      memoryPools: { g_pool: { data: new Uint32Array(4), offset: new Uint32Array([0]) } },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, {
+      compileKernel: (childSource, options = {}) => compileCudaLiteKernel(childSource, options),
+    });
+
+    expect(executionPlan).toMatchObject({
+      supported: true,
+      kind: "host-dynamic-launch",
+    });
+
+    const result = runCompiledKernelReference(compiled, input, launch);
+    expect([...result.buffers.g_pool as Uint32Array]).toEqual([
+      floatBits(3.14), floatBits(3.14), floatBits(3.14), floatBits(3.14),
+    ]);
+  });
+
   it("rejects host-expanded DevicePool allocations when child args depend on parent order", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void child(float *data, int n, int value) {

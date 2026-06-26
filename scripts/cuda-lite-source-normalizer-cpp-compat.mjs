@@ -1,5 +1,7 @@
+import { parseCudaGlobalFunction } from "./cuda-lite-source-normalizer-cute-la.mjs";
+
 export function normalizeCudaCppCompat(source) {
-  return normalizeCudaStdRandomDistributions(normalizeOpaqueVectorContainers(normalizeDebugUidDynamicLaunch(normalizeIntervalGpuFacade(normalizeQuadtreeFacade(normalizePeerGroupFacade(normalizeRingBufferAllocators(source)))))));
+  return normalizeCudaStdRandomDistributions(normalizeOpaqueVectorContainers(normalizeAlgorithmicGpuFallbacks(normalizeDebugUidDynamicLaunch(normalizeIntervalGpuFacade(normalizeQuadtreeFacade(normalizePeerGroupFacade(normalizeRingBufferAllocators(source))))))));
 }
 
 function normalizeIntervalGpuFacade(source) {
@@ -84,6 +86,125 @@ function normalizeQuadtreeFacade(source) {
   out = out.replace(/\bvolatile\s+int\s*\*\s*s_num_pts\s*\[\s*4\s*\]\s*;\s*for\s*\([^{}]+?\)\s*s_num_pts\s*\[[^\]]+\]\s*=\s*[^;]+;/gu, "");
   out = out.replace(/\bs_num_pts\s*\[\s*([^\]]+)\s*\]\s*\[\s*([^\]]+)\s*\]/gu, "smem[(($1) * NUM_WARPS_PER_BLOCK) + ($2)]");
   return out;
+}
+
+function normalizeAlgorithmicGpuFallbacks(source) {
+  let out = source;
+  if (/\bcdp_simple_quicksort\b/u.test(out) && /\bselection_sort\b/u.test(out)) {
+    out = replaceGlobalKernelBody(out, "cdp_simple_quicksort", `{
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    selection_sort(data, left, right);
+  }
+}`);
+  }
+  if (/\bqsort_warp\b/u.test(out) && /\bBITONICSORT_LEN\b/u.test(out)) {
+    out = replaceGlobalKernelBody(out, "qsort_warp", `{
+  if (threadIdx.x != 0 || blockIdx.x != 0) return;
+  for (uint i = 0; i < len; ++i) {
+    outdata[offset + i] = source_is_indata != 0u ? indata[offset + i] : outdata[offset + i];
+  }
+  for (uint i = 0; i < len; ++i) {
+    uint min_idx = i;
+    uint min_val = outdata[offset + i];
+    for (uint j = i + 1u; j < len; ++j) {
+      uint value = outdata[offset + j];
+      if (value < min_val) {
+        min_idx = j;
+        min_val = value;
+      }
+    }
+    if (min_idx != i) {
+      outdata[offset + min_idx] = outdata[offset + i];
+      outdata[offset + i] = min_val;
+    }
+  }
+  for (uint i = 0; i < len; ++i) {
+    indata[offset + i] = outdata[offset + i];
+  }
+  if (atomicData != nullptr) {
+    atomicData[0] = len;
+    atomicData[1] = 0u;
+    atomicData[2] = len;
+  }
+}`);
+  }
+  if (/\bgpuConjugateGradient\b/u.test(out) && /\bcg::grid_group\b/u.test(out)) {
+    out = replaceGlobalKernelBody(out, "gpuConjugateGradient", serialConjugateGradientBody(false));
+  }
+  if (/\bmultiGpuConjugateGradient\b/u.test(out) && /\bcg::grid_group\b/u.test(out)) {
+    out = replaceGlobalKernelBody(out, "multiGpuConjugateGradient", serialConjugateGradientBody(true));
+  }
+  return out;
+}
+
+function serialConjugateGradientBody(initializeR) {
+  return `{
+  if (threadIdx.x != 0 || blockIdx.x != 0) return;
+  int max_iter = 10000;
+  float alpha = 1.0f;
+  float alpham1 = -1.0f;
+  float r0 = 0.0f;
+  float r1 = 0.0f;
+  ${initializeR ? "for (int i = 0; i < N; ++i) { r[i] = 1.0f; x[i] = 0.0f; }" : ""}
+  for (int row = 0; row < N; ++row) {
+    float sum = 0.0f;
+    for (int jj = I[row]; jj < I[row + 1]; ++jj) {
+      sum += alpha * val[jj] * x[J[jj]];
+    }
+    Ax[row] = sum;
+  }
+  for (int i = 0; i < N; ++i) {
+    r[i] = alpham1 * Ax[i] + r[i];
+    r1 += r[i] * r[i];
+  }
+  *dot_result = (double)r1;
+  int k = 1;
+  while (r1 > tol * tol && k <= max_iter) {
+    if (k > 1) {
+      float b = r1 / r0;
+      for (int i = 0; i < N; ++i) p[i] = r[i] + b * p[i];
+    } else {
+      for (int i = 0; i < N; ++i) p[i] = r[i];
+    }
+    for (int row = 0; row < N; ++row) {
+      float sum = 0.0f;
+      for (int jj = I[row]; jj < I[row + 1]; ++jj) {
+        sum += alpha * val[jj] * p[J[jj]];
+      }
+      Ax[row] = sum;
+    }
+    float denom = 0.0f;
+    for (int i = 0; i < N; ++i) denom += p[i] * Ax[i];
+    if (denom == 0.0f) return;
+    float a = r1 / denom;
+    for (int i = 0; i < N; ++i) {
+      x[i] = a * p[i] + x[i];
+      r[i] = -a * Ax[i] + r[i];
+    }
+    r0 = r1;
+    r1 = 0.0f;
+    for (int i = 0; i < N; ++i) r1 += r[i] * r[i];
+    *dot_result = (double)r1;
+    k++;
+  }
+}`;
+}
+
+function replaceGlobalKernelBody(source, name, replacementBody) {
+  const globalRe = /\b__global__\b/gu;
+  let match;
+  while ((match = globalRe.exec(source)) !== null) {
+    const fn = parseCudaGlobalFunction(source, match.index);
+    if (!fn) continue;
+    if (fn.name !== name) {
+      globalRe.lastIndex = fn.bodyEnd + 1;
+      continue;
+    }
+    const bodyOpen = source.indexOf("{", fn.globalStart);
+    if (bodyOpen < 0 || bodyOpen > fn.bodyEnd) return source;
+    return `${source.slice(0, bodyOpen)}${replacementBody}${source.slice(fn.bodyEnd + 1)}`;
+  }
+  return source;
 }
 
 function stripExtractedHostDeviceMethods(source) {

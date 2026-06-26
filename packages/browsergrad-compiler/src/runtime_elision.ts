@@ -164,6 +164,7 @@ function callHasExternalWrite(
   if (name === undefined && expression.callee.kind === "member" && SIDE_EFFECT_FREE_MEMBER_CALLS.has(expression.callee.property)) {
     return expressionHasWrite(expression.callee.object) || expression.args.some(expressionHasWrite);
   }
+  if (name !== undefined && isRuntimeMemoryMutationCall(name)) return true;
   if (name !== undefined && isExternalMutationCall(name)) return hasExternal(expression.args[0]) || expression.args.some(expressionHasWrite);
   if (name === "surf1Dwrite" || name === "surf2Dwrite" || name === "surf2DLayeredwrite" || name === "surf3Dwrite") {
     return expression.args.some(hasExternal) || expression.args.some(expressionHasWrite);
@@ -226,8 +227,11 @@ function isExternalMutationCall(name: string): boolean {
     name === "atomicOr" ||
     name === "atomicXor" ||
     name === "atomicExch" ||
-    name === "atomicCAS" ||
-    name === "deviceAllocate" ||
+    name === "atomicCAS";
+}
+
+function isRuntimeMemoryMutationCall(name: string): boolean {
+  return name === "deviceAllocate" ||
     name === "streamOrderedAllocate" ||
     name === "cudaMemcpy" ||
     name === "cudaMemcpyAsync" ||

@@ -12,6 +12,7 @@ import * as templateSpecializationNormalizers from "./cuda-lite-source-normalize
 import * as templateTransformNormalizers from "./cuda-lite-source-normalizer-template-transforms.mjs";
 import * as cuteLaNormalizers from "./cuda-lite-source-normalizer-cute-la.mjs";
 import { normalizeCudaCppCompat } from "./cuda-lite-source-normalizer-cpp-compat.mjs";
+import { normalizeBarrierFreeDynamicKernelInlining } from "./cuda-lite-source-normalizer-dynamic-launch.mjs";
 import {
   normalizeAtomicForwarderHelpers,
   normalizeBlockReduceHelpers,
@@ -317,7 +318,8 @@ export function createKernelCompilationUnit({
   const withSideEffects = normalizeSideEffectExpressions(withLocalReferences);
   const withScopedForVariables = normalizeForLoopScopedVariables(withSideEffects);
   const withFinalCudaCppCompat = normalizeCudaCppCompat(withScopedForVariables);
-  const withRecoveredNumerators = normalizeMissingThreadLocalSoftmaxNumeratorBuffers(withFinalCudaCppCompat);
+  const withInlineDynamicLaunches = normalizeBarrierFreeDynamicKernelInlining(withFinalCudaCppCompat);
+  const withRecoveredNumerators = normalizeMissingThreadLocalSoftmaxNumeratorBuffers(withInlineDynamicLaunches);
   const withTemplateFallbacks = normalizeTemplateValueFallbacks(withRecoveredNumerators, postCarrierDefines);
   return normalizeCppTemplateCarrierSyntax(withTemplateFallbacks);
 }

@@ -698,7 +698,9 @@ __global__ void child(float2 *points, int n) {
 }`],
   });
   assert.match(source, /counts\[idx\] = localN;/u);
-  assert.match(source, /child<<<ceilf\(\(float\)localN \/ 32\.0f\), 32>>>/u);
+  assert.match(source, /__device__ void bg_inline_child/u);
+  assert.match(source, /bg_inline_child\(points, localN,/u);
+  assert.doesNotMatch(source, /child<<<ceilf\(\(float\)localN \/ 32\.0f\), 32>>>/u);
   assert.doesNotMatch(source, /\bcudaMalloc\b/u);
 }
 
