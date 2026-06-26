@@ -5,7 +5,13 @@
 - Current corpus audit closes the compatibility ladder at `1038/1038`
   compile/codegen-ok across CUDA-120, NVIDIA `cuda-samples`, `llm.c`, and
   LeetCUDA, with `0` hard gaps in the pinned aggregate gate. Real browser
-  corpus e2e now executes `92/92` fixture-backed kernels through WebGPU.
+  corpus e2e now executes `92/92` fixture-backed kernels through WebGPU, plus
+  `32/32` manifest-selected synthetic corpus smoke kernels per browser bundle.
+- Browser corpus e2e now generates generic WebGPU smoke fixtures from the
+  corpus audit manifest, source-normalized kernel units, Kernel IR synthetic
+  inputs, and CPU-reference preflight. This caught and fixed WGSL signedness,
+  truthiness, pointer-helper, atomic, reserved-identifier, `clock()`, and simple
+  predicated-barrier validation gaps without repo-specific branches.
 - Browser corpus e2e now adds real WebGPU fixtures for LeetCUDA embedding
   packs, histogram packs, RoPE packs, `float4` 2D transpose variants, `llm.c`
   residual/GELU/layernorm/scale/lowp kernels, and simple NVIDIA sample memory

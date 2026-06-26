@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import {
-  corpusById,
   cudaLiteCorpusExecutionFixtureBaseline,
   cudaLiteCorpusExecutionFixtures,
 } from "./cuda-lite-corpus-registry.mjs";
+import {
+  loadAutoCorpusSmokeFixtures,
+  loadCorpusExecutionSources,
+  verifyCorpusFixtureCheckouts,
+} from "./cuda-lite-webgpu-fixtures.mjs";
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i++) {
@@ -25,14 +28,16 @@ const requireWebGpu = args.get("--require-webgpu") === "true";
 const requireCorpusFixtures = args.get("--require-corpus-fixtures") === "true";
 const markdownPath = args.get("--markdown");
 const bundle = parseBundle(args.get("--bundle") ?? "src");
+const autoCorpusSmokeLimit = parseNonNegativeInteger(args.get("--auto-corpus-smoke-limit") ?? "0", "--auto-corpus-smoke-limit");
 
 const root = findRepoRoot(process.cwd());
 const packageRequire = createRequire(path.join(root, "packages/browsergrad-compiler/package.json"));
 const { createServer } = await import(pathToFileURL(packageRequire.resolve("vite")).href);
 const playwright = await import(pathToFileURL(packageRequire.resolve("playwright")).href);
+const compilerNode = await import(pathToFileURL(path.join(root, "packages/browsergrad-compiler/dist/index.js")).href);
 const chromium = playwright.chromium ?? playwright.default?.chromium;
 if (!chromium) throw new Error("could not load Playwright chromium");
-if (requireCorpusFixtures) verifyCorpusFixtureCheckouts();
+if (requireCorpusFixtures || autoCorpusSmokeLimit > 0) verifyCorpusFixtureCheckouts(root);
 
 const examplesRoot = path.join(root, "packages/browsergrad-compiler/examples");
 const sources = {
@@ -215,8 +220,14 @@ __global__ void reciprocalIntrinsic(float *x, float *out) {
     out[idx] = __frcp_rn(x[idx] + 1.0f);
   }
 }`,
-  ...loadCorpusExecutionSources(),
+  ...loadCorpusExecutionSources(root),
 };
+const autoCorpusSmokeFixtures = autoCorpusSmokeLimit > 0
+  ? loadAutoCorpusSmokeFixtures(root, autoCorpusSmokeLimit, compilerNode)
+  : [];
+for (const fixture of autoCorpusSmokeFixtures) {
+  sources[fixture.sourceKey] = fixture.source;
+}
 const expectedCorpusFixtureNames = cudaLiteCorpusExecutionFixtures.map((fixture) => fixture.caseName);
 
 const html = String.raw`<!doctype html>
@@ -241,6 +252,7 @@ const html = String.raw`<!doctype html>
 
       const SOURCES = ${JSON.stringify(sources)};
       const CORPUS_FIXTURES = ${JSON.stringify(cudaLiteCorpusExecutionFixtures)};
+      const AUTO_CORPUS_SMOKE_FIXTURES = ${JSON.stringify(autoCorpusSmokeFixtures.map(({ source, ...fixture }) => fixture))};
       const EXPECTED_CORPUS_FIXTURE_NAMES = ${JSON.stringify(expectedCorpusFixtureNames)};
       const CORPUS_FIXTURE_BASELINE = ${JSON.stringify(cudaLiteCorpusExecutionFixtureBaseline)};
 
@@ -257,19 +269,32 @@ const html = String.raw`<!doctype html>
 
         for (const spec of caseSpecs()) {
           const start = performance.now();
-          const result = await runReferenceWebGpuCase(device, spec);
-          cases.push({
-            name: spec.name,
-            plan: result.plan,
-            ok: result.ok,
-            maxAbsDiff: result.maxAbsDiff,
-            ...(spec.tolerance === undefined ? {} : { tolerance: spec.tolerance }),
-            ...(result.firstDiff === undefined ? {} : { firstDiff: result.firstDiff }),
-            output: spec.output,
-            ...(spec.corpusId === undefined ? {} : { corpusId: spec.corpusId }),
-            ...(spec.expectedOutput === undefined ? {} : { expectedOutputPinned: true }),
-            ms: round(performance.now() - start),
-          });
+          try {
+            const result = await runReferenceWebGpuCase(device, spec);
+            cases.push({
+              name: spec.name,
+              plan: result.plan,
+              ok: result.ok,
+              maxAbsDiff: result.maxAbsDiff,
+              ...(spec.tolerance === undefined ? {} : { tolerance: spec.tolerance }),
+              ...(result.firstDiff === undefined ? {} : { firstDiff: result.firstDiff }),
+              output: result.output ?? spec.output,
+              ...(spec.corpusId === undefined ? {} : { corpusId: spec.corpusId }),
+              ...(spec.expectedOutput === undefined ? {} : { expectedOutputPinned: true }),
+              ms: round(performance.now() - start),
+            });
+          } catch (error) {
+            cases.push({
+              name: spec.name,
+              plan: "threw",
+              ok: false,
+              maxAbsDiff: Number.POSITIVE_INFINITY,
+              output: spec.output,
+              error: serializeError(error),
+              ...(spec.corpusId === undefined ? {} : { corpusId: spec.corpusId }),
+              ms: round(performance.now() - start),
+            });
+          }
         }
 
         const preparedStart = performance.now();
@@ -285,6 +310,8 @@ const html = String.raw`<!doctype html>
         const corpusFixtureCases = cases.filter((item) => item.name.startsWith("corpus:"));
         const corpusFixturePassed = corpusFixtureCases.filter((item) => item.ok);
         const corpusFixtureExpectedOutputCases = corpusFixtureCases.filter((item) => item.expectedOutputPinned);
+        const autoCorpusSmokeCases = cases.filter((item) => item.name.startsWith("auto-corpus:"));
+        const autoCorpusSmokePassed = autoCorpusSmokeCases.filter((item) => item.ok);
         const loadedCorpusFixtureNames = new Set(corpusFixtureCases.map((item) => item.name));
         return {
           available: true,
@@ -295,6 +322,12 @@ const html = String.raw`<!doctype html>
           corpusFixtureExpectedOutputCases: corpusFixtureExpectedOutputCases.length,
           corpusFixtureCasesByCorpus: countByCorpus(corpusFixtureCases),
           corpusFixturePassedByCorpus: countByCorpus(corpusFixturePassed),
+          autoCorpusSmokeCases: autoCorpusSmokeCases.length,
+          autoCorpusSmokePassed: autoCorpusSmokePassed.length,
+          autoCorpusSmokeFailed: autoCorpusSmokeCases.filter((item) => !item.ok).length,
+          autoCorpusSmokeCasesByCorpus: countByCorpus(autoCorpusSmokeCases),
+          autoCorpusSmokePassedByCorpus: countByCorpus(autoCorpusSmokePassed),
+          autoCorpusSmokeLimit: ${autoCorpusSmokeLimit},
           corpusFixtureBaseline: CORPUS_FIXTURE_BASELINE,
           expectedCorpusFixtureNames: EXPECTED_CORPUS_FIXTURE_NAMES,
           missingCorpusFixtureNames: EXPECTED_CORPUS_FIXTURE_NAMES.filter((name) => !loadedCorpusFixtureNames.has(name)),
@@ -547,6 +580,18 @@ const html = String.raw`<!doctype html>
             ...(fixture.tolerance === undefined ? {} : { tolerance: fixture.tolerance }),
           });
         }
+        for (const fixture of AUTO_CORPUS_SMOKE_FIXTURES) {
+          const source = SOURCES[fixture.sourceKey];
+          if (!source) continue;
+          cases.push({
+            name: fixture.caseName,
+            source,
+            options: { ...(fixture.options ?? {}), kernelName: fixture.kernelName, workgroupSize: fixture.workgroupSize },
+            launch: fixture.launch,
+            input: (compiled) => syntheticInputForCompiled(compiled),
+            corpusId: fixture.corpusId,
+          });
+        }
         return cases;
       }
 
@@ -557,6 +602,14 @@ const html = String.raw`<!doctype html>
           out[corpusId] = (out[corpusId] ?? 0) + 1;
         }
         return out;
+      }
+
+      function serializeError(error) {
+        return {
+          name: error?.name ?? "Error",
+          message: error?.message ?? String(error),
+          stack: error?.stack,
+        };
       }
 
       function materializeFixtureInput(input) {
@@ -587,9 +640,76 @@ const html = String.raw`<!doctype html>
         return new Ctor(spec.length ?? 0);
       }
 
+      function syntheticInputForCompiled(compiled) {
+        const scalars = {};
+        const buffers = {};
+        const constants = {};
+        const deviceGlobals = {};
+        const memoryPools = {};
+        const textures = {};
+        for (const param of compiled.ir.params) {
+          if (param.pointer) {
+            if (param.valueType === "devicepool") {
+              memoryPools[param.name] = { data: new Uint32Array(4096), offset: new Uint32Array([0]) };
+            } else {
+              buffers[param.name] = syntheticBufferForType(param.valueType);
+            }
+          } else if (param.valueType === "texture2d") {
+            textures[param.name] = { width: 64, height: 64, data: new Float32Array(64 * 64) };
+          } else {
+            scalars[param.name] = syntheticScalarForName(param.name);
+          }
+        }
+        for (const constant of compiled.ir.constants) {
+          constants[constant.name] = constant.dimensions.length === 0 && !isCudaVectorTypeName(constant.valueType)
+            ? syntheticScalarForName(constant.name)
+            : syntheticBufferForType(constant.valueType);
+        }
+        for (const global of compiled.ir.deviceGlobals) {
+          const length = global.dimensions.length === 0
+            ? 1
+            : global.dimensions.reduce((product, dimension) => product * dimension, 1);
+          deviceGlobals[global.name] = syntheticBufferForType(global.valueType, length);
+        }
+        for (const texture of compiled.ir.textures) {
+          textures[texture.name] = { width: 64, height: 64, data: new Float32Array(64 * 64) };
+        }
+        for (const poolName of externalDevicePoolNamesFromSource(compiled.ast.source)) {
+          memoryPools[poolName] ??= { data: new Uint32Array(4096), offset: new Uint32Array([0]) };
+        }
+        return { buffers, scalars, constants, deviceGlobals, memoryPools, textures };
+      }
+
+      function syntheticBufferForType(type, length = 4096) {
+        if (type === "int") return new Int32Array(length);
+        if (type === "uint" || type === "voidptr" || type === "bool") return new Uint32Array(length);
+        return new Float32Array(length);
+      }
+
+      function isCudaVectorTypeName(type) {
+        return /^(?:float|int|uint)[234]$|^half2$|^bf162$/u.test(type);
+      }
+
+      function syntheticScalarForName(name) {
+        if (/^(?:depth|level)$/iu.test(name)) return 0;
+        if (/^(?:maxDepth|max_depth|maxLevel|max_level)$/u.test(name)) return 4;
+        if (/^(?:left|begin|start|offset)$/u.test(name)) return 0;
+        if (/^(?:right|end|len|nLines|nTessPoints)$/u.test(name)) return 64;
+        if (/^(?:n|N|num|count|length|totalLen|frontierSize|numSamples|totalThreads|poolSize|size)$/u.test(name)) return 1024;
+        if (/^(?:threads|threadsPerBlock|blockSize)$/u.test(name)) return 256;
+        if (/^(?:blocks|blocksPerGrid|numBlocks)$/u.test(name)) return 4;
+        return 1;
+      }
+
+      function externalDevicePoolNamesFromSource(source) {
+        return [...source.matchAll(/\b(?:deviceAllocate|streamOrderedAllocate)\s*\(\s*&\s*([A-Za-z_][A-Za-z0-9_]*)/g)]
+          .map((match) => match[1])
+          .filter(Boolean);
+      }
+
       async function runReferenceWebGpuCase(device, spec) {
         const compiled = compileCudaLiteKernelForWebGpu(spec.source, spec.options);
-        const actualInput = spec.input();
+        const actualInput = spec.input(compiled);
         const plan = createCudaWebGpuExecutionPlan(compiled, actualInput, spec.launch, {
           compileKernel: compileCudaLiteKernelForWebGpu,
         });
@@ -600,22 +720,33 @@ const html = String.raw`<!doctype html>
           ? { ...actualInput, readback: actualInput.readback.filter((name) => name !== spec.offsetOutput) }
           : actualInput;
         const expected = runCompiledKernelReference(compiled, expectedInput, spec.launch);
-        const expectedOutput = spec.expectedOutput === undefined
-          ? expected.buffers[spec.output]
-          : materializeTypedArray(spec.expectedOutput);
-        const referenceComparison = compareArrays(expectedOutput, expected.buffers[spec.output], spec.tolerance);
-        if (!referenceComparison.ok) {
-          return { ...referenceComparison, plan: "reference-output-mismatch" };
-        }
         const actual = await runCompiledKernelWebGpu(device, compiled, actualInput, spec.launch);
-        const comparison = compareArrays(expectedOutput, actual.buffers[spec.output], spec.tolerance);
+        const outputNames = spec.output === undefined ? Object.keys(expected.buffers) : [spec.output];
+        const referenceComparison = compareOutputs(expected, expected, outputNames, spec);
+        if (!referenceComparison.ok) return { ...referenceComparison, plan: "reference-output-mismatch" };
+        const comparison = compareOutputs(expected, actual, outputNames, spec);
         if (comparison.ok && spec.offsetOutput) {
           const offset = actual.buffers[spec.offsetOutput]?.[0];
           if (offset !== spec.expectedOffset) {
             return { ok: false, plan: plan.kind, maxAbsDiff: Math.abs(Number(offset ?? NaN) - spec.expectedOffset) };
           }
         }
-        return { ...comparison, plan: plan.kind };
+        return { ...comparison, plan: plan.kind, output: outputNames.join(",") };
+      }
+
+      function compareOutputs(expected, actual, outputNames, spec) {
+        let worst = { ok: true, maxAbsDiff: 0 };
+        for (const outputName of outputNames) {
+          const expectedOutput = spec.expectedOutput === undefined && outputNames.length === 1
+            ? expected.buffers[outputName]
+            : spec.expectedOutput === undefined
+              ? expected.buffers[outputName]
+              : materializeTypedArray(spec.expectedOutput);
+          const comparison = compareArrays(expectedOutput, actual.buffers[outputName], spec.tolerance);
+          if (!comparison.ok) return { ...comparison, output: outputName };
+          if (comparison.maxAbsDiff > worst.maxAbsDiff) worst = comparison;
+        }
+        return worst;
       }
 
       async function runPreparedResidentSaxpy(device) {
@@ -740,6 +871,7 @@ try {
     userAgent: await page.evaluate(() => navigator.userAgent),
     ...result,
   };
+  console.log(JSON.stringify(report, null, 2));
   if (requireWebGpu && !report.available) {
     throw new Error(`WebGPU unavailable: ${report.reason ?? "unknown"}`);
   }
@@ -749,7 +881,9 @@ try {
   if (report.available && requireCorpusFixtures) {
     validateCorpusFixtureBaseline(report);
   }
-  console.log(JSON.stringify(report, null, 2));
+  if (report.available && autoCorpusSmokeLimit > 0 && (report.autoCorpusSmokePassed ?? 0) < autoCorpusSmokeLimit) {
+    throw new Error(`Auto corpus smoke baseline failed: ${report.autoCorpusSmokePassed ?? 0}/${autoCorpusSmokeLimit} passed`);
+  }
   if (report.available && report.failed > 0) {
     throw new Error(`CUDA-lite WebGPU e2e failed ${report.failed} case(s)`);
   }
@@ -782,6 +916,9 @@ function markdownReport(data) {
   lines.push("", `Passed: \`${data.passed}\`, failed: \`${data.failed}\``, "");
   lines.push(`Corpus fixtures: \`${data.corpusFixturePassed ?? 0}/${data.corpusFixtureCases ?? 0}\``, "");
   lines.push(`Expected-output fixtures: \`${data.corpusFixtureExpectedOutputCases ?? 0}/${data.corpusFixtureBaseline?.expectedOutputMin ?? 0}\``, "");
+  if ((data.autoCorpusSmokeCases ?? 0) > 0) {
+    lines.push(`Auto corpus smoke: \`${data.autoCorpusSmokePassed ?? 0}/${data.autoCorpusSmokeCases ?? 0}\``, "");
+  }
   if (data.corpusFixturePassedByCorpus) {
     lines.push("| Corpus | passed | cases | baseline min |");
     lines.push("| --- | ---: | ---: | ---: |");
@@ -813,72 +950,6 @@ function validateCorpusFixtureBaseline(report) {
   }
 }
 
-function loadCorpusExecutionSources() {
-  const out = {};
-  for (const fixture of cudaLiteCorpusExecutionFixtures) {
-    const source = loadNormalizedCorpusKernelSource(fixture);
-    if (source) out[fixture.sourceKey] = source;
-  }
-  return out;
-}
-
-function loadNormalizedCorpusKernelSource(fixture) {
-  const corpus = corpusById(fixture.corpusId);
-  const result = spawnSync(process.execPath, [
-    path.join(root, "scripts/audit-cuda-lite-corpus.mjs"),
-    corpus.path,
-    "--emit-kernel-source",
-    fixture.relativePath,
-    "--kernel-name",
-    fixture.kernelName,
-  ], {
-    cwd: root,
-    encoding: "utf8",
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0) {
-    throw new Error(`could not load normalized corpus fixture ${fixture.caseName}: ${result.stderr || result.stdout}`);
-  }
-  return JSON.parse(result.stdout).source;
-}
-
-function verifyCorpusFixtureCheckouts() {
-  const seen = new Set();
-  for (const fixture of cudaLiteCorpusExecutionFixtures) {
-    if (seen.has(fixture.corpusId)) continue;
-    seen.add(fixture.corpusId);
-    const corpus = corpusById(fixture.corpusId);
-    const gitDir = path.join(corpus.path, ".git");
-    if (!fs.existsSync(gitDir)) {
-      throw new Error(`${corpus.id} expected pinned git checkout at ${corpus.path}`);
-    }
-    const result = spawnSync("git", ["-C", corpus.path, "rev-parse", "HEAD"], {
-      cwd: root,
-      encoding: "utf8",
-    });
-    if (result.error) throw result.error;
-    if (result.status !== 0) {
-      throw new Error(`${corpus.id} could not verify pinned checkout: ${result.stderr}`);
-    }
-    const actual = result.stdout.trim();
-    if (actual !== corpus.commit) {
-      throw new Error(`${corpus.id} expected ${corpus.commit}, got ${actual}`);
-    }
-    const status = spawnSync("git", ["-C", corpus.path, "status", "--short", "--untracked-files=all"], {
-      cwd: root,
-      encoding: "utf8",
-    });
-    if (status.error) throw status.error;
-    if (status.status !== 0) {
-      throw new Error(`${corpus.id} could not verify clean checkout: ${status.stderr}`);
-    }
-    const dirty = status.stdout.trim();
-    if (dirty.length > 0) {
-      throw new Error(`${corpus.id} checkout at ${corpus.path} is dirty; clean or refresh it before browser e2e:\n${dirty}`);
-    }
-  }
-}
-
 function findRepoRoot(start) {
   let current = path.resolve(start);
   while (true) {
@@ -892,6 +963,12 @@ function findRepoRoot(start) {
 function parseBundle(value) {
   if (value === "src" || value === "dist") return value;
   throw new Error("--bundle expects src or dist");
+}
+
+function parseNonNegativeInteger(value, flag) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`${flag} expects a non-negative integer`);
+  return parsed;
 }
 
 function moduleAliases(bundleName) {

@@ -5049,6 +5049,34 @@ __global__ void volatileShared(float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([5, 3]);
   });
 
+  it("uniformizes simple predicated barriers for WGSL validation", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void predicatedBarrier(float *A, float *B, float *C, int N) {
+  extern __shared__ float sharedData[];
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < N) {
+    sharedData[threadIdx.x] = A[idx];
+    __syncthreads();
+    C[idx] = sharedData[threadIdx.x] + B[idx];
+  }
+}`, { workgroupSize: [2, 1, 1], dynamicSharedMemory: { sharedData: 2 } });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          A: new Float32Array([1, 2]),
+          B: new Float32Array([10, 20]),
+          C: new Float32Array(2),
+        },
+        scalars: { N: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("workgroupBarrier();\n  if ((idx < params.N))");
+    expect([...result.buffers.C as Float32Array]).toEqual([11, 22]);
+  });
+
   it("lowers dynamic extern shared memory declared inside device helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ uint reduce_one(uint value) {
@@ -5111,7 +5139,7 @@ __global__ void init_arrays(float *out) {
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("var<workgroup> shared: array<f32, 2>;");
+    expect(compiled.wgsl).toContain("var<workgroup> bg_shared: array<f32, 2>;");
     expect(compiled.wgsl).toContain("vals[0][0] = 1.0;");
     expect([...result.buffers.out as Float32Array]).toEqual([12]);
   });
@@ -6813,12 +6841,14 @@ __global__ void bad_update(float* out) {
   it("alpha-renames WGSL reserved and builtin-shadowing CUDA symbols", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void reserved_names(float* array, float* out) {
+  extern __shared__ float shared[];
   float var = array[0];
   float exp = var + 2.0f;
   if (threadIdx.x == 0) {
-    out[0] = exp;
+    shared[0] = exp;
+    out[0] = shared[0];
   }
-}`, { workgroupSize: [1, 1, 1] });
+}`, { workgroupSize: [1, 1, 1], dynamicSharedMemory: { shared: 1 } });
     const result = runCompiledKernelReference(
       compiled,
       { buffers: { array: new Float32Array([3]), out: new Float32Array(1) } },
@@ -6827,6 +6857,7 @@ __global__ void reserved_names(float* array, float* out) {
 
     expect([...result.buffers.out as Float32Array]).toEqual([5]);
     expect(compiled.wgsl).toContain("var<storage, read_write> bg_array: array<f32>;");
+    expect(compiled.wgsl).toContain("var<workgroup> bg_shared: array<f32, 1>;");
     expect(compiled.wgsl).toContain("var bg_var: f32 = bg_array[0];");
     expect(compiled.wgsl).toContain("var bg_exp: f32 = (bg_var + 2.0);");
     expect(compiled.wgsl).not.toContain("var var:");
@@ -6859,7 +6890,7 @@ __global__ void lowered_record(float* out) {
 
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(4 + 2 * Math.exp(-4));
     expect(compiled.wgsl).toContain("select(other, value, pick)");
-    expect(compiled.wgsl).toContain("var<workgroup> shared: array<vec2<f32>, 1>;");
+    expect(compiled.wgsl).toContain("var<workgroup> bg_shared: array<vec2<f32>, 1>;");
   });
 
   it("uses local const integer expressions in later array dimensions", () => {

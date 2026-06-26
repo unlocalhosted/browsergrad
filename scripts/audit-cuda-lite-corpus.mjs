@@ -13,19 +13,20 @@ import { setAuditHelpers } from "./audit-cuda-lite-corpus-context.mjs";
 import * as auditCli from "./audit-cuda-lite-corpus-cli.mjs";
 import * as auditDevice from "./audit-cuda-lite-corpus-device.mjs";
 import * as auditScan from "./audit-cuda-lite-corpus-scan.mjs";
+import { syntheticInputForCompiled } from "./cuda-lite-synthetic-input.mjs";
 
 const { parseArgs, checkExpectations } = auditCli;
 const { listFiles, findRepoRoot, markdownBlocks, extractKernelDefinitions, createCorpusContext, sourceWithoutCudaFunctionBodies, stripComments } = auditScan;
 const { collectPortableDeviceFunctions, collectDynamicLaunchTargetDeviceFunctions, collectConstantDeclarations, collectDeviceGlobalDeclarations, collectFunctionPointerTables, collectFunctionDefines, collectTextureDeclarations, collectPodRecordDeclarations, collectTranslationUnitSharedDeclarations, inferDynamicSharedMemory, countBy, mergeCarriedDefines, mergeDefineMaps, recordDeclarationName, escapeRegExp } = auditDevice;
 const auditHelpers = { ...auditCli, ...auditDevice, ...auditScan, collectCudaLiteContextDefines, collectKernelTemplateArguments, createKernelCompilationUnit, kernelDefinitionName, pruneCudaPreprocessorBranches };
 setAuditHelpers(auditHelpers);
-const { corpusPathArg, details, emitKernelSource, expectations, firstFailureLimit, help, includeSources } = parseArgs(process.argv.slice(2));
+const { corpusPathArg, details, emitKernelSource, expectations, firstFailureLimit, help, includeSources, kernelManifest } = parseArgs(process.argv.slice(2));
 if (help) {
-  console.log("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--emit-kernel-source FILE --kernel-name NAME] [--expect-total N] [--expect-compile-codegen-min N] [--expect-hard-fail-max N]");
+  console.log("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--kernel-manifest] [--emit-kernel-source FILE --kernel-name NAME] [--expect-total N] [--expect-compile-codegen-min N] [--expect-hard-fail-max N]");
   process.exit(0);
 }
 if (!corpusPathArg) {
-  console.error("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--emit-kernel-source FILE --kernel-name NAME] [--expect-total N] [--expect-compile-codegen-min N] [--expect-hard-fail-max N]");
+  console.error("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--kernel-manifest] [--emit-kernel-source FILE --kernel-name NAME] [--expect-total N] [--expect-compile-codegen-min N] [--expect-hard-fail-max N]");
   process.exit(2);
 }
 
@@ -148,13 +149,13 @@ for (const file of files) {
       const kernelName = kernelDefinitionName(rawKernel);
       const directAttempt = compileKernelFromAuditContext(rawKernel, kernels, kernelName, directContext);
       if (directAttempt.ok) {
-        results.push({ file, block: blockIndex + 1, kernel: kernelIndex + 1, ok: true });
+        results.push({ file, block: blockIndex + 1, kernel: kernelIndex + 1, kernelName, ok: true, directLoweringOk: true, compileCodegenOk: true });
         continue;
       }
       if (reverseContext !== undefined && shouldRetryWithReverseContext(directAttempt.error)) {
         const reverseAttempt = compileKernelFromAuditContext(rawKernel, kernels, kernelName, reverseContext);
         if (reverseAttempt.ok) {
-          results.push({ file, block: blockIndex + 1, kernel: kernelIndex + 1, ok: true });
+          results.push({ file, block: blockIndex + 1, kernel: kernelIndex + 1, kernelName, ok: true, directLoweringOk: true, compileCodegenOk: true });
           continue;
         }
       }
@@ -395,10 +396,12 @@ const summary = {
 
 if (details) {
   console.log(JSON.stringify({ summary, failures }, null, 2));
+} else if (kernelManifest) {
+  console.log(JSON.stringify({ summary, kernels: kernelManifestRows(results) }, null, 2));
 } else {
   console.log(JSON.stringify(summary, null, 2));
 }
-if (!details && failures.length > 0 && firstFailureLimit > 0) {
+if (!details && !kernelManifest && failures.length > 0 && firstFailureLimit > 0) {
   console.log("\nfirst direct-lowering gaps:");
   for (const failure of failures.slice(0, firstFailureLimit)) {
     const lift = failure.webGpuPlanLiftOk ? ` [webgpu-plan-lift:${failure.webGpuPlanLiftKind}]` : "";
@@ -447,11 +450,28 @@ function classifyReferenceFallback(source, kernelName) {
   }
 }
 
+function kernelManifestRows(items) {
+  return items.map((item) => {
+    const planCompiledOk = item.ok || item.webGpuPlanLiftOk === true;
+    return {
+      file: item.file,
+      block: item.block,
+      kernel: item.kernel,
+      kernelName: item.kernelName,
+      directLoweringOk: item.ok === true,
+      planCompiledOk,
+      compileCodegenOk: planCompiledOk,
+      ...(item.webGpuPlanLiftKind === undefined ? {} : { webGpuPlanLiftKind: item.webGpuPlanLiftKind }),
+      ...(item.webGpuPlanLiftBlockerCode === undefined ? {} : { webGpuPlanLiftBlockerCode: item.webGpuPlanLiftBlockerCode }),
+    };
+  });
+}
+
 function webGpuLiftFor(compiled) {
   const runtimePlan = createCudaRuntimePlan(compiled);
   const executionPlan = createCudaWebGpuExecutionPlan(
     compiled,
-    syntheticInputFor(compiled),
+    syntheticInputForCompiled(compiled),
     { gridDim: [1, 1, 1], blockDim: compiled.ir.workgroupSize },
     {
       compileKernel: (childSource, options = {}) => compileCudaLiteKernelForWebGpu(childSource, {
@@ -486,71 +506,4 @@ function webGpuLiftFor(compiled) {
   }
   if (executionPlan.kind === "single-dispatch") return { kind: undefined, blocker: "no runtime WebGPU lift required" };
   return { kind: executionPlan.kind, blocker: undefined };
-}
-
-function syntheticInputFor(compiled) {
-  const scalars = {};
-  const buffers = {};
-  const constants = {};
-  const deviceGlobals = {};
-  const memoryPools = {};
-  const textures = {};
-  for (const param of compiled.ir.params) {
-    if (param.pointer) {
-      if (param.valueType === "devicepool") {
-        memoryPools[param.name] = { data: new Uint32Array(4096), offset: new Uint32Array([0]) };
-      } else {
-        buffers[param.name] = syntheticBufferForType(param.valueType);
-      }
-    } else if (param.valueType === "texture2d") {
-      textures[param.name] = { width: 64, height: 64, data: new Float32Array(64 * 64) };
-    } else {
-      scalars[param.name] = syntheticScalarForName(param.name);
-    }
-  }
-  for (const constant of compiled.ir.constants) {
-    constants[constant.name] = constant.dimensions.length === 0 && !isCudaVectorTypeName(constant.valueType)
-      ? syntheticScalarForName(constant.name)
-      : syntheticBufferForType(constant.valueType);
-  }
-  for (const global of compiled.ir.deviceGlobals) {
-    const length = global.dimensions.length === 0
-      ? 1
-      : global.dimensions.reduce((product, dimension) => product * dimension, 1);
-    deviceGlobals[global.name] = syntheticBufferForType(global.valueType, length);
-  }
-  for (const texture of compiled.ir.textures) {
-    textures[texture.name] = { width: 64, height: 64, data: new Float32Array(64 * 64) };
-  }
-  for (const poolName of externalDevicePoolNamesFromSource(compiled.ast.source)) {
-    memoryPools[poolName] ??= { data: new Uint32Array(4096), offset: new Uint32Array([0]) };
-  }
-  return { buffers, scalars, constants, deviceGlobals, memoryPools, textures };
-}
-
-function externalDevicePoolNamesFromSource(source) {
-  return [...source.matchAll(/\b(?:deviceAllocate|streamOrderedAllocate)\s*\(\s*&\s*([A-Za-z_][A-Za-z0-9_]*)/g)]
-    .map((match) => match[1])
-    .filter(Boolean);
-}
-
-function syntheticBufferForType(type, length = 4096) {
-  if (type === "int") return new Int32Array(length);
-  if (type === "uint" || type === "voidptr" || type === "bool") return new Uint32Array(length);
-  return new Float32Array(length);
-}
-
-function isCudaVectorTypeName(type) {
-  return /^(?:float|int|uint)[234]$|^half2$|^bf162$/u.test(type);
-}
-
-function syntheticScalarForName(name) {
-  if (/^(?:depth|level)$/iu.test(name)) return 0;
-  if (/^(?:maxDepth|max_depth|maxLevel|max_level)$/u.test(name)) return 4;
-  if (/^(?:left|begin|start|offset)$/u.test(name)) return 0;
-  if (/^(?:right|end|len|nLines|nTessPoints)$/u.test(name)) return 64;
-  if (/^(?:n|N|num|count|length|totalLen|frontierSize|numSamples|totalThreads|poolSize|size)$/u.test(name)) return 1024;
-  if (/^(?:threads|threadsPerBlock|blockSize)$/u.test(name)) return 256;
-  if (/^(?:blocks|blocksPerGrid|numBlocks)$/u.test(name)) return 4;
-  return 1;
 }

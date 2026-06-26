@@ -274,6 +274,12 @@ pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu:corpus -- --require
   checks both CPU reference and real WebGPU against that expected output instead
   of allowing the two implementations to agree on wrong-code. Current hard
   floor requires at least `40` pinned-output corpus fixtures.
+- `e2e:webgpu:corpus -- --auto-corpus-smoke-limit N` layers generic synthetic
+  fixtures over the exact registry. It selects compile/codegen-ok kernels from
+  the corpus manifest, emits normalized source, derives typed inputs from Kernel
+  IR, preflights CPU reference, and dispatches in real WebGPU. The combined
+  `verify:real-world-cuda` gate defaults this to `32` passing synthetic smoke
+  kernels per browser bundle.
 - `e2e:webgpu:dist` runs the browser proof through built package exports. The
   combined `verify:real-world-cuda` gate runs both `src` and `dist` browser
   bundles unless a narrower `--bundle` is supplied.

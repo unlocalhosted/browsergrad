@@ -588,6 +588,10 @@ Acceptance criteria for the first slice:
 - Browser e2e corpus fixture coverage proves real WebGPU execution for at
   least `92` exact kernel launches across the pinned external corpora:
   CUDA-120, NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA.
+- Browser e2e also proves at least `32` manifest-selected synthetic smoke
+  kernels per bundle through real WebGPU. These fixtures must come from generic
+  audit-manifest selection, normalized source emission, Kernel IR synthetic
+  inputs, and CPU-reference preflight rather than repo-name branches.
 - That real-execution floor is enforced per corpus: CUDA-120 `>=2`, NVIDIA
   `cuda-samples` `>=17`, `llm.c` `>=27`, and LeetCUDA `>=46` passing browser
   WebGPU fixtures.

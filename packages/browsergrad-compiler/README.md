@@ -382,6 +382,12 @@ silently diverge between audit and browser execution gates.
 Fixture launch shapes, typed-array inputs, scalars, and output names live in
 `scripts/cuda-lite-corpus-registry.mjs`; browser e2e derives corpus cases from
 that registry instead of duplicating per-repo snippets.
+Pass `-- --auto-corpus-smoke-limit N` to add manifest-selected synthetic smoke
+fixtures on top of the explicit registry. The selector round-robins pinned
+corpora, skips kernels already covered by exact fixtures, emits the same
+source-normalized unit as the audit, builds Kernel IR synthetic inputs, preflights
+CPU reference execution, and then requires real Chromium/WebGPU agreement.
+`verify:real-world-cuda` defaults this smoke floor to `32` per browser bundle.
 Pass `-- --bundle dist` or use `e2e:webgpu:dist` to run the same browser proof
 against built package exports instead of TS source aliases.
 Compiler e2e, corpus, and benchmark package scripts use

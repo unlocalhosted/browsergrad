@@ -20,6 +20,8 @@ for (const bundle of browserBundles(options.bundle)) {
     "--require-corpus-fixtures",
     "--bundle",
     bundle,
+    "--auto-corpus-smoke-limit",
+    String(options.autoCorpusSmokeLimit),
     ...(options.allowMissingWebGpu ? [] : ["--require-webgpu"]),
   ]);
 }
@@ -32,6 +34,7 @@ function parseArgs(args) {
     allowMissingWebGpu: false,
     limit: 0,
     bundle: "both",
+    autoCorpusSmokeLimit: 32,
   };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -63,8 +66,16 @@ function parseArgs(args) {
       options.bundle = parseBundle(arg.slice("--bundle=".length));
       continue;
     }
+    if (arg === "--auto-corpus-smoke-limit") {
+      options.autoCorpusSmokeLimit = parseLimit(args[++index]);
+      continue;
+    }
+    if (arg?.startsWith("--auto-corpus-smoke-limit=")) {
+      options.autoCorpusSmokeLimit = parseLimit(arg.slice("--auto-corpus-smoke-limit=".length));
+      continue;
+    }
     if (arg === "--help" || arg === "-h") {
-      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--allow-missing-webgpu] [--limit N] [--bundle src|dist|both]");
+      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--allow-missing-webgpu] [--limit N] [--bundle src|dist|both] [--auto-corpus-smoke-limit N]");
       process.exit(0);
     }
     throw new Error(`unexpected argument: ${arg}`);
