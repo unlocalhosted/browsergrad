@@ -370,6 +370,28 @@ function replaceLegacyArithmeticMacroCalls(source, spec) {
   return cursor === 0 ? source : out + source.slice(cursor);
 }
 
+export function normalizeMissingThreadLocalSoftmaxNumeratorBuffers(source) {
+  if (!/\b[A-Za-z_][A-Za-z0-9_]*_smem\s*\[\s*(?:tid|threadIdx\.x)\s*\]/u.test(source)) return source;
+  if (!/\bexpf\s*\(/u.test(source) || !/\batomicAdd\s*\(/u.test(source)) return source;
+  const missingRead = /\b([A-Za-z_][A-Za-z0-9_]*_smem)\s*\[\s*(tid|threadIdx\.x)\s*\]/u.exec(source);
+  if (missingRead?.[1] === undefined || missingRead[2] === undefined) return source;
+  const bufferName = missingRead[1];
+  const indexName = missingRead[2];
+  const declaredRe = new RegExp(String.raw`\b(?:extern\s+)?(?:__shared__\s+)?(?:float|double|half|int|uint|unsigned\s+int)\s+(?:\*\s*)?${escapeRegExp(bufferName)}\b`, "u");
+  if (declaredRe.test(source)) return source;
+  const initRe = /\bfloat\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*((?:\([^;\n]*\)|[^;\n])*?\?\s*expf\s*\([^;\n]+\)\s*:\s*0(?:\.0)?f?)\s*;/u;
+  const init = initRe.exec(source);
+  if (init?.[1] === undefined || init[2] === undefined) return source;
+  const numeratorName = "bg_thread_numerator";
+  if (new RegExp(String.raw`\b${escapeRegExp(numeratorName)}\b`, "u").test(source)) return source;
+  const initialized = source.replace(
+    init[0],
+    `float ${numeratorName} = ${init[2]};\n  float ${init[1]} = ${numeratorName};`,
+  );
+  const readRe = new RegExp(String.raw`\b${escapeRegExp(bufferName)}\s*\[\s*${escapeRegExp(indexName)}\s*\]`, "gu");
+  return initialized.replace(readRe, numeratorName);
+}
+
 function inlineSimpleLambdaCalls(source, name, params, body) {
   const re = new RegExp(`\\b${escapeRegExp(name)}\\s*\\(`, "gu");
   let out = "";

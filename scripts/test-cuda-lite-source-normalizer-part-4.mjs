@@ -644,3 +644,38 @@ __global__ void shared_tile_transpose_kernel(InTensor in, OutTensor out) {
   assert.doesNotMatch(source, /shared_memory_mdspan/u);
   assert.doesNotMatch(source, /\bInTensor\b|\bOutTensor\b/u);
 }
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+template <const int NUM_THREADS = 128>
+__global__ void softmax(float *x, float *y, float *total, int N) {
+  const int tid = threadIdx.x;
+  const int idx = blockIdx.x * blockDim.x + tid;
+  constexpr int NUM_WARPS = (128 + 32 - 1) / 32;
+  __shared__ float reduce_smem[NUM_WARPS];
+
+  float sum = (idx < N) ? expf(x[idx]) : 0.0f;
+  int warp = tid / 32;
+  int lane = tid % 32;
+  sum = warp_reduce_sum(sum);
+  if (lane == 0)
+    reduce_smem[warp] = sum;
+  __syncthreads();
+
+  sum = (lane < NUM_WARPS) ? reduce_smem[lane] : 0.0f;
+  sum = warp_reduce_sum(sum);
+
+  if (tid == 0)
+    atomicAdd(total, sum);
+  __threadfence();
+
+  if (idx < N)
+    y[idx] = block_smem[tid] / (*total);
+}`,
+  });
+  assert.match(source, /float bg_thread_numerator = \(idx < N\) \? expf\(x\[idx\]\) : 0\.0f;/u);
+  assert.match(source, /float sum = bg_thread_numerator;/u);
+  assert.match(source, /y\[idx\] = bg_thread_numerator \/ \(\*total\);/u);
+  assert.doesNotMatch(source, /\bblock_smem\b/u);
+}

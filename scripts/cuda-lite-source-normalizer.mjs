@@ -81,7 +81,7 @@ const { specializeTemplateFromLaunchContext, specializeDeviceFunctionFromCallCon
 const { normalizeRank2CallableViews, collectSyntheticVectorPackDefines, normalizeTemplateValueFallbacks, normalizeTemplateTypeArgument, normalizeCppTemplateCarrierSyntax, normalizeCudaVectorLength, normalizeSimpleStatementMacros, normalizeSideEffectExpressions, normalizeStdMathAliases, normalizeStaticTemplateConverters, stripTemplateRecordDeclarations, normalizeVectorCooperativeReductions, normalizeCooperativeGroupHelperParams, normalizeForLoopScopedVariables, normalizeLocalReferenceAliases } = templateTransformNormalizers;
 const { normalizeCarrierMemberReferences, normalizeCudaVectorCarrierAliases, normalizeScalarizedPodRecords, normalizePodRecordVectorAliases } = recordNormalizers;
 const { normalizeBitpackedShortUnions } = podRecordNormalizers;
-const { normalizeLineContinuations, normalizeEscapedNewlinesOutsideStrings, normalizeSimpleLocalLambdas, normalizeSimpleExpressionMacros, normalizeDependentCarrierParams, normalizeMissingSemicolonAfterMacroAssignment, normalizeLegacyCudaArithmeticMacros, normalizeVectorCooperativeShuffles, collectDeclaredIdentifiers, sourceUsesMemberName, normalizeSharedMemoryHelpers, addressTarget } = localTransformNormalizers;
+const { normalizeLineContinuations, normalizeEscapedNewlinesOutsideStrings, normalizeSimpleLocalLambdas, normalizeSimpleExpressionMacros, normalizeDependentCarrierParams, normalizeMissingSemicolonAfterMacroAssignment, normalizeLegacyCudaArithmeticMacros, normalizeMissingThreadLocalSoftmaxNumeratorBuffers, normalizeVectorCooperativeShuffles, collectDeclaredIdentifiers, sourceUsesMemberName, normalizeSharedMemoryHelpers, addressTarget } = localTransformNormalizers;
 const { normalizeCuteRank2TransposeKernels, parseCudaGlobalFunction, cudaParamName, cudaPointerParamValueType, normalizeCuteRowBroadcastGemvKernels, collectCuteIntegerEnv, normalizeCuteScalarExpression, cuteExprEquals, normalizeCuteTnGemmKernels, collectCuteExpressionAliases, resolveCuteExpressionAlias, normalizeCute1dAffineTileCopies } = cuteLaNormalizers;
 const { normalizeWidePacked128Aliases, normalizeCudaPipelineAsync, normalizePacked128MemoryHelpers, normalizeVectorStaticConstructors, WIDE_PACKED128_TYPES } = packedNormalizers;
 const { collectObjectDefines, collectTypeAliasDefines, collectFunctionDefineBodies, collectCarrierMemberDefines, stripSupportedTypeAliasDeclarations, stripSupportedEnumDeclarations, mergeDefineMaps } = definesNormalizers;
@@ -314,7 +314,8 @@ export function createKernelCompilationUnit({
   const withLocalReferences = normalizeLocalReferenceAliases(withStatementMacros);
   const withSideEffects = normalizeSideEffectExpressions(withLocalReferences);
   const withScopedForVariables = normalizeForLoopScopedVariables(withSideEffects);
-  const withTemplateFallbacks = normalizeTemplateValueFallbacks(withScopedForVariables, postCarrierDefines);
+  const withRecoveredNumerators = normalizeMissingThreadLocalSoftmaxNumeratorBuffers(withScopedForVariables);
+  const withTemplateFallbacks = normalizeTemplateValueFallbacks(withRecoveredNumerators, postCarrierDefines);
   return normalizeCppTemplateCarrierSyntax(withTemplateFallbacks);
 }
 
