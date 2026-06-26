@@ -281,6 +281,11 @@ function applyHostExpressionEffect(
   env: Map<string, HostEvalValue>,
   input: CompiledKernelInput,
 ): void {
+  if (expression.kind === "update" && expression.argument.kind === "identifier") {
+    const current = evaluateHostNumber(expression.argument, env, input);
+    if (typeof current === "number") env.set(expression.argument.name, current + (expression.operator === "++" ? 1 : -1));
+    return;
+  }
   if (expression.kind !== "assignment" || expression.left.kind !== "identifier") return;
   if (expression.operator !== "=") return;
   const value = evaluateHostNumber(expression.right, env, input);

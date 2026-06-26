@@ -123,6 +123,18 @@ __global__ void GridSyncDouble(double *out) {
   cg::sync(grid);
   out[threadIdx.x] = out[threadIdx.x] + 1.0;
 }
+
+__global__ void DynamicNoopChild(float *out) {
+  out[0] = 1.0f;
+}
+
+__global__ void InactiveDynamic(float *out) {
+  if (0 != 0) {
+    DynamicNoopChild<<<1, 1>>>(out);
+    cudaDeviceSynchronize();
+  }
+  out[0] += 2.0f;
+}
 `);
   fs.writeFileSync(path.join(tmpRoot, "main.cu"), `
 #include "defs.h"
@@ -167,6 +179,10 @@ void launch_dynamic_late(float *out) {
 void launch_grid_sync_double(double *out) {
   GridSyncDouble<<<1, 32, 512>>>(out);
 }
+
+void launch_inactive_dynamic(float *out) {
+  InactiveDynamic<<<1, 1>>>(out);
+}
 `);
 
   const result = spawnSync("node", ["scripts/audit-cuda-lite-corpus.mjs", tmpRoot, "--details"], {
@@ -180,25 +196,25 @@ void launch_grid_sync_double(double *out) {
     process.exit(result.status ?? 1);
   }
   const report = JSON.parse(result.stdout.slice(result.stdout.indexOf("{")));
-  assertEqual(report.summary.totalKernelDefinitions, 10, "total kernel count");
+  assertEqual(report.summary.totalKernelDefinitions, 12, "total kernel count");
   assertEqual(report.summary.corpusKernelExecution, "compile-codegen-only", "corpus execution mode");
   assertEqual(report.summary.corpusExecutionMode, "compile-codegen-only", "corpus execution mode alias");
-  assertEqual(report.summary.executionTierCounts.compileCodegenOnlyOk, 10, "compile/codegen-only tier count");
-  assertEqual(report.summary.executionTierCounts.planCompiledOk, 10, "plan-compiled tier count");
+  assertEqual(report.summary.executionTierCounts.compileCodegenOnlyOk, 12, "compile/codegen-only tier count");
+  assertEqual(report.summary.executionTierCounts.planCompiledOk, 12, "plan-compiled tier count");
   assertEqual(report.summary.executionTierCounts.planCompileGaps, 0, "plan-compiled gap count");
   assertEqual(report.summary.executionTierCounts.fixtureBackedExecutedOk, 0, "fixture execution tier count");
   assertEqual(report.summary.executionTierCounts.browserWebGpuExecutedOk, 0, "browser execution tier count");
   assertEqual(report.summary.executionTierCounts.outputVerifiedOk, 0, "output verified tier count");
-  assertEqual(report.summary.planCompiledOk, 10, "plan compiled count");
+  assertEqual(report.summary.planCompiledOk, 12, "plan compiled count");
   assertEqual(report.summary.planCompileGaps, 0, "plan compiled gaps");
-  assertEqual(report.summary.singleDispatchPlanCompiledOk, 9, "single-dispatch plan compiled count");
-  assertEqual(report.summary.hostOrchestratedPlanCompiledOk, 1, "host-orchestrated plan compiled count");
+  assertEqual(report.summary.singleDispatchPlanCompiledOk, 10, "single-dispatch plan compiled count");
+  assertEqual(report.summary.hostOrchestratedPlanCompiledOk, 2, "host-orchestrated plan compiled count");
   assertEqual(report.summary.browserExecutedOk, 0, "browser executed count");
   assertEqual(report.summary.outputVerifiedOk, 0, "output verified count");
   assertEqual(report.summary.deprecatedCompilePlanAliases.webGpuRunnableOk, "planCompiledOk", "deprecated runnable alias");
-  assertEqual(report.summary.webGpuDirectCompiledOk, 9, "reverse include kernel direct WGSL compiled");
-  assertEqual(report.summary.webGpuHostPlanCompiledOk, 1, "reverse include kernel host-plan compiled");
-  assertEqual(report.summary.compileCodegenOk, 10, "reverse include kernel compile/codegen count");
+  assertEqual(report.summary.webGpuDirectCompiledOk, 10, "reverse include kernel direct WGSL compiled");
+  assertEqual(report.summary.webGpuHostPlanCompiledOk, 2, "reverse include kernel host-plan compiled");
+  assertEqual(report.summary.compileCodegenOk, 12, "reverse include kernel compile/codegen count");
   assertEqual(report.summary.compileCodegenGaps, 0, "reverse include kernel compile/codegen gaps");
   assertEqual(report.summary.fixtureBackedExecutionOk, 0, "fixture-backed execution count");
   assertEqual(report.summary.webGpuRunnableOk, undefined, "legacy runnable count omitted from top-level summary");
@@ -208,9 +224,18 @@ void launch_grid_sync_double(double *out) {
   assertEqual(report.summary.webGpuLiftedOk, undefined, "legacy lifted count omitted from top-level summary");
   assertEqual(report.summary.webGpuHostOrchestratedOk, undefined, "legacy host-orchestrated count omitted from top-level summary");
   assertEqual(report.summary.hardFail, 0, "reverse include hard gaps");
-  assertEqual(report.summary.referenceFallbackOk, 1, "grid-sync fallback compiles through host plan");
-  assertEqual(report.failures.length, 1, "only strict direct compile has a gap");
-  assertEqual(report.failures[0].webGpuPlanLiftKind, "grid-sync-phases", "grid sync fallback host plan kind");
+  assertEqual(report.summary.referenceFallbackOk, 2, "runtime fallbacks compile through host plans");
+  assertEqual(report.failures.length, 2, "only strict direct compile has gaps");
+  assertEqual(
+    report.failures.find((failure) => failure.kernelName === "GridSyncDouble")?.webGpuPlanLiftKind,
+    "grid-sync-phases",
+    "grid sync fallback host plan kind",
+  );
+  assertEqual(
+    report.failures.find((failure) => failure.kernelName === "InactiveDynamic")?.webGpuPlanLiftKind,
+    "host-pruned-runtime",
+    "host-pruned runtime fallback plan kind",
+  );
 
   const emitted = spawnSync("node", [
     "scripts/audit-cuda-lite-corpus.mjs",

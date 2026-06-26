@@ -4323,6 +4323,62 @@ __global__ void parent(float *out, int n) {
     })).toThrow("maxHostDynamicLaunchDepth must be a non-negative integer");
   });
 
+  it("propagates host-evaluable scalar postfix updates into recursive dynamic launches", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void parent(float *out, int max_depth, int depth) {
+  if (threadIdx.x < 1) {
+    out[depth] = out[depth] + 1.0f;
+    depth++;
+    if (depth >= max_depth) { return; }
+    parent<<<1, 1>>>(out, max_depth, depth);
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const executionPlan = createCudaWebGpuExecutionPlan(
+      compiled,
+      { buffers: { out: new Float32Array(4) }, scalars: { max_depth: 3, depth: 0 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      { compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options) },
+    );
+
+    expect(executionPlan).toMatchObject({
+      supported: true,
+      kind: "host-dynamic-launch",
+    });
+  });
+
+  it("elides externally silent recursive dynamic launch trees", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void log_depth(int depth) {
+  printf("%d", depth);
+  __syncthreads();
+}
+__global__ void parent(int max_depth, int depth) {
+  log_depth(depth);
+  depth++;
+  if (depth >= max_depth) { return; }
+  parent<<<gridDim.x, blockDim.x>>>(max_depth, depth);
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [256, 1, 1],
+    });
+    const executionPlan = createCudaWebGpuExecutionPlan(
+      compiled,
+      { buffers: {}, scalars: { max_depth: 4, depth: 0 } },
+      { gridDim: [1, 1, 1], blockDim: [256, 1, 1] },
+      { compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options) },
+    );
+
+    expect(executionPlan).toMatchObject({
+      supported: true,
+      kind: "runtime-elided-single-dispatch",
+    });
+  });
+
   it("plans host-liftable dynamic launches with DevicePool aliases", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void child(DevicePool *childPool, float *dst) {

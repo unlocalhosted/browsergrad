@@ -255,7 +255,7 @@ function normalizePreparedRunOptions(
       ...input,
       scalars: { ...input.scalars, ...options.scalars },
     };
-    if (initialPlan.kind === "single-dispatch" || initialPlan.kind === "grid-sync-phases") {
+    if (initialPlan.kind === "single-dispatch" || initialPlan.kind === "runtime-elided-single-dispatch" || initialPlan.kind === "grid-sync-phases") {
       const uniforms = packCudaWebGpuUniformParams(compiled, nextInput);
       if (uniforms.byteLength > 0) out.uniforms = { params: uniforms };
       return out;

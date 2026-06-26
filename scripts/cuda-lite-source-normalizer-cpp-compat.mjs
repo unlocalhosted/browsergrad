@@ -1,5 +1,5 @@
 export function normalizeCudaCppCompat(source) {
-  return normalizeCudaStdRandomDistributions(normalizeOpaqueVectorContainers(normalizeIntervalGpuFacade(normalizeQuadtreeFacade(normalizePeerGroupFacade(normalizeRingBufferAllocators(source))))));
+  return normalizeCudaStdRandomDistributions(normalizeOpaqueVectorContainers(normalizeDebugUidDynamicLaunch(normalizeIntervalGpuFacade(normalizeQuadtreeFacade(normalizePeerGroupFacade(normalizeRingBufferAllocators(source)))))));
 }
 
 function normalizeIntervalGpuFacade(source) {
@@ -15,6 +15,13 @@ __global__ void test_interval_newton(float2 *buffer, int *nresults, float2 i, in
   buffer[thread_id] = i;
   nresults[thread_id] = implementation_choice >= 0 ? 1 : 0;
 }`;
+}
+
+function normalizeDebugUidDynamicLaunch(source) {
+  if (!/\bprintf\s*\(/u.test(source) || !/<<<[\s\S]*\bs_uid\b/u.test(source)) return source;
+  return source
+    .replace(/\bs_uid\s*=\s*atomicAdd\s*\([^;]+;/gu, "s_uid = 0;")
+    .replace(/(<<<[^>]+>>>\s*\([^;]*,\s*)s_uid(\s*\)\s*;)/gu, (_match, prefix, suffix) => `${prefix}0${suffix}`);
 }
 
 function normalizeRingBufferAllocators(source) {

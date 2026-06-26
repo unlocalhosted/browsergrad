@@ -478,6 +478,12 @@ function webGpuLiftFor(compiled) {
   ) {
     return { kind: "device-sync-noop", blocker: undefined };
   }
+  if (
+    executionPlan.kind === "single-dispatch" &&
+    runtimePlan.operations.length > 0
+  ) {
+    return { kind: "host-pruned-runtime", blocker: undefined };
+  }
   if (executionPlan.kind === "single-dispatch") return { kind: undefined, blocker: "no runtime WebGPU lift required" };
   return { kind: executionPlan.kind, blocker: undefined };
 }
