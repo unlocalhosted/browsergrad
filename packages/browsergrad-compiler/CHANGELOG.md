@@ -79,6 +79,9 @@
 - CUDA-lite now lowers CUDA helper `lerp(floatN, floatN, t)` as vector math and
   decays fixed local arrays into function-local helper pointer params, raising
   the cuda-samples gate to `326/357` with `29` hard gaps.
+- CUDA-lite now supports fixed local pointer arrays that carry shared/local
+  scratch addresses through helper calls and dereferences, raising the
+  cuda-samples gate to `327/357` with `28` hard gaps.
 - Source normalizer synthetic names now avoid WGSL-reserved double-underscore
   prefixes, and the browser fixture suite now executes all four lifted LeetCUDA
   CuTe transpose variants through real WebGPU.

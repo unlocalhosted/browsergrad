@@ -26,8 +26,8 @@ export const cudaLiteCorpora = [
     path: path.join(corpusRoot, "cuda-samples"),
     expectations: {
       total: 357,
-      compileCodegenMin: 326,
-      hardFailMax: 29,
+      compileCodegenMin: 327,
+      hardFailMax: 28,
     },
   },
   {

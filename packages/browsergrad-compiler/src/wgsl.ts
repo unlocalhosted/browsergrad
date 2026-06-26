@@ -297,7 +297,9 @@ interface EmitContext {
   mutablePointerBaseFor(name: string): string | undefined;
   isLocalName(name: string): boolean;
   localValueTypeFor(name: string): CudaLiteScalarType | undefined;
-  localArrayFor(name: string): CudaLiteVarDecl | undefined;
+  localArrayFor(name: string, span?: SourceSpan): CudaLiteVarDecl | undefined;
+  localPointerArrayFor(name: string, span?: SourceSpan): CudaLiteVarDecl | undefined;
+  localPointerArrayRootFor(name: string, span?: SourceSpan): CudaLiteVarDecl | undefined;
   cooperativeGroupFor(name: string): CudaLiteCooperativeGroupDecl | undefined;
   surfaceWidthField(name: string): string;
   nameFor(name: string): string;
@@ -511,7 +513,8 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
   ]);
   const localValueTypes = new Map(collectLocalValueTypes(ir.body));
   for (const param of mutableScalarParams) localValueTypes.set(param.name, param.valueType);
-  const localArrays = collectLocalArrays(ir.body);
+  const localArrayDeclarations = collectLocalArrayDeclarations(ir.body);
+  const localPointerArrayRoots = collectLocalPointerArrayRoots(ir.body);
   const wgslNames = createWgslNameMap(collectWgslDeclaredNames(ir, localNames, externalPoolNames));
   const vectorCooperativeReduceHelpers = new Map<string, VectorCooperativeReduceHelper>();
   const expressionValueTypes = new WeakMap<CudaLiteExpression, CudaLiteScalarType | undefined>();
@@ -599,8 +602,17 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
     localValueTypeFor(name) {
       return localValueTypes.get(name);
     },
-    localArrayFor(name) {
-      return localArrays.get(name);
+    localArrayFor(name, span) {
+      return localArrayDeclarationFor(localArrayDeclarations, name, span);
+    },
+    localPointerArrayFor(name, span) {
+      const declaration = localArrayDeclarationFor(localArrayDeclarations, name, span);
+      return declaration?.pointer && declaration.dimensions.length > 0 ? declaration : undefined;
+    },
+    localPointerArrayRootFor(name, span) {
+      const declaration = localArrayDeclarationFor(localArrayDeclarations, name, span);
+      if (!declaration?.pointer) return undefined;
+      return localPointerArrayRoots.get(name);
     },
     cooperativeGroupFor(name) {
       return cooperativeGroups.get(name);
@@ -633,9 +645,11 @@ function collectWgslDeclaredNames(
       ...collectCooperativeGroupGeneratedNames(fn.params),
       ...collectLocalNames(fn.body),
       ...collectLocalPointerHandleGeneratedNames(fn.body, structuredPointerRoots),
+      ...collectLocalPointerArrayGeneratedNames(fn.body),
     ]),
     ...localNames,
     ...collectLocalPointerHandleGeneratedNames(ir.body, structuredPointerRoots),
+    ...collectLocalPointerArrayGeneratedNames(ir.body),
     ...externalPoolNames,
     ...externalPoolNames.flatMap((name) => [poolDataName(name), poolOffsetName(name)]),
   ];
@@ -664,6 +678,12 @@ function collectLocalPointerHandleGeneratedNames(
   structuredPointerRoots: ReadonlySet<string> = new Set(),
 ): readonly string[] {
   return [...collectLocalPointerHandles(statements, undefined, structuredPointerRoots).keys()].flatMap((name) => [`${name}_buffer`, `${name}_base`]);
+}
+
+function collectLocalPointerArrayGeneratedNames(statements: readonly CudaLiteStatement[]): readonly string[] {
+  return [...collectLocalArrays(statements).values()]
+    .filter(isLocalPointerArrayDecl)
+    .flatMap((statement) => [`${statement.name}_buffer`, `${statement.name}_base`]);
 }
 
 function collectCooperativeGroupGeneratedNames(params: readonly CudaLiteParam[]): readonly string[] {
@@ -713,6 +733,7 @@ function emitStatement(
     case "var":
       if (statement.storage === "shared") return [];
       if (statement.pointer) {
+        if (isLocalPointerArrayDecl(statement)) return emitLocalPointerArrayDecl(statement, context, indentLevel);
         if (context.localPointerHandleFor(statement.name)) return emitLocalPointerHandleDecl(statement, context, indentLevel);
         if (!isEmittedPointerVar(statement, context)) return [];
         return [`${prefix}var ${context.nameFor(statement.name)}: u32${statement.init ? ` = ${emitExpression(statement.init, context)}` : " = 0u"};`];
@@ -917,6 +938,30 @@ function emitLocalPointerHandleDecl(
   ];
 }
 
+function emitLocalPointerArrayDecl(
+  statement: CudaLiteVarDecl,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const prefix = indent(indentLevel);
+  const length = localPointerArrayLength(statement);
+  if (context.localPointerArrayRootFor(statement.name, statement.span)) {
+    return [`${prefix}var ${context.nameFor(`${statement.name}_base`)}: array<u32, ${length}>;`];
+  }
+  return [
+    `${prefix}var ${context.nameFor(`${statement.name}_buffer`)}: array<u32, ${length}>;`,
+    `${prefix}var ${context.nameFor(`${statement.name}_base`)}: array<u32, ${length}>;`,
+  ];
+}
+
+function localPointerArrayLength(statement: CudaLiteVarDecl): number {
+  return statement.dimensions.reduce((product, dimension) => product * dimension, 1);
+}
+
+function isLocalPointerArrayDecl(statement: CudaLiteVarDecl): boolean {
+  return statement.pointer && statement.storage === "local" && statement.dimensions.length > 0;
+}
+
 function emitLocalPointerHandleInit(statement: CudaLiteVarDecl, context: EmitContext): readonly [string, string] {
   if (!statement.init) return ["0u", "0u"];
   const parts = devicePointerArgumentParts(statement.init, context);
@@ -1049,11 +1094,12 @@ function usesFunctionLocalPointerParam(
   ];
   for (const { statements, localPointerParams } of roots) {
     const localArrayNames = new Set(collectLocalArrays(statements).keys());
+    const localPointerArrayNames = new Set(collectLocalPointerArrayRoots(statements).keys());
     walkCudaLiteExpressions(statements, (expression) => {
       if (!allCallsUseLocalAddress || expression.kind !== "call" || expressionName(expression.callee) !== fn.name) return;
       sawCall = true;
       const arg = expression.args[paramIndex];
-      if (!arg || !isFunctionLocalPointerArgument(arg, sharedNames, localArrayNames, localPointerParams)) allCallsUseLocalAddress = false;
+      if (!arg || !isFunctionLocalPointerArgument(arg, sharedNames, localArrayNames, localPointerArrayNames, localPointerParams)) allCallsUseLocalAddress = false;
     });
   }
   const result = sawCall && allCallsUseLocalAddress;
@@ -1062,8 +1108,14 @@ function usesFunctionLocalPointerParam(
 }
 
 function emitFunctionLocalPointerArgument(expression: CudaLiteExpression, context: EmitContext): string {
-  if (expression.kind === "identifier" && context.localArrayFor(expression.name)) {
+  if (expression.kind === "identifier" && context.localArrayFor(expression.name, expression.span)) {
     return `&${context.nameFor(expression.name)}[0]`;
+  }
+  if (expression.kind === "index" && expression.target.kind === "identifier") {
+    const root = context.localPointerArrayRootFor(expression.target.name, expression.target.span);
+    if (root) {
+      return `&${context.nameFor(root.name)}[${context.nameFor(`${expression.target.name}_base`)}[u32(${emitExpression(expression.index, context)})]]`;
+    }
   }
   return emitExpression(expression, context);
 }
@@ -1072,10 +1124,14 @@ function isFunctionLocalPointerArgument(
   expression: CudaLiteExpression,
   sharedNames: ReadonlySet<string>,
   localArrayNames: ReadonlySet<string>,
+  localPointerArrayNames: ReadonlySet<string>,
   localPointerParamNames: ReadonlySet<string>,
 ): boolean {
   if (expression.kind === "identifier") {
     return localArrayNames.has(expression.name) || localPointerParamNames.has(expression.name);
+  }
+  if (expression.kind === "index" && expression.target.kind === "identifier") {
+    return localPointerArrayNames.has(expression.target.name);
   }
   return expression.kind === "unary" &&
     expression.operator === "&" &&
@@ -1684,6 +1740,17 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
       };
     }
   }
+  if (expression.kind === "index" && expression.target.kind === "identifier") {
+    const pointerArray = context.localPointerArrayFor(expression.target.name, expression.target.span);
+    if (pointerArray) {
+      if (context.localPointerArrayRootFor(pointerArray.name, expression.target.span)) return undefined;
+      const index = `u32(${emitExpression(expression.index, context)})`;
+      return {
+        buffer: `${context.nameFor(`${pointerArray.name}_buffer`)}[${index}]`,
+        base: `${context.nameFor(`${pointerArray.name}_base`)}[${index}]`,
+      };
+    }
+  }
   if (expression.kind === "cast" && expression.pointer) {
     return devicePointerArgumentParts(expression.expression, context);
   }
@@ -1809,6 +1876,8 @@ function devicePointerValueTypeForExpression(expression: CudaLiteExpression, con
   }
   const root = rootIdentifier(expression);
   if (root) {
+    const pointerArray = context.localPointerArrayFor(root, expression.span);
+    if (pointerArray) return pointerArray.valueType;
     const handle = context.localPointerHandleFor(root);
     if (handle) return handle.valueType;
     const alias = context.pointerAliasFor(root);
@@ -1920,6 +1989,16 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
     case "index": {
       const matrixLane = emitMatrixTileLaneAccessExpression(expression, context);
       if (matrixLane) return matrixLane;
+      if (expression.target.kind === "identifier" && context.localPointerArrayFor(expression.target.name, expression.target.span)) {
+        const localRoot = context.localPointerArrayRootFor(expression.target.name, expression.target.span);
+        if (localRoot) {
+          return `${context.nameFor(`${expression.target.name}_base`)}[u32(${emitExpression(expression.index, context)})]`;
+        }
+        const parts = devicePointerArgumentParts(expression, context);
+        return mode === "lvalue"
+          ? `${context.nameFor(`${expression.target.name}_base`)}[u32(${emitExpression(expression.index, context)})]`
+          : parts?.base ?? "0u";
+      }
       if (expression.target.kind === "identifier") {
         const localType = context.localValueTypeFor(expression.target.name);
         if (isCudaVectorType(localType)) {
@@ -2124,6 +2203,220 @@ function collectLocalArrays(statements: readonly CudaLiteStatement[]): ReadonlyM
   return arrays;
 }
 
+function collectLocalArrayDeclarations(statements: readonly CudaLiteStatement[]): readonly CudaLiteVarDecl[] {
+  const declarations: CudaLiteVarDecl[] = [];
+  const walk = (items: readonly CudaLiteStatement[]): void => {
+    for (const item of items) {
+      if (item.kind === "var" && item.storage === "local" && (item.dimensions.length > 0 || item.matrixTile)) {
+        declarations.push(item);
+      }
+      if (item.kind === "if") {
+        walk(item.consequent);
+        if (item.alternate) walk(item.alternate);
+      }
+      if (item.kind === "for") {
+        if (item.init?.kind === "var" && item.init.storage === "local" && (item.init.dimensions.length > 0 || item.init.matrixTile)) {
+          declarations.push(item.init);
+        }
+        walk(item.body);
+      }
+      if (item.kind === "while" || item.kind === "do-while" || item.kind === "block") walk(item.body);
+    }
+  };
+  walk(statements);
+  return declarations.sort((left, right) => left.span.start - right.span.start);
+}
+
+function localArrayDeclarationFor(
+  declarations: readonly CudaLiteVarDecl[],
+  name: string,
+  span?: SourceSpan,
+): CudaLiteVarDecl | undefined {
+  let candidate: CudaLiteVarDecl | undefined;
+  for (const declaration of declarations) {
+    if (declaration.name !== name) continue;
+    if (span && declaration.span.start > span.start) break;
+    candidate = declaration;
+  }
+  return candidate;
+}
+
+function collectLocalPointerArrayRoots(statements: readonly CudaLiteStatement[]): ReadonlyMap<string, CudaLiteVarDecl> {
+  interface PointerArrayState {
+    readonly declaration: CudaLiteVarDecl;
+    root?: CudaLiteVarDecl;
+    invalid: boolean;
+    sawAssignment: boolean;
+  }
+
+  const states: PointerArrayState[] = [];
+  const scanExpression = (
+    expression: CudaLiteExpression,
+    arrays: ReadonlyMap<string, CudaLiteVarDecl>,
+    pointerArrays: ReadonlyMap<string, PointerArrayState>,
+  ): void => {
+    if (expression.kind === "assignment" && expression.left.kind === "index" && expression.left.target.kind === "identifier") {
+      const state = pointerArrays.get(expression.left.target.name);
+      if (state) {
+        state.sawAssignment = true;
+        const root = localArrayAddressRoot(expression.right, arrays);
+        if (!root || (state.root !== undefined && state.root !== root)) {
+          state.invalid = true;
+        } else {
+          state.root = root;
+        }
+      }
+    }
+    for (const child of expressionChildren(expression)) scanExpression(child, arrays, pointerArrays);
+  };
+  const walk = (
+    items: readonly CudaLiteStatement[],
+    inheritedArrays: ReadonlyMap<string, CudaLiteVarDecl>,
+    inheritedPointerArrays: ReadonlyMap<string, PointerArrayState>,
+  ): void => {
+    const arrays = new Map(inheritedArrays);
+    const pointerArrays = new Map(inheritedPointerArrays);
+    for (const item of items) {
+      switch (item.kind) {
+        case "var":
+          if (item.storage === "local" && item.dimensions.length > 0) {
+            if (isLocalPointerArrayDecl(item)) {
+              const state: PointerArrayState = { declaration: item, invalid: false, sawAssignment: false };
+              pointerArrays.set(item.name, state);
+              states.push(state);
+            } else {
+              arrays.set(item.name, item);
+              pointerArrays.delete(item.name);
+            }
+          }
+          if (item.init) scanExpression(item.init, arrays, pointerArrays);
+          break;
+        case "expr":
+          scanExpression(item.expression, arrays, pointerArrays);
+          break;
+        case "if":
+          scanExpression(item.condition, arrays, pointerArrays);
+          walk(item.consequent, new Map(arrays), new Map(pointerArrays));
+          if (item.alternate) walk(item.alternate, new Map(arrays), new Map(pointerArrays));
+          break;
+        case "for": {
+          const loopArrays = new Map(arrays);
+          const loopPointerArrays = new Map(pointerArrays);
+          if (item.init?.kind === "var") {
+            const init = item.init;
+            if (init.storage === "local" && init.dimensions.length > 0) {
+              if (isLocalPointerArrayDecl(init)) {
+                const state: PointerArrayState = { declaration: init, invalid: false, sawAssignment: false };
+                loopPointerArrays.set(init.name, state);
+                states.push(state);
+              } else {
+                loopArrays.set(init.name, init);
+                loopPointerArrays.delete(init.name);
+              }
+            }
+            if (init.init) scanExpression(init.init, loopArrays, loopPointerArrays);
+          } else if (item.init) {
+            scanExpression(item.init, loopArrays, loopPointerArrays);
+          }
+          if (item.condition) scanExpression(item.condition, loopArrays, loopPointerArrays);
+          if (item.update) scanExpression(item.update, loopArrays, loopPointerArrays);
+          walk(item.body, loopArrays, loopPointerArrays);
+          break;
+        }
+        case "while":
+          scanExpression(item.condition, arrays, pointerArrays);
+          walk(item.body, new Map(arrays), new Map(pointerArrays));
+          break;
+        case "do-while":
+          walk(item.body, new Map(arrays), new Map(pointerArrays));
+          scanExpression(item.condition, arrays, pointerArrays);
+          break;
+        case "block":
+          walk(item.body, new Map(arrays), new Map(pointerArrays));
+          break;
+        case "kernel-launch":
+          for (const expression of [...item.grid, ...item.block, ...item.args]) scanExpression(expression, arrays, pointerArrays);
+          break;
+        case "asm":
+          if (item.output) scanExpression(item.output, arrays, pointerArrays);
+          for (const output of item.outputs ?? []) scanExpression(output, arrays, pointerArrays);
+          for (const input of item.inputs) scanExpression(input, arrays, pointerArrays);
+          break;
+        case "return":
+          if (item.value) scanExpression(item.value, arrays, pointerArrays);
+          break;
+        case "dim3":
+          for (const arg of item.args) scanExpression(arg, arrays, pointerArrays);
+          break;
+        case "cooperative-group":
+        case "continue":
+        case "break":
+          break;
+      }
+    }
+  };
+  walk(statements, new Map(), new Map());
+  const out = new Map<string, CudaLiteVarDecl>();
+  for (const state of states) {
+    if (state.sawAssignment && !state.invalid && state.root && !state.root.pointer) {
+      out.set(state.declaration.name, state.root);
+    }
+  }
+  return out;
+}
+
+function localArrayAddressRoot(
+  expression: CudaLiteExpression,
+  arrays: ReadonlyMap<string, CudaLiteVarDecl>,
+): CudaLiteVarDecl | undefined {
+  if (expression.kind === "cast" && expression.pointer) return localArrayAddressRoot(expression.expression, arrays);
+  if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
+    return expression.args[0] ? localArrayAddressRoot(expression.args[0], arrays) : undefined;
+  }
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    return localArrayAddressRoot(expression.left, arrays);
+  }
+  if (expression.kind === "conditional") {
+    const consequent = localArrayAddressRoot(expression.consequent, arrays);
+    const alternate = localArrayAddressRoot(expression.alternate, arrays);
+    return consequent && consequent === alternate ? consequent : undefined;
+  }
+  if (expression.kind !== "unary" || expression.operator !== "&") return undefined;
+  const root = rootIdentifier(expression.argument);
+  const declaration = root ? arrays.get(root) : undefined;
+  return declaration && !declaration.pointer ? declaration : undefined;
+}
+
+function expressionChildren(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
+  switch (expression.kind) {
+    case "call":
+      return [expression.callee, ...expression.args];
+    case "initializer":
+      return expression.elements;
+    case "cast":
+      return [expression.expression];
+    case "member":
+      return [expression.object];
+    case "index":
+      return [expression.target, expression.index];
+    case "unary":
+    case "update":
+      return [expression.argument];
+    case "binary":
+      return [expression.left, expression.right];
+    case "conditional":
+      return [expression.condition, expression.consequent, expression.alternate];
+    case "assignment":
+      return [expression.left, expression.right];
+    case "sequence":
+      return expression.expressions;
+    case "number":
+    case "string":
+    case "identifier":
+      return [];
+  }
+}
+
 function collectLocalValueTypes(statements: readonly CudaLiteStatement[]): ReadonlyMap<string, CudaLiteScalarType> {
   const types = new Map<string, CudaLiteScalarType>();
   const walk = (items: readonly CudaLiteStatement[]): void => {
@@ -2159,7 +2452,7 @@ function emitFillRegsStatement(
   const target = expression.args[0];
   const value = expression.args[1];
   if (target?.kind !== "identifier" || !value) return undefined;
-  const array = context.localArrayFor(target.name);
+  const array = context.localArrayFor(target.name, target.span);
   if (!array) return undefined;
   return emitLocalArrayFill(context.nameFor(target.name), array.dimensions, emitExpression(value, context), indentLevel);
 }
@@ -3045,6 +3338,8 @@ function sharedDeclarationFor(name: string, context: EmitContext): CudaLiteVarDe
 }
 
 function emitDeref(expression: CudaLiteExpression, context: EmitContext): string {
+  const localPointer = localPointerArrayLocalAccess(expression, context);
+  if (localPointer) return localPointer;
   if (expression.kind === "identifier") {
     const alias = context.pointerAliasFor(expression.name);
     if (alias) {
@@ -3082,6 +3377,13 @@ function emitDeref(expression: CudaLiteExpression, context: EmitContext): string
     return `${pointerReadHelperName(valueType)}(${parts.buffer}, ${parts.base})`;
   }
   return `*${emitExpression(expression, context)}`;
+}
+
+function localPointerArrayLocalAccess(expression: CudaLiteExpression, context: EmitContext): string | undefined {
+  if (expression.kind !== "index" || expression.target.kind !== "identifier") return undefined;
+  const root = context.localPointerArrayRootFor(expression.target.name, expression.target.span);
+  if (!root) return undefined;
+  return `${context.nameFor(root.name)}[${context.nameFor(`${expression.target.name}_base`)}[u32(${emitExpression(expression.index, context)})]]`;
 }
 
 function emitMember(expression: Extract<CudaLiteExpression, { kind: "member" }>, context: EmitContext): string {
@@ -4065,6 +4367,8 @@ function integerAtomicLoopHelperName(kind: "Inc" | "Dec", target: AtomicTargetIn
 }
 
 function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string {
+  const pointerArrayAssignment = emitLocalPointerArrayAssignment(expression, context);
+  if (pointerArrayAssignment) return pointerArrayAssignment;
   const pointerRebase = emitPointerRebaseAssignment(expression, context);
   if (pointerRebase) return pointerRebase;
   const localVectorAssignment = emitLocalVectorIndexAssignment(expression, context);
@@ -4184,6 +4488,72 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   if (expression.operator === "|=") return `${left} = (${left} | ${right})`;
   if (expression.operator === "^=") return `${left} = (${left} ^ ${right})`;
   return `${left} ${expression.operator} ${right}`;
+}
+
+function emitLocalPointerArrayAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string | undefined {
+  if (expression.left.kind !== "index" || expression.left.target.kind !== "identifier") return undefined;
+  const pointerArray = context.localPointerArrayFor(expression.left.target.name, expression.left.target.span);
+  if (!pointerArray) return undefined;
+  if (expression.operator !== "=") {
+    throw featureError("unsupported-pointer-assignment", "CUDA pointer-array elements support direct assignment only");
+  }
+  const localRoot = context.localPointerArrayRootFor(pointerArray.name, expression.left.target.span);
+  if (localRoot) {
+    const base = localPointerArrayLocalBase(expression.right, localRoot, context);
+    if (!base) {
+      throw featureError("unsupported-pointer-assignment", "CUDA local pointer-array assignment expects an address inside one local array");
+    }
+    const index = `u32(${emitExpression(expression.left.index, context)})`;
+    return `${context.nameFor(`${pointerArray.name}_base`)}[${index}] = ${base}`;
+  }
+  const parts = devicePointerArgumentParts(expression.right, context);
+  if (!parts) {
+    throw featureError("unsupported-pointer-assignment", "CUDA pointer-array assignment expects a modeled storage or shared pointer");
+  }
+  const index = `u32(${emitExpression(expression.left.index, context)})`;
+  return `${context.nameFor(`${pointerArray.name}_buffer`)}[${index}] = ${parts.buffer}; ${context.nameFor(`${pointerArray.name}_base`)}[${index}] = ${parts.base}`;
+}
+
+function localPointerArrayLocalBase(
+  expression: CudaLiteExpression,
+  root: CudaLiteVarDecl,
+  context: EmitContext,
+): string | undefined {
+  if (expression.kind === "cast" && expression.pointer) return localPointerArrayLocalBase(expression.expression, root, context);
+  if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
+    return expression.args[0] ? localPointerArrayLocalBase(expression.args[0], root, context) : undefined;
+  }
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    const base = localPointerArrayLocalBase(expression.left, root, context);
+    if (!base) return undefined;
+    const delta = `u32(${emitExpression(expression.right, context)})`;
+    return expression.operator === "+" ? `(${base} + ${delta})` : `(${base} - ${delta})`;
+  }
+  if (expression.kind !== "unary" || expression.operator !== "&") return undefined;
+  return localArrayFlatIndexExpression(expression.argument, root, context);
+}
+
+function localArrayFlatIndexExpression(
+  expression: CudaLiteExpression,
+  root: CudaLiteVarDecl,
+  context: EmitContext,
+): string | undefined {
+  const indices: CudaLiteExpression[] = [];
+  let cursor = expression;
+  while (cursor.kind === "index") {
+    indices.unshift(cursor.index);
+    cursor = cursor.target;
+  }
+  if (cursor.kind !== "identifier" || cursor.name !== root.name) return undefined;
+  if (indices.length === 0) return "0u";
+  const dimensions = root.dimensions;
+  if (indices.length !== dimensions.length) return undefined;
+  const terms = indices.map((index, axis) => {
+    const stride = dimensions.slice(axis + 1).reduce((product, dimension) => product * dimension, 1);
+    const value = `u32(${emitExpression(index, context)})`;
+    return stride === 1 ? value : `(${value} * ${stride}u)`;
+  });
+  return terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
 }
 
 function emitLocalVectorIndexAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string | undefined {

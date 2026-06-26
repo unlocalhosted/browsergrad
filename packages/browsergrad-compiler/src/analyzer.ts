@@ -1097,10 +1097,18 @@ function isSupportedSharedPointerAlias(statement: CudaLiteVarDecl, scope: Scope)
 }
 
 function isSupportedLocalPointer(statement: CudaLiteVarDecl, scope: Scope): boolean {
+  if (isSupportedLocalPointerArray(statement)) return true;
   if (isSupportedSharedPointerAlias(statement, scope)) return true;
   if (isSupportedStoragePointerInitializer(statement, scope)) return true;
   if (!statement.pointer || statement.storage !== "local") return false;
   return isSupportedPoolPointerInitializer(statement.init, scope);
+}
+
+function isSupportedLocalPointerArray(statement: CudaLiteVarDecl): boolean {
+  return statement.pointer &&
+    statement.storage === "local" &&
+    statement.dimensions.length > 0 &&
+    statement.init === undefined;
 }
 
 function validatePointerInitializerExpression(
@@ -2781,6 +2789,9 @@ function validateNonCallExpression(
             symbol: target.symbol,
           };
         }
+        if (target.symbol?.pointer) {
+          return { kind: "pointer", valueType: target.valueType, symbol: target.symbol };
+        }
         if (isCudaVectorType(target.valueType)) {
           return { kind: "vector", valueType: target.valueType, symbol: target.symbol };
         }
@@ -2992,7 +3003,7 @@ function validateLValueExpression(
       diagnostics.push(error("const-pointer-write", `cannot write through const pointer '${root}'`, expression.span));
       return;
     }
-    if (info.kind !== "scalar" && info.kind !== "complex" && info.kind !== "vector") {
+    if (info.kind !== "scalar" && info.kind !== "complex" && info.kind !== "vector" && info.kind !== "pointer") {
       diagnostics.push(error("invalid-assignment-target", "assignment target must resolve to a scalar or complex element", expression.span));
     }
     return;

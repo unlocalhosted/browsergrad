@@ -54,7 +54,7 @@ import {
 } from "./types.js";
 
 type EvalValue = number | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue | TextureHandleValue;
-type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue | TextureHandleValue | LocalArrayValue;
+type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue | TextureHandleValue | LocalArrayValue | LocalPointerArrayValue;
 interface Vector3 {
   readonly x: number;
   readonly y: number;
@@ -148,6 +148,13 @@ interface LocalArrayValue {
   readonly data: WgslTypedArray;
   readonly matrixTile?: CudaLiteVarDecl["matrixTile"];
   readonly matrixTileArrayDimensions?: readonly number[];
+}
+
+interface LocalPointerArrayValue {
+  readonly kind: "local-pointer-array";
+  readonly dimensions: readonly number[];
+  readonly valueType: CudaLiteScalarType;
+  readonly values: Array<AddressValue | PoolPointerValue | number>;
 }
 
 interface MutableTrace {
@@ -742,6 +749,10 @@ function offsetLValue(lvalue: LValue, elementOffset: number, valueType: CudaLite
 
 function execVar(statement: CudaLiteVarDecl, context: ThreadContext): void {
   if (statement.storage === "shared") return;
+  if (statement.pointer && statement.dimensions.length > 0) {
+    context.locals.set(statement.name, allocateLocalPointerArray(statement));
+    return;
+  }
   if (statement.pointer) {
     context.locals.set(statement.name, resolvePointerInitializer(statement, context));
     return;
@@ -880,7 +891,7 @@ function pointerArgumentValue(
     const local = context.locals.get(arg.name);
     if (isLocalArray(local)) return { kind: "address", target: { name: arg.name, space: "local", index: 0, valueType, locals: context.locals } };
     if (isPoolPointer(local)) return { ...local, valueType };
-    if (isAddress(local)) return local;
+    if (isAddress(local)) return addressWithValueType(local, valueType);
     if (context.buffers.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "buffer", index: 0, valueType } };
     if (context.shared.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "shared", index: 0, valueType } };
     if (context.deviceGlobals.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "device-global", index: 0, valueType } };
@@ -891,8 +902,15 @@ function pointerArgumentValue(
   }
   const value = evalExpression(arg, context);
   if (isPoolPointer(value)) return { ...value, valueType };
-  if (isAddress(value)) return value;
+  if (isAddress(value)) return addressWithValueType(value, valueType);
   throw compilerFailure("unsupported dynamic kernel pointer argument");
+}
+
+function addressWithValueType(value: AddressValue, valueType: CudaLiteScalarType): AddressValue {
+  return {
+    kind: "address",
+    target: { ...value.target, valueType: value.target.valueType ?? valueType },
+  };
 }
 
 function pointerOffsetArgumentValue(
@@ -1021,6 +1039,10 @@ function pointerValueTypeForExpression(
     if (isPoolPointer(local) && local.valueType) return local.valueType;
     if (isAddress(local) && local.target.valueType) return local.target.valueType;
     return context.valueTypes.get(expression.name) ?? "uint";
+  }
+  if (expression.kind === "index" && expression.target.kind === "identifier") {
+    const local = context.locals.get(expression.target.name);
+    if (isLocalPointerArray(local)) return local.valueType;
   }
   const root = rootIdentifierFromExpression(expression);
   return root ? context.valueTypes.get(root) ?? "uint" : "uint";
@@ -1222,6 +1244,10 @@ function vectorExpressionType(
     }
     if (isHalf2Intrinsic(name) || name === "__float22half2_rn" || name === "__float2half2_rn" || name === "__floats2half2_rn") return "half2";
     if (name === "__half22float2") return "float2";
+  }
+  if (expression.kind === "unary" && expression.operator === "*") {
+    const type = pointerValueTypeForExpression(expression.argument, context);
+    return isCudaVectorType(type) ? type : undefined;
   }
   if (expression.kind === "binary") {
     if (expression.operator !== "+" && expression.operator !== "-" && expression.operator !== "*" && expression.operator !== "/") return undefined;
@@ -2652,6 +2678,9 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
     if (chain.length !== 1) throw compilerFailure(`CUDA vector '${cursor.name}' expects one-dimensional indexing`);
     return { name: cursor.name, space: "local", fieldIndex: chain[0]!, valueType: alias.valueType };
   }
+  if (isLocalPointerArray(alias)) {
+    return { name: cursor.name, space: "local", index: flattenIndex(alias.dimensions, chain), valueType: alias.valueType };
+  }
   if (isLocalArray(alias)) {
     return { name: cursor.name, space: "local", index: flattenIndex(alias.dimensions, chain) };
   }
@@ -2798,6 +2827,9 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
     const locals = lvalue.locals ?? context.locals;
     if (lvalue.index === undefined) return projectField(readIdentifierFrom(lvalue.name, context, locals), lvalue);
     const local = locals.get(lvalue.name);
+    if (isLocalPointerArray(local)) {
+      return local.values[lvalue.index] ?? { kind: "pool-pointer", poolName: "", byteOffset: -1, valueType: lvalue.valueType ?? local.valueType };
+    }
     if (!isLocalArray(local)) throw compilerFailure(`'${lvalue.name}' is not a local array`);
     const valueType = lvalue.valueType ?? local.valueType;
     const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
@@ -2858,6 +2890,19 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
     const locals = lvalue.locals ?? context.locals;
     if (lvalue.index !== undefined) {
       const local = locals.get(lvalue.name);
+      if (isLocalPointerArray(local)) {
+        if (typeof value === "number" && value !== 0) throw compilerFailure(`'${lvalue.name}' pointer array expects pointer values`);
+        if (typeof value === "number") {
+          local.values[lvalue.index] = { kind: "pool-pointer", poolName: "", byteOffset: -1, valueType: lvalue.valueType ?? local.valueType };
+        } else if (isAddress(value)) {
+          local.values[lvalue.index] = addressWithValueType(value, lvalue.valueType ?? local.valueType);
+        } else if (isPoolPointer(value)) {
+          local.values[lvalue.index] = { ...value, valueType: value.valueType ?? lvalue.valueType ?? local.valueType };
+        } else {
+          throw compilerFailure(`'${lvalue.name}' pointer array expects pointer values`);
+        }
+        return;
+      }
       if (!isLocalArray(local)) throw compilerFailure(`'${lvalue.name}' is not a local array`);
       const valueType = lvalue.valueType ?? local.valueType;
       const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
@@ -2948,6 +2993,16 @@ function allocateLocalArray(declaration: CudaLiteVarDecl): LocalArrayValue {
     valueType: declaration.valueType,
     data: allocateTypedArray(declaration.valueType, matrixTileStorageDimensions(declaration)),
     ...(declaration.matrixTile === undefined ? {} : { matrixTile: declaration.matrixTile, matrixTileArrayDimensions: declaration.dimensions }),
+  };
+}
+
+function allocateLocalPointerArray(declaration: CudaLiteVarDecl): LocalPointerArrayValue {
+  const length = declaration.dimensions.reduce((product, dimension) => product * dimension, 1);
+  return {
+    kind: "local-pointer-array",
+    dimensions: declaration.dimensions,
+    valueType: declaration.valueType,
+    values: Array.from({ length }, () => ({ kind: "pool-pointer", poolName: "", byteOffset: -1, valueType: declaration.valueType })),
   };
 }
 
@@ -3523,6 +3578,13 @@ function isLocalArray(value: LocalValue | undefined): value is LocalArrayValue {
     typeof value !== "number" &&
     "kind" in value &&
     value.kind === "local-array";
+}
+
+function isLocalPointerArray(value: LocalValue | undefined): value is LocalPointerArrayValue {
+  return value !== undefined &&
+    typeof value !== "number" &&
+    "kind" in value &&
+    value.kind === "local-pointer-array";
 }
 
 function isPoolPointer(value: LocalValue | EvalValue | undefined): value is PoolPointerValue {

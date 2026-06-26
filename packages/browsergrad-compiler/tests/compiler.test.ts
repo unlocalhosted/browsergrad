@@ -768,6 +768,68 @@ __global__ void localArrayDecay(float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([7]);
   });
 
+  it("stores modeled memory pointers in fixed local pointer arrays", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float read_x(float3 *value) {
+  return (*value).x;
+}
+__global__ void pointerArray(float *out) {
+  __shared__ float3 values[3];
+  values[0] = make_float3(2.0f, 4.0f, 6.0f);
+  float3 *p[3];
+  p[0] = &values[0];
+  out[0] = read_x(p[0]);
+  out[1] = (*p[0]).z;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var p_buffer: array<u32, 3>;");
+    expect(compiled.wgsl).toContain("p_buffer[u32(0)] =");
+    expect(compiled.wgsl).toContain("read_x(p_buffer[u32(0)], p_base[u32(0)]");
+    expect([...result.buffers.out as Float32Array]).toEqual([2, 6]);
+  });
+
+  it("lowers sample-shaped vector pointer-array helper flow", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float3 calcNormal(float3 *a, float3 *b, float3 *c) {
+  return *a + *b + *c;
+}
+__global__ void pointerArrayTriangle(float4 *out) {
+  float3 vertlist[3];
+  vertlist[0] = make_float3(1.0f, 2.0f, 3.0f);
+  vertlist[1] = make_float3(4.0f, 5.0f, 6.0f);
+  vertlist[2] = make_float3(7.0f, 8.0f, 9.0f);
+  float3 *v[3];
+  v[0] = &vertlist[0];
+  v[1] = &vertlist[1];
+  v[2] = &vertlist[2];
+  float3 n = calcNormal(v[0], v[1], v[2]);
+  out[0] = make_float4(*v[0], 1.0f);
+  out[1] = make_float4(n, 0.0f);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(8) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("calcNormal(&vertlist[v_base[u32(0)]]");
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 1, 12, 15, 18, 0]);
+  });
+
+  it("rejects non-pointer assignments to pointer-array elements", () => {
+    expect(() => compileCudaLiteKernel(`
+__global__ void badPointerArray() {
+  __shared__ float3 values[1];
+  float3 *p[1];
+  p[0] = values[0];
+}`, { workgroupSize: [1, 1, 1] })).toThrow(CudaLiteCompilerError);
+  });
+
   it("rejects const storage addresses for writable device pointer params", () => {
     expect(() => compileCudaLiteKernel(`
 __device__ void write_one(float* p) {
