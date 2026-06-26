@@ -82,8 +82,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --sk
   compile/codegen-ok, and `<=13` hard gaps;
   `karpathy/llm.c@f1e2ace` must stay at `148` kernel definitions, `>=148`
   compile/codegen-ok, and `0` hard gaps;
-  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=286`
-  compile/codegen-ok, and `<=7` hard gaps. The aggregate gate also verifies
+  `xlite-dev/LeetCUDA@c5dde9a` must stay at `293` kernel definitions, `>=287`
+  compile/codegen-ok, and `<=6` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
 - Corpus audits now emit `executionTierCounts` plus
   `compileFeatureProfile` and `deprecatedCompilePlanAliases` so platform code can distinguish

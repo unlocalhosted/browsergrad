@@ -262,7 +262,8 @@ export function createKernelCompilationUnit({
   const withVectorShuffles = normalizeVectorCooperativeShuffles(withLambdas);
   const withCuteRank2 = normalizeCuteRank2TransposeKernels(withVectorShuffles);
   const withCuteGemv = normalizeCuteRowBroadcastGemvKernels(withCuteRank2);
-  const withCuteTiles = normalizeCute1dAffineTileCopies(withCuteGemv);
+  const withCuteGemm = normalizeCuteTnGemmKernels(withCuteGemv);
+  const withCuteTiles = normalizeCute1dAffineTileCopies(withCuteGemm);
   const withExpressionMacros = normalizeSimpleExpressionMacros(withCuteTiles);
   const withRecoveredMacroStatements = normalizeMissingSemicolonAfterMacroAssignment(withExpressionMacros);
   const withLegacyArithmeticMacros = normalizeLegacyCudaArithmeticMacros(withRecoveredMacroStatements);
@@ -3501,13 +3502,20 @@ function collectCuteRowBroadcastGemvMotif(body) {
 
 function collectCuteRank2StridedGmemTensors(body) {
   const out = [];
-  const re = /\b(?:auto|Tensor)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*make_tensor\s*\(\s*make_gmem_ptr\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*,\s*make_layout\s*\(\s*make_shape\s*\(([^)]*)\)\s*,\s*make_stride\s*\(([^)]*)\)\s*\)\s*\)\s*;/gu;
-  for (const match of body.matchAll(re)) {
-    if (match[1] === undefined || match[2] === undefined || match[3] === undefined || match[4] === undefined) continue;
-    const shape = splitTopLevel(match[3]).map(normalizeCuteScalarExpression);
-    const stride = splitTopLevel(match[4]).map(normalizeCuteScalarExpression);
-    if (shape.length !== 2 || stride.length !== 2) continue;
-    out.push({ name: match[1], pointer: match[2], shape, stride });
+  const add = (name, pointer, rawShape, rawStride) => {
+    if (name === undefined || pointer === undefined || rawShape === undefined || rawStride === undefined) return;
+    const shape = splitTopLevel(rawShape).map(normalizeCuteScalarExpression);
+    const stride = splitTopLevel(rawStride).map(normalizeCuteScalarExpression);
+    if (shape.length !== 2 || stride.length !== 2) return;
+    out.push({ name, pointer, shape, stride });
+  };
+  const layoutRe = /\b(?:auto|Tensor)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*make_tensor\s*\(\s*make_gmem_ptr\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*,\s*make_layout\s*\(\s*make_shape\s*\(([^)]*)\)\s*,\s*make_stride\s*\(([^)]*)\)\s*\)\s*\)\s*;/gu;
+  for (const match of body.matchAll(layoutRe)) {
+    add(match[1], match[2], match[3], match[4]);
+  }
+  const directRe = /\b(?:auto|Tensor)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*make_tensor\s*\(\s*make_gmem_ptr\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*,\s*make_shape\s*\(([^)]*)\)\s*,\s*make_stride\s*\(([^)]*)\)\s*\)\s*;/gu;
+  for (const match of body.matchAll(directRe)) {
+    add(match[1], match[2], match[3], match[4]);
   }
   return out;
 }
@@ -3568,6 +3576,183 @@ function cuteRowBroadcastGemvBody(motif) {
     `      ${sum} = ${sum} + (${motif.matrixPointer}[(${row} * ${motif.cols}) + ${k}] * ${motif.vectorPointer}[${k}]);`,
     "    }",
     `    ${motif.outputPointer}[${row}] = ${sum};`,
+    "  }",
+    "}",
+  ];
+}
+
+function normalizeCuteTnGemmKernels(source) {
+  if (!/\bmake_tensor\s*\(\s*make_gmem_ptr\s*\(/u.test(source) || !/\blocal_tile\s*\(/u.test(source)) return source;
+  if (!/\bcute::gemm\s*\(/u.test(source) && !/\bgemm\s*\(/u.test(source)) return source;
+  let out = "";
+  let cursor = 0;
+  const globalRe = /\b__global__\b/gu;
+  let match;
+  while ((match = globalRe.exec(source)) !== null) {
+    const globalStart = match.index;
+    if (globalStart < cursor) continue;
+    const fn = parseCudaGlobalFunction(source, globalStart);
+    if (fn === undefined) {
+      globalRe.lastIndex = globalStart + "__global__".length;
+      continue;
+    }
+    const replacement = lowerCuteTnGemmFunction(fn);
+    if (replacement === undefined) {
+      globalRe.lastIndex = fn.bodyEnd + 1;
+      continue;
+    }
+    out += source.slice(cursor, fn.headerStart);
+    out += replacement;
+    cursor = fn.bodyEnd + 1;
+    globalRe.lastIndex = fn.bodyEnd + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function lowerCuteTnGemmFunction(fn) {
+  const motif = collectCuteTnGemmMotif(fn.body);
+  if (motif === undefined) return undefined;
+  const paramsByName = new Map();
+  for (const param of fn.params) {
+    const name = cudaParamName(param);
+    if (name !== undefined && !paramsByName.has(name)) paramsByName.set(name, param);
+  }
+  const keepNames = [motif.aPointer, motif.bPointer, motif.dPointer, motif.rows, motif.cols, motif.depth];
+  const keptParams = [];
+  const seen = new Set();
+  for (const name of keepNames) {
+    if (seen.has(name)) continue;
+    const param = paramsByName.get(name);
+    if (param === undefined) return undefined;
+    keptParams.push(param);
+    seen.add(name);
+  }
+  const valueType = cudaPointerParamValueType(paramsByName.get(motif.dPointer)) ??
+    cudaPointerParamValueType(paramsByName.get(motif.aPointer)) ??
+    "float";
+  return [
+    `${fn.signaturePrefix}(${keptParams.join(", ")}) {`,
+    ...cuteTnGemmBody({ ...motif, valueType }).map((line) => `  ${line}`),
+    "}",
+  ].join("\n");
+}
+
+function collectCuteTnGemmMotif(body) {
+  const tensors = collectCuteRank2StridedGmemTensors(body);
+  if (tensors.length < 3) return undefined;
+  const tiles = collectCuteRank2LocalTiles(body);
+  const aliases = collectCuteExpressionAliases(body);
+  for (const d of tensors) {
+    if (!cuteExprIsOne(d.stride[1])) continue;
+    for (const a of tensors) {
+      if (a === d || !cuteExprEquals(a.shape[0], d.shape[0]) || !cuteExprIsOne(a.stride[1])) continue;
+      if (!cuteExprEquals(a.stride[0], a.shape[1])) continue;
+      for (const b of tensors) {
+        if (b === d || b === a) continue;
+        if (!cuteExprEquals(b.shape[0], d.shape[1]) || !cuteExprEquals(b.shape[1], a.shape[1])) continue;
+        if (!cuteExprEquals(b.stride[0], b.shape[1]) || !cuteExprIsOne(b.stride[1])) continue;
+        if (!cuteExprEquals(d.stride[0], d.shape[1])) continue;
+        const aTile = tiles.find((tile) => tile.base === a.name);
+        const bTile = tiles.find((tile) => tile.base === b.name);
+        const dTile = tiles.find((tile) => tile.base === d.name);
+        if (aTile === undefined || bTile === undefined || dTile === undefined) continue;
+        if (!cuteExprEquals(aTile.extents[0], dTile.extents[0])) continue;
+        if (!cuteExprEquals(aTile.extents[1], bTile.extents[1])) continue;
+        if (!cuteExprEquals(bTile.extents[0], dTile.extents[1])) continue;
+        const aCoords = aTile.coords.map((coord) => resolveCuteExpressionAlias(coord, aliases));
+        const bCoords = bTile.coords.map((coord) => resolveCuteExpressionAlias(coord, aliases));
+        const dCoords = dTile.coords.map((coord) => resolveCuteExpressionAlias(coord, aliases));
+        if (aCoords.length !== 2 || bCoords.length !== 2 || dCoords.length !== 2) continue;
+        if (!cuteCoordIsWildcard(aCoords[1]) || !cuteCoordIsWildcard(bCoords[1])) continue;
+        if (!cuteExprEquals(aCoords[0], dCoords[0]) || !cuteExprEquals(bCoords[0], dCoords[1])) continue;
+        return {
+          aPointer: a.pointer,
+          bPointer: b.pointer,
+          dPointer: d.pointer,
+          rows: d.shape[0],
+          cols: d.shape[1],
+          depth: a.shape[1],
+          blockRows: aTile.extents[0],
+          blockCols: bTile.extents[0],
+          blockRow: dCoords[0],
+          blockCol: dCoords[1],
+        };
+      }
+    }
+  }
+  return undefined;
+}
+
+function collectCuteRank2LocalTiles(body) {
+  const out = [];
+  const re = /\b(?:auto|Tensor)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*local_tile\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*make_(?:tile|shape)\s*\(\s*Int<([^>]+)>\s*\{\s*\}\s*,\s*Int<([^>]+)>\s*\{\s*\}\s*\)\s*,\s*make_coord\s*\(([^)]*)\)\s*\)\s*;/gu;
+  for (const match of body.matchAll(re)) {
+    if (match[1] === undefined || match[2] === undefined || match[3] === undefined || match[4] === undefined || match[5] === undefined) continue;
+    const coords = splitTopLevel(match[5]).map((item) => item.trim());
+    if (coords.length !== 2 || coords.some((item) => item.length === 0)) continue;
+    out.push({
+      name: match[1],
+      base: match[2],
+      extents: [match[3].trim(), match[4].trim()],
+      coords,
+    });
+  }
+  return out;
+}
+
+function collectCuteExpressionAliases(body) {
+  const aliases = new Map(collectCuteIndexAliases(body));
+  for (const match of body.matchAll(/\bint\s+([^;]*\b(?:blockIdx|threadIdx|blockDim|gridDim)\.[xyz][^;]*)\s*;/gu)) {
+    const declarators = splitTopLevel(match[1] ?? "").map((item) => item.trim()).filter(Boolean);
+    for (const declarator of declarators) {
+      const parsed = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([\s\S]+)$/u.exec(declarator);
+      if (parsed?.[1] === undefined || parsed[2] === undefined) continue;
+      aliases.set(parsed[1], normalizeCuteIndexExpression(parsed[2]));
+    }
+  }
+  return aliases;
+}
+
+function normalizeCuteIndexExpression(expr) {
+  return expr
+    .replace(/\(\s*\(\s*int\s*\)\s*([01])\s*\)/gu, "$1")
+    .replace(/\btrue\b/gu, "1")
+    .replace(/\bfalse\b/gu, "0")
+    .trim();
+}
+
+function resolveCuteExpressionAlias(expr, aliases) {
+  const resolved = resolveCuteIndexAlias(expr, aliases);
+  return normalizeCuteIndexExpression(resolved);
+}
+
+function cuteCoordIsWildcard(expr) {
+  return expr.trim() === "_";
+}
+
+function cuteTnGemmBody(motif) {
+  const tid = "bg_cute_tid";
+  const linear = "bg_cute_linear";
+  const localRow = "bg_cute_row_local";
+  const localCol = "bg_cute_col_local";
+  const row = "bg_cute_row";
+  const col = "bg_cute_col";
+  const kk = "bg_cute_k";
+  const acc = "bg_cute_acc";
+  const stride = "((blockDim.x * blockDim.y) * blockDim.z)";
+  return [
+    `int ${tid} = threadIdx.x + (threadIdx.y * blockDim.x) + (threadIdx.z * blockDim.x * blockDim.y);`,
+    `for (int ${linear} = ${tid}; ${linear} < (${motif.blockRows} * ${motif.blockCols}); ${linear} = ${linear} + ${stride}) {`,
+    `  int ${localRow} = ${linear} / ${motif.blockCols};`,
+    `  int ${localCol} = ${linear} % ${motif.blockCols};`,
+    `  int ${row} = ((${motif.blockRow}) * ${motif.blockRows}) + ${localRow};`,
+    `  int ${col} = ((${motif.blockCol}) * ${motif.blockCols}) + ${localCol};`,
+    `  if (${row} < ${motif.rows} && ${col} < ${motif.cols}) {`,
+    `    float ${acc} = 0.0f;`,
+    `    for (int ${kk} = 0; ${kk} < ${motif.depth}; ${kk} = ${kk} + 1) {`,
+    `      ${acc} = ${acc} + ((float)${motif.aPointer}[(${row} * ${motif.depth}) + ${kk}] * (float)${motif.bPointer}[(${col} * ${motif.depth}) + ${kk}]);`,
+    "    }",
+    `    ${motif.dPointer}[(${row} * ${motif.cols}) + ${col}] = (${motif.valueType})${acc};`,
     "  }",
     "}",
   ];
@@ -6161,7 +6346,7 @@ function extendEnvironmentWithConstexprs(env, body, definesByName = new Map()) {
   let changed = true;
   while (changed) {
     changed = false;
-    for (const { name, expression } of scanConstexprIntegerDeclarations(body)) {
+    for (const { name, expression } of scanVisibleIntegerDeclarations(body)) {
       if (env.has(name)) continue;
       const value = evaluateTemplateIntegerExpression(expression, env);
       if (value === undefined) continue;
@@ -6177,7 +6362,7 @@ function collectVisibleIntegerConstants(source, definesByName = new Map()) {
   let changed = true;
   while (changed) {
     changed = false;
-    for (const { name, expression } of scanConstexprIntegerDeclarations(source)) {
+    for (const { name, expression } of scanVisibleIntegerDeclarations(source)) {
       if (env.has(name)) continue;
       const value = evaluateTemplateIntegerExpression(expression, env);
       if (value === undefined) continue;
@@ -6186,6 +6371,13 @@ function collectVisibleIntegerConstants(source, definesByName = new Map()) {
     }
   }
   return env;
+}
+
+function scanVisibleIntegerDeclarations(source) {
+  return [
+    ...scanConstexprIntegerDeclarations(source),
+    ...scanCuteIntObjectDeclarations(source),
+  ];
 }
 
 function scanConstexprIntegerDeclarations(source) {
@@ -6199,6 +6391,16 @@ function scanConstexprIntegerDeclarations(source) {
       if (parsed?.[1] === undefined || parsed[2] === undefined) continue;
       declarations.push({ name: parsed[1], expression: parsed[2].trim() });
     }
+  }
+  return declarations;
+}
+
+function scanCuteIntObjectDeclarations(source) {
+  const declarations = [];
+  const re = /\b(?:auto|const\s+auto|constexpr\s+auto|static\s+constexpr\s+auto)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:cute::)?Int\s*<([^<>]+)>\s*\{\s*\}\s*;/gu;
+  for (const match of source.matchAll(re)) {
+    if (match[1] === undefined || match[2] === undefined) continue;
+    declarations.push({ name: match[1], expression: match[2].trim() });
   }
   return declarations;
 }

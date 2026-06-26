@@ -606,6 +606,36 @@ __global__ void cute_hgemv(half *Aptr, half *Bptr, half *Cptr, const int M, cons
 {
   const source = createKernelCompilationUnit({
     kernel: `
+template <typename T, int BM, int BN, int BK, int kStage, typename TiledMMA>
+__global__ void cute_hgemm_tn(T *Aptr, T *Bptr, T *Dptr, int m, int n, int k) {
+  using namespace cute;
+  int ix = blockIdx.x;
+  int iy = blockIdx.y;
+  Tensor A = make_tensor(make_gmem_ptr(Aptr), make_shape(m, k), make_stride(k, Int<1>{}));
+  Tensor B = make_tensor(make_gmem_ptr(Bptr), make_shape(n, k), make_stride(k, Int<1>{}));
+  Tensor D = make_tensor(make_gmem_ptr(Dptr), make_shape(m, n), make_stride(n, Int<1>{}));
+  Tensor gA = local_tile(A, make_tile(Int<BM>{}, Int<BK>{}), make_coord(iy, _));
+  Tensor gB = local_tile(B, make_tile(Int<BN>{}, Int<BK>{}), make_coord(ix, _));
+  Tensor gD = local_tile(D, make_tile(Int<BM>{}, Int<BN>{}), make_coord(iy, ix));
+  TiledMMA tiled_mma;
+  auto thr_mma = tiled_mma.get_slice(threadIdx.x);
+  auto tCrA = thr_mma.partition_fragment_A(gA(_, _, 0));
+  auto tCrB = thr_mma.partition_fragment_B(gB(_, _, 0));
+  auto tCrD = thr_mma.partition_fragment_C(gD);
+  cute::gemm(tiled_mma, tCrD, tCrA, tCrB, tCrD);
+}`,
+    templateArgumentsByKernelName: new Map([["cute_hgemm_tn", ["half", "8", "16", "4", "2", "MMA"]]]),
+  });
+  assert.match(source, /__global__ void cute_hgemm_tn\(half \*Aptr, half \*Bptr, half \*Dptr, int m, int n, int k\)/u);
+  assert.match(source, /for \(int bg_for_bg_cute_linear_0 = bg_cute_tid;bg_for_bg_cute_linear_0 < \(8 \* 16\);bg_for_bg_cute_linear_0 = bg_for_bg_cute_linear_0 \+ \(\(blockDim\.x \* blockDim\.y\) \* blockDim\.z\)\)/u);
+  assert.match(source, /Dptr\[\(bg_cute_row \* n\) \+ bg_cute_col\] = \(half\)bg_cute_acc;/u);
+  assert.doesNotMatch(source, /\bTiledMMA\b/u);
+  assert.doesNotMatch(source, /\bmake_tensor\b/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 #define FLOAT4(value) (reinterpret_cast<float4 *>(&(value))[0])
 __global__ void vec4_recover(float *x, float *y, int N) {
   int idx = threadIdx.x * 4;
@@ -878,6 +908,30 @@ void host(float *out) {
   assert.match(source, /template <typename T = float, const int Width = 4>/u);
   assert.match(source, /__global__ void typed_kernel\(float \*out\)/u);
   assert.match(source, /float value = \(float\)4;/u);
+}
+
+{
+  const kernel = `
+template <typename T, int BM, int BN, int BK, int kStage>
+__global__ void cute_template_values(T *out) {
+  out[0] = (T)(BM + BN + BK + kStage);
+}`;
+  const wrapper = `
+template <typename T, const int Stages = 2>
+void launch_cute_template_values(T *out) {
+  auto BM = Int<128>{};
+  auto BN = Int<256>{};
+  auto BK = Int<32>{};
+  auto KStage = Int<Stages>{};
+  cute_template_values<T, BM, BN, BK, KStage><<<1, 1>>>(out);
+}
+void host(half *out) {
+  launch_cute_template_values<half, 2>(out);
+}`;
+  const launches = collectKernelTemplateArguments(`${kernel}\n${wrapper}`);
+  assert.deepEqual(launches.get("cute_template_values"), ["half", "128", "256", "32", "2"]);
+  const source = createKernelCompilationUnit({ kernel, templateArgumentsByKernelName: launches });
+  assert.match(source, /template <typename T = half, int BM = 128, int BN = 256, int BK = 32, int kStage = 2>/u);
 }
 
 {
