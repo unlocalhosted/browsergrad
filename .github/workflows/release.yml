@@ -5,6 +5,7 @@
 #   runtime-v0.1.2
 #   kernels-v0.1.0
 #   grad-v0.5.0
+#   compiler-v0.1.0
 #
 # To cut a release:
 #   1. Bump the version in packages/<pkg>/package.json
@@ -35,6 +36,7 @@ on:
       - 'runtime-v*'
       - 'kernels-v*'
       - 'grad-v*'
+      - 'compiler-v*'
 
 jobs:
   publish:
@@ -42,7 +44,7 @@ jobs:
     permissions:
       contents: write   # required for `gh release create`
       id-token: write   # required for npm provenance
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -87,6 +89,14 @@ jobs:
       - name: Integration tests (jit / grad only)
         if: contains(fromJSON('["jit","grad"]'), steps.parse.outputs.shortname)
         run: pnpm --filter "${{ steps.parse.outputs.npmname }}" run test:integration
+
+      - name: Install Playwright Chromium (compiler release)
+        if: steps.parse.outputs.shortname == 'compiler'
+        run: pnpm --filter @unlocalhosted/browsergrad-kernels exec playwright install --with-deps chromium
+
+      - name: Real-world CUDA gate (compiler release)
+        if: steps.parse.outputs.shortname == 'compiler'
+        run: pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --require-webgpu
 
       - name: Publish to npm
         working-directory: packages/${{ steps.parse.outputs.package }}

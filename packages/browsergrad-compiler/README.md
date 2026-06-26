@@ -373,7 +373,8 @@ transcendental kernels while still comparing CPU reference output against real
 WebGPU readback. Specs can also pin explicit expected readbacks for kernels
 where the small fixture output is known; the e2e gate checks both CPU reference
 and WebGPU against that expected output so interpreter and GPU wrong-code cannot
-agree silently.
+agree silently. Current hard floor requires at least `7` such pinned-output
+corpus fixtures.
 Fixture source is emitted through the same corpus-audit normalization path used
 for full-corpus compile/codegen counts, so helper/context handling does not
 silently diverge between audit and browser execution gates.
@@ -393,7 +394,8 @@ fixture e2e against both source aliases and built dist exports by default. Use
 `--bundle src`, `--bundle dist`, or `--bundle both` to choose the browser bundle.
 Root release verification and CI's Chromium job also run this gate with
 `--require-webgpu`, so corpus compile/codegen regressions and fixture-backed
-real GPU regressions fail hard instead of becoming audit notes.
+real GPU regressions fail hard instead of becoming audit notes. Npm publish
+workflows install Chromium and run the same compiler gate before publishing.
 Pinned corpus checkouts must match the expected commit and be clean; dirty
 untracked or modified files fail both audit and browser fixture loading.
 

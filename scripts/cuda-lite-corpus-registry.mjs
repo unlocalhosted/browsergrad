@@ -663,7 +663,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { row: 2, col: 4 },
     },
     output: "y",
-    expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4, 5, 6, 7, 8] },
+    expectedOutput: { type: "Float32Array", data: [1, 3, 5, 7, 2, 4, 6, 8] },
   },
   {
     sourceKey: "corpusLeetCudaMatTransposeF32x4Col2Row",
@@ -980,6 +980,7 @@ export const cudaLiteCorpusExecutionFixtures = [
 
 export const cudaLiteCorpusExecutionFixtureBaseline = {
   totalMin: 51,
+  expectedOutputMin: 7,
   byCorpusMin: {
     "cuda-120": 2,
     "cuda-samples": 8,

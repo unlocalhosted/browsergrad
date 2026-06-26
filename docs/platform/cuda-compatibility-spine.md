@@ -267,7 +267,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu:corpus -- --require
   histogram, RoPE, direct transpose variants, and lifted CuTe transpose motifs.
   Fixture specs may pin explicit expected readbacks; when present, the gate
   checks both CPU reference and real WebGPU against that expected output instead
-  of allowing the two implementations to agree on wrong-code.
+  of allowing the two implementations to agree on wrong-code. Current hard
+  floor requires at least `7` pinned-output corpus fixtures.
 - `e2e:webgpu:dist` runs the browser proof through built package exports. The
   combined `verify:real-world-cuda` gate runs both `src` and `dist` browser
   bundles unless a narrower `--bundle` is supplied.
@@ -275,7 +276,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu:corpus -- --require
 - Root `verify:release` and CI's Chromium job run
   `verify:real-world-cuda -- --require-webgpu`, so full-corpus
   compile/codegen coverage and exact-kernel real GPU fixtures are both hard
-  regression gates.
+  regression gates. Npm publish workflows also run the compiler gate before
+  publishing compiler-capability packages.
 
 Performance gate:
 

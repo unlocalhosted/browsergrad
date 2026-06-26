@@ -267,6 +267,7 @@ const html = String.raw`<!doctype html>
             ...(result.firstDiff === undefined ? {} : { firstDiff: result.firstDiff }),
             output: spec.output,
             ...(spec.corpusId === undefined ? {} : { corpusId: spec.corpusId }),
+            ...(spec.expectedOutput === undefined ? {} : { expectedOutputPinned: true }),
             ms: round(performance.now() - start),
           });
         }
@@ -283,6 +284,7 @@ const html = String.raw`<!doctype html>
         const failed = cases.filter((item) => !item.ok);
         const corpusFixtureCases = cases.filter((item) => item.name.startsWith("corpus:"));
         const corpusFixturePassed = corpusFixtureCases.filter((item) => item.ok);
+        const corpusFixtureExpectedOutputCases = corpusFixtureCases.filter((item) => item.expectedOutputPinned);
         const loadedCorpusFixtureNames = new Set(corpusFixtureCases.map((item) => item.name));
         return {
           available: true,
@@ -290,6 +292,7 @@ const html = String.raw`<!doctype html>
           corpusFixtureCases: corpusFixtureCases.length,
           corpusFixturePassed: corpusFixturePassed.length,
           corpusFixtureFailed: corpusFixtureCases.filter((item) => !item.ok).length,
+          corpusFixtureExpectedOutputCases: corpusFixtureExpectedOutputCases.length,
           corpusFixtureCasesByCorpus: countByCorpus(corpusFixtureCases),
           corpusFixturePassedByCorpus: countByCorpus(corpusFixturePassed),
           corpusFixtureBaseline: CORPUS_FIXTURE_BASELINE,
@@ -540,6 +543,7 @@ const html = String.raw`<!doctype html>
             input: () => materializeFixtureInput(fixture.input),
             output: fixture.output,
             corpusId: fixture.corpusId,
+            ...(fixture.expectedOutput === undefined ? {} : { expectedOutput: fixture.expectedOutput }),
             ...(fixture.tolerance === undefined ? {} : { tolerance: fixture.tolerance }),
           });
         }
@@ -777,6 +781,7 @@ function markdownReport(data) {
   }
   lines.push("", `Passed: \`${data.passed}\`, failed: \`${data.failed}\``, "");
   lines.push(`Corpus fixtures: \`${data.corpusFixturePassed ?? 0}/${data.corpusFixtureCases ?? 0}\``, "");
+  lines.push(`Expected-output fixtures: \`${data.corpusFixtureExpectedOutputCases ?? 0}/${data.corpusFixtureBaseline?.expectedOutputMin ?? 0}\``, "");
   if (data.corpusFixturePassedByCorpus) {
     lines.push("| Corpus | passed | cases | baseline min |");
     lines.push("| --- | ---: | ---: | ---: |");
@@ -796,6 +801,9 @@ function validateCorpusFixtureBaseline(report) {
   const baseline = report.corpusFixtureBaseline ?? cudaLiteCorpusExecutionFixtureBaseline;
   if ((report.corpusFixturePassed ?? 0) < baseline.totalMin) {
     throw new Error(`Corpus fixture baseline failed: ${report.corpusFixturePassed ?? 0}/${baseline.totalMin} passed`);
+  }
+  if ((report.corpusFixtureExpectedOutputCases ?? 0) < (baseline.expectedOutputMin ?? 0)) {
+    throw new Error(`Corpus fixture expected-output baseline failed: ${report.corpusFixtureExpectedOutputCases ?? 0}/${baseline.expectedOutputMin ?? 0} pinned`);
   }
   for (const [corpusId, min] of Object.entries(baseline.byCorpusMin ?? {})) {
     const passed = report.corpusFixturePassedByCorpus?.[corpusId] ?? 0;

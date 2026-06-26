@@ -600,7 +600,8 @@ Acceptance criteria for the first slice:
   indexing stay guarded by output-verified GPU readback.
 - Known-output fixture specs compare CPU reference and real WebGPU readbacks
   against explicit expected arrays, so shared wrong-code between interpreter and
-  WGSL cannot satisfy those fixture gates.
+  WGSL cannot satisfy those fixture gates. The browser gate enforces at least
+  `7` pinned-output corpus fixtures.
 - NVIDIA `cuda-samples` Bezier coverage includes a real browser fixture for
   scalarized pointer-record fixed-array fields (`BezierLine.CP[3]`), so C-style
   struct-of-arrays lowering is guarded by GPU readback.
@@ -611,9 +612,10 @@ Acceptance criteria for the first slice:
   fixture for `SobelTex`, so lowered device function tables, texture reads, and
   signed/unsigned pointer index math are guarded by output-verified WebGPU
   readback.
-- CI and root release verification run `verify:real-world-cuda -- --require-webgpu`,
-  so corpus compile/codegen regressions and exact-kernel real GPU fixture
-  regressions are hard failures, not advisory reports.
+- CI, root release verification, and npm publish workflows run
+  `verify:real-world-cuda -- --require-webgpu`, so corpus compile/codegen
+  regressions and exact-kernel real GPU fixture regressions are hard failures,
+  not advisory reports.
 - CPU reference arithmetic preserves C-style integer locals, integer division,
   and remainder behavior so fixture-backed tensor indexing kernels compare
   against real WebGPU execution instead of JS-number semantics.

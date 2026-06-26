@@ -46,10 +46,12 @@
   regression for local storage-pointer alias dereferences that need WGSL pointer
   helper emission.
 - Corpus fixture specs can now pin explicit expected readbacks; the browser gate
-  compares both CPU reference and real WebGPU output against those arrays.
+  compares both CPU reference and real WebGPU output against those arrays and
+  enforces a minimum pinned-output fixture count.
 - Root release verification and CI's Chromium job now run the combined
   real-world CUDA compile/codegen plus real WebGPU fixture gate with WebGPU
-  required.
+  required, and npm publish workflows run the same gate before compiler-capable
+  packages publish.
 - Cooperative groups now lower `cg::binary_partition(tile, predicate)` through
   subgroup predicate masks and lockstep CPU-reference collectives, raising the
   cuda-samples compile/codegen gate to `340/357` with `14` hard gaps.

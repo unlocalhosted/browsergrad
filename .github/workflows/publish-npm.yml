@@ -35,5 +35,11 @@ jobs:
       - name: Build workspace
         run: pnpm -r run build
 
+      - name: Install Playwright Chromium
+        run: pnpm --filter @unlocalhosted/browsergrad-kernels exec playwright install --with-deps chromium
+
+      - name: Run compiler real-world CUDA gate
+        run: pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --require-webgpu
+
       - name: Publish missing versions
         run: node scripts/publish-missing-npm.mjs
