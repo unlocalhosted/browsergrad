@@ -513,6 +513,13 @@ export function analyzeCudaLite(
     }
   }
 
+  if (options.f16Mode === "f32") {
+    requiredFeatures.delete("shader-f16");
+  }
+  if (options.subgroupMode === "scalar") {
+    requiredFeatures.delete("subgroups");
+  }
+
   if (requiredFeatures.has("shader-f16") && !options.features?.["shader-f16"]) {
     diagnostics.push(error("missing-feature-shader-f16", "half requires WebGPU shader-f16 support", kernel.span));
   }

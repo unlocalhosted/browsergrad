@@ -415,6 +415,8 @@ export interface CudaLiteAnalyzeOptions {
   readonly referenceGridSync?: boolean;
   readonly referenceCudaRuntime?: boolean;
   readonly f64Mode?: "reject" | "f32";
+  readonly f16Mode?: "native" | "f32";
+  readonly subgroupMode?: "native" | "scalar";
 }
 
 export interface CudaLiteAnalysis {
@@ -459,6 +461,8 @@ export interface CompiledCudaLiteKernel {
   readonly diagnostics: readonly CudaLiteDiagnostic[];
   readonly loweringPlan: CudaLoweringPlan;
   readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
+  readonly f16Mode?: "native" | "f32";
+  readonly subgroupMode?: "native" | "scalar";
 }
 
 export interface KernelLaunch {

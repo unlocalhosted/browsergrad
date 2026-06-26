@@ -3,6 +3,7 @@ export function parseArgs(args) {
   let details = false;
   let includeSources = false;
   let kernelManifest = false;
+  let kernelManifestSources = false;
   let emitKernelFile;
   let emitKernelName;
   const expectations = {};
@@ -22,6 +23,11 @@ export function parseArgs(args) {
     }
     if (arg === "--kernel-manifest") {
       kernelManifest = true;
+      continue;
+    }
+    if (arg === "--kernel-manifest-sources") {
+      kernelManifest = true;
+      kernelManifestSources = true;
       continue;
     }
     if (arg === "--emit-kernel-source") {
@@ -82,7 +88,7 @@ export function parseArgs(args) {
     console.error("--emit-kernel-source requires --kernel-name");
     process.exit(2);
   }
-  return { corpusPathArg, details, emitKernelSource, expectations, firstFailureLimit, help, includeSources, kernelManifest };
+  return { corpusPathArg, details, emitKernelSource, expectations, firstFailureLimit, help, includeSources, kernelManifest, kernelManifestSources };
 }
 
 export function parseExpectationArg(arg, args, index) {

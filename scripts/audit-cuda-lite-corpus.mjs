@@ -20,13 +20,13 @@ const { listFiles, findRepoRoot, markdownBlocks, extractKernelDefinitions, creat
 const { collectPortableDeviceFunctions, collectDynamicLaunchTargetDeviceFunctions, collectConstantDeclarations, collectDeviceGlobalDeclarations, collectFunctionPointerTables, collectFunctionDefines, collectTextureDeclarations, collectPodRecordDeclarations, collectTranslationUnitSharedDeclarations, inferDynamicSharedMemory, countBy, mergeCarriedDefines, mergeDefineMaps, recordDeclarationName, escapeRegExp } = auditDevice;
 const auditHelpers = { ...auditCli, ...auditDevice, ...auditScan, collectCudaLiteContextDefines, collectKernelTemplateArguments, createKernelCompilationUnit, kernelDefinitionName, pruneCudaPreprocessorBranches };
 setAuditHelpers(auditHelpers);
-const { corpusPathArg, details, emitKernelSource, expectations, firstFailureLimit, help, includeSources, kernelManifest } = parseArgs(process.argv.slice(2));
+const { corpusPathArg, details, emitKernelSource, expectations, firstFailureLimit, help, includeSources, kernelManifest, kernelManifestSources } = parseArgs(process.argv.slice(2));
 if (help) {
-  console.log("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--kernel-manifest] [--emit-kernel-source FILE --kernel-name NAME] [--expect-total N] [--expect-compile-codegen-min N] [--expect-hard-fail-max N]");
+  console.log("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--kernel-manifest] [--kernel-manifest-sources] [--emit-kernel-source FILE --kernel-name NAME] [--expect-total N] [--expect-compile-codegen-min N] [--expect-hard-fail-max N]");
   process.exit(0);
 }
 if (!corpusPathArg) {
-  console.error("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--kernel-manifest] [--emit-kernel-source FILE --kernel-name NAME] [--expect-total N] [--expect-compile-codegen-min N] [--expect-hard-fail-max N]");
+  console.error("usage: node scripts/audit-cuda-lite-corpus.mjs <corpus-path> [--limit N] [--details] [--sources] [--kernel-manifest] [--kernel-manifest-sources] [--emit-kernel-source FILE --kernel-name NAME] [--expect-total N] [--expect-compile-codegen-min N] [--expect-hard-fail-max N]");
   process.exit(2);
 }
 
@@ -149,13 +149,31 @@ for (const file of files) {
       const kernelName = kernelDefinitionName(rawKernel);
       const directAttempt = compileKernelFromAuditContext(rawKernel, kernels, kernelName, directContext);
       if (directAttempt.ok) {
-        results.push({ file, block: blockIndex + 1, kernel: kernelIndex + 1, kernelName, ok: true, directLoweringOk: true, compileCodegenOk: true });
+        results.push({
+          file,
+          block: blockIndex + 1,
+          kernel: kernelIndex + 1,
+          kernelName,
+          ok: true,
+          directLoweringOk: true,
+          compileCodegenOk: true,
+          ...((includeSources || kernelManifestSources) ? { source: directAttempt.source } : {}),
+        });
         continue;
       }
       if (reverseContext !== undefined && shouldRetryWithReverseContext(directAttempt.error)) {
         const reverseAttempt = compileKernelFromAuditContext(rawKernel, kernels, kernelName, reverseContext);
         if (reverseAttempt.ok) {
-          results.push({ file, block: blockIndex + 1, kernel: kernelIndex + 1, kernelName, ok: true, directLoweringOk: true, compileCodegenOk: true });
+          results.push({
+            file,
+            block: blockIndex + 1,
+            kernel: kernelIndex + 1,
+            kernelName,
+            ok: true,
+            directLoweringOk: true,
+            compileCodegenOk: true,
+            ...((includeSources || kernelManifestSources) ? { source: reverseAttempt.source } : {}),
+          });
           continue;
         }
       }
@@ -176,7 +194,7 @@ for (const file of files) {
         feature: feature?.label ?? "Unknown compatibility gap",
         lowering: feature?.lowering ?? "unsupported",
         message: diagnostic?.message ?? String(error?.message ?? error).split("\n")[0],
-        ...(includeSources ? { source: directAttempt.source } : {}),
+        ...((includeSources || kernelManifestSources) ? { source: directAttempt.source } : {}),
         referenceOk: fallback.referenceOk,
         webGpuPlanLiftOk: fallback.webGpuPlanLiftOk,
         webGpuPlanLiftKind: fallback.webGpuPlanLiftKind,
@@ -397,7 +415,7 @@ const summary = {
 if (details) {
   console.log(JSON.stringify({ summary, failures }, null, 2));
 } else if (kernelManifest) {
-  console.log(JSON.stringify({ summary, kernels: kernelManifestRows(results) }, null, 2));
+  console.log(JSON.stringify({ summary, kernels: kernelManifestRows(results, kernelManifestSources) }, null, 2));
 } else {
   console.log(JSON.stringify(summary, null, 2));
 }
@@ -450,7 +468,7 @@ function classifyReferenceFallback(source, kernelName) {
   }
 }
 
-function kernelManifestRows(items) {
+function kernelManifestRows(items, includeSources = false) {
   return items.map((item) => {
     const planCompiledOk = item.ok || item.webGpuPlanLiftOk === true;
     return {
@@ -463,6 +481,7 @@ function kernelManifestRows(items) {
       compileCodegenOk: planCompiledOk,
       ...(item.webGpuPlanLiftKind === undefined ? {} : { webGpuPlanLiftKind: item.webGpuPlanLiftKind }),
       ...(item.webGpuPlanLiftBlockerCode === undefined ? {} : { webGpuPlanLiftBlockerCode: item.webGpuPlanLiftBlockerCode }),
+      ...(includeSources && item.source !== undefined ? { source: item.source } : {}),
     };
   });
 }

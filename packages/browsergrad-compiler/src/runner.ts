@@ -77,6 +77,8 @@ export function compileCudaLiteKernel(
     {
       ...(options.features === undefined ? {} : { features: options.features }),
       ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
+      ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),
+      ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
     },
   );
   const loweringPlan = createCudaLoweringPlan(analysis.diagnostics);
@@ -89,6 +91,8 @@ export function compileCudaLiteKernel(
     diagnostics: analysis.diagnostics,
     loweringPlan,
     ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
+    ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),
+    ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
   };
 }
 

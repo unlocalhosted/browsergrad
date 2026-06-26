@@ -329,6 +329,32 @@ __global__ void mutateParams(float* out, float alpha, float beta, int n, bool en
     expect([...result.buffers.y as Float32Array]).toEqual([14, 26, 38]);
   });
 
+  it("flattens device helper aliases rooted at pointer params", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float loadAlias(const float* inp, int row) {
+  const float* x = inp + row * 4;
+  return x[1];
+}
+__global__ void aliasedParam(const float* inp, float* out, int row) {
+  out[0] = loadAlias(inp, row);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          inp: new Float32Array([1, 2, 3, 4, 50, 60, 70, 80]),
+          out: new Float32Array(1),
+        },
+        scalars: { row: 1 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toMatch(/bg_ptr_read_f32\(inp_buffer(?:_arg)?/u);
+    expect(compiled.wgsl).not.toContain("x[");
+    expect([...result.buffers.out as Float32Array]).toEqual([60]);
+  });
+
   it("supports conditional storage pointer arguments to device helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ void copyOne(float *target, const float *fallback, const float *source) {
@@ -497,7 +523,7 @@ __global__ void globals_scalar(uint* data, uint* out) {
     expect([...result.buffers.errorFound as Uint32Array]).toEqual([1]);
     expect(compiled.wgsl).toContain("var<storage, read_write> numErrors: array<u32>;");
     expect(compiled.wgsl).toContain("var<storage, read_write> errorFound: array<u32>;");
-    expect(compiled.wgsl).toContain("numErrors[0u] = (numErrors[0u] + u32(1))");
+    expect(compiled.wgsl).toContain("numErrors[0u] += 1u");
   });
 
   it("supports __device__ arrays as storage-backed device pointer arguments", () => {
@@ -547,7 +573,7 @@ __global__ void globals_atomic(uint* out) {
     expect([...result.buffers.counter as Uint32Array]).toEqual([4]);
     expect(compiled.ir.atomicDeviceGlobals).toEqual(["counter"]);
     expect(compiled.wgsl).toContain("var<storage, read_write> counter: array<atomic<u32>>;");
-    expect(compiled.wgsl).toContain("atomicAdd(&counter[0u], 1)");
+    expect(compiled.wgsl).toContain("atomicAdd(&counter[0u], 1u)");
   });
 
   it("lowers multi-dimensional shared memory through helper pointer params", () => {
@@ -2848,8 +2874,8 @@ __global__ void intIntrinsics(int *x, uint *out) {
 
     expect(compiled.wgsl).toContain("countLeadingZeros");
     expect(compiled.wgsl).toContain("countTrailingZeros");
-    expect(compiled.wgsl).toContain("min(u32(7), u32(3))");
-    expect(compiled.wgsl).toContain("0;");
+    expect(compiled.wgsl).toContain("min(u32(7u), u32(3u))");
+    expect(compiled.wgsl).toContain("assert omitted");
     expect([...result.buffers.out as Uint32Array]).toEqual([29, 15, 20, 3, 3, 0, 4, 7, 42, 44, 40]);
   });
 
@@ -3101,7 +3127,7 @@ __global__ void vector_splat(float4 *out, uint4 *kinds) {
     );
 
     expect(compiled.wgsl).toContain("vec4<f32>(f32(2.5), f32(2.5), f32(2.5), f32(2.5))");
-    expect(compiled.wgsl).toContain("vec4<u32>(u32(7), u32(7), u32(7), u32(7))");
+    expect(compiled.wgsl).toContain("vec4<u32>(u32(7u), u32(7u), u32(7u), u32(7u))");
     expect([...result.buffers.out as Float32Array]).toEqual([2.5, 2.5, 2.5, 2.5]);
     expect([...result.buffers.kinds as Uint32Array]).toEqual([7, 7, 7, 7]);
   });
@@ -3499,6 +3525,71 @@ __global__ void addPackedAlias(float *a, float *b, float *c) {
     expect(compiled.wgsl).not.toContain("var ap");
     expect(compiled.wgsl).toContain("vec4<f32>(a[");
     expect([...result.buffers.c as Float32Array]).toEqual([3, 7, 11, 15]);
+  });
+
+  it("flattens chained scalar-to-vector storage pointer aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void chainedVectorAlias(const float *inp, float *out, int row) {
+  const float *x = inp + row * 8;
+  const float4 *x_vec = reinterpret_cast<const float4 *>(x);
+  float4 v = x_vec[1];
+  out[0] = v.x + v.w;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          inp: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 10, 20, 30, 40, 50, 60, 70, 80]),
+          out: new Float32Array(1),
+        },
+        scalars: { row: 1 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("vec4<f32>(inp[");
+    expect(compiled.wgsl).not.toContain("x_vec[");
+    expect(compiled.wgsl).not.toContain("x[");
+    expect([...result.buffers.out as Float32Array]).toEqual([130]);
+  });
+
+  it("coerces integer conditional expressions to WGSL bool predicates", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void integerPredicate(uint *out, int flag) {
+  out[0] = flag ? 1u : 0u;
+}`, { workgroupSize: [1, 1, 1] });
+    const trueResult = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(1) }, scalars: { flag: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const falseResult = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(1) }, scalars: { flag: 0 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("select(0u, 1u, (params.flag != 0))");
+    expect([...trueResult.buffers.out as Uint32Array]).toEqual([1]);
+    expect([...falseResult.buffers.out as Uint32Array]).toEqual([0]);
+  });
+
+  it("keeps hex masks with f digits as integer literals", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void hexMask(uint *out, uint value) {
+  uint mask = 0xffffffffu;
+  out[0] = (mask != 0xffffffffu) ? 1u : 0u;
+  out[1] = (value == 0xffffffffu) ? 7u : 3u;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2) }, scalars: { value: 0xffffffff } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("0xffffffffu");
+    expect(compiled.wgsl).not.toContain("f32(0xffffffff");
+    expect([...result.buffers.out as Uint32Array]).toEqual([0, 7]);
   });
 
   it("lowers generic pointer dereference lvalues and rebased kernel params", () => {
@@ -6122,6 +6213,43 @@ __global__ void reduce(float* x) {
   if (threadIdx.x < 1) { x[0] = bg_subgroup_add(x[0]); }
 }`;
     expect(() => compileCudaLiteKernel(subgroupSource)).toThrow(CudaLiteCompilerError);
+  });
+
+  it("lowers half storage through f32 compatibility mode when shader-f16 is absent", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void halfCompat(half* x, half2* y, half a) {
+  if (threadIdx.x < 1) {
+    x[0] = __float2half(__half2float(x[0]) + __half2float(a));
+    y[0] = __hadd2(y[0], __float2half2_rn(1.0f));
+  }
+}`, {
+      f16Mode: "f32",
+      workgroupSize: [1, 1, 1],
+    });
+    expect(compiled.ir.requiredFeatures).not.toContain("shader-f16");
+    expect(compiled.wgsl).not.toContain("enable f16;");
+    expect(compiled.wgsl).not.toMatch(/\bf16\b/u);
+    expect(compiled.wgsl).toContain("vec2<f32>");
+    expect(compiled.wgslProgram.bindings[0]).toMatchObject({ valueType: "f32" });
+    expect(compiled.wgslProgram.bindings[1]).toMatchObject({ valueType: "f32" });
+  });
+
+  it("lowers subgroup intrinsics through scalar compatibility mode", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void subgroupCompat(float* x) {
+  int lane = threadIdx.x % 32;
+  float v = warp_reduce_sum_f32(x[threadIdx.x]);
+  if (lane == 0) {
+    v = bg_subgroup_add(v);
+  }
+  x[threadIdx.x] = v;
+}`, {
+      subgroupMode: "scalar",
+      workgroupSize: [32, 1, 1],
+    });
+    expect(compiled.ir.requiredFeatures).not.toContain("subgroups");
+    expect(compiled.wgsl).not.toContain("enable subgroups;");
+    expect(compiled.wgsl).not.toMatch(/\bsubgroup(?:Add|Max|Min|Shuffle|Ballot|Any|All)/u);
   });
 
   it("derives compile feature options from kernel feature detection", () => {

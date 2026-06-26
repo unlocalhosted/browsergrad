@@ -1832,7 +1832,7 @@ class Parser {
     const rawNumber = /^0[xX][0-9A-Fa-f]+/u.exec(token.value)?.[0] ?? token.value.replace(/[fFuUlL]+$/u, "");
     const value = Number(rawNumber);
     if (!Number.isFinite(value)) this.fail(`invalid ${label}: ${token.value}`, token.span);
-    return { value, raw: rawNumber, span: token.span };
+    return { value, raw: token.value, span: token.span };
   }
 
   private parseArrayDimension(): number {

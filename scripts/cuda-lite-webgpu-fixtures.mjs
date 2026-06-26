@@ -20,15 +20,17 @@ export function loadCorpusExecutionSources(root) {
   return out;
 }
 
-export function loadAutoCorpusSmokeFixtures(root, limit, compiler) {
+export function loadAutoCorpusSmokeFixtures(root, limit, compiler, options = {}) {
+  const verifyMode = options.verifyMode ?? "reference";
+  const allowedRequiredFeatures = new Set(options.allowedRequiredFeatures ?? []);
   const explicit = new Set(cudaLiteCorpusExecutionFixtures.map(corpusFixtureKey));
   const candidatesByCorpus = [];
   for (const corpus of Object.values(corpusesById())) {
-    const manifest = loadCorpusKernelManifest(root, corpus);
+    const manifest = loadCorpusKernelManifest(root, corpus, true);
     candidatesByCorpus.push({
       corpus,
       candidates: manifest.kernels
-        .filter((item) => item.directLoweringOk && item.planCompiledOk)
+        .filter((item) => item.planCompiledOk)
         .filter((item) => !explicit.has(corpusFixtureKey({ corpusId: corpus.id, relativePath: item.file, kernelName: item.kernelName }))),
     });
   }
@@ -39,7 +41,7 @@ export function loadAutoCorpusSmokeFixtures(root, limit, compiler) {
     cursor++;
     const item = entry.candidates.shift();
     if (!item) continue;
-    const fixture = createAutoCorpusSmokeFixture(root, entry.corpus, item, compiler);
+    const fixture = createAutoCorpusSmokeFixture(root, entry.corpus, item, compiler, { verifyMode, allowedRequiredFeatures });
     if (fixture) selected.push(fixture);
   }
   return selected;
@@ -82,38 +84,44 @@ export function verifyCorpusFixtureCheckouts(root) {
   }
 }
 
-function createAutoCorpusSmokeFixture(root, corpus, item, compiler) {
+function createAutoCorpusSmokeFixture(root, corpus, item, compiler, fixtureOptions) {
+  const { verifyMode, allowedRequiredFeatures } = fixtureOptions;
   const sourceKey = `autoCorpusSmoke_${safeIdentifier(corpus.id)}_${safeIdentifier(item.file)}_${safeIdentifier(item.kernelName)}_${item.block}_${item.kernel}`;
   const caseName = `auto-corpus:${corpus.id}:${item.file}:${item.kernelName}:${item.block}:${item.kernel}`;
-  const source = loadNormalizedCorpusKernelSource(root, {
+  const source = item.source ?? loadNormalizedCorpusKernelSource(root, {
     corpusId: corpus.id,
     relativePath: item.file,
     kernelName: item.kernelName,
     caseName,
   });
   const dynamicSharedMemory = inferDynamicSharedMemory(source);
-  const options = {
+  const compileOptions = {
     kernelName: item.kernelName,
     workgroupSize: [32, 1, 1],
     features: { "shader-f16": true, subgroups: true },
     f64Mode: "f32",
+    ...(verifyMode === "dispatch" ? { f16Mode: "f32", subgroupMode: "scalar" } : {}),
     ...(Object.keys(dynamicSharedMemory).length === 0 ? {} : { dynamicSharedMemory }),
   };
   try {
-    const compiled = compiler.compileCudaLiteKernelForWebGpu(source, options);
-    if (compiled.ir.requiredFeatures.includes("subgroups") || compiled.ir.requiredFeatures.includes("shader-f16")) return undefined;
-    if (Object.keys(syntheticInputForCompiled(compiled).buffers).length === 0) return undefined;
+    const compiled = compiler.compileCudaLiteKernelForWebGpu(source, compileOptions);
+    if (compiled.ir.requiredFeatures.some((feature) => !allowedRequiredFeatures.has(feature))) return undefined;
+    const input = syntheticInputForCompiled(compiled);
+    if (verifyMode === "reference" && Object.keys(input.buffers).length === 0) return undefined;
     const launch = syntheticLaunchForCompiled(compiled);
-    const plan = compiler.createCudaWebGpuExecutionPlan(compiled, syntheticInputForCompiled(compiled), launch, {
+    const plan = compiler.createCudaWebGpuExecutionPlan(compiled, input, launch, {
       compileKernel: (childSource, childOptions = {}) => compiler.compileCudaLiteKernelForWebGpu(childSource, {
         ...childOptions,
         features: { "shader-f16": true, subgroups: true, ...(childOptions.features ?? {}) },
         f64Mode: childOptions.f64Mode ?? "f32",
+        f16Mode: childOptions.f16Mode ?? compileOptions.f16Mode,
         dynamicSharedMemory: childOptions.dynamicSharedMemory ?? inferDynamicSharedMemory(childSource),
       }),
     });
     if (!plan.supported) return undefined;
-    compiler.runCompiledKernelReference(compiled, syntheticInputForCompiled(compiled), launch);
+    if (verifyMode === "reference") {
+      compiler.runCompiledKernelReference(compiled, input, launch);
+    }
     return {
       sourceKey,
       caseName,
@@ -122,25 +130,26 @@ function createAutoCorpusSmokeFixture(root, corpus, item, compiler) {
       kernelName: item.kernelName,
       workgroupSize: compiled.ir.workgroupSize,
       launch,
-      options,
+      options: compileOptions,
       source,
+      verifyMode,
     };
   } catch {
     return undefined;
   }
 }
 
-function loadCorpusKernelManifest(root, corpus) {
+function loadCorpusKernelManifest(root, corpus, includeSources = false) {
   const result = spawnSync(process.execPath, [
     path.join(root, "scripts/audit-cuda-lite-corpus.mjs"),
     corpus.path,
-    "--kernel-manifest",
+    includeSources ? "--kernel-manifest-sources" : "--kernel-manifest",
     "--limit",
     "0",
   ], {
     cwd: root,
     encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
+    maxBuffer: 256 * 1024 * 1024,
   });
   if (result.error) throw result.error;
   if (result.status !== 0) {

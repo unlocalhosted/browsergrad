@@ -258,7 +258,11 @@ function createGridSyncWebGpuPlan(
   const wgslInput = createWgslRunInput(compiled, input);
   const dispatchCount = dispatchCountForLaunch(launch);
   const steps = gridSyncPhasePlan.modules.map((module): WgslKernelSequenceStep => ({
-    program: emitKernelIrWgsl(module, { features: featureOptionsFor(module.requiredFeatures) }).program,
+    program: emitKernelIrWgsl(module, {
+      features: featureOptionsFor(module.requiredFeatures),
+      ...(compiled.f16Mode === undefined ? {} : { f16Mode: compiled.f16Mode }),
+      ...(compiled.subgroupMode === undefined ? {} : { subgroupMode: compiled.subgroupMode }),
+    }).program,
     launch: { dispatchCount },
     ...(wgslInput.uniforms === undefined ? {} : { uniforms: wgslInput.uniforms }),
   }));
@@ -718,6 +722,8 @@ function getOrCompileDynamicChild(
       referenceDynamicParallelism: true,
       referenceGridSync: true,
       referenceCudaRuntime: true,
+      ...(parent.f16Mode === undefined ? {} : { f16Mode: parent.f16Mode }),
+      ...(parent.subgroupMode === undefined ? {} : { subgroupMode: parent.subgroupMode }),
       workgroupSize: item.blockDim,
       pointerBaseOffsets: item.pointerBaseOffsets,
     });

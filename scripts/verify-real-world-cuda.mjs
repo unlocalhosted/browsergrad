@@ -22,6 +22,10 @@ for (const bundle of browserBundles(options.bundle)) {
     bundle,
     "--auto-corpus-smoke-limit",
     String(options.autoCorpusSmokeLimit),
+    "--auto-corpus-smoke-mode",
+    options.autoCorpusSmokeMode,
+    "--auto-corpus-smoke-features",
+    options.autoCorpusSmokeFeatures.join(","),
     ...(options.allowMissingWebGpu ? [] : ["--require-webgpu"]),
   ]);
 }
@@ -35,6 +39,8 @@ function parseArgs(args) {
     limit: 0,
     bundle: "both",
     autoCorpusSmokeLimit: 32,
+    autoCorpusSmokeMode: "reference",
+    autoCorpusSmokeFeatures: [],
   };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -74,8 +80,24 @@ function parseArgs(args) {
       options.autoCorpusSmokeLimit = parseLimit(arg.slice("--auto-corpus-smoke-limit=".length));
       continue;
     }
+    if (arg === "--auto-corpus-smoke-mode") {
+      options.autoCorpusSmokeMode = parseAutoCorpusSmokeMode(args[++index]);
+      continue;
+    }
+    if (arg?.startsWith("--auto-corpus-smoke-mode=")) {
+      options.autoCorpusSmokeMode = parseAutoCorpusSmokeMode(arg.slice("--auto-corpus-smoke-mode=".length));
+      continue;
+    }
+    if (arg === "--auto-corpus-smoke-features") {
+      options.autoCorpusSmokeFeatures = parseFeatureList(args[++index]);
+      continue;
+    }
+    if (arg?.startsWith("--auto-corpus-smoke-features=")) {
+      options.autoCorpusSmokeFeatures = parseFeatureList(arg.slice("--auto-corpus-smoke-features=".length));
+      continue;
+    }
     if (arg === "--help" || arg === "-h") {
-      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--allow-missing-webgpu] [--limit N] [--bundle src|dist|both] [--auto-corpus-smoke-limit N]");
+      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--allow-missing-webgpu] [--limit N] [--bundle src|dist|both] [--auto-corpus-smoke-limit N] [--auto-corpus-smoke-mode reference|dispatch] [--auto-corpus-smoke-features subgroups]");
       process.exit(0);
     }
     throw new Error(`unexpected argument: ${arg}`);
@@ -86,6 +108,16 @@ function parseArgs(args) {
 function parseBundle(raw) {
   if (raw === "src" || raw === "dist" || raw === "both") return raw;
   throw new Error("--bundle expects src, dist, or both");
+}
+
+function parseAutoCorpusSmokeMode(raw) {
+  if (raw === "reference" || raw === "dispatch") return raw;
+  throw new Error("--auto-corpus-smoke-mode expects reference or dispatch");
+}
+
+function parseFeatureList(raw) {
+  if (!raw) return [];
+  return raw.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 function browserBundles(bundle) {

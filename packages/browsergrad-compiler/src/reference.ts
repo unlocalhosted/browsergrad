@@ -1308,7 +1308,10 @@ function expressionValueType(expression: CudaLiteExpression, context: ThreadCont
     if (isComplex(local)) return "complex64";
     return context.valueTypes.get(expression.name);
   }
-  if (expression.kind === "number") return integerLiteralType(expression.raw) ? "int" : "float";
+  if (expression.kind === "number") {
+    if (numberLiteralHasFloatSyntax(expression.raw)) return "float";
+    return numberLiteralHasUnsignedSuffix(expression.raw) ? "uint" : "int";
+  }
   if (expression.kind === "cast") return expression.valueType;
   if (expression.kind === "index") {
     if (expression.target.kind === "identifier") {
@@ -1328,8 +1331,14 @@ function expressionValueType(expression: CudaLiteExpression, context: ThreadCont
   return undefined;
 }
 
-function integerLiteralType(raw: string): boolean {
-  return !/[.eEfF]/u.test(raw);
+function numberLiteralHasFloatSyntax(raw: string): boolean {
+  if (/^0x/iu.test(raw)) return false;
+  const value = raw.replace(/[uUlL]+$/u, "");
+  return /[.eE]/u.test(value) || /[fF]$/u.test(value);
+}
+
+function numberLiteralHasUnsignedSuffix(raw: string): boolean {
+  return /(?:[uU][lL]*|[lL]+[uU][lL]*)$/u.test(raw);
 }
 
 function binaryExpressionValueType(expression: Extract<CudaLiteExpression, { readonly kind: "binary" }>, context: ThreadContext): CudaLiteScalarType | undefined {

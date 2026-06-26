@@ -35,6 +35,7 @@ import {
   CudaLiteCompilerError,
   type CudaLiteAssignmentExpression,
   type CudaLiteCallExpression,
+  type CudaLiteConditionalExpression,
   type CudaLiteCooperativeGroupDecl,
   type CudaLiteDeviceFunction,
   type CudaLiteExpression,
@@ -54,6 +55,8 @@ const NULL_DEVICE_POINTER_BUFFER = "4294967295u";
 export interface EmitKernelIrWgslOptions {
   readonly features?: CudaLiteFeatureOptions;
   readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
+  readonly f16Mode?: "native" | "f32";
+  readonly subgroupMode?: "native" | "scalar";
 }
 
 export interface KernelIrWgslOutput {
@@ -65,18 +68,20 @@ export function emitKernelIrWgsl(
   ir: KernelIrModule,
   options: EmitKernelIrWgslOptions = {},
 ): KernelIrWgslOutput {
-  if (ir.requiredFeatures.includes("shader-f16") && !options.features?.["shader-f16"]) {
+  const f16Mode = effectiveF16Mode(ir, options);
+  const subgroupMode = effectiveSubgroupMode(ir, options);
+  if (f16Mode === "native" && ir.requiredFeatures.includes("shader-f16") && !options.features?.["shader-f16"]) {
     throw featureError("missing-feature-shader-f16", "half requires WebGPU shader-f16 support");
   }
-  if (ir.requiredFeatures.includes("subgroups") && !options.features?.subgroups) {
+  if (subgroupMode === "native" && ir.requiredFeatures.includes("subgroups") && !options.features?.subgroups) {
     throw featureError("missing-feature-subgroups", "bg_subgroup_add requires WebGPU subgroups support");
   }
 
   const context = createEmitContext(ir, options);
   const textures = textureBindings(ir);
   const lines: string[] = [];
-  if (ir.requiredFeatures.includes("shader-f16")) lines.push("enable f16;");
-  if (ir.requiredFeatures.includes("subgroups")) lines.push("enable subgroups;");
+  if (f16Mode === "native" && ir.requiredFeatures.includes("shader-f16")) lines.push("enable f16;");
+  if (subgroupMode === "native" && ir.requiredFeatures.includes("subgroups")) lines.push("enable subgroups;");
   if (lines.length > 0) lines.push("");
   lines.push(`// BrowserGrad CUDA-lite kernel: ${ir.name}`);
 
@@ -254,15 +259,63 @@ export function emitKernelIrWgsl(
   lines.push(...mainBodyLines);
   lines.push("}");
 
+  const rawWgsl = lines.join("\n");
+  const wgsl = f16Mode === "f32" ? rewriteF16WgslToF32(rawWgsl) : rawWgsl;
+  const bindings = f16Mode === "f32" ? rewriteF16BindingsToF32(context.bindings) : context.bindings;
   return {
-    wgsl: lines.join("\n"),
+    wgsl,
     program: defineWgslKernelProgram({
       name: ir.name,
-      wgsl: lines.join("\n"),
-      bindings: context.bindings,
+      wgsl,
+      bindings,
       workgroupSize: ir.workgroupSize,
     }),
   };
+}
+
+function effectiveF16Mode(ir: KernelIrModule, options: EmitKernelIrWgslOptions): "native" | "f32" {
+  if (options.f16Mode !== undefined) return options.f16Mode;
+  return !ir.requiredFeatures.includes("shader-f16") && irUsesHalf(ir) ? "f32" : "native";
+}
+
+function effectiveSubgroupMode(ir: KernelIrModule, options: EmitKernelIrWgslOptions): "native" | "scalar" {
+  if (options.subgroupMode !== undefined) return options.subgroupMode;
+  return !ir.requiredFeatures.includes("subgroups") && irUsesSubgroups(ir) ? "scalar" : "native";
+}
+
+function rewriteF16WgslToF32(wgsl: string): string {
+  return wgsl.replace(/\bf16\b/gu, "f32");
+}
+
+function rewriteF16BindingsToF32(bindings: readonly WgslKernelBindingInput[]): readonly WgslKernelBindingInput[] {
+  return bindings.map((binding) => {
+    if (binding.kind !== "storage" || binding.valueType !== "f16") return binding;
+    return { ...binding, valueType: "f32" as const };
+  });
+}
+
+function irUsesHalf(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value === "half" || value === "half2";
+  if (typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some(irUsesHalf);
+  for (const [key, child] of Object.entries(value)) {
+    if ((key === "span" || key === "diagnostics") && typeof child === "object") continue;
+    if (irUsesHalf(child)) return true;
+  }
+  return false;
+}
+
+function irUsesSubgroups(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return isSubgroupCallName(value);
+  if (typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some(irUsesSubgroups);
+  for (const [key, child] of Object.entries(value)) {
+    if ((key === "span" || key === "diagnostics") && typeof child === "object") continue;
+    if (irUsesSubgroups(child)) return true;
+  }
+  return false;
 }
 
 interface EmitContext {
@@ -290,6 +343,7 @@ interface EmitContext {
   poolPointerFor(name: string): PoolPointerAlias | undefined;
   pointerBaseOffsetFieldFor(name: string): string | undefined;
   readonly rawPoolAllocators: readonly RawPoolAllocator[];
+  readonly subgroupMode: "native" | "scalar";
   readonly externalPoolNames: readonly string[];
   readonly mutablePointerBases: readonly string[];
   readonly vectorCooperativeReduceHelpers: Map<string, VectorCooperativeReduceHelper>;
@@ -598,6 +652,7 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
       return options.pointerBaseOffsets?.[name] === undefined ? undefined : pointerBaseOffsetUniformName(name);
     },
     rawPoolAllocators,
+    subgroupMode: effectiveSubgroupMode(ir, options),
     externalPoolNames,
     mutablePointerBases,
     vectorCooperativeReduceHelpers,
@@ -786,11 +841,16 @@ function emitStatement(
       if (statement.expression.kind === "assignment") {
         return emitAssignmentStatement(statement.expression, context, indentLevel);
       }
-      return [`${prefix}${emitExpressionStatement(statement.expression, context)};`];
+      {
+        const emitted = emitExpressionStatement(statement.expression, context);
+        return emitted.length === 0 ? [] : [`${prefix}${emitted};`];
+      }
     case "if": {
       if (!statement.alternate && statement.consequent.some(isBarrierStatement)) {
         return emitIfWithUniformBarriers(statement.condition, statement.consequent, context, indentLevel);
       }
+      const subgroupAssignment = emitPredicatedSubgroupAssignment(statement, context, indentLevel);
+      if (subgroupAssignment) return subgroupAssignment;
       const lines = [`${prefix}if (${emitTruthinessExpression(statement.condition, context)}) {`];
       lines.push(...statement.consequent.flatMap((child) => emitStatement(child, context, indentLevel + 1)));
       if (statement.alternate) {
@@ -865,6 +925,43 @@ function emitIfWithUniformBarriers(
   }
   flush();
   return lines;
+}
+
+function emitPredicatedSubgroupAssignment(
+  statement: Extract<CudaLiteStatement, { kind: "if" }>,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  if (statement.alternate || statement.consequent.length !== 1) return undefined;
+  const only = statement.consequent[0];
+  if (only?.kind !== "expr" || only.expression.kind !== "assignment" || only.expression.operator !== "=") return undefined;
+  if (!expressionContainsSubgroupCall(only.expression.right)) return undefined;
+  const left = emitExpression(only.expression.left, context);
+  const right = emitExpressionAsValueType(
+    only.expression.right,
+    expressionValueTypeForEmit(only.expression.left, context) ?? expressionValueTypeForEmit(only.expression.right, context) ?? "float",
+    context,
+  );
+  return [`${indent(indentLevel)}${left} = select(${left}, ${right}, ${emitTruthinessExpression(statement.condition, context)});`];
+}
+
+function expressionContainsSubgroupCall(expression: CudaLiteExpression): boolean {
+  let found = false;
+  walkCudaLiteExpressions([{ kind: "expr", expression, span: expression.span }], (item) => {
+    if (item.kind !== "call") return;
+    const name = expressionName(item.callee);
+    if (name !== undefined && isSubgroupCallName(name)) found = true;
+  });
+  return found;
+}
+
+function isSubgroupCallName(name: string): boolean {
+  return name.startsWith("bg_subgroup") ||
+    name.startsWith("warp_reduce") ||
+    name.startsWith("warpReduce") ||
+    name.startsWith("__shfl") ||
+    name.startsWith("__reduce") ||
+    name === "cooperative_groups::reduce";
 }
 
 function isBarrierStatement(statement: CudaLiteStatement): boolean {
@@ -1077,6 +1174,7 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
     .filter((param) => param.pointer && usesFunctionLocalPointerParam(fn, param, context.ir))
     .map((param) => param.name));
   const functionLocalPointerHandles = collectLocalPointerHandles(fn.body, undefined, structuredPointerHandleRoots(context.ir));
+  const functionPointerAliases = collectPointerAliases(fn.body, new Set(functionLocalPointerHandles.keys()));
   const functionLocalValueTypes = new Map(collectLocalValueTypes(fn.body));
   const functionExpressionValueTypes = new WeakMap<CudaLiteExpression, CudaLiteScalarType | undefined>();
   const functionContext = withDevicePointerParams(
@@ -1089,6 +1187,9 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
       },
       localPointerHandleFor(name) {
         return functionLocalPointerHandles.get(name) ?? context.localPointerHandleFor(name);
+      },
+      pointerAliasFor(name) {
+        return functionPointerAliases.get(name) ?? context.pointerAliasFor(name);
       },
       paramFor(name) {
         return fn.params.find((param) => !param.pointer && param.name === name) ?? context.paramFor(name);
@@ -2110,7 +2211,7 @@ function pointerHelperTypeName(type: CudaLiteScalarType): string {
 function emitExpression(expression: CudaLiteExpression, context: EmitContext, mode: EmitMode = "value"): string {
   switch (expression.kind) {
     case "number":
-      return expression.raw.includes(".") ? expression.raw : `${expression.raw}`;
+      return emitNumberLiteral(expression.raw);
     case "string":
       return expression.raw;
     case "initializer":
@@ -2159,8 +2260,13 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
           const index = `(${base} + u32(${emitExpression(expression.index, context)}))`;
           return `${pointerReadHelperName(handle.valueType)}(${buffer}, ${index})`;
         }
-        const alias = context.pointerAliasFor(expression.target.name);
+        const alias = flattenedPointerAlias(expression.target.name, expression.target.span, context);
         if (alias) {
+          const pointerParam = context.devicePointerParamFor(alias.rootName);
+          if (pointerParam) {
+            const valueType = alias.valueType ?? pointerParam.valueType;
+            return `${pointerReadHelperName(valueType)}(${context.nameFor(`${alias.rootName}_buffer`)}, ${emitPointerAliasIndex(alias, expression.index, context)})`;
+          }
           if (alias.valueType && isCudaVectorType(alias.valueType)) {
             const index = emitStorageViewIndex(alias.rootName, alias.baseIndex, expression.index, alias.valueType, context);
             return emitVectorStorageReadAt(context.nameFor(alias.rootName), alias.valueType, index);
@@ -2212,7 +2318,7 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       return emitScalarBinaryExpression(expression, context);
     }
     case "conditional":
-      return `select(${emitExpression(expression.alternate, context)}, ${emitExpression(expression.consequent, context)}, ${emitExpression(expression.condition, context)})`;
+      return emitConditionalExpression(expression, context);
     case "assignment":
       return emitAssignment(expression, context);
     case "update":
@@ -2223,11 +2329,32 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
 }
 
 function emitExpressionStatement(expression: CudaLiteExpression, context: EmitContext): string {
+  if (expression.kind === "number" || expression.kind === "string") return "";
   const source = emitExpression(expression, context);
   if (expression.kind === "call" && isAtomicCasCallName(expressionName(expression.callee))) {
     return source.replace(/\.old_value$/u, "");
   }
   return source;
+}
+
+function emitConditionalExpression(expression: CudaLiteConditionalExpression, context: EmitContext): string {
+  const valueType = expressionValueTypeForEmit(expression, context);
+  const alternate = valueType
+    ? emitExpressionAsValueType(expression.alternate, valueType, context)
+    : emitExpression(expression.alternate, context);
+  const consequent = valueType
+    ? emitExpressionAsValueType(expression.consequent, valueType, context)
+    : emitExpression(expression.consequent, context);
+  return `select(${alternate}, ${consequent}, ${emitTruthinessExpression(expression.condition, context)})`;
+}
+
+function emitNumberLiteral(raw: string): string {
+  let value = raw;
+  if (/[uUlL]+$/u.test(value)) value = value.replace(/[uUlL]+$/u, (suffix) => /u/iu.test(suffix) ? "u" : "");
+  value = /^0x/iu.test(value) ? value : value.replace(/[fF]$/u, "");
+  if (/^\d+\.$/u.test(value)) value = `${value}0`;
+  if (/^\.\d/u.test(value)) value = `0${value}`;
+  return value;
 }
 
 function isAtomicCasCallName(name: string | undefined): boolean {
@@ -3494,8 +3621,13 @@ function emitDeref(expression: CudaLiteExpression, context: EmitContext): string
   const localPointer = localPointerArrayLocalAccess(expression, context);
   if (localPointer) return localPointer;
   if (expression.kind === "identifier") {
-    const alias = context.pointerAliasFor(expression.name);
+    const alias = flattenedPointerAlias(expression.name, expression.span, context);
     if (alias) {
+      const pointerParam = context.devicePointerParamFor(alias.rootName);
+      if (pointerParam) {
+        const valueType = alias.valueType ?? pointerParam.valueType;
+        return `${pointerReadHelperName(valueType)}(${context.nameFor(`${alias.rootName}_buffer`)}, ${emitPointerAliasIndex(alias, zeroExpression(expression.span), context)})`;
+      }
       return `${context.nameFor(alias.rootName)}[${emitPointerAliasIndex(alias, zeroExpression(expression.span), context)}]`;
     }
     const param = context.paramFor(expression.name);
@@ -3606,8 +3738,8 @@ function expressionValueTypeForEmit(expression: CudaLiteExpression, context: Emi
 
 function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, context: EmitContext): CudaLiteScalarType | undefined {
   if (expression.kind === "number") {
-    if (/[.eEfF]/u.test(expression.raw)) return "float";
-    if (/[uU]$/u.test(expression.raw)) return "uint";
+    if (numberLiteralHasFloatSyntax(expression.raw)) return "float";
+    if (numberLiteralHasUnsignedSuffix(expression.raw)) return "uint";
     return "int";
   }
   if (expression.kind === "identifier") {
@@ -3673,6 +3805,12 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
     );
   }
   if (expression.kind === "unary") return expression.operator === "!" ? "bool" : expressionValueTypeForEmit(expression.argument, context);
+  if (expression.kind === "conditional") {
+    return promotedCudaScalarType(
+      expressionValueTypeForEmit(expression.consequent, context),
+      expressionValueTypeForEmit(expression.alternate, context),
+    );
+  }
   return undefined;
 }
 
@@ -3807,8 +3945,24 @@ function isBitwiseOperator(operator: string): boolean {
   return operator === "&" || operator === "|" || operator === "^";
 }
 
+function numberLiteralHasFloatSyntax(raw: string): boolean {
+  if (/^0x/iu.test(raw)) return false;
+  const value = raw.replace(/[uUlL]+$/u, "");
+  return /[.eE]/u.test(value) || /[fF]$/u.test(value);
+}
+
+function numberLiteralHasUnsignedSuffix(raw: string): boolean {
+  return /(?:[uU][lL]*|[lL]+[uU][lL]*)$/u.test(raw);
+}
+
+function numberLiteralHasIntegerSuffix(raw: string): boolean {
+  return /(?:[uU][lL]*|[lL]+[uU]?[lL]*)$/u.test(raw);
+}
+
 function isAbstractIntegerLiteral(expression: CudaLiteExpression): boolean {
-  return expression.kind === "number" && !/[.eEfFuU]/u.test(expression.raw);
+  return expression.kind === "number" &&
+    !numberLiteralHasFloatSyntax(expression.raw) &&
+    !numberLiteralHasIntegerSuffix(expression.raw);
 }
 
 function isComparisonOperator(operator: string): boolean {
@@ -3984,6 +4138,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "div_ceil":
       return `(((${args[0] ?? "0"} + ${args[1] ?? "1"}) - 1) / ${args[1] ?? "1"})`;
     case "bg_subgroup_add":
+      if (context.subgroupMode === "scalar") return args[0] ?? "0";
       return `subgroupAdd(${args.join(", ")})`;
     case "warpReduceSum":
     case "warp_reduce_sum":
@@ -3993,31 +4148,43 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "warp_reduce_sum_f16_f32":
     case "warp_reduce_sum_i8_i32":
     case "warp_reduce_sum_i32_i32":
+      if (context.subgroupMode === "scalar") return args.length === 2 ? args[1] ?? "0" : args[0] ?? "0";
       return `subgroupAdd(${args.length === 2 ? args[1] ?? "0" : args[0] ?? "0"})`;
     case "blockReduce":
+      if (context.subgroupMode === "scalar") return args[0] ?? "0";
       return `subgroupAdd(${args[0] ?? "0"})`;
     case "__reduce_add_sync":
+      if (context.subgroupMode === "scalar") return args[1] ?? "0";
       return `subgroupAdd(${args[1] ?? "0"})`;
     case "warpReduceMax":
     case "warp_reduce_max":
     case "warp_reduce_max_f32":
+      if (context.subgroupMode === "scalar") return args.length === 2 ? args[1] ?? "0" : args[0] ?? "0";
       return `subgroupMax(${args.length === 2 ? args[1] ?? "0" : args[0] ?? "0"})`;
     case "warpReduceMin":
     case "warp_reduce_min":
+      if (context.subgroupMode === "scalar") return args.length === 2 ? args[1] ?? "0" : args[0] ?? "0";
       return `subgroupMin(${args.length === 2 ? args[1] ?? "0" : args[0] ?? "0"})`;
     case "__shfl_sync":
+      if (context.subgroupMode === "scalar") return args[1] ?? "0";
       return `subgroupShuffle(${args[1] ?? "0"}, u32(${args[2] ?? "0"}))`;
     case "__shfl_down_sync":
+      if (context.subgroupMode === "scalar") return args[1] ?? "0";
       return `subgroupShuffleDown(${args[1] ?? "0"}, u32(${args[2] ?? "0"}))`;
     case "__shfl_up_sync":
+      if (context.subgroupMode === "scalar") return args[1] ?? "0";
       return `subgroupShuffleUp(${args[1] ?? "0"}, u32(${args[2] ?? "0"}))`;
     case "__shfl_xor_sync":
+      if (context.subgroupMode === "scalar") return args[1] ?? "0";
       return `subgroupShuffleXor(${args[1] ?? "0"}, u32(${args[2] ?? "0"}))`;
     case "__any_sync":
+      if (context.subgroupMode === "scalar") return `select(0u, 1u, (${args[1] ?? "0"}) != 0)`;
       return `select(0u, 1u, subgroupAny((${args[1] ?? "0"}) != 0))`;
     case "__all_sync":
+      if (context.subgroupMode === "scalar") return `select(0u, 1u, (${args[1] ?? "0"}) != 0)`;
       return `select(0u, 1u, subgroupAll((${args[1] ?? "0"}) != 0))`;
     case "__ballot_sync":
+      if (context.subgroupMode === "scalar") return `select(0u, 1u, (${args[1] ?? "0"}) != 0)`;
       return `subgroupBallot((${args[1] ?? "0"}) != 0).x`;
     case "tex1D":
     case "tex1Dfetch":
@@ -4261,6 +4428,7 @@ function emitCooperativeGroupCall(expression: CudaLiteCallExpression, context: E
   if (callee.property === "shfl" || callee.property === "shfl_down" || callee.property === "shfl_up" || callee.property === "shfl_xor") {
     const value = expression.args[0] ? emitExpression(expression.args[0], context) : "0";
     const offset = expression.args[1] ? emitExpression(expression.args[1], context) : "0";
+    if (context.subgroupMode === "scalar") return value;
     const intrinsic = callee.property === "shfl"
       ? "subgroupShuffle"
       : callee.property === "shfl_up"
@@ -4272,10 +4440,12 @@ function emitCooperativeGroupCall(expression: CudaLiteCallExpression, context: E
   }
   if (callee.property === "ballot") {
     const predicate = expression.args[0] ? emitExpression(expression.args[0], context) : "0";
+    if (context.subgroupMode === "scalar") return `select(0u, 1u, (${predicate}) != 0)`;
     return `subgroupBallot((${predicate}) != 0).x`;
   }
   if (callee.property === "any" || callee.property === "all") {
     const predicate = expression.args[0] ? emitExpression(expression.args[0], context) : "0";
+    if (context.subgroupMode === "scalar") return `(${predicate}) != 0`;
     return `${callee.property === "any" ? "subgroupAny" : "subgroupAll"}((${predicate}) != 0)`;
   }
   return undefined;
@@ -4287,12 +4457,14 @@ function emitCooperativeNamespaceCall(expression: CudaLiteCallExpression, contex
   const groupArg = expression.args[0];
   if (groupArg?.kind !== "identifier") return undefined;
   const group = context.cooperativeGroupFor(groupArg.name);
+  if (!group && name.endsWith("::sync")) return "workgroupBarrier()";
   if (!group) return undefined;
   if (name.endsWith("::sync")) return group.groupKind === "grid" ? "0" : "workgroupBarrier()";
   const vectorReduce = emitVectorCooperativeNamespaceReduce(expression, group, context);
   if (vectorReduce !== undefined) return vectorReduce;
   const value = expression.args[1] ? emitExpression(expression.args[1], context) : "0";
   const op = cooperativeReductionOpName(expression.args[2]);
+  if (context.subgroupMode === "scalar") return value;
   const partitionPredicate = emitCooperativePartitionPredicate(group, context);
   if (partitionPredicate) {
     const valueExpression = expression.args[1];
@@ -4351,6 +4523,7 @@ function emitVectorCooperativeNamespaceReduce(
   if (!valueExpression) return undefined;
   const valueType = expressionValueTypeForEmit(valueExpression, context);
   if (!isCudaVectorType(valueType)) return undefined;
+  if (context.subgroupMode === "scalar") return emitExpression(valueExpression, context);
   const opName = opExpression ? expressionName(opExpression) : undefined;
   const op = opName ? context.deviceFunctionFor(opName) : undefined;
   if (!op || op.returnType !== valueType) {
@@ -4626,7 +4799,16 @@ function flattenedPointerAlias(
   if (seen.has(name)) return undefined;
   const alias = context.pointerAliasFor(name);
   if (!alias) return undefined;
-  const parent = flattenedPointerAlias(alias.rootName, span, context, new Set([...seen, name]));
+  return flattenPointerAlias(alias, span, context, new Set([...seen, name]));
+}
+
+function flattenPointerAlias(
+  alias: PointerAlias,
+  span: CudaLiteExpression["span"],
+  context: EmitContext,
+  seen: ReadonlySet<string> = new Set(),
+): PointerAlias {
+  const parent = flattenedPointerAlias(alias.rootName, span, context, seen);
   if (!parent) return alias;
   const valueType = alias.valueType ?? parent.valueType;
   return {
@@ -4817,7 +4999,7 @@ function shouldCastDirectAssignment(
   if (leftType === undefined || leftType === "void" || leftType === "bool" || leftType === "complex64" || isCudaVectorType(leftType)) return false;
   const rightType = expressionValueTypeForEmit(right, context);
   if (rightType === undefined || rightType === leftType) return false;
-  if ((leftType === "uint" || leftType === "int") && right.kind === "number" && !/[.eEfF]/u.test(right.raw)) return false;
+  if ((leftType === "uint" || leftType === "int") && right.kind === "number" && !numberLiteralHasFloatSyntax(right.raw)) return false;
   return (leftType === "float" || leftType === "double" || leftType === "bf16" || leftType === "half") &&
     (rightType === "int" || rightType === "uint");
 }
@@ -5099,7 +5281,8 @@ function storageViewForPointerExpression(
   context: EmitContext,
 ): { readonly rootName: string; readonly valueType: CudaLiteScalarType; readonly index: string } | undefined {
   if (pointer.kind === "cast" && pointer.pointer) {
-    const alias = pointerAliasForPointerExpression(pointer.expression, pointer.valueType);
+    const rawAlias = pointerAliasForPointerExpression(pointer.expression, pointer.valueType);
+    const alias = rawAlias ? flattenPointerAlias(rawAlias, pointer.span, context) : undefined;
     if (!alias || context.devicePointerParamFor(alias.rootName)) return undefined;
     return {
       rootName: alias.rootName,
@@ -5108,7 +5291,7 @@ function storageViewForPointerExpression(
     };
   }
   if (pointer.kind === "identifier") {
-    const alias = context.pointerAliasFor(pointer.name);
+    const alias = flattenedPointerAlias(pointer.name, pointer.span, context);
     if (!alias?.valueType || context.devicePointerParamFor(alias.rootName)) return undefined;
     return {
       rootName: alias.rootName,
@@ -5117,7 +5300,8 @@ function storageViewForPointerExpression(
     };
   }
   const valueType = devicePointerValueTypeForExpression(pointer, context);
-  const alias = pointerAliasForPointerExpression(pointer, valueType);
+  const rawAlias = pointerAliasForPointerExpression(pointer, valueType);
+  const alias = rawAlias ? flattenPointerAlias(rawAlias, pointer.span, context) : undefined;
   if (alias?.valueType && !context.devicePointerParamFor(alias.rootName)) {
     return {
       rootName: alias.rootName,
@@ -5137,6 +5321,8 @@ function isBarrierCall(expression: CudaLiteExpression): boolean {
 function noopCallComment(expression: CudaLiteExpression): string | undefined {
   if (expression.kind !== "call") return undefined;
   switch (expressionName(expression.callee)) {
+    case "assert":
+      return "assert omitted: WebGPU has no device abort";
     case "printf":
       return "printf omitted: WebGPU has no device stdout";
     case "cudaDeviceSynchronize":
