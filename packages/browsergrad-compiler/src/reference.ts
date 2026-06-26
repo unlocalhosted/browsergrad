@@ -2257,6 +2257,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       return 0;
     case "__trap":
       return 0;
+    case "cudaGraphSetConditional":
+      return 0;
     case "clock":
       return context.blockIdx.x * 104729 +
         context.blockIdx.y * 1009 +

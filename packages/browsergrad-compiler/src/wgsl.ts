@@ -3757,6 +3757,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return "0";
     case "cudaMemcpyPeerAsync":
       return "0";
+    case "cudaGraphSetConditional":
+      return "0";
     case "min":
     case "max":
       return `${name}(${args.join(", ")})`;
@@ -4776,6 +4778,8 @@ function noopCallComment(expression: CudaLiteExpression): string | undefined {
       return "cudaMemcpyAsync omitted: WebGPU copy orchestration is host-managed";
     case "cudaMemcpyPeerAsync":
       return "cudaMemcpyPeerAsync omitted: WebGPU copy orchestration is host-managed";
+    case "cudaGraphSetConditional":
+      return "cudaGraphSetConditional omitted: CUDA graph conditional scheduling is host-managed";
     default:
       return undefined;
   }

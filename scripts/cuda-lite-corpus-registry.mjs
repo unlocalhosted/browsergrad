@@ -26,8 +26,8 @@ export const cudaLiteCorpora = [
     path: path.join(corpusRoot, "cuda-samples"),
     expectations: {
       total: 357,
-      compileCodegenMin: 329,
-      hardFailMax: 25,
+      compileCodegenMin: 333,
+      hardFailMax: 21,
     },
   },
   {
@@ -349,6 +349,59 @@ export const cudaLiteCorpusExecutionFixtures = [
     output: "y",
   },
   {
+    sourceKey: "corpusLeetCudaSgemmNaiveF32",
+    caseName: "corpus:LeetCUDA:sgemm_naive_f32_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/sgemm/sgemm.cu",
+    kernelName: "sgemm_naive_f32_kernel",
+    workgroupSize: [2, 2, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [2, 2, 1] },
+    input: {
+      buffers: {
+        a: { type: "Float32Array", data: [1, 2, 3, 4, 5, 6] },
+        b: { type: "Float32Array", data: [1, 0, 0, 1, 1, 1] },
+        c: { type: "Float32Array", length: 4 },
+      },
+      scalars: { M: 2, N: 2, K: 3 },
+    },
+    output: "c",
+  },
+  {
+    sourceKey: "corpusLeetCudaHistogramI32",
+    caseName: "corpus:LeetCUDA:histogram_i32_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/histogram/histogram.cu",
+    kernelName: "histogram_i32_kernel",
+    workgroupSize: [8, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    input: {
+      buffers: {
+        a: { type: "Int32Array", data: [0, 1, 2, 1, 3, 2, 2, 0] },
+        y: { type: "Int32Array", length: 4 },
+      },
+      scalars: { N: 8 },
+    },
+    output: "y",
+  },
+  {
+    sourceKey: "corpusLeetCudaRopeF32V2",
+    caseName: "corpus:LeetCUDA:rope_f32_v2_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/rope/rope.cu",
+    kernelName: "rope_f32_v2_kernel",
+    workgroupSize: [4, 1, 1],
+    launch: { gridDim: [2, 1, 1], blockDim: [4, 1, 1] },
+    input: {
+      buffers: {
+        x: { type: "Float32Array", data: [1, 2, 3, 4, 5, 6, 7, 8, -1, 0.5, -2, 1.5, 3, -4, 5, -6] },
+        out: { type: "Float32Array", length: 16 },
+      },
+      scalars: { seq_len: 2, N: 4 },
+    },
+    output: "out",
+    tolerance: 3e-3,
+  },
+  {
     sourceKey: "corpusLlmGeluForward1",
     caseName: "corpus:llm.c:gelu_forward_kernel1",
     corpusId: "llm.c",
@@ -565,12 +618,12 @@ export const cudaLiteCorpusExecutionFixtures = [
 ];
 
 export const cudaLiteCorpusExecutionFixtureBaseline = {
-  totalMin: 29,
+  totalMin: 32,
   byCorpusMin: {
     "cuda-120": 2,
     "cuda-samples": 4,
     "llm.c": 10,
-    leetcuda: 13,
+    leetcuda: 16,
   },
 };
 

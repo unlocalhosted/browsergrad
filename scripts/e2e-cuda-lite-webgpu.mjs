@@ -263,6 +263,7 @@ const html = String.raw`<!doctype html>
             plan: result.plan,
             ok: result.ok,
             maxAbsDiff: result.maxAbsDiff,
+            ...(spec.tolerance === undefined ? {} : { tolerance: spec.tolerance }),
             ...(result.firstDiff === undefined ? {} : { firstDiff: result.firstDiff }),
             output: spec.output,
             ...(spec.corpusId === undefined ? {} : { corpusId: spec.corpusId }),
@@ -539,6 +540,7 @@ const html = String.raw`<!doctype html>
             input: () => materializeFixtureInput(fixture.input),
             output: fixture.output,
             corpusId: fixture.corpusId,
+            ...(fixture.tolerance === undefined ? {} : { tolerance: fixture.tolerance }),
           });
         }
         return cases;
@@ -585,7 +587,7 @@ const html = String.raw`<!doctype html>
           : actualInput;
         const expected = runCompiledKernelReference(compiled, expectedInput, spec.launch);
         const actual = await runCompiledKernelWebGpu(device, compiled, actualInput, spec.launch);
-        const comparison = compareArrays(expected.buffers[spec.output], actual.buffers[spec.output]);
+        const comparison = compareArrays(expected.buffers[spec.output], actual.buffers[spec.output], spec.tolerance);
         if (comparison.ok && spec.offsetOutput) {
           const offset = actual.buffers[spec.offsetOutput]?.[0];
           if (offset !== spec.expectedOffset) {
@@ -633,7 +635,7 @@ const html = String.raw`<!doctype html>
         }
       }
 
-      function compareArrays(expected, actual) {
+      function compareArrays(expected, actual, tolerance = 1e-5) {
         if (!expected || !actual || expected.length !== actual.length) {
           return { ok: false, maxAbsDiff: Number.POSITIVE_INFINITY };
         }
@@ -642,7 +644,7 @@ const html = String.raw`<!doctype html>
         for (let i = 0; i < expected.length; i++) {
           const diff = Math.abs(Number(expected[i]) - Number(actual[i]));
           if (diff > maxAbsDiff) maxAbsDiff = diff;
-          if (firstDiff === undefined && diff > 1e-5) {
+          if (firstDiff === undefined && diff > tolerance) {
             firstDiff = {
               index: i,
               expected: Number(expected[i]),
@@ -652,7 +654,7 @@ const html = String.raw`<!doctype html>
           }
         }
         return {
-          ok: maxAbsDiff <= 1e-5,
+          ok: maxAbsDiff <= tolerance,
           maxAbsDiff: round(maxAbsDiff),
           ...(firstDiff === undefined
             ? {}

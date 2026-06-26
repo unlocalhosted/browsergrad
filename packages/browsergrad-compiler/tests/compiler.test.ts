@@ -4632,6 +4632,29 @@ __global__ void syncOnly(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([9]);
   });
 
+  it("validates CUDA graph conditional setters as host-managed scheduler side effects", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void graphCondition(int *input, int *out, cudaGraphConditionalHandle handle) {
+  if (threadIdx.x < 1) {
+    unsigned int value = input[0] & 1;
+    cudaGraphSetConditional(handle, value);
+    out[0] = value;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { input: new Int32Array([3]), out: new Int32Array(1) }, scalars: { handle: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics).toContainEqual(expect.objectContaining({
+      code: "cuda-graph-conditional-host-orchestration",
+      severity: "warning",
+    }));
+    expect(compiled.wgsl).toContain("cudaGraphSetConditional omitted");
+    expect([...result.buffers.out as Int32Array]).toEqual([1]);
+  });
+
   it("passes pointer-offset arguments into reference dynamic launches", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void child(float *out) {

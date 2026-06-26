@@ -153,6 +153,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaMemcpy", [4, 4]],
   ["cudaMemcpyAsync", [5, 5]],
   ["cudaMemcpyPeerAsync", [6, 6]],
+  ["cudaGraphSetConditional", [2, 2]],
   ...[...CUDA_CACHE_HINT_LOADS].map((name) => [name, [1, 1]] as const),
   ...[...CUDA_CACHE_HINT_STORES].map((name) => [name, [2, 2]] as const),
   ["__cvta_generic_to_shared", [1, 1]],
@@ -1459,6 +1460,10 @@ function validateCallExpression(
     validateRuntimeCopyCall(expression, callName, diagnostics, walkExpression, scope, options);
     return { kind: "scalar", valueType: "int" };
   }
+  if (callName === "cudaGraphSetConditional") {
+    validateCudaGraphSetConditionalCall(expression, diagnostics, walkExpression, scope);
+    return { kind: "scalar", valueType: "int" };
+  }
   if (isAtomicBuiltin(callName)) {
     validateAtomicBuiltin(expression, scope, params, atomicParams, atomicShared, atomicDeviceGlobals, atomicDevicePointerTypes, diagnostics, walkExpression);
     return { kind: "scalar" };
@@ -1957,6 +1962,23 @@ function validateRuntimeCopyCall(
 
 function isCudaRuntimeCopyCall(callName: string): boolean {
   return callName === "cudaMemcpy" || callName === "cudaMemcpyAsync" || callName === "cudaMemcpyPeerAsync";
+}
+
+function validateCudaGraphSetConditionalCall(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+  scope: Scope,
+): void {
+  const handle = expression.args[0];
+  const value = expression.args[1];
+  if (handle) validateScalarOperand(walkExpression(handle, scope), handle.span, diagnostics);
+  if (value) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
+  diagnostics.push(warning(
+    "cuda-graph-conditional-host-orchestration",
+    "cudaGraphSetConditional updates CUDA graph scheduler state; BrowserGrad single-kernel execution validates the call and treats graph body orchestration as host-managed",
+    expression.span,
+  ));
 }
 
 function isHostManagedRuntimeNoopCall(callName: string): boolean {
