@@ -181,10 +181,11 @@ Local corpus audits on 2026-06-26:
   pointer math, plus cooperative-groups `binary_partition` lowering through
   subgroup predicate masks and lockstep reference collectives, with `18`
   strict compile gaps and `14` hard gaps.
-  Main failures:
-  parser/frontend gaps, texture/vector
-  operators, remaining `half2` intrinsics, templates, and runtime library
-  shape.
+  Main failures: C++ object-model declarations that need real constructor /
+  member-call / lifetime modeling, remaining parser/frontend context gaps,
+  grid-wide cooperative-groups orchestration, dynamic CUDA runtime/library
+  shape, and one device-side `cudaFree` gap that should not be erased without
+  allocator semantics.
 - `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `148` direct
   compile/codegen-ok after source/context normalization, intrinsic-ledger
   expansion, CUDA/C named constants, CUDA cache-hint memory builtins, local

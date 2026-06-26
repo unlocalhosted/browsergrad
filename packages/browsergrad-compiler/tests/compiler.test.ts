@@ -1142,6 +1142,10 @@ __global__ void unsupported(float* x) {
       message: "double is lowered to f32",
     })).toMatchObject({ family: "feature", gpuRuns: true, referenceRuns: true });
     expect(describeCudaDiagnostic({
+      code: "unsupported-cpp-object-model",
+      message: "C++ object model declarations require modeled constructors, member calls, and object lifetime before CUDA-lite lowering",
+    })).toMatchObject({ family: "frontend", gpuRuns: false, referenceRuns: false });
+    expect(describeCudaDiagnostic({
       code: "unsupported-cute-object",
       message: "CuTe C++ object declarations require a modeled tensor/tile object graph before CUDA-lite lowering",
     })).toMatchObject({ family: "frontend", gpuRuns: false, referenceRuns: false });
@@ -1172,6 +1176,16 @@ __global__ void wgmma(float* out) {
 __global__ void carrier(float* out, typename GEMM_Traits::Arguments args) {
   if (threadIdx.x < 1) { out[0] = 0.0f; }
 }`, "unsupported-dependent-carrier-param");
+
+    expectParseDiagnosticCode(`
+__global__ void opaque(Container<int> **g_container) {
+  *g_container = new Vector<int>(4);
+}`, "unsupported-cpp-object-model");
+
+    expectParseDiagnosticCode(`
+__global__ void stacky(float* out) {
+  global_stack<int, 4, 32> stack(out, threadIdx.x);
+}`, "unsupported-cpp-object-model");
   });
 
   it("rejects semantic gaps before WGSL/runtime execution", () => {

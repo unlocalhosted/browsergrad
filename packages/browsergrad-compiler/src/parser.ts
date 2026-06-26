@@ -1517,7 +1517,10 @@ class Parser {
     if (scalarAlias !== undefined) return scalarAlias;
     const vectorAlias = cudaVectorTypeAlias(token.value);
     if (vectorAlias !== undefined) return vectorAlias;
-    if (!TYPE_KEYWORDS.has(token.value)) this.fail(`unsupported CUDA-lite type: ${token.value}`, token.span);
+    if (!TYPE_KEYWORDS.has(token.value)) {
+      this.rejectUnsupportedCudaCppObjectType(this.index - 1);
+      this.fail(`unsupported CUDA-lite type: ${token.value}`, token.span);
+    }
     return token.value as Exclude<CudaLiteScalarType, "void">;
   }
 
@@ -1585,6 +1588,7 @@ class Parser {
     if (start.kind !== "identifier") return;
     const typeEnd = this.unsupportedCppTypeEndIndex(this.index);
     if (typeEnd === undefined) return;
+    if (this.typeEndIndex(this.index) === typeEnd) return;
     let declaratorIndex = typeEnd;
     while (
       this.tokens[declaratorIndex]?.value === "&" ||
@@ -1609,6 +1613,38 @@ class Parser {
         "unsupported-cute-object",
       );
     }
+    if (typeEnd > this.index + 1) this.failUnsupportedCudaCppObjectModel(start.span);
+  }
+
+  private rejectUnsupportedCudaCppObjectType(startIndex: number): void {
+    const start = this.tokens[startIndex];
+    if (start?.kind !== "identifier") return;
+    const typeEnd = this.unsupportedCppTypeEndIndex(startIndex);
+    if (typeEnd === undefined || typeEnd === startIndex + 1) return;
+    const typeText = this.tokens.slice(startIndex, typeEnd).map((token) => token.value).join("");
+    if (WGMMA_TMA_TYPE_PATTERN.test(typeText)) {
+      this.fail(
+        "WGMMA/TMA object pipeline declarations require a modeled async tensor-core pipeline before CUDA-lite lowering",
+        start.span,
+        "unsupported-wgmma-tma",
+      );
+    }
+    if (CUTE_OBJECT_TYPE_NAMES.has(start.value)) {
+      this.fail(
+        "CuTe C++ object declarations require a modeled tensor/tile object graph before CUDA-lite lowering",
+        start.span,
+        "unsupported-cute-object",
+      );
+    }
+    this.failUnsupportedCudaCppObjectModel(start.span);
+  }
+
+  private failUnsupportedCudaCppObjectModel(span: SourceSpan): never {
+    this.fail(
+      "C++ object model declarations require modeled constructors, member calls, and object lifetime before CUDA-lite lowering",
+      span,
+      "unsupported-cpp-object-model",
+    );
   }
 
   private unsupportedCppTypeEndIndex(startIndex: number): number | undefined {

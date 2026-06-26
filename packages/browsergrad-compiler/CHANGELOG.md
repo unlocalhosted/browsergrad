@@ -44,6 +44,10 @@
 - Cooperative groups now lower `cg::binary_partition(tile, predicate)` through
   subgroup predicate masks and lockstep CPU-reference collectives, raising the
   cuda-samples compile/codegen gate to `340/357` with `14` hard gaps.
+- C++ template/class object declarations now fail with
+  `unsupported-cpp-object-model` instead of generic parse errors, keeping
+  dynamic `new`/member-call/object-lifetime gaps explicit without wrong-code
+  erasure.
 - Source normalization and WGSL emission now lower generic CUDA device
   function-pointer table/param dispatch, device-function local type inference,
   and explicit signed/unsigned index casts. This closes cuda-samples
