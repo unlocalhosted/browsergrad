@@ -59,7 +59,7 @@ Current corpus gate:
 ```sh
 pnpm --filter @unlocalhosted/browsergrad-compiler audit:cuda-120
 pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda
-pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --skip-fetch --require-webgpu
+pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --skip-fetch
 ```
 
 - `AdepojuJeremy/CUDA-120-DAYS--CHALLENGE` audit: `225/240` real code-kernel
@@ -91,9 +91,10 @@ pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --sk
   output-verified readback without parsing prose.
 - `verify:real-world-cuda` is the combined hardware-backed gate: it runs the
   pinned full-corpus compile/codegen audit, then runs exact external corpus
-  fixtures through real Chromium/WebGPU with output comparison. Use
-  `--require-webgpu` in CI lanes where missing WebGPU must fail. Pinned corpus
-  checkouts must match the expected commit and have clean git status.
+  fixtures through real Chromium/WebGPU with output comparison. Missing WebGPU
+  fails by default; use `--allow-missing-webgpu` only for read-only capability
+  discovery on machines without browser GPU support. Pinned corpus checkouts
+  must match the expected commit and have clean git status.
 - Recent semantic lifts: `DevicePool*` bump allocation, raw pointer pool allocation
   with integer offset counters, casted pool pointer reads/writes, WebGPU atomic
   offset updates, DevicePool aliasing across host-lifted child launches,
@@ -272,9 +273,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu:corpus -- --require
 - `e2e:webgpu:dist` runs the browser proof through built package exports. The
   combined `verify:real-world-cuda` gate runs both `src` and `dist` browser
   bundles unless a narrower `--bundle` is supplied.
-- Use `-- --require-webgpu` on machines where absence of WebGPU should fail CI.
 - Root `verify:release` and CI's Chromium job run
-  `verify:real-world-cuda -- --require-webgpu`, so full-corpus
+  `verify:real-world-cuda`, so full-corpus
   compile/codegen coverage and exact-kernel real GPU fixtures are both hard
   regression gates. Npm publish workflows also run the compiler gate before
   publishing compiler-capability packages.

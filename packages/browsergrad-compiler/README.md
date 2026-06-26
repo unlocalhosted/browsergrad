@@ -341,7 +341,7 @@ pnpm verify:compiler
 pnpm e2e:webgpu
 pnpm e2e:webgpu:dist
 pnpm e2e:webgpu:corpus -- --require-webgpu
-pnpm verify:real-world-cuda -- --skip-fetch --require-webgpu
+pnpm verify:real-world-cuda -- --skip-fetch
 ```
 
 `test:browser:open` keeps Chromium open for inspection; quit with `q`. If the
@@ -392,10 +392,11 @@ exercise fresh package output.
 real-world compile/codegen audit and then the exact-kernel browser/WebGPU corpus
 fixture e2e against both source aliases and built dist exports by default. Use
 `--bundle src`, `--bundle dist`, or `--bundle both` to choose the browser bundle.
-Root release verification and CI's Chromium job also run this gate with
-`--require-webgpu`, so corpus compile/codegen regressions and fixture-backed
-real GPU regressions fail hard instead of becoming audit notes. Npm publish
-workflows install Chromium and run the same compiler gate before publishing.
+Missing WebGPU fails by default; use `--allow-missing-webgpu` only for read-only
+capability discovery on machines without browser GPU support. Root release
+verification, CI's Chromium job, and npm publish workflows all run the same
+compiler gate before publishing, so corpus compile/codegen regressions and
+fixture-backed real GPU regressions fail hard instead of becoming audit notes.
 Pinned corpus checkouts must match the expected commit and be clean; dirty
 untracked or modified files fail both audit and browser fixture loading.
 

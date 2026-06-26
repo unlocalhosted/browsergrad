@@ -50,8 +50,9 @@
   enforces a minimum pinned-output fixture count.
 - Root release verification and CI's Chromium job now run the combined
   real-world CUDA compile/codegen plus real WebGPU fixture gate with WebGPU
-  required, and npm publish workflows run the same gate before compiler-capable
-  packages publish.
+  required, npm publish workflows run the same gate before compiler-capable
+  packages publish, and `verify:real-world-cuda` now requires WebGPU by default
+  unless `--allow-missing-webgpu` is passed for local capability discovery.
 - Cooperative groups now lower `cg::binary_partition(tile, predicate)` through
   subgroup predicate masks and lockstep CPU-reference collectives, raising the
   cuda-samples compile/codegen gate to `340/357` with `14` hard gaps.

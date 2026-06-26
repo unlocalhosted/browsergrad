@@ -218,7 +218,8 @@ pnpm --filter @unlocalhosted/browsergrad-compiler bench:browser -- --require-web
 ```
 
 `verify:real-world-cuda` runs both source-alias and dist-export browser bundles
-by default, so library consumers are covered in addition to local TS source.
+by default and treats missing WebGPU as a hard failure, so library consumers are
+covered in addition to local TS source.
 Use stricter ratio values only on pinned machines. Browser/GPU timing is not
 portable enough for global absolute thresholds.
 

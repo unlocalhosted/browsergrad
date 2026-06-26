@@ -474,9 +474,9 @@ Acceptance criteria for the first slice:
 - Real-world corpus audit can be run by
   `pnpm --filter @unlocalhosted/browsergrad-compiler audit:real-world-cuda`.
 - Combined truth gate can be run by
-  `pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --skip-fetch --require-webgpu`;
+  `pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --skip-fetch`;
   it executes full-corpus compile/codegen audit plus exact-kernel browser
-  WebGPU fixture e2e.
+  WebGPU fixture e2e, with missing WebGPU failing by default.
 - The audit wrapper fetches or verifies pinned corpus commits before running.
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   compile/codegen-ok count, hard-gap count, error codes, semantic
@@ -613,9 +613,9 @@ Acceptance criteria for the first slice:
   signed/unsigned pointer index math are guarded by output-verified WebGPU
   readback.
 - CI, root release verification, and npm publish workflows run
-  `verify:real-world-cuda -- --require-webgpu`, so corpus compile/codegen
-  regressions and exact-kernel real GPU fixture regressions are hard failures,
-  not advisory reports.
+  `verify:real-world-cuda`, whose browser fixture step requires WebGPU by
+  default, so corpus compile/codegen regressions and exact-kernel real GPU
+  fixture regressions are hard failures, not advisory reports.
 - CPU reference arithmetic preserves C-style integer locals, integer division,
   and remainder behavior so fixture-backed tensor indexing kernels compare
   against real WebGPU execution instead of JS-number semantics.

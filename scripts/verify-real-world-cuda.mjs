@@ -20,7 +20,7 @@ for (const bundle of browserBundles(options.bundle)) {
     "--require-corpus-fixtures",
     "--bundle",
     bundle,
-    ...(options.requireWebGpu ? ["--require-webgpu"] : []),
+    ...(options.allowMissingWebGpu ? [] : ["--require-webgpu"]),
   ]);
 }
 
@@ -29,7 +29,7 @@ console.log("\nreal-world CUDA verification passed");
 function parseArgs(args) {
   const options = {
     skipFetch: false,
-    requireWebGpu: false,
+    allowMissingWebGpu: false,
     limit: 0,
     bundle: "both",
   };
@@ -40,7 +40,11 @@ function parseArgs(args) {
       continue;
     }
     if (arg === "--require-webgpu") {
-      options.requireWebGpu = true;
+      options.allowMissingWebGpu = false;
+      continue;
+    }
+    if (arg === "--allow-missing-webgpu") {
+      options.allowMissingWebGpu = true;
       continue;
     }
     if (arg === "--limit") {
@@ -60,7 +64,7 @@ function parseArgs(args) {
       continue;
     }
     if (arg === "--help" || arg === "-h") {
-      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--require-webgpu] [--limit N] [--bundle src|dist|both]");
+      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--allow-missing-webgpu] [--limit N] [--bundle src|dist|both]");
       process.exit(0);
     }
     throw new Error(`unexpected argument: ${arg}`);
