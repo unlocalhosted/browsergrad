@@ -2291,6 +2291,23 @@ __global__ void pointer_record(float *out, RefArrays ref) {
 
 {
   const source = createKernelCompilationUnit({
+    recordDeclarations: ["struct RefArrays { float *values; int n; size_t bytes; };"],
+    kernel: `
+__global__ void record_child(int i, RefArrays ref, float *out) {
+  if (i < ref.n) out[i] = ref.values[i] + (float)ref.bytes;
+}
+__global__ void record_parent(RefArrays ref, float *out) {
+  record_child<<<1, 1>>>(0, ref, out);
+}`,
+  });
+  assert.match(source, /__global__ void record_child\(int i, float \*ref__values, int ref__n, uint ref__bytes, float \*out\)/u);
+  assert.match(source, /__global__ void record_parent\(float \*ref__values, int ref__n, uint ref__bytes, float \*out\)/u);
+  assert.match(source, /record_child<<<1, 1>>>\(0, ref__values, ref__n, ref__bytes, out\);/u);
+  assert.doesNotMatch(source, /\bRefArrays\b/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
     recordDeclarations: ["struct DevicePool { int* base; unsigned int poolSize; unsigned int offset; };"],
     kernel: `
 __global__ void allocationKernel(DevicePool* dp, float* output, int N) {

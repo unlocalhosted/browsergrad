@@ -2762,7 +2762,10 @@ function bracketIndexParts(indexes) {
 function rewriteScalarizedRecordCalls(source, functionExpansions, symbolsByRecord) {
   if (functionExpansions.length === 0) return source;
   let out = source;
-  for (const expansion of functionExpansions) out = rewriteScalarizedRecordCallsForFunction(out, expansion, symbolsByRecord);
+  for (const expansion of functionExpansions) {
+    out = rewriteScalarizedRecordCallsForFunction(out, expansion, symbolsByRecord);
+    out = rewriteScalarizedRecordLaunchCallsForFunction(out, expansion, symbolsByRecord);
+  }
   return out;
 }
 
@@ -2784,26 +2787,8 @@ function rewriteScalarizedRecordCallsForFunction(source, expansion, symbolsByRec
       continue;
     }
     const args = splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim());
-    const rewritten = [];
-    let argIndex = 0;
-    let changed = false;
-    for (const param of expansion.params) {
-      const arg = args[argIndex++] ?? "";
-      if (param.kind !== "record") {
-        rewritten.push(arg);
-        continue;
-      }
-      const recordSymbols = symbolsByRecord.get(param.recordName);
-      const parts = recordSymbols === undefined ? undefined : scalarizedRecordArgumentParts(arg, param.record, recordSymbols);
-      if (parts === undefined) {
-        rewritten.push(arg);
-        continue;
-      }
-      changed = true;
-      rewritten.push(...parts);
-    }
-    while (argIndex < args.length) rewritten.push(args[argIndex++] ?? "");
-    if (!changed) {
+    const rewritten = scalarizedRecordRewrittenArgs(args, expansion, symbolsByRecord);
+    if (rewritten === undefined) {
       re.lastIndex = close + 1;
       continue;
     }
@@ -2814,6 +2799,66 @@ function rewriteScalarizedRecordCallsForFunction(source, expansion, symbolsByRec
   }
   out += source.slice(cursor);
   return out;
+}
+
+function rewriteScalarizedRecordLaunchCallsForFunction(source, expansion, symbolsByRecord) {
+  const re = new RegExp(`\\b${escapeRegExp(expansion.name)}\\s*<<<`, "gu");
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const launchOpen = source.indexOf("<<<", match.index + expansion.name.length);
+    const launchClose = findCudaLaunchClose(source, launchOpen);
+    if (launchOpen < 0 || launchClose === undefined) {
+      re.lastIndex = match.index + expansion.name.length;
+      continue;
+    }
+    const argsOpen = skipWhitespace(source, launchClose + 3);
+    if (source[argsOpen] !== "(") {
+      re.lastIndex = launchClose + 3;
+      continue;
+    }
+    const argsClose = findBalanced(source, argsOpen, "(", ")");
+    if (argsClose === undefined) {
+      re.lastIndex = argsOpen + 1;
+      continue;
+    }
+    const args = splitTopLevel(source.slice(argsOpen + 1, argsClose)).map((arg) => arg.trim());
+    const rewritten = scalarizedRecordRewrittenArgs(args, expansion, symbolsByRecord);
+    if (rewritten === undefined) {
+      re.lastIndex = argsClose + 1;
+      continue;
+    }
+    out += source.slice(cursor, argsOpen + 1);
+    out += rewritten.join(", ");
+    cursor = argsClose;
+    re.lastIndex = argsClose + 1;
+  }
+  out += source.slice(cursor);
+  return out;
+}
+
+function scalarizedRecordRewrittenArgs(args, expansion, symbolsByRecord) {
+  const rewritten = [];
+  let argIndex = 0;
+  let changed = false;
+  for (const param of expansion.params) {
+    const arg = args[argIndex++] ?? "";
+    if (param.kind !== "record") {
+      rewritten.push(arg);
+      continue;
+    }
+    const recordSymbols = symbolsByRecord.get(param.recordName);
+    const parts = recordSymbols === undefined ? undefined : scalarizedRecordArgumentParts(arg, param.record, recordSymbols);
+    if (parts === undefined) {
+      rewritten.push(arg);
+      continue;
+    }
+    changed = true;
+    rewritten.push(...parts);
+  }
+  while (argIndex < args.length) rewritten.push(args[argIndex++] ?? "");
+  return changed ? rewritten : undefined;
 }
 
 function scalarizedRecordArgumentParts(arg, record, symbols) {
