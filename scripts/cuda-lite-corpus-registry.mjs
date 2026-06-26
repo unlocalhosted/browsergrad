@@ -58,20 +58,22 @@ export const cudaLiteCorpora = [
 
 import { cudaLiteCorpusExecutionFixtures as baseCudaLiteCorpusExecutionFixtures } from "./cuda-lite-corpus-fixtures.mjs";
 import { cudaLiteCorpusExecutionFixtures as extraCudaLiteCorpusExecutionFixtures } from "./cuda-lite-corpus-fixtures-extra.mjs";
+import { cudaLiteCorpusExecutionFixtures as extra2CudaLiteCorpusExecutionFixtures } from "./cuda-lite-corpus-fixtures-extra-2.mjs";
 
 export const cudaLiteCorpusExecutionFixtures = [
   ...baseCudaLiteCorpusExecutionFixtures,
   ...extraCudaLiteCorpusExecutionFixtures,
+  ...extra2CudaLiteCorpusExecutionFixtures,
 ];
 
 export const cudaLiteCorpusExecutionFixtureBaseline = {
-  totalMin: 70,
-  expectedOutputMin: 22,
+  totalMin: 92,
+  expectedOutputMin: 40,
   byCorpusMin: {
     "cuda-120": 2,
-    "cuda-samples": 10,
-    "llm.c": 21,
-    leetcuda: 37,
+    "cuda-samples": 17,
+    "llm.c": 27,
+    leetcuda: 46,
   },
 };
 

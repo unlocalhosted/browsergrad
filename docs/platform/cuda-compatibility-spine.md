@@ -262,17 +262,18 @@ pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu:corpus -- --require
   exact external kernels through the same source-normalized compilation-unit
   path as the corpus audit, dispatches them in Chromium/WebGPU, and compares
   GPU readbacks to CPU reference. Fixture launch/input/output specs live in
-  `scripts/cuda-lite-corpus-registry.mjs`. Current no-regression floor is `70`
+  `scripts/cuda-lite-corpus-registry.mjs`. Current no-regression floor is `92`
   output-verified real WebGPU corpus fixtures: CUDA-120 `2`, NVIDIA
-  `cuda-samples` `10`, `llm.c` `21`, and LeetCUDA `37`. Coverage includes
+  `cuda-samples` `17`, `llm.c` `27`, and LeetCUDA `46`. Coverage includes
   vector add/scale, cuda-samples Bezier/mdspan/SobelTex/matrix-multiply/scalar
-  product, `llm.c` forward, backward, attention, and optimizer kernels,
-  LeetCUDA scalar/vector activations, SGEMM, histogram, RoPE, direct transpose
-  variants, and lifted CuTe transpose motifs.
+  product/simple memory kernels, `llm.c` forward, backward, attention,
+  optimizer, layernorm, scale, and lowp kernels, LeetCUDA scalar/vector
+  activations, embedding packs, SGEMM, histogram packs, RoPE packs, direct
+  transpose variants, and lifted CuTe transpose motifs.
   Fixture specs may pin explicit expected readbacks; when present, the gate
   checks both CPU reference and real WebGPU against that expected output instead
   of allowing the two implementations to agree on wrong-code. Current hard
-  floor requires at least `22` pinned-output corpus fixtures.
+  floor requires at least `40` pinned-output corpus fixtures.
 - `e2e:webgpu:dist` runs the browser proof through built package exports. The
   combined `verify:real-world-cuda` gate runs both `src` and `dist` browser
   bundles unless a narrower `--bundle` is supplied.

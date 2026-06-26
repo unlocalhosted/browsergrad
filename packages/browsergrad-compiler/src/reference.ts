@@ -3160,6 +3160,8 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
     if (isLocalPointerArray(local)) {
       return local.values[lvalue.index] ?? { kind: "pool-pointer", poolName: "", byteOffset: -1, valueType: lvalue.valueType ?? local.valueType };
     }
+    const scalarStorage = readLocalScalarStorageValue(local, lvalue);
+    if (scalarStorage.handled) return scalarStorage.value;
     if (!isLocalArray(local)) throw compilerFailure(`'${lvalue.name}' is not a local array`);
     const valueType = lvalue.valueType ?? local.valueType;
     const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
@@ -3233,6 +3235,7 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
         }
         return;
       }
+      if (writeLocalScalarStorageValue(local, lvalue, value, locals)) return;
       if (!isLocalArray(local)) throw compilerFailure(`'${lvalue.name}' is not a local array`);
       const valueType = lvalue.valueType ?? local.valueType;
       const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
@@ -3250,7 +3253,7 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
         const field = lvalue.fieldIndex ?? cudaVectorFieldIndex(current.valueType, lvalue.field!);
         if (field === undefined) throw compilerFailure(`unsupported ${current.valueType} member '${lvalue.field}'`);
         const lanes = [...current.lanes];
-        lanes[field] = valueAsNumber(value, lvalue.name);
+        lanes[field] = roundVectorLane(current.valueType, valueAsNumber(value, lvalue.name));
         locals.set(lvalue.name, { ...current, lanes });
       } else {
         throw compilerFailure(`'${lvalue.name}' is not complex or CUDA vector`);
@@ -3968,6 +3971,99 @@ function projectField(value: LocalValue, lvalue: LValue): EvalValue {
   const complex = valueAsComplex(value, lvalue.name);
   if (lvalue.field !== "x" && lvalue.field !== "y") throw compilerFailure(`unsupported complex member '${lvalue.field}'`);
   return complex[lvalue.field];
+}
+
+function readLocalScalarStorageValue(
+  local: LocalValue | undefined,
+  lvalue: LValue,
+): { readonly handled: true; readonly value: EvalValue } | { readonly handled: false } {
+  if (local === undefined || isLocalArray(local) || isLocalPointerArray(local)) return { handled: false };
+  const valueType = lvalue.valueType;
+  const storageIndex = localScalarStorageIndex(lvalue);
+  if (storageIndex === undefined) return { handled: false };
+  if (isCudaVectorValue(local)) {
+    if (isCudaVectorType(valueType)) {
+      const vector = readCudaVectorView(local, valueType, storageIndex);
+      return { handled: true, value: projectField(vector, lvalue) };
+    }
+    return { handled: true, value: local.lanes[storageIndex] ?? 0 };
+  }
+  if (isComplex(local)) {
+    if (valueType === "complex64" && storageIndex === 0) return { handled: true, value: projectField(local, lvalue) };
+    if (storageIndex === 0) return { handled: true, value: local.x };
+    if (storageIndex === 1) return { handled: true, value: local.y };
+    return { handled: true, value: 0 };
+  }
+  if (typeof local === "number") return { handled: true, value: storageIndex === 0 ? local : 0 };
+  return { handled: false };
+}
+
+function writeLocalScalarStorageValue(
+  local: LocalValue | undefined,
+  lvalue: LValue,
+  value: EvalValue,
+  locals: Map<string, LocalValue>,
+): boolean {
+  if (local === undefined || isLocalArray(local) || isLocalPointerArray(local)) return false;
+  const valueType = lvalue.valueType;
+  const storageIndex = localScalarStorageIndex(lvalue);
+  if (storageIndex === undefined) return false;
+  if (isCudaVectorValue(local)) {
+    const lanes = [...local.lanes];
+    if (isCudaVectorType(valueType)) {
+      const field = lvalue.fieldIndex ?? (lvalue.field ? cudaVectorFieldIndex(valueType, lvalue.field) : undefined);
+      if (field !== undefined) {
+        lanes[storageIndex + field] = roundVectorLane(local.valueType, valueAsNumber(value, lvalue.name));
+      } else {
+        const vector = valueAsCudaVector(value, valueType);
+        for (let lane = 0; lane < cudaVectorLaneCount(valueType); lane++) {
+          lanes[storageIndex + lane] = roundVectorLane(local.valueType, vector.lanes[lane] ?? 0);
+        }
+      }
+    } else {
+      lanes[storageIndex] = roundVectorLane(local.valueType, valueAsNumber(value, lvalue.name));
+    }
+    locals.set(lvalue.name, { ...local, lanes });
+    return true;
+  }
+  if (isComplex(local)) {
+    if (valueType === "complex64" && storageIndex === 0) {
+      if (lvalue.field) {
+        if (lvalue.field !== "x" && lvalue.field !== "y") throw compilerFailure(`unsupported complex member '${lvalue.field}'`);
+        locals.set(lvalue.name, { ...local, [lvalue.field]: valueAsNumber(value, lvalue.name) });
+      } else {
+        locals.set(lvalue.name, valueAsComplex(value, lvalue.name));
+      }
+      return true;
+    }
+    if (storageIndex === 0 || storageIndex === 1) {
+      locals.set(lvalue.name, { ...local, [storageIndex === 0 ? "x" : "y"]: valueAsNumber(value, lvalue.name) });
+    }
+    return true;
+  }
+  if (typeof local === "number") {
+    if (storageIndex === 0) locals.set(lvalue.name, coerceReferenceScalarValue(valueType, value, lvalue.name));
+    return true;
+  }
+  return false;
+}
+
+function localScalarStorageIndex(lvalue: LValue): number | undefined {
+  if (lvalue.index === undefined) return undefined;
+  return lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(lvalue.valueType);
+}
+
+function readCudaVectorView(
+  local: CudaVectorValue,
+  valueType: CudaLiteVectorType,
+  storageIndex: number,
+): CudaVectorValue {
+  return {
+    kind: "cuda-vector",
+    valueType,
+    lanes: Array.from({ length: cudaVectorLaneCount(valueType) }, (_unused, lane) =>
+      roundVectorLane(valueType, local.lanes[storageIndex + lane] ?? 0)),
+  };
 }
 
 function zeroLocalValue(type: CudaLiteScalarType): EvalValue {

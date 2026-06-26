@@ -3448,6 +3448,26 @@ __global__ void addPacked(float *a, float *b, float *c, int n) {
     expect([...result.buffers.c as Float32Array]).toEqual([11, 22, 33, 44, 55, 66, 77, 88]);
   });
 
+  it("runs local vector reinterpret casts in the reference interpreter", () => {
+    const compiled = compileCudaLiteKernel(`
+#define FLOAT4(value) (reinterpret_cast<float4 *>(&(value))[0])
+__global__ void localPacked(float *out) {
+  float4 value;
+  value.x = 1.0f;
+  value.y = 2.0f;
+  value.z = 3.0f;
+  value.w = 4.0f;
+  FLOAT4(out[0]) = FLOAT4(value);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
+  });
+
   it("lowers local typed storage pointer views without emitting pointer vars", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void addPackedAlias(float *a, float *b, float *c) {

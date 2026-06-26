@@ -5,7 +5,13 @@
 - Current corpus audit closes the compatibility ladder at `1038/1038`
   compile/codegen-ok across CUDA-120, NVIDIA `cuda-samples`, `llm.c`, and
   LeetCUDA, with `0` hard gaps in the pinned aggregate gate. Real browser
-  corpus e2e now executes `70/70` fixture-backed kernels through WebGPU.
+  corpus e2e now executes `92/92` fixture-backed kernels through WebGPU.
+- Browser corpus e2e now adds real WebGPU fixtures for LeetCUDA embedding
+  packs, histogram packs, RoPE packs, `float4` 2D transpose variants, `llm.c`
+  residual/GELU/layernorm/scale/lowp kernels, and simple NVIDIA sample memory
+  kernels. The reference interpreter now treats local CUDA vector values as
+  addressable scalar storage, so `reinterpret_cast<float4 *>(&local_vec)[0]`
+  matches the WGSL path.
 - WGSL lowering now rewrites CUDA prefix/postfix updates to assignment-form
   statements and casts integer arguments to CUDA float math intrinsics before
   emission, covering real `cuda-samples` matrix-multiply and `llm.c` attention
@@ -65,19 +71,19 @@
 - Corpus audit now reports `compileCodegenOk` / `compileCodegenGaps` and
   `planCompiledOk` / `planCompileGaps`, making compile-plan coverage distinct
   from fixture-backed real WebGPU execution.
-- Browser corpus e2e now runs `70` exact kernels from pinned CUDA-120,
+- Browser corpus e2e now runs `92` exact kernels from pinned CUDA-120,
   NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA sources through real WebGPU in
   both source and dist bundles, with CPU-reference readback comparisons.
 - Browser corpus e2e now enforces those real WebGPU fixtures as a no-regression
-  floor: `70` total passing fixtures, with per-corpus minimums of CUDA-120 `2`,
-  NVIDIA `cuda-samples` `10`, `llm.c` `21`, and LeetCUDA `37`.
+  floor: `92` total passing fixtures, with per-corpus minimums of CUDA-120 `2`,
+  NVIDIA `cuda-samples` `17`, `llm.c` `27`, and LeetCUDA `46`.
 - Browser corpus e2e now adds real WebGPU LeetCUDA direct transpose fixtures and
   `llm.c` encoder/cross-entropy-backward transformer fixtures, including a
   regression for local storage-pointer alias dereferences that need WGSL pointer
   helper emission.
 - Corpus fixture specs can now pin explicit expected readbacks; the browser gate
   compares both CPU reference and real WebGPU output against those arrays and
-  enforces a minimum pinned-output fixture count, currently `22`.
+  enforces a minimum pinned-output fixture count, currently `40`.
 - Corpus audit summaries now expose `compileFeatureProfile` so downstream
   platform code does not confuse feature-full compile/codegen coverage with
   device-portable browser execution.

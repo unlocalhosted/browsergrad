@@ -586,26 +586,28 @@ Acceptance criteria for the first slice:
   analyzer, reference, WGSL, and test coverage.
 - CUDA-120 remains `240/240` compile/codegen-ok with `0` hard gaps.
 - Browser e2e corpus fixture coverage proves real WebGPU execution for at
-  least `70` exact kernel launches across the pinned external corpora:
+  least `92` exact kernel launches across the pinned external corpora:
   CUDA-120, NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA.
 - That real-execution floor is enforced per corpus: CUDA-120 `>=2`, NVIDIA
-  `cuda-samples` `>=10`, `llm.c` `>=21`, and LeetCUDA `>=37` passing browser
+  `cuda-samples` `>=17`, `llm.c` `>=27`, and LeetCUDA `>=46` passing browser
   WebGPU fixtures.
 - LeetCUDA vector-pack coverage includes real browser fixtures for scalar and
   `float4` elementwise/activation kernels (`elementwise_add`, ReLU, sigmoid,
-  swish, hard-swish, GELU, hardshrink, and ELU), so vector storage views stay
+  swish, hard-swish, GELU, hardshrink, ELU, embedding, histogram, RoPE, and
+  transpose packs), so vector storage views stay
   guarded by output-verified GPU readback, not audit-only lowering.
 - LeetCUDA transpose coverage includes real browser fixtures for direct 1D/2D
   scalar and `float4` transpose kernels plus the lifted CuTe transpose motifs,
   so layout/indexing rewrites stay guarded by output-verified GPU readback.
 - `llm.c` fixture coverage includes encoder forward/backward, attention
   query-key/softmax/value/permute/unpermute, AdamW, and cross-entropy softmax
-  backward kernels, so local storage-pointer aliases and transformer backward
-  indexing stay guarded by output-verified GPU readback.
+  backward kernels, plus residual/GELU/layernorm/scale/lowp kernels, so local
+  storage-pointer aliases and transformer backward indexing stay guarded by
+  output-verified GPU readback.
 - Known-output fixture specs compare CPU reference and real WebGPU readbacks
   against explicit expected arrays, so shared wrong-code between interpreter and
   WGSL cannot satisfy those fixture gates. The browser gate enforces at least
-  `22` pinned-output corpus fixtures.
+  `40` pinned-output corpus fixtures.
 - NVIDIA `cuda-samples` Bezier coverage includes a real browser fixture for
   scalarized pointer-record fixed-array fields (`BezierLine.CP[3]`), so C-style
   struct-of-arrays lowering is guarded by GPU readback.
