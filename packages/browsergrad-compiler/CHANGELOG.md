@@ -45,6 +45,8 @@
   `llm.c` encoder/cross-entropy-backward transformer fixtures, including a
   regression for local storage-pointer alias dereferences that need WGSL pointer
   helper emission.
+- Corpus fixture specs can now pin explicit expected readbacks; the browser gate
+  compares both CPU reference and real WebGPU output against those arrays.
 - Root release verification and CI's Chromium job now run the combined
   real-world CUDA compile/codegen plus real WebGPU fixture gate with WebGPU
   required.

@@ -645,6 +645,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { row: 2, col: 4 },
     },
     output: "y",
+    expectedOutput: { type: "Float32Array", data: [1, 5, 2, 6, 3, 7, 4, 8] },
   },
   {
     sourceKey: "corpusLeetCudaMatTransposeF32Row2Col",
@@ -662,6 +663,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { row: 2, col: 4 },
     },
     output: "y",
+    expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4, 5, 6, 7, 8] },
   },
   {
     sourceKey: "corpusLeetCudaMatTransposeF32x4Col2Row",
@@ -679,6 +681,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { row: 2, col: 4 },
     },
     output: "y",
+    expectedOutput: { type: "Float32Array", data: [1, 5, 2, 6, 3, 7, 4, 8] },
   },
   {
     sourceKey: "corpusLeetCudaMatTransposeF32Col2Row2d",
@@ -696,6 +699,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { row: 2, col: 4 },
     },
     output: "y",
+    expectedOutput: { type: "Float32Array", data: [1, 5, 2, 6, 3, 7, 4, 8] },
   },
   {
     sourceKey: "corpusLeetCudaMatTransposeF32Diagonal2d",
@@ -713,6 +717,10 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { row: 4, col: 4 },
     },
     output: "y",
+    expectedOutput: {
+      type: "Float32Array",
+      data: [1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15, 4, 8, 12, 16],
+    },
   },
   {
     sourceKey: "corpusLlmGeluForward1",
@@ -767,6 +775,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { B: 1, T: 2, C: 3 },
     },
     output: "out",
+    expectedOutput: { type: "Float32Array", data: [20.5, 22.5, 24.5, 9, 9, 9] },
   },
   {
     sourceKey: "corpusLlmPermuteKernel",
@@ -839,6 +848,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { B: 1, T: 2, V: 3 },
     },
     output: "dlogits",
+    expectedOutput: { type: "Float32Array", data: [0.1, 0.2, -0.3, -0.25, 0.125, 0.125] },
   },
   {
     sourceKey: "corpusLlmGeluBackward1",

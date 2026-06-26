@@ -598,6 +598,9 @@ Acceptance criteria for the first slice:
 - `llm.c` fixture coverage includes encoder forward and cross-entropy softmax
   backward kernels, so local storage-pointer aliases and transformer backward
   indexing stay guarded by output-verified GPU readback.
+- Known-output fixture specs compare CPU reference and real WebGPU readbacks
+  against explicit expected arrays, so shared wrong-code between interpreter and
+  WGSL cannot satisfy those fixture gates.
 - NVIDIA `cuda-samples` Bezier coverage includes a real browser fixture for
   scalarized pointer-record fixed-array fields (`BezierLine.CP[3]`), so C-style
   struct-of-arrays lowering is guarded by GPU readback.

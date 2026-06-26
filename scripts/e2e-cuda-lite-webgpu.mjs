@@ -597,7 +597,14 @@ const html = String.raw`<!doctype html>
           : actualInput;
         const expected = runCompiledKernelReference(compiled, expectedInput, spec.launch);
         const actual = await runCompiledKernelWebGpu(device, compiled, actualInput, spec.launch);
-        const comparison = compareArrays(expected.buffers[spec.output], actual.buffers[spec.output], spec.tolerance);
+        const expectedOutput = spec.expectedOutput === undefined
+          ? expected.buffers[spec.output]
+          : materializeTypedArray(spec.expectedOutput);
+        const referenceComparison = compareArrays(expectedOutput, expected.buffers[spec.output], spec.tolerance);
+        if (!referenceComparison.ok) {
+          return { ...referenceComparison, plan: "reference-output-mismatch" };
+        }
+        const comparison = compareArrays(expectedOutput, actual.buffers[spec.output], spec.tolerance);
         if (comparison.ok && spec.offsetOutput) {
           const offset = actual.buffers[spec.offsetOutput]?.[0];
           if (offset !== spec.expectedOffset) {
