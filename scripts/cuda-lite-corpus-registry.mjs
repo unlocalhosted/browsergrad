@@ -419,6 +419,109 @@ export const cudaLiteCorpusExecutionFixtures = [
     output: "y",
   },
   {
+    sourceKey: "corpusLeetCudaElementwiseAddF32x4",
+    caseName: "corpus:LeetCUDA:elementwise_add_f32x4_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/elementwise/elementwise.cu",
+    kernelName: "elementwise_add_f32x4_kernel",
+    workgroupSize: [2, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    input: {
+      buffers: {
+        a: { type: "Float32Array", data: [1, 2, 3, 4, -1, -2, 0.5, 8] },
+        b: { type: "Float32Array", data: [10, 20, 30, 40, 1, 2, -0.5, -8] },
+        c: { type: "Float32Array", length: 8 },
+      },
+      scalars: { N: 8 },
+    },
+    output: "c",
+  },
+  {
+    sourceKey: "corpusLeetCudaReluF32x4",
+    caseName: "corpus:LeetCUDA:relu_f32x4_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/relu/relu.cu",
+    kernelName: "relu_f32x4_kernel",
+    workgroupSize: [2, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    input: {
+      buffers: {
+        x: { type: "Float32Array", data: [-3, -0.25, 0, 1, 2, -2, 4, -5] },
+        y: { type: "Float32Array", length: 8 },
+      },
+      scalars: { N: 8 },
+    },
+    output: "y",
+  },
+  {
+    sourceKey: "corpusLeetCudaSigmoidF32x4",
+    caseName: "corpus:LeetCUDA:sigmoid_f32x4_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/sigmoid/sigmoid.cu",
+    kernelName: "sigmoid_f32x4_kernel",
+    workgroupSize: [2, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    input: {
+      buffers: {
+        x: { type: "Float32Array", data: [-4, -2, -0.5, 0, 0.5, 2, 4, 8] },
+        y: { type: "Float32Array", length: 8 },
+      },
+      scalars: { N: 8 },
+    },
+    output: "y",
+  },
+  {
+    sourceKey: "corpusLeetCudaSwishF32x4",
+    caseName: "corpus:LeetCUDA:swish_f32x4_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/swish/swish.cu",
+    kernelName: "swish_f32x4_kernel",
+    workgroupSize: [2, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    input: {
+      buffers: {
+        x: { type: "Float32Array", data: [-4, -1, -0.25, 0, 0.5, 1, 2, 4] },
+        y: { type: "Float32Array", length: 8 },
+      },
+      scalars: { N: 8 },
+    },
+    output: "y",
+  },
+  {
+    sourceKey: "corpusLeetCudaHardswishF32x4",
+    caseName: "corpus:LeetCUDA:hardswish_f32x4_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/hardswish/hardswish.cu",
+    kernelName: "hardswish_f32x4_kernel",
+    workgroupSize: [2, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    input: {
+      buffers: {
+        x: { type: "Float32Array", data: [-4, -3, -1, 0, 1, 2, 3, 5] },
+        y: { type: "Float32Array", length: 8 },
+      },
+      scalars: { N: 8 },
+    },
+    output: "y",
+  },
+  {
+    sourceKey: "corpusLeetCudaEluF32x4",
+    caseName: "corpus:LeetCUDA:elu_f32x4_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/elu/elu.cu",
+    kernelName: "elu_f32x4_kernel",
+    workgroupSize: [2, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    input: {
+      buffers: {
+        x: { type: "Float32Array", data: [-4, -1, -0.25, 0, 0.5, 1, 2, 4] },
+        y: { type: "Float32Array", length: 8 },
+      },
+      scalars: { N: 8 },
+    },
+    output: "y",
+  },
+  {
     sourceKey: "corpusLeetCudaHardshrinkF32x4",
     caseName: "corpus:LeetCUDA:hardshrink_f32x4_kernel",
     corpusId: "leetcuda",
@@ -652,12 +755,12 @@ export const cudaLiteCorpusExecutionFixtures = [
 ];
 
 export const cudaLiteCorpusExecutionFixtureBaseline = {
-  totalMin: 34,
+  totalMin: 40,
   byCorpusMin: {
     "cuda-120": 2,
     "cuda-samples": 4,
     "llm.c": 10,
-    leetcuda: 18,
+    leetcuda: 24,
   },
 };
 
