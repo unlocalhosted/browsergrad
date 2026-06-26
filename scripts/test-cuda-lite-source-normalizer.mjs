@@ -682,6 +682,27 @@ using GEMM_Traits = WSTraits<decltype(make_shape(_8{}, _16{}, _4{})), 2>;`],
 {
   const source = createKernelCompilationUnit({
     kernel: `
+template <const int BM = 128, const int BN = 128, const bool BLOCK_SWIZZLE = false>
+__global__ void __launch_bounds__(256)
+wgmma_tma_kernel(int M, int N, int K, half *C, const CUtensorMap *__restrict__ tensorMapA, const CUtensorMap *__restrict__ tensorMapB) {
+  const int bx = ((int)BLOCK_SWIZZLE) * blockIdx.z * gridDim.x + blockIdx.x;
+  const int by = blockIdx.y;
+  cde::cp_async_bulk_tensor_2d_global_to_shared(smem, tensorMapA, 0, by * BM, full);
+  cde::cp_async_bulk_tensor_2d_global_to_shared(smem, tensorMapB, 0, bx * BN, full);
+  WGMMA_M64N128K16_F32F16F16(d, sA, sB, 1, 1, 1, 0, 0);
+}`,
+  });
+  assert.match(source, /__global__ void __launch_bounds__\(256\)\s*wgmma_tma_kernel\(int M, int N, int K, half \*C, half \*tensorMapA__base, half \*tensorMapB__base\)/u);
+  assert.match(source, /bg_for_bg_wgmma_linear_0 < \(128 \* 128\)/u);
+  assert.match(source, /tensorMapA__base\[\(bg_wgmma_row \* K\) \+ bg_wgmma_k\]/u);
+  assert.match(source, /tensorMapB__base\[\(bg_wgmma_col \* K\) \+ bg_wgmma_k\]/u);
+  assert.doesNotMatch(source, /\bCUtensorMap\b/u);
+  assert.doesNotMatch(source, /\bcp_async_bulk_tensor_2d_global_to_shared\b/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 __global__ void cute_flash_attn(half *pQ, half *pK, half *pV, half *pO, int B, int H, int N_QO, int N_KV, int D, float scale) {
   int bx = blockIdx.x;
   int by = blockIdx.y;
