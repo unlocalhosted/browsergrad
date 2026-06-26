@@ -1044,7 +1044,7 @@ function isPortablePointerDeviceFunction(signature, source, name, recordNames = 
   const pointerBases = pointerBaseTypes(signature);
   const templateTypeParams = templateTypeParamNames(signature);
   if (pointerBases.length === 0) return false;
-  if (!pointerBases.every((type) => isPortableBaseType(type, templateTypeParams, definesByName))) return false;
+  if (!pointerBases.every((type) => isPortableRecordAwareBaseType(type, templateTypeParams, recordNames, definesByName))) return false;
   if (/__float_as_int|__int_as_float/u.test(source)) return false;
   return true;
 }
@@ -1055,7 +1055,7 @@ function isPortableReferenceDeviceFunction(signature, source, name, recordNames 
   const referenceBases = referenceBaseTypes(signature);
   const templateTypeParams = templateTypeParamNames(signature);
   if (referenceBases.length === 0) return false;
-  if (!referenceBases.every((type) => isPortableBaseType(type, templateTypeParams, definesByName))) return false;
+  if (!referenceBases.every((type) => isPortableRecordAwareBaseType(type, templateTypeParams, recordNames, definesByName))) return false;
   if (/__float_as_int|__int_as_float/u.test(source)) return false;
   return true;
 }
@@ -1063,6 +1063,11 @@ function isPortableReferenceDeviceFunction(signature, source, name, recordNames 
 function isPortableBaseType(type, templateTypeParams = new Set(), definesByName = new Map()) {
   const normalized = normalizePortableBaseType(type, definesByName);
   return PORTABLE_POINTER_BASE_TYPES.has(normalized) || templateTypeParams.has(normalized);
+}
+
+function isPortableRecordAwareBaseType(type, templateTypeParams = new Set(), recordNames = new Set(), definesByName = new Map()) {
+  return isPortableBaseType(type, templateTypeParams, definesByName) ||
+    recordNames.has(normalizePortableBaseType(type, definesByName));
 }
 
 function templateTypeParamNames(signature) {

@@ -869,6 +869,35 @@ __global__ void helper_reduce(int *out) {
 {
   const source = createKernelCompilationUnit({
     kernel: `
+__global__ void record_helper_call(OutPair *out, float *sum, float *sum2, int i) {
+  store_pair(sum, sum2, &out[i]);
+}`,
+    deviceFunctions: [
+      {
+        name: "store_pair",
+        source: `__device__ void store_pair(float *sum, float *sum2, OutPair *out) {
+  OutPair value = {sum[0], sum2[0]};
+  *out = value;
+}`,
+      },
+    ],
+    recordDeclarations: [
+      `typedef struct {
+  double expected;
+  double confidence;
+} OutPair;`,
+    ],
+  });
+  assert.match(source, /__global__ void record_helper_call\(double \*out__expected, double \*out__confidence, float \*sum, float \*sum2, int i\)/u);
+  assert.match(source, /__device__ void store_pair\(float \*sum, float \*sum2, double \*out__expected, double \*out__confidence\)/u);
+  assert.match(source, /store_pair\(sum, sum2, &out__expected\[i\], &out__confidence\[i\]\)/u);
+  assert.match(source, /out__expected\[0\] = value__expected; out__confidence\[0\] = value__confidence;/u);
+  assert.doesNotMatch(source, /\bOutPair\b/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 __global__ void kernel(float *in, float *out, int ld) {
   int row = threadIdx.x;
   out[0] = in[IDX2C(row, 0, ld)];

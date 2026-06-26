@@ -46,6 +46,10 @@
   raising the cuda-samples compile/codegen gate to `336/357` with `18` hard
   gaps and adding real WebGPU fixtures for mdspan row scaling and shared-tile
   transpose.
+- Source normalization now admits scalarized POD-record pointer device helpers
+  and expands `&recordPtr[i]` helper arguments into field pointers, closing the
+  MonteCarlo `sumReduce` gap and raising the cuda-samples compile/codegen gate
+  to `337/357` with `17` hard gaps.
 - Added real WebGPU LeetCUDA `float4` fixture coverage for GELU and
   hardshrink vector-pack kernels, plus CPU-reference pointer-view hardening for
   multi-thread vector reinterpret loads.

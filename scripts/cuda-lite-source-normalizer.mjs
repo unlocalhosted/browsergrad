@@ -2532,12 +2532,49 @@ function rewriteScalarizedRecordCallsForFunction(source, expansion, symbolsByRec
 
 function scalarizedRecordArgumentParts(arg, record, symbols) {
   const name = arg.trim();
+  const addressed = scalarizedRecordAddressArgumentParts(name, record, symbols);
+  if (addressed !== undefined) return addressed;
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name) || !symbols.has(name)) return undefined;
   const symbol = symbols.get(name);
   return record.fields.map((field) => {
     if (symbol.kind === "single-array-constant" && record.fields.length === 1 && field.dimensions.length > 0) return name;
     return recordFieldName(name, field);
   });
+}
+
+function scalarizedRecordAddressArgumentParts(arg, record, symbols) {
+  const addressMatch = /^&\s*([A-Za-z_][A-Za-z0-9_]*)(\s*(?:\[[\s\S]+\])*)\s*$/u.exec(arg);
+  if (addressMatch?.[1] !== undefined) {
+    const name = addressMatch[1];
+    if (!symbols.has(name)) return undefined;
+    const indexes = addressMatch[2]?.trim() ?? "";
+    return record.fields.map((field) => scalarizedRecordFieldPointerExpression(name, field, indexes));
+  }
+  const pointerOffsetMatch = /^([A-Za-z_][A-Za-z0-9_]*)\s*\+\s*([\s\S]+)$/u.exec(arg);
+  if (pointerOffsetMatch?.[1] !== undefined && pointerOffsetMatch[2] !== undefined) {
+    const name = pointerOffsetMatch[1];
+    const symbol = symbols.get(name);
+    if (symbol?.kind !== "param-pointer") return undefined;
+    const offset = pointerOffsetMatch[2].trim();
+    return record.fields.map((field) => {
+      const fieldName = recordFieldName(name, field);
+      if (field.dimensions.length === 0) return `${fieldName} + (${offset})`;
+      const fieldStride = field.dimensions.reduce((product, dimension) => product * dimension, 1);
+      return `${fieldName} + ((${offset}) * ${fieldStride})`;
+    });
+  }
+  return undefined;
+}
+
+function scalarizedRecordFieldPointerExpression(name, field, indexes) {
+  const fieldName = recordFieldName(name, field);
+  const indexParts = bracketIndexParts(indexes);
+  if (field.dimensions.length === 0) {
+    return indexParts.length === 0 ? `&${fieldName}` : `&${fieldName}[${indexParts[0]}]`;
+  }
+  const flattened = flattenScalarizedRecordPointerFieldIndexes(indexes, "", field.dimensions);
+  if (flattened !== undefined) return `&${fieldName}[${flattened}]`;
+  return indexParts.length === 0 ? `&${fieldName}[0]` : `&${fieldName}${indexes}`;
 }
 
 function recordFieldName(name, field) {
