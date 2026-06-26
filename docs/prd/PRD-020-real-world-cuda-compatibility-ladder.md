@@ -480,7 +480,8 @@ Acceptance criteria for the first slice:
 - The audit wrapper fetches or verifies pinned corpus commits before running.
 - Gate output records stable corpus metadata: repo, commit, path, kernel count,
   compile/codegen-ok count, hard-gap count, error codes, semantic
-  families, and explicit `executionTierCounts`.
+  families, explicit `executionTierCounts`, and `compileFeatureProfile`
+  assumptions for feature-full compile/codegen audits.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
   `>=340` compile/codegen-ok, and `<=14` hard gaps.
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions,

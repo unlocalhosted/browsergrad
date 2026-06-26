@@ -86,9 +86,11 @@ pnpm --filter @unlocalhosted/browsergrad-compiler verify:real-world-cuda -- --sk
   compile/codegen-ok, and `<=7` hard gaps. The aggregate gate also verifies
   CUDA-120 at its pinned commit.
 - Corpus audits now emit `executionTierCounts` plus
-  `deprecatedCompilePlanAliases` so platform code can distinguish
+  `compileFeatureProfile` and `deprecatedCompilePlanAliases` so platform code can distinguish
   compile/codegen coverage from fixture-backed browser execution and
-  output-verified readback without parsing prose.
+  output-verified readback without parsing prose. Current compile audits assume
+  `shader-f16`, `subgroups`, and `f64Mode: "f32"` compatibility lowering;
+  fixture-backed browser e2e is the device-portability proof.
 - `verify:real-world-cuda` is the combined hardware-backed gate: it runs the
   pinned full-corpus compile/codegen audit, then runs exact external corpus
   fixtures through real Chromium/WebGPU with output comparison. Missing WebGPU

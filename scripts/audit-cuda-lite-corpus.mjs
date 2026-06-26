@@ -319,6 +319,12 @@ const directLoweringOk = results.length - failures.length;
 const hostPlanCompiledOk = failures.filter((failure) => failure.webGpuPlanLiftOk).length;
 const compileCodegenOk = directLoweringOk + hostPlanCompiledOk;
 const compileCodegenGaps = results.length - compileCodegenOk;
+const compileFeatureProfile = {
+  shaderF16: "assumed-available",
+  subgroups: "assumed-available",
+  f64Mode: "f32-compatibility",
+  devicePortability: "fixture-backed-browser-e2e-only",
+};
 const summary = {
   files: files.length,
   codeBlocks,
@@ -326,6 +332,7 @@ const summary = {
   totalKernelDefinitions: results.length,
   corpusKernelExecution: "compile-codegen-only",
   corpusExecutionMode: "compile-codegen-only",
+  compileFeatureProfile,
   executionTierCounts: {
     planCompiledOk: compileCodegenOk,
     planCompileGaps: compileCodegenGaps,
@@ -335,9 +342,9 @@ const summary = {
     outputVerifiedOk: 0,
   },
   executionTierNotes: {
-    planCompiledOk: "Parsed, analyzed, lowered, and emitted direct WGSL or a host-orchestrated WebGPU plan.",
+    planCompiledOk: "Parsed, analyzed, lowered, and emitted direct WGSL or a host-orchestrated WebGPU plan under compileFeatureProfile assumptions.",
     planCompileGaps: "Extracted kernels that did not compile/codegen into direct WGSL or a host-orchestrated WebGPU plan.",
-    compileCodegenOnlyOk: "Parsed, analyzed, lowered, and emitted WGSL or host WebGPU plan from pinned corpus source.",
+    compileCodegenOnlyOk: "Parsed, analyzed, lowered, and emitted WGSL or host WebGPU plan from pinned corpus source under compileFeatureProfile assumptions.",
     fixtureBackedExecutedOk: "Requires explicit input/output fixtures; this corpus audit does not synthesize them.",
     browserWebGpuExecutedOk: "Covered by separate browser E2E gates, not by this corpus audit.",
     outputVerifiedOk: "Covered only when fixture-backed execution compares readback against expected outputs.",

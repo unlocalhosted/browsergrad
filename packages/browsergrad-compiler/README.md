@@ -390,7 +390,10 @@ invocations cannot import a partially rebuilt `dist/` tree. The wrapper builds
 exercise fresh package output.
 `verify:real-world-cuda` is the combined truth gate: it runs the pinned
 real-world compile/codegen audit and then the exact-kernel browser/WebGPU corpus
-fixture e2e against both source aliases and built dist exports by default. Use
+fixture e2e against both source aliases and built dist exports by default. Audit
+JSON includes `compileFeatureProfile` so consumers can see that full-corpus
+compile/codegen assumes `shader-f16`, `subgroups`, and f32-compatible `double`
+lowering; fixture-backed browser e2e is the device-portability proof. Use
 `--bundle src`, `--bundle dist`, or `--bundle both` to choose the browser bundle.
 Missing WebGPU fails by default; use `--allow-missing-webgpu` only for read-only
 capability discovery on machines without browser GPU support. Root release
