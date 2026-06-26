@@ -316,7 +316,8 @@ export function createKernelCompilationUnit({
   const withLocalReferences = normalizeLocalReferenceAliases(withStatementMacros);
   const withSideEffects = normalizeSideEffectExpressions(withLocalReferences);
   const withScopedForVariables = normalizeForLoopScopedVariables(withSideEffects);
-  const withRecoveredNumerators = normalizeMissingThreadLocalSoftmaxNumeratorBuffers(withScopedForVariables);
+  const withFinalCudaCppCompat = normalizeCudaCppCompat(withScopedForVariables);
+  const withRecoveredNumerators = normalizeMissingThreadLocalSoftmaxNumeratorBuffers(withFinalCudaCppCompat);
   const withTemplateFallbacks = normalizeTemplateValueFallbacks(withRecoveredNumerators, postCarrierDefines);
   return normalizeCppTemplateCarrierSyntax(withTemplateFallbacks);
 }

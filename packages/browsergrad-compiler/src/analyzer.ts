@@ -2289,6 +2289,12 @@ function validateCooperativeGroupCall(
     for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
     return { kind: "scalar", valueType: "uint" };
   }
+  if (method === "any" || method === "all") {
+    requiredFeatures.add("subgroups");
+    if (expression.args.length !== 1) diagnostics.push(error("invalid-call-arity", `${method} expects 1 argument`, expression.span));
+    for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return { kind: "scalar", valueType: "bool" };
+  }
   diagnostics.push(error("unsupported-cooperative-groups", `unsupported cooperative group method '${method}'`, expression.span));
   for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
   return { kind: "unknown" };

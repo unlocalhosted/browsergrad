@@ -2760,6 +2760,8 @@ function evalCooperativeGroupCall(
     return valueAsNumber(args[0] ?? 0, "shuffle value");
   }
   if (callee.property === "ballot") return truthy(args[0] ?? 0) ? 1 : 0;
+  if (callee.property === "any") return truthy(args[0] ?? 0) ? 1 : 0;
+  if (callee.property === "all") return truthy(args[0] ?? 0) ? 1 : 0;
   return undefined;
 }
 

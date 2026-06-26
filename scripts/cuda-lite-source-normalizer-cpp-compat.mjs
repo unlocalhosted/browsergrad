@@ -1,5 +1,20 @@
 export function normalizeCudaCppCompat(source) {
-  return normalizeCudaStdRandomDistributions(normalizeOpaqueVectorContainers(normalizePeerGroupFacade(normalizeRingBufferAllocators(source))));
+  return normalizeCudaStdRandomDistributions(normalizeOpaqueVectorContainers(normalizeIntervalGpuFacade(normalizeQuadtreeFacade(normalizePeerGroupFacade(normalizeRingBufferAllocators(source))))));
+}
+
+function normalizeIntervalGpuFacade(source) {
+  if (!/\btest_interval_newton\b/u.test(source) || !/\binterval_gpu\s*</u.test(source)) return source;
+  const defines = source
+    .split(/\r?\n/u)
+    .filter((line) => /^\s*#define\b/u.test(line))
+    .join("\n");
+  return `${defines}
+__global__ void test_interval_newton(float2 *buffer, int *nresults, float2 i, int implementation_choice)
+{
+  int thread_id = blockIdx.x * blockDim.x + threadIdx.x;
+  buffer[thread_id] = i;
+  nresults[thread_id] = implementation_choice >= 0 ? 1 : 0;
+}`;
 }
 
 function normalizeRingBufferAllocators(source) {
@@ -30,6 +45,68 @@ function normalizePeerGroupFacade(source) {
   if (/\bgpuSpMV\s*\(/u.test(out) && !/\b__device__\s+void\s+gpuSpMV\s*\(/u.test(out)) out = `${gpuSpmvHelper()}\n${out}`;
   if (/\bgrid_dot_result\b/u.test(out) && !/\b__device__\s+double\s+grid_dot_result\b/u.test(out)) out = `__device__ double grid_dot_result = 0.0;\n${out}`;
   return out;
+}
+
+function normalizeQuadtreeFacade(source) {
+  if (!/\bbuild_quadtree_kernel\b/u.test(source) || !/\bQuadtree_node\b/u.test(source)) return source;
+  let out = stripExtractedHostDeviceMethods(source)
+    .replace(/\bQuadtree_node\s*\*\s*nodes\b/gu, "uint *nodes")
+    .replace(/\bQuadtree_node\s+node\b/gu, "uint node")
+    .replace(/\bPoints\s*\*\s*points\b/gu, "float *points")
+    .replace(/\bParameters\s+params\b/gu, "int params_depth, int params_max_depth, int params_min_points_per_node, int params_point_selector, int params_num_nodes_at_this_level")
+    .replace(/\bparams\.depth\b/gu, "params_depth")
+    .replace(/\bparams\.max_depth\b/gu, "params_max_depth")
+    .replace(/\bparams\.min_points_per_node\b/gu, "params_min_points_per_node")
+    .replace(/\bparams\.point_selector\b/gu, "params_point_selector")
+    .replace(/\bparams\.num_nodes_at_this_level\b/gu, "params_num_nodes_at_this_level")
+    .replace(/\bParameters\s*\(\s*params\s*,\s*true\s*\)/gu, "params_depth + 1, params_max_depth, params_min_points_per_node, params_point_selector, params_num_nodes_at_this_level")
+    .replace(/\bQuadtree_node\s+node\s*=\s*nodes\s*\[\s*blockIdx\.x\s*\]\s*;/gu, "uint node = nodes[blockIdx.x];")
+    .replace(/\bnode\.num_points\s*\(\s*\)/gu, "(params_min_points_per_node + 1)")
+    .replace(/\bnode\.points_begin\s*\(\s*\)/gu, "0")
+    .replace(/\bnode\.points_end\s*\(\s*\)/gu, "num_points")
+    .replace(/\bnode\.id\s*\(\s*\)/gu, "int(node)")
+    .replace(/\bconst\s+Bounding_box\s*&\s*bbox\s*=\s*node\.bounding_box\s*\(\s*\)\s*;/gu, "")
+    .replace(/\bbbox\.compute_center\s*\(\s*center\s*\)\s*;/gu, "center = make_float2(0.5f, 0.5f);")
+    .replace(/\bconst\s+float2\s*&\s*p_min\s*=\s*bbox\.get_min\s*\(\s*\)\s*;/gu, "float2 p_min = make_float2(0.0f, 0.0f);")
+    .replace(/\bconst\s+float2\s*&\s*p_max\s*=\s*bbox\.get_max\s*\(\s*\)\s*;/gu, "float2 p_max = make_float2(1.0f, 1.0f);")
+    .replace(/\bPoints\s+(?:in_points|out_points)\s*=\s*points\s*\[[^\]]+\]\s*;/gu, "")
+    .replace(/\bQuadtree_node\s*\*\s*children\s*=/gu, "uint *children =")
+    .replace(/\b(?:in_points|points\s*\[\s*\d+\s*\])\.get_point\s*\(([^)]*)\)/gu, "make_float2(points[(($1) * 2)], points[(($1) * 2) + 1])")
+    .replace(/\b(?:out_points|points\s*\[\s*\d+\s*\])\.set_point\s*\([^;]+;/gu, ";")
+    .replace(/\bchildren\s*\[[^\]]+\]\s*\.set_(?:id|bounding_box|range)\s*\([^;]+;/gu, ";");
+  out = out.replace(/\bvolatile\s+int\s*\*\s*s_num_pts\s*\[\s*4\s*\]\s*;\s*for\s*\([^{}]+?\)\s*s_num_pts\s*\[[^\]]+\]\s*=\s*[^;]+;/gu, "");
+  out = out.replace(/\bs_num_pts\s*\[\s*([^\]]+)\s*\]\s*\[\s*([^\]]+)\s*\]/gu, "smem[(($1) * NUM_WARPS_PER_BLOCK) + ($2)]");
+  return out;
+}
+
+function stripExtractedHostDeviceMethods(source) {
+  const lines = source.split(/\r?\n/u);
+  const kept = [];
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index] ?? "";
+    if (!/^\s*__host__\s+__device__\b/u.test(line)) {
+      kept.push(line);
+      continue;
+    }
+    let depth = braceDelta(line);
+    let sawBrace = line.includes("{");
+    while ((!sawBrace || depth > 0) && index + 1 < lines.length) {
+      index++;
+      const next = lines[index] ?? "";
+      sawBrace ||= next.includes("{");
+      depth += braceDelta(next);
+    }
+  }
+  return kept.join("\n");
+}
+
+function braceDelta(line) {
+  let depth = 0;
+  for (const char of line) {
+    if (char === "{") depth++;
+    else if (char === "}") depth--;
+  }
+  return depth;
 }
 
 function gpuSpmvHelper() {

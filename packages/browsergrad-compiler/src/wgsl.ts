@@ -4127,6 +4127,10 @@ function emitCooperativeGroupCall(expression: CudaLiteCallExpression, context: E
     const predicate = expression.args[0] ? emitExpression(expression.args[0], context) : "0";
     return `subgroupBallot((${predicate}) != 0).x`;
   }
+  if (callee.property === "any" || callee.property === "all") {
+    const predicate = expression.args[0] ? emitExpression(expression.args[0], context) : "0";
+    return `${callee.property === "any" ? "subgroupAny" : "subgroupAll"}((${predicate}) != 0)`;
+  }
   return undefined;
 }
 
