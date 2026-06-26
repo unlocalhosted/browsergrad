@@ -358,13 +358,13 @@ WebGPU. It covers SAXPY, guarded map, tiled matmul, grid-sync phases, host
 runtime copy, host dynamic launch, and prepared resident dispatch.
 `e2e:webgpu:corpus` additionally requires fixture-backed corpus kernels loaded
 from pinned local corpora under `/tmp` and executes them through real WebGPU
-with readback comparisons. Required fixture names currently cover `32` exact
+with readback comparisons. Required fixture names currently cover `34` exact
 kernel launches across CUDA-120, NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA,
 including vector ops, activations, embedding, softmax, cross-entropy, permute,
-matmul, normalization, and CuTe transpose cases.
+matmul, normalization, vector-pack activations, and CuTe transpose cases.
 `e2e:webgpu:corpus -- --require-webgpu` enforces this as a no-regression floor:
-at least `32` total passing real WebGPU corpus fixtures, with per-corpus minimums
-of CUDA-120 `2`, NVIDIA `cuda-samples` `4`, `llm.c` `10`, and LeetCUDA `16`.
+at least `34` total passing real WebGPU corpus fixtures, with per-corpus minimums
+of CUDA-120 `2`, NVIDIA `cuda-samples` `4`, `llm.c` `10`, and LeetCUDA `18`.
 Fixture specs can set a per-case tolerance for numerically sensitive
 transcendental kernels while still comparing CPU reference output against real
 WebGPU readback.

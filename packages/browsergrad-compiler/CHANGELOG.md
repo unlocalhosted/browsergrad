@@ -35,12 +35,19 @@
 - Corpus audit now reports `compileCodegenOk` / `compileCodegenGaps` and
   `planCompiledOk` / `planCompileGaps`, making compile-plan coverage distinct
   from fixture-backed real WebGPU execution.
-- Browser corpus e2e now runs `32` exact kernels from pinned CUDA-120,
+- Browser corpus e2e now runs `34` exact kernels from pinned CUDA-120,
   NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA sources through real WebGPU in
   both source and dist bundles, with CPU-reference readback comparisons.
 - Browser corpus e2e now enforces those real WebGPU fixtures as a no-regression
-  floor: `32` total passing fixtures, with per-corpus minimums for CUDA-120,
+  floor: `34` total passing fixtures, with per-corpus minimums for CUDA-120,
   NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA.
+- Added real WebGPU LeetCUDA `float4` fixture coverage for GELU and
+  hardshrink vector-pack kernels, plus CPU-reference pointer-view hardening for
+  multi-thread vector reinterpret loads.
+- CPU reference now models scalar warp-reduction collectives across active
+  subgroup lanes. Browser WebGPU subgroup fixtures stay out of the hard gate
+  until the current browser environment allows WGSL `subgroups` or a workgroup
+  fallback lands.
 - Added CUDA graph conditional setter validation/lowering as a host-managed
   scheduler side effect, raising the cuda-samples compile/codegen gate to
   `333/357` with `21` hard gaps.

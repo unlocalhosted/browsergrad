@@ -36,6 +36,7 @@ import {
   CudaLiteCompilerError,
   type CompiledCudaLiteKernel,
   type CompiledKernelInput,
+  type CudaLiteAssignmentExpression,
   type CudaLiteCallExpression,
   type CudaLiteCooperativeGroupDecl,
   type CudaLiteDeviceFunction,
@@ -168,7 +169,15 @@ interface MutableTrace {
 
 type ExecControl = { readonly kind: "return"; readonly value?: EvalValue } | { readonly kind: "continue" } | { readonly kind: "break" };
 type BarrierKind = "barrier" | "grid-barrier";
-type BarrierGenerator = Generator<BarrierKind, ExecControl | void, void>;
+type CollectiveOp = "sum" | "max" | "min";
+interface CollectiveYield {
+  readonly kind: "collective";
+  readonly op: CollectiveOp;
+  readonly value: number;
+  readonly groupKey: string;
+}
+type SyncYield = BarrierKind | CollectiveYield;
+type BarrierGenerator = Generator<SyncYield, ExecControl | void, EvalValue | void>;
 
 export function runCompiledKernelReference(
   compiled: CompiledCudaLiteKernel,
@@ -304,6 +313,7 @@ function runBlock(
   const shared = allocateShared(sharedDeclarationsFor(body, compiled.ir.sharedDeclarations));
   const generators: BarrierGenerator[] = [];
   const active: boolean[] = [];
+  const resumes: Array<EvalValue | undefined> = [];
 
   for (let tz = 0; tz < blockDim.z; tz++) {
     for (let ty = 0; ty < blockDim.y; ty++) {
@@ -340,6 +350,7 @@ function runBlock(
         };
         generators.push(execStatements(body, context));
         active.push(true);
+        resumes.push(undefined);
       }
     }
   }
@@ -347,19 +358,88 @@ function runBlock(
   while (active.some(Boolean)) {
     let activeBefore = 0;
     let barriers = 0;
+    const collectives: Array<CollectiveYield & { readonly thread: number }> = [];
+    const activeByCollectiveGroup = new Map<string, number>();
     for (let i = 0; i < generators.length; i++) {
       if (!active[i]) continue;
       activeBefore++;
-      const next = generators[i]!.next();
+      const threadGroupKey = `warp:${Math.floor(i / 32)}`;
+      activeByCollectiveGroup.set(threadGroupKey, (activeByCollectiveGroup.get(threadGroupKey) ?? 0) + 1);
+      const resume = resumes[i];
+      resumes[i] = undefined;
+      const next = resume === undefined ? generators[i]!.next() : generators[i]!.next(resume);
       if (next.done) {
         active[i] = false;
-      } else {
+      } else if (next.value === "barrier" || next.value === "grid-barrier") {
         barriers++;
+      } else {
+        collectives.push({ ...next.value, thread: i });
       }
+    }
+    if (collectives.length > 0) {
+      if (barriers > 0) {
+        throw compilerFailure("collective mismatch: not every active thread reached the same subgroup collective");
+      }
+      assertCollectiveGroupParticipation(collectives, activeByCollectiveGroup);
+      for (const group of collectCollectiveResults(collectives)) {
+        for (const thread of group.threads) resumes[thread] = group.value;
+      }
+      continue;
     }
     if (barriers > 0 && barriers !== activeBefore) {
       throw compilerFailure("barrier mismatch: not every active thread reached __syncthreads()");
     }
+  }
+}
+
+function collectCollectiveResults(
+  collectives: readonly (CollectiveYield & { readonly thread: number })[],
+): Array<{ readonly threads: readonly number[]; readonly value: EvalValue }> {
+  const groups = new Map<string, { readonly op: CollectiveOp; readonly threads: number[]; readonly values: number[] }>();
+  for (const collective of collectives) {
+    const key = `${collective.op}:${collective.groupKey}`;
+    const group = groups.get(key);
+    if (group) {
+      group.threads.push(collective.thread);
+      group.values.push(collective.value);
+    } else {
+      groups.set(key, {
+        op: collective.op,
+        threads: [collective.thread],
+        values: [collective.value],
+      });
+    }
+  }
+  return [...groups.values()].map((group) => ({
+    threads: group.threads,
+    value: reduceCollectiveValues(group.op, group.values),
+  }));
+}
+
+function assertCollectiveGroupParticipation(
+  collectives: readonly (CollectiveYield & { readonly thread: number })[],
+  activeByGroup: ReadonlyMap<string, number>,
+): void {
+  const yieldedByGroup = new Map<string, number>();
+  for (const collective of collectives) {
+    yieldedByGroup.set(collective.groupKey, (yieldedByGroup.get(collective.groupKey) ?? 0) + 1);
+  }
+  for (const [groupKey, yielded] of yieldedByGroup) {
+    const active = activeByGroup.get(groupKey) ?? yielded;
+    if (yielded !== active) {
+      throw compilerFailure("collective mismatch: not every active thread in the subgroup reached the same collective");
+    }
+  }
+}
+
+function reduceCollectiveValues(op: CollectiveOp, values: readonly number[]): number {
+  switch (op) {
+    case "sum":
+      return values.reduce((sum, value) => sum + value, 0);
+    case "max":
+      return values.length === 0 ? Number.NEGATIVE_INFINITY : Math.max(...values);
+    case "min":
+      return values.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...values);
   }
 }
 
@@ -485,7 +565,15 @@ function* execStatements(
         break;
       }
       case "var":
-        execVar(statement, context);
+        {
+          const collective = collectiveVarInit(statement, context);
+          if (collective) {
+            const value = yield collective.sync;
+            writeCollectiveVarInit(collective, value ?? 0, context);
+          } else {
+            execVar(statement, context);
+          }
+        }
         break;
       case "dim3":
         context.locals.set(statement.name, vectorFromExpressions(statement.args, context));
@@ -506,7 +594,16 @@ function* execStatements(
       case "expr":
         if (execCpAsyncStatement(statement.expression, context)) {
           break;
-        } else if (isBarrier(statement.expression)) {
+        }
+        {
+          const collective = collectiveAssignment(statement.expression, context);
+          if (collective) {
+            const value = yield collective.sync;
+            writeCollectiveAssignment(collective, value ?? 0, context);
+            break;
+          }
+        }
+        if (isBarrier(statement.expression)) {
           yield "barrier";
         } else if (cooperativeSyncKind(statement.expression, context) === "grid") {
           yield "grid-barrier";
@@ -773,6 +870,97 @@ function execVar(statement: CudaLiteVarDecl, context: ThreadContext): void {
   );
 }
 
+function collectiveVarInit(
+  statement: CudaLiteVarDecl,
+  context: ThreadContext,
+): { readonly statement: CudaLiteVarDecl; readonly sync: CollectiveYield } | undefined {
+  if (statement.storage === "shared" || statement.pointer || statement.dimensions.length > 0 || statement.matrixTile || !statement.init) {
+    return undefined;
+  }
+  const sync = collectiveCall(statement.init, context);
+  return sync ? { statement, sync } : undefined;
+}
+
+function writeCollectiveVarInit(
+  collective: { readonly statement: CudaLiteVarDecl },
+  value: EvalValue,
+  context: ThreadContext,
+): void {
+  const { statement } = collective;
+  setReferenceValueType(context, statement.name, statement.valueType);
+  context.locals.set(statement.name, coerceReferenceScalarValue(statement.valueType, value, statement.name));
+}
+
+function collectiveAssignment(
+  expression: CudaLiteExpression,
+  context: ThreadContext,
+): { readonly expression: CudaLiteAssignmentExpression; readonly lvalue: LValue; readonly sync: CollectiveYield } | undefined {
+  if (expression.kind !== "assignment" || expression.operator !== "=") return undefined;
+  const sync = collectiveCall(expression.right, context);
+  if (!sync) return undefined;
+  return {
+    expression,
+    lvalue: resolveLValue(expression.left, context),
+    sync,
+  };
+}
+
+function writeCollectiveAssignment(
+  collective: { readonly lvalue: LValue },
+  value: EvalValue,
+  context: ThreadContext,
+): void {
+  writeLValue(collective.lvalue, value, context);
+}
+
+function collectiveCall(expression: CudaLiteExpression, context: ThreadContext): CollectiveYield | undefined {
+  if (expression.kind !== "call") return undefined;
+  const name = expressionName(expression.callee);
+  const op = collectiveOpForCall(name);
+  if (!op) return undefined;
+  const value = collectiveValueExpression(name, expression.args);
+  if (!value) return undefined;
+  return {
+    kind: "collective",
+    op,
+    value: evalNumber(value, context),
+    groupKey: `warp:${Math.floor(localLinearRank(context) / 32)}`,
+  };
+}
+
+function collectiveOpForCall(name: string | undefined): CollectiveOp | undefined {
+  switch (name) {
+    case "bg_subgroup_add":
+    case "__reduce_add_sync":
+    case "warpReduceSum":
+    case "warp_reduce_sum":
+    case "warp_reduce_sum_f32":
+    case "warp_reduce_sum_f16":
+    case "warp_reduce_sum_f16_f16":
+    case "warp_reduce_sum_f16_f32":
+    case "warp_reduce_sum_i8_i32":
+    case "warp_reduce_sum_i32_i32":
+      return "sum";
+    case "warpReduceMax":
+    case "warp_reduce_max":
+    case "warp_reduce_max_f32":
+      return "max";
+    case "warpReduceMin":
+    case "warp_reduce_min":
+      return "min";
+    default:
+      return undefined;
+  }
+}
+
+function collectiveValueExpression(
+  name: string | undefined,
+  args: readonly CudaLiteExpression[],
+): CudaLiteExpression | undefined {
+  if (name === "__reduce_add_sync") return args[1];
+  return args.length === 2 ? args[1] : args[0];
+}
+
 function execKernelLaunch(
   statement: Extract<CudaLiteStatement, { kind: "kernel-launch" }>,
   context: ThreadContext,
@@ -892,7 +1080,13 @@ function pointerArgumentValue(
   if (offset) return offset;
   if (arg.kind === "unary" && arg.operator === "&") {
     const target = withLocalScope(resolveLValue(arg.argument, context), context);
-    return { kind: "address", target: { ...target, valueType: target.valueType ?? valueType } };
+    return {
+      kind: "address",
+      target: {
+        ...target,
+        valueType: target.valueType ?? pointerValueTypeForExpression(arg.argument, context) ?? valueType,
+      },
+    };
   }
   if (arg.kind === "identifier") {
     const local = context.locals.get(arg.name);

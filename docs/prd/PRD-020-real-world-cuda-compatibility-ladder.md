@@ -574,14 +574,18 @@ Acceptance criteria for the first slice:
   analyzer, reference, WGSL, and test coverage.
 - CUDA-120 remains `240/240` compile/codegen-ok with `0` hard gaps.
 - Browser e2e corpus fixture coverage proves real WebGPU execution for at
-  least `32` exact kernel launches across the pinned external corpora:
+  least `34` exact kernel launches across the pinned external corpora:
   CUDA-120, NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA.
 - That real-execution floor is enforced per corpus: CUDA-120 `>=2`, NVIDIA
-  `cuda-samples` `>=4`, `llm.c` `>=10`, and LeetCUDA `>=16` passing browser
+  `cuda-samples` `>=4`, `llm.c` `>=10`, and LeetCUDA `>=18` passing browser
   WebGPU fixtures.
 - CPU reference arithmetic preserves C-style integer locals, integer division,
   and remainder behavior so fixture-backed tensor indexing kernels compare
   against real WebGPU execution instead of JS-number semantics.
+- CPU reference scalar warp-reduction collectives model active subgroup lanes,
+  while browser WebGPU subgroup fixture gates remain deferred until WGSL
+  `subgroups` is available in the test environment or a workgroup fallback
+  backend lands.
 
 ## Out of Scope
 

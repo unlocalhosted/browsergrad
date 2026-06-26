@@ -402,6 +402,40 @@ export const cudaLiteCorpusExecutionFixtures = [
     tolerance: 3e-3,
   },
   {
+    sourceKey: "corpusLeetCudaGeluF32x4",
+    caseName: "corpus:LeetCUDA:gelu_f32x4_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/gelu/gelu.cu",
+    kernelName: "gelu_f32x4_kernel",
+    workgroupSize: [2, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    input: {
+      buffers: {
+        x: { type: "Float32Array", data: [-2, -1, 0, 1, 2, 3, -0.5, 0.5] },
+        y: { type: "Float32Array", length: 8 },
+      },
+      scalars: { N: 8 },
+    },
+    output: "y",
+  },
+  {
+    sourceKey: "corpusLeetCudaHardshrinkF32x4",
+    caseName: "corpus:LeetCUDA:hardshrink_f32x4_kernel",
+    corpusId: "leetcuda",
+    relativePath: "kernels/hardshrink/hardshrink.cu",
+    kernelName: "hardshrink_f32x4_kernel",
+    workgroupSize: [2, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    input: {
+      buffers: {
+        x: { type: "Float32Array", data: [-1, -0.25, 0, 0.75, 2, -2, 0.5, -0.5] },
+        y: { type: "Float32Array", length: 8 },
+      },
+      scalars: { N: 8 },
+    },
+    output: "y",
+  },
+  {
     sourceKey: "corpusLlmGeluForward1",
     caseName: "corpus:llm.c:gelu_forward_kernel1",
     corpusId: "llm.c",
@@ -618,12 +652,12 @@ export const cudaLiteCorpusExecutionFixtures = [
 ];
 
 export const cudaLiteCorpusExecutionFixtureBaseline = {
-  totalMin: 32,
+  totalMin: 34,
   byCorpusMin: {
     "cuda-120": 2,
     "cuda-samples": 4,
     "llm.c": 10,
-    leetcuda: 16,
+    leetcuda: 18,
   },
 };
 
