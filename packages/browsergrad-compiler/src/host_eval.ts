@@ -62,7 +62,7 @@ export function evaluateHostNumber(
       if (expressionName(expression.callee) === "alignof" && expression.args[0]?.kind === "identifier") {
         return alignofCudaType(expression.args[0].name) ?? 4;
       }
-      return undefined;
+      return evaluateHostMathCall(expression, env, input);
     case "member": {
       if (expression.object.kind !== "identifier") return undefined;
       const vector = env.get(expression.object.name);
@@ -93,6 +93,44 @@ export function evaluateHostNumber(
       for (const item of expression.expressions) value = evaluateHostNumber(item, env, input);
       return value;
     }
+    default:
+      return undefined;
+  }
+}
+
+function evaluateHostMathCall(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  env: ReadonlyMap<string, HostEvalValue>,
+  input: CompiledKernelInput,
+): number | undefined {
+  const name = expressionName(expression.callee);
+  const args = expression.args.map((arg) => evaluateHostNumber(arg, env, input));
+  if (args.some((arg) => arg === undefined)) return undefined;
+  const first = args[0] ?? 0;
+  const second = args[1] ?? 0;
+  switch (name) {
+    case "ceil":
+    case "ceilf":
+      return Math.ceil(first);
+    case "floor":
+    case "floorf":
+      return Math.floor(first);
+    case "round":
+    case "roundf":
+      return Math.round(first);
+    case "trunc":
+    case "truncf":
+      return Math.trunc(first);
+    case "min":
+    case "fmin":
+    case "fminf":
+      return Math.min(first, second);
+    case "max":
+    case "fmax":
+    case "fmaxf":
+      return Math.max(first, second);
+    case "div_ceil":
+      return Math.ceil(first / Math.max(1, second));
     default:
       return undefined;
   }

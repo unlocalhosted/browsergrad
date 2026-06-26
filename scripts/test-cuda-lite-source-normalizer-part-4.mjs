@@ -679,3 +679,65 @@ __global__ void softmax(float *x, float *y, float *total, int N) {
   assert.match(source, /y\[idx\] = bg_thread_numerator \/ \(\*total\);/u);
   assert.doesNotMatch(source, /\bblock_smem\b/u);
 }
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void runtime_alloc_child(float2 *points, int *counts, int n) {
+  int idx = threadIdx.x;
+  int localN = min(max(n, 4), 32);
+  if (points == NULL) {
+    counts[idx] = localN;
+    cudaMalloc((void **)&points, localN * sizeof(float2));
+  }
+  child<<<ceilf((float)counts[idx] / 32.0f), 32>>>(points, localN);
+}`,
+    siblingKernels: [`
+__global__ void child(float2 *points, int n) {
+  if (threadIdx.x < n) points[threadIdx.x] = make_float2(0.0f, 0.0f);
+}`],
+  });
+  assert.match(source, /counts\[idx\] = localN;/u);
+  assert.match(source, /child<<<ceilf\(\(float\)localN \/ 32\.0f\), 32>>>/u);
+  assert.doesNotMatch(source, /\bcudaMalloc\b/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void placement_vector(int *out) {
+  cg::thread_block cta = cg::this_thread_block();
+  __shared__ unsigned char __align__(8) s_buffer[sizeof(Vector<int>)];
+  __shared__ int __align__(8) s_data[1024];
+  __shared__ Vector<int> *s_vector;
+  if (threadIdx.x == 0) s_vector = new (s_buffer) Vector<int>(1024, s_data);
+  cg::sync(cta);
+  s_vector->push(threadIdx.x);
+  int v;
+  if (s_vector->pop(v)) out[threadIdx.x] = v;
+}`,
+  });
+  assert.match(source, /__device__ void bg_vector_push_int/u);
+  assert.match(source, /__shared__ int s_vector_top\[1\];/u);
+  assert.match(source, /bg_vector_push_int\(s_vector_top, s_data, int\(threadIdx\.x\)\);/u);
+  assert.match(source, /bg_vector_pop_int\(s_vector_top, s_data, &v\)/u);
+  assert.doesNotMatch(source, /\bVector\s*</u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void random_kernel(unsigned long long seed, float *uniform_out, int *poisson_out) {
+  cuda::pcg64 rng(seed + threadIdx.x);
+  cuda::std::uniform_real_distribution<float> uniform_dist(0.0f, 1.0f);
+  cuda::std::poisson_distribution<int> poisson_dist(4.0);
+  uniform_out[threadIdx.x] = uniform_dist(rng);
+  poisson_out[threadIdx.x] = poisson_dist(rng);
+}`,
+  });
+  assert.match(source, /__device__ float bg_random_uniform/u);
+  assert.match(source, /uint rng = uint\(seed \+ threadIdx\.x\);/u);
+  assert.match(source, /uniform_out\[threadIdx\.x\] = bg_random_uniform\(&rng\);/u);
+  assert.match(source, /poisson_out\[threadIdx\.x\] = bg_random_poisson4\(&rng\);/u);
+  assert.doesNotMatch(source, /cuda::std::uniform_real_distribution/u);
+}

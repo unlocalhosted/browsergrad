@@ -91,7 +91,7 @@ export function createCudaHostDynamicLaunchPlan(
   if (!runtimePlan.operations.some((operation) => operation.kind === "device-launch")) {
     return unsupported("no-device-launch", "no device-side launch found");
   }
-  if (!runtimePlan.operations.every((operation) => operation.kind === "device-launch" || operation.kind === "device-sync")) {
+  if (!runtimePlan.operations.every((operation) => operation.kind === "device-launch" || operation.kind === "device-sync" || operation.kind === "runtime-copy")) {
     return unsupported("mixed-runtime-operations", "runtime operations besides device launch/device sync require reference runtime");
   }
   const parentInvocations = launch.gridDim[0] * launch.gridDim[1] * launch.gridDim[2] *
@@ -444,6 +444,9 @@ function isHostNoopExpression(expression: CudaLiteExpression): boolean {
     name === "cudaEventDestroy" ||
     name === "cudaEventRecord" ||
     name === "cudaEventSynchronize" ||
+    name === "cudaMemcpy" ||
+    name === "cudaMemcpyAsync" ||
+    name === "cudaMemcpyPeerAsync" ||
     name === "printf";
 }
 

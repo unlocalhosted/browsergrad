@@ -11,6 +11,7 @@ import * as recordNormalizers from "./cuda-lite-source-normalizer-records.mjs";
 import * as templateSpecializationNormalizers from "./cuda-lite-source-normalizer-template-specialization.mjs";
 import * as templateTransformNormalizers from "./cuda-lite-source-normalizer-template-transforms.mjs";
 import * as cuteLaNormalizers from "./cuda-lite-source-normalizer-cute-la.mjs";
+import { normalizeCudaCppCompat } from "./cuda-lite-source-normalizer-cpp-compat.mjs";
 import {
   normalizeAtomicForwarderHelpers,
   normalizeBlockReduceHelpers,
@@ -298,7 +299,8 @@ export function createKernelCompilationUnit({
   const withAtomicForwarders = normalizeAtomicForwarderHelpers(withBlockReduce, normalizerHelpers);
   const withPointerStoreForwarders = normalizePointerStoreForwarderHelpers(withAtomicForwarders, normalizerHelpers);
   const withLocalPointerHelpers = normalizeLocalPointerDeviceFunctionCalls(withPointerStoreForwarders, normalizerHelpers);
-  const withLambdas = normalizeSimpleLocalLambdas(withLocalPointerHelpers);
+  const withCudaCppCompat = normalizeCudaCppCompat(withLocalPointerHelpers);
+  const withLambdas = normalizeSimpleLocalLambdas(withCudaCppCompat);
   const withVectorShuffles = normalizeVectorCooperativeShuffles(withLambdas);
   const withCarrierParams = normalizeDependentCarrierParams(withVectorShuffles);
   const withWgmmaTma = normalizeWgmmaTmaGemmKernels(withCarrierParams, normalizerHelpers);

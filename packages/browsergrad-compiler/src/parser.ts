@@ -173,7 +173,8 @@ class Parser {
     const functions: CudaLiteDeviceFunction[] = [];
     const kernels: CudaLiteKernel[] = [];
     while (!this.match("<eof>")) {
-      if (this.match("__constant__")) constants.push(this.parseGlobalConstant());
+      if (this.consumeIf(";")) continue;
+      else if (this.match("__constant__")) constants.push(this.parseGlobalConstant());
       else if (this.match("texture")) textures.push(this.parseTexture2D());
       else if (this.match("namespace")) this.skipNamespaceAliasDecl();
       else if (this.match("typedef") || this.match("using")) this.skipSimpleDeclaration();

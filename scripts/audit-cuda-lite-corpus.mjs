@@ -539,7 +539,11 @@ function isCudaVectorTypeName(type) {
 }
 
 function syntheticScalarForName(name) {
-  if (/^(?:n|N|num|count|length|totalLen|frontierSize|numSamples|totalThreads|poolSize)$/u.test(name)) return 1024;
+  if (/^(?:depth|level)$/iu.test(name)) return 0;
+  if (/^(?:maxDepth|max_depth|maxLevel|max_level)$/u.test(name)) return 4;
+  if (/^(?:left|begin|start|offset)$/u.test(name)) return 0;
+  if (/^(?:right|end|len|nLines|nTessPoints)$/u.test(name)) return 64;
+  if (/^(?:n|N|num|count|length|totalLen|frontierSize|numSamples|totalThreads|poolSize|size)$/u.test(name)) return 1024;
   if (/^(?:threads|threadsPerBlock|blockSize)$/u.test(name)) return 256;
   if (/^(?:blocks|blocksPerGrid|numBlocks)$/u.test(name)) return 4;
   return 1;
