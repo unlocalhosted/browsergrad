@@ -601,7 +601,7 @@ Acceptance criteria for the first slice:
 - Known-output fixture specs compare CPU reference and real WebGPU readbacks
   against explicit expected arrays, so shared wrong-code between interpreter and
   WGSL cannot satisfy those fixture gates. The browser gate enforces at least
-  `7` pinned-output corpus fixtures.
+  `22` pinned-output corpus fixtures.
 - NVIDIA `cuda-samples` Bezier coverage includes a real browser fixture for
   scalarized pointer-record fixed-array fields (`BezierLine.CP[3]`), so C-style
   struct-of-arrays lowering is guarded by GPU readback.

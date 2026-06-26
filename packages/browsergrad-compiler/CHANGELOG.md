@@ -47,7 +47,7 @@
   helper emission.
 - Corpus fixture specs can now pin explicit expected readbacks; the browser gate
   compares both CPU reference and real WebGPU output against those arrays and
-  enforces a minimum pinned-output fixture count.
+  enforces a minimum pinned-output fixture count, currently `22`.
 - Root release verification and CI's Chromium job now run the combined
   real-world CUDA compile/codegen plus real WebGPU fixture gate with WebGPU
   required, npm publish workflows run the same gate before compiler-capable

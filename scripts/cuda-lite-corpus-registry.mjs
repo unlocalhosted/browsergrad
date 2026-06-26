@@ -74,6 +74,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4 },
     },
     output: "C",
+    expectedOutput: { type: "Float32Array", data: [11, 22, 33, 44] },
   },
   {
     sourceKey: "corpusCuda120ScaleVector",
@@ -91,6 +92,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { scale: 2, N: 4 },
     },
     output: "output",
+    expectedOutput: { type: "Float32Array", data: [2, 4, 6, 8] },
   },
   {
     sourceKey: "corpusCudaSamplesVectorAdd",
@@ -109,6 +111,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { numElements: 4 },
     },
     output: "C",
+    expectedOutput: { type: "Float32Array", data: [11, 22, 33, 44] },
   },
   {
     sourceKey: "corpusCudaSamplesIncKernel",
@@ -125,6 +128,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4 },
     },
     output: "data",
+    expectedOutput: { type: "Int32Array", data: [1, 2, 3, 4] },
   },
   {
     sourceKey: "corpusCudaSamplesKernelAddConstant",
@@ -141,6 +145,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { b: 5 },
     },
     output: "g_a",
+    expectedOutput: { type: "Int32Array", data: [5, 6, 7, 8] },
   },
   {
     sourceKey: "corpusCudaSamplesVecAddKernel",
@@ -159,6 +164,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4 },
     },
     output: "C",
+    expectedOutput: { type: "Float32Array", data: [3, 7, 11, 15] },
   },
   {
     sourceKey: "corpusCudaSamplesBezierLinePositions",
@@ -267,6 +273,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { B: 1, T: 2, OC: 3 },
     },
     output: "out",
+    expectedOutput: { type: "Float32Array", data: [1.5, 3.5, 1, 4.5, 6.5, 4] },
   },
   {
     sourceKey: "corpusLlmSetVector",
@@ -283,6 +290,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4, value: 7 },
     },
     output: "data",
+    expectedOutput: { type: "Float32Array", data: [7, 7, 7, 7] },
   },
   {
     sourceKey: "corpusLeetCudaElementwiseAddF32",
@@ -301,6 +309,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4 },
     },
     output: "c",
+    expectedOutput: { type: "Float32Array", data: [11, 22, 33, 44] },
   },
   {
     sourceKey: "corpusLeetCudaReluF32",
@@ -318,6 +327,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4 },
     },
     output: "y",
+    expectedOutput: { type: "Float32Array", data: [0, 0, 3, 0] },
   },
   {
     sourceKey: "corpusLeetCudaSigmoidF32",
@@ -353,6 +363,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { n: 2, emb_size: 3 },
     },
     output: "output",
+    expectedOutput: { type: "Float32Array", data: [20, 21, 22, 10, 11, 12] },
   },
   {
     sourceKey: "corpusLeetCudaGeluF32",
@@ -421,6 +432,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4 },
     },
     output: "y",
+    expectedOutput: { type: "Float32Array", data: [-1, 0, 0.75, 2] },
   },
   {
     sourceKey: "corpusLeetCudaEluF32",
@@ -473,6 +485,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 8 },
     },
     output: "y",
+    expectedOutput: { type: "Int32Array", data: [2, 2, 3, 1] },
   },
   {
     sourceKey: "corpusLeetCudaRopeF32V2",
@@ -526,6 +539,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 8 },
     },
     output: "c",
+    expectedOutput: { type: "Float32Array", data: [11, 22, 33, 44, 0, 0, 0, 0] },
   },
   {
     sourceKey: "corpusLeetCudaReluF32x4",
@@ -543,6 +557,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 8 },
     },
     output: "y",
+    expectedOutput: { type: "Float32Array", data: [0, 0, 0, 1, 2, 0, 4, 0] },
   },
   {
     sourceKey: "corpusLeetCudaSigmoidF32x4",
@@ -980,7 +995,7 @@ export const cudaLiteCorpusExecutionFixtures = [
 
 export const cudaLiteCorpusExecutionFixtureBaseline = {
   totalMin: 51,
-  expectedOutputMin: 7,
+  expectedOutputMin: 22,
   byCorpusMin: {
     "cuda-120": 2,
     "cuda-samples": 8,

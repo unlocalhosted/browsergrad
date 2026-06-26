@@ -373,7 +373,7 @@ transcendental kernels while still comparing CPU reference output against real
 WebGPU readback. Specs can also pin explicit expected readbacks for kernels
 where the small fixture output is known; the e2e gate checks both CPU reference
 and WebGPU against that expected output so interpreter and GPU wrong-code cannot
-agree silently. Current hard floor requires at least `7` such pinned-output
+agree silently. Current hard floor requires at least `22` such pinned-output
 corpus fixtures.
 Fixture source is emitted through the same corpus-audit normalization path used
 for full-corpus compile/codegen counts, so helper/context handling does not

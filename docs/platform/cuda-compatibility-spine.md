@@ -269,7 +269,7 @@ pnpm --filter @unlocalhosted/browsergrad-compiler e2e:webgpu:corpus -- --require
   Fixture specs may pin explicit expected readbacks; when present, the gate
   checks both CPU reference and real WebGPU against that expected output instead
   of allowing the two implementations to agree on wrong-code. Current hard
-  floor requires at least `7` pinned-output corpus fixtures.
+  floor requires at least `22` pinned-output corpus fixtures.
 - `e2e:webgpu:dist` runs the browser proof through built package exports. The
   combined `verify:real-world-cuda` gate runs both `src` and `dist` browser
   bundles unless a narrower `--bundle` is supplied.
