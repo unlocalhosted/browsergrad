@@ -38,6 +38,9 @@
 - Browser corpus e2e now runs `29` exact kernels from pinned CUDA-120,
   NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA sources through real WebGPU in
   both source and dist bundles, with CPU-reference readback comparisons.
+- Browser corpus e2e now enforces those real WebGPU fixtures as a no-regression
+  floor: `29` total passing fixtures, with per-corpus minimums for CUDA-120,
+  NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA.
 - CPU reference semantics now preserve C-style integer locals, integer
   division, and remainder behavior so tensor indexing kernels such as
   `llm.c` permute and cross-entropy match WGSL execution.

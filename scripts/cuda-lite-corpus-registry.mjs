@@ -564,6 +564,16 @@ export const cudaLiteCorpusExecutionFixtures = [
   },
 ];
 
+export const cudaLiteCorpusExecutionFixtureBaseline = {
+  totalMin: 29,
+  byCorpusMin: {
+    "cuda-120": 2,
+    "cuda-samples": 4,
+    "llm.c": 10,
+    leetcuda: 13,
+  },
+};
+
 export function corpusById(id) {
   const corpus = cudaLiteCorpora.find((candidate) => candidate.id === id);
   if (corpus === undefined) throw new Error(`unknown CUDA-lite corpus id: ${id}`);

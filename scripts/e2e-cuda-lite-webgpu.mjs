@@ -4,7 +4,11 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
-import { corpusById, cudaLiteCorpusExecutionFixtures } from "./cuda-lite-corpus-registry.mjs";
+import {
+  corpusById,
+  cudaLiteCorpusExecutionFixtureBaseline,
+  cudaLiteCorpusExecutionFixtures,
+} from "./cuda-lite-corpus-registry.mjs";
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i++) {
@@ -238,6 +242,7 @@ const html = String.raw`<!doctype html>
       const SOURCES = ${JSON.stringify(sources)};
       const CORPUS_FIXTURES = ${JSON.stringify(cudaLiteCorpusExecutionFixtures)};
       const EXPECTED_CORPUS_FIXTURE_NAMES = ${JSON.stringify(expectedCorpusFixtureNames)};
+      const CORPUS_FIXTURE_BASELINE = ${JSON.stringify(cudaLiteCorpusExecutionFixtureBaseline)};
 
       window.__bgRunE2e = async () => {
         if (!navigator.gpu) {
@@ -260,6 +265,7 @@ const html = String.raw`<!doctype html>
             maxAbsDiff: result.maxAbsDiff,
             ...(result.firstDiff === undefined ? {} : { firstDiff: result.firstDiff }),
             output: spec.output,
+            ...(spec.corpusId === undefined ? {} : { corpusId: spec.corpusId }),
             ms: round(performance.now() - start),
           });
         }
@@ -275,13 +281,17 @@ const html = String.raw`<!doctype html>
 
         const failed = cases.filter((item) => !item.ok);
         const corpusFixtureCases = cases.filter((item) => item.name.startsWith("corpus:"));
+        const corpusFixturePassed = corpusFixtureCases.filter((item) => item.ok);
         const loadedCorpusFixtureNames = new Set(corpusFixtureCases.map((item) => item.name));
         return {
           available: true,
           cases,
           corpusFixtureCases: corpusFixtureCases.length,
-          corpusFixturePassed: corpusFixtureCases.filter((item) => item.ok).length,
+          corpusFixturePassed: corpusFixturePassed.length,
           corpusFixtureFailed: corpusFixtureCases.filter((item) => !item.ok).length,
+          corpusFixtureCasesByCorpus: countByCorpus(corpusFixtureCases),
+          corpusFixturePassedByCorpus: countByCorpus(corpusFixturePassed),
+          corpusFixtureBaseline: CORPUS_FIXTURE_BASELINE,
           expectedCorpusFixtureNames: EXPECTED_CORPUS_FIXTURE_NAMES,
           missingCorpusFixtureNames: EXPECTED_CORPUS_FIXTURE_NAMES.filter((name) => !loadedCorpusFixtureNames.has(name)),
           passed: cases.length - failed.length,
@@ -528,9 +538,19 @@ const html = String.raw`<!doctype html>
             launch: fixture.launch,
             input: () => materializeFixtureInput(fixture.input),
             output: fixture.output,
+            corpusId: fixture.corpusId,
           });
         }
         return cases;
+      }
+
+      function countByCorpus(items) {
+        const out = {};
+        for (const item of items) {
+          const corpusId = item.corpusId ?? "unknown";
+          out[corpusId] = (out[corpusId] ?? 0) + 1;
+        }
+        return out;
       }
 
       function materializeFixtureInput(input) {
@@ -703,6 +723,9 @@ try {
   if (report.available && requireCorpusFixtures && (report.missingCorpusFixtureNames?.length ?? 0) > 0) {
     throw new Error(`Missing corpus execution fixtures from /tmp corpora: ${report.missingCorpusFixtureNames.join(", ")}`);
   }
+  if (report.available && requireCorpusFixtures) {
+    validateCorpusFixtureBaseline(report);
+  }
   console.log(JSON.stringify(report, null, 2));
   if (report.available && report.failed > 0) {
     throw new Error(`CUDA-lite WebGPU e2e failed ${report.failed} case(s)`);
@@ -735,7 +758,32 @@ function markdownReport(data) {
   }
   lines.push("", `Passed: \`${data.passed}\`, failed: \`${data.failed}\``, "");
   lines.push(`Corpus fixtures: \`${data.corpusFixturePassed ?? 0}/${data.corpusFixtureCases ?? 0}\``, "");
+  if (data.corpusFixturePassedByCorpus) {
+    lines.push("| Corpus | passed | cases | baseline min |");
+    lines.push("| --- | ---: | ---: | ---: |");
+    const baseline = data.corpusFixtureBaseline?.byCorpusMin ?? {};
+    const corpusIds = Object.keys({ ...(data.corpusFixtureCasesByCorpus ?? {}), ...baseline }).sort();
+    for (const corpusId of corpusIds) {
+      lines.push(
+        `| \`${corpusId}\` | ${data.corpusFixturePassedByCorpus[corpusId] ?? 0} | ${data.corpusFixtureCasesByCorpus?.[corpusId] ?? 0} | ${baseline[corpusId] ?? 0} |`,
+      );
+    }
+    lines.push("");
+  }
   return `${lines.join("\n")}\n`;
+}
+
+function validateCorpusFixtureBaseline(report) {
+  const baseline = report.corpusFixtureBaseline ?? cudaLiteCorpusExecutionFixtureBaseline;
+  if ((report.corpusFixturePassed ?? 0) < baseline.totalMin) {
+    throw new Error(`Corpus fixture baseline failed: ${report.corpusFixturePassed ?? 0}/${baseline.totalMin} passed`);
+  }
+  for (const [corpusId, min] of Object.entries(baseline.byCorpusMin ?? {})) {
+    const passed = report.corpusFixturePassedByCorpus?.[corpusId] ?? 0;
+    if (passed < min) {
+      throw new Error(`Corpus fixture baseline failed for ${corpusId}: ${passed}/${min} passed`);
+    }
+  }
 }
 
 function loadCorpusExecutionSources() {
