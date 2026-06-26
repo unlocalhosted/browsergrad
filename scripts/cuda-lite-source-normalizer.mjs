@@ -236,7 +236,8 @@ export function createKernelCompilationUnit({
     postCarrierDefines,
     new Set([...params, ...templateNames]),
   );
-  const withCooperativeGroupHelpers = normalizeCooperativeGroupHelperParams(withTypeDefines);
+  const withMdspanViews = normalizeRank2CallableViews(withTypeDefines);
+  const withCooperativeGroupHelpers = normalizeCooperativeGroupHelperParams(withMdspanViews);
   const withVectorCooperativeReductions = normalizeVectorCooperativeReductions(withCooperativeGroupHelpers);
   const withStdMathAliases = normalizeStdMathAliases(withVectorCooperativeReductions);
   const withStaticTemplateConverters = normalizeStaticTemplateConverters(withStdMathAliases, postCarrierDefines);
@@ -1137,6 +1138,164 @@ function normalizeSupportedTypeDefineReferences(source, definesByName, blockedNa
     for (const name of declared) localBlocked.add(name);
     return out;
   }).join("\n");
+}
+
+function normalizeRank2CallableViews(source) {
+  return normalizeRank2TemplateViewParams(normalizeRank2SharedMemoryMdspanViews(source));
+}
+
+function normalizeRank2TemplateViewParams(source) {
+  let out = "";
+  let cursor = 0;
+  let index = 0;
+  while (index < source.length) {
+    const match = /\btemplate\s*</u.exec(source.slice(index));
+    if (match === null) break;
+    const templateStart = index + match.index;
+    const open = source.indexOf("<", templateStart);
+    const close = findBalanced(source, open, "<", ">");
+    if (close === undefined) break;
+    const brace = source.indexOf("{", close + 1);
+    const semicolon = source.indexOf(";", close + 1);
+    if (brace < 0) break;
+    if (semicolon >= 0 && semicolon < brace) {
+      index = semicolon + 1;
+      continue;
+    }
+    const signature = source.slice(close + 1, brace);
+    if (!/\b__global__\b/u.test(signature)) {
+      index = brace + 1;
+      continue;
+    }
+    const end = findBalanced(source, brace, "{", "}");
+    if (end === undefined) {
+      index = close + 1;
+      continue;
+    }
+    const transformed = normalizeRank2TemplateViewKernel(
+      source.slice(open + 1, close),
+      signature,
+      source.slice(brace + 1, end),
+    );
+    if (transformed === undefined) {
+      index = end + 1;
+      continue;
+    }
+    out += source.slice(cursor, templateStart);
+    out += transformed;
+    cursor = end + 1;
+    index = end + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function normalizeRank2TemplateViewKernel(templateParamsSource, signature, body) {
+  const templateParams = splitTopLevel(templateParamsSource).map(parseTemplateParam).filter(Boolean);
+  const templateTypeNames = new Set(templateParams.filter((param) => param.kind === "type").map((param) => param.name));
+  if (templateTypeNames.size === 0) return undefined;
+  const open = signature.lastIndexOf("(");
+  const close = signature.lastIndexOf(")");
+  if (open < 0 || close < open) return undefined;
+  const beforeParams = signature.slice(0, open);
+  const params = splitTopLevel(signature.slice(open + 1, close));
+  const viewParams = new Map();
+  const rewrittenParams = [];
+  for (const param of params) {
+    const parsed = parseRank2ViewParam(param, templateTypeNames);
+    if (!parsed || !rank2ViewParamIsUsed(body, parsed.name)) {
+      rewrittenParams.push(param);
+      continue;
+    }
+    viewParams.set(parsed.name, parsed);
+    const pointerType = rank2ViewParamIsWritten(body, parsed.name) ? "float" : "const float";
+    rewrittenParams.push(`${pointerType} *${parsed.name}, int ${parsed.name}_extent0, int ${parsed.name}_extent1, int ${parsed.name}_stride0, int ${parsed.name}_stride1`);
+  }
+  if (viewParams.size === 0) return undefined;
+  const removedTypes = new Set([...viewParams.values()].map((param) => param.type));
+  if ([...templateTypeNames].some((name) => !removedTypes.has(name))) return undefined;
+  let rewrittenBody = body;
+  for (const name of viewParams.keys()) {
+    rewrittenBody = replaceRank2ViewExtentCalls(rewrittenBody, name);
+    rewrittenBody = replaceRank2CallableViewAccesses(rewrittenBody, name, {
+      base: name,
+      stride0: `${name}_stride0`,
+      stride1: `${name}_stride1`,
+    });
+  }
+  return `${beforeParams}(${rewrittenParams.join(", ")}) {${rewrittenBody}}`;
+}
+
+function parseRank2ViewParam(param, templateTypeNames) {
+  const match = /^\s*(?:const\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*&?\s*([A-Za-z_][A-Za-z0-9_]*)\s*$/u.exec(param);
+  if (!match?.[1] || !match[2] || !templateTypeNames.has(match[1])) return undefined;
+  return { type: match[1], name: match[2] };
+}
+
+function rank2ViewParamIsUsed(body, name) {
+  return new RegExp(`\\b${escapeRegExp(name)}\\s*\\.\\s*extent\\s*\\(\\s*[01]\\s*\\)`, "u").test(body) &&
+    new RegExp(`\\b${escapeRegExp(name)}\\s*\\(`, "u").test(body);
+}
+
+function rank2ViewParamIsWritten(body, name) {
+  let cursor = 0;
+  const re = new RegExp(`\\b${escapeRegExp(name)}\\s*\\(`, "gu");
+  while (true) {
+    const match = re.exec(body.slice(cursor));
+    if (match === null) return false;
+    const open = cursor + match.index + match[0].lastIndexOf("(");
+    const close = findBalanced(body, open, "(", ")");
+    if (close === undefined) return false;
+    const next = skipWhitespace(body, close + 1);
+    if (body[next] === "=" || (body[next + 1] === "=" && /[+\-*/%&|^]/u.test(body[next] ?? ""))) return true;
+    cursor = close + 1;
+  }
+}
+
+function replaceRank2ViewExtentCalls(source, name) {
+  const escaped = escapeRegExp(name);
+  return source
+    .replace(new RegExp(`\\b${escaped}\\s*\\.\\s*extent\\s*\\(\\s*0\\s*\\)`, "gu"), `${name}_extent0`)
+    .replace(new RegExp(`\\b${escaped}\\s*\\.\\s*extent\\s*\\(\\s*1\\s*\\)`, "gu"), `${name}_extent1`);
+}
+
+function normalizeRank2SharedMemoryMdspanViews(source) {
+  const aliases = [];
+  const pattern = /\bcuda\s*::\s*shared_memory_mdspan\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*cuda\s*::\s*std\s*::\s*dextents\s*<[^>{}]+>\s*\{\s*([^,{}]+?)\s*,\s*([^{}]+?)\s*\}\s*\)\s*;/gu;
+  let out = source.replace(pattern, (_match, name, storage, _rows, cols) => {
+    aliases.push({ name, storage, cols: cols.trim() });
+    return "";
+  });
+  for (const alias of aliases) {
+    out = replaceRank2CallableViewAccesses(out, alias.name, {
+      base: alias.storage,
+      stride0: alias.cols,
+      stride1: "1",
+    });
+  }
+  return out;
+}
+
+function replaceRank2CallableViewAccesses(source, name, layout) {
+  let out = "";
+  let cursor = 0;
+  const re = new RegExp(`\\b${escapeRegExp(name)}\\s*\\(`, "gu");
+  while (true) {
+    const match = re.exec(source);
+    if (match === null) break;
+    const open = match.index + match[0].lastIndexOf("(");
+    const close = findBalanced(source, open, "(", ")");
+    if (close === undefined) break;
+    const args = splitTopLevel(source.slice(open + 1, close));
+    if (args.length !== 2) {
+      re.lastIndex = open + 1;
+      continue;
+    }
+    out += source.slice(cursor, match.index);
+    out += `${layout.base}[(${args[0]}) * ${layout.stride0} + (${args[1]}) * ${layout.stride1}]`;
+    cursor = close + 1;
+    re.lastIndex = close + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
 }
 
 function collectSyntheticVectorPackDefines(source, definesByName = new Map()) {

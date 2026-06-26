@@ -2527,4 +2527,49 @@ __global__ void record_pointer_with_fixed_array_fields(PackedLine *lines, float2
   assert.doesNotMatch(source, /\bPackedLine\b/u);
 }
 
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+template <typename Tensor>
+__global__ void scale_rows_kernel(Tensor tensor) {
+  const int r = blockIdx.y * blockDim.y + threadIdx.y;
+  const int c = blockIdx.x * blockDim.x + threadIdx.x;
+  if (r < static_cast<int>(tensor.extent(0)) && c < static_cast<int>(tensor.extent(1))) {
+    tensor(r, c) *= static_cast<float>(r + 1);
+  }
+}`,
+  });
+  assert.match(source, /__global__ void scale_rows_kernel\(float \*tensor, int tensor_extent0, int tensor_extent1, int tensor_stride0, int tensor_stride1\)/u);
+  assert.match(source, /tensor\[\(r\) \* tensor_stride0 \+ \(c\) \* tensor_stride1\] \*= static_cast<float>\(r \+ 1\);/u);
+  assert.doesNotMatch(source, /\btemplate\s*</u);
+  assert.doesNotMatch(source, /tensor\.extent/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+template <typename InTensor, typename OutTensor>
+__global__ void shared_tile_transpose_kernel(InTensor in, OutTensor out) {
+  __shared__ float smem_storage[8 * 8];
+  cuda::shared_memory_mdspan smem(smem_storage, cuda::std::dextents<cuda::std::size_t, 2>{8, 8});
+  const int tr = threadIdx.y;
+  const int tc = threadIdx.x;
+  const int r = blockIdx.y * 8 + tr;
+  const int c = blockIdx.x * 8 + tc;
+  if (r < static_cast<int>(in.extent(0)) && c < static_cast<int>(in.extent(1))) {
+    smem(tr, tc) = in(r, c);
+  }
+  __syncthreads();
+  if (r < static_cast<int>(out.extent(0)) && c < static_cast<int>(out.extent(1))) {
+    out(r, c) = smem(tc, tr);
+  }
+}`,
+  });
+  assert.match(source, /__global__ void shared_tile_transpose_kernel\(const float \*in, int in_extent0, int in_extent1, int in_stride0, int in_stride1, float \*out, int out_extent0, int out_extent1, int out_stride0, int out_stride1\)/u);
+  assert.match(source, /smem_storage\[\(tr\) \* 8 \+ \(tc\) \* 1\] = in\[\(r\) \* in_stride0 \+ \(c\) \* in_stride1\];/u);
+  assert.match(source, /out\[\(r\) \* out_stride0 \+ \(c\) \* out_stride1\] = smem_storage\[\(tc\) \* 8 \+ \(tr\) \* 1\];/u);
+  assert.doesNotMatch(source, /shared_memory_mdspan/u);
+  assert.doesNotMatch(source, /\bInTensor\b|\bOutTensor\b/u);
+}
+
 console.log("cuda-lite source normalizer tests ok");

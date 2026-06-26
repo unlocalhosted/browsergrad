@@ -26,8 +26,8 @@ export const cudaLiteCorpora = [
     path: path.join(corpusRoot, "cuda-samples"),
     expectations: {
       total: 357,
-      compileCodegenMin: 334,
-      hardFailMax: 20,
+      compileCodegenMin: 336,
+      hardFailMax: 18,
     },
   },
   {
@@ -177,6 +177,53 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { lidx: 0, nTessPoints: 4 },
     },
     output: "bLines__vertexPos",
+  },
+  {
+    sourceKey: "corpusCudaSamplesScaleRowsMdspan",
+    caseName: "corpus:cuda-samples:scale_rows_kernel_mdspan",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/4_CUDA_Libraries/libcuxxMdspan/libcuxxMdspan.cu",
+    kernelName: "scale_rows_kernel",
+    workgroupSize: [8, 8, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [8, 8, 1] },
+    input: {
+      buffers: {
+        tensor: { type: "Float32Array", data: Array.from({ length: 64 }, (_value, index) => index) },
+      },
+      scalars: {
+        tensor_extent0: 8,
+        tensor_extent1: 8,
+        tensor_stride0: 8,
+        tensor_stride1: 1,
+      },
+    },
+    output: "tensor",
+  },
+  {
+    sourceKey: "corpusCudaSamplesSharedTileTransposeMdspan",
+    caseName: "corpus:cuda-samples:shared_tile_transpose_kernel_mdspan",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/4_CUDA_Libraries/libcuxxMdspan/libcuxxMdspan.cu",
+    kernelName: "shared_tile_transpose_kernel",
+    workgroupSize: [8, 8, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [8, 8, 1] },
+    input: {
+      buffers: {
+        in: { type: "Float32Array", data: Array.from({ length: 64 }, (_value, index) => index) },
+        out: { type: "Float32Array", length: 64 },
+      },
+      scalars: {
+        in_extent0: 8,
+        in_extent1: 8,
+        in_stride0: 8,
+        in_stride1: 1,
+        out_extent0: 8,
+        out_extent1: 8,
+        out_stride0: 8,
+        out_stride1: 1,
+      },
+    },
+    output: "out",
   },
   {
     sourceKey: "corpusLlmAddBias",
@@ -773,10 +820,10 @@ export const cudaLiteCorpusExecutionFixtures = [
 ];
 
 export const cudaLiteCorpusExecutionFixtureBaseline = {
-  totalMin: 41,
+  totalMin: 43,
   byCorpusMin: {
     "cuda-120": 2,
-    "cuda-samples": 5,
+    "cuda-samples": 7,
     "llm.c": 10,
     leetcuda: 24,
   },
