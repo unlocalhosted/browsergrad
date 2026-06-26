@@ -4,9 +4,12 @@
 
 - Source normalization now folds CuTe `Int<N>{}` launch-context values and
   lowers direct CuTe TN GEMM tensor/tile object graphs into scalar WebGPU matmul.
-  This closes the LeetCUDA
-  `hgemm_mma_stages_block_swizzle_tn_cute_kernel` gap and raises the LeetCUDA
-  compile/codegen gate to `287/293` with `6` hard gaps.
+  It also expands dependent `typename Traits::Arguments` carrier params,
+  resolves `constexpr static` trait shapes such as
+  `get<0>(decltype(make_shape(...)){})`, and closes the LeetCUDA
+  `hgemm_mma_stages_block_swizzle_tn_cute_kernel` and
+  `ws_hgemm_naive_cute_kernel` gaps. The LeetCUDA compile/codegen gate is now
+  `288/293` with `5` hard gaps.
 - Source normalization now lowers vector-valued POD record returns, record-shaped `memcpy` from scalar arrays, return-switch local lambdas, and vector cooperative-group shuffles. This closes the cuda-samples `shfl_intimage_rows` gap and raises the cuda-samples compile/codegen gate to `341/357` with `13` hard gaps.
 - Initial CUDA-lite parser, analyzer, Kernel IR, reference interpreter, WGSL
   emitter, and WebGPU runner.

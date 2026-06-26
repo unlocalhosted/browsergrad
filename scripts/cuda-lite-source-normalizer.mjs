@@ -260,7 +260,8 @@ export function createKernelCompilationUnit({
   const withLocalPointerHelpers = normalizeLocalPointerDeviceFunctionCalls(withPointerStoreForwarders);
   const withLambdas = normalizeSimpleLocalLambdas(withLocalPointerHelpers);
   const withVectorShuffles = normalizeVectorCooperativeShuffles(withLambdas);
-  const withCuteRank2 = normalizeCuteRank2TransposeKernels(withVectorShuffles);
+  const withCarrierParams = normalizeDependentCarrierParams(withVectorShuffles);
+  const withCuteRank2 = normalizeCuteRank2TransposeKernels(withCarrierParams);
   const withCuteGemv = normalizeCuteRowBroadcastGemvKernels(withCuteRank2);
   const withCuteGemm = normalizeCuteTnGemmKernels(withCuteGemv);
   const withCuteTiles = normalizeCute1dAffineTileCopies(withCuteGemm);
@@ -3168,6 +3169,122 @@ function normalizeSimpleExpressionMacros(source) {
     .join("\n");
 }
 
+function normalizeDependentCarrierParams(source) {
+  if (!/\b(?:typename\s+)?[A-Za-z_][A-Za-z0-9_:]*\s*::\s*Arguments\b/u.test(source)) return source;
+  let out = "";
+  let cursor = 0;
+  const globalRe = /\b__global__\b/gu;
+  let match;
+  while ((match = globalRe.exec(source)) !== null) {
+    const globalStart = match.index;
+    if (globalStart < cursor) continue;
+    const fn = parseCudaGlobalFunction(source, globalStart);
+    if (fn === undefined) {
+      globalRe.lastIndex = globalStart + "__global__".length;
+      continue;
+    }
+    const replacement = lowerDependentCarrierParamFunction(fn);
+    if (replacement === undefined) {
+      globalRe.lastIndex = fn.bodyEnd + 1;
+      continue;
+    }
+    out += source.slice(cursor, fn.headerStart);
+    out += replacement;
+    cursor = fn.bodyEnd + 1;
+    globalRe.lastIndex = fn.bodyEnd + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function lowerDependentCarrierParamFunction(fn) {
+  let body = fn.body;
+  const newParams = [];
+  let changed = false;
+  for (const param of fn.params) {
+    const match = /^(?:(?:const|volatile)\s+)*(?:typename\s+)?[A-Za-z_][A-Za-z0-9_:]*\s*::\s*Arguments(?:\s+const|\s*&)*\s+([A-Za-z_][A-Za-z0-9_]*)$/u.exec(param.trim());
+    const carrierName = match?.[1];
+    if (carrierName === undefined) {
+      newParams.push(param);
+      continue;
+    }
+    const lowered = lowerDependentCarrierParam(body, carrierName);
+    if (lowered === undefined) {
+      newParams.push(param);
+      continue;
+    }
+    body = lowered.body;
+    newParams.push(...lowered.params);
+    changed = true;
+  }
+  if (!changed) return undefined;
+  return [
+    `${fn.signaturePrefix}(${newParams.join(", ")}) {`,
+    body,
+    "}",
+  ].join("\n");
+}
+
+function lowerDependentCarrierParam(body, carrierName) {
+  const pointerFields = collectDependentCarrierPointerFields(body, carrierName);
+  const shapeFields = collectDependentCarrierShapeFields(body, carrierName);
+  if (pointerFields.size === 0 && shapeFields.size === 0) return undefined;
+  const params = [];
+  for (const [field, type] of pointerFields) params.push(`${type} *${carrierName}__${field}`);
+  for (const shape of shapeFields) {
+    for (const index of shape.indexes) params.push(`int ${carrierName}__${shape.field}${index}`);
+  }
+  let out = body;
+  for (const shape of shapeFields) {
+    const selectRe = new RegExp(String.raw`\bselect\s*<\s*([^<>]+)\s*>\s*\(\s*${escapeRegExp(carrierName)}\s*\.\s*${escapeRegExp(shape.field)}\s*\)`, "gu");
+    out = out.replace(selectRe, (_match, rawIndexes) => {
+      const indexes = splitTopLevel(String(rawIndexes)).map((item) => item.trim()).filter(Boolean);
+      if (indexes.length === 0 || indexes.some((index) => !/^[0-9]+$/u.test(index))) return _match;
+      return `make_shape(${indexes.map((index) => `${carrierName}__${shape.field}${index}`).join(", ")})`;
+    });
+    const getRe = new RegExp(String.raw`\bget\s*<\s*([0-9]+)\s*>\s*\(\s*${escapeRegExp(carrierName)}\s*\.\s*${escapeRegExp(shape.field)}\s*\)`, "gu");
+    out = out.replace(getRe, (_match, index) => `${carrierName}__${shape.field}${index}`);
+  }
+  for (const field of pointerFields.keys()) {
+    const fieldRe = new RegExp(String.raw`\b${escapeRegExp(carrierName)}\s*\.\s*${escapeRegExp(field)}\b`, "gu");
+    out = out.replace(fieldRe, `${carrierName}__${field}`);
+  }
+  return { body: out, params };
+}
+
+function collectDependentCarrierPointerFields(body, carrierName) {
+  const fields = new Map();
+  const re = new RegExp(String.raw`\bmake_gmem_ptr(?:\s*<\s*([^<>]+)\s*>)?\s*\(\s*${escapeRegExp(carrierName)}\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)`, "gu");
+  for (const match of body.matchAll(re)) {
+    const rawType = match[1] ?? "float";
+    const field = match[2];
+    const type = normalizeTemplateTypeArgument(rawType) ?? rawType.trim();
+    if (field !== undefined && !fields.has(field)) fields.set(field, type);
+  }
+  return fields;
+}
+
+function collectDependentCarrierShapeFields(body, carrierName) {
+  const byField = new Map();
+  const record = (field, indexes) => {
+    const seen = byField.get(field) ?? new Set();
+    for (const index of indexes) {
+      if (/^[0-9]+$/u.test(index)) seen.add(index);
+    }
+    if (seen.size > 0) byField.set(field, seen);
+  };
+  const selectRe = new RegExp(String.raw`\bselect\s*<\s*([^<>]+)\s*>\s*\(\s*${escapeRegExp(carrierName)}\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)`, "gu");
+  for (const match of body.matchAll(selectRe)) {
+    if (match[1] === undefined || match[2] === undefined) continue;
+    record(match[2], splitTopLevel(match[1]).map((item) => item.trim()));
+  }
+  const getRe = new RegExp(String.raw`\bget\s*<\s*([0-9]+)\s*>\s*\(\s*${escapeRegExp(carrierName)}\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)`, "gu");
+  for (const match of body.matchAll(getRe)) {
+    if (match[1] === undefined || match[2] === undefined) continue;
+    record(match[2], [match[1]]);
+  }
+  return [...byField].map(([field, indexes]) => ({ field, indexes: [...indexes].sort((a, b) => Number(a) - Number(b)) }));
+}
+
 function normalizeCuteRank2TransposeKernels(source) {
   if (!/\bmake_tensor\s*\(\s*make_gmem_ptr\s*\(/u.test(source) || !/\blocal_tile\s*\(/u.test(source)) return source;
   if (!/\b(?:copy_if|copy)\s*\(/u.test(source)) return source;
@@ -3364,7 +3481,7 @@ function cuteRank2BodyCopiesBetweenTiles(body, inputTileName, outputTileName) {
 
 function collectCuteIndexAliases(body) {
   const aliases = new Map();
-  for (const match of body.matchAll(/\bint\s+([^;]*\b(?:blockIdx|threadIdx|blockDim)\.[xyz][^;]*)\s*;/gu)) {
+  for (const match of body.matchAll(/\b(?:const\s+)?(?:int|auto)\s+([^;]*\b(?:blockIdx|threadIdx|blockDim)\.[xyz][^;]*)\s*;/gu)) {
     const declarators = splitTopLevel(match[1] ?? "").map((item) => item.trim()).filter(Boolean);
     for (const declarator of declarators) {
       const parsed = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*((?:blockIdx|threadIdx|blockDim)\.[xyz])$/u.exec(declarator);
@@ -3509,13 +3626,21 @@ function collectCuteRank2StridedGmemTensors(body) {
     if (shape.length !== 2 || stride.length !== 2) return;
     out.push({ name, pointer, shape, stride });
   };
-  const layoutRe = /\b(?:auto|Tensor)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*make_tensor\s*\(\s*make_gmem_ptr\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*,\s*make_layout\s*\(\s*make_shape\s*\(([^)]*)\)\s*,\s*make_stride\s*\(([^)]*)\)\s*\)\s*\)\s*;/gu;
+  const gmemPointer = String.raw`make_gmem_ptr(?:\s*<[^<>]+>)?\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)`;
+  const layoutRe = new RegExp(String.raw`\b(?:auto|Tensor)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*make_tensor\s*\(\s*${gmemPointer}\s*,\s*make_layout\s*\(\s*make_shape\s*\(([^)]*)\)\s*,\s*make_stride\s*\(([^)]*)\)\s*\)\s*\)\s*;`, "gu");
   for (const match of body.matchAll(layoutRe)) {
     add(match[1], match[2], match[3], match[4]);
   }
-  const directRe = /\b(?:auto|Tensor)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*make_tensor\s*\(\s*make_gmem_ptr\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*,\s*make_shape\s*\(([^)]*)\)\s*,\s*make_stride\s*\(([^)]*)\)\s*\)\s*;/gu;
+  const directRe = new RegExp(String.raw`\b(?:auto|Tensor)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*make_tensor\s*\(\s*${gmemPointer}\s*,\s*make_shape\s*\(([^)]*)\)\s*,\s*make_stride\s*\(([^)]*)\)\s*\)\s*;`, "gu");
   for (const match of body.matchAll(directRe)) {
     add(match[1], match[2], match[3], match[4]);
+  }
+  const rowMajorRe = new RegExp(String.raw`\b(?:auto|Tensor)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*make_tensor\s*\(\s*${gmemPointer}\s*,\s*make_shape\s*\(([^)]*)\)\s*,\s*GenRowMajor\s*\{\s*\}\s*\)\s*;`, "gu");
+  for (const match of body.matchAll(rowMajorRe)) {
+    const rawShape = match[3];
+    const shape = rawShape === undefined ? [] : splitTopLevel(rawShape).map(normalizeCuteScalarExpression);
+    if (shape.length !== 2) continue;
+    add(match[1], match[2], rawShape, `${shape[1]}, Int<1>{}`);
   }
   return out;
 }
@@ -3582,8 +3707,8 @@ function cuteRowBroadcastGemvBody(motif) {
 }
 
 function normalizeCuteTnGemmKernels(source) {
-  if (!/\bmake_tensor\s*\(\s*make_gmem_ptr\s*\(/u.test(source) || !/\blocal_tile\s*\(/u.test(source)) return source;
-  if (!/\bcute::gemm\s*\(/u.test(source) && !/\bgemm\s*\(/u.test(source)) return source;
+  if (!/\bmake_tensor\s*\(\s*make_gmem_ptr(?:\s*<[^<>]+>)?\s*\(/u.test(source) || !/\blocal_tile\s*\(/u.test(source)) return source;
+  if (!/\bcute::gemm\s*\(/u.test(source) && !/\bgemm\s*\(/u.test(source) && !/::\s*consumer\s*\(/u.test(source)) return source;
   let out = "";
   let cursor = 0;
   const globalRe = /\b__global__\b/gu;
@@ -3642,6 +3767,7 @@ function collectCuteTnGemmMotif(body) {
   if (tensors.length < 3) return undefined;
   const tiles = collectCuteRank2LocalTiles(body);
   const aliases = collectCuteExpressionAliases(body);
+  const env = collectCuteIntegerEnv(body);
   for (const d of tensors) {
     if (!cuteExprIsOne(d.stride[1])) continue;
     for (const a of tensors) {
@@ -3665,6 +3791,8 @@ function collectCuteTnGemmMotif(body) {
         if (aCoords.length !== 2 || bCoords.length !== 2 || dCoords.length !== 2) continue;
         if (!cuteCoordIsWildcard(aCoords[1]) || !cuteCoordIsWildcard(bCoords[1])) continue;
         if (!cuteExprEquals(aCoords[0], dCoords[0]) || !cuteExprEquals(bCoords[0], dCoords[1])) continue;
+        const blockRows = evaluateTemplateIntegerExpression(aTile.extents[0], env) ?? aTile.extents[0];
+        const blockCols = evaluateTemplateIntegerExpression(bTile.extents[0], env) ?? bTile.extents[0];
         return {
           aPointer: a.pointer,
           bPointer: b.pointer,
@@ -3672,8 +3800,8 @@ function collectCuteTnGemmMotif(body) {
           rows: d.shape[0],
           cols: d.shape[1],
           depth: a.shape[1],
-          blockRows: aTile.extents[0],
-          blockCols: bTile.extents[0],
+          blockRows,
+          blockCols,
           blockRow: dCoords[0],
           blockCol: dCoords[1],
         };
@@ -3702,7 +3830,7 @@ function collectCuteRank2LocalTiles(body) {
 
 function collectCuteExpressionAliases(body) {
   const aliases = new Map(collectCuteIndexAliases(body));
-  for (const match of body.matchAll(/\bint\s+([^;]*\b(?:blockIdx|threadIdx|blockDim|gridDim)\.[xyz][^;]*)\s*;/gu)) {
+  for (const match of body.matchAll(/\b(?:const\s+)?(?:int|auto)\s+([^;]*\b(?:blockIdx|threadIdx|blockDim|gridDim)\.[xyz][^;]*)\s*;/gu)) {
     const declarators = splitTopLevel(match[1] ?? "").map((item) => item.trim()).filter(Boolean);
     for (const declarator of declarators) {
       const parsed = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([\s\S]+)$/u.exec(declarator);
@@ -5444,8 +5572,13 @@ function collectCarrierMemberDefinesForAlias(out, carriers, alias, initialDefine
   const carrier = carriers.get(alias.templateName);
   if (carrier === undefined) return;
   const env = templateEnvironment(carrier.params, alias.args, mergeDefineMaps(initialDefines, out));
-  if (env.size === 0) return;
   const memberEnv = new Map(env);
+  for (const [index, param] of carrier.params.entries()) {
+    if (param?.kind !== "type") continue;
+    const arg = alias.args[index];
+    if (arg !== undefined && parseTemplateShapeArgument(arg).length > 0) memberEnv.set(param.name, arg);
+  }
+  if (memberEnv.size === 0) return;
   for (const member of carrier.members) {
     if (member.kind === "type") {
       const substituted = substituteTemplateArgument(member.value, memberEnv, mergeDefineMaps(initialDefines, out));
@@ -5455,11 +5588,41 @@ function collectCarrierMemberDefinesForAlias(out, carriers, alias, initialDefine
       memberEnv.set(member.name, normalized);
       continue;
     }
-    const value = evaluateTemplateIntegerExpression(member.value, memberEnv);
+    const value = evaluateCarrierIntegerExpression(member.value, memberEnv);
     if (value === undefined) continue;
     out.set(`${alias.name}::${member.name}`, value);
     memberEnv.set(member.name, value);
   }
+}
+
+function evaluateCarrierIntegerExpression(expression, env) {
+  const shapeGet = /^\s*get\s*<\s*([0-9]+)\s*>\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*\{\s*\}\s*\)\s*$/u.exec(expression);
+  if (shapeGet?.[1] !== undefined && shapeGet[2] !== undefined) {
+    const dims = parseTemplateShapeArgument(env.get(shapeGet[2]) ?? "");
+    const value = dims[Number(shapeGet[1])];
+    if (value !== undefined) return value;
+  }
+  return evaluateTemplateIntegerExpression(expression, env);
+}
+
+function parseTemplateShapeArgument(raw) {
+  const source = raw.trim();
+  const open = source.indexOf("make_shape");
+  if (open < 0) return [];
+  const paren = source.indexOf("(", open);
+  const close = findBalanced(source, paren, "(", ")");
+  if (paren < 0 || close === undefined) return [];
+  const dims = [];
+  for (const arg of splitTopLevel(source.slice(paren + 1, close))) {
+    const trimmed = arg.trim();
+    const underscore = /^_([0-9]+)\s*\{\s*\}$/u.exec(trimmed)?.[1];
+    const intWrapper = /^(?:cute::)?Int\s*<\s*([0-9]+)\s*>\s*\{\s*\}$/u.exec(trimmed)?.[1];
+    const numeric = /^[0-9]+$/u.test(trimmed) ? trimmed : undefined;
+    const value = underscore ?? intWrapper ?? numeric;
+    if (value === undefined) return [];
+    dims.push(value);
+  }
+  return dims;
 }
 
 function scanTemplateStructCarriers(source) {
@@ -5500,7 +5663,7 @@ function scanCarrierMembers(body) {
     const [, name, value] = match;
     if (name && value) members.push({ kind: "type", name, value: value.trim() });
   }
-  for (const match of body.matchAll(/\bstatic\s+constexpr\s+(?:const\s+)?(?:int|uint|unsigned\s+int|size_t|ptrdiff_t|bool)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);/gu)) {
+  for (const match of body.matchAll(/\b(?:(?:static\s+constexpr)|(?:constexpr\s+static))\s+(?:const\s+)?(?:int|uint|unsigned\s+int|size_t|ptrdiff_t|bool)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([^;]+);/gu)) {
     const [, name, value] = match;
     if (name && value) members.push({ kind: "value", name, value: value.trim() });
   }

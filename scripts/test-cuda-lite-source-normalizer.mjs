@@ -636,6 +636,52 @@ __global__ void cute_hgemm_tn(T *Aptr, T *Bptr, T *Dptr, int m, int n, int k) {
 {
   const source = createKernelCompilationUnit({
     kernel: `
+template <typename WSHGEMMTraits>
+__global__ void cute_carrier_gemm(typename WSHGEMMTraits::Arguments args) {
+  constexpr int kCTAM = WSHGEMMTraits::kCTAM;
+  constexpr int kCTAN = WSHGEMMTraits::kCTAN;
+  constexpr int kCTAK = WSHGEMMTraits::kCTAK;
+  auto tile_id_m = blockIdx.x;
+  auto tile_id_n = blockIdx.y;
+  auto A = make_tensor(make_gmem_ptr<typename WSHGEMMTraits::MatrixTypeAB>(args.a_ptr),
+                       select<0, 2>(args.problem_shape), GenRowMajor{});
+  auto B = make_tensor(make_gmem_ptr<typename WSHGEMMTraits::MatrixTypeAB>(args.b_ptr),
+                       select<1, 2>(args.problem_shape), GenRowMajor{});
+  auto C = make_tensor(make_gmem_ptr<typename WSHGEMMTraits::AccType>(args.c_ptr),
+                       select<0, 1>(args.problem_shape), GenRowMajor{});
+  auto gA = local_tile(A, make_tile(Int<kCTAM>{}, Int<kCTAK>{}), make_coord(tile_id_m, _));
+  auto gB = local_tile(B, make_tile(Int<kCTAN>{}, Int<kCTAK>{}), make_coord(tile_id_n, _));
+  auto gC = local_tile(C, make_tile(Int<kCTAM>{}, Int<kCTAN>{}), make_coord(tile_id_m, tile_id_n));
+  WSHGEMMTraits::consumer(args, gC);
+}`,
+    recordDeclarations: [`
+template <class CTATile, int Stage> struct WSTraits {
+  using MatrixTypeAB = half;
+  using AccType = half;
+  constexpr static int kCTAM = get<0>(CTATile{});
+  constexpr static int kCTAN = get<1>(CTATile{});
+  constexpr static int kCTAK = get<2>(CTATile{});
+  constexpr static int kStage = Stage;
+  struct Arguments {
+    void *a_ptr;
+    void *b_ptr;
+    void *c_ptr;
+    Shape<int, int, int> problem_shape;
+  };
+};
+using GEMM_Traits = WSTraits<decltype(make_shape(_8{}, _16{}, _4{})), 2>;`],
+    templateArgumentsByKernelName: new Map([["cute_carrier_gemm", ["GEMM_Traits"]]]),
+  });
+  assert.match(source, /__global__ void cute_carrier_gemm\(half \*args__a_ptr, half \*args__b_ptr, half \*args__c_ptr, int args__problem_shape0, int args__problem_shape1, int args__problem_shape2\)/u);
+  assert.match(source, /bg_for_bg_cute_linear_0 < \(8 \* 16\)/u);
+  assert.match(source, /args__c_ptr\[\(bg_cute_row \* args__problem_shape1\) \+ bg_cute_col\] = \(half\)bg_cute_acc;/u);
+  assert.doesNotMatch(source, /\btypename\s+GEMM_Traits::Arguments\b/u);
+  assert.doesNotMatch(source, /\bmake_tensor\b/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 #define FLOAT4(value) (reinterpret_cast<float4 *>(&(value))[0])
 __global__ void vec4_recover(float *x, float *y, int N) {
   int idx = threadIdx.x * 4;
