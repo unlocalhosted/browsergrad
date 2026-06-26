@@ -58,6 +58,10 @@ const CUDA_BUILTIN_RECORD_DECLARATIONS = [
   "struct cudaExtent { size_t width; size_t height; size_t depth; };",
 ];
 
+const SEMANTIC_RECORD_CARRIERS = new Set([
+  "DevicePool",
+]);
+
 export function createKernelCompilationUnit({
   kernel,
   siblingKernels = [],
@@ -705,6 +709,7 @@ function podRecordDeclarationVectorAlias(declaration, definesByName) {
 function scalarizedPodRecordDeclaration(declaration, definesByName) {
   const name = recordDeclarationName(declaration);
   if (name === undefined) return undefined;
+  if (SEMANTIC_RECORD_CARRIERS.has(name)) return undefined;
   return collectScalarizedPodRecords(declaration, definesByName)
     .find((record) => record.name === name);
 }
@@ -1884,6 +1889,7 @@ function collectScalarizedPodRecords(source, definesByName = new Map()) {
     const { aliasName, body, declaration, rawTemplateParams, tagName } = recordDeclaration;
     const name = aliasName ?? tagName;
     if (!name || /\(|\)|\b(?:public|private|protected|operator|union)\b/u.test(stripRecordEnums(body).body)) continue;
+    if (SEMANTIC_RECORD_CARRIERS.has(name)) continue;
     const templateParams = rawTemplateParams === undefined
       ? []
       : splitTopLevel(rawTemplateParams).map(parseTemplateParam).filter(Boolean);
@@ -1957,11 +1963,16 @@ function parseScalarizedRecordFields(body, definesByName) {
   for (const raw of body.split(";")) {
     const line = stripLineComment(raw).trim();
     if (line.length === 0) continue;
-    if (/[(){}*&]/u.test(line)) return undefined;
-    const match = /^(?:const\s+|volatile\s+)*([A-Za-z_][A-Za-z0-9_]*(?:\s+[A-Za-z_][A-Za-z0-9_]*)?)\s+([A-Za-z_][A-Za-z0-9_]*)(.*)$/u.exec(line);
+    if (/[(){}&]/u.test(line)) return undefined;
+    const pointerMatch = /^(?:const\s+|volatile\s+)*([A-Za-z_][A-Za-z0-9_]*(?:\s+[A-Za-z_][A-Za-z0-9_]*)?)\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)(.*)$/u.exec(line);
+    const scalarMatch = pointerMatch === null
+      ? /^(?:const\s+|volatile\s+)*([A-Za-z_][A-Za-z0-9_]*(?:\s+[A-Za-z_][A-Za-z0-9_]*)?)\s+([A-Za-z_][A-Za-z0-9_]*)(.*)$/u.exec(line)
+      : null;
+    const match = pointerMatch ?? scalarMatch;
     if (match?.[1] === undefined || match[2] === undefined) return undefined;
     const valueType = normalizeTemplateTypeArgument(match[1], definesByName);
     if (!isScalarizedRecordFieldType(valueType)) return undefined;
+    const pointer = pointerMatch !== null;
     const dimensions = [];
     const tail = match[3] ?? "";
     const dimRe = /\[\s*([A-Za-z_][A-Za-z0-9_]*|[0-9]+)\s*\]/gu;
@@ -1975,7 +1986,7 @@ function parseScalarizedRecordFields(body, definesByName) {
       consumed += dimMatch[0];
     }
     if (tail.replace(consumed, "").trim().length > 0) return undefined;
-    fields.push({ name: match[2], valueType, dimensions });
+    fields.push({ name: match[2], valueType, dimensions, pointer });
   }
   return fields;
 }
@@ -2144,7 +2155,7 @@ function expandScalarizedRecordParam(param, record) {
   return {
     name,
     pointer: false,
-    params: record.fields.map((field) => field.dimensions.length > 0
+    params: record.fields.map((field) => field.pointer || field.dimensions.length > 0
       ? `${prefix}${field.valueType} *${recordFieldName(name, field)}`
       : `${prefix}${field.valueType} ${recordFieldName(name, field)}`),
   };

@@ -1955,6 +1955,37 @@ __global__ void macro_array_record(__grid_constant__ const param_t p, int* out) 
 
 {
   const source = createKernelCompilationUnit({
+    recordDeclarations: ["struct RefArrays { float *values; int n; size_t bytes; };"],
+    kernel: `
+__global__ void pointer_record(float *out, RefArrays ref) {
+  int idx = threadIdx.x;
+  if (idx < ref.n) {
+    out[idx] = ref.values[idx] + (float)ref.bytes;
+  }
+}`,
+  });
+  assert.doesNotMatch(source, /struct RefArrays/u);
+  assert.match(source, /float \*ref__values, int ref__n, uint ref__bytes/u);
+  assert.match(source, /idx < ref__n/u);
+  assert.match(source, /out\[idx\] = ref__values\[idx\] \+ \(float\)ref__bytes;/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    recordDeclarations: ["struct DevicePool { int* base; unsigned int poolSize; unsigned int offset; };"],
+    kernel: `
+__global__ void allocationKernel(DevicePool* dp, float* output, int N) {
+  void* ptr = deviceAllocate(dp, sizeof(float));
+  output[threadIdx.x] = ptr != nullptr ? 1.0f : 0.0f;
+}`,
+  });
+  assert.match(source, /DevicePool\* dp/u);
+  assert.match(source, /deviceAllocate\(dp, sizeof\(float\)\)/u);
+  assert.doesNotMatch(source, /\bdp__base\b/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
     kernel: `
 typedef float vec2[2];
 __global__ void array_alias(vec2* points, float* out) {

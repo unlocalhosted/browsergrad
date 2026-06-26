@@ -86,6 +86,8 @@
   back into real CUDA lines, and stdout no-op analysis accepts pointer/local
   array debug arguments, raising the cuda-samples gate to `328/357` with `26`
   hard gaps.
+- Source normalization now scalarizes by-value POD records that carry pointer
+  fields, raising the cuda-samples gate to `329/357` with `25` hard gaps.
 - Source normalizer synthetic names now avoid WGSL-reserved double-underscore
   prefixes, and the browser fixture suite now executes all four lifted LeetCUDA
   CuTe transpose variants through real WebGPU.
