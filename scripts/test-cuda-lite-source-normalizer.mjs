@@ -682,6 +682,31 @@ using GEMM_Traits = WSTraits<decltype(make_shape(_8{}, _16{}, _4{})), 2>;`],
 {
   const source = createKernelCompilationUnit({
     kernel: `
+__global__ void cute_flash_attn(half *pQ, half *pK, half *pV, half *pO, int B, int H, int N_QO, int N_KV, int D, float scale) {
+  int bx = blockIdx.x;
+  int by = blockIdx.y;
+  int bz = blockIdx.z;
+  auto Q = make_tensor(make_gmem_ptr(pQ), make_layout(make_shape(B, H, N_QO, D), GenRowMajor{}));
+  auto K = make_tensor(make_gmem_ptr(pK), make_layout(make_shape(B, H, N_KV, D), GenRowMajor{}));
+  auto V = make_tensor(make_gmem_ptr(pV), make_layout(make_shape(B, H, N_KV, D), GenRowMajor{}));
+  auto O = make_tensor(make_gmem_ptr(pO), make_layout(make_shape(B, H, N_QO, D), GenRowMajor{}));
+  auto gQ = local_tile(Q, make_shape(_1{}, _1{}, Int<4>{}, Int<16>{}), make_coord(bx, by, bz, 0))(0,0,_,_);
+  auto global_row_denominator = make_tensor<float>(make_shape(Int<4>{}, Int<1>{}));
+  gemm(tiled_mma, gQ, gQ, global_row_denominator);
+  global_row_denominator(0, 0) = exp(scale);
+}`,
+  });
+  assert.match(source, /__global__ void cute_flash_attn\(half \*pQ, half \*pK, half \*pV, half \*pO, int B, int H, int N_QO, int N_KV, int D, float scale\)/u);
+  assert.match(source, /bg_for_bg_attn_linear_0 < \(4 \* D\)/u);
+  assert.match(source, /float bg_attn_weight = expf\(\(bg_attn_score \* scale\) - bg_attn_max\);/u);
+  assert.match(source, /pO\[\(\(\(\(\(bg_attn_b \* H\) \+ bg_attn_h\) \* N_QO\) \+ bg_attn_q\) \* D\) \+ bg_attn_dim\] = \(half\)\(bg_attn_acc \/ bg_attn_denom\);/u);
+  assert.doesNotMatch(source, /\bmake_tensor\b/u);
+  assert.doesNotMatch(source, /\bglobal_row_denominator\b/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 #define FLOAT4(value) (reinterpret_cast<float4 *>(&(value))[0])
 __global__ void vec4_recover(float *x, float *y, int N) {
   int idx = threadIdx.x * 4;
