@@ -26,8 +26,8 @@ export const cudaLiteCorpora = [
     path: path.join(corpusRoot, "cuda-samples"),
     expectations: {
       total: 357,
-      compileCodegenMin: 333,
-      hardFailMax: 21,
+      compileCodegenMin: 334,
+      hardFailMax: 20,
     },
   },
   {
@@ -159,6 +159,24 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4 },
     },
     output: "C",
+  },
+  {
+    sourceKey: "corpusCudaSamplesBezierLinePositions",
+    caseName: "corpus:cuda-samples:computeBezierLinePositions",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/3_CUDA_Features/cdpBezierTessellation/BezierLineCDP.cu",
+    kernelName: "computeBezierLinePositions",
+    workgroupSize: [4, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    input: {
+      buffers: {
+        bLines__CP: { type: "Float32Array", data: [0, 0, 1, 2, 2, 0] },
+        bLines__vertexPos: { type: "Float32Array", length: 8 },
+        bLines__nVertices: { type: "Int32Array", data: [4] },
+      },
+      scalars: { lidx: 0, nTessPoints: 4 },
+    },
+    output: "bLines__vertexPos",
   },
   {
     sourceKey: "corpusLlmAddBias",
@@ -755,10 +773,10 @@ export const cudaLiteCorpusExecutionFixtures = [
 ];
 
 export const cudaLiteCorpusExecutionFixtureBaseline = {
-  totalMin: 40,
+  totalMin: 41,
   byCorpusMin: {
     "cuda-120": 2,
-    "cuda-samples": 4,
+    "cuda-samples": 5,
     "llm.c": 10,
     leetcuda: 24,
   },

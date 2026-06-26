@@ -2505,4 +2505,26 @@ __global__ void reachable_constant_table(uint* out) {
   assert.doesNotMatch(source, /unusedTable/u);
 }
 
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void record_pointer_with_fixed_array_fields(PackedLine *lines, float2 *out, int line, int lane) {
+  float2 value = lines[line].CP[lane];
+  lines[line].target[lane] = value;
+  out[lane] = value;
+}`,
+    recordDeclarations: [
+      `struct PackedLine {
+  float2 CP[3];
+  float2 *target;
+  int n;
+};`,
+    ],
+  });
+  assert.match(source, /__global__ void record_pointer_with_fixed_array_fields\(float2 \*lines__CP, float2 \*lines__target, int \*lines__n, float2 \*out, int line, int lane\)/u);
+  assert.match(source, /float2 value = lines__CP\[\(line\) \* 3 \+ \(lane\)\];/u);
+  assert.match(source, /lines__target\[lane\] = value;/u);
+  assert.doesNotMatch(source, /\bPackedLine\b/u);
+}
+
 console.log("cuda-lite source normalizer tests ok");

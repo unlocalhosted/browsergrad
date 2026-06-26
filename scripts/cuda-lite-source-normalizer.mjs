@@ -2162,7 +2162,6 @@ function expandScalarizedRecordParam(param, record) {
 }
 
 function expandScalarizedRecordPointerParam(param, record) {
-  if (record.fields.some((field) => field.dimensions.length > 0)) return undefined;
   const re = new RegExp(`^\\s*((?:(?:const|volatile|__restrict__|__restrict|restrict)\\s+)*)${escapeRegExp(record.name)}\\s*\\*\\s*((?:(?:const|volatile|__restrict__|__restrict|restrict)\\s+)*)?([A-Za-z_][A-Za-z0-9_]*)\\s*$`, "u");
   const match = re.exec(param);
   if (match === null || match[3] === undefined) return undefined;
@@ -2267,16 +2266,50 @@ function rewriteScalarizedRecordMemberAccess(source, record, symbols) {
     for (const field of record.fields) {
       if (symbol.kind === "param-pointer") {
         const arrowRe = new RegExp(`\\b${escapeRegExp(name)}\\s*->\\s*${escapeRegExp(field.name)}\\b`, "gu");
-        out = out.replace(arrowRe, `${recordFieldName(name, field)}[0]`);
+        out = out.replace(arrowRe, field.pointer ? recordFieldName(name, field) : `${recordFieldName(name, field)}[0]`);
       }
-      const re = new RegExp(`\\b${escapeRegExp(name)}\\b((?:\\s*\\[[^\\]]+\\])*)\\s*\\.\\s*${escapeRegExp(field.name)}\\b`, "gu");
-      out = out.replace(re, (_match, indexes) => {
+      const re = new RegExp(`\\b${escapeRegExp(name)}\\b((?:\\s*\\[[^\\]]+\\])*)\\s*\\.\\s*${escapeRegExp(field.name)}\\b((?:\\s*\\[[^\\]]+\\])*)`, "gu");
+      out = out.replace(re, (_match, indexes, fieldIndexes) => {
         if (symbol.kind === "single-array-constant" && record.fields.length === 1 && field.dimensions.length > 0) {
-          return `${name}${indexes ?? ""}`;
+          return `${name}${indexes ?? ""}${fieldIndexes ?? ""}`;
         }
-        return `${recordFieldName(name, field)}${indexes ?? ""}`;
+        if (symbol.kind === "param-pointer") {
+          if (field.pointer) return `${recordFieldName(name, field)}${fieldIndexes ?? ""}`;
+          if (field.dimensions.length > 0) {
+            const flattened = flattenScalarizedRecordPointerFieldIndexes(indexes ?? "", fieldIndexes ?? "", field.dimensions);
+            if (flattened !== undefined) return `${recordFieldName(name, field)}[${flattened}]`;
+          }
+        }
+        return `${recordFieldName(name, field)}${indexes ?? ""}${fieldIndexes ?? ""}`;
       });
     }
+  }
+  return out;
+}
+
+function flattenScalarizedRecordPointerFieldIndexes(recordIndexes, fieldIndexes, dimensions) {
+  const recordParts = bracketIndexParts(recordIndexes);
+  const fieldParts = bracketIndexParts(fieldIndexes);
+  if (recordParts.length === 0) recordParts.push("0");
+  if (recordParts.length > 1) return undefined;
+  if (fieldParts.length > dimensions.length) return undefined;
+  const fieldStride = dimensions.reduce((product, dimension) => product * dimension, 1);
+  const terms = [`(${recordParts[0]}) * ${fieldStride}`];
+  for (let index = 0; index < dimensions.length; index++) {
+    const value = fieldParts[index] ?? "0";
+    const stride = dimensions.slice(index + 1).reduce((product, dimension) => product * dimension, 1);
+    terms.push(stride === 1 ? `(${value})` : `((${value}) * ${stride})`);
+  }
+  return terms.join(" + ");
+}
+
+function bracketIndexParts(indexes) {
+  const out = [];
+  const re = /\[\s*([^\]]+?)\s*\]/gu;
+  let match;
+  while ((match = re.exec(indexes)) !== null) {
+    const value = match[1]?.trim();
+    if (value) out.push(value);
   }
   return out;
 }
