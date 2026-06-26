@@ -2,6 +2,7 @@
 
 ## 0.1.0
 
+- Source normalization now lowers vector-valued POD record returns, record-shaped `memcpy` from scalar arrays, return-switch local lambdas, and vector cooperative-group shuffles. This closes the cuda-samples `shfl_intimage_rows` gap and raises the cuda-samples compile/codegen gate to `341/357` with `13` hard gaps.
 - Initial CUDA-lite parser, analyzer, Kernel IR, reference interpreter, WGSL
   emitter, and WebGPU runner.
 - Added real WebGPU orchestration for safe `grid.sync()` phase splitting,

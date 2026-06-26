@@ -259,7 +259,8 @@ export function createKernelCompilationUnit({
   const withPointerStoreForwarders = normalizePointerStoreForwarderHelpers(withAtomicForwarders);
   const withLocalPointerHelpers = normalizeLocalPointerDeviceFunctionCalls(withPointerStoreForwarders);
   const withLambdas = normalizeSimpleLocalLambdas(withLocalPointerHelpers);
-  const withCuteRank2 = normalizeCuteRank2TransposeKernels(withLambdas);
+  const withVectorShuffles = normalizeVectorCooperativeShuffles(withLambdas);
+  const withCuteRank2 = normalizeCuteRank2TransposeKernels(withVectorShuffles);
   const withCuteGemv = normalizeCuteRowBroadcastGemvKernels(withCuteRank2);
   const withCuteTiles = normalizeCute1dAffineTileCopies(withCuteGemv);
   const withExpressionMacros = normalizeSimpleExpressionMacros(withCuteTiles);
@@ -2161,7 +2162,9 @@ function normalizeScalarizedPodRecords(source, definesByName = new Map()) {
   for (const record of records) out = rewriteScalarizedRecordConstants(out, record, symbolsByRecord.get(record.name));
   const functionExpansions = [];
   for (const record of records) out = rewriteScalarizedRecordFunctionSignatures(out, record, symbolsByRecord.get(record.name), functionExpansions);
+  for (const record of records) out = rewriteScalarizedRecordReturnCallDeclarations(out, record, symbolsByRecord.get(record.name), functionExpansions);
   for (const record of records) out = rewriteScalarizedRecordLocalDeclarations(out, record, symbolsByRecord.get(record.name));
+  for (const record of records) out = rewriteScalarizedRecordMemcpys(out, record, symbolsByRecord.get(record.name));
   for (const record of records) out = rewriteScalarizedRecordAssignments(out, record, symbolsByRecord.get(record.name));
   for (const record of records) out = rewriteScalarizedRecordMemberAccess(out, record, symbolsByRecord.get(record.name));
   out = rewriteScalarizedRecordCalls(out, functionExpansions, symbolsByRecord);
@@ -2290,20 +2293,28 @@ function parseScalarizedRecordFields(body, definesByName) {
     const valueType = normalizeTemplateTypeArgument(match[1], definesByName);
     if (!isScalarizedRecordFieldType(valueType)) return undefined;
     const pointer = pointerMatch !== null;
-    const dimensions = [];
     const tail = match[3] ?? "";
-    const dimRe = /\[\s*([A-Za-z_][A-Za-z0-9_]*|[0-9]+)\s*\]/gu;
-    let dimMatch;
-    let consumed = "";
-    while ((dimMatch = dimRe.exec(tail)) !== null) {
-      const rawDim = dimMatch[1];
-      const resolved = rawDim === undefined ? undefined : resolveScalarizedRecordArrayDimension(rawDim, definesByName);
-      if (!Number.isInteger(resolved) || resolved <= 0) return undefined;
-      dimensions.push(resolved);
-      consumed += dimMatch[0];
+    const declarators = pointer || !/^\s*,/u.test(tail)
+      ? [`${match[2]}${tail}`]
+      : [match[2], ...splitTopLevel(tail.replace(/^\s*,/u, "")).map((item) => item.trim()).filter(Boolean)];
+    for (const declarator of declarators) {
+      const parsed = /^([A-Za-z_][A-Za-z0-9_]*)([\s\S]*)$/u.exec(declarator.trim());
+      if (parsed?.[1] === undefined) return undefined;
+      const dimensions = [];
+      const dimTail = parsed[2] ?? "";
+      const dimRe = /\[\s*([A-Za-z_][A-Za-z0-9_]*|[0-9]+)\s*\]/gu;
+      let dimMatch;
+      let consumed = "";
+      while ((dimMatch = dimRe.exec(dimTail)) !== null) {
+        const rawDim = dimMatch[1];
+        const resolved = rawDim === undefined ? undefined : resolveScalarizedRecordArrayDimension(rawDim, definesByName);
+        if (!Number.isInteger(resolved) || resolved <= 0) return undefined;
+        dimensions.push(resolved);
+        consumed += dimMatch[0];
+      }
+      if (dimTail.replace(consumed, "").trim().length > 0) return undefined;
+      fields.push({ name: parsed[1], valueType, dimensions, pointer });
     }
-    if (tail.replace(consumed, "").trim().length > 0) return undefined;
-    fields.push({ name: match[2], valueType, dimensions, pointer });
   }
   return fields;
 }
@@ -2432,6 +2443,8 @@ function rewriteScalarizedRecordFunctionSignatures(source, record, symbols, func
     const params = splitTopLevel(rawParams).map((param) => param.trim()).filter(Boolean);
     const expansion = [];
     let changed = false;
+    const prefix = source.slice(match.index, open);
+    const returnRecord = scalarizedRecordReturnFunction(prefix, match[1], record);
     const rewritten = params.flatMap((param) => {
       const expanded = expandScalarizedRecordParam(param, record);
       if (expanded === undefined) {
@@ -2443,19 +2456,129 @@ function rewriteScalarizedRecordFunctionSignatures(source, record, symbols, func
       expansion.push({ kind: "record", recordName: record.name, record });
       return expanded.params;
     });
+    if (returnRecord !== undefined) {
+      changed = true;
+      rewritten.push(...scalarizedRecordReturnParams(returnRecord.name, record));
+    }
     if (!changed) {
       re.lastIndex = close + 1;
       continue;
     }
     const name = match[1];
-    if (name !== undefined) functionExpansions.push({ name, params: expansion });
-    out += source.slice(cursor, open + 1);
+    if (name !== undefined) functionExpansions.push({
+      name,
+      params: expansion,
+      ...(returnRecord === undefined ? {} : { returnRecordName: record.name, returnRecord: record }),
+    });
+    out += source.slice(cursor, match.index);
+    out += returnRecord === undefined ? source.slice(match.index, open + 1) : scalarizedRecordReturnPrefix(prefix, name, record);
     out += rewritten.join(", ");
+    const bodyOpen = next;
+    const bodyEnd = findBalanced(source, bodyOpen, "{", "}");
+    if (returnRecord !== undefined && bodyEnd !== undefined) {
+      out += source.slice(close, bodyOpen + 1);
+      out += rewriteScalarizedRecordReturns(source.slice(bodyOpen + 1, bodyEnd), returnRecord.name, record);
+      cursor = bodyEnd;
+      re.lastIndex = bodyEnd + 1;
+      continue;
+    }
     cursor = close;
     re.lastIndex = close + 1;
   }
   out += source.slice(cursor);
   return out;
+}
+
+function scalarizedRecordReturnFunction(prefix, name, record) {
+  if (name === undefined) return undefined;
+  const re = new RegExp(`\\b${escapeRegExp(record.name)}\\s+${escapeRegExp(name)}\\s*$`, "u");
+  return re.test(prefix) ? { name } : undefined;
+}
+
+function scalarizedRecordReturnPrefix(prefix, name, record) {
+  const re = new RegExp(`\\b${escapeRegExp(record.name)}\\s+${escapeRegExp(name)}\\s*$`, "u");
+  return `${prefix.replace(re, `void ${name}`)}(`;
+}
+
+function scalarizedRecordReturnParams(name, record) {
+  return record.fields.map((field) => `${field.valueType} *${recordReturnFieldName(name, field)}`);
+}
+
+function recordReturnFieldName(name, field) {
+  return `${name}__bg_return__${field.name}`;
+}
+
+function rewriteScalarizedRecordReturns(body, functionName, record) {
+  const re = /\breturn\s+([A-Za-z_][A-Za-z0-9_]*)\s*;/gu;
+  return body.replace(re, (_match, name) => {
+    if (typeof name !== "string") return _match;
+    return record.fields
+      .map((field) => `*${recordReturnFieldName(functionName, field)} = ${recordFieldName(name, field)};`)
+      .join(" ") + " return;";
+  });
+}
+
+function rewriteScalarizedRecordReturnCallDeclarations(source, record, symbols, functionExpansions) {
+  const recordReturnFunctions = functionExpansions.filter((expansion) => expansion.returnRecordName === record.name);
+  if (recordReturnFunctions.length === 0) return source;
+  const byName = new Map(recordReturnFunctions.map((expansion) => [expansion.name, expansion]));
+  const re = new RegExp(`(^|[;{}]\\s*)${escapeRegExp(record.name)}\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*\\(`, "gmu");
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const variable = match[2];
+    const callee = match[3];
+    if (variable === undefined || callee === undefined || !byName.has(callee)) {
+      re.lastIndex = match.index + 1;
+      continue;
+    }
+    const open = source.indexOf("(", match.index + match[0].length - 1);
+    const close = findBalanced(source, open, "(", ")");
+    if (close === undefined) {
+      re.lastIndex = match.index + 1;
+      continue;
+    }
+    const semi = skipWhitespace(source, close + 1);
+    if (source[semi] !== ";") {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    symbols.set(variable, { kind: "local" });
+    const args = splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim()).filter(Boolean);
+    const declarations = record.fields.map((field) => `${field.valueType} ${recordFieldName(variable, field)};`).join(" ");
+    const returnArgs = record.fields.map((field) => `&${recordFieldName(variable, field)}`);
+    out += source.slice(cursor, match.index);
+    out += `${match[1] ?? ""}${declarations} ${callee}(${[...args, ...returnArgs].join(", ")});`;
+    cursor = semi + 1;
+    re.lastIndex = semi + 1;
+  }
+  out += source.slice(cursor);
+  return out;
+}
+
+function rewriteScalarizedRecordMemcpys(source, record, symbols) {
+  if (symbols.size === 0) return source;
+  const re = /\bmemcpy\s*\(\s*&\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*sizeof\s*\(\s*\1\s*\)\s*\)\s*;/gu;
+  return source.replace(re, (match, target, sourceArray) => {
+    if (typeof target !== "string" || typeof sourceArray !== "string") return match;
+    const symbol = symbols.get(target);
+    if (symbol?.kind !== "local" && symbol?.kind !== "param") return match;
+    let offset = 0;
+    const statements = [];
+    for (const field of record.fields) {
+      const lanes = cudaVectorLanes(field.valueType);
+      if (lanes.length === 0) {
+        statements.push(`${recordFieldName(target, field)} = ${sourceArray}[${offset}];`);
+        offset++;
+        continue;
+      }
+      const ctor = `make_${field.valueType}`;
+      statements.push(`${recordFieldName(target, field)} = ${ctor}(${lanes.map((_lane, laneIndex) => `${sourceArray}[${offset + laneIndex}]`).join(", ")});`);
+      offset += lanes.length;
+    }
+    return statements.join(" ");
+  });
 }
 
 function expandScalarizedRecordParam(param, record) {
@@ -2982,7 +3105,7 @@ function normalizeSimpleLocalLambdas(source) {
   let out = source;
   let cursor = 0;
   while (cursor < out.length) {
-    const match = /\bauto\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\[\s*&?\s*\]\s*/gu.exec(out.slice(cursor));
+    const match = /\bauto\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*\[[^\]\n]*\]\s*/gu.exec(out.slice(cursor));
     if (match === null) break;
     const declStart = cursor + match.index;
     const name = match[1];
@@ -2994,21 +3117,33 @@ function normalizeSimpleLocalLambdas(source) {
       continue;
     }
     const bodyOpen = skipWhitespace(out, paramsClose + 1);
-    const bodyClose = findBalanced(out, bodyOpen, "{", "}");
+    const actualBodyOpen = out[bodyOpen] === "{"
+      ? bodyOpen
+      : skipWhitespace(out, out.indexOf("{", bodyOpen));
+    if (actualBodyOpen < bodyOpen) {
+      cursor = declStart + 1;
+      continue;
+    }
+    const bodyClose = findBalanced(out, actualBodyOpen, "{", "}");
     const semi = bodyClose === undefined ? undefined : skipWhitespace(out, bodyClose + 1);
     if (bodyClose === undefined || out[semi] !== ";") {
       cursor = declStart + 1;
       continue;
     }
     const params = splitTopLevel(out.slice(paramsOpen + 1, paramsClose)).map((param) => param.trim()).filter(Boolean);
-    const body = out.slice(bodyOpen + 1, bodyClose).trim();
-    if (params.length === 0 || params.some((param) => lambdaParamName(param) === undefined) || /\breturn\b/u.test(body)) {
+    const body = out.slice(actualBodyOpen + 1, bodyClose).trim();
+    if (params.length === 0 || params.some((param) => lambdaParamName(param) === undefined)) {
       cursor = semi + 1;
       continue;
     }
     const before = out.slice(0, declStart);
     const after = out.slice(semi + 1);
-    out = before + inlineSimpleLambdaCalls(after, name, params, body);
+    const returnExpression = simpleReturnLambdaExpression(out.slice(paramsClose + 1, actualBodyOpen).trim(), body, params);
+    out = before + (
+      returnExpression === undefined
+        ? inlineSimpleLambdaCalls(after, name, params, body)
+        : inlineSimpleExpressionLambdaCalls(after, name, params, returnExpression)
+    );
     cursor = before.length;
   }
   return out;
@@ -3719,6 +3854,115 @@ function inlineSimpleLambdaCalls(source, name, params, body) {
     re.lastIndex = semi + 1;
   }
   return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function simpleReturnLambdaExpression(trailingReturnType, body, params) {
+  if (!/\breturn\b/u.test(body)) return undefined;
+  if (params.length !== 1) return undefined;
+  const paramName = lambdaParamName(params[0]);
+  if (paramName === undefined) return undefined;
+  const switchExpression = simpleSwitchReturnExpression(body, paramName, trailingReturnType);
+  if (switchExpression !== undefined) return switchExpression;
+  const direct = /^\s*return\s+([^;{}]+)\s*;\s*$/u.exec(body)?.[1];
+  return direct === undefined ? undefined : { params: [paramName], expression: direct.trim() };
+}
+
+function simpleSwitchReturnExpression(body, paramName, trailingReturnType) {
+  const switchRe = new RegExp(`^\\s*switch\\s*\\(\\s*${escapeRegExp(paramName)}\\s*\\)\\s*\\{([\\s\\S]*?)\\}\\s*return\\s+([^;]+)\\s*;\\s*$`, "u");
+  const match = switchRe.exec(body);
+  if (match?.[1] === undefined || match[2] === undefined) return undefined;
+  const cases = [];
+  const caseRe = /\bcase\s+([0-9]+)\s*:\s*return\s+([^;]+)\s*;/gu;
+  for (const item of match[1].matchAll(caseRe)) {
+    if (item[1] === undefined || item[2] === undefined) continue;
+    cases.push({ value: item[1], expression: item[2].trim() });
+  }
+  if (cases.length === 0) return undefined;
+  const fallback = emptyCudaReturnExpression(match[2].trim(), trailingReturnType);
+  const expression = cases
+    .reverse()
+    .reduce((acc, item) => `((${paramName}) == ${item.value} ? ${item.expression} : ${acc})`, fallback);
+  return { params: [paramName], expression };
+}
+
+function emptyCudaReturnExpression(rawFallback, trailingReturnType) {
+  if (rawFallback !== "{}") return rawFallback;
+  const type = /->\s*(?:const\s+)?([A-Za-z_][A-Za-z0-9_]*)/u.exec(trailingReturnType)?.[1];
+  if (type === "float4") return "make_float4(0.0f, 0.0f, 0.0f, 0.0f)";
+  if (type === "float3") return "make_float3(0.0f, 0.0f, 0.0f)";
+  if (type === "float2") return "make_float2(0.0f, 0.0f)";
+  if (type === "uint4") return "make_uint4(0u, 0u, 0u, 0u)";
+  if (type === "uint3") return "make_uint3(0u, 0u, 0u)";
+  if (type === "uint2") return "make_uint2(0u, 0u)";
+  if (type === "int4") return "make_int4(0, 0, 0, 0)";
+  if (type === "int3") return "make_int3(0, 0, 0)";
+  if (type === "int2") return "make_int2(0, 0)";
+  return "0";
+}
+
+function inlineSimpleExpressionLambdaCalls(source, name, params, lambda) {
+  const re = new RegExp(`\\b${escapeRegExp(name)}\\s*\\(`, "gu");
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const open = source.indexOf("(", match.index + name.length);
+    const close = findBalanced(source, open, "(", ")");
+    if (close === undefined) {
+      re.lastIndex = match.index + name.length;
+      continue;
+    }
+    const args = splitTopLevel(source.slice(open + 1, close)).map((arg) => arg.trim());
+    if (args.length !== params.length) {
+      re.lastIndex = close + 1;
+      continue;
+    }
+    out += source.slice(cursor, match.index);
+    let expression = lambda.expression;
+    for (const [index, param] of lambda.params.entries()) {
+      const arg = args[index] ?? "0";
+      expression = expression.replace(new RegExp(`\\b${escapeRegExp(param)}\\b`, "gu"), `(${arg})`);
+    }
+    out += `(${expression})`;
+    cursor = close + 1;
+    re.lastIndex = close + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function normalizeVectorCooperativeShuffles(source) {
+  if (!/\.shfl(?:_up|_down|_xor)?\s*\(/u.test(source)) return source;
+  const vectorSymbols = collectCudaVectorValueTypes(source);
+  if (vectorSymbols.size === 0) return source;
+  const re = /\b([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*(shfl(?:_up|_down|_xor)?)\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([^;)]+)\)\s*;/gu;
+  return source.replace(re, (match, target, group, method, value, offset) => {
+    if (typeof target !== "string" || typeof group !== "string" || typeof method !== "string" || typeof value !== "string" || typeof offset !== "string") return match;
+    const targetType = vectorSymbols.get(target);
+    const valueType = vectorSymbols.get(value);
+    if (targetType === undefined || valueType === undefined || targetType !== valueType) return match;
+    const lanes = cudaVectorLanes(targetType);
+    if (lanes.length === 0) return match;
+    return `${target} = make_${targetType}(${lanes.map((lane) => `${group}.${method}(${value}.${lane}, ${offset.trim()})`).join(", ")});`;
+  });
+}
+
+function collectCudaVectorValueTypes(source) {
+  const symbols = new Map();
+  const declarationRe = /\b(float[234]|half2|int[234]|uint[234])\s+([A-Za-z_][A-Za-z0-9_]*)\b(?!\s*\()/gu;
+  let match;
+  while ((match = declarationRe.exec(source)) !== null) {
+    const type = match[1];
+    const name = match[2];
+    if (type !== undefined && name !== undefined) symbols.set(name, type);
+  }
+  return symbols;
+}
+
+function cudaVectorLanes(type) {
+  if (type === "half2" || type === "float2" || type === "int2" || type === "uint2") return ["x", "y"];
+  if (type === "float3" || type === "int3" || type === "uint3") return ["x", "y", "z"];
+  if (type === "float4" || type === "int4" || type === "uint4") return ["x", "y", "z", "w"];
+  return [];
 }
 
 function lambdaParamName(param) {

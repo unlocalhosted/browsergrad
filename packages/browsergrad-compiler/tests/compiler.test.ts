@@ -1710,6 +1710,23 @@ __global__ void tileReduce(const float *input, float *output) {
     expect([...result.buffers.output as Float32Array]).toEqual([16]);
   });
 
+  it("accepts const-qualified cooperative-group declarations", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void constGroup(int *out) {
+  const cg::thread_block block = cg::this_thread_block();
+  const auto tile = cg::tiled_partition<4>(block);
+  out[threadIdx.x] = tile.thread_rank();
+}`, { features: { subgroups: true }, workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Int32Array]).toEqual([0, 1, 2, 3]);
+  });
+
   it("passes cooperative-group handles through device helper parameters", () => {
     const compiled = compileCudaLiteKernel(`
 namespace cg = cooperative_groups;

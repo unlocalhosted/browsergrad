@@ -674,6 +674,7 @@ class Parser {
 
   private parseCooperativeGroupDecl(): CudaLiteCooperativeGroupDecl {
     const start = this.peek().span;
+    this.consumeCvQualifiers();
     let name: Token;
     let groupKind: CudaLiteCooperativeGroupKind;
     let tileSize: number | undefined;
@@ -1420,15 +1421,17 @@ class Parser {
   }
 
   private startsCooperativeGroupDecl(): boolean {
-    if (this.match("auto")) {
-      return this.tokens[this.index + 2]?.value === "=" &&
-        this.tokens.slice(this.index + 3, this.index + 8).some((token) =>
+    let index = this.index;
+    while (this.isCvQualifier(this.tokens[index]?.value)) index++;
+    if (this.tokens[index]?.value === "auto") {
+      return this.tokens[index + 2]?.value === "=" &&
+        this.tokens.slice(index + 3, index + 8).some((token) =>
           token.value === "tiled_partition" ||
           token.value === "binary_partition" ||
           token.value === "coalesced_threads"
         );
     }
-    return this.startsCooperativeGroupType();
+    return this.startsCooperativeGroupType(index);
   }
 
   private startsCooperativeGroupType(index = this.index): boolean {

@@ -617,6 +617,91 @@ __global__ void vec4_recover(float *x, float *y, int N) {
 }
 
 {
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void lambda_switch(uint4 *out, uint4 value) {
+  auto idxToElem = [&value](unsigned int idx) -> const uint4 {
+    switch (idx) {
+    case 0:
+      return value;
+    case 1:
+      return make_uint4(1u, 2u, 3u, 4u);
+    }
+    return {};
+  };
+  out[threadIdx.x] = idxToElem(threadIdx.x);
+}`,
+  });
+  assert.doesNotMatch(source, /\bauto\s+idxToElem\b/u);
+  assert.doesNotMatch(source, /\bswitch\s*\(/u);
+  assert.match(source, /out\[threadIdx\.x\] = \(\(\(\(threadIdx\.x\)\) == 0 \? value : \(\(\(threadIdx\.x\)\) == 1 \? make_uint4\(1u, 2u, 3u, 4u\) : make_uint4\(0u, 0u, 0u, 0u\)\)\)\);/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void vector_record(uint4 *dst, uint4 src) {
+  packed_result value = pack(src);
+  dst[0] = value.x;
+  dst[1] = value.y;
+}`,
+    deviceFunctions: [{
+      name: "pack",
+      source: `
+__device__ packed_result pack(uint4 value) {
+  packed_result out;
+  out.x = value;
+  out.y = make_uint4(1u, 2u, 3u, 4u);
+  return out;
+}`,
+    }],
+    recordDeclarations: [`
+struct packed_result {
+  uint4 x, y, z, w;
+};`],
+  });
+  assert.doesNotMatch(source, /\bstruct\s+packed_result\b/u);
+  assert.match(source, /__device__ void pack\(uint4 value, uint4 \*pack__bg_return__x/u);
+  assert.match(source, /uint4 value__x; uint4 value__y; uint4 value__z; uint4 value__w; pack\(src, &value__x, &value__y, &value__z, &value__w\);/u);
+  assert.match(source, /dst\[0\] = value__x;/u);
+  assert.match(source, /dst\[1\] = value__y;/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void record_memcpy(uint4 *dst) {
+  packed_result out;
+  unsigned int raw[8];
+  memcpy(&out, raw, sizeof(out));
+  dst[0] = out.x;
+  dst[1] = out.y;
+}`,
+    recordDeclarations: [`
+struct packed_result {
+  uint4 x, y;
+};`],
+  });
+  assert.doesNotMatch(source, /\bmemcpy\b/u);
+  assert.match(source, /out__x = make_uint4\(raw\[0\], raw\[1\], raw\[2\], raw\[3\]\);/u);
+  assert.match(source, /out__y = make_uint4\(raw\[4\], raw\[5\], raw\[6\], raw\[7\]\);/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
+__global__ void vector_shuffle(uint4 *out) {
+  cg::thread_block block = cg::this_thread_block();
+  auto tile = cg::tiled_partition<4>(block);
+  uint4 value = out[threadIdx.x];
+  value = tile.shfl_xor(value, 1);
+  out[threadIdx.x] = value;
+}`,
+  });
+  assert.match(source, /value = make_uint4\(tile\.shfl_xor\(value\.x, 1\), tile\.shfl_xor\(value\.y, 1\), tile\.shfl_xor\(value\.z, 1\), tile\.shfl_xor\(value\.w, 1\)\);/u);
+}
+
+{
   const source = `
 using fn_ptr = void(*)(float*);
 template<fn_ptr fn>
