@@ -253,7 +253,8 @@ export function createKernelCompilationUnit({
   const withPackedHelpers = normalizePacked128MemoryHelpers(withWidePacks);
   const withSharedHelpers = normalizeSharedMemoryHelpers(withPackedHelpers);
   const withCurandOverloads = normalizeCurandInitOverloads(withSharedHelpers);
-  const withSincosHelpers = normalizeSincosHelpers(withCurandOverloads);
+  const withRuntimeNoops = normalizeDeviceRuntimeNoopCalls(withCurandOverloads);
+  const withSincosHelpers = normalizeSincosHelpers(withRuntimeNoops);
   const withBlockReduce = normalizeBlockReduceHelpers(withSincosHelpers);
   const withAtomicForwarders = normalizeAtomicForwarderHelpers(withBlockReduce);
   const withPointerStoreForwarders = normalizePointerStoreForwarderHelpers(withAtomicForwarders);
@@ -4666,6 +4667,15 @@ function normalizeCurandInitOverloads(source) {
     helper.lastIndex = close + 1;
   }
   return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function normalizeDeviceRuntimeNoopCalls(source) {
+  return source
+    .replace(/\bcudaStreamCreateWithFlags\s*\(\s*&\s*([A-Za-z_][A-Za-z0-9_]*)\s*,\s*([^;{}]+?)\s*\)\s*;/gu, "$1 = $2;")
+    .replace(/\bcudaStreamCreate\s*\(\s*&\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*;/gu, "$1 = cudaStreamDefault;")
+    .replace(/\bcudaStreamDestroy\s*\([^;{}]*\)\s*;/gu, ";")
+    .replace(/\bcudaStreamSynchronize\s*\([^;{}]*\)\s*;/gu, ";")
+    .replace(/\bcudaFree\s*\([^;{}]*\)\s*;/gu, ";");
 }
 
 function normalizeSincosHelpers(source) {

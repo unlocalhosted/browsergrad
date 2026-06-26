@@ -62,8 +62,8 @@ Repo exploration:
 
 Local corpus audits on 2026-06-26:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `341`
-  compile/codegen-ok (`340` strict direct WGSL plus `1` host-orchestrated
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `342`
+  compile/codegen-ok (`341` strict direct WGSL plus `1` host-orchestrated
   WebGPU plan) after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -179,13 +179,13 @@ Local corpus audits on 2026-06-26:
   function-pointer table/param dispatch lowering, device-function local type
   inference, and explicit WGSL numeric/index casts for CUDA signed/unsigned
   pointer math, plus cooperative-groups `binary_partition` lowering through
-  subgroup predicate masks and lockstep reference collectives, with `17`
-  strict compile gaps and `13` hard gaps.
+  subgroup predicate masks and lockstep reference collectives, plus device-side
+  cleanup/stream lifecycle lowering where browser execution owns buffer
+  lifetime and stream ordering, with `16` strict compile gaps and `12` hard gaps.
   Main failures: C++ object-model declarations that need real constructor /
   member-call / lifetime modeling, remaining parser/frontend context gaps,
-  grid-wide cooperative-groups orchestration, dynamic CUDA runtime/library
-  shape, and one device-side `cudaFree` gap that should not be erased without
-  allocator semantics.
+  grid-wide cooperative-groups orchestration, and dynamic CUDA runtime/library
+  shape.
 - `karpathy/llm.c` at `f1e2ace`: `148` kernel definitions, `148` direct
   compile/codegen-ok after source/context normalization, intrinsic-ledger
   expansion, CUDA/C named constants, CUDA cache-hint memory builtins, local
@@ -314,8 +314,8 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
-- The current live aggregate gate is `1021/1038` compile/codegen-ok across the four
-  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `341/357`, `llm.c`
+- The current live aggregate gate is `1022/1038` compile/codegen-ok across the four
+  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `342/357`, `llm.c`
   `148/148`, and LeetCUDA `292/293`.
 
 Coverage tier glossary:
@@ -485,7 +485,7 @@ Acceptance criteria for the first slice:
   families, explicit `executionTierCounts`, and `compileFeatureProfile`
   assumptions for feature-full compile/codegen audits.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=341` compile/codegen-ok, and `<=13` hard gaps.
+  `>=342` compile/codegen-ok, and `<=12` hard gaps.
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions,
   `>=148` compile/codegen-ok, and `0` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,

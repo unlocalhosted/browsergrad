@@ -636,6 +636,23 @@ __global__ void cute_hgemm_tn(T *Aptr, T *Bptr, T *Dptr, int m, int n, int k) {
 {
   const source = createKernelCompilationUnit({
     kernel: `
+__global__ void device_runtime_noops(float *ptr) {
+  cudaStream_t s;
+  cudaStreamCreateWithFlags(&s, cudaStreamNonBlocking);
+  cudaFree(ptr);
+  cudaStreamDestroy(s);
+}`,
+  });
+  assert.match(source, /cudaStream_t s;/u);
+  assert.match(source, /s = cudaStreamNonBlocking;/u);
+  assert.doesNotMatch(source, /\bcudaFree\b/u);
+  assert.doesNotMatch(source, /\bcudaStreamCreateWithFlags\b/u);
+  assert.doesNotMatch(source, /\bcudaStreamDestroy\b/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 template <typename WSHGEMMTraits>
 __global__ void cute_carrier_gemm(typename WSHGEMMTraits::Arguments args) {
   constexpr int kCTAM = WSHGEMMTraits::kCTAM;

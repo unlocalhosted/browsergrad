@@ -15,6 +15,11 @@
   `ws_hgemm_naive_cute_kernel` gaps, one CuTe flash-attention gap, and three
   WGMMA/TMA gaps. The LeetCUDA compile/codegen gate is now `292/293` with `1`
   hard gap.
+- Device-side `cudaFree` and stream lifecycle calls now lower to deterministic
+  no-ops or explicit stream-handle assignments when BrowserGrad owns buffer
+  lifetime and host orchestration owns ordering. This closes the cuda-samples
+  `freeVertexMem` cleanup gap and raises the cuda-samples compile/codegen gate
+  to `342/357` with `12` hard gaps.
 - Source normalization now lowers vector-valued POD record returns, record-shaped `memcpy` from scalar arrays, return-switch local lambdas, and vector cooperative-group shuffles. This closes the cuda-samples `shfl_intimage_rows` gap and raises the cuda-samples compile/codegen gate to `341/357` with `13` hard gaps.
 - Initial CUDA-lite parser, analyzer, Kernel IR, reference interpreter, WGSL
   emitter, and WebGPU runner.
