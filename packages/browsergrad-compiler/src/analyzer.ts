@@ -1446,6 +1446,7 @@ function validateCallExpression(
   if (callName === "printf") {
     for (const arg of expression.args.slice(1)) {
       const info = walkExpression(arg, scope);
+      if (isPrintfArgument(info)) continue;
       validateScalarOperand(info, arg.span, diagnostics);
     }
     return { kind: "scalar" };
@@ -1686,6 +1687,17 @@ function validateCallExpression(
     validateScalarOperand(info, arg.span, diagnostics);
   }
   return { kind: "scalar" };
+}
+
+function isPrintfArgument(info: ExpressionInfo): boolean {
+  return info.kind === "scalar" ||
+    info.kind === "complex" ||
+    info.kind === "vector" ||
+    info.kind === "string" ||
+    info.kind === "array" ||
+    info.kind === "pointer" ||
+    info.kind === "address" ||
+    info.kind === "pool-pointer";
 }
 
 function validateVectorMinMaxCall(

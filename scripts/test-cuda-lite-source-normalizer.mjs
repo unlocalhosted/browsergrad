@@ -2418,6 +2418,27 @@ __global__ void reachable_device_global(uint* out) {
 
 {
   const source = createKernelCompilationUnit({
+    kernel: String.raw`
+__device__ float helper(float x) { \n return x + 1.0f; \n }
+__global__ \n void escaped_newline_kernel(float* out) { \n out[0] = helper(1.0f); \n }`,
+  });
+  assert.match(source, /__global__\s+void escaped_newline_kernel/u);
+  assert.match(source, /return x \+ 1\.0f;/u);
+  assert.doesNotMatch(source, /\\n void escaped_newline_kernel/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: String.raw`
+__global__ void keep_asm_newline(uint* out) {
+  asm volatile("mov.u32 %0, %laneid;\n" : "=r"(out[0]));
+}`,
+  });
+  assert.match(source, /"mov\.u32 %0, %laneid;\\n"/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
     kernel: `
 __global__ void ignore_unused_context(uint* out) {
   out[0] = 1u;

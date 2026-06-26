@@ -201,7 +201,7 @@ export function createKernelCompilationUnit({
     ])),
     sharedDeclarations,
   );
-  const unit = normalizeLineContinuations([
+  const unit = normalizeLineContinuations(normalizeEscapedNewlinesOutsideStrings([
     defines.join("\n"),
     functionMacros.map(normalizeFunctionMacro).join("\n"),
     referencedDeviceFunctions.map((fn) => fn.source).join("\n"),
@@ -211,7 +211,7 @@ export function createKernelCompilationUnit({
     referencedRecordDeclarations.join("\n"),
     referencedSiblingKernels.join("\n"),
     kernelWithSharedDeclarations,
-  ].filter((part) => part.trim().length > 0).join("\n"));
+  ].filter((part) => part.trim().length > 0).join("\n")));
   const prunedUnit = pruneCudaPreprocessorBranches(unit, effectiveDefines);
   const withCarrierMembers = normalizeCarrierMemberReferences(prunedUnit, effectiveDefines);
   const postCarrierAliasDefines = collectTypeAliasDefines(withCarrierMembers, effectiveDefines);
@@ -2537,6 +2537,47 @@ function rewriteBitpackedShortUnionFieldReads(source, variable, union) {
 
 function normalizeLineContinuations(source) {
   return source.replace(/\\\r?\n\s*/gu, " ");
+}
+
+function normalizeEscapedNewlinesOutsideStrings(source) {
+  let out = "";
+  let inString = false;
+  let inChar = false;
+  let escaped = false;
+  for (let index = 0; index < source.length; index++) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (inString || inChar) {
+      out += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (inString && char === "\"") {
+        inString = false;
+      } else if (inChar && char === "'") {
+        inChar = false;
+      }
+      continue;
+    }
+    if (char === "\"") {
+      inString = true;
+      out += char;
+      continue;
+    }
+    if (char === "'") {
+      inChar = true;
+      out += char;
+      continue;
+    }
+    if (char === "\\" && next === "n") {
+      out += "\n";
+      index++;
+      continue;
+    }
+    out += char;
+  }
+  return out;
 }
 
 function normalizeSimpleLocalLambdas(source) {

@@ -1469,6 +1469,18 @@ __global__ void hello() {
     expect(compiled.wgsl).toContain("printf omitted");
   });
 
+  it("accepts printf pointer and local array arguments as no-op debug output", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void hello(char *name) {
+  char buffer[8];
+  buffer[0] = 'b';
+  buffer[1] = '\\0';
+  printf("%s %s\\n", buffer, name);
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("printf omitted");
+  });
+
   it("parses scalar C++ aliases and brace scalar constructors", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void scalarCppIntake(float *out, half *halfOut, std::size_t n) {

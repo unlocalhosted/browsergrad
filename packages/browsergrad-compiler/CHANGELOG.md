@@ -82,6 +82,10 @@
 - CUDA-lite now supports fixed local pointer arrays that carry shared/local
   scratch addresses through helper calls and dereferences, raising the
   cuda-samples gate to `327/357` with `28` hard gaps.
+- Source normalization now converts escaped newline fragments outside strings
+  back into real CUDA lines, and stdout no-op analysis accepts pointer/local
+  array debug arguments, raising the cuda-samples gate to `328/357` with `26`
+  hard gaps.
 - Source normalizer synthetic names now avoid WGSL-reserved double-underscore
   prefixes, and the browser fixture suite now executes all four lifted LeetCUDA
   CuTe transpose variants through real WebGPU.
