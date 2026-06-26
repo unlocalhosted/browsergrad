@@ -35,12 +35,18 @@
 - Corpus audit now reports `compileCodegenOk` / `compileCodegenGaps` and
   `planCompiledOk` / `planCompileGaps`, making compile-plan coverage distinct
   from fixture-backed real WebGPU execution.
-- Browser corpus e2e now runs `43` exact kernels from pinned CUDA-120,
+- Browser corpus e2e now runs `44` exact kernels from pinned CUDA-120,
   NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA sources through real WebGPU in
   both source and dist bundles, with CPU-reference readback comparisons.
 - Browser corpus e2e now enforces those real WebGPU fixtures as a no-regression
-  floor: `43` total passing fixtures, with per-corpus minimums for CUDA-120,
+  floor: `44` total passing fixtures, with per-corpus minimums for CUDA-120,
   NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA.
+- Source normalization and WGSL emission now lower generic CUDA device
+  function-pointer table/param dispatch, device-function local type inference,
+  and explicit signed/unsigned index casts. This closes cuda-samples
+  `SobelShared` / `SobelTex`, raises the cuda-samples compile/codegen gate to
+  `339/357` with `15` hard gaps, and adds a real WebGPU SobelTex corpus
+  fixture.
 - Source normalization now lowers bounded rank-2 callable tensor views and
   `cuda::shared_memory_mdspan` aliases to pointer/extent/stride primitives,
   raising the cuda-samples compile/codegen gate to `336/357` with `18` hard

@@ -62,8 +62,8 @@ Repo exploration:
 
 Local corpus audits on 2026-06-25:
 
-- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `337`
-  compile/codegen-ok (`336` strict direct WGSL plus `1` host-orchestrated
+- `NVIDIA/cuda-samples` at `b7c5481`: `357` kernel definitions, `339`
+  compile/codegen-ok (`338` strict direct WGSL plus `1` host-orchestrated
   WebGPU plan) after source/context normalization plus intrinsic-ledger
   expansion, scalarized CUDA vector storage views, and simple C++ alias /
   constexpr intake plus cooperative-groups namespace call forms and typed
@@ -174,9 +174,11 @@ Local corpus audits on 2026-06-25:
   pointer/local-array `printf` debug arguments, plus scalarized by-value POD
   records with pointer fields and scalarized pointer-record fixed-array fields,
   plus bounded rank-2 callable-view lowering for mdspan-like tensor params and
-  `cuda::shared_memory_mdspan` tile aliases, with `22` strict compile gaps and
-  scalarized POD-record pointer device-helper expansion for MonteCarlo
-  reduction outputs, with `17` hard gaps.
+  `cuda::shared_memory_mdspan` tile aliases, scalarized POD-record pointer
+  device-helper expansion for MonteCarlo reduction outputs, generic
+  function-pointer table/param dispatch lowering, device-function local type
+  inference, and explicit WGSL numeric/index casts for CUDA signed/unsigned
+  pointer math, with `19` strict compile gaps and `15` hard gaps.
   Main failures:
   parser/frontend gaps, texture/vector
   operators, remaining `half2` intrinsics, templates, and runtime library
@@ -307,8 +309,8 @@ What this changes:
   ladder whose first proof happens to improve LeetCUDA, `llm.c`, and samples.
 - The most valuable first code slice is frontend/context normalization plus
   reusable intrinsic tables, not another runtime orchestration feature.
-- The current live aggregate gate is `1011/1038` compile/codegen-ok across the four
-  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `337/357`, `llm.c`
+- The current live aggregate gate is `1013/1038` compile/codegen-ok across the four
+  pinned corpora: CUDA-120 `240/240`, `cuda-samples` `339/357`, `llm.c`
   `148/148`, and LeetCUDA `286/293`.
 
 Coverage tier glossary:
@@ -477,7 +479,7 @@ Acceptance criteria for the first slice:
   compile/codegen-ok count, hard-gap count, error codes, semantic
   families, and explicit `executionTierCounts`.
 - `NVIDIA/cuda-samples` at `b7c5481` remains `357` total kernel definitions,
-  `>=337` compile/codegen-ok, and `<=17` hard gaps.
+  `>=339` compile/codegen-ok, and `<=15` hard gaps.
 - `karpathy/llm.c` at `f1e2ace` remains `148` total kernel definitions,
   `>=148` compile/codegen-ok, and `0` hard gaps.
 - `xlite-dev/LeetCUDA` at `c5dde9a` remains `293` total kernel definitions,
@@ -578,10 +580,10 @@ Acceptance criteria for the first slice:
   analyzer, reference, WGSL, and test coverage.
 - CUDA-120 remains `240/240` compile/codegen-ok with `0` hard gaps.
 - Browser e2e corpus fixture coverage proves real WebGPU execution for at
-  least `43` exact kernel launches across the pinned external corpora:
+  least `44` exact kernel launches across the pinned external corpora:
   CUDA-120, NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA.
 - That real-execution floor is enforced per corpus: CUDA-120 `>=2`, NVIDIA
-  `cuda-samples` `>=7`, `llm.c` `>=10`, and LeetCUDA `>=24` passing browser
+  `cuda-samples` `>=8`, `llm.c` `>=10`, and LeetCUDA `>=24` passing browser
   WebGPU fixtures.
 - LeetCUDA vector-pack coverage includes real browser fixtures for scalar and
   `float4` elementwise/activation kernels (`elementwise_add`, ReLU, sigmoid,
@@ -593,6 +595,10 @@ Acceptance criteria for the first slice:
 - NVIDIA `cuda-samples` mdspan coverage includes real browser fixtures for
   row-scaling and shared-tile transpose kernels, so rank-2 callable views and
   shared-memory view aliases are guarded by output-verified WebGPU readback.
+- NVIDIA `cuda-samples` function-pointer coverage includes a real browser
+  fixture for `SobelTex`, so lowered device function tables, texture reads, and
+  signed/unsigned pointer index math are guarded by output-verified WebGPU
+  readback.
 - CPU reference arithmetic preserves C-style integer locals, integer division,
   and remainder behavior so fixture-backed tensor indexing kernels compare
   against real WebGPU execution instead of JS-number semantics.

@@ -74,6 +74,7 @@ export function createKernelCompilationUnit({
   textureDeclarations = [],
   sharedDeclarations = [],
   recordDeclarations = [],
+  functionPointerTables = [],
 }) {
   const recordContext = [
     kernel,
@@ -101,7 +102,10 @@ export function createKernelCompilationUnit({
   const carrierDefines = collectCarrierMemberDefines(aliasContext, mergeDefineMaps(definesByName, aliasDefines));
   const syntheticPackDefines = collectSyntheticVectorPackDefines(aliasContext, mergeDefineMaps(definesByName, aliasDefines, carrierDefines));
   const effectiveDefines = mergeDefineMaps(definesByName, aliasDefines, carrierDefines, syntheticPackDefines);
-  const specializedKernel = specializeTemplateFromLaunchContext(kernel, templateArgumentsByKernelName, effectiveDefines);
+  const specializedKernel = normalizeFunctionPointerDispatch(
+    specializeTemplateFromLaunchContext(kernel, templateArgumentsByKernelName, effectiveDefines),
+    functionPointerTables,
+  );
   const params = new Set(kernelParamNames(specializedKernel));
   const functionDefineBodies = collectFunctionDefineBodies(functionDeclarations);
   const referencedDeviceFunctionsRaw = referencedDeviceFunctionClosure(
@@ -216,7 +220,7 @@ export function createKernelCompilationUnit({
     referencedSiblingKernels.join("\n"),
     kernelWithSharedDeclarations,
   ].filter((part) => part.trim().length > 0).join("\n")));
-  const prunedUnit = pruneCudaPreprocessorBranches(unit, effectiveDefines);
+  const prunedUnit = pruneCudaPreprocessorBranches(stripFunctionPointerDeviceGlobals(unit, functionPointerTables), effectiveDefines);
   const withCarrierMembers = normalizeCarrierMemberReferences(prunedUnit, effectiveDefines);
   const postCarrierAliasDefines = collectTypeAliasDefines(withCarrierMembers, effectiveDefines);
   const postCarrierDefines = mergeDefineMaps(effectiveDefines, postCarrierAliasDefines);
@@ -527,6 +531,160 @@ function referencedDeviceFunctionClosure(kernel, deviceFunctions, definesByName 
     }
   }
   return [...included.values()].flat();
+}
+
+function normalizeFunctionPointerDispatch(source, functionPointerTables = []) {
+  const tables = functionPointerTables.filter((table) => table?.tableName && Array.isArray(table.entries) && table.entries.length > 0);
+  if (tables.length === 0) return source;
+  let out = source;
+  const aliases = collectFunctionPointerAliasParams(out, tables);
+  out = rewriteFunctionPointerTableAssignments(out, tables);
+  out = rewriteFunctionPointerNullComparisons(out, aliases);
+  for (const table of tables) out = rewriteFunctionPointerTableCalls(out, table);
+  for (const alias of aliases) out = rewriteFunctionPointerVariableCalls(out, alias.name, alias.table);
+  for (const table of tables) {
+    for (const selector of collectFunctionPointerSelectorLocals(out, table)) {
+      out = rewriteFunctionPointerVariableCalls(out, selector.name, table);
+    }
+  }
+  return out;
+}
+
+function collectFunctionPointerAliasParams(source, tables) {
+  const signature = kernelSignature(source);
+  if (signature?.params === undefined) return [];
+  const byAlias = new Map();
+  for (const table of tables) {
+    if (typeof table.aliasName === "string" && table.aliasName.length > 0 && !byAlias.has(table.aliasName)) byAlias.set(table.aliasName, table);
+  }
+  if (byAlias.size === 0) return [];
+  const out = [];
+  for (const rawParam of splitTopLevel(signature.params)) {
+    const param = rawParam.trim();
+    for (const [aliasName, table] of byAlias) {
+      const match = new RegExp(`^\\s*(?:const\\s+)?${escapeRegExp(aliasName)}\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*$`, "u").exec(param);
+      if (match?.[1] !== undefined) out.push({ name: match[1], table });
+    }
+  }
+  return out;
+}
+
+function rewriteFunctionPointerTableAssignments(source, tables) {
+  let out = source;
+  for (const table of tables) {
+    const tableName = escapeRegExp(table.tableName);
+    const re = new RegExp(`(^|[;{}]\\s*)([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*${tableName}\\s*\\[\\s*([^\\]]+)\\s*\\]\\s*;`, "gmu");
+    out = out.replace(re, (_match, prefix, name, selector) => `${prefix}uint ${name} = ${selector.trim()};`);
+  }
+  return out;
+}
+
+function rewriteFunctionPointerNullComparisons(source, aliases) {
+  let out = source;
+  for (const alias of aliases) {
+    const name = escapeRegExp(alias.name);
+    out = out
+      .replace(new RegExp(`\\b${name}\\s*!=\\s*NULL\\b`, "gu"), `${alias.name} != 0xffffffffu`)
+      .replace(new RegExp(`\\b${name}\\s*==\\s*NULL\\b`, "gu"), `${alias.name} == 0xffffffffu`)
+      .replace(new RegExp(`\\bNULL\\s*!=\\s*${name}\\b`, "gu"), `0xffffffffu != ${alias.name}`)
+      .replace(new RegExp(`\\bNULL\\s*==\\s*${name}\\b`, "gu"), `0xffffffffu == ${alias.name}`);
+  }
+  return out;
+}
+
+function rewriteFunctionPointerTableCalls(source, table) {
+  const re = new RegExp(`\\(\\s*\\*\\s*\\(?\\s*${escapeRegExp(table.tableName)}\\s*\\[`, "gu");
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const bracketOpen = source.indexOf("[", match.index);
+    const bracketClose = findBalanced(source, bracketOpen, "[", "]");
+    if (bracketClose === undefined) {
+      re.lastIndex = match.index + 1;
+      continue;
+    }
+    let scan = skipWhitespace(source, bracketClose + 1);
+    let parens = 0;
+    while (source[scan] === ")") {
+      parens++;
+      scan = skipWhitespace(source, scan + 1);
+    }
+    if (parens === 0) {
+      re.lastIndex = bracketClose + 1;
+      continue;
+    }
+    if (source[scan] !== "(") {
+      re.lastIndex = scan;
+      continue;
+    }
+    const callClose = findBalanced(source, scan, "(", ")");
+    if (callClose === undefined) {
+      re.lastIndex = scan + 1;
+      continue;
+    }
+    const selector = source.slice(bracketOpen + 1, bracketClose).trim();
+    const args = source.slice(scan + 1, callClose);
+    out += source.slice(cursor, match.index);
+    out += functionPointerDispatchExpression(table, selector, args);
+    cursor = callClose + 1;
+    re.lastIndex = callClose + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function collectFunctionPointerSelectorLocals(source, table) {
+  const out = [];
+  const re = new RegExp(`\\buint\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*=\\s*([^;]+)\\s*;`, "gu");
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    if (match[1] !== undefined && match[2] !== undefined && source.slice(match.index, re.lastIndex).includes(table.tableName) === false) out.push({ name: match[1] });
+  }
+  return out;
+}
+
+function rewriteFunctionPointerVariableCalls(source, name, table) {
+  const re = new RegExp(`\\(\\s*\\*\\s*${escapeRegExp(name)}\\s*\\)\\s*\\(`, "gu");
+  let out = "";
+  let cursor = 0;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const callOpen = source.indexOf("(", re.lastIndex - 1);
+    const callClose = findBalanced(source, callOpen, "(", ")");
+    if (callOpen < 0 || callClose === undefined) {
+      re.lastIndex = match.index + 1;
+      continue;
+    }
+    const args = source.slice(callOpen + 1, callClose);
+    out += source.slice(cursor, match.index);
+    out += functionPointerDispatchExpression(table, name, args);
+    cursor = callClose + 1;
+    re.lastIndex = callClose + 1;
+  }
+  return cursor === 0 ? source : out + source.slice(cursor);
+}
+
+function functionPointerDispatchExpression(table, selector, args) {
+  const entries = [...table.entries].sort((a, b) => Number(a.index) - Number(b.index));
+  if (entries.length === 1) return `${entries[0].target}(${args})`;
+  const fallback = entries[entries.length - 1];
+  let expression = `${fallback.target}(${args})`;
+  for (let index = entries.length - 2; index >= 0; index--) {
+    const entry = entries[index];
+    expression = `((${selector}) == ${entry.index} ? ${entry.target}(${args}) : ${expression})`;
+  }
+  return expression;
+}
+
+function stripFunctionPointerDeviceGlobals(source, functionPointerTables = []) {
+  const aliases = new Set(functionPointerTables.map((table) => table?.aliasName).filter((alias) => typeof alias === "string" && alias.length > 0));
+  if (aliases.size === 0) return source;
+  let out = source;
+  for (const alias of aliases) {
+    const re = new RegExp(`\\b__device__\\s+${escapeRegExp(alias)}\\s+[A-Za-z_][A-Za-z0-9_]*(?:\\s*\\[[^\\]]+\\])?\\s*(?:=\\s*[A-Za-z_][A-Za-z0-9_]*)?\\s*;\\s*`, "gu");
+    out = out.replace(re, "");
+  }
+  return out;
 }
 
 function deviceFunctionSignatureShape(source) {

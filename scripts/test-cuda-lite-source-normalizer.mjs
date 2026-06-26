@@ -898,6 +898,48 @@ __global__ void record_helper_call(OutPair *out, float *sum, float *sum2, int i)
 {
   const source = createKernelCompilationUnit({
     kernel: `
+typedef int (*op_t)(int, int);
+__global__ void function_pointer_dispatch(int *out, int selector, op_t pointOp) {
+  op_t localOp;
+  localOp = op_table[selector];
+  int value = (*localOp)(out[0], 3);
+  if (pointOp != NULL) {
+    value = (*pointOp)(value, 1);
+  }
+  out[0] = value;
+}`,
+    deviceFunctions: [
+      { name: "add_op", source: "__device__ int add_op(int a, int b) { return a + b; }" },
+      { name: "mul_op", source: "__device__ int mul_op(int a, int b) { return a * b; }" },
+    ],
+    deviceGlobalDeclarations: [
+      "__device__ op_t op_table[2];",
+      "__device__ op_t localOp;",
+    ],
+    functionPointerTables: [
+      {
+        tableName: "op_table",
+        aliasName: "op_t",
+        entries: [
+          { index: 0, target: "add_op" },
+          { index: 1, target: "mul_op" },
+        ],
+      },
+    ],
+  });
+  assert.match(source, /__device__ int add_op/u);
+  assert.match(source, /__device__ int mul_op/u);
+  assert.match(source, /uint localOp = selector;/u);
+  assert.match(source, /int value = \(\(localOp\) == 0 \? add_op\(out\[0\], 3\) : mul_op\(out\[0\], 3\)\);/u);
+  assert.match(source, /if \(pointOp != 0xffffffffu\)/u);
+  assert.match(source, /value = \(\(pointOp\) == 0 \? add_op\(value, 1\) : mul_op\(value, 1\)\);/u);
+  assert.doesNotMatch(source, /__device__ op_t/u);
+  assert.doesNotMatch(source, /op_table\[/u);
+}
+
+{
+  const source = createKernelCompilationUnit({
+    kernel: `
 __global__ void kernel(float *in, float *out, int ld) {
   int row = threadIdx.x;
   out[0] = in[IDX2C(row, 0, ld)];

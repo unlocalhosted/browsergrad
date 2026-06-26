@@ -26,8 +26,8 @@ export const cudaLiteCorpora = [
     path: path.join(corpusRoot, "cuda-samples"),
     expectations: {
       total: 357,
-      compileCodegenMin: 337,
-      hardFailMax: 17,
+      compileCodegenMin: 339,
+      hardFailMax: 15,
     },
   },
   {
@@ -224,6 +224,32 @@ export const cudaLiteCorpusExecutionFixtures = [
       },
     },
     output: "out",
+  },
+  {
+    sourceKey: "corpusCudaSamplesSobelTexFunctionPointer",
+    caseName: "corpus:cuda-samples:SobelTex_function_pointer",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/2_Concepts_and_Techniques/FunctionPointers/FunctionPointers_kernels.cu",
+    kernelName: "SobelTex",
+    workgroupSize: [4, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    input: {
+      buffers: {
+        pSobelOriginal: { type: "Uint32Array", length: 1 },
+      },
+      textures: {
+        tex: { width: 4, height: 1, data: { type: "Float32Array", data: [9, 9, 9, 9] } },
+      },
+      scalars: {
+        Pitch: 4,
+        w: 4,
+        h: 1,
+        fScale: 1,
+        blockOperation: 1,
+        pPointOperation: 0xffffffff,
+      },
+    },
+    output: "pSobelOriginal",
   },
   {
     sourceKey: "corpusLlmAddBias",
@@ -820,10 +846,10 @@ export const cudaLiteCorpusExecutionFixtures = [
 ];
 
 export const cudaLiteCorpusExecutionFixtureBaseline = {
-  totalMin: 43,
+  totalMin: 44,
   byCorpusMin: {
     "cuda-120": 2,
-    "cuda-samples": 7,
+    "cuda-samples": 8,
     "llm.c": 10,
     leetcuda: 24,
   },

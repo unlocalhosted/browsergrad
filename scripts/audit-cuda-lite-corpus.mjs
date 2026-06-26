@@ -204,6 +204,7 @@ function createAuditBlockContext(includeContext, blockCode, carriedDefines, corp
     textureDeclarations: collectTextureDeclarations(source),
     recordDeclarations,
     sharedDeclarations: collectTranslationUnitSharedDeclarations(declarationContext),
+    functionPointerTables: collectFunctionPointerTables(source, effectiveDefines),
     templateArguments: collectKernelTemplateArguments(source),
   };
 }
@@ -268,6 +269,7 @@ function sourceFromAuditContext(rawKernel, kernels, kernelName, context) {
     textureDeclarations: context.textureDeclarations,
     recordDeclarations: context.recordDeclarations,
     sharedDeclarations: context.sharedDeclarations,
+    functionPointerTables: context.functionPointerTables,
   });
   return source;
 }
@@ -1302,6 +1304,81 @@ function collectDeviceGlobalDeclarations(source) {
     declarations.push(declaration);
   }
   return declarations;
+}
+
+function collectFunctionPointerTables(source, definesByName = new Map()) {
+  const clean = stripComments(source);
+  const symbols = collectDeviceFunctionPointerSymbols(clean);
+  if (symbols.size === 0) return [];
+  const tables = collectDeviceFunctionPointerTableDeclarations(clean, definesByName);
+  if (tables.size === 0) return [];
+  const entriesByHostTable = new Map();
+  const copyRe = /cudaMemcpyFromSymbol\s*\(\s*&\s*([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*([^\]]+)\s*\]\s*,\s*([A-Za-z_][A-Za-z0-9_]*)/gu;
+  let copyMatch;
+  while ((copyMatch = copyRe.exec(clean)) !== null) {
+    const hostTable = copyMatch[1];
+    const rawIndex = copyMatch[2]?.trim();
+    const symbolName = copyMatch[3];
+    if (hostTable === undefined || rawIndex === undefined || symbolName === undefined) continue;
+    const target = symbols.get(symbolName)?.target;
+    const index = resolveFunctionPointerTableIndex(rawIndex, definesByName);
+    if (target === undefined || index === undefined) continue;
+    const entries = entriesByHostTable.get(hostTable) ?? [];
+    entries.push({ index, target });
+    entriesByHostTable.set(hostTable, entries);
+  }
+  const out = [];
+  for (const [tableName, table] of tables) {
+    const hostName = `h_${tableName}`;
+    const entries = entriesByHostTable.get(hostName) ?? entriesByHostTable.get(tableName) ?? [];
+    if (entries.length === 0) continue;
+    out.push({
+      tableName,
+      aliasName: table.aliasName,
+      entries: dedupeFunctionPointerEntries(entries),
+    });
+  }
+  return out;
+}
+
+function collectDeviceFunctionPointerSymbols(source) {
+  const symbols = new Map();
+  const re = /\b__device__\s+([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\s*;/gu;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    if (match[1] !== undefined && match[2] !== undefined && match[3] !== undefined) {
+      symbols.set(match[2], { aliasName: match[1], target: match[3] });
+    }
+  }
+  return symbols;
+}
+
+function collectDeviceFunctionPointerTableDeclarations(source, definesByName = new Map()) {
+  const tables = new Map();
+  const re = /\b__device__\s+([A-Za-z_][A-Za-z0-9_]*)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\[\s*([^\]]+)\s*\]\s*;/gu;
+  let match;
+  while ((match = re.exec(source)) !== null) {
+    const aliasName = match[1];
+    const tableName = match[2];
+    const rawLength = match[3]?.trim();
+    if (aliasName === undefined || tableName === undefined || rawLength === undefined) continue;
+    const length = resolveFunctionPointerTableIndex(rawLength, definesByName);
+    tables.set(tableName, { aliasName, length });
+  }
+  return tables;
+}
+
+function resolveFunctionPointerTableIndex(raw, definesByName = new Map()) {
+  const value = raw.trim();
+  if (/^[0-9]+$/u.test(value)) return Number(value);
+  const mapped = definesByName.get(value);
+  if (mapped !== undefined && /^[0-9]+$/u.test(String(mapped).trim())) return Number(String(mapped).trim());
+  return undefined;
+}
+
+function dedupeFunctionPointerEntries(entries) {
+  return [...new Map(entries.map((entry) => [entry.index, entry])).values()]
+    .sort((a, b) => a.index - b.index);
 }
 
 function collectFunctionDefines(source) {

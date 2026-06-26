@@ -560,9 +560,19 @@ const html = String.raw`<!doctype html>
         for (const [name, spec] of Object.entries(input.buffers ?? {})) {
           buffers[name] = materializeTypedArray(spec);
         }
+        const textures = {};
+        for (const [name, spec] of Object.entries(input.textures ?? {})) {
+          textures[name] = {
+            width: spec.width,
+            height: spec.height,
+            channels: spec.channels,
+            data: materializeTypedArray(spec.data),
+          };
+        }
         return {
           buffers,
           scalars: { ...(input.scalars ?? {}) },
+          ...(Object.keys(textures).length === 0 ? {} : { textures }),
         };
       }
 

@@ -497,7 +497,7 @@ __global__ void globals_scalar(uint* data, uint* out) {
     expect([...result.buffers.errorFound as Uint32Array]).toEqual([1]);
     expect(compiled.wgsl).toContain("var<storage, read_write> numErrors: array<u32>;");
     expect(compiled.wgsl).toContain("var<storage, read_write> errorFound: array<u32>;");
-    expect(compiled.wgsl).toContain("numErrors[0u] += 1");
+    expect(compiled.wgsl).toContain("numErrors[0u] = (numErrors[0u] + u32(1))");
   });
 
   it("supports __device__ arrays as storage-backed device pointer arguments", () => {
@@ -4912,7 +4912,7 @@ __global__ void splitShared(float *x) {
     );
 
     expect(compiled.wgsl).not.toContain("var sdataB");
-    expect(compiled.wgsl).toContain("sdataA[((0 + 2)) + (tid)]");
+    expect(compiled.wgsl).toContain("sdataA[(u32((0 + 2))) + (u32(tid))]");
     expect([...result.buffers.x as Float32Array]).toEqual([6, 2, 3, 4]);
   });
 
@@ -5231,6 +5231,56 @@ __global__ void apply(float *x) {
       access: "read",
     }));
     expect([...result.buffers.x as Float32Array]).toEqual([20, 80]);
+  });
+
+  it("casts signed local initializers from unsigned arithmetic in WGSL", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ int edge(unsigned char left, unsigned char right) {
+  short delta = right - left;
+  return delta;
+}
+__global__ void kernel(int *out, unsigned int a, unsigned int b) {
+  out[0] = edge(a, b);
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("var delta: i32 = i32((right - left));");
+  });
+
+  it("casts device-function scalar compound assignments from promoted operands in WGSL", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ int scale_box(unsigned char ul, unsigned char um, float fscale) {
+  short Sum = (short)(ul + um) / 2;
+  Sum *= fscale;
+  return Sum;
+}
+__global__ void kernel(int *out, unsigned int a, unsigned int b, float scale) {
+  out[0] = scale_box(a, b, scale);
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).not.toContain("Sum *= fscale");
+    expect(compiled.wgsl).toContain("Sum = i32((f32(Sum) * fscale));");
+  });
+
+  it("casts mixed signed and unsigned arithmetic operands in WGSL", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__global__ void kernel(unsigned int *out, unsigned int pitch) {
+  int i = threadIdx.x;
+  out[(blockIdx.x * pitch) + i] = 7;
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("(u32(i32(workgroup_id.x)) * params.pitch)");
+    expect(compiled.wgsl).toContain("+ u32(i)");
+  });
+
+  it("casts pointer-alias base and offset index math in WGSL", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__global__ void kernel(unsigned int *out, unsigned int pitch) {
+  unsigned int *row = out + (blockIdx.x * pitch);
+  int i = threadIdx.x;
+  row[i] = 7;
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("(u32(i32(workgroup_id.x)) * params.pitch))) + (u32(i))");
   });
 
   it("lowers scalar CUDA vector constants as scalarized readonly storage inputs", () => {
@@ -6605,8 +6655,8 @@ __global__ void qualified_std_casts(float* out, int q) {
     );
 
     expect([...result.buffers.out as Float32Array]).toEqual([12]);
-    expect(compiled.wgsl).toContain("var a: u32 = u32((u32(params.q) * 2));");
-    expect(compiled.wgsl).toContain("var b: u32 = u32(u32((a + 1)));");
+    expect(compiled.wgsl).toContain("var a: u32 = u32((u32(params.q) * u32(2)));");
+    expect(compiled.wgsl).toContain("var b: u32 = u32(u32((a + u32(1))));");
     expect(compiled.wgsl).toContain("var c: i32 = (i32(i32(workgroup_id.x)) + 3);");
   });
 
