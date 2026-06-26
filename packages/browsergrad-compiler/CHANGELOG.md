@@ -76,6 +76,9 @@
   boundary, supports conditional local read pointers over storage buffers, and
   emits dynamic shared-memory pointer handles for derived addresses, raising the
   cuda-samples gate to `324/357` with `31` hard gaps.
+- CUDA-lite now lowers CUDA helper `lerp(floatN, floatN, t)` as vector math and
+  decays fixed local arrays into function-local helper pointer params, raising
+  the cuda-samples gate to `326/357` with `29` hard gaps.
 - Source normalizer synthetic names now avoid WGSL-reserved double-underscore
   prefixes, and the browser fixture suite now executes all four lifted LeetCUDA
   CuTe transpose variants through real WebGPU.

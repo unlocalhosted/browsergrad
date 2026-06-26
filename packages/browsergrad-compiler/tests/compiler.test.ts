@@ -746,6 +746,28 @@ __global__ void constReadParam(const float* input, float* out) {
     expect([...result.buffers.out as Float32Array]).toEqual([9]);
   });
 
+  it("decays fixed local arrays into function-local pointer params", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float sum_local(float *values) {
+  return values[0] + values[1];
+}
+__global__ void localArrayDecay(float *out) {
+  float values[2];
+  values[0] = 2.0f;
+  values[1] = 5.0f;
+  out[0] = sum_local(values);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn sum_local(values: ptr<function, f32>");
+    expect(compiled.wgsl).toContain("sum_local(&values[0]");
+    expect([...result.buffers.out as Float32Array]).toEqual([7]);
+  });
+
   it("rejects const storage addresses for writable device pointer params", () => {
     expect(() => compileCudaLiteKernel(`
 __device__ void write_one(float* p) {
@@ -2934,6 +2956,23 @@ __global__ void vector_math(float3 *out, float *scalars) {
       expect.closeTo(-5.2),
       3,
     ]);
+  });
+
+  it("lowers CUDA helper_math vector lerp without shadowing scalar lerp", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void vector_lerp(float3 *out) {
+  float3 a = make_float3(1.0f, 2.0f, 3.0f);
+  float3 b = make_float3(5.0f, 10.0f, 15.0f);
+  out[0] = lerp(a, b, 0.25f);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fma(vec3<f32>(f32(0.25)");
+    expect([...result.buffers.out as Float32Array]).toEqual([2, 4, 6]);
   });
 
   it("maps CUDA byte-vector aliases onto canonical uint vector values", () => {

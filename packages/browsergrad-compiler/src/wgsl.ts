@@ -1022,25 +1022,61 @@ function usesFunctionLocalPointerParam(
   fn: CudaLiteDeviceFunction,
   param: CudaLiteParam,
   ir: KernelIrModule,
+  memo: Map<string, boolean | "visiting"> = new Map(),
 ): boolean {
   if (!param.pointer) return false;
   const paramIndex = fn.params.findIndex((item) => item.name === param.name);
   if (paramIndex < 0) return false;
+  const memoKey = `${fn.name}/${paramIndex}/${param.name}`;
+  const cached = memo.get(memoKey);
+  if (cached === "visiting") return false;
+  if (cached !== undefined) return cached;
+  memo.set(memoKey, "visiting");
   const sharedNames = new Set(ir.sharedDeclarations.map((shared) => shared.name));
   let sawCall = false;
   let allCallsUseLocalAddress = true;
-  for (const statements of [ir.body, ...ir.functions.map((item) => item.body)]) {
+  const roots: Array<{
+    readonly statements: readonly CudaLiteStatement[];
+    readonly localPointerParams: ReadonlySet<string>;
+  }> = [
+    { statements: ir.body, localPointerParams: new Set() },
+    ...ir.functions.map((caller) => ({
+      statements: caller.body,
+      localPointerParams: new Set(caller.params
+        .filter((callerParam) => callerParam.pointer && usesFunctionLocalPointerParam(caller, callerParam, ir, memo))
+        .map((callerParam) => callerParam.name)),
+    })),
+  ];
+  for (const { statements, localPointerParams } of roots) {
+    const localArrayNames = new Set(collectLocalArrays(statements).keys());
     walkCudaLiteExpressions(statements, (expression) => {
       if (!allCallsUseLocalAddress || expression.kind !== "call" || expressionName(expression.callee) !== fn.name) return;
       sawCall = true;
       const arg = expression.args[paramIndex];
-      if (!arg || !isFunctionLocalPointerArgument(arg, sharedNames)) allCallsUseLocalAddress = false;
+      if (!arg || !isFunctionLocalPointerArgument(arg, sharedNames, localArrayNames, localPointerParams)) allCallsUseLocalAddress = false;
     });
   }
-  return sawCall && allCallsUseLocalAddress;
+  const result = sawCall && allCallsUseLocalAddress;
+  memo.set(memoKey, result);
+  return result;
 }
 
-function isFunctionLocalPointerArgument(expression: CudaLiteExpression, sharedNames: ReadonlySet<string>): boolean {
+function emitFunctionLocalPointerArgument(expression: CudaLiteExpression, context: EmitContext): string {
+  if (expression.kind === "identifier" && context.localArrayFor(expression.name)) {
+    return `&${context.nameFor(expression.name)}[0]`;
+  }
+  return emitExpression(expression, context);
+}
+
+function isFunctionLocalPointerArgument(
+  expression: CudaLiteExpression,
+  sharedNames: ReadonlySet<string>,
+  localArrayNames: ReadonlySet<string>,
+  localPointerParamNames: ReadonlySet<string>,
+): boolean {
+  if (expression.kind === "identifier") {
+    return localArrayNames.has(expression.name) || localPointerParamNames.has(expression.name);
+  }
   return expression.kind === "unary" &&
     expression.operator === "&" &&
     expression.argument.kind === "identifier" &&
@@ -3134,6 +3170,12 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
       const fn = context.deviceFunctionFor(name, expression.args.length);
       if (fn) return fn.returnType;
     }
+    if (name === "lerp") {
+      const left = expression.args[0] ? expressionValueTypeForEmit(expression.args[0], context) : undefined;
+      const right = expression.args[1] ? expressionValueTypeForEmit(expression.args[1], context) : undefined;
+      if (isCudaVectorType(left)) return left;
+      if (isCudaVectorType(right)) return right;
+    }
     return name ? cudaVectorConstructorType(name) : undefined;
   }
   if (expression.kind === "index") {
@@ -3282,6 +3324,23 @@ function emitVectorMinMaxCall(
   return `${op}(${expression.args.map((arg) => emitExpressionAsVectorOperand(arg, vectorType, context)).join(", ")})`;
 }
 
+function emitVectorLerpCall(
+  expression: CudaLiteCallExpression,
+  name: string | undefined,
+  context: EmitContext,
+): string | undefined {
+  if (name !== "lerp") return undefined;
+  const vectorType = expression.args
+    .slice(0, 2)
+    .map((arg) => expressionValueTypeForEmit(arg, context))
+    .find(isCudaVectorType);
+  if (!vectorType) return undefined;
+  const left = expression.args[0] ? emitExpressionAsVectorOperand(expression.args[0], vectorType, context) : emitVectorSplat(vectorType, "0.0");
+  const right = expression.args[1] ? emitExpressionAsVectorOperand(expression.args[1], vectorType, context) : emitVectorSplat(vectorType, "0.0");
+  const t = expression.args[2] ? emitExpression(expression.args[2], context) : "0.0";
+  return `fma(${emitVectorSplat(vectorType, castExpressionToVectorScalar(t, vectorType))}, (${right} - ${left}), ${left})`;
+}
+
 function emitFrexpCall(expression: CudaLiteCallExpression, context: EmitContext): string {
   const value = expression.args[0] ? emitExpressionAsValueType(expression.args[0], "float", context) : "0.0";
   const exponent = expression.args[1] ? emitExpression(expression.args[1], context) : "&__bg_missing_frexp_exp";
@@ -3318,7 +3377,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       if (!arg) return param.pointer ? ["0u", "0u"] : [zeroValue(param.valueType)];
       return param.pointer
         ? usesFunctionLocalPointerParam(deviceFunction, param, context.ir)
-          ? [emitExpression(arg, context)]
+          ? [emitFunctionLocalPointerArgument(arg, context)]
           : emitDevicePointerArgument(arg, context)
         : [emitExpressionAsValueType(arg, param.valueType, context)];
     });
@@ -3327,6 +3386,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   const args = expression.args.map((arg) => emitExpression(arg, context));
   const vectorMinMax = emitVectorMinMaxCall(expression, name, context);
   if (vectorMinMax !== undefined) return vectorMinMax;
+  const vectorLerp = emitVectorLerpCall(expression, name, context);
+  if (vectorLerp !== undefined) return vectorLerp;
   if (name === "frexp" || name === "frexpf") return emitFrexpCall(expression, context);
   const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
   if (intrinsic?.emitWgsl) return intrinsic.emitWgsl(args);

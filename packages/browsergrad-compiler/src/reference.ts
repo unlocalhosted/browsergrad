@@ -878,6 +878,7 @@ function pointerArgumentValue(
   }
   if (arg.kind === "identifier") {
     const local = context.locals.get(arg.name);
+    if (isLocalArray(local)) return { kind: "address", target: { name: arg.name, space: "local", index: 0, valueType, locals: context.locals } };
     if (isPoolPointer(local)) return { ...local, valueType };
     if (isAddress(local)) return local;
     if (context.buffers.has(arg.name)) return { kind: "address", target: { name: arg.name, space: "buffer", index: 0, valueType } };
@@ -1215,6 +1216,7 @@ function vectorExpressionType(
     const name = expressionName(expression.callee);
     const constructor = name ? cudaVectorConstructorType(name) : undefined;
     if (constructor) return constructor;
+    if (name === "lerp") return vectorExpressionType(expression.args[0]!, context) ?? vectorExpressionType(expression.args[1]!, context);
     if (name !== undefined && isTextureReadCall(name) && isCudaVectorType(expression.templateValueType)) {
       return expression.templateValueType;
     }
@@ -2139,6 +2141,10 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   }, context));
   if (name === "normalize") return normalizeCudaVector(expression, context);
   if (name === "cross") return crossCudaVectors(expression, context);
+  if (name === "lerp") {
+    const vectorType = vectorExpressionType(expression.args[0]!, context) ?? vectorExpressionType(expression.args[1]!, context);
+    if (vectorType) return lerpCudaVector(expression, vectorType, context);
+  }
   const deviceFunction = name ? resolveReferenceDeviceFunction(context.functions, name, expression.args.length) : undefined;
   if (deviceFunction) return evalDeviceFunction(
     deviceFunction,
@@ -2629,6 +2635,7 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
       space: alias.target.space,
       index,
       ...(valueType === undefined ? {} : { valueType }),
+      ...(alias.target.locals === undefined ? {} : { locals: alias.target.locals }),
       rawStorageIndex: true,
     };
   }
@@ -3479,6 +3486,21 @@ function crossCudaVectors(expression: CudaLiteCallExpression, context: ThreadCon
       (left.lanes[2] ?? 0) * (right.lanes[0] ?? 0) - (left.lanes[0] ?? 0) * (right.lanes[2] ?? 0),
       (left.lanes[0] ?? 0) * (right.lanes[1] ?? 0) - (left.lanes[1] ?? 0) * (right.lanes[0] ?? 0),
     ],
+  };
+}
+
+function lerpCudaVector(
+  expression: CudaLiteCallExpression,
+  valueType: CudaLiteVectorType,
+  context: ThreadContext,
+): CudaVectorValue {
+  const left = valueAsCudaVector(evalExpression(expression.args[0]!, context), valueType);
+  const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), valueType);
+  const t = evalNumber(expression.args[2]!, context);
+  return {
+    kind: "cuda-vector",
+    valueType,
+    lanes: left.lanes.map((value, index) => roundVectorLane(valueType, (value ?? 0) + t * ((right.lanes[index] ?? 0) - (value ?? 0)))),
   };
 }
 

@@ -1573,6 +1573,10 @@ function validateCallExpression(
     validateFrexp(expression, scope, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "float" };
   }
+  if (isVectorMathBuiltin(callName)) {
+    const vectorMath = validateVectorMathBuiltin(expression, callName, diagnostics, walkExpression, scope);
+    if (vectorMath) return vectorMath;
+  }
   const intrinsic = CUDA_INTRINSICS_BY_NAME.get(callName);
   if (intrinsic) {
     for (const feature of intrinsic.requiredFeatures ?? []) requiredFeatures.add(feature);
@@ -1650,9 +1654,7 @@ function validateCallExpression(
       valueType: isCudaVectorType(vectorType) ? cudaVectorScalarType(vectorType) : undefined,
     };
   }
-  if (isVectorMathBuiltin(callName)) {
-    return validateVectorMathBuiltin(expression, callName, diagnostics, walkExpression, scope);
-  }
+  if (isVectorMathBuiltin(callName)) return validateVectorMathBuiltin(expression, callName, diagnostics, walkExpression, scope) ?? { kind: "scalar" };
   if (callName === "deviceAllocate" || callName === "streamOrderedAllocate") {
     validatePoolAllocate(expression, scope, atomicParams, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "voidptr" };
@@ -1736,7 +1738,7 @@ function validateReadPointerOperand(
 }
 
 function isVectorMathBuiltin(name: string): boolean {
-  return name === "dot" || name === "length" || name === "normalize" || name === "cross";
+  return name === "dot" || name === "length" || name === "normalize" || name === "cross" || name === "lerp";
 }
 
 function validateVectorMathBuiltin(
@@ -1745,8 +1747,27 @@ function validateVectorMathBuiltin(
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
   scope: Scope,
-): ExpressionInfo {
+): ExpressionInfo | undefined {
   const infos = expression.args.map((arg) => walkExpression(arg, scope));
+  if (callName === "lerp") {
+    const leftType = infos[0]?.kind === "vector" && isCudaVectorType(infos[0].valueType) ? infos[0].valueType : undefined;
+    const rightType = infos[1]?.kind === "vector" && isCudaVectorType(infos[1].valueType) ? infos[1].valueType : undefined;
+    const vectorType = leftType ?? rightType;
+    if (!vectorType) return undefined;
+    for (const [index, info] of infos.entries()) {
+      const arg = expression.args[index]!;
+      if (index < 2) {
+        if (info.kind !== "vector" && info.kind !== "unknown") {
+          diagnostics.push(error("unsupported-vector-argument", "lerp expects matching CUDA vector endpoints", arg.span));
+        } else if (info.kind === "vector" && info.valueType !== vectorType) {
+          diagnostics.push(error("unsupported-vector-argument", "lerp expects matching CUDA vector endpoints", arg.span));
+        }
+      } else {
+        validateScalarOperand(info, arg.span, diagnostics);
+      }
+    }
+    return { kind: "vector", valueType: vectorType };
+  }
   for (const [index, info] of infos.entries()) {
     const arg = expression.args[index]!;
     if (info.kind !== "vector" && info.kind !== "unknown") {
@@ -2144,7 +2165,10 @@ function validateDevicePointerArgument(
   const globalArrayDecay = rootSymbol?.kind === "device-global" &&
     rootSymbol.dimensions !== undefined &&
     info.kind === "array";
-  if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "unknown" && !sharedArrayDecay && !constantArrayDecay && !globalArrayDecay) {
+  const localArrayDecay = rootSymbol?.kind === "local" &&
+    rootSymbol.dimensions !== undefined &&
+    info.kind === "array";
+  if (info.kind !== "pointer" && info.kind !== "address" && info.kind !== "unknown" && !sharedArrayDecay && !constantArrayDecay && !globalArrayDecay && !localArrayDecay) {
     diagnostics.push(error("unsupported-device-pointer-param", `device pointer parameter '${param.name}' expects a pointer argument`, arg.span));
     return;
   }
