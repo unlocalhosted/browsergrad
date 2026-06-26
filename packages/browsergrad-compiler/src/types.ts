@@ -191,6 +191,8 @@ export interface CudaLiteCooperativeGroupDecl {
   readonly groupKind: CudaLiteCooperativeGroupKind;
   readonly name: string;
   readonly tileSize?: number;
+  readonly partitionParent?: string;
+  readonly partitionPredicate?: CudaLiteExpression;
   readonly dynamicTileSizeName?: string;
   readonly span: SourceSpan;
 }

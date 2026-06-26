@@ -677,6 +677,8 @@ class Parser {
     let name: Token;
     let groupKind: CudaLiteCooperativeGroupKind;
     let tileSize: number | undefined;
+    let partitionParent: string | undefined;
+    let partitionPredicate: CudaLiteExpression | undefined;
     if (this.consumeIf("auto")) {
       name = this.expectIdentifier("cooperative group variable name");
       this.expect("=");
@@ -688,6 +690,14 @@ class Parser {
         this.expect(">");
         this.skipBalanced("(", ")");
         groupKind = "tile";
+      } else if (factory.value === "binary_partition") {
+        this.expect("(");
+        const parent = this.parseExpression();
+        this.expect(",");
+        partitionPredicate = this.parseExpression();
+        this.expect(")");
+        groupKind = "tile";
+        if (parent.kind === "identifier") partitionParent = parent.name;
       } else if (factory.value === "coalesced_threads") {
         this.skipBalanced("(", ")");
         groupKind = "tile";
@@ -720,6 +730,8 @@ class Parser {
       groupKind,
       name: name.value,
       ...(tileSize === undefined ? {} : { tileSize }),
+      ...(partitionParent === undefined ? {} : { partitionParent }),
+      ...(partitionPredicate === undefined ? {} : { partitionPredicate }),
       span: mergeSpans(start, end),
     };
   }
@@ -1410,7 +1422,11 @@ class Parser {
   private startsCooperativeGroupDecl(): boolean {
     if (this.match("auto")) {
       return this.tokens[this.index + 2]?.value === "=" &&
-        this.tokens.slice(this.index + 3, this.index + 8).some((token) => token.value === "tiled_partition" || token.value === "coalesced_threads");
+        this.tokens.slice(this.index + 3, this.index + 8).some((token) =>
+          token.value === "tiled_partition" ||
+          token.value === "binary_partition" ||
+          token.value === "coalesced_threads"
+        );
     }
     return this.startsCooperativeGroupType();
   }

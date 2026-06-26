@@ -71,6 +71,7 @@ interface CooperativeGroupValue {
   readonly kind: "cooperative-group";
   readonly groupKind: CudaLiteCooperativeGroupDecl["groupKind"];
   readonly tileSize?: number;
+  readonly partitionPredicate?: CudaLiteExpression;
 }
 
 interface ComplexValue {
@@ -579,11 +580,17 @@ function* execStatements(
         context.locals.set(statement.name, vectorFromExpressions(statement.args, context));
         break;
       case "cooperative-group":
-        context.locals.set(statement.name, {
-          kind: "cooperative-group",
-          groupKind: statement.groupKind,
-          ...(statement.tileSize === undefined ? {} : { tileSize: statement.tileSize }),
-        });
+        {
+          const parent = statement.partitionParent ? context.locals.get(statement.partitionParent) : undefined;
+          const parentGroup = isCooperativeGroup(parent) ? parent : undefined;
+          const tileSize = statement.tileSize ?? parentGroup?.tileSize;
+          context.locals.set(statement.name, {
+            kind: "cooperative-group",
+            groupKind: statement.groupKind,
+            ...(tileSize === undefined ? {} : { tileSize }),
+            ...(statement.partitionPredicate === undefined ? {} : { partitionPredicate: statement.partitionPredicate }),
+          });
+        }
         break;
       case "kernel-launch":
         execKernelLaunch(statement, context);
@@ -915,6 +922,8 @@ function writeCollectiveAssignment(
 
 function collectiveCall(expression: CudaLiteExpression, context: ThreadContext): CollectiveYield | undefined {
   if (expression.kind !== "call") return undefined;
+  const cooperativeReduce = cooperativeReduceCollective(expression, context);
+  if (cooperativeReduce) return cooperativeReduce;
   const name = expressionName(expression.callee);
   const op = collectiveOpForCall(name);
   if (!op) return undefined;
@@ -926,6 +935,49 @@ function collectiveCall(expression: CudaLiteExpression, context: ThreadContext):
     value: evalNumber(value, context),
     groupKey: `warp:${Math.floor(localLinearRank(context) / 32)}`,
   };
+}
+
+function cooperativeReduceCollective(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: ThreadContext,
+): CollectiveYield | undefined {
+  const name = expressionNameForReference(expression.callee);
+  if (!name?.endsWith("::reduce")) return undefined;
+  const groupArg = expression.args[0];
+  if (groupArg?.kind !== "identifier") return undefined;
+  const groupValue = context.locals.get(groupArg.name);
+  if (!isCooperativeGroup(groupValue)) return undefined;
+  const valueExpression = expression.args[1];
+  if (!valueExpression) return undefined;
+  const op = collectiveOpForCooperativeReduce(expression.args[2]);
+  if (!op) return undefined;
+  return {
+    kind: "collective",
+    op,
+    value: evalNumber(valueExpression, context),
+    groupKey: cooperativeCollectiveGroupKey(groupValue, context),
+  };
+}
+
+function collectiveOpForCooperativeReduce(expression: CudaLiteExpression | undefined): CollectiveOp | undefined {
+  const op = cooperativeReductionOpName(expression);
+  if (op?.endsWith("::plus")) return "sum";
+  if (op?.endsWith("::greater")) return "max";
+  if (op?.endsWith("::less")) return "min";
+  return undefined;
+}
+
+function cooperativeCollectiveGroupKey(group: CooperativeGroupValue, context: ThreadContext): string {
+  const rank = localLinearRank(context);
+  const base = group.groupKind === "tile"
+    ? `tile:${Math.floor(rank / (group.tileSize ?? 32))}:${group.tileSize ?? 32}`
+    : group.groupKind === "block"
+      ? `block:${context.blockIdx.x}:${context.blockIdx.y}:${context.blockIdx.z}`
+      : group.groupKind === "grid"
+        ? "grid"
+        : `thread:${rank}`;
+  if (!group.partitionPredicate) return base;
+  return `${base}:partition:${truthy(evalNumber(group.partitionPredicate, context)) ? 1 : 0}`;
 }
 
 function collectiveOpForCall(name: string | undefined): CollectiveOp | undefined {
@@ -2686,11 +2738,12 @@ function evalCooperativeGroupCall(
   const args = expression.args.map((arg) => evalNumber(arg, context));
   if (callee.property === "sync") return 0;
   if (callee.property === "size") {
-    if (value.groupKind === "tile") return value.tileSize ?? 32;
+    if (value.groupKind === "tile") return cooperativeTileParticipantCount(value, context);
     return context.blockDim.x * context.blockDim.y * context.blockDim.z;
   }
   if (callee.property === "thread_rank") {
     const localRank = localLinearRank(context);
+    if (value.partitionPredicate) return localRank % (value.tileSize ?? 32);
     if (value.groupKind === "tile") return localRank % (value.tileSize ?? 32);
     return localRank;
   }
@@ -2729,11 +2782,18 @@ function evalCooperativeNamespaceCall(
   const op = cooperativeReductionOpName(expression.args[2]);
   if (op?.endsWith("::plus")) {
     const size = groupValue.groupKind === "tile"
-      ? groupValue.tileSize ?? 32
+      ? cooperativeTileParticipantCount(groupValue, context)
       : context.blockDim.x * context.blockDim.y * context.blockDim.z;
     return item * size;
   }
   return item;
+}
+
+function cooperativeTileParticipantCount(group: CooperativeGroupValue, context: ThreadContext): number {
+  const tileSize = group.tileSize ?? 32;
+  const blockSize = context.blockDim.x * context.blockDim.y * context.blockDim.z;
+  const tileStart = Math.floor(localLinearRank(context) / tileSize) * tileSize;
+  return Math.max(0, Math.min(tileSize, blockSize - tileStart));
 }
 
 function cooperativeReductionOpName(expression: CudaLiteExpression | undefined): string | undefined {

@@ -41,6 +41,9 @@
 - Browser corpus e2e now enforces those real WebGPU fixtures as a no-regression
   floor: `44` total passing fixtures, with per-corpus minimums for CUDA-120,
   NVIDIA `cuda-samples`, `llm.c`, and LeetCUDA.
+- Cooperative groups now lower `cg::binary_partition(tile, predicate)` through
+  subgroup predicate masks and lockstep CPU-reference collectives, raising the
+  cuda-samples compile/codegen gate to `340/357` with `14` hard gaps.
 - Source normalization and WGSL emission now lower generic CUDA device
   function-pointer table/param dispatch, device-function local type inference,
   and explicit signed/unsigned index casts. This closes cuda-samples

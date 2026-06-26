@@ -3103,7 +3103,14 @@ function collectCooperativeGroups(statements: readonly CudaLiteStatement[]): Rea
   const groups = new Map<string, CudaLiteCooperativeGroupDecl>();
   const walk = (items: readonly CudaLiteStatement[]): void => {
     for (const item of items) {
-      if (item.kind === "cooperative-group") groups.set(item.name, item);
+      if (item.kind === "cooperative-group") {
+        const parent = item.partitionParent ? groups.get(item.partitionParent) : undefined;
+        const tileSize = item.tileSize ?? parent?.tileSize;
+        groups.set(item.name, {
+          ...item,
+          ...(tileSize === undefined ? {} : { tileSize }),
+        });
+      }
       if (item.kind === "if") {
         walk(item.consequent);
         if (item.alternate) walk(item.alternate);
@@ -4053,11 +4060,15 @@ function emitCooperativeGroupCall(expression: CudaLiteCallExpression, context: E
     return group.groupKind === "grid" ? "0" : "workgroupBarrier()";
   }
   if (callee.property === "size") {
+    const partitionSize = emitCooperativePartitionSize(group, context);
+    if (partitionSize) return partitionSize;
     if (group.groupKind === "thread" && group.dynamicTileSizeName) return `i32(${group.dynamicTileSizeName})`;
     if (group.groupKind === "tile") return String(group.tileSize ?? 32);
     return String(context.ir.workgroupSize[0] * context.ir.workgroupSize[1] * context.ir.workgroupSize[2]);
   }
   if (callee.property === "thread_rank") {
+    const partitionRank = emitCooperativePartitionRank(group, context);
+    if (partitionRank) return partitionRank;
     const localRank = emitLocalLinearRank(context);
     if (group.groupKind === "thread" && group.dynamicTileSizeName) return `(${localRank} % i32(${group.dynamicTileSizeName}))`;
     if (group.groupKind === "tile") return `(${localRank} % ${group.tileSize ?? 32})`;
@@ -4108,8 +4119,52 @@ function emitCooperativeNamespaceCall(expression: CudaLiteCallExpression, contex
   if (vectorReduce !== undefined) return vectorReduce;
   const value = expression.args[1] ? emitExpression(expression.args[1], context) : "0";
   const op = cooperativeReductionOpName(expression.args[2]);
+  const partitionPredicate = emitCooperativePartitionPredicate(group, context);
+  if (partitionPredicate) {
+    const valueExpression = expression.args[1];
+    const valueType = valueExpression ? expressionValueTypeForEmit(valueExpression, context) : undefined;
+    const zero = valueType ? zeroValue(valueType) : "0";
+    const maskedValue = `select(${zero}, ${value}, ${partitionPredicate})`;
+    if (op?.endsWith("::greater")) return `subgroupMax(${maskedValue})`;
+    return `subgroupAdd(${maskedValue})`;
+  }
   if (op?.endsWith("::greater")) return `subgroupMax(${value})`;
   return `subgroupAdd(${value})`;
+}
+
+function emitCooperativePartitionPredicate(group: CudaLiteCooperativeGroupDecl, context: EmitContext): string | undefined {
+  if (!group.partitionPredicate) return undefined;
+  return `(${emitExpression(group.partitionPredicate, context)} != 0)`;
+}
+
+function emitCooperativePartitionMask(group: CudaLiteCooperativeGroupDecl, context: EmitContext): string | undefined {
+  const predicate = emitCooperativePartitionPredicate(group, context);
+  if (!predicate) return undefined;
+  const ballot = `subgroupBallot(${predicate}).x`;
+  const tileMask = emitCooperativeTileLaneMask(group, context);
+  return tileMask ? `(${ballot} & ${tileMask})` : ballot;
+}
+
+function emitCooperativeTileLaneMask(group: CudaLiteCooperativeGroupDecl, context: EmitContext): string | undefined {
+  if (group.groupKind !== "tile") return undefined;
+  const tileSize = group.tileSize ?? 32;
+  if (tileSize >= 32) return "0xffffffffu";
+  const lane = `u32(${emitLocalLinearRank(context)} % 32)`;
+  const tileBase = `((${lane} / ${tileSize}u) * ${tileSize}u)`;
+  return `(((1u << ${tileSize}u) - 1u) << ${tileBase})`;
+}
+
+function emitCooperativePartitionSize(group: CudaLiteCooperativeGroupDecl, context: EmitContext): string | undefined {
+  const mask = emitCooperativePartitionMask(group, context);
+  return mask ? `i32(countOneBits(${mask}))` : undefined;
+}
+
+function emitCooperativePartitionRank(group: CudaLiteCooperativeGroupDecl, context: EmitContext): string | undefined {
+  const mask = emitCooperativePartitionMask(group, context);
+  if (!mask) return undefined;
+  const tileSize = group.tileSize ?? 32;
+  const lane = `u32(${emitLocalLinearRank(context)} % ${tileSize})`;
+  return `i32(countOneBits(${mask} & ((1u << ${lane}) - 1u)))`;
 }
 
 function emitVectorCooperativeNamespaceReduce(

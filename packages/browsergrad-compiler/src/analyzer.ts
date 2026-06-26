@@ -193,6 +193,8 @@ interface SymbolInfo {
   readonly overloads?: readonly CudaLiteDeviceFunction[];
   readonly groupKind?: CudaLiteCooperativeGroupKind;
   readonly tileSize?: number;
+  readonly partitionParent?: string;
+  readonly partitionPredicate?: CudaLiteExpression;
   readonly pointer?: boolean;
   readonly constant?: boolean;
   readonly pointerRoot?: string;
@@ -351,12 +353,23 @@ export function analyzeCudaLite(
             diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${statement.name}'`, statement.span));
           }
           validateDeclaredSymbolName(statement.name, statement.span, diagnostics);
+          if (statement.partitionPredicate) {
+            requiredFeatures.add("subgroups");
+            validateScalarOperand(walkExpression(statement.partitionPredicate, scope), statement.partitionPredicate.span, diagnostics);
+          }
+          const parent = statement.partitionParent ? lookupSymbol(statement.partitionParent, scope, statement.span) : undefined;
+          if (statement.partitionParent && parent?.kind !== "cooperative-group") {
+            diagnostics.push(error("unsupported-cooperative-groups", `binary partition parent '${statement.partitionParent}' must be a cooperative group`, statement.span));
+          }
+          const tileSize = statement.tileSize ?? parent?.tileSize;
           names.add(statement.name);
           scope.symbols.set(statement.name, {
             name: statement.name,
             kind: "cooperative-group",
             groupKind: statement.groupKind,
-            ...(statement.tileSize === undefined ? {} : { tileSize: statement.tileSize }),
+            ...(tileSize === undefined ? {} : { tileSize }),
+            ...(statement.partitionParent === undefined ? {} : { partitionParent: statement.partitionParent }),
+            ...(statement.partitionPredicate === undefined ? {} : { partitionPredicate: statement.partitionPredicate }),
             span: statement.span,
           });
           break;

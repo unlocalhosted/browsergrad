@@ -2377,6 +2377,35 @@ __global__ void namespaceTileReduce(const float *input, float *output) {
     expect([...result.buffers.output as Float32Array]).toEqual([8]);
   });
 
+  it("lowers cooperative-group binary partitions to predicate masks", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+__global__ void binaryPartition(int *input, int *out) {
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_block_tile<32> tile = cg::tiled_partition<32>(block);
+  int value = input[threadIdx.x];
+  auto part = cg::binary_partition(tile, value & 1);
+  int sum = cg::reduce(part, value, cg::plus<int>());
+  if (part.thread_rank() == 0) {
+    out[0] = part.size() + sum;
+  }
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [1, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { input: new Int32Array([3]), out: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.ir.requiredFeatures).toContain("subgroups");
+    expect(compiled.wgsl).toContain("subgroupBallot");
+    expect(compiled.wgsl).toContain("countOneBits");
+    expect(compiled.wgsl).toContain("subgroupAdd(select(0, value");
+    expect([...result.buffers.out as Int32Array]).toEqual([4]);
+  });
+
   it("passes tile cooperative groups through generic device helper reduce params", () => {
     const compiled = compileCudaLiteKernel(`
 namespace cg = cooperative_groups;
