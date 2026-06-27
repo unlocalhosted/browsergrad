@@ -3221,7 +3221,7 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
   const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
   const width = valueStorageWidth(valueType);
   const ok = storageIndex >= 0 && storageIndex + width - 1 < shared.data.length;
-  const value = ok ? readBufferValue(shared.data, storageIndex, valueType, lvalue.field) : 0;
+  const value = ok ? readSharedBufferValue(shared, storageIndex, valueType, lvalue.field) : 0;
   context.trace.sharedReads.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
   return value;
 }
@@ -3305,7 +3305,7 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
   const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
   const width = valueStorageWidth(valueType);
   const ok = storageIndex >= 0 && storageIndex + width - 1 < shared.data.length;
-  if (ok) writeBufferValue(shared.data, storageIndex, valueType, lvalue.field, value);
+  if (ok) writeSharedBufferValue(shared, storageIndex, valueType, lvalue.field, value);
   context.trace.sharedWrites.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
 }
 
@@ -3443,6 +3443,89 @@ function writeBufferValue(
   buffer[storageIndex] = valueType === "bf16"
     ? roundBfloat16(valueAsNumber(value, "write value"))
     : valueAsNumber(value, "write value");
+}
+
+function readScalarStorageValue(
+  buffer: WgslTypedArray,
+  storageIndex: number,
+  valueType: CudaLiteScalarType | undefined,
+): number {
+  const raw = Number(buffer[storageIndex] ?? 0);
+  if ((valueType === "float" || valueType === "double" || valueType === "bf16") &&
+    (buffer instanceof Int32Array || buffer instanceof Uint32Array)) {
+    return floatFromBits(raw);
+  }
+  if ((valueType === "int" || valueType === "uint") && buffer instanceof Float32Array) {
+    const bits = bitsFromFloat(raw);
+    return valueType === "int" ? intFromBits(bits) : bits;
+  }
+  return raw;
+}
+
+function writeScalarStorageValue(
+  buffer: WgslTypedArray,
+  storageIndex: number,
+  valueType: CudaLiteScalarType | undefined,
+  value: number,
+): void {
+  if ((valueType === "float" || valueType === "double" || valueType === "bf16") &&
+    (buffer instanceof Int32Array || buffer instanceof Uint32Array)) {
+    buffer[storageIndex] = bitsFromFloat(value);
+    return;
+  }
+  if ((valueType === "int" || valueType === "uint") && buffer instanceof Float32Array) {
+    buffer[storageIndex] = floatFromBits(Math.trunc(value) >>> 0);
+    return;
+  }
+  buffer[storageIndex] = value;
+}
+
+function readSharedBufferValue(
+  shared: SharedArrayValue,
+  storageIndex: number,
+  valueType: CudaLiteScalarType | undefined,
+  field: "x" | "y" | "z" | "w" | undefined,
+): EvalValue {
+  if (shared.valueType === valueType || valueType === undefined) return readBufferValue(shared.data, storageIndex, valueType, field);
+  if (isCudaVectorType(valueType)) {
+    const scalar = cudaVectorScalarType(valueType);
+    const lanes = Array.from({ length: cudaVectorLaneCount(valueType) }, (_, lane) =>
+      readScalarStorageValue(shared.data, storageIndex + lane, scalar)
+    );
+    if (field) {
+      const index = cudaVectorFieldIndex(valueType, field);
+      return index === undefined ? 0 : lanes[index] ?? 0;
+    }
+    return { kind: "cuda-vector", valueType, lanes };
+  }
+  return readScalarStorageValue(shared.data, storageIndex, valueType);
+}
+
+function writeSharedBufferValue(
+  shared: SharedArrayValue,
+  storageIndex: number,
+  valueType: CudaLiteScalarType | undefined,
+  field: "x" | "y" | "z" | "w" | undefined,
+  value: EvalValue,
+): void {
+  if (shared.valueType === valueType || valueType === undefined) {
+    writeBufferValue(shared.data, storageIndex, valueType, field, value);
+    return;
+  }
+  if (isCudaVectorType(valueType)) {
+    if (field) {
+      const index = cudaVectorFieldIndex(valueType, field);
+      if (index !== undefined) writeScalarStorageValue(shared.data, storageIndex + index, cudaVectorScalarType(valueType), valueAsNumber(value, field));
+      return;
+    }
+    const vector = valueAsCudaVector(value, valueType);
+    const scalar = cudaVectorScalarType(valueType);
+    for (let lane = 0; lane < cudaVectorLaneCount(valueType); lane++) {
+      writeScalarStorageValue(shared.data, storageIndex + lane, scalar, vector.lanes[lane] ?? 0);
+    }
+    return;
+  }
+  writeScalarStorageValue(shared.data, storageIndex, valueType, valueAsNumber(value, "shared write"));
 }
 
 function readPoolValue(

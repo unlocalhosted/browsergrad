@@ -1778,6 +1778,9 @@ function emitSharedPointerRead(
 ): string {
   if (isCudaVectorType(viewType) && shared.valueType !== viewType) return emitSharedVectorFlatRead(shared, index, viewType, context);
   const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, index);
+  if (shared.valueType !== viewType && bitcastStorageViewType(shared.valueType, viewType)) {
+    return `bitcast<${wgslScalar(viewType)}>(${access})`;
+  }
   if (!ir.atomicShared.includes(shared.name)) return access;
   const loaded = `atomicLoad(&${access})`;
   return shared.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
@@ -1793,8 +1796,21 @@ function emitSharedPointerWrite(
 ): string {
   if (isCudaVectorType(viewType) && shared.valueType !== viewType) return emitSharedVectorFlatWrite(shared, index, value, viewType, context);
   const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, index);
+  const bitcastType = bitcastStorageViewType(viewType, shared.valueType);
+  if (shared.valueType !== viewType && bitcastType) return `${access} = bitcast<${bitcastType}>(${value})`;
   if (!ir.atomicShared.includes(shared.name)) return `${access} = ${value}`;
   return shared.valueType === "float" ? `atomicStore(&${access}, bitcast<u32>(${value}))` : `atomicStore(&${access}, ${value})`;
+}
+
+function bitcastStorageViewType(from: CudaLiteScalarType, to: CudaLiteScalarType): "f32" | "i32" | "u32" | undefined {
+  const source = cudaScalarWgslType(from);
+  const target = cudaScalarWgslType(to);
+  if (!source || !target || source === "bool" || target === "bool") return undefined;
+  if ((source === "f32" || source === "i32" || source === "u32") &&
+    (target === "f32" || target === "i32" || target === "u32")) {
+    return target;
+  }
+  return undefined;
 }
 
 function emitSharedFlatAccess(name: string, dimensions: readonly number[], index: string): string {
@@ -1816,8 +1832,9 @@ function emitSharedVectorFlatRead(
   context: EmitContext,
 ): string {
   const lanes = cudaVectorLaneCount(viewType);
+  const scalar = cudaVectorScalarType(viewType) ?? "float";
   const values = Array.from({ length: lanes }, (_, lane) =>
-    emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, `(${index} + ${lane}u)`)
+    emitSharedPointerRead(shared, `(${index} + ${lane}u)`, context.ir, context, scalar)
   );
   return `${wgslScalar(viewType)}(${values.join(", ")})`;
 }
@@ -1830,8 +1847,9 @@ function emitSharedVectorFlatWrite(
   context: EmitContext,
 ): string {
   const lanes = cudaVectorLaneCount(viewType);
+  const scalar = cudaVectorScalarType(viewType) ?? "float";
   return Array.from({ length: lanes }, (_, lane) =>
-    `${emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, `(${index} + ${lane}u)`)} = ${value}.${vectorFieldName(lane)}`
+    emitSharedPointerWrite(shared, `(${index} + ${lane}u)`, `${value}.${vectorFieldName(lane)}`, context.ir, context, scalar)
   ).join("; ");
 }
 
@@ -2208,7 +2226,9 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       }
       const storageView = storageViewLValue(expression, context);
       if (storageView && isCudaVectorType(storageView.valueType)) {
-        return emitVectorStorageReadAt(context.nameFor(storageView.name), storageView.valueType, storageView.index);
+        const shared = storageView.rootName ? sharedDeclarationFor(storageView.rootName, context) : undefined;
+        if (shared) return emitSharedVectorFlatRead(shared, storageView.index, storageView.valueType, context);
+        return emitVectorStorageReadAt(storageView.name, storageView.valueType, storageView.index);
       }
       const poolAccess = poolAccessForIndex(expression, context);
       if (poolAccess) return emitPoolRead(poolAccess, context);
@@ -2241,6 +2261,13 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
           if (alias.valueType && isCudaVectorType(alias.valueType)) {
             const index = emitStorageViewIndex(alias.rootName, alias.baseIndex, expression.index, alias.valueType, context);
             return emitVectorStorageReadAt(context.nameFor(alias.rootName), alias.valueType, index);
+          }
+          if (alias.valueType) {
+            const shared = sharedDeclarationFor(alias.rootName, context);
+            if (shared) {
+              const index = emitStorageViewIndex(alias.rootName, alias.baseIndex, expression.index, alias.valueType, context);
+              return emitSharedPointerRead(shared, index, context.ir, context, alias.valueType);
+            }
           }
           return `${context.nameFor(alias.rootName)}[${emitPointerAliasIndex(alias, expression.index, context)}]`;
         }
@@ -3909,7 +3936,7 @@ function cudaScalarWgslType(type: CudaLiteScalarType): "f32" | "f16" | "i32" | "
 }
 
 function isScalarPromotionOperator(operator: string): boolean {
-  return isVectorArithmeticOperator(operator) || isComparisonOperator(operator);
+  return isVectorArithmeticOperator(operator) || operator === "%" || isComparisonOperator(operator);
 }
 
 function isShiftOperator(operator: string): boolean {
@@ -4856,7 +4883,26 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   if (localVectorAssignment) return localVectorAssignment;
   const storageView = storageViewLValue(expression.left, context);
   if (storageView && isCudaVectorType(storageView.valueType)) {
-    const right = emitExpression(expression.right, context);
+    const shared = storageView.rootName ? sharedDeclarationFor(storageView.rootName, context) : undefined;
+    const right = emitExpressionAsValueType(expression.right, storageView.valueType, context);
+    if (shared) {
+      if (storageView.field) {
+        const scalar = cudaVectorScalarType(storageView.valueType) ?? "float";
+        const laneIndex = `(${storageView.index} + ${storageView.fieldIndex ?? 0}u)`;
+        const current = emitSharedPointerRead(shared, laneIndex, context.ir, context, scalar);
+        const laneValue = expression.operator === "="
+          ? emitExpressionAsValueType(expression.right, scalar, context)
+          : `(${current} ${expression.operator.slice(0, -1)} ${emitExpressionAsValueType(expression.right, scalar, context)})`;
+        return emitSharedPointerWrite(shared, laneIndex, laneValue, context.ir, context, scalar);
+      }
+      if (expression.operator !== "=") {
+        const current = emitSharedVectorFlatRead(shared, storageView.index, storageView.valueType, context);
+        const op = expression.operator.slice(0, -1);
+        const vectorRight = emitExpressionAsVectorOperand(expression.right, storageView.valueType as CudaLiteVectorType, context);
+        return emitSharedVectorFlatWrite(shared, storageView.index, `(${current} ${op} ${vectorRight})`, storageView.valueType, context);
+      }
+      return emitSharedVectorFlatWrite(shared, storageView.index, right, storageView.valueType, context);
+    }
     if (storageView.field) {
       const current = `${storageView.name}[${storageView.index} + ${storageView.fieldIndex ?? 0}u]`;
       if (expression.operator !== "=") {
@@ -4879,6 +4925,15 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   if (localVectorWholeAssignment) return localVectorWholeAssignment;
   const vectorAssignment = emitVectorAssignment(expression, context);
   if (vectorAssignment) return vectorAssignment;
+  const scalarStorageView = scalarStorageViewLValue(expression.left, context);
+  if (scalarStorageView) {
+    const current = emitSharedPointerRead(scalarStorageView.shared, scalarStorageView.index, context.ir, context, scalarStorageView.valueType);
+    const right = emitExpressionAsValueType(expression.right, scalarStorageView.valueType, context);
+    const value = expression.operator === "="
+      ? right
+      : `(${current} ${expression.operator.slice(0, -1)} ${right})`;
+    return emitSharedPointerWrite(scalarStorageView.shared, scalarStorageView.index, value, context.ir, context, scalarStorageView.valueType);
+  }
   const pointerLvalue = devicePointerLValue(expression.left, context);
   if (pointerLvalue) {
     const right = emitExpression(expression.right, context);
@@ -4986,6 +5041,7 @@ function shouldCastDirectAssignment(
   const rightType = expressionValueTypeForEmit(right, context);
   if (rightType === undefined || rightType === leftType) return false;
   if ((leftType === "uint" || leftType === "int") && right.kind === "number" && !numberLiteralHasFloatSyntax(right.raw)) return false;
+  if ((leftType === "uint" || leftType === "int") && (rightType === "uint" || rightType === "int")) return true;
   return (leftType === "float" || leftType === "double" || leftType === "bf16" || leftType === "half") &&
     (rightType === "int" || rightType === "uint");
 }
@@ -5207,6 +5263,7 @@ function emitVectorAssignment(expression: CudaLiteAssignmentExpression, context:
 }
 
 interface VectorStorageLValue {
+  readonly rootName?: string;
   readonly name: string;
   readonly valueType: CudaLiteScalarType;
   readonly index: string;
@@ -5251,6 +5308,7 @@ function storageViewLValue(expression: CudaLiteExpression, context: EmitContext)
       : undefined;
   if (!view || !isCudaVectorType(view.valueType)) return undefined;
   const base = {
+    rootName: view.rootName,
     name: context.nameFor(view.rootName),
     valueType: view.valueType,
     index: view.index,
@@ -5259,6 +5317,20 @@ function storageViewLValue(expression: CudaLiteExpression, context: EmitContext)
   if (!field) return base;
   const fieldIndex = cudaVectorFieldIndex(view.valueType, field);
   return fieldIndex === undefined ? undefined : { ...base, field, fieldIndex };
+}
+
+interface ScalarStorageViewLValue {
+  readonly shared: CudaLiteVarDecl;
+  readonly valueType: CudaLiteScalarType;
+  readonly index: string;
+}
+
+function scalarStorageViewLValue(expression: CudaLiteExpression, context: EmitContext): ScalarStorageViewLValue | undefined {
+  if (expression.kind !== "index") return undefined;
+  const view = storageViewForPointerExpression(expression.target, expression.index, context);
+  if (!view || isCudaVectorType(view.valueType)) return undefined;
+  const shared = sharedDeclarationFor(view.rootName, context);
+  return shared ? { shared, valueType: view.valueType, index: view.index } : undefined;
 }
 
 function storageViewForPointerExpression(
@@ -5600,7 +5672,7 @@ function emitSurfaceWriteExpression(
     const fields = ["x", "y", "z", "w"].slice(0, cudaVectorLaneCount(valueType));
     return [
       ...fields.map((field, index) =>
-        `bg_surf2dwrite_${surfaceName}(f32(${value}.${field}), (${emitExpression(xBytesExpression, context)} + ${index * 4}), ${y}, ${z})`,
+        `bg_surf2dwrite_${surfaceName}(f32(${value}.${field}), (${emitExpressionAsValueType(xBytesExpression, "int", context)} + ${index * 4}), ${y}, ${z})`,
       ),
       "0",
     ].join("; ");

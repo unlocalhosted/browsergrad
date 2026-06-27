@@ -200,6 +200,30 @@ __global__ void atomicFloatOps(float *minValue, float *subValue) {
 }
 `;
 
+const SIGNEDNESS_MIX = `
+__device__ int rgbToInt(int x) { return x + 7; }
+__global__ void signedness(uint *out, int *signedOut, int n) {
+  uint tid = threadIdx.x;
+  if (tid < 2u) {
+    out[tid] = rgbToInt((int)tid);
+    signedOut[tid] = tid % n;
+  }
+}
+`;
+
+const SHARED_TYPED_OVERLAY = `
+__global__ void sharedOverlay(float *out) {
+  extern __shared__ int params[];
+  float4 *scratch = (float4*)params;
+  if (threadIdx.x == 0) { scratch[0] = make_float4(1.0f, 2.0f, 3.0f, 4.0f); }
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    float4 value = scratch[0];
+    out[0] = value.x + value.y + value.z + value.w;
+  }
+}
+`;
+
 const DEVICE_POOL_ALLOC = `
 __global__ void poolKernel(DevicePool* dp, float* out, int N) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -323,6 +347,38 @@ __global__ void namedConstants(float* out, uint* kinds) {
 
     expect([...actual.buffers.kinds as Uint32Array]).toEqual([...expected.buffers.kinds as Uint32Array]);
     expect([...actual.buffers.out as Float32Array][0]).toBeCloseTo([...expected.buffers.out as Float32Array][0]!, 6);
+  });
+
+  it("runs mixed signedness assignment and modulo through real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(SIGNEDNESS_MIX, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Uint32Array(2),
+        signedOut: new Int32Array(2),
+      },
+      scalars: { n: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+    expect([...actual.buffers.signedOut as Int32Array]).toEqual([...expected.buffers.signedOut as Int32Array]);
+  });
+
+  it("runs typed shared-memory overlays through real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(SHARED_TYPED_OVERLAY, {
+      workgroupSize: [1, 1, 1],
+      dynamicSharedMemory: { params: 4 },
+    });
+    const input = { buffers: { out: new Float32Array(1) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
   it("runs CUDA cache-hint pointer loads and stores through WebGPU", async () => {

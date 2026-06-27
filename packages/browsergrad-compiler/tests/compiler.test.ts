@@ -3630,6 +3630,75 @@ __global__ void paramsBuffer(const float *params, float *out, int n) {
     expect([...result.buffers.out as Float32Array]).toEqual([2, 3, 4, 5]);
   });
 
+  it("casts mixed signedness assignment and modulo expressions", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ int rgbToInt(int x) { return x + 7; }
+__global__ void signedness(uint *out, int *signedOut, int n) {
+  uint tid = threadIdx.x;
+  if (tid < 2u) {
+    out[tid] = rgbToInt((int)tid);
+    signedOut[tid] = tid % n;
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2), signedOut: new Int32Array(2) }, scalars: { n: 2 } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("out[tid] = u32(rgbToInt");
+    expect(compiled.wgsl).toContain("(tid % u32(bg_uniforms.n))");
+    expect([...result.buffers.out as Uint32Array]).toEqual([7, 8]);
+    expect([...result.buffers.signedOut as Int32Array]).toEqual([0, 1]);
+  });
+
+  it("bitcasts scalar typed views over integer shared backing storage", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sharedOverlay(float *out) {
+  extern __shared__ int params[];
+  float *scratch = (float*)params;
+  int tid = threadIdx.x;
+  if (tid < 2) { scratch[tid] = (float)(tid + 1); }
+  __syncthreads();
+  if (tid == 0) { out[0] = scratch[0] + scratch[1]; }
+}`, { workgroupSize: [2, 1, 1], dynamicSharedMemory: { params: 2 } });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<workgroup> bg_params: array<i32, 2>;");
+    expect(compiled.wgsl).toContain("bg_params[");
+    expect(compiled.wgsl).toContain("bitcast<i32>");
+    expect(compiled.wgsl).toContain("bitcast<f32>");
+    expect([...result.buffers.out as Float32Array]).toEqual([3]);
+  });
+
+  it("bitcasts vector typed views over integer shared backing storage", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sharedVectorOverlay(float *out) {
+  extern __shared__ int params[];
+  float4 *scratch = (float4*)params;
+  if (threadIdx.x == 0) { scratch[0] = make_float4(1.0f, 2.0f, 3.0f, 4.0f); }
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    float4 value = scratch[0];
+    out[0] = value.x + value.y + value.z + value.w;
+  }
+}`, { workgroupSize: [1, 1, 1], dynamicSharedMemory: { params: 4 } });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<workgroup> bg_params: array<i32, 4>;");
+    expect(compiled.wgsl).toContain("bitcast<i32>(vec4<f32>");
+    expect(compiled.wgsl).toContain("vec4<f32>(bitcast<f32>");
+    expect([...result.buffers.out as Float32Array]).toEqual([10]);
+  });
+
   it("lowers generic pointer dereference lvalues and rebased kernel params", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void derefWrite(float *x) {
@@ -5331,7 +5400,7 @@ __global__ void splitShared(float *x) {
     );
 
     expect(compiled.wgsl).not.toContain("var sdataB");
-    expect(compiled.wgsl).toContain("sdataA[(u32((0 + 2))) + (u32(tid))]");
+    expect(compiled.wgsl).toContain("sdataA[(u32((0 + 2)) + (u32(tid) * 1u))]");
     expect([...result.buffers.x as Float32Array]).toEqual([6, 2, 3, 4]);
   });
 
