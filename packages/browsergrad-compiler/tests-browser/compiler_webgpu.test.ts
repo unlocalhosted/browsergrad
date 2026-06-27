@@ -224,6 +224,14 @@ __global__ void sharedOverlay(float *out) {
 }
 `;
 
+const SUBGROUP_REDUCTION_MIX = `
+__global__ void subgroupReduction(float *out, float value, int n, unsigned int mask) {
+  float sum = warpReduceSum(mask, value);
+  float total = __reduce_add_sync(mask, value);
+  out[0] = (sum + total) / n;
+}
+`;
+
 const DEVICE_POOL_ALLOC = `
 __global__ void poolKernel(DevicePool* dp, float* out, int N) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -377,6 +385,24 @@ __global__ void namedConstants(float* out, uint* kinds) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
+  it("runs subgroup reductions with mixed scalar math through real WebGPU", async () => {
+    if (!deviceCheck.available || !deviceCheck.features?.includes("subgroups")) return;
+    const device = await createDevice({ requiredFeatures: ["subgroups" as GPUFeatureName] });
+    const compiled = compileCudaLiteKernel(SUBGROUP_REDUCTION_MIX, {
+      features: { subgroups: true },
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: { out: new Float32Array(1) },
+      scalars: { value: 4, n: 4, mask: 0xffffffff },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(device, compiled, input, launch);
 
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
@@ -1681,8 +1707,8 @@ __global__ void wmma_toy(float* A, float* B, float* C) {
   });
 
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {
-    if (!deviceCheck.available) return;
-    const device = await createDevice();
+    if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
+    const device = await createDevice({ requiredFeatures: ["shader-f16" as GPUFeatureName] });
     const features = await detectKernelFeatures(device);
     if (!features.shaderF16 || !features.float16Array) return;
 
@@ -1707,8 +1733,8 @@ __global__ void half_inc(half* x) {
   });
 
   it("runs compiled half2 vector storage when the browser exposes shader-f16", async () => {
-    if (!deviceCheck.available) return;
-    const device = await createDevice();
+    if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
+    const device = await createDevice({ requiredFeatures: ["shader-f16" as GPUFeatureName] });
     const features = await detectKernelFeatures(device);
     if (!features.shaderF16 || !features.float16Array) return;
 

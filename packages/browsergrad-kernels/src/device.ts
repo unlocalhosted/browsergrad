@@ -86,7 +86,12 @@ export async function createDevice(
     if (!adapter) {
       throw new KernelError("Failed to obtain a WebGPU adapter");
     }
-    gpu = await adapter.requestDevice();
+    const requiredFeatures = options.requiredFeatures ?? [];
+    const missingFeatures = requiredFeatures.filter((feature) => !adapter.features.has(feature));
+    if (missingFeatures.length > 0) {
+      throw new KernelError(`WebGPU adapter missing required features: ${missingFeatures.join(", ")}`);
+    }
+    gpu = await adapter.requestDevice(requiredFeatures.length > 0 ? { requiredFeatures: [...requiredFeatures] } : undefined);
   }
 
   return new KernelDeviceImpl(gpu, options.pipelineCacheSize ?? 32);

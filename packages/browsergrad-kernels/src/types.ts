@@ -37,6 +37,9 @@ export interface KernelDeviceOptions {
   /** Forwarded to `requestAdapter`. Default `"high-performance"`. */
   powerPreference?: GPUPowerPreference;
 
+  /** Optional WebGPU features requested when BrowserGrad creates the device. */
+  requiredFeatures?: readonly GPUFeatureName[];
+
   /** Max compute pipelines kept warm in cache. Default 32. */
   pipelineCacheSize?: number;
 }

@@ -571,7 +571,9 @@ async function collectReadbacks(
   }
   for (const read of reads) {
     try {
-      const bytes = read.readBuffer.getMappedRange(0, read.byteLength).slice(0);
+      const bytes = read.readBuffer
+        .getMappedRange(0, alignTo(read.byteLength, 4))
+        .slice(0, read.byteLength);
       output[read.name] = typedArrayFromBytes(read.binding.valueType, bytes);
     } finally {
       read.readBuffer.unmap();

@@ -1040,9 +1040,29 @@ function emitMmaM16N8K16Statement(
   return outputs.map((output, index) => {
     const a = `u32(${emitExpression(statement.inputs[index % 4]!, context)})`;
     const b = `u32(${emitExpression(statement.inputs[4 + (index % 2)]!, context)})`;
-    const c = emitExpression(statement.inputs[6 + index]!, context);
-    return `${emitExpression(output, context)} = (${c} + dot(unpack2x16float(${a}), unpack2x16float(${b})))`;
+    const c = emitMmaF32AccumulatorInput(statement.inputs[6 + index]!, context);
+    const value = `(${c} + dot(unpack2x16float(${a}), unpack2x16float(${b})))`;
+    return `${emitExpression(output, context)} = ${emitMmaF32AccumulatorOutput(output, value, context)}`;
   }).join("\n");
+}
+
+function emitMmaF32AccumulatorInput(expression: CudaLiteExpression, context: EmitContext): string {
+  const value = emitExpression(expression, context);
+  const type = expressionValueTypeForEmit(expression, context);
+  const scalar = type === undefined || isCudaVectorType(type) ? undefined : cudaScalarWgslType(type);
+  if (scalar === "u32") return `bitcast<f32>(${value})`;
+  if (scalar === "i32") return `bitcast<f32>(u32(${value}))`;
+  if (scalar === "f16") return `f32(${value})`;
+  return value;
+}
+
+function emitMmaF32AccumulatorOutput(target: CudaLiteExpression, value: string, context: EmitContext): string {
+  const type = expressionValueTypeForEmit(target, context);
+  const scalar = type === undefined || isCudaVectorType(type) ? undefined : cudaScalarWgslType(type);
+  if (scalar === "u32") return `bitcast<u32>(${value})`;
+  if (scalar === "i32") return `bitcast<i32>(${value})`;
+  if (scalar === "f16") return `f16(${value})`;
+  return value;
 }
 
 function emitU8x4SadAddExpression(inputs: readonly CudaLiteExpression[], context: EmitContext): string {
@@ -1775,9 +1795,12 @@ function emitSharedPointerRead(
   ir: KernelIrModule,
   context: EmitContext,
   viewType: CudaLiteScalarType = shared.valueType,
+  subElementLane?: string,
 ): string {
-  if (isCudaVectorType(viewType) && shared.valueType !== viewType) return emitSharedVectorFlatRead(shared, index, viewType, context);
   const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, index);
+  const packed = emitPackedHalfStorageRead(access, shared.valueType, viewType, subElementLane);
+  if (packed) return packed;
+  if (isCudaVectorType(viewType) && shared.valueType !== viewType) return emitSharedVectorFlatRead(shared, index, viewType, context);
   if (shared.valueType !== viewType && bitcastStorageViewType(shared.valueType, viewType)) {
     return `bitcast<${wgslScalar(viewType)}>(${access})`;
   }
@@ -1793,13 +1816,96 @@ function emitSharedPointerWrite(
   ir: KernelIrModule,
   context: EmitContext,
   viewType: CudaLiteScalarType = shared.valueType,
+  subElementLane?: string,
 ): string {
-  if (isCudaVectorType(viewType) && shared.valueType !== viewType) return emitSharedVectorFlatWrite(shared, index, value, viewType, context);
   const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, index);
+  const packed = emitPackedHalfStorageWrite(access, shared.valueType, viewType, value, subElementLane);
+  if (packed) return packed;
+  if (isCudaVectorType(viewType) && shared.valueType !== viewType) return emitSharedVectorFlatWrite(shared, index, value, viewType, context);
   const bitcastType = bitcastStorageViewType(viewType, shared.valueType);
   if (shared.valueType !== viewType && bitcastType) return `${access} = bitcast<${bitcastType}>(${value})`;
   if (!ir.atomicShared.includes(shared.name)) return `${access} = ${value}`;
   return shared.valueType === "float" ? `atomicStore(&${access}, bitcast<u32>(${value}))` : `atomicStore(&${access}, ${value})`;
+}
+
+function emitLocalPointerRead(
+  local: CudaLiteVarDecl,
+  index: string,
+  viewType: CudaLiteScalarType,
+  context: EmitContext,
+  subElementLane?: string,
+): string {
+  const access = emitSharedFlatAccess(context.nameFor(local.name), matrixTileStorageDimensions(local), index);
+  const packed = emitPackedHalfStorageRead(access, local.valueType, viewType, subElementLane);
+  if (packed) return packed;
+  if (isCudaVectorType(viewType) && local.valueType !== viewType) return emitLocalVectorFlatRead(local, index, viewType, context);
+  const bitcastType = bitcastStorageViewType(local.valueType, viewType);
+  return local.valueType !== viewType && bitcastType ? `bitcast<${bitcastType}>(${access})` : access;
+}
+
+function emitLocalPointerWrite(
+  local: CudaLiteVarDecl,
+  index: string,
+  value: string,
+  viewType: CudaLiteScalarType,
+  context: EmitContext,
+  subElementLane?: string,
+): string {
+  const access = emitSharedFlatAccess(context.nameFor(local.name), matrixTileStorageDimensions(local), index);
+  const packed = emitPackedHalfStorageWrite(access, local.valueType, viewType, value, subElementLane);
+  if (packed) return packed;
+  if (isCudaVectorType(viewType) && local.valueType !== viewType) return emitLocalVectorFlatWrite(local, index, value, viewType, context);
+  const bitcastType = bitcastStorageViewType(viewType, local.valueType);
+  return local.valueType !== viewType && bitcastType ? `${access} = bitcast<${bitcastType}>(${value})` : `${access} = ${value}`;
+}
+
+function emitPackedHalfStorageRead(
+  access: string,
+  storageType: CudaLiteScalarType,
+  viewType: CudaLiteScalarType,
+  subElementLane?: string,
+): string | undefined {
+  if (!isPackableHalfCarrier(storageType)) return undefined;
+  const bits = emitStorageCarrierAsU32(access, storageType);
+  if (viewType === "half2") return `${wgslScalar("half2")}(unpack2x16float(${bits}))`;
+  if (viewType !== "half" || subElementLane === undefined) return undefined;
+  const unpacked = `unpack2x16float(${bits})`;
+  return `${wgslScalar("half")}(select(${unpacked}.x, ${unpacked}.y, (${subElementLane}) == 1u))`;
+}
+
+function emitPackedHalfStorageWrite(
+  access: string,
+  storageType: CudaLiteScalarType,
+  viewType: CudaLiteScalarType,
+  value: string,
+  subElementLane?: string,
+): string | undefined {
+  if (!isPackableHalfCarrier(storageType)) return undefined;
+  if (viewType === "half2") {
+    return `${access} = ${emitU32AsStorageCarrier(`pack2x16float(vec2<f32>(${value}))`, storageType)}`;
+  }
+  if (viewType !== "half" || subElementLane === undefined) return undefined;
+  const unpacked = `unpack2x16float(${emitStorageCarrierAsU32(access, storageType)})`;
+  const packed = `pack2x16float(vec2<f32>(select(${unpacked}.x, f32(${value}), (${subElementLane}) == 0u), select(${unpacked}.y, f32(${value}), (${subElementLane}) == 1u)))`;
+  return `${access} = ${emitU32AsStorageCarrier(packed, storageType)}`;
+}
+
+function isPackableHalfCarrier(storageType: CudaLiteScalarType): boolean {
+  return wgslElementByteSize(storageType) === 4 && !isCudaVectorType(storageType) && storageType !== "bool";
+}
+
+function emitStorageCarrierAsU32(access: string, storageType: CudaLiteScalarType): string {
+  const storageScalar = cudaScalarWgslType(storageType);
+  if (storageScalar === "u32") return access;
+  if (storageScalar === "i32" || storageScalar === "f32") return `bitcast<u32>(${access})`;
+  return `u32(${access})`;
+}
+
+function emitU32AsStorageCarrier(value: string, storageType: CudaLiteScalarType): string {
+  const storageScalar = cudaScalarWgslType(storageType);
+  if (storageScalar === "u32") return value;
+  if (storageScalar === "i32" || storageScalar === "f32") return `bitcast<${storageScalar}>(${value})`;
+  return `${wgslScalar(storageType)}(${value})`;
 }
 
 function bitcastStorageViewType(from: CudaLiteScalarType, to: CudaLiteScalarType): "f32" | "i32" | "u32" | undefined {
@@ -1818,9 +1924,10 @@ function emitSharedFlatAccess(name: string, dimensions: readonly number[], index
   if (dimensions.length <= 1) return `${name}[${index}]`;
   return dimensions.reduce((expr, dimension, axis) => {
     const stride = dimensions.slice(axis + 1).reduce((product, item) => product * item, 1);
-    const axisIndex = stride === 1
+    const rawAxisIndex = stride === 1
       ? `(${index} % ${dimension}u)`
       : `(((${index}) / ${stride}u) % ${dimension}u)`;
+    const axisIndex = dimension <= 1 ? "0u" : `min(${rawAxisIndex}, ${dimension - 1}u)`;
     return `${expr}[${axisIndex}]`;
   }, name);
 }
@@ -1839,6 +1946,20 @@ function emitSharedVectorFlatRead(
   return `${wgslScalar(viewType)}(${values.join(", ")})`;
 }
 
+function emitLocalVectorFlatRead(
+  local: CudaLiteVarDecl,
+  index: string,
+  viewType: CudaLiteScalarType,
+  context: EmitContext,
+): string {
+  const lanes = cudaVectorLaneCount(viewType);
+  const scalar = cudaVectorScalarType(viewType) ?? "float";
+  const values = Array.from({ length: lanes }, (_, lane) =>
+    emitLocalPointerRead(local, `(${index} + ${lane}u)`, scalar, context)
+  );
+  return `${wgslScalar(viewType)}(${values.join(", ")})`;
+}
+
 function emitSharedVectorFlatWrite(
   shared: CudaLiteVarDecl,
   index: string,
@@ -1850,6 +1971,20 @@ function emitSharedVectorFlatWrite(
   const scalar = cudaVectorScalarType(viewType) ?? "float";
   return Array.from({ length: lanes }, (_, lane) =>
     emitSharedPointerWrite(shared, `(${index} + ${lane}u)`, `${value}.${vectorFieldName(lane)}`, context.ir, context, scalar)
+  ).join("; ");
+}
+
+function emitLocalVectorFlatWrite(
+  local: CudaLiteVarDecl,
+  index: string,
+  value: string,
+  viewType: CudaLiteScalarType,
+  context: EmitContext,
+): string {
+  const lanes = cudaVectorLaneCount(viewType);
+  const scalar = cudaVectorScalarType(viewType) ?? "float";
+  return Array.from({ length: lanes }, (_, lane) =>
+    emitLocalPointerWrite(local, `(${index} + ${lane}u)`, `${value}.${vectorFieldName(lane)}`, scalar, context)
   ).join("; ");
 }
 
@@ -2227,7 +2362,9 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
       const storageView = storageViewLValue(expression, context);
       if (storageView && isCudaVectorType(storageView.valueType)) {
         const shared = storageView.rootName ? sharedDeclarationFor(storageView.rootName, context) : undefined;
-        if (shared) return emitSharedVectorFlatRead(shared, storageView.index, storageView.valueType, context);
+        if (shared) return emitSharedPointerRead(shared, storageView.index, context.ir, context, storageView.valueType, storageView.subElementLane);
+        const local = storageView.rootName ? localArrayForStorageView(storageView.rootName, expression.span, context) : undefined;
+        if (local) return emitLocalPointerRead(local, storageView.index, storageView.valueType, context, storageView.subElementLane);
         return emitVectorStorageReadAt(storageView.name, storageView.valueType, storageView.index);
       }
       const poolAccess = poolAccessForIndex(expression, context);
@@ -2259,14 +2396,23 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
             return `${pointerReadHelperName(valueType)}(${context.nameFor(`${alias.rootName}_buffer`)}, ${emitPointerAliasIndex(alias, expression.index, context)})`;
           }
           if (alias.valueType && isCudaVectorType(alias.valueType)) {
-            const index = emitStorageViewIndex(alias.rootName, alias.baseIndex, expression.index, alias.valueType, context);
-            return emitVectorStorageReadAt(context.nameFor(alias.rootName), alias.valueType, index);
+            const view = createStorageView(alias.rootName, alias.baseIndex, expression.index, alias.valueType, context);
+            const shared = sharedDeclarationFor(alias.rootName, context);
+            if (shared) return emitSharedPointerRead(shared, view.index, context.ir, context, alias.valueType, view.subElementLane);
+            const local = localArrayForStorageView(alias.rootName, expression.span, context);
+            if (local) return emitLocalPointerRead(local, view.index, alias.valueType, context, view.subElementLane);
+            return emitVectorStorageReadAt(context.nameFor(alias.rootName), alias.valueType, view.index);
           }
           if (alias.valueType) {
             const shared = sharedDeclarationFor(alias.rootName, context);
             if (shared) {
-              const index = emitStorageViewIndex(alias.rootName, alias.baseIndex, expression.index, alias.valueType, context);
-              return emitSharedPointerRead(shared, index, context.ir, context, alias.valueType);
+              const view = createStorageView(alias.rootName, alias.baseIndex, expression.index, alias.valueType, context);
+              return emitSharedPointerRead(shared, view.index, context.ir, context, alias.valueType, view.subElementLane);
+            }
+            const local = localArrayForStorageView(alias.rootName, expression.span, context);
+            if (local) {
+              const view = createStorageView(alias.rootName, alias.baseIndex, expression.index, alias.valueType, context);
+              return emitLocalPointerRead(local, view.index, alias.valueType, context, view.subElementLane);
             }
           }
           return `${context.nameFor(alias.rootName)}[${emitPointerAliasIndex(alias, expression.index, context)}]`;
@@ -3164,21 +3310,36 @@ function collectPointerAliases(
   skipNames: ReadonlySet<string> = new Set(),
 ): ReadonlyMap<string, PointerAlias> {
   const aliases = new Map<string, PointerAlias>();
-  const walk = (items: readonly CudaLiteStatement[]): void => {
+  const walk = (items: readonly CudaLiteStatement[], inheritedArrays: ReadonlyMap<string, CudaLiteVarDecl>): void => {
+    const arrays = new Map(inheritedArrays);
     for (const item of items) {
+      if (item.kind === "var" && item.storage === "local" && (item.dimensions.length > 0 || item.matrixTile)) {
+        arrays.set(item.name, item);
+      }
       if (item.kind === "var" && item.pointer && !skipNames.has(item.name)) {
-        const alias = pointerAliasForVar(item);
+        const alias = pointerAliasForVar(item, arrays);
         if (alias) aliases.set(item.name, alias);
       }
       if (item.kind === "dim3" || item.kind === "cooperative-group" || item.kind === "kernel-launch") continue;
       if (item.kind === "if") {
-        walk(item.consequent);
-        if (item.alternate) walk(item.alternate);
+        walk(item.consequent, arrays);
+        if (item.alternate) walk(item.alternate, arrays);
       }
-      if (item.kind === "for" || item.kind === "while" || item.kind === "do-while" || item.kind === "block") walk(item.body);
+      if (item.kind === "for") {
+        const loopArrays = new Map(arrays);
+        if (item.init?.kind === "var" && item.init.storage === "local" && (item.init.dimensions.length > 0 || item.init.matrixTile)) {
+          loopArrays.set(item.init.name, item.init);
+        }
+        if (item.init?.kind === "var" && item.init.pointer && !skipNames.has(item.init.name)) {
+          const alias = pointerAliasForVar(item.init, loopArrays);
+          if (alias) aliases.set(item.init.name, alias);
+        }
+        walk(item.body, loopArrays);
+      }
+      if (item.kind === "while" || item.kind === "do-while" || item.kind === "block") walk(item.body, arrays);
     }
   };
-  walk(statements);
+  walk(statements, new Map());
   return aliases;
 }
 
@@ -3339,9 +3500,12 @@ function collectCooperativeGroups(statements: readonly CudaLiteStatement[]): Rea
   return groups;
 }
 
-function pointerAliasForVar(statement: CudaLiteVarDecl): PointerAlias | undefined {
+function pointerAliasForVar(
+  statement: CudaLiteVarDecl,
+  localArrays: ReadonlyMap<string, CudaLiteVarDecl> = new Map(),
+): PointerAlias | undefined {
   const init = statement.init;
-  const view = pointerAliasForPointerExpression(init, statement.valueType);
+  const view = pointerAliasForPointerExpression(init, statement.valueType, localArrays);
   if (view) return view;
   if (init?.kind !== "unary" || init.operator !== "&") return undefined;
   const target = init.argument;
@@ -3355,14 +3519,17 @@ function pointerAliasForVar(statement: CudaLiteVarDecl): PointerAlias | undefine
 function pointerAliasForPointerExpression(
   expression: CudaLiteExpression | undefined,
   valueType: CudaLiteScalarType,
+  localArrays: ReadonlyMap<string, CudaLiteVarDecl> = new Map(),
 ): PointerAlias | undefined {
   if (!expression) return undefined;
-  if (expression.kind === "cast" && expression.pointer) return pointerAliasForPointerExpression(expression.expression, valueType);
+  if (expression.kind === "cast" && expression.pointer) return pointerAliasForPointerExpression(expression.expression, valueType, localArrays);
   if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
-    return pointerAliasForPointerExpression(expression.args[0], valueType);
+    return pointerAliasForPointerExpression(expression.args[0], valueType, localArrays);
   }
   if (expression.kind === "unary" && expression.operator === "&") {
     const target = expression.argument;
+    const local = localArrayAddressAlias(target, valueType, localArrays);
+    if (local) return local;
     if (target.kind === "index" && target.target.kind === "identifier") {
       return { rootName: target.target.name, baseIndex: target.index, valueType };
     }
@@ -3375,7 +3542,7 @@ function pointerAliasForPointerExpression(
     return { rootName: expression.name, baseIndex: zeroExpression(expression.span), valueType };
   }
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
-    const base = pointerAliasForPointerExpression(expression.left, valueType);
+    const base = pointerAliasForPointerExpression(expression.left, valueType, localArrays);
     if (!base) return undefined;
     return {
       ...base,
@@ -3385,6 +3552,53 @@ function pointerAliasForPointerExpression(
     };
   }
   return undefined;
+}
+
+function localArrayAddressAlias(
+  expression: CudaLiteExpression,
+  valueType: CudaLiteScalarType,
+  localArrays: ReadonlyMap<string, CudaLiteVarDecl>,
+): PointerAlias | undefined {
+  const indices: CudaLiteExpression[] = [];
+  let cursor = expression;
+  while (cursor.kind === "index") {
+    indices.unshift(cursor.index);
+    cursor = cursor.target;
+  }
+  if (cursor.kind !== "identifier") return undefined;
+  const declaration = localArrays.get(cursor.name);
+  if (!declaration) return undefined;
+  return {
+    rootName: cursor.name,
+    baseIndex: flatLocalArrayIndexExpression(indices, matrixTileStorageDimensions(declaration), expression.span),
+    valueType,
+  };
+}
+
+function flatLocalArrayIndexExpression(
+  indices: readonly CudaLiteExpression[],
+  dimensions: readonly number[],
+  span: SourceSpan,
+): CudaLiteExpression {
+  if (indices.length === 0) return zeroExpression(span);
+  const terms = indices.map((index, axis) => {
+    const stride = dimensions.slice(axis + 1).reduce((product, dimension) => product * dimension, 1);
+    if (stride === 1) return index;
+    return {
+      kind: "binary",
+      operator: "*",
+      left: index,
+      right: { kind: "number", value: stride, raw: String(stride), span: index.span },
+      span: index.span,
+    } satisfies CudaLiteExpression;
+  });
+  return terms.reduce<CudaLiteExpression>((left, right) => ({
+    kind: "binary",
+    operator: "+",
+    left,
+    right,
+    span,
+  }), zeroExpression(span));
 }
 
 function isPointerIdentityCall(name: string | undefined): boolean {
@@ -3399,6 +3613,22 @@ function emitPointerAliasIndex(alias: PointerAlias, index: CudaLiteExpression, c
   return `(${base} + ${baseIndex} + ${offset})`;
 }
 
+function createStorageView(
+  rootName: string,
+  baseIndex: CudaLiteExpression,
+  index: CudaLiteExpression,
+  valueType: CudaLiteScalarType,
+  context: EmitContext,
+): StorageView {
+  const subElementLane = emitStorageViewSubElementLane(rootName, index, valueType, context);
+  return {
+    rootName,
+    valueType,
+    index: emitStorageViewIndex(rootName, baseIndex, index, valueType, context),
+    ...(subElementLane === undefined ? {} : { subElementLane }),
+  };
+}
+
 function emitStorageViewIndex(
   rootName: string,
   baseIndex: CudaLiteExpression,
@@ -3410,8 +3640,41 @@ function emitStorageViewIndex(
   const prefix = base
     ? `${base} + u32(${emitExpression(baseIndex, context)})`
     : `u32(${emitExpression(baseIndex, context)})`;
+  const offset = `u32(${emitExpression(index, context)})`;
+  const rootBytes = storageViewRootByteSize(rootName, context);
+  const viewBytes = wgslElementByteSize(valueType);
+  if (viewBytes === rootBytes) return `(${prefix} + ${offset})`;
+  if (viewBytes > rootBytes && viewBytes % rootBytes === 0) {
+    return `(${prefix} + (${offset} * ${viewBytes / rootBytes}u))`;
+  }
+  if (rootBytes > viewBytes && rootBytes % viewBytes === 0) {
+    return `(${prefix} + (${offset} / ${rootBytes / viewBytes}u))`;
+  }
   const lanes = cudaVectorLaneCount(valueType);
-  return `(${prefix} + (u32(${emitExpression(index, context)}) * ${lanes}u))`;
+  return `(${prefix} + (${offset} * ${lanes}u))`;
+}
+
+function emitStorageViewSubElementLane(
+  rootName: string,
+  index: CudaLiteExpression,
+  valueType: CudaLiteScalarType,
+  context: EmitContext,
+): string | undefined {
+  const rootBytes = storageViewRootByteSize(rootName, context);
+  const viewBytes = wgslElementByteSize(valueType);
+  if (rootBytes <= viewBytes || rootBytes % viewBytes !== 0) return undefined;
+  return `(u32(${emitExpression(index, context)}) % ${rootBytes / viewBytes}u)`;
+}
+
+function storageViewRootByteSize(rootName: string, context: EmitContext): number {
+  return wgslElementByteSize(storageViewRootValueType(rootName, context) ?? "uint");
+}
+
+function storageViewRootValueType(rootName: string, context: EmitContext): CudaLiteScalarType | undefined {
+  return sharedDeclarationFor(rootName, context)?.valueType ??
+    context.localArrayFor(rootName)?.valueType ??
+    context.deviceGlobalFor(rootName)?.valueType ??
+    context.paramFor(rootName)?.valueType;
 }
 
 function emitVectorStorageReadAt(name: string, type: CudaLiteScalarType, storageIndex: string): string {
@@ -3615,6 +3878,10 @@ function sharedDeclarationFor(name: string, context: EmitContext): CudaLiteVarDe
   return context.ir.sharedDeclarations.find((item) => item.name === name);
 }
 
+function localArrayForStorageView(name: string, span: SourceSpan | undefined, context: EmitContext): CudaLiteVarDecl | undefined {
+  return context.localArrayFor(name, span) ?? context.localArrayFor(name);
+}
+
 function emitDeref(expression: CudaLiteExpression, context: EmitContext): string {
   const localPointer = localPointerArrayLocalAccess(expression, context);
   if (localPointer) return localPointer;
@@ -3652,6 +3919,10 @@ function emitDeref(expression: CudaLiteExpression, context: EmitContext): string
   }
   const storageView = storageViewForPointerExpression(expression, zeroExpression(expression.span), context);
   if (storageView && isCudaVectorType(storageView.valueType)) {
+    const shared = sharedDeclarationFor(storageView.rootName, context);
+    if (shared) return emitSharedPointerRead(shared, storageView.index, context.ir, context, storageView.valueType, storageView.subElementLane);
+    const local = localArrayForStorageView(storageView.rootName, expression.span, context);
+    if (local) return emitLocalPointerRead(local, storageView.index, storageView.valueType, context, storageView.subElementLane);
     return emitVectorStorageReadAt(context.nameFor(storageView.rootName), storageView.valueType, storageView.index);
   }
   const parts = devicePointerArgumentParts(expression, context);
@@ -3678,7 +3949,11 @@ function emitMember(expression: Extract<CudaLiteExpression, { kind: "member" }>,
   }
   const storageView = storageViewLValue(expression, context);
   if (storageView?.fieldIndex !== undefined) {
-    return `${context.nameFor(storageView.name)}[${storageView.index} + ${storageView.fieldIndex}u]`;
+    const shared = storageView.rootName ? sharedDeclarationFor(storageView.rootName, context) : undefined;
+    if (shared) return `${emitSharedPointerRead(shared, storageView.index, context.ir, context, storageView.valueType, storageView.subElementLane)}.${storageView.field}`;
+    const local = storageView.rootName ? localArrayForStorageView(storageView.rootName, expression.span, context) : undefined;
+    if (local) return `${emitLocalPointerRead(local, storageView.index, storageView.valueType, context, storageView.subElementLane)}.${storageView.field}`;
+    return `${storageView.name}[${storageView.index} + ${storageView.fieldIndex}u]`;
   }
   const objectName = expressionName(expression.object);
   const axisIndex = expression.property === "x" ? 0 : expression.property === "y" ? 1 : 2;
@@ -3752,6 +4027,8 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
   if (expression.kind === "call") {
     const name = expressionName(expression.callee);
     if (name !== undefined && isTextureReadCall(name)) return expression.templateValueType ?? "float";
+    const cooperativeReturnType = name === undefined ? undefined : cooperativeReductionReturnType(name, expression.args, context);
+    if (cooperativeReturnType !== undefined) return cooperativeReturnType;
     if (name !== undefined) {
       const fn = context.deviceFunctionFor(name, expression.args.length);
       if (fn) return fn.returnType;
@@ -3779,6 +4056,9 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
   if (expression.kind === "index") {
     const storageView = storageViewLValue(expression, context);
     if (storageView) return storageView.valueType;
+    const root = rootIdentifier(expression);
+    const localArray = root ? localArrayForStorageView(root, expression.span, context) : undefined;
+    if (localArray) return localArray.valueType;
     return expressionValueTypeForEmit(expression.target, context);
   }
   if (expression.kind === "member") {
@@ -3810,6 +4090,38 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
     );
   }
   return undefined;
+}
+
+function cooperativeReductionReturnType(
+  name: string,
+  args: readonly CudaLiteExpression[],
+  context: EmitContext,
+): CudaLiteScalarType | undefined {
+  switch (name) {
+    case "bg_subgroup_add":
+    case "blockReduce":
+      return args[0] ? expressionValueTypeForEmit(args[0], context) : undefined;
+    case "warpReduceSum":
+    case "warp_reduce_sum":
+    case "warp_reduce_sum_f32":
+    case "warp_reduce_sum_f16":
+    case "warp_reduce_sum_f16_f16":
+    case "warp_reduce_sum_f16_f32":
+    case "warp_reduce_sum_i8_i32":
+    case "warp_reduce_sum_i32_i32":
+    case "warpReduceMax":
+    case "warp_reduce_max":
+    case "warp_reduce_max_f32":
+    case "warpReduceMin":
+    case "warp_reduce_min": {
+      const value = args.length === 2 ? args[1] : args[0];
+      return value ? expressionValueTypeForEmit(value, context) : undefined;
+    }
+    case "__reduce_add_sync":
+      return args[1] ? expressionValueTypeForEmit(args[1], context) : undefined;
+    default:
+      return undefined;
+  }
 }
 
 function vectorArithmeticTypeForEmit(
@@ -4884,24 +5196,31 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   const storageView = storageViewLValue(expression.left, context);
   if (storageView && isCudaVectorType(storageView.valueType)) {
     const shared = storageView.rootName ? sharedDeclarationFor(storageView.rootName, context) : undefined;
+    const local = storageView.rootName ? localArrayForStorageView(storageView.rootName, expression.left.span, context) : undefined;
     const right = emitExpressionAsValueType(expression.right, storageView.valueType, context);
-    if (shared) {
+    if (shared || local) {
+      const read = (): string => shared
+        ? emitSharedPointerRead(shared, storageView.index, context.ir, context, storageView.valueType, storageView.subElementLane)
+        : emitLocalPointerRead(local!, storageView.index, storageView.valueType, context, storageView.subElementLane);
+      const write = (value: string): string => shared
+        ? emitSharedPointerWrite(shared, storageView.index, value, context.ir, context, storageView.valueType, storageView.subElementLane)
+        : emitLocalPointerWrite(local!, storageView.index, value, storageView.valueType, context, storageView.subElementLane);
       if (storageView.field) {
         const scalar = cudaVectorScalarType(storageView.valueType) ?? "float";
-        const laneIndex = `(${storageView.index} + ${storageView.fieldIndex ?? 0}u)`;
-        const current = emitSharedPointerRead(shared, laneIndex, context.ir, context, scalar);
+        const currentVector = read();
+        const current = `${currentVector}.${storageView.field}`;
         const laneValue = expression.operator === "="
           ? emitExpressionAsValueType(expression.right, scalar, context)
           : `(${current} ${expression.operator.slice(0, -1)} ${emitExpressionAsValueType(expression.right, scalar, context)})`;
-        return emitSharedPointerWrite(shared, laneIndex, laneValue, context.ir, context, scalar);
+        return write(emitVectorLaneSetExpression(currentVector, storageView.valueType, storageView.fieldIndex ?? 0, laneValue));
       }
       if (expression.operator !== "=") {
-        const current = emitSharedVectorFlatRead(shared, storageView.index, storageView.valueType, context);
+        const current = read();
         const op = expression.operator.slice(0, -1);
         const vectorRight = emitExpressionAsVectorOperand(expression.right, storageView.valueType as CudaLiteVectorType, context);
-        return emitSharedVectorFlatWrite(shared, storageView.index, `(${current} ${op} ${vectorRight})`, storageView.valueType, context);
+        return write(`(${current} ${op} ${vectorRight})`);
       }
-      return emitSharedVectorFlatWrite(shared, storageView.index, right, storageView.valueType, context);
+      return write(right);
     }
     if (storageView.field) {
       const current = `${storageView.name}[${storageView.index} + ${storageView.fieldIndex ?? 0}u]`;
@@ -4927,12 +5246,16 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   if (vectorAssignment) return vectorAssignment;
   const scalarStorageView = scalarStorageViewLValue(expression.left, context);
   if (scalarStorageView) {
-    const current = emitSharedPointerRead(scalarStorageView.shared, scalarStorageView.index, context.ir, context, scalarStorageView.valueType);
+    const current = scalarStorageView.addressSpace === "shared"
+      ? emitSharedPointerRead(scalarStorageView.root, scalarStorageView.index, context.ir, context, scalarStorageView.valueType, scalarStorageView.subElementLane)
+      : emitLocalPointerRead(scalarStorageView.root, scalarStorageView.index, scalarStorageView.valueType, context, scalarStorageView.subElementLane);
     const right = emitExpressionAsValueType(expression.right, scalarStorageView.valueType, context);
     const value = expression.operator === "="
       ? right
       : `(${current} ${expression.operator.slice(0, -1)} ${right})`;
-    return emitSharedPointerWrite(scalarStorageView.shared, scalarStorageView.index, value, context.ir, context, scalarStorageView.valueType);
+    return scalarStorageView.addressSpace === "shared"
+      ? emitSharedPointerWrite(scalarStorageView.root, scalarStorageView.index, value, context.ir, context, scalarStorageView.valueType, scalarStorageView.subElementLane)
+      : emitLocalPointerWrite(scalarStorageView.root, scalarStorageView.index, value, scalarStorageView.valueType, context, scalarStorageView.subElementLane);
   }
   const pointerLvalue = devicePointerLValue(expression.left, context);
   if (pointerLvalue) {
@@ -5267,9 +5590,17 @@ interface VectorStorageLValue {
   readonly name: string;
   readonly valueType: CudaLiteScalarType;
   readonly index: string;
+  readonly subElementLane?: string;
   readonly lanes: number;
   readonly field?: string;
   readonly fieldIndex?: number;
+}
+
+interface StorageView {
+  readonly rootName: string;
+  readonly valueType: CudaLiteScalarType;
+  readonly index: string;
+  readonly subElementLane?: string;
 }
 
 function vectorStorageLValue(expression: CudaLiteExpression, context: EmitContext): VectorStorageLValue | undefined {
@@ -5312,6 +5643,7 @@ function storageViewLValue(expression: CudaLiteExpression, context: EmitContext)
     name: context.nameFor(view.rootName),
     valueType: view.valueType,
     index: view.index,
+    ...(view.subElementLane === undefined ? {} : { subElementLane: view.subElementLane }),
     lanes: cudaVectorLaneCount(view.valueType),
   };
   if (!field) return base;
@@ -5320,9 +5652,11 @@ function storageViewLValue(expression: CudaLiteExpression, context: EmitContext)
 }
 
 interface ScalarStorageViewLValue {
-  readonly shared: CudaLiteVarDecl;
+  readonly root: CudaLiteVarDecl;
+  readonly addressSpace: "local" | "shared";
   readonly valueType: CudaLiteScalarType;
   readonly index: string;
+  readonly subElementLane?: string;
 }
 
 function scalarStorageViewLValue(expression: CudaLiteExpression, context: EmitContext): ScalarStorageViewLValue | undefined {
@@ -5330,44 +5664,104 @@ function scalarStorageViewLValue(expression: CudaLiteExpression, context: EmitCo
   const view = storageViewForPointerExpression(expression.target, expression.index, context);
   if (!view || isCudaVectorType(view.valueType)) return undefined;
   const shared = sharedDeclarationFor(view.rootName, context);
-  return shared ? { shared, valueType: view.valueType, index: view.index } : undefined;
+  if (shared) {
+    return {
+      root: shared,
+      addressSpace: "shared",
+      valueType: view.valueType,
+      index: view.index,
+      ...(view.subElementLane === undefined ? {} : { subElementLane: view.subElementLane }),
+    };
+  }
+  const local = localArrayForStorageView(view.rootName, expression.span, context);
+  return local ? {
+    root: local,
+    addressSpace: "local",
+    valueType: view.valueType,
+    index: view.index,
+    ...(view.subElementLane === undefined ? {} : { subElementLane: view.subElementLane }),
+  } : undefined;
 }
 
 function storageViewForPointerExpression(
   pointer: CudaLiteExpression,
   index: CudaLiteExpression,
   context: EmitContext,
-): { readonly rootName: string; readonly valueType: CudaLiteScalarType; readonly index: string } | undefined {
+): StorageView | undefined {
   if (pointer.kind === "cast" && pointer.pointer) {
-    const rawAlias = pointerAliasForPointerExpression(pointer.expression, pointer.valueType);
+    const rawAlias = pointerAliasForContextPointerExpression(pointer.expression, pointer.valueType, context) ??
+      pointerAliasForPointerExpression(pointer.expression, pointer.valueType);
     const alias = rawAlias ? flattenPointerAlias(rawAlias, pointer.span, context) : undefined;
     if (!alias || context.devicePointerParamFor(alias.rootName)) return undefined;
-    return {
-      rootName: alias.rootName,
-      valueType: pointer.valueType,
-      index: emitStorageViewIndex(alias.rootName, alias.baseIndex, index, pointer.valueType, context),
-    };
+    return createStorageView(alias.rootName, alias.baseIndex, index, pointer.valueType, context);
   }
   if (pointer.kind === "identifier") {
     const alias = flattenedPointerAlias(pointer.name, pointer.span, context);
     if (!alias?.valueType || context.devicePointerParamFor(alias.rootName)) return undefined;
-    return {
-      rootName: alias.rootName,
-      valueType: alias.valueType,
-      index: emitStorageViewIndex(alias.rootName, alias.baseIndex, index, alias.valueType, context),
-    };
+    return createStorageView(alias.rootName, alias.baseIndex, index, alias.valueType, context);
   }
   const valueType = devicePointerValueTypeForExpression(pointer, context);
-  const rawAlias = pointerAliasForPointerExpression(pointer, valueType);
+  const rawAlias = pointerAliasForContextPointerExpression(pointer, valueType, context) ??
+    pointerAliasForPointerExpression(pointer, valueType);
   const alias = rawAlias ? flattenPointerAlias(rawAlias, pointer.span, context) : undefined;
   if (alias?.valueType && !context.devicePointerParamFor(alias.rootName)) {
+    return createStorageView(alias.rootName, alias.baseIndex, index, alias.valueType, context);
+  }
+  return undefined;
+}
+
+function pointerAliasForContextPointerExpression(
+  expression: CudaLiteExpression | undefined,
+  valueType: CudaLiteScalarType,
+  context: EmitContext,
+): PointerAlias | undefined {
+  if (!expression) return undefined;
+  if (expression.kind === "cast" && expression.pointer) return pointerAliasForContextPointerExpression(expression.expression, valueType, context);
+  if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
+    return pointerAliasForContextPointerExpression(expression.args[0], valueType, context);
+  }
+  if (expression.kind === "unary" && expression.operator === "&") return arrayAddressAliasForContext(expression.argument, valueType, context);
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    const base = pointerAliasForContextPointerExpression(expression.left, valueType, context);
+    if (!base) return undefined;
     return {
-      rootName: alias.rootName,
-      valueType: alias.valueType,
-      index: emitStorageViewIndex(alias.rootName, alias.baseIndex, index, alias.valueType, context),
+      ...base,
+      baseIndex: expression.operator === "+"
+        ? { kind: "binary", operator: "+", left: base.baseIndex, right: expression.right, span: expression.span }
+        : { kind: "binary", operator: "-", left: base.baseIndex, right: expression.right, span: expression.span },
     };
   }
   return undefined;
+}
+
+function arrayAddressAliasForContext(
+  expression: CudaLiteExpression,
+  valueType: CudaLiteScalarType,
+  context: EmitContext,
+): PointerAlias | undefined {
+  const indices: CudaLiteExpression[] = [];
+  let cursor = expression;
+  while (cursor.kind === "index") {
+    indices.unshift(cursor.index);
+    cursor = cursor.target;
+  }
+  if (cursor.kind !== "identifier") return undefined;
+  const local = localArrayForStorageView(cursor.name, expression.span, context);
+  const shared = sharedDeclarationFor(cursor.name, context);
+  const global = context.deviceGlobalFor(cursor.name);
+  const dimensions = local
+    ? matrixTileStorageDimensions(local)
+    : shared
+      ? shared.dimensions
+      : global
+        ? global.dimensions
+        : undefined;
+  if (!dimensions) return undefined;
+  return {
+    rootName: cursor.name,
+    baseIndex: flatLocalArrayIndexExpression(indices, dimensions, expression.span),
+    valueType,
+  };
 }
 
 function isBarrierCall(expression: CudaLiteExpression): boolean {
@@ -5667,17 +6061,19 @@ function emitSurfaceWriteExpression(
   context: EmitContext,
 ): string {
   const valueType = expressionValueTypeForEmit(valueExpression, context);
+  const surfaceY = `i32(${y})`;
+  const surfaceZ = `i32(${z})`;
   if (isCudaVectorType(valueType)) {
     const value = emitExpression(valueExpression, context);
     const fields = ["x", "y", "z", "w"].slice(0, cudaVectorLaneCount(valueType));
     return [
       ...fields.map((field, index) =>
-        `bg_surf2dwrite_${surfaceName}(f32(${value}.${field}), (${emitExpressionAsValueType(xBytesExpression, "int", context)} + ${index * 4}), ${y}, ${z})`,
+        `bg_surf2dwrite_${surfaceName}(f32(${value}.${field}), (${emitExpressionAsValueType(xBytesExpression, "int", context)} + ${index * 4}), ${surfaceY}, ${surfaceZ})`,
       ),
       "0",
     ].join("; ");
   }
-  return `bg_surf2dwrite_${surfaceName}(${emitExpressionAsValueType(valueExpression, "float", context)}, ${emitExpressionAsValueType(xBytesExpression, "int", context)}, ${y}, ${z})`;
+  return `bg_surf2dwrite_${surfaceName}(${emitExpressionAsValueType(valueExpression, "float", context)}, ${emitExpressionAsValueType(xBytesExpression, "int", context)}, ${surfaceY}, ${surfaceZ})`;
 }
 
 function emitTextureVectorCastHelpers(

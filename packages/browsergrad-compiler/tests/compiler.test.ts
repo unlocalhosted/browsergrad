@@ -603,8 +603,8 @@ __global__ void shared_pointer_2d(float* out) {
       { gridDim: [1, 1, 1], blockDim: [6, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("case 1u: { return tile[(((index) / 3u) % 2u)][(index % 3u)]; }");
-    expect(compiled.wgsl).toContain("case 1u: { tile[(((index) / 3u) % 2u)][(index % 3u)] = value; return; }");
+    expect(compiled.wgsl).toContain("case 1u: { return tile[min((((index) / 3u) % 2u), 1u)][min((index % 3u), 2u)]; }");
+    expect(compiled.wgsl).toContain("case 1u: { tile[min((((index) / 3u) % 2u), 1u)][min((index % 3u), 2u)] = value; return; }");
     expect([...result.buffers.out as Float32Array]).toEqual([3, 3, 3, 3, 3, 3]);
   });
 
@@ -1653,6 +1653,23 @@ __global__ void kernel(int* out, int value, unsigned int mask) {
 
     expect(compiled.wgsl).toContain("out[0] = subgroupAdd(bg_uniforms.value)");
     expect([...result.buffers.out as Int32Array]).toEqual([7]);
+  });
+
+  it("infers subgroup reduction value types for mixed scalar math", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void kernel(float* out, float value, int n, unsigned int mask) {
+  float sum = warpReduceSum(mask, value);
+  float total = __reduce_add_sync(mask, value);
+  out[0] = (sum + total) / n;
+}`, { features: { subgroups: true }, workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) }, scalars: { value: 4, n: 4, mask: 0xffffffff } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("/ f32(bg_uniforms.n)");
+    expect([...result.buffers.out as Float32Array]).toEqual([2]);
   });
 
   it("runs scalar warp reductions across reference threads", () => {
@@ -3699,6 +3716,53 @@ __global__ void sharedVectorOverlay(float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([10]);
   });
 
+  it("bitcasts nested local array scalar pointer views over integer carriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void localOverlay(float *out) {
+  uint regs[1][2][2];
+  regs[0][1][0] = __float_as_uint(3.5f);
+  float *view = reinterpret_cast<float *>(&(regs[0][1][0]));
+  view[1] = view[0] + 2.0f;
+  out[0] = __uint_as_float(regs[0][1][1]);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bitcast<f32>(regs[");
+    expect(compiled.wgsl).toContain("bitcast<u32>");
+    expect([...result.buffers.out as Float32Array]).toEqual([5.5]);
+  });
+
+  it("packs scalar half pointer views over 32-bit local carriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void localHalfOverlay(uint *out, float *sum) {
+  uint regs[1][2];
+  regs[0][0] = 0u;
+  regs[0][1] = 0u;
+  half *view = reinterpret_cast<half *>(&(regs[0][0]));
+  view[0] = __float2half(1.0f);
+  view[1] = __float2half(2.0f);
+  view[2] = __float2half(3.0f);
+  view[3] = __float2half(4.0f);
+  sum[0] = __half2float(view[0]) + __half2float(view[1]) + __half2float(view[2]) + __half2float(view[3]);
+  out[0] = regs[0][0];
+  out[1] = regs[0][1];
+}`, { workgroupSize: [1, 1, 1], features: { "shader-f16": true } });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2), sum: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("pack2x16float");
+    expect(compiled.wgsl).toContain("unpack2x16float");
+    expect([...result.buffers.out as Uint32Array]).toEqual([0x40003c00, 0x44004200]);
+    expect([...result.buffers.sum as Float32Array]).toEqual([10]);
+  });
+
   it("lowers generic pointer dereference lvalues and rebased kernel params", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void derefWrite(float *x) {
@@ -4145,6 +4209,38 @@ __global__ void mmaCarrier(uint *out) {
 
     expect(compiled.wgsl).toContain("pack2x16float");
     expect([...result.buffers.out as Uint32Array]).toEqual([0x40004000, 0x40004000]);
+  });
+
+  it("bitcasts f32 inline PTX mma accumulator carriers stored in integer regs", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void mmaF32Carrier(uint *out, float *asFloat) {
+  uint a0 = 0x3c003c00u;
+  uint a1 = 0x3c003c00u;
+  uint a2 = 0x3c003c00u;
+  uint a3 = 0x3c003c00u;
+  uint b0 = 0x40004000u;
+  uint b1 = 0x40004000u;
+  uint d0 = __float_as_uint(1.5f);
+  uint d1 = __float_as_uint(2.5f);
+  uint d2 = __float_as_uint(3.5f);
+  uint d3 = __float_as_uint(4.5f);
+  asm volatile(
+    "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\\n"
+    : "=r"(d0), "=r"(d1), "=r"(d2), "=r"(d3)
+    : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(d0), "r"(d1), "r"(d2), "r"(d3));
+  out[0] = d0;
+  asFloat[0] = __uint_as_float(d0);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(1), asFloat: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bitcast<f32>(d0)");
+    expect(compiled.wgsl).toContain("d0 = bitcast<u32>");
+    expect([...result.buffers.out as Uint32Array]).toEqual([floatBits(5.5)]);
+    expect([...result.buffers.asFloat as Float32Array]).toEqual([5.5]);
   });
 
   it("lowers multi-output ldmatrix carriers", () => {
@@ -5400,7 +5496,7 @@ __global__ void splitShared(float *x) {
     );
 
     expect(compiled.wgsl).not.toContain("var sdataB");
-    expect(compiled.wgsl).toContain("sdataA[(u32((0 + 2)) + (u32(tid) * 1u))]");
+    expect(compiled.wgsl).toContain("sdataA[(u32((0 + 2)) + u32(tid))]");
     expect([...result.buffers.x as Float32Array]).toEqual([6, 2, 3, 4]);
   });
 

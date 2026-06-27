@@ -780,10 +780,27 @@ function execMmaM16N8K16(
   for (let index = 0; index < outputs.length; index++) {
     const a = inputs[index % 4]!;
     const b = inputs[4 + (index % 2)]!;
-    const c = evalNumber(statement.inputs[6 + index]!, context);
+    const c = mmaF32AccumulatorInput(statement.inputs[6 + index]!, context);
     const prod = unpackHalfLane(a, 0) * unpackHalfLane(b, 0) + unpackHalfLane(a, 1) * unpackHalfLane(b, 1);
-    writeLValue(resolveLValue(outputs[index]!, context), c + prod, context);
+    const output = outputs[index]!;
+    writeLValue(resolveLValue(output, context), mmaF32AccumulatorOutput(output, c + prod, context), context);
   }
+}
+
+function mmaF32AccumulatorInput(expression: CudaLiteExpression, context: ThreadContext): number {
+  const value = evalNumber(expression, context);
+  const type = expressionValueType(expression, context);
+  if (type === "uint") return floatFromBits(value);
+  if (type === "int") return floatFromBits(value >>> 0);
+  return value;
+}
+
+function mmaF32AccumulatorOutput(expression: CudaLiteExpression, value: number, context: ThreadContext): number {
+  const type = expressionValueType(expression, context);
+  if (type === "uint") return bitsFromFloat(value);
+  if (type === "int") return bitsFromFloat(value) | 0;
+  if (type === "half") return roundHalf(value);
+  return value;
 }
 
 function mmaHalf2Carrier(a: number, b: number, c: number): number {
@@ -1121,7 +1138,7 @@ function pointerArgumentValue(
         kind: "address",
         target: {
           ...pointer.target,
-          index: lvalueStorageIndex(pointer.target, context),
+          index: rawStorageIndexFromByteOffset(lvalueByteOffset(pointer.target, context), arg.valueType),
           valueType: arg.valueType,
           rawStorageIndex: true,
         },
@@ -1387,6 +1404,14 @@ function scalarByteSize(valueType: CudaLiteScalarType | undefined): number {
   if (valueType === "bf16") return 2;
   if (valueType === "complex64") return 8;
   return 4;
+}
+
+function rawStorageUnitByteSize(valueType: CudaLiteScalarType | undefined): number {
+  return scalarByteSize(valueType === undefined ? undefined : cudaVectorScalarType(valueType) ?? valueType);
+}
+
+function rawStorageIndexFromByteOffset(byteOffset: number, valueType: CudaLiteScalarType | undefined): number {
+  return Math.trunc(byteOffset / rawStorageUnitByteSize(valueType));
 }
 
 function rootIdentifierFromExpression(expression: CudaLiteExpression): string | undefined {
@@ -3098,7 +3123,7 @@ function resolvePointerCastLValue(expression: CudaLiteExpression, context: Threa
     return {
       name: pointer.target.name,
       space: pointer.target.space,
-      index: lvalueStorageIndex(pointer.target, context) + index,
+      index: rawStorageIndexFromByteOffset(lvalueByteOffset(pointer.target, context), target.valueType) + index,
       valueType: target.valueType,
       rawStorageIndex: true,
     };
@@ -3117,6 +3142,21 @@ function lvalueStorageIndex(lvalue: LValue, context: ThreadContext): number {
     return lvalue.index * valueStorageWidth(isLocalArray(local) ? local.valueType : undefined);
   }
   return lvalue.index;
+}
+
+function lvalueByteOffset(lvalue: LValue, context: ThreadContext): number {
+  if (lvalue.index === undefined) return 0;
+  if (lvalue.rawStorageIndex) return lvalue.index * rawStorageUnitByteSize(lvalue.valueType);
+  if (lvalue.valueType) return lvalue.index * elementByteSize(lvalue.valueType);
+  if (lvalue.space === "shared") return lvalue.index * elementByteSize(context.shared.get(lvalue.name)?.valueType ?? "uint");
+  if (lvalue.space === "buffer" || lvalue.space === "constant" || lvalue.space === "device-global") {
+    return lvalue.index * elementByteSize(context.valueTypes.get(lvalue.name) ?? "uint");
+  }
+  if (lvalue.space === "local") {
+    const local = context.locals.get(lvalue.name);
+    return lvalue.index * elementByteSize(isLocalArray(local) ? local.valueType : lvalue.valueType ?? "uint");
+  }
+  return lvalue.index * 4;
 }
 
 function resolvePoolLValue(expression: CudaLiteExpression, context: ThreadContext): LValue | undefined {
@@ -3174,9 +3214,8 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
     if (!isLocalArray(local)) throw compilerFailure(`'${lvalue.name}' is not a local array`);
     const valueType = lvalue.valueType ?? local.valueType;
     const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
-    const width = valueStorageWidth(valueType);
-    const ok = storageIndex >= 0 && storageIndex + width - 1 < local.data.length;
-    return ok ? readBufferValue(local.data, storageIndex, valueType, lvalue.field) : 0;
+    const ok = storageRangeFits(local.data, storageIndex, valueType);
+    return ok ? readLocalBufferValue(local, storageIndex, valueType, lvalue.field) : 0;
   }
   if (lvalue.index === undefined) throw compilerFailure(`missing index for '${lvalue.name}'`);
   if (lvalue.space === "buffer" || lvalue.space === "device-global") {
@@ -3184,8 +3223,7 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
     if (!buffer) throw compilerFailure(`missing ${lvalue.space === "device-global" ? "device global" : "buffer"} '${lvalue.name}'`);
     const valueType = lvalue.valueType ?? context.valueTypes.get(lvalue.name);
     const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
-    const width = valueStorageWidth(valueType);
-    const ok = storageIndex >= 0 && storageIndex + width - 1 < buffer.length;
+    const ok = storageRangeFits(buffer, storageIndex, valueType);
     const value = ok ? readBufferValue(buffer, storageIndex, valueType, lvalue.field) : 0;
     context.trace.reads.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
     return value;
@@ -3195,8 +3233,7 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
     if (!value || typeof value === "number") throw compilerFailure(`missing constant buffer '${lvalue.name}'`);
     const valueType = lvalue.valueType ?? context.valueTypes.get(lvalue.name);
     const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
-    const width = valueStorageWidth(valueType);
-    const ok = storageIndex >= 0 && storageIndex + width - 1 < value.length;
+    const ok = storageRangeFits(value, storageIndex, valueType);
     const read = ok ? readBufferValue(value, storageIndex, valueType, lvalue.field) : 0;
     context.trace.reads.push({ name: lvalue.name, index: storageIndex, value: traceValue(read), ok });
     return read;
@@ -3219,8 +3256,7 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
   if (!shared) throw compilerFailure(`missing shared array '${lvalue.name}'`);
   const valueType = lvalue.valueType ?? shared.valueType;
   const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
-  const width = valueStorageWidth(valueType);
-  const ok = storageIndex >= 0 && storageIndex + width - 1 < shared.data.length;
+  const ok = storageRangeFits(shared.data, storageIndex, valueType);
   const value = ok ? readSharedBufferValue(shared, storageIndex, valueType, lvalue.field) : 0;
   context.trace.sharedReads.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
   return value;
@@ -3248,9 +3284,8 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
       if (!isLocalArray(local)) throw compilerFailure(`'${lvalue.name}' is not a local array`);
       const valueType = lvalue.valueType ?? local.valueType;
       const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
-      const width = valueStorageWidth(valueType);
-      const ok = storageIndex >= 0 && storageIndex + width - 1 < local.data.length;
-      if (ok) writeBufferValue(local.data, storageIndex, valueType, lvalue.field, value);
+      const ok = storageRangeFits(local.data, storageIndex, valueType);
+      if (ok) writeLocalBufferValue(local, storageIndex, valueType, lvalue.field, value);
       return;
     }
     if (lvalue.field || lvalue.fieldIndex !== undefined) {
@@ -3279,8 +3314,7 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
     if (!buffer) throw compilerFailure(`missing ${lvalue.space === "device-global" ? "device global" : "buffer"} '${lvalue.name}'`);
     const valueType = lvalue.valueType ?? context.valueTypes.get(lvalue.name);
     const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
-    const width = valueStorageWidth(valueType);
-    const ok = storageIndex >= 0 && storageIndex + width - 1 < buffer.length;
+    const ok = storageRangeFits(buffer, storageIndex, valueType);
     if (ok) writeBufferValue(buffer, storageIndex, valueType, lvalue.field, value);
     context.trace.writes.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
     return;
@@ -3303,8 +3337,7 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
   if (!shared) throw compilerFailure(`missing shared array '${lvalue.name}'`);
   const valueType = lvalue.valueType ?? shared.valueType;
   const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
-  const width = valueStorageWidth(valueType);
-  const ok = storageIndex >= 0 && storageIndex + width - 1 < shared.data.length;
+  const ok = storageRangeFits(shared.data, storageIndex, valueType);
   if (ok) writeSharedBufferValue(shared, storageIndex, valueType, lvalue.field, value);
   context.trace.sharedWrites.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
 }
@@ -3450,6 +3483,9 @@ function readScalarStorageValue(
   storageIndex: number,
   valueType: CudaLiteScalarType | undefined,
 ): number {
+  if (valueType === "half" && isPackedHalfCarrierBuffer(buffer)) {
+    return readPackedHalfStorageValue(buffer, storageIndex);
+  }
   const raw = Number(buffer[storageIndex] ?? 0);
   if ((valueType === "float" || valueType === "double" || valueType === "bf16") &&
     (buffer instanceof Int32Array || buffer instanceof Uint32Array)) {
@@ -3468,6 +3504,10 @@ function writeScalarStorageValue(
   valueType: CudaLiteScalarType | undefined,
   value: number,
 ): void {
+  if (valueType === "half" && isPackedHalfCarrierBuffer(buffer)) {
+    writePackedHalfStorageValue(buffer, storageIndex, value);
+    return;
+  }
   if ((valueType === "float" || valueType === "double" || valueType === "bf16") &&
     (buffer instanceof Int32Array || buffer instanceof Uint32Array)) {
     buffer[storageIndex] = bitsFromFloat(value);
@@ -3478,6 +3518,98 @@ function writeScalarStorageValue(
     return;
   }
   buffer[storageIndex] = value;
+}
+
+function storageRangeFits(buffer: WgslTypedArray, storageIndex: number, valueType: CudaLiteScalarType | undefined): boolean {
+  if (storageIndex < 0) return false;
+  const width = valueStorageWidth(valueType);
+  const scalar = valueType === undefined ? undefined : cudaVectorScalarType(valueType) ?? valueType;
+  if (scalar === "half" && isPackedHalfCarrierBuffer(buffer)) {
+    return Math.trunc((storageIndex + width - 1) / 2) < buffer.length;
+  }
+  return storageIndex + width - 1 < buffer.length;
+}
+
+function isPackedHalfCarrierBuffer(buffer: WgslTypedArray): buffer is Int32Array | Uint32Array | Float32Array {
+  return buffer instanceof Int32Array || buffer instanceof Uint32Array || buffer instanceof Float32Array;
+}
+
+function readPackedHalfStorageValue(buffer: Int32Array | Uint32Array | Float32Array, halfIndex: number): number {
+  const wordIndex = Math.trunc(halfIndex / 2);
+  const lane = Math.abs(halfIndex % 2) as 0 | 1;
+  return unpackHalfLane(readPackedHalfCarrierBits(buffer, wordIndex), lane);
+}
+
+function writePackedHalfStorageValue(buffer: Int32Array | Uint32Array | Float32Array, halfIndex: number, value: number): void {
+  const wordIndex = Math.trunc(halfIndex / 2);
+  const lane = Math.abs(halfIndex % 2);
+  const old = readPackedHalfCarrierBits(buffer, wordIndex);
+  const halfBits = float32ToFloat16Bits(value);
+  const mask = lane === 0 ? 0xffff0000 : 0x0000ffff;
+  const shifted = lane === 0 ? halfBits : halfBits << 16;
+  writePackedHalfCarrierBits(buffer, wordIndex, ((old & mask) | shifted) >>> 0);
+}
+
+function readPackedHalfCarrierBits(buffer: Int32Array | Uint32Array | Float32Array, index: number): number {
+  const raw = Number(buffer[index] ?? 0);
+  if (buffer instanceof Float32Array) return bitsFromFloat(raw);
+  return raw >>> 0;
+}
+
+function writePackedHalfCarrierBits(buffer: Int32Array | Uint32Array | Float32Array, index: number, value: number): void {
+  if (buffer instanceof Float32Array) {
+    buffer[index] = floatFromBits(value);
+    return;
+  }
+  buffer[index] = value;
+}
+
+function readLocalBufferValue(
+  local: LocalArrayValue,
+  storageIndex: number,
+  valueType: CudaLiteScalarType | undefined,
+  field: "x" | "y" | "z" | "w" | undefined,
+): EvalValue {
+  if (local.valueType === valueType || valueType === undefined) return readBufferValue(local.data, storageIndex, valueType, field);
+  if (isCudaVectorType(valueType)) {
+    const scalar = cudaVectorScalarType(valueType);
+    const lanes = Array.from({ length: cudaVectorLaneCount(valueType) }, (_unused, lane) =>
+      readScalarStorageValue(local.data, storageIndex + lane, scalar)
+    );
+    if (field) {
+      const index = cudaVectorFieldIndex(valueType, field);
+      return index === undefined ? 0 : lanes[index] ?? 0;
+    }
+    return { kind: "cuda-vector", valueType, lanes };
+  }
+  return readScalarStorageValue(local.data, storageIndex, valueType);
+}
+
+function writeLocalBufferValue(
+  local: LocalArrayValue,
+  storageIndex: number,
+  valueType: CudaLiteScalarType | undefined,
+  field: "x" | "y" | "z" | "w" | undefined,
+  value: EvalValue,
+): void {
+  if (local.valueType === valueType || valueType === undefined) {
+    writeBufferValue(local.data, storageIndex, valueType, field, value);
+    return;
+  }
+  if (isCudaVectorType(valueType)) {
+    if (field) {
+      const index = cudaVectorFieldIndex(valueType, field);
+      if (index !== undefined) writeScalarStorageValue(local.data, storageIndex + index, cudaVectorScalarType(valueType), valueAsNumber(value, field));
+      return;
+    }
+    const vector = valueAsCudaVector(value, valueType);
+    const scalar = cudaVectorScalarType(valueType);
+    for (let lane = 0; lane < cudaVectorLaneCount(valueType); lane++) {
+      writeScalarStorageValue(local.data, storageIndex + lane, scalar, vector.lanes[lane] ?? 0);
+    }
+    return;
+  }
+  writeScalarStorageValue(local.data, storageIndex, valueType, valueAsNumber(value, "local write"));
 }
 
 function readSharedBufferValue(
