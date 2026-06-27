@@ -261,7 +261,7 @@ function normalizePreparedRunOptions(
     };
     if (initialPlan.kind === "single-dispatch" || initialPlan.kind === "runtime-elided-single-dispatch" || initialPlan.kind === "grid-sync-phases") {
       const uniforms = packCudaWebGpuUniformParams(compiled, nextInput);
-      if (uniforms.byteLength > 0) out.uniforms = { params: uniforms };
+      if (uniforms.byteLength > 0) out.uniforms = { bg_uniforms: uniforms };
       return out;
     }
     const nextPlan = createCudaWebGpuExecutionPlan(compiled, nextInput, launch, planOptions);

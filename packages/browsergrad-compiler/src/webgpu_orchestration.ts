@@ -761,7 +761,7 @@ function createWgslRunInput(
     ...(input.residentBuffers === undefined ? {} : { residentBuffers: input.residentBuffers }),
     ...(Object.keys(storageMetadata).length === 0 ? {} : { storageMetadata }),
     ...(input.textures === undefined ? {} : { textures: input.textures }),
-    ...(uniforms.byteLength === 0 ? {} : { uniforms: { params: uniforms } }),
+    ...(uniforms.byteLength === 0 ? {} : { uniforms: { bg_uniforms: uniforms } }),
     readback,
   };
 }

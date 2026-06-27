@@ -176,7 +176,7 @@ describe("CUDA-lite compiler", () => {
     expect(compiled.wgsl).toContain("@workgroup_size(8, 1, 1)");
     expect(compiled.wgsl).toContain("var<storage, read> x: array<f32>;");
     expect(compiled.wgsl).toContain("var<storage, read_write> y: array<f32>;");
-    expect(compiled.wgsl).toContain("params.a");
+    expect(compiled.wgsl).toContain("bg_uniforms.a");
     const directPlan = createCudaWebGpuExecutionPlan(
       compiled,
       {
@@ -254,9 +254,9 @@ __global__ void mutateParams(float* out, float alpha, float beta, int n, bool en
     );
 
     expect([...result.buffers.out as Float32Array]).toEqual([8]);
-    expect(compiled.wgsl).toContain("var beta: f32 = params.beta;");
-    expect(compiled.wgsl).toContain("var n: i32 = params.n;");
-    expect(compiled.wgsl).toContain("var enabled: bool = (params.enabled != 0u);");
+    expect(compiled.wgsl).toContain("var beta: f32 = bg_uniforms.beta;");
+    expect(compiled.wgsl).toContain("var n: i32 = bg_uniforms.n;");
+    expect(compiled.wgsl).toContain("var enabled: bool = (bg_uniforms.enabled != 0u);");
   });
 
   it("caches compiled kernels with deterministic option keys and LRU eviction", () => {
@@ -899,7 +899,7 @@ __global__ void sizeKernel(uint* out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("var bytes: u32 = u32(4)");
+    expect(compiled.wgsl).toContain("var bytes: u32 = 4u");
     expect([...result.buffers.out as Uint32Array]).toEqual([4]);
   });
 
@@ -959,7 +959,7 @@ __global__ void integerAliases(int32_t *signedOut, uint32_t *unsignedOut, signed
     expect(compiled.wgsl).toContain("var stride: i32");
     expect(compiled.wgsl).toContain("var unsignedWide: u32");
     expect(compiled.wgsl).toContain("var ptrValue: u32");
-    expect(compiled.wgsl).toContain("var bytes: u32 = u32(u32(4))");
+    expect(compiled.wgsl).toContain("var bytes: u32 = u32(4)");
     expect([...result.buffers.signedOut as Int32Array]).toEqual([4, 6]);
     expect([...result.buffers.unsignedOut as Uint32Array]).toEqual([15, 17]);
   });
@@ -1458,7 +1458,7 @@ __global__ void mixed(float *out, int i, int n) {
   }
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toContain("pow(10000.0, (f32((2 * params.i)) / (f32(params.n) * 2.0)))");
+    expect(compiled.wgsl).toContain("pow(10000.0, (f32((2 * bg_uniforms.i)) / (f32(bg_uniforms.n) * 2.0)))");
   });
 
   it("requires explicit f64 compatibility mode before lowering double to f32", () => {
@@ -1637,7 +1637,7 @@ __global__ void kernel(float* out, float value) {
   out[0] = blockReduce(value, false, 0.0f);
 }`, { features: { subgroups: true } });
 
-    expect(compiled.wgsl).toContain("out[0] = subgroupAdd(params.value)");
+    expect(compiled.wgsl).toContain("out[0] = subgroupAdd(bg_uniforms.value)");
   });
 
   it("lowers masked warp reductions using the value operand", () => {
@@ -1651,7 +1651,7 @@ __global__ void kernel(int* out, int value, unsigned int mask) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("out[0] = subgroupAdd(params.value)");
+    expect(compiled.wgsl).toContain("out[0] = subgroupAdd(bg_uniforms.value)");
     expect([...result.buffers.out as Int32Array]).toEqual([7]);
   });
 
@@ -2802,9 +2802,9 @@ __global__ void int_math_arg(int n, float *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("sqrt(f32(params.n))");
-    expect(compiled.wgsl).toContain("exp(f32((params.n - 2)))");
-    expect(compiled.wgsl).toContain("min(f32(params.n), 3.5)");
+    expect(compiled.wgsl).toContain("sqrt(f32(bg_uniforms.n))");
+    expect(compiled.wgsl).toContain("exp(f32((bg_uniforms.n - 2)))");
+    expect(compiled.wgsl).toContain("min(f32(bg_uniforms.n), 3.5)");
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(Math.sqrt(4) + Math.exp(2) + 3.5, 5);
   });
 
@@ -3227,7 +3227,7 @@ __global__ void byte_vectors(int *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("vec4<u32>(1, 2, 3, 4)");
+    expect(compiled.wgsl).toContain("vec4<u32>(1u, 2u, 3u, 4u)");
     expect(compiled.wgsl).toContain("rgbToInt(f32(color.z), f32(color.y), f32(color.x)");
     expect([...result.buffers.out as Int32Array]).toEqual([6]);
   });
@@ -3289,7 +3289,7 @@ __global__ void dynamicLane(float *out, int lane) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("[u32(params.lane)]");
+    expect(compiled.wgsl).toContain("[u32(bg_uniforms.lane)]");
     expect([...result.buffers.out as Float32Array]).toEqual([6]);
   });
 
@@ -3569,7 +3569,7 @@ __global__ void integerPredicate(uint *out, int flag) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("select(0u, 1u, (params.flag != 0))");
+    expect(compiled.wgsl).toContain("select(0u, 1u, (bg_uniforms.flag != 0))");
     expect([...trueResult.buffers.out as Uint32Array]).toEqual([1]);
     expect([...falseResult.buffers.out as Uint32Array]).toEqual([0]);
   });
@@ -3590,6 +3590,44 @@ __global__ void hexMask(uint *out, uint value) {
     expect(compiled.wgsl).toContain("0xffffffffu");
     expect(compiled.wgsl).not.toContain("f32(0xffffffff");
     expect([...result.buffers.out as Uint32Array]).toEqual([0, 7]);
+  });
+
+  it("lowers signed int hex masks through bit-preserving casts", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void signedHexMask(uint *out) {
+  int mask = 0xffffffff;
+  out[0] = uint(mask);
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("var mask: i32 = bitcast<i32>(0xffffffffu);");
+    expect(compiled.wgsl).not.toContain("var mask: i32 = 0xffffffff;");
+  });
+
+  it("keeps user params pointer distinct from compiler uniforms", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void paramsBuffer(const float *params, float *out, int n) {
+  int idx = threadIdx.x;
+  if (idx < n) {
+    out[idx] = params[idx] + 1.0f;
+  }
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          params: new Float32Array([1, 2, 3, 4]),
+          out: new Float32Array(4),
+        },
+        scalars: { n: 4 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var<storage, read> bg_params: array<f32>;");
+    expect(compiled.wgsl).toContain("var<uniform> bg_uniforms: Params;");
+    expect(compiled.wgsl).toContain("bg_params[idx]");
+    expect(compiled.wgsl).toContain("idx < bg_uniforms.n");
+    expect([...result.buffers.out as Float32Array]).toEqual([2, 3, 4, 5]);
   });
 
   it("lowers generic pointer dereference lvalues and rebased kernel params", () => {
@@ -4145,7 +4183,7 @@ __global__ void surfaceWrite3d(cudaSurfaceObject_t outputSurf) {
     );
 
     expect(compiled.wgsl).toContain("bg_surf2dwrite_outputSurf");
-    expect(compiled.wgsl).toContain("z * i32(params.outputSurf_height)");
+    expect(compiled.wgsl).toContain("z * i32(bg_uniforms.outputSurf_height)");
     expect([...result.buffers.outputSurf as Float32Array]).toEqual([0, 1, 10, 11, 100, 101, 110, 111]);
   });
 
@@ -5164,7 +5202,7 @@ __global__ void predicatedBarrier(float *A, float *B, float *C, int N) {
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("workgroupBarrier();\n  if ((idx < params.N))");
+    expect(compiled.wgsl).toContain("workgroupBarrier();\n  if ((idx < bg_uniforms.N))");
     expect([...result.buffers.C as Float32Array]).toEqual([11, 22]);
   });
 
@@ -5570,7 +5608,7 @@ __global__ void scale(const float *x, float *y, int n) {
 
     expect(compiled.ir.constants.map((constant) => constant.name)).toEqual(["scaleFactor"]);
     expect(compiled.wgsl).toContain("scaleFactor: f32");
-    expect(compiled.wgsl).toContain("params.scaleFactor");
+    expect(compiled.wgsl).toContain("bg_uniforms.scaleFactor");
     expect([...result.buffers.y as Float32Array]).toEqual([3, 6, 9, 12]);
   });
 
@@ -5649,7 +5687,7 @@ __global__ void kernel(unsigned int *out, unsigned int pitch) {
   out[(blockIdx.x * pitch) + i] = 7;
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toContain("(u32(i32(workgroup_id.x)) * params.pitch)");
+    expect(compiled.wgsl).toContain("(u32(i32(workgroup_id.x)) * bg_uniforms.pitch)");
     expect(compiled.wgsl).toContain("+ u32(i)");
   });
 
@@ -5661,7 +5699,7 @@ __global__ void kernel(unsigned int *out, unsigned int pitch) {
   row[i] = 7;
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toContain("(u32(i32(workgroup_id.x)) * params.pitch))) + (u32(i))");
+    expect(compiled.wgsl).toContain("(u32(i32(workgroup_id.x)) * bg_uniforms.pitch))) + (u32(i))");
   });
 
   it("lowers scalar CUDA vector constants as scalarized readonly storage inputs", () => {
@@ -5683,7 +5721,7 @@ __global__ void apply(float *out) {
 
     expect(compiled.wgsl).toContain("var<storage, read> collider: array<f32, 3>;");
     expect(compiled.wgsl).toContain("vec3<f32>(collider[(u32(0u) * 3u) + 0u]");
-    expect(compiled.wgsl).not.toContain("params.collider");
+    expect(compiled.wgsl).not.toContain("bg_uniforms.collider");
     expect([...result.buffers.out as Float32Array]).toEqual([11, 22, 33]);
   });
 
@@ -6448,7 +6486,7 @@ __global__ void conditional_pointer(float* target, float* fallback, int enabled)
     expect([...disabled.buffers.target as Float32Array]).toEqual([0]);
     expect([...disabled.buffers.fallback as Float32Array]).toEqual([4]);
     expect(compiled.wgsl).toContain("4294967295u");
-    expect(compiled.wgsl).toContain("select(4294967295u, 0u, (params.enabled != 0))");
+    expect(compiled.wgsl).toContain("select(4294967295u, 0u, (bg_uniforms.enabled != 0))");
   });
 
   it("lowers CUDA bitwise not and trap no-op control paths", () => {
@@ -6907,7 +6945,7 @@ __global__ void address_math(uint* out, int n) {
     );
 
     expect([...result.buffers.out as Uint32Array]).toEqual([5, 4, 3]);
-    expect(compiled.wgsl).toContain("(((params.n + 4) - 1) / 4)");
+    expect(compiled.wgsl).toContain("(((bg_uniforms.n + 4) - 1) / 4)");
     expect(compiled.wgsl).toContain("var tile_base: u32 = u32(4);");
     expect(compiled.wgsl).toContain("out[1] = u32(tile_base);");
     expect(compiled.wgsl).toContain("regs[fill_regs_0][fill_regs_1] = 3.0;");
@@ -7076,8 +7114,8 @@ __global__ void qualified_std_casts(float* out, int q) {
     );
 
     expect([...result.buffers.out as Float32Array]).toEqual([12]);
-    expect(compiled.wgsl).toContain("var a: u32 = u32((u32(params.q) * u32(2)));");
-    expect(compiled.wgsl).toContain("var b: u32 = u32(u32((a + u32(1))));");
+    expect(compiled.wgsl).toContain("var a: u32 = (u32(bg_uniforms.q) * 2u);");
+    expect(compiled.wgsl).toContain("var b: u32 = u32((a + 1u));");
     expect(compiled.wgsl).toContain("var c: i32 = (i32(i32(workgroup_id.x)) + 3);");
   });
 
@@ -7118,7 +7156,7 @@ __global__ void pointer_rebase(uint* x, uint* out, int offset) {
 
     expect([...result.buffers.out as Uint32Array]).toEqual([30, 20, 30]);
     expect(compiled.wgsl).toContain("var bg_x_base: u32 = 0u;");
-    expect(compiled.wgsl).toContain("bg_x_base = (bg_x_base + u32(params.offset));");
+    expect(compiled.wgsl).toContain("bg_x_base = (bg_x_base + u32(bg_uniforms.offset));");
     expect(compiled.wgsl).toContain("x[(bg_x_base + u32(0))]");
 
     const constPointee = compileCudaLiteKernel(`
@@ -7146,7 +7184,7 @@ __global__ void assign_pointer_rebase(uint* x, uint* out, int offset) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
     expect([...assignmentRebaseResult.buffers.out as Uint32Array]).toEqual([20, 30]);
-    expect(assignmentRebase.wgsl).toContain("bg_x_base = (bg_x_base + u32(params.offset));");
+    expect(assignmentRebase.wgsl).toContain("bg_x_base = (bg_x_base + u32(bg_uniforms.offset));");
     expect(assignmentRebase.wgsl).toContain("bg_x_base = (bg_x_base + u32(1));");
 
     const nullGuard = compileCudaLiteKernel(`
@@ -7192,7 +7230,7 @@ __global__ void pointer_distance(uint* data, int* out, int left) {
     );
     expect([...pointerDistanceResult.buffers.out as Int32Array]).toEqual([3, 2]);
     expect(pointerDistance.wgsl).toContain("i32(");
-    expect(pointerDistance.wgsl).toContain("var width: i32 = (i32((0u + u32(3))) - i32((0u + u32((0 + params.left)))));");
+    expect(pointerDistance.wgsl).toContain("var width: i32 = i32((i32((0u + u32(3))) - i32((0u + u32((0 + bg_uniforms.left))))));");
 
     const mismatchedPointerDistance = analyzeCudaLite(parseCudaLite(`
 __global__ void bad_pointer_distance(uint* a, float* b, int* out) {
