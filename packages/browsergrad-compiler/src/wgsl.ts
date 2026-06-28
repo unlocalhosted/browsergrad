@@ -972,7 +972,22 @@ function isBarrierStatement(statement: CudaLiteStatement): boolean {
 
 function functionsToEmit(ir: KernelIrModule): readonly CudaLiteDeviceFunction[] {
   const launchCallees = new Set(collectKernelLaunchCallees(ir.body));
-  return ir.functions.filter((fn) => fn.name !== ir.name && !launchCallees.has(fn.name));
+  const reachable = new Set<string>();
+  const visitBody = (statements: readonly CudaLiteStatement[]): void => {
+    walkCudaLiteExpressions(statements, (expression) => {
+      if (expression.kind !== "call") return;
+      const name = expressionName(expression.callee);
+      if (name === undefined || launchCallees.has(name)) return;
+      const fn = resolveDeviceFunctionForCall(ir, name, expression.args.length);
+      if (!fn) return;
+      const linkName = deviceFunctionLinkName(fn, ir);
+      if (reachable.has(linkName)) return;
+      reachable.add(linkName);
+      visitBody(fn.body);
+    });
+  };
+  visitBody(ir.body);
+  return ir.functions.filter((fn) => fn.name !== ir.name && reachable.has(deviceFunctionLinkName(fn, ir)));
 }
 
 function emitInlineAsmStatement(

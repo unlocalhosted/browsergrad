@@ -1636,6 +1636,26 @@ __global__ void helperKernel(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([3]);
   });
 
+  it("does not emit unreachable device helpers into WGSL", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint64_t unused_desc(uint *ptr) {
+  uint64_t desc = 0;
+  desc |= 1llu << 62;
+  return desc;
+}
+__device__ float addOne(float value) {
+  return value + 1.0f;
+}
+__global__ void helperKernel(float *x) {
+  if (threadIdx.x < 1) { x[0] = addOne(x[0]); }
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.ir.functions.map((fn) => fn.name)).toEqual(["unused_desc", "addOne"]);
+    expect(compiled.wgsl).toContain("fn addOne(value_arg: f32");
+    expect(compiled.wgsl).not.toContain("unused_desc");
+    expect(compiled.wgsl).not.toContain("<< 62");
+  });
+
   it("resolves overloaded __device__ helpers by arity", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ int pick(int value) {
