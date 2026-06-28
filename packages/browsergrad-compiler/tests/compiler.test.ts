@@ -5946,6 +5946,40 @@ __global__ void singletonZBarrier(float *out, int N) {
     expect(compiled.wgsl).toContain("workgroupBarrier();");
   });
 
+  it("folds single-warp ids before barrier uniformity analysis", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void singleWarpBarrier(float *out) {
+  int tid = threadIdx.x;
+  int warpId = threadIdx.x / 32;
+  if (warpId != 0) { out[tid] = 1.0f; }
+  __syncthreads();
+  if (warpId == 0) { out[tid] = 2.0f; }
+}`, { workgroupSize: [32, 1, 1] });
+
+    expect(compiled.wgsl).toContain("var warpId: i32 = 0;");
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+    expect(compiled.wgsl).not.toContain("i32(local_id.x) / 32");
+  });
+
+  it("keeps loop barriers uniform after divergent breaks", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void breakBeforeBarrier(float *out, int N) {
+  int tid = threadIdx.x;
+  for (int i = 0; i < 2; ++i) {
+    int idx = tid + i * 4;
+    if (idx >= N) { break; }
+    out[idx] = out[idx] + 1.0f;
+    __syncthreads();
+    out[idx] = out[idx] + 1.0f;
+  }
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toContain("var bg_loop_active_");
+    expect(compiled.wgsl).toContain("bg_loop_active_");
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+    expect(compiled.wgsl).not.toContain("break;\n    out");
+  });
+
   it("lowers dynamic extern shared memory declared inside device helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ uint reduce_one(uint value) {
@@ -7329,6 +7363,8 @@ __global__ void bitwise_not_and_trap(int* out) {
 
     expect([...result.buffers.out as Int32Array]).toEqual([-4]);
     expect(compiled.wgsl).toContain("~(4 - 1)");
+    expect(compiled.wgsl).toContain("__trap omitted");
+    expect(compiled.wgsl).not.toContain("\n    0;\n");
   });
 
   it("lowers scalar CUDA half arithmetic and comparison intrinsics", () => {

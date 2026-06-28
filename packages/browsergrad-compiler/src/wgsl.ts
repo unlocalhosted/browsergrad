@@ -885,6 +885,13 @@ function emitStatement(
           : "";
       const condition = statement.condition ? emitTruthinessExpression(statement.condition, loopContext) : "true";
       const update = statement.update ? emitExpression(statement.update, loopContext) : "";
+      const breakFlag = statementHasEarlyBreakBeforeBarrier(statement) ? `bg_loop_active_${statement.span.start}` : undefined;
+      if (breakFlag) {
+        const lines = [`${prefix}var ${breakFlag}: bool = true;`, `${prefix}for (${init}; ${condition}; ${update}) {`];
+        lines.push(...emitStatementSequence(statement.body, loopContext, indentLevel + 1, { activeFlag: breakFlag }));
+        lines.push(`${prefix}}`);
+        return lines;
+      }
       const lines = [`${prefix}for (${init}; ${condition}; ${update}) {`];
       lines.push(...emitStatementSequence(statement.body, loopContext, indentLevel + 1));
       lines.push(`${prefix}}`);
@@ -961,6 +968,8 @@ function emitStatementWithActiveFlag(
   if (isBarrierStatement(statement)) return [`${prefix}workgroupBarrier();`];
   const split = splitIfTrailingVoidReturn(statement);
   if (split) return emitIfTrailingReturnAsActiveFlag(split, activeFlag, context, indentLevel);
+  const breakSplit = splitIfTrailingBreak(statement);
+  if (breakSplit) return emitIfTrailingBreakAsActiveFlag(breakSplit, activeFlag, context, indentLevel);
   if (statement.kind === "var") return emitVarStatementWithActiveFlag(statement, activeFlag, context, indentLevel);
   if (statementContainsBarrier(statement)) return emitStatementWithGuard(statement, activeFlag, context, indentLevel);
   const lines = [`${prefix}if (${activeFlag}) {`];
@@ -1072,6 +1081,11 @@ interface IfTrailingReturn {
   readonly beforeReturn: readonly CudaLiteStatement[];
 }
 
+interface IfTrailingBreak {
+  readonly condition: CudaLiteExpression;
+  readonly beforeBreak: readonly CudaLiteStatement[];
+}
+
 function splitIfTrailingVoidReturn(statement: CudaLiteStatement): IfTrailingReturn | undefined {
   if (statement.kind !== "if" || statement.alternate || statement.consequent.length === 0) return undefined;
   const last = statement.consequent[statement.consequent.length - 1];
@@ -1079,6 +1093,15 @@ function splitIfTrailingVoidReturn(statement: CudaLiteStatement): IfTrailingRetu
   const beforeReturn = statement.consequent.slice(0, -1);
   if (beforeReturn.some(statementContainsBarrier)) return undefined;
   return { condition: statement.condition, beforeReturn };
+}
+
+function splitIfTrailingBreak(statement: CudaLiteStatement): IfTrailingBreak | undefined {
+  if (statement.kind !== "if" || statement.alternate || statement.consequent.length === 0) return undefined;
+  const last = statement.consequent[statement.consequent.length - 1];
+  if (last?.kind !== "break") return undefined;
+  const beforeBreak = statement.consequent.slice(0, -1);
+  if (beforeBreak.some(statementContainsBarrier)) return undefined;
+  return { condition: statement.condition, beforeBreak };
 }
 
 function emitIfTrailingReturnAsActiveFlag(
@@ -1093,6 +1116,27 @@ function emitIfTrailingReturnAsActiveFlag(
   lines.push(`${indent(indentLevel + 1)}${activeFlag} = false;`);
   lines.push(`${prefix}}`);
   return lines;
+}
+
+function emitIfTrailingBreakAsActiveFlag(
+  split: IfTrailingBreak,
+  activeFlag: string,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const prefix = indent(indentLevel);
+  const lines = [`${prefix}if (${activeFlag} && (${emitTruthinessExpression(split.condition, context)})) {`];
+  lines.push(...split.beforeBreak.flatMap((child) => emitStatement(child, context, indentLevel + 1)));
+  lines.push(`${indent(indentLevel + 1)}${activeFlag} = false;`);
+  lines.push(`${prefix}}`);
+  return lines;
+}
+
+function statementHasEarlyBreakBeforeBarrier(statement: CudaLiteStatement): boolean {
+  if (statement.kind !== "for" && statement.kind !== "while" && statement.kind !== "do-while") return false;
+  return statement.body.some((child, index) =>
+    splitIfTrailingBreak(child) !== undefined && statement.body.slice(index + 1).some(statementContainsBarrier)
+  );
 }
 
 function statementContainsBarrier(statement: CudaLiteStatement): boolean {
@@ -4985,6 +5029,8 @@ function emitScalarBinaryExpression(
   expression: Extract<CudaLiteExpression, { kind: "binary" }>,
   context: EmitContext,
 ): string {
+  const threadIndexSimplification = emitThreadIndexRangeBinarySimplification(expression, context);
+  if (threadIndexSimplification !== undefined) return threadIndexSimplification;
   if (expression.operator === "&&" || expression.operator === "||") {
     return `(${emitTruthinessExpression(expression.left, context)} ${expression.operator} ${emitTruthinessExpression(expression.right, context)})`;
   }
@@ -5006,6 +5052,36 @@ function emitScalarBinaryExpression(
   const left = target ? emitExpressionAsWgslScalar(expression.left, target, context) : emitExpression(expression.left, context);
   const right = target ? emitExpressionAsWgslScalar(expression.right, target, context) : emitExpression(expression.right, context);
   return `(${left} ${expression.operator} ${right})`;
+}
+
+function emitThreadIndexRangeBinarySimplification(
+  expression: Extract<CudaLiteExpression, { kind: "binary" }>,
+  context: EmitContext,
+): string | undefined {
+  if (expression.operator !== "/" && expression.operator !== "%") return undefined;
+  if (!isIntegerNumberLiteral(expression.right)) return undefined;
+  const divisor = expression.right.value;
+  if (!Number.isFinite(divisor) || divisor <= 0) return undefined;
+  const axisIndex = threadIndexAxis(expression.left);
+  if (axisIndex === undefined) return undefined;
+  const axisSize = context.ir.workgroupSize[axisIndex];
+  if (divisor < axisSize) return undefined;
+  if (expression.operator === "/") return "0";
+  return emitExpression(expression.left, context);
+}
+
+function threadIndexAxis(expression: CudaLiteExpression): 0 | 1 | 2 | undefined {
+  if (expression.kind !== "member" || expressionName(expression.object) !== "threadIdx") return undefined;
+  switch (expression.property) {
+    case "x":
+      return 0;
+    case "y":
+      return 1;
+    case "z":
+      return 2;
+    default:
+      return undefined;
+  }
 }
 
 function integerBinaryTargetType(
@@ -6870,6 +6946,8 @@ function noopCallComment(expression: CudaLiteExpression): string | undefined {
   switch (expressionName(expression.callee)) {
     case "assert":
       return "assert omitted: WebGPU has no device abort";
+    case "__trap":
+      return "__trap omitted: WebGPU has no device abort";
     case "printf":
       return "printf omitted: WebGPU has no device stdout";
     case "cudaDeviceSynchronize":
