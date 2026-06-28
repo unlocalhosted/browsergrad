@@ -1177,6 +1177,7 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
   const functionLocalPointerHandles = collectLocalPointerHandles(fn.body, undefined, structuredPointerHandleRoots(context.ir));
   const functionPointerAliases = collectPointerAliases(fn.body, new Set(functionLocalPointerHandles.keys()));
   const functionLocalValueTypes = new Map(collectLocalValueTypes(fn.body));
+  const functionParamNames = new Set(fn.params.map((param) => param.name));
   const functionExpressionValueTypes = new WeakMap<CudaLiteExpression, CudaLiteScalarType | undefined>();
   const functionContext = withDevicePointerParams(
     {
@@ -1184,7 +1185,7 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
       currentReturnType: fn.returnType,
       expressionValueTypes: functionExpressionValueTypes,
       localValueTypeFor(name) {
-        return functionLocalValueTypes.get(name) ?? context.localValueTypeFor(name);
+        return functionLocalValueTypes.get(name) ?? (functionParamNames.has(name) ? undefined : context.localValueTypeFor(name));
       },
       localPointerHandleFor(name) {
         return functionLocalPointerHandles.get(name) ?? context.localPointerHandleFor(name);

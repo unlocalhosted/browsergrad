@@ -492,6 +492,12 @@ __device__ void incAt(uint* ptr, uint index) {
 }
 
 __global__ void kernel(uint* out) {
+  for (uint i = 0; i < 1u; i++) {
+    uint4 index = make_uint4(i);
+    if (index.x == 99u) {
+      out[0] = index.x;
+    }
+  }
   incAt(out, 1u);
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
@@ -502,6 +508,7 @@ __global__ void kernel(uint* out) {
 
     expect([...result.buffers.out as Uint32Array]).toEqual([5, 8]);
     expect(compiled.wgsl).toContain("bg_ptr_write_u32(ptr_buffer, (ptr_base + u32(index)), (bg_ptr_read_u32(ptr_buffer, (ptr_base + u32(index))) + 1u))");
+    expect(compiled.wgsl).not.toContain("u32(index * vec4<u32>");
     expect(compiled.wgsl).not.toContain("bg_ptr_read_u32(ptr_buffer, (ptr_base + u32(index))) =");
   });
 
