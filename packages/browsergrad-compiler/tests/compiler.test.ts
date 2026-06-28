@@ -3196,6 +3196,31 @@ __global__ void vectorSaxpy(float a, const float4* x, const float4* y, float4* z
     expect([...result.buffers.z as Float32Array]).toEqual([12, 22, 33, 46, 60, 66, 77, 90]);
   });
 
+  it("keeps dynamic local vector lane reads scalar inside casts", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__global__ void reduce_add_sum_kernel(float* dst, const float* src, size_t n, size_t m) {
+  const size_t idx = threadIdx.x * 4;
+  if (idx < n) {
+    float4 acc;
+    for (int k = 0; k < 4; ++k) {
+      acc[k] = 0.f;
+    }
+    for (int l = 0; l < m; ++l) {
+      float4 s = reinterpret_cast<float4 *>(src + idx + n * l)[0];
+      for (int k = 0; k < 4; ++k) {
+        acc[k] += s[k];
+      }
+    }
+    for (int k = 0; k < 4; ++k) {
+      dst[idx + k] = (float)((float)dst[idx + k] + acc[k]);
+    }
+  }
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).not.toContain("f32((vec4<f32>");
+    expect(compiled.wgsl).toContain("dst[(idx + u32(k))] = f32((f32(dst[(idx + u32(k))]) + acc[u32(k)]));");
+  });
+
   it("maps CUDA Packed128 float aliases onto vector storage views", () => {
     const compiled = compileCudaLiteKernel(`
 typedef float floatX;

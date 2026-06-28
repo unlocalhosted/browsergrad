@@ -4626,6 +4626,10 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
     if (pointerLvalue) return pointerLvalue.valueType;
     const storageView = storageViewLValue(expression, context);
     if (storageView) return storageView.valueType;
+    if (expression.target.kind === "identifier") {
+      const localType = context.localValueTypeFor(expression.target.name);
+      if (isCudaVectorType(localType)) return cudaVectorScalarType(localType);
+    }
     const root = rootIdentifier(expression);
     const localArray = root ? localArrayForStorageView(root, expression.span, context) : undefined;
     if (localArray) return localArray.valueType;
