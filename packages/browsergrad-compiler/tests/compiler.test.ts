@@ -3380,6 +3380,19 @@ __global__ void half2Add(const half2 *x, half2 *y) {
     expect(Array.from(result.buffers.y as ArrayLike<number>)).toEqual([4, 7]);
   });
 
+  it("preserves half2 vector arithmetic when writing through device pointer aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void reduce_pair(half2 *v) {
+  v[0] = v[0] + v[1];
+}
+__global__ void half2PtrAssign(half2 *x) {
+  reduce_pair(x);
+}`, { features: { "shader-f16": true }, f16Mode: "f32", workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("bg_ptr_write_f16x2(v_buffer, (v_base + u32(0)), (bg_ptr_read_f16x2(v_buffer, (v_base + u32(0))) + bg_ptr_read_f16x2(v_buffer, (v_base + u32(1)))))");
+    expect(compiled.wgsl).not.toMatch(/vec2<f32>\(f32\(\(bg_ptr_read_f16x2/u);
+  });
+
   it("lowers CUDA half2 arithmetic intrinsics", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void half2Ops(const half2 *x, const half2 *y, half2 *out, float *scalar) {

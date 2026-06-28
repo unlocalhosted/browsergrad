@@ -4361,6 +4361,8 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
     return name ? cudaVectorConstructorType(name) : undefined;
   }
   if (expression.kind === "index") {
+    const pointerLvalue = devicePointerLValue(expression, context);
+    if (pointerLvalue) return pointerLvalue.valueType;
     const storageView = storageViewLValue(expression, context);
     if (storageView) return storageView.valueType;
     const root = rootIdentifier(expression);
