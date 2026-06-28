@@ -5226,14 +5226,20 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return `normalize(${args[0] ?? "vec2<f32>()"})`;
     case "cross":
       return `cross(${args[0] ?? "vec3<f32>()"}, ${args[1] ?? "vec3<f32>()"})`;
-    case "curand_init":
-      return `bg_curand_init(u32(${args[0] ?? "0"}), u32(${args[1] ?? "0"}), u32(${args[2] ?? "0"}), ${args[3] ?? "&state"})`;
+    case "curand_init": {
+      const helper = curandStateAddressSpace(expression.args[3], context) === "storage" ? "bg_curand_init_storage" : "bg_curand_init";
+      return `${helper}(u32(${args[0] ?? "0"}), u32(${args[1] ?? "0"}), u32(${args[2] ?? "0"}), ${args[3] ?? "&state"})`;
+    }
     case "curand_uniform":
-    case "curand_uniform_double":
-      return `bg_curand_uniform(${args[0] ?? "&state"})`;
+    case "curand_uniform_double": {
+      const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_uniform_storage" : "bg_curand_uniform";
+      return `${helper}(${args[0] ?? "&state"})`;
+    }
     case "curand_normal":
-    case "curand_normal_double":
-      return `bg_curand_normal(${args[0] ?? "&state"})`;
+    case "curand_normal_double": {
+      const helper = curandStateAddressSpace(expression.args[0], context) === "storage" ? "bg_curand_normal_storage" : "bg_curand_normal";
+      return `${helper}(${args[0] ?? "&state"})`;
+    }
     case "atomicAdd":
     case "atomicAdd_system":
       return emitAtomicCall("atomicAdd", expression, context, args);
@@ -5653,6 +5659,19 @@ function emitDevicePointerAtomicCall(
     return `${pointerAtomicExchangeHelperName(valueType)}(${parts.buffer}, ${parts.base}, ${valueExpression})`;
   }
   return undefined;
+}
+
+function curandStateAddressSpace(
+  expression: CudaLiteExpression | undefined,
+  context: EmitContext,
+): "function" | "storage" | undefined {
+  if (expression?.kind !== "unary" || expression.operator !== "&") return undefined;
+  const root = rootIdentifier(expression.argument);
+  if (!root) return undefined;
+  const param = context.paramFor(root);
+  if (param?.pointer) return "storage";
+  if (context.deviceGlobalFor(root)) return "storage";
+  return "function";
 }
 
 function emitAtomicIntegerValueExpression(
@@ -7300,6 +7319,25 @@ function emitCurandHelpers(): string[] {
     "fn bg_curand_normal(state: ptr<function, u32>) -> f32 {",
     "  let u1 = max(bg_curand_uniform(state), 1.1754943508222875e-38);",
     "  let u2 = bg_curand_uniform(state);",
+    "  return sqrt(-2.0 * log(u1)) * cos(6.283185307179586 * u2);",
+    "}",
+    "fn bg_curand_next_storage(state: ptr<storage, u32, read_write>) -> u32 {",
+    "  var x = *state;",
+    "  x = (x * 1664525u) + 1013904223u;",
+    "  *state = x;",
+    "  return x;",
+    "}",
+    "fn bg_curand_init_storage(seed: u32, sequence: u32, offset: u32, state: ptr<storage, u32, read_write>) {",
+    "  *state = seed ^ (sequence * 747796405u) ^ offset ^ 2891336453u;",
+    "  _ = bg_curand_next_storage(state);",
+    "}",
+    "fn bg_curand_uniform_storage(state: ptr<storage, u32, read_write>) -> f32 {",
+    "  let bits = bg_curand_next_storage(state);",
+    "  return (f32(bits) + 1.0) * 2.3283064365386963e-10;",
+    "}",
+    "fn bg_curand_normal_storage(state: ptr<storage, u32, read_write>) -> f32 {",
+    "  let u1 = max(bg_curand_uniform_storage(state), 1.1754943508222875e-38);",
+    "  let u2 = bg_curand_uniform_storage(state);",
     "  return sqrt(-2.0 * log(u1)) * cos(6.283185307179586 * u2);",
     "}",
   ];

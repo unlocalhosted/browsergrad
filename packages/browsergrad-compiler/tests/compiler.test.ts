@@ -4142,6 +4142,26 @@ __global__ void curandNormalKernel(float *out) {
     expect([...result.buffers.out as Float32Array].every((value) => Number.isFinite(value))).toBe(true);
   });
 
+  it("lowers cuRAND calls against storage-backed state arrays", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__global__ void initRNG(curandState_t *states, float *out, unsigned int seed) {
+  unsigned int tid = threadIdx.x;
+  curand_init(seed, tid, 0, &states[tid]);
+  out[tid] = curand_uniform(&states[tid]) + curand_normal(&states[tid]);
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { states: new Uint32Array(4), out: new Float32Array(4) }, scalars: { seed: 1234 } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_curand_init_storage");
+    expect(compiled.wgsl).toContain("fn bg_curand_uniform_storage");
+    expect(compiled.wgsl).toContain("fn bg_curand_normal_storage");
+    expect(compiled.wgsl).toContain("bg_curand_init_storage(u32(bg_uniforms.seed), u32(tid), u32(0), &states[tid])");
+    expect([...result.buffers.out as Float32Array].every((value) => Number.isFinite(value))).toBe(true);
+  });
+
   it("supports cufftComplex buffers as interleaved complex64 values", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void magnitudeKernel(cufftComplex *data, float *mag, int N) {
