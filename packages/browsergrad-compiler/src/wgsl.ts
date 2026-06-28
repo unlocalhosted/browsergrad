@@ -1178,6 +1178,7 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
   const functionPointerAliases = collectPointerAliases(fn.body, new Set(functionLocalPointerHandles.keys()));
   const functionLocalValueTypes = new Map(collectLocalValueTypes(fn.body));
   const functionParamNames = new Set(fn.params.map((param) => param.name));
+  const functionLocalNames = new Set([...fn.params.map((param) => param.name), ...collectLocalNames(fn.body)]);
   const functionExpressionValueTypes = new WeakMap<CudaLiteExpression, CudaLiteScalarType | undefined>();
   const functionContext = withDevicePointerParams(
     {
@@ -1198,6 +1199,9 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
       },
       cooperativeGroupFor(name) {
         return cooperativeParams.get(name) ?? context.cooperativeGroupFor(name);
+      },
+      isAtomicShared(name) {
+        return functionLocalNames.has(name) ? false : context.isAtomicShared(name);
       },
     },
     fn.params.filter((param) => param.pointer && !functionPointerParams.has(param.name)),
@@ -2546,6 +2550,15 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
     return devicePointerArgumentParts(expression.expression, context);
   }
   if (expression.kind === "unary" && expression.operator === "&" && expression.argument.kind === "index") {
+    const argumentRoot = rootIdentifier(expression.argument.target);
+    if (argumentRoot && context.devicePointerParamFor(argumentRoot)) {
+      const target = devicePointerArgumentParts(expression.argument.target, context);
+      if (!target) return undefined;
+      return {
+        buffer: target.buffer,
+        base: `(${target.base} + u32(${emitExpression(expression.argument.index, context)}))`,
+      };
+    }
     const global = deviceGlobalPointerArgumentParts(expression.argument, context);
     if (global) return global;
     const shared = sharedPointerArgumentParts(expression.argument, context);
@@ -2560,6 +2573,13 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
     };
   }
   if (expression.kind === "unary" && expression.operator === "&" && expression.argument.kind === "identifier") {
+    const pointerParam = context.devicePointerParamFor(expression.argument.name);
+    if (pointerParam) {
+      return {
+        buffer: context.nameFor(`${pointerParam.name}_buffer`),
+        base: context.nameFor(`${pointerParam.name}_base`),
+      };
+    }
     const sharedId = context.sharedPointerIdFor(expression.argument.name);
     if (sharedId !== undefined) return { buffer: `${sharedId}u`, base: "0u" };
     const globalId = context.deviceGlobalPointerIdFor(expression.argument.name);
@@ -2727,6 +2747,15 @@ function devicePointerLValue(expression: CudaLiteExpression, context: EmitContex
       buffer: parts.buffer,
       index: `(${parts.base} + u32(${emitExpression(expression.index, context)}))`,
       valueType,
+    };
+  }
+  if (expression.kind === "identifier" && context.devicePointerParamFor(expression.name)) {
+    const parts = devicePointerArgumentParts(expression, context);
+    if (!parts) return undefined;
+    return {
+      buffer: parts.buffer,
+      index: parts.base,
+      valueType: devicePointerValueTypeForExpression(expression, context),
     };
   }
   if (expression.kind === "unary" && expression.operator === "*") {
@@ -5287,7 +5316,8 @@ const FLOAT_ARG_INTRINSICS = new Set([
   "fabs", "fabsf", "floor", "floorf", "ceil", "ceilf", "round", "roundf",
   "rintf", "trunc", "truncf", "sin", "sinf", "__sinf", "cos", "cosf",
   "__cosf", "tan", "tanf", "__tanf", "asin", "asinf", "acos", "acosf",
-  "atan", "atanf", "tanh", "tanhf", "cosh", "coshf", "isinf", "rsqrt",
+  "atan", "atanf", "tanh", "tanhf", "cosh", "coshf", "isinf", "isnan",
+  "isNan", "rsqrt",
   "rsqrtf", "__frcp_rn", "__saturatef", "pow", "powf", "atan2", "atan2f",
   "fmin", "fminf", "fmax", "fmaxf", "fma", "fmaf", "__fmaf_rn", "lerp",
 ]);
@@ -5645,7 +5675,11 @@ function emitAtomicTarget(
     const inner = emitAtomicTarget(target.expression, context);
     return inner ? { ...inner, valueType: target.valueType } : undefined;
   }
-  if (target.kind === "unary" && target.operator === "&") return emitAtomicAddressTarget(target.argument, context);
+  if (target.kind === "unary" && target.operator === "&") {
+    const addressRoot = rootIdentifier(target.argument);
+    if (addressRoot && context.devicePointerParamFor(addressRoot)) return undefined;
+    return emitAtomicAddressTarget(target.argument, context);
+  }
   if (target.kind === "identifier") {
     const alias = flattenedPointerAlias(target.name, target.span, context);
     if (alias) {
@@ -5679,6 +5713,7 @@ function emitAtomicTarget(
   }
   const pointerParts = devicePointerArgumentParts(target, context);
   const root = rootIdentifier(target);
+  if (root && context.devicePointerParamFor(root)) return undefined;
   const rootName = root ? resolveAtomicRootName(root, context) : undefined;
   const info = rootName ? atomicStorageInfo(rootName, context) : undefined;
   if (pointerParts && rootName && info) {
@@ -7258,7 +7293,7 @@ function emitCurandHelpers(): string[] {
 function emitFrexpHelpers(): string[] {
   return [
     "fn bg_frexp(value: f32, exponent_out: ptr<function, i32>) -> f32 {",
-    "  if (value == 0.0 || isNan(value) || isInf(value)) {",
+    "  if (value == 0.0 || value != value || abs(value) > 3.4028234663852886e38) {",
     "    *exponent_out = 0;",
     "    return value;",
     "  }",

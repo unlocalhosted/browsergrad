@@ -3085,13 +3085,15 @@ __global__ void constants(float* out, uint* kinds) {
     out[4] = tile[0];
     out[5] = M_SQRT2 * M_2_SQRTPI * 0.5f + M_SQRT1_2;
     out[6] = isinf(out[0]) ? 1.0f : 0.0f;
+    out[7] = isnan(out[3]) ? 1.0f : 0.0f;
+    out[8] = isNan(out[3]) ? 1.0f : 0.0f;
     kinds[0] = cudaMemcpyDeviceToDevice + cudaStreamNonBlocking;
     kinds[1] = warpSize + WARP_SIZE;
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { out: new Float32Array(7), kinds: new Uint32Array(2) } },
+      { buffers: { out: new Float32Array(9), kinds: new Uint32Array(2) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
     const out = [...result.buffers.out as Float32Array];
@@ -3106,6 +3108,8 @@ __global__ void constants(float* out, uint* kinds) {
     expect(out[4]).toBe(7);
     expect(out[5]).toBeCloseTo(Math.SQRT2 * (2 / Math.sqrt(Math.PI)) * 0.5 + Math.SQRT1_2, 6);
     expect(out[6]).toBe(1);
+    expect(out[7]).toBe(1);
+    expect(out[8]).toBe(1);
     expect([...result.buffers.kinds as Uint32Array]).toEqual([4, 64]);
   });
 
@@ -7474,6 +7478,49 @@ __global__ void helper_shared_scalar_exchange(uint* out) {
     expect(compiled.wgsl).toContain("fn bg_ptr_atomicExchange_u32");
     expect(compiled.wgsl).toContain("case 1u: { return atomicExchange(&flag, value); }");
     expect([...result.buffers.out as Uint32Array]).toEqual([7]);
+  });
+
+  it("keeps shared scalar atomic pointer parameters distinct from caller shared names", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void mark_u32(uint* flag, uint value) {
+  atomicExch(flag, value);
+}
+__global__ void helper_shared_scalar_collision(uint* out) {
+  __shared__ uint flag;
+  if (threadIdx.x == 0) {
+    flag = 0u;
+    mark_u32(&flag, 7u);
+    out[0] = flag;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_ptr_atomicExchange_u32(flag_buffer");
+    expect(compiled.wgsl).not.toContain("&flag[flag_base]");
+    expect([...result.buffers.out as Uint32Array]).toEqual([7]);
+  });
+
+  it("lets scalar parameters shadow shared atomic names", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint set_local(uint flag) {
+  flag = 9u;
+  return flag;
+}
+__global__ void helper_shared_scalar_param_collision(uint* out) {
+  __shared__ uint flag;
+  if (threadIdx.x == 0) {
+    flag = 0u;
+    out[0] = set_local(flag);
+    out[1] = flag;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("flag = 9u");
+    expect(compiled.wgsl).not.toContain("atomicStore(&flag, 9u)");
   });
 
   it("supports pointer-form atomic compare-swap against storage and shared memory", () => {
