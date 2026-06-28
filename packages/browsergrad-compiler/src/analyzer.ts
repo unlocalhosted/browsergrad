@@ -496,9 +496,11 @@ export function analyzeCudaLite(
       validateF64Type(param.valueType, param.span, diagnostics, options);
     }
     walkStatements(fn.body, functionScope, 0, 0, 0, functionDeclaredNames);
+    validateDivergentReturnsBeforeBarriers(fn.body, new Map(fn.params.map((param) => [param.name, param])), diagnostics);
   }
 
   walkStatements(kernel.body, rootScope, 0, 0, 0, declaredNames);
+  validateDivergentReturnsBeforeBarriers(kernel.body, params, diagnostics);
   markExactAtomicPointerUsage(ast, kernel, options, atomicParams, atomicShared, atomicDeviceGlobals);
 
   if (options.f16Mode === "f32") {
@@ -3834,6 +3836,92 @@ function isBarrierCall(expression: CudaLiteExpression): expression is Extract<Cu
   if (expression.kind !== "call") return false;
   const name = expressionName(expression.callee);
   return name === "__syncthreads" || name === "__syncwarp";
+}
+
+function validateDivergentReturnsBeforeBarriers(
+  statements: readonly CudaLiteStatement[],
+  params: ReadonlyMap<string, CudaLiteParam>,
+  diagnostics: CudaLiteDiagnostic[],
+): void {
+  const visitBlock = (
+    body: readonly CudaLiteStatement[],
+    divergentDepth: number,
+    initialBarrierLater = false,
+  ): boolean => {
+    let barrierLater = initialBarrierLater;
+    let containsBarrier = false;
+    for (let index = body.length - 1; index >= 0; index--) {
+      const statement = body[index]!;
+      const info = visitStatement(statement, divergentDepth, barrierLater);
+      containsBarrier = info.containsBarrier || containsBarrier;
+      barrierLater = barrierLater || info.containsBarrier;
+    }
+    return containsBarrier;
+  };
+
+  const visitStatement = (
+    statement: CudaLiteStatement,
+    divergentDepth: number,
+    barrierLater: boolean,
+  ): { readonly containsBarrier: boolean } => {
+    switch (statement.kind) {
+      case "block":
+        return { containsBarrier: visitBlock(statement.body, divergentDepth, barrierLater) };
+      case "expr":
+        return { containsBarrier: isBarrierCall(statement.expression) };
+      case "return":
+        if (divergentDepth > 0 && barrierLater) {
+          diagnostics.push(error(
+            "divergent-return-before-barrier",
+            "thread-dependent return before a later barrier would make WGSL barrier control flow non-uniform",
+            statement.span,
+          ));
+        }
+        return { containsBarrier: false };
+      case "if": {
+        const nestedDivergentDepth = divergentDepth + (expressionMayBeNonUniformBeforeBarrier(statement.condition, params) ? 1 : 0);
+        const consequentHasBarrier = visitBlock(statement.consequent, nestedDivergentDepth, barrierLater);
+        const alternateHasBarrier = statement.alternate ? visitBlock(statement.alternate, nestedDivergentDepth, barrierLater) : false;
+        return { containsBarrier: consequentHasBarrier || alternateHasBarrier };
+      }
+      case "for": {
+        const nestedDivergentDepth = divergentDepth + (statement.condition && expressionMayBeNonUniformBeforeBarrier(statement.condition, params) ? 1 : 0);
+        return { containsBarrier: visitBlock(statement.body, nestedDivergentDepth, barrierLater) };
+      }
+      case "while": {
+        const nestedDivergentDepth = divergentDepth + (expressionMayBeNonUniformBeforeBarrier(statement.condition, params) ? 1 : 0);
+        return { containsBarrier: visitBlock(statement.body, nestedDivergentDepth, barrierLater) };
+      }
+      case "do-while": {
+        const nestedDivergentDepth = divergentDepth + (expressionMayBeNonUniformBeforeBarrier(statement.condition, params) ? 1 : 0);
+        return { containsBarrier: visitBlock(statement.body, nestedDivergentDepth, barrierLater) };
+      }
+      default:
+        return { containsBarrier: false };
+    }
+  };
+
+  visitBlock(statements, 0);
+}
+
+function expressionMayBeNonUniformBeforeBarrier(
+  expression: CudaLiteExpression,
+  params: ReadonlyMap<string, CudaLiteParam>,
+): boolean {
+  if (expressionIsDivergent(expression, params)) return true;
+  if (expression.kind === "identifier") {
+    const param = params.get(expression.name);
+    return param === undefined || param.pointer;
+  }
+  if (expression.kind === "member" && expression.object.kind === "identifier") {
+    const name = expression.object.name;
+    return name !== "blockIdx" && name !== "blockDim" && name !== "gridDim";
+  }
+  let nonUniform = false;
+  forEachExpressionChild(expression, (child) => {
+    if (expressionMayBeNonUniformBeforeBarrier(child, params)) nonUniform = true;
+  });
+  return nonUniform;
 }
 
 function forEachExpressionChild(

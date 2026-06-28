@@ -1073,6 +1073,16 @@ __global__ void bad(float* x) {
 }`);
     const barrierAnalysis = analyzeCudaLite(divergentBarrier);
     expect(barrierAnalysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-barrier");
+
+    const divergentReturnBeforeBarrier = parseCudaLite(`
+__global__ void bad(float* x, int n) {
+  int idx = threadIdx.x;
+  if (idx >= n) return;
+  __syncthreads();
+  x[idx] = 1.0;
+}`);
+    const divergentReturnAnalysis = analyzeCudaLite(divergentReturnBeforeBarrier);
+    expect(divergentReturnAnalysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
   });
 
   it("hardens symbol and array validation", () => {
