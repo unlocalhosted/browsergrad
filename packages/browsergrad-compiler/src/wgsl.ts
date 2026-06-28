@@ -1355,6 +1355,7 @@ function usesDevicePointerParams(ir: KernelIrModule): boolean {
     "nvcuda::wmma::store_matrix_sync",
   ]);
   return ir.functions.some((fn) => fn.params.some((param) => param.pointer)) ||
+    usesKernelPointerParamDereference(ir.body, ir.params) ||
     collectLocalPointerHandles(ir.body, undefined, structuredRoots).size > 0 ||
     ir.functions.some((fn) => collectLocalPointerHandles(fn.body, undefined, structuredRoots).size > 0) ||
     usesDevicePointerArrayHandles(ir.body) ||
@@ -1363,6 +1364,25 @@ function usesDevicePointerParams(ir: KernelIrModule): boolean {
     ir.functions.some((fn) => usesLocalPointerAliasDereference(fn.body)) ||
     statementsUseCall(ir.body, devicePointerCalls) ||
     ir.functions.some((fn) => statementsUseCall(fn.body, devicePointerCalls));
+}
+
+function usesKernelPointerParamDereference(
+  statements: readonly CudaLiteStatement[],
+  params: readonly CudaLiteParam[],
+): boolean {
+  const pointerParamNames = new Set(params.filter((param) => param.pointer).map((param) => param.name));
+  let used = false;
+  walkCudaLiteExpressions(statements, (expression) => {
+    if (
+      expression.kind === "unary" &&
+      expression.operator === "*" &&
+      expression.argument.kind === "identifier" &&
+      pointerParamNames.has(expression.argument.name)
+    ) {
+      used = true;
+    }
+  });
+  return used;
 }
 
 function usesDevicePointerArrayHandles(statements: readonly CudaLiteStatement[]): boolean {

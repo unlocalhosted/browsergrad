@@ -692,14 +692,13 @@ const html = String.raw`<!doctype html>
           if (missingFeatures.length > 0) {
             cases.push({
               name: spec.name,
-              plan: "skipped:missing-features:" + missingFeatures.join(","),
-              ok: true,
-              skipped: true,
-              maxAbsDiff: 0,
+              plan: "missing-features:" + missingFeatures.join(","),
+              ok: false,
+              maxAbsDiff: Number.POSITIVE_INFINITY,
               output: spec.output,
               corpusId: spec.corpusId,
             });
-            emitProgress({ event: "case-skip", index: index + 1, total: specs.length, name: spec.name, missingFeatures });
+            emitProgress({ event: "case-fail", index: index + 1, total: specs.length, name: spec.name, missingFeatures });
             continue;
           }
           emitProgress({ event: "case-start", index: index + 1, total: specs.length, name: spec.name });
@@ -1679,10 +1678,9 @@ const html = String.raw`<!doctype html>
         const diagnosticSkip = webGpuDiagnosticSkip(compiled);
         if (diagnosticSkip) {
           return {
-            ok: true,
-            skipped: true,
-            plan: "skipped:" + diagnosticSkip,
-            maxAbsDiff: 0,
+            ok: false,
+            plan: diagnosticSkip,
+            maxAbsDiff: Number.POSITIVE_INFINITY,
             output: spec.verifyMode === "dispatch" ? "dispatch" : spec.output,
           };
         }
@@ -1699,10 +1697,9 @@ const html = String.raw`<!doctype html>
         const resourceLimitBlocker = webGpuResourceLimitBlocker(device.gpu.limits, plan);
         if (resourceLimitBlocker) {
           return {
-            ok: true,
-            skipped: true,
-            plan: "skipped:resource-limits:" + resourceLimitBlocker,
-            maxAbsDiff: 0,
+            ok: false,
+            plan: "resource-limits:" + resourceLimitBlocker,
+            maxAbsDiff: Number.POSITIVE_INFINITY,
             output: spec.verifyMode === "dispatch" ? "dispatch" : spec.output,
           };
         }

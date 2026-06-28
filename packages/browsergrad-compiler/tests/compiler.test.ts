@@ -330,6 +330,25 @@ __global__ void mutateParams(float* out, float alpha, float beta, int n, bool en
     expect([...result.buffers.y as Float32Array]).toEqual([14, 26, 38]);
   });
 
+  it("emits pointer helpers for direct kernel pointer dereference writes", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void directDeref(float* result, int* count) {
+  *result = 3.5f;
+  *count = 2;
+}
+`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { result: new Float32Array(1), count: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_ptr_write_f32(buffer: u32, index: u32, value: f32)");
+    expect(compiled.wgsl).toContain("fn bg_ptr_write_i32(buffer: u32, index: u32, value: i32)");
+    expect([...result.buffers.result as Float32Array]).toEqual([3.5]);
+    expect([...result.buffers.count as Int32Array]).toEqual([2]);
+  });
+
   it("flattens device helper aliases rooted at pointer params", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ float loadAlias(const float* inp, int row) {
