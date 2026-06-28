@@ -867,15 +867,16 @@ function emitStatement(
       if (statement.update?.kind === "sequence" || statement.init?.kind === "sequence") {
         return emitForLoopWithContinuing(statement, context, indentLevel);
       }
+      const loopContext = scopedForLoopContext(statement, context);
       const init = statement.init?.kind === "var"
-        ? emitForVar(statement.init, context)
+        ? emitForVar(statement.init, loopContext)
         : statement.init
-          ? emitExpression(statement.init, context)
+          ? emitExpression(statement.init, loopContext)
           : "";
-      const condition = statement.condition ? emitTruthinessExpression(statement.condition, context) : "true";
-      const update = statement.update ? emitExpression(statement.update, context) : "";
+      const condition = statement.condition ? emitTruthinessExpression(statement.condition, loopContext) : "true";
+      const update = statement.update ? emitExpression(statement.update, loopContext) : "";
       const lines = [`${prefix}for (${init}; ${condition}; ${update}) {`];
-      lines.push(...statement.body.flatMap((child) => emitStatement(child, context, indentLevel + 1)));
+      lines.push(...statement.body.flatMap((child) => emitStatement(child, loopContext, indentLevel + 1)));
       lines.push(`${prefix}}`);
       return lines;
     }
@@ -899,6 +900,20 @@ function emitStatement(
     case "break":
       return [`${prefix}break;`];
   }
+}
+
+function scopedForLoopContext(
+  statement: Extract<CudaLiteStatement, { kind: "for" }>,
+  context: EmitContext,
+): EmitContext {
+  const init = statement.init;
+  if (init?.kind !== "var" || init.storage !== "local" || init.pointer || init.dimensions.length > 0) return context;
+  return {
+    ...context,
+    localValueTypeFor(name) {
+      return name === init.name ? init.valueType : context.localValueTypeFor(name);
+    },
+  };
 }
 
 function emitIfWithUniformBarriers(

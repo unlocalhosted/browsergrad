@@ -6219,6 +6219,27 @@ __global__ void kernel(unsigned int *out, unsigned int pitch) {
     expect(compiled.wgsl).toContain("+ u32(i)");
   });
 
+  it("keeps duplicate for-loop variable names scoped for signedness", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__global__ void kernel(int *out) {
+  for (int k = 0; k < 8; k++) {
+    out[k] = k;
+  }
+  for (unsigned int k = 0; k < 8; k++) {
+    out[k] += (int)k;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(8) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("for (var k: i32 = 0; (k < 8); k = (k + 1))");
+    expect(compiled.wgsl).toContain("for (var k: u32 = 0u; (k < 8u); k = (k + 1u))");
+    expect([...result.buffers.out as Int32Array]).toEqual([0, 2, 4, 6, 8, 10, 12, 14]);
+  });
+
   it("casts pointer-alias base and offset index math in WGSL", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __global__ void kernel(unsigned int *out, unsigned int pitch) {
