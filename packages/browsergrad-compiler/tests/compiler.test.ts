@@ -1773,6 +1773,22 @@ __global__ void voteKernel(uint *input, uint *out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([1, 0, 1, 1, 7]);
   });
 
+  it("lowers CUDA warp vote helpers with boolean predicates", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void voteBoolKernel(bool *info, int warp_size) {
+  int tx = threadIdx.x;
+  bool *offs = info + (tx * 3);
+  *offs = __any_sync(0xffffffffu, (tx >= (warp_size * 3) / 2));
+  *(offs + 1) = (tx >= (warp_size * 3) / 2 ? true : false);
+  if (__all_sync(0xffffffffu, (tx >= (warp_size * 3) / 2))) {
+    *(offs + 2) = true;
+  }
+}`, { features: { subgroups: true }, subgroupMode: "scalar", workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("select(0u, 1u, (tx >= ((bg_uniforms.warp_size * 3) / 2)))");
+    expect(compiled.wgsl).not.toContain(") != 0) != 0");
+  });
+
   it("lowers cooperative-group block and tiled primitives to WebGPU primitives", () => {
     const compiled = compileCudaLiteKernel(`
 namespace cg = cooperative_groups;

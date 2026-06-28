@@ -4853,15 +4853,21 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "__shfl_xor_sync":
       if (context.subgroupMode === "scalar") return args[1] ?? "0";
       return `subgroupShuffleXor(${args[1] ?? "0"}, u32(${args[2] ?? "0"}))`;
-    case "__any_sync":
-      if (context.subgroupMode === "scalar") return `select(0u, 1u, (${args[1] ?? "0"}) != 0)`;
-      return `select(0u, 1u, subgroupAny((${args[1] ?? "0"}) != 0))`;
-    case "__all_sync":
-      if (context.subgroupMode === "scalar") return `select(0u, 1u, (${args[1] ?? "0"}) != 0)`;
-      return `select(0u, 1u, subgroupAll((${args[1] ?? "0"}) != 0))`;
-    case "__ballot_sync":
-      if (context.subgroupMode === "scalar") return `select(0u, 1u, (${args[1] ?? "0"}) != 0)`;
-      return `subgroupBallot((${args[1] ?? "0"}) != 0).x`;
+    case "__any_sync": {
+      const predicate = expression.args[1] ? emitTruthinessExpression(expression.args[1], context) : "false";
+      if (context.subgroupMode === "scalar") return `select(0u, 1u, ${predicate})`;
+      return `select(0u, 1u, subgroupAny(${predicate}))`;
+    }
+    case "__all_sync": {
+      const predicate = expression.args[1] ? emitTruthinessExpression(expression.args[1], context) : "false";
+      if (context.subgroupMode === "scalar") return `select(0u, 1u, ${predicate})`;
+      return `select(0u, 1u, subgroupAll(${predicate}))`;
+    }
+    case "__ballot_sync": {
+      const predicate = expression.args[1] ? emitTruthinessExpression(expression.args[1], context) : "false";
+      if (context.subgroupMode === "scalar") return `select(0u, 1u, ${predicate})`;
+      return `subgroupBallot(${predicate}).x`;
+    }
     case "tex1D":
     case "tex1Dfetch":
     case "tex2D":
