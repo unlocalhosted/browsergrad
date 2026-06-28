@@ -95,9 +95,10 @@ function createAutoCorpusSmokeFixture(root, corpus, item, compiler, fixtureOptio
     caseName,
   });
   const dynamicSharedMemory = inferDynamicSharedMemory(source);
+  const workgroupSize = inferAutoCorpusWorkgroupSize(source);
   const compileOptions = {
     kernelName: item.kernelName,
-    workgroupSize: [32, 1, 1],
+    workgroupSize,
     features: { "shader-f16": true, subgroups: true },
     f64Mode: "f32",
     ...(verifyMode === "dispatch" ? { f16Mode: "f32", subgroupMode: "scalar" } : {}),
@@ -135,6 +136,22 @@ function createAutoCorpusSmokeFixture(root, corpus, item, compiler, fixtureOptio
       source,
       verifyMode,
     };
+  } catch {
+    return undefined;
+  }
+}
+
+export function inferAutoCorpusWorkgroupSize(source) {
+  const launchBounds = /\b__launch_bounds__\s*\(\s*([^,)]+)/u.exec(source)?.[1];
+  const threads = launchBounds ? evaluateIntegerExpression(launchBounds) : undefined;
+  return threads && threads > 0 && threads <= 256 ? [threads, 1, 1] : [32, 1, 1];
+}
+
+function evaluateIntegerExpression(expression) {
+  if (!/^[\d\s()+*/%-]+$/u.test(expression)) return undefined;
+  try {
+    const value = Function(`"use strict"; return (${expression});`)();
+    return Number.isInteger(value) ? value : undefined;
   } catch {
     return undefined;
   }

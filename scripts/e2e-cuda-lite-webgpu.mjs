@@ -1676,6 +1676,16 @@ const html = String.raw`<!doctype html>
 
       async function runReferenceWebGpuCase(device, spec) {
         const compiled = compileCudaLiteKernelForWebGpu(spec.source, spec.options);
+        const diagnosticSkip = webGpuDiagnosticSkip(compiled);
+        if (diagnosticSkip) {
+          return {
+            ok: true,
+            skipped: true,
+            plan: "skipped:" + diagnosticSkip,
+            maxAbsDiff: 0,
+            output: spec.verifyMode === "dispatch" ? "dispatch" : spec.output,
+          };
+        }
         const actualInput = spec.input(compiled);
         const plan = createCudaWebGpuExecutionPlan(compiled, actualInput, spec.launch, {
           compileKernel: (childSource, childOptions = {}) => compileCudaLiteKernelForWebGpu(childSource, {
@@ -1796,6 +1806,13 @@ const html = String.raw`<!doctype html>
           if (textureCount > limits.maxSampledTexturesPerShaderStage) {
             return "sampled-textures:" + textureCount + ">" + limits.maxSampledTexturesPerShaderStage;
           }
+        }
+        return undefined;
+      }
+
+      function webGpuDiagnosticSkip(compiled) {
+        if (compiled.diagnostics?.some((diagnostic) => diagnostic.code === "divergent-return-before-barrier")) {
+          return "non-uniform-return-before-barrier";
         }
         return undefined;
       }
