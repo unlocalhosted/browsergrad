@@ -802,6 +802,7 @@ const html = String.raw`<!doctype html>
           requiredLimits[name] = Math.min(supported, desired);
         };
         requestLimit("maxStorageBuffersPerShaderStage", 8, 16);
+        requestLimit("maxComputeWorkgroupStorageSize", 16384, 32768);
         const descriptor = {};
         if (requiredFeatures.length > 0) descriptor.requiredFeatures = requiredFeatures;
         if (Object.keys(requiredLimits).length > 0) descriptor.requiredLimits = requiredLimits;
