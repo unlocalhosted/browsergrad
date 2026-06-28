@@ -4101,6 +4101,7 @@ __global__ void async_copy(const float *input, float *output) {
     );
 
     expect(compiled.wgsl).toContain("bg_ptr_write_f32");
+    expect(compiled.wgsl).toContain("cp.async fence omitted: CP_ASYNC_WAIT_GROUP");
     expect(compiled.wgsl).toContain("workgroupBarrier()");
     expect([...result.buffers.output as Float32Array]).toEqual([2, 3, 4, 5]);
   });
@@ -5761,7 +5762,7 @@ __global__ void predicatedBarrier(float *A, float *B, float *C, int N) {
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("workgroupBarrier();\n  if ((idx < bg_uniforms.N))");
+    expect(compiled.wgsl).toContain("workgroupBarrier();\n    if ((idx < bg_uniforms.N))");
     expect([...result.buffers.C as Float32Array]).toEqual([11, 22]);
   });
 
@@ -5816,6 +5817,85 @@ __global__ void earlyReturnLoopBarrier(float *x, int N) {
     expect(compiled.wgsl).toContain("workgroupBarrier();\n    if (bg_active_lane)");
     expect(compiled.wgsl).not.toContain("if (bg_active_lane) {\n  for");
     expect([...result.buffers.x as Float32Array]).toEqual([3, 5, 7, 9]);
+  });
+
+  it("keeps nested predicated barriers uniform after active-lane early returns", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void nestedPredicatedBarrier(float *x, int N) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  if (tid >= N) return;
+  for (int k = 0; k < 2; ++k) {
+    if (k + 1 < 2) {
+      scratch[tid] = x[tid] + (float)k;
+      __syncthreads();
+    }
+    __syncthreads();
+  }
+  x[tid] = scratch[tid] + 1.0f;
+}`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([1, 2, 3, 4]) }, scalars: { N: 4 } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("if (bg_active_lane && (((k + 1) < 2)))");
+    expect(compiled.wgsl).toContain("workgroupBarrier();\n    }\n    workgroupBarrier();");
+    expect(compiled.wgsl).not.toContain("if (bg_active_lane) {\n    if (((k + 1) < 2))");
+    expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 5]);
+  });
+
+  it("keeps nested predicated barriers uniform without early returns", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void nestedBarrierNoReturn(float *x) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  for (int k = 0; k < 2; ++k) {
+    if (k + 1 < 2) {
+      scratch[tid] = x[tid];
+      __syncthreads();
+    }
+    __syncthreads();
+  }
+  x[tid] = scratch[tid] + 1.0f;
+}`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([1, 2, 3, 4]) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("if (((k + 1) < 2))");
+    expect(compiled.wgsl).toContain("workgroupBarrier();\n    }\n    workgroupBarrier();");
+    expect(compiled.wgsl).not.toContain("if (((k + 1) < 2)) {\n      workgroupBarrier();");
+    expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 5]);
+  });
+
+  it("keeps barriers uniform across predicated if-else branches", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void branchedBarrier(float *x, int flag) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  if (flag != 0) {
+    scratch[tid] = x[tid];
+    __syncthreads();
+  } else {
+    scratch[tid] = x[tid] + 1.0f;
+    __syncthreads();
+  }
+  x[tid] = scratch[tid] + 1.0f;
+}`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([1, 2, 3, 4]) }, scalars: { flag: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("if ((bg_uniforms.flag != 0))");
+    expect(compiled.wgsl).toContain("if (!((bg_uniforms.flag != 0)))");
+    expect(compiled.wgsl).not.toContain("} else {\n    workgroupBarrier();");
+    expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 5]);
   });
 
   it("folds singleton thread axes before barrier uniformity analysis", () => {

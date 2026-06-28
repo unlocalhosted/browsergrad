@@ -850,8 +850,16 @@ function emitStatement(
         return emitted.length === 0 ? [] : [`${prefix}${emitted};`];
       }
     case "if": {
-      if (!statement.alternate && statement.consequent.some(isBarrierStatement)) {
-        return emitIfWithUniformBarriers(statement.condition, statement.consequent, context, indentLevel);
+      if (!statement.alternate && statement.consequent.some(statementContainsBarrier)) {
+        const guardSource = emitTruthinessExpression(statement.condition, context);
+        return emitGuardedBranch(statement.consequent, guardSource, context, indentLevel);
+      }
+      if (statement.alternate && (statement.consequent.some(statementContainsBarrier) || statement.alternate.some(statementContainsBarrier))) {
+        const guardSource = emitTruthinessExpression(statement.condition, context);
+        return [
+          ...emitGuardedBranch(statement.consequent, guardSource, context, indentLevel),
+          ...emitGuardedBranch(statement.alternate, `!(${guardSource})`, context, indentLevel),
+        ];
       }
       const subgroupAssignment = emitPredicatedSubgroupAssignment(statement, context, indentLevel);
       if (subgroupAssignment) return subgroupAssignment;
@@ -953,28 +961,44 @@ function emitStatementWithActiveFlag(
   const split = splitIfTrailingVoidReturn(statement);
   if (split) return emitIfTrailingReturnAsActiveFlag(split, activeFlag, context, indentLevel);
   if (statement.kind === "var") return emitVarStatementWithActiveFlag(statement, activeFlag, context, indentLevel);
+  if (statementContainsBarrier(statement)) return emitStatementWithGuard(statement, activeFlag, context, indentLevel);
+  const lines = [`${prefix}if (${activeFlag}) {`];
+  lines.push(...emitStatement(statement, context, indentLevel + 1));
+  lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitStatementWithGuard(
+  statement: CudaLiteStatement,
+  guardSource: string,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const prefix = indent(indentLevel);
+  if (isBarrierStatement(statement)) return [`${prefix}workgroupBarrier();`];
+  if (statement.kind === "var") return emitVarStatementWithActiveFlag(statement, guardSource, context, indentLevel);
   if (statementContainsBarrier(statement)) {
     switch (statement.kind) {
       case "block": {
         const lines = [`${prefix}{`];
-        lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1, { activeFlag }));
+        lines.push(...statement.body.flatMap((child) => emitStatementWithGuard(child, guardSource, context, indentLevel + 1)));
         lines.push(`${prefix}}`);
         return lines;
       }
-      case "if":
-        if (!statement.alternate && statement.consequent.some(isBarrierStatement)) {
-          return emitIfWithUniformBarriers(
-            statement.condition,
-            statement.consequent,
-            context,
-            indentLevel,
-            `${activeFlag} && (${emitTruthinessExpression(statement.condition, context)})`,
-          );
+      case "if": {
+        if (!statement.alternate) {
+          const nestedGuard = `${guardSource} && (${emitTruthinessExpression(statement.condition, context)})`;
+          return emitGuardedBranch(statement.consequent, nestedGuard, context, indentLevel);
         }
-        break;
+        const condition = emitTruthinessExpression(statement.condition, context);
+        return [
+          ...emitGuardedBranch(statement.consequent, `${guardSource} && (${condition})`, context, indentLevel),
+          ...emitGuardedBranch(statement.alternate, `${guardSource} && !(${condition})`, context, indentLevel),
+        ];
+      }
       case "for": {
         if (statement.update?.kind === "sequence" || statement.init?.kind === "sequence") {
-          return emitForLoopWithContinuing(statement, context, indentLevel, activeFlag);
+          return emitForLoopWithContinuing(statement, context, indentLevel, guardSource);
         }
         const loopContext = scopedForLoopContext(statement, context);
         const init = statement.init?.kind === "var"
@@ -985,27 +1009,40 @@ function emitStatementWithActiveFlag(
         const condition = statement.condition ? emitTruthinessExpression(statement.condition, loopContext) : "true";
         const update = statement.update ? emitExpression(statement.update, loopContext) : "";
         const lines = [`${prefix}for (${init}; ${condition}; ${update}) {`];
-        lines.push(...emitStatementSequence(statement.body, loopContext, indentLevel + 1, { activeFlag }));
+        lines.push(...statement.body.flatMap((child) => emitStatementWithGuard(child, guardSource, loopContext, indentLevel + 1)));
         lines.push(`${prefix}}`);
         return lines;
       }
       case "while": {
         const lines = [`${prefix}while (${emitTruthinessExpression(statement.condition, context)}) {`];
-        lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1, { activeFlag }));
+        lines.push(...statement.body.flatMap((child) => emitStatementWithGuard(child, guardSource, context, indentLevel + 1)));
         lines.push(`${prefix}}`);
         return lines;
       }
       case "do-while": {
         const lines = [`${prefix}loop {`];
-        lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1, { activeFlag }));
+        lines.push(...statement.body.flatMap((child) => emitStatementWithGuard(child, guardSource, context, indentLevel + 1)));
         lines.push(`${indent(indentLevel + 1)}if (!(${emitTruthinessExpression(statement.condition, context)})) { break; }`);
         lines.push(`${prefix}}`);
         return lines;
       }
     }
   }
-  const lines = [`${prefix}if (${activeFlag}) {`];
+  const lines = [`${prefix}if (${guardSource}) {`];
   lines.push(...emitStatement(statement, context, indentLevel + 1));
+  lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitGuardedBranch(
+  body: readonly CudaLiteStatement[],
+  guardSource: string,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const prefix = indent(indentLevel);
+  const lines = [`${prefix}{`];
+  lines.push(...body.flatMap((child) => emitStatementWithGuard(child, guardSource, context, indentLevel + 1)));
   lines.push(`${prefix}}`);
   return lines;
 }
@@ -1086,36 +1123,6 @@ function scopedForLoopContext(
       return name === init.name ? init.valueType : context.localValueTypeFor(name);
     },
   };
-}
-
-function emitIfWithUniformBarriers(
-  condition: CudaLiteExpression,
-  body: readonly CudaLiteStatement[],
-  context: EmitContext,
-  indentLevel: number,
-  conditionSourceOverride?: string,
-): string[] {
-  const prefix = indent(indentLevel);
-  const conditionSource = conditionSourceOverride ?? emitTruthinessExpression(condition, context);
-  const lines: string[] = [];
-  let chunk: CudaLiteStatement[] = [];
-  const flush = () => {
-    if (chunk.length === 0) return;
-    lines.push(`${prefix}if (${conditionSource}) {`);
-    lines.push(...chunk.flatMap((child) => emitStatement(child, context, indentLevel + 1)));
-    lines.push(`${prefix}}`);
-    chunk = [];
-  };
-  for (const child of body) {
-    if (isBarrierStatement(child)) {
-      flush();
-      lines.push(`${prefix}workgroupBarrier();`);
-      continue;
-    }
-    chunk.push(child);
-  }
-  flush();
-  return lines;
 }
 
 function emitPredicatedSubgroupAssignment(
@@ -3797,7 +3804,7 @@ function emitCpAsyncStatement(
   if (expression.kind !== "call") return undefined;
   const name = expressionName(expression.callee);
   const prefix = indent(indentLevel);
-  if (isCpAsyncFenceCall(name)) return [`${prefix}workgroupBarrier();`];
+  if (isCpAsyncFenceCall(name)) return [`${prefix}// cp.async fence omitted: ${name}`];
   if (!isCpAsyncCopyCall(name)) return undefined;
   const [dst, src, bytes] = expression.args;
   if (!dst || !src) return [`${prefix}// cp.async omitted: missing pointer operand`];
