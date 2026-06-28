@@ -234,7 +234,7 @@ export function emitKernelIrWgsl(
 
   const emittedFunctions = functionsToEmit(ir);
   const functionLines = emittedFunctions.flatMap((fn) => ["", ...emitDeviceFunction(fn, context)]);
-  const mainBodyLines = ir.body.flatMap((statement) => emitStatement(statement, context, 1));
+  const mainBodyLines = emitStatementSequence(ir.body, context, 1, { lowerEarlyReturnsBeforeBarriers: true });
   for (const helper of context.vectorCooperativeReduceHelpers.values()) {
     lines.push("");
     lines.push(...emitVectorCooperativeReduceHelper(helper, context));
@@ -702,6 +702,7 @@ function collectWgslDeclaredNames(
   const structuredPointerRoots = structuredPointerHandleRoots(ir);
   return [
     ir.name,
+    "bg_active_lane",
     ...ir.params.map((param) => param.name),
     ...ir.constants.map((constant) => constant.name),
     ...ir.deviceGlobals.map((global) => global.name),
@@ -794,7 +795,7 @@ function emitStatement(
   switch (statement.kind) {
     case "block": {
       const lines = [`${prefix}{`];
-      lines.push(...statement.body.flatMap((child) => emitStatement(child, context, indentLevel + 1)));
+      lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1));
       lines.push(`${prefix}}`);
       return lines;
     }
@@ -855,10 +856,10 @@ function emitStatement(
       const subgroupAssignment = emitPredicatedSubgroupAssignment(statement, context, indentLevel);
       if (subgroupAssignment) return subgroupAssignment;
       const lines = [`${prefix}if (${emitTruthinessExpression(statement.condition, context)}) {`];
-      lines.push(...statement.consequent.flatMap((child) => emitStatement(child, context, indentLevel + 1)));
+      lines.push(...emitStatementSequence(statement.consequent, context, indentLevel + 1));
       if (statement.alternate) {
         lines.push(`${prefix}} else {`);
-        lines.push(...statement.alternate.flatMap((child) => emitStatement(child, context, indentLevel + 1)));
+        lines.push(...emitStatementSequence(statement.alternate, context, indentLevel + 1));
       }
       lines.push(`${prefix}}`);
       return lines;
@@ -876,19 +877,19 @@ function emitStatement(
       const condition = statement.condition ? emitTruthinessExpression(statement.condition, loopContext) : "true";
       const update = statement.update ? emitExpression(statement.update, loopContext) : "";
       const lines = [`${prefix}for (${init}; ${condition}; ${update}) {`];
-      lines.push(...statement.body.flatMap((child) => emitStatement(child, loopContext, indentLevel + 1)));
+      lines.push(...emitStatementSequence(statement.body, loopContext, indentLevel + 1));
       lines.push(`${prefix}}`);
       return lines;
     }
     case "while": {
       const lines = [`${prefix}while (${emitTruthinessExpression(statement.condition, context)}) {`];
-      lines.push(...statement.body.flatMap((child) => emitStatement(child, context, indentLevel + 1)));
+      lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1));
       lines.push(`${prefix}}`);
       return lines;
     }
     case "do-while": {
       const lines = [`${prefix}loop {`];
-      lines.push(...statement.body.flatMap((child) => emitStatement(child, context, indentLevel + 1)));
+      lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1));
       lines.push(`${indent(indentLevel + 1)}if (!(${emitTruthinessExpression(statement.condition, context)})) { break; }`);
       lines.push(`${prefix}}`);
       return lines;
@@ -899,6 +900,177 @@ function emitStatement(
       return [`${prefix}continue;`];
     case "break":
       return [`${prefix}break;`];
+  }
+}
+
+interface StatementSequenceOptions {
+  readonly activeFlag?: string;
+  readonly lowerEarlyReturnsBeforeBarriers?: boolean;
+}
+
+function emitStatementSequence(
+  statements: readonly CudaLiteStatement[],
+  context: EmitContext,
+  indentLevel: number,
+  options: StatementSequenceOptions = {},
+): string[] {
+  const activeFlag = options.activeFlag;
+  if (activeFlag) {
+    return statements.flatMap((statement) => emitStatementWithActiveFlag(statement, activeFlag, context, indentLevel));
+  }
+  if (options.lowerEarlyReturnsBeforeBarriers) {
+    const earlyReturnIndex = statements.findIndex((statement, index) =>
+      splitIfTrailingVoidReturn(statement) !== undefined && statements.slice(index + 1).some(statementContainsBarrier)
+    );
+    if (earlyReturnIndex >= 0) {
+      const flag = context.nameFor("bg_active_lane");
+      const prefix = indent(indentLevel);
+      const lines = statements.slice(0, earlyReturnIndex).flatMap((statement) => emitStatement(statement, context, indentLevel));
+      lines.push(`${prefix}var ${flag}: bool = true;`);
+      for (let index = earlyReturnIndex; index < statements.length; index++) {
+        const statement = statements[index]!;
+        const split = splitIfTrailingVoidReturn(statement);
+        if (split) {
+          lines.push(...emitIfTrailingReturnAsActiveFlag(split, flag, context, indentLevel));
+        } else {
+          lines.push(...emitStatementWithActiveFlag(statement, flag, context, indentLevel));
+        }
+      }
+      return lines;
+    }
+  }
+  return statements.flatMap((statement) => emitStatement(statement, context, indentLevel));
+}
+
+function emitStatementWithActiveFlag(
+  statement: CudaLiteStatement,
+  activeFlag: string,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const prefix = indent(indentLevel);
+  if (isBarrierStatement(statement)) return [`${prefix}workgroupBarrier();`];
+  const split = splitIfTrailingVoidReturn(statement);
+  if (split) return emitIfTrailingReturnAsActiveFlag(split, activeFlag, context, indentLevel);
+  if (statement.kind === "var") return emitVarStatementWithActiveFlag(statement, activeFlag, context, indentLevel);
+  if (statementContainsBarrier(statement)) {
+    switch (statement.kind) {
+      case "block": {
+        const lines = [`${prefix}{`];
+        lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1, { activeFlag }));
+        lines.push(`${prefix}}`);
+        return lines;
+      }
+      case "if":
+        if (!statement.alternate && statement.consequent.some(isBarrierStatement)) {
+          return emitIfWithUniformBarriers(
+            statement.condition,
+            statement.consequent,
+            context,
+            indentLevel,
+            `${activeFlag} && (${emitTruthinessExpression(statement.condition, context)})`,
+          );
+        }
+        break;
+      case "for": {
+        if (statement.update?.kind === "sequence" || statement.init?.kind === "sequence") {
+          return emitForLoopWithContinuing(statement, context, indentLevel, activeFlag);
+        }
+        const loopContext = scopedForLoopContext(statement, context);
+        const init = statement.init?.kind === "var"
+          ? emitForVar(statement.init, loopContext)
+          : statement.init
+            ? emitExpression(statement.init, loopContext)
+            : "";
+        const condition = statement.condition ? emitTruthinessExpression(statement.condition, loopContext) : "true";
+        const update = statement.update ? emitExpression(statement.update, loopContext) : "";
+        const lines = [`${prefix}for (${init}; ${condition}; ${update}) {`];
+        lines.push(...emitStatementSequence(statement.body, loopContext, indentLevel + 1, { activeFlag }));
+        lines.push(`${prefix}}`);
+        return lines;
+      }
+      case "while": {
+        const lines = [`${prefix}while (${emitTruthinessExpression(statement.condition, context)}) {`];
+        lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1, { activeFlag }));
+        lines.push(`${prefix}}`);
+        return lines;
+      }
+      case "do-while": {
+        const lines = [`${prefix}loop {`];
+        lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1, { activeFlag }));
+        lines.push(`${indent(indentLevel + 1)}if (!(${emitTruthinessExpression(statement.condition, context)})) { break; }`);
+        lines.push(`${prefix}}`);
+        return lines;
+      }
+    }
+  }
+  const lines = [`${prefix}if (${activeFlag}) {`];
+  lines.push(...emitStatement(statement, context, indentLevel + 1));
+  lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitVarStatementWithActiveFlag(
+  statement: CudaLiteVarDecl,
+  activeFlag: string,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const prefix = indent(indentLevel);
+  if (statement.storage === "shared") return [];
+  if (statement.pointer || statement.dimensions.length > 0 || statement.matrixTile || !statement.init) {
+    return emitStatement(statement, context, indentLevel);
+  }
+  return [
+    `${prefix}var ${context.nameFor(statement.name)}: ${wgslScalar(statement.valueType)};`,
+    `${prefix}if (${activeFlag}) {`,
+    `${indent(indentLevel + 1)}${context.nameFor(statement.name)} = ${emitLocalInit(statement, context)};`,
+    `${prefix}}`,
+  ];
+}
+
+interface IfTrailingReturn {
+  readonly condition: CudaLiteExpression;
+  readonly beforeReturn: readonly CudaLiteStatement[];
+}
+
+function splitIfTrailingVoidReturn(statement: CudaLiteStatement): IfTrailingReturn | undefined {
+  if (statement.kind !== "if" || statement.alternate || statement.consequent.length === 0) return undefined;
+  const last = statement.consequent[statement.consequent.length - 1];
+  if (last?.kind !== "return" || last.value) return undefined;
+  const beforeReturn = statement.consequent.slice(0, -1);
+  if (beforeReturn.some(statementContainsBarrier)) return undefined;
+  return { condition: statement.condition, beforeReturn };
+}
+
+function emitIfTrailingReturnAsActiveFlag(
+  split: IfTrailingReturn,
+  activeFlag: string,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const prefix = indent(indentLevel);
+  const lines = [`${prefix}if (${activeFlag} && (${emitTruthinessExpression(split.condition, context)})) {`];
+  lines.push(...split.beforeReturn.flatMap((child) => emitStatement(child, context, indentLevel + 1)));
+  lines.push(`${indent(indentLevel + 1)}${activeFlag} = false;`);
+  lines.push(`${prefix}}`);
+  return lines;
+}
+
+function statementContainsBarrier(statement: CudaLiteStatement): boolean {
+  switch (statement.kind) {
+    case "block":
+      return statement.body.some(statementContainsBarrier);
+    case "expr":
+      return isBarrierCall(statement.expression);
+    case "if":
+      return statement.consequent.some(statementContainsBarrier) || (statement.alternate?.some(statementContainsBarrier) ?? false);
+    case "for":
+    case "while":
+    case "do-while":
+      return statement.body.some(statementContainsBarrier);
+    default:
+      return false;
   }
 }
 
@@ -921,9 +1093,10 @@ function emitIfWithUniformBarriers(
   body: readonly CudaLiteStatement[],
   context: EmitContext,
   indentLevel: number,
+  conditionSourceOverride?: string,
 ): string[] {
   const prefix = indent(indentLevel);
-  const conditionSource = emitTruthinessExpression(condition, context);
+  const conditionSource = conditionSourceOverride ?? emitTruthinessExpression(condition, context);
   const lines: string[] = [];
   let chunk: CudaLiteStatement[] = [];
   const flush = () => {
@@ -3044,6 +3217,7 @@ function emitForLoopWithContinuing(
   statement: Extract<CudaLiteStatement, { kind: "for" }>,
   context: EmitContext,
   indentLevel: number,
+  activeFlag?: string,
 ): string[] {
   const prefix = indent(indentLevel);
   const lines: string[] = [];
@@ -3054,7 +3228,7 @@ function emitForLoopWithContinuing(
   }
   lines.push(`${prefix}loop {`);
   if (statement.condition) lines.push(`${indent(indentLevel + 1)}if (!(${emitTruthinessExpression(statement.condition, context)})) { break; }`);
-  lines.push(...statement.body.flatMap((child) => emitStatement(child, context, indentLevel + 1)));
+  lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1, activeFlag ? { activeFlag } : undefined));
   if (statement.update) {
     lines.push(`${indent(indentLevel + 1)}continuing {`);
     for (const expression of sequenceItems(statement.update)) {

@@ -1819,6 +1819,7 @@ const html = String.raw`<!doctype html>
 
       function webGpuDiagnosticSkip(compiled) {
         if (compiled.diagnostics?.some((diagnostic) => diagnostic.code === "divergent-return-before-barrier")) {
+          if (compiled.wgsl?.includes("var bg_active_lane: bool = true;")) return undefined;
           return "non-uniform-return-before-barrier";
         }
         return undefined;

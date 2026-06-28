@@ -5765,6 +5765,59 @@ __global__ void predicatedBarrier(float *A, float *B, float *C, int N) {
     expect([...result.buffers.C as Float32Array]).toEqual([11, 22]);
   });
 
+  it("lowers early returns before later barriers into active-lane guards", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void earlyReturnBarrier(float *x, int N) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    scratch[tid] = 0.0f;
+    return;
+  }
+  scratch[tid] = x[tid];
+  __syncthreads();
+  x[tid] = scratch[tid] + 1.0f;
+}`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([1, 2, 3, 4]) }, scalars: { N: 4 } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
+    expect(compiled.wgsl).toContain("bg_active_lane = false;");
+    expect(compiled.wgsl).toContain("workgroupBarrier();\n  if (bg_active_lane)");
+    expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 5]);
+  });
+
+  it("keeps barriers uniform inside tiled loops after active-lane early returns", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void earlyReturnLoopBarrier(float *x, int N) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  if (tid >= N) return;
+  float acc = 0.0f;
+  for (int k = 0; k < 2; ++k) {
+    scratch[tid] = x[tid] + (float)k;
+    __syncthreads();
+    acc += scratch[tid];
+    __syncthreads();
+  }
+  x[tid] = acc;
+}`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([1, 2, 3, 4]) }, scalars: { N: 4 } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("for (var k: i32 = 0; (k < 2); k = (k + 1))");
+    expect(compiled.wgsl).toContain("workgroupBarrier();\n    if (bg_active_lane)");
+    expect(compiled.wgsl).not.toContain("if (bg_active_lane) {\n  for");
+    expect([...result.buffers.x as Float32Array]).toEqual([3, 5, 7, 9]);
+  });
+
   it("folds singleton thread axes before barrier uniformity analysis", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void singletonZBarrier(float *out, int N) {
