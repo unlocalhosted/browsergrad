@@ -1175,7 +1175,7 @@ function emitLocalInit(statement: CudaLiteVarDecl, context: EmitContext): string
   if (!statement.init) return value;
   if (statement.valueType === "uint") return emitExpressionAsWgslScalar(statement.init, "u32", context);
   if (statement.valueType === "int") return emitExpressionAsWgslScalar(statement.init, "i32", context);
-  const sourceType = context.expressionValueTypes.get(statement.init);
+  const sourceType = expressionValueTypeForEmit(statement.init, context);
   if (sourceType === undefined || sourceType === statement.valueType) return value;
   if ((statement.valueType === "float" || statement.valueType === "double" || statement.valueType === "bf16") && (sourceType === "int" || sourceType === "uint")) return `f32(${value})`;
   if (statement.valueType === "half" && sourceType !== "half") return `f16(${value})`;

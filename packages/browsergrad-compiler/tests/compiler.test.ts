@@ -6240,6 +6240,22 @@ __global__ void kernel(int *out) {
     expect([...result.buffers.out as Int32Array]).toEqual([0, 2, 4, 6, 8, 10, 12, 14]);
   });
 
+  it("casts uncached integer local initializers for float vars", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__global__ void kernel(float *out) {
+  float dist = ((int)threadIdx.x - 3) * ((int)threadIdx.x - 3);
+  out[0] = dist;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var dist: f32 = f32(");
+    expect([...result.buffers.out as Float32Array]).toEqual([9]);
+  });
+
   it("casts pointer-alias base and offset index math in WGSL", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __global__ void kernel(unsigned int *out, unsigned int pitch) {
