@@ -28,6 +28,7 @@ import {
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
 } from "../src/index";
+import { packCudaWebGpuUniformParams } from "../src/webgpu_orchestration";
 
 const SAXPY = `
 __global__ void saxpy(const float* x, float* y, float a, int n) {
@@ -574,6 +575,50 @@ __global__ void globals_atomic(uint* out) {
     expect(compiled.ir.atomicDeviceGlobals).toEqual(["counter"]);
     expect(compiled.wgsl).toContain("var<storage, read_write> counter: array<atomic<u32>>;");
     expect(compiled.wgsl).toContain("atomicAdd(&counter[0u], 1u)");
+  });
+
+  it("supports read-modify-write atomics through device pointer helper parameters to __device__ globals", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ int g_i[1];
+__device__ float g_f[1];
+
+__device__ void helper_global_rmw(int* xi, float* xf, float* out) {
+  out[0] = float(atomicSub(xi, 2));
+  out[1] = float(atomicMin(xi, 5));
+  out[2] = float(atomicMax(xi, 9));
+  out[3] = float(atomicAnd(xi, 6));
+  out[4] = float(atomicOr(xi, 10));
+  out[5] = float(atomicXor(xi, 3));
+  out[6] = atomicSub(xf, 1.5f);
+  out[7] = atomicMin(xf, 2.0f);
+  out[8] = atomicMax(xf, 5.0f);
+  out[9] = float(xi[0]);
+  out[10] = xf[0];
+}
+
+__global__ void device_global_atomic_rmw(float* out) {
+  if (threadIdx.x == 0) {
+    helper_global_rmw(g_i, g_f, out);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(11) },
+        deviceGlobals: {
+          g_i: new Int32Array([10]),
+          g_f: new Float32Array([4]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicSub_i32");
+    expect(compiled.wgsl).toContain("case 1u: { return atomicSub(&g_i[index], value); }");
+    expect(compiled.wgsl).toContain("case 2u: { return bg_atomicSub_f32(&g_f[index], value); }");
+    expect([...result.buffers.out as Float32Array]).toEqual([10, 8, 5, 9, 0, 10, 4, 2.5, 2, 9, 5]);
+    expect([...result.buffers.g_i as Int32Array]).toEqual([9]);
+    expect([...result.buffers.g_f as Float32Array]).toEqual([5]);
   });
 
   it("lowers multi-dimensional shared memory through helper pointer params", () => {
@@ -2664,7 +2709,7 @@ __global__ void boolPointer(bool *flags, int *out) {
     );
 
     expect(compiled.wgsl).toContain("var<storage, read_write> flags: array<u32>;");
-    expect(compiled.wgsl).toContain("var active: bool = (flags[idx] != 0u);");
+    expect(compiled.wgsl).toContain("var bg_active: bool = (flags[idx] != 0u);");
     expect([...result.buffers.out as Int32Array]).toEqual([1, 0]);
     expect([...result.buffers.flags as Uint32Array]).toEqual([1, 0, 0, 1]);
   });
@@ -3825,6 +3870,7 @@ __global__ void boolPointerAliases(bool *flags) {
     );
 
     expect(compiled.wgsl).toContain("fn bg_ptr_write_bool(buffer: u32, index: u32, value: bool)");
+    expect(compiled.wgsl).toContain("bg_ptr_write_bool(0u");
     expect([...result.buffers.flags as Uint32Array]).toEqual([0, 1, 0, 1]);
   });
 
@@ -4729,6 +4775,174 @@ __global__ void parent(int max_depth, int depth) {
       supported: true,
       kind: "runtime-elided-single-dispatch",
     });
+  });
+
+  it("does not elide dynamic launches that write external buffers through system atomics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(int *out) {
+  if (threadIdx.x == 0) {
+    atomicSub_system(&out[0], 1);
+    atomicMax_system(&out[1], 7);
+    atomicCAS_system(&out[2], 3, 5);
+  }
+}
+__global__ void parent(int *out) {
+  if (threadIdx.x == 0) {
+    child<<<1, 1>>>(out);
+    cudaDeviceSynchronize();
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+
+    const executionPlan = createCudaWebGpuExecutionPlan(
+      compiled,
+      { buffers: { out: new Int32Array([9, 2, 3]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      { compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options) },
+    );
+
+    expect(executionPlan).toMatchObject({
+      supported: true,
+      kind: "host-dynamic-launch",
+    });
+  });
+
+  it("does not elide dynamic launches that write through reassigned pointer aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(int *out) {
+  if (threadIdx.x == 0) {
+    int *ptr = nullptr;
+    ptr = out;
+    atomicAdd(ptr, 1);
+  }
+}
+__global__ void parent(int *out) {
+  if (threadIdx.x == 0) {
+    child<<<1, 1>>>(out);
+    cudaDeviceSynchronize();
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+
+    const executionPlan = createCudaWebGpuExecutionPlan(
+      compiled,
+      { buffers: { out: new Int32Array([4]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      { compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options) },
+    );
+
+    expect(executionPlan).toMatchObject({
+      supported: true,
+      kind: "host-dynamic-launch",
+    });
+  });
+
+  it("does not elide dynamic launches after conditional pointer alias rebinding", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(int *out, int clear_alias) {
+  if (threadIdx.x == 0) {
+    int *ptr = out;
+    if (clear_alias) {
+      ptr = nullptr;
+    }
+    atomicAdd(ptr, 1);
+  }
+}
+__global__ void parent(int *out, int clear_alias) {
+  if (threadIdx.x == 0) {
+    child<<<1, 1>>>(out, clear_alias);
+    cudaDeviceSynchronize();
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+
+    const executionPlan = createCudaWebGpuExecutionPlan(
+      compiled,
+      { buffers: { out: new Int32Array([4]) }, scalars: { clear_alias: 0 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      { compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options) },
+    );
+
+    expect(executionPlan).toMatchObject({
+      supported: false,
+      blockers: [{
+        code: "dynamic-child-compile-failed",
+      }],
+    });
+  });
+
+  it("does not elide dynamic launches after conditional pointer alias initialization", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(int *out, int use_out) {
+  if (threadIdx.x == 0) {
+    int *ptr = use_out ? out : out;
+    atomicAdd(ptr, 1);
+  }
+}
+__global__ void parent(int *out, int use_out) {
+  if (threadIdx.x == 0) {
+    child<<<1, 1>>>(out, use_out);
+    cudaDeviceSynchronize();
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+
+    const executionPlan = createCudaWebGpuExecutionPlan(
+      compiled,
+      { buffers: { out: new Int32Array([4]) }, scalars: { use_out: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      { compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options) },
+    );
+
+    expect(executionPlan).toMatchObject({
+      supported: true,
+      kind: "host-dynamic-launch",
+    });
+  });
+
+  it("does not elide dynamic launches after unsupported assignment-expression pointer alias initialization", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(int *out) {
+  if (threadIdx.x == 0) {
+    int *tmp = nullptr;
+    int *ptr = (tmp = out);
+    atomicAdd(ptr, 1);
+  }
+}
+__global__ void parent(int *out) {
+  if (threadIdx.x == 0) {
+    child<<<1, 1>>>(out);
+    cudaDeviceSynchronize();
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+
+    const executionPlan = createCudaWebGpuExecutionPlan(
+      compiled,
+      { buffers: { out: new Int32Array([4]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      { compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options) },
+    );
+
+    expect(executionPlan.supported).toBe(false);
+    if (executionPlan.supported) throw new Error("expected assignment-expression pointer alias launch to be unsupported");
+    expect(executionPlan.blockers).toMatchObject([{ code: "dynamic-child-compile-failed" }]);
+    expect(executionPlan.reason).toContain("unsupported-local-pointer");
   });
 
   it("plans host-liftable dynamic launches with DevicePool aliases", () => {
@@ -6435,6 +6649,15 @@ __global__ void halfCompat(half* x, half2* y, half a) {
     expect(compiled.wgsl).toContain("vec2<f32>");
     expect(compiled.wgslProgram.bindings[0]).toMatchObject({ valueType: "f32" });
     expect(compiled.wgslProgram.bindings[1]).toMatchObject({ valueType: "f32" });
+
+    const uniforms = packCudaWebGpuUniformParams(compiled, {
+      buffers: {
+        x: new Float32Array([1.5]),
+        y: new Float32Array([3, 5]),
+      },
+      scalars: { a: 2 },
+    });
+    expect(new DataView(uniforms.buffer).getFloat32(0, true)).toBe(2);
   });
 
   it("lowers subgroup intrinsics through scalar compatibility mode", () => {
@@ -6798,6 +7021,37 @@ __global__ void atomic_exchange(float* x, float* out) {
     expect([...result.buffers.out as Float32Array]).toEqual([2.5]);
   });
 
+  it("supports CUDA system-scope float atomics through CAS-backed WGSL helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void atomic_float_system(float* x, float* out) {
+  if (threadIdx.x < 1) {
+    out[0] = atomicAdd_system(&x[0], 1.5f);
+    out[1] = atomicSub_system(&x[0], 0.5f);
+    out[2] = atomicMin_system(&x[0], 2.0f);
+    out[3] = atomicMax_system(&x[0], 4.0f);
+    out[4] = atomicExch_system(&x[0], 6.0f);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([2]),
+          out: new Float32Array(5),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_atomicAdd_f32(&x[0], 1.5)");
+    expect(compiled.wgsl).toContain("bg_atomicSub_f32(&x[0], 0.5)");
+    expect(compiled.wgsl).toContain("bg_atomicMin_f32(&x[0], 2.0)");
+    expect(compiled.wgsl).toContain("bg_atomicMax_f32(&x[0], 4.0)");
+    expect(compiled.wgsl).toContain("bitcast<f32>(atomicExchange(&x[0], bitcast<u32>(6.0)))");
+    expect([...result.buffers.x as Float32Array]).toEqual([6]);
+    expect([...result.buffers.out as Float32Array]).toEqual([2, 3.5, 3, 2, 4]);
+  });
+
   it("supports CUDA pointer-form atomicAdd on integer buffers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomic_count(int* x) {
@@ -6872,9 +7126,89 @@ __global__ void helper_shared_atomic(uint* out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32");
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32(");
     expect(compiled.wgsl).toContain("case 1u: { return atomicAdd(&counts[index], value); }");
     expect([...result.buffers.out as Uint32Array]).toEqual([5]);
+  });
+
+  it("supports read-modify-write atomics through device pointer helper parameters", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void helper_rmw(int* xi, float* xf, float* out) {
+  out[0] = float(atomicSub(xi, 2));
+  out[1] = float(atomicMin(xi, 5));
+  out[2] = float(atomicMax(xi, 9));
+  out[3] = float(atomicAnd(xi, 6));
+  out[4] = float(atomicOr(xi, 10));
+  out[5] = float(atomicXor(xi, 3));
+  out[6] = atomicSub(xf, 1.5f);
+  out[7] = atomicMin(xf, 2.0f);
+  out[8] = atomicMax(xf, 5.0f);
+  out[9] = float(xi[0]);
+  out[10] = xf[0];
+}
+__global__ void helper_atomic_rmw(int* xi, float* xf, float* out) {
+  if (threadIdx.x == 0) {
+    helper_rmw(xi, xf, out);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          xi: new Int32Array([10]),
+          xf: new Float32Array([4]),
+          out: new Float32Array(11),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicSub_i32");
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicMin_i32");
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicMax_i32");
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicAnd_i32");
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicOr_i32");
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicXor_i32");
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicSub_f32");
+    expect([...result.buffers.xi as Int32Array]).toEqual([9]);
+    expect([...result.buffers.xf as Float32Array]).toEqual([5]);
+    expect([...result.buffers.out as Float32Array]).toEqual([10, 8, 5, 9, 0, 10, 4, 2.5, 2, 9, 5]);
+  });
+
+  it("supports read-modify-write atomics through device pointer helper parameters to shared memory", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void helper_shared_rmw(int* xi, float* xf, float* out) {
+  out[0] = float(atomicSub(xi, 2));
+  out[1] = float(atomicMin(xi, 5));
+  out[2] = float(atomicMax(xi, 9));
+  out[3] = float(atomicAnd(xi, 6));
+  out[4] = float(atomicOr(xi, 10));
+  out[5] = float(atomicXor(xi, 3));
+  out[6] = atomicSub(xf, 1.5f);
+  out[7] = atomicMin(xf, 2.0f);
+  out[8] = atomicMax(xf, 5.0f);
+  out[9] = float(xi[0]);
+  out[10] = xf[0];
+}
+__global__ void helper_shared_atomic_rmw(float* out) {
+  __shared__ int xi[1];
+  __shared__ float xf[1];
+  if (threadIdx.x == 0) {
+    xi[0] = 10;
+    xf[0] = 4.0f;
+    helper_shared_rmw(&xi[0], &xf[0], out);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(11) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicSub_i32");
+    expect(compiled.wgsl).toContain("case 1u: { return atomicSub(&xi[index], value); }");
+    expect(compiled.wgsl).toContain("case 2u: { return bg_atomicSub_f32_workgroup(&xf[index], value); }");
+    expect([...result.buffers.out as Float32Array]).toEqual([10, 8, 5, 9, 0, 10, 4, 2.5, 2, 9, 5]);
   });
 
   it("supports pointer-form atomic exchange against shared scalars", () => {
@@ -7008,14 +7342,17 @@ __global__ void atomic_more(int* x, int* out) {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomic_system_aliases(int* x, int* out) {
   if (threadIdx.x == 0) {
-    out[0] = atomicMax_system(&x[0], 5);
-    out[1] = atomicMin_system(&x[0], 3);
-    out[2] = atomicAnd_system(&x[1], 0x6);
-    out[3] = atomicOr_system(&x[1], 0x8);
-    out[4] = atomicXor_system(&x[1], 0x3);
-    out[5] = atomicInc_system((uint*)&x[2], 2);
-    out[6] = atomicDec_system((uint*)&x[2], 2);
-    out[7] = atomicCAS_system(&x[3], 9, 11);
+    out[0] = atomicAdd_system(&x[0], 2);
+    out[1] = atomicSub_system(&x[0], 1);
+    out[2] = atomicMax_system(&x[0], 5);
+    out[3] = atomicMin_system(&x[0], 3);
+    out[4] = atomicAnd_system(&x[1], 0x6);
+    out[5] = atomicOr_system(&x[1], 0x8);
+    out[6] = atomicXor_system(&x[1], 0x3);
+    out[7] = atomicInc_system((uint*)&x[2], 2);
+    out[8] = atomicDec_system((uint*)&x[2], 2);
+    out[9] = atomicExch_system(&x[3], 12);
+    out[10] = atomicCAS_system(&x[3], 12, 11);
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
@@ -7023,18 +7360,22 @@ __global__ void atomic_system_aliases(int* x, int* out) {
       {
         buffers: {
           x: new Int32Array([4, 7, 1, 9]),
-          out: new Int32Array(8),
+          out: new Int32Array(11),
         },
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
     expect([...result.buffers.x as Int32Array]).toEqual([3, 13, 1, 11]);
-    expect([...result.buffers.out as Int32Array]).toEqual([4, 5, 7, 6, 14, 1, 2, 9]);
+    expect([...result.buffers.out as Int32Array]).toEqual([4, 6, 5, 5, 7, 6, 14, 1, 2, 9, 12]);
+    expect(compiled.wgsl).toContain("atomicAdd(&x[0], 2)");
+    expect(compiled.wgsl).toContain("atomicSub(&x[0], 1)");
     expect(compiled.wgsl).toContain("atomicMax(&x[0], 5)");
     expect(compiled.wgsl).toContain("atomicMin(&x[0], 3)");
-    expect(compiled.wgsl).toContain("bg_atomicInc_storage_u32");
-    expect(compiled.wgsl).toContain("atomicCompareExchangeWeak(&x[3], 9, 11).old_value");
+    expect(compiled.wgsl).toContain("out[7] = i32(bg_atomicInc_storage_i32(&x[2], u32(2)))");
+    expect(compiled.wgsl).toContain("out[8] = i32(bg_atomicDec_storage_i32(&x[2], u32(2)))");
+    expect(compiled.wgsl).toContain("atomicExchange(&x[3], 12)");
+    expect(compiled.wgsl).toContain("atomicCompareExchangeWeak(&x[3], 12, 11).old_value");
   });
 
   it("supports CUDA atomic inc/dec and atomics through pointer aliases", () => {
@@ -7062,9 +7403,9 @@ __global__ void alias_atomic(float* scratch, const float* values, uint* out) {
 
     expect([...result.buffers.scratch as Float32Array]).toEqual([11.5, 0, 1]);
     expect([...result.buffers.out as Uint32Array]).toEqual([1, 2]);
-    expect(compiled.wgsl).toContain("fn bg_atomicInc_storage_u32");
-    expect(compiled.wgsl).toContain("fn bg_atomicDec_storage_u32");
-    expect(compiled.wgsl).toContain("bg_atomicInc_storage_u32(&scratch[");
+    expect(compiled.wgsl).toContain("fn bg_atomicInc_storage_f32_as_u32");
+    expect(compiled.wgsl).toContain("fn bg_atomicDec_storage_f32_as_u32");
+    expect(compiled.wgsl).toContain("bg_atomicInc_storage_f32_as_u32(&scratch[");
     expect(compiled.wgsl).toContain("bg_atomicAdd_f32(&scratch[");
   });
 
@@ -7088,6 +7429,303 @@ __global__ void shared_counter(uint* out) {
     expect(compiled.wgsl).toContain("var<workgroup> counter: array<atomic<u32>, 1>;");
     expect(compiled.wgsl).toContain("bg_atomicInc_workgroup_u32(&counter[0], u32(1))");
     expect(compiled.wgsl).toContain("bg_atomicDec_workgroup_u32(&counter[0], u32(1))");
+  });
+
+  it("supports CUDA atomic inc/dec through helper pointer params", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void helper_inc_dec(uint* counter, uint* out) {
+  uint* ptr = counter;
+  out[0] = atomicInc(ptr, 2);
+  out[1] = atomicDec(ptr, 2);
+  out[2] = ptr[0];
+}
+__device__ void helper_inc_dec_offset(uint* counter, uint* out, int offset) {
+  uint* ptr = counter;
+  out[offset + 0] = atomicInc(ptr, 2);
+  out[offset + 1] = atomicDec(ptr, 2);
+  out[offset + 2] = ptr[0];
+}
+__global__ void helper_atomic_inc_dec(uint* counter, uint* out) {
+  __shared__ uint shared_counter[1];
+  if (threadIdx.x == 0) {
+    helper_inc_dec(counter, out);
+    shared_counter[0] = 1;
+    helper_inc_dec_offset(&shared_counter[0], out, 3);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          counter: new Uint32Array([1]),
+          out: new Uint32Array(6),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.counter as Uint32Array]).toEqual([1]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 2, 1, 1, 2, 1]);
+    expect(compiled.wgsl).toContain("bg_atomicInc_storage_u32");
+    expect(compiled.wgsl).toContain("bg_atomicDec_storage_u32");
+    expect(compiled.wgsl).toContain("bg_atomicInc_workgroup_u32");
+    expect(compiled.wgsl).toContain("bg_atomicDec_workgroup_u32");
+  });
+
+  it("supports CUDA atomic inc/dec through helper pointer params to device globals", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint g_counter[1];
+
+__device__ void helper_global_inc_dec(uint* counter, uint* out) {
+  uint* ptr = counter;
+  out[0] = atomicInc(ptr, 2);
+  out[1] = atomicDec(ptr, 2);
+  out[2] = ptr[0];
+}
+
+__global__ void helper_global_atomic_inc_dec(uint* out) {
+  if (threadIdx.x == 0) {
+    helper_global_inc_dec(g_counter, out);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(3),
+        },
+        deviceGlobals: {
+          g_counter: new Uint32Array([1]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.g_counter as Uint32Array]).toEqual([1]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 2, 1]);
+    expect(compiled.wgsl).toContain("g_counter: array<atomic<u32>>");
+    expect(compiled.wgsl).toContain("var<storage, read_write> out: array<u32>;");
+    expect(compiled.wgsl).not.toContain("var<storage, read_write> out: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicInc_u32");
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicDec_u32");
+    expect(compiled.wgsl).toContain("return bg_atomicInc_storage_u32(&g_counter[index], limit);");
+    expect(compiled.wgsl).toContain("return bg_atomicDec_storage_u32(&g_counter[index], limit);");
+  });
+
+  it("marks storage atomic after local pointer assignment rebinding", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void assigned_pointer_atomic(uint* counter, uint* out) {
+  uint* ptr = NULL;
+  if (threadIdx.x == 0) {
+    ptr = counter;
+    out[0] = atomicAdd(ptr, 1u);
+    out[1] = counter[0];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          counter: new Uint32Array([4]),
+          out: new Uint32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.counter as Uint32Array]).toEqual([5]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([4, 5]);
+    expect(compiled.wgsl).toContain("var<storage, read_write> counter: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("var<storage, read_write> out: array<u32>;");
+  });
+
+  it("marks all possible atomic roots after branch pointer rebinding", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void branch_assigned_pointer_atomic(uint* left, uint* right, uint* out, int pick_right) {
+  uint* ptr = NULL;
+  if (pick_right) {
+    ptr = right;
+  } else {
+    ptr = left;
+  }
+  if (threadIdx.x == 0) {
+    out[0] = atomicAdd(ptr, 1u);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          left: new Uint32Array([4]),
+          right: new Uint32Array([8]),
+          out: new Uint32Array(1),
+        },
+        scalars: { pick_right: 1 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.left as Uint32Array]).toEqual([4]);
+    expect([...result.buffers.right as Uint32Array]).toEqual([9]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([8]);
+    expect(compiled.wgsl).toContain("var<storage, read_write> left: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("var<storage, read_write> right: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("var<storage, read_write> out: array<u32>;");
+  });
+
+  it("marks all possible atomic roots after conditional pointer initialization", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void conditional_pointer_atomic(uint* left, uint* right, uint* out, int pick_right) {
+  uint* ptr = pick_right ? right : left;
+  if (threadIdx.x == 0) {
+    out[0] = atomicAdd(ptr, 1u);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          left: new Uint32Array([4]),
+          right: new Uint32Array([8]),
+          out: new Uint32Array(1),
+        },
+        scalars: { pick_right: 0 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.left as Uint32Array]).toEqual([5]);
+    expect([...result.buffers.right as Uint32Array]).toEqual([8]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([4]);
+    expect(compiled.wgsl).toContain("var<storage, read_write> left: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("var<storage, read_write> right: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("var<storage, read_write> out: array<u32>;");
+  });
+
+  it("marks initial and update roots for for-loop pointer rebinding", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void loop_update_pointer_atomic(uint* left, uint* right, uint* out) {
+  uint* ptr = left;
+  if (threadIdx.x == 0) {
+    for (int i = 0; i < 1; i++, ptr = right) {
+      out[0] = atomicAdd(ptr, 1u);
+    }
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          left: new Uint32Array([4]),
+          right: new Uint32Array([8]),
+          out: new Uint32Array(1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.left as Uint32Array]).toEqual([5]);
+    expect([...result.buffers.right as Uint32Array]).toEqual([8]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([4]);
+    expect(compiled.wgsl).toContain("var<storage, read_write> left: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("var<storage, read_write> right: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("var<storage, read_write> out: array<u32>;");
+  });
+
+  it("keeps unrelated same-type storage non-atomic for helper pointer atomics", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void add_one(uint* target) {
+  atomicAdd(target, 1u);
+}
+
+__global__ void exact_helper_atomic(uint* counter, uint* untouched, uint* out) {
+  if (threadIdx.x == 0) {
+    add_one(counter);
+    out[0] = untouched[0];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          counter: new Uint32Array([4]),
+          untouched: new Uint32Array([8]),
+          out: new Uint32Array(1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.counter as Uint32Array]).toEqual([5]);
+    expect([...result.buffers.untouched as Uint32Array]).toEqual([8]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([8]);
+    expect(compiled.wgsl).toContain("var<storage, read_write> counter: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("var<storage, read_write> untouched: array<u32>;");
+    expect(compiled.wgsl).toContain("var<storage, read_write> out: array<u32>;");
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32");
+    expect(compiled.wgsl).not.toContain("var<storage, read_write> untouched: array<atomic<u32>>;");
+  });
+
+  it("marks storage atomic after chained pointer assignment", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void chained_assignment_pointer_atomic(uint* counter, uint* out) {
+  uint* a = NULL;
+  uint* b = NULL;
+  if (threadIdx.x == 0) {
+    a = b = counter;
+    out[0] = atomicAdd(a, 1u);
+    out[1] = b[0];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          counter: new Uint32Array([4]),
+          out: new Uint32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.counter as Uint32Array]).toEqual([5]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([4, 5]);
+    expect(compiled.wgsl).toContain("var<storage, read_write> counter: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("var<storage, read_write> out: array<u32>;");
+  });
+
+  it("marks storage atomic through local pointer-array elements", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void pointer_array_atomic(uint* counter, uint* untouched, uint* out) {
+  uint* ptrs[2];
+  if (threadIdx.x == 0) {
+    ptrs[0] = counter;
+    ptrs[1] = untouched;
+    out[0] = atomicAdd(ptrs[0], 1u);
+    out[1] = counter[0];
+    out[2] = untouched[0];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          counter: new Uint32Array([4]),
+          untouched: new Uint32Array([8]),
+          out: new Uint32Array(3),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.counter as Uint32Array]).toEqual([5]);
+    expect([...result.buffers.untouched as Uint32Array]).toEqual([8]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([4, 5, 8]);
+    expect(compiled.wgsl).toContain("var<storage, read_write> counter: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("var<storage, read_write> untouched: array<u32>;");
+    expect(compiled.wgsl).toContain("var<storage, read_write> out: array<u32>;");
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32(");
+    expect(compiled.wgsl).not.toContain("var<storage, read_write> untouched: array<atomic<u32>>;");
   });
 
   it("supports CUDA div_ceil and shared address conversion helpers", () => {

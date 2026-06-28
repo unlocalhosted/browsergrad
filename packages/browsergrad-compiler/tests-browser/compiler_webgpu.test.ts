@@ -169,6 +169,27 @@ __global__ void asmFma(const float *A, const float *B, float *out) {
 }
 `;
 
+const PTX_MMA_F32_CARRIER = `
+__global__ void ptxMmaF32Carrier(uint *out) {
+  uint a0 = 0x3c003c00u;
+  uint a1 = 0x3c003c00u;
+  uint a2 = 0x3c003c00u;
+  uint a3 = 0x3c003c00u;
+  uint b0 = 0x40004000u;
+  uint b1 = 0x40004000u;
+  uint d0 = __float_as_uint(1.5f);
+  uint d1 = __float_as_uint(2.5f);
+  uint d2 = __float_as_uint(3.5f);
+  uint d3 = __float_as_uint(4.5f);
+  asm volatile(
+    "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\\n"
+    : "=r"(d0), "=r"(d1), "=r"(d2), "=r"(d3)
+    : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(d0), "r"(d1), "r"(d2), "r"(d3));
+  out[0] = d0;
+  out[1] = __float_as_uint(__uint_as_float(d0));
+}
+`;
+
 const SURFACE_WRITE = `
 texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
 __global__ void surfaceWrite(cudaSurfaceObject_t outputSurf, int width, int height) {
@@ -407,6 +428,33 @@ __global__ void namedConstants(float* out, uint* kinds) {
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs subgroup scalar compatibility mode through real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void subgroupScalarCompat(float *x) {
+  int idx = threadIdx.x;
+  float v = warp_reduce_sum_f32(x[idx]);
+  if ((idx % 32) == 0) {
+    v = bg_subgroup_add(v);
+  }
+  x[idx] = v;
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      subgroupMode: "scalar",
+      workgroupSize: [4, 1, 1],
+    });
+    const input = { buffers: { x: new Float32Array([1, 2, 3, 4]) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.ir.requiredFeatures).not.toContain("subgroups");
+    expect(compiled.wgsl).not.toContain("enable subgroups;");
+    expect(compiled.wgsl).not.toMatch(/\bsubgroup(?:Add|Max|Min|Shuffle|Ballot|Elect|Broadcast|All|Any)\b/u);
+    expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
+    expect([...actual.buffers.x as Float32Array]).toEqual([1, 2, 3, 4]);
+  });
+
   it("runs CUDA cache-hint pointer loads and stores through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `
@@ -424,6 +472,39 @@ __global__ void cacheHint(const float* x, float* y) {
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
     expect([...actual.buffers.y as Float32Array]).toEqual([...expected.buffers.y as Float32Array]);
+  });
+
+  it("runs u32-backed bool pointer storage through real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void boolPointer(bool *flags, int *out) {
+  int idx = threadIdx.x;
+  bool active = flags[idx];
+  bool *slot = flags + idx + 2;
+  if (active) {
+    out[idx] = 1;
+    *slot = false;
+  } else {
+    out[idx] = 0;
+    *slot = true;
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        flags: new Uint32Array([1, 0, 1, 1]),
+        out: new Int32Array(2),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("fn bg_ptr_write_bool");
+    expect([...actual.buffers.out as Int32Array]).toEqual([...expected.buffers.out as Int32Array]);
+    expect([...actual.buffers.flags as Uint32Array]).toEqual([...expected.buffers.flags as Uint32Array]);
+    expect([...actual.buffers.out as Int32Array]).toEqual([1, 0]);
+    expect([...actual.buffers.flags as Uint32Array]).toEqual([1, 0, 0, 1]);
   });
 
   it("runs CUDA float4 storage memory views through WebGPU", async () => {
@@ -1427,6 +1508,88 @@ __global__ void texture_object_sample(float* out, int width, cudaTextureObject_t
     expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
   });
 
+  it("runs compiled texture fetch/lod aliases through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void texture_fetch_lod(float4* vecOut, float* scalarOut) {
+  vecOut[0] = tex2DLod<float4>(texRef, 0.5f, 0.5f, 0.0f);
+  scalarOut[0] = tex1Dfetch<float>(texRef, 1);
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        vecOut: new Float32Array(4),
+        scalarOut: new Float32Array(1),
+      },
+      textures: {
+        texRef: { width: 2, height: 1, channels: 4 as const, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.vecOut as Float32Array]).toEqual([...expected.buffers.vecOut as Float32Array]);
+    expect([...actual.buffers.scalarOut as Float32Array]).toEqual([...expected.buffers.scalarOut as Float32Array]);
+  });
+
+  it("runs compiled texture atlas helpers through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void texture_atlas_helpers(float4* vecOut, float* scalarOut, cudaTextureObject_t tex) {
+  scalarOut[0] = tex1D<float>(tex, 1.0f);
+  scalarOut[1] = tex2DLayered<float>(tex, 0.0f, 1.0f, 1.0f);
+  scalarOut[2] = tex3D<float>(tex, 2.0f, 1.0f, 1.0f);
+  scalarOut[3] = texCubemap<float>(tex, 1.0f, 0.0f, 0.0f);
+  vecOut[0] = tex1D<float4>(tex, 0.0f);
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        vecOut: new Float32Array(4),
+        scalarOut: new Float32Array(4),
+      },
+      textures: {
+        tex: {
+          width: 4,
+          height: 24,
+          channels: 4 as const,
+          data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+        },
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.vecOut as Float32Array]).toEqual([...expected.buffers.vecOut as Float32Array]);
+    expect([...actual.buffers.scalarOut as Float32Array]).toEqual([...expected.buffers.scalarOut as Float32Array]);
+  });
+
+  it("runs compiled typed uchar4 texture reads through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void texture_uchar4(uint4* out) {
+  out[0] = tex2D<uchar4>(texRef, 0.5f, 0.5f);
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Uint32Array(4),
+      },
+      textures: {
+        texRef: { width: 1, height: 1, channels: 4 as const, data: new Float32Array([1, 2, 3, 255]) },
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+  });
+
   it("runs compiled integer CAS atomics through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const source = `
@@ -1516,6 +1679,442 @@ __global__ void atomic_exchange(float* x, float* out) {
     expect([...actual.buffers.out as Float32Array][0]).toBeCloseTo(2.5);
   });
 
+  it("runs compiled system-scope float atomics through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void atomic_float_system(float* x, float* out) {
+  if (threadIdx.x < 1) {
+    out[0] = atomicAdd_system(&x[0], 1.5f);
+    out[1] = atomicSub_system(&x[0], 0.5f);
+    out[2] = atomicMin_system(&x[0], 2.0f);
+    out[3] = atomicMax_system(&x[0], 4.0f);
+    out[4] = atomicExch_system(&x[0], 6.0f);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        x: new Float32Array([2]),
+        out: new Float32Array(5),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.x as Float32Array][0]).toBeCloseTo([...expected.buffers.x as Float32Array][0] ?? 0);
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
+  it("runs compiled read-modify-write atomics through device pointer helpers in WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__device__ void helper_rmw(int* xi, float* xf, float* out) {
+  out[0] = float(atomicSub(xi, 2));
+  out[1] = float(atomicMin(xi, 5));
+  out[2] = float(atomicMax(xi, 9));
+  out[3] = float(atomicAnd(xi, 6));
+  out[4] = float(atomicOr(xi, 10));
+  out[5] = float(atomicXor(xi, 3));
+  out[6] = atomicSub(xf, 1.5f);
+  out[7] = atomicMin(xf, 2.0f);
+  out[8] = atomicMax(xf, 5.0f);
+  out[9] = float(xi[0]);
+  out[10] = xf[0];
+}
+__global__ void helper_atomic_rmw(int* xi, float* xf, float* out) {
+  if (threadIdx.x == 0) {
+    helper_rmw(xi, xf, out);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        xi: new Int32Array([10]),
+        xf: new Float32Array([4]),
+        out: new Float32Array(11),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.xi as Int32Array]).toEqual([...expected.buffers.xi as Int32Array]);
+    expect([...actual.buffers.xf as Float32Array]).toEqual([...expected.buffers.xf as Float32Array]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
+  it("runs compiled helper read-modify-write atomics against __device__ globals in WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__device__ int g_i[1];
+__device__ float g_f[1];
+
+__device__ void helper_global_rmw(int* xi, float* xf, float* out) {
+  out[0] = float(atomicSub(xi, 2));
+  out[1] = float(atomicMin(xi, 5));
+  out[2] = float(atomicMax(xi, 9));
+  out[3] = float(atomicAnd(xi, 6));
+  out[4] = float(atomicOr(xi, 10));
+  out[5] = float(atomicXor(xi, 3));
+  out[6] = atomicSub(xf, 1.5f);
+  out[7] = atomicMin(xf, 2.0f);
+  out[8] = atomicMax(xf, 5.0f);
+  out[9] = float(xi[0]);
+  out[10] = xf[0];
+}
+
+__global__ void device_global_atomic_rmw(float* out) {
+  if (threadIdx.x == 0) {
+    helper_global_rmw(g_i, g_f, out);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(11) },
+      deviceGlobals: {
+        g_i: new Int32Array([10]),
+        g_f: new Float32Array([4]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+    expect([...actual.buffers.g_i as Int32Array]).toEqual([...expected.buffers.g_i as Int32Array]);
+    expect([...actual.buffers.g_f as Float32Array]).toEqual([...expected.buffers.g_f as Float32Array]);
+  });
+
+  it("runs compiled atomic inc/dec through pointer aliases in WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void alias_atomic(float* scratch, const float* values, uint* out) {
+  if (threadIdx.x == 0) {
+    float* accum = scratch;
+    uint* flag = (uint*)(scratch + 2);
+    out[0] = atomicInc(flag, 2);
+    out[1] = atomicDec(flag, 2);
+    atomicAdd(&accum[0], values[0]);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        scratch: new Float32Array([10, 0, 1]),
+        values: new Float32Array([1.5]),
+        out: new Uint32Array(2),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.scratch as Float32Array]).toEqual([...expected.buffers.scratch as Float32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+  });
+
+  it("runs compiled shared atomic inc/dec through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void shared_counter(uint* out) {
+  __shared__ uint counter[1];
+  if (threadIdx.x == 0) {
+    counter[0] = 1;
+    out[0] = atomicInc(&counter[0], 1);
+    out[1] = atomicDec(&counter[0], 1);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Uint32Array(2) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+  });
+
+  it("runs compiled helper atomic inc/dec through storage and shared pointers in WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__device__ void helper_inc_dec(uint* counter, uint* out) {
+  uint* ptr = counter;
+  out[0] = atomicInc(ptr, 2);
+  out[1] = atomicDec(ptr, 2);
+  out[2] = ptr[0];
+}
+__device__ void helper_inc_dec_offset(uint* counter, uint* out, int offset) {
+  uint* ptr = counter;
+  out[offset + 0] = atomicInc(ptr, 2);
+  out[offset + 1] = atomicDec(ptr, 2);
+  out[offset + 2] = ptr[0];
+}
+__global__ void helper_atomic_inc_dec(uint* counter, uint* out) {
+  __shared__ uint shared_counter[1];
+  if (threadIdx.x == 0) {
+    helper_inc_dec(counter, out);
+    shared_counter[0] = 1;
+    helper_inc_dec_offset(&shared_counter[0], out, 3);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        counter: new Uint32Array([1]),
+        out: new Uint32Array(6),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.counter as Uint32Array]).toEqual([...expected.buffers.counter as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+  });
+
+  it("runs compiled helper atomic inc/dec against __device__ globals in WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__device__ uint g_counter[1];
+
+__device__ void helper_global_inc_dec(uint* counter, uint* out) {
+  uint* ptr = counter;
+  out[0] = atomicInc(ptr, 2);
+  out[1] = atomicDec(ptr, 2);
+  out[2] = ptr[0];
+}
+
+__global__ void helper_global_atomic_inc_dec(uint* out) {
+  if (threadIdx.x == 0) {
+    helper_global_inc_dec(g_counter, out);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Uint32Array(3),
+      },
+      deviceGlobals: {
+        g_counter: new Uint32Array([1]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.g_counter as Uint32Array]).toEqual([...expected.buffers.g_counter as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+  });
+
+  it("runs assigned local pointer atomics through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void assigned_pointer_atomic(uint* counter, uint* out) {
+  uint* ptr = NULL;
+  if (threadIdx.x == 0) {
+    ptr = counter;
+    out[0] = atomicAdd(ptr, 1u);
+    out[1] = counter[0];
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        counter: new Uint32Array([4]),
+        out: new Uint32Array(2),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.counter as Uint32Array]).toEqual([...expected.buffers.counter as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+  });
+
+  it("runs branch-rebound local pointer atomics through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void branch_assigned_pointer_atomic(uint* left, uint* right, uint* out, int pick_right) {
+  uint* ptr = NULL;
+  if (pick_right) {
+    ptr = right;
+  } else {
+    ptr = left;
+  }
+  if (threadIdx.x == 0) {
+    out[0] = atomicAdd(ptr, 1u);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        left: new Uint32Array([4]),
+        right: new Uint32Array([8]),
+        out: new Uint32Array(1),
+      },
+      scalars: { pick_right: 1 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.left as Uint32Array]).toEqual([...expected.buffers.left as Uint32Array]);
+    expect([...actual.buffers.right as Uint32Array]).toEqual([...expected.buffers.right as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+  });
+
+  it("runs conditional local pointer atomics through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void conditional_pointer_atomic(uint* left, uint* right, uint* out, int pick_right) {
+  uint* ptr = pick_right ? right : left;
+  if (threadIdx.x == 0) {
+    out[0] = atomicAdd(ptr, 1u);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        left: new Uint32Array([4]),
+        right: new Uint32Array([8]),
+        out: new Uint32Array(1),
+      },
+      scalars: { pick_right: 0 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.left as Uint32Array]).toEqual([...expected.buffers.left as Uint32Array]);
+    expect([...actual.buffers.right as Uint32Array]).toEqual([...expected.buffers.right as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+  });
+
+  it("runs chained-assignment local pointer atomics through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void chained_assignment_pointer_atomic(uint* counter, uint* out) {
+  uint* a = NULL;
+  uint* b = NULL;
+  if (threadIdx.x == 0) {
+    a = b = counter;
+    out[0] = atomicAdd(a, 1u);
+    out[1] = b[0];
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        counter: new Uint32Array([4]),
+        out: new Uint32Array(2),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.counter as Uint32Array]).toEqual([...expected.buffers.counter as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+  });
+
+  it("runs local pointer-array atomics through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void pointer_array_atomic(uint* counter, uint* untouched, uint* out) {
+  uint* ptrs[2];
+  if (threadIdx.x == 0) {
+    ptrs[0] = counter;
+    ptrs[1] = untouched;
+    out[0] = atomicAdd(ptrs[0], 1u);
+    out[1] = counter[0];
+    out[2] = untouched[0];
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        counter: new Uint32Array([4]),
+        untouched: new Uint32Array([8]),
+        out: new Uint32Array(3),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.counter as Uint32Array]).toEqual([...expected.buffers.counter as Uint32Array]);
+    expect([...actual.buffers.untouched as Uint32Array]).toEqual([...expected.buffers.untouched as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+  });
+
+  it("runs compiled shared helper read-modify-write atomics through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__device__ void helper_shared_rmw(int* xi, float* xf, float* out) {
+  out[0] = float(atomicSub(xi, 2));
+  out[1] = float(atomicMin(xi, 5));
+  out[2] = float(atomicMax(xi, 9));
+  out[3] = float(atomicAnd(xi, 6));
+  out[4] = float(atomicOr(xi, 10));
+  out[5] = float(atomicXor(xi, 3));
+  out[6] = atomicSub(xf, 1.5f);
+  out[7] = atomicMin(xf, 2.0f);
+  out[8] = atomicMax(xf, 5.0f);
+  out[9] = float(xi[0]);
+  out[10] = xf[0];
+}
+__global__ void helper_shared_atomic_rmw(float* out) {
+  __shared__ int xi[1];
+  __shared__ float xf[1];
+  if (threadIdx.x == 0) {
+    xi[0] = 10;
+    xf[0] = 4.0f;
+    helper_shared_rmw(&xi[0], &xf[0], out);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Float32Array(11) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Float32Array]).toEqual([...expected.buffers.out as Float32Array]);
+  });
+
+  it("runs compiled system-scope integer atomic aliases through WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void atomic_system_aliases(int* x, int* out) {
+  if (threadIdx.x == 0) {
+    out[0] = atomicAdd_system(&x[0], 2);
+    out[1] = atomicSub_system(&x[0], 1);
+    out[2] = atomicMax_system(&x[0], 5);
+    out[3] = atomicMin_system(&x[0], 3);
+    out[4] = atomicAnd_system(&x[1], 0x6);
+    out[5] = atomicOr_system(&x[1], 0x8);
+    out[6] = atomicXor_system(&x[1], 0x3);
+    out[7] = atomicInc_system((uint*)&x[2], 2);
+    out[8] = atomicDec_system((uint*)&x[2], 2);
+    out[9] = atomicExch_system(&x[3], 12);
+    out[10] = atomicCAS_system(&x[3], 12, 11);
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        x: new Int32Array([4, 7, 1, 9]),
+        out: new Int32Array(11),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.x as Int32Array]).toEqual([...expected.buffers.x as Int32Array]);
+    expect([...actual.buffers.out as Int32Array]).toEqual([...expected.buffers.out as Int32Array]);
+  });
+
   it("runs compiled cufftComplex writeback through WebGPU", async () => {
     if (!deviceCheck.available) return;
     const compiled = compileCudaLiteKernel(COMPLEX_MULTIPLY, { workgroupSize: [2, 1, 1] });
@@ -1564,6 +2163,72 @@ __global__ void atomic_exchange(float* x, float* out) {
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
     expect([...actual.buffers.outputSurf as Float32Array]).toEqual([...expected.buffers.outputSurf as Float32Array]);
+  });
+
+  it("runs surf2Dread through WebGPU storage-backed surfaces", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void readSurface(uint *out, cudaSurfaceObject_t surf) {
+  uint value = 0;
+  surf2Dread(&value, surf, 4, 0);
+  out[0] = value;
+  out[1] = surf2Dread<unsigned int>(surf, 0, 0);
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { out: new Uint32Array(2) },
+      surfaces: { surf: { width: 2, height: 1, data: new Float32Array([3, 9]) } },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("fn bg_surf2dread_surf");
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([9, 3]);
+  });
+
+  it("runs surf3Dwrite through WebGPU storage-backed surfaces", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void surfaceWrite3d(cudaSurfaceObject_t outputSurf) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  int z = blockIdx.z;
+  surf3Dwrite(float(x + y * 10 + z * 100), outputSurf, x * sizeof(float), y, z);
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [2, 2, 1] });
+    const input = {
+      buffers: {},
+      surfaces: { outputSurf: { width: 2, height: 2, data: new Float32Array(8) } },
+    };
+    const launch = { gridDim: [1, 1, 2] as const, blockDim: [2, 2, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.wgsl).toContain("z * i32(bg_uniforms.outputSurf_height)");
+    expect([...actual.buffers.outputSurf as Float32Array]).toEqual([...expected.buffers.outputSurf as Float32Array]);
+    expect([...actual.buffers.outputSurf as Float32Array]).toEqual([0, 1, 10, 11, 100, 101, 110, 111]);
+  });
+
+  it("runs CUDA driver surface aliases through WebGPU surfaces", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void driverSurfaceAlias(CUsurfObject surf) {
+  surf2Dwrite(13u, surf, 4, 0);
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {},
+      surfaces: { surf: { width: 2, height: 1, data: new Float32Array([3, 9]) } },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.ir.params.find((param) => param.name === "surf")?.valueType).toBe("surface2d");
+    expect([...actual.buffers.surf as Float32Array]).toEqual([...expected.buffers.surf as Float32Array]);
+    expect([...actual.buffers.surf as Float32Array]).toEqual([3, 13]);
   });
 
   it("runs f32 atomic max through WebGPU CAS loop", async () => {
@@ -1704,6 +2369,119 @@ __global__ void wmma_toy(float* A, float* B, float* C) {
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
     expect([...actual.buffers.C as Float32Array]).toEqual([...expected.buffers.C as Float32Array]);
+  });
+
+  it("runs inline PTX MMA f32 accumulator carriers through real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const compiled = compileCudaLiteKernel(PTX_MMA_F32_CARRIER, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Uint32Array(2) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const expected = runCompiledKernelReference(compiled, input, launch);
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect([...actual.buffers.out as Uint32Array]).toEqual([...expected.buffers.out as Uint32Array]);
+    expect([...actual.buffers.out as Uint32Array]).toEqual([0x40b00000, 0x40b00000]);
+  });
+
+  it("runs half storage through f32 compatibility mode on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__global__ void halfCompat(half* x, half2* y, half a) {
+  if (threadIdx.x < 1) {
+    x[0] = __float2half(__half2float(x[0]) + __half2float(a));
+    y[0] = __hadd2(y[0], __floats2half2_rn(1.0f, 2.0f));
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      f16Mode: "f32",
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        x: new Float32Array([1.5]),
+        y: new Float32Array([3, 5]),
+      },
+      scalars: { a: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.ir.requiredFeatures).not.toContain("shader-f16");
+    expect([...actual.buffers.x as Float32Array]).toEqual([3.5]);
+    expect([...actual.buffers.y as Float32Array]).toEqual([4, 7]);
+  });
+
+  it("updates prepared half scalar uniforms in f32 compatibility mode", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const source = `
+__global__ void halfCompat(half* x, half2* y, half a) {
+  if (threadIdx.x < 1) {
+    x[0] = __float2half(__half2float(x[0]) + __half2float(a));
+    y[0] = __hadd2(y[0], __floats2half2_rn(1.0f, 2.0f));
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      f16Mode: "f32",
+      workgroupSize: [1, 1, 1],
+    });
+    const prepared = await prepareCompiledKernelWebGpu(
+      device,
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([1.5]),
+          y: new Float32Array([3, 5]),
+        },
+        scalars: { a: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    try {
+      const first = await prepared.run({ readback: ["x", "y"] });
+      expect([...first.buffers.x as Float32Array]).toEqual([3.5]);
+      expect([...first.buffers.y as Float32Array]).toEqual([4, 7]);
+
+      const second = await prepared.run({ scalars: { a: 4 }, readback: ["x", "y"], awaitCompletion: true });
+      expect([...second.buffers.x as Float32Array]).toEqual([7.5]);
+      expect([...second.buffers.y as Float32Array]).toEqual([5, 9]);
+    } finally {
+      prepared.destroy();
+    }
+  });
+
+  it("runs double storage through f32 compatibility mode on real WebGPU", async () => {
+    if (!deviceCheck.available) return;
+    const source = `
+__device__ void addValue(double *result, double value) {
+  atomicAdd(result, value);
+}
+__global__ void doubleCompat(double* result, double* out, double a) {
+  int idx = threadIdx.x;
+  if (idx < 2) {
+    addValue(result, a);
+    out[idx] = a + (double)idx + 1.25;
+  }
+}`;
+    const compiled = compileCudaLiteKernel(source, {
+      f64Mode: "f32",
+      workgroupSize: [2, 1, 1],
+    });
+    const input = {
+      buffers: {
+        result: new Float32Array([0]),
+        out: new Float32Array(2),
+      },
+      scalars: { a: 1.5 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
+
+    expect(compiled.diagnostics.some((diagnostic) => diagnostic.code === "f64-lowered-to-f32")).toBe(true);
+    expect(compiled.ir.requiredFeatures).not.toContain("shader-f16");
+    expect([...actual.buffers.result as Float32Array]).toEqual([3]);
+    expect([...actual.buffers.out as Float32Array]).toEqual([2.75, 3.75]);
   });
 
   it("runs compiled f16 storage when the browser exposes shader-f16", async () => {

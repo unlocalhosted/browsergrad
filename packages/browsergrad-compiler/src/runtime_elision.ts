@@ -57,13 +57,30 @@ function launchableHasExternalWrite(
   const hasExternal = (expression: CudaLiteExpression | undefined): boolean => {
     if (!expression) return false;
     const root = rootIdentifier(expression);
-    return root !== undefined && (externalRoots.has(root) || aliases.has(root));
+    if (root !== undefined && (externalRoots.has(root) || aliases.has(root))) return true;
+    switch (expression.kind) {
+      case "assignment":
+        return hasExternal(expression.left) || hasExternal(expression.right);
+      case "conditional":
+        return hasExternal(expression.consequent) || hasExternal(expression.alternate);
+      case "sequence":
+        return expression.expressions.some(hasExternal);
+      case "initializer":
+        return expression.elements.some(hasExternal);
+      default:
+        return false;
+    }
   };
 
   const expressionHasWrite = (expression: CudaLiteExpression): boolean => {
     switch (expression.kind) {
-      case "assignment":
-        return hasExternal(expression.left) || expressionHasWrite(expression.right);
+      case "assignment": {
+        const leftHasExternal = hasExternal(expression.left);
+        const rightHasExternal = hasExternal(expression.right);
+        const rightHasWrite = expressionHasWrite(expression.right);
+        updateExternalAlias(expression.left, rightHasExternal);
+        return leftHasExternal || rightHasWrite;
+      }
       case "update":
         return hasExternal(expression.argument);
       case "call":
@@ -91,6 +108,11 @@ function launchableHasExternalWrite(
       case "string":
         return false;
     }
+  };
+
+  const updateExternalAlias = (target: CudaLiteExpression, aliasesExternal: boolean): void => {
+    if (target.kind !== "identifier") return;
+    if (aliasesExternal) aliases.add(target.name);
   };
 
   const statementsHaveWrite = (statements: readonly CudaLiteStatement[]): boolean => {
@@ -221,13 +243,25 @@ function isExternalMutationCall(name: string): boolean {
   return name === "atomicAdd" ||
     name === "atomicAdd_system" ||
     name === "atomicSub" ||
+    name === "atomicSub_system" ||
     name === "atomicMin" ||
+    name === "atomicMin_system" ||
     name === "atomicMax" ||
+    name === "atomicMax_system" ||
     name === "atomicAnd" ||
+    name === "atomicAnd_system" ||
     name === "atomicOr" ||
+    name === "atomicOr_system" ||
     name === "atomicXor" ||
+    name === "atomicXor_system" ||
+    name === "atomicInc" ||
+    name === "atomicInc_system" ||
+    name === "atomicDec" ||
+    name === "atomicDec_system" ||
     name === "atomicExch" ||
-    name === "atomicCAS";
+    name === "atomicExch_system" ||
+    name === "atomicCAS" ||
+    name === "atomicCAS_system";
 }
 
 function isRuntimeMemoryMutationCall(name: string): boolean {

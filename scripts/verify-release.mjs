@@ -28,7 +28,24 @@ const gates = [
   ["pnpm", ["--filter", "@unlocalhosted/browsergrad-compiler", "test:browser"], repoRoot],
   ["pnpm", ["--filter", "@unlocalhosted/browsergrad-compiler", "test:source-normalizer"], repoRoot],
   ["pnpm", ["--filter", "@unlocalhosted/browsergrad-compiler", "test:audit-corpus"], repoRoot],
-  ["pnpm", ["--filter", "@unlocalhosted/browsergrad-compiler", "verify:real-world-cuda", "--", "--require-webgpu"], repoRoot],
+  [
+    "pnpm",
+    [
+      "--filter",
+      "@unlocalhosted/browsergrad-compiler",
+      "verify:real-world-cuda",
+      "--",
+      "--require-webgpu",
+      "--benchmark-webgpu",
+      "--expect-prepared-ratio-max",
+      "10",
+      "--expect-prepared-scalar-ratio-max",
+      "10",
+      "--expect-prepared-readback-ratio-max",
+      "10",
+    ],
+    repoRoot,
+  ],
   ["pnpm", ["test"], resolve(repoRoot, "packages/browsergrad-dogfood")],
 ];
 

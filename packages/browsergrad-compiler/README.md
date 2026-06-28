@@ -458,4 +458,8 @@ dispatch. Pass `--require-webgpu` when CI should fail instead of reporting a
 skipped WebGPU bench. When WebGPU is available, benchmark validation failures
 exit nonzero. Use `--expect-prepared-ratio-max N` and
 `--expect-prepared-scalar-ratio-max N` for machine-local perf regression gates
-that compare prepared median time against one-shot median time.
+that compare prepared median time against one-shot median time. Use
+`--expect-prepared-readback-ratio-max N` to cap prepared readback overhead
+against prepared resident dispatch. Pass `--benchmark-webgpu` to
+`verify:real-world-cuda` to run these browser perf gates after each source/dist
+real WebGPU fixture pass.

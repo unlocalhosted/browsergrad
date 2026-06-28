@@ -5,13 +5,36 @@
 - Current corpus audit closes the compatibility ladder at `1038/1038`
   compile/codegen-ok across CUDA-120, NVIDIA `cuda-samples`, `llm.c`, and
   LeetCUDA, with `0` hard gaps in the pinned aggregate gate. Real browser
-  corpus e2e now executes `92/92` fixture-backed kernels through WebGPU, plus
+  corpus e2e now executes `92/92` fixture-backed kernels through WebGPU with
+  `41` pinned-output fixture checks, plus
   `32/32` manifest-selected synthetic corpus smoke kernels per browser bundle.
 - Browser corpus e2e now generates generic WebGPU smoke fixtures from the
   corpus audit manifest, source-normalized kernel units, Kernel IR synthetic
   inputs, and CPU-reference preflight. This caught and fixed WGSL signedness,
   truthiness, pointer-helper, atomic, reserved-identifier, `clock()`, and simple
   predicated-barrier validation gaps without repo-specific branches.
+- Real WebGPU fixtures now cover f32-compatible half storage/scalar uniforms,
+  f32-compatible double atomics/storage, bool pointer aliases, aliased
+  `atomicInc` / `atomicDec`, read-modify-write atomics plus exchange/CAS
+  through device helper pointer params for storage, shared memory, and
+  `__device__` globals, complete
+  helper `atomicInc` / `atomicDec` through storage, shared, and `__device__`
+  global pointer params, system-scope integer atomic aliases plus reassigned
+  and conditional pointer-alias atomics in direct and host-orchestrated dynamic-launch paths, system-scope
+  float atomics, shared-memory `atomicInc` / `atomicDec`, `surf2Dread` / `surf3Dwrite` storage-backed
+  surfaces, driver `CUsurfObject` aliases, `tex2DLod` / `tex1Dfetch` texture
+  aliases, `uchar4` typed reads, texture-object atlas helpers, scalar subgroup
+  fallback, and inline PTX MMA f32 accumulator carriers. Half scalar uniforms in
+  f32 compatibility mode now pack as `f32`, WGSL-local `active` symbols now
+  alpha-rename, bool pointer writes now coerce literals to `bool`, aliased
+  `atomicInc` / `atomicDec` over f32-backed storage now return numeric values
+  instead of raw float bits, helper/local pointer atomics now mark exact storage
+  roots after assignment, branch, conditional, chained-assignment, and local
+  pointer-array rebinding, native
+  `shader-f16` synthetic smoke inputs now use `Float16Array` storage, and
+  `verify:real-world-cuda` can run
+  prepared-dispatch/readback browser perf gates with ratio thresholds and
+  filtered `--case` browser fixture runs for tighter bug/perf loops.
 - Browser corpus e2e now adds real WebGPU fixtures for LeetCUDA embedding
   packs, histogram packs, RoPE packs, `float4` 2D transpose variants, `llm.c`
   residual/GELU/layernorm/scale/lowp kernels, and simple NVIDIA sample memory

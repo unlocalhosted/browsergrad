@@ -99,6 +99,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["atomicAdd", [2, 2]],
   ["atomicAdd_system", [2, 2]],
   ["atomicSub", [2, 2]],
+  ["atomicSub_system", [2, 2]],
   ["atomicMin", [2, 2]],
   ["atomicMin_system", [2, 2]],
   ["atomicMax", [2, 2]],
@@ -229,7 +230,6 @@ export function analyzeCudaLite(
   const atomicParams = new Set<string>();
   const atomicShared = new Set<string>();
   const atomicDeviceGlobals = new Set<string>();
-  const atomicDevicePointerTypes = new Set<CudaLiteScalarType>();
   const params = new Map(kernel.params.map((param) => [param.name, param]));
   const declaredNames = new Set<string>();
   const rootScope = createScope();
@@ -284,7 +284,7 @@ export function analyzeCudaLite(
 
   const walkExpression = (expression: CudaLiteExpression, scope: Scope): ExpressionInfo => {
     if (expression.kind === "call") {
-      return validateCallExpression(expression, scope, params, atomicParams, atomicShared, atomicDeviceGlobals, atomicDevicePointerTypes, requiredFeatures, diagnostics, walkExpression, options);
+      return validateCallExpression(expression, scope, params, atomicParams, atomicShared, atomicDeviceGlobals, requiredFeatures, diagnostics, walkExpression, options);
     }
     return validateNonCallExpression(expression, scope, diagnostics, walkExpression, requiredFeatures);
   };
@@ -499,19 +499,7 @@ export function analyzeCudaLite(
   }
 
   walkStatements(kernel.body, rootScope, 0, 0, 0, declaredNames);
-  const sharedDeclarations = collectSharedDeclarationsFromBodies([kernel.body, ...ast.functions.map((fn) => fn.body)], options);
-  for (const type of atomicDevicePointerTypes) {
-    for (const param of kernel.params) {
-      if (param.pointer && !param.constant && isDevicePointerAtomicMemoryCompatible(type, param.valueType)) {
-        atomicParams.add(param.name);
-      }
-    }
-    for (const shared of sharedDeclarations) {
-      if (isDevicePointerAtomicMemoryCompatible(type, shared.valueType)) {
-        atomicShared.add(shared.name);
-      }
-    }
-  }
+  markExactAtomicPointerUsage(ast, kernel, options, atomicParams, atomicShared, atomicDeviceGlobals);
 
   if (options.f16Mode === "f32") {
     requiredFeatures.delete("shader-f16");
@@ -1410,7 +1398,6 @@ function validateCallExpression(
   atomicParams: Set<string>,
   atomicShared: Set<string>,
   atomicDeviceGlobals: Set<string>,
-  atomicDevicePointerTypes: Set<CudaLiteScalarType>,
   requiredFeatures: Set<string>,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
@@ -1485,7 +1472,7 @@ function validateCallExpression(
     return { kind: "scalar", valueType: "int" };
   }
   if (isAtomicBuiltin(callName)) {
-    validateAtomicBuiltin(expression, scope, params, atomicParams, atomicShared, atomicDeviceGlobals, atomicDevicePointerTypes, diagnostics, walkExpression);
+    validateAtomicBuiltin(expression, scope, params, atomicParams, atomicShared, atomicDeviceGlobals, diagnostics, walkExpression);
     return { kind: "scalar" };
   }
   if (isPointerIdentityCall(callName)) {
@@ -2566,13 +2553,12 @@ function validateAtomicBuiltin(
   atomicParams: Set<string>,
   atomicShared: Set<string>,
   atomicDeviceGlobals: Set<string>,
-  atomicDevicePointerTypes: Set<CudaLiteScalarType>,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
 ): void {
   const target = expression.args[0];
   const callName = expressionName(expression.callee);
-  const targetExpression = atomicTargetExpression(target);
+  const targetExpression = atomicTargetExpression(target, scope);
   if (!targetExpression) {
     diagnostics.push(error("atomic-address-required", `${callName ?? "atomic operation"} first argument must be a pointer parameter or address like &x[i]`, expression.span));
     if (target) walkExpression(target, scope);
@@ -2609,9 +2595,9 @@ function validateAtomicBuiltin(
         diagnostics.push(error("const-pointer-write", `cannot ${callName ?? "atomic operation"} through const pointer '${symbol.name}'`, expression.span));
       }
       if (targetType && isSupportedDevicePointerAtomic(callName, targetType)) {
-        atomicDevicePointerTypes.add(targetType);
+        // Exact storage roots for helper pointer atomics are marked after validation.
       } else {
-        diagnostics.push(error("unsupported-atomic-target", `${callName ?? "atomic operation"} through device pointer supports int/uint add and CAS-backed float add in CUDA-lite`, targetExpression.span));
+        diagnostics.push(error("unsupported-atomic-target", `${callName ?? "atomic operation"} through device pointer supports int/uint read-modify-write atomics including inc/dec and CAS-backed float add/sub/min/max/exch in CUDA-lite`, targetExpression.span));
       }
     } else if (!param?.pointer) {
       diagnostics.push(error("unsupported-atomic-target", `${callName ?? "atomic operation"} target must resolve to storage or shared memory`, targetExpression.span));
@@ -2619,6 +2605,7 @@ function validateAtomicBuiltin(
       callName === "atomicAdd" ||
       callName === "atomicAdd_system" ||
       callName === "atomicSub" ||
+      callName === "atomicSub_system" ||
       callName === "atomicMin" ||
       callName === "atomicMin_system" ||
       callName === "atomicMax" ||
@@ -2650,10 +2637,276 @@ function atomicStorageRoot(name: string, scope: Scope, span: SourceSpan): string
   return symbol?.pointerRoot ?? name;
 }
 
+function markExactAtomicPointerUsage(
+  ast: CudaLiteModule,
+  kernel: CudaLiteKernel,
+  options: CudaLiteAnalyzeOptions,
+  atomicParams: Set<string>,
+  atomicShared: Set<string>,
+  atomicDeviceGlobals: Set<string>,
+): void {
+  const functionsByName = new Map<string, CudaLiteDeviceFunction[]>();
+  for (const fn of ast.functions) {
+    const overloads = functionsByName.get(fn.name) ?? [];
+    overloads.push(fn);
+    functionsByName.set(fn.name, overloads);
+  }
+
+  const sharedNames = new Set(collectSharedDeclarationsFromBodies([kernel.body, ...ast.functions.map((fn) => fn.body)], options).map((shared) => shared.name));
+  const deviceGlobalNames = new Set(ast.deviceGlobals.map((global) => global.name));
+  const kernelPointerParams = new Set(kernel.params.filter((param) => param.pointer && !param.constant).map((param) => param.name));
+  const functionAtomicParams = new Map<string, Set<string>>();
+  for (const fn of ast.functions) functionAtomicParams.set(fn.name, new Set());
+
+  const markConcreteRoot = (root: string): boolean => {
+    if (kernelPointerParams.has(root)) {
+      const size = atomicParams.size;
+      atomicParams.add(root);
+      return atomicParams.size !== size;
+    }
+    if (sharedNames.has(root)) {
+      const size = atomicShared.size;
+      atomicShared.add(root);
+      return atomicShared.size !== size;
+    }
+    if (deviceGlobalNames.has(root)) {
+      const size = atomicDeviceGlobals.size;
+      atomicDeviceGlobals.add(root);
+      return atomicDeviceGlobals.size !== size;
+    }
+    return false;
+  };
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const fn of ast.functions) {
+      const fnPointerParams = new Set(fn.params.filter((param) => param.pointer).map((param) => param.name));
+      const fnAtomicParams = functionAtomicParams.get(fn.name)!;
+      const markFunctionRoot = (root: string): void => {
+        if (fnPointerParams.has(root)) {
+          const size = fnAtomicParams.size;
+          fnAtomicParams.add(root);
+          if (fnAtomicParams.size !== size) changed = true;
+          return;
+        }
+        if (markConcreteRoot(root)) changed = true;
+      };
+      const aliases = new Map<string, Set<string>>([...fnPointerParams].map((name) => [name, new Set([name])]));
+      scanAtomicPointerStatements(fn.body, aliases, markFunctionRoot, functionAtomicParams, functionsByName);
+    }
+  }
+
+  const kernelAliases = new Map<string, Set<string>>(kernel.params.filter((param) => param.pointer).map((param) => [param.name, new Set([param.name])]));
+  scanAtomicPointerStatements(kernel.body, kernelAliases, markConcreteRoot, functionAtomicParams, functionsByName);
+}
+
+function scanAtomicPointerStatements(
+  statements: readonly CudaLiteStatement[],
+  aliases: Map<string, Set<string>>,
+  markRoot: (root: string) => void,
+  functionAtomicParams: ReadonlyMap<string, ReadonlySet<string>>,
+  functionsByName: ReadonlyMap<string, readonly CudaLiteDeviceFunction[]>,
+): void {
+  const visitExpression = (
+    expression: CudaLiteExpression,
+    expressionAliases: Map<string, Set<string>> = aliases,
+  ): void => {
+    if (
+      expression.kind === "assignment" &&
+      expression.operator === "=" &&
+      expression.left.kind === "identifier" &&
+      expressionAliases.has(expression.left.name)
+    ) {
+      expressionAliases.set(expression.left.name, pointerRootsFromExpression(expression.right, expressionAliases));
+    }
+    if (
+      expression.kind === "assignment" &&
+      expression.operator === "=" &&
+      expression.left.kind === "index" &&
+      expression.left.target.kind === "identifier" &&
+      expressionAliases.has(expression.left.target.name)
+    ) {
+      const roots = pointerRootsFromExpression(expression.right, expressionAliases);
+      const elementKey = pointerArrayElementAliasKey(expression.left);
+      if (elementKey) expressionAliases.set(elementKey, new Set(roots));
+      const arrayRoots = expressionAliases.get(expression.left.target.name) ?? new Set<string>();
+      for (const root of roots) arrayRoots.add(root);
+      expressionAliases.set(expression.left.target.name, arrayRoots);
+    }
+    if (expression.kind === "call") {
+      const callName = expressionName(expression.callee);
+      if (callName && isAtomicBuiltin(callName)) {
+        const target = atomicTargetExpression(expression.args[0]);
+        const roots = target ? pointerRootsFromExpression(target, expressionAliases) : new Set<string>();
+        for (const root of roots) markRoot(root);
+      }
+      const overloads = callName ? functionsByName.get(callName) : undefined;
+      const callee = overloads?.find((candidate) => candidate.params.length === expression.args.length) ?? overloads?.[0];
+      const atomicParams = callName ? functionAtomicParams.get(callName) : undefined;
+      if (callee && atomicParams) {
+        for (const [index, param] of callee.params.entries()) {
+          if (!param.pointer || !atomicParams.has(param.name)) continue;
+          const roots = pointerRootsFromExpression(expression.args[index], expressionAliases);
+          for (const root of roots) markRoot(root);
+        }
+      }
+    }
+    forEachExpressionChild(expression, (child) => visitExpression(child, expressionAliases));
+  };
+
+  for (const statement of statements) {
+    switch (statement.kind) {
+      case "block":
+        scanChildAtomicPointerStatements(statement.body, aliases, markRoot, functionAtomicParams, functionsByName);
+        break;
+      case "var":
+        if (statement.pointer) {
+          aliases.set(statement.name, pointerRootsFromExpression(statement.init, aliases));
+        }
+        if (statement.init) visitExpression(statement.init);
+        break;
+      case "dim3":
+        for (const arg of statement.args) visitExpression(arg);
+        break;
+      case "cooperative-group":
+        if (statement.partitionPredicate) visitExpression(statement.partitionPredicate);
+        break;
+      case "kernel-launch":
+        for (const arg of [...statement.grid, ...statement.block, ...statement.args]) visitExpression(arg);
+        break;
+      case "asm":
+        for (const arg of [...(statement.outputs ?? []), ...statement.inputs]) visitExpression(arg);
+        break;
+      case "expr":
+        visitExpression(statement.expression);
+        break;
+      case "if":
+        visitExpression(statement.condition);
+        mergeBranchAtomicPointerAliases(aliases, statement.consequent, statement.alternate, markRoot, functionAtomicParams, functionsByName);
+        break;
+      case "for": {
+        const loopAliases = cloneAtomicPointerAliases(aliases);
+        if (statement.init?.kind === "var") {
+          if (statement.init.pointer) {
+            loopAliases.set(statement.init.name, pointerRootsFromExpression(statement.init.init, loopAliases));
+          }
+          if (statement.init.init) visitExpression(statement.init.init, loopAliases);
+        } else if (statement.init) {
+          visitExpression(statement.init, loopAliases);
+        }
+        if (statement.condition) visitExpression(statement.condition, loopAliases);
+        if (statement.update) visitExpression(statement.update, loopAliases);
+        scanAtomicPointerStatements(statement.body, loopAliases, markRoot, functionAtomicParams, functionsByName);
+        mergeExistingAtomicPointerAliases(aliases, loopAliases);
+        break;
+      }
+      case "while":
+        visitExpression(statement.condition);
+        scanChildAtomicPointerStatements(statement.body, aliases, markRoot, functionAtomicParams, functionsByName);
+        break;
+      case "do-while":
+        scanChildAtomicPointerStatements(statement.body, aliases, markRoot, functionAtomicParams, functionsByName);
+        visitExpression(statement.condition);
+        break;
+      case "return":
+        if (statement.value) visitExpression(statement.value);
+        break;
+      case "continue":
+      case "break":
+        break;
+    }
+  }
+}
+
+function scanChildAtomicPointerStatements(
+  statements: readonly CudaLiteStatement[],
+  aliases: Map<string, Set<string>>,
+  markRoot: (root: string) => void,
+  functionAtomicParams: ReadonlyMap<string, ReadonlySet<string>>,
+  functionsByName: ReadonlyMap<string, readonly CudaLiteDeviceFunction[]>,
+): void {
+  const childAliases = cloneAtomicPointerAliases(aliases);
+  scanAtomicPointerStatements(statements, childAliases, markRoot, functionAtomicParams, functionsByName);
+  mergeExistingAtomicPointerAliases(aliases, childAliases);
+}
+
+function mergeBranchAtomicPointerAliases(
+  aliases: Map<string, Set<string>>,
+  consequent: readonly CudaLiteStatement[],
+  alternate: readonly CudaLiteStatement[] | undefined,
+  markRoot: (root: string) => void,
+  functionAtomicParams: ReadonlyMap<string, ReadonlySet<string>>,
+  functionsByName: ReadonlyMap<string, readonly CudaLiteDeviceFunction[]>,
+): void {
+  const consequentAliases = cloneAtomicPointerAliases(aliases);
+  scanAtomicPointerStatements(consequent, consequentAliases, markRoot, functionAtomicParams, functionsByName);
+  const alternateAliases = cloneAtomicPointerAliases(aliases);
+  if (alternate) scanAtomicPointerStatements(alternate, alternateAliases, markRoot, functionAtomicParams, functionsByName);
+  mergeExistingAtomicPointerAliases(aliases, consequentAliases);
+  mergeExistingAtomicPointerAliases(aliases, alternateAliases);
+}
+
+function cloneAtomicPointerAliases(aliases: ReadonlyMap<string, ReadonlySet<string>>): Map<string, Set<string>> {
+  return new Map([...aliases].map(([name, roots]) => [name, new Set(roots)]));
+}
+
+function mergeExistingAtomicPointerAliases(
+  target: Map<string, Set<string>>,
+  source: ReadonlyMap<string, ReadonlySet<string>>,
+): void {
+  for (const [name, roots] of source) {
+    const targetRoots = target.get(name);
+    if (!targetRoots) continue;
+    for (const root of roots) targetRoots.add(root);
+  }
+}
+
+function pointerRootsFromExpression(
+  expression: CudaLiteExpression | undefined,
+  aliases: ReadonlyMap<string, ReadonlySet<string>>,
+): Set<string> {
+  if (!expression) return new Set();
+  if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
+    return pointerRootsFromExpression(expression.args[0], aliases);
+  }
+  if (expression.kind === "cast" && expression.pointer) {
+    return pointerRootsFromExpression(expression.expression, aliases);
+  }
+  if (expression.kind === "conditional") {
+    return new Set([
+      ...pointerRootsFromExpression(expression.consequent, aliases),
+      ...pointerRootsFromExpression(expression.alternate, aliases),
+    ]);
+  }
+  if (expression.kind === "assignment" && expression.operator === "=") {
+    return pointerRootsFromExpression(expression.right, aliases);
+  }
+  if (expression.kind === "sequence") {
+    return pointerRootsFromExpression(expression.expressions.at(-1), aliases);
+  }
+  if (expression.kind === "index" && expression.target.kind === "identifier") {
+    const elementKey = pointerArrayElementAliasKey(expression);
+    const elementAlias = elementKey ? aliases.get(elementKey) : undefined;
+    if (elementAlias) return new Set(elementAlias);
+  }
+  const root = rootIdentifier(expression);
+  if (!root) return new Set();
+  const aliased = aliases.get(root);
+  return aliased ? new Set(aliased) : new Set([root]);
+}
+
+function pointerArrayElementAliasKey(expression: Extract<CudaLiteExpression, { kind: "index" }>): string | undefined {
+  if (expression.target.kind !== "identifier") return undefined;
+  if (expression.index.kind !== "number" || !Number.isInteger(expression.index.value)) return undefined;
+  return `${expression.target.name}[${expression.index.value}]`;
+}
+
 function isAtomicBuiltin(callName: string): boolean {
   return callName === "atomicAdd" ||
     callName === "atomicAdd_system" ||
     callName === "atomicSub" ||
+    callName === "atomicSub_system" ||
     callName === "atomicMin" ||
     callName === "atomicMin_system" ||
     callName === "atomicMax" ||
@@ -2694,15 +2947,25 @@ function isSupportedDevicePointerAtomic(
 ): boolean {
   if (targetType !== "float" && targetType !== "double" && targetType !== "int" && targetType !== "uint") return false;
   if (callName === "atomicAdd" || callName === "atomicAdd_system") return true;
+  if (callName === "atomicSub" || callName === "atomicSub_system") return true;
+  if (callName === "atomicMin" || callName === "atomicMin_system") return true;
+  if (callName === "atomicMax" || callName === "atomicMax_system" || callName === "atomicMaxFloat") return true;
   if (callName === "atomicExch" || callName === "atomicExch_system") return true;
-  return (callName === "atomicCAS" || callName === "atomicCAS_system") && targetType !== "float";
-}
-
-function isDevicePointerAtomicMemoryCompatible(
-  pointerType: CudaLiteScalarType,
-  memoryType: CudaLiteScalarType,
-): boolean {
-  return pointerType === memoryType && (memoryType === "float" || memoryType === "int" || memoryType === "uint");
+  if (targetType === "int" || targetType === "uint") {
+    return callName === "atomicAnd" ||
+      callName === "atomicAnd_system" ||
+      callName === "atomicOr" ||
+      callName === "atomicOr_system" ||
+      callName === "atomicXor" ||
+      callName === "atomicXor_system" ||
+      callName === "atomicInc" ||
+      callName === "atomicInc_system" ||
+      callName === "atomicDec" ||
+      callName === "atomicDec_system" ||
+      callName === "atomicCAS" ||
+      callName === "atomicCAS_system";
+  }
+  return false;
 }
 
 function isShuffleBuiltin(callName: string): boolean {
@@ -2748,11 +3011,18 @@ function warpReductionReturnType(callName: string, valueType: ValueType | undefi
 
 function atomicTargetExpression(
   target: CudaLiteExpression | undefined,
+  scope?: Scope,
 ): CudaLiteExpression | undefined {
   if (!target) return undefined;
-  if (target.kind === "cast" && target.pointer) return atomicTargetExpression(target.expression);
+  if (target.kind === "cast" && target.pointer) return atomicTargetExpression(target.expression, scope);
   if (target.kind === "unary" && target.operator === "&") return target.argument;
   if (target.kind === "identifier") return target;
+  if (target.kind === "index" && rootIdentifier(target.target)) {
+    if (!scope) return target;
+    const root = rootIdentifier(target.target);
+    const symbol = root ? lookupSymbol(root, scope, target.span) : undefined;
+    if (symbol?.kind === "local" && symbol.pointer && (symbol.dimensions?.length ?? 0) > 0) return target;
+  }
   if (target.kind === "binary" && (target.operator === "+" || target.operator === "-")) return target;
   return undefined;
 }

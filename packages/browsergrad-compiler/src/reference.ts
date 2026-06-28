@@ -1302,7 +1302,7 @@ function pointerValueTypeForExpression(
   }
   if (expression.kind === "unary" && expression.operator === "&") {
     const root = rootIdentifierFromExpression(expression.argument);
-    return root ? context.valueTypes.get(root) ?? "uint" : "uint";
+    return root ? context.valueTypes.get(root) ?? context.shared.get(root)?.valueType ?? "uint" : "uint";
   }
   if (expression.kind === "identifier") {
     const local = context.locals.get(expression.name);
@@ -1315,7 +1315,7 @@ function pointerValueTypeForExpression(
     if (isLocalPointerArray(local)) return local.valueType;
   }
   const root = rootIdentifierFromExpression(expression);
-  return root ? context.valueTypes.get(root) ?? "uint" : "uint";
+  return root ? context.valueTypes.get(root) ?? context.shared.get(root)?.valueType ?? "uint" : "uint";
 }
 
 function expressionValueType(expression: CudaLiteExpression, context: ThreadContext): CudaLiteScalarType | undefined {
@@ -1879,6 +1879,15 @@ function evalAssignment(
     }
   }
   const lvalue = resolveLValue(leftExpression, context);
+  const local = lvalue.space === "local" ? (lvalue.locals ?? context.locals).get(lvalue.name) : undefined;
+  if (operator === "=" && lvalue.index !== undefined && isLocalPointerArray(local)) {
+    const pointer = pointerArgumentValue(rightExpression, lvalue.valueType ?? local.valueType, context);
+    if (typeof pointer !== "number" && !isAddress(pointer) && !isPoolPointer(pointer)) {
+      throw compilerFailure(`'${lvalue.name}' pointer array expects pointer values`);
+    }
+    writeLValue(lvalue, pointer, context);
+    return pointer;
+  }
   const right = evalExpression(rightExpression, context);
   if (isPoolPointer(right)) {
     if (operator !== "=") throw compilerFailure("pool pointers only support assignment");
@@ -1995,7 +2004,8 @@ function mutablePointerValue(name: string, context: ThreadContext): AddressValue
   if (isAddress(local) || isPoolPointer(local)) return local;
   const valueType = context.valueTypes.get(name);
   if (context.buffers.has(name)) return { kind: "address", target: { name, space: "buffer", index: 0, ...(valueType ? { valueType } : {}) } };
-  if (context.shared.has(name)) return { kind: "address", target: { name, space: "shared", index: 0, ...(valueType ? { valueType } : {}) } };
+  const shared = context.shared.get(name);
+  if (shared) return { kind: "address", target: { name, space: "shared", index: 0, valueType: valueType ?? shared.valueType } };
   if (context.memoryPools.has(name)) return { kind: "pool-pointer", poolName: name, byteOffset: 0, ...(valueType ? { valueType } : {}) };
   return undefined;
 }
@@ -2259,7 +2269,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (name === "atomicAdd" || name === "atomicAdd_system") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => current + value);
   }
-  if (name === "atomicSub") {
+  if (name === "atomicSub" || name === "atomicSub_system") {
     return evalAtomicReadModifyWrite(expression, context, (current, value) => current - value);
   }
   if (name === "atomicMin" || name === "atomicMin_system") {
@@ -3003,7 +3013,8 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
   }
   if (expression.kind === "identifier") {
     if (context.buffers.has(expression.name)) return { name: expression.name, space: "buffer", index: 0 };
-    if (context.shared.has(expression.name)) return { name: expression.name, space: "shared", index: 0 };
+    const shared = context.shared.get(expression.name);
+    if (shared) return { name: expression.name, space: "shared", index: 0, valueType: shared.valueType };
     if (context.deviceGlobals.has(expression.name)) return { name: expression.name, space: "device-global", index: 0 };
     const valueType = context.valueTypes.get(expression.name);
     return { name: expression.name, space: "local", ...(valueType === undefined ? {} : { valueType }) };
@@ -3050,7 +3061,7 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
   }
   const shared = context.shared.get(cursor.name);
   if (shared) {
-    return { name: cursor.name, space: "shared", index: flattenIndex(shared.dimensions, chain) };
+    return { name: cursor.name, space: "shared", index: flattenIndex(shared.dimensions, chain), valueType: shared.valueType };
   }
   if (context.deviceGlobals.has(cursor.name)) {
     const dimensions = contextDeviceGlobalDimensions(cursor.name, context);

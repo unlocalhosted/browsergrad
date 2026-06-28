@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import {
   createDevice,
+  createWgslFloat16Array,
   createWgslStorageBuffer,
   defineWgslKernelProgram,
   destroyWgslStorageBuffer,
@@ -14,6 +15,7 @@ import {
 interface DeviceCheck {
   readonly available: boolean;
   readonly reason?: string;
+  readonly features?: readonly string[];
 }
 
 async function checkDevice(): Promise<DeviceCheck> {
@@ -23,7 +25,7 @@ async function checkDevice(): Promise<DeviceCheck> {
   try {
     const adapter = await navigator.gpu.requestAdapter();
     if (!adapter) return { available: false, reason: "no GPU adapter" };
-    return { available: true };
+    return { available: true, features: [...adapter.features] };
   } catch (error) {
     return {
       available: false,
@@ -349,6 +351,35 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     expect(result.buffers.raw).toBeInstanceOf(Uint32Array);
     expect([...new Float32Array((result.buffers.raw as Uint32Array).buffer)]).toEqual([1.5, 2.5, 3.5, 4.5]);
+  });
+
+  it("reads odd-length f16 storage through aligned WebGPU map ranges", async () => {
+    if (!deviceCheck.available || !deviceCheck.features?.includes("shader-f16")) return;
+    const device = await createDevice({ requiredFeatures: ["shader-f16" as GPUFeatureName] });
+    const program = defineWgslKernelProgram({
+      name: "odd_f16_readback",
+      workgroupSize: [1, 1, 1],
+      bindings: [{ kind: "storage", name: "x", valueType: "f16", access: "read_write", binding: 0 }],
+      wgsl: `
+enable f16;
+@group(0) @binding(0) var<storage, read_write> x: array<f16>;
+@compute @workgroup_size(1, 1, 1)
+fn main() {
+  x[0] = f16(1.5);
+  x[1] = f16(-2.25);
+  x[2] = f16(4.0);
+}`,
+    });
+
+    const result = await runWgslKernelProgram(
+      device,
+      program,
+      { buffers: { x: createWgslFloat16Array(3) } },
+      { dispatchCount: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.x]).toEqual([1.5, -2.25, 4]);
+    expect(result.buffers.x.byteLength).toBe(6);
   });
 
   it("reads storage-metadata-only buffers without a WGSL binding", async () => {

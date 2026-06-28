@@ -118,6 +118,10 @@ const HOST_SIDE_EFFECT_FREE_CALLS = new Set([
   ...CUDA_INTRINSICS.map((intrinsic) => intrinsic.name),
 ]);
 
+type DynamicChildCompileResult =
+  | { readonly compiled: CompiledCudaLiteKernel }
+  | { readonly blocker: CudaWebGpuExecutionBlocker };
+
 export function createCudaWebGpuExecutionPlan(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
@@ -343,17 +347,14 @@ function createHostLiftedDynamicWebGpuPlan(
   const childCompileCache = new Map<string, CompiledCudaLiteKernel>();
 
   for (const item of plan.launches) {
-    const childCompiled = getOrCompileDynamicChild(
+    const childCompileResult = getOrCompileDynamicChild(
       compiled,
       item,
       childCompileCache,
       options.compileKernel,
     );
-    if (!childCompiled) {
-      return unsupportedWebGpuPlan(compiled, [
-        webGpuBlocker("device-launch", "dynamic-child-compile-failed", `dynamic child kernel '${item.kernel.name}' could not be compiled for WebGPU`),
-      ]);
-    }
+    if ("blocker" in childCompileResult) return unsupportedWebGpuPlan(compiled, [childCompileResult.blocker]);
+    const childCompiled = childCompileResult.compiled;
     const childLaunch = { gridDim: item.gridDim, blockDim: item.blockDim };
     const childExecutionPlan = createCudaWebGpuExecutionPlan(
       childCompiled,
@@ -707,14 +708,14 @@ function getOrCompileDynamicChild(
   },
   cache: Map<string, CompiledCudaLiteKernel>,
   compileKernel: NonNullable<CudaWebGpuExecutionPlanOptions["compileKernel"]>,
-): CompiledCudaLiteKernel | undefined {
+): DynamicChildCompileResult {
   const key = JSON.stringify({
     kernelName: item.kernel.name,
     blockDim: item.blockDim,
     pointerBaseOffsets: item.pointerBaseOffsets,
   });
   const cached = cache.get(key);
-  if (cached) return cached;
+  if (cached) return { compiled: cached };
   try {
     const compiled = compileKernel(parent.ast.source, {
       kernelName: item.kernel.name,
@@ -728,10 +729,26 @@ function getOrCompileDynamicChild(
       pointerBaseOffsets: item.pointerBaseOffsets,
     });
     cache.set(key, compiled);
-    return compiled;
-  } catch {
-    return undefined;
+    return { compiled };
+  } catch (error) {
+    return {
+      blocker: webGpuBlocker(
+        "device-launch",
+        "dynamic-child-compile-failed",
+        dynamicChildCompileFailureMessage(item.kernel.name, error),
+      ),
+    };
   }
+}
+
+function dynamicChildCompileFailureMessage(kernelName: string, error: unknown): string {
+  const prefix = `dynamic child kernel '${kernelName}' could not be compiled for WebGPU`;
+  if (error instanceof CudaLiteCompilerError && error.diagnostics.length > 0) {
+    const details = error.diagnostics.map((diagnostic) => `${diagnostic.code}: ${diagnostic.message}`).join("; ");
+    return `${prefix}: ${details}`;
+  }
+  if (error instanceof Error && error.message.length > 0) return `${prefix}: ${error.message}`;
+  return prefix;
 }
 
 function createWgslRunInput(
@@ -839,7 +856,7 @@ export function packCudaWebGpuUniformParams(
     const offset = i * 4;
     if (param.valueType === "int") view.setInt32(offset, Math.trunc(value), true);
     else if (param.valueType === "uint") view.setUint32(offset, Math.trunc(value), true);
-    else if (param.valueType === "half") view.setUint16(offset, float16Bits(value), true);
+    else if (param.valueType === "half" && compiled.f16Mode !== "f32") view.setUint16(offset, float16Bits(value), true);
     else if (param.valueType === "bool") view.setUint32(offset, value ? 1 : 0, true);
     else view.setFloat32(offset, value, true);
   }

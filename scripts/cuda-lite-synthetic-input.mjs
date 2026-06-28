@@ -1,3 +1,5 @@
+import { createWgslFloat16Array } from "../packages/browsergrad-kernels/dist/index.js";
+
 export function syntheticInputForCompiled(compiled) {
   const scalars = {};
   const buffers = {};
@@ -15,7 +17,7 @@ export function syntheticInputForCompiled(compiled) {
       if (param.valueType === "devicepool") {
         memoryPools[param.name] = { data: new Uint32Array(4096), offset: new Uint32Array([0]) };
       } else {
-        buffers[param.name] = syntheticBufferForType(param.valueType);
+        buffers[param.name] = syntheticBufferForType(param.valueType, 4096, compiled.f16Mode);
       }
     } else {
       scalars[param.name] = syntheticScalarForName(param.name);
@@ -24,13 +26,13 @@ export function syntheticInputForCompiled(compiled) {
   for (const constant of compiled.ir.constants) {
     constants[constant.name] = constant.dimensions.length === 0 && !isCudaVectorTypeName(constant.valueType)
       ? syntheticScalarForName(constant.name)
-      : syntheticBufferForType(constant.valueType);
+      : syntheticBufferForType(constant.valueType, 4096, compiled.f16Mode);
   }
   for (const global of compiled.ir.deviceGlobals) {
     const length = global.dimensions.length === 0
       ? 1
       : global.dimensions.reduce((product, dimension) => product * dimension, 1);
-    deviceGlobals[global.name] = syntheticBufferForType(global.valueType, length);
+    deviceGlobals[global.name] = syntheticBufferForType(global.valueType, length, compiled.f16Mode);
   }
   for (const texture of compiled.ir.textures) {
     textures[texture.name] = { width: 64, height: 64, data: new Float32Array(64 * 64) };
@@ -51,9 +53,10 @@ export function externalDevicePoolNamesFromSource(source) {
     .filter(Boolean);
 }
 
-export function syntheticBufferForType(type, length = 4096) {
+export function syntheticBufferForType(type, length = 4096, f16Mode = "native") {
   if (type === "int") return new Int32Array(length);
   if (type === "uint" || type === "voidptr" || type === "bool") return new Uint32Array(length);
+  if ((type === "half" || type === "half2") && f16Mode !== "f32") return createWgslFloat16Array(length);
   return new Float32Array(length);
 }
 

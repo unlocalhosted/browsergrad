@@ -3,6 +3,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
+import {
+  findRepoRoot,
+  moduleAliases,
+  parseBundle,
+} from "./cuda-lite-webgpu-cli.mjs";
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i++) {
@@ -17,10 +22,12 @@ const runs = positiveInt(args.get("--runs"), 25);
 const warmup = positiveInt(args.get("--warmup"), 5);
 const length = positiveInt(args.get("--length"), 16_384);
 const markdownPath = args.get("--markdown");
+const jsonPath = args.get("--json");
 const headed = args.get("--headed") === "true";
 const requireWebGpu = args.get("--require-webgpu") === "true";
 const preparedRatioMax = positiveNumber(args.get("--expect-prepared-ratio-max"));
 const preparedScalarRatioMax = positiveNumber(args.get("--expect-prepared-scalar-ratio-max"));
+const preparedReadbackRatioMax = positiveNumber(args.get("--expect-prepared-readback-ratio-max"));
 const bundle = parseBundle(args.get("--bundle") ?? "src");
 
 const root = findRepoRoot(process.cwd());
@@ -118,6 +125,10 @@ const html = String.raw`<!doctype html>
               scalar = scalar === 4 ? 3 : 4;
               await prepared.run({ scalars: { a: scalar }, readback: [], awaitCompletion: true });
             });
+            const preparedReadback = await measure("webgpu:saxpy-prepared-readback", runs, warmup, async () => {
+              writeWgslStorageBuffer(device, y, yInitial);
+              await prepared.run({ readback: ["y"], awaitCompletion: true });
+            });
             writeWgslStorageBuffer(device, y, yInitial);
             await prepared.run({ scalars: { a: 4 }, readback: [], awaitCompletion: true });
             const out = await readWgslStorageBuffer(device, y);
@@ -132,6 +143,7 @@ const html = String.raw`<!doctype html>
                 oneShot,
                 preparedRun,
                 preparedScalarUpdate,
+                preparedReadback,
               ],
               validation: { saxpy: ok },
             };
@@ -190,7 +202,7 @@ const server = await createServer({
   logLevel: "error",
   server: { host: "127.0.0.1", port: 0 },
   resolve: {
-    alias: moduleAliases(bundle),
+    alias: moduleAliases(root, bundle),
   },
   plugins: [{
     name: "browsergrad-cuda-lite-bench-page",
@@ -232,13 +244,20 @@ try {
     userAgent: await page.evaluate(() => navigator.userAgent),
     ...result,
   };
+  if (report.available) {
+    report.comparisons = benchmarkComparisons(report);
+  }
   if (requireWebGpu && !report.available) {
     throw new Error(`WebGPU unavailable: ${report.reason ?? "unknown"}`);
   }
   assertValidation(report);
   assertRatio(report, "webgpu:saxpy-prepared-resident", "webgpu:saxpy-one-shot-resident", preparedRatioMax, "--expect-prepared-ratio-max");
   assertRatio(report, "webgpu:saxpy-prepared-scalar-update", "webgpu:saxpy-one-shot-resident", preparedScalarRatioMax, "--expect-prepared-scalar-ratio-max");
+  assertRatio(report, "webgpu:saxpy-prepared-readback", "webgpu:saxpy-prepared-resident", preparedReadbackRatioMax, "--expect-prepared-readback-ratio-max");
   console.log(JSON.stringify(report, null, 2));
+  if (jsonPath && jsonPath !== "true") {
+    fs.writeFileSync(path.resolve(jsonPath), JSON.stringify(report, null, 2));
+  }
   if (markdownPath && markdownPath !== "true") {
     fs.writeFileSync(path.resolve(markdownPath), markdownReport(report));
   }
@@ -266,6 +285,12 @@ function markdownReport(data) {
   for (const bench of data.benchmarks) {
     lines.push(`| \`${bench.name}\` | ${bench.minMs} | ${bench.medianMs} | ${bench.p95Ms} | ${bench.maxMs} |`);
   }
+  if ((data.comparisons ?? []).length > 0) {
+    lines.push("", "| Comparison | median ratio |", "| --- | ---: |");
+    for (const comparison of data.comparisons) {
+      lines.push(`| \`${comparison.name}\` | ${comparison.medianRatio} |`);
+    }
+  }
   lines.push("", `Validation: \`${JSON.stringify(data.validation ?? {})}\``, "");
   return `${lines.join("\n")}\n`;
 }
@@ -291,8 +316,8 @@ function assertValidation(report) {
 
 function assertRatio(report, numeratorName, denominatorName, maxRatio, flag) {
   if (!report.available || maxRatio === undefined) return;
-  const numerator = report.benchmarks?.find((bench) => bench.name === numeratorName);
-  const denominator = report.benchmarks?.find((bench) => bench.name === denominatorName);
+  const numerator = benchmarkByName(report, numeratorName);
+  const denominator = benchmarkByName(report, denominatorName);
   if (!numerator || !denominator) throw new Error(`${flag} could not find benchmark pair`);
   if (denominator.medianMs <= 0) throw new Error(`${flag} denominator median must be > 0`);
   const ratio = numerator.medianMs / denominator.medianMs;
@@ -301,33 +326,30 @@ function assertRatio(report, numeratorName, denominatorName, maxRatio, flag) {
   }
 }
 
+function benchmarkComparisons(report) {
+  return [
+    comparison(report, "prepared-vs-one-shot", "webgpu:saxpy-prepared-resident", "webgpu:saxpy-one-shot-resident"),
+    comparison(report, "prepared-scalar-update-vs-one-shot", "webgpu:saxpy-prepared-scalar-update", "webgpu:saxpy-one-shot-resident"),
+    comparison(report, "prepared-readback-vs-prepared-resident", "webgpu:saxpy-prepared-readback", "webgpu:saxpy-prepared-resident"),
+  ].filter(Boolean);
+}
+
+function comparison(report, name, numeratorName, denominatorName) {
+  const numerator = benchmarkByName(report, numeratorName);
+  const denominator = benchmarkByName(report, denominatorName);
+  if (!numerator || !denominator || denominator.medianMs <= 0) return undefined;
+  return {
+    name,
+    numerator: numeratorName,
+    denominator: denominatorName,
+    medianRatio: round(numerator.medianMs / denominator.medianMs),
+  };
+}
+
+function benchmarkByName(report, name) {
+  return report.benchmarks?.find((bench) => bench.name === name);
+}
+
 function round(value) {
   return Math.round(value * 1000) / 1000;
-}
-
-function findRepoRoot(start) {
-  let dir = path.resolve(start);
-  while (dir !== path.dirname(dir)) {
-    if (fs.existsSync(path.join(dir, "pnpm-workspace.yaml"))) return dir;
-    dir = path.dirname(dir);
-  }
-  throw new Error("could not find repo root");
-}
-
-function parseBundle(value) {
-  if (value === "src" || value === "dist") return value;
-  throw new Error("--bundle expects src or dist");
-}
-
-function moduleAliases(bundleName) {
-  const compilerEntry = bundleName === "dist"
-    ? path.join(root, "packages/browsergrad-compiler/dist/index.js")
-    : path.join(root, "packages/browsergrad-compiler/src/index.ts");
-  const kernelsEntry = bundleName === "dist"
-    ? path.join(root, "packages/browsergrad-kernels/dist/index.js")
-    : path.join(root, "packages/browsergrad-kernels/src/index.ts");
-  return {
-    "@unlocalhosted/browsergrad-kernels": kernelsEntry,
-    "@unlocalhosted/browsergrad-compiler": compilerEntry,
-  };
 }

@@ -26,8 +26,27 @@ for (const bundle of browserBundles(options.bundle)) {
     options.autoCorpusSmokeMode,
     "--auto-corpus-smoke-features",
     options.autoCorpusSmokeFeatures.join(","),
+    "--case-timeout-ms",
+    String(options.caseTimeoutMs),
     ...(options.allowMissingWebGpu ? [] : ["--require-webgpu"]),
   ]);
+  if (options.benchmarkWebGpu) {
+    run(`real-world CUDA browser perf gate (${bundle})`, [
+      path.join(scriptDir, "benchmark-cuda-lite-webgpu.mjs"),
+      "--bundle",
+      bundle,
+      "--runs",
+      String(options.benchmarkRuns),
+      "--warmup",
+      String(options.benchmarkWarmup),
+      "--length",
+      String(options.benchmarkLength),
+      ...ratioArg("--expect-prepared-ratio-max", options.preparedRatioMax),
+      ...ratioArg("--expect-prepared-scalar-ratio-max", options.preparedScalarRatioMax),
+      ...ratioArg("--expect-prepared-readback-ratio-max", options.preparedReadbackRatioMax),
+      ...(options.allowMissingWebGpu ? [] : ["--require-webgpu"]),
+    ]);
+  }
 }
 
 console.log("\nreal-world CUDA verification passed");
@@ -41,6 +60,14 @@ function parseArgs(args) {
     autoCorpusSmokeLimit: 32,
     autoCorpusSmokeMode: "reference",
     autoCorpusSmokeFeatures: [],
+    caseTimeoutMs: 0,
+    benchmarkWebGpu: false,
+    benchmarkRuns: 8,
+    benchmarkWarmup: 2,
+    benchmarkLength: 4096,
+    preparedRatioMax: undefined,
+    preparedScalarRatioMax: undefined,
+    preparedReadbackRatioMax: undefined,
   };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -96,8 +123,68 @@ function parseArgs(args) {
       options.autoCorpusSmokeFeatures = parseFeatureList(arg.slice("--auto-corpus-smoke-features=".length));
       continue;
     }
+    if (arg === "--case-timeout-ms") {
+      options.caseTimeoutMs = parseLimit(args[++index], "--case-timeout-ms");
+      continue;
+    }
+    if (arg?.startsWith("--case-timeout-ms=")) {
+      options.caseTimeoutMs = parseLimit(arg.slice("--case-timeout-ms=".length), "--case-timeout-ms");
+      continue;
+    }
+    if (arg === "--benchmark-webgpu") {
+      options.benchmarkWebGpu = true;
+      continue;
+    }
+    if (arg === "--benchmark-runs") {
+      options.benchmarkRuns = parsePositiveInt(args[++index], "--benchmark-runs");
+      continue;
+    }
+    if (arg?.startsWith("--benchmark-runs=")) {
+      options.benchmarkRuns = parsePositiveInt(arg.slice("--benchmark-runs=".length), "--benchmark-runs");
+      continue;
+    }
+    if (arg === "--benchmark-warmup") {
+      options.benchmarkWarmup = parsePositiveInt(args[++index], "--benchmark-warmup");
+      continue;
+    }
+    if (arg?.startsWith("--benchmark-warmup=")) {
+      options.benchmarkWarmup = parsePositiveInt(arg.slice("--benchmark-warmup=".length), "--benchmark-warmup");
+      continue;
+    }
+    if (arg === "--benchmark-length") {
+      options.benchmarkLength = parsePositiveInt(args[++index], "--benchmark-length");
+      continue;
+    }
+    if (arg?.startsWith("--benchmark-length=")) {
+      options.benchmarkLength = parsePositiveInt(arg.slice("--benchmark-length=".length), "--benchmark-length");
+      continue;
+    }
+    if (arg === "--expect-prepared-ratio-max") {
+      options.preparedRatioMax = parsePositiveNumber(args[++index], "--expect-prepared-ratio-max");
+      continue;
+    }
+    if (arg?.startsWith("--expect-prepared-ratio-max=")) {
+      options.preparedRatioMax = parsePositiveNumber(arg.slice("--expect-prepared-ratio-max=".length), "--expect-prepared-ratio-max");
+      continue;
+    }
+    if (arg === "--expect-prepared-scalar-ratio-max") {
+      options.preparedScalarRatioMax = parsePositiveNumber(args[++index], "--expect-prepared-scalar-ratio-max");
+      continue;
+    }
+    if (arg?.startsWith("--expect-prepared-scalar-ratio-max=")) {
+      options.preparedScalarRatioMax = parsePositiveNumber(arg.slice("--expect-prepared-scalar-ratio-max=".length), "--expect-prepared-scalar-ratio-max");
+      continue;
+    }
+    if (arg === "--expect-prepared-readback-ratio-max") {
+      options.preparedReadbackRatioMax = parsePositiveNumber(args[++index], "--expect-prepared-readback-ratio-max");
+      continue;
+    }
+    if (arg?.startsWith("--expect-prepared-readback-ratio-max=")) {
+      options.preparedReadbackRatioMax = parsePositiveNumber(arg.slice("--expect-prepared-readback-ratio-max=".length), "--expect-prepared-readback-ratio-max");
+      continue;
+    }
     if (arg === "--help" || arg === "-h") {
-      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--allow-missing-webgpu] [--limit N] [--bundle src|dist|both] [--auto-corpus-smoke-limit N] [--auto-corpus-smoke-mode reference|dispatch] [--auto-corpus-smoke-features subgroups]");
+      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--require-webgpu] [--allow-missing-webgpu] [--limit N] [--bundle src|dist|both] [--auto-corpus-smoke-limit N] [--auto-corpus-smoke-mode reference|dispatch] [--auto-corpus-smoke-features subgroups] [--case-timeout-ms N] [--benchmark-webgpu] [--benchmark-runs N] [--benchmark-warmup N] [--benchmark-length N] [--expect-prepared-ratio-max N] [--expect-prepared-scalar-ratio-max N] [--expect-prepared-readback-ratio-max N]");
       process.exit(0);
     }
     throw new Error(`unexpected argument: ${arg}`);
@@ -124,12 +211,32 @@ function browserBundles(bundle) {
   return bundle === "both" ? ["src", "dist"] : [bundle];
 }
 
-function parseLimit(raw) {
+function parseLimit(raw, flag = "--limit") {
   const value = Number(raw);
   if (!Number.isInteger(value) || value < 0) {
-    throw new Error("--limit expects a non-negative integer");
+    throw new Error(`${flag} expects a non-negative integer`);
   }
   return value;
+}
+
+function parsePositiveInt(raw, flag) {
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${flag} expects a positive integer`);
+  }
+  return value;
+}
+
+function parsePositiveNumber(raw, flag) {
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${flag} expects a positive number`);
+  }
+  return value;
+}
+
+function ratioArg(flag, value) {
+  return value === undefined ? [] : [flag, String(value)];
 }
 
 function run(label, args) {

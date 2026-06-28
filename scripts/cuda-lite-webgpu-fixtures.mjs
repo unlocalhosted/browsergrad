@@ -131,6 +131,7 @@ function createAutoCorpusSmokeFixture(root, corpus, item, compiler, fixtureOptio
       workgroupSize: compiled.ir.workgroupSize,
       launch,
       options: compileOptions,
+      requiredFeatures: compiled.ir.requiredFeatures,
       source,
       verifyMode,
     };

@@ -355,5 +355,6 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { vectorN: 1, elementN: 4 },
     },
     output: "d_C",
+    expectedOutput: { type: "Float32Array", data: [20] },
   },
 ];

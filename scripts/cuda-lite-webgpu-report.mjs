@@ -6,22 +6,37 @@ export function summarizeReport(data) {
     tool: data.tool,
     bundle: data.bundle ?? "src",
     available: data.available,
+    caseFilters: data.caseFilters ?? [],
     reason: data.available ? undefined : data.reason ?? "unknown",
     passed: data.passed ?? 0,
     failed: data.failed ?? 0,
+    skipped: data.skipped ?? 0,
     corpusFixturePassed: data.corpusFixturePassed ?? 0,
     corpusFixtureCases: data.corpusFixtureCases ?? 0,
     corpusFixtureExpectedOutputCases: data.corpusFixtureExpectedOutputCases ?? 0,
     corpusFixturePassedByCorpus: data.corpusFixturePassedByCorpus ?? {},
     autoCorpusSmokePassed: data.autoCorpusSmokePassed ?? 0,
+    autoCorpusSmokeSkipped: data.autoCorpusSmokeSkipped ?? 0,
+    autoCorpusSmokeCovered: data.autoCorpusSmokeCovered ?? data.autoCorpusSmokePassed ?? 0,
     autoCorpusSmokeCases: data.autoCorpusSmokeCases ?? 0,
     autoCorpusSmokePassedByCorpus: data.autoCorpusSmokePassedByCorpus ?? {},
+    autoCorpusSmokeSkippedByCorpus: data.autoCorpusSmokeSkippedByCorpus ?? {},
     autoCorpusSmokeMode: data.autoCorpusSmokeMode,
     autoCorpusSmokeLimit: data.autoCorpusSmokeLimit,
     failedCases: cases.filter((item) => !item.ok).map((item) => ({
       name: item.name,
       plan: item.plan,
+      output: item.output,
+      maxAbsDiff: item.maxAbsDiff,
+      tolerance: item.tolerance,
+      firstDiff: item.firstDiff,
       error: item.error,
+      corpusId: item.corpusId,
+    })),
+    skippedCases: cases.filter((item) => item.skipped).map((item) => ({
+      name: item.name,
+      plan: item.plan,
+      corpusId: item.corpusId,
     })),
     slowestCases: [...cases]
       .filter((item) => Number.isFinite(item.ms))
@@ -54,11 +69,11 @@ export function markdownReport(data) {
   for (const item of data.cases ?? []) {
     lines.push(`| \`${item.name}\` | \`${item.plan}\` | \`${item.output}\` | ${item.maxAbsDiff} | \`${item.ok}\` | ${item.ms} |`);
   }
-  lines.push("", `Passed: \`${data.passed}\`, failed: \`${data.failed}\``, "");
+  lines.push("", `Passed: \`${data.passed}\`, failed: \`${data.failed}\`, skipped: \`${data.skipped ?? 0}\``, "");
   lines.push(`Corpus fixtures: \`${data.corpusFixturePassed ?? 0}/${data.corpusFixtureCases ?? 0}\``, "");
   lines.push(`Expected-output fixtures: \`${data.corpusFixtureExpectedOutputCases ?? 0}/${data.corpusFixtureBaseline?.expectedOutputMin ?? 0}\``, "");
   if ((data.autoCorpusSmokeCases ?? 0) > 0) {
-    lines.push(`Auto corpus smoke: \`${data.autoCorpusSmokePassed ?? 0}/${data.autoCorpusSmokeCases ?? 0}\``, "");
+    lines.push(`Auto corpus smoke: \`${data.autoCorpusSmokePassed ?? 0}/${data.autoCorpusSmokeCases ?? 0}\`, skipped: \`${data.autoCorpusSmokeSkipped ?? 0}\``, "");
   }
   if (data.corpusFixturePassedByCorpus) {
     lines.push("| Corpus | passed | cases | baseline min |");

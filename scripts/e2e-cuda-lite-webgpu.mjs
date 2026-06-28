@@ -36,6 +36,27 @@ for (let i = 2; i < process.argv.length; i++) {
   if (value && !value.startsWith("--")) i++;
 }
 
+function parseCaseFilters(argv) {
+  const values = [];
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index];
+    if (arg === "--case" || arg === "--cases") {
+      const value = argv[index + 1];
+      if (value && !value.startsWith("--")) {
+        values.push(value);
+        index++;
+      }
+      continue;
+    }
+    if (arg?.startsWith("--case=")) values.push(arg.slice("--case=".length));
+    if (arg?.startsWith("--cases=")) values.push(arg.slice("--cases=".length));
+  }
+  return values.join(",")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 const headed = args.get("--headed") === "true";
 const requireWebGpu = args.get("--require-webgpu") === "true";
 const requireCorpusFixtures = args.get("--require-corpus-fixtures") === "true";
@@ -44,6 +65,7 @@ const jsonPath = args.get("--json");
 const summaryOnly = args.get("--summary-only") === "true";
 const progress = args.get("--progress") === "true";
 const progressPath = args.get("--progress-file");
+const caseFilters = parseCaseFilters(process.argv.slice(2));
 const caseTimeoutMs = parseNonNegativeInteger(args.get("--case-timeout-ms") ?? "0", "--case-timeout-ms");
 const bundle = parseBundle(args.get("--bundle") ?? "src");
 const autoCorpusSmokeLimit = parseNonNegativeInteger(args.get("--auto-corpus-smoke-limit") ?? "0", "--auto-corpus-smoke-limit");
@@ -106,6 +128,47 @@ __global__ void parent(float *x, int n) {
     dim3 grid(1);
     dim3 block(n);
     child<<<grid, block>>>(x, n);
+    cudaDeviceSynchronize();
+  }
+}`,
+  dynamicSystemAtomicLaunch: `
+__global__ void child(int *out) {
+  if (threadIdx.x == 0) {
+    atomicSub_system(&out[0], 1);
+    atomicMax_system(&out[1], 7);
+    atomicCAS_system(&out[2], 3, 5);
+  }
+}
+__global__ void parent(int *out) {
+  if (threadIdx.x == 0) {
+    child<<<1, 1>>>(out);
+    cudaDeviceSynchronize();
+  }
+}`,
+  dynamicAliasAtomicLaunch: `
+__global__ void child(int *out) {
+  if (threadIdx.x == 0) {
+    int *ptr = nullptr;
+    ptr = out;
+    atomicAdd(ptr, 1);
+  }
+}
+__global__ void parent(int *out) {
+  if (threadIdx.x == 0) {
+    child<<<1, 1>>>(out);
+    cudaDeviceSynchronize();
+  }
+}`,
+  dynamicConditionalAliasAtomicLaunch: `
+__global__ void child(int *out, int use_out) {
+  if (threadIdx.x == 0) {
+    int *ptr = use_out ? out : out;
+    atomicAdd(ptr, 1);
+  }
+}
+__global__ void parent(int *out, int use_out) {
+  if (threadIdx.x == 0) {
+    child<<<1, 1>>>(out, use_out);
     cudaDeviceSynchronize();
   }
 }`,
@@ -209,6 +272,29 @@ __global__ void deviceGlobalStorage(float* out, uint* old) {
   setValue(values, tid, (float)(tid + 1));
   out[tid] = values[tid];
 }`,
+  deviceGlobalAtomicRmw: `
+__device__ int g_i[1];
+__device__ float g_f[1];
+
+__device__ void helperGlobalRmw(int *xi, float *xf, float *out) {
+  out[0] = float(atomicSub(xi, 2));
+  out[1] = float(atomicMin(xi, 5));
+  out[2] = float(atomicMax(xi, 9));
+  out[3] = float(atomicAnd(xi, 6));
+  out[4] = float(atomicOr(xi, 10));
+  out[5] = float(atomicXor(xi, 3));
+  out[6] = atomicSub(xf, 1.5f);
+  out[7] = atomicMin(xf, 2.0f);
+  out[8] = atomicMax(xf, 5.0f);
+  out[9] = float(xi[0]);
+  out[10] = xf[0];
+}
+
+__global__ void deviceGlobalAtomicRmw(float *out) {
+  if (threadIdx.x == 0) {
+    helperGlobalRmw(g_i, g_f, out);
+  }
+}`,
   ptxTileCarrier: `
 __global__ void ptxTileCarrier(uint *out) {
   uint addr = 5u;
@@ -232,6 +318,311 @@ __global__ void ptxTileCarrier(uint *out) {
     : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(c), "r"(d));
   out[0] = c;
   out[1] = d;
+}`,
+  ptxMmaF32Carrier: `
+__global__ void ptxMmaF32Carrier(uint *out) {
+  uint a0 = 0x3c003c00u;
+  uint a1 = 0x3c003c00u;
+  uint a2 = 0x3c003c00u;
+  uint a3 = 0x3c003c00u;
+  uint b0 = 0x40004000u;
+  uint b1 = 0x40004000u;
+  uint d0 = __float_as_uint(1.5f);
+  uint d1 = __float_as_uint(2.5f);
+  uint d2 = __float_as_uint(3.5f);
+  uint d3 = __float_as_uint(4.5f);
+  asm volatile(
+    "mma.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5, %6, %7}, {%8, %9}, {%10, %11, %12, %13};\\n"
+    : "=r"(d0), "=r"(d1), "=r"(d2), "=r"(d3)
+    : "r"(a0), "r"(a1), "r"(a2), "r"(a3), "r"(b0), "r"(b1), "r"(d0), "r"(d1), "r"(d2), "r"(d3));
+  out[0] = d0;
+  out[1] = __float_as_uint(__uint_as_float(d0));
+}`,
+  localHalfCarrier: `
+__global__ void localHalfCarrier(uint *out) {
+  uint regs[1][2];
+  regs[0][0] = 0u;
+  regs[0][1] = 0u;
+  half *view = reinterpret_cast<half *>(&(regs[0][0]));
+  view[0] = __float2half(1.0f);
+  view[1] = __float2half(2.0f);
+  view[2] = __float2half(3.0f);
+  view[3] = __float2half(4.0f);
+  float sum = __half2float(view[0]) + __half2float(view[1]) + __half2float(view[2]) + __half2float(view[3]);
+  out[0] = regs[0][0];
+  out[1] = regs[0][1];
+  out[2] = __float_as_uint(sum);
+}`,
+  halfCompatF32Mode: `
+__global__ void halfCompatF32Mode(float *out, half *x, half2 *y, half a) {
+  if (threadIdx.x < 1) {
+    half next = __float2half(__half2float(x[0]) + __half2float(a));
+    half2 pair = __hadd2(y[0], __floats2half2_rn(1.0f, 2.0f));
+    out[0] = __half2float(next);
+    out[1] = __low2float(pair);
+    out[2] = __high2float(pair);
+  }
+}`,
+  subgroupScalarCompat: `
+__global__ void subgroupScalarCompat(float *x) {
+  int idx = threadIdx.x;
+  float v = warp_reduce_sum_f32(x[idx]);
+  if ((idx % 32) == 0) {
+    v = bg_subgroup_add(v);
+  }
+  x[idx] = v;
+}`,
+  doubleCompatF32Mode: `
+__device__ void addValue(double *result, double value) {
+  atomicAdd(result, value);
+}
+__global__ void doubleCompatF32Mode(double* result, double* out, double a) {
+  int idx = threadIdx.x;
+  if (idx < 2) {
+    addValue(result, a);
+    out[idx] = a + (double)idx + 1.25;
+  }
+}`,
+  boolPointerStorage: `
+__global__ void boolPointerStorage(bool *flags, int *out) {
+  int idx = threadIdx.x;
+  bool active = flags[idx];
+  bool *slot = flags + idx + 2;
+  if (active) {
+    out[idx] = 1;
+    *slot = false;
+  } else {
+    out[idx] = 0;
+    *slot = true;
+  }
+}`,
+  aliasAtomicIncDec: `
+__global__ void aliasAtomicIncDec(float *scratch, const float *values, uint *out) {
+  if (threadIdx.x == 0) {
+    float *accum = scratch;
+    uint *flag = (uint *)(scratch + 2);
+    out[0] = atomicInc(flag, 2);
+    out[1] = atomicDec(flag, 2);
+    atomicAdd(&accum[0], values[0]);
+  }
+}`,
+  sharedAtomicIncDec: `
+__global__ void sharedAtomicIncDec(uint *out) {
+  __shared__ uint counter[1];
+  if (threadIdx.x == 0) {
+    counter[0] = 1;
+    out[0] = atomicInc(&counter[0], 1);
+    out[1] = atomicDec(&counter[0], 1);
+  }
+}`,
+  helperAtomicIncDec: `
+__device__ void helperIncDec(uint *counter, uint *out) {
+  uint *ptr = counter;
+  out[0] = atomicInc(ptr, 2);
+  out[1] = atomicDec(ptr, 2);
+  out[2] = ptr[0];
+}
+__device__ void helperIncDecOffset(uint *counter, uint *out, int offset) {
+  uint *ptr = counter;
+  out[offset + 0] = atomicInc(ptr, 2);
+  out[offset + 1] = atomicDec(ptr, 2);
+  out[offset + 2] = ptr[0];
+}
+__global__ void helperAtomicIncDec(uint *counter, uint *out) {
+  __shared__ uint sharedCounter[1];
+  if (threadIdx.x == 0) {
+    helperIncDec(counter, out);
+    sharedCounter[0] = 1;
+    helperIncDecOffset(&sharedCounter[0], out, 3);
+  }
+}`,
+  deviceGlobalAtomicIncDec: `
+__device__ uint gCounter[1];
+
+__device__ void helperGlobalIncDec(uint *counter, uint *out) {
+  uint *ptr = counter;
+  out[0] = atomicInc(ptr, 2);
+  out[1] = atomicDec(ptr, 2);
+  out[2] = ptr[0];
+}
+
+__global__ void deviceGlobalAtomicIncDec(uint *out) {
+  if (threadIdx.x == 0) {
+    helperGlobalIncDec(gCounter, out);
+  }
+}`,
+  assignedPointerAtomic: `
+__global__ void assignedPointerAtomic(uint *counter, uint *out) {
+  uint *ptr = NULL;
+  if (threadIdx.x == 0) {
+    ptr = counter;
+    out[0] = atomicAdd(ptr, 1u);
+    out[1] = counter[0];
+  }
+}`,
+  branchAssignedPointerAtomic: `
+__global__ void branchAssignedPointerAtomic(uint *left, uint *right, uint *out, int pickRight) {
+  uint *ptr = NULL;
+  if (pickRight) {
+    ptr = right;
+  } else {
+    ptr = left;
+  }
+  if (threadIdx.x == 0) {
+    out[0] = atomicAdd(ptr, 1u);
+  }
+}`,
+  conditionalPointerAtomic: `
+__global__ void conditionalPointerAtomic(uint *left, uint *right, uint *out, int pickRight) {
+  uint *ptr = pickRight ? right : left;
+  if (threadIdx.x == 0) {
+    out[0] = atomicAdd(ptr, 1u);
+  }
+}`,
+  chainedAssignmentPointerAtomic: `
+__global__ void chainedAssignmentPointerAtomic(uint *counter, uint *out) {
+  uint *a = NULL;
+  uint *b = NULL;
+  if (threadIdx.x == 0) {
+    a = b = counter;
+    out[0] = atomicAdd(a, 1u);
+    out[1] = b[0];
+  }
+}`,
+  pointerArrayAtomic: `
+__global__ void pointerArrayAtomic(uint *counter, uint *untouched, uint *out) {
+  uint *ptrs[2];
+  if (threadIdx.x == 0) {
+    ptrs[0] = counter;
+    ptrs[1] = untouched;
+    out[0] = atomicAdd(ptrs[0], 1u);
+    out[1] = counter[0];
+    out[2] = untouched[0];
+  }
+}`,
+  systemAtomicAliases: `
+__global__ void systemAtomicAliases(int *x, int *out) {
+  if (threadIdx.x == 0) {
+    out[0] = atomicAdd_system(&x[0], 2);
+    out[1] = atomicSub_system(&x[0], 1);
+    out[2] = atomicMax_system(&x[0], 5);
+    out[3] = atomicMin_system(&x[0], 3);
+    out[4] = atomicAnd_system(&x[1], 0x6);
+    out[5] = atomicOr_system(&x[1], 0x8);
+    out[6] = atomicXor_system(&x[1], 0x3);
+    out[7] = atomicInc_system((uint *)&x[2], 2);
+    out[8] = atomicDec_system((uint *)&x[2], 2);
+    out[9] = atomicExch_system(&x[3], 12);
+    out[10] = atomicCAS_system(&x[3], 12, 11);
+  }
+}`,
+  systemFloatAtomics: `
+__global__ void systemFloatAtomics(float *x, float *out) {
+  if (threadIdx.x == 0) {
+    out[0] = atomicAdd_system(&x[0], 1.5f);
+    out[1] = atomicSub_system(&x[0], 0.5f);
+    out[2] = atomicMin_system(&x[0], 2.0f);
+    out[3] = atomicMax_system(&x[0], 4.0f);
+    out[4] = atomicExch_system(&x[0], 6.0f);
+  }
+}`,
+  helperAtomicRmw: `
+__device__ void helperRmw(int *xi, float *xf, float *out) {
+  out[0] = float(atomicSub(xi, 2));
+  out[1] = float(atomicMin(xi, 5));
+  out[2] = float(atomicMax(xi, 9));
+  out[3] = float(atomicAnd(xi, 6));
+  out[4] = float(atomicOr(xi, 10));
+  out[5] = float(atomicXor(xi, 3));
+  out[6] = atomicSub(xf, 1.5f);
+  out[7] = atomicMin(xf, 2.0f);
+  out[8] = atomicMax(xf, 5.0f);
+  out[9] = float(xi[0]);
+  out[10] = xf[0];
+}
+__global__ void helperAtomicRmw(int *xi, float *xf, float *out) {
+  if (threadIdx.x == 0) {
+    helperRmw(xi, xf, out);
+  }
+}`,
+  helperSharedAtomicRmw: `
+__device__ void helperSharedRmw(int *xi, float *xf, float *out) {
+  out[0] = float(atomicSub(xi, 2));
+  out[1] = float(atomicMin(xi, 5));
+  out[2] = float(atomicMax(xi, 9));
+  out[3] = float(atomicAnd(xi, 6));
+  out[4] = float(atomicOr(xi, 10));
+  out[5] = float(atomicXor(xi, 3));
+  out[6] = atomicSub(xf, 1.5f);
+  out[7] = atomicMin(xf, 2.0f);
+  out[8] = atomicMax(xf, 5.0f);
+  out[9] = float(xi[0]);
+  out[10] = xf[0];
+}
+__global__ void helperSharedAtomicRmw(float *out) {
+  __shared__ int xi[1];
+  __shared__ float xf[1];
+  if (threadIdx.x == 0) {
+    xi[0] = 10;
+    xf[0] = 4.0f;
+    helperSharedRmw(&xi[0], &xf[0], out);
+  }
+}`,
+  helperAtomicExchangeCas: `
+__device__ uint exchangeU32(uint *target, uint value) {
+  return atomicExch(target, value);
+}
+__device__ uint casU32(uint *target, uint compare, uint value) {
+  return atomicCAS(target, compare, value);
+}
+__global__ void helperAtomicExchangeCas(uint *storage, uint *out) {
+  __shared__ uint flag;
+  if (threadIdx.x == 0) {
+    flag = 3u;
+    out[0] = exchangeU32(&flag, 7u);
+    out[1] = flag;
+    out[2] = casU32(storage, 2u, 9u);
+    out[3] = storage[0];
+    out[4] = casU32(&flag, 7u, 11u);
+    out[5] = flag;
+  }
+}`,
+  surfaceRead: `
+__global__ void surfaceRead(uint *out, cudaSurfaceObject_t surf) {
+  uint value = 0;
+  surf2Dread(&value, surf, 4, 0);
+  out[0] = value;
+  out[1] = surf2Dread<unsigned int>(surf, 0, 0);
+}`,
+  surfaceWrite3d: `
+__global__ void surfaceWrite3d(cudaSurfaceObject_t outputSurf) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  int z = blockIdx.z;
+  surf3Dwrite(float(x + y * 10 + z * 100), outputSurf, x * sizeof(float), y, z);
+}`,
+  driverSurfaceAlias: `
+__global__ void driverSurfaceAlias(CUsurfObject surf) {
+  surf2Dwrite(13u, surf, 4, 0);
+}`,
+  textureFetchLod: `
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void textureFetchLod(float4 *vecOut, float *scalarOut) {
+  vecOut[0] = tex2DLod<float4>(texRef, 0.5f, 0.5f, 0.0f);
+  scalarOut[0] = tex1Dfetch<float>(texRef, 1);
+}`,
+  textureAtlasHelpers: `
+__global__ void textureAtlasHelpers(float4 *vecOut, float *scalarOut, cudaTextureObject_t tex) {
+  scalarOut[0] = tex1D<float>(tex, 1.0f);
+  scalarOut[1] = tex2DLayered<float>(tex, 0.0f, 1.0f, 1.0f);
+  scalarOut[2] = tex3D<float>(tex, 2.0f, 1.0f, 1.0f);
+  scalarOut[3] = texCubemap<float>(tex, 1.0f, 0.0f, 0.0f);
+  vecOut[0] = tex1D<float4>(tex, 0.0f);
+}`,
+  textureUchar4: `
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void textureUchar4(uint4 *out) {
+  out[0] = tex2D<uchar4>(texRef, 0.5f, 0.5f);
 }`,
   reciprocalIntrinsic: `
 __global__ void reciprocalIntrinsic(float *x, float *out) {
@@ -260,6 +651,7 @@ const html = String.raw`<!doctype html>
     <script type="module">
       import {
         createDevice,
+        createWgslFloat16Array,
         createWgslStorageBuffer,
         destroyWgslStorageBuffer,
         readWgslStorageBuffer,
@@ -278,6 +670,7 @@ const html = String.raw`<!doctype html>
       const AUTO_CORPUS_SMOKE_FIXTURES = ${JSON.stringify(autoCorpusSmokeFixtures.map(({ source, ...fixture }) => fixture))};
       const EXPECTED_CORPUS_FIXTURE_NAMES = ${JSON.stringify(expectedCorpusFixtureNames)};
       const CORPUS_FIXTURE_BASELINE = ${JSON.stringify(cudaLiteCorpusExecutionFixtureBaseline)};
+      const CASE_FILTERS = ${JSON.stringify(caseFilters)};
       const CASE_TIMEOUT_MS = ${caseTimeoutMs};
       const PROGRESS = ${JSON.stringify(progress)};
 
@@ -292,9 +685,23 @@ const html = String.raw`<!doctype html>
         let device = await createE2eKernelDevice();
         const cases = [];
 
-        const specs = caseSpecs();
+        const specs = filterCaseSpecs(caseSpecs());
         for (let index = 0; index < specs.length; index++) {
           const spec = specs[index];
+          const missingFeatures = missingSpecFeatures(device, spec);
+          if (missingFeatures.length > 0) {
+            cases.push({
+              name: spec.name,
+              plan: "skipped:missing-features:" + missingFeatures.join(","),
+              ok: true,
+              skipped: true,
+              maxAbsDiff: 0,
+              output: spec.output,
+              corpusId: spec.corpusId,
+            });
+            emitProgress({ event: "case-skip", index: index + 1, total: specs.length, name: spec.name, missingFeatures });
+            continue;
+          }
           emitProgress({ event: "case-start", index: index + 1, total: specs.length, name: spec.name });
           const start = performance.now();
           try {
@@ -331,26 +738,33 @@ const html = String.raw`<!doctype html>
           }
         }
 
-        emitProgress({ event: "case-start", index: specs.length + 1, total: specs.length + 1, name: "prepared-resident-saxpy" });
-        const preparedStart = performance.now();
-        cases.push({
-          name: "prepared-resident-saxpy",
-          plan: "prepared:single-dispatch",
-          ...(await runPreparedResidentSaxpy(device)),
-          output: "y",
-          ms: round(performance.now() - preparedStart),
-        });
-        emitProgress({ event: "case-pass", index: specs.length + 1, total: specs.length + 1, name: "prepared-resident-saxpy", ms: cases[cases.length - 1].ms });
+        if (shouldRunPreparedSmoke()) {
+          emitProgress({ event: "case-start", index: specs.length + 1, total: specs.length + 1, name: "prepared-resident-saxpy" });
+          const preparedStart = performance.now();
+          cases.push({
+            name: "prepared-resident-saxpy",
+            plan: "prepared:single-dispatch",
+            ...(await runPreparedResidentSaxpy(device)),
+            output: "y",
+            ms: round(performance.now() - preparedStart),
+          });
+          emitProgress({ event: "case-pass", index: specs.length + 1, total: specs.length + 1, name: "prepared-resident-saxpy", ms: cases[cases.length - 1].ms });
+        }
 
         const failed = cases.filter((item) => !item.ok);
+        const skipped = cases.filter((item) => item.skipped);
         const corpusFixtureCases = cases.filter((item) => item.name.startsWith("corpus:"));
         const corpusFixturePassed = corpusFixtureCases.filter((item) => item.ok);
         const corpusFixtureExpectedOutputCases = corpusFixtureCases.filter((item) => item.expectedOutputPinned);
         const autoCorpusSmokeCases = cases.filter((item) => item.name.startsWith("auto-corpus:"));
-        const autoCorpusSmokePassed = autoCorpusSmokeCases.filter((item) => item.ok);
+        const autoCorpusSmokePassed = autoCorpusSmokeCases.filter((item) => item.ok && !item.skipped);
+        const autoCorpusSmokeSkipped = autoCorpusSmokeCases.filter((item) => item.skipped);
+        const autoCorpusSmokeCovered = autoCorpusSmokePassed.length + autoCorpusSmokeSkipped.length;
         const loadedCorpusFixtureNames = new Set(corpusFixtureCases.map((item) => item.name));
+        const expectedCorpusFixtureNames = filterExpectedCorpusFixtureNames();
         return {
           available: true,
+          caseFilters: CASE_FILTERS,
           cases,
           corpusFixtureCases: corpusFixtureCases.length,
           corpusFixturePassed: corpusFixturePassed.length,
@@ -360,16 +774,20 @@ const html = String.raw`<!doctype html>
           corpusFixturePassedByCorpus: countByCorpus(corpusFixturePassed),
           autoCorpusSmokeCases: autoCorpusSmokeCases.length,
           autoCorpusSmokePassed: autoCorpusSmokePassed.length,
+          autoCorpusSmokeSkipped: autoCorpusSmokeSkipped.length,
+          autoCorpusSmokeCovered,
           autoCorpusSmokeFailed: autoCorpusSmokeCases.filter((item) => !item.ok).length,
           autoCorpusSmokeCasesByCorpus: countByCorpus(autoCorpusSmokeCases),
           autoCorpusSmokePassedByCorpus: countByCorpus(autoCorpusSmokePassed),
+          autoCorpusSmokeSkippedByCorpus: countByCorpus(autoCorpusSmokeSkipped),
           autoCorpusSmokeLimit: ${autoCorpusSmokeLimit},
           autoCorpusSmokeMode: ${JSON.stringify(autoCorpusSmokeMode)},
           corpusFixtureBaseline: CORPUS_FIXTURE_BASELINE,
-          expectedCorpusFixtureNames: EXPECTED_CORPUS_FIXTURE_NAMES,
-          missingCorpusFixtureNames: EXPECTED_CORPUS_FIXTURE_NAMES.filter((name) => !loadedCorpusFixtureNames.has(name)),
-          passed: cases.length - failed.length,
+          expectedCorpusFixtureNames,
+          missingCorpusFixtureNames: expectedCorpusFixtureNames.filter((name) => !loadedCorpusFixtureNames.has(name)),
+          passed: cases.length - failed.length - skipped.length,
           failed: failed.length,
+          skipped: skipped.length,
         };
       };
 
@@ -394,9 +812,33 @@ const html = String.raw`<!doctype html>
         return String(error?.message ?? error).startsWith("case timeout after ");
       }
 
+      function missingSpecFeatures(device, spec) {
+        const features = spec.requiredFeatures ?? [];
+        return features.filter((feature) => !device.gpu.features?.has?.(feature));
+      }
+
       function emitProgress(event) {
         if (!PROGRESS) return;
         console.log("__BG_PROGRESS__" + JSON.stringify(event));
+      }
+
+      function filterCaseSpecs(specs) {
+        if (CASE_FILTERS.length === 0) return specs;
+        const filtered = specs.filter((spec) => CASE_FILTERS.some((filter) => spec.name === filter || spec.name.includes(filter)));
+        if (filtered.length === 0 && !shouldRunPreparedSmoke()) {
+          throw new Error("no CUDA-lite WebGPU e2e cases matched: " + CASE_FILTERS.join(","));
+        }
+        return filtered;
+      }
+
+      function filterExpectedCorpusFixtureNames() {
+        if (CASE_FILTERS.length === 0) return EXPECTED_CORPUS_FIXTURE_NAMES;
+        return EXPECTED_CORPUS_FIXTURE_NAMES.filter((name) => CASE_FILTERS.some((filter) => name === filter || name.includes(filter)));
+      }
+
+      function shouldRunPreparedSmoke() {
+        return CASE_FILTERS.length === 0 ||
+          CASE_FILTERS.some((filter) => "prepared-resident-saxpy" === filter || "prepared-resident-saxpy".includes(filter));
       }
 
       function caseSpecs() {
@@ -498,6 +940,46 @@ const html = String.raw`<!doctype html>
               scalars: { n: 2 },
             }),
             output: "x",
+          },
+          {
+            name: "runtime:host-dynamic-system-atomics",
+            source: SOURCES.dynamicSystemAtomicLaunch,
+            options: { kernelName: "parent", workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array([9, 2, 3]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [8, 7, 5] },
+          },
+          {
+            name: "runtime:host-dynamic-alias-atomic",
+            source: SOURCES.dynamicAliasAtomicLaunch,
+            options: { kernelName: "parent", workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array([4]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [5] },
+          },
+          {
+            name: "runtime:host-dynamic-conditional-alias-atomic",
+            source: SOURCES.dynamicConditionalAliasAtomicLaunch,
+            options: { kernelName: "parent", workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array([4]),
+              },
+              scalars: { use_out: 1 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [5] },
           },
           {
             name: "runtime:recursive-host-dynamic-launch",
@@ -603,6 +1085,23 @@ const html = String.raw`<!doctype html>
             output: "out",
           },
           {
+            name: "device-function:device-global-helper-rmw",
+            source: SOURCES.deviceGlobalAtomicRmw,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(11),
+              },
+              deviceGlobals: {
+                g_i: new Int32Array([10]),
+                g_f: new Float32Array([4]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [10, 8, 5, 9, 0, 10, 4, 2.5, 2, 9, 5] },
+          },
+          {
             name: "ptx:tile-carrier",
             source: SOURCES.ptxTileCarrier,
             options: { workgroupSize: [1, 1, 1] },
@@ -613,6 +1112,403 @@ const html = String.raw`<!doctype html>
               },
             }),
             output: "out",
+          },
+          {
+            name: "ptx:mma-f32-carrier",
+            source: SOURCES.ptxMmaF32Carrier,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(2),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0x40b00000, 0x40b00000] },
+          },
+          {
+            name: "ptx:local-half-carrier",
+            source: SOURCES.localHalfCarrier,
+            options: { workgroupSize: [1, 1, 1], features: { "shader-f16": true } },
+            requiredFeatures: ["shader-f16"],
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(3),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0x40003c00, 0x44004200, 0x41200000] },
+          },
+          {
+            name: "compat:half-f32-mode-scalar-uniform",
+            source: SOURCES.halfCompatF32Mode,
+            options: { workgroupSize: [1, 1, 1], f16Mode: "f32" },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(3),
+                x: new Float32Array([1.5]),
+                y: new Float32Array([3, 5]),
+              },
+              scalars: { a: 2 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [3.5, 4, 7] },
+          },
+          {
+            name: "compat:subgroup-scalar-mode",
+            source: SOURCES.subgroupScalarCompat,
+            options: { workgroupSize: [4, 1, 1], subgroupMode: "scalar" },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                x: new Float32Array([1, 2, 3, 4]),
+              },
+            }),
+            output: "x",
+            expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4] },
+          },
+          {
+            name: "compat:double-f32-mode-atomic",
+            source: SOURCES.doubleCompatF32Mode,
+            options: { workgroupSize: [2, 1, 1], f64Mode: "f32" },
+            launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+            input: () => ({
+              buffers: {
+                result: new Float32Array([0]),
+                out: new Float32Array(2),
+              },
+              scalars: { a: 1.5 },
+            }),
+            output: "result",
+            expectedOutput: { type: "Float32Array", data: [3] },
+          },
+          {
+            name: "storage:bool-pointer-alias",
+            source: SOURCES.boolPointerStorage,
+            options: { workgroupSize: [2, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+            input: () => ({
+              buffers: {
+                flags: new Uint32Array([1, 0, 1, 1]),
+                out: new Int32Array(2),
+              },
+            }),
+            output: "flags",
+            expectedOutput: { type: "Uint32Array", data: [1, 0, 0, 1] },
+          },
+          {
+            name: "atomic:alias-inc-dec",
+            source: SOURCES.aliasAtomicIncDec,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                scratch: new Float32Array([10, 0, 1]),
+                values: new Float32Array([1.5]),
+                out: new Uint32Array(2),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [1, 2] },
+          },
+          {
+            name: "atomic:shared-inc-dec",
+            source: SOURCES.sharedAtomicIncDec,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(2),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [1, 0] },
+          },
+          {
+            name: "atomic:helper-inc-dec",
+            source: SOURCES.helperAtomicIncDec,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([1]),
+                out: new Uint32Array(6),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [1, 2, 1, 1, 2, 1] },
+          },
+          {
+            name: "atomic:device-global-helper-inc-dec",
+            source: SOURCES.deviceGlobalAtomicIncDec,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(3),
+              },
+              deviceGlobals: {
+                gCounter: new Uint32Array([1]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [1, 2, 1] },
+          },
+          {
+            name: "atomic:assigned-pointer-rebind",
+            source: SOURCES.assignedPointerAtomic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([4]),
+                out: new Uint32Array(2),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [4, 5] },
+          },
+          {
+            name: "atomic:branch-assigned-pointer-rebind",
+            source: SOURCES.branchAssignedPointerAtomic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                left: new Uint32Array([4]),
+                right: new Uint32Array([8]),
+                out: new Uint32Array(1),
+              },
+              scalars: { pickRight: 1 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [8] },
+          },
+          {
+            name: "atomic:conditional-pointer-rebind",
+            source: SOURCES.conditionalPointerAtomic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                left: new Uint32Array([4]),
+                right: new Uint32Array([8]),
+                out: new Uint32Array(1),
+              },
+              scalars: { pickRight: 0 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [4] },
+          },
+          {
+            name: "atomic:chained-assignment-pointer-rebind",
+            source: SOURCES.chainedAssignmentPointerAtomic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([4]),
+                out: new Uint32Array(2),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [4, 5] },
+          },
+          {
+            name: "atomic:pointer-array-rebind",
+            source: SOURCES.pointerArrayAtomic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([4]),
+                untouched: new Uint32Array([8]),
+                out: new Uint32Array(3),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [4, 5, 8] },
+          },
+          {
+            name: "atomic:system-aliases",
+            source: SOURCES.systemAtomicAliases,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                x: new Int32Array([4, 7, 1, 9]),
+                out: new Int32Array(11),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [4, 6, 5, 5, 7, 6, 14, 1, 2, 9, 12] },
+          },
+          {
+            name: "atomic:system-float",
+            source: SOURCES.systemFloatAtomics,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                x: new Float32Array([2]),
+                out: new Float32Array(5),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [2, 3.5, 3, 2, 4] },
+          },
+          {
+            name: "atomic:helper-rmw",
+            source: SOURCES.helperAtomicRmw,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                xi: new Int32Array([10]),
+                xf: new Float32Array([4]),
+                out: new Float32Array(11),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [10, 8, 5, 9, 0, 10, 4, 2.5, 2, 9, 5] },
+          },
+          {
+            name: "atomic:helper-shared-rmw",
+            source: SOURCES.helperSharedAtomicRmw,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(11),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [10, 8, 5, 9, 0, 10, 4, 2.5, 2, 9, 5] },
+          },
+          {
+            name: "atomic:helper-exchange-cas",
+            source: SOURCES.helperAtomicExchangeCas,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                storage: new Uint32Array([2]),
+                out: new Uint32Array(6),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [3, 7, 2, 9, 7, 11] },
+          },
+          {
+            name: "surface:surf2d-read",
+            source: SOURCES.surfaceRead,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(2),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array([3, 9]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [9, 3] },
+          },
+          {
+            name: "surface:surf3d-write",
+            source: SOURCES.surfaceWrite3d,
+            options: { workgroupSize: [2, 2, 1] },
+            launch: { gridDim: [1, 1, 2], blockDim: [2, 2, 1] },
+            input: () => ({
+              buffers: {},
+              surfaces: {
+                outputSurf: { width: 2, height: 2, data: new Float32Array(8) },
+              },
+            }),
+            output: "outputSurf",
+            expectedOutput: { type: "Float32Array", data: [0, 1, 10, 11, 100, 101, 110, 111] },
+          },
+          {
+            name: "surface:driver-alias",
+            source: SOURCES.driverSurfaceAlias,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {},
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array([3, 9]) },
+              },
+            }),
+            output: "surf",
+            expectedOutput: { type: "Float32Array", data: [3, 13] },
+          },
+          {
+            name: "texture:fetch-lod-vector",
+            source: SOURCES.textureFetchLod,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                vecOut: new Float32Array(4),
+                scalarOut: new Float32Array(1),
+              },
+              textures: {
+                texRef: {
+                  width: 2,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+              },
+            }),
+            output: "vecOut",
+            expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4] },
+          },
+          {
+            name: "texture:atlas-helpers",
+            source: SOURCES.textureAtlasHelpers,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                vecOut: new Float32Array(4),
+                scalarOut: new Float32Array(4),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+            }),
+            output: "scalarOut",
+            expectedOutput: { type: "Float32Array", data: [5, 33, 41, 21] },
+          },
+          {
+            name: "texture:uchar4-read",
+            source: SOURCES.textureUchar4,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+              textures: {
+                texRef: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([1, 2, 3, 255]),
+                },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [1, 2, 3, 255] },
           },
           {
             name: "intrinsic:reciprocal",
@@ -654,6 +1550,7 @@ const html = String.raw`<!doctype html>
             input: (compiled) => syntheticInputForCompiled(compiled),
             corpusId: fixture.corpusId,
             verifyMode: fixture.verifyMode,
+            requiredFeatures: fixture.requiredFeatures,
           });
         }
         return cases;
@@ -721,7 +1618,7 @@ const html = String.raw`<!doctype html>
             if (param.valueType === "devicepool") {
               memoryPools[param.name] = { data: new Uint32Array(4096), offset: new Uint32Array([0]) };
             } else {
-              buffers[param.name] = syntheticBufferForType(param.valueType);
+              buffers[param.name] = syntheticBufferForType(param.valueType, 4096, compiled.f16Mode);
             }
           } else {
             scalars[param.name] = syntheticScalarForName(param.name);
@@ -730,13 +1627,13 @@ const html = String.raw`<!doctype html>
         for (const constant of compiled.ir.constants) {
           constants[constant.name] = constant.dimensions.length === 0 && !isCudaVectorTypeName(constant.valueType)
             ? syntheticScalarForName(constant.name)
-            : syntheticBufferForType(constant.valueType);
+            : syntheticBufferForType(constant.valueType, 4096, compiled.f16Mode);
         }
         for (const global of compiled.ir.deviceGlobals) {
           const length = global.dimensions.length === 0
             ? 1
             : global.dimensions.reduce((product, dimension) => product * dimension, 1);
-          deviceGlobals[global.name] = syntheticBufferForType(global.valueType, length);
+          deviceGlobals[global.name] = syntheticBufferForType(global.valueType, length, compiled.f16Mode);
         }
         for (const texture of compiled.ir.textures) {
           textures[texture.name] = { width: 64, height: 64, data: new Float32Array(64 * 64) };
@@ -747,9 +1644,10 @@ const html = String.raw`<!doctype html>
         return { buffers, scalars, constants, deviceGlobals, memoryPools, textures, surfaces };
       }
 
-      function syntheticBufferForType(type, length = 4096) {
+      function syntheticBufferForType(type, length = 4096, f16Mode = "native") {
         if (type === "int") return new Int32Array(length);
         if (type === "uint" || type === "voidptr" || type === "bool") return new Uint32Array(length);
+        if ((type === "half" || type === "half2") && f16Mode !== "f32") return createWgslFloat16Array(length);
         return new Float32Array(length);
       }
 
@@ -791,12 +1689,22 @@ const html = String.raw`<!doctype html>
           await runCompiledKernelWebGpu(device, compiled, actualInput, spec.launch);
           return { ok: true, plan: plan.kind, maxAbsDiff: 0, output: "dispatch" };
         }
+        const actual = await runCompiledKernelWebGpu(device, compiled, actualInput, spec.launch);
+        const outputNames = spec.output === undefined ? Object.keys(actual.buffers) : [spec.output];
+        if (spec.expectedOutput !== undefined) {
+          const comparison = compareOutputs({ buffers: {} }, actual, outputNames, spec);
+          if (comparison.ok && spec.offsetOutput) {
+            const offset = actual.buffers[spec.offsetOutput]?.[0];
+            if (offset !== spec.expectedOffset) {
+              return { ok: false, plan: plan.kind, maxAbsDiff: Math.abs(Number(offset ?? NaN) - spec.expectedOffset) };
+            }
+          }
+          return { ...comparison, plan: plan.kind, output: outputNames.join(",") };
+        }
         const expectedInput = spec.offsetOutput && actualInput.readback
           ? { ...actualInput, readback: actualInput.readback.filter((name) => name !== spec.offsetOutput) }
           : actualInput;
         const expected = runCompiledKernelReference(compiled, expectedInput, spec.launch);
-        const actual = await runCompiledKernelWebGpu(device, compiled, actualInput, spec.launch);
-        const outputNames = spec.output === undefined ? Object.keys(expected.buffers) : [spec.output];
         const referenceComparison = compareOutputs(expected, expected, outputNames, spec);
         if (!referenceComparison.ok) return { ...referenceComparison, plan: "reference-output-mismatch" };
         const comparison = compareOutputs(expected, actual, outputNames, spec);
@@ -965,14 +1873,15 @@ try {
   if (requireWebGpu && !report.available) {
     throw new Error(`WebGPU unavailable: ${report.reason ?? "unknown"}`);
   }
-  if (report.available && requireCorpusFixtures && (report.missingCorpusFixtureNames?.length ?? 0) > 0) {
+  const filteredRun = caseFilters.length > 0;
+  if (report.available && requireCorpusFixtures && !filteredRun && (report.missingCorpusFixtureNames?.length ?? 0) > 0) {
     throw new Error(`Missing corpus execution fixtures from /tmp corpora: ${report.missingCorpusFixtureNames.join(", ")}`);
   }
-  if (report.available && requireCorpusFixtures) {
+  if (report.available && requireCorpusFixtures && !filteredRun) {
     validateCorpusFixtureBaseline(report);
   }
-  if (report.available && autoCorpusSmokeLimit > 0 && (report.autoCorpusSmokePassed ?? 0) < autoCorpusSmokeLimit) {
-    throw new Error(`Auto corpus smoke baseline failed: ${report.autoCorpusSmokePassed ?? 0}/${autoCorpusSmokeLimit} passed`);
+  if (report.available && autoCorpusSmokeLimit > 0 && !filteredRun && (report.autoCorpusSmokeCovered ?? report.autoCorpusSmokePassed ?? 0) < autoCorpusSmokeLimit) {
+    throw new Error(`Auto corpus smoke baseline failed: ${report.autoCorpusSmokeCovered ?? report.autoCorpusSmokePassed ?? 0}/${autoCorpusSmokeLimit} covered`);
   }
   if (report.available && report.failed > 0) {
     throw new Error(`CUDA-lite WebGPU e2e failed ${report.failed} case(s)`);
