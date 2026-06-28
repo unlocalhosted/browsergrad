@@ -5779,9 +5779,7 @@ function shouldCastDirectAssignment(
   const rightType = expressionValueTypeForEmit(right, context);
   if (rightType === undefined || rightType === leftType) return false;
   if ((leftType === "uint" || leftType === "int") && right.kind === "number" && !numberLiteralHasFloatSyntax(right.raw)) return false;
-  if ((leftType === "uint" || leftType === "int") && (rightType === "uint" || rightType === "int")) return true;
-  return (leftType === "float" || leftType === "double" || leftType === "bf16" || leftType === "half") &&
-    (rightType === "int" || rightType === "uint");
+  return true;
 }
 
 function emitScalarCompoundAssignment(

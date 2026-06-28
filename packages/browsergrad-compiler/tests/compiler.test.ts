@@ -3773,6 +3773,24 @@ __global__ void signedness(uint *out, int *signedOut, int n) {
     expect([...result.buffers.signedOut as Int32Array]).toEqual([0, 1]);
   });
 
+  it("casts float expressions stored into unsigned buffers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void floatToUint(const float *src, uint *out) {
+  int idx = threadIdx.x;
+  if (idx < 2) {
+    out[idx] = src[idx] * 255.0f;
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { src: new Float32Array([0.5, 2]), out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("out[idx] = u32((src[idx] * 255.0))");
+    expect([...result.buffers.out as Uint32Array]).toEqual([127, 510]);
+  });
+
   it("bitcasts scalar typed views over integer shared backing storage", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void sharedOverlay(float *out) {
