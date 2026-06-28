@@ -2798,6 +2798,9 @@ function emitExpressionStatement(expression: CudaLiteExpression, context: EmitCo
   if (expression.kind === "call" && isAtomicCasCallName(expressionName(expression.callee))) {
     return source.replace(/\.old_value$/u, "");
   }
+  if (expression.kind === "call" && isAtomicExchangeCallName(expressionName(expression.callee))) {
+    return source.replace(/^bitcast<f32>\((atomicExchange\(.*\))\)$/u, "$1");
+  }
   return source;
 }
 
@@ -2823,6 +2826,10 @@ function emitNumberLiteral(raw: string): string {
 
 function isAtomicCasCallName(name: string | undefined): boolean {
   return name === "atomicCAS" || name === "atomicCAS_system";
+}
+
+function isAtomicExchangeCallName(name: string | undefined): boolean {
+  return name === "atomicExch" || name === "atomicExch_system";
 }
 
 function emitForLoopWithContinuing(

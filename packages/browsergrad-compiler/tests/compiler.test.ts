@@ -7102,6 +7102,16 @@ __global__ void atomic_exchange(float* x, float* out) {
     expect([...result.buffers.out as Float32Array]).toEqual([2.5]);
   });
 
+  it("drops unused CUDA float atomicExch return values as valid WGSL statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void atomic_exchange_statement(float* x) {
+  if (threadIdx.x < 1) { atomicExch(&x[0], 7.5f); }
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("atomicExchange(&x[0], bitcast<u32>(7.5));");
+    expect(compiled.wgsl).not.toContain("bitcast<f32>(atomicExchange(&x[0], bitcast<u32>(7.5)));");
+  });
+
   it("supports CUDA system-scope float atomics through CAS-backed WGSL helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomic_float_system(float* x, float* out) {
