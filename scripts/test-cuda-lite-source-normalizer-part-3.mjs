@@ -613,6 +613,47 @@ __device__ float pick(float x, float y) {
 }
 
 {
+  const recursiveTemplateSource = `
+#define KERNEL_RADIUS 8
+__constant__ float c_Kernel[17];
+template <int i> __device__ float convolutionRow(float x, float y, cudaTextureObject_t texSrc)
+{
+    return tex2D<float>(texSrc, x + (float)(KERNEL_RADIUS - i), y) * c_Kernel[i] + convolutionRow<i - 1>(x, y, texSrc);
+}
+template <> __device__ float convolutionRow<-1>(float x, float y, cudaTextureObject_t texSrc) { return 0; }
+template <int i> __device__ float convolutionColumn(float x, float y, cudaTextureObject_t texSrc)
+{
+    return tex2D<float>(texSrc, x, y + (float)(KERNEL_RADIUS - i)) * c_Kernel[i] + convolutionColumn<i - 1>(x, y, texSrc);
+}
+template <> __device__ float convolutionColumn<-1>(float x, float y, cudaTextureObject_t texSrc) { return 0; }
+__global__ void convolutionTexture(float *out, cudaTextureObject_t texSrc) {
+  out[0] = convolutionRow<2 * KERNEL_RADIUS>(1.5f, 2.5f, texSrc) + convolutionColumn<2 * KERNEL_RADIUS>(1.5f, 2.5f, texSrc);
+}`;
+  const source = createKernelCompilationUnit({
+    kernel: /__global__ void convolutionTexture[\s\S]*$/u.exec(recursiveTemplateSource)?.[0],
+    definesByName: collectCudaLiteContextDefines(recursiveTemplateSource),
+    constantDeclarations: ["__constant__ float c_Kernel[17];"],
+    deviceFunctions: [
+      {
+        name: "convolutionRow",
+        source: /template <int i> __device__ float convolutionRow[\s\S]*?^\}/mu.exec(recursiveTemplateSource)?.[0],
+      },
+      {
+        name: "convolutionColumn",
+        source: /template <int i> __device__ float convolutionColumn[\s\S]*?^\}/mu.exec(recursiveTemplateSource)?.[0],
+      },
+    ],
+  });
+  assert.match(source, /float bg_recursive_template_sum = 0\.0f;/u);
+  assert.match(source, /for \(int i = 0; i <= 16; \+\+i\)/u);
+  assert.match(source, /tex2D<float>\(texSrc, x \+ \(float\)\(8 - i\), y\) \* c_Kernel\[i\]/u);
+  assert.match(source, /tex2D<float>\(texSrc, x, y \+ \(float\)\(8 - i\)\) \* c_Kernel\[i\]/u);
+  assert.doesNotMatch(source, /convolutionRow<i - 1>/u);
+  assert.doesNotMatch(source, /convolutionColumn<i - 1>/u);
+  assert.doesNotMatch(source, /\btemplate\s*</u);
+}
+
+{
   const source = createKernelCompilationUnit({
     kernel: `
 typedef struct {

@@ -13,6 +13,7 @@ const mergeDefineMaps = (...args) => requireNormalizerHelpers().mergeDefineMaps(
 const normalizeConstexprIntegerExpression = (...args) => requireNormalizerHelpers().normalizeConstexprIntegerExpression(...args);
 const normalizeTemplateTypeArgument = (...args) => requireNormalizerHelpers().normalizeTemplateTypeArgument(...args);
 const resolveTemplateDefineValue = (...args) => requireNormalizerHelpers().resolveTemplateDefineValue(...args);
+const skipWhitespace = (...args) => requireNormalizerHelpers().skipWhitespace(...args);
 const splitTopLevel = (...args) => requireNormalizerHelpers().splitTopLevel(...args);
 const substituteTemplateTypes = (...args) => requireNormalizerHelpers().substituteTemplateTypes(...args);
 const templateHeaders = (...args) => requireNormalizerHelpers().templateHeaders(...args);
@@ -26,6 +27,8 @@ export function specializeTemplateFromLaunchContext(source, templateArgumentsByK
 }
 
 export function specializeDeviceFunctionFromCallContext(source, args, definesByName = new Map()) {
+  const recursive = specializeRecursiveDecrementDeviceFunction(source, args, definesByName);
+  if (recursive !== undefined) return recursive;
   const defaults = templateHeaderDefaultArguments(source, definesByName);
   if ((args === undefined || args.length === 0) && defaults.length === 0) return rewriteFirstTemplateHeader(source, [], definesByName);
   const merged = defaults.map((value, index) => args?.[index] ?? value);
@@ -33,6 +36,72 @@ export function specializeDeviceFunctionFromCallContext(source, args, definesByN
     for (let index = 0; index < args.length; index++) merged[index] = args[index];
   }
   return rewriteFirstTemplateHeader(source, merged, definesByName);
+}
+
+function specializeRecursiveDecrementDeviceFunction(source, args, definesByName = new Map()) {
+  const templateStart = source.search(/\btemplate\s*</u);
+  if (templateStart < 0) return undefined;
+  const open = source.indexOf("<", templateStart);
+  const close = findBalanced(source, open, "<", ">");
+  if (close === undefined) return undefined;
+  const parsedParams = splitTopLevel(source.slice(open + 1, close)).map(parseTemplateParam);
+  if (parsedParams.length !== 1 || parsedParams[0]?.kind !== "value") return undefined;
+  const templateParam = parsedParams[0];
+  const signatureStart = skipWhitespace(source, close + 1);
+  const bodyOpen = source.indexOf("{", signatureStart);
+  if (bodyOpen < 0) return undefined;
+  const bodyClose = findBalanced(source, bodyOpen, "{", "}");
+  if (bodyClose === undefined) return undefined;
+  const signature = source.slice(signatureStart, bodyOpen).trimEnd();
+  const name = deviceFunctionNameFromSignature(signature);
+  if (name === undefined) return undefined;
+  const body = source.slice(bodyOpen + 1, bodyClose).trim();
+  const returnMatch = /^return\s+([\s\S]*);$/u.exec(body);
+  if (returnMatch?.[1] === undefined) return undefined;
+  const term = recursiveDecrementTerm(returnMatch[1], name, templateParam.name);
+  if (term === undefined) return undefined;
+  const max = recursiveTemplateMax(args?.[0] ?? templateParamDefaultValue(templateParam), definesByName);
+  if (max === undefined || max < 0 || max > 1024) return undefined;
+  return [
+    `${signature} {`,
+    "  float bg_recursive_template_sum = 0.0f;",
+    `  for (int ${templateParam.name} = 0; ${templateParam.name} <= ${max}; ++${templateParam.name}) {`,
+    `    bg_recursive_template_sum += ${term};`,
+    "  }",
+    "  return bg_recursive_template_sum;",
+    "}",
+  ].join("\n");
+}
+
+function deviceFunctionNameFromSignature(signature) {
+  const cleaned = signature
+    .replace(/\b(?:static|inline|__inline__|__forceinline__|__host__|__device__)\b/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return /\b(?:[A-Za-z_][A-Za-z0-9_:<>]*\s+)+([A-Za-z_][A-Za-z0-9_]*)\s*\(/u.exec(cleaned)?.[1];
+}
+
+function recursiveDecrementTerm(expression, name, templateParamName) {
+  const call = new RegExp(`\\b${escapeRegExp(name)}\\s*<\\s*${escapeRegExp(templateParamName)}\\s*-\\s*1\\s*>\\s*\\(`, "u").exec(expression);
+  if (call?.index === undefined) return undefined;
+  const parenStart = expression.indexOf("(", call.index);
+  const parenEnd = findBalanced(expression, parenStart, "(", ")");
+  if (parenStart < 0 || parenEnd === undefined) return undefined;
+  const before = expression.slice(0, call.index).trimEnd();
+  const after = expression.slice(parenEnd + 1).trimStart();
+  if (before.endsWith("+")) return before.slice(0, -1).trimEnd();
+  if (after.startsWith("+")) return after.slice(1).trimStart();
+  return undefined;
+}
+
+function recursiveTemplateMax(rawArg, definesByName = new Map()) {
+  if (rawArg === undefined) return undefined;
+  const env = mergeDefineMaps(definesByName, numericTemplateDefines(definesByName));
+  const resolved = resolveTemplateDefineValue(rawArg, env);
+  const evaluated = evaluateTemplateIntegerExpression(resolved, env) ?? normalizeTemplateValueArgument(resolved, "int");
+  if (evaluated === undefined) return undefined;
+  const value = Number(evaluated);
+  return Number.isInteger(value) ? value : undefined;
 }
 
 function rewriteFirstTemplateHeader(source, args, definesByName = new Map()) {
