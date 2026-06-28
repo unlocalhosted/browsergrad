@@ -3,6 +3,7 @@ import {
   type CudaLiteAnalysis,
   type CudaLiteAnalyzeOptions,
   type CudaLiteAssignmentExpression,
+  type CudaLiteCooperativeGroupDecl,
   type CudaLiteCooperativeGroupKind,
   type CudaLiteDeviceFunction,
   type CudaLiteDeviceGlobal,
@@ -496,11 +497,11 @@ export function analyzeCudaLite(
       validateF64Type(param.valueType, param.span, diagnostics, options);
     }
     walkStatements(fn.body, functionScope, 0, 0, 0, functionDeclaredNames);
-    validateDivergentReturnsBeforeBarriers(fn.body, new Map(fn.params.map((param) => [param.name, param])), diagnostics);
+    validateDivergentReturnsBeforeBarriers(fn.body, new Map(fn.params.map((param) => [param.name, param])), diagnostics, options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE);
   }
 
   walkStatements(kernel.body, rootScope, 0, 0, 0, declaredNames);
-  validateDivergentReturnsBeforeBarriers(kernel.body, params, diagnostics);
+  validateDivergentReturnsBeforeBarriers(kernel.body, params, diagnostics, options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE);
   markExactAtomicPointerUsage(ast, kernel, options, atomicParams, atomicShared, atomicDeviceGlobals);
 
   if (options.f16Mode === "f32") {
@@ -3842,7 +3843,9 @@ function validateDivergentReturnsBeforeBarriers(
   statements: readonly CudaLiteStatement[],
   params: ReadonlyMap<string, CudaLiteParam>,
   diagnostics: CudaLiteDiagnostic[],
+  workgroupSize: readonly [number, number, number],
 ): void {
+  const uniformity = collectBarrierUniformity(statements, params, workgroupSize);
   const visitBlock = (
     body: readonly CudaLiteStatement[],
     divergentDepth: number,
@@ -3871,7 +3874,7 @@ function validateDivergentReturnsBeforeBarriers(
         return { containsBarrier: isBarrierCall(statement.expression) };
       case "return":
         if (divergentDepth > 0 && barrierLater) {
-          diagnostics.push(error(
+          diagnostics.push(warning(
             "divergent-return-before-barrier",
             "thread-dependent return before a later barrier would make WGSL barrier control flow non-uniform",
             statement.span,
@@ -3879,21 +3882,21 @@ function validateDivergentReturnsBeforeBarriers(
         }
         return { containsBarrier: false };
       case "if": {
-        const nestedDivergentDepth = divergentDepth + (expressionMayBeNonUniformBeforeBarrier(statement.condition, params) ? 1 : 0);
+        const nestedDivergentDepth = divergentDepth + (expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity) ? 1 : 0);
         const consequentHasBarrier = visitBlock(statement.consequent, nestedDivergentDepth, barrierLater);
         const alternateHasBarrier = statement.alternate ? visitBlock(statement.alternate, nestedDivergentDepth, barrierLater) : false;
         return { containsBarrier: consequentHasBarrier || alternateHasBarrier };
       }
       case "for": {
-        const nestedDivergentDepth = divergentDepth + (statement.condition && expressionMayBeNonUniformBeforeBarrier(statement.condition, params) ? 1 : 0);
+        const nestedDivergentDepth = divergentDepth + (statement.condition && expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity) ? 1 : 0);
         return { containsBarrier: visitBlock(statement.body, nestedDivergentDepth, barrierLater) };
       }
       case "while": {
-        const nestedDivergentDepth = divergentDepth + (expressionMayBeNonUniformBeforeBarrier(statement.condition, params) ? 1 : 0);
+        const nestedDivergentDepth = divergentDepth + (expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity) ? 1 : 0);
         return { containsBarrier: visitBlock(statement.body, nestedDivergentDepth, barrierLater) };
       }
       case "do-while": {
-        const nestedDivergentDepth = divergentDepth + (expressionMayBeNonUniformBeforeBarrier(statement.condition, params) ? 1 : 0);
+        const nestedDivergentDepth = divergentDepth + (expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity) ? 1 : 0);
         return { containsBarrier: visitBlock(statement.body, nestedDivergentDepth, barrierLater) };
       }
       default:
@@ -3904,14 +3907,66 @@ function validateDivergentReturnsBeforeBarriers(
   visitBlock(statements, 0);
 }
 
+interface BarrierUniformityContext {
+  readonly params: ReadonlyMap<string, CudaLiteParam>;
+  readonly locals: ReadonlyMap<string, boolean>;
+  readonly cooperativeGroups: ReadonlyMap<string, CudaLiteCooperativeGroupDecl>;
+  readonly workgroupSize: readonly [number, number, number];
+}
+
+function collectBarrierUniformity(
+  statements: readonly CudaLiteStatement[],
+  params: ReadonlyMap<string, CudaLiteParam>,
+  workgroupSize: readonly [number, number, number],
+): BarrierUniformityContext {
+  const locals = new Map<string, boolean>();
+  const cooperativeGroups = new Map<string, CudaLiteCooperativeGroupDecl>();
+  const context: BarrierUniformityContext = { params, locals, cooperativeGroups, workgroupSize };
+  const visitStatements = (body: readonly CudaLiteStatement[]): void => {
+    for (const statement of body) {
+      if (statement.kind === "var") {
+        locals.set(statement.name, statement.init ? expressionMayBeNonUniformBeforeBarrier(statement.init, context) : true);
+      } else if (statement.kind === "dim3") {
+        locals.set(statement.name, statement.args.some((arg) => expressionMayBeNonUniformBeforeBarrier(arg, context)));
+      } else if (statement.kind === "cooperative-group") {
+        cooperativeGroups.set(statement.name, statement);
+      } else if (statement.kind === "expr" && statement.expression.kind === "assignment" && statement.expression.left.kind === "identifier") {
+        locals.set(statement.expression.left.name, expressionMayBeNonUniformBeforeBarrier(statement.expression.right, context));
+      }
+      if (statement.kind === "block" || statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while") visitStatements(statement.body);
+      if (statement.kind === "if") {
+        visitStatements(statement.consequent);
+        if (statement.alternate) visitStatements(statement.alternate);
+      }
+    }
+  };
+  visitStatements(statements);
+  return context;
+}
+
 function expressionMayBeNonUniformBeforeBarrier(
   expression: CudaLiteExpression,
-  params: ReadonlyMap<string, CudaLiteParam>,
+  context: BarrierUniformityContext,
 ): boolean {
-  if (expressionIsDivergent(expression, params)) return true;
+  if (expressionIsDivergent(expression, context.params)) return true;
   if (expression.kind === "identifier") {
-    const param = params.get(expression.name);
-    return param === undefined || param.pointer;
+    const param = context.params.get(expression.name);
+    if (param) return param.pointer;
+    if (context.locals.has(expression.name)) return context.locals.get(expression.name) ?? true;
+    return !BUILTIN_VECTORS.has(expression.name);
+  }
+  if (expression.kind === "call") {
+    const callee = expression.callee;
+    if (callee.kind === "member" && callee.object.kind === "identifier") {
+      const group = context.cooperativeGroups.get(callee.object.name);
+      if (group) {
+        const argsNonUniform = expression.args.some((arg) => expressionMayBeNonUniformBeforeBarrier(arg, context));
+        if (argsNonUniform) return true;
+        if (callee.property === "meta_group_size" || callee.property === "size") return false;
+        if (callee.property === "meta_group_rank") return cooperativeGroupMetaRankMayBeNonUniform(group, context.workgroupSize);
+        if (callee.property === "thread_rank") return true;
+      }
+    }
   }
   if (expression.kind === "member" && expression.object.kind === "identifier") {
     const name = expression.object.name;
@@ -3919,9 +3974,19 @@ function expressionMayBeNonUniformBeforeBarrier(
   }
   let nonUniform = false;
   forEachExpressionChild(expression, (child) => {
-    if (expressionMayBeNonUniformBeforeBarrier(child, params)) nonUniform = true;
+    if (expressionMayBeNonUniformBeforeBarrier(child, context)) nonUniform = true;
   });
   return nonUniform;
+}
+
+function cooperativeGroupMetaRankMayBeNonUniform(
+  group: CudaLiteCooperativeGroupDecl,
+  workgroupSize: readonly [number, number, number],
+): boolean {
+  if (group.groupKind !== "tile") return false;
+  const tileSize = group.tileSize ?? 32;
+  const blockSize = workgroupSize[0] * workgroupSize[1] * workgroupSize[2];
+  return blockSize > tileSize;
 }
 
 function forEachExpressionChild(

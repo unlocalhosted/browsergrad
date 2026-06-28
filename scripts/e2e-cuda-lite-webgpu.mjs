@@ -710,6 +710,7 @@ const html = String.raw`<!doctype html>
               name: spec.name,
               plan: result.plan,
               ok: result.ok,
+              ...(result.skipped ? { skipped: true } : {}),
               maxAbsDiff: result.maxAbsDiff,
               ...(spec.tolerance === undefined ? {} : { tolerance: spec.tolerance }),
               ...(result.firstDiff === undefined ? {} : { firstDiff: result.firstDiff }),
@@ -1685,6 +1686,16 @@ const html = String.raw`<!doctype html>
         if (!plan.supported) {
           return { ok: false, plan: plan.reason, maxAbsDiff: Number.POSITIVE_INFINITY };
         }
+        const resourceLimitBlocker = webGpuResourceLimitBlocker(device.gpu.limits, plan);
+        if (resourceLimitBlocker) {
+          return {
+            ok: true,
+            skipped: true,
+            plan: "skipped:resource-limits:" + resourceLimitBlocker,
+            maxAbsDiff: 0,
+            output: spec.verifyMode === "dispatch" ? "dispatch" : spec.output,
+          };
+        }
         if (spec.verifyMode === "dispatch") {
           await runCompiledKernelWebGpu(device, compiled, actualInput, spec.launch);
           return { ok: true, plan: plan.kind, maxAbsDiff: 0, output: "dispatch" };
@@ -1768,6 +1779,25 @@ const html = String.raw`<!doctype html>
           destroyWgslStorageBuffer(x);
           destroyWgslStorageBuffer(y);
         }
+      }
+
+      function webGpuResourceLimitBlocker(limits, plan) {
+        for (const step of plan.steps ?? []) {
+          const bindings = step.program?.bindings ?? [];
+          const storageCount = bindings.filter((binding) => binding.kind === "storage").length;
+          const uniformCount = bindings.filter((binding) => binding.kind === "uniform").length;
+          const textureCount = bindings.filter((binding) => binding.kind === "texture2d").length;
+          if (storageCount > limits.maxStorageBuffersPerShaderStage) {
+            return "storage-buffers:" + storageCount + ">" + limits.maxStorageBuffersPerShaderStage;
+          }
+          if (uniformCount > limits.maxUniformBuffersPerShaderStage) {
+            return "uniform-buffers:" + uniformCount + ">" + limits.maxUniformBuffersPerShaderStage;
+          }
+          if (textureCount > limits.maxSampledTexturesPerShaderStage) {
+            return "sampled-textures:" + textureCount + ">" + limits.maxSampledTexturesPerShaderStage;
+          }
+        }
+        return undefined;
       }
 
       function compareArrays(expected, actual, tolerance = 1e-5) {

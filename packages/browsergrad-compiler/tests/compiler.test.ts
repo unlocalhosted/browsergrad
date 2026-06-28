@@ -1083,6 +1083,14 @@ __global__ void bad(float* x, int n) {
 }`);
     const divergentReturnAnalysis = analyzeCudaLite(divergentReturnBeforeBarrier);
     expect(divergentReturnAnalysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(divergentReturnAnalysis.diagnostics.find((diagnostic) => diagnostic.code === "divergent-return-before-barrier")?.severity).toBe("warning");
+    expect(() => compileCudaLiteKernel(`
+__global__ void warnOnly(float* x, int n) {
+  int idx = threadIdx.x;
+  if (idx >= n) return;
+  __syncthreads();
+  x[idx] = 1.0;
+}`, { workgroupSize: [2, 1, 1] })).not.toThrow();
   });
 
   it("hardens symbol and array validation", () => {
