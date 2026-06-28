@@ -2249,6 +2249,14 @@ function emitPackedHalfStorageWrite(
   return `${access} = ${emitU32AsStorageCarrier(packed, storageType)}`;
 }
 
+function emitBf162PackExpression(value: string): string {
+  return `((bitcast<u32>(${value}.x) >> 16u) | (bitcast<u32>(${value}.y) & 0xffff0000u))`;
+}
+
+function emitBf162UnpackExpression(bits: string): string {
+  return `vec2<f32>(bitcast<f32>((${bits} & 0x0000ffffu) << 16u), bitcast<f32>(${bits} & 0xffff0000u))`;
+}
+
 function isPackableHalfCarrier(storageType: CudaLiteScalarType): boolean {
   return wgslElementByteSize(storageType) === 4 && !isCudaVectorType(storageType) && storageType !== "bool";
 }
@@ -4344,6 +4352,8 @@ function localArrayForStorageView(name: string, span: SourceSpan | undefined, co
 }
 
 function emitDeref(expression: CudaLiteExpression, context: EmitContext): string {
+  const localBitReinterpret = emitLocalBitReinterpretDeref(expression, context);
+  if (localBitReinterpret) return localBitReinterpret;
   const localPointer = localPointerArrayLocalAccess(expression, context);
   if (localPointer) return localPointer;
   if (expression.kind === "identifier") {
@@ -4401,6 +4411,25 @@ function emitDeref(expression: CudaLiteExpression, context: EmitContext): string
     return `${pointerReadHelperName(valueType)}(${parts.buffer}, ${parts.base})`;
   }
   return `*${emitExpression(expression, context)}`;
+}
+
+function emitLocalBitReinterpretDeref(expression: CudaLiteExpression, context: EmitContext): string | undefined {
+  if (expression.kind !== "cast" || !expression.pointer) return undefined;
+  const inner = expression.expression;
+  if (inner.kind !== "unary" || inner.operator !== "&" || inner.argument.kind !== "identifier") return undefined;
+  const sourceName = inner.argument.name;
+  const sourceType = context.localValueTypeFor(sourceName);
+  if (sourceType === undefined) return undefined;
+  const source = context.nameFor(sourceName);
+  if ((expression.valueType === "uint" || expression.valueType === "int") && sourceType === "bf162") {
+    const packed = emitBf162PackExpression(source);
+    return expression.valueType === "uint" ? packed : `bitcast<i32>(${packed})`;
+  }
+  if (expression.valueType === "bf162" && (sourceType === "uint" || sourceType === "int")) {
+    const bits = sourceType === "uint" ? source : `bitcast<u32>(${source})`;
+    return emitBf162UnpackExpression(bits);
+  }
+  return undefined;
 }
 
 function localPointerArrayLocalAccess(expression: CudaLiteExpression, context: EmitContext): string | undefined {
@@ -5588,6 +5617,8 @@ function emitAtomicTarget(
 ): AtomicTargetInfo | undefined {
   if (!target) return undefined;
   if (target.kind === "cast" && target.pointer) {
+    const vectorStorage = emitAtomicVectorStorageViewCastTarget(target, context);
+    if (vectorStorage) return vectorStorage;
     const inner = emitAtomicTarget(target.expression, context);
     return inner ? { ...inner, valueType: target.valueType } : undefined;
   }
@@ -5635,6 +5666,52 @@ function emitAtomicTarget(
       storageValueType: info.valueType,
       storageScalar: info.storageScalar,
       addressSpace: info.addressSpace,
+    };
+  }
+  return undefined;
+}
+
+function emitAtomicVectorStorageViewCastTarget(
+  target: Extract<CudaLiteExpression, { kind: "cast" }>,
+  context: EmitContext,
+): AtomicTargetInfo | undefined {
+  if (!target.pointer || target.expression.kind !== "unary" || target.expression.operator !== "&") return undefined;
+  if (target.valueType !== "uint" && target.valueType !== "int") return undefined;
+  const address = target.expression.argument;
+  if (address.kind !== "index") return undefined;
+  const view = storageViewForPointerExpression(address.target, address.index, context);
+  if (!view || !isCudaVectorType(view.valueType)) return undefined;
+  const param = context.paramFor(view.rootName);
+  if (param?.pointer && context.ir.atomicParams.includes(param.name) && wgslElementByteSize(view.valueType) === wgslElementByteSize(param.valueType)) {
+    return {
+      address: `&${context.nameFor(param.name)}[${view.index}]`,
+      rootName: param.name,
+      valueType: target.valueType,
+      storageValueType: param.valueType,
+      storageScalar: param.valueType === "int" ? "i32" : "u32",
+      addressSpace: "storage",
+    };
+  }
+  const shared = sharedDeclarationFor(view.rootName, context);
+  if (shared && context.isAtomicShared(shared.name) && wgslElementByteSize(view.valueType) === wgslElementByteSize(shared.valueType)) {
+    return {
+      address: `&${emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, view.index)}`,
+      rootName: shared.name,
+      valueType: target.valueType,
+      storageValueType: shared.valueType,
+      storageScalar: shared.valueType === "int" ? "i32" : "u32",
+      addressSpace: "workgroup",
+    };
+  }
+  const global = context.deviceGlobalFor(view.rootName);
+  if (global && context.ir.atomicDeviceGlobals.includes(global.name) && wgslElementByteSize(view.valueType) === wgslElementByteSize(global.valueType)) {
+    return {
+      address: `&${context.nameFor(global.name)}[${view.index}]`,
+      rootName: global.name,
+      valueType: target.valueType,
+      storageValueType: global.valueType,
+      storageScalar: global.valueType === "int" ? "i32" : "u32",
+      addressSpace: "storage",
     };
   }
   return undefined;

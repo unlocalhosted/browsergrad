@@ -6933,6 +6933,23 @@ __global__ void bf16_cache_hint(const __nv_bfloat16* input, __nv_bfloat16* outpu
     expect([...result.buffers.output as Float32Array]).toEqual([2.5, 3.5]);
   });
 
+  it("packs bf16x2 local reinterpret bits for atomic CAS operands", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__global__ void bf162_bits(float* data, unsigned int* out) {
+  __nv_bfloat162* packed = reinterpret_cast<__nv_bfloat162*>(data);
+  __nv_bfloat162 current = packed[0];
+  __nv_bfloat162 next = current + __halves2bfloat162((__nv_bfloat16)1.0f, (__nv_bfloat16)2.0f);
+  unsigned int currentBits = *reinterpret_cast<unsigned int*>(&current);
+  unsigned int nextBits = *reinterpret_cast<unsigned int*>(&next);
+  out[0] = atomicCAS((unsigned int*)&packed[0], currentBits, nextBits);
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("bitcast<u32>(current.x) >> 16u");
+    expect(compiled.wgsl).toContain("atomicCompareExchangeWeak(&data[");
+    expect(compiled.wgsl).not.toContain("*&current");
+    expect(compiled.wgsl).not.toContain("&vec2<f32>");
+  });
+
   it("passes nullable conditional storage pointers into device helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ void maybe_store(float* target, float* fallback, float value) {
