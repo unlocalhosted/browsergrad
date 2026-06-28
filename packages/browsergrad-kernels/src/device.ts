@@ -91,7 +91,20 @@ export async function createDevice(
     if (missingFeatures.length > 0) {
       throw new KernelError(`WebGPU adapter missing required features: ${missingFeatures.join(", ")}`);
     }
-    gpu = await adapter.requestDevice(requiredFeatures.length > 0 ? { requiredFeatures: [...requiredFeatures] } : undefined);
+    const requiredLimits = options.requiredLimits ? { ...options.requiredLimits } : undefined;
+    if (requiredLimits) {
+      for (const [name, value] of Object.entries(requiredLimits)) {
+        if (value === undefined) continue;
+        const supported = adapter.limits[name as keyof GPUSupportedLimits];
+        if (typeof supported === "number" && value > supported) {
+          throw new KernelError(`WebGPU adapter limit ${name}=${supported} is below required ${value}`);
+        }
+      }
+    }
+    const descriptor: GPUDeviceDescriptor = {};
+    if (requiredFeatures.length > 0) descriptor.requiredFeatures = [...requiredFeatures];
+    if (requiredLimits && Object.keys(requiredLimits).length > 0) descriptor.requiredLimits = requiredLimits;
+    gpu = await adapter.requestDevice(Object.keys(descriptor).length > 0 ? descriptor : undefined);
   }
 
   return new KernelDeviceImpl(gpu, options.pipelineCacheSize ?? 32);

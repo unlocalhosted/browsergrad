@@ -40,6 +40,9 @@ export interface KernelDeviceOptions {
   /** Optional WebGPU features requested when BrowserGrad creates the device. */
   requiredFeatures?: readonly GPUFeatureName[];
 
+  /** Optional WebGPU limits requested when BrowserGrad creates the device. */
+  requiredLimits?: GPUDeviceDescriptor["requiredLimits"];
+
   /** Max compute pipelines kept warm in cache. Default 32. */
   pipelineCacheSize?: number;
 }

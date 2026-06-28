@@ -795,7 +795,17 @@ const html = String.raw`<!doctype html>
         const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
         if (!adapter) throw new Error("Failed to obtain a WebGPU adapter");
         const requiredFeatures = ["shader-f16", "subgroups"].filter((feature) => adapter.features?.has?.(feature));
-        const gpuDevice = await adapter.requestDevice({ requiredFeatures });
+        const requiredLimits = {};
+        const requestLimit = (name, baseline, desired) => {
+          const supported = adapter.limits?.[name];
+          if (typeof supported !== "number" || supported <= baseline) return;
+          requiredLimits[name] = Math.min(supported, desired);
+        };
+        requestLimit("maxStorageBuffersPerShaderStage", 8, 16);
+        const descriptor = {};
+        if (requiredFeatures.length > 0) descriptor.requiredFeatures = requiredFeatures;
+        if (Object.keys(requiredLimits).length > 0) descriptor.requiredLimits = requiredLimits;
+        const gpuDevice = await adapter.requestDevice(descriptor);
         return createDevice({ device: gpuDevice });
       }
 

@@ -132,4 +132,16 @@ describe("type surface (compile-time only)", () => {
     };
     expect(typeof _check).toBe("function");
   });
+
+  it("KernelDeviceOptions accepts WebGPU required limits", () => {
+    const _check = (): void => {
+      void createDevice({
+        requiredLimits: {
+          maxStorageBuffersPerShaderStage: 16,
+          maxComputeWorkgroupStorageSize: 32768,
+        },
+      });
+    };
+    expect(typeof _check).toBe("function");
+  });
 });
