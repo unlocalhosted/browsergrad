@@ -4458,6 +4458,7 @@ function emitMember(expression: Extract<CudaLiteExpression, { kind: "member" }>,
   const axisIndex = expression.property === "x" ? 0 : expression.property === "y" ? 1 : 2;
   switch (objectName) {
     case "threadIdx":
+      if (context.ir.workgroupSize[axisIndex] === 1) return "0";
       return `i32(local_id.${expression.property})`;
     case "blockIdx":
       return `i32(workgroup_id.${expression.property})`;

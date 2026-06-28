@@ -771,7 +771,7 @@ __global__ void derefKernel(const int* n, float* out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("i32(local_id.x) < n[0]");
+    expect(compiled.wgsl).toContain("0 < n[0]");
     expect([...result.buffers.out as Float32Array]).toEqual([1]);
   });
 
@@ -5662,6 +5662,20 @@ __global__ void predicatedBarrier(float *A, float *B, float *C, int N) {
     expect([...result.buffers.C as Float32Array]).toEqual([11, 22]);
   });
 
+  it("folds singleton thread axes before barrier uniformity analysis", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void singletonZBarrier(float *out, int N) {
+  for (int i = blockIdx.x * blockDim.z + threadIdx.z; i < N; i += gridDim.x * blockDim.z) {
+    out[i] = 1.0f;
+    __syncthreads();
+    out[i] += 1.0f;
+  }
+}`, { workgroupSize: [32, 1, 1] });
+
+    expect(compiled.wgsl).not.toContain("local_id.z");
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+  });
+
   it("lowers dynamic extern shared memory declared inside device helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ uint reduce_one(uint value) {
@@ -6239,7 +6253,7 @@ __global__ void apply(uint *out) {
 
     expect(compiled.wgsl).toContain("var<storage, read> table: array<array<u32, 2>, 2>;");
     expect(compiled.wgsl).toContain("var row_buffer: u32 = 1u;");
-    expect(compiled.wgsl).toContain("var row_base: u32 = ((u32(i32(local_id.y)) * 2u) + u32(0));");
+    expect(compiled.wgsl).toContain("var row_base: u32 = ((u32(0) * 2u) + u32(0));");
     expect([...result.buffers.out as Uint32Array]).toEqual([3, 5]);
 
     const oneDimensional = compileCudaLiteKernel(`
