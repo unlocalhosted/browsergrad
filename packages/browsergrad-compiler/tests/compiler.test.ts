@@ -6678,6 +6678,28 @@ __global__ void subgroupCompat(float* x) {
     expect(compiled.wgsl).not.toMatch(/\bsubgroup(?:Add|Max|Min|Shuffle|Ballot|Any|All)/u);
   });
 
+  it("runs divergent subgroup calls as scalar operations in scalar compatibility mode", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void subgroupScalarReference(float* x) {
+  int idx = threadIdx.x;
+  float v = warp_reduce_sum_f32(x[idx]);
+  if ((idx % 32) == 0) {
+    v = bg_subgroup_add(v);
+  }
+  x[idx] = v;
+}`, {
+      subgroupMode: "scalar",
+      workgroupSize: [4, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([1, 2, 3, 4]) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect([...result.buffers.x as Float32Array]).toEqual([1, 2, 3, 4]);
+  });
+
   it("derives compile feature options from kernel feature detection", () => {
     expect(
       cudaLiteFeatureOptionsFromKernelFeatures({

@@ -127,6 +127,7 @@ interface ThreadContext {
   readonly kernels: ReadonlyMap<string, CudaLiteKernel>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly valueTypes: ReadonlyMap<string, CudaLiteScalarType>;
+  readonly subgroupMode: "native" | "scalar";
   readonly locals: Map<string, LocalValue>;
   readonly shared: Map<string, SharedArrayValue>;
   readonly trace: MutableTrace;
@@ -345,6 +346,7 @@ function runBlock(
           kernels,
           scalars,
           valueTypes,
+          subgroupMode: compiled.subgroupMode ?? "native",
           locals: new Map(),
           shared,
           trace,
@@ -503,6 +505,7 @@ function runGrid(
                 kernels,
                 scalars,
                 valueTypes,
+                subgroupMode: compiled.subgroupMode ?? "native",
                 locals: new Map(),
                 shared,
                 trace,
@@ -938,6 +941,7 @@ function writeCollectiveAssignment(
 }
 
 function collectiveCall(expression: CudaLiteExpression, context: ThreadContext): CollectiveYield | undefined {
+  if (context.subgroupMode === "scalar") return undefined;
   if (expression.kind !== "call") return undefined;
   const cooperativeReduce = cooperativeReduceCollective(expression, context);
   if (cooperativeReduce) return cooperativeReduce;
