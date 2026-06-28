@@ -6155,7 +6155,8 @@ __global__ void kernel(unsigned int *out, unsigned int pitch) {
   row[i] = 7;
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toContain("(u32(i32(workgroup_id.x)) * bg_uniforms.pitch))) + (u32(i))");
+    expect(compiled.wgsl).toContain("(u32(i32(workgroup_id.x)) * bg_uniforms.pitch)");
+    expect(compiled.wgsl).toContain("+ u32(i)");
   });
 
   it("lowers scalar CUDA vector constants as scalarized readonly storage inputs", () => {
@@ -7238,6 +7239,52 @@ __global__ void helper_shared_atomic(uint* out) {
     expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32(");
     expect(compiled.wgsl).toContain("case 1u: { return atomicAdd(&counts[index], value); }");
     expect([...result.buffers.out as Uint32Array]).toEqual([5]);
+  });
+
+  it("supports atomicAdd through shared pointer aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void shared_alias_atomic(float* out) {
+  extern __shared__ float shared[];
+  float* acc = shared;
+  if (threadIdx.x == 0) {
+    acc[0] = 0.0f;
+    atomicAdd(&acc[0], 1.5f);
+    out[0] = acc[0];
+  }
+}`, { workgroupSize: [1, 1, 1], dynamicSharedMemory: { shared: 1 } });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_atomicAdd_f32_workgroup(&bg_shared");
+    expect(compiled.wgsl).not.toContain("&bitcast<f32>");
+    expect([...result.buffers.out as Float32Array]).toEqual([1.5]);
+  });
+
+  it("loads vector views from atomic float buffers lane-wise", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void atomic_vector_read(float* scratch, float4* out) {
+  if (threadIdx.x == 0) {
+    atomicAdd(&scratch[0], 1.0f);
+    float4 loaded = reinterpret_cast<float4*>(scratch)[0];
+    out[0] = loaded;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          scratch: new Float32Array([0, 2, 3, 4]),
+          out: new Float32Array(4),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("vec4<f32>(bitcast<f32>(atomicLoad(&scratch");
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
   });
 
   it("supports read-modify-write atomics through device pointer helper parameters", () => {

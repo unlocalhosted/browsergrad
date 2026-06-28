@@ -1427,13 +1427,13 @@ function emitDevicePointerHelper(type: CudaLiteScalarType, ir: KernelIrModule, c
   const storageParams = ir.params.filter((param) =>
     param.pointer &&
     !isDevicePoolParam(param) &&
-    isPointerHelperCompatibleStorage(type, param.valueType)
+    isPointerHelperReadableStorage(type, param.valueType)
   );
   const sharedDeclarations = ir.sharedDeclarations.filter((shared) =>
-    isPointerHelperCompatibleStorage(type, shared.valueType)
+    isPointerHelperReadableStorage(type, shared.valueType)
   );
   const deviceGlobals = ir.deviceGlobals.filter((global) =>
-    isPointerHelperCompatibleStorage(type, global.valueType)
+    isPointerHelperReadableStorage(type, global.valueType)
   );
   const constantArrays = ir.constants.filter((constant) =>
     constant.dimensions.length > 0 &&
@@ -1976,6 +1976,11 @@ function isPointerHelperCompatibleStorage(helperType: CudaLiteScalarType, storag
   return isCudaVectorType(helperType) && cudaVectorScalarType(helperType) === storageType;
 }
 
+function isPointerHelperReadableStorage(helperType: CudaLiteScalarType, storageType: CudaLiteScalarType): boolean {
+  return isPointerHelperCompatibleStorage(helperType, storageType) ||
+    ((helperType === "uint" || helperType === "int") && (storageType === "float" || storageType === "double"));
+}
+
 function emitPointerStorageRead(
   param: CudaLiteParam,
   index: string,
@@ -1985,15 +1990,26 @@ function emitPointerStorageRead(
 ): string {
   const name = context.nameFor(param.name);
   if (isCudaVectorType(viewType)) {
+    if (param.valueType !== viewType && ir.atomicParams.includes(param.name)) {
+      return emitPointerVectorFlatRead(param, index, viewType, ir, context);
+    }
     return param.valueType === viewType
       ? emitVectorStorageRead(name, viewType, index)
       : emitVectorStorageReadAt(name, viewType, index);
   }
   const access = `${name}[${index}]`;
   if (param.valueType === "bool") return `(${access} != 0u)`;
-  if (!ir.atomicParams.includes(param.name)) return access;
-  const loaded = `atomicLoad(&${access})`;
-  return param.valueType === "float" || param.valueType === "double" ? `bitcast<f32>(${loaded})` : loaded;
+  const bitcastType = bitcastStorageViewType(param.valueType, viewType);
+  if (ir.atomicParams.includes(param.name)) {
+    const loaded = `atomicLoad(&${access})`;
+    if (param.valueType === "float" || param.valueType === "double") {
+      if (viewType === "uint") return loaded;
+      if (viewType === "int") return `bitcast<i32>(${loaded})`;
+      return `bitcast<f32>(${loaded})`;
+    }
+    return param.valueType !== viewType && bitcastType ? `bitcast<${bitcastType}>(${loaded})` : loaded;
+  }
+  return param.valueType !== viewType && bitcastType ? `bitcast<${bitcastType}>(${access})` : access;
 }
 
 function emitPointerStorageWrite(
@@ -2006,14 +2022,20 @@ function emitPointerStorageWrite(
 ): string {
   const name = context.nameFor(param.name);
   if (isCudaVectorType(viewType)) {
+    if (param.valueType !== viewType && ir.atomicParams.includes(param.name)) {
+      return emitPointerVectorFlatWrite(param, index, value, viewType, ir, context);
+    }
     return param.valueType === viewType
       ? emitVectorStorageWrite(name, viewType, index, value)
       : emitVectorStorageWriteAt(name, viewType, index, value);
   }
   const access = `${name}[${index}]`;
   if (param.valueType === "bool") return `${access} = select(0u, 1u, ${value})`;
-  if (!ir.atomicParams.includes(param.name)) return `${access} = ${value}`;
-  if (param.valueType === "float" || param.valueType === "double") return `atomicStore(&${access}, bitcast<u32>(${value}))`;
+  const bitcastType = bitcastStorageViewType(viewType, param.valueType);
+  if (!ir.atomicParams.includes(param.name)) return param.valueType !== viewType && bitcastType
+    ? `${access} = bitcast<${bitcastType}>(${value})`
+    : `${access} = ${value}`;
+  if (param.valueType === "float" || param.valueType === "double") return `atomicStore(&${access}, ${emitStorageCarrierAsU32(value, viewType)})`;
   return `atomicStore(&${access}, ${value})`;
 }
 
@@ -2026,15 +2048,26 @@ function emitDeviceGlobalPointerRead(
 ): string {
   const name = context.nameFor(global.name);
   if (isCudaVectorType(viewType)) {
+    if (global.valueType !== viewType && ir.atomicDeviceGlobals.includes(global.name)) {
+      return emitDeviceGlobalVectorFlatRead(global, index, viewType, ir, context);
+    }
     return global.valueType === viewType
       ? emitVectorStorageRead(name, viewType, index)
       : emitVectorStorageReadAt(name, viewType, index);
   }
   const access = `${name}[${index}]`;
   if (global.valueType === "bool") return `(${access} != 0u)`;
-  if (!ir.atomicDeviceGlobals.includes(global.name)) return access;
-  const loaded = `atomicLoad(&${access})`;
-  return global.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
+  const bitcastType = bitcastStorageViewType(global.valueType, viewType);
+  if (ir.atomicDeviceGlobals.includes(global.name)) {
+    const loaded = `atomicLoad(&${access})`;
+    if (global.valueType === "float") {
+      if (viewType === "uint") return loaded;
+      if (viewType === "int") return `bitcast<i32>(${loaded})`;
+      return `bitcast<f32>(${loaded})`;
+    }
+    return global.valueType !== viewType && bitcastType ? `bitcast<${bitcastType}>(${loaded})` : loaded;
+  }
+  return global.valueType !== viewType && bitcastType ? `bitcast<${bitcastType}>(${access})` : access;
 }
 
 function emitDeviceGlobalPointerWrite(
@@ -2047,14 +2080,20 @@ function emitDeviceGlobalPointerWrite(
 ): string {
   const name = context.nameFor(global.name);
   if (isCudaVectorType(viewType)) {
+    if (global.valueType !== viewType && ir.atomicDeviceGlobals.includes(global.name)) {
+      return emitDeviceGlobalVectorFlatWrite(global, index, value, viewType, ir, context);
+    }
     return global.valueType === viewType
       ? emitVectorStorageWrite(name, viewType, index, value)
       : emitVectorStorageWriteAt(name, viewType, index, value);
   }
   const access = `${name}[${index}]`;
   if (global.valueType === "bool") return `${access} = select(0u, 1u, ${value})`;
-  if (!ir.atomicDeviceGlobals.includes(global.name)) return `${access} = ${value}`;
-  if (global.valueType === "float") return `atomicStore(&${access}, bitcast<u32>(${value}))`;
+  const bitcastType = bitcastStorageViewType(viewType, global.valueType);
+  if (!ir.atomicDeviceGlobals.includes(global.name)) return global.valueType !== viewType && bitcastType
+    ? `${access} = bitcast<${bitcastType}>(${value})`
+    : `${access} = ${value}`;
+  if (global.valueType === "float") return `atomicStore(&${access}, ${emitStorageCarrierAsU32(value, viewType)})`;
   return `atomicStore(&${access}, ${value})`;
 }
 
@@ -2112,12 +2151,18 @@ function emitSharedPointerRead(
   const packed = emitPackedHalfStorageRead(access, shared.valueType, viewType, subElementLane);
   if (packed) return packed;
   if (isCudaVectorType(viewType) && shared.valueType !== viewType) return emitSharedVectorFlatRead(shared, index, viewType, context);
-  if (shared.valueType !== viewType && bitcastStorageViewType(shared.valueType, viewType)) {
-    return `bitcast<${wgslScalar(viewType)}>(${access})`;
+  const bitcastType = bitcastStorageViewType(shared.valueType, viewType);
+  if (ir.atomicShared.includes(shared.name)) {
+    const loaded = `atomicLoad(&${access})`;
+    if (shared.valueType === "float" || shared.valueType === "double") {
+      if (viewType === "uint") return loaded;
+      if (viewType === "int") return `bitcast<i32>(${loaded})`;
+      return `bitcast<f32>(${loaded})`;
+    }
+    return shared.valueType !== viewType && bitcastType ? `bitcast<${bitcastType}>(${loaded})` : loaded;
   }
-  if (!ir.atomicShared.includes(shared.name)) return access;
-  const loaded = `atomicLoad(&${access})`;
-  return shared.valueType === "float" ? `bitcast<f32>(${loaded})` : loaded;
+  if (shared.valueType !== viewType && bitcastType) return `bitcast<${bitcastType}>(${access})`;
+  return access;
 }
 
 function emitSharedPointerWrite(
@@ -2134,9 +2179,12 @@ function emitSharedPointerWrite(
   if (packed) return packed;
   if (isCudaVectorType(viewType) && shared.valueType !== viewType) return emitSharedVectorFlatWrite(shared, index, value, viewType, context);
   const bitcastType = bitcastStorageViewType(viewType, shared.valueType);
-  if (shared.valueType !== viewType && bitcastType) return `${access} = bitcast<${bitcastType}>(${value})`;
-  if (!ir.atomicShared.includes(shared.name)) return `${access} = ${value}`;
-  return shared.valueType === "float" ? `atomicStore(&${access}, bitcast<u32>(${value}))` : `atomicStore(&${access}, ${value})`;
+  if (!ir.atomicShared.includes(shared.name)) return shared.valueType !== viewType && bitcastType
+    ? `${access} = bitcast<${bitcastType}>(${value})`
+    : `${access} = ${value}`;
+  return shared.valueType === "float" || shared.valueType === "double"
+    ? `atomicStore(&${access}, ${emitStorageCarrierAsU32(value, viewType)})`
+    : `atomicStore(&${access}, ${value})`;
 }
 
 function emitLocalPointerRead(
@@ -2257,6 +2305,36 @@ function emitSharedVectorFlatRead(
   return `${wgslScalar(viewType)}(${values.join(", ")})`;
 }
 
+function emitPointerVectorFlatRead(
+  param: CudaLiteParam,
+  index: string,
+  viewType: CudaLiteScalarType,
+  ir: KernelIrModule,
+  context: EmitContext,
+): string {
+  const lanes = cudaVectorLaneCount(viewType);
+  const scalar = cudaVectorScalarType(viewType) ?? "float";
+  const values = Array.from({ length: lanes }, (_, lane) =>
+    emitPointerStorageRead(param, `(${index} + ${lane}u)`, ir, context, scalar)
+  );
+  return `${wgslScalar(viewType)}(${values.join(", ")})`;
+}
+
+function emitDeviceGlobalVectorFlatRead(
+  global: CudaLiteDeviceGlobal,
+  index: string,
+  viewType: CudaLiteScalarType,
+  ir: KernelIrModule,
+  context: EmitContext,
+): string {
+  const lanes = cudaVectorLaneCount(viewType);
+  const scalar = cudaVectorScalarType(viewType) ?? "float";
+  const values = Array.from({ length: lanes }, (_, lane) =>
+    emitDeviceGlobalPointerRead(global, `(${index} + ${lane}u)`, ir, context, scalar)
+  );
+  return `${wgslScalar(viewType)}(${values.join(", ")})`;
+}
+
 function emitLocalVectorFlatRead(
   local: CudaLiteVarDecl,
   index: string,
@@ -2282,6 +2360,36 @@ function emitSharedVectorFlatWrite(
   const scalar = cudaVectorScalarType(viewType) ?? "float";
   return Array.from({ length: lanes }, (_, lane) =>
     emitSharedPointerWrite(shared, `(${index} + ${lane}u)`, `${value}.${vectorFieldName(lane)}`, context.ir, context, scalar)
+  ).join("; ");
+}
+
+function emitPointerVectorFlatWrite(
+  param: CudaLiteParam,
+  index: string,
+  value: string,
+  viewType: CudaLiteScalarType,
+  ir: KernelIrModule,
+  context: EmitContext,
+): string {
+  const lanes = cudaVectorLaneCount(viewType);
+  const scalar = cudaVectorScalarType(viewType) ?? "float";
+  return Array.from({ length: lanes }, (_, lane) =>
+    emitPointerStorageWrite(param, `(${index} + ${lane}u)`, `${value}.${vectorFieldName(lane)}`, ir, context, scalar)
+  ).join("; ");
+}
+
+function emitDeviceGlobalVectorFlatWrite(
+  global: CudaLiteDeviceGlobal,
+  index: string,
+  value: string,
+  viewType: CudaLiteScalarType,
+  ir: KernelIrModule,
+  context: EmitContext,
+): string {
+  const lanes = cudaVectorLaneCount(viewType);
+  const scalar = cudaVectorScalarType(viewType) ?? "float";
+  return Array.from({ length: lanes }, (_, lane) =>
+    emitDeviceGlobalPointerWrite(global, `(${index} + ${lane}u)`, `${value}.${vectorFieldName(lane)}`, ir, context, scalar)
   ).join("; ");
 }
 
@@ -2685,6 +2793,14 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
         if (shared) return emitSharedPointerRead(shared, storageView.index, context.ir, context, storageView.valueType, storageView.subElementLane);
         const local = storageView.rootName ? localArrayForStorageView(storageView.rootName, expression.span, context) : undefined;
         if (local) return emitLocalPointerRead(local, storageView.index, storageView.valueType, context, storageView.subElementLane);
+        const param = storageView.rootName ? context.paramFor(storageView.rootName) : undefined;
+        if (param && context.ir.atomicParams.includes(param.name)) {
+          return emitPointerVectorFlatRead(param, storageView.index, storageView.valueType, context.ir, context);
+        }
+        const global = storageView.rootName ? context.deviceGlobalFor(storageView.rootName) : undefined;
+        if (global && context.ir.atomicDeviceGlobals.includes(global.name)) {
+          return emitDeviceGlobalVectorFlatRead(global, storageView.index, storageView.valueType, context.ir, context);
+        }
         return emitVectorStorageReadAt(storageView.name, storageView.valueType, storageView.index);
       }
       const poolAccess = poolAccessForIndex(expression, context);
@@ -2721,6 +2837,14 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
             if (shared) return emitSharedPointerRead(shared, view.index, context.ir, context, alias.valueType, view.subElementLane);
             const local = localArrayForStorageView(alias.rootName, expression.span, context);
             if (local) return emitLocalPointerRead(local, view.index, alias.valueType, context, view.subElementLane);
+            const param = context.paramFor(alias.rootName);
+            if (param && context.ir.atomicParams.includes(param.name)) {
+              return emitPointerVectorFlatRead(param, view.index, alias.valueType, context.ir, context);
+            }
+            const global = context.deviceGlobalFor(alias.rootName);
+            if (global && context.ir.atomicDeviceGlobals.includes(global.name)) {
+              return emitDeviceGlobalVectorFlatRead(global, view.index, alias.valueType, context.ir, context);
+            }
             return emitVectorStorageReadAt(context.nameFor(alias.rootName), alias.valueType, view.index);
           }
           if (alias.valueType) {
@@ -2733,6 +2857,16 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
             if (local) {
               const view = createStorageView(alias.rootName, alias.baseIndex, expression.index, alias.valueType, context);
               return emitLocalPointerRead(local, view.index, alias.valueType, context, view.subElementLane);
+            }
+            const param = context.paramFor(alias.rootName);
+            if (param) {
+              const view = createStorageView(alias.rootName, alias.baseIndex, expression.index, alias.valueType, context);
+              return emitPointerStorageRead(param, view.index, context.ir, context, alias.valueType);
+            }
+            const global = context.deviceGlobalFor(alias.rootName);
+            if (global) {
+              const view = createStorageView(alias.rootName, alias.baseIndex, expression.index, alias.valueType, context);
+              return emitDeviceGlobalPointerRead(global, view.index, context.ir, context, alias.valueType);
             }
           }
           return `${context.nameFor(alias.rootName)}[${emitPointerAliasIndex(alias, expression.index, context)}]`;
@@ -4220,6 +4354,15 @@ function emitDeref(expression: CudaLiteExpression, context: EmitContext): string
         const valueType = alias.valueType ?? pointerParam.valueType;
         return `${pointerReadHelperName(valueType)}(${context.nameFor(`${alias.rootName}_buffer`)}, ${emitPointerAliasIndex(alias, zeroExpression(expression.span), context)})`;
       }
+      if (alias.valueType) {
+        const index = emitPointerAliasIndex(alias, zeroExpression(expression.span), context);
+        const shared = sharedDeclarationFor(alias.rootName, context);
+        if (shared) return emitSharedPointerRead(shared, index, context.ir, context, alias.valueType);
+        const local = localArrayForStorageView(alias.rootName, expression.span, context);
+        if (local) return emitLocalPointerRead(local, index, alias.valueType, context);
+        const global = context.deviceGlobalFor(alias.rootName);
+        if (global) return emitDeviceGlobalPointerRead(global, index, context.ir, context, alias.valueType);
+      }
       return `${context.nameFor(alias.rootName)}[${emitPointerAliasIndex(alias, zeroExpression(expression.span), context)}]`;
     }
     const param = context.paramFor(expression.name);
@@ -4413,7 +4556,21 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
       expressionValueTypeForEmit(expression.right, context),
     );
   }
-  if (expression.kind === "unary") return expression.operator === "!" ? "bool" : expressionValueTypeForEmit(expression.argument, context);
+  if (expression.kind === "unary") {
+    if (expression.operator === "!") return "bool";
+    if (expression.operator === "*") {
+      const storageView = storageViewForPointerExpression(expression.argument, zeroExpression(expression.span), context);
+      if (storageView) return storageView.valueType;
+      if (expression.argument.kind === "identifier") {
+        const alias = flattenedPointerAlias(expression.argument.name, expression.argument.span, context);
+        if (alias?.valueType) return alias.valueType;
+        const param = context.paramFor(expression.argument.name);
+        if (param?.pointer) return param.valueType;
+      }
+      return devicePointerValueTypeForExpression(expression.argument, context);
+    }
+    return expressionValueTypeForEmit(expression.argument, context);
+  }
   if (expression.kind === "conditional") {
     return promotedCudaScalarType(
       expressionValueTypeForEmit(expression.consequent, context),
@@ -5484,6 +5641,8 @@ function emitAtomicTarget(
 }
 
 function emitAtomicAddressTarget(expression: CudaLiteExpression, context: EmitContext): AtomicTargetInfo | undefined {
+  const storageViewTarget = emitAtomicStorageViewTarget(expression, context);
+  if (storageViewTarget) return storageViewTarget;
   const rootName = atomicExpressionRootName(expression, context);
   if (!rootName) return undefined;
   const info = atomicStorageInfo(rootName, context);
@@ -5496,6 +5655,46 @@ function emitAtomicAddressTarget(expression: CudaLiteExpression, context: EmitCo
     storageScalar: info.storageScalar,
     addressSpace: info.addressSpace,
   };
+}
+
+function emitAtomicStorageViewTarget(expression: CudaLiteExpression, context: EmitContext): AtomicTargetInfo | undefined {
+  if (expression.kind !== "index") return undefined;
+  const view = storageViewForPointerExpression(expression.target, expression.index, context);
+  if (!view || isCudaVectorType(view.valueType)) return undefined;
+  const shared = sharedDeclarationFor(view.rootName, context);
+  if (shared && context.isAtomicShared(shared.name)) {
+    return {
+      address: `&${emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, view.index)}`,
+      rootName: shared.name,
+      valueType: view.valueType,
+      storageValueType: shared.valueType,
+      storageScalar: shared.valueType === "int" ? "i32" : "u32",
+      addressSpace: "workgroup",
+    };
+  }
+  const param = context.paramFor(view.rootName);
+  if (param?.pointer && context.ir.atomicParams.includes(param.name)) {
+    return {
+      address: `&${context.nameFor(param.name)}[${view.index}]`,
+      rootName: param.name,
+      valueType: view.valueType,
+      storageValueType: param.valueType,
+      storageScalar: param.valueType === "int" ? "i32" : "u32",
+      addressSpace: "storage",
+    };
+  }
+  const global = context.deviceGlobalFor(view.rootName);
+  if (global && context.ir.atomicDeviceGlobals.includes(global.name)) {
+    return {
+      address: `&${context.nameFor(global.name)}[${view.index}]`,
+      rootName: global.name,
+      valueType: view.valueType,
+      storageValueType: global.valueType,
+      storageScalar: global.valueType === "int" ? "i32" : "u32",
+      addressSpace: "storage",
+    };
+  }
+  return undefined;
 }
 
 function atomicExpressionRootName(expression: CudaLiteExpression, context: EmitContext): string | undefined {
@@ -5669,6 +5868,19 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
     return scalarStorageView.addressSpace === "shared"
       ? emitSharedPointerWrite(scalarStorageView.root, scalarStorageView.index, value, context.ir, context, scalarStorageView.valueType, scalarStorageView.subElementLane)
       : emitLocalPointerWrite(scalarStorageView.root, scalarStorageView.index, value, scalarStorageView.valueType, context, scalarStorageView.subElementLane);
+  }
+  const scalarParamStorageView = scalarParamStorageViewLValue(expression.left, context);
+  if (scalarParamStorageView) {
+    const current = scalarParamStorageView.addressSpace === "global"
+      ? emitDeviceGlobalPointerRead(scalarParamStorageView.root, scalarParamStorageView.index, context.ir, context, scalarParamStorageView.valueType)
+      : emitPointerStorageRead(scalarParamStorageView.root, scalarParamStorageView.index, context.ir, context, scalarParamStorageView.valueType);
+    const right = emitExpressionAsValueType(expression.right, scalarParamStorageView.valueType, context);
+    const value = expression.operator === "="
+      ? right
+      : `(${current} ${expression.operator.slice(0, -1)} ${right})`;
+    return scalarParamStorageView.addressSpace === "global"
+      ? emitDeviceGlobalPointerWrite(scalarParamStorageView.root, scalarParamStorageView.index, value, context.ir, context, scalarParamStorageView.valueType)
+      : emitPointerStorageWrite(scalarParamStorageView.root, scalarParamStorageView.index, value, context.ir, context, scalarParamStorageView.valueType);
   }
   const pointerLvalue = devicePointerLValue(expression.left, context);
   if (pointerLvalue) {
@@ -6072,6 +6284,20 @@ interface ScalarStorageViewLValue {
   readonly subElementLane?: string;
 }
 
+type ScalarParamStorageViewLValue =
+  | {
+    readonly root: CudaLiteParam;
+    readonly addressSpace: "param";
+    readonly valueType: CudaLiteScalarType;
+    readonly index: string;
+  }
+  | {
+    readonly root: CudaLiteDeviceGlobal;
+    readonly addressSpace: "global";
+    readonly valueType: CudaLiteScalarType;
+    readonly index: string;
+  };
+
 function scalarStorageViewLValue(expression: CudaLiteExpression, context: EmitContext): ScalarStorageViewLValue | undefined {
   if (expression.kind !== "index") return undefined;
   const view = storageViewForPointerExpression(expression.target, expression.index, context);
@@ -6093,6 +6319,29 @@ function scalarStorageViewLValue(expression: CudaLiteExpression, context: EmitCo
     valueType: view.valueType,
     index: view.index,
     ...(view.subElementLane === undefined ? {} : { subElementLane: view.subElementLane }),
+  } : undefined;
+}
+
+function scalarParamStorageViewLValue(expression: CudaLiteExpression, context: EmitContext): ScalarParamStorageViewLValue | undefined {
+  if (expression.kind !== "index" || expression.target.kind !== "identifier") return undefined;
+  const alias = flattenedPointerAlias(expression.target.name, expression.target.span, context);
+  if (!alias?.valueType || isCudaVectorType(alias.valueType)) return undefined;
+  const view = createStorageView(alias.rootName, alias.baseIndex, expression.index, alias.valueType, context);
+  const param = context.paramFor(alias.rootName);
+  if (param?.pointer) {
+    return {
+      root: param,
+      addressSpace: "param",
+      valueType: view.valueType,
+      index: view.index,
+    };
+  }
+  const global = context.deviceGlobalFor(alias.rootName);
+  return global ? {
+    root: global,
+    addressSpace: "global",
+    valueType: view.valueType,
+    index: view.index,
   } : undefined;
 }
 
