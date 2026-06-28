@@ -718,7 +718,10 @@ const html = String.raw`<!doctype html>
               ...(spec.expectedOutput === undefined ? {} : { expectedOutputPinned: true }),
               ms: round(performance.now() - start),
             });
-            emitProgress({ event: "case-pass", index: index + 1, total: specs.length, name: spec.name, ms: cases[cases.length - 1].ms });
+            const completed = cases[cases.length - 1];
+            emitProgress(completed.ok
+              ? { event: "case-pass", index: index + 1, total: specs.length, name: spec.name, ms: completed.ms }
+              : { event: "case-fail", index: index + 1, total: specs.length, name: spec.name, ms: completed.ms, plan: completed.plan });
           } catch (error) {
             cases.push({
               name: spec.name,
