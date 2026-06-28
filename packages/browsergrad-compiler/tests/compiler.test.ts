@@ -485,6 +485,26 @@ __global__ void kernel(const float* x) {
 `)).toThrow(CudaLiteCompilerError);
   });
 
+  it("lowers update expressions through device helper pointer params", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void incAt(uint* ptr, uint index) {
+  ptr[index]++;
+}
+
+__global__ void kernel(uint* out) {
+  incAt(out, 1u);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array([5, 7]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Uint32Array]).toEqual([5, 8]);
+    expect(compiled.wgsl).toContain("bg_ptr_write_u32(ptr_buffer, (ptr_base + u32(index)), (bg_ptr_read_u32(ptr_buffer, (ptr_base + u32(index))) + 1u))");
+    expect(compiled.wgsl).not.toContain("bg_ptr_read_u32(ptr_buffer, (ptr_base + u32(index))) =");
+  });
+
   it("lowers one-dimensional shared memory through helper pointer params", () => {
     const compiled = compileCudaLiteKernel(SHARED_POINTER_HELPERS, { workgroupSize: [4, 1, 1] });
     const result = runCompiledKernelReference(
@@ -8004,10 +8024,10 @@ __global__ void bad_update(float* out) {
 
   it("alpha-renames WGSL reserved and builtin-shadowing CUDA symbols", () => {
     const compiled = compileCudaLiteKernel(`
-__global__ void reserved_names(float* array, float* out) {
+__global__ void reserved_names(float* array, float* out, float precision) {
   extern __shared__ float shared[];
   float var = array[0];
-  float exp = var + 2.0f;
+  float exp = var + precision;
   if (threadIdx.x == 0) {
     shared[0] = exp;
     out[0] = shared[0];
@@ -8015,7 +8035,7 @@ __global__ void reserved_names(float* array, float* out) {
 }`, { workgroupSize: [1, 1, 1], dynamicSharedMemory: { shared: 1 } });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { array: new Float32Array([3]), out: new Float32Array(1) } },
+      { buffers: { array: new Float32Array([3]), out: new Float32Array(1) }, scalars: { precision: 2 } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
@@ -8023,8 +8043,10 @@ __global__ void reserved_names(float* array, float* out) {
     expect(compiled.wgsl).toContain("var<storage, read_write> bg_array: array<f32>;");
     expect(compiled.wgsl).toContain("var<workgroup> bg_shared: array<f32, 1>;");
     expect(compiled.wgsl).toContain("var bg_var: f32 = bg_array[0];");
-    expect(compiled.wgsl).toContain("var bg_exp: f32 = (bg_var + 2.0);");
+    expect(compiled.wgsl).toContain("bg_precision: f32,");
+    expect(compiled.wgsl).toContain("var bg_exp: f32 = (bg_var + bg_uniforms.bg_precision);");
     expect(compiled.wgsl).not.toContain("var var:");
+    expect(compiled.wgsl).not.toContain(" precision:");
   });
 
   it("supports vector conditionals used by POD-record lowering", () => {

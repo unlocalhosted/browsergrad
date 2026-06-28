@@ -415,6 +415,7 @@ const WGSL_RESERVED_IDENTIFIERS = new Set([
   "let",
   "loop",
   "override",
+  "precision",
   "private",
   "read",
   "read_write",
@@ -6257,14 +6258,23 @@ function emitUpdateExpression(
 ): string {
   const pointerRebase = emitPointerRebaseUpdate(expression, context);
   if (pointerRebase) return pointerRebase;
+  const pointerLvalue = devicePointerLValue(expression.argument, context);
+  if (pointerLvalue) {
+    const read = `${pointerReadHelperName(pointerLvalue.valueType)}(${pointerLvalue.buffer}, ${pointerLvalue.index})`;
+    const delta = updateDeltaForValueType(pointerLvalue.valueType);
+    const value = `(${read} ${expression.operator === "++" ? "+" : "-"} ${delta})`;
+    return `${pointerWriteHelperName(pointerLvalue.valueType)}(${pointerLvalue.buffer}, ${pointerLvalue.index}, ${value})`;
+  }
   const target = emitExpression(expression.argument, context, "lvalue");
   const type = expressionValueTypeForEmit(expression.argument, context);
-  const delta = type === "uint"
-    ? "1u"
-    : type === "float" || type === "double" || type === "half" || type === "bf16"
-      ? "1.0"
-      : "1";
+  const delta = updateDeltaForValueType(type);
   return `${target} = (${target} ${expression.operator === "++" ? "+" : "-"} ${delta})`;
+}
+
+function updateDeltaForValueType(type: CudaLiteScalarType | undefined): string {
+  if (type === "uint") return "1u";
+  if (type === "float" || type === "double" || type === "half" || type === "bf16") return "1.0";
+  return "1";
 }
 
 function emitVectorAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string | undefined {

@@ -38,6 +38,21 @@ const f32Input = syntheticInputForCompiled(f32Half);
 assert.equal(f32Input.buffers.x instanceof Float32Array, true, "f32 half compatibility storage should use Float32Array");
 assert.equal(f32Input.buffers.y instanceof Float32Array, true, "f32 half2 compatibility storage should use Float32Array lanes");
 
+const vectorInputKernel = compiler.compileCudaLiteKernelForWebGpu(`
+__global__ void vector_input(uint4 *u, int4 *i, float4 *f) {
+  if (threadIdx.x < 1) {
+    u[0] = u[0];
+    i[0] = i[0];
+    f[0] = f[0];
+  }
+}`, {
+  workgroupSize: [1, 1, 1],
+});
+const vectorInput = syntheticInputForCompiled(vectorInputKernel);
+assert.equal(vectorInput.buffers.u instanceof Uint32Array, true, "uint vector storage should use Uint32Array lanes");
+assert.equal(vectorInput.buffers.i instanceof Int32Array, true, "int vector storage should use Int32Array lanes");
+assert.equal(vectorInput.buffers.f instanceof Float32Array, true, "float vector storage should use Float32Array lanes");
+
 console.log("cuda-lite synthetic input tests passed");
 
 function findRepoRoot(start) {

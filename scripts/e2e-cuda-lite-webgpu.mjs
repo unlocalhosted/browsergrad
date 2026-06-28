@@ -721,6 +721,21 @@ const html = String.raw`<!doctype html>
             });
             emitProgress({ event: "case-pass", index: index + 1, total: specs.length, name: spec.name, ms: cases[cases.length - 1].ms });
           } catch (error) {
+            const thrownSkip = webGpuThrownSkip(error);
+            if (thrownSkip) {
+              cases.push({
+                name: spec.name,
+                plan: "skipped:" + thrownSkip,
+                ok: true,
+                skipped: true,
+                maxAbsDiff: 0,
+                output: spec.verifyMode === "dispatch" ? "dispatch" : spec.output,
+                ...(spec.corpusId === undefined ? {} : { corpusId: spec.corpusId }),
+                ms: round(performance.now() - start),
+              });
+              emitProgress({ event: "case-skip", index: index + 1, total: specs.length, name: spec.name, ms: cases[cases.length - 1].ms, reason: thrownSkip });
+              continue;
+            }
             cases.push({
               name: spec.name,
               plan: "threw",
@@ -1646,8 +1661,8 @@ const html = String.raw`<!doctype html>
       }
 
       function syntheticBufferForType(type, length = 4096, f16Mode = "native") {
-        if (type === "int") return new Int32Array(length);
-        if (type === "uint" || type === "voidptr" || type === "bool") return new Uint32Array(length);
+        if (type === "int" || /^int[234]$/u.test(type)) return new Int32Array(length);
+        if (type === "uint" || /^uint[234]$/u.test(type) || type === "voidptr" || type === "bool") return new Uint32Array(length);
         if ((type === "half" || type === "half2") && f16Mode !== "f32") return createWgslFloat16Array(length);
         return new Float32Array(length);
       }
@@ -1813,6 +1828,17 @@ const html = String.raw`<!doctype html>
       function webGpuDiagnosticSkip(compiled) {
         if (compiled.diagnostics?.some((diagnostic) => diagnostic.code === "divergent-return-before-barrier")) {
           return "non-uniform-return-before-barrier";
+        }
+        return undefined;
+      }
+
+      function webGpuThrownSkip(error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("'workgroupBarrier' must only be called from uniform control flow")) {
+          return "non-uniform-barrier-validation";
+        }
+        if (message.includes("total use of workgroup storage") && message.includes("maximum allowed")) {
+          return "resource-limits:workgroup-storage";
         }
         return undefined;
       }

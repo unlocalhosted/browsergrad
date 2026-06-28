@@ -54,8 +54,8 @@ export function externalDevicePoolNamesFromSource(source) {
 }
 
 export function syntheticBufferForType(type, length = 4096, f16Mode = "native") {
-  if (type === "int") return new Int32Array(length);
-  if (type === "uint" || type === "voidptr" || type === "bool") return new Uint32Array(length);
+  if (type === "int" || /^int[234]$/u.test(type)) return new Int32Array(length);
+  if (type === "uint" || /^uint[234]$/u.test(type) || type === "voidptr" || type === "bool") return new Uint32Array(length);
   if ((type === "half" || type === "half2") && f16Mode !== "f32") return createWgslFloat16Array(length);
   return new Float32Array(length);
 }
