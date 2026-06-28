@@ -6861,7 +6861,8 @@ function arrayAddressAliasForContext(
 function isBarrierCall(expression: CudaLiteExpression): boolean {
   if (expression.kind !== "call") return false;
   const name = expressionName(expression.callee);
-  return name === "__syncthreads" || name === "__syncwarp";
+  if (name === "__syncthreads" || name === "__syncwarp" || name?.endsWith("::sync")) return true;
+  return expression.callee.kind === "member" && expression.callee.property === "sync";
 }
 
 function noopCallComment(expression: CudaLiteExpression): string | undefined {

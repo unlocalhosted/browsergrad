@@ -5766,6 +5766,40 @@ __global__ void predicatedBarrier(float *A, float *B, float *C, int N) {
     expect([...result.buffers.C as Float32Array]).toEqual([11, 22]);
   });
 
+  it("uniformizes namespace cooperative-group sync inside predicated regions", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void predicatedCoopNamespaceSync(float *x, int N) {
+  cg::thread_block cta = cg::this_thread_block();
+  int tid = threadIdx.x;
+  if (tid < N) {
+    x[tid] = x[tid] + 1.0f;
+    cg::sync(cta);
+    x[tid] = x[tid] + 2.0f;
+  }
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
+    expect(compiled.wgsl).toContain("workgroupBarrier();\n    if ((tid < bg_uniforms.N))");
+    expect(compiled.wgsl).not.toContain("if ((tid < bg_uniforms.N)) {\n    x[u32(tid)] = (x[u32(tid)] + 1.0);\n    workgroupBarrier();");
+  });
+
+  it("uniformizes member cooperative-group sync inside predicated regions", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void predicatedCoopMemberSync(float *x, int N) {
+  cg::thread_block cta = cg::this_thread_block();
+  int tid = threadIdx.x;
+  if (tid < N) {
+    x[tid] = x[tid] + 1.0f;
+    cta.sync();
+    x[tid] = x[tid] + 2.0f;
+  }
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
+    expect(compiled.wgsl).toContain("workgroupBarrier();\n    if ((tid < bg_uniforms.N))");
+    expect(compiled.wgsl).not.toContain("if ((tid < bg_uniforms.N)) {\n    x[u32(tid)] = (x[u32(tid)] + 1.0);\n    workgroupBarrier();");
+  });
+
   it("lowers early returns before later barriers into active-lane guards", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void earlyReturnBarrier(float *x, int N) {
