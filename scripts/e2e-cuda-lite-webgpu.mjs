@@ -1672,7 +1672,7 @@ const html = String.raw`<!doctype html>
         if (/^(?:left|begin|start|offset)$/u.test(name)) return 0;
         if (/^(?:right|end|len|nLines|nTessPoints)$/u.test(name)) return 64;
         if (/^(?:n|N|num|count|length|totalLen|frontierSize|numSamples|totalThreads|poolSize|size)$/u.test(name)) return 1024;
-        if (/^(?:threads|threadsPerBlock|blockSize)$/u.test(name)) return 256;
+        if (/^(?:threads|threadsPerBlock|threads_per_block|blockSize|block_size)$/u.test(name)) return 256;
         if (/^(?:blocks|blocksPerGrid|numBlocks)$/u.test(name)) return 4;
         return 1;
       }

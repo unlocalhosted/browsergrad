@@ -7563,8 +7563,25 @@ __global__ void shared_alias_atomic(float* out) {
     );
 
     expect(compiled.wgsl).toContain("bg_atomicAdd_f32_workgroup(&bg_shared");
+    expect(compiled.wgsl).not.toContain("&shared[");
     expect(compiled.wgsl).not.toContain("&bitcast<f32>");
     expect([...result.buffers.out as Float32Array]).toEqual([1.5]);
+  });
+
+  it("supports atomicAdd through direct shared pointer expressions", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void shared_pointer_expr_atomic(float* out) {
+  extern __shared__ float shared[];
+  if (threadIdx.x == 0) {
+    shared[0] = 0.0f;
+    atomicAdd(shared + threadIdx.x, 2.5f);
+    out[0] = shared[0];
+  }
+}`, { workgroupSize: [1, 1, 1], dynamicSharedMemory: { shared: 1 } });
+
+    expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
+    expect(compiled.wgsl).toContain("bg_atomicAdd_f32_workgroup(&bg_shared");
+    expect(compiled.wgsl).not.toContain("&shared[");
   });
 
   it("loads vector views from atomic float buffers lane-wise", () => {
@@ -7910,6 +7927,21 @@ __global__ void alias_atomic(float* scratch, const float* values, uint* out) {
     expect(compiled.wgsl).toContain("fn bg_atomicDec_storage_f32_as_u32");
     expect(compiled.wgsl).toContain("bg_atomicInc_storage_f32_as_u32(&scratch[");
     expect(compiled.wgsl).toContain("bg_atomicAdd_f32(&scratch[");
+  });
+
+  it("stores vector views through mixed atomic float buffers lane-wise", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void mixed_atomic_vector_store(float* scratch) {
+  if (threadIdx.x == 0) {
+    uint* flag = (uint*)scratch;
+    atomicInc(flag, 8);
+    reinterpret_cast<float4*>(scratch + 4)[0] = make_float4(1.0f, 2.0f, 3.0f, 4.0f);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
+    expect(compiled.wgsl).toContain("atomicStore(&scratch[");
+    expect(compiled.wgsl).not.toContain("scratch[(0u + u32(4)) +");
   });
 
   it("supports CUDA atomic inc/dec on shared integer memory", () => {

@@ -5907,7 +5907,7 @@ function emitAtomicTarget(
       if (!info) return undefined;
       const index = emitPointerAliasIndex(alias, zeroExpression(target.span), context);
       return {
-        address: `&${rootName}[${index}]`,
+        address: emitAtomicRootAddress(rootName, index, context),
         rootName,
         valueType: alias.valueType ?? info.valueType,
         storageValueType: info.valueType,
@@ -5921,7 +5921,7 @@ function emitAtomicTarget(
       if (!info) return undefined;
       const index = emitPointerIndex(target.name, zeroExpression(target.span), context);
       return {
-        address: `&${target.name}[${index}]`,
+        address: emitAtomicRootAddress(target.name, index, context),
         rootName: target.name,
         valueType: param.valueType,
         storageValueType: info.valueType,
@@ -5937,7 +5937,7 @@ function emitAtomicTarget(
   const info = rootName ? atomicStorageInfo(rootName, context) : undefined;
   if (pointerParts && rootName && info) {
     return {
-      address: `&${rootName}[${pointerParts.base}]`,
+      address: emitAtomicRootAddress(rootName, pointerParts.base, context),
       rootName,
       valueType: atomicExpressionValueType(target, rootName, context) ?? info.valueType,
       storageValueType: info.valueType,
@@ -5946,6 +5946,12 @@ function emitAtomicTarget(
     };
   }
   return undefined;
+}
+
+function emitAtomicRootAddress(rootName: string, index: string, context: EmitContext): string {
+  const shared = sharedDeclarationFor(rootName, context);
+  if (shared) return `&${emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, index)}`;
+  return `&${context.nameFor(rootName)}[${index}]`;
 }
 
 function emitAtomicVectorStorageViewCastTarget(
@@ -6182,6 +6188,48 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
       }
       if (expression.operator !== "=") {
         const current = read();
+        const op = expression.operator.slice(0, -1);
+        const vectorRight = emitExpressionAsVectorOperand(expression.right, storageView.valueType as CudaLiteVectorType, context);
+        return write(`(${current} ${op} ${vectorRight})`);
+      }
+      return write(right);
+    }
+    const param = storageView.rootName ? context.paramFor(storageView.rootName) : undefined;
+    if (param && context.ir.atomicParams.includes(param.name)) {
+      const write = (value: string): string =>
+        emitPointerVectorFlatWrite(param, storageView.index, value, storageView.valueType, context.ir, context);
+      if (storageView.field) {
+        const scalar = cudaVectorScalarType(storageView.valueType) ?? "float";
+        const currentVector = emitPointerVectorFlatRead(param, storageView.index, storageView.valueType, context.ir, context);
+        const current = `${currentVector}.${storageView.field}`;
+        const laneValue = expression.operator === "="
+          ? emitExpressionAsValueType(expression.right, scalar, context)
+          : `(${current} ${expression.operator.slice(0, -1)} ${emitExpressionAsValueType(expression.right, scalar, context)})`;
+        return write(emitVectorLaneSetExpression(currentVector, storageView.valueType, storageView.fieldIndex ?? 0, laneValue));
+      }
+      if (expression.operator !== "=") {
+        const current = emitPointerVectorFlatRead(param, storageView.index, storageView.valueType, context.ir, context);
+        const op = expression.operator.slice(0, -1);
+        const vectorRight = emitExpressionAsVectorOperand(expression.right, storageView.valueType as CudaLiteVectorType, context);
+        return write(`(${current} ${op} ${vectorRight})`);
+      }
+      return write(right);
+    }
+    const global = storageView.rootName ? context.deviceGlobalFor(storageView.rootName) : undefined;
+    if (global && context.ir.atomicDeviceGlobals.includes(global.name)) {
+      const write = (value: string): string =>
+        emitDeviceGlobalVectorFlatWrite(global, storageView.index, value, storageView.valueType, context.ir, context);
+      if (storageView.field) {
+        const scalar = cudaVectorScalarType(storageView.valueType) ?? "float";
+        const currentVector = emitDeviceGlobalVectorFlatRead(global, storageView.index, storageView.valueType, context.ir, context);
+        const current = `${currentVector}.${storageView.field}`;
+        const laneValue = expression.operator === "="
+          ? emitExpressionAsValueType(expression.right, scalar, context)
+          : `(${current} ${expression.operator.slice(0, -1)} ${emitExpressionAsValueType(expression.right, scalar, context)})`;
+        return write(emitVectorLaneSetExpression(currentVector, storageView.valueType, storageView.fieldIndex ?? 0, laneValue));
+      }
+      if (expression.operator !== "=") {
+        const current = emitDeviceGlobalVectorFlatRead(global, storageView.index, storageView.valueType, context.ir, context);
         const op = expression.operator.slice(0, -1);
         const vectorRight = emitExpressionAsVectorOperand(expression.right, storageView.valueType as CudaLiteVectorType, context);
         return write(`(${current} ${op} ${vectorRight})`);
