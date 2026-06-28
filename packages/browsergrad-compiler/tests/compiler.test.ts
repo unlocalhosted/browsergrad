@@ -8618,6 +8618,37 @@ __global__ void wmma_toy(float* A, float* B, float* C) {
     expect(compiled.wgsl).toContain("write_f32");
   });
 
+  it("resolves same-named local pointer aliases by source scope for WMMA loads", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void wmma_scoped_alias(float* A, float* C, int first_marker, int second_marker) {
+  for (int outer = 0; outer < 1; outer++) {
+    int first_sel = first_marker;
+    wmma::fragment<wmma::matrix_a, 2, 2, 2, float, wmma::row_major> frag[1];
+    for (int i = 0; i < 1; i++) {
+      float* tile = A + first_sel * 4;
+      wmma::load_matrix_sync(frag[i], tile, 2);
+    }
+  }
+  for (int outer = 0; outer < 1; outer++) {
+    int second_sel = second_marker;
+    wmma::fragment<wmma::matrix_a, 2, 2, 2, float, wmma::row_major> frag[1];
+    for (int i = 0; i < 1; i++) {
+      float* tile = A + second_sel * 4;
+      wmma::load_matrix_sync(frag[i], tile, 2);
+    }
+  }
+  C[0] = 0.0f;
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
+    const firstBlock = compiled.wgsl.slice(
+      compiled.wgsl.indexOf("var first_sel"),
+      compiled.wgsl.indexOf("var second_sel"),
+    );
+    expect(firstBlock).toContain("first_sel");
+    expect(firstBlock).not.toContain("second_sel");
+  });
+
   it("supports WMMA tf32 precision aliases and fragment lane access", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void wmma_tf32(float* A, float* C) {

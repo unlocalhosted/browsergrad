@@ -339,7 +339,7 @@ interface EmitContext {
   uniformScalarTypeFor(name: string): CudaLiteScalarType | undefined;
   isAtomicShared(name: string): boolean;
   isAtomicDeviceGlobal(name: string): boolean;
-  pointerAliasFor(name: string): PointerAlias | undefined;
+  pointerAliasFor(name: string, span?: SourceSpan): PointerAlias | undefined;
   localPointerHandleFor(name: string): CudaLiteVarDecl | undefined;
   poolPointerFor(name: string): PoolPointerAlias | undefined;
   pointerBaseOffsetFieldFor(name: string): string | undefined;
@@ -373,6 +373,7 @@ interface PointerAlias {
   readonly rootName: string;
   readonly baseIndex: CudaLiteExpression;
   readonly valueType?: CudaLiteScalarType;
+  readonly declarationSpan?: SourceSpan;
 }
 
 interface PoolPointerAlias {
@@ -642,8 +643,8 @@ function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions 
     isAtomicDeviceGlobal(name) {
       return ir.atomicDeviceGlobals.includes(name);
     },
-    pointerAliasFor(name) {
-      return pointerAliases.get(name);
+    pointerAliasFor(name, span) {
+      return pointerAliasDeclarationFor(pointerAliases, name, span);
     },
     localPointerHandleFor(name) {
       return localPointerHandles.get(name);
@@ -1386,8 +1387,8 @@ function emitDeviceFunction(fn: CudaLiteDeviceFunction, context: EmitContext): s
       localPointerHandleFor(name) {
         return functionLocalPointerHandles.get(name) ?? context.localPointerHandleFor(name);
       },
-      pointerAliasFor(name) {
-        return functionPointerAliases.get(name) ?? context.pointerAliasFor(name);
+      pointerAliasFor(name, span) {
+        return pointerAliasDeclarationFor(functionPointerAliases, name, span) ?? context.pointerAliasFor(name, span);
       },
       paramFor(name) {
         return fn.params.find((param) => !param.pointer && param.name === name) ?? context.paramFor(name);
@@ -1599,7 +1600,7 @@ function usesLocalPointerAliasDereference(statements: readonly CudaLiteStatement
     const alias = expression.kind === "unary" &&
       expression.operator === "*" &&
       expression.argument.kind === "identifier"
-      ? aliases.get(expression.argument.name)
+      ? pointerAliasDeclarationFor(aliases, expression.argument.name, expression.argument.span)
       : undefined;
     if (
       alias !== undefined &&
@@ -2716,7 +2717,7 @@ function devicePointerArgumentParts(expression: CudaLiteExpression, context: Emi
     if (globalId !== undefined) return { buffer: `${globalId}u`, base: "0u" };
     const constantId = context.constantPointerIdFor(expression.name);
     if (constantId !== undefined) return { buffer: `${constantId}u`, base: "0u" };
-    const alias = context.pointerAliasFor(expression.name);
+    const alias = context.pointerAliasFor(expression.name, expression.span);
     if (alias) {
       const target = devicePointerArgumentParts({
         kind: "identifier",
@@ -2895,7 +2896,7 @@ function devicePointerValueTypeForExpression(expression: CudaLiteExpression, con
     if (pointerArray) return pointerArray.valueType;
     const handle = context.localPointerHandleFor(root);
     if (handle) return handle.valueType;
-    const alias = context.pointerAliasFor(root);
+    const alias = context.pointerAliasFor(root, expression.span);
     if (alias?.valueType) return alias.valueType;
     const param = context.devicePointerParamFor(root) ?? context.paramFor(root);
     if (param?.pointer) return param.valueType;
@@ -4024,8 +4025,13 @@ function collectMutableLocalPointerNames(statements: readonly CudaLiteStatement[
 function collectPointerAliases(
   statements: readonly CudaLiteStatement[],
   skipNames: ReadonlySet<string> = new Set(),
-): ReadonlyMap<string, PointerAlias> {
-  const aliases = new Map<string, PointerAlias>();
+): ReadonlyMap<string, readonly PointerAlias[]> {
+  const aliases = new Map<string, PointerAlias[]>();
+  const addAlias = (statement: CudaLiteVarDecl, alias: PointerAlias): void => {
+    const list = aliases.get(statement.name) ?? [];
+    list.push({ ...alias, declarationSpan: statement.span });
+    aliases.set(statement.name, list);
+  };
   const walk = (items: readonly CudaLiteStatement[], inheritedArrays: ReadonlyMap<string, CudaLiteVarDecl>): void => {
     const arrays = new Map(inheritedArrays);
     for (const item of items) {
@@ -4034,7 +4040,7 @@ function collectPointerAliases(
       }
       if (item.kind === "var" && item.pointer && !skipNames.has(item.name)) {
         const alias = pointerAliasForVar(item, arrays);
-        if (alias) aliases.set(item.name, alias);
+        if (alias) addAlias(item, alias);
       }
       if (item.kind === "dim3" || item.kind === "cooperative-group" || item.kind === "kernel-launch") continue;
       if (item.kind === "if") {
@@ -4048,7 +4054,7 @@ function collectPointerAliases(
         }
         if (item.init?.kind === "var" && item.init.pointer && !skipNames.has(item.init.name)) {
           const alias = pointerAliasForVar(item.init, loopArrays);
-          if (alias) aliases.set(item.init.name, alias);
+          if (alias) addAlias(item.init, alias);
         }
         walk(item.body, loopArrays);
       }
@@ -4057,6 +4063,21 @@ function collectPointerAliases(
   };
   walk(statements, new Map());
   return aliases;
+}
+
+function pointerAliasDeclarationFor(
+  aliases: ReadonlyMap<string, readonly PointerAlias[]>,
+  name: string,
+  span?: SourceSpan,
+): PointerAlias | undefined {
+  const candidates = aliases.get(name);
+  if (!candidates || candidates.length === 0) return undefined;
+  if (!span) return candidates[candidates.length - 1];
+  for (let index = candidates.length - 1; index >= 0; index--) {
+    const candidate = candidates[index]!;
+    if (!candidate.declarationSpan || candidate.declarationSpan.start <= span.start) return candidate;
+  }
+  return candidates[0];
 }
 
 function collectMutableStoragePointerBases(
@@ -6069,7 +6090,7 @@ function atomicExpressionValueType(
 ): CudaLiteScalarType | undefined {
   const root = rootIdentifier(expression);
   if (root) {
-    const alias = context.pointerAliasFor(root);
+    const alias = context.pointerAliasFor(root, expression.span);
     if (alias?.valueType) return alias.valueType;
     const direct = context.paramFor(root);
     if (direct?.pointer) return direct.valueType;
