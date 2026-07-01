@@ -2829,6 +2829,41 @@ __global__ void textureAtlasVectorAtomicPointerAliasCompound(cudaTextureObject_t
     summary[0] = (value.x + value.y + value.z + value.w) + 100u * (laneTwo.x + laneTwo.y + laneTwo.z + laneTwo.w);
   }
 }`,
+  textureAtlasVectorAtomicPointerArraySelect: `
+__device__ uint4 read_atomic_pointer_array_texture_atlas_vec(cudaTextureObject_t texArg) {
+  uint4 layered = tex2DLayered<uint4>(texArg, 0.0f, 1.0f, 1.0f);
+  uint4 volume = tex3D<uint4>(texArg, 2.0f, 1.0f, 1.0f);
+  return make_uint4(layered.x + volume.x, layered.y + volume.y, layered.z + volume.z, layered.w + volume.w);
+}
+
+__device__ void atomic_array_select_atlas_vec(uint *scalarOut, uint4 value) {
+  atomicAdd(&scalarOut[0], value.x);
+  atomicAdd(&scalarOut[1], value.y);
+  atomicAdd(&scalarOut[2], value.z);
+  atomicAdd(&scalarOut[3], value.w);
+}
+
+__global__ void textureAtlasVectorAtomicPointerArraySelect(cudaTextureObject_t tex, uint4 *out, uint4 *shadow, uint *summary) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid == 0) {
+    uint *slots[2];
+    slots[0] = reinterpret_cast<uint*>(shadow + 1);
+    slots[1] = reinterpret_cast<uint*>(out + 1);
+    uint4 value = read_atomic_pointer_array_texture_atlas_vec(tex);
+    int pick = value.x > 0u ? 1 : 0;
+    atomic_array_select_atlas_vec(slots[pick], value);
+    atomicAdd(slots[0] + 2, 5u);
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
   textureDeepHelperActiveLaneVectorStore: `
 __device__ float4 read_deep_texture_leaf(cudaTextureObject_t texArg) {
   return tex2D<float4>(texArg, 0.5f, 0.5f);
@@ -6659,6 +6694,29 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [8177] },
+          },
+          {
+            name: "texture:atlas-vector-atomic-pointer-array-select",
+            source: SOURCES.textureAtlasVectorAtomicPointerArraySelect,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [10463] },
           },
           {
             name: "texture:deep-helper-active-lane-vector-store",
