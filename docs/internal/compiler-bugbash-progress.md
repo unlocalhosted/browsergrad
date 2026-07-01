@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-01T17:00:07Z
+Last updated: 2026-07-01T17:03:22Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,9 +11,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | texture pointer-array CAS/minmax active-lane return probed green; continue next corpus-shaped storage/texture/control probe |
+| Active work item | atlas texture pointer-array CAS/minmax active-lane return probed green; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
-| Worktree | Dirty until current texture pointer-array CAS/minmax fixtures are committed |
+| Worktree | Dirty until current atlas texture pointer-array CAS/minmax fixtures are committed |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
 
 ## How To Track This
@@ -480,11 +480,17 @@ Current verified gates:
 - hot texture pointer-alias atomic pointer-array CAS/minmax active-lane probe: repeat `5`, warmup `1`, `10 passed / 0 failed / 0 skipped`, best warm `4.3ms` / `4.2ms`, speedups `1.37` / `1.26`
 - WebGPU fixture test after texture pointer-array CAS/minmax probe: passed
 - WebGPU smoke after texture pointer-array CAS/minmax probe: `209 passed / 0 failed / 0 skipped`
+- atlas texture vector atomic pointer-array CAS/minmax active-lane fixtures: `texture:atlas-vector-atomic-pointer-array-cas-active-lane-return,texture:atlas-vector-atomic-pointer-array-minmax-active-lane-return` are `2 passed / 0 failed / 0 skipped`
+- hot atlas texture vector atomic pointer-array CAS/minmax active-lane probe: repeat `5`, warmup `1`, `10 passed / 0 failed / 0 skipped`, best warm `4.5ms` / `4.5ms`, speedups `1.38` / `1.11`
+- WebGPU fixture test after atlas texture pointer-array CAS/minmax probe: passed
+- WebGPU smoke after atlas texture pointer-array CAS/minmax probe: `211 passed / 0 failed / 0 skipped`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Probed green | atlas texture pointer-array CAS/exchange active-lane return | atlas/3D texture-fed `uint4` selected scalar pointer-array CAS/exchange ops before an early `return` could regress atlas sampling, compare/exchange old values, selected buffer handles, or active-lane side effects before a later barrier | existing atlas/3D texture vector read, pointer-array CAS/exchange lowering, and active-lane guard preserve old-value side effects before return | `texture:atlas-vector-atomic-pointer-array-cas-active-lane-return` `1/0/0`; smoke `211/0/0`; hot gate `5/0/0`, speedup `1.38` |
+| Probed green | atlas texture pointer-array min/max active-lane return | atlas/3D texture-fed `uint4` selected scalar pointer-array min/max ops before an early `return` could regress atlas sampling, unsigned min/max old values, selected buffer handles, or active-lane side effects before a later barrier | existing atlas/3D texture vector read, pointer-array min/max lowering, and active-lane guard preserve old-value side effects before return | `texture:atlas-vector-atomic-pointer-array-minmax-active-lane-return` `1/0/0`; smoke `211/0/0`; hot gate `5/0/0`, speedup `1.11` |
 | Probed green | texture pointer-array CAS/exchange active-lane return | texture-fed `uint4` selected scalar pointer-array CAS/exchange ops before an early `return` could regress compare/exchange old values, selected buffer handles, or active-lane side effects before a later barrier | existing texture vector read, pointer-array CAS/exchange lowering, and active-lane guard preserve old-value side effects before return | `texture:pointer-alias-atomic-pointer-array-cas-active-lane-return` `1/0/0`; smoke `209/0/0`; hot gate `5/0/0`, speedup `1.37` |
 | Probed green | texture pointer-array min/max active-lane return | texture-fed `uint4` selected scalar pointer-array min/max ops before an early `return` could regress unsigned min/max old values, selected buffer handles, or active-lane side effects before a later barrier | existing texture vector read, pointer-array min/max lowering, and active-lane guard preserve old-value side effects before return | `texture:pointer-alias-atomic-pointer-array-minmax-active-lane-return` `1/0/0`; smoke `209/0/0`; hot gate `5/0/0`, speedup `1.26` |
 | Probed green | layered surface pointer-array CAS/exchange active-lane return | layered-surface-fed `uint4` selected scalar pointer-array CAS/exchange ops before an early `return` could regress compare/exchange old values, selected buffer handles, or active-lane side effects before a later barrier | existing layered surface vector read, pointer-array CAS/exchange lowering, and active-lane guard preserve old-value side effects before return | `surface:pointer-alias-atomic-pointer-array-cas-active-lane-return` `1/0/0`; smoke `207/0/0`; hot gate `5/0/0`, speedup `1.28` |
@@ -661,6 +667,8 @@ Current added surface/texture cases:
 - `texture:atlas-vector-atomic-pointer-alias-readback`
 - `texture:atlas-vector-atomic-pointer-alias-compound`
 - `texture:atlas-vector-atomic-pointer-array-select`
+- `texture:atlas-vector-atomic-pointer-array-cas-active-lane-return`
+- `texture:atlas-vector-atomic-pointer-array-minmax-active-lane-return`
 - `texture:deep-helper-active-lane-vector-store`
 - `texture:mixed-scalar-vector-active-lane-store`
 - `texture:pointer-alias-active-lane-store`
@@ -711,7 +719,7 @@ Current added pointer/control cases:
 - `control:active-lane-shared-return-side-effect-barrier`
 - `control:subgroup-truthiness-assignment-scalar`
 
-Smoke current: `209/0/0`.
+Smoke current: `211/0/0`.
 
 Full source e2e current: `221/0/0`.
 

@@ -3182,6 +3182,82 @@ __global__ void textureAtlasVectorAtomicPointerArraySelect(cudaTextureObject_t t
     summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
   }
 }`,
+  textureAtlasVectorAtomicPointerArrayCasActiveLaneReturn: `
+__device__ uint4 read_cas_pointer_array_texture_atlas_vec(cudaTextureObject_t texArg) {
+  uint4 layered = tex2DLayered<uint4>(texArg, 0.0f, 1.0f, 1.0f);
+  uint4 volume = tex3D<uint4>(texArg, 2.0f, 1.0f, 1.0f);
+  return make_uint4(layered.x + volume.x, layered.y + volume.y, layered.z + volume.z, layered.w + volume.w);
+}
+
+__device__ void atomic_cas_array_select_atlas_vec(uint *scalarOut, uint *shadowOut, uint4 value) {
+  uint oldX = atomicCAS(scalarOut + 0, 2u, value.x + 40u);
+  uint oldY = atomicCAS(scalarOut + 1, 99u, value.y + 50u);
+  uint oldZ = atomicExch(scalarOut + 2, value.z + 60u);
+  uint oldW = atomicAdd(scalarOut + 3, oldX + oldY + oldZ + value.w);
+  atomicExch(shadowOut + 0, oldW);
+  atomicCAS(shadowOut + 1, 201u, oldY);
+  atomicExch(shadowOut + 2, oldZ);
+}
+
+__global__ void textureAtlasVectorAtomicPointerArrayCasActiveLaneReturn(cudaTextureObject_t tex, uint4 *out, uint4 *shadow, uint *summary, int N) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    uint *slots[2];
+    slots[0] = reinterpret_cast<uint*>(shadow + 1);
+    slots[1] = reinterpret_cast<uint*>(out + 1);
+    uint4 value = read_cas_pointer_array_texture_atlas_vec(tex);
+    int pick = value.x > 0u ? 1 : 0;
+    atomic_cas_array_select_atlas_vec(slots[pick], slots[0], value);
+    return;
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
+  textureAtlasVectorAtomicPointerArrayMinMaxActiveLaneReturn: `
+__device__ uint4 read_minmax_pointer_array_texture_atlas_vec(cudaTextureObject_t texArg) {
+  uint4 layered = tex2DLayered<uint4>(texArg, 0.0f, 1.0f, 1.0f);
+  uint4 volume = tex3D<uint4>(texArg, 2.0f, 1.0f, 1.0f);
+  return make_uint4(layered.x + volume.x, layered.y + volume.y, layered.z + volume.z, layered.w + volume.w);
+}
+
+__device__ void atomic_minmax_array_select_atlas_vec(uint *scalarOut, uint *shadowOut, uint4 value) {
+  uint oldX = atomicMin(scalarOut + 0, value.x + 20u);
+  uint oldY = atomicMax(scalarOut + 1, value.y + 50u);
+  uint oldZ = atomicMin(scalarOut + 2, value.z + 4u);
+  uint oldW = atomicMax(scalarOut + 3, value.w + oldX + oldY + oldZ);
+  atomicMin(shadowOut + 0, oldW);
+  atomicMax(shadowOut + 1, oldY + oldZ);
+  atomicMin(shadowOut + 2, value.z);
+}
+
+__global__ void textureAtlasVectorAtomicPointerArrayMinMaxActiveLaneReturn(cudaTextureObject_t tex, uint4 *out, uint4 *shadow, uint *summary, int N) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    uint *slots[2];
+    slots[0] = reinterpret_cast<uint*>(shadow + 1);
+    slots[1] = reinterpret_cast<uint*>(out + 1);
+    uint4 value = read_minmax_pointer_array_texture_atlas_vec(tex);
+    int pick = value.w > 0u ? 1 : 0;
+    atomic_minmax_array_select_atlas_vec(slots[pick], slots[0], value);
+    return;
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
   textureDeepHelperActiveLaneVectorStore: `
 __device__ float4 read_deep_texture_leaf(cudaTextureObject_t texArg) {
   return tex2D<float4>(texArg, 0.5f, 0.5f);
@@ -7749,6 +7825,54 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [10463] },
+          },
+          {
+            name: "texture:atlas-vector-atomic-pointer-array-cas-active-lane-return",
+            source: SOURCES.textureAtlasVectorAtomicPointerArrayCasActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [5048] },
+          },
+          {
+            name: "texture:atlas-vector-atomic-pointer-array-minmax-active-lane-return",
+            source: SOURCES.textureAtlasVectorAtomicPointerArrayMinMaxActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [7373] },
           },
           {
             name: "texture:deep-helper-active-lane-vector-store",
