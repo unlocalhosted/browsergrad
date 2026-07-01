@@ -2079,6 +2079,21 @@ __global__ void textureUint3ActiveLaneStore(cudaTextureObject_t tex, uint3 *out,
   __syncthreads();
   out[tid] = make_uint3(1u + (uint)tid, 10u + (uint)tid, 100u + (uint)tid);
 }`,
+  textureInt3ActiveLaneStore: `
+__device__ int3 read_return_texture_int3(cudaTextureObject_t texArg) {
+  return tex2D<int3>(texArg, 0.5f, 0.5f);
+}
+
+__global__ void textureInt3ActiveLaneStore(cudaTextureObject_t tex, int3 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    int3 value = read_return_texture_int3(tex);
+    out[tid] = make_int3(value.x - tid, value.y - tid, value.z - tid);
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_int3(1 + tid, -10 - tid, 100 + tid);
+}`,
   textureAtlasActiveLaneReturnReadSideEffect: `
 __device__ float read_return_texture_atlas(cudaTextureObject_t texArg) {
   float layered = tex2DLayered<float>(texArg, 0.0f, 1.0f, 1.0f);
@@ -4960,6 +4975,33 @@ const html = String.raw`<!doctype html>
               2, 11, 101,
               3, 12, 102,
               5, 6, 8,
+            ] },
+          },
+          {
+            name: "texture:int3-active-lane-store",
+            source: SOURCES.textureInt3ActiveLaneStore,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(12),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([-2, 3, -5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [
+              1, -10, 100,
+              2, -11, 101,
+              3, -12, 102,
+              -5, 0, -8,
             ] },
           },
           {
