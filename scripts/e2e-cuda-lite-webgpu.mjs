@@ -2210,6 +2210,51 @@ __global__ void textureActiveLaneReturnReadSideEffect(cudaTextureObject_t tex, f
   __syncthreads();
   out[tid] = 1.0f + (float)tid;
 }`,
+  textureFloat2ActiveLaneStore: `
+__device__ float2 read_return_texture_float2(cudaTextureObject_t texArg) {
+  return tex2D<float2>(texArg, 0.5f, 0.5f);
+}
+
+__global__ void textureFloat2ActiveLaneStore(cudaTextureObject_t tex, float2 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    float2 value = read_return_texture_float2(tex);
+    out[tid] = make_float2(value.x + (float)tid, value.y + (float)tid);
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_float2(1.0f + (float)tid, 10.0f + (float)tid);
+}`,
+  textureUint2ActiveLaneStore: `
+__device__ uint2 read_return_texture_uint2(cudaTextureObject_t texArg) {
+  return tex2D<uint2>(texArg, 0.5f, 0.5f);
+}
+
+__global__ void textureUint2ActiveLaneStore(cudaTextureObject_t tex, uint2 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    uint2 value = read_return_texture_uint2(tex);
+    out[tid] = make_uint2(value.x + (uint)tid, value.y + (uint)tid);
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_uint2(1u + (uint)tid, 10u + (uint)tid);
+}`,
+  textureInt2ActiveLaneStore: `
+__device__ int2 read_return_texture_int2(cudaTextureObject_t texArg) {
+  return tex2D<int2>(texArg, 0.5f, 0.5f);
+}
+
+__global__ void textureInt2ActiveLaneStore(cudaTextureObject_t tex, int2 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    int2 value = read_return_texture_int2(tex);
+    out[tid] = make_int2(value.x - tid, value.y - tid);
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_int2(1 + tid, -10 - tid);
+}`,
   textureFloat3ActiveLaneStore: `
 __device__ float3 read_return_texture_float3(cudaTextureObject_t texArg) {
   return tex2D<float3>(texArg, 0.5f, 0.5f);
@@ -5228,6 +5273,87 @@ const html = String.raw`<!doctype html>
               2, 11, 101,
               3, 12, 102,
               5, 6, 8,
+            ] },
+          },
+          {
+            name: "texture:float2-active-lane-store",
+            source: SOURCES.textureFloat2ActiveLaneStore,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(8),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [
+              1, 10,
+              2, 11,
+              3, 12,
+              5, 6,
+            ] },
+          },
+          {
+            name: "texture:uint2-active-lane-store",
+            source: SOURCES.textureUint2ActiveLaneStore,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [
+              1, 10,
+              2, 11,
+              3, 12,
+              5, 6,
+            ] },
+          },
+          {
+            name: "texture:int2-active-lane-store",
+            source: SOURCES.textureInt2ActiveLaneStore,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(8),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([-2, 3, -5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [
+              1, -10,
+              2, -11,
+              3, -12,
+              -5, 0,
             ] },
           },
           {
