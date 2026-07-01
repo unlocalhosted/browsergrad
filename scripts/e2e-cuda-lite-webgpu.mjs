@@ -1861,6 +1861,29 @@ __global__ void surfaceVectorRead3d(cudaSurfaceObject_t surf, float *out) {
     out[3] = pointerValue.w + returnValue.w;
   }
 }`,
+  surface3DVectorWriteActiveLaneReturn: `
+__device__ void write_vec3d_active(cudaSurfaceObject_t surfaceArg, float base) {
+  surf3Dwrite(make_float4(base + 1.0f, base + 2.0f, base + 3.0f, base + 4.0f), surfaceArg, 0, 0, 1);
+}
+
+__device__ float4 read_vec3d_active(cudaSurfaceObject_t surfaceArg) {
+  return surf3Dread<float4>(surfaceArg, 0, 0, 1);
+}
+
+__global__ void surface3DVectorWriteActiveLaneReturn(cudaSurfaceObject_t surf, float *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    write_vec3d_active(surf, 40.0f + (float)tid);
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    float4 value = read_vec3d_active(surf);
+    out[0] = value.x + value.y + value.z + value.w;
+  } else {
+    out[tid] = 1.0f + (float)tid;
+  }
+}`,
   surfaceLayeredWrite: `
 __global__ void surfaceLayeredWrite(cudaSurfaceObject_t outputSurf) {
   if (threadIdx.x == 0) {
@@ -5514,6 +5537,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [10, 12, 14, 16] },
+          },
+          {
+            name: "surface:surf3d-vector-write-active-lane-return",
+            source: SOURCES.surface3DVectorWriteActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [182, 2, 3, 0] },
           },
           {
             name: "surface:layered-write",
