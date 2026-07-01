@@ -2442,6 +2442,42 @@ __global__ void surface1DPointerAliasAtomicPointerArrayCasActiveLaneReturn(cudaS
     summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
   }
 }`,
+  surface1DPointerAliasAtomicPointerArrayMinMaxActiveLaneReturn: `
+__device__ uint4 read_1d_surface_minmax_pointer_array_vec(cudaSurfaceObject_t surfaceArg, int x) {
+  return surf1Dread<uint4>(surfaceArg, x * sizeof(float));
+}
+
+__device__ void atomic_1d_surface_minmax_array_select_vec(uint *scalarOut, uint *shadowOut, uint4 value) {
+  uint oldX = atomicMin(scalarOut + 0, value.x + 20u);
+  uint oldY = atomicMax(scalarOut + 1, value.y + 50u);
+  uint oldZ = atomicMin(scalarOut + 2, value.z + 4u);
+  uint oldW = atomicMax(scalarOut + 3, value.w + oldX + oldY + oldZ);
+  atomicMin(shadowOut + 0, oldW);
+  atomicMax(shadowOut + 1, oldY + oldZ);
+  atomicMin(shadowOut + 2, value.z);
+}
+
+__global__ void surface1DPointerAliasAtomicPointerArrayMinMaxActiveLaneReturn(cudaSurfaceObject_t surf, uint4 *out, uint4 *shadow, uint *summary, int N) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    uint *slots[2];
+    slots[0] = reinterpret_cast<uint*>(shadow + 1);
+    slots[1] = reinterpret_cast<uint*>(out + 1);
+    uint4 value = read_1d_surface_minmax_pointer_array_vec(surf, 0);
+    int pick = value.w > 0u ? 1 : 0;
+    atomic_1d_surface_minmax_array_select_vec(slots[pick], slots[0], value);
+    return;
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
   surfacePointerAliasAtomicActiveLaneStore: `
 __device__ float read_atomic_alias_surface_scalar(cudaSurfaceObject_t surfaceArg, int layer) {
   return surf2DLayeredread<float>(surfaceArg, 0, 0, layer);
@@ -6812,6 +6848,25 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [4830] },
+          },
+          {
+            name: "surface:surf1d-pointer-alias-atomic-pointer-array-minmax-active-lane-return",
+            source: SOURCES.surface1DPointerAliasAtomicPointerArrayMinMaxActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([2, 3, 5, 7]) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [6485] },
           },
           {
             name: "surface:pointer-alias-atomic-active-lane-store",
