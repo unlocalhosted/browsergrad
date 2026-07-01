@@ -2241,6 +2241,41 @@ __global__ void surface1DPointerAliasAtomicVectorReadback(cudaSurfaceObject_t su
     summary[0] = value.x + value.y + value.z + value.w;
   }
 }`,
+  surface1DPointerAliasAtomicVectorCompound: `
+__device__ uint read_1d_atomic_compound_surface_scalar(cudaSurfaceObject_t surfaceArg, int x) {
+  return surf1Dread<uint>(surfaceArg, x * sizeof(float));
+}
+
+__device__ void atomic_1d_surface_compound_alias_lane(uint *scalarOut, int lane, uint value) {
+  atomicAdd(&scalarOut[lane * 4 + 1], value);
+}
+
+__device__ void add_1d_surface_vector_alias(uint4 *vectorOut, int lane, uint4 value) {
+  vectorOut[lane] += value;
+}
+
+__device__ void add_1d_surface_vector_alias_y(uint4 *vectorOut, int lane, uint value) {
+  vectorOut[lane].y += value;
+}
+
+__global__ void surface1DPointerAliasAtomicVectorCompound(cudaSurfaceObject_t surf, uint4 *out, uint *summary) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  __syncthreads();
+  if (tid == 0) {
+    uint *scalarView = reinterpret_cast<uint*>(out);
+    atomic_1d_surface_compound_alias_lane(scalarView, 1, read_1d_atomic_compound_surface_scalar(surf, 2));
+    uint4 *vectorView = reinterpret_cast<uint4*>(out);
+    add_1d_surface_vector_alias(vectorView, 1, make_uint4(1u, 1u, 1u, 1u));
+    add_1d_surface_vector_alias_y(vectorView, 2, 9u);
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 laneTwo = out[2];
+    summary[0] = (value.x + value.y + value.z + value.w) + 100u * (laneTwo.x + laneTwo.y + laneTwo.z + laneTwo.w);
+  }
+}`,
   surfacePointerAliasAtomicActiveLaneStore: `
 __device__ float read_atomic_alias_surface_scalar(cudaSurfaceObject_t surfaceArg, int layer) {
   return surf2DLayeredread<float>(surfaceArg, 0, 0, layer);
@@ -5763,6 +5798,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [70] },
+          },
+          {
+            name: "surface:surf1d-pointer-alias-atomic-vector-compound",
+            source: SOURCES.surface1DPointerAliasAtomicVectorCompound,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([2, 3, 5, 7]) },
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [7874] },
           },
           {
             name: "surface:pointer-alias-atomic-active-lane-store",
