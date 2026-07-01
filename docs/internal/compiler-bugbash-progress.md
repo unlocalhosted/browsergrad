@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-01T16:42:03Z
+Last updated: 2026-07-01T16:45:10Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,9 +11,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | texture pointer-array active-lane return probed green; continue next corpus-shaped storage/texture/control probe |
+| Active work item | surface pointer-array active-lane return probed green; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
-| Worktree | Dirty until current texture pointer-array active-lane fixture is committed |
+| Worktree | Dirty until current surface pointer-array active-lane fixture is committed |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
 
 ## How To Track This
@@ -456,11 +456,16 @@ Current verified gates:
 - hot texture pointer-alias atomic pointer-array active-lane probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `4.6ms`, speedup `1.26`
 - WebGPU fixture test after texture pointer-array active-lane probe: passed
 - WebGPU smoke after texture pointer-array active-lane probe: `201 passed / 0 failed / 0 skipped`
+- surface pointer-alias atomic pointer-array active-lane fixture: `surface:pointer-alias-atomic-pointer-array-active-lane-return` is `1 passed / 0 failed / 0 skipped`
+- hot surface pointer-alias atomic pointer-array active-lane probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `4.6ms`, speedup `1.24`
+- WebGPU fixture test after surface pointer-array active-lane probe: passed
+- WebGPU smoke after surface pointer-array active-lane probe: `202 passed / 0 failed / 0 skipped`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Probed green | surface pointer-array active-lane return | layered surface-fed `uint4` selected scalar pointer-array atomics before an early `return` could regress active-lane side effects or selected storage handles before a later barrier | existing active-lane guard plus pointer-array scalar atomic lowering preserves layered-surface side effects before return | `surface:pointer-alias-atomic-pointer-array-active-lane-return` `1/0/0`; smoke `202/0/0`; hot gate `5/0/0`, speedup `1.24` |
 | Probed green | texture pointer-array active-lane return | texture-fed `uint4` selected scalar pointer-array atomics before an early `return` could regress active-lane side effects or selected pointer-array storage handles before a later barrier | existing active-lane guard plus pointer-array scalar atomic lowering preserves non-atlas texture side effects before return | `texture:pointer-alias-atomic-pointer-array-active-lane-return` `1/0/0`; smoke `201/0/0`; hot gate `5/0/0`, speedup `1.26` |
 | Probed green | texture pointer-alias atomic pointer-array select | texture-fed `uint4` atomic lane writes through selected scalar pointer-array slots could regress pointer-array base selection or flat lane writes outside atlas/surface paths | existing storage pointer-array and scalar atomic lane lowering handles non-atlas texture vector reads correctly | `texture:pointer-alias-atomic-pointer-array-select` `1/0/0`; smoke `200/0/0`; hot gate `5/0/0`, speedup `1.40` |
 | Fixed | while/do-while divergent break before later barrier | `while` and `do-while` loops with thread-dependent `break` before a later `__syncthreads()` still emitted raw loop breaks even after the `for`-loop fix | active-lane break lowering now detects direct trailing breaks in `for`, `while`, and `do-while` loop bodies before later barriers/subgroup calls | unit guard `keeps post-loop barriers uniform after while and do-while divergent breaks`; WebGPU fixtures `2/0/0`; smoke `199/0/0`; hot gate `10/0/0`, speedups `1.17` / `1.07` |
@@ -590,6 +595,7 @@ Current added surface/texture cases:
 - `surface:pointer-alias-atomic-vector-readback`
 - `surface:pointer-alias-atomic-vector-compound`
 - `surface:pointer-alias-atomic-pointer-array-select`
+- `surface:pointer-alias-atomic-pointer-array-active-lane-return`
 - `surface:uint4-vector-active-lane-return`
 - `surface:int4-vector-active-lane-return`
 - `surface:helper-vector-layered-write`
@@ -671,7 +677,7 @@ Current added pointer/control cases:
 - `control:active-lane-shared-return-side-effect-barrier`
 - `control:subgroup-truthiness-assignment-scalar`
 
-Smoke current: `201/0/0`.
+Smoke current: `202/0/0`.
 
 Full source e2e current: `221/0/0`.
 
