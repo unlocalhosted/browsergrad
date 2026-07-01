@@ -2652,6 +2652,93 @@ __global__ void textureSurfaceInt2VectorActiveLaneReturn(cudaSurfaceObject_t sur
     out[tid] = 1 + tid;
   }
 }`,
+  textureSurfaceFloat3VectorActiveLaneReturn: `
+__device__ float3 sample_return_surface_float3(cudaTextureObject_t texArg, int lane) {
+  float3 value = tex2D<float3>(texArg, 0.5f, 0.5f);
+  return make_float3(value.x + (float)lane, value.y + (float)lane, value.z + (float)lane);
+}
+
+__device__ void write_return_surface_float3(cudaSurfaceObject_t surfaceArg, float3 value, int layer) {
+  surf2DLayeredwrite(value, surfaceArg, 0, 0, layer);
+}
+
+__device__ float3 read_return_surface_float3(cudaSurfaceObject_t surfaceArg, int layer) {
+  return surf2DLayeredread<float3>(surfaceArg, 0, 0, layer);
+}
+
+__global__ void textureSurfaceFloat3VectorActiveLaneReturn(cudaSurfaceObject_t surf, cudaTextureObject_t tex, float *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    float3 value = sample_return_surface_float3(tex, tid);
+    write_return_surface_float3(surf, value, 1);
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    float3 value = read_return_surface_float3(surf, 1);
+    out[0] = value.x + value.y + value.z;
+  } else {
+    out[tid] = 1.0f + (float)tid;
+  }
+}`,
+  textureSurfaceUint3VectorActiveLaneReturn: `
+__device__ uint3 sample_return_surface_uint3(cudaTextureObject_t texArg, int lane) {
+  uint3 value = tex2D<uint3>(texArg, 0.5f, 0.5f);
+  return make_uint3(value.x + (uint)lane, value.y + (uint)lane, value.z + (uint)lane);
+}
+
+__device__ void write_return_surface_uint3(cudaSurfaceObject_t surfaceArg, uint3 value, int layer) {
+  surf2DLayeredwrite(value, surfaceArg, 0, 0, layer);
+}
+
+__device__ uint3 read_return_surface_uint3(cudaSurfaceObject_t surfaceArg, int layer) {
+  return surf2DLayeredread<uint3>(surfaceArg, 0, 0, layer);
+}
+
+__global__ void textureSurfaceUint3VectorActiveLaneReturn(cudaSurfaceObject_t surf, cudaTextureObject_t tex, uint *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    uint3 value = sample_return_surface_uint3(tex, tid);
+    write_return_surface_uint3(surf, value, 1);
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    uint3 value = read_return_surface_uint3(surf, 1);
+    out[0] = value.x + value.y + value.z;
+  } else {
+    out[tid] = 1u + (uint)tid;
+  }
+}`,
+  textureSurfaceInt3VectorActiveLaneReturn: `
+__device__ int3 sample_return_surface_int3(cudaTextureObject_t texArg, int lane) {
+  int3 value = tex2D<int3>(texArg, 0.5f, 0.5f);
+  return make_int3(value.x - lane, value.y - lane, value.z - lane);
+}
+
+__device__ void write_return_surface_int3(cudaSurfaceObject_t surfaceArg, int3 value, int layer) {
+  surf2DLayeredwrite(value, surfaceArg, 0, 0, layer);
+}
+
+__device__ int3 read_return_surface_int3(cudaSurfaceObject_t surfaceArg, int layer) {
+  return surf2DLayeredread<int3>(surfaceArg, 0, 0, layer);
+}
+
+__global__ void textureSurfaceInt3VectorActiveLaneReturn(cudaSurfaceObject_t surf, cudaTextureObject_t tex, int *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    int3 value = sample_return_surface_int3(tex, tid);
+    write_return_surface_int3(surf, value, 1);
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    int3 value = read_return_surface_int3(surf, 1);
+    out[0] = value.x + value.y + value.z;
+  } else {
+    out[tid] = 1 + tid;
+  }
+}`,
   textureSurfaceVolumeVectorActiveLaneReturn: `
 __device__ float4 sample_return_volume_vec(cudaTextureObject_t texArg, int lane) {
   float4 layered = tex2DLayered<float4>(texArg, 0.0f, 1.0f, 1.0f);
@@ -5945,6 +6032,81 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Int32Array", data: [-5, 2, 3, 0] },
+          },
+          {
+            name: "texture-surface:float3-vector-active-lane-return",
+            source: SOURCES.textureSurfaceFloat3VectorActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+              surfaces: {
+                surf: { width: 3, height: 1, data: new Float32Array(6) },
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [19, 2, 3, 0] },
+          },
+          {
+            name: "texture-surface:uint3-vector-active-lane-return",
+            source: SOURCES.textureSurfaceUint3VectorActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+              surfaces: {
+                surf: { width: 3, height: 1, data: new Float32Array(6) },
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [19, 2, 3, 0] },
+          },
+          {
+            name: "texture-surface:int3-vector-active-lane-return",
+            source: SOURCES.textureSurfaceInt3VectorActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(4),
+              },
+              surfaces: {
+                surf: { width: 3, height: 1, data: new Float32Array(6) },
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([-2, 3, -5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [-13, 2, 3, 0] },
           },
           {
             name: "texture-surface:volume-vector-active-lane-return",
