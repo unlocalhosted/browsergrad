@@ -2049,6 +2049,21 @@ __global__ void textureActiveLaneReturnReadSideEffect(cudaTextureObject_t tex, f
   __syncthreads();
   out[tid] = 1.0f + (float)tid;
 }`,
+  textureFloat3ActiveLaneStore: `
+__device__ float3 read_return_texture_float3(cudaTextureObject_t texArg) {
+  return tex2D<float3>(texArg, 0.5f, 0.5f);
+}
+
+__global__ void textureFloat3ActiveLaneStore(cudaTextureObject_t tex, float3 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    float3 value = read_return_texture_float3(tex);
+    out[tid] = make_float3(value.x + (float)tid, value.y + (float)tid, value.z + (float)tid);
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_float3(1.0f + (float)tid, 10.0f + (float)tid, 100.0f + (float)tid);
+}`,
   textureAtlasActiveLaneReturnReadSideEffect: `
 __device__ float read_return_texture_atlas(cudaTextureObject_t texArg) {
   float layered = tex2DLayered<float>(texArg, 0.0f, 1.0f, 1.0f);
@@ -4877,6 +4892,33 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [1, 2, 3, 20] },
+          },
+          {
+            name: "texture:float3-active-lane-store",
+            source: SOURCES.textureFloat3ActiveLaneStore,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(12),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [
+              1, 10, 100,
+              2, 11, 101,
+              3, 12, 102,
+              5, 6, 8,
+            ] },
           },
           {
             name: "texture:atlas-active-lane-return-read-side-effect",
