@@ -522,7 +522,7 @@ function isPackableHalfCarrier(storageType: CudaLiteScalarType): boolean {
   return wgslElementByteSize(storageType) === 4 && !isCudaVectorType(storageType) && storageType !== "bool";
 }
 
-function emitSharedVectorFlatRead(
+export function emitSharedVectorFlatRead(
   shared: CudaLiteVarDecl,
   index: string,
   viewType: CudaLiteScalarType,
@@ -530,9 +530,20 @@ function emitSharedVectorFlatRead(
 ): string {
   const lanes = cudaVectorLaneCount(viewType);
   const scalar = cudaVectorScalarType(viewType) ?? "float";
-  const values = Array.from({ length: lanes }, (_, lane) =>
-    emitSharedPointerRead(shared, `(${index} + ${lane}u)`, context.ir, context, scalar)
-  );
+  const rootLanes = isCudaVectorType(shared.valueType) ? cudaVectorLaneCount(shared.valueType) : 1;
+  const values = Array.from({ length: lanes }, (_, lane) => {
+    const flatIndex = `(${index} + ${lane}u)`;
+    return rootLanes <= 1
+      ? emitSharedPointerRead(shared, flatIndex, context.ir, context, scalar)
+      : emitSharedPointerRead(
+        shared,
+        `(u32(${flatIndex}) / ${rootLanes}u)`,
+        context.ir,
+        context,
+        scalar,
+        `(u32(${flatIndex}) % ${rootLanes}u)`,
+      );
+  });
   return `${wgslScalar(viewType)}(${values.join(", ")})`;
 }
 
@@ -574,13 +585,23 @@ function emitLocalVectorFlatRead(
 ): string {
   const lanes = cudaVectorLaneCount(viewType);
   const scalar = cudaVectorScalarType(viewType) ?? "float";
-  const values = Array.from({ length: lanes }, (_, lane) =>
-    emitLocalPointerRead(local, `(${index} + ${lane}u)`, scalar, context)
-  );
+  const rootLanes = isCudaVectorType(local.valueType) ? cudaVectorLaneCount(local.valueType) : 1;
+  const values = Array.from({ length: lanes }, (_, lane) => {
+    const flatIndex = `(${index} + ${lane}u)`;
+    return rootLanes <= 1
+      ? emitLocalPointerRead(local, flatIndex, scalar, context)
+      : emitLocalPointerRead(
+        local,
+        `(u32(${flatIndex}) / ${rootLanes}u)`,
+        scalar,
+        context,
+        `(u32(${flatIndex}) % ${rootLanes}u)`,
+      );
+  });
   return `${wgslScalar(viewType)}(${values.join(", ")})`;
 }
 
-function emitSharedVectorFlatWrite(
+export function emitSharedVectorFlatWrite(
   shared: CudaLiteVarDecl,
   index: string,
   value: string,
@@ -589,9 +610,21 @@ function emitSharedVectorFlatWrite(
 ): string {
   const lanes = cudaVectorLaneCount(viewType);
   const scalar = cudaVectorScalarType(viewType) ?? "float";
-  return Array.from({ length: lanes }, (_, lane) =>
-    emitSharedPointerWrite(shared, `(${index} + ${lane}u)`, `${value}.${vectorFieldName(lane)}`, context.ir, context, scalar)
-  ).join("; ");
+  const rootLanes = isCudaVectorType(shared.valueType) ? cudaVectorLaneCount(shared.valueType) : 1;
+  return Array.from({ length: lanes }, (_, lane) => {
+    const flatIndex = `(${index} + ${lane}u)`;
+    return rootLanes <= 1
+      ? emitSharedPointerWrite(shared, flatIndex, `${value}.${vectorFieldName(lane)}`, context.ir, context, scalar)
+      : emitSharedPointerWrite(
+        shared,
+        `(u32(${flatIndex}) / ${rootLanes}u)`,
+        `${value}.${vectorFieldName(lane)}`,
+        context.ir,
+        context,
+        scalar,
+        `(u32(${flatIndex}) % ${rootLanes}u)`,
+      );
+  }).join("; ");
 }
 
 export function emitPointerVectorFlatWrite(
@@ -633,12 +666,23 @@ function emitLocalVectorFlatWrite(
 ): string {
   const lanes = cudaVectorLaneCount(viewType);
   const scalar = cudaVectorScalarType(viewType) ?? "float";
-  return Array.from({ length: lanes }, (_, lane) =>
-    emitLocalPointerWrite(local, `(${index} + ${lane}u)`, `${value}.${vectorFieldName(lane)}`, scalar, context)
-  ).join("; ");
+  const rootLanes = isCudaVectorType(local.valueType) ? cudaVectorLaneCount(local.valueType) : 1;
+  return Array.from({ length: lanes }, (_, lane) => {
+    const flatIndex = `(${index} + ${lane}u)`;
+    return rootLanes <= 1
+      ? emitLocalPointerWrite(local, flatIndex, `${value}.${vectorFieldName(lane)}`, scalar, context)
+      : emitLocalPointerWrite(
+        local,
+        `(u32(${flatIndex}) / ${rootLanes}u)`,
+        `${value}.${vectorFieldName(lane)}`,
+        scalar,
+        context,
+        `(u32(${flatIndex}) % ${rootLanes}u)`,
+      );
+  }).join("; ");
 }
 
-function emitConstantVectorFlatRead(
+export function emitConstantVectorFlatRead(
   constant: CudaLiteGlobalConstant,
   index: string,
   viewType: CudaLiteScalarType,

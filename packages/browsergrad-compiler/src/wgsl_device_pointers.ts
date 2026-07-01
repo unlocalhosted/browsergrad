@@ -174,8 +174,7 @@ export function devicePointerArgumentParts(
     const target = devicePointerArgumentParts(expression.argument.target, context, callbacks);
     if (!target) return undefined;
     const valueType = devicePointerValueTypeForExpression(expression.argument.target, context);
-    const addressDelta = dynamicSharedVectorAliasAddressDelta(expression.argument.target, expression.argument.index, valueType, context, callbacks) ??
-      devicePointerIndexDelta(expression.argument.index, valueType, context, callbacks);
+    const addressDelta = devicePointerIndexDelta(expression.argument.index, valueType, context, callbacks);
     return {
       buffer: target.buffer,
       base: `(${target.base} + ${addressDelta})`,
@@ -220,7 +219,7 @@ function flattenedDevicePointerAlias(
   const alias = context.pointerAliasFor(name, span);
   if (!alias) return undefined;
   const parent = flattenedDevicePointerAlias(alias.rootName, span, context, new Set([...seen, name]));
-  if (!parent) return alias;
+  if (!parent) return normalizeDevicePointerAlias(alias, context, span ?? alias.baseIndex.span);
   const valueType = alias.valueType ?? parent.valueType;
   return {
     rootName: parent.rootName,
@@ -233,6 +232,18 @@ function flattenedDevicePointerAlias(
       span: span ?? alias.baseIndex.span,
     },
     ...(alias.declarationSpan === undefined ? {} : { declarationSpan: alias.declarationSpan }),
+  };
+}
+
+function normalizeDevicePointerAlias(
+  alias: PointerAlias,
+  context: WgslDevicePointerContext,
+  span: SourceSpan,
+): PointerAlias {
+  const rootType = pointerAliasRootValueType(alias.rootName, context);
+  return {
+    ...alias,
+    baseIndex: scaleDevicePointerAliasOffset(alias.baseIndex, rootType, span),
   };
 }
 
@@ -263,34 +274,12 @@ function devicePointerIndexDelta(
   return lanes <= 1 ? raw : `(${raw} * ${lanes}u)`;
 }
 
-function dynamicSharedVectorAliasAddressDelta(
-  pointer: CudaLiteExpression,
-  index: CudaLiteExpression,
-  valueType: CudaLiteScalarType | undefined,
-  context: WgslDevicePointerContext,
-  callbacks: WgslDevicePointerCallbacks,
-): string | undefined {
-  if (!isCudaVectorType(valueType) || pointer.kind !== "identifier") return undefined;
-  const alias = flattenedDevicePointerAlias(pointer.name, pointer.span, context);
-  if (!alias || !isCudaVectorType(alias.valueType)) return undefined;
-  const rootType = pointerAliasRootValueType(alias.rootName, context);
-  if (isCudaVectorType(rootType) || context.sharedPointerIdFor(alias.rootName) === undefined) return undefined;
-  return `u32(${callbacks.emitExpression(index, context)})`;
-}
-
 function devicePointerAliasBaseDelta(
   alias: PointerAlias,
   context: WgslDevicePointerContext,
   callbacks: WgslDevicePointerCallbacks,
 ): string {
-  const raw = `u32(${callbacks.emitExpression(alias.baseIndex, context)})`;
-  const rootType = pointerAliasRootValueType(alias.rootName, context) ?? alias.valueType;
-  const rootBytes = pointerValueByteSize(rootType);
-  const aliasBytes = pointerValueByteSize(alias.valueType);
-  if (rootBytes === aliasBytes) return raw;
-  if (rootBytes < aliasBytes && aliasBytes % rootBytes === 0) return `(${raw} / ${aliasBytes / rootBytes}u)`;
-  if (rootBytes > aliasBytes && rootBytes % aliasBytes === 0) return `(${raw} * ${rootBytes / aliasBytes}u)`;
-  return raw;
+  return `u32(${callbacks.emitExpression(alias.baseIndex, context)})`;
 }
 
 function pointerAliasRootValueType(
@@ -310,13 +299,6 @@ function pointerAliasRootValueType(
   return context.localPointerArrayRootFor(rootName)?.valueType ??
     context.localPointerArrayFor(rootName)?.valueType ??
     context.localPointerHandleFor(rootName)?.valueType;
-}
-
-function pointerValueByteSize(valueType: CudaLiteScalarType | undefined): number {
-  if (!valueType) return 4;
-  if (isCudaVectorType(valueType)) return cudaVectorLaneCount(valueType) * pointerValueByteSize(cudaVectorScalarType(valueType));
-  if (valueType === "double" || valueType === "complex64") return 8;
-  return 4;
 }
 
 function devicePointerValueTypeForExpression(
@@ -390,7 +372,10 @@ function sharedPointerArgumentParts(
     const value = `u32(${callbacks.emitExpression(index, context)})`;
     return stride === 1 ? value : `(${value} * ${stride}u)`;
   });
-  return { buffer: `${id}u`, base: terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})` };
+  const elementIndex = terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
+  const lanes = isCudaVectorType(declaration.valueType) ? cudaVectorLaneCount(declaration.valueType) : 1;
+  const base = lanes <= 1 ? elementIndex : `(${elementIndex} * ${lanes}u)`;
+  return { buffer: `${id}u`, base };
 }
 
 function deviceGlobalPointerArgumentParts(
@@ -416,5 +401,8 @@ function deviceGlobalPointerArgumentParts(
     const value = `u32(${callbacks.emitExpression(index, context)})`;
     return stride === 1 ? value : `(${value} * ${stride}u)`;
   });
-  return { buffer: `${id}u`, base: terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})` };
+  const elementIndex = terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
+  const lanes = isCudaVectorType(global.valueType) ? cudaVectorLaneCount(global.valueType) : 1;
+  const base = lanes <= 1 ? elementIndex : `(${elementIndex} * ${lanes}u)`;
+  return { buffer: `${id}u`, base };
 }

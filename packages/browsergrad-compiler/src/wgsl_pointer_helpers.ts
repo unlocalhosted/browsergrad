@@ -10,12 +10,19 @@ import {
   integerAtomicLoopHelperName,
 } from "./wgsl_atomic_helpers.js";
 import {
+  emitConstantVectorFlatRead,
   emitConstantPointerRead,
+  emitDeviceGlobalVectorFlatRead,
+  emitDeviceGlobalVectorFlatWrite,
   emitDeviceGlobalPointerRead,
   emitDeviceGlobalPointerWrite,
+  emitPointerVectorFlatRead,
+  emitPointerVectorFlatWrite,
   emitPointerStorageRead,
   emitPointerStorageWrite,
   emitSharedFlatAccess,
+  emitSharedVectorFlatRead,
+  emitSharedVectorFlatWrite,
   emitSharedPointerRead,
   emitSharedPointerWrite,
   wgslScalar,
@@ -105,32 +112,25 @@ export function emitDevicePointerHelper(
     const id = context.storagePointerIdFor(param.name);
     if (id === undefined) continue;
     if (options.reachableBufferIds && !options.reachableBufferIds.has(id)) continue;
-    lines.push(`    case ${id}u: { return ${emitPointerStorageRead(param, "index", ir, context, type)}; }`);
+    lines.push(`    case ${id}u: { return ${emitPointerHelperStorageRead(param, "index", type, ir, context)}; }`);
   }
   for (const shared of sharedDeclarations) {
     const id = context.sharedPointerIdFor(shared.name);
     if (id === undefined) continue;
     if (options.reachableBufferIds && !options.reachableBufferIds.has(id)) continue;
-    lines.push(`    case ${id}u: { return ${emitSharedPointerRead(
-      shared,
-      sharedPointerHelperIndex(shared.valueType, type, "index", context.ir.atomicShared.includes(shared.name)),
-      ir,
-      context,
-      type,
-      sharedPointerHelperLane(shared.valueType, type, "index", context.ir.atomicShared.includes(shared.name)),
-    )}; }`);
+    lines.push(`    case ${id}u: { return ${emitSharedPointerHelperRead(shared, "index", type, ir, context)}; }`);
   }
   for (const global of deviceGlobals) {
     const id = context.deviceGlobalPointerIdFor(global.name);
     if (id === undefined) continue;
     if (options.reachableBufferIds && !options.reachableBufferIds.has(id)) continue;
-    lines.push(`    case ${id}u: { return ${emitDeviceGlobalPointerRead(global, "index", ir, context, type)}; }`);
+    lines.push(`    case ${id}u: { return ${emitDevicePointerHelperGlobalRead(global, "index", type, ir, context)}; }`);
   }
   for (const constant of constantArrays) {
     const id = context.constantPointerIdFor(constant.name);
     if (id === undefined) continue;
     if (options.reachableBufferIds && !options.reachableBufferIds.has(id)) continue;
-    lines.push(`    case ${id}u: { return ${emitConstantPointerRead(constant, "index", context, type)}; }`);
+    lines.push(`    case ${id}u: { return ${emitDevicePointerHelperConstantRead(constant, "index", type, context)}; }`);
   }
   lines.push(`    default: { return ${zeroValue(type)}; }`);
   lines.push("  }");
@@ -142,27 +142,19 @@ export function emitDevicePointerHelper(
     const id = context.storagePointerIdFor(param.name);
     if (id === undefined) continue;
     if (options.reachableBufferIds && !options.reachableBufferIds.has(id)) continue;
-    lines.push(`    case ${id}u: { ${emitPointerStorageWrite(param, "index", "value", ir, context, type)}; return; }`);
+    lines.push(`    case ${id}u: { ${emitPointerHelperStorageWrite(param, "index", "value", type, ir, context)}; return; }`);
   }
   for (const shared of sharedDeclarations) {
     const id = context.sharedPointerIdFor(shared.name);
     if (id === undefined) continue;
     if (options.reachableBufferIds && !options.reachableBufferIds.has(id)) continue;
-    lines.push(`    case ${id}u: { ${emitSharedPointerWrite(
-      shared,
-      sharedPointerHelperIndex(shared.valueType, type, "index", context.ir.atomicShared.includes(shared.name)),
-      "value",
-      ir,
-      context,
-      type,
-      sharedPointerHelperLane(shared.valueType, type, "index", context.ir.atomicShared.includes(shared.name)),
-    )}; return; }`);
+    lines.push(`    case ${id}u: { ${emitSharedPointerHelperWrite(shared, "index", "value", type, ir, context)}; return; }`);
   }
   for (const global of deviceGlobals) {
     const id = context.deviceGlobalPointerIdFor(global.name);
     if (id === undefined) continue;
     if (options.reachableBufferIds && !options.reachableBufferIds.has(id)) continue;
-    lines.push(`    case ${id}u: { ${emitDeviceGlobalPointerWrite(global, "index", "value", ir, context, type)}; return; }`);
+    lines.push(`    case ${id}u: { ${emitDevicePointerHelperGlobalWrite(global, "index", "value", type, ir, context)}; return; }`);
   }
   lines.push("    default: { return; }");
   lines.push("  }");
@@ -213,23 +205,16 @@ function singletonDevicePointerReadExpression(
   constantArrays: readonly CudaLiteGlobalConstant[],
 ): string | undefined {
   for (const param of storageParams) {
-    if (context.storagePointerIdFor(param.name) === bufferId) return emitPointerStorageRead(param, "index", ir, context, type);
+    if (context.storagePointerIdFor(param.name) === bufferId) return emitPointerHelperStorageRead(param, "index", type, ir, context);
   }
   for (const shared of sharedDeclarations) {
-    if (context.sharedPointerIdFor(shared.name) === bufferId) return emitSharedPointerRead(
-      shared,
-      sharedPointerHelperIndex(shared.valueType, type, "index", context.ir.atomicShared.includes(shared.name)),
-      ir,
-      context,
-      type,
-      sharedPointerHelperLane(shared.valueType, type, "index", context.ir.atomicShared.includes(shared.name)),
-    );
+    if (context.sharedPointerIdFor(shared.name) === bufferId) return emitSharedPointerHelperRead(shared, "index", type, ir, context);
   }
   for (const global of deviceGlobals) {
-    if (context.deviceGlobalPointerIdFor(global.name) === bufferId) return emitDeviceGlobalPointerRead(global, "index", ir, context, type);
+    if (context.deviceGlobalPointerIdFor(global.name) === bufferId) return emitDevicePointerHelperGlobalRead(global, "index", type, ir, context);
   }
   for (const constant of constantArrays) {
-    if (context.constantPointerIdFor(constant.name) === bufferId) return emitConstantPointerRead(constant, "index", context, type);
+    if (context.constantPointerIdFor(constant.name) === bufferId) return emitDevicePointerHelperConstantRead(constant, "index", type, context);
   }
   return undefined;
 }
@@ -244,23 +229,114 @@ function singletonDevicePointerWriteExpression(
   deviceGlobals: readonly CudaLiteDeviceGlobal[],
 ): string | undefined {
   for (const param of storageParams.filter((item) => !item.constant)) {
-    if (context.storagePointerIdFor(param.name) === bufferId) return emitPointerStorageWrite(param, "index", "value", ir, context, type);
+    if (context.storagePointerIdFor(param.name) === bufferId) return emitPointerHelperStorageWrite(param, "index", "value", type, ir, context);
   }
   for (const shared of sharedDeclarations) {
-    if (context.sharedPointerIdFor(shared.name) === bufferId) return emitSharedPointerWrite(
-      shared,
-      sharedPointerHelperIndex(shared.valueType, type, "index", context.ir.atomicShared.includes(shared.name)),
-      "value",
-      ir,
-      context,
-      type,
-      sharedPointerHelperLane(shared.valueType, type, "index", context.ir.atomicShared.includes(shared.name)),
-    );
+    if (context.sharedPointerIdFor(shared.name) === bufferId) return emitSharedPointerHelperWrite(shared, "index", "value", type, ir, context);
   }
   for (const global of deviceGlobals) {
-    if (context.deviceGlobalPointerIdFor(global.name) === bufferId) return emitDeviceGlobalPointerWrite(global, "index", "value", ir, context, type);
+    if (context.deviceGlobalPointerIdFor(global.name) === bufferId) return emitDevicePointerHelperGlobalWrite(global, "index", "value", type, ir, context);
   }
   return undefined;
+}
+
+function emitPointerHelperStorageRead(
+  param: CudaLiteParam,
+  index: string,
+  viewType: CudaLiteScalarType,
+  ir: KernelIrModule,
+  context: WgslPointerHelperContext,
+): string {
+  return isCudaVectorType(viewType)
+    ? emitPointerVectorFlatRead(param, index, viewType, ir, context)
+    : emitPointerStorageRead(param, index, ir, context, viewType);
+}
+
+function emitPointerHelperStorageWrite(
+  param: CudaLiteParam,
+  index: string,
+  value: string,
+  viewType: CudaLiteScalarType,
+  ir: KernelIrModule,
+  context: WgslPointerHelperContext,
+): string {
+  return isCudaVectorType(viewType)
+    ? emitPointerVectorFlatWrite(param, index, value, viewType, ir, context)
+    : emitPointerStorageWrite(param, index, value, ir, context, viewType);
+}
+
+function emitSharedPointerHelperRead(
+  shared: CudaLiteVarDecl,
+  index: string,
+  viewType: CudaLiteScalarType,
+  ir: KernelIrModule,
+  context: WgslPointerHelperContext,
+): string {
+  if (isCudaVectorType(viewType)) return emitSharedVectorFlatRead(shared, index, viewType, context);
+  return emitSharedPointerRead(
+    shared,
+    sharedPointerHelperIndex(shared.valueType, viewType, index, context.ir.atomicShared.includes(shared.name)),
+    ir,
+    context,
+    viewType,
+    sharedPointerHelperLane(shared.valueType, viewType, index, context.ir.atomicShared.includes(shared.name)),
+  );
+}
+
+function emitSharedPointerHelperWrite(
+  shared: CudaLiteVarDecl,
+  index: string,
+  value: string,
+  viewType: CudaLiteScalarType,
+  ir: KernelIrModule,
+  context: WgslPointerHelperContext,
+): string {
+  if (isCudaVectorType(viewType)) return emitSharedVectorFlatWrite(shared, index, value, viewType, context);
+  return emitSharedPointerWrite(
+    shared,
+    sharedPointerHelperIndex(shared.valueType, viewType, index, context.ir.atomicShared.includes(shared.name)),
+    value,
+    ir,
+    context,
+    viewType,
+    sharedPointerHelperLane(shared.valueType, viewType, index, context.ir.atomicShared.includes(shared.name)),
+  );
+}
+
+function emitDevicePointerHelperGlobalRead(
+  global: CudaLiteDeviceGlobal,
+  index: string,
+  viewType: CudaLiteScalarType,
+  ir: KernelIrModule,
+  context: WgslPointerHelperContext,
+): string {
+  return isCudaVectorType(viewType)
+    ? emitDeviceGlobalVectorFlatRead(global, index, viewType, ir, context)
+    : emitDeviceGlobalPointerRead(global, index, ir, context, viewType);
+}
+
+function emitDevicePointerHelperGlobalWrite(
+  global: CudaLiteDeviceGlobal,
+  index: string,
+  value: string,
+  viewType: CudaLiteScalarType,
+  ir: KernelIrModule,
+  context: WgslPointerHelperContext,
+): string {
+  return isCudaVectorType(viewType)
+    ? emitDeviceGlobalVectorFlatWrite(global, index, value, viewType, ir, context)
+    : emitDeviceGlobalPointerWrite(global, index, value, ir, context, viewType);
+}
+
+function emitDevicePointerHelperConstantRead(
+  constant: CudaLiteGlobalConstant,
+  index: string,
+  viewType: CudaLiteScalarType,
+  context: WgslPointerHelperContext,
+): string {
+  return isCudaVectorType(viewType)
+    ? emitConstantVectorFlatRead(constant, index, viewType, context)
+    : emitConstantPointerRead(constant, index, context, viewType);
 }
 
 function emitDevicePointerAtomicHelpers(type: CudaLiteScalarType, ir: KernelIrModule, context: WgslPointerHelperContext): string[] {

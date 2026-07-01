@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-01T15:43:28Z
+Last updated: 2026-07-01T16:19:38Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,9 +11,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | volume vector-pointer array CAS/exchange active-lane fixture green; continue next corpus-shaped storage/texture/control probe |
+| Active work item | vector pointer flat-lane storage/helper failures fixed; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
-| Worktree | Clean after latest fixture slice commit |
+| Worktree | Dirty until current vector pointer flat-lane slice is committed |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
 
 ## How To Track This
@@ -420,11 +420,26 @@ Current verified gates:
 - WGSL module suite after volume vector-pointer array CAS/exchange probe: `16 passed / 0 failed`
 - WebGPU smoke after volume vector-pointer array CAS/exchange probe: `194 passed / 0 failed / 0 skipped`
 - hot volume vector-pointer array CAS/exchange probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `2.8ms`, speedup `2.29`
+- compiler build after vector pointer flat-lane storage fix: passed
+- compiler typecheck after vector pointer flat-lane storage fix: passed
+- compiler unit suite after vector pointer flat-lane storage fix: `418 passed / 0 failed`
+- WGSL module suite after vector pointer flat-lane storage fix: `16 passed / 0 failed`
+- WebGPU fixture tests after vector pointer flat-lane storage fix: passed
+- WebGPU smoke after vector pointer flat-lane storage fix: `195 passed / 0 failed / 0 skipped`
+- hot volume vector-pointer array compound active-lane probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `5.7ms`, speedup `1.33`
+- bugbash status tooling after vector pointer flat-lane storage fix: passed
+- changed-test-scope tooling after vector pointer flat-lane storage fix: passed
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | vector pointer lane offset helpers | non-atomic member writes through pointer helpers skipped the helper path, so `helpers:vector-lane-pointer-offset-helper` wrote the wrong scalar lane | pointer member assignment now routes lexical device pointer params through device pointer helper lowering before direct storage fallback | unit guard `preserves scalar-to-vector pointer alias byte offsets`; focused WebGPU helper case green; smoke `195/0/0` |
+| Fixed | device-global vector pointer arrays | `&g_ptr_values[2]` for `__device__ float3[]` stored vector element index `2`, not flat scalar lane index `6`, causing helper-selected pointer arrays to read stale lanes | device-global pointer argument parts now scale vector element bases by lane count before helper dispatch | unit guard `keeps device-global vector pointer-array entries in flat lanes`; smoke `195/0/0` |
+| Fixed | shared/local vector flat helper reads and writes | shared/local vector helper flat reads emitted whole vectors into scalar constructors, including invalid WGSL like `vec4<f32>(vec4<f32>, ...)` | storage vector flat read/write helpers now decompose flat lane indexes into vector element plus lane before scalar load/store | unit guard `reads shared vector pointer helpers through scalar lanes`; `storage:cross-space-vector-alias-consistency` green; smoke `195/0/0` |
+| Fixed | shared vector pointer array bases | `&values[1]` for typed `__shared__ float3 values[]` used element base `1` instead of flat scalar base `3`, so pointer-array helpers wrote/read the wrong lanes | shared pointer argument parts now scale vector roots by lane count, matching device-global pointer argument semantics | `storage:shared-vector-pointer-array` green; smoke `195/0/0` |
+| Fixed | dynamic shared vector pointer arithmetic | dynamic shared vector aliases had a special-case delta that suppressed vector pointer scaling, so `float3* values; &values[1]` addressed the wrong base | removed the dynamic-shared vector special-case; vector pointer arithmetic now consistently scales by lane count | updated dynamic shared vector pointer-array expectations; `storage:dynamic-shared-vector-pointer-array` and alias-chain variants green; smoke `195/0/0` |
+| Fixed | lexical pointer param detection | generic storage params were incorrectly treated like device pointer helper params, producing unresolved helper bases such as `x_base` in normal storage vector helpers | device pointer param lookup is now lexical, and pointer helper fast paths only fire for real helper pointer params | `storage:shared-vector-helper` green; compiler unit `418/0`; smoke `195/0/0` |
 | Fixed | vector pointer arithmetic atomics | `atomicAdd(reinterpret_cast<uint*>(vecPointer) + lane, value)` through helper-local scalar alias of a vector pointer-array target emitted invalid WGSL `atomicAdd(u32, u32)` | binary pointer arithmetic value-type resolution now follows the left pointer expression, preserving scalar casts over vector pointers before pointer-helper atomic lowering | unit guard `keeps casted vector pointer arithmetic atomics on pointer helpers`; `texture-surface:volume-vector-pointer-array-atomic-active-lane-return` `1/0/0`; smoke `193/0/0` |
 | Fixed | surface helper params | `cudaSurfaceObject_t` helper params used name coincidence, not handles | surface dispatch helpers by handle | src/dist verifier `249/0/0` earlier |
 | Fixed | vector surface write | `surf2Dwrite(float4, ...)` emitted invalid `...; 0;` WGSL | vector surface writes emit pure statements | `texture-surface:vector-helper-roundtrip` |

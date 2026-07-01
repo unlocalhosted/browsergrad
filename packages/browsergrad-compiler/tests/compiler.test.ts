@@ -474,8 +474,8 @@ __global__ void vector_helper(float* out, const float* inp) {
 
     expect(compiled.wgsl).toContain("return bg_ptr_read_f32x4(address_buffer, address_base);");
     expect(compiled.wgsl).toContain("bg_ptr_write_f32x4(address_buffer, address_base, val);");
-    expect(compiled.wgsl).toContain("case 1u: { return vec4<f32>(f32(inp[index + 0u]), f32(inp[index + 1u]), f32(inp[index + 2u]), f32(inp[index + 3u])); }");
-    expect(compiled.wgsl).toContain("case 0u: { out[index + 0u] = value.x; out[index + 1u] = value.y; out[index + 2u] = value.z; out[index + 3u] = value.w; return; }");
+    expect(compiled.wgsl).toContain("case 1u: { return vec4<f32>(inp[(index + 0u)], inp[(index + 1u)], inp[(index + 2u)], inp[(index + 3u)]); }");
+    expect(compiled.wgsl).toContain("case 0u: { out[(index + 0u)] = value.x; out[(index + 1u)] = value.y; out[(index + 2u)] = value.z; out[(index + 3u)] = value.w; return; }");
     expect(compiled.wgsl).not.toContain("address[");
     expect([...result.buffers.out as Float32Array]).toEqual([1, 12, 3, 4]);
   });
@@ -494,8 +494,8 @@ __global__ void vector_lane_offset(float* out, const float* inp) {
   write_lane_offset(writeView, idx, value.x + value.w);
 }`, { workgroupSize: [2, 1, 1] });
 
-    expect(compiled.wgsl).toContain("write_lane_offset(0u, (0u + (u32((0 + 4)) / 4u)), idx");
-    expect(compiled.wgsl).toContain("out[(u32((out_base + u32(idx))) * 4u) + 1u] = value;");
+    expect(compiled.wgsl).toContain("write_lane_offset(0u, (0u + u32((0 + 4))), idx");
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32x4(out_buffer, (out_base + (u32(idx) * 4u))");
   });
 
   it("keeps shifted vector bases aligned when casting helper pointer params to scalar lanes", () => {
@@ -510,7 +510,7 @@ __global__ void vector_to_scalar_offset(float* out, const float4* inp) {
   out[idx] = load_scalar_offset(scalarView, idx);
 }`, { workgroupSize: [2, 1, 1] });
 
-    expect(compiled.wgsl).toContain("load_scalar_offset(1u, (0u + (u32((0 + 1)) * 4u)), idx");
+    expect(compiled.wgsl).toContain("load_scalar_offset(1u, (0u + u32(((0 + 1) * 4))), idx");
     expect(compiled.wgsl).toContain("return inp[index];");
     expect(compiled.wgsl).toContain("return bg_ptr_read_f32(inp_buffer, (inp_base + u32(idx)));");
   });
@@ -527,7 +527,7 @@ __global__ void vector_to_scalar_write_offset(float4* out) {
   write_scalar_offset(scalarView, idx, 7.0f + (float)idx);
 }`, { workgroupSize: [2, 1, 1] });
 
-    expect(compiled.wgsl).toContain("write_scalar_offset(0u, (0u + (u32((0 + 1)) * 4u)), idx");
+    expect(compiled.wgsl).toContain("write_scalar_offset(0u, (0u + u32(((0 + 1) * 4))), idx");
     expect(compiled.wgsl).toContain("out[index] = value;");
     expect(compiled.wgsl).toContain("bg_ptr_write_f32(out_buffer, (out_base + u32(idx)), value);");
   });
@@ -545,7 +545,7 @@ __global__ void vector_to_scalar_atomic_offset(float4* out) {
 }`, { workgroupSize: [2, 1, 1] });
 
     expect(compiled.wgsl).toContain("var<storage, read_write> out: array<atomic<u32>>;");
-    expect(compiled.wgsl).toContain("add_scalar_offset(0u, (0u + (u32((0 + 1)) * 4u)), idx");
+    expect(compiled.wgsl).toContain("add_scalar_offset(0u, (0u + u32(((0 + 1) * 4))), idx");
     expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_f32(out_buffer, (out_base + u32(idx)), value);");
     expect(compiled.wgsl).toContain("case 0u: { return bg_atomicAdd_f32(&out[index], value); }");
   });
@@ -563,7 +563,7 @@ __global__ void uint_vector_to_scalar_atomic_offset(uint4* out) {
 }`, { workgroupSize: [2, 1, 1] });
 
     expect(compiled.wgsl).toContain("var<storage, read_write> out: array<atomic<u32>>;");
-    expect(compiled.wgsl).toContain("add_uint_scalar_offset(0u, (0u + (u32((0 + 1)) * 4u)), idx");
+    expect(compiled.wgsl).toContain("add_uint_scalar_offset(0u, (0u + u32(((0 + 1) * 4))), idx");
     expect(compiled.wgsl).toContain("case 0u: { return atomicAdd(&out[index], value); }");
   });
 
@@ -582,7 +582,7 @@ __global__ void vector_pointer_array_atomic_offset(uint4* out) {
 }`, { workgroupSize: [1, 1, 1] });
 
     expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32(");
-    expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_u32(slot_buffer, ((slot_base + (u32(0) * 4u)) + u32(3)), value)");
+    expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_u32(slot_buffer, ((slot_base + u32((0 * 4))) + u32(3)), value)");
     expect(compiled.wgsl).not.toContain("atomicAdd((slot_base + 3u), value)");
   });
 
@@ -601,8 +601,63 @@ __global__ void vector_pointer_array_cas_offset(uint4* out, uint* summary) {
 }`, { workgroupSize: [1, 1, 1] });
 
     expect(compiled.wgsl).toContain("fn bg_ptr_atomicCompareExchange_u32(");
-    expect(compiled.wgsl).toContain("bg_ptr_atomicCompareExchange_u32(slot_buffer, ((slot_base + (u32(0) * 4u)) + u32(2)), compare, value)");
+    expect(compiled.wgsl).toContain("bg_ptr_atomicCompareExchange_u32(slot_buffer, ((slot_base + u32((0 * 4))) + u32(2)), compare, value)");
     expect(compiled.wgsl).not.toContain("atomicCompareExchangeWeak((slot_base + 2u)");
+  });
+
+  it("keeps vector pointer-array compound writes on pointer helpers after atomics", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ void atomic_uint_vector_slot(uint4* slot, uint value) {
+  uint* lanes = reinterpret_cast<uint*>(slot);
+  atomicAdd(lanes + 1, value);
+}
+
+__device__ void add_uint_vector_slot(uint4* slot, uint4 value) {
+  slot[0] += value;
+}
+
+__device__ void add_uint_vector_slot_z(uint4* slot, uint value) {
+  slot[0].z += value;
+}
+
+__global__ void vector_pointer_array_compound_after_atomic(uint4* out) {
+  uint4* slots[2];
+  slots[0] = out + 1;
+  slots[1] = out + 2;
+  atomic_uint_vector_slot(slots[0], 5u);
+  add_uint_vector_slot(slots[0], make_uint4(1u, 2u, 3u, 4u));
+  add_uint_vector_slot_z(slots[1], 7u);
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32(");
+    expect(compiled.wgsl).toContain("fn bg_ptr_write_u32x4(");
+    expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_u32(slot_buffer");
+    expect(compiled.wgsl).toContain("bg_ptr_write_u32x4(slot_buffer");
+    expect(compiled.wgsl).toContain("atomicLoad(&out[(index + 0u)]");
+    expect(compiled.wgsl).toContain("atomicStore(&out[(index + 0u)]");
+    expect(compiled.wgsl).not.toContain("atomicLoad(&out[((u32(index) * 4u) + 0u)]");
+    expect(compiled.wgsl).not.toContain("atomicStore(&out[((u32(index) * 4u) + 0u)]");
+    expect(compiled.wgsl).not.toContain("slot[");
+  });
+
+  it("preserves scalar-to-vector pointer alias byte offsets", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ void bump_roundtrip_vec(float4* out, int idx, float4 delta) {
+  float4 value = out[idx];
+  out[idx] = make_float4(value.x + delta.x, value.y + delta.y, value.z + delta.z, value.w + delta.w);
+}
+
+__global__ void vectorScalarVectorAliasRoundtrip(float4* out) {
+  int idx = threadIdx.x;
+  float* scalarView = reinterpret_cast<float*>(out + 1);
+  float4* vecView = reinterpret_cast<float4*>(scalarView);
+  float scale = (float)(idx + 1);
+  bump_roundtrip_vec(vecView, idx, make_float4(scale, scale * 2.0f, scale * 3.0f, scale * 4.0f));
+}`, { workgroupSize: [2, 1, 1] });
+
+    expect(compiled.wgsl).toContain("bump_roundtrip_vec(0u, (0u + u32((((0 + 1) * 4) + 0))), idx");
+    expect(compiled.wgsl).toContain("bg_ptr_read_f32x4(out_buffer, (out_base + (u32(idx) * 4u)))");
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32x4(out_buffer, (out_base + (u32(idx) * 4u)), vec4<f32>");
   });
 
   it("reads shifted vector-backed device global scalar atomics from flat lanes", () => {
@@ -621,8 +676,51 @@ __global__ void device_global_vector_to_scalar_atomic(uint* out) {
 }`, { workgroupSize: [2, 1, 1] });
 
     expect(compiled.wgsl).toContain("var<storage, read_write> g_vec: array<atomic<u32>>;");
-    expect(compiled.wgsl).toContain("add_global_scalar(1u, (0u + (u32((0 + 1)) * 4u)), idx");
+    expect(compiled.wgsl).toContain("add_global_scalar(1u, (0u + u32(((0 + 1) * 4))), idx");
     expect(compiled.wgsl).toContain("atomicLoad(&g_vec[(u32(((0 + 1) * 4)) + u32(idx))])");
+  });
+
+  it("keeps device-global vector pointer-array entries in flat lanes", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ float3 g_ptr_values[3];
+
+__device__ float3 sum_global_ptrs(float3 *a, float3 *b, float3 *c) {
+  return *a + *b + *c;
+}
+
+__global__ void deviceGlobalVectorPointerArray(float4 *out) {
+  g_ptr_values[0] = make_float3(2.0f, 3.0f, 5.0f);
+  g_ptr_values[1] = make_float3(7.0f, 11.0f, 13.0f);
+  g_ptr_values[2] = make_float3(17.0f, 19.0f, 23.0f);
+  float3 *ptrs[3];
+  ptrs[0] = &g_ptr_values[0];
+  ptrs[1] = &g_ptr_values[1];
+  ptrs[2] = &g_ptr_values[2];
+  float3 total = sum_global_ptrs(ptrs[0], ptrs[1], ptrs[2]);
+  out[0] = make_float4(*ptrs[2], 1.0f);
+  out[1] = make_float4(total, 0.0f);
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("ptrs_base[u32(2)] = (u32(2) * 3u);");
+    expect(compiled.wgsl).toContain("sum_global_ptrs(ptrs_buffer[u32(0)], ptrs_base[u32(0)], ptrs_buffer[u32(1)], ptrs_base[u32(1)], ptrs_buffer[u32(2)], ptrs_base[u32(2)]");
+    expect(compiled.wgsl).not.toContain("ptrs_base[u32(2)] = u32(2);");
+  });
+
+  it("reads shared vector pointer helpers through scalar lanes", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ void adjust_storage_alias_lane(float *lanes, int offset, float delta) {
+  lanes[offset] = lanes[offset] + delta;
+}
+
+__global__ void crossSpaceVectorAliasConsistency(float *out) {
+  __shared__ float4 shared[2];
+  shared[1] = make_float4(50.0f, 60.0f, 70.0f, 80.0f);
+  adjust_storage_alias_lane(reinterpret_cast<float*>(shared + 1), 1, 1.5f);
+  out[0] = shared[1].y;
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("return vec4<f32>(f32(bg_shared[(u32((index + 0u)) / 4u)]");
+    expect(compiled.wgsl).not.toContain("return vec4<f32>(bg_shared[(index + 0u)]");
   });
 
   it("flattens shared vector scalar atomics to scalar atomic lanes", () => {
@@ -640,7 +738,7 @@ __global__ void shared_vector_to_scalar_atomic(uint* out) {
 }`, { workgroupSize: [2, 1, 1] });
 
     expect(compiled.wgsl).toContain("var<workgroup> tile: array<atomic<u32>, 8>;");
-    expect(compiled.wgsl).toContain("add_shared_scalar(1u, (0u + (u32((0 + 1)) * 4u)), idx");
+    expect(compiled.wgsl).toContain("add_shared_scalar(1u, (0u + u32(((0 + 1) * 4))), idx");
     expect(compiled.wgsl).toContain("case 1u: { return atomicAdd(&tile[index], value); }");
     expect(compiled.wgsl).toContain("atomicLoad(&tile[(u32(((0 + 1) * 4)) + u32(idx))])");
   });
@@ -661,7 +759,7 @@ __global__ void shared_vector_scalar_lane_write(float* out) {
   }
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toContain("add_shared_float_lane(1u, (0u + (u32((0 + 1)) * 4u)), 1, 0.5");
+    expect(compiled.wgsl).toContain("add_shared_float_lane(1u, (0u + u32(((0 + 1) * 4))), 1, 0.5");
     expect(compiled.wgsl).toContain("return f32(tile[(u32(index) / 4u)][(u32(index) % 4u)]);");
     expect(compiled.wgsl).toContain("tile[(u32(index) / 4u)] = vec4<f32>(select((tile[(u32(index) / 4u)]).x");
   });
@@ -682,7 +780,7 @@ __global__ void shared_float3_vector_to_scalar_atomic(float* out) {
 
     expect(compiled.wgsl).toContain("var<workgroup> tile: array<atomic<u32>, 6>;");
     expect(compiled.wgsl).toContain("fn bg_atomicAdd_f32_workgroup");
-    expect(compiled.wgsl).toContain("add_shared_float3_scalar(1u, (0u + (u32((0 + 1)) * 3u)), idx");
+    expect(compiled.wgsl).toContain("add_shared_float3_scalar(1u, (0u + u32(((0 + 1) * 3))), idx");
     expect(compiled.wgsl).toContain("case 1u: { return bg_atomicAdd_f32_workgroup(&tile[index], value); }");
     expect(compiled.wgsl).toContain("bitcast<f32>(atomicLoad(&tile[(u32(((0 + 1) * 3)) + u32(idx))]))");
   });
@@ -3896,7 +3994,7 @@ __global__ void half2PtrAssign(half2 *x) {
   reduce_pair(x);
 }`, { features: { "shader-f16": true }, f16Mode: "f32", workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toContain("bg_ptr_write_f16x2(v_buffer, (v_base + u32(0)), (bg_ptr_read_f16x2(v_buffer, (v_base + u32(0))) + bg_ptr_read_f16x2(v_buffer, (v_base + u32(1)))))");
+    expect(compiled.wgsl).toContain("bg_ptr_write_f16x2(v_buffer, (v_base + (u32(0) * 2u)), (bg_ptr_read_f16x2(v_buffer, (v_base + (u32(0) * 2u))) + bg_ptr_read_f16x2(v_buffer, (v_base + (u32(1) * 2u)))))");
     expect(compiled.wgsl).not.toMatch(/vec2<f32>\(f32\(\(bg_ptr_read_f16x2/u);
   });
 
@@ -4296,7 +4394,7 @@ __global__ void sharedVectorOverlay(float *out) {
     );
 
     expect(compiled.wgsl).toContain("var<workgroup> bg_params: array<i32, 4>;");
-    expect(compiled.wgsl).toContain("bg_params[((u32(index) * 4u) + 0u)] = bitcast<i32>(value.x)");
+    expect(compiled.wgsl).toContain("bg_params[(index + 0u)] = bitcast<i32>(value.x)");
     expect(compiled.wgsl).toContain("vec4<f32>(bitcast<f32>");
     expect([...result.buffers.out as Float32Array]).toEqual([10]);
   });
@@ -6274,9 +6372,9 @@ __global__ void dynamicSharedFloat3View(float *out) {
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("scratch[((u32(index) * 3u) + 0u)] = value.x");
-    expect(compiled.wgsl).toContain("bg_ptr_write_f32x3(1u, ((0u + (u32(0) / 3u)) + u32(tid))");
-    expect(compiled.wgsl).toContain("bg_ptr_write_f32x3(tile_buffer, (tile_base + u32(index))");
+    expect(compiled.wgsl).toContain("scratch[(index + 0u)] = value.x");
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32x3(1u, ((0u + u32(0)) + (u32(tid) * 3u))");
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32x3(tile_buffer, (tile_base + (u32(index) * 3u))");
     expect([...result.buffers.out as Float32Array]).toEqual([1.5, 11, 101.5, 3.5, 14, 105.5]);
   });
 
@@ -6310,11 +6408,11 @@ __global__ void dynamicSharedFloat3ScalarAtomic(float *out) {
 
     expect(compiled.wgsl).toContain("add_dynamic_shared_scalar(1u, (0u + u32((0 + ((0 + 1) * 3))))");
     expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_f32(lanes_buffer, (lanes_base + u32(lane)), value)");
-    expect(compiled.wgsl).not.toContain("add_dynamic_shared_scalar(1u, ((0u + (u32(0) / 3u)) + u32((0 + 1)))");
+    expect(compiled.wgsl).not.toContain("add_dynamic_shared_scalar(1u, ((0u + u32(0)) + u32((0 + 1)))");
     expect([...result.buffers.out as Float32Array]).toEqual([2.5, 12.5]);
   });
 
-  it("keeps dynamic shared vector addresses in vector elements for pointer arrays", () => {
+  it("keeps dynamic shared vector addresses in scalar lanes for pointer arrays", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ float3 sum_dynamic_shared3(float3 *a, float3 *b, float3 *c) {
   return *a + *b + *c;
@@ -6342,13 +6440,13 @@ __global__ void dynamicSharedVectorPointerArray(float4 *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("ptrs_base[u32(1)] = ((0u + (u32(0) / 3u)) + u32(1));");
-    expect(compiled.wgsl).toContain("ptrs_base[u32(2)] = ((0u + (u32(0) / 3u)) + u32(2));");
-    expect(compiled.wgsl).not.toContain("ptrs_base[u32(1)] = ((0u + (u32(0) / 3u)) + (u32(1) * 3u));");
+    expect(compiled.wgsl).toContain("ptrs_base[u32(1)] = ((0u + u32(0)) + (u32(1) * 3u));");
+    expect(compiled.wgsl).toContain("ptrs_base[u32(2)] = ((0u + u32(0)) + (u32(2) * 3u));");
+    expect(compiled.wgsl).not.toContain("ptrs_base[u32(1)] = ((0u + u32(0)) + u32(1));");
     expect([...result.buffers.out as Float32Array]).toEqual([3, 5, 7, 1, 33, 41, 53, 0]);
   });
 
-  it("keeps chained dynamic shared vector aliases in vector elements for pointer arrays", () => {
+  it("keeps chained dynamic shared vector aliases in scalar lanes for pointer arrays", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ float3 sum_dynamic_shared_chain3(float3 *a, float3 *b, float3 *c) {
   return *a + *b + *c;
@@ -6378,9 +6476,9 @@ __global__ void dynamicSharedVectorAliasChainPointerArray(float4 *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("ptrs_base[u32(0)] = ((0u + (u32((0 + ((0 + 1) * 3))) / 3u)) + u32(0));");
-    expect(compiled.wgsl).toContain("ptrs_base[u32(1)] = ((0u + (u32((0 + ((0 + 1) * 3))) / 3u)) + u32(1));");
-    expect(compiled.wgsl).not.toContain("ptrs_base[u32(1)] = ((0u + (u32((0 + ((0 + 1) * 3))) / 3u)) + (u32(1) * 3u));");
+    expect(compiled.wgsl).toContain("ptrs_base[u32(0)] = ((0u + u32((0 + ((0 + 1) * 3)))) + (u32(0) * 3u));");
+    expect(compiled.wgsl).toContain("ptrs_base[u32(1)] = ((0u + u32((0 + ((0 + 1) * 3)))) + (u32(1) * 3u));");
+    expect(compiled.wgsl).not.toContain("ptrs_base[u32(1)] = ((0u + u32((0 + ((0 + 1) * 3)))) + u32(1));");
     expect([...result.buffers.out as Float32Array]).toEqual([17, 19, 23, 1, 53, 61, 73, 0]);
   });
 
@@ -6653,7 +6751,7 @@ __global__ void loopInternalReturnBarrier(float *x, int N) {
     expect(compiled.wgsl).toContain("var bg_barrier_loop_active_");
     expect(compiled.wgsl).toMatch(/bg_barrier_loop_active_\d+ = false;/u);
     expect(compiled.wgsl).toContain("workgroupBarrier();");
-    expect(compiled.wgsl).not.toContain("return;");
+    expect(compiled.wgsl).not.toContain("if ((idx >= bg_uniforms.N)) {\n      return;");
   });
 
   it("lowers alternate-branch returns before barriers into active-lane guards", () => {
@@ -7095,10 +7193,10 @@ __global__ void texturePointerAliasAtomicVectorCompound(cudaTextureObject_t tex,
   }
 }`, { workgroupSize: [4, 1, 1] });
 
-    expect(compiled.wgsl).toContain("atomicLoad(&out[((u32(index) * 4u) + 0u)]");
-    expect(compiled.wgsl).toContain("atomicStore(&out[((u32(index) * 4u) + 0u)]");
-    expect(compiled.wgsl).toContain("bg_ptr_read_u32x4(vectorOut_buffer, (vectorOut_base + u32(lane)))");
-    expect(compiled.wgsl).toContain("bg_ptr_write_u32x4(vectorOut_buffer, (vectorOut_base + u32(lane)), vec4<u32>");
+    expect(compiled.wgsl).toContain("atomicLoad(&out[(index + 0u)]");
+    expect(compiled.wgsl).toContain("atomicStore(&out[(index + 0u)]");
+    expect(compiled.wgsl).toContain("bg_ptr_read_u32x4(vectorOut_buffer, (vectorOut_base + (u32(lane) * 4u)))");
+    expect(compiled.wgsl).toContain("bg_ptr_write_u32x4(vectorOut_buffer, (vectorOut_base + (u32(lane) * 4u)), vec4<u32>");
     expect(compiled.wgsl).not.toContain("vectorOut[");
   });
 

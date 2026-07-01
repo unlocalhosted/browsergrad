@@ -1712,7 +1712,7 @@ function withDevicePointerParams(
       return localNames.has(name) || context.isLocalName(name);
     },
     devicePointerParamFor(name) {
-      return pointerParams.get(name) ?? context.devicePointerParamFor(name);
+      return pointerParams.get(name);
     },
     mutablePointerBaseFor(name) {
       return pointerParams.has(name) ? context.nameFor(`${name}_base`) : context.mutablePointerBaseFor(name);
@@ -1916,7 +1916,9 @@ function devicePointerParamForIndex(
   context: EmitContext,
 ): CudaLiteParam | undefined {
   return expression.target.kind === "identifier"
-    ? context.devicePointerParamFor(expression.target.name)
+    ? context.mutablePointerBaseFor(expression.target.name) === context.nameFor(`${expression.target.name}_base`)
+      ? context.devicePointerParamFor(expression.target.name)
+      : undefined
     : undefined;
 }
 
@@ -1925,7 +1927,17 @@ function devicePointerIndexExpression(
   index: CudaLiteExpression,
   context: EmitContext,
 ): string {
-  return `(${context.nameFor(`${name}_base`)} + u32(${emitExpression(index, context)}))`;
+  return `(${context.nameFor(`${name}_base`)} + ${emitDevicePointerIndexDelta(index, context.devicePointerParamFor(name)?.valueType, context)})`;
+}
+
+function emitDevicePointerIndexDelta(
+  index: CudaLiteExpression,
+  valueType: CudaLiteScalarType | undefined,
+  context: EmitContext,
+): string {
+  const raw = `u32(${emitExpression(index, context)})`;
+  const lanes = isCudaVectorType(valueType) ? cudaVectorLaneCount(valueType) : 1;
+  return lanes <= 1 ? raw : `(${raw} * ${lanes}u)`;
 }
 
 function devicePointerLValue(expression: CudaLiteExpression, context: EmitContext): DevicePointerLValue | undefined {
@@ -1950,7 +1962,7 @@ function devicePointerLValue(expression: CudaLiteExpression, context: EmitContex
     const valueType = devicePointerValueTypeForExpression(expression.target, context);
     return {
       buffer: parts.buffer,
-      index: `(${parts.base} + u32(${emitExpression(expression.index, context)}))`,
+      index: `(${parts.base} + ${emitDevicePointerIndexDelta(expression.index, valueType, context)})`,
       valueType,
     };
   }
@@ -2012,7 +2024,7 @@ function emitDirectPointerIndexAssignment(expression: CudaLiteAssignmentExpressi
   const parts = devicePointerArgumentParts(target, context);
   if (!parts) return undefined;
   const valueType = devicePointerValueTypeForExpression(expression.left.target, context);
-  const index = `(${parts.base} + u32(${emitExpression(expression.left.index, context)}))`;
+  const index = `(${parts.base} + ${emitDevicePointerIndexDelta(expression.left.index, valueType, context)})`;
   const right = emitPointerAssignmentValue(expression.right, valueType, context);
   const value = expression.operator === "="
     ? right
@@ -2113,7 +2125,7 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
         const pointerParts = devicePointerArgumentParts(expression.target, context);
         if (pointerParts) {
           const valueType = devicePointerValueTypeForExpression(expression.target, context);
-          return `${pointerReadHelperName(valueType)}(${pointerParts.buffer}, (${pointerParts.base} + u32(${emitExpression(expression.index, context)})))`;
+          return `${pointerReadHelperName(valueType)}(${pointerParts.buffer}, (${pointerParts.base} + ${emitDevicePointerIndexDelta(expression.index, valueType, context)}))`;
         }
       }
       if (expression.target.kind === "identifier") {
@@ -2121,7 +2133,7 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
         if (handle) {
           const base = context.nameFor(`${handle.name}_base`);
           const buffer = context.nameFor(`${handle.name}_buffer`);
-          const index = `(${base} + u32(${emitExpression(expression.index, context)}))`;
+          const index = `(${base} + ${emitDevicePointerIndexDelta(expression.index, handle.valueType, context)})`;
           return `${pointerReadHelperName(handle.valueType)}(${buffer}, ${index})`;
         }
         const alias = flattenedPointerAlias(expression.target.name, expression.target.span, context);
@@ -2176,6 +2188,16 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
         : emitExpression(expression.index, context);
       const param = root ? context.paramFor(root) : undefined;
       const global = root ? context.deviceGlobalFor(root) : undefined;
+      const pointerParamForValue = root ? context.devicePointerParamFor(root) : undefined;
+      if (
+        mode === "value" &&
+        pointerParamForValue &&
+        context.mutablePointerBaseFor(pointerParamForValue.name) === context.nameFor(`${pointerParamForValue.name}_base`) &&
+        isCudaVectorType(pointerParamForValue.valueType) &&
+        expression.target.kind === "identifier"
+      ) {
+        return `${pointerReadHelperName(pointerParamForValue.valueType)}(${context.nameFor(`${pointerParamForValue.name}_buffer`)}, (${context.nameFor(`${pointerParamForValue.name}_base`)} + ${emitDevicePointerIndexDelta(expression.index, pointerParamForValue.valueType, context)}))`;
+      }
       if (mode === "value" && param && isCudaVectorType(param.valueType) && expression.target.kind === "identifier") {
         if (context.ir.atomicParams.includes(param.name)) {
           return emitPointerVectorFlatRead(
@@ -4405,6 +4427,15 @@ function emitExpressionAsValueType(
     if (parts) return `${pointerReadHelperName(valueType)}(${parts.buffer}, ${parts.base})`;
   }
   if (isCudaVectorType(valueType) && expression.kind === "index") {
+    const root = rootIdentifier(expression);
+    const pointerParam = root && expression.target.kind === "identifier" ? context.devicePointerParamFor(root) : undefined;
+    if (
+      root !== undefined &&
+      pointerParam &&
+      context.mutablePointerBaseFor(root) === context.nameFor(`${root}_base`)
+    ) {
+      return `${pointerReadHelperName(valueType)}(${context.nameFor(`${pointerParam.name}_buffer`)}, (${context.nameFor(`${pointerParam.name}_base`)} + ${emitDevicePointerIndexDelta(expression.index, pointerParam.valueType, context)}))`;
+    }
     const storageView = storageViewLValue(expression, context);
     if (storageView && isCudaVectorType(storageView.valueType)) {
       const shared = storageView.rootName ? sharedDeclarationFor(storageView.rootName, context) : undefined;
@@ -4419,7 +4450,6 @@ function emitExpressionAsValueType(
       }
       return emitVectorStorageReadAt(storageView.name, storageView.valueType, storageView.index);
     }
-    const root = rootIdentifier(expression);
     const index = root ? emitPointerIndex(root, expression.index, context) : undefined;
     const shared = root ? sharedDeclarationFor(root, context) : undefined;
     if (shared && isCudaVectorType(shared.valueType)) return emitSharedPointerRead(shared, index!, context.ir, context, valueType);
@@ -4492,9 +4522,34 @@ function flattenedPointerAlias(
   return flattenedPointerAliasImpl(name, span, context, storageViewCallbacks);
 }
 
+function devicePointerMemberRootName(expression: CudaLiteExpression): string | undefined {
+  let cursor: CudaLiteExpression = expression;
+  while (true) {
+    if (cursor.kind === "identifier") return cursor.name;
+    if (cursor.kind === "member") {
+      cursor = cursor.object;
+      continue;
+    }
+    if (cursor.kind === "index") {
+      cursor = cursor.target;
+      continue;
+    }
+    if (cursor.kind === "unary" && cursor.operator === "*") {
+      cursor = cursor.argument;
+      continue;
+    }
+    if (cursor.kind === "cast") {
+      cursor = cursor.expression;
+      continue;
+    }
+    return undefined;
+  }
+}
+
 function emitDevicePointerMemberAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string | undefined {
   if (expression.left.kind !== "member") return undefined;
-  if (context.ir.atomicParams.length === 0 && context.ir.atomicDeviceGlobals.length === 0) return undefined;
+  const rootName = devicePointerMemberRootName(expression.left);
+  if (rootName === undefined || context.devicePointerParamFor(rootName) === undefined) return undefined;
   const pointerLvalue = devicePointerLValue(expression.left, context);
   if (!pointerLvalue || pointerLvalue.fieldIndex === undefined) return undefined;
   if (!isCudaVectorType(pointerLvalue.valueType)) {
