@@ -2045,6 +2045,29 @@ __global__ void surfaceFloat3VectorActiveLaneReturn(cudaSurfaceObject_t surf, fl
     out[tid] = 1.0f + (float)tid;
   }
 }`,
+  surfaceFloat4VectorActiveLaneReturn: `
+__device__ void write_layer_float4_active(cudaSurfaceObject_t surfaceArg, int row, int layer, float base) {
+  surf2DLayeredwrite(make_float4(base + 1.0f, base + 2.0f, base + 3.0f, base + 4.0f), surfaceArg, 0, row, layer);
+}
+
+__device__ float4 read_layer_float4_active(cudaSurfaceObject_t surfaceArg, int row, int layer) {
+  return surf2DLayeredread<float4>(surfaceArg, 0, row, layer);
+}
+
+__global__ void surfaceFloat4VectorActiveLaneReturn(cudaSurfaceObject_t surf, float *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    write_layer_float4_active(surf, 0, 1, 70.0f + (float)tid);
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    float4 value = read_layer_float4_active(surf, 0, 1);
+    out[0] = value.x + value.y + value.z + value.w;
+  } else {
+    out[tid] = 1.0f + (float)tid;
+  }
+}`,
   surfaceUint3VectorActiveLaneReturn: `
 __device__ void write_layer_uint3_active(cudaSurfaceObject_t surfaceArg, int row, int layer, uint base) {
   surf2DLayeredwrite(make_uint3(base + 1u, base + 2u, base + 3u), surfaceArg, 0, row, layer);
@@ -5388,6 +5411,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Int32Array", data: [105, 2, 3, 0] },
+          },
+          {
+            name: "surface:layered-float4-vector-active-lane-return",
+            source: SOURCES.surfaceFloat4VectorActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [302, 2, 3, 0] },
           },
           {
             name: "surface:uint4-vector-active-lane-return",
