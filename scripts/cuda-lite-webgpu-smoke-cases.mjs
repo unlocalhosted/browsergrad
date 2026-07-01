@@ -164,6 +164,7 @@ export const textureScopeCases = [
   "texture:uint4-active-lane-store",
   "texture:int4-active-lane-store",
   "texture:atlas-active-lane-return-read-side-effect",
+  "texture:atlas-vector-active-lane-store",
   "texture:deep-helper-active-lane-vector-store",
   "texture:mixed-scalar-vector-active-lane-store",
   "texture:pointer-alias-active-lane-store",

@@ -2692,6 +2692,23 @@ __global__ void textureAtlasActiveLaneReturnReadSideEffect(cudaTextureObject_t t
   __syncthreads();
   out[tid] = 1.0f + (float)tid;
 }`,
+  textureAtlasVectorActiveLaneStore: `
+__device__ float4 read_return_texture_atlas_vec(cudaTextureObject_t texArg) {
+  float4 layered = tex2DLayered<float4>(texArg, 0.0f, 1.0f, 1.0f);
+  float4 volume = tex3D<float4>(texArg, 2.0f, 1.0f, 1.0f);
+  return make_float4(layered.x + volume.x, layered.y + volume.y, layered.z + volume.z, layered.w + volume.w);
+}
+
+__global__ void textureAtlasVectorActiveLaneStore(cudaTextureObject_t tex, float4 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    float4 value = read_return_texture_atlas_vec(tex);
+    out[tid] = make_float4(value.x + (float)tid, value.y + (float)tid, value.z + (float)tid, value.w + (float)tid);
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_float4(1.0f + (float)tid, 10.0f + (float)tid, 20.0f + (float)tid, 30.0f + (float)tid);
+}`,
   textureDeepHelperActiveLaneVectorStore: `
 __device__ float4 read_deep_texture_leaf(cudaTextureObject_t texArg) {
   return tex2D<float4>(texArg, 0.5f, 0.5f);
@@ -6396,6 +6413,33 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [1, 2, 3, 77] },
+          },
+          {
+            name: "texture:atlas-vector-active-lane-store",
+            source: SOURCES.textureAtlasVectorActiveLaneStore,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(16),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [
+              1, 10, 20, 30,
+              2, 11, 21, 31,
+              3, 12, 22, 32,
+              77, 79, 81, 83,
+            ] },
           },
           {
             name: "texture:deep-helper-active-lane-vector-store",
