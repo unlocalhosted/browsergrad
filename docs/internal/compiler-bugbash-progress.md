@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-01T14:38:31Z
+Last updated: 2026-07-01T14:40:32Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | surf1Dread analyzer/reference/WGSL support and real WebGPU fixture green; continue next corpus-shaped storage/texture/control probe |
+| Active work item | surf1Dread vector lane real WebGPU fixture green; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Clean after latest fixture slice commit |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -282,6 +282,12 @@ Current verified gates:
 - compiler unit suite after 1D surface read probe: `412 passed / 0 failed`
 - WebGPU smoke after 1D surface read probe: `172 passed / 0 failed / 0 skipped`
 - hot 1D surface read probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `3.5ms`, speedup `1.11`
+- 1D surface vector read fixture: `surface:surf1d-vector-read` is `1 passed / 0 failed / 0 skipped`
+- compiler fixture test after 1D surface vector read probe: passed
+- compiler typecheck after 1D surface vector read probe: passed
+- compiler unit suite after 1D surface vector read probe: `412 passed / 0 failed`
+- WebGPU smoke after 1D surface vector read probe: `173 passed / 0 failed / 0 skipped`
+- hot 1D surface vector read probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `3.4ms`, speedup `1.24`
 
 ## Bugs Found During Current Run
 
@@ -310,6 +316,7 @@ Current verified gates:
 | Probed green | helper layered vector write | vector `surf2DLayeredwrite` through `cudaSurfaceObject_t` helper param could lose handle/lane/layer semantics | existing surface dispatch + vector lane writes held | `surface:helper-vector-layered-write` |
 | Probed green | 1D surface write | `surf1Dwrite` could share broken 2D/layered lowering path | existing Y=0/Z=0 lowering held | `surface:surf1d-write` |
 | Fixed | 1D surface read | `surf1Dread` was missing from analyzer/reference/WGSL even though `surf1Dwrite` existed | x-only reads now lower as y=0/z=0 and support pointer and return forms through analyzer, CPU reference, and WGSL | `surface:surf1d-read` `1/0/0`, smoke `172/0/0` |
+| Probed green | 1D surface vector read | `surf1Dread<float4>` and pointer-form `surf1Dread(&float4, ...)` could mis-scale x-byte offsets or collapse vector lanes after adding scalar 1D reads | existing lane-wise surface read lowering preserves 1D vector pointer and return forms | `surface:surf1d-vector-read` `1/0/0`, smoke `173/0/0` |
 | Probed green | texture helper vector conversion | `tex2D<uint4>` through texture object helper could lose lane casts | existing vector cast path held | `texture:object-uint4-helper-read` |
 | Probed green | nested texture helper chain | texture object could break through nested device helpers | existing texture object argument lowering held | `texture:nested-helper-vector-read` |
 | Probed green | conditional vector lane pointer write | vector lane pointer through conditional rebind could target wrong lane/buffer | existing scalar-view pointer lowering held | `storage:conditional-vector-lane-pointer-write` |
@@ -384,6 +391,7 @@ Current added surface/texture cases:
 - `surface:helper-vector-layered-write`
 - `surface:surf1d-write`
 - `surface:surf1d-read`
+- `surface:surf1d-vector-read`
 - `texture:object-uint4-helper-read`
 - `texture:helper-vector-cast-coercion`
 - `texture:nested-helper-vector-read`
@@ -436,7 +444,7 @@ Current added pointer/control cases:
 - `control:active-lane-shared-return-side-effect-barrier`
 - `control:subgroup-truthiness-assignment-scalar`
 
-Smoke current: `172/0/0`.
+Smoke current: `173/0/0`.
 
 Full source e2e current: `221/0/0`.
 
