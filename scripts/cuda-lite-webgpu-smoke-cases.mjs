@@ -133,6 +133,7 @@ export const textureScopeCases = [
   "texture:nested-helper-vector-read",
   "texture:active-lane-return-read-side-effect",
   "texture:float3-active-lane-store",
+  "texture:uint3-active-lane-store",
   "texture:atlas-active-lane-return-read-side-effect",
   "texture:deep-helper-active-lane-vector-store",
   "texture:mixed-scalar-vector-active-lane-store",
