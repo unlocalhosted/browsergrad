@@ -1873,6 +1873,16 @@ __global__ void surface1DWrite(cudaSurfaceObject_t outputSurf) {
     surf1Dwrite(37.0f, outputSurf, 2 * sizeof(float));
   }
 }`,
+  surface1DVectorWrite: `
+__device__ void write_1d_surface_vec(cudaSurfaceObject_t surfaceArg, float4 value, int x) {
+  surf1Dwrite(value, surfaceArg, x * sizeof(float));
+}
+
+__global__ void surface1DVectorWrite(cudaSurfaceObject_t outputSurf) {
+  if (threadIdx.x == 0) {
+    write_1d_surface_vec(outputSurf, make_float4(2.0f, 3.0f, 5.0f, 7.0f), 1);
+  }
+}`,
   surface1DRead: `
 __device__ float read_1d_surface(cudaSurfaceObject_t surfaceArg, int x) {
   return surf1Dread<float>(surfaceArg, x * sizeof(float));
@@ -6731,6 +6741,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "outputSurf",
             expectedOutput: { type: "Float32Array", data: [0, 0, 37, 0] },
+          },
+          {
+            name: "surface:surf1d-vector-write",
+            source: SOURCES.surface1DVectorWrite,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {},
+              surfaces: {
+                outputSurf: { width: 6, height: 1, data: new Float32Array(6) },
+              },
+            }),
+            output: "outputSurf",
+            expectedOutput: { type: "Float32Array", data: [0, 2, 3, 5, 7, 0] },
           },
           {
             name: "surface:surf1d-read",

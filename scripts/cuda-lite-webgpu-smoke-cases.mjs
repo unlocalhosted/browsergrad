@@ -115,6 +115,7 @@ export const controlScopeCases = [
 export const textureScopeCases = [
   "surface:surf2d-read",
   "surface:surf1d-write",
+  "surface:surf1d-vector-write",
   "surface:surf1d-read",
   "surface:surf1d-vector-read",
   "surface:surf3d-write",
