@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-01T16:54:25Z
+Last updated: 2026-07-01T16:57:17Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,9 +11,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | surf1D pointer-array min/max active-lane return probed green; continue next corpus-shaped storage/texture/control probe |
+| Active work item | layered surface pointer-array CAS/minmax active-lane return probed green; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
-| Worktree | Dirty until current surf1D pointer-array min/max fixture is committed |
+| Worktree | Dirty until current layered surface pointer-array CAS/minmax fixtures are committed |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
 
 ## How To Track This
@@ -472,11 +472,17 @@ Current verified gates:
 - hot surf1D pointer-alias atomic pointer-array min/max active-lane probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `4.7ms`, speedup `1.30`
 - WebGPU fixture test after surf1D pointer-array min/max probe: passed
 - WebGPU smoke after surf1D pointer-array min/max probe: `205 passed / 0 failed / 0 skipped`
+- layered surface pointer-alias atomic pointer-array CAS/minmax active-lane fixtures: `surface:pointer-alias-atomic-pointer-array-cas-active-lane-return,surface:pointer-alias-atomic-pointer-array-minmax-active-lane-return` are `2 passed / 0 failed / 0 skipped`
+- hot layered surface pointer-alias atomic pointer-array CAS/minmax active-lane probe: repeat `5`, warmup `1`, `10 passed / 0 failed / 0 skipped`, best warm `4.3ms` / `4.4ms`, speedups `1.28` / `1.25`
+- WebGPU fixture test after layered surface pointer-array CAS/minmax probe: passed
+- WebGPU smoke after layered surface pointer-array CAS/minmax probe: `207 passed / 0 failed / 0 skipped`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Probed green | layered surface pointer-array CAS/exchange active-lane return | layered-surface-fed `uint4` selected scalar pointer-array CAS/exchange ops before an early `return` could regress compare/exchange old values, selected buffer handles, or active-lane side effects before a later barrier | existing layered surface vector read, pointer-array CAS/exchange lowering, and active-lane guard preserve old-value side effects before return | `surface:pointer-alias-atomic-pointer-array-cas-active-lane-return` `1/0/0`; smoke `207/0/0`; hot gate `5/0/0`, speedup `1.28` |
+| Probed green | layered surface pointer-array min/max active-lane return | layered-surface-fed `uint4` selected scalar pointer-array min/max ops before an early `return` could regress unsigned min/max old values, selected buffer handles, or active-lane side effects before a later barrier | existing layered surface vector read, pointer-array min/max lowering, and active-lane guard preserve old-value side effects before return | `surface:pointer-alias-atomic-pointer-array-minmax-active-lane-return` `1/0/0`; smoke `207/0/0`; hot gate `5/0/0`, speedup `1.25` |
 | Probed green | surf1D pointer-array min/max active-lane return | surf1D-fed `uint4` selected scalar pointer-array min/max ops before an early `return` could regress unsigned min/max return values, selected buffer handles, or active-lane side effects before a later barrier | existing surf1D vector read, pointer-array scalar min/max lowering, and active-lane guard preserve old-value side effects before return | `surface:surf1d-pointer-alias-atomic-pointer-array-minmax-active-lane-return` `1/0/0`; smoke `205/0/0`; hot gate `5/0/0`, speedup `1.30` |
 | Probed green | surf1D pointer-array CAS/exchange active-lane return | surf1D-fed `uint4` selected scalar pointer-array CAS/exchange ops before an early `return` could regress compare/exchange return values, selected buffer handles, or active-lane side effects before a later barrier | existing surf1D vector read, pointer-array scalar atomic return lowering, and active-lane guard preserve CAS/exchange side effects and old-value writes before return | `surface:surf1d-pointer-alias-atomic-pointer-array-cas-active-lane-return` `1/0/0`; smoke `204/0/0`; hot gate `5/0/0`, speedup `1.18` |
 | Probed green | surf1D pointer-array active-lane return | surf1D-fed `uint4` selected scalar pointer-array atomics before an early `return` could regress flat byte-offset reads or active-lane side effects before a later barrier | existing active-lane guard plus surf1D vector read and pointer-array scalar atomic lowering preserves side effects before return | `surface:surf1d-pointer-alias-atomic-pointer-array-active-lane-return` `1/0/0`; smoke `203/0/0`; hot gate `5/0/0`, speedup `2.07` |
@@ -611,6 +617,8 @@ Current added surface/texture cases:
 - `surface:pointer-alias-atomic-vector-compound`
 - `surface:pointer-alias-atomic-pointer-array-select`
 - `surface:pointer-alias-atomic-pointer-array-active-lane-return`
+- `surface:pointer-alias-atomic-pointer-array-cas-active-lane-return`
+- `surface:pointer-alias-atomic-pointer-array-minmax-active-lane-return`
 - `surface:uint4-vector-active-lane-return`
 - `surface:int4-vector-active-lane-return`
 - `surface:helper-vector-layered-write`
@@ -695,7 +703,7 @@ Current added pointer/control cases:
 - `control:active-lane-shared-return-side-effect-barrier`
 - `control:subgroup-truthiness-assignment-scalar`
 
-Smoke current: `205/0/0`.
+Smoke current: `207/0/0`.
 
 Full source e2e current: `221/0/0`.
 
