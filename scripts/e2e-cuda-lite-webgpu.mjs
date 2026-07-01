@@ -2022,6 +2022,52 @@ __global__ void surfaceInt3VectorActiveLaneReturn(cudaSurfaceObject_t surf, int 
     out[tid] = 1 + tid;
   }
 }`,
+  surfaceUint4VectorActiveLaneReturn: `
+__device__ void write_layer_uint4_active(cudaSurfaceObject_t surfaceArg, int row, int layer, uint base) {
+  surf2DLayeredwrite(make_uint4(base + 1u, base + 2u, base + 3u, base + 4u), surfaceArg, 0, row, layer);
+}
+
+__device__ uint4 read_layer_uint4_active(cudaSurfaceObject_t surfaceArg, int row, int layer) {
+  return surf2DLayeredread<uint4>(surfaceArg, 0, row, layer);
+}
+
+__global__ void surfaceUint4VectorActiveLaneReturn(cudaSurfaceObject_t surf, uint *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    write_layer_uint4_active(surf, 0, 1, 30u + (uint)tid);
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    uint4 value = read_layer_uint4_active(surf, 0, 1);
+    out[0] = value.x + value.y + value.z + value.w;
+  } else {
+    out[tid] = 1u + (uint)tid;
+  }
+}`,
+  surfaceInt4VectorActiveLaneReturn: `
+__device__ void write_layer_int4_active(cudaSurfaceObject_t surfaceArg, int row, int layer, int base) {
+  surf2DLayeredwrite(make_int4(base + 1, base + 2, base + 3, base + 4), surfaceArg, 0, row, layer);
+}
+
+__device__ int4 read_layer_int4_active(cudaSurfaceObject_t surfaceArg, int row, int layer) {
+  return surf2DLayeredread<int4>(surfaceArg, 0, row, layer);
+}
+
+__global__ void surfaceInt4VectorActiveLaneReturn(cudaSurfaceObject_t surf, int *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    write_layer_int4_active(surf, 0, 1, 30 + tid);
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    int4 value = read_layer_int4_active(surf, 0, 1);
+    out[0] = value.x + value.y + value.z + value.w;
+  } else {
+    out[tid] = 1 + tid;
+  }
+}`,
   driverSurfaceAlias: `
 __global__ void driverSurfaceAlias(CUsurfObject surf) {
   surf2Dwrite(13u, surf, 4, 0);
@@ -4838,6 +4884,40 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Int32Array", data: [105, 2, 3, 0] },
+          },
+          {
+            name: "surface:uint4-vector-active-lane-return",
+            source: SOURCES.surfaceUint4VectorActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [142, 2, 3, 0] },
+          },
+          {
+            name: "surface:int4-vector-active-lane-return",
+            source: SOURCES.surfaceInt4VectorActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(4),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [142, 2, 3, 0] },
           },
           {
             name: "surface:driver-alias",
