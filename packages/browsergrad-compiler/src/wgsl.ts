@@ -1888,6 +1888,9 @@ function devicePointerValueTypeForExpression(expression: CudaLiteExpression, con
     const pointer = expression.args[0];
     return pointer ? devicePointerValueTypeForExpression(pointer, context) : "float";
   }
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    return devicePointerValueTypeForExpression(expression.left, context);
+  }
   const root = rootIdentifier(expression);
   if (root) {
     const pointerArray = context.localPointerArrayFor(root, expression.span);

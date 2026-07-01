@@ -567,6 +567,25 @@ __global__ void uint_vector_to_scalar_atomic_offset(uint4* out) {
     expect(compiled.wgsl).toContain("case 0u: { return atomicAdd(&out[index], value); }");
   });
 
+  it("keeps casted vector pointer arithmetic atomics on pointer helpers", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ void add_uint_vector_slot(uint4* slot, uint value) {
+  uint* lanes = reinterpret_cast<uint*>(slot);
+  atomicAdd(lanes + 3, value);
+}
+
+__global__ void vector_pointer_array_atomic_offset(uint4* out) {
+  uint4* slots[2];
+  slots[0] = out + 1;
+  slots[1] = out + 2;
+  add_uint_vector_slot(slots[0], 9u);
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32(");
+    expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_u32(slot_buffer, ((slot_base + (u32(0) * 4u)) + u32(3)), value)");
+    expect(compiled.wgsl).not.toContain("atomicAdd((slot_base + 3u), value)");
+  });
+
   it("reads shifted vector-backed device global scalar atomics from flat lanes", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ uint4 g_vec[2];
