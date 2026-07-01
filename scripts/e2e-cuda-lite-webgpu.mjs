@@ -2139,6 +2139,29 @@ __global__ void surfacePointerAliasAtomicActiveLaneStore(cudaSurfaceObject_t sur
   __syncthreads();
   out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
 }`,
+  surfacePointerAliasAtomicVectorReadback: `
+__device__ float read_atomic_readback_surface_scalar(cudaSurfaceObject_t surfaceArg, int layer) {
+  return surf2DLayeredread<float>(surfaceArg, 0, 0, layer);
+}
+
+__device__ void atomic_surface_readback_alias_lane(uint *scalarOut, int lane, uint value) {
+  atomicAdd(&scalarOut[lane * 4 + 1], value);
+}
+
+__global__ void surfacePointerAliasAtomicVectorReadback(cudaSurfaceObject_t surf, uint4 *out, uint *summary) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  __syncthreads();
+  if (tid == 0) {
+    uint *scalarView = reinterpret_cast<uint*>(out);
+    atomic_surface_readback_alias_lane(scalarView, 1, (uint)read_atomic_readback_surface_scalar(surf, 1));
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    summary[0] = value.x + value.y + value.z + value.w;
+  }
+}`,
   surfaceUint3VectorActiveLaneReturn: `
 __device__ void write_layer_uint3_active(cudaSurfaceObject_t surfaceArg, int row, int layer, uint base) {
   surf2DLayeredwrite(make_uint3(base + 1u, base + 2u, base + 3u), surfaceArg, 0, row, layer);
@@ -5550,6 +5573,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [1, 10, 20, 30, 2, 11, 21, 31, 3, 12, 22, 32, 0, 0, 8, 0] },
+          },
+          {
+            name: "surface:pointer-alias-atomic-vector-readback",
+            source: SOURCES.surfacePointerAliasAtomicVectorReadback,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 1, height: 1, data: new Float32Array([2, 5]) },
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [70] },
           },
           {
             name: "surface:uint4-vector-active-lane-return",

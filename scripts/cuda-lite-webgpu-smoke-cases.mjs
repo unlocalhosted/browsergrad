@@ -133,6 +133,7 @@ export const textureScopeCases = [
   "surface:layered-mixed-scalar-vector-active-lane-return",
   "surface:pointer-alias-active-lane-store",
   "surface:pointer-alias-atomic-active-lane-store",
+  "surface:pointer-alias-atomic-vector-readback",
   "surface:uint4-vector-active-lane-return",
   "surface:int4-vector-active-lane-return",
   "surface:driver-alias",
