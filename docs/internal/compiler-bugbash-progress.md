@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-01T14:07:39Z
+Last updated: 2026-07-01T14:10:20Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Float3/uint3/int3 texture-to-surface vector active-lane probes green; continue next corpus-shaped storage/texture/control probe |
+| Active work item | Float4/uint4/int4 texture-to-surface vector active-lane probes green; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Dirty, unstaged |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -236,6 +236,11 @@ Current verified gates:
 - compiler typecheck after 3-lane texture-to-surface active-lane probes: passed
 - WebGPU smoke after 3-lane texture-to-surface active-lane probes: `161 passed / 0 failed / 0 skipped`
 - hot 3-lane texture-to-surface active-lane probe group: repeat `5`, warmup `1`, `15 passed / 0 failed / 0 skipped`, best warm `1.0ms` / `1.4ms` / `1.0ms`, speedups `3.90` / `2.71` / `3.40`
+- float4/uint4/int4 texture-to-layered-surface vector active-lane fixture group: `3 passed / 0 failed / 0 skipped`
+- compiler fixture test after 4-lane texture-to-surface active-lane probes: passed
+- compiler typecheck after 4-lane texture-to-surface active-lane probes: passed
+- WebGPU smoke after 4-lane texture-to-surface active-lane probes: `164 passed / 0 failed / 0 skipped`
+- hot 4-lane texture-to-surface active-lane probe group: repeat `5`, warmup `1`, `15 passed / 0 failed / 0 skipped`, best warm `3.5ms` / `1.7ms` / `1.2ms`, speedups `1.14` / `2.59` / `3.25`
 
 ## Bugs Found During Current Run
 
@@ -287,6 +292,7 @@ Current verified gates:
 | Probed green | texture-fed layered surface vector write before return | `tex2D<float4>` feeding vector `surf2DLayeredwrite` before active-lane return could lose texture value lanes, surface handle/layer, or deactivation order | active-lane lowering preserves texture vector read and lane-wise layered surface write before deactivating the lane | `texture-surface:vector-active-lane-return` `1/0/0`, smoke `137/0/0` |
 | Probed green | 2-lane texture-fed layered surface vector write/read before return | `tex2D<float2/uint2/int2>` feeding typed `surf2DLayeredwrite` and post-barrier typed surface reads could mis-scale lanes, lose signedness/unsigned casts, or reorder active-lane deactivation | existing texture conversion, typed surface vector writes/reads, and active-lane lowering preserve 2-lane float/signed/unsigned values across texture-to-surface flow | `texture-surface:float2-vector-active-lane-return,texture-surface:uint2-vector-active-lane-return,texture-surface:int2-vector-active-lane-return` `3/0/0`, smoke `158/0/0` |
 | Probed green | 3-lane texture-fed layered surface vector write/read before return | `tex2D<float3/uint3/int3>` feeding typed `surf2DLayeredwrite` and post-barrier typed surface reads could mis-pack 3 lanes, lose signedness/unsigned casts, or reorder active-lane deactivation | existing texture conversion, typed surface vector writes/reads, and active-lane lowering preserve 3-lane float/signed/unsigned values across texture-to-surface flow | `texture-surface:float3-vector-active-lane-return,texture-surface:uint3-vector-active-lane-return,texture-surface:int3-vector-active-lane-return` `3/0/0`, smoke `161/0/0` |
+| Probed green | 4-lane texture-fed layered surface vector write/read before return | `tex2D<float4/uint4/int4>` feeding typed `surf2DLayeredwrite` and post-barrier typed surface reads could scalarize full-width vectors, lose signedness/unsigned casts, or reorder active-lane deactivation | existing texture conversion, typed surface vector writes/reads, and active-lane lowering preserve 4-lane float/signed/unsigned values across texture-to-surface flow | `texture-surface:float4-vector-active-lane-return,texture-surface:uint4-vector-active-lane-return,texture-surface:int4-vector-active-lane-return` `3/0/0`, smoke `164/0/0` |
 | Probed green | layered/3D texture vector read into 3D surface vector write before return | `tex2DLayered<float4>` plus `tex3D<float4>` feeding vector `surf3Dwrite` before active-lane return could lose atlas/volume lanes, z indexing, or deactivation order | active-lane lowering preserves layered/3D texture vector reads, 3D surface vector write, and post-barrier vector readback | `texture-surface:volume-vector-active-lane-return` `1/0/0`, smoke `138/0/0` |
 | Probed green | atlas/layered texture side effect before return | `tex2DLayered` and `tex3D` helper reads before active-lane return could mis-map atlas rows or be dropped before a later barrier | active-lane lowering preserves atlas/layered texture reads before lane deactivation | `texture:atlas-active-lane-return-read-side-effect` `1/0/0`, compiler unit `387/0`, smoke `124/0/0` |
 | Probed green | deep helper texture vector store before return | nested texture helper calls feeding `float4` storage writes before active-lane return could lose vector lane stores or deactivation order | active-lane lowering preserves deep texture helper calls and vector stores before lane deactivation | `texture:deep-helper-active-lane-vector-store` `1/0/0`, compiler unit `388/0`, smoke `125/0/0` |
@@ -346,6 +352,9 @@ Current added surface/texture cases:
 - `texture-surface:float3-vector-active-lane-return`
 - `texture-surface:uint3-vector-active-lane-return`
 - `texture-surface:int3-vector-active-lane-return`
+- `texture-surface:float4-vector-active-lane-return`
+- `texture-surface:uint4-vector-active-lane-return`
+- `texture-surface:int4-vector-active-lane-return`
 - `texture:pointer-alias-atomic-vector-readback`
 - `texture:pointer-alias-atomic-vector-compound`
 - `texture-surface:active-lane-return-side-effect`
@@ -370,7 +379,7 @@ Current added pointer/control cases:
 - `control:active-lane-shared-return-side-effect-barrier`
 - `control:subgroup-truthiness-assignment-scalar`
 
-Smoke current: `161/0/0`.
+Smoke current: `164/0/0`.
 
 Full source e2e current: `221/0/0`.
 
@@ -383,11 +392,11 @@ Probe these with fail-first real WebGPU fixtures:
 - Surface family:
   - surface writes before active-lane return, layered writes, helper layered vector writes, layered reads, 3D reads, layered/3D vector reads, surface vector read/write before active-lane return, float2/uint2/int2/float3/uint3/int3/uint4/int4 surface vector write/read before active-lane return, and 3D vector writes fed by layered/3D texture vectors are now green; keep probing next corpus-shaped surface/texture pattern
 - Texture family:
-  - vector helper return, cast/coercion, active-lane pre-return read, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 texture active-lane stores, texture-to-surface pre-return side effects, 2-lane/3-lane texture-fed layered surface vector writes/reads, texture-fed layered surface vector writes, layered/3D texture vector reads feeding 3D surface vector writes, atlas/layered active-lane reads, deep helper vector stores, mixed scalar/vector texture stores, texture-fed pointer alias writes, texture-fed pointer alias atomics, atomic vector readback, atomic vector compound helper writes, and atomic vector member helper writes are now green; keep probing next corpus-shaped texture/storage pattern
+  - vector helper return, cast/coercion, active-lane pre-return read, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 texture active-lane stores, texture-to-surface pre-return side effects, 2-lane/3-lane/4-lane texture-fed layered surface vector writes/reads, texture-fed layered surface vector writes, layered/3D texture vector reads feeding 3D surface vector writes, atlas/layered active-lane reads, deep helper vector stores, mixed scalar/vector texture stores, texture-fed pointer alias writes, texture-fed pointer alias atomics, atomic vector readback, atomic vector compound helper writes, and atomic vector member helper writes are now green; keep probing next corpus-shaped texture/storage pattern
 - Pointer/vector family:
   - mixed local pointer-param + generic storage pointer helper now has explicit diagnostic; implementation support remains future work
 - Active-lane/control family:
-  - loop-internal, alternate-branch, nested, loop+alternate, scalar side-effect, vector-lane side-effect, pointer-alias side-effect, atomic side-effect, shared-memory side-effect, surface side-effect, texture read side-effect, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 texture-store side-effect, float2/uint2/int2/float3/uint3/int3/uint4/int4 surface side-effect, texture-to-surface side-effect, 2-lane/3-lane texture-fed layered surface vector side-effect, texture-fed layered surface vector side-effect, layered/3D texture into 3D surface vector side-effect, atlas/layered texture return, deep helper vector-store, mixed scalar/vector texture-store, texture-fed pointer-alias, texture-fed pointer-alias atomic, atomic vector readback, atomic vector compound helper, and atomic vector member helper cases are now green in real WebGPU; keep probing next corpus-shaped texture/storage pattern
+  - loop-internal, alternate-branch, nested, loop+alternate, scalar side-effect, vector-lane side-effect, pointer-alias side-effect, atomic side-effect, shared-memory side-effect, surface side-effect, texture read side-effect, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 texture-store side-effect, float2/uint2/int2/float3/uint3/int3/uint4/int4 surface side-effect, texture-to-surface side-effect, 2-lane/3-lane/4-lane texture-fed layered surface vector side-effect, texture-fed layered surface vector side-effect, layered/3D texture into 3D surface vector side-effect, atlas/layered texture return, deep helper vector-store, mixed scalar/vector texture-store, texture-fed pointer-alias, texture-fed pointer-alias atomic, atomic vector readback, atomic vector compound helper, and atomic vector member helper cases are now green in real WebGPU; keep probing next corpus-shaped texture/storage pattern
   - non-uniform break/return should remain clear diagnostic, not silent miscompile
 - Perf/tooling:
   - keep `verify:changed` scoped and explain selected gates
