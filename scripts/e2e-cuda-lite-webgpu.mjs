@@ -2218,6 +2218,29 @@ __global__ void surface1DPointerAliasAtomicActiveLaneStore(cudaSurfaceObject_t s
   __syncthreads();
   out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
 }`,
+  surface1DPointerAliasAtomicVectorReadback: `
+__device__ uint read_1d_atomic_readback_surface_scalar(cudaSurfaceObject_t surfaceArg, int x) {
+  return surf1Dread<uint>(surfaceArg, x * sizeof(float));
+}
+
+__device__ void atomic_1d_surface_readback_alias_lane(uint *scalarOut, int lane, uint value) {
+  atomicAdd(&scalarOut[lane * 4 + 1], value);
+}
+
+__global__ void surface1DPointerAliasAtomicVectorReadback(cudaSurfaceObject_t surf, uint4 *out, uint *summary) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  __syncthreads();
+  if (tid == 0) {
+    uint *scalarView = reinterpret_cast<uint*>(out);
+    atomic_1d_surface_readback_alias_lane(scalarView, 1, read_1d_atomic_readback_surface_scalar(surf, 2));
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    summary[0] = value.x + value.y + value.z + value.w;
+  }
+}`,
   surfacePointerAliasAtomicActiveLaneStore: `
 __device__ float read_atomic_alias_surface_scalar(cudaSurfaceObject_t surfaceArg, int layer) {
   return surf2DLayeredread<float>(surfaceArg, 0, 0, layer);
@@ -5723,6 +5746,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [1, 10, 20, 30, 2, 11, 21, 31, 3, 12, 22, 32, 0, 8, 0, 0] },
+          },
+          {
+            name: "surface:surf1d-pointer-alias-atomic-vector-readback",
+            source: SOURCES.surface1DPointerAliasAtomicVectorReadback,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([2, 3, 5, 7]) },
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [70] },
           },
           {
             name: "surface:pointer-alias-atomic-active-lane-store",
