@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-01T14:42:33Z
+Last updated: 2026-07-01T14:44:38Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | surf1Dwrite vector lane real WebGPU fixture green; continue next corpus-shaped storage/texture/control probe |
+| Active work item | 1D surface vector active-lane real WebGPU fixture green; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Clean after latest fixture slice commit |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -294,6 +294,12 @@ Current verified gates:
 - compiler unit suite after 1D surface vector write probe: `412 passed / 0 failed`
 - WebGPU smoke after 1D surface vector write probe: `174 passed / 0 failed / 0 skipped`
 - hot 1D surface vector write probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `3.0ms`, speedup `1.33`
+- 1D surface vector active-lane fixture: `surface:surf1d-vector-active-lane-return` is `1 passed / 0 failed / 0 skipped`
+- compiler fixture test after 1D surface vector active-lane probe: passed
+- compiler typecheck after 1D surface vector active-lane probe: passed
+- compiler unit suite after 1D surface vector active-lane probe: `412 passed / 0 failed`
+- WebGPU smoke after 1D surface vector active-lane probe: `175 passed / 0 failed / 0 skipped`
+- hot 1D surface vector active-lane probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `3.2ms`, speedup `1.31`
 
 ## Bugs Found During Current Run
 
@@ -324,6 +330,7 @@ Current verified gates:
 | Probed green | 1D surface vector write | `surf1Dwrite(float4)` through helper could mis-scale x-byte offsets or emit invalid multi-statement vector writes for 1D surfaces | existing lane-wise vector surface write lowering preserves 1D helper param writes | `surface:surf1d-vector-write` `1/0/0`, smoke `174/0/0` |
 | Fixed | 1D surface read | `surf1Dread` was missing from analyzer/reference/WGSL even though `surf1Dwrite` existed | x-only reads now lower as y=0/z=0 and support pointer and return forms through analyzer, CPU reference, and WGSL | `surface:surf1d-read` `1/0/0`, smoke `172/0/0` |
 | Probed green | 1D surface vector read | `surf1Dread<float4>` and pointer-form `surf1Dread(&float4, ...)` could mis-scale x-byte offsets or collapse vector lanes after adding scalar 1D reads | existing lane-wise surface read lowering preserves 1D vector pointer and return forms | `surface:surf1d-vector-read` `1/0/0`, smoke `173/0/0` |
+| Probed green | 1D surface vector write before active-lane return | `surf1Dwrite(float4)` before return-and-barrier lowering could drop inactive-lane side effects, mis-guard multi-statement vector writes, or mis-read lanes after the barrier | existing active-lane lowering preserves 1D vector surface writes before lane deactivation and later `surf1Dread<float4>` readback | `surface:surf1d-vector-active-lane-return` `1/0/0`, smoke `175/0/0` |
 | Probed green | texture helper vector conversion | `tex2D<uint4>` through texture object helper could lose lane casts | existing vector cast path held | `texture:object-uint4-helper-read` |
 | Probed green | nested texture helper chain | texture object could break through nested device helpers | existing texture object argument lowering held | `texture:nested-helper-vector-read` |
 | Probed green | conditional vector lane pointer write | vector lane pointer through conditional rebind could target wrong lane/buffer | existing scalar-view pointer lowering held | `storage:conditional-vector-lane-pointer-write` |
@@ -400,6 +407,7 @@ Current added surface/texture cases:
 - `surface:surf1d-vector-write`
 - `surface:surf1d-read`
 - `surface:surf1d-vector-read`
+- `surface:surf1d-vector-active-lane-return`
 - `texture:object-uint4-helper-read`
 - `texture:helper-vector-cast-coercion`
 - `texture:nested-helper-vector-read`
@@ -452,7 +460,7 @@ Current added pointer/control cases:
 - `control:active-lane-shared-return-side-effect-barrier`
 - `control:subgroup-truthiness-assignment-scalar`
 
-Smoke current: `174/0/0`.
+Smoke current: `175/0/0`.
 
 Full source e2e current: `221/0/0`.
 

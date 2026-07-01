@@ -118,6 +118,7 @@ export const textureScopeCases = [
   "surface:surf1d-vector-write",
   "surface:surf1d-read",
   "surface:surf1d-vector-read",
+  "surface:surf1d-vector-active-lane-return",
   "surface:surf3d-write",
   "surface:surf3d-read",
   "surface:surf3d-vector-read",
