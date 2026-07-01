@@ -1,5 +1,31 @@
 export const cudaLiteCorpusExecutionFixtures = [
   {
+    sourceKey: "corpusCudaSamplesHistogram64Kernel",
+    caseName: "corpus:cuda-samples:histogram64Kernel",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/2_Concepts_and_Techniques/histogram/histogram64.cu",
+    kernelName: "histogram64Kernel",
+    workgroupSize: [64, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [64, 1, 1] },
+    input: {
+      buffers: {
+        d_PartialHistograms: { type: "Uint32Array", length: 64 },
+        d_Data: { type: "Uint32Array", data: [0x0004080c, 0x1014181c, 0x2024282c, 0x3034383c] },
+      },
+      scalars: { dataCount: 1 },
+    },
+    output: "d_PartialHistograms",
+    expectedOutput: {
+      type: "Uint32Array",
+      data: [
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+      ],
+    },
+  },
+  {
     sourceKey: "corpusLeetCudaEmbeddingF32x4",
     caseName: "corpus:LeetCUDA:embedding_f32x4_kernel",
     corpusId: "leetcuda",
@@ -236,6 +262,32 @@ export const cudaLiteCorpusExecutionFixtures = [
     },
     output: "inp",
     expectedOutput: { type: "Float32Array", data: [2] },
+  },
+  {
+    sourceKey: "corpusLlmSoftmaxForwardKernel2",
+    caseName: "corpus:llm.c:softmax_forward_kernel2",
+    corpusId: "llm.c",
+    relativePath: "dev/cuda/softmax_forward.cu",
+    kernelName: "softmax_forward_kernel2",
+    workgroupSize: [4, 1, 1],
+    options: { dynamicSharedMemory: { shared: 4 } },
+    launch: { gridDim: [2, 1, 1], blockDim: [4, 1, 1] },
+    input: {
+      buffers: {
+        out: { type: "Float32Array", length: 8 },
+        inp: { type: "Float32Array", data: [1, 2, 3, 4, -1, 0, 1, 2] },
+      },
+      scalars: { N: 2, C: 4 },
+    },
+    output: "out",
+    tolerance: 2e-5,
+    expectedOutput: {
+      type: "Float32Array",
+      data: [
+        0.0320586, 0.0871443, 0.236883, 0.643914,
+        0.0320586, 0.0871443, 0.236883, 0.643914,
+      ],
+    },
   },
   {
     sourceKey: "corpusLlmFp32ToLowp",

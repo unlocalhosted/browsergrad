@@ -40,8 +40,8 @@ const CUDA_SCALAR_TYPE_ALIASES = new Map<string, Exclude<CudaLiteScalarType, "vo
   ["char", "int"],
   ["int8_t", "int"],
   ["ptrdiff_t", "int"],
-  ["uchar", "uint"],
-  ["uint8_t", "uint"],
+  ["uchar", "uchar"],
+  ["uint8_t", "uchar"],
   ["clock_t", "uint"],
   ["size_type", "uint"],
   ["curandState", "uint"],
@@ -1478,7 +1478,7 @@ class Parser {
     }
     if (token.value === "auto") return "int";
     if (token.value === "unsigned") {
-      if (this.consumeIf("char")) return "uint";
+      if (this.consumeIf("char")) return "uchar";
       this.consumeIntegerWidthSuffix();
       return "uint";
     }

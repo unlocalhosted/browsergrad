@@ -18,6 +18,7 @@ export type CudaLiteScalarType =
   | "double"
   | "int"
   | "uint"
+  | "uchar"
   | "half"
   | "half2"
   | "bf16"

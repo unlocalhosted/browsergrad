@@ -171,12 +171,16 @@ interface MutableTrace {
 
 type ExecControl = { readonly kind: "return"; readonly value?: EvalValue } | { readonly kind: "continue" } | { readonly kind: "break" };
 type BarrierKind = "barrier" | "grid-barrier";
-type CollectiveOp = "sum" | "max" | "min";
+type CollectiveOp = "sum" | "max" | "min" | "any" | "all" | "device" | "shfl" | "shfl_down" | "shfl_up" | "shfl_xor";
 interface CollectiveYield {
   readonly kind: "collective";
   readonly op: CollectiveOp;
-  readonly value: number;
+  readonly value: EvalValue;
   readonly groupKey: string;
+  readonly shuffleIndex?: number;
+  readonly shuffleWidth?: number;
+  readonly deviceOp?: CudaLiteDeviceFunction;
+  readonly context?: ThreadContext;
 }
 type SyncYield = BarrierKind | CollectiveYield;
 type BarrierGenerator = Generator<SyncYield, ExecControl | void, EvalValue | void>;
@@ -385,7 +389,9 @@ function runBlock(
       }
       assertCollectiveGroupParticipation(collectives, activeByCollectiveGroup);
       for (const group of collectCollectiveResults(collectives)) {
-        for (const thread of group.threads) resumes[thread] = group.value;
+        for (let index = 0; index < group.threads.length; index++) {
+          resumes[group.threads[index]!] = group.values[index];
+        }
       }
       continue;
     }
@@ -397,26 +403,72 @@ function runBlock(
 
 function collectCollectiveResults(
   collectives: readonly (CollectiveYield & { readonly thread: number })[],
-): Array<{ readonly threads: readonly number[]; readonly value: EvalValue }> {
-  const groups = new Map<string, { readonly op: CollectiveOp; readonly threads: number[]; readonly values: number[] }>();
+): Array<{ readonly threads: readonly number[]; readonly values: readonly EvalValue[] }> {
+  const groups = new Map<string, {
+    readonly op: CollectiveOp;
+    readonly threads: number[];
+    readonly values: EvalValue[];
+    readonly shuffleIndices: number[];
+    readonly shuffleWidths: number[];
+    readonly deviceOp?: CudaLiteDeviceFunction;
+    readonly context?: ThreadContext;
+  }>();
   for (const collective of collectives) {
-    const key = `${collective.op}:${collective.groupKey}`;
+    const key = `${collective.op}:${collective.deviceOp?.name ?? ""}:${collective.shuffleWidth ?? ""}:${collective.groupKey}`;
     const group = groups.get(key);
     if (group) {
       group.threads.push(collective.thread);
       group.values.push(collective.value);
+      group.shuffleIndices.push(collective.shuffleIndex ?? 0);
+      group.shuffleWidths.push(collective.shuffleWidth ?? 32);
     } else {
       groups.set(key, {
         op: collective.op,
         threads: [collective.thread],
         values: [collective.value],
+        shuffleIndices: [collective.shuffleIndex ?? 0],
+        shuffleWidths: [collective.shuffleWidth ?? 32],
+        ...(collective.deviceOp === undefined ? {} : { deviceOp: collective.deviceOp }),
+        ...(collective.context === undefined ? {} : { context: collective.context }),
       });
     }
   }
   return [...groups.values()].map((group) => ({
     threads: group.threads,
-    value: reduceCollectiveValues(group.op, group.values),
+    values: collectiveResultValues(group),
   }));
+}
+
+function collectiveResultValues(group: {
+  readonly op: CollectiveOp;
+  readonly threads: readonly number[];
+  readonly values: readonly EvalValue[];
+  readonly shuffleIndices: readonly number[];
+  readonly shuffleWidths: readonly number[];
+  readonly deviceOp?: CudaLiteDeviceFunction;
+  readonly context?: ThreadContext;
+}): readonly EvalValue[] {
+  if (group.op === "shfl" || group.op === "shfl_down" || group.op === "shfl_up" || group.op === "shfl_xor") {
+    const valuesByThread = new Map(group.threads.map((thread, index) => [thread, group.values[index]!] as const));
+    return group.threads.map((thread, index) => {
+      const width = Math.max(1, Math.min(32, Math.trunc(group.shuffleWidths[index] ?? 32)));
+      const lane = thread % 32;
+      const logicalLane = lane % width;
+      const base = thread - logicalLane;
+      const offset = Math.trunc(group.shuffleIndices[index] ?? 0);
+      const sourceLane = group.op === "shfl"
+        ? offset
+        : group.op === "shfl_down"
+          ? logicalLane + offset
+          : group.op === "shfl_up"
+            ? logicalLane - offset
+            : logicalLane ^ offset;
+      const sourceThread = sourceLane >= 0 && sourceLane < width ? base + sourceLane : thread;
+      return valuesByThread.get(sourceThread) ?? group.values[index]!;
+    });
+  }
+  const value = reduceCollectiveValues(group.op, group.values, group.deviceOp, group.context);
+  return group.threads.map(() => value);
 }
 
 function assertCollectiveGroupParticipation(
@@ -435,14 +487,28 @@ function assertCollectiveGroupParticipation(
   }
 }
 
-function reduceCollectiveValues(op: CollectiveOp, values: readonly number[]): number {
+function reduceCollectiveValues(
+  op: CollectiveOp,
+  values: readonly EvalValue[],
+  deviceOp: CudaLiteDeviceFunction | undefined,
+  context: ThreadContext | undefined,
+): EvalValue {
   switch (op) {
     case "sum":
-      return values.reduce((sum, value) => sum + value, 0);
+      return values.reduce<number>((sum, value) => sum + valueAsNumber(value, "collective value"), 0);
     case "max":
-      return values.length === 0 ? Number.NEGATIVE_INFINITY : Math.max(...values);
+      return values.length === 0 ? Number.NEGATIVE_INFINITY : Math.max(...values.map((value) => valueAsNumber(value, "collective value")));
     case "min":
-      return values.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...values);
+      return values.length === 0 ? Number.POSITIVE_INFINITY : Math.min(...values.map((value) => valueAsNumber(value, "collective value")));
+    case "any":
+      return values.some((value) => truthy(valueAsNumber(value, "collective value"))) ? 1 : 0;
+    case "all":
+      return values.every((value) => truthy(valueAsNumber(value, "collective value"))) ? 1 : 0;
+    case "device":
+      if (!deviceOp || !context) throw compilerFailure("device collective reduction is missing its reducer");
+      return values.slice(1).reduce((acc, value) => evalDeviceFunction(deviceOp, [acc, value], context), values[0] ?? zeroLocalValue(deviceOp.returnType));
+    default:
+      throw compilerFailure(`unsupported collective reduction '${op}'`);
   }
 }
 
@@ -922,7 +988,7 @@ function collectiveAssignment(
   expression: CudaLiteExpression,
   context: ThreadContext,
 ): { readonly expression: CudaLiteAssignmentExpression; readonly lvalue: LValue; readonly sync: CollectiveYield } | undefined {
-  if (expression.kind !== "assignment" || expression.operator !== "=") return undefined;
+  if (expression.kind !== "assignment") return undefined;
   const sync = collectiveCall(expression.right, context);
   if (!sync) return undefined;
   return {
@@ -933,11 +999,42 @@ function collectiveAssignment(
 }
 
 function writeCollectiveAssignment(
-  collective: { readonly lvalue: LValue },
+  collective: { readonly expression: CudaLiteAssignmentExpression; readonly lvalue: LValue },
   value: EvalValue,
   context: ThreadContext,
 ): void {
-  writeLValue(collective.lvalue, value, context);
+  if (collective.expression.operator === "=") {
+    writeLValue(collective.lvalue, value, context);
+    return;
+  }
+  const current = valueAsNumber(readLValue(collective.lvalue, context), collective.lvalue.name);
+  const next = applyAssignmentOperator(current, valueAsNumber(value, "collective assignment value"), collective.expression.operator);
+  writeLValue(collective.lvalue, next, context);
+}
+
+function applyAssignmentOperator(current: number, value: number, operator: CudaLiteAssignmentExpression["operator"]): number {
+  switch (operator) {
+    case "+=":
+      return current + value;
+    case "-=":
+      return current - value;
+    case "*=":
+      return current * value;
+    case "/=":
+      return current / value;
+    case "<<=":
+      return current << value;
+    case ">>=":
+      return current >> value;
+    case "&=":
+      return current & value;
+    case "|=":
+      return current | value;
+    case "^=":
+      return current ^ value;
+    default:
+      return value;
+  }
 }
 
 function collectiveCall(expression: CudaLiteExpression, context: ThreadContext): CollectiveYield | undefined {
@@ -945,6 +1042,8 @@ function collectiveCall(expression: CudaLiteExpression, context: ThreadContext):
   if (expression.kind !== "call") return undefined;
   const cooperativeReduce = cooperativeReduceCollective(expression, context);
   if (cooperativeReduce) return cooperativeReduce;
+  const shuffle = shuffleCollective(expression, context);
+  if (shuffle) return shuffle;
   const name = expressionName(expression.callee);
   const op = collectiveOpForCall(name);
   if (!op) return undefined;
@@ -954,6 +1053,58 @@ function collectiveCall(expression: CudaLiteExpression, context: ThreadContext):
     kind: "collective",
     op,
     value: evalNumber(value, context),
+    groupKey: `warp:${Math.floor(localLinearRank(context) / 32)}`,
+  };
+}
+
+function shuffleCollective(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: ThreadContext,
+): CollectiveYield | undefined {
+  const name = expressionName(expression.callee);
+  const native = nativeShuffleCollective(name, expression.args, context);
+  if (native) return native;
+  if (expression.callee.kind !== "member" || expression.callee.object.kind !== "identifier") return undefined;
+  const groupValue = context.locals.get(expression.callee.object.name);
+  if (!isCooperativeGroup(groupValue)) return undefined;
+  const property = expression.callee.property;
+  if (property !== "shfl" && property !== "shfl_down" && property !== "shfl_up" && property !== "shfl_xor") return undefined;
+  const value = expression.args[0];
+  if (!value) return undefined;
+  return {
+    kind: "collective",
+    op: property,
+    value: evalExpression(value, context),
+    shuffleIndex: expression.args[1] ? evalNumber(expression.args[1], context) : 0,
+    shuffleWidth: groupValue.tileSize ?? 32,
+    groupKey: cooperativeCollectiveGroupKey(groupValue, context),
+  };
+}
+
+function nativeShuffleCollective(
+  name: string | undefined,
+  args: readonly CudaLiteExpression[],
+  context: ThreadContext,
+): CollectiveYield | undefined {
+  const op = name === "__shfl_sync"
+    ? "shfl"
+    : name === "__shfl_down_sync"
+      ? "shfl_down"
+      : name === "__shfl_up_sync"
+        ? "shfl_up"
+        : name === "__shfl_xor_sync"
+          ? "shfl_xor"
+          : undefined;
+  if (!op) return undefined;
+  const value = args[1];
+  const index = args[2];
+  if (!value || !index) return undefined;
+  return {
+    kind: "collective",
+    op,
+    value: evalExpression(value, context),
+    shuffleIndex: evalNumber(index, context),
+    shuffleWidth: args[3] ? evalNumber(args[3], context) : 32,
     groupKey: `warp:${Math.floor(localLinearRank(context) / 32)}`,
   };
 }
@@ -971,7 +1122,21 @@ function cooperativeReduceCollective(
   const valueExpression = expression.args[1];
   if (!valueExpression) return undefined;
   const op = collectiveOpForCooperativeReduce(expression.args[2]);
-  if (!op) return undefined;
+  if (!op) {
+    const deviceOpName = cooperativeReductionOpName(expression.args[2]);
+    const deviceOp = deviceOpName ? resolveReferenceDeviceFunction(context.functions, deviceOpName, 2) : undefined;
+    if (!deviceOp) return undefined;
+    const value = evalExpression(valueExpression, context);
+    if (!isCudaVectorValue(value)) return undefined;
+    return {
+      kind: "collective",
+      op: "device",
+      value,
+      groupKey: cooperativeCollectiveGroupKey(groupValue, context),
+      deviceOp,
+      context,
+    };
+  }
   return {
     kind: "collective",
     op,
@@ -1021,6 +1186,10 @@ function collectiveOpForCall(name: string | undefined): CollectiveOp | undefined
     case "warpReduceMin":
     case "warp_reduce_min":
       return "min";
+    case "__any_sync":
+      return "any";
+    case "__all_sync":
+      return "all";
     default:
       return undefined;
   }
@@ -1031,6 +1200,7 @@ function collectiveValueExpression(
   args: readonly CudaLiteExpression[],
 ): CudaLiteExpression | undefined {
   if (name === "__reduce_add_sync") return args[1];
+  if (name === "__any_sync" || name === "__all_sync") return args[1];
   return args.length === 2 ? args[1] : args[0];
 }
 
@@ -1193,17 +1363,21 @@ function pointerOffsetArgumentValue(
   context: ThreadContext,
 ): LocalValue | undefined {
   if (arg.kind !== "binary" || (arg.operator !== "+" && arg.operator !== "-")) return undefined;
-  const left = pointerArgumentValue(arg.left, valueType, context);
+  const leftValueType = pointerValueTypeForExpression(arg.left, context) ?? valueType;
+  const left = pointerArgumentValue(arg.left, leftValueType, context);
   const delta = evalNumber(arg.right, context) * (arg.operator === "-" ? -1 : 1);
   if (isPoolPointer(left)) {
-    return { ...left, byteOffset: left.byteOffset + delta * elementByteSize(valueType), valueType };
+    return { ...left, byteOffset: left.byteOffset + delta * elementByteSize(leftValueType), valueType: leftValueType };
   }
   if (typeof left !== "number" && "kind" in left && left.kind === "address") {
+    const indexDelta = left.target.rawStorageIndex
+      ? delta * valueStorageWidth(left.target.valueType ?? leftValueType)
+      : delta;
     return {
       kind: "address",
       target: {
         ...left.target,
-        index: (left.target.index ?? 0) + Math.trunc(delta),
+        index: (left.target.index ?? 0) + Math.trunc(indexDelta),
       },
     };
   }
@@ -1312,7 +1486,7 @@ function pointerValueTypeForExpression(
     const local = context.locals.get(expression.name);
     if (isPoolPointer(local) && local.valueType) return local.valueType;
     if (isAddress(local) && local.target.valueType) return local.target.valueType;
-    return context.valueTypes.get(expression.name) ?? "uint";
+    return context.valueTypes.get(expression.name) ?? context.shared.get(expression.name)?.valueType ?? "uint";
   }
   if (expression.kind === "index" && expression.target.kind === "identifier") {
     const local = context.locals.get(expression.target.name);
@@ -1610,10 +1784,9 @@ function vectorConstructorLanes(
   context: ThreadContext,
 ): readonly number[] {
   const lanes: number[] = [];
-  const targetScalar = cudaVectorScalarType(valueType);
   for (const arg of args) {
     const value = evalExpression(arg, context);
-    if (isCudaVectorValue(value) && cudaVectorScalarType(value.valueType) === targetScalar) {
+    if (isCudaVectorValue(value)) {
       lanes.push(...value.lanes);
     } else {
       lanes.push(valueAsNumber(value, "vector constructor"));
@@ -2328,8 +2501,9 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     if (isCudaVectorType(valueType)) return readTextureVector(texture, x, y, valueType);
     return texture.data[(y * texture.width + x) * textureChannels(texture)] ?? 0;
   }
-  if (name === "surf2Dread") {
-    const returnForm = expression.args.length <= 3;
+  if (name === "surf2Dread" || name === "surf2DLayeredread" || name === "surf3Dread") {
+    const hasZ = name === "surf2DLayeredread" || name === "surf3Dread";
+    const returnForm = hasZ ? expression.args.length <= 4 : expression.args.length <= 3;
     const target = returnForm ? undefined : expression.args[0];
     const surfaceRef = returnForm ? expression.args[0] : expression.args[1];
     if (!returnForm && !target) throw compilerFailure("surf2Dread expects output target");
@@ -2339,18 +2513,35 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     if (!surface) throw compilerFailure(`missing surface input '${surfaceName}'`);
     const xArg = returnForm ? expression.args[1] : expression.args[2];
     const yArg = returnForm ? expression.args[2] : expression.args[3];
+    const zArg = hasZ ? returnForm ? expression.args[3] : expression.args[4] : undefined;
+    const targetLValue = target
+      ? target.kind === "unary" && target.operator === "&"
+        ? resolveLValue(target.argument, context)
+        : resolveLValue(target, context)
+      : undefined;
+    const valueType = expression.templateValueType ?? targetLValue?.valueType ?? "float";
     const x = Math.trunc(evalNumber(xArg!, context) / 4);
     const y = Math.trunc(evalNumber(yArg!, context));
-    const index = y * surface.width + x;
-    const ok = x >= 0 && y >= 0 && x < surface.width && y < surface.height && index < surface.data.length;
-    const value = ok ? surface.data[index] ?? 0 : 0;
-    if (target) {
-      const lvalue = target.kind === "unary" && target.operator === "&"
-        ? resolveLValue(target.argument, context)
-        : resolveLValue(target, context);
-      writeLValue(lvalue, value, context);
+    const z = zArg ? Math.trunc(evalNumber(zArg, context)) : 0;
+    const readLane = (lane: number): number => {
+      const laneX = x + lane;
+      const index = ((z * surface.height) + y) * surface.width + laneX;
+      const ok = laneX >= 0 && y >= 0 && z >= 0 && laneX < surface.width && y < surface.height && index < surface.data.length;
+      return ok ? surface.data[index] ?? 0 : 0;
+    };
+    const index = ((z * surface.height) + y) * surface.width + x;
+    const ok = x >= 0 && y >= 0 && z >= 0 && x < surface.width && y < surface.height && index < surface.data.length;
+    const value = isCudaVectorType(valueType)
+      ? {
+          kind: "cuda-vector" as const,
+          valueType,
+          lanes: Array.from({ length: cudaVectorLaneCount(valueType) }, (_unused, lane) => roundVectorLane(valueType, readLane(lane))),
+        }
+      : readLane(0);
+    if (targetLValue) {
+      writeLValue(targetLValue, value, context);
     }
-    context.trace.reads.push({ name: surfaceName, index, value, ok });
+    context.trace.reads.push({ name: surfaceName, index, value: traceValue(value), ok });
     return returnForm ? value : 0;
   }
   if (name === "surf2Dwrite" || name === "surf1Dwrite" || name === "surf2DLayeredwrite" || name === "surf3Dwrite") {
@@ -2362,9 +2553,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const value = evalExpression(expression.args[0]!, context);
     const x = Math.trunc(evalNumber(expression.args[2]!, context) / 4);
     const yBase = name === "surf1Dwrite" ? 0 : Math.trunc(evalNumber(expression.args[3]!, context));
-    const layer = name === "surf2DLayeredwrite" ? Math.trunc(evalNumber(expression.args[4]!, context)) : 0;
-    const z = name === "surf3Dwrite" ? Math.trunc(evalNumber(expression.args[4]!, context)) : 0;
-    const y = yBase + layer;
+    const z = name === "surf3Dwrite" || name === "surf2DLayeredwrite" ? Math.trunc(evalNumber(expression.args[4]!, context)) : 0;
+    const y = yBase;
     const lanes = isCudaVectorValue(value) ? value.lanes : [valueAsNumber(value, "surface write value")];
     for (const [lane, laneValue] of lanes.entries()) {
       const index = ((z * surface.height) + y) * surface.width + x + lane;
@@ -2449,7 +2639,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (vectorConstructor) {
     if (expression.args.length === 1) {
       const value = evalExpression(expression.args[0]!, context);
-      if (isCudaVectorValue(value) && cudaVectorScalarType(value.valueType) === cudaVectorScalarType(vectorConstructor)) {
+      if (isCudaVectorValue(value)) {
         return {
           kind: "cuda-vector",
           valueType: vectorConstructor,
@@ -3458,7 +3648,7 @@ function readBufferValue(
     }
     return { kind: "cuda-vector", valueType, lanes };
   }
-  return Number(buffer[storageIndex]!);
+  return readScalarStorageValue(buffer, storageIndex, valueType);
 }
 
 function writeBufferValue(
@@ -3488,9 +3678,12 @@ function writeBufferValue(
     for (let lane = 0; lane < cudaVectorLaneCount(valueType); lane++) buffer[storageIndex + lane] = vector.lanes[lane] ?? 0;
     return;
   }
-  buffer[storageIndex] = valueType === "bf16"
-    ? roundBfloat16(valueAsNumber(value, "write value"))
-    : valueAsNumber(value, "write value");
+  writeScalarStorageValue(
+    buffer,
+    storageIndex,
+    valueType,
+    valueType === "bf16" ? roundBfloat16(valueAsNumber(value, "write value")) : valueAsNumber(value, "write value"),
+  );
 }
 
 function readScalarStorageValue(

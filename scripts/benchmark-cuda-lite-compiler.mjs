@@ -3,18 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { pathToFileURL } from "node:url";
+import { parseFlagArgs } from "./cuda-lite-webgpu-cli.mjs";
 
-const args = new Map();
-for (let i = 2; i < process.argv.length; i++) {
-  const key = process.argv[i];
-  const value = process.argv[i + 1];
-  if (!key?.startsWith("--")) continue;
-  args.set(key, value?.startsWith("--") || value === undefined ? "true" : value);
-  if (value && !value.startsWith("--")) i++;
-}
+const args = parseFlagArgs(process.argv.slice(2));
 
 const runs = positiveInt(args.get("--runs"), 40);
-const warmup = positiveInt(args.get("--warmup"), 8);
+const warmup = nonNegativeInt(args.get("--warmup"), 8);
 const markdownPath = args.get("--markdown");
 const medianMaxExpectations = parseBenchmarkThresholds(args.get("--expect-median-max"), "--expect-median-max");
 const p95MaxExpectations = parseBenchmarkThresholds(args.get("--expect-p95-max"), "--expect-p95-max");
@@ -143,6 +137,11 @@ function round(value) {
 function positiveInt(value, fallback) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function nonNegativeInt(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 function parseBenchmarkThresholds(value, flag) {

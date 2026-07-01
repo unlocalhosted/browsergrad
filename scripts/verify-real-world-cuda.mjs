@@ -2,56 +2,12 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseAutoCorpusSmokeProfile } from "./cuda-lite-webgpu-cli.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "..");
-const options = parseArgs(process.argv.slice(2));
 
-run("real-world CUDA compile/codegen audit", [
-  path.join(scriptDir, "audit-real-world-cuda-corpora.mjs"),
-  ...(options.skipFetch ? ["--skip-fetch"] : []),
-  "--limit",
-  String(options.limit),
-]);
-
-for (const bundle of browserBundles(options.bundle)) {
-  run(`real-world CUDA browser fixture e2e (${bundle})`, [
-    path.join(scriptDir, "e2e-cuda-lite-webgpu.mjs"),
-    "--require-corpus-fixtures",
-    "--bundle",
-    bundle,
-    "--auto-corpus-smoke-limit",
-    String(options.autoCorpusSmokeLimit),
-    "--auto-corpus-smoke-mode",
-    options.autoCorpusSmokeMode,
-    "--auto-corpus-smoke-features",
-    options.autoCorpusSmokeFeatures.join(","),
-    "--case-timeout-ms",
-    String(options.caseTimeoutMs),
-    ...(options.allowMissingWebGpu ? [] : ["--require-webgpu"]),
-  ]);
-  if (options.benchmarkWebGpu) {
-    run(`real-world CUDA browser perf gate (${bundle})`, [
-      path.join(scriptDir, "benchmark-cuda-lite-webgpu.mjs"),
-      "--bundle",
-      bundle,
-      "--runs",
-      String(options.benchmarkRuns),
-      "--warmup",
-      String(options.benchmarkWarmup),
-      "--length",
-      String(options.benchmarkLength),
-      ...ratioArg("--expect-prepared-ratio-max", options.preparedRatioMax),
-      ...ratioArg("--expect-prepared-scalar-ratio-max", options.preparedScalarRatioMax),
-      ...ratioArg("--expect-prepared-readback-ratio-max", options.preparedReadbackRatioMax),
-      ...(options.allowMissingWebGpu ? [] : ["--require-webgpu"]),
-    ]);
-  }
-}
-
-console.log("\nreal-world CUDA verification passed");
-
-function parseArgs(args) {
+export function parseVerifyRealWorldCudaArgs(args) {
   const options = {
     skipFetch: false,
     allowMissingWebGpu: false,
@@ -59,6 +15,7 @@ function parseArgs(args) {
     bundle: "both",
     autoCorpusSmokeLimit: 32,
     autoCorpusSmokeMode: "reference",
+    autoCorpusSmokeProfile: "fast",
     autoCorpusSmokeFeatures: [],
     caseTimeoutMs: 0,
     benchmarkWebGpu: false,
@@ -113,6 +70,14 @@ function parseArgs(args) {
     }
     if (arg?.startsWith("--auto-corpus-smoke-mode=")) {
       options.autoCorpusSmokeMode = parseAutoCorpusSmokeMode(arg.slice("--auto-corpus-smoke-mode=".length));
+      continue;
+    }
+    if (arg === "--auto-corpus-smoke-profile") {
+      options.autoCorpusSmokeProfile = parseAutoCorpusSmokeProfile(args[++index]);
+      continue;
+    }
+    if (arg?.startsWith("--auto-corpus-smoke-profile=")) {
+      options.autoCorpusSmokeProfile = parseAutoCorpusSmokeProfile(arg.slice("--auto-corpus-smoke-profile=".length));
       continue;
     }
     if (arg === "--auto-corpus-smoke-features") {
@@ -184,12 +149,71 @@ function parseArgs(args) {
       continue;
     }
     if (arg === "--help" || arg === "-h") {
-      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--require-webgpu] [--allow-missing-webgpu] [--limit N] [--bundle src|dist|both] [--auto-corpus-smoke-limit N] [--auto-corpus-smoke-mode reference|dispatch] [--auto-corpus-smoke-features subgroups] [--case-timeout-ms N] [--benchmark-webgpu] [--benchmark-runs N] [--benchmark-warmup N] [--benchmark-length N] [--expect-prepared-ratio-max N] [--expect-prepared-scalar-ratio-max N] [--expect-prepared-readback-ratio-max N]");
+      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--require-webgpu] [--allow-missing-webgpu] [--limit N] [--bundle src|dist|both] [--auto-corpus-smoke-limit N] [--auto-corpus-smoke-mode reference|dispatch] [--auto-corpus-smoke-profile fast|full] [--auto-corpus-smoke-features subgroups] [--case-timeout-ms N] [--benchmark-webgpu] [--benchmark-runs N] [--benchmark-warmup N] [--benchmark-length N] [--expect-prepared-ratio-max N] [--expect-prepared-scalar-ratio-max N] [--expect-prepared-readback-ratio-max N]");
       process.exit(0);
     }
     throw new Error(`unexpected argument: ${arg}`);
   }
   return options;
+}
+
+export function verifyRealWorldCudaPlan(options) {
+  const steps = [
+    {
+      label: "real-world CUDA compile/codegen audit",
+      args: [
+        path.join(scriptDir, "audit-real-world-cuda-corpora.mjs"),
+        ...(options.skipFetch ? ["--skip-fetch"] : []),
+        "--limit",
+        String(options.limit),
+      ],
+    },
+  ];
+  for (const bundle of browserBundles(options.bundle)) {
+    steps.push({
+      label: `real-world CUDA browser fixture e2e (${bundle})`,
+      args: [
+        path.join(scriptDir, "e2e-cuda-lite-webgpu.mjs"),
+        "--require-corpus-fixtures",
+        "--forbid-skips",
+        "--summary-only",
+        "--bundle",
+        bundle,
+        "--auto-corpus-smoke-limit",
+        String(options.autoCorpusSmokeLimit),
+        "--auto-corpus-smoke-mode",
+        options.autoCorpusSmokeMode,
+        "--auto-corpus-smoke-profile",
+        options.autoCorpusSmokeProfile,
+        "--auto-corpus-smoke-features",
+        options.autoCorpusSmokeFeatures.join(","),
+        "--case-timeout-ms",
+        String(options.caseTimeoutMs),
+        ...(options.allowMissingWebGpu ? [] : ["--require-webgpu"]),
+      ],
+    });
+    if (options.benchmarkWebGpu) {
+      steps.push({
+        label: `real-world CUDA browser perf gate (${bundle})`,
+        args: [
+          path.join(scriptDir, "benchmark-cuda-lite-webgpu.mjs"),
+          "--bundle",
+          bundle,
+          "--runs",
+          String(options.benchmarkRuns),
+          "--warmup",
+          String(options.benchmarkWarmup),
+          "--length",
+          String(options.benchmarkLength),
+          ...ratioArg("--expect-prepared-ratio-max", options.preparedRatioMax),
+          ...ratioArg("--expect-prepared-scalar-ratio-max", options.preparedScalarRatioMax),
+          ...ratioArg("--expect-prepared-readback-ratio-max", options.preparedReadbackRatioMax),
+          ...(options.allowMissingWebGpu ? [] : ["--require-webgpu"]),
+        ],
+      });
+    }
+  }
+  return steps;
 }
 
 function parseBundle(raw) {
@@ -249,4 +273,14 @@ function run(label, args) {
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
   }
+}
+
+function main() {
+  const options = parseVerifyRealWorldCudaArgs(process.argv.slice(2));
+  for (const step of verifyRealWorldCudaPlan(options)) run(step.label, step.args);
+  console.log("\nreal-world CUDA verification passed");
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
 }

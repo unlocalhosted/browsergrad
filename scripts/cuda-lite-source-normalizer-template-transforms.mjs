@@ -251,7 +251,7 @@ export function normalizeTemplateTypeArgument(arg, definesByName = new Map(), se
   if (type === "__nv_bfloat16" || type === "nv_bfloat16") return "bf16";
   if (type === "double") return "double";
   if (type === "unsigned int" || type === "unsigned") return "uint";
-  if (type === "unsigned char" || type === "uchar" || type === "uint8_t") return "uint";
+  if (type === "unsigned char" || type === "uchar" || type === "uint8_t") return "uchar";
   if (type === "unsigned short" || type === "unsigned short int") return "uint";
   if (type === "signed int" || type === "signed") return "int";
   if (type === "signed short" || type === "signed short int") return "int";
@@ -463,7 +463,7 @@ export function normalizeVectorCooperativeReductions(source) {
       re.lastIndex = close + 1;
       continue;
     }
-    const replacement = emitVectorCooperativeReduction(vectorType, target, args[1], args[2], counter++);
+    const replacement = emitVectorCooperativeReduction(vectorType, target, args[0], args[1], args[2], counter++);
     out += source.slice(cursor, match.index);
     out += replacement;
     cursor = end + 1;
@@ -472,19 +472,10 @@ export function normalizeVectorCooperativeReductions(source) {
   return cursor === 0 ? source : out + source.slice(cursor);
 }
 
-function emitVectorCooperativeReduction(vectorType, target, value, op, counter) {
+function emitVectorCooperativeReduction(vectorType, target, group, value, op, _counter) {
   const lanes = vectorLaneCount(vectorType);
   if (lanes === undefined) return `${vectorType} ${target} = ${value};`;
-  const fields = ["x", "y", "z", "w"].slice(0, lanes);
-  const offset = `bg_cg_reduce_offset_${counter}`;
-  const shuffled = `make_${vectorType}(${fields.map((field) =>
-    `__shfl_xor_sync(0xffffffff, ${target}.${field}, ${offset})`).join(", ")})`;
-  return [
-    `${vectorType} ${target} = ${value};`,
-    `for (int ${offset} = 16; ${offset} > 0; ${offset} /= 2) {`,
-    `  ${target} = ${op}(${target}, ${shuffled});`,
-    "}",
-  ].join(" ");
+  return `${vectorType} ${target} = cg::reduce(${group}, ${value}, ${op});`;
 }
 
 export function normalizeCooperativeGroupHelperParams(source) {

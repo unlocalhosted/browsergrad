@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -59,6 +59,9 @@ if (failures.length > 0) process.exit(1);
 
 function ensureCorpus(corpus) {
   const gitDir = path.join(corpus.path, ".git");
+  if (existsSync(gitDir) && !isUsableGitCheckout(corpus.path)) {
+    rmSync(corpus.path, { recursive: true, force: true });
+  }
   if (!existsSync(gitDir)) {
     if (existsSync(corpus.path)) {
       throw new Error(`${corpus.path} exists but is not a git checkout`);
@@ -77,6 +80,14 @@ function ensureCorpus(corpus) {
     throw new Error(`${corpus.id} expected ${corpus.commit}, got ${actual}`);
   }
   assertCorpusClean(corpus);
+}
+
+function isUsableGitCheckout(corpusPath) {
+  const result = spawnSync("git", ["-C", corpusPath, "rev-parse", "--git-dir"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  return result.status === 0;
 }
 
 function verifyCorpus(corpus) {

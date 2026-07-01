@@ -1,0 +1,302 @@
+# Compiler Bugbash Progress
+
+Last updated: 2026-07-01T12:09:59Z
+
+Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
+
+## Dashboard
+
+| Field | Current |
+| --- | --- |
+| Overall status | Active bugbash, not complete |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
+| Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
+| Active work item | Surface vector read before active-lane return probe green; continue next corpus-shaped storage/texture/control probe |
+| Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
+| Worktree | Dirty, unstaged |
+| Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
+
+## How To Track This
+
+Use this file as the source of truth for the current bugbash.
+
+- Quick status, latest proof, active failures, and remaining probes: `pnpm --filter @unlocalhosted/browsergrad-compiler run bugbash:status`
+- Replay current blocker: `pnpm --filter @unlocalhosted/browsergrad-compiler run e2e:webgpu:last-failures`
+- See scoped test plan: `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan`
+- Read `Dashboard` first for the state in one screen.
+- Read `Latest Proven Green Gates` before trusting any "fixed" claim.
+- Read `Bugs Found During Current Run` to see root fixes, not shallow patches.
+- Read `Remaining Probe Map` to see what is still not proven.
+- Read `Gate Ladder` to see why I am running a focused command instead of a repo-wide command.
+
+Every work chunk should update:
+
+- `Last updated`
+- `Dashboard.Active work item`
+- `Latest Proven Green Gates`
+- `Bugs Found During Current Run`
+- `Remaining Probe Map`
+
+Done means all of these are true:
+
+- No current failing focused cases.
+- No new skips in touched compiler tests or WebGPU fixtures.
+- Full compiler unit suite passes, not only filtered `-t` runs.
+- WebGPU smoke passes with `0 skipped`.
+- Source and dist real-world verifier pass with `0 skipped`.
+- Remaining unsupported cases have explicit diagnostics, not emit-time crashes or silent wrong output.
+
+## Latest Proven Green Gates
+
+Current verified gates:
+
+- `surface:helper-vector-read-multiple-surfaces`: `1 passed / 0 failed / 0 skipped`
+- focused surf2Dread unit run: `386 passed`
+- `surface:layered-write`: `1 passed / 0 failed / 0 skipped`
+- focused surf2DLayeredwrite unit run: `387 passed`
+- compiler typecheck: passed
+- compiler lint: passed
+- WebGPU smoke: `100 passed / 0 failed / 0 skipped`
+- full source WebGPU e2e: `221 passed / 0 failed / 0 skipped`
+- real-world CUDA verifier: src `253/0/0`, dist `253/0/0`
+- new surface/texture probe group: `4 passed / 0 failed / 0 skipped`
+- WebGPU smoke after new probes: `104 passed / 0 failed / 0 skipped`
+- pointer/control probe group: `5 passed / 0 failed / 0 skipped`
+- WebGPU smoke after pointer/control probes: `109 passed / 0 failed / 0 skipped`
+- cross-space vector alias probe: `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after texture vector conversion fix: `374 passed / 0 failed`
+- WGSL module unit suite: `16 passed / 0 failed`
+- WebGPU smoke after shared-vector fix: `110 passed / 0 failed / 0 skipped`
+- test-scope tooling: passed
+- bugbash status progress summary: passed
+- mixed local/storage helper pointer diagnostic unit: `1 passed`
+- pointer-array + shared-vector targeted WebGPU pair: `2 passed / 0 failed / 0 skipped`
+- hot cross-space vector alias loop: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `4.2ms`, speedup `1.26`
+- fast auto-corpus WebGPU gate: `32 passed / 0 failed / 0 skipped`
+- texture helper vector cast/coercion: `1 passed / 0 failed / 0 skipped`
+- WebGPU smoke after texture coercion fixture: `111 passed / 0 failed / 0 skipped`
+- loop-internal return/barrier replay: `control:active-lane-loop-internal-return-barrier` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after loop-internal return/barrier regression: `375 passed / 0 failed`
+- WebGPU smoke after loop-internal return/barrier fixture: `112 passed / 0 failed / 0 skipped`
+- alternate-branch return/barrier fixture: `control:active-lane-alternate-return-barrier` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after alternate-return active-lane regression: `376 passed / 0 failed`
+- WGSL module suite after alternate-return split: `16 passed / 0 failed`
+- WebGPU smoke after alternate-return fixture: `113 passed / 0 failed / 0 skipped`
+- nested return/barrier fixture: `control:active-lane-nested-return-barrier` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after nested active-lane regression: `377 passed / 0 failed`
+- WebGPU smoke after nested return/barrier fixture: `114 passed / 0 failed / 0 skipped`
+- loop alternate-return/barrier fixture: `control:active-lane-loop-alternate-return-barrier` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after loop alternate-return probe: `378 passed / 0 failed`
+- WebGPU smoke after loop alternate-return fixture: `115 passed / 0 failed / 0 skipped`
+- loop return-side-effect/barrier fixture: `control:active-lane-loop-return-side-effect-barrier` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after loop return-side-effect probe: `379 passed / 0 failed`
+- WebGPU smoke after loop return-side-effect fixture: `116 passed / 0 failed / 0 skipped`
+- hot loop return-side-effect fixture: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `3.6ms`, speedup `1.14`
+- vector lane return-side-effect fixture: `control:active-lane-vector-return-side-effect-barrier` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after vector lane return-side-effect probe: `380 passed / 0 failed`
+- WebGPU smoke after vector lane return-side-effect fixture: `117 passed / 0 failed / 0 skipped`
+- hot vector lane return-side-effect fixture: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `3.9ms`, speedup `1.10`
+- pointer alias return-side-effect fixture: `control:active-lane-pointer-alias-return-side-effect-barrier` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after pointer alias return-side-effect probe: `381 passed / 0 failed`
+- WebGPU smoke after pointer alias return-side-effect fixture: `118 passed / 0 failed / 0 skipped`
+- hot pointer alias return-side-effect fixture: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `3.7ms`, speedup `1.19`
+- atomic return-side-effect fixture: `control:active-lane-atomic-return-side-effect-barrier` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after atomic return-side-effect probe: `382 passed / 0 failed`
+- WebGPU smoke after atomic return-side-effect fixture: `119 passed / 0 failed / 0 skipped`
+- hot atomic return-side-effect fixture: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `1.7ms`, speedup `1.06`
+- shared return-side-effect fixture: `control:active-lane-shared-return-side-effect-barrier` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after shared return-side-effect probe: `383 passed / 0 failed`
+- WebGPU smoke after shared return-side-effect fixture: `120 passed / 0 failed / 0 skipped`
+- hot shared return-side-effect fixture: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `3.4ms`, speedup `1.21`
+- surface return-side-effect fixture: `surface:active-lane-return-side-effect` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after surface return-side-effect probe: `384 passed / 0 failed`
+- WebGPU smoke after surface return-side-effect fixture: `121 passed / 0 failed / 0 skipped`
+- hot surface return-side-effect fixture: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `1.2ms`, speedup `3.17`
+- compiler typecheck after active-lane return/barrier fixes: passed
+- texture active-lane return-read side-effect fixture: `texture:active-lane-return-read-side-effect` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after texture active-lane read probe: `385 passed / 0 failed`
+- WebGPU smoke after texture active-lane read probe: `122 passed / 0 failed / 0 skipped`
+- hot texture active-lane read probe: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `3.7ms`, speedup `1.27`
+- texture/surface active-lane return side-effect fixture: `texture-surface:active-lane-return-side-effect` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after texture/surface active-lane probe: `386 passed / 0 failed`
+- WebGPU smoke after texture/surface active-lane probe: `123 passed / 0 failed / 0 skipped`
+- hot texture/surface active-lane probe: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `4.0ms`, speedup `0.50`
+- texture atlas/layered active-lane return-read fixture: `texture:atlas-active-lane-return-read-side-effect` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after atlas/layered active-lane probe: `387 passed / 0 failed`
+- WebGPU smoke after atlas/layered active-lane probe: `124 passed / 0 failed / 0 skipped`
+- hot atlas/layered active-lane probe: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `3.3ms`, speedup `1.36`
+- deep helper texture active-lane vector-store fixture: `texture:deep-helper-active-lane-vector-store` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after deep helper vector-store probe: `388 passed / 0 failed`
+- WebGPU smoke after deep helper vector-store probe: `125 passed / 0 failed / 0 skipped`
+- hot deep helper vector-store probe: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `4.0ms`, speedup `1.05`
+- mixed scalar/vector texture active-lane store fixture: `texture:mixed-scalar-vector-active-lane-store` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after mixed scalar/vector texture probe: `389 passed / 0 failed`
+- WebGPU smoke after mixed scalar/vector texture probe: `126 passed / 0 failed / 0 skipped`
+- hot mixed scalar/vector texture probe: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `4.0ms`, speedup `1.13`
+- texture pointer-alias active-lane store fixture: `texture:pointer-alias-active-lane-store` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after texture pointer-alias probe: `390 passed / 0 failed`
+- WebGPU smoke after texture pointer-alias probe: `127 passed / 0 failed / 0 skipped`
+- hot texture pointer-alias probe: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `4.6ms`, speedup `1.11`
+- texture pointer-alias atomic active-lane fixture: `texture:pointer-alias-atomic-active-lane-store` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after texture pointer-alias atomic fix: `391 passed / 0 failed`
+- WebGPU smoke after texture pointer-alias atomic fix: `128 passed / 0 failed / 0 skipped`
+- hot texture pointer-alias atomic probe: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `1.8ms`, speedup `3.00`
+- texture pointer-alias atomic vector readback fixture: `texture:pointer-alias-atomic-vector-readback` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after atomic vector readback fix: `392 passed / 0 failed`
+- WebGPU smoke after atomic vector readback fix: `129 passed / 0 failed / 0 skipped`
+- hot atomic vector readback probe: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `1.5ms`, speedup `3.80`
+- texture pointer-alias atomic vector compound fixture: `texture:pointer-alias-atomic-vector-compound` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after atomic vector helper index fix: `393 passed / 0 failed`
+- WebGPU smoke after atomic vector helper index fix: `130 passed / 0 failed / 0 skipped`
+- hot atomic vector compound probe: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `5.2ms`, speedup `1.10`
+- surface layered read fixture: `surface:layered-read` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after surface layered read fix: `394 passed / 0 failed`
+- WebGPU smoke after surface layered read fix: `131 passed / 0 failed / 0 skipped`
+- hot surface layered read probe: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `1.8ms`, speedup `2.56`
+- surface 3D read fixture: `surface:surf3d-read` is `1 passed / 0 failed / 0 skipped`
+- compiler unit suite after surface 3D read fix: `395 passed / 0 failed`
+- WebGPU smoke after surface 3D read fix: `132 passed / 0 failed / 0 skipped`
+- hot surface 3D read probe: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `3.7ms`, speedup `1.19`
+- surface layered/3D vector read fixture pair: `2 passed / 0 failed / 0 skipped`
+- compiler unit suite after surface vector read type fix: `396 passed / 0 failed`
+- WebGPU smoke after surface vector read type fix: `134 passed / 0 failed / 0 skipped`
+- hot surface layered/3D vector read probe: `6 passed / 0 failed / 0 skipped`, warmup `1`, best warm `3.6ms` / `3.7ms`, speedups `1.19` / `1.08`
+- surface vector read before active-lane return fixture: `surface:vector-read-active-lane-return` is `1 passed / 0 failed / 0 skipped`
+- WebGPU smoke after active-lane surface vector read probe: `135 passed / 0 failed / 0 skipped`
+- hot active-lane surface vector read probe: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `2.8ms`, speedup `1.79`
+
+## Bugs Found During Current Run
+
+| Status | Area | Symptom | Root Fix | Proof |
+| --- | --- | --- | --- | --- |
+| Fixed | surface helper params | `cudaSurfaceObject_t` helper params used name coincidence, not handles | surface dispatch helpers by handle | src/dist verifier `249/0/0` earlier |
+| Fixed | vector surface write | `surf2Dwrite(float4, ...)` emitted invalid `...; 0;` WGSL | vector surface writes emit pure statements | `texture-surface:vector-helper-roundtrip` |
+| Fixed | vector surface read | `surf2Dread(&float4, ...)` splatted lane 0 | lane-wise reads at byte offsets | `surface:vector-read` |
+| Fixed | templated vector surface read | `surf2Dread<float4>` return cast as `f32(vec4)` | expression type inference honors template | `surface:helper-vector-read-multiple-surfaces` |
+| Fixed | layered surface write | `surf2DLayeredwrite` wrote layer into Y, not Z | use Y as row, layer as Z | `surface:layered-write` |
+| Fixed | layered/3D surface read/reference z | `surf2DLayeredread` and `surf3Dread` were unsupported, and reference layered writes flattened layer into Y instead of z-linearized storage | add layered/3D surface read analyzer/reference/WGSL lowering and share z-linearized surface read/write indexing | `surface:layered-read,surface:surf3d-read` `2/0/0`, compiler unit `395/0`, smoke `132/0/0` |
+| Fixed | layered/3D vector surface read type inference | `surf3Dread<float4>` through helper returned `vec4<f32>` but WGSL value-type inference treated non-2D surface reads as scalar, emitting `f32(vec4<f32>)`; reference runtime also read only one lane for vector surface reads | surface read value inference now covers `surf2DLayeredread`/`surf3Dread`; reference reads vector lanes from z-linearized storage | `surface:layered-vector-read,surface:surf3d-vector-read` `2/0/0`, compiler unit `396/0`, smoke `134/0/0` |
+| Probed green | surface vector read before active-lane return | layered/3D vector surface reads before deactivating a lane could be dropped, scalarized, or hidden behind non-uniform barrier lowering | existing active-lane lowering now preserves vector surface reads before lane deactivation and keeps later barriers uniform | `surface:vector-read-active-lane-return` `1/0/0`, smoke `135/0/0` |
+| Probed green | helper layered vector write | vector `surf2DLayeredwrite` through `cudaSurfaceObject_t` helper param could lose handle/lane/layer semantics | existing surface dispatch + vector lane writes held | `surface:helper-vector-layered-write` |
+| Probed green | 1D surface write | `surf1Dwrite` could share broken 2D/layered lowering path | existing Y=0/Z=0 lowering held | `surface:surf1d-write` |
+| Probed green | texture helper vector conversion | `tex2D<uint4>` through texture object helper could lose lane casts | existing vector cast path held | `texture:object-uint4-helper-read` |
+| Probed green | nested texture helper chain | texture object could break through nested device helpers | existing texture object argument lowering held | `texture:nested-helper-vector-read` |
+| Probed green | conditional vector lane pointer write | vector lane pointer through conditional rebind could target wrong lane/buffer | existing scalar-view pointer lowering held | `storage:conditional-vector-lane-pointer-write` |
+| Probed green | pointer-array selected helper args | pointer array entries crossing helper call boundary could lose storage view | existing pointer handle lowering held | `storage:helper-pointer-array-selected-args` |
+| Probed green | active-lane compound RHS | inactive lanes could evaluate side-effecting compound assignment RHS after return-before-barrier lowering | active-lane guard held | `control:active-lane-compound-assignment-guarded-rhs` |
+| Probed green | active-lane uniform break barrier | loop break before barrier could corrupt active-lane barrier lowering | uniform break path held | `control:active-lane-uniform-break-barrier` |
+| Probed green | scalar subgroup truthiness assignment | subgroup expression truthiness feeding assignment could miscast in scalar fallback | scalar subgroup lowering held | `control:subgroup-truthiness-assignment-scalar` |
+| Fixed | packed shared vector scalar helpers | non-atomic `float*` helper view over shared `float4[]` returned/wrote whole vectors or used unscaled base | shared pointer helpers split packed element index from lane and preserve atomic shared flat-lane path | `storage:cross-space-vector-alias-consistency`, smoke `110/0/0` |
+| Fixed | mixed local/storage helper pointer diagnostic | a helper called with both storage pointers and local pointer-array elements failed late with a generic storage-pointer error | `emitDevicePointerArgument` reports the local pointer-array boundary explicitly while preserving supported all-local helper lowering | compiler unit `373/0`, smoke `110/0/0` |
+| Fixed | texture vector conversion constructor | `make_float4(uint4)` from a texture helper was rejected by analyzer and reference runtime even though WGSL emitter could cast lanes | vector constructors now accept CUDA vector args across scalar families in analyzer and reference runtime | `texture:helper-vector-cast-coercion`, compiler unit `374/0`, smoke `111/0/0` |
+| Fixed | loop-internal return/barrier replay | real WebGPU lowering used loop-local active-lane guards, but e2e diagnostic gate only recognized top-level `bg_active_lane` and reported `non-uniform-return-before-barrier` | diagnostic gate now accepts proven `bg_barrier_loop_active_*` return lowering; replay cleanup removes stale last-failure file after green rerun | `control:active-lane-loop-internal-return-barrier` `1/0/0`, compiler unit `375/0`, smoke `112/0/0` |
+| Fixed | alternate-branch return before barrier | `if (...) { active work } else { return; }` before a later barrier was not normalized into the existing active-lane return split | `splitIfTrailingVoidReturn` now supports return in either branch and preserves the still-active branch under the active-lane guard | `control:active-lane-alternate-return-barrier` `1/0/0`, compiler unit `376/0`, smoke `113/0/0` |
+| Fixed | nested return before barrier | nested `return` inside a non-returning outer branch before a later barrier could survive as a raw WGSL `return` | early-return detection now recurses and nested return branches lower through active-lane guarded branch emission | `control:active-lane-nested-return-barrier` `1/0/0`, compiler unit `377/0`, smoke `114/0/0` |
+| Probed green | loop alternate-branch return before barrier | loop-local `if (...) { work } else { return; }` could break active-lane barrier uniformity | existing loop-local active flag now covers alternate return split under bounded barrier loop lowering | `control:active-lane-loop-alternate-return-barrier` `1/0/0`, compiler unit `378/0`, smoke `115/0/0` |
+| Probed green | side effect before loop return | side-effecting statements before a loop-local return could be dropped or evaluated after lane deactivation | existing `beforeReturn` lowering preserves the side effect before flipping loop-local active flag | `control:active-lane-loop-return-side-effect-barrier` `1/0/0`, compiler unit `379/0`, smoke `116/0/0` |
+| Probed green | vector lane side effect before loop return | vector-lane writes before active-lane return could be lost or mis-addressed when later barriers force active-lane lowering | existing vector lane storage lowering preserves lane side effects before loop-local active flag flips | `control:active-lane-vector-return-side-effect-barrier` `1/0/0`, compiler unit `380/0`, smoke `117/0/0` |
+| Probed green | pointer alias side effect before loop return | pointer-alias writes before active-lane return could write wrong storage view/index or be lost before lane deactivation | existing pointer helper lowering preserves alias side effects before loop-local active flag flips | `control:active-lane-pointer-alias-return-side-effect-barrier` `1/0/0`, compiler unit `381/0`, smoke `118/0/0` |
+| Probed green | atomic side effect before loop return | atomic increments before active-lane return could be dropped or reordered past lane deactivation | existing atomic lowering preserves side effects before loop-local active flag flips | `control:active-lane-atomic-return-side-effect-barrier` `1/0/0`, compiler unit `382/0`, smoke `119/0/0` |
+| Probed green | shared-memory side effect before return | shared-memory writes before active-lane return could be lost before a later barrier read by active lanes | existing top-level active-lane lowering preserves shared side effects and keeps later barriers uniform | `control:active-lane-shared-return-side-effect-barrier` `1/0/0`, compiler unit `383/0`, smoke `120/0/0` |
+| Probed green | surface side effect before return | `surf2Dwrite` before active-lane return could be dropped or hidden behind non-uniform barrier diagnostics | active-lane lowering preserves surface writes before deactivating the lane and keeps later barriers uniform | `surface:active-lane-return-side-effect` `1/0/0`, compiler unit `384/0`, smoke `121/0/0` |
+| Probed green | texture read side effect before return | helper `tex2D<float4>` before active-lane return could be dropped, miscast, or hidden behind non-uniform barrier diagnostics | active-lane lowering preserves texture helper reads and storage writes before deactivating the lane, while keeping later barriers uniform | `texture:active-lane-return-read-side-effect` `1/0/0`, compiler unit `385/0`, smoke `122/0/0` |
+| Probed green | texture-to-surface side effect before return | helper `tex2D<float4>` feeding helper `surf2Dwrite` before active-lane return could lose either handle or reorder side effects | active-lane lowering preserves texture reads and surface writes across helper calls before deactivating the lane | `texture-surface:active-lane-return-side-effect` `1/0/0`, compiler unit `386/0`, smoke `123/0/0` |
+| Probed green | atlas/layered texture side effect before return | `tex2DLayered` and `tex3D` helper reads before active-lane return could mis-map atlas rows or be dropped before a later barrier | active-lane lowering preserves atlas/layered texture reads before lane deactivation | `texture:atlas-active-lane-return-read-side-effect` `1/0/0`, compiler unit `387/0`, smoke `124/0/0` |
+| Probed green | deep helper texture vector store before return | nested texture helper calls feeding `float4` storage writes before active-lane return could lose vector lane stores or deactivation order | active-lane lowering preserves deep texture helper calls and vector stores before lane deactivation | `texture:deep-helper-active-lane-vector-store` `1/0/0`, compiler unit `388/0`, smoke `125/0/0` |
+| Probed green | mixed scalar/vector texture store before return | scalar `tex2D<float>` plus vector `tex2D<uint4>` feeding a `float4` store before active-lane return could miscast lanes or reorder deactivation | active-lane lowering preserves mixed scalar/vector texture reads and vector stores before lane deactivation | `texture:mixed-scalar-vector-active-lane-store` `1/0/0`, compiler unit `389/0`, smoke `126/0/0` |
+| Probed green | texture-fed pointer alias store before return | texture scalar read feeding a scalar pointer alias over `float4*` storage before active-lane return could mis-address vector lanes or reorder deactivation | active-lane lowering preserves texture read and scalar pointer alias write before lane deactivation | `texture:pointer-alias-active-lane-store` `1/0/0`, compiler unit `390/0`, smoke `127/0/0` |
+| Fixed | atomic vector direct store after pointer alias atomic | a buffer promoted to `array<atomic<u32>>` by pointer-alias atomics still used direct `out[...] = value` vector lane stores | direct vector assignments to atomic params/globals now emit lane-wise `atomicStore` | `texture:pointer-alias-atomic-active-lane-store` `1/0/0`, compiler unit `391/0`, smoke `128/0/0` |
+| Fixed | atomic vector readback after pointer alias atomic | `uint4 value = out[1]` on an atomic-promoted vector buffer read scalar lanes `1..4` instead of vector element lanes `4..7` | atomic vector storage-view reads now scale whole-vector indexes before lane-wise `atomicLoad` for params/globals | `texture:pointer-alias-atomic-vector-readback` `1/0/0`, compiler unit `392/0`, smoke `129/0/0` |
+| Fixed | atomic vector compound/member writes through device pointer helper | `vectorOut[lane] += value` and `vectorOut[lane].y += value` through pointer helpers targeting atomic-promoted vector storage either updated only one scalar lane or emitted unresolved direct `vectorOut[...]` WGSL | pointer helpers keep vector-element indexes; atomic vector storage helpers scale inside read/write helper bodies; atomic pointer-member assignment is emitted through pointer helpers before direct storage lowering | `texture:pointer-alias-atomic-vector-compound` `1/0/0`, compiler unit `393/0`, smoke `130/0/0` |
+
+## Real WebGPU Fixture Counts
+
+Current added surface/texture cases:
+
+- `texture-surface:vector-helper-roundtrip`
+- `surface:helper-dispatch-multiple-surfaces`
+- `surface:vector-read`
+- `surface:helper-vector-read-multiple-surfaces`
+- `surface:active-lane-return-side-effect`
+- `surface:layered-write`
+- `surface:layered-read`
+- `surface:surf3d-read`
+- `surface:layered-vector-read`
+- `surface:surf3d-vector-read`
+- `surface:vector-read-active-lane-return`
+- `surface:helper-vector-layered-write`
+- `surface:surf1d-write`
+- `texture:object-uint4-helper-read`
+- `texture:helper-vector-cast-coercion`
+- `texture:nested-helper-vector-read`
+- `texture:active-lane-return-read-side-effect`
+- `texture:atlas-active-lane-return-read-side-effect`
+- `texture:deep-helper-active-lane-vector-store`
+- `texture:mixed-scalar-vector-active-lane-store`
+- `texture:pointer-alias-active-lane-store`
+- `texture:pointer-alias-atomic-active-lane-store`
+- `texture:pointer-alias-atomic-vector-readback`
+- `texture:pointer-alias-atomic-vector-compound`
+- `texture-surface:active-lane-return-side-effect`
+
+Current added pointer/control cases:
+
+- `storage:conditional-vector-lane-pointer-write`
+- `storage:helper-pointer-array-selected-args`
+- `storage:cross-space-vector-alias-consistency`
+- `control:active-lane-compound-assignment-guarded-rhs`
+- `control:active-lane-uniform-break-barrier`
+- `control:active-lane-loop-internal-return-barrier`
+- `control:active-lane-alternate-return-barrier`
+- `control:active-lane-nested-return-barrier`
+- `control:active-lane-loop-alternate-return-barrier`
+- `control:active-lane-loop-return-side-effect-barrier`
+- `control:active-lane-vector-return-side-effect-barrier`
+- `control:active-lane-pointer-alias-return-side-effect-barrier`
+- `control:active-lane-atomic-return-side-effect-barrier`
+- `control:active-lane-shared-return-side-effect-barrier`
+- `control:subgroup-truthiness-assignment-scalar`
+
+Smoke current: `135/0/0`.
+
+Full source e2e current: `221/0/0`.
+
+Verifier current: src `253/0/0`, dist `253/0/0`.
+
+## Remaining Probe Map
+
+Probe these with fail-first real WebGPU fixtures:
+
+- Surface family:
+  - surface writes before active-lane return, layered writes, helper layered vector writes, layered reads, 3D reads, layered/3D vector reads, and surface vector reads before active-lane return are now green; keep probing next corpus-shaped surface/texture pattern
+- Texture family:
+  - vector helper return, cast/coercion, active-lane pre-return read, texture-to-surface pre-return side effects, atlas/layered active-lane reads, deep helper vector stores, mixed scalar/vector texture stores, texture-fed pointer alias writes, texture-fed pointer alias atomics, atomic vector readback, atomic vector compound helper writes, and atomic vector member helper writes are now green; keep probing next corpus-shaped texture/storage pattern
+- Pointer/vector family:
+  - mixed local pointer-param + generic storage pointer helper now has explicit diagnostic; implementation support remains future work
+- Active-lane/control family:
+  - loop-internal, alternate-branch, nested, loop+alternate, scalar side-effect, vector-lane side-effect, pointer-alias side-effect, atomic side-effect, shared-memory side-effect, surface side-effect, texture read side-effect, texture-to-surface side-effect, atlas/layered texture return, deep helper vector-store, mixed scalar/vector texture-store, texture-fed pointer-alias, texture-fed pointer-alias atomic, atomic vector readback, atomic vector compound helper, and atomic vector member helper cases are now green in real WebGPU; keep probing next corpus-shaped texture/storage pattern
+  - non-uniform break/return should remain clear diagnostic, not silent miscompile
+- Perf/tooling:
+  - keep `verify:changed` scoped and explain selected gates
+  - keep smoke real-WebGPU and fast enough for inner loop
+
+## Gate Ladder
+
+Use this order:
+
+1. Target case: `pnpm --filter @unlocalhosted/browsergrad-compiler run e2e:webgpu:case -- --cases <case>`
+2. Focused unit: `pnpm --filter @unlocalhosted/browsergrad-compiler test -- --runInBand -t <name>`
+3. Type/lint: `pnpm --filter @unlocalhosted/browsergrad-compiler run typecheck && pnpm --filter @unlocalhosted/browsergrad-compiler run lint`
+4. Smoke: `pnpm --filter @unlocalhosted/browsergrad-compiler run e2e:webgpu:smoke`
+5. Full source: `pnpm --filter @unlocalhosted/browsergrad-compiler run e2e:webgpu -- --require-webgpu --forbid-skips --summary-only --case-timeout-ms 30000`
+6. Verifier: `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:real-world-cuda -- --skip-fetch --require-webgpu`
+
+## Reporting Format
+
+End each work chunk with:
+
+- Found: bug/no bug
+- Changed: files + root behavior
+- Proof: exact counts
+- Remaining: next 1-3 probes
+- Git: staged/unstaged/dirty

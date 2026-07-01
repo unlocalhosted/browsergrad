@@ -24,9 +24,10 @@ export function syntheticInputForCompiled(compiled) {
     }
   }
   for (const constant of compiled.ir.constants) {
+    if (constant.init !== undefined) continue;
     constants[constant.name] = constant.dimensions.length === 0 && !isCudaVectorTypeName(constant.valueType)
       ? syntheticScalarForName(constant.name)
-      : syntheticBufferForType(constant.valueType, 4096, compiled.f16Mode);
+      : syntheticConstantBufferForType(constant.valueType, constant.name, 4096, compiled.f16Mode);
   }
   for (const global of compiled.ir.deviceGlobals) {
     const length = global.dimensions.length === 0
@@ -55,9 +56,19 @@ export function externalDevicePoolNamesFromSource(source) {
 
 export function syntheticBufferForType(type, length = 4096, f16Mode = "native") {
   if (type === "int" || /^int[234]$/u.test(type)) return new Int32Array(length);
-  if (type === "uint" || /^uint[234]$/u.test(type) || type === "voidptr" || type === "bool") return new Uint32Array(length);
+  if (type === "uint" || type === "uchar" || /^uint[234]$/u.test(type) || type === "voidptr" || type === "bool") return new Uint32Array(length);
   if ((type === "half" || type === "half2") && f16Mode !== "f32") return createWgslFloat16Array(length);
   return new Float32Array(length);
+}
+
+export function syntheticConstantBufferForType(type, name, length = 4096, f16Mode = "native") {
+  const buffer = syntheticBufferForType(type, length, f16Mode);
+  if (buffer instanceof Uint32Array || buffer instanceof Int32Array) {
+    buffer.fill(/gridSize|numCells|numBodies|maxParticlesPerCell/iu.test(name) ? 64 : 1);
+  } else if (buffer instanceof Float32Array) {
+    buffer.fill(/worldOrigin|colliderPos|gravity/iu.test(name) ? 0 : 1);
+  }
+  return buffer;
 }
 
 export function isCudaVectorTypeName(type) {
@@ -65,11 +76,14 @@ export function isCudaVectorTypeName(type) {
 }
 
 export function syntheticScalarForName(name) {
+  if (/^(?:warpSize|warp_size)$/u.test(name)) return 32;
+  if (/^(?:nanoseconds|microseconds|milliseconds)$/iu.test(name)) return 0;
   if (/(?:clock|delay|sleep|spin|wait)/iu.test(name)) return 0;
   if (/^(?:depth|level)$/iu.test(name)) return 0;
   if (/^(?:maxDepth|max_depth|maxLevel|max_level)$/u.test(name)) return 4;
   if (/^(?:left|begin|start|offset)$/u.test(name)) return 0;
   if (/^(?:right|end|len|nLines|nTessPoints)$/u.test(name)) return 64;
+  if (/^(?:C|cols|columns|channels|nChannels|vocabSize|vocab_size)$/u.test(name)) return 64;
   if (/^(?:n|N|num|count|length|totalLen|frontierSize|numSamples|totalThreads|poolSize|size)$/u.test(name)) return 1024;
   if (/^(?:threads|threadsPerBlock|threads_per_block|blockSize|block_size)$/u.test(name)) return 256;
   if (/^(?:blocks|blocksPerGrid|numBlocks)$/u.test(name)) return 4;

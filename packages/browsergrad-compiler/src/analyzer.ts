@@ -128,6 +128,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["tex3D", [4, 4]],
   ["texCubemap", [4, 4]],
   ["surf2Dread", [3, 5]],
+  ["surf2DLayeredread", [4, 6]],
+  ["surf3Dread", [4, 6]],
   ["surf2Dwrite", [4, 5]],
   ["surf3Dwrite", [5, 6]],
   ["surf1Dwrite", [3, 4]],
@@ -1495,13 +1497,14 @@ function validateCallExpression(
   if (CUDA_CACHE_HINT_STORES.has(callName)) {
     const target = expression.args[0];
     const value = expression.args[1];
+    let targetInfo: ExpressionInfo | undefined;
     if (target) {
-      const info = walkExpression(target, scope);
-      if (info.kind !== "pointer" && info.kind !== "pool-pointer" && info.kind !== "address" && info.kind !== "unknown") {
+      targetInfo = validateReadPointerOperand(target, scope, walkExpression);
+      if (targetInfo.kind !== "pointer" && targetInfo.kind !== "pool-pointer" && targetInfo.kind !== "address" && targetInfo.kind !== "unknown") {
         diagnostics.push(error("unsupported-cache-hint-address", `${callName} expects a pointer expression`, target.span));
       }
     }
-    if (value) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
+    if (value) validateCacheHintStoreValue(callName, targetInfo, value, scope, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "voidptr" };
   }
   if (callName === "__cvta_generic_to_shared") {
@@ -1652,9 +1655,10 @@ function validateCallExpression(
     if (requiresShaderF16(expression.templateValueType)) requiredFeatures.add("shader-f16");
     return expressionInfoForTextureRead(expression);
   }
-  if (callName === "surf2Dread") {
-    validateSurf2DRead(expression, scope, diagnostics, walkExpression);
-    return expression.args.length <= 3 ? expressionInfoForTextureRead(expression) : { kind: "scalar", valueType: "voidptr" };
+  if (callName === "surf2Dread" || callName === "surf2DLayeredread" || callName === "surf3Dread") {
+    validateSurf2DRead(expression, callName, scope, diagnostics, walkExpression);
+    const returnForm = callName === "surf2DLayeredread" || callName === "surf3Dread" ? expression.args.length <= 4 : expression.args.length <= 3;
+    return returnForm ? expressionInfoForTextureRead(expression) : { kind: "scalar", valueType: "voidptr" };
   }
   if (callName === "surf2Dwrite" || callName === "surf1Dwrite" || callName === "surf2DLayeredwrite" || callName === "surf3Dwrite") {
     validateSurf2DWrite(expression, callName, scope, diagnostics, walkExpression);
@@ -1770,6 +1774,26 @@ function validateReadPointerOperand(
     return { kind: "address", valueType: info.valueType, symbol: info.symbol };
   }
   return walkExpression(expression, scope);
+}
+
+function validateCacheHintStoreValue(
+  callName: string,
+  targetInfo: ExpressionInfo | undefined,
+  value: CudaLiteExpression,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const valueInfo = walkExpression(value, scope);
+  const targetType = targetInfo?.valueType;
+  if (!isCudaVectorType(targetType)) {
+    validateScalarOperand(valueInfo, value.span, diagnostics);
+    return;
+  }
+  if (valueInfo.kind === "unknown") return;
+  if (valueInfo.kind !== "vector" || valueInfo.valueType !== targetType) {
+    diagnostics.push(error("unsupported-vector-assignment", `${callName} expects a ${targetType} value`, value.span));
+  }
 }
 
 function isVectorMathBuiltin(name: string): boolean {
@@ -2022,11 +2046,10 @@ function validateVectorConstructorArgs(
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
 ): void {
-  const targetScalar = cudaVectorScalarType(vectorConstructor);
   let laneCount = 0;
   for (const arg of expression.args) {
     const info = walkExpression(arg, scope);
-    if (info.kind === "vector" && isCudaVectorType(info.valueType) && cudaVectorScalarType(info.valueType) === targetScalar) {
+    if (info.kind === "vector" && isCudaVectorType(info.valueType)) {
       laneCount += cudaVectorLaneCount(info.valueType);
       continue;
     }
@@ -2371,7 +2394,7 @@ function validateTextureRead(
   walkExpression: ExpressionWalker,
 ): void {
   if (!isSupportedTextureReadType(expression.templateValueType)) {
-    diagnostics.push(error("unsupported-texture", `${callName} currently supports float/int/uint, half, float2/3/4, int2/3/4, uint2/3/4, and half2 reads`, expression.span));
+    diagnostics.push(error("unsupported-texture", `${callName} currently supports float/int/uint/uchar, half, float2/3/4, int2/3/4, uint2/3/4, and half2 reads`, expression.span));
   }
   const texture = expression.args[0];
   if (texture?.kind !== "identifier") {
@@ -2390,11 +2413,13 @@ function validateTextureRead(
 
 function validateSurf2DRead(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  callName: string,
   scope: Scope,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
 ): void {
-  const returnForm = expression.args.length <= 3;
+  const hasZ = callName === "surf2DLayeredread" || callName === "surf3Dread";
+  const returnForm = hasZ ? expression.args.length <= 4 : expression.args.length <= 3;
   const target = returnForm ? undefined : expression.args[0];
   if (target) {
     const lvalue = target.kind === "unary" && target.operator === "&" ? target.argument : target;
@@ -2410,7 +2435,10 @@ function validateSurf2DRead(
       diagnostics.push(error("unsupported-texture", `surf2Dread target '${surfaceName}' is not a surface reference`, surface?.span ?? expression.span));
     }
   }
-  for (const coord of returnForm ? expression.args.slice(1, 3) : expression.args.slice(2, 4)) {
+  const end = returnForm
+    ? hasZ ? 4 : 3
+    : hasZ ? 5 : 4;
+  for (const coord of returnForm ? expression.args.slice(1, end) : expression.args.slice(2, end)) {
     validateScalarOperand(walkExpression(coord, scope), coord.span, diagnostics);
   }
 }
@@ -2576,7 +2604,8 @@ function validateAtomicBuiltin(
     const param = storageRoot ? params.get(storageRoot) : undefined;
     const symbol = targetName ? lookupSymbol(targetName, scope, targetExpression.span) : undefined;
     const storageSymbol = storageRoot ? lookupSymbol(storageRoot, scope, targetExpression.span) : undefined;
-    const targetType = symbol?.valueType ?? storageSymbol?.valueType;
+    const targetInfo = target ? validateReadPointerOperand(target, scope, walkExpression) : undefined;
+    const targetType = targetInfo?.valueType ?? symbol?.valueType ?? storageSymbol?.valueType;
     if (storageSymbol?.kind === "shared") {
       if ((targetType === "float" || targetType === "double") && isSupportedFloatAtomic(callName)) {
         atomicShared.add(storageSymbol.name);
@@ -2593,7 +2622,7 @@ function validateAtomicBuiltin(
       } else {
         atomicDeviceGlobals.add(storageSymbol.name);
       }
-    } else if (!param?.pointer && symbol?.kind === "local" && symbol.pointer) {
+    } else if (!param?.pointer && (symbol?.kind === "local" || symbol?.kind === "param") && symbol.pointer) {
       if (symbol.constant) {
         diagnostics.push(error("const-pointer-write", `cannot ${callName ?? "atomic operation"} through const pointer '${symbol.name}'`, expression.span));
       }
@@ -3578,6 +3607,7 @@ function isSupportedTextureReadType(type: CudaLiteScalarType | undefined): boole
     type === "float" ||
     type === "int" ||
     type === "uint" ||
+    type === "uchar" ||
     type === "half" ||
     type === "half2" ||
     type === "float2" ||

@@ -127,10 +127,9 @@ __global__ void vector_reduce(float2 *out) {
   out[0] = total;
 }`,
   });
-  assert.match(source, /float2 total = value;/u);
-  assert.match(source, /bg_for_bg_cg_reduce_offset_0_0 = 16/u);
-  assert.match(source, /total = merge_pair\(total, make_float2\(__shfl_xor_sync\(0xffffffff, total\.x/u);
-  assert.doesNotMatch(source, /float2 total = cg::reduce/u);
+  assert.match(source, /float2 total = cg::reduce\(warp, value, merge_pair\);/u);
+  assert.doesNotMatch(source, /bg_for_bg_cg_reduce_offset_0_0/u);
+  assert.doesNotMatch(source, /__shfl_xor_sync\(0xffffffff, total\.x/u);
 }
 
 {

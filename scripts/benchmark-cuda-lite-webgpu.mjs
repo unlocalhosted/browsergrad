@@ -7,19 +7,13 @@ import {
   findRepoRoot,
   moduleAliases,
   parseBundle,
+  parseFlagArgs,
 } from "./cuda-lite-webgpu-cli.mjs";
 
-const args = new Map();
-for (let i = 2; i < process.argv.length; i++) {
-  const key = process.argv[i];
-  const value = process.argv[i + 1];
-  if (!key?.startsWith("--")) continue;
-  args.set(key, value?.startsWith("--") || value === undefined ? "true" : value);
-  if (value && !value.startsWith("--")) i++;
-}
+const args = parseFlagArgs(process.argv.slice(2));
 
 const runs = positiveInt(args.get("--runs"), 25);
-const warmup = positiveInt(args.get("--warmup"), 5);
+const warmup = nonNegativeInt(args.get("--warmup"), 5);
 const length = positiveInt(args.get("--length"), 16_384);
 const markdownPath = args.get("--markdown");
 const jsonPath = args.get("--json");
@@ -298,6 +292,11 @@ function markdownReport(data) {
 function positiveInt(value, fallback) {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function nonNegativeInt(value, fallback) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 function positiveNumber(value) {

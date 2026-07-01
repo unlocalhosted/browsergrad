@@ -827,16 +827,6 @@ async function createPipeline(
 ): Promise<CachedWgslPipeline> {
   const bindGroupLayout = gpu.createBindGroupLayout({ entries: [...layoutEntries] });
   const shaderModule = gpu.createShaderModule({ code: program.wgsl });
-  const compilationInfo = "getCompilationInfo" in shaderModule
-    ? await shaderModule.getCompilationInfo()
-    : undefined;
-  const messages = compilationInfo?.messages ?? [];
-  const errorMessages = messages.filter((message) => message.type === "error");
-  if (errorMessages.length > 0) {
-    throw new KernelError(
-      `WGSL compile failed for ${program.name}: ${formatCompilationMessages(errorMessages)}`,
-    );
-  }
   try {
     const pipeline = await gpu.createComputePipelineAsync({
       layout: gpu.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
@@ -844,8 +834,13 @@ async function createPipeline(
     });
     return { pipeline, bindGroupLayout };
   } catch (error) {
+    const compilationInfo = "getCompilationInfo" in shaderModule
+      ? await shaderModule.getCompilationInfo()
+      : undefined;
+    const messages = compilationInfo?.messages ?? [];
+    const errorMessages = messages.filter((message) => message.type === "error");
     const detail = messages.length > 0
-      ? formatCompilationMessages(messages)
+      ? formatCompilationMessages(errorMessages.length > 0 ? errorMessages : messages)
       : error instanceof Error
         ? error.message
         : String(error);

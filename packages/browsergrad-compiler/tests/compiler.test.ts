@@ -474,10 +474,179 @@ __global__ void vector_helper(float* out, const float* inp) {
 
     expect(compiled.wgsl).toContain("return bg_ptr_read_f32x4(address_buffer, address_base);");
     expect(compiled.wgsl).toContain("bg_ptr_write_f32x4(address_buffer, address_base, val);");
-    expect(compiled.wgsl).toContain("case 1u: { return vec4<f32>(inp[index + 0u], inp[index + 1u], inp[index + 2u], inp[index + 3u]); }");
+    expect(compiled.wgsl).toContain("case 1u: { return vec4<f32>(f32(inp[index + 0u]), f32(inp[index + 1u]), f32(inp[index + 2u]), f32(inp[index + 3u])); }");
     expect(compiled.wgsl).toContain("case 0u: { out[index + 0u] = value.x; out[index + 1u] = value.y; out[index + 2u] = value.z; out[index + 3u] = value.w; return; }");
     expect(compiled.wgsl).not.toContain("address[");
     expect([...result.buffers.out as Float32Array]).toEqual([1, 12, 3, 4]);
+  });
+
+  it("keeps shifted scalar bases aligned when casting helper pointer params to vector lanes", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ void write_lane_offset(float4* out, int idx, float value) {
+  out[idx].y = value;
+}
+
+__global__ void vector_lane_offset(float* out, const float* inp) {
+  int idx = threadIdx.x;
+  const float4* readView = reinterpret_cast<const float4*>(inp);
+  float4* writeView = reinterpret_cast<float4*>(out + 4);
+  float4 value = readView[idx];
+  write_lane_offset(writeView, idx, value.x + value.w);
+}`, { workgroupSize: [2, 1, 1] });
+
+    expect(compiled.wgsl).toContain("write_lane_offset(0u, (0u + (u32((0 + 4)) / 4u)), idx");
+    expect(compiled.wgsl).toContain("out[(u32((out_base + u32(idx))) * 4u) + 1u] = value;");
+  });
+
+  it("keeps shifted vector bases aligned when casting helper pointer params to scalar lanes", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ float load_scalar_offset(const float* inp, int idx) {
+  return inp[idx];
+}
+
+__global__ void vector_to_scalar_offset(float* out, const float4* inp) {
+  int idx = threadIdx.x;
+  const float* scalarView = reinterpret_cast<const float*>(inp + 1);
+  out[idx] = load_scalar_offset(scalarView, idx);
+}`, { workgroupSize: [2, 1, 1] });
+
+    expect(compiled.wgsl).toContain("load_scalar_offset(1u, (0u + (u32((0 + 1)) * 4u)), idx");
+    expect(compiled.wgsl).toContain("return inp[index];");
+    expect(compiled.wgsl).toContain("return bg_ptr_read_f32(inp_buffer, (inp_base + u32(idx)));");
+  });
+
+  it("writes scalar helper pointer params through shifted vector-backed storage", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ void write_scalar_offset(float* out, int idx, float value) {
+  out[idx] = value;
+}
+
+__global__ void vector_to_scalar_write_offset(float4* out) {
+  int idx = threadIdx.x;
+  float* scalarView = reinterpret_cast<float*>(out + 1);
+  write_scalar_offset(scalarView, idx, 7.0f + (float)idx);
+}`, { workgroupSize: [2, 1, 1] });
+
+    expect(compiled.wgsl).toContain("write_scalar_offset(0u, (0u + (u32((0 + 1)) * 4u)), idx");
+    expect(compiled.wgsl).toContain("out[index] = value;");
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32(out_buffer, (out_base + u32(idx)), value);");
+  });
+
+  it("keeps shifted vector-backed scalar atomics on atomic storage carriers", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ void add_scalar_offset(float* out, int idx, float value) {
+  atomicAdd(&out[idx], value);
+}
+
+__global__ void vector_to_scalar_atomic_offset(float4* out) {
+  int idx = threadIdx.x;
+  float* scalarView = reinterpret_cast<float*>(out + 1);
+  add_scalar_offset(scalarView, idx, 2.0f + (float)idx);
+}`, { workgroupSize: [2, 1, 1] });
+
+    expect(compiled.wgsl).toContain("var<storage, read_write> out: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("add_scalar_offset(0u, (0u + (u32((0 + 1)) * 4u)), idx");
+    expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_f32(out_buffer, (out_base + u32(idx)), value);");
+    expect(compiled.wgsl).toContain("case 0u: { return bg_atomicAdd_f32(&out[index], value); }");
+  });
+
+  it("keeps shifted vector-backed integer scalar atomics on atomic storage carriers", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ void add_uint_scalar_offset(uint* out, int idx, uint value) {
+  atomicAdd(&out[idx], value);
+}
+
+__global__ void uint_vector_to_scalar_atomic_offset(uint4* out) {
+  int idx = threadIdx.x;
+  uint* scalarView = reinterpret_cast<uint*>(out + 1);
+  add_uint_scalar_offset(scalarView, idx, 2u + (uint)idx);
+}`, { workgroupSize: [2, 1, 1] });
+
+    expect(compiled.wgsl).toContain("var<storage, read_write> out: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("add_uint_scalar_offset(0u, (0u + (u32((0 + 1)) * 4u)), idx");
+    expect(compiled.wgsl).toContain("case 0u: { return atomicAdd(&out[index], value); }");
+  });
+
+  it("reads shifted vector-backed device global scalar atomics from flat lanes", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ uint4 g_vec[2];
+
+__device__ void add_global_scalar(uint* out, int idx, uint value) {
+  atomicAdd(&out[idx], value);
+}
+
+__global__ void device_global_vector_to_scalar_atomic(uint* out) {
+  int idx = threadIdx.x;
+  uint* scalarView = reinterpret_cast<uint*>(g_vec + 1);
+  add_global_scalar(scalarView, idx, 5u + (uint)idx);
+  out[idx] = scalarView[idx];
+}`, { workgroupSize: [2, 1, 1] });
+
+    expect(compiled.wgsl).toContain("var<storage, read_write> g_vec: array<atomic<u32>>;");
+    expect(compiled.wgsl).toContain("add_global_scalar(1u, (0u + (u32((0 + 1)) * 4u)), idx");
+    expect(compiled.wgsl).toContain("atomicLoad(&g_vec[(u32(((0 + 1) * 4)) + u32(idx))])");
+  });
+
+  it("flattens shared vector scalar atomics to scalar atomic lanes", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ void add_shared_scalar(uint* out, int idx, uint value) {
+  atomicAdd(&out[idx], value);
+}
+
+__global__ void shared_vector_to_scalar_atomic(uint* out) {
+  __shared__ uint4 tile[2];
+  int idx = threadIdx.x;
+  uint* scalarView = reinterpret_cast<uint*>(tile + 1);
+  add_shared_scalar(scalarView, idx, 7u + (uint)idx);
+  out[idx] = scalarView[idx];
+}`, { workgroupSize: [2, 1, 1] });
+
+    expect(compiled.wgsl).toContain("var<workgroup> tile: array<atomic<u32>, 8>;");
+    expect(compiled.wgsl).toContain("add_shared_scalar(1u, (0u + (u32((0 + 1)) * 4u)), idx");
+    expect(compiled.wgsl).toContain("case 1u: { return atomicAdd(&tile[index], value); }");
+    expect(compiled.wgsl).toContain("atomicLoad(&tile[(u32(((0 + 1) * 4)) + u32(idx))])");
+  });
+
+  it("reads and writes packed shared vector scalar helper lanes", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ void add_shared_float_lane(float* lanes, int idx, float value) {
+  lanes[idx] = lanes[idx] + value;
+}
+
+__global__ void shared_vector_scalar_lane_write(float* out) {
+  __shared__ float4 tile[2];
+  if (threadIdx.x == 0) {
+    tile[1] = make_float4(5.0f, 6.0f, 7.0f, 8.0f);
+    float* scalarView = reinterpret_cast<float*>(tile + 1);
+    add_shared_float_lane(scalarView, 1, 0.5f);
+    out[0] = tile[1].y;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("add_shared_float_lane(1u, (0u + (u32((0 + 1)) * 4u)), 1, 0.5");
+    expect(compiled.wgsl).toContain("return f32(tile[(u32(index) / 4u)][(u32(index) % 4u)]);");
+    expect(compiled.wgsl).toContain("tile[(u32(index) / 4u)] = vec4<f32>(select((tile[(u32(index) / 4u)]).x");
+  });
+
+  it("emits shared float vector scalar atomic helpers for flat lanes", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ void add_shared_float3_scalar(float* out, int idx, float value) {
+  atomicAdd(&out[idx], value);
+}
+
+__global__ void shared_float3_vector_to_scalar_atomic(float* out) {
+  __shared__ float3 tile[2];
+  int idx = threadIdx.x;
+  float* scalarView = reinterpret_cast<float*>(tile + 1);
+  add_shared_float3_scalar(scalarView, idx, 7.0f + (float)idx);
+  out[idx] = scalarView[idx];
+}`, { workgroupSize: [2, 1, 1] });
+
+    expect(compiled.wgsl).toContain("var<workgroup> tile: array<atomic<u32>, 6>;");
+    expect(compiled.wgsl).toContain("fn bg_atomicAdd_f32_workgroup");
+    expect(compiled.wgsl).toContain("add_shared_float3_scalar(1u, (0u + (u32((0 + 1)) * 3u)), idx");
+    expect(compiled.wgsl).toContain("case 1u: { return bg_atomicAdd_f32_workgroup(&tile[index], value); }");
+    expect(compiled.wgsl).toContain("bitcast<f32>(atomicLoad(&tile[(u32(((0 + 1) * 3)) + u32(idx))]))");
   });
 
   it("rejects writes through const device helper pointer params", () => {
@@ -531,6 +700,84 @@ __global__ void kernel(uint* out) {
     expect(compiled.wgsl).not.toContain("bg_ptr_read_u32(ptr_buffer, (ptr_base + u32(index))) =");
   });
 
+  it("lowers device helper pointer-param writes fed by atomic return values", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void helper_rmw(uint* counter, float* out) {
+  uint* ptr = counter;
+  out[0] = atomicSub(ptr, 2);
+  out[1] = ptr[0];
+}
+
+__global__ void helper_atomic_rmw(uint* counter, float* out) {
+  helper_rmw(counter, out);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          counter: new Uint32Array([5]),
+          out: new Float32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.counter as Uint32Array]).toEqual([3]);
+    expect([...result.buffers.out as Float32Array]).toEqual([5, 3]);
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32(out_buffer, (out_base + u32(0)), f32(");
+    expect(compiled.wgsl).not.toContain("bg_ptr_read_f32(out_buffer, (out_base + u32(0))) =");
+  });
+
+  it("emits pointer helpers for local storage pointer aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void aliased_rows(float* out, const float* inp, int rows, int cols) {
+  int row = blockIdx.x * blockDim.x + threadIdx.x;
+  if (row < rows) {
+    const float* in_row = inp + row * cols;
+    float* out_row = out + row * cols;
+    for (int col = 0; col < cols; col++) {
+      out_row[col] = in_row[col] + 1.0f;
+    }
+  }
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Float32Array(6),
+          inp: new Float32Array([1, 2, 3, 4, 5, 6]),
+        },
+        scalars: { rows: 2, cols: 3 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([2, 3, 4, 5, 6, 7]);
+    expect(compiled.wgsl).toContain("fn bg_ptr_read_f32(buffer: u32, index: u32) -> f32");
+    expect(compiled.wgsl).toContain("fn bg_ptr_write_f32(buffer: u32, index: u32, value: f32)");
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32(0u, ((0u + u32((0 + (row * bg_uniforms.cols)))) + u32(col))");
+  });
+
+  it("keeps direct scalar storage updates off pointer helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void incKernel(int *data, int n) {
+  int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i < n) {
+    data[i]++;
+  }
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { data: new Int32Array([0, 1, 2, 3]) }, scalars: { n: 4 } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect([...result.buffers.data as Int32Array]).toEqual([1, 2, 3, 4]);
+    expect(compiled.wgsl).toContain("data[i] = (i32(data[i]) + 1)");
+    expect(compiled.wgsl).not.toContain("bg_ptr_read_i32");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
+  });
+
   it("lowers one-dimensional shared memory through helper pointer params", () => {
     const compiled = compileCudaLiteKernel(SHARED_POINTER_HELPERS, { workgroupSize: [4, 1, 1] });
     const result = runCompiledKernelReference(
@@ -539,8 +786,9 @@ __global__ void kernel(uint* out) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("case 1u: { return tile[index]; }");
-    expect(compiled.wgsl).toContain("case 1u: { tile[index] = value; return; }");
+    expect(compiled.wgsl).toContain("fn bg_ptr_read_f32(buffer: u32, index: u32) -> f32 {\n  return tile[index];");
+    expect(compiled.wgsl).toContain("fn bg_ptr_write_f32(buffer: u32, index: u32, value: f32) {\n  tile[index] = value;");
+    expect(compiled.wgsl).not.toContain("switch buffer");
     expect(compiled.wgsl).toContain("writeTile(1u, 0u, tid");
     expect([...result.buffers.out as Float32Array]).toEqual([4, 3, 2, 1]);
   });
@@ -597,8 +845,8 @@ __global__ void globals_array(float* out) {
     expect([...result.buffers.d_CallValue as Float32Array]).toEqual([0.5, 1.5, 2.5, 3.5]);
     expect(compiled.wgsl).toContain("var<storage, read_write> d_CallValue: array<f32>;");
     expect(compiled.wgsl).toContain("setCallValue(1u, 0u, i");
-    expect(compiled.wgsl).toContain("case 1u: { return d_CallValue[index]; }");
-    expect(compiled.wgsl).toContain("case 1u: { d_CallValue[index] = value; return; }");
+    expect(compiled.wgsl).toContain("fn bg_ptr_read_f32(buffer: u32, index: u32) -> f32 {\n  return d_CallValue[index];");
+    expect(compiled.wgsl).toContain("fn bg_ptr_write_f32(buffer: u32, index: u32, value: f32) {\n  d_CallValue[index] = value;");
   });
 
   it("supports atomic operations on __device__ globals", () => {
@@ -694,8 +942,8 @@ __global__ void shared_pointer_2d(float* out) {
       { gridDim: [1, 1, 1], blockDim: [6, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("case 1u: { return tile[min((((index) / 3u) % 2u), 1u)][min((index % 3u), 2u)]; }");
-    expect(compiled.wgsl).toContain("case 1u: { tile[min((((index) / 3u) % 2u), 1u)][min((index % 3u), 2u)] = value; return; }");
+    expect(compiled.wgsl).toContain("return tile[min((((index) / 3u) % 2u), 1u)][min((index % 3u), 2u)];");
+    expect(compiled.wgsl).toContain("tile[min((((index) / 3u) % 2u), 1u)][min((index % 3u), 2u)] = value;");
     expect([...result.buffers.out as Float32Array]).toEqual([3, 3, 3, 3, 3, 3]);
   });
 
@@ -711,6 +959,35 @@ __global__ void kernel(float* x) {
       code: "unsupported-device-pointer-param",
       message: "device pointer parameter 'ptr' expects int pointer",
     }));
+  });
+
+  it("reports precise diagnostics for mixed local and storage helper pointer calls", () => {
+    const source = `
+__device__ void writeMaybeLocal(float* ptr, float value) {
+  ptr[0] = value;
+}
+
+__global__ void bad(float* out, int pickStorage) {
+  float scratch[1];
+  float* ptrs[1];
+  ptrs[0] = &scratch[0];
+  if (pickStorage) {
+    writeMaybeLocal(out, 2.0f);
+  } else {
+    writeMaybeLocal(ptrs[0], 1.0f);
+  }
+  out[0] = scratch[0];
+}`;
+    try {
+      compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+      throw new Error("expected mixed local/storage helper pointer call to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(CudaLiteCompilerError);
+      expect((error as CudaLiteCompilerError).diagnostics).toContainEqual(expect.objectContaining({
+        code: "unsupported-device-pointer-param",
+        message: "local-memory pointer array 'ptrs' cannot cross a storage pointer helper boundary",
+      }));
+    }
   });
 
   it("lowers fixed thread-local arrays through reference and WGSL", () => {
@@ -1733,12 +2010,12 @@ __global__ void overloadKernel(int *out) {
     expect(compiled.ir.functions.map((fn) => fn.name)).toEqual(["pick", "pick"]);
     expect(compiled.wgsl).toContain("fn pick__bg_overload_0(");
     expect(compiled.wgsl).toContain("fn pick__bg_overload_1(");
-    expect(compiled.wgsl).toContain("out[0] = pick__bg_overload_0(4");
-    expect(compiled.wgsl).toContain("out[1] = pick__bg_overload_1(4, 5");
+    expect(compiled.wgsl).toContain("out[0] = i32(pick__bg_overload_0(4");
+    expect(compiled.wgsl).toContain("out[1] = i32(pick__bg_overload_1(4, 5");
     expect([...result.buffers.out as Int32Array]).toEqual([5, 9]);
   });
 
-  it("lowers CUDA warp shuffle helpers to subgroup intrinsics", () => {
+  it("lowers CUDA warp shuffle helpers to workgroup-backed warp intrinsics", () => {
     const compiled = compileCudaLiteKernel(`
 __inline__ __device__ float warpReduceSum(float val) {
   unsigned int mask = 0xffffffff;
@@ -1756,8 +2033,9 @@ __global__ void warpKernel(const float *input, float *output) {
     });
 
     expect(compiled.wgsl).toContain("enable subgroups;");
-    expect(compiled.wgsl).toContain("subgroupShuffleDown(val, u32(16))");
-    expect(compiled.wgsl).toContain("warpReduceSum(val, local_id, workgroup_id, num_workgroups)");
+    expect(compiled.wgsl).toContain("bg_warp_shuffle_down_float_32(val, 16u, 32u, local_id)");
+    expect(compiled.wgsl).toContain("bg_inline_warpReduceSum_");
+    expect(compiled.wgsl).not.toContain("val = warpReduceSum(val, local_id, workgroup_id, num_workgroups)");
   });
 
   it("lowers semantic block reductions as subgroup reductions", () => {
@@ -1766,7 +2044,7 @@ __global__ void kernel(float* out, float value) {
   out[0] = blockReduce(value, false, 0.0f);
 }`, { features: { subgroups: true } });
 
-    expect(compiled.wgsl).toContain("out[0] = subgroupAdd(bg_uniforms.value)");
+    expect(compiled.wgsl).toContain("out[0] = f32(subgroupAdd(bg_uniforms.value))");
   });
 
   it("lowers masked warp reductions using the value operand", () => {
@@ -1780,7 +2058,7 @@ __global__ void kernel(int* out, int value, unsigned int mask) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("out[0] = subgroupAdd(bg_uniforms.value)");
+    expect(compiled.wgsl).toContain("out[0] = i32(bg_warp_reduce_sum_int_32(bg_uniforms.value, 32u, local_id))");
     expect([...result.buffers.out as Int32Array]).toEqual([7]);
   });
 
@@ -1841,7 +2119,7 @@ __global__ void voteKernel(uint *input, uint *out) {
     expect(compiled.wgsl).toContain("subgroupAny");
     expect(compiled.wgsl).toContain("subgroupAll");
     expect(compiled.wgsl).toContain("subgroupBallot");
-    expect(compiled.wgsl).toContain("subgroupAdd");
+    expect(compiled.wgsl).toContain("bg_warp_reduce_sum_uint_32(input[0], 32u, local_id)");
     expect(compiled.wgsl).toContain("countOneBits");
     expect(compiled.ir.requiredFeatures).toContain("subgroups");
     expect([...result.buffers.out as Uint32Array]).toEqual([1, 0, 1, 1, 7]);
@@ -1861,6 +2139,44 @@ __global__ void voteBoolKernel(bool *info, int warp_size) {
 
     expect(compiled.wgsl).toContain("select(0u, 1u, (tx >= ((bg_uniforms.warp_size * 3) / 2)))");
     expect(compiled.wgsl).not.toContain(") != 0) != 0");
+  });
+
+  it("runs CUDA warp vote helpers as subgroup collectives in reference mode", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void voteBoolKernel(bool *info, int warp_size) {
+  int tx = threadIdx.x;
+  bool *offs = info + (tx * 3);
+  *offs = __any_sync(0xffffffffu, (tx >= (warp_size * 3) / 2));
+  *(offs + 1) = (tx >= (warp_size * 3) / 2 ? true : false);
+}`, { features: { subgroups: true }, workgroupSize: [32, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { info: new Uint32Array(96) }, scalars: { warp_size: 16 } },
+      { gridDim: [1, 1, 1], blockDim: [32, 1, 1] },
+    );
+
+    expect((result.buffers.info as Uint32Array)[0]).toBe(1);
+    expect((result.buffers.info as Uint32Array)[1]).toBe(0);
+    expect((result.buffers.info as Uint32Array)[72]).toBe(1);
+    expect((result.buffers.info as Uint32Array)[73]).toBe(1);
+  });
+
+  it("preserves storage bits for typed pointer writes in reference mode", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void typePunnedFlag(float *scratch) {
+  unsigned int *flag = (unsigned int *)(scratch + 2);
+  if (threadIdx.x == 0) {
+    atomicAdd(flag, 1);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { scratch: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const expected = new Float32Array(new Uint32Array([1]).buffer)[0];
+
+    expect((result.buffers.scratch as Float32Array)[2]).toBe(expected);
   });
 
   it("lowers cooperative-group block and tiled primitives to WebGPU primitives", () => {
@@ -1892,7 +2208,7 @@ __global__ void tileReduce(const float *input, float *output) {
     );
 
     expect(compiled.wgsl).toContain("enable subgroups;");
-    expect(compiled.wgsl).toContain("subgroupShuffleDown(val, u32(offset))");
+    expect(compiled.wgsl).toContain("bg_warp_shuffle_down_float_16(val, u32(offset), 16u, local_id)");
     expect(compiled.wgsl).toContain("(i32(local_id.x) % 16)");
     expect(compiled.wgsl).toContain("workgroupBarrier();");
     expect([...result.buffers.output as Float32Array]).toEqual([16]);
@@ -1963,8 +2279,10 @@ __global__ void bareThreadGroup(int *out) {
 
     expect(compiled.wgsl).toContain("fn sumReduction");
     expect(compiled.wgsl).toContain("g_tile_size_arg");
-    expect(compiled.wgsl).toContain("sumReduction(4u");
-    expect(compiled.wgsl).toContain("sumReduction(2u");
+    expect(compiled.wgsl).toContain("let g_tile_size: u32 = g_tile_size_arg");
+    expect(compiled.wgsl).toContain("let bg_inline_sumReduction_");
+    expect(compiled.wgsl).toContain("_g_tile_size: u32 = 4u");
+    expect(compiled.wgsl).toContain("_g_tile_size: u32 = 2u");
     expect(compiled.wgsl).toContain("workgroupBarrier();");
   });
 
@@ -2534,8 +2852,8 @@ __global__ void tileScan(const float *input, float *output) {
       workgroupSize: [8, 4, 1],
     });
 
-    expect(compiled.wgsl).toContain("subgroupShuffleUp(val, u32(1))");
-    expect(compiled.wgsl).toContain("subgroupShuffleXor(val, u32(2))");
+    expect(compiled.wgsl).toContain("bg_warp_shuffle_up_float_8(val, 1u, 8u, local_id)");
+    expect(compiled.wgsl).toContain("bg_warp_shuffle_xor_float_8(val, 2u, 8u, local_id)");
     expect(compiled.wgsl).toContain("(i32(local_id.x + local_id.y * 8u) % 8)");
     expect(compiled.wgsl).toContain("workgroupBarrier();");
   });
@@ -2559,7 +2877,7 @@ __global__ void coalescedVote(uint *flags, uint *out) {
     );
 
     expect(compiled.wgsl).toContain("subgroupBallot");
-    expect(compiled.wgsl).toContain("subgroupShuffle");
+    expect(compiled.wgsl).toContain("bg_warp_shuffle_sync_int_1");
     expect(compiled.wgsl).toContain("countOneBits");
     expect(compiled.ir.requiredFeatures).toContain("subgroups");
     expect([...result.buffers.out as Uint32Array]).toEqual([1]);
@@ -2591,7 +2909,7 @@ __global__ void namespaceTileReduce(const float *input, float *output) {
       { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("subgroupAdd(value)");
+    expect(compiled.wgsl).toContain("bg_warp_reduce_sum_float_8(value, 8u, local_id)");
     expect(compiled.wgsl).toContain("workgroupBarrier();");
     expect([...result.buffers.output as Float32Array]).toEqual([8]);
   });
@@ -2603,7 +2921,7 @@ __global__ void binaryPartition(int *input, int *out) {
   cg::thread_block block = cg::this_thread_block();
   cg::thread_block_tile<32> tile = cg::tiled_partition<32>(block);
   int value = input[threadIdx.x];
-  auto part = cg::binary_partition(tile, value & 1);
+  auto part = cg::binary_partition(tile, (value & 1) != 0);
   int sum = cg::reduce(part, value, cg::plus<int>());
   if (part.thread_rank() == 0) {
     out[0] = part.size() + sum;
@@ -2621,7 +2939,8 @@ __global__ void binaryPartition(int *input, int *out) {
     expect(compiled.ir.requiredFeatures).toContain("subgroups");
     expect(compiled.wgsl).toContain("subgroupBallot");
     expect(compiled.wgsl).toContain("countOneBits");
-    expect(compiled.wgsl).toContain("subgroupAdd(select(0, value");
+    expect(compiled.wgsl).toContain("bg_warp_partition_reduce_sum_int_1(value");
+    expect(compiled.wgsl).not.toContain("!= 0) != 0");
     expect([...result.buffers.out as Int32Array]).toEqual([4]);
   });
 
@@ -2648,11 +2967,11 @@ __global__ void helperTileReduce(int *out) {
     );
 
     expect(compiled.wgsl).toContain("reduce_n(value, 4u");
-    expect(compiled.wgsl).toContain("subgroupAdd(value)");
+    expect(compiled.wgsl).toContain("bg_warp_reduce_sum_int_4(value, tile_tile_size, local_id)");
     expect([...result.buffers.out as Int32Array]).toEqual([4]);
   });
 
-  it("lowers custom vector cooperative reductions through scalar subgroup shuffles", () => {
+  it("lowers custom vector cooperative reductions through workgroup tile reductions", () => {
     const compiled = compileCudaLiteKernel(`
 namespace cg = cooperative_groups;
 __device__ float2 merge_pair(float2 a, float2 b) {
@@ -2675,8 +2994,13 @@ __global__ void vectorTileReduce(float2 *out) {
     );
 
     expect(compiled.wgsl).toContain("fn bg_cg_reduce_merge_pair_float2_32");
-    expect(compiled.wgsl).toContain("subgroupShuffleXor(value.x, offset)");
-    expect(compiled.wgsl).toContain("value = merge_pair(value, vec2<f32>");
+    expect(compiled.wgsl).toContain("var<workgroup> bg_cg_reduce_merge_pair_float2_32_scratch");
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+    expect(compiled.wgsl).toContain("merge_pair(bg_cg_reduce_merge_pair_float2_32_scratch[bg_linear_rank]");
+    const mergeFnIndex = compiled.wgsl.indexOf("fn merge_pair(");
+    const reduceHelperIndex = compiled.wgsl.indexOf("fn bg_cg_reduce_merge_pair_float2_32");
+    expect(mergeFnIndex).toBeGreaterThanOrEqual(0);
+    expect(mergeFnIndex).toBeLessThan(reduceHelperIndex);
     expect([...result.buffers.out as Float32Array]).toEqual([2, 3]);
   });
 
@@ -3130,8 +3454,8 @@ __global__ void cache_hint(const float* x, float* y) {
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("bg_ptr_read_f32");
-    expect(compiled.wgsl).toContain("bg_ptr_write_f32");
+    expect(compiled.wgsl).toContain("var value: f32 = x[");
+    expect(compiled.wgsl).toContain("y[");
     expect([...result.buffers.y as Float32Array]).toEqual([3, 7]);
   });
 
@@ -3218,7 +3542,7 @@ __global__ void reduce_add_sum_kernel(float* dst, const float* src, size_t n, si
 }`, { workgroupSize: [1, 1, 1] });
 
     expect(compiled.wgsl).not.toContain("f32((vec4<f32>");
-    expect(compiled.wgsl).toContain("dst[(idx + u32(k))] = f32((f32(dst[(idx + u32(k))]) + acc[u32(k)]));");
+    expect(compiled.wgsl).toContain("dst[(idx + u32(k))] = f32(f32((f32(dst[(idx + u32(k))]) + acc[u32(k)])));");
   });
 
   it("maps CUDA Packed128 float aliases onto vector storage views", () => {
@@ -3338,8 +3662,24 @@ __global__ void vector_convert(float4 *input, float3 *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("vec3<f32>(value.x, value.y, value.z)");
+    expect(compiled.wgsl).toContain("vec3<f32>(f32(value.x), f32(value.y), f32(value.z))");
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3]);
+  });
+
+  it("supports CUDA vector conversion constructors across scalar families", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void vector_convert(uint4 *input, float4 *out) {
+  uint4 raw = input[0];
+  out[0] = make_float4(raw);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { input: new Uint32Array([3, 5, 7, 11]), out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("vec4<f32>(f32(raw.x), f32(raw.y), f32(raw.z), f32(raw.w))");
+    expect([...result.buffers.out as Float32Array]).toEqual([3, 5, 7, 11]);
   });
 
   it("supports CUDA vector constructors with vector prefix and scalar tail", () => {
@@ -3575,7 +3915,7 @@ __global__ void intrinsic_pack(half2 *h, float2 *f, float *out) {
     );
 
     expect(compiled.ir.requiredFeatures).toEqual(expect.arrayContaining(["shader-f16", "subgroups"]));
-    expect(compiled.wgsl).toContain("subgroupShuffle(");
+    expect(compiled.wgsl).toContain("bg_warp_shuffle_sync_int_32(0, 0u, 32u, local_id)");
     expect(compiled.wgsl).toContain("workgroupBarrier()");
     expect(compiled.wgsl).toContain("storageBarrier()");
     expect([...result.buffers.f as Float32Array]).toEqual([1, 4]);
@@ -3606,9 +3946,9 @@ __global__ void reduction_alias_pack(const float *x, half2 *h, float *out) {
     );
 
     expect(compiled.ir.requiredFeatures).toEqual(expect.arrayContaining(["shader-f16", "subgroups"]));
-    expect(compiled.wgsl).toContain("subgroupAdd(");
-    expect(compiled.wgsl).toContain("subgroupMax(");
-    expect(compiled.wgsl).toContain("subgroupMin(");
+    expect(compiled.wgsl).toContain("bg_warp_reduce_sum_float_32(x[i], 32u, local_id)");
+    expect(compiled.wgsl).toContain("bg_warp_reduce_max_float_32(sum, 32u, local_id)");
+    expect(compiled.wgsl).toContain("bg_warp_reduce_min_float_32(maxv, 32u, local_id)");
     expect(compiled.wgsl).toContain("vec2<f16>");
     expect(Array.from(result.buffers.h as ArrayLike<number>)).toEqual([4, 5, 3, 3]);
     expect([...result.buffers.out as Float32Array]).toEqual([3.5]);
@@ -3633,7 +3973,7 @@ __global__ void reduce_int_alias(const int *x, int *out) {
     );
 
     expect(compiled.ir.requiredFeatures).toContain("subgroups");
-    expect(compiled.wgsl).toContain("subgroupAdd(");
+    expect(compiled.wgsl).toContain("bg_warp_reduce_sum_int_32(x[i], 32u, local_id)");
     expect([...result.buffers.out as Int32Array]).toEqual([7]);
   });
 
@@ -3673,7 +4013,7 @@ __global__ void addPacked(float *a, float *b, float *c, int n) {
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("vec4<f32>(a[");
+    expect(compiled.wgsl).toContain("vec4<f32>(f32(a[");
     expect(compiled.wgsl).toContain("c[");
     expect([...result.buffers.c as Float32Array]).toEqual([11, 22, 33, 44, 55, 66, 77, 88]);
   });
@@ -3695,6 +4035,8 @@ __global__ void localPacked(float *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
+    expect(compiled.wgsl).toContain("= value.x;");
+    expect(compiled.wgsl).not.toMatch(/&value\[0\]\.[xyzw]/u);
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
   });
 
@@ -3727,7 +4069,7 @@ __global__ void addPackedAlias(float *a, float *b, float *c) {
     );
 
     expect(compiled.wgsl).not.toContain("var ap");
-    expect(compiled.wgsl).toContain("vec4<f32>(a[");
+    expect(compiled.wgsl).toContain("vec4<f32>(f32(a[");
     expect([...result.buffers.c as Float32Array]).toEqual([3, 7, 11, 15]);
   });
 
@@ -3751,7 +4093,7 @@ __global__ void chainedVectorAlias(const float *inp, float *out, int row) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("vec4<f32>(inp[");
+    expect(compiled.wgsl).toContain("vec4<f32>(f32(inp[");
     expect(compiled.wgsl).not.toContain("x_vec[");
     expect(compiled.wgsl).not.toContain("x[");
     expect([...result.buffers.out as Float32Array]).toEqual([130]);
@@ -3916,7 +4258,7 @@ __global__ void sharedVectorOverlay(float *out) {
     );
 
     expect(compiled.wgsl).toContain("var<workgroup> bg_params: array<i32, 4>;");
-    expect(compiled.wgsl).toContain("bitcast<i32>(vec4<f32>");
+    expect(compiled.wgsl).toContain("bg_params[((u32(index) * 4u) + 0u)] = bitcast<i32>(value.x)");
     expect(compiled.wgsl).toContain("vec4<f32>(bitcast<f32>");
     expect([...result.buffers.out as Float32Array]).toEqual([10]);
   });
@@ -4047,7 +4389,8 @@ __global__ void vectorDeref(float *x, float *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).not.toContain("bg_ptr_write_f32x4");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_f32x4(0u,");
+    expect(compiled.wgsl).not.toMatch(/x\[[^\n]+\] = vec[234]<f32>/u);
     expect(compiled.wgsl).toMatch(/x\[[^\n]+ \+ 2u\] =/u);
     expect([...result.buffers.x as Float32Array]).toEqual([2, 4, 6, 8]);
     expect([...result.buffers.out as Float32Array]).toEqual([6]);
@@ -4211,7 +4554,7 @@ __global__ void magnitudeKernel(cufftComplex *data, float *mag, int N) {
     );
 
     expect(compiled.wgsl).toContain("var<storage, read_write> data: array<vec2<f32>>;");
-    expect(compiled.wgsl).toContain("data[idx].x");
+    expect(compiled.wgsl).toContain("data[u32(idx)].x");
     expect([...result.buffers.mag as Float32Array]).toEqual([5, 13]);
   });
 
@@ -4241,7 +4584,7 @@ __global__ void multiplyFreqDomain(cufftComplex *A, const cufftComplex *B, int N
     );
 
     expect(compiled.wgsl).toContain("var c: vec2<f32>");
-    expect(compiled.wgsl).toContain("A[idx] = c");
+    expect(compiled.wgsl).toContain("A[u32(idx)] = c");
     expect([...result.buffers.A as Float32Array]).toEqual([-7, 16, -11, 52]);
   });
 
@@ -4270,7 +4613,8 @@ __global__ void pointwise(cufftComplex *a, cufftComplex *b, float scale) {
     );
 
     expect(compiled.wgsl).toContain("fn ComplexMul");
-    expect(compiled.wgsl).toContain("a[i] = ComplexScale");
+    expect(compiled.wgsl).toContain("a[u32(i)] = ComplexScale");
+    expect(compiled.wgsl).not.toContain("f32(vec2<f32>");
     expect([...result.buffers.a as Float32Array]).toEqual([-3.5, 8, -5.5, 26]);
   });
 
@@ -4354,7 +4698,8 @@ __global__ void globalTimer(uint *out) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("global_id.x");
+    expect(compiled.wgsl).toContain("workgroup_id.x");
+    expect(compiled.wgsl).toContain("local_id.x");
     expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3]);
   });
 
@@ -4577,6 +4922,198 @@ __global__ void surfaceWrite3d(cudaSurfaceObject_t outputSurf) {
     expect(compiled.wgsl).toContain("bg_surf2dwrite_outputSurf");
     expect(compiled.wgsl).toContain("z * i32(bg_uniforms.outputSurf_height)");
     expect([...result.buffers.outputSurf as Float32Array]).toEqual([0, 1, 10, 11, 100, 101, 110, 111]);
+  });
+
+  it("lowers cudaSurfaceObject_t surf2DLayeredwrite to z-linearized layer storage", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void surfaceLayeredWrite(cudaSurfaceObject_t outputSurf) {
+  surf2DLayeredwrite(23.0f, outputSurf, 1 * sizeof(float), 1, 1);
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("bg_surf2dwrite_outputSurf(23.0, (1 * 4), i32(1), i32(1))");
+    expect(compiled.wgsl).not.toContain("bg_surf2dwrite_outputSurf(23.0, (1 * 4), i32((1 + 1)), i32(0))");
+  });
+
+  it("lowers cudaSurfaceObject_t surf2DLayeredread to z-linearized layer storage", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float read_layer(cudaSurfaceObject_t surfaceArg, int row, int layer) {
+  return surf2DLayeredread<float>(surfaceArg, 1 * sizeof(float), row, layer);
+}
+
+__global__ void surfaceLayeredRead(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    float value = 0.0f;
+    surf2DLayeredread(&value, surf, 0, 1, 1);
+    out[0] = value;
+    out[1] = surf2DLayeredread<float>(surf, 1 * sizeof(float), 1, 1);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(2) },
+        surfaces: { surf: { width: 2, height: 2, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([7, 8]);
+    expect(compiled.wgsl).toContain("bg_surf2dread_surf(0, 1, 1)");
+    expect(compiled.wgsl).toContain("bg_surf2dread_surf((1 * 4), 1, 1)");
+
+    const helperCompiled = compileCudaLiteKernel(`
+__device__ float read_layer(cudaSurfaceObject_t surfaceArg, int row, int layer) {
+  return surf2DLayeredread<float>(surfaceArg, 1 * sizeof(float), row, layer);
+}
+
+__global__ void surfaceLayeredRead(cudaSurfaceObject_t surf, float *out) {
+  out[0] = read_layer(surf, 1, 1);
+}`, { workgroupSize: [1, 1, 1] });
+    expect(helperCompiled.wgsl).toContain("bg_surf2dread(surfaceArg, (1 * 4), row, layer)");
+  });
+
+  it("lowers cudaSurfaceObject_t surf3Dread to z-linearized layer storage", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float read_z(cudaSurfaceObject_t surfaceArg, int row, int z) {
+  return surf3Dread<float>(surfaceArg, 1 * sizeof(float), row, z);
+}
+
+__global__ void surfaceRead3d(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    float value = 0.0f;
+    surf3Dread(&value, surf, 0, 1, 1);
+    out[0] = value;
+    out[1] = surf3Dread<float>(surf, 1 * sizeof(float), 1, 1);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(2) },
+        surfaces: { surf: { width: 2, height: 2, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([7, 8]);
+    expect(compiled.wgsl).toContain("bg_surf2dread_surf(0, 1, 1)");
+    expect(compiled.wgsl).toContain("bg_surf2dread_surf((1 * 4), 1, 1)");
+
+    const helperCompiled = compileCudaLiteKernel(`
+__device__ float read_z(cudaSurfaceObject_t surfaceArg, int row, int z) {
+  return surf3Dread<float>(surfaceArg, 1 * sizeof(float), row, z);
+}
+
+__global__ void surfaceRead3d(cudaSurfaceObject_t surf, float *out) {
+  out[0] = read_z(surf, 1, 1);
+}`, { workgroupSize: [1, 1, 1] });
+    expect(helperCompiled.wgsl).toContain("bg_surf2dread(surfaceArg, (1 * 4), row, z)");
+  });
+
+  it("lowers layered and 3D vector surface reads lane-wise through z-linearized storage", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void surfaceVectorLayeredRead(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    float4 layeredPointer;
+    float4 zPointer;
+    surf2DLayeredread(&layeredPointer, surf, 0, 0, 1);
+    surf3Dread(&zPointer, surf, 0, 0, 1);
+    float4 layeredReturn = surf2DLayeredread<float4>(surf, 0, 0, 1);
+    float4 zReturn = surf3Dread<float4>(surf, 0, 0, 1);
+    out[0] = layeredPointer.x + layeredReturn.x;
+    out[1] = layeredPointer.y + layeredReturn.y;
+    out[2] = zPointer.z + zReturn.z;
+    out[3] = zPointer.w + zReturn.w;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(4) },
+        surfaces: { surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([10, 12, 14, 16]);
+    expect(compiled.wgsl).toContain("layeredPointer = vec4<f32>(f32(bg_surf2dread_surf((0 + 0), 0, 1)), f32(bg_surf2dread_surf((0 + 4), 0, 1)), f32(bg_surf2dread_surf((0 + 8), 0, 1)), f32(bg_surf2dread_surf((0 + 12), 0, 1)));");
+    expect(compiled.wgsl).toContain("var layeredReturn: vec4<f32> = vec4<f32>(f32(bg_surf2dread_surf((0 + 0), 0, 1)), f32(bg_surf2dread_surf((0 + 4), 0, 1)), f32(bg_surf2dread_surf((0 + 8), 0, 1)), f32(bg_surf2dread_surf((0 + 12), 0, 1)));");
+
+    const helperCompiled = compileCudaLiteKernel(`
+__device__ float4 read_layer_vec(cudaSurfaceObject_t surfaceArg, int row, int layer) {
+  return surf2DLayeredread<float4>(surfaceArg, 0, row, layer);
+}
+
+__device__ float4 read_z_vec(cudaSurfaceObject_t surfaceArg, int row, int z) {
+  return surf3Dread<float4>(surfaceArg, 0, row, z);
+}
+
+__global__ void surfaceVectorLayeredRead(cudaSurfaceObject_t surf, float *out) {
+  float4 layeredReturn = read_layer_vec(surf, 0, 1);
+  float4 zReturn = read_z_vec(surf, 0, 1);
+  out[0] = layeredReturn.x + zReturn.x;
+}`, { workgroupSize: [1, 1, 1] });
+    expect(helperCompiled.wgsl).toContain("return vec4<f32>(f32(bg_surf2dread(surfaceArg, (0 + 0), row, layer)), f32(bg_surf2dread(surfaceArg, (0 + 4), row, layer)), f32(bg_surf2dread(surfaceArg, (0 + 8), row, layer)), f32(bg_surf2dread(surfaceArg, (0 + 12), row, layer)));");
+    expect(helperCompiled.wgsl).toContain("return vec4<f32>(f32(bg_surf2dread(surfaceArg, (0 + 0), row, z)), f32(bg_surf2dread(surfaceArg, (0 + 4), row, z)), f32(bg_surf2dread(surfaceArg, (0 + 8), row, z)), f32(bg_surf2dread(surfaceArg, (0 + 12), row, z)));");
+  });
+
+  it("passes surface object params through device helpers as dispatch handles", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float4 sample_surface_vec(cudaTextureObject_t texArg) {
+  return tex2D<float4>(texArg, 0.5f, 0.5f);
+}
+
+__device__ void write_surface_vec(cudaSurfaceObject_t surfaceArg, float4 value) {
+  surf2Dwrite(value, surfaceArg, 0, 0);
+}
+
+__device__ uint read_surface_value(cudaSurfaceObject_t surfaceArg) {
+  return surf2Dread<unsigned int>(surfaceArg, 4, 0);
+}
+
+__global__ void textureSurfaceVectorHelperRoundtrip(cudaSurfaceObject_t surf, cudaTextureObject_t tex, float *out) {
+  float4 value = sample_surface_vec(tex);
+  write_surface_vec(surf, value);
+  out[0] = (float)read_surface_value(surf);
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("fn bg_surf2dread(surface: u32, x_bytes: i32, y: i32, z: i32) -> f32");
+    expect(compiled.wgsl).toContain("fn bg_surf2dwrite(surface: u32, value: f32, x_bytes: i32, y: i32, z: i32)");
+    expect(compiled.wgsl).toContain("write_surface_vec(0u, value");
+    expect(compiled.wgsl).toContain("bg_surf2dwrite(surfaceArg");
+    expect(compiled.wgsl).toContain("bg_surf2dread(surfaceArg");
+    expect(compiled.wgsl).not.toContain("bg_surf2dwrite_surfaceArg");
+    expect(compiled.wgsl).not.toContain("; 0;");
+  });
+
+  it("lowers vector surf2Dread pointer-form calls lane-wise", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void surfaceVectorRead(cudaSurfaceObject_t surf, float *out) {
+  float4 value;
+  surf2Dread(&value, surf, 0, 0);
+  out[0] = value.x;
+  out[1] = value.y;
+  out[2] = value.z;
+  out[3] = value.w;
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("value = vec4<f32>(f32(bg_surf2dread_surf((0 + 0), 0, 0)), f32(bg_surf2dread_surf((0 + 4), 0, 0)), f32(bg_surf2dread_surf((0 + 8), 0, 0)), f32(bg_surf2dread_surf((0 + 12), 0, 0)));");
+    expect(compiled.wgsl).not.toContain("value = vec4<f32>(bg_surf2dread_surf(0, 0, 0));");
+  });
+
+  it("preserves templated vector surf2Dread return type in device helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float4 read_surface_vec_return(cudaSurfaceObject_t surfaceArg) {
+  return surf2Dread<float4>(surfaceArg, 0, 0);
+}
+
+__global__ void surfaceHelperVectorRead(cudaSurfaceObject_t surf, float *out) {
+  float4 value = read_surface_vec_return(surf);
+  out[0] = value.x;
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("return vec4<f32>(f32(bg_surf2dread(surfaceArg, (0 + 0), 0, 0)), f32(bg_surf2dread(surfaceArg, (0 + 4), 0, 0)), f32(bg_surf2dread(surfaceArg, (0 + 8), 0, 0)), f32(bg_surf2dread(surfaceArg, (0 + 12), 0, 0)));");
+    expect(compiled.wgsl).not.toContain("return f32(vec4<f32>");
   });
 
   it("lowers f32 atomic max helpers through CAS semantics", () => {
@@ -5671,6 +6208,144 @@ __global__ void dynamicShared(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([5, 3]);
   });
 
+  it("keeps dynamic shared scalar bases in scalar lanes for vector pointer helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void adjust(float3 *tile, int index, float bias) {
+  float3 value = tile[index];
+  tile[index] = make_float3(value.x + bias, value.y + 2.0f * bias, value.z + 3.0f * bias);
+}
+__global__ void dynamicSharedFloat3View(float *out) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  float3 *tile = reinterpret_cast<float3 *>(scratch);
+  tile[tid] = make_float3((float)(tid + 1), (float)(tid + 10), (float)(tid + 100));
+  __syncthreads();
+  adjust(tile, tid, 0.5f + (float)tid);
+  __syncthreads();
+  float3 value = tile[tid];
+  out[tid * 3 + 0] = value.x;
+  out[tid * 3 + 1] = value.y;
+  out[tid * 3 + 2] = value.z;
+}`, {
+      workgroupSize: [2, 1, 1],
+      dynamicSharedMemory: { scratch: 6 },
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(6) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("scratch[((u32(index) * 3u) + 0u)] = value.x");
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32x3(1u, ((0u + (u32(0) / 3u)) + u32(tid))");
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32x3(tile_buffer, (tile_base + u32(index))");
+    expect([...result.buffers.out as Float32Array]).toEqual([1.5, 11, 101.5, 3.5, 14, 105.5]);
+  });
+
+  it("flattens vector pointer alias chains before dynamic shared scalar atomics", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void add_dynamic_shared_scalar(float *lanes, int lane, float value) {
+  atomicAdd(&lanes[lane], value);
+}
+__global__ void dynamicSharedFloat3ScalarAtomic(float *out) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  float3 *tile = reinterpret_cast<float3 *>(scratch);
+  tile[tid] = make_float3((float)(tid + 1), (float)(tid + 10), (float)(tid + 100));
+  __syncthreads();
+  float *lanes = reinterpret_cast<float *>(tile + 1);
+  add_dynamic_shared_scalar(lanes, tid, 0.5f + (float)tid);
+  __syncthreads();
+  if (tid == 0) {
+    out[0] = lanes[0];
+    out[1] = lanes[1];
+  }
+}`, {
+      workgroupSize: [2, 1, 1],
+      dynamicSharedMemory: { scratch: 6 },
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("add_dynamic_shared_scalar(1u, (0u + u32((0 + ((0 + 1) * 3))))");
+    expect(compiled.wgsl).toContain("bg_ptr_atomicAdd_f32(lanes_buffer, (lanes_base + u32(lane)), value)");
+    expect(compiled.wgsl).not.toContain("add_dynamic_shared_scalar(1u, ((0u + (u32(0) / 3u)) + u32((0 + 1)))");
+    expect([...result.buffers.out as Float32Array]).toEqual([2.5, 12.5]);
+  });
+
+  it("keeps dynamic shared vector addresses in vector elements for pointer arrays", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float3 sum_dynamic_shared3(float3 *a, float3 *b, float3 *c) {
+  return *a + *b + *c;
+}
+__global__ void dynamicSharedVectorPointerArray(float4 *out) {
+  extern __shared__ float scratch[];
+  float3 *values = reinterpret_cast<float3 *>(scratch);
+  values[0] = make_float3(3.0f, 5.0f, 7.0f);
+  values[1] = make_float3(11.0f, 13.0f, 17.0f);
+  values[2] = make_float3(19.0f, 23.0f, 29.0f);
+  float3 *ptrs[3];
+  ptrs[0] = &values[0];
+  ptrs[1] = &values[1];
+  ptrs[2] = &values[2];
+  float3 total = sum_dynamic_shared3(ptrs[0], ptrs[1], ptrs[2]);
+  out[0] = make_float4(*ptrs[0], 1.0f);
+  out[1] = make_float4(total, 0.0f);
+}`, {
+      workgroupSize: [1, 1, 1],
+      dynamicSharedMemory: { scratch: 9 },
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(8) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("ptrs_base[u32(1)] = ((0u + (u32(0) / 3u)) + u32(1));");
+    expect(compiled.wgsl).toContain("ptrs_base[u32(2)] = ((0u + (u32(0) / 3u)) + u32(2));");
+    expect(compiled.wgsl).not.toContain("ptrs_base[u32(1)] = ((0u + (u32(0) / 3u)) + (u32(1) * 3u));");
+    expect([...result.buffers.out as Float32Array]).toEqual([3, 5, 7, 1, 33, 41, 53, 0]);
+  });
+
+  it("keeps chained dynamic shared vector aliases in vector elements for pointer arrays", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float3 sum_dynamic_shared_chain3(float3 *a, float3 *b, float3 *c) {
+  return *a + *b + *c;
+}
+__global__ void dynamicSharedVectorAliasChainPointerArray(float4 *out) {
+  extern __shared__ float scratch[];
+  float3 *values = reinterpret_cast<float3 *>(scratch);
+  values[0] = make_float3(2.0f, 3.0f, 5.0f);
+  values[1] = make_float3(7.0f, 11.0f, 13.0f);
+  values[2] = make_float3(17.0f, 19.0f, 23.0f);
+  values[3] = make_float3(29.0f, 31.0f, 37.0f);
+  float3 *shifted = values + 1;
+  float3 *ptrs[3];
+  ptrs[0] = &shifted[0];
+  ptrs[1] = &shifted[1];
+  ptrs[2] = &values[3];
+  float3 total = sum_dynamic_shared_chain3(ptrs[0], ptrs[1], ptrs[2]);
+  out[0] = make_float4(*ptrs[1], 1.0f);
+  out[1] = make_float4(total, 0.0f);
+}`, {
+      workgroupSize: [1, 1, 1],
+      dynamicSharedMemory: { scratch: 12 },
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(8) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("ptrs_base[u32(0)] = ((0u + (u32((0 + ((0 + 1) * 3))) / 3u)) + u32(0));");
+    expect(compiled.wgsl).toContain("ptrs_base[u32(1)] = ((0u + (u32((0 + ((0 + 1) * 3))) / 3u)) + u32(1));");
+    expect(compiled.wgsl).not.toContain("ptrs_base[u32(1)] = ((0u + (u32((0 + ((0 + 1) * 3))) / 3u)) + (u32(1) * 3u));");
+    expect([...result.buffers.out as Float32Array]).toEqual([17, 19, 23, 1, 53, 61, 73, 0]);
+  });
+
   it("lowers CUDA alternate extern shared qualifier order", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void dynamicSharedLateQualifier(float *x) {
@@ -5800,6 +6475,71 @@ __global__ void predicatedCoopMemberSync(float *x, int N) {
     expect(compiled.wgsl).not.toContain("if ((tid < bg_uniforms.N)) {\n    x[u32(tid)] = (x[u32(tid)] + 1.0);\n    workgroupBarrier();");
   });
 
+  it("uniformizes barrier device helpers inside predicated regions", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void helper_with_barrier(uint *out, uint value) {
+  __syncthreads();
+  out[threadIdx.x] = value + (uint)threadIdx.x;
+  __syncthreads();
+}
+__global__ void predicatedBarrierHelper(uint *out) {
+  __shared__ uint ready;
+  if (threadIdx.x == 0) {
+    atomicExch(&ready, 1u);
+  }
+  __syncthreads();
+  if (ready == 1u) {
+    helper_with_barrier(out, 7u);
+    out[threadIdx.x + 4] = 9u;
+  }
+  __syncthreads();
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toContain("helper_with_barrier__bg_guarded_barrier");
+    expect(compiled.wgsl).toContain("bg_call_active: bool");
+    expect(compiled.wgsl).toContain("workgroupBarrier();\n  if (bg_call_active)");
+    expect(compiled.wgsl).not.toContain("if ((atomicLoad(&ready) == 1u)) {\n    helper_with_barrier(");
+  });
+
+  it("keeps uniform shared-memory barrier helper calls as direct calls", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ void sharedBarrierHelper(float *out) {
+  __shared__ float tile[4];
+  tile[threadIdx.x] = out[threadIdx.x];
+  __syncthreads();
+  out[threadIdx.x] = tile[threadIdx.x] + 1.0f;
+}
+__global__ void sharedBarrierCaller(float *out) {
+  sharedBarrierHelper(out);
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toContain("var<workgroup> tile: array<f32, 4>;");
+    expect(compiled.wgsl).toContain("sharedBarrierHelper(0u, 0u, local_id, workgroup_id, num_workgroups);");
+    expect(compiled.wgsl).not.toContain("bg_inline_sharedBarrierHelper");
+  });
+
+  it("keeps shared-atomic loop breaks before later barriers uniform", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sharedAtomicBreakBeforeBarrier(uint *out) {
+  __shared__ uint done;
+  if (threadIdx.x == 0) {
+    atomicExch(&done, 1u);
+  }
+  while (1) {
+    __syncthreads();
+    if (done == 1u) break;
+    __syncthreads();
+    out[threadIdx.x] = 3u;
+  }
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toContain("var bg_loop_active_");
+    expect(compiled.wgsl).toContain("workgroupBarrier();\n      bg_loop_active_");
+    expect(compiled.wgsl).toContain(" = (bg_loop_active_");
+    expect(compiled.wgsl).toContain(" && !((atomicLoad(&done) == 1u)));");
+    expect(compiled.wgsl).not.toContain("if ((atomicLoad(&done) == 1u)) {\n      break;\n    }\n    workgroupBarrier();");
+  });
+
   it("lowers early returns before later barriers into active-lane guards", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void earlyReturnBarrier(float *x, int N) {
@@ -5847,10 +6587,526 @@ __global__ void earlyReturnLoopBarrier(float *x, int N) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("for (var k: i32 = 0; (k < 2); k = (k + 1))");
-    expect(compiled.wgsl).toContain("workgroupBarrier();\n    if (bg_active_lane)");
+    expect(compiled.wgsl).toContain("var bg_barrier_loop_active_");
+    expect(compiled.wgsl).toContain("var bg_barrier_loop_active_");
+    expect(compiled.wgsl).toContain(": bool = bg_active_lane;");
+    expect(compiled.wgsl).toContain("for (var bg_barrier_loop_iter_");
+    expect(compiled.wgsl).toContain("workgroupBarrier();\n    acc = select(acc, (acc + scratch[tid]), bg_barrier_loop_active_");
+    expect(compiled.wgsl).toContain("k = select(k, (k + 1), bg_barrier_loop_active_");
     expect(compiled.wgsl).not.toContain("if (bg_active_lane) {\n  for");
     expect([...result.buffers.x as Float32Array]).toEqual([3, 5, 7, 9]);
+  });
+
+  it("lowers loop-internal returns before barriers into loop active-lane guards", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void loopInternalReturnBarrier(float *x, int N) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  for (int k = 0; k < 2; ++k) {
+    int idx = tid + k * 4;
+    if (idx >= N) return;
+    scratch[tid] = x[idx] + (float)k;
+    __syncthreads();
+    x[idx] = scratch[tid] + 1.0f;
+    __syncthreads();
+  }
+}`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("var bg_barrier_loop_active_");
+    expect(compiled.wgsl).toMatch(/bg_barrier_loop_active_\d+ = false;/u);
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+    expect(compiled.wgsl).not.toContain("return;");
+  });
+
+  it("lowers alternate-branch returns before barriers into active-lane guards", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void alternateReturnBarrier(float *x, int N) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  if (tid < N) {
+    scratch[tid] = x[tid];
+  } else {
+    return;
+  }
+  __syncthreads();
+  x[tid] = scratch[tid] + 1.0f;
+}`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([1, 2, 3, 4]) }, scalars: { N: 4 } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
+    expect(compiled.wgsl).toContain("bg_active_lane = false;");
+    expect(compiled.wgsl).toContain("if (bg_active_lane) {\n    scratch[tid] = f32(x[tid]);\n  }");
+    expect(compiled.wgsl).not.toContain("return;");
+    expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 5]);
+  });
+
+  it("lowers nested returns before barriers into active-lane guards", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void nestedReturnBarrier(float *x, int N) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  if (tid < N) {
+    if ((tid + 1) < N) {
+      scratch[tid] = x[tid];
+    } else {
+      return;
+    }
+  }
+  __syncthreads();
+  if ((tid + 1) < N) {
+    x[tid] = scratch[tid] + 1.0f;
+  }
+}`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
+    expect(compiled.wgsl).toContain("bg_active_lane = false;");
+    expect(compiled.wgsl).not.toContain("return;");
+  });
+
+  it("lowers loop alternate-branch returns before barriers into loop active-lane guards", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void loopAlternateReturnBarrier(float *x, int N) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  for (int k = 0; k < 2; ++k) {
+    int idx = tid + k * 4;
+    if (idx < N) {
+      scratch[tid] = x[idx] + (float)k;
+    } else {
+      return;
+    }
+    __syncthreads();
+    x[idx] = scratch[tid] + 1.0f;
+    __syncthreads();
+  }
+}`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("var bg_barrier_loop_active_");
+    expect(compiled.wgsl).toMatch(/bg_barrier_loop_active_\d+ = false;/u);
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+    expect(compiled.wgsl).not.toContain("return;");
+  });
+
+  it("preserves side effects before loop returns lowered for barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void loopReturnSideEffectBarrier(float *x, int N) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  for (int k = 0; k < 2; ++k) {
+    int idx = tid + k * 4;
+    if (idx >= N) {
+      x[tid] = -10.0f - (float)tid;
+      return;
+    }
+    scratch[tid] = x[idx] + (float)k;
+    __syncthreads();
+    x[idx] = scratch[tid] + 1.0f;
+    __syncthreads();
+  }
+}`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("x[tid] = f32(((-10.0) - f32(tid)));");
+    expect(compiled.wgsl).toMatch(/bg_barrier_loop_active_\d+ = false;/u);
+    expect(compiled.wgsl).not.toContain("return;");
+  });
+
+  it("preserves vector lane side effects before loop returns lowered for barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void vectorReturnSideEffectBarrier(float4 *out, int N) {
+  int tid = threadIdx.x;
+  for (int k = 0; k < 2; ++k) {
+    int idx = tid + k * 4;
+    if (idx >= N) {
+      out[tid].w = -10.0f - (float)tid;
+      return;
+    }
+    float4 value = out[idx];
+    __syncthreads();
+    out[idx] = make_float4(value.x + 1.0f, value.y + 2.0f, value.z + 3.0f, value.w + 4.0f);
+    __syncthreads();
+  }
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("-10.0");
+    expect(compiled.wgsl).toMatch(/bg_barrier_loop_active_\d+ = false;/u);
+    expect(compiled.wgsl).not.toContain("return;");
+  });
+
+  it("preserves pointer alias side effects before loop returns lowered for barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void pointerAliasReturnSideEffectBarrier(float *x, int N) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  for (int k = 0; k < 2; ++k) {
+    int idx = tid + k * 4;
+    float *target = &x[idx];
+    if (idx >= N) {
+      float *lane = &x[tid];
+      *lane = -20.0f - (float)tid;
+      return;
+    }
+    scratch[tid] = *target + (float)k;
+    __syncthreads();
+    *target = scratch[tid] + 1.0f;
+    __syncthreads();
+  }
+}`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("-20.0");
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32");
+    expect(compiled.wgsl).toMatch(/bg_barrier_loop_active_\d+ = false;/u);
+  });
+
+  it("preserves atomic side effects before loop returns lowered for barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void atomicReturnSideEffectBarrier(uint *counter, uint *out, int N) {
+  extern __shared__ uint scratch[];
+  int tid = threadIdx.x;
+  for (int k = 0; k < 2; ++k) {
+    int idx = tid + k * 4;
+    if (idx >= N) {
+      atomicAdd(&counter[0], 1u);
+      return;
+    }
+    scratch[tid] = (uint)idx;
+    __syncthreads();
+    out[idx] = scratch[tid] + 1u;
+    __syncthreads();
+  }
+}`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("atomicAdd");
+    expect(compiled.wgsl).toMatch(/bg_barrier_loop_active_\d+ = false;/u);
+  });
+
+  it("preserves shared-memory side effects before returns lowered for barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sharedReturnSideEffectBarrier(uint *out, int N) {
+  extern __shared__ uint scratch[];
+  int tid = threadIdx.x;
+  scratch[tid] = 0u;
+  __syncthreads();
+  if (tid >= N) {
+    scratch[tid] = 100u + (uint)tid;
+    return;
+  }
+  __syncthreads();
+  out[tid] = scratch[(tid + 1) & 3] + (uint)tid;
+}`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("scratch[tid] =");
+    expect(compiled.wgsl).toContain("100u");
+    expect(compiled.wgsl).toContain("bg_active_lane = false;");
+    expect(compiled.wgsl).not.toContain("return;");
+  });
+
+  it("preserves surface side effects before returns lowered for barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void surfaceReturnSideEffectBarrier(cudaSurfaceObject_t surf, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    surf2Dwrite(100.0f + (float)tid, surf, tid * sizeof(float), 0);
+    return;
+  }
+  __syncthreads();
+  surf2Dwrite(1.0f + (float)tid, surf, tid * sizeof(float), 0);
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("100.0");
+    expect(compiled.wgsl).toContain("bg_surf2dwrite_surf");
+    expect(compiled.wgsl).toContain("bg_active_lane = false;");
+  });
+
+  it("preserves texture read side effects before returns lowered for barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float4 read_return_texture_vec(cudaTextureObject_t texArg) {
+  return tex2D<float4>(texArg, 0.5f, 0.5f);
+}
+
+__global__ void textureReturnReadSideEffectBarrier(cudaTextureObject_t tex, float *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    float4 value = read_return_texture_vec(tex);
+    out[tid] = value.x + value.y + value.z + value.w + (float)tid;
+    return;
+  }
+  __syncthreads();
+  out[tid] = 1.0f + (float)tid;
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("bg_tex2d_float4_tex");
+    expect(compiled.wgsl).toContain("value");
+    expect(compiled.wgsl).toContain("bg_active_lane = false;");
+  });
+
+  it("preserves atlas texture read side effects before returns lowered for barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float read_return_texture_atlas(cudaTextureObject_t texArg) {
+  float layered = tex2DLayered<float>(texArg, 0.0f, 1.0f, 1.0f);
+  float volume = tex3D<float>(texArg, 2.0f, 1.0f, 1.0f);
+  return layered + volume;
+}
+
+__global__ void textureAtlasReturnReadSideEffectBarrier(cudaTextureObject_t tex, float *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    out[tid] = read_return_texture_atlas(tex) + (float)tid;
+    return;
+  }
+  __syncthreads();
+  out[tid] = 1.0f + (float)tid;
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("var layered: f32 = textureLoad(texArg");
+    expect(compiled.wgsl).toContain("var volume: f32 = textureLoad(texArg");
+    expect(compiled.wgsl).toContain("bg_active_lane = false;");
+  });
+
+  it("preserves deep texture helper vector stores before returns lowered for barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float4 read_deep_texture_leaf(cudaTextureObject_t texArg) {
+  return tex2D<float4>(texArg, 0.5f, 0.5f);
+}
+
+__device__ float4 read_deep_texture_mid(cudaTextureObject_t texArg) {
+  return read_deep_texture_leaf(texArg);
+}
+
+__device__ float4 read_deep_texture_outer(cudaTextureObject_t texArg) {
+  return read_deep_texture_mid(texArg);
+}
+
+__global__ void textureDeepHelperVectorStoreBarrier(cudaTextureObject_t tex, float4 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    float4 value = read_deep_texture_outer(tex);
+    out[tid] = make_float4(value.x + (float)tid, value.y, value.z, value.w);
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_float4(1.0f + (float)tid, 10.0f + (float)tid, 20.0f + (float)tid, 30.0f + (float)tid);
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("bg_tex2d_float4_tex");
+    expect(compiled.wgsl).toContain("read_deep_texture_outer");
+    expect(compiled.wgsl).toContain("bg_active_lane = false;");
+  });
+
+  it("preserves mixed scalar and vector texture stores before returns lowered for barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float read_mixed_texture_scalar(cudaTextureObject_t texArg) {
+  return tex2D<float>(texArg, 0.5f, 0.5f);
+}
+
+__device__ uint4 read_mixed_texture_vec(cudaTextureObject_t texArg) {
+  return tex2D<uint4>(texArg, 0.5f, 0.5f);
+}
+
+__global__ void textureMixedScalarVectorStoreBarrier(cudaTextureObject_t tex, float4 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    float scalar = read_mixed_texture_scalar(tex);
+    uint4 vec = read_mixed_texture_vec(tex);
+    out[tid] = make_float4(scalar + (float)tid, (float)vec.y, (float)vec.z, (float)vec.w);
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_float4(1.0f + (float)tid, 10.0f + (float)tid, 20.0f + (float)tid, 30.0f + (float)tid);
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("bg_tex2d_f32_tex");
+    expect(compiled.wgsl).toContain("bg_tex2d_uint4_tex");
+    expect(compiled.wgsl).toContain("bg_active_lane = false;");
+  });
+
+  it("preserves texture-fed scalar pointer alias stores before returns lowered for barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float read_alias_texture_scalar(cudaTextureObject_t texArg) {
+  return tex2D<float>(texArg, 0.5f, 0.5f);
+}
+
+__device__ void write_alias_lane(float *scalarOut, int lane, float value) {
+  scalarOut[lane * 4 + 1] = value;
+}
+
+__global__ void texturePointerAliasStoreBarrier(cudaTextureObject_t tex, float4 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    float *scalarView = reinterpret_cast<float*>(out);
+    write_alias_lane(scalarView, tid, read_alias_texture_scalar(tex) + (float)tid);
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_float4(1.0f + (float)tid, 10.0f + (float)tid, 20.0f + (float)tid, 30.0f + (float)tid);
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("bg_tex2d_f32_tex");
+    expect(compiled.wgsl).toContain("write_alias_lane");
+    expect(compiled.wgsl).toContain("bg_active_lane = false;");
+  });
+
+  it("preserves texture-fed pointer alias atomics before returns lowered for barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint read_alias_texture_uint(cudaTextureObject_t texArg) {
+  return tex2D<uint>(texArg, 0.5f, 0.5f);
+}
+
+__device__ void atomic_alias_lane(uint *scalarOut, int lane, uint value) {
+  atomicAdd(&scalarOut[lane * 4 + 1], value);
+}
+
+__global__ void texturePointerAliasAtomicStoreBarrier(cudaTextureObject_t tex, uint4 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    uint *scalarView = reinterpret_cast<uint*>(out);
+    atomic_alias_lane(scalarView, tid, read_alias_texture_uint(tex) + (uint)tid);
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("bg_tex2d_uint_tex");
+    expect(compiled.wgsl).toContain("atomicAdd");
+    expect(compiled.wgsl).toContain("atomicStore(&out[((u32(tid) * 4u) + 0u)]");
+    expect(compiled.wgsl).toContain("bg_active_lane = false;");
+  });
+
+  it("scales atomic vector reads after pointer alias atomics", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint read_atomic_readback_texture_uint(cudaTextureObject_t texArg) {
+  return tex2D<uint>(texArg, 0.5f, 0.5f);
+}
+
+__device__ void atomic_readback_alias_lane(uint *scalarOut, int lane, uint value) {
+  atomicAdd(&scalarOut[lane * 4 + 1], value);
+}
+
+__global__ void texturePointerAliasAtomicVectorReadback(cudaTextureObject_t tex, uint4 *out, uint *summary) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  __syncthreads();
+  if (tid == 0) {
+    uint *scalarView = reinterpret_cast<uint*>(out);
+    atomic_readback_alias_lane(scalarView, 1, read_atomic_readback_texture_uint(tex));
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    summary[0] = value.x + value.y + value.z + value.w;
+  }
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toContain("atomicLoad(&out[((u32(1) * 4u) + 0u)]");
+    expect(compiled.wgsl).not.toContain("atomicLoad(&out[(1 + 0u)]");
+  });
+
+  it("scales atomic vector compound writes through pointer aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint read_atomic_compound_texture_uint(cudaTextureObject_t texArg) {
+  return tex2D<uint>(texArg, 0.5f, 0.5f);
+}
+
+__device__ void atomic_compound_alias_lane(uint *scalarOut, int lane, uint value) {
+  atomicAdd(&scalarOut[lane * 4 + 1], value);
+}
+
+__device__ void add_vector_alias(uint4 *vectorOut, int lane, uint4 value) {
+  vectorOut[lane] += value;
+}
+
+__device__ void add_vector_alias_y(uint4 *vectorOut, int lane, uint value) {
+  vectorOut[lane].y += value;
+}
+
+__global__ void texturePointerAliasAtomicVectorCompound(cudaTextureObject_t tex, uint4 *out, uint *summary) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  __syncthreads();
+  if (tid == 0) {
+    uint *scalarView = reinterpret_cast<uint*>(out);
+    atomic_compound_alias_lane(scalarView, 1, read_atomic_compound_texture_uint(tex));
+    uint4 *vectorView = reinterpret_cast<uint4*>(out);
+    add_vector_alias(vectorView, 1, make_uint4(1u, 1u, 1u, 1u));
+    add_vector_alias_y(vectorView, 2, 9u);
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 laneTwo = out[2];
+    summary[0] = (value.x + value.y + value.z + value.w) + 100u * (laneTwo.x + laneTwo.y + laneTwo.z + laneTwo.w);
+  }
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toContain("atomicLoad(&out[((u32(index) * 4u) + 0u)]");
+    expect(compiled.wgsl).toContain("atomicStore(&out[((u32(index) * 4u) + 0u)]");
+    expect(compiled.wgsl).toContain("bg_ptr_read_u32x4(vectorOut_buffer, (vectorOut_base + u32(lane)))");
+    expect(compiled.wgsl).toContain("bg_ptr_write_u32x4(vectorOut_buffer, (vectorOut_base + u32(lane)), vec4<u32>");
+    expect(compiled.wgsl).not.toContain("vectorOut[");
+  });
+
+  it("preserves texture-to-surface side effects before returns lowered for barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float4 sample_return_surface_vec(cudaTextureObject_t texArg) {
+  return tex2D<float4>(texArg, 0.5f, 0.5f);
+}
+
+__device__ void write_return_surface_vec(cudaSurfaceObject_t surfaceArg, int lane, float4 value) {
+  surf2Dwrite(value.x + value.y + value.z + value.w + (float)lane, surfaceArg, lane * sizeof(float), 0);
+}
+
+__global__ void textureSurfaceReturnSideEffectBarrier(cudaSurfaceObject_t surf, cudaTextureObject_t tex, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    float4 value = sample_return_surface_vec(tex);
+    write_return_surface_vec(surf, tid, value);
+    return;
+  }
+  __syncthreads();
+  surf2Dwrite(1.0f + (float)tid, surf, tid * sizeof(float), 0);
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("bg_tex2d_float4_tex");
+    expect(compiled.wgsl).toContain("bg_surf2dwrite_surf");
+    expect(compiled.wgsl).toContain("bg_active_lane = false;");
+  });
+
+  it("uses uniform dynamic bounds for barrier loops that exceed static smoke caps", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void longBarrierLoop(float *x, int N) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  for (int row = blockIdx.x; row < N; row += gridDim.x) {
+    scratch[tid] = x[row * blockDim.x + tid];
+    __syncthreads();
+    x[row * blockDim.x + tid] = scratch[tid] + 1.0f;
+  }
+}`, { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 4 } });
+
+    expect(compiled.wgsl).toContain("for (var bg_barrier_loop_iter_");
+    expect(compiled.wgsl).toContain("bg_barrier_loop_iter_");
+    expect(compiled.wgsl).toContain("bg_uniforms.N");
+    expect(compiled.wgsl).not.toContain("< 256u;");
   });
 
   it("keeps nested predicated barriers uniform after active-lane early returns", () => {
@@ -5874,7 +7130,9 @@ __global__ void nestedPredicatedBarrier(float *x, int N) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("if (bg_active_lane && (((k + 1) < 2)))");
+    expect(compiled.wgsl).toContain(": bool = bg_active_lane;");
+    expect(compiled.wgsl).toContain("if (bg_barrier_loop_active_");
+    expect(compiled.wgsl).toContain("&& (((k + 1) < 2)))");
     expect(compiled.wgsl).toContain("workgroupBarrier();\n    }\n    workgroupBarrier();");
     expect(compiled.wgsl).not.toContain("if (bg_active_lane) {\n    if (((k + 1) < 2))");
     expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 5]);
@@ -5900,7 +7158,8 @@ __global__ void nestedBarrierNoReturn(float *x) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("if (((k + 1) < 2))");
+    expect(compiled.wgsl).toContain("if (bg_barrier_loop_active_");
+    expect(compiled.wgsl).toContain("&& (((k + 1) < 2)))");
     expect(compiled.wgsl).toContain("workgroupBarrier();\n    }\n    workgroupBarrier();");
     expect(compiled.wgsl).not.toContain("if (((k + 1) < 2)) {\n      workgroupBarrier();");
     expect([...result.buffers.x as Float32Array]).toEqual([2, 3, 4, 5]);
@@ -6105,7 +7364,7 @@ __global__ void splitShared(float *x) {
     );
 
     expect(compiled.wgsl).not.toContain("var sdataB");
-    expect(compiled.wgsl).toContain("sdataA[(u32((0 + 2)) + u32(tid))]");
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32(1u, ((0u + u32((0 + 2))) + u32(tid))");
     expect([...result.buffers.x as Float32Array]).toEqual([6, 2, 3, 4]);
   });
 
@@ -6126,7 +7385,7 @@ __global__ void sharedScalar(int *out) {
     );
 
     expect(compiled.wgsl).toContain("var<workgroup> localCount: atomic<i32>;");
-    expect(compiled.wgsl).toContain("atomicStore(&localCount, 7)");
+    expect(compiled.wgsl).toContain("atomicStore(&localCount, i32(7))");
     expect(compiled.wgsl).toContain("atomicAdd(&localCount, 1)");
     expect(compiled.wgsl).toContain("atomicLoad(&localCount)");
     expect([...result.buffers.out as Int32Array]).toEqual([9]);
@@ -6303,7 +7562,7 @@ __global__ void constexprIf(int *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("if ((8 == 8))");
+    expect(compiled.wgsl).toContain("scratch[0] = i32(swizzle");
     expect([...result.buffers.out as Int32Array]).toEqual([0]);
   });
 
@@ -6668,6 +7927,18 @@ __global__ void apply(float *x, int *out) {
     expect([...result.buffers.out as Int32Array]).toEqual([2, 3, 5]);
   });
 
+  it("keeps initialized CUDA constant arrays embedded instead of requiring storage bindings", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__constant__ short Q[] = {32, 33, 34, 35};
+__global__ void quant(float *out, float value) {
+  int idx = threadIdx.x;
+  out[idx] = roundf(value / (float)Q[idx]);
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toContain("const Q: array<i32, 4> = array<i32, 4>(32, 33, 34, 35);");
+    expect(compiled.wgslProgram.bindings.map((binding) => binding.name)).not.toContain("Q");
+  });
+
   it("lowers CUDA texture references and tex2D reads", () => {
     const compiled = compileCudaLiteKernel(`
 texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
@@ -6723,6 +7994,26 @@ __global__ void sample(float *out, int width, cudaTextureObject_t tex) {
       name: "tex",
     }));
     expect([...result.buffers.out as Float32Array]).toEqual([2, 4, 6]);
+  });
+
+  it("lowers templated uchar tex2D reads", () => {
+    const compiled = compileCudaLiteKernel(`
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void sample(uint *out) {
+  int x = threadIdx.x;
+  out[x] = tex2D<unsigned char>(texRef, (float)x + 0.5f, 0.5f);
+}`, { workgroupSize: [3, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Uint32Array(3) },
+        textures: { texRef: { width: 3, height: 1, data: new Float32Array([2, 127, 255]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_tex2d_uchar_texRef");
+    expect([...result.buffers.out as Uint32Array]).toEqual([2, 127, 255]);
   });
 
   it("passes CUDA texture handles through device helper params", () => {
@@ -7133,6 +8424,173 @@ __global__ void subgroupScalarReference(float* x) {
     expect([...result.buffers.x as Float32Array]).toEqual([1, 2, 3, 4]);
   });
 
+  it("keeps native subgroup reductions uniform after active-lane early returns", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void subgroupAfterReturn(float* x, float* out, int n) {
+  int idx = threadIdx.x;
+  if (idx >= n) return;
+  float v = x[idx];
+  float sum = bg_subgroup_add(v);
+  if (idx == 0) {
+    out[0] = sum;
+  }
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [4, 1, 1],
+    });
+
+    expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
+    expect(compiled.wgsl).not.toContain("return;");
+    expect(compiled.wgsl).toContain("sum = select(sum, subgroupAdd(v), bg_active_lane);");
+    expect(compiled.wgsl).not.toContain("if (bg_active_lane) {\n    sum = subgroupAdd");
+  });
+
+  it("keeps native subgroup reductions assigned to local arrays uniform after active-lane early returns", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void subgroupArrayAfterReturn(float* x, float* out, int n) {
+  int idx = threadIdx.x;
+  if (idx >= n) return;
+  float values[2];
+  values[0] = x[idx];
+  values[1] = x[idx] + 1.0;
+  for (int k = 0; k < 2; k++) {
+    values[k] = bg_subgroup_add(values[k]);
+  }
+  if (idx == 0) {
+    out[0] = values[0] + values[1];
+  }
+}`, {
+    features: { subgroups: true },
+    workgroupSize: [4, 1, 1],
+  });
+
+    expect(compiled.wgsl).toContain("values[k] = select(values[k], bg_predicated_value_");
+    expect(compiled.wgsl).not.toContain("if (bg_active_lane) {\n      values[k] = subgroupAdd");
+  });
+
+  it("keeps subgroup local declarations uniform inside predicated branches", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void subgroupVarInBranch(float* x, float* out) {
+  int idx = threadIdx.x;
+  float partial = bg_subgroup_add(x[idx]);
+  if ((threadIdx.x / 32) == 0) {
+    float gathered = idx == 0 ? partial : 0.0f;
+    float total = bg_subgroup_add(gathered);
+    if ((threadIdx.x % 32) == 0) {
+      out[0] = total;
+    }
+  }
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [32, 1, 1],
+    });
+
+    expect(compiled.wgsl).toContain("let bg_subgroup_if_active_");
+    expect(compiled.wgsl).toContain("total = select(total, subgroupAdd(gathered), bg_subgroup_if_active_");
+    expect(compiled.wgsl).not.toContain("if (((i32(local_id.x) / 32) == 0)) {\n    var gathered");
+    expect(compiled.wgsl).not.toContain("if (((i32(local_id.x) / 32) == 0)) {\n    var total");
+  });
+
+  it("keeps native subgroup reductions uniform inside data-dependent loops", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void subgroupInDataLoop(float* x, float* out, int count, int stride) {
+  int lane = threadIdx.x;
+  float acc = 0.0f;
+  for (int i = lane; i < count; i += stride) {
+    acc += x[i];
+    acc = bg_subgroup_add(acc);
+  }
+  out[lane] = acc;
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [32, 1, 1],
+    });
+
+    expect(compiled.wgsl).toContain("var bg_barrier_loop_active_");
+    expect(compiled.wgsl).toContain("acc = select(acc, bg_predicated_value_");
+    expect(compiled.wgsl).not.toContain("for (var i: i32 = i32(local_id.x); (i < bg_uniforms.count); i += bg_uniforms.stride)");
+  });
+
+  it("avoids nonuniform dynamic bounds for subgroup loops with local lane-derived limits", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void subgroupLocalBound(float* x, float* out) {
+  int t = threadIdx.x / 32;
+  float acc = x[threadIdx.x];
+  for (int i = 0; i <= t; ++i) {
+    acc = bg_subgroup_add(acc);
+  }
+  out[threadIdx.x] = acc;
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [32, 1, 1],
+    });
+
+    expect(compiled.wgsl).toContain("< 256u;");
+    expect(compiled.wgsl).not.toContain("t + 1");
+  });
+
+  it("keeps vector cooperative reductions uniform after active-lane early returns", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float2 merge_pair(float2 a, float2 b) {
+  float2 out;
+  out.x = max(a.x, b.x);
+  out.y = a.y + b.y;
+  return out;
+}
+__global__ void subgroupVectorReduce(float* x, float* out, int n) {
+  namespace cg = cooperative_groups;
+  cg::thread_block block = cg::this_thread_block();
+  cg::thread_block_tile<32> warp = cg::tiled_partition<32>(block);
+  int idx = blockIdx.x * warp.meta_group_size() + warp.meta_group_rank();
+  if (idx >= n) return;
+  float2 pair = make_float2(x[threadIdx.x], 1.0f);
+  float2 total = cg::reduce(warp, pair, merge_pair);
+  if (warp.thread_rank() == 0) {
+    out[idx] = total.x + total.y;
+  }
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [32, 1, 1],
+    });
+
+    expect(compiled.wgsl).toContain("total = select(total, bg_cg_reduce_merge_pair_float2_32(pair");
+    expect(compiled.wgsl).toContain("var<workgroup> bg_cg_reduce_merge_pair_float2_32_scratch");
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+    expect(compiled.wgsl).not.toContain("if (bg_active_lane) {\n    total = bg_cg_reduce");
+  });
+
+  it("keeps subgroup device functions uniform inside predicated branches", () => {
+    const compiled = compileCudaLiteKernel(`
+__inline__ __device__ float warpPrefixSum(float val) {
+  unsigned mask = 0xffffffff;
+  for (int offset = 1; offset < 32; offset <<= 1) {
+    float n = __shfl_up_sync(mask, val, offset, 32);
+    int laneId = threadIdx.x & 31;
+    if (laneId >= offset) {
+      val += n;
+    }
+  }
+  return val;
+}
+__global__ void warpScanKernel(const float *input, float *output, int N) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < N) {
+    float val = input[idx];
+    float prefix = warpPrefixSum(val);
+    output[idx] = prefix;
+  }
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [32, 1, 1],
+    });
+
+    expect(compiled.wgsl).toContain("bg_inline_warpPrefixSum_");
+    expect(compiled.wgsl).toContain("prefix = bg_inline_warpPrefixSum_");
+    expect(compiled.wgsl).not.toContain("if ((idx < bg_uniforms.N)) {\n    var val");
+    expect(compiled.wgsl).not.toContain("if ((idx < bg_uniforms.N)) {\n    var prefix");
+    expect(compiled.wgsl).toContain("bg_warp_shuffle_up_float_32");
+  });
+
   it("derives compile feature options from kernel feature detection", () => {
     expect(
       cudaLiteFeatureOptionsFromKernelFeatures({
@@ -7283,8 +8741,8 @@ __global__ void bf16_cache_hint(const __nv_bfloat16* input, __nv_bfloat16* outpu
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("bg_ptr_read_bf16");
-    expect(compiled.wgsl).toContain("bg_ptr_write_bf16");
+    expect(compiled.wgsl).toContain("var value: f32 = input[");
+    expect(compiled.wgsl).toContain("output[");
     expect([...result.buffers.output as Float32Array]).toEqual([2.5, 3.5]);
   });
 
@@ -7363,7 +8821,7 @@ __global__ void bitwise_not_and_trap(int* out) {
 
     expect([...result.buffers.out as Int32Array]).toEqual([-4]);
     expect(compiled.wgsl).toContain("~(4 - 1)");
-    expect(compiled.wgsl).toContain("__trap omitted");
+    expect(compiled.wgsl).toContain("out[0] = i32((~(4 - 1)))");
     expect(compiled.wgsl).not.toContain("\n    0;\n");
   });
 
@@ -7425,7 +8883,7 @@ __global__ void atomic_read(int* x) {
 
     expect(compiled.wgsl).toContain("var<storage, read_write> x: array<atomic<i32>>;");
     expect(compiled.wgsl).toContain("atomicAdd(&x[0], 1);");
-    expect(compiled.wgsl).toContain("atomicStore(&x[1], atomicLoad(&x[0]));");
+    expect(compiled.wgsl).toContain("atomicStore(&x[1], i32(atomicLoad(&x[0])));");
   });
 
   it("supports CUDA float atomicAdd with a WGSL CAS loop", () => {
@@ -7470,7 +8928,8 @@ __global__ void atomic_sum(double* result) {
     );
 
     expect(compiled.diagnostics.some((diagnostic) => diagnostic.code === "f64-lowered-to-f32")).toBe(true);
-    expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_f32");
+    expect(compiled.wgsl).toContain("fn bg_atomicAdd_f32");
+    expect(compiled.wgsl).not.toContain("fn bg_ptr_atomicAdd_f32");
     expect([...result.buffers.result as Float32Array]).toEqual([3]);
   });
 
@@ -7493,6 +8952,34 @@ __global__ void atomic_exchange(float* x, float* out) {
     expect(compiled.wgsl).toContain("bitcast<f32>(atomicExchange(&x[0], bitcast<u32>(7.5)))");
     expect([...result.buffers.x as Float32Array]).toEqual([7.5]);
     expect([...result.buffers.out as Float32Array]).toEqual([2.5]);
+  });
+
+  it("stores computed float values back into atomic float storage with u32 carriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void atomic_exchange_assign(float* data, float newValue, int N) {
+  int idx = threadIdx.x + blockIdx.x * blockDim.x;
+  if (idx < N) {
+    float oldValue = atomicExch(&data[idx], newValue);
+    data[idx] = oldValue + newValue;
+  }
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          data: new Float32Array([1, 2, 3, 4]),
+        },
+        scalars: {
+          newValue: 10,
+          N: 4,
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("atomicStore(&data[");
+    expect(compiled.wgsl).toContain("bitcast<u32>(f32((oldValue + bg_uniforms.newValue)))");
+    expect([...result.buffers.data as Float32Array]).toEqual([11, 12, 13, 14]);
   });
 
   it("drops unused CUDA float atomicExch return values as valid WGSL statements", () => {
@@ -7613,6 +9100,34 @@ __global__ void helper_shared_atomic(uint* out) {
     expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32(");
     expect(compiled.wgsl).toContain("case 1u: { return atomicAdd(&counts[index], value); }");
     expect([...result.buffers.out as Uint32Array]).toEqual([5]);
+  });
+
+  it("packs uchar shared-memory pointer helpers into u32 carriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void bump(uchar* ptr, uint offset) {
+  ptr[offset]++;
+}
+__global__ void uchar_shared(uint* out) {
+  __shared__ uchar bytes[16];
+  ((uint*)bytes)[threadIdx.x] = 0u;
+  bump(bytes, threadIdx.x);
+  bump(bytes, threadIdx.x + 4u);
+  if (threadIdx.x == 0) {
+    out[0] = bytes[0] + bytes[4];
+  }
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.ir.sharedDeclarations[0]?.valueType).toBe("uchar");
+    expect(compiled.wgsl).toContain("var<workgroup> bytes: array<u32, 4>;");
+    expect(compiled.wgsl).toContain("fn bg_ptr_read_u8(");
+    expect(compiled.wgsl).toContain("fn bg_ptr_write_u8(");
+    expect(compiled.wgsl).not.toContain("array<u32, 16>");
+    expect([...result.buffers.out as Uint32Array]).toEqual([2]);
   });
 
   it("supports atomicAdd through shared pointer aliases", () => {
@@ -7991,10 +9506,12 @@ __global__ void alias_atomic(float* scratch, const float* values, uint* out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect([...result.buffers.scratch as Float32Array]).toEqual([11.5, 0, 1]);
-    expect([...result.buffers.out as Uint32Array]).toEqual([1, 2]);
+    expect([...result.buffers.scratch as Float32Array]).toEqual([11.5, 0, new Float32Array(new Uint32Array([2]).buffer)[0]]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([1065353216, 0]);
     expect(compiled.wgsl).toContain("fn bg_atomicInc_storage_f32_as_u32");
     expect(compiled.wgsl).toContain("fn bg_atomicDec_storage_f32_as_u32");
+    expect(compiled.wgsl).not.toContain("u32(bitcast<f32>(old_bits))");
+    expect(compiled.wgsl).not.toContain("bitcast<u32>(f32(next_value))");
     expect(compiled.wgsl).toContain("bg_atomicInc_storage_f32_as_u32(&scratch[");
     expect(compiled.wgsl).toContain("bg_atomicAdd_f32(&scratch[");
   });
@@ -8115,6 +9632,26 @@ __global__ void helper_global_atomic_inc_dec(uint* out) {
     expect(compiled.wgsl).toContain("fn bg_ptr_atomicDec_u32");
     expect(compiled.wgsl).toContain("return bg_atomicInc_storage_u32(&g_counter[index], limit);");
     expect(compiled.wgsl).toContain("return bg_atomicDec_storage_u32(&g_counter[index], limit);");
+  });
+
+  it("reads scalar device globals as values in device helper truthiness", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ unsigned int flag = 0;
+__device__ unsigned int errors = 0;
+
+__device__ void check_value(int *data, int expected) {
+  if ((data[threadIdx.x] != expected) && (!flag)) {
+    errors++;
+    flag = 1;
+  }
+}
+
+__global__ void scalar_global_truthiness(int *data) {
+  check_value(data, 7);
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toContain("!(flag[0u] != 0u)");
+    expect(compiled.wgsl).not.toContain("!(1u != 4294967295u)");
   });
 
   it("marks storage atomic after local pointer assignment rebinding", () => {
@@ -8355,7 +9892,7 @@ __global__ void address_math(uint* out, int n) {
     expect([...result.buffers.out as Uint32Array]).toEqual([5, 4, 3]);
     expect(compiled.wgsl).toContain("(((bg_uniforms.n + 4) - 1) / 4)");
     expect(compiled.wgsl).toContain("var tile_base: u32 = u32(4);");
-    expect(compiled.wgsl).toContain("out[1] = u32(tile_base);");
+    expect(compiled.wgsl).toContain("out[1] = u32(u32(tile_base));");
     expect(compiled.wgsl).toContain("regs[fill_regs_0][fill_regs_1] = 3.0;");
   });
 
@@ -8375,8 +9912,8 @@ __global__ void nested_shared_address(uint* out) {
     );
 
     expect([...result.buffers.out as Uint32Array]).toEqual([0, 23]);
-    expect(compiled.wgsl).toContain("out[0] = u32(0u)");
-    expect(compiled.wgsl).toContain("out[1] = u32(((u32(1) * 12u) + (u32(2) * 4u) + u32(3)))");
+    expect(compiled.wgsl).toContain("out[0] = u32(u32(0u))");
+    expect(compiled.wgsl).toContain("out[1] = u32(u32(((u32(1) * 12u) + (u32(2) * 4u) + u32(3))))");
   });
 
   it("lowers CUDA assignment expression chains as ordered statements", () => {
@@ -8401,7 +9938,7 @@ __global__ void chained_assign(float* x, float* out) {
 
     expect([...result.buffers.out as Float32Array]).toEqual([7, 7]);
     expect(compiled.wgsl).toContain("mySum = (mySum + sdata[(tid + 1)]);");
-    expect(compiled.wgsl).toContain("sdata[tid] = mySum;");
+    expect(compiled.wgsl).toContain("sdata[tid] = f32(mySum);");
   });
 
   it("keeps nested updates out of expression contexts", () => {
@@ -8505,7 +10042,7 @@ __global__ void bitwise_compound(int* out) {
 
     expect([...result.buffers.out as Int32Array]).toEqual([12]);
     expect(compiled.wgsl).toContain("value = (value ^ 3)");
-    expect(compiled.wgsl).toContain("value = (value | 8)");
+    expect(compiled.wgsl).toContain("value = (value | 8u)");
     expect(compiled.wgsl).toContain("value = (value & 14)");
   });
 
@@ -8641,6 +10178,21 @@ __global__ void pointer_distance(uint* data, int* out, int left) {
     expect([...pointerDistanceResult.buffers.out as Int32Array]).toEqual([3, 2]);
     expect(pointerDistance.wgsl).toContain("i32(");
     expect(pointerDistance.wgsl).toContain("var width: i32 = i32((i32((0u + u32(3))) - i32((0u + u32((0 + bg_uniforms.left))))));");
+
+    const sharedScalarDistance = compileCudaLiteKernel(`
+__global__ void shared_scalar_distance(uint* blocks, uint* out) {
+  __shared__ uint start;
+  __shared__ uint end;
+  __shared__ uint active;
+  if (threadIdx.x == 0) {
+    start = blocks[0];
+    end = blocks[1];
+    active = end - start;
+    out[0] = active;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    expect(sharedScalarDistance.wgsl).toContain("bg_active = u32((end - start));");
+    expect(sharedScalarDistance.wgsl).not.toContain("select(0, (i32(end) - i32(start))");
 
     const mismatchedPointerDistance = analyzeCudaLite(parseCudaLite(`
 __global__ void bad_pointer_distance(uint* a, float* b, int* out) {

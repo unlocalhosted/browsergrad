@@ -32,11 +32,15 @@ if (!toolName || toolName === "--help" || !(toolName in tools)) {
 }
 
 const tool = tools[toolName];
-const forwardedArgs = rawArgs[0] === "--" ? rawArgs.slice(1) : rawArgs;
+const skipBuild = rawArgs.includes("--skip-build") || rawArgs.includes("--no-build");
+const toolArgs = rawArgs.filter((arg) => arg !== "--skip-build" && arg !== "--no-build");
+const forwardedArgs = toolArgs[0] === "--" ? toolArgs.slice(1) : toolArgs;
 
 await withDirectoryLock(lockDir, { tool: toolName }, async () => {
-  await run(pnpmBin(), ["--filter", "@unlocalhosted/browsergrad-kernels", "run", "build"], root);
-  await run(pnpmBin(), ["run", "build"], compilerDir);
+  if (!skipBuild) {
+    await run(pnpmBin(), ["--filter", "@unlocalhosted/browsergrad-kernels", "run", "build"], root);
+    await run(pnpmBin(), ["run", "build"], compilerDir);
+  }
   await run(process.execPath, [
     path.join(scriptDir, tool.script),
     ...(tool.args ?? []),
