@@ -141,6 +141,7 @@ export const textureScopeCases = [
   "texture-surface:roundtrip",
   "texture-surface:vector-helper-roundtrip",
   "texture-surface:active-lane-return-side-effect",
+  "texture-surface:vector-active-lane-return",
   "surface:helper-dispatch-multiple-surfaces",
   "surface:vector-read",
   "surface:helper-vector-read-multiple-surfaces",

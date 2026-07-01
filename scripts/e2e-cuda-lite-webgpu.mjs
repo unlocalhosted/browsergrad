@@ -2224,6 +2224,28 @@ __global__ void textureSurfaceActiveLaneReturnSideEffect(cudaSurfaceObject_t sur
   __syncthreads();
   surf2Dwrite(1.0f + (float)tid, surf, tid * sizeof(float), 0);
 }`,
+  textureSurfaceVectorActiveLaneReturn: `
+__device__ float4 sample_return_surface_layer_vec(cudaTextureObject_t texArg, int lane) {
+  float4 value = tex2D<float4>(texArg, 0.5f, 0.5f);
+  return make_float4(value.x + (float)lane, value.y + (float)lane, value.z + (float)lane, value.w + (float)lane);
+}
+
+__device__ void write_return_surface_layer_vec(cudaSurfaceObject_t surfaceArg, float4 value, int layer) {
+  surf2DLayeredwrite(value, surfaceArg, 0, 0, layer);
+}
+
+__global__ void textureSurfaceVectorActiveLaneReturn(cudaSurfaceObject_t surf, cudaTextureObject_t tex, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    float4 value = sample_return_surface_layer_vec(tex, tid);
+    write_return_surface_layer_vec(surf, value, 1);
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    surf2Dwrite(1.0f, surf, 0, 0);
+  }
+}`,
   surfaceHelperDispatchMultipleSurfaces: `
 __device__ float read_surface_alias(cudaSurfaceObject_t surfaceArg) {
   float value = 0.0f;
@@ -5008,6 +5030,29 @@ const html = String.raw`<!doctype html>
             }),
             output: "surf",
             expectedOutput: { type: "Float32Array", data: [1, 2, 3, 20] },
+          },
+          {
+            name: "texture-surface:vector-active-lane-return",
+            source: SOURCES.textureSurfaceVectorActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {},
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "surf",
+            expectedOutput: { type: "Float32Array", data: [1, 0, 0, 0, 5, 6, 8, 10] },
           },
           {
             name: "surface:helper-dispatch-multiple-surfaces",
