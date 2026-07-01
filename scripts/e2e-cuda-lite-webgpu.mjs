@@ -2734,6 +2734,31 @@ __global__ void textureAtlasVectorPointerAliasActiveLaneStore(cudaTextureObject_
   __syncthreads();
   out[tid] = make_float4(1.0f + (float)tid, 10.0f + (float)tid, 20.0f + (float)tid, 30.0f + (float)tid);
 }`,
+  textureAtlasVectorAtomicPointerAliasActiveLaneStore: `
+__device__ uint4 read_atomic_alias_texture_atlas_vec(cudaTextureObject_t texArg) {
+  uint4 layered = tex2DLayered<uint4>(texArg, 0.0f, 1.0f, 1.0f);
+  uint4 volume = tex3D<uint4>(texArg, 2.0f, 1.0f, 1.0f);
+  return make_uint4(layered.x + volume.x, layered.y + volume.y, layered.z + volume.z, layered.w + volume.w);
+}
+
+__device__ void atomic_alias_atlas_vec(uint *scalarOut, int lane, uint4 value) {
+  atomicAdd(&scalarOut[lane * 4 + 0], value.x);
+  atomicAdd(&scalarOut[lane * 4 + 1], value.y);
+  atomicAdd(&scalarOut[lane * 4 + 2], value.z);
+  atomicAdd(&scalarOut[lane * 4 + 3], value.w);
+}
+
+__global__ void textureAtlasVectorAtomicPointerAliasActiveLaneStore(cudaTextureObject_t tex, uint4 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    uint4 value = read_atomic_alias_texture_atlas_vec(tex);
+    uint *scalarView = reinterpret_cast<uint*>(out);
+    atomic_alias_atlas_vec(scalarView, tid, make_uint4(value.x + (uint)tid, value.y + (uint)tid, value.z + (uint)tid, value.w + (uint)tid));
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+}`,
   textureDeepHelperActiveLaneVectorStore: `
 __device__ float4 read_deep_texture_leaf(cudaTextureObject_t texArg) {
   return tex2D<float4>(texArg, 0.5f, 0.5f);
@@ -6487,6 +6512,33 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [
+              1, 10, 20, 30,
+              2, 11, 21, 31,
+              3, 12, 22, 32,
+              77, 79, 81, 83,
+            ] },
+          },
+          {
+            name: "texture:atlas-vector-atomic-pointer-alias-active-lane-store",
+            source: SOURCES.textureAtlasVectorAtomicPointerAliasActiveLaneStore,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [
               1, 10, 20, 30,
               2, 11, 21, 31,
               3, 12, 22, 32,
