@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-01T15:22:21Z
+Last updated: 2026-07-01T15:25:27Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | surf1D vector atomic pointer-array selection real WebGPU fixture green; continue next corpus-shaped storage/texture/control probe |
+| Active work item | texture-to-surface uint4 atomic pointer-array selection real WebGPU fixture green; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Clean after latest fixture slice commit |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -384,6 +384,12 @@ Current verified gates:
 - compiler unit suite after surf1D vector atomic pointer-array selection probe: `412 passed / 0 failed`
 - WebGPU smoke after surf1D vector atomic pointer-array selection probe: `189 passed / 0 failed / 0 skipped`
 - hot surf1D vector atomic pointer-array selection probe: repeat `9`, warmup `1`, `9 passed / 0 failed / 0 skipped`, best warm `1.7ms`, speedup `3.06`; earlier repeat `5` run was correctness-green but speedup-noisy at `0.67`
+- texture-to-surface uint4 atomic pointer-array selection fixture: `texture-surface:uint4-atomic-pointer-array-select` is `1 passed / 0 failed / 0 skipped`
+- compiler fixture test after texture-to-surface uint4 atomic pointer-array selection probe: passed
+- compiler typecheck after texture-to-surface uint4 atomic pointer-array selection probe: passed
+- compiler unit suite after texture-to-surface uint4 atomic pointer-array selection probe: `412 passed / 0 failed`
+- WebGPU smoke after texture-to-surface uint4 atomic pointer-array selection probe: `190 passed / 0 failed / 0 skipped`
+- hot texture-to-surface uint4 atomic pointer-array selection probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `4.3ms`, speedup `1.30`
 
 ## Bugs Found During Current Run
 
@@ -454,6 +460,7 @@ Current verified gates:
 | Probed green | 2-lane texture-fed layered surface vector write/read before return | `tex2D<float2/uint2/int2>` feeding typed `surf2DLayeredwrite` and post-barrier typed surface reads could mis-scale lanes, lose signedness/unsigned casts, or reorder active-lane deactivation | existing texture conversion, typed surface vector writes/reads, and active-lane lowering preserve 2-lane float/signed/unsigned values across texture-to-surface flow | `texture-surface:float2-vector-active-lane-return,texture-surface:uint2-vector-active-lane-return,texture-surface:int2-vector-active-lane-return` `3/0/0`, smoke `158/0/0` |
 | Probed green | 3-lane texture-fed layered surface vector write/read before return | `tex2D<float3/uint3/int3>` feeding typed `surf2DLayeredwrite` and post-barrier typed surface reads could mis-pack 3 lanes, lose signedness/unsigned casts, or reorder active-lane deactivation | existing texture conversion, typed surface vector writes/reads, and active-lane lowering preserve 3-lane float/signed/unsigned values across texture-to-surface flow | `texture-surface:float3-vector-active-lane-return,texture-surface:uint3-vector-active-lane-return,texture-surface:int3-vector-active-lane-return` `3/0/0`, smoke `161/0/0` |
 | Probed green | 4-lane texture-fed layered surface vector write/read before return | `tex2D<float4/uint4/int4>` feeding typed `surf2DLayeredwrite` and post-barrier typed surface reads could scalarize full-width vectors, lose signedness/unsigned casts, or reorder active-lane deactivation | existing texture conversion, typed surface vector writes/reads, and active-lane lowering preserve 4-lane float/signed/unsigned values across texture-to-surface flow | `texture-surface:float4-vector-active-lane-return,texture-surface:uint4-vector-active-lane-return,texture-surface:int4-vector-active-lane-return` `3/0/0`, smoke `164/0/0` |
+| Probed green | texture-to-surface uint4 atomic pointer-array selection | `tex2D<uint4>` feeding `surf2DLayeredwrite`/`surf2DLayeredread<uint4>` then selecting a scalar pointer from a local pointer array across two vector buffers could lose texture/surface lane casts, choose the wrong storage handle/base, or mis-scale later whole-vector readback | existing texture conversion, typed surface vector writes/reads, pointer-array storage handles, and atomic vector storage-view reads preserve texture-to-surface selected scalar atomics across buffers | `texture-surface:uint4-atomic-pointer-array-select` `1/0/0`, smoke `190/0/0` |
 | Probed green | mixed scalar/vector texture-fed layered surface write/read before return | scalar `tex2D<float>` plus vector `tex2D<uint4>` feeding typed `surf2DLayeredwrite(float4)` and post-barrier typed surface read could lose lane casts, scalar/vector conversion, surface handle/layer, or active-lane ordering | existing texture conversion, numeric casts, typed surface vector writes/reads, and active-lane lowering preserve mixed scalar/vector texture-to-surface flow | `texture-surface:mixed-vector-active-lane-return` `1/0/0`, smoke `165/0/0` |
 | Probed green | layered/3D texture vector read into 3D surface vector write before return | `tex2DLayered<float4>` plus `tex3D<float4>` feeding vector `surf3Dwrite` before active-lane return could lose atlas/volume lanes, z indexing, or deactivation order | active-lane lowering preserves layered/3D texture vector reads, 3D surface vector write, and post-barrier vector readback | `texture-surface:volume-vector-active-lane-return` `1/0/0`, smoke `138/0/0` |
 | Probed green | atlas/layered texture side effect before return | `tex2DLayered` and `tex3D` helper reads before active-lane return could mis-map atlas rows or be dropped before a later barrier | active-lane lowering preserves atlas/layered texture reads before lane deactivation | `texture:atlas-active-lane-return-read-side-effect` `1/0/0`, compiler unit `387/0`, smoke `124/0/0` |
@@ -546,6 +553,7 @@ Current added surface/texture cases:
 - `texture-surface:int3-vector-active-lane-return`
 - `texture-surface:float4-vector-active-lane-return`
 - `texture-surface:uint4-vector-active-lane-return`
+- `texture-surface:uint4-atomic-pointer-array-select`
 - `texture-surface:int4-vector-active-lane-return`
 - `texture-surface:mixed-vector-active-lane-return`
 - `texture:pointer-alias-atomic-vector-readback`

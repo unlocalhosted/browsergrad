@@ -3399,6 +3399,49 @@ __global__ void textureSurfaceUint4VectorActiveLaneReturn(cudaSurfaceObject_t su
     out[tid] = 1u + (uint)tid;
   }
 }`,
+  textureSurfaceUint4AtomicPointerArraySelect: `
+__device__ uint4 sample_surface_pointer_array_uint4(cudaTextureObject_t texArg) {
+  return tex2D<uint4>(texArg, 0.5f, 0.5f);
+}
+
+__device__ void write_surface_pointer_array_uint4(cudaSurfaceObject_t surfaceArg, uint4 value, int layer) {
+  surf2DLayeredwrite(value, surfaceArg, 0, 0, layer);
+}
+
+__device__ uint4 read_surface_pointer_array_uint4(cudaSurfaceObject_t surfaceArg, int layer) {
+  return surf2DLayeredread<uint4>(surfaceArg, 0, 0, layer);
+}
+
+__device__ void atomic_texture_surface_array_select_vec(uint *scalarOut, uint4 value) {
+  atomicAdd(&scalarOut[0], value.x);
+  atomicAdd(&scalarOut[1], value.y);
+  atomicAdd(&scalarOut[2], value.z);
+  atomicAdd(&scalarOut[3], value.w);
+}
+
+__global__ void textureSurfaceUint4AtomicPointerArraySelect(cudaSurfaceObject_t surf, cudaTextureObject_t tex, uint4 *out, uint4 *shadow, uint *summary) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid == 0) {
+    uint4 sampled = sample_surface_pointer_array_uint4(tex);
+    write_surface_pointer_array_uint4(surf, sampled, 1);
+    uint4 value = read_surface_pointer_array_uint4(surf, 1);
+    uint *slots[2];
+    slots[0] = reinterpret_cast<uint*>(shadow + 1);
+    slots[1] = reinterpret_cast<uint*>(out + 1);
+    int pick = value.x > 0u ? 1 : 0;
+    atomic_texture_surface_array_select_vec(slots[pick], value);
+    atomicAdd(slots[0] + 2, 5u);
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
   textureSurfaceInt4VectorActiveLaneReturn: `
 __device__ int4 sample_return_surface_int4(cudaTextureObject_t texArg, int lane) {
   int4 value = tex2D<int4>(texArg, 0.5f, 0.5f);
@@ -7270,6 +7313,32 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [29, 2, 3, 0] },
+          },
+          {
+            name: "texture-surface:uint4-atomic-pointer-array-select",
+            source: SOURCES.textureSurfaceUint4AtomicPointerArraySelect,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [10172] },
           },
           {
             name: "texture-surface:int4-vector-active-lane-return",
