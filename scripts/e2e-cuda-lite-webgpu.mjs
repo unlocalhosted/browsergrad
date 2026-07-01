@@ -2789,6 +2789,46 @@ __global__ void textureAtlasVectorAtomicPointerAliasReadback(cudaTextureObject_t
     summary[0] = value.x + value.y + value.z + value.w;
   }
 }`,
+  textureAtlasVectorAtomicPointerAliasCompound: `
+__device__ uint4 read_atomic_compound_texture_atlas_vec(cudaTextureObject_t texArg) {
+  uint4 layered = tex2DLayered<uint4>(texArg, 0.0f, 1.0f, 1.0f);
+  uint4 volume = tex3D<uint4>(texArg, 2.0f, 1.0f, 1.0f);
+  return make_uint4(layered.x + volume.x, layered.y + volume.y, layered.z + volume.z, layered.w + volume.w);
+}
+
+__device__ void atomic_compound_atlas_vec(uint *scalarOut, int lane, uint4 value) {
+  atomicAdd(&scalarOut[lane * 4 + 0], value.x);
+  atomicAdd(&scalarOut[lane * 4 + 1], value.y);
+  atomicAdd(&scalarOut[lane * 4 + 2], value.z);
+  atomicAdd(&scalarOut[lane * 4 + 3], value.w);
+}
+
+__device__ void add_atlas_vector_alias(uint4 *vectorOut, int lane, uint4 value) {
+  vectorOut[lane] += value;
+}
+
+__device__ void add_atlas_vector_alias_y(uint4 *vectorOut, int lane, uint value) {
+  vectorOut[lane].y += value;
+}
+
+__global__ void textureAtlasVectorAtomicPointerAliasCompound(cudaTextureObject_t tex, uint4 *out, uint *summary) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  __syncthreads();
+  if (tid == 0) {
+    uint *scalarView = reinterpret_cast<uint*>(out);
+    atomic_compound_atlas_vec(scalarView, 1, read_atomic_compound_texture_atlas_vec(tex));
+    uint4 *vectorView = reinterpret_cast<uint4*>(out);
+    add_atlas_vector_alias(vectorView, 1, make_uint4(1u, 1u, 1u, 1u));
+    add_atlas_vector_alias_y(vectorView, 2, 9u);
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 laneTwo = out[2];
+    summary[0] = (value.x + value.y + value.z + value.w) + 100u * (laneTwo.x + laneTwo.y + laneTwo.z + laneTwo.w);
+  }
+}`,
   textureDeepHelperActiveLaneVectorStore: `
 __device__ float4 read_deep_texture_leaf(cudaTextureObject_t texArg) {
   return tex2D<float4>(texArg, 0.5f, 0.5f);
@@ -6597,6 +6637,28 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [373] },
+          },
+          {
+            name: "texture:atlas-vector-atomic-pointer-alias-compound",
+            source: SOURCES.textureAtlasVectorAtomicPointerAliasCompound,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [8177] },
           },
           {
             name: "texture:deep-helper-active-lane-vector-store",
