@@ -3503,6 +3503,51 @@ __global__ void textureSurfaceVolumeVectorActiveLaneReturn(cudaSurfaceObject_t s
     out[tid] = 1.0f + (float)tid;
   }
 }`,
+  textureSurfaceVolumeAtomicPointerArraySelect: `
+__device__ uint4 sample_surface_volume_pointer_array_vec(cudaTextureObject_t texArg) {
+  uint4 layered = tex2DLayered<uint4>(texArg, 0.0f, 1.0f, 1.0f);
+  uint4 volume = tex3D<uint4>(texArg, 2.0f, 1.0f, 1.0f);
+  return make_uint4(layered.x + volume.x, layered.y + volume.y, layered.z + volume.z, layered.w + volume.w);
+}
+
+__device__ void write_surface_volume_pointer_array_vec(cudaSurfaceObject_t surfaceArg, uint4 value) {
+  surf3Dwrite(value, surfaceArg, 0, 0, 1);
+}
+
+__device__ uint4 read_surface_volume_pointer_array_vec(cudaSurfaceObject_t surfaceArg) {
+  return surf3Dread<uint4>(surfaceArg, 0, 0, 1);
+}
+
+__device__ void atomic_surface_volume_array_select_vec(uint *scalarOut, uint4 value) {
+  atomicAdd(&scalarOut[0], value.x);
+  atomicAdd(&scalarOut[1], value.y);
+  atomicAdd(&scalarOut[2], value.z);
+  atomicAdd(&scalarOut[3], value.w);
+}
+
+__global__ void textureSurfaceVolumeAtomicPointerArraySelect(cudaSurfaceObject_t surf, cudaTextureObject_t tex, uint4 *out, uint4 *shadow, uint *summary) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid == 0) {
+    uint4 sampled = sample_surface_volume_pointer_array_vec(tex);
+    write_surface_volume_pointer_array_vec(surf, sampled);
+    uint4 value = read_surface_volume_pointer_array_vec(surf);
+    uint *slots[2];
+    slots[0] = reinterpret_cast<uint*>(shadow + 1);
+    slots[1] = reinterpret_cast<uint*>(out + 1);
+    int pick = value.x > 0u ? 1 : 0;
+    atomic_surface_volume_array_select_vec(slots[pick], value);
+    atomicAdd(slots[0] + 2, 5u);
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
   surfaceHelperDispatchMultipleSurfaces: `
 __device__ float read_surface_alias(cudaSurfaceObject_t surfaceArg) {
   float value = 0.0f;
@@ -7389,6 +7434,32 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [320, 2, 3, 0] },
+          },
+          {
+            name: "texture-surface:volume-atomic-pointer-array-select",
+            source: SOURCES.textureSurfaceVolumeAtomicPointerArraySelect,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [10463] },
           },
           {
             name: "surface:helper-dispatch-multiple-surfaces",
