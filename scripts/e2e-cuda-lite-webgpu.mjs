@@ -1953,6 +1953,75 @@ __global__ void surfaceVectorWriteActiveLaneReturn(cudaSurfaceObject_t surf, flo
     out[tid] = 1.0f + (float)tid;
   }
 }`,
+  surfaceFloat2VectorActiveLaneReturn: `
+__device__ void write_layer_float2_active(cudaSurfaceObject_t surfaceArg, int row, int layer, float base) {
+  surf2DLayeredwrite(make_float2(base + 1.0f, base + 2.0f), surfaceArg, 0, row, layer);
+}
+
+__device__ float2 read_layer_float2_active(cudaSurfaceObject_t surfaceArg, int row, int layer) {
+  return surf2DLayeredread<float2>(surfaceArg, 0, row, layer);
+}
+
+__global__ void surfaceFloat2VectorActiveLaneReturn(cudaSurfaceObject_t surf, float *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    write_layer_float2_active(surf, 0, 1, 40.0f + (float)tid);
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    float2 value = read_layer_float2_active(surf, 0, 1);
+    out[0] = value.x + value.y;
+  } else {
+    out[tid] = 1.0f + (float)tid;
+  }
+}`,
+  surfaceUint2VectorActiveLaneReturn: `
+__device__ void write_layer_uint2_active(cudaSurfaceObject_t surfaceArg, int row, int layer, uint base) {
+  surf2DLayeredwrite(make_uint2(base + 1u, base + 2u), surfaceArg, 0, row, layer);
+}
+
+__device__ uint2 read_layer_uint2_active(cudaSurfaceObject_t surfaceArg, int row, int layer) {
+  return surf2DLayeredread<uint2>(surfaceArg, 0, row, layer);
+}
+
+__global__ void surfaceUint2VectorActiveLaneReturn(cudaSurfaceObject_t surf, uint *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    write_layer_uint2_active(surf, 0, 1, 50u + (uint)tid);
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    uint2 value = read_layer_uint2_active(surf, 0, 1);
+    out[0] = value.x + value.y;
+  } else {
+    out[tid] = 1u + (uint)tid;
+  }
+}`,
+  surfaceInt2VectorActiveLaneReturn: `
+__device__ void write_layer_int2_active(cudaSurfaceObject_t surfaceArg, int row, int layer, int base) {
+  surf2DLayeredwrite(make_int2(base + 1, base + 2), surfaceArg, 0, row, layer);
+}
+
+__device__ int2 read_layer_int2_active(cudaSurfaceObject_t surfaceArg, int row, int layer) {
+  return surf2DLayeredread<int2>(surfaceArg, 0, row, layer);
+}
+
+__global__ void surfaceInt2VectorActiveLaneReturn(cudaSurfaceObject_t surf, int *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    write_layer_int2_active(surf, 0, 1, 60 + tid);
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    int2 value = read_layer_int2_active(surf, 0, 1);
+    out[0] = value.x + value.y;
+  } else {
+    out[tid] = 1 + tid;
+  }
+}`,
   surfaceFloat3VectorActiveLaneReturn: `
 __device__ void write_layer_float3_active(cudaSurfaceObject_t surfaceArg, int row, int layer, float base) {
   surf2DLayeredwrite(make_float3(base + 1.0f, base + 2.0f, base + 3.0f), surfaceArg, 0, row, layer);
@@ -4850,6 +4919,57 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [75, 2, 3, 0] },
+          },
+          {
+            name: "surface:float2-vector-active-lane-return",
+            source: SOURCES.surfaceFloat2VectorActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array(4) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [89, 2, 3, 0] },
+          },
+          {
+            name: "surface:uint2-vector-active-lane-return",
+            source: SOURCES.surfaceUint2VectorActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array(4) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [109, 2, 3, 0] },
+          },
+          {
+            name: "surface:int2-vector-active-lane-return",
+            source: SOURCES.surfaceInt2VectorActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(4),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array(4) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [129, 2, 3, 0] },
           },
           {
             name: "surface:uint3-vector-active-lane-return",
