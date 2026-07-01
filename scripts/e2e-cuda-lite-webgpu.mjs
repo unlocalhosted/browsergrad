@@ -2759,6 +2759,36 @@ __global__ void textureAtlasVectorAtomicPointerAliasActiveLaneStore(cudaTextureO
   __syncthreads();
   out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
 }`,
+  textureAtlasVectorAtomicPointerAliasReadback: `
+__device__ uint4 read_atomic_readback_texture_atlas_vec(cudaTextureObject_t texArg) {
+  uint4 layered = tex2DLayered<uint4>(texArg, 0.0f, 1.0f, 1.0f);
+  uint4 volume = tex3D<uint4>(texArg, 2.0f, 1.0f, 1.0f);
+  return make_uint4(layered.x + volume.x, layered.y + volume.y, layered.z + volume.z, layered.w + volume.w);
+}
+
+__device__ void atomic_readback_atlas_vec(uint *scalarOut, int lane, uint4 value) {
+  atomicAdd(&scalarOut[lane * 4 + 0], value.x);
+  atomicAdd(&scalarOut[lane * 4 + 1], value.y);
+  atomicAdd(&scalarOut[lane * 4 + 2], value.z);
+  atomicAdd(&scalarOut[lane * 4 + 3], value.w);
+}
+
+__global__ void textureAtlasVectorAtomicPointerAliasReadback(cudaTextureObject_t tex, uint4 *out, uint *summary, int N) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    uint4 value = read_atomic_readback_texture_atlas_vec(tex);
+    uint *scalarView = reinterpret_cast<uint*>(out);
+    atomic_readback_atlas_vec(scalarView, 1, value);
+    return;
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    summary[0] = value.x + value.y + value.z + value.w;
+  }
+}`,
   textureDeepHelperActiveLaneVectorStore: `
 __device__ float4 read_deep_texture_leaf(cudaTextureObject_t texArg) {
   return tex2D<float4>(texArg, 0.5f, 0.5f);
@@ -6544,6 +6574,29 @@ const html = String.raw`<!doctype html>
               3, 12, 22, 32,
               77, 79, 81, 83,
             ] },
+          },
+          {
+            name: "texture:atlas-vector-atomic-pointer-alias-readback",
+            source: SOURCES.textureAtlasVectorAtomicPointerAliasReadback,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [373] },
           },
           {
             name: "texture:deep-helper-active-lane-vector-store",

@@ -167,6 +167,7 @@ export const textureScopeCases = [
   "texture:atlas-vector-active-lane-store",
   "texture:atlas-vector-pointer-alias-active-lane-store",
   "texture:atlas-vector-atomic-pointer-alias-active-lane-store",
+  "texture:atlas-vector-atomic-pointer-alias-readback",
   "texture:deep-helper-active-lane-vector-store",
   "texture:mixed-scalar-vector-active-lane-store",
   "texture:pointer-alias-active-lane-store",
