@@ -125,6 +125,7 @@ export const textureScopeCases = [
   "surface:vector-write-active-lane-return",
   "surface:float3-vector-active-lane-return",
   "surface:uint3-vector-active-lane-return",
+  "surface:int3-vector-active-lane-return",
   "surface:driver-alias",
   "texture:fetch-lod-vector",
   "texture:atlas-helpers",

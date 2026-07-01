@@ -1999,6 +1999,29 @@ __global__ void surfaceUint3VectorActiveLaneReturn(cudaSurfaceObject_t surf, uin
     out[tid] = 1u + (uint)tid;
   }
 }`,
+  surfaceInt3VectorActiveLaneReturn: `
+__device__ void write_layer_int3_active(cudaSurfaceObject_t surfaceArg, int row, int layer, int base) {
+  surf2DLayeredwrite(make_int3(base + 1, base + 2, base + 3), surfaceArg, 0, row, layer);
+}
+
+__device__ int3 read_layer_int3_active(cudaSurfaceObject_t surfaceArg, int row, int layer) {
+  return surf2DLayeredread<int3>(surfaceArg, 0, row, layer);
+}
+
+__global__ void surfaceInt3VectorActiveLaneReturn(cudaSurfaceObject_t surf, int *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    write_layer_int3_active(surf, 0, 1, 30 + tid);
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    int3 value = read_layer_int3_active(surf, 0, 1);
+    out[0] = value.x + value.y + value.z;
+  } else {
+    out[tid] = 1 + tid;
+  }
+}`,
   driverSurfaceAlias: `
 __global__ void driverSurfaceAlias(CUsurfObject surf) {
   surf2Dwrite(13u, surf, 4, 0);
@@ -4798,6 +4821,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [105, 2, 3, 0] },
+          },
+          {
+            name: "surface:int3-vector-active-lane-return",
+            source: SOURCES.surfaceInt3VectorActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(4),
+              },
+              surfaces: {
+                surf: { width: 3, height: 1, data: new Float32Array(6) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [105, 2, 3, 0] },
           },
           {
             name: "surface:driver-alias",
