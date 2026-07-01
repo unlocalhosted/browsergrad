@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-01T12:09:59Z
+Last updated: 2026-07-01T12:12:33Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Surface vector read before active-lane return probe green; continue next corpus-shaped storage/texture/control probe |
+| Active work item | Surface vector write before active-lane return probe green; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Dirty, unstaged |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -164,6 +164,9 @@ Current verified gates:
 - surface vector read before active-lane return fixture: `surface:vector-read-active-lane-return` is `1 passed / 0 failed / 0 skipped`
 - WebGPU smoke after active-lane surface vector read probe: `135 passed / 0 failed / 0 skipped`
 - hot active-lane surface vector read probe: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `2.8ms`, speedup `1.79`
+- surface vector write before active-lane return fixture: `surface:vector-write-active-lane-return` is `1 passed / 0 failed / 0 skipped`
+- WebGPU smoke after active-lane surface vector write probe: `136 passed / 0 failed / 0 skipped`
+- hot active-lane surface vector write probe: `3 passed / 0 failed / 0 skipped`, warmup `1`, best warm `4.0ms`, speedup `1.43`
 
 ## Bugs Found During Current Run
 
@@ -177,6 +180,7 @@ Current verified gates:
 | Fixed | layered/3D surface read/reference z | `surf2DLayeredread` and `surf3Dread` were unsupported, and reference layered writes flattened layer into Y instead of z-linearized storage | add layered/3D surface read analyzer/reference/WGSL lowering and share z-linearized surface read/write indexing | `surface:layered-read,surface:surf3d-read` `2/0/0`, compiler unit `395/0`, smoke `132/0/0` |
 | Fixed | layered/3D vector surface read type inference | `surf3Dread<float4>` through helper returned `vec4<f32>` but WGSL value-type inference treated non-2D surface reads as scalar, emitting `f32(vec4<f32>)`; reference runtime also read only one lane for vector surface reads | surface read value inference now covers `surf2DLayeredread`/`surf3Dread`; reference reads vector lanes from z-linearized storage | `surface:layered-vector-read,surface:surf3d-vector-read` `2/0/0`, compiler unit `396/0`, smoke `134/0/0` |
 | Probed green | surface vector read before active-lane return | layered/3D vector surface reads before deactivating a lane could be dropped, scalarized, or hidden behind non-uniform barrier lowering | existing active-lane lowering now preserves vector surface reads before lane deactivation and keeps later barriers uniform | `surface:vector-read-active-lane-return` `1/0/0`, smoke `135/0/0` |
+| Probed green | surface vector write before active-lane return | vector `surf2DLayeredwrite` before deactivating a lane could drop lane-wise writes or fail barrier-uniform lowering | existing active-lane lowering preserves lane-wise vector surface writes before lane deactivation and keeps later barriers uniform | `surface:vector-write-active-lane-return` `1/0/0`, smoke `136/0/0` |
 | Probed green | helper layered vector write | vector `surf2DLayeredwrite` through `cudaSurfaceObject_t` helper param could lose handle/lane/layer semantics | existing surface dispatch + vector lane writes held | `surface:helper-vector-layered-write` |
 | Probed green | 1D surface write | `surf1Dwrite` could share broken 2D/layered lowering path | existing Y=0/Z=0 lowering held | `surface:surf1d-write` |
 | Probed green | texture helper vector conversion | `tex2D<uint4>` through texture object helper could lose lane casts | existing vector cast path held | `texture:object-uint4-helper-read` |
@@ -224,6 +228,7 @@ Current added surface/texture cases:
 - `surface:layered-vector-read`
 - `surface:surf3d-vector-read`
 - `surface:vector-read-active-lane-return`
+- `surface:vector-write-active-lane-return`
 - `surface:helper-vector-layered-write`
 - `surface:surf1d-write`
 - `texture:object-uint4-helper-read`
@@ -257,7 +262,7 @@ Current added pointer/control cases:
 - `control:active-lane-shared-return-side-effect-barrier`
 - `control:subgroup-truthiness-assignment-scalar`
 
-Smoke current: `135/0/0`.
+Smoke current: `136/0/0`.
 
 Full source e2e current: `221/0/0`.
 
@@ -268,7 +273,7 @@ Verifier current: src `253/0/0`, dist `253/0/0`.
 Probe these with fail-first real WebGPU fixtures:
 
 - Surface family:
-  - surface writes before active-lane return, layered writes, helper layered vector writes, layered reads, 3D reads, layered/3D vector reads, and surface vector reads before active-lane return are now green; keep probing next corpus-shaped surface/texture pattern
+  - surface writes before active-lane return, layered writes, helper layered vector writes, layered reads, 3D reads, layered/3D vector reads, and surface vector read/write before active-lane return are now green; keep probing next corpus-shaped surface/texture pattern
 - Texture family:
   - vector helper return, cast/coercion, active-lane pre-return read, texture-to-surface pre-return side effects, atlas/layered active-lane reads, deep helper vector stores, mixed scalar/vector texture stores, texture-fed pointer alias writes, texture-fed pointer alias atomics, atomic vector readback, atomic vector compound helper writes, and atomic vector member helper writes are now green; keep probing next corpus-shaped texture/storage pattern
 - Pointer/vector family:
