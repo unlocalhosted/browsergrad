@@ -135,6 +135,7 @@ export const textureScopeCases = [
   "surface:int3-vector-active-lane-return",
   "surface:layered-float4-vector-active-lane-return",
   "surface:layered-mixed-scalar-vector-active-lane-return",
+  "surface:surf1d-pointer-alias-active-lane-store",
   "surface:pointer-alias-active-lane-store",
   "surface:pointer-alias-atomic-active-lane-store",
   "surface:pointer-alias-atomic-vector-readback",
