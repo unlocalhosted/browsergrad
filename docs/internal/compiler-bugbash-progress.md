@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-01T15:01:38Z
+Last updated: 2026-07-01T15:04:18Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | atlas/3D texture vector active-lane real WebGPU fixture green; continue next corpus-shaped storage/texture/control probe |
+| Active work item | atlas/3D texture vector pointer-alias active-lane real WebGPU fixture green; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Clean after latest fixture slice commit |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -342,6 +342,12 @@ Current verified gates:
 - compiler unit suite after atlas/3D texture vector active-lane probe: `412 passed / 0 failed`
 - WebGPU smoke after atlas/3D texture vector active-lane probe: `182 passed / 0 failed / 0 skipped`
 - hot atlas/3D texture vector active-lane probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `3.2ms`, speedup `1.38`
+- atlas/3D texture vector pointer-alias active-lane fixture: `texture:atlas-vector-pointer-alias-active-lane-store` is `1 passed / 0 failed / 0 skipped`
+- compiler fixture test after atlas/3D texture vector pointer-alias active-lane probe: passed
+- compiler typecheck after atlas/3D texture vector pointer-alias active-lane probe: passed
+- compiler unit suite after atlas/3D texture vector pointer-alias active-lane probe: `412 passed / 0 failed`
+- WebGPU smoke after atlas/3D texture vector pointer-alias active-lane probe: `183 passed / 0 failed / 0 skipped`
+- hot atlas/3D texture vector pointer-alias active-lane probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `4.0ms`, speedup `1.25`
 
 ## Bugs Found During Current Run
 
@@ -414,6 +420,7 @@ Current verified gates:
 | Probed green | layered/3D texture vector read into 3D surface vector write before return | `tex2DLayered<float4>` plus `tex3D<float4>` feeding vector `surf3Dwrite` before active-lane return could lose atlas/volume lanes, z indexing, or deactivation order | active-lane lowering preserves layered/3D texture vector reads, 3D surface vector write, and post-barrier vector readback | `texture-surface:volume-vector-active-lane-return` `1/0/0`, smoke `138/0/0` |
 | Probed green | atlas/layered texture side effect before return | `tex2DLayered` and `tex3D` helper reads before active-lane return could mis-map atlas rows or be dropped before a later barrier | active-lane lowering preserves atlas/layered texture reads before lane deactivation | `texture:atlas-active-lane-return-read-side-effect` `1/0/0`, compiler unit `387/0`, smoke `124/0/0` |
 | Probed green | atlas/3D texture vector store before return | `tex2DLayered<float4>` plus `tex3D<float4>` feeding vector storage before active-lane return could mis-map atlas rows, lose vector lanes, or reorder inactive-lane writes before the barrier | active-lane lowering preserves layered/3D texture vector reads and inactive-lane vector stores before later barriers | `texture:atlas-vector-active-lane-store` `1/0/0`, smoke `182/0/0` |
+| Probed green | atlas/3D texture vector pointer-alias store before return | `tex2DLayered<float4>` plus `tex3D<float4>` feeding scalar pointer alias writes over `float4*` storage before active-lane return could mis-map atlas rows, lose vector lanes through scalar view writes, or reorder inactive-lane writes before the barrier | active-lane lowering preserves layered/3D texture vector reads and scalar-view pointer alias vector writes before later barriers | `texture:atlas-vector-pointer-alias-active-lane-store` `1/0/0`, smoke `183/0/0` |
 | Probed green | deep helper texture vector store before return | nested texture helper calls feeding `float4` storage writes before active-lane return could lose vector lane stores or deactivation order | active-lane lowering preserves deep texture helper calls and vector stores before lane deactivation | `texture:deep-helper-active-lane-vector-store` `1/0/0`, compiler unit `388/0`, smoke `125/0/0` |
 | Probed green | mixed scalar/vector texture store before return | scalar `tex2D<float>` plus vector `tex2D<uint4>` feeding a `float4` store before active-lane return could miscast lanes or reorder deactivation | active-lane lowering preserves mixed scalar/vector texture reads and vector stores before lane deactivation | `texture:mixed-scalar-vector-active-lane-store` `1/0/0`, compiler unit `389/0`, smoke `126/0/0` |
 | Probed green | texture-fed pointer alias store before return | texture scalar read feeding a scalar pointer alias over `float4*` storage before active-lane return could mis-address vector lanes or reorder deactivation | active-lane lowering preserves texture read and scalar pointer alias write before lane deactivation | `texture:pointer-alias-active-lane-store` `1/0/0`, compiler unit `390/0`, smoke `127/0/0` |
@@ -478,6 +485,7 @@ Current added surface/texture cases:
 - `texture:int4-active-lane-store`
 - `texture:atlas-active-lane-return-read-side-effect`
 - `texture:atlas-vector-active-lane-store`
+- `texture:atlas-vector-pointer-alias-active-lane-store`
 - `texture:deep-helper-active-lane-vector-store`
 - `texture:mixed-scalar-vector-active-lane-store`
 - `texture:pointer-alias-active-lane-store`
@@ -516,7 +524,7 @@ Current added pointer/control cases:
 - `control:active-lane-shared-return-side-effect-barrier`
 - `control:subgroup-truthiness-assignment-scalar`
 
-Smoke current: `182/0/0`.
+Smoke current: `183/0/0`.
 
 Full source e2e current: `221/0/0`.
 
