@@ -2300,6 +2300,51 @@ __global__ void textureInt3ActiveLaneStore(cudaTextureObject_t tex, int3 *out, i
   __syncthreads();
   out[tid] = make_int3(1 + tid, -10 - tid, 100 + tid);
 }`,
+  textureFloat4ActiveLaneStore: `
+__device__ float4 read_return_texture_float4(cudaTextureObject_t texArg) {
+  return tex2D<float4>(texArg, 0.5f, 0.5f);
+}
+
+__global__ void textureFloat4ActiveLaneStore(cudaTextureObject_t tex, float4 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    float4 value = read_return_texture_float4(tex);
+    out[tid] = make_float4(value.x + (float)tid, value.y + (float)tid, value.z + (float)tid, value.w + (float)tid);
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_float4(1.0f + (float)tid, 10.0f + (float)tid, 20.0f + (float)tid, 30.0f + (float)tid);
+}`,
+  textureUint4ActiveLaneStore: `
+__device__ uint4 read_return_texture_uint4(cudaTextureObject_t texArg) {
+  return tex2D<uint4>(texArg, 0.5f, 0.5f);
+}
+
+__global__ void textureUint4ActiveLaneStore(cudaTextureObject_t tex, uint4 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    uint4 value = read_return_texture_uint4(tex);
+    out[tid] = make_uint4(value.x + (uint)tid, value.y + (uint)tid, value.z + (uint)tid, value.w + (uint)tid);
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+}`,
+  textureInt4ActiveLaneStore: `
+__device__ int4 read_return_texture_int4(cudaTextureObject_t texArg) {
+  return tex2D<int4>(texArg, 0.5f, 0.5f);
+}
+
+__global__ void textureInt4ActiveLaneStore(cudaTextureObject_t tex, int4 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    int4 value = read_return_texture_int4(tex);
+    out[tid] = make_int4(value.x - tid, value.y - tid, value.z - tid, value.w - tid);
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_int4(1 + tid, -10 - tid, 100 + tid, -100 - tid);
+}`,
   textureAtlasActiveLaneReturnReadSideEffect: `
 __device__ float read_return_texture_atlas(cudaTextureObject_t texArg) {
   float layered = tex2DLayered<float>(texArg, 0.0f, 1.0f, 1.0f);
@@ -5408,6 +5453,87 @@ const html = String.raw`<!doctype html>
               2, -11, 101,
               3, -12, 102,
               -5, 0, -8,
+            ] },
+          },
+          {
+            name: "texture:float4-active-lane-store",
+            source: SOURCES.textureFloat4ActiveLaneStore,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(16),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [
+              1, 10, 20, 30,
+              2, 11, 21, 31,
+              3, 12, 22, 32,
+              5, 6, 8, 10,
+            ] },
+          },
+          {
+            name: "texture:uint4-active-lane-store",
+            source: SOURCES.textureUint4ActiveLaneStore,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [
+              1, 10, 20, 30,
+              2, 11, 21, 31,
+              3, 12, 22, 32,
+              5, 6, 8, 10,
+            ] },
+          },
+          {
+            name: "texture:int4-active-lane-store",
+            source: SOURCES.textureInt4ActiveLaneStore,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(16),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([-2, 3, -5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [
+              1, -10, 100, -100,
+              2, -11, 101, -101,
+              3, -12, 102, -102,
+              -5, 0, -8, 4,
             ] },
           },
           {
