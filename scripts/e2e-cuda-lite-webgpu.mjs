@@ -2068,6 +2068,39 @@ __global__ void surfaceFloat4VectorActiveLaneReturn(cudaSurfaceObject_t surf, fl
     out[tid] = 1.0f + (float)tid;
   }
 }`,
+  surfaceMixedScalarVectorActiveLaneReturn: `
+__device__ void write_layer_mixed_scalar_active(cudaSurfaceObject_t surfaceArg, float value) {
+  surf2DLayeredwrite(value, surfaceArg, 0, 0, 0);
+}
+
+__device__ void write_layer_mixed_vec_active(cudaSurfaceObject_t surfaceArg, float4 value) {
+  surf2DLayeredwrite(value, surfaceArg, 0, 0, 1);
+}
+
+__device__ float read_layer_mixed_scalar_active(cudaSurfaceObject_t surfaceArg) {
+  return surf2DLayeredread<float>(surfaceArg, 0, 0, 0);
+}
+
+__device__ float4 read_layer_mixed_vec_active(cudaSurfaceObject_t surfaceArg) {
+  return surf2DLayeredread<float4>(surfaceArg, 0, 0, 1);
+}
+
+__global__ void surfaceMixedScalarVectorActiveLaneReturn(cudaSurfaceObject_t surf, float *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    write_layer_mixed_scalar_active(surf, 40.0f + (float)tid);
+    write_layer_mixed_vec_active(surf, make_float4(70.0f + (float)tid, 71.0f + (float)tid, 72.0f + (float)tid, 73.0f + (float)tid));
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    float scalar = read_layer_mixed_scalar_active(surf);
+    float4 value = read_layer_mixed_vec_active(surf);
+    out[0] = scalar + value.x + value.y + value.z + value.w;
+  } else {
+    out[tid] = 1.0f + (float)tid;
+  }
+}`,
   surfaceUint3VectorActiveLaneReturn: `
 __device__ void write_layer_uint3_active(cudaSurfaceObject_t surfaceArg, int row, int layer, uint base) {
   surf2DLayeredwrite(make_uint3(base + 1u, base + 2u, base + 3u), surfaceArg, 0, row, layer);
@@ -5428,6 +5461,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [302, 2, 3, 0] },
+          },
+          {
+            name: "surface:layered-mixed-scalar-vector-active-lane-return",
+            source: SOURCES.surfaceMixedScalarVectorActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [341, 2, 3, 0] },
           },
           {
             name: "surface:uint4-vector-active-lane-return",
