@@ -3388,6 +3388,78 @@ __global__ void texturePointerAliasAtomicPointerArrayActiveLaneReturn(cudaTextur
     summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
   }
 }`,
+  texturePointerAliasAtomicPointerArrayCasActiveLaneReturn: `
+__device__ uint4 read_cas_pointer_array_texture_vec(cudaTextureObject_t texArg) {
+  return tex2D<uint4>(texArg, 0.5f, 0.5f);
+}
+
+__device__ void atomic_cas_array_select_texture_vec(uint *scalarOut, uint *shadowOut, uint4 value) {
+  uint oldX = atomicCAS(scalarOut + 0, 2u, value.x + 40u);
+  uint oldY = atomicCAS(scalarOut + 1, 99u, value.y + 50u);
+  uint oldZ = atomicExch(scalarOut + 2, value.z + 60u);
+  uint oldW = atomicAdd(scalarOut + 3, oldX + oldY + oldZ + value.w);
+  atomicExch(shadowOut + 0, oldW);
+  atomicCAS(shadowOut + 1, 201u, oldY);
+  atomicExch(shadowOut + 2, oldZ);
+}
+
+__global__ void texturePointerAliasAtomicPointerArrayCasActiveLaneReturn(cudaTextureObject_t tex, uint4 *out, uint4 *shadow, uint *summary, int N) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    uint *slots[2];
+    slots[0] = reinterpret_cast<uint*>(shadow + 1);
+    slots[1] = reinterpret_cast<uint*>(out + 1);
+    uint4 value = read_cas_pointer_array_texture_vec(tex);
+    int pick = value.x == 2u ? 1 : 0;
+    atomic_cas_array_select_texture_vec(slots[pick], slots[0], value);
+    return;
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
+  texturePointerAliasAtomicPointerArrayMinMaxActiveLaneReturn: `
+__device__ uint4 read_minmax_pointer_array_texture_vec(cudaTextureObject_t texArg) {
+  return tex2D<uint4>(texArg, 0.5f, 0.5f);
+}
+
+__device__ void atomic_minmax_array_select_texture_vec(uint *scalarOut, uint *shadowOut, uint4 value) {
+  uint oldX = atomicMin(scalarOut + 0, value.x + 20u);
+  uint oldY = atomicMax(scalarOut + 1, value.y + 50u);
+  uint oldZ = atomicMin(scalarOut + 2, value.z + 4u);
+  uint oldW = atomicMax(scalarOut + 3, value.w + oldX + oldY + oldZ);
+  atomicMin(shadowOut + 0, oldW);
+  atomicMax(shadowOut + 1, oldY + oldZ);
+  atomicMin(shadowOut + 2, value.z);
+}
+
+__global__ void texturePointerAliasAtomicPointerArrayMinMaxActiveLaneReturn(cudaTextureObject_t tex, uint4 *out, uint4 *shadow, uint *summary, int N) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    uint *slots[2];
+    slots[0] = reinterpret_cast<uint*>(shadow + 1);
+    slots[1] = reinterpret_cast<uint*>(out + 1);
+    uint4 value = read_minmax_pointer_array_texture_vec(tex);
+    int pick = value.w > 0u ? 1 : 0;
+    atomic_minmax_array_select_texture_vec(slots[pick], slots[0], value);
+    return;
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
   textureSurfaceRoundtrip: `
 __global__ void textureSurfaceRoundtrip(cudaSurfaceObject_t surf, cudaTextureObject_t tex, float *out) {
   if (threadIdx.x == 0) {
@@ -7856,6 +7928,54 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [10172] },
+          },
+          {
+            name: "texture:pointer-alias-atomic-pointer-array-cas-active-lane-return",
+            source: SOURCES.texturePointerAliasAtomicPointerArrayCasActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [4830] },
+          },
+          {
+            name: "texture:pointer-alias-atomic-pointer-array-minmax-active-lane-return",
+            source: SOURCES.texturePointerAliasAtomicPointerArrayMinMaxActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [6485] },
           },
           {
             name: "texture-surface:roundtrip",
