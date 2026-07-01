@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-01T14:46:49Z
+Last updated: 2026-07-01T14:48:51Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | surf1Dread pointer-alias active-lane real WebGPU fixture green; continue next corpus-shaped storage/texture/control probe |
+| Active work item | surf1Dread atomic pointer-alias active-lane real WebGPU fixture green; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Clean after latest fixture slice commit |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -306,6 +306,12 @@ Current verified gates:
 - compiler unit suite after surf1Dread pointer-alias active-lane probe: `412 passed / 0 failed`
 - WebGPU smoke after surf1Dread pointer-alias active-lane probe: `176 passed / 0 failed / 0 skipped`
 - hot surf1Dread pointer-alias active-lane probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `3.5ms`, speedup `1.29`
+- surf1Dread atomic pointer-alias active-lane fixture: `surface:surf1d-pointer-alias-atomic-active-lane-store` is `1 passed / 0 failed / 0 skipped`
+- compiler fixture test after surf1Dread atomic pointer-alias active-lane probe: passed
+- compiler typecheck after surf1Dread atomic pointer-alias active-lane probe: passed
+- compiler unit suite after surf1Dread atomic pointer-alias active-lane probe: `412 passed / 0 failed`
+- WebGPU smoke after surf1Dread atomic pointer-alias active-lane probe: `177 passed / 0 failed / 0 skipped`
+- hot surf1Dread atomic pointer-alias active-lane probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `3.3ms`, speedup `1.45`
 
 ## Bugs Found During Current Run
 
@@ -338,6 +344,7 @@ Current verified gates:
 | Probed green | 1D surface vector read | `surf1Dread<float4>` and pointer-form `surf1Dread(&float4, ...)` could mis-scale x-byte offsets or collapse vector lanes after adding scalar 1D reads | existing lane-wise surface read lowering preserves 1D vector pointer and return forms | `surface:surf1d-vector-read` `1/0/0`, smoke `173/0/0` |
 | Probed green | 1D surface vector write before active-lane return | `surf1Dwrite(float4)` before return-and-barrier lowering could drop inactive-lane side effects, mis-guard multi-statement vector writes, or mis-read lanes after the barrier | existing active-lane lowering preserves 1D vector surface writes before lane deactivation and later `surf1Dread<float4>` readback | `surface:surf1d-vector-active-lane-return` `1/0/0`, smoke `175/0/0` |
 | Probed green | surf1Dread pointer-alias store before active-lane return | scalar `surf1Dread` feeding a scalar pointer alias over `float4*` storage before active-lane return could mis-address vector lanes or lose inactive-lane side effects | existing 1D surface read lowering and scalar-view pointer alias writes preserve inactive-lane writes across active-lane barrier lowering | `surface:surf1d-pointer-alias-active-lane-store` `1/0/0`, smoke `176/0/0` |
+| Probed green | surf1Dread atomic pointer-alias store before active-lane return | unsigned `surf1Dread` feeding an atomic scalar pointer alias over `uint4*` storage before active-lane return could lose atomic vector storage promotion or mis-address scalar lanes | existing 1D surface read lowering, atomic vector storage promotion, and scalar-view atomic pointer writes preserve inactive-lane side effects | `surface:surf1d-pointer-alias-atomic-active-lane-store` `1/0/0`, smoke `177/0/0` |
 | Probed green | texture helper vector conversion | `tex2D<uint4>` through texture object helper could lose lane casts | existing vector cast path held | `texture:object-uint4-helper-read` |
 | Probed green | nested texture helper chain | texture object could break through nested device helpers | existing texture object argument lowering held | `texture:nested-helper-vector-read` |
 | Probed green | conditional vector lane pointer write | vector lane pointer through conditional rebind could target wrong lane/buffer | existing scalar-view pointer lowering held | `storage:conditional-vector-lane-pointer-write` |
@@ -416,6 +423,7 @@ Current added surface/texture cases:
 - `surface:surf1d-vector-read`
 - `surface:surf1d-vector-active-lane-return`
 - `surface:surf1d-pointer-alias-active-lane-store`
+- `surface:surf1d-pointer-alias-atomic-active-lane-store`
 - `texture:object-uint4-helper-read`
 - `texture:helper-vector-cast-coercion`
 - `texture:nested-helper-vector-read`
@@ -468,7 +476,7 @@ Current added pointer/control cases:
 - `control:active-lane-shared-return-side-effect-barrier`
 - `control:subgroup-truthiness-assignment-scalar`
 
-Smoke current: `176/0/0`.
+Smoke current: `177/0/0`.
 
 Full source e2e current: `221/0/0`.
 

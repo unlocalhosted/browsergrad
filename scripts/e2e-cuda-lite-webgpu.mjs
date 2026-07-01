@@ -2199,6 +2199,25 @@ __global__ void surface1DPointerAliasActiveLaneStore(cudaSurfaceObject_t surf, f
   __syncthreads();
   out[tid] = make_float4(1.0f + (float)tid, 10.0f + (float)tid, 20.0f + (float)tid, 30.0f + (float)tid);
 }`,
+  surface1DPointerAliasAtomicActiveLaneStore: `
+__device__ uint read_1d_atomic_alias_surface_scalar(cudaSurfaceObject_t surfaceArg, int x) {
+  return surf1Dread<uint>(surfaceArg, x * sizeof(float));
+}
+
+__device__ void atomic_1d_surface_alias_lane(uint *scalarOut, int lane, uint value) {
+  atomicAdd(&scalarOut[lane * 4 + 1], value);
+}
+
+__global__ void surface1DPointerAliasAtomicActiveLaneStore(cudaSurfaceObject_t surf, uint4 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    uint *scalarView = reinterpret_cast<uint*>(out);
+    atomic_1d_surface_alias_lane(scalarView, tid, read_1d_atomic_alias_surface_scalar(surf, 2) + (uint)tid);
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+}`,
   surfacePointerAliasAtomicActiveLaneStore: `
 __device__ float read_atomic_alias_surface_scalar(cudaSurfaceObject_t surfaceArg, int layer) {
   return surf2DLayeredread<float>(surfaceArg, 0, 0, layer);
@@ -5687,6 +5706,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [1, 10, 20, 30, 2, 11, 21, 31, 3, 12, 22, 32, 0, 8, 0, 0] },
+          },
+          {
+            name: "surface:surf1d-pointer-alias-atomic-active-lane-store",
+            source: SOURCES.surface1DPointerAliasAtomicActiveLaneStore,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([2, 3, 5, 7]) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [1, 10, 20, 30, 2, 11, 21, 31, 3, 12, 22, 32, 0, 8, 0, 0] },
           },
           {
             name: "surface:pointer-alias-atomic-active-lane-store",
