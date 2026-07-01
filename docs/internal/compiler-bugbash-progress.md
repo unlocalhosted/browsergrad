@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-01T15:39:35Z
+Last updated: 2026-07-01T15:43:28Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | fixed vector-pointer array atomic pointer arithmetic over volume texture-to-surface active-lane fixture; continue next corpus-shaped storage/texture/control probe |
+| Active work item | volume vector-pointer array CAS/exchange active-lane fixture green; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Clean after latest fixture slice commit |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -413,6 +413,13 @@ Current verified gates:
 - hot vector-pointer array atomic pointer arithmetic probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `5.2ms`, speedup `1.31`
 - bugbash status test after vector-pointer array atomic pointer arithmetic fix: passed
 - changed-test-scope test after vector-pointer array atomic pointer arithmetic fix: passed
+- volume vector-pointer array CAS/exchange active-lane fixture: `texture-surface:volume-vector-pointer-array-cas-active-lane-return` is `1 passed / 0 failed / 0 skipped`
+- compiler fixture test after volume vector-pointer array CAS/exchange probe: passed
+- compiler typecheck after volume vector-pointer array CAS/exchange probe: passed
+- compiler unit suite after volume vector-pointer array CAS/exchange probe: `414 passed / 0 failed`
+- WGSL module suite after volume vector-pointer array CAS/exchange probe: `16 passed / 0 failed`
+- WebGPU smoke after volume vector-pointer array CAS/exchange probe: `194 passed / 0 failed / 0 skipped`
+- hot volume vector-pointer array CAS/exchange probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `2.8ms`, speedup `2.29`
 
 ## Bugs Found During Current Run
 
@@ -488,6 +495,7 @@ Current verified gates:
 | Probed green | volume texture-to-surface atomic pointer-array selection | `tex2DLayered<uint4>` plus `tex3D<uint4>` feeding `surf3Dwrite`/`surf3Dread<uint4>` then selecting a scalar pointer from a local pointer array across two vector buffers could mis-map atlas/volume lanes, lose 3D surface z indexing, choose the wrong storage handle/base, or mis-scale later whole-vector readback | existing atlas/3D texture conversion, 3D surface vector writes/reads, pointer-array storage handles, and atomic vector storage-view reads preserve volume texture-to-surface selected scalar atomics across buffers | `texture-surface:volume-atomic-pointer-array-select` `1/0/0`, smoke `191/0/0` |
 | Probed green | volume texture-to-surface atomic pointer-array active-lane return | inactive lane `return` after `tex2DLayered<uint4>` plus `tex3D<uint4>` writes `surf3Dwrite`, then active lanes read `surf3Dread<uint4>` and select a scalar pointer array for atomics; this could drop pre-return side effects, mis-handle active-lane barriers, mis-map 3D surface z, or choose the wrong vector storage view | active-lane lowering preserves pre-return volume texture-to-surface side effects, then pointer-array atomic vector writes and readback stay coherent across buffers | `texture-surface:volume-atomic-pointer-array-active-lane-return` `1/0/0`, smoke `192/0/0` |
 | Fixed | volume texture-to-surface vector-pointer array atomic active-lane return | inactive lane volume texture-to-3D-surface write then active-lane `surf3Dread<uint4>` selected a `uint4*` local pointer-array target and performed `atomicAdd(reinterpret_cast<uint*>(targets[0]) + 3, 9u)`; WGSL lowered the pointer arithmetic to a plain `u32` base and failed pipeline creation | scalar cast value type now survives binary pointer arithmetic over vector pointers, so pointer-helper atomic lowering emits `bg_ptr_atomicAdd_u32(buffer, base + lane, value)` | `texture-surface:volume-vector-pointer-array-atomic-active-lane-return` `1/0/0`, unit `413/0`, smoke `193/0/0` |
+| Probed green | volume texture-to-surface vector-pointer array CAS/exchange active-lane return | inactive lane volume texture-to-3D-surface write then active-lane `surf3Dread<uint4>` selected a `uint4*` local pointer-array target and performed `atomicCAS`/`atomicExch`/`atomicAdd` through a scalar cast plus `atomicCAS(reinterpret_cast<uint*>(targets[0]) + 0, ...)`; this could regress the scalar-cast pointer arithmetic fix across CAS/exchange paths, lose compare/exchange return values, or reorder pre-return surface side effects | existing scalar-cast pointer arithmetic value typing, pointer-helper CAS/exchange lowering, and active-lane surface side-effect lowering preserve CAS/exchange semantics through vector pointer arrays | `texture-surface:volume-vector-pointer-array-cas-active-lane-return` `1/0/0`, unit `414/0`, smoke `194/0/0` |
 | Probed green | mixed scalar/vector texture-fed layered surface write/read before return | scalar `tex2D<float>` plus vector `tex2D<uint4>` feeding typed `surf2DLayeredwrite(float4)` and post-barrier typed surface read could lose lane casts, scalar/vector conversion, surface handle/layer, or active-lane ordering | existing texture conversion, numeric casts, typed surface vector writes/reads, and active-lane lowering preserve mixed scalar/vector texture-to-surface flow | `texture-surface:mixed-vector-active-lane-return` `1/0/0`, smoke `165/0/0` |
 | Probed green | layered/3D texture vector read into 3D surface vector write before return | `tex2DLayered<float4>` plus `tex3D<float4>` feeding vector `surf3Dwrite` before active-lane return could lose atlas/volume lanes, z indexing, or deactivation order | active-lane lowering preserves layered/3D texture vector reads, 3D surface vector write, and post-barrier vector readback | `texture-surface:volume-vector-active-lane-return` `1/0/0`, smoke `138/0/0` |
 | Probed green | atlas/layered texture side effect before return | `tex2DLayered` and `tex3D` helper reads before active-lane return could mis-map atlas rows or be dropped before a later barrier | active-lane lowering preserves atlas/layered texture reads before lane deactivation | `texture:atlas-active-lane-return-read-side-effect` `1/0/0`, compiler unit `387/0`, smoke `124/0/0` |
@@ -591,6 +599,7 @@ Current added surface/texture cases:
 - `texture-surface:volume-atomic-pointer-array-select`
 - `texture-surface:volume-atomic-pointer-array-active-lane-return`
 - `texture-surface:volume-vector-pointer-array-atomic-active-lane-return`
+- `texture-surface:volume-vector-pointer-array-cas-active-lane-return`
 
 Current added pointer/control cases:
 
