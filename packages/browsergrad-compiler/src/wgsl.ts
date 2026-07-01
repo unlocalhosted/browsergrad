@@ -533,6 +533,21 @@ function emitStatementSequence(
       }
       return lines;
     }
+    const earlyBreakLoopIndex = statements.findIndex((statement, index) =>
+      statement.kind === "for" &&
+      statement.body.some((child) => splitIfTrailingBreak(child) !== undefined) &&
+      statements.slice(index + 1).some((item) => statementContainsBarrierLike(item, context) || statementContainsSubgroupCall(item))
+    );
+    if (earlyBreakLoopIndex >= 0) {
+      const flag = context.nameFor("bg_active_lane");
+      const prefix = indent(indentLevel);
+      const lines = statements.slice(0, earlyBreakLoopIndex).flatMap((statement) => emitStatement(statement, context, indentLevel));
+      lines.push(`${prefix}var ${flag}: bool = true;`);
+      for (let index = earlyBreakLoopIndex; index < statements.length; index++) {
+        lines.push(...emitStatementWithActiveFlag(statements[index]!, flag, context, indentLevel));
+      }
+      return lines;
+    }
   }
   const sharedAtomicBreakIndex = statements.findIndex((statement, index) => {
     const split = splitIfTrailingBreak(statement);
@@ -619,6 +634,9 @@ function emitStatementWithActiveFlag(
     statement.body.some((child) => statementContainsBarrierLike(child, context))
   )) {
     return emitBoundedBarrierForLoop(statement, scopedForLoopContext(statement, context), indentLevel, activeFlag);
+  }
+  if (statement.kind === "for" && statement.body.some((child) => splitIfTrailingBreak(child) !== undefined)) {
+    return emitForLoopWithActiveBreak(statement, scopedForLoopContext(statement, context), indentLevel, activeFlag);
   }
   if (statementContainsBarrierLike(statement, context) || statementContainsSubgroupCall(statement)) {
     return emitStatementWithGuard(statement, activeFlag, context, indentLevel);
@@ -2316,6 +2334,29 @@ function emitForLoopWithContinuing(
     }
     lines.push(`${indent(indentLevel + 1)}}`);
   }
+  lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitForLoopWithActiveBreak(
+  statement: Extract<CudaLiteStatement, { kind: "for" }>,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag: string,
+): string[] {
+  if (statement.update?.kind === "sequence" || statement.init?.kind === "sequence") {
+    return emitForLoopWithContinuing(statement, context, indentLevel, activeFlag);
+  }
+  const prefix = indent(indentLevel);
+  const init = statement.init?.kind === "var"
+    ? emitForVar(statement.init, context)
+    : statement.init
+      ? emitExpression(statement.init, context)
+      : "";
+  const condition = statement.condition ? emitTruthinessExpression(statement.condition, context) : "true";
+  const update = statement.update ? emitExpression(statement.update, context) : "";
+  const lines = [`${prefix}for (${init}; ${condition}; ${update}) {`];
+  lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1, { activeFlag }));
   lines.push(`${prefix}}`);
   return lines;
 }

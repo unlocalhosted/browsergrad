@@ -1543,6 +1543,19 @@ __global__ void bad(float* x, int n) {
     const divergentReturnAnalysis = analyzeCudaLite(divergentReturnBeforeBarrier);
     expect(divergentReturnAnalysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
     expect(divergentReturnAnalysis.diagnostics.find((diagnostic) => diagnostic.code === "divergent-return-before-barrier")?.severity).toBe("warning");
+    const divergentBreakBeforeBarrier = parseCudaLite(`
+__global__ void bad(uint* x, int n) {
+  int idx = threadIdx.x;
+  for (int i = 0; i < 2; ++i) {
+    if (idx >= n) break;
+    x[idx] = (uint)i;
+  }
+  __syncthreads();
+  if (idx < n) { x[idx] = x[idx] + 1u; }
+}`);
+    const divergentBreakAnalysis = analyzeCudaLite(divergentBreakBeforeBarrier);
+    expect(divergentBreakAnalysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-break-before-barrier");
+    expect(divergentBreakAnalysis.diagnostics.find((diagnostic) => diagnostic.code === "divergent-break-before-barrier")?.severity).toBe("warning");
     expect(() => compileCudaLiteKernel(`
 __global__ void warnOnly(float* x, int n) {
   int idx = threadIdx.x;
@@ -7373,6 +7386,28 @@ __global__ void breakBeforeBarrier(float *out, int N) {
     expect(compiled.wgsl).toContain("bg_loop_active_");
     expect(compiled.wgsl).toContain("workgroupBarrier();");
     expect(compiled.wgsl).not.toContain("break;\n    out");
+  });
+
+  it("keeps post-loop barriers uniform after divergent breaks", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void breakBeforePostLoopBarrier(uint *out, int N) {
+  int tid = threadIdx.x;
+  for (int i = 0; i < 3; ++i) {
+    out[tid] = (uint)i;
+    if (tid >= N) { break; }
+  }
+  __syncthreads();
+  if (tid < N) {
+    out[tid] = out[tid] + 10u;
+  }
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-break-before-barrier");
+    expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
+    expect(compiled.wgsl).toContain("bg_active_lane = (bg_active_lane && !((tid >= bg_uniforms.N)));");
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+    expect(compiled.wgsl).toContain("if (bg_active_lane) {\n    if ((tid < bg_uniforms.N))");
+    expect(compiled.wgsl).not.toContain("if ((tid >= bg_uniforms.N)) {\n      break;");
   });
 
   it("lowers dynamic extern shared memory declared inside device helpers", () => {

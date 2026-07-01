@@ -1041,6 +1041,18 @@ __global__ void activeLaneLoopAlternateReturnBarrier(float *x, int N) {
     __syncthreads();
   }
 }`,
+  activeLaneBreakPostLoopBarrier: `
+__global__ void activeLaneBreakPostLoopBarrier(uint *out, int N) {
+  int tid = threadIdx.x;
+  for (int i = 0; i < 3; ++i) {
+    out[tid] = (uint)i;
+    if (tid >= N) { break; }
+  }
+  __syncthreads();
+  if (tid < N) {
+    out[tid] = out[tid] + 10u;
+  }
+}`,
   activeLaneLoopReturnSideEffectBarrier: `
 __global__ void activeLaneLoopReturnSideEffectBarrier(float *x, int N) {
   extern __shared__ float scratch[];
@@ -5182,6 +5194,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "x",
             expectedOutput: { type: "Float32Array", data: [2, 3, 4, 5, 7, 8, 7, 8] },
+          },
+          {
+            name: "control:active-lane-break-post-loop-barrier",
+            source: SOURCES.activeLaneBreakPostLoopBarrier,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [12, 12, 12, 0] },
           },
           {
             name: "control:active-lane-loop-return-side-effect-barrier",
