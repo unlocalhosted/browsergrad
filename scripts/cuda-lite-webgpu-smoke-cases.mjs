@@ -188,6 +188,7 @@ export const textureScopeCases = [
   "surface:helper-dispatch-multiple-surfaces",
   "surface:vector-read",
   "surface:helper-vector-read-multiple-surfaces",
+  "surface:helper-vector-multi-surface-active-lane-return",
   "surface:active-lane-return-side-effect",
   "surface:helper-vector-layered-write",
 ];

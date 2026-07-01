@@ -3275,6 +3275,33 @@ __global__ void surfaceHelperVectorReadMultipleSurfaces(cudaSurfaceObject_t firs
     out[7] = secondValue.w;
   }
 }`,
+  surfaceHelperVectorMultiSurfaceActiveLaneReturn: `
+__device__ float4 read_multi_surface_vec(cudaSurfaceObject_t surfaceArg) {
+  return surf2Dread<float4>(surfaceArg, 0, 0);
+}
+
+__device__ void write_multi_surface_layered_vec(cudaSurfaceObject_t surfaceArg, float4 value, int row, int layer) {
+  surf2DLayeredwrite(value, surfaceArg, 0, row, layer);
+}
+
+__global__ void surfaceHelperVectorMultiSurfaceActiveLaneReturn(cudaSurfaceObject_t first, cudaSurfaceObject_t second, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    float4 value = read_multi_surface_vec(first);
+    write_multi_surface_layered_vec(
+      second,
+      make_float4(value.x + (float)tid, value.y + (float)tid, value.z + (float)tid, value.w + (float)tid),
+      1,
+      1
+    );
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    float4 value = surf2DLayeredread<float4>(second, 0, 1, 1);
+    write_multi_surface_layered_vec(second, value, 1, 1);
+  }
+}`,
   surfaceActiveLaneReturnSideEffect: `
 __global__ void surfaceActiveLaneReturnSideEffect(cudaSurfaceObject_t surf, int N) {
   int tid = threadIdx.x;
@@ -6918,6 +6945,25 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [2, 3, 5, 7, 11, 13, 17, 19] },
+          },
+          {
+            name: "surface:helper-vector-multi-surface-active-lane-return",
+            source: SOURCES.surfaceHelperVectorMultiSurfaceActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {},
+              surfaces: {
+                first: { width: 4, height: 1, data: new Float32Array([2, 3, 5, 7]) },
+                second: { width: 4, height: 2, data: new Float32Array(16) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "second",
+            expectedOutput: {
+              type: "Float32Array",
+              data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 6, 8, 10],
+            },
           },
           {
             name: "surface:active-lane-return-side-effect",
