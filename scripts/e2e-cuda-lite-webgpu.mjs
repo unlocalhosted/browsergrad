@@ -3142,6 +3142,40 @@ __global__ void texturePointerAliasAtomicPointerArraySelect(cudaTextureObject_t 
     summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
   }
 }`,
+  texturePointerAliasAtomicPointerArrayActiveLaneReturn: `
+__device__ uint4 read_active_pointer_array_texture_vec(cudaTextureObject_t texArg) {
+  return tex2D<uint4>(texArg, 0.5f, 0.5f);
+}
+
+__device__ void atomic_active_array_select_texture_vec(uint *scalarOut, uint4 value) {
+  atomicAdd(&scalarOut[0], value.x);
+  atomicAdd(&scalarOut[1], value.y);
+  atomicAdd(&scalarOut[2], value.z);
+  atomicAdd(&scalarOut[3], value.w);
+}
+
+__global__ void texturePointerAliasAtomicPointerArrayActiveLaneReturn(cudaTextureObject_t tex, uint4 *out, uint4 *shadow, uint *summary, int N) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    uint *slots[2];
+    slots[0] = reinterpret_cast<uint*>(shadow + 1);
+    slots[1] = reinterpret_cast<uint*>(out + 1);
+    uint4 value = read_active_pointer_array_texture_vec(tex);
+    int pick = value.y > 0u ? 1 : 0;
+    atomic_active_array_select_texture_vec(slots[pick], value);
+    atomicAdd(slots[0] + 2, 5u);
+    return;
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
   textureSurfaceRoundtrip: `
 __global__ void textureSurfaceRoundtrip(cudaSurfaceObject_t surf, cudaTextureObject_t tex, float *out) {
   if (threadIdx.x == 0) {
@@ -7469,6 +7503,30 @@ const html = String.raw`<!doctype html>
                   data: new Float32Array([2, 3, 5, 7]),
                 },
               },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [10172] },
+          },
+          {
+            name: "texture:pointer-alias-atomic-pointer-array-active-lane-return",
+            source: SOURCES.texturePointerAliasAtomicPointerArrayActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 3 },
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [10172] },

@@ -182,6 +182,7 @@ export const textureScopeCases = [
   "texture:pointer-alias-atomic-vector-readback",
   "texture:pointer-alias-atomic-vector-compound",
   "texture:pointer-alias-atomic-pointer-array-select",
+  "texture:pointer-alias-atomic-pointer-array-active-lane-return",
   "texture-surface:roundtrip",
   "texture-surface:vector-helper-roundtrip",
   "texture-surface:active-lane-return-side-effect",
