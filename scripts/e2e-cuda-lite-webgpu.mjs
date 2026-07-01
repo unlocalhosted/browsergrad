@@ -3777,6 +3777,72 @@ __global__ void textureSurfaceVolumeVectorPointerArrayCompoundActiveLaneReturn(c
     summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
   }
 }`,
+  textureSurfaceVolumeVectorPointerArrayMinMaxActiveLaneReturn: `
+__device__ uint4 sample_surface_volume_vector_pointer_minmax_vec(cudaTextureObject_t texArg, int lane) {
+  uint4 layered = tex2DLayered<uint4>(texArg, 0.0f, 1.0f, 1.0f);
+  uint4 volume = tex3D<uint4>(texArg, 2.0f, 1.0f, 1.0f);
+  return make_uint4(
+    layered.x + volume.x + (uint)lane,
+    layered.y + volume.y + (uint)lane,
+    layered.z + volume.z + (uint)lane,
+    layered.w + volume.w + (uint)lane
+  );
+}
+
+__device__ void write_surface_volume_vector_pointer_minmax_vec(cudaSurfaceObject_t surfaceArg, uint4 value) {
+  surf3Dwrite(value, surfaceArg, 0, 0, 1);
+}
+
+__device__ uint4 read_surface_volume_vector_pointer_minmax_vec(cudaSurfaceObject_t surfaceArg) {
+  return surf3Dread<uint4>(surfaceArg, 0, 0, 1);
+}
+
+__device__ uint minmax_surface_volume_vector_pointer_slot(uint4 *vecOut, uint4 value) {
+  uint *scalarOut = reinterpret_cast<uint*>(vecOut);
+  uint oldX = atomicMin(scalarOut + 0, value.x);
+  uint oldY = atomicMax(scalarOut + 1, value.y);
+  uint oldZ = atomicMin(scalarOut + 2, 5u);
+  uint oldW = atomicMax(scalarOut + 3, value.w);
+  return oldX + oldY + oldZ + oldW;
+}
+
+__device__ void add_surface_volume_vector_pointer_minmax_slot_x(uint4 *vectorOut, int lane, uint value) {
+  vectorOut[lane].x += value;
+}
+
+__device__ void add_surface_volume_vector_pointer_minmax_slot_z(uint4 *vectorOut, int lane, uint value) {
+  vectorOut[lane].z += value;
+}
+
+__global__ void textureSurfaceVolumeVectorPointerArrayMinMaxActiveLaneReturn(cudaSurfaceObject_t surf, cudaTextureObject_t tex, uint4 *out, uint4 *shadow, uint *summary, int N) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    uint4 sampled = sample_surface_volume_vector_pointer_minmax_vec(tex, tid);
+    write_surface_volume_vector_pointer_minmax_vec(surf, sampled);
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    uint4 value = read_surface_volume_vector_pointer_minmax_vec(surf);
+    uint4 *targets[2];
+    targets[0] = shadow + 1;
+    targets[1] = out + 1;
+    int pick = value.x > 0u ? 1 : 0;
+    uint token = minmax_surface_volume_vector_pointer_slot(targets[pick], value);
+    add_surface_volume_vector_pointer_minmax_slot_x(targets[pick], 0, token);
+    add_surface_volume_vector_pointer_minmax_slot_z(targets[0], 0, 9u);
+    summary[0] = token;
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    summary[0] = summary[0] + (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
   surfaceHelperDispatchMultipleSurfaces: `
 __device__ float read_surface_alias(cudaSurfaceObject_t surfaceArg) {
   float value = 0.0f;
@@ -7797,6 +7863,33 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [10525] },
+          },
+          {
+            name: "texture-surface:volume-vector-pointer-array-minmax-active-lane-return",
+            source: SOURCES.textureSurfaceVolumeVectorPointerArrayMinMaxActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [10429] },
           },
           {
             name: "surface:helper-dispatch-multiple-surfaces",

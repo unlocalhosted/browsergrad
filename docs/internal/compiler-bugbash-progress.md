@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-01T16:19:38Z
+Last updated: 2026-07-01T16:23:48Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,9 +11,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | vector pointer flat-lane storage/helper failures fixed; continue next corpus-shaped storage/texture/control probe |
+| Active work item | volume vector-pointer array min/max active-lane fixture green; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
-| Worktree | Dirty until current vector pointer flat-lane slice is committed |
+| Worktree | Dirty until current min/max fixture slice is committed |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
 
 ## How To Track This
@@ -429,11 +429,17 @@ Current verified gates:
 - hot volume vector-pointer array compound active-lane probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `5.7ms`, speedup `1.33`
 - bugbash status tooling after vector pointer flat-lane storage fix: passed
 - changed-test-scope tooling after vector pointer flat-lane storage fix: passed
+- volume vector-pointer array min/max active-lane fixture: `texture-surface:volume-vector-pointer-array-minmax-active-lane-return` is `1 passed / 0 failed / 0 skipped`
+- WebGPU fixture test after min/max active-lane probe: passed
+- WebGPU smoke after min/max active-lane probe: `196 passed / 0 failed / 0 skipped`
+- hot volume vector-pointer array min/max active-lane probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `5.3ms`, speedup `1.36`
+- changed-test-scope tooling after min/max active-lane probe: passed
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Probed green | volume vector pointer-array min/max before active-lane return | volume texture plus 3D surface read feeds `atomicMin`/`atomicMax` through a selected `uint4*` pointer array, then performs vector member compound writes before a later barrier | existing vector pointer helper min/max and member compound lowering preserves flat scalar lanes and active-lane side effects | `texture-surface:volume-vector-pointer-array-minmax-active-lane-return` `1/0/0`; smoke `196/0/0`; hot gate `5/0/0`, speedup `1.36` |
 | Fixed | vector pointer lane offset helpers | non-atomic member writes through pointer helpers skipped the helper path, so `helpers:vector-lane-pointer-offset-helper` wrote the wrong scalar lane | pointer member assignment now routes lexical device pointer params through device pointer helper lowering before direct storage fallback | unit guard `preserves scalar-to-vector pointer alias byte offsets`; focused WebGPU helper case green; smoke `195/0/0` |
 | Fixed | device-global vector pointer arrays | `&g_ptr_values[2]` for `__device__ float3[]` stored vector element index `2`, not flat scalar lane index `6`, causing helper-selected pointer arrays to read stale lanes | device-global pointer argument parts now scale vector element bases by lane count before helper dispatch | unit guard `keeps device-global vector pointer-array entries in flat lanes`; smoke `195/0/0` |
 | Fixed | shared/local vector flat helper reads and writes | shared/local vector helper flat reads emitted whole vectors into scalar constructors, including invalid WGSL like `vec4<f32>(vec4<f32>, ...)` | storage vector flat read/write helpers now decompose flat lane indexes into vector element plus lane before scalar load/store | unit guard `reads shared vector pointer helpers through scalar lanes`; `storage:cross-space-vector-alias-consistency` green; smoke `195/0/0` |
@@ -634,7 +640,7 @@ Current added pointer/control cases:
 - `control:active-lane-shared-return-side-effect-barrier`
 - `control:subgroup-truthiness-assignment-scalar`
 
-Smoke current: `185/0/0`.
+Smoke current: `196/0/0`.
 
 Full source e2e current: `221/0/0`.
 
