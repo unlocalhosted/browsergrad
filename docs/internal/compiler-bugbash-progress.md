@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-01T16:29:02Z
+Last updated: 2026-07-01T16:35:06Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,9 +11,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | post-loop divergent break before barrier fixed; continue next corpus-shaped storage/texture/control probe |
+| Active work item | while/do-while divergent break before barrier fixed; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
-| Worktree | Dirty until current post-loop break/barrier fix is committed |
+| Worktree | Dirty until current while/do-while break/barrier fix is committed |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
 
 ## How To Track This
@@ -441,11 +441,19 @@ Current verified gates:
 - WebGPU fixture test after post-loop break/barrier fix: passed
 - WebGPU smoke after post-loop break/barrier fix: `197 passed / 0 failed / 0 skipped`
 - hot post-loop break/barrier probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `1.2ms`, speedup `3.83`
+- while/do-while post-loop divergent break/barrier fixtures: `2 passed / 0 failed / 0 skipped`
+- hot while/do-while post-loop break/barrier probe: repeat `5`, warmup `1`, `10 passed / 0 failed / 0 skipped`, best warm `3.0ms` / `2.7ms`, speedups `1.17` / `1.07`
+- compiler unit suite after while/do-while break/barrier fix: `420 passed / 0 failed`
+- compiler typecheck after while/do-while break/barrier fix: passed
+- WGSL module suite after while/do-while break/barrier fix: `16 passed / 0 failed`
+- WebGPU fixture test after while/do-while break/barrier fix: passed
+- WebGPU smoke after while/do-while break/barrier fix: `199 passed / 0 failed / 0 skipped`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | while/do-while divergent break before later barrier | `while` and `do-while` loops with thread-dependent `break` before a later `__syncthreads()` still emitted raw loop breaks even after the `for`-loop fix | active-lane break lowering now detects direct trailing breaks in `for`, `while`, and `do-while` loop bodies before later barriers/subgroup calls | unit guard `keeps post-loop barriers uniform after while and do-while divergent breaks`; WebGPU fixtures `2/0/0`; smoke `199/0/0`; hot gate `10/0/0`, speedups `1.17` / `1.07` |
 | Fixed | post-loop divergent break before later barrier | `if (tid >= N) break;` inside a loop followed by `__syncthreads()` emitted raw WGSL `break` and only warned about unguarded storage writes, leaving barrier control flow non-uniform | analyzer now emits `divergent-break-before-barrier`; WGSL sequence lowering turns direct for-loop divergent breaks before later barriers into active-lane flag updates and predicates following statements | unit guard `keeps post-loop barriers uniform after divergent breaks`; `control:active-lane-break-post-loop-barrier` `1/0/0`; smoke `197/0/0`; hot gate `5/0/0`, speedup `3.83` |
 | Probed green | volume vector pointer-array min/max before active-lane return | volume texture plus 3D surface read feeds `atomicMin`/`atomicMax` through a selected `uint4*` pointer array, then performs vector member compound writes before a later barrier | existing vector pointer helper min/max and member compound lowering preserves flat scalar lanes and active-lane side effects | `texture-surface:volume-vector-pointer-array-minmax-active-lane-return` `1/0/0`; smoke `196/0/0`; hot gate `5/0/0`, speedup `1.36` |
 | Fixed | vector pointer lane offset helpers | non-atomic member writes through pointer helpers skipped the helper path, so `helpers:vector-lane-pointer-offset-helper` wrote the wrong scalar lane | pointer member assignment now routes lexical device pointer params through device pointer helper lowering before direct storage fallback | unit guard `preserves scalar-to-vector pointer alias byte offsets`; focused WebGPU helper case green; smoke `195/0/0` |
@@ -641,6 +649,9 @@ Current added pointer/control cases:
 - `control:active-lane-alternate-return-barrier`
 - `control:active-lane-nested-return-barrier`
 - `control:active-lane-loop-alternate-return-barrier`
+- `control:active-lane-break-post-loop-barrier`
+- `control:active-lane-while-break-post-loop-barrier`
+- `control:active-lane-do-while-break-post-loop-barrier`
 - `control:active-lane-loop-return-side-effect-barrier`
 - `control:active-lane-vector-return-side-effect-barrier`
 - `control:active-lane-pointer-alias-return-side-effect-barrier`
@@ -648,7 +659,7 @@ Current added pointer/control cases:
 - `control:active-lane-shared-return-side-effect-barrier`
 - `control:subgroup-truthiness-assignment-scalar`
 
-Smoke current: `197/0/0`.
+Smoke current: `199/0/0`.
 
 Full source e2e current: `221/0/0`.
 

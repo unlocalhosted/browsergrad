@@ -534,8 +534,7 @@ function emitStatementSequence(
       return lines;
     }
     const earlyBreakLoopIndex = statements.findIndex((statement, index) =>
-      statement.kind === "for" &&
-      statement.body.some((child) => splitIfTrailingBreak(child) !== undefined) &&
+      loopBodyHasDirectTrailingBreak(statement) &&
       statements.slice(index + 1).some((item) => statementContainsBarrierLike(item, context) || statementContainsSubgroupCall(item))
     );
     if (earlyBreakLoopIndex >= 0) {
@@ -635,8 +634,8 @@ function emitStatementWithActiveFlag(
   )) {
     return emitBoundedBarrierForLoop(statement, scopedForLoopContext(statement, context), indentLevel, activeFlag);
   }
-  if (statement.kind === "for" && statement.body.some((child) => splitIfTrailingBreak(child) !== undefined)) {
-    return emitForLoopWithActiveBreak(statement, scopedForLoopContext(statement, context), indentLevel, activeFlag);
+  if (loopBodyHasDirectTrailingBreak(statement)) {
+    return emitLoopWithActiveBreak(statement, context, indentLevel, activeFlag);
   }
   if (statementContainsBarrierLike(statement, context) || statementContainsSubgroupCall(statement)) {
     return emitStatementWithGuard(statement, activeFlag, context, indentLevel);
@@ -1224,6 +1223,13 @@ function statementHasEarlyBreakBeforeBarrier(statement: CudaLiteStatement, conte
   return statement.body.some((child, index) =>
     splitIfTrailingBreak(child) !== undefined && statement.body.slice(index + 1).some((item) => statementContainsBarrierLike(item, context))
   );
+}
+
+function loopBodyHasDirectTrailingBreak(
+  statement: CudaLiteStatement,
+): statement is Extract<CudaLiteStatement, { kind: "for" | "while" | "do-while" }> {
+  return (statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while") &&
+    statement.body.some((child) => splitIfTrailingBreak(child) !== undefined);
 }
 
 function statementContainsBarrierLike(statement: CudaLiteStatement, context: EmitContext): boolean {
@@ -2338,12 +2344,14 @@ function emitForLoopWithContinuing(
   return lines;
 }
 
-function emitForLoopWithActiveBreak(
-  statement: Extract<CudaLiteStatement, { kind: "for" }>,
+function emitLoopWithActiveBreak(
+  statement: Extract<CudaLiteStatement, { kind: "for" | "while" | "do-while" }>,
   context: EmitContext,
   indentLevel: number,
   activeFlag: string,
 ): string[] {
+  if (statement.kind === "while") return emitWhileLoopWithActiveBreak(statement, context, indentLevel, activeFlag);
+  if (statement.kind === "do-while") return emitDoWhileLoopWithActiveBreak(statement, context, indentLevel, activeFlag);
   if (statement.update?.kind === "sequence" || statement.init?.kind === "sequence") {
     return emitForLoopWithContinuing(statement, context, indentLevel, activeFlag);
   }
@@ -2357,6 +2365,35 @@ function emitForLoopWithActiveBreak(
   const update = statement.update ? emitExpression(statement.update, context) : "";
   const lines = [`${prefix}for (${init}; ${condition}; ${update}) {`];
   lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1, { activeFlag }));
+  lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitWhileLoopWithActiveBreak(
+  statement: Extract<CudaLiteStatement, { kind: "while" }>,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag: string,
+): string[] {
+  const prefix = indent(indentLevel);
+  const condition = emitTruthinessExpression(statement.condition, context);
+  const lines = [`${prefix}while ((${condition}) && ${activeFlag}) {`];
+  lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1, { activeFlag }));
+  lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitDoWhileLoopWithActiveBreak(
+  statement: Extract<CudaLiteStatement, { kind: "do-while" }>,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag: string,
+): string[] {
+  const prefix = indent(indentLevel);
+  const condition = emitTruthinessExpression(statement.condition, context);
+  const lines = [`${prefix}loop {`];
+  lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1, { activeFlag }));
+  lines.push(`${indent(indentLevel + 1)}if (!(${activeFlag} && (${condition}))) { break; }`);
   lines.push(`${prefix}}`);
   return lines;
 }

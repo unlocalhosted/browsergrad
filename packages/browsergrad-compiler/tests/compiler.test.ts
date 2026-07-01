@@ -7410,6 +7410,41 @@ __global__ void breakBeforePostLoopBarrier(uint *out, int N) {
     expect(compiled.wgsl).not.toContain("if ((tid >= bg_uniforms.N)) {\n      break;");
   });
 
+  it("keeps post-loop barriers uniform after while and do-while divergent breaks", () => {
+    const whileCompiled = compileCudaLiteKernel(`
+__global__ void whileBreakBeforePostLoopBarrier(uint *out, int N) {
+  int tid = threadIdx.x;
+  int i = 0;
+  while (i < 3) {
+    out[tid] = (uint)i;
+    if (tid >= N) { break; }
+    i++;
+  }
+  __syncthreads();
+  if (tid < N) { out[tid] = out[tid] + 10u; }
+}`, { workgroupSize: [4, 1, 1] });
+    const doWhileCompiled = compileCudaLiteKernel(`
+__global__ void doWhileBreakBeforePostLoopBarrier(uint *out, int N) {
+  int tid = threadIdx.x;
+  int i = 0;
+  do {
+    out[tid] = (uint)i;
+    if (tid >= N) { break; }
+    i++;
+  } while (i < 3);
+  __syncthreads();
+  if (tid < N) { out[tid] = out[tid] + 10u; }
+}`, { workgroupSize: [4, 1, 1] });
+
+    for (const compiled of [whileCompiled, doWhileCompiled]) {
+      expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-break-before-barrier");
+      expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
+      expect(compiled.wgsl).toContain("bg_active_lane = (bg_active_lane && !((tid >= bg_uniforms.N)));");
+      expect(compiled.wgsl).toContain("workgroupBarrier();");
+      expect(compiled.wgsl).not.toContain("if ((tid >= bg_uniforms.N)) {\n      break;");
+    }
+  });
+
   it("lowers dynamic extern shared memory declared inside device helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ uint reduce_one(uint value) {

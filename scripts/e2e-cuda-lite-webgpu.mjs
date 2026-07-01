@@ -1053,6 +1053,34 @@ __global__ void activeLaneBreakPostLoopBarrier(uint *out, int N) {
     out[tid] = out[tid] + 10u;
   }
 }`,
+  activeLaneWhileBreakPostLoopBarrier: `
+__global__ void activeLaneWhileBreakPostLoopBarrier(uint *out, int N) {
+  int tid = threadIdx.x;
+  int i = 0;
+  while (i < 3) {
+    out[tid] = (uint)i;
+    if (tid >= N) { break; }
+    i++;
+  }
+  __syncthreads();
+  if (tid < N) {
+    out[tid] = out[tid] + 10u;
+  }
+}`,
+  activeLaneDoWhileBreakPostLoopBarrier: `
+__global__ void activeLaneDoWhileBreakPostLoopBarrier(uint *out, int N) {
+  int tid = threadIdx.x;
+  int i = 0;
+  do {
+    out[tid] = (uint)i;
+    if (tid >= N) { break; }
+    i++;
+  } while (i < 3);
+  __syncthreads();
+  if (tid < N) {
+    out[tid] = out[tid] + 10u;
+  }
+}`,
   activeLaneLoopReturnSideEffectBarrier: `
 __global__ void activeLaneLoopReturnSideEffectBarrier(float *x, int N) {
   extern __shared__ float scratch[];
@@ -5198,6 +5226,34 @@ const html = String.raw`<!doctype html>
           {
             name: "control:active-lane-break-post-loop-barrier",
             source: SOURCES.activeLaneBreakPostLoopBarrier,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [12, 12, 12, 0] },
+          },
+          {
+            name: "control:active-lane-while-break-post-loop-barrier",
+            source: SOURCES.activeLaneWhileBreakPostLoopBarrier,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [12, 12, 12, 0] },
+          },
+          {
+            name: "control:active-lane-do-while-break-post-loop-barrier",
+            source: SOURCES.activeLaneDoWhileBreakPostLoopBarrier,
             options: { workgroupSize: [4, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
             input: () => ({
