@@ -2501,9 +2501,10 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     if (isCudaVectorType(valueType)) return readTextureVector(texture, x, y, valueType);
     return texture.data[(y * texture.width + x) * textureChannels(texture)] ?? 0;
   }
-  if (name === "surf2Dread" || name === "surf2DLayeredread" || name === "surf3Dread") {
+  if (name === "surf1Dread" || name === "surf2Dread" || name === "surf2DLayeredread" || name === "surf3Dread") {
+    const is1D = name === "surf1Dread";
     const hasZ = name === "surf2DLayeredread" || name === "surf3Dread";
-    const returnForm = hasZ ? expression.args.length <= 4 : expression.args.length <= 3;
+    const returnForm = is1D ? expression.args.length <= 2 : hasZ ? expression.args.length <= 4 : expression.args.length <= 3;
     const target = returnForm ? undefined : expression.args[0];
     const surfaceRef = returnForm ? expression.args[0] : expression.args[1];
     if (!returnForm && !target) throw compilerFailure("surf2Dread expects output target");
@@ -2512,7 +2513,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const surface = context.surfaces[surfaceName];
     if (!surface) throw compilerFailure(`missing surface input '${surfaceName}'`);
     const xArg = returnForm ? expression.args[1] : expression.args[2];
-    const yArg = returnForm ? expression.args[2] : expression.args[3];
+    const yArg = is1D ? undefined : returnForm ? expression.args[2] : expression.args[3];
     const zArg = hasZ ? returnForm ? expression.args[3] : expression.args[4] : undefined;
     const targetLValue = target
       ? target.kind === "unary" && target.operator === "&"
@@ -2521,7 +2522,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       : undefined;
     const valueType = expression.templateValueType ?? targetLValue?.valueType ?? "float";
     const x = Math.trunc(evalNumber(xArg!, context) / 4);
-    const y = Math.trunc(evalNumber(yArg!, context));
+    const y = yArg ? Math.trunc(evalNumber(yArg, context)) : 0;
     const z = zArg ? Math.trunc(evalNumber(zArg, context)) : 0;
     const readLane = (lane: number): number => {
       const laneX = x + lane;

@@ -1873,6 +1873,21 @@ __global__ void surface1DWrite(cudaSurfaceObject_t outputSurf) {
     surf1Dwrite(37.0f, outputSurf, 2 * sizeof(float));
   }
 }`,
+  surface1DRead: `
+__device__ float read_1d_surface(cudaSurfaceObject_t surfaceArg, int x) {
+  return surf1Dread<float>(surfaceArg, x * sizeof(float));
+}
+
+__global__ void surface1DRead(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    float pointerValue = 0.0f;
+    surf1Dread(&pointerValue, surf, 2 * sizeof(float));
+    float returnValue = read_1d_surface(surf, 3);
+    out[0] = pointerValue;
+    out[1] = returnValue;
+    out[2] = pointerValue + returnValue;
+  }
+}`,
   surfaceHelperVectorLayeredWrite: `
 __device__ void write_layered_vec(cudaSurfaceObject_t surfaceArg, float4 value, int row, int layer) {
   surf2DLayeredwrite(value, surfaceArg, 0, row, layer);
@@ -6700,6 +6715,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "outputSurf",
             expectedOutput: { type: "Float32Array", data: [0, 0, 37, 0] },
+          },
+          {
+            name: "surface:surf1d-read",
+            source: SOURCES.surface1DRead,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(3),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([11, 13, 17, 19]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [17, 19, 36] },
           },
           {
             name: "intrinsic:reciprocal",

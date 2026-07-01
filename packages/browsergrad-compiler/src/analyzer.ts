@@ -127,6 +127,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["tex2DLayered", [4, 4]],
   ["tex3D", [4, 4]],
   ["texCubemap", [4, 4]],
+  ["surf1Dread", [2, 4]],
   ["surf2Dread", [3, 5]],
   ["surf2DLayeredread", [4, 6]],
   ["surf3Dread", [4, 6]],
@@ -1655,9 +1656,11 @@ function validateCallExpression(
     if (requiresShaderF16(expression.templateValueType)) requiredFeatures.add("shader-f16");
     return expressionInfoForTextureRead(expression);
   }
-  if (callName === "surf2Dread" || callName === "surf2DLayeredread" || callName === "surf3Dread") {
+  if (callName === "surf1Dread" || callName === "surf2Dread" || callName === "surf2DLayeredread" || callName === "surf3Dread") {
     validateSurf2DRead(expression, callName, scope, diagnostics, walkExpression);
-    const returnForm = callName === "surf2DLayeredread" || callName === "surf3Dread" ? expression.args.length <= 4 : expression.args.length <= 3;
+    const returnForm = callName === "surf1Dread"
+      ? expression.args.length <= 2
+      : callName === "surf2DLayeredread" || callName === "surf3Dread" ? expression.args.length <= 4 : expression.args.length <= 3;
     return returnForm ? expressionInfoForTextureRead(expression) : { kind: "scalar", valueType: "voidptr" };
   }
   if (callName === "surf2Dwrite" || callName === "surf1Dwrite" || callName === "surf2DLayeredwrite" || callName === "surf3Dwrite") {
@@ -2418,8 +2421,9 @@ function validateSurf2DRead(
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
 ): void {
+  const is1D = callName === "surf1Dread";
   const hasZ = callName === "surf2DLayeredread" || callName === "surf3Dread";
-  const returnForm = hasZ ? expression.args.length <= 4 : expression.args.length <= 3;
+  const returnForm = is1D ? expression.args.length <= 2 : hasZ ? expression.args.length <= 4 : expression.args.length <= 3;
   const target = returnForm ? undefined : expression.args[0];
   if (target) {
     const lvalue = target.kind === "unary" && target.operator === "&" ? target.argument : target;
@@ -2436,8 +2440,8 @@ function validateSurf2DRead(
     }
   }
   const end = returnForm
-    ? hasZ ? 4 : 3
-    : hasZ ? 5 : 4;
+    ? is1D ? 2 : hasZ ? 4 : 3
+    : is1D ? 3 : hasZ ? 5 : 4;
   for (const coord of returnForm ? expression.args.slice(1, end) : expression.args.slice(2, end)) {
     validateScalarOperand(walkExpression(coord, scope), coord.span, diagnostics);
   }

@@ -3509,7 +3509,7 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
     if (expression.callee.kind === "member" && (expression.callee.property === "any" || expression.callee.property === "all")) return "bool";
     if (expression.callee.kind === "member" && expression.callee.property === "ballot") return "uint";
     if (name !== undefined && isTextureReadCall(name)) return expression.templateValueType ?? "float";
-    if (name === "surf2Dread" || name === "surf2DLayeredread" || name === "surf3Dread") return expression.templateValueType ?? "float";
+    if (name === "surf1Dread" || name === "surf2Dread" || name === "surf2DLayeredread" || name === "surf3Dread") return expression.templateValueType ?? "float";
     const atomicReturnType = atomicCallReturnValueType(name, expression.args, context);
     if (atomicReturnType !== undefined) return atomicReturnType;
     const cooperativeReturnType = name === undefined ? undefined : cooperativeReductionReturnType(name, expression.args, context);
@@ -4217,6 +4217,19 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
           textureArgs,
           expression.templateValueType,
         );
+      }
+      return `${name}(${args.join(", ")})`;
+    case "surf1Dread":
+      if (expression.args.length === 2) {
+        const targetType = expression.templateValueType ?? "float";
+        return emitSurfaceReadExpression(expression.args[0]!, expression.args[1]!, zeroExpression(expression.span), undefined, targetType, textureSurfaceContext(context));
+      }
+      if (expression.args.length >= 3) {
+        const target = expression.args[0]!;
+        const lvalue = target.kind === "unary" && target.operator === "&" ? target.argument : target;
+        const targetType = expressionValueTypeForEmit(lvalue, context) ?? "float";
+        const value = emitSurfaceReadExpression(expression.args[1]!, expression.args[2]!, zeroExpression(expression.span), undefined, targetType, textureSurfaceContext(context));
+        return `${emitExpression(lvalue, context, "lvalue")} = ${value}`;
       }
       return `${name}(${args.join(", ")})`;
     case "surf2Dread":
