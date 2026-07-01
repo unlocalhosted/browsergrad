@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-01T15:17:03Z
+Last updated: 2026-07-01T15:19:46Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | atlas/3D texture vector atomic pointer-array selection real WebGPU fixture green; continue next corpus-shaped storage/texture/control probe |
+| Active work item | surface vector atomic pointer-array selection real WebGPU fixture green; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Clean after latest fixture slice commit |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -372,6 +372,12 @@ Current verified gates:
 - compiler unit suite after atlas/3D texture vector atomic pointer-array selection probe: `412 passed / 0 failed`
 - WebGPU smoke after atlas/3D texture vector atomic pointer-array selection probe: `187 passed / 0 failed / 0 skipped`
 - hot atlas/3D texture vector atomic pointer-array selection probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `4.3ms`, speedup `1.35`
+- surface vector atomic pointer-array selection fixture: `surface:pointer-alias-atomic-pointer-array-select` is `1 passed / 0 failed / 0 skipped`
+- compiler fixture test after surface vector atomic pointer-array selection probe: passed
+- compiler typecheck after surface vector atomic pointer-array selection probe: passed
+- compiler unit suite after surface vector atomic pointer-array selection probe: `412 passed / 0 failed`
+- WebGPU smoke after surface vector atomic pointer-array selection probe: `188 passed / 0 failed / 0 skipped`
+- hot surface vector atomic pointer-array selection probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `4.5ms`, speedup `1.27`
 
 ## Bugs Found During Current Run
 
@@ -397,6 +403,7 @@ Current verified gates:
 | Probed green | surface read feeding atomic pointer-alias store before return | typed layered surface scalar read feeding an atomic scalar pointer alias over `uint4*` storage before active-lane return could mis-promote vector storage, mis-address scalar lanes, or lose later direct vector stores to atomic-promoted output | existing surface read lowering, atomic vector storage promotion, and scalar-view atomic pointer writes preserve inactive-lane side effects across active-lane barrier lowering | `surface:pointer-alias-atomic-active-lane-store` `1/0/0`, smoke `169/0/0` |
 | Probed green | surface atomic vector readback after pointer alias atomic | `uint4 value = out[1]` after a surface-fed scalar atomic alias over `uint4*` storage could read scalar lanes `1..4` instead of vector element lanes `4..7` or lose atomic promotion on the readback path | existing atomic vector storage-view reads scale whole-vector indexes before lane-wise atomic loads for surface-fed pointer alias atomics | `surface:pointer-alias-atomic-vector-readback` `1/0/0`, smoke `170/0/0` |
 | Probed green | surface atomic vector compound/member writes through helper | `vectorOut[lane] += value` and `vectorOut[lane].y += value` through pointer helpers targeting surface-fed atomic-promoted vector storage could update wrong scalar lanes or bypass atomic vector storage helpers | existing pointer helper lowering keeps vector-element indexes and atomic vector helpers scale read/write paths for surface-fed pointer alias atomics | `surface:pointer-alias-atomic-vector-compound` `1/0/0`, smoke `171/0/0` |
+| Probed green | surface atomic pointer-array selection | layered surface `uint4` data selecting a scalar pointer from a local pointer array across two vector buffers could choose the wrong storage handle/base, drop dynamic pointer-array index lowering, or mis-scale later whole-vector readback | existing pointer-array storage handles and atomic vector storage-view reads preserve selected surface-fed scalar atomics across buffers | `surface:pointer-alias-atomic-pointer-array-select` `1/0/0`, smoke `188/0/0` |
 | Probed green | uint4/int4 surface vector write/read before active-lane return | `surf2DLayeredwrite(uint4/int4)` plus templated layered reads before/after active-lane return could lose signedness/unsigned casts or fail full-width vector lane packing | existing vector storage/surface lowering preserves full-width signed and unsigned surface writes and reads across active-lane barrier lowering; surface fixtures remain `Float32Array`-backed by current runtime contract | `surface:uint4-vector-active-lane-return,surface:int4-vector-active-lane-return` `2/0/0`, smoke `146/0/0` |
 | Probed green | float2/uint2/int2 surface vector write/read before active-lane return | `surf2DLayeredwrite(float2/uint2/int2)` plus templated layered reads before/after active-lane return could mis-scale 2-lane vectors, drop signedness/unsigned casts, or reuse 3/4-lane assumptions | existing vector storage/surface lowering preserves 2-lane float/signed/unsigned surface writes and reads across active-lane barrier lowering; surface fixtures remain `Float32Array`-backed by current runtime contract | `surface:float2-vector-active-lane-return,surface:uint2-vector-active-lane-return,surface:int2-vector-active-lane-return` `3/0/0`, smoke `149/0/0` |
 | Probed green | helper layered vector write | vector `surf2DLayeredwrite` through `cudaSurfaceObject_t` helper param could lose handle/lane/layer semantics | existing surface dispatch + vector lane writes held | `surface:helper-vector-layered-write` |
@@ -486,6 +493,7 @@ Current added surface/texture cases:
 - `surface:pointer-alias-atomic-active-lane-store`
 - `surface:pointer-alias-atomic-vector-readback`
 - `surface:pointer-alias-atomic-vector-compound`
+- `surface:pointer-alias-atomic-pointer-array-select`
 - `surface:uint4-vector-active-lane-return`
 - `surface:int4-vector-active-lane-return`
 - `surface:helper-vector-layered-write`
