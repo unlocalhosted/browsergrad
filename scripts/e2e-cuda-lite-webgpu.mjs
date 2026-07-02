@@ -661,6 +661,28 @@ __global__ void deviceGlobalVectorToScalarAtomic(uint* out) {
   add_global_scalar(scalarView, idx, 5u + (uint)idx);
   out[idx] = scalarView[idx];
 }`,
+  deviceGlobalVectorScalarAtomicActiveLaneReturn: `
+__device__ uint4 g_active_vec[2];
+
+__device__ void add_active_global_scalar(uint* out, int idx, uint value) {
+  atomicAdd(&out[idx], value);
+}
+
+__global__ void deviceGlobalVectorScalarAtomicActiveLaneReturn(uint* out, int N) {
+  int idx = threadIdx.x;
+  uint* scalarView = reinterpret_cast<uint*>(g_active_vec + 1);
+  if (idx < 2) {
+    add_active_global_scalar(scalarView, idx, 5u + (uint)idx);
+  }
+  if (idx >= N) {
+    return;
+  }
+  __syncthreads();
+  if (idx == 0) {
+    out[0] = scalarView[0];
+    out[1] = scalarView[1];
+  }
+}`,
   deviceGlobalFloat3VectorToScalarAtomic: `
 __device__ float3 g_f3[2];
 
@@ -691,6 +713,35 @@ __global__ void deviceGlobalVectorPointerArray(float4 *out) {
     ptrs[1] = &g_ptr_values[1];
     ptrs[2] = &g_ptr_values[2];
     float3 total = sum_global_ptrs(ptrs[0], ptrs[1], ptrs[2]);
+    out[0] = make_float4(*ptrs[2], 1.0f);
+    out[1] = make_float4(total, 0.0f);
+  }
+}`,
+  deviceGlobalVectorPointerArrayActiveLaneReturn: `
+__device__ float3 g_active_ptr_values[3];
+
+__device__ float3 sum_active_global_ptrs(float3 *a, float3 *b, float3 *c) {
+  return *a + *b + *c;
+}
+
+__global__ void deviceGlobalVectorPointerArrayActiveLaneReturn(float4 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid < 3) {
+    g_active_ptr_values[tid] = make_float3(
+      2.0f + 5.0f * (float)tid,
+      3.0f + 8.0f * (float)tid,
+      5.0f + 9.0f * (float)tid);
+  }
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    float3 *ptrs[3];
+    ptrs[0] = &g_active_ptr_values[0];
+    ptrs[1] = &g_active_ptr_values[1];
+    ptrs[2] = &g_active_ptr_values[2];
+    float3 total = sum_active_global_ptrs(ptrs[0], ptrs[1], ptrs[2]);
     out[0] = make_float4(*ptrs[2], 1.0f);
     out[1] = make_float4(total, 0.0f);
   }
@@ -6589,6 +6640,23 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [5, 6] },
           },
           {
+            name: "control:device-global-vector-scalar-atomic-active-lane-return",
+            source: SOURCES.deviceGlobalVectorScalarAtomicActiveLaneReturn,
+            options: { workgroupSize: [2, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(2),
+              },
+              deviceGlobals: {
+                g_active_vec: new Uint32Array(8),
+              },
+              scalars: { N: 1 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [5, 6] },
+          },
+          {
             name: "helpers:device-global-float3-vector-to-scalar-atomic",
             source: SOURCES.deviceGlobalFloat3VectorToScalarAtomic,
             options: { workgroupSize: [2, 1, 1] },
@@ -6619,6 +6687,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [17, 19, 23, 1, 26, 33, 41, 0] },
+          },
+          {
+            name: "control:device-global-vector-pointer-array-active-lane-return",
+            source: SOURCES.deviceGlobalVectorPointerArrayActiveLaneReturn,
+            options: { workgroupSize: [3, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(8),
+              },
+              deviceGlobals: {
+                g_active_ptr_values: new Float32Array(9),
+              },
+              scalars: { N: 2 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [12, 19, 23, 1, 21, 33, 42, 0] },
           },
           {
             name: "storage:cross-space-vector-alias-consistency",
