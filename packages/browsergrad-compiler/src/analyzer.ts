@@ -229,8 +229,10 @@ export function analyzeCudaLite(
   const kernel = selectKernel(ast, options.kernelName, launchCallees);
   const selectedDeviceFunctionAsKernel = ast.functions.some((fn) => fn.name === kernel.name) &&
     !ast.kernels.some((candidate) => candidate.name === kernel.name);
+  const reachableFunctionSpans = reachableDeviceFunctionSpans(ast, kernel);
   const diagnostics: CudaLiteDiagnostic[] = [];
   const requiredFeatures = new Set<string>();
+  let activeRequiredFeatures = requiredFeatures;
   const atomicParams = new Set<string>();
   const atomicShared = new Set<string>();
   const atomicDeviceGlobals = new Set<string>();
@@ -249,7 +251,8 @@ export function analyzeCudaLite(
   }
   for (const fn of ast.functions) {
     if (selectedDeviceFunctionAsKernel && fn.name === kernel.name) continue;
-    declareDeviceFunction(fn, rootScope, declaredNames, requiredFeatures, diagnostics, options);
+    const featureSink = reachableFunctionSpans.has(fn.span.start) ? requiredFeatures : new Set<string>();
+    declareDeviceFunction(fn, rootScope, declaredNames, featureSink, diagnostics, options);
   }
   const rootDeclaredNames = new Set(declaredNames);
 
@@ -260,7 +263,7 @@ export function analyzeCudaLite(
     validateDeclaredSymbolName(param.name, param.span, diagnostics);
     declaredNames.add(param.name);
     rootScope.symbols.set(param.name, symbolForParam(param, "param"));
-    if (requiresShaderF16(param.valueType)) requiredFeatures.add("shader-f16");
+    if (requiresShaderF16(param.valueType)) activeRequiredFeatures.add("shader-f16");
     validateF64Type(param.valueType, param.span, diagnostics, options);
   }
 
@@ -282,15 +285,15 @@ export function analyzeCudaLite(
       ...(statement.matrixTile === undefined ? {} : { matrixTile: statement.matrixTile }),
       span: statement.span,
     });
-    if (statement.matrixTile) validateMatrixTileDeclaration(statement, requiredFeatures, diagnostics);
+    if (statement.matrixTile) validateMatrixTileDeclaration(statement, activeRequiredFeatures, diagnostics);
     else validateF64Type(statement.valueType, statement.span, diagnostics, options);
   };
 
   const walkExpression = (expression: CudaLiteExpression, scope: Scope): ExpressionInfo => {
     if (expression.kind === "call") {
-      return validateCallExpression(expression, scope, params, atomicParams, atomicShared, atomicDeviceGlobals, requiredFeatures, diagnostics, walkExpression, options);
+      return validateCallExpression(expression, scope, params, atomicParams, atomicShared, atomicDeviceGlobals, activeRequiredFeatures, diagnostics, walkExpression, options);
     }
-    return validateNonCallExpression(expression, scope, diagnostics, walkExpression, requiredFeatures);
+    return validateNonCallExpression(expression, scope, diagnostics, walkExpression, activeRequiredFeatures);
   };
 
   for (const constant of ast.constants) {
@@ -317,7 +320,7 @@ export function analyzeCudaLite(
         }
         case "var":
           declareVar(statement, scope, names);
-          if (!statement.matrixTile && requiresShaderF16(statement.valueType)) requiredFeatures.add("shader-f16");
+          if (!statement.matrixTile && requiresShaderF16(statement.valueType)) activeRequiredFeatures.add("shader-f16");
           if (!statement.matrixTile && statement.pointer && !isSupportedLocalPointer(statement, scope)) {
             diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.span));
           }
@@ -358,7 +361,7 @@ export function analyzeCudaLite(
           }
           validateDeclaredSymbolName(statement.name, statement.span, diagnostics);
           if (statement.partitionPredicate) {
-            requiredFeatures.add("subgroups");
+            activeRequiredFeatures.add("subgroups");
             validateScalarOperand(walkExpression(statement.partitionPredicate, scope), statement.partitionPredicate.span, diagnostics);
           }
           const parent = statement.partitionParent ? lookupSymbol(statement.partitionParent, scope, statement.span) : undefined;
@@ -421,7 +424,7 @@ export function analyzeCudaLite(
           const loopNames = new Set<string>();
           if (statement.init?.kind === "var") {
             declareVar(statement.init, loopScope, loopNames);
-            if (!statement.init.matrixTile && requiresShaderF16(statement.init.valueType)) requiredFeatures.add("shader-f16");
+            if (!statement.init.matrixTile && requiresShaderF16(statement.init.valueType)) activeRequiredFeatures.add("shader-f16");
             if (!statement.init.matrixTile && statement.init.pointer && !isSupportedLocalPointer(statement.init, loopScope)) {
               diagnostics.push(error("unsupported-local-pointer", "local pointer declarations are not supported in CUDA-lite yet", statement.init.span));
             }
@@ -487,6 +490,9 @@ export function analyzeCudaLite(
 
   for (const fn of ast.functions) {
     if (selectedDeviceFunctionAsKernel && fn.name === kernel.name) continue;
+    const featureSink = reachableFunctionSpans.has(fn.span.start) ? requiredFeatures : new Set<string>();
+    const previousRequiredFeatures = activeRequiredFeatures;
+    activeRequiredFeatures = featureSink;
     const functionScope = createScope(rootScope);
     const functionDeclaredNames = new Set(rootDeclaredNames);
     for (const param of fn.params) {
@@ -496,11 +502,12 @@ export function analyzeCudaLite(
       validateDeclaredSymbolName(param.name, param.span, diagnostics);
       functionDeclaredNames.add(param.name);
       functionScope.symbols.set(param.name, symbolForParam(param, "local"));
-      if (requiresShaderF16(param.valueType)) requiredFeatures.add("shader-f16");
+      if (requiresShaderF16(param.valueType)) activeRequiredFeatures.add("shader-f16");
       validateF64Type(param.valueType, param.span, diagnostics, options);
     }
     walkStatements(fn.body, functionScope, 0, 0, 0, functionDeclaredNames);
     validateDivergentReturnsBeforeBarriers(fn.body, new Map(fn.params.map((param) => [param.name, param])), diagnostics, options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE);
+    activeRequiredFeatures = previousRequiredFeatures;
   }
 
   walkStatements(kernel.body, rootScope, 0, 0, 0, declaredNames);
@@ -569,6 +576,28 @@ export function lowerAnalyzedCudaLiteToKernelIr(
     atomicDeviceGlobals: analysis.atomicDeviceGlobals,
     workgroupSize: normalizeWorkgroupSize(options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE),
   };
+}
+
+function reachableDeviceFunctionSpans(ast: CudaLiteModule, kernel: CudaLiteKernel): ReadonlySet<number> {
+  const launchCallees = new Set(collectKernelLaunchCallees(kernel.body));
+  const reachable = new Set<number>();
+  const visitFunction = (fn: CudaLiteDeviceFunction): void => {
+    if (reachable.has(fn.span.start)) return;
+    reachable.add(fn.span.start);
+    visitStatements(fn.body);
+  };
+  const visitStatements = (statements: readonly CudaLiteStatement[]): void => {
+    walkCudaLiteExpressions(statements, (expression) => {
+      if (expression.kind !== "call") return;
+      const name = expressionName(expression.callee);
+      if (name === undefined || launchCallees.has(name)) return;
+      for (const candidate of ast.functions) {
+        if (candidate.name === name && candidate.params.length === expression.args.length) visitFunction(candidate);
+      }
+    });
+  };
+  visitStatements(kernel.body);
+  return reachable;
 }
 
 function selectKernel(

@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T16:40:23Z
+Last updated: 2026-07-02T16:48:07Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,9 +9,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; shared byte vector helper probes are green |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; unreachable half-helper feature gating and active-lane shared byte vector probes are green |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Shared byte `half2`/`bf162` helper pointer probes are green; ready for next corpus-shaped probe |
+| Active work item | Unreachable half helpers no longer force shader-f16 on selected kernels; active-lane shared byte vector helper probes are green |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -586,11 +586,15 @@ Current verified gates:
 - changed gate after shared signed byte-storage fixture/helper trim: typecheck passed; WGSL modules `16/0`; WebGPU smoke `276/0/0`; selected atomic WebGPU group `35/0/0`; fixture/status/scope tests passed
 - expanded shared signed byte-storage atomic fixture: `storage:shared-byte-int-helper-atomic` now covers helper add/sub/min/max/and/or/xor/CAS and direct CAS/and/or/xor/exchange over byte offset 4; focused WebGPU `1/0/0`
 - shared byte vector helper pointer fixtures: `storage:shared-byte-half2-reinterpret,storage:shared-byte-bf162-reinterpret` now cover device helper read/write through vector pointers over `__shared__ uchar[]`; focused WebGPU `2/0/0`
+- active-lane shared byte vector helper fixtures: `control:active-lane-shared-byte-half2-return-barrier,control:active-lane-shared-byte-bf162-return-barrier` cover pre-return helper writes through packed shared-byte vector pointers before a later barrier; focused WebGPU `2/0/0`
+- unreachable half-helper feature-gate fix: focused unit run `438/0`; unused `half2` helpers no longer add `shader-f16` to a selected kernel that only reaches non-half helpers
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | unreachable half helper feature gating | compiling selected `bf162` active-lane kernel failed with `missing-feature-shader-f16` because an unused `half2` helper in the same CUDA source was scanned for required features | analyzer now tracks device-function reachability from the selected kernel and routes feature requirements from unreachable helper declarations/bodies into a dead feature sink while keeping diagnostics and overload metadata intact | focused unit `438/0`; `control:active-lane-shared-byte-half2-return-barrier,control:active-lane-shared-byte-bf162-return-barrier` `2/0/0` |
+| Probed green | active-lane shared byte vector helper pointer views | packed shared-byte `half2`/`bf162` helper pointer coverage did not include divergent return before a later barrier, where inactive lanes write before return and active lanes read after barrier | existing active-lane lowering plus packed shared-byte vector pointer helpers preserve pre-return lane writes and later active-lane reads through `__shared__ uchar[]` | `control:active-lane-shared-byte-half2-return-barrier,control:active-lane-shared-byte-bf162-return-barrier` `2/0/0` |
 | Probed green | shared byte vector helper pointer views | direct `half2`/`bf162` reinterpret over `__shared__ uchar[]` was green, but helper pointer read/write coverage was missing and could regress pointer helper storage compatibility for 16-bit vector carriers | existing packed shared-byte storage helpers preserve `half2` and `__nv_bfloat162` reads/writes through device helper pointer params | `storage:shared-byte-half2-reinterpret,storage:shared-byte-bf162-reinterpret` `2/0/0` |
 | Probed green | shared signed atomics over byte-backed storage | storage signed byte atomics were fixed, but shared `uchar` byte roots needed real WebGPU coverage for helper signed add/sub/min/max/and/or/xor/CAS and direct CAS/and/or/xor/exchange at byte offset 4 | existing signed-u32 carrier helpers and shared byte-root address lowering preserve old/new signed values over packed workgroup storage | `storage:shared-byte-int-helper-atomic` `1/0/0`; earlier mixed guard group `3/0/0` |
 | Fixed | int-view atomic helper over-emission | any unsigned atomic carrier plus an atomic call emitted the whole signed-u32 helper set, adding unused WGSL helper functions to kernels that needed only one or two signed view operations | int-view helper emission now derives used atomic kinds from IR calls and emits only those helpers for storage/workgroup address spaces | typecheck passed; focused WebGPU group `3/0/0` |
@@ -918,6 +922,8 @@ Current added pointer/control cases:
 - `control:active-lane-pointer-alias-return-side-effect-barrier`
 - `control:active-lane-atomic-return-side-effect-barrier`
 - `control:active-lane-shared-return-side-effect-barrier`
+- `control:active-lane-shared-byte-half2-return-barrier`
+- `control:active-lane-shared-byte-bf162-return-barrier`
 - `control:subgroup-truthiness-assignment-scalar`
 - `storage:shared-byte-reinterpret`
 - `storage:shared-byte-concurrent-writes`

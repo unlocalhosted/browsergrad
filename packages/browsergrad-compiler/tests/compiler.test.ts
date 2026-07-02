@@ -2313,6 +2313,23 @@ __global__ void helperKernel(float *x) {
     expect(compiled.wgsl).not.toContain("<< 62");
   });
 
+  it("does not require shader-f16 for unreachable half helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ half2 unused_half2(half2 value) {
+  return value;
+}
+__device__ float addOne(float value) {
+  return value + 1.0f;
+}
+__global__ void helperKernel(float *x) {
+  if (threadIdx.x < 1) { x[0] = addOne(x[0]); }
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.ir.requiredFeatures).not.toContain("shader-f16");
+    expect(compiled.wgsl).toContain("fn addOne(value_arg: f32");
+    expect(compiled.wgsl).not.toContain("unused_half2");
+  });
+
   it("resolves overloaded __device__ helpers by arity", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ int pick(int value) {

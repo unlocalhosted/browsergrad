@@ -810,6 +810,52 @@ __global__ void sharedByteBf162Reinterpret(float *out) {
     read_shared_byte_bf162((__nv_bfloat162 *)&scratch[0], out);
   }
 }`,
+  activeLaneSharedByteHalf2ReturnBarrier: `
+__device__ void write_shared_byte_half2_lane(half2 *values, int lane, float x, float y) {
+  values[lane] = make_half2(__float2half(x), __float2half(y));
+}
+
+__device__ void read_shared_byte_half2_lane(half2 *values, int lane, float *out, int outLane) {
+  half2 pair = values[lane];
+  out[outLane * 2] = __low2float(pair);
+  out[outLane * 2 + 1] = __high2float(pair);
+}
+
+__global__ void activeLaneSharedByteHalf2ReturnBarrier(float *out, int N) {
+  __shared__ uchar scratch[16];
+  int tid = threadIdx.x;
+  write_shared_byte_half2_lane((half2 *)&scratch[0], tid, (float)(tid + 1), (float)(tid + 11));
+  __syncthreads();
+  if (tid >= N) {
+    write_shared_byte_half2_lane((half2 *)&scratch[0], tid, (float)(100 + tid), (float)(200 + tid));
+    return;
+  }
+  __syncthreads();
+  read_shared_byte_half2_lane((half2 *)&scratch[0], (tid + 1) & 3, out, tid);
+}
+
+__device__ void write_shared_byte_bf162_lane(__nv_bfloat162 *values, int lane, float x, float y) {
+  values[lane] = __halves2bfloat162(__float2bfloat16(x), __float2bfloat16(y));
+}
+
+__device__ void read_shared_byte_bf162_lane(__nv_bfloat162 *values, int lane, float *out, int outLane) {
+  __nv_bfloat162 pair = values[lane];
+  out[outLane * 2] = __bfloat162float(pair.x);
+  out[outLane * 2 + 1] = __bfloat162float(pair.y);
+}
+
+__global__ void activeLaneSharedByteBf162ReturnBarrier(float *out, int N) {
+  __shared__ uchar scratch[16];
+  int tid = threadIdx.x;
+  write_shared_byte_bf162_lane((__nv_bfloat162 *)&scratch[0], tid, (float)(tid + 1), (float)(tid + 11));
+  __syncthreads();
+  if (tid >= N) {
+    write_shared_byte_bf162_lane((__nv_bfloat162 *)&scratch[0], tid, (float)(100 + tid), (float)(200 + tid));
+    return;
+  }
+  __syncthreads();
+  read_shared_byte_bf162_lane((__nv_bfloat162 *)&scratch[0], (tid + 1) & 3, out, tid);
+}`,
   sharedByteIntHelperAtomic: `
 __device__ void signed_shared_byte_ops(int *word, int *out) {
   out[0] = atomicAdd(word, -3);
@@ -6471,6 +6517,34 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [1, 2] },
+          },
+          {
+            name: "control:active-lane-shared-byte-half2-return-barrier",
+            source: SOURCES.activeLaneSharedByteHalf2ReturnBarrier,
+            options: { workgroupSize: [4, 1, 1], f16Mode: "f32" },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(8),
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [2, 12, 3, 13, 103, 203, 0, 0] },
+          },
+          {
+            name: "control:active-lane-shared-byte-bf162-return-barrier",
+            source: SOURCES.activeLaneSharedByteHalf2ReturnBarrier,
+            options: { kernelName: "activeLaneSharedByteBf162ReturnBarrier", workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(8),
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [2, 12, 3, 13, 103, 203, 0, 0] },
           },
           {
             name: "storage:shared-byte-int-helper-atomic",
