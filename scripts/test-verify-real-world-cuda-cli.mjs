@@ -5,6 +5,7 @@ import {
   parseVerifyRealWorldCudaArgs,
   verifyRealWorldCudaPlan,
 } from "./verify-real-world-cuda.mjs";
+import { cudaLiteCorpusExecutionFixtures } from "./cuda-lite-corpus-registry.mjs";
 
 const defaults = parseVerifyRealWorldCudaArgs([]);
 assert.equal(defaults.autoCorpusSmokeProfile, "fast");
@@ -48,12 +49,11 @@ assert.deepEqual(scoped.only, ["cuda-samples", "llm.c"]);
 
 const scopedPlan = verifyRealWorldCudaPlan(scoped);
 assert.deepEqual(allArgsAfter(scopedPlan[0].args, "--only"), ["cuda-samples", "llm.c"]);
-assert.equal(argAfter(scopedPlan[1].args, "--cases"), [
-  "corpus:cuda-samples:",
-  "auto-corpus:cuda-samples:",
-  "corpus:llm.c:",
-  "auto-corpus:llm.c:",
-].join(","));
+const scopedCases = argAfter(scopedPlan[1].args, "--cases").split(",");
+assert.ok(scopedCases.includes("corpus:cuda-samples:vectorAdd"));
+assert.ok(scopedCases.includes("corpus:llm.c:add_bias"));
+assert.ok(scopedCases.includes("auto-corpus:cuda-samples:"));
+assert.ok(scopedCases.includes("auto-corpus:llm.c:"));
 assert.ok(scopedPlan[1].args.includes("--forbid-skips"));
 
 const scopedNoAutoSmoke = parseVerifyRealWorldCudaArgs([
@@ -62,7 +62,17 @@ const scopedNoAutoSmoke = parseVerifyRealWorldCudaArgs([
   "--auto-corpus-smoke-limit=0",
 ]);
 const scopedNoAutoSmokePlan = verifyRealWorldCudaPlan(scopedNoAutoSmoke);
-assert.equal(argAfter(scopedNoAutoSmokePlan[1].args, "--cases"), "corpus:cuda-samples:");
+assert.deepEqual(
+  argAfter(scopedNoAutoSmokePlan[1].args, "--cases").split(","),
+  cudaLiteCorpusExecutionFixtures
+    .filter((fixture) => fixture.corpusId === "cuda-samples")
+    .map((fixture) => fixture.caseName),
+);
+
+const leetCudaScoped = parseVerifyRealWorldCudaArgs(["--corpus=leetcuda", "--bundle=src"]);
+const leetCudaCases = argAfter(verifyRealWorldCudaPlan(leetCudaScoped)[1].args, "--cases").split(",");
+assert.ok(leetCudaCases.includes("corpus:LeetCUDA:elementwise_add_f32_kernel"));
+assert.ok(!leetCudaCases.includes("corpus:leetcuda:"));
 
 assert.throws(
   () => parseVerifyRealWorldCudaArgs(["--auto-corpus-smoke-profile", "wide"]),

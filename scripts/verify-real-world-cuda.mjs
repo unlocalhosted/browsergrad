@@ -3,7 +3,10 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseAutoCorpusSmokeProfile } from "./cuda-lite-webgpu-cli.mjs";
-import { cudaLiteCorpora } from "./cuda-lite-corpus-registry.mjs";
+import {
+  cudaLiteCorpora,
+  cudaLiteCorpusExecutionFixtures,
+} from "./cuda-lite-corpus-registry.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "..");
@@ -298,7 +301,9 @@ function ratioArg(flag, value) {
 function scopedCaseFilterArgs(only, autoCorpusSmokeLimit) {
   if (only.length === 0) return [];
   const filters = only.flatMap((id) => [
-    `corpus:${id}:`,
+    ...cudaLiteCorpusExecutionFixtures
+      .filter((fixture) => fixture.corpusId === id)
+      .map((fixture) => fixture.caseName),
     ...(autoCorpusSmokeLimit > 0 ? [`auto-corpus:${id}:`] : []),
   ]);
   return ["--cases", filters.join(",")];
