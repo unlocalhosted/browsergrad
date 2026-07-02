@@ -3182,6 +3182,52 @@ __global__ void textureAtlasVectorAtomicPointerArraySelect(cudaTextureObject_t t
     summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
   }
 }`,
+  textureAtlasVectorAtomicPointerArrayCompoundActiveLaneReturn: `
+__device__ uint4 read_compound_pointer_array_texture_atlas_vec(cudaTextureObject_t texArg) {
+  uint4 layered = tex2DLayered<uint4>(texArg, 0.0f, 1.0f, 1.0f);
+  uint4 volume = tex3D<uint4>(texArg, 2.0f, 1.0f, 1.0f);
+  return make_uint4(layered.x + volume.x, layered.y + volume.y, layered.z + volume.z, layered.w + volume.w);
+}
+
+__device__ void atomic_compound_array_select_atlas_vec(uint4 *vecOut, uint4 value) {
+  uint *scalarOut = reinterpret_cast<uint*>(vecOut);
+  atomicAdd(scalarOut + 0, value.x);
+  atomicAdd(scalarOut + 1, value.y);
+  atomicAdd(scalarOut + 2, value.z);
+  atomicAdd(scalarOut + 3, value.w);
+}
+
+__device__ void add_compound_array_select_atlas_vec(uint4 *vecOut, int lane, uint4 value) {
+  vecOut[lane] += value;
+}
+
+__device__ void add_compound_array_select_atlas_vec_y(uint4 *vecOut, int lane, uint value) {
+  vecOut[lane].y += value;
+}
+
+__global__ void textureAtlasVectorAtomicPointerArrayCompoundActiveLaneReturn(cudaTextureObject_t tex, uint4 *out, uint4 *shadow, uint *summary, int N) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    uint4 *targets[2];
+    targets[0] = shadow + 1;
+    targets[1] = out + 1;
+    uint4 value = read_compound_pointer_array_texture_atlas_vec(tex);
+    int pick = value.z > 0u ? 1 : 0;
+    atomic_compound_array_select_atlas_vec(targets[pick], value);
+    add_compound_array_select_atlas_vec(targets[pick], 0, make_uint4(1u, 2u, 3u, 4u));
+    add_compound_array_select_atlas_vec_y(targets[0], 0, 9u);
+    return;
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
   textureAtlasVectorAtomicPointerArrayCasActiveLaneReturn: `
 __device__ uint4 read_cas_pointer_array_texture_atlas_vec(cudaTextureObject_t texArg) {
   uint4 layered = tex2DLayered<uint4>(texArg, 0.0f, 1.0f, 1.0f);
@@ -3455,6 +3501,50 @@ __global__ void texturePointerAliasAtomicPointerArrayActiveLaneReturn(cudaTextur
     int pick = value.y > 0u ? 1 : 0;
     atomic_active_array_select_texture_vec(slots[pick], value);
     atomicAdd(slots[0] + 2, 5u);
+    return;
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
+  texturePointerAliasAtomicPointerArrayCompoundActiveLaneReturn: `
+__device__ uint4 read_compound_pointer_array_texture_vec(cudaTextureObject_t texArg) {
+  return tex2D<uint4>(texArg, 0.5f, 0.5f);
+}
+
+__device__ void atomic_compound_array_select_texture_vec(uint4 *vecOut, uint4 value) {
+  uint *scalarOut = reinterpret_cast<uint*>(vecOut);
+  atomicAdd(scalarOut + 0, value.x);
+  atomicAdd(scalarOut + 1, value.y);
+  atomicAdd(scalarOut + 2, value.z);
+  atomicAdd(scalarOut + 3, value.w);
+}
+
+__device__ void add_compound_array_select_texture_vec(uint4 *vecOut, int lane, uint4 value) {
+  vecOut[lane] += value;
+}
+
+__device__ void add_compound_array_select_texture_vec_y(uint4 *vecOut, int lane, uint value) {
+  vecOut[lane].y += value;
+}
+
+__global__ void texturePointerAliasAtomicPointerArrayCompoundActiveLaneReturn(cudaTextureObject_t tex, uint4 *out, uint4 *shadow, uint *summary, int N) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    uint4 *targets[2];
+    targets[0] = shadow + 1;
+    targets[1] = out + 1;
+    uint4 value = read_compound_pointer_array_texture_vec(tex);
+    int pick = value.z > 0u ? 1 : 0;
+    atomic_compound_array_select_texture_vec(targets[pick], value);
+    add_compound_array_select_texture_vec(targets[pick], 0, make_uint4(1u, 2u, 3u, 4u));
+    add_compound_array_select_texture_vec_y(targets[0], 0, 9u);
     return;
   }
   __syncthreads();
@@ -7827,6 +7917,30 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [10463] },
           },
           {
+            name: "texture:atlas-vector-atomic-pointer-array-compound-active-lane-return",
+            source: SOURCES.textureAtlasVectorAtomicPointerArrayCompoundActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [10513] },
+          },
+          {
             name: "texture:atlas-vector-atomic-pointer-array-cas-active-lane-return",
             source: SOURCES.textureAtlasVectorAtomicPointerArrayCasActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -8052,6 +8166,30 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [10172] },
+          },
+          {
+            name: "texture:pointer-alias-atomic-pointer-array-compound-active-lane-return",
+            source: SOURCES.texturePointerAliasAtomicPointerArrayCompoundActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [10222] },
           },
           {
             name: "texture:pointer-alias-atomic-pointer-array-cas-active-lane-return",
