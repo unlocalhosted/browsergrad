@@ -14,6 +14,7 @@ export const runtimeScopeCases = [
   "runtime:unreachable-texture-surface-compat-diagnostics",
   "runtime:unreachable-constant-binding",
   "runtime:unreachable-device-global-binding",
+  "runtime:unreachable-half-global-feature-binding",
   "runtime:recursive-host-dynamic-launch",
   "runtime:pool-alias-host-dynamic-launch",
   "runtime:pool-pointer-host-dynamic-launch",

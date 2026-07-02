@@ -230,6 +230,13 @@ export function analyzeCudaLite(
   const selectedDeviceFunctionAsKernel = ast.functions.some((fn) => fn.name === kernel.name) &&
     !ast.kernels.some((candidate) => candidate.name === kernel.name);
   const reachableFunctionSpans = reachableDeviceFunctionSpans(ast.functions, kernel.body);
+  const reachableGlobalBodies = [
+    kernel.body,
+    ...ast.functions
+      .filter((fn) => reachableFunctionSpans.has(fn.span.start))
+      .map((fn) => fn.body),
+  ];
+  const reachableGlobalSymbols = collectReferencedSymbolNames(reachableGlobalBodies);
   const diagnostics: CudaLiteDiagnostic[] = [];
   const requiredFeatures = new Set<string>();
   let activeRequiredFeatures = requiredFeatures;
@@ -245,10 +252,12 @@ export function analyzeCudaLite(
   const rootScope = createScope();
 
   for (const constant of ast.constants) {
-    declareConstant(constant, rootScope, declaredNames, requiredFeatures, diagnostics, options);
+    const reachableGlobal = reachableGlobalSymbols.has(constant.name);
+    declareConstant(constant, rootScope, declaredNames, reachableGlobal ? requiredFeatures : new Set<string>(), diagnostics, options, reachableGlobal);
   }
   for (const global of ast.deviceGlobals) {
-    declareDeviceGlobal(global, rootScope, declaredNames, requiredFeatures, diagnostics, options);
+    const reachableGlobal = reachableGlobalSymbols.has(global.name);
+    declareDeviceGlobal(global, rootScope, declaredNames, reachableGlobal ? requiredFeatures : new Set<string>(), diagnostics, options, reachableGlobal);
   }
   for (const texture of ast.textures) {
     declareTexture(texture, rootScope, declaredNames, diagnostics);
@@ -315,10 +324,22 @@ export function analyzeCudaLite(
   };
 
   for (const constant of ast.constants) {
+    const previousRequiredFeatures = activeRequiredFeatures;
+    const previousReachable: boolean = activeStatementsReachable;
+    activeRequiredFeatures = reachableGlobalSymbols.has(constant.name) ? requiredFeatures : new Set<string>();
+    activeStatementsReachable = reachableGlobalSymbols.has(constant.name);
     validateGlobalConstantInitializer(constant, rootScope, diagnostics, walkExpression);
+    activeRequiredFeatures = previousRequiredFeatures;
+    activeStatementsReachable = previousReachable;
   }
   for (const global of ast.deviceGlobals) {
+    const previousRequiredFeatures = activeRequiredFeatures;
+    const previousReachable: boolean = activeStatementsReachable;
+    activeRequiredFeatures = reachableGlobalSymbols.has(global.name) ? requiredFeatures : new Set<string>();
+    activeStatementsReachable = reachableGlobalSymbols.has(global.name);
     validateDeviceGlobalInitializer(global, rootScope, diagnostics, walkExpression);
+    activeRequiredFeatures = previousRequiredFeatures;
+    activeStatementsReachable = previousReachable;
   }
 
   const walkStatements = (
@@ -988,6 +1009,7 @@ function declareConstant(
   requiredFeatures: Set<string>,
   diagnostics: CudaLiteDiagnostic[],
   options: CudaLiteAnalyzeOptions,
+  compatibilityDiagnosticsReachable = true,
 ): void {
   if (declaredNames.has(constant.name)) {
     diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${constant.name}'`, constant.span));
@@ -1003,7 +1025,7 @@ function declareConstant(
     span: constant.span,
   });
   if (requiresShaderF16(constant.valueType)) requiredFeatures.add("shader-f16");
-  validateF64Type(constant.valueType, constant.span, diagnostics, options);
+  validateF64Type(constant.valueType, constant.span, diagnostics, options, compatibilityDiagnosticsReachable);
   for (const dimension of constant.dimensions) {
     if (!Number.isInteger(dimension) || dimension <= 0) {
       diagnostics.push(error("invalid-array-dimension", "array dimensions must be positive integer literals", constant.span));
@@ -1018,6 +1040,7 @@ function declareDeviceGlobal(
   requiredFeatures: Set<string>,
   diagnostics: CudaLiteDiagnostic[],
   options: CudaLiteAnalyzeOptions,
+  compatibilityDiagnosticsReachable = true,
 ): void {
   if (declaredNames.has(global.name)) {
     diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${global.name}'`, global.span));
@@ -1032,7 +1055,7 @@ function declareDeviceGlobal(
     span: global.span,
   });
   if (requiresShaderF16(global.valueType)) requiredFeatures.add("shader-f16");
-  validateF64Type(global.valueType, global.span, diagnostics, options);
+  validateF64Type(global.valueType, global.span, diagnostics, options, compatibilityDiagnosticsReachable);
   for (const dimension of global.dimensions) {
     if (!Number.isInteger(dimension) || dimension <= 0) {
       diagnostics.push(error("invalid-array-dimension", "array dimensions must be positive integer literals", global.span));
