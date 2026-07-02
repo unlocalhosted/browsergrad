@@ -1344,6 +1344,49 @@ __global__ void pointerArray(float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([2, 6]);
   });
 
+  it("supports corpus-shaped byte storage reinterpret local pointers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void byteReinterpret(int* out) {
+  __shared__ uchar scratch[16];
+  int lane = threadIdx.x;
+  if (lane == 0) {
+    scratch[0] = (uchar)1;
+    scratch[1] = (uchar)2;
+    scratch[2] = (uchar)3;
+    scratch[3] = (uchar)4;
+  }
+  __syncthreads();
+  int *shared_words = (int *)&scratch[0];
+  if (lane == 0) {
+    shared_words[1] = 9;
+    out[0] = shared_words[0];
+    out[1] = shared_words[1];
+  }
+}`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Int32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("var shared_words_buffer: u32");
+    expect([...result.buffers.out as Int32Array]).toEqual([0x04030201, 9]);
+
+    const storageCompiled = compileCudaLiteKernel(`
+__global__ void storageByteReinterpret(const uchar* input, int* out) {
+  int4 *lane_ptr = (int4 *)(input + threadIdx.x);
+  lane_ptr = (int4 *)((uchar *)lane_ptr + 4);
+  if (threadIdx.x == 0) {
+    out[0] = (*lane_ptr).x;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    expect(storageCompiled.wgsl).toContain("var lane_ptr_buffer: u32");
+  });
+
   it("lowers sample-shaped vector pointer-array helper flow", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ float3 calcNormal(float3 *a, float3 *b, float3 *c) {

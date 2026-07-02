@@ -1,5 +1,6 @@
 import { expressionName, rootIdentifier } from "./analyzer.js";
 import { cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
+import { wgslElementByteSize } from "./wgsl_storage.js";
 import { isPointerIdentityCall, type PointerAlias } from "./wgsl_ir_analysis.js";
 import {
   CudaLiteCompilerError,
@@ -198,7 +199,7 @@ export function devicePointerArgumentParts(
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
     const target = devicePointerArgumentParts(expression.left, context, callbacks);
     if (!target) return undefined;
-    const delta = devicePointerIndexDelta(expression.right, devicePointerValueTypeForExpression(expression.left, context), context, callbacks);
+    const delta = devicePointerIndexDelta(expression.right, devicePointerValueTypeForExpression(expression.left, context), context, callbacks, expression.left);
     return {
       buffer: target.buffer,
       base: expression.operator === "+"
@@ -268,10 +269,54 @@ function devicePointerIndexDelta(
   valueType: CudaLiteParam["valueType"] | PointerAlias["valueType"] | undefined,
   context: WgslDevicePointerContext,
   callbacks: WgslDevicePointerCallbacks,
+  pointer?: CudaLiteExpression,
 ): string {
   const raw = `u32(${callbacks.emitExpression(index, context)})`;
-  const lanes = isCudaVectorType(valueType) ? cudaVectorLaneCount(valueType) : 1;
-  return lanes <= 1 ? raw : `(${raw} * ${lanes}u)`;
+  const scale = devicePointerIndexScale(pointer, valueType, context, callbacks);
+  return scale <= 1 ? raw : `(${raw} * ${scale}u)`;
+}
+
+function devicePointerIndexScale(
+  pointer: CudaLiteExpression | undefined,
+  valueType: CudaLiteParam["valueType"] | PointerAlias["valueType"] | undefined,
+  context: WgslDevicePointerContext,
+  callbacks: WgslDevicePointerCallbacks,
+): number {
+  const root = pointer ? rootIdentifier(pointer) : undefined;
+  const handle = root ? context.localPointerHandleFor(root) : undefined;
+  const sourceType = handle?.init ? devicePointerRootValueType(handle.init, context, callbacks) : undefined;
+  if (sourceType === "uchar" && valueType !== undefined && valueType !== "uchar") {
+    const bytes = wgslElementByteSize(valueType);
+    if (bytes > 1) return bytes;
+  }
+  return isCudaVectorType(valueType) ? cudaVectorLaneCount(valueType) : 1;
+}
+
+function devicePointerRootValueType(
+  expression: CudaLiteExpression,
+  context: WgslDevicePointerContext,
+  callbacks: WgslDevicePointerCallbacks,
+  seen: ReadonlySet<string> = new Set(),
+): CudaLiteScalarType | undefined {
+  if (expression.kind === "cast" && expression.pointer) return devicePointerRootValueType(expression.expression, context, callbacks, seen);
+  if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
+    return expression.args[0] ? devicePointerRootValueType(expression.args[0], context, callbacks, seen) : undefined;
+  }
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    return devicePointerRootValueType(expression.left, context, callbacks, seen);
+  }
+  if (expression.kind === "conditional") {
+    return devicePointerRootValueType(expression.consequent, context, callbacks, seen) ??
+      devicePointerRootValueType(expression.alternate, context, callbacks, seen);
+  }
+  const root = rootIdentifier(expression);
+  if (!root || seen.has(root)) return undefined;
+  const handle = context.localPointerHandleFor(root);
+  if (handle?.init) return devicePointerRootValueType(handle.init, context, callbacks, new Set([...seen, root])) ?? handle.valueType;
+  return callbacks.sharedDeclarationFor(root, context)?.valueType ??
+    context.paramFor(root)?.valueType ??
+    context.deviceGlobalFor(root)?.valueType ??
+    context.ir.constants.find((item) => item.name === root)?.valueType;
 }
 
 function devicePointerAliasBaseDelta(

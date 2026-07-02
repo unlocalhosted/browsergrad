@@ -2004,10 +2004,52 @@ function emitDevicePointerIndexDelta(
   index: CudaLiteExpression,
   valueType: CudaLiteScalarType | undefined,
   context: EmitContext,
+  pointer?: CudaLiteExpression,
 ): string {
   const raw = `u32(${emitExpression(index, context)})`;
-  const lanes = isCudaVectorType(valueType) ? cudaVectorLaneCount(valueType) : 1;
-  return lanes <= 1 ? raw : `(${raw} * ${lanes}u)`;
+  const scale = devicePointerIndexScale(pointer, valueType, context);
+  return scale <= 1 ? raw : `(${raw} * ${scale}u)`;
+}
+
+function devicePointerIndexScale(
+  pointer: CudaLiteExpression | undefined,
+  valueType: CudaLiteScalarType | undefined,
+  context: EmitContext,
+): number {
+  const root = pointer ? rootIdentifier(pointer) : undefined;
+  const handle = root ? context.localPointerHandleFor(root) : undefined;
+  const sourceType = handle?.init ? devicePointerRootValueType(handle.init, context) : undefined;
+  if (sourceType === "uchar" && valueType !== undefined && valueType !== "uchar") {
+    const bytes = wgslElementByteSize(valueType);
+    if (bytes > 1) return bytes;
+  }
+  return isCudaVectorType(valueType) ? cudaVectorLaneCount(valueType) : 1;
+}
+
+function devicePointerRootValueType(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+  seen: ReadonlySet<string> = new Set(),
+): CudaLiteScalarType | undefined {
+  if (expression.kind === "cast" && expression.pointer) return devicePointerRootValueType(expression.expression, context, seen);
+  if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
+    return expression.args[0] ? devicePointerRootValueType(expression.args[0], context, seen) : undefined;
+  }
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    return devicePointerRootValueType(expression.left, context, seen);
+  }
+  if (expression.kind === "conditional") {
+    return devicePointerRootValueType(expression.consequent, context, seen) ??
+      devicePointerRootValueType(expression.alternate, context, seen);
+  }
+  const root = rootIdentifier(expression);
+  if (!root || seen.has(root)) return undefined;
+  const handle = context.localPointerHandleFor(root);
+  if (handle?.init) return devicePointerRootValueType(handle.init, context, new Set([...seen, root])) ?? handle.valueType;
+  return sharedDeclarationFor(root, context)?.valueType ??
+    context.paramFor(root)?.valueType ??
+    context.deviceGlobalFor(root)?.valueType ??
+    context.ir.constants.find((item) => item.name === root)?.valueType;
 }
 
 function devicePointerLValue(expression: CudaLiteExpression, context: EmitContext): DevicePointerLValue | undefined {
@@ -2032,7 +2074,7 @@ function devicePointerLValue(expression: CudaLiteExpression, context: EmitContex
     const valueType = devicePointerValueTypeForExpression(expression.target, context);
     return {
       buffer: parts.buffer,
-      index: `(${parts.base} + ${emitDevicePointerIndexDelta(expression.index, valueType, context)})`,
+      index: `(${parts.base} + ${emitDevicePointerIndexDelta(expression.index, valueType, context, expression.target)})`,
       valueType,
     };
   }
@@ -2094,7 +2136,7 @@ function emitDirectPointerIndexAssignment(expression: CudaLiteAssignmentExpressi
   const parts = devicePointerArgumentParts(target, context);
   if (!parts) return undefined;
   const valueType = devicePointerValueTypeForExpression(expression.left.target, context);
-  const index = `(${parts.base} + ${emitDevicePointerIndexDelta(expression.left.index, valueType, context)})`;
+  const index = `(${parts.base} + ${emitDevicePointerIndexDelta(expression.left.index, valueType, context, target)})`;
   const right = emitPointerAssignmentValue(expression.right, valueType, context);
   const value = expression.operator === "="
     ? right
@@ -2195,7 +2237,7 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
         const pointerParts = devicePointerArgumentParts(expression.target, context);
         if (pointerParts) {
           const valueType = devicePointerValueTypeForExpression(expression.target, context);
-          return `${pointerReadHelperName(valueType)}(${pointerParts.buffer}, (${pointerParts.base} + ${emitDevicePointerIndexDelta(expression.index, valueType, context)}))`;
+          return `${pointerReadHelperName(valueType)}(${pointerParts.buffer}, (${pointerParts.base} + ${emitDevicePointerIndexDelta(expression.index, valueType, context, expression.target)}))`;
         }
       }
       if (expression.target.kind === "identifier") {
@@ -2203,7 +2245,7 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
         if (handle) {
           const base = context.nameFor(`${handle.name}_base`);
           const buffer = context.nameFor(`${handle.name}_buffer`);
-          const index = `(${base} + ${emitDevicePointerIndexDelta(expression.index, handle.valueType, context)})`;
+          const index = `(${base} + ${emitDevicePointerIndexDelta(expression.index, handle.valueType, context, expression.target)})`;
           return `${pointerReadHelperName(handle.valueType)}(${buffer}, ${index})`;
         }
         const alias = flattenedPointerAlias(expression.target.name, expression.target.span, context);
@@ -4691,6 +4733,20 @@ function emitDevicePointerMemberAssignment(expression: CudaLiteAssignmentExpress
   return `${pointerWriteHelperName(pointerLvalue.valueType)}(${pointerLvalue.buffer}, ${pointerLvalue.index}, ${value})`;
 }
 
+function emitSharedByteAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string | undefined {
+  const root = rootIdentifier(expression.left);
+  const shared = root ? sharedDeclarationFor(root, context) : undefined;
+  if (!shared || shared.valueType !== "uchar") return undefined;
+  const index = emitSharedAddressIndex(expression.left, context.ir, (item) => emitExpression(item, context));
+  if (!index) return undefined;
+  const current = emitSharedPointerRead(shared, index, context.ir, context, "uchar");
+  const right = emitExpressionAsStorageElementValueType(expression.right, "uchar", context);
+  const value = expression.operator === "="
+    ? right
+    : `(${current} ${expression.operator.slice(0, -1)} ${right})`;
+  return emitSharedPointerWrite(shared, index, value, context.ir, context, "uchar");
+}
+
 function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string {
   const directPointerIndexAssignment = emitDirectPointerIndexAssignment(expression, context);
   if (directPointerIndexAssignment) return directPointerIndexAssignment;
@@ -4700,6 +4756,8 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
   if (pointerRebase) return pointerRebase;
   const localVectorAddressScalarAssignment = emitLocalVectorAddressScalarAssignment(expression, context);
   if (localVectorAddressScalarAssignment) return localVectorAddressScalarAssignment;
+  const sharedByteAssignment = emitSharedByteAssignment(expression, context);
+  if (sharedByteAssignment) return sharedByteAssignment;
   const directStorageScalarAssignment = emitDirectStorageScalarAssignment(expression, context);
   if (directStorageScalarAssignment) return directStorageScalarAssignment;
   const localVectorAssignment = emitLocalVectorIndexAssignment(expression, context);
@@ -5005,6 +5063,17 @@ function emitDirectStorageScalarAssignment(
   const declaration = sharedDeclaration ?? localArrayForStorageView(root, expression.left.span, context);
   const valueType = declaration?.valueType;
   if (!valueType || isCudaVectorType(valueType)) return undefined;
+  if (sharedDeclaration && valueType === "uchar") {
+    const view = scalarStorageViewLValue(expression.left, context);
+    if (view?.addressSpace === "shared") {
+      const current = emitSharedPointerRead(view.root, view.index, context.ir, context, view.valueType, view.subElementLane);
+      const right = emitExpressionAsStorageElementValueType(expression.right, view.valueType, context);
+      const value = expression.operator === "="
+        ? right
+        : `(${current} ${expression.operator.slice(0, -1)} ${right})`;
+      return emitSharedPointerWrite(view.root, view.index, value, context.ir, context, view.valueType, view.subElementLane);
+    }
+  }
   const target = emitExpression(expression.left, context, "lvalue");
   const current = emitExpressionAsStorageElementValueType(expression.left, valueType, context);
   const right = emitExpressionAsStorageElementValueType(expression.right, valueType, context);

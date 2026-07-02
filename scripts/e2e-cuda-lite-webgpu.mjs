@@ -696,6 +696,24 @@ __global__ void sharedVectorOverlay(float *out) {
     out[0] = value.x + value.y + value.z + value.w;
   }
 }`,
+  sharedByteReinterpret: `
+__global__ void sharedByteReinterpret(int *out) {
+  __shared__ uchar scratch[16];
+  int lane = threadIdx.x;
+  if (lane == 0) {
+    scratch[0] = (uchar)1;
+    scratch[1] = (uchar)2;
+    scratch[2] = (uchar)3;
+    scratch[3] = (uchar)4;
+  }
+  __syncthreads();
+  if (lane == 0) {
+    int *words = (int *)&scratch[0];
+    words[1] = 9;
+    out[0] = words[0];
+    out[1] = words[1];
+  }
+}`,
   localVectorPointerArray: `
 __device__ float3 sum3(float3 *a, float3 *b, float3 *c) {
   return *a + *b + *c;
@@ -6146,6 +6164,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [10] },
+          },
+          {
+            name: "storage:shared-byte-reinterpret",
+            source: SOURCES.sharedByteReinterpret,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(2),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [0x04030201, 9] },
           },
           {
             name: "storage:local-vector-pointer-array",

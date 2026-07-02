@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T09:45:58Z
+Last updated: 2026-07-02T10:09:19Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,9 +9,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `419/0/0`, dist `419/0/0` |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `420/0/0`, dist `420/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Fixed corpus audit class-member helper extraction and loop-local divergent-continue analysis; continue next remaining local-pointer/corpus-shaped storage probe |
+| Active work item | Fixed shared-byte reinterpret local pointers from cuda-samples `compute_gemm_imma`; continue full verifier and next corpus-shaped storage probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -553,11 +553,14 @@ Current verified gates:
 - corpus audit class-member helper fix: cuda-samples compile/codegen improved from `355/357` to `356/357`; hard fails improved from `2` to `1`; `missing-kernel` is gone for `multiGpuConjugateGradient`
 - loop-local divergent continue fix: compiler unit file `407/0`; focused unit run `423/0`; llm.c audit restored `148/0/0`; full real-world corpus audit green; verifier src/dist `419/0/0`
 - WebGPU smoke after loop-local continue/class-member fixes: `266/0/0`
+- shared-byte reinterpret local pointer fix: focused byte-reinterpret unit `424/0`; `storage:shared-byte-reinterpret` `1/0/0`; WebGPU smoke `267/0/0`; cuda-samples audit compile/codegen `357/357`, hard fails `0`
+- real-world CUDA verifier after shared-byte reinterpret fix: src `420/0/0`, dist `420/0/0`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | shared byte storage reinterpret local pointers | cuda-samples `immaTensorCoreGemm` kernel `compute_gemm_imma` failed audit with `unsupported-local-pointer`, and local `int*` / `int4*` aliases over `uchar` storage could index bytes as scalar words or write whole packed slots incorrectly | analyzer allows word-addressable `uchar` pointer aliases; reference runtime packs shared `uchar` into byte-addressed words; WGSL pointer indexing scales typed aliases over byte roots by element byte size; direct shared `uchar` assignments route through packed byte writes | focused byte-reinterpret unit `424/0`; `storage:shared-byte-reinterpret` `1/0/0`; WebGPU smoke `267/0/0`; cuda-samples audit compile/codegen `357/357`, hard fails `0` |
 | Fixed | loop-local divergent continue analysis | llm.c `fused_classifier_kernel2` and `fused_classifier_kernel4` were rejected with `divergent-continue-before-barrier` even though the `continue` only targeted an inner lane loop and did not skip the later helper barrier | analyzer now tracks barriers later in the current continue-target loop separately from barriers after enclosing loops/blocks; unsafe same-loop continues still error | focused unit run `423/0`; compiler unit file `407/0`; llm.c audit `148/0/0`; full real-world audit green; WebGPU smoke `266/0/0`; verifier src/dist `419/0/0` |
 | Fixed | corpus audit C++ member helper extraction | cuda-samples `multiGpuConjugateGradient` became `missing-kernel` because class `PeerGroup` `__device__` member methods/constructors were collected as free device helpers and poisoned normalization until the requested kernel disappeared | audit device-function collection now filters constructor initializer signatures and `const`/override-style member methods; regression emits the class-adjacent kernel source and verifies member methods are excluded | corpus audit regression passed; cuda-samples compile/codegen `356/357`; hard fails `1`; full real-world audit green |
 | Fixed | WebGPU smoke command echo | `e2e:webgpu:smoke` still printed a giant inner `pnpm run e2e:webgpu:case -- --cases ...` command before JSON, even after summary compaction | smoke wrapper now spawns `run-cuda-lite-tool.mjs` directly with the same WebGPU flags, bypassing nested pnpm lifecycle echo while preserving the lock/build-skip behavior | smoke `266/0/0`; output now starts with wrapper command then compact JSON |
@@ -872,12 +875,13 @@ Current added pointer/control cases:
 - `control:active-lane-atomic-return-side-effect-barrier`
 - `control:active-lane-shared-return-side-effect-barrier`
 - `control:subgroup-truthiness-assignment-scalar`
+- `storage:shared-byte-reinterpret`
 
-Smoke current: `266/0/0`.
+Smoke current: `267/0/0`.
 
 Full source e2e current: `221/0/0`.
 
-Verifier current: src `419/0/0`, dist `419/0/0`.
+Verifier current: src `420/0/0`, dist `420/0/0`.
 
 ## Remaining Probe Map
 
@@ -888,7 +892,7 @@ Probe these with fail-first real WebGPU fixtures:
 - Texture family:
   - vector helper return, cast/coercion, active-lane pre-return read, atlas/volume guarded RHS, atlas/volume all-inactive guarded RHS, atlas pointer-array false-branch selection, pointer-array false-branch selection, texture/atlas compound false-branch selection, texture/atlas CAS/minmax false-branch selection, 2D and volume scalar/vector pointer-array active-lane false-branch selection, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 texture active-lane stores, texture-to-surface pre-return side effects, 2-lane/3-lane/4-lane texture-fed layered surface vector writes/reads, mixed scalar/vector texture-fed layered surface vector writes/reads, texture-fed layered surface vector writes, layered/3D texture vector reads feeding 3D surface vector writes, atlas/layered active-lane reads, deep helper vector stores, mixed scalar/vector texture stores, texture-fed pointer alias writes, texture-fed pointer alias atomics, atomic vector readback, atomic vector compound helper writes, and atomic vector member helper writes are now green; keep probing next corpus-shaped texture/storage pattern
 - Pointer/vector family:
-  - mixed local pointer-param + generic storage pointer helper now has explicit diagnostic; implementation support remains future work
+  - shared-byte reinterpret local pointers, typed aliases over byte roots, direct packed-byte shared writes, and cuda-samples `compute_gemm_imma` audit planning are now green; mixed local pointer-param + generic storage pointer helper still has explicit diagnostic and implementation support remains future work
 - Active-lane/control family:
   - loop-internal, alternate-branch, nested, loop+alternate, scalar side-effect, vector-lane side-effect, pointer-alias side-effect, atomic side-effect, shared-memory side-effect, surface side-effect, texture read side-effect, atlas/volume texture guarded RHS, all-inactive guarded RHS, surface/atlas pointer-array false-branch selection, 2D and volume texture-to-surface scalar/vector pointer-array false-branch selection, compound false-branch selection, surface CAS/minmax false-branch selection, texture CAS/minmax false-branch selection, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 texture-store side-effect, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 surface side-effect, mixed scalar/vector layered surface side-effect, surface-read pointer-alias side-effect, surface-read atomic pointer-alias side-effect, surface atomic vector readback, surface atomic vector compound helper, surf3D helper multi-surface and guarded RHS probes, surf3D pointer-alias active/atomic vector probes, surf3D pointer-array select/active/compound/CAS/minmax, texture-to-surface side-effect, 2-lane/3-lane/4-lane texture-fed layered surface vector side-effect, mixed scalar/vector texture-fed layered surface vector side-effect, texture-fed layered surface vector side-effect, layered/3D texture into 3D surface vector side-effect, atlas/layered texture return, deep helper vector-store, mixed scalar/vector texture-store, texture-fed pointer-alias, texture-fed pointer-alias atomic, atomic vector readback, atomic vector compound helper, and atomic vector member helper cases are now green in real WebGPU; keep probing next corpus-shaped texture/storage pattern
   - non-uniform break/return/continue should remain clear diagnostic or safe active-lane lowering, not silent miscompile; divergent continue before a barrier in the same target loop is blocked, while inner-loop continues that do not skip later barriers are allowed

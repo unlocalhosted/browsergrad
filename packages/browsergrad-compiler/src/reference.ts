@@ -3225,7 +3225,12 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
   if (alias && typeof alias !== "number" && "kind" in alias && alias.kind === "address") {
     if (chain.length !== 1) throw compilerFailure(`pointer alias '${cursor.name}' expects one-dimensional indexing`);
     const valueType = alias.target.valueType;
-    const index = lvalueStorageIndex(alias.target, context) + chain[0]! * valueStorageWidth(valueType);
+    const bytePackedShared = alias.target.space === "shared" &&
+      context.shared.get(alias.target.name)?.valueType === "uchar" &&
+      valueType !== "uchar";
+    const index = bytePackedShared
+      ? ((alias.target.index ?? 0) + chain[0]! * valueStorageWidth(valueType)) * rawStorageUnitByteSize(valueType)
+      : lvalueStorageIndex(alias.target, context) + chain[0]! * valueStorageWidth(valueType);
     return {
       name: alias.target.name,
       space: alias.target.space,
@@ -3462,7 +3467,7 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
   if (!shared) throw compilerFailure(`missing shared array '${lvalue.name}'`);
   const valueType = lvalue.valueType ?? shared.valueType;
   const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
-  const ok = storageRangeFits(shared.data, storageIndex, valueType);
+  const ok = sharedStorageRangeFits(shared, storageIndex, valueType);
   const value = ok ? readSharedBufferValue(shared, storageIndex, valueType, lvalue.field) : 0;
   context.trace.sharedReads.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
   return value;
@@ -3543,7 +3548,7 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
   if (!shared) throw compilerFailure(`missing shared array '${lvalue.name}'`);
   const valueType = lvalue.valueType ?? shared.valueType;
   const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
-  const ok = storageRangeFits(shared.data, storageIndex, valueType);
+  const ok = sharedStorageRangeFits(shared, storageIndex, valueType);
   if (ok) writeSharedBufferValue(shared, storageIndex, valueType, lvalue.field, value);
   context.trace.sharedWrites.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
 }
@@ -3554,7 +3559,9 @@ function allocateShared(declarations: readonly CudaLiteVarDecl[]): Map<string, S
     const elements = declaration.dimensions.reduce((product, item) => product * item, 1);
     const length = elements * valueStorageWidth(declaration.valueType);
     const scalarType = cudaVectorScalarType(declaration.valueType);
-    const data = declaration.valueType === "int" || scalarType === "int"
+    const data = declaration.valueType === "uchar"
+      ? new Uint32Array(Math.ceil(elements / 4))
+      : declaration.valueType === "int" || scalarType === "int"
       ? new Int32Array(length)
       : declaration.valueType === "uint" || scalarType === "uint"
         ? new Uint32Array(length)
@@ -3827,6 +3834,9 @@ function readSharedBufferValue(
   valueType: CudaLiteScalarType | undefined,
   field: "x" | "y" | "z" | "w" | undefined,
 ): EvalValue {
+  if (shared.valueType === "uchar" && valueType !== undefined && !isCudaVectorType(valueType)) {
+    return readPackedByteSharedValue(shared.data, storageIndex, valueType);
+  }
   if (shared.valueType === valueType || valueType === undefined) return readBufferValue(shared.data, storageIndex, valueType, field);
   if (isCudaVectorType(valueType)) {
     const scalar = cudaVectorScalarType(valueType);
@@ -3849,6 +3859,10 @@ function writeSharedBufferValue(
   field: "x" | "y" | "z" | "w" | undefined,
   value: EvalValue,
 ): void {
+  if (shared.valueType === "uchar" && valueType !== undefined && !isCudaVectorType(valueType)) {
+    writePackedByteSharedValue(shared.data, storageIndex, valueType, valueAsNumber(value, "shared write"));
+    return;
+  }
   if (shared.valueType === valueType || valueType === undefined) {
     writeBufferValue(shared.data, storageIndex, valueType, field, value);
     return;
@@ -3867,6 +3881,67 @@ function writeSharedBufferValue(
     return;
   }
   writeScalarStorageValue(shared.data, storageIndex, valueType, valueAsNumber(value, "shared write"));
+}
+
+function sharedStorageRangeFits(
+  shared: SharedArrayValue,
+  storageIndex: number,
+  valueType: CudaLiteScalarType | undefined,
+): boolean {
+  if (shared.valueType !== "uchar" || valueType === undefined || isCudaVectorType(valueType)) {
+    return storageRangeFits(shared.data, storageIndex, valueType);
+  }
+  if (storageIndex < 0) return false;
+  const byteCount = elementByteSize(valueType);
+  const lastWordIndex = Math.trunc((storageIndex + byteCount - 1) / 4);
+  return lastWordIndex < shared.data.length;
+}
+
+function readPackedByteSharedValue(
+  buffer: WgslTypedArray,
+  byteIndex: number,
+  valueType: CudaLiteScalarType,
+): number {
+  const word = readPackedByteSharedWord(buffer, byteIndex);
+  if (valueType === "uchar") {
+    const shift = (Math.trunc(byteIndex) & 3) * 8;
+    return (word >>> shift) & 0xff;
+  }
+  return valueType === "int" ? intFromBits(word) : word;
+}
+
+function writePackedByteSharedValue(
+  buffer: WgslTypedArray,
+  byteIndex: number,
+  valueType: CudaLiteScalarType,
+  value: number,
+): void {
+  const wordIndex = Math.trunc(byteIndex / 4);
+  if (valueType !== "uchar") {
+    writePackedByteSharedWord(buffer, wordIndex, Math.trunc(value) >>> 0);
+    return;
+  }
+  const shift = (Math.trunc(byteIndex) & 3) * 8;
+  const old = readPackedByteSharedWordAt(buffer, wordIndex);
+  const mask = 0xff << shift;
+  writePackedByteSharedWord(buffer, wordIndex, ((old & ~mask) | ((Math.trunc(value) & 0xff) << shift)) >>> 0);
+}
+
+function readPackedByteSharedWord(buffer: WgslTypedArray, byteIndex: number): number {
+  return readPackedByteSharedWordAt(buffer, Math.trunc(byteIndex / 4));
+}
+
+function readPackedByteSharedWordAt(buffer: WgslTypedArray, wordIndex: number): number {
+  const raw = Number(buffer[wordIndex] ?? 0);
+  return buffer instanceof Float32Array ? bitsFromFloat(raw) : raw >>> 0;
+}
+
+function writePackedByteSharedWord(buffer: WgslTypedArray, wordIndex: number, value: number): void {
+  if (buffer instanceof Float32Array) {
+    buffer[wordIndex] = floatFromBits(value);
+    return;
+  }
+  buffer[wordIndex] = value >>> 0;
 }
 
 function readPoolValue(

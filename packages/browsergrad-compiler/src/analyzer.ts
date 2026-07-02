@@ -1272,6 +1272,7 @@ function isWordAddressablePointerType(type: ValueType): boolean {
   return type === "float" ||
     type === "int" ||
     type === "uint" ||
+    type === "uchar" ||
     type === "half" ||
     isCudaVectorType(type);
 }
