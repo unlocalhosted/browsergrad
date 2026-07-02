@@ -985,6 +985,33 @@ __global__ void globals_array(float* out) {
     expect(compiled.wgsl).toContain("fn bg_ptr_write_f32(buffer: u32, index: u32, value: f32) {\n  d_CallValue[index] = value;");
   });
 
+  it("packs wider pointer views over device global byte storage", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uchar gScratch[8];
+
+__global__ void globalByteFloatOverlay(float* out) {
+  if (threadIdx.x == 0) {
+    float *value = (float *)&gScratch[0];
+    value[0] = 1.0f;
+    value[1] = 2.0f;
+    out[0] = value[0];
+    out[1] = value[1];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
+    expect(result.buffers.gScratch).toBeInstanceOf(Uint32Array);
+    expect(compiled.wgsl).toContain("var<storage, read_write> gScratch: array<u32>;");
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32");
+    expect(compiled.wgsl).toContain(">> 2u");
+  });
+
   it("supports atomic operations on __device__ globals", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int counter = 0;

@@ -272,6 +272,8 @@ export function emitDeviceGlobalPointerRead(
   viewType: CudaLiteScalarType = global.valueType,
 ): string {
   const name = context.nameFor(global.name);
+  const packedByte = emitPackedByteStorageRead(name, global.valueType, index, viewType);
+  if (packedByte) return packedByte;
   if (isCudaVectorType(viewType)) {
     if (ir.atomicDeviceGlobals.includes(global.name)) {
       return emitDeviceGlobalVectorFlatRead(global, vectorStorageBase(index, cudaVectorLaneCount(viewType)), viewType, ir, context);
@@ -306,6 +308,8 @@ export function emitDeviceGlobalPointerWrite(
   viewType: CudaLiteScalarType = global.valueType,
 ): string {
   const name = context.nameFor(global.name);
+  const packedByte = emitPackedByteStorageWrite(name, global.valueType, index, value, viewType);
+  if (packedByte) return packedByte;
   if (isCudaVectorType(viewType)) {
     if (ir.atomicDeviceGlobals.includes(global.name)) {
       return emitDeviceGlobalVectorFlatWrite(global, vectorStorageBase(index, cudaVectorLaneCount(viewType)), value, viewType, ir, context);

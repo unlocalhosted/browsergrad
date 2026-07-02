@@ -4237,7 +4237,7 @@ function deviceGlobalInitialValue(global: CudaLiteDeviceGlobal): WgslTypedArray 
     : flattenConstantInitializer(global.init).map(evaluateConstantNumber);
   const padded = Array.from({ length: total }, (_, index) => values[index] ?? 0);
   if (global.valueType === "int") return Int32Array.from(padded.map((value) => Math.trunc(value)));
-  if (global.valueType === "uint" || global.valueType === "bool" || global.valueType === "voidptr") {
+  if (global.valueType === "uint" || global.valueType === "uchar" || global.valueType === "bool" || global.valueType === "voidptr") {
     return Uint32Array.from(padded.map((value) => Math.trunc(value) >>> 0));
   }
   if (global.valueType === "half") return createWgslFloat16Array(padded);
@@ -4892,7 +4892,7 @@ function validateTypedDeviceGlobal(name: string, valueType: string, value: WgslT
   if ((valueType === "int" || scalarType === "int") && !(value instanceof Int32Array)) {
     throw compilerFailure(`device global '${name}' expects Int32Array`);
   }
-  if ((valueType === "uint" || scalarType === "uint" || valueType === "bool" || valueType === "voidptr") && !(value instanceof Uint32Array)) {
+  if ((valueType === "uint" || valueType === "uchar" || scalarType === "uint" || valueType === "bool" || valueType === "voidptr") && !(value instanceof Uint32Array)) {
     throw compilerFailure(`device global '${name}' expects Uint32Array`);
   }
   if ((valueType === "float" || valueType === "double" || valueType === "bf16" || scalarType === "float" || scalarType === "bf16") && !(value instanceof Float32Array)) {

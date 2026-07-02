@@ -1374,6 +1374,18 @@ __global__ void deviceGlobalStorage(float* out, uint* old) {
   setValue(values, tid, (float)(tid + 1));
   out[tid] = values[tid];
 }`,
+  deviceGlobalByteFloatReinterpret: `
+__device__ uchar gScratch[8];
+
+__global__ void deviceGlobalByteFloatReinterpret(float* out) {
+  if (threadIdx.x == 0) {
+    float *value = (float *)&gScratch[0];
+    value[0] = 1.0f;
+    value[1] = 2.0f;
+    out[0] = value[0];
+    out[1] = value[1];
+  }
+}`,
   deviceGlobalTruthiness: `
 __device__ unsigned int flag = 0;
 __device__ unsigned int numErrors = 0;
@@ -6990,6 +7002,19 @@ const html = String.raw`<!doctype html>
               },
             }),
             output: "out",
+          },
+          {
+            name: "device-function:device-global-byte-float-reinterpret",
+            source: SOURCES.deviceGlobalByteFloatReinterpret,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(2),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [1, 2] },
           },
           {
             name: "device-function:device-global-truthiness",

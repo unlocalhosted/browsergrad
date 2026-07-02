@@ -142,7 +142,7 @@ function deviceGlobalInitialValue(global: CudaLiteDeviceGlobal): WgslTypedArray 
     : flattenInitializer(global.init).map(evaluateInitializerNumber);
   const padded = Array.from({ length: total }, (_, index) => values[index] ?? 0);
   if (global.valueType === "int") return Int32Array.from(padded.map((value) => Math.trunc(value)));
-  if (global.valueType === "uint" || global.valueType === "bool" || global.valueType === "voidptr") {
+  if (global.valueType === "uint" || global.valueType === "uchar" || global.valueType === "bool" || global.valueType === "voidptr") {
     return Uint32Array.from(padded.map((value) => Math.trunc(value) >>> 0));
   }
   if (global.valueType === "half") return createWgslFloat16Array(padded);

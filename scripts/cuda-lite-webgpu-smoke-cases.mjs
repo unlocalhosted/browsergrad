@@ -18,6 +18,7 @@ export const storageScopeCases = [
   "device-function:pointer-param-helpers",
   "device-function:shared-pointer-helpers",
   "device-function:device-global-storage",
+  "device-function:device-global-byte-float-reinterpret",
   "device-function:device-global-truthiness",
   "device-function:device-global-helper-rmw",
   "storage:local-pointer-row-alias",
