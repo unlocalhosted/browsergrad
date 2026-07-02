@@ -753,6 +753,21 @@ __global__ void sharedByteHalfReinterpret(float *out) {
     out[1] = __half2float(value[1]);
   }
 }`,
+  sharedByteBf16Reinterpret: `
+__global__ void sharedByteBf16Reinterpret(float *out) {
+  __shared__ uchar scratch[4];
+  if (threadIdx.x == 0) {
+    __nv_bfloat16 *value = (__nv_bfloat16 *)&scratch[0];
+    value[0] = __float2bfloat16(1.0f);
+    value[1] = __float2bfloat16(2.0f);
+  }
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    __nv_bfloat16 *value = (__nv_bfloat16 *)&scratch[0];
+    out[0] = __bfloat162float(value[0]);
+    out[1] = __bfloat162float(value[1]);
+  }
+}`,
   localVectorPointerArray: `
 __device__ float3 sum3(float3 *a, float3 *b, float3 *c) {
   return *a + *b + *c;
@@ -6247,6 +6262,19 @@ const html = String.raw`<!doctype html>
             name: "storage:shared-byte-half-reinterpret",
             source: SOURCES.sharedByteHalfReinterpret,
             options: { workgroupSize: [1, 1, 1], f16Mode: "f32" },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(2),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [1, 2] },
+          },
+          {
+            name: "storage:shared-byte-bf16-reinterpret",
+            source: SOURCES.sharedByteBf16Reinterpret,
+            options: { workgroupSize: [1, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({
               buffers: {

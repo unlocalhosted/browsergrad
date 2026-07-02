@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T10:48:35Z
+Last updated: 2026-07-02T10:58:40Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,9 +9,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `423/0/0`, dist `423/0/0` |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `424/0/0`, dist `424/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Scoped local pointer handle and packed shared-byte half fixes are green through `verify:changed` and full real-world verifier; ready for next corpus-shaped probe |
+| Active work item | Packed shared-byte bf16 fix is green through `verify:changed` and full real-world verifier; ready for next corpus-shaped probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -563,11 +563,15 @@ Current verified gates:
 - packed shared-byte half view fix: after scoped pointer fix, fail-first `storage:shared-byte-half-reinterpret` failed compare with actual `0`; after 16-bit lane read/write and helper compatibility fix, focused real WebGPU case `1/0/0`; compiler unit `411/0`
 - changed gate after scoped pointer/half shared-byte fixes: typecheck passed; lint passed; compiler unit `411/0`; WGSL modules `16/0`; storage focused group `4/0/0`; selected pointer/storage WebGPU group `39/0/0`; WebGPU smoke `270/0/0`; fixture/status/scope tests passed
 - real-world CUDA verifier after scoped pointer/half shared-byte fixes: src `423/0/0`, dist `423/0/0`
+- packed shared-byte bf16 view fix: fail-first `storage:shared-byte-bf16-reinterpret` failed with `unsupported-local-pointer` for `__nv_bfloat16*` over `uchar` shared storage; after analyzer/helper/storage/reference fixes, compiler unit `412/0`, focused real WebGPU case `1/0/0`
+- changed gate after packed shared-byte bf16 fix: typecheck passed; lint passed; compiler unit `412/0`; WGSL modules `16/0`; storage focused group `5/0/0`; selected pointer/storage WebGPU group `40/0/0`; WebGPU smoke `271/0/0`; fixture/status/scope tests passed
+- real-world CUDA verifier after packed shared-byte bf16 fix: src `424/0/0`, dist `424/0/0`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | packed shared-byte bf16 views | `(__nv_bfloat16 *)&scratch[0]` over `__shared__ uchar scratch[]` was rejected as `unsupported-local-pointer`; packed shared-byte carrier also treated `bf16` like 32-bit float instead of 16-bit bfloat lanes | analyzer now allows `bf16` word-addressable explicit pointer aliases; packed shared-byte reads/writes store/read bfloat16 top-half f32 bits in 16-bit lanes; pointer helpers include `bf16` over `uchar` shared storage; CPU reference mirrors lane packing | fail-first real WebGPU case failed at compile; after fix `storage:shared-byte-bf16-reinterpret` `1/0/0`; compiler unit `412/0` |
 | Fixed | scoped local pointer handles | two C block scopes reused the pointer variable name `value`; generated WGSL declared `value_buffer`/`value_base` twice, causing pipeline creation failure before the storage bug could run | local pointer handle declarations are resolved by source span and emitted with span-scoped backing names; device-pointer helper paths use the same scoped handle name lookup | fail-first `storage:shared-byte-half-reinterpret` failed with redeclared `value_buffer`/`value_base`; compiler unit regression `keeps same-named local pointer handles distinct across C block scopes`; full compiler unit `411/0` |
 | Fixed | packed shared-byte half views | `(half *)&scratch[0]` over `__shared__ uchar scratch[]` wrote/read through `bg_ptr_write_f16/read_f16` with no shared-byte helper case, producing `0` instead of `[1, 2]`; direct packed byte logic also lacked 16-bit lane masking | packed byte shared reads/writes now handle `half` via `unpack2x16float`/`pack2x16float` lane selection; CPU reference mirrors 16-bit lane updates; pointer helpers include `half` over `uchar` shared storage | fail-first real WebGPU case failed compare; after fix `storage:shared-byte-half-reinterpret` `1/0/0`; focused unit `packs half pointer views over shared byte storage into 16-bit lanes`; full compiler unit `411/0` |
 | Fixed | packed shared-byte float views | `(float *)&scratch[0]` over `__shared__ uchar scratch[]` emitted `bg_ptr_read_f32` returning raw `u32`, so WGSL pipeline creation failed with returned `u32`, expected `f32`; reference also treated float views as raw integer bits | packed byte scalar carrier conversion now bitcasts `float`/`double`/`bf16` from/to `u32`, keeps `int` bitcast, preserves `uint`, and handles bool carriers | fail-first real WebGPU case failed at pipeline creation; after fix `storage:shared-byte-float-reinterpret` `1/0/0`; focused unit `425/0`; compiler unit `409/0`; storage group `38/0/0`; smoke `269/0/0` |

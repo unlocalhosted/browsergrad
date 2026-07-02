@@ -3911,7 +3911,11 @@ function readPackedByteSharedValue(
     const shift = (Math.trunc(byteIndex) & 2) * 8;
     return float16BitsToFloat32((word >>> shift) & 0xffff);
   }
-  if (valueType === "float" || valueType === "double" || valueType === "bf16") return floatFromBits(word);
+  if (valueType === "bf16") {
+    const shift = (Math.trunc(byteIndex) & 2) * 8;
+    return floatFromBits(((word >>> shift) & 0xffff) << 16);
+  }
+  if (valueType === "float" || valueType === "double") return floatFromBits(word);
   if (valueType === "int") return intFromBits(word);
   if (valueType === "bool") return word === 0 ? 0 : 1;
   return word;
@@ -3932,6 +3936,14 @@ function writePackedByteSharedValue(
     writePackedByteSharedWord(buffer, wordIndex, ((old & ~mask) | ((halfBits & 0xffff) << shift)) >>> 0);
     return;
   }
+  if (valueType === "bf16") {
+    const shift = (Math.trunc(byteIndex) & 2) * 8;
+    const old = readPackedByteSharedWordAt(buffer, wordIndex);
+    const mask = 0xffff << shift;
+    const bits = (bitsFromFloat(roundBfloat16(value)) >>> 16) & 0xffff;
+    writePackedByteSharedWord(buffer, wordIndex, ((old & ~mask) | (bits << shift)) >>> 0);
+    return;
+  }
   if (valueType !== "uchar") {
     writePackedByteSharedWord(buffer, wordIndex, packedByteSharedWord(valueType, value));
     return;
@@ -3943,7 +3955,7 @@ function writePackedByteSharedValue(
 }
 
 function packedByteSharedWord(valueType: CudaLiteScalarType, value: number): number {
-  if (valueType === "float" || valueType === "double" || valueType === "bf16") return bitsFromFloat(value);
+  if (valueType === "float" || valueType === "double") return bitsFromFloat(value);
   if (valueType === "bool") return value === 0 ? 0 : 1;
   return Math.trunc(value) >>> 0;
 }

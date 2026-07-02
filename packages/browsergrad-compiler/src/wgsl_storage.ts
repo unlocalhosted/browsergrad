@@ -485,6 +485,10 @@ function emitPackedByteSharedRead(
     const unpacked = `unpack2x16float(${loaded})`;
     return `${wgslScalar("half")}(select(${unpacked}.x, ${unpacked}.y, (((${index}) & 2u) != 0u)))`;
   }
+  if (viewType === "bf16") {
+    const shift = `(((${index}) & 2u) * 8u)`;
+    return `bitcast<f32>((((${loaded} >> ${shift}) & 0xffffu) << 16u))`;
+  }
   if (viewType !== "uchar") return emitPackedByteWordAsView(loaded, viewType);
   const shift = `(((${index}) & 3u) * 8u)`;
   return `((${loaded} >> (${shift})) & 255u)`;
@@ -506,6 +510,12 @@ function emitPackedByteSharedWrite(
     const halfBits = `(pack2x16float(vec2<f32>(f32(${value}), 0.0)) & 0xffffu)`;
     return `atomicAnd(&${word}, ~${mask}); atomicOr(&${word}, (${halfBits} << ${shift}))`;
   }
+  if (viewType === "bf16") {
+    const shift = `(((${index}) & 2u) * 8u)`;
+    const mask = `(0xffffu << ${shift})`;
+    const bits = `(((bitcast<u32>(f32(${value})) + 0x8000u) >> 16u) & 0xffffu)`;
+    return `atomicAnd(&${word}, ~${mask}); atomicOr(&${word}, (${bits} << ${shift}))`;
+  }
   if (viewType !== "uchar") return `atomicStore(&${word}, ${emitPackedByteViewAsWord(value, viewType)})`;
   const shift = `(((${index}) & 3u) * 8u)`;
   const mask = `(255u << ${shift})`;
@@ -515,14 +525,14 @@ function emitPackedByteSharedWrite(
 }
 
 function emitPackedByteWordAsView(word: string, viewType: CudaLiteScalarType): string {
-  if (viewType === "float" || viewType === "double" || viewType === "bf16") return `bitcast<f32>(${word})`;
+  if (viewType === "float" || viewType === "double") return `bitcast<f32>(${word})`;
   if (viewType === "int") return `bitcast<i32>(${word})`;
   if (viewType === "bool") return `(${word} != 0u)`;
   return word;
 }
 
 function emitPackedByteViewAsWord(value: string, viewType: CudaLiteScalarType): string {
-  if (viewType === "float" || viewType === "double" || viewType === "bf16") return `bitcast<u32>(${value})`;
+  if (viewType === "float" || viewType === "double") return `bitcast<u32>(${value})`;
   if (viewType === "int") return `bitcast<u32>(${value})`;
   if (viewType === "bool") return `select(0u, 1u, ${value})`;
   return `u32(${value})`;

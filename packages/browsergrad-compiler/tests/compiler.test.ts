@@ -4575,6 +4575,29 @@ __global__ void sharedByteHalfOverlay(float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
   });
 
+  it("packs bf16 pointer views over shared byte storage into 16-bit lanes", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sharedByteBf16Overlay(float *out) {
+  __shared__ uchar scratch[4];
+  if (threadIdx.x == 0) {
+    __nv_bfloat16 *view = (__nv_bfloat16 *)&scratch[0];
+    view[0] = __float2bfloat16(1.0f);
+    view[1] = __float2bfloat16(2.0f);
+    out[0] = __bfloat162float(view[0]);
+    out[1] = __bfloat162float(view[1]);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("<< 16u");
+    expect(compiled.wgsl).toContain(">> 16u");
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
+  });
+
   it("lowers generic pointer dereference lvalues and rebased kernel params", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void derefWrite(float *x) {

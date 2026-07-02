@@ -33,6 +33,7 @@ export const storageScopeCases = [
   "storage:shared-byte-concurrent-writes",
   "storage:shared-byte-float-reinterpret",
   "storage:shared-byte-half-reinterpret",
+  "storage:shared-byte-bf16-reinterpret",
   "storage:local-vector-pointer-array",
   "storage:shared-vector-pointer-array",
   "storage:dynamic-shared-vector-pointer-array",
