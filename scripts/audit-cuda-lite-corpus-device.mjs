@@ -114,8 +114,12 @@ export function isPortableDeviceFunctionCandidate(signature, source, name, recor
 }
 
 export function isCudaMemberFunctionLike(signature, name) {
+  if (/\b__device__\s+[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)\s*:/u.test(signature)) return true;
   const open = signature.lastIndexOf("(");
   if (open < 0) return true;
+  const close = signature.indexOf(")", open);
+  const afterParams = close < 0 ? "" : signature.slice(close + 1).trim();
+  if (/^(?:const|noexcept|override|final)\b/u.test(afterParams)) return true;
   const before = signature.slice(0, open).trim();
   if (new RegExp(`~\\s*${escapeRegExp(name)}\\s*(?:<[^<>]*>)?\\s*$`, "u").test(before)) return true;
   if (new RegExp(`::\\s*${escapeRegExp(name)}\\s*(?:<[^<>]*>)?\\s*$`, "u").test(before)) return true;

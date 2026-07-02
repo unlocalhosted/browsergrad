@@ -7487,6 +7487,27 @@ __global__ void continueBeforeBarrier(uint *out, int N) {
     expect(() => compileCudaLiteKernel(source, { workgroupSize: [4, 1, 1] })).toThrow(/divergent-continue-before-barrier/u);
   });
 
+  it("allows divergent continues that do not skip later barriers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint sum_valid_lanes(uint value, int N) {
+  uint total = 0u;
+  for (int k = 0; k < 4; ++k) {
+    if (threadIdx.x + k >= N) { continue; }
+    total += value + (uint)k;
+  }
+  __syncthreads();
+  return total;
+}
+
+__global__ void innerContinueBeforeBarrier(uint *out, int N) {
+  int tid = threadIdx.x;
+  out[tid] = sum_valid_lanes((uint)tid, N);
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("divergent-continue-before-barrier");
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+  });
+
   it("lowers dynamic extern shared memory declared inside device helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ uint reduce_one(uint value) {

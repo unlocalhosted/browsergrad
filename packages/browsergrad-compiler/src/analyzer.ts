@@ -3884,14 +3884,18 @@ function validateDivergentReturnsBeforeBarriers(
     body: readonly CudaLiteStatement[],
     divergentDepth: number,
     initialBarrierLater = false,
+    initialContinueBarrierLater = false,
   ): boolean => {
     let barrierLater = initialBarrierLater;
+    let localBarrierLater = false;
+    let continueBarrierLater = initialContinueBarrierLater;
     let containsBarrier = false;
     for (let index = body.length - 1; index >= 0; index--) {
       const statement = body[index]!;
-      const info = visitStatement(statement, divergentDepth, barrierLater);
+      const info = visitStatement(statement, divergentDepth, barrierLater, continueBarrierLater || localBarrierLater);
       containsBarrier = info.containsBarrier || containsBarrier;
       barrierLater = barrierLater || info.containsBarrier;
+      localBarrierLater = localBarrierLater || info.containsBarrier;
     }
     return containsBarrier;
   };
@@ -3900,10 +3904,11 @@ function validateDivergentReturnsBeforeBarriers(
     statement: CudaLiteStatement,
     divergentDepth: number,
     barrierLater: boolean,
+    continueBarrierLater: boolean,
   ): { readonly containsBarrier: boolean } => {
     switch (statement.kind) {
       case "block":
-        return { containsBarrier: visitBlock(statement.body, divergentDepth, barrierLater) };
+        return { containsBarrier: visitBlock(statement.body, divergentDepth, barrierLater, continueBarrierLater) };
       case "expr":
         return { containsBarrier: isBarrierCall(statement.expression) };
       case "return":
@@ -3925,7 +3930,7 @@ function validateDivergentReturnsBeforeBarriers(
         }
         return { containsBarrier: false };
       case "continue":
-        if (divergentDepth > 0 && barrierLater) {
+        if (divergentDepth > 0 && continueBarrierLater) {
           diagnostics.push(error(
             "divergent-continue-before-barrier",
             "thread-dependent continue before a later barrier would make WGSL barrier control flow non-uniform",
@@ -3935,21 +3940,21 @@ function validateDivergentReturnsBeforeBarriers(
         return { containsBarrier: false };
       case "if": {
         const nestedDivergentDepth = divergentDepth + (expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity) ? 1 : 0);
-        const consequentHasBarrier = visitBlock(statement.consequent, nestedDivergentDepth, barrierLater);
-        const alternateHasBarrier = statement.alternate ? visitBlock(statement.alternate, nestedDivergentDepth, barrierLater) : false;
+        const consequentHasBarrier = visitBlock(statement.consequent, nestedDivergentDepth, barrierLater, continueBarrierLater);
+        const alternateHasBarrier = statement.alternate ? visitBlock(statement.alternate, nestedDivergentDepth, barrierLater, continueBarrierLater) : false;
         return { containsBarrier: consequentHasBarrier || alternateHasBarrier };
       }
       case "for": {
         const nestedDivergentDepth = divergentDepth + (statement.condition && expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity) ? 1 : 0);
-        return { containsBarrier: visitBlock(statement.body, nestedDivergentDepth, barrierLater) };
+        return { containsBarrier: visitBlock(statement.body, nestedDivergentDepth, barrierLater, false) };
       }
       case "while": {
         const nestedDivergentDepth = divergentDepth + (expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity) ? 1 : 0);
-        return { containsBarrier: visitBlock(statement.body, nestedDivergentDepth, barrierLater) };
+        return { containsBarrier: visitBlock(statement.body, nestedDivergentDepth, barrierLater, false) };
       }
       case "do-while": {
         const nestedDivergentDepth = divergentDepth + (expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity) ? 1 : 0);
-        return { containsBarrier: visitBlock(statement.body, nestedDivergentDepth, barrierLater) };
+        return { containsBarrier: visitBlock(statement.body, nestedDivergentDepth, barrierLater, false) };
       }
       default:
         return { containsBarrier: false };
