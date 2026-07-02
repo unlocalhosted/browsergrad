@@ -173,6 +173,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       },
     },
     output: "params_memory",
+    expectedOutput: { type: "Float32Array", data: [0.9898999929428101, 2.0097999572753906, 2.9897000789642334, 4.0096001625061035] },
   },
   {
     sourceKey: "corpusLlmAdamwKernel2",
@@ -201,6 +202,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       },
     },
     output: "params_memory",
+    expectedOutput: { type: "Float32Array", data: [0.9898999929428101, 2.0097999572753906, 2.9897000789642334, 4.0096001625061035] },
   },
   {
     sourceKey: "corpusLlmEncoderBackward1",
@@ -220,6 +222,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { B: 1, T: 2, C: 3 },
     },
     output: "dwte",
+    expectedOutput: { type: "Float32Array", data: [4, 5, 6, 1, 2, 3] },
   },
   {
     sourceKey: "corpusLlmEncoderBackward2",
@@ -239,6 +242,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { B: 1, T: 2, C: 3 },
     },
     output: "dwte",
+    expectedOutput: { type: "Float32Array", data: [4, 5, 6, 1, 2, 3] },
   },
   {
     sourceKey: "corpusLlmAttentionQueryKey1",
@@ -273,6 +277,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { B: 1, T: 2, NH: 1 },
     },
     output: "att",
+    expectedOutput: { type: "Float32Array", data: [1, 0, 0.2689414322376251, 0.7310585975646973] },
   },
   {
     sourceKey: "corpusLlmAttentionValue1",
@@ -291,6 +296,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { B: 1, T: 2, C: 2, NH: 1 },
     },
     output: "out",
+    expectedOutput: { type: "Float32Array", data: [5, 6, 9.5, 10.5] },
   },
   {
     sourceKey: "corpusLlmAttentionPermute",
@@ -310,6 +316,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { B: 1, N: 2, NH: 1, d: 2 },
     },
     output: "q",
+    expectedOutput: { type: "Float32Array", data: [1, 2, 7, 8] },
   },
   {
     sourceKey: "corpusLlmAttentionUnpermute",
@@ -327,6 +334,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { B: 1, N: 2, NH: 1, d: 2 },
     },
     output: "out",
+    expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4] },
   },
   {
     sourceKey: "corpusCudaSamplesMatrixMul",
