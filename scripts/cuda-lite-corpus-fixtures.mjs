@@ -78,6 +78,27 @@ export const cudaLiteCorpusExecutionFixtures = [
     tolerance: 1e-5,
   },
   {
+    sourceKey: "corpusCuda120ImageConvolutionSurface",
+    caseName: "corpus:cuda-120:imageConvolutionKernel_surface",
+    corpusId: "cuda-120",
+    relativePath: "daily-updates/day-28-Progress-Checkpoint.md",
+    kernelName: "imageConvolutionKernel",
+    workgroupSize: [2, 2, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [2, 2, 1] },
+    input: {
+      buffers: {},
+      textures: {
+        texRef: { width: 2, height: 2, data: { type: "Float32Array", data: [1, 2, 3, 4] } },
+      },
+      surfaces: {
+        outputSurf: { width: 2, height: 2, data: { type: "Float32Array", length: 4 } },
+      },
+      scalars: { width: 2, height: 2, filterWidth: 1 },
+    },
+    output: "outputSurf",
+    expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4] },
+  },
+  {
     sourceKey: "corpusCudaSamplesVectorAdd",
     caseName: "corpus:cuda-samples:vectorAdd",
     corpusId: "cuda-samples",

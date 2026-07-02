@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T18:45:59Z
+Last updated: 2026-07-02T18:49:33Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; unreachable helper feature/shared/atomic/texture/constant/device-global/function-body/global-feature pollution fixes are green |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Added CUDA-120 memory-pool style atomic allocation corpus fixture |
+| Active work item | Added CUDA-120 texture-to-surface corpus fixture |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -631,11 +631,14 @@ Current verified gates:
 - full corpus fixture WebGPU gate after CUDA-120 constant-memory fixture: `95/0/0`; expected-output cases `44`; by corpus `cuda-120=3`, `cuda-samples=18`, `llm.c=28`, `leetcuda=46`
 - CUDA-120 memory-pool style corpus fixture: `corpus:cuda-120:useMemoryPoolKernel` `1/0/0`; hot repeat `5/0/0`, best warm `3.3ms`, speedup `2.58`
 - full corpus fixture WebGPU gate after CUDA-120 memory-pool fixture: `96/0/0`; expected-output cases `45`; by corpus `cuda-120=4`, `cuda-samples=18`, `llm.c=28`, `leetcuda=46`
+- CUDA-120 texture-to-surface corpus fixture: `corpus:cuda-120:imageConvolutionKernel_surface` `1/0/0`; hot repeat `5/0/0`, best warm `4.1ms`, speedup `1.15`
+- full corpus fixture WebGPU gate after CUDA-120 texture-to-surface fixture: `97/0/0`; expected-output cases `46`; by corpus `cuda-120=5`, `cuda-samples=18`, `llm.c=28`, `leetcuda=46`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Probed green | real corpus texture-to-surface write | corpus execution coverage had one texture fixture but no real corpus fixture combining `tex2D` reads with `surf2Dwrite` surface output | added CUDA-120 `imageConvolutionKernel` fixture from `day-28-Progress-Checkpoint.md`; validates texture input, surface output, and expected surface readback in real WebGPU; raised corpus fixture baseline to lock it in | `corpus:cuda-120:imageConvolutionKernel_surface` `1/0/0`; full corpus fixture gate `97/0/0`; hot repeat `5/0/0`, best warm `4.1ms` |
 | Probed green | real corpus atomic pool allocation | corpus execution coverage did not include a real source using device-side atomic offset allocation into a pool-like pointer plus explicit offset readback | added CUDA-120 `useMemoryPoolKernel` fixture from `day-84-Progress-Checkpoint.md`; validates pool writes and `offset` readback through real WebGPU; raised corpus fixture baseline to lock it in | `corpus:cuda-120:useMemoryPoolKernel` `1/0/0`; full corpus fixture gate `96/0/0`; hot repeat `5/0/0`, best warm `3.3ms` |
 | Probed green | real corpus constant memory | corpus execution coverage had buffer/scalar and one texture fixture, but no real corpus fixture proving scalar `__constant__` input materialization through WebGPU | added CUDA-120 `vectorScaleKernel` fixture from `day-26-Constant-Memory.md` with `constants.scaleFactor` and expected output; raised corpus fixture baseline to lock it in | `corpus:cuda-120:vectorScaleKernel_constant` `1/0/0`; changed gate corpus pair `2/0/0`; full corpus fixture gate `95/0/0`; hot repeat `5/0/0`, best warm `1.1ms` |
 | Fixed | corpus WebGPU fixture harness | corpus execution fixture materialization only preserved buffers, scalars, and textures, so future corpus fixtures using constants, device globals, surfaces, memory pools, or explicit readback could silently run with incomplete inputs | shared fixture materializer now covers every supported WebGPU input family and the in-browser e2e materializer mirrors that behavior; fixture unit locks all families | `test:webgpu-fixtures` passed; changed WebGPU smoke `290/0/0`, skips `0` |
