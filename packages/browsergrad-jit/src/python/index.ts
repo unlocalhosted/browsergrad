@@ -91,6 +91,8 @@ from ._tensor_proxy import (
     stack,
     where,
     minimum as _minimum,
+    cumsum as _cumsum,
+    sort as _sort,
 )
 from ._buffer_table import BufferTable
 from ._errors import (
@@ -524,6 +526,26 @@ def argmax(x, dim=None, axis=None, keepdim=False, keepdims=False):
     return x.argmax(dim=dim, axis=axis, keepdim=keepdim, keepdims=keepdims)
 
 
+def prod(x, dim=None, axis=None, keepdim=False, keepdims=False):
+    return x.prod(dim=dim, axis=axis, keepdim=keepdim, keepdims=keepdims)
+
+
+def gather(x, dim, index):
+    return x.gather(dim, index)
+
+
+def repeat_interleave(x, repeats, dim):
+    return x.repeat_interleave(repeats, dim)
+
+
+def cumsum(x, dim=0):
+    return _cumsum(x, dim=dim)
+
+
+def sort(x, dim=-1, descending=False):
+    return _sort(x, dim=dim, descending=descending)
+
+
 def reshape(input, *shape):
     return input.reshape(*shape)
 
@@ -589,7 +611,8 @@ __all__ = [
     "manual_seed", "no_grad", "inference_mode",
     "sigmoid", "matmul", "mm", "bmm", "exp", "log", "tanh", "abs",
     "sqrt", "pow", "sin", "cos", "rsqrt",
-    "sum", "mean", "argmax", "reshape", "view", "flatten", "squeeze",
+    "sum", "mean", "argmax", "prod", "gather", "repeat_interleave",
+    "cumsum", "sort", "reshape", "view", "flatten", "squeeze",
     "unsqueeze", "transpose", "permute", "softmax", "log_softmax",
     "save", "load",
     "nn", "optim", "jit", "utils", "amp", "kernels", "func",

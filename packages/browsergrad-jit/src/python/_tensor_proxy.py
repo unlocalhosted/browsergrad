@@ -729,6 +729,103 @@ class TensorProxy:
     def clamp_min(self, min: Any) -> "TensorProxy":
         return self.clamp(min=min)
 
+    def expand(self, *shape: Any) -> "TensorProxy":
+        if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
+            target_shape = tuple(shape[0])
+        else:
+            target_shape = tuple(shape)
+        if len(target_shape) < self.ndim:
+            raise ShapeError(f"expand: target {target_shape} has fewer dims than input {self.shape}")
+        padded = (1,) * (len(target_shape) - self.ndim) + self.shape
+        resolved = tuple(
+            padded[i] if int(dim) == -1 else int(dim)
+            for i, dim in enumerate(target_shape)
+        )
+
+        def _expand_forward(x_arr: np.ndarray) -> np.ndarray:
+            return np.broadcast_to(x_arr.reshape(padded), resolved).copy()
+
+        uop = UOp(
+            op=OP_CUSTOM,
+            inputs=(self._uop,),
+            shape=resolved,
+            dtype=self._uop.dtype,
+            arg={"fn": _expand_forward, "captures": (), "name": "expand"},
+        )
+
+        def _bw(dy: np.ndarray, _ins) -> Tuple[Optional[np.ndarray], ...]:
+            grad = dy
+            for i, (orig, new) in enumerate(zip(padded, resolved)):
+                if orig == 1 and new != 1:
+                    grad = grad.sum(axis=i, keepdims=True)
+            return (grad.reshape(self.shape).astype(np.dtype(self.dtype), copy=False),)
+
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
+        return TensorProxy(uop, session=self._get_session(),
+                           requires_grad=requires, ctx=ctx)
+
+    def repeat(self, *sizes: Any) -> "TensorProxy":
+        if len(sizes) == 1 and isinstance(sizes[0], (tuple, list)):
+            sizes_t = tuple(int(s) for s in sizes[0])
+        else:
+            sizes_t = tuple(int(s) for s in sizes)
+        if len(sizes_t) == 0:
+            raise ShapeError("repeat: expected at least one repeat size")
+        padded_shape = (1,) * max(0, len(sizes_t) - self.ndim) + self.shape
+        if len(sizes_t) < len(padded_shape):
+            raise ShapeError(
+                f"repeat: repeat sizes {sizes_t} cannot be shorter than input shape {self.shape}"
+            )
+        out_shape = tuple(rep * dim for rep, dim in zip(sizes_t, padded_shape))
+
+        def _repeat_forward(x_arr: np.ndarray) -> np.ndarray:
+            return np.tile(x_arr, sizes_t)
+
+        uop = UOp(
+            op=OP_CUSTOM,
+            inputs=(self._uop,),
+            shape=out_shape,
+            dtype=self._uop.dtype,
+            arg={"fn": _repeat_forward, "captures": (), "name": "repeat"},
+        )
+
+        def _bw(dy: np.ndarray, _ins) -> Tuple[Optional[np.ndarray], ...]:
+            new_shape = []
+            for rep, orig in zip(sizes_t, padded_shape):
+                new_shape.extend([rep, orig])
+            grad = dy.reshape(new_shape)
+            for i in range(len(sizes_t) - 1, -1, -1):
+                grad = grad.sum(axis=2 * i)
+            return (grad.reshape(self.shape).astype(np.dtype(self.dtype), copy=False),)
+
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
+        return TensorProxy(uop, session=self._get_session(),
+                           requires_grad=requires, ctx=ctx)
+
+    def flip(self, dim: int) -> "TensorProxy":
+        axis = int(dim) % self.ndim
+
+        def _flip_forward(x_arr: np.ndarray) -> np.ndarray:
+            return np.flip(x_arr, axis=axis).copy()
+
+        uop = UOp(
+            op=OP_CUSTOM,
+            inputs=(self._uop,),
+            shape=self._uop.shape,
+            dtype=self._uop.dtype,
+            arg={"fn": _flip_forward, "captures": (), "name": "flip"},
+        )
+
+        def _bw(dy: np.ndarray, _ins) -> Tuple[Optional[np.ndarray], ...]:
+            return (np.flip(dy, axis=axis).copy().astype(np.dtype(self.dtype), copy=False),)
+
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
+        return TensorProxy(uop, session=self._get_session(),
+                           requires_grad=requires, ctx=ctx)
+
     def _reduce(self, op: str, axis: Any = None, keepdims: bool = False) -> "TensorProxy":
         # Normalize axis to a tuple or None.
         if axis is None:
@@ -828,6 +925,124 @@ class TensorProxy:
             axis=dim if dim is not None else axis,
             keepdims=keepdim or keepdims,
         )
+
+    def prod(
+        self,
+        axis: Any = None,
+        dim: Any = None,
+        keepdims: bool = False,
+        keepdim: bool = False,
+    ) -> "TensorProxy":
+        reduce_axis = dim if dim is not None else axis
+        keep = keepdim or keepdims
+        axes = None if reduce_axis is None else (
+            (reduce_axis,) if isinstance(reduce_axis, int) else tuple(reduce_axis)
+        )
+        norm_axes = None if axes is None else tuple(a % self.ndim for a in axes)
+        if norm_axes is None:
+            out_shape = (1,) * self.ndim if keep else ()
+        else:
+            out_dims = []
+            for i, d in enumerate(self.shape):
+                if i in norm_axes:
+                    if keep:
+                        out_dims.append(1)
+                else:
+                    out_dims.append(d)
+            out_shape = tuple(out_dims)
+
+        def _prod_forward(x_arr: np.ndarray) -> np.ndarray:
+            return np.prod(x_arr, axis=reduce_axis, keepdims=keep)
+
+        uop = UOp(
+            op=OP_CUSTOM,
+            inputs=(self._uop,),
+            shape=out_shape,
+            dtype=self._uop.dtype,
+            arg={"fn": _prod_forward, "captures": (), "name": "prod"},
+        )
+
+        def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+            (x_arr,) = ins
+            if norm_axes is None:
+                out_kd = np.prod(x_arr)
+                grad = np.broadcast_to(dy, x_arr.shape)
+            else:
+                out_kd = np.prod(x_arr, axis=norm_axes, keepdims=True)
+                grad = dy
+                if not keep:
+                    for ax in sorted(norm_axes):
+                        grad = np.expand_dims(grad, ax)
+                grad = np.broadcast_to(grad, x_arr.shape)
+            out_b = np.broadcast_to(out_kd, x_arr.shape)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                grad = np.where(x_arr != 0, grad * out_b / x_arr, 0.0)
+            return (grad.astype(x_arr.dtype, copy=False),)
+
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
+        return TensorProxy(uop, session=self._get_session(),
+                           requires_grad=requires, ctx=ctx)
+
+    def gather(self, dim: int, index: Any) -> "TensorProxy":
+        index_proxy = _to_proxy(index, self._get_session())
+        axis = int(dim) % self.ndim
+
+        def _gather_forward(x_arr: np.ndarray, idx_arr: np.ndarray) -> np.ndarray:
+            return np.take_along_axis(x_arr, idx_arr.astype(np.int64), axis=axis)
+
+        uop = UOp(
+            op=OP_CUSTOM,
+            inputs=(self._uop, index_proxy._uop),
+            shape=index_proxy.shape,
+            dtype=self._uop.dtype,
+            arg={"fn": _gather_forward, "captures": (), "name": "gather"},
+        )
+
+        def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+            x_arr, idx_arr = ins
+            idx_np = idx_arr.astype(np.int64)
+            grad_x = np.zeros_like(x_arr)
+            np.add.at(grad_x, _make_gather_idx(idx_np, axis, x_arr.ndim), dy)
+            return (grad_x.astype(x_arr.dtype, copy=False), None)
+
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self, index_proxy)) if requires else None
+        return TensorProxy(uop, session=self._get_session(),
+                           requires_grad=requires, ctx=ctx)
+
+    def repeat_interleave(self, repeats: int, dim: int) -> "TensorProxy":
+        axis = int(dim) % self.ndim
+        repeats_i = int(repeats)
+        out_shape = list(self.shape)
+        out_shape[axis] *= repeats_i
+
+        def _repeat_interleave_forward(x_arr: np.ndarray) -> np.ndarray:
+            return np.repeat(x_arr, repeats_i, axis=axis)
+
+        uop = UOp(
+            op=OP_CUSTOM,
+            inputs=(self._uop,),
+            shape=tuple(out_shape),
+            dtype=self._uop.dtype,
+            arg={
+                "fn": _repeat_interleave_forward,
+                "captures": (),
+                "name": "repeat_interleave",
+            },
+        )
+
+        def _bw(dy: np.ndarray, _ins) -> Tuple[Optional[np.ndarray], ...]:
+            new_shape = list(dy.shape[:axis]) + [self.shape[axis], repeats_i] + list(dy.shape[axis + 1:])
+            return (dy.reshape(new_shape).sum(axis=axis + 1).astype(np.dtype(self.dtype), copy=False),)
+
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
+        return TensorProxy(uop, session=self._get_session(),
+                           requires_grad=requires, ctx=ctx)
+
+    def topk(self, k: int, dim: int = -1, largest: bool = True):
+        return _topk(self, k=k, dim=dim, largest=largest)
 
     def reshape(self, *shape: Any) -> "TensorProxy":
         # Accept reshape(3, 4) or reshape((3, 4)).
@@ -1462,12 +1677,125 @@ def where(condition: Any, a: Any, b: Any) -> "TensorProxy":
                        requires_grad=requires, ctx=ctx)
 
 
+def _make_gather_idx(idx_np: np.ndarray, dim: int, ndim: int) -> tuple:
+    idx_list = []
+    for axis in range(ndim):
+        if axis == dim:
+            idx_list.append(idx_np)
+        else:
+            size = idx_np.shape[axis]
+            shape = [1] * ndim
+            shape[axis] = size
+            arr = np.arange(size).reshape(shape)
+            idx_list.append(np.broadcast_to(arr, idx_np.shape).copy())
+    return tuple(idx_list)
+
+
 def minimum(a: Any, b: Any) -> "TensorProxy":
     first_proxy = next((v for v in (a, b) if isinstance(v, TensorProxy)), None)
     sess = first_proxy._get_session() if first_proxy is not None else None
     lhs = _to_proxy(a, sess)
     rhs = _to_proxy(b, sess)
     return where(lhs <= rhs, lhs, rhs)
+
+
+def cumsum(x: Any, dim: int = 0) -> "TensorProxy":
+    proxy = _to_proxy(x, None)
+    axis = int(dim) % proxy.ndim
+
+    def _cumsum_forward(x_arr: np.ndarray) -> np.ndarray:
+        return np.cumsum(x_arr, axis=axis)
+
+    uop = UOp(
+        op=OP_CUSTOM,
+        inputs=(proxy._uop,),
+        shape=proxy.shape,
+        dtype=proxy.dtype,
+        arg={"fn": _cumsum_forward, "captures": (), "name": "cumsum"},
+    )
+
+    def _bw(dy: np.ndarray, _ins) -> Tuple[Optional[np.ndarray], ...]:
+        grad = np.flip(np.cumsum(np.flip(dy, axis=axis), axis=axis), axis=axis)
+        return (grad.copy().astype(np.dtype(proxy.dtype), copy=False),)
+
+    requires = _should_track(proxy)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=(proxy,)) if requires else None
+    return TensorProxy(uop, session=proxy._get_session(),
+                       requires_grad=requires, ctx=ctx)
+
+
+def sort(x: Any, dim: int = -1, descending: bool = False):
+    proxy = _to_proxy(x, None)
+    axis = int(dim) % proxy.ndim
+
+    def _sort_indices_forward(x_arr: np.ndarray) -> np.ndarray:
+        idx = np.argsort(x_arr, axis=axis)
+        if descending:
+            slices = [slice(None)] * x_arr.ndim
+            slices[axis] = slice(None, None, -1)
+            idx = idx[tuple(slices)]
+        return idx.astype(np.int64)
+
+    def _sort_values_forward(x_arr: np.ndarray) -> np.ndarray:
+        idx = _sort_indices_forward(x_arr)
+        return np.take_along_axis(x_arr, idx, axis=axis)
+
+    values_uop = UOp(
+        op=OP_CUSTOM,
+        inputs=(proxy._uop,),
+        shape=proxy.shape,
+        dtype=proxy.dtype,
+        arg={"fn": _sort_values_forward, "captures": (), "name": "sort_values"},
+    )
+    indices_uop = UOp(
+        op=OP_CUSTOM,
+        inputs=(proxy._uop,),
+        shape=proxy.shape,
+        dtype="int64",
+        arg={"fn": _sort_indices_forward, "captures": (), "name": "sort_indices"},
+    )
+    return (
+        TensorProxy(values_uop, session=proxy._get_session(), requires_grad=False),
+        TensorProxy(indices_uop, session=proxy._get_session(), requires_grad=False),
+    )
+
+
+def _topk(x: Any, k: int, dim: int = -1, largest: bool = True):
+    proxy = _to_proxy(x, None)
+    axis = int(dim) % proxy.ndim
+    k_i = int(k)
+    out_shape = list(proxy.shape)
+    out_shape[axis] = k_i
+    out_shape_t = tuple(out_shape)
+
+    def _topk_indices_forward(x_arr: np.ndarray) -> np.ndarray:
+        idx = np.argsort(-x_arr if largest else x_arr, axis=axis)
+        slices = [slice(None)] * x_arr.ndim
+        slices[axis] = slice(k_i)
+        return idx[tuple(slices)].astype(np.int64)
+
+    def _topk_values_forward(x_arr: np.ndarray) -> np.ndarray:
+        idx = _topk_indices_forward(x_arr)
+        return np.take_along_axis(x_arr, idx, axis=axis)
+
+    values_uop = UOp(
+        op=OP_CUSTOM,
+        inputs=(proxy._uop,),
+        shape=out_shape_t,
+        dtype=proxy.dtype,
+        arg={"fn": _topk_values_forward, "captures": (), "name": "topk_values"},
+    )
+    indices_uop = UOp(
+        op=OP_CUSTOM,
+        inputs=(proxy._uop,),
+        shape=out_shape_t,
+        dtype="int64",
+        arg={"fn": _topk_indices_forward, "captures": (), "name": "topk_indices"},
+    )
+    return (
+        TensorProxy(values_uop, session=proxy._get_session(), requires_grad=False),
+        TensorProxy(indices_uop, session=proxy._get_session(), requires_grad=False),
+    )
 
 
 __all__ = [
@@ -1486,4 +1814,6 @@ __all__ = [
     "stack",
     "where",
     "minimum",
+    "cumsum",
+    "sort",
 ]

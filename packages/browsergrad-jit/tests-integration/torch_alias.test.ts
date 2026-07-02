@@ -550,6 +550,139 @@ stack_loss.backward()
     expect(result.stackGradB).toEqual([[1.25, 1.25]]);
   });
 
+  it("supports eager-compatible indexing, repeat, and reduction aliases", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      prod: number[];
+      prodGrad: number[][];
+      cumsum: number[];
+      cumsumGrad: number[];
+      gathered: number[][];
+      gatherGrad: number[][];
+      repeatedShape: number[];
+      repeatInterleave: number[][];
+      repeatGrad: number[][];
+      expandedShape: number[];
+      flip: number[][];
+      expandFlipGrad: number[][];
+      sortedValues: number[][];
+      sortedIndices: number[][];
+      topValues: number[][];
+      topIndices: number[][];
+      caps: Record<string, boolean>;
+    }>(`
+import browsergrad_jit as bg
+bg.install_torch_alias()
+import torch
+import numpy as np
+
+p = torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
+prod = torch.prod(p, dim=1)
+prod.sum().backward()
+
+c = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+cs = torch.cumsum(c, dim=0)
+cs.sum().backward()
+
+g = torch.tensor([[10.0, 11.0, 12.0], [20.0, 21.0, 22.0]], requires_grad=True)
+idx = torch.tensor([[2, 0], [1, 1]], dtype=torch.int64)
+gathered = torch.gather(g, 1, idx)
+gathered.sum().backward()
+
+r = torch.tensor([[1.0, 2.0]], requires_grad=True)
+repeated = r.repeat(2, 1)
+interleaved = torch.repeat_interleave(r, repeats=3, dim=1)
+(repeated.sum() + interleaved.sum()).backward()
+
+e = torch.tensor([[1.0], [2.0]], requires_grad=True)
+expanded = e.expand(2, 3)
+flipped = e.flip(0)
+(expanded.sum() + flipped.sum()).backward()
+
+s = torch.tensor([[3.0, 1.0, 2.0], [4.0, 6.0, 5.0]])
+sort_values, sort_indices = torch.sort(s, dim=1, descending=True)
+top_values, top_indices = s.topk(2, dim=1, largest=False)
+
+{
+  "prod": prod.numpy().tolist(),
+  "prodGrad": p.grad.numpy().tolist(),
+  "cumsum": cs.numpy().tolist(),
+  "cumsumGrad": c.grad.numpy().tolist(),
+  "gathered": gathered.numpy().tolist(),
+  "gatherGrad": g.grad.numpy().tolist(),
+  "repeatedShape": list(repeated.shape),
+  "repeatInterleave": interleaved.numpy().tolist(),
+  "repeatGrad": r.grad.numpy().tolist(),
+  "expandedShape": list(expanded.shape),
+  "flip": flipped.numpy().tolist(),
+  "expandFlipGrad": e.grad.numpy().tolist(),
+  "sortedValues": sort_values.numpy().tolist(),
+  "sortedIndices": sort_indices.numpy().tolist(),
+  "topValues": top_values.numpy().tolist(),
+  "topIndices": top_indices.numpy().tolist(),
+  "caps": {
+    "torch.prod": hasattr(torch, "prod"),
+    "torch.gather": hasattr(torch, "gather"),
+    "torch.repeat_interleave": hasattr(torch, "repeat_interleave"),
+    "torch.cumsum": hasattr(torch, "cumsum"),
+    "torch.sort": hasattr(torch, "sort"),
+    "Tensor.repeat": hasattr(r, "repeat"),
+    "Tensor.expand": hasattr(e, "expand"),
+    "Tensor.flip": hasattr(e, "flip"),
+    "Tensor.topk": hasattr(s, "topk"),
+  },
+}
+`);
+    expect(result.prod).toEqual([2, 12]);
+    expect(result.prodGrad).toEqual([
+      [2, 1],
+      [4, 3],
+    ]);
+    expect(result.cumsum).toEqual([1, 3, 6]);
+    expect(result.cumsumGrad).toEqual([3, 2, 1]);
+    expect(result.gathered).toEqual([
+      [12, 10],
+      [21, 21],
+    ]);
+    expect(result.gatherGrad).toEqual([
+      [1, 0, 1],
+      [0, 2, 0],
+    ]);
+    expect(result.repeatedShape).toEqual([2, 2]);
+    expect(result.repeatInterleave).toEqual([[1, 1, 1, 2, 2, 2]]);
+    expect(result.repeatGrad).toEqual([[5, 5]]);
+    expect(result.expandedShape).toEqual([2, 3]);
+    expect(result.flip).toEqual([[2], [1]]);
+    expect(result.expandFlipGrad).toEqual([[4], [4]]);
+    expect(result.sortedValues).toEqual([
+      [3, 2, 1],
+      [6, 5, 4],
+    ]);
+    expect(result.sortedIndices).toEqual([
+      [0, 2, 1],
+      [1, 2, 0],
+    ]);
+    expect(result.topValues).toEqual([
+      [1, 2],
+      [4, 5],
+    ]);
+    expect(result.topIndices).toEqual([
+      [1, 2],
+      [0, 2],
+    ]);
+    expect(result.caps).toEqual({
+      "torch.prod": true,
+      "torch.gather": true,
+      "torch.repeat_interleave": true,
+      "torch.cumsum": true,
+      "torch.sort": true,
+      "Tensor.repeat": true,
+      "Tensor.expand": true,
+      "Tensor.flip": true,
+      "Tensor.topk": true,
+    });
+  });
+
   it("supports functional one_hot and stable BCE-with-logits loss", async () => {
     const target = await getJitTarget();
     const result = await target.run<{
