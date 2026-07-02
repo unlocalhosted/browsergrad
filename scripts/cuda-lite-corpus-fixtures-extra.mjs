@@ -357,4 +357,30 @@ export const cudaLiteCorpusExecutionFixtures = [
     output: "d_C",
     expectedOutput: { type: "Float32Array", data: [20] },
   },
+  {
+    sourceKey: "corpusCudaSamplesConvolutionTextureRows",
+    caseName: "corpus:cuda-samples:convolutionRowsKernel_texture",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/2_Concepts_and_Techniques/convolutionTexture/convolutionTexture.cu",
+    kernelName: "convolutionRowsKernel",
+    workgroupSize: [2, 2, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [2, 2, 1] },
+    input: {
+      buffers: {
+        d_Dst: { type: "Float32Array", length: 4 },
+      },
+      constants: {
+        c_Kernel: {
+          type: "Float32Array",
+          data: [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
+        },
+      },
+      textures: {
+        texSrc: { width: 2, height: 2, data: { type: "Float32Array", data: [1, 2, 3, 4] } },
+      },
+      scalars: { imageW: 2, imageH: 2 },
+    },
+    output: "d_Dst",
+    expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4] },
+  },
 ];
