@@ -1251,6 +1251,42 @@ __global__ void dynamicSharedVectorAliasChainPointerArray(float4 *out) {
     out[1] = make_float4(total, 0.0f);
   }
 }`,
+  dynamicSharedVectorAliasChainActiveLaneReturn: `
+__device__ float3 sum_dynamic_shared_chain_active3(float3 *a, float3 *b, float3 *c) {
+  return *a + *b + *c;
+}
+
+__global__ void dynamicSharedVectorAliasChainActiveLaneReturn(float4 *out, int N) {
+  extern __shared__ float scratch[];
+  int tid = threadIdx.x;
+  float3 *values = reinterpret_cast<float3*>(scratch);
+  if (tid == 0) {
+    values[0] = make_float3(2.0f, 3.0f, 5.0f);
+  }
+  if (tid == 1) {
+    values[1] = make_float3(7.0f, 11.0f, 13.0f);
+  }
+  if (tid == 2) {
+    values[2] = make_float3(17.0f, 19.0f, 23.0f);
+  }
+  if (tid == 3) {
+    values[3] = make_float3(29.0f, 31.0f, 37.0f);
+  }
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    float3 *shifted = values + 1;
+    float3 *ptrs[3];
+    ptrs[0] = &shifted[0];
+    ptrs[1] = &shifted[1];
+    ptrs[2] = &values[3];
+    float3 total = sum_dynamic_shared_chain_active3(ptrs[0], ptrs[1], ptrs[2]);
+    out[0] = make_float4(*ptrs[1], 1.0f);
+    out[1] = make_float4(total, 0.0f);
+  }
+}`,
   localArrayVectorScalarRoundtrip: `
 __global__ void localArrayVectorScalarRoundtrip(float *out) {
   int tid = threadIdx.x;
@@ -7090,6 +7126,20 @@ const html = String.raw`<!doctype html>
               buffers: {
                 out: new Float32Array(8),
               },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [17, 19, 23, 1, 53, 61, 73, 0] },
+          },
+          {
+            name: "control:dynamic-shared-vector-alias-chain-active-lane-return",
+            source: SOURCES.dynamicSharedVectorAliasChainActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1], dynamicSharedMemory: { scratch: 12 } },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(8),
+              },
+              scalars: { N: 2 },
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [17, 19, 23, 1, 53, 61, 73, 0] },

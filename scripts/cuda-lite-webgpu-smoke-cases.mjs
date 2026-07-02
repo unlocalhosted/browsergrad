@@ -52,6 +52,7 @@ export const storageScopeCases = [
   "storage:shared-vector-pointer-array",
   "storage:dynamic-shared-vector-pointer-array",
   "storage:dynamic-shared-vector-alias-chain-pointer-array",
+  "control:dynamic-shared-vector-alias-chain-active-lane-return",
   "storage:local-array-vector-scalar-roundtrip",
   "storage:shared-vector-helper",
   "storage:guarded-shared-vector-lanes",
