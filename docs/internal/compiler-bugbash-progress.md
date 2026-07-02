@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T10:09:19Z
+Last updated: 2026-07-02T10:18:09Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,9 +9,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `420/0/0`, dist `420/0/0` |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `421/0/0`, dist `421/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Fixed shared-byte reinterpret local pointers from cuda-samples `compute_gemm_imma`; continue full verifier and next corpus-shaped storage probe |
+| Active work item | Fixed concurrent shared-byte packed writes after fail-first real WebGPU repro; continue scoped gate and next corpus-shaped storage probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -555,11 +555,14 @@ Current verified gates:
 - WebGPU smoke after loop-local continue/class-member fixes: `266/0/0`
 - shared-byte reinterpret local pointer fix: focused byte-reinterpret unit `424/0`; `storage:shared-byte-reinterpret` `1/0/0`; WebGPU smoke `267/0/0`; cuda-samples audit compile/codegen `357/357`, hard fails `0`
 - real-world CUDA verifier after shared-byte reinterpret fix: src `420/0/0`, dist `420/0/0`
+- concurrent shared-byte packed write fix: fail-first `storage:shared-byte-concurrent-writes` reproduced `0x04000000` instead of `0x04030201`; after atomic packed-byte lowering, focused unit `424/0`, real WebGPU case `1/0/0`, storage group `37/0/0`, WebGPU smoke `268/0/0`
+- real-world CUDA verifier after concurrent shared-byte write fix: src `421/0/0`, dist `421/0/0`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | concurrent shared-byte packed writes | `scratch[threadIdx.x] = uchar(threadIdx.x + 1)` over `__shared__ uchar scratch[4]` lowered each byte write as non-atomic read/modify/write of the same packed `u32`; real WebGPU produced `0x04000000` instead of `0x04030201` | packed `uchar` shared arrays now use `array<atomic<u32>>`; byte reads use `atomicLoad`; byte writes use `atomicAnd` to clear the byte and `atomicOr` to set it; typed word aliases use `atomicLoad`/`atomicStore`; direct `bytes[i]` reads route through packed shared reads | fail-first real WebGPU case failed at compare; after fix `storage:shared-byte-concurrent-writes` `1/0/0`; focused unit `424/0`; storage group `37/0/0`; smoke `268/0/0` |
 | Fixed | shared byte storage reinterpret local pointers | cuda-samples `immaTensorCoreGemm` kernel `compute_gemm_imma` failed audit with `unsupported-local-pointer`, and local `int*` / `int4*` aliases over `uchar` storage could index bytes as scalar words or write whole packed slots incorrectly | analyzer allows word-addressable `uchar` pointer aliases; reference runtime packs shared `uchar` into byte-addressed words; WGSL pointer indexing scales typed aliases over byte roots by element byte size; direct shared `uchar` assignments route through packed byte writes | focused byte-reinterpret unit `424/0`; `storage:shared-byte-reinterpret` `1/0/0`; WebGPU smoke `267/0/0`; cuda-samples audit compile/codegen `357/357`, hard fails `0` |
 | Fixed | loop-local divergent continue analysis | llm.c `fused_classifier_kernel2` and `fused_classifier_kernel4` were rejected with `divergent-continue-before-barrier` even though the `continue` only targeted an inner lane loop and did not skip the later helper barrier | analyzer now tracks barriers later in the current continue-target loop separately from barriers after enclosing loops/blocks; unsafe same-loop continues still error | focused unit run `423/0`; compiler unit file `407/0`; llm.c audit `148/0/0`; full real-world audit green; WebGPU smoke `266/0/0`; verifier src/dist `419/0/0` |
 | Fixed | corpus audit C++ member helper extraction | cuda-samples `multiGpuConjugateGradient` became `missing-kernel` because class `PeerGroup` `__device__` member methods/constructors were collected as free device helpers and poisoned normalization until the requested kernel disappeared | audit device-function collection now filters constructor initializer signatures and `const`/override-style member methods; regression emits the class-adjacent kernel source and verifies member methods are excluded | corpus audit regression passed; cuda-samples compile/codegen `356/357`; hard fails `1`; full real-world audit green |
@@ -876,12 +879,13 @@ Current added pointer/control cases:
 - `control:active-lane-shared-return-side-effect-barrier`
 - `control:subgroup-truthiness-assignment-scalar`
 - `storage:shared-byte-reinterpret`
+- `storage:shared-byte-concurrent-writes`
 
-Smoke current: `267/0/0`.
+Smoke current: `268/0/0`.
 
 Full source e2e current: `221/0/0`.
 
-Verifier current: src `420/0/0`, dist `420/0/0`.
+Verifier current: src `421/0/0`, dist `421/0/0`.
 
 ## Remaining Probe Map
 

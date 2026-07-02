@@ -714,6 +714,17 @@ __global__ void sharedByteReinterpret(int *out) {
     out[1] = words[1];
   }
 }`,
+  sharedByteConcurrentWrites: `
+__global__ void sharedByteConcurrentWrites(int *out) {
+  __shared__ uchar scratch[4];
+  int lane = threadIdx.x;
+  scratch[lane] = (uchar)(lane + 1);
+  __syncthreads();
+  if (lane == 0) {
+    int *word = (int *)&scratch[0];
+    out[0] = word[0];
+  }
+}`,
   localVectorPointerArray: `
 __device__ float3 sum3(float3 *a, float3 *b, float3 *c) {
   return *a + *b + *c;
@@ -6177,6 +6188,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Int32Array", data: [0x04030201, 9] },
+          },
+          {
+            name: "storage:shared-byte-concurrent-writes",
+            source: SOURCES.sharedByteConcurrentWrites,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(1),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [0x04030201] },
           },
           {
             name: "storage:local-vector-pointer-array",

@@ -480,9 +480,10 @@ function emitPackedByteSharedRead(
   if (shared.valueType !== "uchar") return undefined;
   const wordIndex = `((${index}) >> 2u)`;
   const word = `${context.nameFor(shared.name)}[${wordIndex}]`;
-  if (viewType !== "uchar") return viewType === "int" ? `bitcast<i32>(${word})` : word;
+  const loaded = `atomicLoad(&${word})`;
+  if (viewType !== "uchar") return viewType === "int" ? `bitcast<i32>(${loaded})` : loaded;
   const shift = `(((${index}) & 3u) * 8u)`;
-  return `((${word} >> (${shift})) & 255u)`;
+  return `((${loaded} >> (${shift})) & 255u)`;
 }
 
 function emitPackedByteSharedWrite(
@@ -495,10 +496,12 @@ function emitPackedByteSharedWrite(
   if (shared.valueType !== "uchar") return undefined;
   const wordIndex = `((${index}) >> 2u)`;
   const word = `${context.nameFor(shared.name)}[${wordIndex}]`;
-  if (viewType !== "uchar") return `${word} = ${viewType === "int" ? `bitcast<u32>(${value})` : `u32(${value})`}`;
+  if (viewType !== "uchar") return `atomicStore(&${word}, ${viewType === "int" ? `bitcast<u32>(${value})` : `u32(${value})`})`;
   const shift = `(((${index}) & 3u) * 8u)`;
   const mask = `(255u << ${shift})`;
-  return `${word} = ((${word} & ~${mask}) | ((u32(${value}) & 255u) << ${shift}))`;
+  const cleared = `atomicAnd(&${word}, ~${mask})`;
+  const written = `atomicOr(&${word}, ((u32(${value}) & 255u) << ${shift}))`;
+  return `${cleared}; ${written}`;
 }
 
 function emitPackedHalfStorageWrite(

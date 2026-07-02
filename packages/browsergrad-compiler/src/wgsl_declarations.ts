@@ -41,7 +41,7 @@ export function emitSharedType(statement: CudaLiteVarDecl, ir: KernelIrModule): 
     : wgslScalar(statement.valueType);
   if (statement.valueType === "uchar" && statement.dimensions.length > 0) {
     const totalBytes = statement.dimensions.reduce((product, item) => product * item, 1);
-    return `array<u32, ${Math.ceil(totalBytes / 4)}>`;
+    return `array<atomic<u32>, ${Math.ceil(totalBytes / 4)}>`;
   }
   for (let i = statement.dimensions.length - 1; i >= 0; i--) {
     type = `array<${type}, ${statement.dimensions[i]}>`;

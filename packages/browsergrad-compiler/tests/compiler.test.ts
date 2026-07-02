@@ -1374,6 +1374,9 @@ __global__ void byteReinterpret(int* out) {
     );
 
     expect(compiled.wgsl).toContain("var shared_words_buffer: u32");
+    expect(compiled.wgsl).toContain("var<workgroup> scratch: array<atomic<u32>, 4>;");
+    expect(compiled.wgsl).toContain("atomicLoad(&scratch");
+    expect(compiled.wgsl).toContain("atomicStore(&scratch");
     expect([...result.buffers.out as Int32Array]).toEqual([0x04030201, 9]);
 
     const storageCompiled = compileCudaLiteKernel(`
@@ -9435,9 +9438,11 @@ __global__ void uchar_shared(uint* out) {
     );
 
     expect(compiled.ir.sharedDeclarations[0]?.valueType).toBe("uchar");
-    expect(compiled.wgsl).toContain("var<workgroup> bytes: array<u32, 4>;");
+    expect(compiled.wgsl).toContain("var<workgroup> bytes: array<atomic<u32>, 4>;");
     expect(compiled.wgsl).toContain("fn bg_ptr_read_u8(");
     expect(compiled.wgsl).toContain("fn bg_ptr_write_u8(");
+    expect(compiled.wgsl).toContain("atomicAnd(&bytes");
+    expect(compiled.wgsl).toContain("atomicOr(&bytes");
     expect(compiled.wgsl).not.toContain("array<u32, 16>");
     expect([...result.buffers.out as Uint32Array]).toEqual([2]);
   });

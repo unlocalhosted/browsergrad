@@ -2342,6 +2342,10 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
           ? emitDeviceGlobalPointerRead(global, index, context.ir, context)
           : `${context.nameFor(root!)}[${index}]`;
       }
+      const shared = root ? sharedDeclarationFor(root, context) : undefined;
+      if (mode === "value" && shared && expression.target.kind === "identifier" && !isCudaVectorType(shared.valueType)) {
+        return emitSharedPointerRead(shared, index, context.ir, context, shared.valueType);
+      }
       const access = `${emitExpression(expression.target, context, "lvalue")}[${index}]`;
       if (mode === "value" && param?.valueType === "bool") return `(${access} != 0u)`;
       if (mode === "value" && param && context.ir.atomicParams.includes(param.name)) {
