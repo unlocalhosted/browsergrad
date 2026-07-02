@@ -19,6 +19,7 @@ import {
   textureScopeCases,
   webGpuSmokeCases,
 } from "./cuda-lite-webgpu-smoke-cases.mjs";
+import { buildWebGpuSmokeArgs } from "./run-cuda-lite-webgpu-smoke.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -213,6 +214,15 @@ assert.deepEqual(scopedSmokePlan.scopes.map((scope) => scope.id), [
   "webgpu-smoke-scripts",
 ]);
 assert.deepEqual(scopedSmokePlan.scopes.map((scope) => scope.requested), [true]);
+
+const smokeArgs = buildWebGpuSmokeArgs(root, [], {});
+assert.equal(smokeArgs.includes("--profile-case"), false);
+assert.equal(smokeArgs.filter((arg) => arg === "--case-timeout-ms").length, 1);
+assert.ok(smokeArgs.includes(webGpuSmokeCases.join(",")));
+
+const profiledSmokeArgs = buildWebGpuSmokeArgs(root, [], { CUDA_LITE_WEBGPU_SMOKE_PROFILE: "all" });
+assert.ok(profiledSmokeArgs.includes("--profile-case"));
+assert.ok(profiledSmokeArgs.includes("all"));
 
 const lastFailurePlan = planForChangedFiles([
   "scripts/run-cuda-lite-last-failures.mjs",

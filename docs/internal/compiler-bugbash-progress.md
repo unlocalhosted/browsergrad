@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T17:04:04Z
+Last updated: 2026-07-02T17:08:37Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; unreachable helper feature/shared/atomic pollution fixes are green |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Unreachable helper atomic lowering now has unit and real WebGPU fixture proof, including WGSL shape assertions |
+| Active work item | WebGPU smoke profiling is now opt-in so normal scoped smoke runs stay leaner; shader compile remains the main time cost |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -593,11 +593,13 @@ Current verified gates:
 - unreachable helper atomic lowering fix: fail-first unit reproduced `atomicDeviceGlobals=["gCounter"]` from an unused helper; focused atomic unit slice `441/0`; `verify:changed` typecheck + compiler unit `425/0`; lint passed
 - unreachable helper atomic WebGPU fixture: `atomic:unreachable-helper-plain-storage` `1/0/0`; asserts plain `gCounter` storage, plain `scratch` workgroup storage, no unreachable helper atomic WGSL declarations
 - changed gate after unreachable-helper WebGPU fixture: fixture tests passed; WebGPU smoke `277/0/0`; bugbash status tests passed; bugbash status active failures `0`; test-scope tests passed
+- WebGPU smoke wrapper profiling trim: default smoke no longer passes `--profile-case all`, has one `--case-timeout-ms`, and keeps profiling opt-in via `CUDA_LITE_WEBGPU_SMOKE_PROFILE`; focused smoke stayed `277/0/0`, test-scope passed
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Perf | WebGPU smoke wrapper overhead | default smoke always enabled per-case profiling and duplicate timeout args, making routine scoped gates noisier and doing extra profile work when only pass/fail feedback was needed | smoke wrapper now builds args through a tested helper, defaults profiling off, keeps opt-in profiling through `CUDA_LITE_WEBGPU_SMOKE_PROFILE`, and emits one timeout arg | test-scope passed; WebGPU smoke `277/0/0` |
 | Probed green | unreachable helper atomic real WebGPU fixture | unit coverage proved IR/WGSL strings, but real WebGPU smoke did not exercise selected-kernel reachable atomic pollution directly | WebGPU e2e fixture now supports `wgslContains` / `wgslNotContains`, and `atomic:unreachable-helper-plain-storage` locks plain storage/workgroup declarations plus runtime output | focused fixture `1/0/0`; WebGPU smoke `277/0/0`; fixture and test-scope harness tests passed |
 | Fixed | unreachable helper atomic lowering | unused device helpers with direct atomics on device globals or helper-local `__shared__` storage could mark the selected kernel's IR/WGSL storage as atomic even when the selected kernel only performed plain reads/writes | validation still walks unreachable helpers for diagnostics, but unreachable helper atomic side effects now write to scratch sinks; exact pointer-atomic propagation and shared-name discovery use selected-kernel reachable helpers only | fail-first unit; focused atomic unit slice `441/0`; `verify:changed` typecheck + compiler unit `425/0`; lint passed |
 | Fixed | unreachable helper shared declarations | unused device helpers with local `__shared__` declarations still contributed `ir.sharedDeclarations`, emitting extra WGSL `var<workgroup>` storage for kernels that never call the helper | shared declaration collection now uses the same selected-kernel reachable helper set as feature gating | fail-first unit; focused unit `439/0` |
