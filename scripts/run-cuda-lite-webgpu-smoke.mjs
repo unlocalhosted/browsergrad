@@ -12,6 +12,8 @@ const args = [
   "--",
   "--cases",
   webGpuSmokeCases.join(","),
+  "--profile-case",
+  "all",
   "--case-timeout-ms",
   "15000",
   ...process.argv.slice(2),
