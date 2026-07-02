@@ -5785,6 +5785,35 @@ __global__ void selected(float *x) {
     expect(compiled.wgsl).not.toContain("unused_runtime");
   });
 
+  it("ignores grid sync compatibility calls in unreachable helpers for selected kernels", () => {
+    const compiled = compileCudaLiteKernel(`
+namespace cg = cooperative_groups;
+
+__device__ void unused_grid_sync() {
+  cg::grid_group grid = cg::this_grid();
+  grid.sync();
+  cg::sync(grid);
+}
+
+__global__ void selected(float *x) {
+  if (threadIdx.x == 0) {
+    x[0] += 2.0f;
+  }
+}`, { kernelName: "selected", workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([3]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.x as Float32Array]).toEqual([5]);
+    expect(compiled.wgsl).not.toContain("unused_grid_sync");
+  });
+
   it("runs device-side kernel launches in the CPU reference when explicitly enabled", async () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void child(float *x) {

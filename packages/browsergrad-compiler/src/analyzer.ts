@@ -1488,11 +1488,11 @@ function validateCallExpression(
   const callName = expressionName(expression.callee);
   const namespaceCooperativeCall = cooperativeNamespaceCall(expression, scope);
   if (namespaceCooperativeCall) {
-    return validateCooperativeNamespaceCall(expression, namespaceCooperativeCall, requiredFeatures, diagnostics, walkExpression, scope, options);
+    return validateCooperativeNamespaceCall(expression, namespaceCooperativeCall, requiredFeatures, diagnostics, walkExpression, scope, options, compatibilityDiagnosticsReachable);
   }
   const cooperativeCall = cooperativeGroupCall(expression, scope);
   if (cooperativeCall) {
-    return validateCooperativeGroupCall(expression, cooperativeCall, requiredFeatures, diagnostics, walkExpression, scope, options);
+    return validateCooperativeGroupCall(expression, cooperativeCall, requiredFeatures, diagnostics, walkExpression, scope, options, compatibilityDiagnosticsReachable);
   }
   if (!callName) {
     diagnostics.push(error("unsupported-call", "CUDA-lite v0 only supports direct builtin calls", expression.span));
@@ -2352,13 +2352,16 @@ function validateCooperativeGroupCall(
   walkExpression: ExpressionWalker,
   scope: Scope,
   options: CudaLiteAnalyzeOptions,
+  compatibilityDiagnosticsReachable: boolean,
 ): ExpressionInfo {
   const { symbol, method } = call;
   if (symbol.groupKind === "grid" && method === "sync") {
-    diagnostics.push({
-      ...error("unsupported-cooperative-groups", "grid.sync() requires explicit runtime orchestration", expression.span),
-      severity: options.referenceGridSync ? "warning" : "error",
-    });
+    if (compatibilityDiagnosticsReachable) {
+      diagnostics.push({
+        ...error("unsupported-cooperative-groups", "grid.sync() requires explicit runtime orchestration", expression.span),
+        severity: options.referenceGridSync ? "warning" : "error",
+      });
+    }
     return { kind: "scalar" };
   }
   if (method === "sync") {
@@ -2413,11 +2416,12 @@ function validateCooperativeNamespaceCall(
   walkExpression: ExpressionWalker,
   scope: Scope,
   options: CudaLiteAnalyzeOptions,
+  compatibilityDiagnosticsReachable: boolean,
 ): ExpressionInfo {
   const { symbol, method, groupArg } = call;
   if (method === "sync") {
     if (expression.args.length !== 1) diagnostics.push(error("invalid-call-arity", "cg::sync expects 1 argument", expression.span));
-    if (symbol.groupKind === "grid") {
+    if (compatibilityDiagnosticsReachable && symbol.groupKind === "grid") {
       diagnostics.push({
         ...error("unsupported-cooperative-groups", "cg::sync(grid) requires explicit runtime orchestration", expression.span),
         severity: options.referenceGridSync ? "warning" : "error",

@@ -267,6 +267,20 @@ __global__ void selected(float *x) {
     x[0] += 2.0f;
   }
 }`,
+  unreachableGridSyncCompatDiagnostics: `
+namespace cg = cooperative_groups;
+
+__device__ void unused_grid_sync() {
+  cg::grid_group grid = cg::this_grid();
+  grid.sync();
+  cg::sync(grid);
+}
+
+__global__ void selected(float *x) {
+  if (threadIdx.x == 0) {
+    x[0] += 2.0f;
+  }
+}`,
   recursiveDynamicLaunch: `
 __global__ void child(float *dst, int value) {
   if (threadIdx.x < 1) { dst[0] += (float)value; }
@@ -6025,6 +6039,24 @@ const html = String.raw`<!doctype html>
               "unused_runtime",
               "cudaMemcpy",
               "cudaDeviceSynchronize",
+            ],
+          },
+          {
+            name: "runtime:unreachable-grid-sync-compat-diagnostics",
+            source: SOURCES.unreachableGridSyncCompatDiagnostics,
+            options: { kernelName: "selected", workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                x: new Float32Array([3]),
+              },
+            }),
+            output: "x",
+            expectedOutput: { type: "Float32Array", data: [5] },
+            wgslNotContains: [
+              "unused_grid_sync",
+              "grid.sync",
+              "cg::sync",
             ],
           },
           {

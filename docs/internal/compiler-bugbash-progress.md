@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T17:25:35Z
+Last updated: 2026-07-02T17:29:05Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; unreachable helper feature/shared/atomic pollution fixes are green |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Unreachable helper runtime compatibility diagnostics are now scoped to selected-kernel reachability: CUDA runtime/copy calls in unused helpers no longer poison selected kernels |
+| Active work item | Unreachable helper cooperative grid-sync diagnostics are now scoped to selected-kernel reachability: unused grid sync helpers no longer poison selected kernels |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -600,11 +600,14 @@ Current verified gates:
 - changed gate after unreachable helper compatibility diagnostics: typecheck passed; compiler unit `428/0`; fixture tests passed; WebGPU smoke `279/0/0`; test-scope passed; lint passed
 - unreachable helper runtime compatibility diagnostic fix: fail-first unit reproduced `unsupported-cuda-runtime` from unused `cudaMemcpy`/`cudaDeviceSynchronize` helper calls; focused unit slice `445/0`; `runtime:unreachable-runtime-compat-diagnostics` `1/0/0`
 - changed gate after unreachable runtime compatibility diagnostics: typecheck passed; compiler unit `429/0`; fixture tests passed; WebGPU smoke `280/0/0`; bugbash status active failures `0`; test-scope passed; lint passed
+- unreachable helper grid-sync compatibility diagnostic fix: fail-first unit reproduced `unsupported-cooperative-groups` from unused `grid.sync()` / `cg::sync(grid)` helper calls; focused unit slice `446/0`; `runtime:unreachable-grid-sync-compat-diagnostics` `1/0/0`
+- changed gate after unreachable grid-sync compatibility diagnostics: typecheck passed; compiler unit `430/0`; fixture tests passed; WebGPU smoke `281/0/0`; bugbash status active failures `0`; test-scope passed; lint passed
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | unreachable helper cooperative grid-sync diagnostics | unused device helpers containing `grid.sync()` or `cg::sync(grid)` failed selected-kernel compilation with `unsupported-cooperative-groups`, even though selected kernels never called those helpers and no WGSL emitted them | cooperative grid-sync compatibility diagnostics now honor selected-kernel reachability while keeping arity/group validation intact | fail-first unit; focused unit slice `446/0`; `runtime:unreachable-grid-sync-compat-diagnostics` `1/0/0`; WebGPU smoke `281/0/0`; lint passed |
 | Fixed | unreachable helper CUDA runtime diagnostics | unused device helpers containing `cudaMemcpy` / `cudaDeviceSynchronize` failed selected-kernel compilation with `unsupported-cuda-runtime`, even though selected kernels never called those helpers and no WGSL emitted them | runtime/copy compatibility diagnostics now honor selected-kernel reachability while still walking arguments for ordinary validation | fail-first unit; focused unit slice `445/0`; `runtime:unreachable-runtime-compat-diagnostics` `1/0/0`; WebGPU smoke `280/0/0`; lint passed |
 | Fixed | unreachable helper compatibility diagnostics | unused device helpers with unresolved `extern __shared__` storage or divergent return before `__syncthreads()` failed selected-kernel compile/WebGPU diagnostics even when the selected kernel never called those helpers | unreachable dynamic shared declarations now get a non-emitting placeholder while walking unreachable statements, and barrier-divergence validation runs only for selected-kernel reachable functions | fail-first unit; focused unit slice `444/0`; `runtime:unreachable-helper-compat-diagnostics` `1/0/0`; WebGPU smoke `279/0/0`; lint passed |
 | Fixed | unreachable helper dynamic launches | unused device helpers containing `child<<<...>>>` failed compilation for selected kernels that never call those helpers, even though no emitted WGSL or runtime path used the launch | dynamic-launch compatibility diagnostics now only attach while walking selected-kernel reachable statements; unreachable helpers still validate ordinary expressions without poisoning selected-kernel compile | fail-first unit; focused unit slice `442/0`; `runtime:unreachable-dynamic-launch` `1/0/0`; WebGPU smoke `278/0/0`; lint passed |
