@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T19:40:05Z
+Last updated: 2026-07-02T19:50:47Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,12 +9,12 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; unreachable helper feature/shared/atomic/texture/constant/device-global/function-body/global-feature pollution fixes are green |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `98/98` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Pinned expected outputs for real corpus WebGPU fixtures |
+| Active work item | Source/dist real-world verifier and perf gate after corpus fixture oracle completion |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
-| Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
+| Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed` |
 
 ## How To Track This
 
@@ -643,11 +643,13 @@ Current verified gates:
 - pinned-output corpus fixture hardening: LeetCUDA fixture slice `46/0/0`, expected-output `35`, skips `0`; llm.c fixture slice `28/0/0`, expected-output `17`, skips `0`; full corpus fixture gate `98/0/0`, expected-output `71`, skips `0`
 - second pinned-output corpus fixture hardening: focused new-pinned slice `11/0/0`, expected-output `11`, skips `0`; full corpus fixture gate `98/0/0`, expected-output `82`, skips `0`
 - third pinned-output corpus fixture hardening: focused new-pinned slice `11/0/0`, expected-output `11`, skips `0`; full corpus fixture gate `98/0/0`, expected-output `93`, skips `0`
+- final pinned-output corpus fixture hardening: focused remaining slice `5/0/0`, expected-output `5`, skips `0`; full corpus fixture gate `98/0/0`, expected-output `98`, skips `0`; fixture tooling test passed
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | final real corpus pinned outputs | last 5 corpus fixtures still used dynamic generated CPU-reference comparison, and one `-Infinity` oracle showed fixture data passed through `JSON.stringify` would collapse non-finite numbers to `null` in browser e2e specs | pinned SobelTex, RoPE, packed RoPE, and llm.c attention query/key outputs; added fixture JS-literal serialization for `NaN`/`Infinity`/`-Infinity`; diff reports now include non-finite labels; raised expected-output baseline to `98` | focused remaining slice `5/0/0`, expected-output `5`, skips `0`; full corpus fixture gate `98/0/0`, expected-output `98`, skips `0`; `test:webgpu-fixtures` passed |
 | Probed green | real corpus pinned outputs | 24 real WebGPU corpus fixtures were executing but only compared against generated CPU reference output, so fixture regressions could still move both dynamic paths together without a stable pinned oracle | pinned expected outputs for deterministic LeetCUDA activations/vector kernels, llm.c residual/permute/softmax/matmul/layernorm cases, and CUTE transpose fixtures; raised expected-output baseline to `71` | LeetCUDA slice `46/0/0`, expected-output `35`; llm.c slice `28/0/0`, expected-output `17`; full corpus fixture gate `98/0/0`, expected-output `71`; all skips `0` |
 | Probed green | additional real corpus pinned outputs | 11 more simple deterministic fixtures still used only generated reference output: LeetCUDA nsight/interview kernels, cuda-samples `MatrixMulCUDA`, llm.c vectorized GELU and layernorm | pinned stable expected outputs and raised expected-output baseline to `82` | focused slice `11/0/0`, expected-output `11`; full corpus fixture gate `98/0/0`, expected-output `82`; all skips `0` |
 | Probed green | mdspan/attention/optimizer pinned outputs | 11 more source-derived fixtures still used only generated reference output: cuda-samples Bezier/mdspan, llm.c AdamW/encoder-backward/attention value-path permutations | pinned stable expected outputs and raised expected-output baseline to `93` | focused slice `11/0/0`, expected-output `11`; full corpus fixture gate `98/0/0`, expected-output `93`; all skips `0` |
@@ -1041,7 +1043,7 @@ Probe these with fail-first real WebGPU fixtures:
   - keep `verify:changed` scoped and explain selected gates; exact `--cases` filters now run only the named case before falling back to fuzzy substring matching, large summary `caseFilters` now print compact count/sample output, and smoke wrapper avoids nested pnpm command echo
   - auto-corpus exact-case profiling no longer fails a full-corpus baseline check; filtered expected counts now match the selected case set
   - llm.c synthetic smoke reference loops are smaller, but layernorm reference cases still dominate the scoped run at about `234ms`; keep profiling reference hot spots separately from WebGPU dispatch time
-  - corpus fixture expected-output baseline now covers `93/98` real WebGPU fixtures; remaining dynamic-reference-only fixtures should be pinned when their math oracle is stable
+  - corpus fixture expected-output baseline now covers `98/98` real WebGPU fixtures; next confidence gap is source/dist real-world verifier plus perf gate, not missing fixture oracles
   - keep smoke real-WebGPU and fast enough for inner loop
 
 ## Gate Ladder

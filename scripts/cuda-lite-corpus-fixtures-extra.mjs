@@ -260,6 +260,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { B: 1, T: 2, C: 2, NH: 1 },
     },
     output: "preatt",
+    expectedOutput: { type: "Float32Array", data: [7.77817440032959, -Infinity, 37.47665786743164, 101.11627197265625] },
   },
   {
     sourceKey: "corpusLlmAttentionSoftmax1",

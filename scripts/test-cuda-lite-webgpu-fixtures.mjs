@@ -18,6 +18,7 @@ import {
   autoCorpusSmokeCacheInputHash,
   autoCorpusSmokeCachePath,
   corpusExecutionFixturesForCaseFilters,
+  fixtureJsLiteral,
   inferAutoCorpusWorkgroupSize,
   materializeFixtureInput,
 } from "./cuda-lite-webgpu-fixtures.mjs";
@@ -131,6 +132,18 @@ assert.equal(materializedFixtureInput.memoryPools.pool.data.length, 4);
 assert.deepEqual([...materializedFixtureInput.memoryPools.pool.offset], [12]);
 assert.deepEqual(materializedFixtureInput.scalars, { n: 2 });
 assert.deepEqual(materializedFixtureInput.readback, ["out", "g_state", "pool_offset"]);
+
+const nonFiniteLiteral = fixtureJsLiteral({
+  values: [NaN, Infinity, -Infinity, -0, undefined],
+  omitted: undefined,
+});
+const nonFiniteRoundTrip = Function(`return (${nonFiniteLiteral});`)();
+assert.equal(Number.isNaN(nonFiniteRoundTrip.values[0]), true);
+assert.equal(nonFiniteRoundTrip.values[1], Infinity);
+assert.equal(nonFiniteRoundTrip.values[2], -Infinity);
+assert.equal(Object.is(nonFiniteRoundTrip.values[3], -0), true);
+assert.equal(nonFiniteRoundTrip.values[4], null);
+assert.equal(Object.hasOwn(nonFiniteRoundTrip, "omitted"), false);
 
 assert.deepEqual(parseCaseFilters(["--case", "storage:vector-deref-lane-write"]), ["storage:vector-deref-lane-write"]);
 assert.deepEqual(parseCaseFilters(["--cases=atomic:helper-rmw,storage:shared-vector-overlay"]), ["atomic:helper-rmw", "storage:shared-vector-overlay"]);

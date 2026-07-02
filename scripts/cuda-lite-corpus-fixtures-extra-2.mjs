@@ -98,6 +98,10 @@ export const cudaLiteCorpusExecutionFixtures = [
     },
     output: "out",
     tolerance: 3e-3,
+    expectedOutput: {
+      type: "Float32Array",
+      data: [1, 2, 3, 4, -2.3473143577575684, 7.449168682098389, 6.919651508331299, 8.069599151611328],
+    },
   },
   {
     sourceKey: "corpusLeetCudaRopeF32x4Pack",
@@ -116,6 +120,15 @@ export const cudaLiteCorpusExecutionFixtures = [
     },
     output: "out",
     tolerance: 3e-3,
+    expectedOutput: {
+      type: "Float32Array",
+      data: [
+        1, 2, 3, 4,
+        5, 6, 7, 8,
+        -3.5519890785217285, 12.976262092590332, 9.747044563293457, 13.038217544555664,
+        12.859352111816406, 14.129298210144043, 14.983992576599121, 16.014991760253906,
+      ],
+    },
   },
   {
     sourceKey: "corpusLeetCudaMatTransposeF32Row2Col2d",

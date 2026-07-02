@@ -290,6 +290,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       },
     },
     output: "pSobelOriginal",
+    expectedOutput: { type: "Uint32Array", data: [9] },
   },
   {
     sourceKey: "corpusLlmAddBias",
@@ -544,6 +545,15 @@ export const cudaLiteCorpusExecutionFixtures = [
     },
     output: "out",
     tolerance: 3e-3,
+    expectedOutput: {
+      type: "Float32Array",
+      data: [
+        1, 2, 3, 4,
+        5, 6, 7, 8,
+        -0.961037814617157, -0.5713198184967041, -2.139758348464966, 1.2928394079208374,
+        3.039849281311035, -3.9698004722595215, 5.005997657775879, -5.994997024536133,
+      ],
+    },
   },
   {
     sourceKey: "corpusLeetCudaGeluF32x4",

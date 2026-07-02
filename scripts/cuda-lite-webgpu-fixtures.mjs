@@ -39,6 +39,29 @@ export function materializeFixtureInput(input) {
   };
 }
 
+export function fixtureJsLiteral(value) {
+  if (value === null) return "null";
+  if (typeof value === "number") {
+    if (Number.isNaN(value)) return "NaN";
+    if (value === Number.POSITIVE_INFINITY) return "Infinity";
+    if (value === Number.NEGATIVE_INFINITY) return "-Infinity";
+    if (Object.is(value, -0)) return "-0";
+    return JSON.stringify(value);
+  }
+  if (typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => item === undefined ? "null" : fixtureJsLiteral(item)).join(",")}]`;
+  }
+  if (typeof value === "object") {
+    return `{${Object.entries(value)
+      .filter(([, item]) => item !== undefined)
+      .map(([key, item]) => `${JSON.stringify(key)}:${fixtureJsLiteral(item)}`)
+      .join(",")}}`;
+  }
+  if (value === undefined) return "undefined";
+  throw new Error(`unsupported fixture literal value: ${String(value)}`);
+}
+
 export function materializeTypedArray(spec) {
   const Ctor = globalThis[spec.type];
   if (typeof Ctor !== "function") throw new Error("unsupported fixture typed array: " + spec.type);

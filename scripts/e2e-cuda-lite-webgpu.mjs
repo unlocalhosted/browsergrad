@@ -8,6 +8,7 @@ import {
 } from "./cuda-lite-corpus-registry.mjs";
 import {
   corpusExecutionFixturesForCaseFilters,
+  fixtureJsLiteral,
   loadAutoCorpusSmokeFixtures,
   loadCorpusExecutionSources,
   verifyCorpusFixtureCheckouts,
@@ -5700,8 +5701,8 @@ const html = String.raw`<!doctype html>
       } from "@unlocalhosted/browsergrad-compiler";
 
       const SOURCES = ${JSON.stringify(sources)};
-      const CORPUS_FIXTURES = ${JSON.stringify(corpusExecutionFixtures)};
-      const AUTO_CORPUS_SMOKE_FIXTURES = ${JSON.stringify(autoCorpusSmokeFixtures.map(({ source, ...fixture }) => fixture))};
+      const CORPUS_FIXTURES = ${fixtureJsLiteral(corpusExecutionFixtures)};
+      const AUTO_CORPUS_SMOKE_FIXTURES = ${fixtureJsLiteral(autoCorpusSmokeFixtures.map(({ source, ...fixture }) => fixture))};
       const EXPECTED_CORPUS_FIXTURE_NAMES = ${JSON.stringify(expectedCorpusFixtureNames)};
       const CORPUS_FIXTURE_BASELINE = ${JSON.stringify(cudaLiteCorpusExecutionFixtureBaseline)};
       const CASE_FILTERS = ${JSON.stringify(caseFilters)};
@@ -12363,12 +12364,14 @@ const html = String.raw`<!doctype html>
           const relDiff = sameValue ? 0 : diff / relativeBase;
           if (diff > maxAbsDiff) maxAbsDiff = diff;
           if (relDiff > maxRelDiff) maxRelDiff = relDiff;
-          const withinTolerance = diff <= tolerance || (useRelativeTolerance && relDiff <= relativeTolerance);
+          const withinTolerance = sameValue || diff <= tolerance || (useRelativeTolerance && relDiff <= relativeTolerance);
           if (firstDiff === undefined && !withinTolerance) {
             firstDiff = {
               index: i,
               expected: expectedValue,
               actual: actualValue,
+              expectedLabel: numberLabel(expectedValue),
+              actualLabel: numberLabel(actualValue),
               absDiff: diff,
               relDiff,
             };
@@ -12392,6 +12395,14 @@ const html = String.raw`<!doctype html>
 
       function isFloatTypedArray(value) {
         return value instanceof Float32Array || value instanceof Float64Array;
+      }
+
+      function numberLabel(value) {
+        if (Number.isNaN(value)) return "NaN";
+        if (value === Infinity) return "Infinity";
+        if (value === -Infinity) return "-Infinity";
+        if (Object.is(value, -0)) return "-0";
+        return String(value);
       }
 
       function round(value) {
