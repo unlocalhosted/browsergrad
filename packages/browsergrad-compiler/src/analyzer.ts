@@ -3924,6 +3924,15 @@ function validateDivergentReturnsBeforeBarriers(
           ));
         }
         return { containsBarrier: false };
+      case "continue":
+        if (divergentDepth > 0 && barrierLater) {
+          diagnostics.push(error(
+            "divergent-continue-before-barrier",
+            "thread-dependent continue before a later barrier would make WGSL barrier control flow non-uniform",
+            statement.span,
+          ));
+        }
+        return { containsBarrier: false };
       case "if": {
         const nestedDivergentDepth = divergentDepth + (expressionMayBeNonUniformBeforeBarrier(statement.condition, uniformity) ? 1 : 0);
         const consequentHasBarrier = visitBlock(statement.consequent, nestedDivergentDepth, barrierLater);

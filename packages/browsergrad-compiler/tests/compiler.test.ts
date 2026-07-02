@@ -7469,6 +7469,24 @@ __global__ void doWhileBreakBeforePostLoopBarrier(uint *out, int N) {
     }
   });
 
+  it("rejects divergent continues before later barriers instead of emitting unsafe WGSL", () => {
+    const source = `
+__global__ void continueBeforeBarrier(uint *out, int N) {
+  int tid = threadIdx.x;
+  for (int i = 0; i < 3; ++i) {
+    if (tid >= N) { continue; }
+    out[tid] = out[tid] + 1u;
+    __syncthreads();
+    out[tid] = out[tid] + 10u;
+  }
+}`;
+    const analysis = analyzeCudaLite(parseCudaLite(source), { workgroupSize: [4, 1, 1] });
+    const diagnostic = analysis.diagnostics.find((item) => item.code === "divergent-continue-before-barrier");
+
+    expect(diagnostic?.severity).toBe("error");
+    expect(() => compileCudaLiteKernel(source, { workgroupSize: [4, 1, 1] })).toThrow(/divergent-continue-before-barrier/u);
+  });
+
   it("lowers dynamic extern shared memory declared inside device helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ uint reduce_one(uint value) {

@@ -53,6 +53,7 @@ const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("missing-feature-subgroups", "feature", "Missing subgroups", "unsupported", false, true, "Requires WebGPU subgroups or future shared-memory fallback."),
   feature("compatibility-mode-subgroups", "feature", "Subgroups disabled by compatibility mode", "unsupported", false, true, "Compatibility devices cannot run subgroup lowering."),
   feature("divergent-barrier", "safety", "Divergent barrier", "unsupported", false, true, "Cannot lower unsafe barrier control flow."),
+  feature("divergent-continue-before-barrier", "safety", "Divergent continue before barrier", "unsupported", false, true, "Continue before a later barrier needs per-iteration active-lane lowering before WGSL can run safely."),
   feature("const-pointer-write", "safety", "Const pointer write", "unsupported", false, false, "Rejects invalid memory mutation."),
   feature("unsupported-local-array", "memory", "Local arrays", "unsupported", false, true, "Local array address space not modeled yet."),
   feature("unsupported-local-array-init", "memory", "Local array initializers", "unsupported", false, true, "Local array initializer lowering not modeled yet."),
