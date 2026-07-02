@@ -4598,6 +4598,52 @@ __global__ void sharedByteBf16Overlay(float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
   });
 
+  it("packs vector half pointer views over shared byte storage into byte-offset lanes", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sharedByteHalf2Overlay(float *out) {
+  __shared__ uchar scratch[4];
+  if (threadIdx.x == 0) {
+    half2 *view = (half2 *)&scratch[0];
+    view[0] = make_half2(__float2half(1.0f), __float2half(2.0f));
+    half2 value = view[0];
+    out[0] = __low2float(value);
+    out[1] = __high2float(value);
+  }
+}`, { workgroupSize: [1, 1, 1], features: { "shader-f16": true }, f16Mode: "f32" });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_ptr_read_f16x2");
+    expect(compiled.wgsl).toContain("pack2x16float");
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
+  });
+
+  it("packs vector bf16 pointer views over shared byte storage into byte-offset lanes", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sharedByteBf162Overlay(float *out) {
+  __shared__ uchar scratch[4];
+  if (threadIdx.x == 0) {
+    __nv_bfloat162 *view = (__nv_bfloat162 *)&scratch[0];
+    view[0] = __halves2bfloat162(__float2bfloat16(1.0f), __float2bfloat16(2.0f));
+    __nv_bfloat162 value = view[0];
+    out[0] = __bfloat162float(value.x);
+    out[1] = __bfloat162float(value.y);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bg_ptr_read_f32x2");
+    expect(compiled.wgsl).toContain("<< 16u");
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
+  });
+
   it("lowers generic pointer dereference lvalues and rebased kernel params", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void derefWrite(float *x) {

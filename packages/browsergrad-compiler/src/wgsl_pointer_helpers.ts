@@ -849,6 +849,8 @@ function isPointerHelperReadableStorage(helperType: CudaLiteScalarType, storageT
     (isCudaVectorType(storageType) && helperType === cudaVectorScalarType(storageType)) ||
     (helperType === "half" && storageType === "uchar") ||
     (helperType === "bf16" && storageType === "uchar") ||
+    (helperType === "half2" && storageType === "uchar") ||
+    (helperType === "bf162" && storageType === "uchar") ||
     ((helperType === "uint" || helperType === "int") && (storageType === "float" || storageType === "double" || storageType === "uchar"));
 }
 

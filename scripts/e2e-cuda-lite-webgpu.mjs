@@ -768,6 +768,35 @@ __global__ void sharedByteBf16Reinterpret(float *out) {
     out[1] = __bfloat162float(value[1]);
   }
 }`,
+  sharedByteHalf2Reinterpret: `
+__global__ void sharedByteHalf2Reinterpret(float *out) {
+  __shared__ uchar scratch[4];
+  if (threadIdx.x == 0) {
+    half2 *value = (half2 *)&scratch[0];
+    value[0] = make_half2(__float2half(1.0f), __float2half(2.0f));
+  }
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    half2 *value = (half2 *)&scratch[0];
+    out[0] = __low2float(value[0]);
+    out[1] = __high2float(value[0]);
+  }
+}`,
+  sharedByteBf162Reinterpret: `
+__global__ void sharedByteBf162Reinterpret(float *out) {
+  __shared__ uchar scratch[4];
+  if (threadIdx.x == 0) {
+    __nv_bfloat162 *value = (__nv_bfloat162 *)&scratch[0];
+    value[0] = __halves2bfloat162(__float2bfloat16(1.0f), __float2bfloat16(2.0f));
+  }
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    __nv_bfloat162 *value = (__nv_bfloat162 *)&scratch[0];
+    __nv_bfloat162 pair = value[0];
+    out[0] = __bfloat162float(pair.x);
+    out[1] = __bfloat162float(pair.y);
+  }
+}`,
   localVectorPointerArray: `
 __device__ float3 sum3(float3 *a, float3 *b, float3 *c) {
   return *a + *b + *c;
@@ -6274,6 +6303,32 @@ const html = String.raw`<!doctype html>
           {
             name: "storage:shared-byte-bf16-reinterpret",
             source: SOURCES.sharedByteBf16Reinterpret,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(2),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [1, 2] },
+          },
+          {
+            name: "storage:shared-byte-half2-reinterpret",
+            source: SOURCES.sharedByteHalf2Reinterpret,
+            options: { workgroupSize: [1, 1, 1], f16Mode: "f32" },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(2),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [1, 2] },
+          },
+          {
+            name: "storage:shared-byte-bf162-reinterpret",
+            source: SOURCES.sharedByteBf162Reinterpret,
             options: { workgroupSize: [1, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({

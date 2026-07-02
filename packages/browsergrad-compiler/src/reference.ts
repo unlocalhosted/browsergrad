@@ -3834,6 +3834,18 @@ function readSharedBufferValue(
   valueType: CudaLiteScalarType | undefined,
   field: "x" | "y" | "z" | "w" | undefined,
 ): EvalValue {
+  if (shared.valueType === "uchar" && valueType !== undefined && isCudaVectorType(valueType)) {
+    const scalar = cudaVectorScalarType(valueType) ?? "float";
+    const stride = elementByteSize(scalar);
+    const lanes = Array.from({ length: cudaVectorLaneCount(valueType) }, (_, lane) =>
+      readPackedByteSharedValue(shared.data, storageIndex + lane * stride, scalar)
+    );
+    if (field) {
+      const index = cudaVectorFieldIndex(valueType, field);
+      return index === undefined ? 0 : lanes[index] ?? 0;
+    }
+    return { kind: "cuda-vector", valueType, lanes };
+  }
   if (shared.valueType === "uchar" && valueType !== undefined && !isCudaVectorType(valueType)) {
     return readPackedByteSharedValue(shared.data, storageIndex, valueType);
   }
@@ -3859,6 +3871,20 @@ function writeSharedBufferValue(
   field: "x" | "y" | "z" | "w" | undefined,
   value: EvalValue,
 ): void {
+  if (shared.valueType === "uchar" && valueType !== undefined && isCudaVectorType(valueType)) {
+    const scalar = cudaVectorScalarType(valueType) ?? "float";
+    const stride = elementByteSize(scalar);
+    if (field) {
+      const index = cudaVectorFieldIndex(valueType, field);
+      if (index !== undefined) writePackedByteSharedValue(shared.data, storageIndex + index * stride, scalar, valueAsNumber(value, field));
+      return;
+    }
+    const vector = valueAsCudaVector(value, valueType);
+    for (let lane = 0; lane < cudaVectorLaneCount(valueType); lane++) {
+      writePackedByteSharedValue(shared.data, storageIndex + lane * stride, scalar, vector.lanes[lane] ?? 0);
+    }
+    return;
+  }
   if (shared.valueType === "uchar" && valueType !== undefined && !isCudaVectorType(valueType)) {
     writePackedByteSharedValue(shared.data, storageIndex, valueType, valueAsNumber(value, "shared write"));
     return;
@@ -3888,7 +3914,7 @@ function sharedStorageRangeFits(
   storageIndex: number,
   valueType: CudaLiteScalarType | undefined,
 ): boolean {
-  if (shared.valueType !== "uchar" || valueType === undefined || isCudaVectorType(valueType)) {
+  if (shared.valueType !== "uchar" || valueType === undefined) {
     return storageRangeFits(shared.data, storageIndex, valueType);
   }
   if (storageIndex < 0) return false;

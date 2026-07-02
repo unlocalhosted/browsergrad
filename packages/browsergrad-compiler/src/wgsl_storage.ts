@@ -478,6 +478,14 @@ function emitPackedByteSharedRead(
   context: WgslStorageEmitContext,
 ): string | undefined {
   if (shared.valueType !== "uchar") return undefined;
+  if (isCudaVectorType(viewType)) {
+    const scalar = cudaVectorScalarType(viewType) ?? "float";
+    const stride = wgslElementByteSize(scalar);
+    const values = Array.from({ length: cudaVectorLaneCount(viewType) }, (_, lane) =>
+      emitPackedByteSharedRead(shared, `(${index} + ${lane * stride}u)`, scalar, context) ?? zeroValue(scalar)
+    );
+    return `${wgslScalar(viewType)}(${values.join(", ")})`;
+  }
   const wordIndex = `((${index}) >> 2u)`;
   const word = `${context.nameFor(shared.name)}[${wordIndex}]`;
   const loaded = `atomicLoad(&${word})`;
@@ -502,6 +510,13 @@ function emitPackedByteSharedWrite(
   context: WgslStorageEmitContext,
 ): string | undefined {
   if (shared.valueType !== "uchar") return undefined;
+  if (isCudaVectorType(viewType)) {
+    const scalar = cudaVectorScalarType(viewType) ?? "float";
+    const stride = wgslElementByteSize(scalar);
+    return Array.from({ length: cudaVectorLaneCount(viewType) }, (_, lane) =>
+      emitPackedByteSharedWrite(shared, `(${index} + ${lane * stride}u)`, `${value}.${vectorFieldName(lane)}`, scalar, context)
+    ).filter((line): line is string => line !== undefined).join("; ");
+  }
   const wordIndex = `((${index}) >> 2u)`;
   const word = `${context.nameFor(shared.name)}[${wordIndex}]`;
   if (viewType === "half") {
@@ -565,6 +580,8 @@ export function emitSharedVectorFlatRead(
   viewType: CudaLiteScalarType,
   context: WgslStorageEmitContext,
 ): string {
+  const packedByte = emitPackedByteSharedRead(shared, index, viewType, context);
+  if (packedByte) return packedByte;
   const lanes = cudaVectorLaneCount(viewType);
   const scalar = cudaVectorScalarType(viewType) ?? "float";
   const rootLanes = isCudaVectorType(shared.valueType) ? cudaVectorLaneCount(shared.valueType) : 1;
@@ -645,6 +662,8 @@ export function emitSharedVectorFlatWrite(
   viewType: CudaLiteScalarType,
   context: WgslStorageEmitContext,
 ): string {
+  const packedByte = emitPackedByteSharedWrite(shared, index, value, viewType, context);
+  if (packedByte) return packedByte;
   const lanes = cudaVectorLaneCount(viewType);
   const scalar = cudaVectorScalarType(viewType) ?? "float";
   const rootLanes = isCudaVectorType(shared.valueType) ? cudaVectorLaneCount(shared.valueType) : 1;
