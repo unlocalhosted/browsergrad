@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T19:50:47Z
+Last updated: 2026-07-02T19:56:25Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,12 +9,12 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `98/98` |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `453/0/0`, dist `453/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `98/98` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Source/dist real-world verifier and perf gate after corpus fixture oracle completion |
+| Active work item | Continue corpus-shaped probes and keep perf/source-dist verifier gates green |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
-| Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed` |
+| Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
 
 ## How To Track This
 
@@ -644,6 +644,8 @@ Current verified gates:
 - second pinned-output corpus fixture hardening: focused new-pinned slice `11/0/0`, expected-output `11`, skips `0`; full corpus fixture gate `98/0/0`, expected-output `82`, skips `0`
 - third pinned-output corpus fixture hardening: focused new-pinned slice `11/0/0`, expected-output `11`, skips `0`; full corpus fixture gate `98/0/0`, expected-output `93`, skips `0`
 - final pinned-output corpus fixture hardening: focused remaining slice `5/0/0`, expected-output `5`, skips `0`; full corpus fixture gate `98/0/0`, expected-output `98`, skips `0`; fixture tooling test passed
+- source/dist real-world verifier after final oracle pinning: compile/codegen audit hard fails `0`; source browser gate `453/0/0`, corpus fixtures `98/0/0`, expected-output `98`, auto-corpus `32/0/0`, skips `0`; dist browser gate `453/0/0`, same coverage, skips `0`
+- corpus hot perf gate after final oracle pinning: histogram/scalar repeat `2`, `4/0/0`, expected-output `4`, skips `0`; warm best `5.8ms` / `4.3ms`, speedup `261.97` / `296.28`
 
 ## Bugs Found During Current Run
 
@@ -1043,7 +1045,7 @@ Probe these with fail-first real WebGPU fixtures:
   - keep `verify:changed` scoped and explain selected gates; exact `--cases` filters now run only the named case before falling back to fuzzy substring matching, large summary `caseFilters` now print compact count/sample output, and smoke wrapper avoids nested pnpm command echo
   - auto-corpus exact-case profiling no longer fails a full-corpus baseline check; filtered expected counts now match the selected case set
   - llm.c synthetic smoke reference loops are smaller, but layernorm reference cases still dominate the scoped run at about `234ms`; keep profiling reference hot spots separately from WebGPU dispatch time
-  - corpus fixture expected-output baseline now covers `98/98` real WebGPU fixtures; next confidence gap is source/dist real-world verifier plus perf gate, not missing fixture oracles
+  - corpus fixture expected-output baseline now covers `98/98` real WebGPU fixtures; source/dist real-world verifier and histogram/scalar hot perf gate are green after final oracle pinning
   - keep smoke real-WebGPU and fast enough for inner loop
 
 ## Gate Ladder
