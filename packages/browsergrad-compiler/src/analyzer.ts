@@ -603,6 +603,7 @@ export function lowerAnalyzedCudaLiteToKernelIr(
       .filter((fn) => reachableFunctionSpans.has(fn.span.start))
       .map((fn) => fn.body),
   ];
+  const reachableFunctions = analysis.functions.filter((fn) => reachableFunctionSpans.has(fn.span.start));
   const reachableSymbolNames = collectReferencedSymbolNames(sharedDeclarationBodies);
   return {
     name: analysis.kernel.name,
@@ -610,7 +611,7 @@ export function lowerAnalyzedCudaLiteToKernelIr(
     constants: analysis.constants.filter((constant) => reachableSymbolNames.has(constant.name)),
     deviceGlobals: analysis.deviceGlobals.filter((global) => reachableSymbolNames.has(global.name)),
     textures: analysis.textures.filter((texture) => reachableSymbolNames.has(texture.name)),
-    functions: analysis.functions,
+    functions: reachableFunctions,
     body: analysis.kernel.body,
     sharedDeclarations: collectSharedDeclarationsFromBodies(sharedDeclarationBodies, options),
     requiredFeatures: analysis.requiredFeatures,
@@ -632,13 +633,20 @@ function reachableDeviceFunctionSpans(
     reachable.add(fn.span.start);
     visitStatements(fn.body);
   };
+  const visitFunctionByName = (name: string | undefined, arity: number): void => {
+    if (name === undefined || launchCallees.has(name)) return;
+    for (const candidate of functions) {
+      if (candidate.name === name && candidate.params.length === arity) visitFunction(candidate);
+    }
+  };
   const visitStatements = (statements: readonly CudaLiteStatement[]): void => {
     walkCudaLiteExpressions(statements, (expression) => {
       if (expression.kind !== "call") return;
       const name = expressionName(expression.callee);
-      if (name === undefined || launchCallees.has(name)) return;
-      for (const candidate of functions) {
-        if (candidate.name === name && candidate.params.length === expression.args.length) visitFunction(candidate);
+      visitFunctionByName(name, expression.args.length);
+      const memberName = expression.callee.kind === "member" ? expression.callee.property : undefined;
+      if ((name === "reduce" || name?.endsWith("::reduce") || memberName === "reduce") && expression.args.length === 3) {
+        visitFunctionByName(expressionName(expression.args[2]!), 2);
       }
     });
   };

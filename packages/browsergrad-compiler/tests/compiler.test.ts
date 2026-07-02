@@ -2307,7 +2307,7 @@ __global__ void helperKernel(float *x) {
   if (threadIdx.x < 1) { x[0] = addOne(x[0]); }
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.ir.functions.map((fn) => fn.name)).toEqual(["unused_desc", "addOne"]);
+    expect(compiled.ir.functions.map((fn) => fn.name)).toEqual(["addOne"]);
     expect(compiled.wgsl).toContain("fn addOne(value_arg: f32");
     expect(compiled.wgsl).not.toContain("unused_desc");
     expect(compiled.wgsl).not.toContain("<< 62");
@@ -5935,6 +5935,37 @@ __global__ void selected(float *x) {
     expect([...result.buffers.x as Float32Array]).toEqual([5]);
     expect(compiled.wgsl).not.toContain("unused_state");
     expect(compiled.wgsl).not.toContain("unused_device_global_helper");
+  });
+
+  it("removes unreachable helper bodies from lowered IR for selected kernels", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float unused_helper(float value) {
+  return value * 10.0f;
+}
+
+__device__ float selected_helper(float value) {
+  return value + 2.0f;
+}
+
+__global__ void selected(float *x) {
+  if (threadIdx.x == 0) {
+    x[0] = selected_helper(x[0]);
+  }
+}`, { kernelName: "selected", workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([3]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.ir.functions.map((fn) => fn.name)).toEqual(["selected_helper"]);
+    expect([...result.buffers.x as Float32Array]).toEqual([5]);
+    expect(compiled.wgsl).toContain("selected_helper");
+    expect(compiled.wgsl).not.toContain("unused_helper");
   });
 
   it("runs device-side kernel launches in the CPU reference when explicitly enabled", async () => {
