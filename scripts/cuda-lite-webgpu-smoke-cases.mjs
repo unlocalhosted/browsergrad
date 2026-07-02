@@ -38,6 +38,7 @@ export const storageScopeCases = [
   "storage:shared-byte-half2-reinterpret",
   "storage:shared-byte-bf162-reinterpret",
   "storage:param-byte-float-reinterpret",
+  "storage:param-byte-float-helper-reinterpret",
   "storage:local-vector-pointer-array",
   "storage:shared-vector-pointer-array",
   "storage:dynamic-shared-vector-pointer-array",

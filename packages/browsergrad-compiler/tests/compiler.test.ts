@@ -1469,6 +1469,35 @@ __global__ void storageByteFloatOverlay(uchar *scratch, float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
   });
 
+  it("scales helper pointer params when byte storage is viewed as wider values", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void write_storage_byte_float(float *value, float *out) {
+  value[0] = 1.0f;
+  value[1] = 2.0f;
+  out[0] = value[0];
+  out[1] = value[1];
+}
+
+__global__ void storageByteFloatHelperOverlay(uchar *scratch, float *out) {
+  if (threadIdx.x == 0) {
+    write_storage_byte_float((float *)&scratch[0], out);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          scratch: new Uint32Array(2),
+          out: new Float32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("select(u32(1), (u32(1) * 4u), (value_buffer == 0u))");
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
+  });
+
   it("bitcasts float views over packed shared byte storage", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void byteFloatReinterpret(float* out) {

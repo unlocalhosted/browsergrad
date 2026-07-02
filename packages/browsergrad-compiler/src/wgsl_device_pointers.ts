@@ -165,7 +165,7 @@ export function devicePointerArgumentParts(
       if (!target) return undefined;
       return {
         buffer: target.buffer,
-        base: `(${target.base} + ${devicePointerIndexDelta(expression.argument.index, pointerParam.valueType, context, callbacks)})`,
+        base: `(${target.base} + ${devicePointerIndexDelta(expression.argument.index, pointerParam.valueType, context, callbacks, expression.argument.target)})`,
       };
     }
     const global = deviceGlobalPointerArgumentParts(expression.argument, context, callbacks);
@@ -274,8 +274,53 @@ function devicePointerIndexDelta(
   pointer?: CudaLiteExpression,
 ): string {
   const raw = `u32(${callbacks.emitExpression(index, context)})`;
+  const dynamic = emitDevicePointerDynamicByteIndexDelta(pointer, raw, valueType, context);
+  if (dynamic) return dynamic;
   const scale = devicePointerIndexScale(pointer, valueType, context, callbacks);
   return scale <= 1 ? raw : `(${raw} * ${scale}u)`;
+}
+
+function emitDevicePointerDynamicByteIndexDelta(
+  pointer: CudaLiteExpression | undefined,
+  raw: string,
+  valueType: CudaLiteParam["valueType"] | PointerAlias["valueType"] | undefined,
+  context: WgslDevicePointerContext,
+): string | undefined {
+  if (valueType === undefined || valueType === "uchar") return undefined;
+  const root = pointer ? rootIdentifier(pointer) : undefined;
+  if (!root || !context.devicePointerParamFor(root)) return undefined;
+  const bytes = wgslElementByteSize(valueType);
+  if (bytes <= 1) return undefined;
+  const byteBuffers = devicePointerByteStorageBufferIds(context);
+  if (byteBuffers.length === 0) return undefined;
+  const buffer = context.nameFor(`${root}_buffer`);
+  const condition = byteBuffers.map((id) => `(${buffer} == ${id}u)`).join(" || ");
+  return `select(${raw}, (${raw} * ${bytes}u), ${condition})`;
+}
+
+function devicePointerByteStorageBufferIds(context: WgslDevicePointerContext): number[] {
+  const ids: number[] = [];
+  for (const param of context.ir.params) {
+    if (!param.pointer || param.valueType !== "uchar") continue;
+    const id = context.storagePointerIdFor(param.name);
+    if (id !== undefined) ids.push(id);
+  }
+  for (const shared of context.ir.sharedDeclarations) {
+    if (shared.valueType !== "uchar") continue;
+    const id = context.sharedPointerIdFor(shared.name);
+    if (id !== undefined) ids.push(id);
+  }
+  for (const global of context.ir.deviceGlobals) {
+    if (global.valueType !== "uchar") continue;
+    const id = context.deviceGlobalPointerIdFor(global.name);
+    if (id !== undefined) ids.push(id);
+  }
+  for (const constant of context.ir.constants) {
+    if (constant.valueType !== "uchar") continue;
+    const id = context.constantPointerIdFor(constant.name);
+    if (id !== undefined) ids.push(id);
+  }
+  return ids;
 }
 
 function devicePointerIndexScale(
