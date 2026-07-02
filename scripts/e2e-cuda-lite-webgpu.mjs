@@ -4977,6 +4977,26 @@ const autoCorpusSmokeFixtures = applyAutoCorpusSmokeShard(allAutoCorpusSmokeFixt
 for (const fixture of autoCorpusSmokeFixtures) {
   sources[fixture.sourceKey] = fixture.source;
 }
+sources.textureSurfaceVolumeVectorPointerArrayAtomicActiveLaneReturnFalseBranch =
+  sources.textureSurfaceVolumeVectorPointerArrayAtomicActiveLaneReturn.replace(
+    "int pick = value.y > 0u ? 1 : 0;",
+    "int pick = value.y == 0u ? 1 : 0;",
+  );
+sources.textureSurfaceVolumeVectorPointerArrayCasActiveLaneReturnFalseBranch =
+  sources.textureSurfaceVolumeVectorPointerArrayCasActiveLaneReturn.replace(
+    "int pick = value.z > 0u ? 1 : 0;",
+    "int pick = value.z == 0u ? 1 : 0;",
+  );
+sources.textureSurfaceVolumeVectorPointerArrayCompoundActiveLaneReturnFalseBranch =
+  sources.textureSurfaceVolumeVectorPointerArrayCompoundActiveLaneReturn.replace(
+    "int pick = value.w > 0u ? 1 : 0;",
+    "int pick = value.w == 0u ? 1 : 0;",
+  );
+sources.textureSurfaceVolumeVectorPointerArrayMinMaxActiveLaneReturnFalseBranch =
+  sources.textureSurfaceVolumeVectorPointerArrayMinMaxActiveLaneReturn.replace(
+    "int pick = value.x > 0u ? 1 : 0;",
+    "int pick = value.x == 0u ? 1 : 0;",
+  );
 const expectedCorpusFixtureNames = corpusExecutionFixtures.map((fixture) => fixture.caseName);
 
 const html = String.raw`<!doctype html>
@@ -9639,6 +9659,33 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [10515] },
           },
           {
+            name: "texture-surface:volume-vector-pointer-array-atomic-active-lane-return-false-branch",
+            source: SOURCES.textureSurfaceVolumeVectorPointerArrayAtomicActiveLaneReturnFalseBranch,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [13395] },
+          },
+          {
             name: "texture-surface:volume-vector-pointer-array-cas-active-lane-return",
             source: SOURCES.textureSurfaceVolumeVectorPointerArrayCasActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -9664,6 +9711,33 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [9728] },
+          },
+          {
+            name: "texture-surface:volume-vector-pointer-array-cas-active-lane-return-false-branch",
+            source: SOURCES.textureSurfaceVolumeVectorPointerArrayCasActiveLaneReturnFalseBranch,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [13317] },
           },
           {
             name: "texture-surface:volume-vector-pointer-array-compound-active-lane-return",
@@ -9693,6 +9767,33 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [10525] },
           },
           {
+            name: "texture-surface:volume-vector-pointer-array-compound-active-lane-return-false-branch",
+            source: SOURCES.textureSurfaceVolumeVectorPointerArrayCompoundActiveLaneReturnFalseBranch,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [13495] },
+          },
+          {
             name: "texture-surface:volume-vector-pointer-array-minmax-active-lane-return",
             source: SOURCES.textureSurfaceVolumeVectorPointerArrayMinMaxActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -9718,6 +9819,33 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [10429] },
+          },
+          {
+            name: "texture-surface:volume-vector-pointer-array-minmax-active-lane-return-false-branch",
+            source: SOURCES.textureSurfaceVolumeVectorPointerArrayMinMaxActiveLaneReturnFalseBranch,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [18039] },
           },
           {
             name: "surface:helper-dispatch-multiple-surfaces",
