@@ -2875,6 +2875,29 @@ __global__ void surface1DVectorRead(cudaSurfaceObject_t surf, float *out) {
     out[3] = pointerValue.w + returnValue.w;
   }
 }`,
+  surface1DNegativeByteOffset: `
+__global__ void surface1DNegativeByteOffset(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    float value = 99.0f;
+    surf1Dread(&value, surf, -1);
+    surf1Dwrite(42.0f, surf, -1);
+    out[0] = value;
+    out[1] = surf1Dread<float>(surf, 0);
+  }
+}`,
+  surface1DVectorBoundary: `
+__global__ void surface1DVectorBoundary(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    surf1Dwrite(make_float4(21.0f, 22.0f, 23.0f, 24.0f), surf, 2 * sizeof(float));
+    float4 value = surf1Dread<float4>(surf, 2 * sizeof(float));
+    out[0] = value.x;
+    out[1] = value.y;
+    out[2] = value.z;
+    out[3] = value.w;
+    out[4] = surf1Dread<float>(surf, 0);
+    out[5] = surf1Dread<float>(surf, 1 * sizeof(float));
+  }
+}`,
   surface1DVectorActiveLaneReturn: `
 __device__ void write_1d_surface_vec_active(cudaSurfaceObject_t surfaceArg, float base) {
   surf1Dwrite(make_float4(base + 1.0f, base + 2.0f, base + 3.0f, base + 4.0f), surfaceArg, 1 * sizeof(float));
@@ -11927,6 +11950,38 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [14, 18, 24, 30] },
+          },
+          {
+            name: "surface:surf1d-negative-byte-offset",
+            source: SOURCES.surface1DNegativeByteOffset,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(2),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array([7, 11]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 7] },
+          },
+          {
+            name: "surface:surf1d-vector-boundary",
+            source: SOURCES.surface1DVectorBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(6),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([3, 5, 7, 11]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [21, 22, 0, 0, 3, 5] },
           },
           {
             name: "surface:surf1d-vector-active-lane-return",
