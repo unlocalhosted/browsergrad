@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T09:21:19Z
+Last updated: 2026-07-02T09:26:54Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Divergent continue before a later barrier now fails closed with an explicit safety diagnostic; continue next corpus-shaped storage/texture/control probe |
+| Active work item | WebGPU case filtering now honors exact case names before fuzzy substring matching; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -544,11 +544,14 @@ Current verified gates:
 - nested divergent break before post-loop barrier fix: focused compiler unit `421/0`; focused real WebGPU break group `5/0/0`; new fixture `control:active-lane-nested-break-post-loop-barrier` passes with `0` skips
 - divergent continue before later barrier safety fix: fail-first compiler unit now `422/0`; safe canonical continue regression remains `422/0`; diagnostic is `divergent-continue-before-barrier`
 - changed gate after divergent continue safety fix: typecheck passed; compiler unit file `406/0`; bugbash-status tests passed; corpus audit tests passed; WebGPU smoke `266/0/0`
+- exact WebGPU case-filter fix: fail-first harness unit covered exact-vs-fuzzy filters; focused real WebGPU rerun for `texture-surface:volume-vector-pointer-array-minmax-active-lane-return` now runs `1/0/0` instead of also running the `-false-branch` sibling; fuzzy filter `minmax-active-lane-return` still runs `12/0/0`
+- changed gate after exact case-filter fix: `test:webgpu-fixtures` passed; WebGPU smoke `266/0/0`; bugbash-status tests passed; active failures `0`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | WebGPU case filter exactness | `--cases texture-surface:volume-vector-pointer-array-minmax-active-lane-return` also ran `texture-surface:volume-vector-pointer-array-minmax-active-lane-return-false-branch`, making focused reruns slower and less precise | shared case-name matcher now gives exact filters priority and only falls back to substring matching when no exact candidate exists | fail-first harness unit; exact real WebGPU rerun `1/0/0`; fuzzy fallback `minmax-active-lane-return` `12/0/0` |
 | Fixed | divergent continue before later barrier | `if (tid >= N) continue;` before a later `__syncthreads()` had no diagnostic and could emit raw WGSL `continue`, letting some lanes skip the barrier | analyzer now treats thread-dependent `continue` before a later barrier as an error and the compatibility plan classifies it as an unsupported safety blocker until per-iteration active-lane continue lowering exists | fail-first compiler unit now `422/0`; safe canonical continue regression `422/0`; diagnostic `divergent-continue-before-barrier` |
 | Fixed | nested divergent break before post-loop barrier | `if (tid >= N) { if (out[tid] >= 0u) break; }` inside a loop followed by `__syncthreads()` emitted a raw nested WGSL `break`, leaving non-uniform control flow before the barrier | active-lane break lowering now detects current-loop breaks nested through blocks/ifs, rewrites nested `break` to the loop active flag, and keeps breaks inside nested loops out of the current-loop rewrite | compiler focused unit `421/0`; real WebGPU break group `5/0/0`; `control:active-lane-nested-break-post-loop-barrier` `1/0/0` |
 | Fixed | report-output parent directories | `e2e:webgpu:smoke -- --json .tmp/reports/smoke-profile.json` completed all WebGPU cases, then failed with `ENOENT` because report/progress writers assumed parent dirs already existed | e2e JSON, markdown, and progress writers now create parent dirs; CUDA-lite compiler/WebGPU benchmark report writers use same parent-dir creation behavior | smoke with nested JSON/markdown/progress output `265/0/0`; compiler benchmark nested markdown; WebGPU benchmark nested JSON/markdown |
@@ -879,7 +882,7 @@ Probe these with fail-first real WebGPU fixtures:
   - loop-internal, alternate-branch, nested, loop+alternate, scalar side-effect, vector-lane side-effect, pointer-alias side-effect, atomic side-effect, shared-memory side-effect, surface side-effect, texture read side-effect, atlas/volume texture guarded RHS, all-inactive guarded RHS, surface/atlas pointer-array false-branch selection, 2D and volume texture-to-surface scalar/vector pointer-array false-branch selection, compound false-branch selection, surface CAS/minmax false-branch selection, texture CAS/minmax false-branch selection, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 texture-store side-effect, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 surface side-effect, mixed scalar/vector layered surface side-effect, surface-read pointer-alias side-effect, surface-read atomic pointer-alias side-effect, surface atomic vector readback, surface atomic vector compound helper, surf3D helper multi-surface and guarded RHS probes, surf3D pointer-alias active/atomic vector probes, surf3D pointer-array select/active/compound/CAS/minmax, texture-to-surface side-effect, 2-lane/3-lane/4-lane texture-fed layered surface vector side-effect, mixed scalar/vector texture-fed layered surface vector side-effect, texture-fed layered surface vector side-effect, layered/3D texture into 3D surface vector side-effect, atlas/layered texture return, deep helper vector-store, mixed scalar/vector texture-store, texture-fed pointer-alias, texture-fed pointer-alias atomic, atomic vector readback, atomic vector compound helper, and atomic vector member helper cases are now green in real WebGPU; keep probing next corpus-shaped texture/storage pattern
   - non-uniform break/return/continue should remain clear diagnostic or safe active-lane lowering, not silent miscompile; divergent continue before a later barrier is now blocked until per-iteration active-lane continue lowering exists
 - Perf/tooling:
-  - keep `verify:changed` scoped and explain selected gates
+  - keep `verify:changed` scoped and explain selected gates; exact `--cases` filters now run only the named case before falling back to fuzzy substring matching
   - keep smoke real-WebGPU and fast enough for inner loop
 
 ## Gate Ladder

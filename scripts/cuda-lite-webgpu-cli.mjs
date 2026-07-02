@@ -99,6 +99,15 @@ export function parseCaseFilters(argv) {
     .filter(Boolean);
 }
 
+export function filterCaseNames(caseNames, caseFilters = []) {
+  if (caseFilters.length === 0) return caseNames;
+  const names = new Set(caseNames);
+  const exactFilters = new Set(caseFilters.filter((filter) => names.has(filter)));
+  return caseNames.filter((name) =>
+    caseFilters.some((filter) => name === filter || (!exactFilters.has(filter) && name.includes(filter)))
+  );
+}
+
 export function moduleAliases(root, bundleName) {
   const compilerEntry = bundleName === "dist"
     ? path.join(root, "packages/browsergrad-compiler/dist/index.js")

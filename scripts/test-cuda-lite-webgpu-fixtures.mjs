@@ -10,6 +10,7 @@ import {
   parseAutoCorpusSmokeShard,
   parseCaseFilters,
   parseFlagArgs,
+  filterCaseNames,
 } from "./cuda-lite-webgpu-cli.mjs";
 import { cudaLiteCorpusExecutionFixtures } from "./cuda-lite-corpus-registry.mjs";
 import {
@@ -92,6 +93,19 @@ assert.deepEqual(parseCaseFilters(["--case", "storage:vector-deref-lane-write"])
 assert.deepEqual(parseCaseFilters(["--cases=atomic:helper-rmw,storage:shared-vector-overlay"]), ["atomic:helper-rmw", "storage:shared-vector-overlay"]);
 assert.deepEqual(parseCaseFilters(["--only", "prepared-resident-saxpy"]), ["prepared-resident-saxpy"]);
 assert.deepEqual(parseCaseFilters(["--only=auto-corpus:cuda-samples:file.cu:kernel:1:1"]), ["auto-corpus:cuda-samples:file.cu:kernel:1:1"]);
+assert.deepEqual(filterCaseNames([
+  "texture-surface:volume-vector-pointer-array-minmax-active-lane-return",
+  "texture-surface:volume-vector-pointer-array-minmax-active-lane-return-false-branch",
+], ["texture-surface:volume-vector-pointer-array-minmax-active-lane-return"]), [
+  "texture-surface:volume-vector-pointer-array-minmax-active-lane-return",
+]);
+assert.deepEqual(filterCaseNames([
+  "texture-surface:volume-vector-pointer-array-minmax-active-lane-return",
+  "texture-surface:volume-vector-pointer-array-minmax-active-lane-return-false-branch",
+], ["minmax-active-lane-return"]), [
+  "texture-surface:volume-vector-pointer-array-minmax-active-lane-return",
+  "texture-surface:volume-vector-pointer-array-minmax-active-lane-return-false-branch",
+]);
 assert.deepEqual([...parseFlagArgs(["--require-webgpu", "--case-timeout-ms=15000", "--repeat", "2"])], [
   ["--require-webgpu", "true"],
   ["--case-timeout-ms", "15000"],

@@ -5414,9 +5414,19 @@ const html = String.raw`<!doctype html>
         console.log("__BG_PROGRESS__" + JSON.stringify(event));
       }
 
+      function filterCaseNames(caseNames, caseFilters) {
+        if (caseFilters.length === 0) return caseNames;
+        const names = new Set(caseNames);
+        const exactFilters = new Set(caseFilters.filter((filter) => names.has(filter)));
+        return caseNames.filter((name) =>
+          caseFilters.some((filter) => name === filter || (!exactFilters.has(filter) && name.includes(filter)))
+        );
+      }
+
       function filterCaseSpecs(specs) {
         if (CASE_FILTERS.length === 0) return specs;
-        const filtered = specs.filter((spec) => CASE_FILTERS.some((filter) => spec.name === filter || spec.name.includes(filter)));
+        const selected = new Set(filterCaseNames(specs.map((spec) => spec.name), CASE_FILTERS));
+        const filtered = specs.filter((spec) => selected.has(spec.name));
         if (filtered.length === 0 && !shouldRunPreparedSmoke()) {
           throw new Error("no CUDA-lite WebGPU e2e cases matched: " + CASE_FILTERS.join(","));
         }
@@ -5425,13 +5435,13 @@ const html = String.raw`<!doctype html>
 
       function filterExpectedCorpusFixtureNames() {
         if (CASE_FILTERS.length === 0) return EXPECTED_CORPUS_FIXTURE_NAMES;
-        return EXPECTED_CORPUS_FIXTURE_NAMES.filter((name) => CASE_FILTERS.some((filter) => name === filter || name.includes(filter)));
+        return filterCaseNames(EXPECTED_CORPUS_FIXTURE_NAMES, CASE_FILTERS);
       }
 
       function shouldRunPreparedSmoke() {
         if (ONLY_AUTO_CORPUS_SMOKE || ONLY_CORPUS_FIXTURES) return false;
         return CASE_FILTERS.length === 0 ||
-          CASE_FILTERS.some((filter) => "prepared-resident-saxpy" === filter || "prepared-resident-saxpy".includes(filter));
+          filterCaseNames(["prepared-resident-saxpy"], CASE_FILTERS).length > 0;
       }
 
       function caseSpecs() {

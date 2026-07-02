@@ -6,6 +6,7 @@ import {
   corpusById,
   cudaLiteCorpusExecutionFixtures,
 } from "./cuda-lite-corpus-registry.mjs";
+import { filterCaseNames } from "./cuda-lite-webgpu-cli.mjs";
 import { inferDynamicSharedMemory } from "./audit-cuda-lite-corpus-device.mjs";
 import {
   syntheticInputForCompiled,
@@ -14,8 +15,9 @@ import {
 
 export function corpusExecutionFixturesForCaseFilters(caseFilters = []) {
   if (caseFilters.length === 0) return cudaLiteCorpusExecutionFixtures;
+  const selected = new Set(filterCaseNames(cudaLiteCorpusExecutionFixtures.map((fixture) => fixture.caseName), caseFilters));
   return cudaLiteCorpusExecutionFixtures.filter((fixture) =>
-    caseFilters.some((filter) => fixture.caseName === filter || fixture.caseName.includes(filter)));
+    selected.has(fixture.caseName));
 }
 
 export function loadCorpusExecutionSources(root, fixtures = cudaLiteCorpusExecutionFixtures) {
