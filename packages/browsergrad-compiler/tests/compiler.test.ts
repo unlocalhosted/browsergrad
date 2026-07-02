@@ -2330,6 +2330,24 @@ __global__ void helperKernel(float *x) {
     expect(compiled.wgsl).not.toContain("unused_half2");
   });
 
+  it("does not emit shared declarations from unreachable helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void unused_shared_helper(float* out) {
+  __shared__ float unusedScratch[1];
+  unusedScratch[0] = 9.0f;
+  out[0] = unusedScratch[0];
+}
+__device__ float addOne(float value) {
+  return value + 1.0f;
+}
+__global__ void helperKernel(float *x) {
+  if (threadIdx.x < 1) { x[0] = addOne(x[0]); }
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.ir.sharedDeclarations.map((shared) => shared.name)).not.toContain("unusedScratch");
+    expect(compiled.wgsl).not.toContain("unusedScratch");
+  });
+
   it("resolves overloaded __device__ helpers by arity", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ int pick(int value) {

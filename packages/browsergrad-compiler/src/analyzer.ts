@@ -229,7 +229,7 @@ export function analyzeCudaLite(
   const kernel = selectKernel(ast, options.kernelName, launchCallees);
   const selectedDeviceFunctionAsKernel = ast.functions.some((fn) => fn.name === kernel.name) &&
     !ast.kernels.some((candidate) => candidate.name === kernel.name);
-  const reachableFunctionSpans = reachableDeviceFunctionSpans(ast, kernel);
+  const reachableFunctionSpans = reachableDeviceFunctionSpans(ast.functions, kernel.body);
   const diagnostics: CudaLiteDiagnostic[] = [];
   const requiredFeatures = new Set<string>();
   let activeRequiredFeatures = requiredFeatures;
@@ -561,6 +561,13 @@ export function lowerAnalyzedCudaLiteToKernelIr(
   if (errors.length > 0) {
     throw new CudaLiteCompilerError("CUDA-lite analysis failed", errors);
   }
+  const reachableFunctionSpans = reachableDeviceFunctionSpans(analysis.functions, analysis.kernel.body);
+  const sharedDeclarationBodies = [
+    analysis.kernel.body,
+    ...analysis.functions
+      .filter((fn) => reachableFunctionSpans.has(fn.span.start))
+      .map((fn) => fn.body),
+  ];
   return {
     name: analysis.kernel.name,
     params: analysis.kernel.params,
@@ -569,7 +576,7 @@ export function lowerAnalyzedCudaLiteToKernelIr(
     textures: analysis.textures,
     functions: analysis.functions,
     body: analysis.kernel.body,
-    sharedDeclarations: collectSharedDeclarationsFromBodies([analysis.kernel.body, ...analysis.functions.map((fn) => fn.body)], options),
+    sharedDeclarations: collectSharedDeclarationsFromBodies(sharedDeclarationBodies, options),
     requiredFeatures: analysis.requiredFeatures,
     atomicParams: analysis.atomicParams,
     atomicShared: analysis.atomicShared,
@@ -578,8 +585,11 @@ export function lowerAnalyzedCudaLiteToKernelIr(
   };
 }
 
-function reachableDeviceFunctionSpans(ast: CudaLiteModule, kernel: CudaLiteKernel): ReadonlySet<number> {
-  const launchCallees = new Set(collectKernelLaunchCallees(kernel.body));
+function reachableDeviceFunctionSpans(
+  functions: readonly CudaLiteDeviceFunction[],
+  statements: readonly CudaLiteStatement[],
+): ReadonlySet<number> {
+  const launchCallees = new Set(collectKernelLaunchCallees(statements));
   const reachable = new Set<number>();
   const visitFunction = (fn: CudaLiteDeviceFunction): void => {
     if (reachable.has(fn.span.start)) return;
@@ -591,12 +601,12 @@ function reachableDeviceFunctionSpans(ast: CudaLiteModule, kernel: CudaLiteKerne
       if (expression.kind !== "call") return;
       const name = expressionName(expression.callee);
       if (name === undefined || launchCallees.has(name)) return;
-      for (const candidate of ast.functions) {
+      for (const candidate of functions) {
         if (candidate.name === name && candidate.params.length === expression.args.length) visitFunction(candidate);
       }
     });
   };
-  visitStatements(kernel.body);
+  visitStatements(statements);
   return reachable;
 }
 
