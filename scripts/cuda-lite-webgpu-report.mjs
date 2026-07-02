@@ -7,7 +7,7 @@ export function summarizeReport(data) {
     tool: data.tool,
     bundle: data.bundle ?? "src",
     available: data.available,
-    caseFilters: data.caseFilters ?? [],
+    caseFilters: summarizeCaseFilters(data.caseFilters ?? []),
     reason: data.available ? undefined : data.reason ?? "unknown",
     passed: data.passed ?? 0,
     failed: data.failed ?? 0,
@@ -68,6 +68,15 @@ export function summarizeReport(data) {
         corpusId: item.corpusId,
         ...(item.profile === undefined ? {} : { profile: item.profile }),
       })),
+  };
+}
+
+function summarizeCaseFilters(caseFilters) {
+  if (caseFilters.length <= 20) return caseFilters;
+  return {
+    count: caseFilters.length,
+    first: caseFilters.slice(0, 8),
+    last: caseFilters.slice(-8),
   };
 }
 

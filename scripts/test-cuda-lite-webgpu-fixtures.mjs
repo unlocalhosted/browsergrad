@@ -117,6 +117,7 @@ const summarized = summarizeReport({
   passed: 2,
   failed: 0,
   skipped: 0,
+  caseFilters: Array.from({ length: 24 }, (_, index) => `case:${index}`),
   warmup: 1,
   warmupCases: 1,
   warmupFailed: 0,
@@ -124,6 +125,11 @@ const summarized = summarizeReport({
     { name: "case:a", repeat: 1, stage: "compare", plan: "single-dispatch", ok: true, ms: 20 },
     { name: "case:a", repeat: 2, stage: "compare", plan: "single-dispatch", ok: true, ms: 5 },
   ],
+});
+assert.deepEqual(summarized.caseFilters, {
+  count: 24,
+  first: ["case:0", "case:1", "case:2", "case:3", "case:4", "case:5", "case:6", "case:7"],
+  last: ["case:16", "case:17", "case:18", "case:19", "case:20", "case:21", "case:22", "case:23"],
 });
 assert.equal(summarized.warmup, 1);
 assert.equal(summarized.warmupCases, 1);
