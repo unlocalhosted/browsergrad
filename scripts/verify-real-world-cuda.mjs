@@ -209,6 +209,7 @@ export function verifyRealWorldCudaPlan(options) {
         options.autoCorpusSmokeProfile,
         "--auto-corpus-smoke-features",
         options.autoCorpusSmokeFeatures.join(","),
+        ...autoCorpusSmokeCorporaArgs(options.only, options.autoCorpusSmokeLimit),
         "--case-timeout-ms",
         String(options.caseTimeoutMs),
         ...(options.allowMissingWebGpu ? [] : ["--require-webgpu"]),
@@ -307,6 +308,11 @@ function scopedCaseFilterArgs(only, autoCorpusSmokeLimit) {
     ...(autoCorpusSmokeLimit > 0 ? [`auto-corpus:${id}:`] : []),
   ]);
   return ["--cases", filters.join(",")];
+}
+
+function autoCorpusSmokeCorporaArgs(only, autoCorpusSmokeLimit) {
+  if (only.length === 0 || autoCorpusSmokeLimit === 0) return [];
+  return ["--auto-corpus-smoke-corpora", only.join(",")];
 }
 
 function run(label, args) {

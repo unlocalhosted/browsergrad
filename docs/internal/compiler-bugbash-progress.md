@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T19:06:28Z
+Last updated: 2026-07-02T19:11:07Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; unreachable helper feature/shared/atomic/texture/constant/device-global/function-body/global-feature pollution fixes are green |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Fixed scoped verifier LeetCUDA corpus fixture casing |
+| Active work item | Fixed scoped auto-corpus WebGPU coverage |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -637,11 +637,13 @@ Current verified gates:
 - full corpus fixture WebGPU gate after cuda-samples constant-array texture fixture: `98/0/0`; expected-output cases `47`; by corpus `cuda-120=5`, `cuda-samples=19`, `llm.c=28`, `leetcuda=46`
 - scoped cuda-samples real-world verifier after corpus-filter tooling fix: audit `357/357` compile/codegen, hard fails `0`; source WebGPU corpus fixture slice `19/0/0`, expected-output `14`, skips `0`; `--auto-corpus-smoke-limit 0` kept auto-corpus at `0`
 - scoped LeetCUDA real-world verifier after exact fixture-name corpus filters: audit `293/293` compile/codegen, hard fails `0`; source WebGPU corpus fixture slice `46/0/0`, expected-output `19`, skips `0`
+- scoped LeetCUDA real-world verifier after corpus-restricted auto smoke fix: audit `293/293` compile/codegen, hard fails `0`; source WebGPU scoped slice `54/0/0`, with fixture `46/0/0`, auto-corpus `8/0/0`, skips `0`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | scoped auto-corpus WebGPU coverage | scoped verifier requested `--auto-corpus-smoke-limit 8` for `leetcuda`, but generated auto-smoke fixtures round-robin from all corpora; case filters then removed every auto case, so the gate reported `autoCorpusSmokeExpectedCovered: 8` with `autoCorpusSmokeCovered: 0` and still passed | auto-smoke generation can now restrict candidate corpora, scoped verifier passes selected corpus ids, cache keys include corpus scope, and scoped auto-smoke coverage is validated even during filtered runs | fail-first scoped LeetCUDA verifier showed auto-corpus `0/8`; fixture and verifier CLI tests; scoped LeetCUDA verifier now `54/0/0` with auto-corpus `8/0/0`, skips `0` |
 | Fixed | scoped verifier LeetCUDA fixture selection | scoped `--corpus leetcuda` generated `corpus:leetcuda:` filters, but explicit LeetCUDA fixture case names use `corpus:LeetCUDA:...`; browser phase failed with no matching cases despite 46 pinned fixtures | scoped verifier now derives exact corpus fixture case names from the registry and appends auto-corpus filters separately, avoiding case-label drift across corpora | fail-first scoped LeetCUDA verifier; CLI regression; scoped LeetCUDA verifier audit `293/293`, source WebGPU fixture slice `46/0/0`, skips `0` |
 | Fixed | real-world verifier corpus scoping | `verify:real-world-cuda` could not run one corpus, so bugbash had to pay full-corpus feedback cost; wrapper also rejected `--forbid-skips` even though downstream always enforces it | wrapper now accepts `--only`/`--corpus`, validates corpus ids, passes audit `--only`, scopes browser fixtures with `--cases`, and treats wrapper-level `--forbid-skips` as accepted no-op | CLI unit; scoped cuda-samples verifier audit `357/357`, hard fails `0`; source WebGPU slice `19/0/0`, skips `0` |
 | Probed green | real corpus constant array plus texture helper | corpus execution coverage did not include a real source combining `__constant__` array input, helper texture reads, and texture object input | added cuda-samples `convolutionRowsKernel` fixture from `convolutionTexture.cu` with `c_Kernel` identity constant array and texture input; raised corpus fixture baseline to lock it in | `corpus:cuda-samples:convolutionRowsKernel_texture` `1/0/0`; full corpus fixture gate `98/0/0`; hot repeat `5/0/0`, best warm `2.0ms` |

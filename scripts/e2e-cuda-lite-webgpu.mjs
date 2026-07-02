@@ -31,6 +31,7 @@ import {
   parseAutoCorpusSmokeShard,
   parseBundle,
   parseCaseFilters,
+  parseCommaSeparatedList,
   parseFlagArgs,
   parseNonNegativeInteger,
 } from "./cuda-lite-webgpu-cli.mjs";
@@ -67,6 +68,7 @@ const autoCorpusSmokeLimit = parseNonNegativeInteger(args.get("--auto-corpus-smo
 const autoCorpusSmokeMode = parseAutoCorpusSmokeMode(args.get("--auto-corpus-smoke-mode") ?? "reference");
 const autoCorpusSmokeProfile = parseAutoCorpusSmokeProfile(args.get("--auto-corpus-smoke-profile") ?? "full");
 const autoCorpusSmokeFeatures = parseAutoCorpusSmokeFeatures(args.get("--auto-corpus-smoke-features") ?? "");
+const autoCorpusSmokeCorpora = parseCommaSeparatedList(args.get("--auto-corpus-smoke-corpora") ?? "");
 const autoCorpusSmokeShard = parseAutoCorpusSmokeShard(args.get("--auto-corpus-smoke-shard") ?? "1/1");
 const autoCorpusSmokeReferencePreflight = autoCorpusSmokeProfile !== "fast" && args.get("--no-auto-corpus-reference-preflight") !== "true";
 const effectiveAutoCorpusSmokeLimit = resolveEffectiveAutoCorpusSmokeLimit(autoCorpusSmokeLimit, caseFilters);
@@ -5557,6 +5559,7 @@ const allAutoCorpusSmokeFixtures = effectiveAutoCorpusSmokeLimit > 0
       verifyMode: autoCorpusSmokeMode,
       profile: autoCorpusSmokeProfile,
       allowedRequiredFeatures: autoCorpusSmokeFeatures,
+      corpusIds: autoCorpusSmokeCorpora,
       cache: autoCorpusSmokeCache,
       referencePreflight: autoCorpusSmokeReferencePreflight,
     })
@@ -5816,6 +5819,7 @@ const html = String.raw`<!doctype html>
           autoCorpusSmokeExpectedCovered: ${autoCorpusSmokeFixtures.length},
           autoCorpusSmokeMode: ${JSON.stringify(autoCorpusSmokeMode)},
           autoCorpusSmokeProfile: ${JSON.stringify(autoCorpusSmokeProfile)},
+          autoCorpusSmokeCorpora: ${JSON.stringify(autoCorpusSmokeCorpora)},
           compileOnly: COMPILE_ONLY,
           warmup: WARMUP,
           warmupCases: warmupCases.length,
@@ -12473,10 +12477,11 @@ try {
   if (report.available && requireCorpusFixtures && !filteredRun) {
     validateCorpusFixtureBaseline(report);
   }
-  const expectedAutoCorpusSmokeCovered = autoCorpusSmokeShard.count > 1
+  const scopedAutoCorpusSmoke = autoCorpusSmokeCorpora.length > 0;
+  const expectedAutoCorpusSmokeCovered = autoCorpusSmokeShard.count > 1 || scopedAutoCorpusSmoke
     ? autoCorpusSmokeFixtures.length
     : effectiveAutoCorpusSmokeLimit;
-  if (report.available && effectiveAutoCorpusSmokeLimit > 0 && !filteredRun && (report.autoCorpusSmokeCovered ?? report.autoCorpusSmokePassed ?? 0) < expectedAutoCorpusSmokeCovered) {
+  if (report.available && effectiveAutoCorpusSmokeLimit > 0 && (!filteredRun || scopedAutoCorpusSmoke) && (report.autoCorpusSmokeCovered ?? report.autoCorpusSmokePassed ?? 0) < expectedAutoCorpusSmokeCovered) {
     throw new Error(`Auto corpus smoke baseline failed: ${report.autoCorpusSmokeCovered ?? report.autoCorpusSmokePassed ?? 0}/${expectedAutoCorpusSmokeCovered} covered`);
   }
   if (report.available && forbidSkips && (report.skipped ?? 0) > 0) {

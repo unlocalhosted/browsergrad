@@ -9,6 +9,7 @@ import {
   parseAutoCorpusSmokeProfile,
   parseAutoCorpusSmokeShard,
   parseCaseFilters,
+  parseCommaSeparatedList,
   parseFlagArgs,
   filterCaseNames,
 } from "./cuda-lite-webgpu-cli.mjs";
@@ -53,6 +54,7 @@ assert.deepEqual(parseAutoCorpusSmokeShard("3/8"), { index: 3, count: 8 });
 assert.deepEqual(applyAutoCorpusSmokeShard([0, 1, 2, 3, 4, 5, 6, 7], { index: 2, count: 4 }), [1, 5]);
 assert.equal(parseAutoCorpusSmokeProfile("fast"), "fast");
 assert.equal(parseAutoCorpusSmokeProfile("full"), "full");
+assert.deepEqual(parseCommaSeparatedList(" leetcuda, cuda-samples ,, "), ["leetcuda", "cuda-samples"]);
 assert.match(autoCorpusSmokeCacheInputHash(process.cwd()), /^[0-9a-f]{16}$/u);
 const cacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), "browsergrad-cache-hash-"));
 const cacheSrcDir = path.join(cacheRoot, "packages/browsergrad-compiler/src");
@@ -66,6 +68,7 @@ const cachePathA = autoCorpusSmokeCachePath("/tmp/browsergrad", {
   limit: 4,
   verifyMode: "reference",
   profile: "fast",
+  corpusIds: new Set(["leetcuda"]),
   allowedRequiredFeatures: new Set(["subgroups", "shader-f16"]),
   inputHash: "abc",
 });
@@ -73,11 +76,13 @@ const cachePathB = autoCorpusSmokeCachePath("/tmp/browsergrad", {
   limit: 4,
   verifyMode: "reference",
   profile: "fast",
+  corpusIds: new Set(["cuda-samples"]),
   allowedRequiredFeatures: new Set(["shader-f16", "subgroups"]),
   inputHash: "def",
 });
-assert.match(cachePathA, /v4/u);
+assert.match(cachePathA, /v5/u);
 assert.match(cachePathA, /sig-abc/u);
+assert.match(cachePathA, /corpora-leetcuda/u);
 assert.match(cachePathA, /features-shader-f16-subgroups/u);
 assert.notEqual(cachePathA, cachePathB);
 

@@ -55,6 +55,7 @@ assert.ok(scopedCases.includes("corpus:llm.c:add_bias"));
 assert.ok(scopedCases.includes("auto-corpus:cuda-samples:"));
 assert.ok(scopedCases.includes("auto-corpus:llm.c:"));
 assert.ok(scopedPlan[1].args.includes("--forbid-skips"));
+assert.equal(argAfter(scopedPlan[1].args, "--auto-corpus-smoke-corpora"), "cuda-samples,llm.c");
 
 const scopedNoAutoSmoke = parseVerifyRealWorldCudaArgs([
   "--corpus=cuda-samples",
@@ -68,6 +69,7 @@ assert.deepEqual(
     .filter((fixture) => fixture.corpusId === "cuda-samples")
     .map((fixture) => fixture.caseName),
 );
+assert.equal(scopedNoAutoSmokePlan[1].args.includes("--auto-corpus-smoke-corpora"), false);
 
 const leetCudaScoped = parseVerifyRealWorldCudaArgs(["--corpus=leetcuda", "--bundle=src"]);
 const leetCudaCases = argAfter(verifyRealWorldCudaPlan(leetCudaScoped)[1].args, "--cases").split(",");

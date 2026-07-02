@@ -27,6 +27,10 @@ export function parseAutoCorpusSmokeProfile(value) {
 }
 
 export function parseAutoCorpusSmokeFeatures(value) {
+  return parseCommaSeparatedList(value);
+}
+
+export function parseCommaSeparatedList(value) {
   if (value === "") return [];
   return value.split(",").map((item) => item.trim()).filter(Boolean);
 }

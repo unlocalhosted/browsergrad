@@ -100,12 +100,14 @@ export function loadAutoCorpusSmokeFixtures(root, limit, compiler, options = {})
   const profile = options.profile ?? "full";
   const referencePreflight = options.referencePreflight ?? true;
   const allowedRequiredFeatures = new Set(options.allowedRequiredFeatures ?? []);
+  const corpusIds = new Set(options.corpusIds ?? []);
   const cachePath = options.cache === true
     ? autoCorpusSmokeCachePath(root, {
         limit,
         verifyMode,
         profile,
         allowedRequiredFeatures,
+        corpusIds,
         inputHash: autoCorpusSmokeCacheInputHash(root),
       })
     : undefined;
@@ -115,6 +117,7 @@ export function loadAutoCorpusSmokeFixtures(root, limit, compiler, options = {})
   const explicit = new Set(cudaLiteCorpusExecutionFixtures.map(corpusFixtureKey));
   const candidatesByCorpus = [];
   for (const corpus of Object.values(corpusesById())) {
+    if (corpusIds.size > 0 && !corpusIds.has(corpus.id)) continue;
     const manifest = loadCorpusKernelManifest(root, corpus, true);
     candidatesByCorpus.push({
       corpus,
@@ -143,11 +146,13 @@ export function loadAutoCorpusSmokeFixtures(root, limit, compiler, options = {})
 
 export function autoCorpusSmokeCachePath(root, options) {
   const features = [...options.allowedRequiredFeatures].sort().join("-");
+  const corpora = [...(options.corpusIds ?? [])].sort().join("-");
   const key = [
-    "v4",
+    "v5",
     `limit-${options.limit}`,
     `mode-${options.verifyMode}`,
     `profile-${options.profile}`,
+    `corpora-${corpora || "all"}`,
     `features-${features || "none"}`,
     `sig-${options.inputHash ?? "unknown"}`,
   ].join("__").replace(/[^A-Za-z0-9_.-]+/gu, "_");
