@@ -296,7 +296,19 @@ export function analyzeCudaLite(
 
   const walkExpression = (expression: CudaLiteExpression, scope: Scope): ExpressionInfo => {
     if (expression.kind === "call") {
-      return validateCallExpression(expression, scope, params, activeAtomicParams, activeAtomicShared, activeAtomicDeviceGlobals, activeRequiredFeatures, diagnostics, walkExpression, options);
+      return validateCallExpression(
+        expression,
+        scope,
+        params,
+        activeAtomicParams,
+        activeAtomicShared,
+        activeAtomicDeviceGlobals,
+        activeRequiredFeatures,
+        diagnostics,
+        walkExpression,
+        options,
+        activeStatementsReachable,
+      );
     }
     return validateNonCallExpression(expression, scope, diagnostics, walkExpression, activeRequiredFeatures);
   };
@@ -1471,6 +1483,7 @@ function validateCallExpression(
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
   options: CudaLiteAnalyzeOptions,
+  compatibilityDiagnosticsReachable: boolean,
 ): ExpressionInfo {
   const callName = expressionName(expression.callee);
   const namespaceCooperativeCall = cooperativeNamespaceCall(expression, scope);
@@ -1529,11 +1542,11 @@ function validateCallExpression(
     return { kind: "scalar" };
   }
   if (isHostManagedRuntimeNoopCall(callName)) {
-    validateRuntimeCall(expression, `${callName}() is host-managed in CUDA-lite WebGPU execution`, diagnostics, walkExpression, scope, options);
+    validateRuntimeCall(expression, `${callName}() is host-managed in CUDA-lite WebGPU execution`, diagnostics, walkExpression, scope, options, compatibilityDiagnosticsReachable);
     return { kind: "scalar", valueType: "int" };
   }
   if (isCudaRuntimeCopyCall(callName)) {
-    validateRuntimeCopyCall(expression, callName, diagnostics, walkExpression, scope, options);
+    validateRuntimeCopyCall(expression, callName, diagnostics, walkExpression, scope, options, compatibilityDiagnosticsReachable);
     return { kind: "scalar", valueType: "int" };
   }
   if (callName === "cudaGraphSetConditional") {
@@ -2023,12 +2036,15 @@ function validateRuntimeCall(
   walkExpression: ExpressionWalker,
   scope: Scope,
   options: CudaLiteAnalyzeOptions,
+  compatibilityDiagnosticsReachable: boolean,
 ): void {
   const referenceRuntime = options.referenceCudaRuntime || options.referenceDynamicParallelism;
-  diagnostics.push({
-    ...error("unsupported-cuda-runtime", message, expression.span),
-    severity: referenceRuntime ? "warning" : "error",
-  });
+  if (compatibilityDiagnosticsReachable) {
+    diagnostics.push({
+      ...error("unsupported-cuda-runtime", message, expression.span),
+      severity: referenceRuntime ? "warning" : "error",
+    });
+  }
   for (const arg of expression.args) walkExpression(arg, scope);
 }
 
@@ -2039,19 +2055,22 @@ function validateRuntimeCopyCall(
   walkExpression: ExpressionWalker,
   scope: Scope,
   options: CudaLiteAnalyzeOptions,
+  compatibilityDiagnosticsReachable: boolean,
 ): void {
   const referenceRuntime = options.referenceCudaRuntime || options.referenceDynamicParallelism;
-  diagnostics.push({
-    ...error("unsupported-cuda-runtime", `${callName}() requires CUDA runtime copy orchestration`, expression.span),
-    severity: referenceRuntime ? "warning" : "error",
-  });
+  if (compatibilityDiagnosticsReachable) {
+    diagnostics.push({
+      ...error("unsupported-cuda-runtime", `${callName}() requires CUDA runtime copy orchestration`, expression.span),
+      severity: referenceRuntime ? "warning" : "error",
+    });
+  }
   const dst = expression.args[0];
   const src = expression.args[callName === "cudaMemcpyPeerAsync" ? 2 : 1];
   const byteCount = expression.args[callName === "cudaMemcpyPeerAsync" ? 4 : 2];
   if (dst) walkExpression(dst, scope);
   if (src) walkExpression(src, scope);
   if (byteCount) validateScalarOperand(walkExpression(byteCount, scope), byteCount.span, diagnostics);
-  if ((callName === "cudaMemcpy" || callName === "cudaMemcpyAsync") && !supportedCudaMemcpyKind(expression.args[3])) {
+  if (compatibilityDiagnosticsReachable && (callName === "cudaMemcpy" || callName === "cudaMemcpyAsync") && !supportedCudaMemcpyKind(expression.args[3])) {
     diagnostics.push(error(
       "unsupported-cuda-runtime-copy-kind",
       `${callName} supports cudaMemcpyDeviceToDevice/cudaMemcpyDefault only`,
