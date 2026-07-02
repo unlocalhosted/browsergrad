@@ -4982,6 +4982,11 @@ sources.textureSurfaceVolumeVectorPointerArrayAtomicActiveLaneReturnFalseBranch 
     "int pick = value.y > 0u ? 1 : 0;",
     "int pick = value.y == 0u ? 1 : 0;",
   );
+sources.textureSurfaceVolumeAtomicPointerArrayActiveLaneReturnFalseBranch =
+  sources.textureSurfaceVolumeAtomicPointerArrayActiveLaneReturn.replace(
+    "int pick = value.w > 0u ? 1 : 0;",
+    "int pick = value.w == 0u ? 1 : 0;",
+  );
 sources.textureSurfaceVolumeVectorPointerArrayCasActiveLaneReturnFalseBranch =
   sources.textureSurfaceVolumeVectorPointerArrayCasActiveLaneReturn.replace(
     "int pick = value.z > 0u ? 1 : 0;",
@@ -10148,6 +10153,33 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [10495] },
           },
           {
+            name: "texture-surface:volume-atomic-pointer-array-active-lane-return-false-branch",
+            source: SOURCES.textureSurfaceVolumeAtomicPointerArrayActiveLaneReturnFalseBranch,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [13375] },
+          },
+          {
             name: "texture-surface:volume-vector-pointer-array-atomic-active-lane-return",
             source: SOURCES.textureSurfaceVolumeVectorPointerArrayAtomicActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -11258,6 +11290,9 @@ try {
     writeLastFailures(root, report, process.argv.slice(2));
     throw new Error(`CUDA-lite WebGPU e2e failed ${report.failed} case(s)`);
   }
+  if (report.available) {
+    clearLastFailures(root);
+  }
   if (markdownPath && markdownPath !== "true") {
     fs.writeFileSync(path.resolve(markdownPath), markdownReport(report));
   }
@@ -11290,4 +11325,8 @@ function writeLastFailures(root, report, argv) {
   const target = path.join(root, ".tmp", "cuda-lite-last-failures.json");
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, `${JSON.stringify(out, null, 2)}\n`);
+}
+
+function clearLastFailures(root) {
+  fs.rmSync(path.join(root, ".tmp", "cuda-lite-last-failures.json"), { force: true });
 }
