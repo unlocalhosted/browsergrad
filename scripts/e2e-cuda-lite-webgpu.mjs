@@ -4658,6 +4658,46 @@ __global__ void textureSurfaceConstantActiveLaneReturn(cudaSurfaceObject_t surf,
     out[3] = 1.0f;
   }
 }`,
+  textureSurfaceSharedConstantActiveLaneReturn: `
+__constant__ float c_surface_bias[4];
+
+__device__ float4 sample_shared_constant_surface_vec(cudaTextureObject_t texArg, float4 base) {
+  float4 value = tex2D<float4>(texArg, 0.5f, 0.5f);
+  return make_float4(
+    value.x + c_surface_bias[0] + base.x,
+    value.y + c_surface_bias[1] + base.y,
+    value.z + c_surface_bias[2] + base.z,
+    value.w + c_surface_bias[3] + base.w
+  );
+}
+
+__device__ void write_shared_constant_surface_vec(cudaSurfaceObject_t surfaceArg, float4 value) {
+  surf2Dwrite(value, surfaceArg, 0, 0);
+}
+
+__device__ float4 read_shared_constant_surface_vec(cudaSurfaceObject_t surfaceArg) {
+  return surf2Dread<float4>(surfaceArg, 0, 0);
+}
+
+__global__ void textureSurfaceSharedConstantActiveLaneReturn(cudaSurfaceObject_t surf, cudaTextureObject_t tex, float *out, int N) {
+  __shared__ float4 scratch[4];
+  int tid = threadIdx.x;
+  scratch[tid] = make_float4(1.0f + (float)tid, 10.0f + (float)tid, 20.0f + (float)tid, 30.0f + (float)tid);
+  __syncthreads();
+  if (tid >= N) {
+    float4 value = sample_shared_constant_surface_vec(tex, scratch[tid]);
+    write_shared_constant_surface_vec(surf, value);
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    float4 value = read_shared_constant_surface_vec(surf);
+    out[0] = value.x + value.y + value.z + value.w;
+    out[1] = scratch[0].x + scratch[1].y;
+    out[2] = c_surface_bias[0] + c_surface_bias[3];
+    out[3] = value.w;
+  }
+}`,
   textureSurfaceActiveLaneReturnSideEffect: `
 __device__ float4 sample_return_surface_vec(cudaTextureObject_t texArg) {
   return tex2D<float4>(texArg, 0.5f, 0.5f);
@@ -10802,6 +10842,34 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [86, 436, 50, 1] },
+          },
+          {
+            name: "texture-surface:shared-constant-active-lane-return",
+            source: SOURCES.textureSurfaceSharedConstantActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+              constants: {
+                c_surface_bias: new Float32Array([100, 200, 300, 400]),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(4) },
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [1090, 12, 500, 440] },
           },
           {
             name: "texture-surface:active-lane-return-side-effect",
