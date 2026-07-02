@@ -93,6 +93,10 @@ from ._tensor_proxy import (
     minimum as _minimum,
     cumsum as _cumsum,
     sort as _sort,
+    triu as _triu,
+    tril as _tril,
+    multinomial as _multinomial,
+    einsum as _einsum,
 )
 from ._buffer_table import BufferTable
 from ._errors import (
@@ -135,6 +139,8 @@ _sys.modules["browsergrad_jit.nn.functional"] = _functional
 _sys.modules["browsergrad_jit.optim"] = _optim
 nn = _nn
 optim = _optim
+functional = _functional
+F = _functional
 
 
 # bg.jit — the introspection + control surface for the JIT.
@@ -530,6 +536,26 @@ def prod(x, dim=None, axis=None, keepdim=False, keepdims=False):
     return x.prod(dim=dim, axis=axis, keepdim=keepdim, keepdims=keepdims)
 
 
+def std(x, dim=None, axis=None, keepdim=False, keepdims=False, unbiased=True):
+    return x.std(
+        dim=dim,
+        axis=axis,
+        keepdim=keepdim,
+        keepdims=keepdims,
+        unbiased=unbiased,
+    )
+
+
+def var(x, dim=None, axis=None, keepdim=False, keepdims=False, unbiased=True):
+    return x.var(
+        dim=dim,
+        axis=axis,
+        keepdim=keepdim,
+        keepdims=keepdims,
+        unbiased=unbiased,
+    )
+
+
 def gather(x, dim, index):
     return x.gather(dim, index)
 
@@ -544,6 +570,22 @@ def cumsum(x, dim=0):
 
 def sort(x, dim=-1, descending=False):
     return _sort(x, dim=dim, descending=descending)
+
+
+def triu(input, diagonal=0):
+    return _triu(input, diagonal=diagonal)
+
+
+def tril(input, diagonal=0):
+    return _tril(input, diagonal=diagonal)
+
+
+def multinomial(input, num_samples, replacement=True):
+    return _multinomial(input, num_samples=num_samples, replacement=replacement)
+
+
+def einsum(equation, *operands):
+    return _einsum(equation, *operands)
 
 
 def reshape(input, *shape):
@@ -607,15 +649,16 @@ __all__ = [
     "TensorProxy", "Tensor",
     "tensor", "zeros", "ones", "randn", "arange", "from_numpy",
     "zeros_like", "ones_like", "cat", "stack", "where", "minimum",
+    "triu", "tril", "multinomial", "einsum",
     "Session", "get_default_session", "set_default_session", "new_session",
     "manual_seed", "no_grad", "inference_mode",
     "sigmoid", "matmul", "mm", "bmm", "exp", "log", "tanh", "abs",
     "sqrt", "pow", "sin", "cos", "rsqrt",
-    "sum", "mean", "argmax", "prod", "gather", "repeat_interleave",
+    "sum", "mean", "argmax", "prod", "std", "var", "gather", "repeat_interleave",
     "cumsum", "sort", "reshape", "view", "flatten", "squeeze",
     "unsqueeze", "transpose", "permute", "softmax", "log_softmax",
     "save", "load",
-    "nn", "optim", "jit", "utils", "amp", "kernels", "func",
+    "functional", "F", "nn", "optim", "jit", "utils", "amp", "kernels", "func",
     "custom_kernel", "onnx", "lab", "experimental",
     "realize_webgpu", "register_webgpu_bridge", "unregister_webgpu_bridge",
     "webgpu_is_available", "webgpu_supported_opcodes",

@@ -503,8 +503,28 @@ def one_hot(indices: Any, num_classes: int) -> TensorProxy:
     return from_numpy(out_data, session=sess)
 
 
-bce_with_logits_loss = binary_cross_entropy_with_logits
-bce_loss = binary_cross_entropy
+def bce_with_logits_loss(
+    logits: TensorProxy,
+    targets: TensorProxy,
+    reduction: str = "mean",
+) -> TensorProxy:
+    return binary_cross_entropy_with_logits(logits, targets, reduction=reduction)
+
+
+def bce_loss(
+    input: TensorProxy,
+    target: TensorProxy,
+    reduction: str = "mean",
+) -> TensorProxy:
+    return binary_cross_entropy(input, target, reduction=reduction)
+
+
+def cross_entropy_loss(
+    logits: TensorProxy,
+    targets: TensorProxy,
+    reduction: str = "mean",
+) -> TensorProxy:
+    return cross_entropy(logits, targets, reduction=reduction)
 
 
 # ---------------------------------------------------------------------------
@@ -582,6 +602,7 @@ __all__ = [
     "softmax",
     "log_softmax",
     "cross_entropy",
+    "cross_entropy_loss",
     "mse_loss",
     "nll_loss",
     "l1_loss",

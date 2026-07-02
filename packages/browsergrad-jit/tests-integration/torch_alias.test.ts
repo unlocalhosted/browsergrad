@@ -683,6 +683,157 @@ top_values, top_indices = s.topk(2, dim=1, largest=False)
     });
   });
 
+  it("supports eager-compatible convenience, masking, and namespace aliases", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      device: string;
+      sameCpu: boolean;
+      sameCuda: boolean;
+      contiguousSame: boolean;
+      doubleDtype: string;
+      intDtype: string;
+      toDtype: string;
+      varValues: number[];
+      stdValues: number[];
+      varGrad: number[][];
+      masked: number[];
+      maskedGrad: number[];
+      maskedInplace: number[];
+      scatter: number[][];
+      triu: number[][];
+      tril: number[][];
+      triGrad: number[][];
+      einsum: number[][];
+      multinomialShape: number[];
+      multinomialDtype: string;
+      zeroGradIsNone: boolean;
+      ceLossAlias: number;
+      caps: Record<string, boolean>;
+    }>(`
+import browsergrad_jit as bg
+bg.install_torch_alias()
+import torch
+import torch.nn.functional as F
+import numpy as np
+
+x = torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
+var_values = x.var(dim=1, unbiased=False)
+std_values = x.std(dim=1, unbiased=False)
+var_values.sum().backward()
+
+m = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+mask = torch.tensor([False, True, False], dtype="bool")
+masked = m.masked_fill(mask, -9.0)
+masked.sum().backward()
+masked_inplace = m.masked_fill_(mask, 0.0)
+
+base = torch.zeros(1, 3)
+idx = torch.tensor([[0, 2]], dtype=torch.int64)
+scatter = base.scatter(1, idx, torch.tensor([[5.0, 6.0]]))
+
+tri = torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
+upper = torch.triu(tri)
+lower = torch.tril(tri, diagonal=-1)
+(upper.sum() + lower.sum()).backward()
+
+a = torch.tensor([[1.0, 2.0]])
+b = torch.tensor([[3.0], [4.0]])
+sampled = torch.multinomial(torch.tensor([0.1, 0.9]), num_samples=1)
+
+zg = torch.tensor([1.0], requires_grad=True)
+(zg * 2.0).sum().backward()
+zg.zero_grad()
+
+ce_loss = F.cross_entropy_loss(
+    torch.tensor([[1.0, 3.0], [4.0, 2.0]]),
+    torch.tensor([1, 0], dtype=torch.int64),
+)
+
+{
+  "device": x.device,
+  "sameCpu": x.cpu() is x,
+  "sameCuda": x.cuda() is x,
+  "contiguousSame": x.contiguous() is x,
+  "doubleDtype": x.double().dtype,
+  "intDtype": torch.tensor([1.2]).int().dtype,
+  "toDtype": x.to(dtype="float64").dtype,
+  "varValues": var_values.numpy().tolist(),
+  "stdValues": std_values.numpy().round(6).tolist(),
+  "varGrad": x.grad.numpy().tolist(),
+  "masked": masked.numpy().tolist(),
+  "maskedGrad": m.grad.numpy().tolist(),
+  "maskedInplace": masked_inplace.numpy().tolist(),
+  "scatter": scatter.numpy().tolist(),
+  "triu": upper.numpy().tolist(),
+  "tril": lower.numpy().tolist(),
+  "triGrad": tri.grad.numpy().tolist(),
+  "einsum": torch.einsum("ij,jk", a, b).numpy().tolist(),
+  "multinomialShape": list(sampled.shape),
+  "multinomialDtype": sampled.dtype,
+  "zeroGradIsNone": zg.grad is None,
+  "ceLossAlias": float(ce_loss.item()),
+  "caps": {
+    "torch.F": hasattr(torch, "F"),
+    "torch.functional": hasattr(torch, "functional"),
+    "torch.std": hasattr(torch, "std"),
+    "torch.var": hasattr(torch, "var"),
+    "torch.triu": hasattr(torch, "triu"),
+    "torch.tril": hasattr(torch, "tril"),
+    "torch.einsum": hasattr(torch, "einsum"),
+    "torch.multinomial": hasattr(torch, "multinomial"),
+    "F.cross_entropy_loss": hasattr(F, "cross_entropy_loss"),
+    "F.bce_with_logits_loss": hasattr(F, "bce_with_logits_loss"),
+  },
+}
+`);
+    expect(result.device).toBe("cpu");
+    expect(result.sameCpu).toBe(true);
+    expect(result.sameCuda).toBe(true);
+    expect(result.contiguousSame).toBe(true);
+    expect(result.doubleDtype).toBe("float64");
+    expect(result.intDtype).toBe("int32");
+    expect(result.toDtype).toBe("float64");
+    expect(result.varValues).toEqual([0.25, 0.25]);
+    expect(result.stdValues).toEqual([0.5, 0.5]);
+    expect(result.varGrad).toEqual([
+      [-0.5, 0.5],
+      [-0.5, 0.5],
+    ]);
+    expect(result.masked).toEqual([1, -9, 3]);
+    expect(result.maskedGrad).toEqual([1, 0, 1]);
+    expect(result.maskedInplace).toEqual([1, 0, 3]);
+    expect(result.scatter).toEqual([[5, 0, 6]]);
+    expect(result.triu).toEqual([
+      [1, 2],
+      [0, 4],
+    ]);
+    expect(result.tril).toEqual([
+      [0, 0],
+      [3, 0],
+    ]);
+    expect(result.triGrad).toEqual([
+      [1, 1],
+      [1, 1],
+    ]);
+    expect(result.einsum).toEqual([[11]]);
+    expect(result.multinomialShape).toEqual([1]);
+    expect(result.multinomialDtype).toBe("int64");
+    expect(result.zeroGradIsNone).toBe(true);
+    expect(result.ceLossAlias).toBeLessThan(0.2);
+    expect(result.caps).toEqual({
+      "torch.F": true,
+      "torch.functional": true,
+      "torch.std": true,
+      "torch.var": true,
+      "torch.triu": true,
+      "torch.tril": true,
+      "torch.einsum": true,
+      "torch.multinomial": true,
+      "F.cross_entropy_loss": true,
+      "F.bce_with_logits_loss": true,
+    });
+  });
+
   it("supports functional one_hot and stable BCE-with-logits loss", async () => {
     const target = await getJitTarget();
     const result = await target.run<{

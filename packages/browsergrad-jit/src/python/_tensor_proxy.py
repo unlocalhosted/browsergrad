@@ -231,6 +231,10 @@ class TensorProxy:
         return len(self._uop.shape)
 
     @property
+    def device(self) -> str:
+        return "cpu"
+
+    @property
     def is_leaf(self) -> bool:
         return self._ctx is None
 
@@ -254,6 +258,9 @@ class TensorProxy:
         for d in self._uop.shape:
             n *= d
         return n
+
+    def zero_grad(self) -> None:
+        self.grad = None
 
     @property
     def data(self) -> Any:
@@ -1044,6 +1051,130 @@ class TensorProxy:
     def topk(self, k: int, dim: int = -1, largest: bool = True):
         return _topk(self, k=k, dim=dim, largest=largest)
 
+    def var(
+        self,
+        axis: Any = None,
+        dim: Any = None,
+        keepdims: bool = False,
+        keepdim: bool = False,
+        unbiased: bool = True,
+    ) -> "TensorProxy":
+        reduce_axis = dim if dim is not None else axis
+        keep = keepdim or keepdims
+        ddof = 1 if unbiased else 0
+        axes = None if reduce_axis is None else (
+            (reduce_axis,) if isinstance(reduce_axis, int) else tuple(reduce_axis)
+        )
+        norm_axes = None if axes is None else tuple(a % self.ndim for a in axes)
+        if norm_axes is None:
+            out_shape = (1,) * self.ndim if keep else ()
+        else:
+            out_dims = []
+            for i, d in enumerate(self.shape):
+                if i in norm_axes:
+                    if keep:
+                        out_dims.append(1)
+                else:
+                    out_dims.append(d)
+            out_shape = tuple(out_dims)
+
+        def _var_forward(x_arr: np.ndarray) -> np.ndarray:
+            return np.var(x_arr, axis=reduce_axis, keepdims=keep, ddof=ddof)
+
+        uop = UOp(
+            op=OP_CUSTOM,
+            inputs=(self._uop,),
+            shape=out_shape,
+            dtype=self._uop.dtype,
+            arg={"fn": _var_forward, "captures": (), "name": "var"},
+        )
+
+        def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+            (x_arr,) = ins
+            if norm_axes is None:
+                n = float(x_arr.size)
+                centered = x_arr - x_arr.mean()
+                grad = np.broadcast_to(dy, x_arr.shape)
+            else:
+                n = float(np.prod([x_arr.shape[ax] for ax in norm_axes]))
+                centered = x_arr - x_arr.mean(axis=norm_axes, keepdims=True)
+                grad = dy
+                if not keep:
+                    for ax in sorted(norm_axes):
+                        grad = np.expand_dims(grad, ax)
+                grad = np.broadcast_to(grad, x_arr.shape)
+            denom = n - float(ddof)
+            return ((grad * 2.0 * centered / denom).astype(x_arr.dtype, copy=False),)
+
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
+        return TensorProxy(uop, session=self._get_session(),
+                           requires_grad=requires, ctx=ctx)
+
+    def std(
+        self,
+        axis: Any = None,
+        dim: Any = None,
+        keepdims: bool = False,
+        keepdim: bool = False,
+        unbiased: bool = True,
+    ) -> "TensorProxy":
+        return self.var(
+            axis=axis,
+            dim=dim,
+            keepdims=keepdims,
+            keepdim=keepdim,
+            unbiased=unbiased,
+        ).sqrt()
+
+    def masked_fill(self, mask: Any, value: float) -> "TensorProxy":
+        mask_proxy = _to_proxy(mask, self._get_session())
+        out_shape = _broadcast_shape(self.shape, mask_proxy.shape)
+
+        def _masked_fill_forward(x_arr: np.ndarray, mask_arr: np.ndarray) -> np.ndarray:
+            return np.where(mask_arr.astype(bool), np.asarray(value, dtype=x_arr.dtype), x_arr)
+
+        uop = UOp(
+            op=OP_CUSTOM,
+            inputs=(self._uop, mask_proxy._uop),
+            shape=out_shape,
+            dtype=self._uop.dtype,
+            arg={"fn": _masked_fill_forward, "captures": (), "name": "masked_fill"},
+        )
+
+        def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+            x_arr, mask_arr = ins
+            grad = np.where(mask_arr.astype(bool), 0, dy)
+            return (_unbroadcast(grad, x_arr.shape).astype(x_arr.dtype, copy=False), None)
+
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self, mask_proxy)) if requires else None
+        return TensorProxy(uop, session=self._get_session(),
+                           requires_grad=requires, ctx=ctx)
+
+    def masked_fill_(self, mask: Any, value: float) -> "TensorProxy":
+        return self.masked_fill(mask, value)
+
+    def scatter(self, dim: int, index: Any, src: Any) -> "TensorProxy":
+        index_proxy = _to_proxy(index, self._get_session())
+        src_proxy = _to_proxy(src, self._get_session())
+        axis = int(dim) % self.ndim
+
+        def _scatter_forward(x_arr: np.ndarray, idx_arr: np.ndarray, src_arr: np.ndarray) -> np.ndarray:
+            out = x_arr.copy()
+            source = np.broadcast_to(src_arr, idx_arr.shape).astype(x_arr.dtype, copy=False)
+            np.put_along_axis(out, idx_arr.astype(np.int64), source, axis=axis)
+            return out
+
+        uop = UOp(
+            op=OP_CUSTOM,
+            inputs=(self._uop, index_proxy._uop, src_proxy._uop),
+            shape=self.shape,
+            dtype=self._uop.dtype,
+            arg={"fn": _scatter_forward, "captures": (), "name": "scatter"},
+        )
+        return TensorProxy(uop, session=self._get_session(), requires_grad=False)
+
     def reshape(self, *shape: Any) -> "TensorProxy":
         # Accept reshape(3, 4) or reshape((3, 4)).
         if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
@@ -1166,11 +1297,36 @@ class TensorProxy:
     def float(self) -> "TensorProxy":
         return self.cast("float32")
 
+    def double(self) -> "TensorProxy":
+        return self.cast("float64")
+
+    def int(self) -> "TensorProxy":
+        return self.cast("int32")
+
     def long(self) -> "TensorProxy":
         return self.cast("int64")
 
     def bool(self) -> "TensorProxy":
         return self.cast("bool")
+
+    def to(self, *args: Any, **kwargs: Any) -> "TensorProxy":
+        dtype_spec = kwargs.get("dtype") or (args[0] if args else None)
+        if dtype_spec is None:
+            return self
+        try:
+            dtype_name = np.dtype(dtype_spec).name
+        except (TypeError, ValueError):
+            return self
+        return self.cast(dtype_name)
+
+    def cpu(self) -> "TensorProxy":
+        return self
+
+    def cuda(self) -> "TensorProxy":
+        return self
+
+    def contiguous(self) -> "TensorProxy":
+        return self
 
     # ------------------------------------------------------------------
     # Autograd
@@ -1798,6 +1954,101 @@ def _topk(x: Any, k: int, dim: int = -1, largest: bool = True):
     )
 
 
+def triu(input: Any, diagonal: int = 0) -> "TensorProxy":
+    proxy = _to_proxy(input, None)
+
+    def _triu_forward(x_arr: np.ndarray) -> np.ndarray:
+        return np.triu(x_arr, k=int(diagonal)).copy()
+
+    uop = UOp(
+        op=OP_CUSTOM,
+        inputs=(proxy._uop,),
+        shape=proxy.shape,
+        dtype=proxy.dtype,
+        arg={"fn": _triu_forward, "captures": (), "name": "triu"},
+    )
+
+    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+        (x_arr,) = ins
+        mask = np.triu(np.ones_like(x_arr), k=int(diagonal))
+        return ((dy * mask).astype(x_arr.dtype, copy=False),)
+
+    requires = _should_track(proxy)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=(proxy,)) if requires else None
+    return TensorProxy(uop, session=proxy._get_session(),
+                       requires_grad=requires, ctx=ctx)
+
+
+def tril(input: Any, diagonal: int = 0) -> "TensorProxy":
+    proxy = _to_proxy(input, None)
+
+    def _tril_forward(x_arr: np.ndarray) -> np.ndarray:
+        return np.tril(x_arr, k=int(diagonal)).copy()
+
+    uop = UOp(
+        op=OP_CUSTOM,
+        inputs=(proxy._uop,),
+        shape=proxy.shape,
+        dtype=proxy.dtype,
+        arg={"fn": _tril_forward, "captures": (), "name": "tril"},
+    )
+
+    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+        (x_arr,) = ins
+        mask = np.tril(np.ones_like(x_arr), k=int(diagonal))
+        return ((dy * mask).astype(x_arr.dtype, copy=False),)
+
+    requires = _should_track(proxy)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=(proxy,)) if requires else None
+    return TensorProxy(uop, session=proxy._get_session(),
+                       requires_grad=requires, ctx=ctx)
+
+
+def multinomial(input: Any, num_samples: int, replacement: bool = True) -> "TensorProxy":
+    proxy = _to_proxy(input, None)
+    probs = proxy._realize_array().astype(np.float32, copy=False)
+    if probs.ndim == 1:
+        total = probs.sum()
+        if total <= 0:
+            raise ValueError("multinomial: all weights are zero")
+        p = (probs / total).astype(np.float64)
+        p /= p.sum()
+        idx = np.random.choice(len(p), size=int(num_samples), replace=replacement, p=p)
+        return from_numpy(idx.astype(np.int64), session=proxy._get_session())
+    if probs.ndim == 2:
+        rows = []
+        for row in probs:
+            total = row.sum()
+            if total <= 0:
+                raise ValueError("multinomial: row has all-zero weights")
+            p = (row / total).astype(np.float64)
+            p /= p.sum()
+            rows.append(np.random.choice(len(p), size=int(num_samples), replace=replacement, p=p))
+        return from_numpy(np.array(rows, dtype=np.int64), session=proxy._get_session())
+    raise ValueError(f"multinomial: only 1-D and 2-D inputs supported, got {probs.ndim}D")
+
+
+def einsum(equation: str, *operands: Any) -> "TensorProxy":
+    first_proxy = next((v for v in operands if isinstance(v, TensorProxy)), None)
+    sess = first_proxy._get_session() if first_proxy is not None else None
+    proxies = tuple(_to_proxy(op, sess) for op in operands)
+    sample_shapes = [np.empty(p.shape, dtype=np.dtype(p.dtype)) for p in proxies]
+    sample = np.einsum(equation, *sample_shapes)
+    out_dtype = _promote_many_dtype(proxies)
+
+    def _einsum_forward(*arrays: np.ndarray) -> np.ndarray:
+        return np.einsum(equation, *arrays).astype(np.dtype(out_dtype), copy=False)
+
+    uop = UOp(
+        op=OP_CUSTOM,
+        inputs=tuple(p._uop for p in proxies),
+        shape=tuple(sample.shape),
+        dtype=out_dtype,
+        arg={"fn": _einsum_forward, "captures": (), "name": "einsum"},
+    )
+    return TensorProxy(uop, session=proxies[0]._get_session(), requires_grad=False)
+
+
 __all__ = [
     "TensorProxy",
     "no_grad",
@@ -1816,4 +2067,8 @@ __all__ = [
     "minimum",
     "cumsum",
     "sort",
+    "triu",
+    "tril",
+    "multinomial",
+    "einsum",
 ]
