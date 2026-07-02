@@ -320,6 +320,47 @@ y.backward()
     expect(result.grad[1]).toBeCloseTo(1 / 6, 6);
   });
 
+  it("supports PyTorch where and like-factory aliases", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      selected: number[];
+      grad: number[];
+      zeros: number[][];
+      ones: number[][];
+      zerosDtype: string;
+    }>(`
+import browsergrad_jit as bg
+bg.install_torch_alias()
+import torch
+
+x = torch.tensor([-2.0, 3.0], requires_grad=True)
+selected = torch.where(x > 0, x, -x)
+selected.sum().backward()
+base = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+zeros = torch.zeros_like(base)
+ones = torch.ones_like(base, dtype=torch.int64)
+
+{
+  "selected": selected.numpy().tolist(),
+  "grad": x.grad.numpy().tolist(),
+  "zeros": zeros.numpy().tolist(),
+  "ones": ones.numpy().tolist(),
+  "zerosDtype": zeros.dtype,
+}
+`);
+    expect(result.selected).toEqual([2, 3]);
+    expect(result.grad).toEqual([-1, 1]);
+    expect(result.zeros).toEqual([
+      [0, 0],
+      [0, 0],
+    ]);
+    expect(result.ones).toEqual([
+      [1, 1],
+      [1, 1],
+    ]);
+    expect(result.zerosDtype).toBe("float32");
+  });
+
   it("supports PyTorch shape and multi-tensor composition aliases", async () => {
     const target = await getJitTarget();
     const result = await target.run<{

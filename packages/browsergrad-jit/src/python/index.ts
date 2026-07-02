@@ -85,8 +85,11 @@ from ._tensor_proxy import (
     ones,
     randn,
     arange,
+    zeros_like,
+    ones_like,
     cat,
     stack,
+    where,
 )
 from ._buffer_table import BufferTable
 from ._errors import (
@@ -564,7 +567,7 @@ __version__ = "${pkg.version}"
 __all__ = [
     "TensorProxy", "Tensor",
     "tensor", "zeros", "ones", "randn", "arange", "from_numpy",
-    "cat", "stack",
+    "zeros_like", "ones_like", "cat", "stack", "where",
     "Session", "get_default_session", "set_default_session", "new_session",
     "manual_seed", "no_grad", "inference_mode",
     "sigmoid", "matmul", "mm", "bmm", "exp", "log", "tanh", "abs",

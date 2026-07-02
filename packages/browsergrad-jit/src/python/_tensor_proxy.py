@@ -1205,6 +1205,20 @@ def arange(*args: Any, dtype: str = "int64",
     return from_numpy(arr, requires_grad=requires_grad, session=session)
 
 
+def zeros_like(input: Any, dtype: Optional[str] = None,
+               session: Any = None) -> "TensorProxy":
+    base = _to_proxy(input, session)
+    out_dtype = dtype if dtype is not None else base.dtype
+    return zeros(base.shape, dtype=out_dtype, session=base._get_session())
+
+
+def ones_like(input: Any, dtype: Optional[str] = None,
+              session: Any = None) -> "TensorProxy":
+    base = _to_proxy(input, session)
+    out_dtype = dtype if dtype is not None else base.dtype
+    return ones(base.shape, dtype=out_dtype, session=base._get_session())
+
+
 def _normalize_dim(dim: int, ndim: int, op_name: str) -> int:
     if dim < 0:
         dim += ndim
@@ -1310,6 +1324,42 @@ def stack(tensors: Any, dim: int = 0) -> "TensorProxy":
                        requires_grad=requires, ctx=ctx)
 
 
+def where(condition: Any, a: Any, b: Any) -> "TensorProxy":
+    first_proxy = next(
+        (v for v in (condition, a, b) if isinstance(v, TensorProxy)),
+        None,
+    )
+    sess = first_proxy._get_session() if first_proxy is not None else None
+    cond = _to_proxy(condition, sess)
+    lhs = _to_proxy(a, sess)
+    rhs = _to_proxy(b, sess)
+    out_shape = _broadcast_shape(cond.shape, lhs.shape, rhs.shape)
+    out_dtype = _promote_dtype(lhs.dtype, rhs.dtype)
+    uop = UOp(
+        op=OP_WHERE,
+        inputs=(cond._uop, lhs._uop, rhs._uop),
+        shape=out_shape,
+        dtype=out_dtype,
+        arg=None,
+    )
+
+    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+        cond_arr, lhs_arr, rhs_arr = ins
+        mask = cond_arr.astype(bool)
+        grad_lhs = np.where(mask, dy, 0)
+        grad_rhs = np.where(mask, 0, dy)
+        return (
+            None,
+            _unbroadcast(grad_lhs, lhs_arr.shape).astype(lhs_arr.dtype, copy=False),
+            _unbroadcast(grad_rhs, rhs_arr.shape).astype(rhs_arr.dtype, copy=False),
+        )
+
+    requires = _should_track(lhs, rhs)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=(cond, lhs, rhs)) if requires else None
+    return TensorProxy(uop, session=cond._get_session(),
+                       requires_grad=requires, ctx=ctx)
+
+
 __all__ = [
     "TensorProxy",
     "no_grad",
@@ -1320,6 +1370,9 @@ __all__ = [
     "ones",
     "randn",
     "arange",
+    "zeros_like",
+    "ones_like",
     "cat",
     "stack",
+    "where",
 ]
