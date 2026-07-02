@@ -56,6 +56,28 @@ export const cudaLiteCorpusExecutionFixtures = [
     expectedOutput: { type: "Float32Array", data: [3, 6, 9, 12] },
   },
   {
+    sourceKey: "corpusCuda120UseMemoryPoolKernel",
+    caseName: "corpus:cuda-120:useMemoryPoolKernel",
+    corpusId: "cuda-120",
+    relativePath: "daily-updates/day-84-Progress-Checkpoint.md",
+    kernelName: "useMemoryPoolKernel",
+    workgroupSize: [4, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    input: {
+      buffers: {
+        poolBase: { type: "Float32Array", length: 4 },
+        offset: { type: "Uint32Array", data: [0] },
+      },
+      scalars: { poolSize: 16, N: 4 },
+      readback: ["poolBase", "offset"],
+    },
+    output: "poolBase",
+    offsetOutput: "offset",
+    expectedOffset: 16,
+    expectedOutput: { type: "Float32Array", data: [3.14, 3.14, 3.14, 3.14] },
+    tolerance: 1e-5,
+  },
+  {
     sourceKey: "corpusCudaSamplesVectorAdd",
     caseName: "corpus:cuda-samples:vectorAdd",
     corpusId: "cuda-samples",

@@ -67,10 +67,10 @@ export const cudaLiteCorpusExecutionFixtures = [
 ];
 
 export const cudaLiteCorpusExecutionFixtureBaseline = {
-  totalMin: 95,
-  expectedOutputMin: 44,
+  totalMin: 96,
+  expectedOutputMin: 45,
   byCorpusMin: {
-    "cuda-120": 3,
+    "cuda-120": 4,
     "cuda-samples": 18,
     "llm.c": 28,
     leetcuda: 46,
