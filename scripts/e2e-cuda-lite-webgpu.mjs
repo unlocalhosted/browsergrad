@@ -4997,6 +4997,36 @@ sources.textureSurfaceVolumeVectorPointerArrayMinMaxActiveLaneReturnFalseBranch 
     "int pick = value.x > 0u ? 1 : 0;",
     "int pick = value.x == 0u ? 1 : 0;",
   );
+sources.surface3DPointerAliasAtomicPointerArrayCasActiveLaneReturnFalseBranch =
+  sources.surface3DPointerAliasAtomicPointerArrayCasActiveLaneReturn.replace(
+    "int pick = value.x > 0u ? 1 : 0;",
+    "int pick = value.x == 0u ? 1 : 0;",
+  );
+sources.surface3DPointerAliasAtomicPointerArrayMinMaxActiveLaneReturnFalseBranch =
+  sources.surface3DPointerAliasAtomicPointerArrayMinMaxActiveLaneReturn.replace(
+    "int pick = value.w > 0u ? 1 : 0;",
+    "int pick = value.w == 0u ? 1 : 0;",
+  );
+sources.surface1DPointerAliasAtomicPointerArrayCasActiveLaneReturnFalseBranch =
+  sources.surface1DPointerAliasAtomicPointerArrayCasActiveLaneReturn.replace(
+    "int pick = value.x == 2u ? 1 : 0;",
+    "int pick = value.x != 2u ? 1 : 0;",
+  );
+sources.surface1DPointerAliasAtomicPointerArrayMinMaxActiveLaneReturnFalseBranch =
+  sources.surface1DPointerAliasAtomicPointerArrayMinMaxActiveLaneReturn.replace(
+    "int pick = value.w > 0u ? 1 : 0;",
+    "int pick = value.w == 0u ? 1 : 0;",
+  );
+sources.surfacePointerAliasAtomicPointerArrayCasActiveLaneReturnFalseBranch =
+  sources.surfacePointerAliasAtomicPointerArrayCasActiveLaneReturn.replace(
+    "int pick = value.x > 0u ? 1 : 0;",
+    "int pick = value.x == 0u ? 1 : 0;",
+  );
+sources.surfacePointerAliasAtomicPointerArrayMinMaxActiveLaneReturnFalseBranch =
+  sources.surfacePointerAliasAtomicPointerArrayMinMaxActiveLaneReturn.replace(
+    "int pick = value.w > 0u ? 1 : 0;",
+    "int pick = value.w == 0u ? 1 : 0;",
+  );
 const expectedCorpusFixtureNames = corpusExecutionFixtures.map((fixture) => fixture.caseName);
 
 const html = String.raw`<!doctype html>
@@ -7483,6 +7513,25 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [4836] },
           },
           {
+            name: "surface:surf3d-pointer-alias-atomic-pointer-array-cas-active-lane-return-false-branch",
+            source: SOURCES.surface3DPointerAliasAtomicPointerArrayCasActiveLaneReturnFalseBranch,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [19215] },
+          },
+          {
             name: "surface:surf3d-pointer-alias-atomic-pointer-array-minmax-active-lane-return",
             source: SOURCES.surface3DPointerAliasAtomicPointerArrayMinMaxActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -7500,6 +7549,25 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [6511] },
+          },
+          {
+            name: "surface:surf3d-pointer-alias-atomic-pointer-array-minmax-active-lane-return-false-branch",
+            source: SOURCES.surface3DPointerAliasAtomicPointerArrayMinMaxActiveLaneReturnFalseBranch,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [11515] },
           },
           {
             name: "surface:layered-write",
@@ -7896,6 +7964,25 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [4830] },
           },
           {
+            name: "surface:surf1d-pointer-alias-atomic-pointer-array-cas-active-lane-return-false-branch",
+            source: SOURCES.surface1DPointerAliasAtomicPointerArrayCasActiveLaneReturnFalseBranch,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([2, 3, 5, 7]) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [19205] },
+          },
+          {
             name: "surface:surf1d-pointer-alias-atomic-pointer-array-minmax-active-lane-return",
             source: SOURCES.surface1DPointerAliasAtomicPointerArrayMinMaxActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -7913,6 +8000,25 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [6485] },
+          },
+          {
+            name: "surface:surf1d-pointer-alias-atomic-pointer-array-minmax-active-lane-return-false-branch",
+            source: SOURCES.surface1DPointerAliasAtomicPointerArrayMinMaxActiveLaneReturnFalseBranch,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([2, 3, 5, 7]) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [11455] },
           },
           {
             name: "surface:pointer-alias-atomic-active-lane-store",
@@ -8059,6 +8165,25 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [4836] },
           },
           {
+            name: "surface:pointer-alias-atomic-pointer-array-cas-active-lane-return-false-branch",
+            source: SOURCES.surfacePointerAliasAtomicPointerArrayCasActiveLaneReturnFalseBranch,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [19215] },
+          },
+          {
             name: "surface:pointer-alias-atomic-pointer-array-minmax-active-lane-return",
             source: SOURCES.surfacePointerAliasAtomicPointerArrayMinMaxActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -8076,6 +8201,25 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [6511] },
+          },
+          {
+            name: "surface:pointer-alias-atomic-pointer-array-minmax-active-lane-return-false-branch",
+            source: SOURCES.surfacePointerAliasAtomicPointerArrayMinMaxActiveLaneReturnFalseBranch,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [11515] },
           },
           {
             name: "surface:uint4-vector-active-lane-return",
