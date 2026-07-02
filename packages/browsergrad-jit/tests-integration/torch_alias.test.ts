@@ -283,6 +283,71 @@ lsm = torch.log_softmax(x, dim=-1).numpy()
     expect(result.logSoftmaxRows).toEqual([1, 1]);
   });
 
+  it("supports functional one_hot and stable BCE-with-logits loss", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      oneHot: number[][];
+      tensorOneHot: number[][];
+      loss: number;
+      sumLoss: number;
+      noneLoss: number[];
+      grad: number[];
+      moduleLoss: number;
+      moduleGradFinite: boolean;
+    }>(`
+import browsergrad_jit as bg
+bg.install_torch_alias()
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+
+one_hot = F.one_hot(np.array([0, 2, 1], dtype=np.int64), num_classes=3)
+tensor_one_hot = F.one_hot(torch.tensor([2, 0], dtype=torch.int64), num_classes=3)
+
+logits = torch.tensor([0.0, 100.0, -100.0], requires_grad=True)
+targets = torch.tensor([0.0, 1.0, 0.0])
+loss = F.binary_cross_entropy_with_logits(logits, targets)
+loss.backward()
+
+sum_loss = F.binary_cross_entropy_with_logits(logits, targets, reduction="sum")
+none_loss = F.binary_cross_entropy_with_logits(logits, targets, reduction="none")
+
+module_logits = torch.tensor([1000.0, -1000.0], requires_grad=True)
+module_targets = torch.tensor([1.0, 0.0])
+module_loss = nn.BCEWithLogitsLoss()(module_logits, module_targets)
+module_loss.backward()
+
+{
+  "oneHot": one_hot.numpy().tolist(),
+  "tensorOneHot": tensor_one_hot.numpy().tolist(),
+  "loss": float(loss.item()),
+  "sumLoss": float(sum_loss.item()),
+  "noneLoss": none_loss.numpy().round(6).tolist(),
+  "grad": logits.grad.numpy().round(6).tolist(),
+  "moduleLoss": float(module_loss.item()),
+  "moduleGradFinite": bool(np.isfinite(module_logits.grad.numpy()).all()),
+}
+`);
+    expect(result.oneHot).toEqual([
+      [1, 0, 0],
+      [0, 0, 1],
+      [0, 1, 0],
+    ]);
+    expect(result.tensorOneHot).toEqual([
+      [0, 0, 1],
+      [1, 0, 0],
+    ]);
+    expect(result.loss).toBeCloseTo(Math.log(2) / 3, 6);
+    expect(result.sumLoss).toBeCloseTo(Math.log(2), 6);
+    expect(result.noneLoss[0]).toBeCloseTo(Math.log(2), 6);
+    expect(result.noneLoss.slice(1)).toEqual([0, 0]);
+    expect(result.grad[0]).toBeCloseTo(1 / 6, 6);
+    expect(result.grad.slice(1)).toEqual([0, 0]);
+    expect(result.moduleLoss).toBe(0);
+    expect(result.moduleGradFinite).toBe(true);
+  });
+
   it("is idempotent — re-installing returns cleanly", async () => {
     const target = await getJitTarget();
     const ok = await target.run<boolean>(`

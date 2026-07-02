@@ -22,7 +22,7 @@ from ._ir import (
     UOp, OP_WHERE, OP_CONST, OP_CUSTOM, OP_REDUCE, OP_DIV,
 )
 from ._tensor_proxy import (
-    TensorProxy, _BackwardCtx, _should_track, _to_proxy,
+    TensorProxy, _BackwardCtx, _should_track, _to_proxy, from_numpy,
 )
 from ._errors import ShapeError
 
@@ -243,6 +243,99 @@ def nll_loss(log_probs: TensorProxy, targets: TensorProxy,
     return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
 
 
+def binary_cross_entropy_with_logits(
+    logits: TensorProxy,
+    targets: TensorProxy,
+    reduction: str = "mean",
+) -> TensorProxy:
+    """Binary cross-entropy from raw logits.
+
+    Stable formula:
+      max(x, 0) - x*y + log(1 + exp(-abs(x)))
+    Backward:
+      sigmoid(x) - y, scaled by the reduction.
+    """
+    targets = _to_proxy(targets, logits._get_session())
+    if logits.shape != targets.shape:
+        raise ShapeError(
+            "binary_cross_entropy_with_logits: logits and targets must have "
+            f"the same shape, got {logits.shape} vs {targets.shape}"
+        )
+    if reduction not in ("mean", "sum", "none"):
+        raise ValueError(
+            f"binary_cross_entropy_with_logits: unknown reduction {reduction!r}"
+        )
+    sess = logits._get_session()
+
+    def _bce_forward(logits_arr: np.ndarray, targets_arr: np.ndarray) -> np.ndarray:
+        x = logits_arr.astype(np.float32, copy=False)
+        y = targets_arr.astype(np.float32, copy=False)
+        per_elem = np.maximum(x, 0.0) - x * y + np.log1p(np.exp(-np.abs(x)))
+        if reduction == "mean":
+            return np.asarray(per_elem.mean(), dtype=x.dtype)
+        if reduction == "sum":
+            return np.asarray(per_elem.sum(), dtype=x.dtype)
+        return per_elem.astype(x.dtype, copy=False)
+
+    out_shape: Tuple[int, ...] = () if reduction in ("mean", "sum") else logits.shape
+    uop = UOp(
+        op=OP_CUSTOM,
+        inputs=(logits._uop, targets._uop),
+        shape=out_shape,
+        dtype=logits.dtype,
+        arg={
+            "fn": _bce_forward,
+            "captures": (),
+            "name": "binary_cross_entropy_with_logits",
+        },
+    )
+
+    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+        logits_arr, targets_arr = ins
+        sigmoid = np.empty_like(logits_arr, dtype=np.float32)
+        positive = logits_arr >= 0
+        sigmoid[positive] = 1.0 / (1.0 + np.exp(-logits_arr[positive]))
+        exp_x = np.exp(logits_arr[~positive])
+        sigmoid[~positive] = exp_x / (1.0 + exp_x)
+        grad_logits = sigmoid - targets_arr
+        if reduction == "mean":
+            grad_logits *= dy / float(logits_arr.size)
+        elif reduction == "sum":
+            grad_logits *= dy
+        else:
+            grad_logits *= dy
+        return (grad_logits.astype(logits_arr.dtype, copy=False), None)
+
+    requires = _should_track(logits)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=(logits, targets)) if requires else None
+    return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
+
+
+def one_hot(indices: Any, num_classes: int) -> TensorProxy:
+    """One-hot encode integer indices.
+
+    Mirrors browsergrad_grad's teaching-friendly choice: output is float32
+    so it composes naturally with downstream f32 tensor ops.
+    """
+    sess = None
+    if isinstance(indices, TensorProxy):
+        sess = indices._get_session()
+        idx = indices._realize_array().astype(np.int64)
+    else:
+        idx = np.asarray(indices, dtype=np.int64)
+    if (idx < 0).any() or (idx >= num_classes).any():
+        raise ValueError(f"one_hot: indices out of range [0, {num_classes})")
+    out_shape = idx.shape + (int(num_classes),)
+    out_data = np.zeros(out_shape, dtype=np.float32)
+    flat_idx = idx.reshape(-1)
+    flat_out = out_data.reshape(-1, int(num_classes))
+    flat_out[np.arange(flat_idx.size), flat_idx] = 1.0
+    return from_numpy(out_data, session=sess)
+
+
+bce_with_logits_loss = binary_cross_entropy_with_logits
+
+
 # ---------------------------------------------------------------------------
 # Linear (the workhorse of MLPs)
 # ---------------------------------------------------------------------------
@@ -318,6 +411,9 @@ __all__ = [
     "cross_entropy",
     "mse_loss",
     "nll_loss",
+    "binary_cross_entropy_with_logits",
+    "bce_with_logits_loss",
+    "one_hot",
     "linear",
     "dropout",
 ]

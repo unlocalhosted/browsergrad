@@ -513,6 +513,16 @@ class NLLLoss(Module):
         return F.nll_loss(log_probs, targets, reduction=self.reduction)
 
 
+class BCEWithLogitsLoss(Module):
+    def __init__(self, reduction: str = "mean") -> None:
+        super().__init__()
+        self.reduction = reduction
+    def forward(self, logits: TensorProxy, targets: TensorProxy) -> TensorProxy:
+        return F.binary_cross_entropy_with_logits(
+            logits, targets, reduction=self.reduction
+        )
+
+
 # Expose F at the package level so users can write `nn.functional.softmax`.
 functional = F
 
@@ -532,5 +542,6 @@ __all__ = [
     "MSELoss",
     "CrossEntropyLoss",
     "NLLLoss",
+    "BCEWithLogitsLoss",
     "functional",
 ]
