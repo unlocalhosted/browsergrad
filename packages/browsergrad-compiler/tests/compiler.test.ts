@@ -10810,6 +10810,33 @@ __global__ void wmma_scoped_alias(float* A, float* C, int first_marker, int seco
     expect(firstBlock).not.toContain("second_sel");
   });
 
+  it("keeps same-named WMMA pointer aliases when only one declaration needs a handle", () => {
+    const compiled = compileCudaLiteKernel(`
+#define C_LAYOUT wmma::mem_row_major
+__global__ void wmma_shared_alias_shadow(float* out) {
+  extern __shared__ half shmem[][8 * 16 + 16];
+  float *base = (float *)&shmem[0][0];
+  {
+    const float *tile_ptr = base;
+    wmma::fragment<wmma::accumulator, 16, 16, 16, float> c;
+    wmma::load_matrix_sync(c, tile_ptr, 128, C_LAYOUT);
+  }
+  {
+    const half *tile_ptr = &shmem[0][0];
+    wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a;
+    wmma::load_matrix_sync(a, tile_ptr, 16 * 8 + 16);
+  }
+}`, {
+      features: { "shader-f16": true },
+      workgroupSize: [256, 1, 1],
+      dynamicSharedMemory: { shmem: 256 },
+    });
+
+    expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
+    expect(compiled.wgsl).toContain("bg_ptr_read_f32");
+    expect(compiled.wgsl).toContain("bg_ptr_read_f16");
+  });
+
   it("supports WMMA tf32 precision aliases and fragment lane access", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void wmma_tf32(float* A, float* C) {

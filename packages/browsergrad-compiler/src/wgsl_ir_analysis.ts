@@ -25,6 +25,11 @@ export interface PoolPointerAlias {
   readonly rawBuffer?: boolean;
 }
 
+type PointerAliasArrayDeclaration = CudaLiteVarDecl | {
+  readonly name: string;
+  readonly dimensions: readonly number[];
+};
+
 export interface RawPoolAllocator {
   readonly baseName: string;
   readonly offsetName: string;
@@ -344,6 +349,8 @@ export function structuredPointerHandleRoots(ir: KernelIrModule): ReadonlySet<st
 export function collectPointerAliases(
   statements: readonly CudaLiteStatement[],
   skipNames: ReadonlySet<string> = new Set(),
+  structuredArrays: ReadonlyMap<string, PointerAliasArrayDeclaration> = new Map(),
+  skipDeclarationStarts: ReadonlySet<number> = new Set(),
 ): ReadonlyMap<string, readonly PointerAlias[]> {
   const aliases = new Map<string, PointerAlias[]>();
   const addAlias = (statement: CudaLiteVarDecl, alias: PointerAlias): void => {
@@ -351,13 +358,13 @@ export function collectPointerAliases(
     list.push({ ...alias, declarationSpan: statement.span });
     aliases.set(statement.name, list);
   };
-  const walk = (items: readonly CudaLiteStatement[], inheritedArrays: ReadonlyMap<string, CudaLiteVarDecl>): void => {
+  const walk = (items: readonly CudaLiteStatement[], inheritedArrays: ReadonlyMap<string, PointerAliasArrayDeclaration>): void => {
     const arrays = new Map(inheritedArrays);
     for (const item of items) {
       if (item.kind === "var" && item.storage === "local" && (item.dimensions.length > 0 || item.matrixTile)) {
         arrays.set(item.name, item);
       }
-      if (item.kind === "var" && item.pointer && !skipNames.has(item.name)) {
+      if (item.kind === "var" && item.pointer && !skipsPointerAlias(item, skipNames, skipDeclarationStarts)) {
         const alias = pointerAliasForVar(item, arrays);
         if (alias) addAlias(item, alias);
       }
@@ -371,7 +378,7 @@ export function collectPointerAliases(
         if (item.init?.kind === "var" && item.init.storage === "local" && (item.init.dimensions.length > 0 || item.init.matrixTile)) {
           loopArrays.set(item.init.name, item.init);
         }
-        if (item.init?.kind === "var" && item.init.pointer && !skipNames.has(item.init.name)) {
+        if (item.init?.kind === "var" && item.init.pointer && !skipsPointerAlias(item.init, skipNames, skipDeclarationStarts)) {
           const alias = pointerAliasForVar(item.init, loopArrays);
           if (alias) addAlias(item.init, alias);
         }
@@ -380,8 +387,17 @@ export function collectPointerAliases(
       if (item.kind === "while" || item.kind === "do-while" || item.kind === "block") walk(item.body, arrays);
     }
   };
-  walk(statements, new Map());
+  walk(statements, structuredArrays);
   return aliases;
+}
+
+function skipsPointerAlias(
+  declaration: CudaLiteVarDecl,
+  skipNames: ReadonlySet<string>,
+  skipDeclarationStarts: ReadonlySet<number>,
+): boolean {
+  if (skipDeclarationStarts.size > 0) return skipDeclarationStarts.has(declaration.span.start);
+  return skipNames.has(declaration.name);
 }
 
 export function pointerAliasDeclarationFor(
@@ -525,17 +541,17 @@ export function collectRawPoolAllocators(statements: readonly CudaLiteStatement[
 export function pointerAliasForPointerExpression(
   expression: CudaLiteExpression | undefined,
   valueType: CudaLiteScalarType,
-  localArrays: ReadonlyMap<string, CudaLiteVarDecl> = new Map(),
+  arrayDeclarations: ReadonlyMap<string, PointerAliasArrayDeclaration> = new Map(),
 ): PointerAlias | undefined {
   if (!expression) return undefined;
-  if (expression.kind === "cast" && expression.pointer) return pointerAliasForPointerExpression(expression.expression, valueType, localArrays);
+  if (expression.kind === "cast" && expression.pointer) return pointerAliasForPointerExpression(expression.expression, valueType, arrayDeclarations);
   if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
-    return pointerAliasForPointerExpression(expression.args[0], valueType, localArrays);
+    return pointerAliasForPointerExpression(expression.args[0], valueType, arrayDeclarations);
   }
   if (expression.kind === "unary" && expression.operator === "&") {
     const target = expression.argument;
-    const local = localArrayAddressAlias(target, valueType, localArrays);
-    if (local) return local;
+    const arrayAlias = arrayAddressAlias(target, valueType, arrayDeclarations);
+    if (arrayAlias) return arrayAlias;
     if (target.kind === "index" && target.target.kind === "identifier") {
       return { rootName: target.target.name, baseIndex: target.index, valueType };
     }
@@ -548,7 +564,7 @@ export function pointerAliasForPointerExpression(
     return { rootName: expression.name, baseIndex: zeroExpression(expression.span), valueType };
   }
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
-    const base = pointerAliasForPointerExpression(expression.left, valueType, localArrays);
+    const base = pointerAliasForPointerExpression(expression.left, valueType, arrayDeclarations);
     if (!base) return undefined;
     return {
       ...base,
@@ -716,10 +732,10 @@ function poolPointerForInitializer(
 
 function pointerAliasForVar(
   statement: CudaLiteVarDecl,
-  localArrays: ReadonlyMap<string, CudaLiteVarDecl> = new Map(),
+  arrayDeclarations: ReadonlyMap<string, PointerAliasArrayDeclaration> = new Map(),
 ): PointerAlias | undefined {
   const init = statement.init;
-  const view = pointerAliasForPointerExpression(init, statement.valueType, localArrays);
+  const view = pointerAliasForPointerExpression(init, statement.valueType, arrayDeclarations);
   if (view) return view;
   if (init?.kind !== "unary" || init.operator !== "&") return undefined;
   const target = init.argument;
@@ -730,10 +746,10 @@ function pointerAliasForVar(
   };
 }
 
-function localArrayAddressAlias(
+function arrayAddressAlias(
   expression: CudaLiteExpression,
   valueType: CudaLiteScalarType,
-  localArrays: ReadonlyMap<string, CudaLiteVarDecl>,
+  arrayDeclarations: ReadonlyMap<string, PointerAliasArrayDeclaration>,
 ): PointerAlias | undefined {
   const indices: CudaLiteExpression[] = [];
   let cursor = expression;
@@ -742,13 +758,20 @@ function localArrayAddressAlias(
     cursor = cursor.target;
   }
   if (cursor.kind !== "identifier") return undefined;
-  const declaration = localArrays.get(cursor.name);
+  const declaration = arrayDeclarations.get(cursor.name);
   if (!declaration) return undefined;
+  const dimensions = isCudaLiteVarDecl(declaration) && declaration.matrixTile
+    ? matrixTileStorageDimensions(declaration)
+    : declaration.dimensions;
   return {
     rootName: cursor.name,
-    baseIndex: flatLocalArrayIndexExpression(indices, matrixTileStorageDimensions(declaration), expression.span),
+    baseIndex: flatLocalArrayIndexExpression(indices, dimensions, expression.span),
     valueType,
   };
+}
+
+function isCudaLiteVarDecl(declaration: PointerAliasArrayDeclaration): declaration is CudaLiteVarDecl {
+  return "kind" in declaration && declaration.kind === "var";
 }
 
 function localArrayAddressRoot(

@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T10:58:40Z
+Last updated: 2026-07-02T12:46:44Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,9 +9,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `424/0/0`, dist `424/0/0` |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `429/0/0`, dist `429/0/0`; cuda-samples compile/codegen audit now has `0` hard fails |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Packed shared-byte bf16 fix is green through `verify:changed` and full real-world verifier; ready for next corpus-shaped probe |
+| Active work item | WMMA shared-memory alias shadowing fix removed cuda-samples `unsupported-wmma-pointer-operand` hard fails; running changed/full gates before next corpus-shaped probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -566,11 +566,14 @@ Current verified gates:
 - packed shared-byte bf16 view fix: fail-first `storage:shared-byte-bf16-reinterpret` failed with `unsupported-local-pointer` for `__nv_bfloat16*` over `uchar` shared storage; after analyzer/helper/storage/reference fixes, compiler unit `412/0`, focused real WebGPU case `1/0/0`
 - changed gate after packed shared-byte bf16 fix: typecheck passed; lint passed; compiler unit `412/0`; WGSL modules `16/0`; storage focused group `5/0/0`; selected pointer/storage WebGPU group `40/0/0`; WebGPU smoke `271/0/0`; fixture/status/scope tests passed
 - real-world CUDA verifier after packed shared-byte bf16 fix: src `424/0/0`, dist `424/0/0`
+- WMMA shared-memory alias shadowing fix: fail-first minimal reproduced same-name `tile_ptr` scopes where an earlier alias was skipped because a later declaration needed a local pointer handle; focused unit `1 passed`; cuda-samples compile/codegen audit improved to `357/357`, hard fails `0`
+- real-world CUDA verifier after helper byte pointer overlay fix: src `429/0/0`, dist `429/0/0`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | WMMA shared-memory alias shadowing | cuda-samples `compute_gemm` and `compute_gemm_imma` failed compile/codegen with `unsupported-wmma-pointer-operand` when same-named `tile_ptr` declarations mixed a storage/shared alias with a later pointer handle | pointer alias collection now understands structured shared/global/constant array roots and skips aliases by declaration span instead of by name, so an unrelated later handle no longer hides an earlier same-name alias | fail-first minimal reproduced the WMMA alias miss; focused unit `keeps same-named WMMA pointer aliases when only one declaration needs a handle`; cuda-samples audit `357/357`, hard fails `0` |
 | Fixed | packed shared-byte bf16 views | `(__nv_bfloat16 *)&scratch[0]` over `__shared__ uchar scratch[]` was rejected as `unsupported-local-pointer`; packed shared-byte carrier also treated `bf16` like 32-bit float instead of 16-bit bfloat lanes | analyzer now allows `bf16` word-addressable explicit pointer aliases; packed shared-byte reads/writes store/read bfloat16 top-half f32 bits in 16-bit lanes; pointer helpers include `bf16` over `uchar` shared storage; CPU reference mirrors lane packing | fail-first real WebGPU case failed at compile; after fix `storage:shared-byte-bf16-reinterpret` `1/0/0`; compiler unit `412/0` |
 | Fixed | scoped local pointer handles | two C block scopes reused the pointer variable name `value`; generated WGSL declared `value_buffer`/`value_base` twice, causing pipeline creation failure before the storage bug could run | local pointer handle declarations are resolved by source span and emitted with span-scoped backing names; device-pointer helper paths use the same scoped handle name lookup | fail-first `storage:shared-byte-half-reinterpret` failed with redeclared `value_buffer`/`value_base`; compiler unit regression `keeps same-named local pointer handles distinct across C block scopes`; full compiler unit `411/0` |
 | Fixed | packed shared-byte half views | `(half *)&scratch[0]` over `__shared__ uchar scratch[]` wrote/read through `bg_ptr_write_f16/read_f16` with no shared-byte helper case, producing `0` instead of `[1, 2]`; direct packed byte logic also lacked 16-bit lane masking | packed byte shared reads/writes now handle `half` via `unpack2x16float`/`pack2x16float` lane selection; CPU reference mirrors 16-bit lane updates; pointer helpers include `half` over `uchar` shared storage | fail-first real WebGPU case failed compare; after fix `storage:shared-byte-half-reinterpret` `1/0/0`; focused unit `packs half pointer views over shared byte storage into 16-bit lanes`; full compiler unit `411/0` |
@@ -897,9 +900,9 @@ Current added pointer/control cases:
 
 Smoke current: `269/0/0`.
 
-Full source e2e current: `221/0/0`.
+Full source e2e current: `429/0/0`.
 
-Verifier current: src `422/0/0`, dist `422/0/0`.
+Verifier current: src `429/0/0`, dist `429/0/0`.
 
 ## Remaining Probe Map
 
@@ -910,7 +913,7 @@ Probe these with fail-first real WebGPU fixtures:
 - Texture family:
   - vector helper return, cast/coercion, active-lane pre-return read, atlas/volume guarded RHS, atlas/volume all-inactive guarded RHS, atlas pointer-array false-branch selection, pointer-array false-branch selection, texture/atlas compound false-branch selection, texture/atlas CAS/minmax false-branch selection, 2D and volume scalar/vector pointer-array active-lane false-branch selection, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 texture active-lane stores, texture-to-surface pre-return side effects, 2-lane/3-lane/4-lane texture-fed layered surface vector writes/reads, mixed scalar/vector texture-fed layered surface vector writes/reads, texture-fed layered surface vector writes, layered/3D texture vector reads feeding 3D surface vector writes, atlas/layered active-lane reads, deep helper vector stores, mixed scalar/vector texture stores, texture-fed pointer alias writes, texture-fed pointer alias atomics, atomic vector readback, atomic vector compound helper writes, and atomic vector member helper writes are now green; keep probing next corpus-shaped texture/storage pattern
 - Pointer/vector family:
-  - shared-byte reinterpret local pointers, typed aliases over byte roots, direct packed-byte shared writes, and cuda-samples `compute_gemm_imma` audit planning are now green; mixed local pointer-param + generic storage pointer helper still has explicit diagnostic and implementation support remains future work
+  - shared-byte reinterpret local pointers, typed aliases over byte roots, direct packed-byte shared writes, and cuda-samples WMMA shared-memory aliases are now green; mixed local pointer-param + generic storage pointer helper still has explicit diagnostic and implementation support remains future work
 - Active-lane/control family:
   - loop-internal, alternate-branch, nested, loop+alternate, scalar side-effect, vector-lane side-effect, pointer-alias side-effect, atomic side-effect, shared-memory side-effect, surface side-effect, texture read side-effect, atlas/volume texture guarded RHS, all-inactive guarded RHS, surface/atlas pointer-array false-branch selection, 2D and volume texture-to-surface scalar/vector pointer-array false-branch selection, compound false-branch selection, surface CAS/minmax false-branch selection, texture CAS/minmax false-branch selection, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 texture-store side-effect, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 surface side-effect, mixed scalar/vector layered surface side-effect, surface-read pointer-alias side-effect, surface-read atomic pointer-alias side-effect, surface atomic vector readback, surface atomic vector compound helper, surf3D helper multi-surface and guarded RHS probes, surf3D pointer-alias active/atomic vector probes, surf3D pointer-array select/active/compound/CAS/minmax, texture-to-surface side-effect, 2-lane/3-lane/4-lane texture-fed layered surface vector side-effect, mixed scalar/vector texture-fed layered surface vector side-effect, texture-fed layered surface vector side-effect, layered/3D texture into 3D surface vector side-effect, atlas/layered texture return, deep helper vector-store, mixed scalar/vector texture-store, texture-fed pointer-alias, texture-fed pointer-alias atomic, atomic vector readback, atomic vector compound helper, and atomic vector member helper cases are now green in real WebGPU; keep probing next corpus-shaped texture/storage pattern
   - non-uniform break/return/continue should remain clear diagnostic or safe active-lane lowering, not silent miscompile; divergent continue before a barrier in the same target loop is blocked, while inner-loop continues that do not skip later barriers are allowed

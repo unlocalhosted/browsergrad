@@ -256,9 +256,15 @@ export function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslO
   const uniformScalarNames = new Set(uniformScalars.map((scalar) => scalar.name));
   const uniformScalarTypes = new Map(uniformScalars.map((scalar) => [scalar.name, scalar.valueType] as const));
   const structuredPointerRoots = structuredPointerHandleRoots(ir);
+  const structuredPointerArrays = structuredPointerArrayDeclarations(ir);
   const localPointerHandleDeclarations = collectLocalPointerHandleDeclarations(ir.body, undefined, structuredPointerRoots);
   const localPointerHandles = collectLocalPointerHandles(ir.body, undefined, structuredPointerRoots);
-  const pointerAliases = collectPointerAliases(ir.body, new Set(localPointerHandles.keys()));
+  const pointerAliases = collectPointerAliases(
+    ir.body,
+    new Set(localPointerHandles.keys()),
+    structuredPointerArrays,
+    new Set(localPointerHandleDeclarations.map((item) => item.span.start)),
+  );
   const mutablePointerBases = collectMutableStoragePointerBases(
     ir.body,
     new Set(storagePointerParams.map((param) => param.name)),
@@ -455,6 +461,16 @@ function collectLocalPointerHandleGeneratedNames(
 
 export function localPointerHandleStorageName(statement: CudaLiteVarDecl, part: "buffer" | "base"): string {
   return `${statement.name}_${statement.span.start}_${part}`;
+}
+
+export function structuredPointerArrayDeclarations(ir: KernelIrModule) {
+  return new Map([
+    ...ir.sharedDeclarations,
+    ...ir.deviceGlobals,
+    ...ir.constants,
+  ]
+    .filter((item) => item.dimensions.length > 0)
+    .map((item) => [item.name, item] as const));
 }
 
 function collectLocalPointerArrayGeneratedNames(statements: readonly CudaLiteStatement[]): readonly string[] {

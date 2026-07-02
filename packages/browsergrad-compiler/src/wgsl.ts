@@ -88,6 +88,7 @@ import {
   deviceFunctionLinkName,
   localPointerHandleStorageName,
   resolveDeviceFunctionForCall,
+  structuredPointerArrayDeclarations,
   type EmitContext,
   type EmitKernelIrWgslOptions,
 } from "./wgsl_context.js";
@@ -970,7 +971,12 @@ function emitInlineBarrierDeviceFunctionCall(
   const functionCooperativeGroups = collectCooperativeGroups(fn.body);
   const functionLocalPointerHandleDeclarations = collectLocalPointerHandleDeclarations(fn.body, undefined, structuredPointerHandleRoots(context.ir));
   const functionLocalPointerHandles = collectLocalPointerHandles(fn.body, undefined, structuredPointerHandleRoots(context.ir));
-  const functionPointerAliases = collectPointerAliases(fn.body, new Set(functionLocalPointerHandles.keys()));
+  const functionPointerAliases = collectPointerAliases(
+    fn.body,
+    new Set(functionLocalPointerHandles.keys()),
+    structuredPointerArrayDeclarations(context.ir),
+    new Set(functionLocalPointerHandleDeclarations.map((item) => item.span.start)),
+  );
   const functionLocalValueTypes = new Map(collectLocalValueTypes(fn.body));
   const functionParamNames = new Set(fn.params.map((param) => param.name));
   const functionLocalNames = new Set([...fn.params.map((param) => param.name), ...remappableLocalNames]);
@@ -1689,7 +1695,12 @@ function emitDeviceFunction(
     .map((param) => param.name));
   const functionLocalPointerHandleDeclarations = collectLocalPointerHandleDeclarations(fn.body, undefined, structuredPointerHandleRoots(context.ir));
   const functionLocalPointerHandles = collectLocalPointerHandles(fn.body, undefined, structuredPointerHandleRoots(context.ir));
-  const functionPointerAliases = collectPointerAliases(fn.body, new Set(functionLocalPointerHandles.keys()));
+  const functionPointerAliases = collectPointerAliases(
+    fn.body,
+    new Set(functionLocalPointerHandles.keys()),
+    structuredPointerArrayDeclarations(context.ir),
+    new Set(functionLocalPointerHandleDeclarations.map((item) => item.span.start)),
+  );
   const functionLocalValueTypes = new Map(collectLocalValueTypes(fn.body));
   const functionParamNames = new Set(fn.params.map((param) => param.name));
   const functionLocalNames = new Set([...fn.params.map((param) => param.name), ...collectLocalNames(fn.body)]);
