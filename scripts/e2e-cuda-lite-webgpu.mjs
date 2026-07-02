@@ -7388,6 +7388,24 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [10181] },
           },
           {
+            name: "surface:surf3d-pointer-alias-atomic-pointer-array-select-false-branch",
+            source: SOURCES.surface3DPointerAliasAtomicPointerArraySelect,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [10155] },
+          },
+          {
             name: "surface:surf3d-pointer-alias-atomic-pointer-array-active-lane-return",
             source: SOURCES.surface3DPointerAliasAtomicPointerArrayActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -7783,6 +7801,24 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [10172] },
           },
           {
+            name: "surface:surf1d-pointer-alias-atomic-pointer-array-select-false-branch",
+            source: SOURCES.surface1DPointerAliasAtomicPointerArraySelect,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(4) },
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [10155] },
+          },
+          {
             name: "surface:surf1d-pointer-alias-atomic-pointer-array-active-lane-return",
             source: SOURCES.surface1DPointerAliasAtomicPointerArrayActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -7926,6 +7962,24 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [10181] },
+          },
+          {
+            name: "surface:pointer-alias-atomic-pointer-array-select-false-branch",
+            source: SOURCES.surfacePointerAliasAtomicPointerArraySelect,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [10155] },
           },
           {
             name: "surface:pointer-alias-atomic-pointer-array-active-lane-return",
@@ -8637,6 +8691,29 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [10463] },
+          },
+          {
+            name: "texture:atlas-vector-atomic-pointer-array-select-false-branch",
+            source: SOURCES.textureAtlasVectorAtomicPointerArraySelect,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(4 * 24 * 4),
+                },
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [10155] },
           },
           {
             name: "texture:atlas-vector-atomic-pointer-array-compound-active-lane-return",
