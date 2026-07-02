@@ -7,7 +7,10 @@ import {
 } from "./vector_types.js";
 import {
   floatAtomicHelperName,
+  intViewAtomicCasHelperName,
+  intViewAtomicHelperName,
   integerAtomicLoopHelperName,
+  type WgslIntViewAtomicKind,
 } from "./wgsl_atomic_helpers.js";
 import {
   emitConstantVectorFlatRead,
@@ -557,7 +560,7 @@ function emitDevicePointerAtomicAddHelper(
     if (id === undefined) continue;
     const target = pointerHelperAtomicTarget(type, context.nameFor(param.name), param.valueType, "index", "storage");
     if (!target) continue;
-    lines.push(`    case ${id}u: { return ${emitAtomicAddAtAddress(type, target.addressSpace, target.address, "value")}; }`);
+    lines.push(`    case ${id}u: { return ${emitAtomicAddAtAddress(type, target, "value")}; }`);
   }
   for (const shared of ir.sharedDeclarations.filter((shared) =>
     isPointerHelperAtomicStorage(type, shared.valueType) &&
@@ -567,7 +570,7 @@ function emitDevicePointerAtomicAddHelper(
     if (id === undefined) continue;
     const target = pointerHelperSharedAtomicTarget(type, shared, "index", context);
     if (!target) continue;
-    lines.push(`    case ${id}u: { return ${emitAtomicAddAtAddress(type, target.addressSpace, target.address, "value")}; }`);
+    lines.push(`    case ${id}u: { return ${emitAtomicAddAtAddress(type, target, "value")}; }`);
   }
   for (const global of ir.deviceGlobals.filter((global) =>
     isPointerHelperAtomicStorage(type, global.valueType) &&
@@ -577,7 +580,7 @@ function emitDevicePointerAtomicAddHelper(
     if (id === undefined) continue;
     const target = pointerHelperAtomicTarget(type, context.nameFor(global.name), global.valueType, "index", "storage");
     if (!target) continue;
-    lines.push(`    case ${id}u: { return ${emitAtomicAddAtAddress(type, target.addressSpace, target.address, "value")}; }`);
+    lines.push(`    case ${id}u: { return ${emitAtomicAddAtAddress(type, target, "value")}; }`);
   }
   lines.push(`    default: { return ${zeroValue(type)}; }`);
   lines.push("  }");
@@ -706,7 +709,7 @@ function emitDevicePointerAtomicRmwHelper(
     if (id === undefined) continue;
     const target = pointerHelperAtomicTarget(type, context.nameFor(param.name), param.valueType, "index", "storage");
     if (!target) continue;
-    lines.push(`    case ${id}u: { return ${emitAtomicRmwAtAddress(kind, type, target.addressSpace, target.address, "value")}; }`);
+    lines.push(`    case ${id}u: { return ${emitAtomicRmwAtAddress(kind, type, target, "value")}; }`);
   }
   for (const shared of ir.sharedDeclarations.filter((shared) =>
     isPointerHelperAtomicStorage(type, shared.valueType) &&
@@ -716,7 +719,7 @@ function emitDevicePointerAtomicRmwHelper(
     if (id === undefined) continue;
     const target = pointerHelperSharedAtomicTarget(type, shared, "index", context);
     if (!target) continue;
-    lines.push(`    case ${id}u: { return ${emitAtomicRmwAtAddress(kind, type, target.addressSpace, target.address, "value")}; }`);
+    lines.push(`    case ${id}u: { return ${emitAtomicRmwAtAddress(kind, type, target, "value")}; }`);
   }
   for (const global of ir.deviceGlobals.filter((global) =>
     isPointerHelperAtomicStorage(type, global.valueType) &&
@@ -726,7 +729,7 @@ function emitDevicePointerAtomicRmwHelper(
     if (id === undefined) continue;
     const target = pointerHelperAtomicTarget(type, context.nameFor(global.name), global.valueType, "index", "storage");
     if (!target) continue;
-    lines.push(`    case ${id}u: { return ${emitAtomicRmwAtAddress(kind, type, target.addressSpace, target.address, "value")}; }`);
+    lines.push(`    case ${id}u: { return ${emitAtomicRmwAtAddress(kind, type, target, "value")}; }`);
   }
   lines.push(`    default: { return ${zeroValue(type)}; }`);
   lines.push("  }");
@@ -754,7 +757,7 @@ function emitDevicePointerAtomicExchangeHelper(
     if (id === undefined) continue;
     const target = pointerHelperAtomicTarget(type, context.nameFor(param.name), param.valueType, "index", "storage");
     if (!target) continue;
-    lines.push(`    case ${id}u: { return ${emitAtomicExchangeAtAddress(type, target.address, "value")}; }`);
+    lines.push(`    case ${id}u: { return ${emitAtomicExchangeAtAddress(type, target, "value")}; }`);
   }
   for (const shared of ir.sharedDeclarations.filter((shared) =>
     isPointerHelperAtomicStorage(type, shared.valueType) &&
@@ -764,7 +767,7 @@ function emitDevicePointerAtomicExchangeHelper(
     if (id === undefined) continue;
     const target = pointerHelperSharedAtomicTarget(type, shared, "index", context);
     if (!target) continue;
-    lines.push(`    case ${id}u: { return ${emitAtomicExchangeAtAddress(type, target.address, "value")}; }`);
+    lines.push(`    case ${id}u: { return ${emitAtomicExchangeAtAddress(type, target, "value")}; }`);
   }
   for (const global of ir.deviceGlobals.filter((global) =>
     isPointerHelperAtomicStorage(type, global.valueType) &&
@@ -774,7 +777,7 @@ function emitDevicePointerAtomicExchangeHelper(
     if (id === undefined) continue;
     const target = pointerHelperAtomicTarget(type, context.nameFor(global.name), global.valueType, "index", "storage");
     if (!target) continue;
-    lines.push(`    case ${id}u: { return ${emitAtomicExchangeAtAddress(type, target.address, "value")}; }`);
+    lines.push(`    case ${id}u: { return ${emitAtomicExchangeAtAddress(type, target, "value")}; }`);
   }
   lines.push(`    default: { return ${zeroValue(type)}; }`);
   lines.push("  }");
@@ -798,7 +801,7 @@ function emitDevicePointerAtomicCasHelper(type: "int" | "uint", ir: KernelIrModu
     if (id === undefined) continue;
     const target = pointerHelperAtomicTarget(type, context.nameFor(param.name), param.valueType, "index", "storage");
     if (!target) continue;
-    lines.push(`    case ${id}u: { return atomicCompareExchangeWeak(${target.address}, compare, value).old_value; }`);
+    lines.push(`    case ${id}u: { return ${emitAtomicCasAtAddress(type, target, "compare", "value")}; }`);
   }
   for (const shared of ir.sharedDeclarations.filter((shared) =>
     isPointerHelperAtomicStorage(type, shared.valueType) &&
@@ -808,7 +811,7 @@ function emitDevicePointerAtomicCasHelper(type: "int" | "uint", ir: KernelIrModu
     if (id === undefined) continue;
     const target = pointerHelperSharedAtomicTarget(type, shared, "index", context);
     if (!target) continue;
-    lines.push(`    case ${id}u: { return atomicCompareExchangeWeak(${target.address}, compare, value).old_value; }`);
+    lines.push(`    case ${id}u: { return ${emitAtomicCasAtAddress(type, target, "compare", "value")}; }`);
   }
   for (const global of ir.deviceGlobals.filter((global) =>
     isPointerHelperAtomicStorage(type, global.valueType) &&
@@ -818,7 +821,7 @@ function emitDevicePointerAtomicCasHelper(type: "int" | "uint", ir: KernelIrModu
     if (id === undefined) continue;
     const target = pointerHelperAtomicTarget(type, context.nameFor(global.name), global.valueType, "index", "storage");
     if (!target) continue;
-    lines.push(`    case ${id}u: { return atomicCompareExchangeWeak(${target.address}, compare, value).old_value; }`);
+    lines.push(`    case ${id}u: { return ${emitAtomicCasAtAddress(type, target, "compare", "value")}; }`);
   }
   lines.push(`    default: { return ${zeroValue(type)}; }`);
   lines.push("  }");
@@ -826,30 +829,43 @@ function emitDevicePointerAtomicCasHelper(type: "int" | "uint", ir: KernelIrModu
   return lines;
 }
 
-function emitAtomicAddAtAddress(type: "float" | "double" | "int" | "uint", addressSpace: "storage" | "workgroup", address: string, value: string): string {
-  return type === "float" || type === "double"
-    ? `${floatAtomicHelperName("Add", addressSpace)}(${address}, ${value})`
-    : `atomicAdd(${address}, ${value})`;
+function emitAtomicAddAtAddress(type: "float" | "double" | "int" | "uint", target: PointerHelperAtomicTarget, value: string): string {
+  if (type === "float" || type === "double") return `${floatAtomicHelperName("Add", target.addressSpace)}(${target.address}, ${value})`;
+  if (usesIntViewAtomicHelper(type, target)) return `${intViewAtomicHelperName("Add", target.addressSpace)}(${target.address}, ${value})`;
+  return `atomicAdd(${target.address}, ${value})`;
 }
 
 function emitAtomicRmwAtAddress(
   kind: "Sub" | "Min" | "Max" | "And" | "Or" | "Xor",
   type: "float" | "double" | "int" | "uint",
-  addressSpace: "storage" | "workgroup",
-  address: string,
+  target: PointerHelperAtomicTarget,
   value: string,
 ): string {
   if (type === "float" || type === "double") {
     if (kind !== "Sub" && kind !== "Min" && kind !== "Max") return zeroValue(type);
-    return `${floatAtomicHelperName(kind, addressSpace)}(${address}, ${value})`;
+    return `${floatAtomicHelperName(kind, target.addressSpace)}(${target.address}, ${value})`;
   }
-  return `atomic${kind}(${address}, ${value})`;
+  if (usesIntViewAtomicHelper(type, target)) return `${intViewAtomicHelperName(kind as WgslIntViewAtomicKind, target.addressSpace)}(${target.address}, ${value})`;
+  return `atomic${kind}(${target.address}, ${value})`;
 }
 
-function emitAtomicExchangeAtAddress(type: "float" | "int" | "uint", address: string, value: string): string {
-  return type === "float"
-    ? `bitcast<f32>(atomicExchange(${address}, bitcast<u32>(${value})))`
-    : `atomicExchange(${address}, ${value})`;
+function emitAtomicExchangeAtAddress(type: "float" | "int" | "uint", target: PointerHelperAtomicTarget, value: string): string {
+  if (type === "float") return `bitcast<f32>(atomicExchange(${target.address}, bitcast<u32>(${value})))`;
+  if (usesIntViewAtomicHelper(type, target)) return `${intViewAtomicHelperName("Exchange", target.addressSpace)}(${target.address}, ${value})`;
+  return `atomicExchange(${target.address}, ${value})`;
+}
+
+function emitAtomicCasAtAddress(type: "int" | "uint", target: PointerHelperAtomicTarget, compare: string, value: string): string {
+  if (usesIntViewAtomicHelper(type, target)) return `${intViewAtomicCasHelperName(target.addressSpace)}(${target.address}, ${compare}, ${value})`;
+  return `atomicCompareExchangeWeak(${target.address}, ${compare}, ${value}).old_value`;
+}
+
+function usesIntViewAtomicHelper(type: CudaLiteScalarType, target: PointerHelperAtomicTarget): boolean {
+  return type === "int" && target.storageScalar === "u32";
+}
+
+function pointerHelperAtomicStorageScalar(storageType: CudaLiteScalarType): "i32" | "u32" {
+  return (cudaVectorScalarType(storageType) ?? storageType) === "int" ? "i32" : "u32";
 }
 
 interface PointerHelperAtomicTarget {
@@ -870,7 +886,7 @@ function pointerHelperAtomicTarget(
     return {
       address: `&${name}[${index}]`,
       storageValueType: storageType,
-      storageScalar: storageType === "int" ? "i32" : "u32",
+      storageScalar: pointerHelperAtomicStorageScalar(storageType),
       addressSpace,
     };
   }
@@ -898,7 +914,7 @@ function pointerHelperSharedAtomicTarget(
   return {
     address: `&${emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, storageIndex)}`,
     storageValueType: shared.valueType,
-    storageScalar: shared.valueType === "int" ? "i32" : "u32",
+    storageScalar: pointerHelperAtomicStorageScalar(shared.valueType),
     addressSpace: "workgroup",
   };
 }
@@ -909,7 +925,7 @@ function isPointerHelperAtomicStorage(helperType: CudaLiteScalarType, storageTyp
 }
 
 function isPointerHelperPackedByteAtomicStorage(helperType: CudaLiteScalarType, storageType: CudaLiteScalarType): boolean {
-  return storageType === "uchar" && (helperType === "uint" || helperType === "float");
+  return storageType === "uchar" && (helperType === "int" || helperType === "uint" || helperType === "float");
 }
 
 function isPointerHelperCompatibleStorage(helperType: CudaLiteScalarType, storageType: CudaLiteScalarType): boolean {

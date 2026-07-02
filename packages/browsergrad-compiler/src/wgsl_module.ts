@@ -21,14 +21,16 @@ import {
   usesFloatAtomicSub,
   usesFp8Intrinsics,
   usesFrexp,
+  usesIntViewAtomicStorage,
   usesSharedFloatAtomicAdd,
   usesSharedFloatAtomicMax,
   usesSharedFloatAtomicMin,
   usesSharedFloatAtomicSub,
+  usesSharedIntViewAtomics,
   usesSpecialFloatNamedConstants,
   wgslUniformScalar,
 } from "./wgsl_feature_usage.js";
-import { emitIntegerAtomicLoopHelpers, emitFloatAtomicAddHelper, emitFloatAtomicMaxHelper, emitFloatAtomicMinHelper, emitFloatAtomicSubHelper } from "./wgsl_atomic_helpers.js";
+import { emitIntegerAtomicLoopHelpers, emitFloatAtomicAddHelper, emitFloatAtomicMaxHelper, emitFloatAtomicMinHelper, emitFloatAtomicSubHelper, emitIntViewAtomicHelpers } from "./wgsl_atomic_helpers.js";
 import { UNIFORM_PARAMS_NAME, type EmitContext } from "./wgsl_context.js";
 import { wgslScalar } from "./wgsl_storage.js";
 import {
@@ -168,6 +170,8 @@ function appendKernelModuleSupportHelpers(
   if (usesFloatAtomicMax(ir)) lines.push("", ...emitFloatAtomicMaxHelper("storage"));
   if (usesSharedFloatAtomicMax(ir)) lines.push("", ...emitFloatAtomicMaxHelper("workgroup"));
   if (usesAtomicIncDec(ir)) lines.push("", ...emitIntegerAtomicLoopHelpers());
+  if (usesIntViewAtomicStorage(ir)) lines.push("", ...emitIntViewAtomicHelpers("storage"));
+  if (usesSharedIntViewAtomics(ir)) lines.push("", ...emitIntViewAtomicHelpers("workgroup"));
   if (usesCurand(ir)) lines.push("", ...emitCurandHelpers());
   if (usesFrexp(ir)) lines.push("", ...emitFrexpHelpers());
   if (usesSpecialFloatNamedConstants(ir)) lines.push("", ...emitSpecialFloatConstantHelpers());

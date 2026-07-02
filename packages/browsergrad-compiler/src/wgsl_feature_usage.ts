@@ -149,6 +149,51 @@ export function usesAtomicIncDec(ir: KernelIrModule): boolean {
     ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["atomicInc", "atomicInc_system", "atomicDec", "atomicDec_system"])));
 }
 
+export function usesIntViewAtomicStorage(ir: KernelIrModule): boolean {
+  return hasUnsignedAtomicStorage(ir) && statementsUseAnyIntViewAtomic(ir);
+}
+
+export function usesSharedIntViewAtomics(ir: KernelIrModule): boolean {
+  return hasUnsignedAtomicShared(ir) && statementsUseAnyIntViewAtomic(ir);
+}
+
+function statementsUseAnyIntViewAtomic(ir: KernelIrModule): boolean {
+  const names = new Set([
+    "atomicAdd",
+    "atomicAdd_system",
+    "atomicSub",
+    "atomicSub_system",
+    "atomicMin",
+    "atomicMin_system",
+    "atomicMax",
+    "atomicMax_system",
+    "atomicAnd",
+    "atomicAnd_system",
+    "atomicOr",
+    "atomicOr_system",
+    "atomicXor",
+    "atomicXor_system",
+    "atomicExch",
+    "atomicExch_system",
+    "atomicCAS",
+    "atomicCAS_system",
+  ]);
+  return statementsUseCall(ir.body, names) || ir.functions.some((fn) => statementsUseCall(fn.body, names));
+}
+
+function hasUnsignedAtomicStorage(ir: KernelIrModule): boolean {
+  return ir.params.some((param) => param.pointer && atomicStorageScalarType(param.valueType) === "u32" && ir.atomicParams.includes(param.name)) ||
+    ir.deviceGlobals.some((global) => atomicStorageScalarType(global.valueType) === "u32" && ir.atomicDeviceGlobals.includes(global.name));
+}
+
+function hasUnsignedAtomicShared(ir: KernelIrModule): boolean {
+  return ir.sharedDeclarations.some((shared) => atomicStorageScalarType(shared.valueType) === "u32" && ir.atomicShared.includes(shared.name));
+}
+
+function atomicStorageScalarType(valueType: CudaLiteScalarType): "i32" | "u32" {
+  return (cudaVectorScalarType(valueType) ?? valueType) === "int" ? "i32" : "u32";
+}
+
 export function usesCurand(ir: KernelIrModule): boolean {
   const curandCalls = new Set(["curand_init", "curand_uniform", "curand_uniform_double", "curand_normal", "curand_normal_double"]);
   return statementsUseCall(ir.body, curandCalls) ||

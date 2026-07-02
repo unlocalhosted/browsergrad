@@ -2,7 +2,10 @@ import { rootIdentifier } from "./analyzer.js";
 import { cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 import {
   floatAtomicHelperName,
+  intViewAtomicCasHelperName,
+  intViewAtomicHelperName,
   integerAtomicLoopHelperName,
+  type WgslIntViewAtomicKind,
 } from "./wgsl_atomic_helpers.js";
 import {
   isDevicePointerAtomicAddType,
@@ -108,6 +111,10 @@ export function emitAtomicCall(
     if (wgslName === "atomicExchange" && (atomicTarget.valueType === "float" || atomicTarget.valueType === "double")) {
       return `bitcast<f32>(atomicExchange(${atomicTarget.address}, bitcast<u32>(${valueExpression})))`;
     }
+    const intViewKind = intViewAtomicKindForWgslName(wgslName);
+    if (intViewKind && atomicTarget.valueType === "int" && atomicTarget.storageScalar === "u32") {
+      return `${intViewAtomicHelperName(intViewKind, atomicTarget.addressSpace)}(${atomicTarget.address}, ${integerValueExpression})`;
+    }
     return `${wgslName}(${atomicTarget.address}, ${integerValueExpression})`;
   }
   const pointerAtomic = emitDevicePointerAtomicCall(wgslName, target, value, context, callbacks);
@@ -132,6 +139,9 @@ export function emitAtomicCasCall(
     const valueExpression = atomicTarget.valueType === "int" || atomicTarget.valueType === "uint"
       ? emitAtomicIntegerValueExpression(value, atomicTarget.valueType, context, callbacks)
       : callbacks.emitExpression(value, context);
+    if (atomicTarget.valueType === "int" && atomicTarget.storageScalar === "u32") {
+      return `${intViewAtomicCasHelperName(atomicTarget.addressSpace)}(${atomicTarget.address}, ${compareExpression}, ${valueExpression})`;
+    }
     return `atomicCompareExchangeWeak(${atomicTarget.address}, ${compareExpression}, ${valueExpression}).old_value`;
   }
   const pointerAtomic = emitDevicePointerAtomicCasCall(target, compare, value, context, callbacks);
@@ -195,6 +205,29 @@ function emitAtomicIntegerValueExpression(
     : callbacks.emitExpressionAsValueType(expression, valueType, context);
 }
 
+function intViewAtomicKindForWgslName(wgslName: string): WgslIntViewAtomicKind | undefined {
+  switch (wgslName) {
+    case "atomicAdd":
+      return "Add";
+    case "atomicSub":
+      return "Sub";
+    case "atomicMin":
+      return "Min";
+    case "atomicMax":
+      return "Max";
+    case "atomicAnd":
+      return "And";
+    case "atomicOr":
+      return "Or";
+    case "atomicXor":
+      return "Xor";
+    case "atomicExchange":
+      return "Exchange";
+    default:
+      return undefined;
+  }
+}
+
 function emitDevicePointerAtomicCasCall(
   target: CudaLiteExpression | undefined,
   compare: CudaLiteExpression | undefined,
@@ -234,10 +267,11 @@ function emitAtomicTarget(
       const info = atomicStorageInfo(rootName, context);
       if (!info) return undefined;
       const index = callbacks.emitPointerAliasIndex(alias, zeroExpression(target.span), context);
+      const valueType = alias.valueType ?? info.valueType;
       return {
-        address: emitAtomicRootAddress(rootName, index, context, callbacks),
+        address: emitAtomicRootAddress(rootName, index, context, callbacks, valueType),
         rootName,
-        valueType: alias.valueType ?? info.valueType,
+        valueType,
         storageValueType: info.valueType,
         storageScalar: info.storageScalar,
         addressSpace: info.addressSpace,
@@ -249,7 +283,7 @@ function emitAtomicTarget(
       if (!info) return undefined;
       const index = callbacks.emitPointerIndex(target.name, zeroExpression(target.span), context);
       return {
-        address: emitAtomicRootAddress(target.name, index, context, callbacks),
+        address: emitAtomicRootAddress(target.name, index, context, callbacks, param.valueType),
         rootName: target.name,
         valueType: param.valueType,
         storageValueType: info.valueType,
@@ -264,10 +298,11 @@ function emitAtomicTarget(
   const rootName = root ? resolveAtomicRootName(root, context) : undefined;
   const info = rootName ? atomicStorageInfo(rootName, context) : undefined;
   if (pointerParts && rootName && info) {
+    const valueType = atomicExpressionValueType(target, rootName, context) ?? info.valueType;
     return {
-      address: emitAtomicRootAddress(rootName, pointerParts.base, context, callbacks),
+      address: emitAtomicRootAddress(rootName, pointerParts.base, context, callbacks, valueType),
       rootName,
-      valueType: atomicExpressionValueType(target, rootName, context) ?? info.valueType,
+      valueType,
       storageValueType: info.valueType,
       storageScalar: info.storageScalar,
       addressSpace: info.addressSpace,
@@ -281,10 +316,14 @@ function emitAtomicRootAddress(
   index: string,
   context: WgslAtomicContext,
   callbacks: WgslAtomicCallbacks,
+  viewType?: CudaLiteScalarType,
 ): string {
   const shared = callbacks.sharedDeclarationFor(rootName, context);
-  if (shared) return `&${emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, index)}`;
-  return `&${context.nameFor(rootName)}[${index}]`;
+  if (shared) return `&${emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, atomicStorageIndex(index, viewType ?? shared.valueType, shared.valueType))}`;
+  const param = context.paramFor(rootName);
+  const global = context.deviceGlobalFor(rootName);
+  const storageType = param?.valueType ?? global?.valueType ?? viewType;
+  return `&${context.nameFor(rootName)}[${atomicStorageIndex(index, viewType ?? storageType, storageType)}]`;
 }
 
 function emitAtomicVectorStorageViewCastTarget(
@@ -301,7 +340,7 @@ function emitAtomicVectorStorageViewCastTarget(
   const param = context.paramFor(view.rootName);
   if (param?.pointer && context.ir.atomicParams.includes(param.name) && wgslElementByteSize(view.valueType) === wgslElementByteSize(param.valueType)) {
     return {
-      address: `&${context.nameFor(param.name)}[${view.index}]`,
+      address: emitAtomicRootAddress(param.name, view.index, context, callbacks, target.valueType),
       rootName: param.name,
       valueType: target.valueType,
       storageValueType: param.valueType,
@@ -312,7 +351,7 @@ function emitAtomicVectorStorageViewCastTarget(
   const shared = callbacks.sharedDeclarationFor(view.rootName, context);
   if (shared && context.isAtomicShared(shared.name) && wgslElementByteSize(view.valueType) === wgslElementByteSize(shared.valueType)) {
     return {
-      address: `&${emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, view.index)}`,
+      address: emitAtomicRootAddress(shared.name, view.index, context, callbacks, target.valueType),
       rootName: shared.name,
       valueType: target.valueType,
       storageValueType: shared.valueType,
@@ -323,7 +362,7 @@ function emitAtomicVectorStorageViewCastTarget(
   const global = context.deviceGlobalFor(view.rootName);
   if (global && context.ir.atomicDeviceGlobals.includes(global.name) && wgslElementByteSize(view.valueType) === wgslElementByteSize(global.valueType)) {
     return {
-      address: `&${context.nameFor(global.name)}[${view.index}]`,
+      address: emitAtomicRootAddress(global.name, view.index, context, callbacks, target.valueType),
       rootName: global.name,
       valueType: target.valueType,
       storageValueType: global.valueType,
@@ -366,7 +405,7 @@ function emitAtomicStorageViewTarget(
   const shared = callbacks.sharedDeclarationFor(view.rootName, context);
   if (shared && context.isAtomicShared(shared.name)) {
     return {
-      address: `&${emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, view.index)}`,
+      address: emitAtomicRootAddress(shared.name, view.index, context, callbacks, view.valueType),
       rootName: shared.name,
       valueType: view.valueType,
       storageValueType: shared.valueType,
@@ -377,7 +416,7 @@ function emitAtomicStorageViewTarget(
   const param = context.paramFor(view.rootName);
   if (param?.pointer && context.ir.atomicParams.includes(param.name)) {
     return {
-      address: `&${context.nameFor(param.name)}[${view.index}]`,
+      address: emitAtomicRootAddress(param.name, view.index, context, callbacks, view.valueType),
       rootName: param.name,
       valueType: view.valueType,
       storageValueType: param.valueType,
@@ -388,7 +427,7 @@ function emitAtomicStorageViewTarget(
   const global = context.deviceGlobalFor(view.rootName);
   if (global && context.ir.atomicDeviceGlobals.includes(global.name)) {
     return {
-      address: `&${context.nameFor(global.name)}[${view.index}]`,
+      address: emitAtomicRootAddress(global.name, view.index, context, callbacks, view.valueType),
       rootName: global.name,
       valueType: view.valueType,
       storageValueType: global.valueType,
@@ -461,6 +500,12 @@ function atomicStorageInfo(
 
 function atomicStorageScalar(valueType: CudaLiteScalarType): "i32" | "u32" {
   return (cudaVectorScalarType(valueType) ?? valueType) === "int" ? "i32" : "u32";
+}
+
+function atomicStorageIndex(index: string, viewType: CudaLiteScalarType | undefined, storageType: CudaLiteScalarType | undefined): string {
+  return storageType === "uchar" && viewType !== undefined && viewType !== "uchar"
+    ? `(u32(${index})) >> 2u`
+    : index;
 }
 
 function zeroExpression(span: CudaLiteExpression["span"]): CudaLiteExpression {

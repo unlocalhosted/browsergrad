@@ -1,5 +1,6 @@
 export type WgslAtomicAddressSpace = "storage" | "workgroup";
 export type WgslAtomicIntegerScalar = "i32" | "u32";
+export type WgslIntViewAtomicKind = "Add" | "Sub" | "Min" | "Max" | "And" | "Or" | "Xor" | "Exchange";
 
 export interface WgslIntegerAtomicLoopTarget {
   readonly valueType: string;
@@ -17,6 +18,14 @@ export function integerAtomicLoopHelperName(kind: "Inc" | "Dec", target: WgslInt
     return `bg_atomic${kind}_${target.addressSpace}_f32_as_u32`;
   }
   return `bg_atomic${kind}_${target.addressSpace}_${target.storageScalar}`;
+}
+
+export function intViewAtomicHelperName(kind: WgslIntViewAtomicKind, addressSpace: WgslAtomicAddressSpace): string {
+  return `bg_atomic${kind}_${addressSpace}_u32_as_i32`;
+}
+
+export function intViewAtomicCasHelperName(addressSpace: WgslAtomicAddressSpace): string {
+  return `bg_atomicCompareExchange_${addressSpace}_u32_as_i32`;
 }
 
 export function isAtomicCasCallName(name: string | undefined): boolean {
@@ -158,10 +167,77 @@ export function emitIntegerAtomicLoopHelpers(): string[] {
   ];
 }
 
+export function emitIntViewAtomicHelpers(addressSpace: WgslAtomicAddressSpace): string[] {
+  return [
+    ...emitIntViewAtomicBuiltinHelper("Add", addressSpace, "atomicAdd"),
+    "",
+    ...emitIntViewAtomicBuiltinHelper("Sub", addressSpace, "atomicSub"),
+    "",
+    ...emitIntViewAtomicMinMaxHelper("Min", addressSpace),
+    "",
+    ...emitIntViewAtomicMinMaxHelper("Max", addressSpace),
+    "",
+    ...emitIntViewAtomicBuiltinHelper("And", addressSpace, "atomicAnd"),
+    "",
+    ...emitIntViewAtomicBuiltinHelper("Or", addressSpace, "atomicOr"),
+    "",
+    ...emitIntViewAtomicBuiltinHelper("Xor", addressSpace, "atomicXor"),
+    "",
+    ...emitIntViewAtomicBuiltinHelper("Exchange", addressSpace, "atomicExchange"),
+    "",
+    ...emitIntViewAtomicCasHelper(addressSpace),
+  ];
+}
+
 function atomicPointerType(addressSpace: WgslAtomicAddressSpace, scalar: WgslAtomicIntegerScalar): string {
   return addressSpace === "workgroup"
     ? `ptr<workgroup, atomic<${scalar}>>`
     : `ptr<storage, atomic<${scalar}>, read_write>`;
+}
+
+function emitIntViewAtomicBuiltinHelper(
+  kind: WgslIntViewAtomicKind,
+  addressSpace: WgslAtomicAddressSpace,
+  builtin: "atomicAdd" | "atomicSub" | "atomicAnd" | "atomicOr" | "atomicXor" | "atomicExchange",
+): string[] {
+  const name = intViewAtomicHelperName(kind, addressSpace);
+  return [
+    `fn ${name}(ptr_value: ${atomicPointerType(addressSpace, "u32")}, value: i32) -> i32 {`,
+    `  return bitcast<i32>(${builtin}(ptr_value, bitcast<u32>(value)));`,
+    "}",
+  ];
+}
+
+function emitIntViewAtomicMinMaxHelper(kind: "Min" | "Max", addressSpace: WgslAtomicAddressSpace): string[] {
+  const name = intViewAtomicHelperName(kind, addressSpace);
+  const op = kind === "Min" ? "min" : "max";
+  return [
+    `fn ${name}(ptr_value: ${atomicPointerType(addressSpace, "u32")}, value: i32) -> i32 {`,
+    "  var old_bits = atomicLoad(ptr_value);",
+    "  loop {",
+    "    let old_value = bitcast<i32>(old_bits);",
+    `    let next_value = ${op}(old_value, value);`,
+    "    let next_bits = bitcast<u32>(next_value);",
+    "    if (next_bits == old_bits) {",
+    "      return old_value;",
+    "    }",
+    "    let result = atomicCompareExchangeWeak(ptr_value, old_bits, next_bits);",
+    "    if (result.exchanged) {",
+    "      return old_value;",
+    "    }",
+    "    old_bits = result.old_value;",
+    "  }",
+    "}",
+  ];
+}
+
+function emitIntViewAtomicCasHelper(addressSpace: WgslAtomicAddressSpace): string[] {
+  const name = intViewAtomicCasHelperName(addressSpace);
+  return [
+    `fn ${name}(ptr_value: ${atomicPointerType(addressSpace, "u32")}, compare: i32, value: i32) -> i32 {`,
+    "  return bitcast<i32>(atomicCompareExchangeWeak(ptr_value, bitcast<u32>(compare), bitcast<u32>(value)).old_value);",
+    "}",
+  ];
 }
 
 function emitIntegerAtomicIncHelper(addressSpace: WgslAtomicAddressSpace, scalar: WgslAtomicIntegerScalar): string[] {

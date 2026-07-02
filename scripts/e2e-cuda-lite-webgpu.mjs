@@ -844,6 +844,26 @@ __global__ void storageByteUintHelperAtomic(uchar *scratch, uint *out) {
     add_storage_byte_word((uint *)&scratch[0], out);
   }
 }`,
+  storageByteIntHelperAtomic: `
+__device__ void signed_storage_byte_ops(int *word, int *out) {
+  out[0] = atomicAdd(word, -3);
+  out[1] = word[0];
+  out[2] = atomicMin(word, -4);
+  out[3] = word[0];
+  out[4] = atomicMax(word, 9);
+  out[5] = word[0];
+  out[6] = atomicCAS(word, 9, -2);
+  out[7] = word[0];
+}
+
+__global__ void storageByteIntHelperAtomic(uchar *scratch, int *out) {
+  if (threadIdx.x == 0) {
+    signed_storage_byte_ops((int *)&scratch[0], out);
+    int *direct = (int *)&scratch[4];
+    out[8] = atomicExch(direct, -11);
+    out[9] = direct[0];
+  }
+}`,
   localVectorPointerArray: `
 __device__ float3 sum3(float3 *a, float3 *b, float3 *c) {
   return *a + *b + *c;
@@ -6453,6 +6473,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [7, 12] },
+          },
+          {
+            name: "storage:param-byte-int-helper-atomic",
+            source: SOURCES.storageByteIntHelperAtomic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                scratch: new Uint32Array([10, 22]),
+                out: new Int32Array(10),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [10, 7, 7, -4, -4, 9, 9, -2, 22, -11] },
           },
           {
             name: "storage:local-vector-pointer-array",

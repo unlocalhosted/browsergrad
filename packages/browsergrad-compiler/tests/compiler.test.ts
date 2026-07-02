@@ -9696,6 +9696,48 @@ __global__ void helper_byte_atomic(uchar* scratch, uint* out) {
     expect([...result.buffers.scratch as Uint32Array]).toEqual([12]);
   });
 
+  it("supports signed helper atomics over byte-backed storage views", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void signed_byte_ops(int* word, int* out) {
+  out[0] = atomicAdd(word, -3);
+  out[1] = word[0];
+  out[2] = atomicMin(word, -4);
+  out[3] = word[0];
+  out[4] = atomicMax(word, 9);
+  out[5] = word[0];
+  out[6] = atomicCAS(word, 9, -2);
+  out[7] = word[0];
+}
+__global__ void signed_byte_atomic(uchar* scratch, int* out) {
+  if (threadIdx.x == 0) {
+    signed_byte_ops((int*)&scratch[0], out);
+    int* direct = (int*)&scratch[4];
+    out[8] = atomicExch(direct, -11);
+    out[9] = direct[0];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          scratch: new Uint32Array([10, 22]),
+          out: new Int32Array(10),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
+    expect(compiled.ir.atomicParams).toContain("scratch");
+    expect(compiled.wgsl).toContain("case 0u: { return bg_atomicAdd_storage_u32_as_i32(&scratch[(u32(index)) >> 2u], value); }");
+    expect(compiled.wgsl).toContain("case 0u: { return bg_atomicMin_storage_u32_as_i32(&scratch[(u32(index)) >> 2u], value); }");
+    expect(compiled.wgsl).toContain("case 0u: { return bg_atomicMax_storage_u32_as_i32(&scratch[(u32(index)) >> 2u], value); }");
+    expect(compiled.wgsl).toContain("case 0u: { return bg_atomicCompareExchange_storage_u32_as_i32(&scratch[(u32(index)) >> 2u], compare, value); }");
+    expect(compiled.wgsl).toContain("bg_atomicExchange_storage_u32_as_i32(&scratch[(u32((4u) + (0u))) >> 2u], (-11))");
+    expect([...result.buffers.out as Int32Array]).toEqual([10, 7, 7, -4, -4, 9, 9, -2, 22, -11]);
+    expect([...result.buffers.scratch as Uint32Array]).toEqual([0xfffffffe, 0xfffffff5]);
+  });
+
   it("packs uchar shared-memory pointer helpers into u32 carriers", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ void bump(uchar* ptr, uint offset) {

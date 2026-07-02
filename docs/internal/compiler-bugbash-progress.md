@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T13:25:00Z
+Last updated: 2026-07-02T16:24:54Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,9 +9,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; helper byte-storage atomic changed gate is green |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; signed byte-storage atomic changed gate is green |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Helper pointer atomics over byte-backed storage views fixed through changed gate; ready for next corpus-shaped probe |
+| Active work item | Signed helper/direct atomics over byte-backed storage views fixed through changed gate; ready for next corpus-shaped probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -577,11 +577,16 @@ Current verified gates:
 - atomic packed-byte storage read fix: first WebGPU run for `storage:param-byte-uint-helper-atomic` failed pipeline creation because packed-byte reads shifted `atomic<u32>` storage directly; after atomic-aware packed-byte storage loads/writes, focused fixture `1/0/0`; related storage helper group `3/0/0`; related atomic helper units `7/0`
 - compiler unit suite after helper byte-storage atomic fix: `420 passed / 0 failed`
 - changed gate after helper byte-storage atomic fix: typecheck passed; compiler unit `420/0`; WGSL modules `16/0`; selected storage/pointer WebGPU group `45/0/0`; WebGPU smoke `276/0/0`; fixture/status/scope tests passed
+- signed byte-storage atomic probe: fail-first direct/helper `atomicAdd((int *)&scratch[0], -3)` over `uchar*` either emitted a default-only helper or invalid `atomicAdd` against `atomic<u32>`; after signed-u32 carrier helpers and byte-root address lowering, focused unit group `2/0`
+- focused WebGPU after signed byte-storage atomic fix: `storage:param-byte-int-helper-atomic,storage:param-byte-uint-helper-atomic` `2/0/0`
+- compiler unit suite after signed byte-storage atomic fix: `421 passed / 0 failed`
+- changed gate after signed byte-storage atomic fix: typecheck passed; compiler unit `421/0`; WGSL modules `16/0`; WebGPU smoke `276/0/0`; selected storage/atomic WebGPU group `80/0/0`; fixture/status/scope tests passed
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | signed atomics over byte-backed storage | `int*` views over `uchar*` storage marked the root atomic but direct atomics emitted `atomicAdd(&scratch[...], -3)` against `atomic<u32>`, while helper atomics generated default-only `bg_ptr_atomicAdd_i32`; byte offset `&scratch[4]` also needed word addressing | signed atomic views over unsigned carriers now route through bitcast/CAS helpers for add/sub/min/max/bitwise/exchange/CAS, and direct/helper byte-root atomic addresses use `index >> 2` | fail-first ad hoc probes; focused unit `supports signed helper atomics over byte-backed storage views`; real WebGPU fixture `storage:param-byte-int-helper-atomic` plus uint guard `2/0/0` |
 | Fixed | helper atomics over byte-backed storage | `add_word((uint *)&scratch[0], out)` compiled but generated `bg_ptr_atomicAdd_u32` with no `scratch` case, so helper atomics through byte-backed typed views returned the default and skipped the update | pointer atomic helpers now use the same byte-root compatibility/address policy as packed storage helpers, emitting `scratch[index >> 2]` for aligned typed atomic views over `uchar` storage/shared/global roots | fail-first ad hoc probe; focused unit `supports helper pointer atomics over byte-backed storage views`; real WebGPU fixture `storage:param-byte-uint-helper-atomic` `1/0/0` |
 | Fixed | atomic packed-byte storage reads | After marking `uchar* scratch` atomic, normal `word[0]` reads through the helper path tried to shift `scratch[...]` where the element was `atomic<u32>`, causing WGSL pipeline creation failure | packed-byte storage read/write lowering now takes atomic root state, uses `atomicLoad` for packed reads, `atomicStore` for aligned typed writes, and atomic byte clear/or updates for sub-word writes | first real WebGPU run failed with `operator >> (atomic<u32>, u32)`; after fix focused fixture `1/0/0`; related storage helper group `3/0/0`; related atomic helper units `7/0` |
 | Fixed | unaligned typed byte-storage overlays | `(float *)&scratch[1]` over `uchar*` storage compiled and self-read back, but raw byte placement was wrong because reference aliases scaled the base offset by element size and WGSL packed-byte helpers treated non-`uchar` views as whole-word aligned | byte-packed storage/shared reads now assemble scalar bits byte-by-byte for unaligned addresses, keep aligned word fast paths, writes update individual bytes only when needed, and reference aliases keep byte base offsets while only scaling pointer indexing by element byte size | fail-first ad hoc probe exposed wrong raw bytes; focused unit `preserves unaligned typed pointer views over byte storage`; real WebGPU fixture `storage:param-byte-unaligned-float-helper-reinterpret` `1/0/0` |
