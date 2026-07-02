@@ -1924,6 +1924,102 @@ __global__ void surface3DVectorWriteActiveLaneReturn(cudaSurfaceObject_t surf, f
     out[tid] = 1.0f + (float)tid;
   }
 }`,
+  surface3DPointerAliasActiveLaneStore: `
+__device__ float read_3d_alias_surface_scalar(cudaSurfaceObject_t surfaceArg, int z) {
+  return surf3Dread<float>(surfaceArg, 0, 0, z);
+}
+
+__device__ void write_3d_surface_alias_lane(float *scalarOut, int lane, float value) {
+  scalarOut[lane * 4 + 2] = value;
+}
+
+__global__ void surface3DPointerAliasActiveLaneStore(cudaSurfaceObject_t surf, float4 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    float *scalarView = reinterpret_cast<float*>(out);
+    write_3d_surface_alias_lane(scalarView, tid, read_3d_alias_surface_scalar(surf, 1) + (float)tid);
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_float4(1.0f + (float)tid, 10.0f + (float)tid, 20.0f + (float)tid, 30.0f + (float)tid);
+}`,
+  surface3DPointerAliasAtomicActiveLaneStore: `
+__device__ uint read_3d_atomic_alias_surface_scalar(cudaSurfaceObject_t surfaceArg, int z) {
+  return surf3Dread<uint>(surfaceArg, 0, 0, z);
+}
+
+__device__ void atomic_3d_surface_alias_lane(uint *scalarOut, int lane, uint value) {
+  atomicAdd(&scalarOut[lane * 4 + 2], value);
+}
+
+__global__ void surface3DPointerAliasAtomicActiveLaneStore(cudaSurfaceObject_t surf, uint4 *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    uint *scalarView = reinterpret_cast<uint*>(out);
+    atomic_3d_surface_alias_lane(scalarView, tid, read_3d_atomic_alias_surface_scalar(surf, 1) + (uint)tid);
+    return;
+  }
+  __syncthreads();
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+}`,
+  surface3DPointerAliasAtomicVectorReadback: `
+__device__ uint read_3d_atomic_readback_surface_scalar(cudaSurfaceObject_t surfaceArg, int z) {
+  return surf3Dread<uint>(surfaceArg, 0, 0, z);
+}
+
+__device__ void atomic_3d_surface_readback_alias_lane(uint *scalarOut, int lane, uint value) {
+  atomicAdd(&scalarOut[lane * 4 + 1], value);
+}
+
+__global__ void surface3DPointerAliasAtomicVectorReadback(cudaSurfaceObject_t surf, uint4 *out, uint *summary) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  __syncthreads();
+  if (tid == 0) {
+    uint *scalarView = reinterpret_cast<uint*>(out);
+    atomic_3d_surface_readback_alias_lane(scalarView, 1, read_3d_atomic_readback_surface_scalar(surf, 1));
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    summary[0] = value.x + value.y + value.z + value.w;
+  }
+}`,
+  surface3DPointerAliasAtomicVectorCompound: `
+__device__ uint read_3d_atomic_compound_surface_scalar(cudaSurfaceObject_t surfaceArg, int z) {
+  return surf3Dread<uint>(surfaceArg, 0, 0, z);
+}
+
+__device__ void atomic_3d_surface_compound_alias_lane(uint *scalarOut, int lane, uint value) {
+  atomicAdd(&scalarOut[lane * 4 + 1], value);
+}
+
+__device__ void add_3d_surface_vector_alias(uint4 *vectorOut, int lane, uint4 value) {
+  vectorOut[lane] += value;
+}
+
+__device__ void add_3d_surface_vector_alias_y(uint4 *vectorOut, int lane, uint value) {
+  vectorOut[lane].y += value;
+}
+
+__global__ void surface3DPointerAliasAtomicVectorCompound(cudaSurfaceObject_t surf, uint4 *out, uint *summary) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  __syncthreads();
+  if (tid == 0) {
+    uint *scalarView = reinterpret_cast<uint*>(out);
+    atomic_3d_surface_compound_alias_lane(scalarView, 1, read_3d_atomic_compound_surface_scalar(surf, 1));
+    uint4 *vectorView = reinterpret_cast<uint4*>(out);
+    add_3d_surface_vector_alias(vectorView, 1, make_uint4(1u, 1u, 1u, 1u));
+    add_3d_surface_vector_alias_y(vectorView, 2, 9u);
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 laneTwo = out[2];
+    summary[0] = (value.x + value.y + value.z + value.w) + 100u * (laneTwo.x + laneTwo.y + laneTwo.z + laneTwo.w);
+  }
+}`,
   surface3DPointerAliasAtomicPointerArraySelect: `
 __device__ uint4 read_3d_surface_pointer_array_vec(cudaSurfaceObject_t surfaceArg, int z) {
   return surf3Dread<uint4>(surfaceArg, 0, 0, z);
@@ -7069,6 +7165,74 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [182, 2, 3, 0] },
+          },
+          {
+            name: "surface:surf3d-pointer-alias-active-lane-store",
+            source: SOURCES.surface3DPointerAliasActiveLaneStore,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(16),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [1, 10, 20, 30, 2, 11, 21, 31, 3, 12, 22, 32, 0, 0, 8, 0] },
+          },
+          {
+            name: "surface:surf3d-pointer-alias-atomic-active-lane-store",
+            source: SOURCES.surface3DPointerAliasAtomicActiveLaneStore,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [1, 10, 20, 30, 2, 11, 21, 31, 3, 12, 22, 32, 0, 0, 8, 0] },
+          },
+          {
+            name: "surface:surf3d-pointer-alias-atomic-vector-readback",
+            source: SOURCES.surface3DPointerAliasAtomicVectorReadback,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [70] },
+          },
+          {
+            name: "surface:surf3d-pointer-alias-atomic-vector-compound",
+            source: SOURCES.surface3DPointerAliasAtomicVectorCompound,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [7874] },
           },
           {
             name: "surface:surf3d-pointer-alias-atomic-pointer-array-select",

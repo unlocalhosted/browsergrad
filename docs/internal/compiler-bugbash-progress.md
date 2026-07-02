@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T07:36:27Z
+Last updated: 2026-07-02T07:41:07Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | surf3D surface pointer-array select/basic active-lane return probed green; continue next corpus-shaped storage/texture/control probe |
+| Active work item | surf3D surface pointer-alias active/atomic vector probes green; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -502,11 +502,15 @@ Current verified gates:
 - surf3D surface pointer-array select/basic active-lane fixtures: `surface:surf3d-pointer-alias-atomic-pointer-array-select,surface:surf3d-pointer-alias-atomic-pointer-array-active-lane-return` are `2 passed / 0 failed / 0 skipped`
 - hot surf3D surface pointer-array select/basic active-lane probe: repeat `5`, warmup `1`, `10 passed / 0 failed / 0 skipped`, best warm `4.0ms` / `3.5ms`, speedups `1.18` / `1.31`
 - WebGPU smoke after surf3D surface pointer-array select/basic active-lane probe: `220 passed / 0 failed / 0 skipped`
+- surf3D surface pointer-alias active/atomic vector fixtures: `surface:surf3d-pointer-alias-active-lane-store,surface:surf3d-pointer-alias-atomic-active-lane-store,surface:surf3d-pointer-alias-atomic-vector-readback,surface:surf3d-pointer-alias-atomic-vector-compound` are `4 passed / 0 failed / 0 skipped`
+- hot surf3D surface pointer-alias active/atomic vector probe: repeat `5`, warmup `1`, `20 passed / 0 failed / 0 skipped`, best warm `3.2ms` / `2.9ms` / `3.0ms` / `3.9ms`, speedups `1.16` / `1.24` / `1.23` / `1.21`
+- WebGPU smoke after surf3D surface pointer-alias active/atomic vector probe: `224 passed / 0 failed / 0 skipped`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Probed green | surf3D surface pointer-alias active/atomic vector writes | 3D-surface scalar reads feeding float pointer-lane stores, atomic lane stores, atomic readback, and vector compound helper writes could regress z-linearized scalar reads, scalar-cast storage views, atomic lane writes, vector readback, or compound vector assignment | existing 3D surface scalar read, scalar storage view, atomic lane lowering, and vector compound assignment preserve side effects and readback | `surface:surf3d-pointer-alias-active-lane-store,surface:surf3d-pointer-alias-atomic-active-lane-store,surface:surf3d-pointer-alias-atomic-vector-readback,surface:surf3d-pointer-alias-atomic-vector-compound` `4/0/0`; smoke `224/0/0`; hot gate `20/0/0`, speedups `1.16` / `1.24` / `1.23` / `1.21` |
 | Probed green | surf3D surface pointer-array select/basic active-lane return | 3D-surface-fed `uint4` selected scalar pointer-array atomic adds, both ordinary select and pre-barrier active-lane early return, could regress z-linearized vector reads, selected buffer handles, scalar-lane atomic writes, or side effects before a later barrier | existing 3D surface vector read, scalar pointer-array atomic lowering, and active-lane guard preserve selected-buffer writes before return | `surface:surf3d-pointer-alias-atomic-pointer-array-select,surface:surf3d-pointer-alias-atomic-pointer-array-active-lane-return` `2/0/0`; smoke `220/0/0`; hot gate `10/0/0`, speedups `1.18` / `1.31` |
 | Probed green | surf3D surface pointer-array CAS/exchange active-lane return | 3D-surface-fed `uint4` selected scalar pointer-array CAS/exchange ops before an early `return` could regress z-linearized surface vector reads, compare/exchange old values, selected buffer handles, or active-lane side effects before a later barrier | existing 3D surface vector read, pointer-array CAS/exchange lowering, and active-lane guard preserve old-value side effects before return | `surface:surf3d-pointer-alias-atomic-pointer-array-cas-active-lane-return` `1/0/0`; smoke `218/0/0`; hot gate `5/0/0`, speedup `1.16` |
 | Probed green | surf3D surface pointer-array min/max active-lane return | 3D-surface-fed `uint4` selected scalar pointer-array min/max ops before an early `return` could regress z-linearized surface vector reads, unsigned min/max old values, selected buffer handles, or active-lane side effects before a later barrier | existing 3D surface vector read, pointer-array min/max lowering, and active-lane guard preserve old-value side effects before return | `surface:surf3d-pointer-alias-atomic-pointer-array-minmax-active-lane-return` `1/0/0`; smoke `218/0/0`; hot gate `5/0/0`, speedup `1.09` |
@@ -639,6 +643,10 @@ Current added surface/texture cases:
 - `surface:layered-vector-read`
 - `surface:surf3d-vector-read`
 - `surface:surf3d-vector-write-active-lane-return`
+- `surface:surf3d-pointer-alias-active-lane-store`
+- `surface:surf3d-pointer-alias-atomic-active-lane-store`
+- `surface:surf3d-pointer-alias-atomic-vector-readback`
+- `surface:surf3d-pointer-alias-atomic-vector-compound`
 - `surface:surf3d-pointer-alias-atomic-pointer-array-select`
 - `surface:surf3d-pointer-alias-atomic-pointer-array-active-lane-return`
 - `surface:surf3d-pointer-alias-atomic-pointer-array-compound-active-lane-return`
@@ -754,7 +762,7 @@ Current added pointer/control cases:
 - `control:active-lane-shared-return-side-effect-barrier`
 - `control:subgroup-truthiness-assignment-scalar`
 
-Smoke current: `220/0/0`.
+Smoke current: `224/0/0`.
 
 Full source e2e current: `221/0/0`.
 
@@ -765,13 +773,13 @@ Verifier current: src `253/0/0`, dist `253/0/0`.
 Probe these with fail-first real WebGPU fixtures:
 
 - Surface family:
-  - surface writes before active-lane return, layered writes, helper layered vector writes, layered reads, 3D reads, layered/3D vector reads, surface vector read/write before active-lane return, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 surface vector write/read before active-lane return, mixed scalar/vector layered surface side effects, surface-read pointer-alias side effects, surface-read atomic pointer-alias side effects, surface atomic vector readback, surface atomic vector compound helper writes, surf3D pointer-array select/active/compound/CAS/minmax, and 3D vector writes fed by layered/3D texture vectors are now green; keep probing next corpus-shaped surface/texture pattern
+  - surface writes before active-lane return, layered writes, helper layered vector writes, layered reads, 3D reads, layered/3D vector reads, surface vector read/write before active-lane return, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 surface vector write/read before active-lane return, mixed scalar/vector layered surface side effects, surface-read pointer-alias side effects, surface-read atomic pointer-alias side effects, surface atomic vector readback, surface atomic vector compound helper writes, surf3D pointer-alias active/atomic vector probes, surf3D pointer-array select/active/compound/CAS/minmax, and 3D vector writes fed by layered/3D texture vectors are now green; keep probing next corpus-shaped surface/texture pattern
 - Texture family:
   - vector helper return, cast/coercion, active-lane pre-return read, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 texture active-lane stores, texture-to-surface pre-return side effects, 2-lane/3-lane/4-lane texture-fed layered surface vector writes/reads, mixed scalar/vector texture-fed layered surface vector writes/reads, texture-fed layered surface vector writes, layered/3D texture vector reads feeding 3D surface vector writes, atlas/layered active-lane reads, deep helper vector stores, mixed scalar/vector texture stores, texture-fed pointer alias writes, texture-fed pointer alias atomics, atomic vector readback, atomic vector compound helper writes, and atomic vector member helper writes are now green; keep probing next corpus-shaped texture/storage pattern
 - Pointer/vector family:
   - mixed local pointer-param + generic storage pointer helper now has explicit diagnostic; implementation support remains future work
 - Active-lane/control family:
-  - loop-internal, alternate-branch, nested, loop+alternate, scalar side-effect, vector-lane side-effect, pointer-alias side-effect, atomic side-effect, shared-memory side-effect, surface side-effect, texture read side-effect, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 texture-store side-effect, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 surface side-effect, mixed scalar/vector layered surface side-effect, surface-read pointer-alias side-effect, surface-read atomic pointer-alias side-effect, surface atomic vector readback, surface atomic vector compound helper, surf3D pointer-array select/active/compound/CAS/minmax, texture-to-surface side-effect, 2-lane/3-lane/4-lane texture-fed layered surface vector side-effect, mixed scalar/vector texture-fed layered surface vector side-effect, texture-fed layered surface vector side-effect, layered/3D texture into 3D surface vector side-effect, atlas/layered texture return, deep helper vector-store, mixed scalar/vector texture-store, texture-fed pointer-alias, texture-fed pointer-alias atomic, atomic vector readback, atomic vector compound helper, and atomic vector member helper cases are now green in real WebGPU; keep probing next corpus-shaped texture/storage pattern
+  - loop-internal, alternate-branch, nested, loop+alternate, scalar side-effect, vector-lane side-effect, pointer-alias side-effect, atomic side-effect, shared-memory side-effect, surface side-effect, texture read side-effect, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 texture-store side-effect, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 surface side-effect, mixed scalar/vector layered surface side-effect, surface-read pointer-alias side-effect, surface-read atomic pointer-alias side-effect, surface atomic vector readback, surface atomic vector compound helper, surf3D pointer-alias active/atomic vector probes, surf3D pointer-array select/active/compound/CAS/minmax, texture-to-surface side-effect, 2-lane/3-lane/4-lane texture-fed layered surface vector side-effect, mixed scalar/vector texture-fed layered surface vector side-effect, texture-fed layered surface vector side-effect, layered/3D texture into 3D surface vector side-effect, atlas/layered texture return, deep helper vector-store, mixed scalar/vector texture-store, texture-fed pointer-alias, texture-fed pointer-alias atomic, atomic vector readback, atomic vector compound helper, and atomic vector member helper cases are now green in real WebGPU; keep probing next corpus-shaped texture/storage pattern
   - non-uniform break/return should remain clear diagnostic, not silent miscompile
 - Perf/tooling:
   - keep `verify:changed` scoped and explain selected gates
