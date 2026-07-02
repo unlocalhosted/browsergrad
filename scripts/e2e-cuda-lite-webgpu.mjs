@@ -281,6 +281,22 @@ __global__ void selected(float *x) {
     x[0] += 2.0f;
   }
 }`,
+  unreachableFeatureAsmCompatDiagnostics: `
+__device__ double unused_double(double value) {
+  double acc = value + 1.0;
+  return acc;
+}
+
+__device__ void unused_inline_asm(int *out) {
+  asm volatile("cp.async.commit_group;\\n" ::);
+  out[0] = 1;
+}
+
+__global__ void selected(float *x) {
+  if (threadIdx.x == 0) {
+    x[0] += 2.0f;
+  }
+}`,
   recursiveDynamicLaunch: `
 __global__ void child(float *dst, int value) {
   if (threadIdx.x < 1) { dst[0] += (float)value; }
@@ -6057,6 +6073,24 @@ const html = String.raw`<!doctype html>
               "unused_grid_sync",
               "grid.sync",
               "cg::sync",
+            ],
+          },
+          {
+            name: "runtime:unreachable-feature-asm-compat-diagnostics",
+            source: SOURCES.unreachableFeatureAsmCompatDiagnostics,
+            options: { kernelName: "selected", workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                x: new Float32Array([3]),
+              },
+            }),
+            output: "x",
+            expectedOutput: { type: "Float32Array", data: [5] },
+            wgslNotContains: [
+              "unused_double",
+              "unused_inline_asm",
+              "cp.async",
             ],
           },
           {

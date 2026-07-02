@@ -255,8 +255,9 @@ export function analyzeCudaLite(
   }
   for (const fn of ast.functions) {
     if (selectedDeviceFunctionAsKernel && fn.name === kernel.name) continue;
-    const featureSink = reachableFunctionSpans.has(fn.span.start) ? requiredFeatures : new Set<string>();
-    declareDeviceFunction(fn, rootScope, declaredNames, featureSink, diagnostics, options);
+    const reachableFunction = reachableFunctionSpans.has(fn.span.start);
+    const featureSink = reachableFunction ? requiredFeatures : new Set<string>();
+    declareDeviceFunction(fn, rootScope, declaredNames, featureSink, diagnostics, options, reachableFunction);
   }
   const rootDeclaredNames = new Set(declaredNames);
 
@@ -291,7 +292,7 @@ export function analyzeCudaLite(
       span: statement.span,
     });
     if (statement.matrixTile) validateMatrixTileDeclaration(statement, activeRequiredFeatures, diagnostics);
-    else validateF64Type(statement.valueType, statement.span, diagnostics, options);
+    else validateF64Type(statement.valueType, statement.span, diagnostics, options, activeStatementsReachable);
   };
 
   const walkExpression = (expression: CudaLiteExpression, scope: Scope): ExpressionInfo => {
@@ -413,7 +414,7 @@ export function analyzeCudaLite(
           for (const arg of statement.args) walkExpression(arg, scope);
           break;
         case "asm":
-          validateInlineAsmStatement(statement, scope, diagnostics, walkExpression);
+          validateInlineAsmStatement(statement, scope, diagnostics, walkExpression, activeStatementsReachable);
           break;
         case "expr":
           if (isBarrierCall(statement.expression)) {
@@ -531,7 +532,7 @@ export function analyzeCudaLite(
       functionDeclaredNames.add(param.name);
       functionScope.symbols.set(param.name, symbolForParam(param, "local"));
       if (requiresShaderF16(param.valueType)) activeRequiredFeatures.add("shader-f16");
-      validateF64Type(param.valueType, param.span, diagnostics, options);
+      validateF64Type(param.valueType, param.span, diagnostics, options, reachableFunction);
     }
     walkStatements(fn.body, functionScope, 0, 0, 0, functionDeclaredNames);
     if (reachableFunction) {
@@ -681,8 +682,10 @@ function validateF64Type(
   span: SourceSpan,
   diagnostics: CudaLiteDiagnostic[],
   options: CudaLiteAnalyzeOptions,
+  compatibilityDiagnosticsReachable = true,
 ): void {
   if (type !== "double") return;
+  if (!compatibilityDiagnosticsReachable) return;
   if (options.f64Mode === "f32") {
     diagnostics.push(warning(
       "f64-lowered-to-f32",
@@ -1100,6 +1103,7 @@ function declareDeviceFunction(
   requiredFeatures: Set<string>,
   diagnostics: CudaLiteDiagnostic[],
   options: CudaLiteAnalyzeOptions,
+  compatibilityDiagnosticsReachable: boolean,
 ): void {
   const existing = rootScope.symbols.get(fn.name);
   if (existing?.kind === "device-function") {
@@ -1127,10 +1131,10 @@ function declareDeviceFunction(
   }
   validateDeclaredSymbolName(fn.name, fn.span, diagnostics);
   if (requiresShaderF16(fn.returnType)) requiredFeatures.add("shader-f16");
-  validateF64Type(fn.returnType, fn.span, diagnostics, options);
+  validateF64Type(fn.returnType, fn.span, diagnostics, options, compatibilityDiagnosticsReachable);
   for (const param of fn.params) {
     if (requiresShaderF16(param.valueType)) requiredFeatures.add("shader-f16");
-    validateF64Type(param.valueType, param.span, diagnostics, options);
+    validateF64Type(param.valueType, param.span, diagnostics, options, compatibilityDiagnosticsReachable);
   }
 }
 
@@ -1404,11 +1408,13 @@ function validateInlineAsmStatement(
   scope: Scope,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
+  compatibilityDiagnosticsReachable: boolean,
 ): void {
   const op = classifyInlineAsm(statement.template);
   const outputs = statement.outputs ?? (statement.output === undefined ? [] : [statement.output]);
+  const asmDiagnostics = compatibilityDiagnosticsReachable ? diagnostics : [];
   if (!op) {
-    diagnostics.push(error("unsupported-inline-asm", `only ${inlineAsmSupportedList()} inline PTX are supported in CUDA-lite v0`, statement.span));
+    asmDiagnostics.push(error("unsupported-inline-asm", `only ${inlineAsmSupportedList()} inline PTX are supported in CUDA-lite v0`, statement.span));
   }
   const outputInfos = outputs.map((output) => walkExpression(output, scope));
   for (let index = 0; index < outputs.length; index++) {
@@ -1417,46 +1423,46 @@ function validateInlineAsmStatement(
     validateScalarOperand(outputInfos[index]!, output.span, diagnostics);
   }
   if (op?.kind === "fma-rn-f32" && (outputs.length !== 1 || statement.inputs.length !== 2)) {
-    diagnostics.push(error("invalid-inline-asm-operands", "fma.rn.f32 inline PTX expects one output operand and exactly two input operands", statement.span));
+    asmDiagnostics.push(error("invalid-inline-asm-operands", "fma.rn.f32 inline PTX expects one output operand and exactly two input operands", statement.span));
   }
   if (op?.kind === "laneid" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
-    diagnostics.push(error("invalid-inline-asm-operands", "laneid inline PTX expects one output operand and no input operands", statement.span));
+    asmDiagnostics.push(error("invalid-inline-asm-operands", "laneid inline PTX expects one output operand and no input operands", statement.span));
   }
   if (op?.kind === "laneid" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    diagnostics.push(error("invalid-inline-asm-operands", "laneid inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
+    asmDiagnostics.push(error("invalid-inline-asm-operands", "laneid inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "lanemask-lt" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
-    diagnostics.push(error("invalid-inline-asm-operands", "lanemask_lt inline PTX expects one output operand and no input operands", statement.span));
+    asmDiagnostics.push(error("invalid-inline-asm-operands", "lanemask_lt inline PTX expects one output operand and no input operands", statement.span));
   }
   if (op?.kind === "lanemask-lt" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    diagnostics.push(error("invalid-inline-asm-operands", "lanemask_lt inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
+    asmDiagnostics.push(error("invalid-inline-asm-operands", "lanemask_lt inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "globaltimer-u64" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
-    diagnostics.push(error("invalid-inline-asm-operands", "globaltimer inline PTX expects one output operand and no input operands", statement.span));
+    asmDiagnostics.push(error("invalid-inline-asm-operands", "globaltimer inline PTX expects one output operand and no input operands", statement.span));
   }
   if (op?.kind === "globaltimer-u64" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    diagnostics.push(error("invalid-inline-asm-operands", "globaltimer inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
+    asmDiagnostics.push(error("invalid-inline-asm-operands", "globaltimer inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "bfind-u32" && (outputs.length !== 1 || statement.inputs.length !== 1)) {
-    diagnostics.push(error("invalid-inline-asm-operands", "bfind.u32 inline PTX expects one output operand and one input operand", statement.span));
+    asmDiagnostics.push(error("invalid-inline-asm-operands", "bfind.u32 inline PTX expects one output operand and one input operand", statement.span));
   }
   if (op?.kind === "bfind-u32" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint") {
-    diagnostics.push(error("invalid-inline-asm-operands", "bfind.u32 inline PTX writes a uint output operand", outputs[0]?.span ?? statement.span));
+    asmDiagnostics.push(error("invalid-inline-asm-operands", "bfind.u32 inline PTX writes a uint output operand", outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "u8x4-sad-add" && (outputs.length !== 1 || statement.inputs.length !== 3)) {
-    diagnostics.push(error("invalid-inline-asm-operands", "vabsdiff4.u32.u32.u32.add inline PTX expects one output operand and three input operands", statement.span));
+    asmDiagnostics.push(error("invalid-inline-asm-operands", "vabsdiff4.u32.u32.u32.add inline PTX expects one output operand and three input operands", statement.span));
   }
   if (op?.kind === "u8x4-sad-add" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
-    diagnostics.push(error("invalid-inline-asm-operands", "vabsdiff4.u32.u32.u32.add inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
+    asmDiagnostics.push(error("invalid-inline-asm-operands", "vabsdiff4.u32.u32.u32.add inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
   if (op?.kind === "ldmatrix") {
     if (outputs.length !== op.matrices || statement.inputs.length !== 1) {
-      diagnostics.push(error("invalid-inline-asm-operands", `ldmatrix.x${op.matrices} inline PTX expects ${op.matrices} output operand(s) and one shared-address input operand`, statement.span));
+      asmDiagnostics.push(error("invalid-inline-asm-operands", `ldmatrix.x${op.matrices} inline PTX expects ${op.matrices} output operand(s) and one shared-address input operand`, statement.span));
     }
     for (let index = 0; index < outputs.length; index++) {
       const type = outputInfos[index]?.valueType;
       if (type !== undefined && type !== "uint" && type !== "int") {
-        diagnostics.push(error("invalid-inline-asm-operands", "ldmatrix inline PTX writes integer register carrier operands", outputs[index]?.span ?? statement.span));
+        asmDiagnostics.push(error("invalid-inline-asm-operands", "ldmatrix inline PTX writes integer register carrier operands", outputs[index]?.span ?? statement.span));
       }
     }
   }
@@ -1464,7 +1470,7 @@ function validateInlineAsmStatement(
     const outputCount = op.accumulator === "f32" ? 4 : 2;
     const inputCount = op.accumulator === "f32" ? 10 : 8;
     if (outputs.length !== outputCount || statement.inputs.length !== inputCount) {
-      diagnostics.push(error("invalid-inline-asm-operands", `mma.m16n8k16 ${op.accumulator} inline PTX expects ${outputCount} output operand(s) and ${inputCount} input operands`, statement.span));
+      asmDiagnostics.push(error("invalid-inline-asm-operands", `mma.m16n8k16 ${op.accumulator} inline PTX expects ${outputCount} output operand(s) and ${inputCount} input operands`, statement.span));
     }
   }
   for (const input of statement.inputs) {
