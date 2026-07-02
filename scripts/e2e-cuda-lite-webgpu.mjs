@@ -820,6 +820,19 @@ __global__ void storageByteFloatHelperReinterpret(uchar *scratch, float *out) {
     write_storage_byte_float((float *)&scratch[0], out);
   }
 }`,
+  storageByteUnalignedFloatHelperReinterpret: `
+__device__ void write_unaligned_storage_byte_float(float *value, float *out) {
+  value[0] = 1.0f;
+  value[1] = 2.0f;
+  out[0] = value[0];
+  out[1] = value[1];
+}
+
+__global__ void storageByteUnalignedFloatHelperReinterpret(uchar *scratch, float *out) {
+  if (threadIdx.x == 0) {
+    write_unaligned_storage_byte_float((float *)&scratch[1], out);
+  }
+}`,
   localVectorPointerArray: `
 __device__ float3 sum3(float3 *a, float3 *b, float3 *c) {
   return *a + *b + *c;
@@ -6401,6 +6414,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [1, 2] },
+          },
+          {
+            name: "storage:param-byte-unaligned-float-helper-reinterpret",
+            source: SOURCES.storageByteUnalignedFloatHelperReinterpret,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                scratch: new Uint32Array(3),
+                out: new Float32Array(2),
+              },
+            }),
+            output: "scratch",
+            expectedOutput: { type: "Uint32Array", data: [0x80000000, 0x0000003f, 0x00000040] },
           },
           {
             name: "storage:local-vector-pointer-array",

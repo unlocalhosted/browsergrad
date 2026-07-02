@@ -505,7 +505,7 @@ function emitPackedByteSharedRead(
     const shift = `(((${index}) & 2u) * 8u)`;
     return `bitcast<f32>((((${loaded} >> ${shift}) & 0xffffu) << 16u))`;
   }
-  if (viewType !== "uchar") return emitPackedByteWordAsView(loaded, viewType);
+  if (viewType !== "uchar") return emitPackedByteBitsAsView(emitPackedByteAlignedOrAssembledSharedBits(shared, index, viewType, context), viewType);
   const shift = `(((${index}) & 3u) * 8u)`;
   return `((${loaded} >> (${shift})) & 255u)`;
 }
@@ -525,16 +525,13 @@ function emitPackedByteStorageRead(
     );
     return `${wgslScalar(viewType)}(${values.join(", ")})`;
   }
-  const word = `${name}[((${index}) >> 2u)]`;
   if (viewType === "half") {
-    const unpacked = `unpack2x16float(${word})`;
-    return `${wgslScalar("half")}(select(${unpacked}.x, ${unpacked}.y, (((${index}) & 2u) != 0u)))`;
+    return emitPackedByteBitsAsView(emitPackedByteAlignedOrAssembledStorageBits(name, index, viewType), viewType);
   }
   if (viewType === "bf16") {
-    const shift = `(((${index}) & 2u) * 8u)`;
-    return `bitcast<f32>(((((${word}) >> ${shift}) & 0xffffu) << 16u))`;
+    return emitPackedByteBitsAsView(emitPackedByteAlignedOrAssembledStorageBits(name, index, viewType), viewType);
   }
-  return emitPackedByteWordAsView(word, viewType);
+  return emitPackedByteBitsAsView(emitPackedByteAlignedOrAssembledStorageBits(name, index, viewType), viewType);
 }
 
 function emitPackedByteSharedWrite(
@@ -552,21 +549,15 @@ function emitPackedByteSharedWrite(
       emitPackedByteSharedWrite(shared, `(${index} + ${lane * stride}u)`, `${value}.${vectorFieldName(lane)}`, scalar, context)
     ).filter((line): line is string => line !== undefined).join("; ");
   }
-  const wordIndex = `((${index}) >> 2u)`;
-  const word = `${context.nameFor(shared.name)}[${wordIndex}]`;
   if (viewType === "half") {
-    const shift = `(((${index}) & 2u) * 8u)`;
-    const mask = `(0xffffu << ${shift})`;
-    const halfBits = `(pack2x16float(vec2<f32>(f32(${value}), 0.0)) & 0xffffu)`;
-    return `atomicAnd(&${word}, ~${mask}); atomicOr(&${word}, (${halfBits} << ${shift}))`;
+    return emitPackedByteSharedAlignedOrByteWrite(shared, index, emitPackedByteViewAsBits(value, viewType), viewType, context);
   }
   if (viewType === "bf16") {
-    const shift = `(((${index}) & 2u) * 8u)`;
-    const mask = `(0xffffu << ${shift})`;
-    const bits = `(((bitcast<u32>(f32(${value})) + 0x8000u) >> 16u) & 0xffffu)`;
-    return `atomicAnd(&${word}, ~${mask}); atomicOr(&${word}, (${bits} << ${shift}))`;
+    return emitPackedByteSharedAlignedOrByteWrite(shared, index, emitPackedByteViewAsBits(value, viewType), viewType, context);
   }
-  if (viewType !== "uchar") return `atomicStore(&${word}, ${emitPackedByteViewAsWord(value, viewType)})`;
+  if (viewType !== "uchar") return emitPackedByteSharedAlignedOrByteWrite(shared, index, emitPackedByteViewAsBits(value, viewType), viewType, context);
+  const wordIndex = `((${index}) >> 2u)`;
+  const word = `${context.nameFor(shared.name)}[${wordIndex}]`;
   const shift = `(((${index}) & 3u) * 8u)`;
   const mask = `(255u << ${shift})`;
   const cleared = `atomicAnd(&${word}, ~${mask})`;
@@ -589,20 +580,211 @@ function emitPackedByteStorageWrite(
       emitPackedByteStorageWrite(name, storageType, `(${index} + ${lane * stride}u)`, `${value}.${vectorFieldName(lane)}`, scalar)
     ).filter((line): line is string => line !== undefined).join("; ");
   }
-  const word = `${name}[((${index}) >> 2u)]`;
   if (viewType === "half") {
-    const shift = `(((${index}) & 2u) * 8u)`;
-    const mask = `(0xffffu << ${shift})`;
-    const halfBits = `(pack2x16float(vec2<f32>(f32(${value}), 0.0)) & 0xffffu)`;
-    return `${word} = ((${word} & ~${mask}) | (${halfBits} << ${shift}))`;
+    return emitPackedByteStorageAlignedOrByteWrite(name, index, emitPackedByteViewAsBits(value, viewType), viewType);
   }
   if (viewType === "bf16") {
-    const shift = `(((${index}) & 2u) * 8u)`;
-    const mask = `(0xffffu << ${shift})`;
-    const bits = `(((bitcast<u32>(f32(${value})) + 0x8000u) >> 16u) & 0xffffu)`;
-    return `${word} = ((${word} & ~${mask}) | (${bits} << ${shift}))`;
+    return emitPackedByteStorageAlignedOrByteWrite(name, index, emitPackedByteViewAsBits(value, viewType), viewType);
   }
-  return `${word} = ${emitPackedByteViewAsWord(value, viewType)}`;
+  return emitPackedByteStorageAlignedOrByteWrite(name, index, emitPackedByteViewAsBits(value, viewType), viewType);
+}
+
+function emitPackedByteAlignedOrAssembledStorageBits(name: string, index: string, viewType: CudaLiteScalarType): string {
+  const assembled = emitPackedByteStorageBits(name, index, viewType);
+  const aligned = emitPackedByteAlignedStorageBits(name, index, viewType);
+  return aligned === undefined ? assembled : `select(${assembled}, ${aligned}, ${emitPackedByteAlignedCondition(index, viewType)})`;
+}
+
+function emitPackedByteAlignedOrAssembledSharedBits(
+  shared: CudaLiteVarDecl,
+  index: string,
+  viewType: CudaLiteScalarType,
+  context: WgslStorageEmitContext,
+): string {
+  const assembled = emitPackedByteSharedBits(shared, index, viewType, context);
+  const aligned = emitPackedByteAlignedSharedBits(shared, index, viewType, context);
+  return aligned === undefined ? assembled : `select(${assembled}, ${aligned}, ${emitPackedByteAlignedCondition(index, viewType)})`;
+}
+
+function emitPackedByteStorageBits(name: string, index: string, viewType: CudaLiteScalarType): string {
+  return emitPackedByteAssembledBits(
+    index,
+    viewType,
+    (byteIndex) => `((${name}[(${byteIndex}) >> 2u] >> ((((${byteIndex}) & 3u)) * 8u)) & 255u)`,
+  );
+}
+
+function emitPackedByteAlignedStorageBits(name: string, index: string, viewType: CudaLiteScalarType): string | undefined {
+  if (viewType === "uchar" || isCudaVectorType(viewType)) return undefined;
+  const word = `${name}[(u32(${index})) >> 2u]`;
+  if (viewType === "half" || viewType === "bf16") {
+    const shift = `(((u32(${index})) & 2u) * 8u)`;
+    return `((${word} >> ${shift}) & 0xffffu)`;
+  }
+  return word;
+}
+
+function emitPackedByteAlignedSharedBits(
+  shared: CudaLiteVarDecl,
+  index: string,
+  viewType: CudaLiteScalarType,
+  context: WgslStorageEmitContext,
+): string | undefined {
+  if (viewType === "uchar" || isCudaVectorType(viewType)) return undefined;
+  const word = `atomicLoad(&${context.nameFor(shared.name)}[(u32(${index})) >> 2u])`;
+  if (viewType === "half" || viewType === "bf16") {
+    const shift = `(((u32(${index})) & 2u) * 8u)`;
+    return `((${word} >> ${shift}) & 0xffffu)`;
+  }
+  return word;
+}
+
+function emitPackedByteSharedBits(
+  shared: CudaLiteVarDecl,
+  index: string,
+  viewType: CudaLiteScalarType,
+  context: WgslStorageEmitContext,
+): string {
+  const name = context.nameFor(shared.name);
+  return emitPackedByteAssembledBits(
+    index,
+    viewType,
+    (byteIndex) => `((atomicLoad(&${name}[(${byteIndex}) >> 2u]) >> ((((${byteIndex}) & 3u)) * 8u)) & 255u)`,
+  );
+}
+
+function emitPackedByteAssembledBits(
+  index: string,
+  viewType: CudaLiteScalarType,
+  byteExpression: (byteIndex: string) => string,
+): string {
+  const byteCount = wgslElementByteSize(viewType);
+  const bytes = Array.from({ length: byteCount }, (_, offset) => {
+    const byteIndex = offset === 0 ? `u32(${index})` : `(u32(${index}) + ${offset}u)`;
+    const byte = byteExpression(byteIndex);
+    return offset === 0 ? byte : `((${byte}) << ${offset * 8}u)`;
+  });
+  return bytes.length === 1 ? bytes[0] ?? "0u" : `(${bytes.join(" | ")})`;
+}
+
+function emitPackedByteStorageBitsWrite(
+  name: string,
+  index: string,
+  bits: string,
+  viewType: CudaLiteScalarType,
+): string {
+  return emitPackedByteBitsWrite(
+    index,
+    viewType,
+    (byteIndex, byteValue) => {
+      const word = `${name}[(${byteIndex}) >> 2u]`;
+      const shift = `(((${byteIndex}) & 3u) * 8u)`;
+      const mask = `(255u << ${shift})`;
+      return `${word} = ((${word} & ~${mask}) | ((${byteValue} & 255u) << ${shift}))`;
+    },
+    bits,
+  );
+}
+
+function emitPackedByteStorageAlignedOrByteWrite(
+  name: string,
+  index: string,
+  bits: string,
+  viewType: CudaLiteScalarType,
+): string {
+  return `if (${emitPackedByteAlignedCondition(index, viewType)}) { ${emitPackedByteStorageAlignedBitsWrite(name, index, bits, viewType)}; } else { ${emitPackedByteStorageBitsWrite(name, index, bits, viewType)}; }`;
+}
+
+function emitPackedByteStorageAlignedBitsWrite(
+  name: string,
+  index: string,
+  bits: string,
+  viewType: CudaLiteScalarType,
+): string {
+  const word = `${name}[(u32(${index})) >> 2u]`;
+  if (viewType === "half" || viewType === "bf16") {
+    const shift = `(((u32(${index})) & 2u) * 8u)`;
+    const mask = `(0xffffu << ${shift})`;
+    return `${word} = ((${word} & ~${mask}) | ((${bits} & 0xffffu) << ${shift}))`;
+  }
+  return `${word} = ${bits}`;
+}
+
+function emitPackedByteSharedBitsWrite(
+  shared: CudaLiteVarDecl,
+  index: string,
+  bits: string,
+  viewType: CudaLiteScalarType,
+  context: WgslStorageEmitContext,
+): string {
+  const name = context.nameFor(shared.name);
+  return emitPackedByteBitsWrite(
+    index,
+    viewType,
+    (byteIndex, byteValue) => {
+      const word = `${name}[(${byteIndex}) >> 2u]`;
+      const shift = `(((${byteIndex}) & 3u) * 8u)`;
+      const mask = `(255u << ${shift})`;
+      return `atomicAnd(&${word}, ~${mask}); atomicOr(&${word}, ((${byteValue} & 255u) << ${shift}))`;
+    },
+    bits,
+  );
+}
+
+function emitPackedByteSharedAlignedOrByteWrite(
+  shared: CudaLiteVarDecl,
+  index: string,
+  bits: string,
+  viewType: CudaLiteScalarType,
+  context: WgslStorageEmitContext,
+): string {
+  return `if (${emitPackedByteAlignedCondition(index, viewType)}) { ${emitPackedByteSharedAlignedBitsWrite(shared, index, bits, viewType, context)}; } else { ${emitPackedByteSharedBitsWrite(shared, index, bits, viewType, context)}; }`;
+}
+
+function emitPackedByteSharedAlignedBitsWrite(
+  shared: CudaLiteVarDecl,
+  index: string,
+  bits: string,
+  viewType: CudaLiteScalarType,
+  context: WgslStorageEmitContext,
+): string {
+  const word = `${context.nameFor(shared.name)}[(u32(${index})) >> 2u]`;
+  if (viewType === "half" || viewType === "bf16") {
+    const shift = `(((u32(${index})) & 2u) * 8u)`;
+    const mask = `(0xffffu << ${shift})`;
+    return `atomicAnd(&${word}, ~${mask}); atomicOr(&${word}, ((${bits} & 0xffffu) << ${shift}))`;
+  }
+  return `atomicStore(&${word}, ${bits})`;
+}
+
+function emitPackedByteAlignedCondition(index: string, viewType: CudaLiteScalarType): string {
+  const mask = Math.min(wgslElementByteSize(viewType), 4) - 1;
+  return mask <= 0 ? "true" : `((u32(${index}) & ${mask}u) == 0u)`;
+}
+
+function emitPackedByteBitsWrite(
+  index: string,
+  viewType: CudaLiteScalarType,
+  writeByte: (byteIndex: string, byteValue: string) => string,
+  bits: string,
+): string {
+  return Array.from({ length: wgslElementByteSize(viewType) }, (_, offset) => {
+    const byteIndex = offset === 0 ? `u32(${index})` : `(u32(${index}) + ${offset}u)`;
+    const byte = offset === 0 ? `(${bits} & 255u)` : `((${bits} >> ${offset * 8}u) & 255u)`;
+    return writeByte(byteIndex, byte);
+  }).join("; ");
+}
+
+function emitPackedByteBitsAsView(bits: string, viewType: CudaLiteScalarType): string {
+  if (viewType === "half") return `${wgslScalar("half")}(unpack2x16float(${bits}).x)`;
+  if (viewType === "bf16") return `bitcast<f32>((${bits} & 0xffffu) << 16u)`;
+  return emitPackedByteWordAsView(bits, viewType);
+}
+
+function emitPackedByteViewAsBits(value: string, viewType: CudaLiteScalarType): string {
+  if (viewType === "half") return `(pack2x16float(vec2<f32>(f32(${value}), 0.0)) & 0xffffu)`;
+  if (viewType === "bf16") return `(((bitcast<u32>(f32(${value})) + 0x8000u) >> 16u) & 0xffffu)`;
+  return emitPackedByteViewAsWord(value, viewType);
 }
 
 function emitPackedByteWordAsView(word: string, viewType: CudaLiteScalarType): string {

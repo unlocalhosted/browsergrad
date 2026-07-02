@@ -3227,9 +3227,10 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
     const valueType = alias.target.valueType;
     const bytePackedRoot = ((alias.target.space === "shared" && context.shared.get(alias.target.name)?.valueType === "uchar") ||
       ((alias.target.space === "buffer" || alias.target.space === "device-global") && context.valueTypes.get(alias.target.name) === "uchar")) &&
+      valueType !== undefined &&
       valueType !== "uchar";
     const index = bytePackedRoot
-      ? ((alias.target.index ?? 0) + chain[0]! * valueStorageWidth(valueType)) * rawStorageUnitByteSize(valueType)
+      ? (alias.target.index ?? 0) + chain[0]! * elementByteSize(valueType)
       : lvalueStorageIndex(alias.target, context) + chain[0]! * valueStorageWidth(valueType);
     return {
       name: alias.target.name,
@@ -3943,23 +3944,22 @@ function readPackedByteSharedValue(
   byteIndex: number,
   valueType: CudaLiteScalarType,
 ): number {
-  const word = readPackedByteSharedWord(buffer, byteIndex);
   if (valueType === "uchar") {
+    const word = readPackedByteSharedWord(buffer, byteIndex);
     const shift = (Math.trunc(byteIndex) & 3) * 8;
     return (word >>> shift) & 0xff;
   }
+  const bits = readPackedByteSharedBits(buffer, byteIndex, elementByteSize(valueType));
   if (valueType === "half") {
-    const shift = (Math.trunc(byteIndex) & 2) * 8;
-    return float16BitsToFloat32((word >>> shift) & 0xffff);
+    return float16BitsToFloat32(bits & 0xffff);
   }
   if (valueType === "bf16") {
-    const shift = (Math.trunc(byteIndex) & 2) * 8;
-    return floatFromBits(((word >>> shift) & 0xffff) << 16);
+    return floatFromBits((bits & 0xffff) << 16);
   }
-  if (valueType === "float" || valueType === "double") return floatFromBits(word);
-  if (valueType === "int") return intFromBits(word);
-  if (valueType === "bool") return word === 0 ? 0 : 1;
-  return word;
+  if (valueType === "float" || valueType === "double") return floatFromBits(bits);
+  if (valueType === "int") return intFromBits(bits);
+  if (valueType === "bool") return bits === 0 ? 0 : 1;
+  return bits;
 }
 
 function writePackedByteSharedValue(
@@ -3968,31 +3968,56 @@ function writePackedByteSharedValue(
   valueType: CudaLiteScalarType,
   value: number,
 ): void {
-  const wordIndex = Math.trunc(byteIndex / 4);
   if (valueType === "half") {
-    const shift = (Math.trunc(byteIndex) & 2) * 8;
-    const old = readPackedByteSharedWordAt(buffer, wordIndex);
-    const mask = 0xffff << shift;
-    const halfBits = float32ToFloat16Bits(value);
-    writePackedByteSharedWord(buffer, wordIndex, ((old & ~mask) | ((halfBits & 0xffff) << shift)) >>> 0);
+    writePackedByteSharedBits(buffer, byteIndex, float32ToFloat16Bits(value), elementByteSize(valueType));
     return;
   }
   if (valueType === "bf16") {
-    const shift = (Math.trunc(byteIndex) & 2) * 8;
-    const old = readPackedByteSharedWordAt(buffer, wordIndex);
-    const mask = 0xffff << shift;
     const bits = (bitsFromFloat(roundBfloat16(value)) >>> 16) & 0xffff;
-    writePackedByteSharedWord(buffer, wordIndex, ((old & ~mask) | (bits << shift)) >>> 0);
+    writePackedByteSharedBits(buffer, byteIndex, bits, elementByteSize(valueType));
     return;
   }
   if (valueType !== "uchar") {
-    writePackedByteSharedWord(buffer, wordIndex, packedByteSharedWord(valueType, value));
+    writePackedByteSharedBits(buffer, byteIndex, packedByteSharedWord(valueType, value), elementByteSize(valueType));
     return;
   }
   const shift = (Math.trunc(byteIndex) & 3) * 8;
+  const wordIndex = Math.trunc(byteIndex / 4);
   const old = readPackedByteSharedWordAt(buffer, wordIndex);
   const mask = 0xff << shift;
   writePackedByteSharedWord(buffer, wordIndex, ((old & ~mask) | ((Math.trunc(value) & 0xff) << shift)) >>> 0);
+}
+
+function readPackedByteSharedBits(
+  buffer: WgslTypedArray,
+  byteIndex: number,
+  byteCount: number,
+): number {
+  let bits = 0;
+  for (let offset = 0; offset < byteCount; offset++) {
+    const current = Math.trunc(byteIndex) + offset;
+    const word = readPackedByteSharedWord(buffer, current);
+    const shift = (current & 3) * 8;
+    bits |= ((word >>> shift) & 0xff) << (offset * 8);
+  }
+  return bits >>> 0;
+}
+
+function writePackedByteSharedBits(
+  buffer: WgslTypedArray,
+  byteIndex: number,
+  bits: number,
+  byteCount: number,
+): void {
+  for (let offset = 0; offset < byteCount; offset++) {
+    const current = Math.trunc(byteIndex) + offset;
+    const wordIndex = Math.trunc(current / 4);
+    const shift = (current & 3) * 8;
+    const old = readPackedByteSharedWordAt(buffer, wordIndex);
+    const mask = 0xff << shift;
+    const byte = (bits >>> (offset * 8)) & 0xff;
+    writePackedByteSharedWord(buffer, wordIndex, ((old & ~mask) | (byte << shift)) >>> 0);
+  }
 }
 
 function readPackedByteBufferValue(

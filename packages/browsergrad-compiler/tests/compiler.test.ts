@@ -1428,7 +1428,7 @@ __global__ void byteReinterpret(int* out) {
     expect(compiled.wgsl).toMatch(/var shared_words_\d+_buffer: u32/u);
     expect(compiled.wgsl).toContain("var<workgroup> scratch: array<atomic<u32>, 4>;");
     expect(compiled.wgsl).toContain("atomicLoad(&scratch");
-    expect(compiled.wgsl).toContain("atomicStore(&scratch");
+    expect(compiled.wgsl).toContain("atomicOr(&scratch");
     expect([...result.buffers.out as Int32Array]).toEqual([0x04030201, 9]);
 
     const storageCompiled = compileCudaLiteKernel(`
@@ -1515,8 +1515,9 @@ __global__ void byteFloatReinterpret(float* out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("bitcast<f32>(atomicLoad(&scratch");
+    expect(compiled.wgsl).toContain("bitcast<f32>(select(");
     expect(compiled.wgsl).toContain("atomicStore(&scratch");
+    expect(compiled.wgsl).toContain("atomicOr(&scratch");
     expect([...result.buffers.out as Float32Array]).toEqual([1]);
   });
 
@@ -4679,6 +4680,32 @@ __global__ void sharedByteBf16Overlay(float *out) {
     expect(compiled.wgsl).toContain("<< 16u");
     expect(compiled.wgsl).toContain(">> 16u");
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
+  });
+
+  it("preserves unaligned typed pointer views over byte storage", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void write_unaligned_byte_float(float *value, float *out) {
+  value[0] = 1.0f;
+  value[1] = 2.0f;
+  out[0] = value[0];
+  out[1] = value[1];
+}
+
+__global__ void unalignedByteFloatOverlay(uchar *scratch, float *out) {
+  if (threadIdx.x == 0) {
+    write_unaligned_byte_float((float *)&scratch[1], out);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { scratch: new Uint32Array(3), out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
+    expect([...result.buffers.scratch as Uint32Array]).toEqual([0x80000000, 0x0000003f, 0x00000040]);
+    expect(compiled.wgsl).toContain("& 255u");
+    expect(compiled.wgsl).toContain(">> 24u");
   });
 
   it("packs vector half pointer views over shared byte storage into byte-offset lanes", () => {
