@@ -5399,7 +5399,8 @@ __global__ void surfaceWrite3d(cudaSurfaceObject_t outputSurf) {
     );
 
     expect(compiled.wgsl).toContain("bg_surf2dwrite_outputSurf");
-    expect(compiled.wgsl).toContain("z * i32(bg_uniforms.outputSurf_height)");
+    expect(compiled.wgsl).toContain("let height = i32(bg_uniforms.outputSurf_height)");
+    expect(compiled.wgsl).toContain("let index = ((z * height) + y) * width + x");
     expect([...result.buffers.outputSurf as Float32Array]).toEqual([0, 1, 10, 11, 100, 101, 110, 111]);
   });
 
