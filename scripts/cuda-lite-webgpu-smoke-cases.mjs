@@ -97,6 +97,7 @@ export const controlScopeCases = [
   "control:active-lane-nested-return-barrier",
   "control:active-lane-loop-alternate-return-barrier",
   "control:active-lane-break-post-loop-barrier",
+  "control:active-lane-nested-break-post-loop-barrier",
   "control:active-lane-while-break-post-loop-barrier",
   "control:active-lane-do-while-break-post-loop-barrier",
   "control:active-lane-loop-return-side-effect-barrier",

@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T09:09:04Z
+Last updated: 2026-07-02T09:14:14Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Report-output parent-dir bug fixed across WebGPU e2e, progress logs, and CUDA-lite benchmarks; continue next corpus-shaped storage/texture/control probe |
+| Active work item | Nested divergent break before post-loop barrier fixed and covered in real WebGPU; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -541,11 +541,13 @@ Current verified gates:
 - WebGPU smoke after 2D texture-to-layered-surface active-lane scalar pointer-array probe: `265 passed / 0 failed / 0 skipped`
 - report-output parent-dir fix: WebGPU smoke writes nested JSON, markdown, and progress files under `.tmp/reports`; smoke remains `265 passed / 0 failed / 0 skipped`
 - benchmark report-output parent-dir fix: compiler benchmark writes nested markdown; WebGPU benchmark writes nested JSON and markdown
+- nested divergent break before post-loop barrier fix: focused compiler unit `421/0`; focused real WebGPU break group `5/0/0`; new fixture `control:active-lane-nested-break-post-loop-barrier` passes with `0` skips
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | nested divergent break before post-loop barrier | `if (tid >= N) { if (out[tid] >= 0u) break; }` inside a loop followed by `__syncthreads()` emitted a raw nested WGSL `break`, leaving non-uniform control flow before the barrier | active-lane break lowering now detects current-loop breaks nested through blocks/ifs, rewrites nested `break` to the loop active flag, and keeps breaks inside nested loops out of the current-loop rewrite | compiler focused unit `421/0`; real WebGPU break group `5/0/0`; `control:active-lane-nested-break-post-loop-barrier` `1/0/0` |
 | Fixed | report-output parent directories | `e2e:webgpu:smoke -- --json .tmp/reports/smoke-profile.json` completed all WebGPU cases, then failed with `ENOENT` because report/progress writers assumed parent dirs already existed | e2e JSON, markdown, and progress writers now create parent dirs; CUDA-lite compiler/WebGPU benchmark report writers use same parent-dir creation behavior | smoke with nested JSON/markdown/progress output `265/0/0`; compiler benchmark nested markdown; WebGPU benchmark nested JSON/markdown |
 | Probed green | 2D texture-to-layered-surface active-lane scalar pointer-array true/false branches | 2D `tex2D<uint4>` to `surf2DLayeredwrite/read` scalar pointer-array selection had select-only coverage and volume active-lane coverage, but no 2D active-lane true/false pair; this could regress pre-return layered-surface side effects, selected scalar storage handles, or false-branch shadow writes | existing active-lane lowering, texture vector conversion, layered surface vector read/write, pointer-array storage handle lowering, and scalar atomic lane writes preserve true and false selected targets | `texture-surface:uint4-atomic-pointer-array-active-lane-return,texture-surface:uint4-atomic-pointer-array-active-lane-return-false-branch` `2/0/0`; smoke `265/0/0`; hot gate `10/0/0`, speedups `1.35` / `1.13` |
 | Fixed | stale last-failure status | a fail-first expectation miss wrote `.tmp/cuda-lite-last-failures.json`; the later green focused rerun left the artifact in place, so `bugbash:status` falsely reported an active failure | successful WebGPU e2e runs now clear the last-failure artifact after all failure/skip/warmup checks pass | focused green rerun `1/0/0`; `bugbash:status` reports `Active failure cases: 0`; smoke `263/0/0` |

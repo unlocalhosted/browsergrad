@@ -1053,6 +1053,20 @@ __global__ void activeLaneBreakPostLoopBarrier(uint *out, int N) {
     out[tid] = out[tid] + 10u;
   }
 }`,
+  activeLaneNestedBreakPostLoopBarrier: `
+__global__ void activeLaneNestedBreakPostLoopBarrier(uint *out, int N) {
+  int tid = threadIdx.x;
+  for (int i = 0; i < 3; ++i) {
+    out[tid] = (uint)i;
+    if (tid >= N) {
+      if (out[tid] >= 0u) { break; }
+    }
+  }
+  __syncthreads();
+  if (tid < N) {
+    out[tid] = out[tid] + 10u;
+  }
+}`,
   activeLaneWhileBreakPostLoopBarrier: `
 __global__ void activeLaneWhileBreakPostLoopBarrier(uint *out, int N) {
   int tid = threadIdx.x;
@@ -6361,6 +6375,20 @@ const html = String.raw`<!doctype html>
           {
             name: "control:active-lane-break-post-loop-barrier",
             source: SOURCES.activeLaneBreakPostLoopBarrier,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [12, 12, 12, 0] },
+          },
+          {
+            name: "control:active-lane-nested-break-post-loop-barrier",
+            source: SOURCES.activeLaneNestedBreakPostLoopBarrier,
             options: { workgroupSize: [4, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
             input: () => ({

@@ -7410,6 +7410,30 @@ __global__ void breakBeforePostLoopBarrier(uint *out, int N) {
     expect(compiled.wgsl).not.toContain("if ((tid >= bg_uniforms.N)) {\n      break;");
   });
 
+  it("keeps post-loop barriers uniform after nested divergent breaks", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void nestedBreakBeforePostLoopBarrier(uint *out, int N) {
+  int tid = threadIdx.x;
+  for (int i = 0; i < 3; ++i) {
+    out[tid] = (uint)i;
+    if (tid >= N) {
+      if (out[tid] >= 0u) { break; }
+    }
+  }
+  __syncthreads();
+  if (tid < N) {
+    out[tid] = out[tid] + 10u;
+  }
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-break-before-barrier");
+    expect(compiled.wgsl).toContain("var bg_active_lane: bool = true;");
+    expect(compiled.wgsl).toContain("bg_active_lane = (bg_active_lane && !((out[tid] >= 0u)));");
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+    expect(compiled.wgsl).toContain("if (bg_active_lane) {\n    if ((tid < bg_uniforms.N))");
+    expect(compiled.wgsl).not.toContain("if ((out[tid] >= 0u)) {\n        break;");
+  });
+
   it("keeps post-loop barriers uniform after while and do-while divergent breaks", () => {
     const whileCompiled = compileCudaLiteKernel(`
 __global__ void whileBreakBeforePostLoopBarrier(uint *out, int N) {

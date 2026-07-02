@@ -598,6 +598,7 @@ function emitStatementWithActiveFlag(
   indentLevel: number,
 ): string[] {
   const prefix = indent(indentLevel);
+  if (statement.kind === "break") return [`${prefix}${activeFlag} = false;`];
   if (statement.kind === "if") {
     const constantCondition = constantBooleanExpression(statement.condition, context);
     if (constantCondition === false) {
@@ -615,6 +616,9 @@ function emitStatementWithActiveFlag(
   }
   const breakSplit = splitIfTrailingBreak(statement);
   if (breakSplit) return emitIfTrailingBreakAsActiveFlag(breakSplit, activeFlag, context, indentLevel);
+  if (statement.kind === "if" && statementContainsCurrentLoopBreak(statement)) {
+    return emitIfWithNestedBreakAsActiveFlag(statement, activeFlag, context, indentLevel);
+  }
   if (statement.kind === "expr" && statement.expression.kind === "assignment") {
     const hoisted = emitAssignmentWithHoistedBarrierDeviceFunction(statement.expression, context, indentLevel, activeFlag);
     if (hoisted) return hoisted;
@@ -1201,6 +1205,29 @@ function emitIfWithNestedReturnAsActiveFlag(
   return lines;
 }
 
+function emitIfWithNestedBreakAsActiveFlag(
+  statement: Extract<CudaLiteStatement, { kind: "if" }>,
+  activeFlag: string,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const prefix = indent(indentLevel);
+  const condition = emitTruthinessExpression(statement.condition, context);
+  if (!statement.alternate) {
+    const lines = [`${prefix}if (${activeFlag} && (${condition})) {`];
+    lines.push(...emitStatementSequence(statement.consequent, context, indentLevel + 1, { activeFlag }));
+    lines.push(`${prefix}}`);
+    return lines;
+  }
+  const lines = [`${prefix}if (${activeFlag}) {`, `${indent(indentLevel + 1)}if (${condition}) {`];
+  lines.push(...emitStatementSequence(statement.consequent, context, indentLevel + 2, { activeFlag }));
+  lines.push(`${indent(indentLevel + 1)}} else {`);
+  lines.push(...emitStatementSequence(statement.alternate, context, indentLevel + 2, { activeFlag }));
+  lines.push(`${indent(indentLevel + 1)}}`);
+  lines.push(`${prefix}}`);
+  return lines;
+}
+
 function emitIfTrailingBreakAsActiveFlag(
   split: IfTrailingBreak,
   activeFlag: string,
@@ -1221,7 +1248,7 @@ function emitIfTrailingBreakAsActiveFlag(
 function statementHasEarlyBreakBeforeBarrier(statement: CudaLiteStatement, context: EmitContext): boolean {
   if (statement.kind !== "for" && statement.kind !== "while" && statement.kind !== "do-while") return false;
   return statement.body.some((child, index) =>
-    splitIfTrailingBreak(child) !== undefined && statement.body.slice(index + 1).some((item) => statementContainsBarrierLike(item, context))
+    statementContainsCurrentLoopBreak(child) && statement.body.slice(index + 1).some((item) => statementContainsBarrierLike(item, context))
   );
 }
 
@@ -1229,7 +1256,26 @@ function loopBodyHasDirectTrailingBreak(
   statement: CudaLiteStatement,
 ): statement is Extract<CudaLiteStatement, { kind: "for" | "while" | "do-while" }> {
   return (statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while") &&
-    statement.body.some((child) => splitIfTrailingBreak(child) !== undefined);
+    statement.body.some(statementContainsCurrentLoopBreak);
+}
+
+function statementContainsCurrentLoopBreak(statement: CudaLiteStatement): boolean {
+  if (splitIfTrailingBreak(statement) !== undefined) return true;
+  switch (statement.kind) {
+    case "block":
+      return statement.body.some(statementContainsCurrentLoopBreak);
+    case "if":
+      return statement.consequent.some(statementContainsCurrentLoopBreak) ||
+        (statement.alternate?.some(statementContainsCurrentLoopBreak) ?? false);
+    case "break":
+      return true;
+    case "for":
+    case "while":
+    case "do-while":
+      return false;
+    default:
+      return false;
+  }
 }
 
 function statementContainsBarrierLike(statement: CudaLiteStatement, context: EmitContext): boolean {
