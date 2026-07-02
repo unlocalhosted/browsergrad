@@ -1390,6 +1390,28 @@ __global__ void storageByteReinterpret(const uchar* input, int* out) {
     expect(storageCompiled.wgsl).toContain("var lane_ptr_buffer: u32");
   });
 
+  it("bitcasts float views over packed shared byte storage", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void byteFloatReinterpret(float* out) {
+  __shared__ uchar scratch[4];
+  if (threadIdx.x == 0) {
+    uint *word = (uint *)&scratch[0];
+    word[0] = 0x3f800000u;
+    float *value = (float *)&scratch[0];
+    out[0] = value[0];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("bitcast<f32>(atomicLoad(&scratch");
+    expect(compiled.wgsl).toContain("atomicStore(&scratch");
+    expect([...result.buffers.out as Float32Array]).toEqual([1]);
+  });
+
   it("lowers sample-shaped vector pointer-array helper flow", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ float3 calcNormal(float3 *a, float3 *b, float3 *c) {

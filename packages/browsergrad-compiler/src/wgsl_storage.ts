@@ -481,7 +481,7 @@ function emitPackedByteSharedRead(
   const wordIndex = `((${index}) >> 2u)`;
   const word = `${context.nameFor(shared.name)}[${wordIndex}]`;
   const loaded = `atomicLoad(&${word})`;
-  if (viewType !== "uchar") return viewType === "int" ? `bitcast<i32>(${loaded})` : loaded;
+  if (viewType !== "uchar") return emitPackedByteWordAsView(loaded, viewType);
   const shift = `(((${index}) & 3u) * 8u)`;
   return `((${loaded} >> (${shift})) & 255u)`;
 }
@@ -496,12 +496,26 @@ function emitPackedByteSharedWrite(
   if (shared.valueType !== "uchar") return undefined;
   const wordIndex = `((${index}) >> 2u)`;
   const word = `${context.nameFor(shared.name)}[${wordIndex}]`;
-  if (viewType !== "uchar") return `atomicStore(&${word}, ${viewType === "int" ? `bitcast<u32>(${value})` : `u32(${value})`})`;
+  if (viewType !== "uchar") return `atomicStore(&${word}, ${emitPackedByteViewAsWord(value, viewType)})`;
   const shift = `(((${index}) & 3u) * 8u)`;
   const mask = `(255u << ${shift})`;
   const cleared = `atomicAnd(&${word}, ~${mask})`;
   const written = `atomicOr(&${word}, ((u32(${value}) & 255u) << ${shift}))`;
   return `${cleared}; ${written}`;
+}
+
+function emitPackedByteWordAsView(word: string, viewType: CudaLiteScalarType): string {
+  if (viewType === "float" || viewType === "double" || viewType === "bf16") return `bitcast<f32>(${word})`;
+  if (viewType === "int") return `bitcast<i32>(${word})`;
+  if (viewType === "bool") return `(${word} != 0u)`;
+  return word;
+}
+
+function emitPackedByteViewAsWord(value: string, viewType: CudaLiteScalarType): string {
+  if (viewType === "float" || viewType === "double" || viewType === "bf16") return `bitcast<u32>(${value})`;
+  if (viewType === "int") return `bitcast<u32>(${value})`;
+  if (viewType === "bool") return `select(0u, 1u, ${value})`;
+  return `u32(${value})`;
 }
 
 function emitPackedHalfStorageWrite(
