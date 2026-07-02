@@ -550,31 +550,34 @@ function emitDevicePointerAtomicAddHelper(
   for (const param of ir.params.filter((param) =>
     param.pointer &&
     !param.constant &&
-    isPointerHelperCompatibleStorage(type, param.valueType) &&
+    isPointerHelperAtomicStorage(type, param.valueType) &&
     ir.atomicParams.includes(param.name)
   )) {
     const id = context.storagePointerIdFor(param.name);
     if (id === undefined) continue;
-    const access = `${context.nameFor(param.name)}[index]`;
-    lines.push(`    case ${id}u: { return ${emitAtomicAddAtAddress(type, "storage", `&${access}`, "value")}; }`);
+    const target = pointerHelperAtomicTarget(type, context.nameFor(param.name), param.valueType, "index", "storage");
+    if (!target) continue;
+    lines.push(`    case ${id}u: { return ${emitAtomicAddAtAddress(type, target.addressSpace, target.address, "value")}; }`);
   }
   for (const shared of ir.sharedDeclarations.filter((shared) =>
-    isPointerHelperCompatibleStorage(type, shared.valueType) &&
+    isPointerHelperAtomicStorage(type, shared.valueType) &&
     ir.atomicShared.includes(shared.name)
   )) {
     const id = context.sharedPointerIdFor(shared.name);
     if (id === undefined) continue;
-    const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, "index");
-    lines.push(`    case ${id}u: { return ${emitAtomicAddAtAddress(type, "workgroup", `&${access}`, "value")}; }`);
+    const target = pointerHelperSharedAtomicTarget(type, shared, "index", context);
+    if (!target) continue;
+    lines.push(`    case ${id}u: { return ${emitAtomicAddAtAddress(type, target.addressSpace, target.address, "value")}; }`);
   }
   for (const global of ir.deviceGlobals.filter((global) =>
-    isPointerHelperCompatibleStorage(type, global.valueType) &&
+    isPointerHelperAtomicStorage(type, global.valueType) &&
     ir.atomicDeviceGlobals.includes(global.name)
   )) {
     const id = context.deviceGlobalPointerIdFor(global.name);
     if (id === undefined) continue;
-    const access = `${context.nameFor(global.name)}[index]`;
-    lines.push(`    case ${id}u: { return ${emitAtomicAddAtAddress(type, "storage", `&${access}`, "value")}; }`);
+    const target = pointerHelperAtomicTarget(type, context.nameFor(global.name), global.valueType, "index", "storage");
+    if (!target) continue;
+    lines.push(`    case ${id}u: { return ${emitAtomicAddAtAddress(type, target.addressSpace, target.address, "value")}; }`);
   }
   lines.push(`    default: { return ${zeroValue(type)}; }`);
   lines.push("  }");
@@ -628,49 +631,52 @@ function emitDevicePointerAtomicIncDecHelper(
   for (const param of ir.params.filter((param) =>
     param.pointer &&
     !param.constant &&
-    isPointerHelperCompatibleStorage(type, param.valueType) &&
+    isPointerHelperAtomicStorage(type, param.valueType) &&
     ir.atomicParams.includes(param.name)
   )) {
     const id = context.storagePointerIdFor(param.name);
     if (id === undefined) continue;
-    const access = `${context.nameFor(param.name)}[index]`;
+    const target = pointerHelperAtomicTarget(type, context.nameFor(param.name), param.valueType, "index", "storage");
+    if (!target) continue;
     const helper = integerAtomicLoopHelperName(kind, {
       valueType: type,
-      storageValueType: param.valueType,
-      storageScalar: param.valueType === "int" ? "i32" : "u32",
-      addressSpace: "storage",
+      storageValueType: target.storageValueType,
+      storageScalar: target.storageScalar,
+      addressSpace: target.addressSpace,
     });
-    lines.push(`    case ${id}u: { return ${helper}(&${access}, limit); }`);
+    lines.push(`    case ${id}u: { return ${helper}(${target.address}, limit); }`);
   }
   for (const shared of ir.sharedDeclarations.filter((shared) =>
-    isPointerHelperCompatibleStorage(type, shared.valueType) &&
+    isPointerHelperAtomicStorage(type, shared.valueType) &&
     ir.atomicShared.includes(shared.name)
   )) {
     const id = context.sharedPointerIdFor(shared.name);
     if (id === undefined) continue;
-    const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, "index");
+    const target = pointerHelperSharedAtomicTarget(type, shared, "index", context);
+    if (!target) continue;
     const helper = integerAtomicLoopHelperName(kind, {
       valueType: type,
-      storageValueType: shared.valueType,
-      storageScalar: shared.valueType === "int" ? "i32" : "u32",
-      addressSpace: "workgroup",
+      storageValueType: target.storageValueType,
+      storageScalar: target.storageScalar,
+      addressSpace: target.addressSpace,
     });
-    lines.push(`    case ${id}u: { return ${helper}(&${access}, limit); }`);
+    lines.push(`    case ${id}u: { return ${helper}(${target.address}, limit); }`);
   }
   for (const global of ir.deviceGlobals.filter((global) =>
-    isPointerHelperCompatibleStorage(type, global.valueType) &&
+    isPointerHelperAtomicStorage(type, global.valueType) &&
     ir.atomicDeviceGlobals.includes(global.name)
   )) {
     const id = context.deviceGlobalPointerIdFor(global.name);
     if (id === undefined) continue;
-    const access = `${context.nameFor(global.name)}[index]`;
+    const target = pointerHelperAtomicTarget(type, context.nameFor(global.name), global.valueType, "index", "storage");
+    if (!target) continue;
     const helper = integerAtomicLoopHelperName(kind, {
       valueType: type,
-      storageValueType: global.valueType,
-      storageScalar: global.valueType === "int" ? "i32" : "u32",
-      addressSpace: "storage",
+      storageValueType: target.storageValueType,
+      storageScalar: target.storageScalar,
+      addressSpace: target.addressSpace,
     });
-    lines.push(`    case ${id}u: { return ${helper}(&${access}, limit); }`);
+    lines.push(`    case ${id}u: { return ${helper}(${target.address}, limit); }`);
   }
   lines.push("    default: { return 0u; }");
   lines.push("  }");
@@ -693,31 +699,34 @@ function emitDevicePointerAtomicRmwHelper(
   for (const param of ir.params.filter((param) =>
     param.pointer &&
     !param.constant &&
-    isPointerHelperCompatibleStorage(type, param.valueType) &&
+    isPointerHelperAtomicStorage(type, param.valueType) &&
     ir.atomicParams.includes(param.name)
   )) {
     const id = context.storagePointerIdFor(param.name);
     if (id === undefined) continue;
-    const access = `${context.nameFor(param.name)}[index]`;
-    lines.push(`    case ${id}u: { return ${emitAtomicRmwAtAddress(kind, type, "storage", `&${access}`, "value")}; }`);
+    const target = pointerHelperAtomicTarget(type, context.nameFor(param.name), param.valueType, "index", "storage");
+    if (!target) continue;
+    lines.push(`    case ${id}u: { return ${emitAtomicRmwAtAddress(kind, type, target.addressSpace, target.address, "value")}; }`);
   }
   for (const shared of ir.sharedDeclarations.filter((shared) =>
-    isPointerHelperCompatibleStorage(type, shared.valueType) &&
+    isPointerHelperAtomicStorage(type, shared.valueType) &&
     ir.atomicShared.includes(shared.name)
   )) {
     const id = context.sharedPointerIdFor(shared.name);
     if (id === undefined) continue;
-    const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, "index");
-    lines.push(`    case ${id}u: { return ${emitAtomicRmwAtAddress(kind, type, "workgroup", `&${access}`, "value")}; }`);
+    const target = pointerHelperSharedAtomicTarget(type, shared, "index", context);
+    if (!target) continue;
+    lines.push(`    case ${id}u: { return ${emitAtomicRmwAtAddress(kind, type, target.addressSpace, target.address, "value")}; }`);
   }
   for (const global of ir.deviceGlobals.filter((global) =>
-    isPointerHelperCompatibleStorage(type, global.valueType) &&
+    isPointerHelperAtomicStorage(type, global.valueType) &&
     ir.atomicDeviceGlobals.includes(global.name)
   )) {
     const id = context.deviceGlobalPointerIdFor(global.name);
     if (id === undefined) continue;
-    const access = `${context.nameFor(global.name)}[index]`;
-    lines.push(`    case ${id}u: { return ${emitAtomicRmwAtAddress(kind, type, "storage", `&${access}`, "value")}; }`);
+    const target = pointerHelperAtomicTarget(type, context.nameFor(global.name), global.valueType, "index", "storage");
+    if (!target) continue;
+    lines.push(`    case ${id}u: { return ${emitAtomicRmwAtAddress(kind, type, target.addressSpace, target.address, "value")}; }`);
   }
   lines.push(`    default: { return ${zeroValue(type)}; }`);
   lines.push("  }");
@@ -738,31 +747,34 @@ function emitDevicePointerAtomicExchangeHelper(
   for (const param of ir.params.filter((param) =>
     param.pointer &&
     !param.constant &&
-    isPointerHelperCompatibleStorage(type, param.valueType) &&
+    isPointerHelperAtomicStorage(type, param.valueType) &&
     ir.atomicParams.includes(param.name)
   )) {
     const id = context.storagePointerIdFor(param.name);
     if (id === undefined) continue;
-    const access = `${context.nameFor(param.name)}[index]`;
-    lines.push(`    case ${id}u: { return ${emitAtomicExchangeAtAddress(type, `&${access}`, "value")}; }`);
+    const target = pointerHelperAtomicTarget(type, context.nameFor(param.name), param.valueType, "index", "storage");
+    if (!target) continue;
+    lines.push(`    case ${id}u: { return ${emitAtomicExchangeAtAddress(type, target.address, "value")}; }`);
   }
   for (const shared of ir.sharedDeclarations.filter((shared) =>
-    isPointerHelperCompatibleStorage(type, shared.valueType) &&
+    isPointerHelperAtomicStorage(type, shared.valueType) &&
     ir.atomicShared.includes(shared.name)
   )) {
     const id = context.sharedPointerIdFor(shared.name);
     if (id === undefined) continue;
-    const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, "index");
-    lines.push(`    case ${id}u: { return ${emitAtomicExchangeAtAddress(type, `&${access}`, "value")}; }`);
+    const target = pointerHelperSharedAtomicTarget(type, shared, "index", context);
+    if (!target) continue;
+    lines.push(`    case ${id}u: { return ${emitAtomicExchangeAtAddress(type, target.address, "value")}; }`);
   }
   for (const global of ir.deviceGlobals.filter((global) =>
-    isPointerHelperCompatibleStorage(type, global.valueType) &&
+    isPointerHelperAtomicStorage(type, global.valueType) &&
     ir.atomicDeviceGlobals.includes(global.name)
   )) {
     const id = context.deviceGlobalPointerIdFor(global.name);
     if (id === undefined) continue;
-    const access = `${context.nameFor(global.name)}[index]`;
-    lines.push(`    case ${id}u: { return ${emitAtomicExchangeAtAddress(type, `&${access}`, "value")}; }`);
+    const target = pointerHelperAtomicTarget(type, context.nameFor(global.name), global.valueType, "index", "storage");
+    if (!target) continue;
+    lines.push(`    case ${id}u: { return ${emitAtomicExchangeAtAddress(type, target.address, "value")}; }`);
   }
   lines.push(`    default: { return ${zeroValue(type)}; }`);
   lines.push("  }");
@@ -779,31 +791,34 @@ function emitDevicePointerAtomicCasHelper(type: "int" | "uint", ir: KernelIrModu
   for (const param of ir.params.filter((param) =>
     param.pointer &&
     !param.constant &&
-    isPointerHelperCompatibleStorage(type, param.valueType) &&
+    isPointerHelperAtomicStorage(type, param.valueType) &&
     ir.atomicParams.includes(param.name)
   )) {
     const id = context.storagePointerIdFor(param.name);
     if (id === undefined) continue;
-    const access = `${context.nameFor(param.name)}[index]`;
-    lines.push(`    case ${id}u: { return atomicCompareExchangeWeak(&${access}, compare, value).old_value; }`);
+    const target = pointerHelperAtomicTarget(type, context.nameFor(param.name), param.valueType, "index", "storage");
+    if (!target) continue;
+    lines.push(`    case ${id}u: { return atomicCompareExchangeWeak(${target.address}, compare, value).old_value; }`);
   }
   for (const shared of ir.sharedDeclarations.filter((shared) =>
-    isPointerHelperCompatibleStorage(type, shared.valueType) &&
+    isPointerHelperAtomicStorage(type, shared.valueType) &&
     ir.atomicShared.includes(shared.name)
   )) {
     const id = context.sharedPointerIdFor(shared.name);
     if (id === undefined) continue;
-    const access = emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, "index");
-    lines.push(`    case ${id}u: { return atomicCompareExchangeWeak(&${access}, compare, value).old_value; }`);
+    const target = pointerHelperSharedAtomicTarget(type, shared, "index", context);
+    if (!target) continue;
+    lines.push(`    case ${id}u: { return atomicCompareExchangeWeak(${target.address}, compare, value).old_value; }`);
   }
   for (const global of ir.deviceGlobals.filter((global) =>
-    isPointerHelperCompatibleStorage(type, global.valueType) &&
+    isPointerHelperAtomicStorage(type, global.valueType) &&
     ir.atomicDeviceGlobals.includes(global.name)
   )) {
     const id = context.deviceGlobalPointerIdFor(global.name);
     if (id === undefined) continue;
-    const access = `${context.nameFor(global.name)}[index]`;
-    lines.push(`    case ${id}u: { return atomicCompareExchangeWeak(&${access}, compare, value).old_value; }`);
+    const target = pointerHelperAtomicTarget(type, context.nameFor(global.name), global.valueType, "index", "storage");
+    if (!target) continue;
+    lines.push(`    case ${id}u: { return atomicCompareExchangeWeak(${target.address}, compare, value).old_value; }`);
   }
   lines.push(`    default: { return ${zeroValue(type)}; }`);
   lines.push("  }");
@@ -835,6 +850,66 @@ function emitAtomicExchangeAtAddress(type: "float" | "int" | "uint", address: st
   return type === "float"
     ? `bitcast<f32>(atomicExchange(${address}, bitcast<u32>(${value})))`
     : `atomicExchange(${address}, ${value})`;
+}
+
+interface PointerHelperAtomicTarget {
+  readonly address: string;
+  readonly storageValueType: CudaLiteScalarType;
+  readonly storageScalar: "i32" | "u32";
+  readonly addressSpace: "storage" | "workgroup";
+}
+
+function pointerHelperAtomicTarget(
+  helperType: CudaLiteScalarType,
+  name: string,
+  storageType: CudaLiteScalarType,
+  index: string,
+  addressSpace: "storage" | "workgroup",
+): PointerHelperAtomicTarget | undefined {
+  if (isPointerHelperCompatibleStorage(helperType, storageType)) {
+    return {
+      address: `&${name}[${index}]`,
+      storageValueType: storageType,
+      storageScalar: storageType === "int" ? "i32" : "u32",
+      addressSpace,
+    };
+  }
+  if (isPointerHelperPackedByteAtomicStorage(helperType, storageType)) {
+    return {
+      address: `&${name}[(u32(${index})) >> 2u]`,
+      storageValueType: storageType,
+      storageScalar: "u32",
+      addressSpace,
+    };
+  }
+  return undefined;
+}
+
+function pointerHelperSharedAtomicTarget(
+  helperType: CudaLiteScalarType,
+  shared: CudaLiteVarDecl,
+  index: string,
+  context: WgslPointerHelperContext,
+): PointerHelperAtomicTarget | undefined {
+  if (!isPointerHelperAtomicStorage(helperType, shared.valueType)) return undefined;
+  const storageIndex = isPointerHelperPackedByteAtomicStorage(helperType, shared.valueType)
+    ? `(u32(${index})) >> 2u`
+    : index;
+  return {
+    address: `&${emitSharedFlatAccess(context.nameFor(shared.name), shared.dimensions, storageIndex)}`,
+    storageValueType: shared.valueType,
+    storageScalar: shared.valueType === "int" ? "i32" : "u32",
+    addressSpace: "workgroup",
+  };
+}
+
+function isPointerHelperAtomicStorage(helperType: CudaLiteScalarType, storageType: CudaLiteScalarType): boolean {
+  return isPointerHelperCompatibleStorage(helperType, storageType) ||
+    isPointerHelperPackedByteAtomicStorage(helperType, storageType);
+}
+
+function isPointerHelperPackedByteAtomicStorage(helperType: CudaLiteScalarType, storageType: CudaLiteScalarType): boolean {
+  return storageType === "uchar" && (helperType === "uint" || helperType === "float");
 }
 
 function isPointerHelperCompatibleStorage(helperType: CudaLiteScalarType, storageType: CudaLiteScalarType): boolean {

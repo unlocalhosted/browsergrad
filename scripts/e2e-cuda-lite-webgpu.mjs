@@ -833,6 +833,17 @@ __global__ void storageByteUnalignedFloatHelperReinterpret(uchar *scratch, float
     write_unaligned_storage_byte_float((float *)&scratch[1], out);
   }
 }`,
+  storageByteUintHelperAtomic: `
+__device__ void add_storage_byte_word(uint *word, uint *out) {
+  out[0] = atomicAdd(word, 5u);
+  out[1] = word[0];
+}
+
+__global__ void storageByteUintHelperAtomic(uchar *scratch, uint *out) {
+  if (threadIdx.x == 0) {
+    add_storage_byte_word((uint *)&scratch[0], out);
+  }
+}`,
   localVectorPointerArray: `
 __device__ float3 sum3(float3 *a, float3 *b, float3 *c) {
   return *a + *b + *c;
@@ -6428,6 +6439,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "scratch",
             expectedOutput: { type: "Uint32Array", data: [0x80000000, 0x0000003f, 0x00000040] },
+          },
+          {
+            name: "storage:param-byte-uint-helper-atomic",
+            source: SOURCES.storageByteUintHelperAtomic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                scratch: new Uint32Array([7]),
+                out: new Uint32Array(2),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [7, 12] },
           },
           {
             name: "storage:local-vector-pointer-array",

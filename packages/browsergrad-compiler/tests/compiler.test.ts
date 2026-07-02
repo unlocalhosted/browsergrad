@@ -9666,6 +9666,36 @@ __global__ void helper_shared_atomic(uint* out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([5]);
   });
 
+  it("supports helper pointer atomics over byte-backed storage views", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void add_word(uint* word, uint* out) {
+  out[0] = atomicAdd(word, 5u);
+  out[1] = word[0];
+}
+__global__ void helper_byte_atomic(uchar* scratch, uint* out) {
+  if (threadIdx.x == 0) {
+    add_word((uint*)&scratch[0], out);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          scratch: new Uint32Array([7]),
+          out: new Uint32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
+    expect(compiled.ir.atomicParams).toContain("scratch");
+    expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32(");
+    expect(compiled.wgsl).toContain("case 0u: { return atomicAdd(&scratch[(u32(index)) >> 2u], value); }");
+    expect([...result.buffers.out as Uint32Array]).toEqual([7, 12]);
+    expect([...result.buffers.scratch as Uint32Array]).toEqual([12]);
+  });
+
   it("packs uchar shared-memory pointer helpers into u32 carriers", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ void bump(uchar* ptr, uint offset) {

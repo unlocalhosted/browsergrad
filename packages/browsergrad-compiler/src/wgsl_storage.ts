@@ -199,7 +199,7 @@ export function emitPointerStorageRead(
   if (param.valueType === "complex64" && (viewType === "complex64" || viewType === "float2")) {
     return `${name}[u32(${index})]`;
   }
-  const packedByte = emitPackedByteStorageRead(name, param.valueType, index, viewType);
+  const packedByte = emitPackedByteStorageRead(name, param.valueType, index, viewType, ir.atomicParams.includes(param.name));
   if (packedByte) return packedByte;
   if (isCudaVectorType(viewType)) {
     if (ir.atomicParams.includes(param.name)) {
@@ -238,7 +238,7 @@ export function emitPointerStorageWrite(
   if (param.valueType === "complex64" && (viewType === "complex64" || viewType === "float2")) {
     return `${name}[u32(${index})] = ${value}`;
   }
-  const packedByte = emitPackedByteStorageWrite(name, param.valueType, index, value, viewType);
+  const packedByte = emitPackedByteStorageWrite(name, param.valueType, index, value, viewType, ir.atomicParams.includes(param.name));
   if (packedByte) return packedByte;
   if (isCudaVectorType(viewType)) {
     if (ir.atomicParams.includes(param.name)) {
@@ -272,7 +272,7 @@ export function emitDeviceGlobalPointerRead(
   viewType: CudaLiteScalarType = global.valueType,
 ): string {
   const name = context.nameFor(global.name);
-  const packedByte = emitPackedByteStorageRead(name, global.valueType, index, viewType);
+  const packedByte = emitPackedByteStorageRead(name, global.valueType, index, viewType, ir.atomicDeviceGlobals.includes(global.name));
   if (packedByte) return packedByte;
   if (isCudaVectorType(viewType)) {
     if (ir.atomicDeviceGlobals.includes(global.name)) {
@@ -308,7 +308,7 @@ export function emitDeviceGlobalPointerWrite(
   viewType: CudaLiteScalarType = global.valueType,
 ): string {
   const name = context.nameFor(global.name);
-  const packedByte = emitPackedByteStorageWrite(name, global.valueType, index, value, viewType);
+  const packedByte = emitPackedByteStorageWrite(name, global.valueType, index, value, viewType, ir.atomicDeviceGlobals.includes(global.name));
   if (packedByte) return packedByte;
   if (isCudaVectorType(viewType)) {
     if (ir.atomicDeviceGlobals.includes(global.name)) {
@@ -515,23 +515,24 @@ function emitPackedByteStorageRead(
   storageType: CudaLiteScalarType,
   index: string,
   viewType: CudaLiteScalarType,
+  atomic = false,
 ): string | undefined {
   if (storageType !== "uchar" || viewType === "uchar") return undefined;
   if (isCudaVectorType(viewType)) {
     const scalar = cudaVectorScalarType(viewType) ?? "float";
     const stride = wgslElementByteSize(scalar);
     const values = Array.from({ length: cudaVectorLaneCount(viewType) }, (_, lane) =>
-      emitPackedByteStorageRead(name, storageType, `(${index} + ${lane * stride}u)`, scalar) ?? zeroValue(scalar)
+      emitPackedByteStorageRead(name, storageType, `(${index} + ${lane * stride}u)`, scalar, atomic) ?? zeroValue(scalar)
     );
     return `${wgslScalar(viewType)}(${values.join(", ")})`;
   }
   if (viewType === "half") {
-    return emitPackedByteBitsAsView(emitPackedByteAlignedOrAssembledStorageBits(name, index, viewType), viewType);
+    return emitPackedByteBitsAsView(emitPackedByteAlignedOrAssembledStorageBits(name, index, viewType, atomic), viewType);
   }
   if (viewType === "bf16") {
-    return emitPackedByteBitsAsView(emitPackedByteAlignedOrAssembledStorageBits(name, index, viewType), viewType);
+    return emitPackedByteBitsAsView(emitPackedByteAlignedOrAssembledStorageBits(name, index, viewType, atomic), viewType);
   }
-  return emitPackedByteBitsAsView(emitPackedByteAlignedOrAssembledStorageBits(name, index, viewType), viewType);
+  return emitPackedByteBitsAsView(emitPackedByteAlignedOrAssembledStorageBits(name, index, viewType, atomic), viewType);
 }
 
 function emitPackedByteSharedWrite(
@@ -571,27 +572,28 @@ function emitPackedByteStorageWrite(
   index: string,
   value: string,
   viewType: CudaLiteScalarType,
+  atomic = false,
 ): string | undefined {
   if (storageType !== "uchar" || viewType === "uchar") return undefined;
   if (isCudaVectorType(viewType)) {
     const scalar = cudaVectorScalarType(viewType) ?? "float";
     const stride = wgslElementByteSize(scalar);
     return Array.from({ length: cudaVectorLaneCount(viewType) }, (_, lane) =>
-      emitPackedByteStorageWrite(name, storageType, `(${index} + ${lane * stride}u)`, `${value}.${vectorFieldName(lane)}`, scalar)
+      emitPackedByteStorageWrite(name, storageType, `(${index} + ${lane * stride}u)`, `${value}.${vectorFieldName(lane)}`, scalar, atomic)
     ).filter((line): line is string => line !== undefined).join("; ");
   }
   if (viewType === "half") {
-    return emitPackedByteStorageAlignedOrByteWrite(name, index, emitPackedByteViewAsBits(value, viewType), viewType);
+    return emitPackedByteStorageAlignedOrByteWrite(name, index, emitPackedByteViewAsBits(value, viewType), viewType, atomic);
   }
   if (viewType === "bf16") {
-    return emitPackedByteStorageAlignedOrByteWrite(name, index, emitPackedByteViewAsBits(value, viewType), viewType);
+    return emitPackedByteStorageAlignedOrByteWrite(name, index, emitPackedByteViewAsBits(value, viewType), viewType, atomic);
   }
-  return emitPackedByteStorageAlignedOrByteWrite(name, index, emitPackedByteViewAsBits(value, viewType), viewType);
+  return emitPackedByteStorageAlignedOrByteWrite(name, index, emitPackedByteViewAsBits(value, viewType), viewType, atomic);
 }
 
-function emitPackedByteAlignedOrAssembledStorageBits(name: string, index: string, viewType: CudaLiteScalarType): string {
-  const assembled = emitPackedByteStorageBits(name, index, viewType);
-  const aligned = emitPackedByteAlignedStorageBits(name, index, viewType);
+function emitPackedByteAlignedOrAssembledStorageBits(name: string, index: string, viewType: CudaLiteScalarType, atomic: boolean): string {
+  const assembled = emitPackedByteStorageBits(name, index, viewType, atomic);
+  const aligned = emitPackedByteAlignedStorageBits(name, index, viewType, atomic);
   return aligned === undefined ? assembled : `select(${assembled}, ${aligned}, ${emitPackedByteAlignedCondition(index, viewType)})`;
 }
 
@@ -606,22 +608,27 @@ function emitPackedByteAlignedOrAssembledSharedBits(
   return aligned === undefined ? assembled : `select(${assembled}, ${aligned}, ${emitPackedByteAlignedCondition(index, viewType)})`;
 }
 
-function emitPackedByteStorageBits(name: string, index: string, viewType: CudaLiteScalarType): string {
+function emitPackedByteStorageBits(name: string, index: string, viewType: CudaLiteScalarType, atomic: boolean): string {
   return emitPackedByteAssembledBits(
     index,
     viewType,
-    (byteIndex) => `((${name}[(${byteIndex}) >> 2u] >> ((((${byteIndex}) & 3u)) * 8u)) & 255u)`,
+    (byteIndex) => {
+      const word = `${name}[(${byteIndex}) >> 2u]`;
+      const loaded = atomic ? `atomicLoad(&${word})` : word;
+      return `((${loaded} >> ((((${byteIndex}) & 3u)) * 8u)) & 255u)`;
+    },
   );
 }
 
-function emitPackedByteAlignedStorageBits(name: string, index: string, viewType: CudaLiteScalarType): string | undefined {
+function emitPackedByteAlignedStorageBits(name: string, index: string, viewType: CudaLiteScalarType, atomic: boolean): string | undefined {
   if (viewType === "uchar" || isCudaVectorType(viewType)) return undefined;
   const word = `${name}[(u32(${index})) >> 2u]`;
+  const loaded = atomic ? `atomicLoad(&${word})` : word;
   if (viewType === "half" || viewType === "bf16") {
     const shift = `(((u32(${index})) & 2u) * 8u)`;
-    return `((${word} >> ${shift}) & 0xffffu)`;
+    return `((${loaded} >> ${shift}) & 0xffffu)`;
   }
-  return word;
+  return loaded;
 }
 
 function emitPackedByteAlignedSharedBits(
@@ -672,6 +679,7 @@ function emitPackedByteStorageBitsWrite(
   index: string,
   bits: string,
   viewType: CudaLiteScalarType,
+  atomic: boolean,
 ): string {
   return emitPackedByteBitsWrite(
     index,
@@ -680,6 +688,7 @@ function emitPackedByteStorageBitsWrite(
       const word = `${name}[(${byteIndex}) >> 2u]`;
       const shift = `(((${byteIndex}) & 3u) * 8u)`;
       const mask = `(255u << ${shift})`;
+      if (atomic) return `atomicAnd(&${word}, ~${mask}); atomicOr(&${word}, ((${byteValue} & 255u) << ${shift}))`;
       return `${word} = ((${word} & ~${mask}) | ((${byteValue} & 255u) << ${shift}))`;
     },
     bits,
@@ -691,8 +700,9 @@ function emitPackedByteStorageAlignedOrByteWrite(
   index: string,
   bits: string,
   viewType: CudaLiteScalarType,
+  atomic: boolean,
 ): string {
-  return `if (${emitPackedByteAlignedCondition(index, viewType)}) { ${emitPackedByteStorageAlignedBitsWrite(name, index, bits, viewType)}; } else { ${emitPackedByteStorageBitsWrite(name, index, bits, viewType)}; }`;
+  return `if (${emitPackedByteAlignedCondition(index, viewType)}) { ${emitPackedByteStorageAlignedBitsWrite(name, index, bits, viewType, atomic)}; } else { ${emitPackedByteStorageBitsWrite(name, index, bits, viewType, atomic)}; }`;
 }
 
 function emitPackedByteStorageAlignedBitsWrite(
@@ -700,13 +710,16 @@ function emitPackedByteStorageAlignedBitsWrite(
   index: string,
   bits: string,
   viewType: CudaLiteScalarType,
+  atomic: boolean,
 ): string {
   const word = `${name}[(u32(${index})) >> 2u]`;
   if (viewType === "half" || viewType === "bf16") {
     const shift = `(((u32(${index})) & 2u) * 8u)`;
     const mask = `(0xffffu << ${shift})`;
+    if (atomic) return `atomicAnd(&${word}, ~${mask}); atomicOr(&${word}, ((${bits} & 0xffffu) << ${shift}))`;
     return `${word} = ((${word} & ~${mask}) | ((${bits} & 0xffffu) << ${shift}))`;
   }
+  if (atomic) return `atomicStore(&${word}, ${bits})`;
   return `${word} = ${bits}`;
 }
 

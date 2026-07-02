@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T13:13:03Z
+Last updated: 2026-07-02T13:25:00Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,9 +9,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; helper byte-storage atomic changed gate is green |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Unaligned typed overlays over byte storage are fixed through changed/full real-world gates; ready for next corpus-shaped probe |
+| Active work item | Helper pointer atomics over byte-backed storage views fixed through changed gate; ready for next corpus-shaped probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -573,11 +573,17 @@ Current verified gates:
 - changed gate after unaligned typed byte-storage overlay fix: typecheck passed; compiler unit `419/0`; WGSL modules `16/0`; selected storage/pointer WebGPU group `45/0/0`; WebGPU smoke `276/0/0`; fixture/status/scope tests passed
 - compiler lint after unaligned typed byte-storage overlay fix: passed
 - real-world CUDA verifier after unaligned typed byte-storage overlay fix: src `430/0/0`, dist `430/0/0`
+- helper byte-storage atomic probe: fail-first device helper `atomicAdd((uint *)&scratch[0], ...)` over `uchar*` generated `bg_ptr_atomicAdd_u32` with only the default case; after helper atomic byte-root address lowering, focused unit `1 passed`
+- atomic packed-byte storage read fix: first WebGPU run for `storage:param-byte-uint-helper-atomic` failed pipeline creation because packed-byte reads shifted `atomic<u32>` storage directly; after atomic-aware packed-byte storage loads/writes, focused fixture `1/0/0`; related storage helper group `3/0/0`; related atomic helper units `7/0`
+- compiler unit suite after helper byte-storage atomic fix: `420 passed / 0 failed`
+- changed gate after helper byte-storage atomic fix: typecheck passed; compiler unit `420/0`; WGSL modules `16/0`; selected storage/pointer WebGPU group `45/0/0`; WebGPU smoke `276/0/0`; fixture/status/scope tests passed
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | helper atomics over byte-backed storage | `add_word((uint *)&scratch[0], out)` compiled but generated `bg_ptr_atomicAdd_u32` with no `scratch` case, so helper atomics through byte-backed typed views returned the default and skipped the update | pointer atomic helpers now use the same byte-root compatibility/address policy as packed storage helpers, emitting `scratch[index >> 2]` for aligned typed atomic views over `uchar` storage/shared/global roots | fail-first ad hoc probe; focused unit `supports helper pointer atomics over byte-backed storage views`; real WebGPU fixture `storage:param-byte-uint-helper-atomic` `1/0/0` |
+| Fixed | atomic packed-byte storage reads | After marking `uchar* scratch` atomic, normal `word[0]` reads through the helper path tried to shift `scratch[...]` where the element was `atomic<u32>`, causing WGSL pipeline creation failure | packed-byte storage read/write lowering now takes atomic root state, uses `atomicLoad` for packed reads, `atomicStore` for aligned typed writes, and atomic byte clear/or updates for sub-word writes | first real WebGPU run failed with `operator >> (atomic<u32>, u32)`; after fix focused fixture `1/0/0`; related storage helper group `3/0/0`; related atomic helper units `7/0` |
 | Fixed | unaligned typed byte-storage overlays | `(float *)&scratch[1]` over `uchar*` storage compiled and self-read back, but raw byte placement was wrong because reference aliases scaled the base offset by element size and WGSL packed-byte helpers treated non-`uchar` views as whole-word aligned | byte-packed storage/shared reads now assemble scalar bits byte-by-byte for unaligned addresses, keep aligned word fast paths, writes update individual bytes only when needed, and reference aliases keep byte base offsets while only scaling pointer indexing by element byte size | fail-first ad hoc probe exposed wrong raw bytes; focused unit `preserves unaligned typed pointer views over byte storage`; real WebGPU fixture `storage:param-byte-unaligned-float-helper-reinterpret` `1/0/0` |
 | Fixed | WMMA shared-memory alias shadowing | cuda-samples `compute_gemm` and `compute_gemm_imma` failed compile/codegen with `unsupported-wmma-pointer-operand` when same-named `tile_ptr` declarations mixed a storage/shared alias with a later pointer handle | pointer alias collection now understands structured shared/global/constant array roots and skips aliases by declaration span instead of by name, so an unrelated later handle no longer hides an earlier same-name alias | fail-first minimal reproduced the WMMA alias miss; focused unit `keeps same-named WMMA pointer aliases when only one declaration needs a handle`; cuda-samples audit `357/357`, hard fails `0` |
 | Fixed | packed shared-byte bf16 views | `(__nv_bfloat16 *)&scratch[0]` over `__shared__ uchar scratch[]` was rejected as `unsupported-local-pointer`; packed shared-byte carrier also treated `bf16` like 32-bit float instead of 16-bit bfloat lanes | analyzer now allows `bf16` word-addressable explicit pointer aliases; packed shared-byte reads/writes store/read bfloat16 top-half f32 bits in 16-bit lanes; pointer helpers include `bf16` over `uchar` shared storage; CPU reference mirrors lane packing | fail-first real WebGPU case failed at compile; after fix `storage:shared-byte-bf16-reinterpret` `1/0/0`; compiler unit `412/0` |
