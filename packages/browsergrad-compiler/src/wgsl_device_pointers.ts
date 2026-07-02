@@ -286,7 +286,12 @@ function devicePointerIndexScale(
 ): number {
   const root = pointer ? rootIdentifier(pointer) : undefined;
   const handle = root ? context.localPointerHandleFor(root) : undefined;
-  const sourceType = handle?.init ? devicePointerRootValueType(handle.init, context, callbacks) : undefined;
+  const alias = root ? context.pointerAliasFor(root) : undefined;
+  const sourceType = handle?.init
+    ? devicePointerRootValueType(handle.init, context, callbacks)
+    : alias
+      ? pointerAliasRootValueType(alias.rootName, context)
+      : undefined;
   if (sourceType === "uchar" && valueType !== undefined && valueType !== "uchar") {
     const bytes = wgslElementByteSize(valueType);
     if (bytes > 1) return bytes;

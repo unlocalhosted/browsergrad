@@ -797,6 +797,16 @@ __global__ void sharedByteBf162Reinterpret(float *out) {
     out[1] = __bfloat162float(pair.y);
   }
 }`,
+  storageByteFloatReinterpret: `
+__global__ void storageByteFloatReinterpret(uchar *scratch, float *out) {
+  if (threadIdx.x == 0) {
+    float *value = (float *)&scratch[0];
+    value[0] = 1.0f;
+    value[1] = 2.0f;
+    out[0] = value[0];
+    out[1] = value[1];
+  }
+}`,
   localVectorPointerArray: `
 __device__ float3 sum3(float3 *a, float3 *b, float3 *c) {
   return *a + *b + *c;
@@ -6333,6 +6343,20 @@ const html = String.raw`<!doctype html>
             launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({
               buffers: {
+                out: new Float32Array(2),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [1, 2] },
+          },
+          {
+            name: "storage:param-byte-float-reinterpret",
+            source: SOURCES.storageByteFloatReinterpret,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                scratch: new Uint32Array(2),
                 out: new Float32Array(2),
               },
             }),

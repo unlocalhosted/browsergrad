@@ -847,11 +847,19 @@ function isPointerHelperCompatibleStorage(helperType: CudaLiteScalarType, storag
 function isPointerHelperReadableStorage(helperType: CudaLiteScalarType, storageType: CudaLiteScalarType): boolean {
   return isPointerHelperCompatibleStorage(helperType, storageType) ||
     (isCudaVectorType(storageType) && helperType === cudaVectorScalarType(storageType)) ||
-    (helperType === "half" && storageType === "uchar") ||
-    (helperType === "bf16" && storageType === "uchar") ||
-    (helperType === "half2" && storageType === "uchar") ||
-    (helperType === "bf162" && storageType === "uchar") ||
+    (storageType === "uchar" && isPackedBytePointerHelperType(helperType)) ||
     ((helperType === "uint" || helperType === "int") && (storageType === "float" || storageType === "double" || storageType === "uchar"));
+}
+
+function isPackedBytePointerHelperType(type: CudaLiteScalarType): boolean {
+  const scalar = isCudaVectorType(type) ? cudaVectorScalarType(type) : type;
+  return scalar === "float" ||
+    scalar === "double" ||
+    scalar === "int" ||
+    scalar === "uint" ||
+    scalar === "half" ||
+    scalar === "bf16" ||
+    scalar === "bool";
 }
 
 function isPointerHelperBitcastCompatibleStorage(helperType: CudaLiteScalarType, storageType: CudaLiteScalarType): boolean {

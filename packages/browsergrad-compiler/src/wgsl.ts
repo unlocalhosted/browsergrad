@@ -2030,8 +2030,17 @@ function devicePointerIndexScale(
   context: EmitContext,
 ): number {
   const root = pointer ? rootIdentifier(pointer) : undefined;
-  const handle = root ? context.localPointerHandleFor(root, pointer?.span) : undefined;
-  const sourceType = handle?.init ? devicePointerRootValueType(handle.init, context) : undefined;
+  const handle = root
+    ? context.localPointerHandleFor(root, pointer?.span) ?? context.localPointerHandleFor(root)
+    : undefined;
+  const alias = root
+    ? context.pointerAliasFor(root, pointer?.span) ?? context.pointerAliasFor(root)
+    : undefined;
+  const sourceType = handle?.init
+    ? devicePointerRootValueType(handle.init, context)
+    : alias
+      ? pointerAliasRootValueType(alias.rootName, context)
+      : undefined;
   if (sourceType === "uchar" && valueType !== undefined && valueType !== "uchar") {
     const bytes = wgslElementByteSize(valueType);
     if (bytes > 1) return bytes;
@@ -2063,6 +2072,13 @@ function devicePointerRootValueType(
     context.paramFor(root)?.valueType ??
     context.deviceGlobalFor(root)?.valueType ??
     context.ir.constants.find((item) => item.name === root)?.valueType;
+}
+
+function pointerAliasRootValueType(rootName: string, context: EmitContext): CudaLiteScalarType | undefined {
+  return sharedDeclarationFor(rootName, context)?.valueType ??
+    context.paramFor(rootName)?.valueType ??
+    context.deviceGlobalFor(rootName)?.valueType ??
+    context.ir.constants.find((item) => item.name === rootName)?.valueType;
 }
 
 function devicePointerLValue(expression: CudaLiteExpression, context: EmitContext): DevicePointerLValue | undefined {

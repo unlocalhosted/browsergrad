@@ -3225,10 +3225,10 @@ function resolveLValue(expression: CudaLiteExpression, context: ThreadContext): 
   if (alias && typeof alias !== "number" && "kind" in alias && alias.kind === "address") {
     if (chain.length !== 1) throw compilerFailure(`pointer alias '${cursor.name}' expects one-dimensional indexing`);
     const valueType = alias.target.valueType;
-    const bytePackedShared = alias.target.space === "shared" &&
-      context.shared.get(alias.target.name)?.valueType === "uchar" &&
+    const bytePackedRoot = ((alias.target.space === "shared" && context.shared.get(alias.target.name)?.valueType === "uchar") ||
+      ((alias.target.space === "buffer" || alias.target.space === "device-global") && context.valueTypes.get(alias.target.name) === "uchar")) &&
       valueType !== "uchar";
-    const index = bytePackedShared
+    const index = bytePackedRoot
       ? ((alias.target.index ?? 0) + chain[0]! * valueStorageWidth(valueType)) * rawStorageUnitByteSize(valueType)
       : lvalueStorageIndex(alias.target, context) + chain[0]! * valueStorageWidth(valueType);
     return {
@@ -3432,10 +3432,18 @@ function readLValue(lvalue: LValue, context: ThreadContext): EvalValue {
   if (lvalue.space === "buffer" || lvalue.space === "device-global") {
     const buffer = lvalue.space === "device-global" ? context.deviceGlobals.get(lvalue.name) : context.buffers.get(lvalue.name);
     if (!buffer) throw compilerFailure(`missing ${lvalue.space === "device-global" ? "device global" : "buffer"} '${lvalue.name}'`);
-    const valueType = lvalue.valueType ?? context.valueTypes.get(lvalue.name);
+    const rootValueType = context.valueTypes.get(lvalue.name);
+    const valueType = lvalue.valueType ?? rootValueType;
     const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
-    const ok = storageRangeFits(buffer, storageIndex, valueType);
-    const value = ok ? readBufferValue(buffer, storageIndex, valueType, lvalue.field) : 0;
+    const bytePacked = rootValueType === "uchar" && valueType !== undefined && valueType !== "uchar";
+    const ok = bytePacked
+      ? packedByteStorageRangeFits(buffer, storageIndex, valueType)
+      : storageRangeFits(buffer, storageIndex, valueType);
+    const value = ok
+      ? bytePacked
+        ? readPackedByteBufferValue(buffer, storageIndex, valueType, lvalue.field)
+        : readBufferValue(buffer, storageIndex, valueType, lvalue.field)
+      : 0;
     context.trace.reads.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
     return value;
   }
@@ -3523,10 +3531,17 @@ function writeLValue(lvalue: LValue, value: EvalValue, context: ThreadContext): 
   if (lvalue.space === "buffer" || lvalue.space === "device-global") {
     const buffer = lvalue.space === "device-global" ? context.deviceGlobals.get(lvalue.name) : context.buffers.get(lvalue.name);
     if (!buffer) throw compilerFailure(`missing ${lvalue.space === "device-global" ? "device global" : "buffer"} '${lvalue.name}'`);
-    const valueType = lvalue.valueType ?? context.valueTypes.get(lvalue.name);
+    const rootValueType = context.valueTypes.get(lvalue.name);
+    const valueType = lvalue.valueType ?? rootValueType;
     const storageIndex = lvalue.rawStorageIndex ? lvalue.index : lvalue.index * valueStorageWidth(valueType);
-    const ok = storageRangeFits(buffer, storageIndex, valueType);
-    if (ok) writeBufferValue(buffer, storageIndex, valueType, lvalue.field, value);
+    const bytePacked = rootValueType === "uchar" && valueType !== undefined && valueType !== "uchar";
+    const ok = bytePacked
+      ? packedByteStorageRangeFits(buffer, storageIndex, valueType)
+      : storageRangeFits(buffer, storageIndex, valueType);
+    if (ok) {
+      if (bytePacked) writePackedByteBufferValue(buffer, storageIndex, valueType, lvalue.field, value);
+      else writeBufferValue(buffer, storageIndex, valueType, lvalue.field, value);
+    }
     context.trace.writes.push({ name: lvalue.name, index: storageIndex, value: traceValue(value), ok });
     return;
   }
@@ -3978,6 +3993,62 @@ function writePackedByteSharedValue(
   const old = readPackedByteSharedWordAt(buffer, wordIndex);
   const mask = 0xff << shift;
   writePackedByteSharedWord(buffer, wordIndex, ((old & ~mask) | ((Math.trunc(value) & 0xff) << shift)) >>> 0);
+}
+
+function readPackedByteBufferValue(
+  buffer: WgslTypedArray,
+  byteIndex: number,
+  valueType: CudaLiteScalarType,
+  field: "x" | "y" | "z" | "w" | undefined,
+): EvalValue {
+  if (isCudaVectorType(valueType)) {
+    const scalar = cudaVectorScalarType(valueType) ?? "float";
+    const stride = elementByteSize(scalar);
+    const lanes = Array.from({ length: cudaVectorLaneCount(valueType) }, (_, lane) =>
+      readPackedByteSharedValue(buffer, byteIndex + lane * stride, scalar)
+    );
+    if (field) {
+      const index = cudaVectorFieldIndex(valueType, field);
+      return index === undefined ? 0 : lanes[index] ?? 0;
+    }
+    return { kind: "cuda-vector", valueType, lanes };
+  }
+  return readPackedByteSharedValue(buffer, byteIndex, valueType);
+}
+
+function writePackedByteBufferValue(
+  buffer: WgslTypedArray,
+  byteIndex: number,
+  valueType: CudaLiteScalarType,
+  field: "x" | "y" | "z" | "w" | undefined,
+  value: EvalValue,
+): void {
+  if (isCudaVectorType(valueType)) {
+    const scalar = cudaVectorScalarType(valueType) ?? "float";
+    const stride = elementByteSize(scalar);
+    if (field) {
+      const index = cudaVectorFieldIndex(valueType, field);
+      if (index !== undefined) writePackedByteSharedValue(buffer, byteIndex + index * stride, scalar, valueAsNumber(value, field));
+      return;
+    }
+    const vector = valueAsCudaVector(value, valueType);
+    for (let lane = 0; lane < cudaVectorLaneCount(valueType); lane++) {
+      writePackedByteSharedValue(buffer, byteIndex + lane * stride, scalar, vector.lanes[lane] ?? 0);
+    }
+    return;
+  }
+  writePackedByteSharedValue(buffer, byteIndex, valueType, valueAsNumber(value, "packed byte write"));
+}
+
+function packedByteStorageRangeFits(
+  buffer: WgslTypedArray,
+  byteIndex: number,
+  valueType: CudaLiteScalarType,
+): boolean {
+  if (byteIndex < 0) return false;
+  const byteCount = elementByteSize(valueType);
+  const lastWordIndex = Math.trunc((byteIndex + byteCount - 1) / 4);
+  return lastWordIndex < buffer.length;
 }
 
 function packedByteSharedWord(valueType: CudaLiteScalarType, value: number): number {

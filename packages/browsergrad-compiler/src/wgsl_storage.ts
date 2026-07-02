@@ -199,6 +199,8 @@ export function emitPointerStorageRead(
   if (param.valueType === "complex64" && (viewType === "complex64" || viewType === "float2")) {
     return `${name}[u32(${index})]`;
   }
+  const packedByte = emitPackedByteStorageRead(name, param.valueType, index, viewType);
+  if (packedByte) return packedByte;
   if (isCudaVectorType(viewType)) {
     if (ir.atomicParams.includes(param.name)) {
       return emitPointerVectorFlatRead(param, vectorStorageBase(index, cudaVectorLaneCount(viewType)), viewType, ir, context);
@@ -236,6 +238,8 @@ export function emitPointerStorageWrite(
   if (param.valueType === "complex64" && (viewType === "complex64" || viewType === "float2")) {
     return `${name}[u32(${index})] = ${value}`;
   }
+  const packedByte = emitPackedByteStorageWrite(name, param.valueType, index, value, viewType);
+  if (packedByte) return packedByte;
   if (isCudaVectorType(viewType)) {
     if (ir.atomicParams.includes(param.name)) {
       return emitPointerVectorFlatWrite(param, vectorStorageBase(index, cudaVectorLaneCount(viewType)), value, viewType, ir, context);
@@ -502,6 +506,33 @@ function emitPackedByteSharedRead(
   return `((${loaded} >> (${shift})) & 255u)`;
 }
 
+function emitPackedByteStorageRead(
+  name: string,
+  storageType: CudaLiteScalarType,
+  index: string,
+  viewType: CudaLiteScalarType,
+): string | undefined {
+  if (storageType !== "uchar" || viewType === "uchar") return undefined;
+  if (isCudaVectorType(viewType)) {
+    const scalar = cudaVectorScalarType(viewType) ?? "float";
+    const stride = wgslElementByteSize(scalar);
+    const values = Array.from({ length: cudaVectorLaneCount(viewType) }, (_, lane) =>
+      emitPackedByteStorageRead(name, storageType, `(${index} + ${lane * stride}u)`, scalar) ?? zeroValue(scalar)
+    );
+    return `${wgslScalar(viewType)}(${values.join(", ")})`;
+  }
+  const word = `${name}[((${index}) >> 2u)]`;
+  if (viewType === "half") {
+    const unpacked = `unpack2x16float(${word})`;
+    return `${wgslScalar("half")}(select(${unpacked}.x, ${unpacked}.y, (((${index}) & 2u) != 0u)))`;
+  }
+  if (viewType === "bf16") {
+    const shift = `(((${index}) & 2u) * 8u)`;
+    return `bitcast<f32>(((((${word}) >> ${shift}) & 0xffffu) << 16u))`;
+  }
+  return emitPackedByteWordAsView(word, viewType);
+}
+
 function emitPackedByteSharedWrite(
   shared: CudaLiteVarDecl,
   index: string,
@@ -537,6 +568,37 @@ function emitPackedByteSharedWrite(
   const cleared = `atomicAnd(&${word}, ~${mask})`;
   const written = `atomicOr(&${word}, ((u32(${value}) & 255u) << ${shift}))`;
   return `${cleared}; ${written}`;
+}
+
+function emitPackedByteStorageWrite(
+  name: string,
+  storageType: CudaLiteScalarType,
+  index: string,
+  value: string,
+  viewType: CudaLiteScalarType,
+): string | undefined {
+  if (storageType !== "uchar" || viewType === "uchar") return undefined;
+  if (isCudaVectorType(viewType)) {
+    const scalar = cudaVectorScalarType(viewType) ?? "float";
+    const stride = wgslElementByteSize(scalar);
+    return Array.from({ length: cudaVectorLaneCount(viewType) }, (_, lane) =>
+      emitPackedByteStorageWrite(name, storageType, `(${index} + ${lane * stride}u)`, `${value}.${vectorFieldName(lane)}`, scalar)
+    ).filter((line): line is string => line !== undefined).join("; ");
+  }
+  const word = `${name}[((${index}) >> 2u)]`;
+  if (viewType === "half") {
+    const shift = `(((${index}) & 2u) * 8u)`;
+    const mask = `(0xffffu << ${shift})`;
+    const halfBits = `(pack2x16float(vec2<f32>(f32(${value}), 0.0)) & 0xffffu)`;
+    return `${word} = ((${word} & ~${mask}) | (${halfBits} << ${shift}))`;
+  }
+  if (viewType === "bf16") {
+    const shift = `(((${index}) & 2u) * 8u)`;
+    const mask = `(0xffffu << ${shift})`;
+    const bits = `(((bitcast<u32>(f32(${value})) + 0x8000u) >> 16u) & 0xffffu)`;
+    return `${word} = ((${word} & ~${mask}) | (${bits} << ${shift}))`;
+  }
+  return `${word} = ${emitPackedByteViewAsWord(value, viewType)}`;
 }
 
 function emitPackedByteWordAsView(word: string, viewType: CudaLiteScalarType): string {
