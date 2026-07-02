@@ -608,7 +608,7 @@ export function lowerAnalyzedCudaLiteToKernelIr(
     name: analysis.kernel.name,
     params: analysis.kernel.params,
     constants: analysis.constants.filter((constant) => reachableSymbolNames.has(constant.name)),
-    deviceGlobals: analysis.deviceGlobals,
+    deviceGlobals: analysis.deviceGlobals.filter((global) => reachableSymbolNames.has(global.name)),
     textures: analysis.textures.filter((texture) => reachableSymbolNames.has(texture.name)),
     functions: analysis.functions,
     body: analysis.kernel.body,
