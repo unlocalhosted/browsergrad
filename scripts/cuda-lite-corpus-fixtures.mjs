@@ -349,6 +349,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4 },
     },
     output: "y",
+    expectedOutput: { type: "Float32Array", data: [0.11920291930437088, 0.5, 0.8807970881462097, 0.9820137619972229] },
   },
   {
     sourceKey: "corpusLeetCudaEmbeddingF32",
@@ -385,6 +386,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4 },
     },
     output: "y",
+    expectedOutput: { type: "Float32Array", data: [-0.15880800783634186, 0, 0.8411920070648193, 1.9545977115631104] },
   },
   {
     sourceKey: "corpusLeetCudaSwishF32",
@@ -402,6 +404,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4 },
     },
     output: "y",
+    expectedOutput: { type: "Float32Array", data: [-0.23840583860874176, -0.1887703388929367, 0.7310585975646973, 2.857722282409668] },
   },
   {
     sourceKey: "corpusLeetCudaHardswishF32",
@@ -419,6 +422,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4 },
     },
     output: "y",
+    expectedOutput: { type: "Float32Array", data: [0, -0.3333333432674408, 1.6666666269302368, 5] },
   },
   {
     sourceKey: "corpusLeetCudaHardshrinkF32",
@@ -454,6 +458,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4 },
     },
     output: "y",
+    expectedOutput: { type: "Float32Array", data: [-0.8646647334098816, -0.39346933364868164, 0, 2] },
   },
   {
     sourceKey: "corpusLeetCudaSgemmNaiveF32",
@@ -472,6 +477,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { M: 2, N: 2, K: 3 },
     },
     output: "c",
+    expectedOutput: { type: "Float32Array", data: [4, 5, 10, 11] },
   },
   {
     sourceKey: "corpusLeetCudaHistogramI32",
@@ -525,6 +531,10 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 8 },
     },
     output: "y",
+    expectedOutput: {
+      type: "Float32Array",
+      data: [-0.04540230706334114, -0.15880800783634186, 0, 0.8411920070648193, 1.9545977115631104, 2.9963626861572266, -0.1542859971523285, 0.3457140028476715],
+    },
   },
   {
     sourceKey: "corpusLeetCudaElementwiseAddF32x4",
@@ -579,6 +589,10 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 8 },
     },
     output: "y",
+    expectedOutput: {
+      type: "Float32Array",
+      data: [0.01798621006309986, 0.11920291930437088, 0.3775406777858734, 0.5, 0.622459352016449, 0.8807970881462097, 0.9820137619972229, 0.9996646642684937],
+    },
   },
   {
     sourceKey: "corpusLeetCudaSwishF32x4",
@@ -596,6 +610,10 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 8 },
     },
     output: "y",
+    expectedOutput: {
+      type: "Float32Array",
+      data: [-0.07194484025239944, -0.2689414322376251, -0.10945587605237961, 0, 0.3112296760082245, 0.7310585975646973, 1.7615941762924194, 3.9280550479888916],
+    },
   },
   {
     sourceKey: "corpusLeetCudaHardswishF32x4",
@@ -613,6 +631,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 8 },
     },
     output: "y",
+    expectedOutput: { type: "Float32Array", data: [0, 0, -0.3333333432674408, 0, 0.6666666865348816, 1.6666666269302368, 3, 5] },
   },
   {
     sourceKey: "corpusLeetCudaEluF32x4",
@@ -630,6 +649,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 8 },
     },
     output: "y",
+    expectedOutput: { type: "Float32Array", data: [-0.9816843867301941, -0.6321205496788025, -0.22119921445846558, 0, 0.5, 1, 2, 4] },
   },
   {
     sourceKey: "corpusLeetCudaHardshrinkF32x4",
@@ -647,6 +667,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 8 },
     },
     output: "y",
+    expectedOutput: { type: "Float32Array", data: [-1, 0, 0, 0.75, 2, -2, 0, 0] },
   },
   {
     sourceKey: "corpusLeetCudaMatTransposeF32Col2Row",
@@ -757,6 +778,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4 },
     },
     output: "out",
+    expectedOutput: { type: "Float32Array", data: [-0.15880800783634186, 0, 0.8411920070648193, 1.9545977115631104] },
   },
   {
     sourceKey: "corpusLlmResidualForward1",
@@ -775,6 +797,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4 },
     },
     output: "out",
+    expectedOutput: { type: "Float32Array", data: [11, 22, 33, 44] },
   },
   {
     sourceKey: "corpusLlmEncoderForward2",
@@ -812,6 +835,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { dim1: 1, dim2: 2, dim3: 2, dim4: 3 },
     },
     output: "out_matrix",
+    expectedOutput: { type: "Float32Array", data: [1, 7, 4, 10, 2, 8, 5, 11, 3, 9, 6, 12] },
   },
   {
     sourceKey: "corpusLlmSoftmaxForward1",
@@ -830,6 +854,10 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 2, C: 3 },
     },
     output: "out",
+    expectedOutput: {
+      type: "Float32Array",
+      data: [0.09003057330846786, 0.2447284758090973, 0.6652409434318542, 0.09003057330846786, 0.2447284758090973, 0.6652409434318542],
+    },
   },
   {
     sourceKey: "corpusLlmCrossentropyForward1",
@@ -848,6 +876,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { B: 1, T: 2, V: 3 },
     },
     output: "losses",
+    expectedOutput: { type: "Float32Array", data: [0.3566749393939972, 0.6931471824645996] },
   },
   {
     sourceKey: "corpusLlmCrossentropySoftmaxBackward1",
@@ -886,6 +915,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4 },
     },
     output: "dinp",
+    expectedOutput: { type: "Float32Array", data: [-0.08296408504247665, 0.25, -1.0829640626907349, 2.172198534011841] },
   },
   {
     sourceKey: "corpusLlmMatmulForward1",
@@ -905,6 +935,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { BT: 2, C: 3, OC: 2 },
     },
     output: "out",
+    expectedOutput: { type: "Float32Array", data: [4.5, 4, 10.5, 10] },
   },
   {
     sourceKey: "corpusLlmLayernormNormalization",
@@ -926,6 +957,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { B: 1, T: 2, C: 3 },
     },
     output: "out",
+    expectedOutput: { type: "Float32Array", data: [-1, 10, 103, -0.5, 10, 101.5] },
   },
   {
     sourceKey: "corpusLeetCudaCuteTransposeReg",
@@ -943,6 +975,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { M: 2, N: 3 },
     },
     output: "pB",
+    expectedOutput: { type: "Float32Array", data: [1, 4, 2, 5, 3, 6] },
   },
   {
     sourceKey: "corpusLeetCudaCuteTransposeSmem",
@@ -960,6 +993,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { M: 2, N: 3 },
     },
     output: "pB",
+    expectedOutput: { type: "Float32Array", data: [1, 4, 2, 5, 3, 6] },
   },
   {
     sourceKey: "corpusLeetCudaCuteTransposeSmemVectorized",
@@ -977,6 +1011,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { M: 2, N: 3 },
     },
     output: "pB",
+    expectedOutput: { type: "Float32Array", data: [1, 4, 2, 5, 3, 6] },
   },
   {
     sourceKey: "corpusLeetCudaCuteTransposeSmemVectorizedOptimized",
@@ -994,5 +1029,6 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { M: 2, N: 3 },
     },
     output: "pB",
+    expectedOutput: { type: "Float32Array", data: [1, 4, 2, 5, 3, 6] },
   },
 ];
