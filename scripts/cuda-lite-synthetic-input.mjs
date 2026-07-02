@@ -83,7 +83,11 @@ export function syntheticScalarForName(name) {
   if (/^(?:maxDepth|max_depth|maxLevel|max_level)$/u.test(name)) return 4;
   if (/^(?:left|begin|start|offset)$/u.test(name)) return 0;
   if (/^(?:right|end|len|nLines|nTessPoints)$/u.test(name)) return 64;
-  if (/^(?:C|cols|columns|channels|nChannels|vocabSize|vocab_size)$/u.test(name)) return 64;
+  if (/^(?:T|seqLen|seq_len|timeSteps|time_steps)$/u.test(name)) return 4;
+  if (/^(?:B|batch|batchSize|batch_size)$/u.test(name)) return 1;
+  if (/^(?:NH|numHeads|num_heads|heads)$/u.test(name)) return 1;
+  if (/^(?:HS|headSize|head_size)$/u.test(name)) return 4;
+  if (/^(?:C|cols|columns|channels|nChannels|vocabSize|vocab_size)$/u.test(name)) return 4;
   if (/^(?:n|N|num|count|length|totalLen|frontierSize|numSamples|totalThreads|poolSize|size)$/u.test(name)) return 1024;
   if (/^(?:threads|threadsPerBlock|threads_per_block|blockSize|block_size)$/u.test(name)) return 256;
   if (/^(?:blocks|blocksPerGrid|numBlocks)$/u.test(name)) return 4;

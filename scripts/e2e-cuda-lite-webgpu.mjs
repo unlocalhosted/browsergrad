@@ -5796,6 +5796,7 @@ const html = String.raw`<!doctype html>
         const autoCorpusSmokeCovered = autoCorpusSmokePassed.length + autoCorpusSmokeSkipped.length;
         const loadedCorpusFixtureNames = new Set(corpusFixtureCases.map((item) => item.name));
         const expectedCorpusFixtureNames = filterExpectedCorpusFixtureNames();
+        const expectedAutoCorpusSmokeNames = filterExpectedAutoCorpusSmokeNames();
         return {
           available: true,
           caseFilters: CASE_FILTERS,
@@ -5816,7 +5817,7 @@ const html = String.raw`<!doctype html>
           autoCorpusSmokePassedByCorpus: countByCorpus(autoCorpusSmokePassed),
           autoCorpusSmokeSkippedByCorpus: countByCorpus(autoCorpusSmokeSkipped),
           autoCorpusSmokeLimit: ${effectiveAutoCorpusSmokeLimit},
-          autoCorpusSmokeExpectedCovered: ${autoCorpusSmokeFixtures.length},
+          autoCorpusSmokeExpectedCovered: expectedAutoCorpusSmokeNames.length,
           autoCorpusSmokeMode: ${JSON.stringify(autoCorpusSmokeMode)},
           autoCorpusSmokeProfile: ${JSON.stringify(autoCorpusSmokeProfile)},
           autoCorpusSmokeCorpora: ${JSON.stringify(autoCorpusSmokeCorpora)},
@@ -5966,6 +5967,12 @@ const html = String.raw`<!doctype html>
       function filterExpectedCorpusFixtureNames() {
         if (CASE_FILTERS.length === 0) return EXPECTED_CORPUS_FIXTURE_NAMES;
         return filterCaseNames(EXPECTED_CORPUS_FIXTURE_NAMES, CASE_FILTERS);
+      }
+
+      function filterExpectedAutoCorpusSmokeNames() {
+        const expectedNames = AUTO_CORPUS_SMOKE_FIXTURES.map((fixture) => fixture.caseName);
+        if (CASE_FILTERS.length === 0) return expectedNames;
+        return filterCaseNames(expectedNames, CASE_FILTERS);
       }
 
       function shouldRunPreparedSmoke() {
@@ -11975,7 +11982,11 @@ const html = String.raw`<!doctype html>
         if (/^(?:maxDepth|max_depth|maxLevel|max_level)$/u.test(name)) return 4;
         if (/^(?:left|begin|start|offset)$/u.test(name)) return 0;
         if (/^(?:right|end|len|nLines|nTessPoints)$/u.test(name)) return 64;
-        if (/^(?:C|cols|columns|channels|nChannels|vocabSize|vocab_size)$/u.test(name)) return 64;
+        if (/^(?:T|seqLen|seq_len|timeSteps|time_steps)$/u.test(name)) return 4;
+        if (/^(?:B|batch|batchSize|batch_size)$/u.test(name)) return 1;
+        if (/^(?:NH|numHeads|num_heads|heads)$/u.test(name)) return 1;
+        if (/^(?:HS|headSize|head_size)$/u.test(name)) return 4;
+        if (/^(?:C|cols|columns|channels|nChannels|vocabSize|vocab_size)$/u.test(name)) return 4;
         if (/^(?:n|N|num|count|length|totalLen|frontierSize|numSamples|totalThreads|poolSize|size)$/u.test(name)) return 1024;
         if (/^(?:threads|threadsPerBlock|threads_per_block|blockSize|block_size)$/u.test(name)) return 256;
         if (/^(?:blocks|blocksPerGrid|numBlocks)$/u.test(name)) return 4;
@@ -12478,10 +12489,12 @@ try {
     validateCorpusFixtureBaseline(report);
   }
   const scopedAutoCorpusSmoke = autoCorpusSmokeCorpora.length > 0;
+  const broadScopedAutoCorpusRun = scopedAutoCorpusSmoke && autoCorpusSmokeCorpora.some((id) =>
+    caseFilters.includes(`auto-corpus:${id}:`));
   const expectedAutoCorpusSmokeCovered = autoCorpusSmokeShard.count > 1 || scopedAutoCorpusSmoke
     ? autoCorpusSmokeFixtures.length
     : effectiveAutoCorpusSmokeLimit;
-  if (report.available && effectiveAutoCorpusSmokeLimit > 0 && (!filteredRun || scopedAutoCorpusSmoke) && (report.autoCorpusSmokeCovered ?? report.autoCorpusSmokePassed ?? 0) < expectedAutoCorpusSmokeCovered) {
+  if (report.available && effectiveAutoCorpusSmokeLimit > 0 && (!filteredRun || broadScopedAutoCorpusRun) && (report.autoCorpusSmokeCovered ?? report.autoCorpusSmokePassed ?? 0) < expectedAutoCorpusSmokeCovered) {
     throw new Error(`Auto corpus smoke baseline failed: ${report.autoCorpusSmokeCovered ?? report.autoCorpusSmokePassed ?? 0}/${expectedAutoCorpusSmokeCovered} covered`);
   }
   if (report.available && forbidSkips && (report.skipped ?? 0) > 0) {

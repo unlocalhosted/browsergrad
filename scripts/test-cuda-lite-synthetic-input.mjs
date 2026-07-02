@@ -92,17 +92,20 @@ assert.equal(snakeCaseSizingInput.scalars.block_size, 256, "snake_case block_siz
 assert.equal(snakeCaseSizingInput.scalars.threads_per_block, 256, "snake_case threads_per_block should use block sizing default");
 
 const channelSizingKernel = compiler.compileCudaLiteKernelForWebGpu(`
-__global__ void channel_sizing(float *out, int N, int C, int channels) {
+__global__ void channel_sizing(float *out, int N, int T, int C, int channels, int NH, int B) {
   if (threadIdx.x == 0) {
-    out[0] = (float)(N + C + channels);
+    out[0] = (float)(N + T + C + channels + NH + B);
   }
 }`, {
   workgroupSize: [1, 1, 1],
 });
 const channelSizingInput = syntheticInputForCompiled(channelSizingKernel);
 assert.equal(channelSizingInput.scalars.N, 1024, "N should use batch-like sizing default");
-assert.equal(channelSizingInput.scalars.C, 64, "C should use channel-like sizing default");
-assert.equal(channelSizingInput.scalars.channels, 64, "channels should use channel-like sizing default");
+assert.equal(channelSizingInput.scalars.T, 4, "T should stay small enough for auto-corpus reference loops");
+assert.equal(channelSizingInput.scalars.C, 4, "C should stay small enough for auto-corpus reference loops");
+assert.equal(channelSizingInput.scalars.channels, 4, "channels should stay small enough for auto-corpus reference loops");
+assert.equal(channelSizingInput.scalars.NH, 1, "NH should keep head loops small");
+assert.equal(channelSizingInput.scalars.B, 1, "B should keep batch loops small");
 
 console.log("cuda-lite synthetic input tests passed");
 
