@@ -897,6 +897,26 @@ __global__ void sharedByteIntHelperAtomic(int *out) {
     out[27] = direct[0];
   }
 }`,
+  unreachableHelperAtomicPlainStorage: `
+__device__ uint gCounter[1];
+
+__device__ void unused_global_atomic() {
+  atomicAdd(&gCounter[0], 1u);
+}
+
+__device__ void unused_shared_atomic() {
+  __shared__ uint unusedScratch[1];
+  atomicAdd(&unusedScratch[0], 1u);
+}
+
+__global__ void unreachableHelperAtomicPlainStorage(uint *out) {
+  __shared__ uint scratch[1];
+  if (threadIdx.x == 0) {
+    scratch[0] = 9u;
+    out[0] = gCounter[0];
+    out[1] = scratch[0];
+  }
+}`,
   storageByteFloatReinterpret: `
 __global__ void storageByteFloatReinterpret(uchar *scratch, float *out) {
   if (threadIdx.x == 0) {
@@ -6560,6 +6580,31 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Int32Array", data: [10, 7, 7, 5, 5, -4, -4, 9, 9, 0, 0, 10, 10, 9, 9, -2, 22, 22, 22, -11, -11, 5, 5, 21, 21, 22, 22, -12] },
           },
           {
+            name: "atomic:unreachable-helper-plain-storage",
+            source: SOURCES.unreachableHelperAtomicPlainStorage,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(2),
+              },
+              deviceGlobals: {
+                gCounter: new Uint32Array([7]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [7, 9] },
+            wgslContains: [
+              "var<storage, read_write> gCounter: array<u32>;",
+              "var<workgroup> scratch: array<u32, 1>;",
+            ],
+            wgslNotContains: [
+              "var<storage, read_write> gCounter: array<atomic<u32>>;",
+              "var<workgroup> scratch: array<atomic<u32>, 1>;",
+              "unusedScratch",
+            ],
+          },
+          {
             name: "storage:param-byte-float-reinterpret",
             source: SOURCES.storageByteFloatReinterpret,
             options: { workgroupSize: [1, 1, 1] },
@@ -11313,6 +11358,33 @@ const html = String.raw`<!doctype html>
         };
       }
 
+      function verifyWgslExpectations(compiled, spec) {
+        const wgsl = compiled.wgsl ?? "";
+        for (const expected of spec.wgslContains ?? []) {
+          if (!wgsl.includes(expected)) {
+            return {
+              ok: false,
+              stage: "wgsl_expectation",
+              plan: "missing-wgsl:" + expected,
+              maxAbsDiff: Number.POSITIVE_INFINITY,
+              output: spec.verifyMode === "dispatch" ? "dispatch" : spec.output,
+            };
+          }
+        }
+        for (const forbidden of spec.wgslNotContains ?? []) {
+          if (wgsl.includes(forbidden)) {
+            return {
+              ok: false,
+              stage: "wgsl_expectation",
+              plan: "forbidden-wgsl:" + forbidden,
+              maxAbsDiff: Number.POSITIVE_INFINITY,
+              output: spec.verifyMode === "dispatch" ? "dispatch" : spec.output,
+            };
+          }
+        }
+        return undefined;
+      }
+
       function materializeFixtureInput(input) {
         const buffers = {};
         for (const [name, spec] of Object.entries(input.buffers ?? {})) {
@@ -11445,6 +11517,10 @@ const html = String.raw`<!doctype html>
         let phaseStart = performance.now();
         const compiled = compileCudaLiteKernelForWebGpu(spec.source, spec.options);
         if (profile) profile.compileMs = round(performance.now() - phaseStart);
+        const wgslExpectation = verifyWgslExpectations(compiled, spec);
+        if (wgslExpectation) {
+          return { ...wgslExpectation, ...(profile === undefined ? {} : { profile }) };
+        }
         const diagnosticSkip = webGpuDiagnosticSkip(compiled);
         if (diagnosticSkip) {
           return {
@@ -11544,6 +11620,8 @@ const html = String.raw`<!doctype html>
 
       async function runCompileOnlyWebGpuCase(device, spec) {
         const compiled = compileCudaLiteKernelForWebGpu(spec.source, spec.options);
+        const wgslExpectation = verifyWgslExpectations(compiled, spec);
+        if (wgslExpectation) return wgslExpectation;
         const diagnosticSkip = webGpuDiagnosticSkip(compiled);
         if (diagnosticSkip) {
           return {

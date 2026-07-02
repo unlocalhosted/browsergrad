@@ -98,6 +98,7 @@ export const atomicScopeCases = [
   "atomic:helper-rmw",
   "atomic:helper-shared-rmw",
   "atomic:helper-exchange-cas",
+  "atomic:unreachable-helper-plain-storage",
 ];
 
 export const controlScopeCases = [
