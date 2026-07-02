@@ -1,6 +1,7 @@
 export type WgslAtomicAddressSpace = "storage" | "workgroup";
 export type WgslAtomicIntegerScalar = "i32" | "u32";
 export type WgslIntViewAtomicKind = "Add" | "Sub" | "Min" | "Max" | "And" | "Or" | "Xor" | "Exchange";
+export type WgslIntViewAtomicEmitKind = WgslIntViewAtomicKind | "CompareExchange";
 
 export interface WgslIntegerAtomicLoopTarget {
   readonly valueType: string;
@@ -167,32 +168,45 @@ export function emitIntegerAtomicLoopHelpers(): string[] {
   ];
 }
 
-export function emitIntViewAtomicHelpers(addressSpace: WgslAtomicAddressSpace): string[] {
-  return [
-    ...emitIntViewAtomicBuiltinHelper("Add", addressSpace, "atomicAdd"),
-    "",
-    ...emitIntViewAtomicBuiltinHelper("Sub", addressSpace, "atomicSub"),
-    "",
-    ...emitIntViewAtomicMinMaxHelper("Min", addressSpace),
-    "",
-    ...emitIntViewAtomicMinMaxHelper("Max", addressSpace),
-    "",
-    ...emitIntViewAtomicBuiltinHelper("And", addressSpace, "atomicAnd"),
-    "",
-    ...emitIntViewAtomicBuiltinHelper("Or", addressSpace, "atomicOr"),
-    "",
-    ...emitIntViewAtomicBuiltinHelper("Xor", addressSpace, "atomicXor"),
-    "",
-    ...emitIntViewAtomicBuiltinHelper("Exchange", addressSpace, "atomicExchange"),
-    "",
-    ...emitIntViewAtomicCasHelper(addressSpace),
-  ];
+export function emitIntViewAtomicHelpers(
+  addressSpace: WgslAtomicAddressSpace,
+  kinds: ReadonlySet<WgslIntViewAtomicEmitKind> = new Set(["Add", "Sub", "Min", "Max", "And", "Or", "Xor", "Exchange", "CompareExchange"]),
+): string[] {
+  const lines: string[] = [];
+  for (const kind of kinds) {
+    if (lines.length > 0) lines.push("");
+    lines.push(...emitIntViewAtomicHelper(kind, addressSpace));
+  }
+  return lines;
 }
 
 function atomicPointerType(addressSpace: WgslAtomicAddressSpace, scalar: WgslAtomicIntegerScalar): string {
   return addressSpace === "workgroup"
     ? `ptr<workgroup, atomic<${scalar}>>`
     : `ptr<storage, atomic<${scalar}>, read_write>`;
+}
+
+function emitIntViewAtomicHelper(kind: WgslIntViewAtomicEmitKind, addressSpace: WgslAtomicAddressSpace): string[] {
+  switch (kind) {
+    case "Add":
+      return emitIntViewAtomicBuiltinHelper("Add", addressSpace, "atomicAdd");
+    case "Sub":
+      return emitIntViewAtomicBuiltinHelper("Sub", addressSpace, "atomicSub");
+    case "Min":
+      return emitIntViewAtomicMinMaxHelper("Min", addressSpace);
+    case "Max":
+      return emitIntViewAtomicMinMaxHelper("Max", addressSpace);
+    case "And":
+      return emitIntViewAtomicBuiltinHelper("And", addressSpace, "atomicAnd");
+    case "Or":
+      return emitIntViewAtomicBuiltinHelper("Or", addressSpace, "atomicOr");
+    case "Xor":
+      return emitIntViewAtomicBuiltinHelper("Xor", addressSpace, "atomicXor");
+    case "Exchange":
+      return emitIntViewAtomicBuiltinHelper("Exchange", addressSpace, "atomicExchange");
+    case "CompareExchange":
+      return emitIntViewAtomicCasHelper(addressSpace);
+  }
 }
 
 function emitIntViewAtomicBuiltinHelper(

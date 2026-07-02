@@ -11,6 +11,7 @@ import {
 } from "./wgsl_declarations.js";
 import {
   deviceGlobalStorageElementType,
+  intViewAtomicKinds,
   irUsesSubgroups,
   storageElementType,
   usesAtomicIncDec,
@@ -170,8 +171,8 @@ function appendKernelModuleSupportHelpers(
   if (usesFloatAtomicMax(ir)) lines.push("", ...emitFloatAtomicMaxHelper("storage"));
   if (usesSharedFloatAtomicMax(ir)) lines.push("", ...emitFloatAtomicMaxHelper("workgroup"));
   if (usesAtomicIncDec(ir)) lines.push("", ...emitIntegerAtomicLoopHelpers());
-  if (usesIntViewAtomicStorage(ir)) lines.push("", ...emitIntViewAtomicHelpers("storage"));
-  if (usesSharedIntViewAtomics(ir)) lines.push("", ...emitIntViewAtomicHelpers("workgroup"));
+  if (usesIntViewAtomicStorage(ir)) lines.push("", ...emitIntViewAtomicHelpers("storage", intViewAtomicKinds(ir)));
+  if (usesSharedIntViewAtomics(ir)) lines.push("", ...emitIntViewAtomicHelpers("workgroup", intViewAtomicKinds(ir)));
   if (usesCurand(ir)) lines.push("", ...emitCurandHelpers());
   if (usesFrexp(ir)) lines.push("", ...emitFrexpHelpers());
   if (usesSpecialFloatNamedConstants(ir)) lines.push("", ...emitSpecialFloatConstantHelpers());

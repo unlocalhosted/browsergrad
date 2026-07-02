@@ -7,6 +7,7 @@ import {
 } from "./types.js";
 import { cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 import { isSubgroupCallName } from "./wgsl_control_analysis.js";
+import type { WgslIntViewAtomicEmitKind } from "./wgsl_atomic_helpers.js";
 import { wgslScalar } from "./wgsl_storage.js";
 
 export function effectiveF16Mode(
@@ -150,35 +151,33 @@ export function usesAtomicIncDec(ir: KernelIrModule): boolean {
 }
 
 export function usesIntViewAtomicStorage(ir: KernelIrModule): boolean {
-  return hasUnsignedAtomicStorage(ir) && statementsUseAnyIntViewAtomic(ir);
+  return hasUnsignedAtomicStorage(ir) && intViewAtomicKinds(ir).size > 0;
 }
 
 export function usesSharedIntViewAtomics(ir: KernelIrModule): boolean {
-  return hasUnsignedAtomicShared(ir) && statementsUseAnyIntViewAtomic(ir);
+  return hasUnsignedAtomicShared(ir) && intViewAtomicKinds(ir).size > 0;
 }
 
-function statementsUseAnyIntViewAtomic(ir: KernelIrModule): boolean {
-  const names = new Set([
-    "atomicAdd",
-    "atomicAdd_system",
-    "atomicSub",
-    "atomicSub_system",
-    "atomicMin",
-    "atomicMin_system",
-    "atomicMax",
-    "atomicMax_system",
-    "atomicAnd",
-    "atomicAnd_system",
-    "atomicOr",
-    "atomicOr_system",
-    "atomicXor",
-    "atomicXor_system",
-    "atomicExch",
-    "atomicExch_system",
-    "atomicCAS",
-    "atomicCAS_system",
-  ]);
-  return statementsUseCall(ir.body, names) || ir.functions.some((fn) => statementsUseCall(fn.body, names));
+export function intViewAtomicKinds(ir: KernelIrModule): ReadonlySet<WgslIntViewAtomicEmitKind> {
+  const kinds = new Set<WgslIntViewAtomicEmitKind>();
+  const calls: readonly [WgslIntViewAtomicEmitKind, readonly string[]][] = [
+    ["Add", ["atomicAdd", "atomicAdd_system"]],
+    ["Sub", ["atomicSub", "atomicSub_system"]],
+    ["Min", ["atomicMin", "atomicMin_system"]],
+    ["Max", ["atomicMax", "atomicMax_system"]],
+    ["And", ["atomicAnd", "atomicAnd_system"]],
+    ["Or", ["atomicOr", "atomicOr_system"]],
+    ["Xor", ["atomicXor", "atomicXor_system"]],
+    ["Exchange", ["atomicExch", "atomicExch_system"]],
+    ["CompareExchange", ["atomicCAS", "atomicCAS_system"]],
+  ];
+  for (const [kind, names] of calls) {
+    const callNames = new Set(names);
+    if (statementsUseCall(ir.body, callNames) || ir.functions.some((fn) => statementsUseCall(fn.body, callNames))) {
+      kinds.add(kind);
+    }
+  }
+  return kinds;
 }
 
 function hasUnsignedAtomicStorage(ir: KernelIrModule): boolean {

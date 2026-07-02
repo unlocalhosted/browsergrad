@@ -797,6 +797,27 @@ __global__ void sharedByteBf162Reinterpret(float *out) {
     out[1] = __bfloat162float(pair.y);
   }
 }`,
+  sharedByteIntHelperAtomic: `
+__device__ void signed_shared_byte_ops(int *word, int *out) {
+  out[0] = atomicAdd(word, -3);
+  out[1] = word[0];
+  out[2] = atomicMin(word, -4);
+  out[3] = word[0];
+  out[4] = atomicMax(word, 9);
+  out[5] = word[0];
+}
+
+__global__ void sharedByteIntHelperAtomic(int *out) {
+  __shared__ uchar scratch[8];
+  if (threadIdx.x == 0) {
+    ((int *)&scratch[0])[0] = 10;
+    signed_shared_byte_ops((int *)&scratch[0], out);
+    int *direct = (int *)&scratch[4];
+    direct[0] = 22;
+    out[6] = atomicExch(direct, -11);
+    out[7] = direct[0];
+  }
+}`,
   storageByteFloatReinterpret: `
 __global__ void storageByteFloatReinterpret(uchar *scratch, float *out) {
   if (threadIdx.x == 0) {
@@ -6417,6 +6438,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [1, 2] },
+          },
+          {
+            name: "storage:shared-byte-int-helper-atomic",
+            source: SOURCES.sharedByteIntHelperAtomic,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(8),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [10, 7, 7, -4, -4, 9, 22, -11] },
           },
           {
             name: "storage:param-byte-float-reinterpret",
