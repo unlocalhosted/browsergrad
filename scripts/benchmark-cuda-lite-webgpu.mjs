@@ -250,14 +250,19 @@ try {
   assertRatio(report, "webgpu:saxpy-prepared-readback", "webgpu:saxpy-prepared-resident", preparedReadbackRatioMax, "--expect-prepared-readback-ratio-max");
   console.log(JSON.stringify(report, null, 2));
   if (jsonPath && jsonPath !== "true") {
-    fs.writeFileSync(path.resolve(jsonPath), JSON.stringify(report, null, 2));
+    writeTextFileCreatingParents(path.resolve(jsonPath), JSON.stringify(report, null, 2));
   }
   if (markdownPath && markdownPath !== "true") {
-    fs.writeFileSync(path.resolve(markdownPath), markdownReport(report));
+    writeTextFileCreatingParents(path.resolve(markdownPath), markdownReport(report));
   }
 } finally {
   if (browser) await browser.close();
   await server.close();
+}
+
+function writeTextFileCreatingParents(target, content) {
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, content);
 }
 
 function markdownReport(data) {

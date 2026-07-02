@@ -11350,7 +11350,7 @@ try {
         const payload = text.slice("__BG_PROGRESS__".length);
         console.error(payload);
         if (progressPath && progressPath !== "true") {
-          fs.appendFileSync(path.resolve(progressPath), `${payload}\n`);
+          appendTextFileCreatingParents(path.resolve(progressPath), `${payload}\n`);
         }
       }
     });
@@ -11364,7 +11364,7 @@ try {
     ...result,
   };
   if (jsonPath && jsonPath !== "true") {
-    fs.writeFileSync(path.resolve(jsonPath), JSON.stringify(report, null, 2));
+    writeTextFileCreatingParents(path.resolve(jsonPath), JSON.stringify(report, null, 2));
   }
   console.log(JSON.stringify(summaryOnly ? summarizeReport(report) : report, null, 2));
   if (requireWebGpu && !report.available) {
@@ -11401,7 +11401,7 @@ try {
     clearLastFailures(root);
   }
   if (markdownPath && markdownPath !== "true") {
-    fs.writeFileSync(path.resolve(markdownPath), markdownReport(report));
+    writeTextFileCreatingParents(path.resolve(markdownPath), markdownReport(report));
   }
 } finally {
   if (browser) await browser.close();
@@ -11436,4 +11436,14 @@ function writeLastFailures(root, report, argv) {
 
 function clearLastFailures(root) {
   fs.rmSync(path.join(root, ".tmp", "cuda-lite-last-failures.json"), { force: true });
+}
+
+function writeTextFileCreatingParents(target, content) {
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, content);
+}
+
+function appendTextFileCreatingParents(target, content) {
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.appendFileSync(target, content);
 }

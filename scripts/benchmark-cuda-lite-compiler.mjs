@@ -102,8 +102,13 @@ function main() {
 
   console.log(JSON.stringify(result, null, 2));
   if (markdownPath && markdownPath !== "true") {
-    fs.writeFileSync(path.resolve(markdownPath), markdownReport(result));
+    writeTextFileCreatingParents(path.resolve(markdownPath), markdownReport(result));
   }
+}
+
+function writeTextFileCreatingParents(target, content) {
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, content);
 }
 
 function measure(name, fn, options) {

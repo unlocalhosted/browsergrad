@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T08:57:46Z
+Last updated: 2026-07-02T09:09:04Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | 2D texture-to-layered-surface active-lane scalar pointer-array true/false branch pair green; continue next corpus-shaped storage/texture/control probe |
+| Active work item | Report-output parent-dir bug fixed across WebGPU e2e, progress logs, and CUDA-lite benchmarks; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -539,11 +539,14 @@ Current verified gates:
 - 2D texture-to-layered-surface active-lane scalar pointer-array fixtures: `texture-surface:uint4-atomic-pointer-array-active-lane-return,texture-surface:uint4-atomic-pointer-array-active-lane-return-false-branch` are `2 passed / 0 failed / 0 skipped`
 - hot 2D texture-to-layered-surface active-lane scalar pointer-array probe: repeat `5`, warmup `1`, `10 passed / 0 failed / 0 skipped`, best warm `4.3ms` / `4.7ms`, speedups `1.35` / `1.13`
 - WebGPU smoke after 2D texture-to-layered-surface active-lane scalar pointer-array probe: `265 passed / 0 failed / 0 skipped`
+- report-output parent-dir fix: WebGPU smoke writes nested JSON, markdown, and progress files under `.tmp/reports`; smoke remains `265 passed / 0 failed / 0 skipped`
+- benchmark report-output parent-dir fix: compiler benchmark writes nested markdown; WebGPU benchmark writes nested JSON and markdown
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | report-output parent directories | `e2e:webgpu:smoke -- --json .tmp/reports/smoke-profile.json` completed all WebGPU cases, then failed with `ENOENT` because report/progress writers assumed parent dirs already existed | e2e JSON, markdown, and progress writers now create parent dirs; CUDA-lite compiler/WebGPU benchmark report writers use same parent-dir creation behavior | smoke with nested JSON/markdown/progress output `265/0/0`; compiler benchmark nested markdown; WebGPU benchmark nested JSON/markdown |
 | Probed green | 2D texture-to-layered-surface active-lane scalar pointer-array true/false branches | 2D `tex2D<uint4>` to `surf2DLayeredwrite/read` scalar pointer-array selection had select-only coverage and volume active-lane coverage, but no 2D active-lane true/false pair; this could regress pre-return layered-surface side effects, selected scalar storage handles, or false-branch shadow writes | existing active-lane lowering, texture vector conversion, layered surface vector read/write, pointer-array storage handle lowering, and scalar atomic lane writes preserve true and false selected targets | `texture-surface:uint4-atomic-pointer-array-active-lane-return,texture-surface:uint4-atomic-pointer-array-active-lane-return-false-branch` `2/0/0`; smoke `265/0/0`; hot gate `10/0/0`, speedups `1.35` / `1.13` |
 | Fixed | stale last-failure status | a fail-first expectation miss wrote `.tmp/cuda-lite-last-failures.json`; the later green focused rerun left the artifact in place, so `bugbash:status` falsely reported an active failure | successful WebGPU e2e runs now clear the last-failure artifact after all failure/skip/warmup checks pass | focused green rerun `1/0/0`; `bugbash:status` reports `Active failure cases: 0`; smoke `263/0/0` |
 | Probed green | texture-surface active-lane scalar pointer-array false branch | volume texture-to-surf3D scalar pointer-array active-lane case proved true target only; false-target selection could regress pre-return surface writes, selected scalar storage handles, or shadow-buffer atomics | existing active-lane side-effect lowering, volume texture conversion, surf3D vector read/write, pointer-array storage handle lowering, and scalar atomic lane writes preserve false-branch selected targets | `texture-surface:volume-atomic-pointer-array-active-lane-return-false-branch` `1/0/0`; smoke `263/0/0`; hot gate `5/0/0`, speedup `1.24` |
