@@ -104,7 +104,7 @@ function summarizeProgress(progress, activeFailureCases) {
   return {
     movement: progress.dashboard["Fixed failure movement"],
     activeFailureCount: activeFailureCases.length,
-    latestUnitGate: latestGate(progress.latestGreenGates, /compiler unit suite/i),
+    latestUnitGate: latestGate(progress.latestGreenGates, /\bcompiler unit\b/i),
     latestSmokeGate: latestGate(progress.latestGreenGates, /WebGPU smoke/i),
     latestVerifierGate: latestGate(progress.latestGreenGates, /verifier/i),
     remainingProbeCount: progress.remainingProbes.length,

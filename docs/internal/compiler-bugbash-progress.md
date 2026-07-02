@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T18:22:46Z
+Last updated: 2026-07-02T18:26:02Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; unreachable helper feature/shared/atomic/texture/constant/device-global/function-body/global-feature pollution fixes are green |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Added dynamic shared vector alias-chain active-lane probe for inactive-lane pre-return writes and post-barrier pointer-array reads |
+| Active work item | Fixed bugbash status latest-unit proof extraction so changed gates with `compiler unit` counts do not get hidden behind stale suite-only lines |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -620,11 +620,13 @@ Current verified gates:
 - dynamic shared vector alias-chain active-lane probe: `control:dynamic-shared-vector-alias-chain-active-lane-return` is `1/0/0`
 - hot dynamic shared vector alias-chain active-lane probe: repeat `5`, warmup `1`, `5/0/0`; best warm `4.7ms`, speedup `1.36`
 - changed gate after dynamic shared vector alias-chain active-lane probe: fixture tests passed; WebGPU smoke `289/0/0`; bugbash status active failures `0`; test-scope passed
+- bugbash status latest-unit proof fix: status now recognizes changed-gate unit-count lines, not only older suite-only wording; regression passed and live status no longer reports stale `421`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | bugbash progress visibility | `bugbash:status` reported stale `Latest unit proof: compiler unit suite after signed byte-storage atomic fix: 421 passed` even though newer changed gates recorded `compiler unit 436/0`, making progress look older than reality | status parser now matches any `compiler unit` gate line, and regression locks that a newer changed gate supersedes an older suite-only line | `test:bugbash-status` passed; live `bugbash:status` now shows latest unit proof from half-global changed gate with `compiler unit 436/0` |
 | Probed green | dynamic shared vector alias-chain active-lane side effects | dynamic shared vector pointer arrays had alias-chain coverage, but not inactive lanes writing vector lanes before an early return while active lanes read through shifted pointer arrays after a later barrier | existing active-lane lowering preserves pre-return dynamic shared writes and post-barrier vector pointer-array address scaling through chained aliases | `control:dynamic-shared-vector-alias-chain-active-lane-return` `1/0/0`; hot repeat `5/0/0`, best warm `4.7ms` |
 | Probed green | device-global vector active-lane side effects | device-global vector lanes had scalar atomic and pointer-array coverage, but not inactive lanes writing/atomically updating device globals before an early return and active lanes reading them after a later barrier | existing active-lane lowering preserves pre-return device-global side effects, scalar atomic lane writes, and vector pointer-array reads across the barrier | `control:device-global-vector-scalar-atomic-active-lane-return,control:device-global-vector-pointer-array-active-lane-return` `2/0/0`; hot repeat `10/0/0`, best warm `1.4ms` / `1.4ms` |
 | Fixed | unreferenced global half feature gating | selected-kernel compilation could fail with `missing-feature-shader-f16` solely because unused global `__constant__ half` / `__device__ half` declarations were declared before selected-kernel reachability filtering removed their IR/WGSL bindings | analyzer now computes global symbol reachability from the selected kernel plus reachable device functions, routes unreachable global feature requirements and initializer feature checks into a dead sink, and keeps f64 compatibility diagnostics tied to the same reachability bit | fail-first unit; focused unit slice passed; `runtime:unreachable-half-global-feature-binding` `1/0/0`; changed gate compiler unit `436/0`; WebGPU smoke `286/0/0` |

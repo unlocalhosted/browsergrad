@@ -28,6 +28,7 @@ Last updated: 2026-07-01T10:00:00Z
 
 - compiler unit suite: 374 passed
 - WebGPU smoke: 111 passed / 0 failed / 0 skipped
+- changed gate after probe: typecheck passed; compiler unit \`436/0\`; WebGPU smoke \`289/0/0\`
 
 ## Remaining Probe Map
 
@@ -47,8 +48,8 @@ assert.equal(status.lastUpdated, "2026-07-01T10:00:00Z");
 assert.equal(status.dashboard["Overall status"], "Active bugbash, not complete");
 assert.equal(status.progress.activeFailureCount, 1);
 assert.equal(status.progress.movement, "Started from 87 failing cases; current focused gate is green");
-assert.equal(status.progress.latestUnitGate, "compiler unit suite: 374 passed");
-assert.equal(status.progress.latestSmokeGate, "WebGPU smoke: 111 passed / 0 failed / 0 skipped");
+assert.equal(status.progress.latestUnitGate, "changed gate after probe: typecheck passed; compiler unit `436/0`; WebGPU smoke `289/0/0`");
+assert.equal(status.progress.latestSmokeGate, "changed gate after probe: typecheck passed; compiler unit `436/0`; WebGPU smoke `289/0/0`");
 assert.equal(status.progress.remainingProbeCount, 2);
 assert.deepEqual(status.activeFailures.cases, ["control:probe"]);
 assert.equal(status.activeFailures.failedByStage.diagnostics, 1);
@@ -59,7 +60,8 @@ assert.deepEqual(status.remainingProbes, [
 assert.ok(status.nextCommands.includes("pnpm --filter @unlocalhosted/browsergrad-compiler run e2e:webgpu:last-failures"));
 assert.match(formatStatus(status), /Progress:/u);
 assert.match(formatStatus(status), /Movement: Started from 87 failing cases/u);
-assert.match(formatStatus(status), /Latest smoke proof: WebGPU smoke: 111 passed/u);
+assert.match(formatStatus(status), /Latest unit proof: changed gate after probe/u);
+assert.match(formatStatus(status), /Latest smoke proof: changed gate after probe/u);
 assert.match(formatStatus(status), /Active failures: 1/u);
 assert.match(formatStatus(status), /control:probe/u);
 assert.match(formatStatus(status), /Remaining probes:/u);
