@@ -160,6 +160,8 @@ export const textureScopeCases = [
   "surface:surf3d-write",
   "surface:surf3d-read",
   "surface:surf3d-vector-read",
+  "surface:surf3d-negative-z-boundary",
+  "surface:surf3d-vector-z-boundary",
   "surface:surf3d-vector-write-active-lane-return",
   "surface:surf3d-helper-vector-multi-surface-active-lane-return",
   "surface:surf3d-active-lane-guarded-rhs",

@@ -2477,6 +2477,35 @@ __global__ void surfaceVectorRead3d(cudaSurfaceObject_t surf, float *out) {
     out[3] = pointerValue.w + returnValue.w;
   }
 }`,
+  surface3DNegativeZBoundary: `
+__global__ void surface3DNegativeZBoundary(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    float negativeValue = 99.0f;
+    float highValue = 99.0f;
+    surf3Dread(&negativeValue, surf, 0, 0, -1);
+    surf3Dread(&highValue, surf, 0, 0, 2);
+    surf3Dwrite(42.0f, surf, 0, 0, -1);
+    surf3Dwrite(43.0f, surf, 0, 0, 2);
+    out[0] = negativeValue;
+    out[1] = highValue;
+    out[2] = surf3Dread<float>(surf, 0, 0, 0);
+    out[3] = surf3Dread<float>(surf, 0, 0, 1);
+  }
+}`,
+  surface3DVectorZBoundary: `
+__global__ void surface3DVectorZBoundary(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    surf3Dwrite(make_float4(31.0f, 32.0f, 33.0f, 34.0f), surf, 0, 0, 2);
+    float4 highValue = surf3Dread<float4>(surf, 0, 0, 2);
+    float4 layerValue = surf3Dread<float4>(surf, 0, 0, 1);
+    out[0] = highValue.x;
+    out[1] = highValue.y;
+    out[2] = highValue.z;
+    out[3] = highValue.w;
+    out[4] = layerValue.x;
+    out[5] = layerValue.y;
+  }
+}`,
   surface3DVectorWriteActiveLaneReturn: `
 __device__ void write_vec3d_active(cudaSurfaceObject_t surfaceArg, float base) {
   surf3Dwrite(make_float4(base + 1.0f, base + 2.0f, base + 3.0f, base + 4.0f), surfaceArg, 0, 0, 1);
@@ -8695,6 +8724,38 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [10, 12, 14, 16] },
+          },
+          {
+            name: "surface:surf3d-negative-z-boundary",
+            source: SOURCES.surface3DNegativeZBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+              surfaces: {
+                surf: { width: 2, height: 2, data: new Float32Array([3, 5, 7, 11, 13, 17, 19, 23]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 3, 13] },
+          },
+          {
+            name: "surface:surf3d-vector-z-boundary",
+            source: SOURCES.surface3DVectorZBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(6),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([3, 5, 7, 11, 13, 17, 19, 23]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 13, 17] },
           },
           {
             name: "surface:surf3d-vector-write-active-lane-return",
