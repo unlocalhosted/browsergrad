@@ -224,6 +224,7 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 4 },
     },
     output: "out",
+    expectedOutput: { type: "Float32Array", data: [-0.15880800783634186, 0, 0.8411920070648193, 1.9545977115631104] },
   },
   {
     sourceKey: "corpusLlmLayerNormForwardKernel1",
@@ -245,6 +246,10 @@ export const cudaLiteCorpusExecutionFixtures = [
       scalars: { N: 2, C: 3 },
     },
     output: "out",
+    expectedOutput: {
+      type: "Float32Array",
+      data: [-1.2247356176376343, 0, 1.2247356176376343, -1.2247356176376343, 0, 1.2247356176376343],
+    },
   },
   {
     sourceKey: "corpusLlmAttentionScaleKernel",

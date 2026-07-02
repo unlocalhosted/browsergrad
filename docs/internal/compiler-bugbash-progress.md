@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T19:30:17Z
+Last updated: 2026-07-02T19:35:29Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -641,12 +641,14 @@ Current verified gates:
 - exact llm.c auto-corpus trimul profile after reference-size tuning: repeat `3`, warmup `1`, `3/0/0`, skips `0`; expected auto coverage now reports `1`; best warm `113.1ms`; profile `webgpuMs 2.6ms`, `referenceMs 108.2ms`
 - scoped llm.c real-world verifier after auto-corpus reference-size tuning: audit `148/148` compile/codegen, hard fails `0`; source WebGPU scoped slice `44/0/0`, with fixture `28/0/0`, auto-corpus `16/0/0`, skips `0`; trimul slow case reduced from about `1.86s` earlier to `170.1ms` in the full scoped verifier
 - pinned-output corpus fixture hardening: LeetCUDA fixture slice `46/0/0`, expected-output `35`, skips `0`; llm.c fixture slice `28/0/0`, expected-output `17`, skips `0`; full corpus fixture gate `98/0/0`, expected-output `71`, skips `0`
+- second pinned-output corpus fixture hardening: focused new-pinned slice `11/0/0`, expected-output `11`, skips `0`; full corpus fixture gate `98/0/0`, expected-output `82`, skips `0`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
 | Probed green | real corpus pinned outputs | 24 real WebGPU corpus fixtures were executing but only compared against generated CPU reference output, so fixture regressions could still move both dynamic paths together without a stable pinned oracle | pinned expected outputs for deterministic LeetCUDA activations/vector kernels, llm.c residual/permute/softmax/matmul/layernorm cases, and CUTE transpose fixtures; raised expected-output baseline to `71` | LeetCUDA slice `46/0/0`, expected-output `35`; llm.c slice `28/0/0`, expected-output `17`; full corpus fixture gate `98/0/0`, expected-output `71`; all skips `0` |
+| Probed green | additional real corpus pinned outputs | 11 more simple deterministic fixtures still used only generated reference output: LeetCUDA nsight/interview kernels, cuda-samples `MatrixMulCUDA`, llm.c vectorized GELU and layernorm | pinned stable expected outputs and raised expected-output baseline to `82` | focused slice `11/0/0`, expected-output `11`; full corpus fixture gate `98/0/0`, expected-output `82`; all skips `0` |
 | Fixed | exact auto-corpus rerun baseline | profiling one exact auto-corpus case with `--auto-corpus-smoke-corpora llm.c` passed the selected case but still exited with `Auto corpus smoke baseline failed: 3/16 covered` because scoped-corpus coverage validation treated exact filters like a full corpus smoke | full auto-corpus coverage is enforced for unfiltered and broad `auto-corpus:<id>:` runs; exact case filters validate the selected case and report the filtered expected count | fail-first exact trimul run reproduced the false baseline failure; exact profile now exits `0` with `3/0/0`, skips `0`, and `autoCorpusSmokeExpectedCovered: 1` |
 | Perf | auto-corpus synthetic reference loops | llm.c `trimul_global` WebGPU work was only about `5ms`, but CPU reference comparison took about `1.4s`, making focused iteration look like a WebGPU performance problem when it was synthetic reference size | synthetic smoke dimensions now keep sequence/channel/head/batch loops small for `T`, `C`, `channels`, `HS`, `NH`, and `B` in both node and browser input generators | synthetic-input unit passed; exact trimul profile now repeat `3/0/0`, skips `0`, best warm `113.1ms`; scoped llm.c verifier `44/0/0`, skips `0` |
 | Fixed | scoped auto-corpus WebGPU coverage | scoped verifier requested `--auto-corpus-smoke-limit 8` for `leetcuda`, but generated auto-smoke fixtures round-robin from all corpora; case filters then removed every auto case, so the gate reported `autoCorpusSmokeExpectedCovered: 8` with `autoCorpusSmokeCovered: 0` and still passed | auto-smoke generation can now restrict candidate corpora, scoped verifier passes selected corpus ids, cache keys include corpus scope, and scoped auto-smoke coverage is validated even during filtered runs | fail-first scoped LeetCUDA verifier showed auto-corpus `0/8`; fixture and verifier CLI tests; scoped LeetCUDA verifier now `54/0/0` with auto-corpus `8/0/0`, skips `0` |
@@ -1037,7 +1039,7 @@ Probe these with fail-first real WebGPU fixtures:
   - keep `verify:changed` scoped and explain selected gates; exact `--cases` filters now run only the named case before falling back to fuzzy substring matching, large summary `caseFilters` now print compact count/sample output, and smoke wrapper avoids nested pnpm command echo
   - auto-corpus exact-case profiling no longer fails a full-corpus baseline check; filtered expected counts now match the selected case set
   - llm.c synthetic smoke reference loops are smaller, but layernorm reference cases still dominate the scoped run at about `234ms`; keep profiling reference hot spots separately from WebGPU dispatch time
-  - corpus fixture expected-output baseline now covers `71/98` real WebGPU fixtures; remaining dynamic-reference-only fixtures should be pinned when their math oracle is stable
+  - corpus fixture expected-output baseline now covers `82/98` real WebGPU fixtures; remaining dynamic-reference-only fixtures should be pinned when their math oracle is stable
   - keep smoke real-WebGPU and fast enough for inner loop
 
 ## Gate Ladder
