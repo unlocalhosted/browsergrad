@@ -683,6 +683,20 @@ __global__ void deviceGlobalVectorScalarAtomicActiveLaneReturn(uint* out, int N)
     out[1] = scalarView[1];
   }
 }`,
+  deviceGlobalAllInactiveSideEffectReturn: `
+__device__ uint g_all_inactive[4];
+
+__global__ void deviceGlobalAllInactiveSideEffectReturn(int N) {
+  int idx = threadIdx.x;
+  atomicAdd(&g_all_inactive[idx], 10u + (uint)idx);
+  if (idx >= N) {
+    return;
+  }
+  __syncthreads();
+  if (idx == 0) {
+    atomicAdd(&g_all_inactive[3], 100u);
+  }
+}`,
   deviceGlobalFloat3VectorToScalarAtomic: `
 __device__ float3 g_f3[2];
 
@@ -6691,6 +6705,21 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [5, 6] },
+          },
+          {
+            name: "control:device-global-all-inactive-side-effect-return",
+            source: SOURCES.deviceGlobalAllInactiveSideEffectReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {},
+              deviceGlobals: {
+                g_all_inactive: new Uint32Array(4),
+              },
+              scalars: { N: 0 },
+            }),
+            output: "g_all_inactive",
+            expectedOutput: { type: "Uint32Array", data: [10, 11, 12, 13] },
           },
           {
             name: "helpers:device-global-float3-vector-to-scalar-atomic",

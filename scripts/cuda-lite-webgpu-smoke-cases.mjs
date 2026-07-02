@@ -97,6 +97,7 @@ export const atomicScopeCases = [
   "helpers:int-vector-to-scalar-pointer-atomic-offset-helper",
   "helpers:device-global-vector-to-scalar-atomic",
   "control:device-global-vector-scalar-atomic-active-lane-return",
+  "control:device-global-all-inactive-side-effect-return",
   "helpers:shared-vector-to-scalar-atomic",
   "helpers:shared-float3-vector-to-scalar-atomic",
   "helpers:shared-int3-vector-to-scalar-atomic",
