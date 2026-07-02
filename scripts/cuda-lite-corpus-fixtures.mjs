@@ -37,6 +37,25 @@ export const cudaLiteCorpusExecutionFixtures = [
     expectedOutput: { type: "Float32Array", data: [2, 4, 6, 8] },
   },
   {
+    sourceKey: "corpusCuda120VectorScaleConstant",
+    caseName: "corpus:cuda-120:vectorScaleKernel_constant",
+    corpusId: "cuda-120",
+    relativePath: "daily-updates/day-26-Constant-Memory.md",
+    kernelName: "vectorScaleKernel",
+    workgroupSize: [4, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    input: {
+      buffers: {
+        input: { type: "Float32Array", data: [1, 2, 3, 4] },
+        output: { type: "Float32Array", length: 4 },
+      },
+      constants: { scaleFactor: 3 },
+      scalars: { N: 4 },
+    },
+    output: "output",
+    expectedOutput: { type: "Float32Array", data: [3, 6, 9, 12] },
+  },
+  {
     sourceKey: "corpusCudaSamplesVectorAdd",
     caseName: "corpus:cuda-samples:vectorAdd",
     corpusId: "cuda-samples",
