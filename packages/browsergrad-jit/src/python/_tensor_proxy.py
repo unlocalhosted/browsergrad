@@ -655,11 +655,31 @@ class TensorProxy:
         return TensorProxy(uop, session=self._get_session(),
                            requires_grad=requires, ctx=ctx)
 
-    def sum(self, axis: Any = None, keepdims: bool = False) -> "TensorProxy":
-        return self._reduce("sum", axis=axis, keepdims=keepdims)
+    def sum(
+        self,
+        axis: Any = None,
+        dim: Any = None,
+        keepdims: bool = False,
+        keepdim: bool = False,
+    ) -> "TensorProxy":
+        return self._reduce(
+            "sum",
+            axis=dim if dim is not None else axis,
+            keepdims=keepdim or keepdims,
+        )
 
-    def mean(self, axis: Any = None, keepdims: bool = False) -> "TensorProxy":
-        return self._reduce("mean", axis=axis, keepdims=keepdims)
+    def mean(
+        self,
+        axis: Any = None,
+        dim: Any = None,
+        keepdims: bool = False,
+        keepdim: bool = False,
+    ) -> "TensorProxy":
+        return self._reduce(
+            "mean",
+            axis=dim if dim is not None else axis,
+            keepdims=keepdim or keepdims,
+        )
 
     def max(self, axis: Any = None, keepdims: bool = False) -> "TensorProxy":
         return self._reduce("max", axis=axis, keepdims=keepdims)
@@ -667,8 +687,18 @@ class TensorProxy:
     def min(self, axis: Any = None, keepdims: bool = False) -> "TensorProxy":
         return self._reduce("min", axis=axis, keepdims=keepdims)
 
-    def argmax(self, axis: Any = None, keepdims: bool = False) -> "TensorProxy":
-        return self._reduce("argmax", axis=axis, keepdims=keepdims)
+    def argmax(
+        self,
+        axis: Any = None,
+        dim: Any = None,
+        keepdims: bool = False,
+        keepdim: bool = False,
+    ) -> "TensorProxy":
+        return self._reduce(
+            "argmax",
+            axis=dim if dim is not None else axis,
+            keepdims=keepdim or keepdims,
+        )
 
     def reshape(self, *shape: Any) -> "TensorProxy":
         # Accept reshape(3, 4) or reshape((3, 4)).

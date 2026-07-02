@@ -454,6 +454,50 @@ def sigmoid(x):
     return _functional.sigmoid(x)
 
 
+def matmul(a, b):
+    return a @ b
+
+
+def mm(a, b):
+    return a @ b
+
+
+def bmm(a, b):
+    return a @ b
+
+
+def exp(x):
+    return x.exp()
+
+
+def log(x):
+    return x.log()
+
+
+def tanh(x):
+    return _functional.tanh(x)
+
+
+def sum(x, dim=None, axis=None, keepdim=False, keepdims=False):
+    return x.sum(dim=dim, axis=axis, keepdim=keepdim, keepdims=keepdims)
+
+
+def mean(x, dim=None, axis=None, keepdim=False, keepdims=False):
+    return x.mean(dim=dim, axis=axis, keepdim=keepdim, keepdims=keepdims)
+
+
+def argmax(x, dim=None, axis=None, keepdim=False, keepdims=False):
+    return x.argmax(dim=dim, axis=axis, keepdim=keepdim, keepdims=keepdims)
+
+
+def softmax(input, dim=-1):
+    return _functional.softmax(input, dim=dim)
+
+
+def log_softmax(input, dim=-1):
+    return _functional.log_softmax(input, dim=dim)
+
+
 def save(obj, path):
     """Pickle a browser-safe object to Pyodide's filesystem.
 
@@ -480,7 +524,8 @@ __all__ = [
     "tensor", "zeros", "ones", "randn", "arange", "from_numpy",
     "Session", "get_default_session", "set_default_session", "new_session",
     "manual_seed", "no_grad", "inference_mode",
-    "sigmoid", "save", "load",
+    "sigmoid", "matmul", "mm", "bmm", "exp", "log", "tanh",
+    "sum", "mean", "argmax", "softmax", "log_softmax", "save", "load",
     "nn", "optim", "jit", "utils", "amp", "kernels", "func",
     "custom_kernel", "onnx", "lab", "experimental",
     "realize_webgpu", "register_webgpu_bridge", "unregister_webgpu_bridge",

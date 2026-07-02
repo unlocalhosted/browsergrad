@@ -206,6 +206,83 @@ loaded = torch.load("/tmp/bg_jit_state.pt")
     expect(result.loadedKeys).toEqual(["weight"]);
   });
 
+  it("supports PyTorch reduction aliases on Tensor and top-level torch", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      methodSum: number[][];
+      methodMean: number[][];
+      methodArgmax: number[][];
+      torchSum: number[][];
+      torchMean: number[][];
+      torchArgmax: number[][];
+    }>(`
+import browsergrad_jit as bg
+bg.install_torch_alias()
+import torch
+
+x = torch.tensor([[1.0, 3.0, 2.0], [4.0, 0.0, 5.0]], requires_grad=True)
+{
+  "methodSum": x.sum(dim=1, keepdim=True).numpy().tolist(),
+  "methodMean": x.mean(dim=0, keepdim=True).numpy().tolist(),
+  "methodArgmax": x.argmax(dim=1, keepdim=True).numpy().tolist(),
+  "torchSum": torch.sum(x, dim=1, keepdim=True).numpy().tolist(),
+  "torchMean": torch.mean(x, dim=0, keepdim=True).numpy().tolist(),
+  "torchArgmax": torch.argmax(x, dim=1, keepdim=True).numpy().tolist(),
+}
+`);
+    expect(result.methodSum).toEqual([[6], [9]]);
+    expect(result.methodMean).toEqual([[2.5, 1.5, 3.5]]);
+    expect(result.methodArgmax).toEqual([[1], [2]]);
+    expect(result.torchSum).toEqual(result.methodSum);
+    expect(result.torchMean).toEqual(result.methodMean);
+    expect(result.torchArgmax).toEqual(result.methodArgmax);
+  });
+
+  it("supports top-level PyTorch math and softmax aliases", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      matmul: number[][];
+      mm: number[][];
+      bmmShape: number[];
+      expFirst: number;
+      logFirst: number;
+      tanhZero: number;
+      softmaxRows: number[];
+      logSoftmaxRows: number[];
+    }>(`
+import browsergrad_jit as bg
+bg.install_torch_alias()
+import torch
+import numpy as np
+
+a = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+b = torch.tensor([[5.0, 6.0], [7.0, 8.0]])
+batched_a = torch.tensor(np.ones((2, 2, 3), dtype=np.float32))
+batched_b = torch.tensor(np.ones((2, 3, 4), dtype=np.float32))
+x = torch.tensor([[1.0, 2.0, 3.0], [2.0, 0.0, -1.0]])
+sm = torch.softmax(x, dim=-1).numpy()
+lsm = torch.log_softmax(x, dim=-1).numpy()
+{
+  "matmul": torch.matmul(a, b).numpy().tolist(),
+  "mm": torch.mm(a, b).numpy().tolist(),
+  "bmmShape": list(torch.bmm(batched_a, batched_b).shape),
+  "expFirst": float(torch.exp(torch.tensor([1.0])).item()),
+  "logFirst": float(torch.log(torch.tensor([1.0])).item()),
+  "tanhZero": float(torch.tanh(torch.tensor([0.0])).item()),
+  "softmaxRows": sm.sum(axis=-1).round(6).tolist(),
+  "logSoftmaxRows": np.exp(lsm).sum(axis=-1).round(6).tolist(),
+}
+`);
+    expect(result.matmul).toEqual([[19, 22], [43, 50]]);
+    expect(result.mm).toEqual(result.matmul);
+    expect(result.bmmShape).toEqual([2, 2, 4]);
+    expect(result.expFirst).toBeCloseTo(Math.E, 5);
+    expect(result.logFirst).toBe(0);
+    expect(result.tanhZero).toBe(0);
+    expect(result.softmaxRows).toEqual([1, 1]);
+    expect(result.logSoftmaxRows).toEqual([1, 1]);
+  });
+
   it("is idempotent — re-installing returns cleanly", async () => {
     const target = await getJitTarget();
     const ok = await target.run<boolean>(`
