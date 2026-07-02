@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T20:21:00Z
+Last updated: 2026-07-02T20:27:47Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,7 +9,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `453/0/0`, dist `453/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `98/98` |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `459/0/0`, dist `459/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `98/98` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
 | Active work item | Validate surface boundary semantics plus keep perf/source-dist verifier gates green |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
@@ -646,6 +646,8 @@ Current verified gates:
 - final pinned-output corpus fixture hardening: focused remaining slice `5/0/0`, expected-output `5`, skips `0`; full corpus fixture gate `98/0/0`, expected-output `98`, skips `0`; fixture tooling test passed
 - source/dist real-world verifier after final oracle pinning: compile/codegen audit hard fails `0`; source browser gate `453/0/0`, corpus fixtures `98/0/0`, expected-output `98`, auto-corpus `32/0/0`, skips `0`; dist browser gate `453/0/0`, same coverage, skips `0`
 - corpus hot perf gate after final oracle pinning: histogram/scalar repeat `2`, `4/0/0`, expected-output `4`, skips `0`; warm best `5.8ms` / `4.3ms`, speedup `261.97` / `296.28`
+- source/dist real-world verifier after surface boundary probes: compile/codegen audit hard fails `0`; source browser gate `459/0/0`, corpus fixtures `98/0/0`, expected-output `98`, auto-corpus `32/0/0`, skips `0`; dist browser gate `459/0/0`, same coverage, skips `0`
+- corpus hot perf gate after surface boundary probes: histogram/scalar repeat `2`, `4/0/0`, expected-output `4`, skips `0`; warm best `5.6ms` / `4.1ms`, speedups `307.46` / `348.12`
 - constant texture-to-surface active-lane probe: `texture-surface:constant-active-lane-return` is `1 passed / 0 failed / 0 skipped`; WebGPU smoke after constant texture-to-surface probe `291/0/0`, skips `0`; hot repeat `5/0/0`, best warm `4.4ms`, speedup `19.39`; test-scope passed
 - shared/constant texture-to-surface active-lane probe: `texture-surface:shared-constant-active-lane-return` is `1 passed / 0 failed / 0 skipped`; WebGPU smoke after shared/constant texture-to-surface probe `292/0/0`, skips `0`; hot repeat `5/0/0`, best warm `4.8ms`, speedup `31.81`
 - surface negative byte-offset boundary fix: `surface:negative-byte-offset` is `1 passed / 0 failed / 0 skipped`; hot repeat `5/0/0`, best warm `1.2ms`, speedup `20.33`; changed gate typecheck passed, compiler unit `436/0`, surface/texture focused group `158/0/0`, WebGPU smoke `293/0/0`, skips `0`
