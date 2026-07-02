@@ -801,10 +801,20 @@ __global__ void sharedByteBf162Reinterpret(float *out) {
 __device__ void signed_shared_byte_ops(int *word, int *out) {
   out[0] = atomicAdd(word, -3);
   out[1] = word[0];
-  out[2] = atomicMin(word, -4);
+  out[2] = atomicSub(word, 2);
   out[3] = word[0];
-  out[4] = atomicMax(word, 9);
+  out[4] = atomicMin(word, -4);
   out[5] = word[0];
+  out[6] = atomicMax(word, 9);
+  out[7] = word[0];
+  out[8] = atomicAnd(word, 6);
+  out[9] = word[0];
+  out[10] = atomicOr(word, 10);
+  out[11] = word[0];
+  out[12] = atomicXor(word, 3);
+  out[13] = word[0];
+  out[14] = atomicCAS(word, 9, -2);
+  out[15] = word[0];
 }
 
 __global__ void sharedByteIntHelperAtomic(int *out) {
@@ -814,8 +824,18 @@ __global__ void sharedByteIntHelperAtomic(int *out) {
     signed_shared_byte_ops((int *)&scratch[0], out);
     int *direct = (int *)&scratch[4];
     direct[0] = 22;
-    out[6] = atomicExch(direct, -11);
-    out[7] = direct[0];
+    out[16] = atomicCAS(direct, 21, -11);
+    out[17] = direct[0];
+    out[18] = atomicCAS(direct, 22, -11);
+    out[19] = direct[0];
+    out[20] = atomicAnd(direct, 7);
+    out[21] = direct[0];
+    out[22] = atomicOr(direct, 16);
+    out[23] = direct[0];
+    out[24] = atomicXor(direct, 3);
+    out[25] = direct[0];
+    out[26] = atomicExch(direct, -12);
+    out[27] = direct[0];
   }
 }`,
   storageByteFloatReinterpret: `
@@ -6446,11 +6466,11 @@ const html = String.raw`<!doctype html>
             launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({
               buffers: {
-                out: new Int32Array(8),
+                out: new Int32Array(28),
               },
             }),
             output: "out",
-            expectedOutput: { type: "Int32Array", data: [10, 7, 7, -4, -4, 9, 22, -11] },
+            expectedOutput: { type: "Int32Array", data: [10, 7, 7, 5, 5, -4, -4, 9, 9, 0, 0, 10, 10, 9, 9, -2, 22, 22, 22, -11, -11, 5, 5, 21, 21, 22, 22, -12] },
           },
           {
             name: "storage:param-byte-float-reinterpret",

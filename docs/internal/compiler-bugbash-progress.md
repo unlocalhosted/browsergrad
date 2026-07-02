@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T16:32:09Z
+Last updated: 2026-07-02T16:37:37Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,9 +9,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; shared signed byte-storage fixture/helper trim changed gate is green |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; expanded shared signed byte-storage atomic probe is green |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Shared signed byte-storage atomic fixture and int-view helper emission trim fixed through changed gate; ready for next corpus-shaped probe |
+| Active work item | Expanded shared signed byte-storage helper/direct atomic probe is green; ready for next corpus-shaped probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -584,12 +584,13 @@ Current verified gates:
 - shared signed byte-storage atomic fixture: `storage:shared-byte-int-helper-atomic` covers signed helper add/min/max over `__shared__ uchar[]` and direct exchange at byte offset 4; focused WebGPU group `3/0/0` with param signed-byte guard and int-vector atomic guard
 - int-view atomic helper emission trim: signed-u32 carrier helpers now emit only atomic kinds used by the module instead of the full add/sub/min/max/bitwise/exchange/CAS set
 - changed gate after shared signed byte-storage fixture/helper trim: typecheck passed; WGSL modules `16/0`; WebGPU smoke `276/0/0`; selected atomic WebGPU group `35/0/0`; fixture/status/scope tests passed
+- expanded shared signed byte-storage atomic fixture: `storage:shared-byte-int-helper-atomic` now covers helper add/sub/min/max/and/or/xor/CAS and direct CAS/and/or/xor/exchange over byte offset 4; focused WebGPU `1/0/0`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
-| Probed green | shared signed atomics over byte-backed storage | storage signed byte atomics were fixed, but shared `uchar` byte roots needed real WebGPU coverage for helper signed add/min/max and direct exchange at byte offset 4 | existing signed-u32 carrier helpers and shared byte-root address lowering preserve old/new signed values over packed workgroup storage | `storage:shared-byte-int-helper-atomic,storage:param-byte-int-helper-atomic,helpers:int-vector-to-scalar-pointer-atomic-offset-helper` `3/0/0` |
+| Probed green | shared signed atomics over byte-backed storage | storage signed byte atomics were fixed, but shared `uchar` byte roots needed real WebGPU coverage for helper signed add/sub/min/max/and/or/xor/CAS and direct CAS/and/or/xor/exchange at byte offset 4 | existing signed-u32 carrier helpers and shared byte-root address lowering preserve old/new signed values over packed workgroup storage | `storage:shared-byte-int-helper-atomic` `1/0/0`; earlier mixed guard group `3/0/0` |
 | Fixed | int-view atomic helper over-emission | any unsigned atomic carrier plus an atomic call emitted the whole signed-u32 helper set, adding unused WGSL helper functions to kernels that needed only one or two signed view operations | int-view helper emission now derives used atomic kinds from IR calls and emits only those helpers for storage/workgroup address spaces | typecheck passed; focused WebGPU group `3/0/0` |
 | Fixed | signed atomics over byte-backed storage | `int*` views over `uchar*` storage marked the root atomic but direct atomics emitted `atomicAdd(&scratch[...], -3)` against `atomic<u32>`, while helper atomics generated default-only `bg_ptr_atomicAdd_i32`; byte offset `&scratch[4]` also needed word addressing | signed atomic views over unsigned carriers now route through bitcast/CAS helpers for add/sub/min/max/bitwise/exchange/CAS, and direct/helper byte-root atomic addresses use `index >> 2` | fail-first ad hoc probes; focused unit `supports signed helper atomics over byte-backed storage views`; real WebGPU fixture `storage:param-byte-int-helper-atomic` plus uint guard `2/0/0` |
 | Fixed | helper atomics over byte-backed storage | `add_word((uint *)&scratch[0], out)` compiled but generated `bg_ptr_atomicAdd_u32` with no `scratch` case, so helper atomics through byte-backed typed views returned the default and skipped the update | pointer atomic helpers now use the same byte-root compatibility/address policy as packed storage helpers, emitting `scratch[index >> 2]` for aligned typed atomic views over `uchar` storage/shared/global roots | fail-first ad hoc probe; focused unit `supports helper pointer atomics over byte-backed storage views`; real WebGPU fixture `storage:param-byte-uint-helper-atomic` `1/0/0` |
@@ -919,6 +920,7 @@ Current added pointer/control cases:
 - `storage:shared-byte-reinterpret`
 - `storage:shared-byte-concurrent-writes`
 - `storage:shared-byte-float-reinterpret`
+- `storage:shared-byte-int-helper-atomic`
 
 Smoke current: `276/0/0`.
 
