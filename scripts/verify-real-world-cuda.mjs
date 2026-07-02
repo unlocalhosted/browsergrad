@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseAutoCorpusSmokeProfile } from "./cuda-lite-webgpu-cli.mjs";
+import { cudaLiteCorpora } from "./cuda-lite-corpus-registry.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(scriptDir, "..");
@@ -12,6 +13,7 @@ export function parseVerifyRealWorldCudaArgs(args) {
     skipFetch: false,
     allowMissingWebGpu: false,
     limit: 0,
+    only: [],
     bundle: "both",
     autoCorpusSmokeLimit: 32,
     autoCorpusSmokeMode: "reference",
@@ -40,12 +42,27 @@ export function parseVerifyRealWorldCudaArgs(args) {
       options.allowMissingWebGpu = true;
       continue;
     }
+    if (arg === "--forbid-skips") {
+      continue;
+    }
     if (arg === "--limit") {
       options.limit = parseLimit(args[++index]);
       continue;
     }
     if (arg?.startsWith("--limit=")) {
       options.limit = parseLimit(arg.slice("--limit=".length));
+      continue;
+    }
+    if (arg === "--only" || arg === "--corpus") {
+      options.only.push(...parseCorpusList(args[++index]));
+      continue;
+    }
+    if (arg?.startsWith("--only=")) {
+      options.only.push(...parseCorpusList(arg.slice("--only=".length)));
+      continue;
+    }
+    if (arg?.startsWith("--corpus=")) {
+      options.only.push(...parseCorpusList(arg.slice("--corpus=".length)));
       continue;
     }
     if (arg === "--bundle") {
@@ -149,7 +166,7 @@ export function parseVerifyRealWorldCudaArgs(args) {
       continue;
     }
     if (arg === "--help" || arg === "-h") {
-      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--require-webgpu] [--allow-missing-webgpu] [--limit N] [--bundle src|dist|both] [--auto-corpus-smoke-limit N] [--auto-corpus-smoke-mode reference|dispatch] [--auto-corpus-smoke-profile fast|full] [--auto-corpus-smoke-features subgroups] [--case-timeout-ms N] [--benchmark-webgpu] [--benchmark-runs N] [--benchmark-warmup N] [--benchmark-length N] [--expect-prepared-ratio-max N] [--expect-prepared-scalar-ratio-max N] [--expect-prepared-readback-ratio-max N]");
+      console.log("usage: node scripts/verify-real-world-cuda.mjs [--skip-fetch] [--require-webgpu] [--allow-missing-webgpu] [--forbid-skips] [--limit N] [--only CORPUS[,CORPUS...]] [--corpus CORPUS[,CORPUS...]] [--bundle src|dist|both] [--auto-corpus-smoke-limit N] [--auto-corpus-smoke-mode reference|dispatch] [--auto-corpus-smoke-profile fast|full] [--auto-corpus-smoke-features subgroups] [--case-timeout-ms N] [--benchmark-webgpu] [--benchmark-runs N] [--benchmark-warmup N] [--benchmark-length N] [--expect-prepared-ratio-max N] [--expect-prepared-scalar-ratio-max N] [--expect-prepared-readback-ratio-max N]");
       process.exit(0);
     }
     throw new Error(`unexpected argument: ${arg}`);
@@ -164,6 +181,7 @@ export function verifyRealWorldCudaPlan(options) {
       args: [
         path.join(scriptDir, "audit-real-world-cuda-corpora.mjs"),
         ...(options.skipFetch ? ["--skip-fetch"] : []),
+        ...options.only.flatMap((id) => ["--only", id]),
         "--limit",
         String(options.limit),
       ],
@@ -179,6 +197,7 @@ export function verifyRealWorldCudaPlan(options) {
         "--summary-only",
         "--bundle",
         bundle,
+        ...scopedCaseFilterArgs(options.only, options.autoCorpusSmokeLimit),
         "--auto-corpus-smoke-limit",
         String(options.autoCorpusSmokeLimit),
         "--auto-corpus-smoke-mode",
@@ -226,6 +245,19 @@ function parseAutoCorpusSmokeMode(raw) {
   throw new Error("--auto-corpus-smoke-mode expects reference or dispatch");
 }
 
+function parseCorpusList(raw) {
+  if (!raw) throw new Error("--only/--corpus expects a corpus id");
+  const known = new Set(cudaLiteCorpora.map((corpus) => corpus.id));
+  const values = raw.split(",").map((item) => item.trim()).filter(Boolean);
+  if (values.length === 0) throw new Error("--only/--corpus expects a corpus id");
+  for (const value of values) {
+    if (!known.has(value)) {
+      throw new Error(`unknown CUDA-lite corpus '${value}', expected one of: ${[...known].join(", ")}`);
+    }
+  }
+  return values;
+}
+
 function parseFeatureList(raw) {
   if (!raw) return [];
   return raw.split(",").map((item) => item.trim()).filter(Boolean);
@@ -261,6 +293,15 @@ function parsePositiveNumber(raw, flag) {
 
 function ratioArg(flag, value) {
   return value === undefined ? [] : [flag, String(value)];
+}
+
+function scopedCaseFilterArgs(only, autoCorpusSmokeLimit) {
+  if (only.length === 0) return [];
+  const filters = only.flatMap((id) => [
+    `corpus:${id}:`,
+    ...(autoCorpusSmokeLimit > 0 ? [`auto-corpus:${id}:`] : []),
+  ]);
+  return ["--cases", filters.join(",")];
 }
 
 function run(label, args) {

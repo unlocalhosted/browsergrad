@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T18:53:07Z
+Last updated: 2026-07-02T19:01:17Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; unreachable helper feature/shared/atomic/texture/constant/device-global/function-body/global-feature pollution fixes are green |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Added cuda-samples constant-array texture corpus fixture |
+| Active work item | Added scoped real-world CUDA verifier corpus filter |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -635,11 +635,13 @@ Current verified gates:
 - full corpus fixture WebGPU gate after CUDA-120 texture-to-surface fixture: `97/0/0`; expected-output cases `46`; by corpus `cuda-120=5`, `cuda-samples=18`, `llm.c=28`, `leetcuda=46`
 - cuda-samples constant-array texture corpus fixture: `corpus:cuda-samples:convolutionRowsKernel_texture` `1/0/0`; hot repeat `5/0/0`, best warm `2.0ms`, speedup `2.80`
 - full corpus fixture WebGPU gate after cuda-samples constant-array texture fixture: `98/0/0`; expected-output cases `47`; by corpus `cuda-120=5`, `cuda-samples=19`, `llm.c=28`, `leetcuda=46`
+- scoped cuda-samples real-world verifier after corpus-filter tooling fix: audit `357/357` compile/codegen, hard fails `0`; source WebGPU corpus fixture slice `19/0/0`, expected-output `14`, skips `0`; `--auto-corpus-smoke-limit 0` kept auto-corpus at `0`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | real-world verifier corpus scoping | `verify:real-world-cuda` could not run one corpus, so bugbash had to pay full-corpus feedback cost; wrapper also rejected `--forbid-skips` even though downstream always enforces it | wrapper now accepts `--only`/`--corpus`, validates corpus ids, passes audit `--only`, scopes browser fixtures with `--cases`, and treats wrapper-level `--forbid-skips` as accepted no-op | CLI unit; scoped cuda-samples verifier audit `357/357`, hard fails `0`; source WebGPU slice `19/0/0`, skips `0` |
 | Probed green | real corpus constant array plus texture helper | corpus execution coverage did not include a real source combining `__constant__` array input, helper texture reads, and texture object input | added cuda-samples `convolutionRowsKernel` fixture from `convolutionTexture.cu` with `c_Kernel` identity constant array and texture input; raised corpus fixture baseline to lock it in | `corpus:cuda-samples:convolutionRowsKernel_texture` `1/0/0`; full corpus fixture gate `98/0/0`; hot repeat `5/0/0`, best warm `2.0ms` |
 | Probed green | real corpus texture-to-surface write | corpus execution coverage had one texture fixture but no real corpus fixture combining `tex2D` reads with `surf2Dwrite` surface output | added CUDA-120 `imageConvolutionKernel` fixture from `day-28-Progress-Checkpoint.md`; validates texture input, surface output, and expected surface readback in real WebGPU; raised corpus fixture baseline to lock it in | `corpus:cuda-120:imageConvolutionKernel_surface` `1/0/0`; full corpus fixture gate `97/0/0`; hot repeat `5/0/0`, best warm `4.1ms` |
 | Probed green | real corpus atomic pool allocation | corpus execution coverage did not include a real source using device-side atomic offset allocation into a pool-like pointer plus explicit offset readback | added CUDA-120 `useMemoryPoolKernel` fixture from `day-84-Progress-Checkpoint.md`; validates pool writes and `offset` readback through real WebGPU; raised corpus fixture baseline to lock it in | `corpus:cuda-120:useMemoryPoolKernel` `1/0/0`; full corpus fixture gate `96/0/0`; hot repeat `5/0/0`, best warm `3.3ms` |
