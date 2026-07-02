@@ -600,6 +600,33 @@ class TensorProxy:
         return TensorProxy(uop, session=self._get_session(),
                            requires_grad=requires, ctx=ctx)
 
+    def abs(self) -> "TensorProxy":
+        def _abs_forward(x_arr: np.ndarray) -> np.ndarray:
+            return np.abs(x_arr)
+
+        uop = UOp(
+            op=OP_CUSTOM,
+            inputs=(self._uop,),
+            shape=self._uop.shape,
+            dtype=self._uop.dtype,
+            arg={"fn": _abs_forward, "captures": (), "name": "abs"},
+        )
+
+        def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+            (x_arr,) = ins
+            return ((dy * np.sign(x_arr)).astype(x_arr.dtype, copy=False),)
+
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
+        return TensorProxy(uop, session=self._get_session(),
+                           requires_grad=requires, ctx=ctx)
+
+    def sqrt(self) -> "TensorProxy":
+        return self ** 0.5
+
+    def pow(self, exponent: Any) -> "TensorProxy":
+        return self ** exponent
+
     def _reduce(self, op: str, axis: Any = None, keepdims: bool = False) -> "TensorProxy":
         # Normalize axis to a tuple or None.
         if axis is None:

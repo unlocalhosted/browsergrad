@@ -480,6 +480,18 @@ def tanh(x):
     return _functional.tanh(x)
 
 
+def abs(x):
+    return x.abs()
+
+
+def sqrt(x):
+    return x.sqrt()
+
+
+def pow(input, exponent):
+    return input ** exponent
+
+
 def sum(x, dim=None, axis=None, keepdim=False, keepdims=False):
     return x.sum(dim=dim, axis=axis, keepdim=keepdim, keepdims=keepdims)
 
@@ -555,7 +567,8 @@ __all__ = [
     "cat", "stack",
     "Session", "get_default_session", "set_default_session", "new_session",
     "manual_seed", "no_grad", "inference_mode",
-    "sigmoid", "matmul", "mm", "bmm", "exp", "log", "tanh",
+    "sigmoid", "matmul", "mm", "bmm", "exp", "log", "tanh", "abs",
+    "sqrt", "pow",
     "sum", "mean", "argmax", "reshape", "view", "flatten", "squeeze",
     "unsqueeze", "transpose", "permute", "softmax", "log_softmax",
     "save", "load",

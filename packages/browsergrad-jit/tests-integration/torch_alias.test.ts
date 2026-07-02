@@ -283,6 +283,43 @@ lsm = torch.log_softmax(x, dim=-1).numpy()
     expect(result.logSoftmaxRows).toEqual([1, 1]);
   });
 
+  it("supports PyTorch unary math aliases and gradients", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      methodAbs: number[];
+      torchAbs: number[];
+      methodSqrt: number[];
+      torchSqrt: number[];
+      torchPow: number[];
+      grad: number[];
+    }>(`
+import browsergrad_jit as bg
+bg.install_torch_alias()
+import torch
+
+x = torch.tensor([-4.0, 9.0], requires_grad=True)
+positive = torch.tensor([4.0, 9.0], requires_grad=True)
+y = x.abs().sum() + torch.sqrt(positive).sum()
+y.backward()
+
+{
+  "methodAbs": x.abs().numpy().tolist(),
+  "torchAbs": torch.abs(x).numpy().tolist(),
+  "methodSqrt": positive.sqrt().numpy().tolist(),
+  "torchSqrt": torch.sqrt(positive).numpy().tolist(),
+  "torchPow": torch.pow(torch.tensor([2.0, 3.0]), 3).numpy().tolist(),
+  "grad": positive.grad.numpy().round(6).tolist(),
+}
+`);
+    expect(result.methodAbs).toEqual([4, 9]);
+    expect(result.torchAbs).toEqual([4, 9]);
+    expect(result.methodSqrt).toEqual([2, 3]);
+    expect(result.torchSqrt).toEqual([2, 3]);
+    expect(result.torchPow).toEqual([8, 27]);
+    expect(result.grad[0]).toBeCloseTo(0.25, 6);
+    expect(result.grad[1]).toBeCloseTo(1 / 6, 6);
+  });
+
   it("supports PyTorch shape and multi-tensor composition aliases", async () => {
     const target = await getJitTarget();
     const result = await target.run<{
