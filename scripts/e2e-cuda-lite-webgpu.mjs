@@ -11779,6 +11779,72 @@ const html = String.raw`<!doctype html>
         };
       }
 
+      function materializeFixtureInput(input) {
+        const buffers = materializeTypedArrayRecord(input.buffers);
+        const constants = materializeConstantRecord(input.constants);
+        const deviceGlobals = materializeTypedArrayRecord(input.deviceGlobals);
+        const textures = materializeTextureRecord(input.textures);
+        const surfaces = materializeTextureRecord(input.surfaces);
+        const memoryPools = materializeMemoryPoolRecord(input.memoryPools);
+        return {
+          buffers,
+          scalars: { ...(input.scalars ?? {}) },
+          ...(Object.keys(constants).length === 0 ? {} : { constants }),
+          ...(Object.keys(deviceGlobals).length === 0 ? {} : { deviceGlobals }),
+          ...(Object.keys(textures).length === 0 ? {} : { textures }),
+          ...(Object.keys(surfaces).length === 0 ? {} : { surfaces }),
+          ...(Object.keys(memoryPools).length === 0 ? {} : { memoryPools }),
+          ...(input.readback === undefined ? {} : { readback: [...input.readback] }),
+        };
+      }
+
+      function materializeTypedArray(spec) {
+        const Ctor = globalThis[spec.type];
+        if (typeof Ctor !== "function") throw new Error("unsupported fixture typed array: " + spec.type);
+        if (spec.data !== undefined) return new Ctor(spec.data);
+        return new Ctor(spec.length ?? 0);
+      }
+
+      function materializeTypedArrayRecord(record) {
+        const out = {};
+        for (const [name, spec] of Object.entries(record ?? {})) {
+          out[name] = materializeTypedArray(spec);
+        }
+        return out;
+      }
+
+      function materializeConstantRecord(record) {
+        const out = {};
+        for (const [name, spec] of Object.entries(record ?? {})) {
+          out[name] = typeof spec === "number" ? spec : materializeTypedArray(spec);
+        }
+        return out;
+      }
+
+      function materializeTextureRecord(record) {
+        const out = {};
+        for (const [name, spec] of Object.entries(record ?? {})) {
+          out[name] = {
+            width: spec.width,
+            height: spec.height,
+            channels: spec.channels,
+            data: materializeTypedArray(spec.data),
+          };
+        }
+        return out;
+      }
+
+      function materializeMemoryPoolRecord(record) {
+        const out = {};
+        for (const [name, spec] of Object.entries(record ?? {})) {
+          out[name] = {
+            data: materializeTypedArray(spec.data),
+            ...(spec.offset === undefined ? {} : { offset: materializeTypedArray(spec.offset) }),
+          };
+        }
+        return out;
+      }
+
       function countByCorpus(items) {
         const out = {};
         for (const item of items) {
@@ -11830,34 +11896,6 @@ const html = String.raw`<!doctype html>
           }
         }
         return undefined;
-      }
-
-      function materializeFixtureInput(input) {
-        const buffers = {};
-        for (const [name, spec] of Object.entries(input.buffers ?? {})) {
-          buffers[name] = materializeTypedArray(spec);
-        }
-        const textures = {};
-        for (const [name, spec] of Object.entries(input.textures ?? {})) {
-          textures[name] = {
-            width: spec.width,
-            height: spec.height,
-            channels: spec.channels,
-            data: materializeTypedArray(spec.data),
-          };
-        }
-        return {
-          buffers,
-          scalars: { ...(input.scalars ?? {}) },
-          ...(Object.keys(textures).length === 0 ? {} : { textures }),
-        };
-      }
-
-      function materializeTypedArray(spec) {
-        const Ctor = globalThis[spec.type];
-        if (typeof Ctor !== "function") throw new Error("unsupported fixture typed array: " + spec.type);
-        if (spec.data !== undefined) return new Ctor(spec.data);
-        return new Ctor(spec.length ?? 0);
       }
 
       function syntheticInputForCompiled(compiled) {

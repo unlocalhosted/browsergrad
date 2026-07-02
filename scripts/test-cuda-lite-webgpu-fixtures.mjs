@@ -18,6 +18,7 @@ import {
   autoCorpusSmokeCachePath,
   corpusExecutionFixturesForCaseFilters,
   inferAutoCorpusWorkgroupSize,
+  materializeFixtureInput,
 } from "./cuda-lite-webgpu-fixtures.mjs";
 import {
   failureReplayCases,
@@ -88,6 +89,43 @@ assert.deepEqual(
   corpusExecutionFixturesForCaseFilters([fixtureCaseName]).map((fixture) => fixture.caseName),
   [fixtureCaseName],
 );
+const materializedFixtureInput = materializeFixtureInput({
+  buffers: {
+    out: { type: "Float32Array", length: 2 },
+  },
+  constants: {
+    scale: 3,
+    lut: { type: "Float32Array", data: [1, 2] },
+  },
+  deviceGlobals: {
+    g_state: { type: "Uint32Array", data: [4, 5] },
+  },
+  textures: {
+    tex: { width: 2, height: 1, channels: 1, data: { type: "Float32Array", data: [6, 7] } },
+  },
+  surfaces: {
+    surf: { width: 2, height: 1, data: { type: "Float32Array", data: [8, 9] } },
+  },
+  memoryPools: {
+    pool: {
+      data: { type: "Uint32Array", length: 4 },
+      offset: { type: "Uint32Array", data: [12] },
+    },
+  },
+  scalars: { n: 2 },
+  readback: ["out", "g_state", "pool_offset"],
+});
+assert.ok(materializedFixtureInput.buffers.out instanceof Float32Array);
+assert.equal(materializedFixtureInput.buffers.out.length, 2);
+assert.equal(materializedFixtureInput.constants.scale, 3);
+assert.deepEqual([...materializedFixtureInput.constants.lut], [1, 2]);
+assert.deepEqual([...materializedFixtureInput.deviceGlobals.g_state], [4, 5]);
+assert.deepEqual([...materializedFixtureInput.textures.tex.data], [6, 7]);
+assert.deepEqual([...materializedFixtureInput.surfaces.surf.data], [8, 9]);
+assert.equal(materializedFixtureInput.memoryPools.pool.data.length, 4);
+assert.deepEqual([...materializedFixtureInput.memoryPools.pool.offset], [12]);
+assert.deepEqual(materializedFixtureInput.scalars, { n: 2 });
+assert.deepEqual(materializedFixtureInput.readback, ["out", "g_state", "pool_offset"]);
 
 assert.deepEqual(parseCaseFilters(["--case", "storage:vector-deref-lane-write"]), ["storage:vector-deref-lane-write"]);
 assert.deepEqual(parseCaseFilters(["--cases=atomic:helper-rmw,storage:shared-vector-overlay"]), ["atomic:helper-rmw", "storage:shared-vector-overlay"]);

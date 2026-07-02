@@ -20,6 +20,72 @@ export function corpusExecutionFixturesForCaseFilters(caseFilters = []) {
     selected.has(fixture.caseName));
 }
 
+export function materializeFixtureInput(input) {
+  const buffers = materializeTypedArrayRecord(input.buffers);
+  const constants = materializeConstantRecord(input.constants);
+  const deviceGlobals = materializeTypedArrayRecord(input.deviceGlobals);
+  const textures = materializeTextureRecord(input.textures);
+  const surfaces = materializeTextureRecord(input.surfaces);
+  const memoryPools = materializeMemoryPoolRecord(input.memoryPools);
+  return {
+    buffers,
+    scalars: { ...(input.scalars ?? {}) },
+    ...(Object.keys(constants).length === 0 ? {} : { constants }),
+    ...(Object.keys(deviceGlobals).length === 0 ? {} : { deviceGlobals }),
+    ...(Object.keys(textures).length === 0 ? {} : { textures }),
+    ...(Object.keys(surfaces).length === 0 ? {} : { surfaces }),
+    ...(Object.keys(memoryPools).length === 0 ? {} : { memoryPools }),
+    ...(input.readback === undefined ? {} : { readback: [...input.readback] }),
+  };
+}
+
+export function materializeTypedArray(spec) {
+  const Ctor = globalThis[spec.type];
+  if (typeof Ctor !== "function") throw new Error("unsupported fixture typed array: " + spec.type);
+  if (spec.data !== undefined) return new Ctor(spec.data);
+  return new Ctor(spec.length ?? 0);
+}
+
+function materializeTypedArrayRecord(record) {
+  const out = {};
+  for (const [name, spec] of Object.entries(record ?? {})) {
+    out[name] = materializeTypedArray(spec);
+  }
+  return out;
+}
+
+function materializeConstantRecord(record) {
+  const out = {};
+  for (const [name, spec] of Object.entries(record ?? {})) {
+    out[name] = typeof spec === "number" ? spec : materializeTypedArray(spec);
+  }
+  return out;
+}
+
+function materializeTextureRecord(record) {
+  const out = {};
+  for (const [name, spec] of Object.entries(record ?? {})) {
+    out[name] = {
+      width: spec.width,
+      height: spec.height,
+      channels: spec.channels,
+      data: materializeTypedArray(spec.data),
+    };
+  }
+  return out;
+}
+
+function materializeMemoryPoolRecord(record) {
+  const out = {};
+  for (const [name, spec] of Object.entries(record ?? {})) {
+    out[name] = {
+      data: materializeTypedArray(spec.data),
+      ...(spec.offset === undefined ? {} : { offset: materializeTypedArray(spec.offset) }),
+    };
+  }
+  return out;
+}
+
 export function loadCorpusExecutionSources(root, fixtures = cudaLiteCorpusExecutionFixtures) {
   const out = {};
   for (const fixture of fixtures) {

@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T18:29:29Z
+Last updated: 2026-07-02T18:36:47Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; unreachable helper feature/shared/atomic/texture/constant/device-global/function-body/global-feature pollution fixes are green |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Added all-inactive device-global side-effect probe using direct device-global readback |
+| Active work item | Hardened corpus fixture WebGPU input materialization for constants, device globals, surfaces, memory pools, and readback |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- changed gate after corpus fixture input materializer hardening: fixture tests passed; WebGPU smoke `290/0/0`; skips `0`
 - unreachable helper atomic lowering fix: fail-first unit reproduced `atomicDeviceGlobals=["gCounter"]` from an unused helper; focused atomic unit slice `441/0`; `verify:changed` typecheck + compiler unit `425/0`; lint passed
 - `surface:helper-vector-read-multiple-surfaces`: `1 passed / 0 failed / 0 skipped`
 - focused surf2Dread unit run: `386 passed`
@@ -624,11 +625,13 @@ Current verified gates:
 - all-inactive device-global side-effect probe: `control:device-global-all-inactive-side-effect-return` is `1/0/0`
 - hot all-inactive device-global side-effect probe: repeat `5`, warmup `1`, `5/0/0`; best warm `1.9ms`, speedup `2.00`
 - changed gate after all-inactive device-global side-effect probe: fixture tests passed; WebGPU smoke `290/0/0`; bugbash status active failures `0`; test-scope passed
+- changed gate after corpus fixture input materializer hardening: fixture tests passed; WebGPU smoke `290/0/0`; skips `0`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | corpus WebGPU fixture harness | corpus execution fixture materialization only preserved buffers, scalars, and textures, so future corpus fixtures using constants, device globals, surfaces, memory pools, or explicit readback could silently run with incomplete inputs | shared fixture materializer now covers every supported WebGPU input family and the in-browser e2e materializer mirrors that behavior; fixture unit locks all families | `test:webgpu-fixtures` passed; changed WebGPU smoke `290/0/0`, skips `0` |
 | Probed green | all-inactive device-global side effects | active-lane coverage had all-inactive guarded RHS and partial device-global side effects, but not every lane returning before a later barrier while pre-return device-global atomics were verified through direct global readback | existing active-lane lowering preserves device-global side effects before all lanes return and suppresses post-barrier active-lane work when no lanes remain active | `control:device-global-all-inactive-side-effect-return` `1/0/0`; hot repeat `5/0/0`, best warm `1.9ms` |
 | Fixed | bugbash progress visibility | `bugbash:status` reported stale `Latest unit proof: compiler unit suite after signed byte-storage atomic fix: 421 passed` even though newer changed gates recorded `compiler unit 436/0`, making progress look older than reality | status parser now matches any `compiler unit` gate line, and regression locks that a newer changed gate supersedes an older suite-only line | `test:bugbash-status` passed; live `bugbash:status` now shows latest unit proof from half-global changed gate with `compiler unit 436/0` |
 | Probed green | dynamic shared vector alias-chain active-lane side effects | dynamic shared vector pointer arrays had alias-chain coverage, but not inactive lanes writing vector lanes before an early return while active lanes read through shifted pointer arrays after a later barrier | existing active-lane lowering preserves pre-return dynamic shared writes and post-barrier vector pointer-array address scaling through chained aliases | `control:dynamic-shared-vector-alias-chain-active-lane-return` `1/0/0`; hot repeat `5/0/0`, best warm `4.7ms` |
