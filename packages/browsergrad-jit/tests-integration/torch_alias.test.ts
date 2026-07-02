@@ -422,6 +422,90 @@ module_loss.backward()
     expect(result.moduleGradFinite).toBe(true);
   });
 
+  it("supports eager-compatible functional and module loss aliases", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      l1Loss: number;
+      l1Grad: number[];
+      bceLoss: number;
+      bceGrad: number[];
+      smoothLoss: number;
+      smoothGrad: number[];
+      klLoss: number;
+      klGrad: number[][];
+      caps: Record<string, boolean>;
+    }>(`
+import browsergrad_jit as bg
+bg.install_torch_alias()
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+
+l1_x = torch.tensor([1.0, -2.0, 3.0], requires_grad=True)
+l1_t = torch.tensor([0.0, -1.0, 5.0])
+l1_loss = nn.L1Loss()(l1_x, l1_t)
+l1_loss.backward()
+
+bce_x = torch.tensor([0.25, 0.75], requires_grad=True)
+bce_t = torch.tensor([0.0, 1.0])
+bce_loss = F.binary_cross_entropy(bce_x, bce_t)
+bce_loss.backward()
+
+smooth_x = torch.tensor([0.0, 2.0, -2.0], requires_grad=True)
+smooth_t = torch.tensor([0.0, 0.0, 0.0])
+smooth_loss = nn.SmoothL1Loss(reduction="sum")(smooth_x, smooth_t)
+smooth_loss.backward()
+
+kl_x = torch.tensor(np.log([[0.5, 0.5], [0.25, 0.75]]), requires_grad=True)
+kl_t = torch.tensor([[0.5, 0.5], [0.0, 1.0]])
+kl_loss = nn.KLDivLoss(reduction="batchmean")(kl_x, kl_t)
+kl_loss.backward()
+
+{
+  "l1Loss": float(l1_loss.item()),
+  "l1Grad": l1_x.grad.numpy().round(6).tolist(),
+  "bceLoss": float(bce_loss.item()),
+  "bceGrad": bce_x.grad.numpy().round(6).tolist(),
+  "smoothLoss": float(smooth_loss.item()),
+  "smoothGrad": smooth_x.grad.numpy().round(6).tolist(),
+  "klLoss": float(kl_loss.item()),
+  "klGrad": kl_x.grad.numpy().round(6).tolist(),
+  "caps": {
+    "nn.BCELoss": hasattr(nn, "BCELoss"),
+    "nn.L1Loss": hasattr(nn, "L1Loss"),
+    "nn.SmoothL1Loss": hasattr(nn, "SmoothL1Loss"),
+    "nn.KLDivLoss": hasattr(nn, "KLDivLoss"),
+    "F.bce_loss": hasattr(F, "bce_loss"),
+    "F.kl_div": hasattr(F, "kl_div"),
+  },
+}
+`);
+    expect(result.l1Loss).toBeCloseTo(4 / 3, 6);
+    expect(result.l1Grad[0]).toBeCloseTo(1 / 3, 6);
+    expect(result.l1Grad[1]).toBeCloseTo(-1 / 3, 6);
+    expect(result.l1Grad[2]).toBeCloseTo(-1 / 3, 6);
+    expect(result.bceLoss).toBeCloseTo(-Math.log(0.75), 6);
+    expect(result.bceGrad[0]).toBeCloseTo(2 / 3, 6);
+    expect(result.bceGrad[1]).toBeCloseTo(-2 / 3, 6);
+    expect(result.smoothLoss).toBe(3);
+    expect(result.smoothGrad).toEqual([0, 1, -1]);
+    expect(result.klLoss).toBeCloseTo(-Math.log(0.75) / 2, 6);
+    expect(result.klGrad[0]).toEqual([-0.25, -0.25]);
+    const klSecondRow = result.klGrad[1];
+    expect(klSecondRow).toBeDefined();
+    expect(klSecondRow![0]).toBeCloseTo(0, 6);
+    expect(klSecondRow![1]).toBe(-0.5);
+    expect(result.caps).toEqual({
+      "nn.BCELoss": true,
+      "nn.L1Loss": true,
+      "nn.SmoothL1Loss": true,
+      "nn.KLDivLoss": true,
+      "F.bce_loss": true,
+      "F.kl_div": true,
+    });
+  });
+
   it("is idempotent — re-installing returns cleanly", async () => {
     const target = await getJitTarget();
     const ok = await target.run<boolean>(`

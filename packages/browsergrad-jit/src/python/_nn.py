@@ -523,6 +523,42 @@ class BCEWithLogitsLoss(Module):
         )
 
 
+class BCELoss(Module):
+    def __init__(self, reduction: str = "mean") -> None:
+        super().__init__()
+        self.reduction = reduction
+    def forward(self, input: TensorProxy, target: TensorProxy) -> TensorProxy:
+        return F.binary_cross_entropy(input, target, reduction=self.reduction)
+
+
+class L1Loss(Module):
+    def __init__(self, reduction: str = "mean") -> None:
+        super().__init__()
+        self.reduction = reduction
+    def forward(self, input: TensorProxy, target: TensorProxy) -> TensorProxy:
+        return F.l1_loss(input, target, reduction=self.reduction)
+
+
+class SmoothL1Loss(Module):
+    def __init__(self, beta: float = 1.0, reduction: str = "mean") -> None:
+        super().__init__()
+        self.beta = beta
+        self.reduction = reduction
+    def forward(self, input: TensorProxy, target: TensorProxy) -> TensorProxy:
+        return F.smooth_l1_loss(
+            input, target, beta=self.beta, reduction=self.reduction
+        )
+
+
+class KLDivLoss(Module):
+    def __init__(self, reduction: str = "mean", log_target: bool = False) -> None:
+        super().__init__()
+        self.reduction = reduction
+        self.log_target = log_target
+    def forward(self, input: TensorProxy, target: TensorProxy) -> TensorProxy:
+        return F.kl_div(input, target, reduction=self.reduction, log_target=self.log_target)
+
+
 # Expose F at the package level so users can write `nn.functional.softmax`.
 functional = F
 
@@ -543,5 +579,9 @@ __all__ = [
     "CrossEntropyLoss",
     "NLLLoss",
     "BCEWithLogitsLoss",
+    "BCELoss",
+    "L1Loss",
+    "SmoothL1Loss",
+    "KLDivLoss",
     "functional",
 ]

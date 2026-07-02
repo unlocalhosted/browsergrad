@@ -243,6 +243,166 @@ def nll_loss(log_probs: TensorProxy, targets: TensorProxy,
     return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
 
 
+def _custom_elementwise_loss(
+    input: TensorProxy,
+    target: TensorProxy,
+    reduction: str,
+    op_name: str,
+    forward_fn: Any,
+    grad_fn: Any,
+    *,
+    allow_batchmean: bool = False,
+) -> TensorProxy:
+    target = _to_proxy(target, input._get_session())
+    if input.shape != target.shape:
+        raise ShapeError(f"{op_name}: shape mismatch {input.shape} vs {target.shape}")
+    valid_reductions = ("mean", "sum", "none", "batchmean") if allow_batchmean else (
+        "mean", "sum", "none"
+    )
+    if reduction not in valid_reductions:
+        raise ValueError(f"{op_name}: unknown reduction {reduction!r}")
+
+    sess = input._get_session()
+    out_shape: Tuple[int, ...] = () if reduction != "none" else input.shape
+
+    def _forward(input_arr: np.ndarray, target_arr: np.ndarray) -> np.ndarray:
+        per_elem = forward_fn(input_arr, target_arr).astype(np.float32, copy=False)
+        if reduction == "none":
+            return per_elem.astype(np.dtype(input.dtype), copy=False)
+        if reduction == "sum":
+            return np.asarray(per_elem.sum(), dtype=np.dtype(input.dtype))
+        denom = float(input_arr.shape[0]) if reduction == "batchmean" else float(per_elem.size)
+        return np.asarray(per_elem.sum() / denom, dtype=np.dtype(input.dtype))
+
+    uop = UOp(
+        op=OP_CUSTOM,
+        inputs=(input._uop, target._uop),
+        shape=out_shape,
+        dtype=input.dtype,
+        arg={"fn": _forward, "captures": (), "name": op_name},
+    )
+
+    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+        input_arr, target_arr = ins
+        grad = grad_fn(input_arr, target_arr).astype(np.float32, copy=False)
+        if reduction == "mean":
+            grad *= dy / float(input_arr.size)
+        elif reduction == "sum":
+            grad *= dy
+        elif reduction == "batchmean":
+            grad *= dy / float(input_arr.shape[0])
+        else:
+            grad *= dy
+        return (grad.astype(input_arr.dtype, copy=False), None)
+
+    requires = _should_track(input)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=(input, target)) if requires else None
+    return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
+
+
+def l1_loss(
+    input: TensorProxy,
+    target: TensorProxy,
+    reduction: str = "mean",
+) -> TensorProxy:
+    def _forward(input_arr: np.ndarray, target_arr: np.ndarray) -> np.ndarray:
+        return np.abs(input_arr - target_arr)
+
+    def _grad(input_arr: np.ndarray, target_arr: np.ndarray) -> np.ndarray:
+        return np.sign(input_arr - target_arr)
+
+    return _custom_elementwise_loss(input, target, reduction, "l1_loss", _forward, _grad)
+
+
+def binary_cross_entropy(
+    input: TensorProxy,
+    target: TensorProxy,
+    reduction: str = "mean",
+) -> TensorProxy:
+    def _forward(input_arr: np.ndarray, target_arr: np.ndarray) -> np.ndarray:
+        p = input_arr.astype(np.float64, copy=False)
+        t = target_arr.astype(np.float64, copy=False)
+        eps = 1e-12
+        p_clamped = np.clip(p, eps, 1.0 - eps)
+        return -(t * np.log(p_clamped) + (1.0 - t) * np.log(1.0 - p_clamped))
+
+    def _grad(input_arr: np.ndarray, target_arr: np.ndarray) -> np.ndarray:
+        p = input_arr.astype(np.float64, copy=False)
+        t = target_arr.astype(np.float64, copy=False)
+        eps = 1e-12
+        p_clamped = np.clip(p, eps, 1.0 - eps)
+        return (1.0 - t) / (1.0 - p_clamped) - t / p_clamped
+
+    return _custom_elementwise_loss(
+        input, target, reduction, "binary_cross_entropy", _forward, _grad
+    )
+
+
+def smooth_l1_loss(
+    input: TensorProxy,
+    target: TensorProxy,
+    beta: float = 1.0,
+    reduction: str = "mean",
+) -> TensorProxy:
+    if beta <= 0:
+        raise ValueError(f"smooth_l1_loss: beta must be > 0, got {beta}")
+
+    def _forward(input_arr: np.ndarray, target_arr: np.ndarray) -> np.ndarray:
+        diff = input_arr - target_arr
+        abs_diff = np.abs(diff)
+        return np.where(abs_diff < beta, 0.5 * diff * diff / beta, abs_diff - 0.5 * beta)
+
+    def _grad(input_arr: np.ndarray, target_arr: np.ndarray) -> np.ndarray:
+        diff = input_arr - target_arr
+        abs_diff = np.abs(diff)
+        return np.where(abs_diff < beta, diff / beta, np.sign(diff))
+
+    return _custom_elementwise_loss(
+        input, target, reduction, "smooth_l1_loss", _forward, _grad
+    )
+
+
+def kl_div(
+    input: TensorProxy,
+    target: TensorProxy,
+    reduction: str = "mean",
+    log_target: bool = False,
+) -> TensorProxy:
+    def _forward(input_arr: np.ndarray, target_arr: np.ndarray) -> np.ndarray:
+        if log_target:
+            log_t = target_arr.astype(np.float64, copy=False)
+            t = np.exp(log_t)
+        else:
+            t = target_arr.astype(np.float64, copy=False)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                log_t = np.where(t > 0, np.log(t), 0.0)
+        return t * (log_t - input_arr.astype(np.float64, copy=False))
+
+    def _grad(input_arr: np.ndarray, target_arr: np.ndarray) -> np.ndarray:
+        if log_target:
+            return -np.exp(target_arr.astype(np.float64, copy=False))
+        return -target_arr
+
+    return _custom_elementwise_loss(
+        input,
+        target,
+        reduction,
+        "kl_div",
+        _forward,
+        _grad,
+        allow_batchmean=True,
+    )
+
+
+def kl_div_loss(
+    input: TensorProxy,
+    target: TensorProxy,
+    reduction: str = "mean",
+    log_target: bool = False,
+) -> TensorProxy:
+    return kl_div(input, target, reduction=reduction, log_target=log_target)
+
+
 def binary_cross_entropy_with_logits(
     logits: TensorProxy,
     targets: TensorProxy,
@@ -334,6 +494,7 @@ def one_hot(indices: Any, num_classes: int) -> TensorProxy:
 
 
 bce_with_logits_loss = binary_cross_entropy_with_logits
+bce_loss = binary_cross_entropy
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +572,12 @@ __all__ = [
     "cross_entropy",
     "mse_loss",
     "nll_loss",
+    "l1_loss",
+    "binary_cross_entropy",
+    "bce_loss",
+    "smooth_l1_loss",
+    "kl_div",
+    "kl_div_loss",
     "binary_cross_entropy_with_logits",
     "bce_with_logits_loss",
     "one_hot",
