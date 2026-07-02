@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T16:51:38Z
+Last updated: 2026-07-02T16:57:29Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,9 +9,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; unreachable helper feature/shared pollution fixes are green |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; unreachable helper feature/shared/atomic pollution fixes are green |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Unreachable helper feature and shared-memory declarations are now scoped to selected-kernel reachability |
+| Active work item | Unreachable helper feature, shared declarations, and atomic lowering are now scoped to selected-kernel reachability |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- unreachable helper atomic lowering fix: fail-first unit reproduced `atomicDeviceGlobals=["gCounter"]` from an unused helper; focused atomic unit slice `441/0`; `verify:changed` typecheck + compiler unit `425/0`; lint passed
 - `surface:helper-vector-read-multiple-surfaces`: `1 passed / 0 failed / 0 skipped`
 - focused surf2Dread unit run: `386 passed`
 - `surface:layered-write`: `1 passed / 0 failed / 0 skipped`
@@ -594,6 +595,7 @@ Current verified gates:
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | unreachable helper atomic lowering | unused device helpers with direct atomics on device globals or helper-local `__shared__` storage could mark the selected kernel's IR/WGSL storage as atomic even when the selected kernel only performed plain reads/writes | validation still walks unreachable helpers for diagnostics, but unreachable helper atomic side effects now write to scratch sinks; exact pointer-atomic propagation and shared-name discovery use selected-kernel reachable helpers only | fail-first unit; focused atomic unit slice `441/0`; `verify:changed` typecheck + compiler unit `425/0`; lint passed |
 | Fixed | unreachable helper shared declarations | unused device helpers with local `__shared__` declarations still contributed `ir.sharedDeclarations`, emitting extra WGSL `var<workgroup>` storage for kernels that never call the helper | shared declaration collection now uses the same selected-kernel reachable helper set as feature gating | fail-first unit; focused unit `439/0` |
 | Fixed | unreachable half helper feature gating | compiling selected `bf162` active-lane kernel failed with `missing-feature-shader-f16` because an unused `half2` helper in the same CUDA source was scanned for required features | analyzer now tracks device-function reachability from the selected kernel and routes feature requirements from unreachable helper declarations/bodies into a dead feature sink while keeping diagnostics and overload metadata intact | focused unit `438/0`; `control:active-lane-shared-byte-half2-return-barrier,control:active-lane-shared-byte-bf162-return-barrier` `2/0/0` |
 | Probed green | active-lane shared byte vector helper pointer views | packed shared-byte `half2`/`bf162` helper pointer coverage did not include divergent return before a later barrier, where inactive lanes write before return and active lanes read after barrier | existing active-lane lowering plus packed shared-byte vector pointer helpers preserve pre-return lane writes and later active-lane reads through `__shared__ uchar[]` | `control:active-lane-shared-byte-half2-return-barrier,control:active-lane-shared-byte-bf162-return-barrier` `2/0/0` |

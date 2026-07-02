@@ -10481,6 +10481,70 @@ __global__ void exact_helper_atomic(uint* counter, uint* untouched, uint* out) {
     expect(compiled.wgsl).not.toContain("var<storage, read_write> untouched: array<atomic<u32>>;");
   });
 
+  it("ignores unreachable helper atomics when marking device globals atomic", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint gCounter[1];
+
+__device__ void unused_global_atomic() {
+  atomicAdd(&gCounter[0], 1u);
+}
+
+__global__ void read_global(uint* out) {
+  if (threadIdx.x == 0) {
+    out[0] = gCounter[0];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(1),
+        },
+        deviceGlobals: {
+          gCounter: new Uint32Array([7]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Uint32Array]).toEqual([7]);
+    expect(compiled.ir.atomicDeviceGlobals).not.toContain("gCounter");
+    expect(compiled.wgsl).toContain("var<storage, read_write> gCounter: array<u32>;");
+    expect(compiled.wgsl).not.toContain("var<storage, read_write> gCounter: array<atomic<u32>>;");
+  });
+
+  it("ignores unreachable helper atomics when marking shared storage atomic", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void unused_shared_atomic() {
+  __shared__ uint unusedScratch[1];
+  atomicAdd(&unusedScratch[0], 1u);
+}
+
+__global__ void plain_shared(uint* out) {
+  __shared__ uint scratch[1];
+  if (threadIdx.x == 0) {
+    scratch[0] = 9u;
+    out[0] = scratch[0];
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.out as Uint32Array]).toEqual([9]);
+    expect(compiled.ir.atomicShared).not.toContain("unusedScratch");
+    expect(compiled.ir.atomicShared).not.toContain("scratch");
+    expect(compiled.wgsl).toContain("var<workgroup> scratch: array<u32, 1>;");
+    expect(compiled.wgsl).not.toContain("var<workgroup> scratch: array<atomic<u32>, 1>;");
+    expect(compiled.wgsl).not.toContain("unusedScratch");
+  });
+
   it("marks storage atomic after chained pointer assignment", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void chained_assignment_pointer_atomic(uint* counter, uint* out) {

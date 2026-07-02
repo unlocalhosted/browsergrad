@@ -236,6 +236,9 @@ export function analyzeCudaLite(
   const atomicParams = new Set<string>();
   const atomicShared = new Set<string>();
   const atomicDeviceGlobals = new Set<string>();
+  let activeAtomicParams = atomicParams;
+  let activeAtomicShared = atomicShared;
+  let activeAtomicDeviceGlobals = atomicDeviceGlobals;
   const params = new Map(kernel.params.map((param) => [param.name, param]));
   const declaredNames = new Set<string>();
   const rootScope = createScope();
@@ -291,7 +294,7 @@ export function analyzeCudaLite(
 
   const walkExpression = (expression: CudaLiteExpression, scope: Scope): ExpressionInfo => {
     if (expression.kind === "call") {
-      return validateCallExpression(expression, scope, params, atomicParams, atomicShared, atomicDeviceGlobals, activeRequiredFeatures, diagnostics, walkExpression, options);
+      return validateCallExpression(expression, scope, params, activeAtomicParams, activeAtomicShared, activeAtomicDeviceGlobals, activeRequiredFeatures, diagnostics, walkExpression, options);
     }
     return validateNonCallExpression(expression, scope, diagnostics, walkExpression, activeRequiredFeatures);
   };
@@ -490,9 +493,16 @@ export function analyzeCudaLite(
 
   for (const fn of ast.functions) {
     if (selectedDeviceFunctionAsKernel && fn.name === kernel.name) continue;
-    const featureSink = reachableFunctionSpans.has(fn.span.start) ? requiredFeatures : new Set<string>();
+    const reachableFunction = reachableFunctionSpans.has(fn.span.start);
+    const featureSink = reachableFunction ? requiredFeatures : new Set<string>();
     const previousRequiredFeatures = activeRequiredFeatures;
+    const previousAtomicParams = activeAtomicParams;
+    const previousAtomicShared = activeAtomicShared;
+    const previousAtomicDeviceGlobals = activeAtomicDeviceGlobals;
     activeRequiredFeatures = featureSink;
+    activeAtomicParams = reachableFunction ? atomicParams : new Set<string>();
+    activeAtomicShared = reachableFunction ? atomicShared : new Set<string>();
+    activeAtomicDeviceGlobals = reachableFunction ? atomicDeviceGlobals : new Set<string>();
     const functionScope = createScope(rootScope);
     const functionDeclaredNames = new Set(rootDeclaredNames);
     for (const param of fn.params) {
@@ -508,6 +518,9 @@ export function analyzeCudaLite(
     walkStatements(fn.body, functionScope, 0, 0, 0, functionDeclaredNames);
     validateDivergentReturnsBeforeBarriers(fn.body, new Map(fn.params.map((param) => [param.name, param])), diagnostics, options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE);
     activeRequiredFeatures = previousRequiredFeatures;
+    activeAtomicParams = previousAtomicParams;
+    activeAtomicShared = previousAtomicShared;
+    activeAtomicDeviceGlobals = previousAtomicDeviceGlobals;
   }
 
   walkStatements(kernel.body, rootScope, 0, 0, 0, declaredNames);
@@ -2722,18 +2735,20 @@ function markExactAtomicPointerUsage(
   atomicShared: Set<string>,
   atomicDeviceGlobals: Set<string>,
 ): void {
+  const reachableFunctionSpans = reachableDeviceFunctionSpans(ast.functions, kernel.body);
+  const reachableFunctions = ast.functions.filter((fn) => reachableFunctionSpans.has(fn.span.start));
   const functionsByName = new Map<string, CudaLiteDeviceFunction[]>();
-  for (const fn of ast.functions) {
+  for (const fn of reachableFunctions) {
     const overloads = functionsByName.get(fn.name) ?? [];
     overloads.push(fn);
     functionsByName.set(fn.name, overloads);
   }
 
-  const sharedNames = new Set(collectSharedDeclarationsFromBodies([kernel.body, ...ast.functions.map((fn) => fn.body)], options).map((shared) => shared.name));
+  const sharedNames = new Set(collectSharedDeclarationsFromBodies([kernel.body, ...reachableFunctions.map((fn) => fn.body)], options).map((shared) => shared.name));
   const deviceGlobalNames = new Set(ast.deviceGlobals.map((global) => global.name));
   const kernelPointerParams = new Set(kernel.params.filter((param) => param.pointer && !param.constant).map((param) => param.name));
   const functionAtomicParams = new Map<string, Set<string>>();
-  for (const fn of ast.functions) functionAtomicParams.set(fn.name, new Set());
+  for (const fn of reachableFunctions) functionAtomicParams.set(fn.name, new Set());
 
   const markConcreteRoot = (root: string): boolean => {
     if (kernelPointerParams.has(root)) {
@@ -2757,7 +2772,7 @@ function markExactAtomicPointerUsage(
   let changed = true;
   while (changed) {
     changed = false;
-    for (const fn of ast.functions) {
+    for (const fn of reachableFunctions) {
       const fnPointerParams = new Set(fn.params.filter((param) => param.pointer).map((param) => param.name));
       const fnAtomicParams = functionAtomicParams.get(fn.name)!;
       const markFunctionRoot = (root: string): void => {
