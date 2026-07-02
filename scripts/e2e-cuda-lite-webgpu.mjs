@@ -5027,6 +5027,26 @@ sources.surfacePointerAliasAtomicPointerArrayMinMaxActiveLaneReturnFalseBranch =
     "int pick = value.w > 0u ? 1 : 0;",
     "int pick = value.w == 0u ? 1 : 0;",
   );
+sources.textureAtlasVectorAtomicPointerArrayCasActiveLaneReturnFalseBranch =
+  sources.textureAtlasVectorAtomicPointerArrayCasActiveLaneReturn.replace(
+    "int pick = value.x > 0u ? 1 : 0;",
+    "int pick = value.x == 0u ? 1 : 0;",
+  );
+sources.textureAtlasVectorAtomicPointerArrayMinMaxActiveLaneReturnFalseBranch =
+  sources.textureAtlasVectorAtomicPointerArrayMinMaxActiveLaneReturn.replace(
+    "int pick = value.w > 0u ? 1 : 0;",
+    "int pick = value.w == 0u ? 1 : 0;",
+  );
+sources.texturePointerAliasAtomicPointerArrayCasActiveLaneReturnFalseBranch =
+  sources.texturePointerAliasAtomicPointerArrayCasActiveLaneReturn.replace(
+    "int pick = value.x == 2u ? 1 : 0;",
+    "int pick = value.x != 2u ? 1 : 0;",
+  );
+sources.texturePointerAliasAtomicPointerArrayMinMaxActiveLaneReturnFalseBranch =
+  sources.texturePointerAliasAtomicPointerArrayMinMaxActiveLaneReturn.replace(
+    "int pick = value.w > 0u ? 1 : 0;",
+    "int pick = value.w == 0u ? 1 : 0;",
+  );
 const expectedCorpusFixtureNames = corpusExecutionFixtures.map((fixture) => fixture.caseName);
 
 const html = String.raw`<!doctype html>
@@ -8928,6 +8948,30 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [5048] },
           },
           {
+            name: "texture:atlas-vector-atomic-pointer-array-cas-active-lane-return-false-branch",
+            source: SOURCES.textureAtlasVectorAtomicPointerArrayCasActiveLaneReturnFalseBranch,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [19935] },
+          },
+          {
             name: "texture:atlas-vector-atomic-pointer-array-minmax-active-lane-return",
             source: SOURCES.textureAtlasVectorAtomicPointerArrayMinMaxActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -8950,6 +8994,30 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [7373] },
+          },
+          {
+            name: "texture:atlas-vector-atomic-pointer-array-minmax-active-lane-return-false-branch",
+            source: SOURCES.textureAtlasVectorAtomicPointerArrayMinMaxActiveLaneReturnFalseBranch,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [13635] },
           },
           {
             name: "texture:deep-helper-active-lane-vector-store",
@@ -9226,6 +9294,30 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [4830] },
           },
           {
+            name: "texture:pointer-alias-atomic-pointer-array-cas-active-lane-return-false-branch",
+            source: SOURCES.texturePointerAliasAtomicPointerArrayCasActiveLaneReturnFalseBranch,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [19205] },
+          },
+          {
             name: "texture:pointer-alias-atomic-pointer-array-minmax-active-lane-return",
             source: SOURCES.texturePointerAliasAtomicPointerArrayMinMaxActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -9248,6 +9340,30 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [6485] },
+          },
+          {
+            name: "texture:pointer-alias-atomic-pointer-array-minmax-active-lane-return-false-branch",
+            source: SOURCES.texturePointerAliasAtomicPointerArrayMinMaxActiveLaneReturnFalseBranch,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [11455] },
           },
           {
             name: "texture-surface:roundtrip",
