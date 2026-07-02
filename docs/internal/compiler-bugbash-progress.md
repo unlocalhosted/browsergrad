@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T09:29:16Z
+Last updated: 2026-07-02T09:31:59Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | WebGPU summary output now compacts large case-filter lists; continue next corpus-shaped storage/texture/control probe |
+| Active work item | WebGPU smoke wrapper no longer prints giant inner `pnpm --cases ...` command; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -548,11 +548,13 @@ Current verified gates:
 - changed gate after exact case-filter fix: `test:webgpu-fixtures` passed; WebGPU smoke `266/0/0`; bugbash-status tests passed; active failures `0`
 - compact WebGPU summary-output fix: `summarizeReport` now keeps small filter lists verbatim but summarizes large filter lists with `count`, `first`, and `last`; harness unit passed; 21-case real WebGPU sample `21/0/0` emitted compact filters
 - WebGPU smoke after compact summary-output fix: `266/0/0`; summary output now shows compact `caseFilters` count/sample instead of the full 266-case list
+- WebGPU smoke after wrapper output fix: `266/0/0`; `e2e:webgpu:smoke` now invokes `run-cuda-lite-tool.mjs` directly, avoiding the inner `pnpm run e2e:webgpu:case -- --cases ...` echo
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | WebGPU smoke command echo | `e2e:webgpu:smoke` still printed a giant inner `pnpm run e2e:webgpu:case -- --cases ...` command before JSON, even after summary compaction | smoke wrapper now spawns `run-cuda-lite-tool.mjs` directly with the same WebGPU flags, bypassing nested pnpm lifecycle echo while preserving the lock/build-skip behavior | smoke `266/0/0`; output now starts with wrapper command then compact JSON |
 | Fixed | WebGPU summary output size | focused/smoke runs with many `--cases` printed hundreds of full case-filter names, making iteration logs noisy and expensive to inspect | summary reports now compact large filter lists into count plus first/last samples while preserving full names for small focused runs | harness unit; 21-case real WebGPU sample `21/0/0` with compact `caseFilters` |
 | Fixed | WebGPU case filter exactness | `--cases texture-surface:volume-vector-pointer-array-minmax-active-lane-return` also ran `texture-surface:volume-vector-pointer-array-minmax-active-lane-return-false-branch`, making focused reruns slower and less precise | shared case-name matcher now gives exact filters priority and only falls back to substring matching when no exact candidate exists | fail-first harness unit; exact real WebGPU rerun `1/0/0`; fuzzy fallback `minmax-active-lane-return` `12/0/0` |
 | Fixed | divergent continue before later barrier | `if (tid >= N) continue;` before a later `__syncthreads()` had no diagnostic and could emit raw WGSL `continue`, letting some lanes skip the barrier | analyzer now treats thread-dependent `continue` before a later barrier as an error and the compatibility plan classifies it as an unsupported safety blocker until per-iteration active-lane continue lowering exists | fail-first compiler unit now `422/0`; safe canonical continue regression `422/0`; diagnostic `divergent-continue-before-barrier` |
@@ -885,7 +887,7 @@ Probe these with fail-first real WebGPU fixtures:
   - loop-internal, alternate-branch, nested, loop+alternate, scalar side-effect, vector-lane side-effect, pointer-alias side-effect, atomic side-effect, shared-memory side-effect, surface side-effect, texture read side-effect, atlas/volume texture guarded RHS, all-inactive guarded RHS, surface/atlas pointer-array false-branch selection, 2D and volume texture-to-surface scalar/vector pointer-array false-branch selection, compound false-branch selection, surface CAS/minmax false-branch selection, texture CAS/minmax false-branch selection, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 texture-store side-effect, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 surface side-effect, mixed scalar/vector layered surface side-effect, surface-read pointer-alias side-effect, surface-read atomic pointer-alias side-effect, surface atomic vector readback, surface atomic vector compound helper, surf3D helper multi-surface and guarded RHS probes, surf3D pointer-alias active/atomic vector probes, surf3D pointer-array select/active/compound/CAS/minmax, texture-to-surface side-effect, 2-lane/3-lane/4-lane texture-fed layered surface vector side-effect, mixed scalar/vector texture-fed layered surface vector side-effect, texture-fed layered surface vector side-effect, layered/3D texture into 3D surface vector side-effect, atlas/layered texture return, deep helper vector-store, mixed scalar/vector texture-store, texture-fed pointer-alias, texture-fed pointer-alias atomic, atomic vector readback, atomic vector compound helper, and atomic vector member helper cases are now green in real WebGPU; keep probing next corpus-shaped texture/storage pattern
   - non-uniform break/return/continue should remain clear diagnostic or safe active-lane lowering, not silent miscompile; divergent continue before a later barrier is now blocked until per-iteration active-lane continue lowering exists
 - Perf/tooling:
-  - keep `verify:changed` scoped and explain selected gates; exact `--cases` filters now run only the named case before falling back to fuzzy substring matching, and large summary `caseFilters` now print compact count/sample output
+  - keep `verify:changed` scoped and explain selected gates; exact `--cases` filters now run only the named case before falling back to fuzzy substring matching, large summary `caseFilters` now print compact count/sample output, and smoke wrapper avoids nested pnpm command echo
   - keep smoke real-WebGPU and fast enough for inner loop
 
 ## Gate Ladder
