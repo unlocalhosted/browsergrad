@@ -272,7 +272,8 @@ export function analyzeCudaLite(
   }
 
   const declareVar = (statement: CudaLiteVarDecl, scope: Scope, names: Set<string>): void => {
-    const dimensions = resolvedSharedDimensions(statement, options) ?? statement.dimensions;
+    const resolvedDynamicShared = resolvedSharedDimensions(statement, options);
+    const dimensions = resolvedDynamicShared ?? (!activeStatementsReachable && statement.dynamicShared ? [1] : statement.dimensions);
     const pointerRoot = statement.pointer ? pointerRootForInitializer(statement.init, scope) : undefined;
     if (names.has(statement.name)) {
       diagnostics.push(error("duplicate-symbol", `duplicate CUDA-lite symbol '${statement.name}'`, statement.span));
@@ -331,7 +332,7 @@ export function analyzeCudaLite(
           if (!statement.matrixTile && statement.storage === "local" && statement.dimensions.length > 0 && statement.init) {
             validateArrayInitializer(statement, scope, diagnostics, walkExpression);
           }
-          if (statement.dynamicShared && !resolvedSharedDimensions(statement, options)) {
+          if (activeStatementsReachable && statement.dynamicShared && !resolvedSharedDimensions(statement, options)) {
             diagnostics.push(error("dynamic-shared-memory", "__shared__ arrays must have fixed dimensions", statement.span));
           }
           for (const dimension of statement.dimensions) {
@@ -521,7 +522,9 @@ export function analyzeCudaLite(
       validateF64Type(param.valueType, param.span, diagnostics, options);
     }
     walkStatements(fn.body, functionScope, 0, 0, 0, functionDeclaredNames);
-    validateDivergentReturnsBeforeBarriers(fn.body, new Map(fn.params.map((param) => [param.name, param])), diagnostics, options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE);
+    if (reachableFunction) {
+      validateDivergentReturnsBeforeBarriers(fn.body, new Map(fn.params.map((param) => [param.name, param])), diagnostics, options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE);
+    }
     activeRequiredFeatures = previousRequiredFeatures;
     activeAtomicParams = previousAtomicParams;
     activeAtomicShared = previousAtomicShared;

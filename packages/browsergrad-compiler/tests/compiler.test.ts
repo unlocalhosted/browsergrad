@@ -5655,6 +5655,63 @@ __global__ void dynamicShared(float *x) {
     expect(analysis.diagnostics.map((diagnostic) => diagnostic.code)).toContain("dynamic-shared-memory");
   });
 
+  it("ignores dynamic extern shared memory in unreachable helpers for selected kernels", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void unused_dynamic_shared(float *x) {
+  extern __shared__ float scratch[];
+  if (threadIdx.x == 0) {
+    scratch[0] = x[0];
+  }
+}
+
+__global__ void selected(float *x) {
+  if (threadIdx.x == 0) {
+    x[0] += 2.0f;
+  }
+}`, { kernelName: "selected", workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([3]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.x as Float32Array]).toEqual([5]);
+    expect(compiled.wgsl).not.toContain("unused_dynamic_shared");
+  });
+
+  it("ignores divergent barriers in unreachable helpers for selected kernels", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void unused_divergent_barrier(float *x) {
+  if (threadIdx.x == 0) {
+    return;
+  }
+  __syncthreads();
+  x[threadIdx.x] = 0.0f;
+}
+
+__global__ void selected(float *x) {
+  if (threadIdx.x == 0) {
+    x[0] += 2.0f;
+  }
+}`, { kernelName: "selected", workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([3]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect([...result.buffers.x as Float32Array]).toEqual([5]);
+    expect(compiled.wgsl).not.toContain("unused_divergent_barrier");
+  });
+
   it("parses device-side kernel launches as a runtime compatibility gap", () => {
     const analysis = analyzeCudaLite(parseCudaLite(`
 __global__ void child(float *x) { if (threadIdx.x < 1) { x[0] = 1.0f; } }
