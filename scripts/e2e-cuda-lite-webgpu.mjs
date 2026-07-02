@@ -3418,6 +3418,26 @@ __global__ void textureAtlasActiveLaneReturnReadSideEffect(cudaTextureObject_t t
   __syncthreads();
   out[tid] = 1.0f + (float)tid;
 }`,
+  textureAtlasActiveLaneGuardedRhs: `
+__device__ float read_guarded_texture_atlas(cudaTextureObject_t texArg, uint *counter) {
+  atomicAdd(counter, 1u);
+  float layered = tex2DLayered<float>(texArg, 0.0f, 1.0f, 1.0f);
+  float volume = tex3D<float>(texArg, 2.0f, 1.0f, 1.0f);
+  return layered + volume;
+}
+
+__global__ void textureAtlasActiveLaneGuardedRhs(cudaTextureObject_t tex, uint *counter, float *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  out[tid] = read_guarded_texture_atlas(tex, counter) + (float)tid;
+  __syncthreads();
+  if (tid == 0) {
+    out[3] = (float)counter[0];
+  }
+}`,
   textureAtlasVectorActiveLaneStore: `
 __device__ float4 read_return_texture_atlas_vec(cudaTextureObject_t texArg) {
   float4 layered = tex2DLayered<float4>(texArg, 0.0f, 1.0f, 1.0f);
@@ -4466,6 +4486,43 @@ __global__ void textureSurfaceVolumeVectorActiveLaneReturn(cudaSurfaceObject_t s
     out[0] = value.x + value.y + value.z + value.w;
   } else {
     out[tid] = 1.0f + (float)tid;
+  }
+}`,
+  textureSurfaceVolumeGuardedRhs: `
+__device__ uint4 sample_guarded_volume_vec(cudaTextureObject_t texArg, uint *counter, int lane) {
+  atomicAdd(counter, 1u);
+  uint4 layered = tex2DLayered<uint4>(texArg, 0.0f, 1.0f, 1.0f);
+  uint4 volume = tex3D<uint4>(texArg, 2.0f, 1.0f, 1.0f);
+  return make_uint4(
+    layered.x + volume.x + (uint)lane,
+    layered.y + volume.y + (uint)lane,
+    layered.z + volume.z + (uint)lane,
+    layered.w + volume.w + (uint)lane
+  );
+}
+
+__device__ void write_guarded_volume_vec(cudaSurfaceObject_t surfaceArg, uint4 value) {
+  surf3Dwrite(value, surfaceArg, 0, 0, 1);
+}
+
+__device__ uint4 read_guarded_volume_vec(cudaSurfaceObject_t surfaceArg) {
+  return surf3Dread<uint4>(surfaceArg, 0, 0, 1);
+}
+
+__global__ void textureSurfaceVolumeGuardedRhs(cudaSurfaceObject_t surf, cudaTextureObject_t tex, uint *counter, uint *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  uint4 sampled = sample_guarded_volume_vec(tex, counter, tid);
+  if (tid == 1) {
+    write_guarded_volume_vec(surf, sampled);
+  }
+  __syncthreads();
+  if (tid == 0) {
+    uint4 value = read_guarded_volume_vec(surf);
+    out[0] = value.x + value.y + value.z + value.w + counter[0];
   }
 }`,
   textureSurfaceVolumeAtomicPointerArraySelect: `
@@ -8410,6 +8467,29 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Float32Array", data: [1, 2, 3, 77] },
           },
           {
+            name: "texture:atlas-active-lane-guarded-rhs",
+            source: SOURCES.textureAtlasActiveLaneGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0]),
+                out: new Float32Array(4),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 2 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [74, 75, 0, 2] },
+          },
+          {
             name: "texture:atlas-vector-active-lane-store",
             source: SOURCES.textureAtlasVectorActiveLaneStore,
             options: { workgroupSize: [4, 1, 1] },
@@ -9275,6 +9355,32 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [320, 2, 3, 0] },
+          },
+          {
+            name: "texture-surface:volume-active-lane-guarded-rhs",
+            source: SOURCES.textureSurfaceVolumeGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0]),
+                out: new Uint32Array(4),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 2 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [314, 0, 0, 0] },
           },
           {
             name: "texture-surface:volume-atomic-pointer-array-select",
