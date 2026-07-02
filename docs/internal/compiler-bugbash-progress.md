@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T20:14:43Z
+Last updated: 2026-07-02T20:18:47Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -650,11 +650,13 @@ Current verified gates:
 - shared/constant texture-to-surface active-lane probe: `texture-surface:shared-constant-active-lane-return` is `1 passed / 0 failed / 0 skipped`; WebGPU smoke after shared/constant texture-to-surface probe `292/0/0`, skips `0`; hot repeat `5/0/0`, best warm `4.8ms`, speedup `31.81`
 - surface negative byte-offset boundary fix: `surface:negative-byte-offset` is `1 passed / 0 failed / 0 skipped`; hot repeat `5/0/0`, best warm `1.2ms`, speedup `20.33`; changed gate typecheck passed, compiler unit `436/0`, surface/texture focused group `158/0/0`, WebGPU smoke `293/0/0`, skips `0`
 - surface row-boundary fix: `surface:negative-byte-offset,surface:row-boundary` is `2 passed / 0 failed / 0 skipped`; hot row-boundary repeat `5/0/0`, best warm `3.3ms`, speedup `9.64`; changed gate typecheck passed, compiler unit `436/0`, surface/texture focused group `159/0/0`, WebGPU smoke `294/0/0`, skips `0`
+- surface vector row-boundary probe: `surface:vector-row-boundary` is `1 passed / 0 failed / 0 skipped`; hot repeat `5/0/0`, best warm `1.0ms`, speedup `52.2`; changed gate fixture tests passed, WebGPU smoke `295/0/0`, skips `0`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Probed green | surface vector row-boundary lane overflow | scalar row-boundary coverage did not prove `surf2Dwrite(float4)` and `surf2Dread<float4>` at `x == width - 1`; lane overflow could still spill vector lanes into the next row if per-lane bounds regressed | added pinned `surface:vector-row-boundary` real WebGPU fixture and smoke case | focused case `1/0/0`, skips `0`; hot repeat `5/0/0`, best warm `1.0ms`, speedup `52.2`; changed gate smoke `295/0/0` |
 | Fixed | surface row-boundary aliasing | WGSL surface helpers accepted any flat in-range index, so `surf2Dread(..., width * sizeof(float), row)` and `surf2Dwrite(..., width * sizeof(float), row)` could alias the next row/layer instead of treating `x == width` as out-of-bounds; CPU reference writes had the same missing row-bound check | CPU reference writes and WGSL read/write helpers now require `0 <= x < width`, `0 <= y < height`, and `z >= 0` before flat indexing; added pinned `surface:row-boundary` regression to smoke | boundary pair `2/0/0`, skips `0`; hot row-boundary repeat `5/0/0`, best warm `3.3ms`, speedup `9.64`; changed gate smoke `294/0/0` |
 | Fixed | surface negative byte offset | `surf2Dread(..., -1, ...)` and `surf2Dwrite(..., -1, ...)` divided byte offset before bounds check, so `-1 / 4` became lane `0` and could read/write the first surface cell | CPU reference and WGSL surface helpers now reject negative byte offsets before converting bytes to element indexes; added pinned `surface:negative-byte-offset` regression to smoke | focused case `1/0/0`, skips `0`; hot repeat `5/0/0`, best warm `1.2ms`, speedup `20.33`; changed gate smoke `293/0/0` |
 | Probed green | shared plus constant texture-to-surface active-lane side effects | previous probe combined constants with texture/surface active-lane lowering, but not workgroup vector state crossing the same barrier/return path | added `texture-surface:shared-constant-active-lane-return`, combining `__shared__ float4`, `__constant__` coefficients, helper texture vector read, pre-return surface vector write, post-barrier surface read, and pinned output | focused case `1/0/0`, skips `0`; hot repeat `5/0/0`, best warm `4.8ms`, speedup `31.81` |
