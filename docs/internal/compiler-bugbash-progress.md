@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T07:19:58Z
+Last updated: 2026-07-02T07:25:19Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,9 +11,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `253/0/0`, dist `253/0/0` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | surf1D/layered surface pointer-array compound active-lane return probed green; continue next corpus-shaped storage/texture/control probe |
+| Active work item | surf3D surface pointer-array compound active-lane return probed green; continue next corpus-shaped storage/texture/control probe |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
-| Worktree | Dirty until current surf1D/layered surface pointer-array compound fixtures are committed |
+| Worktree | Dirty until current surf3D surface pointer-array compound fixture is committed |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
 
 ## How To Track This
@@ -492,11 +492,16 @@ Current verified gates:
 - hot surf1D/layered surface pointer-array compound active-lane probe: repeat `5`, warmup `1`, `10 passed / 0 failed / 0 skipped`, best warm `4.7ms` / `4.7ms`, speedups `1.19` / `1.19`
 - WebGPU fixture test after surf1D/layered surface pointer-array compound probe: passed
 - WebGPU smoke after surf1D/layered surface pointer-array compound probe: `215 passed / 0 failed / 0 skipped`
+- surf3D surface pointer-array compound active-lane fixture: `surface:surf3d-pointer-alias-atomic-pointer-array-compound-active-lane-return` is `1 passed / 0 failed / 0 skipped`
+- hot surf3D surface pointer-array compound active-lane probe: repeat `5`, warmup `1`, `5 passed / 0 failed / 0 skipped`, best warm `4.6ms`, speedup `1.35`
+- WebGPU fixture test after surf3D surface pointer-array compound probe: passed
+- WebGPU smoke after surf3D surface pointer-array compound probe: `216 passed / 0 failed / 0 skipped`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Probed green | surf3D surface pointer-array compound active-lane return | 3D-surface-fed `uint4` selected vector pointer-array compound writes before an early `return` could regress z-linearized surface vector reads, vector pointer selection, compound member writes, atomic scalar lane adds, or active-lane side effects before a later barrier | existing 3D surface vector read, vector pointer-array storage view, compound vector assignment, scalar atomic lane lowering, and active-lane guard preserve side effects before return | `surface:surf3d-pointer-alias-atomic-pointer-array-compound-active-lane-return` `1/0/0`; smoke `216/0/0`; hot gate `5/0/0`, speedup `1.35` |
 | Probed green | layered surface pointer-array compound active-lane return | layered-surface-fed `uint4` selected vector pointer-array compound writes before an early `return` could regress layered surface vector reads, vector pointer selection, compound member writes, atomic scalar lane adds, or active-lane side effects before a later barrier | existing layered surface vector read, vector pointer-array storage view, compound vector assignment, scalar atomic lane lowering, and active-lane guard preserve side effects before return | `surface:pointer-alias-atomic-pointer-array-compound-active-lane-return` `1/0/0`; smoke `215/0/0`; hot gate `5/0/0`, speedup `1.19` |
 | Probed green | surf1D pointer-array compound active-lane return | surf1D-fed `uint4` selected vector pointer-array compound writes before an early `return` could regress surf1D vector reads, vector pointer selection, compound member writes, atomic scalar lane adds, or active-lane side effects before a later barrier | existing surf1D vector read, vector pointer-array storage view, compound vector assignment, scalar atomic lane lowering, and active-lane guard preserve side effects before return | `surface:surf1d-pointer-alias-atomic-pointer-array-compound-active-lane-return` `1/0/0`; smoke `215/0/0`; hot gate `5/0/0`, speedup `1.19` |
 | Probed green | atlas texture pointer-array compound active-lane return | atlas/3D texture-fed `uint4` selected vector pointer-array compound writes before an early `return` could regress atlas sampling, vector pointer selection, compound member writes, atomic scalar lane adds, or active-lane side effects before a later barrier | existing atlas/3D texture vector read, vector pointer-array storage view, compound vector assignment, scalar atomic lane lowering, and active-lane guard preserve side effects before return | `texture:atlas-vector-atomic-pointer-array-compound-active-lane-return` `1/0/0`; smoke `213/0/0`; hot gate `5/0/0`, speedup `1.33` |
@@ -625,6 +630,7 @@ Current added surface/texture cases:
 - `surface:layered-vector-read`
 - `surface:surf3d-vector-read`
 - `surface:surf3d-vector-write-active-lane-return`
+- `surface:surf3d-pointer-alias-atomic-pointer-array-compound-active-lane-return`
 - `surface:vector-read-active-lane-return`
 - `surface:vector-write-active-lane-return`
 - `surface:float2-vector-active-lane-return`
@@ -735,7 +741,7 @@ Current added pointer/control cases:
 - `control:active-lane-shared-return-side-effect-barrier`
 - `control:subgroup-truthiness-assignment-scalar`
 
-Smoke current: `215/0/0`.
+Smoke current: `216/0/0`.
 
 Full source e2e current: `221/0/0`.
 

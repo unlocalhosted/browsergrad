@@ -1924,6 +1924,49 @@ __global__ void surface3DVectorWriteActiveLaneReturn(cudaSurfaceObject_t surf, f
     out[tid] = 1.0f + (float)tid;
   }
 }`,
+  surface3DPointerAliasAtomicPointerArrayCompoundActiveLaneReturn: `
+__device__ uint4 read_3d_surface_compound_pointer_array_vec(cudaSurfaceObject_t surfaceArg, int z) {
+  return surf3Dread<uint4>(surfaceArg, 0, 0, z);
+}
+
+__device__ void atomic_3d_surface_compound_array_select_vec(uint *scalarOut, uint4 value) {
+  atomicAdd(&scalarOut[0], value.x);
+  atomicAdd(&scalarOut[1], value.y);
+  atomicAdd(&scalarOut[2], value.z);
+  atomicAdd(&scalarOut[3], value.w);
+}
+
+__device__ void add_3d_surface_compound_array_select_vec(uint4 *vecOut, int lane, uint4 value) {
+  vecOut[lane] += value;
+}
+
+__device__ void add_3d_surface_compound_array_select_vec_y(uint4 *vecOut, int lane, uint value) {
+  vecOut[lane].y += value;
+}
+
+__global__ void surface3DPointerAliasAtomicPointerArrayCompoundActiveLaneReturn(cudaSurfaceObject_t surf, uint4 *out, uint4 *shadow, uint *summary, int N) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    uint4 *targets[2];
+    targets[0] = shadow + 1;
+    targets[1] = out + 1;
+    uint4 value = read_3d_surface_compound_pointer_array_vec(surf, 1);
+    int pick = value.z > 0u ? 1 : 0;
+    atomic_3d_surface_compound_array_select_vec(reinterpret_cast<uint*>(targets[pick]), value);
+    add_3d_surface_compound_array_select_vec(targets[pick], 0, make_uint4(1u, 2u, 3u, 4u));
+    add_3d_surface_compound_array_select_vec_y(targets[0], 0, 9u);
+    return;
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
   surfaceLayeredWrite: `
 __global__ void surfaceLayeredWrite(cudaSurfaceObject_t outputSurf) {
   if (threadIdx.x == 0) {
@@ -6887,6 +6930,25 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [182, 2, 3, 0] },
+          },
+          {
+            name: "surface:surf3d-pointer-alias-atomic-pointer-array-compound-active-lane-return",
+            source: SOURCES.surface3DPointerAliasAtomicPointerArrayCompoundActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [10231] },
           },
           {
             name: "surface:layered-write",
