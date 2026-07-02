@@ -239,6 +239,7 @@ export function analyzeCudaLite(
   let activeAtomicParams = atomicParams;
   let activeAtomicShared = atomicShared;
   let activeAtomicDeviceGlobals = atomicDeviceGlobals;
+  let activeStatementsReachable = true;
   const params = new Map(kernel.params.map((param) => [param.name, param]));
   const declaredNames = new Set<string>();
   const rootScope = createScope();
@@ -384,14 +385,16 @@ export function analyzeCudaLite(
           });
           break;
         case "kernel-launch":
-          diagnostics.push({
-            ...error(
-              "unsupported-dynamic-parallelism",
-              `device-side kernel launch '${statement.callee}<<<...>>>' requires explicit runtime orchestration in CUDA-lite`,
-              statement.span,
-            ),
-            severity: options.referenceDynamicParallelism ? "warning" : "error",
-          });
+          if (activeStatementsReachable) {
+            diagnostics.push({
+              ...error(
+                "unsupported-dynamic-parallelism",
+                `device-side kernel launch '${statement.callee}<<<...>>>' requires explicit runtime orchestration in CUDA-lite`,
+                statement.span,
+              ),
+              severity: options.referenceDynamicParallelism ? "warning" : "error",
+            });
+          }
           for (const arg of statement.grid) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
           for (const arg of statement.block) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
           for (const arg of statement.args) walkExpression(arg, scope);
@@ -499,10 +502,12 @@ export function analyzeCudaLite(
     const previousAtomicParams = activeAtomicParams;
     const previousAtomicShared = activeAtomicShared;
     const previousAtomicDeviceGlobals = activeAtomicDeviceGlobals;
+    const previousStatementsReachable: boolean = activeStatementsReachable;
     activeRequiredFeatures = featureSink;
     activeAtomicParams = reachableFunction ? atomicParams : new Set<string>();
     activeAtomicShared = reachableFunction ? atomicShared : new Set<string>();
     activeAtomicDeviceGlobals = reachableFunction ? atomicDeviceGlobals : new Set<string>();
+    activeStatementsReachable = reachableFunction;
     const functionScope = createScope(rootScope);
     const functionDeclaredNames = new Set(rootDeclaredNames);
     for (const param of fn.params) {
@@ -521,6 +526,7 @@ export function analyzeCudaLite(
     activeAtomicParams = previousAtomicParams;
     activeAtomicShared = previousAtomicShared;
     activeAtomicDeviceGlobals = previousAtomicDeviceGlobals;
+    activeStatementsReachable = previousStatementsReachable;
   }
 
   walkStatements(kernel.body, rootScope, 0, 0, 0, declaredNames);

@@ -6,6 +6,7 @@ export const runtimeScopeCases = [
   "runtime:host-dynamic-system-atomics",
   "runtime:host-dynamic-alias-atomic",
   "runtime:host-dynamic-conditional-alias-atomic",
+  "runtime:unreachable-dynamic-launch",
   "runtime:recursive-host-dynamic-launch",
   "runtime:pool-alias-host-dynamic-launch",
   "runtime:pool-pointer-host-dynamic-launch",

@@ -219,6 +219,22 @@ __global__ void parent(int *out, int use_out) {
     cudaDeviceSynchronize();
   }
 }`,
+  unreachableDynamicLaunch: `
+__global__ void child(float *x) {
+  x[threadIdx.x] += 1.0f;
+}
+
+__device__ void unused_launch(float *x) {
+  dim3 grid(1);
+  dim3 block(1);
+  child<<<grid, block>>>(x);
+}
+
+__global__ void selected(float *x) {
+  if (threadIdx.x == 0) {
+    x[0] += 2.0f;
+  }
+}`,
   recursiveDynamicLaunch: `
 __global__ void child(float *dst, int value) {
   if (threadIdx.x < 1) { dst[0] += (float)value; }
@@ -5926,6 +5942,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Int32Array", data: [5] },
+          },
+          {
+            name: "runtime:unreachable-dynamic-launch",
+            source: SOURCES.unreachableDynamicLaunch,
+            options: { kernelName: "selected", workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                x: new Float32Array([3]),
+              },
+            }),
+            output: "x",
+            expectedOutput: { type: "Float32Array", data: [5] },
+            wgslNotContains: [
+              "unused_launch",
+              "child<<<",
+            ],
           },
           {
             name: "runtime:recursive-host-dynamic-launch",

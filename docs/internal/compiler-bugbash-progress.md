@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T17:08:37Z
+Last updated: 2026-07-02T17:12:46Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; unreachable helper feature/shared/atomic pollution fixes are green |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | WebGPU smoke profiling is now opt-in so normal scoped smoke runs stay leaner; shader compile remains the main time cost |
+| Active work item | Unreachable helper dynamic-launch diagnostics are now scoped to selected-kernel reachability with unit and real WebGPU proof |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -594,11 +594,14 @@ Current verified gates:
 - unreachable helper atomic WebGPU fixture: `atomic:unreachable-helper-plain-storage` `1/0/0`; asserts plain `gCounter` storage, plain `scratch` workgroup storage, no unreachable helper atomic WGSL declarations
 - changed gate after unreachable-helper WebGPU fixture: fixture tests passed; WebGPU smoke `277/0/0`; bugbash status tests passed; bugbash status active failures `0`; test-scope tests passed
 - WebGPU smoke wrapper profiling trim: default smoke no longer passes `--profile-case all`, has one `--case-timeout-ms`, and keeps profiling opt-in via `CUDA_LITE_WEBGPU_SMOKE_PROFILE`; focused smoke stayed `277/0/0`, test-scope passed
+- unreachable helper dynamic-launch diagnostic fix: fail-first unit reproduced `unsupported-dynamic-parallelism` from an unused helper; focused dynamic-launch unit slice `442/0`; `runtime:unreachable-dynamic-launch` real WebGPU fixture `1/0/0`
+- changed gate after unreachable dynamic-launch fixture: typecheck passed; compiler unit `426/0`; fixture tests passed; WebGPU smoke `278/0/0`; test-scope passed; lint passed
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | unreachable helper dynamic launches | unused device helpers containing `child<<<...>>>` failed compilation for selected kernels that never call those helpers, even though no emitted WGSL or runtime path used the launch | dynamic-launch compatibility diagnostics now only attach while walking selected-kernel reachable statements; unreachable helpers still validate ordinary expressions without poisoning selected-kernel compile | fail-first unit; focused unit slice `442/0`; `runtime:unreachable-dynamic-launch` `1/0/0`; WebGPU smoke `278/0/0`; lint passed |
 | Perf | WebGPU smoke wrapper overhead | default smoke always enabled per-case profiling and duplicate timeout args, making routine scoped gates noisier and doing extra profile work when only pass/fail feedback was needed | smoke wrapper now builds args through a tested helper, defaults profiling off, keeps opt-in profiling through `CUDA_LITE_WEBGPU_SMOKE_PROFILE`, and emits one timeout arg | test-scope passed; WebGPU smoke `277/0/0` |
 | Probed green | unreachable helper atomic real WebGPU fixture | unit coverage proved IR/WGSL strings, but real WebGPU smoke did not exercise selected-kernel reachable atomic pollution directly | WebGPU e2e fixture now supports `wgslContains` / `wgslNotContains`, and `atomic:unreachable-helper-plain-storage` locks plain storage/workgroup declarations plus runtime output | focused fixture `1/0/0`; WebGPU smoke `277/0/0`; fixture and test-scope harness tests passed |
 | Fixed | unreachable helper atomic lowering | unused device helpers with direct atomics on device globals or helper-local `__shared__` storage could mark the selected kernel's IR/WGSL storage as atomic even when the selected kernel only performed plain reads/writes | validation still walks unreachable helpers for diagnostics, but unreachable helper atomic side effects now write to scratch sinks; exact pointer-atomic propagation and shared-name discovery use selected-kernel reachable helpers only | fail-first unit; focused atomic unit slice `441/0`; `verify:changed` typecheck + compiler unit `425/0`; lint passed |
