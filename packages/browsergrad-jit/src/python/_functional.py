@@ -592,6 +592,182 @@ def dropout(x: TensorProxy, p: float = 0.5, training: bool = True) -> TensorProx
     return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
 
 
+def pad(input: TensorProxy, pad, mode: str = "constant", value: float = 0.0) -> TensorProxy:
+    if mode != "constant":
+        raise NotImplementedError(f"pad: mode {mode!r} not supported; only 'constant'")
+    if len(pad) % 2 != 0:
+        raise ValueError(f"pad: pad length must be even, got {len(pad)}")
+    pairs_lastdim_first = list(zip(pad[0::2], pad[1::2]))
+    ndim = input.ndim
+    npad = [(0, 0)] * ndim
+    for k, (lo, hi) in enumerate(pairs_lastdim_first):
+        dim = ndim - 1 - k
+        npad[dim] = (int(lo), int(hi))
+    out_shape = tuple(input.shape[i] + lo + hi for i, (lo, hi) in enumerate(npad))
+
+    def _pad_forward(x_arr: np.ndarray) -> np.ndarray:
+        return np.pad(x_arr, npad, mode="constant", constant_values=value)
+
+    uop = UOp(
+        op=OP_CUSTOM,
+        inputs=(input._uop,),
+        shape=out_shape,
+        dtype=input.dtype,
+        arg={"fn": _pad_forward, "captures": (), "name": "pad"},
+    )
+
+    def _bw(dy: np.ndarray, _ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+        slices = tuple(slice(lo, lo + size) for (lo, _), size in zip(npad, input.shape))
+        return (dy[slices].copy().astype(np.dtype(input.dtype), copy=False),)
+
+    requires = _should_track(input)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=(input,)) if requires else None
+    return TensorProxy(uop, session=input._get_session(), requires_grad=requires, ctx=ctx)
+
+
+def normalize(input: TensorProxy, p: float = 2.0, dim: int = 1, eps: float = 1e-12) -> TensorProxy:
+    if p != 2.0:
+        raise NotImplementedError(f"normalize: only p=2 supported; got p={p}")
+    norm = (input * input).sum(dim=dim, keepdim=True).sqrt().clamp_min(eps)
+    return input / norm
+
+
+def cosine_similarity(x1: TensorProxy, x2: TensorProxy, dim: int = 1, eps: float = 1e-8) -> TensorProxy:
+    x2 = _to_proxy(x2, x1._get_session())
+    dot = (x1 * x2).sum(dim=dim, keepdim=True)
+    n1 = (x1 * x1).sum(dim=dim, keepdim=True).sqrt().clamp_min(eps)
+    n2 = (x2 * x2).sum(dim=dim, keepdim=True).sqrt().clamp_min(eps)
+    return (dot / (n1 * n2)).squeeze(dim=dim)
+
+
+def _interp_nearest_2d(x_data: np.ndarray, out_h: int, out_w: int, scale_h: float, scale_w: float):
+    h_in, w_in = x_data.shape[-2:]
+    si = np.floor(np.arange(out_h) / scale_h).astype(np.int64)
+    sj = np.floor(np.arange(out_w) / scale_w).astype(np.int64)
+    si = np.clip(si, 0, h_in - 1)
+    sj = np.clip(sj, 0, w_in - 1)
+    return x_data[..., si[:, None], sj[None, :]], si, sj
+
+
+def _interp_bilinear_2d(
+    x_data: np.ndarray,
+    out_h: int,
+    out_w: int,
+    scale_h: float,
+    scale_w: float,
+    align_corners: bool,
+) -> np.ndarray:
+    h_in, w_in = x_data.shape[-2:]
+    if align_corners:
+        ih = np.linspace(0, h_in - 1, out_h).astype(np.float32) if out_h > 1 else np.zeros(out_h, dtype=np.float32)
+        iw = np.linspace(0, w_in - 1, out_w).astype(np.float32) if out_w > 1 else np.zeros(out_w, dtype=np.float32)
+    else:
+        ih = (np.arange(out_h, dtype=np.float32) + 0.5) / scale_h - 0.5
+        iw = (np.arange(out_w, dtype=np.float32) + 0.5) / scale_w - 0.5
+    i0 = np.floor(ih).astype(np.int64)
+    i1 = i0 + 1
+    j0 = np.floor(iw).astype(np.int64)
+    j1 = j0 + 1
+    a = (ih - i0).astype(np.float32)
+    b = (iw - j0).astype(np.float32)
+    i0c = np.clip(i0, 0, h_in - 1)
+    i1c = np.clip(i1, 0, h_in - 1)
+    j0c = np.clip(j0, 0, w_in - 1)
+    j1c = np.clip(j1, 0, w_in - 1)
+    v00 = x_data[..., i0c[:, None], j0c[None, :]]
+    v01 = x_data[..., i0c[:, None], j1c[None, :]]
+    v10 = x_data[..., i1c[:, None], j0c[None, :]]
+    v11 = x_data[..., i1c[:, None], j1c[None, :]]
+    aw = a[:, None]
+    bw = b[None, :]
+    out = (1 - aw) * ((1 - bw) * v00 + bw * v01) + aw * ((1 - bw) * v10 + bw * v11)
+    return out.astype(np.float32)
+
+
+def interpolate(
+    input: TensorProxy,
+    size=None,
+    scale_factor=None,
+    mode: str = "nearest",
+    align_corners: bool = False,
+) -> TensorProxy:
+    if input.ndim != 4:
+        raise NotImplementedError(f"interpolate: only 4D input supported; got {input.ndim}D")
+    h_in, w_in = input.shape[-2:]
+    if size is not None:
+        out_h, out_w = int(size[0]), int(size[1])
+    elif scale_factor is not None:
+        sf = scale_factor if isinstance(scale_factor, (tuple, list)) else (scale_factor, scale_factor)
+        out_h = int(round(h_in * sf[0]))
+        out_w = int(round(w_in * sf[1]))
+    else:
+        raise ValueError("interpolate: provide size or scale_factor")
+    scale_h = out_h / h_in
+    scale_w = out_w / w_in
+    out_shape = input.shape[:-2] + (out_h, out_w)
+
+    captured: dict = {}
+
+    def _interpolate_forward(x_arr: np.ndarray) -> np.ndarray:
+        if mode == "nearest":
+            out, si, sj = _interp_nearest_2d(x_arr, out_h, out_w, scale_h, scale_w)
+            captured["nearest"] = (si, sj)
+            return out.astype(np.dtype(input.dtype), copy=False)
+        if mode == "bilinear":
+            return _interp_bilinear_2d(x_arr, out_h, out_w, scale_h, scale_w, align_corners).astype(np.dtype(input.dtype), copy=False)
+        raise NotImplementedError(f"interpolate: mode {mode!r} not supported")
+
+    uop = UOp(
+        op=OP_CUSTOM,
+        inputs=(input._uop,),
+        shape=out_shape,
+        dtype=input.dtype,
+        arg={"fn": _interpolate_forward, "captures": (), "name": "interpolate"},
+    )
+
+    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+        (x_arr,) = ins
+        dx = np.zeros_like(x_arr)
+        if mode == "nearest":
+            si, sj = captured["nearest"]
+            for y in range(out_h):
+                for x in range(out_w):
+                    dx[..., si[y], sj[x]] += dy[..., y, x]
+            return (dx.astype(x_arr.dtype, copy=False),)
+        raise NotImplementedError("interpolate: bilinear backward not implemented in JIT yet")
+
+    requires = _should_track(input)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=(input,)) if requires else None
+    return TensorProxy(uop, session=input._get_session(), requires_grad=requires, ctx=ctx)
+
+
+def scaled_dot_product_attention(
+    query: TensorProxy,
+    key: TensorProxy,
+    value: TensorProxy,
+    attn_mask=None,
+    dropout_p: float = 0.0,
+    is_causal: bool = False,
+    scale=None,
+) -> TensorProxy:
+    if dropout_p != 0.0:
+        raise NotImplementedError("scaled_dot_product_attention: dropout_p > 0 not supported")
+    s = (1.0 / np.sqrt(query.shape[-1])) if scale is None else float(scale)
+    scores = (query @ key.transpose(-1, -2)) * s
+    if is_causal:
+        l_q, l_k = scores.shape[-2], scores.shape[-1]
+        mask = np.triu(np.ones((l_q, l_k), dtype=bool), k=1)
+        scores = scores.masked_fill(from_numpy(mask, session=query._get_session()), -np.inf)
+    if attn_mask is not None:
+        mask_proxy = _to_proxy(attn_mask, query._get_session())
+        if mask_proxy.dtype == "bool":
+            scores = scores.masked_fill(mask_proxy, -np.inf)
+        else:
+            scores = scores + mask_proxy
+    attn = softmax(scores, dim=-1)
+    return attn @ value
+
+
 __all__ = [
     "relu",
     "sigmoid",
@@ -616,4 +792,9 @@ __all__ = [
     "one_hot",
     "linear",
     "dropout",
+    "pad",
+    "interpolate",
+    "normalize",
+    "cosine_similarity",
+    "scaled_dot_product_attention",
 ]

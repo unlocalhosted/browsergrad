@@ -834,6 +834,93 @@ ce_loss = F.cross_entropy_loss(
     });
   });
 
+  it("supports eager-compatible functional spatial and vector utility aliases", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      padded: number[][];
+      padGrad: number[][];
+      normalizedRows: number[];
+      cosine: number[];
+      interpolatedShape: number[];
+      interpolated: number[][][][];
+      attentionShape: number[];
+      attentionRows: number[];
+      caps: Record<string, boolean>;
+    }>(`
+import browsergrad_jit as bg
+bg.install_torch_alias()
+import torch
+import torch.nn.functional as F
+import numpy as np
+
+p = torch.tensor([[1.0, 2.0], [3.0, 4.0]], requires_grad=True)
+padded = F.pad(p, (1, 0, 0, 1), value=-1.0)
+padded.sum().backward()
+
+n = F.normalize(torch.tensor([[3.0, 4.0], [0.0, 5.0]]), dim=1)
+cos = F.cosine_similarity(
+    torch.tensor([[1.0, 0.0], [1.0, 1.0]]),
+    torch.tensor([[0.0, 1.0], [1.0, 0.0]]),
+    dim=1,
+)
+
+img = torch.tensor(np.array([[[[1.0, 2.0], [3.0, 4.0]]]], dtype=np.float32))
+interp = F.interpolate(img, scale_factor=2, mode="nearest")
+
+q = torch.tensor(np.array([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=np.float32))
+k = torch.tensor(np.array([[[[1.0, 0.0], [0.0, 1.0]]]], dtype=np.float32))
+v = torch.tensor(np.array([[[[10.0, 0.0], [0.0, 20.0]]]], dtype=np.float32))
+attn = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+
+{
+  "padded": padded.numpy().tolist(),
+  "padGrad": p.grad.numpy().tolist(),
+  "normalizedRows": (n * n).sum(dim=1).numpy().round(6).tolist(),
+  "cosine": cos.numpy().round(6).tolist(),
+  "interpolatedShape": list(interp.shape),
+  "interpolated": interp.numpy().tolist(),
+  "attentionShape": list(attn.shape),
+  "attentionRows": attn.numpy().sum(axis=-1).round(6).tolist()[0][0],
+  "caps": {
+    "F.pad": hasattr(F, "pad"),
+    "F.interpolate": hasattr(F, "interpolate"),
+    "F.normalize": hasattr(F, "normalize"),
+    "F.cosine_similarity": hasattr(F, "cosine_similarity"),
+    "F.scaled_dot_product_attention": hasattr(F, "scaled_dot_product_attention"),
+  },
+}
+`);
+    expect(result.padded).toEqual([
+      [-1, 1, 2],
+      [-1, 3, 4],
+      [-1, -1, -1],
+    ]);
+    expect(result.padGrad).toEqual([
+      [1, 1],
+      [1, 1],
+    ]);
+    expect(result.normalizedRows).toEqual([1, 1]);
+    expect(result.cosine[0]).toBe(0);
+    expect(result.cosine[1]).toBeCloseTo(Math.SQRT1_2, 6);
+    expect(result.interpolatedShape).toEqual([1, 1, 4, 4]);
+    expect(result.interpolated[0]?.[0]).toEqual([
+      [1, 1, 2, 2],
+      [1, 1, 2, 2],
+      [3, 3, 4, 4],
+      [3, 3, 4, 4],
+    ]);
+    expect(result.attentionShape).toEqual([1, 1, 2, 2]);
+    expect(result.attentionRows[0]).toBe(10);
+    expect(result.attentionRows[1]).toBeCloseTo(16.697617, 6);
+    expect(result.caps).toEqual({
+      "F.pad": true,
+      "F.interpolate": true,
+      "F.normalize": true,
+      "F.cosine_similarity": true,
+      "F.scaled_dot_product_attention": true,
+    });
+  });
+
   it("supports functional one_hot and stable BCE-with-logits loss", async () => {
     const target = await getJitTarget();
     const result = await target.run<{
