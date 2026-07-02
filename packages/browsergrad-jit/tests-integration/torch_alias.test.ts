@@ -283,6 +283,80 @@ lsm = torch.log_softmax(x, dim=-1).numpy()
     expect(result.logSoftmaxRows).toEqual([1, 1]);
   });
 
+  it("supports PyTorch shape and multi-tensor composition aliases", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      flattened: number[][];
+      topFlattenShape: number[];
+      unsqueezedShape: number[];
+      squeezedShape: number[];
+      transposed: number[][];
+      permutedShape: number[];
+      catRows: number[][];
+      stackShape: number[];
+      catGradA: number[][];
+      catGradB: number[][];
+      stackGradA: number[][];
+      stackGradB: number[][];
+    }>(`
+import browsergrad_jit as bg
+bg.install_torch_alias()
+import torch
+
+x = torch.tensor([[[1.0, 2.0], [3.0, 4.0]]])
+flat_method = x.flatten(start_dim=1)
+flat_top = torch.flatten(x, start_dim=0, end_dim=1)
+unsqueezed = torch.unsqueeze(flat_method, dim=-1)
+squeezed = unsqueezed.squeeze(dim=-1)
+transposed = torch.transpose(torch.tensor([[1.0, 2.0], [3.0, 4.0]]), 0, 1)
+permuted = torch.permute(x, 2, 0, 1)
+
+a = torch.tensor([[1.0, 2.0]], requires_grad=True)
+b = torch.tensor([[3.0, 4.0]], requires_grad=True)
+cat_out = torch.cat([a, b], dim=0)
+stack_out = torch.stack([a, b], dim=1)
+cat_loss = cat_out.sum()
+cat_loss.backward()
+cat_grad_a = a.grad.numpy().copy().tolist()
+cat_grad_b = b.grad.numpy().copy().tolist()
+stack_loss = stack_out.mean()
+stack_loss.backward()
+
+{
+  "flattened": flat_method.numpy().tolist(),
+  "topFlattenShape": list(flat_top.shape),
+  "unsqueezedShape": list(unsqueezed.shape),
+  "squeezedShape": list(squeezed.shape),
+  "transposed": transposed.numpy().tolist(),
+  "permutedShape": list(permuted.shape),
+  "catRows": cat_out.numpy().tolist(),
+  "stackShape": list(stack_out.shape),
+  "catGradA": cat_grad_a,
+  "catGradB": cat_grad_b,
+  "stackGradA": a.grad.numpy().tolist(),
+  "stackGradB": b.grad.numpy().tolist(),
+}
+`);
+    expect(result.flattened).toEqual([[1, 2, 3, 4]]);
+    expect(result.topFlattenShape).toEqual([2, 2]);
+    expect(result.unsqueezedShape).toEqual([1, 4, 1]);
+    expect(result.squeezedShape).toEqual([1, 4]);
+    expect(result.transposed).toEqual([
+      [1, 3],
+      [2, 4],
+    ]);
+    expect(result.permutedShape).toEqual([2, 1, 2]);
+    expect(result.catRows).toEqual([
+      [1, 2],
+      [3, 4],
+    ]);
+    expect(result.stackShape).toEqual([1, 2, 2]);
+    expect(result.catGradA).toEqual([[1, 1]]);
+    expect(result.catGradB).toEqual([[1, 1]]);
+    expect(result.stackGradA).toEqual([[1.25, 1.25]]);
+    expect(result.stackGradB).toEqual([[1.25, 1.25]]);
+  });
+
   it("supports functional one_hot and stable BCE-with-logits loss", async () => {
     const target = await getJitTarget();
     const result = await target.run<{

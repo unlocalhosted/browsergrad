@@ -44,7 +44,7 @@ from ._ir import (
     UOp,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CMP,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
-    OP_WHERE, OP_CAST, OP_CONST,
+    OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM,
 )
 from ._errors import JitNotImplementedError, ShapeError, RealizationError
 
@@ -738,6 +738,47 @@ class TensorProxy:
     def view(self, *shape: Any) -> "TensorProxy":
         return self.reshape(*shape)
 
+    def flatten(self, start_dim: int = 0, end_dim: int = -1) -> "TensorProxy":
+        ndim = self.ndim
+        if ndim == 0:
+            return self.reshape((1,))
+        if start_dim < 0:
+            start_dim += ndim
+        if end_dim < 0:
+            end_dim += ndim
+        if start_dim < 0 or start_dim >= ndim or end_dim < 0 or end_dim >= ndim:
+            raise ShapeError(
+                f"flatten: dims out of range for shape {self.shape}: "
+                f"start_dim={start_dim}, end_dim={end_dim}"
+            )
+        if start_dim > end_dim:
+            raise ShapeError(
+                f"flatten: start_dim must be <= end_dim, got "
+                f"{start_dim} > {end_dim}"
+            )
+        flat = int(np.prod(self.shape[start_dim:end_dim + 1]))
+        return self.reshape(self.shape[:start_dim] + (flat,) + self.shape[end_dim + 1:])
+
+    def unsqueeze(self, dim: int) -> "TensorProxy":
+        ndim = self.ndim
+        if dim < 0:
+            dim += ndim + 1
+        if dim < 0 or dim > ndim:
+            raise ShapeError(f"unsqueeze: dim {dim} out of range for shape {self.shape}")
+        return self.reshape(self.shape[:dim] + (1,) + self.shape[dim:])
+
+    def squeeze(self, dim: Optional[int] = None) -> "TensorProxy":
+        if dim is None:
+            new_shape = tuple(d for d in self.shape if d != 1)
+            return self.reshape(new_shape)
+        if dim < 0:
+            dim += self.ndim
+        if dim < 0 or dim >= self.ndim:
+            raise ShapeError(f"squeeze: dim {dim} out of range for shape {self.shape}")
+        if self.shape[dim] != 1:
+            return self.reshape(self.shape)
+        return self.reshape(self.shape[:dim] + self.shape[dim + 1:])
+
     def transpose(self, dim0: int, dim1: int) -> "TensorProxy":
         axes = list(range(self.ndim))
         axes[dim0], axes[dim1] = axes[dim1], axes[dim0]
@@ -1137,6 +1178,111 @@ def arange(*args: Any, dtype: str = "int64",
     return from_numpy(arr, requires_grad=requires_grad, session=session)
 
 
+def _normalize_dim(dim: int, ndim: int, op_name: str) -> int:
+    if dim < 0:
+        dim += ndim
+    if dim < 0 or dim >= ndim:
+        raise ShapeError(f"{op_name}: dim {dim} out of range for ndim {ndim}")
+    return dim
+
+
+def _promote_many_dtype(tensors: Tuple["TensorProxy", ...]) -> str:
+    dtype = tensors[0].dtype
+    for t in tensors[1:]:
+        dtype = _promote_dtype(dtype, t.dtype)
+    return dtype
+
+
+def cat(tensors: Any, dim: int = 0) -> "TensorProxy":
+    tensors_t = tuple(tensors)
+    if len(tensors_t) == 0:
+        raise ValueError("cat: empty tensor list")
+    first_proxy = next((t for t in tensors_t if isinstance(t, TensorProxy)), None)
+    sess = first_proxy._get_session() if first_proxy is not None else None
+    proxies = tuple(_to_proxy(t, sess) for t in tensors_t)
+    ndim = proxies[0].ndim
+    dim = _normalize_dim(dim, ndim, "cat")
+    ref_shape = proxies[0].shape
+    out_shape = list(ref_shape)
+    out_shape[dim] = 0
+    for p in proxies:
+        if p.ndim != ndim:
+            raise ShapeError(f"cat: all tensors must have {ndim} dims, got {p.ndim}")
+        for axis, (actual, expected) in enumerate(zip(p.shape, ref_shape)):
+            if axis != dim and actual != expected:
+                raise ShapeError(
+                    f"cat: tensor shape {p.shape} does not match {ref_shape} "
+                    f"outside dim {dim}"
+                )
+        out_shape[dim] += p.shape[dim]
+    out_dtype = _promote_many_dtype(proxies)
+
+    def _cat_forward(*arrays: np.ndarray) -> np.ndarray:
+        return np.concatenate(arrays, axis=dim).astype(np.dtype(out_dtype), copy=False)
+
+    uop = UOp(
+        op=OP_CUSTOM,
+        inputs=tuple(p._uop for p in proxies),
+        shape=tuple(out_shape),
+        dtype=out_dtype,
+        arg={"fn": _cat_forward, "captures": (), "name": "cat"},
+    )
+    sizes = tuple(p.shape[dim] for p in proxies)
+
+    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+        cuts = np.cumsum(sizes)[:-1].tolist()
+        parts = np.split(dy, cuts, axis=dim)
+        return tuple(
+            part.astype(arr.dtype, copy=False)
+            for part, arr in zip(parts, ins)
+        )
+
+    requires = _should_track(*proxies)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=proxies) if requires else None
+    return TensorProxy(uop, session=proxies[0]._get_session(),
+                       requires_grad=requires, ctx=ctx)
+
+
+def stack(tensors: Any, dim: int = 0) -> "TensorProxy":
+    tensors_t = tuple(tensors)
+    if len(tensors_t) == 0:
+        raise ValueError("stack: empty tensor list")
+    first_proxy = next((t for t in tensors_t if isinstance(t, TensorProxy)), None)
+    sess = first_proxy._get_session() if first_proxy is not None else None
+    proxies = tuple(_to_proxy(t, sess) for t in tensors_t)
+    ref_shape = proxies[0].shape
+    for p in proxies:
+        if p.shape != ref_shape:
+            raise ShapeError(f"stack: all tensors must have shape {ref_shape}, got {p.shape}")
+    dim = _normalize_dim(dim, proxies[0].ndim + 1, "stack")
+    out_shape = ref_shape[:dim] + (len(proxies),) + ref_shape[dim:]
+    out_dtype = _promote_many_dtype(proxies)
+
+    def _stack_forward(*arrays: np.ndarray) -> np.ndarray:
+        return np.stack(arrays, axis=dim).astype(np.dtype(out_dtype), copy=False)
+
+    uop = UOp(
+        op=OP_CUSTOM,
+        inputs=tuple(p._uop for p in proxies),
+        shape=out_shape,
+        dtype=out_dtype,
+        arg={"fn": _stack_forward, "captures": (), "name": "stack"},
+    )
+
+    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+        parts = []
+        for i, arr in enumerate(ins):
+            idx = [slice(None)] * dy.ndim
+            idx[dim] = i
+            parts.append(dy[tuple(idx)].astype(arr.dtype, copy=False))
+        return tuple(parts)
+
+    requires = _should_track(*proxies)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=proxies) if requires else None
+    return TensorProxy(uop, session=proxies[0]._get_session(),
+                       requires_grad=requires, ctx=ctx)
+
+
 __all__ = [
     "TensorProxy",
     "no_grad",
@@ -1147,4 +1293,6 @@ __all__ = [
     "ones",
     "randn",
     "arange",
+    "cat",
+    "stack",
 ]

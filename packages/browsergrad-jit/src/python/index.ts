@@ -85,6 +85,8 @@ from ._tensor_proxy import (
     ones,
     randn,
     arange,
+    cat,
+    stack,
 )
 from ._buffer_table import BufferTable
 from ._errors import (
@@ -490,6 +492,34 @@ def argmax(x, dim=None, axis=None, keepdim=False, keepdims=False):
     return x.argmax(dim=dim, axis=axis, keepdim=keepdim, keepdims=keepdims)
 
 
+def reshape(input, *shape):
+    return input.reshape(*shape)
+
+
+def view(input, *shape):
+    return input.view(*shape)
+
+
+def flatten(input, start_dim=0, end_dim=-1):
+    return input.flatten(start_dim=start_dim, end_dim=end_dim)
+
+
+def squeeze(input, dim=None):
+    return input.squeeze(dim=dim)
+
+
+def unsqueeze(input, dim):
+    return input.unsqueeze(dim)
+
+
+def transpose(input, dim0, dim1):
+    return input.transpose(dim0, dim1)
+
+
+def permute(input, *dims):
+    return input.permute(*dims)
+
+
 def softmax(input, dim=-1):
     return _functional.softmax(input, dim=dim)
 
@@ -522,10 +552,13 @@ __version__ = "${pkg.version}"
 __all__ = [
     "TensorProxy", "Tensor",
     "tensor", "zeros", "ones", "randn", "arange", "from_numpy",
+    "cat", "stack",
     "Session", "get_default_session", "set_default_session", "new_session",
     "manual_seed", "no_grad", "inference_mode",
     "sigmoid", "matmul", "mm", "bmm", "exp", "log", "tanh",
-    "sum", "mean", "argmax", "softmax", "log_softmax", "save", "load",
+    "sum", "mean", "argmax", "reshape", "view", "flatten", "squeeze",
+    "unsqueeze", "transpose", "permute", "softmax", "log_softmax",
+    "save", "load",
     "nn", "optim", "jit", "utils", "amp", "kernels", "func",
     "custom_kernel", "onnx", "lab", "experimental",
     "realize_webgpu", "register_webgpu_bridge", "unregister_webgpu_bridge",
