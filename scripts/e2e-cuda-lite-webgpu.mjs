@@ -6449,6 +6449,20 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Int32Array", data: [2, 2] },
           },
           {
+            name: "control:active-lane-guarded-rhs-all-inactive",
+            source: SOURCES.activeLaneGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Int32Array([0, 0]),
+              },
+              scalars: { n: 0 },
+            }),
+            output: "counter",
+            expectedOutput: { type: "Int32Array", data: [0, 0] },
+          },
+          {
             name: "control:active-lane-assignment-guarded-rhs",
             source: SOURCES.activeLaneAssignmentGuardedRhs,
             options: { workgroupSize: [4, 1, 1] },
@@ -6462,6 +6476,21 @@ const html = String.raw`<!doctype html>
             }),
             output: "counter",
             expectedOutput: { type: "Int32Array", data: [2, 2] },
+          },
+          {
+            name: "control:active-lane-assignment-guarded-rhs-all-inactive",
+            source: SOURCES.activeLaneAssignmentGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Int32Array([0, 0]),
+                sink: new Int32Array(4),
+              },
+              scalars: { n: 0 },
+            }),
+            output: "counter",
+            expectedOutput: { type: "Int32Array", data: [0, 0] },
           },
           {
             name: "control:active-lane-vector-atomic-guarded-rhs",
@@ -6479,6 +6508,21 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Float32Array", data: [5.25, 10.25, 16] },
           },
           {
+            name: "control:active-lane-vector-atomic-guarded-rhs-all-inactive",
+            source: SOURCES.activeLaneVectorAtomicGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                data: new Float32Array([0, 0, 0, 4, 8, 16]),
+                out: new Float32Array(3),
+              },
+              scalars: { n: 0 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 0] },
+          },
+          {
             name: "control:active-lane-compound-assignment-guarded-rhs",
             source: SOURCES.activeLaneCompoundAssignmentGuardedRhs,
             options: { workgroupSize: [4, 1, 1] },
@@ -6492,6 +6536,21 @@ const html = String.raw`<!doctype html>
             }),
             output: "counter",
             expectedOutput: { type: "Int32Array", data: [2, 2] },
+          },
+          {
+            name: "control:active-lane-compound-assignment-guarded-rhs-all-inactive",
+            source: SOURCES.activeLaneCompoundAssignmentGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Int32Array([0, 0]),
+                sink: new Int32Array([10, 10, 10, 10]),
+              },
+              scalars: { n: 0 },
+            }),
+            output: "counter",
+            expectedOutput: { type: "Int32Array", data: [0, 0] },
           },
           {
             name: "control:active-lane-uniform-break-barrier",
@@ -7395,6 +7454,24 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [5, 6, 0, 0] },
+          },
+          {
+            name: "surface:surf3d-active-lane-guarded-rhs-all-inactive",
+            source: SOURCES.surface3DActiveLaneGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0]),
+                out: new Float32Array(4),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+              },
+              scalars: { N: 0 },
+            }),
+            output: "counter",
+            expectedOutput: { type: "Uint32Array", data: [0, 0] },
           },
           {
             name: "surface:surf3d-pointer-alias-active-lane-store",
@@ -8810,6 +8887,29 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Float32Array", data: [74, 75, 0, 2] },
           },
           {
+            name: "texture:atlas-active-lane-guarded-rhs-all-inactive",
+            source: SOURCES.textureAtlasActiveLaneGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0]),
+                out: new Float32Array(4),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+            output: "counter",
+            expectedOutput: { type: "Uint32Array", data: [0] },
+          },
+          {
             name: "texture:atlas-vector-active-lane-store",
             source: SOURCES.textureAtlasVectorActiveLaneStore,
             options: { workgroupSize: [4, 1, 1] },
@@ -9941,6 +10041,32 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [314, 0, 0, 0] },
+          },
+          {
+            name: "texture-surface:volume-active-lane-guarded-rhs-all-inactive",
+            source: SOURCES.textureSurfaceVolumeGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0]),
+                out: new Uint32Array(4),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+            output: "counter",
+            expectedOutput: { type: "Uint32Array", data: [0] },
           },
           {
             name: "texture-surface:volume-atomic-pointer-array-select",
