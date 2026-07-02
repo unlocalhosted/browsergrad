@@ -603,13 +603,13 @@ export function lowerAnalyzedCudaLiteToKernelIr(
       .filter((fn) => reachableFunctionSpans.has(fn.span.start))
       .map((fn) => fn.body),
   ];
-  const textureNames = collectReferencedTextureNames(sharedDeclarationBodies);
+  const reachableSymbolNames = collectReferencedSymbolNames(sharedDeclarationBodies);
   return {
     name: analysis.kernel.name,
     params: analysis.kernel.params,
-    constants: analysis.constants,
+    constants: analysis.constants.filter((constant) => reachableSymbolNames.has(constant.name)),
     deviceGlobals: analysis.deviceGlobals,
-    textures: analysis.textures.filter((texture) => textureNames.has(texture.name)),
+    textures: analysis.textures.filter((texture) => reachableSymbolNames.has(texture.name)),
     functions: analysis.functions,
     body: analysis.kernel.body,
     sharedDeclarations: collectSharedDeclarationsFromBodies(sharedDeclarationBodies, options),
@@ -3939,7 +3939,7 @@ function collectSharedDeclarationsFromBodies(
   return [...declarations.values()];
 }
 
-function collectReferencedTextureNames(
+function collectReferencedSymbolNames(
   bodies: readonly (readonly CudaLiteStatement[])[],
 ): ReadonlySet<string> {
   const names = new Set<string>();
