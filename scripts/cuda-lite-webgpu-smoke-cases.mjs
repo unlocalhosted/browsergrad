@@ -126,6 +126,8 @@ export const textureScopeCases = [
   "surface:surf3d-read",
   "surface:surf3d-vector-read",
   "surface:surf3d-vector-write-active-lane-return",
+  "surface:surf3d-helper-vector-multi-surface-active-lane-return",
+  "surface:surf3d-active-lane-guarded-rhs",
   "surface:surf3d-pointer-alias-active-lane-store",
   "surface:surf3d-pointer-alias-atomic-active-lane-store",
   "surface:surf3d-pointer-alias-atomic-vector-readback",

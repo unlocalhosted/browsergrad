@@ -1924,6 +1924,50 @@ __global__ void surface3DVectorWriteActiveLaneReturn(cudaSurfaceObject_t surf, f
     out[tid] = 1.0f + (float)tid;
   }
 }`,
+  surface3DHelperVectorMultiSurfaceActiveLaneReturn: `
+__device__ float4 read_3d_multi_surface_vec(cudaSurfaceObject_t surfaceArg, int z) {
+  return surf3Dread<float4>(surfaceArg, 0, 0, z);
+}
+
+__device__ void write_3d_multi_surface_vec(cudaSurfaceObject_t surfaceArg, float4 value, int z) {
+  surf3Dwrite(value, surfaceArg, 0, 0, z);
+}
+
+__global__ void surface3DHelperVectorMultiSurfaceActiveLaneReturn(cudaSurfaceObject_t first, cudaSurfaceObject_t second, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    float4 value = read_3d_multi_surface_vec(first, 1);
+    write_3d_multi_surface_vec(
+      second,
+      make_float4(value.x + (float)tid, value.y + (float)tid, value.z + (float)tid, value.w + (float)tid),
+      1
+    );
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    float4 value = read_3d_multi_surface_vec(second, 1);
+    write_3d_multi_surface_vec(second, value, 1);
+  }
+}`,
+  surface3DActiveLaneGuardedRhs: `
+__device__ float read_3d_guarded_rhs(cudaSurfaceObject_t surfaceArg, uint *counter) {
+  atomicAdd(counter, 1u);
+  return surf3Dread<float>(surfaceArg, 0, 0, 1);
+}
+
+__global__ void surface3DActiveLaneGuardedRhs(cudaSurfaceObject_t surf, uint *counter, float *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  out[tid] = read_3d_guarded_rhs(surf, counter) + (float)tid;
+  __syncthreads();
+  if (tid == 0) {
+    counter[1] = counter[0];
+  }
+}`,
   surface3DPointerAliasActiveLaneStore: `
 __device__ float read_3d_alias_surface_scalar(cudaSurfaceObject_t surfaceArg, int z) {
   return surf3Dread<float>(surfaceArg, 0, 0, z);
@@ -7165,6 +7209,40 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [182, 2, 3, 0] },
+          },
+          {
+            name: "surface:surf3d-helper-vector-multi-surface-active-lane-return",
+            source: SOURCES.surface3DHelperVectorMultiSurfaceActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {},
+              surfaces: {
+                first: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+                second: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "second",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 8, 9, 10, 11] },
+          },
+          {
+            name: "surface:surf3d-active-lane-guarded-rhs",
+            source: SOURCES.surface3DActiveLaneGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0]),
+                out: new Float32Array(4),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+              },
+              scalars: { N: 2 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [5, 6, 0, 0] },
           },
           {
             name: "surface:surf3d-pointer-alias-active-lane-store",
