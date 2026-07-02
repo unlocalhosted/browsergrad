@@ -2433,6 +2433,14 @@ __global__ void surfaceVectorRowBoundary(float *out, cudaSurfaceObject_t surf) {
   out[2] = surf2Dread<float>(surf, 0, 1);
   out[3] = surf2Dread<float>(surf, 1 * sizeof(float), 1);
 }`,
+  surfaceLayerBoundary: `
+__global__ void surfaceLayerBoundary(float *out, cudaSurfaceObject_t surf) {
+  float value = 99.0f;
+  surf3Dread(&value, surf, 0, 2, 0);
+  surf3Dwrite(42.0f, surf, 0, 2, 0);
+  out[0] = value;
+  out[1] = surf3Dread<float>(surf, 0, 0, 1);
+}`,
   surfaceWrite3d: `
 __global__ void surfaceWrite3d(cudaSurfaceObject_t outputSurf) {
   int x = threadIdx.x;
@@ -8602,6 +8610,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [21, 0, 7, 11] },
+          },
+          {
+            name: "surface:layer-boundary",
+            source: SOURCES.surfaceLayerBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(2),
+              },
+              surfaces: {
+                surf: { width: 2, height: 2, data: new Float32Array([3, 5, 7, 11, 13, 17, 19, 23]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 13] },
           },
           {
             name: "surface:surf3d-write",

@@ -149,6 +149,7 @@ export const textureScopeCases = [
   "surface:negative-byte-offset",
   "surface:row-boundary",
   "surface:vector-row-boundary",
+  "surface:layer-boundary",
   "surface:surf1d-write",
   "surface:surf1d-vector-write",
   "surface:surf1d-read",
