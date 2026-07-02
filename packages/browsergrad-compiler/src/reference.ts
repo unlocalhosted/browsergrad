@@ -2521,17 +2521,18 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
         : resolveLValue(target, context)
       : undefined;
     const valueType = expression.templateValueType ?? targetLValue?.valueType ?? "float";
-    const x = Math.trunc(evalNumber(xArg!, context) / 4);
+    const xBytes = Math.trunc(evalNumber(xArg!, context));
+    const x = Math.trunc(xBytes / 4);
     const y = yArg ? Math.trunc(evalNumber(yArg, context)) : 0;
     const z = zArg ? Math.trunc(evalNumber(zArg, context)) : 0;
     const readLane = (lane: number): number => {
       const laneX = x + lane;
       const index = ((z * surface.height) + y) * surface.width + laneX;
-      const ok = laneX >= 0 && y >= 0 && z >= 0 && laneX < surface.width && y < surface.height && index < surface.data.length;
+      const ok = xBytes >= 0 && laneX >= 0 && y >= 0 && z >= 0 && laneX < surface.width && y < surface.height && index < surface.data.length;
       return ok ? surface.data[index] ?? 0 : 0;
     };
     const index = ((z * surface.height) + y) * surface.width + x;
-    const ok = x >= 0 && y >= 0 && z >= 0 && x < surface.width && y < surface.height && index < surface.data.length;
+    const ok = xBytes >= 0 && x >= 0 && y >= 0 && z >= 0 && x < surface.width && y < surface.height && index < surface.data.length;
     const value = isCudaVectorType(valueType)
       ? {
           kind: "cuda-vector" as const,
@@ -2552,14 +2553,15 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const surface = context.surfaces[surfaceName];
     if (!surface) throw compilerFailure(`missing surface input '${surfaceName}'`);
     const value = evalExpression(expression.args[0]!, context);
-    const x = Math.trunc(evalNumber(expression.args[2]!, context) / 4);
+    const xBytes = Math.trunc(evalNumber(expression.args[2]!, context));
+    const x = Math.trunc(xBytes / 4);
     const yBase = name === "surf1Dwrite" ? 0 : Math.trunc(evalNumber(expression.args[3]!, context));
     const z = name === "surf3Dwrite" || name === "surf2DLayeredwrite" ? Math.trunc(evalNumber(expression.args[4]!, context)) : 0;
     const y = yBase;
     const lanes = isCudaVectorValue(value) ? value.lanes : [valueAsNumber(value, "surface write value")];
     for (const [lane, laneValue] of lanes.entries()) {
       const index = ((z * surface.height) + y) * surface.width + x + lane;
-      const ok = x >= 0 && y >= 0 && index >= 0 && index < surface.data.length;
+      const ok = xBytes >= 0 && x >= 0 && y >= 0 && index >= 0 && index < surface.data.length;
       if (ok) surface.data[index] = laneValue ?? 0;
       context.trace.writes.push({ name: surfaceName, index, value: laneValue ?? 0, ok });
     }

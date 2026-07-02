@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T20:05:13Z
+Last updated: 2026-07-02T20:10:15Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `453/0/0`, dist `453/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `98/98` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Continue corpus-shaped probes and keep perf/source-dist verifier gates green |
+| Active work item | Validate surface boundary semantics plus keep perf/source-dist verifier gates green |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -648,11 +648,13 @@ Current verified gates:
 - corpus hot perf gate after final oracle pinning: histogram/scalar repeat `2`, `4/0/0`, expected-output `4`, skips `0`; warm best `5.8ms` / `4.3ms`, speedup `261.97` / `296.28`
 - constant texture-to-surface active-lane probe: `texture-surface:constant-active-lane-return` is `1 passed / 0 failed / 0 skipped`; WebGPU smoke after constant texture-to-surface probe `291/0/0`, skips `0`; hot repeat `5/0/0`, best warm `4.4ms`, speedup `19.39`; test-scope passed
 - shared/constant texture-to-surface active-lane probe: `texture-surface:shared-constant-active-lane-return` is `1 passed / 0 failed / 0 skipped`; WebGPU smoke after shared/constant texture-to-surface probe `292/0/0`, skips `0`; hot repeat `5/0/0`, best warm `4.8ms`, speedup `31.81`
+- surface negative byte-offset boundary fix: `surface:negative-byte-offset` is `1 passed / 0 failed / 0 skipped`; hot repeat `5/0/0`, best warm `1.2ms`, speedup `20.33`; changed gate typecheck passed, compiler unit `436/0`, surface/texture focused group `158/0/0`, WebGPU smoke `293/0/0`, skips `0`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | surface negative byte offset | `surf2Dread(..., -1, ...)` and `surf2Dwrite(..., -1, ...)` divided byte offset before bounds check, so `-1 / 4` became lane `0` and could read/write the first surface cell | CPU reference and WGSL surface helpers now reject negative byte offsets before converting bytes to element indexes; added pinned `surface:negative-byte-offset` regression to smoke | focused case `1/0/0`, skips `0`; hot repeat `5/0/0`, best warm `1.2ms`, speedup `20.33`; changed gate smoke `293/0/0` |
 | Probed green | shared plus constant texture-to-surface active-lane side effects | previous probe combined constants with texture/surface active-lane lowering, but not workgroup vector state crossing the same barrier/return path | added `texture-surface:shared-constant-active-lane-return`, combining `__shared__ float4`, `__constant__` coefficients, helper texture vector read, pre-return surface vector write, post-barrier surface read, and pinned output | focused case `1/0/0`, skips `0`; hot repeat `5/0/0`, best warm `4.8ms`, speedup `31.81` |
 | Probed green | constant texture-to-surface active-lane side effects | real WebGPU smoke covered constants, texture reads, surface writes, vector side effects, and active-lane returns separately, but not a corpus-shaped path combining `__constant__` coefficients, helper texture vector read, pre-return surface vector write, post-barrier surface read, and stable pinned output | added `texture-surface:constant-active-lane-return` to e2e and smoke case set | focused case `1/0/0`, skips `0`; hot repeat `5/0/0`, best warm `4.4ms`, speedup `19.39`; test-scope passed |
 | Fixed | final real corpus pinned outputs | last 5 corpus fixtures still used dynamic generated CPU-reference comparison, and one `-Infinity` oracle showed fixture data passed through `JSON.stringify` would collapse non-finite numbers to `null` in browser e2e specs | pinned SobelTex, RoPE, packed RoPE, and llm.c attention query/key outputs; added fixture JS-literal serialization for `NaN`/`Infinity`/`-Infinity`; diff reports now include non-finite labels; raised expected-output baseline to `98` | focused remaining slice `5/0/0`, expected-output `5`, skips `0`; full corpus fixture gate `98/0/0`, expected-output `98`, skips `0`; `test:webgpu-fixtures` passed |

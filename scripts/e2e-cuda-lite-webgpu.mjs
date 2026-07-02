@@ -2408,6 +2408,14 @@ __global__ void surfaceRead(uint *out, cudaSurfaceObject_t surf) {
   out[0] = value;
   out[1] = surf2Dread<unsigned int>(surf, 0, 0);
 }`,
+  surfaceNegativeByteOffset: `
+__global__ void surfaceNegativeByteOffset(uint *out, cudaSurfaceObject_t surf) {
+  uint value = 99u;
+  surf2Dread(&value, surf, -1, 0);
+  surf2Dwrite(42.0f, surf, -1, 0);
+  out[0] = value;
+  out[1] = surf2Dread<unsigned int>(surf, 0, 0);
+}`,
   surfaceWrite3d: `
 __global__ void surfaceWrite3d(cudaSurfaceObject_t outputSurf) {
   int x = threadIdx.x;
@@ -8529,6 +8537,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [9, 3] },
+          },
+          {
+            name: "surface:negative-byte-offset",
+            source: SOURCES.surfaceNegativeByteOffset,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(2),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array([7, 11]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0, 7] },
           },
           {
             name: "surface:surf3d-write",
