@@ -276,8 +276,20 @@ export function collectLocalPointerHandles(
   poolPointers: ReadonlyMap<string, PoolPointerAlias> = collectPoolPointers(statements),
   structuredPointerRoots: ReadonlySet<string> = new Set(),
 ): ReadonlyMap<string, CudaLiteVarDecl> {
-  const mutableNames = collectMutableLocalPointerNames(statements);
   const handles = new Map<string, CudaLiteVarDecl>();
+  for (const declaration of collectLocalPointerHandleDeclarations(statements, poolPointers, structuredPointerRoots)) {
+    handles.set(declaration.name, declaration);
+  }
+  return handles;
+}
+
+export function collectLocalPointerHandleDeclarations(
+  statements: readonly CudaLiteStatement[],
+  poolPointers: ReadonlyMap<string, PoolPointerAlias> = collectPoolPointers(statements),
+  structuredPointerRoots: ReadonlySet<string> = new Set(),
+): readonly CudaLiteVarDecl[] {
+  const mutableNames = collectMutableLocalPointerNames(statements);
+  const handles: CudaLiteVarDecl[] = [];
   const needsHandle = (statement: CudaLiteVarDecl): boolean =>
     statement.pointer &&
     statement.storage === "local" &&
@@ -288,7 +300,7 @@ export function collectLocalPointerHandles(
   const walk = (items: readonly CudaLiteStatement[]): void => {
     for (const item of items) {
       if (item.kind === "var" && needsHandle(item)) {
-        handles.set(item.name, item);
+        handles.push(item);
       }
       if (item.kind === "if") {
         walk(item.consequent);
@@ -296,7 +308,7 @@ export function collectLocalPointerHandles(
       }
       if (item.kind === "for") {
         if (item.init?.kind === "var" && needsHandle(item.init)) {
-          handles.set(item.init.name, item.init);
+          handles.push(item.init);
         }
         walk(item.body);
       }
@@ -304,7 +316,21 @@ export function collectLocalPointerHandles(
     }
   };
   walk(statements);
-  return handles;
+  return handles.sort((left, right) => left.span.start - right.span.start);
+}
+
+export function localPointerHandleDeclarationFor(
+  declarations: readonly CudaLiteVarDecl[],
+  name: string,
+  span?: SourceSpan,
+): CudaLiteVarDecl | undefined {
+  let candidate: CudaLiteVarDecl | undefined;
+  for (const declaration of declarations) {
+    if (declaration.name !== name) continue;
+    if (span && declaration.span.start > span.start) break;
+    candidate = declaration;
+  }
+  return candidate;
 }
 
 export function structuredPointerHandleRoots(ir: KernelIrModule): ReadonlySet<string> {

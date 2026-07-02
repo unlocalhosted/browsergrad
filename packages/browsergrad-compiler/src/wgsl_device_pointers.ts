@@ -1,5 +1,6 @@
 import { expressionName, rootIdentifier } from "./analyzer.js";
 import { cudaVectorFieldIndex, cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
+import { localPointerHandleStorageName } from "./wgsl_context.js";
 import { wgslElementByteSize } from "./wgsl_storage.js";
 import { isPointerIdentityCall, type PointerAlias } from "./wgsl_ir_analysis.js";
 import {
@@ -31,7 +32,7 @@ export interface WgslDevicePointerContext {
   paramFor(name: string): CudaLiteParam | undefined;
   deviceGlobalFor(name: string): CudaLiteDeviceGlobal | undefined;
   pointerAliasFor(name: string, span?: SourceSpan): PointerAlias | undefined;
-  localPointerHandleFor(name: string): CudaLiteVarDecl | undefined;
+  localPointerHandleFor(name: string, span?: SourceSpan): CudaLiteVarDecl | undefined;
   localPointerArrayFor(name: string, span?: SourceSpan): CudaLiteVarDecl | undefined;
   localPointerArrayRootFor(name: string, span?: SourceSpan): CudaLiteVarDecl | undefined;
 }
@@ -87,10 +88,11 @@ export function devicePointerArgumentParts(
     return pointer ? devicePointerArgumentParts(pointer, context, callbacks) : undefined;
   }
   if (expression.kind === "identifier") {
-    if (context.localPointerHandleFor(expression.name)) {
+    const localHandle = context.localPointerHandleFor(expression.name, expression.span);
+    if (localHandle) {
       return {
-        buffer: context.nameFor(`${expression.name}_buffer`),
-        base: context.nameFor(`${expression.name}_base`),
+        buffer: context.nameFor(localPointerHandleStorageName(localHandle, "buffer")),
+        base: context.nameFor(localPointerHandleStorageName(localHandle, "base")),
       };
     }
     const pointerParam = context.devicePointerParamFor(expression.name);

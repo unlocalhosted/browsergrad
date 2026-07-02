@@ -481,6 +481,10 @@ function emitPackedByteSharedRead(
   const wordIndex = `((${index}) >> 2u)`;
   const word = `${context.nameFor(shared.name)}[${wordIndex}]`;
   const loaded = `atomicLoad(&${word})`;
+  if (viewType === "half") {
+    const unpacked = `unpack2x16float(${loaded})`;
+    return `${wgslScalar("half")}(select(${unpacked}.x, ${unpacked}.y, (((${index}) & 2u) != 0u)))`;
+  }
   if (viewType !== "uchar") return emitPackedByteWordAsView(loaded, viewType);
   const shift = `(((${index}) & 3u) * 8u)`;
   return `((${loaded} >> (${shift})) & 255u)`;
@@ -496,6 +500,12 @@ function emitPackedByteSharedWrite(
   if (shared.valueType !== "uchar") return undefined;
   const wordIndex = `((${index}) >> 2u)`;
   const word = `${context.nameFor(shared.name)}[${wordIndex}]`;
+  if (viewType === "half") {
+    const shift = `(((${index}) & 2u) * 8u)`;
+    const mask = `(0xffffu << ${shift})`;
+    const halfBits = `(pack2x16float(vec2<f32>(f32(${value}), 0.0)) & 0xffffu)`;
+    return `atomicAnd(&${word}, ~${mask}); atomicOr(&${word}, (${halfBits} << ${shift}))`;
+  }
   if (viewType !== "uchar") return `atomicStore(&${word}, ${emitPackedByteViewAsWord(value, viewType)})`;
   const shift = `(((${index}) & 3u) * 8u)`;
   const mask = `(255u << ${shift})`;

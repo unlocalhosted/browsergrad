@@ -3907,6 +3907,10 @@ function readPackedByteSharedValue(
     const shift = (Math.trunc(byteIndex) & 3) * 8;
     return (word >>> shift) & 0xff;
   }
+  if (valueType === "half") {
+    const shift = (Math.trunc(byteIndex) & 2) * 8;
+    return float16BitsToFloat32((word >>> shift) & 0xffff);
+  }
   if (valueType === "float" || valueType === "double" || valueType === "bf16") return floatFromBits(word);
   if (valueType === "int") return intFromBits(word);
   if (valueType === "bool") return word === 0 ? 0 : 1;
@@ -3920,6 +3924,14 @@ function writePackedByteSharedValue(
   value: number,
 ): void {
   const wordIndex = Math.trunc(byteIndex / 4);
+  if (valueType === "half") {
+    const shift = (Math.trunc(byteIndex) & 2) * 8;
+    const old = readPackedByteSharedWordAt(buffer, wordIndex);
+    const mask = 0xffff << shift;
+    const halfBits = float32ToFloat16Bits(value);
+    writePackedByteSharedWord(buffer, wordIndex, ((old & ~mask) | ((halfBits & 0xffff) << shift)) >>> 0);
+    return;
+  }
   if (valueType !== "uchar") {
     writePackedByteSharedWord(buffer, wordIndex, packedByteSharedWord(valueType, value));
     return;

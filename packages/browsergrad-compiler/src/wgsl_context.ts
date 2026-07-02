@@ -7,6 +7,7 @@ import { isCudaVectorType } from "./vector_types.js";
 import {
   collectLocalArrayDeclarations,
   collectLocalArrays,
+  collectLocalPointerHandleDeclarations,
   collectLocalNames,
   collectLocalPointerArrayRoots,
   collectLocalPointerHandles,
@@ -18,6 +19,7 @@ import {
   collectRawPoolAllocators,
   isLocalPointerArrayDecl,
   localArrayDeclarationFor,
+  localPointerHandleDeclarationFor,
   pointerAliasDeclarationFor,
   structuredPointerHandleRoots,
   type PointerAlias,
@@ -79,7 +81,7 @@ export interface EmitContext {
   isAtomicShared(name: string): boolean;
   isAtomicDeviceGlobal(name: string): boolean;
   pointerAliasFor(name: string, span?: SourceSpan): PointerAlias | undefined;
-  localPointerHandleFor(name: string): CudaLiteVarDecl | undefined;
+  localPointerHandleFor(name: string, span?: SourceSpan): CudaLiteVarDecl | undefined;
   poolPointerFor(name: string): PoolPointerAlias | undefined;
   pointerBaseOffsetFieldFor(name: string): string | undefined;
   readonly rawPoolAllocators: readonly RawPoolAllocator[];
@@ -254,6 +256,7 @@ export function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslO
   const uniformScalarNames = new Set(uniformScalars.map((scalar) => scalar.name));
   const uniformScalarTypes = new Map(uniformScalars.map((scalar) => [scalar.name, scalar.valueType] as const));
   const structuredPointerRoots = structuredPointerHandleRoots(ir);
+  const localPointerHandleDeclarations = collectLocalPointerHandleDeclarations(ir.body, undefined, structuredPointerRoots);
   const localPointerHandles = collectLocalPointerHandles(ir.body, undefined, structuredPointerRoots);
   const pointerAliases = collectPointerAliases(ir.body, new Set(localPointerHandles.keys()));
   const mutablePointerBases = collectMutableStoragePointerBases(
@@ -337,8 +340,8 @@ export function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslO
     pointerAliasFor(name, span) {
       return pointerAliasDeclarationFor(pointerAliases, name, span);
     },
-    localPointerHandleFor(name) {
-      return localPointerHandles.get(name);
+    localPointerHandleFor(name, span) {
+      return localPointerHandleDeclarationFor(localPointerHandleDeclarations, name, span);
     },
     poolPointerFor(name) {
       return poolPointers.get(name);
@@ -443,7 +446,15 @@ function collectLocalPointerHandleGeneratedNames(
   statements: readonly CudaLiteStatement[],
   structuredPointerRoots: ReadonlySet<string> = new Set(),
 ): readonly string[] {
-  return [...collectLocalPointerHandles(statements, undefined, structuredPointerRoots).keys()].flatMap((name) => [`${name}_buffer`, `${name}_base`]);
+  return collectLocalPointerHandleDeclarations(statements, undefined, structuredPointerRoots)
+    .flatMap((statement) => [
+      localPointerHandleStorageName(statement, "buffer"),
+      localPointerHandleStorageName(statement, "base"),
+    ]);
+}
+
+export function localPointerHandleStorageName(statement: CudaLiteVarDecl, part: "buffer" | "base"): string {
+  return `${statement.name}_${statement.span.start}_${part}`;
 }
 
 function collectLocalPointerArrayGeneratedNames(statements: readonly CudaLiteStatement[]): readonly string[] {

@@ -738,6 +738,21 @@ __global__ void sharedByteFloatReinterpret(float *out) {
     out[0] = value[0];
   }
 }`,
+  sharedByteHalfReinterpret: `
+__global__ void sharedByteHalfReinterpret(float *out) {
+  __shared__ uchar scratch[4];
+  if (threadIdx.x == 0) {
+    half *value = (half *)&scratch[0];
+    value[0] = __float2half(1.0f);
+    value[1] = __float2half(2.0f);
+  }
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    half *value = (half *)&scratch[0];
+    out[0] = __half2float(value[0]);
+    out[1] = __half2float(value[1]);
+  }
+}`,
   localVectorPointerArray: `
 __device__ float3 sum3(float3 *a, float3 *b, float3 *c) {
   return *a + *b + *c;
@@ -6227,6 +6242,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [1] },
+          },
+          {
+            name: "storage:shared-byte-half-reinterpret",
+            source: SOURCES.sharedByteHalfReinterpret,
+            options: { workgroupSize: [1, 1, 1], f16Mode: "f32" },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(2),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [1, 2] },
           },
           {
             name: "storage:local-vector-pointer-array",

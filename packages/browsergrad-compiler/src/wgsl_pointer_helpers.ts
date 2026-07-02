@@ -847,6 +847,7 @@ function isPointerHelperCompatibleStorage(helperType: CudaLiteScalarType, storag
 function isPointerHelperReadableStorage(helperType: CudaLiteScalarType, storageType: CudaLiteScalarType): boolean {
   return isPointerHelperCompatibleStorage(helperType, storageType) ||
     (isCudaVectorType(storageType) && helperType === cudaVectorScalarType(storageType)) ||
+    (helperType === "half" && storageType === "uchar") ||
     ((helperType === "uint" || helperType === "int") && (storageType === "float" || storageType === "double" || storageType === "uchar"));
 }
 

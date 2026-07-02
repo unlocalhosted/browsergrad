@@ -28,6 +28,7 @@ import {
 } from "./vector_types.js";
 import {
   collectLocalArrays,
+  collectLocalPointerHandleDeclarations,
   collectLocalNames,
   collectLocalPointerArrayRoots,
   collectLocalPointerHandles,
@@ -36,6 +37,7 @@ import {
   expressionChildren,
   isLocalPointerArrayDecl,
   isPointerIdentityCall,
+  localPointerHandleDeclarationFor,
   pointerAliasDeclarationFor,
   poolPointerForAllocationCall,
   structuredPointerHandleRoots,
@@ -84,6 +86,7 @@ import {
   collectCooperativeGroups,
   createEmitContext,
   deviceFunctionLinkName,
+  localPointerHandleStorageName,
   resolveDeviceFunctionForCall,
   type EmitContext,
   type EmitKernelIrWgslOptions,
@@ -348,7 +351,7 @@ function emitStatement(
       if (statement.storage === "shared") return [];
       if (statement.pointer) {
         if (isLocalPointerArrayDecl(statement)) return emitLocalPointerArrayDecl(statement, context, indentLevel);
-        if (context.localPointerHandleFor(statement.name)) return emitLocalPointerHandleDecl(statement, context, indentLevel);
+        if (context.localPointerHandleFor(statement.name, statement.span)) return emitLocalPointerHandleDecl(statement, context, indentLevel);
         if (!isEmittedPointerVar(statement, context)) return [];
         return [`${prefix}var ${context.nameFor(statement.name)}: u32${statement.init ? ` = ${emitExpression(statement.init, context)}` : " = 0u"};`];
       }
@@ -965,6 +968,7 @@ function emitInlineBarrierDeviceFunctionCall(
       ] as const;
     }));
   const functionCooperativeGroups = collectCooperativeGroups(fn.body);
+  const functionLocalPointerHandleDeclarations = collectLocalPointerHandleDeclarations(fn.body, undefined, structuredPointerHandleRoots(context.ir));
   const functionLocalPointerHandles = collectLocalPointerHandles(fn.body, undefined, structuredPointerHandleRoots(context.ir));
   const functionPointerAliases = collectPointerAliases(fn.body, new Set(functionLocalPointerHandles.keys()));
   const functionLocalValueTypes = new Map(collectLocalValueTypes(fn.body));
@@ -991,8 +995,8 @@ function emitInlineBarrierDeviceFunctionCall(
       const param = fn.params.find((item) => item.name === name && !item.pointer);
       return functionLocalValueTypes.get(name) ?? param?.valueType ?? context.localValueTypeFor(name);
     },
-    localPointerHandleFor(name) {
-      return functionLocalPointerHandles.get(name) ?? context.localPointerHandleFor(name);
+    localPointerHandleFor(name, span) {
+      return localPointerHandleDeclarationFor(functionLocalPointerHandleDeclarations, name, span) ?? context.localPointerHandleFor(name, span);
     },
     pointerAliasFor(name, span) {
       return pointerAliasDeclarationFor(functionPointerAliases, name, span) ?? context.pointerAliasFor(name, span);
@@ -1583,7 +1587,7 @@ function emitU8x4SadAddExpression(inputs: readonly CudaLiteExpression[], context
 }
 
 function emitForVar(statement: CudaLiteVarDecl, context: EmitContext): string {
-  if (statement.pointer && context.localPointerHandleFor(statement.name)) {
+  if (statement.pointer && context.localPointerHandleFor(statement.name, statement.span)) {
     throw featureError(
       "unsupported-local-pointer-for-init",
       "mutable local pointer declarations in for-loop initializers are not supported yet",
@@ -1602,9 +1606,17 @@ function emitLocalPointerHandleDecl(
   const prefix = indent(indentLevel);
   const [buffer, base] = emitLocalPointerHandleInit(statement, context);
   return [
-    `${prefix}var ${context.nameFor(`${statement.name}_buffer`)}: u32 = ${buffer};`,
-    `${prefix}var ${context.nameFor(`${statement.name}_base`)}: u32 = ${base};`,
+    `${prefix}var ${localPointerHandleBufferName(statement, context)}: u32 = ${buffer};`,
+    `${prefix}var ${localPointerHandleBaseName(statement, context)}: u32 = ${base};`,
   ];
+}
+
+function localPointerHandleBufferName(statement: CudaLiteVarDecl, context: EmitContext): string {
+  return context.nameFor(localPointerHandleStorageName(statement, "buffer"));
+}
+
+function localPointerHandleBaseName(statement: CudaLiteVarDecl, context: EmitContext): string {
+  return context.nameFor(localPointerHandleStorageName(statement, "base"));
 }
 
 function emitLocalPointerArrayDecl(
@@ -1675,6 +1687,7 @@ function emitDeviceFunction(
   const functionPointerParams = new Set(fn.params
     .filter((param) => param.pointer && usesFunctionLocalPointerParam(fn, param, context.ir))
     .map((param) => param.name));
+  const functionLocalPointerHandleDeclarations = collectLocalPointerHandleDeclarations(fn.body, undefined, structuredPointerHandleRoots(context.ir));
   const functionLocalPointerHandles = collectLocalPointerHandles(fn.body, undefined, structuredPointerHandleRoots(context.ir));
   const functionPointerAliases = collectPointerAliases(fn.body, new Set(functionLocalPointerHandles.keys()));
   const functionLocalValueTypes = new Map(collectLocalValueTypes(fn.body));
@@ -1689,8 +1702,8 @@ function emitDeviceFunction(
       localValueTypeFor(name) {
         return functionLocalValueTypes.get(name) ?? (functionParamNames.has(name) ? undefined : context.localValueTypeFor(name));
       },
-      localPointerHandleFor(name) {
-        return functionLocalPointerHandles.get(name) ?? context.localPointerHandleFor(name);
+      localPointerHandleFor(name, span) {
+        return localPointerHandleDeclarationFor(functionLocalPointerHandleDeclarations, name, span) ?? context.localPointerHandleFor(name, span);
       },
       pointerAliasFor(name, span) {
         return pointerAliasDeclarationFor(functionPointerAliases, name, span) ?? context.pointerAliasFor(name, span);
@@ -1965,7 +1978,7 @@ function devicePointerValueTypeForExpression(expression: CudaLiteExpression, con
   if (root) {
     const pointerArray = context.localPointerArrayFor(root, expression.span);
     if (pointerArray) return pointerArray.valueType;
-    const handle = context.localPointerHandleFor(root);
+    const handle = context.localPointerHandleFor(root, expression.span);
     if (handle) return handle.valueType;
     const alias = context.pointerAliasFor(root, expression.span);
     if (alias?.valueType) return alias.valueType;
@@ -2017,7 +2030,7 @@ function devicePointerIndexScale(
   context: EmitContext,
 ): number {
   const root = pointer ? rootIdentifier(pointer) : undefined;
-  const handle = root ? context.localPointerHandleFor(root) : undefined;
+  const handle = root ? context.localPointerHandleFor(root, pointer?.span) : undefined;
   const sourceType = handle?.init ? devicePointerRootValueType(handle.init, context) : undefined;
   if (sourceType === "uchar" && valueType !== undefined && valueType !== "uchar") {
     const bytes = wgslElementByteSize(valueType);
@@ -2044,7 +2057,7 @@ function devicePointerRootValueType(
   }
   const root = rootIdentifier(expression);
   if (!root || seen.has(root)) return undefined;
-  const handle = context.localPointerHandleFor(root);
+  const handle = context.localPointerHandleFor(root, expression.span);
   if (handle?.init) return devicePointerRootValueType(handle.init, context, new Set([...seen, root])) ?? handle.valueType;
   return sharedDeclarationFor(root, context)?.valueType ??
     context.paramFor(root)?.valueType ??
@@ -2116,7 +2129,7 @@ function isWritableDevicePointerExpression(expression: CudaLiteExpression, conte
     return context.localPointerArrayFor(expression.target.name, expression.target.span) !== undefined;
   }
   if (expression.kind !== "identifier") return false;
-  return context.localPointerHandleFor(expression.name) !== undefined ||
+  return context.localPointerHandleFor(expression.name, expression.span) !== undefined ||
     context.devicePointerParamFor(expression.name) !== undefined ||
     context.localPointerArrayFor(expression.name, expression.span) !== undefined ||
     context.pointerAliasFor(expression.name, expression.span) !== undefined;
@@ -2241,10 +2254,10 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
         }
       }
       if (expression.target.kind === "identifier") {
-        const handle = context.localPointerHandleFor(expression.target.name);
+        const handle = context.localPointerHandleFor(expression.target.name, expression.target.span);
         if (handle) {
-          const base = context.nameFor(`${handle.name}_base`);
-          const buffer = context.nameFor(`${handle.name}_buffer`);
+          const base = localPointerHandleBaseName(handle, context);
+          const buffer = localPointerHandleBufferName(handle, context);
           const index = `(${base} + ${emitDevicePointerIndexDelta(expression.index, handle.valueType, context, expression.target)})`;
           return `${pointerReadHelperName(handle.valueType)}(${buffer}, ${index})`;
         }
@@ -3385,7 +3398,7 @@ function isPointerDifferenceOperand(expression: CudaLiteExpression, context: Emi
     return pointer !== undefined && isPointerDifferenceOperand(pointer, context);
   }
   if (expression.kind === "identifier") {
-    return context.localPointerHandleFor(expression.name) !== undefined ||
+    return context.localPointerHandleFor(expression.name, expression.span) !== undefined ||
       context.devicePointerParamFor(expression.name) !== undefined ||
       context.localPointerArrayFor(expression.name, expression.span) !== undefined ||
       context.pointerAliasFor(expression.name, expression.span) !== undefined;
@@ -5310,10 +5323,10 @@ function emitVectorLaneSet(name: string, type: CudaLiteScalarType, index: string
 
 function emitPointerRebaseAssignment(expression: CudaLiteAssignmentExpression, context: EmitContext): string | undefined {
   if (expression.left.kind !== "identifier") return undefined;
-  const handle = context.localPointerHandleFor(expression.left.name);
+  const handle = context.localPointerHandleFor(expression.left.name, expression.left.span);
   if (handle) {
-    const buffer = context.nameFor(`${handle.name}_buffer`);
-    const base = context.nameFor(`${handle.name}_base`);
+    const buffer = localPointerHandleBufferName(handle, context);
+    const base = localPointerHandleBaseName(handle, context);
     if (expression.operator === "=") {
       const parts = devicePointerArgumentParts(expression.right, context);
       if (!parts) throw featureError("unsupported-pointer-assignment", "CUDA pointer assignment expects a modeled storage or shared pointer");

@@ -1251,9 +1251,34 @@ __global__ void nullablePointer(float* out, int n) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("var p_buffer: u32 = 4294967295u;");
-    expect(compiled.wgsl).toContain("var p_base: u32 = 0u;");
+    expect(compiled.wgsl).toMatch(/var p_\d+_buffer: u32 = 4294967295u;/u);
+    expect(compiled.wgsl).toMatch(/var p_\d+_base: u32 = 0u;/u);
     expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 0]);
+  });
+
+  it("keeps same-named local pointer handles distinct across C block scopes", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void scopedPointerHandles(float* out) {
+  if (threadIdx.x == 0) {
+    float *value = &out[0];
+    value += 0;
+    value[0] = 1.0f;
+  }
+  if (threadIdx.x == 0) {
+    float *value = &out[1];
+    value += 0;
+    value[0] = out[0] + 1.0f;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    const handles = [...compiled.wgsl.matchAll(/var (value_\d+_buffer): u32/gu)].map((match) => match[1]);
+    expect(new Set(handles).size).toBe(2);
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
   });
 
   it("supports conditional local read pointers derived from const storage", () => {
@@ -1373,7 +1398,7 @@ __global__ void byteReinterpret(int* out) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("var shared_words_buffer: u32");
+    expect(compiled.wgsl).toMatch(/var shared_words_\d+_buffer: u32/u);
     expect(compiled.wgsl).toContain("var<workgroup> scratch: array<atomic<u32>, 4>;");
     expect(compiled.wgsl).toContain("atomicLoad(&scratch");
     expect(compiled.wgsl).toContain("atomicStore(&scratch");
@@ -1387,7 +1412,7 @@ __global__ void storageByteReinterpret(const uchar* input, int* out) {
     out[0] = (*lane_ptr).x;
   }
 }`, { workgroupSize: [1, 1, 1] });
-    expect(storageCompiled.wgsl).toContain("var lane_ptr_buffer: u32");
+    expect(storageCompiled.wgsl).toMatch(/var lane_ptr_\d+_buffer: u32/u);
   });
 
   it("bitcasts float views over packed shared byte storage", () => {
@@ -1705,8 +1730,8 @@ __global__ void mutable_local_ptr(const float* a, float* b, float* out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
     expect([...mutableLocalPointerResult.buffers.out as Float32Array]).toEqual([2, 5]);
-    expect(mutableLocalPointer.wgsl).toContain("var p_buffer: u32");
-    expect(mutableLocalPointer.wgsl).toContain("p_buffer = 1u;");
+    expect(mutableLocalPointer.wgsl).toMatch(/var p_\d+_buffer: u32/u);
+    expect(mutableLocalPointer.wgsl).toMatch(/p_\d+_buffer = 1u;/u);
 
     const alignedPointer = compileCudaLiteKernel(`
 __global__ void aligned(float* x, float* out) {
@@ -4525,6 +4550,29 @@ __global__ void localHalfOverlay(uint *out, float *sum) {
     expect(compiled.wgsl).toContain("unpack2x16float");
     expect([...result.buffers.out as Uint32Array]).toEqual([0x40003c00, 0x44004200]);
     expect([...result.buffers.sum as Float32Array]).toEqual([10]);
+  });
+
+  it("packs half pointer views over shared byte storage into 16-bit lanes", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sharedByteHalfOverlay(float *out) {
+  __shared__ uchar scratch[4];
+  if (threadIdx.x == 0) {
+    half *view = (half *)&scratch[0];
+    view[0] = __float2half(1.0f);
+    view[1] = __float2half(2.0f);
+    out[0] = __half2float(view[0]);
+    out[1] = __half2float(view[1]);
+  }
+}`, { workgroupSize: [1, 1, 1], features: { "shader-f16": true }, f16Mode: "f32" });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("pack2x16float");
+    expect(compiled.wgsl).toContain("unpack2x16float");
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2]);
   });
 
   it("lowers generic pointer dereference lvalues and rebased kernel params", () => {
@@ -8189,8 +8237,8 @@ __global__ void apply(uint *out) {
     );
 
     expect(compiled.wgsl).toContain("var<storage, read> table: array<array<u32, 2>, 2>;");
-    expect(compiled.wgsl).toContain("var row_buffer: u32 = 1u;");
-    expect(compiled.wgsl).toContain("var row_base: u32 = ((u32(0) * 2u) + u32(0));");
+    expect(compiled.wgsl).toMatch(/var row_\d+_buffer: u32 = 1u;/u);
+    expect(compiled.wgsl).toMatch(/var row_\d+_base: u32 = \(\(u32\(0\) \* 2u\) \+ u32\(0\)\);/u);
     expect([...result.buffers.out as Uint32Array]).toEqual([3, 5]);
 
     const oneDimensional = compileCudaLiteKernel(`
@@ -8207,7 +8255,7 @@ __global__ void one_dim(uint *out) {
       },
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
-    expect(oneDimensional.wgsl).toContain("var row_base: u32 = u32(0);");
+    expect(oneDimensional.wgsl).toMatch(/var row_\d+_base: u32 = u32\(0\);/u);
     expect([...oneDimensionalResult.buffers.out as Uint32Array]).toEqual([13, 17]);
 
     const write = analyzeCudaLite(parseCudaLite(`
@@ -10230,8 +10278,8 @@ __global__ void address_math(uint* out, int n) {
 
     expect([...result.buffers.out as Uint32Array]).toEqual([5, 4, 3]);
     expect(compiled.wgsl).toContain("(((bg_uniforms.n + 4) - 1) / 4)");
-    expect(compiled.wgsl).toContain("var tile_base: u32 = u32(4);");
-    expect(compiled.wgsl).toContain("out[1] = u32(u32(tile_base));");
+    expect(compiled.wgsl).toMatch(/var tile_\d+_base: u32 = u32\(4\);/u);
+    expect(compiled.wgsl).toMatch(/out\[1\] = u32\(u32\(tile_\d+_base\)\);/u);
     expect(compiled.wgsl).toContain("regs[fill_regs_0][fill_regs_1] = 3.0;");
   });
 
