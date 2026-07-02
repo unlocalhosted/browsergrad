@@ -4621,6 +4621,43 @@ __global__ void textureSurfaceVectorHelperRoundtrip(cudaSurfaceObject_t surf, cu
     out[0] = value.x + value.y + value.z + value.w;
   }
 }`,
+  textureSurfaceConstantActiveLaneReturn: `
+__constant__ float c_surface_scale[4];
+
+__device__ float4 sample_constant_surface_vec(cudaTextureObject_t texArg, int lane) {
+  float4 value = tex2D<float4>(texArg, 0.5f, 0.5f);
+  return make_float4(
+    value.x * c_surface_scale[0] + (float)lane,
+    value.y * c_surface_scale[1] + (float)lane,
+    value.z * c_surface_scale[2] + (float)lane,
+    value.w * c_surface_scale[3] + (float)lane
+  );
+}
+
+__device__ void write_constant_surface_vec(cudaSurfaceObject_t surfaceArg, float4 value) {
+  surf2Dwrite(value, surfaceArg, 0, 0);
+}
+
+__device__ float4 read_constant_surface_vec(cudaSurfaceObject_t surfaceArg) {
+  return surf2Dread<float4>(surfaceArg, 0, 0);
+}
+
+__global__ void textureSurfaceConstantActiveLaneReturn(cudaSurfaceObject_t surf, cudaTextureObject_t tex, float *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    float4 value = sample_constant_surface_vec(tex, tid);
+    write_constant_surface_vec(surf, value);
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    float4 value = read_constant_surface_vec(surf);
+    out[0] = value.x + value.y;
+    out[1] = value.z + value.w;
+    out[2] = c_surface_scale[0] + c_surface_scale[3];
+    out[3] = 1.0f;
+  }
+}`,
   textureSurfaceActiveLaneReturnSideEffect: `
 __device__ float4 sample_return_surface_vec(cudaTextureObject_t texArg) {
   return tex2D<float4>(texArg, 0.5f, 0.5f);
@@ -10737,6 +10774,34 @@ const html = String.raw`<!doctype html>
             }),
             output: "surf",
             expectedOutput: { type: "Float32Array", data: [2, 3, 5, 7] },
+          },
+          {
+            name: "texture-surface:constant-active-lane-return",
+            source: SOURCES.textureSurfaceConstantActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+              constants: {
+                c_surface_scale: new Float32Array([10, 20, 30, 40]),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(4) },
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [86, 436, 50, 1] },
           },
           {
             name: "texture-surface:active-lane-return-side-effect",

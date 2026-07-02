@@ -263,6 +263,7 @@ export const textureScopeCases = [
   "texture:pointer-alias-atomic-pointer-array-minmax-active-lane-return-false-branch",
   "texture-surface:roundtrip",
   "texture-surface:vector-helper-roundtrip",
+  "texture-surface:constant-active-lane-return",
   "texture-surface:active-lane-return-side-effect",
   "texture-surface:vector-active-lane-return",
   "texture-surface:mixed-vector-active-lane-return",

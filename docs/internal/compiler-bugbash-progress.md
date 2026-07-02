@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T19:56:25Z
+Last updated: 2026-07-02T19:59:48Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -646,11 +646,13 @@ Current verified gates:
 - final pinned-output corpus fixture hardening: focused remaining slice `5/0/0`, expected-output `5`, skips `0`; full corpus fixture gate `98/0/0`, expected-output `98`, skips `0`; fixture tooling test passed
 - source/dist real-world verifier after final oracle pinning: compile/codegen audit hard fails `0`; source browser gate `453/0/0`, corpus fixtures `98/0/0`, expected-output `98`, auto-corpus `32/0/0`, skips `0`; dist browser gate `453/0/0`, same coverage, skips `0`
 - corpus hot perf gate after final oracle pinning: histogram/scalar repeat `2`, `4/0/0`, expected-output `4`, skips `0`; warm best `5.8ms` / `4.3ms`, speedup `261.97` / `296.28`
+- constant texture-to-surface active-lane probe: `texture-surface:constant-active-lane-return` is `1 passed / 0 failed / 0 skipped`; WebGPU smoke after constant texture-to-surface probe `291/0/0`, skips `0`; hot repeat `5/0/0`, best warm `4.4ms`, speedup `19.39`; test-scope passed
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Probed green | constant texture-to-surface active-lane side effects | real WebGPU smoke covered constants, texture reads, surface writes, vector side effects, and active-lane returns separately, but not a corpus-shaped path combining `__constant__` coefficients, helper texture vector read, pre-return surface vector write, post-barrier surface read, and stable pinned output | added `texture-surface:constant-active-lane-return` to e2e and smoke case set | focused case `1/0/0`, skips `0`; hot repeat `5/0/0`, best warm `4.4ms`, speedup `19.39`; test-scope passed |
 | Fixed | final real corpus pinned outputs | last 5 corpus fixtures still used dynamic generated CPU-reference comparison, and one `-Infinity` oracle showed fixture data passed through `JSON.stringify` would collapse non-finite numbers to `null` in browser e2e specs | pinned SobelTex, RoPE, packed RoPE, and llm.c attention query/key outputs; added fixture JS-literal serialization for `NaN`/`Infinity`/`-Infinity`; diff reports now include non-finite labels; raised expected-output baseline to `98` | focused remaining slice `5/0/0`, expected-output `5`, skips `0`; full corpus fixture gate `98/0/0`, expected-output `98`, skips `0`; `test:webgpu-fixtures` passed |
 | Probed green | real corpus pinned outputs | 24 real WebGPU corpus fixtures were executing but only compared against generated CPU reference output, so fixture regressions could still move both dynamic paths together without a stable pinned oracle | pinned expected outputs for deterministic LeetCUDA activations/vector kernels, llm.c residual/permute/softmax/matmul/layernorm cases, and CUTE transpose fixtures; raised expected-output baseline to `71` | LeetCUDA slice `46/0/0`, expected-output `35`; llm.c slice `28/0/0`, expected-output `17`; full corpus fixture gate `98/0/0`, expected-output `71`; all skips `0` |
 | Probed green | additional real corpus pinned outputs | 11 more simple deterministic fixtures still used only generated reference output: LeetCUDA nsight/interview kernels, cuda-samples `MatrixMulCUDA`, llm.c vectorized GELU and layernorm | pinned stable expected outputs and raised expected-output baseline to `82` | focused slice `11/0/0`, expected-output `11`; full corpus fixture gate `98/0/0`, expected-output `82`; all skips `0` |
@@ -1024,9 +1026,9 @@ Current added pointer/control cases:
 
 Smoke current: `276/0/0`.
 
-Full source e2e current: `430/0/0`.
+Full source e2e current: `453/0/0`.
 
-Verifier current: src `430/0/0`, dist `430/0/0`.
+Verifier current: src `453/0/0`, dist `453/0/0`.
 
 ## Remaining Probe Map
 
@@ -1035,7 +1037,7 @@ Probe these with fail-first real WebGPU fixtures:
 - Surface family:
   - surface writes before active-lane return, layered writes, helper layered vector writes, layered reads, 3D reads, layered/3D vector reads, surface vector read/write before active-lane return, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 surface vector write/read before active-lane return, mixed scalar/vector layered surface side effects, surface-read pointer-alias side effects, surface-read atomic pointer-alias side effects, surface atomic vector readback, surface atomic vector compound helper writes, surf3D helper multi-surface and guarded RHS probes, surf3D all-inactive guarded RHS, surf3D pointer-alias active/atomic vector probes, surf3D pointer-array select/active/compound/CAS/minmax, surface/surf1D/surf3D pointer-array false-branch selection, surface/surf1D/surf3D compound false-branch selection, surface/surf1D/surf3D CAS/minmax false-branch selection, and 3D vector writes fed by layered/3D texture vectors are now green; keep probing next corpus-shaped surface/texture pattern
 - Texture family:
-  - vector helper return, cast/coercion, active-lane pre-return read, atlas/volume guarded RHS, atlas/volume all-inactive guarded RHS, atlas pointer-array false-branch selection, pointer-array false-branch selection, texture/atlas compound false-branch selection, texture/atlas CAS/minmax false-branch selection, 2D and volume scalar/vector pointer-array active-lane false-branch selection, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 texture active-lane stores, texture-to-surface pre-return side effects, 2-lane/3-lane/4-lane texture-fed layered surface vector writes/reads, mixed scalar/vector texture-fed layered surface vector writes/reads, texture-fed layered surface vector writes, layered/3D texture vector reads feeding 3D surface vector writes, atlas/layered active-lane reads, deep helper vector stores, mixed scalar/vector texture stores, texture-fed pointer alias writes, texture-fed pointer alias atomics, atomic vector readback, atomic vector compound helper writes, and atomic vector member helper writes are now green; keep probing next corpus-shaped texture/storage pattern
+  - vector helper return, cast/coercion, active-lane pre-return read, atlas/volume guarded RHS, atlas/volume all-inactive guarded RHS, atlas pointer-array false-branch selection, pointer-array false-branch selection, texture/atlas compound false-branch selection, texture/atlas CAS/minmax false-branch selection, 2D and volume scalar/vector pointer-array active-lane false-branch selection, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 texture active-lane stores, texture-to-surface pre-return side effects, constant texture-to-surface active-lane reads/writes, 2-lane/3-lane/4-lane texture-fed layered surface vector writes/reads, mixed scalar/vector texture-fed layered surface vector writes/reads, texture-fed layered surface vector writes, layered/3D texture vector reads feeding 3D surface vector writes, atlas/layered active-lane reads, deep helper vector stores, mixed scalar/vector texture stores, texture-fed pointer alias writes, texture-fed pointer alias atomics, atomic vector readback, atomic vector compound helper writes, and atomic vector member helper writes are now green; keep probing next corpus-shaped texture/storage pattern
 - Pointer/vector family:
   - shared-byte reinterpret local pointers, typed aliases over byte roots, direct packed-byte shared writes, unaligned typed byte-storage overlays, dynamic shared vector alias-chain pointer arrays after active-lane returns, cuda-samples WMMA shared-memory aliases, selected-kernel reachability filtering for unused constants/textures/device globals/global `half` feature requirements, device-global vector pointer-array reads after active-lane returns, and lowered-IR pruning for unreachable helper bodies are now green; mixed local pointer-param + generic storage pointer helper still has explicit diagnostic and implementation support remains future work
 - Active-lane/control family:
