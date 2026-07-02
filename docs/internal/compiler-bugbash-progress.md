@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T17:34:12Z
+Last updated: 2026-07-02T17:42:34Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `430/0/0`, dist `430/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; unreachable helper feature/shared/atomic pollution fixes are green |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Unreachable helper f64/inline-asm compatibility diagnostics are now scoped to selected-kernel reachability: unused feature/asm helpers no longer poison selected kernels |
+| Active work item | Unreachable helper texture/surface diagnostics and texture input binding are now scoped to selected-kernel reachability |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -604,11 +604,14 @@ Current verified gates:
 - changed gate after unreachable grid-sync compatibility diagnostics: typecheck passed; compiler unit `430/0`; fixture tests passed; WebGPU smoke `281/0/0`; bugbash status active failures `0`; test-scope passed; lint passed
 - unreachable helper f64/inline-asm compatibility diagnostic fix: fail-first unit reproduced `unsupported-f64` and `unsupported-inline-asm` from unused helpers; focused unit slice `447/0`; `runtime:unreachable-feature-asm-compat-diagnostics` `1/0/0`; typecheck passed
 - changed gate after unreachable f64/inline-asm diagnostics: typecheck passed; compiler unit `431/0`; fixture tests passed; WebGPU smoke `282/0/0`; bugbash status active failures `0`; test-scope passed; lint passed
+- unreachable helper texture/surface diagnostic and binding fix: fail-first unit reproduced `unsupported-texture` / `unsupported-surface` from unused helpers, then exposed unused texture declarations still requiring CPU-reference texture input; focused unit slice `448/0`; `runtime:unreachable-texture-surface-compat-diagnostics` `1/0/0`; typecheck passed
+- changed gate after unreachable texture/surface diagnostics: typecheck passed; compiler unit `432/0`; fixture tests passed; WebGPU smoke `283/0/0`; bugbash status active failures `0`; test-scope passed; lint passed
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | unreachable helper texture/surface diagnostics and texture binding | unused device helpers containing unsupported texture/surface calls failed selected-kernel compilation; after suppressing those diagnostics, an unused global texture still forced missing CPU-reference texture input | texture/surface compatibility diagnostics now honor selected-kernel reachability, and lowered IR keeps only textures referenced from selected-kernel reachable bodies | fail-first unit; focused unit slice `448/0`; `runtime:unreachable-texture-surface-compat-diagnostics` `1/0/0`; WebGPU smoke `283/0/0`; lint passed |
 | Fixed | unreachable helper f64 and inline asm diagnostics | unused device helpers containing `double` params/locals/returns or unsupported inline PTX failed selected-kernel compilation with `unsupported-f64` / `unsupported-inline-asm`, even though selected kernels never called those helpers and no WGSL emitted them | f64 declaration/body checks and inline-asm compatibility diagnostics now honor selected-kernel reachability while still walking operands for ordinary lvalue/scalar validation | fail-first unit; focused unit slice `447/0`; `runtime:unreachable-feature-asm-compat-diagnostics` `1/0/0`; WebGPU smoke `282/0/0`; lint passed |
 | Fixed | unreachable helper cooperative grid-sync diagnostics | unused device helpers containing `grid.sync()` or `cg::sync(grid)` failed selected-kernel compilation with `unsupported-cooperative-groups`, even though selected kernels never called those helpers and no WGSL emitted them | cooperative grid-sync compatibility diagnostics now honor selected-kernel reachability while keeping arity/group validation intact | fail-first unit; focused unit slice `446/0`; `runtime:unreachable-grid-sync-compat-diagnostics` `1/0/0`; WebGPU smoke `281/0/0`; lint passed |
 | Fixed | unreachable helper CUDA runtime diagnostics | unused device helpers containing `cudaMemcpy` / `cudaDeviceSynchronize` failed selected-kernel compilation with `unsupported-cuda-runtime`, even though selected kernels never called those helpers and no WGSL emitted them | runtime/copy compatibility diagnostics now honor selected-kernel reachability while still walking arguments for ordinary validation | fail-first unit; focused unit slice `445/0`; `runtime:unreachable-runtime-compat-diagnostics` `1/0/0`; WebGPU smoke `280/0/0`; lint passed |

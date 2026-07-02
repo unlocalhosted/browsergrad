@@ -297,6 +297,19 @@ __global__ void selected(float *x) {
     x[0] += 2.0f;
   }
 }`,
+  unreachableTextureSurfaceCompatDiagnostics: `
+texture<float, cudaTextureType2D, cudaReadModeElementType> tex;
+
+__device__ void unused_texture_surface(float *out) {
+  out[0] = tex2D<double>(tex, 0.0f, 0.0f);
+  surf2Dwrite(out[0], out, 0, 0);
+}
+
+__global__ void selected(float *x) {
+  if (threadIdx.x == 0) {
+    x[0] += 2.0f;
+  }
+}`,
   recursiveDynamicLaunch: `
 __global__ void child(float *dst, int value) {
   if (threadIdx.x < 1) { dst[0] += (float)value; }
@@ -6091,6 +6104,24 @@ const html = String.raw`<!doctype html>
               "unused_double",
               "unused_inline_asm",
               "cp.async",
+            ],
+          },
+          {
+            name: "runtime:unreachable-texture-surface-compat-diagnostics",
+            source: SOURCES.unreachableTextureSurfaceCompatDiagnostics,
+            options: { kernelName: "selected", workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                x: new Float32Array([3]),
+              },
+            }),
+            output: "x",
+            expectedOutput: { type: "Float32Array", data: [5] },
+            wgslNotContains: [
+              "unused_texture_surface",
+              "texture_2d",
+              "surf2Dwrite",
             ],
           },
           {

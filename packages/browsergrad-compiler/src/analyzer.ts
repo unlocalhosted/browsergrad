@@ -603,12 +603,13 @@ export function lowerAnalyzedCudaLiteToKernelIr(
       .filter((fn) => reachableFunctionSpans.has(fn.span.start))
       .map((fn) => fn.body),
   ];
+  const textureNames = collectReferencedTextureNames(sharedDeclarationBodies);
   return {
     name: analysis.kernel.name,
     params: analysis.kernel.params,
     constants: analysis.constants,
     deviceGlobals: analysis.deviceGlobals,
-    textures: analysis.textures,
+    textures: analysis.textures.filter((texture) => textureNames.has(texture.name)),
     functions: analysis.functions,
     body: analysis.kernel.body,
     sharedDeclarations: collectSharedDeclarationsFromBodies(sharedDeclarationBodies, options),
@@ -1734,19 +1735,19 @@ function validateCallExpression(
     return { kind: "scalar", valueType: warpReductionReturnType(callName, info.valueType) };
   }
   if (isTextureReadCall(callName)) {
-    validateTextureRead(expression, callName, scope, diagnostics, walkExpression);
+    validateTextureRead(expression, callName, scope, diagnostics, walkExpression, compatibilityDiagnosticsReachable);
     if (requiresShaderF16(expression.templateValueType)) requiredFeatures.add("shader-f16");
     return expressionInfoForTextureRead(expression);
   }
   if (callName === "surf1Dread" || callName === "surf2Dread" || callName === "surf2DLayeredread" || callName === "surf3Dread") {
-    validateSurf2DRead(expression, callName, scope, diagnostics, walkExpression);
+    validateSurf2DRead(expression, callName, scope, diagnostics, walkExpression, compatibilityDiagnosticsReachable);
     const returnForm = callName === "surf1Dread"
       ? expression.args.length <= 2
       : callName === "surf2DLayeredread" || callName === "surf3Dread" ? expression.args.length <= 4 : expression.args.length <= 3;
     return returnForm ? expressionInfoForTextureRead(expression) : { kind: "scalar", valueType: "voidptr" };
   }
   if (callName === "surf2Dwrite" || callName === "surf1Dwrite" || callName === "surf2DLayeredwrite" || callName === "surf3Dwrite") {
-    validateSurf2DWrite(expression, callName, scope, diagnostics, walkExpression);
+    validateSurf2DWrite(expression, callName, scope, diagnostics, walkExpression, compatibilityDiagnosticsReachable);
     return { kind: "scalar", valueType: "float" };
   }
   if (callName === "sizeof" || callName === "alignof") {
@@ -2487,17 +2488,19 @@ function validateTextureRead(
   scope: Scope,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
+  compatibilityDiagnosticsReachable: boolean,
 ): void {
+  const textureDiagnostics = compatibilityDiagnosticsReachable ? diagnostics : [];
   if (!isSupportedTextureReadType(expression.templateValueType)) {
-    diagnostics.push(error("unsupported-texture", `${callName} currently supports float/int/uint/uchar, half, float2/3/4, int2/3/4, uint2/3/4, and half2 reads`, expression.span));
+    textureDiagnostics.push(error("unsupported-texture", `${callName} currently supports float/int/uint/uchar, half, float2/3/4, int2/3/4, uint2/3/4, and half2 reads`, expression.span));
   }
   const texture = expression.args[0];
   if (texture?.kind !== "identifier") {
-    diagnostics.push(error("unsupported-texture", `${callName} first argument must be a texture reference`, expression.span));
+    textureDiagnostics.push(error("unsupported-texture", `${callName} first argument must be a texture reference`, expression.span));
   } else {
     const symbol = lookupSymbol(texture.name, scope, texture.span);
     if (symbol?.kind !== "texture" && symbol?.valueType !== "texture2d") {
-      diagnostics.push(error("unsupported-texture", `${callName} target '${texture.name}' is not a texture reference`, texture.span));
+      textureDiagnostics.push(error("unsupported-texture", `${callName} target '${texture.name}' is not a texture reference`, texture.span));
     }
   }
   const coords = textureCoordinateArgs(expression, callName);
@@ -2512,7 +2515,9 @@ function validateSurf2DRead(
   scope: Scope,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
+  compatibilityDiagnosticsReachable: boolean,
 ): void {
+  const surfaceDiagnostics = compatibilityDiagnosticsReachable ? diagnostics : [];
   const is1D = callName === "surf1Dread";
   const hasZ = callName === "surf2DLayeredread" || callName === "surf3Dread";
   const returnForm = is1D ? expression.args.length <= 2 : hasZ ? expression.args.length <= 4 : expression.args.length <= 3;
@@ -2524,11 +2529,11 @@ function validateSurf2DRead(
   const surface = returnForm ? expression.args[0] : expression.args[1];
   const surfaceName = surface ? rootIdentifier(surface) : undefined;
   if (!surfaceName) {
-    diagnostics.push(error("unsupported-texture", returnForm ? "surf2Dread first argument must be a surface reference" : "surf2Dread second argument must be a surface reference", expression.span));
+    surfaceDiagnostics.push(error("unsupported-texture", returnForm ? "surf2Dread first argument must be a surface reference" : "surf2Dread second argument must be a surface reference", expression.span));
   } else {
     const symbol = lookupSymbol(surfaceName, scope, surface?.span ?? expression.span);
     if (symbol?.valueType !== "surface2d") {
-      diagnostics.push(error("unsupported-texture", `surf2Dread target '${surfaceName}' is not a surface reference`, surface?.span ?? expression.span));
+      surfaceDiagnostics.push(error("unsupported-texture", `surf2Dread target '${surfaceName}' is not a surface reference`, surface?.span ?? expression.span));
     }
   }
   const end = returnForm
@@ -2545,7 +2550,9 @@ function validateSurf2DWrite(
   scope: Scope,
   diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
+  compatibilityDiagnosticsReachable: boolean,
 ): void {
+  const surfaceDiagnostics = compatibilityDiagnosticsReachable ? diagnostics : [];
   const value = expression.args[0];
   const surface = expression.args[1];
   const xBytes = expression.args[2];
@@ -2558,11 +2565,11 @@ function validateSurf2DWrite(
   }
   const surfaceName = surface ? rootIdentifier(surface) : undefined;
   if (!surfaceName) {
-    diagnostics.push(error("unsupported-surface", "surf2Dwrite second argument must be a surface object", expression.span));
+    surfaceDiagnostics.push(error("unsupported-surface", "surf2Dwrite second argument must be a surface object", expression.span));
   } else {
     const symbol = lookupSymbol(surfaceName, scope, surface?.span ?? expression.span);
     if (symbol?.valueType !== "surface2d") {
-      diagnostics.push(error("unsupported-surface", `surf2Dwrite target '${surfaceName}' is not a cudaSurfaceObject_t parameter`, surface?.span ?? expression.span));
+      surfaceDiagnostics.push(error("unsupported-surface", `surf2Dwrite target '${surfaceName}' is not a cudaSurfaceObject_t parameter`, surface?.span ?? expression.span));
     }
   }
   if (xBytes) validateScalarOperand(walkExpression(xBytes, scope), xBytes.span, diagnostics);
@@ -3930,6 +3937,77 @@ function collectSharedDeclarationsFromBodies(
     }
   }
   return [...declarations.values()];
+}
+
+function collectReferencedTextureNames(
+  bodies: readonly (readonly CudaLiteStatement[])[],
+): ReadonlySet<string> {
+  const names = new Set<string>();
+  const walkExpression = (expression: CudaLiteExpression): void => {
+    if (expression.kind === "identifier") names.add(expression.name);
+    forEachExpressionChild(expression, walkExpression);
+  };
+  const walkStatements = (statements: readonly CudaLiteStatement[]): void => {
+    for (const statement of statements) {
+      switch (statement.kind) {
+        case "block":
+          walkStatements(statement.body);
+          break;
+        case "var":
+          if (statement.init) walkExpression(statement.init);
+          break;
+        case "dim3":
+          for (const arg of statement.args) walkExpression(arg);
+          break;
+        case "cooperative-group":
+          if (statement.partitionPredicate) walkExpression(statement.partitionPredicate);
+          break;
+        case "kernel-launch":
+          for (const arg of statement.grid) walkExpression(arg);
+          for (const arg of statement.block) walkExpression(arg);
+          for (const arg of statement.args) walkExpression(arg);
+          break;
+        case "asm":
+          for (const output of statement.outputs ?? (statement.output === undefined ? [] : [statement.output])) walkExpression(output);
+          for (const input of statement.inputs) walkExpression(input);
+          break;
+        case "expr":
+          walkExpression(statement.expression);
+          break;
+        case "if":
+          walkExpression(statement.condition);
+          walkStatements(statement.consequent);
+          if (statement.alternate) walkStatements(statement.alternate);
+          break;
+        case "for":
+          if (statement.init?.kind === "var") {
+            if (statement.init.init) walkExpression(statement.init.init);
+          } else if (statement.init) {
+            walkExpression(statement.init);
+          }
+          if (statement.condition) walkExpression(statement.condition);
+          if (statement.update) walkExpression(statement.update);
+          walkStatements(statement.body);
+          break;
+        case "while":
+          walkExpression(statement.condition);
+          walkStatements(statement.body);
+          break;
+        case "do-while":
+          walkStatements(statement.body);
+          walkExpression(statement.condition);
+          break;
+        case "return":
+          if (statement.value) walkExpression(statement.value);
+          break;
+        case "continue":
+        case "break":
+          break;
+      }
+    }
+  };
+  for (const body of bodies) walkStatements(body);
+  return names;
 }
 
 function resolvedSharedDimensions(
