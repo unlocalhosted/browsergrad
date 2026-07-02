@@ -251,6 +251,8 @@ export const textureScopeCases = [
   "texture-surface:uint4-vector-active-lane-return",
   "texture-surface:uint4-atomic-pointer-array-select",
   "texture-surface:uint4-atomic-pointer-array-select-false-branch",
+  "texture-surface:uint4-atomic-pointer-array-active-lane-return",
+  "texture-surface:uint4-atomic-pointer-array-active-lane-return-false-branch",
   "texture-surface:int4-vector-active-lane-return",
   "texture-surface:volume-vector-active-lane-return",
   "texture-surface:volume-active-lane-guarded-rhs",
