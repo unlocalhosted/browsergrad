@@ -22,7 +22,7 @@ from ._ir import (
     UOp, OP_WHERE, OP_CONST, OP_CUSTOM, OP_REDUCE, OP_DIV,
 )
 from ._tensor_proxy import (
-    TensorProxy, _BackwardCtx, _should_track, _to_proxy, from_numpy,
+    TensorProxy, _BackwardCtx, _should_track, _to_proxy, from_numpy, where,
 )
 from ._errors import ShapeError
 
@@ -74,6 +74,16 @@ def gelu(x: TensorProxy) -> TensorProxy:
     # 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
     c = (2.0 / np.pi) ** 0.5
     return 0.5 * x * (_to_proxy(1.0, x._get_session()) + tanh(_to_proxy(c, x._get_session()) * (x + 0.044715 * x * x * x)))
+
+
+def silu(x: TensorProxy) -> TensorProxy:
+    """SiLU / swish: x * sigmoid(x)."""
+    return x * sigmoid(x)
+
+
+def leaky_relu(x: TensorProxy, negative_slope: float = 0.01) -> TensorProxy:
+    """Leaky ReLU: x for positive values, negative_slope * x otherwise."""
+    return where(x > 0, x, x * float(negative_slope))
 
 
 # ---------------------------------------------------------------------------
@@ -567,6 +577,8 @@ __all__ = [
     "sigmoid",
     "tanh",
     "gelu",
+    "silu",
+    "leaky_relu",
     "softmax",
     "log_softmax",
     "cross_entropy",

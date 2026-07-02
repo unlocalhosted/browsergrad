@@ -627,6 +627,108 @@ class TensorProxy:
     def pow(self, exponent: Any) -> "TensorProxy":
         return self ** exponent
 
+    def sin(self) -> "TensorProxy":
+        def _sin_forward(x_arr: np.ndarray) -> np.ndarray:
+            return np.sin(x_arr)
+
+        uop = UOp(
+            op=OP_CUSTOM,
+            inputs=(self._uop,),
+            shape=self._uop.shape,
+            dtype=self._uop.dtype,
+            arg={"fn": _sin_forward, "captures": (), "name": "sin"},
+        )
+
+        def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+            (x_arr,) = ins
+            return ((dy * np.cos(x_arr)).astype(x_arr.dtype, copy=False),)
+
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
+        return TensorProxy(uop, session=self._get_session(),
+                           requires_grad=requires, ctx=ctx)
+
+    def cos(self) -> "TensorProxy":
+        def _cos_forward(x_arr: np.ndarray) -> np.ndarray:
+            return np.cos(x_arr)
+
+        uop = UOp(
+            op=OP_CUSTOM,
+            inputs=(self._uop,),
+            shape=self._uop.shape,
+            dtype=self._uop.dtype,
+            arg={"fn": _cos_forward, "captures": (), "name": "cos"},
+        )
+
+        def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+            (x_arr,) = ins
+            return ((-dy * np.sin(x_arr)).astype(x_arr.dtype, copy=False),)
+
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
+        return TensorProxy(uop, session=self._get_session(),
+                           requires_grad=requires, ctx=ctx)
+
+    def sign(self) -> "TensorProxy":
+        def _sign_forward(x_arr: np.ndarray) -> np.ndarray:
+            return np.sign(x_arr)
+
+        uop = UOp(
+            op=OP_CUSTOM,
+            inputs=(self._uop,),
+            shape=self._uop.shape,
+            dtype=self._uop.dtype,
+            arg={"fn": _sign_forward, "captures": (), "name": "sign"},
+        )
+
+        def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+            (x_arr,) = ins
+            return (np.zeros_like(x_arr),)
+
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
+        return TensorProxy(uop, session=self._get_session(),
+                           requires_grad=requires, ctx=ctx)
+
+    def clamp(self, min: Any = None, max: Any = None) -> "TensorProxy":
+        if min is None and max is None:
+            raise ValueError("clamp: at least one of min or max must be provided")
+        min_value = None if min is None else float(min)
+        max_value = None if max is None else float(max)
+        if min_value is not None and max_value is not None and min_value > max_value:
+            raise ValueError(f"clamp: min {min_value} must be <= max {max_value}")
+
+        def _clamp_forward(x_arr: np.ndarray) -> np.ndarray:
+            return np.clip(x_arr, min_value, max_value)
+
+        uop = UOp(
+            op=OP_CUSTOM,
+            inputs=(self._uop,),
+            shape=self._uop.shape,
+            dtype=self._uop.dtype,
+            arg={"fn": _clamp_forward, "captures": (), "name": "clamp"},
+        )
+
+        def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+            (x_arr,) = ins
+            mask = np.ones_like(x_arr, dtype=bool)
+            if min_value is not None:
+                mask &= x_arr >= min_value
+            if max_value is not None:
+                mask &= x_arr <= max_value
+            return ((dy * mask).astype(x_arr.dtype, copy=False),)
+
+        requires = _should_track(self)
+        ctx = _BackwardCtx(fn=_bw, input_proxies=(self,)) if requires else None
+        return TensorProxy(uop, session=self._get_session(),
+                           requires_grad=requires, ctx=ctx)
+
+    def clip(self, min: Any = None, max: Any = None) -> "TensorProxy":
+        return self.clamp(min=min, max=max)
+
+    def clamp_min(self, min: Any) -> "TensorProxy":
+        return self.clamp(min=min)
+
     def _reduce(self, op: str, axis: Any = None, keepdims: bool = False) -> "TensorProxy":
         # Normalize axis to a tuple or None.
         if axis is None:
@@ -1360,6 +1462,14 @@ def where(condition: Any, a: Any, b: Any) -> "TensorProxy":
                        requires_grad=requires, ctx=ctx)
 
 
+def minimum(a: Any, b: Any) -> "TensorProxy":
+    first_proxy = next((v for v in (a, b) if isinstance(v, TensorProxy)), None)
+    sess = first_proxy._get_session() if first_proxy is not None else None
+    lhs = _to_proxy(a, sess)
+    rhs = _to_proxy(b, sess)
+    return where(lhs <= rhs, lhs, rhs)
+
+
 __all__ = [
     "TensorProxy",
     "no_grad",
@@ -1375,4 +1485,5 @@ __all__ = [
     "cat",
     "stack",
     "where",
+    "minimum",
 ]

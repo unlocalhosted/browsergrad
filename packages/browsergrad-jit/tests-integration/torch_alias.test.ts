@@ -320,6 +320,121 @@ y.backward()
     expect(result.grad[1]).toBeCloseTo(1 / 6, 6);
   });
 
+  it("supports eager-compatible math, clamp, and activation aliases", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      sin: number[];
+      cos: number[];
+      rsqrt: number[];
+      clamp: number[];
+      clip: number[];
+      clampMin: number[];
+      clampGrad: number[];
+      sign: number[];
+      minimum: number[];
+      minGradA: number[];
+      minGradB: number[];
+      silu: number[];
+      leaky: number[];
+      moduleLeaky: number[];
+      moduleFlatShape: number[];
+      activationGrad: number[];
+      caps: Record<string, boolean>;
+    }>(`
+import browsergrad_jit as bg
+bg.install_torch_alias()
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import numpy as np
+
+trig = torch.tensor([0.0, np.pi / 2], requires_grad=True)
+c = torch.tensor([-2.0, -0.5, 0.0, 2.0], requires_grad=True)
+(c.clamp(min=-1.0, max=1.0).sum() + c.sign().sum()).backward()
+
+a = torch.tensor([1.0, 4.0], requires_grad=True)
+b = torch.tensor([2.0, 3.0], requires_grad=True)
+mn = torch.minimum(a, b)
+mn.sum().backward()
+
+act = torch.tensor([-1.0, 0.0, 2.0], requires_grad=True)
+functional_leaky = F.leaky_relu(act, negative_slope=0.2)
+module_leaky = nn.LeakyReLU(negative_slope=0.3)(act)
+(functional_leaky.sum() + module_leaky.sum()).backward()
+
+flat = nn.Flatten(start_dim=1)(torch.tensor(np.arange(24, dtype=np.float32).reshape(2, 3, 4)))
+
+{
+  "sin": torch.sin(trig).numpy().round(6).tolist(),
+  "cos": torch.cos(trig).numpy().round(6).tolist(),
+  "rsqrt": torch.rsqrt(torch.tensor([4.0, 9.0])).numpy().round(6).tolist(),
+  "clamp": c.clamp(min=-1.0, max=1.0).numpy().tolist(),
+  "clip": c.clip(min=-0.5, max=0.5).numpy().tolist(),
+  "clampMin": c.clamp_min(0.0).numpy().tolist(),
+  "clampGrad": c.grad.numpy().tolist(),
+  "sign": c.sign().numpy().tolist(),
+  "minimum": mn.numpy().tolist(),
+  "minGradA": a.grad.numpy().tolist(),
+  "minGradB": b.grad.numpy().tolist(),
+  "silu": F.silu(torch.tensor([-1.0, 0.0, 1.0])).numpy().round(6).tolist(),
+  "leaky": functional_leaky.numpy().tolist(),
+  "moduleLeaky": module_leaky.numpy().tolist(),
+  "moduleFlatShape": list(flat.shape),
+  "activationGrad": act.grad.numpy().round(6).tolist(),
+  "caps": {
+    "torch.sin": hasattr(torch, "sin"),
+    "torch.cos": hasattr(torch, "cos"),
+    "torch.rsqrt": hasattr(torch, "rsqrt"),
+    "torch.minimum": hasattr(torch, "minimum"),
+    "Tensor.clamp": hasattr(c, "clamp"),
+    "Tensor.clip": hasattr(c, "clip"),
+    "Tensor.clamp_min": hasattr(c, "clamp_min"),
+    "Tensor.sign": hasattr(c, "sign"),
+    "F.silu": hasattr(F, "silu"),
+    "F.leaky_relu": hasattr(F, "leaky_relu"),
+    "nn.LeakyReLU": hasattr(nn, "LeakyReLU"),
+    "nn.Flatten": hasattr(nn, "Flatten"),
+  },
+}
+`);
+    expect(result.sin).toEqual([0, 1]);
+    expect(result.cos[0]).toBe(1);
+    expect(Math.abs(result.cos[1]!)).toBeLessThan(1e-5);
+    expect(result.rsqrt[0]).toBe(0.5);
+    expect(result.rsqrt[1]).toBeCloseTo(1 / 3, 6);
+    expect(result.clamp).toEqual([-1, -0.5, 0, 1]);
+    expect(result.clip).toEqual([-0.5, -0.5, 0, 0.5]);
+    expect(result.clampMin).toEqual([0, 0, 0, 2]);
+    expect(result.clampGrad).toEqual([0, 1, 1, 0]);
+    expect(result.sign).toEqual([-1, -1, 0, 1]);
+    expect(result.minimum).toEqual([1, 3]);
+    expect(result.minGradA).toEqual([1, 0]);
+    expect(result.minGradB).toEqual([0, 1]);
+    expect(result.silu[0]).toBeCloseTo(-0.268941, 6);
+    expect(result.silu[1]).toBe(0);
+    expect(result.silu[2]).toBeCloseTo(0.731059, 6);
+    expect(result.leaky[0]).toBeCloseTo(-0.2, 6);
+    expect(result.leaky.slice(1)).toEqual([0, 2]);
+    expect(result.moduleLeaky[0]).toBeCloseTo(-0.3, 6);
+    expect(result.moduleLeaky.slice(1)).toEqual([0, 2]);
+    expect(result.moduleFlatShape).toEqual([2, 12]);
+    expect(result.activationGrad).toEqual([0.5, 0.5, 2]);
+    expect(result.caps).toEqual({
+      "torch.sin": true,
+      "torch.cos": true,
+      "torch.rsqrt": true,
+      "torch.minimum": true,
+      "Tensor.clamp": true,
+      "Tensor.clip": true,
+      "Tensor.clamp_min": true,
+      "Tensor.sign": true,
+      "F.silu": true,
+      "F.leaky_relu": true,
+      "nn.LeakyReLU": true,
+      "nn.Flatten": true,
+    });
+  });
+
   it("supports PyTorch where and like-factory aliases", async () => {
     const target = await getJitTarget();
     const result = await target.run<{

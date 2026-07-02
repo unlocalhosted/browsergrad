@@ -312,6 +312,19 @@ class GELU(Module):
         return F.gelu(x)
 
 
+class SiLU(Module):
+    def forward(self, x: TensorProxy) -> TensorProxy:
+        return F.silu(x)
+
+
+class LeakyReLU(Module):
+    def __init__(self, negative_slope: float = 0.01) -> None:
+        super().__init__()
+        self.negative_slope = negative_slope
+    def forward(self, x: TensorProxy) -> TensorProxy:
+        return F.leaky_relu(x, negative_slope=self.negative_slope)
+
+
 class Softmax(Module):
     def __init__(self, dim: int = -1) -> None:
         super().__init__()
@@ -326,6 +339,15 @@ class Dropout(Module):
         self.p = p
     def forward(self, x: TensorProxy) -> TensorProxy:
         return F.dropout(x, p=self.p, training=self.training)
+
+
+class Flatten(Module):
+    def __init__(self, start_dim: int = 1, end_dim: int = -1) -> None:
+        super().__init__()
+        self.start_dim = start_dim
+        self.end_dim = end_dim
+    def forward(self, x: TensorProxy) -> TensorProxy:
+        return x.flatten(start_dim=self.start_dim, end_dim=self.end_dim)
 
 
 class BatchNorm1d(Module):
@@ -571,8 +593,11 @@ __all__ = [
     "Sigmoid",
     "Tanh",
     "GELU",
+    "SiLU",
+    "LeakyReLU",
     "Softmax",
     "Dropout",
+    "Flatten",
     "BatchNorm1d",
     "Sequential",
     "MSELoss",

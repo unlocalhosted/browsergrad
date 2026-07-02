@@ -90,6 +90,7 @@ from ._tensor_proxy import (
     cat,
     stack,
     where,
+    minimum as _minimum,
 )
 from ._buffer_table import BufferTable
 from ._errors import (
@@ -495,6 +496,22 @@ def pow(input, exponent):
     return input ** exponent
 
 
+def sin(x):
+    return x.sin()
+
+
+def cos(x):
+    return x.cos()
+
+
+def rsqrt(x):
+    return x ** -0.5
+
+
+def minimum(a, b):
+    return _minimum(a, b)
+
+
 def sum(x, dim=None, axis=None, keepdim=False, keepdims=False):
     return x.sum(dim=dim, axis=axis, keepdim=keepdim, keepdims=keepdims)
 
@@ -567,11 +584,11 @@ __version__ = "${pkg.version}"
 __all__ = [
     "TensorProxy", "Tensor",
     "tensor", "zeros", "ones", "randn", "arange", "from_numpy",
-    "zeros_like", "ones_like", "cat", "stack", "where",
+    "zeros_like", "ones_like", "cat", "stack", "where", "minimum",
     "Session", "get_default_session", "set_default_session", "new_session",
     "manual_seed", "no_grad", "inference_mode",
     "sigmoid", "matmul", "mm", "bmm", "exp", "log", "tanh", "abs",
-    "sqrt", "pow",
+    "sqrt", "pow", "sin", "cos", "rsqrt",
     "sum", "mean", "argmax", "reshape", "view", "flatten", "squeeze",
     "unsqueeze", "transpose", "permute", "softmax", "log_softmax",
     "save", "load",
