@@ -120,6 +120,9 @@ export const storageScopeCases = [
   "storage:cross-space-vector-alias-consistency",
   "storage:conditional-vector-lane-pointer-write",
   "storage:helper-pointer-array-selected-args",
+  "storage:active-lane-helper-pointer-array-selected-args",
+  "storage:active-lane-helper-pointer-array-selected-args-same-target",
+  "storage:active-lane-helper-pointer-array-selected-args-all-inactive",
 ];
 
 export const atomicScopeCases = [

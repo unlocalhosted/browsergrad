@@ -665,6 +665,33 @@ __global__ void active_lane_pointer_array_assignment(uint4* out, uint4* shadow, 
     expect(compiled.wgsl).not.toContain("select(slots[");
   });
 
+  it("keeps active-lane pointer-array helper args behind the active guard", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ void write_two_active_selected_ptrs(float *a, float *b, float addA, float addB) {
+  a[0] = a[0] + addA;
+  b[0] = b[0] + addB;
+}
+
+__global__ void active_lane_helper_pointer_array_selected_args(float4 *values, int limit, int pickRight) {
+  int tid = threadIdx.x;
+  float *lanes = reinterpret_cast<float*>(values);
+  for (int step = 0; step < 2; step++) {
+    if (tid >= limit) return;
+    __syncthreads();
+    float *ptrs[2];
+    ptrs[0] = lanes + tid;
+    ptrs[1] = lanes + tid + 4;
+    write_two_active_selected_ptrs(ptrs[0], ptrs[pickRight != 0 ? 1 : 0], (float)(10 + step), (float)(20 + step));
+    __syncthreads();
+  }
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toContain("if (bg_barrier_loop_active_");
+    expect(compiled.wgsl).toContain("write_two_active_selected_ptrs");
+    expect(compiled.wgsl).not.toContain("select(ptrs");
+  });
+
   it("preserves scalar-to-vector pointer alias byte offsets", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ void bump_roundtrip_vec(float4* out, int idx, float4 delta) {

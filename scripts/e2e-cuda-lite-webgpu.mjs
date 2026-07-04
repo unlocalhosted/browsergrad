@@ -2846,6 +2846,27 @@ __global__ void helperPointerArraySelectedArgs(float4 *values, float *out) {
     write_two_selected_ptrs(ptrs[0], ptrs[1], out);
   }
 }`,
+  activeLaneHelperPointerArraySelectedArgs: `
+__device__ void write_two_active_selected_ptrs(float *a, float *b, float addA, float addB) {
+  a[0] = a[0] + addA;
+  b[0] = b[0] + addB;
+}
+
+__global__ void activeLaneHelperPointerArraySelectedArgs(float4 *values, int limit, int pickRight) {
+  int tid = threadIdx.x;
+  float *lanes = reinterpret_cast<float*>(values);
+  for (int step = 0; step < 2; step++) {
+    if (tid >= limit) {
+      return;
+    }
+    __syncthreads();
+    float *ptrs[2];
+    ptrs[0] = lanes + tid;
+    ptrs[1] = lanes + tid + 4;
+    write_two_active_selected_ptrs(ptrs[0], ptrs[pickRight != 0 ? 1 : 0], (float)(10 + step), (float)(20 + step));
+    __syncthreads();
+  }
+}`,
   systemAtomicAliases: `
 __global__ void systemAtomicAliases(int *x, int *out) {
   if (threadIdx.x == 0) {
@@ -10141,6 +10162,48 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [12, 27] },
+          },
+          {
+            name: "storage:active-lane-helper-pointer-array-selected-args",
+            source: SOURCES.activeLaneHelperPointerArraySelectedArgs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                values: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+              },
+              scalars: { limit: 3, pickRight: 1 },
+            }),
+            output: "values",
+            expectedOutput: { type: "Float32Array", data: [22, 23, 24, 4, 46, 47, 48, 8] },
+          },
+          {
+            name: "storage:active-lane-helper-pointer-array-selected-args-same-target",
+            source: SOURCES.activeLaneHelperPointerArraySelectedArgs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                values: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+              },
+              scalars: { limit: 3, pickRight: 0 },
+            }),
+            output: "values",
+            expectedOutput: { type: "Float32Array", data: [63, 64, 65, 4, 5, 6, 7, 8] },
+          },
+          {
+            name: "storage:active-lane-helper-pointer-array-selected-args-all-inactive",
+            source: SOURCES.activeLaneHelperPointerArraySelectedArgs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                values: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+              },
+              scalars: { limit: 0, pickRight: 1 },
+            }),
+            output: "values",
+            expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4, 5, 6, 7, 8] },
           },
           {
             name: "atomic:system-aliases",
