@@ -50,7 +50,7 @@ const failFast = args.get("--fail-fast") === "true";
 const forbidSkips = args.get("--forbid-skips") === "true";
 const compileOnly = args.get("--compile-only") === "true";
 const progressPath = args.get("--progress-file");
-const profileCase = args.get("--profile-case");
+const profileCases = parseCommaSeparatedList(args.get("--profile-case") ?? "");
 const onlyAutoCorpusSmoke = args.get("--auto-corpus-smoke-only") === "true";
 const onlyCorpusFixtures = args.get("--corpus-fixtures-only") === "true";
 const autoCorpusSmokeCache = args.get("--auto-corpus-smoke-cache") === "true";
@@ -5999,7 +5999,7 @@ const html = String.raw`<!doctype html>
       const COMPILE_ONLY = ${JSON.stringify(compileOnly)};
       const PROGRESS = ${JSON.stringify(progress)};
       const FAIL_FAST = ${JSON.stringify(failFast)};
-      const PROFILE_CASE = ${JSON.stringify(profileCase ?? "")};
+      const PROFILE_CASES = new Set(${JSON.stringify(profileCases)});
       const ONLY_AUTO_CORPUS_SMOKE = ${JSON.stringify(onlyAutoCorpusSmoke)};
       const ONLY_CORPUS_FIXTURES = ${JSON.stringify(onlyCorpusFixtures)};
       const DEVICE_RECYCLE_INTERVAL = 128;
@@ -12806,7 +12806,7 @@ const html = String.raw`<!doctype html>
       }
 
       function shouldProfileCase(spec) {
-        return PROFILE_CASE === "true" || PROFILE_CASE === "all" || PROFILE_CASE === spec.name;
+        return PROFILE_CASES.has("true") || PROFILE_CASES.has("all") || PROFILE_CASES.has(spec.name);
       }
 
       function compareOutputs(expected, actual, outputNames, spec) {
