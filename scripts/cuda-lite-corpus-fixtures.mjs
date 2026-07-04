@@ -214,6 +214,23 @@ export const cudaLiteCorpusExecutionFixtures = [
     expectedOutput: { type: "Float32Array", data: [11, 22, 33, 44] },
   },
   {
+    sourceKey: "corpusCudaSamplesSimpleAtomicIntrinsics",
+    caseName: "corpus:cuda-samples:simpleAtomicIntrinsics",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/0_Introduction/simpleAtomicIntrinsics/simpleAtomicIntrinsics_kernel.cuh",
+    kernelName: "testKernel",
+    workgroupSize: [1, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    input: {
+      buffers: {
+        g_odata: { type: "Int32Array", data: [0, 0, 7, -5, 5, 0, 0, -1, 15, 2, 11] },
+      },
+      scalars: {},
+    },
+    output: "g_odata",
+    expectedOutput: { type: "Int32Array", data: [10, -10, 0, 0, 0, 1, 137, 0, 7, 3, 11] },
+  },
+  {
     sourceKey: "corpusCudaSamplesIncKernel",
     caseName: "corpus:cuda-samples:incKernel",
     corpusId: "cuda-samples",
