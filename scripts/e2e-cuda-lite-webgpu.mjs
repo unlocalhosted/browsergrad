@@ -9106,6 +9106,25 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Float32Array", data: [11, 13, 17, 19, 24, 30, 32, 38, 2] },
           },
           {
+            name: "surface:surf3d-helper-vector-multi-surface-guarded-rhs-all-inactive",
+            source: SOURCES.surface3DHelperVectorMultiSurfaceGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0]),
+                out: new Float32Array(9),
+              },
+              surfaces: {
+                first: { width: 4, height: 2, data: new Float32Array([0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8]) },
+                second: { width: 4, height: 2, data: new Float32Array([0, 0, 0, 0, 0, 0, 0, 0, 11, 13, 17, 19, 23, 29, 31, 37]) },
+              },
+              scalars: { N: 0, pick: 1 },
+            }),
+            output: "counter",
+            expectedOutput: { type: "Uint32Array", data: [0, 0] },
+          },
+          {
             name: "surface:surf3d-active-lane-guarded-rhs",
             source: SOURCES.surface3DActiveLaneGuardedRhs,
             options: { workgroupSize: [4, 1, 1] },
