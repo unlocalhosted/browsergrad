@@ -3021,6 +3021,19 @@ __global__ void byteRootPointerArrayDiffIndexOnce(uchar *bytes, uint *counter, i
   summary[0] = ptrs[byte_pointer_array_diff_index_helper(counter)] - reinterpret_cast<float*>(bytes + 4);
   summary[1] = (int)counter[0];
 }`,
+  byteRootVectorPointerArrayDiffIndexOnce: `
+__device__ uint byte_vector_pointer_array_diff_index_helper(uint *counter) {
+  atomicAdd(counter, 1u);
+  return 1u;
+}
+
+__global__ void byteRootVectorPointerArrayDiffIndexOnce(uchar *bytes, uint *counter, int *summary) {
+  float4 *ptrs[2];
+  ptrs[0] = reinterpret_cast<float4*>(bytes + 16);
+  ptrs[1] = reinterpret_cast<float4*>(bytes + 48);
+  summary[0] = ptrs[byte_vector_pointer_array_diff_index_helper(counter)] - reinterpret_cast<float4*>(bytes + 16);
+  summary[1] = (int)counter[0];
+}`,
   systemAtomicAliases: `
 __global__ void systemAtomicAliases(int *x, int *out) {
   if (threadIdx.x == 0) {
@@ -10573,6 +10586,21 @@ const html = String.raw`<!doctype html>
             input: () => ({
               buffers: {
                 bytes: new Uint32Array(4),
+                counter: new Uint32Array([10]),
+                summary: new Int32Array(2),
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Int32Array", data: [2, 11] },
+          },
+          {
+            name: "storage:byte-root-vector-pointer-array-diff-index-once",
+            source: SOURCES.byteRootVectorPointerArrayDiffIndexOnce,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                bytes: new Uint32Array(16),
                 counter: new Uint32Array([10]),
                 summary: new Int32Array(2),
               },

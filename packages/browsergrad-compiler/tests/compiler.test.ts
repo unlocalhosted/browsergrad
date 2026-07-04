@@ -888,6 +888,24 @@ __global__ void byte_root_pointer_array_diff_index_once(uchar *bytes, uint *coun
     expect(compiled.wgsl).toMatch(/summary\[0\] = i32\(select\(0, select\(.+ \/ 4\), \(ptrs_buffer\[.+\] == 0u\)\), \(ptrs_buffer\[.+\] == 0u\)\)\);/u);
   });
 
+  it("scales byte-root vector pointer-array differences by vector byte size", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ uint byte_vector_pointer_array_diff_index_helper(uint *counter) {
+  atomicAdd(counter, 1u);
+  return 1u;
+}
+
+__global__ void byte_root_vector_pointer_array_diff_index_once(uchar *bytes, uint *counter, int *summary) {
+  float4 *ptrs[2];
+  ptrs[0] = reinterpret_cast<float4*>(bytes + 16);
+  ptrs[1] = reinterpret_cast<float4*>(bytes + 48);
+  summary[0] = ptrs[byte_vector_pointer_array_diff_index_helper(counter)] - reinterpret_cast<float4*>(bytes + 16);
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl.match(/\bbyte_vector_pointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
+    expect(compiled.wgsl).toMatch(/summary\[0\] = i32\(select\(0, select\(.+ \/ 16\), \(ptrs_buffer\[.+\] == 0u\)\), \(ptrs_buffer\[.+\] == 0u\)\)\);/u);
+  });
+
   it("preserves scalar-to-vector pointer alias byte offsets", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ void bump_roundtrip_vec(float4* out, int idx, float4 delta) {
