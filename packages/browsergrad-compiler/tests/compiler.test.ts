@@ -7932,6 +7932,24 @@ __global__ void conditionalLocalVectorMemberLvalue(uint4 *storage, uint *out, in
     expect(compiled.wgsl).not.toContain("select(0u, conditional_local_vector_member_lvalue_helper_with_pointer_side_effect");
   });
 
+  it("preserves conditional helper-call laziness in atomic addresses", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint conditional_atomic_address_helper_with_pointer_side_effect(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__global__ void conditionalAtomicAddress(uint *storage, uint *out, int enabled) {
+  uint old = atomicAdd(storage + (enabled != 0 ? conditional_atomic_address_helper_with_pointer_side_effect(storage, 7u) : 0u), 5u);
+  out[0] = storage[0];
+  out[1] = storage[1];
+  out[2] = old;
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toContain("conditional_atomic_address_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0u, conditional_atomic_address_helper_with_pointer_side_effect");
+  });
+
   it("preserves atomic side effects before loop returns lowered for barriers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomicReturnSideEffectBarrier(uint *counter, uint *out, int N) {

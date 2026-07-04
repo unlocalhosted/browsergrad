@@ -66,6 +66,8 @@ export const storageScopeCases = [
   "storage:conditional-helper-pointer-init-false-branch",
   "storage:conditional-helper-vector-member-lvalue",
   "storage:conditional-helper-vector-member-lvalue-false-branch",
+  "storage:conditional-helper-atomic-address",
+  "storage:conditional-helper-atomic-address-false-branch",
   "storage:vector-pointer-memory-view",
   "storage:vector-cast-dynamic-base-read",
   "helpers:vector-cache-hint-dynamic-read",

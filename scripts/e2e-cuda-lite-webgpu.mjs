@@ -2611,6 +2611,26 @@ __global__ void conditionalHelperVectorMemberLvalue(uint4 *left, uint *summary, 
     summary[1] = second.x + second.y + second.z + second.w;
   }
 }`,
+  conditionalHelperAtomicAddress: `
+__device__ uint conditional_atomic_address_helper_rmw(uint *ptr, uint lane, uint add) {
+  atomicAdd(ptr + lane, add);
+  return 1u;
+}
+
+__global__ void conditionalHelperAtomicAddress(uint4 *left, uint *summary, int useHelper) {
+  int tid = threadIdx.x;
+  if (tid == 0) {
+    left[0] = make_uint4(10u, 20u, 30u, 40u);
+  }
+  __syncthreads();
+  if (tid == 0) {
+    uint *ptr = reinterpret_cast<uint*>(left);
+    uint old = atomicAdd(ptr + (useHelper != 0 ? conditional_atomic_address_helper_rmw(ptr, 0u, 7u) : 0u), 5u);
+    uint4 first = left[0];
+    summary[0] = first.x + first.y + first.z + first.w;
+    summary[1] = old;
+  }
+}`,
   branchAssignedPointerAtomic: `
 __global__ void branchAssignedPointerAtomic(uint *left, uint *right, uint *out, int pickRight) {
   uint *ptr = NULL;
@@ -7943,6 +7963,36 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [89, 260, 0, 0] },
+          },
+          {
+            name: "storage:conditional-helper-atomic-address",
+            source: SOURCES.conditionalHelperAtomicAddress,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                left: new Uint32Array(16),
+                summary: new Uint32Array(4),
+              },
+              scalars: { useHelper: 1 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [112, 20, 0, 0] },
+          },
+          {
+            name: "storage:conditional-helper-atomic-address-false-branch",
+            source: SOURCES.conditionalHelperAtomicAddress,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                left: new Uint32Array(16),
+                summary: new Uint32Array(4),
+              },
+              scalars: { useHelper: 0 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [105, 10, 0, 0] },
           },
           {
             name: "storage:vector-pointer-memory-view",
