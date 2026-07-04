@@ -3203,6 +3203,17 @@ function emitAssignmentWithLazyConditionalSideEffectRhs(
   const split = splitLazyConditionalSideEffectExpression(expression.right, context);
   if (!split) return undefined;
   const prefix = indent(indentLevel);
+  const conditionPointerArrayIndex = firstSideEffectingPointerArrayIndexExpression(split.condition, context)?.index;
+  if (conditionPointerArrayIndex) {
+    const tempName = `bg_pointer_array_index_${conditionPointerArrayIndex.span.start}`;
+    const scopedContext = contextWithHoistedLocalValue(context, tempName, "uint");
+    const replacement: CudaLiteExpression = { kind: "identifier", name: tempName, span: conditionPointerArrayIndex.span };
+    const replacedRight = replaceExpressionNode(expression.right, conditionPointerArrayIndex, replacement);
+    return [
+      `${prefix}let ${scopedContext.nameFor(tempName)}: u32 = ${emitExpressionAsValueType(conditionPointerArrayIndex, "uint", context)};`,
+      ...emitLazyConditionalAssignmentBranch({ ...expression, right: replacedRight }, scopedContext, indentLevel),
+    ];
+  }
   return [
     `${prefix}if (${emitTruthinessExpression(split.condition, context)}) {`,
     ...emitLazyConditionalAssignmentBranch({ ...expression, right: split.consequent }, context, indentLevel + 1),
@@ -3234,10 +3245,11 @@ function emitAssignmentWithHoistedSideEffectingPointerArrayIndex(
   const tempName = `bg_pointer_array_index_${pointerArrayIndex.span.start}`;
   const scopedContext = contextWithHoistedLocalValue(context, tempName, "uint");
   const replacement: CudaLiteExpression = { kind: "identifier", name: tempName, span: pointerArrayIndex.span };
-  const replacedLeft = replaceExpressionNode(expression.left, pointerArrayIndex, replacement);
+  const replaced = replaceExpressionNode(expression, pointerArrayIndex, replacement);
+  if (replaced.kind !== "assignment") return undefined;
   return [
     `${prefix}let ${scopedContext.nameFor(tempName)}: u32 = ${emitExpressionAsValueType(pointerArrayIndex, "uint", context)};`,
-    ...emitLazyConditionalAssignmentBranch({ ...expression, left: replacedLeft }, scopedContext, indentLevel),
+    ...emitLazyConditionalAssignmentBranch(replaced, scopedContext, indentLevel),
   ];
 }
 
@@ -3245,7 +3257,8 @@ function sideEffectingPointerArrayAssignmentIndex(
   expression: CudaLiteAssignmentExpression,
   context: EmitContext,
 ): CudaLiteExpression | undefined {
-  return firstSideEffectingPointerArrayIndexExpression(expression.left, context)?.index;
+  return firstSideEffectingPointerArrayIndexExpression(expression.left, context)?.index ??
+    firstSideEffectingPointerArrayIndexExpression(expression.right, context)?.index;
 }
 
 function emitLazyConditionalValueAssignment(
