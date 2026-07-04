@@ -13026,6 +13026,28 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [13635] },
           },
           {
+            name: "texture:atlas-vector-atomic-pointer-array-minmax-active-lane-return-all-inactive",
+            source: SOURCES.textureAtlasVectorAtomicPointerArrayMinMaxActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+          },
+          {
             name: "texture:deep-helper-active-lane-vector-store",
             source: SOURCES.textureDeepHelperActiveLaneVectorStore,
             options: { workgroupSize: [4, 1, 1] },

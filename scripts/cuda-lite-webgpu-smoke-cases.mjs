@@ -345,6 +345,7 @@ export const textureScopeCases = [
   "texture:atlas-vector-atomic-pointer-array-cas-active-lane-return-false-branch",
   "texture:atlas-vector-atomic-pointer-array-minmax-active-lane-return",
   "texture:atlas-vector-atomic-pointer-array-minmax-active-lane-return-false-branch",
+  "texture:atlas-vector-atomic-pointer-array-minmax-active-lane-return-all-inactive",
   "texture:deep-helper-active-lane-vector-store",
   "texture:mixed-scalar-vector-active-lane-store",
   "texture:pointer-alias-active-lane-store",
