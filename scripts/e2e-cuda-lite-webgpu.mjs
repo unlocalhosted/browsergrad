@@ -2501,6 +2501,17 @@ __global__ void surface3DNegativeZBoundary(cudaSurfaceObject_t surf, float *out)
     out[3] = surf3Dread<float>(surf, 0, 0, 1);
   }
 }`,
+  surface3DUnalignedByteOffset: `
+__global__ void surface3DUnalignedByteOffset(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    float value = 99.0f;
+    surf3Dread(&value, surf, 2, 0, 1);
+    surf3Dwrite(42.0f, surf, 6, 0, 1);
+    out[0] = value;
+    out[1] = surf3Dread<float>(surf, 0, 0, 1);
+    out[2] = surf3Dread<float>(surf, 1 * sizeof(float), 0, 1);
+  }
+}`,
   surface3DVectorZBoundary: `
 __global__ void surface3DVectorZBoundary(cudaSurfaceObject_t surf, float *out) {
   if (threadIdx.x == 0) {
@@ -2921,6 +2932,17 @@ __global__ void surface1DNegativeByteOffset(cudaSurfaceObject_t surf, float *out
     surf1Dwrite(42.0f, surf, -1);
     out[0] = value;
     out[1] = surf1Dread<float>(surf, 0);
+  }
+}`,
+  surface1DUnalignedByteOffset: `
+__global__ void surface1DUnalignedByteOffset(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    float value = 99.0f;
+    surf1Dread(&value, surf, 2);
+    surf1Dwrite(42.0f, surf, 6);
+    out[0] = value;
+    out[1] = surf1Dread<float>(surf, 0);
+    out[2] = surf1Dread<float>(surf, 1 * sizeof(float));
   }
 }`,
   surface1DVectorBoundary: `
@@ -8767,6 +8789,22 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Float32Array", data: [0, 0, 3, 13] },
           },
           {
+            name: "surface:surf3d-unaligned-byte-offset",
+            source: SOURCES.surface3DUnalignedByteOffset,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(3),
+              },
+              surfaces: {
+                surf: { width: 2, height: 2, data: new Float32Array([3, 5, 7, 11, 13, 17, 19, 23]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 13, 17] },
+          },
+          {
             name: "surface:surf3d-vector-z-boundary",
             source: SOURCES.surface3DVectorZBoundary,
             options: { workgroupSize: [1, 1, 1] },
@@ -12052,6 +12090,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [0, 7] },
+          },
+          {
+            name: "surface:surf1d-unaligned-byte-offset",
+            source: SOURCES.surface1DUnalignedByteOffset,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(3),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array([7, 11]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 7, 11] },
           },
           {
             name: "surface:surf1d-vector-boundary",
