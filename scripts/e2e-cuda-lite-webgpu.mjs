@@ -3008,6 +3008,19 @@ __global__ void byteRootInlineCastPointerDifference(uchar *bytes, int *summary) 
   summary[0] = reinterpret_cast<float*>(bytes + 8) - reinterpret_cast<float*>(bytes);
   summary[1] = reinterpret_cast<uint*>(bytes + 12) - reinterpret_cast<uint*>(bytes);
 }`,
+  byteRootPointerArrayDiffIndexOnce: `
+__device__ uint byte_pointer_array_diff_index_helper(uint *counter) {
+  atomicAdd(counter, 1u);
+  return 1u;
+}
+
+__global__ void byteRootPointerArrayDiffIndexOnce(uchar *bytes, uint *counter, int *summary) {
+  float *ptrs[2];
+  ptrs[0] = reinterpret_cast<float*>(bytes + 4);
+  ptrs[1] = reinterpret_cast<float*>(bytes + 12);
+  summary[0] = ptrs[byte_pointer_array_diff_index_helper(counter)] - reinterpret_cast<float*>(bytes + 4);
+  summary[1] = (int)counter[0];
+}`,
   systemAtomicAliases: `
 __global__ void systemAtomicAliases(int *x, int *out) {
   if (threadIdx.x == 0) {
@@ -10551,6 +10564,21 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Int32Array", data: [2, 3] },
+          },
+          {
+            name: "storage:byte-root-pointer-array-diff-index-once",
+            source: SOURCES.byteRootPointerArrayDiffIndexOnce,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                bytes: new Uint32Array(4),
+                counter: new Uint32Array([10]),
+                summary: new Int32Array(2),
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Int32Array", data: [2, 11] },
           },
           {
             name: "atomic:system-aliases",

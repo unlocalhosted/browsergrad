@@ -4016,11 +4016,28 @@ function emitPointerDifference(
   if (!left || !right) return undefined;
   const rawDiff = `(i32(${left.base}) - i32(${right.base}))`;
   const valueType = devicePointerValueTypeForExpression(expression.left, context);
-  const scale = devicePointerIndexScale(expression.left, valueType, context);
-  const diff = scale <= 1 ? rawDiff : `(${rawDiff} / ${scale})`;
+  const diff = emitPointerDifferenceScaledDiff(expression.left, valueType, rawDiff, left.buffer, context);
   return left.buffer === right.buffer
     ? diff
     : `select(0, ${diff}, (${left.buffer} == ${right.buffer}))`;
+}
+
+function emitPointerDifferenceScaledDiff(
+  pointer: CudaLiteExpression,
+  valueType: CudaLiteScalarType,
+  rawDiff: string,
+  buffer: string,
+  context: EmitContext,
+): string {
+  const scale = devicePointerIndexScale(pointer, valueType, context);
+  const scaled = scale <= 1 ? rawDiff : `(${rawDiff} / ${scale})`;
+  if (valueType === "uchar") return scaled;
+  const byteScale = wgslElementByteSize(valueType);
+  if (byteScale <= 1 || byteScale === scale) return scaled;
+  const byteBuffers = devicePointerByteStorageBufferIds(context);
+  if (byteBuffers.length === 0) return scaled;
+  const condition = byteBuffers.map((id) => `(${buffer} == ${id}u)`).join(" || ");
+  return `select(${scaled}, (${rawDiff} / ${byteScale}), ${condition})`;
 }
 
 function isPointerDifferenceOperand(expression: CudaLiteExpression, context: EmitContext): boolean {
