@@ -10646,6 +10646,22 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Int32Array", data: [4, 4, 4, 0, 2, 2, 2, 0] },
           },
           {
+            name: "storage:active-lane-byte-root-pointer-array-diff-all-inactive",
+            source: SOURCES.activeLaneByteRootPointerArrayDiff,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                bytes: new Uint32Array(8),
+                counter: new Uint32Array([10, 20, 30, 40]),
+                summary: new Int32Array(8),
+              },
+              scalars: { limit: 0 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Int32Array", data: [0, 0, 0, 0, 10, 20, 30, 40] },
+          },
+          {
             name: "atomic:system-aliases",
             source: SOURCES.systemAtomicAliases,
             options: { workgroupSize: [1, 1, 1] },
