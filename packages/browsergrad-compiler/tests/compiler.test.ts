@@ -817,6 +817,18 @@ __global__ void pointer_array_diff_index_once(uint *storage) {
     expect(compiled.wgsl).not.toContain("bg_storage +");
   });
 
+  it("scales vector pointer differences by vector lane width", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__global__ void vector_pointer_difference(uint4 *out, int *summary) {
+  uint4 *left = out + 2;
+  uint4 *right = out;
+  summary[0] = left - right;
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toMatch(/summary\[0\] = i32\(\(\(i32\(.+\) - i32\(.+\)\) \/ 4\)\);/u);
+    expect(compiled.wgsl).not.toMatch(/summary\[0\] = i32\(\(i32\(.+\) - i32\(.+\)\)\);/u);
+  });
+
   it("preserves scalar-to-vector pointer alias byte offsets", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ void bump_roundtrip_vec(float4* out, int idx, float4 delta) {

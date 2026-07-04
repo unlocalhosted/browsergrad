@@ -134,6 +134,7 @@ export const storageScopeCases = [
   "storage:pointer-array-compare-index-once",
   "storage:pointer-array-var-init-compare-index-once",
   "storage:pointer-array-diff-index-once",
+  "storage:vector-pointer-difference",
 ];
 
 export const atomicScopeCases = [

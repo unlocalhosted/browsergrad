@@ -4012,7 +4012,10 @@ function emitPointerDifference(
   const left = devicePointerArgumentParts(expression.left, context);
   const right = devicePointerArgumentParts(expression.right, context);
   if (!left || !right) return undefined;
-  const diff = `(i32(${left.base}) - i32(${right.base}))`;
+  const rawDiff = `(i32(${left.base}) - i32(${right.base}))`;
+  const valueType = devicePointerValueTypeForExpression(expression.left, context);
+  const scale = devicePointerIndexScale(expression.left, valueType, context);
+  const diff = scale <= 1 ? rawDiff : `(${rawDiff} / ${scale})`;
   return left.buffer === right.buffer
     ? diff
     : `select(0, ${diff}, (${left.buffer} == ${right.buffer}))`;

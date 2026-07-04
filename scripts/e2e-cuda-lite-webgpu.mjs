@@ -2975,6 +2975,14 @@ __global__ void pointerArrayDiffIndexOnce(uint *storage) {
   ptrs[1] = storage + 3;
   storage[3] = (uint)(ptrs[pointer_array_diff_index_helper(storage, 1u)] - (storage + 1));
 }`,
+  vectorPointerDifference: `
+__global__ void vectorPointerDifference(uint4 *out, int *summary) {
+  uint4 *left = out + 2;
+  uint4 *right = out;
+  summary[0] = left - right;
+  summary[1] = (out + 1) - out;
+  summary[2] = (out + 3) - left;
+}`,
   systemAtomicAliases: `
 __global__ void systemAtomicAliases(int *x, int *out) {
   if (threadIdx.x == 0) {
@@ -10461,6 +10469,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "storage",
             expectedOutput: { type: "Uint32Array", data: [11, 20, 30, 2] },
+          },
+          {
+            name: "storage:vector-pointer-difference",
+            source: SOURCES.vectorPointerDifference,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                summary: new Int32Array(3),
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Int32Array", data: [2, 1, 1] },
           },
           {
             name: "atomic:system-aliases",
