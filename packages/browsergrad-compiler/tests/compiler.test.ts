@@ -7822,6 +7822,41 @@ __global__ void nestedConditionalHelperCondition(uint *storage, uint *out, int e
     expect(compiled.wgsl).not.toContain("select(0u, nested_condition_conditional_helper_with_pointer_side_effect");
   });
 
+  it("preserves nested conditional helper-call laziness in loop conditions", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint nested_loop_condition_helper_with_pointer_side_effect(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return ptr[0];
+}
+
+__global__ void nestedConditionalHelperLoopCondition(uint *storage, uint *out, int enabled) {
+  for (int i = 0; i < 1 && ((3u + (enabled != 0 ? nested_loop_condition_helper_with_pointer_side_effect(storage, 7u) : 0u)) != 0u); ++i) {
+    out[0] = 1u;
+  }
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toMatch(/if \(bg_loop_condition_\d+\) \{/u);
+    expect(compiled.wgsl).toContain("bg_uniforms.enabled != 0");
+    expect(compiled.wgsl).toContain("nested_loop_condition_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0u, nested_loop_condition_helper_with_pointer_side_effect");
+
+    const sequenceCompiled = compileCudaLiteKernel(`
+__device__ uint nested_sequence_loop_condition_helper_with_pointer_side_effect(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return ptr[0];
+}
+
+__global__ void nestedConditionalHelperSequenceLoopCondition(uint *storage, uint *out, int enabled) {
+  for (int i = 0, j = 0; j < 1 && ((enabled != 0 ? nested_sequence_loop_condition_helper_with_pointer_side_effect(storage, 7u) : 0u) != 0u); ++i, ++j) {
+    out[0] = 1u;
+  }
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(sequenceCompiled.wgsl).toMatch(/loop \{/u);
+    expect(sequenceCompiled.wgsl).toContain("nested_sequence_loop_condition_helper_with_pointer_side_effect");
+    expect(sequenceCompiled.wgsl).not.toContain("select(0u, nested_sequence_loop_condition_helper_with_pointer_side_effect");
+  });
+
   it("preserves atomic side effects before loop returns lowered for barriers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomicReturnSideEffectBarrier(uint *counter, uint *out, int N) {

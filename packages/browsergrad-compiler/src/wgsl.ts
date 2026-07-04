@@ -474,6 +474,10 @@ function emitStatement(
       ) {
         return emitBoundedBarrierForLoop(statement, loopContext, indentLevel);
       }
+      {
+        const lazy = emitForLoopWithLazyConditionalCondition(statement, loopContext, indentLevel);
+        if (lazy) return lazy;
+      }
       const lines = [`${prefix}for (${init}; ${condition}; ${update}) {`];
       lines.push(...emitStatementSequence(statement.body, loopContext, indentLevel + 1));
       lines.push(`${prefix}}`);
@@ -483,12 +487,20 @@ function emitStatement(
       if (statementHasEarlyBreakBeforeBarrier(statement, context)) {
         return emitWhileLoopWithEarlyBreakBeforeBarrier(statement, context, indentLevel);
       }
+      {
+        const lazy = emitWhileLoopWithLazyConditionalCondition(statement, context, indentLevel);
+        if (lazy) return lazy;
+      }
       const lines = [`${prefix}while (${emitTruthinessExpression(statement.condition, context)}) {`];
       lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1));
       lines.push(`${prefix}}`);
       return lines;
     }
     case "do-while": {
+      {
+        const lazy = emitDoWhileLoopWithLazyConditionalCondition(statement, context, indentLevel);
+        if (lazy) return lazy;
+      }
       const lines = [`${prefix}loop {`];
       lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1));
       lines.push(`${indent(indentLevel + 1)}if (!(${emitTruthinessExpression(statement.condition, context)})) { break; }`);
@@ -517,6 +529,123 @@ function emitIfWithLazyConditionalCondition(
     ...emitStatement({ ...statement, condition: split.consequent }, context, indentLevel + 1),
     `${prefix}} else {`,
     ...emitStatement({ ...statement, condition: split.alternate }, context, indentLevel + 1),
+    `${prefix}}`,
+  ];
+}
+
+function emitForLoopWithLazyConditionalCondition(
+  statement: Extract<CudaLiteStatement, { kind: "for" }>,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] | undefined {
+  if (!statement.condition || !splitLazyConditionalSideEffectExpression(statement.condition, context)) return undefined;
+  const prefix = indent(indentLevel);
+  const innerPrefix = indent(indentLevel + 1);
+  const lines = [`${prefix}{`];
+  if (statement.init?.kind === "var") {
+    lines.push(`${innerPrefix}${emitForVar(statement.init, context)};`);
+  } else if (statement.init) {
+    for (const expression of sequenceItems(statement.init)) lines.push(`${innerPrefix}${emitExpression(expression, context)};`);
+  }
+  lines.push(`${innerPrefix}loop {`);
+  lines.push(...emitLazyConditionBreak(statement.condition, context, indentLevel + 2, activeFlag));
+  lines.push(...emitStatementSequence(statement.body, context, indentLevel + 2, activeFlag ? { activeFlag } : undefined));
+  if (statement.update) {
+    lines.push(`${indent(indentLevel + 2)}continuing {`);
+    for (const expression of sequenceItems(statement.update)) {
+      lines.push(`${indent(indentLevel + 3)}${emitExpression(expression, context)};`);
+    }
+    lines.push(`${indent(indentLevel + 2)}}`);
+  }
+  lines.push(`${innerPrefix}}`);
+  lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitWhileLoopWithLazyConditionalCondition(
+  statement: Extract<CudaLiteStatement, { kind: "while" }>,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] | undefined {
+  if (!splitLazyConditionalSideEffectExpression(statement.condition, context)) return undefined;
+  const prefix = indent(indentLevel);
+  const lines = [`${prefix}loop {`];
+  lines.push(...emitLazyConditionBreak(statement.condition, context, indentLevel + 1, activeFlag));
+  lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1, activeFlag ? { activeFlag } : undefined));
+  lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitDoWhileLoopWithLazyConditionalCondition(
+  statement: Extract<CudaLiteStatement, { kind: "do-while" }>,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] | undefined {
+  if (!splitLazyConditionalSideEffectExpression(statement.condition, context)) return undefined;
+  const prefix = indent(indentLevel);
+  const lines = [`${prefix}loop {`];
+  lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1, activeFlag ? { activeFlag } : undefined));
+  lines.push(...emitLazyConditionBreak(statement.condition, context, indentLevel + 1, activeFlag));
+  lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitLazyConditionBreak(
+  condition: CudaLiteExpression,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] {
+  const conditionName = context.nameFor(`bg_loop_condition_${condition.span.start}`);
+  const prefix = indent(indentLevel);
+  const lines = [`${prefix}var ${conditionName}: bool = ${activeFlag ? "true" : "false"};`];
+  if (activeFlag) {
+    lines.push(`${prefix}if (${activeFlag}) {`);
+    lines.push(...emitLazyTruthinessAssignment(conditionName, condition, context, indentLevel + 1));
+    lines.push(`${prefix}}`);
+  } else {
+    lines.push(...emitLazyTruthinessAssignment(conditionName, condition, context, indentLevel));
+  }
+  lines.push(`${prefix}if (!(${conditionName})) { break; }`);
+  return lines;
+}
+
+function emitLazyTruthinessAssignment(
+  target: string,
+  expression: CudaLiteExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const prefix = indent(indentLevel);
+  if (expression.kind === "binary" && expression.operator === "&&") {
+    return [
+      ...emitLazyTruthinessAssignment(target, expression.left, context, indentLevel),
+      `${prefix}if (${target}) {`,
+      ...emitLazyTruthinessAssignment(target, expression.right, context, indentLevel + 1),
+      `${prefix}}`,
+    ];
+  }
+  if (expression.kind === "binary" && expression.operator === "||") {
+    return [
+      ...emitLazyTruthinessAssignment(target, expression.left, context, indentLevel),
+      `${prefix}if (!(${target})) {`,
+      ...emitLazyTruthinessAssignment(target, expression.right, context, indentLevel + 1),
+      `${prefix}}`,
+    ];
+  }
+  const split = splitLazyConditionalSideEffectExpression(expression, context);
+  if (!split) return [`${prefix}${target} = ${emitTruthinessExpression(expression, context)};`];
+  const branchCondition = `${target}_branch_${split.condition.span.start}`;
+  return [
+    `${prefix}var ${branchCondition}: bool = false;`,
+    ...emitLazyTruthinessAssignment(branchCondition, split.condition, context, indentLevel),
+    `${prefix}if (${branchCondition}) {`,
+    ...emitLazyTruthinessAssignment(target, split.consequent, context, indentLevel + 1),
+    `${prefix}} else {`,
+    ...emitLazyTruthinessAssignment(target, split.alternate, context, indentLevel + 1),
     `${prefix}}`,
   ];
 }
@@ -2614,7 +2743,13 @@ function emitForLoopWithContinuing(
     for (const expression of sequenceItems(statement.init)) lines.push(`${prefix}${emitExpression(expression, context)};`);
   }
   lines.push(`${prefix}loop {`);
-  if (statement.condition) lines.push(`${indent(indentLevel + 1)}if (!(${emitTruthinessExpression(statement.condition, context)})) { break; }`);
+  if (statement.condition) {
+    if (!activeFlag && splitLazyConditionalSideEffectExpression(statement.condition, context)) {
+      lines.push(...emitLazyConditionBreak(statement.condition, context, indentLevel + 1));
+    } else {
+      lines.push(`${indent(indentLevel + 1)}if (!(${emitTruthinessExpression(statement.condition, context)})) { break; }`);
+    }
+  }
   lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1, activeFlag ? { activeFlag } : undefined));
   if (statement.update) {
     lines.push(`${indent(indentLevel + 1)}continuing {`);
