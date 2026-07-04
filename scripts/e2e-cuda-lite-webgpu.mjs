@@ -2186,6 +2186,46 @@ __global__ void activeLanePointerHandleRebind(uint4 *left, uint4 *right, uint *c
     summary[3] = value;
   }
 }`,
+  activeLanePointerHandleLoopRebind: `
+__device__ uint update_loop_rebound_handle(uint *ptr, uint lane, uint add) {
+  atomicAdd(ptr + lane, add);
+  return ptr[lane];
+}
+
+__global__ void activeLanePointerHandleLoopRebind(uint4 *left, uint4 *right, uint *counter, uint *summary, int limit, int pickRight) {
+  int tid = threadIdx.x;
+  if (tid == 0) {
+    left[0] = make_uint4(10u, 20u, 30u, 40u);
+    right[0] = make_uint4(100u, 200u, 300u, 400u);
+  }
+  __syncthreads();
+  uint *ptr = NULL;
+  uint total = 0u;
+  for (int step = 0; step < 2; step++) {
+    if (tid >= limit) {
+      return;
+    }
+    if (step == 1 && tid == limit - 1) {
+      return;
+    }
+    __syncthreads();
+    ptr = reinterpret_cast<uint*>(left);
+    if (((step + pickRight) & 1) != 0) {
+      ptr = reinterpret_cast<uint*>(right);
+    }
+    total += update_loop_rebound_handle(ptr, (uint)tid, (uint)(step + tid + 1));
+    atomicAdd(counter, 1u);
+    __syncthreads();
+  }
+  if (tid == 0) {
+    uint4 leftValue = left[0];
+    uint4 rightValue = right[0];
+    summary[0] = leftValue.x + leftValue.y + leftValue.z + leftValue.w;
+    summary[1] = rightValue.x + rightValue.y + rightValue.z + rightValue.w;
+    summary[2] = counter[0];
+    summary[3] = total;
+  }
+}`,
   branchAssignedPointerAtomic: `
 __global__ void branchAssignedPointerAtomic(uint *left, uint *right, uint *out, int pickRight) {
   uint *ptr = NULL;
@@ -6994,6 +7034,57 @@ const html = String.raw`<!doctype html>
                 summary: new Uint32Array(4),
               },
               scalars: { N: 0, pickRight: 1 },
+            }),
+            output: "counter",
+            expectedOutput: { type: "Uint32Array", data: [0, 0] },
+          },
+          {
+            name: "storage:active-lane-pointer-handle-loop-rebind",
+            source: SOURCES.activeLanePointerHandleLoopRebind,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                left: new Uint32Array(16),
+                right: new Uint32Array(16),
+                counter: new Uint32Array([0, 0]),
+                summary: new Uint32Array(4),
+              },
+              scalars: { limit: 3, pickRight: 0 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [106, 1005, 5, 113] },
+          },
+          {
+            name: "storage:active-lane-pointer-handle-loop-rebind-right",
+            source: SOURCES.activeLanePointerHandleLoopRebind,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                left: new Uint32Array(16),
+                right: new Uint32Array(16),
+                counter: new Uint32Array([0, 0]),
+                summary: new Uint32Array(4),
+              },
+              scalars: { limit: 3, pickRight: 1 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [105, 1006, 5, 113] },
+          },
+          {
+            name: "storage:active-lane-pointer-handle-loop-rebind-all-inactive",
+            source: SOURCES.activeLanePointerHandleLoopRebind,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                left: new Uint32Array(16),
+                right: new Uint32Array(16),
+                counter: new Uint32Array([0, 0]),
+                summary: new Uint32Array(4),
+              },
+              scalars: { limit: 0, pickRight: 1 },
             }),
             output: "counter",
             expectedOutput: { type: "Uint32Array", data: [0, 0] },

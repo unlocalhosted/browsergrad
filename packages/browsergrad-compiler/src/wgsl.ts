@@ -2829,7 +2829,7 @@ function emitGuardedAssignmentWithHoistedUniformRhs(
   const expression = statement.expression;
   if (expression.operator !== "=") return undefined;
   if (!expressionContainsSubgroupCall(expression.right)) return undefined;
-  if (expressionContainsAssignment(expression.right) || expressionContainsSideEffectingCall(expression.right)) return undefined;
+  if (expressionContainsAssignment(expression.right) || expressionContainsSideEffectingCall(expression.right, context)) return undefined;
   const valueType = expressionValueTypeForEmit(expression.left, context) ?? expressionValueTypeForEmit(expression.right, context);
   if (!valueType || valueType === "void" || valueType === "complex64") return undefined;
   const prefix = indent(indentLevel);
@@ -2940,7 +2940,7 @@ function emitPredicatedScalarAssignment(
   const current = emitExpressionAsValueType(expression.left, valueType, context);
   const value = predicatedScalarAssignmentValue(expression, valueType, context);
   if (!value) return undefined;
-  if (expressionContainsSideEffectingCall(expression.right)) {
+  if (expressionContainsSideEffectingCall(expression.right, context)) {
     const prefix = indent(indentLevel);
     return [
       `${prefix}if (${activeFlag}) {`,
@@ -2963,11 +2963,15 @@ function predicatedValueNeedsUniformCallHoist(value: string): boolean {
   return /\b(?:subgroup[A-Z][A-Za-z0-9_]*|bg_warp_(?:reduce|shuffle)_[A-Za-z0-9_]+)\s*\(/u.test(value);
 }
 
-function expressionContainsSideEffectingCall(expression: CudaLiteExpression): boolean {
+function expressionContainsSideEffectingCall(expression: CudaLiteExpression, context?: EmitContext): boolean {
   let found = false;
   walkCudaLiteExpressions([{ kind: "expr", expression, span: expression.span }], (item) => {
     if (item.kind !== "call") return;
     const name = expressionName(item.callee);
+    if (name !== undefined && context?.deviceFunctionFor(name, item.args.length)) {
+      found = true;
+      return;
+    }
     if (
       name !== undefined &&
       (name.startsWith("atomic") ||

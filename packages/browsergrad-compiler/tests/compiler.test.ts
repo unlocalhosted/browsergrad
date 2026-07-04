@@ -7598,6 +7598,35 @@ __global__ void pointerAliasReturnSideEffectBarrier(float *x, int N) {
     expect(compiled.wgsl).toMatch(/bg_barrier_loop_active_\d+ = false;/u);
   });
 
+  it("guards helper calls in predicated compound assignments after loop returns", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint helper_with_pointer_side_effect(uint *ptr, uint lane, uint add) {
+  atomicAdd(ptr + lane, add);
+  return ptr[lane];
+}
+
+__global__ void pointerHandleLoopReturnSideEffect(uint4 *left, uint4 *right, uint *out, int limit, int pickRight) {
+  int tid = threadIdx.x;
+  uint *ptr = NULL;
+  uint total = 0u;
+  for (int step = 0; step < 2; step++) {
+    if (tid >= limit) return;
+    __syncthreads();
+    ptr = reinterpret_cast<uint*>(left);
+    if (((step + pickRight) & 1) != 0) {
+      ptr = reinterpret_cast<uint*>(right);
+    }
+    total += helper_with_pointer_side_effect(ptr, (uint)tid, (uint)(step + tid + 1));
+    __syncthreads();
+  }
+  out[tid] = total;
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+total = \(total \+ helper_with_pointer_side_effect/u);
+    expect(compiled.wgsl).not.toContain("select(total, (total + helper_with_pointer_side_effect");
+  });
+
   it("preserves atomic side effects before loop returns lowered for barriers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomicReturnSideEffectBarrier(uint *counter, uint *out, int N) {
