@@ -313,6 +313,26 @@ export const cudaLiteCorpusExecutionFixtures = [
     expectedOutput: { type: "Int32Array", data: [15, 16, 17, 18] },
   },
   {
+    sourceKey: "corpusCudaSamplesClockTimedReduction",
+    caseName: "corpus:cuda-samples:timedReduction",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/0_Introduction/clock/clock.cu",
+    kernelName: "timedReduction",
+    workgroupSize: [4, 1, 1],
+    options: { dynamicSharedMemory: { shared: 32 } },
+    launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    input: {
+      buffers: {
+        input: { type: "Float32Array", data: [3, 1, 4, 2, 5, 6, 7, 8] },
+        output: { type: "Float32Array", length: 1 },
+        timer: { type: "Int32Array", length: 2 },
+      },
+      scalars: {},
+    },
+    output: "output",
+    expectedOutput: { type: "Float32Array", data: [1] },
+  },
+  {
     sourceKey: "corpusCudaSamplesIncKernel",
     caseName: "corpus:cuda-samples:incKernel",
     corpusId: "cuda-samples",
