@@ -2996,6 +2996,13 @@ __global__ void vectorPointerArrayDiffIndexOnce(uint4 *out, uint *counter, int *
   summary[0] = ptrs[vector_pointer_array_diff_index_helper(counter, 1u)] - (out + 1);
   summary[1] = (int)counter[0];
 }`,
+  scalarViewVectorPointerDifference: `
+__global__ void scalarViewVectorPointerDifference(uint4 *out, int *summary) {
+  uint *left = reinterpret_cast<uint*>(out + 1);
+  uint *right = reinterpret_cast<uint*>(out);
+  summary[0] = left - right;
+  summary[1] = (out + 1) - out;
+}`,
   systemAtomicAliases: `
 __global__ void systemAtomicAliases(int *x, int *out) {
   if (threadIdx.x == 0) {
@@ -10511,6 +10518,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Int32Array", data: [2, 11] },
+          },
+          {
+            name: "storage:scalar-view-vector-pointer-difference",
+            source: SOURCES.scalarViewVectorPointerDifference,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+                summary: new Int32Array(2),
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Int32Array", data: [4, 1] },
           },
           {
             name: "atomic:system-aliases",
