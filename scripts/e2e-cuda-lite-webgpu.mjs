@@ -5863,6 +5863,47 @@ __global__ void surfaceHelperVectorMultiSurfaceActiveLaneReturn(cudaSurfaceObjec
     write_multi_surface_layered_vec(second, value, 1, 1);
   }
 }`,
+  surfaceHelperVectorMultiSurfaceGuardedRhs: `
+__device__ float4 read_multi_surface_guarded_vec(cudaSurfaceObject_t first, cudaSurfaceObject_t second, uint *counter, int row, int pick) {
+  atomicAdd(counter, 1u);
+  if (pick != 0) {
+    return surf2Dread<float4>(second, 0, row);
+  }
+  return surf2Dread<float4>(first, 0, row);
+}
+
+__device__ void write_multi_surface_guarded_layered_vec(cudaSurfaceObject_t surfaceArg, float4 value, int row, int layer) {
+  surf2DLayeredwrite(value, surfaceArg, 0, row, layer);
+}
+
+__global__ void surfaceHelperVectorMultiSurfaceGuardedRhs(cudaSurfaceObject_t first, cudaSurfaceObject_t second, uint *counter, float *out, int N, int pick) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  float4 value = read_multi_surface_guarded_vec(first, second, counter, tid, pick);
+  write_multi_surface_guarded_layered_vec(
+    second,
+    make_float4(value.x + (float)tid, value.y + (float)tid, value.z + (float)tid, value.w + (float)tid),
+    tid,
+    1
+  );
+  __syncthreads();
+  if (tid == 0) {
+    float4 row0 = surf2DLayeredread<float4>(second, 0, 0, 1);
+    float4 row1 = surf2DLayeredread<float4>(second, 0, 1, 1);
+    out[0] = row0.x;
+    out[1] = row0.y;
+    out[2] = row0.z;
+    out[3] = row0.w;
+    out[4] = row1.x;
+    out[5] = row1.y;
+    out[6] = row1.z;
+    out[7] = row1.w;
+    out[8] = (float)counter[0];
+  }
+}`,
   surfaceActiveLaneReturnSideEffect: `
 __global__ void surfaceActiveLaneReturnSideEffect(cudaSurfaceObject_t surf, int N) {
   int tid = threadIdx.x;
@@ -12253,6 +12294,63 @@ const html = String.raw`<!doctype html>
               type: "Float32Array",
               data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 6, 8, 10],
             },
+          },
+          {
+            name: "surface:helper-vector-multi-surface-guarded-rhs",
+            source: SOURCES.surfaceHelperVectorMultiSurfaceGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0]),
+                out: new Float32Array(9),
+              },
+              surfaces: {
+                first: { width: 4, height: 2, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+                second: { width: 4, height: 2, data: new Float32Array(16) },
+              },
+              scalars: { N: 2, pick: 0 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4, 6, 7, 8, 9, 2] },
+          },
+          {
+            name: "surface:helper-vector-multi-surface-guarded-rhs-false-branch",
+            source: SOURCES.surfaceHelperVectorMultiSurfaceGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0]),
+                out: new Float32Array(9),
+              },
+              surfaces: {
+                first: { width: 4, height: 2, data: new Float32Array(8) },
+                second: { width: 4, height: 2, data: new Float32Array([11, 13, 17, 19, 23, 29, 31, 37, 0, 0, 0, 0, 0, 0, 0, 0]) },
+              },
+              scalars: { N: 2, pick: 1 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [11, 13, 17, 19, 24, 30, 32, 38, 2] },
+          },
+          {
+            name: "surface:helper-vector-multi-surface-guarded-rhs-all-inactive",
+            source: SOURCES.surfaceHelperVectorMultiSurfaceGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0]),
+                out: new Float32Array(9),
+              },
+              surfaces: {
+                first: { width: 4, height: 2, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+                second: { width: 4, height: 2, data: new Float32Array([11, 13, 17, 19, 23, 29, 31, 37, 0, 0, 0, 0, 0, 0, 0, 0]) },
+              },
+              scalars: { N: 0, pick: 1 },
+            }),
+            output: "counter",
+            expectedOutput: { type: "Uint32Array", data: [0, 0] },
           },
           {
             name: "surface:active-lane-return-side-effect",
