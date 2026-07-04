@@ -2589,6 +2589,25 @@ __global__ void conditionalHelperPointerInit(uint4 *left, uint4 *right, uint *su
     summary[1] = rightValue.x + rightValue.y + rightValue.z + rightValue.w;
   }
 }`,
+  activeLaneConditionalHelperPointerInit: `
+__device__ uint active_conditional_pointer_init_helper_rmw(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__global__ void activeLaneConditionalHelperPointerInit(uint *storage, int limit, int useHelper) {
+  int tid = threadIdx.x;
+  for (int step = 0; step < 2; step++) {
+    if (tid >= limit) {
+      return;
+    }
+    __syncthreads();
+    uint *ptr = storage + tid * 2;
+    uint *target = ptr + (useHelper != 0 ? active_conditional_pointer_init_helper_rmw(ptr, (uint)(step + tid + 1)) : 0u);
+    target[0] = 9u;
+    __syncthreads();
+  }
+}`,
   conditionalHelperVectorMemberLvalue: `
 __device__ uint conditional_vector_member_lvalue_helper_rmw(uint *ptr, uint lane, uint add) {
   atomicAdd(ptr + lane, add);
@@ -7933,6 +7952,48 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [99, 1000, 0, 0] },
+          },
+          {
+            name: "storage:active-lane-conditional-helper-pointer-init",
+            source: SOURCES.activeLaneConditionalHelperPointerInit,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                storage: new Uint32Array([10, 20, 30, 40, 50, 60, 70, 80]),
+              },
+              scalars: { limit: 3, useHelper: 1 },
+            }),
+            output: "storage",
+            expectedOutput: { type: "Uint32Array", data: [13, 9, 35, 9, 57, 9, 70, 80] },
+          },
+          {
+            name: "storage:active-lane-conditional-helper-pointer-init-false-branch",
+            source: SOURCES.activeLaneConditionalHelperPointerInit,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                storage: new Uint32Array([10, 20, 30, 40, 50, 60, 70, 80]),
+              },
+              scalars: { limit: 3, useHelper: 0 },
+            }),
+            output: "storage",
+            expectedOutput: { type: "Uint32Array", data: [9, 20, 9, 40, 9, 60, 70, 80] },
+          },
+          {
+            name: "storage:active-lane-conditional-helper-pointer-init-all-inactive",
+            source: SOURCES.activeLaneConditionalHelperPointerInit,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                storage: new Uint32Array([10, 20, 30, 40, 50, 60, 70, 80]),
+              },
+              scalars: { limit: 0, useHelper: 1 },
+            }),
+            output: "storage",
+            expectedOutput: { type: "Uint32Array", data: [10, 20, 30, 40, 50, 60, 70, 80] },
           },
           {
             name: "storage:conditional-helper-vector-member-lvalue",

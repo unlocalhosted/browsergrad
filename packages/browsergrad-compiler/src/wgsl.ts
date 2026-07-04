@@ -1288,6 +1288,9 @@ function emitVarStatementWithActiveFlag(
 ): string[] {
   const prefix = indent(indentLevel);
   if (statement.storage === "shared") return [];
+  if (statement.pointer && context.localPointerHandleFor(statement.name, statement.span)) {
+    return emitLocalPointerHandleDecl(statement, context, indentLevel, activeFlag);
+  }
   if (statement.pointer || statement.dimensions.length > 0 || statement.matrixTile || !statement.init) {
     return emitStatement(statement, context, indentLevel);
   }
@@ -1784,8 +1787,21 @@ function emitLocalPointerHandleDecl(
   statement: CudaLiteVarDecl,
   context: EmitContext,
   indentLevel: number,
+  activeFlag?: string,
 ): string[] {
   const prefix = indent(indentLevel);
+  if (activeFlag) {
+    const lines = [
+      `${prefix}var ${localPointerHandleBufferName(statement, context)}: u32 = 0u;`,
+      `${prefix}var ${localPointerHandleBaseName(statement, context)}: u32 = 0u;`,
+    ];
+    if (statement.init) {
+      lines.push(`${prefix}if (${activeFlag}) {`);
+      lines.push(...emitLazyLocalPointerHandleInitAssignment(statement, statement.init, context, indentLevel + 1));
+      lines.push(`${prefix}}`);
+    }
+    return lines;
+  }
   if (statement.init && splitLazyConditionalSideEffectExpression(statement.init, context)) {
     return [
       `${prefix}var ${localPointerHandleBufferName(statement, context)}: u32 = 0u;`,

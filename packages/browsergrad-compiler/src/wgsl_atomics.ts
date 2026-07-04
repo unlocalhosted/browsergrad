@@ -261,6 +261,20 @@ function emitAtomicTarget(
     return emitAtomicAddressTarget(target.argument, context, callbacks);
   }
   if (target.kind === "identifier") {
+    const param = context.paramFor(target.name);
+    if (param?.pointer) {
+      const info = atomicStorageInfo(target.name, context);
+      if (!info) return undefined;
+      const index = callbacks.emitPointerIndex(target.name, zeroExpression(target.span), context);
+      return {
+        address: emitAtomicRootAddress(target.name, index, context, callbacks, param.valueType),
+        rootName: target.name,
+        valueType: param.valueType,
+        storageValueType: info.valueType,
+        storageScalar: info.storageScalar,
+        addressSpace: info.addressSpace,
+      };
+    }
     const alias = callbacks.flattenedPointerAlias(target.name, target.span, context);
     if (alias) {
       const rootName = resolveAtomicRootName(alias.rootName, context);
@@ -272,20 +286,6 @@ function emitAtomicTarget(
         address: emitAtomicRootAddress(rootName, index, context, callbacks, valueType),
         rootName,
         valueType,
-        storageValueType: info.valueType,
-        storageScalar: info.storageScalar,
-        addressSpace: info.addressSpace,
-      };
-    }
-    const param = context.paramFor(target.name);
-    if (param?.pointer) {
-      const info = atomicStorageInfo(target.name, context);
-      if (!info) return undefined;
-      const index = callbacks.emitPointerIndex(target.name, zeroExpression(target.span), context);
-      return {
-        address: emitAtomicRootAddress(target.name, index, context, callbacks, param.valueType),
-        rootName: target.name,
-        valueType: param.valueType,
         storageValueType: info.valueType,
         storageScalar: info.storageScalar,
         addressSpace: info.addressSpace,

@@ -7893,6 +7893,34 @@ __global__ void conditionalPointerInit(uint *storage, uint *out, int enabled) {
     expect(compiled.wgsl).not.toContain("select(0u, conditional_pointer_init_helper_with_pointer_side_effect");
   });
 
+  it("guards conditional helper-call pointer initializers inside active-lane predication", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint active_conditional_pointer_init_helper_with_pointer_side_effect(uint *ptr, uint lane, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__global__ void activeConditionalPointerInit(uint *storage, uint *out, int limit, int enabled) {
+  int tid = threadIdx.x;
+  for (int step = 0; step < 2; step++) {
+    if (tid >= limit) return;
+    __syncthreads();
+    uint *ptr = storage + tid * 2;
+    uint *target = ptr + (enabled != 0 ? active_conditional_pointer_init_helper_with_pointer_side_effect(ptr, (uint)tid, (uint)(step + tid + 1)) : 0u);
+    target[0] = 9u;
+    __syncthreads();
+  }
+  out[tid] = storage[tid];
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(bg_uniforms.enabled != 0\)\)/u);
+    expect(compiled.wgsl).toContain("_ = bg_ptr_atomicAdd_u32(ptr_buffer, ptr_base, add);");
+    expect(compiled.wgsl).toContain("active_conditional_pointer_init_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0u, active_conditional_pointer_init_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("_ = atomicAdd(&bg_storage[(u32((0 + (tid * 2))))");
+  });
+
   it("preserves conditional helper-call laziness in vector pointer member lvalues", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ uint conditional_vector_member_lvalue_helper_with_pointer_side_effect(uint *ptr, uint add) {
