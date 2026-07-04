@@ -275,6 +275,26 @@ export const cudaLiteCorpusExecutionFixtures = [
     },
   },
   {
+    sourceKey: "corpusCudaSamplesSimpleSurfaceWrite",
+    caseName: "corpus:cuda-samples:surfaceWriteKernel",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/0_Introduction/simpleSurfaceWrite/simpleSurfaceWrite.cu",
+    kernelName: "surfaceWriteKernel",
+    workgroupSize: [2, 2, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [2, 2, 1] },
+    input: {
+      buffers: {
+        gIData: { type: "Float32Array", data: [1, 2, 3, 4] },
+      },
+      surfaces: {
+        outputSurface: { width: 2, height: 2, data: { type: "Float32Array", length: 4 } },
+      },
+      scalars: { width: 2, height: 2 },
+    },
+    output: "outputSurface",
+    expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4] },
+  },
+  {
     sourceKey: "corpusCudaSamplesIncKernel",
     caseName: "corpus:cuda-samples:incKernel",
     corpusId: "cuda-samples",

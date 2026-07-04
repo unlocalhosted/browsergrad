@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-04T23:22:01Z
+Last updated: 2026-07-04T23:26:09Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,9 +9,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `472/0/0`, dist `472/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `106/106` |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `472/0/0`, dist `472/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `107/107` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Hardened cuda-samples histogram/scalar hot perf gate |
+| Active work item | Pinned cuda-samples surface object write fixture |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- cuda-samples surface object write fixture pinning: promoted `simpleSurfaceWrite/surfaceWriteKernel` into explicit expected-output fixture covering real cuda-samples `surf2Dwrite` to `cudaSurfaceObject_t`; focused fixture `1 passed / 0 failed / 0 skipped`, expected-output `1`; full pinned fixture gate `107/0/0`, expected-output `107`, by corpus `cuda-120=10`, `cuda-samples=23`, `llm.c=28`, `leetcuda=46`, skips `0`
 - cuda-samples histogram/scalar hot perf gate hardening: changed `e2e:webgpu:corpus-hot` from speedup-only repeat to warmup + phase profile + `--expect-warm-ms-max 12`; gate is `6/0/0`, skips `0`, best warm `5.2ms` / `3.7ms`, profiled WebGPU run about `2.5-2.8ms`
 - cuda-samples HyperQ reduction fixture pinning: promoted `simpleHyperQ/sum` into explicit expected-output fixture covering cooperative groups sync, shared-memory reduction, and warp-size loop; focused fixture `1 passed / 0 failed / 0 skipped`, expected-output `1`; full pinned fixture gate `106/0/0`, expected-output `106`, by corpus `cuda-120=10`, `cuda-samples=22`, `llm.c=28`, `leetcuda=46`, skips `0`
 - active-lane var-init all-inactive storage helper probe batch: `2 passed / 0 failed / 0 skipped`; hot repeat `6 passed / 0 failed / 0 skipped`, best warm `4.7ms` / `4.3ms`; active-lane false-branch gap scan now reports no missing all-inactive smoke siblings
@@ -762,6 +763,7 @@ Current verified gates:
 | Pinned | cuda-samples atomic intrinsics fixture | simpleAtomicIntrinsics was generated auto-corpus smoke only, and multi-lane final atomic values can be order-sensitive for exchange/CAS-style ops | added one-lane deterministic expected-output fixture that still executes CUDA atomic add/sub/exch/min/max/inc/dec/CAS/and/or/xor lowering against real cuda-samples source | focused fixture `1/0/0`; full fixture gate `104/0/0`, expected-output `104`, by corpus `cuda-samples=20`, skips `0` |
 | Pinned | cuda-samples CUDA2GL dynamic shared fixture | `simpleCUDA2GL/cudaProcess` was auto-corpus smoke only, so dynamic shared declaration plus packed `uchar4`/device-helper behavior lacked a stable expected-output oracle | added compact expected-output fixture with `imgw=33` so the x-bit branch produces a nonzero packed RGB value at the final pixel while keeping readback small | focused fixture `1/0/0`; full fixture gate `105/0/0`, expected-output `105`, by corpus `cuda-samples=21`, skips `0` |
 | Pinned | cuda-samples HyperQ shared-memory reduction fixture | `simpleHyperQ/sum` was auto-corpus smoke only, so cooperative groups sync plus shared-memory warp reduction lacked a stable expected-output oracle | added compact expected-output fixture over `d_clocks=[1..32]` proving `cg::sync`, shared-memory reduction, and `warpSize` loop write `528` to index `0` | focused fixture `1/0/0`; full fixture gate `106/0/0`, expected-output `106`, by corpus `cuda-samples=22`, skips `0` |
+| Pinned | cuda-samples surface object write fixture | `simpleSurfaceWrite/surfaceWriteKernel` was auto-corpus smoke only, so real cuda-samples `surf2Dwrite` through a `cudaSurfaceObject_t` lacked a stable expected-output oracle | added compact 2x2 surface fixture writing `[1,2,3,4]` from global memory into a float surface with byte-offset `x * 4` | focused fixture `1/0/0`; full fixture gate `107/0/0`, expected-output `107`, by corpus `cuda-samples=23`, skips `0` |
 | Probed green | vector pointer-array difference side effects | remaining combined risk: `ptrs[helper(counter)] - (out + 1)` for `uint4*` could have re-run helper index side effects, returned scalar-lane distance instead of vector-element distance, or mis-selected buffer/base pairs | no code fix needed; existing pointer-array index hoist plus scaled pointer-difference lowering materializes helper index once and divides vector flat-lane base deltas by lane width | focused unit `482/0`; focused WebGPU `1/0/0`, skips `0`; hot repeat `3/0/0`, best warm `1.4ms`; changed gate compiler unit `466/0`, smoke `389/0/0`, skips `0` |
 | Fixed | vector pointer-difference scaling | fail-first unit showed `uint4*` pointer subtraction returned flat lane delta `8` for `(out + 2) - out` instead of CUDA element delta `2`; real WebGPU fixture checks `[2,1,1]` element distances | pointer-difference lowering now divides raw base deltas by `devicePointerIndexScale(...)`, matching vector pointer arithmetic lane scaling while leaving scalar pointers unchanged | focused unit `481/0`; focused WebGPU `1/0/0`, skips `0`; hot repeat `3/0/0`, best warm `3.5ms`; changed gate compiler unit `465/0`, WGSL `16/0`, smoke `388/0/0`, focused storage `111/0/0`, skips `0`; lint passed |
 | Fixed | pointer-difference storage operand recognition | fail-first real WebGPU case `(uint)(ptrs[pointer_array_diff_index_helper(...)] - (storage + 1))` failed pipeline creation with `operator + (array<atomic<u32>>, u32)` because `storage + 1` was treated as scalar arithmetic after pointer-difference recognition rejected direct storage pointer params | pointer-difference operand recognition now treats pointer storage params as pointer operands, reusing existing device pointer buffer/base lowering instead of scalar storage-buffer math | focused unit `480/0`; focused WebGPU `1/0/0`, skips `0`; hot repeat `3/0/0`, best warm `4.3ms`; changed gate compiler unit `464/0`, WGSL `16/0`, smoke `387/0/0`, focused storage `110/0/0`, skips `0`; lint passed |
@@ -1273,7 +1275,7 @@ Probe these with fail-first real WebGPU fixtures:
   - `e2e:webgpu:auto-corpus-hot` guards slow-looking auto-corpus shared-memory/barrier cases with exact filters, warmup, phase profiling, and `--expect-warm-ms-max 8`; latest run is `6/0/0`, skips `0`, best warm `4.1ms` / `3.4ms`
   - auto-corpus exact-case profiling no longer fails a full-corpus baseline check; filtered expected counts now match the selected case set
   - llm.c synthetic smoke reference loops are smaller, but layernorm reference cases still dominate the scoped run at about `234ms`; keep profiling reference hot spots separately from WebGPU dispatch time
-  - corpus fixture expected-output baseline now covers `106/106` real WebGPU fixtures; source/dist real-world verifier and histogram/scalar hot perf gate are green after final oracle pinning
+  - corpus fixture expected-output baseline now covers `107/107` real WebGPU fixtures; source/dist real-world verifier and histogram/scalar hot perf gate are green after final oracle pinning
   - `e2e:webgpu:corpus-hot` now profiles histogram/scalar slow real corpus fixtures with warmup and `--expect-warm-ms-max 12`; latest run is `6/0/0`, skips `0`, best warm `5.2ms` / `3.7ms`, WebGPU run about `2.5-2.8ms`
   - warm-speedup gate now ignores sub-`8ms` cold runs because timing-floor noise can invert ratios on tiny fixtures; use warm-ms max gates or larger cases for true perf regressions
   - multi-case `--profile-case` now profiles paired slow smoke siblings in one run; current slow volume min/max cases are pipeline-prepare dominated, not dispatch dominated
