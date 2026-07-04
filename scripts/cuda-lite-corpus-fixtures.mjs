@@ -231,6 +231,23 @@ export const cudaLiteCorpusExecutionFixtures = [
     expectedOutput: { type: "Int32Array", data: [10, -10, 0, 0, 0, 1, 137, 0, 7, 3, 11] },
   },
   {
+    sourceKey: "corpusCudaSamplesSystemWideAtomics",
+    caseName: "corpus:cuda-samples:systemWideAtomics",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/0_Introduction/systemWideAtomics/systemWideAtomics.cu",
+    kernelName: "atomicKernel",
+    workgroupSize: [1, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    input: {
+      buffers: {
+        atom_arr: { type: "Int32Array", data: [0, 0, -256, 256, 0, 0, -1, -1, 0, 11] },
+      },
+      scalars: {},
+    },
+    output: "atom_arr",
+    expectedOutput: { type: "Int32Array", data: [500, 0, 0, 0, 14, 88, 0, 7, 1, 11] },
+  },
+  {
     sourceKey: "corpusCudaSamplesSimpleCuda2GlProcess",
     caseName: "corpus:cuda-samples:cudaProcess",
     corpusId: "cuda-samples",
