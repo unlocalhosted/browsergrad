@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-04T23:18:38Z
+Last updated: 2026-07-04T23:22:01Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `472/0/0`, dist `472/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `106/106` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Pinned cuda-samples HyperQ shared-memory reduction fixture |
+| Active work item | Hardened cuda-samples histogram/scalar hot perf gate |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- cuda-samples histogram/scalar hot perf gate hardening: changed `e2e:webgpu:corpus-hot` from speedup-only repeat to warmup + phase profile + `--expect-warm-ms-max 12`; gate is `6/0/0`, skips `0`, best warm `5.2ms` / `3.7ms`, profiled WebGPU run about `2.5-2.8ms`
 - cuda-samples HyperQ reduction fixture pinning: promoted `simpleHyperQ/sum` into explicit expected-output fixture covering cooperative groups sync, shared-memory reduction, and warp-size loop; focused fixture `1 passed / 0 failed / 0 skipped`, expected-output `1`; full pinned fixture gate `106/0/0`, expected-output `106`, by corpus `cuda-120=10`, `cuda-samples=22`, `llm.c=28`, `leetcuda=46`, skips `0`
 - active-lane var-init all-inactive storage helper probe batch: `2 passed / 0 failed / 0 skipped`; hot repeat `6 passed / 0 failed / 0 skipped`, best warm `4.7ms` / `4.3ms`; active-lane false-branch gap scan now reports no missing all-inactive smoke siblings
 - slow smoke hot perf gate: profiled 15 slow smoke siblings after one warmup; `30 passed / 0 failed / 0 skipped`; best warm max `5.3ms`, below `20ms` gate; cold full-smoke profile showed volume min/max first-prepare shader compilation at about `685-711ms`, while steady-state prepare/run is about `5ms`
@@ -755,6 +756,7 @@ Current verified gates:
 | Probed green | active-lane var-init all-inactive storage helpers | active-lane conditional and nested conditional helper var-init paths had true/false-branch coverage, but no all-inactive sibling proving helper var initializers do not evaluate once every lane returns | no compiler code fix needed; active-lane lowering suppresses helper var-init side effects for both direct and nested helper calls when `limit=0` | focused batch `2/0/0`, skips `0`; hot repeat `6/0/0`, best warm `4.7ms` / `4.3ms`; active-lane false-branch gap scan `[]` |
 | Fixed | auto-corpus synthetic zero-data probes | several auto-corpus cases compiled and dispatched but started from zero-filled synthetic pointer buffers, so vector-add/residual-style outputs could remain zero and prove less than intended | synthetic pointer buffers now use deterministic bounded nonzero data in both node and browser input generators; `voidptr` and device-pool storage remain zero to avoid fake pointer offsets | synthetic-input unit passed; changed-output spot check now mutates `C`/`out`/atomic buffers; fast auto-corpus WebGPU/reference `32/0/0`, compile-only `32/0/0`, pinned corpus fixtures `98/0/0`, WebGPU smoke `419/0/0`, skips `0`; lint passed |
 | Perf/tooling | auto-corpus shared-memory hot gate | full fast auto-corpus sweep reported `synchronizedKernel` and `sharedMemoryExample` at about `240-255ms`, which looked like a real shared-memory/barrier regression | exact warmed phase profile proved steady-state stays under `4.1ms` and WebGPU run is about `2.5-2.8ms`; added `e2e:webgpu:auto-corpus-hot` to keep these real auto-corpus cases guarded by warm-ms instead of noisy full-sweep first-run timing | focused exact run `6/0/0`, skips `0`, best warm `4.1ms` / `3.4ms`; package script has `--forbid-skips`, `--profile-case`, and `--expect-warm-ms-max 8` |
+| Perf/tooling | cuda-samples histogram/scalar hot gate | full fixture runs list `histogram64Kernel` and `scalarProdGPU` around `1.4-1.7s`, but the old gate only checked speedup and did not expose phase timings | changed `e2e:webgpu:corpus-hot` to run with warmup, paired `--profile-case`, repeat `3`, and `--expect-warm-ms-max 12`, proving the steady path instead of relying on cold/warm ratio | hot gate `6/0/0`, skips `0`, best warm `5.2ms` / `3.7ms`; profile shows WebGPU run about `2.5-2.8ms`; test-scope covers script flags |
 | Pinned | CUDA-120 shared-memory fixtures | `synchronizedKernel` and `sharedMemoryExample` were only covered through generated auto-corpus smoke, so they were not part of the explicit pinned expected-output baseline | added compact real corpus fixtures for static shared-memory + `__syncthreads` and extern dynamic shared memory; bumped pinned baseline to `100/100` and CUDA-120 fixture minimum to `7` | focused fixture run `2/0/0`; hot profile `6/0/0`, best warm `3.3ms` / `3.1ms`; full fixture gate `100/0/0`, expected-output `100`, skips `0` |
 | Pinned | CUDA-120 memory/SIMT fixtures | day-3 coalesced access, SIMT branch, and vector-add examples were still generated auto-corpus smoke only, leaving no stable expected-output oracle for these simple real kernels | added explicit expected-output fixtures for `coalescedAccess`, `simtExample`, and `vectorAddGPU`; the SIMT case uses mixed signs to prove both branch outputs | focused fixture run `3/0/0`; full fixture gate `103/0/0`, expected-output `103`, by corpus `cuda-120=10`, skips `0` |
 | Pinned | cuda-samples atomic intrinsics fixture | simpleAtomicIntrinsics was generated auto-corpus smoke only, and multi-lane final atomic values can be order-sensitive for exchange/CAS-style ops | added one-lane deterministic expected-output fixture that still executes CUDA atomic add/sub/exch/min/max/inc/dec/CAS/and/or/xor lowering against real cuda-samples source | focused fixture `1/0/0`; full fixture gate `104/0/0`, expected-output `104`, by corpus `cuda-samples=20`, skips `0` |
@@ -1272,6 +1274,7 @@ Probe these with fail-first real WebGPU fixtures:
   - auto-corpus exact-case profiling no longer fails a full-corpus baseline check; filtered expected counts now match the selected case set
   - llm.c synthetic smoke reference loops are smaller, but layernorm reference cases still dominate the scoped run at about `234ms`; keep profiling reference hot spots separately from WebGPU dispatch time
   - corpus fixture expected-output baseline now covers `106/106` real WebGPU fixtures; source/dist real-world verifier and histogram/scalar hot perf gate are green after final oracle pinning
+  - `e2e:webgpu:corpus-hot` now profiles histogram/scalar slow real corpus fixtures with warmup and `--expect-warm-ms-max 12`; latest run is `6/0/0`, skips `0`, best warm `5.2ms` / `3.7ms`, WebGPU run about `2.5-2.8ms`
   - warm-speedup gate now ignores sub-`8ms` cold runs because timing-floor noise can invert ratios on tiny fixtures; use warm-ms max gates or larger cases for true perf regressions
   - multi-case `--profile-case` now profiles paired slow smoke siblings in one run; current slow volume min/max cases are pipeline-prepare dominated, not dispatch dominated
   - repeat stats now include phase profile for cold and best-warm repeats, so hot gates identify compile/run/prepare/reference/compare costs without manual log spelunking
