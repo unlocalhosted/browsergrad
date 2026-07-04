@@ -689,6 +689,9 @@ function needsDynamicPointerHandle(expression: CudaLiteExpression | undefined): 
     return needsDynamicPointerHandle(expression.args[0]);
   }
   if (expression.kind === "conditional") return true;
+  if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
+    return needsDynamicPointerHandle(expression.left) || needsDynamicPointerHandle(expression.right);
+  }
   return false;
 }
 

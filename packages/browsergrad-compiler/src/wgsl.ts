@@ -1786,10 +1786,47 @@ function emitLocalPointerHandleDecl(
   indentLevel: number,
 ): string[] {
   const prefix = indent(indentLevel);
+  if (statement.init && splitLazyConditionalSideEffectExpression(statement.init, context)) {
+    return [
+      `${prefix}var ${localPointerHandleBufferName(statement, context)}: u32 = 0u;`,
+      `${prefix}var ${localPointerHandleBaseName(statement, context)}: u32 = 0u;`,
+      ...emitLazyLocalPointerHandleInitAssignment(statement, statement.init, context, indentLevel),
+    ];
+  }
   const [buffer, base] = emitLocalPointerHandleInit(statement, context);
   return [
     `${prefix}var ${localPointerHandleBufferName(statement, context)}: u32 = ${buffer};`,
     `${prefix}var ${localPointerHandleBaseName(statement, context)}: u32 = ${base};`,
+  ];
+}
+
+function emitLazyLocalPointerHandleInitAssignment(
+  statement: CudaLiteVarDecl,
+  expression: CudaLiteExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const split = splitLazyConditionalSideEffectExpression(expression, context);
+  const prefix = indent(indentLevel);
+  if (!split) {
+    const parts = devicePointerArgumentParts(expression, context);
+    if (!parts) {
+      throw featureError(
+        "unsupported-device-pointer-param",
+        `local pointer '${statement.name}' at line ${statement.span.line} must initialize from modeled storage or shared memory`,
+      );
+    }
+    return [
+      `${prefix}${localPointerHandleBufferName(statement, context)} = ${parts.buffer};`,
+      `${prefix}${localPointerHandleBaseName(statement, context)} = ${parts.base};`,
+    ];
+  }
+  return [
+    `${prefix}if (${emitTruthinessExpression(split.condition, context)}) {`,
+    ...emitLazyLocalPointerHandleInitAssignment(statement, split.consequent, context, indentLevel + 1),
+    `${prefix}} else {`,
+    ...emitLazyLocalPointerHandleInitAssignment(statement, split.alternate, context, indentLevel + 1),
+    `${prefix}}`,
   ];
 }
 

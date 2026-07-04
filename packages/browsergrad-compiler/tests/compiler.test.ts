@@ -7875,6 +7875,24 @@ __global__ void conditionalVectorLaneLvalue(uint *storage, uint4 *out, int enabl
     expect(compiled.wgsl).not.toContain("select(0u, conditional_vector_lane_lvalue_helper_with_pointer_side_effect");
   });
 
+  it("preserves conditional helper-call laziness in pointer initializers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint conditional_pointer_init_helper_with_pointer_side_effect(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__global__ void conditionalPointerInit(uint *storage, uint *out, int enabled) {
+  uint *target = storage + (enabled != 0 ? conditional_pointer_init_helper_with_pointer_side_effect(storage, 7u) : 0u);
+  target[0] = 9u;
+  out[0] = storage[0];
+  out[1] = storage[1];
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toContain("conditional_pointer_init_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0u, conditional_pointer_init_helper_with_pointer_side_effect");
+  });
+
   it("preserves atomic side effects before loop returns lowered for barriers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomicReturnSideEffectBarrier(uint *counter, uint *out, int N) {
