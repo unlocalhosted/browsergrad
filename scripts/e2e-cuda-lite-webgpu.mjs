@@ -3003,6 +3003,11 @@ __global__ void scalarViewVectorPointerDifference(uint4 *out, int *summary) {
   summary[0] = left - right;
   summary[1] = (out + 1) - out;
 }`,
+  byteRootInlineCastPointerDifference: `
+__global__ void byteRootInlineCastPointerDifference(uchar *bytes, int *summary) {
+  summary[0] = reinterpret_cast<float*>(bytes + 8) - reinterpret_cast<float*>(bytes);
+  summary[1] = reinterpret_cast<uint*>(bytes + 12) - reinterpret_cast<uint*>(bytes);
+}`,
   systemAtomicAliases: `
 __global__ void systemAtomicAliases(int *x, int *out) {
   if (threadIdx.x == 0) {
@@ -10532,6 +10537,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Int32Array", data: [4, 1] },
+          },
+          {
+            name: "storage:byte-root-inline-cast-pointer-difference",
+            source: SOURCES.byteRootInlineCastPointerDifference,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                bytes: new Uint32Array(4),
+                summary: new Int32Array(2),
+              },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Int32Array", data: [2, 3] },
           },
           {
             name: "atomic:system-aliases",

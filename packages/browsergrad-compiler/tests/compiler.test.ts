@@ -860,6 +860,16 @@ __global__ void scalar_view_vector_pointer_difference(uint4 *out, int *summary) 
     expect(compiled.wgsl).not.toMatch(/summary\[0\] = i32\(\(\(i32\(.+\) - i32\(.+\)\) \/ 4\)\);/u);
   });
 
+  it("scales inline cast pointer differences over byte roots", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__global__ void byte_root_inline_cast_pointer_difference(uchar *bytes, int *summary) {
+  summary[0] = reinterpret_cast<float*>(bytes + 8) - reinterpret_cast<float*>(bytes);
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl).toMatch(/summary\[0\] = i32\(\(\(i32\(.+\) - i32\(.+\)\) \/ 4\)\);/u);
+    expect(compiled.wgsl).not.toMatch(/summary\[0\] = i32\(\(i32\(.+\) - i32\(.+\)\)\);/u);
+  });
+
   it("preserves scalar-to-vector pointer alias byte offsets", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ void bump_roundtrip_vec(float4* out, int idx, float4 delta) {

@@ -137,6 +137,7 @@ export const storageScopeCases = [
   "storage:vector-pointer-difference",
   "storage:vector-pointer-array-diff-index-once",
   "storage:scalar-view-vector-pointer-difference",
+  "storage:byte-root-inline-cast-pointer-difference",
 ];
 
 export const atomicScopeCases = [
