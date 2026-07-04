@@ -2920,6 +2920,8 @@ function emitPredicatedScalarAssignment(
     context.paramFor(root) ||
     context.deviceGlobalFor(root) ||
     context.isAtomicShared(root) ||
+    context.localPointerArrayFor(root, expression.left.span) ||
+    context.localPointerHandleFor(root, expression.left.span) ||
     storageViewLValue(expression.left, context) ||
     scalarStorageViewLValue(expression.left, context) ||
     scalarParamStorageViewLValue(expression.left, context) ||

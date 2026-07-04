@@ -640,6 +640,31 @@ __global__ void vector_pointer_array_compound_after_atomic(uint4* out) {
     expect(compiled.wgsl).not.toContain("slot[");
   });
 
+  it("guards active-lane pointer-array assignments without scalar select fallback", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ void add_uint_vector_slot(uint4* slot, uint value) {
+  uint* lanes = reinterpret_cast<uint*>(slot);
+  atomicAdd(lanes + 1, value);
+}
+
+__global__ void active_lane_pointer_array_assignment(uint4* out, uint4* shadow, int n) {
+  int tid = threadIdx.x;
+  if (tid >= n) {
+    return;
+  }
+  __syncthreads();
+  uint4* slots[2];
+  slots[0] = out + 1;
+  slots[1] = shadow + 1;
+  add_uint_vector_slot(slots[tid], 5u);
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toContain("if (bg_active_lane) {");
+    expect(compiled.wgsl).toContain("slots_buffer[u32(0)] = 0u; slots_base[u32(0)] = (0u + (u32(1) * 4u));");
+    expect(compiled.wgsl).toContain("slots_buffer[u32(1)] = 1u; slots_base[u32(1)] = (0u + (u32(1) * 4u));");
+    expect(compiled.wgsl).not.toContain("select(slots[");
+  });
+
   it("preserves scalar-to-vector pointer alias byte offsets", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ void bump_roundtrip_vec(float4* out, int idx, float4 delta) {
