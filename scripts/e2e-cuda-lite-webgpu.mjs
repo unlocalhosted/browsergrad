@@ -2885,6 +2885,30 @@ __global__ void activeLanePointerArrayAssignment(uint4 *storage, int limit) {
   add_active_uint_vector_slot(slots[tid], 5u + (uint)tid);
   __syncthreads();
 }`,
+  activeLaneConditionalHelperPointerArrayIndex: `
+__device__ uint active_conditional_pointer_array_index_helper(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__device__ void add_selected_uint_ptr(uint *ptr, uint value) {
+  atomicAdd(ptr, value);
+}
+
+__global__ void activeLaneConditionalHelperPointerArrayIndex(uint *storage, int limit, int enabled) {
+  int tid = threadIdx.x;
+  for (int step = 0; step < 2; step++) {
+    if (tid >= limit) {
+      return;
+    }
+    __syncthreads();
+    uint *ptrs[2];
+    ptrs[0] = storage + tid;
+    ptrs[1] = storage + tid + 4;
+    add_selected_uint_ptr(ptrs[enabled != 0 ? active_conditional_pointer_array_index_helper(storage + tid, (uint)(step + tid + 1)) : 0u], 5u);
+    __syncthreads();
+  }
+}`,
   systemAtomicAliases: `
 __global__ void systemAtomicAliases(int *x, int *out) {
   if (threadIdx.x == 0) {
@@ -10264,6 +10288,48 @@ const html = String.raw`<!doctype html>
             }),
             output: "storage",
             expectedOutput: { type: "Uint32Array", data: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160] },
+          },
+          {
+            name: "storage:active-lane-conditional-helper-pointer-array-index",
+            source: SOURCES.activeLaneConditionalHelperPointerArrayIndex,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                storage: new Uint32Array([10, 20, 30, 40, 50, 60, 70, 80]),
+              },
+              scalars: { limit: 3, enabled: 1 },
+            }),
+            output: "storage",
+            expectedOutput: { type: "Uint32Array", data: [13, 25, 37, 40, 60, 70, 80, 80] },
+          },
+          {
+            name: "storage:active-lane-conditional-helper-pointer-array-index-false-branch",
+            source: SOURCES.activeLaneConditionalHelperPointerArrayIndex,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                storage: new Uint32Array([10, 20, 30, 40, 50, 60, 70, 80]),
+              },
+              scalars: { limit: 3, enabled: 0 },
+            }),
+            output: "storage",
+            expectedOutput: { type: "Uint32Array", data: [20, 30, 40, 40, 50, 60, 70, 80] },
+          },
+          {
+            name: "storage:active-lane-conditional-helper-pointer-array-index-all-inactive",
+            source: SOURCES.activeLaneConditionalHelperPointerArrayIndex,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                storage: new Uint32Array([10, 20, 30, 40, 50, 60, 70, 80]),
+              },
+              scalars: { limit: 0, enabled: 1 },
+            }),
+            output: "storage",
+            expectedOutput: { type: "Uint32Array", data: [10, 20, 30, 40, 50, 60, 70, 80] },
           },
           {
             name: "atomic:system-aliases",

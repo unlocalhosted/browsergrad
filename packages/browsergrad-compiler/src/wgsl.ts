@@ -216,6 +216,7 @@ import {
   type CudaLiteDeviceGlobal,
   type CudaLiteDeviceFunction,
   type CudaLiteExpression,
+  type CudaLiteIndexExpression,
   type CudaLiteParam,
   type CudaLiteScalarType,
   type CudaLiteStatement,
@@ -2771,8 +2772,42 @@ function emitLazyConditionalExpressionStatementBranch(
 ): string[] {
   const nested = emitExpressionStatementWithLazyConditionalSideEffect(expression, context, indentLevel);
   if (nested) return nested;
+  const hoistedPointerArrayIndex = emitExpressionStatementWithHoistedSideEffectingPointerArrayIndex(expression, context, indentLevel);
+  if (hoistedPointerArrayIndex) return hoistedPointerArrayIndex;
   const emitted = emitExpressionStatement(expression, context);
   return emitted.length === 0 ? [] : [`${indent(indentLevel)}${emitted};`];
+}
+
+function emitExpressionStatementWithHoistedSideEffectingPointerArrayIndex(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  const pointerArrayIndex = firstSideEffectingPointerArrayIndexExpression(expression, context);
+  if (!pointerArrayIndex) return undefined;
+  const prefix = indent(indentLevel);
+  const tempName = `bg_pointer_array_index_${pointerArrayIndex.index.span.start}`;
+  const scopedContext = contextWithHoistedLocalValue(context, tempName, "uint");
+  const replacement: CudaLiteExpression = { kind: "identifier", name: tempName, span: pointerArrayIndex.index.span };
+  const replaced = replaceExpressionNode(expression, pointerArrayIndex.index, replacement);
+  return [
+    `${prefix}let ${scopedContext.nameFor(tempName)}: u32 = ${emitExpressionAsValueType(pointerArrayIndex.index, "uint", context)};`,
+    ...emitLazyConditionalExpressionStatementBranch(replaced, scopedContext, indentLevel),
+  ];
+}
+
+function firstSideEffectingPointerArrayIndexExpression(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+): CudaLiteIndexExpression | undefined {
+  let found: CudaLiteIndexExpression | undefined;
+  walkCudaLiteExpressions([{ kind: "expr", expression, span: expression.span }], (item) => {
+    if (found || item.kind !== "index" || item.target.kind !== "identifier") return;
+    if (!context.localPointerArrayFor(item.target.name, item.target.span)) return;
+    if (!expressionContainsSideEffectingCall(item.index, context)) return;
+    found = item;
+  });
+  return found;
 }
 
 function emitConditionalExpression(expression: CudaLiteConditionalExpression, context: EmitContext): string {

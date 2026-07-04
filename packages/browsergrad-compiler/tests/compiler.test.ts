@@ -692,6 +692,38 @@ __global__ void active_lane_helper_pointer_array_selected_args(float4 *values, i
     expect(compiled.wgsl).not.toContain("select(ptrs");
   });
 
+  it("guards active-lane conditional helper-call pointer-array indices", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ uint active_conditional_pointer_array_index_helper(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__device__ void add_selected_uint_ptr(uint *ptr, uint value) {
+  atomicAdd(ptr, value);
+}
+
+__global__ void active_lane_conditional_helper_pointer_array_index(uint *storage, int limit, int enabled) {
+  int tid = threadIdx.x;
+  for (int step = 0; step < 2; step++) {
+    if (tid >= limit) return;
+    __syncthreads();
+    uint *ptrs[2];
+    ptrs[0] = storage + tid;
+    ptrs[1] = storage + tid + 4;
+    add_selected_uint_ptr(ptrs[enabled != 0 ? active_conditional_pointer_array_index_helper(storage + tid, (uint)(step + tid + 1)) : 0u], 5u);
+    __syncthreads();
+  }
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(bg_uniforms.enabled != 0\)\)/u);
+    expect(compiled.wgsl).toContain("active_conditional_pointer_array_index_helper");
+    expect(compiled.wgsl.match(/\bactive_conditional_pointer_array_index_helper\(/gu) ?? []).toHaveLength(2);
+    expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = active_conditional_pointer_array_index_helper\(/u);
+    expect(compiled.wgsl).not.toContain("select(0u, active_conditional_pointer_array_index_helper");
+  });
+
   it("preserves scalar-to-vector pointer alias byte offsets", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ void bump_roundtrip_vec(float4* out, int idx, float4 delta) {
