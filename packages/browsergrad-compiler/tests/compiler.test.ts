@@ -724,6 +724,24 @@ __global__ void active_lane_conditional_helper_pointer_array_index(uint *storage
     expect(compiled.wgsl).not.toContain("select(0u, active_conditional_pointer_array_index_helper");
   });
 
+  it("evaluates side-effecting pointer-array assignment indices once", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ uint pointer_array_assignment_index_helper(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__global__ void pointer_array_assignment_index_once(uint *storage) {
+  uint *ptrs[2];
+  ptrs[0] = storage;
+  ptrs[1] = storage + 1;
+  ptrs[pointer_array_assignment_index_helper(storage, 1u)] = storage + 2;
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl.match(/\bpointer_array_assignment_index_helper\(/gu) ?? []).toHaveLength(2);
+    expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = pointer_array_assignment_index_helper\(/u);
+  });
+
   it("preserves scalar-to-vector pointer alias byte offsets", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ void bump_roundtrip_vec(float4* out, int idx, float4 delta) {

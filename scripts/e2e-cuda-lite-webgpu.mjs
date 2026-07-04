@@ -2909,6 +2909,23 @@ __global__ void activeLaneConditionalHelperPointerArrayIndex(uint *storage, int 
     __syncthreads();
   }
 }`,
+  pointerArrayAssignmentIndexOnce: `
+__device__ uint pointer_array_assignment_index_helper(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__device__ void add_pointer_array_assignment_selected(uint *ptr, uint value) {
+  atomicAdd(ptr, value);
+}
+
+__global__ void pointerArrayAssignmentIndexOnce(uint *storage) {
+  uint *ptrs[2];
+  ptrs[0] = storage + 1;
+  ptrs[1] = storage + 1;
+  ptrs[pointer_array_assignment_index_helper(storage, 1u)] = storage + 2;
+  add_pointer_array_assignment_selected(ptrs[1], 5u);
+}`,
   systemAtomicAliases: `
 __global__ void systemAtomicAliases(int *x, int *out) {
   if (threadIdx.x == 0) {
@@ -10330,6 +10347,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "storage",
             expectedOutput: { type: "Uint32Array", data: [10, 20, 30, 40, 50, 60, 70, 80] },
+          },
+          {
+            name: "storage:pointer-array-assignment-index-once",
+            source: SOURCES.pointerArrayAssignmentIndexOnce,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                storage: new Uint32Array([10, 20, 30, 40]),
+              },
+            }),
+            output: "storage",
+            expectedOutput: { type: "Uint32Array", data: [11, 20, 35, 40] },
           },
           {
             name: "atomic:system-aliases",

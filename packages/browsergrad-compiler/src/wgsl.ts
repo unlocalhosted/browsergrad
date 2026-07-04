@@ -3122,6 +3122,8 @@ function emitAssignmentStatement(
   if (conditionalLeft) return conditionalLeft;
   const conditional = emitAssignmentWithConditionalSideEffectRhs(expression, context, indentLevel);
   if (conditional) return conditional;
+  const hoistedPointerArrayIndex = emitAssignmentWithHoistedSideEffectingPointerArrayIndex(expression, context, indentLevel);
+  if (hoistedPointerArrayIndex) return hoistedPointerArrayIndex;
   const nested = splitNestedAssignmentExpression(expression.right);
   if (!nested) return [`${prefix}${emitAssignment(expression, context)};`];
   return [
@@ -3217,7 +3219,35 @@ function emitLazyConditionalAssignmentBranch(
 ): string[] {
   return emitAssignmentWithLazyConditionalSideEffectLhs(expression, context, indentLevel) ??
     emitAssignmentWithLazyConditionalSideEffectRhs(expression, context, indentLevel) ??
+    emitAssignmentWithHoistedSideEffectingPointerArrayIndex(expression, context, indentLevel) ??
     [`${indent(indentLevel)}${emitAssignment(expression, context)};`];
+}
+
+function emitAssignmentWithHoistedSideEffectingPointerArrayIndex(
+  expression: CudaLiteAssignmentExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  const pointerArrayIndex = sideEffectingPointerArrayAssignmentIndex(expression, context);
+  if (!pointerArrayIndex) return undefined;
+  const prefix = indent(indentLevel);
+  const tempName = `bg_pointer_array_index_${pointerArrayIndex.span.start}`;
+  const scopedContext = contextWithHoistedLocalValue(context, tempName, "uint");
+  const replacement: CudaLiteExpression = { kind: "identifier", name: tempName, span: pointerArrayIndex.span };
+  const replacedLeft = replaceExpressionNode(expression.left, pointerArrayIndex, replacement);
+  return [
+    `${prefix}let ${scopedContext.nameFor(tempName)}: u32 = ${emitExpressionAsValueType(pointerArrayIndex, "uint", context)};`,
+    ...emitLazyConditionalAssignmentBranch({ ...expression, left: replacedLeft }, scopedContext, indentLevel),
+  ];
+}
+
+function sideEffectingPointerArrayAssignmentIndex(
+  expression: CudaLiteAssignmentExpression,
+  context: EmitContext,
+): CudaLiteExpression | undefined {
+  if (expression.left.kind !== "index" || expression.left.target.kind !== "identifier") return undefined;
+  if (!context.localPointerArrayFor(expression.left.target.name, expression.left.target.span)) return undefined;
+  return expressionContainsSideEffectingCall(expression.left.index, context) ? expression.left.index : undefined;
 }
 
 function emitLazyConditionalValueAssignment(

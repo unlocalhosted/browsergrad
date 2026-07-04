@@ -129,6 +129,7 @@ export const storageScopeCases = [
   "storage:active-lane-conditional-helper-pointer-array-index",
   "storage:active-lane-conditional-helper-pointer-array-index-false-branch",
   "storage:active-lane-conditional-helper-pointer-array-index-all-inactive",
+  "storage:pointer-array-assignment-index-once",
 ];
 
 export const atomicScopeCases = [
