@@ -784,6 +784,8 @@ function emitStatementWithActiveFlag(
     if (hoisted) return hoisted;
     const inlined = emitInlineBarrierDeviceFunctionAssignment(statement.expression, context, indentLevel, activeFlag);
     if (inlined) return inlined;
+    const conditionalLeft = emitActiveAssignmentWithConditionalSideEffectLhs(statement.expression, activeFlag, context, indentLevel);
+    if (conditionalLeft) return conditionalLeft;
   }
   if (statement.kind === "var") return emitVarStatementWithActiveFlag(statement, activeFlag, context, indentLevel);
   const localConstantAssignment = emitLocalConstantAssignmentStatement(statement, context, indentLevel);
@@ -836,6 +838,8 @@ function emitStatementWithGuard(
     if (hoisted) return hoisted;
     const inlined = emitInlineBarrierDeviceFunctionAssignment(statement.expression, context, indentLevel, guardSource);
     if (inlined) return inlined;
+    const conditionalLeft = emitActiveAssignmentWithConditionalSideEffectLhs(statement.expression, guardSource, context, indentLevel);
+    if (conditionalLeft) return conditionalLeft;
   }
   if (statement.kind === "var") return emitVarStatementWithActiveFlag(statement, guardSource, context, indentLevel);
   const localConstantAssignment = emitLocalConstantAssignmentStatement(statement, context, indentLevel);
@@ -3250,6 +3254,22 @@ function emitPredicatedScalarAssignmentStatement(
   return emitPredicatedScalarAssignment(statement.expression, activeFlag, context, indentLevel);
 }
 
+function emitActiveAssignmentWithConditionalSideEffectLhs(
+  expression: CudaLiteAssignmentExpression,
+  activeFlag: string,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  const conditionalLeft = emitAssignmentWithLazyConditionalSideEffectLhs(expression, context, indentLevel + 1);
+  if (!conditionalLeft) return undefined;
+  const prefix = indent(indentLevel);
+  return [
+    `${prefix}if (${activeFlag}) {`,
+    ...conditionalLeft,
+    `${prefix}}`,
+  ];
+}
+
 function emitGuardedAssignmentWithHoistedUniformRhs(
   statement: CudaLiteStatement,
   guardSource: string,
@@ -3367,6 +3387,8 @@ function emitPredicatedScalarAssignment(
   }
   const valueType = expressionValueTypeForEmit(expression.left, context) ?? context.localValueTypeFor(root);
   if (!valueType || valueType === "void" || valueType === "complex64") return undefined;
+  const conditionalLeft = emitActiveAssignmentWithConditionalSideEffectLhs(expression, activeFlag, context, indentLevel);
+  if (conditionalLeft) return conditionalLeft;
   const left = emitExpression(expression.left, context, "lvalue");
   const current = emitExpressionAsValueType(expression.left, valueType, context);
   const conditional = emitPredicatedAssignmentWithConditionalSideEffectRhs(expression, activeFlag, context, indentLevel);

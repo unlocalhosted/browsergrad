@@ -7921,6 +7921,32 @@ __global__ void activeConditionalPointerInit(uint *storage, uint *out, int limit
     expect(compiled.wgsl).not.toContain("_ = atomicAdd(&bg_storage[(u32((0 + (tid * 2))))");
   });
 
+  it("guards conditional helper-call vector lane lvalues inside active-lane predication", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint active_conditional_vector_lane_lvalue_helper_with_pointer_side_effect(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__global__ void activeConditionalVectorLaneLvalue(uint *storage, uint4 *out, int limit, int enabled) {
+  int tid = threadIdx.x;
+  uint4 value = make_uint4(1u, 2u, 3u, 4u);
+  for (int step = 0; step < 2; step++) {
+    if (tid >= limit) return;
+    __syncthreads();
+    value[enabled != 0 ? (int)active_conditional_vector_lane_lvalue_helper_with_pointer_side_effect(storage + tid, (uint)(step + tid + 1)) : 0] = 9u;
+    __syncthreads();
+  }
+  out[tid] = value;
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(bg_uniforms.enabled != 0\)\)/u);
+    expect(compiled.wgsl).toContain("active_conditional_vector_lane_lvalue_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0, i32(active_conditional_vector_lane_lvalue_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0u, active_conditional_vector_lane_lvalue_helper_with_pointer_side_effect");
+  });
+
   it("preserves conditional helper-call laziness in vector pointer member lvalues", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ uint conditional_vector_member_lvalue_helper_with_pointer_side_effect(uint *ptr, uint add) {
