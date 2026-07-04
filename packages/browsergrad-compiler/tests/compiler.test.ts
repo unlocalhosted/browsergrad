@@ -778,6 +778,25 @@ __global__ void pointer_array_compare_index_once(uint *storage) {
     expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = pointer_array_compare_index_helper\(/u);
   });
 
+  it("evaluates side-effecting pointer-array var-init comparison indices once", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ uint pointer_array_var_init_compare_index_helper(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__global__ void pointer_array_var_init_compare_index_once(uint *storage) {
+  uint *ptrs[2];
+  ptrs[0] = storage + 1;
+  ptrs[1] = storage + 2;
+  uint value = ptrs[pointer_array_var_init_compare_index_helper(storage, 1u)] == storage + 2 ? 7u : 9u;
+  storage[3] = value;
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl.match(/\bpointer_array_var_init_compare_index_helper\(/gu) ?? []).toHaveLength(2);
+    expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = pointer_array_var_init_compare_index_helper\(/u);
+  });
+
   it("preserves scalar-to-vector pointer alias byte offsets", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ void bump_roundtrip_vec(float4* out, int idx, float4 delta) {

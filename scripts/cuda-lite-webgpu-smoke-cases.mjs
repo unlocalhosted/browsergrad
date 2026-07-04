@@ -132,6 +132,7 @@ export const storageScopeCases = [
   "storage:pointer-array-assignment-index-once",
   "storage:nested-pointer-array-target-index-once",
   "storage:pointer-array-compare-index-once",
+  "storage:pointer-array-var-init-compare-index-once",
 ];
 
 export const atomicScopeCases = [
