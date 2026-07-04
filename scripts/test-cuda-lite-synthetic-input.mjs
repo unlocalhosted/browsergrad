@@ -37,6 +37,8 @@ __global__ void half_kernel(half *x, half2 *y) {
 const f32Input = syntheticInputForCompiled(f32Half);
 assert.equal(f32Input.buffers.x instanceof Float32Array, true, "f32 half compatibility storage should use Float32Array");
 assert.equal(f32Input.buffers.y instanceof Float32Array, true, "f32 half2 compatibility storage should use Float32Array lanes");
+assert.equal(f32Input.buffers.x[0], 0.25, "synthetic scalar float inputs should avoid degenerate zero data");
+assert.equal(f32Input.buffers.y[1], 0.5, "synthetic vector float inputs should use deterministic lane-varying data");
 
 const vectorInputKernel = compiler.compileCudaLiteKernelForWebGpu(`
 __global__ void vector_input(uint4 *u, int4 *i, float4 *f) {
@@ -52,6 +54,9 @@ const vectorInput = syntheticInputForCompiled(vectorInputKernel);
 assert.equal(vectorInput.buffers.u instanceof Uint32Array, true, "uint vector storage should use Uint32Array lanes");
 assert.equal(vectorInput.buffers.i instanceof Int32Array, true, "int vector storage should use Int32Array lanes");
 assert.equal(vectorInput.buffers.f instanceof Float32Array, true, "float vector storage should use Float32Array lanes");
+assert.equal(vectorInput.buffers.u[0], 1, "uint synthetic inputs should avoid all-zero storage");
+assert.equal(vectorInput.buffers.i[1], 2, "int synthetic inputs should vary by lane");
+assert.equal(vectorInput.buffers.f[2], 0.75, "float synthetic inputs should vary by lane");
 
 const ucharInputKernel = compiler.compileCudaLiteKernelForWebGpu(`
 __global__ void uchar_input(uchar *out) {

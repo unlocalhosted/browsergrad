@@ -55,10 +55,28 @@ export function externalDevicePoolNamesFromSource(source) {
 }
 
 export function syntheticBufferForType(type, length = 4096, f16Mode = "native") {
-  if (type === "int" || /^int[234]$/u.test(type)) return new Int32Array(length);
-  if (type === "uint" || type === "uchar" || /^uint[234]$/u.test(type) || type === "voidptr" || type === "bool") return new Uint32Array(length);
-  if ((type === "half" || type === "half2") && f16Mode !== "f32") return createWgslFloat16Array(length);
-  return new Float32Array(length);
+  if (type === "int" || /^int[234]$/u.test(type)) return seedSyntheticBuffer(new Int32Array(length), type);
+  if (type === "uint" || type === "uchar" || /^uint[234]$/u.test(type) || type === "bool") {
+    return seedSyntheticBuffer(new Uint32Array(length), type);
+  }
+  if (type === "voidptr") return new Uint32Array(length);
+  if ((type === "half" || type === "half2") && f16Mode !== "f32") {
+    return seedSyntheticBuffer(createWgslFloat16Array(length), type);
+  }
+  return seedSyntheticBuffer(new Float32Array(length), type);
+}
+
+export function seedSyntheticBuffer(buffer, type) {
+  for (let index = 0; index < buffer.length; index += 1) {
+    if (buffer instanceof Uint32Array) {
+      buffer[index] = type === "bool" ? index % 2 : (index % 8) + 1;
+    } else if (buffer instanceof Int32Array) {
+      buffer[index] = (index % 8) + 1;
+    } else {
+      buffer[index] = ((index % 8) + 1) * 0.25;
+    }
+  }
+  return buffer;
 }
 
 export function syntheticConstantBufferForType(type, name, length = 4096, f16Mode = "native") {
