@@ -255,6 +255,26 @@ export const cudaLiteCorpusExecutionFixtures = [
     },
   },
   {
+    sourceKey: "corpusCudaSamplesSimpleHyperQSum",
+    caseName: "corpus:cuda-samples:simpleHyperQ_sum",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/0_Introduction/simpleHyperQ/simpleHyperQ.cu",
+    kernelName: "sum",
+    workgroupSize: [32, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [32, 1, 1] },
+    input: {
+      buffers: {
+        d_clocks: { type: "Int32Array", data: Array.from({ length: 32 }, (_value, index) => index + 1) },
+      },
+      scalars: { N: 32 },
+    },
+    output: "d_clocks",
+    expectedOutput: {
+      type: "Int32Array",
+      data: [528, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32],
+    },
+  },
+  {
     sourceKey: "corpusCudaSamplesIncKernel",
     caseName: "corpus:cuda-samples:incKernel",
     corpusId: "cuda-samples",
