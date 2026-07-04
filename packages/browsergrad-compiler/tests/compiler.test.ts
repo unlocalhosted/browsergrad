@@ -7857,6 +7857,24 @@ __global__ void nestedConditionalHelperSequenceLoopCondition(uint *storage, uint
     expect(sequenceCompiled.wgsl).not.toContain("select(0u, nested_sequence_loop_condition_helper_with_pointer_side_effect");
   });
 
+  it("preserves conditional helper-call laziness in vector-lane lvalues", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint conditional_vector_lane_lvalue_helper_with_pointer_side_effect(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__global__ void conditionalVectorLaneLvalue(uint *storage, uint4 *out, int enabled) {
+  uint4 value = make_uint4(1u, 2u, 3u, 4u);
+  value[enabled != 0 ? (int)conditional_vector_lane_lvalue_helper_with_pointer_side_effect(storage, 7u) : 0] = 9u;
+  out[0] = value;
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toContain("conditional_vector_lane_lvalue_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0, i32(conditional_vector_lane_lvalue_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0u, conditional_vector_lane_lvalue_helper_with_pointer_side_effect");
+  });
+
   it("preserves atomic side effects before loop returns lowered for barriers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomicReturnSideEffectBarrier(uint *counter, uint *out, int N) {

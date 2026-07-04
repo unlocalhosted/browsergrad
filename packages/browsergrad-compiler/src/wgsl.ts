@@ -3026,6 +3026,8 @@ function emitAssignmentStatement(
   indentLevel: number,
 ): string[] {
   const prefix = indent(indentLevel);
+  const conditionalLeft = emitAssignmentWithConditionalSideEffectLhs(expression, context, indentLevel);
+  if (conditionalLeft) return conditionalLeft;
   const conditional = emitAssignmentWithConditionalSideEffectRhs(expression, context, indentLevel);
   if (conditional) return conditional;
   const nested = splitNestedAssignmentExpression(expression.right);
@@ -3034,6 +3036,61 @@ function emitAssignmentStatement(
     ...emitAssignmentStatement(nested.assignment, context, indentLevel),
     `${prefix}${emitAssignment({ ...expression, right: nested.replacement }, context)};`,
   ];
+}
+
+function emitAssignmentWithConditionalSideEffectLhs(
+  expression: CudaLiteAssignmentExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  return emitAssignmentWithLazyConditionalSideEffectLhs(expression, context, indentLevel);
+}
+
+function emitAssignmentWithLazyConditionalSideEffectLhs(
+  expression: CudaLiteAssignmentExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  const conditional = firstSideEffectingConditionalExpression(expression.left, context);
+  if (!conditional) return undefined;
+  const prefix = indent(indentLevel);
+  return [
+    `${prefix}if (${emitTruthinessExpression(conditional.condition, context)}) {`,
+    ...emitLazyConditionalAssignmentBranchWithLeftReplacement(expression, conditional, conditional.consequent, context, indentLevel + 1),
+    `${prefix}} else {`,
+    ...emitLazyConditionalAssignmentBranchWithLeftReplacement(expression, conditional, conditional.alternate, context, indentLevel + 1),
+    `${prefix}}`,
+  ];
+}
+
+function emitLazyConditionalAssignmentBranchWithLeftReplacement(
+  expression: CudaLiteAssignmentExpression,
+  conditional: CudaLiteConditionalExpression,
+  replacement: CudaLiteExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const valueType = expressionValueTypeForEmit(replacement, context);
+  if (
+    valueType &&
+    valueType !== "void" &&
+    !isCudaVectorType(valueType) &&
+    expressionContainsSideEffectingCall(replacement, context)
+  ) {
+    const tempName = `bg_lhs_value_${replacement.span.start}`;
+    const scopedContext = contextWithHoistedLocalValue(context, tempName, valueType);
+    const temp: CudaLiteExpression = { kind: "identifier", name: tempName, span: replacement.span };
+    const replacedLeft = replaceExpressionNode(expression.left, conditional, temp);
+    return [
+      `${indent(indentLevel)}let ${scopedContext.nameFor(tempName)}: ${wgslScalar(valueType)} = ${emitExpressionAsValueType(replacement, valueType, context)};`,
+      ...emitLazyConditionalAssignmentBranch({ ...expression, left: replacedLeft }, scopedContext, indentLevel),
+    ];
+  }
+  return emitLazyConditionalAssignmentBranch(
+    { ...expression, left: replaceExpressionNode(expression.left, conditional, replacement) },
+    context,
+    indentLevel,
+  );
 }
 
 function emitAssignmentWithConditionalSideEffectRhs(
@@ -3066,7 +3123,9 @@ function emitLazyConditionalAssignmentBranch(
   context: EmitContext,
   indentLevel: number,
 ): string[] {
-  return emitAssignmentWithLazyConditionalSideEffectRhs(expression, context, indentLevel) ?? [`${indent(indentLevel)}${emitAssignment(expression, context)};`];
+  return emitAssignmentWithLazyConditionalSideEffectLhs(expression, context, indentLevel) ??
+    emitAssignmentWithLazyConditionalSideEffectRhs(expression, context, indentLevel) ??
+    [`${indent(indentLevel)}${emitAssignment(expression, context)};`];
 }
 
 function emitLazyConditionalValueAssignment(
