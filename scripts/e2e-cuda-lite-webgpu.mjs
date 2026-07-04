@@ -2626,6 +2626,23 @@ __global__ void activeLaneConditionalHelperVectorLaneLvalue(uint *storage, int l
     __syncthreads();
   }
 }`,
+  activeLaneConditionalHelperAtomicAddress: `
+__device__ uint active_conditional_atomic_address_helper_rmw(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__global__ void activeLaneConditionalHelperAtomicAddress(uint *storage, int limit, int useHelper) {
+  int tid = threadIdx.x;
+  for (int step = 0; step < 2; step++) {
+    if (tid >= limit) {
+      return;
+    }
+    __syncthreads();
+    atomicAdd(storage + (useHelper != 0 ? active_conditional_atomic_address_helper_rmw(storage + tid, (uint)(step + tid + 1)) : 0u), 5u);
+    __syncthreads();
+  }
+}`,
   conditionalHelperVectorMemberLvalue: `
 __device__ uint conditional_vector_member_lvalue_helper_rmw(uint *ptr, uint lane, uint add) {
   atomicAdd(ptr + lane, add);
@@ -8044,6 +8061,48 @@ const html = String.raw`<!doctype html>
           {
             name: "storage:active-lane-conditional-helper-vector-lane-lvalue-all-inactive",
             source: SOURCES.activeLaneConditionalHelperVectorLaneLvalue,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                storage: new Uint32Array([10, 20, 30, 40]),
+              },
+              scalars: { limit: 0, useHelper: 1 },
+            }),
+            output: "storage",
+            expectedOutput: { type: "Uint32Array", data: [10, 20, 30, 40] },
+          },
+          {
+            name: "storage:active-lane-conditional-helper-atomic-address",
+            source: SOURCES.activeLaneConditionalHelperAtomicAddress,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                storage: new Uint32Array([10, 20, 30, 40]),
+              },
+              scalars: { limit: 3, useHelper: 1 },
+            }),
+            output: "storage",
+            expectedOutput: { type: "Uint32Array", data: [13, 55, 37, 40] },
+          },
+          {
+            name: "storage:active-lane-conditional-helper-atomic-address-false-branch",
+            source: SOURCES.activeLaneConditionalHelperAtomicAddress,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                storage: new Uint32Array([10, 20, 30, 40]),
+              },
+              scalars: { limit: 3, useHelper: 0 },
+            }),
+            output: "storage",
+            expectedOutput: { type: "Uint32Array", data: [40, 20, 30, 40] },
+          },
+          {
+            name: "storage:active-lane-conditional-helper-atomic-address-all-inactive",
+            source: SOURCES.activeLaneConditionalHelperAtomicAddress,
             options: { workgroupSize: [4, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
             input: () => ({

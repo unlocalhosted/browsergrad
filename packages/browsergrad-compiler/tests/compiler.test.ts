@@ -8004,6 +8004,29 @@ __global__ void conditionalAtomicAddress(uint *storage, uint *out, int enabled) 
     expect(compiled.wgsl).not.toContain("select(0u, conditional_atomic_address_helper_with_pointer_side_effect");
   });
 
+  it("guards conditional helper-call atomic addresses inside active-lane predication", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint active_conditional_atomic_address_helper_with_pointer_side_effect(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__global__ void activeConditionalAtomicAddress(uint *storage, int limit, int enabled) {
+  int tid = threadIdx.x;
+  for (int step = 0; step < 2; step++) {
+    if (tid >= limit) return;
+    __syncthreads();
+    atomicAdd(storage + (enabled != 0 ? active_conditional_atomic_address_helper_with_pointer_side_effect(storage + tid, (uint)(step + tid + 1)) : 0u), 5u);
+    __syncthreads();
+  }
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(bg_uniforms.enabled != 0\)\)/u);
+    expect(compiled.wgsl).toContain("active_conditional_atomic_address_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0u, active_conditional_atomic_address_helper_with_pointer_side_effect");
+  });
+
   it("preserves atomic side effects before loop returns lowered for barriers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomicReturnSideEffectBarrier(uint *counter, uint *out, int N) {
