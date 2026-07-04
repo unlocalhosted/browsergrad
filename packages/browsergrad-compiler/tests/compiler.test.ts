@@ -7646,6 +7646,31 @@ __global__ void conditionalHelperAssignment(uint *storage, uint *out, int enable
     expect(compiled.wgsl).not.toContain("select(0u, conditional_helper_with_pointer_side_effect");
   });
 
+  it("preserves conditional helper-call laziness inside active-lane predication", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint active_conditional_helper_with_pointer_side_effect(uint *ptr, uint lane, uint add) {
+  atomicAdd(ptr + lane, add);
+  return ptr[lane];
+}
+
+__global__ void activeConditionalHelperAssignment(uint *storage, uint *out, int limit, int enabled) {
+  int tid = threadIdx.x;
+  uint total = 0u;
+  for (int step = 0; step < 2; step++) {
+    if (tid >= limit) return;
+    __syncthreads();
+    total += enabled != 0 ? active_conditional_helper_with_pointer_side_effect(storage, (uint)tid, (uint)(step + tid + 1)) : 0u;
+    __syncthreads();
+  }
+  out[tid] = total;
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(bg_uniforms.enabled != 0\)\)/u);
+    expect(compiled.wgsl).toContain("total += active_conditional_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0u, active_conditional_helper_with_pointer_side_effect");
+  });
+
   it("preserves atomic side effects before loop returns lowered for barriers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomicReturnSideEffectBarrier(uint *counter, uint *out, int N) {

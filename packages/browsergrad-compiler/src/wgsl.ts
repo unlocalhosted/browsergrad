@@ -2956,6 +2956,8 @@ function emitPredicatedScalarAssignment(
   if (!valueType || valueType === "void" || valueType === "complex64") return undefined;
   const left = emitExpression(expression.left, context, "lvalue");
   const current = emitExpressionAsValueType(expression.left, valueType, context);
+  const conditional = emitPredicatedAssignmentWithConditionalSideEffectRhs(expression, activeFlag, context, indentLevel);
+  if (conditional) return conditional;
   const value = predicatedScalarAssignmentValue(expression, valueType, context);
   if (!value) return undefined;
   if (expressionContainsSideEffectingCall(expression.right, context)) {
@@ -2975,6 +2977,25 @@ function emitPredicatedScalarAssignment(
     ];
   }
   return [`${indent(indentLevel)}${left} = select(${current}, ${value}, ${activeFlag});`];
+}
+
+function emitPredicatedAssignmentWithConditionalSideEffectRhs(
+  expression: CudaLiteAssignmentExpression,
+  activeFlag: string,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  if (expression.right.kind !== "conditional" || !expressionContainsSideEffectingCall(expression.right, context)) return undefined;
+  const prefix = indent(indentLevel);
+  return [
+    `${prefix}if (${activeFlag}) {`,
+    `${indent(indentLevel + 1)}if (${emitTruthinessExpression(expression.right.condition, context)}) {`,
+    `${indent(indentLevel + 2)}${emitAssignment({ ...expression, right: expression.right.consequent }, context)};`,
+    `${indent(indentLevel + 1)}} else {`,
+    `${indent(indentLevel + 2)}${emitAssignment({ ...expression, right: expression.right.alternate }, context)};`,
+    `${indent(indentLevel + 1)}}`,
+    `${prefix}}`,
+  ];
 }
 
 function predicatedValueNeedsUniformCallHoist(value: string): boolean {
