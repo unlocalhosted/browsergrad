@@ -724,6 +724,32 @@ __global__ void active_lane_conditional_helper_pointer_array_index(uint *storage
     expect(compiled.wgsl).not.toContain("select(0u, active_conditional_pointer_array_index_helper");
   });
 
+  it("scales active-lane byte-root pointer-array differences before barriers", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ uint active_byte_pointer_array_diff_index_helper(uint *counter) {
+  atomicAdd(counter, 1u);
+  return 1u;
+}
+
+__global__ void active_lane_byte_root_pointer_array_diff(uchar *bytes, uint *counter, int *summary, int limit) {
+  int tid = threadIdx.x;
+  for (int step = 0; step < 2; step++) {
+    if (tid >= limit) return;
+    __syncthreads();
+    float *ptrs[2];
+    ptrs[0] = reinterpret_cast<float*>(bytes + ((tid + 1) * 4));
+    ptrs[1] = reinterpret_cast<float*>(bytes + ((tid + 3) * 4));
+    summary[tid] = summary[tid] + (ptrs[active_byte_pointer_array_diff_index_helper(counter + tid)] - reinterpret_cast<float*>(bytes + ((tid + 1) * 4)));
+    __syncthreads();
+  }
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl.match(/\bactive_byte_pointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
+    expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = active_byte_pointer_array_diff_index_helper\(/u);
+    expect(compiled.wgsl).toMatch(/summary\[.+\] = i32\(\(summary\[.+\] \+ select\(0, select\(.+ \/ 4\), \(ptrs_buffer\[.+\] == 0u\)\), \(ptrs_buffer\[.+\] == 0u\)\)\)\);/u);
+  });
+
   it("evaluates side-effecting pointer-array assignment indices once", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ uint pointer_array_assignment_index_helper(uint *ptr, uint add) {
@@ -11961,7 +11987,7 @@ __global__ void pointer_distance(uint* data, int* out, int left) {
     );
     expect([...pointerDistanceResult.buffers.out as Int32Array]).toEqual([3, 2]);
     expect(pointerDistance.wgsl).toContain("i32(");
-    expect(pointerDistance.wgsl).toContain("var width: i32 = i32((i32((0u + u32(3))) - i32((0u + u32((0 + bg_uniforms.left))))));");
+    expect(pointerDistance.wgsl).toContain("var width: i32 = (i32((0u + u32(3))) - i32((0u + u32((0 + bg_uniforms.left)))));");
 
     const sharedScalarDistance = compileCudaLiteKernel(`
 __global__ void shared_scalar_distance(uint* blocks, uint* out) {

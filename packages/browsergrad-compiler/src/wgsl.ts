@@ -4446,6 +4446,9 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
     return objectType;
   }
   if (expression.kind === "binary") {
+    if (expression.operator === "-" && isPointerDifferenceOperand(expression.left, context) && isPointerDifferenceOperand(expression.right, context)) {
+      return "int";
+    }
     const vectorType = vectorArithmeticTypeForEmit(expression, context);
     if (vectorType) return vectorType;
     if (isComparisonOperator(expression.operator) || expression.operator === "&&" || expression.operator === "||") return "bool";

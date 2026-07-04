@@ -3034,6 +3034,27 @@ __global__ void byteRootVectorPointerArrayDiffIndexOnce(uchar *bytes, uint *coun
   summary[0] = ptrs[byte_vector_pointer_array_diff_index_helper(counter)] - reinterpret_cast<float4*>(bytes + 16);
   summary[1] = (int)counter[0];
 }`,
+  activeLaneByteRootPointerArrayDiff: `
+__device__ uint active_byte_pointer_array_diff_index_helper(uint *counter) {
+  atomicAdd(counter, 1u);
+  return 1u;
+}
+
+__global__ void activeLaneByteRootPointerArrayDiff(uchar *bytes, uint *counter, int *summary, int limit) {
+  int tid = threadIdx.x;
+  for (int step = 0; step < 2; step++) {
+    if (tid >= limit) {
+      return;
+    }
+    __syncthreads();
+    float *ptrs[2];
+    ptrs[0] = reinterpret_cast<float*>(bytes + ((tid + 1) * 4));
+    ptrs[1] = reinterpret_cast<float*>(bytes + ((tid + 3) * 4));
+    summary[tid] = summary[tid] + (ptrs[active_byte_pointer_array_diff_index_helper(counter + tid)] - reinterpret_cast<float*>(bytes + ((tid + 1) * 4)));
+    __syncthreads();
+  }
+  summary[4 + tid] = (int)counter[tid];
+}`,
   systemAtomicAliases: `
 __global__ void systemAtomicAliases(int *x, int *out) {
   if (threadIdx.x == 0) {
@@ -10607,6 +10628,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Int32Array", data: [2, 11] },
+          },
+          {
+            name: "storage:active-lane-byte-root-pointer-array-diff",
+            source: SOURCES.activeLaneByteRootPointerArrayDiff,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                bytes: new Uint32Array(8),
+                counter: new Uint32Array(4),
+                summary: new Int32Array(8),
+              },
+              scalars: { limit: 3 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Int32Array", data: [4, 4, 4, 0, 2, 2, 2, 0] },
           },
           {
             name: "atomic:system-aliases",

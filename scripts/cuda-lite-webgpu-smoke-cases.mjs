@@ -140,6 +140,7 @@ export const storageScopeCases = [
   "storage:byte-root-inline-cast-pointer-difference",
   "storage:byte-root-pointer-array-diff-index-once",
   "storage:byte-root-vector-pointer-array-diff-index-once",
+  "storage:active-lane-byte-root-pointer-array-diff",
 ];
 
 export const atomicScopeCases = [
