@@ -4030,6 +4030,7 @@ function isPointerDifferenceOperand(expression: CudaLiteExpression, context: Emi
   if (expression.kind === "identifier") {
     return context.localPointerHandleFor(expression.name, expression.span) !== undefined ||
       context.devicePointerParamFor(expression.name) !== undefined ||
+      context.paramFor(expression.name)?.pointer === true ||
       context.localPointerArrayFor(expression.name, expression.span) !== undefined ||
       context.pointerAliasFor(expression.name, expression.span) !== undefined;
   }

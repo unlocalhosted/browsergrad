@@ -2963,6 +2963,18 @@ __global__ void pointerArrayVarInitCompareIndexOnce(uint *storage) {
   uint value = ptrs[pointer_array_var_init_compare_index_helper(storage, 1u)] == storage + 2 ? 7u : 9u;
   storage[3] = value;
 }`,
+  pointerArrayDiffIndexOnce: `
+__device__ uint pointer_array_diff_index_helper(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__global__ void pointerArrayDiffIndexOnce(uint *storage) {
+  uint *ptrs[2];
+  ptrs[0] = storage + 1;
+  ptrs[1] = storage + 3;
+  storage[3] = (uint)(ptrs[pointer_array_diff_index_helper(storage, 1u)] - (storage + 1));
+}`,
   systemAtomicAliases: `
 __global__ void systemAtomicAliases(int *x, int *out) {
   if (threadIdx.x == 0) {
@@ -10436,6 +10448,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "storage",
             expectedOutput: { type: "Uint32Array", data: [11, 20, 30, 7] },
+          },
+          {
+            name: "storage:pointer-array-diff-index-once",
+            source: SOURCES.pointerArrayDiffIndexOnce,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                storage: new Uint32Array([10, 20, 30, 40]),
+              },
+            }),
+            output: "storage",
+            expectedOutput: { type: "Uint32Array", data: [11, 20, 30, 2] },
           },
           {
             name: "atomic:system-aliases",
