@@ -2589,6 +2589,28 @@ __global__ void conditionalHelperPointerInit(uint4 *left, uint4 *right, uint *su
     summary[1] = rightValue.x + rightValue.y + rightValue.z + rightValue.w;
   }
 }`,
+  conditionalHelperVectorMemberLvalue: `
+__device__ uint conditional_vector_member_lvalue_helper_rmw(uint *ptr, uint lane, uint add) {
+  atomicAdd(ptr + lane, add);
+  return 1u;
+}
+
+__global__ void conditionalHelperVectorMemberLvalue(uint4 *left, uint *summary, int useHelper) {
+  int tid = threadIdx.x;
+  if (tid == 0) {
+    left[0] = make_uint4(10u, 20u, 30u, 40u);
+    left[1] = make_uint4(50u, 60u, 70u, 80u);
+  }
+  __syncthreads();
+  if (tid == 0) {
+    uint4 *target = left;
+    target[useHelper != 0 ? (int)conditional_vector_member_lvalue_helper_rmw(reinterpret_cast<uint*>(left), 0u, 7u) : 0].y = 9u;
+    uint4 first = left[0];
+    uint4 second = left[1];
+    summary[0] = first.x + first.y + first.z + first.w;
+    summary[1] = second.x + second.y + second.z + second.w;
+  }
+}`,
   branchAssignedPointerAtomic: `
 __global__ void branchAssignedPointerAtomic(uint *left, uint *right, uint *out, int pickRight) {
   uint *ptr = NULL;
@@ -7891,6 +7913,36 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [99, 1000, 0, 0] },
+          },
+          {
+            name: "storage:conditional-helper-vector-member-lvalue",
+            source: SOURCES.conditionalHelperVectorMemberLvalue,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                left: new Uint32Array(16),
+                summary: new Uint32Array(4),
+              },
+              scalars: { useHelper: 1 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [107, 209, 0, 0] },
+          },
+          {
+            name: "storage:conditional-helper-vector-member-lvalue-false-branch",
+            source: SOURCES.conditionalHelperVectorMemberLvalue,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                left: new Uint32Array(16),
+                summary: new Uint32Array(4),
+              },
+              scalars: { useHelper: 0 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [89, 260, 0, 0] },
           },
           {
             name: "storage:vector-pointer-memory-view",

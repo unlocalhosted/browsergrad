@@ -7893,6 +7893,45 @@ __global__ void conditionalPointerInit(uint *storage, uint *out, int enabled) {
     expect(compiled.wgsl).not.toContain("select(0u, conditional_pointer_init_helper_with_pointer_side_effect");
   });
 
+  it("preserves conditional helper-call laziness in vector pointer member lvalues", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint conditional_vector_member_lvalue_helper_with_pointer_side_effect(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__global__ void conditionalVectorMemberLvalue(uint4 *storage, uint *out, int enabled) {
+  storage[enabled != 0 ? (int)conditional_vector_member_lvalue_helper_with_pointer_side_effect(reinterpret_cast<uint*>(storage), 7u) : 0].y = 9u;
+  out[0] = storage[0].x;
+  out[1] = storage[0].y;
+  out[2] = storage[1].y;
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toContain("conditional_vector_member_lvalue_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0, i32(conditional_vector_member_lvalue_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0u, conditional_vector_member_lvalue_helper_with_pointer_side_effect");
+  });
+
+  it("preserves conditional helper-call laziness in local vector pointer member lvalues", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint conditional_local_vector_member_lvalue_helper_with_pointer_side_effect(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__global__ void conditionalLocalVectorMemberLvalue(uint4 *storage, uint *out, int enabled) {
+  uint4 *target = storage;
+  target[enabled != 0 ? (int)conditional_local_vector_member_lvalue_helper_with_pointer_side_effect(reinterpret_cast<uint*>(storage), 7u) : 0].y = 9u;
+  out[0] = storage[0].x;
+  out[1] = storage[0].y;
+  out[2] = storage[1].y;
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toContain("conditional_local_vector_member_lvalue_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0, i32(conditional_local_vector_member_lvalue_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0u, conditional_local_vector_member_lvalue_helper_with_pointer_side_effect");
+  });
+
   it("preserves atomic side effects before loop returns lowered for barriers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomicReturnSideEffectBarrier(uint *counter, uint *out, int N) {
