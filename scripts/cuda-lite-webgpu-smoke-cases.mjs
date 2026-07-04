@@ -123,6 +123,9 @@ export const storageScopeCases = [
   "storage:active-lane-helper-pointer-array-selected-args",
   "storage:active-lane-helper-pointer-array-selected-args-same-target",
   "storage:active-lane-helper-pointer-array-selected-args-all-inactive",
+  "storage:active-lane-pointer-array-assignment",
+  "storage:active-lane-pointer-array-assignment-one-lane",
+  "storage:active-lane-pointer-array-assignment-all-inactive",
 ];
 
 export const atomicScopeCases = [

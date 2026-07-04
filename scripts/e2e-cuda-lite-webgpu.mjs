@@ -2867,6 +2867,24 @@ __global__ void activeLaneHelperPointerArraySelectedArgs(float4 *values, int lim
     __syncthreads();
   }
 }`,
+  activeLanePointerArrayAssignment: `
+__device__ void add_active_uint_vector_slot(uint4 *slot, uint value) {
+  uint *lanes = reinterpret_cast<uint*>(slot);
+  atomicAdd(lanes + 1, value);
+}
+
+__global__ void activeLanePointerArrayAssignment(uint4 *storage, int limit) {
+  int tid = threadIdx.x;
+  if (tid >= limit) {
+    return;
+  }
+  __syncthreads();
+  uint4 *slots[2];
+  slots[0] = storage + 1;
+  slots[1] = storage + 2;
+  add_active_uint_vector_slot(slots[tid], 5u + (uint)tid);
+  __syncthreads();
+}`,
   systemAtomicAliases: `
 __global__ void systemAtomicAliases(int *x, int *out) {
   if (threadIdx.x == 0) {
@@ -10204,6 +10222,48 @@ const html = String.raw`<!doctype html>
             }),
             output: "values",
             expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4, 5, 6, 7, 8] },
+          },
+          {
+            name: "storage:active-lane-pointer-array-assignment",
+            source: SOURCES.activeLanePointerArrayAssignment,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                storage: new Uint32Array([10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160]),
+              },
+              scalars: { limit: 2 },
+            }),
+            output: "storage",
+            expectedOutput: { type: "Uint32Array", data: [10, 20, 30, 40, 50, 65, 70, 80, 90, 106, 110, 120, 130, 140, 150, 160] },
+          },
+          {
+            name: "storage:active-lane-pointer-array-assignment-one-lane",
+            source: SOURCES.activeLanePointerArrayAssignment,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                storage: new Uint32Array([10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160]),
+              },
+              scalars: { limit: 1 },
+            }),
+            output: "storage",
+            expectedOutput: { type: "Uint32Array", data: [10, 20, 30, 40, 50, 65, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160] },
+          },
+          {
+            name: "storage:active-lane-pointer-array-assignment-all-inactive",
+            source: SOURCES.activeLanePointerArrayAssignment,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                storage: new Uint32Array([10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160]),
+              },
+              scalars: { limit: 0 },
+            }),
+            output: "storage",
+            expectedOutput: { type: "Uint32Array", data: [10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160] },
           },
           {
             name: "atomic:system-aliases",
