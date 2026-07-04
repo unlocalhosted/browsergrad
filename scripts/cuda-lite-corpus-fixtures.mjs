@@ -295,6 +295,24 @@ export const cudaLiteCorpusExecutionFixtures = [
     expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4] },
   },
   {
+    sourceKey: "corpusCudaSamplesSimpleStreamsInitArray",
+    caseName: "corpus:cuda-samples:init_array",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/0_Introduction/simpleStreams/simpleStreams.cu",
+    kernelName: "init_array",
+    workgroupSize: [4, 1, 1],
+    launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    input: {
+      buffers: {
+        g_data: { type: "Int32Array", data: [0, 1, 2, 3] },
+        factor: { type: "Int32Array", data: [5] },
+      },
+      scalars: { num_iterations: 3 },
+    },
+    output: "g_data",
+    expectedOutput: { type: "Int32Array", data: [15, 16, 17, 18] },
+  },
+  {
     sourceKey: "corpusCudaSamplesIncKernel",
     caseName: "corpus:cuda-samples:incKernel",
     corpusId: "cuda-samples",
