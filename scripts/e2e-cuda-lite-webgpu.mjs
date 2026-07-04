@@ -2440,6 +2440,51 @@ __global__ void surfaceVectorUnalignedByteOffset(float *out, cudaSurfaceObject_t
   out[6] = surf2Dread<float>(surf, 2 * sizeof(float), 1);
   out[7] = surf2Dread<float>(surf, 3 * sizeof(float), 1);
 }`,
+  surfaceLayeredVectorUnalignedByteOffset: `
+__global__ void surfaceLayeredVectorUnalignedByteOffset(float *out, cudaSurfaceObject_t surf) {
+  float4 pointerValue = make_float4(99.0f, 99.0f, 99.0f, 99.0f);
+  surf2DLayeredread(&pointerValue, surf, 2, 0, 1);
+  float4 returnValue = surf2DLayeredread<float4>(surf, 6, 0, 1);
+  surf2DLayeredwrite(make_float4(31.0f, 32.0f, 33.0f, 34.0f), surf, 10, 0, 1);
+  out[0] = pointerValue.x;
+  out[1] = pointerValue.y;
+  out[2] = returnValue.x;
+  out[3] = returnValue.y;
+  out[4] = surf2DLayeredread<float>(surf, 0, 0, 1);
+  out[5] = surf2DLayeredread<float>(surf, 1 * sizeof(float), 0, 1);
+  out[6] = surf2DLayeredread<float>(surf, 2 * sizeof(float), 0, 1);
+  out[7] = surf2DLayeredread<float>(surf, 3 * sizeof(float), 0, 1);
+}`,
+  surfaceUint4VectorUnalignedByteOffset: `
+__global__ void surfaceUint4VectorUnalignedByteOffset(uint *out, cudaSurfaceObject_t surf) {
+  uint4 pointerValue = make_uint4(99u, 99u, 99u, 99u);
+  surf2Dread(&pointerValue, surf, 2, 0);
+  uint4 returnValue = surf2Dread<uint4>(surf, 6, 0);
+  surf2Dwrite(make_uint4(31u, 32u, 33u, 34u), surf, 10, 0);
+  out[0] = pointerValue.x;
+  out[1] = pointerValue.y;
+  out[2] = returnValue.x;
+  out[3] = returnValue.y;
+  out[4] = surf2Dread<unsigned int>(surf, 0, 0);
+  out[5] = surf2Dread<unsigned int>(surf, 1 * sizeof(float), 0);
+  out[6] = surf2Dread<unsigned int>(surf, 2 * sizeof(float), 0);
+  out[7] = surf2Dread<unsigned int>(surf, 3 * sizeof(float), 0);
+}`,
+  surfaceInt4VectorUnalignedByteOffset: `
+__global__ void surfaceInt4VectorUnalignedByteOffset(int *out, cudaSurfaceObject_t surf) {
+  int4 pointerValue = make_int4(99, 99, 99, 99);
+  surf2Dread(&pointerValue, surf, 2, 0);
+  int4 returnValue = surf2Dread<int4>(surf, 6, 0);
+  surf2Dwrite(make_int4(31, 32, 33, 34), surf, 10, 0);
+  out[0] = pointerValue.x;
+  out[1] = pointerValue.y;
+  out[2] = returnValue.x;
+  out[3] = returnValue.y;
+  out[4] = surf2Dread<int>(surf, 0, 0);
+  out[5] = surf2Dread<int>(surf, 1 * sizeof(float), 0);
+  out[6] = surf2Dread<int>(surf, 2 * sizeof(float), 0);
+  out[7] = surf2Dread<int>(surf, 3 * sizeof(float), 0);
+}`,
   surfaceRowBoundary: `
 __global__ void surfaceRowBoundary(uint *out, cudaSurfaceObject_t surf) {
   uint value = 99u;
@@ -8742,6 +8787,54 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
+          },
+          {
+            name: "surface:layered-vector-unaligned-byte-offset",
+            source: SOURCES.surfaceLayeredVectorUnalignedByteOffset,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(8),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 7, 11, 13]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
+          },
+          {
+            name: "surface:uint4-vector-unaligned-byte-offset",
+            source: SOURCES.surfaceUint4VectorUnalignedByteOffset,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([5, 7, 11, 13]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
+          },
+          {
+            name: "surface:int4-vector-unaligned-byte-offset",
+            source: SOURCES.surfaceInt4VectorUnalignedByteOffset,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(8),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([5, 7, 11, 13]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
           },
           {
             name: "surface:row-boundary",
