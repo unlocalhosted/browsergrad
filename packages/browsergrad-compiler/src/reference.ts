@@ -6,7 +6,7 @@ import {
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./ast_queries.js";
-import { expressionName, rootIdentifier } from "./analyzer.js";
+import { expressionName } from "./analyzer.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import {
@@ -54,8 +54,8 @@ import {
   type ReferenceKernelResult,
 } from "./types.js";
 
-type EvalValue = number | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue | TextureHandleValue;
-type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue | TextureHandleValue | LocalArrayValue | LocalPointerArrayValue;
+type EvalValue = number | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue | TextureHandleValue | SurfaceHandleValue;
+type LocalValue = number | Vector3 | AddressValue | CooperativeGroupValue | ComplexValue | CudaVectorValue | PoolPointerValue | TextureHandleValue | SurfaceHandleValue | LocalArrayValue | LocalPointerArrayValue;
 interface Vector3 {
   readonly x: number;
   readonly y: number;
@@ -96,6 +96,11 @@ interface PoolPointerValue {
 
 interface TextureHandleValue {
   readonly kind: "texture-handle";
+  readonly name: string;
+}
+
+interface SurfaceHandleValue {
+  readonly kind: "surface-handle";
   readonly name: string;
 }
 
@@ -1853,6 +1858,7 @@ function readIdentifierFrom(name: string, context: ThreadContext, locals: Readon
   if (name === "gridDim") return context.gridDim;
   if (locals.has(name)) return locals.get(name)!;
   if (Object.prototype.hasOwnProperty.call(context.textures, name)) return { kind: "texture-handle", name };
+  if (Object.prototype.hasOwnProperty.call(context.surfaces, name)) return { kind: "surface-handle", name };
   if (context.shared.has(name)) return readLValue({ name, space: "shared", index: 0 }, context);
   if (context.deviceGlobals.has(name)) return readLValue({ name, space: "device-global", index: 0 }, context);
   if (context.constants.has(name)) {
@@ -2508,7 +2514,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const target = returnForm ? undefined : expression.args[0];
     const surfaceRef = returnForm ? expression.args[0] : expression.args[1];
     if (!returnForm && !target) throw compilerFailure("surf2Dread expects output target");
-    const surfaceName = surfaceRef ? rootIdentifier(surfaceRef) : undefined;
+    const surfaceName = surfaceNameFromExpression(surfaceRef, context);
     if (!surfaceName) throw compilerFailure("surf2Dread expects surface reference");
     const surface = context.surfaces[surfaceName];
     if (!surface) throw compilerFailure(`missing surface input '${surfaceName}'`);
@@ -2549,7 +2555,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   }
   if (name === "surf2Dwrite" || name === "surf1Dwrite" || name === "surf2DLayeredwrite" || name === "surf3Dwrite") {
     const surfaceRef = expression.args[1];
-    const surfaceName = surfaceRef ? rootIdentifier(surfaceRef) : undefined;
+    const surfaceName = surfaceNameFromExpression(surfaceRef, context);
     if (!surfaceName) throw compilerFailure("surf2Dwrite expects surface reference");
     const surface = context.surfaces[surfaceName];
     if (!surface) throw compilerFailure(`missing surface input '${surfaceName}'`);
@@ -3066,6 +3072,11 @@ function deviceFunctionArgs(
       const textureName = textureNameFromExpression(arg, context);
       if (!textureName) throw compilerFailure(`device texture parameter '${param.name}' expects a texture argument`);
       return { kind: "texture-handle", name: textureName };
+    }
+    if (param.valueType === "surface2d") {
+      const surfaceName = surfaceNameFromExpression(arg, context);
+      if (!surfaceName) throw compilerFailure(`device surface parameter '${param.name}' expects a surface argument`);
+      return { kind: "surface-handle", name: surfaceName };
     }
     if (!param.pointer) {
       if (isCudaVectorType(param.valueType) && arg.kind === "initializer") {
@@ -4603,6 +4614,13 @@ function isTextureHandle(value: LocalValue | EvalValue | undefined): value is Te
     value.kind === "texture-handle";
 }
 
+function isSurfaceHandle(value: LocalValue | EvalValue | undefined): value is SurfaceHandleValue {
+  return value !== undefined &&
+    typeof value !== "number" &&
+    "kind" in value &&
+    value.kind === "surface-handle";
+}
+
 function textureNameFromExpression(expression: CudaLiteExpression | undefined, context: ThreadContext): string | undefined {
   if (expression?.kind === "identifier") {
     if (Object.prototype.hasOwnProperty.call(context.textures, expression.name)) return expression.name;
@@ -4612,6 +4630,17 @@ function textureNameFromExpression(expression: CudaLiteExpression | undefined, c
   if (!expression) return undefined;
   const value = evalExpression(expression, context);
   return isTextureHandle(value) ? value.name : undefined;
+}
+
+function surfaceNameFromExpression(expression: CudaLiteExpression | undefined, context: ThreadContext): string | undefined {
+  if (expression?.kind === "identifier") {
+    if (Object.prototype.hasOwnProperty.call(context.surfaces, expression.name)) return expression.name;
+    const value = context.locals.get(expression.name);
+    return isSurfaceHandle(value) ? value.name : undefined;
+  }
+  if (!expression) return undefined;
+  const value = evalExpression(expression, context);
+  return isSurfaceHandle(value) ? value.name : undefined;
 }
 
 function isAddress(value: LocalValue | EvalValue | undefined): value is AddressValue {
@@ -4762,6 +4791,7 @@ function traceValue(value: EvalValue): number {
   if (isCudaVectorValue(value)) return value.lanes[0] ?? 0;
   if (isCooperativeGroup(value)) return 0;
   if (isTextureHandle(value)) return 0;
+  if (isSurfaceHandle(value)) return 0;
   return isComplex(value) ? value.x : value;
 }
 
