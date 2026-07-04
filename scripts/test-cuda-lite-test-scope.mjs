@@ -430,5 +430,11 @@ assert.match(compilerPackage.scripts["e2e:webgpu:slow-smoke-hot"], /texture:help
 assert.match(compilerPackage.scripts["e2e:webgpu:slow-smoke-hot"], /surface:surf3d-pointer-alias-atomic-pointer-array-compound-active-lane-return-false-branch/u);
 assert.match(compilerPackage.scripts["e2e:webgpu:slow-smoke-hot"], /--profile-case/u);
 assert.match(compilerPackage.scripts["e2e:webgpu:slow-smoke-hot"], /--expect-warm-ms-max 20/u);
+assert.match(compilerPackage.scripts["e2e:webgpu:auto-corpus-hot"], /--auto-corpus-smoke-only/u);
+assert.match(compilerPackage.scripts["e2e:webgpu:auto-corpus-hot"], /--cases 'auto-corpus:/u);
+assert.match(compilerPackage.scripts["e2e:webgpu:auto-corpus-hot"], /--profile-case 'auto-corpus:/u);
+assert.match(compilerPackage.scripts["e2e:webgpu:auto-corpus-hot"], /synchronizedKernel:6:1/u);
+assert.match(compilerPackage.scripts["e2e:webgpu:auto-corpus-hot"], /sharedMemoryExample:7:1/u);
+assert.match(compilerPackage.scripts["e2e:webgpu:auto-corpus-hot"], /--expect-warm-ms-max 8/u);
 
 console.log("cuda-lite test scope tests ok");
