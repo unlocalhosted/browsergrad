@@ -11315,6 +11315,23 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [10555] },
           },
           {
+            name: "surface:surf3d-pointer-alias-atomic-pointer-array-compound-active-lane-return-all-inactive",
+            source: SOURCES.surface3DPointerAliasAtomicPointerArrayCompoundActiveLaneReturn,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+              },
+              scalars: { N: 0 },
+            }),
+          },
+          {
             name: "surface:surf3d-pointer-alias-atomic-pointer-array-cas-active-lane-return",
             source: SOURCES.surface3DPointerAliasAtomicPointerArrayCasActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -11785,6 +11802,23 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [10465] },
           },
           {
+            name: "surface:surf1d-pointer-alias-atomic-pointer-array-compound-active-lane-return-all-inactive",
+            source: SOURCES.surface1DPointerAliasAtomicPointerArrayCompoundActiveLaneReturn,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([2, 3, 5, 7]) },
+              },
+              scalars: { N: 0 },
+            }),
+          },
+          {
             name: "surface:surf1d-pointer-alias-atomic-pointer-array-cas-active-lane-return",
             source: SOURCES.surface1DPointerAliasAtomicPointerArrayCasActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -12003,6 +12037,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [10555] },
+          },
+          {
+            name: "surface:pointer-alias-atomic-pointer-array-compound-active-lane-return-all-inactive",
+            source: SOURCES.surfacePointerAliasAtomicPointerArrayCompoundActiveLaneReturn,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+              },
+              scalars: { N: 0 },
+            }),
           },
           {
             name: "surface:pointer-alias-atomic-pointer-array-cas-active-lane-return",
