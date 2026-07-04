@@ -7959,6 +7959,23 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [100, 1000, 6, 0] },
           },
           {
+            name: "storage:active-lane-conditional-helper-var-init-all-inactive",
+            source: SOURCES.activeLaneConditionalHelperVarInit,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                left: new Uint32Array(16),
+                right: new Uint32Array(16),
+                counter: new Uint32Array([0, 0]),
+                summary: new Uint32Array(4),
+              },
+              scalars: { limit: 0, pickRight: 0, useHelper: 1 },
+            }),
+            output: "counter",
+            expectedOutput: { type: "Uint32Array", data: [0, 0] },
+          },
+          {
             name: "storage:nested-conditional-helper-var-init",
             source: SOURCES.nestedConditionalHelperVarInit,
             options: { workgroupSize: [4, 1, 1] },
@@ -8023,6 +8040,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [100, 1000, 6, 3] },
+          },
+          {
+            name: "storage:active-lane-nested-conditional-helper-var-init-all-inactive",
+            source: SOURCES.activeLaneNestedConditionalHelperVarInit,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                left: new Uint32Array(16),
+                right: new Uint32Array(16),
+                counter: new Uint32Array([0, 0]),
+                summary: new Uint32Array(4),
+              },
+              scalars: { limit: 0, pickRight: 0, useHelper: 1 },
+            }),
+            output: "counter",
+            expectedOutput: { type: "Uint32Array", data: [0, 0] },
           },
           {
             name: "storage:nested-conditional-helper-return",
