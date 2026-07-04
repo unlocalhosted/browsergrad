@@ -403,6 +403,10 @@ function emitStatement(
         return emitAssignmentStatement(statement.expression, context, indentLevel);
       }
       {
+        const lazy = emitExpressionStatementWithLazyConditionalSideEffect(statement.expression, context, indentLevel);
+        if (lazy) return lazy;
+      }
+      {
         const emitted = emitExpressionStatement(statement.expression, context);
         return emitted.length === 0 ? [] : [`${prefix}${emitted};`];
       }
@@ -2534,6 +2538,34 @@ function emitExpressionStatement(expression: CudaLiteExpression, context: EmitCo
     if (isAtomicReturnCallName(name)) return `_ = ${source}`;
   }
   return source;
+}
+
+function emitExpressionStatementWithLazyConditionalSideEffect(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  const split = splitLazyConditionalSideEffectExpression(expression, context);
+  if (!split) return undefined;
+  const prefix = indent(indentLevel);
+  return [
+    `${prefix}if (${emitTruthinessExpression(split.condition, context)}) {`,
+    ...emitLazyConditionalExpressionStatementBranch(split.consequent, context, indentLevel + 1),
+    `${prefix}} else {`,
+    ...emitLazyConditionalExpressionStatementBranch(split.alternate, context, indentLevel + 1),
+    `${prefix}}`,
+  ];
+}
+
+function emitLazyConditionalExpressionStatementBranch(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const nested = emitExpressionStatementWithLazyConditionalSideEffect(expression, context, indentLevel);
+  if (nested) return nested;
+  const emitted = emitExpressionStatement(expression, context);
+  return emitted.length === 0 ? [] : [`${indent(indentLevel)}${emitted};`];
 }
 
 function emitConditionalExpression(expression: CudaLiteConditionalExpression, context: EmitContext): string {
