@@ -4086,6 +4086,29 @@ __global__ void textureNestedHelperVectorRead(cudaTextureObject_t tex, float4 *o
     out[0] = read_nested_tex_outer(tex);
   }
 }`,
+  textureHelperMultiObjectGuardedRhs: `
+__device__ float4 read_multi_texture_guarded_vec(cudaTextureObject_t first, cudaTextureObject_t second, uint *counter, int row, int pick) {
+  atomicAdd(counter, 1u);
+  float y = (float)row + 0.5f;
+  if (pick != 0) {
+    return tex2D<float4>(second, 0.5f, y);
+  }
+  return tex2D<float4>(first, 0.5f, y);
+}
+
+__global__ void textureHelperMultiObjectGuardedRhs(cudaTextureObject_t first, cudaTextureObject_t second, uint *counter, float4 *out, int N, int pick) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  float4 value = read_multi_texture_guarded_vec(first, second, counter, tid, pick);
+  out[tid] = make_float4(value.x + (float)tid, value.y + (float)tid, value.z + (float)tid, value.w + (float)tid);
+  __syncthreads();
+  if (tid == 0) {
+    out[2] = make_float4((float)counter[0], 0.0f, 0.0f, 0.0f);
+  }
+}`,
   textureActiveLaneReturnReadSideEffect: `
 __device__ float4 read_return_texture_vec(cudaTextureObject_t texArg) {
   return tex2D<float4>(texArg, 0.5f, 0.5f);
@@ -10344,6 +10367,63 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [2, 3, 5, 7] },
+          },
+          {
+            name: "texture:helper-multi-object-guarded-rhs",
+            source: SOURCES.textureHelperMultiObjectGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0]),
+                out: new Float32Array(12),
+              },
+              textures: {
+                first: { width: 1, height: 2, channels: 4, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+                second: { width: 1, height: 2, channels: 4, data: new Float32Array(8) },
+              },
+              scalars: { N: 2, pick: 0 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4, 6, 7, 8, 9, 2, 0, 0, 0] },
+          },
+          {
+            name: "texture:helper-multi-object-guarded-rhs-false-branch",
+            source: SOURCES.textureHelperMultiObjectGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0]),
+                out: new Float32Array(12),
+              },
+              textures: {
+                first: { width: 1, height: 2, channels: 4, data: new Float32Array(8) },
+                second: { width: 1, height: 2, channels: 4, data: new Float32Array([11, 13, 17, 19, 23, 29, 31, 37]) },
+              },
+              scalars: { N: 2, pick: 1 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [11, 13, 17, 19, 24, 30, 32, 38, 2, 0, 0, 0] },
+          },
+          {
+            name: "texture:helper-multi-object-guarded-rhs-all-inactive",
+            source: SOURCES.textureHelperMultiObjectGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0]),
+                out: new Float32Array(12),
+              },
+              textures: {
+                first: { width: 1, height: 2, channels: 4, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+                second: { width: 1, height: 2, channels: 4, data: new Float32Array([11, 13, 17, 19, 23, 29, 31, 37]) },
+              },
+              scalars: { N: 0, pick: 1 },
+            }),
+            output: "counter",
+            expectedOutput: { type: "Uint32Array", data: [0, 0] },
           },
           {
             name: "texture:active-lane-return-read-side-effect",
