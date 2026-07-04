@@ -3245,9 +3245,7 @@ function sideEffectingPointerArrayAssignmentIndex(
   expression: CudaLiteAssignmentExpression,
   context: EmitContext,
 ): CudaLiteExpression | undefined {
-  if (expression.left.kind !== "index" || expression.left.target.kind !== "identifier") return undefined;
-  if (!context.localPointerArrayFor(expression.left.target.name, expression.left.target.span)) return undefined;
-  return expressionContainsSideEffectingCall(expression.left.index, context) ? expression.left.index : undefined;
+  return firstSideEffectingPointerArrayIndexExpression(expression.left, context)?.index;
 }
 
 function emitLazyConditionalValueAssignment(

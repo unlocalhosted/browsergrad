@@ -2926,6 +2926,18 @@ __global__ void pointerArrayAssignmentIndexOnce(uint *storage) {
   ptrs[pointer_array_assignment_index_helper(storage, 1u)] = storage + 2;
   add_pointer_array_assignment_selected(ptrs[1], 5u);
 }`,
+  nestedPointerArrayTargetIndexOnce: `
+__device__ uint nested_pointer_array_target_index_helper(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__global__ void nestedPointerArrayTargetIndexOnce(uint *storage) {
+  uint *ptrs[2];
+  ptrs[0] = storage + 1;
+  ptrs[1] = storage + 2;
+  ptrs[nested_pointer_array_target_index_helper(storage, 1u)][0] = 5u;
+}`,
   systemAtomicAliases: `
 __global__ void systemAtomicAliases(int *x, int *out) {
   if (threadIdx.x == 0) {
@@ -10360,6 +10372,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "storage",
             expectedOutput: { type: "Uint32Array", data: [11, 20, 35, 40] },
+          },
+          {
+            name: "storage:nested-pointer-array-target-index-once",
+            source: SOURCES.nestedPointerArrayTargetIndexOnce,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                storage: new Uint32Array([10, 20, 30, 40]),
+              },
+            }),
+            output: "storage",
+            expectedOutput: { type: "Uint32Array", data: [11, 20, 5, 40] },
           },
           {
             name: "atomic:system-aliases",
