@@ -173,6 +173,8 @@ export const textureScopeCases = [
   "surface:surf3d-vector-z-boundary",
   "surface:surf3d-vector-write-active-lane-return",
   "surface:surf3d-helper-vector-multi-surface-active-lane-return",
+  "surface:surf3d-helper-vector-multi-surface-guarded-rhs",
+  "surface:surf3d-helper-vector-multi-surface-guarded-rhs-false-branch",
   "surface:surf3d-active-lane-guarded-rhs",
   "surface:surf3d-active-lane-guarded-rhs-all-inactive",
   "surface:surf3d-pointer-alias-active-lane-store",

@@ -2652,6 +2652,46 @@ __global__ void surface3DHelperVectorMultiSurfaceActiveLaneReturn(cudaSurfaceObj
     write_3d_multi_surface_vec(second, value, 1);
   }
 }`,
+  surface3DHelperVectorMultiSurfaceGuardedRhs: `
+__device__ float4 read_3d_multi_surface_guarded_vec(cudaSurfaceObject_t first, cudaSurfaceObject_t second, uint *counter, int row, int pick) {
+  atomicAdd(counter, 1u);
+  if (pick != 0) {
+    return surf3Dread<float4>(second, 0, row, 1);
+  }
+  return surf3Dread<float4>(first, 0, row, 1);
+}
+
+__device__ void write_3d_multi_surface_guarded_vec(cudaSurfaceObject_t surfaceArg, float4 value, int row) {
+  surf3Dwrite(value, surfaceArg, 0, row, 1);
+}
+
+__global__ void surface3DHelperVectorMultiSurfaceGuardedRhs(cudaSurfaceObject_t first, cudaSurfaceObject_t second, uint *counter, float *out, int N, int pick) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  float4 value = read_3d_multi_surface_guarded_vec(first, second, counter, tid, pick);
+  write_3d_multi_surface_guarded_vec(
+    second,
+    make_float4(value.x + (float)tid, value.y + (float)tid, value.z + (float)tid, value.w + (float)tid),
+    tid
+  );
+  __syncthreads();
+  if (tid == 0) {
+    float4 row0 = surf3Dread<float4>(second, 0, 0, 1);
+    float4 row1 = surf3Dread<float4>(second, 0, 1, 1);
+    out[0] = row0.x;
+    out[1] = row0.y;
+    out[2] = row0.z;
+    out[3] = row0.w;
+    out[4] = row1.x;
+    out[5] = row1.y;
+    out[6] = row1.z;
+    out[7] = row1.w;
+    out[8] = (float)counter[0];
+  }
+}`,
   surface3DActiveLaneGuardedRhs: `
 __device__ float read_3d_guarded_rhs(cudaSurfaceObject_t surfaceArg, uint *counter) {
   atomicAdd(counter, 1u);
@@ -9026,6 +9066,44 @@ const html = String.raw`<!doctype html>
             }),
             output: "second",
             expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 8, 9, 10, 11] },
+          },
+          {
+            name: "surface:surf3d-helper-vector-multi-surface-guarded-rhs",
+            source: SOURCES.surface3DHelperVectorMultiSurfaceGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0]),
+                out: new Float32Array(9),
+              },
+              surfaces: {
+                first: { width: 4, height: 2, data: new Float32Array([0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8]) },
+                second: { width: 4, height: 2, data: new Float32Array(16) },
+              },
+              scalars: { N: 2, pick: 0 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4, 6, 7, 8, 9, 2] },
+          },
+          {
+            name: "surface:surf3d-helper-vector-multi-surface-guarded-rhs-false-branch",
+            source: SOURCES.surface3DHelperVectorMultiSurfaceGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0]),
+                out: new Float32Array(9),
+              },
+              surfaces: {
+                first: { width: 4, height: 2, data: new Float32Array(16) },
+                second: { width: 4, height: 2, data: new Float32Array([0, 0, 0, 0, 0, 0, 0, 0, 11, 13, 17, 19, 23, 29, 31, 37]) },
+              },
+              scalars: { N: 2, pick: 1 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [11, 13, 17, 19, 24, 30, 32, 38, 2] },
           },
           {
             name: "surface:surf3d-active-lane-guarded-rhs",
