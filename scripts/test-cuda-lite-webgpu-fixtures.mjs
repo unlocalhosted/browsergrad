@@ -202,6 +202,12 @@ validateWarmSpeedup({
     { name: "case:a", repeat: 2, ms: 5 },
   ],
 }, 2);
+validateWarmSpeedup({
+  cases: [
+    { name: "case:tiny", repeat: 1, ms: 4 },
+    { name: "case:tiny", repeat: 2, ms: 3.8 },
+  ],
+}, 2);
 validateWarmMsMax({
   cases: [
     { name: "case:a", repeat: 1, ms: 20 },

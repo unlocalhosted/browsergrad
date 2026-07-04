@@ -1,5 +1,7 @@
 import { cudaLiteCorpusExecutionFixtureBaseline } from "./cuda-lite-corpus-registry.mjs";
 
+export const WARM_SPEEDUP_NOISE_FLOOR_MS = 8;
+
 export function summarizeReport(data) {
   const cases = data.cases ?? [];
   const repeatStats = repeatCaseStats(cases);
@@ -113,7 +115,8 @@ export function validateWarmSpeedup(report, minSpeedup) {
   if (stats.length === 0) {
     throw new Error("Warm speedup gate needs repeat >= 2; got no repeat stats");
   }
-  const slow = stats.filter((item) => item.speedup < minSpeedup);
+  const eligible = stats.filter((item) => item.coldMs >= WARM_SPEEDUP_NOISE_FLOOR_MS);
+  const slow = eligible.filter((item) => item.speedup < minSpeedup);
   if (slow.length > 0) {
     throw new Error(`Warm speedup gate failed: ${slow.map((item) => `${item.name} ${item.speedup}x < ${minSpeedup}x`).join(", ")}`);
   }

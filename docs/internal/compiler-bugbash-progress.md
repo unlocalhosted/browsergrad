@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-04T16:43:41Z
+Last updated: 2026-07-04T16:46:48Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `472/0/0`, dist `472/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `98/98` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Continue corpus-shaped surface/texture probes after layered + typed vector unaligned byte-offset coverage |
+| Active work item | Continue corpus-shaped surface/texture probes with warm-speedup gate noise floor fixed |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -666,12 +666,14 @@ Current verified gates:
 - source/dist real-world verifier after vector unaligned byte probes: compile/codegen audit hard fails `0`; source browser gate `469/0/0`, corpus fixtures `98/0/0`, expected-output `98`, auto-corpus `32/0/0`, skips `0`; dist browser gate `469/0/0`, same coverage, skips `0`
 - layered + typed vector unaligned byte-offset surface probes: `surface:layered-vector-unaligned-byte-offset,surface:uint4-vector-unaligned-byte-offset,surface:int4-vector-unaligned-byte-offset` are `3 passed / 0 failed / 0 skipped`; repeat `15/0/0`, warmup `1`, best warm `1.4ms` / `3.3ms` / `3.4ms`, speedups `3.07` / `1.12` / `1.12`; changed gate fixture tests passed, WebGPU smoke `309/0/0`, skips `0`
 - source/dist real-world verifier after layered + typed vector unaligned byte probes: compile/codegen audit hard fails `0`; source browser gate `472/0/0`, corpus fixtures `98/0/0`, expected-output `98`, auto-corpus `32/0/0`, skips `0`; dist browser gate `472/0/0`, same coverage, skips `0`
+- warm-speedup timing-floor tooling fix: report unit tests passed; previously failing tiny unaligned hot gates now pass with correctness `15/0/0` and skips `0`; `verify:changed` passed fixture tests plus WebGPU smoke `309/0/0`, skips `0`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
 | Fixed | surface unaligned byte offset | `surf2Dread(..., 2, row)` and `surf2Dwrite(..., 6, row)` divided byte offsets before checking alignment, so unaligned addresses silently aliased lanes `0` and `1` | CPU reference and WGSL surface helpers now reject non-4-byte-aligned `x_bytes` before converting bytes to element indexes; added pinned `surface:unaligned-byte-offset` regression to smoke | fail-first focused case showed expected `0`, actual `7`; rerun `1/0/0`, skips `0`; hot repeat `5/0/0`, best warm `1.1ms`, speedup `3.55`; changed gate smoke `301/0/0`; src/dist verifier `464/0/0` |
+| Fixed | warm-speedup gate false negatives | hot-case gates failed tiny real WebGPU fixtures with correctness `15/0/0` because cold and warm dispatch/readback times were around `3ms` and ratio noise dominated | speedup validation now ignores cases with cold time below the `8ms` noise floor while preserving warm-ms gates and speedup checks for larger cases; added fixture-report unit coverage | `test:webgpu-fixtures` passed; prior tiny unaligned hot gates pass with `15/0/0`, skips `0`; `verify:changed` passed, smoke `309/0/0` |
 | Probed green | layered and typed vector unaligned byte offsets | float4 2D/1D/3D unaligned probes did not prove layered-surface dispatch or signed/unsigned vector casts used the same x-byte alignment guard | added pinned `surface:layered-vector-unaligned-byte-offset`, `surface:uint4-vector-unaligned-byte-offset`, and `surface:int4-vector-unaligned-byte-offset` real WebGPU fixtures and smoke cases | focused group `3/0/0`, skips `0`; repeat `15/0/0`, best warm `1.4ms` / `3.3ms` / `3.4ms`; changed gate smoke `309/0/0`; src/dist verifier `472/0/0` |
 | Probed green | vector unaligned byte offsets | scalar unaligned surface probes did not prove pointer-form vector reads, return-form vector reads, or vector writes rejected non-4-byte-aligned x-byte offsets lane-wise across 2D, 1D, and 3D surface paths | added pinned `surface:vector-unaligned-byte-offset`, `surface:surf1d-vector-unaligned-byte-offset`, and `surface:surf3d-vector-unaligned-byte-offset` real WebGPU fixtures and smoke cases | focused group `3/0/0`, skips `0`; repeat `15/0/0`, best warm `1.2ms` / `1.0ms` / `1.3ms`; changed gate smoke `306/0/0`; src/dist verifier `469/0/0` |
 | Probed green | surf1D/surf3D unaligned byte offsets | surf2D unaligned byte-offset regression did not prove the x-byte alignment guard held for 1D and 3D surface helper paths | added pinned `surface:surf1d-unaligned-byte-offset` and `surface:surf3d-unaligned-byte-offset` real WebGPU fixtures and smoke cases | focused pair `2/0/0`, skips `0`; repeat `10/0/0`, best warm `2.8ms` / `2.9ms`; changed gate smoke `303/0/0`; src/dist verifier `466/0/0` |
@@ -1086,6 +1088,7 @@ Probe these with fail-first real WebGPU fixtures:
   - auto-corpus exact-case profiling no longer fails a full-corpus baseline check; filtered expected counts now match the selected case set
   - llm.c synthetic smoke reference loops are smaller, but layernorm reference cases still dominate the scoped run at about `234ms`; keep profiling reference hot spots separately from WebGPU dispatch time
   - corpus fixture expected-output baseline now covers `98/98` real WebGPU fixtures; source/dist real-world verifier and histogram/scalar hot perf gate are green after final oracle pinning
+  - warm-speedup gate now ignores sub-`8ms` cold runs because timing-floor noise can invert ratios on tiny fixtures; use warm-ms max gates or larger cases for true perf regressions
   - WebGPU smoke after layered + typed vector unaligned byte probes is `309/0/0`; slowest cases are still pre-existing texture/surface compound pointer-array probes, not the new unaligned cases; tiny unaligned probes run around `3ms`, so correctness repeat is useful but hard speedup thresholds can be timing-floor noisy
 
 ## Gate Ladder
