@@ -7759,6 +7759,28 @@ __global__ void activeNestedConditionalHelperVarInit(uint *storage, uint *out, i
     expect(compiled.wgsl).not.toContain("select(0u, active_nested_conditional_var_init_helper_with_pointer_side_effect");
   });
 
+  it("preserves nested conditional helper-call laziness in device return expressions", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint nested_return_conditional_helper_with_pointer_side_effect(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return ptr[0];
+}
+
+__device__ uint nested_return_conditional_wrapper(uint *ptr, int enabled) {
+  return 3u + (enabled != 0 ? nested_return_conditional_helper_with_pointer_side_effect(ptr, 7u) : 0u);
+}
+
+__global__ void nestedConditionalHelperReturn(uint *storage, uint *out, int enabled) {
+  out[0] = nested_return_conditional_wrapper(storage, enabled);
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toMatch(/var bg_return_value_\d+: u32 = 0u;/u);
+    expect(compiled.wgsl).toContain("if ((enabled != 0))");
+    expect(compiled.wgsl).toContain("bg_return_value_");
+    expect(compiled.wgsl).toContain("= (3u + nested_return_conditional_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0u, nested_return_conditional_helper_with_pointer_side_effect");
+  });
+
   it("preserves atomic side effects before loop returns lowered for barriers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomicReturnSideEffectBarrier(uint *counter, uint *out, int N) {

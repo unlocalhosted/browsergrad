@@ -488,7 +488,7 @@ function emitStatement(
       return lines;
     }
     case "return":
-      return [`${prefix}${statement.value ? `return ${emitReturnValue(statement.value, context)};` : "return;"}`];
+      return emitReturnStatement(statement, context, indentLevel);
     case "continue":
       return [`${prefix}continue;`];
     case "break":
@@ -1061,9 +1061,9 @@ function emitInlineBarrierDeviceFunctionCall(
     indentLevel + 1,
     options.activeFlag ? { activeFlag: options.activeFlag } : { lowerEarlyReturnsBeforeBarriers: true },
   ));
-  if (options.assignTarget && final?.kind === "return" && final.value) {
+  if (options.assignTarget && final?.kind === "return" && final.value && fn.returnType !== "void") {
     const target = emitExpression(options.assignTarget, context, "lvalue");
-    lines.push(`${indent(indentLevel + 1)}${target} = ${emitReturnValue(final.value, functionContext)};`);
+    lines.push(...emitLazyConditionalValueAssignment(target, final.value, fn.returnType, functionContext, indentLevel + 1));
   }
   lines.push(`${prefix}}`);
   return lines;
@@ -1989,6 +1989,36 @@ function emitReturnValue(expression: CudaLiteExpression, context: EmitContext): 
     : emitExpressionAsValueType(expression, context.currentReturnType, context);
 }
 
+function emitReturnStatement(
+  statement: Extract<CudaLiteStatement, { kind: "return" }>,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const prefix = indent(indentLevel);
+  if (!statement.value) return [`${prefix}return;`];
+  const lazy = emitReturnWithLazyConditionalSideEffect(statement.value, context, indentLevel);
+  if (lazy) return lazy;
+  return [`${prefix}return ${emitReturnValue(statement.value, context)};`];
+}
+
+function emitReturnWithLazyConditionalSideEffect(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  const valueType = context.currentReturnType !== undefined && context.currentReturnType !== "void"
+    ? context.currentReturnType
+    : expressionValueTypeForEmit(expression, context);
+  if (!valueType || valueType === "void" || !splitLazyConditionalSideEffectExpression(expression, context)) return undefined;
+  const prefix = indent(indentLevel);
+  const tempName = context.nameFor(`bg_return_value_${expression.span.start}`);
+  return [
+    `${prefix}var ${tempName}: ${wgslScalar(valueType)} = ${zeroValue(valueType)};`,
+    ...emitLazyConditionalValueAssignment(tempName, expression, valueType, context, indentLevel),
+    `${prefix}return ${tempName};`,
+  ];
+}
+
 function devicePointerValueTypeForExpression(expression: CudaLiteExpression, context: EmitContext): CudaLiteScalarType {
   if (expression.kind === "unary" && expression.operator === "&" && expression.argument.kind === "member") {
     const objectType = devicePointerValueTypeForExpression(expression.argument.object, context);
@@ -2849,6 +2879,25 @@ function emitLazyConditionalAssignmentBranch(
   indentLevel: number,
 ): string[] {
   return emitAssignmentWithLazyConditionalSideEffectRhs(expression, context, indentLevel) ?? [`${indent(indentLevel)}${emitAssignment(expression, context)};`];
+}
+
+function emitLazyConditionalValueAssignment(
+  target: string,
+  expression: CudaLiteExpression,
+  valueType: Exclude<CudaLiteScalarType, "void">,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const split = splitLazyConditionalSideEffectExpression(expression, context);
+  const prefix = indent(indentLevel);
+  if (!split) return [`${prefix}${target} = ${emitExpressionAsValueType(expression, valueType, context)};`];
+  return [
+    `${prefix}if (${emitTruthinessExpression(split.condition, context)}) {`,
+    ...emitLazyConditionalValueAssignment(target, split.consequent, valueType, context, indentLevel + 1),
+    `${prefix}} else {`,
+    ...emitLazyConditionalValueAssignment(target, split.alternate, valueType, context, indentLevel + 1),
+    `${prefix}}`,
+  ];
 }
 
 function splitLazyConditionalSideEffectExpression(
