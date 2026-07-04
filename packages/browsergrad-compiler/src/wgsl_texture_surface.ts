@@ -279,7 +279,7 @@ export function emitSurfaceHelper(name: string, context: WgslTextureSurfaceEmitC
   const safeName = context.nameFor(name);
   return [
     `fn bg_surf2dread_${name}(x_bytes: i32, y: i32, z: i32) -> f32 {`,
-    "  if (x_bytes < 0) {",
+    "  if (x_bytes < 0 || (x_bytes % 4) != 0) {",
     "    return 0.0;",
     "  }",
     "  let x = x_bytes / 4;",
@@ -295,7 +295,7 @@ export function emitSurfaceHelper(name: string, context: WgslTextureSurfaceEmitC
     "  return 0.0;",
     "}",
     `fn bg_surf2dwrite_${name}(value: f32, x_bytes: i32, y: i32, z: i32) {`,
-    "  if (x_bytes < 0) {",
+    "  if (x_bytes < 0 || (x_bytes % 4) != 0) {",
     "    return;",
     "  }",
     "  let x = x_bytes / 4;",

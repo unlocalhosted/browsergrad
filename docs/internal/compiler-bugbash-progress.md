@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-02T20:46:04Z
+Last updated: 2026-07-04T16:17:56Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,7 +9,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `463/0/0`, dist `463/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `98/98` |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `464/0/0`, dist `464/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `98/98` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
 | Active work item | Continue corpus-shaped surface/texture boundary probes plus keep perf/source-dist verifier gates green |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
@@ -658,11 +658,14 @@ Current verified gates:
 - source/dist real-world verifier after surf1D boundary probes: compile/codegen audit hard fails `0`; source browser gate `461/0/0`, corpus fixtures `98/0/0`, expected-output `98`, auto-corpus `32/0/0`, skips `0`; dist browser gate `461/0/0`, same coverage, skips `0`
 - surf3D z-boundary probes: `surface:surf3d-negative-z-boundary,surface:surf3d-vector-z-boundary` are `2 passed / 0 failed / 0 skipped`; hot repeat `10/0/0`, best warm `3.1ms` / `3.1ms`, speedups `1.39` / `1.26`; changed gate fixture tests passed, WebGPU smoke `300/0/0`, skips `0`
 - source/dist real-world verifier after surf3D z-boundary probes: compile/codegen audit hard fails `0`; source browser gate `463/0/0`, corpus fixtures `98/0/0`, expected-output `98`, auto-corpus `32/0/0`, skips `0`; dist browser gate `463/0/0`, same coverage, skips `0`
+- surface unaligned byte-offset fix: `surface:unaligned-byte-offset` initially failed expected-output compare with first diff expected `0`, actual `7`; CPU reference and WGSL now reject non-4-byte-aligned surface offsets before lane conversion; focused rerun `1/0/0`, hot repeat `5/0/0`, best warm `1.1ms`, speedup `3.55`; changed gate typecheck passed, compiler unit `436/0`, focused surface/texture group `166/0/0`, WebGPU smoke `301/0/0`, skips `0`
+- source/dist real-world verifier after unaligned surface byte fix: compile/codegen audit hard fails `0`; source browser gate `464/0/0`, corpus fixtures `98/0/0`, expected-output `98`, auto-corpus `32/0/0`, skips `0`; dist browser gate `464/0/0`, same coverage, skips `0`
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | surface unaligned byte offset | `surf2Dread(..., 2, row)` and `surf2Dwrite(..., 6, row)` divided byte offsets before checking alignment, so unaligned addresses silently aliased lanes `0` and `1` | CPU reference and WGSL surface helpers now reject non-4-byte-aligned `x_bytes` before converting bytes to element indexes; added pinned `surface:unaligned-byte-offset` regression to smoke | fail-first focused case showed expected `0`, actual `7`; rerun `1/0/0`, skips `0`; hot repeat `5/0/0`, best warm `1.1ms`, speedup `3.55`; changed gate smoke `301/0/0`; src/dist verifier `464/0/0` |
 | Probed green | surf3D negative and high-z boundary access | row/layer probes did not explicitly prove `surf3Dread/write` rejected negative `z` or vector lane reads/writes at a layer beyond the surface backing store | added pinned `surface:surf3d-negative-z-boundary` and `surface:surf3d-vector-z-boundary` real WebGPU fixtures and smoke cases | focused pair `2/0/0`, skips `0`; hot repeat `10/0/0`, best warm `3.1ms` / `3.1ms`, speedups `1.39` / `1.26`; changed gate smoke `300/0/0`; src/dist verifier `463/0/0` |
 | Probed green | surf1D negative and vector boundary access | surf2D boundary probes did not prove `surf1Dread/write` rejected negative byte offsets or per-lane vector overruns at the end of a 1D surface | added pinned `surface:surf1d-negative-byte-offset` and `surface:surf1d-vector-boundary` real WebGPU fixtures and smoke cases | focused pair `2/0/0`, skips `0`; hot repeat `10/0/0`, best warm `0.6ms` / `0.9ms`, speedups `8` / `4.22`; changed gate smoke `298/0/0` |
 | Probed green | surface layer-boundary aliasing | row-boundary coverage did not prove `y == height`; 3D/layered surface access could still alias the next layer if row bounds regressed | added pinned `surface:layer-boundary` real WebGPU fixture and smoke case | focused case `1/0/0`, skips `0`; hot repeat `5/0/0`, best warm `1.6ms`, speedup `22.88`; changed gate smoke `296/0/0` |
@@ -1042,18 +1045,18 @@ Current added pointer/control cases:
 - `storage:shared-byte-bf162-reinterpret`
 - `storage:shared-byte-int-helper-atomic`
 
-Smoke current: `300/0/0`.
+Smoke current: `301/0/0`.
 
-Full source e2e current: `463/0/0`.
+Full source e2e current: `464/0/0`.
 
-Verifier current: src `463/0/0`, dist `463/0/0`.
+Verifier current: src `464/0/0`, dist `464/0/0`.
 
 ## Remaining Probe Map
 
 Probe these with fail-first real WebGPU fixtures:
 
 - Surface family:
-  - surface writes before active-lane return, layered writes, helper layered vector writes, layered reads, 3D reads, layered/3D vector reads, surface vector read/write before active-lane return, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 surface vector write/read before active-lane return, mixed scalar/vector layered surface side effects, surface-read pointer-alias side effects, surface-read atomic pointer-alias side effects, surface atomic vector readback, surface atomic vector compound helper writes, surf3D helper multi-surface and guarded RHS probes, surf3D all-inactive guarded RHS, surf3D pointer-alias active/atomic vector probes, surf3D pointer-array select/active/compound/CAS/minmax, surface/surf1D/surf3D pointer-array false-branch selection, surface/surf1D/surf3D compound false-branch selection, surface/surf1D/surf3D CAS/minmax false-branch selection, 3D vector writes fed by layered/3D texture vectors, surf1D negative/vector boundary checks, and surf3D negative/high-z boundary checks are now green; keep probing next corpus-shaped surface/texture pattern
+  - surface writes before active-lane return, layered writes, helper layered vector writes, layered reads, 3D reads, layered/3D vector reads, surface vector read/write before active-lane return, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 surface vector write/read before active-lane return, mixed scalar/vector layered surface side effects, surface-read pointer-alias side effects, surface-read atomic pointer-alias side effects, surface atomic vector readback, surface atomic vector compound helper writes, surf3D helper multi-surface and guarded RHS probes, surf3D all-inactive guarded RHS, surf3D pointer-alias active/atomic vector probes, surf3D pointer-array select/active/compound/CAS/minmax, surface/surf1D/surf3D pointer-array false-branch selection, surface/surf1D/surf3D compound false-branch selection, surface/surf1D/surf3D CAS/minmax false-branch selection, 3D vector writes fed by layered/3D texture vectors, surf1D negative/vector boundary checks, surf3D negative/high-z boundary checks, and unaligned byte-offset checks are now green; keep probing next corpus-shaped surface/texture pattern
 - Texture family:
   - vector helper return, cast/coercion, active-lane pre-return read, atlas/volume guarded RHS, atlas/volume all-inactive guarded RHS, atlas pointer-array false-branch selection, pointer-array false-branch selection, texture/atlas compound false-branch selection, texture/atlas CAS/minmax false-branch selection, 2D and volume scalar/vector pointer-array active-lane false-branch selection, float2/uint2/int2/float3/uint3/int3/float4/uint4/int4 texture active-lane stores, texture-to-surface pre-return side effects, constant/shared texture-to-surface active-lane reads/writes, 2-lane/3-lane/4-lane texture-fed layered surface vector writes/reads, mixed scalar/vector texture-fed layered surface vector writes/reads, texture-fed layered surface vector writes, layered/3D texture vector reads feeding 3D surface vector writes, atlas/layered active-lane reads, deep helper vector stores, mixed scalar/vector texture stores, texture-fed pointer alias writes, texture-fed pointer alias atomics, atomic vector readback, atomic vector compound helper writes, and atomic vector member helper writes are now green; keep probing next corpus-shaped texture/storage pattern
 - Pointer/vector family:
@@ -1066,7 +1069,7 @@ Probe these with fail-first real WebGPU fixtures:
   - auto-corpus exact-case profiling no longer fails a full-corpus baseline check; filtered expected counts now match the selected case set
   - llm.c synthetic smoke reference loops are smaller, but layernorm reference cases still dominate the scoped run at about `234ms`; keep profiling reference hot spots separately from WebGPU dispatch time
   - corpus fixture expected-output baseline now covers `98/98` real WebGPU fixtures; source/dist real-world verifier and histogram/scalar hot perf gate are green after final oracle pinning
-  - WebGPU smoke after surf3D z-boundary probes is `300/0/0`; slowest cases are still pre-existing texture/surface compound pointer-array probes, not the new boundary pairs; keep smoke real-WebGPU and fast enough for inner loop
+  - WebGPU smoke after unaligned surface byte fix is `301/0/0`; slowest cases are still pre-existing texture/surface compound pointer-array probes, not the new boundary cases; keep smoke real-WebGPU and fast enough for inner loop
 
 ## Gate Ladder
 

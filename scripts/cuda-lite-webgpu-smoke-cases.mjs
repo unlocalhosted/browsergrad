@@ -147,6 +147,7 @@ export const controlScopeCases = [
 export const textureScopeCases = [
   "surface:surf2d-read",
   "surface:negative-byte-offset",
+  "surface:unaligned-byte-offset",
   "surface:row-boundary",
   "surface:vector-row-boundary",
   "surface:layer-boundary",

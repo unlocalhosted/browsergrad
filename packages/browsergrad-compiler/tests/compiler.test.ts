@@ -5559,6 +5559,7 @@ __global__ void textureSurfaceVectorHelperRoundtrip(cudaSurfaceObject_t surf, cu
 
     expect(compiled.wgsl).toContain("fn bg_surf2dread(surface: u32, x_bytes: i32, y: i32, z: i32) -> f32");
     expect(compiled.wgsl).toContain("fn bg_surf2dwrite(surface: u32, value: f32, x_bytes: i32, y: i32, z: i32)");
+    expect(compiled.wgsl).toContain("if (x_bytes < 0 || (x_bytes % 4) != 0)");
     expect(compiled.wgsl).toContain("write_surface_vec(0u, value");
     expect(compiled.wgsl).toContain("bg_surf2dwrite(surfaceArg");
     expect(compiled.wgsl).toContain("bg_surf2dread(surfaceArg");

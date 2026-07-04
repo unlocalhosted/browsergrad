@@ -2416,6 +2416,15 @@ __global__ void surfaceNegativeByteOffset(uint *out, cudaSurfaceObject_t surf) {
   out[0] = value;
   out[1] = surf2Dread<unsigned int>(surf, 0, 0);
 }`,
+  surfaceUnalignedByteOffset: `
+__global__ void surfaceUnalignedByteOffset(uint *out, cudaSurfaceObject_t surf) {
+  uint value = 99u;
+  surf2Dread(&value, surf, 2, 0);
+  surf2Dwrite(42.0f, surf, 6, 0);
+  out[0] = value;
+  out[1] = surf2Dread<unsigned int>(surf, 0, 0);
+  out[2] = surf2Dread<unsigned int>(surf, 1 * sizeof(float), 0);
+}`,
   surfaceRowBoundary: `
 __global__ void surfaceRowBoundary(uint *out, cudaSurfaceObject_t surf) {
   uint value = 99u;
@@ -8630,6 +8639,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [0, 7] },
+          },
+          {
+            name: "surface:unaligned-byte-offset",
+            source: SOURCES.surfaceUnalignedByteOffset,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(3),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array([7, 11]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0, 7, 11] },
           },
           {
             name: "surface:row-boundary",
