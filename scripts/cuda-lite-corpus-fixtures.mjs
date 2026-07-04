@@ -231,6 +231,30 @@ export const cudaLiteCorpusExecutionFixtures = [
     expectedOutput: { type: "Int32Array", data: [10, -10, 0, 0, 0, 1, 137, 0, 7, 3, 11] },
   },
   {
+    sourceKey: "corpusCudaSamplesSimpleCuda2GlProcess",
+    caseName: "corpus:cuda-samples:cudaProcess",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/0_Introduction/simpleCUDA2GL/simpleCUDA2GL.cu",
+    kernelName: "cudaProcess",
+    workgroupSize: [1, 1, 1],
+    options: { dynamicSharedMemory: { sdata: 16 } },
+    launch: { gridDim: [33, 1, 1], blockDim: [1, 1, 1] },
+    input: {
+      buffers: {
+        g_odata: { type: "Uint32Array", length: 33 },
+      },
+      scalars: { imgw: 33 },
+    },
+    output: "g_odata",
+    expectedOutput: {
+      type: "Uint32Array",
+      data: [
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        6553600,
+      ],
+    },
+  },
+  {
     sourceKey: "corpusCudaSamplesIncKernel",
     caseName: "corpus:cuda-samples:incKernel",
     corpusId: "cuda-samples",
