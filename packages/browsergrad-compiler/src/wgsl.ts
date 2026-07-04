@@ -1179,17 +1179,13 @@ function emitVarInitWithConditionalSideEffect(
   activeFlag?: string,
 ): string[] | undefined {
   if (statement.storage === "shared" || statement.pointer || statement.dimensions.length > 0 || statement.matrixTile) return undefined;
-  if (statement.init?.kind !== "conditional" || !expressionContainsSideEffectingCall(statement.init, context)) return undefined;
+  if (!statement.init || !splitLazyConditionalSideEffectExpression(statement.init, context)) return undefined;
   const prefix = indent(indentLevel);
   const branchIndent = activeFlag ? indentLevel + 1 : indentLevel;
   const target: CudaLiteExpression = { kind: "identifier", name: statement.name, span: statement.span };
   const lines = [`${prefix}var ${context.nameFor(statement.name)}: ${wgslScalar(statement.valueType)} = ${zeroValue(statement.valueType)};`];
   if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
-  lines.push(`${indent(branchIndent)}if (${emitTruthinessExpression(statement.init.condition, context)}) {`);
-  lines.push(`${indent(branchIndent + 1)}${emitAssignment({ kind: "assignment", left: target, operator: "=", right: statement.init.consequent, span: statement.span }, context)};`);
-  lines.push(`${indent(branchIndent)}} else {`);
-  lines.push(`${indent(branchIndent + 1)}${emitAssignment({ kind: "assignment", left: target, operator: "=", right: statement.init.alternate, span: statement.span }, context)};`);
-  lines.push(`${indent(branchIndent)}}`);
+  lines.push(...emitAssignmentWithLazyConditionalSideEffectRhs({ kind: "assignment", left: target, operator: "=", right: statement.init, span: statement.span }, context, branchIndent) ?? []);
   if (activeFlag) lines.push(`${prefix}}`);
   return lines;
 }
@@ -2827,15 +2823,57 @@ function emitAssignmentWithConditionalSideEffectRhs(
   context: EmitContext,
   indentLevel: number,
 ): string[] | undefined {
-  if (expression.right.kind !== "conditional" || !expressionContainsSideEffectingCall(expression.right, context)) return undefined;
+  return emitAssignmentWithLazyConditionalSideEffectRhs(expression, context, indentLevel);
+}
+
+function emitAssignmentWithLazyConditionalSideEffectRhs(
+  expression: CudaLiteAssignmentExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  const split = splitLazyConditionalSideEffectExpression(expression.right, context);
+  if (!split) return undefined;
   const prefix = indent(indentLevel);
   return [
-    `${prefix}if (${emitTruthinessExpression(expression.right.condition, context)}) {`,
-    `${indent(indentLevel + 1)}${emitAssignment({ ...expression, right: expression.right.consequent }, context)};`,
+    `${prefix}if (${emitTruthinessExpression(split.condition, context)}) {`,
+    ...emitLazyConditionalAssignmentBranch({ ...expression, right: split.consequent }, context, indentLevel + 1),
     `${prefix}} else {`,
-    `${indent(indentLevel + 1)}${emitAssignment({ ...expression, right: expression.right.alternate }, context)};`,
+    ...emitLazyConditionalAssignmentBranch({ ...expression, right: split.alternate }, context, indentLevel + 1),
     `${prefix}}`,
   ];
+}
+
+function emitLazyConditionalAssignmentBranch(
+  expression: CudaLiteAssignmentExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  return emitAssignmentWithLazyConditionalSideEffectRhs(expression, context, indentLevel) ?? [`${indent(indentLevel)}${emitAssignment(expression, context)};`];
+}
+
+function splitLazyConditionalSideEffectExpression(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+): { readonly condition: CudaLiteExpression; readonly consequent: CudaLiteExpression; readonly alternate: CudaLiteExpression } | undefined {
+  const conditional = firstSideEffectingConditionalExpression(expression, context);
+  if (!conditional) return undefined;
+  return {
+    condition: conditional.condition,
+    consequent: replaceExpressionNode(expression, conditional, conditional.consequent),
+    alternate: replaceExpressionNode(expression, conditional, conditional.alternate),
+  };
+}
+
+function firstSideEffectingConditionalExpression(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+): CudaLiteConditionalExpression | undefined {
+  let found: CudaLiteConditionalExpression | undefined;
+  walkCudaLiteExpressions([{ kind: "expr", expression, span: expression.span }], (item) => {
+    if (found || item.kind !== "conditional" || !expressionContainsSideEffectingCall(item, context)) return;
+    found = item;
+  });
+  return found;
 }
 
 function splitNestedAssignmentExpression(
@@ -3011,14 +3049,15 @@ function emitPredicatedAssignmentWithConditionalSideEffectRhs(
   context: EmitContext,
   indentLevel: number,
 ): string[] | undefined {
-  if (expression.right.kind !== "conditional" || !expressionContainsSideEffectingCall(expression.right, context)) return undefined;
+  const split = splitLazyConditionalSideEffectExpression(expression.right, context);
+  if (!split) return undefined;
   const prefix = indent(indentLevel);
   return [
     `${prefix}if (${activeFlag}) {`,
-    `${indent(indentLevel + 1)}if (${emitTruthinessExpression(expression.right.condition, context)}) {`,
-    `${indent(indentLevel + 2)}${emitAssignment({ ...expression, right: expression.right.consequent }, context)};`,
+    `${indent(indentLevel + 1)}if (${emitTruthinessExpression(split.condition, context)}) {`,
+    ...emitLazyConditionalAssignmentBranch({ ...expression, right: split.consequent }, context, indentLevel + 2),
     `${indent(indentLevel + 1)}} else {`,
-    `${indent(indentLevel + 2)}${emitAssignment({ ...expression, right: expression.right.alternate }, context)};`,
+    ...emitLazyConditionalAssignmentBranch({ ...expression, right: split.alternate }, context, indentLevel + 2),
     `${indent(indentLevel + 1)}}`,
     `${prefix}}`,
   ];
