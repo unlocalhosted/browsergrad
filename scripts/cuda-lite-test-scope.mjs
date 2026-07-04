@@ -231,6 +231,17 @@ export const scopeRules = [
     ],
   },
   {
+    id: "corpus-audit-scripts",
+    reason: "corpus audit/source emission changed",
+    matches: [
+      /^scripts\/audit-cuda-lite-corpus(?:-[A-Za-z0-9-]+)?\.mjs$/u,
+      /^scripts\/test-cuda-lite-corpus-audit\.mjs$/u,
+    ],
+    commands: [
+      command("pnpm", "--filter", COMPILER, "run", "test:audit-corpus:run"),
+    ],
+  },
+  {
     id: "synthetic-input-scripts",
     reason: "synthetic input changed",
     matches: [

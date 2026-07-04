@@ -6,6 +6,7 @@ export function parseArgs(args) {
   let kernelManifestSources = false;
   let emitKernelFile;
   let emitKernelName;
+  let emitKernelTemplateArgs;
   const expectations = {};
   let firstFailureLimit = 80;
   let help = false;
@@ -46,6 +47,14 @@ export function parseArgs(args) {
       }
       continue;
     }
+    if (arg === "--kernel-template-args") {
+      emitKernelTemplateArgs = parseKernelTemplateArgs(args[++index]);
+      continue;
+    }
+    if (arg?.startsWith("--kernel-template-args=")) {
+      emitKernelTemplateArgs = parseKernelTemplateArgs(arg.slice("--kernel-template-args=".length));
+      continue;
+    }
     if (arg === "--limit") {
       const value = Number(args[++index]);
       if (!Number.isInteger(value) || value < 0) {
@@ -82,13 +91,21 @@ export function parseArgs(args) {
     process.exit(2);
   }
   const emitKernelSource = emitKernelFile !== undefined || emitKernelName !== undefined
-    ? { file: emitKernelFile, kernelName: emitKernelName }
+    ? { file: emitKernelFile, kernelName: emitKernelName, templateArgs: emitKernelTemplateArgs ?? [] }
     : undefined;
   if (emitKernelSource !== undefined && (!emitKernelSource.file || !emitKernelSource.kernelName)) {
     console.error("--emit-kernel-source requires --kernel-name");
     process.exit(2);
   }
   return { corpusPathArg, details, emitKernelSource, expectations, firstFailureLimit, help, includeSources, kernelManifest, kernelManifestSources };
+}
+
+function parseKernelTemplateArgs(value) {
+  if (value === undefined) {
+    console.error("--kernel-template-args expects a comma-separated argument list");
+    process.exit(2);
+  }
+  return value.split(",").map((arg) => arg.trim()).filter((arg) => arg.length > 0);
 }
 
 export function parseExpectationArg(arg, args, index) {

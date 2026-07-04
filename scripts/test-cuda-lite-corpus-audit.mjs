@@ -109,6 +109,11 @@ __global__ void TemplateSpecializationHelper(float *out, const float *data) {
   out[threadIdx.x] = cast_value_like<float, float>(data[threadIdx.x]);
 }
 
+template<class T>
+__global__ void TypedKernel(T *out) {
+  out[threadIdx.x] = (T)threadIdx.x;
+}
+
 __global__ void GlobalAlias(ExternalColor *dst) {
   dst[threadIdx.x] = (ExternalColor)threadIdx.x;
 }
@@ -199,6 +204,14 @@ void launch_template_specialization(float *out, const float *data) {
   TemplateSpecializationHelper<<<1, 32>>>(out, data);
 }
 
+void launch_typed_float(float *out) {
+  TypedKernel<float><<<1, 32>>>(out);
+}
+
+void launch_typed_int(int *out) {
+  TypedKernel<int><<<1, 32>>>(out);
+}
+
 void launch_global_alias(ExternalColor *dst) {
   GlobalAlias<<<1, 32>>>(dst);
 }
@@ -239,25 +252,25 @@ void launch_multi_gpu_like(int *I, int *J, float *val, float *x, float *Ax, floa
     process.exit(result.status ?? 1);
   }
   const report = JSON.parse(result.stdout.slice(result.stdout.indexOf("{")));
-  assertEqual(report.summary.totalKernelDefinitions, 13, "total kernel count");
+  assertEqual(report.summary.totalKernelDefinitions, 14, "total kernel count");
   assertEqual(report.summary.corpusKernelExecution, "compile-codegen-only", "corpus execution mode");
   assertEqual(report.summary.corpusExecutionMode, "compile-codegen-only", "corpus execution mode alias");
-  assertEqual(report.summary.executionTierCounts.compileCodegenOnlyOk, 13, "compile/codegen-only tier count");
-  assertEqual(report.summary.executionTierCounts.planCompiledOk, 13, "plan-compiled tier count");
+  assertEqual(report.summary.executionTierCounts.compileCodegenOnlyOk, 14, "compile/codegen-only tier count");
+  assertEqual(report.summary.executionTierCounts.planCompiledOk, 14, "plan-compiled tier count");
   assertEqual(report.summary.executionTierCounts.planCompileGaps, 0, "plan-compiled gap count");
   assertEqual(report.summary.executionTierCounts.fixtureBackedExecutedOk, 0, "fixture execution tier count");
   assertEqual(report.summary.executionTierCounts.browserWebGpuExecutedOk, 0, "browser execution tier count");
   assertEqual(report.summary.executionTierCounts.outputVerifiedOk, 0, "output verified tier count");
-  assertEqual(report.summary.planCompiledOk, 13, "plan compiled count");
+  assertEqual(report.summary.planCompiledOk, 14, "plan compiled count");
   assertEqual(report.summary.planCompileGaps, 0, "plan compiled gaps");
-  assertEqual(report.summary.singleDispatchPlanCompiledOk, 11, "single-dispatch plan compiled count");
+  assertEqual(report.summary.singleDispatchPlanCompiledOk, 12, "single-dispatch plan compiled count");
   assertEqual(report.summary.hostOrchestratedPlanCompiledOk, 2, "host-orchestrated plan compiled count");
   assertEqual(report.summary.browserExecutedOk, 0, "browser executed count");
   assertEqual(report.summary.outputVerifiedOk, 0, "output verified count");
   assertEqual(report.summary.deprecatedCompilePlanAliases.webGpuRunnableOk, "planCompiledOk", "deprecated runnable alias");
-  assertEqual(report.summary.webGpuDirectCompiledOk, 11, "reverse include kernel direct WGSL compiled");
+  assertEqual(report.summary.webGpuDirectCompiledOk, 12, "reverse include kernel direct WGSL compiled");
   assertEqual(report.summary.webGpuHostPlanCompiledOk, 2, "reverse include kernel host-plan compiled");
-  assertEqual(report.summary.compileCodegenOk, 13, "reverse include kernel compile/codegen count");
+  assertEqual(report.summary.compileCodegenOk, 14, "reverse include kernel compile/codegen count");
   assertEqual(report.summary.compileCodegenGaps, 0, "reverse include kernel compile/codegen gaps");
   assertEqual(report.summary.fixtureBackedExecutionOk, 0, "fixture-backed execution count");
   assertEqual(report.summary.webGpuRunnableOk, undefined, "legacy runnable count omitted from top-level summary");
@@ -300,6 +313,28 @@ void launch_multi_gpu_like(int *I, int *J, float *val, float *x, float *Ax, floa
   const emittedSource = JSON.parse(emitted.stdout).source;
   assertIncludes(emittedSource, "make_color", "emitted normalized source includes helper context");
   assertIncludes(emittedSource, "__global__ void Copy", "emitted normalized source includes requested kernel");
+  const emittedTypedInt = spawnSync("node", [
+    "scripts/audit-cuda-lite-corpus.mjs",
+    tmpRoot,
+    "--emit-kernel-source",
+    "kernel.cuh",
+    "--kernel-name",
+    "TypedKernel",
+    "--kernel-template-args",
+    "int",
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (emittedTypedInt.status !== 0) {
+    process.stderr.write(emittedTypedInt.stderr);
+    process.stderr.write(emittedTypedInt.stdout);
+    process.exit(emittedTypedInt.status ?? 1);
+  }
+  const emittedTypedIntSource = JSON.parse(emittedTypedInt.stdout).source;
+  assertIncludes(emittedTypedIntSource, "template<class T = int>", "template arg override updates default");
+  assertIncludes(emittedTypedIntSource, "__global__ void TypedKernel(int *out)", "template arg override updates kernel param type");
   const emittedClassAdjacent = spawnSync("node", [
     "scripts/audit-cuda-lite-corpus.mjs",
     tmpRoot,

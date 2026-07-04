@@ -463,6 +463,7 @@ function loadNormalizedCorpusKernelSource(root, fixture) {
     fixture.relativePath,
     "--kernel-name",
     fixture.kernelName,
+    ...(fixture.templateArguments?.length ? ["--kernel-template-args", fixture.templateArguments.join(",")] : []),
   ], {
     cwd: root,
     encoding: "utf8",

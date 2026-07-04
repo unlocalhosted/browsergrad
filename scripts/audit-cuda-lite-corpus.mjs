@@ -116,7 +116,13 @@ const files = listFiles(corpusRoot)
 const corpusContext = createCorpusContext(corpusRoot, files);
 
 if (emitKernelSource !== undefined) {
-  const source = emitKernelCompilationSource(corpusRoot, corpusContext, emitKernelSource.file, emitKernelSource.kernelName);
+  const source = emitKernelCompilationSource(
+    corpusRoot,
+    corpusContext,
+    emitKernelSource.file,
+    emitKernelSource.kernelName,
+    emitKernelSource.templateArgs,
+  );
   console.log(JSON.stringify({ source }, null, 2));
   process.exit(0);
 }
@@ -278,18 +284,21 @@ function compileKernelFromAuditContext(rawKernel, kernels, kernelName, context) 
   }
 }
 
-function sourceFromAuditContext(rawKernel, kernels, kernelName, context) {
+function sourceFromAuditContext(rawKernel, kernels, kernelName, context, templateArgs = []) {
   const kernel = pruneCudaPreprocessorBranches(rawKernel, context.effectiveDefines);
   const siblingKernels = [
     ...kernels.filter((candidate) => candidate !== rawKernel)
       .map((candidate) => pruneCudaPreprocessorBranches(candidate, context.effectiveDefines)),
     ...context.dynamicLaunchTargets,
   ];
+  const templateArguments = templateArgs.length === 0
+    ? context.templateArguments
+    : new Map([...context.templateArguments, [kernelName, templateArgs]]);
   const source = createKernelCompilationUnit({
     kernel,
     siblingKernels,
     definesByName: context.effectiveDefines,
-    templateArgumentsByKernelName: context.templateArguments,
+    templateArgumentsByKernelName: templateArguments,
     functionDeclarations: context.functionDeclarations,
     deviceFunctions: context.deviceFunctions,
     constantDeclarations: context.constantDeclarations,
@@ -302,7 +311,7 @@ function sourceFromAuditContext(rawKernel, kernels, kernelName, context) {
   return source;
 }
 
-function emitKernelCompilationSource(corpusRoot, corpusContext, relativePath, kernelName) {
+function emitKernelCompilationSource(corpusRoot, corpusContext, relativePath, kernelName, templateArgs = []) {
   const absolute = path.join(corpusRoot, relativePath);
   if (!fs.existsSync(absolute)) {
     throw new Error(`kernel source file not found: ${relativePath}`);
@@ -321,16 +330,33 @@ function emitKernelCompilationSource(corpusRoot, corpusContext, relativePath, ke
     const kernels = extractKernelDefinitions(block.code);
     const rawKernel = kernels.find((candidate) => kernelDefinitionName(candidate) === kernelName);
     if (rawKernel !== undefined) {
-      const directAttempt = compileKernelFromAuditContext(rawKernel, kernels, kernelName, directContext);
+      const directAttempt = compileKernelFromAuditContextWithTemplateArgs(rawKernel, kernels, kernelName, directContext, templateArgs);
       if (directAttempt.ok || reverseContext === undefined || !shouldRetryWithReverseContext(directAttempt.error)) {
         return directAttempt.source;
       }
-      const reverseAttempt = compileKernelFromAuditContext(rawKernel, kernels, kernelName, reverseContext);
+      const reverseAttempt = compileKernelFromAuditContextWithTemplateArgs(rawKernel, kernels, kernelName, reverseContext, templateArgs);
       return reverseAttempt.source;
     }
     carriedDefines = mergeCarriedDefines(carriedDefines, directContext.blockDefines);
   }
   throw new Error(`kernel ${kernelName} not found in ${relativePath}`);
+}
+
+function compileKernelFromAuditContextWithTemplateArgs(rawKernel, kernels, kernelName, context, templateArgs = []) {
+  if (templateArgs.length === 0) return compileKernelFromAuditContext(rawKernel, kernels, kernelName, context);
+  const source = sourceFromAuditContext(rawKernel, kernels, kernelName, context, templateArgs);
+  try {
+    compileCudaLiteKernel(source, {
+      kernelName,
+      features: { "shader-f16": true, subgroups: true },
+      f64Mode: "f32",
+      workgroupSize: [256, 1, 1],
+      dynamicSharedMemory: inferDynamicSharedMemory(source),
+    });
+    return { ok: true, source };
+  } catch (error) {
+    return { ok: false, source, error };
+  }
 }
 
 function shouldRetryWithReverseContext(error) {
