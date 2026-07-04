@@ -56,6 +56,7 @@ const onlyCorpusFixtures = args.get("--corpus-fixtures-only") === "true";
 const autoCorpusSmokeCache = args.get("--auto-corpus-smoke-cache") === "true";
 const caseFilters = parseCaseFilters(process.argv.slice(2));
 const caseTimeoutMs = parseNonNegativeInteger(args.get("--case-timeout-ms") ?? "0", "--case-timeout-ms");
+const deviceRecycleInterval = parseNonNegativeInteger(args.get("--device-recycle-interval") ?? "128", "--device-recycle-interval");
 const warmup = parseNonNegativeInteger(args.get("--warmup") ?? "0", "--warmup");
 const repeat = parsePositiveInteger(args.get("--repeat") ?? "1", "--repeat");
 const expectWarmSpeedupMin = args.has("--expect-warm-speedup-min")
@@ -6955,7 +6956,7 @@ const html = String.raw`<!doctype html>
       const PROFILE_CASES = new Set(${JSON.stringify(profileCases)});
       const ONLY_AUTO_CORPUS_SMOKE = ${JSON.stringify(onlyAutoCorpusSmoke)};
       const ONLY_CORPUS_FIXTURES = ${JSON.stringify(onlyCorpusFixtures)};
-      const DEVICE_RECYCLE_INTERVAL = 128;
+      const DEVICE_RECYCLE_INTERVAL = ${deviceRecycleInterval};
 
       window.__bgRunE2e = async () => {
         if (!navigator.gpu) {
@@ -7173,7 +7174,7 @@ const html = String.raw`<!doctype html>
       }
 
       function shouldRecycleDevice(completed, total) {
-        return completed > 0 && completed < total && completed % DEVICE_RECYCLE_INTERVAL === 0;
+        return DEVICE_RECYCLE_INTERVAL > 0 && completed > 0 && completed < total && completed % DEVICE_RECYCLE_INTERVAL === 0;
       }
 
       function missingSpecFeatures(device, spec) {

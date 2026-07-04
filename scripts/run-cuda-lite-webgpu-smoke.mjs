@@ -9,6 +9,7 @@ export function buildWebGpuSmokeArgs(root, extraArgs = [], env = process.env) {
   const profileValue = env.CUDA_LITE_WEBGPU_SMOKE_PROFILE;
   const profileArgs = profileValue ? ["--profile-case", profileValue === "true" ? "all" : profileValue] : [];
   const timeoutMs = env.CUDA_LITE_WEBGPU_SMOKE_TIMEOUT_MS ?? "15000";
+  const recycleInterval = env.CUDA_LITE_WEBGPU_SMOKE_DEVICE_RECYCLE_INTERVAL ?? "128";
   return [
     path.join(root, "scripts/run-cuda-lite-tool.mjs"),
     "e2e:webgpu",
@@ -20,6 +21,8 @@ export function buildWebGpuSmokeArgs(root, extraArgs = [], env = process.env) {
     "--fail-fast",
     "--case-timeout-ms",
     timeoutMs,
+    "--device-recycle-interval",
+    recycleInterval,
     "--cases",
     webGpuSmokeCases.join(","),
     ...profileArgs,

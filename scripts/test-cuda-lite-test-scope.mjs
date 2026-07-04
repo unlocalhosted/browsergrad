@@ -218,7 +218,9 @@ assert.deepEqual(scopedSmokePlan.scopes.map((scope) => scope.requested), [true])
 const smokeArgs = buildWebGpuSmokeArgs(root, [], {});
 assert.equal(smokeArgs.includes("--profile-case"), false);
 assert.equal(smokeArgs.filter((arg) => arg === "--case-timeout-ms").length, 1);
+assert.equal(smokeArgs.filter((arg) => arg === "--device-recycle-interval").length, 1);
 assert.ok(smokeArgs.includes(webGpuSmokeCases.join(",")));
+assert.ok(buildWebGpuSmokeArgs(root, [], { CUDA_LITE_WEBGPU_SMOKE_DEVICE_RECYCLE_INTERVAL: "16" }).includes("16"));
 
 const profiledSmokeArgs = buildWebGpuSmokeArgs(root, [], { CUDA_LITE_WEBGPU_SMOKE_PROFILE: "all" });
 assert.ok(profiledSmokeArgs.includes("--profile-case"));
@@ -424,5 +426,9 @@ assert.match(compilerPackage.scripts["e2e:webgpu:volume-minmax-hot"], /volume-ve
 assert.match(compilerPackage.scripts["e2e:webgpu:volume-minmax-hot"], /volume-vector-pointer-array-minmax-active-lane-return-false-branch/u);
 assert.match(compilerPackage.scripts["e2e:webgpu:volume-minmax-hot"], /--profile-case/u);
 assert.match(compilerPackage.scripts["e2e:webgpu:volume-minmax-hot"], /--expect-warm-ms-max 12/u);
+assert.match(compilerPackage.scripts["e2e:webgpu:slow-smoke-hot"], /texture:helper-multi-object-pointer-array-guarded-rhs/u);
+assert.match(compilerPackage.scripts["e2e:webgpu:slow-smoke-hot"], /surface:surf3d-pointer-alias-atomic-pointer-array-compound-active-lane-return-false-branch/u);
+assert.match(compilerPackage.scripts["e2e:webgpu:slow-smoke-hot"], /--profile-case/u);
+assert.match(compilerPackage.scripts["e2e:webgpu:slow-smoke-hot"], /--expect-warm-ms-max 20/u);
 
 console.log("cuda-lite test scope tests ok");

@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-04T22:28:46Z
+Last updated: 2026-07-04T22:37:22Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `472/0/0`, dist `472/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `98/98` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Probed remaining active-return all-inactive pointer-array paths |
+| Active work item | Profiled slow smoke WebGPU cases and added hot slow-smoke gate |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- slow smoke hot perf gate: profiled 15 slow smoke siblings after one warmup; `30 passed / 0 failed / 0 skipped`; best warm max `5.3ms`, below `20ms` gate; cold full-smoke profile showed volume min/max first-prepare shader compilation at about `685-711ms`, while steady-state prepare/run is about `5ms`
 - remaining active-return all-inactive pointer-array probe batch: `4 passed / 0 failed / 0 skipped`; hot repeat `12 passed / 0 failed / 0 skipped`, best warm `4.9ms` / `5.5ms` / `5.4ms` / `4.8ms`; active-return false-branch gap scan now reports no smoke cases missing an all-inactive sibling
 - surface CAS/minmax all-inactive pointer-array probe batch: `6 passed / 0 failed / 0 skipped`; hot repeat `18 passed / 0 failed / 0 skipped`, best warm `4.8ms` / `5.3ms` / `5.1ms` / `4.6ms` / `4.9ms` / `5.1ms`
 - surface compound all-inactive pointer-array probe batch: `3 passed / 0 failed / 0 skipped`; hot repeat `9 passed / 0 failed / 0 skipped`, best warm `5.7ms` / `5.9ms` / `5.7ms`
@@ -721,6 +722,7 @@ Current verified gates:
 - surface compound all-inactive pointer-array probe batch: added 2D surface, surf1D, and surf3D all-inactive compound pointer-array fixtures to prove pre-return surface side effects and post-barrier suppression across surface handle shapes; focused WebGPU batch `3/0/0`, skips `0`; hot repeat `9/0/0`, best warm `5.7ms` / `5.9ms` / `5.7ms`
 - surface CAS/minmax all-inactive pointer-array probe batch: added 2D surface, surf1D, and surf3D all-inactive CAS/minmax pointer-array fixtures to prove compare/exchange and min/max pointer-array paths suppress post-barrier writes when every lane returns; focused WebGPU batch `6/0/0`, skips `0`; hot repeat `18/0/0`, best warm `4.8ms` / `5.3ms` / `5.1ms` / `4.6ms` / `4.9ms` / `5.1ms`
 - remaining active-return all-inactive pointer-array probe batch: gap scan found four smoke cases with active/false-branch coverage but no all-inactive sibling (`texture:pointer-alias-atomic-pointer-array-active-lane-return`, `texture-surface:uint4-atomic-pointer-array-active-lane-return`, `texture-surface:volume-atomic-pointer-array-active-lane-return`, `texture-surface:volume-vector-pointer-array-atomic-active-lane-return`); added all four all-inactive fixtures; focused WebGPU batch `4/0/0`, skips `0`; hot repeat `12/0/0`, best warm `4.9ms` / `5.5ms` / `5.4ms` / `4.8ms`; follow-up gap scan is empty
+- slow smoke hot perf profiling: full-smoke profile of volume min/max cases showed slow `ms` is cold first-prepare shader compilation (`prepareMs` about `685-711ms`), not dispatch/reference/compare; lowering device recycle interval to `16` and smoke priority ordering did not remove cold prepare; added `e2e:webgpu:slow-smoke-hot` to guard the same slow siblings after warmup with phase profiles and `--expect-warm-ms-max 20`; latest run `30/0/0`, skips `0`, best warm max `5.3ms`
 
 ## Bugs Found During Current Run
 
@@ -740,6 +742,7 @@ Current verified gates:
 | Probed green | surface compound all-inactive pointer arrays | 2D surface, surf1D, and surf3D compound pointer-array paths had active/false-branch coverage, but not all-inactive return-before-barrier coverage across surface object shapes | no compiler code fix needed; one-lane all-inactive fixtures prove surface pre-return side effects survive and post-barrier compound pointer-array writes stay suppressed when every lane returns | focused batch `3/0/0`, skips `0`; hot repeat `9/0/0`, best warm `5.7ms` / `5.9ms` / `5.7ms` |
 | Probed green | surface CAS/minmax all-inactive pointer arrays | 2D surface, surf1D, and surf3D CAS/minmax pointer-array paths had active/false-branch coverage, but not all-inactive return-before-barrier coverage across compare/exchange and min/max atomic variants | no compiler code fix needed; one-lane all-inactive fixtures prove surface pre-return side effects survive and post-barrier CAS/minmax pointer-array writes stay suppressed when every lane returns | focused batch `6/0/0`, skips `0`; hot repeat `18/0/0`, best warm `4.8ms` / `5.3ms` / `5.1ms` / `4.6ms` / `4.9ms` / `5.1ms` |
 | Probed green | remaining active-return all-inactive pointer arrays | smoke contained four active-return pointer-array cases with false-branch siblings but no all-inactive sibling, leaving active-lane suppression unproven for ordinary atomic pointer-array return paths | no compiler code fix needed; all four added all-inactive siblings pass and a follow-up gap scan finds no active-return false-branch smoke case missing all-inactive coverage | focused batch `4/0/0`, skips `0`; hot repeat `12/0/0`, best warm `4.9ms` / `5.5ms` / `5.4ms` / `4.8ms` |
+| Perf/tooling | slow smoke hot gate | full WebGPU smoke listed volume min/max and compound siblings as `400-700ms` cases, but exact hot gate showed `5ms` warm runs; needed distinguish cold shader pipeline compilation from steady-state dispatch regressions | added `e2e:webgpu:slow-smoke-hot` for 15 slow smoke siblings with phase profiles, warmup, repeat, and `--expect-warm-ms-max 20`; smoke runner now exposes `CUDA_LITE_WEBGPU_SMOKE_DEVICE_RECYCLE_INTERVAL` for recycle experiments, though recycle interval `16` did not remove cold shader compile cost | full-smoke profile: prepare about `685-711ms`; slow-hot gate `30/0/0`, skips `0`, best warm max `5.3ms`; test-scope and fixture tests passed |
 | Probed green | vector pointer-array difference side effects | remaining combined risk: `ptrs[helper(counter)] - (out + 1)` for `uint4*` could have re-run helper index side effects, returned scalar-lane distance instead of vector-element distance, or mis-selected buffer/base pairs | no code fix needed; existing pointer-array index hoist plus scaled pointer-difference lowering materializes helper index once and divides vector flat-lane base deltas by lane width | focused unit `482/0`; focused WebGPU `1/0/0`, skips `0`; hot repeat `3/0/0`, best warm `1.4ms`; changed gate compiler unit `466/0`, smoke `389/0/0`, skips `0` |
 | Fixed | vector pointer-difference scaling | fail-first unit showed `uint4*` pointer subtraction returned flat lane delta `8` for `(out + 2) - out` instead of CUDA element delta `2`; real WebGPU fixture checks `[2,1,1]` element distances | pointer-difference lowering now divides raw base deltas by `devicePointerIndexScale(...)`, matching vector pointer arithmetic lane scaling while leaving scalar pointers unchanged | focused unit `481/0`; focused WebGPU `1/0/0`, skips `0`; hot repeat `3/0/0`, best warm `3.5ms`; changed gate compiler unit `465/0`, WGSL `16/0`, smoke `388/0/0`, focused storage `111/0/0`, skips `0`; lint passed |
 | Fixed | pointer-difference storage operand recognition | fail-first real WebGPU case `(uint)(ptrs[pointer_array_diff_index_helper(...)] - (storage + 1))` failed pipeline creation with `operator + (array<atomic<u32>>, u32)` because `storage + 1` was treated as scalar arithmetic after pointer-difference recognition rejected direct storage pointer params | pointer-difference operand recognition now treats pointer storage params as pointer operands, reusing existing device pointer buffer/base lowering instead of scalar storage-buffer math | focused unit `480/0`; focused WebGPU `1/0/0`, skips `0`; hot repeat `3/0/0`, best warm `4.3ms`; changed gate compiler unit `464/0`, WGSL `16/0`, smoke `387/0/0`, focused storage `110/0/0`, skips `0`; lint passed |
@@ -1254,6 +1257,7 @@ Probe these with fail-first real WebGPU fixtures:
   - multi-case `--profile-case` now profiles paired slow smoke siblings in one run; current slow volume min/max cases are pipeline-prepare dominated, not dispatch dominated
   - repeat stats now include phase profile for cold and best-warm repeats, so hot gates identify compile/run/prepare/reference/compare costs without manual log spelunking
   - `e2e:webgpu:volume-minmax-hot` now guards the paired slow volume min/max siblings with exact case filters, profiling, and `--expect-warm-ms-max 12`; latest run is `6/0/0`, skips `0`, best warm `5.7ms` / `5.6ms`
+  - `e2e:webgpu:slow-smoke-hot` now guards 15 slow smoke siblings with warmup, phase profiling, and `--expect-warm-ms-max 20`; full-smoke slow volume min/max is cold shader prepare cost, while steady-state max warm time is `5.3ms`
   - WebGPU smoke after nested conditional helper-call condition fix is `351/0/0`; hot repeat for the nested conditional branch-condition fixtures is `4.4-4.5ms`, so steady-state remains small
 
 ## Gate Ladder
