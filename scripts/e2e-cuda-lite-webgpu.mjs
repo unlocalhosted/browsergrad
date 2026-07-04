@@ -13418,6 +13418,28 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [11455] },
           },
           {
+            name: "texture:pointer-alias-atomic-pointer-array-minmax-active-lane-return-all-inactive",
+            source: SOURCES.texturePointerAliasAtomicPointerArrayMinMaxActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+          },
+          {
             name: "texture-surface:roundtrip",
             source: SOURCES.textureSurfaceRoundtrip,
             options: { workgroupSize: [1, 1, 1] },
