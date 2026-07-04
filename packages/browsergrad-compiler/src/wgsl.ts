@@ -416,6 +416,10 @@ function emitStatement(
         return statement.alternate ? emitStatementSequence(statement.alternate, context, indentLevel) : [];
       }
       if (constantCondition === true) return emitStatementSequence(statement.consequent, context, indentLevel);
+      {
+        const lazy = emitIfWithLazyConditionalCondition(statement, context, indentLevel);
+        if (lazy) return lazy;
+      }
       if (!statement.alternate && statement.consequent.some((child) => statementContainsBarrierLike(child, context))) {
         const guardSource = emitTruthinessExpression(statement.condition, context);
         return emitGuardedBranch(statement.consequent, guardSource, context, indentLevel);
@@ -498,6 +502,23 @@ function emitStatement(
     case "break":
       return [`${prefix}break;`];
   }
+}
+
+function emitIfWithLazyConditionalCondition(
+  statement: Extract<CudaLiteStatement, { kind: "if" }>,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  const split = splitLazyConditionalSideEffectExpression(statement.condition, context);
+  if (!split) return undefined;
+  const prefix = indent(indentLevel);
+  return [
+    `${prefix}if (${emitTruthinessExpression(split.condition, context)}) {`,
+    ...emitStatement({ ...statement, condition: split.consequent }, context, indentLevel + 1),
+    `${prefix}} else {`,
+    ...emitStatement({ ...statement, condition: split.alternate }, context, indentLevel + 1),
+    `${prefix}}`,
+  ];
 }
 
 interface StatementSequenceOptions {

@@ -56,6 +56,8 @@ export const storageScopeCases = [
   "storage:nested-conditional-helper-return-false-branch",
   "storage:nested-conditional-helper-arg",
   "storage:nested-conditional-helper-arg-false-branch",
+  "storage:nested-conditional-helper-condition",
+  "storage:nested-conditional-helper-condition-false-branch",
   "storage:vector-pointer-memory-view",
   "storage:vector-cast-dynamic-base-read",
   "helpers:vector-cache-hint-dynamic-read",
