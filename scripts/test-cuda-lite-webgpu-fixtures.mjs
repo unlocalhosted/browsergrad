@@ -24,6 +24,7 @@ import {
 } from "./cuda-lite-webgpu-fixtures.mjs";
 import {
   failureReplayCases,
+  markdownReport,
   summarizeReport,
   validateWarmMsMax,
   validateWarmSpeedup,
@@ -178,8 +179,8 @@ const summarized = summarizeReport({
   warmupCases: 1,
   warmupFailed: 0,
   cases: [
-    { name: "case:a", repeat: 1, stage: "compare", plan: "single-dispatch", ok: true, ms: 20 },
-    { name: "case:a", repeat: 2, stage: "compare", plan: "single-dispatch", ok: true, ms: 5 },
+    { name: "case:a", repeat: 1, stage: "compare", plan: "single-dispatch", ok: true, ms: 20, profile: { compileMs: 2, prepareMs: 15, runMs: 2, compareMs: 1 } },
+    { name: "case:a", repeat: 2, stage: "compare", plan: "single-dispatch", ok: true, ms: 5, profile: { compileMs: 1, prepareMs: 1, runMs: 2, compareMs: 1 } },
   ],
 });
 assert.deepEqual(summarized.caseFilters, {
@@ -195,7 +196,20 @@ assert.deepEqual(summarized.repeatStats, [{
   bestWarmMs: 5,
   bestWarmRepeat: 2,
   speedup: 4,
+  coldProfile: { compileMs: 2, prepareMs: 15, runMs: 2, compareMs: 1 },
+  bestWarmProfile: { compileMs: 1, prepareMs: 1, runMs: 2, compareMs: 1 },
 }]);
+assert.match(markdownReport({
+  tool: "test",
+  available: true,
+  passed: 2,
+  failed: 0,
+  skipped: 0,
+  cases: summarized.repeatStats.flatMap((item) => [
+    { name: item.name, repeat: 1, ok: true, ms: item.coldMs, profile: item.coldProfile },
+    { name: item.name, repeat: 2, ok: true, ms: item.bestWarmMs, profile: item.bestWarmProfile },
+  ]),
+}), /prepareMs=15/u);
 validateWarmSpeedup({
   cases: [
     { name: "case:a", repeat: 1, ms: 20 },

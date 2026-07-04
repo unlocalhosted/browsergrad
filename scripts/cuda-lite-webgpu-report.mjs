@@ -103,6 +103,8 @@ export function repeatCaseStats(cases) {
         bestWarmMs: bestWarm.ms,
         bestWarmRepeat: bestWarm.repeat,
         speedup: bestWarm.ms > 0 ? Math.round((cold.ms / bestWarm.ms) * 100) / 100 : Number.POSITIVE_INFINITY,
+        ...(cold.profile === undefined ? {} : { coldProfile: cold.profile }),
+        ...(bestWarm.profile === undefined ? {} : { bestWarmProfile: bestWarm.profile }),
       };
     })
     .filter(Boolean)
@@ -173,10 +175,10 @@ export function markdownReport(data) {
   }
   const repeatStats = repeatCaseStats(data.cases ?? []);
   if (repeatStats.length > 0) {
-    lines.push("| Repeat case | cold ms | best warm ms | best repeat | speedup |");
-    lines.push("| --- | ---: | ---: | ---: | ---: |");
+    lines.push("| Repeat case | cold ms | best warm ms | best repeat | speedup | cold profile | best warm profile |");
+    lines.push("| --- | ---: | ---: | ---: | ---: | --- | --- |");
     for (const item of repeatStats) {
-      lines.push(`| \`${item.name}\` | ${item.coldMs} | ${item.bestWarmMs} | ${item.bestWarmRepeat} | ${item.speedup}x |`);
+      lines.push(`| \`${item.name}\` | ${item.coldMs} | ${item.bestWarmMs} | ${item.bestWarmRepeat} | ${item.speedup}x | ${formatProfileSummary(item.coldProfile)} | ${formatProfileSummary(item.bestWarmProfile)} |`);
     }
     lines.push("");
   }
@@ -193,6 +195,15 @@ export function markdownReport(data) {
     lines.push("");
   }
   return `${lines.join("\n")}\n`;
+}
+
+function formatProfileSummary(profile) {
+  if (profile === undefined) return "";
+  const parts = [];
+  for (const key of ["compileMs", "prepareMs", "runMs", "referenceMs", "compareMs"]) {
+    if (profile[key] !== undefined) parts.push(`${key}=${profile[key]}`);
+  }
+  return parts.join("<br>");
 }
 
 export function validateCorpusFixtureBaseline(report) {
