@@ -362,6 +362,8 @@ function emitStatement(
           ...emitLocalArrayInitializer(statement, context, indentLevel, indent, (expression) => emitExpression(expression, context)),
         ];
       }
+      const conditional = emitVarInitWithConditionalSideEffect(statement, context, indentLevel);
+      if (conditional) return conditional;
       return [`${prefix}var ${context.nameFor(statement.name)}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitLocalInit(statement, context)}` : ""};`];
     case "dim3":
       return [];
@@ -1135,6 +1137,8 @@ function emitVarStatementWithActiveFlag(
   if (statement.pointer || statement.dimensions.length > 0 || statement.matrixTile || !statement.init) {
     return emitStatement(statement, context, indentLevel);
   }
+  const conditional = emitVarInitWithConditionalSideEffect(statement, context, indentLevel, activeFlag);
+  if (conditional) return conditional;
   if (statement.init.kind === "call") {
     const name = expressionName(statement.init.callee);
     const fn = name ? context.deviceFunctionFor(name, statement.init.args.length) : undefined;
@@ -1166,6 +1170,28 @@ function emitVarStatementWithActiveFlag(
     `${indent(indentLevel + 1)}${context.nameFor(statement.name)} = ${emitActiveFlagLocalInit(statement, context)};`,
     `${prefix}}`,
   ];
+}
+
+function emitVarInitWithConditionalSideEffect(
+  statement: CudaLiteVarDecl,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] | undefined {
+  if (statement.storage === "shared" || statement.pointer || statement.dimensions.length > 0 || statement.matrixTile) return undefined;
+  if (statement.init?.kind !== "conditional" || !expressionContainsSideEffectingCall(statement.init, context)) return undefined;
+  const prefix = indent(indentLevel);
+  const branchIndent = activeFlag ? indentLevel + 1 : indentLevel;
+  const target: CudaLiteExpression = { kind: "identifier", name: statement.name, span: statement.span };
+  const lines = [`${prefix}var ${context.nameFor(statement.name)}: ${wgslScalar(statement.valueType)} = ${zeroValue(statement.valueType)};`];
+  if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
+  lines.push(`${indent(branchIndent)}if (${emitTruthinessExpression(statement.init.condition, context)}) {`);
+  lines.push(`${indent(branchIndent + 1)}${emitAssignment({ kind: "assignment", left: target, operator: "=", right: statement.init.consequent, span: statement.span }, context)};`);
+  lines.push(`${indent(branchIndent)}} else {`);
+  lines.push(`${indent(branchIndent + 1)}${emitAssignment({ kind: "assignment", left: target, operator: "=", right: statement.init.alternate, span: statement.span }, context)};`);
+  lines.push(`${indent(branchIndent)}}`);
+  if (activeFlag) lines.push(`${prefix}}`);
+  return lines;
 }
 
 function emitActiveFlagLocalInit(statement: CudaLiteVarDecl, context: EmitContext): string {

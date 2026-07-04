@@ -7671,6 +7671,50 @@ __global__ void activeConditionalHelperAssignment(uint *storage, uint *out, int 
     expect(compiled.wgsl).not.toContain("select(0u, active_conditional_helper_with_pointer_side_effect");
   });
 
+  it("preserves conditional helper-call laziness in local var initializers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint conditional_var_init_helper_with_pointer_side_effect(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return ptr[0];
+}
+
+__global__ void conditionalHelperVarInit(uint *storage, uint *out, int enabled) {
+  uint total = enabled != 0 ? conditional_var_init_helper_with_pointer_side_effect(storage, 7u) : 0u;
+  out[0] = total;
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toContain("var total: u32 = 0u;");
+    expect(compiled.wgsl).toContain("if ((bg_uniforms.enabled != 0))");
+    expect(compiled.wgsl).toContain("total = conditional_var_init_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0u, conditional_var_init_helper_with_pointer_side_effect");
+  });
+
+  it("preserves conditional helper-call var init laziness inside active-lane predication", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint active_conditional_var_init_helper_with_pointer_side_effect(uint *ptr, uint lane, uint add) {
+  atomicAdd(ptr + lane, add);
+  return ptr[lane];
+}
+
+__global__ void activeConditionalHelperVarInit(uint *storage, uint *out, int limit, int enabled) {
+  int tid = threadIdx.x;
+  uint total = 0u;
+  for (int step = 0; step < 2; step++) {
+    if (tid >= limit) return;
+    __syncthreads();
+    uint value = enabled != 0 ? active_conditional_var_init_helper_with_pointer_side_effect(storage, (uint)tid, (uint)(step + tid + 1)) : 0u;
+    total += value;
+    __syncthreads();
+  }
+  out[tid] = total;
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).toContain("divergent-return-before-barrier");
+    expect(compiled.wgsl).toMatch(/if \(bg_barrier_loop_active_\d+\) \{\n\s+if \(\(bg_uniforms.enabled != 0\)\)/u);
+    expect(compiled.wgsl).toContain("value = active_conditional_var_init_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).not.toContain("select(0u, active_conditional_var_init_helper_with_pointer_side_effect");
+  });
+
   it("preserves atomic side effects before loop returns lowered for barriers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomicReturnSideEffectBarrier(uint *counter, uint *out, int N) {
