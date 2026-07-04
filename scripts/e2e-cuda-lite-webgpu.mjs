@@ -13471,6 +13471,28 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [10295] },
           },
           {
+            name: "texture:pointer-alias-atomic-pointer-array-active-lane-return-all-inactive",
+            source: SOURCES.texturePointerAliasAtomicPointerArrayActiveLaneReturn,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+          },
+          {
             name: "texture:pointer-alias-atomic-pointer-array-compound-active-lane-return",
             source: SOURCES.texturePointerAliasAtomicPointerArrayCompoundActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -14162,6 +14184,31 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [10465] },
           },
           {
+            name: "texture-surface:uint4-atomic-pointer-array-active-lane-return-all-inactive",
+            source: SOURCES.textureSurfaceUint4AtomicPointerArrayActiveLaneReturn,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+          },
+          {
             name: "texture-surface:int4-vector-active-lane-return",
             source: SOURCES.textureSurfaceInt4VectorActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -14370,6 +14417,31 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [13375] },
           },
           {
+            name: "texture-surface:volume-atomic-pointer-array-active-lane-return-all-inactive",
+            source: SOURCES.textureSurfaceVolumeAtomicPointerArrayActiveLaneReturn,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+          },
+          {
             name: "texture-surface:volume-vector-pointer-array-atomic-active-lane-return",
             source: SOURCES.textureSurfaceVolumeVectorPointerArrayAtomicActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -14422,6 +14494,31 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [13395] },
+          },
+          {
+            name: "texture-surface:volume-vector-pointer-array-atomic-active-lane-return-all-inactive",
+            source: SOURCES.textureSurfaceVolumeVectorPointerArrayAtomicActiveLaneReturn,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 0 },
+            }),
           },
           {
             name: "texture-surface:volume-vector-pointer-array-cas-active-lane-return",
