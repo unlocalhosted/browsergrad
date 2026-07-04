@@ -419,5 +419,10 @@ assert.match(compilerPackage.scripts["e2e:webgpu:corpus-hot"], /--forbid-skips/u
 assert.match(compilerPackage.scripts["e2e:webgpu:corpus-hot"], /histogram64Kernel/u);
 assert.match(compilerPackage.scripts["e2e:webgpu:corpus-hot"], /scalarProdGPU/u);
 assert.match(compilerPackage.scripts["e2e:webgpu:corpus-hot"], /--expect-warm-speedup-min 10/u);
+assert.match(compilerPackage.scripts["e2e:webgpu:volume-minmax-hot"], /--forbid-skips/u);
+assert.match(compilerPackage.scripts["e2e:webgpu:volume-minmax-hot"], /volume-vector-pointer-array-minmax-active-lane-return,/u);
+assert.match(compilerPackage.scripts["e2e:webgpu:volume-minmax-hot"], /volume-vector-pointer-array-minmax-active-lane-return-false-branch/u);
+assert.match(compilerPackage.scripts["e2e:webgpu:volume-minmax-hot"], /--profile-case/u);
+assert.match(compilerPackage.scripts["e2e:webgpu:volume-minmax-hot"], /--expect-warm-ms-max 12/u);
 
 console.log("cuda-lite test scope tests ok");

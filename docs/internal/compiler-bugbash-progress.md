@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-04T16:53:40Z
+Last updated: 2026-07-04T16:57:03Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `472/0/0`, dist `472/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `98/98` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Continue corpus-shaped surface/texture probes with repeat profile phase breakdown available |
+| Active work item | Dedicated warm-ms perf gate added for slow volume min/max smoke siblings; continue next corpus-shaped probe only if we keep bugbash open |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -669,12 +669,14 @@ Current verified gates:
 - warm-speedup timing-floor tooling fix: report unit tests passed; previously failing tiny unaligned hot gates now pass with correctness `15/0/0` and skips `0`; `verify:changed` passed fixture tests plus WebGPU smoke `309/0/0`, skips `0`
 - multi-case WebGPU profile selection: paired slow volume min/max cases now profile in one focused command; focused run `2/0/0`, skips `0`, profile shows prepare dominates (`~701ms` / `~610ms`) while run is `~4.6ms` / `~2.5ms`; `verify:changed` passed fixture tests plus WebGPU smoke `309/0/0`, skips `0`
 - repeat profile phase breakdown: repeat stats now carry cold/best-warm phase timings into JSON and markdown; slow volume min/max repeat profile `6/0/0`, skips `0`, best warm `5.6ms` / `5.9ms`, with compile `~2.8-2.9ms`, run `~2.3-2.8ms`, prepare `~0.1ms`; `verify:changed` passed fixture tests plus WebGPU smoke `309/0/0`, skips `0`
+- volume min/max warm-ms perf gate: package script `e2e:webgpu:volume-minmax-hot` runs paired slow volume min/max siblings with `--expect-warm-ms-max 12`, profiling, warmup `1`, repeat `3`; gate passed `6/0/0`, skips `0`, best warm `5.7ms` / `5.6ms`; `test:test-scope` passed; `verify:changed` selected package-script smoke and passed
 
 ## Bugs Found During Current Run
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
 | Fixed | surface unaligned byte offset | `surf2Dread(..., 2, row)` and `surf2Dwrite(..., 6, row)` divided byte offsets before checking alignment, so unaligned addresses silently aliased lanes `0` and `1` | CPU reference and WGSL surface helpers now reject non-4-byte-aligned `x_bytes` before converting bytes to element indexes; added pinned `surface:unaligned-byte-offset` regression to smoke | fail-first focused case showed expected `0`, actual `7`; rerun `1/0/0`, skips `0`; hot repeat `5/0/0`, best warm `1.1ms`, speedup `3.55`; changed gate smoke `301/0/0`; src/dist verifier `464/0/0` |
+| Perf | volume min/max warm-ms gate | paired slow volume min/max smoke siblings were known slow-looking cases, but speedup ratio was noisy around tiny hot runs and cold browser prepare could dominate first-run profiles | added a dedicated package script that runs both exact cases together with profiling and `--expect-warm-ms-max 12`, guarding steady-state latency instead of cold browser setup | `e2e:webgpu:volume-minmax-hot` passed `6/0/0`, skips `0`, best warm `5.7ms` / `5.6ms`; `test:test-scope` passed; `verify:changed` passed |
 | Fixed | warm-speedup gate false negatives | hot-case gates failed tiny real WebGPU fixtures with correctness `15/0/0` because cold and warm dispatch/readback times were around `3ms` and ratio noise dominated | speedup validation now ignores cases with cold time below the `8ms` noise floor while preserving warm-ms gates and speedup checks for larger cases; added fixture-report unit coverage | `test:webgpu-fixtures` passed; prior tiny unaligned hot gates pass with `15/0/0`, skips `0`; `verify:changed` passed, smoke `309/0/0` |
 | Perf | repeat phase attribution | repeat stats only showed cold/warm totals and speedup, so hot-case output did not say whether compile, prepare, run, reference, or compare dominated the best warm run | repeat stats now preserve cold and best-warm profile objects in JSON and render compact phase summaries in markdown | report unit passed; slow volume min/max repeat profile `6/0/0`, skips `0`; `verify:changed` smoke `309/0/0` |
 | Perf | paired slow-case profiling | `--profile-case` accepted only one case, so comparing true/false slow smoke siblings required multiple browser runs and hid whether compile, prepare, run, or compare dominated | `--profile-case` now accepts comma-separated case names, preserving `all`/`true`; slow volume min/max true/false cases can be profiled in one browser session | paired profile run `2/0/0`, skips `0`; true case profile `prepareMs ~701`, `runMs ~4.6`; false case profile `prepareMs ~610`, `runMs ~2.5`; `verify:changed` smoke `309/0/0` |
@@ -1095,6 +1097,7 @@ Probe these with fail-first real WebGPU fixtures:
   - warm-speedup gate now ignores sub-`8ms` cold runs because timing-floor noise can invert ratios on tiny fixtures; use warm-ms max gates or larger cases for true perf regressions
   - multi-case `--profile-case` now profiles paired slow smoke siblings in one run; current slow volume min/max cases are pipeline-prepare dominated, not dispatch dominated
   - repeat stats now include phase profile for cold and best-warm repeats, so hot gates identify compile/run/prepare/reference/compare costs without manual log spelunking
+  - `e2e:webgpu:volume-minmax-hot` now guards the paired slow volume min/max siblings with exact case filters, profiling, and `--expect-warm-ms-max 12`; latest run is `6/0/0`, skips `0`, best warm `5.7ms` / `5.6ms`
   - WebGPU smoke after layered + typed vector unaligned byte probes is `309/0/0`; slowest cases are still pre-existing texture/surface compound pointer-array probes, not the new unaligned cases; tiny unaligned probes run around `3ms`, so correctness repeat is useful but hard speedup thresholds can be timing-floor noisy
 
 ## Gate Ladder
