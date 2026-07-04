@@ -333,6 +333,24 @@ export const cudaLiteCorpusExecutionFixtures = [
     expectedOutput: { type: "Float32Array", data: [1] },
   },
   {
+    sourceKey: "corpusCudaSamplesSimpleOccupancySquare",
+    caseName: "corpus:cuda-samples:simpleOccupancy_square",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/0_Introduction/simpleOccupancy/simpleOccupancy.cu",
+    kernelName: "square",
+    workgroupSize: [4, 1, 1],
+    options: { dynamicSharedMemory: { dynamicSmem: 16 } },
+    launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    input: {
+      buffers: {
+        array: { type: "Uint32Array", data: [1, 2, 3, 4] },
+      },
+      scalars: { arrayCount: 4 },
+    },
+    output: "array",
+    expectedOutput: { type: "Uint32Array", data: [1, 4, 9, 16] },
+  },
+  {
     sourceKey: "corpusCudaSamplesIncKernel",
     caseName: "corpus:cuda-samples:incKernel",
     corpusId: "cuda-samples",

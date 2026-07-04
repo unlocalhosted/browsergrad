@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-04T23:36:41Z
+Last updated: 2026-07-04T23:41:29Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,9 +9,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `472/0/0`, dist `472/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `109/109` |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `472/0/0`, dist `472/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `110/110` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Pinned cuda-samples clock reduction fixture |
+| Active work item | Pinned cuda-samples occupancy square fixture |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- cuda-samples occupancy square fixture pinning: promoted `simpleOccupancy/square` into explicit expected-output fixture covering `uint32_t` storage, bounds guard, and unused extern dynamic shared declaration with explicit size; focused fixture `1 passed / 0 failed / 0 skipped`, expected-output `1`; full pinned fixture gate `110/0/0`, expected-output `110`, by corpus `cuda-120=10`, `cuda-samples=26`, `llm.c=28`, `leetcuda=46`, skips `0`
 - cuda-samples clock reduction fixture pinning: promoted `clock/timedReduction` into explicit expected-output fixture covering `clock()`, extern dynamic shared memory, and block-local min reduction while ignoring nondeterministic timer readback; focused fixture `1 passed / 0 failed / 0 skipped`, expected-output `1`; full pinned fixture gate `109/0/0`, expected-output `109`, by corpus `cuda-120=10`, `cuda-samples=25`, `llm.c=28`, `leetcuda=46`, skips `0`
 - cuda-samples streams pointer-scalar loop fixture pinning: promoted `simpleStreams/init_array` into explicit expected-output fixture covering a pointer scalar load plus looped integer mutation; focused fixture `1 passed / 0 failed / 0 skipped`, expected-output `1`; full pinned fixture gate `108/0/0`, expected-output `108`, by corpus `cuda-120=10`, `cuda-samples=24`, `llm.c=28`, `leetcuda=46`, skips `0`
 - cuda-samples surface object write fixture pinning: promoted `simpleSurfaceWrite/surfaceWriteKernel` into explicit expected-output fixture covering real cuda-samples `surf2Dwrite` to `cudaSurfaceObject_t`; focused fixture `1 passed / 0 failed / 0 skipped`, expected-output `1`; full pinned fixture gate `107/0/0`, expected-output `107`, by corpus `cuda-120=10`, `cuda-samples=23`, `llm.c=28`, `leetcuda=46`, skips `0`
@@ -768,6 +769,7 @@ Current verified gates:
 | Pinned | cuda-samples surface object write fixture | `simpleSurfaceWrite/surfaceWriteKernel` was auto-corpus smoke only, so real cuda-samples `surf2Dwrite` through a `cudaSurfaceObject_t` lacked a stable expected-output oracle | added compact 2x2 surface fixture writing `[1,2,3,4]` from global memory into a float surface with byte-offset `x * 4` | focused fixture `1/0/0`; full fixture gate `107/0/0`, expected-output `107`, by corpus `cuda-samples=23`, skips `0` |
 | Pinned | cuda-samples streams pointer-scalar loop fixture | `simpleStreams/init_array` was auto-corpus smoke only, so pointer scalar dereference inside repeated integer accumulation lacked a stable expected-output oracle | added compact expected-output fixture with `factor=[5]` and `num_iterations=3`, proving `*factor` load and loop mutation produce `[15,16,17,18]` | focused fixture `1/0/0`; full fixture gate `108/0/0`, expected-output `108`, by corpus `cuda-samples=24`, skips `0` |
 | Pinned | cuda-samples clock reduction fixture | `clock/timedReduction` was auto-corpus smoke only, and its timer buffer is intentionally nondeterministic, so only the deterministic reduction output should be pinned | added compact expected-output fixture with extern dynamic shared memory and 4-thread min reduction; timer writes still execute but output comparison reads only `output` | focused fixture `1/0/0`; full fixture gate `109/0/0`, expected-output `109`, by corpus `cuda-samples=25`, skips `0` |
+| Pinned | cuda-samples occupancy square fixture | `simpleOccupancy/square` was auto-corpus smoke only, and its unused extern dynamic shared declaration still needs an explicit dynamic shared size to compile safely | added compact `Uint32Array` expected-output fixture with `dynamicSmem=16` and `arrayCount=4`, proving guarded `uint32_t` squaring produces `[1,4,9,16]` | focused fixture `1/0/0`; full fixture gate `110/0/0`, expected-output `110`, by corpus `cuda-samples=26`, skips `0` |
 | Found | normalized texture descriptor gap | fail-first attempt to pin `simpleTexture/transformKernel` with `theta=0` expected a 2x2 identity read under sample host setup, but current compiler/reference floor raw coords and returned `1` at index `1` instead of `2`; root cause is that kernel-only input has no way to carry `cudaTextureDesc.normalizedCoords=true` into reference/WGSL lowering | did not pin the weak oracle; fixture was changed to a descriptor-free streams kernel instead; normalized texture metadata needs explicit design before pinning those cuda-samples texture transforms | fail-first focused fixture failed `0/1/0`, first diff `index=1 expected=2 actual=1`; no skip added |
 | Probed green | vector pointer-array difference side effects | remaining combined risk: `ptrs[helper(counter)] - (out + 1)` for `uint4*` could have re-run helper index side effects, returned scalar-lane distance instead of vector-element distance, or mis-selected buffer/base pairs | no code fix needed; existing pointer-array index hoist plus scaled pointer-difference lowering materializes helper index once and divides vector flat-lane base deltas by lane width | focused unit `482/0`; focused WebGPU `1/0/0`, skips `0`; hot repeat `3/0/0`, best warm `1.4ms`; changed gate compiler unit `466/0`, smoke `389/0/0`, skips `0` |
 | Fixed | vector pointer-difference scaling | fail-first unit showed `uint4*` pointer subtraction returned flat lane delta `8` for `(out + 2) - out` instead of CUDA element delta `2`; real WebGPU fixture checks `[2,1,1]` element distances | pointer-difference lowering now divides raw base deltas by `devicePointerIndexScale(...)`, matching vector pointer arithmetic lane scaling while leaving scalar pointers unchanged | focused unit `481/0`; focused WebGPU `1/0/0`, skips `0`; hot repeat `3/0/0`, best warm `3.5ms`; changed gate compiler unit `465/0`, WGSL `16/0`, smoke `388/0/0`, focused storage `111/0/0`, skips `0`; lint passed |
@@ -1281,7 +1283,7 @@ Probe these with fail-first real WebGPU fixtures:
   - `e2e:webgpu:auto-corpus-hot` guards slow-looking auto-corpus shared-memory/barrier cases with exact filters, warmup, phase profiling, and `--expect-warm-ms-max 8`; latest run is `6/0/0`, skips `0`, best warm `4.1ms` / `3.4ms`
   - auto-corpus exact-case profiling no longer fails a full-corpus baseline check; filtered expected counts now match the selected case set
   - llm.c synthetic smoke reference loops are smaller, but layernorm reference cases still dominate the scoped run at about `234ms`; keep profiling reference hot spots separately from WebGPU dispatch time
-  - corpus fixture expected-output baseline now covers `109/109` real WebGPU fixtures; source/dist real-world verifier and histogram/scalar hot perf gate are green after final oracle pinning
+  - corpus fixture expected-output baseline now covers `110/110` real WebGPU fixtures; source/dist real-world verifier and histogram/scalar hot perf gate are green after final oracle pinning
   - `e2e:webgpu:corpus-hot` now profiles histogram/scalar slow real corpus fixtures with warmup and `--expect-warm-ms-max 12`; latest run is `6/0/0`, skips `0`, best warm `5.2ms` / `3.7ms`, WebGPU run about `2.5-2.8ms`
   - warm-speedup gate now ignores sub-`8ms` cold runs because timing-floor noise can invert ratios on tiny fixtures; use warm-ms max gates or larger cases for true perf regressions
   - multi-case `--profile-case` now profiles paired slow smoke siblings in one run; current slow volume min/max cases are pipeline-prepare dominated, not dispatch dominated
