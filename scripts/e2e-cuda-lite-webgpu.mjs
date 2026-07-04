@@ -14301,6 +14301,36 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [18039] },
           },
           {
+            name: "texture-surface:volume-vector-pointer-array-minmax-active-lane-return-all-inactive",
+            source: SOURCES.textureSurfaceVolumeVectorPointerArrayMinMaxActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [1, 10, 20, 30, 2, 11, 21, 31, 3, 12, 22, 32, 4, 13, 23, 33],
+            },
+          },
+          {
             name: "surface:helper-dispatch-multiple-surfaces",
             source: SOURCES.surfaceHelperDispatchMultipleSurfaces,
             options: { workgroupSize: [1, 1, 1] },

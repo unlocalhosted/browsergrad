@@ -396,6 +396,7 @@ export const textureScopeCases = [
   "texture-surface:volume-vector-pointer-array-compound-active-lane-return-false-branch",
   "texture-surface:volume-vector-pointer-array-minmax-active-lane-return",
   "texture-surface:volume-vector-pointer-array-minmax-active-lane-return-false-branch",
+  "texture-surface:volume-vector-pointer-array-minmax-active-lane-return-all-inactive",
   "surface:helper-dispatch-multiple-surfaces",
   "surface:vector-read",
   "surface:helper-vector-read-multiple-surfaces",
