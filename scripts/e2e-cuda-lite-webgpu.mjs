@@ -2226,6 +2226,36 @@ __global__ void activeLanePointerHandleLoopRebind(uint4 *left, uint4 *right, uin
     summary[3] = total;
   }
 }`,
+  conditionalHelperPointerRhs: `
+__device__ uint conditional_helper_rmw(uint *ptr, uint lane, uint add) {
+  atomicAdd(ptr + lane, add);
+  return ptr[lane];
+}
+
+__global__ void conditionalHelperPointerRhs(uint4 *left, uint4 *right, uint *summary, int pickRight, int useHelper) {
+  int tid = threadIdx.x;
+  if (tid == 0) {
+    left[0] = make_uint4(10u, 20u, 30u, 40u);
+    right[0] = make_uint4(100u, 200u, 300u, 400u);
+  }
+  __syncthreads();
+  uint *ptr = reinterpret_cast<uint*>(left);
+  if (pickRight != 0) {
+    ptr = reinterpret_cast<uint*>(right);
+  }
+  uint total = 0u;
+  if (tid == 0) {
+    total += useHelper != 0 ? conditional_helper_rmw(ptr, 0u, 7u) : 0u;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    uint4 leftValue = left[0];
+    uint4 rightValue = right[0];
+    summary[0] = leftValue.x + leftValue.y + leftValue.z + leftValue.w;
+    summary[1] = rightValue.x + rightValue.y + rightValue.z + rightValue.w;
+    summary[2] = total;
+  }
+}`,
   branchAssignedPointerAtomic: `
 __global__ void branchAssignedPointerAtomic(uint *left, uint *right, uint *out, int pickRight) {
   uint *ptr = NULL;
@@ -7088,6 +7118,54 @@ const html = String.raw`<!doctype html>
             }),
             output: "counter",
             expectedOutput: { type: "Uint32Array", data: [0, 0] },
+          },
+          {
+            name: "storage:conditional-helper-pointer-rhs",
+            source: SOURCES.conditionalHelperPointerRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                left: new Uint32Array(16),
+                right: new Uint32Array(16),
+                summary: new Uint32Array(4),
+              },
+              scalars: { pickRight: 0, useHelper: 1 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [107, 1000, 17, 0] },
+          },
+          {
+            name: "storage:conditional-helper-pointer-rhs-false-branch",
+            source: SOURCES.conditionalHelperPointerRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                left: new Uint32Array(16),
+                right: new Uint32Array(16),
+                summary: new Uint32Array(4),
+              },
+              scalars: { pickRight: 0, useHelper: 0 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [100, 1000, 0, 0] },
+          },
+          {
+            name: "storage:conditional-helper-pointer-rhs-right",
+            source: SOURCES.conditionalHelperPointerRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                left: new Uint32Array(16),
+                right: new Uint32Array(16),
+                summary: new Uint32Array(4),
+              },
+              scalars: { pickRight: 1, useHelper: 1 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [100, 1007, 107, 0] },
           },
           {
             name: "storage:vector-pointer-memory-view",

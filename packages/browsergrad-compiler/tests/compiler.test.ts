@@ -7627,6 +7627,25 @@ __global__ void pointerHandleLoopReturnSideEffect(uint4 *left, uint4 *right, uin
     expect(compiled.wgsl).not.toContain("select(total, (total + helper_with_pointer_side_effect");
   });
 
+  it("preserves conditional expression laziness for helper-call assignment RHS", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint conditional_helper_with_pointer_side_effect(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return ptr[0];
+}
+
+__global__ void conditionalHelperAssignment(uint *storage, uint *out, int enabled) {
+  uint total = 0u;
+  total += enabled != 0 ? conditional_helper_with_pointer_side_effect(storage, 7u) : 0u;
+  out[0] = total;
+}`, { workgroupSize: [4, 1, 1] });
+
+    expect(compiled.wgsl).toContain("if ((bg_uniforms.enabled != 0))");
+    expect(compiled.wgsl).toContain("total += conditional_helper_with_pointer_side_effect");
+    expect(compiled.wgsl).toContain("total += 0u;");
+    expect(compiled.wgsl).not.toContain("select(0u, conditional_helper_with_pointer_side_effect");
+  });
+
   it("preserves atomic side effects before loop returns lowered for barriers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomicReturnSideEffectBarrier(uint *counter, uint *out, int N) {

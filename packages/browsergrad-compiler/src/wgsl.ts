@@ -2786,11 +2786,29 @@ function emitAssignmentStatement(
   indentLevel: number,
 ): string[] {
   const prefix = indent(indentLevel);
+  const conditional = emitAssignmentWithConditionalSideEffectRhs(expression, context, indentLevel);
+  if (conditional) return conditional;
   const nested = splitNestedAssignmentExpression(expression.right);
   if (!nested) return [`${prefix}${emitAssignment(expression, context)};`];
   return [
     ...emitAssignmentStatement(nested.assignment, context, indentLevel),
     `${prefix}${emitAssignment({ ...expression, right: nested.replacement }, context)};`,
+  ];
+}
+
+function emitAssignmentWithConditionalSideEffectRhs(
+  expression: CudaLiteAssignmentExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  if (expression.right.kind !== "conditional" || !expressionContainsSideEffectingCall(expression.right, context)) return undefined;
+  const prefix = indent(indentLevel);
+  return [
+    `${prefix}if (${emitTruthinessExpression(expression.right.condition, context)}) {`,
+    `${indent(indentLevel + 1)}${emitAssignment({ ...expression, right: expression.right.consequent }, context)};`,
+    `${prefix}} else {`,
+    `${indent(indentLevel + 1)}${emitAssignment({ ...expression, right: expression.right.alternate }, context)};`,
+    `${prefix}}`,
   ];
 }
 
