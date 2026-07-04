@@ -829,6 +829,25 @@ __global__ void vector_pointer_difference(uint4 *out, int *summary) {
     expect(compiled.wgsl).not.toMatch(/summary\[0\] = i32\(\(i32\(.+\) - i32\(.+\)\)\);/u);
   });
 
+  it("evaluates side-effecting vector pointer-array difference indices once", () => {
+    const compiled = compileCudaLiteKernelForWebGpu(`
+__device__ uint vector_pointer_array_diff_index_helper(uint *ptr, uint add) {
+  atomicAdd(ptr, add);
+  return 1u;
+}
+
+__global__ void vector_pointer_array_diff_index_once(uint4 *out, uint *counter, int *summary) {
+  uint4 *ptrs[2];
+  ptrs[0] = out + 1;
+  ptrs[1] = out + 3;
+  summary[0] = ptrs[vector_pointer_array_diff_index_helper(counter, 1u)] - (out + 1);
+}`, { workgroupSize: [1, 1, 1] });
+
+    expect(compiled.wgsl.match(/\bvector_pointer_array_diff_index_helper\(/gu) ?? []).toHaveLength(2);
+    expect(compiled.wgsl).toMatch(/let bg_pointer_array_index_\d+: u32 = vector_pointer_array_diff_index_helper\(/u);
+    expect(compiled.wgsl).toMatch(/summary\[0\] = i32\(select\(0, \(\(i32\(.+\) - i32\(.+\)\) \/ 4\),/u);
+  });
+
   it("preserves scalar-to-vector pointer alias byte offsets", () => {
     const compiled = compileCudaLiteKernelForWebGpu(`
 __device__ void bump_roundtrip_vec(float4* out, int idx, float4 delta) {
