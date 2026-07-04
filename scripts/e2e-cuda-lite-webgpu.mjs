@@ -3111,6 +3111,47 @@ __global__ void surface1DVectorActiveLaneReturn(cudaSurfaceObject_t surf, float 
     out[tid] = 1.0f + (float)tid;
   }
 }`,
+  surface1DHelperVectorMultiSurfaceGuardedRhs: `
+__device__ float4 read_1d_multi_surface_guarded_vec(cudaSurfaceObject_t first, cudaSurfaceObject_t second, uint *counter, int block, int pick) {
+  atomicAdd(counter, 1u);
+  int offset = block * 4 * (int)sizeof(float);
+  if (pick != 0) {
+    return surf1Dread<float4>(second, offset);
+  }
+  return surf1Dread<float4>(first, offset);
+}
+
+__device__ void write_1d_multi_surface_guarded_vec(cudaSurfaceObject_t surfaceArg, float4 value, int block) {
+  surf1Dwrite(value, surfaceArg, (8 + block * 4) * (int)sizeof(float));
+}
+
+__global__ void surface1DHelperVectorMultiSurfaceGuardedRhs(cudaSurfaceObject_t first, cudaSurfaceObject_t second, uint *counter, float *out, int N, int pick) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  float4 value = read_1d_multi_surface_guarded_vec(first, second, counter, tid, pick);
+  write_1d_multi_surface_guarded_vec(
+    second,
+    make_float4(value.x + (float)tid, value.y + (float)tid, value.z + (float)tid, value.w + (float)tid),
+    tid
+  );
+  __syncthreads();
+  if (tid == 0) {
+    float4 block0 = surf1Dread<float4>(second, 8 * sizeof(float));
+    float4 block1 = surf1Dread<float4>(second, 12 * sizeof(float));
+    out[0] = block0.x;
+    out[1] = block0.y;
+    out[2] = block0.z;
+    out[3] = block0.w;
+    out[4] = block1.x;
+    out[5] = block1.y;
+    out[6] = block1.z;
+    out[7] = block1.w;
+    out[8] = (float)counter[0];
+  }
+}`,
   surfaceHelperVectorLayeredWrite: `
 __device__ void write_layered_vec(cudaSurfaceObject_t surfaceArg, float4 value, int row, int layer) {
   surf2DLayeredwrite(value, surfaceArg, 0, row, layer);
@@ -12524,6 +12565,63 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [62, 2, 3, 0] },
+          },
+          {
+            name: "surface:surf1d-helper-vector-multi-surface-guarded-rhs",
+            source: SOURCES.surface1DHelperVectorMultiSurfaceGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0]),
+                out: new Float32Array(9),
+              },
+              surfaces: {
+                first: { width: 16, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+                second: { width: 16, height: 1, data: new Float32Array(16) },
+              },
+              scalars: { N: 2, pick: 0 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4, 6, 7, 8, 9, 2] },
+          },
+          {
+            name: "surface:surf1d-helper-vector-multi-surface-guarded-rhs-false-branch",
+            source: SOURCES.surface1DHelperVectorMultiSurfaceGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0]),
+                out: new Float32Array(9),
+              },
+              surfaces: {
+                first: { width: 16, height: 1, data: new Float32Array(16) },
+                second: { width: 16, height: 1, data: new Float32Array([11, 13, 17, 19, 23, 29, 31, 37, 0, 0, 0, 0, 0, 0, 0, 0]) },
+              },
+              scalars: { N: 2, pick: 1 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [11, 13, 17, 19, 24, 30, 32, 38, 2] },
+          },
+          {
+            name: "surface:surf1d-helper-vector-multi-surface-guarded-rhs-all-inactive",
+            source: SOURCES.surface1DHelperVectorMultiSurfaceGuardedRhs,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0]),
+                out: new Float32Array(9),
+              },
+              surfaces: {
+                first: { width: 16, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) },
+                second: { width: 16, height: 1, data: new Float32Array([11, 13, 17, 19, 23, 29, 31, 37, 0, 0, 0, 0, 0, 0, 0, 0]) },
+              },
+              scalars: { N: 0, pick: 1 },
+            }),
+            output: "counter",
+            expectedOutput: { type: "Uint32Array", data: [0, 0] },
           },
           {
             name: "intrinsic:reciprocal",
