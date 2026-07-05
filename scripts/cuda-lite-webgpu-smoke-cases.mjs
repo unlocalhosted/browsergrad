@@ -230,6 +230,8 @@ export const textureScopeCases = [
   "surface:layered-vector-layer-boundary",
   "surface:uint4-vector-unaligned-byte-offset",
   "surface:int4-vector-unaligned-byte-offset",
+  "surface:uint4-vector-negative-byte-offset",
+  "surface:int4-vector-negative-byte-offset",
   "surface:row-boundary",
   "surface:y-boundary",
   "surface:vector-row-boundary",
