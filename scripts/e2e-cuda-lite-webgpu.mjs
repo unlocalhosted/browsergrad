@@ -4953,6 +4953,34 @@ __global__ void textureLayeredDescriptorConflictingHelpers(cudaTextureObject_t n
     out[1] = read_layered_descriptor_tex(pointTex, 3.0f, 0.0f, 1.0f);
   }
 }`,
+  textureVolumeDescriptorBranchReads: `
+__device__ float read_volume_descriptor_branch_tex(cudaTextureObject_t texArg, float x, float y, float z) {
+  return tex3D<float>(texArg, x, y, z);
+}
+
+__global__ void textureVolumeDescriptorBranchReads(cudaTextureObject_t normTex, cudaTextureObject_t pointTex, float *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    return;
+  }
+  int offset = tid * 2;
+  out[offset] = read_volume_descriptor_branch_tex(normTex, 0.75f, 0.0f, 0.25f);
+  out[offset + 1] = read_volume_descriptor_branch_tex(pointTex, 3.0f, 0.0f, 1.0f);
+}`,
+  textureLayeredDescriptorBranchReads: `
+__device__ float read_layered_descriptor_branch_tex(cudaTextureObject_t texArg, float x, float y, float layer) {
+  return tex2DLayered<float>(texArg, x, y, layer);
+}
+
+__global__ void textureLayeredDescriptorBranchReads(cudaTextureObject_t normTex, cudaTextureObject_t pointTex, float *out, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    return;
+  }
+  int offset = tid * 2;
+  out[offset] = read_layered_descriptor_branch_tex(normTex, 0.75f, 0.0f, 0.25f);
+  out[offset + 1] = read_layered_descriptor_branch_tex(pointTex, 3.0f, 0.0f, 1.0f);
+}`,
   textureCubemapDescriptorConflictingHelpers: `
 __device__ float read_cubemap_descriptor_tex(cudaTextureObject_t texArg, float x, float y, float z) {
   return texCubemap<float>(texArg, x, y, z);
@@ -13319,6 +13347,70 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Float32Array", data: [8, 18] },
           },
           {
+            name: "texture:volume-descriptor-branch-reads",
+            source: SOURCES.textureVolumeDescriptorBranchReads,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array([1, 2, 3, 4, 7, 8, 9, 10]),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 4,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 4,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]),
+                },
+              },
+              scalars: { N: 2 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [8, 18, 8, 18, 7, 8, 9, 10] },
+          },
+          {
+            name: "texture:volume-descriptor-branch-reads-all-inactive",
+            source: SOURCES.textureVolumeDescriptorBranchReads,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array([7, 8, 9, 10, 11, 12, 13, 14]),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 4,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 4,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [7, 8, 9, 10, 11, 12, 13, 14] },
+          },
+          {
             name: "texture:layered-descriptor-conflicting-helpers",
             source: SOURCES.textureLayeredDescriptorConflictingHelpers,
             options: {
@@ -13348,6 +13440,70 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [8, 18] },
+          },
+          {
+            name: "texture:layered-descriptor-branch-reads",
+            source: SOURCES.textureLayeredDescriptorBranchReads,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array([1, 2, 3, 4, 7, 8, 9, 10]),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 4,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 4,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]),
+                },
+              },
+              scalars: { N: 2 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [8, 18, 8, 18, 7, 8, 9, 10] },
+          },
+          {
+            name: "texture:layered-descriptor-branch-reads-all-inactive",
+            source: SOURCES.textureLayeredDescriptorBranchReads,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array([7, 8, 9, 10, 11, 12, 13, 14]),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 4,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 4,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [7, 8, 9, 10, 11, 12, 13, 14] },
           },
           {
             name: "texture:cubemap-descriptor-conflicting-helpers",
