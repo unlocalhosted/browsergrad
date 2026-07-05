@@ -1,5 +1,25 @@
 # @unlocalhosted/browsergrad-compiler Changelog
 
+## 0.1.1
+
+- Hardened CUDA-lite/WebGPU correctness gates after the compiler bugbash:
+  current real-world verifier gates are green for source and dist bundles at
+  `677/0/0`, with `0` hard compile/codegen audit failures and `117/117`
+  pinned corpus WebGPU fixture outputs.
+- Expanded real WebGPU smoke coverage for pointer/vector storage,
+  texture/surface vector lanes, active-lane return-before-barrier lowering,
+  guarded side-effect suppression, byte-storage helper atomics, bool pointer
+  aliases, and f32-compatible double atomic mode. The normal smoke gate now
+  runs `568/0/0` cases with `0` skips.
+- Added focused fixture and status guardrails for bugbash iteration: scoped
+  changed-test planning, latest-proof status output, no-skip WebGPU commands,
+  full-buffer all-inactive fixture oracle checks, and hot-case warm timing gates.
+- Fixed and pinned several WebGPU lowering issues found by fail-first fixtures,
+  including cubemap descriptor-coordinate bypass, guarded descriptor-specialized
+  helper cloning, nested texture descriptor propagation, side-effecting
+  pointer-array atomic address evaluation, vector surface boundary checks, and
+  active-lane barrier/control-flow lowering.
+
 ## 0.1.0
 
 - Current corpus audit closes the compatibility ladder at `1038/1038`

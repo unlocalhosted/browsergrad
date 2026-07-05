@@ -4,6 +4,7 @@ This is the workspace-level changelog. Per-package changelogs are at:
 
 - [`packages/browsergrad-runtime/CHANGELOG.md`](./packages/browsergrad-runtime/CHANGELOG.md)
 - [`packages/browsergrad-kernels/CHANGELOG.md`](./packages/browsergrad-kernels/CHANGELOG.md)
+- [`packages/browsergrad-compiler/CHANGELOG.md`](./packages/browsergrad-compiler/CHANGELOG.md)
 - [`packages/browsergrad-jit/CHANGELOG.md`](./packages/browsergrad-jit/CHANGELOG.md)
 - [`packages/browsergrad-grad/CHANGELOG.md`](./packages/browsergrad-grad/CHANGELOG.md)
 
@@ -11,6 +12,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
+
+## 2026-07 — browsergrad-compiler 0.1.1
+
+- CUDA-lite/WebGPU compiler bugbash release: source and dist real-world verifier
+  gates are green at `677/0/0`, compile/codegen audit has `0` hard failures,
+  pinned corpus WebGPU fixture outputs are `117/117`, normal smoke is
+  `568/0/0`, and skips remain `0`.
+- Adds fixture/status/perf guardrails for faster compiler iteration and broader
+  real-browser coverage of pointer/vector storage, texture/surface lanes,
+  active-lane barriers, byte helper atomics, and descriptor-specialized texture
+  lowering.
 
 ## 2026-05 — browsergrad-jit 0.8.0
 
