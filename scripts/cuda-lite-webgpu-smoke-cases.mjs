@@ -281,6 +281,7 @@ export const textureScopeCases = [
   "surface:layered-write",
   "surface:layered-read",
   "surface:layered-row-boundary",
+  "surface:layered-column-boundary",
   "surface:layered-vector-read",
   "surface:vector-read-active-lane-return",
   "surface:vector-write-active-lane-return",
