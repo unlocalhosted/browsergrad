@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-05T07:39:03Z
+Last updated: 2026-07-05T07:44:34Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,9 +9,9 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `472/0/0`, dist `472/0/0`; cuda-samples compile/codegen audit now has `0` hard fails; real corpus WebGPU fixture outputs are pinned `117/117` |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `612/0/0`, dist `612/0/0`; real-world compile/codegen audit has `0` hard fails; real corpus WebGPU fixture outputs are pinned `117/117` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Pinned cubemap all-inactive active-lane probe |
+| Active work item | Refreshed full real-world CUDA verifier proof |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- real-world CUDA verifier refresh: full verifier passed after latest cubemap descriptor/active-lane probes; compile/codegen audit across 4 corpora has `0` hard fails and `1038` plan-compiled kernels; browser fixture e2e is green for src `612/0/0` and dist `612/0/0`; corpus expected-output fixtures remain pinned `117/117` by corpus `cuda-120=10`, `cuda-samples=33`, `llm.c=28`, `leetcuda=46`; auto-corpus fast smoke `32/0/0`; skips `0`
 - cubemap pointer all-inactive probe: added all-inactive sibling for the cubemap pointer-array active-lane fixture, proving cubemap helper reads and selected atomic writes are fully suppressed when every lane returns before the barrier; no compiler fix needed; focused WebGPU pair `texture:cubemap-pointer-array-active-lane,texture:cubemap-pointer-array-active-lane-all-inactive` `2/0/0`, hot repeat `6/0/0`, best warm `4.3ms` / `4.2ms`, changed gate smoke `430/0/0`, fixture tests ok, test-scope tests ok, skips `0`
 - cubemap pointer active-lane probe: added a real WebGPU fixture combining cubemap descriptor-bypass semantics, return-before-barrier active-lane lowering, helper texture reads, pointer-array selected atomic writes, and inactive-lane suppression; no compiler fix needed; focused WebGPU fixture `texture:cubemap-pointer-array-active-lane` `1/0/0`, hot repeat `3/0/0`, best warm `4.2ms`, changed gate smoke `429/0/0`, fixture tests ok, test-scope tests ok, skips `0`
 - cubemap descriptor coord fix: fail-first real WebGPU fixture proved `texCubemap` through a descriptor-specialized helper returned `201` instead of expected `21` because WGSL applied normalized/wrap 2D descriptor coordinate transforms to cubemap direction-derived face coords while reference cubemap mapping ignores texture descriptors; cubemap WGSL lowering now bypasses descriptor-aware 2D texture helpers and emits raw cubemap-mapped `textureLoad` coords; focused unit `1/0`, focused WebGPU fixture `texture:cubemap-descriptor-conflicting-helpers` failed before fix then passed `1/0/0`, hot repeat `3/0/0`, best warm `3.5ms`, changed gate compiler unit `479/0`, WGSL modules `16/0`, selected WebGPU `120/0/0`, smoke `428/0/0`, fixture tests ok, test-scope tests ok, skips `0`
@@ -1291,9 +1292,9 @@ Current added pointer/control cases:
 
 Smoke current: `419/0/0`.
 
-Full source e2e current: `472/0/0`.
+Full source e2e current: `612/0/0`.
 
-Verifier current: src `472/0/0`, dist `472/0/0`.
+Verifier current: src `612/0/0`, dist `612/0/0`.
 
 ## Remaining Probe Map
 
