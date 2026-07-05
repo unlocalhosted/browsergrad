@@ -59,7 +59,7 @@ for (const dir of packageDirs) {
   }
 
   console.log(`publish ${spec}`);
-  const publish = run("pnpm", ["publish", "--access", "public"], {
+  const publish = run("pnpm", ["publish", "--access", "public", "--no-git-checks"], {
     cwd: dir,
     stdio: "inherit",
   });

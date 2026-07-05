@@ -23,7 +23,9 @@ change. Release CI runs the real-world CUDA gate before npm publish.
 Use `pnpm publish`, not `npm publish`, for workspace packages. `pnpm publish`
 rewrites `workspace:*` dependency ranges to concrete package versions in the
 packed tarball. `npm publish` does not, and can publish an unusable package with
-raw `workspace:*` metadata.
+raw `workspace:*` metadata. Tag-triggered CI runs on a detached HEAD, so release
+workflows pass `--no-git-checks` while still relying on GitHub tag/version
+validation.
 
 `scripts/publish-missing-npm.mjs` intentionally uses `pnpm publish` and
 topologically publishes workspace dependencies before dependents. For the
@@ -65,4 +67,3 @@ npm view @unlocalhosted/browsergrad-compiler version dependencies --json
 ```
 
 The expected compiler dependency is the just-published kernels version.
-
