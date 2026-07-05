@@ -5060,6 +5060,35 @@ __global__ void textureSurfaceCubemapVectorWrites(cudaSurfaceObject_t surf, cuda
     write_cubemap_vector_surface(surf, 4, pointValue);
   }
 }`,
+  textureSurfaceCubemapVectorPreReturnWrites: `
+__device__ float4 read_cubemap_vector_pre_return_tex(cudaTextureObject_t texArg) {
+  return texCubemap<float4>(texArg, 1.0f, 0.0f, 0.0f);
+}
+
+__device__ void write_cubemap_vector_pre_return_surface(cudaSurfaceObject_t surfaceArg, int slot, float4 value) {
+  surf2Dwrite(value, surfaceArg, slot * sizeof(float), 0);
+}
+
+__global__ void textureSurfaceCubemapVectorPreReturnWrites(cudaSurfaceObject_t surf, cudaTextureObject_t normTex, cudaTextureObject_t pointTex, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    float lane = (float)tid;
+    float4 normValue = read_cubemap_vector_pre_return_tex(normTex);
+    float4 pointValue = read_cubemap_vector_pre_return_tex(pointTex);
+    float4 combined = make_float4(
+      normValue.x + pointValue.x + lane,
+      normValue.y + pointValue.y + lane,
+      normValue.z + pointValue.z + lane,
+      normValue.w + pointValue.w + lane
+    );
+    write_cubemap_vector_pre_return_surface(surf, tid * 4, combined);
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    write_cubemap_vector_pre_return_surface(surf, 0, make_float4(1.0f, 2.0f, 3.0f, 4.0f));
+  }
+}`,
   textureHelperMultiObjectGuardedRhs: `
 __device__ float4 read_multi_texture_guarded_vec(cudaTextureObject_t first, cudaTextureObject_t second, uint *counter, int row, int pick) {
   atomicAdd(counter, 1u);
@@ -13202,6 +13231,80 @@ const html = String.raw`<!doctype html>
             }),
             output: "surf",
             expectedOutput: { type: "Float32Array", data: [1, 2, 3, 4, 5, 6, 7, 8] },
+          },
+          {
+            name: "texture-surface:cubemap-vector-pre-return-writes",
+            source: SOURCES.textureSurfaceCubemapVectorPreReturnWrites,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              surfaces: {
+                surf: { width: 16, height: 1, data: new Float32Array(16) },
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 101)),
+                },
+              },
+              scalars: { N: 3 },
+            }),
+            output: "surf",
+            expectedOutput: {
+              type: "Float32Array",
+              data: [1, 2, 3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 145, 147, 149, 151],
+            },
+          },
+          {
+            name: "texture-surface:cubemap-vector-pre-return-writes-all-inactive",
+            source: SOURCES.textureSurfaceCubemapVectorPreReturnWrites,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              surfaces: {
+                surf: { width: 16, height: 1, data: new Float32Array(16) },
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 101)),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+            output: "surf",
+            expectedOutput: {
+              type: "Float32Array",
+              data: [142, 144, 146, 148, 143, 145, 147, 149, 144, 146, 148, 150, 145, 147, 149, 151],
+            },
           },
           {
             name: "texture:helper-multi-object-guarded-rhs",
