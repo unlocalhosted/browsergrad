@@ -4990,6 +4990,29 @@ __global__ void textureCubemapPointerArrayActiveLane(cudaTextureObject_t normTex
     summary[2] = summary[0] + summary[1];
   }
 }`,
+  textureSurfaceCubemapDescriptorWrites: `
+__device__ float read_cubemap_surface_tex(cudaTextureObject_t texArg, float x, float y, float z) {
+  return texCubemap<float>(texArg, x, y, z);
+}
+
+__device__ void write_cubemap_surface(cudaSurfaceObject_t surfaceArg, int slot, float value) {
+  surf2Dwrite(value, surfaceArg, slot * sizeof(float), 0);
+}
+
+__global__ void textureSurfaceCubemapDescriptorWrites(cudaSurfaceObject_t surf, cudaTextureObject_t normTex, cudaTextureObject_t pointTex, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    float normValue = read_cubemap_surface_tex(normTex, 1.0f, 0.0f, 0.0f);
+    float pointValue = read_cubemap_surface_tex(pointTex, 1.0f, 0.0f, 0.0f);
+    write_cubemap_surface(surf, 0, normValue);
+    write_cubemap_surface(surf, 1, pointValue);
+    write_cubemap_surface(surf, 2, normValue + pointValue);
+  }
+}`,
   textureHelperMultiObjectGuardedRhs: `
 __device__ float4 read_multi_texture_guarded_vec(cudaTextureObject_t first, cudaTextureObject_t second, uint *counter, int row, int pick) {
   atomicAdd(counter, 1u);
@@ -12922,6 +12945,74 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [0, 0, 0, 0] },
+          },
+          {
+            name: "texture-surface:cubemap-descriptor-writes",
+            source: SOURCES.textureSurfaceCubemapDescriptorWrites,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(4) },
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 101)),
+                },
+              },
+              scalars: { N: 1 },
+            }),
+            output: "surf",
+            expectedOutput: { type: "Float32Array", data: [21, 121, 142, 0] },
+          },
+          {
+            name: "texture-surface:cubemap-descriptor-writes-all-inactive",
+            source: SOURCES.textureSurfaceCubemapDescriptorWrites,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([7, 8, 9, 10]) },
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 101)),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+            output: "surf",
+            expectedOutput: { type: "Float32Array", data: [7, 8, 9, 10] },
           },
           {
             name: "texture:helper-multi-object-guarded-rhs",
