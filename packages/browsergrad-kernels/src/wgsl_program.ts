@@ -108,6 +108,9 @@ export interface WgslTexture2DInput {
   readonly height: number;
   readonly data: Float32Array;
   readonly channels?: 1 | 2 | 4;
+  readonly normalizedCoords?: boolean;
+  readonly addressMode?: readonly ["clamp" | "wrap", "clamp" | "wrap"];
+  readonly filterMode?: "point";
 }
 
 export interface WgslKernelLaunch {

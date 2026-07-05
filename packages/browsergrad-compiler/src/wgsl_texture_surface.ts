@@ -1,5 +1,11 @@
 import { expressionName } from "./analyzer.js";
-import type { CudaLiteCallExpression, CudaLiteExpression, CudaLiteScalarType } from "./types.js";
+import type {
+  CudaLiteCallExpression,
+  CudaLiteExpression,
+  CudaLiteScalarType,
+  CudaLiteTextureAddressMode,
+  CudaLiteTextureDescriptor,
+} from "./types.js";
 import {
   cudaVectorLaneCount,
   cudaVectorScalarType,
@@ -18,6 +24,7 @@ export interface WgslTextureSurfaceEmitContext {
   nameFor(name: string): string;
   surfaceWidthField(name: string): string;
   surfaceHeightField(name: string): string;
+  textureDescriptor(name: string): CudaLiteTextureDescriptor | undefined;
   emitExpression(expression: CudaLiteExpression, mode?: EmitMode): string;
   emitExpressionAsValueType(expression: CudaLiteExpression, valueType: CudaLiteScalarType): string;
   expressionValueType(expression: CudaLiteExpression): CudaLiteScalarType | undefined;
@@ -25,12 +32,9 @@ export interface WgslTextureSurfaceEmitContext {
 
 export function emitTextureHelper(name: string, context: WgslTextureSurfaceEmitContext): string[] {
   const safeName = context.nameFor(name);
+  const coordLines = emitTextureCoordHelper(name, safeName, context.textureDescriptor(name));
   const lines = [
-    `fn bg_tex2d_coord_${name}(x: f32, y: f32) -> vec2<i32> {`,
-    `  let dims = textureDimensions(${safeName});`,
-    "  let max_coord = vec2<i32>(i32(dims.x) - 1, i32(dims.y) - 1);",
-    "  return clamp(vec2<i32>(i32(floor(x)), i32(floor(y))), vec2<i32>(0, 0), max_coord);",
-    "}",
+    ...coordLines,
     `fn bg_tex2d_f32_${name}(x: f32, y: f32) -> f32 {`,
     `  return textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0).r;`,
     "}",
@@ -65,6 +69,42 @@ export function emitTextureHelper(name: string, context: WgslTextureSurfaceEmitC
     );
   }
   return lines;
+}
+
+function emitTextureCoordHelper(
+  name: string,
+  safeName: string,
+  descriptor: CudaLiteTextureDescriptor | undefined,
+): string[] {
+  const x = textureAxisCoordExpression("x", "dims.x", descriptor, "x");
+  const y = textureAxisCoordExpression("y", "dims.y", descriptor, "y");
+  return [
+    `fn bg_tex2d_coord_${name}(x: f32, y: f32) -> vec2<i32> {`,
+    `  let dims = textureDimensions(${safeName});`,
+    `  return vec2<i32>(${x}, ${y});`,
+    "}",
+  ];
+}
+
+function textureAxisCoordExpression(
+  value: string,
+  extent: string,
+  descriptor: CudaLiteTextureDescriptor | undefined,
+  axis: "x" | "y",
+): string {
+  const scaled = descriptor?.normalizedCoords ? `floor(${value} * f32(${extent}))` : `floor(${value})`;
+  const mode = textureAddressMode(descriptor, axis);
+  if (mode === "wrap") {
+    return `i32((${scaled}) - floor((${scaled}) / f32(${extent})) * f32(${extent}))`;
+  }
+  return `i32(clamp(${scaled}, 0.0, f32(${extent}) - 1.0))`;
+}
+
+function textureAddressMode(
+  descriptor: CudaLiteTextureDescriptor | undefined,
+  axis: "x" | "y",
+): CudaLiteTextureAddressMode {
+  return descriptor?.addressMode?.[axis === "x" ? 0 : 1] ?? "clamp";
 }
 
 export function emitCubeTextureAtlasHelpers(): string[] {

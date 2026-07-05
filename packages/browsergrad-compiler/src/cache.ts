@@ -132,6 +132,9 @@ function mergeCompileOptions(
   if (defaults.pointerBaseOffsets || options.pointerBaseOffsets) {
     merged.pointerBaseOffsets = { ...defaults.pointerBaseOffsets, ...options.pointerBaseOffsets };
   }
+  if (defaults.textureDescriptors || options.textureDescriptors) {
+    merged.textureDescriptors = { ...defaults.textureDescriptors, ...options.textureDescriptors };
+  }
   return merged as CompileCudaLiteOptions;
 }
 

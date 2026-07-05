@@ -46,6 +46,7 @@ import type {
   CudaLiteParam,
   CudaLiteScalarType,
   CudaLiteStatement,
+  CudaLiteTextureDescriptor,
   CudaLiteVarDecl,
   KernelIrModule,
   SourceSpan,
@@ -58,6 +59,7 @@ export interface EmitKernelIrWgslOptions {
   readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
   readonly f16Mode?: "native" | "f32";
   readonly subgroupMode?: "native" | "scalar";
+  readonly textureDescriptors?: Readonly<Record<string, CudaLiteTextureDescriptor>>;
 }
 
 export interface EmitContext {
@@ -88,6 +90,7 @@ export interface EmitContext {
   readonly subgroupMode: "native" | "scalar";
   readonly externalPoolNames: readonly string[];
   readonly mutablePointerBases: readonly string[];
+  readonly textureDescriptors: Readonly<Record<string, CudaLiteTextureDescriptor>>;
   readonly scalarWarpReduceHelpers: Map<string, ScalarWarpReduceHelper>;
   readonly scalarWarpShuffleHelpers: Map<string, ScalarWarpShuffleHelper>;
   readonly vectorCooperativeReduceHelpers: Map<string, VectorCooperativeReduceHelper>;
@@ -357,6 +360,7 @@ export function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslO
     },
     rawPoolAllocators,
     subgroupMode: effectiveSubgroupMode(ir, options),
+    textureDescriptors: options.textureDescriptors ?? {},
     externalPoolNames,
     mutablePointerBases,
     scalarWarpReduceHelpers,

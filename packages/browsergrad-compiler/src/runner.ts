@@ -62,6 +62,7 @@ export function compileCudaLiteKernel(
   source: string,
   options: CompileCudaLiteOptions = {},
 ): CompiledCudaLiteKernel {
+  validateTextureDescriptorOptions(options);
   const ast = parseCudaLite(source);
   const analysis = analyzeCudaLite(ast, options);
   const errors = analysis.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
@@ -77,6 +78,7 @@ export function compileCudaLiteKernel(
     {
       ...(options.features === undefined ? {} : { features: options.features }),
       ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
+      ...(options.textureDescriptors === undefined ? {} : { textureDescriptors: options.textureDescriptors }),
       ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),
       ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
     },
@@ -91,9 +93,18 @@ export function compileCudaLiteKernel(
     diagnostics: analysis.diagnostics,
     loweringPlan,
     ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
+    ...(options.textureDescriptors === undefined ? {} : { textureDescriptors: options.textureDescriptors }),
     ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),
     ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
   };
+}
+
+function validateTextureDescriptorOptions(options: CompileCudaLiteOptions): void {
+  for (const [name, descriptor] of Object.entries(options.textureDescriptors ?? {})) {
+    if (descriptor.filterMode !== undefined && descriptor.filterMode !== "point") {
+      throw new RangeError(`texture descriptor '${name}' uses unsupported filterMode '${descriptor.filterMode}'`);
+    }
+  }
 }
 
 export function cudaLiteWebGpuCompileOptions(

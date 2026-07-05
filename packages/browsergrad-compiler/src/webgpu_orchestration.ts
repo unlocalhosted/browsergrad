@@ -266,6 +266,7 @@ function createGridSyncWebGpuPlan(
       features: featureOptionsFor(module.requiredFeatures),
       ...(compiled.f16Mode === undefined ? {} : { f16Mode: compiled.f16Mode }),
       ...(compiled.subgroupMode === undefined ? {} : { subgroupMode: compiled.subgroupMode }),
+      ...(compiled.textureDescriptors === undefined ? {} : { textureDescriptors: compiled.textureDescriptors }),
     }).program,
     launch: { dispatchCount },
     ...(wgslInput.uniforms === undefined ? {} : { uniforms: wgslInput.uniforms }),
@@ -725,6 +726,7 @@ function getOrCompileDynamicChild(
       referenceCudaRuntime: true,
       ...(parent.f16Mode === undefined ? {} : { f16Mode: parent.f16Mode }),
       ...(parent.subgroupMode === undefined ? {} : { subgroupMode: parent.subgroupMode }),
+      ...(parent.textureDescriptors === undefined ? {} : { textureDescriptors: parent.textureDescriptors }),
       workgroupSize: item.blockDim,
       pointerBaseOffsets: item.pointerBaseOffsets,
     });

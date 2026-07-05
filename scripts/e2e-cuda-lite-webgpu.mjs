@@ -15276,6 +15276,9 @@ const html = String.raw`<!doctype html>
             width: spec.width,
             height: spec.height,
             channels: spec.channels,
+            ...(spec.normalizedCoords === undefined ? {} : { normalizedCoords: spec.normalizedCoords }),
+            ...(spec.addressMode === undefined ? {} : { addressMode: spec.addressMode }),
+            ...(spec.filterMode === undefined ? {} : { filterMode: spec.filterMode }),
             data: materializeTypedArray(spec.data),
           };
         }

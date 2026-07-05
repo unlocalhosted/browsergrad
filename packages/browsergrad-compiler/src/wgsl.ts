@@ -320,6 +320,7 @@ function textureSurfaceContext(context: EmitContext): WgslTextureSurfaceEmitCont
     nameFor: (name) => context.nameFor(name),
     surfaceWidthField: (name) => context.surfaceWidthField(name),
     surfaceHeightField: (name) => context.surfaceHeightField(name),
+    textureDescriptor: (name) => context.textureDescriptors[name],
     emitExpression: (expression, mode = "value") => emitExpression(expression, context, mode),
     emitExpressionAsValueType: (expression, valueType) => emitExpressionAsValueType(expression, valueType, context),
     expressionValueType: (expression) => expressionValueTypeForEmit(expression, context),

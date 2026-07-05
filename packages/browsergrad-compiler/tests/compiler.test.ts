@@ -9668,6 +9668,33 @@ __global__ void sample(float *out, int width, cudaTextureObject_t tex) {
     expect([...result.buffers.out as Float32Array]).toEqual([2, 4, 6]);
   });
 
+  it("honors normalized point-wrap texture descriptors in reference and WGSL lowering", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sample(float *out, int width, int height, cudaTextureObject_t tex) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  out[y * width + x] = tex2D<float>(tex, (x + 1) / (float)width, (y + 1) / (float)height);
+}`, {
+      workgroupSize: [4, 2, 1],
+      textureDescriptors: {
+        tex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+      },
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(8) },
+        textures: { tex: { width: 4, height: 2, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) } },
+        scalars: { width: 4, height: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("floor(x * f32(dims.x))");
+    expect(compiled.wgsl).toContain("floor(y * f32(dims.y))");
+    expect([...result.buffers.out as Float32Array]).toEqual([6, 7, 8, 5, 2, 3, 4, 1]);
+  });
+
   it("lowers templated uchar tex2D reads", () => {
     const compiled = compileCudaLiteKernel(`
 texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;

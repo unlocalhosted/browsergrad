@@ -214,6 +214,38 @@ export const cudaLiteCorpusExecutionFixtures = [
     expectedOutput: { type: "Float32Array", data: [11, 22, 33, 44] },
   },
   {
+    sourceKey: "corpusCudaSamplesSimplePitchLinearTextureShiftArray",
+    caseName: "corpus:cuda-samples:shiftArray_normalized_wrap",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/0_Introduction/simplePitchLinearTexture/simplePitchLinearTexture.cu",
+    kernelName: "shiftArray",
+    workgroupSize: [4, 2, 1],
+    options: {
+      textureDescriptors: {
+        texRefArray: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+      },
+    },
+    launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+    input: {
+      buffers: {
+        odata: { type: "Float32Array", length: 8 },
+      },
+      textures: {
+        texRefArray: {
+          width: 4,
+          height: 2,
+          normalizedCoords: true,
+          addressMode: ["wrap", "wrap"],
+          filterMode: "point",
+          data: { type: "Float32Array", data: [1, 2, 3, 4, 5, 6, 7, 8] },
+        },
+      },
+      scalars: { pitch: 4, width: 4, height: 2, shiftX: 1, shiftY: 1 },
+    },
+    output: "odata",
+    expectedOutput: { type: "Float32Array", data: [6, 7, 8, 5, 2, 3, 4, 1] },
+  },
+  {
     sourceKey: "corpusCudaSamplesSimpleAtomicIntrinsics",
     caseName: "corpus:cuda-samples:simpleAtomicIntrinsics",
     corpusId: "cuda-samples",

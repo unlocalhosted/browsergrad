@@ -420,6 +420,15 @@ export interface CudaLiteAnalyzeOptions {
   readonly subgroupMode?: "native" | "scalar";
 }
 
+export type CudaLiteTextureAddressMode = "clamp" | "wrap";
+export type CudaLiteTextureFilterMode = "point";
+
+export interface CudaLiteTextureDescriptor {
+  readonly normalizedCoords?: boolean;
+  readonly addressMode?: readonly [CudaLiteTextureAddressMode, CudaLiteTextureAddressMode];
+  readonly filterMode?: CudaLiteTextureFilterMode;
+}
+
 export interface CudaLiteAnalysis {
   readonly kernel: CudaLiteKernel;
   readonly constants: readonly CudaLiteGlobalConstant[];
@@ -451,6 +460,7 @@ export interface KernelIrModule {
 
 export interface CompileCudaLiteOptions extends CudaLiteAnalyzeOptions {
   readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
+  readonly textureDescriptors?: Readonly<Record<string, CudaLiteTextureDescriptor>>;
 }
 
 export interface CompiledCudaLiteKernel {
@@ -462,6 +472,7 @@ export interface CompiledCudaLiteKernel {
   readonly diagnostics: readonly CudaLiteDiagnostic[];
   readonly loweringPlan: CudaLoweringPlan;
   readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
+  readonly textureDescriptors?: Readonly<Record<string, CudaLiteTextureDescriptor>>;
   readonly f16Mode?: "native" | "f32";
   readonly subgroupMode?: "native" | "scalar";
 }
