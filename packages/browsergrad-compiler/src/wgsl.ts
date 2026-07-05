@@ -394,6 +394,8 @@ function emitStatement(
       }
       const conditional = emitVarInitWithConditionalSideEffect(statement, context, indentLevel);
       if (conditional) return conditional;
+      const hoistedPointerArrayIndex = emitVarInitWithHoistedSideEffectingPointerArrayIndex(statement, context, indentLevel);
+      if (hoistedPointerArrayIndex) return hoistedPointerArrayIndex;
       return [`${prefix}var ${context.nameFor(statement.name)}: ${wgslScalar(statement.valueType)}${statement.init ? ` = ${emitLocalInit(statement, context)}` : ""};`];
     case "dim3":
       return [];
@@ -1338,6 +1340,8 @@ function emitVarStatementWithActiveFlag(
   }
   const conditional = emitVarInitWithConditionalSideEffect(statement, context, indentLevel, activeFlag);
   if (conditional) return conditional;
+  const hoistedPointerArrayIndex = emitVarInitWithHoistedSideEffectingPointerArrayIndex(statement, context, indentLevel, activeFlag);
+  if (hoistedPointerArrayIndex) return hoistedPointerArrayIndex;
   if (statement.init.kind === "call") {
     const name = expressionName(statement.init.callee);
     const fn = name ? context.deviceFunctionFor(name, statement.init.args.length) : undefined;
@@ -1385,6 +1389,40 @@ function emitVarInitWithConditionalSideEffect(
   const lines = [`${prefix}var ${context.nameFor(statement.name)}: ${wgslScalar(statement.valueType)} = ${zeroValue(statement.valueType)};`];
   if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
   lines.push(...emitAssignmentWithLazyConditionalSideEffectRhs({ kind: "assignment", left: target, operator: "=", right: statement.init, span: statement.span }, context, branchIndent) ?? []);
+  if (activeFlag) lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitVarInitWithHoistedSideEffectingPointerArrayIndex(
+  statement: CudaLiteVarDecl,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] | undefined {
+  if (
+    statement.storage === "shared" ||
+    statement.pointer ||
+    statement.dimensions.length > 0 ||
+    statement.matrixTile ||
+    !statement.init ||
+    isCudaVectorType(statement.valueType) ||
+    statement.valueType === "complex64"
+  ) {
+    return undefined;
+  }
+  const pointerArrayIndex = firstSideEffectingPointerArrayIndexExpression(statement.init, context);
+  if (!pointerArrayIndex) return undefined;
+  const prefix = indent(indentLevel);
+  const bodyIndent = activeFlag ? indentLevel + 1 : indentLevel;
+  const tempName = `bg_pointer_array_index_${pointerArrayIndex.index.span.start}`;
+  const scopedContext = contextWithHoistedLocalValue(context, tempName, "uint");
+  const replacement: CudaLiteExpression = { kind: "identifier", name: tempName, span: pointerArrayIndex.index.span };
+  const replacedInit = replaceExpressionNode(statement.init, pointerArrayIndex.index, replacement);
+  const replacedStatement: CudaLiteVarDecl = { ...statement, init: replacedInit };
+  const lines = [`${prefix}var ${context.nameFor(statement.name)}: ${wgslScalar(statement.valueType)} = ${zeroValue(statement.valueType)};`];
+  if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
+  lines.push(`${indent(bodyIndent)}let ${scopedContext.nameFor(tempName)}: u32 = ${emitExpressionAsValueType(pointerArrayIndex.index, "uint", context)};`);
+  lines.push(`${indent(bodyIndent)}${context.nameFor(statement.name)} = ${emitLocalInit(replacedStatement, scopedContext)};`);
   if (activeFlag) lines.push(`${prefix}}`);
   return lines;
 }

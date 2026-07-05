@@ -7642,6 +7642,68 @@ __global__ void textureSurfaceVolumeAtomicPointerArraySideEffectIndex(cudaSurfac
     summarize_surface_volume_pointer_array_side_effect(out, shadow, trace, summary);
   }
 }`,
+  textureSurfaceVolumeAtomicPointerArrayCasMinMaxSideEffectIndex: `
+__device__ uint4 sample_surface_volume_pointer_array_cas_minmax_side_effect_vec(cudaTextureObject_t texArg) {
+  uint4 layered = tex2DLayered<uint4>(texArg, 0.0f, 1.0f, 1.0f);
+  uint4 volume = tex3D<uint4>(texArg, 2.0f, 1.0f, 1.0f);
+  return make_uint4(
+    layered.x + volume.x,
+    layered.y + volume.y,
+    layered.z + volume.z,
+    layered.w + volume.w
+  );
+}
+
+__device__ void write_surface_volume_pointer_array_cas_minmax_side_effect_vec(cudaSurfaceObject_t surfaceArg, uint4 value) {
+  surf3Dwrite(value, surfaceArg, 0, 0, 1);
+}
+
+__device__ uint4 read_surface_volume_pointer_array_cas_minmax_side_effect_vec(cudaSurfaceObject_t surfaceArg) {
+  return surf3Dread<uint4>(surfaceArg, 0, 0, 1);
+}
+
+__device__ int choose_surface_volume_pointer_array_cas_minmax_side_effect_index(uint *trace, uint4 value, int routeMode) {
+  atomicAdd(trace, value.x + value.y + value.z + value.w + 1u);
+  return routeMode == 0 ? (value.x > 0u ? 1 : 0) : (value.x > 0u ? 0 : 1);
+}
+
+__device__ void summarize_surface_volume_pointer_array_cas_minmax_side_effect(uint4 *out, uint4 *shadow, uint *trace, uint *token, uint *summary) {
+  uint4 outValue = out[1];
+  uint4 shadowValue = shadow[1];
+  summary[0] = outValue.x + outValue.y + outValue.z + outValue.w;
+  summary[1] = shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w;
+  summary[2] = trace[0];
+  summary[3] = token[0];
+  summary[4] = outValue.y + shadowValue.y;
+}
+
+__global__ void textureSurfaceVolumeAtomicPointerArrayCasMinMaxSideEffectIndex(cudaSurfaceObject_t surf, cudaTextureObject_t tex, uint4 *out, uint4 *shadow, uint *trace, uint *token, uint *summary, int N, int routeMode) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    uint4 sampled = sample_surface_volume_pointer_array_cas_minmax_side_effect_vec(tex);
+    write_surface_volume_pointer_array_cas_minmax_side_effect_vec(surf, sampled);
+    uint4 value = read_surface_volume_pointer_array_cas_minmax_side_effect_vec(surf);
+    uint4 *targets[2];
+    targets[0] = shadow + 1;
+    targets[1] = out + 1;
+    uint oldY = atomicCAS(reinterpret_cast<uint*>(targets[choose_surface_volume_pointer_array_cas_minmax_side_effect_index(trace, value, routeMode)]) + 1, 11u, value.y);
+    uint oldZ = atomicExch(reinterpret_cast<uint*>(targets[choose_surface_volume_pointer_array_cas_minmax_side_effect_index(trace, value, routeMode)]) + 2, value.z);
+    uint oldX = atomicMin(reinterpret_cast<uint*>(targets[choose_surface_volume_pointer_array_cas_minmax_side_effect_index(trace, value, routeMode)]) + 0, value.x);
+    uint oldW = atomicMax(reinterpret_cast<uint*>(targets[choose_surface_volume_pointer_array_cas_minmax_side_effect_index(trace, value, routeMode)]) + 3, value.w);
+    token[0] = oldX + oldY + oldZ + oldW;
+  }
+  __syncthreads();
+  if (tid == 1) {
+    summarize_surface_volume_pointer_array_cas_minmax_side_effect(out, shadow, trace, token, summary);
+  }
+}`,
   textureSurfaceVolumeAtomicPointerArrayActiveLaneReturn: `
 __device__ uint4 sample_surface_volume_pointer_array_active_vec(cudaTextureObject_t texArg, int lane) {
   uint4 layered = tex2DLayered<uint4>(texArg, 0.0f, 1.0f, 1.0f);
@@ -18903,6 +18965,93 @@ const html = String.raw`<!doctype html>
             }),
             output: "trace",
             expectedOutput: { type: "Uint32Array", data: [900] },
+          },
+          {
+            name: "texture-surface:volume-atomic-pointer-array-cas-minmax-side-effect-index",
+            source: SOURCES.textureSurfaceVolumeAtomicPointerArrayCasMinMaxSideEffectIndex,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                trace: new Uint32Array([5]),
+                token: new Uint32Array([0]),
+                summary: new Uint32Array(5),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 2, routeMode: 0 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [236, 1004, 1241, 65, 277] },
+          },
+          {
+            name: "texture-surface:volume-atomic-pointer-array-cas-minmax-side-effect-index-shadow",
+            source: SOURCES.textureSurfaceVolumeAtomicPointerArrayCasMinMaxSideEffectIndex,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                trace: new Uint32Array([5]),
+                token: new Uint32Array([0]),
+                summary: new Uint32Array(5),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 2, routeMode: 1 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [65, 754, 1241, 1004, 212] },
+          },
+          {
+            name: "texture-surface:volume-atomic-pointer-array-cas-minmax-side-effect-index-all-inactive",
+            source: SOURCES.textureSurfaceVolumeAtomicPointerArrayCasMinMaxSideEffectIndex,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                trace: new Uint32Array([700]),
+                token: new Uint32Array([33]),
+                summary: new Uint32Array([7, 8, 9, 10, 11]),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+              },
+              scalars: { N: 0, routeMode: 1 },
+            }),
+            output: "trace",
+            expectedOutput: { type: "Uint32Array", data: [700] },
           },
           {
             name: "texture-surface:volume-atomic-pointer-array-active-lane-return",
