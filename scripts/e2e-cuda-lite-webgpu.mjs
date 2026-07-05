@@ -4032,6 +4032,21 @@ __global__ void surfaceLayeredRead(cudaSurfaceObject_t surf, float *out) {
     out[1] = read_layer(surf, 1, 1);
   }
 }`,
+  surfaceLayeredRowBoundary: `
+__global__ void surfaceLayeredRowBoundary(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    float negativeValue = 77.0f;
+    float highValue = 88.0f;
+    surf2DLayeredread(&negativeValue, surf, 0, -1, 1);
+    surf2DLayeredread(&highValue, surf, 0, 1, 1);
+    surf2DLayeredwrite(42.0f, surf, 0, -1, 1);
+    surf2DLayeredwrite(43.0f, surf, 0, 1, 1);
+    out[0] = negativeValue;
+    out[1] = highValue;
+    out[2] = surf2DLayeredread<float>(surf, 0, 0, 1);
+    out[3] = surf2DLayeredread<float>(surf, 1 * sizeof(float), 0, 1);
+  }
+}`,
   surfaceVectorLayeredRead: `
 __device__ float4 read_layer_vec(cudaSurfaceObject_t surfaceArg, int row, int layer) {
   return surf2DLayeredread<float4>(surfaceArg, 0, row, layer);
@@ -13008,6 +13023,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [7, 8] },
+          },
+          {
+            name: "surface:layered-row-boundary",
+            source: SOURCES.surfaceLayeredRowBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array([3, 5, 7, 11]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 7, 11] },
           },
           {
             name: "surface:layered-vector-read",
