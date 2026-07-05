@@ -3249,6 +3249,22 @@ __global__ void surfaceLayeredVectorNegativeXPointerBoundary(float *out, cudaSur
   out[6] = layer1.x;
   out[7] = layer1.y;
 }`,
+  surfaceLayeredVectorHighXPointerBoundary: `
+__global__ void surfaceLayeredVectorHighXPointerBoundary(float *out, cudaSurfaceObject_t surf) {
+  float4 highValue = make_float4(77.0f, 78.0f, 79.0f, 80.0f);
+  surf2DLayeredread(&highValue, surf, 4 * (int)sizeof(float), 0, 1);
+  surf2DLayeredwrite(make_float4(41.0f, 42.0f, 43.0f, 44.0f), surf, 4 * (int)sizeof(float), 0, 1);
+  float4 layer0 = surf2DLayeredread<float4>(surf, 0, 0, 0);
+  float4 layer1 = surf2DLayeredread<float4>(surf, 0, 0, 1);
+  out[0] = highValue.x;
+  out[1] = highValue.y;
+  out[2] = highValue.z;
+  out[3] = highValue.w;
+  out[4] = layer0.x;
+  out[5] = layer0.y;
+  out[6] = layer1.x;
+  out[7] = layer1.y;
+}`,
   surfaceLayeredVectorColumnBoundary: `
 __global__ void surfaceLayeredVectorColumnBoundary(float *out, cudaSurfaceObject_t surf) {
   surf2DLayeredwrite(make_float4(21.0f, 22.0f, 23.0f, 24.0f), surf, 1 * sizeof(float), 0, 1);
@@ -4245,6 +4261,23 @@ __global__ void surface1DVectorNegativeByteOffset(cudaSurfaceObject_t surf, floa
     out[1] = negativeValue.y;
     out[2] = negativeValue.z;
     out[3] = negativeValue.w;
+    out[4] = value.x;
+    out[5] = value.y;
+    out[6] = value.z;
+    out[7] = value.w;
+  }
+}`,
+  surface1DVectorHighByteOffsetBoundary: `
+__global__ void surface1DVectorHighByteOffsetBoundary(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    float4 highValue = make_float4(77.0f, 78.0f, 79.0f, 80.0f);
+    surf1Dread(&highValue, surf, 4 * (int)sizeof(float));
+    surf1Dwrite(make_float4(41.0f, 42.0f, 43.0f, 44.0f), surf, 4 * (int)sizeof(float));
+    float4 value = surf1Dread<float4>(surf, 0);
+    out[0] = highValue.x;
+    out[1] = highValue.y;
+    out[2] = highValue.z;
+    out[3] = highValue.w;
     out[4] = value.x;
     out[5] = value.y;
     out[6] = value.z;
@@ -12672,6 +12705,22 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 3, 5, 13, 17] },
           },
           {
+            name: "surface:layered-vector-high-x-pointer-boundary",
+            source: SOURCES.surfaceLayeredVectorHighXPointerBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(8),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([3, 5, 7, 11, 13, 17, 19, 23]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 3, 5, 13, 17] },
+          },
+          {
             name: "surface:layered-vector-row-boundary",
             source: SOURCES.surfaceLayeredVectorRowBoundary,
             options: { workgroupSize: [1, 1, 1] },
@@ -20528,6 +20577,22 @@ const html = String.raw`<!doctype html>
           {
             name: "surface:surf1d-vector-negative-byte-offset",
             source: SOURCES.surface1DVectorNegativeByteOffset,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(8),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([5, 7, 11, 13]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
+          },
+          {
+            name: "surface:surf1d-vector-high-byte-offset-boundary",
+            source: SOURCES.surface1DVectorHighByteOffsetBoundary,
             options: { workgroupSize: [1, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({
