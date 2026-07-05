@@ -32,43 +32,98 @@ export interface WgslTextureSurfaceEmitContext {
 
 export function emitTextureHelper(name: string, context: WgslTextureSurfaceEmitContext): string[] {
   const safeName = context.nameFor(name);
-  const coordLines = emitTextureCoordHelper(name, safeName, context.textureDescriptor(name));
+  const descriptor = context.textureDescriptor(name);
+  const coordLines = emitTextureCoordHelper(name, safeName, descriptor);
+  const textureValue = descriptor?.filterMode === "linear"
+    ? `bg_tex2d_linear_${name}(x, y)`
+    : `textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0)`;
   const lines = [
     ...coordLines,
+    ...(descriptor?.filterMode === "linear" ? emitLinearTextureHelper(name, safeName, descriptor) : []),
     `fn bg_tex2d_f32_${name}(x: f32, y: f32) -> f32 {`,
-    `  return textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0).r;`,
+    `  return ${textureValue}.r;`,
     "}",
     `fn bg_tex2d_float2_${name}(x: f32, y: f32) -> vec2<f32> {`,
-    `  return textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0).xy;`,
+    `  return ${textureValue}.xy;`,
     "}",
     `fn bg_tex2d_float3_${name}(x: f32, y: f32) -> vec3<f32> {`,
-    `  return textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0).xyz;`,
+    `  return ${textureValue}.xyz;`,
     "}",
     `fn bg_tex2d_float4_${name}(x: f32, y: f32) -> vec4<f32> {`,
-    `  return textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0);`,
+    `  return ${textureValue};`,
     "}",
     `fn bg_tex2d_int_${name}(x: f32, y: f32) -> i32 {`,
-    `  return i32(textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0).r);`,
+    `  return i32(${textureValue}.r);`,
     "}",
     `fn bg_tex2d_uint_${name}(x: f32, y: f32) -> u32 {`,
-    `  return u32(textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0).r);`,
+    `  return u32(${textureValue}.r);`,
     "}",
     `fn bg_tex2d_uchar_${name}(x: f32, y: f32) -> u32 {`,
-    `  return u32(textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0).r);`,
+    `  return u32(${textureValue}.r);`,
     "}",
-    ...emitTextureVectorCastHelpers(name, safeName, ["int2", "int3", "int4", "uint2", "uint3", "uint4"]),
+    ...emitTextureVectorCastHelpers(name, textureValue, ["int2", "int3", "int4", "uint2", "uint3", "uint4"]),
   ];
   if (context.requiredFeatures.includes("shader-f16")) {
     lines.push(
       `fn bg_tex2d_half_${name}(x: f32, y: f32) -> f16 {`,
-      `  return f16(textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0).r);`,
+      `  return f16(${textureValue}.r);`,
       "}",
       `fn bg_tex2d_half2_${name}(x: f32, y: f32) -> vec2<f16> {`,
-      `  return vec2<f16>(textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0).xy);`,
+      `  return vec2<f16>(${textureValue}.xy);`,
       "}",
     );
   }
   return lines;
+}
+
+function emitLinearTextureHelper(
+  name: string,
+  safeName: string,
+  descriptor: CudaLiteTextureDescriptor,
+): string[] {
+  const sx = textureLinearAxisScaledExpression("x", "dims.x", descriptor);
+  const sy = textureLinearAxisScaledExpression("y", "dims.y", descriptor);
+  return [
+    `fn bg_tex2d_linear_${name}(x: f32, y: f32) -> vec4<f32> {`,
+    `  let dims = textureDimensions(${safeName});`,
+    `  let sx = ${sx};`,
+    `  let sy = ${sy};`,
+    "  let xb = sx - 0.5;",
+    "  let yb = sy - 0.5;",
+    "  let x0 = floor(xb);",
+    "  let y0 = floor(yb);",
+    "  let ax = fract(xb);",
+    "  let ay = fract(yb);",
+    `  let ix0 = ${textureLinearIndexExpression("x0", "dims.x", descriptor, "x")};`,
+    `  let ix1 = ${textureLinearIndexExpression("(x0 + 1.0)", "dims.x", descriptor, "x")};`,
+    `  let iy0 = ${textureLinearIndexExpression("y0", "dims.y", descriptor, "y")};`,
+    `  let iy1 = ${textureLinearIndexExpression("(y0 + 1.0)", "dims.y", descriptor, "y")};`,
+    `  let top = textureLoad(${safeName}, vec2<i32>(ix0, iy0), 0) * (1.0 - ax) + textureLoad(${safeName}, vec2<i32>(ix1, iy0), 0) * ax;`,
+    `  let bottom = textureLoad(${safeName}, vec2<i32>(ix0, iy1), 0) * (1.0 - ax) + textureLoad(${safeName}, vec2<i32>(ix1, iy1), 0) * ax;`,
+    "  return top * (1.0 - ay) + bottom * ay;",
+    "}",
+  ];
+}
+
+function textureLinearAxisScaledExpression(
+  value: string,
+  extent: string,
+  descriptor: CudaLiteTextureDescriptor,
+): string {
+  return descriptor.normalizedCoords ? `${value} * f32(${extent})` : value;
+}
+
+function textureLinearIndexExpression(
+  value: string,
+  extent: string,
+  descriptor: CudaLiteTextureDescriptor,
+  axis: "x" | "y",
+): string {
+  const mode = textureAddressMode(descriptor, axis);
+  if (mode === "wrap") {
+    return `i32((${value}) - floor((${value}) / f32(${extent})) * f32(${extent}))`;
+  }
+  return `i32(clamp(${value}, 0.0, f32(${extent}) - 1.0))`;
 }
 
 function emitTextureCoordHelper(
@@ -299,7 +354,7 @@ export function emitSurfaceWriteExpression(
 
 function emitTextureVectorCastHelpers(
   name: string,
-  safeName: string,
+  textureValue: string,
   valueTypes: readonly CudaLiteVectorType[],
 ): string[] {
   return valueTypes.flatMap((valueType) => {
@@ -308,7 +363,7 @@ function emitTextureVectorCastHelpers(
     const values = fields.map((field) => `${scalarType}(value.${field})`).join(", ");
     return [
       `fn bg_tex2d_${valueType}_${name}(x: f32, y: f32) -> ${wgslScalar(valueType)} {`,
-      `  let value = textureLoad(${safeName}, bg_tex2d_coord_${name}(x, y), 0);`,
+      `  let value = ${textureValue};`,
       `  return ${wgslScalar(valueType)}(${values});`,
       "}",
     ];

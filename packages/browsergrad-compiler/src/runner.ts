@@ -101,7 +101,7 @@ export function compileCudaLiteKernel(
 
 function validateTextureDescriptorOptions(options: CompileCudaLiteOptions): void {
   for (const [name, descriptor] of Object.entries(options.textureDescriptors ?? {})) {
-    if (descriptor.filterMode !== undefined && descriptor.filterMode !== "point") {
+    if (descriptor.filterMode !== undefined && descriptor.filterMode !== "point" && descriptor.filterMode !== "linear") {
       throw new RangeError(`texture descriptor '${name}' uses unsupported filterMode '${descriptor.filterMode}'`);
     }
   }

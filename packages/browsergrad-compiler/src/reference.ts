@@ -152,6 +152,16 @@ interface SharedArrayValue {
   readonly data: WgslTypedArray;
 }
 
+interface TextureDescriptorInput {
+  readonly width: number;
+  readonly height: number;
+  readonly data: Float32Array;
+  readonly channels?: number;
+  readonly normalizedCoords?: boolean;
+  readonly addressMode?: readonly [CudaLiteTextureAddressMode, CudaLiteTextureAddressMode];
+  readonly filterMode?: string;
+}
+
 interface LocalArrayValue {
   readonly kind: "local-array";
   readonly dimensions: readonly number[];
@@ -2507,8 +2517,14 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     if (!textureName) throw compilerFailure(`${name} expects texture reference`);
     const texture = context.textures[textureName];
     if (!texture) throw compilerFailure(`missing texture input '${textureName}'`);
-    const [x, y] = textureAtlasCoord(expression, name, texture, context, textureName);
+    const descriptor = textureDescriptorFor(textureName, texture, context);
     const valueType = expression.templateValueType ?? "float";
+    if (descriptor.filterMode === "linear" && (name === "tex2D" || name === "tex2DLod")) {
+      return isCudaVectorType(valueType)
+        ? readLinearTextureVector(expression, texture, descriptor, context, valueType)
+        : readLinearTextureScalar(expression, texture, descriptor, context);
+    }
+    const [x, y] = textureAtlasCoord(expression, name, texture, context, textureName);
     if (isCudaVectorType(valueType)) return readTextureVector(texture, x, y, valueType);
     return texture.data[(y * texture.width + x) * textureChannels(texture)] ?? 0;
   }
@@ -2882,6 +2898,47 @@ function readTextureVector(
   return { kind: "cuda-vector", valueType, lanes };
 }
 
+function readLinearTextureVector(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  texture: { readonly width: number; readonly height: number; readonly data: Float32Array; readonly channels?: number },
+  descriptor: CudaLiteTextureDescriptor,
+  context: ThreadContext,
+  valueType: CudaLiteVectorType,
+): CudaVectorValue {
+  const lanes = Array.from({ length: cudaVectorLaneCount(valueType) }, (_lane, lane) => {
+    if (lane < textureChannels(texture)) return readLinearTextureScalar(expression, texture, descriptor, context, lane);
+    return lane === 3 ? 1 : 0;
+  });
+  return { kind: "cuda-vector", valueType, lanes };
+}
+
+function readLinearTextureScalar(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  texture: { readonly width: number; readonly height: number; readonly data: Float32Array; readonly channels?: number },
+  descriptor: CudaLiteTextureDescriptor,
+  context: ThreadContext,
+  lane = 0,
+): number {
+  const x = linearTextureAxis(evalNumber(expression.args[1]!, context), texture.width, descriptor, "x");
+  const y = linearTextureAxis(evalNumber(expression.args[2]!, context), texture.height, descriptor, "y");
+  const c00 = readTextureLane(texture, x.i0, y.i0, lane);
+  const c10 = readTextureLane(texture, x.i1, y.i0, lane);
+  const c01 = readTextureLane(texture, x.i0, y.i1, lane);
+  const c11 = readTextureLane(texture, x.i1, y.i1, lane);
+  const top = c00 * (1 - x.alpha) + c10 * x.alpha;
+  const bottom = c01 * (1 - x.alpha) + c11 * x.alpha;
+  return top * (1 - y.alpha) + bottom * y.alpha;
+}
+
+function readTextureLane(
+  texture: { readonly width: number; readonly data: Float32Array; readonly channels?: number },
+  x: number,
+  y: number,
+  lane: number,
+): number {
+  return texture.data[(y * texture.width + x) * textureChannels(texture) + lane] ?? 0;
+}
+
 function evalFrexp(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): number {
   const value = evalNumber(expression.args[0]!, context);
   const exponentTarget = resolvePointerArgument(expression.args[1]!, context);
@@ -2920,17 +2977,11 @@ function evalVectorMinMaxCall(
 function textureAtlasCoord(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
   name: string,
-  texture: {
-    readonly width: number;
-    readonly height: number;
-    readonly normalizedCoords?: boolean;
-    readonly addressMode?: readonly [CudaLiteTextureAddressMode, CudaLiteTextureAddressMode];
-    readonly filterMode?: string;
-  },
+  texture: TextureDescriptorInput,
   context: ThreadContext,
   textureName: string,
 ): readonly [number, number] {
-  const descriptor = context.textureDescriptors[textureName] ?? textureDescriptorFromInput(texture);
+  const descriptor = textureDescriptorFor(textureName, texture, context);
   const x = evalNumber(expression.args[1]!, context);
   if (name === "tex1D" || name === "tex1Dfetch") return [textureCoord(x, texture.width, descriptor, "x"), 0];
   const y = evalNumber(expression.args[2]!, context);
@@ -2975,15 +3026,46 @@ function textureCoord(
   return Math.max(0, Math.min(extent - 1, floored));
 }
 
-function textureDescriptorFromInput(texture: {
-  readonly normalizedCoords?: boolean;
-  readonly addressMode?: readonly [CudaLiteTextureAddressMode, CudaLiteTextureAddressMode];
-  readonly filterMode?: string;
-}): CudaLiteTextureDescriptor {
+function linearTextureAxis(
+  value: number,
+  extent: number,
+  descriptor: CudaLiteTextureDescriptor,
+  axis: "x" | "y",
+): { readonly i0: number; readonly i1: number; readonly alpha: number } {
+  const scaled = descriptor.normalizedCoords ? value * extent : value;
+  const base = scaled - 0.5;
+  const i0 = Math.floor(base);
+  return {
+    i0: textureIndex(i0, extent, descriptor, axis),
+    i1: textureIndex(i0 + 1, extent, descriptor, axis),
+    alpha: base - i0,
+  };
+}
+
+function textureIndex(
+  value: number,
+  extent: number,
+  descriptor: CudaLiteTextureDescriptor,
+  axis: "x" | "y",
+): number {
+  const mode = descriptor.addressMode?.[axis === "x" ? 0 : 1] ?? "clamp";
+  if (mode === "wrap") return modulo(value, extent);
+  return Math.max(0, Math.min(extent - 1, value));
+}
+
+function textureDescriptorFor(
+  textureName: string,
+  texture: TextureDescriptorInput,
+  context: ThreadContext,
+): CudaLiteTextureDescriptor {
+  return context.textureDescriptors[textureName] ?? textureDescriptorFromInput(texture);
+}
+
+function textureDescriptorFromInput(texture: TextureDescriptorInput): CudaLiteTextureDescriptor {
   return {
     ...(texture.normalizedCoords === undefined ? {} : { normalizedCoords: texture.normalizedCoords }),
     ...(texture.addressMode === undefined ? {} : { addressMode: texture.addressMode }),
-    ...(texture.filterMode === "point" ? { filterMode: "point" as const } : {}),
+    ...(texture.filterMode === "point" || texture.filterMode === "linear" ? { filterMode: texture.filterMode } : {}),
   };
 }
 

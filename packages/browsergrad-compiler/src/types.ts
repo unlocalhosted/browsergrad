@@ -421,7 +421,7 @@ export interface CudaLiteAnalyzeOptions {
 }
 
 export type CudaLiteTextureAddressMode = "clamp" | "wrap";
-export type CudaLiteTextureFilterMode = "point";
+export type CudaLiteTextureFilterMode = "point" | "linear";
 
 export interface CudaLiteTextureDescriptor {
   readonly normalizedCoords?: boolean;

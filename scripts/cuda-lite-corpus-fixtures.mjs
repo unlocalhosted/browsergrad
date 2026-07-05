@@ -246,6 +246,38 @@ export const cudaLiteCorpusExecutionFixtures = [
     expectedOutput: { type: "Float32Array", data: [6, 7, 8, 5, 2, 3, 4, 1] },
   },
   {
+    sourceKey: "corpusCudaSamplesSimpleTextureTransformLinear",
+    caseName: "corpus:cuda-samples:transformKernel_linear_wrap",
+    corpusId: "cuda-samples",
+    relativePath: "cpp/0_Introduction/simpleTexture/simpleTexture.cu",
+    kernelName: "transformKernel",
+    workgroupSize: [4, 2, 1],
+    options: {
+      textureDescriptors: {
+        tex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+      },
+    },
+    launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+    input: {
+      buffers: {
+        outputData: { type: "Float32Array", length: 8 },
+      },
+      textures: {
+        tex: {
+          width: 4,
+          height: 2,
+          normalizedCoords: true,
+          addressMode: ["wrap", "wrap"],
+          filterMode: "linear",
+          data: { type: "Float32Array", data: [1, 2, 3, 4, 5, 6, 7, 8] },
+        },
+      },
+      scalars: { width: 4, height: 2, theta: 0 },
+    },
+    output: "outputData",
+    expectedOutput: { type: "Float32Array", data: [4.5, 3.5, 4.5, 5.5, 4.5, 3.5, 4.5, 5.5] },
+  },
+  {
     sourceKey: "corpusCudaSamplesSimpleAtomicIntrinsics",
     caseName: "corpus:cuda-samples:simpleAtomicIntrinsics",
     corpusId: "cuda-samples",

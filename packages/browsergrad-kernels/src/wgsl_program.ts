@@ -110,7 +110,7 @@ export interface WgslTexture2DInput {
   readonly channels?: 1 | 2 | 4;
   readonly normalizedCoords?: boolean;
   readonly addressMode?: readonly ["clamp" | "wrap", "clamp" | "wrap"];
-  readonly filterMode?: "point";
+  readonly filterMode?: "point" | "linear";
 }
 
 export interface WgslKernelLaunch {
