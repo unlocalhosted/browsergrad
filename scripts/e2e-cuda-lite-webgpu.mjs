@@ -3364,6 +3364,21 @@ __global__ void surface3DRowBoundary(cudaSurfaceObject_t surf, float *out) {
     out[3] = surf3Dread<float>(surf, 0, 1, 1);
   }
 }`,
+  surface3DColumnBoundary: `
+__global__ void surface3DColumnBoundary(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    float negativeValue = 77.0f;
+    float highValue = 88.0f;
+    surf3Dread(&negativeValue, surf, -4, 0, 1);
+    surf3Dread(&highValue, surf, 2 * sizeof(float), 0, 1);
+    surf3Dwrite(42.0f, surf, -4, 0, 1);
+    surf3Dwrite(43.0f, surf, 2 * sizeof(float), 0, 1);
+    out[0] = negativeValue;
+    out[1] = highValue;
+    out[2] = surf3Dread<float>(surf, 0, 0, 1);
+    out[3] = surf3Dread<float>(surf, 1 * sizeof(float), 0, 1);
+  }
+}`,
   surface3DUnalignedByteOffset: `
 __global__ void surface3DUnalignedByteOffset(cudaSurfaceObject_t surf, float *out) {
   if (threadIdx.x == 0) {
@@ -12471,6 +12486,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [0, 0, 13, 19] },
+          },
+          {
+            name: "surface:surf3d-column-boundary",
+            source: SOURCES.surface3DColumnBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+              surfaces: {
+                surf: { width: 2, height: 2, data: new Float32Array([3, 5, 7, 11, 13, 17, 19, 23]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 13, 17] },
           },
           {
             name: "surface:surf3d-unaligned-byte-offset",

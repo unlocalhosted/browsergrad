@@ -248,6 +248,7 @@ export const textureScopeCases = [
   "surface:surf3d-vector-read",
   "surface:surf3d-negative-z-boundary",
   "surface:surf3d-row-boundary",
+  "surface:surf3d-column-boundary",
   "surface:surf3d-unaligned-byte-offset",
   "surface:surf3d-vector-unaligned-byte-offset",
   "surface:surf3d-vector-z-boundary",
