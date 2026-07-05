@@ -331,6 +331,7 @@ export const textureScopeCases = [
   "texture:descriptor-pointer-array-atomic",
   "texture:volume-descriptor-conflicting-helpers",
   "texture:layered-descriptor-conflicting-helpers",
+  "texture:cubemap-descriptor-conflicting-helpers",
   "texture:helper-multi-object-guarded-rhs",
   "texture:helper-multi-object-guarded-rhs-false-branch",
   "texture:helper-multi-object-guarded-rhs-all-inactive",

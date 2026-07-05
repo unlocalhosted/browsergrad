@@ -9933,6 +9933,25 @@ __global__ void sample(uint *out, int width, int height, cudaTextureObject_t lin
     expect(compiled.wgsl).toContain("textureDimensions(texSrc).x");
   });
 
+  it("does not apply 2D texture descriptors to cubemap direction coords", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float readCube(cudaTextureObject_t texSrc) {
+  return texCubemap<float>(texSrc, 1.0f, 0.0f, 0.0f);
+}
+__global__ void sample(float *out, cudaTextureObject_t tex) {
+  out[0] = readCube(tex);
+}`, {
+      workgroupSize: [1, 1, 1],
+      textureDescriptors: {
+        tex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+      },
+    });
+
+    expect(compiled.wgsl).toContain("bg_cube_face");
+    expect(compiled.wgsl).not.toContain("fn readCube__bg_tex_0");
+    expect(compiled.wgsl).not.toContain("bg_tex2d_f32_texSrc");
+  });
+
   it("lowers CUDA driver texture object aliases as texture params", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void sample(float *out, CUtexObject tex) {

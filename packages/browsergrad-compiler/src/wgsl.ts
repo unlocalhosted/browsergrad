@@ -5142,7 +5142,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       if (expression.args.length >= 2 && expression.args[0]?.kind === "identifier") {
         const textureSurface = textureSurfaceContext(context);
         const textureArgs = textureReadArgsForEmit(expression, textureSurface);
-        if (isTextureBindingName(expression.args[0].name, textureSurface)) {
+        if (isTextureBindingName(expression.args[0].name, textureSurface) && name !== "texCubemap") {
           const suffix = textureReadHelperSuffix(expression.templateValueType);
           return `bg_tex2d_${suffix}_${expression.args[0].name}(${textureArgs.join(", ")})`;
         }
@@ -5150,7 +5150,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
           emitTextureArgument(expression.args[0], textureSurface),
           textureArgs,
           expression.templateValueType,
-          textureSurface.textureDescriptor(expression.args[0].name),
+          name === "texCubemap" ? undefined : textureSurface.textureDescriptor(expression.args[0].name),
         );
       }
       return `${name}(${args.join(", ")})`;

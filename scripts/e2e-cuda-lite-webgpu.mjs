@@ -4953,6 +4953,17 @@ __global__ void textureLayeredDescriptorConflictingHelpers(cudaTextureObject_t n
     out[1] = read_layered_descriptor_tex(pointTex, 3.0f, 0.0f, 1.0f);
   }
 }`,
+  textureCubemapDescriptorConflictingHelpers: `
+__device__ float read_cubemap_descriptor_tex(cudaTextureObject_t texArg, float x, float y, float z) {
+  return texCubemap<float>(texArg, x, y, z);
+}
+
+__global__ void textureCubemapDescriptorConflictingHelpers(cudaTextureObject_t normTex, cudaTextureObject_t pointTex, float *out) {
+  if (threadIdx.x == 0) {
+    out[0] = read_cubemap_descriptor_tex(normTex, 1.0f, 0.0f, 0.0f);
+    out[1] = read_cubemap_descriptor_tex(pointTex, 1.0f, 0.0f, 0.0f);
+  }
+}`,
   textureHelperMultiObjectGuardedRhs: `
 __device__ float4 read_multi_texture_guarded_vec(cudaTextureObject_t first, cudaTextureObject_t second, uint *counter, int row, int pick) {
   atomicAdd(counter, 1u);
@@ -12784,6 +12795,39 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [8, 18] },
+          },
+          {
+            name: "texture:cubemap-descriptor-conflicting-helpers",
+            source: SOURCES.textureCubemapDescriptorConflictingHelpers,
+            options: {
+              workgroupSize: [1, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(2),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 101)),
+                },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [21, 121] },
           },
           {
             name: "texture:helper-multi-object-guarded-rhs",
