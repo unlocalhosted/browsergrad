@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-05T13:53:00Z
+Last updated: 2026-07-05T13:57:48Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `677/0/0`, dist `677/0/0`; real-world compile/codegen audit has `0` hard fails; real corpus WebGPU fixture outputs are pinned `117/117` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Pinned typed surf1D/layered/surf3D vector high-byte boundary probes |
+| Active work item | Pinned typed surf1D/layered/surf3D vector negative-boundary probes |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- typed surf1D/layered/surf3D vector negative-boundary probes: added real WebGPU `int4`/`uint4` fixtures proving pointer-form `surf1Dread<int4>`/`surf1Dwrite(int4)`, `surf2DLayeredread<uint4>`/`surf2DLayeredwrite(uint4)`, and `surf3Dread<int4>`/`surf3Dwrite(int4)` reject negative base byte offsets or negative z before lane expansion, zero all out-of-range typed pointer vector read lanes, ignore negative vector writes, and preserve valid 1D/layer/3D payloads; focused trio `3/0/0`, hot repeat `9/0/0`, best warm `3.2ms` / `3.4ms` / `3.3ms`, changed gate fixture tests passed, WebGPU smoke `554/0/0`, slow-hot `78/0/0`, skips `0`
 - typed surf1D/layered/surf3D vector high-byte boundary probes: added real WebGPU `uint4`/`int4` fixtures proving pointer-form `surf1Dread<uint4>`/`surf1Dwrite(uint4)`, `surf2DLayeredread<int4>`/`surf2DLayeredwrite(int4)`, and `surf3Dread<uint4>`/`surf3Dwrite(uint4)` reject byte offset `width * sizeof(float)`, zero all out-of-range typed pointer vector read lanes, ignore high-byte vector writes, and preserve valid 1D/layer/3D payloads; focused trio `3/0/0`, hot repeat `9/0/0`, best warm `3.4ms` / `3.7ms` / `3.4ms`, changed gate fixture tests passed, WebGPU smoke `551/0/0`, slow-hot `78/0/0`, skips `0`
 - surf1D/layered vector high-byte boundary probes: added real WebGPU fixtures proving pointer-form `surf1Dread<float4>`/`surf1Dwrite(float4)` and `surf2DLayeredread<float4>`/`surf2DLayeredwrite(float4)` reject byte offset `width * sizeof(float)`, zero all out-of-range pointer vector read lanes, ignore high-byte vector writes, and preserve valid surface/layer payloads; focused pair `2/0/0`, hot repeat `6/0/0`, best warm `3.6ms` / `3.8ms`, changed gate fixture tests passed, WebGPU smoke `548/0/0`, slow-hot `78/0/0`, skips `0`
 - typed high-byte surface vector boundary probes: added real WebGPU `uint4` and `int4` fixtures proving pointer-form `surf2Dread<uint4/int4>` and `surf2Dwrite(uint4/int4)` reject byte offset `width * sizeof(float)`, zero all out-of-range pointer vector read lanes with typed zero vectors, ignore high-byte vector writes, and preserve valid surface payloads; focused pair `2/0/0`, hot repeat `6/0/0`, best warm `1.3ms` / `3.6ms`, changed gate fixture tests passed, WebGPU smoke `546/0/0`, slow-hot `78/0/0`, skips `0`
@@ -831,6 +832,7 @@ Current verified gates:
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Probed green | typed surf1D/layered/surf3D vector negative-boundary access | typed negative-base coverage existed for plain 2D, but surf1D, layered, and surf3D typed vector APIs could still regress typed zero-vector emission or suppress writes differently from float vector paths | existing base-boundary guard rejects negative byte offsets and negative z before lane expansion across typed surf1D/layered/surf3D vector APIs, emits typed zero vectors, suppresses out-of-range writes, and preserves valid payloads | focused WebGPU trio `3/0/0`, skips `0`; hot repeat `9/0/0`, best warm `3.2ms` / `3.4ms` / `3.3ms`; changed gate fixture tests passed, smoke `554/0/0`, slow-hot `78/0/0`, skips `0` |
 | Probed green | typed surf1D/layered/surf3D vector high byte-offset access | typed high-byte vector bounds were pinned for plain 2D, but `uint4`/`int4` pointer-form reads and writes through surf1D, layered, and surf3D APIs could still leave stale typed lanes, use wrong zero literals, or mutate valid backing data | existing surface vector bounds guard rejects high byte offsets before lane expansion across surf1D/layered/surf3D typed vector APIs, emits typed zero vectors, suppresses out-of-range writes, and preserves valid payloads | focused WebGPU trio `3/0/0`, skips `0`; hot repeat `9/0/0`, best warm `3.4ms` / `3.7ms` / `3.4ms`; changed gate fixture tests passed, smoke `551/0/0`, slow-hot `78/0/0`, skips `0` |
 | Probed green | surf1D/layered vector high byte-offset access | typed 2D high-byte vector access and scalar/lane-clipped 1D/layered bounds were pinned, but pointer-form `float4` reads/writes exactly at `width * sizeof(float)` could still leave stale pointer lanes or mutate valid 1D/layer backing data | existing surface vector bounds guard rejects high byte offsets before lane expansion for `surf1D` and layered surface APIs, zeroes pointer-form vector reads, suppresses vector writes, and preserves valid payloads | focused WebGPU pair `2/0/0`, skips `0`; hot repeat `6/0/0`, best warm `3.6ms` / `3.8ms`; changed gate fixture tests passed, smoke `548/0/0`, slow-hot `78/0/0`, skips `0` |
 | Probed green | signed/unsigned surface vector high byte-offset access | negative-base and unaligned typed `uint4`/`int4` surface vector reads were pinned, but high-byte pointer reads at `width * sizeof(float)` could still leave stale pointer lanes, emit wrong typed zero vectors, or allow vector writes to mutate valid data | existing surface vector bounds guard rejects high byte offsets before lane expansion, emits typed zero vectors for `uint4`/`int4` pointer reads, suppresses out-of-range writes, and preserves valid surface payloads | focused WebGPU pair `2/0/0`, skips `0`; hot repeat `6/0/0`, best warm `1.3ms` / `3.6ms`; changed gate fixture tests passed, smoke `546/0/0`, slow-hot `78/0/0`, skips `0` |
@@ -1227,6 +1229,7 @@ Current added surface/texture cases:
 - `surface:surf1d-vector-write`
 - `surface:surf1d-read`
 - `surface:surf1d-vector-read`
+- `surface:surf1d-int4-vector-negative-byte-offset`
 - `surface:surf1d-vector-high-byte-offset-boundary`
 - `surface:surf1d-uint4-vector-high-byte-offset-boundary`
 - `surface:surf1d-vector-active-lane-return`
@@ -1243,8 +1246,10 @@ Current added surface/texture cases:
 - `surface:surf1d-pointer-alias-atomic-pointer-array-cas-active-lane-return-false-branch`
 - `surface:surf1d-pointer-alias-atomic-pointer-array-minmax-active-lane-return`
 - `surface:surf1d-pointer-alias-atomic-pointer-array-minmax-active-lane-return-false-branch`
+- `surface:layered-uint4-vector-negative-x-pointer-boundary`
 - `surface:layered-vector-high-x-pointer-boundary`
 - `surface:layered-int4-vector-high-x-pointer-boundary`
+- `surface:surf3d-int4-vector-negative-z-boundary`
 - `surface:surf3d-uint4-vector-high-x-pointer-boundary`
 - `texture:object-uint4-helper-read`
 - `texture:helper-vector-cast-coercion`

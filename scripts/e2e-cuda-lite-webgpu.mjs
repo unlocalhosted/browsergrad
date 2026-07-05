@@ -3249,6 +3249,22 @@ __global__ void surfaceLayeredVectorNegativeXPointerBoundary(float *out, cudaSur
   out[6] = layer1.x;
   out[7] = layer1.y;
 }`,
+  surfaceLayeredUint4VectorNegativeXPointerBoundary: `
+__global__ void surfaceLayeredUint4VectorNegativeXPointerBoundary(uint *out, cudaSurfaceObject_t surf) {
+  uint4 negativeValue = make_uint4(77u, 78u, 79u, 80u);
+  surf2DLayeredread(&negativeValue, surf, -1 * (int)sizeof(float), 0, 1);
+  surf2DLayeredwrite(make_uint4(41u, 42u, 43u, 44u), surf, -1 * (int)sizeof(float), 0, 1);
+  uint4 layer0 = surf2DLayeredread<uint4>(surf, 0, 0, 0);
+  uint4 layer1 = surf2DLayeredread<uint4>(surf, 0, 0, 1);
+  out[0] = negativeValue.x;
+  out[1] = negativeValue.y;
+  out[2] = negativeValue.z;
+  out[3] = negativeValue.w;
+  out[4] = layer0.x;
+  out[5] = layer0.y;
+  out[6] = layer1.x;
+  out[7] = layer1.y;
+}`,
   surfaceLayeredVectorHighXPointerBoundary: `
 __global__ void surfaceLayeredVectorHighXPointerBoundary(float *out, cudaSurfaceObject_t surf) {
   float4 highValue = make_float4(77.0f, 78.0f, 79.0f, 80.0f);
@@ -3627,6 +3643,24 @@ __global__ void surface3DVectorNegativeZBoundary(cudaSurfaceObject_t surf, float
     out[3] = layer0.y;
     out[4] = layer1.x;
     out[5] = layer1.y;
+  }
+}`,
+  surface3DInt4VectorNegativeZBoundary: `
+__global__ void surface3DInt4VectorNegativeZBoundary(cudaSurfaceObject_t surf, int *out) {
+  if (threadIdx.x == 0) {
+    int4 negativeValue = make_int4(77, 78, 79, 80);
+    surf3Dread(&negativeValue, surf, 0, 0, -1);
+    surf3Dwrite(make_int4(41, 42, 43, 44), surf, 0, 0, -1);
+    int4 layer0 = surf3Dread<int4>(surf, 0, 0, 0);
+    int4 layer1 = surf3Dread<int4>(surf, 0, 0, 1);
+    out[0] = negativeValue.x;
+    out[1] = negativeValue.y;
+    out[2] = negativeValue.z;
+    out[3] = negativeValue.w;
+    out[4] = layer0.x;
+    out[5] = layer0.y;
+    out[6] = layer1.x;
+    out[7] = layer1.y;
   }
 }`,
   surface3DVectorHighZPointerBoundary: `
@@ -4291,6 +4325,23 @@ __global__ void surface1DVectorNegativeByteOffset(cudaSurfaceObject_t surf, floa
     surf1Dread(&negativeValue, surf, -1 * (int)sizeof(float));
     surf1Dwrite(make_float4(41.0f, 42.0f, 43.0f, 44.0f), surf, -1 * (int)sizeof(float));
     float4 value = surf1Dread<float4>(surf, 0);
+    out[0] = negativeValue.x;
+    out[1] = negativeValue.y;
+    out[2] = negativeValue.z;
+    out[3] = negativeValue.w;
+    out[4] = value.x;
+    out[5] = value.y;
+    out[6] = value.z;
+    out[7] = value.w;
+  }
+}`,
+  surface1DInt4VectorNegativeByteOffset: `
+__global__ void surface1DInt4VectorNegativeByteOffset(cudaSurfaceObject_t surf, int *out) {
+  if (threadIdx.x == 0) {
+    int4 negativeValue = make_int4(77, 78, 79, 80);
+    surf1Dread(&negativeValue, surf, -1 * (int)sizeof(float));
+    surf1Dwrite(make_int4(41, 42, 43, 44), surf, -1 * (int)sizeof(float));
+    int4 value = surf1Dread<int4>(surf, 0);
     out[0] = negativeValue.x;
     out[1] = negativeValue.y;
     out[2] = negativeValue.z;
@@ -12756,6 +12807,22 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 3, 5, 13, 17] },
           },
           {
+            name: "surface:layered-uint4-vector-negative-x-pointer-boundary",
+            source: SOURCES.surfaceLayeredUint4VectorNegativeXPointerBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([3, 5, 7, 11, 13, 17, 19, 23]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0, 0, 0, 0, 3, 5, 13, 17] },
+          },
+          {
             name: "surface:layered-vector-high-x-pointer-boundary",
             source: SOURCES.surfaceLayeredVectorHighXPointerBoundary,
             options: { workgroupSize: [1, 1, 1] },
@@ -13232,6 +13299,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 3, 5, 13, 17] },
+          },
+          {
+            name: "surface:surf3d-int4-vector-negative-z-boundary",
+            source: SOURCES.surface3DInt4VectorNegativeZBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(8),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([3, 5, 7, 11, 13, 17, 19, 23]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [0, 0, 0, 0, 3, 5, 13, 17] },
           },
           {
             name: "surface:surf3d-uint4-vector-high-x-pointer-boundary",
@@ -20672,6 +20755,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
+          },
+          {
+            name: "surface:surf1d-int4-vector-negative-byte-offset",
+            source: SOURCES.surface1DInt4VectorNegativeByteOffset,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(8),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([5, 7, 11, 13]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
           },
           {
             name: "surface:surf1d-vector-high-byte-offset-boundary",
