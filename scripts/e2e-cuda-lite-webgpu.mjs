@@ -3505,6 +3505,24 @@ __global__ void surface3DVectorNegativeZBoundary(cudaSurfaceObject_t surf, float
     out[5] = layer1.y;
   }
 }`,
+  surface3DVectorHighZPointerBoundary: `
+__global__ void surface3DVectorHighZPointerBoundary(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    float4 highValue = make_float4(77.0f, 78.0f, 79.0f, 80.0f);
+    surf3Dread(&highValue, surf, 0, 0, 2);
+    surf3Dwrite(make_float4(41.0f, 42.0f, 43.0f, 44.0f), surf, 0, 0, 2);
+    float4 layer0 = surf3Dread<float4>(surf, 0, 0, 0);
+    float4 layer1 = surf3Dread<float4>(surf, 0, 0, 1);
+    out[0] = highValue.x;
+    out[1] = highValue.y;
+    out[2] = highValue.z;
+    out[3] = highValue.w;
+    out[4] = layer0.x;
+    out[5] = layer0.y;
+    out[6] = layer1.x;
+    out[7] = layer1.y;
+  }
+}`,
   surface3DVectorColumnBoundary: `
 __global__ void surface3DVectorColumnBoundary(cudaSurfaceObject_t surf, float *out) {
   if (threadIdx.x == 0) {
@@ -12789,6 +12807,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [0, 0, 3, 5, 13, 17] },
+          },
+          {
+            name: "surface:surf3d-vector-high-z-pointer-boundary",
+            source: SOURCES.surface3DVectorHighZPointerBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(8),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([3, 5, 7, 11, 13, 17, 19, 23]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 3, 5, 13, 17] },
           },
           {
             name: "surface:surf3d-vector-column-boundary",
