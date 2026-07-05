@@ -261,6 +261,7 @@ export const textureScopeCases = [
   "surface:surf3d-vector-negative-z-boundary",
   "surface:surf3d-vector-high-z-pointer-boundary",
   "surface:surf3d-vector-high-x-pointer-boundary",
+  "surface:surf3d-vector-high-y-pointer-boundary",
   "surface:surf3d-vector-column-boundary",
   "surface:surf3d-vector-row-boundary",
   "surface:surf3d-vector-write-active-lane-return",
