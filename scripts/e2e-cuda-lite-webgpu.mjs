@@ -4964,6 +4964,32 @@ __global__ void textureCubemapDescriptorConflictingHelpers(cudaTextureObject_t n
     out[1] = read_cubemap_descriptor_tex(pointTex, 1.0f, 0.0f, 0.0f);
   }
 }`,
+  textureCubemapPointerArrayActiveLane: `
+__device__ uint read_cubemap_pointer_tex(cudaTextureObject_t texArg) {
+  return (uint)texCubemap<float>(texArg, 1.0f, 0.0f, 0.0f);
+}
+
+__device__ void atomic_cubemap_pointer_slot(uint *slot, uint value) {
+  atomicAdd(slot, value);
+}
+
+__global__ void textureCubemapPointerArrayActiveLane(cudaTextureObject_t normTex, cudaTextureObject_t pointTex, uint *summary, int N) {
+  int tid = threadIdx.x;
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    uint *slots[2];
+    slots[0] = summary;
+    slots[1] = summary + 1;
+    uint normValue = read_cubemap_pointer_tex(normTex);
+    uint pointValue = read_cubemap_pointer_tex(pointTex);
+    atomic_cubemap_pointer_slot(slots[normValue > 50u ? 1 : 0], normValue);
+    atomic_cubemap_pointer_slot(slots[pointValue > 50u ? 1 : 0], pointValue);
+    summary[2] = summary[0] + summary[1];
+  }
+}`,
   textureHelperMultiObjectGuardedRhs: `
 __device__ float4 read_multi_texture_guarded_vec(cudaTextureObject_t first, cudaTextureObject_t second, uint *counter, int row, int pick) {
   atomicAdd(counter, 1u);
@@ -12828,6 +12854,40 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [21, 121] },
+          },
+          {
+            name: "texture:cubemap-pointer-array-active-lane",
+            source: SOURCES.textureCubemapPointerArrayActiveLane,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                summary: new Uint32Array(4),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 101)),
+                },
+              },
+              scalars: { N: 1 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [21, 121, 142, 0] },
           },
           {
             name: "texture:helper-multi-object-guarded-rhs",
