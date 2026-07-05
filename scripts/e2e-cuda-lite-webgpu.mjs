@@ -3986,6 +3986,17 @@ __global__ void surface1DVectorBoundary(cudaSurfaceObject_t surf, float *out) {
     out[5] = surf1Dread<float>(surf, 1 * sizeof(float));
   }
 }`,
+  surface1DVectorLastColumnBoundary: `
+__global__ void surface1DVectorLastColumnBoundary(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    surf1Dwrite(make_float4(21.0f, 22.0f, 23.0f, 24.0f), surf, 3 * sizeof(float));
+    float4 value = surf1Dread<float4>(surf, 3 * sizeof(float));
+    out[0] = value.x;
+    out[1] = value.y;
+    out[2] = surf1Dread<float>(surf, 2 * sizeof(float));
+    out[3] = surf1Dread<float>(surf, 3 * sizeof(float));
+  }
+}`,
   surface1DVectorActiveLaneReturn: `
 __device__ void write_1d_surface_vec_active(cudaSurfaceObject_t surfaceArg, float base) {
   surf1Dwrite(make_float4(base + 1.0f, base + 2.0f, base + 3.0f, base + 4.0f), surfaceArg, 1 * sizeof(float));
@@ -19995,6 +20006,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [21, 22, 0, 0, 3, 5] },
+          },
+          {
+            name: "surface:surf1d-vector-last-column-boundary",
+            source: SOURCES.surface1DVectorLastColumnBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([3, 5, 7, 11]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [21, 0, 7, 21] },
           },
           {
             name: "surface:surf1d-vector-active-lane-return",

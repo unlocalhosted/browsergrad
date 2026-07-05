@@ -240,6 +240,7 @@ export const textureScopeCases = [
   "surface:surf1d-unaligned-byte-offset",
   "surface:surf1d-vector-unaligned-byte-offset",
   "surface:surf1d-vector-boundary",
+  "surface:surf1d-vector-last-column-boundary",
   "surface:surf1d-vector-active-lane-return",
   "surface:surf1d-helper-vector-multi-surface-guarded-rhs",
   "surface:surf1d-helper-vector-multi-surface-guarded-rhs-false-branch",
