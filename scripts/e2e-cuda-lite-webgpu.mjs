@@ -5031,6 +5031,29 @@ __global__ void textureDescriptorAtomicVectorLaneStores(cudaTextureObject_t line
   uint *lanes = reinterpret_cast<uint*>(out);
   atomic_descriptor_lane(lanes, y * blockDim.x + x, linearValue, pointValue);
 }`,
+  textureDescriptorCompoundVectorLaneStores: `
+__device__ float read_descriptor_compound_lane_tex(cudaTextureObject_t texArg, float x, float y) {
+  return tex2D<float>(texArg, x, y);
+}
+
+__device__ void add_descriptor_vector_lane(uint4 *out, int lane, float linearValue, float pointValue) {
+  uint linearBits = (uint)(linearValue * 10.0f);
+  uint pointBits = (uint)(pointValue * 10.0f);
+  out[lane] += make_uint4(linearBits, pointBits, linearBits + pointBits, pointBits - linearBits);
+  out[lane].y += linearBits;
+}
+
+__global__ void textureDescriptorCompoundVectorLaneStores(cudaTextureObject_t linearTex, cudaTextureObject_t pointTex, uint4 *out, int activeWidth, int width, int height) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  if (x >= activeWidth) {
+    return;
+  }
+  __syncthreads();
+  float linearValue = read_descriptor_compound_lane_tex(linearTex, x / (float)width, y / (float)height);
+  float pointValue = read_descriptor_compound_lane_tex(pointTex, (float)x, (float)y);
+  add_descriptor_vector_lane(out, y * blockDim.x + x, linearValue, pointValue);
+}`,
   textureCubemapDescriptorConflictingHelpers: `
 __device__ float read_cubemap_descriptor_tex(cudaTextureObject_t texArg, float x, float y, float z) {
   return texCubemap<float>(texArg, x, y, z);
@@ -13769,6 +13792,129 @@ const html = String.raw`<!doctype html>
           {
             name: "texture:descriptor-atomic-vector-lane-stores-all-inactive",
             source: SOURCES.textureDescriptorAtomicVectorLaneStores,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(Array.from({ length: 32 }, (_, index) => index + 201)),
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { activeWidth: 0, width: 4, height: 2 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: Array.from({ length: 32 }, (_, index) => index + 201),
+            },
+          },
+          {
+            name: "texture:descriptor-compound-vector-lane-stores",
+            source: SOURCES.textureDescriptorCompoundVectorLaneStores,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(32),
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { activeWidth: 4, width: 4, height: 2 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [
+                45, 155, 155, 65,
+                35, 155, 155, 85,
+                45, 175, 175, 85,
+                55, 195, 195, 85,
+                45, 195, 195, 105,
+                35, 195, 195, 125,
+                45, 215, 215, 125,
+                55, 235, 235, 125,
+              ],
+            },
+          },
+          {
+            name: "texture:descriptor-compound-vector-lane-stores-false-branch",
+            source: SOURCES.textureDescriptorCompoundVectorLaneStores,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(Array.from({ length: 32 }, (_, index) => index + 101)),
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { activeWidth: 2, width: 4, height: 2 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [
+                146, 257, 258, 169,
+                140, 261, 262, 193,
+                109, 110, 111, 112,
+                113, 114, 115, 116,
+                162, 313, 314, 225,
+                156, 317, 318, 249,
+                125, 126, 127, 128,
+                129, 130, 131, 132,
+              ],
+            },
+          },
+          {
+            name: "texture:descriptor-compound-vector-lane-stores-all-inactive",
+            source: SOURCES.textureDescriptorCompoundVectorLaneStores,
             options: {
               workgroupSize: [4, 2, 1],
               textureDescriptors: {
