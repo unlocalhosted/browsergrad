@@ -3321,6 +3321,21 @@ __global__ void surfaceLayeredVectorColumnBoundary(float *out, cudaSurfaceObject
   out[2] = surf2DLayeredread<float>(surf, 0, 0, 1);
   out[3] = surf2DLayeredread<float>(surf, 1 * sizeof(float), 0, 1);
 }`,
+  surfaceLayeredInt4VectorColumnBoundary: `
+__global__ void surfaceLayeredInt4VectorColumnBoundary(int *out, cudaSurfaceObject_t surf) {
+  int4 pointerValue = make_int4(77, 78, 79, 80);
+  surf2DLayeredread(&pointerValue, surf, 1 * sizeof(float), 0, 1);
+  surf2DLayeredwrite(make_int4(21, 22, 23, 24), surf, 1 * sizeof(float), 0, 1);
+  int4 returnValue = surf2DLayeredread<int4>(surf, 1 * sizeof(float), 0, 1);
+  out[0] = pointerValue.x;
+  out[1] = pointerValue.y;
+  out[2] = returnValue.x;
+  out[3] = returnValue.y;
+  out[4] = surf2DLayeredread<int>(surf, 0, 0, 0);
+  out[5] = surf2DLayeredread<int>(surf, 1 * sizeof(float), 0, 0);
+  out[6] = surf2DLayeredread<int>(surf, 0, 0, 1);
+  out[7] = surf2DLayeredread<int>(surf, 1 * sizeof(float), 0, 1);
+}`,
   surfaceLayeredVectorRowBoundary: `
 __global__ void surfaceLayeredVectorRowBoundary(float *out, cudaSurfaceObject_t surf) {
   float4 negativeValue = make_float4(77.0f, 78.0f, 79.0f, 80.0f);
@@ -3483,6 +3498,21 @@ __global__ void surfaceVectorColumnBoundary(float *out, cudaSurfaceObject_t surf
   out[3] = surf2Dread<float>(surf, 1 * sizeof(float), 0);
   out[4] = surf2Dread<float>(surf, 0, 1);
   out[5] = surf2Dread<float>(surf, 1 * sizeof(float), 1);
+}`,
+  surfaceUint4VectorColumnBoundary: `
+__global__ void surfaceUint4VectorColumnBoundary(uint *out, cudaSurfaceObject_t surf) {
+  uint4 pointerValue = make_uint4(77u, 78u, 79u, 80u);
+  surf2Dread(&pointerValue, surf, 1 * sizeof(float), 0);
+  surf2Dwrite(make_uint4(21u, 22u, 23u, 24u), surf, 1 * sizeof(float), 0);
+  uint4 returnValue = surf2Dread<uint4>(surf, 1 * sizeof(float), 0);
+  out[0] = pointerValue.x;
+  out[1] = pointerValue.y;
+  out[2] = returnValue.x;
+  out[3] = returnValue.y;
+  out[4] = surf2Dread<uint>(surf, 0, 0);
+  out[5] = surf2Dread<uint>(surf, 1 * sizeof(float), 0);
+  out[6] = surf2Dread<uint>(surf, 0, 1);
+  out[7] = surf2Dread<uint>(surf, 1 * sizeof(float), 1);
 }`,
   surfaceVectorYBoundary: `
 __global__ void surfaceVectorYBoundary(float *out, cudaSurfaceObject_t surf) {
@@ -3798,6 +3828,23 @@ __global__ void surface3DVectorColumnBoundary(cudaSurfaceObject_t surf, float *o
     out[3] = surf3Dread<float>(surf, 1 * sizeof(float), 0, 1);
     out[4] = surf3Dread<float>(surf, 0, 0, 0);
   out[5] = surf3Dread<float>(surf, 1 * sizeof(float), 0, 0);
+  }
+}`,
+  surface3DUint4VectorColumnBoundary: `
+__global__ void surface3DUint4VectorColumnBoundary(cudaSurfaceObject_t surf, uint *out) {
+  if (threadIdx.x == 0) {
+    uint4 pointerValue = make_uint4(77u, 78u, 79u, 80u);
+    surf3Dread(&pointerValue, surf, 1 * sizeof(float), 0, 1);
+    surf3Dwrite(make_uint4(21u, 22u, 23u, 24u), surf, 1 * sizeof(float), 0, 1);
+    uint4 returnValue = surf3Dread<uint4>(surf, 1 * sizeof(float), 0, 1);
+    out[0] = pointerValue.x;
+    out[1] = pointerValue.y;
+    out[2] = returnValue.x;
+    out[3] = returnValue.y;
+    out[4] = surf3Dread<uint>(surf, 0, 0, 0);
+    out[5] = surf3Dread<uint>(surf, 1 * sizeof(float), 0, 0);
+    out[6] = surf3Dread<uint>(surf, 0, 0, 1);
+    out[7] = surf3Dread<uint>(surf, 1 * sizeof(float), 0, 1);
   }
 }`,
   surface3DVectorRowBoundary: `
@@ -4457,6 +4504,21 @@ __global__ void surface1DVectorLastColumnBoundary(cudaSurfaceObject_t surf, floa
     out[1] = value.y;
     out[2] = surf1Dread<float>(surf, 2 * sizeof(float));
     out[3] = surf1Dread<float>(surf, 3 * sizeof(float));
+  }
+}`,
+  surface1DUint4VectorLastColumnBoundary: `
+__global__ void surface1DUint4VectorLastColumnBoundary(cudaSurfaceObject_t surf, uint *out) {
+  if (threadIdx.x == 0) {
+    uint4 pointerValue = make_uint4(77u, 78u, 79u, 80u);
+    surf1Dread(&pointerValue, surf, 3 * sizeof(float));
+    surf1Dwrite(make_uint4(21u, 22u, 23u, 24u), surf, 3 * sizeof(float));
+    uint4 returnValue = surf1Dread<uint4>(surf, 3 * sizeof(float));
+    out[0] = pointerValue.x;
+    out[1] = pointerValue.y;
+    out[2] = returnValue.x;
+    out[3] = returnValue.y;
+    out[4] = surf1Dread<uint>(surf, 2 * sizeof(float));
+    out[5] = surf1Dread<uint>(surf, 3 * sizeof(float));
   }
 }`,
   surface1DVectorActiveLaneReturn: `
@@ -12856,6 +12918,22 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Float32Array", data: [21, 0, 7, 21] },
           },
           {
+            name: "surface:layered-int4-vector-column-boundary",
+            source: SOURCES.surfaceLayeredInt4VectorColumnBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(8),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array([3, 5, 7, 11]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [11, 0, 21, 0, 3, 5, 7, 21] },
+          },
+          {
             name: "surface:layered-vector-negative-x-pointer-boundary",
             source: SOURCES.surfaceLayeredVectorNegativeXPointerBoundary,
             options: { workgroupSize: [1, 1, 1] },
@@ -13110,6 +13188,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [21, 0, 3, 21, 7, 11] },
+          },
+          {
+            name: "surface:uint4-vector-column-boundary",
+            source: SOURCES.surfaceUint4VectorColumnBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+              },
+              surfaces: {
+                surf: { width: 2, height: 2, data: new Float32Array([3, 5, 7, 11]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [5, 0, 21, 0, 3, 21, 7, 11] },
           },
           {
             name: "surface:vector-y-boundary",
@@ -13444,6 +13538,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [21, 0, 7, 11, 3, 21] },
+          },
+          {
+            name: "surface:surf3d-uint4-vector-column-boundary",
+            source: SOURCES.surface3DUint4VectorColumnBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array([3, 5, 7, 11]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [11, 0, 21, 0, 3, 5, 7, 21] },
           },
           {
             name: "surface:surf3d-vector-row-boundary",
@@ -20932,6 +21042,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [21, 0, 7, 21] },
+          },
+          {
+            name: "surface:surf1d-uint4-vector-last-column-boundary",
+            source: SOURCES.surface1DUint4VectorLastColumnBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(6),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([3, 5, 7, 11]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [11, 0, 21, 0, 7, 21] },
           },
           {
             name: "surface:surf1d-vector-active-lane-return",
