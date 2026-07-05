@@ -3233,6 +3233,21 @@ __global__ void surfaceLayeredVectorUnalignedByteOffset(float *out, cudaSurfaceO
   out[6] = surf2DLayeredread<float>(surf, 2 * sizeof(float), 0, 1);
   out[7] = surf2DLayeredread<float>(surf, 3 * sizeof(float), 0, 1);
 }`,
+  surfaceLayeredInt4VectorUnalignedByteOffset: `
+__global__ void surfaceLayeredInt4VectorUnalignedByteOffset(int *out, cudaSurfaceObject_t surf) {
+  int4 pointerValue = make_int4(99, 99, 99, 99);
+  surf2DLayeredread(&pointerValue, surf, 2, 0, 1);
+  int4 returnValue = surf2DLayeredread<int4>(surf, 6, 0, 1);
+  surf2DLayeredwrite(make_int4(31, 32, 33, 34), surf, 10, 0, 1);
+  out[0] = pointerValue.x;
+  out[1] = pointerValue.y;
+  out[2] = returnValue.x;
+  out[3] = returnValue.y;
+  out[4] = surf2DLayeredread<int>(surf, 0, 0, 1);
+  out[5] = surf2DLayeredread<int>(surf, 1 * sizeof(float), 0, 1);
+  out[6] = surf2DLayeredread<int>(surf, 2 * sizeof(float), 0, 1);
+  out[7] = surf2DLayeredread<int>(surf, 3 * sizeof(float), 0, 1);
+}`,
   surfaceLayeredVectorNegativeXPointerBoundary: `
 __global__ void surfaceLayeredVectorNegativeXPointerBoundary(float *out, cudaSurfaceObject_t surf) {
   float4 negativeValue = make_float4(77.0f, 78.0f, 79.0f, 80.0f);
@@ -3613,6 +3628,23 @@ __global__ void surface3DVectorUnalignedByteOffset(cudaSurfaceObject_t surf, flo
     out[5] = surf3Dread<float>(surf, 1 * sizeof(float), 0, 1);
     out[6] = surf3Dread<float>(surf, 2 * sizeof(float), 0, 1);
     out[7] = surf3Dread<float>(surf, 3 * sizeof(float), 0, 1);
+  }
+}`,
+  surface3DUint4VectorUnalignedByteOffset: `
+__global__ void surface3DUint4VectorUnalignedByteOffset(cudaSurfaceObject_t surf, uint *out) {
+  if (threadIdx.x == 0) {
+    uint4 pointerValue = make_uint4(99u, 99u, 99u, 99u);
+    surf3Dread(&pointerValue, surf, 2, 0, 1);
+    uint4 returnValue = surf3Dread<uint4>(surf, 6, 0, 1);
+    surf3Dwrite(make_uint4(31u, 32u, 33u, 34u), surf, 10, 0, 1);
+    out[0] = pointerValue.x;
+    out[1] = pointerValue.y;
+    out[2] = returnValue.x;
+    out[3] = returnValue.y;
+    out[4] = surf3Dread<uint>(surf, 0, 0, 1);
+    out[5] = surf3Dread<uint>(surf, 1 * sizeof(float), 0, 1);
+    out[6] = surf3Dread<uint>(surf, 2 * sizeof(float), 0, 1);
+    out[7] = surf3Dread<uint>(surf, 3 * sizeof(float), 0, 1);
   }
 }`,
   surface3DVectorZBoundary: `
@@ -4316,6 +4348,23 @@ __global__ void surface1DVectorUnalignedByteOffset(cudaSurfaceObject_t surf, flo
     out[5] = surf1Dread<float>(surf, 1 * sizeof(float));
     out[6] = surf1Dread<float>(surf, 2 * sizeof(float));
     out[7] = surf1Dread<float>(surf, 3 * sizeof(float));
+  }
+}`,
+  surface1DUint4VectorUnalignedByteOffset: `
+__global__ void surface1DUint4VectorUnalignedByteOffset(cudaSurfaceObject_t surf, uint *out) {
+  if (threadIdx.x == 0) {
+    uint4 pointerValue = make_uint4(99u, 99u, 99u, 99u);
+    surf1Dread(&pointerValue, surf, 2);
+    uint4 returnValue = surf1Dread<uint4>(surf, 6);
+    surf1Dwrite(make_uint4(31u, 32u, 33u, 34u), surf, 10);
+    out[0] = pointerValue.x;
+    out[1] = pointerValue.y;
+    out[2] = returnValue.x;
+    out[3] = returnValue.y;
+    out[4] = surf1Dread<uint>(surf, 0);
+    out[5] = surf1Dread<uint>(surf, 1 * sizeof(float));
+    out[6] = surf1Dread<uint>(surf, 2 * sizeof(float));
+    out[7] = surf1Dread<uint>(surf, 3 * sizeof(float));
   }
 }`,
   surface1DVectorNegativeByteOffset: `
@@ -12775,6 +12824,22 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
           },
           {
+            name: "surface:layered-int4-vector-unaligned-byte-offset",
+            source: SOURCES.surfaceLayeredInt4VectorUnalignedByteOffset,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(8),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 7, 11, 13]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
+          },
+          {
             name: "surface:layered-vector-column-boundary",
             source: SOURCES.surfaceLayeredVectorColumnBoundary,
             options: { workgroupSize: [1, 1, 1] },
@@ -13219,6 +13284,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
+          },
+          {
+            name: "surface:surf3d-uint4-vector-unaligned-byte-offset",
+            source: SOURCES.surface3DUint4VectorUnalignedByteOffset,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([1, 2, 3, 4, 5, 7, 11, 13]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
           },
           {
             name: "surface:surf3d-vector-z-boundary",
@@ -20739,6 +20820,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
+          },
+          {
+            name: "surface:surf1d-uint4-vector-unaligned-byte-offset",
+            source: SOURCES.surface1DUint4VectorUnalignedByteOffset,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([5, 7, 11, 13]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
           },
           {
             name: "surface:surf1d-vector-negative-byte-offset",
