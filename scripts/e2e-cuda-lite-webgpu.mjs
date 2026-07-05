@@ -3226,6 +3226,22 @@ __global__ void surfaceLayeredVectorColumnBoundary(float *out, cudaSurfaceObject
   out[2] = surf2DLayeredread<float>(surf, 0, 0, 1);
   out[3] = surf2DLayeredread<float>(surf, 1 * sizeof(float), 0, 1);
 }`,
+  surfaceLayeredVectorRowBoundary: `
+__global__ void surfaceLayeredVectorRowBoundary(float *out, cudaSurfaceObject_t surf) {
+  float4 negativeValue = make_float4(77.0f, 78.0f, 79.0f, 80.0f);
+  surf2DLayeredread(&negativeValue, surf, 0, -1, 1);
+  float4 highValue = surf2DLayeredread<float4>(surf, 0, 1, 1);
+  surf2DLayeredwrite(make_float4(41.0f, 42.0f, 43.0f, 44.0f), surf, 0, -1, 1);
+  surf2DLayeredwrite(make_float4(45.0f, 46.0f, 47.0f, 48.0f), surf, 0, 1, 1);
+  out[0] = negativeValue.x;
+  out[1] = negativeValue.y;
+  out[2] = highValue.x;
+  out[3] = highValue.y;
+  out[4] = surf2DLayeredread<float>(surf, 0, 0, 0);
+  out[5] = surf2DLayeredread<float>(surf, 1 * sizeof(float), 0, 0);
+  out[6] = surf2DLayeredread<float>(surf, 0, 0, 1);
+  out[7] = surf2DLayeredread<float>(surf, 1 * sizeof(float), 0, 1);
+}`,
   surfaceUint4VectorUnalignedByteOffset: `
 __global__ void surfaceUint4VectorUnalignedByteOffset(uint *out, cudaSurfaceObject_t surf) {
   uint4 pointerValue = make_uint4(99u, 99u, 99u, 99u);
@@ -12387,6 +12403,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [21, 0, 7, 21] },
+          },
+          {
+            name: "surface:layered-vector-row-boundary",
+            source: SOURCES.surfaceLayeredVectorRowBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(8),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array([3, 5, 7, 11]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 3, 5, 7, 11] },
           },
           {
             name: "surface:uint4-vector-unaligned-byte-offset",
