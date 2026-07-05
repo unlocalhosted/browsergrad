@@ -13,6 +13,15 @@ Each package follows independent [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## 2026-07 — browsergrad-kernels/compiler 0.1.2
+
+- Republishes `@unlocalhosted/browsergrad-kernels` from rebuilt `dist/` so the
+  WGSL program, float16, CUDA concept, rubric, and CUDA program APIs are present
+  on npm.
+- Republishes `@unlocalhosted/browsergrad-compiler` through `pnpm publish` so
+  its kernels dependency is rewritten from `workspace:*` to the published
+  kernels version.
+
 ## 2026-07 — browsergrad-compiler 0.1.1
 
 - CUDA-lite/WebGPU compiler bugbash release: source and dist real-world verifier

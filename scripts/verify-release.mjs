@@ -18,6 +18,7 @@ const gates = [
     repoRoot,
   ],
   ["pnpm", ["-r", "run", "build"], repoRoot],
+  ["pnpm", ["test:release-packages"], repoRoot],
   ["pnpm", ["-r", "run", "typecheck"], repoRoot],
   ["pnpm", ["-r", "run", "test"], repoRoot],
   ["pnpm", ["-r", "run", "lint"], repoRoot],

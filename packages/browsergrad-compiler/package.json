@@ -1,6 +1,6 @@
 {
   "name": "@unlocalhosted/browsergrad-compiler",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "CUDA-lite to BrowserGrad Kernel IR compiler with WGSL/WebGPU and CPU-reference execution.",
   "type": "module",
   "license": "MIT",

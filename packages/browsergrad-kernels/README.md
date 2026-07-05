@@ -45,6 +45,37 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
 npm install @unlocalhosted/browsergrad-kernels
 ```
 
+## Public import surface
+
+Most consumers should use the top-level package:
+
+```ts
+import {
+  createDevice,
+  createWgslFloat16Array,
+  defineWgslKernelProgram,
+  prepareWgslKernelProgramSequence,
+  runThreadGrid,
+  createKernelRubric,
+} from "@unlocalhosted/browsergrad-kernels";
+```
+
+These subpaths are stable for bundlers and agents that want smaller,
+domain-specific imports:
+
+```ts
+import { reference } from "@unlocalhosted/browsergrad-kernels/reference";
+import { defineWgslKernelProgram } from "@unlocalhosted/browsergrad-kernels/wgsl_program";
+import { createWgslFloat16Array } from "@unlocalhosted/browsergrad-kernels/float16";
+import { runThreadGrid } from "@unlocalhosted/browsergrad-kernels/cuda_concepts";
+import { defineCuda1DProgram } from "@unlocalhosted/browsergrad-kernels/cuda_program";
+import { createKernelRubric } from "@unlocalhosted/browsergrad-kernels/rubric";
+```
+
+Do not import private files under `src/` or `dist/` from consumer code.
+Release CI verifies the packed tarball exports these entry points before npm
+publish.
+
 ## Quick start
 
 ### One-shot kernel (host round-trip)

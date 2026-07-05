@@ -17,10 +17,15 @@ Chromium with WebGPU. Designed to catch the failure modes that
 
 The other packages depend on each other via the npm name. `pnpm` will resolve
 `@unlocalhosted/browsergrad-kernels` inside this package's `node_modules` to
-the **real npm tarball** (because we pin an exact version like `"0.1.0"`), not
+the **real npm tarball** (because we pin an exact version), not
 to the local workspace `packages/browsergrad-kernels/` (which would require a
 `workspace:*` protocol). That gap is the whole point — we want to test the
 published artifact.
+
+When cutting a new package version, do not bump dogfood exact dependencies until
+after that version exists on npm; release workflows install dependencies before
+they publish. Use `pnpm test:release-packages` for pre-publish tarball checks
+and dogfood for post-publish registry checks.
 
 ## Running
 
@@ -73,10 +78,10 @@ Plus `hypotheses.md` — 77 adversarial hypotheses every test file derives from.
 
 | Package | Surface | Adversarial |
 |---|---|---|
-| `@unlocalhosted/browsergrad-kernels@0.1.0` | ✅ | 40 hypotheses (H1-H40) |
-| `@unlocalhosted/browsergrad-runtime@0.1.1` | ✅ | 11 hypotheses (R1-R11) |
-| `@unlocalhosted/browsergrad-grad@0.5.0` | ✅ | 15 hypotheses (G1-G15) |
-| `@unlocalhosted/browsergrad-jit@0.8.0` | ✅ | 11 hypotheses (J1-J11) — beyond craftingattention's 61-test suite |
+| `@unlocalhosted/browsergrad-kernels` | ✅ | 40 hypotheses (H1-H40) |
+| `@unlocalhosted/browsergrad-runtime` | ✅ | 11 hypotheses (R1-R11) |
+| `@unlocalhosted/browsergrad-grad` | ✅ | 15 hypotheses (G1-G15) |
+| `@unlocalhosted/browsergrad-jit` | ✅ | 11 hypotheses (J1-J11) — beyond craftingattention's 61-test suite |
 | Cross-package (grad+jit+runtime+kernels coexistence) | ✅ | 3 hypotheses (CP1-CP3) |
 
 ## Output convention

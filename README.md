@@ -57,6 +57,17 @@ npm install @unlocalhosted/browsergrad-primitives     # optional: text/data/eval
 ```
 
 `pyodide` is a peer dependency. Asset-sync into `public/pyodide/v0.26.4/` so the runtime is served same-origin.
+For CUDA-lite/WebGPU compiler consumers, install `browsergrad-kernels` and
+`browsergrad-compiler` together at compatible published versions:
+
+```sh
+npm install @unlocalhosted/browsergrad-kernels@latest @unlocalhosted/browsergrad-compiler@latest
+```
+
+See [`docs/platform/consuming-browsergrad.md`](./docs/platform/consuming-browsergrad.md)
+for the production import matrix and
+[`docs/platform/agent-consumption-guide.md`](./docs/platform/agent-consumption-guide.md)
+for agent-facing package selection rules.
 
 ## Quick start
 
@@ -138,6 +149,7 @@ Workspace tests cover package surfaces, Pyodide integration, and browser WebGPU:
 
 ```sh
 pnpm -r run build
+pnpm test:release-packages
 pnpm -r run typecheck
 pnpm -r run test
 pnpm -r run lint
@@ -153,10 +165,15 @@ pnpm --filter @unlocalhosted/browsergrad-primitives test
 ```
 
 The browser-mode suite runs the WGSL kernels and the realizer bridge against an actual `GPUDevice` via Playwright + Chromium. It catches shader-level bugs that NumPy mocks miss.
+`pnpm test:release-packages` packs the actual npm artifacts and verifies
+published-entry exports plus workspace dependency rewriting before release.
 
 ## Documentation
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — how the packages compose; data flow; design principles
+- [`docs/platform/consuming-browsergrad.md`](./docs/platform/consuming-browsergrad.md) — production package selection and import matrix
+- [`docs/platform/agent-consumption-guide.md`](./docs/platform/agent-consumption-guide.md) — rules for coding agents consuming BrowserGrad packages
+- [`docs/platform/release-readiness.md`](./docs/platform/release-readiness.md) — pre-publish and post-publish artifact verification
 - [`CHANGELOG.md`](./CHANGELOG.md) — release history
 - [`CONTRIBUTING.md`](./CONTRIBUTING.md) — how to contribute
 - [`SECURITY.md`](./SECURITY.md) — vulnerability reporting

@@ -1,22 +1,8 @@
 /**
  * Module-loader compatibility — does the published tarball import in raw Node?
- *
- * KNOWN BUG (surfaced by this dogfood):
- *   Both @unlocalhosted/browsergrad-grad@0.5.0 and @unlocalhosted/browsergrad-jit@0.8.0
- *   ship `import pkg from "./package.json"` in their dist/ files without the
- *   `with { type: "json" }` attribute required by Node ESM 20+.
- *
- * This works under:
- *   - Vite, webpack, esbuild (they transform JSON imports automatically)
- *   - Vitest (because it runs through Vite)
- *
- * This BREAKS:
- *   - Raw Node ESM consumers (`node my-script.mjs` that imports either package)
- *   - Server-side rendering frameworks that hand-roll Node ESM
- *   - Edge runtimes (Cloudflare Workers, Deno) that follow strict ESM semantics
- *
  * The test below spawns a child Node process and tries to import each package
- * directly — the failure is the bug.
+ * directly, catching published-tarball module metadata bugs that workspace tests
+ * can miss.
  */
 
 import { spawnSync } from "node:child_process";

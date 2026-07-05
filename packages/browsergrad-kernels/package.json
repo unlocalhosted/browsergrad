@@ -1,6 +1,6 @@
 {
   "name": "@unlocalhosted/browsergrad-kernels",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "WGSL kernel catalog for browser-side machine learning: matmul, softmax, layernorm, attention, and friends. Each kernel ships with a JS reference for conformance + fallback. Independent of any tensor framework.",
   "type": "module",
   "license": "MIT",
@@ -34,6 +34,26 @@
     "./reference": {
       "types": "./dist/reference.d.ts",
       "import": "./dist/reference.js"
+    },
+    "./wgsl_program": {
+      "types": "./dist/wgsl_program.d.ts",
+      "import": "./dist/wgsl_program.js"
+    },
+    "./float16": {
+      "types": "./dist/float16.d.ts",
+      "import": "./dist/float16.js"
+    },
+    "./cuda_concepts": {
+      "types": "./dist/cuda_concepts.d.ts",
+      "import": "./dist/cuda_concepts.js"
+    },
+    "./cuda_program": {
+      "types": "./dist/cuda_program.d.ts",
+      "import": "./dist/cuda_program.js"
+    },
+    "./rubric": {
+      "types": "./dist/rubric.d.ts",
+      "import": "./dist/rubric.js"
     },
     "./package.json": "./package.json"
   },

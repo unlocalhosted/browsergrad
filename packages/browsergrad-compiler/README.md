@@ -11,6 +11,15 @@ CUDA-lite source -> BrowserGrad Kernel IR -> WGSL -> WebGPU
 
 This package is independent of Pyodide. It uses
 `@unlocalhosted/browsergrad-kernels` for WGSL dispatch.
+Install the compiler and kernels together from npm:
+
+```sh
+npm install @unlocalhosted/browsergrad-kernels @unlocalhosted/browsergrad-compiler
+```
+
+Published compiler tarballs must depend on a concrete kernels version, never a
+raw `workspace:*` range. Release CI verifies this with `pnpm pack` before npm
+publish.
 
 Compatibility vocabulary:
 

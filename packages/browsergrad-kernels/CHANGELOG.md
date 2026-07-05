@@ -62,6 +62,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   storage value types for a physical buffer, not only the first step-local
   binding.
 
+## [0.1.2] — 2026-07-06
+
+### Fixed
+
+- Publishes the current rebuilt `dist/` surface for the WGSL program,
+  float16, CUDA concept, rubric, and CUDA program APIs that were present in the
+  repo but missing from the stale npm `0.1.1` tarball.
+- Restores the published export surface required by
+  `@unlocalhosted/browsergrad-compiler`, including the WGSL program sequence
+  and float16 helpers used by compiler WebGPU execution.
+
 ## [0.1.1] — 2026-06-02
 
 Dogfood pass on the published 0.1.0 tarball surfaced three issues. All fixed.

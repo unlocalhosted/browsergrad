@@ -83,6 +83,9 @@ jobs:
       - name: Build (all packages — handles inter-package types)
         run: pnpm -r build
 
+      - name: Verify packed package metadata and exports
+        run: pnpm test:release-packages
+
       - name: Surface tests
         run: pnpm --filter "${{ steps.parse.outputs.npmname }}" run test
 
@@ -100,7 +103,7 @@ jobs:
 
       - name: Publish to npm
         working-directory: packages/${{ steps.parse.outputs.package }}
-        run: npm publish --access public --provenance
+        run: pnpm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -111,7 +114,7 @@ jobs:
           # write to a file. We use --notes-file (not --notes) so the
           # changelog body — which contains backticks, ${...}, and other
           # shell-meaningful characters — never gets re-interpreted by bash.
-          awk '/^## / {if(found) exit; found=1} found' CHANGELOG.md > /tmp/release-notes.md
+          awk -v version="${{ steps.parse.outputs.version }}" '/^## / {if(found) exit; found=($0 ~ version)} found' CHANGELOG.md > /tmp/release-notes.md
           if [ ! -s /tmp/release-notes.md ]; then
             echo "See CHANGELOG.md for details." > /tmp/release-notes.md
           fi

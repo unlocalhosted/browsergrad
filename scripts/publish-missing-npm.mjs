@@ -20,15 +20,14 @@ function packageJson(dir) {
   return JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
 }
 
-const packageDirs = readdirSync(packagesRoot, { withFileTypes: true })
+const packageDirs = sortByWorkspaceDependencies(readdirSync(packagesRoot, { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => join(packagesRoot, entry.name))
   .filter((dir) => existsSync(join(dir, "package.json")))
   .filter((dir) => {
     const pkg = packageJson(dir);
     return pkg.private !== true && pkg.name?.startsWith("@unlocalhosted/");
-  })
-  .sort();
+  }));
 
 if (packageDirs.length === 0) {
   throw new Error("No public @unlocalhosted packages found.");
@@ -60,11 +59,48 @@ for (const dir of packageDirs) {
   }
 
   console.log(`publish ${spec}`);
-  const publish = run("npm", ["publish", "--access", "public"], {
+  const publish = run("pnpm", ["publish", "--access", "public"], {
     cwd: dir,
     stdio: "inherit",
   });
   if (publish.status !== 0) {
-    throw new Error(`npm publish failed for ${spec}`);
+    throw new Error(`pnpm publish failed for ${spec}`);
+  }
+}
+
+function sortByWorkspaceDependencies(dirs) {
+  const byName = new Map();
+  const ordered = [];
+  const visiting = new Set();
+  const visited = new Set();
+
+  for (const dir of dirs) {
+    byName.set(packageJson(dir).name, dir);
+  }
+
+  for (const dir of dirs.sort()) {
+    visit(dir);
+  }
+
+  return ordered;
+
+  function visit(dir) {
+    const pkg = packageJson(dir);
+    if (visited.has(pkg.name)) {
+      return;
+    }
+    if (visiting.has(pkg.name)) {
+      throw new Error(`Circular workspace dependency involving ${pkg.name}`);
+    }
+
+    visiting.add(pkg.name);
+    for (const [depName, depRange] of Object.entries(pkg.dependencies ?? {})) {
+      if (depRange === "workspace:*" && byName.has(depName)) {
+        visit(byName.get(depName));
+      }
+    }
+    visiting.delete(pkg.name);
+    visited.add(pkg.name);
+    ordered.push(dir);
   }
 }

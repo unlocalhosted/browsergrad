@@ -86,3 +86,25 @@ pnpm --filter @unlocalhosted/browsergrad-compiler run e2e:webgpu:fast
 - `verify:real-world-cuda` uses fast auto-corpus smoke by default; pass `--auto-corpus-smoke-profile full` only for exhaustive smoke.
 - Full corpus gates stay for commit/release confidence, not every edit.
 - Filtered WebGPU runs should not load unrelated corpus fixture sources. If focused cases slow down, check source-loading first.
+
+## Release And Publish
+
+Never claim npm publication from local source state. Verify the packed artifact
+and the registry.
+
+Before tagging or dispatching publish:
+
+```sh
+pnpm -r build
+pnpm test:release-packages
+node scripts/publish-missing-npm.mjs --dry-run
+```
+
+Use `pnpm publish`, not `npm publish`, for workspace packages. `pnpm publish`
+rewrites `workspace:*` dependencies to concrete package versions in the tarball.
+After CI publishes, check npm directly:
+
+```sh
+npm view @unlocalhosted/browsergrad-kernels version exports --json
+npm view @unlocalhosted/browsergrad-compiler version dependencies --json
+```

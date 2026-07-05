@@ -1,5 +1,13 @@
 # @unlocalhosted/browsergrad-compiler Changelog
 
+## 0.1.2
+
+- Republishes the compiler against rebuilt `@unlocalhosted/browsergrad-kernels`
+  `0.1.2`, restoring the kernel exports needed by compiler WebGPU execution.
+- Fixes the npm package dependency metadata by publishing through `pnpm`, so
+  the internal `workspace:*` kernels dependency is rewritten to the published
+  kernels version instead of leaking into the tarball.
+
 ## 0.1.1
 
 - Hardened CUDA-lite/WebGPU correctness gates after the compiler bugbash:
