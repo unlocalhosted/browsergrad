@@ -9868,6 +9868,37 @@ __global__ void sample(float *out, int width, int height, cudaTextureObject_t li
     ]);
   });
 
+  it("specializes conflicting texture descriptor helpers in guarded barrier clones", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ void guardedSample(cudaTextureObject_t texSrc, float *out, int offset, float x, float y) {
+  out[offset] = tex2D<float>(texSrc, x, y);
+  __syncthreads();
+}
+__global__ void sample(float *out, int width, int height, cudaTextureObject_t linearTex, cudaTextureObject_t pointTex) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  if (x < width) {
+    int offset = y * width + x;
+    guardedSample(linearTex, out, offset, x / (float)width, y / (float)height);
+  }
+  __syncthreads();
+  if (x < width) {
+    int offset = y * width + x;
+    guardedSample(pointTex, out, offset + width * height, (float)x, (float)y);
+  }
+}`, {
+      workgroupSize: [4, 2, 1],
+      textureDescriptors: {
+        linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+        pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+      },
+    });
+
+    expect(compiled.wgsl).toContain("fn guardedSample__bg_tex_0__bg_guarded_barrier");
+    expect(compiled.wgsl).toContain("fn guardedSample__bg_tex_1__bg_guarded_barrier");
+    expect(compiled.wgsl).toContain("textureDimensions(texSrc).x");
+  });
+
   it("lowers CUDA driver texture object aliases as texture params", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void sample(float *out, CUtexObject tex) {

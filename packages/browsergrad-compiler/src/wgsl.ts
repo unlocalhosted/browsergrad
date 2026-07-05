@@ -970,8 +970,12 @@ function emitInlineGuardedBarrierDeviceFunctionStatement(
   const deviceFunction = name ? context.deviceFunctionFor(name, statement.expression.args.length) : undefined;
   if (!deviceFunction || !deviceFunctionNeedsGuardedBarrierClone(deviceFunction)) return undefined;
   const args = emitDeviceFunctionCallArgs(statement.expression, deviceFunction, context);
+  const specialization = textureSpecializationForDeviceFunctionCall(statement.expression, deviceFunction, context);
+  const linkName = specialization === undefined
+    ? guardedBarrierDeviceFunctionLinkName(deviceFunction, context.ir)
+    : guardedBarrierDeviceFunctionLinkNameFromLinkName(specialization.linkName);
   const prefix = indent(indentLevel);
-  return [`${prefix}${context.nameFor(guardedBarrierDeviceFunctionLinkName(deviceFunction, context.ir))}(${[...args, guardSource, "local_id", "workgroup_id", "num_workgroups"].join(", ")});`];
+  return [`${prefix}${context.nameFor(linkName)}(${[...args, guardSource, "local_id", "workgroup_id", "num_workgroups"].join(", ")});`];
 }
 
 function emitGuardedCallWithHoistedSubgroupArgs(
@@ -2023,7 +2027,7 @@ function emitDeviceFunction(
   ];
   const returnType = fn.returnType === "void" ? "" : ` -> ${wgslScalar(fn.returnType)}`;
   const functionName = options.guardedBarrierClone
-    ? guardedBarrierDeviceFunctionLinkName(fn, context.ir)
+    ? guardedBarrierDeviceFunctionLinkNameFromLinkName(options.linkName ?? deviceFunctionLinkName(fn, context.ir))
     : options.linkName ?? deviceFunctionLinkName(fn, context.ir);
   const lines = [`fn ${context.nameFor(functionName)}(${params.join(", ")})${returnType} {`];
   const assignedNames = collectAssignedNames(fn.body);
@@ -2067,6 +2071,16 @@ function emitDeviceFunctionTextureSpecializations(fn: CudaLiteDeviceFunction, co
       linkName: specialization.linkName,
       textureDescriptors: specialization.descriptors,
     }),
+    ...(deviceFunctionNeedsGuardedBarrierClone(fn)
+      ? [
+          "",
+          ...emitDeviceFunction(fn, context, {
+            guardedBarrierClone: true,
+            linkName: specialization.linkName,
+            textureDescriptors: specialization.descriptors,
+          }),
+        ]
+      : []),
   ]);
 }
 
@@ -2075,7 +2089,11 @@ function deviceFunctionNeedsGuardedBarrierClone(fn: CudaLiteDeviceFunction): boo
 }
 
 function guardedBarrierDeviceFunctionLinkName(fn: CudaLiteDeviceFunction, ir: KernelIrModule): string {
-  return `${deviceFunctionLinkName(fn, ir)}__bg_guarded_barrier`;
+  return guardedBarrierDeviceFunctionLinkNameFromLinkName(deviceFunctionLinkName(fn, ir));
+}
+
+function guardedBarrierDeviceFunctionLinkNameFromLinkName(linkName: string): string {
+  return `${linkName}__bg_guarded_barrier`;
 }
 
 function withDevicePointerParams(
