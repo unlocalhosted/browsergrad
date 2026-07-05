@@ -15848,6 +15848,62 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Float32Array", data: [86, 436, 50, 1] },
           },
           {
+            name: "texture-surface:constant-active-lane-return-false-branch",
+            source: SOURCES.textureSurfaceConstantActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+              constants: {
+                c_surface_scale: new Float32Array([10, 20, 30, 40]),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(4) },
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 4 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 50, 1] },
+          },
+          {
+            name: "texture-surface:constant-active-lane-return-all-inactive",
+            source: SOURCES.textureSurfaceConstantActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+              constants: {
+                c_surface_scale: new Float32Array([10, 20, 30, 40]),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(4) },
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0] },
+          },
+          {
             name: "texture-surface:shared-constant-active-lane-return",
             source: SOURCES.textureSurfaceSharedConstantActiveLaneReturn,
             options: { workgroupSize: [4, 1, 1] },
@@ -15874,6 +15930,62 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [1090, 12, 500, 440] },
+          },
+          {
+            name: "texture-surface:shared-constant-active-lane-return-false-branch",
+            source: SOURCES.textureSurfaceSharedConstantActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+              constants: {
+                c_surface_bias: new Float32Array([100, 200, 300, 400]),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(4) },
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 4 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 12, 500, 0] },
+          },
+          {
+            name: "texture-surface:shared-constant-active-lane-return-all-inactive",
+            source: SOURCES.textureSurfaceSharedConstantActiveLaneReturn,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+              constants: {
+                c_surface_bias: new Float32Array([100, 200, 300, 400]),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array(4) },
+              },
+              textures: {
+                tex: {
+                  width: 1,
+                  height: 1,
+                  channels: 4,
+                  data: new Float32Array([2, 3, 5, 7]),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0] },
           },
           {
             name: "texture-surface:active-lane-return-side-effect",
