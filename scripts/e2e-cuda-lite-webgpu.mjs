@@ -15796,6 +15796,70 @@ const html = String.raw`<!doctype html>
             },
           },
           {
+            name: "texture-surface:descriptor-conflicting-writes-false-branch",
+            source: SOURCES.textureSurfaceDescriptorConflictingWrites,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              surfaces: {
+                surf: { width: 8, height: 1, data: new Float32Array(8) },
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { width: 2, height: 2 },
+            }),
+            output: "surf",
+            expectedOutput: { type: "Float32Array", data: [4.5, 4.5, 4.5, 4.5, 11, 12, 15, 16] },
+          },
+          {
+            name: "texture-surface:descriptor-conflicting-writes-all-inactive",
+            source: SOURCES.textureSurfaceDescriptorConflictingWrites,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              surfaces: {
+                surf: { width: 8, height: 1, data: new Float32Array([7, 8, 9, 10, 11, 12, 13, 14]) },
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { width: 0, height: 2 },
+            }),
+            output: "surf",
+            expectedOutput: { type: "Float32Array", data: [7, 8, 9, 10, 11, 12, 13, 14] },
+          },
+          {
             name: "texture-surface:vector-helper-roundtrip",
             source: SOURCES.textureSurfaceVectorHelperRoundtrip,
             options: { workgroupSize: [1, 1, 1] },

@@ -420,6 +420,8 @@ export const textureScopeCases = [
   "texture:pointer-alias-atomic-pointer-array-minmax-active-lane-return-all-inactive",
   "texture-surface:roundtrip",
   "texture-surface:descriptor-conflicting-writes",
+  "texture-surface:descriptor-conflicting-writes-false-branch",
+  "texture-surface:descriptor-conflicting-writes-all-inactive",
   "texture-surface:vector-helper-roundtrip",
   "texture-surface:constant-active-lane-return",
   "texture-surface:constant-active-lane-return-false-branch",
