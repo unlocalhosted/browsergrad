@@ -3202,6 +3202,22 @@ __global__ void surfaceVectorUnalignedByteOffset(float *out, cudaSurfaceObject_t
   out[6] = surf2Dread<float>(surf, 2 * sizeof(float), 1);
   out[7] = surf2Dread<float>(surf, 3 * sizeof(float), 1);
 }`,
+  surfaceVectorNegativeXPointerBoundary: `
+__global__ void surfaceVectorNegativeXPointerBoundary(float *out, cudaSurfaceObject_t surf) {
+  float4 negativeValue = make_float4(77.0f, 78.0f, 79.0f, 80.0f);
+  surf2Dread(&negativeValue, surf, -1 * (int)sizeof(float), 1);
+  surf2Dwrite(make_float4(41.0f, 42.0f, 43.0f, 44.0f), surf, -1 * (int)sizeof(float), 1);
+  float4 row0 = surf2Dread<float4>(surf, 0, 0);
+  float4 row1 = surf2Dread<float4>(surf, 0, 1);
+  out[0] = negativeValue.x;
+  out[1] = negativeValue.y;
+  out[2] = negativeValue.z;
+  out[3] = negativeValue.w;
+  out[4] = row0.x;
+  out[5] = row0.y;
+  out[6] = row1.x;
+  out[7] = row1.y;
+}`,
   surfaceLayeredVectorUnalignedByteOffset: `
 __global__ void surfaceLayeredVectorUnalignedByteOffset(float *out, cudaSurfaceObject_t surf) {
   float4 pointerValue = make_float4(99.0f, 99.0f, 99.0f, 99.0f);
@@ -12513,6 +12529,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
+          },
+          {
+            name: "surface:vector-negative-x-pointer-boundary",
+            source: SOURCES.surfaceVectorNegativeXPointerBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(8),
+              },
+              surfaces: {
+                surf: { width: 4, height: 2, data: new Float32Array([3, 5, 7, 11, 13, 17, 19, 23]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 3, 5, 13, 17] },
           },
           {
             name: "surface:layered-vector-unaligned-byte-offset",
