@@ -4903,6 +4903,34 @@ __global__ void textureGuardedBarrierConflictingDescriptors(cudaTextureObject_t 
     write_guarded_descriptor_tex(pointTex, out, offset + width * height, (float)x, (float)y);
   }
 }`,
+  textureDescriptorPointerArrayAtomic: `
+__device__ float read_descriptor_atomic_tex(cudaTextureObject_t texArg, float x, float y) {
+  return tex2D<float>(texArg, x, y);
+}
+
+__device__ void add_descriptor_atomic(uint *slot, float value) {
+  atomicAdd(slot, (uint)(value * 10.0f));
+}
+
+__global__ void textureDescriptorPointerArrayAtomic(cudaTextureObject_t linearTex, cudaTextureObject_t pointTex, uint *summary, int width, int height) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  if (x < width) {
+    uint *linearTargets[2];
+    linearTargets[0] = summary;
+    linearTargets[1] = summary + 1;
+    float linearValue = read_descriptor_atomic_tex(linearTex, x / (float)width, y / (float)height);
+    add_descriptor_atomic(linearTargets[linearValue > 4.0f ? 1 : 0], linearValue);
+  }
+  __syncthreads();
+  if (x < width) {
+    uint *pointTargets[2];
+    pointTargets[0] = summary + 2;
+    pointTargets[1] = summary + 3;
+    float pointValue = read_descriptor_atomic_tex(pointTex, (float)x, (float)y);
+    add_descriptor_atomic(pointTargets[pointValue > 14.0f ? 1 : 0], pointValue);
+  }
+}`,
   textureHelperMultiObjectGuardedRhs: `
 __device__ float4 read_multi_texture_guarded_vec(cudaTextureObject_t first, cudaTextureObject_t second, uint *counter, int row, int pick) {
   atomicAdd(counter, 1u);
@@ -12620,6 +12648,38 @@ const html = String.raw`<!doctype html>
               type: "Float32Array",
               data: [4.5, 3.5, 4.5, 5.5, 4.5, 3.5, 4.5, 5.5, 11, 12, 13, 14, 15, 16, 17, 18],
             },
+          },
+          {
+            name: "texture:descriptor-pointer-array-atomic",
+            source: SOURCES.textureDescriptorPointerArrayAtomic,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                summary: new Uint32Array(4),
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { width: 4, height: 2 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [70, 290, 500, 660] },
           },
           {
             name: "texture:helper-multi-object-guarded-rhs",

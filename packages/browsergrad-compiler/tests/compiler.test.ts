@@ -9899,6 +9899,40 @@ __global__ void sample(float *out, int width, int height, cudaTextureObject_t li
     expect(compiled.wgsl).toContain("textureDimensions(texSrc).x");
   });
 
+  it("specializes conflicting texture descriptor helpers feeding pointer-array atomics", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float readDescriptorAtomic(cudaTextureObject_t texSrc, float x, float y) {
+  return tex2D<float>(texSrc, x, y);
+}
+__device__ void addDescriptorAtomic(uint *slot, float value) {
+  atomicAdd(slot, (uint)(value * 10.0f));
+}
+__global__ void sample(uint *out, int width, int height, cudaTextureObject_t linearTex, cudaTextureObject_t pointTex) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  if (x < width) {
+    uint *targets[2];
+    targets[0] = out;
+    targets[1] = out + 1;
+    float linearValue = readDescriptorAtomic(linearTex, x / (float)width, y / (float)height);
+    addDescriptorAtomic(targets[linearValue > 4.0f ? 1 : 0], linearValue);
+    float pointValue = readDescriptorAtomic(pointTex, (float)x, (float)y);
+    addDescriptorAtomic(out + 2 + (pointValue > 14.0f ? 1 : 0), pointValue);
+  }
+}`, {
+      workgroupSize: [4, 2, 1],
+      textureDescriptors: {
+        linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+        pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+      },
+    });
+
+    expect(compiled.wgsl).toContain("fn readDescriptorAtomic__bg_tex_0");
+    expect(compiled.wgsl).toContain("fn readDescriptorAtomic__bg_tex_1");
+    expect(compiled.wgsl).toContain("atomicAdd(");
+    expect(compiled.wgsl).toContain("textureDimensions(texSrc).x");
+  });
+
   it("lowers CUDA driver texture object aliases as texture params", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void sample(float *out, CUtexObject tex) {

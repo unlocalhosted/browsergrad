@@ -328,6 +328,7 @@ export const textureScopeCases = [
   "texture:nested-helper-linear-descriptor",
   "texture:helper-conflicting-descriptors",
   "texture:guarded-barrier-conflicting-descriptors",
+  "texture:descriptor-pointer-array-atomic",
   "texture:helper-multi-object-guarded-rhs",
   "texture:helper-multi-object-guarded-rhs-false-branch",
   "texture:helper-multi-object-guarded-rhs-all-inactive",
