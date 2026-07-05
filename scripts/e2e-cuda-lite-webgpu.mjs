@@ -4290,6 +4290,49 @@ __global__ void surface1DPointerAliasAtomicPointerArraySelect(cudaSurfaceObject_
     summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
   }
 }`,
+  surface1DPointerAliasAtomicPointerArraySideEffectIndex: `
+__device__ uint4 read_1d_surface_pointer_array_side_effect_vec(cudaSurfaceObject_t surfaceArg, int x) {
+  return surf1Dread<uint4>(surfaceArg, x * sizeof(float));
+}
+
+__device__ int choose_1d_surface_pointer_array_side_effect_index(uint *trace, uint4 value, int routeMode) {
+  atomicAdd(trace, value.x + value.y + value.z + value.w + 1u);
+  return routeMode == 0 ? (value.x > 0u ? 1 : 0) : (value.x > 0u ? 0 : 1);
+}
+
+__device__ void summarize_1d_surface_pointer_array_side_effect(uint4 *out, uint4 *shadow, uint *trace, uint *summary) {
+  uint4 outValue = out[1];
+  uint4 shadowValue = shadow[1];
+  summary[0] = outValue.x + outValue.y + outValue.z + outValue.w;
+  summary[1] = shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w;
+  summary[2] = trace[0];
+  summary[3] = outValue.z + shadowValue.z;
+}
+
+__global__ void surface1DPointerAliasAtomicPointerArraySideEffectIndex(cudaSurfaceObject_t surf, uint4 *out, uint4 *shadow, uint *trace, uint *summary, int N, int routeMode) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    uint4 value = read_1d_surface_pointer_array_side_effect_vec(surf, 0);
+    uint4 *targets[2];
+    targets[0] = shadow + 1;
+    targets[1] = out + 1;
+    atomicAdd(reinterpret_cast<uint*>(targets[choose_1d_surface_pointer_array_side_effect_index(trace, value, routeMode)]) + 0, value.x);
+    atomicAdd(reinterpret_cast<uint*>(targets[choose_1d_surface_pointer_array_side_effect_index(trace, value, routeMode)]) + 1, value.y);
+    atomicMax(reinterpret_cast<uint*>(targets[choose_1d_surface_pointer_array_side_effect_index(trace, value, routeMode)]) + 2, value.x + value.z);
+    atomicAdd(reinterpret_cast<uint*>(targets[choose_1d_surface_pointer_array_side_effect_index(trace, value, routeMode)]) + 3, value.w);
+  }
+  __syncthreads();
+  if (tid == 1) {
+    summarize_1d_surface_pointer_array_side_effect(out, shadow, trace, summary);
+  }
+}`,
   surface1DPointerAliasAtomicPointerArrayActiveLaneReturn: `
 __device__ uint4 read_1d_surface_active_pointer_array_vec(cudaSurfaceObject_t surfaceArg, int x) {
   return surf1Dread<uint4>(surfaceArg, x * sizeof(float));
@@ -12907,6 +12950,66 @@ const html = String.raw`<!doctype html>
             }),
             output: "summary",
             expectedOutput: { type: "Uint32Array", data: [10155] },
+          },
+          {
+            name: "surface:surf1d-pointer-alias-atomic-pointer-array-side-effect-index",
+            source: SOURCES.surface1DPointerAliasAtomicPointerArraySideEffectIndex,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                trace: new Uint32Array([7]),
+                summary: new Uint32Array(4),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([2, 3, 5, 7]) },
+              },
+              scalars: { N: 2, routeMode: 0 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [77, 1004, 79, 322] },
+          },
+          {
+            name: "surface:surf1d-pointer-alias-atomic-pointer-array-side-effect-index-shadow",
+            source: SOURCES.surface1DPointerAliasAtomicPointerArraySideEffectIndex,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                trace: new Uint32Array([7]),
+                summary: new Uint32Array(4),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([2, 3, 5, 7]) },
+              },
+              scalars: { N: 2, routeMode: 1 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [65, 1016, 79, 322] },
+          },
+          {
+            name: "surface:surf1d-pointer-alias-atomic-pointer-array-side-effect-index-all-inactive",
+            source: SOURCES.surface1DPointerAliasAtomicPointerArraySideEffectIndex,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                trace: new Uint32Array([900]),
+                summary: new Uint32Array([7, 8, 9, 10]),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([2, 3, 5, 7]) },
+              },
+              scalars: { N: 0, routeMode: 1 },
+            }),
+            output: "trace",
+            expectedOutput: { type: "Uint32Array", data: [900] },
           },
           {
             name: "surface:surf1d-pointer-alias-atomic-pointer-array-active-lane-return",
