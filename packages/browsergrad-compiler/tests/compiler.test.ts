@@ -5808,8 +5808,8 @@ __global__ void surfaceVectorLayeredRead(cudaSurfaceObject_t surf, float *out) {
     );
 
     expect([...result.buffers.out as Float32Array]).toEqual([10, 12, 14, 16]);
-    expect(compiled.wgsl).toContain("layeredPointer = vec4<f32>(f32(bg_surf2dread_surf((0 + 0), 0, 1)), f32(bg_surf2dread_surf((0 + 4), 0, 1)), f32(bg_surf2dread_surf((0 + 8), 0, 1)), f32(bg_surf2dread_surf((0 + 12), 0, 1)));");
-    expect(compiled.wgsl).toContain("var layeredReturn: vec4<f32> = vec4<f32>(f32(bg_surf2dread_surf((0 + 0), 0, 1)), f32(bg_surf2dread_surf((0 + 4), 0, 1)), f32(bg_surf2dread_surf((0 + 8), 0, 1)), f32(bg_surf2dread_surf((0 + 12), 0, 1)));");
+    expect(compiled.wgsl).toContain("layeredPointer = select(vec4<f32>(f32(bg_surf2dread_surf((0 + 0), 0, 1)), f32(bg_surf2dread_surf((0 + 4), 0, 1)), f32(bg_surf2dread_surf((0 + 8), 0, 1)), f32(bg_surf2dread_surf((0 + 12), 0, 1))), vec4<f32>(0.0), 0 < 0);");
+    expect(compiled.wgsl).toContain("var layeredReturn: vec4<f32> = select(vec4<f32>(f32(bg_surf2dread_surf((0 + 0), 0, 1)), f32(bg_surf2dread_surf((0 + 4), 0, 1)), f32(bg_surf2dread_surf((0 + 8), 0, 1)), f32(bg_surf2dread_surf((0 + 12), 0, 1))), vec4<f32>(0.0), 0 < 0);");
 
     const helperCompiled = compileCudaLiteKernel(`
 __device__ float4 read_layer_vec(cudaSurfaceObject_t surfaceArg, int row, int layer) {
@@ -5825,8 +5825,8 @@ __global__ void surfaceVectorLayeredRead(cudaSurfaceObject_t surf, float *out) {
   float4 zReturn = read_z_vec(surf, 0, 1);
   out[0] = layeredReturn.x + zReturn.x;
 }`, { workgroupSize: [1, 1, 1] });
-    expect(helperCompiled.wgsl).toContain("return vec4<f32>(f32(bg_surf2dread(surfaceArg, (0 + 0), row, layer)), f32(bg_surf2dread(surfaceArg, (0 + 4), row, layer)), f32(bg_surf2dread(surfaceArg, (0 + 8), row, layer)), f32(bg_surf2dread(surfaceArg, (0 + 12), row, layer)));");
-    expect(helperCompiled.wgsl).toContain("return vec4<f32>(f32(bg_surf2dread(surfaceArg, (0 + 0), row, z)), f32(bg_surf2dread(surfaceArg, (0 + 4), row, z)), f32(bg_surf2dread(surfaceArg, (0 + 8), row, z)), f32(bg_surf2dread(surfaceArg, (0 + 12), row, z)));");
+    expect(helperCompiled.wgsl).toContain("return select(vec4<f32>(f32(bg_surf2dread(surfaceArg, (0 + 0), row, layer)), f32(bg_surf2dread(surfaceArg, (0 + 4), row, layer)), f32(bg_surf2dread(surfaceArg, (0 + 8), row, layer)), f32(bg_surf2dread(surfaceArg, (0 + 12), row, layer))), vec4<f32>(0.0), 0 < 0);");
+    expect(helperCompiled.wgsl).toContain("return select(vec4<f32>(f32(bg_surf2dread(surfaceArg, (0 + 0), row, z)), f32(bg_surf2dread(surfaceArg, (0 + 4), row, z)), f32(bg_surf2dread(surfaceArg, (0 + 8), row, z)), f32(bg_surf2dread(surfaceArg, (0 + 12), row, z))), vec4<f32>(0.0), 0 < 0);");
   });
 
   it("passes surface object params through device helpers as dispatch handles", () => {
@@ -5870,7 +5870,7 @@ __global__ void surfaceVectorRead(cudaSurfaceObject_t surf, float *out) {
   out[3] = value.w;
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toContain("value = vec4<f32>(f32(bg_surf2dread_surf((0 + 0), 0, 0)), f32(bg_surf2dread_surf((0 + 4), 0, 0)), f32(bg_surf2dread_surf((0 + 8), 0, 0)), f32(bg_surf2dread_surf((0 + 12), 0, 0)));");
+    expect(compiled.wgsl).toContain("value = select(vec4<f32>(f32(bg_surf2dread_surf((0 + 0), 0, 0)), f32(bg_surf2dread_surf((0 + 4), 0, 0)), f32(bg_surf2dread_surf((0 + 8), 0, 0)), f32(bg_surf2dread_surf((0 + 12), 0, 0))), vec4<f32>(0.0), 0 < 0);");
     expect(compiled.wgsl).not.toContain("value = vec4<f32>(bg_surf2dread_surf(0, 0, 0));");
   });
 
@@ -5885,7 +5885,7 @@ __global__ void surfaceHelperVectorRead(cudaSurfaceObject_t surf, float *out) {
   out[0] = value.x;
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toContain("return vec4<f32>(f32(bg_surf2dread(surfaceArg, (0 + 0), 0, 0)), f32(bg_surf2dread(surfaceArg, (0 + 4), 0, 0)), f32(bg_surf2dread(surfaceArg, (0 + 8), 0, 0)), f32(bg_surf2dread(surfaceArg, (0 + 12), 0, 0)));");
+    expect(compiled.wgsl).toContain("return select(vec4<f32>(f32(bg_surf2dread(surfaceArg, (0 + 0), 0, 0)), f32(bg_surf2dread(surfaceArg, (0 + 4), 0, 0)), f32(bg_surf2dread(surfaceArg, (0 + 8), 0, 0)), f32(bg_surf2dread(surfaceArg, (0 + 12), 0, 0))), vec4<f32>(0.0), 0 < 0);");
     expect(compiled.wgsl).not.toContain("return f32(vec4<f32>");
   });
 
