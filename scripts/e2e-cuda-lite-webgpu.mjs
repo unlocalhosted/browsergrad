@@ -5512,6 +5512,51 @@ __global__ void textureCubemapVectorPointerArrayAtomic(cudaTextureObject_t normT
     summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
   }
 }`,
+  textureCubemapVectorPointerArrayAtomicSideEffectIndex: `
+__device__ uint4 read_cubemap_vector_pointer_atomic_side_effect_tex(cudaTextureObject_t texArg) {
+  float4 value = texCubemap<float4>(texArg, 1.0f, 0.0f, 0.0f);
+  return make_uint4((uint)value.x, (uint)value.y, (uint)value.z, (uint)value.w);
+}
+
+__device__ int choose_cubemap_vector_pointer_atomic_side_effect_index(uint *trace, uint4 normValue, uint4 pointValue, int routeMode) {
+  atomicAdd(trace, normValue.x + pointValue.x + 1u);
+  return routeMode == 0 ? (pointValue.x > normValue.x ? 1 : 0) : (normValue.x > pointValue.x ? 1 : 0);
+}
+
+__device__ void summarize_cubemap_vector_pointer_atomic_side_effect(uint4 *out, uint4 *shadow, uint *trace, uint *summary) {
+  uint4 outValue = out[1];
+  uint4 shadowValue = shadow[1];
+  summary[0] = outValue.x + outValue.y + outValue.z + outValue.w;
+  summary[1] = shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w;
+  summary[2] = trace[0];
+  summary[3] = outValue.z + shadowValue.z;
+}
+
+__global__ void textureCubemapVectorPointerArrayAtomicSideEffectIndex(cudaTextureObject_t normTex, cudaTextureObject_t pointTex, uint4 *out, uint4 *shadow, uint *trace, uint *summary, int N, int routeMode) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    uint4 normValue = read_cubemap_vector_pointer_atomic_side_effect_tex(normTex);
+    uint4 pointValue = read_cubemap_vector_pointer_atomic_side_effect_tex(pointTex);
+    uint4 *targets[2];
+    targets[0] = shadow + 1;
+    targets[1] = out + 1;
+    atomicAdd(reinterpret_cast<uint*>(targets[choose_cubemap_vector_pointer_atomic_side_effect_index(trace, normValue, pointValue, routeMode)]) + 0, normValue.x);
+    atomicAdd(reinterpret_cast<uint*>(targets[choose_cubemap_vector_pointer_atomic_side_effect_index(trace, normValue, pointValue, routeMode)]) + 1, pointValue.y);
+    atomicMax(reinterpret_cast<uint*>(targets[choose_cubemap_vector_pointer_atomic_side_effect_index(trace, normValue, pointValue, routeMode)]) + 2, normValue.z + pointValue.z);
+    atomicAdd(reinterpret_cast<uint*>(targets[choose_cubemap_vector_pointer_atomic_side_effect_index(trace, normValue, pointValue, routeMode)]) + 3, pointValue.w - normValue.w);
+  }
+  __syncthreads();
+  if (tid == 1) {
+    summarize_cubemap_vector_pointer_atomic_side_effect(out, shadow, trace, summary);
+  }
+}`,
   textureCubemapVectorPointerArrayCompound: `
 __device__ uint4 read_cubemap_vector_pointer_compound_tex(cudaTextureObject_t texArg) {
   float4 value = texCubemap<float4>(texArg, 1.0f, 0.0f, 0.0f);
@@ -15317,6 +15362,117 @@ const html = String.raw`<!doctype html>
               type: "Uint32Array",
               data: [1, 10, 20, 30, 2, 11, 21, 31, 3, 12, 22, 32, 4, 13, 23, 33],
             },
+          },
+          {
+            name: "texture:cubemap-vector-pointer-array-atomic-side-effect-index",
+            source: SOURCES.textureCubemapVectorPointerArrayAtomicSideEffectIndex,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                trace: new Uint32Array([7]),
+                summary: new Uint32Array(4),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 101)),
+                },
+              },
+              scalars: { N: 2, routeMode: 0 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [433, 1004, 579, 447] },
+          },
+          {
+            name: "texture:cubemap-vector-pointer-array-atomic-side-effect-index-shadow",
+            source: SOURCES.textureCubemapVectorPointerArrayAtomicSideEffectIndex,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                trace: new Uint32Array([7]),
+                summary: new Uint32Array(4),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 101)),
+                },
+              },
+              scalars: { N: 2, routeMode: 1 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [65, 1247, 579, 322] },
+          },
+          {
+            name: "texture:cubemap-vector-pointer-array-atomic-side-effect-index-all-inactive",
+            source: SOURCES.textureCubemapVectorPointerArrayAtomicSideEffectIndex,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                trace: new Uint32Array([900]),
+                summary: new Uint32Array([7, 8, 9, 10]),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 101)),
+                },
+              },
+              scalars: { N: 0, routeMode: 1 },
+            }),
+            output: "trace",
+            expectedOutput: { type: "Uint32Array", data: [900] },
           },
           {
             name: "texture:cubemap-vector-pointer-array-compound",
