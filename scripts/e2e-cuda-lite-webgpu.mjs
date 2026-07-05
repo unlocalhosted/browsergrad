@@ -3335,6 +3335,21 @@ __global__ void surfaceUint4VectorNegativeByteOffset(uint *out, cudaSurfaceObjec
   out[6] = value.z;
   out[7] = value.w;
 }`,
+  surfaceUint4VectorHighByteOffsetBoundary: `
+__global__ void surfaceUint4VectorHighByteOffsetBoundary(uint *out, cudaSurfaceObject_t surf) {
+  uint4 highValue = make_uint4(77u, 78u, 79u, 80u);
+  surf2Dread(&highValue, surf, 4 * (int)sizeof(float), 0);
+  surf2Dwrite(make_uint4(41u, 42u, 43u, 44u), surf, 4 * (int)sizeof(float), 0);
+  uint4 value = surf2Dread<uint4>(surf, 0, 0);
+  out[0] = highValue.x;
+  out[1] = highValue.y;
+  out[2] = highValue.z;
+  out[3] = highValue.w;
+  out[4] = value.x;
+  out[5] = value.y;
+  out[6] = value.z;
+  out[7] = value.w;
+}`,
   surfaceInt4VectorNegativeByteOffset: `
 __global__ void surfaceInt4VectorNegativeByteOffset(int *out, cudaSurfaceObject_t surf) {
   int4 negativeValue = make_int4(77, 78, 79, 80);
@@ -3345,6 +3360,21 @@ __global__ void surfaceInt4VectorNegativeByteOffset(int *out, cudaSurfaceObject_
   out[1] = negativeValue.y;
   out[2] = negativeValue.z;
   out[3] = negativeValue.w;
+  out[4] = value.x;
+  out[5] = value.y;
+  out[6] = value.z;
+  out[7] = value.w;
+}`,
+  surfaceInt4VectorHighByteOffsetBoundary: `
+__global__ void surfaceInt4VectorHighByteOffsetBoundary(int *out, cudaSurfaceObject_t surf) {
+  int4 highValue = make_int4(77, 78, 79, 80);
+  surf2Dread(&highValue, surf, 4 * (int)sizeof(float), 0);
+  surf2Dwrite(make_int4(41, 42, 43, 44), surf, 4 * (int)sizeof(float), 0);
+  int4 value = surf2Dread<int4>(surf, 0, 0);
+  out[0] = highValue.x;
+  out[1] = highValue.y;
+  out[2] = highValue.z;
+  out[3] = highValue.w;
   out[4] = value.x;
   out[5] = value.y;
   out[6] = value.z;
@@ -12722,8 +12752,40 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
           },
           {
+            name: "surface:uint4-vector-high-byte-offset-boundary",
+            source: SOURCES.surfaceUint4VectorHighByteOffsetBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([5, 7, 11, 13]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
+          },
+          {
             name: "surface:int4-vector-negative-byte-offset",
             source: SOURCES.surfaceInt4VectorNegativeByteOffset,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array(8),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([5, 7, 11, 13]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
+          },
+          {
+            name: "surface:int4-vector-high-byte-offset-boundary",
+            source: SOURCES.surfaceInt4VectorHighByteOffsetBoundary,
             options: { workgroupSize: [1, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({
