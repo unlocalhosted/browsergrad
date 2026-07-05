@@ -5152,6 +5152,50 @@ __global__ void textureDescriptorPointerArrayCasMinmaxTargets(cudaTextureObject_
     summarize_descriptor_pointer_array_cas(out, shadow, summary);
   }
 }`,
+  textureDescriptorSampledPointerArrayRouting: `
+__device__ float read_descriptor_sampled_pointer_route_tex(cudaTextureObject_t texArg, float x, float y) {
+  return tex2D<float>(texArg, x, y);
+}
+
+__device__ void add_descriptor_sampled_pointer_route_lane(uint4 *target, float linearValue, float pointValue) {
+  uint linearBits = (uint)(linearValue * 10.0f);
+  uint pointBits = (uint)(pointValue * 10.0f);
+  target[0] += make_uint4(linearBits, pointBits, linearBits + pointBits, pointBits - linearBits);
+  target[0].y += linearBits;
+}
+
+__device__ void summarize_descriptor_sampled_pointer_route(uint4 *out, uint4 *shadow, uint *summary) {
+  uint4 outValue = out[0];
+  uint4 shadowValue = shadow[0];
+  summary[0] = outValue.x;
+  summary[1] = outValue.y;
+  summary[2] = shadowValue.x;
+  summary[3] = shadowValue.y;
+}
+
+__global__ void textureDescriptorSampledPointerArrayRouting(cudaTextureObject_t linearTex, cudaTextureObject_t pointTex, uint4 *out, uint4 *shadow, uint *summary, int activeWidth, int width, int height, int routeMode) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  if (x >= activeWidth) {
+    return;
+  }
+  __syncthreads();
+  if (x == 0 && y == 0) {
+    float linearValue = read_descriptor_sampled_pointer_route_tex(linearTex, x / (float)width, y / (float)height);
+    float pointValue = read_descriptor_sampled_pointer_route_tex(pointTex, (float)x, (float)y);
+    uint linearBits = (uint)(linearValue * 10.0f);
+    uint pointBits = (uint)(pointValue * 10.0f);
+    uint4 *targets[2];
+    targets[0] = out;
+    targets[1] = shadow;
+    int pick = routeMode == 0 ? (linearBits > pointBits ? 1 : 0) : (pointBits > linearBits ? 1 : 0);
+    add_descriptor_sampled_pointer_route_lane(targets[pick], linearValue, pointValue);
+  }
+  __syncthreads();
+  if (x == 0 && y == 0) {
+    summarize_descriptor_sampled_pointer_route(out, shadow, summary);
+  }
+}`,
   textureCubemapDescriptorConflictingHelpers: `
 __device__ float read_cubemap_descriptor_tex(cudaTextureObject_t texArg, float x, float y, float z) {
   return texCubemap<float>(texArg, x, y, z);
@@ -14253,6 +14297,111 @@ const html = String.raw`<!doctype html>
             expectedOutput: {
               type: "Uint32Array",
               data: Array.from({ length: 32 }, (_, index) => index + 401),
+            },
+          },
+          {
+            name: "texture:descriptor-sampled-pointer-array-routing",
+            source: SOURCES.textureDescriptorSampledPointerArrayRouting,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(32),
+                shadow: new Uint32Array(32),
+                summary: new Uint32Array(4),
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { activeWidth: 1, width: 4, height: 2, routeMode: 0 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [45, 155, 0, 0] },
+          },
+          {
+            name: "texture:descriptor-sampled-pointer-array-routing-shadow",
+            source: SOURCES.textureDescriptorSampledPointerArrayRouting,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(32),
+                shadow: new Uint32Array(32),
+                summary: new Uint32Array(4),
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { activeWidth: 1, width: 4, height: 2, routeMode: 1 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [0, 0, 45, 155] },
+          },
+          {
+            name: "texture:descriptor-sampled-pointer-array-routing-all-inactive",
+            source: SOURCES.textureDescriptorSampledPointerArrayRouting,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(Array.from({ length: 32 }, (_, index) => index + 601)),
+                shadow: new Uint32Array(Array.from({ length: 32 }, (_, index) => index + 701)),
+                summary: new Uint32Array([7, 8, 9, 10]),
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { activeWidth: 0, width: 4, height: 2, routeMode: 1 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: Array.from({ length: 32 }, (_, index) => index + 601),
             },
           },
           {
