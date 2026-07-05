@@ -3489,6 +3489,22 @@ __global__ void surface3DVectorZBoundary(cudaSurfaceObject_t surf, float *out) {
     out[5] = layerValue.y;
   }
 }`,
+  surface3DVectorNegativeZBoundary: `
+__global__ void surface3DVectorNegativeZBoundary(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    float4 negativeValue = make_float4(77.0f, 78.0f, 79.0f, 80.0f);
+    surf3Dread(&negativeValue, surf, 0, 0, -1);
+    surf3Dwrite(make_float4(41.0f, 42.0f, 43.0f, 44.0f), surf, 0, 0, -1);
+    float4 layer0 = surf3Dread<float4>(surf, 0, 0, 0);
+    float4 layer1 = surf3Dread<float4>(surf, 0, 0, 1);
+    out[0] = negativeValue.x;
+    out[1] = negativeValue.y;
+    out[2] = layer0.x;
+    out[3] = layer0.y;
+    out[4] = layer1.x;
+    out[5] = layer1.y;
+  }
+}`,
   surface3DVectorColumnBoundary: `
 __global__ void surface3DVectorColumnBoundary(cudaSurfaceObject_t surf, float *out) {
   if (threadIdx.x == 0) {
@@ -12757,6 +12773,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 13, 17] },
+          },
+          {
+            name: "surface:surf3d-vector-negative-z-boundary",
+            source: SOURCES.surface3DVectorNegativeZBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(6),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([3, 5, 7, 11, 13, 17, 19, 23]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 3, 5, 13, 17] },
           },
           {
             name: "surface:surf3d-vector-column-boundary",
