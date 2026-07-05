@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-05T10:21:00Z
+Last updated: 2026-07-05T11:01:21Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -9,7 +9,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Field | Current |
 | --- | --- |
 | Overall status | Active bugbash, not complete |
-| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `612/0/0`, dist `612/0/0`; real-world compile/codegen audit has `0` hard fails; real corpus WebGPU fixture outputs are pinned `117/117` |
+| Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `677/0/0`, dist `677/0/0`; real-world compile/codegen audit has `0` hard fails; real corpus WebGPU fixture outputs are pinned `117/117` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
 | Active work item | Fixed side-effecting pointer-array index duplication in expression statements |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- full real-world CUDA verifier refresh after side-effecting pointer-array index fix: compile/codegen audit across 4 corpora still has `0` hard fails and `1038` plan-compiled kernels; browser fixture e2e is green for src `677/0/0` and dist `677/0/0`; corpus expected-output fixtures remain pinned `117/117` by corpus `cuda-120=10`, `cuda-samples=33`, `llm.c=28`, `leetcuda=46`; auto-corpus fast smoke `32/0/0`; skips `0`
 - side-effecting pointer-array expression-statement fix: fail-first real WebGPU fixture proved `targets[choose_descriptor_sampled_side_effect_index(...)]` inside a helper-call expression statement evaluated the pointer-array index helper twice (`trace=317` instead of `161`); top-level expression statements now use the existing side-effecting pointer-array index hoist path before final emission, so the helper runs once and selected `uint4*` writes still route correctly; focused trio failed before fix then passed `3/0/0`, hot repeat `9/0/0`, best warm `5.9ms`; changed gate typecheck passed, WGSL modules `16/0`, smoke `495/0/0`, selected storage/pointer WebGPU `120/0/0`, slow-hot `78/0/0`, fixture/status/test-scope passed, skips `0`
 - descriptor-sampled pointer-array CAS/minmax routing probes: added real WebGPU active out-target, shadow-target, and all-inactive fixtures proving conflicting normalized-linear/raw-point descriptor helper values can choose the local pointer-array target for CAS/min/max lane atomics while return-before-barrier lowering preserves old-value mirror writes and suppresses all-inactive reads/writes; focused trio `3/0/0`, hot repeat `9/0/0`, best warm `6.4ms`; changed gate smoke `492/0/0`, slow-hot `78/0/0`, fixture/test-scope passed, skips `0`
 - descriptor-sampled pointer-array routing probes: added real WebGPU active out-target, shadow-target, and all-inactive fixtures proving conflicting normalized-linear/raw-point descriptor helper values can choose the local pointer-array target while return-before-barrier lowering preserves selected `uint4*` vector writes and suppresses all-inactive reads/writes; focused trio `3/0/0`, hot repeat `9/0/0`, best warm `5.2ms`; changed gate smoke `489/0/0`, slow-hot `78/0/0`, fixture/test-scope passed, skips `0`
@@ -72,7 +73,7 @@ Current verified gates:
 - cubemap vector surface-write probe: added real WebGPU active/all-inactive fixtures proving `texCubemap<float4>` descriptor-bypass vector reads feed `surf2Dwrite(float4)` correctly and suppress vector writes when all lanes return before the barrier; no compiler fix needed; focused WebGPU pair `texture-surface:cubemap-vector-writes,texture-surface:cubemap-vector-writes-all-inactive` `2/0/0`, hot repeat `6/0/0`, best warm `3.5ms` / `3.6ms`, changed gate smoke `436/0/0`, fixture tests ok, test-scope tests ok, skips `0`
 - cubemap pre-return surface side-effect probe: added real WebGPU active/all-inactive fixtures proving cubemap descriptor-bypass reads feeding `surf2Dwrite` still execute before return-before-barrier active-lane lowering, including every lane returning before the barrier; no compiler fix needed; focused WebGPU pair `texture-surface:cubemap-pre-return-writes,texture-surface:cubemap-pre-return-writes-all-inactive` `2/0/0`, hot repeat `6/0/0`, best warm `4.3ms` / `4.0ms`, changed gate smoke `434/0/0`, fixture tests ok, test-scope tests ok, skips `0`
 - cubemap descriptor surface-write probe: added real WebGPU active/all-inactive fixtures proving cubemap descriptor-bypass reads feed `surf2Dwrite` correctly and that all lanes returning before the barrier suppress both cubemap reads and surface writes; no compiler fix needed; focused WebGPU pair `texture-surface:cubemap-descriptor-writes,texture-surface:cubemap-descriptor-writes-all-inactive` `2/0/0`, hot repeat `6/0/0`, best warm `3.6ms` / `3.5ms`, changed gate smoke `432/0/0`, fixture tests ok, test-scope tests ok, skips `0`
-- real-world CUDA verifier refresh: full verifier passed after latest cubemap descriptor/active-lane probes; compile/codegen audit across 4 corpora has `0` hard fails and `1038` plan-compiled kernels; browser fixture e2e is green for src `612/0/0` and dist `612/0/0`; corpus expected-output fixtures remain pinned `117/117` by corpus `cuda-120=10`, `cuda-samples=33`, `llm.c=28`, `leetcuda=46`; auto-corpus fast smoke `32/0/0`; skips `0`
+- real-world CUDA verifier refresh: full verifier passed after latest side-effecting pointer-array expression-statement fix; compile/codegen audit across 4 corpora has `0` hard fails and `1038` plan-compiled kernels; browser fixture e2e is green for src `677/0/0` and dist `677/0/0`; corpus expected-output fixtures remain pinned `117/117` by corpus `cuda-120=10`, `cuda-samples=33`, `llm.c=28`, `leetcuda=46`; auto-corpus fast smoke `32/0/0`; skips `0`
 - cubemap pointer all-inactive probe: added all-inactive sibling for the cubemap pointer-array active-lane fixture, proving cubemap helper reads and selected atomic writes are fully suppressed when every lane returns before the barrier; no compiler fix needed; focused WebGPU pair `texture:cubemap-pointer-array-active-lane,texture:cubemap-pointer-array-active-lane-all-inactive` `2/0/0`, hot repeat `6/0/0`, best warm `4.3ms` / `4.2ms`, changed gate smoke `430/0/0`, fixture tests ok, test-scope tests ok, skips `0`
 - cubemap pointer active-lane probe: added a real WebGPU fixture combining cubemap descriptor-bypass semantics, return-before-barrier active-lane lowering, helper texture reads, pointer-array selected atomic writes, and inactive-lane suppression; no compiler fix needed; focused WebGPU fixture `texture:cubemap-pointer-array-active-lane` `1/0/0`, hot repeat `3/0/0`, best warm `4.2ms`, changed gate smoke `429/0/0`, fixture tests ok, test-scope tests ok, skips `0`
 - cubemap descriptor coord fix: fail-first real WebGPU fixture proved `texCubemap` through a descriptor-specialized helper returned `201` instead of expected `21` because WGSL applied normalized/wrap 2D descriptor coordinate transforms to cubemap direction-derived face coords while reference cubemap mapping ignores texture descriptors; cubemap WGSL lowering now bypasses descriptor-aware 2D texture helpers and emits raw cubemap-mapped `textureLoad` coords; focused unit `1/0`, focused WebGPU fixture `texture:cubemap-descriptor-conflicting-helpers` failed before fix then passed `1/0/0`, hot repeat `3/0/0`, best warm `3.5ms`, changed gate compiler unit `479/0`, WGSL modules `16/0`, selected WebGPU `120/0/0`, smoke `428/0/0`, fixture tests ok, test-scope tests ok, skips `0`
@@ -1341,9 +1342,9 @@ Current added pointer/control cases:
 
 Smoke current: `480/0/0`.
 
-Full source e2e current: `612/0/0`.
+Full source e2e current: `677/0/0`.
 
-Verifier current: src `612/0/0`, dist `612/0/0`.
+Verifier current: src `677/0/0`, dist `677/0/0`.
 
 ## Remaining Probe Map
 
