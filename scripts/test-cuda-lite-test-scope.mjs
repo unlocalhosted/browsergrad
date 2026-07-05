@@ -354,6 +354,7 @@ assert.ok(multiWgslE2e[0].includes("control:active-lane-loop-barrier"));
 assert.ok(multiWgslE2e[0].includes("texture:uchar4-read"));
 assert.ok(multiWgslE2e[0].includes("texture-surface:roundtrip"));
 assert.ok(multiWgslCommands.some((cmd) => cmd.includes("run e2e:webgpu:hot-case:gate") && cmd.includes("texture-surface:roundtrip")));
+assert.ok(multiWgslCommands.some((cmd) => cmd.includes("run e2e:webgpu:hot-case:gate") && cmd.includes("--expect-warm-ms-max 12")));
 
 const fastPlan = planForChangedFiles([
   "packages/browsergrad-compiler/src/analyzer.ts",
@@ -444,6 +445,9 @@ assert.equal(compilerPackage.scripts["e2e:webgpu:fast"].includes("--skip-build")
 assert.equal(compilerPackage.scripts["e2e:webgpu:smoke"], "node ../../scripts/run-cuda-lite-webgpu-smoke.mjs");
 assert.equal(compilerPackage.scripts["e2e:webgpu:slow-smoke-hot"], "node ../../scripts/run-cuda-lite-webgpu-slow-smoke-hot.mjs");
 assert.equal(compilerPackage.scripts["bugbash:status"], "node ../../scripts/cuda-lite-bugbash-status.mjs");
+assert.match(compilerPackage.scripts["e2e:webgpu:hot-case:gate"], /--warmup 1/u);
+assert.match(compilerPackage.scripts["e2e:webgpu:hot-case:gate"], /--expect-warm-ms-max 12/u);
+assert.doesNotMatch(compilerPackage.scripts["e2e:webgpu:hot-case:gate"], /--expect-warm-speedup-min/u);
 assert.match(compilerPackage.scripts["e2e:webgpu:corpus-hot"], /--forbid-skips/u);
 assert.match(compilerPackage.scripts["e2e:webgpu:corpus-hot"], /histogram64Kernel/u);
 assert.match(compilerPackage.scripts["e2e:webgpu:corpus-hot"], /scalarProdGPU/u);
