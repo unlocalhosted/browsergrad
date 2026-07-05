@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-05T15:07:52Z
+Last updated: 2026-07-05T15:11:43Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `677/0/0`, dist `677/0/0`; real-world compile/codegen audit has `0` hard fails; real corpus WebGPU fixture outputs are pinned `117/117` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Pinned typed surface vector column/lane-clipping probes |
+| Active work item | Pinned device pointer helper output oracle |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- device pointer helper output oracle: promoted `device-function:pointer-param-helpers` from run-only WebGPU coverage to an expected-output fixture, pinning device helper storage pointer reads/writes against real WebGPU output `[14, 26, 38]`; focused `1/0/0`, hot repeat `3/0/0`, best warm `3.7ms`, changed gate fixture tests passed, WebGPU smoke `561/0/0`, skips `0`
 - typed surface vector column/lane-clipping probes: added real WebGPU `uint4`/`int4` fixtures proving pointer-form and return-form `surf2Dread<uint4>`/`surf2Dwrite(uint4)`, `surf2DLayeredread<int4>`/`surf2DLayeredwrite(int4)`, `surf1Dread<uint4>`/`surf1Dwrite(uint4)`, and `surf3Dread<uint4>`/`surf3Dwrite(uint4)` preserve only in-range last-column lanes, zero clipped typed lanes, suppress clipped vector writes, and avoid spilling into adjacent rows/layers/z slices; focused quartet `4/0/0`, hot repeat `12/0/0`, best warm `1.1ms` / `3.5ms` / `3.3ms` / `3.6ms`, changed gate fixture tests passed, WebGPU smoke `561/0/0`, slow-hot `78/0/0`, skips `0`
 - typed non-2D unaligned surface vector probes: added real WebGPU `uint4`/`int4` fixtures proving pointer-form `surf1Dread<uint4>`/`surf1Dwrite(uint4)`, `surf2DLayeredread<int4>`/`surf2DLayeredwrite(int4)`, and `surf3Dread<uint4>`/`surf3Dwrite(uint4)` reject non-4-byte-aligned byte offsets before lane expansion, zero all unaligned typed pointer vector read lanes, ignore unaligned vector writes, and preserve valid 1D/layer/3D payloads; focused trio `3/0/0`, hot repeat `9/0/0`, best warm `3.1ms` / `3.3ms` / `3.2ms`, changed gate fixture tests passed, WebGPU smoke `557/0/0`, slow-hot `78/0/0`, skips `0`
 - typed surf1D/layered/surf3D vector negative-boundary probes: added real WebGPU `int4`/`uint4` fixtures proving pointer-form `surf1Dread<int4>`/`surf1Dwrite(int4)`, `surf2DLayeredread<uint4>`/`surf2DLayeredwrite(uint4)`, and `surf3Dread<int4>`/`surf3Dwrite(int4)` reject negative base byte offsets or negative z before lane expansion, zero all out-of-range typed pointer vector read lanes, ignore negative vector writes, and preserve valid 1D/layer/3D payloads; focused trio `3/0/0`, hot repeat `9/0/0`, best warm `3.2ms` / `3.4ms` / `3.3ms`, changed gate fixture tests passed, WebGPU smoke `554/0/0`, slow-hot `78/0/0`, skips `0`
@@ -834,6 +835,7 @@ Current verified gates:
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Probed green | device pointer helper output oracle | `device-function:pointer-param-helpers` exercised real WebGPU storage pointer helper lowering but did not assert its output, so a wrong read/write result could pass as long as dispatch completed | added expected-output oracle for device helper pointer param reads/writes, matching existing CPU/unit reference output `[14, 26, 38]` | focused WebGPU `1/0/0`, skips `0`; hot repeat `3/0/0`, best warm `3.7ms`; changed gate fixture tests passed, smoke `561/0/0`, skips `0` |
 | Probed green | typed surface vector column/lane-clipping access | float vector last-column clipping was pinned, but typed `uint4`/`int4` paths could still spill clipped lanes into adjacent rows, layers, z slices, or keep stale nonzero typed lanes on pointer reads | existing vector lane clipping preserves only in-range last-column lanes across typed surf2D/layered/surf1D/surf3D APIs, emits typed zero for clipped lanes, suppresses clipped vector writes, and preserves adjacent payloads | focused WebGPU quartet `4/0/0`, skips `0`; hot repeat `12/0/0`, best warm `1.1ms` / `3.5ms` / `3.3ms` / `3.6ms`; changed gate fixture tests passed, smoke `561/0/0`, slow-hot `78/0/0`, skips `0` |
 | Probed green | typed non-2D unaligned surface vector access | typed unaligned vector coverage existed for plain 2D, but surf1D, layered, and surf3D typed vector APIs could still regress alignment guarding, typed zero lanes, or unaligned write suppression | existing alignment guard rejects non-4-byte-aligned offsets before lane expansion across typed surf1D/layered/surf3D vector APIs, emits typed zero vectors, suppresses unaligned writes, and preserves valid payloads | focused WebGPU trio `3/0/0`, skips `0`; hot repeat `9/0/0`, best warm `3.1ms` / `3.3ms` / `3.2ms`; changed gate fixture tests passed, smoke `557/0/0`, slow-hot `78/0/0`, skips `0` |
 | Probed green | typed surf1D/layered/surf3D vector negative-boundary access | typed negative-base coverage existed for plain 2D, but surf1D, layered, and surf3D typed vector APIs could still regress typed zero-vector emission or suppress writes differently from float vector paths | existing base-boundary guard rejects negative byte offsets and negative z before lane expansion across typed surf1D/layered/surf3D vector APIs, emits typed zero vectors, suppresses out-of-range writes, and preserves valid payloads | focused WebGPU trio `3/0/0`, skips `0`; hot repeat `9/0/0`, best warm `3.2ms` / `3.4ms` / `3.3ms`; changed gate fixture tests passed, smoke `554/0/0`, slow-hot `78/0/0`, skips `0` |

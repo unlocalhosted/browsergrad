@@ -9655,6 +9655,7 @@ const html = String.raw`<!doctype html>
               scalars: { a: 2, n: 3 },
             }),
             output: "y",
+            expectedOutput: { type: "Float32Array", data: [14, 26, 38] },
           },
           {
             name: "storage:local-pointer-row-alias",
