@@ -5811,6 +5811,26 @@ __global__ void textureSurfaceRoundtrip(cudaSurfaceObject_t surf, cudaTextureObj
     surf2Dwrite(value.z + value.w, surf, 0, 0);
   }
 }`,
+  textureSurfaceDescriptorConflictingWrites: `
+__device__ float read_surface_descriptor_tex(cudaTextureObject_t texArg, float x, float y) {
+  return tex2D<float>(texArg, x, y);
+}
+
+__device__ void write_surface_descriptor(cudaSurfaceObject_t surfaceArg, int offset, float value) {
+  surf2Dwrite(value, surfaceArg, offset * sizeof(float), 0);
+}
+
+__global__ void textureSurfaceDescriptorConflictingWrites(cudaSurfaceObject_t surf, cudaTextureObject_t linearTex, cudaTextureObject_t pointTex, int width, int height) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  if (x < width) {
+    int offset = y * width + x;
+    float linearValue = read_surface_descriptor_tex(linearTex, x / (float)width, y / (float)height);
+    write_surface_descriptor(surf, offset, linearValue);
+    float pointValue = read_surface_descriptor_tex(pointTex, (float)x, (float)y);
+    write_surface_descriptor(surf, offset + width * height, pointValue);
+  }
+}`,
   textureSurfaceVectorHelperRoundtrip: `
 __device__ float4 sample_surface_vec(cudaTextureObject_t texArg) {
   return tex2D<float4>(texArg, 0.5f, 0.5f);
@@ -13997,6 +14017,41 @@ const html = String.raw`<!doctype html>
             }),
             output: "surf",
             expectedOutput: { type: "Float32Array", data: [12, 0] },
+          },
+          {
+            name: "texture-surface:descriptor-conflicting-writes",
+            source: SOURCES.textureSurfaceDescriptorConflictingWrites,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              surfaces: {
+                surf: { width: 16, height: 1, data: new Float32Array(16) },
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { width: 4, height: 2 },
+            }),
+            output: "surf",
+            expectedOutput: {
+              type: "Float32Array",
+              data: [4.5, 3.5, 4.5, 5.5, 4.5, 3.5, 4.5, 5.5, 11, 12, 13, 14, 15, 16, 17, 18],
+            },
           },
           {
             name: "texture-surface:vector-helper-roundtrip",
