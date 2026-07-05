@@ -220,6 +220,7 @@ import {
   type CudaLiteParam,
   type CudaLiteScalarType,
   type CudaLiteStatement,
+  type CudaLiteTextureDescriptor,
   type CudaLiteVarDecl,
   type KernelIrModule,
   type SourceSpan,
@@ -1940,11 +1941,16 @@ function emitDeviceFunction(
   const functionParamNames = new Set(fn.params.map((param) => param.name));
   const functionLocalNames = new Set([...fn.params.map((param) => param.name), ...collectLocalNames(fn.body)]);
   const functionExpressionValueTypes = new WeakMap<CudaLiteExpression, CudaLiteScalarType | undefined>();
+  const functionTextureDescriptors = inferDeviceFunctionTextureDescriptors(fn, context);
   const functionContext = withDevicePointerParams(
     {
       ...context,
       currentReturnType: fn.returnType,
       expressionValueTypes: functionExpressionValueTypes,
+      textureDescriptors: {
+        ...context.textureDescriptors,
+        ...functionTextureDescriptors,
+      },
       localValueTypeFor(name) {
         return functionLocalValueTypes.get(name) ?? (functionParamNames.has(name) ? undefined : context.localValueTypeFor(name));
       },
@@ -5081,6 +5087,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
           emitTextureArgument(expression.args[0], textureSurface),
           textureArgs,
           expression.templateValueType,
+          textureSurface.textureDescriptor(expression.args[0].name),
         );
       }
       return `${name}(${args.join(", ")})`;
@@ -5211,6 +5218,49 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     default:
       return `${emitExpression(expression.callee, context)}(${args.join(", ")})`;
   }
+}
+
+function inferDeviceFunctionTextureDescriptors(
+  fn: CudaLiteDeviceFunction,
+  context: EmitContext,
+): Readonly<Record<string, CudaLiteTextureDescriptor>> {
+  const textureParams = fn.params
+    .map((param, index) => ({ param, index }))
+    .filter((item) => item.param.valueType === "texture2d");
+  if (textureParams.length === 0) return {};
+  const descriptors = new Map<string, CudaLiteTextureDescriptor>();
+  const conflicts = new Set<string>();
+  const bodies = [context.ir.body, ...context.ir.functions.map((candidate) => candidate.body)];
+  for (const body of bodies) {
+    walkCudaLiteExpressions(body, (expression) => {
+      if (expression.kind !== "call") return;
+      const name = expressionName(expression.callee);
+      if (name === undefined) return;
+      if (context.deviceFunctionFor(name, expression.args.length) !== fn) return;
+      for (const { param, index } of textureParams) {
+        const arg = expression.args[index];
+        if (arg?.kind !== "identifier") continue;
+        const descriptor = context.textureDescriptors[arg.name];
+        if (descriptor === undefined) continue;
+        const current = descriptors.get(param.name);
+        if (current !== undefined && textureDescriptorKey(current) !== textureDescriptorKey(descriptor)) {
+          conflicts.add(param.name);
+          descriptors.delete(param.name);
+          continue;
+        }
+        if (!conflicts.has(param.name)) descriptors.set(param.name, descriptor);
+      }
+    });
+  }
+  return Object.fromEntries(descriptors);
+}
+
+function textureDescriptorKey(descriptor: CudaLiteTextureDescriptor): string {
+  return JSON.stringify({
+    normalizedCoords: descriptor.normalizedCoords ?? false,
+    addressMode: descriptor.addressMode ?? ["clamp", "clamp"],
+    filterMode: descriptor.filterMode ?? "point",
+  });
 }
 
 function emitDeviceFunctionCallArgs(

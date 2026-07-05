@@ -271,10 +271,14 @@ export function emitTextureReadExpression(
   texture: string,
   coordArgs: readonly [string, string],
   valueType: CudaLiteScalarType | undefined,
+  descriptor?: CudaLiteTextureDescriptor,
 ): string {
   const [x, y] = coordArgs;
-  const coord = `clamp(vec2<i32>(i32(floor(${x})), i32(floor(${y}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1))`;
-  const value = `textureLoad(${texture}, ${coord}, 0)`;
+  const value = textureReadValue(texture, x, y, descriptor);
+  return emitTextureReadValue(value, valueType);
+}
+
+function emitTextureReadValue(value: string, valueType: CudaLiteScalarType | undefined): string {
   if (valueType === "float2") return `${value}.xy`;
   if (valueType === "float3") return `${value}.xyz`;
   if (valueType === "float4") return value;
@@ -289,6 +293,56 @@ export function emitTextureReadExpression(
     return `${wgslScalar(valueType)}(${fields.map((field) => `${scalarType}(${value}.${field})`).join(", ")})`;
   }
   return `${value}.r`;
+}
+
+function textureReadValue(
+  texture: string,
+  x: string,
+  y: string,
+  descriptor: CudaLiteTextureDescriptor | undefined,
+): string {
+  if (descriptor?.filterMode === "linear") return linearTextureReadValue(texture, x, y, descriptor);
+  const coord = descriptor === undefined
+    ? `clamp(vec2<i32>(i32(floor(${x})), i32(floor(${y}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1))`
+    : `vec2<i32>(${textureAxisCoordInline(texture, x, descriptor, "x")}, ${textureAxisCoordInline(texture, y, descriptor, "y")})`;
+  return `textureLoad(${texture}, ${coord}, 0)`;
+}
+
+function textureAxisCoordInline(
+  texture: string,
+  value: string,
+  descriptor: CudaLiteTextureDescriptor,
+  axis: "x" | "y",
+): string {
+  const extent = `textureDimensions(${texture}).${axis}`;
+  return textureAxisCoordExpression(value, extent, descriptor, axis);
+}
+
+function linearTextureReadValue(
+  texture: string,
+  x: string,
+  y: string,
+  descriptor: CudaLiteTextureDescriptor,
+): string {
+  const xExtent = `textureDimensions(${texture}).x`;
+  const yExtent = `textureDimensions(${texture}).y`;
+  const sx = textureLinearAxisScaledExpression(`(${x})`, xExtent, descriptor);
+  const sy = textureLinearAxisScaledExpression(`(${y})`, yExtent, descriptor);
+  const xb = `((${sx}) - 0.5)`;
+  const yb = `((${sy}) - 0.5)`;
+  const x0 = `floor(${xb})`;
+  const y0 = `floor(${yb})`;
+  const ax = `fract(${xb})`;
+  const ay = `fract(${yb})`;
+  const ix0 = textureLinearIndexExpression(x0, xExtent, descriptor, "x");
+  const ix1 = textureLinearIndexExpression(`(${x0} + 1.0)`, xExtent, descriptor, "x");
+  const iy0 = textureLinearIndexExpression(y0, yExtent, descriptor, "y");
+  const iy1 = textureLinearIndexExpression(`(${y0} + 1.0)`, yExtent, descriptor, "y");
+  const c00 = `textureLoad(${texture}, vec2<i32>(${ix0}, ${iy0}), 0)`;
+  const c10 = `textureLoad(${texture}, vec2<i32>(${ix1}, ${iy0}), 0)`;
+  const c01 = `textureLoad(${texture}, vec2<i32>(${ix0}, ${iy1}), 0)`;
+  const c11 = `textureLoad(${texture}, vec2<i32>(${ix1}, ${iy1}), 0)`;
+  return `(((${c00}) * (1.0 - ${ax}) + (${c10}) * ${ax}) * (1.0 - ${ay}) + ((${c01}) * (1.0 - ${ax}) + (${c11}) * ${ax}) * ${ay})`;
 }
 
 export function emitSurfaceReadExpression(

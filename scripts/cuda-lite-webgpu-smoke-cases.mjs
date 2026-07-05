@@ -324,6 +324,7 @@ export const textureScopeCases = [
   "texture:object-uint4-helper-read",
   "texture:helper-vector-cast-coercion",
   "texture:nested-helper-vector-read",
+  "texture:helper-linear-descriptor",
   "texture:helper-multi-object-guarded-rhs",
   "texture:helper-multi-object-guarded-rhs-false-branch",
   "texture:helper-multi-object-guarded-rhs-all-inactive",

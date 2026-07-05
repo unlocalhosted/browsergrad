@@ -4848,6 +4848,16 @@ __global__ void textureNestedHelperVectorRead(cudaTextureObject_t tex, float4 *o
     out[0] = read_nested_tex_outer(tex);
   }
 }`,
+  textureHelperLinearDescriptor: `
+__device__ float read_linear_descriptor_tex(cudaTextureObject_t texArg, float x, float y) {
+  return tex2D<float>(texArg, x, y);
+}
+
+__global__ void textureHelperLinearDescriptor(cudaTextureObject_t tex, float *out, int width, int height) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  out[y * width + x] = read_linear_descriptor_tex(tex, x / (float)width, y / (float)height);
+}`,
   textureHelperMultiObjectGuardedRhs: `
 __device__ float4 read_multi_texture_guarded_vec(cudaTextureObject_t first, cudaTextureObject_t second, uint *counter, int row, int pick) {
   atomicAdd(counter, 1u);
@@ -12443,6 +12453,32 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [2, 3, 5, 7] },
+          },
+          {
+            name: "texture:helper-linear-descriptor",
+            source: SOURCES.textureHelperLinearDescriptor,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                tex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(8),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+              },
+              scalars: { width: 4, height: 2 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [4.5, 3.5, 4.5, 5.5, 4.5, 3.5, 4.5, 5.5] },
           },
           {
             name: "texture:helper-multi-object-guarded-rhs",
