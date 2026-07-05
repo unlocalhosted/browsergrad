@@ -3255,6 +3255,19 @@ __global__ void surfaceRowBoundary(uint *out, cudaSurfaceObject_t surf) {
   out[0] = value;
   out[1] = surf2Dread<unsigned int>(surf, 0, 1);
 }`,
+  surfaceYBoundary: `
+__global__ void surfaceYBoundary(uint *out, cudaSurfaceObject_t surf) {
+  uint negativeValue = 77u;
+  uint highValue = 88u;
+  surf2Dread(&negativeValue, surf, 0, -1);
+  surf2Dread(&highValue, surf, 0, 2);
+  surf2Dwrite(42.0f, surf, 0, -1);
+  surf2Dwrite(43.0f, surf, 0, 2);
+  out[0] = negativeValue;
+  out[1] = highValue;
+  out[2] = surf2Dread<unsigned int>(surf, 0, 0);
+  out[3] = surf2Dread<unsigned int>(surf, 0, 1);
+}`,
   surfaceVectorRowBoundary: `
 __global__ void surfaceVectorRowBoundary(float *out, cudaSurfaceObject_t surf) {
   surf2Dwrite(make_float4(21.0f, 22.0f, 23.0f, 24.0f), surf, 1 * sizeof(float), 0);
@@ -12288,6 +12301,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [0, 7] },
+          },
+          {
+            name: "surface:y-boundary",
+            source: SOURCES.surfaceYBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(4),
+              },
+              surfaces: {
+                surf: { width: 2, height: 2, data: new Float32Array([3, 5, 7, 11]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0, 0, 3, 7] },
           },
           {
             name: "surface:vector-row-boundary",
