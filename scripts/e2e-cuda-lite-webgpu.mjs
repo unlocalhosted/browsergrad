@@ -3286,6 +3286,17 @@ __global__ void surfaceVectorRowBoundary(float *out, cudaSurfaceObject_t surf) {
   out[2] = surf2Dread<float>(surf, 0, 1);
   out[3] = surf2Dread<float>(surf, 1 * sizeof(float), 1);
 }`,
+  surfaceVectorColumnBoundary: `
+__global__ void surfaceVectorColumnBoundary(float *out, cudaSurfaceObject_t surf) {
+  surf2Dwrite(make_float4(21.0f, 22.0f, 23.0f, 24.0f), surf, 1 * sizeof(float), 0);
+  float4 value = surf2Dread<float4>(surf, 1 * sizeof(float), 0);
+  out[0] = value.x;
+  out[1] = value.y;
+  out[2] = surf2Dread<float>(surf, 0, 0);
+  out[3] = surf2Dread<float>(surf, 1 * sizeof(float), 0);
+  out[4] = surf2Dread<float>(surf, 0, 1);
+  out[5] = surf2Dread<float>(surf, 1 * sizeof(float), 1);
+}`,
   surfaceLayerBoundary: `
 __global__ void surfaceLayerBoundary(float *out, cudaSurfaceObject_t surf) {
   float value = 99.0f;
@@ -12440,6 +12451,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [21, 0, 7, 11] },
+          },
+          {
+            name: "surface:vector-column-boundary",
+            source: SOURCES.surfaceVectorColumnBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(6),
+              },
+              surfaces: {
+                surf: { width: 2, height: 2, data: new Float32Array([3, 5, 7, 11]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [21, 0, 3, 21, 7, 11] },
           },
           {
             name: "surface:layer-boundary",

@@ -229,6 +229,7 @@ export const textureScopeCases = [
   "surface:row-boundary",
   "surface:y-boundary",
   "surface:vector-row-boundary",
+  "surface:vector-column-boundary",
   "surface:layer-boundary",
   "surface:layered-layer-boundary",
   "surface:surf1d-write",
