@@ -169,6 +169,27 @@ assert.deepEqual([...parseFlagArgs(["--require-webgpu", "--case-timeout-ms=15000
   ["--repeat", "2"],
 ]);
 
+const webGpuE2eSource = fs.readFileSync(new URL("./e2e-cuda-lite-webgpu.mjs", import.meta.url), "utf8");
+const allInactiveSummaryOnlyWithoutOracle = [];
+for (let cursor = 0; (cursor = webGpuE2eSource.indexOf('name: "', cursor)) !== -1;) {
+  const nameEnd = webGpuE2eSource.indexOf('"', cursor + 7);
+  const name = webGpuE2eSource.slice(cursor + 7, nameEnd);
+  const blockEnd = webGpuE2eSource.indexOf("\n          },", nameEnd);
+  const nextName = webGpuE2eSource.indexOf('name: "', nameEnd);
+  const end = blockEnd !== -1 && (nextName === -1 || blockEnd < nextName) ? blockEnd : nextName;
+  const block = webGpuE2eSource.slice(cursor, end === -1 ? webGpuE2eSource.length : end);
+  if (
+    name.includes("all-inactive") &&
+    block.includes("output:") &&
+    !block.includes("expectedOutput") &&
+    !block.includes("expectedOffset")
+  ) {
+    allInactiveSummaryOnlyWithoutOracle.push(name);
+  }
+  cursor = nameEnd + 1;
+}
+assert.deepEqual(allInactiveSummaryOnlyWithoutOracle, []);
+
 const summarized = summarizeReport({
   available: true,
   passed: 2,
