@@ -3285,6 +3285,19 @@ __global__ void surfaceLayerBoundary(float *out, cudaSurfaceObject_t surf) {
   out[0] = value;
   out[1] = surf3Dread<float>(surf, 0, 0, 1);
 }`,
+  surfaceLayeredLayerBoundary: `
+__global__ void surfaceLayeredLayerBoundary(float *out, cudaSurfaceObject_t surf) {
+  float negativeValue = 77.0f;
+  float highValue = 88.0f;
+  surf2DLayeredread(&negativeValue, surf, 0, 0, -1);
+  surf2DLayeredread(&highValue, surf, 0, 0, 2);
+  surf2DLayeredwrite(42.0f, surf, 0, 0, -1);
+  surf2DLayeredwrite(43.0f, surf, 0, 0, 2);
+  out[0] = negativeValue;
+  out[1] = highValue;
+  out[2] = surf2DLayeredread<float>(surf, 0, 0, 1);
+  out[3] = surf2DLayeredread<float>(surf, 1 * sizeof(float), 0, 1);
+}`,
   surfaceWrite3d: `
 __global__ void surfaceWrite3d(cudaSurfaceObject_t outputSurf) {
   int x = threadIdx.x;
@@ -12349,6 +12362,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [0, 13] },
+          },
+          {
+            name: "surface:layered-layer-boundary",
+            source: SOURCES.surfaceLayeredLayerBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(4),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array([3, 5, 7, 11]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 7, 11] },
           },
           {
             name: "surface:surf3d-write",
