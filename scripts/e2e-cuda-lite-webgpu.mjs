@@ -5130,6 +5130,135 @@ __global__ void textureCubemapVectorPointerArrayAtomic(cudaTextureObject_t normT
     summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
   }
 }`,
+  textureCubemapVectorPointerArrayCompound: `
+__device__ uint4 read_cubemap_vector_pointer_compound_tex(cudaTextureObject_t texArg) {
+  float4 value = texCubemap<float4>(texArg, 1.0f, 0.0f, 0.0f);
+  return make_uint4((uint)value.x, (uint)value.y, (uint)value.z, (uint)value.w);
+}
+
+__device__ void compound_cubemap_vector_pointer_slot(uint4 *target, uint4 value) {
+  target[0].x += value.x;
+  target[0].y += value.y;
+  target[0].z += value.z;
+  target[0].w += value.w;
+}
+
+__global__ void textureCubemapVectorPointerArrayCompound(cudaTextureObject_t normTex, cudaTextureObject_t pointTex, uint4 *out, uint4 *shadow, uint *summary, int N) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    uint4 normValue = read_cubemap_vector_pointer_compound_tex(normTex);
+    uint4 pointValue = read_cubemap_vector_pointer_compound_tex(pointTex);
+    uint4 *targets[2];
+    targets[0] = shadow + 1;
+    targets[1] = out + 1;
+    int pick = pointValue.x > 100u ? 1 : 0;
+    compound_cubemap_vector_pointer_slot(targets[pick], normValue);
+    compound_cubemap_vector_pointer_slot(targets[pick], pointValue);
+    compound_cubemap_vector_pointer_slot(targets[pick], make_uint4(1u, 2u, 3u, 4u));
+    targets[0][0].y += 9u;
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
+  textureCubemapVectorPointerArrayCas: `
+__device__ uint4 read_cubemap_vector_pointer_cas_tex(cudaTextureObject_t texArg) {
+  float4 value = texCubemap<float4>(texArg, 1.0f, 0.0f, 0.0f);
+  return make_uint4((uint)value.x, (uint)value.y, (uint)value.z, (uint)value.w);
+}
+
+__device__ uint cas_cubemap_vector_pointer_slot(uint4 *target, uint4 value) {
+  uint *scalarTarget = reinterpret_cast<uint*>(target);
+  uint oldY = atomicCAS(scalarTarget + 1, 11u, value.y);
+  uint oldZ = atomicExch(scalarTarget + 2, value.z);
+  atomicAdd(scalarTarget + 3, value.w);
+  return oldY + oldZ;
+}
+
+__global__ void textureCubemapVectorPointerArrayCas(cudaTextureObject_t normTex, cudaTextureObject_t pointTex, uint4 *out, uint4 *shadow, uint *summary, int N) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    uint4 normValue = read_cubemap_vector_pointer_cas_tex(normTex);
+    uint4 pointValue = read_cubemap_vector_pointer_cas_tex(pointTex);
+    uint4 combined = make_uint4(normValue.x + pointValue.x, normValue.y + pointValue.y, normValue.z + pointValue.z, normValue.w + pointValue.w);
+    uint4 *targets[2];
+    targets[0] = shadow + 1;
+    targets[1] = out + 1;
+    int pick = pointValue.x > 100u ? 1 : 0;
+    uint token = cas_cubemap_vector_pointer_slot(targets[pick], combined);
+    atomicCAS(reinterpret_cast<uint*>(targets[0]) + 0, 101u, token + 7u);
+    summary[0] = token;
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    uint token = summary[0];
+    summary[0] = token + (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
+  textureCubemapVectorPointerArrayMinmax: `
+__device__ uint4 read_cubemap_vector_pointer_minmax_tex(cudaTextureObject_t texArg) {
+  float4 value = texCubemap<float4>(texArg, 1.0f, 0.0f, 0.0f);
+  return make_uint4((uint)value.x, (uint)value.y, (uint)value.z, (uint)value.w);
+}
+
+__device__ uint minmax_cubemap_vector_pointer_slot(uint4 *target, uint4 value) {
+  uint *scalarTarget = reinterpret_cast<uint*>(target);
+  uint oldX = atomicMin(scalarTarget + 0, value.x);
+  uint oldY = atomicMax(scalarTarget + 1, value.y);
+  uint oldZ = atomicMin(scalarTarget + 2, 5u);
+  uint oldW = atomicMax(scalarTarget + 3, value.w);
+  return oldX + oldY + oldZ + oldW;
+}
+
+__global__ void textureCubemapVectorPointerArrayMinmax(cudaTextureObject_t normTex, cudaTextureObject_t pointTex, uint4 *out, uint4 *shadow, uint *summary, int N) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    uint4 normValue = read_cubemap_vector_pointer_minmax_tex(normTex);
+    uint4 pointValue = read_cubemap_vector_pointer_minmax_tex(pointTex);
+    uint4 combined = make_uint4(normValue.x + pointValue.x, normValue.y + pointValue.y, normValue.z + pointValue.z, normValue.w + pointValue.w);
+    uint4 *targets[2];
+    targets[0] = shadow + 1;
+    targets[1] = out + 1;
+    int pick = pointValue.x > 100u ? 1 : 0;
+    uint token = minmax_cubemap_vector_pointer_slot(targets[pick], combined);
+    targets[pick][0].x += token;
+    targets[0][0].z += 9u;
+    summary[0] = token;
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    uint token = summary[0];
+    summary[0] = token + (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
   textureHelperMultiObjectGuardedRhs: `
 __device__ float4 read_multi_texture_guarded_vec(cudaTextureObject_t first, cudaTextureObject_t second, uint *counter, int row, int pick) {
   atomicAdd(counter, 1u);
@@ -13386,6 +13515,231 @@ const html = String.raw`<!doctype html>
           {
             name: "texture:cubemap-vector-pointer-array-atomic-all-inactive",
             source: SOURCES.textureCubemapVectorPointerArrayAtomic,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 101)),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [1, 10, 20, 30, 2, 11, 21, 31, 3, 12, 22, 32, 4, 13, 23, 33],
+            },
+          },
+          {
+            name: "texture:cubemap-vector-pointer-array-compound",
+            source: SOURCES.textureCubemapVectorPointerArrayCompound,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 101)),
+                },
+              },
+              scalars: { N: 2 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [10785] },
+          },
+          {
+            name: "texture:cubemap-vector-pointer-array-compound-all-inactive",
+            source: SOURCES.textureCubemapVectorPointerArrayCompound,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 101)),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [1, 10, 20, 30, 2, 11, 21, 31, 3, 12, 22, 32, 4, 13, 23, 33],
+            },
+          },
+          {
+            name: "texture:cubemap-vector-pointer-array-cas",
+            source: SOURCES.textureCubemapVectorPointerArrayCas,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 101)),
+                },
+              },
+              scalars: { N: 2 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [9923] },
+          },
+          {
+            name: "texture:cubemap-vector-pointer-array-cas-all-inactive",
+            source: SOURCES.textureCubemapVectorPointerArrayCas,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 101)),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [1, 10, 20, 30, 2, 11, 21, 31, 3, 12, 22, 32, 4, 13, 23, 33],
+            },
+          },
+          {
+            name: "texture:cubemap-vector-pointer-array-minmax",
+            source: SOURCES.textureCubemapVectorPointerArrayMinmax,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 101)),
+                },
+              },
+              scalars: { N: 2 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [10559] },
+          },
+          {
+            name: "texture:cubemap-vector-pointer-array-minmax-all-inactive",
+            source: SOURCES.textureCubemapVectorPointerArrayMinmax,
             options: {
               workgroupSize: [4, 1, 1],
               textureDescriptors: {
