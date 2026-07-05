@@ -12890,6 +12890,40 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [21, 121, 142, 0] },
           },
           {
+            name: "texture:cubemap-pointer-array-active-lane-all-inactive",
+            source: SOURCES.textureCubemapPointerArrayActiveLane,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                summary: new Uint32Array(4),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_, index) => index + 101)),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [0, 0, 0, 0] },
+          },
+          {
             name: "texture:helper-multi-object-guarded-rhs",
             source: SOURCES.textureHelperMultiObjectGuardedRhs,
             options: { workgroupSize: [4, 1, 1] },
