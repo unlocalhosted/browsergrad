@@ -365,9 +365,15 @@ export function emitSurfaceReadExpression(
     : `bg_surf2dread(${surfaceHandle}, ${x}, ${y}, ${z})`;
   if (isCudaVectorType(valueType)) {
     const laneCount = cudaVectorLaneCount(valueType);
-    const scalarType = wgslScalar(cudaVectorScalarType(valueType) ?? "float");
+    const vectorScalarType = cudaVectorScalarType(valueType) ?? "float";
+    const scalarType = wgslScalar(vectorScalarType);
+    const zeroValue = vectorScalarType === "uint" ? "0u"
+      : vectorScalarType === "int" ? "0"
+      : vectorScalarType === "half" ? "f16(0.0)"
+      : "0.0";
     const values = Array.from({ length: laneCount }, (_, index) => `${scalarType}(${readCall(`(${xBytes} + ${index * 4})`)})`);
-    return `${wgslScalar(valueType)}(${values.join(", ")})`;
+    const vectorValue = `${wgslScalar(valueType)}(${values.join(", ")})`;
+    return `select(${vectorValue}, ${wgslScalar(valueType)}(${zeroValue}), ${xBytes} < 0)`;
   }
   const read = readCall(xBytes);
   if (valueType === "float" || valueType === "double" || valueType === "bf16") return read;
@@ -401,7 +407,8 @@ export function emitSurfaceWriteExpression(
   if (isCudaVectorType(valueType)) {
     const value = context.emitExpression(valueExpression);
     const fields = ["x", "y", "z", "w"].slice(0, cudaVectorLaneCount(valueType));
-    return fields.map((field, index) => writeCall(`f32(${value}.${field})`, `(${xBytes} + ${index * 4})`)).join("; ");
+    const writes = fields.map((field, index) => writeCall(`f32(${value}.${field})`, `(${xBytes} + ${index * 4})`)).join("; ");
+    return `if (${xBytes} >= 0) { ${writes}; }`;
   }
   return writeCall(context.emitExpressionAsValueType(valueExpression, "float"), xBytes);
 }
