@@ -5408,6 +5408,51 @@ __global__ void textureCubemapHelperMultiObjectPointerArrayGuardedRhs(cudaTextur
     summary[2] = counter[1];
   }
 }`,
+  textureCubemapHelperMultiObjectPointerArrayCasMinmaxGuardedRhs: `
+__device__ uint4 read_multi_cubemap_pointer_array_casmin_vec(cudaTextureObject_t first, cudaTextureObject_t second, uint *counter, int pickTexture) {
+  atomicAdd(counter, 1u);
+  if (pickTexture != 0) {
+    float4 selectedValue = texCubemap<float4>(second, 1.0f, 0.0f, 0.0f);
+    return make_uint4((uint)selectedValue.x, (uint)selectedValue.y, (uint)selectedValue.z, (uint)selectedValue.w);
+  }
+  float4 value = texCubemap<float4>(first, 1.0f, 0.0f, 0.0f);
+  return make_uint4((uint)value.x, (uint)value.y, (uint)value.z, (uint)value.w);
+}
+
+__device__ uint casmin_multi_cubemap_pointer_array_vec(uint4 *target, uint4 value) {
+  uint *scalar = reinterpret_cast<uint*>(target);
+  uint oldX = atomicCAS(scalar + 0, target[0].x, value.x);
+  uint oldY = atomicMin(scalar + 1, value.y);
+  uint oldZ = atomicMin(scalar + 2, value.z);
+  uint oldW = atomicExch(scalar + 3, value.w);
+  target[0].x += 3u;
+  return oldX + oldY + oldZ + oldW;
+}
+
+__global__ void textureCubemapHelperMultiObjectPointerArrayCasMinmaxGuardedRhs(cudaTextureObject_t first, cudaTextureObject_t second, uint *counter, uint4 *out, uint4 *shadow, uint *summary, int N, int pickTexture) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  uint4 *targets[2];
+  targets[0] = shadow + 1;
+  targets[1] = out + 1;
+  uint4 value = read_multi_cubemap_pointer_array_casmin_vec(first, second, counter, pickTexture);
+  int pickTarget = value.x > 100u ? 1 : 0;
+  uint token = casmin_multi_cubemap_pointer_array_vec(targets[pickTarget], value);
+  atomicAdd(counter + 1, value.y);
+  __syncthreads();
+  if (tid == 0) {
+    uint4 valueOut = out[1];
+    uint4 valueShadow = shadow[1];
+    summary[0] = token + (valueOut.x + valueOut.y + valueOut.z + valueOut.w) + 10u * (valueShadow.x + valueShadow.y + valueShadow.z + valueShadow.w);
+    summary[1] = counter[0];
+    summary[2] = counter[1];
+  }
+}`,
   textureHelperMultiObjectGuardedRhs: `
 __device__ float4 read_multi_texture_guarded_vec(cudaTextureObject_t first, cudaTextureObject_t second, uint *counter, int row, int pick) {
   atomicAdd(counter, 1u);
@@ -14253,6 +14298,117 @@ const html = String.raw`<!doctype html>
           {
             name: "texture:cubemap-helper-multi-object-pointer-array-guarded-rhs-all-inactive",
             source: SOURCES.textureCubemapHelperMultiObjectPointerArrayGuardedRhs,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                first: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                second: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0, 0, 0]),
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(4),
+              },
+              textures: {
+                first: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 1)),
+                },
+                second: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 101)),
+                },
+              },
+              scalars: { N: 0, pickTexture: 1 },
+            }),
+            output: "counter",
+            expectedOutput: { type: "Uint32Array", data: [0, 0, 0, 0] },
+          },
+          {
+            name: "texture:cubemap-helper-multi-object-pointer-array-cas-minmax-guarded-rhs",
+            source: SOURCES.textureCubemapHelperMultiObjectPointerArrayCasMinmaxGuardedRhs,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                first: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                second: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0, 0, 0]),
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(4),
+              },
+              textures: {
+                first: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 1)),
+                },
+                second: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 101)),
+                },
+              },
+              scalars: { N: 1, pickTexture: 0 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [1999, 1, 22, 0] },
+          },
+          {
+            name: "texture:cubemap-helper-multi-object-pointer-array-cas-minmax-guarded-rhs-second",
+            source: SOURCES.textureCubemapHelperMultiObjectPointerArrayCasMinmaxGuardedRhs,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                first: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                second: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                counter: new Uint32Array([0, 0, 0, 0]),
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(4),
+              },
+              textures: {
+                first: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 1)),
+                },
+                second: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 101)),
+                },
+              },
+              scalars: { N: 1, pickTexture: 1 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [10385, 1, 122, 0] },
+          },
+          {
+            name: "texture:cubemap-helper-multi-object-pointer-array-cas-minmax-guarded-rhs-all-inactive",
+            source: SOURCES.textureCubemapHelperMultiObjectPointerArrayCasMinmaxGuardedRhs,
             options: {
               workgroupSize: [4, 1, 1],
               textureDescriptors: {
