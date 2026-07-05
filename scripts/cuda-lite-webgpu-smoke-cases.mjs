@@ -338,6 +338,8 @@ export const textureScopeCases = [
   "texture-surface:cubemap-descriptor-writes-all-inactive",
   "texture-surface:cubemap-pre-return-writes",
   "texture-surface:cubemap-pre-return-writes-all-inactive",
+  "texture-surface:cubemap-vector-writes",
+  "texture-surface:cubemap-vector-writes-all-inactive",
   "texture:helper-multi-object-guarded-rhs",
   "texture:helper-multi-object-guarded-rhs-false-branch",
   "texture:helper-multi-object-guarded-rhs-all-inactive",
