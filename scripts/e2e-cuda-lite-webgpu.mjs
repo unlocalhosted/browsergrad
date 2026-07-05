@@ -5089,6 +5089,47 @@ __global__ void textureSurfaceCubemapVectorPreReturnWrites(cudaSurfaceObject_t s
     write_cubemap_vector_pre_return_surface(surf, 0, make_float4(1.0f, 2.0f, 3.0f, 4.0f));
   }
 }`,
+  textureCubemapVectorPointerArrayAtomic: `
+__device__ uint4 read_cubemap_vector_pointer_atomic_tex(cudaTextureObject_t texArg) {
+  float4 value = texCubemap<float4>(texArg, 1.0f, 0.0f, 0.0f);
+  return make_uint4((uint)value.x, (uint)value.y, (uint)value.z, (uint)value.w);
+}
+
+__device__ void atomic_cubemap_vector_pointer_slot(uint4 *target, uint4 value) {
+  uint *scalarTarget = reinterpret_cast<uint*>(target);
+  atomicAdd(scalarTarget + 0, value.x);
+  atomicAdd(scalarTarget + 1, value.y);
+  atomicAdd(scalarTarget + 2, value.z);
+  atomicAdd(scalarTarget + 3, value.w);
+}
+
+__global__ void textureCubemapVectorPointerArrayAtomic(cudaTextureObject_t normTex, cudaTextureObject_t pointTex, uint4 *out, uint4 *shadow, uint *summary, int N) {
+  int tid = threadIdx.x;
+  out[tid] = make_uint4(1u + (uint)tid, 10u + (uint)tid, 20u + (uint)tid, 30u + (uint)tid);
+  shadow[tid] = make_uint4(100u + (uint)tid, 200u + (uint)tid, 300u + (uint)tid, 400u + (uint)tid);
+  __syncthreads();
+  if (tid >= N) {
+    return;
+  }
+  __syncthreads();
+  if (tid == 0) {
+    uint4 normValue = read_cubemap_vector_pointer_atomic_tex(normTex);
+    uint4 pointValue = read_cubemap_vector_pointer_atomic_tex(pointTex);
+    uint4 *targets[2];
+    targets[0] = shadow + 1;
+    targets[1] = out + 1;
+    int pick = pointValue.x > 100u ? 1 : 0;
+    atomic_cubemap_vector_pointer_slot(targets[pick], normValue);
+    atomic_cubemap_vector_pointer_slot(targets[pick], pointValue);
+    atomicAdd(reinterpret_cast<uint*>(targets[0]) + 3, 9u);
+  }
+  __syncthreads();
+  if (tid == 1) {
+    uint4 value = out[1];
+    uint4 shadowValue = shadow[1];
+    summary[0] = (value.x + value.y + value.z + value.w) + 10u * (shadowValue.x + shadowValue.y + shadowValue.z + shadowValue.w);
+  }
+}`,
   textureHelperMultiObjectGuardedRhs: `
 __device__ float4 read_multi_texture_guarded_vec(cudaTextureObject_t first, cudaTextureObject_t second, uint *counter, int row, int pick) {
   atomicAdd(counter, 1u);
@@ -13304,6 +13345,81 @@ const html = String.raw`<!doctype html>
             expectedOutput: {
               type: "Float32Array",
               data: [142, 144, 146, 148, 143, 145, 147, 149, 144, 146, 148, 150, 145, 147, 149, 151],
+            },
+          },
+          {
+            name: "texture:cubemap-vector-pointer-array-atomic",
+            source: SOURCES.textureCubemapVectorPointerArrayAtomic,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 101)),
+                },
+              },
+              scalars: { N: 2 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [10775] },
+          },
+          {
+            name: "texture:cubemap-vector-pointer-array-atomic-all-inactive",
+            source: SOURCES.textureCubemapVectorPointerArrayAtomic,
+            options: {
+              workgroupSize: [4, 1, 1],
+              textureDescriptors: {
+                normTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "point" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(16),
+                shadow: new Uint32Array(16),
+                summary: new Uint32Array(1),
+              },
+              textures: {
+                normTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 1)),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 24,
+                  channels: 4,
+                  data: new Float32Array(Array.from({ length: 4 * 24 * 4 }, (_value, index) => index + 101)),
+                },
+              },
+              scalars: { N: 0 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Uint32Array",
+              data: [1, 10, 20, 30, 2, 11, 21, 31, 3, 12, 22, 32, 4, 13, 23, 33],
             },
           },
           {
