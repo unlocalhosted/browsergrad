@@ -79,7 +79,7 @@ export function formatStatus(status) {
   }
   if (status.latestGreenGates.length > 0) {
     lines.push("Latest green gates:");
-    for (const gate of status.latestGreenGates.slice(-6)) lines.push(`- ${gate}`);
+    for (const gate of status.latestGreenGates.slice(0, 6)) lines.push(`- ${gate}`);
   }
   if (status.remainingProbes.length > 0) {
     lines.push("Remaining probes:");
@@ -105,14 +105,14 @@ function summarizeProgress(progress, activeFailureCases) {
     movement: progress.dashboard["Fixed failure movement"],
     activeFailureCount: activeFailureCases.length,
     latestUnitGate: latestGate(progress.latestGreenGates, /\bcompiler unit\b/i),
-    latestSmokeGate: latestGate(progress.latestGreenGates, /WebGPU smoke/i),
+    latestSmokeGate: latestGate(progress.latestGreenGates, /\b(?:WebGPU\s+)?smoke\b.*(?:\d+\/0\/0|\d+\s+passed)/i),
     latestVerifierGate: latestGate(progress.latestGreenGates, /verifier/i),
     remainingProbeCount: progress.remainingProbes.length,
   };
 }
 
 function latestGate(gates, pattern) {
-  return gates.filter((gate) => pattern.test(gate)).at(-1);
+  return gates.find((gate) => pattern.test(gate));
 }
 
 function readProgress(progressPath) {

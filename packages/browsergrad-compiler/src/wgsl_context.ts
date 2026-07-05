@@ -91,6 +91,10 @@ export interface EmitContext {
   readonly externalPoolNames: readonly string[];
   readonly mutablePointerBases: readonly string[];
   readonly textureDescriptors: Readonly<Record<string, CudaLiteTextureDescriptor>>;
+  readonly deviceFunctionTextureDescriptors?: ReadonlyMap<
+    CudaLiteDeviceFunction,
+    Readonly<Record<string, CudaLiteTextureDescriptor>>
+  >;
   readonly scalarWarpReduceHelpers: Map<string, ScalarWarpReduceHelper>;
   readonly scalarWarpShuffleHelpers: Map<string, ScalarWarpShuffleHelper>;
   readonly vectorCooperativeReduceHelpers: Map<string, VectorCooperativeReduceHelper>;

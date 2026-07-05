@@ -9795,6 +9795,39 @@ __global__ void sample(float *out, int width, int height, cudaTextureObject_t te
     expect([...result.buffers.out as Float32Array]).toEqual([4.5, 3.5, 4.5, 5.5, 4.5, 3.5, 4.5, 5.5]);
   });
 
+  it("propagates texture descriptors through nested device helper texture params", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float sampleInner(cudaTextureObject_t texInner, float x, float y) {
+  return tex2D<float>(texInner, x, y);
+}
+__device__ float sampleOuter(cudaTextureObject_t texOuter, float x, float y) {
+  return sampleInner(texOuter, x, y);
+}
+__global__ void sample(float *out, int width, int height, cudaTextureObject_t tex) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  out[y * width + x] = sampleOuter(tex, x / (float)width, y / (float)height);
+}`, {
+      workgroupSize: [4, 2, 1],
+      textureDescriptors: {
+        tex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+      },
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(8) },
+        textures: { tex: { width: 4, height: 2, data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]) } },
+        scalars: { width: 4, height: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+    );
+
+    expect(compiled.wgsl).toContain("fn sampleInner(texInner: texture_2d<f32>");
+    expect(compiled.wgsl).toContain("textureDimensions(texInner).x");
+    expect([...result.buffers.out as Float32Array]).toEqual([4.5, 3.5, 4.5, 5.5, 4.5, 3.5, 4.5, 5.5]);
+  });
+
   it("lowers CUDA driver texture object aliases as texture params", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void sample(float *out, CUtexObject tex) {

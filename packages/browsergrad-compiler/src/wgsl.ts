@@ -244,7 +244,7 @@ export function emitKernelIrWgsl(
     throw featureError("missing-feature-subgroups", "bg_subgroup_add requires WebGPU subgroups support");
   }
 
-  const context = createEmitContext(ir, options);
+  const context = contextWithDeviceFunctionTextureDescriptors(createEmitContext(ir, options));
   const textureSurface = textureSurfaceContext(context);
   const lines = emitKernelModulePrelude(context, {
     f16Mode,
@@ -325,6 +325,15 @@ function textureSurfaceContext(context: EmitContext): WgslTextureSurfaceEmitCont
     emitExpression: (expression, mode = "value") => emitExpression(expression, context, mode),
     emitExpressionAsValueType: (expression, valueType) => emitExpressionAsValueType(expression, valueType, context),
     expressionValueType: (expression) => expressionValueTypeForEmit(expression, context),
+  };
+}
+
+function contextWithDeviceFunctionTextureDescriptors(context: EmitContext): EmitContext {
+  const descriptors = inferDeviceFunctionTextureDescriptorFixpoint(context);
+  if (descriptors.size === 0) return context;
+  return {
+    ...context,
+    deviceFunctionTextureDescriptors: new Map([...descriptors].map(([fn, fnDescriptors]) => [fn, Object.fromEntries(fnDescriptors)])),
   };
 }
 
@@ -5224,35 +5233,116 @@ function inferDeviceFunctionTextureDescriptors(
   fn: CudaLiteDeviceFunction,
   context: EmitContext,
 ): Readonly<Record<string, CudaLiteTextureDescriptor>> {
-  const textureParams = fn.params
-    .map((param, index) => ({ param, index }))
-    .filter((item) => item.param.valueType === "texture2d");
-  if (textureParams.length === 0) return {};
-  const descriptors = new Map<string, CudaLiteTextureDescriptor>();
-  const conflicts = new Set<string>();
-  const bodies = [context.ir.body, ...context.ir.functions.map((candidate) => candidate.body)];
-  for (const body of bodies) {
+  const cached = context.deviceFunctionTextureDescriptors?.get(fn);
+  if (cached !== undefined) return cached;
+  return Object.fromEntries(inferDeviceFunctionTextureDescriptorFixpoint(context).get(fn) ?? []);
+}
+
+function inferDeviceFunctionTextureDescriptorFixpoint(
+  context: EmitContext,
+): Map<CudaLiteDeviceFunction, Map<string, CudaLiteTextureDescriptor>> {
+  let descriptors = new Map<CudaLiteDeviceFunction, Map<string, CudaLiteTextureDescriptor>>();
+  let key = textureDescriptorStateKey(descriptors, context);
+  for (let pass = 0; pass < context.ir.functions.length + 2; pass++) {
+    const next = inferDeviceFunctionTextureDescriptorState(context, descriptors);
+    const nextKey = textureDescriptorStateKey(next, context);
+    descriptors = next;
+    if (nextKey === key) break;
+    key = nextKey;
+  }
+  return descriptors;
+}
+
+function inferDeviceFunctionTextureDescriptorState(
+  context: EmitContext,
+  previous: ReadonlyMap<CudaLiteDeviceFunction, ReadonlyMap<string, CudaLiteTextureDescriptor>>,
+): Map<CudaLiteDeviceFunction, Map<string, CudaLiteTextureDescriptor>> {
+  const descriptors = new Map<CudaLiteDeviceFunction, Map<string, CudaLiteTextureDescriptor>>();
+  const conflicts = new Map<CudaLiteDeviceFunction, Set<string>>();
+  const bodies = [
+    { body: context.ir.body, descriptors: context.textureDescriptors },
+    ...context.ir.functions.map((owner) => ({
+      body: owner.body,
+      descriptors: textureDescriptorScopeForFunction(owner, context, previous.get(owner)),
+    })),
+  ];
+  for (const { body, descriptors: scope } of bodies) {
     walkCudaLiteExpressions(body, (expression) => {
       if (expression.kind !== "call") return;
       const name = expressionName(expression.callee);
       if (name === undefined) return;
-      if (context.deviceFunctionFor(name, expression.args.length) !== fn) return;
-      for (const { param, index } of textureParams) {
+      const callee = context.deviceFunctionFor(name, expression.args.length);
+      if (callee === undefined) return;
+      for (const { param, index } of textureParamInfos(callee)) {
         const arg = expression.args[index];
         if (arg?.kind !== "identifier") continue;
-        const descriptor = context.textureDescriptors[arg.name];
+        const descriptor = scope[arg.name];
         if (descriptor === undefined) continue;
-        const current = descriptors.get(param.name);
-        if (current !== undefined && textureDescriptorKey(current) !== textureDescriptorKey(descriptor)) {
-          conflicts.add(param.name);
-          descriptors.delete(param.name);
-          continue;
-        }
-        if (!conflicts.has(param.name)) descriptors.set(param.name, descriptor);
+        setDeviceFunctionTextureDescriptor(descriptors, conflicts, callee, param.name, descriptor);
       }
     });
   }
-  return Object.fromEntries(descriptors);
+  return descriptors;
+}
+
+function textureDescriptorScopeForFunction(
+  fn: CudaLiteDeviceFunction,
+  context: EmitContext,
+  descriptors: ReadonlyMap<string, CudaLiteTextureDescriptor> | undefined,
+): Readonly<Record<string, CudaLiteTextureDescriptor>> {
+  const scoped: Record<string, CudaLiteTextureDescriptor> = { ...context.textureDescriptors };
+  for (const { param } of textureParamInfos(fn)) delete scoped[param.name];
+  for (const [name, descriptor] of descriptors ?? []) scoped[name] = descriptor;
+  return scoped;
+}
+
+function setDeviceFunctionTextureDescriptor(
+  descriptors: Map<CudaLiteDeviceFunction, Map<string, CudaLiteTextureDescriptor>>,
+  conflicts: Map<CudaLiteDeviceFunction, Set<string>>,
+  fn: CudaLiteDeviceFunction,
+  paramName: string,
+  descriptor: CudaLiteTextureDescriptor,
+): void {
+  let fnConflicts = conflicts.get(fn);
+  if (fnConflicts?.has(paramName)) return;
+  let fnDescriptors = descriptors.get(fn);
+  if (fnDescriptors === undefined) {
+    fnDescriptors = new Map();
+    descriptors.set(fn, fnDescriptors);
+  }
+  const current = fnDescriptors.get(paramName);
+  if (current !== undefined && textureDescriptorKey(current) !== textureDescriptorKey(descriptor)) {
+    if (fnConflicts === undefined) {
+      fnConflicts = new Set();
+      conflicts.set(fn, fnConflicts);
+    }
+    fnConflicts.add(paramName);
+    fnDescriptors.delete(paramName);
+    return;
+  }
+  fnDescriptors.set(paramName, descriptor);
+}
+
+function textureParamInfos(fn: CudaLiteDeviceFunction): readonly { readonly param: CudaLiteParam; readonly index: number }[] {
+  return fn.params
+    .map((param, index) => ({ param, index }))
+    .filter((item) => item.param.valueType === "texture2d");
+}
+
+function textureDescriptorStateKey(
+  descriptors: ReadonlyMap<CudaLiteDeviceFunction, ReadonlyMap<string, CudaLiteTextureDescriptor>>,
+  context: EmitContext,
+): string {
+  return context.ir.functions
+    .map((fn, functionIndex) => {
+      const fnDescriptors = descriptors.get(fn);
+      if (fnDescriptors === undefined) return `${functionIndex}:`;
+      return `${functionIndex}:${[...fnDescriptors]
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([name, descriptor]) => `${name}=${textureDescriptorKey(descriptor)}`)
+        .join(",")}`;
+    })
+    .join("|");
 }
 
 function textureDescriptorKey(descriptor: CudaLiteTextureDescriptor): string {

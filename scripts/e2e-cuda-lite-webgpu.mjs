@@ -4858,6 +4858,20 @@ __global__ void textureHelperLinearDescriptor(cudaTextureObject_t tex, float *ou
   int y = threadIdx.y;
   out[y * width + x] = read_linear_descriptor_tex(tex, x / (float)width, y / (float)height);
 }`,
+  textureNestedHelperLinearDescriptor: `
+__device__ float read_nested_linear_descriptor_inner(cudaTextureObject_t texInner, float x, float y) {
+  return tex2D<float>(texInner, x, y);
+}
+
+__device__ float read_nested_linear_descriptor_outer(cudaTextureObject_t texOuter, float x, float y) {
+  return read_nested_linear_descriptor_inner(texOuter, x, y);
+}
+
+__global__ void textureNestedHelperLinearDescriptor(cudaTextureObject_t tex, float *out, int width, int height) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  out[y * width + x] = read_nested_linear_descriptor_outer(tex, x / (float)width, y / (float)height);
+}`,
   textureHelperMultiObjectGuardedRhs: `
 __device__ float4 read_multi_texture_guarded_vec(cudaTextureObject_t first, cudaTextureObject_t second, uint *counter, int row, int pick) {
   atomicAdd(counter, 1u);
@@ -12457,6 +12471,32 @@ const html = String.raw`<!doctype html>
           {
             name: "texture:helper-linear-descriptor",
             source: SOURCES.textureHelperLinearDescriptor,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                tex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(8),
+              },
+              textures: {
+                tex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+              },
+              scalars: { width: 4, height: 2 },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [4.5, 3.5, 4.5, 5.5, 4.5, 3.5, 4.5, 5.5] },
+          },
+          {
+            name: "texture:nested-helper-linear-descriptor",
+            source: SOURCES.textureNestedHelperLinearDescriptor,
             options: {
               workgroupSize: [4, 2, 1],
               textureDescriptors: {

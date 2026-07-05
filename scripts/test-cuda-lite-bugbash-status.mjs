@@ -26,9 +26,9 @@ Last updated: 2026-07-01T10:00:00Z
 
 ## Latest Proven Green Gates
 
-- compiler unit suite: 374 passed
-- WebGPU smoke: 111 passed / 0 failed / 0 skipped
 - changed gate after probe: typecheck passed; compiler unit \`436/0\`; WebGPU smoke \`289/0/0\`
+- WebGPU smoke: 111 passed / 0 failed / 0 skipped
+- compiler unit suite: 374 passed
 
 ## Remaining Probe Map
 
@@ -66,6 +66,10 @@ assert.match(formatStatus(status), /Active failures: 1/u);
 assert.match(formatStatus(status), /control:probe/u);
 assert.match(formatStatus(status), /Remaining probes:/u);
 assert.match(formatStatus(status), /Texture family: texture active-lane read probe/u);
+assert.ok(
+  formatStatus(status).indexOf("- changed gate after probe") <
+    formatStatus(status).indexOf("- WebGPU smoke: 111 passed"),
+);
 
 const cli = spawnSync(process.execPath, [
   path.join(root, "scripts/cuda-lite-bugbash-status.mjs"),
