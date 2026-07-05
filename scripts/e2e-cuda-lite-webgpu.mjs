@@ -5245,6 +5245,52 @@ __global__ void textureDescriptorSampledPointerArrayCasMinmaxRouting(cudaTexture
     summarize_descriptor_sampled_pointer_cas_route(out, shadow, summary);
   }
 }`,
+  textureDescriptorSampledPointerArraySideEffectIndex: `
+__device__ float read_descriptor_sampled_side_effect_index_tex(cudaTextureObject_t texArg, float x, float y) {
+  return tex2D<float>(texArg, x, y);
+}
+
+__device__ int choose_descriptor_sampled_side_effect_index(uint *trace, uint linearBits, uint pointBits, int routeMode) {
+  atomicAdd(trace, linearBits + pointBits + 1u);
+  return routeMode == 0 ? (linearBits > pointBits ? 1 : 0) : (pointBits > linearBits ? 1 : 0);
+}
+
+__device__ void add_descriptor_sampled_side_effect_index_lane(uint4 *target, uint linearBits, uint pointBits) {
+  target[0] += make_uint4(linearBits, pointBits, linearBits + pointBits, pointBits - linearBits);
+  target[0].y += linearBits;
+}
+
+__device__ void summarize_descriptor_sampled_side_effect_index(uint4 *out, uint4 *shadow, uint *trace, uint *summary) {
+  uint4 outValue = out[0];
+  uint4 shadowValue = shadow[0];
+  summary[0] = outValue.x;
+  summary[1] = outValue.y;
+  summary[2] = shadowValue.x + shadowValue.y;
+  summary[3] = trace[0];
+}
+
+__global__ void textureDescriptorSampledPointerArraySideEffectIndex(cudaTextureObject_t linearTex, cudaTextureObject_t pointTex, uint4 *out, uint4 *shadow, uint *trace, uint *summary, int activeWidth, int width, int height, int routeMode) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  if (x >= activeWidth) {
+    return;
+  }
+  __syncthreads();
+  if (x == 0 && y == 0) {
+    float linearValue = read_descriptor_sampled_side_effect_index_tex(linearTex, x / (float)width, y / (float)height);
+    float pointValue = read_descriptor_sampled_side_effect_index_tex(pointTex, (float)x, (float)y);
+    uint linearBits = (uint)(linearValue * 10.0f);
+    uint pointBits = (uint)(pointValue * 10.0f);
+    uint4 *targets[2];
+    targets[0] = out;
+    targets[1] = shadow;
+    add_descriptor_sampled_side_effect_index_lane(targets[choose_descriptor_sampled_side_effect_index(trace, linearBits, pointBits, routeMode)], linearBits, pointBits);
+  }
+  __syncthreads();
+  if (x == 0 && y == 0) {
+    summarize_descriptor_sampled_side_effect_index(out, shadow, trace, summary);
+  }
+}`,
   textureCubemapDescriptorConflictingHelpers: `
 __device__ float read_cubemap_descriptor_tex(cudaTextureObject_t texArg, float x, float y, float z) {
   return texCubemap<float>(texArg, x, y, z);
@@ -14557,6 +14603,111 @@ const html = String.raw`<!doctype html>
               type: "Uint32Array",
               data: Array.from({ length: 32 }, (_, index) => index + 801),
             },
+          },
+          {
+            name: "texture:descriptor-sampled-pointer-array-side-effect-index",
+            source: SOURCES.textureDescriptorSampledPointerArraySideEffectIndex,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(32),
+                shadow: new Uint32Array(32),
+                trace: new Uint32Array([5]),
+                summary: new Uint32Array(4),
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { activeWidth: 1, width: 4, height: 2, routeMode: 0 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [45, 155, 0, 161] },
+          },
+          {
+            name: "texture:descriptor-sampled-pointer-array-side-effect-index-shadow",
+            source: SOURCES.textureDescriptorSampledPointerArraySideEffectIndex,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(32),
+                shadow: new Uint32Array(32),
+                trace: new Uint32Array([5]),
+                summary: new Uint32Array(4),
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { activeWidth: 1, width: 4, height: 2, routeMode: 1 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [0, 0, 200, 161] },
+          },
+          {
+            name: "texture:descriptor-sampled-pointer-array-side-effect-index-all-inactive",
+            source: SOURCES.textureDescriptorSampledPointerArraySideEffectIndex,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(Array.from({ length: 32 }, (_, index) => index + 1001)),
+                shadow: new Uint32Array(Array.from({ length: 32 }, (_, index) => index + 1101)),
+                trace: new Uint32Array([900]),
+                summary: new Uint32Array([7, 8, 9, 10]),
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { activeWidth: 0, width: 4, height: 2, routeMode: 1 },
+            }),
+            output: "trace",
+            expectedOutput: { type: "Uint32Array", data: [900] },
           },
           {
             name: "texture:cubemap-descriptor-conflicting-helpers",

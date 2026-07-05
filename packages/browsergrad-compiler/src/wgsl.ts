@@ -437,6 +437,10 @@ function emitStatement(
         if (lazy) return lazy;
       }
       {
+        const hoisted = emitExpressionStatementWithHoistedSideEffectingPointerArrayIndex(statement.expression, context, indentLevel);
+        if (hoisted) return hoisted;
+      }
+      {
         const emitted = emitExpressionStatement(statement.expression, context);
         return emitted.length === 0 ? [] : [`${prefix}${emitted};`];
       }
