@@ -4981,6 +4981,31 @@ __global__ void textureLayeredDescriptorBranchReads(cudaTextureObject_t normTex,
   out[offset] = read_layered_descriptor_branch_tex(normTex, 0.75f, 0.0f, 0.25f);
   out[offset + 1] = read_layered_descriptor_branch_tex(pointTex, 3.0f, 0.0f, 1.0f);
 }`,
+  textureDescriptorVectorLaneStores: `
+__device__ float read_descriptor_lane_tex(cudaTextureObject_t texArg, float x, float y) {
+  return tex2D<float>(texArg, x, y);
+}
+
+__device__ void write_descriptor_lane(float *lanes, int lane, float linearValue, float pointValue) {
+  int offset = lane * 4;
+  lanes[offset + 0] = linearValue;
+  lanes[offset + 1] = pointValue;
+  lanes[offset + 2] = linearValue + pointValue;
+  lanes[offset + 3] = pointValue - linearValue;
+}
+
+__global__ void textureDescriptorVectorLaneStores(cudaTextureObject_t linearTex, cudaTextureObject_t pointTex, float4 *out, int activeWidth, int width, int height) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  if (x >= activeWidth) {
+    return;
+  }
+  __syncthreads();
+  float linearValue = read_descriptor_lane_tex(linearTex, x / (float)width, y / (float)height);
+  float pointValue = read_descriptor_lane_tex(pointTex, (float)x, (float)y);
+  float *lanes = reinterpret_cast<float*>(out);
+  write_descriptor_lane(lanes, y * blockDim.x + x, linearValue, pointValue);
+}`,
   textureCubemapDescriptorConflictingHelpers: `
 __device__ float read_cubemap_descriptor_tex(cudaTextureObject_t texArg, float x, float y, float z) {
   return texCubemap<float>(texArg, x, y, z);
@@ -13504,6 +13529,129 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [7, 8, 9, 10, 11, 12, 13, 14] },
+          },
+          {
+            name: "texture:descriptor-vector-lane-stores",
+            source: SOURCES.textureDescriptorVectorLaneStores,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(32),
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { activeWidth: 4, width: 4, height: 2 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Float32Array",
+              data: [
+                4.5, 11, 15.5, 6.5,
+                3.5, 12, 15.5, 8.5,
+                4.5, 13, 17.5, 8.5,
+                5.5, 14, 19.5, 8.5,
+                4.5, 15, 19.5, 10.5,
+                3.5, 16, 19.5, 12.5,
+                4.5, 17, 21.5, 12.5,
+                5.5, 18, 23.5, 12.5,
+              ],
+            },
+          },
+          {
+            name: "texture:descriptor-vector-lane-stores-false-branch",
+            source: SOURCES.textureDescriptorVectorLaneStores,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(Array.from({ length: 32 }, (_, index) => index + 101)),
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { activeWidth: 2, width: 4, height: 2 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Float32Array",
+              data: [
+                4.5, 11, 15.5, 6.5,
+                3.5, 12, 15.5, 8.5,
+                109, 110, 111, 112,
+                113, 114, 115, 116,
+                4.5, 15, 19.5, 10.5,
+                3.5, 16, 19.5, 12.5,
+                125, 126, 127, 128,
+                129, 130, 131, 132,
+              ],
+            },
+          },
+          {
+            name: "texture:descriptor-vector-lane-stores-all-inactive",
+            source: SOURCES.textureDescriptorVectorLaneStores,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(Array.from({ length: 32 }, (_, index) => index + 201)),
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { activeWidth: 0, width: 4, height: 2 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Float32Array",
+              data: Array.from({ length: 32 }, (_, index) => index + 201),
+            },
           },
           {
             name: "texture:cubemap-descriptor-conflicting-helpers",
