@@ -95,6 +95,10 @@ export interface EmitContext {
     CudaLiteDeviceFunction,
     Readonly<Record<string, CudaLiteTextureDescriptor>>
   >;
+  readonly deviceFunctionTextureSpecializations?: ReadonlyMap<
+    CudaLiteDeviceFunction,
+    ReadonlyMap<string, DeviceFunctionTextureSpecialization>
+  >;
   readonly scalarWarpReduceHelpers: Map<string, ScalarWarpReduceHelper>;
   readonly scalarWarpShuffleHelpers: Map<string, ScalarWarpShuffleHelper>;
   readonly vectorCooperativeReduceHelpers: Map<string, VectorCooperativeReduceHelper>;
@@ -135,6 +139,12 @@ export interface ScalarWarpShuffleHelper {
   readonly op: "sync" | "down" | "up" | "xor";
   readonly valueType: Exclude<CudaLiteScalarType, "void">;
   readonly tileSize: number;
+}
+
+export interface DeviceFunctionTextureSpecialization {
+  readonly key: string;
+  readonly linkName: string;
+  readonly descriptors: Readonly<Record<string, CudaLiteTextureDescriptor>>;
 }
 
 export function createEmitContext(ir: KernelIrModule, options: EmitKernelIrWgslOptions = {}): EmitContext {

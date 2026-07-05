@@ -4872,6 +4872,18 @@ __global__ void textureNestedHelperLinearDescriptor(cudaTextureObject_t tex, flo
   int y = threadIdx.y;
   out[y * width + x] = read_nested_linear_descriptor_outer(tex, x / (float)width, y / (float)height);
 }`,
+  textureHelperConflictingDescriptors: `
+__device__ float read_conflicting_descriptor_tex(cudaTextureObject_t texArg, float x, float y) {
+  return tex2D<float>(texArg, x, y);
+}
+
+__global__ void textureHelperConflictingDescriptors(cudaTextureObject_t linearTex, cudaTextureObject_t pointTex, float *out, int width, int height) {
+  int x = threadIdx.x;
+  int y = threadIdx.y;
+  int offset = y * width + x;
+  out[offset] = read_conflicting_descriptor_tex(linearTex, x / (float)width, y / (float)height);
+  out[offset + width * height] = read_conflicting_descriptor_tex(pointTex, (float)x, (float)y);
+}`,
   textureHelperMultiObjectGuardedRhs: `
 __device__ float4 read_multi_texture_guarded_vec(cudaTextureObject_t first, cudaTextureObject_t second, uint *counter, int row, int pick) {
   atomicAdd(counter, 1u);
@@ -12519,6 +12531,41 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [4.5, 3.5, 4.5, 5.5, 4.5, 3.5, 4.5, 5.5] },
+          },
+          {
+            name: "texture:helper-conflicting-descriptors",
+            source: SOURCES.textureHelperConflictingDescriptors,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(16),
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { width: 4, height: 2 },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Float32Array",
+              data: [4.5, 3.5, 4.5, 5.5, 4.5, 3.5, 4.5, 5.5, 11, 12, 13, 14, 15, 16, 17, 18],
+            },
           },
           {
             name: "texture:helper-multi-object-guarded-rhs",
