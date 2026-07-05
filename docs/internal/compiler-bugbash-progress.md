@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-05T11:01:21Z
+Last updated: 2026-07-05T11:03:50Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `677/0/0`, dist `677/0/0`; real-world compile/codegen audit has `0` hard fails; real corpus WebGPU fixture outputs are pinned `117/117` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Fixed side-effecting pointer-array index duplication in expression statements |
+| Active work item | Confirmed latest full-verifier slowest cases are cold-cache only |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- full-verifier slowest-case warm perf check: latest full verifier listed `texture:cubemap-vector-pointer-array-compound-all-inactive` and auto-corpus `bankConflictKernel` as cold slowest cases; isolated real-browser hot gates prove steady-state is healthy with cubemap compound all-inactive `3/0/0`, best warm `5.1ms`, WebGPU run `2.6ms`, and bank-conflict auto-corpus `3/0/0`, best warm `3.6ms`, WebGPU run `2.6ms`; skips `0`
 - full real-world CUDA verifier refresh after side-effecting pointer-array index fix: compile/codegen audit across 4 corpora still has `0` hard fails and `1038` plan-compiled kernels; browser fixture e2e is green for src `677/0/0` and dist `677/0/0`; corpus expected-output fixtures remain pinned `117/117` by corpus `cuda-120=10`, `cuda-samples=33`, `llm.c=28`, `leetcuda=46`; auto-corpus fast smoke `32/0/0`; skips `0`
 - side-effecting pointer-array expression-statement fix: fail-first real WebGPU fixture proved `targets[choose_descriptor_sampled_side_effect_index(...)]` inside a helper-call expression statement evaluated the pointer-array index helper twice (`trace=317` instead of `161`); top-level expression statements now use the existing side-effecting pointer-array index hoist path before final emission, so the helper runs once and selected `uint4*` writes still route correctly; focused trio failed before fix then passed `3/0/0`, hot repeat `9/0/0`, best warm `5.9ms`; changed gate typecheck passed, WGSL modules `16/0`, smoke `495/0/0`, selected storage/pointer WebGPU `120/0/0`, slow-hot `78/0/0`, fixture/status/test-scope passed, skips `0`
 - descriptor-sampled pointer-array CAS/minmax routing probes: added real WebGPU active out-target, shadow-target, and all-inactive fixtures proving conflicting normalized-linear/raw-point descriptor helper values can choose the local pointer-array target for CAS/min/max lane atomics while return-before-barrier lowering preserves old-value mirror writes and suppresses all-inactive reads/writes; focused trio `3/0/0`, hot repeat `9/0/0`, best warm `6.4ms`; changed gate smoke `492/0/0`, slow-hot `78/0/0`, fixture/test-scope passed, skips `0`
@@ -794,6 +795,7 @@ Current verified gates:
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Perf/tooling | latest full-verifier slowest cases | full verifier showed `texture:cubemap-vector-pointer-array-compound-all-inactive` around `1.7s` and auto-corpus `bankConflictKernel` around `1.4s`, which looked like possible warm-path regression | no code fix needed; isolated hot gates show both are cold-cache/pipeline-prepare artifacts, with steady WebGPU run time around `2.6ms` | cubemap compound all-inactive hot gate `3/0/0`, best warm `5.1ms`; bank-conflict auto-corpus hot gate `3/0/0`, best warm `3.6ms`; skips `0` |
 | Fixed | side-effecting pointer-array index in expression statements | fail-first real WebGPU fixture showed `targets[choose_descriptor_sampled_side_effect_index(...)]` as a helper-call argument ran the index helper twice, producing `trace=317` instead of `161` | top-level expression statements now invoke the existing side-effecting pointer-array index hoist before final expression emission, materializing the selected pointer-array index once and reusing it for pointer buffer/base lowering | fail-first focused WebGPU trio failed before fix then passed `3/0/0`, skips `0`; hot repeat `9/0/0`, best warm `5.9ms`; changed gate typecheck passed, WGSL modules `16/0`, smoke `495/0/0`, selected storage/pointer WebGPU `120/0/0`, slow-hot `78/0/0`, skips `0` |
 | Probed green | scalar-view vector-root pointer differences | remaining inverse-scaling risk: `uint* left = reinterpret_cast<uint*>(out + 1); left - reinterpret_cast<uint*>(out)` over a `uint4*` root could incorrectly divide by vector lane width and return `1` instead of scalar lane distance `4` | no code fix needed; local pointer-handle value types preserve scalar cast units, while direct `uint4*` subtraction still returns vector element units | focused unit `483/0`; focused WebGPU `1/0/0`, skips `0`; hot repeat `3/0/0`, best warm `0.8ms`; changed gate compiler unit `467/0`, smoke `390/0/0`, skips `0` |
 | Fixed | byte-root inline-cast pointer differences | inline `reinterpret_cast<float*>(bytes + 8) - reinterpret_cast<float*>(bytes)` over `uchar*` was measured in raw bytes and returned `8`, not float elements `2`; same risk for `uint*` casts over byte roots | pointer-difference scale now derives the root source type directly from inline cast pointer expressions when no handle init or alias exists | focused unit `484/0`; focused WebGPU `1/0/0`, skips `0`; hot repeat `3/0/0`, best warm `1.0ms`; changed gate compiler unit `468/0`, WGSL `16/0`, smoke `391/0/0`, storage `114/0/0`, skips `0` |
