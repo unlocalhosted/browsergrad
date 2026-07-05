@@ -3430,6 +3430,19 @@ __global__ void surface3DVectorZBoundary(cudaSurfaceObject_t surf, float *out) {
     out[5] = layerValue.y;
   }
 }`,
+  surface3DVectorColumnBoundary: `
+__global__ void surface3DVectorColumnBoundary(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    surf3Dwrite(make_float4(21.0f, 22.0f, 23.0f, 24.0f), surf, 1 * sizeof(float), 0, 0);
+    float4 value = surf3Dread<float4>(surf, 1 * sizeof(float), 0, 0);
+    out[0] = value.x;
+    out[1] = value.y;
+    out[2] = surf3Dread<float>(surf, 0, 0, 1);
+    out[3] = surf3Dread<float>(surf, 1 * sizeof(float), 0, 1);
+    out[4] = surf3Dread<float>(surf, 0, 0, 0);
+    out[5] = surf3Dread<float>(surf, 1 * sizeof(float), 0, 0);
+  }
+}`,
   surface3DVectorWriteActiveLaneReturn: `
 __device__ void write_vec3d_active(cudaSurfaceObject_t surfaceArg, float base) {
   surf3Dwrite(make_float4(base + 1.0f, base + 2.0f, base + 3.0f, base + 4.0f), surfaceArg, 0, 0, 1);
@@ -12590,6 +12603,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 13, 17] },
+          },
+          {
+            name: "surface:surf3d-vector-column-boundary",
+            source: SOURCES.surface3DVectorColumnBoundary,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(6),
+              },
+              surfaces: {
+                surf: { width: 2, height: 1, data: new Float32Array([3, 5, 7, 11]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [21, 0, 7, 11, 3, 21] },
           },
           {
             name: "surface:surf3d-vector-write-active-lane-return",
