@@ -17,9 +17,11 @@ import {
   runtimeScopeCases,
   storageScopeCases,
   textureScopeCases,
+  webGpuSlowSmokeHotCases,
   webGpuSmokeCases,
 } from "./cuda-lite-webgpu-smoke-cases.mjs";
 import { buildWebGpuSmokeArgs } from "./run-cuda-lite-webgpu-smoke.mjs";
+import { buildWebGpuSlowSmokeHotArgs } from "./run-cuda-lite-webgpu-slow-smoke-hot.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -207,6 +209,14 @@ assert.deepEqual(smokePlan.scopes.map((scope) => scope.id), [
 assert.deepEqual(smokePlan.commands.map(commandToString), [
   "pnpm --filter @unlocalhosted/browsergrad-compiler run test:test-scope",
   "pnpm --filter @unlocalhosted/browsergrad-compiler run e2e:webgpu:smoke",
+  "pnpm --filter @unlocalhosted/browsergrad-compiler run e2e:webgpu:slow-smoke-hot",
+]);
+
+const slowSmokeRunnerPlan = planForChangedFiles([
+  "scripts/run-cuda-lite-webgpu-slow-smoke-hot.mjs",
+]);
+assert.deepEqual(slowSmokeRunnerPlan.scopes.map((scope) => scope.id), [
+  "webgpu-smoke-scripts",
 ]);
 
 const scopedSmokePlan = planForChangedFiles([], { scopes: ["webgpu-smoke"] });
@@ -216,15 +226,29 @@ assert.deepEqual(scopedSmokePlan.scopes.map((scope) => scope.id), [
 assert.deepEqual(scopedSmokePlan.scopes.map((scope) => scope.requested), [true]);
 
 const smokeArgs = buildWebGpuSmokeArgs(root, [], {});
-assert.equal(smokeArgs.includes("--profile-case"), false);
+assert.equal(smokeArgs.includes("--profile-case"), true);
 assert.equal(smokeArgs.filter((arg) => arg === "--case-timeout-ms").length, 1);
 assert.equal(smokeArgs.filter((arg) => arg === "--device-recycle-interval").length, 1);
 assert.ok(smokeArgs.includes(webGpuSmokeCases.join(",")));
+assert.ok(smokeArgs.includes(webGpuSlowSmokeHotCases.join(",")));
 assert.ok(buildWebGpuSmokeArgs(root, [], { CUDA_LITE_WEBGPU_SMOKE_DEVICE_RECYCLE_INTERVAL: "16" }).includes("16"));
+assert.equal(buildWebGpuSmokeArgs(root, [], { CUDA_LITE_WEBGPU_SMOKE_PROFILE: "none" }).includes("--profile-case"), false);
 
 const profiledSmokeArgs = buildWebGpuSmokeArgs(root, [], { CUDA_LITE_WEBGPU_SMOKE_PROFILE: "all" });
 assert.ok(profiledSmokeArgs.includes("--profile-case"));
 assert.ok(profiledSmokeArgs.includes("all"));
+assert.ok(buildWebGpuSmokeArgs(root, [], { CUDA_LITE_WEBGPU_SMOKE_PROFILE: "true" }).includes("all"));
+
+const slowSmokeHotArgs = buildWebGpuSlowSmokeHotArgs(root);
+const slowSmokeHotCasesArg = slowSmokeHotArgs[slowSmokeHotArgs.indexOf("--cases") + 1];
+const slowSmokeHotProfileArg = slowSmokeHotArgs[slowSmokeHotArgs.indexOf("--profile-case") + 1];
+assert.equal(slowSmokeHotCasesArg, webGpuSlowSmokeHotCases.join(","));
+assert.equal(slowSmokeHotProfileArg, slowSmokeHotCasesArg);
+assert.ok(slowSmokeHotArgs.includes("--forbid-skips"));
+assert.ok(slowSmokeHotArgs.includes("--expect-warm-ms-max"));
+assert.match(slowSmokeHotCasesArg, /texture:cubemap-vector-pointer-array-compound/u);
+assert.match(slowSmokeHotCasesArg, /texture:cubemap-helper-multi-object-pointer-array-cas-minmax-guarded-rhs/u);
+assert.match(slowSmokeHotCasesArg, /surface:surf3d-pointer-alias-atomic-pointer-array-compound-active-lane-return-false-branch/u);
 
 const lastFailurePlan = planForChangedFiles([
   "scripts/run-cuda-lite-last-failures.mjs",
@@ -413,9 +437,12 @@ const expectedSmokeCases = new Set([
 ]);
 assert.deepEqual(webGpuSmokeCases, [...expectedSmokeCases]);
 assert.equal(new Set(webGpuSmokeCases).size, webGpuSmokeCases.length);
+assert.equal(new Set(webGpuSlowSmokeHotCases).size, webGpuSlowSmokeHotCases.length);
+for (const name of webGpuSlowSmokeHotCases) assert.ok(expectedSmokeCases.has(name), `${name} should be part of WebGPU smoke`);
 assert.equal(compilerPackage.scripts["e2e:webgpu:compile"].includes("--skip-build"), false);
 assert.equal(compilerPackage.scripts["e2e:webgpu:fast"].includes("--skip-build"), false);
 assert.equal(compilerPackage.scripts["e2e:webgpu:smoke"], "node ../../scripts/run-cuda-lite-webgpu-smoke.mjs");
+assert.equal(compilerPackage.scripts["e2e:webgpu:slow-smoke-hot"], "node ../../scripts/run-cuda-lite-webgpu-slow-smoke-hot.mjs");
 assert.equal(compilerPackage.scripts["bugbash:status"], "node ../../scripts/cuda-lite-bugbash-status.mjs");
 assert.match(compilerPackage.scripts["e2e:webgpu:corpus-hot"], /--forbid-skips/u);
 assert.match(compilerPackage.scripts["e2e:webgpu:corpus-hot"], /histogram64Kernel/u);
@@ -428,10 +455,6 @@ assert.match(compilerPackage.scripts["e2e:webgpu:volume-minmax-hot"], /volume-ve
 assert.match(compilerPackage.scripts["e2e:webgpu:volume-minmax-hot"], /volume-vector-pointer-array-minmax-active-lane-return-false-branch/u);
 assert.match(compilerPackage.scripts["e2e:webgpu:volume-minmax-hot"], /--profile-case/u);
 assert.match(compilerPackage.scripts["e2e:webgpu:volume-minmax-hot"], /--expect-warm-ms-max 12/u);
-assert.match(compilerPackage.scripts["e2e:webgpu:slow-smoke-hot"], /texture:helper-multi-object-pointer-array-guarded-rhs/u);
-assert.match(compilerPackage.scripts["e2e:webgpu:slow-smoke-hot"], /surface:surf3d-pointer-alias-atomic-pointer-array-compound-active-lane-return-false-branch/u);
-assert.match(compilerPackage.scripts["e2e:webgpu:slow-smoke-hot"], /--profile-case/u);
-assert.match(compilerPackage.scripts["e2e:webgpu:slow-smoke-hot"], /--expect-warm-ms-max 20/u);
 assert.match(compilerPackage.scripts["e2e:webgpu:auto-corpus-hot"], /--auto-corpus-smoke-only/u);
 assert.match(compilerPackage.scripts["e2e:webgpu:auto-corpus-hot"], /--cases 'auto-corpus:/u);
 assert.match(compilerPackage.scripts["e2e:webgpu:auto-corpus-hot"], /--profile-case 'auto-corpus:/u);

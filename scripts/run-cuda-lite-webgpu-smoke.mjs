@@ -3,11 +3,16 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { findRepoRoot } from "./cuda-lite-webgpu-cli.mjs";
-import { webGpuSmokeCases } from "./cuda-lite-webgpu-smoke-cases.mjs";
+import { webGpuSlowSmokeHotCases, webGpuSmokeCases } from "./cuda-lite-webgpu-smoke-cases.mjs";
 
 export function buildWebGpuSmokeArgs(root, extraArgs = [], env = process.env) {
-  const profileValue = env.CUDA_LITE_WEBGPU_SMOKE_PROFILE;
-  const profileArgs = profileValue ? ["--profile-case", profileValue === "true" ? "all" : profileValue] : [];
+  const profileValue = env.CUDA_LITE_WEBGPU_SMOKE_PROFILE ?? "slow";
+  const profileCases = profileValue === "slow"
+    ? webGpuSlowSmokeHotCases.join(",")
+    : profileValue === "true"
+      ? "all"
+    : profileValue;
+  const profileArgs = profileCases && profileCases !== "none" && profileCases !== "false" ? ["--profile-case", profileCases] : [];
   const timeoutMs = env.CUDA_LITE_WEBGPU_SMOKE_TIMEOUT_MS ?? "15000";
   const recycleInterval = env.CUDA_LITE_WEBGPU_SMOKE_DEVICE_RECYCLE_INTERVAL ?? "128";
   return [

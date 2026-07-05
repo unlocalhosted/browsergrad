@@ -295,10 +295,12 @@ export const scopeRules = [
     matches: [
       /^scripts\/cuda-lite-webgpu-smoke-cases\.mjs$/u,
       /^scripts\/run-cuda-lite-webgpu-smoke\.mjs$/u,
+      /^scripts\/run-cuda-lite-webgpu-slow-smoke-hot\.mjs$/u,
     ],
     commands: [
       command("pnpm", "--filter", COMPILER, "run", "test:test-scope"),
       command("pnpm", "--filter", COMPILER, "run", "e2e:webgpu:smoke"),
+      command("pnpm", "--filter", COMPILER, "run", "e2e:webgpu:slow-smoke-hot"),
     ],
   },
   {
