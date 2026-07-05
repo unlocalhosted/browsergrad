@@ -13224,6 +13224,70 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Uint32Array", data: [70, 290, 500, 660] },
           },
           {
+            name: "texture:descriptor-pointer-array-atomic-false-branch",
+            source: SOURCES.textureDescriptorPointerArrayAtomic,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                summary: new Uint32Array(4),
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { width: 2, height: 2 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [0, 180, 230, 310] },
+          },
+          {
+            name: "texture:descriptor-pointer-array-atomic-all-inactive",
+            source: SOURCES.textureDescriptorPointerArrayAtomic,
+            options: {
+              workgroupSize: [4, 2, 1],
+              textureDescriptors: {
+                linearTex: { normalizedCoords: true, addressMode: ["wrap", "wrap"], filterMode: "linear" },
+                pointTex: { normalizedCoords: false, addressMode: ["clamp", "clamp"], filterMode: "point" },
+              },
+            },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 2, 1] },
+            input: () => ({
+              buffers: {
+                summary: new Uint32Array([7, 8, 9, 10]),
+              },
+              textures: {
+                linearTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+                },
+                pointTex: {
+                  width: 4,
+                  height: 2,
+                  data: new Float32Array([11, 12, 13, 14, 15, 16, 17, 18]),
+                },
+              },
+              scalars: { width: 0, height: 2 },
+            }),
+            output: "summary",
+            expectedOutput: { type: "Uint32Array", data: [7, 8, 9, 10] },
+          },
+          {
             name: "texture:volume-descriptor-conflicting-helpers",
             source: SOURCES.textureVolumeDescriptorConflictingHelpers,
             options: {

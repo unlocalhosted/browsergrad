@@ -329,6 +329,8 @@ export const textureScopeCases = [
   "texture:helper-conflicting-descriptors",
   "texture:guarded-barrier-conflicting-descriptors",
   "texture:descriptor-pointer-array-atomic",
+  "texture:descriptor-pointer-array-atomic-false-branch",
+  "texture:descriptor-pointer-array-atomic-all-inactive",
   "texture:volume-descriptor-conflicting-helpers",
   "texture:layered-descriptor-conflicting-helpers",
   "texture:cubemap-descriptor-conflicting-helpers",
