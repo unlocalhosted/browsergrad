@@ -4174,6 +4174,23 @@ __global__ void surface1DVectorUnalignedByteOffset(cudaSurfaceObject_t surf, flo
     out[7] = surf1Dread<float>(surf, 3 * sizeof(float));
   }
 }`,
+  surface1DVectorNegativeByteOffset: `
+__global__ void surface1DVectorNegativeByteOffset(cudaSurfaceObject_t surf, float *out) {
+  if (threadIdx.x == 0) {
+    float4 negativeValue = make_float4(77.0f, 78.0f, 79.0f, 80.0f);
+    surf1Dread(&negativeValue, surf, -1 * (int)sizeof(float));
+    surf1Dwrite(make_float4(41.0f, 42.0f, 43.0f, 44.0f), surf, -1 * (int)sizeof(float));
+    float4 value = surf1Dread<float4>(surf, 0);
+    out[0] = negativeValue.x;
+    out[1] = negativeValue.y;
+    out[2] = negativeValue.z;
+    out[3] = negativeValue.w;
+    out[4] = value.x;
+    out[5] = value.y;
+    out[6] = value.z;
+    out[7] = value.w;
+  }
+}`,
   surface1DVectorBoundary: `
 __global__ void surface1DVectorBoundary(cudaSurfaceObject_t surf, float *out) {
   if (threadIdx.x == 0) {
@@ -20371,6 +20388,22 @@ const html = String.raw`<!doctype html>
           {
             name: "surface:surf1d-vector-unaligned-byte-offset",
             source: SOURCES.surface1DVectorUnalignedByteOffset,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(8),
+              },
+              surfaces: {
+                surf: { width: 4, height: 1, data: new Float32Array([5, 7, 11, 13]) },
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Float32Array", data: [0, 0, 0, 0, 5, 7, 11, 13] },
+          },
+          {
+            name: "surface:surf1d-vector-negative-byte-offset",
+            source: SOURCES.surface1DVectorNegativeByteOffset,
             options: { workgroupSize: [1, 1, 1] },
             launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
             input: () => ({
