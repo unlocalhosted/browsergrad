@@ -4506,6 +4506,10 @@ function expressionContainsSideEffectingCall(expression: CudaLiteExpression, con
         name === "cudaMemcpy2DAsync" ||
         name === "cudaMemcpyPeer" ||
         name === "cudaMemcpyPeerAsync" ||
+        name === "cudaMemcpyToSymbol" ||
+        name === "cudaMemcpyToSymbolAsync" ||
+        name === "cudaMemcpyFromSymbol" ||
+        name === "cudaMemcpyFromSymbolAsync" ||
         name === "cudaMemset" ||
         name === "cudaMemsetAsync" ||
         name === "cudaMemset2D" ||
@@ -6327,6 +6331,14 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return "0";
     case "cudaMemcpyPeerAsync":
       return "0";
+    case "cudaMemcpyToSymbol":
+      return "0";
+    case "cudaMemcpyToSymbolAsync":
+      return "0";
+    case "cudaMemcpyFromSymbol":
+      return "0";
+    case "cudaMemcpyFromSymbolAsync":
+      return "0";
     case "cudaMemset":
       return "0";
     case "cudaMemsetAsync":
@@ -7810,6 +7822,14 @@ function noopCallComment(expression: CudaLiteExpression): string | undefined {
       return "cudaMemcpyPeer omitted: WebGPU copy orchestration is host-managed";
     case "cudaMemcpyPeerAsync":
       return "cudaMemcpyPeerAsync omitted: WebGPU copy orchestration is host-managed";
+    case "cudaMemcpyToSymbol":
+      return "cudaMemcpyToSymbol omitted: WebGPU symbol-copy orchestration is host-managed";
+    case "cudaMemcpyToSymbolAsync":
+      return "cudaMemcpyToSymbolAsync omitted: WebGPU symbol-copy orchestration is host-managed";
+    case "cudaMemcpyFromSymbol":
+      return "cudaMemcpyFromSymbol omitted: WebGPU symbol-copy orchestration is host-managed";
+    case "cudaMemcpyFromSymbolAsync":
+      return "cudaMemcpyFromSymbolAsync omitted: WebGPU symbol-copy orchestration is host-managed";
     case "cudaMemset":
       return "cudaMemset omitted: WebGPU fill orchestration is host-managed";
     case "cudaMemsetAsync":
@@ -7887,6 +7907,10 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaEventSynchronize" ||
     name === "cudaMemcpy2D" ||
     name === "cudaMemcpy2DAsync" ||
+    name === "cudaMemcpyToSymbol" ||
+    name === "cudaMemcpyToSymbolAsync" ||
+    name === "cudaMemcpyFromSymbol" ||
+    name === "cudaMemcpyFromSymbolAsync" ||
     name === "cudaMemset2D" ||
     name === "cudaMemset2DAsync";
 }

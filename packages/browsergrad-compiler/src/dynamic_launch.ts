@@ -513,6 +513,10 @@ function isHostNoopExpression(expression: CudaLiteExpression): boolean {
     name === "cudaMemcpy2DAsync" ||
     name === "cudaMemcpyPeer" ||
     name === "cudaMemcpyPeerAsync" ||
+    name === "cudaMemcpyToSymbol" ||
+    name === "cudaMemcpyToSymbolAsync" ||
+    name === "cudaMemcpyFromSymbol" ||
+    name === "cudaMemcpyFromSymbolAsync" ||
     name === "cudaMemset2D" ||
     name === "cudaMemset2DAsync" ||
     name === "printf";

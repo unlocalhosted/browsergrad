@@ -206,6 +206,7 @@ function createPeerCopyOperations(
   }
   const copyShape = cudaRuntimeCopyShape(expression);
   if (!copyShape) return undefined;
+  if (copyShape.kind === "symbol") return createPeerSymbolCopyOperation(expression, env, input, copyShape);
   if (copyShape.kind === "copy2d") return createPeerCopy2DOperations(expression, env, input, copyShape);
   const dst = expression.args[0] ? evaluatePointerArgument(expression.args[0], env, input) : undefined;
   const srcArg = expression.args[copyShape.srcIndex];
@@ -228,6 +229,45 @@ function createPeerCopyOperations(
     srcRoot: src.root,
     dstOffset: dst.offset,
     srcOffset: src.offset,
+    elementCount,
+    valueType: dstBuffer.valueType,
+  }];
+}
+
+function createPeerSymbolCopyOperation(
+  expression: CudaLiteCallExpression,
+  env: ReadonlyMap<string, HostEvalValue>,
+  input: CompiledKernelInput,
+  copyShape: Extract<CudaRuntimeCopyShape, { readonly kind: "symbol" }>,
+): readonly CudaPeerCopyOperation[] | undefined {
+  const symbol = expression.args[copyShape.symbolIndex] ? evaluatePointerArgument(expression.args[copyShape.symbolIndex]!, env, input) : undefined;
+  const pointer = expression.args[copyShape.pointerIndex] ? evaluatePointerArgument(expression.args[copyShape.pointerIndex]!, env, input) : undefined;
+  const byteCount = expression.args[copyShape.countIndex] ? evaluateHostNumber(expression.args[copyShape.countIndex]!, env, input) : undefined;
+  const offsetBytes = copyShape.offsetIndex === undefined ? 0 : evaluateHostNumber(expression.args[copyShape.offsetIndex]!, env, input);
+  if (!symbol || !pointer || byteCount === undefined || offsetBytes === undefined) return undefined;
+  if (symbol.offset < 0 || pointer.offset < 0 || byteCount < 0 || offsetBytes < 0) return undefined;
+  const symbolBuffer = copyBufferViewFor(input, symbol.root);
+  const pointerBuffer = copyBufferViewFor(input, pointer.root);
+  if (!symbolBuffer || !pointerBuffer || symbolBuffer.valueType !== pointerBuffer.valueType) return undefined;
+  const elementSize = symbolBuffer.elementSize;
+  if (!Number.isInteger(byteCount) || !Number.isInteger(offsetBytes)) return undefined;
+  if (Math.trunc(byteCount) % elementSize !== 0 || Math.trunc(offsetBytes) % elementSize !== 0) return undefined;
+  const elementCount = Math.trunc(byteCount) / elementSize;
+  const symbolOffset = symbol.offset + Math.trunc(offsetBytes) / elementSize;
+  const srcRoot = copyShape.direction === "to-symbol" ? pointer.root : symbol.root;
+  const dstRoot = copyShape.direction === "to-symbol" ? symbol.root : pointer.root;
+  const srcOffset = copyShape.direction === "to-symbol" ? pointer.offset : symbolOffset;
+  const dstOffset = copyShape.direction === "to-symbol" ? symbolOffset : pointer.offset;
+  const srcBuffer = copyShape.direction === "to-symbol" ? pointerBuffer : symbolBuffer;
+  const dstBuffer = copyShape.direction === "to-symbol" ? symbolBuffer : pointerBuffer;
+  if (srcOffset + elementCount > srcBuffer.elementLength || dstOffset + elementCount > dstBuffer.elementLength) return undefined;
+  return [{
+    kind: "copy",
+    expression,
+    dstRoot,
+    srcRoot,
+    dstOffset,
+    srcOffset,
     elementCount,
     valueType: dstBuffer.valueType,
   }];
@@ -368,8 +408,12 @@ function createPeerFill2DOperations(
 function copyBufferViewFor(input: CompiledKernelInput, name: string): CopyBufferView | undefined {
   const typed = input.buffers[name];
   const resident = input.residentBuffers?.[name];
+  const constant = input.constants?.[name];
+  const deviceGlobal = input.deviceGlobals?.[name];
   if (typed && resident) return undefined;
   if (typed) return copyTypedArrayView(typed);
+  if (deviceGlobal) return copyTypedArrayView(deviceGlobal);
+  if (constant && typeof constant !== "number") return copyTypedArrayView(constant);
   if (resident) return copyResidentBufferView(resident);
   return undefined;
 }
@@ -556,7 +600,8 @@ function isRuntimeQueryWriteCall(name: string): boolean {
 
 type CudaRuntimeCopyShape =
   | { readonly kind: "copy1d"; readonly srcIndex: number; readonly countIndex: number }
-  | { readonly kind: "copy2d"; readonly srcIndex: number };
+  | { readonly kind: "copy2d"; readonly srcIndex: number }
+  | { readonly kind: "symbol"; readonly direction: "to-symbol" | "from-symbol"; readonly symbolIndex: number; readonly pointerIndex: number; readonly srcIndex: number; readonly countIndex: number; readonly offsetIndex?: number };
 
 function cudaRuntimeCopyShape(
   expression: CudaLiteCallExpression,
@@ -565,5 +610,11 @@ function cudaRuntimeCopyShape(
   if (name === "cudaMemcpy" || name === "cudaMemcpyAsync") return { kind: "copy1d", srcIndex: 1, countIndex: 2 };
   if (name === "cudaMemcpy2D" || name === "cudaMemcpy2DAsync") return { kind: "copy2d", srcIndex: 2 };
   if (name === "cudaMemcpyPeer" || name === "cudaMemcpyPeerAsync") return { kind: "copy1d", srcIndex: 2, countIndex: 4 };
+  if (name === "cudaMemcpyToSymbol" || name === "cudaMemcpyToSymbolAsync") {
+    return { kind: "symbol", direction: "to-symbol", symbolIndex: 0, pointerIndex: 1, srcIndex: 1, countIndex: 2, ...(expression.args[3] ? { offsetIndex: 3 } : {}) };
+  }
+  if (name === "cudaMemcpyFromSymbol" || name === "cudaMemcpyFromSymbolAsync") {
+    return { kind: "symbol", direction: "from-symbol", symbolIndex: 1, pointerIndex: 0, srcIndex: 1, countIndex: 2, ...(expression.args[3] ? { offsetIndex: 3 } : {}) };
+  }
   return undefined;
 }

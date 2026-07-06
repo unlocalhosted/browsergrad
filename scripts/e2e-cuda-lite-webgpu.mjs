@@ -113,6 +113,7 @@ __global__ void peerCopySync(float *dst, const float *src) {
   }
 }`,
   runtimeCopy: `
+__constant__ float cRuntimeCopySymbol[2];
 __global__ void runtimeCopy(float *dst, const float *src, int n) {
   cudaStream_t stream;
   cudaEvent_t event;
@@ -128,6 +129,10 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
     cudaMemcpy2DAsync(dst + 1, sizeof(float) * 2, src, sizeof(float), sizeof(float), 2, cudaMemcpyDeviceToHost, stream);
     cudaMemset2D(dst, sizeof(float) * 2, 0, sizeof(float), 2);
     cudaMemset2DAsync(dst + 1, sizeof(float) * 2, 0, sizeof(float), 2, stream);
+    cudaMemcpyToSymbol(cRuntimeCopySymbol, src, sizeof(float) * 2);
+    cudaMemcpyToSymbolAsync(cRuntimeCopySymbol, src + 1, sizeof(float), sizeof(float), cudaMemcpyDeviceToDevice, stream);
+    cudaMemcpyFromSymbol(dst, cRuntimeCopySymbol, sizeof(float) * 2);
+    cudaMemcpyFromSymbolAsync(dst + 2, cRuntimeCopySymbol, sizeof(float) * 2, 0, cudaMemcpyDeviceToDevice, stream);
     cudaEventRecord(event, stream);
     cudaEventSynchronize(event);
     cudaStreamSynchronize(stream);
@@ -9361,9 +9366,13 @@ const html = String.raw`<!doctype html>
                 dst: new Float32Array([0, 0, 0, 0]),
                 src: new Float32Array([2.5, 3.5]),
               },
+              constants: {
+                cRuntimeCopySymbol: new Float32Array([0, 0]),
+              },
               scalars: { n: 2 },
             }),
             output: "dst",
+            expectedOutput: { type: "Float32Array", data: [2.5, 3.5, 2.5, 3.5] },
           },
           {
             name: "runtime:host-peer-copy-sync",

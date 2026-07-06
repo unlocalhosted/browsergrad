@@ -238,6 +238,10 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaMemcpy2DAsync", [8, 8]],
   ["cudaMemcpyPeer", [5, 5]],
   ["cudaMemcpyPeerAsync", [6, 6]],
+  ["cudaMemcpyToSymbol", [3, 5]],
+  ["cudaMemcpyToSymbolAsync", [3, 6]],
+  ["cudaMemcpyFromSymbol", [3, 5]],
+  ["cudaMemcpyFromSymbolAsync", [3, 6]],
   ["cudaGraphSetConditional", [2, 2]],
   ...[...CUDA_CACHE_HINT_LOADS].map((name) => [name, [1, 1]] as const),
   ...[...CUDA_CACHE_HINT_STORES].map((name) => [name, [2, 2]] as const),
@@ -2505,20 +2509,24 @@ function validateRuntimeCopyCall(
   const copy2d = callName === "cudaMemcpy2D" || callName === "cudaMemcpy2DAsync";
   const memset2d = callName === "cudaMemset2D" || callName === "cudaMemset2DAsync";
   const peerCopy = callName === "cudaMemcpyPeer" || callName === "cudaMemcpyPeerAsync";
+  const symbolCopy = isCudaRuntimeSymbolCopyCall(callName);
   const dst = expression.args[0];
   const src = memset2d ? undefined : expression.args[copy2d ? 2 : peerCopy ? 2 : 1];
   if (dst) walkExpression(dst, scope);
   if (src) walkExpression(src, scope);
   const scalarArgs = memset2d
     ? [expression.args[1], expression.args[2], expression.args[3], expression.args[4]]
+    : symbolCopy
+    ? [expression.args[2], expression.args[3]]
     : copy2d
     ? [expression.args[1], expression.args[3], expression.args[4], expression.args[5]]
     : [expression.args[peerCopy ? 4 : 2]];
   for (const arg of scalarArgs) {
     if (arg) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
   }
-  const kindArg = expression.args[copy2d ? 6 : 3];
-  if (compatibilityDiagnosticsReachable && (callName === "cudaMemcpy" || callName === "cudaMemcpyAsync" || copy2d) && !supportedCudaMemcpyKind(kindArg)) {
+  const kindArg = expression.args[symbolCopy ? 4 : copy2d ? 6 : 3];
+  const validatesCopyKind = callName === "cudaMemcpy" || callName === "cudaMemcpyAsync" || copy2d || symbolCopy;
+  if (compatibilityDiagnosticsReachable && validatesCopyKind && !(symbolCopy && kindArg === undefined) && !supportedCudaMemcpyKind(kindArg)) {
     diagnostics.push(error(
       "unsupported-cuda-runtime-copy-kind",
       `${callName} supports modeled cudaMemcpyHostToHost/HostToDevice/DeviceToHost/DeviceToDevice/Default copies only`,
@@ -2534,10 +2542,18 @@ function isCudaRuntimeCopyCall(callName: string): boolean {
     callName === "cudaMemcpy2DAsync" ||
     callName === "cudaMemcpyPeer" ||
     callName === "cudaMemcpyPeerAsync" ||
+    isCudaRuntimeSymbolCopyCall(callName) ||
     callName === "cudaMemset" ||
     callName === "cudaMemsetAsync" ||
     callName === "cudaMemset2D" ||
     callName === "cudaMemset2DAsync";
+}
+
+function isCudaRuntimeSymbolCopyCall(callName: string): boolean {
+  return callName === "cudaMemcpyToSymbol" ||
+    callName === "cudaMemcpyToSymbolAsync" ||
+    callName === "cudaMemcpyFromSymbol" ||
+    callName === "cudaMemcpyFromSymbolAsync";
 }
 
 function validateCudaGraphSetConditionalCall(

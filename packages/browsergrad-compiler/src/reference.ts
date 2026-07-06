@@ -1426,6 +1426,10 @@ function execCudaRuntimeCopy(
   if (!shape) throw compilerFailure("unsupported CUDA runtime copy call");
   const dst = expression.args[0];
   const src = expression.args[shape.srcIndex];
+  if (shape.kind === "symbol") {
+    execCudaRuntimeSymbolCopy(expression, context, shape);
+    return;
+  }
   if (shape.kind === "copy2d") {
     execCudaRuntimeCopy2D(expression, context, shape);
     return;
@@ -1443,6 +1447,33 @@ function execCudaRuntimeCopy(
   dstView.bytes.set(copied, dstView.byteOffset);
   context.trace.reads.push({ name: srcView.name, index: srcView.byteOffset, value: writable, ok: writable === byteCount });
   context.trace.writes.push({ name: dstView.name, index: dstView.byteOffset, value: writable, ok: writable === byteCount });
+}
+
+function execCudaRuntimeSymbolCopy(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: ThreadContext,
+  shape: Extract<CudaRuntimeCopyShape, { readonly kind: "symbol" }>,
+): void {
+  const symbol = expression.args[shape.symbolIndex];
+  const pointer = expression.args[shape.pointerIndex];
+  const count = expression.args[shape.countIndex];
+  if (!symbol || !pointer || !count) throw compilerFailure("CUDA symbol runtime copy expects symbol, pointer, and byte count");
+  const offsetBytes = Math.max(0, Math.trunc(shape.offsetIndex === undefined ? 0 : evalNumber(expression.args[shape.offsetIndex]!, context)));
+  const symbolView = pointerBytesForCopy(symbol, context);
+  const pointerView = pointerBytesForCopy(pointer, context);
+  const srcView = shape.direction === "to-symbol" ? pointerView : symbolView;
+  const dstView = shape.direction === "to-symbol" ? symbolView : pointerView;
+  const srcOffset = srcView.byteOffset + (shape.direction === "from-symbol" ? offsetBytes : 0);
+  const dstOffset = dstView.byteOffset + (shape.direction === "to-symbol" ? offsetBytes : 0);
+  const byteCount = Math.max(0, Math.trunc(evalNumber(count, context)));
+  if (srcOffset < 0 || dstOffset < 0) return;
+  const readable = Math.max(0, Math.min(byteCount, srcView.bytes.byteLength - srcOffset));
+  const writable = Math.max(0, Math.min(readable, dstView.bytes.byteLength - dstOffset));
+  if (writable <= 0) return;
+  const copied = srcView.bytes.slice(srcOffset, srcOffset + writable);
+  dstView.bytes.set(copied, dstOffset);
+  context.trace.reads.push({ name: srcView.name, index: srcOffset, value: writable, ok: writable === byteCount });
+  context.trace.writes.push({ name: dstView.name, index: dstOffset, value: writable, ok: writable === byteCount });
 }
 
 function execCudaRuntimeCopy2D(
@@ -1528,7 +1559,8 @@ function execCudaRuntimeMemset2D(
 
 type CudaRuntimeCopyShape =
   | { readonly kind: "copy1d"; readonly srcIndex: number; readonly countIndex: number }
-  | { readonly kind: "copy2d"; readonly srcIndex: number };
+  | { readonly kind: "copy2d"; readonly srcIndex: number }
+  | { readonly kind: "symbol"; readonly direction: "to-symbol" | "from-symbol"; readonly symbolIndex: number; readonly pointerIndex: number; readonly srcIndex: number; readonly countIndex: number; readonly offsetIndex?: number };
 
 function cudaRuntimeCopyShape(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
@@ -1537,6 +1569,12 @@ function cudaRuntimeCopyShape(
   if (name === "cudaMemcpy" || name === "cudaMemcpyAsync") return { kind: "copy1d", srcIndex: 1, countIndex: 2 };
   if (name === "cudaMemcpy2D" || name === "cudaMemcpy2DAsync") return { kind: "copy2d", srcIndex: 2 };
   if (name === "cudaMemcpyPeer" || name === "cudaMemcpyPeerAsync") return { kind: "copy1d", srcIndex: 2, countIndex: 4 };
+  if (name === "cudaMemcpyToSymbol" || name === "cudaMemcpyToSymbolAsync") {
+    return { kind: "symbol", direction: "to-symbol", symbolIndex: 0, pointerIndex: 1, srcIndex: 1, countIndex: 2, ...(expression.args[3] ? { offsetIndex: 3 } : {}) };
+  }
+  if (name === "cudaMemcpyFromSymbol" || name === "cudaMemcpyFromSymbolAsync") {
+    return { kind: "symbol", direction: "from-symbol", symbolIndex: 1, pointerIndex: 0, srcIndex: 1, countIndex: 2, ...(expression.args[3] ? { offsetIndex: 3 } : {}) };
+  }
   return undefined;
 }
 
@@ -1546,6 +1584,13 @@ function isCudaRuntimeMemsetCall(name: string | undefined): boolean {
 
 function isCudaRuntimeMemset2DCall(name: string | undefined): boolean {
   return name === "cudaMemset2D" || name === "cudaMemset2DAsync";
+}
+
+function isCudaRuntimeSymbolCopyCall(name: string | undefined): boolean {
+  return name === "cudaMemcpyToSymbol" ||
+    name === "cudaMemcpyToSymbolAsync" ||
+    name === "cudaMemcpyFromSymbol" ||
+    name === "cudaMemcpyFromSymbolAsync";
 }
 
 interface PointerByteView {
@@ -1579,9 +1624,14 @@ function lvalueByteView(
   context: ThreadContext,
 ): PointerByteView {
   const index = lvalue.index ?? 0;
-  if (lvalue.space === "buffer" || lvalue.space === "device-global") {
-    const buffer = lvalue.space === "device-global" ? context.deviceGlobals.get(lvalue.name) : context.buffers.get(lvalue.name);
-    if (!buffer) throw compilerFailure(`missing ${lvalue.space === "device-global" ? "device global" : "buffer"} '${lvalue.name}'`);
+  if (lvalue.space === "buffer" || lvalue.space === "device-global" || lvalue.space === "constant") {
+    const constant = lvalue.space === "constant" ? context.constants.get(lvalue.name) : undefined;
+    const buffer = lvalue.space === "device-global"
+      ? context.deviceGlobals.get(lvalue.name)
+      : lvalue.space === "constant"
+      ? typeof constant === "number" ? undefined : constant
+      : context.buffers.get(lvalue.name);
+    if (!buffer) throw compilerFailure(`missing ${lvalue.space === "device-global" ? "device global" : lvalue.space} '${lvalue.name}'`);
     return { name: lvalue.name, bytes: byteView(buffer), byteOffset: index * elementByteSize(valueType) };
   }
   if (lvalue.space === "shared") {
@@ -2638,7 +2688,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     return 0;
   }
   if (name !== undefined && isHostManagedRuntimeNoopCall(name)) return 0;
-  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync" || name === "cudaMemcpy2D" || name === "cudaMemcpy2DAsync" || name === "cudaMemcpyPeer" || name === "cudaMemcpyPeerAsync" || isCudaRuntimeMemsetCall(name)) {
+  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync" || name === "cudaMemcpy2D" || name === "cudaMemcpy2DAsync" || name === "cudaMemcpyPeer" || name === "cudaMemcpyPeerAsync" || isCudaRuntimeSymbolCopyCall(name) || isCudaRuntimeMemsetCall(name)) {
     execCudaRuntimeCopy(expression, context);
     return 0;
   }

@@ -172,6 +172,10 @@ function isCudaRuntimeCopyCall(name: string): boolean {
     name === "cudaMemcpy2DAsync" ||
     name === "cudaMemcpyPeer" ||
     name === "cudaMemcpyPeerAsync" ||
+    name === "cudaMemcpyToSymbol" ||
+    name === "cudaMemcpyToSymbolAsync" ||
+    name === "cudaMemcpyFromSymbol" ||
+    name === "cudaMemcpyFromSymbolAsync" ||
     name === "cudaMemset" ||
     name === "cudaMemsetAsync" ||
     name === "cudaMemset2D" ||

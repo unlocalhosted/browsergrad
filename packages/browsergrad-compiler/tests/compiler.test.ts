@@ -3694,6 +3694,52 @@ __global__ void runtimeFill2D(unsigned int *bits) {
     }
   });
 
+  it("host-lifts cudaMemcpyToSymbol and cudaMemcpyFromSymbol", () => {
+    const compiled = compileCudaLiteKernel(`
+__constant__ unsigned int cBits[4];
+__global__ void runtimeSymbolCopy(unsigned int *dst, const unsigned int *src) {
+  cudaStream_t stream;
+  if (threadIdx.x == 0) {
+    cudaMemcpyToSymbol(cBits, src, sizeof(unsigned int) * 2);
+    cudaMemcpyToSymbolAsync(cBits, src + 2, sizeof(unsigned int), sizeof(unsigned int) * 2, cudaMemcpyDeviceToDevice, stream);
+    cudaMemcpyFromSymbol(dst, cBits, sizeof(unsigned int) * 3);
+    cudaMemcpyFromSymbolAsync(dst + 3, cBits, sizeof(unsigned int), sizeof(unsigned int) * 2, cudaMemcpyDeviceToDevice, stream);
+  }
+}`, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        dst: new Uint32Array([0, 0, 0, 0]),
+        src: new Uint32Array([11, 22, 33]),
+      },
+      constants: {
+        cBits: new Uint32Array([0, 0, 0, 0]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const plan = createCudaRuntimeCopyPlan(compiled, input, launch);
+    const webGpuPlan = createCudaWebGpuExecutionPlan(compiled, input, launch);
+
+    expect([...result.buffers.dst as Uint32Array]).toEqual([11, 22, 33, 33]);
+    expect(plan.supported).toBe(true);
+    expect(plan.copies.map((copy) => copy.kind === "copy"
+      ? { dstRoot: copy.dstRoot, srcRoot: copy.srcRoot, dstOffset: copy.dstOffset, srcOffset: copy.srcOffset, elementCount: copy.elementCount }
+      : { dstRoot: copy.dstRoot, srcRoot: undefined, dstOffset: copy.dstOffset, srcOffset: undefined, elementCount: copy.elementCount })).toEqual([
+      { dstRoot: "cBits", srcRoot: "src", dstOffset: 0, srcOffset: 0, elementCount: 2 },
+      { dstRoot: "cBits", srcRoot: "src", dstOffset: 2, srcOffset: 2, elementCount: 1 },
+      { dstRoot: "dst", srcRoot: "cBits", dstOffset: 0, srcOffset: 0, elementCount: 3 },
+      { dstRoot: "dst", srcRoot: "cBits", dstOffset: 3, srcOffset: 2, elementCount: 1 },
+    ]);
+    expect(webGpuPlan.supported).toBe(true);
+    if (webGpuPlan.supported) {
+      expect(webGpuPlan.kind).toBe("host-copy");
+      expect(webGpuPlan.steps).toHaveLength(5);
+    }
+  });
+
   it("host-lifts cudaMemcpy2D and cudaMemcpy2DAsync row copies", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void runtimeCopy2D(float *dst, const float *src) {
