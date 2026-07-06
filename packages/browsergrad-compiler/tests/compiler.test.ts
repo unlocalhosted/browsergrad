@@ -424,6 +424,30 @@ __global__ void window3(const float* x, float* y, int stride) {
     expect([...referenceResult.buffers.y as Float32Array]).toEqual([111, 222, 333, 444]);
   });
 
+  it("emits simple shared memory and barriers from semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sharedReverse(float* out) {
+  __shared__ float tile[4];
+  int tid = threadIdx.x;
+  tile[tid] = (float)(tid + 1);
+  __syncthreads();
+  out[tid] = tile[3 - tid];
+}
+`, { workgroupSize: [4, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(false);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("var<workgroup> tile: array<f32, 4>;");
+    expect(compiled.wgsl).toContain("workgroupBarrier();");
+    expect([...result.buffers.out as Float32Array]).toEqual([4, 3, 2, 1]);
+  });
+
   it("keeps canonical lab examples executable through Kernel IR and CPU reference", () => {
     const saxpy = compileCudaLiteKernelForWebGpu(compilerExampleText("saxpy.cu"), {
       workgroupSize: [8, 1, 1],

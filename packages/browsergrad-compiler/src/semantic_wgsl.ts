@@ -31,6 +31,7 @@ export function canEmitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): boolean
   return unsupportedSemanticWgslOperation(ir.operations, ir) === undefined &&
     ir.requiredFeatures.length === 0 &&
     ir.params.every(semanticWgslParamSupported) &&
+    semanticWgslSharedBarrierShapeSupported(ir) &&
     ir.memory.every((symbol) => symbol.kind === "local" || symbol.kind === "shared");
 }
 
@@ -67,6 +68,9 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
   for (const param of ir.params.filter((item) => item.addressSpace === "storage")) {
     const access = param.constant ? "read" : "read_write";
     lines.push(`@group(0) @binding(${bindingIndexFor(bindings, param.name)}) var<storage, ${access}> ${nameFor(param.name, names)}: array<${wgslScalar(param.valueType)}>;`);
+  }
+  for (const shared of sharedMemorySymbols(ir)) {
+    lines.push(`var<workgroup> ${nameFor(shared.name, names)}: ${emitSharedType(shared)};`);
   }
   if (uniformParams.length > 0) {
     lines.push("struct Params {");
@@ -105,6 +109,10 @@ function unsupportedSemanticWgslOperation(
   for (const operation of operations) {
     switch (operation.kind) {
       case "declare":
+        if (operation.target.addressSpace === "shared") {
+          if (operation.target.pointer || !semanticWgslScalarTypeSupported(operation.target.valueType)) return operation;
+          break;
+        }
         if (operation.target.addressSpace !== "local" || operation.target.pointer || operation.target.dimensions.length > 0) return operation;
         if (!semanticWgslScalarTypeSupported(operation.target.valueType)) return operation;
         if (operation.init && !semanticWgslExpressionSupported(operation.init, "scalar")) return operation;
@@ -112,7 +120,10 @@ function unsupportedSemanticWgslOperation(
       case "store":
         if (!semanticWgslAssignmentOperatorSupported(operation.operator)) return operation;
         if (!semanticWgslMemoryRefSupported(operation.target)) return operation;
-        if (!ir.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage")) return operation;
+        if (
+          operation.target.addressSpace === "storage" &&
+          !ir.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage")
+        ) return operation;
         if (!semanticWgslExpressionSupported(operation.value, "scalar")) return operation;
         break;
       case "expression":
@@ -135,6 +146,9 @@ function unsupportedSemanticWgslOperation(
           if (unsupported) return unsupported;
         }
         break;
+      case "barrier":
+        if (operation.callee !== "__syncthreads") return operation;
+        break;
       default:
         return operation;
     }
@@ -146,6 +160,30 @@ function semanticWgslParamSupported(param: SemanticKernelIrModule["params"][numb
   if (param.addressSpace === "storage") return Boolean(param.pointer) && semanticWgslScalarTypeSupported(param.valueType);
   if (param.addressSpace === "uniform") return semanticWgslScalarTypeSupported(param.valueType);
   return false;
+}
+
+function semanticWgslSharedBarrierShapeSupported(ir: SemanticKernelIrModule): boolean {
+  const shared = sharedMemorySymbols(ir);
+  if (shared.length === 0 && !operationsContainBarrier(ir.operations)) return true;
+  if (!shared.every((symbol) => symbol.dimensions.length === 1 && (symbol.dimensions[0] ?? 0) > 0)) return false;
+  return operationsHaveOnlyTopLevelBarriers(ir.operations);
+}
+
+function operationsContainBarrier(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.some((operation) =>
+    operation.kind === "barrier" ||
+    operation.kind === "branch" && (operationsContainBarrier(operation.consequent) || operationsContainBarrier(operation.alternate)) ||
+    operation.kind === "loop" && operationsContainBarrier(operation.body) ||
+    operation.kind === "block" && operationsContainBarrier(operation.body)
+  );
+}
+
+function operationsHaveOnlyTopLevelBarriers(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.every((operation) =>
+    operation.kind !== "branch" &&
+    operation.kind !== "loop" &&
+    operation.kind !== "block"
+  );
 }
 
 function semanticWgslScalarTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
@@ -166,10 +204,9 @@ function semanticWgslLoopInitSupported(
 }
 
 function semanticWgslMemoryRefSupported(ref: SemanticMemoryRef): boolean {
-  return ref.addressSpace === "storage" &&
-    ref.indices.length === 1 &&
+  return (ref.addressSpace === "storage" || ref.addressSpace === "shared") &&
     ref.fields.length === 0 &&
-    semanticWgslExpressionSupported(ref.indices[0]!, "scalar");
+    ref.indices.every((index) => semanticWgslExpressionSupported(index, "scalar"));
 }
 
 function semanticWgslExpressionSupported(expression: SemanticExpression, expected: "scalar" | "any"): boolean {
@@ -177,7 +214,10 @@ function semanticWgslExpressionSupported(expression: SemanticExpression, expecte
     case "literal":
       return typeof expression.value === "number";
     case "symbol":
-      return expression.addressSpace === "uniform" || expression.addressSpace === "local" || BUILTIN_VECTOR_NAMES.has(expression.name);
+      return expression.addressSpace === "uniform" ||
+        expression.addressSpace === "local" ||
+        expression.addressSpace === "shared" ||
+        BUILTIN_VECTOR_NAMES.has(expression.name);
     case "member":
       return expression.object.kind === "symbol" &&
         BUILTIN_VECTOR_NAMES.has(expression.object.name) &&
@@ -230,6 +270,7 @@ function emitSemanticOperation(
   const prefix = "  ".repeat(indentLevel);
   switch (operation.kind) {
     case "declare": {
+      if (operation.target.addressSpace === "shared") return [];
       const type = wgslScalar(operation.target.valueType);
       const init = operation.init ? ` = ${emitSemanticExpressionAs(operation.init, ir, names, wgslValueScalar(operation.target.valueType))}` : "";
       return [`${prefix}var ${nameFor(operation.target.name, names)}: ${type}${init};`];
@@ -250,6 +291,8 @@ function emitSemanticOperation(
     }
     case "loop":
       return emitSemanticLoop(operation, ir, names, indentLevel);
+    case "barrier":
+      return [`${prefix}workgroupBarrier();`];
     default:
       throw semanticWgslError(`semantic WGSL does not support ${operation.kind}`, operation.span);
   }
@@ -453,25 +496,76 @@ function emitSemanticMemoryRef(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
 ): string {
-  if (ref.indices.length !== 1 || ref.fields.length > 0) throw semanticWgslError("semantic WGSL supports 1D storage refs only", ref.span);
-  return `${nameFor(ref.base, names)}[${emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32")}]`;
+  if (ref.fields.length > 0) throw semanticWgslError("semantic WGSL supports scalar memory refs only", ref.span);
+  if (ref.addressSpace === "storage") {
+    if (ref.indices.length !== 1) throw semanticWgslError("semantic WGSL supports 1D storage refs only", ref.span);
+    return `${nameFor(ref.base, names)}[${emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32")}]`;
+  }
+  if (ref.addressSpace === "shared") {
+    const shared = sharedMemorySymbols(ir).find((symbol) => symbol.name === ref.base);
+    if (!shared) throw semanticWgslError(`unknown shared memory '${ref.base}'`, ref.span);
+    return `${nameFor(ref.base, names)}[${emitFlatSharedIndex(shared, ref.indices, ir, names)}]`;
+  }
+  throw semanticWgslError(`semantic WGSL does not support ${ref.addressSpace} memory refs`, ref.span);
 }
 
 function memoryRefFromIndexExpression(expression: Extract<SemanticExpression, { readonly kind: "index" }>): SemanticMemoryRef | undefined {
-  const target = expression.target;
-  if (target.kind !== "symbol" || target.addressSpace !== "storage") return undefined;
+  const flattened = flattenMemoryRef(expression);
+  if (!flattened || (flattened.base.addressSpace !== "storage" && flattened.base.addressSpace !== "shared")) return undefined;
   return {
-    base: target.name,
-    addressSpace: target.addressSpace,
-    ...(target.valueType === undefined ? {} : { valueType: target.valueType }),
-    indices: [expression.index],
+    base: flattened.base.name,
+    addressSpace: flattened.base.addressSpace,
+    ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
+    indices: flattened.indices,
     fields: [],
     span: expression.span,
   };
 }
 
+function flattenMemoryRef(expression: SemanticExpression): {
+  readonly base: Extract<SemanticExpression, { readonly kind: "symbol" }>;
+  readonly indices: readonly SemanticExpression[];
+} | undefined {
+  if (expression.kind === "symbol") return { base: expression, indices: [] };
+  if (expression.kind !== "index") return undefined;
+  const target = flattenMemoryRef(expression.target);
+  if (!target) return undefined;
+  return { base: target.base, indices: [...target.indices, expression.index] };
+}
+
 function unsupportedMemoryRef(span: SourceSpan): SemanticMemoryRef {
   return { base: "", addressSpace: "unknown", indices: [], fields: [], span };
+}
+
+function sharedMemorySymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["memory"][number][] {
+  return ir.memory.filter((symbol) => symbol.kind === "shared");
+}
+
+function emitSharedType(symbol: SemanticKernelIrModule["memory"][number]): string {
+  return `array<${wgslScalar(symbol.valueType)}, ${Math.max(1, totalElements(symbol.dimensions))}>`;
+}
+
+function totalElements(dimensions: readonly number[]): number {
+  return dimensions.length === 0 ? 1 : dimensions.reduce((product, dimension) => product * dimension, 1);
+}
+
+function emitFlatSharedIndex(
+  symbol: SemanticKernelIrModule["memory"][number],
+  indices: readonly SemanticExpression[],
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+): string {
+  if (indices.length === 0) return "0u";
+  if (indices.length === 1) return emitSemanticExpressionAs(indices[0]!, ir, names, "u32");
+  if (indices.length !== symbol.dimensions.length) {
+    throw semanticWgslError(`shared memory '${symbol.name}' index rank mismatch`, symbol.span);
+  }
+  const terms = indices.map((index, offset) => {
+    const stride = symbol.dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);
+    const emitted = emitSemanticExpressionAs(index, ir, names, "u32");
+    return stride === 1 ? emitted : `(${emitted} * ${stride}u)`;
+  });
+  return terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
 }
 
 function collectOperationNames(
