@@ -476,6 +476,58 @@ __global__ void atomicCounter(uint* counter, uint* out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([7]);
   });
 
+  it("runs early kernel returns through semantic reference and WGSL", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void earlyReturn(uint* out, int n) {
+  int idx = threadIdx.x;
+  if (idx >= n) return;
+  out[idx] = (uint)(idx + 1);
+}
+`, { workgroupSize: [4, 1, 1] });
+    const input = {
+      buffers: { out: new Uint32Array(4) },
+      scalars: { n: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const result = runCompiledKernelReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("return;");
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([1, 2, 0, 0]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 2, 0, 0]);
+  });
+
+  it("runs storage pointer offset updates through semantic reference and WGSL", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void pointerOffset(float* out, const float* input, int stride) {
+  int row = threadIdx.x;
+  out += row * stride;
+  input += row * stride;
+  out[1] = input[0] + input[1];
+}
+`, { workgroupSize: [2, 1, 1] });
+    const input = {
+      buffers: {
+        out: new Float32Array(4),
+        input: new Float32Array([1, 2, 10, 20]),
+      },
+      scalars: { stride: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [2, 1, 1] as const };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const result = runCompiledKernelReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("var out__bg_ptr_offset");
+    expect(compiled.wgsl).toContain("out[u32((out__bg_ptr_offset + 1))]");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([0, 3, 0, 30]);
+    expect([...result.buffers.out as Float32Array]).toEqual([0, 3, 0, 30]);
+  });
+
   it("emits integer read-modify-write atomic statements from semantic IR", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void atomicRmw(int* x, int* out) {

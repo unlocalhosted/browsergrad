@@ -59,6 +59,7 @@ interface SemanticReferenceContext {
   readonly buffers: Map<string, WgslTypedArray>;
   readonly constants: Map<string, number | WgslTypedArray>;
   readonly deviceGlobals: Map<string, WgslTypedArray>;
+  readonly storageOffsets: Map<string, number>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly locals: Map<string, SemanticValue>;
   readonly blockIdx: Vector3;
@@ -120,6 +121,7 @@ export function runCompiledKernelSemanticReference(
                 buffers,
                 constants,
                 deviceGlobals,
+                storageOffsets: new Map(),
                 scalars,
                 locals: new Map(),
                 blockIdx: { x: bx, y: by, z: bz },
@@ -163,7 +165,7 @@ function unsupportedSemanticReferenceOperation(
         break;
       case "store":
         if (!semanticReferenceAssignmentOperatorSupported(operation.operator)) return operation;
-        if (!semanticReferenceMemoryRefSupported(operation.target)) return operation;
+        if (!semanticReferenceMemoryRefSupported(operation.target) && !semanticReferenceStorageOffsetStoreSupported(operation, compiled)) return operation;
         if (
           operation.target.addressSpace === "storage" &&
           !compiled.kernelIr.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage")
@@ -183,6 +185,9 @@ function unsupportedSemanticReferenceOperation(
         if (operation.init && !semanticReferenceLoopInitSupported(operation.init, compiled)) return operation;
         if (operation.condition && !semanticReferenceExpressionSupported(operation.condition, "scalar")) return operation;
         if (operation.update && !semanticReferenceExpressionSupported(operation.update, "scalar")) return operation;
+        break;
+      case "return":
+        if (operation.value) return operation;
         break;
       default:
         return operation;
@@ -228,9 +233,22 @@ function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
   }
   if (ref.fields.length > 0) return false;
   if (ref.addressSpace === "local" && ref.indices.length === 0) return false;
-  if ((ref.addressSpace === "storage" || ref.addressSpace === "constant") && ref.indices.length !== 1) return false;
+  if (ref.addressSpace === "storage" && ref.indices.length === 0) return false;
+  if (ref.addressSpace === "constant" && ref.indices.length !== 1) return false;
   if (ref.addressSpace === "device-global" && ref.indices.length > 1) return false;
   return ref.indices.every((index) => semanticReferenceExpressionSupported(index, "scalar"));
+}
+
+function semanticReferenceStorageOffsetStoreSupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "store" }>,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  return operation.target.addressSpace === "storage" &&
+    operation.target.indices.length === 0 &&
+    operation.target.fields.length === 0 &&
+    (operation.operator === "+=" || operation.operator === "-=") &&
+    compiled.kernelIr.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage") &&
+    semanticReferenceExpressionSupported(operation.value, "scalar");
 }
 
 function semanticReferenceAtomicSupported(
@@ -320,7 +338,7 @@ function semanticReferenceExpressionSupported(expression: SemanticExpression, ex
         semanticReferenceExpressionSupported(expression.consequent, expected) &&
         semanticReferenceExpressionSupported(expression.alternate, expected);
     case "assignment":
-      return expression.operator === "=" &&
+      return semanticReferenceAssignmentOperatorSupported(expression.operator) &&
         expression.target.kind === "symbol" &&
         expression.target.addressSpace === "local" &&
         semanticReferenceExpressionSupported(expression.value, "scalar");
@@ -376,13 +394,19 @@ function isBuiltinVectorMember(expression: Extract<SemanticExpression, { kind: "
 function execSemanticOperations(
   operations: readonly SemanticKernelIrOperation[],
   context: SemanticReferenceContext,
-): void {
+): boolean {
   for (const operation of operations) {
     switch (operation.kind) {
       case "declare":
         context.locals.set(operation.target.name, semanticDeclareValue(operation, context));
         break;
       case "store":
+        if (semanticReferenceStorageOffsetStoreSupported(operation, context.compiled)) {
+          const delta = Math.trunc(evalNumber(operation.value, context));
+          const current = context.storageOffsets.get(operation.target.base) ?? 0;
+          context.storageOffsets.set(operation.target.base, operation.operator === "-=" ? current - delta : current + delta);
+          break;
+        }
         writeMemory(operation.target, storeValue(operation, context), context);
         break;
       case "atomic":
@@ -392,16 +416,21 @@ function execSemanticOperations(
         evalNumber(operation.expression, context);
         break;
       case "branch":
-        if (truthy(evalNumber(operation.condition, context))) execSemanticOperations(operation.consequent, context);
-        else execSemanticOperations(operation.alternate, context);
+        if (truthy(evalNumber(operation.condition, context))) {
+          if (execSemanticOperations(operation.consequent, context)) return true;
+        } else if (execSemanticOperations(operation.alternate, context)) return true;
         break;
       case "loop":
-        execSemanticLoop(operation, context);
+        if (execSemanticLoop(operation, context)) return true;
         break;
+      case "return":
+        if (operation.value) throw semanticReferenceError("semantic reference supports kernel return without value only", operation.span);
+        return true;
       default:
         throw semanticReferenceError(`semantic reference does not support ${operation.kind}`, operation.span);
     }
   }
+  return false;
 }
 
 function storeValue(
@@ -478,27 +507,27 @@ function semanticAtomicValue(
 function execSemanticLoop(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "loop" }>,
   context: SemanticReferenceContext,
-): void {
+): boolean {
   if (operation.loopKind === "for") {
     if (operation.init) execSemanticLoopInit(operation.init, context);
     for (let guard = 0; operation.condition === undefined || truthy(evalNumber(operation.condition, context)); guard++) {
       if (guard > 1_000_000) throw semanticReferenceError("semantic reference loop exceeded iteration cap", operation.span);
-      execSemanticOperations(operation.body, context);
+      if (execSemanticOperations(operation.body, context)) return true;
       if (operation.update) evalNumber(operation.update, context);
     }
-    return;
+    return false;
   }
   if (operation.loopKind === "while") {
     for (let guard = 0; operation.condition === undefined || truthy(evalNumber(operation.condition, context)); guard++) {
       if (guard > 1_000_000) throw semanticReferenceError("semantic reference loop exceeded iteration cap", operation.span);
-      execSemanticOperations(operation.body, context);
+      if (execSemanticOperations(operation.body, context)) return true;
     }
-    return;
+    return false;
   }
   for (let guard = 0; ; guard++) {
     if (guard > 1_000_000) throw semanticReferenceError("semantic reference loop exceeded iteration cap", operation.span);
-    execSemanticOperations(operation.body, context);
-    if (!operation.condition || !truthy(evalNumber(operation.condition, context))) return;
+    if (execSemanticOperations(operation.body, context)) return true;
+    if (!operation.condition || !truthy(evalNumber(operation.condition, context))) return false;
   }
 }
 
@@ -537,11 +566,13 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
         ? evalSemanticExpression(expression.consequent, context)
         : evalSemanticExpression(expression.alternate, context);
     case "assignment":
-      if (expression.operator !== "=" || expression.target.kind !== "symbol") {
+      if (!semanticReferenceAssignmentOperatorSupported(expression.operator) || expression.target.kind !== "symbol") {
         throw semanticReferenceError("semantic reference supports only scalar local assignment expressions", expression.span);
       }
       {
-        const value = evalNumber(expression.value, context);
+        const right = evalNumber(expression.value, context);
+        const left = expression.operator === "=" ? 0 : evalNumber(expression.target, context);
+        const value = expression.operator === "+=" ? left + right : expression.operator === "-=" ? left - right : right;
         context.locals.set(expression.target.name, value);
         return value;
       }
@@ -735,7 +766,12 @@ function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): n
     if (ref.indices.length === 1) return Math.trunc(evalNumber(ref.indices[0]!, context));
     throw semanticReferenceError("semantic reference supports scalar/1D device-global indexing", ref.span);
   }
-  if (ref.indices.length !== 1) throw semanticReferenceError("semantic reference supports only 1D storage indexing", ref.span);
+  if (ref.addressSpace === "storage") {
+    const offset = context.storageOffsets.get(ref.base) ?? 0;
+    if (ref.indices.length === 0) return offset;
+    return offset + ref.indices.reduce((sum, index) => sum + Math.trunc(evalNumber(index, context)), 0);
+  }
+  if (ref.indices.length !== 1) throw semanticReferenceError("semantic reference supports only 1D constant indexing", ref.span);
   return Math.trunc(evalNumber(ref.indices[0]!, context));
 }
 

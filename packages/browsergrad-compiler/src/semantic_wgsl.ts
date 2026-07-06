@@ -89,7 +89,9 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
   const unsupportedParam = ir.params.find((param) => !semanticWgslParamSupported(param));
   if (unsupportedParam) throw semanticWgslError(`semantic WGSL does not support parameter '${unsupportedParam.name}'`, unsupportedParam.span);
 
+  const storageOffsetBases = semanticStorageOffsetBaseNames(ir.operations);
   const rawNames = new Set(ir.params.map((param) => param.name));
+  for (const base of storageOffsetBases) rawNames.add(storageOffsetSymbol(base));
   for (const operation of ir.operations) collectOperationNames(operation, rawNames);
   const names = createWgslNameMap([...rawNames]);
   const uniformParams = [
@@ -171,6 +173,7 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
     "  @builtin(workgroup_id) workgroup_id: vec3<u32>,",
     "  @builtin(num_workgroups) num_workgroups: vec3<u32>",
     ") {",
+    ...emitSemanticStorageOffsetDeclarations(ir, names, 1),
     ...emitSemanticOperations(ir.operations, ir, names, 1),
     "}",
   );
@@ -204,7 +207,7 @@ function unsupportedSemanticWgslOperation(
         break;
       case "store":
         if (!semanticWgslAssignmentOperatorSupported(operation.operator)) return operation;
-        if (!semanticWgslMemoryRefSupported(operation.target)) return operation;
+        if (!semanticWgslMemoryRefSupported(operation.target) && !semanticWgslStorageOffsetStoreSupported(operation, ir)) return operation;
         if (
           operation.target.addressSpace === "storage" &&
           !ir.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage")
@@ -236,6 +239,9 @@ function unsupportedSemanticWgslOperation(
         break;
       case "barrier":
         if (operation.callee !== "__syncthreads") return operation;
+        break;
+      case "return":
+        if (operation.value) return operation;
         break;
       default:
         return operation;
@@ -301,10 +307,23 @@ function semanticWgslLoopInitSupported(
 function semanticWgslMemoryRefSupported(ref: SemanticMemoryRef): boolean {
   if (ref.addressSpace !== "storage" && ref.addressSpace !== "shared" && ref.addressSpace !== "constant" && ref.addressSpace !== "device-global" && ref.addressSpace !== "local") return false;
   if (ref.fields.length > 0) return false;
-  if ((ref.addressSpace === "storage" || ref.addressSpace === "constant") && ref.indices.length !== 1) return false;
+  if (ref.addressSpace === "storage" && ref.indices.length === 0) return false;
+  if (ref.addressSpace === "constant" && ref.indices.length !== 1) return false;
   if (ref.addressSpace === "device-global" && ref.indices.length > 1) return false;
   if (ref.addressSpace === "local" && ref.indices.length === 0) return false;
   return ref.indices.every((index) => semanticWgslExpressionSupported(index, "scalar"));
+}
+
+function semanticWgslStorageOffsetStoreSupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "store" }>,
+  ir: SemanticKernelIrModule,
+): boolean {
+  return operation.target.addressSpace === "storage" &&
+    operation.target.indices.length === 0 &&
+    operation.target.fields.length === 0 &&
+    (operation.operator === "+=" || operation.operator === "-=") &&
+    ir.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage") &&
+    semanticWgslExpressionSupported(operation.value, "scalar");
 }
 
 function semanticWgslAtomicSupported(
@@ -465,6 +484,9 @@ function emitSemanticOperation(
       return emitSemanticLoop(operation, ir, names, indentLevel);
     case "barrier":
       return [`${prefix}workgroupBarrier();`];
+    case "return":
+      if (operation.value) throw semanticWgslError("semantic WGSL supports kernel return without value only", operation.span);
+      return [`${prefix}return;`];
     default:
       throw semanticWgslError(`semantic WGSL does not support ${operation.kind}`, operation.span);
   }
@@ -475,6 +497,11 @@ function emitSemanticStore(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
 ): string {
+  if (semanticWgslStorageOffsetStoreSupported(operation, ir)) {
+    const offset = nameFor(storageOffsetSymbol(operation.target.base), names);
+    const value = emitSemanticExpressionAs(operation.value, ir, names, "i32");
+    return operation.operator === "-=" ? `${offset} = (${offset} - ${value})` : `${offset} = (${offset} + ${value})`;
+  }
   const target = emitSemanticMemoryRef(operation.target, ir, names);
   if (semanticAtomicStorageNames(ir.operations).has(operation.target.base) || semanticAtomicDeviceGlobalNames(ir.operations).has(operation.target.base)) {
     if (operation.operator !== "=") {
@@ -506,6 +533,17 @@ function emitLocalArrayInit(
         .join("");
       return `${prefix}${nameFor(operation.target.name, names)}${indices} = ${emitSemanticExpressionAs(value, ir, names, wgslValueScalar(operation.target.valueType))};`;
     });
+}
+
+function emitSemanticStorageOffsetDeclarations(
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+): readonly string[] {
+  const prefix = "  ".repeat(indentLevel);
+  return [...semanticStorageOffsetBaseNames(ir.operations)]
+    .sort()
+    .map((base) => `${prefix}var ${nameFor(storageOffsetSymbol(base), names)}: i32 = 0;`);
 }
 
 function emitSemanticAtomic(
@@ -777,8 +815,8 @@ function emitSemanticMemoryRef(
 ): string {
   if (ref.fields.length > 0) throw semanticWgslError("semantic WGSL supports scalar memory refs only", ref.span);
   if (ref.addressSpace === "storage") {
-    if (ref.indices.length !== 1) throw semanticWgslError("semantic WGSL supports 1D storage refs only", ref.span);
-    return `${nameFor(ref.base, names)}[${emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32")}]`;
+    if (ref.indices.length === 0) throw semanticWgslError("semantic WGSL supports indexed storage refs only", ref.span);
+    return `${nameFor(ref.base, names)}[${emitFlatStorageIndex(ref, ir, names)}]`;
   }
   if (ref.addressSpace === "constant") {
     if (ref.indices.length !== 1) throw semanticWgslError("semantic WGSL supports 1D constant refs only", ref.span);
@@ -862,6 +900,10 @@ function totalElements(dimensions: readonly number[]): number {
   return dimensions.length === 0 ? 1 : dimensions.reduce((product, dimension) => product * dimension, 1);
 }
 
+function storageOffsetSymbol(base: string): string {
+  return `${base}__bg_ptr_offset`;
+}
+
 function flattenInitializerExpressions(expression: SemanticExpression): readonly SemanticExpression[] {
   if (expression.kind !== "initializer") return [expression];
   return expression.elements.flatMap((element) => flattenInitializerExpressions(element));
@@ -872,6 +914,23 @@ function flatIndicesForDimensions(dimensions: readonly number[], flatIndex: numb
     const stride = dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);
     return Math.floor(flatIndex / stride) % Math.max(1, dimensions[offset] ?? 1);
   });
+}
+
+function emitFlatStorageIndex(
+  ref: SemanticMemoryRef,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+): string {
+  const hasOffset = semanticStorageOffsetBaseNames(ir.operations).has(ref.base);
+  if (!hasOffset && ref.indices.length === 1) {
+    return emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32");
+  }
+  const terms = ref.indices.map((index) => emitSemanticExpressionAs(index, ir, names, "i32"));
+  if (hasOffset) {
+    terms.unshift(nameFor(storageOffsetSymbol(ref.base), names));
+  }
+  const expression = terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
+  return `u32(${expression})`;
 }
 
 function emitFlatSharedIndex(
@@ -891,6 +950,29 @@ function emitFlatSharedIndex(
     return stride === 1 ? emitted : `(${emitted} * ${stride}u)`;
   });
   return terms.length === 1 ? terms[0]! : `(${terms.join(" + ")})`;
+}
+
+function semanticStorageOffsetBaseNames(operations: readonly SemanticKernelIrOperation[]): Set<string> {
+  const out = new Set<string>();
+  collectSemanticStorageOffsetBaseNames(operations, out);
+  return out;
+}
+
+function collectSemanticStorageOffsetBaseNames(
+  operations: readonly SemanticKernelIrOperation[],
+  out: Set<string>,
+): void {
+  for (const operation of operations) {
+    if (
+      operation.kind === "store" &&
+      operation.target.addressSpace === "storage" &&
+      operation.target.indices.length === 0 &&
+      operation.target.fields.length === 0 &&
+      (operation.operator === "+=" || operation.operator === "-=")
+    ) out.add(operation.target.base);
+    if (operation.kind === "branch") collectSemanticStorageOffsetBaseNames([...operation.consequent, ...operation.alternate], out);
+    if (operation.kind === "loop") collectSemanticStorageOffsetBaseNames(operation.body, out);
+  }
 }
 
 function collectOperationNames(
