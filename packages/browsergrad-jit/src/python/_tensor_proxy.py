@@ -1339,6 +1339,7 @@ class TensorProxy:
         grad: Optional["TensorProxy"] = None,
         loss_scale: float = 1.0,
         device: Optional[str] = None,
+        resident: bool = False,
     ) -> None:
         """Compute gradients via reverse-topological walk of the graph.
 
@@ -1356,7 +1357,8 @@ class TensorProxy:
         `device="webgpu"` realizes symbolic gradient roots through the
         canonical tensor-plan WebGPU bridge. It never falls back to closure
         backward: missing VJP coverage is a loud error because otherwise the
-        call would silently return to CPU.
+        call would silently return to CPU. `resident=True` keeps leaf `.grad`
+        tensors in WebGPU buffers until explicit `.numpy()` / `.item()`.
         """
         if device is None:
             backward_device = "cpu"
@@ -1368,6 +1370,8 @@ class TensorProxy:
             raise ValueError(
                 f"backward(device=...): expected 'cpu' or 'webgpu', got {device!r}"
             )
+        if resident and backward_device != "webgpu":
+            raise ValueError("backward(resident=True) requires device='webgpu'")
 
         if grad is None:
             if self.ndim != 0 and self.numel() != 1:
@@ -1492,11 +1496,12 @@ class TensorProxy:
             # never re-touched (they've been GC'd by the time we get
             # here in any non-toy graph).
             from . import _checkpoint
-            grads: dict[int, np.ndarray] = {}
+            grads: dict[int, Any] = {}
             if backward_device == "webgpu":
                 from ._realize_webgpu import (
                     get_registered_gpu_buffer_table,
                     realize_tensor_plan_webgpu,
+                    realize_tensor_plan_webgpu_resident,
                 )
                 gbt = get_registered_gpu_buffer_table()
                 if gbt is None:
@@ -1513,11 +1518,24 @@ class TensorProxy:
                 if _checkpoint.has_any_region():
                     gnode = _checkpoint.apply_checkpoint_rewrite(gnode)
                 if backward_device == "webgpu":
-                    grads[pid] = realize_tensor_plan_webgpu(
-                        gnode,
-                        numpy_buffer_table=sess.buffer_table,
-                        gpu_buffer_table=gbt,
-                    )
+                    if resident:
+                        grad_bid = realize_tensor_plan_webgpu_resident(
+                            gnode,
+                            numpy_buffer_table=sess.buffer_table,
+                            gpu_buffer_table=gbt,
+                        )
+                        grads[pid] = _from_buffer_id(
+                            grad_bid,
+                            gnode.shape,
+                            gnode.dtype,
+                            session=sess,
+                        )
+                    else:
+                        grads[pid] = realize_tensor_plan_webgpu(
+                            gnode,
+                            numpy_buffer_table=sess.buffer_table,
+                            gpu_buffer_table=gbt,
+                        )
                 else:
                     grads[pid] = realize(gnode, sess.buffer_table)
         else:
@@ -1535,7 +1553,7 @@ class TensorProxy:
             finally:
                 _fusion_config.use_fusion(was_enabled)
 
-            grads = {id(self): grad_arr}
+            grads: dict[int, Any] = {id(self): grad_arr}
             for node in reversed(order):
                 proxy = proxy_by_uop_id.get(id(node))
                 if proxy is None or proxy._ctx is None:
@@ -1561,7 +1579,32 @@ class TensorProxy:
             proxy = proxy_by_id.get(pid)
             if proxy is None or not proxy.requires_grad or proxy._ctx is not None:
                 continue
-            if proxy.grad is None:
+            if resident:
+                if proxy.grad is None:
+                    proxy.grad = g
+                else:
+                    from ._realize_webgpu import (
+                        get_registered_gpu_buffer_table,
+                        realize_tensor_plan_webgpu_resident,
+                    )
+                    gbt = get_registered_gpu_buffer_table()
+                    if gbt is None:
+                        raise RealizationError(
+                            "backward(resident=True) lost registered WebGPU bridge"
+                        )
+                    combined = proxy.grad + g
+                    grad_bid = realize_tensor_plan_webgpu_resident(
+                        combined._uop,
+                        numpy_buffer_table=sess.buffer_table,
+                        gpu_buffer_table=gbt,
+                    )
+                    proxy.grad = _from_buffer_id(
+                        grad_bid,
+                        combined.shape,
+                        combined.dtype,
+                        session=proxy._get_session(),
+                    )
+            elif proxy.grad is None:
                 proxy.grad = from_numpy(g.copy(), session=proxy._get_session())
             else:
                 proxy.grad = from_numpy(

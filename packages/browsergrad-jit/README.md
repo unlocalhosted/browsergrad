@@ -67,14 +67,17 @@ IR ops with NumPy handlers and symbolic VJPs. Their forward/backward roots
 lower through generic tensor-plan WebGPU via `realize_tensor_plan_webgpu(...)`.
 `loss.backward(device="webgpu")` realizes symbolic leaf-gradient roots through
 the same tensor-plan bridge and refuses closure-only graphs instead of falling
-back to CPU. Default `.backward()` still writes CPU grads. `BatchNorm1d`
-remains a `CUSTOM` realization path with explicit NumPy VJPs.
+back to CPU. `loss.backward(device="webgpu", resident=True)` stores leaf grads
+as GPUBuffer-backed TensorProxy values until explicit `.numpy()` / `.item()`.
+Default `.backward()` still writes CPU grads. `BatchNorm1d` remains a `CUSTOM`
+realization path with explicit NumPy VJPs.
 `bg.optim.sgd_update(...)`, `bg.optim.adam_update(...)`, and
 `bg.optim.adamw_update(...)` are functional optimizer/update IR nodes and lower
 through the same tensor-plan WebGPU path. They return updated tensors/state;
 `Optimizer.step(device="webgpu")` uses those IR nodes for SGD without momentum,
 Adam, and AdamW, then writes the materialized result back to CPU parameter/state
-buffers. Fully resident optimizer state remains future work.
+buffers. `SGD.step(device="webgpu", resident=True)` keeps no-momentum parameter
+updates GPU-resident. Adam/AdamW resident optimizer state remains future work.
 
 `bg.gpu_plan_summary(tensor)` and `bg.jit.gpu_plan.*` expose the first
 compiler-facing tensor-IR execution plan: scheduled primitive UOps, buffer
@@ -92,8 +95,9 @@ PERMUTE, BROADCAST_TO, and REDUCE(sum/mean) rank <= 4, plus
 Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm forward/backward and functional
 SGD/Adam/AdamW updates. `Optimizer.step(device="webgpu")` uses the same
 tensor-plan path for SGD without momentum, Adam, and AdamW, then writes the
-materialized result back to CPU buffers; fully resident optimizer state remains
-future work.
+materialized result back to CPU buffers; `SGD.step(device="webgpu",
+resident=True)` keeps the updated parameter buffer resident. Fully resident
+Adam/AdamW state remains future work.
 
 ### Gradient control
 ```python
@@ -242,10 +246,12 @@ Anything in the **Internal** row will break across minor releases. File an issue
 
 - Full PyTorch API parity.
 - CUDA device emulation.
-- GPU-resident `.backward()` / optimizer state. Explicit
-  `loss.backward(device="webgpu")` and `Optimizer.step(device="webgpu")` use
-  tensor-plan WebGPU, then materialize `.grad`, params, and state back to CPU
-  buffers; a fully resident training loop remains future work.
+- GPU-resident default training loop. Explicit
+  `loss.backward(device="webgpu", resident=True)` and
+  `SGD.step(device="webgpu", resident=True)` keep supported grads/params in
+  GPUBuffer storage until explicit `.numpy()` / `.item()`, but default
+  `.backward()`, Adam/AdamW state, and full training-loop scheduling remain
+  future work.
 - Tensor layout/stride compatibility for contiguity teaching.
 - PyTorch-native checkpoint file compatibility.
 

@@ -149,6 +149,14 @@ class BufferTable:
             raise BufferTableError(f"unknown buffer_id {buffer_id!r} in this session")
         return self._metadata[buffer_id]
 
+    def mark_unmaterialized(self, buffer_id: str) -> None:
+        """Mark an existing buffer id as GPU-owned/CPU-unmaterialized."""
+        if buffer_id not in self._buffers:
+            raise BufferTableError(
+                f"cannot mark unknown buffer_id {buffer_id!r} unmaterialized"
+            )
+        self._buffers[buffer_id] = None
+
     def update(self, buffer_id: str, array: np.ndarray) -> None:
         """Replace the array for `buffer_id`. Used by STORE on optimizer
         steps and by `.grad` accumulation.

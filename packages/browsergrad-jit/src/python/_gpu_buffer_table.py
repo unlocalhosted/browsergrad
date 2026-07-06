@@ -79,6 +79,24 @@ class GpuBufferTable:
     def has(self, buffer_id: str) -> bool:
         return buffer_id in self._handles
 
+    def detach(self, buffer_id: str) -> Any:
+        """Remove a handle without releasing it. Caller assumes ownership."""
+        if buffer_id not in self._handles:
+            raise BufferTableError(
+                f"GpuBufferTable: cannot detach unknown buffer_id {buffer_id!r}"
+            )
+        self._handles_alive -= 1
+        return self._handles.pop(buffer_id)
+
+    def replace(self, buffer_id: str, handle: Any) -> None:
+        """Bind `buffer_id` to `handle`, releasing any prior handle."""
+        old = self._handles.pop(buffer_id, None)
+        if old is not None:
+            self._bridge.release(old)
+            self._handles_alive -= 1
+        self._handles[buffer_id] = handle
+        self._handles_alive += 1
+
     def release(self, buffer_id: str) -> None:
         handle = self._handles.pop(buffer_id, None)
         if handle is None:

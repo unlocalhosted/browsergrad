@@ -1476,6 +1476,91 @@ except Exception as e:
     expect(result.tensor_plan).toBe(0);
   });
 
+  it("backward(device='webgpu', resident=True) and SGD.step(..., resident=True) avoid CPU readback", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      max_diff: number;
+      before_materialize: number;
+      after_materialize: number;
+      grad_materialized_before_step: boolean;
+      param_materialized_after_step: boolean;
+      grad_materialized_after_param_numpy: boolean;
+      grad_gpu_registered: boolean;
+      param_gpu_registered: boolean;
+      tensor_plan: number;
+      tensor_plan_resident: number;
+    }>(`
+import browsergrad_jit as bg
+import numpy as np
+
+p_np = np.array([[1.0, -2.0], [0.5, 3.0]], dtype=np.float32)
+
+p_cpu = bg.from_numpy(p_np.copy(), requires_grad=True)
+loss_cpu = (p_cpu * p_cpu).sum()
+loss_cpu.backward()
+bg.optim.SGD([p_cpu], lr=0.25).step()
+expected = p_cpu.numpy()
+
+p_gpu = bg.from_numpy(p_np.copy(), requires_grad=True)
+loss_gpu = (p_gpu * p_gpu).sum()
+loss_gpu.backward(device="webgpu", resident=True)
+grad_id = p_gpu.grad._uop.inputs[0].arg
+bt = p_gpu._get_session().buffer_table
+gbt = bg._realize_webgpu.get_registered_gpu_buffer_table()
+grad_materialized_before_step = bt.is_materialized(grad_id)
+
+opt = bg.optim.SGD([p_gpu], lr=0.25)
+before_materialize = _mock.materialize_count
+opt.step(device="webgpu", resident=True)
+param_id = p_gpu._uop.inputs[0].arg
+param_materialized_after_step = bt.is_materialized(param_id)
+actual = p_gpu.numpy()
+
+{
+    "max_diff": float(np.max(np.abs(actual - expected))),
+    "before_materialize": before_materialize,
+    "after_materialize": _mock.materialize_count,
+    "grad_materialized_before_step": grad_materialized_before_step,
+    "param_materialized_after_step": param_materialized_after_step,
+    "grad_materialized_after_param_numpy": bt.is_materialized(grad_id),
+    "grad_gpu_registered": gbt.has(grad_id),
+    "param_gpu_registered": gbt.has(param_id),
+    "tensor_plan": _mock.tensor_plan_count,
+    "tensor_plan_resident": _mock.tensor_plan_resident_count,
+}
+`);
+    expect(result.max_diff).toBeLessThan(1e-6);
+    expect(result.before_materialize).toBe(0);
+    expect(result.after_materialize).toBe(1);
+    expect(result.grad_materialized_before_step).toBe(false);
+    expect(result.param_materialized_after_step).toBe(false);
+    expect(result.grad_materialized_after_param_numpy).toBe(false);
+    expect(result.grad_gpu_registered).toBe(true);
+    expect(result.param_gpu_registered).toBe(true);
+    expect(result.tensor_plan).toBe(2);
+    expect(result.tensor_plan_resident).toBe(2);
+  });
+
+  it("Adam.step(device='webgpu', resident=True) refuses until optimizer state is resident", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{ message: string; tensor_plan: number }>(`
+import browsergrad_jit as bg
+import numpy as np
+
+p = bg.from_numpy(np.array([1.0, -2.0], dtype=np.float32), requires_grad=True)
+p.grad = bg.from_numpy(np.array([0.25, -0.5], dtype=np.float32))
+opt = bg.optim.Adam([p], lr=0.1)
+try:
+    opt.step(device="webgpu", resident=True)
+    msg = "no_error"
+except Exception as e:
+    msg = str(e)
+{"message": msg, "tensor_plan": _mock.tensor_plan_count}
+`);
+    expect(result.message).toMatch(/optimizer state is GPU-resident/);
+    expect(result.tensor_plan).toBe(0);
+  });
+
   it("realize_tensor_plan_webgpu runs LayerNorm forward/backward roots through generic plan path", async () => {
     const target = await getJitTarget();
     const result = await target.run<{

@@ -11,8 +11,8 @@ Both optimizers follow PyTorch's `torch.optim` semantics:
 CPU `step()` keeps the original NumPy update path. `step(device="webgpu")`
 routes supported optimizer math through primitive update IR and the tensor-plan
 WebGPU bridge, then writes the materialized result back to the CPU BufferTable.
-That is not full resident optimizer state yet, but it keeps optimizer math on
-the canonical GPU IR path instead of adding per-optimizer bridge calls.
+`SGD.step(device="webgpu", resident=True)` keeps the updated parameter buffer on
+GPU for the no-momentum case. Adam/AdamW resident state remains future work.
 """
 
 from __future__ import annotations
@@ -60,6 +60,30 @@ def _realize_update_webgpu(tensor: TensorProxy) -> np.ndarray:
         numpy_buffer_table=tensor._get_session().buffer_table,
         gpu_buffer_table=gbt,
     )
+
+
+def _replace_param_with_webgpu_resident_update(p: TensorProxy, updated: TensorProxy) -> None:
+    from ._realize_webgpu import (
+        get_registered_gpu_buffer_table,
+        realize_tensor_plan_webgpu_resident,
+    )
+    gbt = get_registered_gpu_buffer_table()
+    if gbt is None:
+        raise RealizationError(
+            "optimizer.step(device='webgpu', resident=True) requires a registered "
+            "WebGPU bridge. Call browsergrad_jit.register_webgpu_bridge(...) first."
+        )
+    sess = p._get_session()
+    param_bid = _param_buffer_id(p)
+    tmp_bid = realize_tensor_plan_webgpu_resident(
+        updated._uop,
+        numpy_buffer_table=sess.buffer_table,
+        gpu_buffer_table=gbt,
+    )
+    handle = gbt.detach(tmp_bid)
+    sess.buffer_table.evict(tmp_bid)
+    sess.buffer_table.mark_unmaterialized(param_bid)
+    gbt.replace(param_bid, handle)
 
 
 def _param_buffer_id(p: TensorProxy) -> str:
@@ -260,7 +284,7 @@ class Optimizer:
         for p in self._params:
             p.grad = None
 
-    def step(self, device: Optional[str] = None) -> None:
+    def step(self, device: Optional[str] = None, resident: bool = False) -> None:
         raise NotImplementedError
 
 
@@ -288,8 +312,10 @@ class SGD(Optimizer):
         # Momentum buffers per parameter — indexed by Parameter identity.
         self._velocity: dict[int, np.ndarray] = {}
 
-    def step(self, device: Optional[str] = None) -> None:
+    def step(self, device: Optional[str] = None, resident: bool = False) -> None:
         step_device = _normalize_step_device(device)
+        if resident and step_device != "webgpu":
+            raise ValueError("SGD.step(resident=True) requires device='webgpu'")
         if step_device == "webgpu":
             if self.momentum != 0.0:
                 raise RealizationError(
@@ -305,6 +331,9 @@ class SGD(Optimizer):
                     lr=self.lr,
                     weight_decay=self.weight_decay,
                 )
+                if resident:
+                    _replace_param_with_webgpu_resident_update(p, updated)
+                    continue
                 bid = _param_buffer_id(p)
                 sess = p._get_session()
                 current = sess.buffer_table.get(bid)
@@ -355,8 +384,13 @@ class Adam(Optimizer):
         self._m: dict[int, np.ndarray] = {}
         self._v: dict[int, np.ndarray] = {}
 
-    def step(self, device: Optional[str] = None) -> None:
+    def step(self, device: Optional[str] = None, resident: bool = False) -> None:
         self._step += 1
+        if resident:
+            raise RealizationError(
+                "Adam.step(device='webgpu', resident=True) is not supported until "
+                "optimizer state is GPU-resident. Use resident=False or SGD without momentum."
+            )
         if _normalize_step_device(device) == "webgpu":
             for p in self._params:
                 if not p.requires_grad or p.grad is None:
@@ -414,8 +448,13 @@ class AdamW(Adam):
     """Adam with decoupled weight decay (the right Adam most papers actually
     use). Matches torch.optim.AdamW."""
 
-    def step(self, device: Optional[str] = None) -> None:
+    def step(self, device: Optional[str] = None, resident: bool = False) -> None:
         self._step += 1
+        if resident:
+            raise RealizationError(
+                "AdamW.step(device='webgpu', resident=True) is not supported until "
+                "optimizer state is GPU-resident. Use resident=False or SGD without momentum."
+            )
         if _normalize_step_device(device) == "webgpu":
             for p in self._params:
                 if not p.requires_grad or p.grad is None:
