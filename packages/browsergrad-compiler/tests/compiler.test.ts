@@ -3546,6 +3546,17 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
     expect(plan.supported).toBe(true);
+    expect(createCudaPeerCopyPlan(
+      { ...compiled },
+      {
+        buffers: {
+          dst: new Float32Array(4),
+          src: new Float32Array([2.5, 3.5]),
+        },
+        scalars: { n: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    ).supported).toBe(true);
     expect(plan.copies[0]).toMatchObject({
       dstRoot: "dst",
       dstOffset: 0,
