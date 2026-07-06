@@ -55,6 +55,7 @@ export interface CudaLiteSemanticFunction {
   readonly name: string;
   readonly returnType: CudaLiteScalarType;
   readonly params: readonly CudaLiteSemanticSymbol[];
+  readonly body: readonly SemanticKernelIrOperation[];
   readonly span: SourceSpan;
 }
 
@@ -221,7 +222,8 @@ export function createCudaLiteSemanticModel(analysis: CudaLiteAnalysis): CudaLit
   const constants = analysis.constants.map(symbolForConstant);
   const deviceGlobals = analysis.deviceGlobals.map(symbolForDeviceGlobal);
   const textures = analysis.textures.map(symbolForTexture);
-  const functions = analysis.functions.map(symbolForFunction);
+  const globalScope = new Map([...params, ...constants, ...deviceGlobals, ...textures].map((symbol) => [symbol.name, symbol]));
+  const functions = analysis.functions.map((fn) => symbolForFunction(fn, globalScope));
   return {
     kind: "cuda-lite-semantic-model",
     kernelName: analysis.kernel.name,
@@ -722,13 +724,26 @@ function symbolForTexture(texture: CudaLiteTexture2D): CudaLiteSemanticSymbol {
   };
 }
 
-function symbolForFunction(fn: CudaLiteDeviceFunction): CudaLiteSemanticFunction {
+function symbolForFunction(
+  fn: CudaLiteDeviceFunction,
+  globalScope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+): CudaLiteSemanticFunction {
+  const scope = new Map(globalScope);
+  const params = fn.params.map(symbolForFunctionParam);
+  for (const param of params) scope.set(param.name, param);
   return {
     name: fn.name,
     returnType: fn.returnType,
-    params: fn.params.map(symbolForParam),
+    params,
+    body: lowerStatements(fn.body, scope),
     span: fn.span,
   };
+}
+
+function symbolForFunctionParam(param: CudaLiteParam): CudaLiteSemanticSymbol {
+  const symbol = symbolForParam(param);
+  if (symbol.pointer) return symbol;
+  return { ...symbol, addressSpace: "local" };
 }
 
 function symbolForVar(statement: CudaLiteVarDecl): CudaLiteSemanticSymbol {

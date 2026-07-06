@@ -449,6 +449,33 @@ __global__ void loopControl(int* out) {
     expect([...referenceResult.buffers.out as Int32Array]).toEqual([8]);
   });
 
+  it("runs scalar device helper calls through semantic reference and WGSL paths", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ int affine(int x, int scale, int bias) {
+  int y = x * scale;
+  return y + bias;
+}
+__global__ void helperKernel(int* out, int scale, int bias) {
+  int idx = threadIdx.x;
+  out[idx] = affine(idx, scale, bias);
+}
+`, { workgroupSize: [4, 1, 1] });
+    const input = {
+      buffers: { out: new Int32Array(4) },
+      scalars: { scale: 3, bias: 2 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const referenceResult = runCompiledKernelReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("fn affine(");
+    expect(compiled.wgsl).toContain("return (y + bias);");
+    expect([...semanticResult.buffers.out as Int32Array]).toEqual([2, 5, 8, 11]);
+    expect([...referenceResult.buffers.out as Int32Array]).toEqual([2, 5, 8, 11]);
+  });
+
   it("runs do-while continue through semantic reference and WGSL continuing checks", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void doWhileContinue(int* out) {
@@ -3393,7 +3420,7 @@ __global__ void helperKernel(float *x) {
     );
 
     expect(backendIr(compiled).functions.map((fn) => fn.name)).toEqual(["addOne"]);
-    expect(compiled.wgsl).toContain("fn addOne(value_arg: f32");
+    expect(compiled.wgsl).toContain("fn addOne(value: f32");
     expect(compiled.wgsl).toContain("return (value + 1.0);");
     expect([...result.buffers.x as Float32Array]).toEqual([3]);
   });
@@ -3413,7 +3440,7 @@ __global__ void helperKernel(float *x) {
 }`, { workgroupSize: [1, 1, 1] });
 
     expect(backendIr(compiled).functions.map((fn) => fn.name)).toEqual(["addOne"]);
-    expect(compiled.wgsl).toContain("fn addOne(value_arg: f32");
+    expect(compiled.wgsl).toContain("fn addOne(value: f32");
     expect(compiled.wgsl).not.toContain("unused_desc");
     expect(compiled.wgsl).not.toContain("<< 62");
   });
@@ -3431,7 +3458,7 @@ __global__ void helperKernel(float *x) {
 }`, { workgroupSize: [1, 1, 1] });
 
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
-    expect(compiled.wgsl).toContain("fn addOne(value_arg: f32");
+    expect(compiled.wgsl).toContain("fn addOne(value: f32");
     expect(compiled.wgsl).not.toContain("unused_half2");
   });
 
@@ -5692,8 +5719,8 @@ __global__ void shadow_lerp(float *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("fn bg_lerp(");
-    expect(compiled.wgsl).toContain("bg_lerp(2.0, 6.0, 0.25");
+    expect(compiled.wgsl).toContain("fn lerp(");
+    expect(compiled.wgsl).toContain("lerp(2.0, 6.0, 0.25");
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(8.25, 5);
   });
 
@@ -11744,7 +11771,7 @@ __global__ void constexprIf(int *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("scratch[0] = i32(swizzle");
+    expect(compiled.wgsl).toContain("scratch[0u] = swizzle");
     expect([...result.buffers.out as Int32Array]).toEqual([0]);
   });
 
@@ -14492,7 +14519,8 @@ __global__ void sequence_return_kernel(int* out) {
     );
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-sequence-expression");
-    expect(compiled.wgsl).toContain("var bg_return_value_");
+    expect(compiled.wgsl).toContain("return (local * 3);");
+    expect(compiled.wgsl).toContain("return (local = (local + 4));");
     expect([...result.buffers.out as Int32Array]).toEqual([18, 12]);
   });
 
