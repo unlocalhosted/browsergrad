@@ -2508,7 +2508,7 @@ function validateRuntimeCopyCall(
   if (compatibilityDiagnosticsReachable && (callName === "cudaMemcpy" || callName === "cudaMemcpyAsync") && !supportedCudaMemcpyKind(expression.args[3])) {
     diagnostics.push(error(
       "unsupported-cuda-runtime-copy-kind",
-      `${callName} supports cudaMemcpyDeviceToDevice/cudaMemcpyDefault only`,
+      `${callName} supports modeled cudaMemcpyHostToHost/HostToDevice/DeviceToHost/DeviceToDevice/Default copies only`,
       expression.args[3]?.span ?? expression.span,
     ));
   }
@@ -2607,10 +2607,14 @@ function isHostManagedRuntimeNoopCall(callName: string): boolean {
 function supportedCudaMemcpyKind(expression: CudaLiteExpression | undefined): boolean {
   if (!expression) return false;
   if (expression.kind === "identifier") {
-    return expression.name === "cudaMemcpyDeviceToDevice" || expression.name === "cudaMemcpyDefault";
+    return expression.name === "cudaMemcpyHostToHost" ||
+      expression.name === "cudaMemcpyHostToDevice" ||
+      expression.name === "cudaMemcpyDeviceToHost" ||
+      expression.name === "cudaMemcpyDeviceToDevice" ||
+      expression.name === "cudaMemcpyDefault";
   }
   if (expression.kind === "number") {
-    return expression.value === 3 || expression.value === 4;
+    return Number.isInteger(expression.value) && expression.value >= 0 && expression.value <= 4;
   }
   return false;
 }

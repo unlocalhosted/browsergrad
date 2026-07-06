@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-06T15:58:40Z
+Last updated: 2026-07-06T16:03:44Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `677/0/0`, dist `677/0/0`; real-world compile/codegen audit has `0` hard fails; real corpus WebGPU fixture outputs are pinned `117/117` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Default CUDA-lite WebGPU smoke now retries transient browser/page crashes without masking compiler failures |
+| Active work item | Modeled `cudaMemcpyHostToHost`, `cudaMemcpyHostToDevice`, and `cudaMemcpyDeviceToHost` now use native WebGPU host-copy orchestration |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- modeled cudaMemcpy host/device copy kinds: added `cudaMemcpyHostToHost`, `cudaMemcpyHostToDevice`, and `cudaMemcpyDeviceToHost` constants and analyzer acceptance for modeled buffer-to-buffer runtime copies; CPU reference and WebGPU host-copy planning use the existing byte-copy semantics, invalid numeric copy kinds still fail with `unsupported-cuda-runtime-copy-kind`, exact real WebGPU `runtime:host-copy` passed `1/0/0` with plan `host-copy`, changed gate passed typecheck, compiler unit `515/0`, WebGPU fixture meta-test, and smoke `572/0/0`, full `verify:compiler` passed, skips `0`
 - default WebGPU smoke harness hardening: the smoke runner now retries transient browser/page crashes such as destroyed execution contexts while keeping real compiler/report failures fail-fast; default `e2e:webgpu:smoke` passed `572/0/0` with skips `0`, and full `verify:compiler` passed build/typecheck/lint/unit/compiler fixture/status/audit gates
 - synchronous `cudaMemcpyPeer` host-copy lowering: added `cudaMemcpyPeer(dst, dstDevice, src, srcDevice, count)` to the modeled CUDA runtime copy family, sharing the existing host-lifted WebGPU copy/reference path with `cudaMemcpyPeerAsync`; analyzer recognizes the call, runtime planning marks it as `runtime-copy`, reference copies bytes, WGSL elides it as host-managed, WebGPU plan emits `bg_peer_copy_*`, and smoke promotes `runtime:host-peer-copy-sync`; focused unit `531/0`, exact real WebGPU `1/0/0`, hot repeat `2/0/0` best warm `3.2ms`, WebGPU smoke with progress `572/0/0`, skips `0`
 - runtime/builtin compatibility widening and semantic Kernel IR bridge: dirty compiler slice adds internal backend IR attachment, semantic Kernel IR model/export shape, broader CUDA runtime no-op/query/write modeling, host-lifted `cudaMemset/cudaMemsetAsync` byte-pattern fills, device attribute/limit constants, and expanded CUDA math/integer/bf16/fp8 intrinsic lowering; static changed ladder passed (`typecheck`, `lint`, compiler unit `531/0`, WGSL module `16/0`, synthetic-input, fixture, audit-corpus, bugbash status), full WebGPU smoke `571/0/0`, and full `verify:compiler` passed, skips `0`

@@ -3538,6 +3538,9 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
     cudaMemcpyPeer(dst, 1, src, 0, sizeof(float));
     cudaMemcpy(dst + 1, src, sizeof(float) * n, cudaMemcpyDeviceToDevice);
     cudaMemcpyAsync(dst + 3, src + 1, sizeof(float), cudaMemcpyDefault, stream);
+    cudaMemcpy(dst + 2, src, sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpyAsync(dst + 3, src, sizeof(float), cudaMemcpyDeviceToHost, stream);
+    cudaMemcpy(dst + 1, src + 1, sizeof(float), cudaMemcpyHostToHost);
     cudaEventRecord(event, stream);
     cudaEventSynchronize(event);
     cudaStreamSynchronize(stream);
@@ -3562,10 +3565,13 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
     const runtimePlan = createCudaRuntimePlan(compiled);
     const webGpuPlan = createCudaWebGpuExecutionPlan(compiled, input, launch);
 
-    expect([...result.buffers.dst as Float32Array]).toEqual([2.5, 2.5, 3.5, 3.5]);
+    expect([...result.buffers.dst as Float32Array]).toEqual([2.5, 3.5, 2.5, 2.5]);
     expect(runtimePlan.operations.map((operation) => operation.kind)).toEqual([
       "device-sync",
       "device-sync",
+      "runtime-copy",
+      "runtime-copy",
+      "runtime-copy",
       "runtime-copy",
       "runtime-copy",
       "runtime-copy",
@@ -3587,17 +3593,20 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
       { kind: "copy", dstOffset: 0, srcOffset: 0, elementCount: 1 },
       { kind: "copy", dstOffset: 1, srcOffset: 0, elementCount: 2 },
       { kind: "copy", dstOffset: 3, srcOffset: 1, elementCount: 1 },
+      { kind: "copy", dstOffset: 2, srcOffset: 0, elementCount: 1 },
+      { kind: "copy", dstOffset: 3, srcOffset: 0, elementCount: 1 },
+      { kind: "copy", dstOffset: 1, srcOffset: 1, elementCount: 1 },
     ]);
     expect(webGpuPlan.supported).toBe(true);
     if (webGpuPlan.supported) {
       expect(webGpuPlan.kind).toBe("host-copy");
-      expect(webGpuPlan.steps).toHaveLength(5);
+      expect(webGpuPlan.steps).toHaveLength(8);
     }
 
     expect(() => compileCudaLiteKernel(`
 __global__ void unsupportedKind(float *dst, const float *src) {
   if (threadIdx.x == 0) {
-    cudaMemcpy(dst, src, sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(dst, src, sizeof(float), 99);
   }
 }`, {
       referenceCudaRuntime: true,
