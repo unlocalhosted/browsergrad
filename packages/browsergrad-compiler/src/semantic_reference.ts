@@ -153,8 +153,8 @@ function unsupportedSemanticReferenceOperation(
       case "declare":
         if (operation.target.addressSpace !== "local" || operation.target.pointer) return operation;
         if (!semanticReferenceScalarTypeSupported(operation.target.valueType)) return operation;
-        if (operation.target.dimensions.length > 0 && operation.init) return operation;
-        if (operation.init && !semanticReferenceExpressionSupported(operation.init, "scalar")) return operation;
+        if (operation.target.dimensions.length > 0 && operation.init && !semanticReferenceLocalArrayInitSupported(operation.init)) return operation;
+        if (operation.target.dimensions.length === 0 && operation.init && !semanticReferenceExpressionSupported(operation.init, "scalar")) return operation;
         break;
       case "store":
         if (!semanticReferenceAssignmentOperatorSupported(operation.operator)) return operation;
@@ -247,6 +247,11 @@ function semanticReferenceAtomicSupported(
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
   return semanticReferenceExpressionSupported(expression, "scalar") ||
     expression.kind === "call" && semanticReferenceAtomicCallSupported(expression, compiled);
+}
+
+function semanticReferenceLocalArrayInitSupported(expression: SemanticExpression): boolean {
+  return expression.kind === "initializer" &&
+    flattenInitializerExpressions(expression).every((item) => semanticReferenceExpressionSupported(item, "scalar"));
 }
 
 function semanticReferenceAtomicCallSupported(
@@ -403,7 +408,16 @@ function semanticDeclareValue(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>,
   context: SemanticReferenceContext,
 ): SemanticValue {
-  if (operation.target.dimensions.length > 0) return Array.from({ length: totalElements(operation.target.dimensions) }, () => 0);
+  if (operation.target.dimensions.length > 0) {
+    const values = Array.from({ length: totalElements(operation.target.dimensions) }, () => 0);
+    if (operation.init?.kind === "initializer") {
+      for (const [index, expression] of flattenInitializerExpressions(operation.init).entries()) {
+        if (index >= values.length) break;
+        values[index] = evalNumber(expression, context);
+      }
+    }
+    return values;
+  }
   return operation.init ? evalNumber(operation.init, context) : 0;
 }
 
@@ -782,6 +796,11 @@ function cloneTypedArray(buffer: WgslTypedArray): WgslTypedArray {
 
 function totalElements(dimensions: readonly number[]): number {
   return dimensions.length === 0 ? 1 : dimensions.reduce((product, dimension) => product * dimension, 1);
+}
+
+function flattenInitializerExpressions(expression: SemanticExpression): readonly SemanticExpression[] {
+  if (expression.kind !== "initializer") return [expression];
+  return expression.elements.flatMap((element) => flattenInitializerExpressions(element));
 }
 
 function flatIndexForDimensions(dimensions: readonly number[], indices: readonly number[]): number {

@@ -172,8 +172,8 @@ function unsupportedSemanticWgslOperation(
         }
         if (operation.target.addressSpace !== "local" || operation.target.pointer) return operation;
         if (!semanticWgslScalarTypeSupported(operation.target.valueType)) return operation;
-        if (operation.target.dimensions.length > 0 && operation.init) return operation;
-        if (operation.init && !semanticWgslExpressionSupported(operation.init, "scalar")) return operation;
+        if (operation.target.dimensions.length > 0 && operation.init && !semanticWgslLocalArrayInitSupported(operation.init)) return operation;
+        if (operation.target.dimensions.length === 0 && operation.init && !semanticWgslExpressionSupported(operation.init, "scalar")) return operation;
         break;
       case "store":
         if (!semanticWgslAssignmentOperatorSupported(operation.operator)) return operation;
@@ -304,6 +304,11 @@ function semanticWgslValueExpressionSupported(expression: SemanticExpression, ir
     expression.kind === "call" && semanticWgslAtomicCallSupported(expression, ir);
 }
 
+function semanticWgslLocalArrayInitSupported(expression: SemanticExpression): boolean {
+  return expression.kind === "initializer" &&
+    flattenInitializerExpressions(expression).every((item) => semanticWgslExpressionSupported(item, "scalar"));
+}
+
 function semanticWgslAtomicCallSupported(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
@@ -397,7 +402,10 @@ function emitSemanticOperation(
     case "declare": {
       if (operation.target.addressSpace === "shared") return [];
       if (operation.target.dimensions.length > 0) {
-        return [`${prefix}var ${nameFor(operation.target.name, names)}: ${emitLocalArrayType(operation.target)};`];
+        return [
+          `${prefix}var ${nameFor(operation.target.name, names)}: ${emitLocalArrayType(operation.target)};`,
+          ...emitLocalArrayInit(operation, ir, names, indentLevel),
+        ];
       }
       const type = wgslScalar(operation.target.valueType);
       const init = operation.init ? ` = ${emitSemanticExpressionAs(operation.init, ir, names, wgslValueScalar(operation.target.valueType))}` : "";
@@ -446,6 +454,24 @@ function emitSemanticStore(
   if (operation.operator === "+=") return `${target} = (${target} + ${value})`;
   if (operation.operator === "-=") return `${target} = (${target} - ${value})`;
   throw semanticWgslError(`semantic WGSL does not support assignment '${operation.operator}'`, operation.span);
+}
+
+function emitLocalArrayInit(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+): readonly string[] {
+  if (!operation.init || operation.init.kind !== "initializer") return [];
+  const prefix = "  ".repeat(indentLevel);
+  return flattenInitializerExpressions(operation.init)
+    .slice(0, totalElements(operation.target.dimensions))
+    .map((value, index) => {
+      const indices = flatIndicesForDimensions(operation.target.dimensions, index)
+        .map((item) => `[${item}u]`)
+        .join("");
+      return `${prefix}${nameFor(operation.target.name, names)}${indices} = ${emitSemanticExpressionAs(value, ir, names, wgslValueScalar(operation.target.valueType))};`;
+    });
 }
 
 function emitSemanticAtomic(
@@ -771,6 +797,18 @@ function emitSharedType(symbol: SemanticKernelIrModule["memory"][number]): strin
 
 function totalElements(dimensions: readonly number[]): number {
   return dimensions.length === 0 ? 1 : dimensions.reduce((product, dimension) => product * dimension, 1);
+}
+
+function flattenInitializerExpressions(expression: SemanticExpression): readonly SemanticExpression[] {
+  if (expression.kind !== "initializer") return [expression];
+  return expression.elements.flatMap((element) => flattenInitializerExpressions(element));
+}
+
+function flatIndicesForDimensions(dimensions: readonly number[], flatIndex: number): readonly number[] {
+  return dimensions.map((_, offset) => {
+    const stride = dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);
+    return Math.floor(flatIndex / stride) % Math.max(1, dimensions[offset] ?? 1);
+  });
 }
 
 function emitFlatSharedIndex(
