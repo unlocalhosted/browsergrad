@@ -343,12 +343,15 @@ function createPeerCopy2DOperations(
   if (!copyView) return undefined;
   const elementSize = copyView.elementSize;
   const byteValues = [dstPitchBytes, srcPitchBytes, rowBytes];
-  if (byteValues.some((value) => !Number.isInteger(value) || Math.trunc(value) % elementSize !== 0)) return undefined;
+  if (byteValues.some((value) => !Number.isInteger(value))) return undefined;
   if (!Number.isInteger(rows)) return undefined;
+  const rowCount = Math.trunc(rows);
+  const alignedRows = byteValues.every((value) => Math.trunc(value) % elementSize === 0);
+  const dstByteLength = dstBuffer.elementLength * elementSize;
+  const srcByteLength = srcBuffer.elementLength * elementSize;
   const dstPitch = Math.trunc(dstPitchBytes) / elementSize;
   const srcPitch = Math.trunc(srcPitchBytes) / elementSize;
   const elementCount = Math.trunc(rowBytes) / elementSize;
-  const rowCount = Math.trunc(rows);
   const out: CudaPeerCopyOperation[] = [];
   if (rowCount === 0) {
     return [{
@@ -363,19 +366,35 @@ function createPeerCopy2DOperations(
     }];
   }
   for (let row = 0; row < rowCount; row++) {
-    const dstOffset = dst.offset + row * dstPitch;
-    const srcOffset = src.offset + row * srcPitch;
-    if (dstOffset + elementCount > dstBuffer.elementLength || srcOffset + elementCount > srcBuffer.elementLength) return undefined;
-    out.push({
-      kind: "copy",
-      expression,
-      dstRoot: dst.root,
-      srcRoot: src.root,
-      dstOffset,
-      srcOffset,
-      elementCount,
-      valueType: copyView.valueType,
-    });
+    if (alignedRows) {
+      const dstOffset = dst.offset + row * dstPitch;
+      const srcOffset = src.offset + row * srcPitch;
+      if (dstOffset + elementCount > dstBuffer.elementLength || srcOffset + elementCount > srcBuffer.elementLength) return undefined;
+      out.push({
+        kind: "copy",
+        expression,
+        dstRoot: dst.root,
+        srcRoot: src.root,
+        dstOffset,
+        srcOffset,
+        elementCount,
+        valueType: copyView.valueType,
+      });
+    } else {
+      const dstByteOffset = (dst.offset * elementSize) + row * Math.trunc(dstPitchBytes);
+      const srcByteOffset = (src.offset * elementSize) + row * Math.trunc(srcPitchBytes);
+      const byteCount = Math.trunc(rowBytes);
+      if (dstByteOffset + byteCount > dstByteLength || srcByteOffset + byteCount > srcByteLength) return undefined;
+      out.push({
+        kind: "copy-bytes",
+        expression,
+        dstRoot: dst.root,
+        srcRoot: src.root,
+        dstByteOffset,
+        srcByteOffset,
+        byteCount,
+      });
+    }
   }
   return out;
 }

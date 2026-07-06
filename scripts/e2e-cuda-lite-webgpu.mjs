@@ -164,6 +164,14 @@ __global__ void runtimeByteCopy(unsigned int *dst, const unsigned int *src) {
     cudaStreamDestroy(stream);
   }
 }`,
+  runtimeByteCopy2D: `
+__global__ void runtimeByteCopy2D(unsigned int *dst, const unsigned int *src) {
+  cudaStream_t stream;
+  if (threadIdx.x == 0) {
+    cudaMemcpy2D(dst, 5, src, 4, 3, 2, cudaMemcpyDeviceToDevice);
+    cudaMemcpy2DAsync(dst + 2, 5, src + 1, 4, 5, 1, cudaMemcpyDefault, stream);
+  }
+}`,
   dynamicLaunch: `
 __global__ void child(float *dst, int n) {
   int idx = threadIdx.x;
@@ -9425,6 +9433,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "dst",
             expectedOutput: { type: "Uint32Array", data: [0x00bbccdd, 0xaabbccdd, 0x00000044] },
+          },
+          {
+            name: "runtime:byte-copy-2d",
+            source: SOURCES.runtimeByteCopy2D,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                dst: new Uint32Array([0, 0xffffffff, 0, 0xffffffff]),
+                src: new Uint32Array([0xaabbccdd, 0x11223344, 0x55667788]),
+              },
+            }),
+            output: "dst",
+            expectedOutput: { type: "Uint32Array", data: [0x00bbccdd, 0x223344ff, 0x11223344, 0xffffff88] },
           },
           {
             name: "runtime:host-peer-copy-sync",

@@ -3947,6 +3947,50 @@ __global__ void runtimeCopy2D(float *dst, const float *src) {
     }
   });
 
+  it("host-lifts byte-granular cudaMemcpy2D row copies", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void runtimeByteCopy2D(unsigned int *dst, const unsigned int *src) {
+  cudaStream_t stream;
+  if (threadIdx.x == 0) {
+    cudaMemcpy2D(dst, 5, src, 4, 3, 2, cudaMemcpyDeviceToDevice);
+    cudaMemcpy2DAsync(dst + 2, 5, src + 1, 4, 5, 1, cudaMemcpyDefault, stream);
+  }
+}`, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        dst: new Uint32Array([0, 0xffffffff, 0, 0xffffffff]),
+        src: new Uint32Array([0xaabbccdd, 0x11223344, 0x55667788]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const plan = createCudaRuntimeCopyPlan(compiled, input, launch);
+    const webGpuPlan = createCudaWebGpuExecutionPlan(compiled, input, launch);
+
+    expect([...result.buffers.dst as Uint32Array]).toEqual([0x00bbccdd, 0x223344ff, 0x11223344, 0xffffff88]);
+    expect(plan.supported).toBe(true);
+    expect(plan.copies.map((copy) => copy.kind === "copy-bytes"
+      ? { kind: copy.kind, dstRoot: copy.dstRoot, srcRoot: copy.srcRoot, dstByteOffset: copy.dstByteOffset, srcByteOffset: copy.srcByteOffset, byteCount: copy.byteCount }
+      : { kind: copy.kind, dstRoot: copy.dstRoot, srcRoot: copy.kind === "copy" ? copy.srcRoot : undefined, dstByteOffset: undefined, srcByteOffset: undefined, byteCount: undefined })).toEqual([
+      { kind: "copy-bytes", dstRoot: "dst", srcRoot: "src", dstByteOffset: 0, srcByteOffset: 0, byteCount: 3 },
+      { kind: "copy-bytes", dstRoot: "dst", srcRoot: "src", dstByteOffset: 5, srcByteOffset: 4, byteCount: 3 },
+      { kind: "copy-bytes", dstRoot: "dst", srcRoot: "src", dstByteOffset: 8, srcByteOffset: 4, byteCount: 5 },
+    ]);
+    expect(webGpuPlan.supported).toBe(true);
+    if (webGpuPlan.supported) {
+      expect(webGpuPlan.kind).toBe("host-copy");
+      expect(webGpuPlan.steps).toHaveLength(4);
+      expect(webGpuPlan.steps.slice(1).map((step) => step.program.name)).toEqual([
+        "bg_peer_copy_bytes",
+        "bg_peer_copy_bytes",
+        "bg_peer_copy_bytes",
+      ]);
+    }
+  });
+
   it("explains why unsafe peer-copy lifts stay reference-only", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void peerCopyBad(float *dst, const float *src) {
