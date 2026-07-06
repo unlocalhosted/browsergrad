@@ -33,6 +33,11 @@ import {
   validateCudaKernelLaunch,
 } from "../src/index";
 import { internalBackendIrFor as backendIr } from "../src/backend_ir";
+import {
+  constantBufferInputs,
+  cudaWebGpuDefaultReadbackNames,
+  deviceGlobalBufferInputs,
+} from "../src/webgpu_inputs";
 import { packCudaWebGpuUniformParams } from "../src/webgpu_orchestration";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -4174,6 +4179,36 @@ __global__ void parent(float *dst, float *src) {
     expect(plan.referenceAvailable).toBe(true);
   });
 
+  it("materializes WebGPU input buffers from public compile stages on detached results", () => {
+    const compiled = compileCudaLiteKernel(`
+__constant__ float coeffs[2];
+__device__ float global_state[1];
+
+__global__ void selected(float *out, uint n) {
+  if (threadIdx.x < n) {
+    out[threadIdx.x] = coeffs[threadIdx.x] + global_state[0];
+  }
+}`, { kernelName: "selected", workgroupSize: [2, 1, 1] });
+    const detached = { ...compiled };
+    const input = {
+      buffers: {
+        out: new Float32Array([0, 0]),
+      },
+      scalars: {
+        n: 2,
+      },
+      constants: {
+        coeffs: new Float32Array([3, 4]),
+      },
+    };
+
+    expect(() => backendIr(detached)).toThrow(CudaLiteCompilerError);
+    expect(Object.keys(constantBufferInputs(detached, input))).toEqual(["coeffs"]);
+    expect(Object.keys(deviceGlobalBufferInputs(detached, input))).toEqual(["global_state"]);
+    expect(cudaWebGpuDefaultReadbackNames(detached)).toEqual(["out", "global_state"]);
+    expect(packCudaWebGpuUniformParams(detached, input).byteLength).toBeGreaterThanOrEqual(16);
+  });
+
   it("builds explicit WebGPU execution plans for native dispatch and host lifts", () => {
     const single = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
     const singlePlan = createCudaWebGpuExecutionPlan(
@@ -7753,6 +7788,7 @@ __global__ void selected(float *x) {
     );
 
     expect(backendIr(compiled).constants.map((constant) => constant.name)).not.toContain("unused_coeffs");
+    expect(compiled.kernelIr.memory.map((symbol) => symbol.name)).not.toContain("unused_coeffs");
     expect([...result.buffers.x as Float32Array]).toEqual([5]);
     expect(compiled.wgsl).not.toContain("unused_coeffs");
     expect(compiled.wgsl).not.toContain("unused_constant_helper");
@@ -7783,6 +7819,7 @@ __global__ void selected(float *x) {
     );
 
     expect(backendIr(compiled).deviceGlobals.map((global) => global.name)).not.toContain("unused_state");
+    expect(compiled.kernelIr.memory.map((symbol) => symbol.name)).not.toContain("unused_state");
     expect([...result.buffers.x as Float32Array]).toEqual([5]);
     expect(compiled.wgsl).not.toContain("unused_state");
     expect(compiled.wgsl).not.toContain("unused_device_global_helper");
@@ -7814,6 +7851,7 @@ __global__ void selected(float *x) {
     );
 
     expect(backendIr(compiled).functions.map((fn) => fn.name)).toEqual(["selected_helper"]);
+    expect(compiled.kernelIr.functions.map((fn) => fn.name)).toEqual(["selected_helper"]);
     expect([...result.buffers.x as Float32Array]).toEqual([5]);
     expect(compiled.wgsl).toContain("selected_helper");
     expect(compiled.wgsl).not.toContain("unused_helper");
@@ -7843,6 +7881,8 @@ __global__ void selected(float *x) {
     expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(backendIr(compiled).constants.map((constant) => constant.name)).not.toContain("unused_coeffs");
     expect(backendIr(compiled).deviceGlobals.map((global) => global.name)).not.toContain("unused_state");
+    expect(compiled.kernelIr.memory.map((symbol) => symbol.name)).not.toContain("unused_coeffs");
+    expect(compiled.kernelIr.memory.map((symbol) => symbol.name)).not.toContain("unused_state");
     expect([...result.buffers.x as Float32Array]).toEqual([5]);
     expect(compiled.wgsl).not.toContain("unused_coeffs");
     expect(compiled.wgsl).not.toContain("unused_state");

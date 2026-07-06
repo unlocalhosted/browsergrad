@@ -7,14 +7,12 @@ import {
   type WgslResidentBuffer,
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
-import { collectExternalDevicePoolNames } from "./ast_queries.js";
 import { internalBackendIrFor } from "./backend_ir.js";
 import { createCudaHostDynamicLaunchPlan } from "./dynamic_launch.js";
 import { CUDA_INTRINSICS } from "./intrinsics.js";
 import { createCudaLaunchValidationDiagnostics } from "./launch.js";
 import { createCudaPeerCopyPlan, type CudaPeerCopyOperation } from "./peer_copy.js";
-import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
-import { poolDataName, poolOffsetName } from "./pool_bindings.js";
+import { poolOffsetName } from "./pool_bindings.js";
 import { deviceLaunchTreeIsExternallySilent } from "./runtime_elision.js";
 import { createCudaGridSyncPhasePlan, createCudaRuntimePlan } from "./runtime_plan.js";
 import type {
@@ -23,14 +21,15 @@ import type {
 } from "./semantic_ir.js";
 import {
   constantBufferInputs,
+  cudaWebGpuDefaultReadbackNames,
+  cudaWebGpuMemoryPoolDataAliases,
+  cudaWebGpuUniformParamDescriptors,
   deviceGlobalBufferInputs,
-  isDevicePoolParam,
   memoryPoolBufferInputs,
   memoryPoolStorageMetadata,
   surfaceBufferInputs,
 } from "./webgpu_inputs.js";
 import { emitKernelIrWgsl } from "./wgsl.js";
-import { isCudaVectorType } from "./vector_types.js";
 import {
   CudaLiteCompilerError,
   type CompiledCudaLiteKernel,
@@ -218,7 +217,7 @@ export function createCudaWebGpuExecutionPlan(
   options: CudaWebGpuExecutionPlanOptions = {},
 ): CudaWebGpuExecutionPlan {
   const backendIr = internalBackendIrFor(compiled);
-  const launchDiagnostics = createCudaLaunchValidationDiagnostics(launch, backendIr.workgroupSize);
+  const launchDiagnostics = createCudaLaunchValidationDiagnostics(launch, compiled.kernelIr.workgroupSize);
   if (launchDiagnostics.length > 0) {
     const launchBlockers = launchDiagnostics.map((diagnostic) => webGpuBlocker("launch", diagnostic.code, diagnostic.message));
     return {
@@ -316,14 +315,9 @@ export function normalizeCudaWebGpuReadback(
   compiled: CompiledCudaLiteKernel,
   buffers: Readonly<Record<string, WgslTypedArray>>,
 ): Record<string, WgslTypedArray> {
-  const backendIr = internalBackendIrFor(compiled);
   const out: Record<string, WgslTypedArray> = { ...buffers };
-  for (const pool of backendIr.params.filter(isDevicePoolParam)) {
-    const data = buffers[poolDataName(pool.name)];
-    if (data) out[pool.name] = data;
-  }
-  for (const poolName of collectExternalDevicePoolNames(backendIr.body)) {
-    const data = buffers[poolDataName(poolName)];
+  for (const [poolName, dataName] of cudaWebGpuMemoryPoolDataAliases(compiled)) {
+    const data = buffers[dataName];
     if (data) out[poolName] = data;
   }
   return out;
@@ -333,14 +327,7 @@ export function normalizeCudaWebGpuReadbackNames(
   compiled: CompiledCudaLiteKernel,
   names: readonly string[],
 ): readonly string[] {
-  const backendIr = internalBackendIrFor(compiled);
-  const aliases = new Map<string, string>();
-  for (const pool of backendIr.params.filter(isDevicePoolParam)) {
-    aliases.set(pool.name, poolDataName(pool.name));
-  }
-  for (const poolName of collectExternalDevicePoolNames(backendIr.body)) {
-    aliases.set(poolName, poolDataName(poolName));
-  }
+  const aliases = cudaWebGpuMemoryPoolDataAliases(compiled);
   return [...new Set(names.map((name) => aliases.get(name) ?? name))];
 }
 
@@ -1043,10 +1030,9 @@ function getOrCompileDynamicChild(
   const cached = cache.get(key);
   if (cached) return { compiled: cached };
   try {
-    const parentBackendIr = internalBackendIrFor(parent);
     const compiled = compileKernel(parent.ast.source, {
       kernelName: item.kernel.name,
-      features: featureOptionsFor(parentBackendIr.requiredFeatures),
+      features: featureOptionsFor(parent.kernelIr.requiredFeatures),
       referenceDynamicParallelism: true,
       referenceGridSync: true,
       referenceCudaRuntime: true,
@@ -1083,7 +1069,6 @@ function createWgslRunInput(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
 ): WgslKernelRunInput {
-  const backendIr = internalBackendIrFor(compiled);
   const uniforms = packCudaWebGpuUniformParams(compiled, input);
   const buffers = {
     ...input.buffers,
@@ -1094,13 +1079,7 @@ function createWgslRunInput(
   };
   const storageMetadata = memoryPoolStorageMetadata(compiled);
   const readback = input.readback === undefined
-    ? [
-      ...backendIr.params
-        .filter((param) => (param.pointer && !param.constant) || param.valueType === "surface2d")
-        .map((param) => param.valueType === "devicepool" ? poolDataName(param.name) : param.name),
-      ...backendIr.deviceGlobals.map((global) => global.name),
-      ...collectExternalDevicePoolNames(backendIr.body).map(poolDataName),
-    ]
+    ? cudaWebGpuDefaultReadbackNames(compiled)
     : normalizeCudaWebGpuReadbackNames(compiled, input.readback);
   return {
     buffers,
@@ -1133,41 +1112,21 @@ export function packCudaWebGpuUniformParams(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
 ): Uint8Array {
-  const backendIr = internalBackendIrFor(compiled);
-  const scalarParams = [
-    ...backendIr.params.filter((param) => !param.pointer && param.valueType !== "surface2d" && param.valueType !== "texture2d"),
-    ...backendIr.constants.filter((constant) =>
-      constant.dimensions.length === 0 &&
-      constant.init === undefined &&
-      !isCudaVectorType(constant.valueType)
-    ),
-    ...backendIr.params.filter((param) => param.valueType === "surface2d").flatMap((param) => [
-      { name: `${param.name}_width`, valueType: "uint" as const, surface: param.name, span: param.span },
-      { name: `${param.name}_height`, valueType: "uint" as const, surface: param.name, span: param.span },
-    ]),
-    ...backendIr.params
-      .filter((param) => param.pointer && compiled.pointerBaseOffsets?.[param.name] !== undefined)
-      .map((param) => ({
-        name: pointerBaseOffsetUniformName(param.name),
-        valueType: "uint" as const,
-        pointerBase: param.name,
-        span: param.span,
-      })),
-  ];
+  const scalarParams = cudaWebGpuUniformParamDescriptors(compiled);
   if (scalarParams.length === 0) return new Uint8Array(0);
   const bytes = new Uint8Array(Math.max(16, scalarParams.length * 4));
   const view = new DataView(bytes.buffer);
   for (let i = 0; i < scalarParams.length; i++) {
     const param = scalarParams[i]!;
-    const value = "surface" in param
+    const value = param.kind === "surface-dimension"
       ? (param.name.endsWith("_width") ? input.surfaces?.[param.surface]?.width : input.surfaces?.[param.surface]?.height)
-      : "pointerBase" in param
+      : param.kind === "pointer-base"
       ? compiled.pointerBaseOffsets?.[param.pointerBase]
-      : "pointer" in param
+      : param.kind === "scalar"
       ? input.scalars?.[param.name]
       : input.constants?.[param.name];
     if (value === undefined) {
-      const kind = "surface" in param ? "surface input" : "pointer" in param ? "scalar input" : "constant input";
+      const kind = param.kind === "surface-dimension" ? "surface input" : param.kind === "scalar" ? "scalar input" : "constant input";
       throw new CudaLiteCompilerError(`missing ${kind} '${param.name}'`, [{
         code: "missing-scalar",
         severity: "error",

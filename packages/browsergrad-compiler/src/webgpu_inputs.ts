@@ -3,10 +3,13 @@ import {
   type WgslStorageBufferMetadata,
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
-import { collectExternalDevicePoolNames } from "./ast_queries.js";
-import { internalBackendIrFor } from "./backend_ir.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
+import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
+import type {
+  SemanticExpression,
+  SemanticKernelIrOperation,
+} from "./semantic_ir.js";
 import { isCudaVectorType } from "./vector_types.js";
 import {
   CudaLiteCompilerError,
@@ -15,15 +18,46 @@ import {
   type CudaLiteDeviceGlobal,
   type CudaLiteDiagnostic,
   type CudaLiteExpression,
+  type CudaLiteGlobalConstant,
+  type SourceSpan,
 } from "./types.js";
+
+export type CudaWebGpuUniformParamDescriptor =
+  | {
+      readonly kind: "scalar";
+      readonly name: string;
+      readonly valueType: NonNullable<CudaLiteSemanticSymbolValueType>;
+      readonly span: SourceSpan;
+    }
+  | {
+      readonly kind: "constant";
+      readonly name: string;
+      readonly valueType: CudaLiteGlobalConstant["valueType"];
+      readonly span: SourceSpan;
+    }
+  | {
+      readonly kind: "surface-dimension";
+      readonly name: string;
+      readonly valueType: "uint";
+      readonly surface: string;
+      readonly span: SourceSpan;
+    }
+  | {
+      readonly kind: "pointer-base";
+      readonly name: string;
+      readonly valueType: "uint";
+      readonly pointerBase: string;
+      readonly span: SourceSpan;
+    };
+
+type CudaLiteSemanticSymbolValueType = CompiledCudaLiteKernel["kernelIr"]["params"][number]["valueType"];
 
 export function surfaceBufferInputs(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
 ): Record<string, WgslTypedArray> {
   const out: Record<string, WgslTypedArray> = {};
-  const backendIr = internalBackendIrFor(compiled);
-  for (const surface of backendIr.params.filter((param) => param.valueType === "surface2d")) {
+  for (const surface of compiled.kernelIr.params.filter((param) => param.addressSpace === "surface")) {
     const value = input.surfaces?.[surface.name];
     if (!value) {
       throw new CudaLiteCompilerError(`missing surface input '${surface.name}'`, [{
@@ -92,8 +126,7 @@ export function constantBufferInputs(
   input: CompiledKernelInput,
 ): Record<string, WgslTypedArray> {
   const out: Record<string, WgslTypedArray> = {};
-  const backendIr = internalBackendIrFor(compiled);
-  for (const constant of backendIr.constants.filter((item) =>
+  for (const constant of externalConstantDeclarations(compiled).filter((item) =>
     item.init === undefined &&
     (item.dimensions.length > 0 || isCudaVectorType(item.valueType))
   )) {
@@ -116,26 +149,280 @@ export function deviceGlobalBufferInputs(
   input: CompiledKernelInput,
 ): Record<string, WgslTypedArray> {
   const out: Record<string, WgslTypedArray> = {};
-  const backendIr = internalBackendIrFor(compiled);
-  for (const global of backendIr.deviceGlobals) {
+  for (const global of deviceGlobalDeclarations(compiled)) {
     out[global.name] = input.deviceGlobals?.[global.name] ?? deviceGlobalInitialValue(global);
   }
   return out;
 }
 
-export function isDevicePoolParam(param: { readonly pointer: boolean; readonly valueType: string }): boolean {
-  return param.pointer && param.valueType === "devicepool";
+export function cudaWebGpuUniformParamDescriptors(
+  compiled: CompiledCudaLiteKernel,
+): readonly CudaWebGpuUniformParamDescriptor[] {
+  return [
+    ...compiled.kernelIr.params.flatMap((param): readonly CudaWebGpuUniformParamDescriptor[] =>
+      param.addressSpace === "uniform" && param.valueType !== undefined
+        ? [{ kind: "scalar", name: param.name, valueType: param.valueType, span: param.span }]
+        : []
+    ),
+    ...externalConstantDeclarations(compiled).flatMap((constant): readonly CudaWebGpuUniformParamDescriptor[] =>
+      constant.dimensions.length === 0 && constant.init === undefined && !isCudaVectorType(constant.valueType)
+        ? [{ kind: "constant", name: constant.name, valueType: constant.valueType, span: constant.span }]
+        : []
+    ),
+    ...compiled.kernelIr.params
+      .filter((param) => param.addressSpace === "surface")
+      .flatMap((param): readonly CudaWebGpuUniformParamDescriptor[] => [
+        { kind: "surface-dimension", name: `${param.name}_width`, valueType: "uint", surface: param.name, span: param.span },
+        { kind: "surface-dimension", name: `${param.name}_height`, valueType: "uint", surface: param.name, span: param.span },
+      ]),
+    ...compiled.kernelIr.params.flatMap((param): readonly CudaWebGpuUniformParamDescriptor[] =>
+      param.pointer && compiled.pointerBaseOffsets?.[param.name] !== undefined
+        ? [{
+          kind: "pointer-base",
+          name: pointerBaseOffsetUniformName(param.name),
+          valueType: "uint",
+          pointerBase: param.name,
+          span: param.span,
+        }]
+        : []
+    ),
+  ];
+}
+
+export function cudaWebGpuDefaultReadbackNames(compiled: CompiledCudaLiteKernel): readonly string[] {
+  return [
+    ...compiled.kernelIr.params
+      .filter((param) =>
+        (param.addressSpace === "storage" && param.pointer && !param.constant) ||
+        param.addressSpace === "surface" ||
+        isDevicePoolParam(param)
+      )
+      .map((param) => isDevicePoolParam(param) ? poolDataName(param.name) : param.name),
+    ...deviceGlobalDeclarations(compiled).map((global) => global.name),
+    ...memoryPoolDescriptors(compiled).map((pool) => poolDataName(pool.name)),
+  ].filter((name, index, names) => names.indexOf(name) === index);
+}
+
+export function cudaWebGpuMemoryPoolDataAliases(compiled: CompiledCudaLiteKernel): ReadonlyMap<string, string> {
+  return new Map(memoryPoolDescriptors(compiled).map((pool) => [pool.name, poolDataName(pool.name)] as const));
+}
+
+export function isDevicePoolParam(param: { readonly pointer?: boolean; readonly valueType?: string }): boolean {
+  return Boolean(param.pointer && param.valueType === "devicepool");
 }
 
 function memoryPoolDescriptors(compiled: CompiledCudaLiteKernel): Array<{ readonly name: string; readonly span: CudaLiteDiagnostic["span"] }> {
-  const backendIr = internalBackendIrFor(compiled);
-  return [
-    ...backendIr.params.filter(isDevicePoolParam).map((param) => ({ name: param.name, span: param.span })),
-    ...collectExternalDevicePoolNames(backendIr.body).map((name) => ({
-      name,
-      span: backendIr.body[0]?.span ?? backendIr.params[0]?.span ?? { start: 0, end: 0, line: 1, column: 1 },
-    })),
-  ];
+  const out = new Map<string, SourceSpan>();
+  for (const param of compiled.kernelIr.params.filter(isDevicePoolParam)) out.set(param.name, param.span);
+  for (const descriptor of collectExternalDevicePoolDescriptors(compiled.kernelIr.operations)) {
+    if (!out.has(descriptor.name)) out.set(descriptor.name, descriptor.span);
+  }
+  return [...out].map(([name, span]) => ({ name, span }));
+}
+
+function externalConstantDeclarations(compiled: CompiledCudaLiteKernel): readonly CudaLiteGlobalConstant[] {
+  const semanticNames = new Set(
+    compiled.kernelIr.memory
+      .filter((symbol) => symbol.kind === "constant")
+      .map((symbol) => symbol.name),
+  );
+  const storageBindingNames = storageBindingNameSet(compiled);
+  return compiled.analysis.constants.filter((constant) =>
+    semanticNames.has(constant.name) &&
+    (storageBindingNames.has(constant.name) || constant.dimensions.length === 0)
+  );
+}
+
+function deviceGlobalDeclarations(compiled: CompiledCudaLiteKernel): readonly CudaLiteDeviceGlobal[] {
+  const semanticNames = new Set(
+    compiled.kernelIr.memory
+      .filter((symbol) => symbol.kind === "device-global")
+      .map((symbol) => symbol.name),
+  );
+  const storageBindingNames = storageBindingNameSet(compiled);
+  return compiled.analysis.deviceGlobals.filter((global) =>
+    semanticNames.has(global.name) &&
+    storageBindingNames.has(global.name)
+  );
+}
+
+function storageBindingNameSet(compiled: CompiledCudaLiteKernel): ReadonlySet<string> {
+  return new Set(
+    compiled.wgslProgram.bindings
+      .filter((binding) => binding.kind === "storage")
+      .map((binding) => binding.name),
+  );
+}
+
+function collectExternalDevicePoolDescriptors(
+  operations: readonly SemanticKernelIrOperation[],
+): readonly { readonly name: string; readonly span: SourceSpan }[] {
+  const out = new Map<string, SourceSpan>();
+  walkSemanticOperations(operations, (expression) => {
+    if (expression.kind !== "call") return;
+    const callName = semanticExpressionName(expression.callee);
+    if (callName !== "deviceAllocate" && callName !== "streamOrderedAllocate") return;
+    const pool = expression.args[0];
+    if (pool?.kind !== "unary" || pool.operator !== "&" || pool.argument.kind !== "symbol") return;
+    if (!out.has(pool.argument.name)) out.set(pool.argument.name, pool.argument.span);
+  });
+  return [...out].map(([name, span]) => ({ name, span }));
+}
+
+function walkSemanticOperations(
+  operations: readonly SemanticKernelIrOperation[],
+  visitExpression: (expression: SemanticExpression) => void,
+): void {
+  for (const operation of operations) walkSemanticOperation(operation, visitExpression);
+}
+
+function walkSemanticOperation(
+  operation: SemanticKernelIrOperation,
+  visitExpression: (expression: SemanticExpression) => void,
+): void {
+  switch (operation.kind) {
+    case "declare":
+      if (operation.init) walkSemanticExpression(operation.init, visitExpression);
+      return;
+    case "dim3-declare":
+      for (const arg of operation.args) walkSemanticExpression(arg, visitExpression);
+      return;
+    case "store":
+      walkSemanticMemoryRef(operation.target, visitExpression);
+      walkSemanticExpression(operation.value, visitExpression);
+      for (const read of operation.reads) walkSemanticMemoryRef(read, visitExpression);
+      return;
+    case "atomic":
+    case "call":
+      for (const arg of operation.args) walkSemanticExpression(arg, visitExpression);
+      if ("reads" in operation) {
+        for (const read of operation.reads) walkSemanticMemoryRef(read, visitExpression);
+      }
+      return;
+    case "expression":
+      walkSemanticExpression(operation.expression, visitExpression);
+      return;
+    case "branch":
+      walkSemanticExpression(operation.condition, visitExpression);
+      walkSemanticOperations(operation.consequent, visitExpression);
+      walkSemanticOperations(operation.alternate, visitExpression);
+      return;
+    case "loop":
+      if (operation.init) {
+        if (isSemanticKernelIrOperation(operation.init)) walkSemanticOperation(operation.init, visitExpression);
+        else walkSemanticExpression(operation.init, visitExpression);
+      }
+      if (operation.condition) walkSemanticExpression(operation.condition, visitExpression);
+      if (operation.update) walkSemanticExpression(operation.update, visitExpression);
+      walkSemanticOperations(operation.body, visitExpression);
+      return;
+    case "device-launch":
+      for (const expression of [...operation.launch.grid, ...operation.launch.block, ...operation.launch.args]) {
+        walkSemanticExpression(expression, visitExpression);
+      }
+      return;
+    case "return":
+      if (operation.value) walkSemanticExpression(operation.value, visitExpression);
+      return;
+    case "block":
+      walkSemanticOperations(operation.body, visitExpression);
+      return;
+    case "cooperative-group-declare":
+    case "load":
+    case "barrier":
+    case "inline-asm":
+    case "continue":
+    case "break":
+      return;
+  }
+}
+
+function walkSemanticMemoryRef(
+  ref: { readonly indices: readonly SemanticExpression[] },
+  visitExpression: (expression: SemanticExpression) => void,
+): void {
+  for (const index of ref.indices) walkSemanticExpression(index, visitExpression);
+}
+
+function walkSemanticExpression(
+  expression: SemanticExpression,
+  visit: (expression: SemanticExpression) => void,
+): void {
+  visit(expression);
+  switch (expression.kind) {
+    case "literal":
+    case "symbol":
+      return;
+    case "member":
+      walkSemanticExpression(expression.object, visit);
+      return;
+    case "index":
+      walkSemanticExpression(expression.target, visit);
+      walkSemanticExpression(expression.index, visit);
+      return;
+    case "call":
+      walkSemanticExpression(expression.callee, visit);
+      for (const arg of expression.args) walkSemanticExpression(arg, visit);
+      return;
+    case "cast":
+      walkSemanticExpression(expression.expression, visit);
+      return;
+    case "unary":
+    case "update":
+      walkSemanticExpression(expression.argument, visit);
+      return;
+    case "binary":
+      walkSemanticExpression(expression.left, visit);
+      walkSemanticExpression(expression.right, visit);
+      return;
+    case "conditional":
+      walkSemanticExpression(expression.condition, visit);
+      walkSemanticExpression(expression.consequent, visit);
+      walkSemanticExpression(expression.alternate, visit);
+      return;
+    case "assignment":
+      walkSemanticExpression(expression.target, visit);
+      walkSemanticExpression(expression.value, visit);
+      return;
+    case "initializer":
+      for (const element of expression.elements) walkSemanticExpression(element, visit);
+      return;
+    case "sequence":
+      for (const item of expression.expressions) walkSemanticExpression(item, visit);
+      return;
+  }
+}
+
+function semanticExpressionName(expression: SemanticExpression): string | undefined {
+  return expression.kind === "symbol" ? expression.name : undefined;
+}
+
+function isSemanticKernelIrOperation(
+  value: SemanticKernelIrOperation | SemanticExpression,
+): value is SemanticKernelIrOperation {
+  switch (value.kind) {
+    case "declare":
+    case "dim3-declare":
+    case "cooperative-group-declare":
+    case "load":
+    case "store":
+    case "atomic":
+    case "expression":
+    case "branch":
+    case "loop":
+    case "barrier":
+    case "device-launch":
+    case "inline-asm":
+    case "return":
+    case "continue":
+    case "break":
+    case "block":
+      return true;
+    case "call":
+      return typeof value.callee === "string";
+    default:
+      return false;
+  }
 }
 
 function deviceGlobalInitialValue(global: CudaLiteDeviceGlobal): WgslTypedArray {

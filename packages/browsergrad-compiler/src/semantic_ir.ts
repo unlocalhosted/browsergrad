@@ -15,6 +15,7 @@ import type {
   KernelLaunch,
   SourceSpan,
 } from "./types.js";
+import { walkCudaLiteExpressions } from "./ast_queries.js";
 
 export type SemanticAddressSpace =
   | "uniform"
@@ -239,20 +240,54 @@ export function lowerSemanticModelToKernelIr(
   const scope = new Map(semantic.symbols.map((symbol) => [symbol.name, symbol]));
   const operations = lowerStatements(analysis.kernel.body, scope);
   const localMemory = collectDeclaredMemory(operations);
+  const reachable = collectReachableAnalysisNames(analysis);
   return {
     kind: "semantic-kernel-ir",
     name: analysis.kernel.name,
     span: analysis.kernel.span,
     params: semantic.params,
     memory: [
-      ...semantic.symbols.filter((symbol) => symbol.kind !== "param" && symbol.kind !== "function"),
+      ...semantic.symbols.filter((symbol) =>
+        symbol.kind !== "param" &&
+        symbol.kind !== "function" &&
+        reachable.symbolNames.has(symbol.name)
+      ),
       ...localMemory,
     ],
-    functions: semantic.functions,
+    functions: semantic.functions.filter((fn) => reachable.functionNames.has(fn.name)),
     operations,
     requiredFeatures: semantic.requiredFeatures,
     workgroupSize: normalizeWorkgroupSize(options.workgroupSize ?? DEFAULT_WORKGROUP_SIZE),
   };
+}
+
+function collectReachableAnalysisNames(analysis: CudaLiteAnalysis): {
+  readonly symbolNames: ReadonlySet<string>;
+  readonly functionNames: ReadonlySet<string>;
+} {
+  const symbolNames = new Set<string>();
+  const functionNames = new Set<string>();
+  const functionsByName = new Map(analysis.functions.map((fn) => [fn.name, fn]));
+  const pending = [analysis.kernel.body];
+
+  for (let index = 0; index < pending.length; index++) {
+    const body = pending[index]!;
+    walkCudaLiteExpressions(body, (expression) => {
+      if (expression.kind === "identifier") {
+        symbolNames.add(expression.name);
+        return;
+      }
+      if (expression.kind !== "call" || expression.callee.kind !== "identifier") return;
+      const callee = expression.callee.name;
+      symbolNames.add(callee);
+      const fn = functionsByName.get(callee);
+      if (!fn || functionNames.has(callee)) return;
+      functionNames.add(callee);
+      pending.push(fn.body);
+    });
+  }
+
+  return { symbolNames, functionNames };
 }
 
 function lowerStatements(
