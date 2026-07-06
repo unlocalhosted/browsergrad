@@ -2,6 +2,7 @@ import { fusedElementwiseDirect, type FusedOp } from "./kernels/fused_elementwis
 import { matmulTiledDirect } from "./kernels/matmul_tiled.js";
 import {
   materializeFloat32,
+  releaseDirectBuffer,
   runDirect,
   uploadFloat32,
   type DirectDispatchResult,
@@ -116,6 +117,7 @@ interface ResidentValue {
   readonly buffer: GPUBuffer;
   readonly shape: readonly number[];
   readonly owns: boolean;
+  readonly poolable: boolean;
   readonly byteLength: number;
 }
 
@@ -172,7 +174,7 @@ export async function runTensorGpuPlan(
   rawPlan: TensorGpuPlan | unknown,
   inputs: readonly TensorPlanInput[],
 ): Promise<TensorPlanRunResult> {
-  const { root, rootMeta, owned, peakLiveBytes, rootId, earlyReleaseStats } = executeTensorGpuPlan(
+  const { root, rootMeta, owned, ownedBytes, peakLiveBytes, rootId, earlyReleaseStats } = executeTensorGpuPlan(
     device,
     rawPlan,
     inputs,
@@ -188,7 +190,7 @@ export async function runTensorGpuPlan(
       earlyReleasedBytes: earlyReleaseStats.bytes,
     };
   } finally {
-    for (const buffer of owned) buffer.destroy();
+    for (const buffer of owned) destroyOwnedBuffer(device, buffer, ownedBytes);
   }
 }
 
@@ -197,19 +199,19 @@ export function runTensorGpuPlanResident(
   rawPlan: TensorGpuPlan | unknown,
   inputs: readonly TensorPlanInput[],
 ): TensorPlanResidentResult {
-  const { root, rootMeta, owned, peakLiveBytes, rootId, earlyReleaseStats } = executeTensorGpuPlan(
+  const { root, rootMeta, owned, ownedBytes, peakLiveBytes, rootId, earlyReleaseStats } = executeTensorGpuPlan(
     device,
     rawPlan,
     inputs,
   );
   if (!owned.has(root.buffer)) {
-    for (const buffer of owned) buffer.destroy();
+    for (const buffer of owned) destroyOwnedBuffer(device, buffer, ownedBytes);
     throw new KernelError(
       `tensor plan root ${rootId} aliases an input buffer; resident output requires an owned root`,
     );
   }
   owned.delete(root.buffer);
-  for (const buffer of owned) buffer.destroy();
+  for (const buffer of owned) destroyOwnedBuffer(device, buffer, ownedBytes);
   return {
     buffer: root.buffer,
     byteLength: root.byteLength,
@@ -229,6 +231,7 @@ function executeTensorGpuPlan(
   readonly root: ResidentValue;
   readonly rootMeta: TensorPlanBuffer;
   readonly owned: Set<GPUBuffer>;
+  readonly ownedBytes: Map<GPUBuffer, number>;
   readonly peakLiveBytes: number;
   readonly rootId: number;
   readonly earlyReleaseStats: { readonly buffers: number; readonly bytes: number };
@@ -257,25 +260,26 @@ function executeTensorGpuPlan(
       values.set(step.valueId, value);
       if (value.owns) {
         owned.add(value.buffer);
-        ownedBytes.set(value.buffer, value.byteLength);
+        ownedBytes.set(value.buffer, value.poolable ? value.byteLength : -value.byteLength);
       }
-      releaseDeadOwnedBuffers(plan, step.step, values, owned, ownedBytes, earlyReleaseStats);
+      releaseDeadOwnedBuffers(device, plan, step.step, values, owned, ownedBytes, earlyReleaseStats);
     }
   } catch (err) {
-    for (const buffer of owned) buffer.destroy();
+    for (const buffer of owned) destroyOwnedBuffer(device, buffer, ownedBytes);
     throw err;
   }
 
   const root = values.get(plan.rootId);
   const rootMeta = buffersByValue.get(plan.rootId);
   if (!root || !rootMeta) {
-    for (const buffer of owned) buffer.destroy();
+    for (const buffer of owned) destroyOwnedBuffer(device, buffer, ownedBytes);
     throw new KernelError(`tensor plan root ${plan.rootId} was not produced`);
   }
   return {
     root,
     rootMeta,
     owned,
+    ownedBytes,
     peakLiveBytes: plan.peakLiveBytes,
     rootId: plan.rootId,
     earlyReleaseStats,
@@ -283,6 +287,7 @@ function executeTensorGpuPlan(
 }
 
 function releaseDeadOwnedBuffers(
+  device: KernelDevice,
   plan: TensorGpuPlan,
   currentStep: number,
   values: Map<number, ResidentValue>,
@@ -307,12 +312,26 @@ function releaseDeadOwnedBuffers(
       }
     }
     if (needed) continue;
-    const bytes = ownedBytes.get(buffer) ?? 0;
-    buffer.destroy();
+    const signedBytes = ownedBytes.get(buffer) ?? 0;
+    const bytes = Math.abs(signedBytes);
+    destroyOwnedBuffer(device, buffer, ownedBytes);
     owned.delete(buffer);
     ownedBytes.delete(buffer);
     stats.buffers += 1;
     stats.bytes += bytes;
+  }
+}
+
+function destroyOwnedBuffer(
+  device: KernelDevice,
+  buffer: GPUBuffer,
+  ownedBytes: Map<GPUBuffer, number>,
+): void {
+  const signedBytes = ownedBytes.get(buffer) ?? 0;
+  if (signedBytes > 0) {
+    releaseDirectBuffer(device, buffer, signedBytes);
+  } else {
+    buffer.destroy();
   }
 }
 
@@ -332,6 +351,7 @@ function executeStep(
           buffer: input.resident.buffer,
           shape: step.shape,
           owns: false,
+          poolable: false,
           byteLength: input.resident.byteLength,
         };
       }
@@ -340,7 +360,7 @@ function executeStep(
       }
       validateNumel(input.data.length, step.shape, `BUFFER ${step.valueId}`);
       const buffer = uploadFloat32(device, input.data);
-      return { buffer, shape: step.shape, owns: true, byteLength: input.data.byteLength };
+      return { buffer, shape: step.shape, owns: true, poolable: false, byteLength: input.data.byteLength };
     }
     case "LOAD": {
       const src = requireValue(values, step.inputIds[0], step.op);
@@ -3002,6 +3022,7 @@ function fromDirect(step: TensorPlanStep, result: DirectDispatchResult): Residen
     buffer: result.buffer,
     shape: step.shape,
     owns: true,
+    poolable: true,
     byteLength: result.byteLength,
   };
 }

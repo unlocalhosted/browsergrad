@@ -225,6 +225,19 @@ describe("real WebGPU — matmul + tiled GEMM + fused elementwise + FA-v2", () =
     expect(result.earlyReleasedBuffers).toBeGreaterThan(0);
     expect(result.earlyReleasedBytes).toBeGreaterThan(0);
     expect(maxDiff).toBeLessThan(1e-3);
+
+    const statsAfterFirst = device.getStats();
+    expect(statsAfterFirst.outputBufferPoolBuffers).toBeGreaterThan(0);
+    expect(statsAfterFirst.outputBufferPoolBytes).toBeGreaterThan(0);
+    expect(statsAfterFirst.outputBufferPoolMisses).toBeGreaterThan(0);
+
+    const result2 = await runTensorGpuPlan(device, plan, [
+      { valueId: 1, data: x },
+      { valueId: 2, data: w },
+    ]);
+    const statsAfterSecond = device.getStats();
+    expect(result2.shape).toEqual([M, N]);
+    expect(statsAfterSecond.outputBufferPoolHits).toBeGreaterThan(statsAfterFirst.outputBufferPoolHits);
   });
 
   it("WebGpuRealizerBridge runs a canonical tensor plan through one generic method", async () => {

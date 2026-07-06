@@ -45,6 +45,9 @@ export interface KernelDeviceOptions {
 
   /** Max compute pipelines kept warm in cache. Default 32. */
   pipelineCacheSize?: number;
+
+  /** Max reusable output buffers kept per byte size. Default 8. */
+  outputBufferPoolSize?: number;
 }
 
 /**
@@ -70,6 +73,10 @@ export interface KernelDeviceStats {
   readonly pipelineCacheHits: number;
   readonly pipelineCacheMisses: number;
   readonly kernelInvocations: number;
+  readonly outputBufferPoolBuffers: number;
+  readonly outputBufferPoolBytes: number;
+  readonly outputBufferPoolHits: number;
+  readonly outputBufferPoolMisses: number;
 }
 
 /**

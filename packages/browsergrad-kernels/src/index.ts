@@ -69,6 +69,7 @@ export {
 // recommended path; these are escape hatches.
 export {
   runDirect,
+  releaseDirectBuffer,
   materializeFloat32,
   uploadFloat32,
   type DirectDispatchOptions,

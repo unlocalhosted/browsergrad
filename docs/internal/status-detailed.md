@@ -7,7 +7,7 @@ Living document. Reflects the current state of each package, what's tested, and 
 | Package | Version | Surface tests | Integration tests | Browser tests |
 |---|---|---|---|---|
 | `@unlocalhosted/browsergrad-runtime` | `0.1.1` | 27 | 23 (Pyodide-in-node) | — |
-| `@unlocalhosted/browsergrad-kernels` | `0.1.2` | 35 (incl. JS-reference numerical checks, FUSED WGSL codegen) | — | 38 (real Chromium + WebGPU) |
+| `@unlocalhosted/browsergrad-kernels` | `0.1.2` | 35 (incl. JS-reference numerical checks, FUSED WGSL codegen) | — | 39 (real Chromium + WebGPU) |
 | `@unlocalhosted/browsergrad-grad` | `0.5.1` | 30 | 317 (Pyodide-in-node) | — |
 | `@unlocalhosted/browsergrad-jit` | `0.8.2` | 8 | 213 (Pyodide-in-node, incl. feedback + perf benches) | — (via kernels) |
 
@@ -112,7 +112,7 @@ the intended GPU materialization boundaries.
   resident=True)` and `AdamW.step(device="webgpu", resident=True)` keep
   params/m/v state resident. Default `.step()` selects the resident WebGPU path
   when params/grads are already GPU-owned.
-- Remaining: reusable buffer pooling and broader training-loop scheduling.
+- Remaining: broader training-loop scheduling/codegen beyond direct kernels.
 
 ### Tiled GEMM + fused codegen + GPU cast (PRD-012a)
 - `matmulTiledDirect` — 16×16 tiled GEMM (workgroup-shared A/B tiles). Closes most of the gap PRD-012 was claiming via "megakernels".
@@ -183,6 +183,9 @@ WGSL kernels — each with a JS reference for conformance:
 Plus the realizer-tier API:
 - `createWebGpuRealizerBridge(device)` — production bridge for browsergrad-jit.
 - `runDirect` / `materializeFloat32` / `uploadFloat32` — GPUBuffer-in/out dispatch path.
+- `createDevice({ outputBufferPoolSize })` — per-device reusable output-buffer
+  pool for direct-dispatch outputs; stats expose pool size, bytes, hits, and
+  misses through `device.getStats()`.
 - `runTensorGpuPlan` — generic f32 tensor-plan executor for BUFFER/LOAD,
   2-D MATMUL, elementwise chains, RESHAPE, PERMUTE, BROADCAST_TO, and
   REDUCE(sum/mean) rank <= 4, plus Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm
@@ -190,7 +193,8 @@ Plus the realizer-tier API:
   the snake_case `browsergrad-jit` plan payload, keeps intermediates
   resident, and materializes only the declared root, matching the GPU-native
   direction. It releases dead owned buffers from liveness metadata before the
-  root boundary and reports early-release counts/bytes.
+  root boundary, returns dead direct-dispatch outputs to the device pool, and
+  reports early-release counts/bytes.
 - `runTensorGpuPlanResident` — same executor, but returns an owned resident
   root `GPUBuffer`; bridge inputs can be host bytes or existing resident
   handles.

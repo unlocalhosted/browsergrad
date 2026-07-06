@@ -21,10 +21,15 @@ class KernelDeviceImpl implements KernelDevice {
   private hits = 0;
   private misses = 0;
   private invocations = 0;
+  private outputBufferPool = new Map<number, GPUBuffer[]>();
+  private outputBufferPoolLimit: number;
+  private outputBufferPoolHits = 0;
+  private outputBufferPoolMisses = 0;
 
-  constructor(gpu: GPUDevice, cacheLimit: number) {
+  constructor(gpu: GPUDevice, cacheLimit: number, outputBufferPoolLimit: number) {
     this.gpu = gpu;
     this.cacheLimit = cacheLimit;
+    this.outputBufferPoolLimit = outputBufferPoolLimit;
   }
 
   /** @internal Used by runner. Public API stable, internal access opaque. */
@@ -53,17 +58,57 @@ class KernelDeviceImpl implements KernelDevice {
     this.invocations++;
   }
 
+  /** @internal */
+  acquireOutputBuffer(byteLength: number): GPUBuffer {
+    const pool = this.outputBufferPool.get(byteLength);
+    const existing = pool?.pop();
+    if (existing) {
+      this.outputBufferPoolHits++;
+      return existing;
+    }
+    this.outputBufferPoolMisses++;
+    return this.gpu.createBuffer({
+      size: byteLength,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+    });
+  }
+
+  /** @internal */
+  releaseOutputBuffer(buffer: GPUBuffer, byteLength: number): void {
+    const pool = this.outputBufferPool.get(byteLength) ?? [];
+    if (pool.length >= this.outputBufferPoolLimit) {
+      buffer.destroy();
+      return;
+    }
+    pool.push(buffer);
+    this.outputBufferPool.set(byteLength, pool);
+  }
+
   getStats(): KernelDeviceStats {
+    let outputBufferPoolBuffers = 0;
+    let outputBufferPoolBytes = 0;
+    for (const [byteLength, buffers] of this.outputBufferPool.entries()) {
+      outputBufferPoolBuffers += buffers.length;
+      outputBufferPoolBytes += byteLength * buffers.length;
+    }
     return {
       pipelineCacheSize: this.cache.size,
       pipelineCacheHits: this.hits,
       pipelineCacheMisses: this.misses,
       kernelInvocations: this.invocations,
+      outputBufferPoolBuffers,
+      outputBufferPoolBytes,
+      outputBufferPoolHits: this.outputBufferPoolHits,
+      outputBufferPoolMisses: this.outputBufferPoolMisses,
     };
   }
 
   clearCache(): void {
     this.cache.clear();
+    for (const buffers of this.outputBufferPool.values()) {
+      for (const buffer of buffers) buffer.destroy();
+    }
+    this.outputBufferPool.clear();
   }
 }
 
@@ -107,7 +152,11 @@ export async function createDevice(
     gpu = await adapter.requestDevice(Object.keys(descriptor).length > 0 ? descriptor : undefined);
   }
 
-  return new KernelDeviceImpl(gpu, options.pipelineCacheSize ?? 32);
+  return new KernelDeviceImpl(
+    gpu,
+    options.pipelineCacheSize ?? 32,
+    options.outputBufferPoolSize ?? 8,
+  );
 }
 
 /**

@@ -32,6 +32,10 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
 
 - `createWebGpuRealizerBridge(device)` — production bridge satisfying the `WebGpuBridge` Protocol declared in jit. Opaque integer handles; bridge owns `GPUBuffer` lifetimes; pipeline cache via `runDirect`.
 - `runDirect(device, desc, opts)` — `GPUBuffer`-in / `GPUBuffer`-out dispatch. The realizer-tier path; no host round-trip per op.
+  By default, owned output buffers come from a per-device reusable output pool
+  (`createDevice({ outputBufferPoolSize })`), visible through
+  `device.getStats().outputBufferPool*`. Pass `opts.outputBuffer` when the
+  caller owns output storage.
 - `runTensorGpuPlan(device, plan, inputs)` — generic tensor-IR plan executor.
   It consumes scheduled primitive steps, accepts the snake_case plan payload
   emitted by `browsergrad-jit`, keeps intermediates resident, and materializes
@@ -39,7 +43,8 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
   elementwise chains, RESHAPE, PERMUTE, BROADCAST_TO, and REDUCE(sum/mean) rank
   <= 4, plus Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm forward/backward
   and functional SGD/Adam/AdamW updates. The executor uses plan liveness to
-  destroy dead owned GPU buffers before the root boundary and reports
+  return dead owned direct-dispatch outputs to the reusable output pool before
+  the root boundary, destroys uploaded host inputs when they die, and reports
   `earlyReleasedBuffers` / `earlyReleasedBytes` for tests and profiling. This
   is the future framework-runtime direction; per-op bridge methods are
   legacy/interim coverage.

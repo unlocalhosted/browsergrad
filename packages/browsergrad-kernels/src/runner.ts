@@ -298,10 +298,7 @@ export function runDirect(
   try {
     outputBuffer =
       opts.outputBuffer ??
-      gpu.createBuffer({
-        size: alignTo(outputByteLength, 4),
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-      });
+      impl.acquireOutputBuffer(alignTo(outputByteLength, 4));
 
     if (hasParams) {
       paramsBuffer = gpu.createBuffer({
@@ -348,6 +345,14 @@ export function runDirect(
     paramsBuffer?.destroy();
     if (!completed && ownsOutput) outputBuffer?.destroy();
   }
+}
+
+export function releaseDirectBuffer(
+  device: KernelDevice,
+  buffer: GPUBuffer,
+  byteLength: number,
+): void {
+  asImpl(device).releaseOutputBuffer(buffer, alignTo(byteLength, 4));
 }
 
 /**
