@@ -121,8 +121,9 @@ the intended GPU materialization boundaries.
   resident=True)` and `AdamW.step(device="webgpu", resident=True)` keep
   params/m/v state resident. Default `.step()` selects the resident WebGPU path
   when params/grads are already GPU-owned.
-- Remaining: broader training-loop scheduling/codegen beyond direct kernels
-  beyond current elementwise-chain, softmax, and SDPA-shaped graph fusion.
+- Perf hardening left for future throughput work: broaden scheduler/codegen
+  beyond direct kernels and current elementwise-chain, softmax, and
+  SDPA-shaped graph fusion.
 
 ### Tiled GEMM + fused codegen + GPU cast (PRD-012a)
 - `matmulTiledDirect` — 16×16 tiled GEMM (workgroup-shared A/B tiles). Closes most of the gap PRD-012 was claiming via "megakernels".

@@ -269,10 +269,10 @@ Requirements:
 | JIT-006 | WebGPU realizer bridge supports forward opcodes and materializes at boundaries. | In | bridge/mock + real WebGPU tests through kernels |
 | JIT-007 | Custom WGSL kernels are cache-keyed, forward-only, and explicit. | In | custom kernel tests |
 | JIT-008 | ONNX export emits a supported subset and refuses unmappable ops. | In | ONNX tests |
-| JIT-009 | GPU-resident backward/optimizer steps. | Partial | Conv/LayerNorm backward roots, `backward(device="webgpu", resident=True)` GPUBuffer-backed leaf grads, functional SGD/Adam/AdamW update IR, explicit/non-resident `Optimizer.step(device="webgpu")`, resident `SGD`/`Adam`/`AdamW` step paths, default `.backward()` / `.step()` WebGPU selection for GPU-owned graphs, explicit resident tensor-plan roots, liveness-based early buffer release, reusable direct-output pooling, elementwise-chain fusion, and softmax fusion can lower through WebGPU; broader scheduler/codegen remains |
-| JIT-010 | Heavy CNN family parity with grad. | Partial | Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward are primitive IR with CPU handlers and symbolic VJPs; these CNN roots lower through generic f32 tensor-plan WebGPU; GPU-owned graphs default to resident WebGPU backward and can populate leaf grads without CPU readback; broader scheduler/codegen remains |
-| JIT-011 | Canonical tensor IR for core framework ops instead of `CUSTOM` GPU escape hatches. | In progress | Primitive IR ops for conv/norm/attention/optimizer updates, CPU handlers/refusals, VJPs where differentiable, GPU tensor-plan lowering, elementwise-chain and softmax plan fusion, SDPA-shaped graph lowering, WebGPU lowering, refusal tests |
-| JIT-012 | `.numpy()`/`.item()` are the primary materialization boundaries for GPU paths. | Partial | `realize_tensor_plan_webgpu_resident(...)` returns GPUBuffer-backed TensorProxy roots, resident/default-GPU backward stores leaf grads as GPUBuffer-backed TensorProxy values, resident/default-GPU optimizers rebind params/state to GPUBuffer handles, tensor-plan runtime releases dead owned buffers by liveness, returns reusable direct outputs to the device pool, and materializes only on `.numpy()` / `.item()`; full training-loop scheduling remains |
+| JIT-009 | GPU-resident backward/optimizer steps. | In | Conv/LayerNorm backward roots, `backward(device="webgpu", resident=True)` GPUBuffer-backed leaf grads, functional SGD/Adam/AdamW update IR, explicit/non-resident `Optimizer.step(device="webgpu")`, resident `SGD`/`Adam`/`AdamW` step paths, default `.backward()` / `.step()` WebGPU selection for GPU-owned graphs, explicit resident tensor-plan roots, liveness-based early buffer release, reusable direct-output pooling, elementwise-chain fusion, and softmax fusion lower through WebGPU |
+| JIT-010 | Heavy CNN family parity with grad. | In | Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward are primitive IR with CPU handlers and symbolic VJPs; these CNN roots lower through generic f32 tensor-plan WebGPU; GPU-owned graphs default to resident WebGPU backward and can populate leaf grads without CPU readback |
+| JIT-011 | Canonical tensor IR for core framework ops instead of `CUSTOM` GPU escape hatches. | In | Primitive IR ops for conv/norm/attention/optimizer updates, CPU handlers/refusals, VJPs where differentiable, GPU tensor-plan lowering, elementwise-chain and softmax plan fusion, SDPA-shaped graph lowering, WebGPU lowering, refusal tests |
+| JIT-012 | `.numpy()`/`.item()` are the primary materialization boundaries for GPU paths. | In | `realize_tensor_plan_webgpu_resident(...)` returns GPUBuffer-backed TensorProxy roots, resident/default-GPU backward stores leaf grads as GPUBuffer-backed TensorProxy values, resident/default-GPU optimizers rebind params/state to GPUBuffer handles, tensor-plan runtime releases dead owned buffers by liveness, returns reusable direct outputs to the device pool, and supported resident paths materialize only on `.numpy()` / `.item()` |
 
 LLD:
 
@@ -325,9 +325,9 @@ LLD:
   second-moment buffers resident.
 - `Optimizer.step()` defaults to the resident WebGPU path when any parameter or
   gradient buffer is already GPU-owned; CPU-owned training keeps CPU semantics.
-- Future GPU-native work should promote core ops out of `CUSTOM` into primitive
-  tensor IR. `CUSTOM` should remain for user-authored WGSL/lab kernels and
-  temporary migration scaffolding, not the final path for framework ops.
+- New core GPU work must promote ops out of `CUSTOM` into primitive tensor IR.
+  `CUSTOM` remains for user-authored WGSL/lab kernels and explicitly labeled
+  migration scaffolding, not the final path for framework ops.
 - Existing per-op bridge methods are legacy/interim bridge coverage. Do not
   keep expanding GPU support by adding one JS/Python bridge method per new
   framework op. New core GPU work should add tensor-IR lowering and runtime
@@ -413,9 +413,9 @@ Requirements:
 | CMP-006 | Support execution plans: single dispatch, grid-sync phases, host dynamic launch, host copy, unsupported. | In | orchestration tests |
 | CMP-007 | Support resident buffers and prepared compiled kernels for hot paths. | In | prepared/resident tests |
 | CMP-008 | Expose execution-plan summaries and blocker codes for platform UI. | In | summary tests |
-| CMP-009 | Grow CUDA compatibility by semantic families, not assignment patches. | In progress | corpus audit and compatibility map tests |
+| CMP-009 | Grow CUDA compatibility by semantic families, not assignment patches. | In | corpus audit and compatibility map tests |
 | CMP-010 | Production compiler-backed GPU labs. | In | canonical examples + compiler verify + browser WebGPU + published dogfood tests |
-| CMP-011 | Keep CUDA-lite compiler out of the core tensor runtime hot path. | Target | Framework ops lower from tensor IR; CUDA-lite remains lab/user-kernel path |
+| CMP-011 | Keep CUDA-lite compiler out of the core tensor runtime hot path. | In | Framework ops lower from tensor IR; CUDA-lite remains lab/user-kernel path |
 
 LLD:
 
@@ -511,6 +511,9 @@ Production hardening required:
 
 ## Remaining Limits And Removal Requirements
 
+These are deliberate non-goals for the current package requirements. They do
+not block the validated WebGPU-native `jit` path above.
+
 ### Direct eager GPU scope
 
 Current limit: `grad` has explicit forward-only `device=` dispatch. It does not
@@ -549,9 +552,9 @@ Recommendation: do not put this in `browsergrad-grad` unless the product goal
 changes. Keep serious GPU graph execution in `browsergrad-jit`; keep `grad`
 explicit and teachable.
 
-### JIT CNN WebGPU Lowering
+### JIT WebGPU Performance Hardening
 
-Current limit: `browsergrad-jit` has primitive Conv1d/Conv2d/ConvTranspose2d/
+Current status: `browsergrad-jit` has primitive Conv1d/Conv2d/ConvTranspose2d/
 Conv3d forward/backward IR with CPU reference handlers. Those CNN roots lower
 through generic tensor-plan WebGPU. Explicit `loss.backward(device="webgpu")`
 can populate leaf `.grad` values by realizing symbolic gradient roots through
@@ -566,7 +569,7 @@ Explicit `realize_tensor_plan_webgpu_resident(...)` can keep tensor-plan roots
 GPU-resident across follow-on tensor-plan calls until `.numpy()` / `.item()`;
 CPU-owned training storage still uses CPU by default.
 
-Remove the limit when:
+Next perf hardening, not required for current LLD completion:
 
 - Broaden scheduler/codegen beyond direct kernels and current elementwise-chain
   / softmax / SDPA-shaped graph fusion when throughput matters.
