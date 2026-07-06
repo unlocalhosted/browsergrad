@@ -1,5 +1,6 @@
 import { fusedElementwiseDirect, type FusedOp } from "./kernels/fused_elementwise.js";
 import { matmulTiledDirect } from "./kernels/matmul_tiled.js";
+import { softmaxDirect } from "./kernels/softmax.js";
 import {
   materializeFloat32,
   releaseDirectBuffer,
@@ -26,6 +27,7 @@ export type TensorPlanOp =
   | "PERMUTE"
   | "BROADCAST_TO"
   | "FUSED_ELEMENTWISE"
+  | "FUSED_SOFTMAX"
   | "CONV1D"
   | "CONV1D_BACKWARD_INPUT"
   | "CONV1D_BACKWARD_WEIGHT"
@@ -436,6 +438,19 @@ function executeStep(
           numel(step.shape),
         ),
       );
+    }
+    case "FUSED_SOFTMAX": {
+      const src = requireValue(values, step.inputIds[0], step.op);
+      const axis = expectFusedSoftmaxAxis(step.arg, src.shape.length);
+      if (axis !== src.shape.length - 1) {
+        throw new KernelError("tensor plan FUSED_SOFTMAX currently supports last-axis softmax only");
+      }
+      const cols = src.shape[src.shape.length - 1];
+      if (cols === undefined) {
+        throw new KernelError("tensor plan FUSED_SOFTMAX scalar input is unsupported");
+      }
+      const rows = numel(src.shape) / cols;
+      return fromDirect(step, softmaxDirect(device, src.buffer, rows, cols));
     }
     case "CONV1D": {
       const x = requireValue(values, step.inputIds[0], step.op);
@@ -3894,6 +3909,12 @@ function expectFusedOps(arg: unknown, op: string): FusedOp[] {
   });
 }
 
+function expectFusedSoftmaxAxis(arg: unknown, rank: number): number {
+  const obj = expectRecord(arg, "tensor plan FUSED_SOFTMAX.arg");
+  const rawAxis = obj.axis === undefined ? rank - 1 : obj.axis;
+  return normalizeAxis(expectNumber(rawAxis, "tensor plan FUSED_SOFTMAX.arg.axis"), rank);
+}
+
 function normalizeAxis(axis: number, rank: number): number {
   const n = axis < 0 ? axis + rank : axis;
   if (n < 0 || n >= rank) {
@@ -3938,6 +3959,7 @@ function expectOp(value: unknown, name: string): TensorPlanOp {
     case "PERMUTE":
     case "BROADCAST_TO":
     case "FUSED_ELEMENTWISE":
+    case "FUSED_SOFTMAX":
     case "CONV1D":
     case "CONV1D_BACKWARD_INPUT":
     case "CONV1D_BACKWARD_WEIGHT":

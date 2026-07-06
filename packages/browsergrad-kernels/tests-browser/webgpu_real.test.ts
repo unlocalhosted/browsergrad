@@ -280,6 +280,48 @@ describe("real WebGPU — matmul + tiled GEMM + fused elementwise + FA-v2", () =
     expect(result.materializedValueId).toBe(2);
   });
 
+  it("generic tensor GPU plan runs FUSED_SOFTMAX as one direct softmax step", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const x = new Float32Array([1, 2, 3, -2, 0.5, 1.5]);
+    const plan = {
+      steps: [
+        { step: 0, value_id: 0, op: "BUFFER", input_ids: [], shape: [2, 3], dtype: "float32" },
+        {
+          step: 1,
+          value_id: 1,
+          op: "FUSED_SOFTMAX",
+          input_ids: [0],
+          shape: [2, 3],
+          dtype: "float32",
+          arg: { axis: -1 },
+        },
+      ],
+      buffers: [
+        { value_id: 0, op: "BUFFER", shape: [2, 3], dtype: "float32", bytes: x.byteLength, first_step: 0, last_step: 1, materialize: false },
+        { value_id: 1, op: "FUSED_SOFTMAX", shape: [2, 3], dtype: "float32", bytes: x.byteLength, first_step: 1, last_step: 1, materialize: true },
+      ],
+      root_id: 1,
+      materialization_boundary: "root",
+      peak_live_bytes: x.byteLength * 2,
+      has_custom_ops: false,
+    } as const;
+
+    const result = await runTensorGpuPlan(device, plan, [{ valueId: 0, data: x }]);
+    for (let row = 0; row < 2; row++) {
+      const base = row * 3;
+      const max = Math.max(x[base]!, x[base + 1]!, x[base + 2]!);
+      const denom =
+        Math.exp(x[base]! - max) +
+        Math.exp(x[base + 1]! - max) +
+        Math.exp(x[base + 2]! - max);
+      for (let col = 0; col < 3; col++) {
+        expect(result.data[base + col]!).toBeCloseTo(Math.exp(x[base + col]! - max) / denom, 5);
+      }
+    }
+    expect(result.materializedValueId).toBe(1);
+  });
+
   it("WebGpuRealizerBridge runs a canonical tensor plan through one generic method", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

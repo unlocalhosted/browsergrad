@@ -269,9 +269,9 @@ Requirements:
 | JIT-006 | WebGPU realizer bridge supports forward opcodes and materializes at boundaries. | In | bridge/mock + real WebGPU tests through kernels |
 | JIT-007 | Custom WGSL kernels are cache-keyed, forward-only, and explicit. | In | custom kernel tests |
 | JIT-008 | ONNX export emits a supported subset and refuses unmappable ops. | In | ONNX tests |
-| JIT-009 | GPU-resident backward/optimizer steps. | Partial | Conv/LayerNorm backward roots, `backward(device="webgpu", resident=True)` GPUBuffer-backed leaf grads, functional SGD/Adam/AdamW update IR, explicit/non-resident `Optimizer.step(device="webgpu")`, resident `SGD`/`Adam`/`AdamW` step paths, default `.backward()` / `.step()` WebGPU selection for GPU-owned graphs, explicit resident tensor-plan roots, liveness-based early buffer release, reusable direct-output pooling, and elementwise-chain fusion can lower through WebGPU; broader scheduler/codegen remains |
+| JIT-009 | GPU-resident backward/optimizer steps. | Partial | Conv/LayerNorm backward roots, `backward(device="webgpu", resident=True)` GPUBuffer-backed leaf grads, functional SGD/Adam/AdamW update IR, explicit/non-resident `Optimizer.step(device="webgpu")`, resident `SGD`/`Adam`/`AdamW` step paths, default `.backward()` / `.step()` WebGPU selection for GPU-owned graphs, explicit resident tensor-plan roots, liveness-based early buffer release, reusable direct-output pooling, elementwise-chain fusion, and softmax fusion can lower through WebGPU; broader scheduler/codegen remains |
 | JIT-010 | Heavy CNN family parity with grad. | Partial | Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward are primitive IR with CPU handlers and symbolic VJPs; these CNN roots lower through generic f32 tensor-plan WebGPU; GPU-owned graphs default to resident WebGPU backward and can populate leaf grads without CPU readback; broader scheduler/codegen remains |
-| JIT-011 | Canonical tensor IR for core framework ops instead of `CUSTOM` GPU escape hatches. | In progress | Primitive IR ops for conv/norm/attention/optimizer updates, CPU handlers/refusals, VJPs where differentiable, GPU tensor-plan lowering, elementwise-chain plan fusion, WebGPU lowering, refusal tests |
+| JIT-011 | Canonical tensor IR for core framework ops instead of `CUSTOM` GPU escape hatches. | In progress | Primitive IR ops for conv/norm/attention/optimizer updates, CPU handlers/refusals, VJPs where differentiable, GPU tensor-plan lowering, elementwise-chain and softmax plan fusion, WebGPU lowering, refusal tests |
 | JIT-012 | `.numpy()`/`.item()` are the primary materialization boundaries for GPU paths. | Partial | `realize_tensor_plan_webgpu_resident(...)` returns GPUBuffer-backed TensorProxy roots, resident/default-GPU backward stores leaf grads as GPUBuffer-backed TensorProxy values, resident/default-GPU optimizers rebind params/state to GPUBuffer handles, tensor-plan runtime releases dead owned buffers by liveness, returns reusable direct outputs to the device pool, and materializes only on `.numpy()` / `.item()`; full training-loop scheduling remains |
 
 LLD:
@@ -287,8 +287,7 @@ LLD:
   one bridge method per framework op. Plan value IDs are stable schedule-local
   integers so payloads can cross Pyodide/JS without Python object identity.
   Linear elementwise chains are scheduled as `FUSED_ELEMENTWISE` plan steps;
-  softmax fusion remains separate until tensor-plan softmax runtime support
-  lands.
+  canonical softmax DAGs are scheduled as `FUSED_SOFTMAX` plan steps.
 - `_realize_webgpu.py` talks only to a bridge protocol; `browsergrad-kernels`
   owns actual WebGPU resources. `realize_tensor_plan_webgpu(tensor)` now sends
   one canonical plan plus seed buffers to `bridge.run_tensor_plan(...)`.
@@ -368,12 +367,12 @@ LLD:
   `browsergrad-jit`'s `gpu_plan_summary`, keeps intermediates in `GPUBuffer`,
   supports f32 BUFFER/LOAD/MATMUL, elementwise chains, RESHAPE, PERMUTE,
   BROADCAST_TO, REDUCE(sum/mean) for rank <= 4, `FUSED_ELEMENTWISE` runtime
-  WGSL codegen, Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward,
-  LayerNorm forward/backward, functional SGD/Adam/AdamW updates, materializes
-  only the root, and uses plan liveness to return dead direct-dispatch outputs
-  to the device pool while destroying uploaded host input buffers before the
-  root boundary. Runtime results expose early-release counts/bytes for
-  profiling and regression tests.
+  WGSL codegen, `FUSED_SOFTMAX` last-axis direct softmax, Conv1d/Conv2d/
+  ConvTranspose2d/Conv3d forward/backward, LayerNorm forward/backward,
+  functional SGD/Adam/AdamW updates, materializes only the root, and uses plan
+  liveness to return dead direct-dispatch outputs to the device pool while
+  destroying uploaded host input buffers before the root boundary. Runtime
+  results expose early-release counts/bytes for profiling and regression tests.
 - `runTensorGpuPlanResident()` shares that executor but returns an owned root
   `GPUBuffer`; `createWebGpuRealizerBridge(...).run_tensor_plan_resident(...)`
   mints a bridge handle so later plans can consume resident roots without
@@ -566,7 +565,7 @@ CPU-owned training storage still uses CPU by default.
 Remove the limit when:
 
 - Broaden scheduler/codegen beyond direct kernels and current elementwise-chain
-  fusion when throughput matters.
+  / softmax fusion when throughput matters.
 
 ## Validation Matrix
 

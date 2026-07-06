@@ -5,7 +5,8 @@ UOp graph in, backend-neutral tensor execution plan out. It deliberately does
 not call the legacy per-op WebGPU bridge and it refuses CUSTOM by default.
 
 The plan is still conservative, but it owns the first scheduler/codegen
-choice: linear elementwise chains lower to one FUSED_ELEMENTWISE primitive.
+choices: linear elementwise chains lower to one FUSED_ELEMENTWISE primitive,
+and canonical softmax DAGs lower to one FUSED_SOFTMAX primitive.
 Its job is to pin the contract that future WebGPU lowering must satisfy:
 primitive tensor IR, explicit liveness/materialization, CPU reference parity,
 no hidden readbacks.
@@ -175,7 +176,7 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
     """
     if not allow_custom:
         from ._fusion import fuse
-        root = fuse(root, include_softmax=False)
+        root = fuse(root)
 
     custom = _find_custom(root)
     if custom is not None and not allow_custom:

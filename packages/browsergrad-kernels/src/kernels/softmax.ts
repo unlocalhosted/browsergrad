@@ -10,7 +10,13 @@
  * planned for v0.2 as a separate kernel variant.
  */
 
-import { dispatch, numel, type KernelDescriptor } from "../runner.js";
+import {
+  dispatch,
+  numel,
+  runDirect,
+  type DirectDispatchResult,
+  type KernelDescriptor,
+} from "../runner.js";
 import { KernelError, type KernelDevice, type Tensor } from "../types.js";
 
 const WGSL = /* wgsl */ `
@@ -91,4 +97,23 @@ export async function softmax(
     cacheKeySuffix: "f32",
   });
   return { shape: x.shape, data };
+}
+
+export function softmaxDirect(
+  device: KernelDevice,
+  inputBuffer: GPUBuffer,
+  rows: number,
+  cols: number,
+): DirectDispatchResult {
+  if (!Number.isInteger(rows) || rows < 1 || !Number.isInteger(cols) || cols < 1) {
+    throw new KernelError(`softmaxDirect: invalid rows=${rows}, cols=${cols}`);
+  }
+  const params = new Uint32Array([rows, cols, 0, 0]);
+  return runDirect(device, DESCRIPTOR, {
+    inputBuffers: [inputBuffer],
+    outputLength: rows * cols,
+    params,
+    dispatchCount: [rows, 1, 1],
+    cacheKeySuffix: "f32",
+  });
 }

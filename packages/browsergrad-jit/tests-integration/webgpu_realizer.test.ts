@@ -386,6 +386,12 @@ class MockBridge:
                     else:
                         raise ValueError(f"mock tensor plan: unsupported fused opcode {opcode}")
                 values[value_id] = steps[-1].astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "FUSED_SOFTMAX":
+                x = values[input_ids[0]]
+                axis = int(step["arg"].get("axis", -1))
+                shifted = x - np.max(x, axis=axis, keepdims=True)
+                ex = np.exp(shifted)
+                values[value_id] = (ex / np.sum(ex, axis=axis, keepdims=True)).astype(np.dtype(step["dtype"]), copy=False)
             elif op == "CAST":
                 values[value_id] = values[input_ids[0]].astype(np.dtype(step["dtype"]), copy=False)
             elif op == "RESHAPE":
@@ -1100,6 +1106,35 @@ plan = bg.gpu_plan_summary(out)
     expect(result.ops).not.toContain("EXP");
     expect(result.root_id).toBe(result.step_ids[result.step_ids.length - 1]);
     expect(result.step_ids).toEqual([...result.step_ids.keys()]);
+  });
+
+  it("realize_tensor_plan_webgpu fuses canonical softmax into the tensor plan", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      max_diff: number;
+      tensor_plan: number;
+      ops: string[];
+    }>(`
+import browsergrad_jit as bg
+import browsergrad_jit.nn.functional as F
+import numpy as np
+x_np = np.array([[1.0, 2.0, 3.0], [-2.0, 0.5, 1.5]], dtype=np.float32)
+x = bg.from_numpy(x_np)
+out = F.softmax(x, dim=-1)
+ref = out.numpy()
+gpu = bg.realize_tensor_plan_webgpu(out)
+plan = bg.gpu_plan_summary(out)
+{
+    "max_diff": float(np.max(np.abs(ref - gpu))),
+    "tensor_plan": _mock.tensor_plan_count,
+    "ops": plan["ops"],
+}
+`);
+    expect(result.max_diff).toBeLessThan(1e-6);
+    expect(result.tensor_plan).toBe(1);
+    expect(result.ops).toContain("FUSED_SOFTMAX");
+    expect(result.ops).not.toContain("REDUCE");
+    expect(result.ops).not.toContain("EXP");
   });
 
   it("realize_tensor_plan_webgpu_resident keeps roots on GPU until explicit numpy boundary", async () => {
