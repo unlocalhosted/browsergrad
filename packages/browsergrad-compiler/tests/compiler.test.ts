@@ -394,6 +394,36 @@ describe("CUDA-lite compiler", () => {
     expect(result.trace.some((thread) => thread.writes.length > 0)).toBe(true);
   });
 
+  it("runs simple for-loops through semantic reference and WGSL paths", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void window3(const float* x, float* y, int stride) {
+  int base = blockIdx.x * blockDim.x + threadIdx.x;
+  float acc = 0.0f;
+  for (int j = 0; j < 3; j++) {
+    int idx = base + j * stride;
+    acc = acc + x[idx];
+  }
+  y[base] = acc;
+}
+`, { workgroupSize: [4, 1, 1] });
+    const input = {
+      buffers: {
+        x: new Float32Array([1, 2, 3, 4, 10, 20, 30, 40, 100, 200, 300, 400]),
+        y: new Float32Array(4),
+      },
+      scalars: { stride: 4 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const referenceResult = runCompiledKernelReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("for (var j: i32 = 0; (u32(j) < 3u); j += 1)");
+    expect([...semanticResult.buffers.y as Float32Array]).toEqual([111, 222, 333, 444]);
+    expect([...referenceResult.buffers.y as Float32Array]).toEqual([111, 222, 333, 444]);
+  });
+
   it("keeps canonical lab examples executable through Kernel IR and CPU reference", () => {
     const saxpy = compileCudaLiteKernelForWebGpu(compilerExampleText("saxpy.cu"), {
       workgroupSize: [8, 1, 1],
@@ -2925,7 +2955,7 @@ __global__ void emptyWhile(int *latch, int *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("while ((latch[0] < 1))");
+    expect(compiled.wgsl).toContain("while ((u32(latch[0u]) < 1u))");
     expect([...result.buffers.out as Int32Array]).toEqual([7]);
   });
 
@@ -11597,8 +11627,8 @@ __global__ void kernel(int *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("for (var k: i32 = 0; (k < 8); k = (k + 1))");
-    expect(compiled.wgsl).toContain("for (var k: u32 = 0u; (k < 8u); k = (k + 1u))");
+    expect(compiled.wgsl).toContain("for (var k: i32 = 0; (u32(k) < 8u); k += 1)");
+    expect(compiled.wgsl).toContain("for (var k: u32 = 0u; (k < 8u); k += 1u)");
     expect([...result.buffers.out as Int32Array]).toEqual([0, 2, 4, 6, 8, 10, 12, 14]);
   });
 

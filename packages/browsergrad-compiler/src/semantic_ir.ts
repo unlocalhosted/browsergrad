@@ -375,15 +375,23 @@ function lowerStatement(
         span: statement.span,
       };
     case "for":
-      return {
-        kind: "loop",
-        loopKind: "for",
-        ...(statement.init === undefined ? {} : { init: statement.init.kind === "var" ? lowerStatement(statement.init, new Map(scope)) : lowerExpression(statement.init, scope) }),
-        ...(statement.condition === undefined ? {} : { condition: lowerExpression(statement.condition, scope) }),
-        ...(statement.update === undefined ? {} : { update: lowerExpression(statement.update, scope) }),
-        body: lowerStatements(statement.body, scope),
-        span: statement.span,
-      };
+      {
+        const loopScope = new Map(scope);
+        const init = statement.init?.kind === "var"
+          ? lowerStatement(statement.init, loopScope)
+          : statement.init
+          ? lowerExpression(statement.init, loopScope)
+          : undefined;
+        return {
+          kind: "loop",
+          loopKind: "for",
+          ...(init === undefined ? {} : { init }),
+          ...(statement.condition === undefined ? {} : { condition: lowerExpression(statement.condition, loopScope) }),
+          ...(statement.update === undefined ? {} : { update: lowerExpression(statement.update, loopScope) }),
+          body: lowerStatements(statement.body, loopScope),
+          span: statement.span,
+        };
+      }
     case "while":
       return {
         kind: "loop",

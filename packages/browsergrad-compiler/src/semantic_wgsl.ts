@@ -110,7 +110,7 @@ function unsupportedSemanticWgslOperation(
         if (operation.init && !semanticWgslExpressionSupported(operation.init, "scalar")) return operation;
         break;
       case "store":
-        if (operation.operator !== "=") return operation;
+        if (!semanticWgslAssignmentOperatorSupported(operation.operator)) return operation;
         if (!semanticWgslMemoryRefSupported(operation.target)) return operation;
         if (!ir.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage")) return operation;
         if (!semanticWgslExpressionSupported(operation.value, "scalar")) return operation;
@@ -123,6 +123,15 @@ function unsupportedSemanticWgslOperation(
         {
           const unsupported = unsupportedSemanticWgslOperation(operation.consequent, ir) ??
           unsupportedSemanticWgslOperation(operation.alternate, ir);
+          if (unsupported) return unsupported;
+        }
+        break;
+      case "loop":
+        if (operation.init && !semanticWgslLoopInitSupported(operation.init, ir)) return operation;
+        if (operation.condition && !semanticWgslExpressionSupported(operation.condition, "scalar")) return operation;
+        if (operation.update && !semanticWgslExpressionSupported(operation.update, "scalar")) return operation;
+        {
+          const unsupported = unsupportedSemanticWgslOperation(operation.body, ir);
           if (unsupported) return unsupported;
         }
         break;
@@ -141,6 +150,19 @@ function semanticWgslParamSupported(param: SemanticKernelIrModule["params"][numb
 
 function semanticWgslScalarTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
   return valueType === "float" || valueType === "int" || valueType === "uint";
+}
+
+function semanticWgslAssignmentOperatorSupported(operator: string): boolean {
+  return operator === "=" || operator === "+=" || operator === "-=";
+}
+
+function semanticWgslLoopInitSupported(
+  init: SemanticKernelIrOperation | SemanticExpression,
+  ir: SemanticKernelIrModule,
+): boolean {
+  return isSemanticKernelIrOperation(init)
+    ? unsupportedSemanticWgslOperation([init], ir) === undefined
+    : semanticWgslExpressionSupported(init, "scalar");
 }
 
 function semanticWgslMemoryRefSupported(ref: SemanticMemoryRef): boolean {
@@ -178,10 +200,13 @@ function semanticWgslExpressionSupported(expression: SemanticExpression, expecte
         expression.target.kind === "symbol" &&
         expression.target.addressSpace === "local" &&
         semanticWgslExpressionSupported(expression.value, "scalar");
+    case "update":
+      return expression.argument.kind === "symbol" &&
+        expression.argument.addressSpace === "local" &&
+        (expression.operator === "++" || expression.operator === "--");
     case "sequence":
       return expression.expressions.every((item) => semanticWgslExpressionSupported(item, "scalar"));
     case "call":
-    case "update":
     case "initializer":
       return false;
   }
@@ -210,7 +235,7 @@ function emitSemanticOperation(
       return [`${prefix}var ${nameFor(operation.target.name, names)}: ${type}${init};`];
     }
     case "store":
-      return [`${prefix}${emitSemanticMemoryRef(operation.target, ir, names)} = ${emitSemanticExpressionAs(operation.value, ir, names, wgslValueScalar(operation.target.valueType))};`];
+      return [`${prefix}${emitSemanticStore(operation, ir, names)};`];
     case "expression":
       return [`${prefix}${emitSemanticExpression(operation.expression, ir, names)};`];
     case "branch": {
@@ -223,9 +248,71 @@ function emitSemanticOperation(
       lines.push(`${prefix}}`);
       return lines;
     }
+    case "loop":
+      return emitSemanticLoop(operation, ir, names, indentLevel);
     default:
       throw semanticWgslError(`semantic WGSL does not support ${operation.kind}`, operation.span);
   }
+}
+
+function emitSemanticStore(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "store" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+): string {
+  const target = emitSemanticMemoryRef(operation.target, ir, names);
+  const value = emitSemanticExpressionAs(operation.value, ir, names, wgslValueScalar(operation.target.valueType));
+  if (operation.operator === "=") return `${target} = ${value}`;
+  if (operation.operator === "+=") return `${target} = (${target} + ${value})`;
+  if (operation.operator === "-=") return `${target} = (${target} - ${value})`;
+  throw semanticWgslError(`semantic WGSL does not support assignment '${operation.operator}'`, operation.span);
+}
+
+function emitSemanticLoop(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "loop" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+): readonly string[] {
+  const prefix = "  ".repeat(indentLevel);
+  if (operation.loopKind === "for") {
+    const init = operation.init ? emitSemanticLoopInit(operation.init, ir, names) : "";
+    const condition = operation.condition ? emitTruthiness(operation.condition, ir, names) : "true";
+    const update = operation.update ? emitSemanticExpression(operation.update, ir, names) : "";
+    return [
+      `${prefix}for (${init}; ${condition}; ${update}) {`,
+      ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1),
+      `${prefix}}`,
+    ];
+  }
+  if (operation.loopKind === "while") {
+    return [
+      `${prefix}while (${operation.condition ? emitTruthiness(operation.condition, ir, names) : "true"}) {`,
+      ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1),
+      `${prefix}}`,
+    ];
+  }
+  return [
+    `${prefix}loop {`,
+    ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1),
+    `${"  ".repeat(indentLevel + 1)}if (!(${operation.condition ? emitTruthiness(operation.condition, ir, names) : "false"})) { break; }`,
+    `${prefix}}`,
+  ];
+}
+
+function emitSemanticLoopInit(
+  init: SemanticKernelIrOperation | SemanticExpression,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+): string {
+  if (!isSemanticKernelIrOperation(init)) return emitSemanticExpression(init, ir, names);
+  if (init.kind === "declare") {
+    const type = wgslScalar(init.target.valueType);
+    const value = init.init ? emitSemanticExpressionAs(init.init, ir, names, wgslValueScalar(init.target.valueType)) : zeroForType(type);
+    return `var ${nameFor(init.target.name, names)}: ${type} = ${value}`;
+  }
+  if (init.kind === "expression") return emitSemanticExpression(init.expression, ir, names);
+  throw semanticWgslError(`semantic WGSL does not support ${init.kind} loop initializer`, init.span);
 }
 
 function emitSemanticExpression(
@@ -258,13 +345,25 @@ function emitSemanticExpression(
     case "assignment":
       if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local scalar assignment targets only", expression.target.span);
       return `(${nameFor(expression.target.name, names)} = ${emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(expression.valueType))})`;
+    case "update":
+      return emitSemanticUpdate(expression, names);
     case "sequence":
       return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names);
     case "call":
-    case "update":
     case "initializer":
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
   }
+}
+
+function emitSemanticUpdate(
+  expression: Extract<SemanticExpression, { readonly kind: "update" }>,
+  names: ReadonlyMap<string, string>,
+): string {
+  if (expression.argument.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local scalar updates only", expression.span);
+  const name = nameFor(expression.argument.name, names);
+  if (expression.operator === "++") return `${name} += ${emitNumberLiteral(1, expression.valueType, wgslValueScalar(expression.valueType))}`;
+  if (expression.operator === "--") return `${name} -= ${emitNumberLiteral(1, expression.valueType, wgslValueScalar(expression.valueType))}`;
+  throw semanticWgslError(`semantic WGSL does not support update '${expression.operator}'`, expression.span);
 }
 
 function emitSemanticExpressionAs(
@@ -383,6 +482,10 @@ function collectOperationNames(
   if (operation.kind === "branch") {
     for (const child of [...operation.consequent, ...operation.alternate]) collectOperationNames(child, names);
   }
+  if (operation.kind === "loop") {
+    if (operation.init && isSemanticKernelIrOperation(operation.init)) collectOperationNames(operation.init, names);
+    for (const child of operation.body) collectOperationNames(child, names);
+  }
 }
 
 function wgslBindingType(valueType: CudaLiteScalarType | undefined): WgslValueType {
@@ -426,6 +529,13 @@ function zeroExpression(span: SourceSpan): SemanticExpression {
   return { kind: "literal", literalKind: "number", value: 0, valueType: "int", span };
 }
 
+function zeroForType(valueType: WgslValueType | "bool"): string {
+  if (valueType === "u32") return "0u";
+  if (valueType === "i32") return "0";
+  if (valueType === "bool") return "false";
+  return "0.0";
+}
+
 function bindingIndexFor(bindings: readonly WgslKernelBindingInput[], name: string): number {
   const binding = bindings.find((item) => item.name === name)?.binding;
   return binding ?? 0;
@@ -444,4 +554,32 @@ function semanticWgslError(message: string, span: SourceSpan): CudaLiteCompilerE
     span,
   };
   return new CudaLiteCompilerError(message, [diagnostic]);
+}
+
+function isSemanticKernelIrOperation(
+  value: SemanticKernelIrOperation | SemanticExpression,
+): value is SemanticKernelIrOperation {
+  switch (value.kind) {
+    case "declare":
+    case "dim3-declare":
+    case "cooperative-group-declare":
+    case "load":
+    case "store":
+    case "atomic":
+    case "expression":
+    case "branch":
+    case "loop":
+    case "barrier":
+    case "device-launch":
+    case "inline-asm":
+    case "return":
+    case "continue":
+    case "break":
+    case "block":
+      return true;
+    case "call":
+      return typeof value.callee === "string";
+    default:
+      return false;
+  }
 }

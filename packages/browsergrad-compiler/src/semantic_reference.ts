@@ -126,7 +126,7 @@ function unsupportedSemanticReferenceOperation(
         if (operation.init && !semanticReferenceExpressionSupported(operation.init, "scalar")) return operation;
         break;
       case "store":
-        if (operation.operator !== "=") return operation;
+        if (!semanticReferenceAssignmentOperatorSupported(operation.operator)) return operation;
         if (!semanticReferenceMemoryRefSupported(operation.target)) return operation;
         if (!compiled.kernelIr.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage")) return operation;
         if (!semanticReferenceExpressionSupported(operation.value, "scalar")) return operation;
@@ -137,6 +137,11 @@ function unsupportedSemanticReferenceOperation(
       case "branch":
         if (!semanticReferenceExpressionSupported(operation.condition, "scalar")) return operation;
         break;
+      case "loop":
+        if (operation.init && !semanticReferenceLoopInitSupported(operation.init, compiled)) return operation;
+        if (operation.condition && !semanticReferenceExpressionSupported(operation.condition, "scalar")) return operation;
+        if (operation.update && !semanticReferenceExpressionSupported(operation.update, "scalar")) return operation;
+        break;
       default:
         return operation;
     }
@@ -144,14 +149,24 @@ function unsupportedSemanticReferenceOperation(
       return unsupportedSemanticReferenceOperation(operation.consequent, compiled) ??
         unsupportedSemanticReferenceOperation(operation.alternate, compiled);
     }
+    if (operation.kind === "loop") return unsupportedSemanticReferenceOperation(operation.body, compiled);
   }
   return undefined;
 }
 
 function semanticReferenceParamSupported(param: CompiledCudaLiteKernel["kernelIr"]["params"][number]): boolean {
-  if (param.addressSpace === "storage") return Boolean(param.pointer) && param.valueType === "float";
+  if (param.addressSpace === "storage") return Boolean(param.pointer) && semanticReferenceScalarTypeSupported(param.valueType);
   if (param.addressSpace === "uniform") return semanticReferenceScalarTypeSupported(param.valueType);
   return false;
+}
+
+function semanticReferenceLoopInitSupported(
+  init: SemanticKernelIrOperation | SemanticExpression,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  return isSemanticKernelIrOperation(init)
+    ? unsupportedSemanticReferenceOperation([init], compiled) === undefined
+    : semanticReferenceExpressionSupported(init, "scalar");
 }
 
 function semanticReferenceScalarTypeSupported(valueType: CudaLiteScalarType | undefined): boolean {
@@ -180,6 +195,7 @@ function semanticReferenceExpressionSupported(expression: SemanticExpression, ex
     case "unary":
       return expression.operator !== "*" && expression.operator !== "&" && semanticReferenceExpressionSupported(expression.argument, "scalar");
     case "binary":
+      if (isStoragePointerNullComparison(expression)) return true;
       return semanticReferenceExpressionSupported(expression.left, "scalar") &&
         semanticReferenceExpressionSupported(expression.right, "scalar");
     case "conditional":
@@ -193,8 +209,11 @@ function semanticReferenceExpressionSupported(expression: SemanticExpression, ex
         semanticReferenceExpressionSupported(expression.value, "scalar");
     case "sequence":
       return expression.expressions.every((item) => semanticReferenceExpressionSupported(item, "scalar"));
-    case "call":
     case "update":
+      return expression.argument.kind === "symbol" &&
+        expression.argument.addressSpace === "local" &&
+        (expression.operator === "++" || expression.operator === "--");
+    case "call":
     case "initializer":
       return false;
   }
@@ -202,6 +221,28 @@ function semanticReferenceExpressionSupported(expression: SemanticExpression, ex
 
 function unsupportedMemoryRef(span: SourceSpan): SemanticMemoryRef {
   return { base: "", addressSpace: "unknown", indices: [], fields: [], span };
+}
+
+function semanticReferenceAssignmentOperatorSupported(operator: string): boolean {
+  return operator === "=" || operator === "+=" || operator === "-=";
+}
+
+function isStoragePointerNullComparison(expression: Extract<SemanticExpression, { readonly kind: "binary" }>): boolean {
+  if (expression.operator !== "==" && expression.operator !== "!=") return false;
+  return isStorageSymbol(expression.left) && isNullLiteral(expression.right) ||
+    isStorageSymbol(expression.right) && isNullLiteral(expression.left);
+}
+
+function isStorageSymbol(expression: SemanticExpression): boolean {
+  return expression.kind === "symbol" && expression.addressSpace === "storage";
+}
+
+function isZeroLiteral(expression: SemanticExpression): boolean {
+  return expression.kind === "literal" && expression.literalKind === "number" && expression.value === 0;
+}
+
+function isNullLiteral(expression: SemanticExpression): boolean {
+  return isZeroLiteral(expression) || expression.kind === "symbol" && (expression.name === "NULL" || expression.name === "nullptr");
 }
 
 function isBuiltinVectorSymbol(name: string): boolean {
@@ -224,7 +265,7 @@ function execSemanticOperations(
         context.locals.set(operation.target.name, operation.init ? evalNumber(operation.init, context) : 0);
         break;
       case "store":
-        writeMemory(operation.target, evalNumber(operation.value, context), context);
+        writeMemory(operation.target, storeValue(operation, context), context);
         break;
       case "expression":
         evalNumber(operation.expression, context);
@@ -233,10 +274,60 @@ function execSemanticOperations(
         if (truthy(evalNumber(operation.condition, context))) execSemanticOperations(operation.consequent, context);
         else execSemanticOperations(operation.alternate, context);
         break;
+      case "loop":
+        execSemanticLoop(operation, context);
+        break;
       default:
         throw semanticReferenceError(`semantic reference does not support ${operation.kind}`, operation.span);
     }
   }
+}
+
+function storeValue(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "store" }>,
+  context: SemanticReferenceContext,
+): number {
+  const right = evalNumber(operation.value, context);
+  if (operation.operator === "=") return right;
+  const left = readMemory(operation.target, context);
+  if (operation.operator === "+=") return left + right;
+  if (operation.operator === "-=") return left - right;
+  throw semanticReferenceError(`semantic reference does not support assignment '${operation.operator}'`, operation.span);
+}
+
+function execSemanticLoop(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "loop" }>,
+  context: SemanticReferenceContext,
+): void {
+  if (operation.loopKind === "for") {
+    if (operation.init) execSemanticLoopInit(operation.init, context);
+    for (let guard = 0; operation.condition === undefined || truthy(evalNumber(operation.condition, context)); guard++) {
+      if (guard > 1_000_000) throw semanticReferenceError("semantic reference loop exceeded iteration cap", operation.span);
+      execSemanticOperations(operation.body, context);
+      if (operation.update) evalNumber(operation.update, context);
+    }
+    return;
+  }
+  if (operation.loopKind === "while") {
+    for (let guard = 0; operation.condition === undefined || truthy(evalNumber(operation.condition, context)); guard++) {
+      if (guard > 1_000_000) throw semanticReferenceError("semantic reference loop exceeded iteration cap", operation.span);
+      execSemanticOperations(operation.body, context);
+    }
+    return;
+  }
+  for (let guard = 0; ; guard++) {
+    if (guard > 1_000_000) throw semanticReferenceError("semantic reference loop exceeded iteration cap", operation.span);
+    execSemanticOperations(operation.body, context);
+    if (!operation.condition || !truthy(evalNumber(operation.condition, context))) return;
+  }
+}
+
+function execSemanticLoopInit(
+  init: SemanticKernelIrOperation | SemanticExpression,
+  context: SemanticReferenceContext,
+): void {
+  if (isSemanticKernelIrOperation(init)) execSemanticOperations([init], context);
+  else evalNumber(init, context);
 }
 
 function evalNumber(expression: SemanticExpression, context: SemanticReferenceContext): number {
@@ -280,10 +371,25 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       return value;
     }
     case "call":
-    case "update":
     case "initializer":
       throw semanticReferenceError(`semantic reference does not support ${expression.kind} expression`, expression.span);
+    case "update":
+      return evalUpdate(expression, context);
   }
+}
+
+function evalUpdate(
+  expression: Extract<SemanticExpression, { readonly kind: "update" }>,
+  context: SemanticReferenceContext,
+): number {
+  if (expression.argument.kind !== "symbol") {
+    throw semanticReferenceError("semantic reference supports only local scalar updates", expression.span);
+  }
+  const oldValue = evalNumber(expression.argument, context);
+  const delta = expression.operator === "++" ? 1 : expression.operator === "--" ? -1 : 0;
+  const next = oldValue + delta;
+  context.locals.set(expression.argument.name, next);
+  return expression.prefix ? next : oldValue;
 }
 
 function readIndexExpression(expression: Extract<SemanticExpression, { kind: "index" }>, context: SemanticReferenceContext): number {
@@ -336,6 +442,7 @@ function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): n
 }
 
 function symbolValue(name: string, context: SemanticReferenceContext, span: SourceSpan): SemanticValue {
+  if (name === "NULL" || name === "nullptr") return 0;
   if (name === "threadIdx") return context.threadIdx;
   if (name === "blockIdx") return context.blockIdx;
   if (name === "blockDim") return context.blockDim;
@@ -343,6 +450,8 @@ function symbolValue(name: string, context: SemanticReferenceContext, span: Sour
   if (context.locals.has(name)) return context.locals.get(name)!;
   const scalar = context.scalars[name];
   if (scalar !== undefined) return scalar;
+  const storageParam = context.compiled.kernelIr.params.find((param) => param.name === name && param.addressSpace === "storage");
+  if (storageParam) return context.buffers.has(name) ? 1 : 0;
   throw semanticReferenceError(`unknown semantic reference symbol '${name}'`, span);
 }
 
@@ -401,6 +510,12 @@ function validateSemanticReferenceInput(compiled: CompiledCudaLiteKernel, input:
       if (param.valueType === "float" && !(buffer instanceof Float32Array)) {
         throw semanticReferenceError(`buffer '${param.name}' expects Float32Array`, param.span);
       }
+      if (param.valueType === "int" && !(buffer instanceof Int32Array)) {
+        throw semanticReferenceError(`buffer '${param.name}' expects Int32Array`, param.span);
+      }
+      if (param.valueType === "uint" && !(buffer instanceof Uint32Array)) {
+        throw semanticReferenceError(`buffer '${param.name}' expects Uint32Array`, param.span);
+      }
     } else if (param.addressSpace === "uniform") {
       if (input.scalars?.[param.name] === undefined) throw semanticReferenceError(`missing scalar input '${param.name}'`, param.span);
     } else {
@@ -447,4 +562,32 @@ function semanticReferenceError(message: string, span: SourceSpan): CudaLiteComp
     span,
   };
   return new CudaLiteCompilerError(message, [diagnostic]);
+}
+
+function isSemanticKernelIrOperation(
+  value: SemanticKernelIrOperation | SemanticExpression,
+): value is SemanticKernelIrOperation {
+  switch (value.kind) {
+    case "declare":
+    case "dim3-declare":
+    case "cooperative-group-declare":
+    case "load":
+    case "store":
+    case "atomic":
+    case "expression":
+    case "branch":
+    case "loop":
+    case "barrier":
+    case "device-launch":
+    case "inline-asm":
+    case "return":
+    case "continue":
+    case "break":
+    case "block":
+      return true;
+    case "call":
+      return typeof value.callee === "string";
+    default:
+      return false;
+  }
 }
