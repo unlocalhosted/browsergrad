@@ -65,8 +65,10 @@ pretending to match PyTorch.
 `Conv1d`, `Conv2d`, `ConvTranspose2d`, `Conv3d`, and `LayerNorm` are primitive
 IR ops with NumPy handlers and symbolic VJPs. Their forward/backward roots
 lower through generic tensor-plan WebGPU via `realize_tensor_plan_webgpu(...)`.
-Default `.backward()` still writes CPU grads. `BatchNorm1d` remains a `CUSTOM`
-realization path with explicit NumPy VJPs.
+`loss.backward(device="webgpu")` realizes symbolic leaf-gradient roots through
+the same tensor-plan bridge and refuses closure-only graphs instead of falling
+back to CPU. Default `.backward()` still writes CPU grads. `BatchNorm1d`
+remains a `CUSTOM` realization path with explicit NumPy VJPs.
 `bg.optim.sgd_update(...)`, `bg.optim.adam_update(...)`, and
 `bg.optim.adamw_update(...)` are functional optimizer/update IR nodes and lower
 through the same tensor-plan WebGPU path. They return updated tensors/state;

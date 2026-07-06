@@ -90,6 +90,9 @@ the intended GPU materialization boundaries.
 - `bg.realize_tensor_plan_webgpu(...)` lowers Conv1d/Conv2d/ConvTranspose2d/Conv3d
   forward/backward through the generic tensor-plan bridge (`run_tensor_plan`)
   instead of legacy per-op conv bridge methods.
+- `loss.backward(device="webgpu")` realizes symbolic leaf-gradient roots through
+  the tensor-plan bridge and refuses closure-only graphs instead of falling
+  back to CPU.
 - Covered semantics: tuple stride/padding/dilation where applicable, groups,
   output padding for ConvTranspose2d, module state_dict keys, and torch alias
   exposure.
@@ -99,8 +102,8 @@ the intended GPU materialization boundaries.
   `bg.optim.adamw_update(...)` emit functional
   optimizer/update IR and lower through generic tensor-plan WebGPU. They do
   not mutate params/state.
-- Remaining: default GPU `.backward()` mutation, mutating optimizer-step
-  residency, and resident optimizer state.
+- Remaining: default CPU `.backward()`, CPU materialization of `.grad`,
+  mutating optimizer-step residency, and resident optimizer state.
 
 ### Tiled GEMM + fused codegen + GPU cast (PRD-012a)
 - `matmulTiledDirect` — 16×16 tiled GEMM (workgroup-shared A/B tiles). Closes most of the gap PRD-012 was claiming via "megakernels".
@@ -246,7 +249,7 @@ All 16 PRDs land at v0:
 
 | Item | Reason |
 |---|---|
-| **Default `.backward()` through GPU realizer** | NumPy realizer handles autograd mutation. Explicit `realize_webgpu(...)` can run selected backward IR roots such as Conv1d/Conv2d input/weight/bias grads; `realize_tensor_plan_webgpu(...)` can run Conv/LayerNorm backward roots and functional SGD/Adam/AdamW updates. `.backward()` and mutating `Optimizer.step()` are not GPU-resident. |
+| **Default `.backward()` through GPU realizer** | Default `.backward()` still uses CPU mutation. Explicit `loss.backward(device="webgpu")` realizes symbolic leaf-gradient roots through `run_tensor_plan` and refuses closure-only graphs; `.grad` is still materialized back to CPU tensors. Mutating `Optimizer.step()` is not GPU-resident. |
 | **f16/bf16 cast kernels** | Future work — current CAST handler is f32→f32 only. |
 | **Primitive/WebGPU ConvTranspose in `browsergrad-jit`** | Lazy `browsergrad-jit` now has primitive Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward IR with CPU handlers, symbolic VJPs, and generic tensor-plan WebGPU lowering. |
 | **torch.cuda.\*, torch.compile, torch.fx** | Out of scope for `install_torch_alias`. Raises `AttributeError`. |

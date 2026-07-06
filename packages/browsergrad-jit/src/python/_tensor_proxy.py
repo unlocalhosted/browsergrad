@@ -1336,6 +1336,7 @@ class TensorProxy:
         self,
         grad: Optional["TensorProxy"] = None,
         loss_scale: float = 1.0,
+        device: Optional[str] = None,
     ) -> None:
         """Compute gradients via reverse-topological walk of the graph.
 
@@ -1349,7 +1350,23 @@ class TensorProxy:
         `loss_scale` multiplies the seed gradient. PRD-010's GradScaler
         passes a large value (e.g. 2**16) to keep fp16 backward in the
         representable range; default 1.0 is a no-op.
+
+        `device="webgpu"` realizes symbolic gradient roots through the
+        canonical tensor-plan WebGPU bridge. It never falls back to closure
+        backward: missing VJP coverage is a loud error because otherwise the
+        call would silently return to CPU.
         """
+        if device is None:
+            backward_device = "cpu"
+        else:
+            backward_device = str(device).lower()
+        if backward_device in ("tensor_plan_webgpu", "gpu"):
+            backward_device = "webgpu"
+        if backward_device not in ("cpu", "webgpu"):
+            raise ValueError(
+                f"backward(device=...): expected 'cpu' or 'webgpu', got {device!r}"
+            )
+
         if grad is None:
             if self.ndim != 0 and self.numel() != 1:
                 raise RuntimeError(
@@ -1395,6 +1412,18 @@ class TensorProxy:
             if _vjp.get_rule(proxy._uop.op) is None:
                 symbolic_viable = False
                 break
+        if backward_device == "webgpu" and not symbolic_viable:
+            missing = []
+            for proxy in proxy_by_uop_id.values():
+                if proxy._ctx is None:
+                    continue
+                if _vjp.get_rule(proxy._uop.op) is None:
+                    missing.append(proxy._uop.op)
+            raise RealizationError(
+                "backward(device='webgpu') requires symbolic VJP coverage for "
+                f"the whole autograd chain; missing {sorted(set(missing))}. "
+                "Use CPU backward or promote those ops to primitive VJP rules."
+            )
 
         # 3. Build gradients via the chosen path.
         if symbolic_viable:
@@ -1462,6 +1491,17 @@ class TensorProxy:
             # here in any non-toy graph).
             from . import _checkpoint
             grads: dict[int, np.ndarray] = {}
+            if backward_device == "webgpu":
+                from ._realize_webgpu import (
+                    get_registered_gpu_buffer_table,
+                    realize_tensor_plan_webgpu,
+                )
+                gbt = get_registered_gpu_buffer_table()
+                if gbt is None:
+                    raise RealizationError(
+                        "backward(device='webgpu') requires a registered WebGPU "
+                        "bridge. Call browsergrad_jit.register_webgpu_bridge(...) first."
+                    )
             for pid, gnode in grad_uops.items():
                 proxy = proxy_by_id.get(pid)
                 if proxy is None or not proxy.requires_grad:
@@ -1470,7 +1510,14 @@ class TensorProxy:
                     continue  # only leaves write into .grad
                 if _checkpoint.has_any_region():
                     gnode = _checkpoint.apply_checkpoint_rewrite(gnode)
-                grads[pid] = realize(gnode, sess.buffer_table)
+                if backward_device == "webgpu":
+                    grads[pid] = realize_tensor_plan_webgpu(
+                        gnode,
+                        numpy_buffer_table=sess.buffer_table,
+                        gpu_buffer_table=gbt,
+                    )
+                else:
+                    grads[pid] = realize(gnode, sess.buffer_table)
         else:
             # CLOSURE PATH (PRD-005 legacy, kept as safety net).
             # Fusion is disabled here because backward closures read

@@ -1110,6 +1110,66 @@ plan = bg.gpu_plan_summary(reduced)
     expect(result.ops).toContain("REDUCE");
   });
 
+  it("backward(device='webgpu') realizes symbolic leaf grads through tensor-plan WebGPU", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      x_diff: number;
+      w_diff: number;
+      tensor_plan: number;
+      upload: number;
+      materialize: number;
+      legacy_matmul: number;
+    }>(`
+import browsergrad_jit as bg
+import numpy as np
+
+rng = np.random.RandomState(18)
+x_np = rng.uniform(-1, 1, size=(3, 4)).astype(np.float32)
+w_np = rng.uniform(-1, 1, size=(4, 5)).astype(np.float32)
+
+x_cpu = bg.from_numpy(x_np.copy(), requires_grad=True)
+w_cpu = bg.from_numpy(w_np.copy(), requires_grad=True)
+((x_cpu @ w_cpu).sum()).backward()
+
+x_gpu = bg.from_numpy(x_np.copy(), requires_grad=True)
+w_gpu = bg.from_numpy(w_np.copy(), requires_grad=True)
+((x_gpu @ w_gpu).sum()).backward(device="webgpu")
+
+{
+    "x_diff": float(np.max(np.abs(x_gpu.grad.numpy() - x_cpu.grad.numpy()))),
+    "w_diff": float(np.max(np.abs(w_gpu.grad.numpy() - w_cpu.grad.numpy()))),
+    "tensor_plan": _mock.tensor_plan_count,
+    "upload": _mock.upload_count,
+    "materialize": _mock.materialize_count,
+    "legacy_matmul": _mock.matmul_count,
+}
+`);
+    expect(result.x_diff).toBeLessThan(1e-5);
+    expect(result.w_diff).toBeLessThan(1e-5);
+    expect(result.tensor_plan).toBe(2);
+    expect(result.upload).toBe(0);
+    expect(result.materialize).toBe(0);
+    expect(result.legacy_matmul).toBe(0);
+  });
+
+  it("backward(device='webgpu') refuses closure-only ops instead of falling back to CPU", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{ message: string; tensor_plan: number }>(`
+import browsergrad_jit as bg
+
+x = bg.tensor([-1.0, 2.0, -3.0], requires_grad=True)
+try:
+    x.abs().sum().backward(device="webgpu")
+    msg = "no_error"
+except Exception as e:
+    msg = str(e)
+{"message": msg, "tensor_plan": _mock.tensor_plan_count}
+`);
+    expect(result.message).toMatch(/requires symbolic VJP coverage/);
+    expect(result.message).toMatch(/CUSTOM/);
+    expect(result.tensor_plan).toBe(0);
+  });
+
   it("realize_tensor_plan_webgpu runs functional SGD_UPDATE through generic plan path", async () => {
     const target = await getJitTarget();
     const result = await target.run<{
