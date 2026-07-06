@@ -26,6 +26,26 @@ const UNIFORM_PARAMS_NAME = "bg_uniforms";
 const BUILTIN_VECTOR_NAMES = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]);
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const LOGICAL_OPERATORS = new Set(["&&", "||"]);
+const WGSL_ATOMIC_CALLEES = new Map([
+  ["atomicAdd", "atomicAdd"],
+  ["atomicAdd_system", "atomicAdd"],
+  ["atomicSub", "atomicSub"],
+  ["atomicSub_system", "atomicSub"],
+  ["atomicMin", "atomicMin"],
+  ["atomicMin_system", "atomicMin"],
+  ["atomicMax", "atomicMax"],
+  ["atomicMax_system", "atomicMax"],
+  ["atomicAnd", "atomicAnd"],
+  ["atomicAnd_system", "atomicAnd"],
+  ["atomicOr", "atomicOr"],
+  ["atomicOr_system", "atomicOr"],
+  ["atomicXor", "atomicXor"],
+  ["atomicXor_system", "atomicXor"],
+  ["atomicExch", "atomicExchange"],
+  ["atomicExch_system", "atomicExchange"],
+  ["atomicCAS", "atomicCompareExchangeWeak"],
+  ["atomicCAS_system", "atomicCompareExchangeWeak"],
+]);
 
 export function canEmitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): boolean {
   return unsupportedSemanticWgslOperation(ir.operations, ir) === undefined &&
@@ -220,7 +240,7 @@ function semanticWgslAtomicSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "atomic" }>,
   ir: SemanticKernelIrModule,
 ): boolean {
-  if (operation.callee !== "atomicAdd") return false;
+  if (!WGSL_ATOMIC_CALLEES.has(operation.callee)) return false;
   if (!operation.target || operation.target.addressSpace !== "storage") return false;
   if (!semanticWgslMemoryRefSupported(operation.target)) return false;
   if (operation.target.indices.length !== 1 || operation.target.fields.length > 0) return false;
@@ -228,8 +248,9 @@ function semanticWgslAtomicSupported(
   if (!ir.params.some((param) => param.name === operation.target?.base && param.addressSpace === "storage" && !param.constant)) {
     return false;
   }
-  const value = operation.args[1];
-  return value !== undefined && semanticWgslExpressionSupported(value, "scalar");
+  const expectedArgs = operation.callee === "atomicCAS" || operation.callee === "atomicCAS_system" ? 3 : 2;
+  return operation.args.length >= expectedArgs &&
+    operation.args.slice(1, expectedArgs).every((arg) => semanticWgslExpressionSupported(arg, "scalar"));
 }
 
 function semanticWgslExpressionSupported(expression: SemanticExpression, expected: "scalar" | "any"): boolean {
@@ -348,13 +369,19 @@ function emitSemanticAtomic(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
 ): string {
-  if (!operation.target || operation.callee !== "atomicAdd") {
+  const wgslCallee = WGSL_ATOMIC_CALLEES.get(operation.callee);
+  if (!operation.target || !wgslCallee) {
     throw semanticWgslError(`semantic WGSL does not support atomic '${operation.callee}'`, operation.span);
   }
-  const value = operation.args[1];
-  if (!value) throw semanticWgslError("semantic WGSL atomicAdd requires a value", operation.span);
   const target = emitSemanticMemoryRef(operation.target, ir, names);
-  return `_ = atomicAdd(&${target}, ${emitSemanticExpressionAs(value, ir, names, wgslAtomicScalar(operation.target.valueType))})`;
+  const operands = operation.args.slice(1, wgslCallee === "atomicCompareExchangeWeak" ? 3 : 2);
+  if (operands.length === 0 || operands.some((operand) => operand === undefined)) {
+    throw semanticWgslError(`semantic WGSL atomic '${operation.callee}' missing operand`, operation.span);
+  }
+  const emitted = operands.map((operand) =>
+    emitSemanticExpressionAs(operand!, ir, names, wgslAtomicScalar(operation.target!.valueType))
+  );
+  return `_ = ${wgslCallee}(&${target}, ${emitted.join(", ")})`;
 }
 
 function emitSemanticLoop(

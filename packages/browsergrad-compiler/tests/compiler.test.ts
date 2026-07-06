@@ -476,6 +476,49 @@ __global__ void atomicCounter(uint* counter, uint* out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([7]);
   });
 
+  it("emits integer read-modify-write atomic statements from semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void atomicRmw(int* x, int* out) {
+  atomicSub(&x[0], 3);
+  atomicMin(&x[1], 5);
+  atomicMax(&x[2], 8);
+  atomicAnd(&x[3], 6);
+  atomicOr(&x[4], 3);
+  atomicXor(&x[5], 10);
+  atomicExch(&x[6], 42);
+  atomicCAS(&x[7], 0, 99);
+  atomicAdd_system(&x[8], 2);
+  for (int i = 0; i < 9; i++) {
+    out[i] = x[i];
+  }
+}
+`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        x: new Int32Array([10, 7, 4, 9, 12, 11, 8, 0, 1]),
+        out: new Int32Array(9),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const result = runCompiledKernelReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("atomicSub(&x[0u], 3)");
+    expect(compiled.wgsl).toContain("atomicMin(&x[1u], 5)");
+    expect(compiled.wgsl).toContain("atomicMax(&x[2u], 8)");
+    expect(compiled.wgsl).toContain("atomicAnd(&x[3u], 6)");
+    expect(compiled.wgsl).toContain("atomicOr(&x[4u], 3)");
+    expect(compiled.wgsl).toContain("atomicXor(&x[5u], 10)");
+    expect(compiled.wgsl).toContain("atomicExchange(&x[6u], 42)");
+    expect(compiled.wgsl).toContain("atomicCompareExchangeWeak(&x[7u], 0, 99)");
+    expect(compiled.wgsl).toContain("atomicAdd(&x[8u], 2)");
+    expect([...semanticResult.buffers.out as Int32Array]).toEqual([7, 5, 8, 0, 15, 1, 42, 99, 3]);
+    expect([...result.buffers.out as Int32Array]).toEqual([7, 5, 8, 0, 15, 1, 42, 99, 3]);
+  });
+
   it("keeps canonical lab examples executable through Kernel IR and CPU reference", () => {
     const saxpy = compileCudaLiteKernelForWebGpu(compilerExampleText("saxpy.cu"), {
       workgroupSize: [8, 1, 1],

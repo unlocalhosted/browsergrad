@@ -19,6 +19,28 @@ import type {
 } from "./semantic_ir.js";
 
 type SemanticValue = number | Vector3;
+type SemanticAtomicOp = "add" | "sub" | "min" | "max" | "and" | "or" | "xor" | "exchange" | "cas";
+
+const SEMANTIC_ATOMIC_OPS = new Map<string, SemanticAtomicOp>([
+  ["atomicAdd", "add"],
+  ["atomicAdd_system", "add"],
+  ["atomicSub", "sub"],
+  ["atomicSub_system", "sub"],
+  ["atomicMin", "min"],
+  ["atomicMin_system", "min"],
+  ["atomicMax", "max"],
+  ["atomicMax_system", "max"],
+  ["atomicAnd", "and"],
+  ["atomicAnd_system", "and"],
+  ["atomicOr", "or"],
+  ["atomicOr_system", "or"],
+  ["atomicXor", "xor"],
+  ["atomicXor_system", "xor"],
+  ["atomicExch", "exchange"],
+  ["atomicExch_system", "exchange"],
+  ["atomicCAS", "cas"],
+  ["atomicCAS_system", "cas"],
+]);
 
 interface Vector3 {
   readonly x: number;
@@ -187,14 +209,16 @@ function semanticReferenceAtomicSupported(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "atomic" }>,
   compiled: CompiledCudaLiteKernel,
 ): boolean {
-  if (operation.callee !== "atomicAdd") return false;
+  const atomicOp = SEMANTIC_ATOMIC_OPS.get(operation.callee);
+  if (!atomicOp) return false;
   if (!operation.target || !semanticReferenceMemoryRefSupported(operation.target)) return false;
   if (operation.target.valueType !== "uint" && operation.target.valueType !== "int") return false;
   if (!compiled.kernelIr.params.some((param) => param.name === operation.target?.base && param.addressSpace === "storage" && !param.constant)) {
     return false;
   }
-  const value = operation.args[1];
-  return value !== undefined && semanticReferenceExpressionSupported(value, "scalar");
+  const expectedArgs = atomicOp === "cas" ? 3 : 2;
+  return operation.args.length >= expectedArgs &&
+    operation.args.slice(1, expectedArgs).every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
 }
 
 function semanticReferenceExpressionSupported(expression: SemanticExpression, expected: "scalar" | "any"): boolean {
@@ -319,12 +343,39 @@ function execSemanticAtomic(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "atomic" }>,
   context: SemanticReferenceContext,
 ): void {
-  if (!operation.target || operation.callee !== "atomicAdd") {
+  const atomicOp = SEMANTIC_ATOMIC_OPS.get(operation.callee);
+  if (!operation.target || !atomicOp) {
     throw semanticReferenceError(`semantic reference does not support atomic '${operation.callee}'`, operation.span);
   }
   const value = operation.args[1];
-  if (!value) throw semanticReferenceError("semantic reference atomicAdd requires a value", operation.span);
-  writeMemory(operation.target, readMemory(operation.target, context) + evalNumber(value, context), context);
+  if (!value) throw semanticReferenceError(`semantic reference atomic '${operation.callee}' missing operand`, operation.span);
+  const oldValue = readMemory(operation.target, context);
+  const nextValue = semanticAtomicValue(atomicOp, oldValue, evalNumber(value, context), operation, context);
+  writeMemory(operation.target, nextValue, context);
+}
+
+function semanticAtomicValue(
+  atomicOp: SemanticAtomicOp,
+  oldValue: number,
+  value: number,
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "atomic" }>,
+  context: SemanticReferenceContext,
+): number {
+  switch (atomicOp) {
+    case "add": return oldValue + value;
+    case "sub": return oldValue - value;
+    case "min": return Math.min(oldValue, value);
+    case "max": return Math.max(oldValue, value);
+    case "and": return Math.trunc(oldValue) & Math.trunc(value);
+    case "or": return Math.trunc(oldValue) | Math.trunc(value);
+    case "xor": return Math.trunc(oldValue) ^ Math.trunc(value);
+    case "exchange": return value;
+    case "cas": {
+      const replacement = operation.args[2];
+      if (!replacement) throw semanticReferenceError(`semantic reference atomic '${operation.callee}' missing replacement`, operation.span);
+      return oldValue === value ? evalNumber(replacement, context) : oldValue;
+    }
+  }
 }
 
 function execSemanticLoop(
