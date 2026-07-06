@@ -1,4 +1,5 @@
 import { walkCudaLiteExpressions } from "./ast_queries.js";
+import { lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
 import type {
   SemanticExpression,
   SemanticKernelIrOperation,
@@ -97,7 +98,10 @@ const REFERENCE_RUNTIME_OPERATIONS: ReadonlySet<CudaRuntimeOperationKind> = new 
   "runtime-copy",
 ]);
 
-export function createCudaGridSyncPhasePlan(ir: KernelIrModule): CudaGridSyncPhasePlan {
+export function createCudaGridSyncPhasePlan(compiled: CompiledCudaLiteKernel): CudaGridSyncPhasePlan {
+  const ir = lowerAnalyzedCudaLiteToKernelIr(compiled.analysis, {
+    workgroupSize: compiled.kernelIr.workgroupSize,
+  });
   const operations = collectRuntimeOperations(ir.body);
   const runtimePlan: CudaRuntimePlan = {
     operations,

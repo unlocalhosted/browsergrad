@@ -3496,7 +3496,7 @@ __global__ void gridSync(float *scratch, float *out) {
       severity: "warning",
     }));
     expect([...result.buffers.out as Float32Array]).toEqual([3]);
-    expect(createCudaGridSyncPhasePlan(backendIr(compiled)).supported).toBe(true);
+    expect(createCudaGridSyncPhasePlan(compiled).supported).toBe(true);
     const webGpuPlan = createCudaWebGpuExecutionPlan(compiled, input, launch);
     expect(summarizeCudaWebGpuExecutionPlan(webGpuPlan)).toMatchObject({
       canRunOnWebGpu: true,
@@ -4385,9 +4385,11 @@ __global__ void gridPhases(float *scratch, float *out) {
       referenceGridSync: true,
       workgroupSize: [1, 1, 1],
     });
-    const plan = createCudaGridSyncPhasePlan(backendIr(compiled));
+    const plan = createCudaGridSyncPhasePlan(compiled);
+    const detachedPlan = createCudaGridSyncPhasePlan({ ...compiled });
 
     expect(plan.supported).toBe(true);
+    expect(detachedPlan.supported).toBe(true);
     if (plan.supported) {
       expect(plan.modules).toHaveLength(2);
       expect(plan.modules.map((module) => module.name)).toEqual([
@@ -4421,7 +4423,7 @@ __global__ void badGridPhase(float *out) {
       referenceGridSync: true,
       workgroupSize: [1, 1, 1],
     });
-    const plan = createCudaGridSyncPhasePlan(backendIr(compiled));
+    const plan = createCudaGridSyncPhasePlan(compiled);
 
     expect(plan.supported).toBe(false);
     if (!plan.supported) expect(plan.reason).toContain("private thread state");
@@ -4447,7 +4449,7 @@ __global__ void sharedReuse(float *out) {
       referenceGridSync: true,
       workgroupSize: [2, 1, 1],
     });
-    const plan = createCudaGridSyncPhasePlan(backendIr(compiled));
+    const plan = createCudaGridSyncPhasePlan(compiled);
 
     expect(plan.supported).toBe(true);
     if (plan.supported) expect(plan.modules).toHaveLength(2);
@@ -4467,7 +4469,7 @@ __global__ void sharedCarry(float *out) {
       referenceGridSync: true,
       workgroupSize: [2, 1, 1],
     });
-    const plan = createCudaGridSyncPhasePlan(backendIr(compiled));
+    const plan = createCudaGridSyncPhasePlan(compiled);
 
     expect(plan.supported).toBe(false);
     if (!plan.supported) expect(plan.reason).toContain("read before rewrite");

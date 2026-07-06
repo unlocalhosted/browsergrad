@@ -7,7 +7,6 @@ import {
   type WgslResidentBuffer,
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
-import { internalBackendIrFor } from "./backend_ir.js";
 import { createCudaHostDynamicLaunchPlan } from "./dynamic_launch.js";
 import { CUDA_INTRINSICS } from "./intrinsics.js";
 import { createCudaLaunchValidationDiagnostics } from "./launch.js";
@@ -216,7 +215,6 @@ export function createCudaWebGpuExecutionPlan(
   launch: KernelLaunch,
   options: CudaWebGpuExecutionPlanOptions = {},
 ): CudaWebGpuExecutionPlan {
-  const backendIr = internalBackendIrFor(compiled);
   const launchDiagnostics = createCudaLaunchValidationDiagnostics(launch, compiled.kernelIr.workgroupSize);
   if (launchDiagnostics.length > 0) {
     const launchBlockers = launchDiagnostics.map((diagnostic) => webGpuBlocker("launch", diagnostic.code, diagnostic.message));
@@ -230,7 +228,7 @@ export function createCudaWebGpuExecutionPlan(
   const runtimePlan = createCudaRuntimePlan(compiled);
   const blockers: CudaWebGpuExecutionBlocker[] = [];
 
-  const gridSyncPhasePlan = createCudaGridSyncPhasePlan(backendIr);
+  const gridSyncPhasePlan = createCudaGridSyncPhasePlan(compiled);
   const gridSyncPlan = createGridSyncWebGpuPlan(compiled, input, launch, gridSyncPhasePlan);
   if (gridSyncPlan) return gridSyncPlan;
   if (runtimePlan.operations.some((operation) => operation.kind === "grid-sync") && !gridSyncPhasePlan.supported) {
