@@ -38,6 +38,7 @@ import {
   cudaWebGpuDefaultReadbackNames,
   deviceGlobalBufferInputs,
 } from "../src/webgpu_inputs";
+import { deviceLaunchTreeIsExternallySilent } from "../src/runtime_elision";
 import { packCudaWebGpuUniformParams } from "../src/webgpu_orchestration";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -8219,6 +8220,7 @@ __global__ void parent(int max_depth, int depth) {
       supported: true,
       kind: "runtime-elided-single-dispatch",
     });
+    expect(deviceLaunchTreeIsExternallySilent({ ...compiled })).toBe(true);
   });
 
   it("does not elide dynamic launches that write external buffers through system atomics", () => {

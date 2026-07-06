@@ -1,5 +1,4 @@
 import { expressionName, rootIdentifier } from "./analyzer.js";
-import { internalBackendIrFor } from "./backend_ir.js";
 import { CUDA_INTRINSICS } from "./intrinsics.js";
 import type {
   CompiledCudaLiteKernel,
@@ -38,10 +37,8 @@ const SIDE_EFFECT_FREE_MEMBER_CALLS = new Set([
 ]);
 
 export function deviceLaunchTreeIsExternallySilent(compiled: CompiledCudaLiteKernel): boolean {
-  const backendIr = internalBackendIrFor(compiled);
-  const entry = compiled.ast.kernels.find((kernel) => kernel.name === backendIr.name);
-  if (!entry) return false;
-  const externalRoots = initialExternalRoots(entry, compiled.ast.deviceGlobals);
+  const entry = compiled.analysis.kernel;
+  const externalRoots = initialExternalRoots(entry, compiled.analysis.deviceGlobals);
   return !launchableHasExternalWrite(compiled, entry, externalRoots, new Set());
 }
 
@@ -194,9 +191,9 @@ function callHasExternalWrite(
     return expression.args.some(hasExternal) || expression.args.some(expressionHasWrite);
   }
   if (name !== undefined) {
-    const fn = compiled.ast.functions.find((candidate) => candidate.name === name);
+    const fn = compiled.analysis.functions.find((candidate) => candidate.name === name);
     if (fn) {
-      return launchableHasExternalWrite(compiled, fn, externalRootsForCall(fn.params, expression.args, hasExternal, compiled.ast.deviceGlobals), visiting);
+      return launchableHasExternalWrite(compiled, fn, externalRootsForCall(fn.params, expression.args, hasExternal, compiled.analysis.deviceGlobals), visiting);
     }
   }
   if (expression.args.some(expressionHasWrite)) return true;
@@ -211,9 +208,9 @@ function kernelLaunchHasExternalWrite(
   visiting: Set<string>,
 ): boolean {
   const kernel = compiled.ast.kernels.find((candidate) => candidate.name === statement.callee) ??
-    compiled.ast.functions.find((candidate) => candidate.name === statement.callee);
+    compiled.analysis.functions.find((candidate) => candidate.name === statement.callee);
   if (!kernel) return true;
-  return launchableHasExternalWrite(compiled, kernel, externalRootsForCall(kernel.params, statement.args, hasExternal, compiled.ast.deviceGlobals), visiting);
+  return launchableHasExternalWrite(compiled, kernel, externalRootsForCall(kernel.params, statement.args, hasExternal, compiled.analysis.deviceGlobals), visiting);
 }
 
 function externalRootsForCall(
