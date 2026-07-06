@@ -363,6 +363,29 @@ class MockBridge:
                 values[value_id] = np.exp(values[input_ids[0]])
             elif op == "LOG":
                 values[value_id] = np.log(values[input_ids[0]])
+            elif op == "FUSED_ELEMENTWISE":
+                externals = [values[input_id] for input_id in input_ids]
+                steps = []
+                def resolve(ref):
+                    return externals[-ref - 1] if ref < 0 else steps[ref]
+                for opcode, lhs_ref, rhs_ref in step["arg"]["ops"]:
+                    a = resolve(int(lhs_ref))
+                    rhs = int(rhs_ref) if rhs_ref is not None else int(lhs_ref)
+                    if opcode == "ADD":
+                        steps.append(a + resolve(rhs))
+                    elif opcode == "MUL":
+                        steps.append(a * resolve(rhs))
+                    elif opcode == "DIV":
+                        steps.append(a / resolve(rhs))
+                    elif opcode == "NEG":
+                        steps.append(-a)
+                    elif opcode == "EXP":
+                        steps.append(np.exp(a))
+                    elif opcode == "LOG":
+                        steps.append(np.log(a))
+                    else:
+                        raise ValueError(f"mock tensor plan: unsupported fused opcode {opcode}")
+                values[value_id] = steps[-1].astype(np.dtype(step["dtype"]), copy=False)
             elif op == "CAST":
                 values[value_id] = values[input_ids[0]].astype(np.dtype(step["dtype"]), copy=False)
             elif op == "RESHAPE":
@@ -1041,6 +1064,7 @@ alive_after = gbt.stats()["handles_alive"]
       materialize: number;
       root_id: number;
       step_ids: number[];
+      ops: string[];
     }>(`
 import browsergrad_jit as bg
 import numpy as np
@@ -1063,6 +1087,7 @@ plan = bg.gpu_plan_summary(out)
     "materialize": _mock.materialize_count,
     "root_id": int(plan["root_id"]),
     "step_ids": [int(step["value_id"]) for step in plan["steps"]],
+    "ops": plan["ops"],
 }
 `);
     expect(result.max_diff).toBeLessThan(1e-6);
@@ -1071,6 +1096,8 @@ plan = bg.gpu_plan_summary(out)
     expect(result.matmul).toBe(0);
     expect(result.fused).toBe(0);
     expect(result.materialize).toBe(0);
+    expect(result.ops).toContain("FUSED_ELEMENTWISE");
+    expect(result.ops).not.toContain("EXP");
     expect(result.root_id).toBe(result.step_ids[result.step_ids.length - 1]);
     expect(result.step_ids).toEqual([...result.step_ids.keys()]);
   });

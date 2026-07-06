@@ -410,7 +410,13 @@ def _substitute(root: UOp, substitutions: dict[int, UOp]) -> UOp:
 # ---------------------------------------------------------------------------
 
 
-def fuse(root: UOp, holdout: Optional[Iterable[int]] = None) -> UOp:
+def fuse(
+    root: UOp,
+    holdout: Optional[Iterable[int]] = None,
+    *,
+    include_softmax: bool = True,
+    include_elementwise: bool = True,
+) -> UOp:
     """Run the fusion pass on the IR rooted at `root`.
 
     `holdout` is the set of UOp ids that must NOT become non-terminal nodes
@@ -435,29 +441,33 @@ def fuse(root: UOp, holdout: Optional[Iterable[int]] = None) -> UOp:
     # Pass 1: softmax. Run first because softmax includes nodes (DIV, EXP)
     # that the elementwise matcher would otherwise greedily absorb,
     # producing a worse fusion overall.
-    for node in nodes:
-        match = _match_softmax(node, consumers, holdout_set, already_fused)
-        if match is None:
-            if node.op == OP_DIV and id(node) not in already_fused:
-                _LAST_REPORT.unfused.append(UnfusedReason(
-                    pattern="softmax",
-                    op=node.op,
-                    shape=node.shape,
-                    reason="DIV did not match softmax template",
-                ))
-            continue
-        fused = _build_fused_softmax_uop(match)
-        substitutions[id(match.div_node)] = fused
-        for n in (match.max_node, match.neg_node, match.add_node,
-                  match.exp_node, match.sum_node, match.div_node):
-            already_fused.add(id(n))
-        _LAST_REPORT.fused.append(FusedKernelInfo(
-            pattern="softmax",
-            n_ops=6,  # max, neg, add, exp, sum, div
-            shape=fused.shape,
-            dtype=fused.dtype,
-            ops=("REDUCE(max)", "NEG", "ADD", "EXP", "REDUCE(sum)", "DIV"),
-        ))
+    if include_softmax:
+        for node in nodes:
+            match = _match_softmax(node, consumers, holdout_set, already_fused)
+            if match is None:
+                if node.op == OP_DIV and id(node) not in already_fused:
+                    _LAST_REPORT.unfused.append(UnfusedReason(
+                        pattern="softmax",
+                        op=node.op,
+                        shape=node.shape,
+                        reason="DIV did not match softmax template",
+                    ))
+                continue
+            fused = _build_fused_softmax_uop(match)
+            substitutions[id(match.div_node)] = fused
+            for n in (match.max_node, match.neg_node, match.add_node,
+                      match.exp_node, match.sum_node, match.div_node):
+                already_fused.add(id(n))
+            _LAST_REPORT.fused.append(FusedKernelInfo(
+                pattern="softmax",
+                n_ops=6,  # max, neg, add, exp, sum, div
+                shape=fused.shape,
+                dtype=fused.dtype,
+                ops=("REDUCE(max)", "NEG", "ADD", "EXP", "REDUCE(sum)", "DIV"),
+            ))
+
+    if not include_elementwise:
+        return _substitute(root, substitutions)
 
     # Pass 2: elementwise chains. Walks each node; skips ones already
     # absorbed by softmax. The matcher returns the longest fusable chain

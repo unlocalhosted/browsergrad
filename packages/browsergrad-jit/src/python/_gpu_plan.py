@@ -4,10 +4,11 @@ INTERNAL. This is the first compiler-facing layer for the GPU-native path:
 UOp graph in, backend-neutral tensor execution plan out. It deliberately does
 not call the legacy per-op WebGPU bridge and it refuses CUSTOM by default.
 
-The plan is still conservative: one schedule item per primitive IR node, no
-WGSL emission, no fusion/tiling choices yet. Its job is to pin the contract
-that future WebGPU lowering must satisfy: primitive tensor IR, explicit
-liveness/materialization, CPU reference parity, no hidden readbacks.
+The plan is still conservative, but it owns the first scheduler/codegen
+choice: linear elementwise chains lower to one FUSED_ELEMENTWISE primitive.
+Its job is to pin the contract that future WebGPU lowering must satisfy:
+primitive tensor IR, explicit liveness/materialization, CPU reference parity,
+no hidden readbacks.
 """
 
 from __future__ import annotations
@@ -172,6 +173,10 @@ def build_gpu_execution_plan(root: UOp, *, allow_custom: bool = False) -> GpuExe
     hide behind Python CUSTOM callbacks. User-authored/lab kernels can opt into
     CUSTOM-specific paths outside this core planner.
     """
+    if not allow_custom:
+        from ._fusion import fuse
+        root = fuse(root, include_softmax=False)
+
     custom = _find_custom(root)
     if custom is not None and not allow_custom:
         label = None

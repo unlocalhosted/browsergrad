@@ -40,9 +40,10 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
   It consumes scheduled primitive steps, accepts the snake_case plan payload
   emitted by `browsergrad-jit`, keeps intermediates resident, and materializes
   only the declared root. Current coverage: f32 BUFFER/LOAD/2-D MATMUL,
-  elementwise chains, RESHAPE, PERMUTE, BROADCAST_TO, and REDUCE(sum/mean) rank
-  <= 4, plus Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm forward/backward
-  and functional SGD/Adam/AdamW updates. The executor uses plan liveness to
+  scalar elementwise ops, FUSED_ELEMENTWISE runtime WGSL codegen, RESHAPE,
+  PERMUTE, BROADCAST_TO, and REDUCE(sum/mean) rank <= 4, plus
+  Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm forward/backward and
+  functional SGD/Adam/AdamW updates. The executor uses plan liveness to
   return dead owned direct-dispatch outputs to the reusable output pool before
   the root boundary, destroys uploaded host inputs when they die, and reports
   `earlyReleasedBuffers` / `earlyReleasedBytes` for tests and profiling. This

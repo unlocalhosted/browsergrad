@@ -25,6 +25,7 @@ export type TensorPlanOp =
   | "RESHAPE"
   | "PERMUTE"
   | "BROADCAST_TO"
+  | "FUSED_ELEMENTWISE"
   | "CONV1D"
   | "CONV1D_BACKWARD_INPUT"
   | "CONV1D_BACKWARD_WEIGHT"
@@ -422,6 +423,19 @@ function executeStep(
       const src = requireValue(values, step.inputIds[0], step.op);
       const spec = expectReduceSpec(step.arg, src.shape.length);
       return fromDirect(step, reduceDirect(device, src, step.shape, spec));
+    }
+    case "FUSED_ELEMENTWISE": {
+      const inputs = step.inputIds.map((id) => requireValue(values, id, step.op));
+      const ops = expectFusedOps(step.arg, step.op);
+      return fromDirect(
+        step,
+        fusedElementwiseDirect(
+          device,
+          inputs.map((input) => input.buffer),
+          ops,
+          numel(step.shape),
+        ),
+      );
     }
     case "CONV1D": {
       const x = requireValue(values, step.inputIds[0], step.op);
@@ -3863,6 +3877,23 @@ function expectReduceSpec(arg: unknown, rank: number): ReduceSpec {
   return { op, axes };
 }
 
+function expectFusedOps(arg: unknown, op: string): FusedOp[] {
+  const obj = expectRecord(arg, `tensor plan ${op}.arg`);
+  return expectArray(obj.ops, `tensor plan ${op}.arg.ops`).map((raw, i) => {
+    const item = expectArray(raw, `tensor plan ${op}.arg.ops[${i}]`);
+    if (item.length < 2 || item.length > 3) {
+      throw new KernelError(`tensor plan ${op}.arg.ops[${i}] must be [opcode, lhs, rhs?]`);
+    }
+    const opcode = expectString(item[0], `tensor plan ${op}.arg.ops[${i}][0]`);
+    const lhs = expectNumber(item[1], `tensor plan ${op}.arg.ops[${i}][1]`);
+    const rawRhs = item.length >= 3 ? item[2] : lhs;
+    const rhs = rawRhs === null || rawRhs === undefined
+      ? lhs
+      : expectNumber(rawRhs, `tensor plan ${op}.arg.ops[${i}][2]`);
+    return [opcode, lhs, rhs] as const;
+  });
+}
+
 function normalizeAxis(axis: number, rank: number): number {
   const n = axis < 0 ? axis + rank : axis;
   if (n < 0 || n >= rank) {
@@ -3906,6 +3937,7 @@ function expectOp(value: unknown, name: string): TensorPlanOp {
     case "RESHAPE":
     case "PERMUTE":
     case "BROADCAST_TO":
+    case "FUSED_ELEMENTWISE":
     case "CONV1D":
     case "CONV1D_BACKWARD_INPUT":
     case "CONV1D_BACKWARD_WEIGHT":

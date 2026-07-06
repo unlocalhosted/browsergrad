@@ -240,6 +240,46 @@ describe("real WebGPU — matmul + tiled GEMM + fused elementwise + FA-v2", () =
     expect(statsAfterSecond.outputBufferPoolHits).toBeGreaterThan(statsAfterFirst.outputBufferPoolHits);
   });
 
+  it("generic tensor GPU plan runs FUSED_ELEMENTWISE as one runtime codegen step", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const x = new Float32Array([0.1, 0.2, 0.3, 0.4]);
+    const y = new Float32Array([2, 3, 4, 5]);
+    const plan = {
+      steps: [
+        { step: 0, value_id: 0, op: "BUFFER", input_ids: [], shape: [4], dtype: "float32" },
+        { step: 1, value_id: 1, op: "BUFFER", input_ids: [], shape: [4], dtype: "float32" },
+        {
+          step: 2,
+          value_id: 2,
+          op: "FUSED_ELEMENTWISE",
+          input_ids: [0, 1],
+          shape: [4],
+          dtype: "float32",
+          arg: { ops: [["EXP", -1, null], ["MUL", 0, -2], ["LOG", 1, null]] },
+        },
+      ],
+      buffers: [
+        { value_id: 0, op: "BUFFER", shape: [4], dtype: "float32", bytes: x.byteLength, first_step: 0, last_step: 2, materialize: false },
+        { value_id: 1, op: "BUFFER", shape: [4], dtype: "float32", bytes: y.byteLength, first_step: 1, last_step: 2, materialize: false },
+        { value_id: 2, op: "FUSED_ELEMENTWISE", shape: [4], dtype: "float32", bytes: x.byteLength, first_step: 2, last_step: 2, materialize: true },
+      ],
+      root_id: 2,
+      materialization_boundary: "root",
+      peak_live_bytes: x.byteLength + y.byteLength + x.byteLength,
+      has_custom_ops: false,
+    } as const;
+
+    const result = await runTensorGpuPlan(device, plan, [
+      { valueId: 0, data: x },
+      { valueId: 1, data: y },
+    ]);
+    for (let i = 0; i < x.length; i++) {
+      expect(result.data[i]!).toBeCloseTo(Math.log(Math.exp(x[i]!) * y[i]!), 5);
+    }
+    expect(result.materializedValueId).toBe(2);
+  });
+
   it("WebGpuRealizerBridge runs a canonical tensor plan through one generic method", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

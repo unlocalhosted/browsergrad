@@ -84,17 +84,19 @@ second-moment buffers resident.
 
 `bg.gpu_plan_summary(tensor)` and `bg.jit.gpu_plan.*` expose the first
 compiler-facing tensor-IR execution plan: scheduled primitive UOps, buffer
-liveness bytes, and one explicit root materialization boundary. It refuses
-`CUSTOM` by default, keeping user/lab kernels separate from core framework GPU
-lowering.
+liveness bytes, one explicit root materialization boundary, and the first
+scheduler/codegen choice: linear elementwise chains become one
+`FUSED_ELEMENTWISE` plan step. It refuses `CUSTOM` by default, keeping user/lab
+kernels separate from core framework GPU lowering.
 
 `bg.realize_tensor_plan_webgpu(tensor)` sends that canonical plan through one
 generic WebGPU bridge call (`run_tensor_plan`) instead of walking legacy per-op
 bridge methods. `bg.realize_tensor_plan_webgpu_resident(tensor)` uses
 `run_tensor_plan_resident` and returns a TensorProxy whose root stays in a
 registered GPUBuffer until `.numpy()` / `.item()` materialization. Current
-runtime coverage is f32 BUFFER/LOAD/2-D MATMUL and elementwise chains, RESHAPE,
-PERMUTE, BROADCAST_TO, and REDUCE(sum/mean) rank <= 4, plus
+runtime coverage is f32 BUFFER/LOAD/2-D MATMUL and `FUSED_ELEMENTWISE`
+runtime WGSL codegen, RESHAPE, PERMUTE, BROADCAST_TO, and REDUCE(sum/mean)
+rank <= 4, plus
 Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm forward/backward and functional
 SGD/Adam/AdamW updates. `Optimizer.step(device="webgpu")` uses the same
 tensor-plan path for SGD without momentum, Adam, and AdamW, then writes the
