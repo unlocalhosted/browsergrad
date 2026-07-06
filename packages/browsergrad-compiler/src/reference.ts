@@ -2577,11 +2577,19 @@ function evalCuComplexBuiltin(
   if (name === "cuCaddf") return { kind: "complex64", x: a.x + b.x, y: a.y + b.y };
   if (name === "cuCsubf") return { kind: "complex64", x: a.x - b.x, y: a.y - b.y };
   if (name === "cuCmulf") return { kind: "complex64", x: a.x * b.x - a.y * b.y, y: a.x * b.y + a.y * b.x };
-  if (name === "cuCdivf") {
-    const denom = b.x * b.x + b.y * b.y;
-    return { kind: "complex64", x: (a.x * b.x + a.y * b.y) / denom, y: (a.y * b.x - a.x * b.y) / denom };
-  }
+  if (name === "cuCdivf") return divCuComplex(a, b);
   return undefined;
+}
+
+function divCuComplex(a: ComplexValue, b: ComplexValue): ComplexValue {
+  const s = Math.abs(b.x) + Math.abs(b.y);
+  const oos = 1 / s;
+  const ars = a.x * oos;
+  const ais = a.y * oos;
+  const brs = b.x * oos;
+  const bis = b.y * oos;
+  const scale = 1 / (brs * brs + bis * bis);
+  return { kind: "complex64", x: (ars * brs + ais * bis) * scale, y: (ais * brs - ars * bis) * scale };
 }
 
 function isCuComplexBuiltin(name: string | undefined): boolean {

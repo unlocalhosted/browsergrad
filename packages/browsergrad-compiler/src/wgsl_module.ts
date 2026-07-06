@@ -15,6 +15,7 @@ import {
   irUsesSubgroups,
   storageElementType,
   usesAtomicIncDec,
+  usesCuComplexRobustMath,
   usesCurand,
   usesFloatAtomicAdd,
   usesFloatAtomicMax,
@@ -42,6 +43,7 @@ import { UNIFORM_PARAMS_NAME, type EmitContext } from "./wgsl_context.js";
 import { wgslScalar } from "./wgsl_storage.js";
 import {
   emitCurandHelpers,
+  emitCuComplexRobustMathHelpers,
   emitFp8Helpers,
   emitFrexpHelpers,
   emitFunnelShiftHelpers,
@@ -186,6 +188,7 @@ function appendKernelModuleSupportHelpers(
   if (usesIntViewAtomicStorage(ir)) lines.push("", ...emitIntViewAtomicHelpers("storage", intViewAtomicKinds(ir)));
   if (usesSharedIntViewAtomics(ir)) lines.push("", ...emitIntViewAtomicHelpers("workgroup", intViewAtomicKinds(ir)));
   if (usesCurand(ir)) lines.push("", ...emitCurandHelpers());
+  if (usesCuComplexRobustMath(ir)) lines.push("", ...emitCuComplexRobustMathHelpers());
   if (usesFrexp(ir)) lines.push("", ...emitFrexpHelpers());
   if (usesModf(ir)) lines.push("", ...emitModfHelpers());
   if (usesGammaIntrinsics(ir)) lines.push("", ...emitGammaHelpers());

@@ -199,6 +199,12 @@ export function usesCurand(ir: KernelIrModule): boolean {
     ir.functions.some((fn) => statementsUseCall(fn.body, curandCalls));
 }
 
+export function usesCuComplexRobustMath(ir: KernelIrModule): boolean {
+  const calls = new Set(["cuCabsf", "cuCdivf"]);
+  return statementsUseCall(ir.body, calls) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, calls));
+}
+
 export function usesFrexp(ir: KernelIrModule): boolean {
   return statementsUseCall(ir.body, new Set(["frexp", "frexpf"])) ||
     ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["frexp", "frexpf"])));

@@ -83,6 +83,33 @@ export function emitCurandHelpers(): string[] {
   ];
 }
 
+export function emitCuComplexRobustMathHelpers(): string[] {
+  return [
+    "fn bg_cuCabsf(value: vec2<f32>) -> f32 {",
+    "  let a = abs(value.x);",
+    "  let b = abs(value.y);",
+    "  let v = max(a, b);",
+    "  let w = min(a, b);",
+    "  if (v == 0.0 || v > 3.4028234663852886e38 || w > 3.4028234663852886e38) {",
+    "    return v + w;",
+    "  }",
+    "  let t = w / v;",
+    "  return v * sqrt(1.0 + t * t);",
+    "}",
+    "fn bg_cuCdivf(x: vec2<f32>, y: vec2<f32>) -> vec2<f32> {",
+    "  let s = abs(y.x) + abs(y.y);",
+    "  let oos = 1.0 / s;",
+    "  let ars = x.x * oos;",
+    "  let ais = x.y * oos;",
+    "  let brs = y.x * oos;",
+    "  let bis = y.y * oos;",
+    "  let denom = brs * brs + bis * bis;",
+    "  let scale = 1.0 / denom;",
+    "  return vec2<f32>((ars * brs + ais * bis) * scale, (ais * brs - ars * bis) * scale);",
+    "}",
+  ];
+}
+
 export function emitFrexpHelpers(): string[] {
   return [
     "fn bg_frexp(value: f32, exponent_out: ptr<function, i32>) -> f32 {",

@@ -6531,7 +6531,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return `(${args[0] ?? "vec2<f32>()"}).y`;
     case "cuCabsf": {
       const a = args[0] ?? "vec2<f32>()";
-      return `length(${a})`;
+      return `bg_cuCabsf(${a})`;
     }
     case "cuConjf": {
       const a = args[0] ?? "vec2<f32>()";
@@ -6551,8 +6551,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "cuCdivf": {
       const a = args[0] ?? "vec2<f32>()";
       const b = args[1] ?? "vec2<f32>()";
-      const denom = `((${b}).x * (${b}).x + (${b}).y * (${b}).y)`;
-      return `vec2<f32>(((${a}).x * (${b}).x + (${a}).y * (${b}).y) / ${denom}, ((${a}).y * (${b}).x - (${a}).x * (${b}).y) / ${denom})`;
+      return `bg_cuCdivf(${a}, ${b})`;
     }
     case "curand_init": {
       const helper = curandStateAddressSpace(expression.args[3], context) === "storage" ? "bg_curand_init_storage" : "bg_curand_init";

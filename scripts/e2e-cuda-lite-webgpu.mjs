@@ -2101,6 +2101,14 @@ __global__ void complexCuHelpers(cuComplex *a, cuFloatComplex *b, float *out) {
   a[i] = cuCsubf(q, make_cuComplex(1.0f, -1.0f));
   out[i] = cuCabsf(a[i]) + cuCrealf(a[i]) + cuCimagf(a[i]);
 }`,
+  complexCuRobust: `
+__global__ void complexCuRobust(cuComplex *a, cuComplex *b, float *out) {
+  int i = threadIdx.x;
+  cuComplex q = cuCdivf(a[i], b[i]);
+  out[i * 3] = cuCabsf(b[i]) * 1.0e-20f;
+  out[i * 3 + 1] = cuCrealf(q) * 1.0e20f;
+  out[i * 3 + 2] = cuCimagf(q) * 1.0e20f;
+}`,
   subgroupScalarCompat: `
 __global__ void subgroupScalarCompat(float *x) {
   int idx = threadIdx.x;
@@ -12286,6 +12294,22 @@ const html = String.raw`<!doctype html>
             }),
             output: "a",
             expectedOutput: { type: "Float32Array", data: [-2, 6, -3, 23] },
+          },
+          {
+            name: "complex:cu-helper-robust-math",
+            source: SOURCES.complexCuRobust,
+            options: { workgroupSize: [2, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+            input: () => ({
+              buffers: {
+                a: new Float32Array([1, 1, -1, 2]),
+                b: new Float32Array([1.0e20, 1.0e20, 1.0e20, -1.0e20]),
+                out: new Float32Array(6),
+              },
+            }),
+            output: "out",
+            tolerance: 1e-5,
+            expectedOutput: { type: "Float32Array", data: [Math.SQRT2, 1, 0, Math.SQRT2, -1.5, 0.5] },
           },
           {
             name: "compat:subgroup-scalar-mode",

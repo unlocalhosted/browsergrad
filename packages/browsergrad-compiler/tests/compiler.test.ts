@@ -6820,9 +6820,42 @@ __global__ void cuComplexHelpers(cuComplex *a, cuFloatComplex *b, float *out) {
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
     expect(compiled.wgsl).toContain("vec2<f32>(f32");
-    expect(compiled.wgsl).toContain("length(a[u32(i)])");
+    expect(compiled.wgsl).toContain("fn bg_cuCabsf");
+    expect(compiled.wgsl).toContain("fn bg_cuCdivf");
     expect([...result.buffers.a as Float32Array]).toEqual([-2, 6, -3, 23]);
     expect([...result.buffers.out as Float32Array]).toEqual([...Float32Array.from([Math.hypot(-2, 6) + 4, Math.hypot(-3, 23) + 20])]);
+  });
+
+  it("uses scaled cuComplex abs/div lowering for large finite values", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void cuComplexRobust(cuComplex *a, cuComplex *b, float *out) {
+  int i = threadIdx.x;
+  cuComplex q = cuCdivf(a[i], b[i]);
+  out[i * 3] = cuCabsf(b[i]) * 1.0e-20f;
+  out[i * 3 + 1] = cuCrealf(q) * 1.0e20f;
+  out[i * 3 + 2] = cuCimagf(q) * 1.0e20f;
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          a: new Float32Array([1, 1, -1, 2]),
+          b: new Float32Array([1.0e20, 1.0e20, 1.0e20, -1.0e20]),
+          out: new Float32Array(6),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const out = [...result.buffers.out as Float32Array];
+
+    expect(compiled.wgsl).toContain("fn bg_cuCabsf");
+    expect(compiled.wgsl).toContain("fn bg_cuCdivf");
+    expect(out[0]).toBeCloseTo(Math.SQRT2, 5);
+    expect(out[1]).toBeCloseTo(1, 5);
+    expect(out[2]).toBeCloseTo(0, 5);
+    expect(out[3]).toBeCloseTo(Math.SQRT2, 5);
+    expect(out[4]).toBeCloseTo(-1.5, 5);
+    expect(out[5]).toBeCloseTo(0.5, 5);
   });
 
   it("lowers supported inline PTX fma statements", () => {
