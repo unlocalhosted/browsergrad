@@ -6,8 +6,7 @@ import {
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./ast_queries.js";
-import { expressionName } from "./analyzer.js";
-import { internalBackendIrFor } from "./backend_ir.js";
+import { expressionName, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
 import { cudaDeviceAttributeValue } from "./cuda_device_attributes.js";
 import { cudaDeviceLimitValue } from "./cuda_device_limits.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
@@ -54,6 +53,7 @@ import {
   type CudaLiteTextureDescriptor,
   type CudaLiteVarDecl,
   type KernelLaunch,
+  type KernelIrModule,
   type KernelMemoryAccess,
   type KernelThreadTrace,
   type ReferenceKernelResult,
@@ -211,9 +211,9 @@ export function runCompiledKernelReference(
   input: CompiledKernelInput,
   launch: KernelLaunch,
 ): ReferenceKernelResult {
-  const backendIr = internalBackendIrFor(compiled);
+  const backendIr = referenceKernelIrFor(compiled);
   validateCudaKernelLaunch(launch, backendIr.workgroupSize);
-  validateInputs(compiled, input);
+  validateInputs(input, backendIr);
   const buffers = cloneBuffers(input.buffers);
   const constants = cloneConstants(input.constants ?? {});
   for (const constant of backendIr.constants) {
@@ -243,12 +243,12 @@ export function runCompiledKernelReference(
   const traces: MutableTrace[] = [];
 
   if (usesGridSync(backendIr.body)) {
-    runGrid(backendIr.body, compiled, buffers, constants, constantDimensions, deviceGlobals, deviceGlobalDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, vectorFromTuple(launch.blockDim), vectorFromTuple(launch.gridDim), traces);
+    runGrid(backendIr.body, compiled, backendIr.sharedDeclarations, buffers, constants, constantDimensions, deviceGlobals, deviceGlobalDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, vectorFromTuple(launch.blockDim), vectorFromTuple(launch.gridDim), traces);
   } else {
     for (let bz = 0; bz < launch.gridDim[2]; bz++) {
       for (let by = 0; by < launch.gridDim[1]; by++) {
         for (let bx = 0; bx < launch.gridDim[0]; bx++) {
-          runBlock(backendIr.body, compiled, buffers, constants, constantDimensions, deviceGlobals, deviceGlobalDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, {
+          runBlock(backendIr.body, compiled, backendIr.sharedDeclarations, buffers, constants, constantDimensions, deviceGlobals, deviceGlobalDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, {
             x: bx,
             y: by,
             z: bz,
@@ -318,9 +318,17 @@ function deviceFunctionAsKernel(fn: CudaLiteDeviceFunction): CudaLiteKernel {
   };
 }
 
+function referenceKernelIrFor(compiled: CompiledCudaLiteKernel): KernelIrModule {
+  return lowerAnalyzedCudaLiteToKernelIr(compiled.analysis, {
+    workgroupSize: compiled.kernelIr.workgroupSize,
+    ...(compiled.dynamicSharedMemory === undefined ? {} : { dynamicSharedMemory: compiled.dynamicSharedMemory }),
+  });
+}
+
 function runBlock(
   body: readonly CudaLiteStatement[],
   compiled: CompiledCudaLiteKernel,
+  sharedDeclarations: readonly CudaLiteVarDecl[],
   buffers: Map<string, WgslTypedArray>,
   constants: Map<string, number | WgslTypedArray>,
   constantDimensions: Map<string, readonly number[]>,
@@ -338,7 +346,7 @@ function runBlock(
   gridDim: Vector3,
   traces: MutableTrace[],
 ): void {
-  const shared = allocateShared(sharedDeclarationsFor(body, internalBackendIrFor(compiled).sharedDeclarations));
+  const shared = allocateShared(sharedDeclarationsFor(body, sharedDeclarations));
   const generators: BarrierGenerator[] = [];
   const active: boolean[] = [];
   const resumes: Array<EvalValue | undefined> = [];
@@ -538,6 +546,7 @@ function reduceCollectiveValues(
 function runGrid(
   body: readonly CudaLiteStatement[],
   compiled: CompiledCudaLiteKernel,
+  sharedDeclarations: readonly CudaLiteVarDecl[],
   buffers: Map<string, WgslTypedArray>,
   constants: Map<string, number | WgslTypedArray>,
   constantDimensions: Map<string, readonly number[]>,
@@ -563,7 +572,7 @@ function runGrid(
       for (let bx = 0; bx < gridDim.x; bx++) {
         const blockIdx = { x: bx, y: by, z: bz };
         const blockKey = `${bx},${by},${bz}`;
-        const shared = sharedByBlock.get(blockKey) ?? allocateShared(sharedDeclarationsFor(body, internalBackendIrFor(compiled).sharedDeclarations));
+        const shared = sharedByBlock.get(blockKey) ?? allocateShared(sharedDeclarationsFor(body, sharedDeclarations));
         sharedByBlock.set(blockKey, shared);
         for (let tz = 0; tz < blockDim.z; tz++) {
           for (let ty = 0; ty < blockDim.y; ty++) {
@@ -5423,8 +5432,10 @@ function freezeTrace(trace: MutableTrace): KernelThreadTrace {
   };
 }
 
-function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelInput): void {
-  const backendIr = internalBackendIrFor(compiled);
+function validateInputs(
+  input: CompiledKernelInput,
+  backendIr: KernelIrModule,
+): void {
   for (const param of backendIr.params) {
     if (param.valueType === "texture2d") {
       const texture = input.textures?.[param.name];

@@ -9,13 +9,21 @@ import {
   writeWgslStorageBuffer,
 } from "@unlocalhosted/browsergrad-kernels";
 import {
+  type CompiledCudaLiteKernel,
   compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   prepareCompiledKernelWebGpu,
   runCompiledKernelReference,
   runCompiledKernelWebGpu,
 } from "../src/index";
-import { internalBackendIrFor as backendIr } from "../src/backend_ir";
+import { lowerAnalyzedCudaLiteToKernelIr } from "../src/analyzer";
+
+function backendIr(compiled: CompiledCudaLiteKernel) {
+  return lowerAnalyzedCudaLiteToKernelIr(compiled.analysis, {
+    workgroupSize: compiled.kernelIr.workgroupSize,
+    ...(compiled.dynamicSharedMemory === undefined ? {} : { dynamicSharedMemory: compiled.dynamicSharedMemory }),
+  });
+}
 
 interface DeviceCheck {
   readonly available: boolean;

@@ -39,7 +39,6 @@ export interface CudaLoweringPlan {
 
 const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("parse-error", "frontend", "Unsupported CUDA/C++ syntax", "unsupported", false, false, "Parser stopped before semantic IR."),
-  feature("internal-backend-ir-missing", "frontend", "Internal backend IR missing", "unsupported", false, false, "Compiler invariant failed: backend bridge metadata was not attached to the compiled kernel."),
   feature("internal-lowering-invariant", "frontend", "Internal lowering invariant failed", "unsupported", false, false, "Compiler invariant failed after semantic analysis; this indicates a compiler bug, not an unsupported CUDA feature."),
   feature("duplicate-symbol", "frontend", "Duplicate CUDA-lite symbol", "unsupported", false, false, "Symbol table construction requires unique names in the active scope."),
   feature("reserved-symbol", "frontend", "Reserved CUDA-lite symbol", "unsupported", false, false, "User declarations may not shadow compiler-reserved binding names."),

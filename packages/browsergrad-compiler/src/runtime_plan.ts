@@ -101,6 +101,7 @@ const REFERENCE_RUNTIME_OPERATIONS: ReadonlySet<CudaRuntimeOperationKind> = new 
 export function createCudaGridSyncPhasePlan(compiled: CompiledCudaLiteKernel): CudaGridSyncPhasePlan {
   const ir = lowerAnalyzedCudaLiteToKernelIr(compiled.analysis, {
     workgroupSize: compiled.kernelIr.workgroupSize,
+    ...(compiled.dynamicSharedMemory === undefined ? {} : { dynamicSharedMemory: compiled.dynamicSharedMemory }),
   });
   const operations = collectRuntimeOperations(ir.body);
   const runtimePlan: CudaRuntimePlan = {

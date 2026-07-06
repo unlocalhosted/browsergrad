@@ -6,7 +6,6 @@ import {
   type WgslPreparedKernelSequenceRunOptions,
 } from "@unlocalhosted/browsergrad-kernels";
 import { analyzeCudaLite, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
-import { attachInternalBackendIr } from "./backend_ir.js";
 import { createCudaLoweringPlan } from "./compatibility.js";
 import { createCudaLiteCompileCacheKey } from "./cache-key.js";
 import { validateCudaKernelLaunch } from "./launch.js";
@@ -91,7 +90,7 @@ export function compileCudaLiteKernel(
     },
   );
   const loweringPlan = createCudaLoweringPlan(analysis.diagnostics);
-  return attachInternalBackendIr({
+  return {
     ast,
     semantic,
     kernelIr,
@@ -101,10 +100,11 @@ export function compileCudaLiteKernel(
     diagnostics: analysis.diagnostics,
     loweringPlan,
     ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
+    ...(options.dynamicSharedMemory === undefined ? {} : { dynamicSharedMemory: options.dynamicSharedMemory }),
     ...(options.textureDescriptors === undefined ? {} : { textureDescriptors: options.textureDescriptors }),
     ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),
     ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
-  }, backendIr);
+  };
 }
 
 function validateTextureDescriptorOptions(options: CompileCudaLiteOptions): void {

@@ -465,6 +465,7 @@ export interface KernelIrModule {
 
 export interface CompileCudaLiteOptions extends CudaLiteAnalyzeOptions {
   readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
+  readonly dynamicSharedMemory?: Readonly<Record<string, number>>;
   readonly textureDescriptors?: Readonly<Record<string, CudaLiteTextureDescriptor>>;
 }
 
@@ -478,6 +479,7 @@ export interface CompiledCudaLiteKernel {
   readonly diagnostics: readonly CudaLiteDiagnostic[];
   readonly loweringPlan: CudaLoweringPlan;
   readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
+  readonly dynamicSharedMemory?: Readonly<Record<string, number>>;
   readonly textureDescriptors?: Readonly<Record<string, CudaLiteTextureDescriptor>>;
   readonly f16Mode?: "native" | "f32";
   readonly subgroupMode?: "native" | "scalar";

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createWgslFloat16Array } from "@unlocalhosted/browsergrad-kernels";
 import {
+  type CompiledCudaLiteKernel,
   CudaLiteCompilerError,
   analyzeCudaLite,
   compileCudaLiteOptionsFromKernelFeatures,
@@ -32,7 +33,7 @@ import {
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
 } from "../src/index";
-import { internalBackendIrFor as backendIr } from "../src/backend_ir";
+import { lowerAnalyzedCudaLiteToKernelIr } from "../src/analyzer";
 import {
   constantBufferInputs,
   cudaWebGpuDefaultReadbackNames,
@@ -42,6 +43,13 @@ import { deviceLaunchTreeIsExternallySilent } from "../src/runtime_elision";
 import { packCudaWebGpuUniformParams } from "../src/webgpu_orchestration";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+function backendIr(compiled: CompiledCudaLiteKernel) {
+  return lowerAnalyzedCudaLiteToKernelIr(compiled.analysis, {
+    workgroupSize: compiled.kernelIr.workgroupSize,
+    ...(compiled.dynamicSharedMemory === undefined ? {} : { dynamicSharedMemory: compiled.dynamicSharedMemory }),
+  });
+}
 
 const gammaCoefficients = [
   0.9999999999998099,
@@ -4214,11 +4222,15 @@ __global__ void selected(float *out, uint n) {
       },
     };
 
-    expect(() => backendIr(detached)).toThrow(CudaLiteCompilerError);
+    expect(backendIr(detached).params.map((param) => param.name)).toEqual(["out", "n"]);
     expect(Object.keys(constantBufferInputs(detached, input))).toEqual(["coeffs"]);
     expect(Object.keys(deviceGlobalBufferInputs(detached, input))).toEqual(["global_state"]);
     expect(cudaWebGpuDefaultReadbackNames(detached)).toEqual(["out", "global_state"]);
     expect(packCudaWebGpuUniformParams(detached, input).byteLength).toBeGreaterThanOrEqual(16);
+    expect([...runCompiledKernelReference(detached, input, {
+      gridDim: [1, 1, 1],
+      blockDim: [2, 1, 1],
+    }).buffers.out as Float32Array]).toEqual([3, 4]);
   });
 
   it("builds explicit WebGPU execution plans for native dispatch and host lifts", () => {
