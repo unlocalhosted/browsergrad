@@ -4502,6 +4502,8 @@ function expressionContainsSideEffectingCall(expression: CudaLiteExpression, con
         CUDA_CACHE_HINT_STORES.has(name) ||
         name === "cudaMemcpy" ||
         name === "cudaMemcpyAsync" ||
+        name === "cudaMemcpy2D" ||
+        name === "cudaMemcpy2DAsync" ||
         name === "cudaMemcpyPeer" ||
         name === "cudaMemcpyPeerAsync" ||
         name === "cudaMemset" ||
@@ -6315,6 +6317,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return "0";
     case "cudaMemcpyAsync":
       return "0";
+    case "cudaMemcpy2D":
+      return "0";
+    case "cudaMemcpy2DAsync":
+      return "0";
     case "cudaMemcpyPeer":
       return "0";
     case "cudaMemcpyPeerAsync":
@@ -7790,6 +7796,10 @@ function noopCallComment(expression: CudaLiteExpression): string | undefined {
       return "cudaMemcpy omitted: WebGPU copy orchestration is host-managed";
     case "cudaMemcpyAsync":
       return "cudaMemcpyAsync omitted: WebGPU copy orchestration is host-managed";
+    case "cudaMemcpy2D":
+      return "cudaMemcpy2D omitted: WebGPU copy orchestration is host-managed";
+    case "cudaMemcpy2DAsync":
+      return "cudaMemcpy2DAsync omitted: WebGPU copy orchestration is host-managed";
     case "cudaMemcpyPeer":
       return "cudaMemcpyPeer omitted: WebGPU copy orchestration is host-managed";
     case "cudaMemcpyPeerAsync":
@@ -7864,7 +7874,9 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaEventQuery" ||
     name === "cudaEventRecord" ||
     name === "cudaEventRecordWithFlags" ||
-    name === "cudaEventSynchronize";
+    name === "cudaEventSynchronize" ||
+    name === "cudaMemcpy2D" ||
+    name === "cudaMemcpy2DAsync";
 }
 
 function isEmittedPointerVar(statement: CudaLiteVarDecl, context: EmitContext): boolean {

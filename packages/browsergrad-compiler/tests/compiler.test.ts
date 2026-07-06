@@ -3656,6 +3656,46 @@ __global__ void runtimeFill(unsigned int *bits) {
     }
   });
 
+  it("host-lifts cudaMemcpy2D and cudaMemcpy2DAsync row copies", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void runtimeCopy2D(float *dst, const float *src) {
+  cudaStream_t stream;
+  if (threadIdx.x == 0) {
+    cudaMemcpy2D(dst, sizeof(float) * 3, src, sizeof(float) * 3, sizeof(float) * 2, 2, cudaMemcpyHostToDevice);
+    cudaMemcpy2DAsync(dst + 1, sizeof(float) * 3, src + 3, sizeof(float) * 3, sizeof(float), 2, cudaMemcpyDeviceToHost, stream);
+  }
+}`, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        dst: new Float32Array(6),
+        src: new Float32Array([1, 2, 99, 3, 4, 99, 5, 6, 99]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const plan = createCudaRuntimeCopyPlan(compiled, input, launch);
+    const webGpuPlan = createCudaWebGpuExecutionPlan(compiled, input, launch);
+
+    expect([...result.buffers.dst as Float32Array]).toEqual([1, 3, 0, 3, 5, 0]);
+    expect(plan.supported).toBe(true);
+    expect(plan.copies.map((copy) => copy.kind === "copy"
+      ? { dstOffset: copy.dstOffset, srcOffset: copy.srcOffset, elementCount: copy.elementCount }
+      : { dstOffset: copy.dstOffset, srcOffset: undefined, elementCount: copy.elementCount })).toEqual([
+      { dstOffset: 0, srcOffset: 0, elementCount: 2 },
+      { dstOffset: 3, srcOffset: 3, elementCount: 2 },
+      { dstOffset: 1, srcOffset: 3, elementCount: 1 },
+      { dstOffset: 4, srcOffset: 6, elementCount: 1 },
+    ]);
+    expect(webGpuPlan.supported).toBe(true);
+    if (webGpuPlan.supported) {
+      expect(webGpuPlan.kind).toBe("host-copy");
+      expect(webGpuPlan.steps).toHaveLength(5);
+    }
+  });
+
   it("explains why unsafe peer-copy lifts stay reference-only", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void peerCopyBad(float *dst, const float *src) {

@@ -232,6 +232,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaEventSynchronize", [1, 1]],
   ["cudaMemcpy", [4, 4]],
   ["cudaMemcpyAsync", [5, 5]],
+  ["cudaMemcpy2D", [7, 7]],
+  ["cudaMemcpy2DAsync", [8, 8]],
   ["cudaMemcpyPeer", [5, 5]],
   ["cudaMemcpyPeerAsync", [6, 6]],
   ["cudaGraphSetConditional", [2, 2]],
@@ -2498,18 +2500,24 @@ function validateRuntimeCopyCall(
       severity: referenceRuntime ? "warning" : "error",
     });
   }
-  const dst = expression.args[0];
+  const copy2d = callName === "cudaMemcpy2D" || callName === "cudaMemcpy2DAsync";
   const peerCopy = callName === "cudaMemcpyPeer" || callName === "cudaMemcpyPeerAsync";
-  const src = expression.args[peerCopy ? 2 : 1];
-  const byteCount = expression.args[peerCopy ? 4 : 2];
+  const dst = expression.args[0];
+  const src = expression.args[copy2d ? 2 : peerCopy ? 2 : 1];
   if (dst) walkExpression(dst, scope);
   if (src) walkExpression(src, scope);
-  if (byteCount) validateScalarOperand(walkExpression(byteCount, scope), byteCount.span, diagnostics);
-  if (compatibilityDiagnosticsReachable && (callName === "cudaMemcpy" || callName === "cudaMemcpyAsync") && !supportedCudaMemcpyKind(expression.args[3])) {
+  const scalarArgs = copy2d
+    ? [expression.args[1], expression.args[3], expression.args[4], expression.args[5]]
+    : [expression.args[peerCopy ? 4 : 2]];
+  for (const arg of scalarArgs) {
+    if (arg) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+  }
+  const kindArg = expression.args[copy2d ? 6 : 3];
+  if (compatibilityDiagnosticsReachable && (callName === "cudaMemcpy" || callName === "cudaMemcpyAsync" || copy2d) && !supportedCudaMemcpyKind(kindArg)) {
     diagnostics.push(error(
       "unsupported-cuda-runtime-copy-kind",
       `${callName} supports modeled cudaMemcpyHostToHost/HostToDevice/DeviceToHost/DeviceToDevice/Default copies only`,
-      expression.args[3]?.span ?? expression.span,
+      kindArg?.span ?? expression.span,
     ));
   }
 }
@@ -2517,6 +2525,8 @@ function validateRuntimeCopyCall(
 function isCudaRuntimeCopyCall(callName: string): boolean {
   return callName === "cudaMemcpy" ||
     callName === "cudaMemcpyAsync" ||
+    callName === "cudaMemcpy2D" ||
+    callName === "cudaMemcpy2DAsync" ||
     callName === "cudaMemcpyPeer" ||
     callName === "cudaMemcpyPeerAsync" ||
     callName === "cudaMemset" ||

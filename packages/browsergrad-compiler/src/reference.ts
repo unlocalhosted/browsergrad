@@ -1426,6 +1426,10 @@ function execCudaRuntimeCopy(
   if (!shape) throw compilerFailure("unsupported CUDA runtime copy call");
   const dst = expression.args[0];
   const src = expression.args[shape.srcIndex];
+  if (shape.kind === "copy2d") {
+    execCudaRuntimeCopy2D(expression, context, shape);
+    return;
+  }
   const count = expression.args[shape.countIndex];
   if (!dst || !src || !count) throw compilerFailure("CUDA runtime copy expects dst, src, and byte count");
   const dstView = pointerBytesForCopy(dst, context);
@@ -1439,6 +1443,40 @@ function execCudaRuntimeCopy(
   dstView.bytes.set(copied, dstView.byteOffset);
   context.trace.reads.push({ name: srcView.name, index: srcView.byteOffset, value: writable, ok: writable === byteCount });
   context.trace.writes.push({ name: dstView.name, index: dstView.byteOffset, value: writable, ok: writable === byteCount });
+}
+
+function execCudaRuntimeCopy2D(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: ThreadContext,
+  shape: Extract<CudaRuntimeCopyShape, { readonly kind: "copy2d" }>,
+): void {
+  const dst = expression.args[0];
+  const dstPitch = expression.args[1];
+  const src = expression.args[shape.srcIndex];
+  const srcPitch = expression.args[3];
+  const width = expression.args[4];
+  const height = expression.args[5];
+  if (!dst || !dstPitch || !src || !srcPitch || !width || !height) {
+    throw compilerFailure("CUDA 2D runtime copy expects dst, pitch, src, pitch, width, and height");
+  }
+  const dstView = pointerBytesForCopy(dst, context);
+  const srcView = pointerBytesForCopy(src, context);
+  const dstPitchBytes = Math.trunc(evalNumber(dstPitch, context));
+  const srcPitchBytes = Math.trunc(evalNumber(srcPitch, context));
+  const rowBytes = Math.max(0, Math.trunc(evalNumber(width, context)));
+  const rows = Math.max(0, Math.trunc(evalNumber(height, context)));
+  if (srcView.byteOffset < 0 || dstView.byteOffset < 0 || dstPitchBytes < 0 || srcPitchBytes < 0) return;
+  for (let row = 0; row < rows; row++) {
+    const srcOffset = srcView.byteOffset + row * srcPitchBytes;
+    const dstOffset = dstView.byteOffset + row * dstPitchBytes;
+    const readable = Math.max(0, Math.min(rowBytes, srcView.bytes.byteLength - srcOffset));
+    const writable = Math.max(0, Math.min(readable, dstView.bytes.byteLength - dstOffset));
+    if (writable <= 0) continue;
+    const copied = srcView.bytes.slice(srcOffset, srcOffset + writable);
+    dstView.bytes.set(copied, dstOffset);
+    context.trace.reads.push({ name: srcView.name, index: srcOffset, value: writable, ok: writable === rowBytes });
+    context.trace.writes.push({ name: dstView.name, index: dstOffset, value: writable, ok: writable === rowBytes });
+  }
 }
 
 function execCudaRuntimeMemset(
@@ -1459,12 +1497,17 @@ function execCudaRuntimeMemset(
   context.trace.writes.push({ name: dstView.name, index: dstView.byteOffset, value: writable, ok: writable === byteCount });
 }
 
+type CudaRuntimeCopyShape =
+  | { readonly kind: "copy1d"; readonly srcIndex: number; readonly countIndex: number }
+  | { readonly kind: "copy2d"; readonly srcIndex: number };
+
 function cudaRuntimeCopyShape(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
-): { readonly srcIndex: number; readonly countIndex: number } | undefined {
+): CudaRuntimeCopyShape | undefined {
   const name = expression.callee.kind === "identifier" ? expression.callee.name : undefined;
-  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync") return { srcIndex: 1, countIndex: 2 };
-  if (name === "cudaMemcpyPeer" || name === "cudaMemcpyPeerAsync") return { srcIndex: 2, countIndex: 4 };
+  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync") return { kind: "copy1d", srcIndex: 1, countIndex: 2 };
+  if (name === "cudaMemcpy2D" || name === "cudaMemcpy2DAsync") return { kind: "copy2d", srcIndex: 2 };
+  if (name === "cudaMemcpyPeer" || name === "cudaMemcpyPeerAsync") return { kind: "copy1d", srcIndex: 2, countIndex: 4 };
   return undefined;
 }
 
@@ -2562,7 +2605,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     return 0;
   }
   if (name !== undefined && isHostManagedRuntimeNoopCall(name)) return 0;
-  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync" || name === "cudaMemcpyPeer" || name === "cudaMemcpyPeerAsync" || isCudaRuntimeMemsetCall(name)) {
+  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync" || name === "cudaMemcpy2D" || name === "cudaMemcpy2DAsync" || name === "cudaMemcpyPeer" || name === "cudaMemcpyPeerAsync" || isCudaRuntimeMemsetCall(name)) {
     execCudaRuntimeCopy(expression, context);
     return 0;
   }

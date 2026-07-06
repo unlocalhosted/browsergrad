@@ -176,12 +176,12 @@ function collectHostPeerCopies(
           markUnsafe("unsafe-parent-side-effects", "parent side effects after peer copy cannot be replayed in host-lifted sequence");
         }
         else {
-          const operation = createPeerCopyOperation(item.expression, current, input);
-          if (!operation) {
+          const operations = createPeerCopyOperations(item.expression, current, input);
+          if (!operations) {
             markUnsafe("arguments-not-host-evaluable", "peer-copy arguments must resolve to typed buffer aliases, non-negative offsets, and element-aligned byte count");
           }
           else {
-            out.push(operation);
+            out.push(...operations);
             containsPeerCopy = true;
           }
         }
@@ -194,14 +194,18 @@ function collectHostPeerCopies(
   return unsafeBlocker ? { copies: [], reason: unsafeBlocker.message, blocker: unsafeBlocker } : { copies: out };
 }
 
-function createPeerCopyOperation(
+function createPeerCopyOperations(
   expression: CudaLiteCallExpression,
   env: ReadonlyMap<string, HostEvalValue>,
   input: CompiledKernelInput,
-): CudaPeerCopyOperation | undefined {
-  if (isRuntimeMemsetCall(expression)) return createPeerFillOperation(expression, env, input);
+): readonly CudaPeerCopyOperation[] | undefined {
+  if (isRuntimeMemsetCall(expression)) {
+    const fill = createPeerFillOperation(expression, env, input);
+    return fill ? [fill] : undefined;
+  }
   const copyShape = cudaRuntimeCopyShape(expression);
   if (!copyShape) return undefined;
+  if (copyShape.kind === "copy2d") return createPeerCopy2DOperations(expression, env, input, copyShape);
   const dst = expression.args[0] ? evaluatePointerArgument(expression.args[0], env, input) : undefined;
   const srcArg = expression.args[copyShape.srcIndex];
   const countArg = expression.args[copyShape.countIndex];
@@ -216,7 +220,7 @@ function createPeerCopyOperation(
   if (Math.trunc(byteCount) % elementSize !== 0) return undefined;
   const elementCount = Math.trunc(byteCount) / elementSize;
   if (dst.offset + elementCount > dstBuffer.elementLength || src.offset + elementCount > srcBuffer.elementLength) return undefined;
-  return {
+  return [{
     kind: "copy",
     expression,
     dstRoot: dst.root,
@@ -225,7 +229,63 @@ function createPeerCopyOperation(
     srcOffset: src.offset,
     elementCount,
     valueType: dstBuffer.valueType,
-  };
+  }];
+}
+
+function createPeerCopy2DOperations(
+  expression: CudaLiteCallExpression,
+  env: ReadonlyMap<string, HostEvalValue>,
+  input: CompiledKernelInput,
+  copyShape: Extract<CudaRuntimeCopyShape, { readonly kind: "copy2d" }>,
+): readonly CudaPeerCopyOperation[] | undefined {
+  const dst = expression.args[0] ? evaluatePointerArgument(expression.args[0], env, input) : undefined;
+  const dstPitchBytes = expression.args[1] ? evaluateHostNumber(expression.args[1], env, input) : undefined;
+  const src = expression.args[copyShape.srcIndex] ? evaluatePointerArgument(expression.args[copyShape.srcIndex]!, env, input) : undefined;
+  const srcPitchBytes = expression.args[3] ? evaluateHostNumber(expression.args[3], env, input) : undefined;
+  const rowBytes = expression.args[4] ? evaluateHostNumber(expression.args[4], env, input) : undefined;
+  const rows = expression.args[5] ? evaluateHostNumber(expression.args[5], env, input) : undefined;
+  if (!dst || !src || dstPitchBytes === undefined || srcPitchBytes === undefined || rowBytes === undefined || rows === undefined) return undefined;
+  if (dst.offset < 0 || src.offset < 0 || dstPitchBytes < 0 || srcPitchBytes < 0 || rowBytes < 0 || rows < 0) return undefined;
+  const dstBuffer = copyBufferViewFor(input, dst.root);
+  const srcBuffer = copyBufferViewFor(input, src.root);
+  if (!dstBuffer || !srcBuffer || dstBuffer.valueType !== srcBuffer.valueType) return undefined;
+  const elementSize = dstBuffer.elementSize;
+  const byteValues = [dstPitchBytes, srcPitchBytes, rowBytes];
+  if (byteValues.some((value) => !Number.isInteger(value) || Math.trunc(value) % elementSize !== 0)) return undefined;
+  if (!Number.isInteger(rows)) return undefined;
+  const dstPitch = Math.trunc(dstPitchBytes) / elementSize;
+  const srcPitch = Math.trunc(srcPitchBytes) / elementSize;
+  const elementCount = Math.trunc(rowBytes) / elementSize;
+  const rowCount = Math.trunc(rows);
+  const out: CudaPeerCopyOperation[] = [];
+  if (rowCount === 0) {
+    return [{
+      kind: "copy",
+      expression,
+      dstRoot: dst.root,
+      srcRoot: src.root,
+      dstOffset: dst.offset,
+      srcOffset: src.offset,
+      elementCount: 0,
+      valueType: dstBuffer.valueType,
+    }];
+  }
+  for (let row = 0; row < rowCount; row++) {
+    const dstOffset = dst.offset + row * dstPitch;
+    const srcOffset = src.offset + row * srcPitch;
+    if (dstOffset + elementCount > dstBuffer.elementLength || srcOffset + elementCount > srcBuffer.elementLength) return undefined;
+    out.push({
+      kind: "copy",
+      expression,
+      dstRoot: dst.root,
+      srcRoot: src.root,
+      dstOffset,
+      srcOffset,
+      elementCount,
+      valueType: dstBuffer.valueType,
+    });
+  }
+  return out;
 }
 
 function createPeerFillOperation(
@@ -438,11 +498,16 @@ function isRuntimeQueryWriteCall(name: string): boolean {
     name === "cudaEventElapsedTime";
 }
 
+type CudaRuntimeCopyShape =
+  | { readonly kind: "copy1d"; readonly srcIndex: number; readonly countIndex: number }
+  | { readonly kind: "copy2d"; readonly srcIndex: number };
+
 function cudaRuntimeCopyShape(
   expression: CudaLiteCallExpression,
-): { readonly srcIndex: number; readonly countIndex: number } | undefined {
+): CudaRuntimeCopyShape | undefined {
   const name = expressionName(expression.callee);
-  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync") return { srcIndex: 1, countIndex: 2 };
-  if (name === "cudaMemcpyPeer" || name === "cudaMemcpyPeerAsync") return { srcIndex: 2, countIndex: 4 };
+  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync") return { kind: "copy1d", srcIndex: 1, countIndex: 2 };
+  if (name === "cudaMemcpy2D" || name === "cudaMemcpy2DAsync") return { kind: "copy2d", srcIndex: 2 };
+  if (name === "cudaMemcpyPeer" || name === "cudaMemcpyPeerAsync") return { kind: "copy1d", srcIndex: 2, countIndex: 4 };
   return undefined;
 }
