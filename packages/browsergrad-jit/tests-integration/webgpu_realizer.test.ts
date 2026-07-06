@@ -689,6 +689,15 @@ class MockBridge:
                 values[value_id] = grad_w.astype(np.dtype(step["dtype"]), copy=False)
             elif op == "CONV3D_BACKWARD_BIAS":
                 values[value_id] = values[input_ids[0]].sum(axis=(0, 2, 3, 4)).astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "SGD_UPDATE":
+                arg = step["arg"]
+                param = values[input_ids[0]]
+                grad = values[input_ids[1]]
+                lr = float(arg["lr"])
+                weight_decay = float(arg.get("weight_decay", 0.0))
+                values[value_id] = (
+                    param - lr * (grad + weight_decay * param)
+                ).astype(np.dtype(step["dtype"]), copy=False)
             else:
                 raise ValueError(f"mock tensor plan: unsupported op {op}")
         root_id = plan.get("root_id", plan.get("rootId"))
@@ -892,6 +901,42 @@ plan = bg.gpu_plan_summary(reduced)
     expect(result.ops).toContain("RESHAPE");
     expect(result.ops).toContain("PERMUTE");
     expect(result.ops).toContain("REDUCE");
+  });
+
+  it("realize_tensor_plan_webgpu runs functional SGD_UPDATE through generic plan path", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      max_diff: number;
+      tensor_plan: number;
+      ops: string[];
+      upload: number;
+      materialize: number;
+    }>(`
+import browsergrad_jit as bg
+import numpy as np
+
+rng = np.random.RandomState(17)
+p_np = rng.uniform(-1, 1, size=(2, 3)).astype(np.float32)
+g_np = rng.uniform(-1, 1, size=(2, 3)).astype(np.float32)
+p = bg.from_numpy(p_np.copy())
+g = bg.from_numpy(g_np.copy())
+updated = bg.optim.sgd_update(p, g, lr=0.125, weight_decay=0.01)
+gpu = bg.realize_tensor_plan_webgpu(updated)
+ref = updated.numpy()
+plan = bg.gpu_plan_summary(updated)
+{
+    "max_diff": float(np.max(np.abs(gpu - ref))),
+    "tensor_plan": _mock.tensor_plan_count,
+    "ops": plan["ops"],
+    "upload": _mock.upload_count,
+    "materialize": _mock.materialize_count,
+}
+`);
+    expect(result.max_diff).toBeLessThan(1e-6);
+    expect(result.tensor_plan).toBe(1);
+    expect(result.ops).toContain("SGD_UPDATE");
+    expect(result.upload).toBe(0);
+    expect(result.materialize).toBe(0);
   });
 
   it("realize_tensor_plan_webgpu runs Conv1d/Conv2d through generic plan path", async () => {

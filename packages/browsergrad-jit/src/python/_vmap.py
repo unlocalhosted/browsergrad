@@ -59,7 +59,7 @@ from ._ir import (
     OP_CONV3D, OP_CONV3D_BACKWARD_INPUT,
     OP_CONV3D_BACKWARD_WEIGHT, OP_CONV3D_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
-    OP_WHERE, OP_BROADCAST_TO, OP_ISNAN,
+    OP_WHERE, OP_BROADCAST_TO, OP_ISNAN, OP_SGD_UPDATE,
     OP_PAD, OP_SLICE, OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_INDEX, OP_MASK, OP_RANDOM, OP_CUSTOM,
     OP_STORE,
@@ -517,6 +517,12 @@ _VMAP_RULES[OP_STORE] = _refuse(
     "STORE mutates a BUFFER; that's an autograd-time concern, not a "
     "vmap-time one. If you're seeing this, you constructed a graph "
     "with explicit STORE — restructure to use functional ops",
+)
+
+_VMAP_RULES[OP_SGD_UPDATE] = _refuse(
+    "OP_SGD_UPDATE",
+    "optimizer update batching needs explicit state semantics; vmap the "
+    "loss/grad function, then apply optimizer updates outside vmap",
 )
 
 

@@ -67,6 +67,10 @@ symbolic VJPs. Conv1d/Conv2d/Conv3d forward/backward lower through generic
 tensor-plan WebGPU via `realize_tensor_plan_webgpu(...)`. Default `.backward()` still
 writes CPU grads. `BatchNorm1d` and `ConvTranspose2d` remain `CUSTOM`
 realization paths with explicit NumPy VJPs.
+`bg.optim.sgd_update(param, grad, lr=..., weight_decay=...)` is the first
+functional optimizer/update IR node and lowers through the same tensor-plan
+WebGPU path. It returns the updated tensor; mutating `Optimizer.step()` remains
+CPU for now.
 
 `bg.gpu_plan_summary(tensor)` and `bg.jit.gpu_plan.*` expose the first
 compiler-facing tensor-IR execution plan: scheduled primitive UOps, buffer
@@ -78,8 +82,8 @@ lowering.
 generic WebGPU bridge call (`run_tensor_plan`) instead of walking legacy per-op
 bridge methods. Current runtime coverage is f32 BUFFER/LOAD/2-D MATMUL and
 elementwise chains, RESHAPE, PERMUTE, BROADCAST_TO, and REDUCE(sum/mean) rank
-<= 4, plus Conv1d/Conv2d/Conv3d forward/backward; norm and optimizer tensor-plan
-codegen remain future work.
+<= 4, plus Conv1d/Conv2d/Conv3d forward/backward and functional SGD_UPDATE;
+norm and mutating optimizer-step tensor-plan codegen remain future work.
 
 ### Gradient control
 ```python
@@ -227,8 +231,9 @@ Anything in the **Internal** row will break across minor releases. File an issue
 
 - Full PyTorch API parity.
 - CUDA device emulation.
-- GPU-resident `.backward()` / optimizer steps. WebGPU realization can run
-  selected backward IR roots, but autograd mutation and optimizers remain CPU.
+- GPU-resident `.backward()` / mutating optimizer steps. WebGPU realization can
+  run selected backward IR roots and functional SGD_UPDATE, but autograd
+  mutation and `Optimizer.step()` remain CPU.
 - Tensor layout/stride compatibility for contiguity teaching.
 - PyTorch-native checkpoint file compatibility.
 

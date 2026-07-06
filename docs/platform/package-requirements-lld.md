@@ -269,9 +269,9 @@ Requirements:
 | JIT-006 | WebGPU realizer bridge supports forward opcodes and materializes at boundaries. | In | bridge/mock + real WebGPU tests through kernels |
 | JIT-007 | Custom WGSL kernels are cache-keyed, forward-only, and explicit. | In | custom kernel tests |
 | JIT-008 | ONNX export emits a supported subset and refuses unmappable ops. | In | ONNX tests |
-| JIT-009 | GPU-resident backward/optimizer steps. | Deferred | device residency, backward kernels, optimizer kernels, memory planner |
+| JIT-009 | GPU-resident backward/optimizer steps. | Partial | backward roots and functional `SGD_UPDATE` can lower through tensor-plan WebGPU; default `.backward()` mutation, mutating `Optimizer.step()`, resident optimizer state, and memory planner remain |
 | JIT-010 | Heavy CNN family parity with grad. | Partial | Conv1d/Conv2d/Conv3d forward/backward are primitive IR with CPU handlers and symbolic VJPs; Conv1d/Conv2d/Conv3d forward/backward lower through generic f32 tensor-plan WebGPU; ConvTranspose2d CUSTOM NumPy realizer + VJP remains; default GPU `.backward()` mutation and optimizer residency remain |
-| JIT-011 | Canonical tensor IR for core framework ops instead of `CUSTOM` GPU escape hatches. | In progress | Primitive IR ops for conv/norm/attention/optimizer updates, CPU handlers, VJPs, GPU tensor-plan lowering, WebGPU lowering, refusal tests |
+| JIT-011 | Canonical tensor IR for core framework ops instead of `CUSTOM` GPU escape hatches. | In progress | Primitive IR ops for conv/norm/attention/optimizer updates, CPU handlers/refusals, VJPs where differentiable, GPU tensor-plan lowering, WebGPU lowering, refusal tests |
 | JIT-012 | `.numpy()`/`.item()` are the primary materialization boundaries for GPU paths. | Target | Residency tests proving params/activations/grads/intermediates stay in GPUBuffer until explicit readback |
 
 LLD:
@@ -297,6 +297,10 @@ LLD:
   plan ops. ConvTranspose2d still lowers through `CUSTOM` UOps with explicit
   NumPy VJPs. Default `.backward()` mutation, optimizer residency, and
   ConvTranspose2d WebGPU paths remain pending.
+- `bg.optim.sgd_update(param, grad, lr=..., weight_decay=...)` emits primitive
+  `SGD_UPDATE` IR with a NumPy handler, vmap/ONNX refusals, tensor-plan
+  lowering, and a real WebGPU kernel. This is functional update IR, not yet
+  mutating `Optimizer.step()` or resident optimizer state.
 - Future GPU-native work should promote core ops out of `CUSTOM` into primitive
   tensor IR. `CUSTOM` should remain for user-authored WGSL/lab kernels and
   temporary migration scaffolding, not the final path for framework ops.
@@ -339,8 +343,8 @@ LLD:
   scheduled primitive plan steps, including the snake_case payload emitted by
   `browsergrad-jit`'s `gpu_plan_summary`, keeps intermediates in `GPUBuffer`,
   supports f32 BUFFER/LOAD/MATMUL, elementwise chains, RESHAPE, PERMUTE,
-  BROADCAST_TO, REDUCE(sum/mean) for rank <= 4, and Conv1d/Conv2d/Conv3d
-  forward/backward, and materializes only the root.
+  BROADCAST_TO, REDUCE(sum/mean) for rank <= 4, Conv1d/Conv2d/Conv3d
+  forward/backward, and functional SGD_UPDATE, and materializes only the root.
 - `createWebGpuRealizerBridge(...).run_tensor_plan(plan, inputs, dtype)` exposes
   that executor through the Pyodide bridge as one graph-level call. This is the
   preferred framework GPU direction; new core ops should lower into tensor
@@ -514,7 +518,8 @@ explicit and teachable.
 Current limit: `browsergrad-jit` has primitive Conv1d/Conv2d/Conv3d
 forward/backward IR with CPU reference handlers. Conv1d/Conv2d/Conv3d
 forward/backward lower through generic tensor-plan WebGPU. Default `.backward()`
-still mutates CPU `.grad` buffers, and optimizer steps are still CPU.
+still mutates CPU `.grad` buffers, functional SGD_UPDATE can run as tensor-plan
+WebGPU, and mutating optimizer steps are still CPU.
 ConvTranspose2d still has CPU-backed `CUSTOM` coverage, including groups, tuple
 shapes, dilation, output padding, and backward.
 

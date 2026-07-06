@@ -44,7 +44,7 @@ from ._ir import (
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_BROADCAST_TO,
-    OP_ISNAN,
+    OP_ISNAN, OP_SGD_UPDATE,
 )
 from ._buffer_table import BufferTable
 from ._errors import RealizationError
@@ -875,6 +875,15 @@ def _h_store(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     return new_value
 
 
+def _h_sgd_update(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    param = vt[id(node.inputs[0])]
+    grad = vt[id(node.inputs[1])]
+    lr = float(node.arg.get("lr", 0.0))
+    weight_decay = float(node.arg.get("weight_decay", 0.0))
+    update = grad + weight_decay * param if weight_decay != 0.0 else grad
+    return (param - lr * update).astype(np.dtype(node.dtype), copy=False)
+
+
 # Dispatch table. Adding a new opcode here is also an update to ALL_OPS in
 # _ir.py — the sanity check at module-import time below would fire if we
 # forget.
@@ -922,6 +931,8 @@ _DISPATCH: dict[str, Handler] = {
     OP_BROADCAST_TO:      _h_broadcast_to,
     # Mixed precision (PRD-010)
     OP_ISNAN:             _h_isnan,
+    # Optimizer/update IR
+    OP_SGD_UPDATE:        _h_sgd_update,
 }
 
 

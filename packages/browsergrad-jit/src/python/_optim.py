@@ -19,8 +19,9 @@ from typing import Iterable, List, Optional
 
 import numpy as np
 
+from ._ir import UOp, OP_SGD_UPDATE
 from ._tensor_proxy import TensorProxy
-from ._errors import RealizationError
+from ._errors import RealizationError, ShapeError
 
 
 def _param_buffer_id(p: TensorProxy) -> str:
@@ -33,6 +34,39 @@ def _param_buffer_id(p: TensorProxy) -> str:
         f"optimizer: parameter is not a LOAD-of-BUFFER (op={uop.op}); "
         f"optimizers operate only on leaf parameters."
     )
+
+
+def sgd_update(
+    param: TensorProxy,
+    grad: TensorProxy,
+    *,
+    lr: float,
+    weight_decay: float = 0.0,
+) -> TensorProxy:
+    """Functional SGD update node: `param - lr * (grad + wd * param)`.
+
+    This is the optimizer/update IR primitive for GPU tensor plans. It does
+    not mutate `param`; optimizers can later pair it with STORE/resident
+    buffer state when the runtime owns in-place updates end-to-end.
+    """
+    if param.shape != grad.shape:
+        raise ShapeError(
+            f"sgd_update: param shape {param.shape} must match grad shape {grad.shape}"
+        )
+    if param.dtype != grad.dtype:
+        raise ShapeError(
+            f"sgd_update: param dtype {param.dtype} must match grad dtype {grad.dtype}"
+        )
+    if lr < 0:
+        raise ValueError(f"sgd_update: lr must be >= 0, got {lr}")
+    uop = UOp(
+        op=OP_SGD_UPDATE,
+        inputs=(param._uop, grad._uop),
+        shape=param.shape,
+        dtype=param.dtype,
+        arg={"lr": float(lr), "weight_decay": float(weight_decay)},
+    )
+    return TensorProxy(uop, session=param._get_session(), requires_grad=False)
 
 
 class Optimizer:
@@ -174,4 +208,4 @@ class AdamW(Adam):
             sess.buffer_table.update(bid, new_value.astype(current.dtype, copy=False))
 
 
-__all__ = ["Optimizer", "SGD", "Adam", "AdamW"]
+__all__ = ["Optimizer", "SGD", "Adam", "AdamW", "sgd_update"]

@@ -325,6 +325,49 @@ describe("real WebGPU — matmul + tiled GEMM + fused elementwise + FA-v2", () =
     expect([...broadcasted.data]).toEqual([1, 1, 1, 2, 2, 2]);
   });
 
+  it("generic tensor GPU plan runs SGD_UPDATE", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const param = new Float32Array([1, -2, 3, -4]);
+    const grad = new Float32Array([0.5, -0.25, 0.75, -1]);
+    const plan = {
+      steps: [
+        { step: 0, value_id: 0, op: "BUFFER", input_ids: [], shape: [4], dtype: "float32" },
+        { step: 1, value_id: 1, op: "BUFFER", input_ids: [], shape: [4], dtype: "float32" },
+        { step: 2, value_id: 2, op: "LOAD", input_ids: [0], shape: [4], dtype: "float32" },
+        { step: 3, value_id: 3, op: "LOAD", input_ids: [1], shape: [4], dtype: "float32" },
+        {
+          step: 4,
+          value_id: 4,
+          op: "SGD_UPDATE",
+          input_ids: [2, 3],
+          shape: [4],
+          dtype: "float32",
+          arg: { lr: 0.1, weight_decay: 0.01 },
+        },
+      ],
+      buffers: [
+        { value_id: 0, op: "BUFFER", shape: [4], dtype: "float32", bytes: 16, first_step: 0, last_step: 2, materialize: false },
+        { value_id: 1, op: "BUFFER", shape: [4], dtype: "float32", bytes: 16, first_step: 1, last_step: 3, materialize: false },
+        { value_id: 2, op: "LOAD", shape: [4], dtype: "float32", bytes: 16, first_step: 2, last_step: 4, materialize: false },
+        { value_id: 3, op: "LOAD", shape: [4], dtype: "float32", bytes: 16, first_step: 3, last_step: 4, materialize: false },
+        { value_id: 4, op: "SGD_UPDATE", shape: [4], dtype: "float32", bytes: 16, first_step: 4, last_step: 4, materialize: true },
+      ],
+      root_id: 4,
+      materialization_boundary: "root",
+      peak_live_bytes: 80,
+      has_custom_ops: false,
+    } as const;
+    const result = await runTensorGpuPlan(device, plan, [
+      { valueId: 0, data: param },
+      { valueId: 1, data: grad },
+    ]);
+    for (let i = 0; i < param.length; i++) {
+      const expected = param[i]! - 0.1 * (grad[i]! + 0.01 * param[i]!);
+      expect(Math.abs(result.data[i]! - expected)).toBeLessThan(1e-6);
+    }
+  });
+
   it("generic tensor GPU plan runs Conv1d and Conv2d forward", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

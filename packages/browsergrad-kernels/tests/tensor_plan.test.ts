@@ -81,4 +81,24 @@ describe("tensor GPU plan normalization", () => {
       }),
     ).toThrow(/hasCustomOps must be false/);
   });
+
+  it("accepts SGD_UPDATE optimizer IR plan steps", () => {
+    const plan = normalizeTensorGpuPlan({
+      steps: [
+        { step: 0, value_id: 0, op: "BUFFER", input_ids: [], shape: [2], dtype: "float32" },
+        { step: 1, value_id: 1, op: "BUFFER", input_ids: [], shape: [2], dtype: "float32" },
+        { step: 2, value_id: 2, op: "SGD_UPDATE", input_ids: [0, 1], shape: [2], dtype: "float32", arg: { lr: 0.1, weight_decay: 0 } },
+      ],
+      buffers: [
+        { value_id: 0, op: "BUFFER", shape: [2], dtype: "float32", bytes: 8, first_step: 0, last_step: 2, materialize: false },
+        { value_id: 1, op: "BUFFER", shape: [2], dtype: "float32", bytes: 8, first_step: 1, last_step: 2, materialize: false },
+        { value_id: 2, op: "SGD_UPDATE", shape: [2], dtype: "float32", bytes: 8, first_step: 2, last_step: 2, materialize: true },
+      ],
+      root_id: 2,
+      materialization_boundary: "root",
+      peak_live_bytes: 24,
+      has_custom_ops: false,
+    });
+    expect(plan.steps[2]?.op).toBe("SGD_UPDATE");
+  });
 });

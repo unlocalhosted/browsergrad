@@ -55,7 +55,7 @@ from ._ir import (
     OP_CONV3D, OP_CONV3D_BACKWARD_INPUT,
     OP_CONV3D_BACKWARD_WEIGHT, OP_CONV3D_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
-    OP_WHERE, OP_BROADCAST_TO,
+    OP_WHERE, OP_BROADCAST_TO, OP_SGD_UPDATE,
 )
 from ._errors import JitError
 
@@ -479,8 +479,8 @@ def export_inference(
                 f"{OP_CONV2D_BACKWARD_WEIGHT!r}, and "
                 f"{OP_CONV2D_BACKWARD_BIAS!r}, {OP_CONV3D!r}, "
                 f"{OP_CONV3D_BACKWARD_INPUT!r}, "
-                f"{OP_CONV3D_BACKWARD_WEIGHT!r}, and "
-                f"{OP_CONV3D_BACKWARD_BIAS!r} need explicit ONNX mappings "
+                f"{OP_CONV3D_BACKWARD_WEIGHT!r}, "
+                f"{OP_CONV3D_BACKWARD_BIAS!r}, and {OP_SGD_UPDATE!r} need explicit ONNX mappings "
                 f"before export."
             )
 

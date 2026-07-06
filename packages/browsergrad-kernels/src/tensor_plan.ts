@@ -35,7 +35,8 @@ export type TensorPlanOp =
   | "CONV3D"
   | "CONV3D_BACKWARD_INPUT"
   | "CONV3D_BACKWARD_WEIGHT"
-  | "CONV3D_BACKWARD_BIAS";
+  | "CONV3D_BACKWARD_BIAS"
+  | "SGD_UPDATE";
 
 export interface TensorPlanStep {
   readonly step: number;
@@ -322,6 +323,11 @@ function executeStep(
       const dy = requireValue(values, step.inputIds[0], step.op);
       return fromDirect(step, conv3dBackwardBiasDirect(device, dy, step.shape, step.arg));
     }
+    case "SGD_UPDATE": {
+      const param = requireValue(values, step.inputIds[0], step.op);
+      const grad = requireValue(values, step.inputIds[1], step.op);
+      return fromDirect(step, sgdUpdateDirect(device, param, grad, step.shape, step.arg));
+    }
     case "CONST":
       throw new KernelError("tensor plan CONST lowering needs scalar fill kernel");
     default:
@@ -389,6 +395,11 @@ interface Conv3dArg {
   readonly outD: number;
   readonly outH: number;
   readonly outW: number;
+}
+
+interface SgdUpdateArg {
+  readonly lr: number;
+  readonly weightDecay: number;
 }
 
 const PERMUTE_WGSL = `
@@ -1339,6 +1350,28 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+const SGD_UPDATE_WGSL = `
+@group(0) @binding(0) var<storage, read> P0: array<f32>;
+@group(0) @binding(1) var<storage, read> G: array<f32>;
+@group(0) @binding(2) var<storage, read_write> P1: array<f32>;
+
+struct Params {
+  lr: f32,
+  weight_decay: f32,
+  total: u32,
+  pad: u32,
+};
+@group(0) @binding(3) var<uniform> U: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x;
+  if (idx >= U.total) { return; }
+  let grad = G[idx] + U.weight_decay * P0[idx];
+  P1[idx] = P0[idx] - U.lr * grad;
+}
+`;
+
 function conv1dDirect(
   device: KernelDevice,
   x: ResidentValue,
@@ -1712,6 +1745,30 @@ function conv3dBackwardBiasDirect(
     params: new Uint32Array([arg.n, arg.cOut, arg.outD, arg.outH, arg.outW, 0, 0, 0]),
     dispatchCount: [arg.cOut, 1, 1],
     cacheKeySuffix: `${arg.n}_${arg.cOut}_${arg.outD}_${arg.outH}_${arg.outW}`,
+  });
+}
+
+function sgdUpdateDirect(
+  device: KernelDevice,
+  param: ResidentValue,
+  grad: ResidentValue,
+  shape: readonly number[],
+  rawArg: unknown,
+): DirectDispatchResult {
+  const arg = expectSgdUpdateArg(rawArg);
+  expectShape(param.shape, shape, "SGD_UPDATE.param");
+  expectShape(grad.shape, shape, "SGD_UPDATE.grad");
+  const outputLength = numel(shape);
+  return runDirect(device, {
+    name: "tensor_plan_sgd_update",
+    wgsl: SGD_UPDATE_WGSL,
+    workgroupSize: [64, 1, 1],
+  }, {
+    inputBuffers: [param.buffer, grad.buffer],
+    outputLength,
+    params: sgdUpdateParams(arg, outputLength),
+    dispatchCount: [outputLength, 1, 1],
+    cacheKeySuffix: `${shapeStr(shape)}_${arg.lr}_${arg.weightDecay}`,
   });
 }
 
@@ -2199,6 +2256,27 @@ function conv3dCacheKey(arg: Conv3dArg): string {
   ].join("_");
 }
 
+function expectSgdUpdateArg(rawArg: unknown): SgdUpdateArg {
+  const arg = expectRecord(rawArg, "tensor plan SGD_UPDATE.arg");
+  const lr = expectFiniteNumber(arg.lr, "SGD_UPDATE.lr");
+  const weightDecay = expectFiniteNumber(
+    arg.weight_decay ?? arg.weightDecay ?? 0,
+    "SGD_UPDATE.weight_decay",
+  );
+  if (lr < 0) throw new KernelError("tensor plan SGD_UPDATE.lr must be >= 0");
+  return { lr, weightDecay };
+}
+
+function sgdUpdateParams(arg: SgdUpdateArg, total: number): Uint32Array {
+  const buffer = new ArrayBuffer(16);
+  const view = new DataView(buffer);
+  view.setFloat32(0, arg.lr, true);
+  view.setFloat32(4, arg.weightDecay, true);
+  view.setUint32(8, total, true);
+  view.setUint32(12, 0, true);
+  return new Uint32Array(buffer);
+}
+
 function pad4(values: readonly number[]): [number, number, number, number] {
   if (values.length > 4) throw new KernelError("tensor plan rank > 4 unsupported in v0");
   return [
@@ -2238,6 +2316,13 @@ function expectArray(value: unknown, name: string): unknown[] {
 function expectNumber(value: unknown, name: string): number {
   if (typeof value !== "number" || !Number.isFinite(value) || !Number.isInteger(value)) {
     throw new KernelError(`${name} must be an integer`);
+  }
+  return value;
+}
+
+function expectFiniteNumber(value: unknown, name: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new KernelError(`${name} must be a finite number`);
   }
   return value;
 }
@@ -2351,6 +2436,7 @@ function expectOp(value: unknown, name: string): TensorPlanOp {
     case "CONV3D_BACKWARD_INPUT":
     case "CONV3D_BACKWARD_WEIGHT":
     case "CONV3D_BACKWARD_BIAS":
+    case "SGD_UPDATE":
       return op;
     default:
       throw new KernelError(`${name} unsupported op ${JSON.stringify(op)}`);

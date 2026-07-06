@@ -19,7 +19,7 @@ hash the same. This is what lets the trace cache and pipeline cache
 
 Design notes:
 
-  * 40 opcodes total — corrects PRD-005's nominal 19. The extras are
+  * 41 opcodes total — corrects PRD-005's nominal 19. The extras are
     documented per-opcode below. Headline additions: RANDOM (dropout +
     nn.init at trace time), CMP (boolean results), CONV1D/CONV2D/CONV3D
     primitive CNN ops and backward refs, CUSTOM
@@ -61,6 +61,7 @@ from ._errors import ShapeError
 #                  CONV3D_BACKWARD_INPUT, CONV3D_BACKWARD_WEIGHT,
 #                  CONV3D_BACKWARD_BIAS
 #   Escape hatch:  CUSTOM
+#   Optimizer:     SGD_UPDATE
 # ---------------------------------------------------------------------------
 
 OP_BUFFER  = "BUFFER"   # arg: buffer_id (str)        ← leaf, no inputs
@@ -124,6 +125,11 @@ OP_BROADCAST_TO = "BROADCAST_TO"  # arg: {shape: tuple[int,...]}, inputs: (x,)
 # — no separate OR opcode needed.
 OP_ISNAN = "ISNAN"  # inputs: (x,) → bool-typed mask of same shape
 
+# Optimizer/update IR. This is the first functional update node for the
+# GPU-native path: param + grad in, updated param out. In-place STORE/resident
+# optimizer state can build on this primitive without doing math in Python.
+OP_SGD_UPDATE = "SGD_UPDATE"  # inputs: (param, grad), arg: {lr, weight_decay}
+
 ALL_OPS: FrozenSet[str] = frozenset({
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CMP,
@@ -140,9 +146,9 @@ ALL_OPS: FrozenSet[str] = frozenset({
     # Autograd-emitted (PRD-007)
     OP_SCATTER_ADD, OP_BROADCAST_TO,
     # Mixed precision (PRD-010)
-    OP_ISNAN,
+    OP_ISNAN, OP_SGD_UPDATE,
 })
-assert len(ALL_OPS) == 40, "opcode count drifted from PRD-005+006+007+010+CNN"
+assert len(ALL_OPS) == 41, "opcode count drifted from PRD-005+006+007+010+CNN+optimizer"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -376,7 +382,7 @@ __all__ = [
     "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",
     "OP_FUSED_ELEMENTWISE", "OP_FUSED_SOFTMAX",
     "OP_SCATTER_ADD", "OP_BROADCAST_TO",
-    "OP_ISNAN",
+    "OP_ISNAN", "OP_SGD_UPDATE",
     "ALL_OPS",
     # Core class + helpers
     "UOp", "toposort", "all_buffers",
