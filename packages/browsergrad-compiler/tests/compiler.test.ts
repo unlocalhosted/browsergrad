@@ -253,7 +253,13 @@ function collectEmittedDiagnosticCodes(srcDir: string): ReadonlySet<string> {
     /warning\(\s*"([^"]+)"/gsu,
     /featureError\(\s*"([^"]+)"/gsu,
     /code:\s*"([^"]+)"/gu,
+    /markUnsafe\(\s*"([^"]+)"/gsu,
     /webGpuBlocker\(\s*[^,]+,\s*"([^"]+)"/gsu,
+    /\b(?:blocker|firstBlocker|hostDynamicPlan\.blocker|peerCopyRuntimePlan\.blocker)\?\.code\s*\?\?\s*"([^"]+)"/gu,
+  ];
+  const blockerTypePatterns = [
+    /export type CudaHostDynamicLaunchBlockerCode\s*=([\s\S]*?);/gu,
+    /export type CudaPeerCopyBlockerCode\s*=([\s\S]*?);/gu,
   ];
   for (const file of fs.readdirSync(srcDir)) {
     if (!file.endsWith(".ts")) continue;
@@ -262,6 +268,15 @@ function collectEmittedDiagnosticCodes(srcDir: string): ReadonlySet<string> {
       for (const match of source.matchAll(pattern)) {
         const code = match[1];
         if (code) out.add(code);
+      }
+    }
+    for (const pattern of blockerTypePatterns) {
+      for (const match of source.matchAll(pattern)) {
+        const block = match[1] ?? "";
+        for (const codeMatch of block.matchAll(/"([^"]+)"/gu)) {
+          const code = codeMatch[1];
+          if (code) out.add(code);
+        }
       }
     }
   }
