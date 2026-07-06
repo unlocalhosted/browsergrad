@@ -41,7 +41,16 @@ class MockBridge:
         self.matmul_count = 0
         self.fused_count = 0
         self.flash_count = 0
+        self.conv1d_count = 0
+        self.conv1d_backward_input_count = 0
+        self.conv1d_backward_weight_count = 0
+        self.conv1d_backward_bias_count = 0
+        self.conv2d_count = 0
+        self.conv2d_backward_input_count = 0
+        self.conv2d_backward_weight_count = 0
+        self.conv2d_backward_bias_count = 0
         self.cast_count = 0
+        self.tensor_plan_count = 0
         self.calls = []           # ordered list of (op, handle_id_in_or_out)
 
     def _mint(self, arr):
@@ -133,6 +142,558 @@ class MockBridge:
         hh = self._mint(out)
         self.calls.append(("flash_attention", hh))
         return hh
+
+    def conv1d(self, input, weight, bias, n, c_in, l_in, c_out, k, stride, padding, dilation, groups, l_out, dtype):
+        self.conv1d_count += 1
+        x = self._handles[input]
+        wt = self._handles[weight]
+        b_arr = self._handles[bias] if bias is not None else None
+        x_pad = np.pad(x, ((0,0),(0,0),(padding,padding)), mode="constant")
+        out = np.zeros((n, c_out, l_out), dtype=np.float32)
+        cpg = c_in // groups
+        opg = c_out // groups
+        eff_k = dilation * (k - 1) + 1
+        for nn in range(n):
+            for g in range(groups):
+                c0 = g * cpg
+                o0 = g * opg
+                for co in range(opg):
+                    for i in range(l_out):
+                        l0 = i * stride
+                        out[nn, o0 + co, i] = (
+                            x_pad[nn, c0:c0+cpg, l0:l0+eff_k:dilation]
+                            * wt[o0 + co]
+                        ).sum()
+        if b_arr is not None:
+            out = out + b_arr.reshape(1, c_out, 1)
+        hh = self._mint(out.astype(np.dtype(dtype), copy=False))
+        self.calls.append(("conv1d", hh))
+        return hh
+
+    def conv1d_backward_input(self, dy, weight, n, c_in, l_in, c_out, k, stride, padding, dilation, groups, l_out, dtype):
+        self.conv1d_backward_input_count += 1
+        grad_out = self._handles[dy]
+        wt = self._handles[weight]
+        cpg = c_in // groups
+        opg = c_out // groups
+        grad_x = np.zeros((n, c_in, l_in + 2 * padding), dtype=np.float32)
+        for nn in range(n):
+            for g in range(groups):
+                c0 = g * cpg
+                o0 = g * opg
+                for co in range(opg):
+                    out_ch = o0 + co
+                    for i in range(l_out):
+                        grad_val = grad_out[nn, out_ch, i]
+                        base = i * stride
+                        for ci_local in range(cpg):
+                            in_ch = c0 + ci_local
+                            for r in range(k):
+                                li = base + r * dilation
+                                grad_x[nn, in_ch, li] += grad_val * wt[out_ch, ci_local, r]
+        out = grad_x[:, :, padding:padding+l_in] if padding > 0 else grad_x
+        hh = self._mint(out.astype(np.dtype(dtype), copy=False))
+        self.calls.append(("conv1d_backward_input", hh))
+        return hh
+
+    def conv1d_backward_weight(self, dy, input, n, c_in, l_in, c_out, k, stride, padding, dilation, groups, l_out, dtype):
+        self.conv1d_backward_weight_count += 1
+        grad_out = self._handles[dy]
+        x = self._handles[input]
+        cpg = c_in // groups
+        opg = c_out // groups
+        x_pad = np.pad(x, ((0,0),(0,0),(padding,padding)), mode="constant")
+        grad_w = np.zeros((c_out, cpg, k), dtype=np.float32)
+        for nn in range(n):
+            for g in range(groups):
+                c0 = g * cpg
+                o0 = g * opg
+                for co in range(opg):
+                    out_ch = o0 + co
+                    for ci_local in range(cpg):
+                        in_ch = c0 + ci_local
+                        for r in range(k):
+                            acc = 0.0
+                            for i in range(l_out):
+                                li = i * stride + r * dilation
+                                acc += grad_out[nn, out_ch, i] * x_pad[nn, in_ch, li]
+                            grad_w[out_ch, ci_local, r] += acc
+        hh = self._mint(grad_w.astype(np.dtype(dtype), copy=False))
+        self.calls.append(("conv1d_backward_weight", hh))
+        return hh
+
+    def conv1d_backward_bias(self, dy, n, c_out, l_out, dtype):
+        self.conv1d_backward_bias_count += 1
+        out = self._handles[dy].sum(axis=(0, 2)).astype(np.dtype(dtype), copy=False)
+        hh = self._mint(out)
+        self.calls.append(("conv1d_backward_bias", hh))
+        return hh
+
+    def conv2d(self, input, weight, bias, n, c_in, h, w, c_out, kh, kw, stride_h, stride_w, pad_h, pad_w, dilation_h, dilation_w, groups, out_h, out_w, dtype):
+        self.conv2d_count += 1
+        x = self._handles[input]
+        wt = self._handles[weight]
+        b_arr = self._handles[bias] if bias is not None else None
+        x_pad = np.pad(x, ((0,0),(0,0),(pad_h,pad_h),(pad_w,pad_w)), mode="constant")
+        out = np.zeros((n, c_out, out_h, out_w), dtype=np.float32)
+        cpg = c_in // groups
+        opg = c_out // groups
+        eff_h = dilation_h * (kh - 1) + 1
+        eff_w = dilation_w * (kw - 1) + 1
+        for nn in range(n):
+            for g in range(groups):
+                c0 = g * cpg
+                o0 = g * opg
+                for co in range(opg):
+                    for oh in range(out_h):
+                        for ow in range(out_w):
+                            h0 = oh * stride_h
+                            w0 = ow * stride_w
+                            out[nn, o0 + co, oh, ow] = (
+                                x_pad[nn, c0:c0+cpg, h0:h0+eff_h:dilation_h, w0:w0+eff_w:dilation_w]
+                                * wt[o0 + co]
+                            ).sum()
+        if b_arr is not None:
+            out = out + b_arr.reshape(1, c_out, 1, 1)
+        hh = self._mint(out.astype(np.dtype(dtype), copy=False))
+        self.calls.append(("conv2d", hh))
+        return hh
+
+    def conv2d_backward_input(self, dy, weight, n, c_in, h, w, c_out, kh, kw, stride_h, stride_w, pad_h, pad_w, dilation_h, dilation_w, groups, out_h, out_w, dtype):
+        self.conv2d_backward_input_count += 1
+        grad_out = self._handles[dy]
+        wt = self._handles[weight]
+        cpg = c_in // groups
+        opg = c_out // groups
+        grad_x = np.zeros((n, c_in, h + 2 * pad_h, w + 2 * pad_w), dtype=np.float32)
+        for nn in range(n):
+            for g in range(groups):
+                c0 = g * cpg
+                o0 = g * opg
+                for co in range(opg):
+                    out_ch = o0 + co
+                    for oh in range(out_h):
+                        for ow in range(out_w):
+                            grad_val = grad_out[nn, out_ch, oh, ow]
+                            h_base = oh * stride_h
+                            w_base = ow * stride_w
+                            for ci_local in range(cpg):
+                                in_ch = c0 + ci_local
+                                for r in range(kh):
+                                    ih = h_base + r * dilation_h
+                                    for s in range(kw):
+                                        iw = w_base + s * dilation_w
+                                        grad_x[nn, in_ch, ih, iw] += grad_val * wt[out_ch, ci_local, r, s]
+        out = grad_x[:, :, pad_h:pad_h+h, pad_w:pad_w+w] if (pad_h > 0 or pad_w > 0) else grad_x
+        hh = self._mint(out.astype(np.dtype(dtype), copy=False))
+        self.calls.append(("conv2d_backward_input", hh))
+        return hh
+
+    def conv2d_backward_weight(self, dy, input, n, c_in, h, w, c_out, kh, kw, stride_h, stride_w, pad_h, pad_w, dilation_h, dilation_w, groups, out_h, out_w, dtype):
+        self.conv2d_backward_weight_count += 1
+        grad_out = self._handles[dy]
+        x = self._handles[input]
+        cpg = c_in // groups
+        opg = c_out // groups
+        x_pad = np.pad(x, ((0,0),(0,0),(pad_h,pad_h),(pad_w,pad_w)), mode="constant")
+        grad_w = np.zeros((c_out, cpg, kh, kw), dtype=np.float32)
+        for nn in range(n):
+            for g in range(groups):
+                c0 = g * cpg
+                o0 = g * opg
+                for co in range(opg):
+                    out_ch = o0 + co
+                    for ci_local in range(cpg):
+                        in_ch = c0 + ci_local
+                        for r in range(kh):
+                            for s in range(kw):
+                                acc = 0.0
+                                for oh in range(out_h):
+                                    ih = oh * stride_h + r * dilation_h
+                                    for ow in range(out_w):
+                                        iw = ow * stride_w + s * dilation_w
+                                        acc += grad_out[nn, out_ch, oh, ow] * x_pad[nn, in_ch, ih, iw]
+                                grad_w[out_ch, ci_local, r, s] += acc
+        hh = self._mint(grad_w.astype(np.dtype(dtype), copy=False))
+        self.calls.append(("conv2d_backward_weight", hh))
+        return hh
+
+    def conv2d_backward_bias(self, dy, n, c_out, out_h, out_w, dtype):
+        self.conv2d_backward_bias_count += 1
+        out = self._handles[dy].sum(axis=(0, 2, 3)).astype(np.dtype(dtype), copy=False)
+        hh = self._mint(out)
+        self.calls.append(("conv2d_backward_bias", hh))
+        return hh
+
+    def run_tensor_plan(self, plan, inputs, dtype):
+        self.tensor_plan_count += 1
+        if plan.get("has_custom_ops"):
+            raise ValueError("mock tensor plan refuses CUSTOM-backed plans")
+        provided = {}
+        for item in inputs:
+            value_id = item.get("value_id", item.get("valueId"))
+            data = item["data"]
+            provided[value_id] = np.frombuffer(data, dtype=np.dtype(dtype))
+        values = {}
+        for step in plan["steps"]:
+            value_id = step.get("value_id", step.get("valueId"))
+            input_ids = step.get("input_ids", step.get("inputIds", []))
+            shape = tuple(step["shape"])
+            op = step["op"]
+            if op == "BUFFER":
+                arr = provided[value_id]
+                values[value_id] = arr.reshape(shape) if shape else arr.reshape(())
+            elif op == "LOAD":
+                values[value_id] = values[input_ids[0]]
+            elif op == "MATMUL":
+                values[value_id] = values[input_ids[0]] @ values[input_ids[1]]
+            elif op == "ADD":
+                values[value_id] = values[input_ids[0]] + values[input_ids[1]]
+            elif op == "MUL":
+                values[value_id] = values[input_ids[0]] * values[input_ids[1]]
+            elif op == "DIV":
+                values[value_id] = values[input_ids[0]] / values[input_ids[1]]
+            elif op == "NEG":
+                values[value_id] = -values[input_ids[0]]
+            elif op == "EXP":
+                values[value_id] = np.exp(values[input_ids[0]])
+            elif op == "LOG":
+                values[value_id] = np.log(values[input_ids[0]])
+            elif op == "CAST":
+                values[value_id] = values[input_ids[0]].astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "RESHAPE":
+                values[value_id] = values[input_ids[0]].reshape(shape)
+            elif op == "PERMUTE":
+                values[value_id] = np.transpose(values[input_ids[0]], axes=tuple(step["arg"]["axes"]))
+            elif op == "BROADCAST_TO":
+                values[value_id] = np.broadcast_to(values[input_ids[0]], shape).copy()
+            elif op == "REDUCE":
+                reduce_op = step["arg"]["op"]
+                axis = step["arg"].get("axis", None)
+                keepdims = bool(step["arg"].get("keepdims", False))
+                if isinstance(axis, list):
+                    axis = tuple(axis)
+                if reduce_op == "sum":
+                    values[value_id] = np.sum(values[input_ids[0]], axis=axis, keepdims=keepdims)
+                elif reduce_op == "mean":
+                    values[value_id] = np.mean(values[input_ids[0]], axis=axis, keepdims=keepdims)
+                else:
+                    raise ValueError(f"mock tensor plan: unsupported reduce {reduce_op}")
+            elif op == "CONV1D":
+                arg = step["arg"]
+                x = values[input_ids[0]]
+                wt = values[input_ids[1]]
+                b_arr = values[input_ids[2]] if len(input_ids) > 2 else None
+                n = int(arg["n"]); c_in = int(arg["c_in"]); l_in = int(arg["l_in"])
+                c_out = int(arg["c_out"]); k = int(arg["k"])
+                stride = int(arg["stride"]); padding = int(arg["padding"])
+                dilation = int(arg["dilation"]); groups = int(arg["groups"])
+                l_out = int(arg["l_out"])
+                x_pad = np.pad(x, ((0,0),(0,0),(padding,padding)), mode="constant")
+                out = np.zeros((n, c_out, l_out), dtype=np.float32)
+                cpg = c_in // groups
+                opg = c_out // groups
+                eff_k = dilation * (k - 1) + 1
+                for nn in range(n):
+                    for g in range(groups):
+                        c0 = g * cpg
+                        o0 = g * opg
+                        for co in range(opg):
+                            for i in range(l_out):
+                                l0 = i * stride
+                                out[nn, o0 + co, i] = (
+                                    x_pad[nn, c0:c0+cpg, l0:l0+eff_k:dilation]
+                                    * wt[o0 + co]
+                                ).sum()
+                if b_arr is not None:
+                    out = out + b_arr.reshape(1, c_out, 1)
+                values[value_id] = out.astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "CONV1D_BACKWARD_INPUT":
+                arg = step["arg"]
+                grad_out = values[input_ids[0]]
+                wt = values[input_ids[1]]
+                n = int(arg["n"]); c_in = int(arg["c_in"]); l_in = int(arg["l_in"])
+                c_out = int(arg["c_out"]); k = int(arg["k"])
+                stride = int(arg["stride"]); padding = int(arg["padding"])
+                dilation = int(arg["dilation"]); groups = int(arg["groups"])
+                l_out = int(arg["l_out"])
+                cpg = c_in // groups
+                opg = c_out // groups
+                grad_x = np.zeros((n, c_in, l_in + 2 * padding), dtype=np.float32)
+                for nn in range(n):
+                    for g in range(groups):
+                        c0 = g * cpg
+                        o0 = g * opg
+                        for co in range(opg):
+                            out_ch = o0 + co
+                            for i in range(l_out):
+                                grad_val = grad_out[nn, out_ch, i]
+                                base = i * stride
+                                for ci_local in range(cpg):
+                                    in_ch = c0 + ci_local
+                                    for r in range(k):
+                                        li = base + r * dilation
+                                        grad_x[nn, in_ch, li] += grad_val * wt[out_ch, ci_local, r]
+                values[value_id] = (
+                    grad_x[:, :, padding:padding+l_in] if padding > 0 else grad_x
+                ).astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "CONV1D_BACKWARD_WEIGHT":
+                arg = step["arg"]
+                grad_out = values[input_ids[0]]
+                x = values[input_ids[1]]
+                n = int(arg["n"]); c_in = int(arg["c_in"]); l_in = int(arg["l_in"])
+                c_out = int(arg["c_out"]); k = int(arg["k"])
+                stride = int(arg["stride"]); padding = int(arg["padding"])
+                dilation = int(arg["dilation"]); groups = int(arg["groups"])
+                l_out = int(arg["l_out"])
+                cpg = c_in // groups
+                opg = c_out // groups
+                x_pad = np.pad(x, ((0,0),(0,0),(padding,padding)), mode="constant")
+                grad_w = np.zeros((c_out, cpg, k), dtype=np.float32)
+                for nn in range(n):
+                    for g in range(groups):
+                        c0 = g * cpg
+                        o0 = g * opg
+                        for co in range(opg):
+                            out_ch = o0 + co
+                            for ci_local in range(cpg):
+                                in_ch = c0 + ci_local
+                                for r in range(k):
+                                    acc = 0.0
+                                    for i in range(l_out):
+                                        li = i * stride + r * dilation
+                                        acc += grad_out[nn, out_ch, i] * x_pad[nn, in_ch, li]
+                                    grad_w[out_ch, ci_local, r] += acc
+                values[value_id] = grad_w.astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "CONV1D_BACKWARD_BIAS":
+                values[value_id] = values[input_ids[0]].sum(axis=(0, 2)).astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "CONV2D":
+                arg = step["arg"]
+                x = values[input_ids[0]]
+                wt = values[input_ids[1]]
+                b_arr = values[input_ids[2]] if len(input_ids) > 2 else None
+                n = int(arg["n"]); c_in = int(arg["c_in"])
+                h = int(arg["h"]); w = int(arg["w"]); c_out = int(arg["c_out"])
+                kh = int(arg["kh"]); kw = int(arg["kw"])
+                stride_h = int(arg["stride_h"]); stride_w = int(arg["stride_w"])
+                pad_h = int(arg["pad_h"]); pad_w = int(arg["pad_w"])
+                dilation_h = int(arg["dilation_h"]); dilation_w = int(arg["dilation_w"])
+                groups = int(arg["groups"]); out_h = int(arg["out_h"]); out_w = int(arg["out_w"])
+                x_pad = np.pad(x, ((0,0),(0,0),(pad_h,pad_h),(pad_w,pad_w)), mode="constant")
+                out = np.zeros((n, c_out, out_h, out_w), dtype=np.float32)
+                cpg = c_in // groups
+                opg = c_out // groups
+                eff_h = dilation_h * (kh - 1) + 1
+                eff_w = dilation_w * (kw - 1) + 1
+                for nn in range(n):
+                    for g in range(groups):
+                        c0 = g * cpg
+                        o0 = g * opg
+                        for co in range(opg):
+                            for oh in range(out_h):
+                                for ow in range(out_w):
+                                    h0 = oh * stride_h
+                                    w0 = ow * stride_w
+                                    out[nn, o0 + co, oh, ow] = (
+                                        x_pad[nn, c0:c0+cpg, h0:h0+eff_h:dilation_h, w0:w0+eff_w:dilation_w]
+                                        * wt[o0 + co]
+                                    ).sum()
+                if b_arr is not None:
+                    out = out + b_arr.reshape(1, c_out, 1, 1)
+                values[value_id] = out.astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "CONV2D_BACKWARD_INPUT":
+                arg = step["arg"]
+                grad_out = values[input_ids[0]]
+                wt = values[input_ids[1]]
+                n = int(arg["n"]); c_in = int(arg["c_in"])
+                h = int(arg["h"]); w = int(arg["w"]); c_out = int(arg["c_out"])
+                kh = int(arg["kh"]); kw = int(arg["kw"])
+                stride_h = int(arg["stride_h"]); stride_w = int(arg["stride_w"])
+                pad_h = int(arg["pad_h"]); pad_w = int(arg["pad_w"])
+                dilation_h = int(arg["dilation_h"]); dilation_w = int(arg["dilation_w"])
+                groups = int(arg["groups"]); out_h = int(arg["out_h"]); out_w = int(arg["out_w"])
+                cpg = c_in // groups
+                opg = c_out // groups
+                grad_x = np.zeros((n, c_in, h + 2 * pad_h, w + 2 * pad_w), dtype=np.float32)
+                for nn in range(n):
+                    for g in range(groups):
+                        c0 = g * cpg
+                        o0 = g * opg
+                        for co in range(opg):
+                            out_ch = o0 + co
+                            for oh in range(out_h):
+                                for ow in range(out_w):
+                                    grad_val = grad_out[nn, out_ch, oh, ow]
+                                    h_base = oh * stride_h
+                                    w_base = ow * stride_w
+                                    for ci_local in range(cpg):
+                                        in_ch = c0 + ci_local
+                                        for r in range(kh):
+                                            ih = h_base + r * dilation_h
+                                            for s in range(kw):
+                                                iw = w_base + s * dilation_w
+                                                grad_x[nn, in_ch, ih, iw] += grad_val * wt[out_ch, ci_local, r, s]
+                values[value_id] = (
+                    grad_x[:, :, pad_h:pad_h+h, pad_w:pad_w+w]
+                    if (pad_h > 0 or pad_w > 0)
+                    else grad_x
+                ).astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "CONV2D_BACKWARD_WEIGHT":
+                arg = step["arg"]
+                grad_out = values[input_ids[0]]
+                x = values[input_ids[1]]
+                n = int(arg["n"]); c_in = int(arg["c_in"])
+                h = int(arg["h"]); w = int(arg["w"]); c_out = int(arg["c_out"])
+                kh = int(arg["kh"]); kw = int(arg["kw"])
+                stride_h = int(arg["stride_h"]); stride_w = int(arg["stride_w"])
+                pad_h = int(arg["pad_h"]); pad_w = int(arg["pad_w"])
+                dilation_h = int(arg["dilation_h"]); dilation_w = int(arg["dilation_w"])
+                groups = int(arg["groups"]); out_h = int(arg["out_h"]); out_w = int(arg["out_w"])
+                cpg = c_in // groups
+                opg = c_out // groups
+                x_pad = np.pad(x, ((0,0),(0,0),(pad_h,pad_h),(pad_w,pad_w)), mode="constant")
+                grad_w = np.zeros((c_out, cpg, kh, kw), dtype=np.float32)
+                for nn in range(n):
+                    for g in range(groups):
+                        c0 = g * cpg
+                        o0 = g * opg
+                        for co in range(opg):
+                            out_ch = o0 + co
+                            for ci_local in range(cpg):
+                                in_ch = c0 + ci_local
+                                for r in range(kh):
+                                    for s in range(kw):
+                                        acc = 0.0
+                                        for oh in range(out_h):
+                                            ih = oh * stride_h + r * dilation_h
+                                            for ow in range(out_w):
+                                                iw = ow * stride_w + s * dilation_w
+                                                acc += grad_out[nn, out_ch, oh, ow] * x_pad[nn, in_ch, ih, iw]
+                                        grad_w[out_ch, ci_local, r, s] += acc
+                values[value_id] = grad_w.astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "CONV2D_BACKWARD_BIAS":
+                values[value_id] = values[input_ids[0]].sum(axis=(0, 2, 3)).astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "CONV3D":
+                arg = step["arg"]
+                x = values[input_ids[0]]
+                wt = values[input_ids[1]]
+                b_arr = values[input_ids[2]] if len(input_ids) > 2 else None
+                n = int(arg["n"]); c_in = int(arg["c_in"])
+                d = int(arg["d"]); h = int(arg["h"]); w = int(arg["w"]); c_out = int(arg["c_out"])
+                kd = int(arg["kd"]); kh = int(arg["kh"]); kw = int(arg["kw"])
+                stride_d = int(arg["stride_d"]); stride_h = int(arg["stride_h"]); stride_w = int(arg["stride_w"])
+                pad_d = int(arg["pad_d"]); pad_h = int(arg["pad_h"]); pad_w = int(arg["pad_w"])
+                dilation_d = int(arg["dilation_d"]); dilation_h = int(arg["dilation_h"]); dilation_w = int(arg["dilation_w"])
+                groups = int(arg["groups"]); out_d = int(arg["out_d"]); out_h = int(arg["out_h"]); out_w = int(arg["out_w"])
+                x_pad = np.pad(x, ((0,0),(0,0),(pad_d,pad_d),(pad_h,pad_h),(pad_w,pad_w)), mode="constant")
+                out = np.zeros((n, c_out, out_d, out_h, out_w), dtype=np.float32)
+                cpg = c_in // groups
+                opg = c_out // groups
+                eff_d = dilation_d * (kd - 1) + 1
+                eff_h = dilation_h * (kh - 1) + 1
+                eff_w = dilation_w * (kw - 1) + 1
+                for nn in range(n):
+                    for g in range(groups):
+                        c0 = g * cpg
+                        o0 = g * opg
+                        for co in range(opg):
+                            for od in range(out_d):
+                                for oh in range(out_h):
+                                    for ow in range(out_w):
+                                        d0 = od * stride_d
+                                        h0 = oh * stride_h
+                                        w0 = ow * stride_w
+                                        out[nn, o0 + co, od, oh, ow] = (
+                                            x_pad[nn, c0:c0+cpg, d0:d0+eff_d:dilation_d, h0:h0+eff_h:dilation_h, w0:w0+eff_w:dilation_w]
+                                            * wt[o0 + co]
+                                        ).sum()
+                if b_arr is not None:
+                    out = out + b_arr.reshape(1, c_out, 1, 1, 1)
+                values[value_id] = out.astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "CONV3D_BACKWARD_INPUT":
+                arg = step["arg"]
+                grad_out = values[input_ids[0]]
+                wt = values[input_ids[1]]
+                n = int(arg["n"]); c_in = int(arg["c_in"])
+                d = int(arg["d"]); h = int(arg["h"]); w = int(arg["w"]); c_out = int(arg["c_out"])
+                kd = int(arg["kd"]); kh = int(arg["kh"]); kw = int(arg["kw"])
+                stride_d = int(arg["stride_d"]); stride_h = int(arg["stride_h"]); stride_w = int(arg["stride_w"])
+                pad_d = int(arg["pad_d"]); pad_h = int(arg["pad_h"]); pad_w = int(arg["pad_w"])
+                dilation_d = int(arg["dilation_d"]); dilation_h = int(arg["dilation_h"]); dilation_w = int(arg["dilation_w"])
+                groups = int(arg["groups"]); out_d = int(arg["out_d"]); out_h = int(arg["out_h"]); out_w = int(arg["out_w"])
+                cpg = c_in // groups
+                opg = c_out // groups
+                grad_x = np.zeros((n, c_in, d + 2 * pad_d, h + 2 * pad_h, w + 2 * pad_w), dtype=np.float32)
+                for nn in range(n):
+                    for g in range(groups):
+                        c0 = g * cpg
+                        o0 = g * opg
+                        for co in range(opg):
+                            out_ch = o0 + co
+                            for od in range(out_d):
+                                for oh in range(out_h):
+                                    for ow in range(out_w):
+                                        grad_val = grad_out[nn, out_ch, od, oh, ow]
+                                        d_base = od * stride_d
+                                        h_base = oh * stride_h
+                                        w_base = ow * stride_w
+                                        for ci_local in range(cpg):
+                                            in_ch = c0 + ci_local
+                                            for rd in range(kd):
+                                                di = d_base + rd * dilation_d
+                                                for rh in range(kh):
+                                                    hi = h_base + rh * dilation_h
+                                                    for rw in range(kw):
+                                                        wi = w_base + rw * dilation_w
+                                                        grad_x[nn, in_ch, di, hi, wi] += grad_val * wt[out_ch, ci_local, rd, rh, rw]
+                values[value_id] = (
+                    grad_x[:, :, pad_d:pad_d+d, pad_h:pad_h+h, pad_w:pad_w+w]
+                    if (pad_d > 0 or pad_h > 0 or pad_w > 0)
+                    else grad_x
+                ).astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "CONV3D_BACKWARD_WEIGHT":
+                arg = step["arg"]
+                grad_out = values[input_ids[0]]
+                x = values[input_ids[1]]
+                n = int(arg["n"]); c_in = int(arg["c_in"])
+                d = int(arg["d"]); h = int(arg["h"]); w = int(arg["w"]); c_out = int(arg["c_out"])
+                kd = int(arg["kd"]); kh = int(arg["kh"]); kw = int(arg["kw"])
+                stride_d = int(arg["stride_d"]); stride_h = int(arg["stride_h"]); stride_w = int(arg["stride_w"])
+                pad_d = int(arg["pad_d"]); pad_h = int(arg["pad_h"]); pad_w = int(arg["pad_w"])
+                dilation_d = int(arg["dilation_d"]); dilation_h = int(arg["dilation_h"]); dilation_w = int(arg["dilation_w"])
+                groups = int(arg["groups"]); out_d = int(arg["out_d"]); out_h = int(arg["out_h"]); out_w = int(arg["out_w"])
+                cpg = c_in // groups
+                opg = c_out // groups
+                x_pad = np.pad(x, ((0,0),(0,0),(pad_d,pad_d),(pad_h,pad_h),(pad_w,pad_w)), mode="constant")
+                grad_w = np.zeros((c_out, cpg, kd, kh, kw), dtype=np.float32)
+                for nn in range(n):
+                    for g in range(groups):
+                        c0 = g * cpg
+                        o0 = g * opg
+                        for co in range(opg):
+                            out_ch = o0 + co
+                            for ci_local in range(cpg):
+                                in_ch = c0 + ci_local
+                                for rd in range(kd):
+                                    for rh in range(kh):
+                                        for rw in range(kw):
+                                            acc = 0.0
+                                            for od in range(out_d):
+                                                di = od * stride_d + rd * dilation_d
+                                                for oh in range(out_h):
+                                                    hi = oh * stride_h + rh * dilation_h
+                                                    for ow in range(out_w):
+                                                        wi = ow * stride_w + rw * dilation_w
+                                                        acc += grad_out[nn, out_ch, od, oh, ow] * x_pad[nn, in_ch, di, hi, wi]
+                                            grad_w[out_ch, ci_local, rd, rh, rw] += acc
+                values[value_id] = grad_w.astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "CONV3D_BACKWARD_BIAS":
+                values[value_id] = values[input_ids[0]].sum(axis=(0, 2, 3, 4)).astype(np.dtype(step["dtype"]), copy=False)
+            else:
+                raise ValueError(f"mock tensor plan: unsupported op {op}")
+        root_id = plan.get("root_id", plan.get("rootId"))
+        self.calls.append(("run_tensor_plan", root_id))
+        return values[root_id].astype(np.dtype(dtype), copy=False).tobytes()
 `;
 
 describe("PRD-011.5 WebGPU realizer seam", () => {
@@ -238,6 +799,361 @@ alive_after = gbt.stats()["handles_alive"]
     // After the realize call, the only handles still alive are the three
     // seed BUFFERs (X, W1, W2) which persist for cross-call caching.
     expect(result.alive_after).toBe(3);
+  });
+
+  it("realize_tensor_plan_webgpu uses one generic plan call, not per-op bridge calls", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      max_diff: number;
+      tensor_plan: number;
+      upload: number;
+      matmul: number;
+      fused: number;
+      materialize: number;
+      root_id: number;
+      step_ids: number[];
+    }>(`
+import browsergrad_jit as bg
+import numpy as np
+rng = np.random.RandomState(11)
+A = rng.uniform(-0.5, 0.5, size=(3, 4)).astype(np.float32)
+B = rng.uniform(-0.5, 0.5, size=(4, 5)).astype(np.float32)
+a = bg.from_numpy(A.copy())
+b = bg.from_numpy(B.copy())
+y = a @ b
+out = bg.exp(y) * y
+ref = out.numpy()
+gpu = bg.realize_tensor_plan_webgpu(out)
+plan = bg.gpu_plan_summary(out)
+{
+    "max_diff": float(np.max(np.abs(ref - gpu))),
+    "tensor_plan": _mock.tensor_plan_count,
+    "upload": _mock.upload_count,
+    "matmul": _mock.matmul_count,
+    "fused": _mock.fused_count,
+    "materialize": _mock.materialize_count,
+    "root_id": int(plan["root_id"]),
+    "step_ids": [int(step["value_id"]) for step in plan["steps"]],
+}
+`);
+    expect(result.max_diff).toBeLessThan(1e-6);
+    expect(result.tensor_plan).toBe(1);
+    expect(result.upload).toBe(0);
+    expect(result.matmul).toBe(0);
+    expect(result.fused).toBe(0);
+    expect(result.materialize).toBe(0);
+    expect(result.root_id).toBe(result.step_ids[result.step_ids.length - 1]);
+    expect(result.step_ids).toEqual([...result.step_ids.keys()]);
+  });
+
+  it("realize_tensor_plan_webgpu handles reshape, permute, reduce, and broadcast plan ops", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      reduce_diff: number;
+      broadcast_diff: number;
+      tensor_plan: number;
+      ops: string[];
+    }>(`
+import browsergrad_jit as bg
+import numpy as np
+from browsergrad_jit._ir import UOp, OP_BROADCAST_TO
+from browsergrad_jit._tensor_proxy import TensorProxy
+
+rng = np.random.RandomState(12)
+x_np = rng.uniform(-1, 1, size=(6,)).astype(np.float32)
+x = bg.from_numpy(x_np.copy())
+reduced = x.reshape(2, 3).permute(1, 0).sum(axis=1, keepdims=True)
+reduced_gpu = bg.realize_tensor_plan_webgpu(reduced)
+reduced_ref = reduced.numpy()
+
+base_np = np.array([[1.0], [2.0]], dtype=np.float32)
+base = bg.from_numpy(base_np.copy())
+b_uop = UOp(
+    op=OP_BROADCAST_TO,
+    inputs=(base._uop,),
+    shape=(2, 3),
+    dtype="float32",
+    arg={"shape": (2, 3)},
+)
+broadcasted = TensorProxy(b_uop, session=base._get_session(), requires_grad=False)
+broadcast_gpu = bg.realize_tensor_plan_webgpu(broadcasted)
+broadcast_ref = broadcasted.numpy()
+plan = bg.gpu_plan_summary(reduced)
+{
+    "reduce_diff": float(np.max(np.abs(reduced_gpu - reduced_ref))),
+    "broadcast_diff": float(np.max(np.abs(broadcast_gpu - broadcast_ref))),
+    "tensor_plan": _mock.tensor_plan_count,
+    "ops": plan["ops"],
+}
+`);
+    expect(result.reduce_diff).toBeLessThan(1e-6);
+    expect(result.broadcast_diff).toBeLessThan(1e-6);
+    expect(result.tensor_plan).toBe(2);
+    expect(result.ops).toContain("RESHAPE");
+    expect(result.ops).toContain("PERMUTE");
+    expect(result.ops).toContain("REDUCE");
+  });
+
+  it("realize_tensor_plan_webgpu runs Conv1d/Conv2d through generic plan path", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      conv1d_diff: number;
+      conv2d_diff: number;
+      tensor_plan: number;
+      conv1d_bridge: number;
+      conv2d_bridge: number;
+      ops1: string[];
+      ops2: string[];
+    }>(`
+import browsergrad_jit as bg
+import browsergrad_jit.nn.functional as F
+import numpy as np
+
+rng = np.random.RandomState(13)
+x1_np = rng.uniform(-1, 1, size=(1, 4, 9)).astype(np.float32)
+w1_np = rng.uniform(-1, 1, size=(6, 2, 3)).astype(np.float32)
+b1_np = rng.uniform(-0.2, 0.2, size=(6,)).astype(np.float32)
+x1 = bg.from_numpy(x1_np.copy())
+w1 = bg.from_numpy(w1_np.copy())
+b1 = bg.from_numpy(b1_np.copy())
+out1 = F.conv1d(x1, w1, b1, stride=2, padding=2, dilation=2, groups=2)
+gpu1 = bg.realize_tensor_plan_webgpu(out1)
+ref1 = out1.numpy()
+
+x2_np = rng.uniform(-1, 1, size=(1, 4, 5, 4)).astype(np.float32)
+w2_np = rng.uniform(-1, 1, size=(6, 2, 2, 2)).astype(np.float32)
+b2_np = rng.uniform(-0.2, 0.2, size=(6,)).astype(np.float32)
+x2 = bg.from_numpy(x2_np.copy())
+w2 = bg.from_numpy(w2_np.copy())
+b2 = bg.from_numpy(b2_np.copy())
+out2 = F.conv2d(x2, w2, b2, stride=(1, 1), padding=(2, 0), dilation=(2, 1), groups=2)
+gpu2 = bg.realize_tensor_plan_webgpu(out2)
+ref2 = out2.numpy()
+{
+    "conv1d_diff": float(np.max(np.abs(gpu1 - ref1))),
+    "conv2d_diff": float(np.max(np.abs(gpu2 - ref2))),
+    "tensor_plan": _mock.tensor_plan_count,
+    "conv1d_bridge": _mock.conv1d_count,
+    "conv2d_bridge": _mock.conv2d_count,
+    "ops1": bg.gpu_plan_summary(out1)["ops"],
+    "ops2": bg.gpu_plan_summary(out2)["ops"],
+}
+`);
+    expect(result.conv1d_diff).toBeLessThan(1e-5);
+    expect(result.conv2d_diff).toBeLessThan(1e-5);
+    expect(result.tensor_plan).toBe(2);
+    expect(result.conv1d_bridge).toBe(0);
+    expect(result.conv2d_bridge).toBe(0);
+    expect(result.ops1).toContain("CONV1D");
+    expect(result.ops2).toContain("CONV2D");
+  });
+
+  it("realize_tensor_plan_webgpu runs Conv3d forward/backward roots through generic plan path", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      out_diff: number;
+      gx_diff: number;
+      gw_diff: number;
+      gb_diff: number;
+      tensor_plan: number;
+      out_ops: string[];
+      gx_ops: string[];
+      gw_ops: string[];
+      gb_ops: string[];
+    }>(`
+import browsergrad_jit as bg
+import browsergrad_jit.nn.functional as F
+import numpy as np
+from browsergrad_jit._tensor_proxy import TensorProxy
+from browsergrad_jit._vjp import get_rule
+
+rng = np.random.RandomState(16)
+x_np = rng.uniform(-1, 1, size=(1, 4, 4, 5, 4)).astype(np.float32)
+w_np = rng.uniform(-1, 1, size=(6, 2, 2, 2, 2)).astype(np.float32)
+b_np = rng.uniform(-0.2, 0.2, size=(6,)).astype(np.float32)
+x = bg.from_numpy(x_np.copy())
+w = bg.from_numpy(w_np.copy())
+b = bg.from_numpy(b_np.copy())
+out = F.conv3d(x, w, b, stride=(1, 1, 1), padding=(1, 1, 0), dilation=(1, 2, 1), groups=2)
+out_gpu = bg.realize_tensor_plan_webgpu(out)
+dy_np = rng.uniform(-1, 1, size=out.shape).astype(np.float32)
+dy = bg.from_numpy(dy_np.copy())
+rule = get_rule(out._uop.op)
+gx_uop, gw_uop, gb_uop = rule(out._uop, (x._uop, w._uop, b._uop), dy._uop)
+gx = TensorProxy(gx_uop, session=x._get_session(), requires_grad=False)
+gw = TensorProxy(gw_uop, session=x._get_session(), requires_grad=False)
+gb = TensorProxy(gb_uop, session=x._get_session(), requires_grad=False)
+gx_gpu = bg.realize_tensor_plan_webgpu(gx)
+gw_gpu = bg.realize_tensor_plan_webgpu(gw)
+gb_gpu = bg.realize_tensor_plan_webgpu(gb)
+{
+    "out_diff": float(np.max(np.abs(out_gpu - out.numpy()))),
+    "gx_diff": float(np.max(np.abs(gx_gpu - gx.numpy()))),
+    "gw_diff": float(np.max(np.abs(gw_gpu - gw.numpy()))),
+    "gb_diff": float(np.max(np.abs(gb_gpu - gb.numpy()))),
+    "tensor_plan": _mock.tensor_plan_count,
+    "out_ops": bg.gpu_plan_summary(out)["ops"],
+    "gx_ops": bg.gpu_plan_summary(gx)["ops"],
+    "gw_ops": bg.gpu_plan_summary(gw)["ops"],
+    "gb_ops": bg.gpu_plan_summary(gb)["ops"],
+}
+`);
+    expect(result.out_diff).toBeLessThan(1e-5);
+    expect(result.gx_diff).toBeLessThan(1e-5);
+    expect(result.gw_diff).toBeLessThan(1e-5);
+    expect(result.gb_diff).toBeLessThan(1e-5);
+    expect(result.tensor_plan).toBe(4);
+    expect(result.out_ops).toContain("CONV3D");
+    expect(result.gx_ops).toContain("CONV3D_BACKWARD_INPUT");
+    expect(result.gw_ops).toContain("CONV3D_BACKWARD_WEIGHT");
+    expect(result.gb_ops).toContain("CONV3D_BACKWARD_BIAS");
+  });
+
+  it("realize_tensor_plan_webgpu runs Conv1d backward roots through generic plan path", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      gx_diff: number;
+      gw_diff: number;
+      gb_diff: number;
+      tensor_plan: number;
+      legacy_counts: number[];
+      gx_ops: string[];
+      gw_ops: string[];
+      gb_ops: string[];
+    }>(`
+import browsergrad_jit as bg
+import browsergrad_jit.nn.functional as F
+import numpy as np
+from browsergrad_jit._tensor_proxy import TensorProxy
+from browsergrad_jit._vjp import get_rule
+
+rng = np.random.RandomState(14)
+x_np = rng.uniform(-1, 1, size=(1, 4, 9)).astype(np.float32)
+w_np = rng.uniform(-1, 1, size=(6, 2, 3)).astype(np.float32)
+b_np = rng.uniform(-0.2, 0.2, size=(6,)).astype(np.float32)
+x = bg.from_numpy(x_np.copy())
+w = bg.from_numpy(w_np.copy())
+b = bg.from_numpy(b_np.copy())
+out = F.conv1d(x, w, b, stride=2, padding=2, dilation=2, groups=2)
+dy_np = rng.uniform(-1, 1, size=out.shape).astype(np.float32)
+dy = bg.from_numpy(dy_np.copy())
+rule = get_rule(out._uop.op)
+gx_uop, gw_uop, gb_uop = rule(out._uop, (x._uop, w._uop, b._uop), dy._uop)
+gx = TensorProxy(gx_uop, session=x._get_session(), requires_grad=False)
+gw = TensorProxy(gw_uop, session=x._get_session(), requires_grad=False)
+gb = TensorProxy(gb_uop, session=x._get_session(), requires_grad=False)
+gx_gpu = bg.realize_tensor_plan_webgpu(gx)
+gw_gpu = bg.realize_tensor_plan_webgpu(gw)
+gb_gpu = bg.realize_tensor_plan_webgpu(gb)
+{
+    "gx_diff": float(np.max(np.abs(gx_gpu - gx.numpy()))),
+    "gw_diff": float(np.max(np.abs(gw_gpu - gw.numpy()))),
+    "gb_diff": float(np.max(np.abs(gb_gpu - gb.numpy()))),
+    "tensor_plan": _mock.tensor_plan_count,
+    "legacy_counts": [
+        _mock.conv1d_backward_input_count,
+        _mock.conv1d_backward_weight_count,
+        _mock.conv1d_backward_bias_count,
+    ],
+    "gx_ops": bg.gpu_plan_summary(gx)["ops"],
+    "gw_ops": bg.gpu_plan_summary(gw)["ops"],
+    "gb_ops": bg.gpu_plan_summary(gb)["ops"],
+}
+`);
+    expect(result.gx_diff).toBeLessThan(1e-5);
+    expect(result.gw_diff).toBeLessThan(1e-5);
+    expect(result.gb_diff).toBeLessThan(1e-5);
+    expect(result.tensor_plan).toBe(3);
+    expect(result.legacy_counts).toEqual([0, 0, 0]);
+    expect(result.gx_ops).toContain("CONV1D_BACKWARD_INPUT");
+    expect(result.gw_ops).toContain("CONV1D_BACKWARD_WEIGHT");
+    expect(result.gb_ops).toContain("CONV1D_BACKWARD_BIAS");
+  });
+
+  it("realize_tensor_plan_webgpu runs Conv2d backward roots through generic plan path", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      gx_diff: number;
+      gw_diff: number;
+      gb_diff: number;
+      tensor_plan: number;
+      legacy_counts: number[];
+      gx_ops: string[];
+      gw_ops: string[];
+      gb_ops: string[];
+    }>(`
+import browsergrad_jit as bg
+import browsergrad_jit.nn.functional as F
+import numpy as np
+from browsergrad_jit._tensor_proxy import TensorProxy
+from browsergrad_jit._vjp import get_rule
+
+rng = np.random.RandomState(15)
+x_np = rng.uniform(-1, 1, size=(1, 4, 5, 4)).astype(np.float32)
+w_np = rng.uniform(-1, 1, size=(6, 2, 2, 2)).astype(np.float32)
+b_np = rng.uniform(-0.2, 0.2, size=(6,)).astype(np.float32)
+x = bg.from_numpy(x_np.copy())
+w = bg.from_numpy(w_np.copy())
+b = bg.from_numpy(b_np.copy())
+out = F.conv2d(x, w, b, stride=(1, 1), padding=(2, 0), dilation=(2, 1), groups=2)
+dy_np = rng.uniform(-1, 1, size=out.shape).astype(np.float32)
+dy = bg.from_numpy(dy_np.copy())
+rule = get_rule(out._uop.op)
+gx_uop, gw_uop, gb_uop = rule(out._uop, (x._uop, w._uop, b._uop), dy._uop)
+gx = TensorProxy(gx_uop, session=x._get_session(), requires_grad=False)
+gw = TensorProxy(gw_uop, session=x._get_session(), requires_grad=False)
+gb = TensorProxy(gb_uop, session=x._get_session(), requires_grad=False)
+gx_gpu = bg.realize_tensor_plan_webgpu(gx)
+gw_gpu = bg.realize_tensor_plan_webgpu(gw)
+gb_gpu = bg.realize_tensor_plan_webgpu(gb)
+{
+    "gx_diff": float(np.max(np.abs(gx_gpu - gx.numpy()))),
+    "gw_diff": float(np.max(np.abs(gw_gpu - gw.numpy()))),
+    "gb_diff": float(np.max(np.abs(gb_gpu - gb.numpy()))),
+    "tensor_plan": _mock.tensor_plan_count,
+    "legacy_counts": [
+        _mock.conv2d_backward_input_count,
+        _mock.conv2d_backward_weight_count,
+        _mock.conv2d_backward_bias_count,
+    ],
+    "gx_ops": bg.gpu_plan_summary(gx)["ops"],
+    "gw_ops": bg.gpu_plan_summary(gw)["ops"],
+    "gb_ops": bg.gpu_plan_summary(gb)["ops"],
+}
+`);
+    expect(result.gx_diff).toBeLessThan(1e-5);
+    expect(result.gw_diff).toBeLessThan(1e-5);
+    expect(result.gb_diff).toBeLessThan(1e-5);
+    expect(result.tensor_plan).toBe(3);
+    expect(result.legacy_counts).toEqual([0, 0, 0]);
+    expect(result.gx_ops).toContain("CONV2D_BACKWARD_INPUT");
+    expect(result.gw_ops).toContain("CONV2D_BACKWARD_WEIGHT");
+    expect(result.gb_ops).toContain("CONV2D_BACKWARD_BIAS");
+  });
+
+  it("realize_tensor_plan_webgpu refuses CUSTOM ops before bridge dispatch", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      message: string;
+      tensor_plan: number;
+      flash: number;
+    }>(`
+import browsergrad_jit as bg
+import numpy as np
+Q = bg.from_numpy(np.ones((1, 1, 2, 4), dtype=np.float32))
+K = bg.from_numpy(np.ones((1, 1, 2, 4), dtype=np.float32))
+V = bg.from_numpy(np.ones((1, 1, 2, 4), dtype=np.float32))
+out = bg.kernels.flash_attention(Q, K, V)
+try:
+    bg.realize_tensor_plan_webgpu(out)
+    msg = "no_error"
+except bg.JitNotImplementedError as e:
+    msg = str(e)
+{"message": msg, "tensor_plan": _mock.tensor_plan_count, "flash": _mock.flash_count}
+`);
+    expect(result.message).toMatch(/refuses CUSTOM/);
+    expect(result.tensor_plan).toBe(0);
+    expect(result.flash).toBe(0);
   });
 
   it("reuses uploaded seed buffers on a second realize call", async () => {
@@ -391,6 +1307,181 @@ ref = np.matmul(p, V_np)
     expect(result.flash_count).toBe(1);
   });
 
+  it("CONV2D primitive routes through bridge.conv2d and matches NumPy", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      max_diff: number;
+      shape: number[];
+      op: string;
+      conv2d_count: number;
+      upload: number;
+      materialize: number;
+    }>(`
+import browsergrad_jit as bg
+import browsergrad_jit.nn.functional as F
+import numpy as np
+
+rng = np.random.RandomState(4)
+x_np = rng.uniform(-1, 1, size=(1, 4, 5, 4)).astype(np.float32)
+w_np = rng.uniform(-1, 1, size=(6, 2, 2, 2)).astype(np.float32)
+b_np = rng.uniform(-0.2, 0.2, size=(6,)).astype(np.float32)
+
+x = bg.from_numpy(x_np.copy())
+w = bg.from_numpy(w_np.copy())
+b = bg.from_numpy(b_np.copy())
+out = F.conv2d(x, w, b, stride=(1, 1), padding=(2, 0), dilation=(2, 1), groups=2)
+gpu = bg.realize_webgpu(out)
+ref = out.numpy()
+
+{
+    "max_diff": float(np.max(np.abs(gpu - ref))),
+    "shape": list(gpu.shape),
+    "op": out._uop.op,
+    "conv2d_count": _mock.conv2d_count,
+    "upload": _mock.upload_count,
+    "materialize": _mock.materialize_count,
+}
+`);
+    expect(result.max_diff).toBeLessThan(1e-5);
+    expect(result.shape).toEqual([1, 6, 7, 3]);
+    expect(result.op).toBe("CONV2D");
+    expect(result.conv2d_count).toBe(1);
+    expect(result.upload).toBe(3);
+    expect(result.materialize).toBe(1);
+  });
+
+  it("CONV1D primitive and backward routes through WebGPU bridge", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      outDiff: number;
+      gxDiff: number;
+      gwDiff: number;
+      gbDiff: number;
+      ops: string[];
+      counts: number[];
+    }>(`
+import browsergrad_jit as bg
+import browsergrad_jit.nn.functional as F
+import numpy as np
+from browsergrad_jit._ir import toposort
+from browsergrad_jit._tensor_proxy import TensorProxy
+from browsergrad_jit._vjp import get_rule
+
+rng = np.random.RandomState(6)
+x_np = rng.uniform(-1, 1, size=(1, 4, 9)).astype(np.float32)
+w_np = rng.uniform(-1, 1, size=(6, 2, 3)).astype(np.float32)
+b_np = rng.uniform(-0.2, 0.2, size=(6,)).astype(np.float32)
+
+x = bg.from_numpy(x_np.copy())
+w = bg.from_numpy(w_np.copy())
+b = bg.from_numpy(b_np.copy())
+out = F.conv1d(x, w, b, stride=2, padding=2, dilation=2, groups=2)
+out_gpu = bg.realize_webgpu(out)
+out_ref = out.numpy()
+
+dy_np = rng.uniform(-1, 1, size=out.shape).astype(np.float32)
+dy = bg.from_numpy(dy_np.copy())
+rule = get_rule(out._uop.op)
+gx_uop, gw_uop, gb_uop = rule(out._uop, (x._uop, w._uop, b._uop), dy._uop)
+gx = TensorProxy(gx_uop, session=x._get_session(), requires_grad=False)
+gw = TensorProxy(gw_uop, session=x._get_session(), requires_grad=False)
+gb = TensorProxy(gb_uop, session=x._get_session(), requires_grad=False)
+
+gx_gpu = bg.realize_webgpu(gx)
+gw_gpu = bg.realize_webgpu(gw)
+gb_gpu = bg.realize_webgpu(gb)
+
+{
+    "outDiff": float(np.max(np.abs(out_gpu - out_ref))),
+    "gxDiff": float(np.max(np.abs(gx_gpu - gx.numpy()))),
+    "gwDiff": float(np.max(np.abs(gw_gpu - gw.numpy()))),
+    "gbDiff": float(np.max(np.abs(gb_gpu - gb.numpy()))),
+    "ops": [u.op for u in toposort(out._uop)] + [u.op for u in toposort(gx._uop)] + [u.op for u in toposort(gw._uop)] + [u.op for u in toposort(gb._uop)],
+    "counts": [
+        _mock.conv1d_count,
+        _mock.conv1d_backward_input_count,
+        _mock.conv1d_backward_weight_count,
+        _mock.conv1d_backward_bias_count,
+    ],
+}
+`);
+    expect(result.outDiff).toBeLessThan(1e-5);
+    expect(result.gxDiff).toBeLessThan(1e-5);
+    expect(result.gwDiff).toBeLessThan(1e-5);
+    expect(result.gbDiff).toBeLessThan(1e-5);
+    expect(result.ops).toContain("CONV1D");
+    expect(result.ops).toContain("CONV1D_BACKWARD_INPUT");
+    expect(result.ops).toContain("CONV1D_BACKWARD_WEIGHT");
+    expect(result.ops).toContain("CONV1D_BACKWARD_BIAS");
+    expect(result.counts).toEqual([1, 1, 1, 1]);
+  });
+
+  it("CONV2D backward primitives route through WebGPU bridge and match NumPy", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      gxDiff: number;
+      gwDiff: number;
+      gbDiff: number;
+      gxOps: string[];
+      gwOps: string[];
+      gbOps: string[];
+      counts: number[];
+    }>(`
+import browsergrad_jit as bg
+import browsergrad_jit.nn.functional as F
+import numpy as np
+from browsergrad_jit._ir import toposort
+from browsergrad_jit._tensor_proxy import TensorProxy
+from browsergrad_jit._vjp import get_rule
+
+rng = np.random.RandomState(5)
+x_np = rng.uniform(-1, 1, size=(1, 4, 5, 4)).astype(np.float32)
+w_np = rng.uniform(-1, 1, size=(6, 2, 2, 2)).astype(np.float32)
+b_np = rng.uniform(-0.2, 0.2, size=(6,)).astype(np.float32)
+dy_np = rng.uniform(-1, 1, size=(1, 6, 7, 3)).astype(np.float32)
+
+x = bg.from_numpy(x_np.copy())
+w = bg.from_numpy(w_np.copy())
+b = bg.from_numpy(b_np.copy())
+dy = bg.from_numpy(dy_np.copy())
+
+out = F.conv2d(x, w, b, stride=(1, 1), padding=(2, 0), dilation=(2, 1), groups=2)
+rule = get_rule(out._uop.op)
+gx_uop, gw_uop, gb_uop = rule(out._uop, (x._uop, w._uop, b._uop), dy._uop)
+gx = TensorProxy(gx_uop, session=x._get_session(), requires_grad=False)
+gw = TensorProxy(gw_uop, session=x._get_session(), requires_grad=False)
+gb = TensorProxy(gb_uop, session=x._get_session(), requires_grad=False)
+
+gx_gpu = bg.realize_webgpu(gx)
+gw_gpu = bg.realize_webgpu(gw)
+gb_gpu = bg.realize_webgpu(gb)
+gx_ref = gx.numpy()
+gw_ref = gw.numpy()
+gb_ref = gb.numpy()
+
+{
+    "gxDiff": float(np.max(np.abs(gx_gpu - gx_ref))),
+    "gwDiff": float(np.max(np.abs(gw_gpu - gw_ref))),
+    "gbDiff": float(np.max(np.abs(gb_gpu - gb_ref))),
+    "gxOps": [u.op for u in toposort(gx._uop)],
+    "gwOps": [u.op for u in toposort(gw._uop)],
+    "gbOps": [u.op for u in toposort(gb._uop)],
+    "counts": [
+        _mock.conv2d_backward_input_count,
+        _mock.conv2d_backward_weight_count,
+        _mock.conv2d_backward_bias_count,
+    ],
+}
+`);
+    expect(result.gxDiff).toBeLessThan(1e-5);
+    expect(result.gwDiff).toBeLessThan(1e-5);
+    expect(result.gbDiff).toBeLessThan(1e-5);
+    expect(result.gxOps).toContain("CONV2D_BACKWARD_INPUT");
+    expect(result.gwOps).toContain("CONV2D_BACKWARD_WEIGHT");
+    expect(result.gbOps).toContain("CONV2D_BACKWARD_BIAS");
+    expect(result.counts).toEqual([1, 1, 1]);
+  });
+
   it("supported_opcodes returns the v0 whitelist", async () => {
     const target = await getJitTarget();
     const ops = await target.run<string[]>(`
@@ -401,6 +1492,14 @@ sorted(bg.webgpu_supported_opcodes())
       "BUFFER",
       "CAST",
       "CONST",
+      "CONV1D",
+      "CONV1D_BACKWARD_BIAS",
+      "CONV1D_BACKWARD_INPUT",
+      "CONV1D_BACKWARD_WEIGHT",
+      "CONV2D",
+      "CONV2D_BACKWARD_BIAS",
+      "CONV2D_BACKWARD_INPUT",
+      "CONV2D_BACKWARD_WEIGHT",
       "CUSTOM",
       "FUSED_ELEMENTWISE",
       "LOAD",
