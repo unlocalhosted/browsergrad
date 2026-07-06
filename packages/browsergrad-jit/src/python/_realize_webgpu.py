@@ -2,7 +2,8 @@
 
 INTERNAL. The spike scope per the PRD-012 DL/GPU review:
 
-  * Forward-only inference. Backward stays on the NumPy realizer.
+  * Explicit realization. Core forward ops and selected backward primitives
+    can run here; `.backward()` itself still writes grads via NumPy.
   * Operates on the IR after `_amp.insert_cast_pass` but BEFORE
     `_fusion.fuse` — we want fusion's `OP_FUSED_*` opcodes to land here
     in their fused form (one bridge call per kernel). The realizer
@@ -28,7 +29,7 @@ What this does NOT do:
   * No pattern matcher for transformer blocks (deferred to PRD-012a).
   * No autotune sweeps (deferred to PRD-012b).
   * No backward joint fusion (deferred indefinitely per review).
-  * No CONV2D / RANDOM / SCATTER_ADD / INDEX / MASK / CMP / ISNAN.
+  * No RANDOM / SCATTER_ADD / INDEX / MASK / CMP / ISNAN.
     The realizer's whitelist is small and honest.
 """
 
@@ -41,10 +42,15 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG,
-    OP_MATMUL, OP_FUSED_ELEMENTWISE, OP_CUSTOM,
+    OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
+    OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
+    OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
+    OP_CONV2D_BACKWARD_WEIGHT, OP_CONV2D_BACKWARD_BIAS,
+    OP_FUSED_ELEMENTWISE, OP_CUSTOM,
 )
 from ._errors import JitNotImplementedError, RealizationError
 from ._gpu_buffer_table import GpuBufferTable
+from ._gpu_plan import gpu_plan_summary
 
 
 # --------------------------------------------------------------------------
@@ -125,6 +131,139 @@ def _h_matmul(node: UOp, vt: dict, gbt: GpuBufferTable, br: Any,
             f"WebGPU matmul: inner dims mismatch: {a_uop.shape} @ {b_uop.shape}"
         )
     return br.matmul(a, b, m, k, n, node.dtype)
+
+
+def _conv1d_args(arg: dict) -> Tuple[int, int, int, int, int, int, int, int, int, int]:
+    return (
+        int(arg["n"]),
+        int(arg["c_in"]),
+        int(arg["l_in"]),
+        int(arg["c_out"]),
+        int(arg["k"]),
+        int(arg["stride"]),
+        int(arg["padding"]),
+        int(arg["dilation"]),
+        int(arg["groups"]),
+        int(arg["l_out"]),
+    )
+
+
+def _h_conv1d(node: UOp, vt: dict, gbt: GpuBufferTable, br: Any,
+              numpy_bt: Any) -> Any:
+    if bool(node.arg.get("has_bias", False)):
+        x, weight, bias = [vt[id(inp)] for inp in node.inputs]
+    else:
+        x, weight = [vt[id(inp)] for inp in node.inputs]
+        bias = None
+    return br.conv1d(x, weight, bias, *_conv1d_args(node.arg), node.dtype)
+
+
+def _h_conv1d_backward_input(node: UOp, vt: dict, gbt: GpuBufferTable, br: Any,
+                             numpy_bt: Any) -> Any:
+    dy = vt[id(node.inputs[0])]
+    weight = vt[id(node.inputs[1])]
+    return br.conv1d_backward_input(dy, weight, *_conv1d_args(node.arg), node.dtype)
+
+
+def _h_conv1d_backward_weight(node: UOp, vt: dict, gbt: GpuBufferTable, br: Any,
+                              numpy_bt: Any) -> Any:
+    dy = vt[id(node.inputs[0])]
+    x = vt[id(node.inputs[1])]
+    return br.conv1d_backward_weight(dy, x, *_conv1d_args(node.arg), node.dtype)
+
+
+def _h_conv1d_backward_bias(node: UOp, vt: dict, gbt: GpuBufferTable, br: Any,
+                            numpy_bt: Any) -> Any:
+    dy = vt[id(node.inputs[0])]
+    arg = node.arg
+    return br.conv1d_backward_bias(
+        dy,
+        int(arg["n"]),
+        int(arg["c_out"]),
+        int(arg["l_out"]),
+        node.dtype,
+    )
+
+
+def _h_conv2d(node: UOp, vt: dict, gbt: GpuBufferTable, br: Any,
+              numpy_bt: Any) -> Any:
+    if bool(node.arg.get("has_bias", False)):
+        x, weight, bias = [vt[id(inp)] for inp in node.inputs]
+    else:
+        x, weight = [vt[id(inp)] for inp in node.inputs]
+        bias = None
+    arg = node.arg
+    return br.conv2d(
+        x,
+        weight,
+        bias,
+        int(arg["n"]),
+        int(arg["c_in"]),
+        int(arg["h"]),
+        int(arg["w"]),
+        int(arg["c_out"]),
+        int(arg["kh"]),
+        int(arg["kw"]),
+        int(arg["stride_h"]),
+        int(arg["stride_w"]),
+        int(arg["pad_h"]),
+        int(arg["pad_w"]),
+        int(arg["dilation_h"]),
+        int(arg["dilation_w"]),
+        int(arg["groups"]),
+        int(arg["out_h"]),
+        int(arg["out_w"]),
+        node.dtype,
+    )
+
+
+def _conv_args(arg: dict) -> Tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int]:
+    return (
+        int(arg["n"]),
+        int(arg["c_in"]),
+        int(arg["h"]),
+        int(arg["w"]),
+        int(arg["c_out"]),
+        int(arg["kh"]),
+        int(arg["kw"]),
+        int(arg["stride_h"]),
+        int(arg["stride_w"]),
+        int(arg["pad_h"]),
+        int(arg["pad_w"]),
+        int(arg["dilation_h"]),
+        int(arg["dilation_w"]),
+        int(arg["groups"]),
+        int(arg["out_h"]),
+        int(arg["out_w"]),
+    )
+
+
+def _h_conv2d_backward_input(node: UOp, vt: dict, gbt: GpuBufferTable, br: Any,
+                             numpy_bt: Any) -> Any:
+    dy = vt[id(node.inputs[0])]
+    weight = vt[id(node.inputs[1])]
+    return br.conv2d_backward_input(dy, weight, *_conv_args(node.arg), node.dtype)
+
+
+def _h_conv2d_backward_weight(node: UOp, vt: dict, gbt: GpuBufferTable, br: Any,
+                              numpy_bt: Any) -> Any:
+    dy = vt[id(node.inputs[0])]
+    x = vt[id(node.inputs[1])]
+    return br.conv2d_backward_weight(dy, x, *_conv_args(node.arg), node.dtype)
+
+
+def _h_conv2d_backward_bias(node: UOp, vt: dict, gbt: GpuBufferTable, br: Any,
+                            numpy_bt: Any) -> Any:
+    dy = vt[id(node.inputs[0])]
+    arg = node.arg
+    return br.conv2d_backward_bias(
+        dy,
+        int(arg["n"]),
+        int(arg["c_out"]),
+        int(arg["out_h"]),
+        int(arg["out_w"]),
+        node.dtype,
+    )
 
 
 def _h_fused_elementwise(node: UOp, vt: dict, gbt: GpuBufferTable, br: Any,
@@ -211,6 +350,14 @@ _DISPATCH = {
     OP_CONST: _h_const,
     OP_CAST: _h_cast,
     OP_MATMUL: _h_matmul,
+    OP_CONV1D: _h_conv1d,
+    OP_CONV1D_BACKWARD_INPUT: _h_conv1d_backward_input,
+    OP_CONV1D_BACKWARD_WEIGHT: _h_conv1d_backward_weight,
+    OP_CONV1D_BACKWARD_BIAS: _h_conv1d_backward_bias,
+    OP_CONV2D: _h_conv2d,
+    OP_CONV2D_BACKWARD_INPUT: _h_conv2d_backward_input,
+    OP_CONV2D_BACKWARD_WEIGHT: _h_conv2d_backward_weight,
+    OP_CONV2D_BACKWARD_BIAS: _h_conv2d_backward_bias,
     OP_FUSED_ELEMENTWISE: _h_fused_elementwise,
     OP_CUSTOM: _h_custom,
 }
@@ -325,6 +472,42 @@ def realize_webgpu(
     return np.array(arr, copy=True)  # owning copy — `data` may be a view
 
 
+def realize_tensor_plan_webgpu(
+    root: UOp,
+    *,
+    numpy_buffer_table: Any,
+    gpu_buffer_table: GpuBufferTable,
+) -> np.ndarray:
+    """Realize through the canonical tensor GPU plan bridge.
+
+    Unlike `realize_webgpu`, this does not walk the graph by calling
+    per-op bridge methods. It sends one backend-neutral plan plus input
+    buffers to `bridge.run_tensor_plan(...)`; the JS runtime schedules
+    kernels and materializes only the root.
+    """
+    bridge = gpu_buffer_table.bridge
+    plan = gpu_plan_summary(root, allow_custom=False)
+    inputs = []
+    for step in plan["steps"]:
+        if step["op"] != OP_BUFFER:
+            continue
+        arr = numpy_buffer_table.get(step["arg"])
+        if arr.dtype.name != step["dtype"]:
+            raise RealizationError(
+                f"WebGPU tensor plan: buffer {step['value_id']} dtype mismatch: "
+                f"plan={step['dtype']} table={arr.dtype.name}"
+            )
+        inputs.append({
+            "value_id": int(step["value_id"]),
+            "data": arr.tobytes(),
+        })
+    data = bridge.run_tensor_plan(plan, inputs, root.dtype)
+    arr = np.frombuffer(data, dtype=np.dtype(root.dtype))
+    if root.shape:
+        arr = arr.reshape(root.shape)
+    return np.array(arr, copy=True)
+
+
 # --------------------------------------------------------------------------
 # Bridge registry — module-global mutable state, intentionally simple.
 # --------------------------------------------------------------------------
@@ -368,6 +551,7 @@ def unregister_webgpu_bridge() -> None:
 
 __all__ = [
     "realize_webgpu",
+    "realize_tensor_plan_webgpu",
     "register_webgpu_bridge",
     "unregister_webgpu_bridge",
     "get_registered_bridge",

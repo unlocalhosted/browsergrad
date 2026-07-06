@@ -34,6 +34,15 @@ Op surface (v0 spike):
   - `fused_elementwise(inputs, ops, shape, dtype)`   — pre-fused chain
   - `cast(handle, src_dtype, dst_dtype, shape)`      — dtype conversion
   - `flash_attention(q, k, v, mask, b, h, sq, sk, d, scale, dtype)` — FA-v2 fwd
+  - `conv1d(input, weight, bias, ..., dtype)`        — Conv1d forward
+  - `conv1d_backward_input(dy, weight, ..., dtype)`  — dInput
+  - `conv1d_backward_weight(dy, input, ..., dtype)`  — dWeight
+  - `conv1d_backward_bias(dy, ..., dtype)`           — dBias
+  - `conv2d(input, weight, bias, ..., dtype)`        — Conv2d forward
+  - `conv2d_backward_input(dy, weight, ..., dtype)`  — dInput
+  - `conv2d_backward_weight(dy, input, ..., dtype)`  — dWeight
+  - `conv2d_backward_bias(dy, ..., dtype)`           — dBias
+  - `run_tensor_plan(plan, inputs, dtype) -> bytes`  — canonical tensor IR plan
 
 Anything outside this set raises `JitNotImplementedError` from the
 realizer. The honest scope per the DL/GPU review.
@@ -89,6 +98,147 @@ class WebGpuBridge(Protocol):
         dtype: str,
     ) -> Any: ...
 
+    def conv1d(
+        self,
+        input: Any,
+        weight: Any,
+        bias: Optional[Any],
+        n: int,
+        c_in: int,
+        l_in: int,
+        c_out: int,
+        k: int,
+        stride: int,
+        padding: int,
+        dilation: int,
+        groups: int,
+        l_out: int,
+        dtype: str,
+    ) -> Any: ...
+
+    def conv1d_backward_input(
+        self,
+        dy: Any,
+        weight: Any,
+        n: int,
+        c_in: int,
+        l_in: int,
+        c_out: int,
+        k: int,
+        stride: int,
+        padding: int,
+        dilation: int,
+        groups: int,
+        l_out: int,
+        dtype: str,
+    ) -> Any: ...
+
+    def conv1d_backward_weight(
+        self,
+        dy: Any,
+        input: Any,
+        n: int,
+        c_in: int,
+        l_in: int,
+        c_out: int,
+        k: int,
+        stride: int,
+        padding: int,
+        dilation: int,
+        groups: int,
+        l_out: int,
+        dtype: str,
+    ) -> Any: ...
+
+    def conv1d_backward_bias(
+        self,
+        dy: Any,
+        n: int,
+        c_out: int,
+        l_out: int,
+        dtype: str,
+    ) -> Any: ...
+
+    def conv2d(
+        self,
+        input: Any,
+        weight: Any,
+        bias: Optional[Any],
+        n: int,
+        c_in: int,
+        h: int,
+        w: int,
+        c_out: int,
+        kh: int,
+        kw: int,
+        stride_h: int,
+        stride_w: int,
+        pad_h: int,
+        pad_w: int,
+        dilation_h: int,
+        dilation_w: int,
+        groups: int,
+        out_h: int,
+        out_w: int,
+        dtype: str,
+    ) -> Any: ...
+
+    def conv2d_backward_input(
+        self,
+        dy: Any,
+        weight: Any,
+        n: int,
+        c_in: int,
+        h: int,
+        w: int,
+        c_out: int,
+        kh: int,
+        kw: int,
+        stride_h: int,
+        stride_w: int,
+        pad_h: int,
+        pad_w: int,
+        dilation_h: int,
+        dilation_w: int,
+        groups: int,
+        out_h: int,
+        out_w: int,
+        dtype: str,
+    ) -> Any: ...
+
+    def conv2d_backward_weight(
+        self,
+        dy: Any,
+        input: Any,
+        n: int,
+        c_in: int,
+        h: int,
+        w: int,
+        c_out: int,
+        kh: int,
+        kw: int,
+        stride_h: int,
+        stride_w: int,
+        pad_h: int,
+        pad_w: int,
+        dilation_h: int,
+        dilation_w: int,
+        groups: int,
+        out_h: int,
+        out_w: int,
+        dtype: str,
+    ) -> Any: ...
+
+    def conv2d_backward_bias(
+        self,
+        dy: Any,
+        n: int,
+        c_out: int,
+        out_h: int,
+        out_w: int,
+        dtype: str,
+    ) -> Any: ...
+
     def run_user_kernel(
         self,
         inputs: list,
@@ -101,6 +251,13 @@ class WebGpuBridge(Protocol):
         output_shape: Tuple[int, ...],
         dtype: str,
     ) -> Any: ...
+
+    def run_tensor_plan(
+        self,
+        plan: dict,
+        inputs: list,
+        dtype: str,
+    ) -> bytes: ...
 
 
 __all__ = ["WebGpuBridge"]

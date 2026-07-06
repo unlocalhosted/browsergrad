@@ -129,6 +129,17 @@ export {
 export { flashAttentionDirect } from "./kernels/flash_attention.js";
 
 export {
+  normalizeTensorGpuPlan,
+  runTensorGpuPlan,
+  type TensorGpuPlan,
+  type TensorPlanBuffer,
+  type TensorPlanInput,
+  type TensorPlanOp,
+  type TensorPlanRunResult,
+  type TensorPlanStep,
+} from "./tensor_plan.js";
+
+export {
   defineCuda1DProgram,
   defineKernel1DProgram,
   emitCuda1DProgramWgsl,

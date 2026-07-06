@@ -3,9 +3,9 @@
 INTERNAL module. Users import as `browsergrad_jit.nn.functional as F`.
 
 PRD-005 cut-down scope (per the critique): elementwise + MLP-style ops
-needed for the 0.1.0 conformance bar. Conv, pool, attention, norm,
-embedding, recurrent ship in 0.1.1/0.1.2 patches via the CUSTOM opcode
-or as proper IR additions in PRD-006+.
+needed for the 0.1.0 conformance bar. Conv2d has since moved to a
+primitive CONV2D IR op; pool, attention, norm, embedding, recurrent, and
+other heavy ops still use CUSTOM until promoted.
 
 The pattern across every op: build new UOps + new TensorProxies with the
 right backward closures. NumPy-heavy logic that doesn't decompose into
@@ -19,12 +19,49 @@ from typing import Any, Optional, Tuple
 import numpy as np
 
 from ._ir import (
-    UOp, OP_WHERE, OP_CONST, OP_CUSTOM, OP_REDUCE, OP_DIV,
+    UOp, OP_WHERE, OP_CONST, OP_CUSTOM, OP_CONV1D, OP_CONV2D, OP_CONV3D,
+    OP_REDUCE, OP_DIV,
 )
 from ._tensor_proxy import (
     TensorProxy, _BackwardCtx, _should_track, _to_proxy, from_numpy, where,
 )
 from ._errors import ShapeError
+
+
+def _pair2(value: Any, name: str) -> Tuple[int, int]:
+    if isinstance(value, int):
+        return (int(value), int(value))
+    if isinstance(value, (tuple, list)) and len(value) == 2:
+        return (int(value[0]), int(value[1]))
+    raise ValueError(f"{name} must be an int or a length-2 tuple")
+
+
+def _triple3(value: Any, name: str) -> Tuple[int, int, int]:
+    if isinstance(value, int):
+        return (int(value), int(value), int(value))
+    if isinstance(value, (tuple, list)) and len(value) == 3:
+        return (int(value[0]), int(value[1]), int(value[2]))
+    raise ValueError(f"{name} must be an int or a length-3 tuple")
+
+
+def _check_groups(
+    op_name: str,
+    in_channels: int,
+    out_channels: int,
+    weight_in_channels: int,
+    groups: int,
+) -> None:
+    if groups <= 0:
+        raise ValueError(f"{op_name}: groups must be positive")
+    if in_channels % groups != 0:
+        raise ValueError(f"{op_name}: input channels must be divisible by groups")
+    if out_channels % groups != 0:
+        raise ValueError(f"{op_name}: output channels must be divisible by groups")
+    if weight_in_channels != in_channels // groups:
+        raise ShapeError(
+            f"{op_name}: weight expects {weight_in_channels * groups} input "
+            f"channels across {groups} groups, got {in_channels}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -545,6 +582,492 @@ def linear(x: TensorProxy, weight: TensorProxy,
 
 
 # ---------------------------------------------------------------------------
+# Convolution family — CUSTOM UOps with explicit NumPy VJPs.
+# ---------------------------------------------------------------------------
+
+
+def conv1d(
+    input: TensorProxy,
+    weight: TensorProxy,
+    bias: Optional[TensorProxy] = None,
+    stride: int = 1,
+    padding: int = 0,
+    dilation: int = 1,
+    groups: int = 1,
+) -> TensorProxy:
+    if input.ndim != 3:
+        raise ShapeError(f"conv1d: input must be 3-D (N, C, L), got {input.shape}")
+    if weight.ndim != 3:
+        raise ShapeError(
+            f"conv1d: weight must be 3-D (C_out, C_in/groups, K), got {weight.shape}"
+        )
+    stride = int(stride)
+    padding = int(padding)
+    dilation = int(dilation)
+    groups = int(groups)
+    N, C_in, L_in = input.shape
+    C_out, C_per_group, K = weight.shape
+    _check_groups("conv1d", C_in, C_out, C_per_group, groups)
+    if bias is not None and bias.shape != (C_out,):
+        raise ShapeError(f"conv1d: bias shape must be {(C_out,)}, got {bias.shape}")
+    eff_k = dilation * (K - 1) + 1
+    L_out = (L_in + 2 * padding - eff_k) // stride + 1
+    if L_out <= 0:
+        raise ShapeError(f"conv1d: output length must be positive, got {L_out}")
+    out_shape = (N, C_out, L_out)
+    out_per_group = C_out // groups
+
+    input_uops = [input._uop, weight._uop]
+    input_proxies = [input, weight]
+    if bias is not None:
+        input_uops.append(bias._uop)
+        input_proxies.append(bias)
+    uop = UOp(
+        op=OP_CONV1D,
+        inputs=tuple(input_uops),
+        shape=out_shape,
+        dtype=input.dtype,
+        arg={
+            "n": N,
+            "c_in": C_in,
+            "l_in": L_in,
+            "c_out": C_out,
+            "k": K,
+            "stride": stride,
+            "padding": padding,
+            "dilation": dilation,
+            "groups": groups,
+            "l_out": L_out,
+            "has_bias": bias is not None,
+        },
+    )
+
+    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+        x_arr = ins[0]
+        w_arr = ins[1]
+        if padding > 0:
+            x_pad = np.pad(x_arr, ((0, 0), (0, 0), (padding, padding)), mode="constant")
+        else:
+            x_pad = x_arr
+        grad_w = np.zeros_like(w_arr, dtype=np.float32)
+        grad_x_pad = np.zeros_like(x_pad, dtype=np.float32)
+        for n in range(N):
+            for g in range(groups):
+                c0 = g * C_per_group
+                o0 = g * out_per_group
+                for co in range(out_per_group):
+                    for i in range(L_out):
+                        l0 = i * stride
+                        go = dy[n, o0 + co, i]
+                        window = x_pad[n, c0:c0+C_per_group, l0:l0+eff_k:dilation]
+                        grad_w[o0 + co] += go * window
+                        grad_x_pad[n, c0:c0+C_per_group, l0:l0+eff_k:dilation] += (
+                            go * w_arr[o0 + co]
+                        )
+        grad_x = (
+            grad_x_pad[:, :, padding:padding+L_in].copy()
+            if padding > 0 else grad_x_pad
+        )
+        if bias is not None:
+            grad_b = dy.sum(axis=(0, 2))
+            return (grad_x, grad_w, grad_b)
+        return (grad_x, grad_w)
+
+    requires = _should_track(*input_proxies)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=tuple(input_proxies)) if requires else None
+    return TensorProxy(uop, session=input._get_session(), requires_grad=requires, ctx=ctx)
+
+
+def conv2d(
+    input: TensorProxy,
+    weight: TensorProxy,
+    bias: Optional[TensorProxy] = None,
+    stride: Any = 1,
+    padding: Any = 0,
+    dilation: Any = 1,
+    groups: int = 1,
+) -> TensorProxy:
+    if input.ndim != 4:
+        raise ShapeError(f"conv2d: input must be 4-D (N, C, H, W), got {input.shape}")
+    if weight.ndim != 4:
+        raise ShapeError(
+            "conv2d: weight must be 4-D "
+            f"(C_out, C_in/groups, KH, KW), got {weight.shape}"
+        )
+    sh, sw = _pair2(stride, "stride")
+    ph, pw = _pair2(padding, "padding")
+    dh, dw = _pair2(dilation, "dilation")
+    groups = int(groups)
+    N, C_in, H, W = input.shape
+    C_out, C_per_group, kh, kw = weight.shape
+    _check_groups("conv2d", C_in, C_out, C_per_group, groups)
+    if bias is not None and bias.shape != (C_out,):
+        raise ShapeError(f"conv2d: bias shape must be {(C_out,)}, got {bias.shape}")
+    eff_h = dh * (kh - 1) + 1
+    eff_w = dw * (kw - 1) + 1
+    H_out = (H + 2 * ph - eff_h) // sh + 1
+    W_out = (W + 2 * pw - eff_w) // sw + 1
+    if H_out <= 0 or W_out <= 0:
+        raise ShapeError(f"conv2d: output spatial shape must be positive, got {(H_out, W_out)}")
+    out_shape = (N, C_out, H_out, W_out)
+    out_per_group = C_out // groups
+    L = H_out * W_out
+
+    def _im2col(x_arr: np.ndarray) -> Tuple[np.ndarray, Tuple[int, ...]]:
+        if ph > 0 or pw > 0:
+            x_pad = np.pad(x_arr, ((0, 0), (0, 0), (ph, ph), (pw, pw)), mode="constant")
+        else:
+            x_pad = x_arr
+        cols = np.zeros((N, C_in * kh * kw, L), dtype=np.float32)
+        for i in range(H_out):
+            for j in range(W_out):
+                h0, w0 = i * sh, j * sw
+                cols[:, :, i * W_out + j] = (
+                    x_pad[:, :, h0:h0+eff_h:dh, w0:w0+eff_w:dw].reshape(N, -1)
+                )
+        return cols, x_pad.shape
+
+    input_uops = [input._uop, weight._uop]
+    input_proxies = [input, weight]
+    if bias is not None:
+        input_uops.append(bias._uop)
+        input_proxies.append(bias)
+    uop = UOp(
+        op=OP_CONV2D,
+        inputs=tuple(input_uops),
+        shape=out_shape,
+        dtype=input.dtype,
+        arg={
+            "n": N,
+            "c_in": C_in,
+            "h": H,
+            "w": W,
+            "c_out": C_out,
+            "kh": kh,
+            "kw": kw,
+            "stride_h": sh,
+            "stride_w": sw,
+            "pad_h": ph,
+            "pad_w": pw,
+            "dilation_h": dh,
+            "dilation_w": dw,
+            "groups": groups,
+            "out_h": H_out,
+            "out_w": W_out,
+            "has_bias": bias is not None,
+        },
+    )
+
+    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+        cols, x_pad_shape = _im2col(ins[0])
+        grad_out_flat = dy.reshape(N, C_out, L)
+        grad_w = np.zeros_like(ins[1], dtype=np.float32)
+        grad_cols = np.zeros_like(cols)
+        weight_flats = []
+        col_slices = []
+        for g in range(groups):
+            c0 = g * C_per_group
+            c1 = (g + 1) * C_per_group
+            o0 = g * out_per_group
+            o1 = (g + 1) * out_per_group
+            col_slice = slice(c0 * kh * kw, c1 * kh * kw)
+            weight_flats.append(ins[1][o0:o1].reshape(out_per_group, -1).copy())
+            col_slices.append((o0, o1, col_slice))
+        for idx, (o0, o1, col_slice) in enumerate(col_slices):
+            grad_out_g = grad_out_flat[:, o0:o1, :]
+            cols_g = cols[:, col_slice, :]
+            grad_w_g = (grad_out_g @ np.swapaxes(cols_g, -1, -2)).sum(axis=0)
+            grad_w[o0:o1] = grad_w_g.reshape(out_per_group, C_per_group, kh, kw)
+            grad_cols[:, col_slice, :] = (
+                np.swapaxes(weight_flats[idx], -1, -2) @ grad_out_g
+            )
+        grad_x_pad = np.zeros(x_pad_shape, dtype=np.float32)
+        for i in range(H_out):
+            for j in range(W_out):
+                h0, w0 = i * sh, j * sw
+                grad_x_pad[:, :, h0:h0+eff_h:dh, w0:w0+eff_w:dw] += (
+                    grad_cols[:, :, i * W_out + j].reshape(N, C_in, kh, kw)
+                )
+        grad_x = (
+            grad_x_pad[:, :, ph:ph+H, pw:pw+W].copy()
+            if ph > 0 or pw > 0 else grad_x_pad
+        )
+        if bias is not None:
+            grad_b = dy.sum(axis=(0, 2, 3))
+            return (grad_x, grad_w, grad_b)
+        return (grad_x, grad_w)
+
+    requires = _should_track(*input_proxies)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=tuple(input_proxies)) if requires else None
+    return TensorProxy(uop, session=input._get_session(), requires_grad=requires, ctx=ctx)
+
+
+def conv_transpose2d(
+    input: TensorProxy,
+    weight: TensorProxy,
+    bias: Optional[TensorProxy] = None,
+    stride: Any = 1,
+    padding: Any = 0,
+    output_padding: Any = 0,
+    groups: int = 1,
+    dilation: Any = 1,
+) -> TensorProxy:
+    if input.ndim != 4:
+        raise ShapeError(
+            f"conv_transpose2d: input must be 4-D (N, C, H, W), got {input.shape}"
+        )
+    if weight.ndim != 4:
+        raise ShapeError(
+            "conv_transpose2d: weight must be 4-D "
+            f"(C_in, C_out/groups, KH, KW), got {weight.shape}"
+        )
+    sh, sw = _pair2(stride, "stride")
+    ph, pw = _pair2(padding, "padding")
+    oph, opw = _pair2(output_padding, "output_padding")
+    dh, dw = _pair2(dilation, "dilation")
+    groups = int(groups)
+    N, C_in, H, W = input.shape
+    W_C_in, C_out_per_group, kh, kw = weight.shape
+    if W_C_in != C_in:
+        raise ShapeError(
+            f"conv_transpose2d: weight first dim {W_C_in} must equal input channels {C_in}"
+        )
+    if groups <= 0 or C_in % groups != 0:
+        raise ValueError("conv_transpose2d: groups must divide input channels")
+    C_out = C_out_per_group * groups
+    if bias is not None and bias.shape != (C_out,):
+        raise ShapeError(
+            f"conv_transpose2d: bias shape must be {(C_out,)}, got {bias.shape}"
+        )
+    H_out = (H - 1) * sh - 2 * ph + dh * (kh - 1) + oph + 1
+    W_out = (W - 1) * sw - 2 * pw + dw * (kw - 1) + opw + 1
+    if H_out <= 0 or W_out <= 0:
+        raise ShapeError(
+            f"conv_transpose2d: output spatial shape must be positive, got {(H_out, W_out)}"
+        )
+    out_shape = (N, C_out, H_out, W_out)
+    in_per_group = C_in // groups
+
+    captured: dict = {}
+
+    def _forward(x_arr: np.ndarray, w_arr: np.ndarray, *maybe_bias: np.ndarray) -> np.ndarray:
+        out = np.zeros(out_shape, dtype=np.float32)
+        for n in range(N):
+            for ci in range(C_in):
+                group = ci // in_per_group
+                co0 = group * C_out_per_group
+                for ih in range(H):
+                    for iw in range(W):
+                        value = x_arr[n, ci, ih, iw]
+                        if value == 0:
+                            continue
+                        for r in range(kh):
+                            oh = ih * sh - ph + r * dh
+                            if oh < 0 or oh >= H_out:
+                                continue
+                            for c in range(kw):
+                                ow = iw * sw - pw + c * dw
+                                if 0 <= ow < W_out:
+                                    out[n, co0:co0+C_out_per_group, oh, ow] += (
+                                        value * w_arr[ci, :, r, c]
+                                    )
+        if maybe_bias:
+            out += maybe_bias[0].reshape(1, C_out, 1, 1)
+        captured["w"] = w_arr
+        return out.astype(np.dtype(input.dtype), copy=False)
+
+    input_uops = [input._uop, weight._uop]
+    input_proxies = [input, weight]
+    if bias is not None:
+        input_uops.append(bias._uop)
+        input_proxies.append(bias)
+    uop = UOp(
+        op=OP_CUSTOM,
+        inputs=tuple(input_uops),
+        shape=out_shape,
+        dtype=input.dtype,
+        arg={"fn": _forward, "captures": (), "name": "conv_transpose2d"},
+    )
+
+    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+        x_arr = ins[0]
+        w_arr = captured["w"]
+        grad_x = np.zeros_like(x_arr, dtype=np.float32)
+        grad_w = np.zeros_like(w_arr, dtype=np.float32)
+        for n in range(N):
+            for ci in range(C_in):
+                group = ci // in_per_group
+                co0 = group * C_out_per_group
+                for ih in range(H):
+                    for iw in range(W):
+                        x_val = x_arr[n, ci, ih, iw]
+                        for r in range(kh):
+                            oh = ih * sh - ph + r * dh
+                            if oh < 0 or oh >= H_out:
+                                continue
+                            for c in range(kw):
+                                ow = iw * sw - pw + c * dw
+                                if 0 <= ow < W_out:
+                                    go = dy[n, co0:co0+C_out_per_group, oh, ow]
+                                    grad_x[n, ci, ih, iw] += (go * w_arr[ci, :, r, c]).sum()
+                                    grad_w[ci, :, r, c] += go * x_val
+        if bias is not None:
+            grad_b = dy.sum(axis=(0, 2, 3))
+            return (grad_x, grad_w, grad_b)
+        return (grad_x, grad_w)
+
+    requires = _should_track(*input_proxies)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=tuple(input_proxies)) if requires else None
+    return TensorProxy(uop, session=input._get_session(), requires_grad=requires, ctx=ctx)
+
+
+def conv3d(
+    input: TensorProxy,
+    weight: TensorProxy,
+    bias: Optional[TensorProxy] = None,
+    stride: Any = 1,
+    padding: Any = 0,
+    dilation: Any = 1,
+    groups: int = 1,
+) -> TensorProxy:
+    if input.ndim != 5:
+        raise ShapeError(f"conv3d: input must be 5-D (N, C, D, H, W), got {input.shape}")
+    if weight.ndim != 5:
+        raise ShapeError(
+            "conv3d: weight must be 5-D "
+            f"(C_out, C_in/groups, KD, KH, KW), got {weight.shape}"
+        )
+    sd, sh, sw = _triple3(stride, "stride")
+    pd, ph, pw = _triple3(padding, "padding")
+    dd, dh, dw = _triple3(dilation, "dilation")
+    groups = int(groups)
+    N, C_in, D, H, W = input.shape
+    C_out, C_per_group, kd, kh, kw = weight.shape
+    _check_groups("conv3d", C_in, C_out, C_per_group, groups)
+    if bias is not None and bias.shape != (C_out,):
+        raise ShapeError(f"conv3d: bias shape must be {(C_out,)}, got {bias.shape}")
+    eff_d = dd * (kd - 1) + 1
+    eff_h = dh * (kh - 1) + 1
+    eff_w = dw * (kw - 1) + 1
+    D_out = (D + 2 * pd - eff_d) // sd + 1
+    H_out = (H + 2 * ph - eff_h) // sh + 1
+    W_out = (W + 2 * pw - eff_w) // sw + 1
+    if D_out <= 0 or H_out <= 0 or W_out <= 0:
+        raise ShapeError(
+            f"conv3d: output spatial shape must be positive, got {(D_out, H_out, W_out)}"
+        )
+    out_shape = (N, C_out, D_out, H_out, W_out)
+    input_uops = [input._uop, weight._uop]
+    input_proxies = [input, weight]
+    if bias is not None:
+        input_uops.append(bias._uop)
+        input_proxies.append(bias)
+    uop = UOp(
+        op=OP_CONV3D,
+        inputs=tuple(input_uops),
+        shape=out_shape,
+        dtype=input.dtype,
+        arg={
+            "n": N,
+            "c_in": C_in,
+            "d": D,
+            "h": H,
+            "w": W,
+            "c_out": C_out,
+            "kd": kd,
+            "kh": kh,
+            "kw": kw,
+            "stride_d": sd,
+            "stride_h": sh,
+            "stride_w": sw,
+            "pad_d": pd,
+            "pad_h": ph,
+            "pad_w": pw,
+            "dilation_d": dd,
+            "dilation_h": dh,
+            "dilation_w": dw,
+            "groups": groups,
+            "out_d": D_out,
+            "out_h": H_out,
+            "out_w": W_out,
+            "has_bias": bias is not None,
+        },
+    )
+
+    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+        x_arr = ins[0]
+        w_arr = ins[1]
+        if pd > 0 or ph > 0 or pw > 0:
+            x_pad = np.pad(
+                x_arr,
+                ((0, 0), (0, 0), (pd, pd), (ph, ph), (pw, pw)),
+                mode="constant",
+            )
+        else:
+            x_pad = x_arr
+        L = D_out * H_out * W_out
+        cols = np.zeros((N, C_in * kd * kh * kw, L), dtype=np.float32)
+        col_idx = 0
+        for od in range(D_out):
+            for oh in range(H_out):
+                for ow in range(W_out):
+                    d0, h0, w0 = od * sd, oh * sh, ow * sw
+                    cols[:, :, col_idx] = (
+                        x_pad[
+                            :,
+                            :,
+                            d0:d0+eff_d:dd,
+                            h0:h0+eff_h:dh,
+                            w0:w0+eff_w:dw,
+                        ].reshape(N, -1)
+                    )
+                    col_idx += 1
+        grad_out_flat = dy.reshape(N, C_out, L)
+        grad_w = np.zeros_like(ins[1], dtype=np.float32)
+        grad_cols = np.zeros_like(cols)
+        out_per_group = C_out // groups
+        for g in range(groups):
+            c0 = g * C_per_group
+            c1 = (g + 1) * C_per_group
+            o0 = g * out_per_group
+            o1 = (g + 1) * out_per_group
+            col_slice = slice(c0 * kd * kh * kw, c1 * kd * kh * kw)
+            grad_out_g = grad_out_flat[:, o0:o1, :]
+            cols_g = cols[:, col_slice, :]
+            grad_w_g = (grad_out_g @ np.swapaxes(cols_g, -1, -2)).sum(axis=0)
+            grad_w[o0:o1] = grad_w_g.reshape(out_per_group, C_per_group, kd, kh, kw)
+            grad_cols[:, col_slice, :] = (
+                np.swapaxes(w_arr[o0:o1].reshape(out_per_group, -1), -1, -2) @ grad_out_g
+            )
+        grad_x_pad = np.zeros(x_pad.shape, dtype=np.float32)
+        col_idx = 0
+        for od in range(D_out):
+            for oh in range(H_out):
+                for ow in range(W_out):
+                    d0, h0, w0 = od * sd, oh * sh, ow * sw
+                    grad_x_pad[
+                        :,
+                        :,
+                        d0:d0+eff_d:dd,
+                        h0:h0+eff_h:dh,
+                        w0:w0+eff_w:dw,
+                    ] += grad_cols[:, :, col_idx].reshape(N, C_in, kd, kh, kw)
+                    col_idx += 1
+        grad_x = (
+            grad_x_pad[:, :, pd:pd+D, ph:ph+H, pw:pw+W].copy()
+            if pd > 0 or ph > 0 or pw > 0 else grad_x_pad
+        )
+        if bias is not None:
+            grad_b = dy.sum(axis=(0, 2, 3, 4))
+            return (grad_x, grad_w, grad_b)
+        return (grad_x, grad_w)
+
+    requires = _should_track(*input_proxies)
+    ctx = _BackwardCtx(fn=_bw, input_proxies=tuple(input_proxies)) if requires else None
+    return TensorProxy(uop, session=input._get_session(), requires_grad=requires, ctx=ctx)
+
+
+# ---------------------------------------------------------------------------
 # Dropout — needs RANDOM but for v0 we keep it eager (PRD-005 critique
 # documents this as acceptable; the RANDOM opcode lands when we wire it
 # into the IR-cached path).
@@ -791,6 +1314,10 @@ __all__ = [
     "bce_with_logits_loss",
     "one_hot",
     "linear",
+    "conv1d",
+    "conv2d",
+    "conv_transpose2d",
+    "conv3d",
     "dropout",
     "pad",
     "interpolate",

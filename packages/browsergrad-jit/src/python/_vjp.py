@@ -37,10 +37,9 @@ Design contract (per PRD-007 DL/GPU review):
     in `_tensor_proxy.backward()` runs instead. This allows incremental
     migration — Week 1 lands 12 rules; later weeks add the rest.
 
-  * **Higher-order**: every UOp a VJP rule emits must itself have a
-    registered VJP rule. `create_graph=True` mode wraps emitted UOps in
-    TensorProxies with `requires_grad=True` so a second `.backward()`
-    finds them.
+  * **Higher-order**: v0 is first-order. Many emitted UOps have registered
+    VJPs, but specialized backward primitives such as CONV*_BACKWARD_* do
+    not. Higher-order conv grads must fail explicitly until those rules land.
 """
 
 from __future__ import annotations
@@ -49,7 +48,13 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from ._ir import (
     UOp,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CAST,
-    OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
+    OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
+    OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
+    OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
+    OP_CONV2D_BACKWARD_WEIGHT, OP_CONV2D_BACKWARD_BIAS,
+    OP_CONV3D, OP_CONV3D_BACKWARD_INPUT,
+    OP_CONV3D_BACKWARD_WEIGHT, OP_CONV3D_BACKWARD_BIAS,
+    OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
     OP_CONST, OP_BROADCAST_TO,
     OP_ISNAN,
 )
@@ -520,6 +525,133 @@ def _broadcast_batch_shape(
                 f"batched matmul: cannot broadcast batch dims {a_batch} vs {b_batch}"
             )
     return tuple(out)
+
+
+# ---------------------------------------------------------------------------
+# CONV1D / CONV2D / CONV3D — primitive CNN rules
+# ---------------------------------------------------------------------------
+
+
+@register_vjp(OP_CONV1D)
+def _vjp_conv1d(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    x = inputs[0]
+    weight = inputs[1]
+    arg = dict(output.arg)
+    arg.pop("vjp_of", None)
+    grad_x = _vjp_uop(
+        OP_CONV1D_BACKWARD_INPUT,
+        (dy, weight),
+        x.shape,
+        x.dtype,
+        output,
+        arg=arg,
+    )
+    grad_w = _vjp_uop(
+        OP_CONV1D_BACKWARD_WEIGHT,
+        (dy, x),
+        weight.shape,
+        weight.dtype,
+        output,
+        arg=arg,
+    )
+    if len(inputs) == 2:
+        return (grad_x, grad_w)
+    bias = inputs[2]
+    grad_b = _vjp_uop(
+        OP_CONV1D_BACKWARD_BIAS,
+        (dy,),
+        bias.shape,
+        bias.dtype,
+        output,
+        arg=arg,
+    )
+    return (grad_x, grad_w, grad_b)
+
+
+@register_vjp(OP_CONV2D)
+def _vjp_conv2d(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """Conv2d VJP as first-class IR.
+
+    Forward inputs are (input, weight[, bias]). Backward emits explicit
+    conv2d-backward primitives for input/weight and uses REDUCE(sum) for
+    bias. These have CPU reference handlers plus explicit WebGPU bridge
+    handlers for `realize_webgpu(...)` on gradient roots; default
+    `.backward()` still mutates CPU `.grad` buffers.
+    """
+    x = inputs[0]
+    weight = inputs[1]
+    arg = dict(output.arg)
+    arg.pop("vjp_of", None)
+    grad_x = _vjp_uop(
+        OP_CONV2D_BACKWARD_INPUT,
+        (dy, weight),
+        x.shape,
+        x.dtype,
+        output,
+        arg=arg,
+    )
+    grad_w = _vjp_uop(
+        OP_CONV2D_BACKWARD_WEIGHT,
+        (dy, x),
+        weight.shape,
+        weight.dtype,
+        output,
+        arg=arg,
+    )
+    if len(inputs) == 2:
+        return (grad_x, grad_w)
+    bias = inputs[2]
+    grad_b = _vjp_uop(
+        OP_CONV2D_BACKWARD_BIAS,
+        (dy,),
+        bias.shape,
+        bias.dtype,
+        output,
+        arg=arg,
+    )
+    return (grad_x, grad_w, grad_b)
+
+
+@register_vjp(OP_CONV3D)
+def _vjp_conv3d(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    """Conv3d VJP as first-class IR.
+
+    Mirrors Conv1d/Conv2d: forward inputs are (input, weight[, bias]);
+    backward emits explicit conv3d-backward primitives. CPU handlers are
+    authoritative today; WebGPU lowering can land behind the same opcodes.
+    """
+    x = inputs[0]
+    weight = inputs[1]
+    arg = dict(output.arg)
+    arg.pop("vjp_of", None)
+    grad_x = _vjp_uop(
+        OP_CONV3D_BACKWARD_INPUT,
+        (dy, weight),
+        x.shape,
+        x.dtype,
+        output,
+        arg=arg,
+    )
+    grad_w = _vjp_uop(
+        OP_CONV3D_BACKWARD_WEIGHT,
+        (dy, x),
+        weight.shape,
+        weight.dtype,
+        output,
+        arg=arg,
+    )
+    if len(inputs) == 2:
+        return (grad_x, grad_w)
+    bias = inputs[2]
+    grad_b = _vjp_uop(
+        OP_CONV3D_BACKWARD_BIAS,
+        (dy,),
+        bias.shape,
+        bias.dtype,
+        output,
+        arg=arg,
+    )
+    return (grad_x, grad_w, grad_b)
 
 
 # ---------------------------------------------------------------------------

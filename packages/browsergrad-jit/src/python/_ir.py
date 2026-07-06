@@ -19,11 +19,13 @@ hash the same. This is what lets the trace cache and pipeline cache
 
 Design notes:
 
-  * 23 opcodes total — corrects PRD-005's nominal 19. The extras are
+  * 40 opcodes total — corrects PRD-005's nominal 19. The extras are
     documented per-opcode below. Headline additions: RANDOM (dropout +
-    nn.init at trace time), CMP (boolean results), CUSTOM (opaque-NumPy
-    escape hatch for Conv2d/Pool/Attention until PRD-006 decomposes them),
-    INDEX/MASK (replacing PRD-005's overloaded GATHER).
+    nn.init at trace time), CMP (boolean results), CONV1D/CONV2D/CONV3D
+    primitive CNN ops and backward refs, CUSTOM
+    (opaque-NumPy escape hatch for Pool/Attention/etc. until
+    PRD-006 decomposes them), INDEX/MASK (replacing PRD-005's overloaded
+    GATHER).
   * Shape inference happens at construction. UOp(...) raises ShapeError
     with the user's traceback intact. Never pass shape inference downstream.
   * The hash is cached lazily on first access. Without this, hashing the
@@ -52,6 +54,12 @@ from ._errors import ShapeError
 #   Shape ops:     RESHAPE, PERMUTE, SLICE, PAD
 #   Conditional:   WHERE
 #   Indexing:      INDEX, MASK
+#   CNN:           CONV1D, CONV1D_BACKWARD_INPUT, CONV1D_BACKWARD_WEIGHT,
+#                  CONV1D_BACKWARD_BIAS, CONV2D,
+#                  CONV2D_BACKWARD_INPUT, CONV2D_BACKWARD_WEIGHT,
+#                  CONV2D_BACKWARD_BIAS, CONV3D,
+#                  CONV3D_BACKWARD_INPUT, CONV3D_BACKWARD_WEIGHT,
+#                  CONV3D_BACKWARD_BIAS
 #   Escape hatch:  CUSTOM
 # ---------------------------------------------------------------------------
 
@@ -69,6 +77,18 @@ OP_EXP     = "EXP"
 OP_LOG     = "LOG"
 OP_CMP     = "CMP"      # arg: {op: 'eq'|'lt'|'le'|'gt'|'ge'|'ne'}
 OP_MATMUL  = "MATMUL"
+OP_CONV1D  = "CONV1D"   # arg: {n,c_in,l_in,c_out,k,stride,padding,dilation,groups,l_out,has_bias}
+OP_CONV1D_BACKWARD_INPUT  = "CONV1D_BACKWARD_INPUT"   # inputs: (dy, weight), arg: conv1d metadata
+OP_CONV1D_BACKWARD_WEIGHT = "CONV1D_BACKWARD_WEIGHT"  # inputs: (dy, input), arg: conv1d metadata
+OP_CONV1D_BACKWARD_BIAS   = "CONV1D_BACKWARD_BIAS"    # inputs: (dy,), arg: conv1d metadata
+OP_CONV2D  = "CONV2D"   # arg: {n,c_in,h,w,c_out,kh,kw,stride_h,stride_w,pad_h,pad_w,dilation_h,dilation_w,groups,out_h,out_w,has_bias}
+OP_CONV2D_BACKWARD_INPUT  = "CONV2D_BACKWARD_INPUT"   # inputs: (dy, weight), arg: conv2d metadata
+OP_CONV2D_BACKWARD_WEIGHT = "CONV2D_BACKWARD_WEIGHT"  # inputs: (dy, input), arg: conv2d metadata
+OP_CONV2D_BACKWARD_BIAS   = "CONV2D_BACKWARD_BIAS"    # inputs: (dy,), arg: conv2d metadata
+OP_CONV3D  = "CONV3D"   # arg: {n,c_in,d,h,w,c_out,kd,kh,kw,stride_d,stride_h,stride_w,pad_d,pad_h,pad_w,dilation_d,dilation_h,dilation_w,groups,out_d,out_h,out_w,has_bias}
+OP_CONV3D_BACKWARD_INPUT  = "CONV3D_BACKWARD_INPUT"   # inputs: (dy, weight), arg: conv3d metadata
+OP_CONV3D_BACKWARD_WEIGHT = "CONV3D_BACKWARD_WEIGHT"  # inputs: (dy, input), arg: conv3d metadata
+OP_CONV3D_BACKWARD_BIAS   = "CONV3D_BACKWARD_BIAS"    # inputs: (dy,), arg: conv3d metadata
 OP_REDUCE  = "REDUCE"   # arg: {op, axis, keepdims}
 OP_RESHAPE = "RESHAPE"  # arg: {new_shape: tuple[int,...]}
 OP_PERMUTE = "PERMUTE"  # arg: {axes: tuple[int,...]}
@@ -107,7 +127,12 @@ OP_ISNAN = "ISNAN"  # inputs: (x,) → bool-typed mask of same shape
 ALL_OPS: FrozenSet[str] = frozenset({
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CMP,
-    OP_MATMUL, OP_REDUCE,
+    OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
+    OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
+    OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
+    OP_CONV2D_BACKWARD_WEIGHT, OP_CONV2D_BACKWARD_BIAS,
+    OP_CONV3D, OP_CONV3D_BACKWARD_INPUT, OP_CONV3D_BACKWARD_WEIGHT,
+    OP_CONV3D_BACKWARD_BIAS, OP_REDUCE,
     OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     # Fusion-emitted (PRD-006)
@@ -117,7 +142,7 @@ ALL_OPS: FrozenSet[str] = frozenset({
     # Mixed precision (PRD-010)
     OP_ISNAN,
 })
-assert len(ALL_OPS) == 28, "opcode count drifted from PRD-005+006+007+010"
+assert len(ALL_OPS) == 40, "opcode count drifted from PRD-005+006+007+010+CNN"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -338,7 +363,15 @@ __all__ = [
     # Opcode strings
     "OP_BUFFER", "OP_LOAD", "OP_STORE", "OP_CONST", "OP_RANDOM",
     "OP_CAST", "OP_ADD", "OP_MUL", "OP_DIV", "OP_NEG",
-    "OP_EXP", "OP_LOG", "OP_CMP", "OP_MATMUL", "OP_REDUCE",
+    "OP_EXP", "OP_LOG", "OP_CMP", "OP_MATMUL",
+    "OP_CONV1D", "OP_CONV1D_BACKWARD_INPUT",
+    "OP_CONV1D_BACKWARD_WEIGHT", "OP_CONV1D_BACKWARD_BIAS",
+    "OP_CONV2D",
+    "OP_CONV2D_BACKWARD_INPUT", "OP_CONV2D_BACKWARD_WEIGHT",
+    "OP_CONV2D_BACKWARD_BIAS",
+    "OP_CONV3D", "OP_CONV3D_BACKWARD_INPUT",
+    "OP_CONV3D_BACKWARD_WEIGHT", "OP_CONV3D_BACKWARD_BIAS",
+    "OP_REDUCE",
     "OP_RESHAPE", "OP_PERMUTE", "OP_SLICE", "OP_PAD",
     "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",
     "OP_FUSED_ELEMENTWISE", "OP_FUSED_SOFTMAX",

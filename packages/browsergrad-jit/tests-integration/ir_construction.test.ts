@@ -33,13 +33,25 @@ browsergrad_jit.__version__
     expect(version).toMatch(/^0\.8\.\d+$/);
   });
 
-  it("exposes 28 opcodes in ALL_OPS (23 core + 2 fusion + 2 autograd + 1 AMP)", async () => {
+  it("exposes 40 opcodes in ALL_OPS (core + CNN + fusion + autograd + AMP)", async () => {
     const target = await getJitTarget();
-    const count = await target.run<number>(`
+    const ops = await target.run<string[]>(`
 from browsergrad_jit._ir import ALL_OPS
-len(ALL_OPS)
+sorted(ALL_OPS)
 `);
-    expect(count).toBe(28);
+    expect(ops).toHaveLength(40);
+    expect(ops).toContain("CONV1D");
+    expect(ops).toContain("CONV1D_BACKWARD_INPUT");
+    expect(ops).toContain("CONV1D_BACKWARD_WEIGHT");
+    expect(ops).toContain("CONV1D_BACKWARD_BIAS");
+    expect(ops).toContain("CONV2D");
+    expect(ops).toContain("CONV2D_BACKWARD_INPUT");
+    expect(ops).toContain("CONV2D_BACKWARD_WEIGHT");
+    expect(ops).toContain("CONV2D_BACKWARD_BIAS");
+    expect(ops).toContain("CONV3D");
+    expect(ops).toContain("CONV3D_BACKWARD_INPUT");
+    expect(ops).toContain("CONV3D_BACKWARD_WEIGHT");
+    expect(ops).toContain("CONV3D_BACKWARD_BIAS");
   });
 
   it("constructs a BUFFER leaf with the documented signature", async () => {

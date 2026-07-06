@@ -46,6 +46,7 @@ describe("Python source registry", () => {
       "browsergrad_jit/_bridge.py",
       "browsergrad_jit/_gpu_buffer_table.py",
       "browsergrad_jit/_realize_webgpu.py",
+      "browsergrad_jit/_gpu_plan.py",
       "browsergrad_jit/_func.py",
       "browsergrad_jit/_vmap.py",
       "browsergrad_jit/_webnn.py",
@@ -83,7 +84,7 @@ describe("Python source registry", () => {
     expect(initFile!.content).toMatch(/__version__ = "0\.8\.\d+"/);
   });
 
-  it("declares all 28 opcodes in _ir.py (23 core + 2 fusion + 2 autograd + 1 AMP)", () => {
+  it("declares all 40 opcodes in _ir.py (core + CNN + fusion + autograd + AMP)", () => {
     // Sanity check that the codegen bundled the IR with every opcode the
     // PRD-005 + PRD-006 + PRD-007 + PRD-010 surface needs.
     const irFile = SOURCE_FILES.find((f) => f.path.endsWith("_ir.py"));
@@ -91,7 +92,14 @@ describe("Python source registry", () => {
     const ops = [
       "OP_BUFFER", "OP_LOAD", "OP_STORE", "OP_CONST", "OP_RANDOM",
       "OP_CAST", "OP_ADD", "OP_MUL", "OP_DIV", "OP_NEG",
-      "OP_EXP", "OP_LOG", "OP_CMP", "OP_MATMUL", "OP_REDUCE",
+      "OP_EXP", "OP_LOG", "OP_CMP", "OP_MATMUL",
+      "OP_CONV1D", "OP_CONV1D_BACKWARD_INPUT",
+      "OP_CONV1D_BACKWARD_WEIGHT", "OP_CONV1D_BACKWARD_BIAS",
+      "OP_CONV2D", "OP_CONV2D_BACKWARD_INPUT",
+      "OP_CONV2D_BACKWARD_WEIGHT", "OP_CONV2D_BACKWARD_BIAS",
+      "OP_CONV3D", "OP_CONV3D_BACKWARD_INPUT",
+      "OP_CONV3D_BACKWARD_WEIGHT", "OP_CONV3D_BACKWARD_BIAS",
+      "OP_REDUCE",
       "OP_RESHAPE", "OP_PERMUTE", "OP_SLICE", "OP_PAD",
       "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",
       "OP_FUSED_ELEMENTWISE", "OP_FUSED_SOFTMAX",

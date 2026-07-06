@@ -52,7 +52,13 @@ from ._ir import (
     UOp, toposort,
     OP_BUFFER, OP_LOAD, OP_CONST, OP_CAST,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CMP,
-    OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
+    OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
+    OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
+    OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
+    OP_CONV2D_BACKWARD_WEIGHT, OP_CONV2D_BACKWARD_BIAS,
+    OP_CONV3D, OP_CONV3D_BACKWARD_INPUT,
+    OP_CONV3D_BACKWARD_WEIGHT, OP_CONV3D_BACKWARD_BIAS,
+    OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
     OP_WHERE, OP_BROADCAST_TO, OP_ISNAN,
     OP_PAD, OP_SLICE, OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_INDEX, OP_MASK, OP_RANDOM, OP_CUSTOM,
@@ -430,6 +436,80 @@ _VMAP_RULES[OP_CUSTOM] = _refuse(
     "OP_CUSTOM",
     "user-defined ops can have arbitrary semantics; provide a hand-"
     "written vmap rule via _vmap.register_vmap if you need it",
+)
+
+_VMAP_RULES[OP_CONV1D] = _refuse(
+    "OP_CONV1D",
+    "CNN batching needs an explicit rule for whether vmap maps over N, "
+    "channels, groups, or an outer batch dim",
+)
+
+_VMAP_RULES[OP_CONV1D_BACKWARD_INPUT] = _refuse(
+    "OP_CONV1D_BACKWARD_INPUT",
+    "conv backward batching needs explicit semantics for mapped batch, "
+    "channels, and groups",
+)
+
+_VMAP_RULES[OP_CONV1D_BACKWARD_WEIGHT] = _refuse(
+    "OP_CONV1D_BACKWARD_WEIGHT",
+    "conv backward batching needs explicit semantics for mapped batch, "
+    "channels, and groups",
+)
+
+_VMAP_RULES[OP_CONV1D_BACKWARD_BIAS] = _refuse(
+    "OP_CONV1D_BACKWARD_BIAS",
+    "conv backward batching needs explicit semantics for mapped batch "
+    "and output channels",
+)
+
+_VMAP_RULES[OP_CONV2D] = _refuse(
+    "OP_CONV2D",
+    "CNN batching needs an explicit rule for whether vmap maps over N, "
+    "channels, groups, or an outer batch dim. Add that rule before using "
+    "Conv2d under vmap",
+)
+
+_VMAP_RULES[OP_CONV2D_BACKWARD_INPUT] = _refuse(
+    "OP_CONV2D_BACKWARD_INPUT",
+    "conv backward batching needs explicit semantics for mapped batch, "
+    "channels, and groups",
+)
+
+_VMAP_RULES[OP_CONV2D_BACKWARD_WEIGHT] = _refuse(
+    "OP_CONV2D_BACKWARD_WEIGHT",
+    "conv backward batching needs explicit semantics for mapped batch, "
+    "channels, and groups",
+)
+
+_VMAP_RULES[OP_CONV2D_BACKWARD_BIAS] = _refuse(
+    "OP_CONV2D_BACKWARD_BIAS",
+    "conv backward batching needs explicit semantics for mapped batch "
+    "and output channels",
+)
+
+_VMAP_RULES[OP_CONV3D] = _refuse(
+    "OP_CONV3D",
+    "CNN batching needs an explicit rule for whether vmap maps over N, "
+    "channels, groups, or an outer batch dim. Add that rule before using "
+    "Conv3d under vmap",
+)
+
+_VMAP_RULES[OP_CONV3D_BACKWARD_INPUT] = _refuse(
+    "OP_CONV3D_BACKWARD_INPUT",
+    "conv backward batching needs explicit semantics for mapped batch, "
+    "channels, groups, and volume axes",
+)
+
+_VMAP_RULES[OP_CONV3D_BACKWARD_WEIGHT] = _refuse(
+    "OP_CONV3D_BACKWARD_WEIGHT",
+    "conv backward batching needs explicit semantics for mapped batch, "
+    "channels, groups, and volume axes",
+)
+
+_VMAP_RULES[OP_CONV3D_BACKWARD_BIAS] = _refuse(
+    "OP_CONV3D_BACKWARD_BIAS",
+    "conv backward batching needs explicit semantics for mapped batch "
+    "and output channels",
 )
 
 _VMAP_RULES[OP_STORE] = _refuse(

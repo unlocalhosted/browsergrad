@@ -28,7 +28,13 @@ from typing import Dict, List, Set, Tuple
 from ._ir import (
     UOp, toposort,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CMP,
-    OP_MATMUL, OP_REDUCE, OP_CAST, OP_RESHAPE, OP_PERMUTE,
+    OP_MATMUL, OP_CONV1D, OP_CONV1D_BACKWARD_INPUT,
+    OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
+    OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
+    OP_CONV2D_BACKWARD_WEIGHT, OP_CONV2D_BACKWARD_BIAS,
+    OP_CONV3D, OP_CONV3D_BACKWARD_INPUT,
+    OP_CONV3D_BACKWARD_WEIGHT, OP_CONV3D_BACKWARD_BIAS,
+    OP_REDUCE, OP_CAST, OP_RESHAPE, OP_PERMUTE,
     OP_BROADCAST_TO, OP_BUFFER, OP_LOAD, OP_CONST,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX, OP_CUSTOM,
 )
@@ -67,6 +73,33 @@ def estimate_flops(node: UOp) -> int:
         a_shape = node.inputs[0].shape
         K = a_shape[-1] if a_shape else 1
         return 2 * out_n * K
+    if op in (OP_CONV1D, OP_CONV1D_BACKWARD_INPUT, OP_CONV1D_BACKWARD_WEIGHT):
+        arg = node.arg
+        kernel = int(arg["k"]) * (int(arg["c_in"]) // int(arg["groups"]))
+        return 2 * out_n * kernel
+    if op == OP_CONV1D_BACKWARD_BIAS:
+        arg = node.arg
+        return int(arg["n"]) * int(arg["l_out"]) * int(arg["c_out"])
+    if op in (OP_CONV2D, OP_CONV2D_BACKWARD_INPUT, OP_CONV2D_BACKWARD_WEIGHT):
+        arg = node.arg
+        kernel = int(arg["kh"]) * int(arg["kw"]) * (int(arg["c_in"]) // int(arg["groups"]))
+        return 2 * out_n * kernel
+    if op == OP_CONV2D_BACKWARD_BIAS:
+        arg = node.arg
+        return int(arg["n"]) * int(arg["out_h"]) * int(arg["out_w"]) * int(arg["c_out"])
+    if op in (OP_CONV3D, OP_CONV3D_BACKWARD_INPUT, OP_CONV3D_BACKWARD_WEIGHT):
+        arg = node.arg
+        kernel = (
+            int(arg["kd"]) * int(arg["kh"]) * int(arg["kw"])
+            * (int(arg["c_in"]) // int(arg["groups"]))
+        )
+        return 2 * out_n * kernel
+    if op == OP_CONV3D_BACKWARD_BIAS:
+        arg = node.arg
+        return (
+            int(arg["n"]) * int(arg["out_d"]) * int(arg["out_h"])
+            * int(arg["out_w"]) * int(arg["c_out"])
+        )
     if op == OP_REDUCE:
         # Reduces over its input's reduced axes — approximate by input numel.
         return _numel(node.inputs[0].shape)

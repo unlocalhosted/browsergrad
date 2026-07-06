@@ -288,6 +288,236 @@ class Linear(Module):
 
 
 # ---------------------------------------------------------------------------
+# Convolution modules
+# ---------------------------------------------------------------------------
+
+
+class Conv1d(Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        stride: int = 1,
+        padding: int = 0,
+        dilation: int = 1,
+        groups: int = 1,
+        bias: bool = True,
+    ) -> None:
+        super().__init__()
+        if groups <= 0:
+            raise ValueError("Conv1d: groups must be positive")
+        if in_channels % groups != 0:
+            raise ValueError("Conv1d: in_channels must be divisible by groups")
+        if out_channels % groups != 0:
+            raise ValueError("Conv1d: out_channels must be divisible by groups")
+        self.in_channels = int(in_channels)
+        self.out_channels = int(out_channels)
+        self.kernel_size = int(kernel_size)
+        self.stride = int(stride)
+        self.padding = int(padding)
+        self.dilation = int(dilation)
+        self.groups = int(groups)
+        fan_in = (self.in_channels // self.groups) * self.kernel_size
+        bound = 1.0 / math.sqrt(fan_in)
+        weight = np.random.uniform(
+            -bound,
+            bound,
+            size=(self.out_channels, self.in_channels // self.groups, self.kernel_size),
+        ).astype(np.float32)
+        self.weight = Parameter(from_numpy(weight, requires_grad=True))
+        if bias:
+            self.bias: Optional[Parameter] = Parameter(
+                from_numpy(np.zeros((self.out_channels,), dtype=np.float32), requires_grad=True)
+            )
+        else:
+            self.bias = None
+
+    def forward(self, x: TensorProxy) -> TensorProxy:
+        return F.conv1d(
+            x,
+            self.weight,
+            self.bias,
+            stride=self.stride,
+            padding=self.padding,
+            dilation=self.dilation,
+            groups=self.groups,
+        )
+
+
+class Conv2d(Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: Any,
+        stride: Any = 1,
+        padding: Any = 0,
+        dilation: Any = 1,
+        groups: int = 1,
+        bias: bool = True,
+    ) -> None:
+        super().__init__()
+        if groups <= 0:
+            raise ValueError("Conv2d: groups must be positive")
+        if in_channels % groups != 0:
+            raise ValueError("Conv2d: in_channels must be divisible by groups")
+        if out_channels % groups != 0:
+            raise ValueError("Conv2d: out_channels must be divisible by groups")
+        self.in_channels = int(in_channels)
+        self.out_channels = int(out_channels)
+        self.kernel_size = F._pair2(kernel_size, "kernel_size")
+        self.stride = F._pair2(stride, "stride")
+        self.padding = F._pair2(padding, "padding")
+        self.dilation = F._pair2(dilation, "dilation")
+        self.groups = int(groups)
+        kh, kw = self.kernel_size
+        fan_in = (self.in_channels // self.groups) * kh * kw
+        bound = 1.0 / math.sqrt(fan_in)
+        weight = np.random.uniform(
+            -bound,
+            bound,
+            size=(self.out_channels, self.in_channels // self.groups, kh, kw),
+        ).astype(np.float32)
+        self.weight = Parameter(from_numpy(weight, requires_grad=True))
+        if bias:
+            self.bias: Optional[Parameter] = Parameter(
+                from_numpy(np.zeros((self.out_channels,), dtype=np.float32), requires_grad=True)
+            )
+        else:
+            self.bias = None
+
+    def forward(self, x: TensorProxy) -> TensorProxy:
+        return F.conv2d(
+            x,
+            self.weight,
+            self.bias,
+            stride=self.stride,
+            padding=self.padding,
+            dilation=self.dilation,
+            groups=self.groups,
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"Conv2d({self.in_channels}, {self.out_channels}, "
+            f"kernel_size={self.kernel_size}, stride={self.stride}, "
+            f"padding={self.padding}, dilation={self.dilation}, groups={self.groups})"
+        )
+
+
+class ConvTranspose2d(Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: Any,
+        stride: Any = 1,
+        padding: Any = 0,
+        output_padding: Any = 0,
+        groups: int = 1,
+        bias: bool = True,
+        dilation: Any = 1,
+    ) -> None:
+        super().__init__()
+        if groups <= 0:
+            raise ValueError("ConvTranspose2d: groups must be positive")
+        if in_channels % groups != 0:
+            raise ValueError("ConvTranspose2d: in_channels must be divisible by groups")
+        if out_channels % groups != 0:
+            raise ValueError("ConvTranspose2d: out_channels must be divisible by groups")
+        self.in_channels = int(in_channels)
+        self.out_channels = int(out_channels)
+        self.kernel_size = F._pair2(kernel_size, "kernel_size")
+        self.stride = F._pair2(stride, "stride")
+        self.padding = F._pair2(padding, "padding")
+        self.output_padding = F._pair2(output_padding, "output_padding")
+        self.dilation = F._pair2(dilation, "dilation")
+        self.groups = int(groups)
+        kh, kw = self.kernel_size
+        fan_in = (self.out_channels // self.groups) * kh * kw
+        bound = 1.0 / math.sqrt(fan_in)
+        weight = np.random.uniform(
+            -bound,
+            bound,
+            size=(self.in_channels, self.out_channels // self.groups, kh, kw),
+        ).astype(np.float32)
+        self.weight = Parameter(from_numpy(weight, requires_grad=True))
+        if bias:
+            self.bias: Optional[Parameter] = Parameter(
+                from_numpy(np.zeros((self.out_channels,), dtype=np.float32), requires_grad=True)
+            )
+        else:
+            self.bias = None
+
+    def forward(self, x: TensorProxy) -> TensorProxy:
+        return F.conv_transpose2d(
+            x,
+            self.weight,
+            self.bias,
+            stride=self.stride,
+            padding=self.padding,
+            output_padding=self.output_padding,
+            groups=self.groups,
+            dilation=self.dilation,
+        )
+
+
+class Conv3d(Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: Any,
+        stride: Any = 1,
+        padding: Any = 0,
+        dilation: Any = 1,
+        groups: int = 1,
+        bias: bool = True,
+    ) -> None:
+        super().__init__()
+        if groups <= 0:
+            raise ValueError("Conv3d: groups must be positive")
+        if in_channels % groups != 0:
+            raise ValueError("Conv3d: in_channels must be divisible by groups")
+        if out_channels % groups != 0:
+            raise ValueError("Conv3d: out_channels must be divisible by groups")
+        self.in_channels = int(in_channels)
+        self.out_channels = int(out_channels)
+        self.kernel_size = F._triple3(kernel_size, "kernel_size")
+        self.stride = F._triple3(stride, "stride")
+        self.padding = F._triple3(padding, "padding")
+        self.dilation = F._triple3(dilation, "dilation")
+        self.groups = int(groups)
+        kd, kh, kw = self.kernel_size
+        fan_in = (self.in_channels // self.groups) * kd * kh * kw
+        bound = 1.0 / math.sqrt(fan_in)
+        weight = np.random.uniform(
+            -bound,
+            bound,
+            size=(self.out_channels, self.in_channels // self.groups, kd, kh, kw),
+        ).astype(np.float32)
+        self.weight = Parameter(from_numpy(weight, requires_grad=True))
+        if bias:
+            self.bias: Optional[Parameter] = Parameter(
+                from_numpy(np.zeros((self.out_channels,), dtype=np.float32), requires_grad=True)
+            )
+        else:
+            self.bias = None
+
+    def forward(self, x: TensorProxy) -> TensorProxy:
+        return F.conv3d(
+            x,
+            self.weight,
+            self.bias,
+            stride=self.stride,
+            padding=self.padding,
+            dilation=self.dilation,
+            groups=self.groups,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Activation modules — thin wrappers around the functional equivalents
 # ---------------------------------------------------------------------------
 
@@ -589,6 +819,10 @@ __all__ = [
     "Module",
     "Parameter",
     "Linear",
+    "Conv1d",
+    "Conv2d",
+    "ConvTranspose2d",
+    "Conv3d",
     "ReLU",
     "Sigmoid",
     "Tanh",

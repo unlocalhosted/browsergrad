@@ -52,7 +52,7 @@ from ._ir import (
 
 
 # Force inputs to f16 (the operation runs in f16). Matmul is the marquee win.
-# Conv stays excluded in v0 (CONV2D is opaque CUSTOM today).
+# Conv stays excluded until CONV2D has f16 WGSL + parity coverage.
 ALLOWLIST_F16 = frozenset({OP_MATMUL})
 
 # Force inputs to f32. These are numerically sensitive — softmax/layernorm

@@ -33,7 +33,13 @@ from ._ir import (
     UOp, ALL_OPS, toposort,
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM,
     OP_CAST, OP_ADD, OP_MUL, OP_DIV, OP_NEG,
-    OP_EXP, OP_LOG, OP_CMP, OP_MATMUL, OP_REDUCE,
+    OP_EXP, OP_LOG, OP_CMP, OP_MATMUL,
+    OP_CONV1D, OP_CONV1D_BACKWARD_INPUT, OP_CONV1D_BACKWARD_WEIGHT,
+    OP_CONV1D_BACKWARD_BIAS, OP_CONV2D,
+    OP_CONV2D_BACKWARD_INPUT, OP_CONV2D_BACKWARD_WEIGHT,
+    OP_CONV2D_BACKWARD_BIAS, OP_CONV3D,
+    OP_CONV3D_BACKWARD_INPUT, OP_CONV3D_BACKWARD_WEIGHT,
+    OP_CONV3D_BACKWARD_BIAS, OP_REDUCE,
     OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
@@ -168,6 +174,474 @@ def _h_matmul(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
         out = a.astype(np.float32) @ b.astype(np.float32)
         return out.astype(np.dtype(node.dtype), copy=False)
     return a @ b
+
+
+def _h_conv1d(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    x = vt[id(node.inputs[0])]
+    w_arr = vt[id(node.inputs[1])]
+    bias_arr = vt[id(node.inputs[2])] if bool(node.arg.get("has_bias", False)) else None
+    arg = node.arg
+    n = int(arg["n"])
+    c_in = int(arg["c_in"])
+    l_in = int(arg["l_in"])
+    c_out = int(arg["c_out"])
+    k = int(arg["k"])
+    stride = int(arg["stride"])
+    padding = int(arg["padding"])
+    dilation = int(arg["dilation"])
+    groups = int(arg["groups"])
+    l_out = int(arg["l_out"])
+    c_per_group = c_in // groups
+    out_per_group = c_out // groups
+    eff_k = dilation * (k - 1) + 1
+    if padding > 0:
+        x_pad = np.pad(x, ((0, 0), (0, 0), (padding, padding)), mode="constant")
+    else:
+        x_pad = x
+    out = np.zeros((n, c_out, l_out), dtype=np.float32)
+    for nn in range(n):
+        for g in range(groups):
+            c0 = g * c_per_group
+            o0 = g * out_per_group
+            for co in range(out_per_group):
+                for i in range(l_out):
+                    l0 = i * stride
+                    out[nn, o0 + co, i] = (
+                        x_pad[nn, c0:c0+c_per_group, l0:l0+eff_k:dilation]
+                        * w_arr[o0 + co]
+                    ).sum()
+    if bias_arr is not None:
+        out += bias_arr.reshape(1, c_out, 1)
+    return out.astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_conv1d_backward_input(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    dy = vt[id(node.inputs[0])]
+    weight = vt[id(node.inputs[1])]
+    arg = node.arg
+    n = int(arg["n"])
+    c_in = int(arg["c_in"])
+    l_in = int(arg["l_in"])
+    c_out = int(arg["c_out"])
+    k = int(arg["k"])
+    stride = int(arg["stride"])
+    padding = int(arg["padding"])
+    dilation = int(arg["dilation"])
+    groups = int(arg["groups"])
+    l_out = int(arg["l_out"])
+    c_per_group = c_in // groups
+    out_per_group = c_out // groups
+    grad_x_pad = np.zeros((n, c_in, l_in + 2 * padding), dtype=np.float32)
+    for nn in range(n):
+        for g in range(groups):
+            c0 = g * c_per_group
+            o0 = g * out_per_group
+            for co in range(out_per_group):
+                out_ch = o0 + co
+                for i in range(l_out):
+                    grad_val = dy[nn, out_ch, i]
+                    base = i * stride
+                    for ci in range(c_per_group):
+                        in_ch = c0 + ci
+                        for r in range(k):
+                            li = base + r * dilation
+                            grad_x_pad[nn, in_ch, li] += grad_val * weight[out_ch, ci, r]
+    grad_x = (
+        grad_x_pad[:, :, padding:padding+l_in].copy()
+        if padding > 0 else grad_x_pad
+    )
+    return grad_x.astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_conv1d_backward_weight(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    dy = vt[id(node.inputs[0])]
+    x = vt[id(node.inputs[1])]
+    arg = node.arg
+    n = int(arg["n"])
+    c_in = int(arg["c_in"])
+    c_out = int(arg["c_out"])
+    k = int(arg["k"])
+    stride = int(arg["stride"])
+    padding = int(arg["padding"])
+    dilation = int(arg["dilation"])
+    groups = int(arg["groups"])
+    l_out = int(arg["l_out"])
+    c_per_group = c_in // groups
+    out_per_group = c_out // groups
+    if padding > 0:
+        x_pad = np.pad(x, ((0, 0), (0, 0), (padding, padding)), mode="constant")
+    else:
+        x_pad = x
+    grad_w = np.zeros((c_out, c_per_group, k), dtype=np.float32)
+    for nn in range(n):
+        for g in range(groups):
+            c0 = g * c_per_group
+            o0 = g * out_per_group
+            for co in range(out_per_group):
+                out_ch = o0 + co
+                for ci in range(c_per_group):
+                    in_ch = c0 + ci
+                    for r in range(k):
+                        acc = 0.0
+                        for i in range(l_out):
+                            li = i * stride + r * dilation
+                            acc += dy[nn, out_ch, i] * x_pad[nn, in_ch, li]
+                        grad_w[out_ch, ci, r] += acc
+    return grad_w.astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_conv1d_backward_bias(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    dy = vt[id(node.inputs[0])]
+    return dy.sum(axis=(0, 2)).astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_conv2d(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    x = vt[id(node.inputs[0])]
+    w_arr = vt[id(node.inputs[1])]
+    bias_arr = vt[id(node.inputs[2])] if bool(node.arg.get("has_bias", False)) else None
+    arg = node.arg
+    n = int(arg["n"])
+    c_in = int(arg["c_in"])
+    h = int(arg["h"])
+    w = int(arg["w"])
+    c_out = int(arg["c_out"])
+    kh = int(arg["kh"])
+    kw = int(arg["kw"])
+    stride_h = int(arg["stride_h"])
+    stride_w = int(arg["stride_w"])
+    pad_h = int(arg["pad_h"])
+    pad_w = int(arg["pad_w"])
+    dilation_h = int(arg["dilation_h"])
+    dilation_w = int(arg["dilation_w"])
+    groups = int(arg["groups"])
+    out_h = int(arg["out_h"])
+    out_w = int(arg["out_w"])
+    c_per_group = c_in // groups
+    out_per_group = c_out // groups
+    eff_h = dilation_h * (kh - 1) + 1
+    eff_w = dilation_w * (kw - 1) + 1
+    if pad_h > 0 or pad_w > 0:
+        x_pad = np.pad(x, ((0, 0), (0, 0), (pad_h, pad_h), (pad_w, pad_w)), mode="constant")
+    else:
+        x_pad = x
+    out = np.zeros((n, c_out, out_h, out_w), dtype=np.float32)
+    for nn in range(n):
+        for g in range(groups):
+            c0 = g * c_per_group
+            o0 = g * out_per_group
+            for co in range(out_per_group):
+                for oh in range(out_h):
+                    for ow in range(out_w):
+                        h0 = oh * stride_h
+                        w0 = ow * stride_w
+                        out[nn, o0 + co, oh, ow] = (
+                            x_pad[
+                                nn,
+                                c0:c0+c_per_group,
+                                h0:h0+eff_h:dilation_h,
+                                w0:w0+eff_w:dilation_w,
+                            ]
+                            * w_arr[o0 + co]
+                        ).sum()
+    if bias_arr is not None:
+        out += bias_arr.reshape(1, c_out, 1, 1)
+    return out.astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_conv2d_backward_input(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    dy = vt[id(node.inputs[0])]
+    weight = vt[id(node.inputs[1])]
+    arg = node.arg
+    n = int(arg["n"])
+    c_in = int(arg["c_in"])
+    h = int(arg["h"])
+    w = int(arg["w"])
+    c_out = int(arg["c_out"])
+    kh = int(arg["kh"])
+    kw = int(arg["kw"])
+    stride_h = int(arg["stride_h"])
+    stride_w = int(arg["stride_w"])
+    pad_h = int(arg["pad_h"])
+    pad_w = int(arg["pad_w"])
+    dilation_h = int(arg["dilation_h"])
+    dilation_w = int(arg["dilation_w"])
+    groups = int(arg["groups"])
+    out_h = int(arg["out_h"])
+    out_w = int(arg["out_w"])
+    c_per_group = c_in // groups
+    out_per_group = c_out // groups
+    grad_x_pad = np.zeros(
+        (n, c_in, h + 2 * pad_h, w + 2 * pad_w),
+        dtype=np.float32,
+    )
+    for nn in range(n):
+        for g in range(groups):
+            c0 = g * c_per_group
+            o0 = g * out_per_group
+            for co in range(out_per_group):
+                out_ch = o0 + co
+                for oh in range(out_h):
+                    for ow in range(out_w):
+                        grad_val = dy[nn, out_ch, oh, ow]
+                        h_base = oh * stride_h
+                        w_base = ow * stride_w
+                        for ci in range(c_per_group):
+                            in_ch = c0 + ci
+                            for r in range(kh):
+                                ih = h_base + r * dilation_h
+                                for s in range(kw):
+                                    iw = w_base + s * dilation_w
+                                    grad_x_pad[nn, in_ch, ih, iw] += (
+                                        grad_val * weight[out_ch, ci, r, s]
+                                    )
+    grad_x = (
+        grad_x_pad[:, :, pad_h:pad_h+h, pad_w:pad_w+w].copy()
+        if pad_h > 0 or pad_w > 0 else grad_x_pad
+    )
+    return grad_x.astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_conv2d_backward_weight(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    dy = vt[id(node.inputs[0])]
+    x = vt[id(node.inputs[1])]
+    arg = node.arg
+    n = int(arg["n"])
+    c_in = int(arg["c_in"])
+    c_out = int(arg["c_out"])
+    kh = int(arg["kh"])
+    kw = int(arg["kw"])
+    stride_h = int(arg["stride_h"])
+    stride_w = int(arg["stride_w"])
+    pad_h = int(arg["pad_h"])
+    pad_w = int(arg["pad_w"])
+    dilation_h = int(arg["dilation_h"])
+    dilation_w = int(arg["dilation_w"])
+    groups = int(arg["groups"])
+    out_h = int(arg["out_h"])
+    out_w = int(arg["out_w"])
+    c_per_group = c_in // groups
+    out_per_group = c_out // groups
+    if pad_h > 0 or pad_w > 0:
+        x_pad = np.pad(x, ((0, 0), (0, 0), (pad_h, pad_h), (pad_w, pad_w)), mode="constant")
+    else:
+        x_pad = x
+    grad_w = np.zeros((c_out, c_per_group, kh, kw), dtype=np.float32)
+    for nn in range(n):
+        for g in range(groups):
+            c0 = g * c_per_group
+            o0 = g * out_per_group
+            for co in range(out_per_group):
+                out_ch = o0 + co
+                for ci in range(c_per_group):
+                    in_ch = c0 + ci
+                    for r in range(kh):
+                        for s in range(kw):
+                            acc = 0.0
+                            for oh in range(out_h):
+                                ih = oh * stride_h + r * dilation_h
+                                for ow in range(out_w):
+                                    iw = ow * stride_w + s * dilation_w
+                                    acc += dy[nn, out_ch, oh, ow] * x_pad[nn, in_ch, ih, iw]
+                            grad_w[out_ch, ci, r, s] += acc
+    return grad_w.astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_conv2d_backward_bias(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    dy = vt[id(node.inputs[0])]
+    return dy.sum(axis=(0, 2, 3)).astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_conv3d(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    x = vt[id(node.inputs[0])]
+    w_arr = vt[id(node.inputs[1])]
+    bias_arr = vt[id(node.inputs[2])] if bool(node.arg.get("has_bias", False)) else None
+    arg = node.arg
+    n = int(arg["n"])
+    c_in = int(arg["c_in"])
+    d = int(arg["d"])
+    h = int(arg["h"])
+    w = int(arg["w"])
+    c_out = int(arg["c_out"])
+    kd = int(arg["kd"])
+    kh = int(arg["kh"])
+    kw = int(arg["kw"])
+    stride_d = int(arg["stride_d"])
+    stride_h = int(arg["stride_h"])
+    stride_w = int(arg["stride_w"])
+    pad_d = int(arg["pad_d"])
+    pad_h = int(arg["pad_h"])
+    pad_w = int(arg["pad_w"])
+    dilation_d = int(arg["dilation_d"])
+    dilation_h = int(arg["dilation_h"])
+    dilation_w = int(arg["dilation_w"])
+    groups = int(arg["groups"])
+    out_d = int(arg["out_d"])
+    out_h = int(arg["out_h"])
+    out_w = int(arg["out_w"])
+    c_per_group = c_in // groups
+    out_per_group = c_out // groups
+    if pad_d > 0 or pad_h > 0 or pad_w > 0:
+        x_pad = np.pad(
+            x,
+            ((0, 0), (0, 0), (pad_d, pad_d), (pad_h, pad_h), (pad_w, pad_w)),
+            mode="constant",
+        )
+    else:
+        x_pad = x
+    out = np.zeros((n, c_out, out_d, out_h, out_w), dtype=np.float32)
+    for nn in range(n):
+        for g in range(groups):
+            c0 = g * c_per_group
+            o0 = g * out_per_group
+            for co in range(out_per_group):
+                out_ch = o0 + co
+                for od in range(out_d):
+                    d0 = od * stride_d
+                    for oh in range(out_h):
+                        h0 = oh * stride_h
+                        for ow in range(out_w):
+                            w0 = ow * stride_w
+                            out[nn, out_ch, od, oh, ow] = (
+                                x_pad[
+                                    nn,
+                                    c0:c0+c_per_group,
+                                    d0:d0+dilation_d*(kd-1)+1:dilation_d,
+                                    h0:h0+dilation_h*(kh-1)+1:dilation_h,
+                                    w0:w0+dilation_w*(kw-1)+1:dilation_w,
+                                ]
+                                * w_arr[out_ch]
+                            ).sum()
+    if bias_arr is not None:
+        out += bias_arr.reshape(1, c_out, 1, 1, 1)
+    return out.astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_conv3d_backward_input(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    dy = vt[id(node.inputs[0])]
+    weight = vt[id(node.inputs[1])]
+    arg = node.arg
+    n = int(arg["n"])
+    c_in = int(arg["c_in"])
+    d = int(arg["d"])
+    h = int(arg["h"])
+    w = int(arg["w"])
+    c_out = int(arg["c_out"])
+    kd = int(arg["kd"])
+    kh = int(arg["kh"])
+    kw = int(arg["kw"])
+    stride_d = int(arg["stride_d"])
+    stride_h = int(arg["stride_h"])
+    stride_w = int(arg["stride_w"])
+    pad_d = int(arg["pad_d"])
+    pad_h = int(arg["pad_h"])
+    pad_w = int(arg["pad_w"])
+    dilation_d = int(arg["dilation_d"])
+    dilation_h = int(arg["dilation_h"])
+    dilation_w = int(arg["dilation_w"])
+    groups = int(arg["groups"])
+    out_d = int(arg["out_d"])
+    out_h = int(arg["out_h"])
+    out_w = int(arg["out_w"])
+    c_per_group = c_in // groups
+    out_per_group = c_out // groups
+    grad_x_pad = np.zeros(
+        (n, c_in, d + 2 * pad_d, h + 2 * pad_h, w + 2 * pad_w),
+        dtype=np.float32,
+    )
+    for nn in range(n):
+        for g in range(groups):
+            c0 = g * c_per_group
+            o0 = g * out_per_group
+            for co in range(out_per_group):
+                out_ch = o0 + co
+                for od in range(out_d):
+                    d_base = od * stride_d
+                    for oh in range(out_h):
+                        h_base = oh * stride_h
+                        for ow in range(out_w):
+                            grad_val = dy[nn, out_ch, od, oh, ow]
+                            w_base = ow * stride_w
+                            for ci in range(c_per_group):
+                                in_ch = c0 + ci
+                                for rd in range(kd):
+                                    di = d_base + rd * dilation_d
+                                    for rh in range(kh):
+                                        hi = h_base + rh * dilation_h
+                                        for rw in range(kw):
+                                            wi = w_base + rw * dilation_w
+                                            grad_x_pad[nn, in_ch, di, hi, wi] += (
+                                                grad_val * weight[out_ch, ci, rd, rh, rw]
+                                            )
+    grad_x = (
+        grad_x_pad[:, :, pad_d:pad_d+d, pad_h:pad_h+h, pad_w:pad_w+w].copy()
+        if pad_d > 0 or pad_h > 0 or pad_w > 0 else grad_x_pad
+    )
+    return grad_x.astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_conv3d_backward_weight(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    dy = vt[id(node.inputs[0])]
+    x = vt[id(node.inputs[1])]
+    arg = node.arg
+    n = int(arg["n"])
+    c_in = int(arg["c_in"])
+    c_out = int(arg["c_out"])
+    kd = int(arg["kd"])
+    kh = int(arg["kh"])
+    kw = int(arg["kw"])
+    stride_d = int(arg["stride_d"])
+    stride_h = int(arg["stride_h"])
+    stride_w = int(arg["stride_w"])
+    pad_d = int(arg["pad_d"])
+    pad_h = int(arg["pad_h"])
+    pad_w = int(arg["pad_w"])
+    dilation_d = int(arg["dilation_d"])
+    dilation_h = int(arg["dilation_h"])
+    dilation_w = int(arg["dilation_w"])
+    groups = int(arg["groups"])
+    out_d = int(arg["out_d"])
+    out_h = int(arg["out_h"])
+    out_w = int(arg["out_w"])
+    c_per_group = c_in // groups
+    out_per_group = c_out // groups
+    if pad_d > 0 or pad_h > 0 or pad_w > 0:
+        x_pad = np.pad(
+            x,
+            ((0, 0), (0, 0), (pad_d, pad_d), (pad_h, pad_h), (pad_w, pad_w)),
+            mode="constant",
+        )
+    else:
+        x_pad = x
+    grad_w = np.zeros((c_out, c_per_group, kd, kh, kw), dtype=np.float32)
+    for nn in range(n):
+        for g in range(groups):
+            c0 = g * c_per_group
+            o0 = g * out_per_group
+            for co in range(out_per_group):
+                out_ch = o0 + co
+                for ci in range(c_per_group):
+                    in_ch = c0 + ci
+                    for rd in range(kd):
+                        for rh in range(kh):
+                            for rw in range(kw):
+                                acc = 0.0
+                                for od in range(out_d):
+                                    di = od * stride_d + rd * dilation_d
+                                    for oh in range(out_h):
+                                        hi = oh * stride_h + rh * dilation_h
+                                        for ow in range(out_w):
+                                            wi = ow * stride_w + rw * dilation_w
+                                            acc += (
+                                                dy[nn, out_ch, od, oh, ow]
+                                                * x_pad[nn, in_ch, di, hi, wi]
+                                            )
+                                grad_w[out_ch, ci, rd, rh, rw] += acc
+    return grad_w.astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_conv3d_backward_bias(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    dy = vt[id(node.inputs[0])]
+    return dy.sum(axis=(0, 2, 3, 4)).astype(np.dtype(node.dtype), copy=False)
 
 
 def _h_isnan(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
@@ -419,6 +893,18 @@ _DISPATCH: dict[str, Handler] = {
     OP_LOG:     _h_log,
     OP_CMP:     _h_cmp,
     OP_MATMUL:  _h_matmul,
+    OP_CONV1D:  _h_conv1d,
+    OP_CONV1D_BACKWARD_INPUT: _h_conv1d_backward_input,
+    OP_CONV1D_BACKWARD_WEIGHT: _h_conv1d_backward_weight,
+    OP_CONV1D_BACKWARD_BIAS: _h_conv1d_backward_bias,
+    OP_CONV2D:  _h_conv2d,
+    OP_CONV2D_BACKWARD_INPUT: _h_conv2d_backward_input,
+    OP_CONV2D_BACKWARD_WEIGHT: _h_conv2d_backward_weight,
+    OP_CONV2D_BACKWARD_BIAS: _h_conv2d_backward_bias,
+    OP_CONV3D:  _h_conv3d,
+    OP_CONV3D_BACKWARD_INPUT: _h_conv3d_backward_input,
+    OP_CONV3D_BACKWARD_WEIGHT: _h_conv3d_backward_weight,
+    OP_CONV3D_BACKWARD_BIAS: _h_conv3d_backward_bias,
     OP_REDUCE:  _h_reduce,
     OP_RESHAPE: _h_reshape,
     OP_PERMUTE: _h_permute,

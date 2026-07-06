@@ -42,6 +42,7 @@ import {
   type FusedOp,
 } from "./kernels/fused_elementwise.js";
 import { flashAttentionDirect } from "./kernels/flash_attention.js";
+import { runTensorGpuPlan, type TensorPlanInput } from "./tensor_plan.js";
 import { KernelError, type KernelDevice } from "./types.js";
 
 type Handle = number;
@@ -90,6 +91,131 @@ export interface WebGpuRealizerBridge {
     scale: number,
     dtype: string,
   ): Promise<Handle>;
+  conv1d(
+    input: Handle,
+    weight: Handle,
+    bias: Handle | null,
+    n: number,
+    cIn: number,
+    lIn: number,
+    cOut: number,
+    k: number,
+    stride: number,
+    padding: number,
+    dilation: number,
+    groups: number,
+    lOut: number,
+    dtype: string,
+  ): Handle;
+  conv1d_backward_input(
+    dy: Handle,
+    weight: Handle,
+    n: number,
+    cIn: number,
+    lIn: number,
+    cOut: number,
+    k: number,
+    stride: number,
+    padding: number,
+    dilation: number,
+    groups: number,
+    lOut: number,
+    dtype: string,
+  ): Handle;
+  conv1d_backward_weight(
+    dy: Handle,
+    input: Handle,
+    n: number,
+    cIn: number,
+    lIn: number,
+    cOut: number,
+    k: number,
+    stride: number,
+    padding: number,
+    dilation: number,
+    groups: number,
+    lOut: number,
+    dtype: string,
+  ): Handle;
+  conv1d_backward_bias(
+    dy: Handle,
+    n: number,
+    cOut: number,
+    lOut: number,
+    dtype: string,
+  ): Handle;
+  conv2d(
+    input: Handle,
+    weight: Handle,
+    bias: Handle | null,
+    n: number,
+    cIn: number,
+    h: number,
+    w: number,
+    cOut: number,
+    kh: number,
+    kw: number,
+    strideH: number,
+    strideW: number,
+    padH: number,
+    padW: number,
+    dilationH: number,
+    dilationW: number,
+    groups: number,
+    outH: number,
+    outW: number,
+    dtype: string,
+  ): Handle;
+  conv2d_backward_input(
+    dy: Handle,
+    weight: Handle,
+    n: number,
+    cIn: number,
+    h: number,
+    w: number,
+    cOut: number,
+    kh: number,
+    kw: number,
+    strideH: number,
+    strideW: number,
+    padH: number,
+    padW: number,
+    dilationH: number,
+    dilationW: number,
+    groups: number,
+    outH: number,
+    outW: number,
+    dtype: string,
+  ): Handle;
+  conv2d_backward_weight(
+    dy: Handle,
+    input: Handle,
+    n: number,
+    cIn: number,
+    h: number,
+    w: number,
+    cOut: number,
+    kh: number,
+    kw: number,
+    strideH: number,
+    strideW: number,
+    padH: number,
+    padW: number,
+    dilationH: number,
+    dilationW: number,
+    groups: number,
+    outH: number,
+    outW: number,
+    dtype: string,
+  ): Handle;
+  conv2d_backward_bias(
+    dy: Handle,
+    n: number,
+    cOut: number,
+    outH: number,
+    outW: number,
+    dtype: string,
+  ): Handle;
   run_user_kernel(
     inputs: readonly Handle[],
     wgsl: string,
@@ -101,6 +227,11 @@ export interface WebGpuRealizerBridge {
     outputShape: readonly number[],
     dtype: string,
   ): Handle;
+  run_tensor_plan(
+    plan: unknown,
+    inputs: readonly unknown[],
+    dtype: string,
+  ): Promise<Uint8Array>;
   /** Diagnostic — number of GPU buffers currently alive. */
   aliveHandleCount(): number;
 }
@@ -112,6 +243,561 @@ function assertF32(dtype: string, op: string): void {
         `f16/AMP path is PRD-012a.`,
     );
   }
+}
+
+function assertPositiveInt(value: number, name: string): void {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new KernelError(`WebGPU bridge: ${name} must be a positive integer`);
+  }
+}
+
+function conv1dWgsl(hasBias: boolean): string {
+  const biasBinding = hasBias ? "@group(0) @binding(2) var<storage, read> B: array<f32>;" : "";
+  const outputBinding = hasBias ? 3 : 2;
+  const paramsBinding = hasBias ? 4 : 3;
+  const biasLine = hasBias ? " + B[co]" : "";
+  return `
+@group(0) @binding(0) var<storage, read> X: array<f32>;
+@group(0) @binding(1) var<storage, read> W: array<f32>;
+${biasBinding}
+@group(0) @binding(${outputBinding}) var<storage, read_write> Y: array<f32>;
+
+struct Params {
+  n: u32,
+  c_in: u32,
+  l_in: u32,
+  c_out: u32,
+  k: u32,
+  stride: u32,
+  padding: u32,
+  dilation: u32,
+  groups: u32,
+  l_out: u32,
+};
+@group(0) @binding(${paramsBinding}) var<uniform> P: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x;
+  let total = P.n * P.c_out * P.l_out;
+  if (idx >= total) { return; }
+  let pos = idx % P.l_out;
+  let co = (idx / P.l_out) % P.c_out;
+  let nn = idx / (P.l_out * P.c_out);
+  let c_per_group = P.c_in / P.groups;
+  let out_per_group = P.c_out / P.groups;
+  let group = co / out_per_group;
+  let c0 = group * c_per_group;
+  var acc = 0.0;
+  for (var ci_local = 0u; ci_local < c_per_group; ci_local = ci_local + 1u) {
+    let ci = c0 + ci_local;
+    for (var r = 0u; r < P.k; r = r + 1u) {
+      let li_unpadded = i32(pos * P.stride + r * P.dilation) - i32(P.padding);
+      if (li_unpadded < 0 || li_unpadded >= i32(P.l_in)) { continue; }
+      let x_index = (nn * P.c_in + ci) * P.l_in + u32(li_unpadded);
+      let w_index = (co * c_per_group + ci_local) * P.k + r;
+      acc = acc + X[x_index] * W[w_index];
+    }
+  }
+  Y[idx] = acc${biasLine};
+}
+`;
+}
+
+const CONV1D_BACKWARD_INPUT_WGSL = `
+@group(0) @binding(0) var<storage, read> DY: array<f32>;
+@group(0) @binding(1) var<storage, read> W: array<f32>;
+@group(0) @binding(2) var<storage, read_write> DX: array<f32>;
+
+struct Params {
+  n: u32,
+  c_in: u32,
+  l_in: u32,
+  c_out: u32,
+  k: u32,
+  stride: u32,
+  padding: u32,
+  dilation: u32,
+  groups: u32,
+  l_out: u32,
+};
+@group(0) @binding(3) var<uniform> P: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x;
+  let total = P.n * P.c_in * P.l_in;
+  if (idx >= total) { return; }
+  let li = idx % P.l_in;
+  let ci = (idx / P.l_in) % P.c_in;
+  let nn = idx / (P.l_in * P.c_in);
+  let c_per_group = P.c_in / P.groups;
+  let out_per_group = P.c_out / P.groups;
+  let group = ci / c_per_group;
+  let ci_local = ci - group * c_per_group;
+  let o0 = group * out_per_group;
+  var acc = 0.0;
+  for (var co_local = 0u; co_local < out_per_group; co_local = co_local + 1u) {
+    let co = o0 + co_local;
+    for (var r = 0u; r < P.k; r = r + 1u) {
+      let pos_num = i32(li) + i32(P.padding) - i32(r * P.dilation);
+      if (pos_num < 0 || (pos_num % i32(P.stride)) != 0) { continue; }
+      let pos_i = pos_num / i32(P.stride);
+      if (pos_i < 0 || pos_i >= i32(P.l_out)) { continue; }
+      let pos = u32(pos_i);
+      let dy_index = (nn * P.c_out + co) * P.l_out + pos;
+      let w_index = (co * c_per_group + ci_local) * P.k + r;
+      acc = acc + DY[dy_index] * W[w_index];
+    }
+  }
+  DX[idx] = acc;
+}
+`;
+
+const CONV1D_BACKWARD_WEIGHT_WGSL = `
+@group(0) @binding(0) var<storage, read> DY: array<f32>;
+@group(0) @binding(1) var<storage, read> X: array<f32>;
+@group(0) @binding(2) var<storage, read_write> DW: array<f32>;
+
+struct Params {
+  n: u32,
+  c_in: u32,
+  l_in: u32,
+  c_out: u32,
+  k: u32,
+  stride: u32,
+  padding: u32,
+  dilation: u32,
+  groups: u32,
+  l_out: u32,
+};
+@group(0) @binding(3) var<uniform> P: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x;
+  let c_per_group = P.c_in / P.groups;
+  let total = P.c_out * c_per_group * P.k;
+  if (idx >= total) { return; }
+  let r = idx % P.k;
+  let ci_local = (idx / P.k) % c_per_group;
+  let co = idx / (P.k * c_per_group);
+  let out_per_group = P.c_out / P.groups;
+  let group = co / out_per_group;
+  let ci = group * c_per_group + ci_local;
+  var acc = 0.0;
+  for (var nn = 0u; nn < P.n; nn = nn + 1u) {
+    for (var pos = 0u; pos < P.l_out; pos = pos + 1u) {
+      let li_i = i32(pos * P.stride + r * P.dilation) - i32(P.padding);
+      if (li_i < 0 || li_i >= i32(P.l_in)) { continue; }
+      let li = u32(li_i);
+      let dy_index = (nn * P.c_out + co) * P.l_out + pos;
+      let x_index = (nn * P.c_in + ci) * P.l_in + li;
+      acc = acc + DY[dy_index] * X[x_index];
+    }
+  }
+  DW[idx] = acc;
+}
+`;
+
+const CONV1D_BACKWARD_BIAS_WGSL = `
+@group(0) @binding(0) var<storage, read> DY: array<f32>;
+@group(0) @binding(1) var<storage, read_write> DB: array<f32>;
+
+struct Params {
+  n: u32,
+  c_out: u32,
+  l_out: u32,
+  pad: u32,
+};
+@group(0) @binding(2) var<uniform> P: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let co = gid.x;
+  if (co >= P.c_out) { return; }
+  var acc = 0.0;
+  for (var nn = 0u; nn < P.n; nn = nn + 1u) {
+    for (var pos = 0u; pos < P.l_out; pos = pos + 1u) {
+      let dy_index = (nn * P.c_out + co) * P.l_out + pos;
+      acc = acc + DY[dy_index];
+    }
+  }
+  DB[co] = acc;
+}
+`;
+
+function conv2dWgsl(hasBias: boolean): string {
+  const biasBinding = hasBias ? "@group(0) @binding(2) var<storage, read> B: array<f32>;" : "";
+  const outputBinding = hasBias ? 3 : 2;
+  const paramsBinding = hasBias ? 4 : 3;
+  const biasLine = hasBias ? " + B[co]" : "";
+  return `
+@group(0) @binding(0) var<storage, read> X: array<f32>;
+@group(0) @binding(1) var<storage, read> W: array<f32>;
+${biasBinding}
+@group(0) @binding(${outputBinding}) var<storage, read_write> Y: array<f32>;
+
+struct Params {
+  n: u32,
+  c_in: u32,
+  h: u32,
+  w: u32,
+  c_out: u32,
+  kh: u32,
+  kw: u32,
+  stride_h: u32,
+  stride_w: u32,
+  pad_h: u32,
+  pad_w: u32,
+  dilation_h: u32,
+  dilation_w: u32,
+  groups: u32,
+  out_h: u32,
+  out_w: u32,
+};
+@group(0) @binding(${paramsBinding}) var<uniform> P: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x;
+  let total = P.n * P.c_out * P.out_h * P.out_w;
+  if (idx >= total) {
+    return;
+  }
+  let ow = idx % P.out_w;
+  let oh = (idx / P.out_w) % P.out_h;
+  let co = (idx / (P.out_w * P.out_h)) % P.c_out;
+  let nn = idx / (P.out_w * P.out_h * P.c_out);
+  let c_per_group = P.c_in / P.groups;
+  let out_per_group = P.c_out / P.groups;
+  let group = co / out_per_group;
+  let c0 = group * c_per_group;
+  var acc = 0.0;
+  for (var ci_local = 0u; ci_local < c_per_group; ci_local = ci_local + 1u) {
+    let ci = c0 + ci_local;
+    for (var r = 0u; r < P.kh; r = r + 1u) {
+      let ih_unpadded = i32(oh * P.stride_h + r * P.dilation_h) - i32(P.pad_h);
+      if (ih_unpadded < 0 || ih_unpadded >= i32(P.h)) {
+        continue;
+      }
+      for (var c = 0u; c < P.kw; c = c + 1u) {
+        let iw_unpadded = i32(ow * P.stride_w + c * P.dilation_w) - i32(P.pad_w);
+        if (iw_unpadded < 0 || iw_unpadded >= i32(P.w)) {
+          continue;
+        }
+        let x_index = ((nn * P.c_in + ci) * P.h + u32(ih_unpadded)) * P.w + u32(iw_unpadded);
+        let w_index = ((co * c_per_group + ci_local) * P.kh + r) * P.kw + c;
+        acc = acc + X[x_index] * W[w_index];
+      }
+    }
+  }
+  Y[idx] = acc${biasLine};
+}
+`;
+}
+
+const CONV2D_BACKWARD_INPUT_WGSL = `
+@group(0) @binding(0) var<storage, read> DY: array<f32>;
+@group(0) @binding(1) var<storage, read> W: array<f32>;
+@group(0) @binding(2) var<storage, read_write> DX: array<f32>;
+
+struct Params {
+  n: u32,
+  c_in: u32,
+  h: u32,
+  w: u32,
+  c_out: u32,
+  kh: u32,
+  kw: u32,
+  stride_h: u32,
+  stride_w: u32,
+  pad_h: u32,
+  pad_w: u32,
+  dilation_h: u32,
+  dilation_w: u32,
+  groups: u32,
+  out_h: u32,
+  out_w: u32,
+};
+@group(0) @binding(3) var<uniform> P: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x;
+  let total = P.n * P.c_in * P.h * P.w;
+  if (idx >= total) { return; }
+  let iw = idx % P.w;
+  let ih = (idx / P.w) % P.h;
+  let ci = (idx / (P.w * P.h)) % P.c_in;
+  let nn = idx / (P.w * P.h * P.c_in);
+  let c_per_group = P.c_in / P.groups;
+  let out_per_group = P.c_out / P.groups;
+  let group = ci / c_per_group;
+  let ci_local = ci - group * c_per_group;
+  let o0 = group * out_per_group;
+  var acc = 0.0;
+  for (var co_local = 0u; co_local < out_per_group; co_local = co_local + 1u) {
+    let co = o0 + co_local;
+    for (var r = 0u; r < P.kh; r = r + 1u) {
+      let h_num = i32(ih) + i32(P.pad_h) - i32(r * P.dilation_h);
+      if (h_num < 0 || (h_num % i32(P.stride_h)) != 0) { continue; }
+      let oh_i = h_num / i32(P.stride_h);
+      if (oh_i < 0 || oh_i >= i32(P.out_h)) { continue; }
+      let oh = u32(oh_i);
+      for (var c = 0u; c < P.kw; c = c + 1u) {
+        let w_num = i32(iw) + i32(P.pad_w) - i32(c * P.dilation_w);
+        if (w_num < 0 || (w_num % i32(P.stride_w)) != 0) { continue; }
+        let ow_i = w_num / i32(P.stride_w);
+        if (ow_i < 0 || ow_i >= i32(P.out_w)) { continue; }
+        let ow = u32(ow_i);
+        let dy_index = ((nn * P.c_out + co) * P.out_h + oh) * P.out_w + ow;
+        let w_index = ((co * c_per_group + ci_local) * P.kh + r) * P.kw + c;
+        acc = acc + DY[dy_index] * W[w_index];
+      }
+    }
+  }
+  DX[idx] = acc;
+}
+`;
+
+const CONV2D_BACKWARD_WEIGHT_WGSL = `
+@group(0) @binding(0) var<storage, read> DY: array<f32>;
+@group(0) @binding(1) var<storage, read> X: array<f32>;
+@group(0) @binding(2) var<storage, read_write> DW: array<f32>;
+
+struct Params {
+  n: u32,
+  c_in: u32,
+  h: u32,
+  w: u32,
+  c_out: u32,
+  kh: u32,
+  kw: u32,
+  stride_h: u32,
+  stride_w: u32,
+  pad_h: u32,
+  pad_w: u32,
+  dilation_h: u32,
+  dilation_w: u32,
+  groups: u32,
+  out_h: u32,
+  out_w: u32,
+};
+@group(0) @binding(3) var<uniform> P: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x;
+  let c_per_group = P.c_in / P.groups;
+  let total = P.c_out * c_per_group * P.kh * P.kw;
+  if (idx >= total) { return; }
+  let kc = idx % P.kw;
+  let kr = (idx / P.kw) % P.kh;
+  let ci_local = (idx / (P.kw * P.kh)) % c_per_group;
+  let co = idx / (P.kw * P.kh * c_per_group);
+  let out_per_group = P.c_out / P.groups;
+  let group = co / out_per_group;
+  let ci = group * c_per_group + ci_local;
+  var acc = 0.0;
+  for (var nn = 0u; nn < P.n; nn = nn + 1u) {
+    for (var oh = 0u; oh < P.out_h; oh = oh + 1u) {
+      let ih_i = i32(oh * P.stride_h + kr * P.dilation_h) - i32(P.pad_h);
+      if (ih_i < 0 || ih_i >= i32(P.h)) { continue; }
+      let ih = u32(ih_i);
+      for (var ow = 0u; ow < P.out_w; ow = ow + 1u) {
+        let iw_i = i32(ow * P.stride_w + kc * P.dilation_w) - i32(P.pad_w);
+        if (iw_i < 0 || iw_i >= i32(P.w)) { continue; }
+        let iw = u32(iw_i);
+        let dy_index = ((nn * P.c_out + co) * P.out_h + oh) * P.out_w + ow;
+        let x_index = ((nn * P.c_in + ci) * P.h + ih) * P.w + iw;
+        acc = acc + DY[dy_index] * X[x_index];
+      }
+    }
+  }
+  DW[idx] = acc;
+}
+`;
+
+const CONV2D_BACKWARD_BIAS_WGSL = `
+@group(0) @binding(0) var<storage, read> DY: array<f32>;
+@group(0) @binding(1) var<storage, read_write> DB: array<f32>;
+
+struct Params {
+  n: u32,
+  c_out: u32,
+  out_h: u32,
+  out_w: u32,
+};
+@group(0) @binding(2) var<uniform> P: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let co = gid.x;
+  if (co >= P.c_out) { return; }
+  var acc = 0.0;
+  for (var nn = 0u; nn < P.n; nn = nn + 1u) {
+    for (var oh = 0u; oh < P.out_h; oh = oh + 1u) {
+      for (var ow = 0u; ow < P.out_w; ow = ow + 1u) {
+        let dy_index = ((nn * P.c_out + co) * P.out_h + oh) * P.out_w + ow;
+        acc = acc + DY[dy_index];
+      }
+    }
+  }
+  DB[co] = acc;
+}
+`;
+
+function validateConv2dShape(
+  op: string,
+  n: number,
+  cIn: number,
+  h: number,
+  w: number,
+  cOut: number,
+  kh: number,
+  kw: number,
+  strideH: number,
+  strideW: number,
+  padH: number,
+  padW: number,
+  dilationH: number,
+  dilationW: number,
+  groups: number,
+  outH: number,
+  outW: number,
+): void {
+  for (const [value, name] of [
+    [n, "n"],
+    [cIn, "cIn"],
+    [h, "h"],
+    [w, "w"],
+    [cOut, "cOut"],
+    [kh, "kh"],
+    [kw, "kw"],
+    [strideH, "strideH"],
+    [strideW, "strideW"],
+    [dilationH, "dilationH"],
+    [dilationW, "dilationW"],
+    [groups, "groups"],
+    [outH, "outH"],
+    [outW, "outW"],
+  ] as const) {
+    assertPositiveInt(value, `${op}.${name}`);
+  }
+  if (!Number.isInteger(padH) || padH < 0 || !Number.isInteger(padW) || padW < 0) {
+    throw new KernelError(`WebGPU bridge: ${op} padding must be non-negative integers`);
+  }
+  if (cIn % groups !== 0 || cOut % groups !== 0) {
+    throw new KernelError(`WebGPU bridge: ${op} channels must be divisible by groups`);
+  }
+}
+
+function validateConv1dShape(
+  op: string,
+  n: number,
+  cIn: number,
+  lIn: number,
+  cOut: number,
+  k: number,
+  stride: number,
+  padding: number,
+  dilation: number,
+  groups: number,
+  lOut: number,
+): void {
+  for (const [value, name] of [
+    [n, "n"],
+    [cIn, "cIn"],
+    [lIn, "lIn"],
+    [cOut, "cOut"],
+    [k, "k"],
+    [stride, "stride"],
+    [dilation, "dilation"],
+    [groups, "groups"],
+    [lOut, "lOut"],
+  ] as const) {
+    assertPositiveInt(value, `${op}.${name}`);
+  }
+  if (!Number.isInteger(padding) || padding < 0) {
+    throw new KernelError(`WebGPU bridge: ${op} padding must be a non-negative integer`);
+  }
+  if (cIn % groups !== 0 || cOut % groups !== 0) {
+    throw new KernelError(`WebGPU bridge: ${op} channels must be divisible by groups`);
+  }
+}
+
+function conv1dParams(
+  n: number,
+  cIn: number,
+  lIn: number,
+  cOut: number,
+  k: number,
+  stride: number,
+  padding: number,
+  dilation: number,
+  groups: number,
+  lOut: number,
+): Uint32Array {
+  return new Uint32Array([
+    n, cIn, lIn, cOut, k, stride, padding, dilation, groups, lOut, 0, 0,
+  ]);
+}
+
+function conv2dParams(
+  n: number,
+  cIn: number,
+  h: number,
+  w: number,
+  cOut: number,
+  kh: number,
+  kw: number,
+  strideH: number,
+  strideW: number,
+  padH: number,
+  padW: number,
+  dilationH: number,
+  dilationW: number,
+  groups: number,
+  outH: number,
+  outW: number,
+): Uint32Array {
+  return new Uint32Array([
+    n, cIn, h, w, cOut, kh, kw, strideH, strideW, padH, padW,
+    dilationH, dilationW, groups, outH, outW,
+  ]);
+}
+
+function bytesToFloat32(data: unknown, name: string): Float32Array {
+  if (!(data instanceof Uint8Array)) {
+    throw new KernelError(`WebGPU bridge: ${name}.data must be Uint8Array bytes`);
+  }
+  if (data.byteLength % 4 !== 0) {
+    throw new KernelError(`WebGPU bridge: ${name}.data byte length must be divisible by 4`);
+  }
+  if ((data.byteOffset & 3) === 0) {
+    return new Float32Array(data.buffer, data.byteOffset, data.byteLength / 4);
+  }
+  const copy = new Uint8Array(data.byteLength);
+  copy.set(data);
+  return new Float32Array(copy.buffer);
+}
+
+function normalizeTensorPlanInputs(inputs: readonly unknown[]): TensorPlanInput[] {
+  return inputs.map((input, i) => {
+    if (input === null || typeof input !== "object" || Array.isArray(input)) {
+      throw new KernelError(`WebGPU bridge: tensor plan input ${i} must be an object`);
+    }
+    const record = input as Record<string, unknown>;
+    const rawId = record.valueId ?? record.value_id;
+    if (typeof rawId !== "number" || !Number.isInteger(rawId)) {
+      throw new KernelError(`WebGPU bridge: tensor plan input ${i}.valueId must be an integer`);
+    }
+    return {
+      valueId: rawId,
+      data: bytesToFloat32(record.data, `tensor plan input ${i}`),
+    };
+  });
 }
 
 /**
@@ -278,6 +964,368 @@ export function createWebGpuRealizerBridge(
       return mint(result.buffer, result.byteLength, [b, h, sq, d], dtype);
     },
 
+    conv1d(
+      input: Handle,
+      weight: Handle,
+      bias: Handle | null,
+      n: number,
+      cIn: number,
+      lIn: number,
+      cOut: number,
+      k: number,
+      stride: number,
+      padding: number,
+      dilation: number,
+      groups: number,
+      lOut: number,
+      dtype: string,
+    ): Handle {
+      assertF32(dtype, "conv1d");
+      validateConv1dShape(
+        "conv1d",
+        n, cIn, lIn, cOut, k, stride, padding, dilation, groups, lOut,
+      );
+      const inputRec = get(input, "conv1d[input]");
+      const weightRec = get(weight, "conv1d[weight]");
+      const inputBuffers = [inputRec.buffer, weightRec.buffer];
+      if (bias !== null) {
+        inputBuffers.push(get(bias, "conv1d[bias]").buffer);
+      }
+      const outputLength = n * cOut * lOut;
+      const params = conv1dParams(
+        n, cIn, lIn, cOut, k, stride, padding, dilation, groups, lOut,
+      );
+      const result = runDirect(device, {
+        name: bias === null ? "conv1d_nobias" : "conv1d_bias",
+        wgsl: conv1dWgsl(bias !== null),
+        workgroupSize: [64, 1, 1],
+      }, {
+        inputBuffers,
+        outputLength,
+        params,
+        dispatchCount: [outputLength, 1, 1],
+        cacheKeySuffix: [
+          bias === null ? "nobias" : "bias",
+          n, cIn, lIn, cOut, k, stride, padding, dilation, groups, lOut,
+        ].join("_"),
+      });
+      return mint(result.buffer, result.byteLength, [n, cOut, lOut], dtype);
+    },
+
+    conv1d_backward_input(
+      dy: Handle,
+      weight: Handle,
+      n: number,
+      cIn: number,
+      lIn: number,
+      cOut: number,
+      k: number,
+      stride: number,
+      padding: number,
+      dilation: number,
+      groups: number,
+      lOut: number,
+      dtype: string,
+    ): Handle {
+      assertF32(dtype, "conv1d_backward_input");
+      validateConv1dShape(
+        "conv1d_backward_input",
+        n, cIn, lIn, cOut, k, stride, padding, dilation, groups, lOut,
+      );
+      const dyRec = get(dy, "conv1d_backward_input[dy]");
+      const weightRec = get(weight, "conv1d_backward_input[weight]");
+      const outputLength = n * cIn * lIn;
+      const params = conv1dParams(
+        n, cIn, lIn, cOut, k, stride, padding, dilation, groups, lOut,
+      );
+      const result = runDirect(device, {
+        name: "conv1d_backward_input",
+        wgsl: CONV1D_BACKWARD_INPUT_WGSL,
+        workgroupSize: [64, 1, 1],
+      }, {
+        inputBuffers: [dyRec.buffer, weightRec.buffer],
+        outputLength,
+        params,
+        dispatchCount: [outputLength, 1, 1],
+        cacheKeySuffix: [n, cIn, lIn, cOut, k, stride, padding, dilation, groups, lOut].join("_"),
+      });
+      return mint(result.buffer, result.byteLength, [n, cIn, lIn], dtype);
+    },
+
+    conv1d_backward_weight(
+      dy: Handle,
+      input: Handle,
+      n: number,
+      cIn: number,
+      lIn: number,
+      cOut: number,
+      k: number,
+      stride: number,
+      padding: number,
+      dilation: number,
+      groups: number,
+      lOut: number,
+      dtype: string,
+    ): Handle {
+      assertF32(dtype, "conv1d_backward_weight");
+      validateConv1dShape(
+        "conv1d_backward_weight",
+        n, cIn, lIn, cOut, k, stride, padding, dilation, groups, lOut,
+      );
+      const dyRec = get(dy, "conv1d_backward_weight[dy]");
+      const inputRec = get(input, "conv1d_backward_weight[input]");
+      const cPerGroup = cIn / groups;
+      const outputLength = cOut * cPerGroup * k;
+      const params = conv1dParams(
+        n, cIn, lIn, cOut, k, stride, padding, dilation, groups, lOut,
+      );
+      const result = runDirect(device, {
+        name: "conv1d_backward_weight",
+        wgsl: CONV1D_BACKWARD_WEIGHT_WGSL,
+        workgroupSize: [64, 1, 1],
+      }, {
+        inputBuffers: [dyRec.buffer, inputRec.buffer],
+        outputLength,
+        params,
+        dispatchCount: [outputLength, 1, 1],
+        cacheKeySuffix: [n, cIn, lIn, cOut, k, stride, padding, dilation, groups, lOut].join("_"),
+      });
+      return mint(result.buffer, result.byteLength, [cOut, cPerGroup, k], dtype);
+    },
+
+    conv1d_backward_bias(
+      dy: Handle,
+      n: number,
+      cOut: number,
+      lOut: number,
+      dtype: string,
+    ): Handle {
+      assertF32(dtype, "conv1d_backward_bias");
+      for (const [value, name] of [
+        [n, "n"],
+        [cOut, "cOut"],
+        [lOut, "lOut"],
+      ] as const) {
+        assertPositiveInt(value, `conv1d_backward_bias.${name}`);
+      }
+      const dyRec = get(dy, "conv1d_backward_bias[dy]");
+      const params = new Uint32Array([n, cOut, lOut, 0]);
+      const result = runDirect(device, {
+        name: "conv1d_backward_bias",
+        wgsl: CONV1D_BACKWARD_BIAS_WGSL,
+        workgroupSize: [64, 1, 1],
+      }, {
+        inputBuffers: [dyRec.buffer],
+        outputLength: cOut,
+        params,
+        dispatchCount: [cOut, 1, 1],
+        cacheKeySuffix: [n, cOut, lOut].join("_"),
+      });
+      return mint(result.buffer, result.byteLength, [cOut], dtype);
+    },
+
+    conv2d(
+      input: Handle,
+      weight: Handle,
+      bias: Handle | null,
+      n: number,
+      cIn: number,
+      h: number,
+      w: number,
+      cOut: number,
+      kh: number,
+      kw: number,
+      strideH: number,
+      strideW: number,
+      padH: number,
+      padW: number,
+      dilationH: number,
+      dilationW: number,
+      groups: number,
+      outH: number,
+      outW: number,
+      dtype: string,
+    ): Handle {
+      assertF32(dtype, "conv2d");
+      validateConv2dShape(
+        "conv2d",
+        n, cIn, h, w, cOut, kh, kw,
+        strideH, strideW, padH, padW, dilationH, dilationW,
+        groups, outH, outW,
+      );
+      const inputRec = get(input, "conv2d[input]");
+      const weightRec = get(weight, "conv2d[weight]");
+      const inputBuffers = [inputRec.buffer, weightRec.buffer];
+      if (bias !== null) {
+        inputBuffers.push(get(bias, "conv2d[bias]").buffer);
+      }
+      const outputLength = n * cOut * outH * outW;
+      const params = conv2dParams(
+        n, cIn, h, w, cOut, kh, kw,
+        strideH, strideW, padH, padW, dilationH, dilationW,
+        groups, outH, outW,
+      );
+      const result = runDirect(device, {
+        name: bias === null ? "conv2d_nobias" : "conv2d_bias",
+        wgsl: conv2dWgsl(bias !== null),
+        workgroupSize: [64, 1, 1],
+      }, {
+        inputBuffers,
+        outputLength,
+        params,
+        dispatchCount: [outputLength, 1, 1],
+        cacheKeySuffix: [
+          bias === null ? "nobias" : "bias",
+          n, cIn, h, w, cOut, kh, kw,
+          strideH, strideW, padH, padW, dilationH, dilationW,
+          groups, outH, outW,
+        ].join("_"),
+      });
+      return mint(result.buffer, result.byteLength, [n, cOut, outH, outW], dtype);
+    },
+
+    conv2d_backward_input(
+      dy: Handle,
+      weight: Handle,
+      n: number,
+      cIn: number,
+      h: number,
+      w: number,
+      cOut: number,
+      kh: number,
+      kw: number,
+      strideH: number,
+      strideW: number,
+      padH: number,
+      padW: number,
+      dilationH: number,
+      dilationW: number,
+      groups: number,
+      outH: number,
+      outW: number,
+      dtype: string,
+    ): Handle {
+      assertF32(dtype, "conv2d_backward_input");
+      validateConv2dShape(
+        "conv2d_backward_input",
+        n, cIn, h, w, cOut, kh, kw,
+        strideH, strideW, padH, padW, dilationH, dilationW,
+        groups, outH, outW,
+      );
+      const dyRec = get(dy, "conv2d_backward_input[dy]");
+      const weightRec = get(weight, "conv2d_backward_input[weight]");
+      const outputLength = n * cIn * h * w;
+      const params = conv2dParams(
+        n, cIn, h, w, cOut, kh, kw,
+        strideH, strideW, padH, padW, dilationH, dilationW,
+        groups, outH, outW,
+      );
+      const result = runDirect(device, {
+        name: "conv2d_backward_input",
+        wgsl: CONV2D_BACKWARD_INPUT_WGSL,
+        workgroupSize: [64, 1, 1],
+      }, {
+        inputBuffers: [dyRec.buffer, weightRec.buffer],
+        outputLength,
+        params,
+        dispatchCount: [outputLength, 1, 1],
+        cacheKeySuffix: [
+          n, cIn, h, w, cOut, kh, kw,
+          strideH, strideW, padH, padW, dilationH, dilationW,
+          groups, outH, outW,
+        ].join("_"),
+      });
+      return mint(result.buffer, result.byteLength, [n, cIn, h, w], dtype);
+    },
+
+    conv2d_backward_weight(
+      dy: Handle,
+      input: Handle,
+      n: number,
+      cIn: number,
+      h: number,
+      w: number,
+      cOut: number,
+      kh: number,
+      kw: number,
+      strideH: number,
+      strideW: number,
+      padH: number,
+      padW: number,
+      dilationH: number,
+      dilationW: number,
+      groups: number,
+      outH: number,
+      outW: number,
+      dtype: string,
+    ): Handle {
+      assertF32(dtype, "conv2d_backward_weight");
+      validateConv2dShape(
+        "conv2d_backward_weight",
+        n, cIn, h, w, cOut, kh, kw,
+        strideH, strideW, padH, padW, dilationH, dilationW,
+        groups, outH, outW,
+      );
+      const dyRec = get(dy, "conv2d_backward_weight[dy]");
+      const inputRec = get(input, "conv2d_backward_weight[input]");
+      const cPerGroup = cIn / groups;
+      const outputLength = cOut * cPerGroup * kh * kw;
+      const params = conv2dParams(
+        n, cIn, h, w, cOut, kh, kw,
+        strideH, strideW, padH, padW, dilationH, dilationW,
+        groups, outH, outW,
+      );
+      const result = runDirect(device, {
+        name: "conv2d_backward_weight",
+        wgsl: CONV2D_BACKWARD_WEIGHT_WGSL,
+        workgroupSize: [64, 1, 1],
+      }, {
+        inputBuffers: [dyRec.buffer, inputRec.buffer],
+        outputLength,
+        params,
+        dispatchCount: [outputLength, 1, 1],
+        cacheKeySuffix: [
+          n, cIn, h, w, cOut, kh, kw,
+          strideH, strideW, padH, padW, dilationH, dilationW,
+          groups, outH, outW,
+        ].join("_"),
+      });
+      return mint(result.buffer, result.byteLength, [cOut, cPerGroup, kh, kw], dtype);
+    },
+
+    conv2d_backward_bias(
+      dy: Handle,
+      n: number,
+      cOut: number,
+      outH: number,
+      outW: number,
+      dtype: string,
+    ): Handle {
+      assertF32(dtype, "conv2d_backward_bias");
+      for (const [value, name] of [
+        [n, "n"],
+        [cOut, "cOut"],
+        [outH, "outH"],
+        [outW, "outW"],
+      ] as const) {
+        assertPositiveInt(value, `conv2d_backward_bias.${name}`);
+      }
+      const dyRec = get(dy, "conv2d_backward_bias[dy]");
+      const params = new Uint32Array([n, cOut, outH, outW]);
+      const result = runDirect(device, {
+        name: "conv2d_backward_bias",
+        wgsl: CONV2D_BACKWARD_BIAS_WGSL,
+        workgroupSize: [64, 1, 1],
+      }, {
+        inputBuffers: [dyRec.buffer],
+        outputLength: cOut,
+        params,
+        dispatchCount: [cOut, 1, 1],
+        cacheKeySuffix: [n, cOut, outH, outW].join("_"),
+      });
+      return mint(result.buffer, result.byteLength, [cOut], dtype);
+    },
+
     run_user_kernel(
       inputs: readonly Handle[],
       wgsl: string,
@@ -309,6 +1357,24 @@ export function createWebGpuRealizerBridge(
         cacheKeySuffix: hash,
       });
       return mint(result.buffer, result.byteLength, outputShape, dtype);
+    },
+
+    async run_tensor_plan(
+      plan: unknown,
+      inputs: readonly unknown[],
+      dtype: string,
+    ): Promise<Uint8Array> {
+      assertF32(dtype, "run_tensor_plan");
+      const result = await runTensorGpuPlan(
+        device,
+        plan,
+        normalizeTensorPlanInputs(inputs),
+      );
+      return new Uint8Array(
+        result.data.buffer,
+        result.data.byteOffset,
+        result.data.byteLength,
+      );
     },
 
     aliveHandleCount(): number {

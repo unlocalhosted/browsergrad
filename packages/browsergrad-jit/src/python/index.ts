@@ -29,6 +29,7 @@ import { AMP_PY } from "./_amp.generated.js";
 import { BRIDGE_PY } from "./_bridge.generated.js";
 import { GPU_BUFFER_TABLE_PY } from "./_gpu_buffer_table.generated.js";
 import { REALIZE_WEBGPU_PY } from "./_realize_webgpu.generated.js";
+import { GPU_PLAN_PY } from "./_gpu_plan.generated.js";
 import { FUNC_PY } from "./_func.generated.js";
 import { VMAP_PY } from "./_vmap.generated.js";
 import { WEBNN_PY } from "./_webnn.generated.js";
@@ -117,6 +118,7 @@ from . import _utils_checkpoint as _utils_ckpt
 from . import _utils_data as _utils_data_mod
 from . import _amp as _amp_mod
 from . import _realize_webgpu as _webgpu_mod
+from . import _gpu_plan as _gpu_plan_mod
 from . import _func as _func_mod
 from . import _custom_kernel as _custom_kernel_mod
 from . import _onnx as _onnx_mod
@@ -317,6 +319,24 @@ jit.cost_model = cost_model_mod
 _sys.modules["browsergrad_jit.jit.cost_model"] = cost_model_mod
 
 
+# bg.jit.gpu_plan - compiler-facing tensor-IR plan scaffold.
+gpu_plan_mod = _types.ModuleType("browsergrad_jit.jit.gpu_plan")
+gpu_plan_mod.build_gpu_execution_plan = _gpu_plan_mod.build_gpu_execution_plan
+gpu_plan_mod.gpu_plan_summary = _gpu_plan_mod.gpu_plan_summary
+gpu_plan_mod.GpuPlanUnsupported = _gpu_plan_mod.GpuPlanUnsupported
+gpu_plan_mod.PRIMITIVE_GPU_IR_OPS = _gpu_plan_mod.PRIMITIVE_GPU_IR_OPS
+jit.gpu_plan = gpu_plan_mod
+_sys.modules["browsergrad_jit.jit.gpu_plan"] = gpu_plan_mod
+
+
+def gpu_plan_summary(tensor, *, allow_custom=False):
+    """Return compiler-facing GPU tensor-plan summary for a TensorProxy."""
+    return _gpu_plan_mod.gpu_plan_summary(
+        tensor._uop,
+        allow_custom=allow_custom,
+    )
+
+
 # bg.kernels.transformer_block — opt-in megakernel constructor (PRD-012c).
 # Forward-only; user explicitly opts in via this constructor. Builds an
 # OP_CUSTOM tagged "transformer_block" — the bridge dispatches one fused
@@ -374,6 +394,28 @@ def realize_webgpu(tensor):
     gbt = _webgpu_mod.get_registered_gpu_buffer_table()
     sess = tensor._get_session()
     return _webgpu_mod.realize_webgpu(
+        tensor._uop,
+        numpy_buffer_table=sess.buffer_table,
+        gpu_buffer_table=gbt,
+    )
+
+
+def realize_tensor_plan_webgpu(tensor):
+    """Realize via the canonical tensor GPU plan bridge.
+
+    This path sends one primitive-IR execution plan to WebGPU instead of
+    dispatching through legacy per-op bridge methods. CUSTOM ops are refused;
+    explicit user/lab kernels stay on their own path.
+    """
+    bridge = _webgpu_mod.get_registered_bridge()
+    if bridge is None:
+        raise JitNotImplementedError(
+            "No WebGPU bridge registered. Call "
+            "bg.register_webgpu_bridge(bridge) first."
+        )
+    gbt = _webgpu_mod.get_registered_gpu_buffer_table()
+    sess = tensor._get_session()
+    return _webgpu_mod.realize_tensor_plan_webgpu(
         tensor._uop,
         numpy_buffer_table=sess.buffer_table,
         gpu_buffer_table=gbt,
@@ -660,8 +702,10 @@ __all__ = [
     "save", "load",
     "functional", "F", "nn", "optim", "jit", "utils", "amp", "kernels", "func",
     "custom_kernel", "onnx", "lab", "experimental",
-    "realize_webgpu", "register_webgpu_bridge", "unregister_webgpu_bridge",
+    "realize_webgpu", "realize_tensor_plan_webgpu",
+    "register_webgpu_bridge", "unregister_webgpu_bridge",
     "webgpu_is_available", "webgpu_supported_opcodes",
+    "gpu_plan_summary",
     "install_torch_alias", "uninstall_torch_alias",
     "load_safetensors", "save_safetensors",
     "cache_stats", "clear_cache",
@@ -704,6 +748,7 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_jit/_bridge.py", content: BRIDGE_PY },
   { path: "browsergrad_jit/_gpu_buffer_table.py", content: GPU_BUFFER_TABLE_PY },
   { path: "browsergrad_jit/_realize_webgpu.py", content: REALIZE_WEBGPU_PY },
+  { path: "browsergrad_jit/_gpu_plan.py", content: GPU_PLAN_PY },
   { path: "browsergrad_jit/_func.py", content: FUNC_PY },
   { path: "browsergrad_jit/_vmap.py", content: VMAP_PY },
   { path: "browsergrad_jit/_webnn.py", content: WEBNN_PY },
