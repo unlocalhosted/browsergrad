@@ -93,7 +93,9 @@ the intended GPU materialization boundaries.
 - `loss.backward(device="webgpu")` realizes symbolic leaf-gradient roots through
   the tensor-plan bridge and refuses closure-only graphs instead of falling
   back to CPU. `resident=True` stores leaf `.grad` tensors as GPUBuffer-backed
-  TensorProxy values until explicit `.numpy()` / `.item()`.
+  TensorProxy values until explicit `.numpy()` / `.item()`. Default
+  `.backward()` selects this resident WebGPU path when the graph reads
+  GPU-owned buffers.
 - Covered semantics: tuple stride/padding/dilation where applicable, groups,
   output padding for ConvTranspose2d, module state_dict keys, and torch alias
   exposure.
@@ -108,9 +110,9 @@ the intended GPU materialization boundaries.
   parameter/state buffers. `SGD.step(device="webgpu", resident=True)` keeps
   no-momentum parameter updates GPU-resident; `Adam.step(device="webgpu",
   resident=True)` and `AdamW.step(device="webgpu", resident=True)` keep
-  params/m/v state resident.
-- Remaining: default CPU `.backward()`, default CPU materialization of `.grad`,
-  and full training-loop scheduling.
+  params/m/v state resident. Default `.step()` selects the resident WebGPU path
+  when params/grads are already GPU-owned.
+- Remaining: full training-loop scheduling and memory planning.
 
 ### Tiled GEMM + fused codegen + GPU cast (PRD-012a)
 - `matmulTiledDirect` — 16×16 tiled GEMM (workgroup-shared A/B tiles). Closes most of the gap PRD-012 was claiming via "megakernels".
@@ -261,7 +263,7 @@ All 16 PRDs land at v0:
 
 | Item | Reason |
 |---|---|
-| **Default `.backward()` through GPU realizer** | Default `.backward()` still uses CPU mutation. Explicit `loss.backward(device="webgpu", resident=True)` realizes symbolic leaf-gradient roots through `run_tensor_plan_resident` and stores `.grad` as GPUBuffer-backed TensorProxy values. `Optimizer.step(device="webgpu")` runs update math through tensor-plan WebGPU, then materializes params/state back to CPU buffers; `Optimizer.step(device="webgpu", resident=True)` keeps supported params/state resident for SGD/Adam/AdamW. Explicit `realize_tensor_plan_webgpu_resident(...)` can keep tensor-plan roots GPU-resident until `.numpy()` / `.item()`, but default training storage is still CPU-owned. |
+| **Default `.backward()` through GPU realizer** | CPU-owned graphs keep CPU mutation. GPU-owned graphs make default `.backward()` select `run_tensor_plan_resident` and store `.grad` as GPUBuffer-backed TensorProxy values. `Optimizer.step(device="webgpu")` runs update math through tensor-plan WebGPU, then materializes params/state back to CPU buffers; default `.step()` on GPU-owned params/grads keeps supported params/state resident for SGD/Adam/AdamW. Explicit `realize_tensor_plan_webgpu_resident(...)` can keep tensor-plan roots GPU-resident until `.numpy()` / `.item()`. |
 | **f16/bf16 cast kernels** | Future work — current CAST handler is f32→f32 only. |
 | **Primitive/WebGPU ConvTranspose in `browsergrad-jit`** | Lazy `browsergrad-jit` now has primitive Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward IR with CPU handlers, symbolic VJPs, and generic tensor-plan WebGPU lowering. |
 | **torch.cuda.\*, torch.compile, torch.fx** | Out of scope for `install_torch_alias`. Raises `AttributeError`. |

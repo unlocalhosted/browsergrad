@@ -69,8 +69,9 @@ lower through generic tensor-plan WebGPU via `realize_tensor_plan_webgpu(...)`.
 the same tensor-plan bridge and refuses closure-only graphs instead of falling
 back to CPU. `loss.backward(device="webgpu", resident=True)` stores leaf grads
 as GPUBuffer-backed TensorProxy values until explicit `.numpy()` / `.item()`.
-Default `.backward()` still writes CPU grads. `BatchNorm1d` remains a `CUSTOM`
-realization path with explicit NumPy VJPs.
+Default `.backward()` keeps CPU semantics for CPU-owned graphs, but selects the
+resident WebGPU path when the graph already reads GPU-owned buffers.
+`BatchNorm1d` remains a `CUSTOM` realization path with explicit NumPy VJPs.
 `bg.optim.sgd_update(...)`, `bg.optim.adam_update(...)`, and
 `bg.optim.adamw_update(...)` are functional optimizer/update IR nodes and lower
 through the same tensor-plan WebGPU path. They return updated tensors/state;
@@ -248,12 +249,13 @@ Anything in the **Internal** row will break across minor releases. File an issue
 
 - Full PyTorch API parity.
 - CUDA device emulation.
-- GPU-resident default training loop. Explicit
+- Fully scheduled GPU-resident training loop. Explicit
   `loss.backward(device="webgpu", resident=True)` and
   `Optimizer.step(device="webgpu", resident=True)` keep supported grads,
   params, and optimizer state in GPUBuffer storage until explicit `.numpy()` /
-  `.item()`, but default `.backward()` and full training-loop scheduling remain
-  future work.
+  `.item()`; default `.backward()` / `.step()` select that resident path when
+  inputs are already GPU-owned. Full memory-planned training-loop scheduling
+  remains future work.
 - Tensor layout/stride compatibility for contiguity teaching.
 - PyTorch-native checkpoint file compatibility.
 

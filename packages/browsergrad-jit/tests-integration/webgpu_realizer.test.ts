@@ -1666,6 +1666,103 @@ adamw_v_np = adamw_opt._v_resident[id(adamw_p)].numpy()
     expect(result.tensor_plan_resident).toBe(16);
   });
 
+  it("GPU-resident tensors make default backward and optimizer step stay resident", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      param_diff: number;
+      m_diff: number;
+      v_diff: number;
+      before_materialize: number;
+      after_materialize: number;
+      grad_materialized: boolean;
+      param_materialized: boolean;
+      m_materialized: boolean;
+      v_materialized: boolean;
+      grad_gpu_registered: boolean;
+      param_gpu_registered: boolean;
+      m_gpu_registered: boolean;
+      v_gpu_registered: boolean;
+      tensor_plan: number;
+      tensor_plan_resident: number;
+    }>(`
+import browsergrad_jit as bg
+import numpy as np
+
+p_np = np.array([[0.5, -1.0], [1.5, 0.25]], dtype=np.float32)
+zero = np.zeros_like(p_np)
+
+p_cpu = bg.from_numpy(p_np.copy(), requires_grad=True)
+loss_cpu = (p_cpu * p_cpu).sum()
+loss_cpu.backward()
+opt_cpu = bg.optim.AdamW([p_cpu], lr=0.01, betas=(0.8, 0.95), eps=1e-6, weight_decay=0.02)
+opt_cpu.step()
+expected_p = p_cpu.numpy()
+expected_m = opt_cpu._m[id(p_cpu)]
+expected_v = opt_cpu._v[id(p_cpu)]
+
+p_seed = bg.from_numpy(p_np.copy(), requires_grad=True)
+p = bg.realize_tensor_plan_webgpu_resident(p_seed + bg.from_numpy(zero.copy()))
+loss = (p * p).sum()
+loss.backward()
+opt = bg.optim.AdamW([p], lr=0.01, betas=(0.8, 0.95), eps=1e-6, weight_decay=0.02)
+opt.step()
+
+pid = id(p)
+bt = p._get_session().buffer_table
+gbt = bg._realize_webgpu.get_registered_gpu_buffer_table()
+grad_id = p.grad._uop.inputs[0].arg
+param_id = p._uop.inputs[0].arg
+m_id = opt._m_resident[pid]._uop.inputs[0].arg
+v_id = opt._v_resident[pid]._uop.inputs[0].arg
+before_materialize = _mock.materialize_count
+status = {
+    "grad_materialized": bt.is_materialized(grad_id),
+    "param_materialized": bt.is_materialized(param_id),
+    "m_materialized": bt.is_materialized(m_id),
+    "v_materialized": bt.is_materialized(v_id),
+    "grad_registered": gbt.has(grad_id),
+    "param_registered": gbt.has(param_id),
+    "m_registered": gbt.has(m_id),
+    "v_registered": gbt.has(v_id),
+}
+actual_p = p.numpy()
+actual_m = opt._m_resident[pid].numpy()
+actual_v = opt._v_resident[pid].numpy()
+{
+    "param_diff": float(np.max(np.abs(actual_p - expected_p))),
+    "m_diff": float(np.max(np.abs(actual_m - expected_m))),
+    "v_diff": float(np.max(np.abs(actual_v - expected_v))),
+    "before_materialize": before_materialize,
+    "after_materialize": _mock.materialize_count,
+    "grad_materialized": status["grad_materialized"],
+    "param_materialized": status["param_materialized"],
+    "m_materialized": status["m_materialized"],
+    "v_materialized": status["v_materialized"],
+    "grad_gpu_registered": status["grad_registered"],
+    "param_gpu_registered": status["param_registered"],
+    "m_gpu_registered": status["m_registered"],
+    "v_gpu_registered": status["v_registered"],
+    "tensor_plan": _mock.tensor_plan_count,
+    "tensor_plan_resident": _mock.tensor_plan_resident_count,
+}
+`);
+    expect(result.param_diff).toBeLessThan(1e-5);
+    expect(result.m_diff).toBeLessThan(1e-6);
+    expect(result.v_diff).toBeLessThan(1e-6);
+    expect(result.before_materialize).toBe(0);
+    expect(result.after_materialize).toBe(3);
+    expect(result.grad_materialized).toBe(false);
+    expect(result.param_materialized).toBe(false);
+    expect(result.m_materialized).toBe(false);
+    expect(result.v_materialized).toBe(false);
+    expect(result.grad_gpu_registered).toBe(true);
+    expect(result.param_gpu_registered).toBe(true);
+    expect(result.m_gpu_registered).toBe(true);
+    expect(result.v_gpu_registered).toBe(true);
+    expect(result.tensor_plan_resident).toBeGreaterThanOrEqual(5);
+    expect(result.tensor_plan).toBe(result.tensor_plan_resident);
+  });
+
   it("realize_tensor_plan_webgpu runs LayerNorm forward/backward roots through generic plan path", async () => {
     const target = await getJitTarget();
     const result = await target.run<{

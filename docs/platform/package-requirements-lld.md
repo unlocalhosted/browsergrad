@@ -269,10 +269,10 @@ Requirements:
 | JIT-006 | WebGPU realizer bridge supports forward opcodes and materializes at boundaries. | In | bridge/mock + real WebGPU tests through kernels |
 | JIT-007 | Custom WGSL kernels are cache-keyed, forward-only, and explicit. | In | custom kernel tests |
 | JIT-008 | ONNX export emits a supported subset and refuses unmappable ops. | In | ONNX tests |
-| JIT-009 | GPU-resident backward/optimizer steps. | Partial | Conv/LayerNorm backward roots, explicit `backward(device="webgpu", resident=True)` GPUBuffer-backed leaf grads, functional SGD/Adam/AdamW update IR, explicit `Optimizer.step(device="webgpu")`, resident `SGD`/`Adam`/`AdamW` step paths, and explicit resident tensor-plan roots can lower through WebGPU; default CPU `.backward()` and memory planner remain |
-| JIT-010 | Heavy CNN family parity with grad. | Partial | Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward are primitive IR with CPU handlers and symbolic VJPs; these CNN roots lower through generic f32 tensor-plan WebGPU; explicit `backward(device="webgpu", resident=True)` can populate leaf grads through tensor-plan WebGPU without CPU readback; default CPU `.backward()` and full optimizer residency remain |
+| JIT-009 | GPU-resident backward/optimizer steps. | Partial | Conv/LayerNorm backward roots, `backward(device="webgpu", resident=True)` GPUBuffer-backed leaf grads, functional SGD/Adam/AdamW update IR, explicit/non-resident `Optimizer.step(device="webgpu")`, resident `SGD`/`Adam`/`AdamW` step paths, default `.backward()` / `.step()` WebGPU selection for GPU-owned graphs, and explicit resident tensor-plan roots can lower through WebGPU; memory planner remains |
+| JIT-010 | Heavy CNN family parity with grad. | Partial | Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward are primitive IR with CPU handlers and symbolic VJPs; these CNN roots lower through generic f32 tensor-plan WebGPU; GPU-owned graphs default to resident WebGPU backward and can populate leaf grads without CPU readback; scheduler/memory planner remains |
 | JIT-011 | Canonical tensor IR for core framework ops instead of `CUSTOM` GPU escape hatches. | In progress | Primitive IR ops for conv/norm/attention/optimizer updates, CPU handlers/refusals, VJPs where differentiable, GPU tensor-plan lowering, WebGPU lowering, refusal tests |
-| JIT-012 | `.numpy()`/`.item()` are the primary materialization boundaries for GPU paths. | Partial | `realize_tensor_plan_webgpu_resident(...)` returns GPUBuffer-backed TensorProxy roots, resident backward stores leaf grads as GPUBuffer-backed TensorProxy values, resident optimizers rebind params/state to GPUBuffer handles, and all materialize only on `.numpy()` / `.item()`; default training path is not fully resident |
+| JIT-012 | `.numpy()`/`.item()` are the primary materialization boundaries for GPU paths. | Partial | `realize_tensor_plan_webgpu_resident(...)` returns GPUBuffer-backed TensorProxy roots, resident/default-GPU backward stores leaf grads as GPUBuffer-backed TensorProxy values, resident/default-GPU optimizers rebind params/state to GPUBuffer handles, and all materialize only on `.numpy()` / `.item()`; full memory-planned scheduler remains |
 
 LLD:
 
@@ -301,7 +301,8 @@ LLD:
   roots through that same bridge and refuses closure-only graphs.
   `loss.backward(device="webgpu", resident=True)` registers leaf `.grad`
   tensors as GPU-resident TensorProxy buffers until explicit materialization.
-  Default CPU `.backward()` remains pending.
+  Default `.backward()` selects the same resident WebGPU path when the graph
+  reads GPU-owned buffers; CPU-owned graphs keep CPU semantics.
 - `nn.LayerNorm` / `F.layer_norm(...)` emit primitive `LAYER_NORM` IR and
   `LAYER_NORM_BACKWARD_*` symbolic gradient roots. CPU handlers remain the
   reference; forward/input-grad/weight-grad/bias-grad lower through
@@ -316,6 +317,8 @@ LLD:
   handles without CPU readback. `Adam.step(device="webgpu", resident=True)` and
   `AdamW.step(device="webgpu", resident=True)` keep parameter, first-moment, and
   second-moment buffers resident.
+- `Optimizer.step()` defaults to the resident WebGPU path when any parameter or
+  gradient buffer is already GPU-owned; CPU-owned training keeps CPU semantics.
 - Future GPU-native work should promote core ops out of `CUSTOM` into primitive
   tensor IR. `CUSTOM` should remain for user-authored WGSL/lab kernels and
   temporary migration scaffolding, not the final path for framework ops.
@@ -539,23 +542,19 @@ Current limit: `browsergrad-jit` has primitive Conv1d/Conv2d/ConvTranspose2d/
 Conv3d forward/backward IR with CPU reference handlers. Those CNN roots lower
 through generic tensor-plan WebGPU. Explicit `loss.backward(device="webgpu")`
 can populate leaf `.grad` values by realizing symbolic gradient roots through
-the tensor-plan bridge. Default `.backward()` still mutates CPU `.grad` buffers,
-the WebGPU backward path can keep `.grad` GPU-resident when called with
-`resident=True`, LayerNorm backward roots, functional SGD/Adam/AdamW updates,
-and explicit `Optimizer.step(device="webgpu")` can run as tensor-plan WebGPU.
-No-momentum `SGD.step(device="webgpu", resident=True)` can keep parameter
-updates GPU-resident. Adam/AdamW resident mode keeps params/state GPU-resident;
-non-resident `Optimizer.step(device="webgpu")` still materializes params/state
-back to CPU buffers after the GPU update.
+the tensor-plan bridge. For GPU-owned graphs, default `.backward()` selects the
+resident WebGPU path and keeps `.grad` GPU-resident. LayerNorm backward roots,
+functional SGD/Adam/AdamW updates, and explicit `Optimizer.step(device="webgpu")`
+can run as tensor-plan WebGPU. `Optimizer.step(device="webgpu", resident=True)`
+and default `.step()` on GPU-owned params/grads keep SGD/Adam/AdamW params/state
+GPU-resident; non-resident `Optimizer.step(device="webgpu")` still materializes
+params/state back to CPU buffers after the GPU update.
 Explicit `realize_tensor_plan_webgpu_resident(...)` can keep tensor-plan roots
 GPU-resident across follow-on tensor-plan calls until `.numpy()` / `.item()`;
-default training storage is still CPU-owned.
+CPU-owned training storage still uses CPU by default.
 
 Remove the limit when:
 
-- Make default `.backward()` select the graph backend when tensors/params are
-  GPU-resident.
-- Make GPU-resident `.grad` the default path for GPU-resident tensors.
 - Add a real memory planner/buffer pool for gradient and optimizer lifetimes.
 - Broaden scheduler/codegen beyond direct kernels when throughput matters.
 

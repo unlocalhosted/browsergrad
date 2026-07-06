@@ -1360,8 +1360,13 @@ class TensorProxy:
         call would silently return to CPU. `resident=True` keeps leaf `.grad`
         tensors in WebGPU buffers until explicit `.numpy()` / `.item()`.
         """
+        sess = self._get_session()
         if device is None:
-            backward_device = "cpu"
+            if _has_gpu_resident_inputs(self._uop, sess):
+                backward_device = "webgpu"
+                resident = True
+            else:
+                backward_device = "cpu"
         else:
             backward_device = str(device).lower()
         if backward_device in ("tensor_plan_webgpu", "gpu"):
@@ -1409,7 +1414,6 @@ class TensorProxy:
         from ._realize import realize
         from . import _fusion_config, _vjp
         order = toposort(self._uop)
-        sess = self._get_session()
 
         symbolic_viable = True
         for proxy in proxy_by_uop_id.values():
@@ -1746,6 +1750,26 @@ def _materialize_gpu_inputs_for_cpu(uop: UOp, session: Any) -> None:
             numpy_buffer_table=bt,
             gpu_buffer_table=gbt,
         )
+
+
+def _has_gpu_resident_inputs(uop: UOp, session: Any) -> bool:
+    """True when a graph reads at least one GPU-only BUFFER leaf."""
+    try:
+        from ._ir import toposort
+        from ._realize_webgpu import get_registered_gpu_buffer_table
+    except Exception:
+        return False
+    gbt = get_registered_gpu_buffer_table()
+    if gbt is None:
+        return False
+    bt = session.buffer_table
+    for node in toposort(uop):
+        if node.op != OP_BUFFER:
+            continue
+        buffer_id = node.arg
+        if gbt.has(buffer_id) and not bt.is_materialized(buffer_id):
+            return True
+    return False
 
 
 def tensor(

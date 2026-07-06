@@ -31,7 +31,12 @@ from ._ir import (
     OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
 )
-from ._tensor_proxy import TensorProxy, from_numpy, _from_buffer_id
+from ._tensor_proxy import (
+    TensorProxy,
+    from_numpy,
+    _from_buffer_id,
+    _has_gpu_resident_inputs,
+)
 from ._errors import RealizationError, ShapeError
 
 
@@ -46,6 +51,36 @@ def _normalize_step_device(device: Optional[str]) -> str:
             f"optimizer.step(device=...): expected 'cpu' or 'webgpu', got {device!r}"
         )
     return out
+
+
+def _tensor_has_gpu_residency(tensor: Optional[TensorProxy]) -> bool:
+    if tensor is None:
+        return False
+    try:
+        sess = tensor._get_session()
+        return _has_gpu_resident_inputs(tensor._uop, sess)
+    except Exception:
+        return False
+
+
+def _resolve_step_device_and_residency(
+    params: List[TensorProxy],
+    *,
+    device: Optional[str],
+    resident: bool,
+    name: str,
+) -> tuple[str, bool]:
+    if device is None:
+        if resident:
+            return "webgpu", True
+        for p in params:
+            if _tensor_has_gpu_residency(p) or _tensor_has_gpu_residency(p.grad):
+                return "webgpu", True
+        return "cpu", False
+    step_device = _normalize_step_device(device)
+    if resident and step_device != "webgpu":
+        raise ValueError(f"{name}.step(resident=True) requires device='webgpu'")
+    return step_device, resident
 
 
 def _realize_update_webgpu(tensor: TensorProxy) -> np.ndarray:
@@ -331,9 +366,12 @@ class SGD(Optimizer):
         self._velocity: dict[int, np.ndarray] = {}
 
     def step(self, device: Optional[str] = None, resident: bool = False) -> None:
-        step_device = _normalize_step_device(device)
-        if resident and step_device != "webgpu":
-            raise ValueError("SGD.step(resident=True) requires device='webgpu'")
+        step_device, resident = _resolve_step_device_and_residency(
+            self._params,
+            device=device,
+            resident=resident,
+            name="SGD",
+        )
         if step_device == "webgpu":
             if self.momentum != 0.0:
                 raise RealizationError(
@@ -406,9 +444,12 @@ class Adam(Optimizer):
 
     def step(self, device: Optional[str] = None, resident: bool = False) -> None:
         self._step += 1
-        step_device = _normalize_step_device(device)
-        if resident and step_device != "webgpu":
-            raise ValueError("Adam.step(resident=True) requires device='webgpu'")
+        step_device, resident = _resolve_step_device_and_residency(
+            self._params,
+            device=device,
+            resident=resident,
+            name="Adam",
+        )
         if resident:
             for p in self._params:
                 if not p.requires_grad or p.grad is None:
@@ -515,9 +556,12 @@ class AdamW(Adam):
 
     def step(self, device: Optional[str] = None, resident: bool = False) -> None:
         self._step += 1
-        step_device = _normalize_step_device(device)
-        if resident and step_device != "webgpu":
-            raise ValueError("AdamW.step(resident=True) requires device='webgpu'")
+        step_device, resident = _resolve_step_device_and_residency(
+            self._params,
+            device=device,
+            resident=resident,
+            name="AdamW",
+        )
         if resident:
             for p in self._params:
                 if not p.requires_grad or p.grad is None:
