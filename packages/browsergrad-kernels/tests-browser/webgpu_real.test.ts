@@ -222,6 +222,8 @@ describe("real WebGPU — matmul + tiled GEMM + fused elementwise + FA-v2", () =
     expect(result.shape).toEqual([M, N]);
     expect(result.materializedValueId).toBe(7);
     expect(result.peakLiveBytes).toBeGreaterThan(0);
+    expect(result.earlyReleasedBuffers).toBeGreaterThan(0);
+    expect(result.earlyReleasedBytes).toBeGreaterThan(0);
     expect(maxDiff).toBeLessThan(1e-3);
   });
 

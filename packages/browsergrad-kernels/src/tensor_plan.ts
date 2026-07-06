@@ -96,6 +96,8 @@ export interface TensorPlanRunResult {
   readonly shape: readonly number[];
   readonly peakLiveBytes: number;
   readonly materializedValueId: number;
+  readonly earlyReleasedBuffers: number;
+  readonly earlyReleasedBytes: number;
 }
 
 export interface TensorPlanResidentResult {
@@ -104,6 +106,8 @@ export interface TensorPlanResidentResult {
   readonly shape: readonly number[];
   readonly peakLiveBytes: number;
   readonly residentValueId: number;
+  readonly earlyReleasedBuffers: number;
+  readonly earlyReleasedBytes: number;
 }
 
 type RawRecord = Record<string, unknown>;
@@ -168,7 +172,7 @@ export async function runTensorGpuPlan(
   rawPlan: TensorGpuPlan | unknown,
   inputs: readonly TensorPlanInput[],
 ): Promise<TensorPlanRunResult> {
-  const { root, rootMeta, owned, peakLiveBytes, rootId } = executeTensorGpuPlan(
+  const { root, rootMeta, owned, peakLiveBytes, rootId, earlyReleaseStats } = executeTensorGpuPlan(
     device,
     rawPlan,
     inputs,
@@ -180,6 +184,8 @@ export async function runTensorGpuPlan(
       shape: rootMeta.shape,
       peakLiveBytes,
       materializedValueId: rootId,
+      earlyReleasedBuffers: earlyReleaseStats.buffers,
+      earlyReleasedBytes: earlyReleaseStats.bytes,
     };
   } finally {
     for (const buffer of owned) buffer.destroy();
@@ -191,7 +197,7 @@ export function runTensorGpuPlanResident(
   rawPlan: TensorGpuPlan | unknown,
   inputs: readonly TensorPlanInput[],
 ): TensorPlanResidentResult {
-  const { root, rootMeta, owned, peakLiveBytes, rootId } = executeTensorGpuPlan(
+  const { root, rootMeta, owned, peakLiveBytes, rootId, earlyReleaseStats } = executeTensorGpuPlan(
     device,
     rawPlan,
     inputs,
@@ -210,6 +216,8 @@ export function runTensorGpuPlanResident(
     shape: rootMeta.shape,
     peakLiveBytes,
     residentValueId: rootId,
+    earlyReleasedBuffers: earlyReleaseStats.buffers,
+    earlyReleasedBytes: earlyReleaseStats.bytes,
   };
 }
 
@@ -223,6 +231,7 @@ function executeTensorGpuPlan(
   readonly owned: Set<GPUBuffer>;
   readonly peakLiveBytes: number;
   readonly rootId: number;
+  readonly earlyReleaseStats: { readonly buffers: number; readonly bytes: number };
 } {
   const plan = normalizeTensorGpuPlan(rawPlan);
   validatePlan(plan);
@@ -239,12 +248,18 @@ function executeTensorGpuPlan(
 
   const values = new Map<number, ResidentValue>();
   const owned = new Set<GPUBuffer>();
+  const ownedBytes = new Map<GPUBuffer, number>();
+  const earlyReleaseStats = { buffers: 0, bytes: 0 };
 
   try {
     for (const step of plan.steps) {
       const value = executeStep(device, step, values, inputData);
       values.set(step.valueId, value);
-      if (value.owns) owned.add(value.buffer);
+      if (value.owns) {
+        owned.add(value.buffer);
+        ownedBytes.set(value.buffer, value.byteLength);
+      }
+      releaseDeadOwnedBuffers(plan, step.step, values, owned, ownedBytes, earlyReleaseStats);
     }
   } catch (err) {
     for (const buffer of owned) buffer.destroy();
@@ -263,7 +278,42 @@ function executeTensorGpuPlan(
     owned,
     peakLiveBytes: plan.peakLiveBytes,
     rootId: plan.rootId,
+    earlyReleaseStats,
   };
+}
+
+function releaseDeadOwnedBuffers(
+  plan: TensorGpuPlan,
+  currentStep: number,
+  values: Map<number, ResidentValue>,
+  owned: Set<GPUBuffer>,
+  ownedBytes: Map<GPUBuffer, number>,
+  stats: { buffers: number; bytes: number },
+): void {
+  if (owned.size === 0) return;
+  const root = values.get(plan.rootId);
+  const futureInputIds = new Set<number>();
+  for (const step of plan.steps) {
+    if (step.step <= currentStep) continue;
+    for (const id of step.inputIds) futureInputIds.add(id);
+  }
+  for (const buffer of Array.from(owned)) {
+    if (root?.buffer === buffer) continue;
+    let needed = false;
+    for (const id of futureInputIds) {
+      if (values.get(id)?.buffer === buffer) {
+        needed = true;
+        break;
+      }
+    }
+    if (needed) continue;
+    const bytes = ownedBytes.get(buffer) ?? 0;
+    buffer.destroy();
+    owned.delete(buffer);
+    ownedBytes.delete(buffer);
+    stats.buffers += 1;
+    stats.bytes += bytes;
+  }
 }
 
 function executeStep(

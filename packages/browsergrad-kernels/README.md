@@ -38,9 +38,11 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
   only the declared root. Current coverage: f32 BUFFER/LOAD/2-D MATMUL,
   elementwise chains, RESHAPE, PERMUTE, BROADCAST_TO, and REDUCE(sum/mean) rank
   <= 4, plus Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm forward/backward
-  and functional SGD/Adam/AdamW updates. This is the future
-  framework-runtime direction; per-op bridge methods are legacy/interim
-  coverage.
+  and functional SGD/Adam/AdamW updates. The executor uses plan liveness to
+  destroy dead owned GPU buffers before the root boundary and reports
+  `earlyReleasedBuffers` / `earlyReleasedBytes` for tests and profiling. This
+  is the future framework-runtime direction; per-op bridge methods are
+  legacy/interim coverage.
 - `runTensorGpuPlanResident(device, plan, inputs)` — same executor, but returns
   an owned resident root `GPUBuffer` instead of reading it back. Inputs may be
   host data or bridge-owned resident handles.

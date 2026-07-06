@@ -112,7 +112,7 @@ the intended GPU materialization boundaries.
   resident=True)` and `AdamW.step(device="webgpu", resident=True)` keep
   params/m/v state resident. Default `.step()` selects the resident WebGPU path
   when params/grads are already GPU-owned.
-- Remaining: full training-loop scheduling and memory planning.
+- Remaining: reusable buffer pooling and broader training-loop scheduling.
 
 ### Tiled GEMM + fused codegen + GPU cast (PRD-012a)
 - `matmulTiledDirect` — 16×16 tiled GEMM (workgroup-shared A/B tiles). Closes most of the gap PRD-012 was claiming via "megakernels".
@@ -189,7 +189,8 @@ Plus the realizer-tier API:
   forward/backward and functional SGD/Adam/AdamW updates. It accepts
   the snake_case `browsergrad-jit` plan payload, keeps intermediates
   resident, and materializes only the declared root, matching the GPU-native
-  direction.
+  direction. It releases dead owned buffers from liveness metadata before the
+  root boundary and reports early-release counts/bytes.
 - `runTensorGpuPlanResident` — same executor, but returns an owned resident
   root `GPUBuffer`; bridge inputs can be host bytes or existing resident
   handles.

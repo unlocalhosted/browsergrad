@@ -269,10 +269,10 @@ Requirements:
 | JIT-006 | WebGPU realizer bridge supports forward opcodes and materializes at boundaries. | In | bridge/mock + real WebGPU tests through kernels |
 | JIT-007 | Custom WGSL kernels are cache-keyed, forward-only, and explicit. | In | custom kernel tests |
 | JIT-008 | ONNX export emits a supported subset and refuses unmappable ops. | In | ONNX tests |
-| JIT-009 | GPU-resident backward/optimizer steps. | Partial | Conv/LayerNorm backward roots, `backward(device="webgpu", resident=True)` GPUBuffer-backed leaf grads, functional SGD/Adam/AdamW update IR, explicit/non-resident `Optimizer.step(device="webgpu")`, resident `SGD`/`Adam`/`AdamW` step paths, default `.backward()` / `.step()` WebGPU selection for GPU-owned graphs, and explicit resident tensor-plan roots can lower through WebGPU; memory planner remains |
-| JIT-010 | Heavy CNN family parity with grad. | Partial | Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward are primitive IR with CPU handlers and symbolic VJPs; these CNN roots lower through generic f32 tensor-plan WebGPU; GPU-owned graphs default to resident WebGPU backward and can populate leaf grads without CPU readback; scheduler/memory planner remains |
+| JIT-009 | GPU-resident backward/optimizer steps. | Partial | Conv/LayerNorm backward roots, `backward(device="webgpu", resident=True)` GPUBuffer-backed leaf grads, functional SGD/Adam/AdamW update IR, explicit/non-resident `Optimizer.step(device="webgpu")`, resident `SGD`/`Adam`/`AdamW` step paths, default `.backward()` / `.step()` WebGPU selection for GPU-owned graphs, explicit resident tensor-plan roots, and liveness-based early buffer release can lower through WebGPU; buffer reuse/pooling remains |
+| JIT-010 | Heavy CNN family parity with grad. | Partial | Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward are primitive IR with CPU handlers and symbolic VJPs; these CNN roots lower through generic f32 tensor-plan WebGPU; GPU-owned graphs default to resident WebGPU backward and can populate leaf grads without CPU readback; buffer reuse/pooling remains |
 | JIT-011 | Canonical tensor IR for core framework ops instead of `CUSTOM` GPU escape hatches. | In progress | Primitive IR ops for conv/norm/attention/optimizer updates, CPU handlers/refusals, VJPs where differentiable, GPU tensor-plan lowering, WebGPU lowering, refusal tests |
-| JIT-012 | `.numpy()`/`.item()` are the primary materialization boundaries for GPU paths. | Partial | `realize_tensor_plan_webgpu_resident(...)` returns GPUBuffer-backed TensorProxy roots, resident/default-GPU backward stores leaf grads as GPUBuffer-backed TensorProxy values, resident/default-GPU optimizers rebind params/state to GPUBuffer handles, and all materialize only on `.numpy()` / `.item()`; full memory-planned scheduler remains |
+| JIT-012 | `.numpy()`/`.item()` are the primary materialization boundaries for GPU paths. | Partial | `realize_tensor_plan_webgpu_resident(...)` returns GPUBuffer-backed TensorProxy roots, resident/default-GPU backward stores leaf grads as GPUBuffer-backed TensorProxy values, resident/default-GPU optimizers rebind params/state to GPUBuffer handles, tensor-plan runtime releases dead owned buffers by liveness, and all materialize only on `.numpy()` / `.item()`; reusable buffer pool remains |
 
 LLD:
 
@@ -363,7 +363,9 @@ LLD:
   supports f32 BUFFER/LOAD/MATMUL, elementwise chains, RESHAPE, PERMUTE,
   BROADCAST_TO, REDUCE(sum/mean) for rank <= 4, Conv1d/Conv2d/ConvTranspose2d/Conv3d
   forward/backward, LayerNorm forward/backward, functional SGD/Adam/AdamW
-  updates, and materializes only the root.
+  updates, materializes only the root, and uses plan liveness to release dead
+  owned buffers before the root boundary. Runtime results expose early-release
+  counts/bytes for profiling and regression tests.
 - `runTensorGpuPlanResident()` shares that executor but returns an owned root
   `GPUBuffer`; `createWebGpuRealizerBridge(...).run_tensor_plan_resident(...)`
   mints a bridge handle so later plans can consume resident roots without
@@ -555,7 +557,7 @@ CPU-owned training storage still uses CPU by default.
 
 Remove the limit when:
 
-- Add a real memory planner/buffer pool for gradient and optimizer lifetimes.
+- Add reusable buffer pooling for gradient and optimizer lifetimes.
 - Broaden scheduler/codegen beyond direct kernels when throughput matters.
 
 ## Validation Matrix
