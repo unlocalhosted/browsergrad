@@ -18,7 +18,7 @@ import type {
   SemanticMemoryRef,
 } from "./semantic_ir.js";
 
-type SemanticValue = number | Vector3;
+type SemanticValue = number | Vector3 | number[];
 type SemanticAtomicOp = "add" | "sub" | "min" | "max" | "and" | "or" | "xor" | "exchange" | "cas";
 
 const SEMANTIC_ATOMIC_OPS = new Map<string, SemanticAtomicOp>([
@@ -146,14 +146,18 @@ function unsupportedSemanticReferenceOperation(
   for (const operation of operations) {
     switch (operation.kind) {
       case "declare":
-        if (operation.target.addressSpace !== "local" || operation.target.pointer || operation.target.dimensions.length > 0) return operation;
+        if (operation.target.addressSpace !== "local" || operation.target.pointer) return operation;
         if (!semanticReferenceScalarTypeSupported(operation.target.valueType)) return operation;
+        if (operation.target.dimensions.length > 0 && operation.init) return operation;
         if (operation.init && !semanticReferenceExpressionSupported(operation.init, "scalar")) return operation;
         break;
       case "store":
         if (!semanticReferenceAssignmentOperatorSupported(operation.operator)) return operation;
         if (!semanticReferenceMemoryRefSupported(operation.target)) return operation;
-        if (!compiled.kernelIr.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage")) return operation;
+        if (
+          operation.target.addressSpace === "storage" &&
+          !compiled.kernelIr.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage")
+        ) return operation;
         if (!semanticReferenceValueExpressionSupported(operation.value, compiled)) return operation;
         break;
       case "atomic":
@@ -208,8 +212,8 @@ function semanticReferenceScalarTypeSupported(valueType: CudaLiteScalarType | un
 }
 
 function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
-  return (ref.addressSpace === "storage" || ref.addressSpace === "constant") &&
-    ref.indices.length === 1 &&
+  return (ref.addressSpace === "storage" || ref.addressSpace === "constant" || ref.addressSpace === "local") &&
+    (ref.addressSpace === "local" ? ref.indices.length > 0 : ref.indices.length === 1) &&
     ref.fields.length === 0 &&
     semanticReferenceExpressionSupported(ref.indices[0]!, "scalar");
 }
@@ -335,7 +339,7 @@ function execSemanticOperations(
   for (const operation of operations) {
     switch (operation.kind) {
       case "declare":
-        context.locals.set(operation.target.name, operation.init ? evalNumber(operation.init, context) : 0);
+        context.locals.set(operation.target.name, semanticDeclareValue(operation, context));
         break;
       case "store":
         writeMemory(operation.target, storeValue(operation, context), context);
@@ -369,6 +373,14 @@ function storeValue(
   if (operation.operator === "+=") return left + right;
   if (operation.operator === "-=") return left - right;
   throw semanticReferenceError(`semantic reference does not support assignment '${operation.operator}'`, operation.span);
+}
+
+function semanticDeclareValue(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "declare" }>,
+  context: SemanticReferenceContext,
+): SemanticValue {
+  if (operation.target.dimensions.length > 0) return Array.from({ length: totalElements(operation.target.dimensions) }, () => 0);
+  return operation.init ? evalNumber(operation.init, context) : 0;
 }
 
 function execSemanticAtomic(
@@ -552,7 +564,7 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
     indices.unshift(target.index);
     target = target.target;
   }
-  if (target.kind !== "symbol" || (target.addressSpace !== "storage" && target.addressSpace !== "constant")) return undefined;
+  if (target.kind !== "symbol" || (target.addressSpace !== "storage" && target.addressSpace !== "constant" && target.addressSpace !== "local")) return undefined;
   return {
     base: target.name,
     addressSpace: target.addressSpace,
@@ -564,6 +576,12 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
 }
 
 function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {
+  if (ref.addressSpace === "local") {
+    const buffer = context.locals.get(ref.base);
+    if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
+    const index = flatIndex(ref, context);
+    return Number(buffer[index] ?? 0);
+  }
   const buffer = ref.addressSpace === "constant"
     ? context.constants.get(ref.base)
     : context.buffers.get(ref.base);
@@ -577,6 +595,13 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
 
 function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticReferenceContext): void {
   if (ref.addressSpace === "constant") throw semanticReferenceError(`cannot write constant memory '${ref.base}'`, ref.span);
+  if (ref.addressSpace === "local") {
+    const buffer = context.locals.get(ref.base);
+    if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
+    const index = flatIndex(ref, context);
+    if (index >= 0 && index < buffer.length) buffer[index] = value;
+    return;
+  }
   const buffer = context.buffers.get(ref.base);
   if (!buffer) throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
   const index = flatIndex(ref, context);
@@ -586,6 +611,12 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
 }
 
 function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {
+  if (ref.addressSpace === "local") {
+    const symbol = context.compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === "local");
+    if (!symbol) throw semanticReferenceError(`unknown local array '${ref.base}'`, ref.span);
+    if (ref.indices.length !== symbol.dimensions.length) throw semanticReferenceError(`local array '${ref.base}' index rank mismatch`, ref.span);
+    return flatIndexForDimensions(symbol.dimensions, ref.indices.map((index) => Math.trunc(evalNumber(index, context))));
+  }
   if (ref.indices.length !== 1) throw semanticReferenceError("semantic reference supports only 1D storage indexing", ref.span);
   return Math.trunc(evalNumber(ref.indices[0]!, context));
 }
@@ -607,7 +638,7 @@ function symbolValue(name: string, context: SemanticReferenceContext, span: Sour
 }
 
 function memberValue(value: SemanticValue, property: string, span: SourceSpan): number {
-  if (typeof value === "number") throw semanticReferenceError("semantic member target is not a vector", span);
+  if (typeof value === "number" || Array.isArray(value)) throw semanticReferenceError("semantic member target is not a vector", span);
   if (property === "x") return value.x;
   if (property === "y") return value.y;
   if (property === "z") return value.z;
@@ -704,6 +735,17 @@ function cloneTypedArray(buffer: WgslTypedArray): WgslTypedArray {
   if (buffer instanceof Int32Array) return new Int32Array(buffer);
   if (buffer instanceof Uint32Array) return new Uint32Array(buffer);
   return new Float32Array(buffer as Float32Array);
+}
+
+function totalElements(dimensions: readonly number[]): number {
+  return dimensions.length === 0 ? 1 : dimensions.reduce((product, dimension) => product * dimension, 1);
+}
+
+function flatIndexForDimensions(dimensions: readonly number[], indices: readonly number[]): number {
+  return indices.reduce((sum, index, offset) => {
+    const stride = dimensions.slice(offset + 1).reduce((product, dimension) => product * dimension, 1);
+    return sum + index * stride;
+  }, 0);
 }
 
 function vectorFromTuple(value: readonly [number, number, number]): Vector3 {

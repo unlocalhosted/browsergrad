@@ -1962,13 +1962,22 @@ __global__ void nestedLocalPointer(uint* out) {
   it("lowers fixed thread-local arrays through reference and WGSL", () => {
     const compiled = compileCudaLiteKernel(LOCAL_ARRAY, { workgroupSize: [4, 1, 1] });
     expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("var tmp: array<array<f32, 2>, 2>;");
 
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
     const result = runCompiledKernelReference(
       compiled,
       { buffers: { out: new Float32Array(4) } },
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([3, 4, 5, 6]);
     expect([...result.buffers.out as Float32Array]).toEqual([3, 4, 5, 6]);
   });
 

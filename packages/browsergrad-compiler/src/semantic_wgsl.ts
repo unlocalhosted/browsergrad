@@ -153,8 +153,9 @@ function unsupportedSemanticWgslOperation(
           if (operation.target.pointer || !semanticWgslScalarTypeSupported(operation.target.valueType)) return operation;
           break;
         }
-        if (operation.target.addressSpace !== "local" || operation.target.pointer || operation.target.dimensions.length > 0) return operation;
+        if (operation.target.addressSpace !== "local" || operation.target.pointer) return operation;
         if (!semanticWgslScalarTypeSupported(operation.target.valueType)) return operation;
+        if (operation.target.dimensions.length > 0 && operation.init) return operation;
         if (operation.init && !semanticWgslExpressionSupported(operation.init, "scalar")) return operation;
         break;
       case "store":
@@ -253,9 +254,10 @@ function semanticWgslLoopInitSupported(
 }
 
 function semanticWgslMemoryRefSupported(ref: SemanticMemoryRef): boolean {
-  if (ref.addressSpace !== "storage" && ref.addressSpace !== "shared" && ref.addressSpace !== "constant") return false;
+  if (ref.addressSpace !== "storage" && ref.addressSpace !== "shared" && ref.addressSpace !== "constant" && ref.addressSpace !== "local") return false;
   if (ref.fields.length > 0) return false;
   if ((ref.addressSpace === "storage" || ref.addressSpace === "constant") && ref.indices.length !== 1) return false;
+  if (ref.addressSpace === "local" && ref.indices.length === 0) return false;
   return ref.indices.every((index) => semanticWgslExpressionSupported(index, "scalar"));
 }
 
@@ -360,6 +362,9 @@ function emitSemanticOperation(
   switch (operation.kind) {
     case "declare": {
       if (operation.target.addressSpace === "shared") return [];
+      if (operation.target.dimensions.length > 0) {
+        return [`${prefix}var ${nameFor(operation.target.name, names)}: ${emitLocalArrayType(operation.target)};`];
+      }
       const type = wgslScalar(operation.target.valueType);
       const init = operation.init ? ` = ${emitSemanticExpressionAs(operation.init, ir, names, wgslValueScalar(operation.target.valueType))}` : "";
       return [`${prefix}var ${nameFor(operation.target.name, names)}: ${type}${init};`];
@@ -652,6 +657,12 @@ function emitSemanticMemoryRef(
     if (ref.indices.length !== 1) throw semanticWgslError("semantic WGSL supports 1D constant refs only", ref.span);
     return `${nameFor(ref.base, names)}[${emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32")}]`;
   }
+  if (ref.addressSpace === "local") {
+    const local = localMemorySymbols(ir).find((symbol) => symbol.name === ref.base);
+    if (!local) throw semanticWgslError(`unknown local memory '${ref.base}'`, ref.span);
+    if (ref.indices.length !== local.dimensions.length) throw semanticWgslError(`local memory '${ref.base}' index rank mismatch`, ref.span);
+    return `${nameFor(ref.base, names)}${ref.indices.map((index) => `[${emitSemanticExpressionAs(index, ir, names, "u32")}]`).join("")}`;
+  }
   if (ref.addressSpace === "shared") {
     const shared = sharedMemorySymbols(ir).find((symbol) => symbol.name === ref.base);
     if (!shared) throw semanticWgslError(`unknown shared memory '${ref.base}'`, ref.span);
@@ -662,7 +673,7 @@ function emitSemanticMemoryRef(
 
 function memoryRefFromIndexExpression(expression: Extract<SemanticExpression, { readonly kind: "index" }>): SemanticMemoryRef | undefined {
   const flattened = flattenMemoryRef(expression);
-  if (!flattened || (flattened.base.addressSpace !== "storage" && flattened.base.addressSpace !== "shared" && flattened.base.addressSpace !== "constant")) return undefined;
+  if (!flattened || (flattened.base.addressSpace !== "storage" && flattened.base.addressSpace !== "shared" && flattened.base.addressSpace !== "constant" && flattened.base.addressSpace !== "local")) return undefined;
   return {
     base: flattened.base.name,
     addressSpace: flattened.base.addressSpace,
@@ -694,6 +705,17 @@ function sharedMemorySymbols(ir: SemanticKernelIrModule): readonly SemanticKerne
 
 function constantMemorySymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["memory"][number][] {
   return ir.memory.filter((symbol) => symbol.kind === "constant");
+}
+
+function localMemorySymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["memory"][number][] {
+  return ir.memory.filter((symbol) => symbol.kind === "local" && symbol.dimensions.length > 0);
+}
+
+function emitLocalArrayType(symbol: SemanticKernelIrModule["memory"][number]): string {
+  return symbol.dimensions.reduceRight<string>(
+    (element, dimension) => `array<${element}, ${Math.max(1, dimension)}>`,
+    wgslScalar(symbol.valueType),
+  );
 }
 
 function emitSharedType(symbol: SemanticKernelIrModule["memory"][number]): string {
