@@ -1364,7 +1364,12 @@ def scaled_dot_product_attention(
     if dropout_p != 0.0:
         raise NotImplementedError("scaled_dot_product_attention: dropout_p > 0 not supported")
     s = (1.0 / np.sqrt(query.shape[-1])) if scale is None else float(scale)
-    scores = (query @ key.transpose(-1, -2)) * s
+    scores = query @ key.transpose(-1, -2)
+    scale_tensor = from_numpy(
+        np.full(scores.shape, s, dtype=np.float32),
+        session=query._get_session(),
+    )
+    scores = scores * scale_tensor
     if is_causal:
         l_q, l_k = scores.shape[-2], scores.shape[-1]
         mask = np.triu(np.ones((l_q, l_k), dtype=bool), k=1)

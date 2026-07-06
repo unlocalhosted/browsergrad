@@ -271,7 +271,7 @@ Requirements:
 | JIT-008 | ONNX export emits a supported subset and refuses unmappable ops. | In | ONNX tests |
 | JIT-009 | GPU-resident backward/optimizer steps. | Partial | Conv/LayerNorm backward roots, `backward(device="webgpu", resident=True)` GPUBuffer-backed leaf grads, functional SGD/Adam/AdamW update IR, explicit/non-resident `Optimizer.step(device="webgpu")`, resident `SGD`/`Adam`/`AdamW` step paths, default `.backward()` / `.step()` WebGPU selection for GPU-owned graphs, explicit resident tensor-plan roots, liveness-based early buffer release, reusable direct-output pooling, elementwise-chain fusion, and softmax fusion can lower through WebGPU; broader scheduler/codegen remains |
 | JIT-010 | Heavy CNN family parity with grad. | Partial | Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward are primitive IR with CPU handlers and symbolic VJPs; these CNN roots lower through generic f32 tensor-plan WebGPU; GPU-owned graphs default to resident WebGPU backward and can populate leaf grads without CPU readback; broader scheduler/codegen remains |
-| JIT-011 | Canonical tensor IR for core framework ops instead of `CUSTOM` GPU escape hatches. | In progress | Primitive IR ops for conv/norm/attention/optimizer updates, CPU handlers/refusals, VJPs where differentiable, GPU tensor-plan lowering, elementwise-chain and softmax plan fusion, WebGPU lowering, refusal tests |
+| JIT-011 | Canonical tensor IR for core framework ops instead of `CUSTOM` GPU escape hatches. | In progress | Primitive IR ops for conv/norm/attention/optimizer updates, CPU handlers/refusals, VJPs where differentiable, GPU tensor-plan lowering, elementwise-chain and softmax plan fusion, SDPA-shaped graph lowering, WebGPU lowering, refusal tests |
 | JIT-012 | `.numpy()`/`.item()` are the primary materialization boundaries for GPU paths. | Partial | `realize_tensor_plan_webgpu_resident(...)` returns GPUBuffer-backed TensorProxy roots, resident/default-GPU backward stores leaf grads as GPUBuffer-backed TensorProxy values, resident/default-GPU optimizers rebind params/state to GPUBuffer handles, tensor-plan runtime releases dead owned buffers by liveness, returns reusable direct outputs to the device pool, and materializes only on `.numpy()` / `.item()`; full training-loop scheduling remains |
 
 LLD:
@@ -309,6 +309,10 @@ LLD:
   `LAYER_NORM_BACKWARD_*` symbolic gradient roots. CPU handlers remain the
   reference; forward/input-grad/weight-grad/bias-grad lower through
   `runTensorGpuPlan()` with real browser WebGPU parity tests.
+- `nn.functional.scaled_dot_product_attention(...)` decomposes into primitive
+  tensor IR (`MATMUL` -> scale -> `FUSED_SOFTMAX` -> `MATMUL`) and lowers
+  through `runTensorGpuPlan()` without a `CUSTOM` callback. Browser tests cover
+  the same SDPA-shaped graph with real WebGPU.
 - `bg.optim.sgd_update(...)`, `bg.optim.adam_update(...)`, and
   `bg.optim.adamw_update(...)` emit primitive optimizer/update IR with NumPy
   handlers, vmap/ONNX refusals, tensor-plan lowering, and real WebGPU kernels.
@@ -565,7 +569,7 @@ CPU-owned training storage still uses CPU by default.
 Remove the limit when:
 
 - Broaden scheduler/codegen beyond direct kernels and current elementwise-chain
-  / softmax fusion when throughput matters.
+  / softmax / SDPA-shaped graph fusion when throughput matters.
 
 ## Validation Matrix
 

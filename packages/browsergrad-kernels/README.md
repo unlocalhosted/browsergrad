@@ -44,7 +44,9 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
   FUSED_SOFTMAX last-axis direct softmax, RESHAPE, PERMUTE, BROADCAST_TO, and
   REDUCE(sum/mean) rank <= 4, plus
   Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm forward/backward and
-  functional SGD/Adam/AdamW updates. The executor uses plan liveness to
+  functional SGD/Adam/AdamW updates. SDPA-shaped graphs run as primitive
+  tensor-plan steps (`MATMUL` -> scale -> `FUSED_SOFTMAX` -> `MATMUL`), not
+  a framework-specific bridge method. The executor uses plan liveness to
   return dead owned direct-dispatch outputs to the reusable output pool before
   the root boundary, destroys uploaded host inputs when they die, and reports
   `earlyReleasedBuffers` / `earlyReleasedBytes` for tests and profiling. This

@@ -65,6 +65,8 @@ pretending to match PyTorch.
 `Conv1d`, `Conv2d`, `ConvTranspose2d`, `Conv3d`, and `LayerNorm` are primitive
 IR ops with NumPy handlers and symbolic VJPs. Their forward/backward roots
 lower through generic tensor-plan WebGPU via `realize_tensor_plan_webgpu(...)`.
+`nn.functional.scaled_dot_product_attention(...)` stays in primitive tensor IR:
+`MATMUL` -> scale -> `FUSED_SOFTMAX` -> `MATMUL`, with no `CUSTOM` callback.
 `loss.backward(device="webgpu")` realizes symbolic leaf-gradient roots through
 the same tensor-plan bridge and refuses closure-only graphs instead of falling
 back to CPU. `loss.backward(device="webgpu", resident=True)` stores leaf grads

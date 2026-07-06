@@ -7,9 +7,9 @@ Living document. Reflects the current state of each package, what's tested, and 
 | Package | Version | Surface tests | Integration tests | Browser tests |
 |---|---|---|---|---|
 | `@unlocalhosted/browsergrad-runtime` | `0.1.1` | 27 | 23 (Pyodide-in-node) | — |
-| `@unlocalhosted/browsergrad-kernels` | `0.1.2` | 35 (incl. JS-reference numerical checks, FUSED WGSL codegen) | — | 41 (real Chromium + WebGPU) |
+| `@unlocalhosted/browsergrad-kernels` | `0.1.2` | 35 (incl. JS-reference numerical checks, FUSED WGSL codegen) | — | 42 (real Chromium + WebGPU) |
 | `@unlocalhosted/browsergrad-grad` | `0.5.1` | 30 | 317 (Pyodide-in-node) | — |
-| `@unlocalhosted/browsergrad-jit` | `0.8.2` | 8 | 222 (Pyodide-in-node, incl. feedback + perf benches) | — (via kernels) |
+| `@unlocalhosted/browsergrad-jit` | `0.8.2` | 8 | 223 (Pyodide-in-node, incl. feedback + perf benches) | — (via kernels) |
 
 `browsergrad-grad` current local gates: 30 surface/unit tests and 317
 Pyodide-in-node integration tests green. Workspace-wide totals drift as
@@ -72,18 +72,25 @@ the intended GPU materialization boundaries.
   framework GPU work cannot hide behind callback escape hatches. The planner
   now folds linear elementwise chains into `FUSED_ELEMENTWISE` schedule steps
   and canonical softmax DAGs into `FUSED_SOFTMAX` schedule steps.
-- Whitelisted opcodes: BUFFER, LOAD, CONST, CAST, MATMUL, CONV1D,
+- Whitelisted opcodes: BUFFER, LOAD, CONST, CAST, MATMUL, FUSED_ELEMENTWISE,
+  FUSED_SOFTMAX, CONV1D,
   CONV1D_BACKWARD_INPUT, CONV1D_BACKWARD_WEIGHT, CONV1D_BACKWARD_BIAS,
   CONV2D, CONV2D_BACKWARD_INPUT, CONV2D_BACKWARD_WEIGHT,
   CONV2D_BACKWARD_BIAS, CONV_TRANSPOSE2D,
   CONV_TRANSPOSE2D_BACKWARD_INPUT, CONV_TRANSPOSE2D_BACKWARD_WEIGHT,
-  CONV_TRANSPOSE2D_BACKWARD_BIAS, FUSED_ELEMENTWISE, CUSTOM.
+  CONV_TRANSPOSE2D_BACKWARD_BIAS, CONV3D, CONV3D_BACKWARD_INPUT,
+  CONV3D_BACKWARD_WEIGHT, CONV3D_BACKWARD_BIAS, LAYER_NORM,
+  LAYER_NORM_BACKWARD_INPUT, LAYER_NORM_BACKWARD_WEIGHT,
+  LAYER_NORM_BACKWARD_BIAS, optimizer update ops, CUSTOM.
 - `bg.kernels.flash_attention(Q, K, V, mask=None)` — opt-in CUSTOM op for FA-v2.
 - `nn.functional.conv1d(...)` / `nn.Conv1d(...)`,
   `nn.functional.conv2d(...)` / `nn.Conv2d(...)`,
   `nn.functional.conv_transpose2d(...)` / `nn.ConvTranspose2d(...)`, and
   `nn.functional.conv3d(...)` / `nn.Conv3d(...)` are primitive IR ops and can
   route forward/backward gradient roots through generic tensor-plan WebGPU.
+- `nn.functional.scaled_dot_product_attention(...)` decomposes into primitive
+  tensor IR (`MATMUL` -> scale -> `FUSED_SOFTMAX` -> `MATMUL`) and lowers
+  through the same tensor-plan WebGPU path without `CUSTOM`.
 
 ### CNN parity in JIT
 - `nn.Conv1d`, `nn.Conv2d`, `nn.ConvTranspose2d`, and `nn.Conv3d` are available as primitive
@@ -115,7 +122,7 @@ the intended GPU materialization boundaries.
   params/m/v state resident. Default `.step()` selects the resident WebGPU path
   when params/grads are already GPU-owned.
 - Remaining: broader training-loop scheduling/codegen beyond direct kernels
-  beyond current elementwise-chain and softmax fusion.
+  beyond current elementwise-chain, softmax, and SDPA-shaped graph fusion.
 
 ### Tiled GEMM + fused codegen + GPU cast (PRD-012a)
 - `matmulTiledDirect` — 16×16 tiled GEMM (workgroup-shared A/B tiles). Closes most of the gap PRD-012 was claiming via "megakernels".

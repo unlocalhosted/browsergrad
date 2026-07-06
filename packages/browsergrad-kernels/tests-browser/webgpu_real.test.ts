@@ -322,6 +322,66 @@ describe("real WebGPU — matmul + tiled GEMM + fused elementwise + FA-v2", () =
     expect(result.materializedValueId).toBe(1);
   });
 
+  it("generic tensor GPU plan runs scaled-dot-product attention from primitive ops", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const q = new Float32Array([1, 0.5, 0.25, -0.75]);
+    const k = new Float32Array([0.5, -0.25, 1.25, 0.75]);
+    const v = new Float32Array([2, 3, 5, 7]);
+    const scale = new Float32Array(4).fill(1 / Math.sqrt(2));
+    const plan = {
+      steps: [
+        { step: 0, value_id: 0, op: "BUFFER", input_ids: [], shape: [2, 2], dtype: "float32" },
+        { step: 1, value_id: 1, op: "BUFFER", input_ids: [], shape: [2, 2], dtype: "float32" },
+        { step: 2, value_id: 2, op: "BUFFER", input_ids: [], shape: [2, 2], dtype: "float32" },
+        { step: 3, value_id: 3, op: "BUFFER", input_ids: [], shape: [2, 2], dtype: "float32" },
+        { step: 4, value_id: 4, op: "PERMUTE", input_ids: [1], shape: [2, 2], dtype: "float32", arg: { axes: [1, 0] } },
+        { step: 5, value_id: 5, op: "MATMUL", input_ids: [0, 4], shape: [2, 2], dtype: "float32" },
+        {
+          step: 6,
+          value_id: 6,
+          op: "FUSED_ELEMENTWISE",
+          input_ids: [5, 3],
+          shape: [2, 2],
+          dtype: "float32",
+          arg: { ops: [["MUL", -1, -2]] },
+        },
+        { step: 7, value_id: 7, op: "FUSED_SOFTMAX", input_ids: [6], shape: [2, 2], dtype: "float32", arg: { axis: -1 } },
+        { step: 8, value_id: 8, op: "MATMUL", input_ids: [7, 2], shape: [2, 2], dtype: "float32" },
+      ],
+      buffers: [
+        { value_id: 0, op: "BUFFER", shape: [2, 2], dtype: "float32", bytes: q.byteLength, first_step: 0, last_step: 5, materialize: false },
+        { value_id: 1, op: "BUFFER", shape: [2, 2], dtype: "float32", bytes: k.byteLength, first_step: 1, last_step: 4, materialize: false },
+        { value_id: 2, op: "BUFFER", shape: [2, 2], dtype: "float32", bytes: v.byteLength, first_step: 2, last_step: 8, materialize: false },
+        { value_id: 3, op: "BUFFER", shape: [2, 2], dtype: "float32", bytes: scale.byteLength, first_step: 3, last_step: 6, materialize: false },
+        { value_id: 4, op: "PERMUTE", shape: [2, 2], dtype: "float32", bytes: k.byteLength, first_step: 4, last_step: 5, materialize: false },
+        { value_id: 5, op: "MATMUL", shape: [2, 2], dtype: "float32", bytes: q.byteLength, first_step: 5, last_step: 6, materialize: false },
+        { value_id: 6, op: "FUSED_ELEMENTWISE", shape: [2, 2], dtype: "float32", bytes: q.byteLength, first_step: 6, last_step: 7, materialize: false },
+        { value_id: 7, op: "FUSED_SOFTMAX", shape: [2, 2], dtype: "float32", bytes: q.byteLength, first_step: 7, last_step: 8, materialize: false },
+        { value_id: 8, op: "MATMUL", shape: [2, 2], dtype: "float32", bytes: q.byteLength, first_step: 8, last_step: 8, materialize: true },
+      ],
+      root_id: 8,
+      materialization_boundary: "root",
+      peak_live_bytes: q.byteLength * 5,
+      has_custom_ops: false,
+    } as const;
+
+    const result = await runTensorGpuPlan(device, plan, [
+      { valueId: 0, data: q },
+      { valueId: 1, data: k },
+      { valueId: 2, data: v },
+      { valueId: 3, data: scale },
+    ]);
+    const scores = reference.matmul(tensor([2, 2], q), tensor([2, 2], new Float32Array([0.5, 1.25, -0.25, 0.75])));
+    for (let i = 0; i < scores.data.length; i++) scores.data[i]! *= scale[i]!;
+    const probs = reference.softmax(scores);
+    const expected = reference.matmul(probs, tensor([2, 2], v));
+    for (let i = 0; i < result.data.length; i++) {
+      expect(result.data[i]!).toBeCloseTo(expected.data[i]!, 4);
+    }
+    expect(result.materializedValueId).toBe(8);
+  });
+
   it("WebGpuRealizerBridge runs a canonical tensor plan through one generic method", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

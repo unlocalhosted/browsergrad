@@ -1137,6 +1137,42 @@ plan = bg.gpu_plan_summary(out)
     expect(result.ops).not.toContain("EXP");
   });
 
+  it("realize_tensor_plan_webgpu runs scaled_dot_product_attention through primitive tensor IR", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      max_diff: number;
+      tensor_plan: number;
+      ops: string[];
+      has_custom: boolean;
+    }>(`
+import browsergrad_jit as bg
+import browsergrad_jit.nn.functional as F
+import numpy as np
+q_np = np.array([[1.0, 0.5], [0.25, -0.75]], dtype=np.float32)
+k_np = np.array([[0.5, -0.25], [1.25, 0.75]], dtype=np.float32)
+v_np = np.array([[2.0, 3.0], [5.0, 7.0]], dtype=np.float32)
+q = bg.from_numpy(q_np)
+k = bg.from_numpy(k_np)
+v = bg.from_numpy(v_np)
+out = F.scaled_dot_product_attention(q, k, v)
+ref = out.numpy()
+gpu = bg.realize_tensor_plan_webgpu(out)
+plan = bg.gpu_plan_summary(out)
+{
+    "max_diff": float(np.max(np.abs(ref - gpu))),
+    "tensor_plan": _mock.tensor_plan_count,
+    "ops": plan["ops"],
+    "has_custom": bool(plan["has_custom_ops"]),
+}
+`);
+    expect(result.max_diff).toBeLessThan(1e-6);
+    expect(result.tensor_plan).toBe(1);
+    expect(result.has_custom).toBe(false);
+    expect(result.ops).toContain("MATMUL");
+    expect(result.ops).toContain("FUSED_SOFTMAX");
+    expect(result.ops).not.toContain("CUSTOM");
+  });
+
   it("realize_tensor_plan_webgpu_resident keeps roots on GPU until explicit numpy boundary", async () => {
     const target = await getJitTarget();
     const result = await target.run<{
