@@ -66,15 +66,10 @@ struct Params {
 };
 @group(0) @binding(5) var<uniform> params: Params;
 
-// One workgroup per (batch * head, q-block). Inside the workgroup, each
-// thread handles a single Q row of its q-block and walks all K-blocks
-// once, maintaining the running (m_i, l_i, O_i).
+// One workgroup per (batch * head, q-block). Each thread handles a single Q
+// row and walks all K rows once, maintaining running online-softmax state.
 const BR_LOCAL: u32 = ${BR}u;
-const BC_LOCAL: u32 = ${BC}u;
 const MAX_D_LOCAL: u32 = ${MAX_D}u;
-
-var<workgroup> K_tile: array<f32, BC_LOCAL * MAX_D_LOCAL>;
-var<workgroup> V_tile: array<f32, BC_LOCAL * MAX_D_LOCAL>;
 
 @compute @workgroup_size(${BR}, 1, 1)
 fn main(
@@ -89,104 +84,46 @@ fn main(
   let b = bh / params.H;
   let h = bh % params.H;
 
-  // WGSL requires uniform control flow at workgroupBarrier(). Threads
-  // whose q_idx is out of range must STILL execute the loop body and
-  // hit every barrier — they just refrain from writing the final output.
-  let active = q_idx < params.Sq;
-  let q_idx_safe = select(0u, q_idx, active);
+  let is_active = q_idx < params.Sq;
+  let q_idx_safe = select(0u, q_idx, is_active);
 
   let qkv_row_base = ((b * params.H + h) * params.Sq + q_idx_safe) * params.D;
   let k_row_base_bh = (b * params.H + h) * params.Sk * params.D;
   let mask_b = select(0u, b, params.mask_B > 1u);
   let mask_h = select(0u, h, params.mask_H > 1u);
   let mask_row_base = ((mask_b * params.mask_H + mask_h) * params.Sq + q_idx) * params.Sk;
-
-  // Load Q row for this thread into registers (private array indexed by d).
   var q_reg: array<f32, MAX_D_LOCAL>;
   for (var d: u32 = 0u; d < params.D; d = d + 1u) {
-    q_reg[d] = Q[qkv_row_base + d];
+    q_reg[d] = select(0.0, Q[qkv_row_base + d], is_active);
   }
 
-  // Running softmax state for this row.
-  var m_i: f32 = -3.40282347e38;  // -INF
+  var m_i: f32 = -1.0e20;  // finite -INF sentinel accepted by WGSL parsers
   var l_i: f32 = 0.0;
   var O_i: array<f32, MAX_D_LOCAL>;
   for (var d: u32 = 0u; d < params.D; d = d + 1u) { O_i[d] = 0.0; }
 
-  let num_k_blocks = (params.Sk + BC_LOCAL - 1u) / BC_LOCAL;
-  for (var kb: u32 = 0u; kb < num_k_blocks; kb = kb + 1u) {
-    let k_start = kb * BC_LOCAL;
-
-    // Cooperatively load this K and V block into workgroup memory.
-    // Each thread loads BC/BR rows × D elements.
-    let rows_per_thread = (BC_LOCAL + BR_LOCAL - 1u) / BR_LOCAL;
-    for (var t: u32 = 0u; t < rows_per_thread; t = t + 1u) {
-      let local_row = i_local + t * BR_LOCAL;
-      if (local_row < BC_LOCAL) {
-        let k_idx = k_start + local_row;
-        let in_bounds = k_idx < params.Sk;
-        for (var d: u32 = 0u; d < params.D; d = d + 1u) {
-          let kv_idx = k_row_base_bh + k_idx * params.D + d;
-          let kv_safe = select(0.0, K[kv_idx], in_bounds);
-          K_tile[local_row * MAX_D_LOCAL + d] = kv_safe;
-          V_tile[local_row * MAX_D_LOCAL + d] = select(0.0, V[kv_idx], in_bounds);
-        }
-      }
-    }
-    workgroupBarrier();
-
-    // Compute scores S_ij = Q_i @ K_j^T (BC entries, one per K row in block).
-    var S: array<f32, BC_LOCAL>;
-    var m_ij: f32 = -3.40282347e38;
-    for (var j: u32 = 0u; j < BC_LOCAL; j = j + 1u) {
-      let k_idx = k_start + j;
-      if (k_idx < params.Sk) {
-        var s: f32 = 0.0;
-        for (var d: u32 = 0u; d < params.D; d = d + 1u) {
-          s = s + q_reg[d] * K_tile[j * MAX_D_LOCAL + d];
-        }
-        s = s * params.scale;
-        if (params.has_mask == 1u) {
-          s = s + Mask[mask_row_base + k_idx];
-        }
-        S[j] = s;
-        if (s > m_ij) { m_ij = s; }
-      } else {
-        S[j] = -3.40282347e38;
-      }
-    }
-
-    // Online softmax update: rescale O_i by exp(m_i_prev - m_i_new).
-    let m_new = max(m_i, m_ij);
-    let alpha = exp(m_i - m_new);
-    var l_ij: f32 = 0.0;
-    for (var j: u32 = 0u; j < BC_LOCAL; j = j + 1u) {
-      let k_idx = k_start + j;
-      if (k_idx < params.Sk) {
-        let p = exp(S[j] - m_new);
-        S[j] = p;
-        l_ij = l_ij + p;
-      } else {
-        S[j] = 0.0;
-      }
-    }
-    // O_i ← alpha * O_i + P @ V_j
+  for (var j: u32 = 0u; j < params.Sk; j = j + 1u) {
+    var s: f32 = 0.0;
     for (var d: u32 = 0u; d < params.D; d = d + 1u) {
-      var acc: f32 = alpha * O_i[d];
-      for (var j: u32 = 0u; j < BC_LOCAL; j = j + 1u) {
-        acc = acc + S[j] * V_tile[j * MAX_D_LOCAL + d];
-      }
-      O_i[d] = acc;
+      s = s + q_reg[d] * K[k_row_base_bh + j * params.D + d];
     }
-    l_i = alpha * l_i + l_ij;
-    m_i = m_new;
+    s = s * params.scale;
+    if (params.has_mask == 1u) {
+      s = s + Mask[mask_row_base + j];
+    }
 
-    workgroupBarrier();
+    let m_new = max(m_i, s);
+    let alpha = exp(m_i - m_new);
+    let p = exp(s - m_new);
+    for (var d: u32 = 0u; d < params.D; d = d + 1u) {
+      O_i[d] = alpha * O_i[d] + p * V[k_row_base_bh + j * params.D + d];
+    }
+    l_i = alpha * l_i + p;
+    m_i = m_new;
   }
 
-  // Final normalize: O_i / l_i, write back to global — only for active threads.
-  let inv_l = select(0.0, 1.0 / l_i, l_i > 0.0);
-  if (active) {
+  if (is_active) {
+    let inv_l = select(0.0, 1.0 / l_i, l_i > 0.0);
     for (var d: u32 = 0u; d < params.D; d = d + 1u) {
       Out[qkv_row_base + d] = O_i[d] * inv_l;
     }
