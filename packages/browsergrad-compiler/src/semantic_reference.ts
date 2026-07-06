@@ -131,6 +131,9 @@ function unsupportedSemanticReferenceOperation(
         if (!compiled.kernelIr.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage")) return operation;
         if (!semanticReferenceExpressionSupported(operation.value, "scalar")) return operation;
         break;
+      case "atomic":
+        if (!semanticReferenceAtomicSupported(operation, compiled)) return operation;
+        break;
       case "expression":
         if (!semanticReferenceExpressionSupported(operation.expression, "scalar")) return operation;
         break;
@@ -178,6 +181,20 @@ function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
     ref.indices.length === 1 &&
     ref.fields.length === 0 &&
     semanticReferenceExpressionSupported(ref.indices[0]!, "scalar");
+}
+
+function semanticReferenceAtomicSupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "atomic" }>,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  if (operation.callee !== "atomicAdd") return false;
+  if (!operation.target || !semanticReferenceMemoryRefSupported(operation.target)) return false;
+  if (operation.target.valueType !== "uint" && operation.target.valueType !== "int") return false;
+  if (!compiled.kernelIr.params.some((param) => param.name === operation.target?.base && param.addressSpace === "storage" && !param.constant)) {
+    return false;
+  }
+  const value = operation.args[1];
+  return value !== undefined && semanticReferenceExpressionSupported(value, "scalar");
 }
 
 function semanticReferenceExpressionSupported(expression: SemanticExpression, expected: "scalar" | "any"): boolean {
@@ -267,6 +284,9 @@ function execSemanticOperations(
       case "store":
         writeMemory(operation.target, storeValue(operation, context), context);
         break;
+      case "atomic":
+        execSemanticAtomic(operation, context);
+        break;
       case "expression":
         evalNumber(operation.expression, context);
         break;
@@ -293,6 +313,18 @@ function storeValue(
   if (operation.operator === "+=") return left + right;
   if (operation.operator === "-=") return left - right;
   throw semanticReferenceError(`semantic reference does not support assignment '${operation.operator}'`, operation.span);
+}
+
+function execSemanticAtomic(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "atomic" }>,
+  context: SemanticReferenceContext,
+): void {
+  if (!operation.target || operation.callee !== "atomicAdd") {
+    throw semanticReferenceError(`semantic reference does not support atomic '${operation.callee}'`, operation.span);
+  }
+  const value = operation.args[1];
+  if (!value) throw semanticReferenceError("semantic reference atomicAdd requires a value", operation.span);
+  writeMemory(operation.target, readMemory(operation.target, context) + evalNumber(value, context), context);
 }
 
 function execSemanticLoop(
