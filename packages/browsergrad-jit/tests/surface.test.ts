@@ -84,7 +84,7 @@ describe("Python source registry", () => {
     expect(initFile!.content).toMatch(/__version__ = "0\.8\.\d+"/);
   });
 
-  it("declares all 47 opcodes in _ir.py (core + CNN + fusion + autograd + AMP + optimizer)", () => {
+  it("declares all 51 opcodes in _ir.py (core + CNN + norm + fusion + autograd + AMP + optimizer)", () => {
     // Sanity check that the codegen bundled the IR with every opcode the
     // PRD-005 + PRD-006 + PRD-007 + PRD-010 surface needs.
     const irFile = SOURCE_FILES.find((f) => f.path.endsWith("_ir.py"));
@@ -99,6 +99,8 @@ describe("Python source registry", () => {
       "OP_CONV2D_BACKWARD_WEIGHT", "OP_CONV2D_BACKWARD_BIAS",
       "OP_CONV3D", "OP_CONV3D_BACKWARD_INPUT",
       "OP_CONV3D_BACKWARD_WEIGHT", "OP_CONV3D_BACKWARD_BIAS",
+      "OP_LAYER_NORM", "OP_LAYER_NORM_BACKWARD_INPUT",
+      "OP_LAYER_NORM_BACKWARD_WEIGHT", "OP_LAYER_NORM_BACKWARD_BIAS",
       "OP_REDUCE",
       "OP_RESHAPE", "OP_PERMUTE", "OP_SLICE", "OP_PAD",
       "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",

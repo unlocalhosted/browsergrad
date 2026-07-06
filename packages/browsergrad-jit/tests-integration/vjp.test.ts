@@ -38,11 +38,12 @@ list(list_registered())
     // Week 1: ADD, MUL, DIV, NEG, EXP, LOG, RESHAPE, PERMUTE, CAST,
     // REDUCE, MATMUL. (REDUCE covers sum/mean; max/min defer to W3.)
     // PRD-010 adds ISNAN as a non-differentiable rule (returns None).
-    // CNN IR adds CONV1D/CONV2D/CONV3D, which emit explicit backward UOps.
+    // CNN/norm IR adds CONV1D/CONV2D/CONV3D/LAYER_NORM, which emit
+    // explicit backward UOps.
     const expected = [
       "ADD", "CAST", "CONV1D", "CONV2D", "CONV3D", "DIV", "EXP",
-      "ISNAN", "LOG", "MATMUL", "MUL", "NEG", "PERMUTE", "REDUCE",
-      "RESHAPE",
+      "ISNAN", "LAYER_NORM", "LOG", "MATMUL", "MUL", "NEG", "PERMUTE",
+      "REDUCE", "RESHAPE",
     ];
     expect(registered).toEqual(expected);
   });

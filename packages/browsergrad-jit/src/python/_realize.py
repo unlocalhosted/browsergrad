@@ -39,7 +39,9 @@ from ._ir import (
     OP_CONV2D_BACKWARD_INPUT, OP_CONV2D_BACKWARD_WEIGHT,
     OP_CONV2D_BACKWARD_BIAS, OP_CONV3D,
     OP_CONV3D_BACKWARD_INPUT, OP_CONV3D_BACKWARD_WEIGHT,
-    OP_CONV3D_BACKWARD_BIAS, OP_REDUCE,
+    OP_CONV3D_BACKWARD_BIAS, OP_LAYER_NORM,
+    OP_LAYER_NORM_BACKWARD_INPUT, OP_LAYER_NORM_BACKWARD_WEIGHT,
+    OP_LAYER_NORM_BACKWARD_BIAS, OP_REDUCE,
     OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
@@ -646,6 +648,72 @@ def _h_conv3d_backward_bias(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     return dy.sum(axis=(0, 2, 3, 4)).astype(np.dtype(node.dtype), copy=False)
 
 
+def _layer_norm_stats(
+    x: np.ndarray,
+    weight: np.ndarray,
+    arg: dict,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    rows = int(arg["rows"])
+    cols = int(arg["cols"])
+    eps = float(arg.get("eps", 1e-5))
+    x2 = x.reshape(rows, cols).astype(np.float32, copy=False)
+    w = weight.reshape(cols).astype(np.float32, copy=False)
+    mean = x2.mean(axis=1, keepdims=True)
+    centered = x2 - mean
+    var = (centered * centered).mean(axis=1, keepdims=True)
+    inv_std = 1.0 / np.sqrt(var + eps)
+    x_hat = centered * inv_std
+    return x2, w, inv_std, x_hat
+
+
+def _h_layer_norm(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    x = vt[id(node.inputs[0])]
+    weight = vt[id(node.inputs[1])]
+    bias = vt[id(node.inputs[2])]
+    cols = int(node.arg["cols"])
+    _, w, _, x_hat = _layer_norm_stats(x, weight, node.arg)
+    b = bias.reshape(cols).astype(np.float32, copy=False)
+    out = x_hat * w.reshape(1, cols) + b.reshape(1, cols)
+    return out.reshape(x.shape).astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_layer_norm_backward_input(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    dy = vt[id(node.inputs[0])]
+    x = vt[id(node.inputs[1])]
+    weight = vt[id(node.inputs[2])]
+    rows = int(node.arg["rows"])
+    cols = int(node.arg["cols"])
+    _, w, inv_std, x_hat = _layer_norm_stats(x, weight, node.arg)
+    dy2 = dy.reshape(rows, cols).astype(np.float32, copy=False)
+    grad_x_hat = dy2 * w.reshape(1, cols)
+    sum_g = grad_x_hat.sum(axis=1, keepdims=True)
+    sum_g_xhat = (grad_x_hat * x_hat).sum(axis=1, keepdims=True)
+    grad_x = (inv_std / float(cols)) * (
+        float(cols) * grad_x_hat - sum_g - x_hat * sum_g_xhat
+    )
+    return grad_x.reshape(x.shape).astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_layer_norm_backward_weight(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    dy = vt[id(node.inputs[0])]
+    x = vt[id(node.inputs[1])]
+    rows = int(node.arg["rows"])
+    cols = int(node.arg["cols"])
+    dummy_weight = np.ones((cols,), dtype=np.float32)
+    _, _, _, x_hat = _layer_norm_stats(x, dummy_weight, node.arg)
+    dy2 = dy.reshape(rows, cols).astype(np.float32, copy=False)
+    grad_w = (dy2 * x_hat).sum(axis=0)
+    return grad_w.reshape(node.shape).astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_layer_norm_backward_bias(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    dy = vt[id(node.inputs[0])]
+    rows = int(node.arg["rows"])
+    cols = int(node.arg["cols"])
+    grad_b = dy.reshape(rows, cols).sum(axis=0)
+    return grad_b.reshape(node.shape).astype(np.dtype(node.dtype), copy=False)
+
+
 def _h_isnan(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     """Element-wise NaN check. Used by GradScaler's overflow detection
     (PRD-010); the boolean result feeds REDUCE(any) to produce the
@@ -994,6 +1062,10 @@ _DISPATCH: dict[str, Handler] = {
     OP_CONV3D_BACKWARD_INPUT: _h_conv3d_backward_input,
     OP_CONV3D_BACKWARD_WEIGHT: _h_conv3d_backward_weight,
     OP_CONV3D_BACKWARD_BIAS: _h_conv3d_backward_bias,
+    OP_LAYER_NORM: _h_layer_norm,
+    OP_LAYER_NORM_BACKWARD_INPUT: _h_layer_norm_backward_input,
+    OP_LAYER_NORM_BACKWARD_WEIGHT: _h_layer_norm_backward_weight,
+    OP_LAYER_NORM_BACKWARD_BIAS: _h_layer_norm_backward_bias,
     OP_REDUCE:  _h_reduce,
     OP_RESHAPE: _h_reshape,
     OP_PERMUTE: _h_permute,

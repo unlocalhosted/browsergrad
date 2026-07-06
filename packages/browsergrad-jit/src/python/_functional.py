@@ -3,9 +3,9 @@
 INTERNAL module. Users import as `browsergrad_jit.nn.functional as F`.
 
 PRD-005 cut-down scope (per the critique): elementwise + MLP-style ops
-needed for the 0.1.0 conformance bar. Conv2d has since moved to a
-primitive CONV2D IR op; pool, attention, norm, embedding, recurrent, and
-other heavy ops still use CUSTOM until promoted.
+needed for the 0.1.0 conformance bar. Conv and LayerNorm have since moved to
+primitive IR ops; pool, attention, embedding, recurrent, and other heavy ops
+still use CUSTOM until promoted.
 
 The pattern across every op: build new UOps + new TensorProxies with the
 right backward closures. NumPy-heavy logic that doesn't decompose into
@@ -20,7 +20,7 @@ import numpy as np
 
 from ._ir import (
     UOp, OP_WHERE, OP_CONST, OP_CUSTOM, OP_CONV1D, OP_CONV2D, OP_CONV3D,
-    OP_REDUCE, OP_DIV,
+    OP_LAYER_NORM, OP_REDUCE, OP_DIV,
 )
 from ._tensor_proxy import (
     TensorProxy, _BackwardCtx, _should_track, _to_proxy, from_numpy, where,
@@ -579,6 +579,100 @@ def linear(x: TensorProxy, weight: TensorProxy,
     if bias is not None:
         out = out + bias
     return out
+
+
+def _normalized_shape_tuple(normalized_shape: Any) -> Tuple[int, ...]:
+    if isinstance(normalized_shape, int):
+        return (int(normalized_shape),)
+    if isinstance(normalized_shape, (tuple, list)):
+        if len(normalized_shape) == 0:
+            raise ValueError("layer_norm: normalized_shape must be non-empty")
+        return tuple(int(v) for v in normalized_shape)
+    raise TypeError("layer_norm: normalized_shape must be int or tuple/list of ints")
+
+
+def layer_norm(
+    input: TensorProxy,
+    normalized_shape: Any,
+    weight: Optional[TensorProxy] = None,
+    bias: Optional[TensorProxy] = None,
+    eps: float = 1e-5,
+) -> TensorProxy:
+    ns = _normalized_shape_tuple(normalized_shape)
+    if len(ns) > input.ndim:
+        raise ShapeError(
+            f"layer_norm: normalized_shape {ns} longer than input shape {input.shape}"
+        )
+    if input.shape[-len(ns):] != ns:
+        raise ShapeError(
+            f"layer_norm: input trailing shape {input.shape[-len(ns):]} "
+            f"does not match normalized_shape {ns}"
+        )
+    cols = int(np.prod(ns))
+    rows = int(np.prod(input.shape) // cols)
+    sess = input._get_session()
+    weight_proxy = (
+        _to_proxy(weight, sess)
+        if weight is not None
+        else from_numpy(np.ones(ns, dtype=np.float32), session=sess)
+    )
+    bias_proxy = (
+        _to_proxy(bias, sess)
+        if bias is not None
+        else from_numpy(np.zeros(ns, dtype=np.float32), session=sess)
+    )
+    if weight_proxy.shape != ns:
+        raise ShapeError(
+            f"layer_norm: weight shape {weight_proxy.shape} must match normalized_shape {ns}"
+        )
+    if bias_proxy.shape != ns:
+        raise ShapeError(
+            f"layer_norm: bias shape {bias_proxy.shape} must match normalized_shape {ns}"
+        )
+    arg = {
+        "normalized_shape": ns,
+        "rows": rows,
+        "cols": cols,
+        "eps": float(eps),
+    }
+    uop = UOp(
+        op=OP_LAYER_NORM,
+        inputs=(input._uop, weight_proxy._uop, bias_proxy._uop),
+        shape=input.shape,
+        dtype=input.dtype,
+        arg=arg,
+    )
+
+    def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
+        x_arr, weight_arr, bias_arr = ins
+        x2 = x_arr.reshape(rows, cols).astype(np.float32, copy=False)
+        dy2 = dy.reshape(rows, cols).astype(np.float32, copy=False)
+        w = weight_arr.reshape(cols).astype(np.float32, copy=False)
+        mean = x2.mean(axis=1, keepdims=True)
+        centered = x2 - mean
+        var = (centered * centered).mean(axis=1, keepdims=True)
+        inv_std = 1.0 / np.sqrt(var + float(eps))
+        x_hat = centered * inv_std
+        grad_x_hat = dy2 * w.reshape(1, cols)
+        sum_g = grad_x_hat.sum(axis=1, keepdims=True)
+        sum_g_xhat = (grad_x_hat * x_hat).sum(axis=1, keepdims=True)
+        grad_x = (inv_std / float(cols)) * (
+            float(cols) * grad_x_hat - sum_g - x_hat * sum_g_xhat
+        )
+        grad_w = (dy2 * x_hat).sum(axis=0).reshape(ns)
+        grad_b = dy2.sum(axis=0).reshape(ns)
+        return (
+            grad_x.reshape(input.shape).astype(x_arr.dtype, copy=False),
+            grad_w.astype(weight_arr.dtype, copy=False),
+            grad_b.astype(bias_arr.dtype, copy=False),
+        )
+
+    requires = _should_track(input, weight_proxy, bias_proxy)
+    ctx = _BackwardCtx(
+        fn=_bw,
+        input_proxies=(input, weight_proxy, bias_proxy),
+    ) if requires else None
+    return TensorProxy(uop, session=sess, requires_grad=requires, ctx=ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -1314,6 +1408,7 @@ __all__ = [
     "bce_with_logits_loss",
     "one_hot",
     "linear",
+    "layer_norm",
     "conv1d",
     "conv2d",
     "conv_transpose2d",

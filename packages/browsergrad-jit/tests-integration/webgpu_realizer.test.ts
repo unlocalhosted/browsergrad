@@ -689,6 +689,48 @@ class MockBridge:
                 values[value_id] = grad_w.astype(np.dtype(step["dtype"]), copy=False)
             elif op == "CONV3D_BACKWARD_BIAS":
                 values[value_id] = values[input_ids[0]].sum(axis=(0, 2, 3, 4)).astype(np.dtype(step["dtype"]), copy=False)
+            elif op in ("LAYER_NORM", "LAYER_NORM_BACKWARD_INPUT", "LAYER_NORM_BACKWARD_WEIGHT", "LAYER_NORM_BACKWARD_BIAS"):
+                arg = step["arg"]
+                rows = int(arg["rows"]); cols = int(arg["cols"])
+                eps = float(arg.get("eps", 1e-5))
+                if op == "LAYER_NORM":
+                    x = values[input_ids[0]]
+                    weight = values[input_ids[1]].reshape(cols)
+                    bias = values[input_ids[2]].reshape(cols)
+                    x2 = x.reshape(rows, cols).astype(np.float32, copy=False)
+                    mean = x2.mean(axis=1, keepdims=True)
+                    centered = x2 - mean
+                    inv_std = 1.0 / np.sqrt((centered * centered).mean(axis=1, keepdims=True) + eps)
+                    values[value_id] = (
+                        centered * inv_std * weight.reshape(1, cols) + bias.reshape(1, cols)
+                    ).reshape(x.shape).astype(np.dtype(step["dtype"]), copy=False)
+                elif op == "LAYER_NORM_BACKWARD_INPUT":
+                    dy = values[input_ids[0]]
+                    x = values[input_ids[1]]
+                    weight = values[input_ids[2]].reshape(cols)
+                    x2 = x.reshape(rows, cols).astype(np.float32, copy=False)
+                    dy2 = dy.reshape(rows, cols).astype(np.float32, copy=False)
+                    mean = x2.mean(axis=1, keepdims=True)
+                    centered = x2 - mean
+                    inv_std = 1.0 / np.sqrt((centered * centered).mean(axis=1, keepdims=True) + eps)
+                    x_hat = centered * inv_std
+                    g = dy2 * weight.reshape(1, cols)
+                    sum_g = g.sum(axis=1, keepdims=True)
+                    sum_g_xhat = (g * x_hat).sum(axis=1, keepdims=True)
+                    dx = (inv_std / float(cols)) * (float(cols) * g - sum_g - x_hat * sum_g_xhat)
+                    values[value_id] = dx.reshape(x.shape).astype(np.dtype(step["dtype"]), copy=False)
+                elif op == "LAYER_NORM_BACKWARD_WEIGHT":
+                    dy = values[input_ids[0]]
+                    x = values[input_ids[1]]
+                    x2 = x.reshape(rows, cols).astype(np.float32, copy=False)
+                    dy2 = dy.reshape(rows, cols).astype(np.float32, copy=False)
+                    mean = x2.mean(axis=1, keepdims=True)
+                    centered = x2 - mean
+                    inv_std = 1.0 / np.sqrt((centered * centered).mean(axis=1, keepdims=True) + eps)
+                    values[value_id] = (dy2 * centered * inv_std).sum(axis=0).reshape(step["shape"]).astype(np.dtype(step["dtype"]), copy=False)
+                else:
+                    dy = values[input_ids[0]]
+                    values[value_id] = dy.reshape(rows, cols).sum(axis=0).reshape(step["shape"]).astype(np.dtype(step["dtype"]), copy=False)
             elif op == "SGD_UPDATE":
                 arg = step["arg"]
                 param = values[input_ids[0]]
@@ -1112,6 +1154,67 @@ v_gpu = bg.realize_tensor_plan_webgpu(new_v)
     expect(result.p_ops).toContain("ADAM_UPDATE_PARAM");
     expect(result.m_ops).toContain("ADAM_UPDATE_M");
     expect(result.v_ops).toContain("ADAM_UPDATE_V");
+  });
+
+  it("realize_tensor_plan_webgpu runs LayerNorm forward/backward roots through generic plan path", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      out_diff: number;
+      gx_diff: number;
+      gw_diff: number;
+      gb_diff: number;
+      tensor_plan: number;
+      out_ops: string[];
+      gx_ops: string[];
+      gw_ops: string[];
+      gb_ops: string[];
+    }>(`
+import browsergrad_jit as bg
+import browsergrad_jit.nn.functional as F
+import numpy as np
+from browsergrad_jit._tensor_proxy import TensorProxy
+from browsergrad_jit._vjp import get_rule
+
+rng = np.random.RandomState(31)
+x_np = rng.uniform(-1, 1, size=(2, 3, 4)).astype(np.float32)
+w_np = rng.uniform(0.5, 1.5, size=(4,)).astype(np.float32)
+b_np = rng.uniform(-0.2, 0.2, size=(4,)).astype(np.float32)
+x = bg.from_numpy(x_np.copy())
+w = bg.from_numpy(w_np.copy())
+b = bg.from_numpy(b_np.copy())
+out = F.layer_norm(x, (4,), w, b, eps=1e-5)
+out_gpu = bg.realize_tensor_plan_webgpu(out)
+dy_np = rng.uniform(-1, 1, size=out.shape).astype(np.float32)
+dy = bg.from_numpy(dy_np.copy())
+rule = get_rule(out._uop.op)
+gx_uop, gw_uop, gb_uop = rule(out._uop, (x._uop, w._uop, b._uop), dy._uop)
+gx = TensorProxy(gx_uop, session=x._get_session(), requires_grad=False)
+gw = TensorProxy(gw_uop, session=x._get_session(), requires_grad=False)
+gb = TensorProxy(gb_uop, session=x._get_session(), requires_grad=False)
+gx_gpu = bg.realize_tensor_plan_webgpu(gx)
+gw_gpu = bg.realize_tensor_plan_webgpu(gw)
+gb_gpu = bg.realize_tensor_plan_webgpu(gb)
+{
+    "out_diff": float(np.max(np.abs(out_gpu - out.numpy()))),
+    "gx_diff": float(np.max(np.abs(gx_gpu - gx.numpy()))),
+    "gw_diff": float(np.max(np.abs(gw_gpu - gw.numpy()))),
+    "gb_diff": float(np.max(np.abs(gb_gpu - gb.numpy()))),
+    "tensor_plan": _mock.tensor_plan_count,
+    "out_ops": bg.gpu_plan_summary(out)["ops"],
+    "gx_ops": bg.gpu_plan_summary(gx)["ops"],
+    "gw_ops": bg.gpu_plan_summary(gw)["ops"],
+    "gb_ops": bg.gpu_plan_summary(gb)["ops"],
+}
+`);
+    expect(result.out_diff).toBeLessThan(1e-5);
+    expect(result.gx_diff).toBeLessThan(1e-5);
+    expect(result.gw_diff).toBeLessThan(1e-5);
+    expect(result.gb_diff).toBeLessThan(1e-5);
+    expect(result.tensor_plan).toBe(4);
+    expect(result.out_ops).toContain("LAYER_NORM");
+    expect(result.gx_ops).toContain("LAYER_NORM_BACKWARD_INPUT");
+    expect(result.gw_ops).toContain("LAYER_NORM_BACKWARD_WEIGHT");
+    expect(result.gb_ops).toContain("LAYER_NORM_BACKWARD_BIAS");
   });
 
   it("realize_tensor_plan_webgpu runs Conv1d/Conv2d through generic plan path", async () => {

@@ -3,9 +3,8 @@ nn.Dropout. The 0.1.0 MVP scope per PRD-005's revised plan.
 
 INTERNAL module. Users import as `browsergrad_jit.nn`.
 
-Conv/BatchNorm/LayerNorm/MultiHeadAttention/Embedding/RNN ship in 0.1.1+
-patch releases — they need either real opcodes (PRD-006) or non-trivial
-CUSTOM op wrappers that aren't load-bearing for the 0.1.0 conformance bar.
+Conv/LayerNorm use primitive IR. BatchNorm/MultiHeadAttention/Embedding/RNN
+remain module-level coverage that can be promoted as GPU-native demand lands.
 """
 
 from __future__ import annotations
@@ -580,6 +579,52 @@ class Flatten(Module):
         return x.flatten(start_dim=self.start_dim, end_dim=self.end_dim)
 
 
+class LayerNorm(Module):
+    def __init__(
+        self,
+        normalized_shape: Any,
+        eps: float = 1e-5,
+        elementwise_affine: bool = True,
+    ) -> None:
+        super().__init__()
+        if isinstance(normalized_shape, int):
+            ns = (int(normalized_shape),)
+        elif isinstance(normalized_shape, (tuple, list)) and len(normalized_shape) > 0:
+            ns = tuple(int(v) for v in normalized_shape)
+        else:
+            raise ValueError("LayerNorm: normalized_shape must be int or non-empty tuple/list")
+        self.normalized_shape = ns
+        self.eps = float(eps)
+        self.elementwise_affine = bool(elementwise_affine)
+        if self.elementwise_affine:
+            self.weight = Parameter(from_numpy(
+                np.ones(ns, dtype=np.float32),
+                requires_grad=True,
+            ))
+            self.bias = Parameter(from_numpy(
+                np.zeros(ns, dtype=np.float32),
+                requires_grad=True,
+            ))
+        else:
+            self.weight = None
+            self.bias = None
+
+    def forward(self, x: TensorProxy) -> TensorProxy:
+        return F.layer_norm(
+            x,
+            self.normalized_shape,
+            self.weight,
+            self.bias,
+            self.eps,
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"LayerNorm({self.normalized_shape}, eps={self.eps}, "
+            f"elementwise_affine={self.elementwise_affine})"
+        )
+
+
 class BatchNorm1d(Module):
     """Batch normalization over channel dim for (N, C) or (N, C, L)."""
 
@@ -832,6 +877,7 @@ __all__ = [
     "Softmax",
     "Dropout",
     "Flatten",
+    "LayerNorm",
     "BatchNorm1d",
     "Sequential",
     "MSELoss",

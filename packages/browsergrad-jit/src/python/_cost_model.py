@@ -34,6 +34,8 @@ from ._ir import (
     OP_CONV2D_BACKWARD_WEIGHT, OP_CONV2D_BACKWARD_BIAS,
     OP_CONV3D, OP_CONV3D_BACKWARD_INPUT,
     OP_CONV3D_BACKWARD_WEIGHT, OP_CONV3D_BACKWARD_BIAS,
+    OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
+    OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_CAST, OP_RESHAPE, OP_PERMUTE,
     OP_BROADCAST_TO, OP_BUFFER, OP_LOAD, OP_CONST,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX, OP_CUSTOM,
@@ -103,6 +105,13 @@ def estimate_flops(node: UOp) -> int:
             int(arg["n"]) * int(arg["out_d"]) * int(arg["out_h"])
             * int(arg["out_w"]) * int(arg["c_out"])
         )
+    if op in (
+        OP_LAYER_NORM,
+        OP_LAYER_NORM_BACKWARD_INPUT,
+        OP_LAYER_NORM_BACKWARD_WEIGHT,
+        OP_LAYER_NORM_BACKWARD_BIAS,
+    ):
+        return 8 * out_n
     if op == OP_SGD_UPDATE:
         return 4 * out_n
     if op in (

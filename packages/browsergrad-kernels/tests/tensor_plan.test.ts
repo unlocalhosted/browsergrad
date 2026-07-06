@@ -153,4 +153,33 @@ describe("tensor GPU plan normalization", () => {
     });
     expect(plan.steps.map((step) => step.op)).toContain("ADAM_UPDATE_PARAM");
   });
+
+  it("accepts LayerNorm forward/backward IR plan steps", () => {
+    const arg = { normalized_shape: [3], rows: 2, cols: 3, eps: 1e-5 };
+    const plan = normalizeTensorGpuPlan({
+      steps: [
+        { step: 0, value_id: 0, op: "BUFFER", input_ids: [], shape: [2, 3], dtype: "float32" },
+        { step: 1, value_id: 1, op: "BUFFER", input_ids: [], shape: [3], dtype: "float32" },
+        { step: 2, value_id: 2, op: "BUFFER", input_ids: [], shape: [3], dtype: "float32" },
+        { step: 3, value_id: 3, op: "LAYER_NORM", input_ids: [0, 1, 2], shape: [2, 3], dtype: "float32", arg },
+        { step: 4, value_id: 4, op: "LAYER_NORM_BACKWARD_INPUT", input_ids: [3, 0, 1], shape: [2, 3], dtype: "float32", arg },
+        { step: 5, value_id: 5, op: "LAYER_NORM_BACKWARD_WEIGHT", input_ids: [3, 0], shape: [3], dtype: "float32", arg },
+        { step: 6, value_id: 6, op: "LAYER_NORM_BACKWARD_BIAS", input_ids: [3], shape: [3], dtype: "float32", arg },
+      ],
+      buffers: [
+        { value_id: 0, op: "BUFFER", shape: [2, 3], dtype: "float32", bytes: 24, first_step: 0, last_step: 5, materialize: false },
+        { value_id: 1, op: "BUFFER", shape: [3], dtype: "float32", bytes: 12, first_step: 1, last_step: 4, materialize: false },
+        { value_id: 2, op: "BUFFER", shape: [3], dtype: "float32", bytes: 12, first_step: 2, last_step: 3, materialize: false },
+        { value_id: 3, op: "LAYER_NORM", shape: [2, 3], dtype: "float32", bytes: 24, first_step: 3, last_step: 6, materialize: false },
+        { value_id: 4, op: "LAYER_NORM_BACKWARD_INPUT", shape: [2, 3], dtype: "float32", bytes: 24, first_step: 4, last_step: 4, materialize: false },
+        { value_id: 5, op: "LAYER_NORM_BACKWARD_WEIGHT", shape: [3], dtype: "float32", bytes: 12, first_step: 5, last_step: 5, materialize: false },
+        { value_id: 6, op: "LAYER_NORM_BACKWARD_BIAS", shape: [3], dtype: "float32", bytes: 12, first_step: 6, last_step: 6, materialize: true },
+      ],
+      root_id: 6,
+      materialization_boundary: "root",
+      peak_live_bytes: 120,
+      has_custom_ops: false,
+    });
+    expect(plan.steps.map((step) => step.op)).toContain("LAYER_NORM_BACKWARD_BIAS");
+  });
 });

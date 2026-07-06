@@ -112,6 +112,7 @@ import numpy as np
 caps = {
   "nn.Dropout": hasattr(nn, "Dropout"),
   "nn.BatchNorm1d": hasattr(nn, "BatchNorm1d"),
+  "nn.LayerNorm": hasattr(nn, "LayerNorm"),
   "nn.Conv1d": hasattr(nn, "Conv1d"),
   "nn.Conv2d": hasattr(nn, "Conv2d"),
   "nn.ConvTranspose2d": hasattr(nn, "ConvTranspose2d"),
@@ -183,6 +184,7 @@ loaded = torch.load("/tmp/bg_jit_state.pt")
     expect(result.caps).toEqual({
       "nn.Dropout": true,
       "nn.BatchNorm1d": true,
+      "nn.LayerNorm": true,
       "nn.Conv1d": true,
       "nn.Conv2d": true,
       "nn.ConvTranspose2d": true,

@@ -54,6 +54,8 @@ from ._ir import (
     OP_CONV2D_BACKWARD_WEIGHT, OP_CONV2D_BACKWARD_BIAS,
     OP_CONV3D, OP_CONV3D_BACKWARD_INPUT,
     OP_CONV3D_BACKWARD_WEIGHT, OP_CONV3D_BACKWARD_BIAS,
+    OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
+    OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
     OP_CONST, OP_BROADCAST_TO,
     OP_ISNAN,
@@ -645,6 +647,43 @@ def _vjp_conv3d(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional
     bias = inputs[2]
     grad_b = _vjp_uop(
         OP_CONV3D_BACKWARD_BIAS,
+        (dy,),
+        bias.shape,
+        bias.dtype,
+        output,
+        arg=arg,
+    )
+    return (grad_x, grad_w, grad_b)
+
+
+# ---------------------------------------------------------------------------
+# LAYER_NORM — primitive norm rule
+# ---------------------------------------------------------------------------
+
+
+@register_vjp(OP_LAYER_NORM)
+def _vjp_layer_norm(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    x, weight, bias = inputs
+    arg = dict(output.arg)
+    arg.pop("vjp_of", None)
+    grad_x = _vjp_uop(
+        OP_LAYER_NORM_BACKWARD_INPUT,
+        (dy, x, weight),
+        x.shape,
+        x.dtype,
+        output,
+        arg=arg,
+    )
+    grad_w = _vjp_uop(
+        OP_LAYER_NORM_BACKWARD_WEIGHT,
+        (dy, x),
+        weight.shape,
+        weight.dtype,
+        output,
+        arg=arg,
+    )
+    grad_b = _vjp_uop(
+        OP_LAYER_NORM_BACKWARD_BIAS,
         (dy,),
         bias.shape,
         bias.dtype,

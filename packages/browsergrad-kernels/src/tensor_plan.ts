@@ -36,6 +36,10 @@ export type TensorPlanOp =
   | "CONV3D_BACKWARD_INPUT"
   | "CONV3D_BACKWARD_WEIGHT"
   | "CONV3D_BACKWARD_BIAS"
+  | "LAYER_NORM"
+  | "LAYER_NORM_BACKWARD_INPUT"
+  | "LAYER_NORM_BACKWARD_WEIGHT"
+  | "LAYER_NORM_BACKWARD_BIAS"
   | "SGD_UPDATE"
   | "ADAMW_UPDATE_M"
   | "ADAMW_UPDATE_V"
@@ -329,6 +333,27 @@ function executeStep(
       const dy = requireValue(values, step.inputIds[0], step.op);
       return fromDirect(step, conv3dBackwardBiasDirect(device, dy, step.shape, step.arg));
     }
+    case "LAYER_NORM": {
+      const x = requireValue(values, step.inputIds[0], step.op);
+      const weight = requireValue(values, step.inputIds[1], step.op);
+      const bias = requireValue(values, step.inputIds[2], step.op);
+      return fromDirect(step, layerNormDirect(device, x, weight, bias, step.shape, step.arg));
+    }
+    case "LAYER_NORM_BACKWARD_INPUT": {
+      const dy = requireValue(values, step.inputIds[0], step.op);
+      const x = requireValue(values, step.inputIds[1], step.op);
+      const weight = requireValue(values, step.inputIds[2], step.op);
+      return fromDirect(step, layerNormBackwardInputDirect(device, dy, x, weight, step.shape, step.arg));
+    }
+    case "LAYER_NORM_BACKWARD_WEIGHT": {
+      const dy = requireValue(values, step.inputIds[0], step.op);
+      const x = requireValue(values, step.inputIds[1], step.op);
+      return fromDirect(step, layerNormBackwardWeightDirect(device, dy, x, step.shape, step.arg));
+    }
+    case "LAYER_NORM_BACKWARD_BIAS": {
+      const dy = requireValue(values, step.inputIds[0], step.op);
+      return fromDirect(step, layerNormBackwardBiasDirect(device, dy, step.shape, step.arg));
+    }
     case "SGD_UPDATE": {
       const param = requireValue(values, step.inputIds[0], step.op);
       const grad = requireValue(values, step.inputIds[1], step.op);
@@ -459,6 +484,13 @@ interface AdamUpdateArg {
   readonly eps: number;
   readonly weightDecay: number;
   readonly step: number;
+}
+
+interface LayerNormArg {
+  readonly normalizedShape: readonly number[];
+  readonly rows: number;
+  readonly cols: number;
+  readonly eps: number;
 }
 
 const PERMUTE_WGSL = `
@@ -1579,6 +1611,157 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+const LAYER_NORM_WGSL = `
+@group(0) @binding(0) var<storage, read> X: array<f32>;
+@group(0) @binding(1) var<storage, read> W: array<f32>;
+@group(0) @binding(2) var<storage, read> B: array<f32>;
+@group(0) @binding(3) var<storage, read_write> Y: array<f32>;
+
+struct Params {
+  rows: u32,
+  cols: u32,
+  eps_bits: u32,
+  pad: u32,
+};
+@group(0) @binding(4) var<uniform> U: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let r = gid.x;
+  if (r >= U.rows) { return; }
+  let base = r * U.cols;
+  let eps = bitcast<f32>(U.eps_bits);
+  let n = f32(U.cols);
+  var sum = 0.0;
+  for (var i = 0u; i < U.cols; i = i + 1u) {
+    sum = sum + X[base + i];
+  }
+  let mean = sum / n;
+  var var_sum = 0.0;
+  for (var i = 0u; i < U.cols; i = i + 1u) {
+    let d = X[base + i] - mean;
+    var_sum = var_sum + d * d;
+  }
+  let inv_std = 1.0 / sqrt(var_sum / n + eps);
+  for (var i = 0u; i < U.cols; i = i + 1u) {
+    let x_hat = (X[base + i] - mean) * inv_std;
+    Y[base + i] = x_hat * W[i] + B[i];
+  }
+}
+`;
+
+const LAYER_NORM_BACKWARD_INPUT_WGSL = `
+@group(0) @binding(0) var<storage, read> DY: array<f32>;
+@group(0) @binding(1) var<storage, read> X: array<f32>;
+@group(0) @binding(2) var<storage, read> W: array<f32>;
+@group(0) @binding(3) var<storage, read_write> DX: array<f32>;
+
+struct Params {
+  rows: u32,
+  cols: u32,
+  eps_bits: u32,
+  pad: u32,
+};
+@group(0) @binding(4) var<uniform> U: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let r = gid.x;
+  if (r >= U.rows) { return; }
+  let base = r * U.cols;
+  let eps = bitcast<f32>(U.eps_bits);
+  let n = f32(U.cols);
+  var sum = 0.0;
+  for (var i = 0u; i < U.cols; i = i + 1u) {
+    sum = sum + X[base + i];
+  }
+  let mean = sum / n;
+  var var_sum = 0.0;
+  for (var i = 0u; i < U.cols; i = i + 1u) {
+    let d = X[base + i] - mean;
+    var_sum = var_sum + d * d;
+  }
+  let inv_std = 1.0 / sqrt(var_sum / n + eps);
+  var sum_g = 0.0;
+  var sum_g_xhat = 0.0;
+  for (var i = 0u; i < U.cols; i = i + 1u) {
+    let x_hat = (X[base + i] - mean) * inv_std;
+    let g = DY[base + i] * W[i];
+    sum_g = sum_g + g;
+    sum_g_xhat = sum_g_xhat + g * x_hat;
+  }
+  for (var i = 0u; i < U.cols; i = i + 1u) {
+    let x_hat = (X[base + i] - mean) * inv_std;
+    let g = DY[base + i] * W[i];
+    DX[base + i] = (inv_std / n) * (n * g - sum_g - x_hat * sum_g_xhat);
+  }
+}
+`;
+
+const LAYER_NORM_BACKWARD_WEIGHT_WGSL = `
+@group(0) @binding(0) var<storage, read> DY: array<f32>;
+@group(0) @binding(1) var<storage, read> X: array<f32>;
+@group(0) @binding(2) var<storage, read_write> DW: array<f32>;
+
+struct Params {
+  rows: u32,
+  cols: u32,
+  eps_bits: u32,
+  pad: u32,
+};
+@group(0) @binding(3) var<uniform> U: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let c = gid.x;
+  if (c >= U.cols) { return; }
+  let eps = bitcast<f32>(U.eps_bits);
+  let n = f32(U.cols);
+  var acc = 0.0;
+  for (var r = 0u; r < U.rows; r = r + 1u) {
+    let base = r * U.cols;
+    var sum = 0.0;
+    for (var i = 0u; i < U.cols; i = i + 1u) {
+      sum = sum + X[base + i];
+    }
+    let mean = sum / n;
+    var var_sum = 0.0;
+    for (var i = 0u; i < U.cols; i = i + 1u) {
+      let d = X[base + i] - mean;
+      var_sum = var_sum + d * d;
+    }
+    let inv_std = 1.0 / sqrt(var_sum / n + eps);
+    let x_hat = (X[base + c] - mean) * inv_std;
+    acc = acc + DY[base + c] * x_hat;
+  }
+  DW[c] = acc;
+}
+`;
+
+const LAYER_NORM_BACKWARD_BIAS_WGSL = `
+@group(0) @binding(0) var<storage, read> DY: array<f32>;
+@group(0) @binding(1) var<storage, read_write> DB: array<f32>;
+
+struct Params {
+  rows: u32,
+  cols: u32,
+  eps_bits: u32,
+  pad: u32,
+};
+@group(0) @binding(2) var<uniform> U: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let c = gid.x;
+  if (c >= U.cols) { return; }
+  var acc = 0.0;
+  for (var r = 0u; r < U.rows; r = r + 1u) {
+    acc = acc + DY[r * U.cols + c];
+  }
+  DB[c] = acc;
+}
+`;
+
 function conv1dDirect(
   device: KernelDevice,
   x: ResidentValue,
@@ -1952,6 +2135,104 @@ function conv3dBackwardBiasDirect(
     params: new Uint32Array([arg.n, arg.cOut, arg.outD, arg.outH, arg.outW, 0, 0, 0]),
     dispatchCount: [arg.cOut, 1, 1],
     cacheKeySuffix: `${arg.n}_${arg.cOut}_${arg.outD}_${arg.outH}_${arg.outW}`,
+  });
+}
+
+function layerNormDirect(
+  device: KernelDevice,
+  x: ResidentValue,
+  weight: ResidentValue,
+  bias: ResidentValue,
+  shape: readonly number[],
+  rawArg: unknown,
+): DirectDispatchResult {
+  const arg = expectLayerNormArg(rawArg, "LAYER_NORM");
+  expectShape(x.shape, shape, "LAYER_NORM.input");
+  expectShape(weight.shape, arg.normalizedShape, "LAYER_NORM.weight");
+  expectShape(bias.shape, arg.normalizedShape, "LAYER_NORM.bias");
+  const outputLength = numel(shape);
+  return runDirect(device, {
+    name: "tensor_plan_layer_norm",
+    wgsl: LAYER_NORM_WGSL,
+    workgroupSize: [64, 1, 1],
+  }, {
+    inputBuffers: [x.buffer, weight.buffer, bias.buffer],
+    outputLength,
+    params: layerNormParams(arg),
+    dispatchCount: [arg.rows, 1, 1],
+    cacheKeySuffix: `${shapeStr(shape)}_${arg.rows}_${arg.cols}_${arg.eps}`,
+  });
+}
+
+function layerNormBackwardInputDirect(
+  device: KernelDevice,
+  dy: ResidentValue,
+  x: ResidentValue,
+  weight: ResidentValue,
+  shape: readonly number[],
+  rawArg: unknown,
+): DirectDispatchResult {
+  const arg = expectLayerNormArg(rawArg, "LAYER_NORM_BACKWARD_INPUT");
+  expectShape(dy.shape, shape, "LAYER_NORM_BACKWARD_INPUT.dy");
+  expectShape(x.shape, shape, "LAYER_NORM_BACKWARD_INPUT.input");
+  expectShape(weight.shape, arg.normalizedShape, "LAYER_NORM_BACKWARD_INPUT.weight");
+  const outputLength = numel(shape);
+  return runDirect(device, {
+    name: "tensor_plan_layer_norm_backward_input",
+    wgsl: LAYER_NORM_BACKWARD_INPUT_WGSL,
+    workgroupSize: [64, 1, 1],
+  }, {
+    inputBuffers: [dy.buffer, x.buffer, weight.buffer],
+    outputLength,
+    params: layerNormParams(arg),
+    dispatchCount: [arg.rows, 1, 1],
+    cacheKeySuffix: `${shapeStr(shape)}_${arg.rows}_${arg.cols}_${arg.eps}`,
+  });
+}
+
+function layerNormBackwardWeightDirect(
+  device: KernelDevice,
+  dy: ResidentValue,
+  x: ResidentValue,
+  shape: readonly number[],
+  rawArg: unknown,
+): DirectDispatchResult {
+  const arg = expectLayerNormArg(rawArg, "LAYER_NORM_BACKWARD_WEIGHT");
+  expectShape(dy.shape, x.shape, "LAYER_NORM_BACKWARD_WEIGHT.dy");
+  expectShape(shape, arg.normalizedShape, "LAYER_NORM_BACKWARD_WEIGHT.output");
+  const outputLength = numel(shape);
+  return runDirect(device, {
+    name: "tensor_plan_layer_norm_backward_weight",
+    wgsl: LAYER_NORM_BACKWARD_WEIGHT_WGSL,
+    workgroupSize: [64, 1, 1],
+  }, {
+    inputBuffers: [dy.buffer, x.buffer],
+    outputLength,
+    params: layerNormParams(arg),
+    dispatchCount: [arg.cols, 1, 1],
+    cacheKeySuffix: `${shapeStr(x.shape)}_${arg.rows}_${arg.cols}_${arg.eps}`,
+  });
+}
+
+function layerNormBackwardBiasDirect(
+  device: KernelDevice,
+  dy: ResidentValue,
+  shape: readonly number[],
+  rawArg: unknown,
+): DirectDispatchResult {
+  const arg = expectLayerNormArg(rawArg, "LAYER_NORM_BACKWARD_BIAS");
+  expectShape(shape, arg.normalizedShape, "LAYER_NORM_BACKWARD_BIAS.output");
+  const outputLength = numel(shape);
+  return runDirect(device, {
+    name: "tensor_plan_layer_norm_backward_bias",
+    wgsl: LAYER_NORM_BACKWARD_BIAS_WGSL,
+    workgroupSize: [64, 1, 1],
+  }, {
+    inputBuffers: [dy.buffer],
+    outputLength,
+    params: layerNormParams(arg),
+    dispatchCount: [arg.cols, 1, 1],
+    cacheKeySuffix: `${shapeStr(dy.shape)}_${arg.rows}_${arg.cols}`,
   });
 }
 
@@ -2685,6 +2966,28 @@ function expectAdamUpdateArg(rawArg: unknown, op: string): AdamUpdateArg {
   return { lr, beta1, beta2, eps, weightDecay, step };
 }
 
+function expectLayerNormArg(rawArg: unknown, op: string): LayerNormArg {
+  const arg = expectRecord(rawArg, `tensor plan ${op}.arg`);
+  const normalizedShape = expectArray(
+    arg.normalized_shape ?? arg.normalizedShape,
+    `${op}.normalized_shape`,
+  ).map((v, i) => expectNumber(v, `${op}.normalized_shape[${i}]`));
+  const rows = expectNumber(arg.rows, `${op}.rows`);
+  const cols = expectNumber(arg.cols, `${op}.cols`);
+  const eps = expectFiniteNumber(arg.eps ?? 1e-5, `${op}.eps`);
+  if (normalizedShape.length === 0) {
+    throw new KernelError(`tensor plan ${op}.normalized_shape must be non-empty`);
+  }
+  if (rows <= 0 || cols <= 0) {
+    throw new KernelError(`tensor plan ${op}.rows and cols must be positive`);
+  }
+  if (numel(normalizedShape) !== cols) {
+    throw new KernelError(`tensor plan ${op}.cols must equal normalized_shape numel`);
+  }
+  if (eps <= 0) throw new KernelError(`tensor plan ${op}.eps must be > 0`);
+  return { normalizedShape, rows, cols, eps };
+}
+
 function adamwMvParams(beta: number, total: number): Uint32Array {
   const buffer = new ArrayBuffer(16);
   const view = new DataView(buffer);
@@ -2731,6 +3034,12 @@ function adamParamParams(arg: AdamUpdateArg, total: number): Uint32Array {
   view.setUint32(24, 0, true);
   view.setUint32(28, 0, true);
   return new Uint32Array(buffer);
+}
+
+function layerNormParams(arg: LayerNormArg): Uint32Array {
+  const epsBuf = new Float32Array([arg.eps]);
+  const epsBits = new Uint32Array(epsBuf.buffer, epsBuf.byteOffset, 1)[0]!;
+  return new Uint32Array([arg.rows, arg.cols, epsBits, 0]);
 }
 
 function pad4(values: readonly number[]): [number, number, number, number] {
@@ -2892,6 +3201,10 @@ function expectOp(value: unknown, name: string): TensorPlanOp {
     case "CONV3D_BACKWARD_INPUT":
     case "CONV3D_BACKWARD_WEIGHT":
     case "CONV3D_BACKWARD_BIAS":
+    case "LAYER_NORM":
+    case "LAYER_NORM_BACKWARD_INPUT":
+    case "LAYER_NORM_BACKWARD_WEIGHT":
+    case "LAYER_NORM_BACKWARD_BIAS":
     case "SGD_UPDATE":
     case "ADAMW_UPDATE_M":
     case "ADAMW_UPDATE_V":

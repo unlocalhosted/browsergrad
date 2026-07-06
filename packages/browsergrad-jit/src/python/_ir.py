@@ -19,7 +19,7 @@ hash the same. This is what lets the trace cache and pipeline cache
 
 Design notes:
 
-  * 47 opcodes total — corrects PRD-005's nominal 19. The extras are
+  * 51 opcodes total — corrects PRD-005's nominal 19. The extras are
     documented per-opcode below. Headline additions: RANDOM (dropout +
     nn.init at trace time), CMP (boolean results), CONV1D/CONV2D/CONV3D
     primitive CNN ops and backward refs, CUSTOM
@@ -60,6 +60,8 @@ from ._errors import ShapeError
 #                  CONV2D_BACKWARD_BIAS, CONV3D,
 #                  CONV3D_BACKWARD_INPUT, CONV3D_BACKWARD_WEIGHT,
 #                  CONV3D_BACKWARD_BIAS
+#   Norm:          LAYER_NORM, LAYER_NORM_BACKWARD_INPUT,
+#                  LAYER_NORM_BACKWARD_WEIGHT, LAYER_NORM_BACKWARD_BIAS
 #   Escape hatch:  CUSTOM
 #   Optimizer:     SGD_UPDATE, ADAMW_UPDATE_*, ADAM_UPDATE_*
 # ---------------------------------------------------------------------------
@@ -90,6 +92,10 @@ OP_CONV3D  = "CONV3D"   # arg: {n,c_in,d,h,w,c_out,kd,kh,kw,stride_d,stride_h,st
 OP_CONV3D_BACKWARD_INPUT  = "CONV3D_BACKWARD_INPUT"   # inputs: (dy, weight), arg: conv3d metadata
 OP_CONV3D_BACKWARD_WEIGHT = "CONV3D_BACKWARD_WEIGHT"  # inputs: (dy, input), arg: conv3d metadata
 OP_CONV3D_BACKWARD_BIAS   = "CONV3D_BACKWARD_BIAS"    # inputs: (dy,), arg: conv3d metadata
+OP_LAYER_NORM = "LAYER_NORM"  # inputs: (x, weight, bias), arg: {normalized_shape, rows, cols, eps}
+OP_LAYER_NORM_BACKWARD_INPUT = "LAYER_NORM_BACKWARD_INPUT"  # inputs: (dy, x, weight)
+OP_LAYER_NORM_BACKWARD_WEIGHT = "LAYER_NORM_BACKWARD_WEIGHT"  # inputs: (dy, x)
+OP_LAYER_NORM_BACKWARD_BIAS = "LAYER_NORM_BACKWARD_BIAS"  # inputs: (dy,)
 OP_REDUCE  = "REDUCE"   # arg: {op, axis, keepdims}
 OP_RESHAPE = "RESHAPE"  # arg: {new_shape: tuple[int,...]}
 OP_PERMUTE = "PERMUTE"  # arg: {axes: tuple[int,...]}
@@ -144,7 +150,8 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
     OP_CONV2D_BACKWARD_WEIGHT, OP_CONV2D_BACKWARD_BIAS,
     OP_CONV3D, OP_CONV3D_BACKWARD_INPUT, OP_CONV3D_BACKWARD_WEIGHT,
-    OP_CONV3D_BACKWARD_BIAS, OP_REDUCE,
+    OP_CONV3D_BACKWARD_BIAS, OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
+    OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS, OP_REDUCE,
     OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     # Fusion-emitted (PRD-006)
@@ -156,7 +163,7 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
 })
-assert len(ALL_OPS) == 47, "opcode count drifted from PRD-005+006+007+010+CNN+optimizer"
+assert len(ALL_OPS) == 51, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -385,6 +392,8 @@ __all__ = [
     "OP_CONV2D_BACKWARD_BIAS",
     "OP_CONV3D", "OP_CONV3D_BACKWARD_INPUT",
     "OP_CONV3D_BACKWARD_WEIGHT", "OP_CONV3D_BACKWARD_BIAS",
+    "OP_LAYER_NORM", "OP_LAYER_NORM_BACKWARD_INPUT",
+    "OP_LAYER_NORM_BACKWARD_WEIGHT", "OP_LAYER_NORM_BACKWARD_BIAS",
     "OP_REDUCE",
     "OP_RESHAPE", "OP_PERMUTE", "OP_SLICE", "OP_PAD",
     "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",

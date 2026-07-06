@@ -54,19 +54,19 @@ pretending to match PyTorch.
 ### Neural networks
 - `nn.Module`, `nn.Sequential`
 - `nn.Linear`, `nn.Conv1d`, `nn.Conv2d`, `nn.ConvTranspose2d`, `nn.Conv3d`,
-  `nn.Dropout`, `nn.BatchNorm1d`, activation modules
+  `nn.Dropout`, `nn.LayerNorm`, `nn.BatchNorm1d`, activation modules
 - `nn.Module` parameters, buffers, `state_dict()`, `load_state_dict()`,
   `train()`, `eval()`, `zero_grad()`
 - `nn.functional`: `relu`, `sigmoid`, `tanh`, `gelu`, `softmax`,
-  `cross_entropy`, `mse_loss`, `nll_loss`, `linear`, `conv1d`, `conv2d`,
-  `conv_transpose2d`, `conv3d`
+  `cross_entropy`, `mse_loss`, `nll_loss`, `linear`, `layer_norm`,
+  `conv1d`, `conv2d`, `conv_transpose2d`, `conv3d`
 - `optim.SGD`, `optim.Adam`, `optim.AdamW`
 
-`Conv1d`, `Conv2d`, and `Conv3d` are primitive IR ops with NumPy handlers and
-symbolic VJPs. Conv1d/Conv2d/Conv3d forward/backward lower through generic
-tensor-plan WebGPU via `realize_tensor_plan_webgpu(...)`. Default `.backward()` still
-writes CPU grads. `BatchNorm1d` and `ConvTranspose2d` remain `CUSTOM`
-realization paths with explicit NumPy VJPs.
+`Conv1d`, `Conv2d`, `Conv3d`, and `LayerNorm` are primitive IR ops with NumPy
+handlers and symbolic VJPs. Conv1d/Conv2d/Conv3d/LayerNorm forward/backward
+lower through generic tensor-plan WebGPU via `realize_tensor_plan_webgpu(...)`.
+Default `.backward()` still writes CPU grads. `BatchNorm1d` and
+`ConvTranspose2d` remain `CUSTOM` realization paths with explicit NumPy VJPs.
 `bg.optim.sgd_update(...)`, `bg.optim.adam_update(...)`, and
 `bg.optim.adamw_update(...)` are functional optimizer/update IR nodes and lower
 through the same tensor-plan WebGPU path. They return updated tensors/state;
@@ -82,9 +82,9 @@ lowering.
 generic WebGPU bridge call (`run_tensor_plan`) instead of walking legacy per-op
 bridge methods. Current runtime coverage is f32 BUFFER/LOAD/2-D MATMUL and
 elementwise chains, RESHAPE, PERMUTE, BROADCAST_TO, and REDUCE(sum/mean) rank
-<= 4, plus Conv1d/Conv2d/Conv3d forward/backward and functional SGD/Adam/AdamW
-updates; norm and mutating optimizer-step tensor-plan codegen remain future
-work.
+<= 4, plus Conv1d/Conv2d/Conv3d/LayerNorm forward/backward and functional
+SGD/Adam/AdamW updates; mutating optimizer-step tensor-plan codegen remains
+future work.
 
 ### Gradient control
 ```python

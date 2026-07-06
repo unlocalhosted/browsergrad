@@ -58,6 +58,8 @@ from ._ir import (
     OP_CONV2D_BACKWARD_WEIGHT, OP_CONV2D_BACKWARD_BIAS,
     OP_CONV3D, OP_CONV3D_BACKWARD_INPUT,
     OP_CONV3D_BACKWARD_WEIGHT, OP_CONV3D_BACKWARD_BIAS,
+    OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
+    OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS,
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
     OP_WHERE, OP_BROADCAST_TO, OP_ISNAN, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
@@ -539,6 +541,18 @@ for _op_name, _op in (
         _op_name,
         "Adam update batching needs explicit optimizer-state semantics; "
         "vmap the loss/grad function, then apply optimizer updates outside vmap",
+    )
+
+for _op_name, _op in (
+    ("OP_LAYER_NORM", OP_LAYER_NORM),
+    ("OP_LAYER_NORM_BACKWARD_INPUT", OP_LAYER_NORM_BACKWARD_INPUT),
+    ("OP_LAYER_NORM_BACKWARD_WEIGHT", OP_LAYER_NORM_BACKWARD_WEIGHT),
+    ("OP_LAYER_NORM_BACKWARD_BIAS", OP_LAYER_NORM_BACKWARD_BIAS),
+):
+    _VMAP_RULES[_op] = _refuse(
+        _op_name,
+        "LayerNorm batching needs normalized_shape-aware axis mapping; "
+        "vmap an outer module over examples instead of batching this primitive directly",
     )
 
 

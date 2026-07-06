@@ -92,7 +92,7 @@ the intended GPU materialization boundaries.
 - Covered semantics: tuple stride/padding/dilation where applicable, groups,
   output padding for ConvTranspose2d, module state_dict keys, and torch alias
   exposure.
-- Conv1d/Conv2d/Conv3d forward/backward have generic tensor-plan WebGPU
+- Conv1d/Conv2d/Conv3d/LayerNorm forward/backward have generic tensor-plan WebGPU
   coverage.
 - `bg.optim.sgd_update(...)`, `bg.optim.adam_update(...)`, and
   `bg.optim.adamw_update(...)` emit functional
@@ -173,8 +173,8 @@ Plus the realizer-tier API:
 - `runDirect` / `materializeFloat32` / `uploadFloat32` — GPUBuffer-in/out dispatch path.
 - `runTensorGpuPlan` — generic f32 tensor-plan executor for BUFFER/LOAD,
   2-D MATMUL, elementwise chains, RESHAPE, PERMUTE, BROADCAST_TO, and
-  REDUCE(sum/mean) rank <= 4, plus Conv1d/Conv2d/Conv3d forward/backward and
-  functional SGD/Adam/AdamW updates. It accepts
+  REDUCE(sum/mean) rank <= 4, plus Conv1d/Conv2d/Conv3d/LayerNorm
+  forward/backward and functional SGD/Adam/AdamW updates. It accepts
   the snake_case `browsergrad-jit` plan payload, keeps intermediates
   resident, and materializes only the declared root, matching the GPU-native
   direction.
@@ -246,7 +246,7 @@ All 16 PRDs land at v0:
 
 | Item | Reason |
 |---|---|
-| **Default `.backward()` through GPU realizer** | NumPy realizer handles autograd mutation. Explicit `realize_webgpu(...)` can run selected backward IR roots such as Conv1d/Conv2d input/weight/bias grads; `realize_tensor_plan_webgpu(...)` can run functional SGD/Adam/AdamW updates. `.backward()` and mutating `Optimizer.step()` are not GPU-resident. |
+| **Default `.backward()` through GPU realizer** | NumPy realizer handles autograd mutation. Explicit `realize_webgpu(...)` can run selected backward IR roots such as Conv1d/Conv2d input/weight/bias grads; `realize_tensor_plan_webgpu(...)` can run Conv/LayerNorm backward roots and functional SGD/Adam/AdamW updates. `.backward()` and mutating `Optimizer.step()` are not GPU-resident. |
 | **f16/bf16 cast kernels** | Future work — current CAST handler is f32→f32 only. |
 | **Primitive/WebGPU ConvTranspose in `browsergrad-jit`** | Lazy `browsergrad-jit` now has primitive Conv1d/Conv2d/Conv3d forward/backward IR with CPU handlers, symbolic VJPs, and generic tensor-plan WebGPU lowering. ConvTranspose2d still uses CUSTOM NumPy realizers + VJPs; ConvTranspose2d WebGPU path is pending. |
 | **torch.cuda.\*, torch.compile, torch.fx** | Out of scope for `install_torch_alias`. Raises `AttributeError`. |

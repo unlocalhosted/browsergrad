@@ -507,6 +507,100 @@ describe("real WebGPU — matmul + tiled GEMM + fused elementwise + FA-v2", () =
     }
   });
 
+  it("generic tensor GPU plan runs LayerNorm forward and backward roots", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const x = new Float32Array([1, 2, 4, -1, 0.5, 3]);
+    const weight = new Float32Array([0.75, -1.25, 1.5]);
+    const bias = new Float32Array([0.1, -0.2, 0.3]);
+    const dy = new Float32Array([0.25, -0.5, 1.0, -1.5, 0.75, 0.5]);
+    const arg = { normalized_shape: [3], rows: 2, cols: 3, eps: 1e-5 };
+    const expectedY = new Float32Array(6);
+    const expectedDx = new Float32Array(6);
+    const expectedDw = new Float32Array(3);
+    const expectedDb = new Float32Array(3);
+    for (let r = 0; r < arg.rows; r++) {
+      const base = r * arg.cols;
+      let mean = 0;
+      for (let c = 0; c < arg.cols; c++) mean += x[base + c]!;
+      mean /= arg.cols;
+      let variance = 0;
+      for (let c = 0; c < arg.cols; c++) {
+        const centered = x[base + c]! - mean;
+        variance += centered * centered;
+      }
+      variance /= arg.cols;
+      const invStd = 1 / Math.sqrt(variance + arg.eps);
+      let sumG = 0;
+      let sumGXhat = 0;
+      const xHat = new Float32Array(arg.cols);
+      const g = new Float32Array(arg.cols);
+      for (let c = 0; c < arg.cols; c++) {
+        xHat[c] = (x[base + c]! - mean) * invStd;
+        expectedY[base + c] = xHat[c]! * weight[c]! + bias[c]!;
+        g[c] = dy[base + c]! * weight[c]!;
+        sumG += g[c]!;
+        sumGXhat += g[c]! * xHat[c]!;
+        expectedDw[c] = expectedDw[c]! + dy[base + c]! * xHat[c]!;
+        expectedDb[c] = expectedDb[c]! + dy[base + c]!;
+      }
+      for (let c = 0; c < arg.cols; c++) {
+        expectedDx[base + c] = (invStd / arg.cols) * (arg.cols * g[c]! - sumG - xHat[c]! * sumGXhat);
+      }
+    }
+
+    async function runLayerNormRoot(rootOp: string, rootShape: readonly number[], rootInputs: readonly number[]) {
+      const steps = [
+        { step: 0, value_id: 0, op: "BUFFER", input_ids: [], shape: [2, 3], dtype: "float32" },
+        { step: 1, value_id: 1, op: "BUFFER", input_ids: [], shape: [3], dtype: "float32" },
+        { step: 2, value_id: 2, op: "BUFFER", input_ids: [], shape: [3], dtype: "float32" },
+        { step: 3, value_id: 3, op: "BUFFER", input_ids: [], shape: [2, 3], dtype: "float32" },
+        { step: 4, value_id: 4, op: "LOAD", input_ids: [0], shape: [2, 3], dtype: "float32" },
+        { step: 5, value_id: 5, op: "LOAD", input_ids: [1], shape: [3], dtype: "float32" },
+        { step: 6, value_id: 6, op: "LOAD", input_ids: [2], shape: [3], dtype: "float32" },
+        { step: 7, value_id: 7, op: "LOAD", input_ids: [3], shape: [2, 3], dtype: "float32" },
+        { step: 8, value_id: 8, op: rootOp, input_ids: rootInputs, shape: rootShape, dtype: "float32", arg },
+      ];
+      const buffers = steps.map((step) => ({
+        value_id: step.value_id,
+        op: step.op,
+        shape: step.shape,
+        dtype: "float32",
+        bytes: step.shape.reduce((acc, dim) => acc * dim, 1) * 4,
+        first_step: step.step,
+        last_step: 8,
+        materialize: step.value_id === 8,
+      }));
+      const result = await runTensorGpuPlan(device, {
+        steps,
+        buffers,
+        root_id: 8,
+        materialization_boundary: "root",
+        peak_live_bytes: 160,
+        has_custom_ops: false,
+      }, [
+        { valueId: 0, data: x },
+        { valueId: 1, data: weight },
+        { valueId: 2, data: bias },
+        { valueId: 3, data: dy },
+      ]);
+      return result.data;
+    }
+
+    const y = await runLayerNormRoot("LAYER_NORM", [2, 3], [4, 5, 6]);
+    const dx = await runLayerNormRoot("LAYER_NORM_BACKWARD_INPUT", [2, 3], [7, 4, 5]);
+    const dw = await runLayerNormRoot("LAYER_NORM_BACKWARD_WEIGHT", [3], [7, 4]);
+    const db = await runLayerNormRoot("LAYER_NORM_BACKWARD_BIAS", [3], [7]);
+    for (let i = 0; i < expectedY.length; i++) {
+      expect(Math.abs(y[i]! - expectedY[i]!)).toBeLessThan(1e-5);
+      expect(Math.abs(dx[i]! - expectedDx[i]!)).toBeLessThan(1e-5);
+    }
+    for (let i = 0; i < expectedDw.length; i++) {
+      expect(Math.abs(dw[i]! - expectedDw[i]!)).toBeLessThan(1e-5);
+      expect(Math.abs(db[i]! - expectedDb[i]!)).toBeLessThan(1e-6);
+    }
+  });
+
   it("generic tensor GPU plan runs Conv1d and Conv2d forward", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();
