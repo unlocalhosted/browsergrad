@@ -98,6 +98,7 @@ from ._tensor_proxy import (
     tril as _tril,
     multinomial as _multinomial,
     einsum as _einsum,
+    _from_buffer_id,
 )
 from ._buffer_table import BufferTable
 from ._errors import (
@@ -422,6 +423,34 @@ def realize_tensor_plan_webgpu(tensor):
     )
 
 
+def realize_tensor_plan_webgpu_resident(tensor):
+    """Realize via tensor-plan WebGPU and return a GPU-resident TensorProxy.
+
+    CPU bytes are populated only when the caller later crosses an explicit
+    host boundary such as \`.numpy()\` or \`.item()\`.
+    """
+    bridge = _webgpu_mod.get_registered_bridge()
+    if bridge is None:
+        raise JitNotImplementedError(
+            "No WebGPU bridge registered. Call "
+            "bg.register_webgpu_bridge(bridge) first."
+        )
+    gbt = _webgpu_mod.get_registered_gpu_buffer_table()
+    sess = tensor._get_session()
+    buffer_id = _webgpu_mod.realize_tensor_plan_webgpu_resident(
+        tensor._uop,
+        numpy_buffer_table=sess.buffer_table,
+        gpu_buffer_table=gbt,
+    )
+    return _from_buffer_id(
+        buffer_id,
+        tensor.shape,
+        tensor.dtype,
+        session=sess,
+        requires_grad=tensor.requires_grad,
+    )
+
+
 register_webgpu_bridge = _webgpu_mod.register_webgpu_bridge
 unregister_webgpu_bridge = _webgpu_mod.unregister_webgpu_bridge
 webgpu_is_available = _webgpu_mod.is_available
@@ -702,7 +731,7 @@ __all__ = [
     "save", "load",
     "functional", "F", "nn", "optim", "jit", "utils", "amp", "kernels", "func",
     "custom_kernel", "onnx", "lab", "experimental",
-    "realize_webgpu", "realize_tensor_plan_webgpu",
+    "realize_webgpu", "realize_tensor_plan_webgpu", "realize_tensor_plan_webgpu_resident",
     "register_webgpu_bridge", "unregister_webgpu_bridge",
     "webgpu_is_available", "webgpu_supported_opcodes",
     "gpu_plan_summary",

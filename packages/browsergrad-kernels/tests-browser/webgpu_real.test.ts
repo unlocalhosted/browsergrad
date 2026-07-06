@@ -277,6 +277,79 @@ describe("real WebGPU — matmul + tiled GEMM + fused elementwise + FA-v2", () =
     expect(bridge.aliveHandleCount()).toBe(0);
   });
 
+  it("WebGpuRealizerBridge can keep tensor-plan roots resident and reuse handle inputs", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const bridge = createWebGpuRealizerBridge(device);
+    const M = 2, K = 3, N = 2;
+    const x = new Float32Array([1, 2, 3, 4, 5, 6]);
+    const w = new Float32Array([1, 0, 0, 1, 1, 1]);
+    const offset = new Float32Array([3, 3, 3, 3]);
+    const matmulPlan = {
+      steps: [
+        { step: 0, value_id: 0, op: "BUFFER", input_ids: [], shape: [M, K], dtype: "float32" },
+        { step: 1, value_id: 1, op: "BUFFER", input_ids: [], shape: [K, N], dtype: "float32" },
+        { step: 2, value_id: 2, op: "LOAD", input_ids: [0], shape: [M, K], dtype: "float32" },
+        { step: 3, value_id: 3, op: "LOAD", input_ids: [1], shape: [K, N], dtype: "float32" },
+        { step: 4, value_id: 4, op: "MATMUL", input_ids: [2, 3], shape: [M, N], dtype: "float32" },
+      ],
+      buffers: [
+        { value_id: 0, op: "BUFFER", shape: [M, K], dtype: "float32", bytes: x.byteLength, first_step: 0, last_step: 2, materialize: false },
+        { value_id: 1, op: "BUFFER", shape: [K, N], dtype: "float32", bytes: w.byteLength, first_step: 1, last_step: 3, materialize: false },
+        { value_id: 2, op: "LOAD", shape: [M, K], dtype: "float32", bytes: x.byteLength, first_step: 2, last_step: 4, materialize: false },
+        { value_id: 3, op: "LOAD", shape: [K, N], dtype: "float32", bytes: w.byteLength, first_step: 3, last_step: 4, materialize: false },
+        { value_id: 4, op: "MATMUL", shape: [M, N], dtype: "float32", bytes: offset.byteLength, first_step: 4, last_step: 4, materialize: true },
+      ],
+      root_id: 4,
+      materialization_boundary: "root",
+      peak_live_bytes: 64,
+      has_custom_ops: false,
+    } as const;
+    const root = bridge.run_tensor_plan_resident(
+      matmulPlan,
+      [
+        { value_id: 0, data: new Uint8Array(x.buffer, x.byteOffset, x.byteLength) },
+        { value_id: 1, data: new Uint8Array(w.buffer, w.byteOffset, w.byteLength) },
+      ],
+      "float32",
+    );
+    expect(bridge.aliveHandleCount()).toBe(1);
+
+    const addPlan = {
+      steps: [
+        { step: 0, value_id: 0, op: "BUFFER", input_ids: [], shape: [M, N], dtype: "float32" },
+        { step: 1, value_id: 1, op: "BUFFER", input_ids: [], shape: [M, N], dtype: "float32" },
+        { step: 2, value_id: 2, op: "LOAD", input_ids: [0], shape: [M, N], dtype: "float32" },
+        { step: 3, value_id: 3, op: "LOAD", input_ids: [1], shape: [M, N], dtype: "float32" },
+        { step: 4, value_id: 4, op: "ADD", input_ids: [2, 3], shape: [M, N], dtype: "float32" },
+      ],
+      buffers: [
+        { value_id: 0, op: "BUFFER", shape: [M, N], dtype: "float32", bytes: offset.byteLength, first_step: 0, last_step: 2, materialize: false },
+        { value_id: 1, op: "BUFFER", shape: [M, N], dtype: "float32", bytes: offset.byteLength, first_step: 1, last_step: 3, materialize: false },
+        { value_id: 2, op: "LOAD", shape: [M, N], dtype: "float32", bytes: offset.byteLength, first_step: 2, last_step: 4, materialize: false },
+        { value_id: 3, op: "LOAD", shape: [M, N], dtype: "float32", bytes: offset.byteLength, first_step: 3, last_step: 4, materialize: false },
+        { value_id: 4, op: "ADD", shape: [M, N], dtype: "float32", bytes: offset.byteLength, first_step: 4, last_step: 4, materialize: true },
+      ],
+      root_id: 4,
+      materialization_boundary: "root",
+      peak_live_bytes: 48,
+      has_custom_ops: false,
+    } as const;
+    const outBytes = await bridge.run_tensor_plan(
+      addPlan,
+      [
+        { value_id: 0, handle: root },
+        { value_id: 1, data: new Uint8Array(offset.buffer, offset.byteOffset, offset.byteLength) },
+      ],
+      "float32",
+    );
+    const out = Array.from(new Float32Array(outBytes.buffer, outBytes.byteOffset, outBytes.byteLength / 4));
+    expect(out).toEqual([7, 8, 13, 14]);
+    expect(bridge.aliveHandleCount()).toBe(1);
+    bridge.release(root);
+    expect(bridge.aliveHandleCount()).toBe(0);
+  });
+
   it("generic tensor GPU plan runs reshape, permute, reduce, and broadcast", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

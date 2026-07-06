@@ -43,6 +43,7 @@ Op surface (v0 spike):
   - `conv2d_backward_weight(dy, input, ..., dtype)`  — dWeight
   - `conv2d_backward_bias(dy, ..., dtype)`           — dBias
   - `run_tensor_plan(plan, inputs, dtype) -> bytes`  — canonical tensor IR plan
+  - `run_tensor_plan_resident(plan, inputs, dtype) -> handle` — root stays on GPU
 
 Anything outside this set raises `JitNotImplementedError` from the
 realizer. The honest scope per the DL/GPU review.
@@ -258,6 +259,13 @@ class WebGpuBridge(Protocol):
         inputs: list,
         dtype: str,
     ) -> bytes: ...
+
+    def run_tensor_plan_resident(
+        self,
+        plan: dict,
+        inputs: list,
+        dtype: str,
+    ) -> Any: ...
 
 
 __all__ = ["WebGpuBridge"]

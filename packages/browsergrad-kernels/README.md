@@ -25,7 +25,7 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
 | `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` / `runCuda1DProgramWebGpu` / `simulateCuda1DGrid` | CUDA-shaped compatibility aliases for labs and rubrics that teach CUDA vocabulary | ✅ |
 | `flashAttentionDirect` | Flash Attention forward with online softmax, strict real-WebGPU parity vs composed reference. | ✅ |
 | `fusedElementwiseDirect` | Runtime WGSL codegen for arbitrary elementwise chains | ✅ |
-| `runTensorGpuPlan` | Generic tensor-plan executor for primitive f32 BUFFER/LOAD/MATMUL/elementwise/shape/reduce/Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm-forward-backward/SGD/Adam/AdamW-update steps with GPUBuffer residency and single root readback | ✅ |
+| `runTensorGpuPlan` / `runTensorGpuPlanResident` | Generic tensor-plan executor for primitive f32 BUFFER/LOAD/MATMUL/elementwise/shape/reduce/Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm-forward-backward/SGD/Adam/AdamW-update steps with GPUBuffer residency; materialized or resident root modes | ✅ |
 | `WebGpuRealizerBridge.conv1d*` / `conv2d*` | Resident Conv1d/Conv2d forward plus input/weight/bias backward kernels for jit explicit realization. | ✅ |
 
 ### Realizer-tier surface (consumed by jit)
@@ -41,9 +41,15 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
   and functional SGD/Adam/AdamW updates. This is the future
   framework-runtime direction; per-op bridge methods are legacy/interim
   coverage.
+- `runTensorGpuPlanResident(device, plan, inputs)` — same executor, but returns
+  an owned resident root `GPUBuffer` instead of reading it back. Inputs may be
+  host data or bridge-owned resident handles.
 - `createWebGpuRealizerBridge(device).run_tensor_plan(plan, inputs, dtype)` —
   Pyodide bridge entrypoint for the same graph-level executor. Prefer extending
   this path for core framework ops instead of adding new per-op bridge methods.
+- `createWebGpuRealizerBridge(device).run_tensor_plan_resident(plan, inputs, dtype)` —
+  bridge entrypoint for resident tensor-plan roots; follow-on plans can pass
+  the returned handle as an input without CPU readback.
 - `materializeFloat32(device, buffer, byteLength)` — read a `GPUBuffer` back to a `Float32Array` (the single readback at the realize boundary).
 - `uploadFloat32(device, data)` — upload a typed array into a fresh `GPUBuffer`.
 - `createWgslStorageBuffer()` / `writeWgslStorageBuffer()` /

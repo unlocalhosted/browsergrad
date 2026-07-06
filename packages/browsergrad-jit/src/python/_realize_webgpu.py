@@ -491,21 +491,94 @@ def realize_tensor_plan_webgpu(
     for step in plan["steps"]:
         if step["op"] != OP_BUFFER:
             continue
-        arr = numpy_buffer_table.get(step["arg"])
-        if arr.dtype.name != step["dtype"]:
-            raise RealizationError(
-                f"WebGPU tensor plan: buffer {step['value_id']} dtype mismatch: "
-                f"plan={step['dtype']} table={arr.dtype.name}"
-            )
-        inputs.append({
-            "value_id": int(step["value_id"]),
-            "data": arr.tobytes(),
-        })
+        buffer_id = step["arg"]
+        handle = gpu_buffer_table.get(buffer_id)
+        if handle is not None and not numpy_buffer_table.is_materialized(buffer_id):
+            inputs.append({
+                "value_id": int(step["value_id"]),
+                "handle": handle,
+            })
+        else:
+            arr = numpy_buffer_table.get(buffer_id)
+            if arr.dtype.name != step["dtype"]:
+                raise RealizationError(
+                    f"WebGPU tensor plan: buffer {step['value_id']} dtype mismatch: "
+                    f"plan={step['dtype']} table={arr.dtype.name}"
+                )
+            inputs.append({
+                "value_id": int(step["value_id"]),
+                "data": arr.tobytes(),
+            })
     data = bridge.run_tensor_plan(plan, inputs, root.dtype)
     arr = np.frombuffer(data, dtype=np.dtype(root.dtype))
     if root.shape:
         arr = arr.reshape(root.shape)
     return np.array(arr, copy=True)
+
+
+def realize_tensor_plan_webgpu_resident(
+    root: UOp,
+    *,
+    numpy_buffer_table: Any,
+    gpu_buffer_table: GpuBufferTable,
+) -> str:
+    """Realize a tensor plan and keep the root as a registered GPU buffer.
+
+    Returns the reserved BufferTable id. CPU bytes are not populated until an
+    explicit materialization boundary asks for them.
+    """
+    bridge = gpu_buffer_table.bridge
+    if not hasattr(bridge, "run_tensor_plan_resident"):
+        raise RealizationError(
+            "WebGPU tensor plan residency requires bridge.run_tensor_plan_resident(...)."
+        )
+    plan = gpu_plan_summary(root, allow_custom=False)
+    inputs = []
+    for step in plan["steps"]:
+        if step["op"] != OP_BUFFER:
+            continue
+        buffer_id = step["arg"]
+        handle = gpu_buffer_table.get(buffer_id)
+        if handle is not None and not numpy_buffer_table.is_materialized(buffer_id):
+            inputs.append({
+                "value_id": int(step["value_id"]),
+                "handle": handle,
+            })
+        else:
+            arr = numpy_buffer_table.get(buffer_id)
+            if arr.dtype.name != step["dtype"]:
+                raise RealizationError(
+                    f"WebGPU tensor plan: buffer {step['value_id']} dtype mismatch: "
+                    f"plan={step['dtype']} table={arr.dtype.name}"
+                )
+            inputs.append({
+                "value_id": int(step["value_id"]),
+                "data": arr.tobytes(),
+            })
+    handle = bridge.run_tensor_plan_resident(plan, inputs, root.dtype)
+    buffer_id = numpy_buffer_table.new_unmaterialized_buffer(root.shape, root.dtype)
+    gpu_buffer_table.register(buffer_id, handle)
+    return buffer_id
+
+
+def materialize_gpu_buffer(
+    buffer_id: str,
+    *,
+    shape: Tuple[int, ...],
+    dtype: str,
+    numpy_buffer_table: Any,
+    gpu_buffer_table: GpuBufferTable,
+) -> np.ndarray:
+    handle = gpu_buffer_table.get(buffer_id)
+    if handle is None:
+        raise RealizationError(f"WebGPU buffer {buffer_id!r} is not registered")
+    data = gpu_buffer_table.bridge.materialize(handle, tuple(shape), dtype)
+    arr = np.frombuffer(data, dtype=np.dtype(dtype))
+    if shape:
+        arr = arr.reshape(shape)
+    out = np.array(arr, copy=True)
+    numpy_buffer_table.update(buffer_id, out)
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -552,6 +625,8 @@ def unregister_webgpu_bridge() -> None:
 __all__ = [
     "realize_webgpu",
     "realize_tensor_plan_webgpu",
+    "realize_tensor_plan_webgpu_resident",
+    "materialize_gpu_buffer",
     "register_webgpu_bridge",
     "unregister_webgpu_bridge",
     "get_registered_bridge",

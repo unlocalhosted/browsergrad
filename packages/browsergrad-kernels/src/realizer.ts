@@ -42,7 +42,7 @@ import {
   type FusedOp,
 } from "./kernels/fused_elementwise.js";
 import { flashAttentionDirect } from "./kernels/flash_attention.js";
-import { runTensorGpuPlan, type TensorPlanInput } from "./tensor_plan.js";
+import { runTensorGpuPlan, runTensorGpuPlanResident, type TensorPlanInput } from "./tensor_plan.js";
 import { KernelError, type KernelDevice } from "./types.js";
 
 type Handle = number;
@@ -232,6 +232,11 @@ export interface WebGpuRealizerBridge {
     inputs: readonly unknown[],
     dtype: string,
   ): Promise<Uint8Array>;
+  run_tensor_plan_resident(
+    plan: unknown,
+    inputs: readonly unknown[],
+    dtype: string,
+  ): Handle;
   /** Diagnostic — number of GPU buffers currently alive. */
   aliveHandleCount(): number;
 }
@@ -783,7 +788,10 @@ function bytesToFloat32(data: unknown, name: string): Float32Array {
   return new Float32Array(copy.buffer);
 }
 
-function normalizeTensorPlanInputs(inputs: readonly unknown[]): TensorPlanInput[] {
+function normalizeTensorPlanInputs(
+  inputs: readonly unknown[],
+  getHandle?: (handle: Handle, op: string) => BufferRecord,
+): TensorPlanInput[] {
   return inputs.map((input, i) => {
     if (input === null || typeof input !== "object" || Array.isArray(input)) {
       throw new KernelError(`WebGPU bridge: tensor plan input ${i} must be an object`);
@@ -792,6 +800,23 @@ function normalizeTensorPlanInputs(inputs: readonly unknown[]): TensorPlanInput[
     const rawId = record.valueId ?? record.value_id;
     if (typeof rawId !== "number" || !Number.isInteger(rawId)) {
       throw new KernelError(`WebGPU bridge: tensor plan input ${i}.valueId must be an integer`);
+    }
+    if (record.handle !== undefined) {
+      if (typeof record.handle !== "number" || !Number.isInteger(record.handle)) {
+        throw new KernelError(`WebGPU bridge: tensor plan input ${i}.handle must be an integer`);
+      }
+      if (!getHandle) {
+        throw new KernelError(`WebGPU bridge: tensor plan input ${i}.handle is unsupported here`);
+      }
+      const rec = getHandle(record.handle, `tensor_plan[input${i}]`);
+      assertF32(rec.dtype, `tensor_plan[input${i}]`);
+      return {
+        valueId: rawId,
+        resident: {
+          buffer: rec.buffer,
+          byteLength: rec.byteLength,
+        },
+      };
     }
     return {
       valueId: rawId,
@@ -1368,13 +1393,27 @@ export function createWebGpuRealizerBridge(
       const result = await runTensorGpuPlan(
         device,
         plan,
-        normalizeTensorPlanInputs(inputs),
+        normalizeTensorPlanInputs(inputs, get),
       );
       return new Uint8Array(
         result.data.buffer,
         result.data.byteOffset,
         result.data.byteLength,
       );
+    },
+
+    run_tensor_plan_resident(
+      plan: unknown,
+      inputs: readonly unknown[],
+      dtype: string,
+    ): Handle {
+      assertF32(dtype, "run_tensor_plan_resident");
+      const result = runTensorGpuPlanResident(
+        device,
+        plan,
+        normalizeTensorPlanInputs(inputs, get),
+      );
+      return mint(result.buffer, result.byteLength, result.shape, dtype);
     },
 
     aliveHandleCount(): number {

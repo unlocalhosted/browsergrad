@@ -51,6 +51,7 @@ class MockBridge:
         self.conv2d_backward_bias_count = 0
         self.cast_count = 0
         self.tensor_plan_count = 0
+        self.tensor_plan_resident_count = 0
         self.calls = []           # ordered list of (op, handle_id_in_or_out)
 
     def _mint(self, arr):
@@ -332,8 +333,11 @@ class MockBridge:
         provided = {}
         for item in inputs:
             value_id = item.get("value_id", item.get("valueId"))
-            data = item["data"]
-            provided[value_id] = np.frombuffer(data, dtype=np.dtype(dtype))
+            if "handle" in item:
+                provided[value_id] = self._handles[item["handle"]].reshape(-1)
+            else:
+                data = item["data"]
+                provided[value_id] = np.frombuffer(data, dtype=np.dtype(dtype))
         values = {}
         for step in plan["steps"]:
             value_id = step.get("value_id", step.get("valueId"))
@@ -910,6 +914,15 @@ class MockBridge:
         root_id = plan.get("root_id", plan.get("rootId"))
         self.calls.append(("run_tensor_plan", root_id))
         return values[root_id].astype(np.dtype(dtype), copy=False).tobytes()
+
+    def run_tensor_plan_resident(self, plan, inputs, dtype):
+        self.tensor_plan_resident_count += 1
+        data = self.run_tensor_plan(plan, inputs, dtype)
+        arr = np.frombuffer(data, dtype=np.dtype(dtype)).copy()
+        root_id = plan.get("root_id", plan.get("rootId"))
+        hh = self._mint(arr)
+        self.calls.append(("run_tensor_plan_resident", root_id, hh))
+        return hh
 `;
 
 describe("PRD-011.5 WebGPU realizer seam", () => {
@@ -1060,6 +1073,58 @@ plan = bg.gpu_plan_summary(out)
     expect(result.materialize).toBe(0);
     expect(result.root_id).toBe(result.step_ids[result.step_ids.length - 1]);
     expect(result.step_ids).toEqual([...result.step_ids.keys()]);
+  });
+
+  it("realize_tensor_plan_webgpu_resident keeps roots on GPU until explicit numpy boundary", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      before_numpy_materialize: number;
+      after_numpy_materialize: number;
+      tensor_plan: number;
+      tensor_plan_resident: number;
+      first_materialized: boolean;
+      second_materialized_before_numpy: boolean;
+      first_gpu_registered: boolean;
+      second_gpu_registered: boolean;
+      arr: number[][];
+    }>(`
+import browsergrad_jit as bg
+
+a = bg.tensor([[1.0, 2.0], [3.0, 4.0]])
+b = bg.tensor([[2.0, 0.0], [1.0, 2.0]])
+offset = bg.tensor([[3.0, 3.0], [3.0, 3.0]])
+first = bg.realize_tensor_plan_webgpu_resident(a @ b)
+first_id = first._uop.inputs[0].arg
+second = bg.realize_tensor_plan_webgpu_resident(first + offset)
+second_id = second._uop.inputs[0].arg
+bt = second._get_session().buffer_table
+gbt = bg._realize_webgpu.get_registered_gpu_buffer_table()
+before_numpy = _mock.materialize_count
+arr = second.numpy()
+{
+    "before_numpy_materialize": before_numpy,
+    "after_numpy_materialize": _mock.materialize_count,
+    "tensor_plan": _mock.tensor_plan_count,
+    "tensor_plan_resident": _mock.tensor_plan_resident_count,
+    "first_materialized": bt.is_materialized(first_id),
+    "second_materialized_before_numpy": before_numpy > 0,
+    "first_gpu_registered": gbt.has(first_id),
+    "second_gpu_registered": gbt.has(second_id),
+    "arr": arr.tolist(),
+}
+`);
+    expect(result.before_numpy_materialize).toBe(0);
+    expect(result.after_numpy_materialize).toBe(1);
+    expect(result.tensor_plan).toBe(2);
+    expect(result.tensor_plan_resident).toBe(2);
+    expect(result.first_materialized).toBe(false);
+    expect(result.second_materialized_before_numpy).toBe(false);
+    expect(result.first_gpu_registered).toBe(true);
+    expect(result.second_gpu_registered).toBe(true);
+    expect(result.arr).toEqual([
+      [7, 7],
+      [13, 11],
+    ]);
   });
 
   it("realize_tensor_plan_webgpu handles reshape, permute, reduce, and broadcast plan ops", async () => {

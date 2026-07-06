@@ -21,7 +21,7 @@ messages when callers break them.
 """
 
 from __future__ import annotations
-from typing import Iterator, Optional
+from typing import Iterator, Optional, Tuple
 import uuid
 
 import numpy as np
@@ -42,10 +42,11 @@ class BufferTable:
     purely opaque.
     """
 
-    __slots__ = ("_buffers", "_session_token")
+    __slots__ = ("_buffers", "_metadata", "_session_token")
 
     def __init__(self) -> None:
-        self._buffers: dict[str, np.ndarray] = {}
+        self._buffers: dict[str, Optional[np.ndarray]] = {}
+        self._metadata: dict[str, Tuple[Tuple[int, ...], str]] = {}
         # A token tagging this table — used to detect accidental cross-session
         # UOp reuse. Two BufferTables in the same process have different
         # tokens; if a UOp built against session A is realized in session B,
@@ -84,6 +85,31 @@ class BufferTable:
                 f"buffer_id {buffer_id!r} already registered in this session"
             )
         self._buffers[buffer_id] = array
+        self._metadata[buffer_id] = (tuple(array.shape), array.dtype.name)
+        return buffer_id
+
+    def new_unmaterialized_buffer(
+        self,
+        shape: Tuple[int, ...],
+        dtype: str,
+        name: Optional[str] = None,
+    ) -> str:
+        """Reserve a buffer id whose bytes currently live outside NumPy.
+
+        Used by explicit WebGPU-resident tensor-plan realization. CPU
+        realization refuses until the owner materializes bytes back through
+        `update()`.
+        """
+        if name is not None:
+            buffer_id = f"{self._session_token}:{name}"
+        else:
+            buffer_id = f"{self._session_token}:{uuid.uuid4().hex[:10]}"
+        if buffer_id in self._buffers:
+            raise BufferTableError(
+                f"buffer_id {buffer_id!r} already registered in this session"
+            )
+        self._buffers[buffer_id] = None
+        self._metadata[buffer_id] = (tuple(shape), np.dtype(dtype).name)
         return buffer_id
 
     def get(self, buffer_id: str) -> np.ndarray:
@@ -105,7 +131,23 @@ class BufferTable:
                 f"unknown buffer_id {buffer_id!r} in this session. "
                 f"Was it cleared? (Currently {len(self._buffers)} buffers registered.)"
             )
-        return self._buffers[buffer_id]
+        arr = self._buffers[buffer_id]
+        if arr is None:
+            shape, dtype = self._metadata[buffer_id]
+            raise BufferTableError(
+                f"buffer_id {buffer_id!r} is GPU-resident and not materialized "
+                f"in the CPU BufferTable yet (shape={shape}, dtype={dtype}). "
+                f"Call .numpy(), .item(), or realize through a WebGPU path."
+            )
+        return arr
+
+    def is_materialized(self, buffer_id: str) -> bool:
+        return buffer_id in self._buffers and self._buffers[buffer_id] is not None
+
+    def metadata(self, buffer_id: str) -> Tuple[Tuple[int, ...], str]:
+        if buffer_id not in self._metadata:
+            raise BufferTableError(f"unknown buffer_id {buffer_id!r} in this session")
+        return self._metadata[buffer_id]
 
     def update(self, buffer_id: str, array: np.ndarray) -> None:
         """Replace the array for `buffer_id`. Used by STORE on optimizer
@@ -117,16 +159,16 @@ class BufferTable:
             raise BufferTableError(
                 f"cannot update unknown buffer_id {buffer_id!r}"
             )
-        existing = self._buffers[buffer_id]
-        if existing.shape != array.shape:
+        expected_shape, expected_dtype = self._metadata[buffer_id]
+        if expected_shape != tuple(array.shape):
             raise BufferTableError(
                 f"shape mismatch on update of {buffer_id!r}: "
-                f"existing {existing.shape}, new {array.shape}"
+                f"existing {expected_shape}, new {array.shape}"
             )
-        if existing.dtype != array.dtype:
+        if expected_dtype != array.dtype.name:
             raise BufferTableError(
                 f"dtype mismatch on update of {buffer_id!r}: "
-                f"existing {existing.dtype}, new {array.dtype}"
+                f"existing {expected_dtype}, new {array.dtype}"
             )
         self._buffers[buffer_id] = array
 
@@ -138,6 +180,7 @@ class BufferTable:
                 f"cannot evict unknown buffer_id {buffer_id!r}"
             )
         del self._buffers[buffer_id]
+        self._metadata.pop(buffer_id, None)
 
     def __len__(self) -> int:
         return len(self._buffers)

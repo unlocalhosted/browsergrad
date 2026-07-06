@@ -184,9 +184,14 @@ Plus the realizer-tier API:
   the snake_case `browsergrad-jit` plan payload, keeps intermediates
   resident, and materializes only the declared root, matching the GPU-native
   direction.
+- `runTensorGpuPlanResident` — same executor, but returns an owned resident
+  root `GPUBuffer`; bridge inputs can be host bytes or existing resident
+  handles.
 - `WebGpuRealizerBridge.run_tensor_plan` — one graph-level bridge call from JIT
   plan payload + seed buffers into `runTensorGpuPlan`; avoids legacy per-op
   bridge dispatch for supported primitive tensor plans.
+- `WebGpuRealizerBridge.run_tensor_plan_resident` — graph-level bridge call
+  that mints a resident root handle for `browsergrad-jit` follow-on plans.
 
 ## Surface inventory — `browsergrad-runtime`
 
@@ -252,7 +257,7 @@ All 16 PRDs land at v0:
 
 | Item | Reason |
 |---|---|
-| **Default `.backward()` through GPU realizer** | Default `.backward()` still uses CPU mutation. Explicit `loss.backward(device="webgpu")` realizes symbolic leaf-gradient roots through `run_tensor_plan` and refuses closure-only graphs; `.grad` is still materialized back to CPU tensors. `Optimizer.step(device="webgpu")` runs update math through tensor-plan WebGPU, then materializes params/state back to CPU buffers. |
+| **Default `.backward()` through GPU realizer** | Default `.backward()` still uses CPU mutation. Explicit `loss.backward(device="webgpu")` realizes symbolic leaf-gradient roots through `run_tensor_plan` and refuses closure-only graphs; `.grad` is still materialized back to CPU tensors. `Optimizer.step(device="webgpu")` runs update math through tensor-plan WebGPU, then materializes params/state back to CPU buffers. Explicit `realize_tensor_plan_webgpu_resident(...)` can keep tensor-plan roots GPU-resident until `.numpy()` / `.item()`, but default training storage is still CPU-owned. |
 | **f16/bf16 cast kernels** | Future work — current CAST handler is f32→f32 only. |
 | **Primitive/WebGPU ConvTranspose in `browsergrad-jit`** | Lazy `browsergrad-jit` now has primitive Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward IR with CPU handlers, symbolic VJPs, and generic tensor-plan WebGPU lowering. |
 | **torch.cuda.\*, torch.compile, torch.fx** | Out of scope for `install_torch_alias`. Raises `AttributeError`. |

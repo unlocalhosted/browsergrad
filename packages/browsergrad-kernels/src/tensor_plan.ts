@@ -84,7 +84,11 @@ export interface TensorGpuPlan {
 
 export interface TensorPlanInput {
   readonly valueId: number;
-  readonly data: Float32Array;
+  readonly data?: Float32Array;
+  readonly resident?: {
+    readonly buffer: GPUBuffer;
+    readonly byteLength: number;
+  };
 }
 
 export interface TensorPlanRunResult {
@@ -92,6 +96,14 @@ export interface TensorPlanRunResult {
   readonly shape: readonly number[];
   readonly peakLiveBytes: number;
   readonly materializedValueId: number;
+}
+
+export interface TensorPlanResidentResult {
+  readonly buffer: GPUBuffer;
+  readonly byteLength: number;
+  readonly shape: readonly number[];
+  readonly peakLiveBytes: number;
+  readonly residentValueId: number;
 }
 
 type RawRecord = Record<string, unknown>;
@@ -156,14 +168,70 @@ export async function runTensorGpuPlan(
   rawPlan: TensorGpuPlan | unknown,
   inputs: readonly TensorPlanInput[],
 ): Promise<TensorPlanRunResult> {
+  const { root, rootMeta, owned, peakLiveBytes, rootId } = executeTensorGpuPlan(
+    device,
+    rawPlan,
+    inputs,
+  );
+  try {
+    const data = await materializeFloat32(device, root.buffer, root.byteLength);
+    return {
+      data,
+      shape: rootMeta.shape,
+      peakLiveBytes,
+      materializedValueId: rootId,
+    };
+  } finally {
+    for (const buffer of owned) buffer.destroy();
+  }
+}
+
+export function runTensorGpuPlanResident(
+  device: KernelDevice,
+  rawPlan: TensorGpuPlan | unknown,
+  inputs: readonly TensorPlanInput[],
+): TensorPlanResidentResult {
+  const { root, rootMeta, owned, peakLiveBytes, rootId } = executeTensorGpuPlan(
+    device,
+    rawPlan,
+    inputs,
+  );
+  if (!owned.has(root.buffer)) {
+    for (const buffer of owned) buffer.destroy();
+    throw new KernelError(
+      `tensor plan root ${rootId} aliases an input buffer; resident output requires an owned root`,
+    );
+  }
+  owned.delete(root.buffer);
+  for (const buffer of owned) buffer.destroy();
+  return {
+    buffer: root.buffer,
+    byteLength: root.byteLength,
+    shape: rootMeta.shape,
+    peakLiveBytes,
+    residentValueId: rootId,
+  };
+}
+
+function executeTensorGpuPlan(
+  device: KernelDevice,
+  rawPlan: TensorGpuPlan | unknown,
+  inputs: readonly TensorPlanInput[],
+): {
+  readonly root: ResidentValue;
+  readonly rootMeta: TensorPlanBuffer;
+  readonly owned: Set<GPUBuffer>;
+  readonly peakLiveBytes: number;
+  readonly rootId: number;
+} {
   const plan = normalizeTensorGpuPlan(rawPlan);
   validatePlan(plan);
-  const inputData = new Map<number, Float32Array>();
+  const inputData = new Map<number, TensorPlanInput>();
   for (const input of inputs) {
     if (inputData.has(input.valueId)) {
       throw new KernelError(`tensor plan input ${input.valueId} provided twice`);
     }
-    inputData.set(input.valueId, input.data);
+    inputData.set(input.valueId, input);
   }
 
   const buffersByValue = new Map<number, TensorPlanBuffer>();
@@ -178,37 +246,51 @@ export async function runTensorGpuPlan(
       values.set(step.valueId, value);
       if (value.owns) owned.add(value.buffer);
     }
-
-    const root = values.get(plan.rootId);
-    const rootMeta = buffersByValue.get(plan.rootId);
-    if (!root || !rootMeta) {
-      throw new KernelError(`tensor plan root ${plan.rootId} was not produced`);
-    }
-    const data = await materializeFloat32(device, root.buffer, root.byteLength);
-    return {
-      data,
-      shape: rootMeta.shape,
-      peakLiveBytes: plan.peakLiveBytes,
-      materializedValueId: plan.rootId,
-    };
-  } finally {
+  } catch (err) {
     for (const buffer of owned) buffer.destroy();
+    throw err;
   }
+
+  const root = values.get(plan.rootId);
+  const rootMeta = buffersByValue.get(plan.rootId);
+  if (!root || !rootMeta) {
+    for (const buffer of owned) buffer.destroy();
+    throw new KernelError(`tensor plan root ${plan.rootId} was not produced`);
+  }
+  return {
+    root,
+    rootMeta,
+    owned,
+    peakLiveBytes: plan.peakLiveBytes,
+    rootId: plan.rootId,
+  };
 }
 
 function executeStep(
   device: KernelDevice,
   step: TensorPlanStep,
   values: Map<number, ResidentValue>,
-  inputData: Map<number, Float32Array>,
+  inputData: Map<number, TensorPlanInput>,
 ): ResidentValue {
   switch (step.op) {
     case "BUFFER": {
-      const data = inputData.get(step.valueId);
-      if (!data) throw new KernelError(`tensor plan missing BUFFER input ${step.valueId}`);
-      validateNumel(data.length, step.shape, `BUFFER ${step.valueId}`);
-      const buffer = uploadFloat32(device, data);
-      return { buffer, shape: step.shape, owns: true, byteLength: data.byteLength };
+      const input = inputData.get(step.valueId);
+      if (!input) throw new KernelError(`tensor plan missing BUFFER input ${step.valueId}`);
+      if (input.resident) {
+        validateNumel(input.resident.byteLength / 4, step.shape, `BUFFER ${step.valueId}`);
+        return {
+          buffer: input.resident.buffer,
+          shape: step.shape,
+          owns: false,
+          byteLength: input.resident.byteLength,
+        };
+      }
+      if (!input.data) {
+        throw new KernelError(`tensor plan BUFFER ${step.valueId} input has neither data nor resident buffer`);
+      }
+      validateNumel(input.data.length, step.shape, `BUFFER ${step.valueId}`);
+      const buffer = uploadFloat32(device, input.data);
+      return { buffer, shape: step.shape, owns: true, byteLength: input.data.byteLength };
     }
     case "LOAD": {
       const src = requireValue(values, step.inputIds[0], step.op);

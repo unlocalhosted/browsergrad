@@ -84,9 +84,12 @@ lowering.
 
 `bg.realize_tensor_plan_webgpu(tensor)` sends that canonical plan through one
 generic WebGPU bridge call (`run_tensor_plan`) instead of walking legacy per-op
-bridge methods. Current runtime coverage is f32 BUFFER/LOAD/2-D MATMUL and
-elementwise chains, RESHAPE, PERMUTE, BROADCAST_TO, and REDUCE(sum/mean) rank
-<= 4, plus Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm forward/backward and functional
+bridge methods. `bg.realize_tensor_plan_webgpu_resident(tensor)` uses
+`run_tensor_plan_resident` and returns a TensorProxy whose root stays in a
+registered GPUBuffer until `.numpy()` / `.item()` materialization. Current
+runtime coverage is f32 BUFFER/LOAD/2-D MATMUL and elementwise chains, RESHAPE,
+PERMUTE, BROADCAST_TO, and REDUCE(sum/mean) rank <= 4, plus
+Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm forward/backward and functional
 SGD/Adam/AdamW updates. `Optimizer.step(device="webgpu")` uses the same
 tensor-plan path for SGD without momentum, Adam, and AdamW, then writes the
 materialized result back to CPU buffers; fully resident optimizer state remains

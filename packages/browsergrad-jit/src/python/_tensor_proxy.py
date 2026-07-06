@@ -42,6 +42,7 @@ import numpy as np
 
 from ._ir import (
     UOp,
+    OP_BUFFER,
     OP_ADD, OP_MUL, OP_DIV, OP_NEG, OP_EXP, OP_LOG, OP_CMP,
     OP_MATMUL, OP_REDUCE, OP_RESHAPE, OP_PERMUTE, OP_SLICE, OP_PAD,
     OP_WHERE, OP_CAST, OP_CONST, OP_CUSTOM,
@@ -306,6 +307,7 @@ class TensorProxy:
     def _realize_array(self) -> np.ndarray:
         from ._realize import realize
         sess = self._get_session()
+        _materialize_gpu_inputs_for_cpu(self._uop, sess)
         return realize(self._uop, sess.buffer_table)
 
     def numpy(self) -> np.ndarray:
@@ -1650,6 +1652,57 @@ def from_numpy(
     buf_uop = buffer(bid, tuple(array.shape), array.dtype.name)
     load_uop = load(buf_uop)
     return TensorProxy(load_uop, session=session, requires_grad=requires_grad)
+
+
+def _from_buffer_id(
+    buffer_id: str,
+    shape: Tuple[int, ...],
+    dtype: str,
+    *,
+    session: Any,
+    requires_grad: bool = False,
+) -> "TensorProxy":
+    """Internal: wrap an existing BufferTable id as BUFFER+LOAD."""
+    from ._ir import buffer, load
+    buf_uop = buffer(buffer_id, tuple(shape), np.dtype(dtype).name)
+    load_uop = load(buf_uop)
+    return TensorProxy(load_uop, session=session, requires_grad=requires_grad)
+
+
+def _materialize_gpu_inputs_for_cpu(uop: UOp, session: Any) -> None:
+    """Populate CPU BufferTable entries for any GPU-only BUFFER leaves.
+
+    This is called only at explicit CPU materialization boundaries
+    (`.numpy()`, `.item()`, CPU fallback realization). It keeps WebGPU-resident
+    tensor-plan results resident while allowing existing CPU semantics to work
+    once the user asks for host data.
+    """
+    try:
+        from ._ir import toposort
+        from ._realize_webgpu import (
+            get_registered_gpu_buffer_table,
+            materialize_gpu_buffer,
+        )
+    except Exception:
+        return
+    gbt = get_registered_gpu_buffer_table()
+    if gbt is None:
+        return
+    bt = session.buffer_table
+    for node in toposort(uop):
+        if node.op != OP_BUFFER:
+            continue
+        buffer_id = node.arg
+        if bt.is_materialized(buffer_id) or not gbt.has(buffer_id):
+            continue
+        shape, dtype = bt.metadata(buffer_id)
+        materialize_gpu_buffer(
+            buffer_id,
+            shape=shape,
+            dtype=dtype,
+            numpy_buffer_table=bt,
+            gpu_buffer_table=gbt,
+        )
 
 
 def tensor(
