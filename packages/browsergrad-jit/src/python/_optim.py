@@ -8,10 +8,11 @@ Both optimizers follow PyTorch's `torch.optim` semantics:
   - `step()` reads each parameter's .grad and updates the parameter's
     underlying buffer in place via the BufferTable.
 
-We don't fully decompose the optimizer math into IR ops in v0 — the
-update is a single CUSTOM-shape NumPy walk per parameter. PRD-005's
-critique calls out per-shape optimizer-trace caching as a P1 follow-up
-once the IR layer supports the in-place STORE pattern cleanly.
+CPU `step()` keeps the original NumPy update path. `step(device="webgpu")`
+routes supported optimizer math through primitive update IR and the tensor-plan
+WebGPU bridge, then writes the materialized result back to the CPU BufferTable.
+That is not full resident optimizer state yet, but it keeps optimizer math on
+the canonical GPU IR path instead of adding per-optimizer bridge calls.
 """
 
 from __future__ import annotations
@@ -29,8 +30,36 @@ from ._ir import (
     OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
 )
-from ._tensor_proxy import TensorProxy
+from ._tensor_proxy import TensorProxy, from_numpy
 from ._errors import RealizationError, ShapeError
+
+
+def _normalize_step_device(device: Optional[str]) -> str:
+    if device is None:
+        return "cpu"
+    out = str(device).lower()
+    if out in ("gpu", "tensor_plan_webgpu"):
+        out = "webgpu"
+    if out not in ("cpu", "webgpu"):
+        raise ValueError(
+            f"optimizer.step(device=...): expected 'cpu' or 'webgpu', got {device!r}"
+        )
+    return out
+
+
+def _realize_update_webgpu(tensor: TensorProxy) -> np.ndarray:
+    from ._realize_webgpu import get_registered_gpu_buffer_table, realize_tensor_plan_webgpu
+    gbt = get_registered_gpu_buffer_table()
+    if gbt is None:
+        raise RealizationError(
+            "optimizer.step(device='webgpu') requires a registered WebGPU bridge. "
+            "Call browsergrad_jit.register_webgpu_bridge(...) first."
+        )
+    return realize_tensor_plan_webgpu(
+        tensor._uop,
+        numpy_buffer_table=tensor._get_session().buffer_table,
+        gpu_buffer_table=gbt,
+    )
 
 
 def _param_buffer_id(p: TensorProxy) -> str:
@@ -231,7 +260,7 @@ class Optimizer:
         for p in self._params:
             p.grad = None
 
-    def step(self) -> None:
+    def step(self, device: Optional[str] = None) -> None:
         raise NotImplementedError
 
 
@@ -259,7 +288,30 @@ class SGD(Optimizer):
         # Momentum buffers per parameter — indexed by Parameter identity.
         self._velocity: dict[int, np.ndarray] = {}
 
-    def step(self) -> None:
+    def step(self, device: Optional[str] = None) -> None:
+        step_device = _normalize_step_device(device)
+        if step_device == "webgpu":
+            if self.momentum != 0.0:
+                raise RealizationError(
+                    "SGD.step(device='webgpu') does not support momentum yet. "
+                    "Use momentum=0, CPU step(), or functional optimizer IR."
+                )
+            for p in self._params:
+                if not p.requires_grad or p.grad is None:
+                    continue
+                updated = sgd_update(
+                    p,
+                    p.grad,
+                    lr=self.lr,
+                    weight_decay=self.weight_decay,
+                )
+                bid = _param_buffer_id(p)
+                sess = p._get_session()
+                current = sess.buffer_table.get(bid)
+                new_value = _realize_update_webgpu(updated)
+                sess.buffer_table.update(bid, new_value.astype(current.dtype, copy=False))
+            return
+
         for p in self._params:
             if not p.requires_grad or p.grad is None:
                 continue
@@ -303,8 +355,40 @@ class Adam(Optimizer):
         self._m: dict[int, np.ndarray] = {}
         self._v: dict[int, np.ndarray] = {}
 
-    def step(self) -> None:
+    def step(self, device: Optional[str] = None) -> None:
         self._step += 1
+        if _normalize_step_device(device) == "webgpu":
+            for p in self._params:
+                if not p.requires_grad or p.grad is None:
+                    continue
+                bid = _param_buffer_id(p)
+                sess = p._get_session()
+                current = sess.buffer_table.get(bid)
+                pid = id(p)
+                if pid not in self._m:
+                    self._m[pid] = np.zeros_like(current)
+                    self._v[pid] = np.zeros_like(current)
+                m = from_numpy(self._m[pid], session=sess)
+                v = from_numpy(self._v[pid], session=sess)
+                new_p, new_m, new_v = adam_update(
+                    p,
+                    p.grad,
+                    m,
+                    v,
+                    lr=self.lr,
+                    betas=(self.beta1, self.beta2),
+                    eps=self.eps,
+                    weight_decay=self.weight_decay,
+                    step=self._step,
+                )
+                p_arr = _realize_update_webgpu(new_p)
+                m_arr = _realize_update_webgpu(new_m)
+                v_arr = _realize_update_webgpu(new_v)
+                self._m[pid] = m_arr.astype(current.dtype, copy=False)
+                self._v[pid] = v_arr.astype(current.dtype, copy=False)
+                sess.buffer_table.update(bid, p_arr.astype(current.dtype, copy=False))
+            return
+
         for p in self._params:
             if not p.requires_grad or p.grad is None:
                 continue
@@ -330,8 +414,40 @@ class AdamW(Adam):
     """Adam with decoupled weight decay (the right Adam most papers actually
     use). Matches torch.optim.AdamW."""
 
-    def step(self) -> None:
+    def step(self, device: Optional[str] = None) -> None:
         self._step += 1
+        if _normalize_step_device(device) == "webgpu":
+            for p in self._params:
+                if not p.requires_grad or p.grad is None:
+                    continue
+                bid = _param_buffer_id(p)
+                sess = p._get_session()
+                current = sess.buffer_table.get(bid)
+                pid = id(p)
+                if pid not in self._m:
+                    self._m[pid] = np.zeros_like(current)
+                    self._v[pid] = np.zeros_like(current)
+                m = from_numpy(self._m[pid], session=sess)
+                v = from_numpy(self._v[pid], session=sess)
+                new_p, new_m, new_v = adamw_update(
+                    p,
+                    p.grad,
+                    m,
+                    v,
+                    lr=self.lr,
+                    betas=(self.beta1, self.beta2),
+                    eps=self.eps,
+                    weight_decay=self.weight_decay,
+                    step=self._step,
+                )
+                p_arr = _realize_update_webgpu(new_p)
+                m_arr = _realize_update_webgpu(new_m)
+                v_arr = _realize_update_webgpu(new_v)
+                self._m[pid] = m_arr.astype(current.dtype, copy=False)
+                self._v[pid] = v_arr.astype(current.dtype, copy=False)
+                sess.buffer_table.update(bid, p_arr.astype(current.dtype, copy=False))
+            return
+
         for p in self._params:
             if not p.requires_grad or p.grad is None:
                 continue

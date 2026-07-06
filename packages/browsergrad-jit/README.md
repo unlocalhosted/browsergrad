@@ -72,7 +72,9 @@ remains a `CUSTOM` realization path with explicit NumPy VJPs.
 `bg.optim.sgd_update(...)`, `bg.optim.adam_update(...)`, and
 `bg.optim.adamw_update(...)` are functional optimizer/update IR nodes and lower
 through the same tensor-plan WebGPU path. They return updated tensors/state;
-mutating `Optimizer.step()` remains CPU for now.
+`Optimizer.step(device="webgpu")` uses those IR nodes for SGD without momentum,
+Adam, and AdamW, then writes the materialized result back to CPU parameter/state
+buffers. Fully resident optimizer state remains future work.
 
 `bg.gpu_plan_summary(tensor)` and `bg.jit.gpu_plan.*` expose the first
 compiler-facing tensor-IR execution plan: scheduled primitive UOps, buffer
@@ -85,7 +87,9 @@ generic WebGPU bridge call (`run_tensor_plan`) instead of walking legacy per-op
 bridge methods. Current runtime coverage is f32 BUFFER/LOAD/2-D MATMUL and
 elementwise chains, RESHAPE, PERMUTE, BROADCAST_TO, and REDUCE(sum/mean) rank
 <= 4, plus Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm forward/backward and functional
-SGD/Adam/AdamW updates; mutating optimizer-step tensor-plan codegen remains
+SGD/Adam/AdamW updates. `Optimizer.step(device="webgpu")` uses the same
+tensor-plan path for SGD without momentum, Adam, and AdamW, then writes the
+materialized result back to CPU buffers; fully resident optimizer state remains
 future work.
 
 ### Gradient control
@@ -235,9 +239,10 @@ Anything in the **Internal** row will break across minor releases. File an issue
 
 - Full PyTorch API parity.
 - CUDA device emulation.
-- GPU-resident `.backward()` / mutating optimizer steps. WebGPU realization can
-  run selected backward IR roots and functional SGD/Adam/AdamW updates, but autograd
-  mutation and `Optimizer.step()` remain CPU.
+- GPU-resident `.backward()` / optimizer state. Explicit
+  `loss.backward(device="webgpu")` and `Optimizer.step(device="webgpu")` use
+  tensor-plan WebGPU, then materialize `.grad`, params, and state back to CPU
+  buffers; a fully resident training loop remains future work.
 - Tensor layout/stride compatibility for contiguity teaching.
 - PyTorch-native checkpoint file compatibility.
 

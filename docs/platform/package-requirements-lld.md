@@ -269,8 +269,8 @@ Requirements:
 | JIT-006 | WebGPU realizer bridge supports forward opcodes and materializes at boundaries. | In | bridge/mock + real WebGPU tests through kernels |
 | JIT-007 | Custom WGSL kernels are cache-keyed, forward-only, and explicit. | In | custom kernel tests |
 | JIT-008 | ONNX export emits a supported subset and refuses unmappable ops. | In | ONNX tests |
-| JIT-009 | GPU-resident backward/optimizer steps. | Partial | Conv/LayerNorm backward roots, explicit `backward(device="webgpu")`, and functional SGD/Adam/AdamW update IR can lower through tensor-plan WebGPU; default CPU `.backward()`, CPU `.grad` materialization, mutating `Optimizer.step()`, resident optimizer state, and memory planner remain |
-| JIT-010 | Heavy CNN family parity with grad. | Partial | Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward are primitive IR with CPU handlers and symbolic VJPs; these CNN roots lower through generic f32 tensor-plan WebGPU; explicit `backward(device="webgpu")` can populate leaf grads through tensor-plan WebGPU; default CPU `.backward()` and optimizer residency remain |
+| JIT-009 | GPU-resident backward/optimizer steps. | Partial | Conv/LayerNorm backward roots, explicit `backward(device="webgpu")`, functional SGD/Adam/AdamW update IR, and explicit `Optimizer.step(device="webgpu")` can lower through tensor-plan WebGPU; default CPU `.backward()`, CPU `.grad`/optimizer-state materialization, resident optimizer state, and memory planner remain |
+| JIT-010 | Heavy CNN family parity with grad. | Partial | Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward are primitive IR with CPU handlers and symbolic VJPs; these CNN roots lower through generic f32 tensor-plan WebGPU; explicit `backward(device="webgpu")` can populate leaf grads through tensor-plan WebGPU; default CPU `.backward()` and full optimizer residency remain |
 | JIT-011 | Canonical tensor IR for core framework ops instead of `CUSTOM` GPU escape hatches. | In progress | Primitive IR ops for conv/norm/attention/optimizer updates, CPU handlers/refusals, VJPs where differentiable, GPU tensor-plan lowering, WebGPU lowering, refusal tests |
 | JIT-012 | `.numpy()`/`.item()` are the primary materialization boundaries for GPU paths. | Target | Residency tests proving params/activations/grads/intermediates stay in GPUBuffer until explicit readback |
 
@@ -296,8 +296,7 @@ LLD:
   These CNN forward/backward roots lower through `runTensorGpuPlan()` as generic
   plan ops. `loss.backward(device="webgpu")` realizes symbolic leaf-gradient
   roots through that same bridge and refuses closure-only graphs. Default CPU
-  `.backward()`, CPU `.grad` materialization, and optimizer residency remain
-  pending.
+  `.backward()` and CPU `.grad` materialization remain pending.
 - `nn.LayerNorm` / `F.layer_norm(...)` emit primitive `LAYER_NORM` IR and
   `LAYER_NORM_BACKWARD_*` symbolic gradient roots. CPU handlers remain the
   reference; forward/input-grad/weight-grad/bias-grad lower through
@@ -305,8 +304,9 @@ LLD:
 - `bg.optim.sgd_update(...)`, `bg.optim.adam_update(...)`, and
   `bg.optim.adamw_update(...)` emit primitive optimizer/update IR with NumPy
   handlers, vmap/ONNX refusals, tensor-plan lowering, and real WebGPU kernels.
-  This is functional update IR, not yet mutating `Optimizer.step()` or resident
-  optimizer state.
+  `Optimizer.step(device="webgpu")` uses those same update IR nodes for SGD
+  without momentum, Adam, and AdamW, then writes the materialized result back to
+  CPU parameter/state buffers. This is not yet resident optimizer state.
 - Future GPU-native work should promote core ops out of `CUSTOM` into primitive
   tensor IR. `CUSTOM` should remain for user-authored WGSL/lab kernels and
   temporary migration scaffolding, not the final path for framework ops.
@@ -528,15 +528,16 @@ through generic tensor-plan WebGPU. Explicit `loss.backward(device="webgpu")`
 can populate leaf `.grad` values by realizing symbolic gradient roots through
 the tensor-plan bridge. Default `.backward()` still mutates CPU `.grad` buffers,
 the WebGPU backward path still materializes `.grad` to CPU tensors, LayerNorm
-backward roots and functional SGD/Adam/AdamW updates can run as tensor-plan
-WebGPU, and mutating optimizer steps are still CPU.
+backward roots, functional SGD/Adam/AdamW updates, and explicit
+`Optimizer.step(device="webgpu")` can run as tensor-plan WebGPU. Optimizer
+params/state are still materialized back to CPU buffers after the GPU update.
 
 Remove the limit when:
 
 - Make default `.backward()` select the graph backend when tensors/params are
   GPU-resident.
 - Store `.grad` as GPU-resident buffers until explicit materialization.
-- Add GPU-resident optimizer state and mutating `Optimizer.step()` lowering.
+- Add GPU-resident optimizer state for mutating `Optimizer.step()`.
 - Add a real memory planner/buffer pool for gradient and optimizer lifetimes.
 - Broaden scheduler/codegen beyond direct kernels when throughput matters.
 

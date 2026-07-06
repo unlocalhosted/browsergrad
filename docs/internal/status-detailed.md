@@ -102,8 +102,11 @@ the intended GPU materialization boundaries.
   `bg.optim.adamw_update(...)` emit functional
   optimizer/update IR and lower through generic tensor-plan WebGPU. They do
   not mutate params/state.
-- Remaining: default CPU `.backward()`, CPU materialization of `.grad`,
-  mutating optimizer-step residency, and resident optimizer state.
+- `Optimizer.step(device="webgpu")` uses the same update IR for SGD without
+  momentum, Adam, and AdamW, then writes the materialized result back to CPU
+  parameter/state buffers.
+- Remaining: default CPU `.backward()`, CPU materialization of `.grad`, and
+  resident optimizer state.
 
 ### Tiled GEMM + fused codegen + GPU cast (PRD-012a)
 - `matmulTiledDirect` — 16×16 tiled GEMM (workgroup-shared A/B tiles). Closes most of the gap PRD-012 was claiming via "megakernels".
@@ -249,7 +252,7 @@ All 16 PRDs land at v0:
 
 | Item | Reason |
 |---|---|
-| **Default `.backward()` through GPU realizer** | Default `.backward()` still uses CPU mutation. Explicit `loss.backward(device="webgpu")` realizes symbolic leaf-gradient roots through `run_tensor_plan` and refuses closure-only graphs; `.grad` is still materialized back to CPU tensors. Mutating `Optimizer.step()` is not GPU-resident. |
+| **Default `.backward()` through GPU realizer** | Default `.backward()` still uses CPU mutation. Explicit `loss.backward(device="webgpu")` realizes symbolic leaf-gradient roots through `run_tensor_plan` and refuses closure-only graphs; `.grad` is still materialized back to CPU tensors. `Optimizer.step(device="webgpu")` runs update math through tensor-plan WebGPU, then materializes params/state back to CPU buffers. |
 | **f16/bf16 cast kernels** | Future work — current CAST handler is f32→f32 only. |
 | **Primitive/WebGPU ConvTranspose in `browsergrad-jit`** | Lazy `browsergrad-jit` now has primitive Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward IR with CPU handlers, symbolic VJPs, and generic tensor-plan WebGPU lowering. |
 | **torch.cuda.\*, torch.compile, torch.fx** | Out of scope for `install_torch_alias`. Raises `AttributeError`. |

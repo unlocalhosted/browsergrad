@@ -1312,6 +1312,105 @@ v_gpu = bg.realize_tensor_plan_webgpu(new_v)
     expect(result.v_ops).toContain("ADAM_UPDATE_V");
   });
 
+  it("Optimizer.step(device='webgpu') routes SGD/Adam/AdamW updates through tensor-plan WebGPU", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      sgd_diff: number;
+      adam_p_diff: number;
+      adam_m_diff: number;
+      adam_v_diff: number;
+      adamw_p_diff: number;
+      adamw_m_diff: number;
+      adamw_v_diff: number;
+      tensor_plan: number;
+      upload: number;
+      materialize: number;
+      legacy_matmul: number;
+    }>(`
+import browsergrad_jit as bg
+import numpy as np
+
+p_np = np.array([[0.5, -1.0, 2.0], [1.5, -0.25, 0.75]], dtype=np.float32)
+g1_np = np.array([[0.1, -0.2, 0.3], [0.4, -0.5, 0.6]], dtype=np.float32)
+g2_np = np.array([[-0.3, 0.2, -0.1], [0.05, -0.15, 0.25]], dtype=np.float32)
+
+def run_sgd(device=None):
+    p = bg.from_numpy(p_np.copy(), requires_grad=True)
+    p.grad = bg.from_numpy(g1_np.copy())
+    opt = bg.optim.SGD([p], lr=0.125, weight_decay=0.01)
+    if device is None:
+        opt.step()
+    else:
+        opt.step(device=device)
+    return p.numpy()
+
+def run_adam(cls, device=None):
+    p = bg.from_numpy(p_np.copy(), requires_grad=True)
+    opt = cls([p], lr=0.01, betas=(0.8, 0.95), eps=1e-6, weight_decay=0.02)
+    for grad_np in (g1_np, g2_np):
+        p.grad = bg.from_numpy(grad_np.copy())
+        if device is None:
+            opt.step()
+        else:
+            opt.step(device=device)
+    return p.numpy(), opt._m[id(p)], opt._v[id(p)]
+
+sgd_cpu = run_sgd()
+sgd_gpu = run_sgd("webgpu")
+
+adam_cpu_p, adam_cpu_m, adam_cpu_v = run_adam(bg.optim.Adam)
+adam_gpu_p, adam_gpu_m, adam_gpu_v = run_adam(bg.optim.Adam, "webgpu")
+
+adamw_cpu_p, adamw_cpu_m, adamw_cpu_v = run_adam(bg.optim.AdamW)
+adamw_gpu_p, adamw_gpu_m, adamw_gpu_v = run_adam(bg.optim.AdamW, "webgpu")
+
+{
+    "sgd_diff": float(np.max(np.abs(sgd_gpu - sgd_cpu))),
+    "adam_p_diff": float(np.max(np.abs(adam_gpu_p - adam_cpu_p))),
+    "adam_m_diff": float(np.max(np.abs(adam_gpu_m - adam_cpu_m))),
+    "adam_v_diff": float(np.max(np.abs(adam_gpu_v - adam_cpu_v))),
+    "adamw_p_diff": float(np.max(np.abs(adamw_gpu_p - adamw_cpu_p))),
+    "adamw_m_diff": float(np.max(np.abs(adamw_gpu_m - adamw_cpu_m))),
+    "adamw_v_diff": float(np.max(np.abs(adamw_gpu_v - adamw_cpu_v))),
+    "tensor_plan": _mock.tensor_plan_count,
+    "upload": _mock.upload_count,
+    "materialize": _mock.materialize_count,
+    "legacy_matmul": _mock.matmul_count,
+}
+`);
+    expect(result.sgd_diff).toBeLessThan(1e-6);
+    expect(result.adam_p_diff).toBeLessThan(1e-5);
+    expect(result.adam_m_diff).toBeLessThan(1e-6);
+    expect(result.adam_v_diff).toBeLessThan(1e-6);
+    expect(result.adamw_p_diff).toBeLessThan(1e-5);
+    expect(result.adamw_m_diff).toBeLessThan(1e-6);
+    expect(result.adamw_v_diff).toBeLessThan(1e-6);
+    expect(result.tensor_plan).toBe(13);
+    expect(result.upload).toBe(0);
+    expect(result.materialize).toBe(0);
+    expect(result.legacy_matmul).toBe(0);
+  });
+
+  it("SGD.step(device='webgpu') refuses momentum until momentum state is GPU IR", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{ message: string; tensor_plan: number }>(`
+import browsergrad_jit as bg
+import numpy as np
+
+p = bg.from_numpy(np.array([1.0, -2.0], dtype=np.float32), requires_grad=True)
+p.grad = bg.from_numpy(np.array([0.25, -0.5], dtype=np.float32))
+opt = bg.optim.SGD([p], lr=0.1, momentum=0.9)
+try:
+    opt.step(device="webgpu")
+    msg = "no_error"
+except Exception as e:
+    msg = str(e)
+{"message": msg, "tensor_plan": _mock.tensor_plan_count}
+`);
+    expect(result.message).toMatch(/does not support momentum/);
+    expect(result.tensor_plan).toBe(0);
+  });
+
   it("realize_tensor_plan_webgpu runs LayerNorm forward/backward roots through generic plan path", async () => {
     const target = await getJitTarget();
     const result = await target.run<{
