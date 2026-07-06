@@ -2091,6 +2091,16 @@ __global__ void complexHelperPointwise(cufftComplex *a, cufftComplex *b, float s
   int i = threadIdx.x;
   a[i] = ComplexScale(ComplexMul(a[i], b[i]), scale);
 }`,
+  complexCuHelpers: `
+__global__ void complexCuHelpers(cuComplex *a, cuFloatComplex *b, float *out) {
+  int i = threadIdx.x;
+  cuComplex x = make_cuComplex(a[i].x, a[i].y);
+  cuFloatComplex y = make_cuFloatComplex(b[i].x, b[i].y);
+  cuComplex z = cuCaddf(cuCmulf(x, y), cuConjf(y));
+  cuComplex q = cuCdivf(z, make_cuComplex(2.0f, 0.0f));
+  a[i] = cuCsubf(q, make_cuComplex(1.0f, -1.0f));
+  out[i] = cuCabsf(a[i]) + cuCrealf(a[i]) + cuCimagf(a[i]);
+}`,
   subgroupScalarCompat: `
 __global__ void subgroupScalarCompat(float *x) {
   int idx = threadIdx.x;
@@ -12261,6 +12271,21 @@ const html = String.raw`<!doctype html>
             }),
             output: "a",
             expectedOutput: { type: "Float32Array", data: [-3.5, 8, -5.5, 26] },
+          },
+          {
+            name: "complex:cu-helper-builtins",
+            source: SOURCES.complexCuHelpers,
+            options: { workgroupSize: [2, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+            input: () => ({
+              buffers: {
+                a: new Float32Array([1, 2, 3, 4]),
+                b: new Float32Array([5, 6, 7, 8]),
+                out: new Float32Array(2),
+              },
+            }),
+            output: "a",
+            expectedOutput: { type: "Float32Array", data: [-2, 6, -3, 23] },
           },
           {
             name: "compat:subgroup-scalar-mode",

@@ -6795,6 +6795,36 @@ __global__ void pointwise(cufftComplex *a, cufftComplex *b, float scale) {
     expect([...result.buffers.a as Float32Array]).toEqual([-3.5, 8, -5.5, 26]);
   });
 
+  it("lowers cuComplex helper builtins natively", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void cuComplexHelpers(cuComplex *a, cuFloatComplex *b, float *out) {
+  int i = threadIdx.x;
+  cuComplex x = make_cuComplex(a[i].x, a[i].y);
+  cuFloatComplex y = make_cuFloatComplex(b[i].x, b[i].y);
+  cuComplex z = cuCaddf(cuCmulf(x, y), cuConjf(y));
+  cuComplex q = cuCdivf(z, make_cuComplex(2.0f, 0.0f));
+  a[i] = cuCsubf(q, make_cuComplex(1.0f, -1.0f));
+  out[i] = cuCabsf(a[i]) + cuCrealf(a[i]) + cuCimagf(a[i]);
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          a: new Float32Array([1, 2, 3, 4]),
+          b: new Float32Array([5, 6, 7, 8]),
+          out: new Float32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.wgsl).toContain("vec2<f32>(f32");
+    expect(compiled.wgsl).toContain("length(a[u32(i)])");
+    expect([...result.buffers.a as Float32Array]).toEqual([-2, 6, -3, 23]);
+    expect([...result.buffers.out as Float32Array]).toEqual([...Float32Array.from([Math.hypot(-2, 6) + 4, Math.hypot(-3, 23) + 20])]);
+  });
+
   it("lowers supported inline PTX fma statements", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void asmFma(const float *A, const float *B, float *out) {

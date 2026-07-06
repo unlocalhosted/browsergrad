@@ -5583,6 +5583,22 @@ function expressionValueTypeForEmit(expression: CudaLiteExpression, context: Emi
   return valueType;
 }
 
+function cuComplexCallReturnType(name: string | undefined): CudaLiteScalarType | undefined {
+  if (name === "cuCrealf" || name === "cuCimagf" || name === "cuCabsf") return "float";
+  if (
+    name === "make_cuComplex" ||
+    name === "make_cuFloatComplex" ||
+    name === "cuConjf" ||
+    name === "cuCaddf" ||
+    name === "cuCsubf" ||
+    name === "cuCmulf" ||
+    name === "cuCdivf"
+  ) {
+    return "complex64";
+  }
+  return undefined;
+}
+
 function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, context: EmitContext): CudaLiteScalarType | undefined {
   if (expression.kind === "number") {
     if (numberLiteralHasFloatSyntax(expression.raw)) return "float";
@@ -5600,6 +5616,8 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
   if (expression.kind === "cast") return expression.valueType;
   if (expression.kind === "call") {
     const name = expressionName(expression.callee);
+    const cuComplexReturnType = cuComplexCallReturnType(name);
+    if (cuComplexReturnType !== undefined) return cuComplexReturnType;
     if (name === "subgroupAny" || name === "subgroupAll") return "bool";
     if (name === "subgroupBallot") return "uint";
     if (expression.callee.kind === "member" && (expression.callee.property === "any" || expression.callee.property === "all")) return "bool";
@@ -6504,6 +6522,38 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return `normalize(${args[0] ?? "vec2<f32>()"})`;
     case "cross":
       return `cross(${args[0] ?? "vec3<f32>()"}, ${args[1] ?? "vec3<f32>()"})`;
+    case "make_cuComplex":
+    case "make_cuFloatComplex":
+      return `vec2<f32>(f32(${args[0] ?? "0"}), f32(${args[1] ?? "0"}))`;
+    case "cuCrealf":
+      return `(${args[0] ?? "vec2<f32>()"}).x`;
+    case "cuCimagf":
+      return `(${args[0] ?? "vec2<f32>()"}).y`;
+    case "cuCabsf": {
+      const a = args[0] ?? "vec2<f32>()";
+      return `length(${a})`;
+    }
+    case "cuConjf": {
+      const a = args[0] ?? "vec2<f32>()";
+      return `vec2<f32>((${a}).x, -(${a}).y)`;
+    }
+    case "cuCaddf": {
+      return `((${args[0] ?? "vec2<f32>()"}) + (${args[1] ?? "vec2<f32>()"}))`;
+    }
+    case "cuCsubf": {
+      return `((${args[0] ?? "vec2<f32>()"}) - (${args[1] ?? "vec2<f32>()"}))`;
+    }
+    case "cuCmulf": {
+      const a = args[0] ?? "vec2<f32>()";
+      const b = args[1] ?? "vec2<f32>()";
+      return `vec2<f32>(((${a}).x * (${b}).x - (${a}).y * (${b}).y), ((${a}).x * (${b}).y + (${a}).y * (${b}).x))`;
+    }
+    case "cuCdivf": {
+      const a = args[0] ?? "vec2<f32>()";
+      const b = args[1] ?? "vec2<f32>()";
+      const denom = `((${b}).x * (${b}).x + (${b}).y * (${b}).y)`;
+      return `vec2<f32>(((${a}).x * (${b}).x + (${a}).y * (${b}).y) / ${denom}, ((${a}).y * (${b}).x - (${a}).x * (${b}).y) / ${denom})`;
+    }
     case "curand_init": {
       const helper = curandStateAddressSpace(expression.args[3], context) === "storage" ? "bg_curand_init_storage" : "bg_curand_init";
       return `${helper}(u32(${args[0] ?? "0"}), u32(${args[1] ?? "0"}), u32(${args[2] ?? "0"}), ${args[3] ?? "&state"})`;

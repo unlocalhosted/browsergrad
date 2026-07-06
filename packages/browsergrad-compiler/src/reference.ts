@@ -2555,6 +2555,46 @@ function matrixTileIntegerValue(value: EvalValue, spec: MatrixTileResolvedSpec):
   return coerceMatrixTileValue(value, spec) | 0;
 }
 
+function evalCuComplexBuiltin(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  name: string | undefined,
+  context: ThreadContext,
+): EvalValue | undefined {
+  if (name === "make_cuComplex" || name === "make_cuFloatComplex") {
+    return {
+      kind: "complex64",
+      x: evalNumber(expression.args[0]!, context),
+      y: evalNumber(expression.args[1]!, context),
+    };
+  }
+  if (!isCuComplexBuiltin(name)) return undefined;
+  const a = valueAsComplex(evalExpression(expression.args[0]!, context), name ?? "cuComplex");
+  if (name === "cuCrealf") return a.x;
+  if (name === "cuCimagf") return a.y;
+  if (name === "cuCabsf") return Math.hypot(a.x, a.y);
+  if (name === "cuConjf") return { kind: "complex64", x: a.x, y: -a.y };
+  const b = valueAsComplex(evalExpression(expression.args[1]!, context), name ?? "cuComplex");
+  if (name === "cuCaddf") return { kind: "complex64", x: a.x + b.x, y: a.y + b.y };
+  if (name === "cuCsubf") return { kind: "complex64", x: a.x - b.x, y: a.y - b.y };
+  if (name === "cuCmulf") return { kind: "complex64", x: a.x * b.x - a.y * b.y, y: a.x * b.y + a.y * b.x };
+  if (name === "cuCdivf") {
+    const denom = b.x * b.x + b.y * b.y;
+    return { kind: "complex64", x: (a.x * b.x + a.y * b.y) / denom, y: (a.y * b.x - a.x * b.y) / denom };
+  }
+  return undefined;
+}
+
+function isCuComplexBuiltin(name: string | undefined): boolean {
+  return name === "cuCrealf" ||
+    name === "cuCimagf" ||
+    name === "cuCabsf" ||
+    name === "cuConjf" ||
+    name === "cuCaddf" ||
+    name === "cuCsubf" ||
+    name === "cuCmulf" ||
+    name === "cuCdivf";
+}
+
 function matrixTileRowsCols(tile: MatrixTileResolvedSpec): readonly [number, number] {
   if (tile.role === "matrix_a") return [tile.m, tile.k];
   if (tile.role === "matrix_b") return [tile.k, tile.n];
@@ -2593,6 +2633,8 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     const denominator = evalNumber(expression.args[1]!, context);
     return denominator === 0 ? 0 : Math.trunc((numerator + denominator - 1) / denominator);
   }
+  const complex = evalCuComplexBuiltin(expression, name, context);
+  if (complex !== undefined) return complex;
   if (name === "fill_1D_regs" || name === "fill_2D_regs" || name === "fill_3D_regs") {
     fillLocalArray(expression, context);
     return 0;

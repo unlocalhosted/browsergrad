@@ -210,6 +210,16 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["curand_uniform_double", [1, 1]],
   ["curand_normal", [1, 1]],
   ["curand_normal_double", [1, 1]],
+  ["make_cuComplex", [2, 2]],
+  ["make_cuFloatComplex", [2, 2]],
+  ["cuCrealf", [1, 1]],
+  ["cuCimagf", [1, 1]],
+  ["cuCabsf", [1, 1]],
+  ["cuConjf", [1, 1]],
+  ["cuCaddf", [2, 2]],
+  ["cuCsubf", [2, 2]],
+  ["cuCmulf", [2, 2]],
+  ["cuCdivf", [2, 2]],
   ["cudaDeviceSynchronize", [0, 0]],
   ["cudaStreamCreate", [1, 1]],
   ["cudaStreamCreateWithFlags", [2, 2]],
@@ -1745,6 +1755,12 @@ function validateCallExpression(
   if (isPointerIdentityCall(callName)) {
     return validatePointerIdentityCall(expression, callName, scope, diagnostics, walkExpression);
   }
+  if (isCuComplexBuiltin(callName)) {
+    validateCuComplexBuiltin(expression, callName, scope, diagnostics, walkExpression);
+    return isCuComplexScalarBuiltin(callName)
+      ? { kind: "scalar", valueType: "float" }
+      : { kind: "complex", valueType: "complex64" };
+  }
   if (CUDA_CACHE_HINT_LOADS.has(callName)) {
     const arg = expression.args[0];
     if (!arg) return { kind: "unknown" };
@@ -2754,7 +2770,7 @@ function deviceFunctionArityMessage(symbol: SymbolInfo): string {
 }
 
 function isFloat2ComplexCompatible(expected: CudaLiteScalarType | undefined, info: ExpressionInfo): boolean {
-  return expected === "float2" && (info.kind === "complex" || (info.kind === "vector" && info.valueType === "float2"));
+  return (expected === "float2" || expected === "complex64") && (info.kind === "complex" || (info.kind === "vector" && info.valueType === "float2"));
 }
 
 function deviceFunctionUsesGroupReduce(
@@ -3207,6 +3223,41 @@ function validateCurandStateAddress(
   if (info.kind !== "address") {
     diagnostics.push(error("curand-state-address", `${callName} expects a state address`, state.span));
   }
+}
+
+function validateCuComplexBuiltin(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  callName: string,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  if (callName === "make_cuComplex" || callName === "make_cuFloatComplex") {
+    for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return;
+  }
+  for (const arg of expression.args) {
+    const info = walkExpression(arg, scope);
+    if (info.kind === "unknown" || info.kind === "complex" || isFloat2ComplexCompatible("complex64", info)) continue;
+    diagnostics.push(error("unsupported-cufft", `${callName} expects cuComplex/cuFloatComplex or float2 operands`, arg.span));
+  }
+}
+
+function isCuComplexBuiltin(callName: string): boolean {
+  return callName === "make_cuComplex" ||
+    callName === "make_cuFloatComplex" ||
+    callName === "cuCrealf" ||
+    callName === "cuCimagf" ||
+    callName === "cuCabsf" ||
+    callName === "cuConjf" ||
+    callName === "cuCaddf" ||
+    callName === "cuCsubf" ||
+    callName === "cuCmulf" ||
+    callName === "cuCdivf";
+}
+
+function isCuComplexScalarBuiltin(callName: string): boolean {
+  return callName === "cuCrealf" || callName === "cuCimagf" || callName === "cuCabsf";
 }
 
 function validateAtomicBuiltin(
