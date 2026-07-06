@@ -154,6 +154,16 @@ __global__ void runtimeByteFill(unsigned int *bits) {
     cudaStreamDestroy(stream);
   }
 }`,
+  runtimeByteCopy: `
+__global__ void runtimeByteCopy(unsigned int *dst, const unsigned int *src) {
+  cudaStream_t stream;
+  if (threadIdx.x == 0) {
+    cudaStreamCreate(&stream);
+    cudaMemcpy(dst, src, 3, cudaMemcpyDeviceToDevice);
+    cudaMemcpyAsync(dst + 1, src, 5, cudaMemcpyDefault, stream);
+    cudaStreamDestroy(stream);
+  }
+}`,
   dynamicLaunch: `
 __global__ void child(float *dst, int n) {
   int idx = threadIdx.x;
@@ -9401,6 +9411,20 @@ const html = String.raw`<!doctype html>
             }),
             output: "bits",
             expectedOutput: { type: "Uint32Array", data: [0xff000000, 0x7f7f7f7f, 0x0000007f] },
+          },
+          {
+            name: "runtime:byte-copy",
+            source: SOURCES.runtimeByteCopy,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                dst: new Uint32Array([0, 0xffffffff, 0]),
+                src: new Uint32Array([0xaabbccdd, 0x11223344]),
+              },
+            }),
+            output: "dst",
+            expectedOutput: { type: "Uint32Array", data: [0x00bbccdd, 0xaabbccdd, 0x00000044] },
           },
           {
             name: "runtime:host-peer-copy-sync",

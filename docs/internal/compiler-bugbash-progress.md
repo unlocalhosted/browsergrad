@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-06T16:48:46Z
+Last updated: 2026-07-06T16:52:05Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `677/0/0`, dist `677/0/0`; real-world compile/codegen audit has `0` hard fails; real corpus WebGPU fixture outputs are pinned `117/117` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Host-copy `cudaMemset*` now supports byte-granular partial 32-bit storage words |
+| Active work item | Host-copy `cudaMemcpy*` now supports byte-granular partial 32-bit storage words |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- byte-granular runtime copy planning: host-copy planner now preserves CUDA byte-wise `cudaMemcpy`/`cudaMemcpyAsync` semantics for non-element-aligned byte counts by emitting a native WebGPU `u32` masked byte-copy kernel over affected destination words instead of falling back to reference-only; added unit and exact real WebGPU `runtime:byte-copy` coverage for partial low/high bytes across `Uint32Array` storage, typecheck passed, lint passed, compiler unit passed `538/0`, exact real WebGPU `runtime:host-copy,runtime:byte-fill,runtime:byte-copy` passed `3/0/0` with pinned expected output and skips `0`, fixture/status/scope tests passed
 - byte-granular runtime memset planning: host-copy planner now preserves CUDA byte-wise `cudaMemset`/`cudaMemsetAsync` semantics for non-element-aligned byte counts by emitting a native WebGPU `u32` masked byte-fill kernel over affected storage words instead of falling back to reference-only; added unit and exact real WebGPU `runtime:byte-fill` coverage for partial low/high bytes across `Uint32Array` storage, typecheck passed, lint passed, compiler unit passed `537/0`, exact real WebGPU `runtime:host-copy,runtime:byte-fill` passed `2/0/0` with pinned expected output and skips `0`, fixture/status/scope tests passed
 - cross-type runtime copy planning: host-copy planner now treats `cudaMemcpy*` as byte-wise for compatible 32-bit storage views, using `u32` copy kernels when source/destination element types differ instead of falling back to reference-only; unit and real WebGPU coverage pin `Uint32Array` bit patterns copied into `Float32Array` storage with plan `host-copy` and no CPU simulation; typecheck passed, lint passed, compiler unit passed `536/0`, exact real WebGPU `runtime:host-copy` passed `1/0/0` with pinned expected output and skips `0`, fixture/status/scope tests passed
 - default device-global symbol copies: host-copy planner now derives typed storage metadata for `__device__` globals even when the caller omits `input.deviceGlobals`, matching reference/WebGPU default initialization; added unit and real WebGPU coverage for `cudaMemcpyToSymbol`/`cudaMemcpyFromSymbol` through a default-initialized device global, focused compiler unit passed `535/0`, typecheck and lint passed, exact real WebGPU `runtime:host-copy` passed `1/0/0` with plan `host-copy`, pinned expected output, skips `0`
@@ -849,6 +850,7 @@ Current verified gates:
 
 | Status | Area | Symptom | Root Fix | Proof |
 | --- | --- | --- | --- | --- |
+| Fixed | byte-granular runtime copy planning | `cudaMemcpy*` reference execution honored arbitrary byte counts, but WebGPU host-copy planning only accepted element-aligned copies, so valid partial-word byte copies stayed reference-only | planner now emits `copy-bytes` operations for non-element-aligned ranges and WebGPU orchestration runs a native masked `u32` byte-copy kernel over affected destination words, preserving untouched destination bytes and reading source bytes from arbitrary source word lanes | typecheck passed; lint passed; compiler unit `538/0`; exact real WebGPU `runtime:host-copy,runtime:byte-fill,runtime:byte-copy` `3/0/0`, plan `host-copy`, pinned output, skips `0`; fixture/status/scope tests passed |
 | Fixed | byte-granular runtime memset planning | `cudaMemset*` reference execution honored arbitrary byte counts, but WebGPU host-copy planning only accepted element-aligned fills, so valid partial-word byte fills stayed reference-only | planner now emits `fill-bytes` operations for non-element-aligned ranges and WebGPU orchestration runs a native masked `u32` byte-fill kernel over affected words, preserving untouched bytes | typecheck passed; lint passed; compiler unit `537/0`; exact real WebGPU `runtime:host-copy,runtime:byte-fill` `2/0/0`, plan `host-copy`, pinned output, skips `0`; fixture/status/scope tests passed |
 | Fixed | cross-type runtime copy planning | `cudaMemcpy*` reference execution copied raw bytes, but WebGPU host-copy planning required matching typed source/destination views, so valid 32-bit bit-pattern copies such as `unsigned int*` to `float*` stayed reference-only | planner now accepts equal-sized 32-bit views with different scalar types and emits a native `u32` host-copy kernel, preserving CUDA byte-copy semantics over WebGPU storage buffers | typecheck passed; lint passed; compiler unit `536/0`; exact real WebGPU `runtime:host-copy` `1/0/0`, plan `host-copy`, pinned output, skips `0`; fixture/status/scope tests passed |
 | Fixed | default device-global host-copy metadata | Host-copy planning for `cudaMemcpyToSymbol`/`cudaMemcpyFromSymbol` could use explicit `input.deviceGlobals`, but not default-initialized `__device__` globals even though reference execution and WebGPU run-input creation already synthesize default global storage | planner now derives value type, element size, and element count from reachable device-global declarations when host input omits the buffer, including scalar/vector lane counts for 32-bit float/int/uint-compatible globals | typecheck passed; lint passed; focused compiler unit `535/0`; exact real WebGPU `runtime:host-copy` `1/0/0`, plan `host-copy`, pinned output, skips `0` |

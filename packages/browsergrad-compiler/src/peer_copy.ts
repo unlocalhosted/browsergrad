@@ -42,7 +42,11 @@ export type CudaPeerCopyBlockerCode =
   | "parent-not-single-invocation"
   | "arguments-not-host-evaluable";
 
-export type CudaPeerCopyOperation = CudaPeerCopyBufferOperation | CudaPeerFillBufferOperation | CudaPeerByteFillBufferOperation;
+export type CudaPeerCopyOperation =
+  | CudaPeerCopyBufferOperation
+  | CudaPeerByteCopyBufferOperation
+  | CudaPeerFillBufferOperation
+  | CudaPeerByteFillBufferOperation;
 
 export interface CudaPeerCopyBufferOperation {
   readonly kind: "copy";
@@ -53,6 +57,16 @@ export interface CudaPeerCopyBufferOperation {
   readonly srcOffset: number;
   readonly elementCount: number;
   readonly valueType: "float" | "int" | "uint";
+}
+
+export interface CudaPeerByteCopyBufferOperation {
+  readonly kind: "copy-bytes";
+  readonly expression: CudaLiteCallExpression;
+  readonly dstRoot: string;
+  readonly srcRoot: string;
+  readonly dstByteOffset: number;
+  readonly srcByteOffset: number;
+  readonly byteCount: number;
 }
 
 export interface CudaPeerFillBufferOperation {
@@ -236,9 +250,23 @@ function createPeerCopyOperations(
   const copyView = copyCompatibleBufferView(dstBuffer, srcBuffer);
   if (!copyView) return undefined;
   const elementSize = copyView.elementSize;
-  if (Math.trunc(byteCount) % elementSize !== 0) return undefined;
-  const elementCount = Math.trunc(byteCount) / elementSize;
-  if (dst.offset + elementCount > dstBuffer.elementLength || src.offset + elementCount > srcBuffer.elementLength) return undefined;
+  if (!Number.isInteger(byteCount)) return undefined;
+  const dstByteOffset = dst.offset * elementSize;
+  const srcByteOffset = src.offset * elementSize;
+  const byteLength = Math.trunc(byteCount);
+  if (dstByteOffset + byteLength > dstBuffer.elementLength * elementSize || srcByteOffset + byteLength > srcBuffer.elementLength * elementSize) return undefined;
+  if (byteLength % elementSize !== 0) {
+    return [{
+      kind: "copy-bytes",
+      expression,
+      dstRoot: dst.root,
+      srcRoot: src.root,
+      dstByteOffset,
+      srcByteOffset,
+      byteCount: byteLength,
+    }];
+  }
+  const elementCount = byteLength / elementSize;
   return [{
     kind: "copy",
     expression,
