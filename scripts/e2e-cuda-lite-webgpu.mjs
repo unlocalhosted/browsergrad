@@ -172,6 +172,19 @@ __global__ void runtimeByteCopy2D(unsigned int *dst, const unsigned int *src) {
     cudaMemcpy2DAsync(dst + 2, 5, src + 1, 4, 5, 1, cudaMemcpyDefault, stream);
   }
 }`,
+  runtimeByteSymbolCopy: `
+__constant__ unsigned int cRuntimeByteCopySymbol[3];
+__global__ void runtimeByteSymbolCopy(unsigned int *dst, const unsigned int *src) {
+  cudaStream_t stream;
+  if (threadIdx.x == 0) {
+    cudaStreamCreate(&stream);
+    cudaMemcpyToSymbol(cRuntimeByteCopySymbol, src, 3);
+    cudaMemcpyToSymbolAsync(cRuntimeByteCopySymbol, src + 1, 5, 3, cudaMemcpyDeviceToDevice, stream);
+    cudaMemcpyFromSymbol(dst, cRuntimeByteCopySymbol, 5);
+    cudaMemcpyFromSymbolAsync(dst + 2, cRuntimeByteCopySymbol, 4, 2, cudaMemcpyDeviceToDevice, stream);
+    cudaStreamDestroy(stream);
+  }
+}`,
   dynamicLaunch: `
 __global__ void child(float *dst, int n) {
   int idx = threadIdx.x;
@@ -9447,6 +9460,23 @@ const html = String.raw`<!doctype html>
             }),
             output: "dst",
             expectedOutput: { type: "Uint32Array", data: [0x00bbccdd, 0x223344ff, 0x11223344, 0xffffff88] },
+          },
+          {
+            name: "runtime:byte-symbol-copy",
+            source: SOURCES.runtimeByteSymbolCopy,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                dst: new Uint32Array([0, 0xffffffff, 0, 0xffffffff]),
+                src: new Uint32Array([0xaabbccdd, 0x11223344, 0x55667788]),
+              },
+              constants: {
+                cRuntimeByteCopySymbol: new Uint32Array([0, 0, 0]),
+              },
+            }),
+            output: "dst",
+            expectedOutput: { type: "Uint32Array", data: [0x44bbccdd, 0xffffff33, 0x223344bb, 0xffffffff] },
           },
           {
             name: "runtime:host-peer-copy-sync",

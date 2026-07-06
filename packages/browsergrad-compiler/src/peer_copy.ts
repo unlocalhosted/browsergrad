@@ -206,7 +206,7 @@ function collectHostPeerCopies(
           const operations = createPeerCopyOperations(item.expression, current, input, deviceGlobals);
           if (!operations) {
             const callName = expressionName(item.expression.callee) ?? "runtime copy";
-            markUnsafe("arguments-not-host-evaluable", `${callName} arguments must resolve to typed buffer aliases, non-negative offsets, and element-aligned byte count`);
+            markUnsafe("arguments-not-host-evaluable", `${callName} arguments must resolve to typed buffer aliases, non-negative integer byte ranges`);
           }
           else {
             out.push(...operations);
@@ -299,16 +299,31 @@ function createPeerSymbolCopyOperation(
   if (!copyView) return undefined;
   const elementSize = copyView.elementSize;
   if (!Number.isInteger(byteCount) || !Number.isInteger(offsetBytes)) return undefined;
-  if (Math.trunc(byteCount) % elementSize !== 0 || Math.trunc(offsetBytes) % elementSize !== 0) return undefined;
-  const elementCount = Math.trunc(byteCount) / elementSize;
-  const symbolOffset = symbol.offset + Math.trunc(offsetBytes) / elementSize;
+  const byteLength = Math.trunc(byteCount);
+  const symbolByteOffset = (symbol.offset * elementSize) + Math.trunc(offsetBytes);
+  const pointerByteOffset = pointer.offset * elementSize;
   const srcRoot = copyShape.direction === "to-symbol" ? pointer.root : symbol.root;
   const dstRoot = copyShape.direction === "to-symbol" ? symbol.root : pointer.root;
-  const srcOffset = copyShape.direction === "to-symbol" ? pointer.offset : symbolOffset;
-  const dstOffset = copyShape.direction === "to-symbol" ? symbolOffset : pointer.offset;
+  const srcByteOffset = copyShape.direction === "to-symbol" ? pointerByteOffset : symbolByteOffset;
+  const dstByteOffset = copyShape.direction === "to-symbol" ? symbolByteOffset : pointerByteOffset;
   const srcBuffer = copyShape.direction === "to-symbol" ? pointerBuffer : symbolBuffer;
   const dstBuffer = copyShape.direction === "to-symbol" ? symbolBuffer : pointerBuffer;
-  if (srcOffset + elementCount > srcBuffer.elementLength || dstOffset + elementCount > dstBuffer.elementLength) return undefined;
+  if (srcByteOffset + byteLength > srcBuffer.elementLength * elementSize || dstByteOffset + byteLength > dstBuffer.elementLength * elementSize) return undefined;
+  const aligned = byteLength % elementSize === 0 && srcByteOffset % elementSize === 0 && dstByteOffset % elementSize === 0;
+  if (!aligned) {
+    return [{
+      kind: "copy-bytes",
+      expression,
+      dstRoot,
+      srcRoot,
+      dstByteOffset,
+      srcByteOffset,
+      byteCount: byteLength,
+    }];
+  }
+  const elementCount = byteLength / elementSize;
+  const srcOffset = srcByteOffset / elementSize;
+  const dstOffset = dstByteOffset / elementSize;
   return [{
     kind: "copy",
     expression,

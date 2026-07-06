@@ -3865,6 +3865,60 @@ __global__ void runtimeSymbolCopy(unsigned int *dst, const unsigned int *src) {
     }
   });
 
+  it("host-lifts byte-granular cudaMemcpyToSymbol and cudaMemcpyFromSymbol", () => {
+    const compiled = compileCudaLiteKernel(`
+__constant__ unsigned int cBits[3];
+__global__ void runtimeByteSymbolCopy(unsigned int *dst, const unsigned int *src) {
+  cudaStream_t stream;
+  if (threadIdx.x == 0) {
+    cudaStreamCreate(&stream);
+    cudaMemcpyToSymbol(cBits, src, 3);
+    cudaMemcpyToSymbolAsync(cBits, src + 1, 5, 3, cudaMemcpyDeviceToDevice, stream);
+    cudaMemcpyFromSymbol(dst, cBits, 5);
+    cudaMemcpyFromSymbolAsync(dst + 2, cBits, 4, 2, cudaMemcpyDeviceToDevice, stream);
+    cudaStreamDestroy(stream);
+  }
+}`, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        dst: new Uint32Array([0, 0xffffffff, 0, 0xffffffff]),
+        src: new Uint32Array([0xaabbccdd, 0x11223344, 0x55667788]),
+      },
+      constants: {
+        cBits: new Uint32Array([0, 0, 0]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const plan = createCudaRuntimeCopyPlan(compiled, input, launch);
+    const webGpuPlan = createCudaWebGpuExecutionPlan(compiled, input, launch);
+
+    expect([...result.buffers.dst as Uint32Array]).toEqual([0x44bbccdd, 0xffffff33, 0x223344bb, 0xffffffff]);
+    expect(plan.supported).toBe(true);
+    expect(plan.copies.map((copy) => copy.kind === "copy-bytes"
+      ? { kind: copy.kind, dstRoot: copy.dstRoot, srcRoot: copy.srcRoot, dstByteOffset: copy.dstByteOffset, srcByteOffset: copy.srcByteOffset, byteCount: copy.byteCount }
+      : { kind: copy.kind, dstRoot: copy.dstRoot, srcRoot: copy.kind === "copy" ? copy.srcRoot : undefined, dstByteOffset: undefined, srcByteOffset: undefined, byteCount: undefined })).toEqual([
+      { kind: "copy-bytes", dstRoot: "cBits", srcRoot: "src", dstByteOffset: 0, srcByteOffset: 0, byteCount: 3 },
+      { kind: "copy-bytes", dstRoot: "cBits", srcRoot: "src", dstByteOffset: 3, srcByteOffset: 4, byteCount: 5 },
+      { kind: "copy-bytes", dstRoot: "dst", srcRoot: "cBits", dstByteOffset: 0, srcByteOffset: 0, byteCount: 5 },
+      { kind: "copy-bytes", dstRoot: "dst", srcRoot: "cBits", dstByteOffset: 8, srcByteOffset: 2, byteCount: 4 },
+    ]);
+    expect(webGpuPlan.supported).toBe(true);
+    if (webGpuPlan.supported) {
+      expect(webGpuPlan.kind).toBe("host-copy");
+      expect(webGpuPlan.steps).toHaveLength(5);
+      expect(webGpuPlan.steps.slice(1).map((step) => step.program.name)).toEqual([
+        "bg_peer_copy_bytes",
+        "bg_peer_copy_bytes",
+        "bg_peer_copy_bytes",
+        "bg_peer_copy_bytes",
+      ]);
+    }
+  });
+
   it("host-lifts cudaMemcpy symbol copies for default-initialized device globals", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ unsigned int gBits[3];
