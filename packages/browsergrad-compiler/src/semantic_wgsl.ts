@@ -53,6 +53,7 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["pow", "pow"],
   ["powf", "pow"],
 ]);
+const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
 const WGSL_ATOMIC_CALLEES = new Map([
   ["atomicAdd", "atomicAdd"],
   ["atomicAdd_system", "atomicAdd"],
@@ -225,6 +226,9 @@ function unsupportedSemanticWgslOperation(
         break;
       case "atomic":
         if (!semanticWgslAtomicSupported(operation, ir)) return operation;
+        break;
+      case "call":
+        if (!semanticWgslCallSupported(operation, ir)) return operation;
         break;
       case "expression":
         if (!semanticWgslExpressionSupported(operation.expression, "scalar", ir)) return operation;
@@ -417,6 +421,19 @@ function semanticWgslAtomicCallSupported(
     expression.args.slice(1, expectedArgs).every((arg) => semanticWgslExpressionSupported(arg, "scalar"));
 }
 
+function semanticWgslCallSupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+): boolean {
+  if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
+  const [target, value] = operation.args;
+  return target?.kind === "symbol" &&
+    target.addressSpace === "local" &&
+    value !== undefined &&
+    semanticWgslExpressionSupported(value, "scalar", ir) &&
+    localArraySymbol(ir, target.name) !== undefined;
+}
+
 function semanticWgslAtomicTargetRootSupported(ref: SemanticMemoryRef, ir: SemanticKernelIrModule): boolean {
   if (ref.addressSpace === "storage") {
     return ir.params.some((param) => param.name === ref.base && param.addressSpace === "storage" && !param.constant);
@@ -513,6 +530,8 @@ function emitSemanticOperation(
       return [`${prefix}${emitSemanticStore(operation, ir, names)};`];
     case "atomic":
       return [`${prefix}${emitSemanticAtomic(operation, ir, names)};`];
+    case "call":
+      return emitSemanticCall(operation, ir, names, indentLevel);
     case "expression":
       if (operation.expression.kind === "assignment") return [`${prefix}${emitSemanticAssignmentStatement(operation.expression, ir, names)};`];
       return [`${prefix}${emitSemanticExpression(operation.expression, ir, names)};`];
@@ -644,6 +663,36 @@ function emitSemanticAtomic(
     emitSemanticExpressionAs(operand!, ir, names, wgslAtomicScalar(operation.target!.valueType))
   );
   return `_ = ${wgslCallee}(&${target}, ${emitted.join(", ")})`;
+}
+
+function emitSemanticCall(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+): readonly string[] {
+  if (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return emitSemanticLocalArrayFill(operation, ir, names, indentLevel);
+  throw semanticWgslError(`semantic WGSL does not support call '${operation.callee}'`, operation.span);
+}
+
+function emitSemanticLocalArrayFill(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  indentLevel: number,
+): readonly string[] {
+  const [target, valueExpression] = operation.args;
+  if (target?.kind !== "symbol" || target.addressSpace !== "local" || valueExpression === undefined) {
+    throw semanticWgslError(`${operation.callee} expects local array and scalar value`, operation.span);
+  }
+  const symbol = localArraySymbol(ir, target.name);
+  if (!symbol) throw semanticWgslError(`${operation.callee} expects fixed local array '${target.name}'`, target.span);
+  return emitLocalArrayFill(
+    nameFor(target.name, names),
+    symbol.dimensions,
+    emitSemanticExpressionAs(valueExpression, ir, names, wgslValueScalar(symbol.valueType)),
+    indentLevel,
+  );
 }
 
 function emitSemanticLoop(
@@ -1000,11 +1049,34 @@ function localMemorySymbols(ir: SemanticKernelIrModule): readonly SemanticKernel
   return ir.memory.filter((symbol) => symbol.kind === "local" && symbol.dimensions.length > 0);
 }
 
+function localArraySymbol(ir: SemanticKernelIrModule, name: string): SemanticKernelIrModule["memory"][number] | undefined {
+  return ir.memory.find((symbol) => symbol.kind === "local" && symbol.name === name && symbol.dimensions.length > 0);
+}
+
 function emitLocalArrayType(symbol: SemanticKernelIrModule["memory"][number]): string {
   return symbol.dimensions.reduceRight<string>(
     (element, dimension) => `array<${element}, ${Math.max(1, dimension)}>`,
     wgslScalar(symbol.valueType),
   );
+}
+
+function emitLocalArrayFill(
+  name: string,
+  dimensions: readonly number[],
+  value: string,
+  indentLevel: number,
+  indexes: readonly string[] = [],
+): readonly string[] {
+  if (indexes.length === dimensions.length) {
+    return [`${"  ".repeat(indentLevel)}${name}${indexes.map((index) => `[${index}]`).join("")} = ${value};`];
+  }
+  const loopName = `fill_${name}_${indexes.length}`;
+  const lines = [
+    `${"  ".repeat(indentLevel)}for (var ${loopName}: i32 = 0; ${loopName} < ${dimensions[indexes.length] ?? 0}; ${loopName} = ${loopName} + 1) {`,
+  ];
+  lines.push(...emitLocalArrayFill(name, dimensions, value, indentLevel + 1, [...indexes, loopName]));
+  lines.push(`${"  ".repeat(indentLevel)}}`);
+  return lines;
 }
 
 function emitSharedType(symbol: SemanticKernelIrModule["memory"][number]): string {

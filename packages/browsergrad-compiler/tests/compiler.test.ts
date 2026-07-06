@@ -2168,6 +2168,35 @@ __global__ void localInit(float* out) {
     expect([...result.buffers.out as Float32Array]).toEqual([3, 3]);
   });
 
+  it("fills fixed local arrays through semantic reference and WGSL", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void localFill(float* out) {
+  int tid = threadIdx.x;
+  float regs[2][2];
+  fill_2D_regs<float, 2, 2>(regs, 7.0f);
+  out[tid] = regs[tid][1];
+}
+`, { workgroupSize: [2, 1, 1] });
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-local-array-fill");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("regs[fill_regs_0][fill_regs_1] = 7.0;");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([7, 7]);
+    expect([...result.buffers.out as Float32Array]).toEqual([7, 7]);
+  });
+
   it("runs a shared-memory tiled matmul reference and emits barriers", () => {
     const compiled = compileCudaLiteKernel(TILED_MATMUL, { workgroupSize: [2, 2, 1] });
     const result = runCompiledKernelReference(

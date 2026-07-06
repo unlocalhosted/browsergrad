@@ -48,6 +48,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "floor", "floorf", "ceil", "ceilf", "sin", "sinf", "cos", "cosf",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
 ]);
+const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
 
 interface Vector3 {
   readonly x: number;
@@ -191,6 +192,9 @@ function unsupportedSemanticReferenceOperation(
         break;
       case "atomic":
         if (!semanticReferenceAtomicSupported(operation, compiled)) return operation;
+        break;
+      case "call":
+        if (!semanticReferenceCallSupported(operation, compiled)) return operation;
         break;
       case "expression":
         if (!semanticReferenceExpressionSupported(operation.expression, "scalar", compiled)) return operation;
@@ -364,6 +368,23 @@ function semanticReferenceAtomicCallSupported(
     expression.args.slice(1, expectedArgs).every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
 }
 
+function semanticReferenceCallSupported(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  if (!SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return false;
+  const [target, value] = operation.args;
+  return target?.kind === "symbol" &&
+    target.addressSpace === "local" &&
+    value !== undefined &&
+    semanticReferenceExpressionSupported(value, "scalar", compiled) &&
+    compiled.kernelIr.memory.some((symbol) =>
+      symbol.kind === "local" &&
+      symbol.name === target.name &&
+      symbol.dimensions.length > 0
+    );
+}
+
 function semanticReferenceAtomicTargetRootSupported(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
   if (ref.addressSpace === "storage") {
     return compiled.kernelIr.params.some((param) => param.name === ref.base && param.addressSpace === "storage" && !param.constant);
@@ -481,6 +502,9 @@ function execSemanticOperations(
       case "atomic":
         execSemanticAtomic(operation, context);
         break;
+      case "call":
+        execSemanticCall(operation, context);
+        break;
       case "expression":
         evalNumber(operation.expression, context);
         break;
@@ -557,6 +581,30 @@ function execSemanticAtomic(
   const oldValue = readMemory(operation.target, context);
   const nextValue = semanticAtomicValue(atomicOp, oldValue, evalNumber(value, context), operation, context);
   writeMemory(operation.target, nextValue, context);
+}
+
+function execSemanticCall(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): void {
+  if (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) {
+    execSemanticLocalArrayFill(operation, context);
+    return;
+  }
+  throw semanticReferenceError(`semantic reference does not support call '${operation.callee}'`, operation.span);
+}
+
+function execSemanticLocalArrayFill(
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): void {
+  const [target, valueExpression] = operation.args;
+  if (target?.kind !== "symbol" || target.addressSpace !== "local" || valueExpression === undefined) {
+    throw semanticReferenceError(`${operation.callee} expects local array and scalar value`, operation.span);
+  }
+  const local = context.locals.get(target.name);
+  if (!Array.isArray(local)) throw semanticReferenceError(`${operation.callee} expects fixed local array '${target.name}'`, target.span);
+  local.fill(evalNumber(valueExpression, context));
 }
 
 function semanticAtomicValue(
