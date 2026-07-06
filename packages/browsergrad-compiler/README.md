@@ -332,8 +332,8 @@ reference-only.
 Use `createCudaLoweringPlan(diagnostics)` and `describeCudaDiagnostic()` to group
 compatibility gaps by semantic family instead of raw parser messages.
 Use `createCudaRuntimePlan(compiled)` to see which kernels need host
-orchestration (`device-launch`, `device-sync`, `runtime-copy`, `grid-sync`) before
-trying WebGPU single-dispatch execution.
+orchestration (`device-launch`, `device-sync`, `runtime-copy`, `grid-sync`) from
+the public semantic Kernel IR before trying WebGPU single-dispatch execution.
 Use `createCudaLaunchValidationDiagnostics(launch, compiled.kernelIr.workgroupSize)`
 or `validateCudaKernelLaunch()` to preflight launch shape before selecting CPU
 reference or WebGPU execution. Reference and WebGPU runners use the same

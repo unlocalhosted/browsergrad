@@ -1,5 +1,8 @@
 import { walkCudaLiteExpressions } from "./ast_queries.js";
-import { internalBackendIrFor } from "./backend_ir.js";
+import type {
+  SemanticExpression,
+  SemanticKernelIrOperation,
+} from "./semantic_ir.js";
 import type {
   CompiledCudaLiteKernel,
   CudaLiteExpression,
@@ -42,13 +45,49 @@ export type CudaGridSyncPhasePlan =
 export function createCudaRuntimePlan(
   compiled: CompiledCudaLiteKernel,
 ): CudaRuntimePlan {
-  const operations = collectRuntimeOperations(internalBackendIrFor(compiled).body);
+  const operations = collectSemanticRuntimeOperations(compiled.kernelIr.operations);
   return {
     operations,
     requiresHostOrchestration: operations.length > 0,
     canRunSingleDispatchWebGpu: operations.length === 0,
     referenceAvailable: operations.every((operation) => REFERENCE_RUNTIME_OPERATIONS.has(operation.kind)),
   };
+}
+
+function collectSemanticRuntimeOperations(operations: readonly SemanticKernelIrOperation[]): readonly CudaRuntimeOperation[] {
+  const runtime: CudaRuntimeOperation[] = [];
+  const cooperativeGroups = new Map<string, Extract<CudaLiteStatement, { kind: "cooperative-group" }>["groupKind"]>();
+  visitSemanticOperations(operations, (operation) => {
+    if (operation.kind === "cooperative-group-declare") cooperativeGroups.set(operation.declaration.name, operation.declaration.groupKind);
+    if (operation.kind === "device-launch") {
+      runtime.push({
+        kind: "device-launch",
+        span: operation.span,
+        label: `${operation.launch.callee}<<<...>>>`,
+      });
+      return;
+    }
+    if (operation.kind === "barrier" && (operation.callee === "grid.sync" || operation.callee === "cg::sync")) {
+      runtime.push({
+        kind: "grid-sync",
+        span: operation.span,
+        label: "grid.sync()",
+      });
+      return;
+    }
+    if (operation.kind === "call" || operation.kind === "atomic") {
+      const runtimeOperation = runtimeOperationForSemanticCall(operation.callee, operation.span);
+      if (runtimeOperation) runtime.push(runtimeOperation);
+    }
+    for (const expression of semanticExpressionsForOperation(operation)) {
+      visitSemanticExpression(expression, (item) => {
+        const runtimeOperation = runtimeOperationForSemanticExpression(item, cooperativeGroups);
+        if (runtimeOperation) runtime.push(runtimeOperation);
+      });
+    }
+  });
+  const unique: CudaRuntimeOperation[] = [...uniqueRuntimeOperations(runtime)];
+  return unique.sort((left: CudaRuntimeOperation, right: CudaRuntimeOperation) => left.span.start - right.span.start);
 }
 
 const REFERENCE_RUNTIME_OPERATIONS: ReadonlySet<CudaRuntimeOperationKind> = new Set([
@@ -163,6 +202,199 @@ function runtimeOperationForExpression(
     span: expression.span,
     label: "grid.sync()",
   };
+}
+
+function visitSemanticOperations(
+  operations: readonly SemanticKernelIrOperation[],
+  visit: (operation: SemanticKernelIrOperation) => void,
+): void {
+  for (const operation of operations) {
+    visit(operation);
+    if (operation.kind === "block") visitSemanticOperations(operation.body, visit);
+    else if (operation.kind === "branch") {
+      visitSemanticOperations(operation.consequent, visit);
+      visitSemanticOperations(operation.alternate, visit);
+    } else if (operation.kind === "loop") {
+      if (operation.init && isSemanticOperation(operation.init)) visitSemanticOperations([operation.init], visit);
+      visitSemanticOperations(operation.body, visit);
+    }
+  }
+}
+
+function isSemanticOperation(value: SemanticKernelIrOperation | SemanticExpression): value is SemanticKernelIrOperation {
+  if (value.kind === "call") return "reads" in value;
+  return value.kind === "declare" ||
+    value.kind === "dim3-declare" ||
+    value.kind === "cooperative-group-declare" ||
+    value.kind === "load" ||
+    value.kind === "store" ||
+    value.kind === "atomic" ||
+    value.kind === "expression" ||
+    value.kind === "branch" ||
+    value.kind === "loop" ||
+    value.kind === "barrier" ||
+    value.kind === "device-launch" ||
+    value.kind === "inline-asm" ||
+    value.kind === "return" ||
+    value.kind === "continue" ||
+    value.kind === "break" ||
+    value.kind === "block";
+}
+
+function semanticExpressionsForOperation(operation: SemanticKernelIrOperation): readonly SemanticExpression[] {
+  switch (operation.kind) {
+    case "declare":
+      return operation.init ? [operation.init] : [];
+    case "dim3-declare":
+      return operation.args;
+    case "load":
+      return operation.source.indices;
+    case "store":
+      return [operation.value, ...operation.target.indices, ...operation.reads.flatMap((read) => read.indices)];
+    case "atomic":
+      return [...operation.args, ...(operation.target?.indices ?? [])];
+    case "call":
+      return operation.args;
+    case "expression":
+      return [operation.expression];
+    case "branch":
+      return [operation.condition];
+    case "loop":
+      return [
+        ...(!operation.init || isSemanticOperation(operation.init) ? [] : [operation.init]),
+        ...(operation.condition ? [operation.condition] : []),
+        ...(operation.update ? [operation.update] : []),
+      ];
+    case "device-launch":
+      return [...operation.launch.grid, ...operation.launch.block, ...operation.launch.args];
+    case "return":
+      return operation.value ? [operation.value] : [];
+    case "cooperative-group-declare":
+    case "barrier":
+    case "inline-asm":
+    case "continue":
+    case "break":
+    case "block":
+      return [];
+  }
+}
+
+function visitSemanticExpression(
+  expression: SemanticExpression,
+  visit: (expression: SemanticExpression) => void,
+): void {
+  visit(expression);
+  switch (expression.kind) {
+    case "literal":
+    case "symbol":
+      return;
+    case "member":
+      visitSemanticExpression(expression.object, visit);
+      return;
+    case "index":
+      visitSemanticExpression(expression.target, visit);
+      visitSemanticExpression(expression.index, visit);
+      return;
+    case "call":
+      visitSemanticExpression(expression.callee, visit);
+      for (const arg of expression.args) visitSemanticExpression(arg, visit);
+      return;
+    case "cast":
+      visitSemanticExpression(expression.expression, visit);
+      return;
+    case "unary":
+    case "update":
+      visitSemanticExpression(expression.argument, visit);
+      return;
+    case "binary":
+      visitSemanticExpression(expression.left, visit);
+      visitSemanticExpression(expression.right, visit);
+      return;
+    case "conditional":
+      visitSemanticExpression(expression.condition, visit);
+      visitSemanticExpression(expression.consequent, visit);
+      visitSemanticExpression(expression.alternate, visit);
+      return;
+    case "assignment":
+      visitSemanticExpression(expression.target, visit);
+      visitSemanticExpression(expression.value, visit);
+      return;
+    case "initializer":
+      for (const element of expression.elements) visitSemanticExpression(element, visit);
+      return;
+    case "sequence":
+      for (const item of expression.expressions) visitSemanticExpression(item, visit);
+      return;
+  }
+}
+
+function runtimeOperationForSemanticExpression(
+  expression: SemanticExpression,
+  cooperativeGroups: ReadonlyMap<string, Extract<CudaLiteStatement, { kind: "cooperative-group" }>["groupKind"]>,
+): CudaRuntimeOperation | undefined {
+  if (expression.kind !== "call") return undefined;
+  const callName = semanticCallName(expression.callee);
+  const runtimeOperation = callName ? runtimeOperationForSemanticCall(callName, expression.span) : undefined;
+  if (runtimeOperation) return runtimeOperation;
+  const syncGroup = semanticSyncGroupName(expression);
+  if (syncGroup && cooperativeGroups.get(syncGroup) === "grid") {
+    return {
+      kind: "grid-sync",
+      span: expression.span,
+      label: "grid.sync()",
+    };
+  }
+  return undefined;
+}
+
+function runtimeOperationForSemanticCall(name: string, span: SourceSpan): CudaRuntimeOperation | undefined {
+  if (isHostManagedRuntimeNoopCall(name)) {
+    return {
+      kind: "device-sync",
+      span,
+      label: `${name}()`,
+    };
+  }
+  if (isCudaRuntimeCopyCall(name)) {
+    return {
+      kind: "runtime-copy",
+      span,
+      label: `${name}(...)`,
+    };
+  }
+  return undefined;
+}
+
+function semanticCallName(callee: SemanticExpression): string | undefined {
+  if (callee.kind === "symbol") return callee.name;
+  if (callee.kind === "member") {
+    const objectName = semanticCallName(callee.object);
+    return objectName ? `${objectName}.${callee.property}` : undefined;
+  }
+  return undefined;
+}
+
+function semanticSyncGroupName(expression: Extract<SemanticExpression, { readonly kind: "call" }>): string | undefined {
+  if (expression.callee.kind === "member" && expression.callee.property === "sync" && expression.callee.object.kind === "symbol") {
+    return expression.callee.object.name;
+  }
+  if (expression.callee.kind === "symbol" && expression.callee.name.endsWith("::sync")) {
+    const group = expression.args[0];
+    return group?.kind === "symbol" ? group.name : undefined;
+  }
+  return undefined;
+}
+
+function uniqueRuntimeOperations(operations: readonly CudaRuntimeOperation[]): readonly CudaRuntimeOperation[] {
+  const seen = new Set<string>();
+  const out: CudaRuntimeOperation[] = [];
+  for (const operation of operations) {
+    const key = `${operation.kind}:${operation.span.start}:${operation.span.end}:${operation.label}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(operation);
+  }
+  return out;
 }
 
 function isCudaRuntimeCopyCall(name: string): boolean {

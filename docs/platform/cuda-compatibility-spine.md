@@ -25,11 +25,11 @@ Public APIs:
 
 - `getCudaFeatureRegistry()` returns known feature records.
 - `describeCudaDiagnostic(diagnostic)` maps compiler diagnostics to semantic features.
-- `createCudaLoweringPlan(diagnostics)` summarizes whether a kernel can run on GPU,
-  requires GPU polyfill, has CPU reference coverage, or is unsupported.
+- `createCudaLoweringPlan(diagnostics)` summarizes direct WGSL lowering,
+  GPU-polyfill needs, CPU reference coverage, or unsupported features.
 - `createCudaRuntimePlan(compiled)` reports runtime operations that need host
-  orchestration before single-dispatch WebGPU can run: device launches,
-  device sync, peer copies, and grid sync.
+  orchestration before single-dispatch WebGPU can run from public semantic
+  Kernel IR: device launches, device sync, peer copies, and grid sync.
 - `createCudaLaunchValidationDiagnostics(launch, workgroupSize)` reports
   launch-shape errors before execution. `validateCudaKernelLaunch()` throws the
   same diagnostics. `createCudaWebGpuExecutionPlan()` returns `launch` blockers

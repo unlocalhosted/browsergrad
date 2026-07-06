@@ -4161,6 +4161,7 @@ __global__ void parent(float *dst, float *src) {
       workgroupSize: [1, 1, 1],
     });
     const plan = createCudaRuntimePlan(compiled);
+    const detachedPlan = createCudaRuntimePlan({ ...compiled });
 
     expect(plan.operations.map((operation) => operation.kind)).toEqual([
       "device-launch",
@@ -4168,6 +4169,7 @@ __global__ void parent(float *dst, float *src) {
       "runtime-copy",
       "grid-sync",
     ]);
+    expect(detachedPlan.operations.map((operation) => operation.kind)).toEqual(plan.operations.map((operation) => operation.kind));
     expect(plan.canRunSingleDispatchWebGpu).toBe(false);
     expect(plan.referenceAvailable).toBe(true);
   });

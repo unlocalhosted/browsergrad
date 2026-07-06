@@ -6,7 +6,7 @@ import {
   type WgslPreparedKernelSequenceRunOptions,
 } from "@unlocalhosted/browsergrad-kernels";
 import { analyzeCudaLite, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
-import { attachInternalBackendIr, internalBackendIrFor } from "./backend_ir.js";
+import { attachInternalBackendIr } from "./backend_ir.js";
 import { createCudaLoweringPlan } from "./compatibility.js";
 import { createCudaLiteCompileCacheKey } from "./cache-key.js";
 import { validateCudaKernelLaunch } from "./launch.js";
@@ -174,7 +174,7 @@ export async function runCompiledKernelWebGpu(
   launch: KernelLaunch,
   options: CompiledKernelWebGpuExecutionOptions = {},
 ): Promise<ReferenceKernelResult> {
-  validateCudaKernelLaunch(launch, internalBackendIrFor(compiled).workgroupSize);
+  validateCudaKernelLaunch(launch, compiled.kernelIr.workgroupSize);
   const compileKernel = createCachedWebGpuChildCompiler(options);
   const planOptions = webGpuExecutionPlanOptions(options, compileKernel);
   const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, planOptions);
@@ -196,7 +196,7 @@ export async function prepareCompiledKernelWebGpu(
   launch: KernelLaunch,
   options: PrepareCompiledKernelWebGpuOptions = {},
 ): Promise<PreparedCompiledKernelWebGpu> {
-  validateCudaKernelLaunch(launch, internalBackendIrFor(compiled).workgroupSize);
+  validateCudaKernelLaunch(launch, compiled.kernelIr.workgroupSize);
   const compileKernel = createCachedWebGpuChildCompiler(options);
   const planOptions = webGpuExecutionPlanOptions(options, compileKernel);
   const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, planOptions);
