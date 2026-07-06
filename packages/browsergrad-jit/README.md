@@ -53,17 +53,33 @@ pretending to match PyTorch.
 
 ### Neural networks
 - `nn.Module`, `nn.Sequential`
-- `nn.Linear`, `nn.Dropout`, `nn.BatchNorm1d`, activation modules
+- `nn.Linear`, `nn.Conv1d`, `nn.Conv2d`, `nn.ConvTranspose2d`, `nn.Conv3d`,
+  `nn.Dropout`, `nn.BatchNorm1d`, activation modules
 - `nn.Module` parameters, buffers, `state_dict()`, `load_state_dict()`,
   `train()`, `eval()`, `zero_grad()`
 - `nn.functional`: `relu`, `sigmoid`, `tanh`, `gelu`, `softmax`,
-  `cross_entropy`, `mse_loss`, `nll_loss`, `linear`
+  `cross_entropy`, `mse_loss`, `nll_loss`, `linear`, `conv1d`, `conv2d`,
+  `conv_transpose2d`, `conv3d`
 - `optim.SGD`, `optim.Adam`, `optim.AdamW`
 
-`BatchNorm1d` supports small curriculum training loops. It currently uses a
-`CUSTOM` realization path because running-stat updates are stateful; that keeps
-the API useful while a future effect-aware IR design handles high-throughput
-stateful training.
+`Conv1d`, `Conv2d`, and `Conv3d` are primitive IR ops with NumPy handlers and
+symbolic VJPs. Conv1d/Conv2d/Conv3d forward/backward lower through generic
+tensor-plan WebGPU via `realize_tensor_plan_webgpu(...)`. Default `.backward()` still
+writes CPU grads. `BatchNorm1d` and `ConvTranspose2d` remain `CUSTOM`
+realization paths with explicit NumPy VJPs.
+
+`bg.gpu_plan_summary(tensor)` and `bg.jit.gpu_plan.*` expose the first
+compiler-facing tensor-IR execution plan: scheduled primitive UOps, buffer
+liveness bytes, and one explicit root materialization boundary. It refuses
+`CUSTOM` by default, keeping user/lab kernels separate from core framework GPU
+lowering.
+
+`bg.realize_tensor_plan_webgpu(tensor)` sends that canonical plan through one
+generic WebGPU bridge call (`run_tensor_plan`) instead of walking legacy per-op
+bridge methods. Current runtime coverage is f32 BUFFER/LOAD/2-D MATMUL and
+elementwise chains, RESHAPE, PERMUTE, BROADCAST_TO, and REDUCE(sum/mean) rank
+<= 4, plus Conv1d/Conv2d/Conv3d forward/backward; norm and optimizer tensor-plan
+codegen remain future work.
 
 ### Gradient control
 ```python
@@ -141,7 +157,14 @@ bg.register_webgpu_bridge(bridge)         # bridge built by browsergrad-kernels
 out = bg.realize_webgpu(x @ w + b)        # ndarray, materialized at the seam
 ```
 
-Forward-only in v0. Supported opcodes: `BUFFER`, `LOAD`, `CONST`, `CAST`, `MATMUL`, `FUSED_ELEMENTWISE`, `CUSTOM`. Other opcodes raise with a pointer back to `bg.realize()` (NumPy).
+Explicit materialization in v0. Supported opcodes: `BUFFER`, `LOAD`, `CONST`,
+`CAST`, `MATMUL`, `CONV1D`, `CONV1D_BACKWARD_INPUT`,
+`CONV1D_BACKWARD_WEIGHT`, `CONV1D_BACKWARD_BIAS`, `CONV2D`,
+`CONV2D_BACKWARD_INPUT`,
+`CONV2D_BACKWARD_WEIGHT`, `CONV2D_BACKWARD_BIAS`, `FUSED_ELEMENTWISE`,
+`CUSTOM`. Supported `CUSTOM` bridge ops include FlashAttention forward and
+custom WGSL kernels. Other opcodes raise with a pointer back to `bg.realize()`
+(NumPy).
 
 ### Custom WGSL kernel
 ```python
@@ -204,7 +227,8 @@ Anything in the **Internal** row will break across minor releases. File an issue
 
 - Full PyTorch API parity.
 - CUDA device emulation.
-- GPU-resident backward / optimizer steps. WebGPU realization is forward-only.
+- GPU-resident `.backward()` / optimizer steps. WebGPU realization can run
+  selected backward IR roots, but autograd mutation and optimizers remain CPU.
 - Tensor layout/stride compatibility for contiguity teaching.
 - PyTorch-native checkpoint file compatibility.
 

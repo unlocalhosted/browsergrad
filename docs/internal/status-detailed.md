@@ -7,11 +7,14 @@ Living document. Reflects the current state of each package, what's tested, and 
 | Package | Version | Surface tests | Integration tests | Browser tests |
 |---|---|---|---|---|
 | `@unlocalhosted/browsergrad-runtime` | `0.1.1` | 27 | 23 (Pyodide-in-node) | — |
-| `@unlocalhosted/browsergrad-kernels` | `0.1.0` | 35 (incl. JS-reference numerical checks, FUSED WGSL codegen) | — | 7 (real Chromium + WebGPU) |
-| `@unlocalhosted/browsergrad-grad` | `0.4.6` | 25 | 115 (Pyodide-in-node) | — |
-| `@unlocalhosted/browsergrad-jit` | `0.8.0` | 8 | 156 (Pyodide-in-node, incl. feedback + perf benches) | — (via kernels) |
+| `@unlocalhosted/browsergrad-kernels` | `0.1.2` | 35 (incl. JS-reference numerical checks, FUSED WGSL codegen) | — | 24 (real Chromium + WebGPU) |
+| `@unlocalhosted/browsergrad-grad` | `0.5.1` | 30 | 317 (Pyodide-in-node) | — |
+| `@unlocalhosted/browsergrad-jit` | `0.8.2` | 8 | 195 (Pyodide-in-node, incl. feedback + perf benches) | — (via kernels) |
 
-**Total: 396 tests green** across the workspace.
+`browsergrad-grad` current local gates: 30 surface/unit tests and 317
+Pyodide-in-node integration tests green. Workspace-wide totals drift as
+compiler/WebGPU bug-bash work lands; prefer package-level commands as source of
+truth.
 
 Every gradient verified against finite differences or a hand-derived oracle. Every realizer numerical result verified against a NumPy or JS-reference oracle. No test compares the implementation against itself.
 
@@ -22,10 +25,16 @@ Every gradient verified against finite differences or a hand-derived oracle. Eve
 
 Both ship under the same `unlocalhosted` npm scope. They can coexist in the same Pyodide session (separate `install_torch_alias()` namespaces, owner-token protocol prevents collision).
 
+GPU-native target: keep `grad` as educational CPU/reference baseline; make
+`jit` the canonical tensor IR owner; promote core ops out of permanent
+`CUSTOM` callbacks into primitive tensor IR; compile tensor IR to WebGPU; keep
+CUDA-lite compiler focused on labs and user kernels. `.numpy()` / `.item()` are
+the intended GPU materialization boundaries.
+
 ## Surface inventory — `browsergrad-jit` (v0.8.0)
 
 ### Core (PRD-005)
-- 28-opcode IR (`_ir.py`): BUFFER, LOAD, STORE, CONST, RANDOM, CAST, ADD, MUL, DIV, NEG, EXP, LOG, CMP, MATMUL, REDUCE, RESHAPE, PERMUTE, SLICE, PAD, WHERE, INDEX, MASK, CUSTOM, FUSED_ELEMENTWISE, FUSED_SOFTMAX, SCATTER_ADD, BROADCAST_TO, ISNAN.
+- 40-opcode IR (`_ir.py`): BUFFER, LOAD, STORE, CONST, RANDOM, CAST, ADD, MUL, DIV, NEG, EXP, LOG, CMP, MATMUL, CONV1D, CONV1D_BACKWARD_INPUT, CONV1D_BACKWARD_WEIGHT, CONV1D_BACKWARD_BIAS, CONV2D, CONV2D_BACKWARD_INPUT, CONV2D_BACKWARD_WEIGHT, CONV2D_BACKWARD_BIAS, CONV3D, CONV3D_BACKWARD_INPUT, CONV3D_BACKWARD_WEIGHT, CONV3D_BACKWARD_BIAS, REDUCE, RESHAPE, PERMUTE, SLICE, PAD, WHERE, INDEX, MASK, CUSTOM, FUSED_ELEMENTWISE, FUSED_SOFTMAX, SCATTER_ADD, BROADCAST_TO, ISNAN.
 - `TensorProxy` — lazy tensor; metadata never realizes; arithmetic builds IR; `.numpy()` / `.item()` triggers realize.
 - `Session` + `BufferTable` for per-tab isolation.
 - NumPy realizer (`_realize.py`): single dispatch table; one Python function per opcode; deterministic across runs.
@@ -36,7 +45,7 @@ Both ship under the same `unlocalhosted` npm scope. They can coexist in the same
 - Introspection: `bg.jit.debug_fused_kernels()`, `bg.jit.debug_unfused_reasons()`.
 
 ### Symbolic backward (PRD-007)
-- 13 VJP rules (ADD, MUL, DIV, NEG, EXP, LOG, CAST, MATMUL, REDUCE, RESHAPE, PERMUTE, ISNAN, CMP).
+- 15 VJP rules (ADD, MUL, DIV, NEG, EXP, LOG, CAST, MATMUL, CONV1D, CONV2D, CONV3D, REDUCE, RESHAPE, PERMUTE, ISNAN).
 - Closure-backward kept as the safety net for ops without VJPs.
 - `arg["vjp_of"]` tags every emitted backward node — observable by checkpointing.
 
@@ -57,8 +66,36 @@ Both ship under the same `unlocalhosted` npm scope. They can coexist in the same
 ### GPUBuffer-backed WGSL realizer (PRD-011.5)
 - `bg.realize_webgpu(tensor)` — explicit-realize through the registered bridge.
 - `bg.register_webgpu_bridge(bridge)` — pluggable; bridge owns GPUBuffer lifetimes.
-- Whitelisted opcodes: BUFFER, LOAD, CONST, CAST, MATMUL, FUSED_ELEMENTWISE, CUSTOM.
+- `bg.gpu_plan_summary(tensor)` / `bg.jit.gpu_plan.*` — compiler-facing
+  tensor-IR plan scaffold. It records schedule steps, liveness bytes, and the
+  single root materialization boundary; it refuses `CUSTOM` by default so core
+  framework GPU work cannot hide behind callback escape hatches.
+- Whitelisted opcodes: BUFFER, LOAD, CONST, CAST, MATMUL, CONV1D,
+  CONV1D_BACKWARD_INPUT, CONV1D_BACKWARD_WEIGHT, CONV1D_BACKWARD_BIAS,
+  CONV2D, CONV2D_BACKWARD_INPUT, CONV2D_BACKWARD_WEIGHT,
+  CONV2D_BACKWARD_BIAS, FUSED_ELEMENTWISE, CUSTOM.
 - `bg.kernels.flash_attention(Q, K, V, mask=None)` — opt-in CUSTOM op for FA-v2.
+- `nn.functional.conv1d(...)` / `nn.Conv1d(...)`,
+  `nn.functional.conv2d(...)` / `nn.Conv2d(...)`, and
+  `nn.functional.conv3d(...)` / `nn.Conv3d(...)` are primitive IR ops and can
+  route forward/backward gradient roots through generic tensor-plan WebGPU.
+
+### CNN parity in JIT
+- `nn.Conv1d`, `nn.Conv2d`, and `nn.Conv3d` are available as primitive
+  forward/backward IR with CPU handlers, symbolic VJPs, explicit vmap refusals,
+  and ONNX refusals.
+- `bg.realize_tensor_plan_webgpu(...)` lowers Conv1d/Conv2d/Conv3d
+  forward/backward through the generic tensor-plan bridge (`run_tensor_plan`)
+  instead of legacy per-op conv bridge methods.
+- `nn.ConvTranspose2d` remains available through `CUSTOM` NumPy realizers with
+  explicit backward closures.
+- Covered semantics: tuple stride/padding/dilation where applicable, groups,
+  output padding for ConvTranspose2d, module state_dict keys, and torch alias
+  exposure.
+- Conv1d/Conv2d/Conv3d forward/backward have generic tensor-plan WebGPU
+  coverage.
+- Remaining: default GPU `.backward()` mutation, optimizer residency, and
+  ConvTranspose2d WebGPU paths.
 
 ### Tiled GEMM + fused codegen + GPU cast (PRD-012a)
 - `matmulTiledDirect` — 16×16 tiled GEMM (workgroup-shared A/B tiles). Closes most of the gap PRD-012 was claiming via "megakernels".
@@ -86,9 +123,31 @@ Both ship under the same `unlocalhosted` npm scope. They can coexist in the same
 - 14 ops mapped (ADD/MUL/DIV/NEG/EXP/LOG/MATMUL/WHERE/CAST/REDUCE/RESHAPE/PERMUTE/CMP/BROADCAST_TO) + lifecycle.
 - `OnnxUnmappableOp` typed refusal for the rest.
 
-## Surface inventory — `browsergrad-grad`
+## Surface inventory — `browsergrad-grad` (v0.5.1)
 
-(Stable; unchanged from prior releases. PyTorch-shaped tensor + autograd, closure backward, NumPy-backed eager. See `packages/browsergrad-grad/README.md` for the full API.)
+Stable eager library. PyTorch-shaped tensor + autograd, closure backward,
+NumPy-backed by default. Current covered surface:
+
+- Tensor creation, dtype aliases, indexing/fancy indexing, broadcasting
+  arithmetic, reductions, reshape/view/permute/transpose, gather/scatter,
+  einsum, topk/sort, multinomial, no_grad.
+- Functional ops: activations, softmax/log_softmax, cross entropy/NLL/MSE/BCE,
+  padding/interpolation/normalization/cosine similarity, scaled dot-product
+  attention.
+- Layers: Linear, Conv1d/2d/3d, ConvTranspose2d, MaxPool2d/AvgPool2d,
+  AdaptiveAvgPool2d, BatchNorm1d/2d/3d, GroupNorm, InstanceNorm2d, LayerNorm,
+  Dropout/Dropout2d, Flatten, Sequential, Embedding, MultiHeadAttention,
+  stacked/bidirectional RNN/LSTM/GRU, common activation modules, loss modules.
+- Module ergonomics: train/eval propagation, forward hooks, buffers,
+  state_dict/load_state_dict, torch.save/load shim, torch alias install.
+- Optimizers/schedulers: SGD, Adam, AdamW, RMSprop, Adagrad, Adadelta plus
+  StepLR/CosineAnnealingLR/ReduceLROnPlateau/MultiStepLR/ExponentialLR/OneCycleLR.
+- Optional eager forward WebGPU dispatch: pass `device=` from
+  `createGradKernelDeviceBridge(device)` for 2D matmul/mm, last-dim softmax,
+  last-dim LayerNorm, and unmasked default-scale 2D scaled-dot-product
+  attention. Backward remains CPU closure autograd after forward materializes.
+
+See `packages/browsergrad-grad/README.md` for full API and examples.
 
 ## Surface inventory — `browsergrad-kernels`
 
@@ -98,12 +157,24 @@ WGSL kernels — each with a JS reference for conformance:
 - `relu`, `gelu` (elementwise)
 - `layernorm` (along last axis, optional gamma/beta)
 - `attention` (composed 3-kernel)
-- `flash_attention.ts` (FA-v2 forward — **known issue**, see below)
+- `flash_attention.ts` (FlashAttention forward with online softmax and strict real-WebGPU parity)
 - `fusedElementwiseDirect` — runtime WGSL codegen for arbitrary elementwise chains
+- `WebGpuRealizerBridge.conv1d*` / `conv2d*` — f32 Conv1d/Conv2d forward plus
+  input/weight/bias backward kernels over resident GPUBuffer handles,
+  including stride/padding/dilation and groups
 
 Plus the realizer-tier API:
 - `createWebGpuRealizerBridge(device)` — production bridge for browsergrad-jit.
 - `runDirect` / `materializeFloat32` / `uploadFloat32` — GPUBuffer-in/out dispatch path.
+- `runTensorGpuPlan` — generic f32 tensor-plan executor for BUFFER/LOAD,
+  2-D MATMUL, elementwise chains, RESHAPE, PERMUTE, BROADCAST_TO, and
+  REDUCE(sum/mean) rank <= 4, plus Conv1d/Conv2d/Conv3d forward/backward. It accepts
+  the snake_case `browsergrad-jit` plan payload, keeps intermediates
+  resident, and materializes only the declared root, matching the GPU-native
+  direction.
+- `WebGpuRealizerBridge.run_tensor_plan` — one graph-level bridge call from JIT
+  plan payload + seed buffers into `runTensorGpuPlan`; avoids legacy per-op
+  bridge dispatch for supported primitive tensor plans.
 
 ## Surface inventory — `browsergrad-runtime`
 
@@ -123,7 +194,11 @@ Real-WebGPU CI ships with the kernels package. Run with:
 pnpm --filter @unlocalhosted/browsergrad-kernels test:browser
 ```
 
-Launches Chromium via Playwright with WebGPU enabled. Tests the actual tiled GEMM, fused elementwise codegen, residency contract, and the `WebGpuRealizerBridge` end-to-end against a real `GPUDevice`. On macOS the browser is headed (Metal driver only exposed when visible); on Linux CI set `BG_BROWSER_HEADLESS=1`.
+Launches Chromium via Playwright with WebGPU enabled. Tests actual tiled GEMM,
+fused elementwise codegen, FlashAttention forward, Conv2d forward, residency
+contract, and the `WebGpuRealizerBridge` end-to-end against a real `GPUDevice`.
+On macOS the browser is headed (Metal driver only exposed when visible); on
+Linux CI set `BG_BROWSER_HEADLESS=1`.
 
 ## Performance baselines (NumPy realizer)
 
@@ -144,7 +219,6 @@ AMP on NumPy: not faster than f32 (NumPy lacks f16 SIMD); the value is correctne
 
 | Issue | Found by | Status |
 |---|---|---|
-| FA-v2 kernel: ~0.69 max abs diff vs composed reference | Real-WebGPU browser CI (PRD-011.5+012a) | Bit-deterministic; kernel logic bug. Tracked as PRD-012a follow-up. |
 | Trace cache misses on `requires_grad=True` graphs | Perf bench | Intentional (`_trace_cache.py:147` exclusion). Lifting would let backward graphs cache too. P1 follow-up. |
 
 ## PRD coverage
@@ -158,7 +232,7 @@ All 16 PRDs land at v0:
 | 011.5 (WGSL realizer seam) | ✅ Shipped |
 | 012 (megakernels) | ✅ Split: PRD-012a (tiled GEMM + fused codegen + CAST) shipped. PRD-012b (cost model + producer-consumer detection) shipped at `bg.jit.cost_model.*`. PRD-012c (transformer_block megakernel constructor) shipped at `bg.kernels.transformer_block(...)`. |
 | 013 (lab platform) | ✅ Shipped |
-| 014 (functional transforms) | ✅ Shipped — `grad`, `vjp`, `functional_call`, full `vmap` with 17 active rules + 4 refusal stubs (RANDOM, MASK, CUSTOM, STORE). `vmap(grad(fn))` composition works. |
+| 014 (functional transforms) | ✅ Shipped — `grad`, `vjp`, `functional_call`, full `vmap` with 17 active rules + 16 refusal stubs (RANDOM, MASK, CUSTOM, CONV1D, CONV1D_BACKWARD_INPUT, CONV1D_BACKWARD_WEIGHT, CONV1D_BACKWARD_BIAS, CONV2D, CONV2D_BACKWARD_INPUT, CONV2D_BACKWARD_WEIGHT, CONV2D_BACKWARD_BIAS, CONV3D, CONV3D_BACKWARD_INPUT, CONV3D_BACKWARD_WEIGHT, CONV3D_BACKWARD_BIAS, STORE). `vmap(grad(fn))` composition works. |
 | 015 (custom WGSL) | ✅ Shipped |
 | 016 (ONNX export) | ✅ Shipped |
 
@@ -166,9 +240,9 @@ All 16 PRDs land at v0:
 
 | Item | Reason |
 |---|---|
-| **Backward through GPU realizer** | NumPy realizer handles all `.backward()` calls; GPU path is forward-inference only. |
+| **Default `.backward()` through GPU realizer** | NumPy realizer handles autograd mutation. Explicit `realize_webgpu(...)` can run selected backward IR roots such as Conv1d/Conv2d input/weight/bias grads, but `.backward()` and optimizers are not GPU-resident. |
 | **f16/bf16 cast kernels** | Future work — current CAST handler is f32→f32 only. |
-| **ConvTranspose / Conv3d / dilated / groups** | Out of v0 scope across both grad and jit. |
+| **Primitive/WebGPU ConvTranspose in `browsergrad-jit`** | Lazy `browsergrad-jit` now has primitive Conv1d/Conv2d/Conv3d forward/backward IR with CPU handlers, symbolic VJPs, and generic tensor-plan WebGPU lowering. ConvTranspose2d still uses CUSTOM NumPy realizers + VJPs; ConvTranspose2d WebGPU path is pending. |
 | **torch.cuda.\*, torch.compile, torch.fx** | Out of scope for `install_torch_alias`. Raises `AttributeError`. |
 | **Cross-browser WGSL compile-error line/column parsing** | Vendor diagnostic formats differ; ship raw browser messages and call it honest. |
 | **vmap of RANDOM** | Needs PRNG key splits (JAX-style PRNGKey). Refuses with clear message; user can hand-write a key-split pattern. |
