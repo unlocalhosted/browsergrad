@@ -17,6 +17,10 @@ import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
 import { deviceLaunchTreeIsExternallySilent } from "./runtime_elision.js";
 import { createCudaGridSyncPhasePlan, createCudaRuntimePlan } from "./runtime_plan.js";
+import type {
+  SemanticExpression,
+  SemanticKernelIrOperation,
+} from "./semantic_ir.js";
 import {
   constantBufferInputs,
   deviceGlobalBufferInputs,
@@ -33,8 +37,6 @@ import {
   type CompiledKernelInput,
   type CompileCudaLiteOptions,
   type CudaLiteDiagnostic,
-  type CudaLiteExpression,
-  type CudaLiteStatement,
   type KernelLaunch,
 } from "./types.js";
 
@@ -415,7 +417,7 @@ function createHostLiftedDynamicWebGpuPlan(
   const parentInput = createWgslRunInput(compiled, input);
   const buffers: Record<string, WgslTypedArray> = { ...parentInput.buffers };
   const residentBuffers = { ...parentInput.residentBuffers };
-  const parentDispatchNeeded = hostDynamicParentDispatchNeeded(internalBackendIrFor(compiled).body);
+  const parentDispatchNeeded = hostDynamicParentDispatchNeeded(compiled.kernelIr.operations);
   const poolOffsetUpdates = plan.poolOffsetUpdates ?? {};
   if (parentDispatchNeeded && Object.keys(poolOffsetUpdates).length > 0) {
     return unsupportedWebGpuPlan(compiled, [
@@ -493,43 +495,49 @@ function applyHostDynamicPoolOffsetUpdates(
   }
 }
 
-function hostDynamicParentDispatchNeeded(statements: readonly CudaLiteStatement[]): boolean {
-  return statements.some(statementNeedsParentDispatch);
+function hostDynamicParentDispatchNeeded(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.some(operationNeedsParentDispatch);
 }
 
-function statementNeedsParentDispatch(statement: CudaLiteStatement): boolean {
-  switch (statement.kind) {
+function operationNeedsParentDispatch(operation: SemanticKernelIrOperation): boolean {
+  switch (operation.kind) {
     case "block":
-      return statement.body.some(statementNeedsParentDispatch);
-    case "var":
-      return statement.init === undefined ? false : expressionNeedsParentDispatch(statement.init);
-    case "dim3":
-    case "cooperative-group":
-    case "kernel-launch":
+      return operation.body.some(operationNeedsParentDispatch);
+    case "declare":
+      return operation.init === undefined ? false : expressionNeedsParentDispatch(operation.init);
+    case "dim3-declare":
+      return operation.args.some(expressionNeedsParentDispatch);
+    case "cooperative-group-declare":
+    case "device-launch":
     case "return":
     case "continue":
     case "break":
       return false;
-    case "asm":
+    case "inline-asm":
+    case "load":
       return true;
-    case "expr":
-      return expressionNeedsParentDispatch(statement.expression);
-    case "if":
-      return expressionNeedsParentDispatch(statement.condition) ||
-        statement.consequent.some(statementNeedsParentDispatch) ||
-        (statement.alternate?.some(statementNeedsParentDispatch) ?? false);
-    case "for":
-    case "while":
-    case "do-while":
+    case "store":
+      return true;
+    case "atomic":
+      return true;
+    case "call":
+      return semanticCallNeedsParentDispatch(operation.callee, operation.args);
+    case "expression":
+      return expressionNeedsParentDispatch(operation.expression);
+    case "branch":
+      return expressionNeedsParentDispatch(operation.condition) ||
+        operation.consequent.some(operationNeedsParentDispatch) ||
+        operation.alternate.some(operationNeedsParentDispatch);
+    case "loop":
+    case "barrier":
       return true;
   }
 }
 
-function expressionNeedsParentDispatch(expression: CudaLiteExpression): boolean {
+function expressionNeedsParentDispatch(expression: SemanticExpression): boolean {
   switch (expression.kind) {
-    case "number":
-    case "string":
-    case "identifier":
+    case "literal":
+    case "symbol":
       return false;
     case "initializer":
       return expression.elements.some(expressionNeedsParentDispatch);
@@ -548,20 +556,33 @@ function expressionNeedsParentDispatch(expression: CudaLiteExpression): boolean 
         expressionNeedsParentDispatch(expression.consequent) ||
         expressionNeedsParentDispatch(expression.alternate);
     case "update":
-      return expression.argument.kind !== "identifier";
+      return expression.argument.kind !== "symbol";
     case "assignment":
-      return expression.left.kind !== "identifier" || expressionNeedsParentDispatch(expression.right);
+      return expression.target.kind !== "symbol" || expressionNeedsParentDispatch(expression.value);
     case "sequence":
       return expression.expressions.some(expressionNeedsParentDispatch);
     case "call": {
-      const name = expression.callee.kind === "identifier" ? expression.callee.name : undefined;
-      if (name !== undefined && HOST_RUNTIME_QUERY_WRITE_CALLS.has(name)) return true;
-      if (name !== undefined && HOST_SIDE_EFFECT_FREE_CALLS.has(name)) {
-        return expression.args.some(expressionNeedsParentDispatch);
-      }
-      return true;
+      const name = semanticCallName(expression.callee);
+      return semanticCallNeedsParentDispatch(name, expression.args);
     }
   }
+}
+
+function semanticCallNeedsParentDispatch(name: string | undefined, args: readonly SemanticExpression[]): boolean {
+  if (name !== undefined && HOST_RUNTIME_QUERY_WRITE_CALLS.has(name)) return true;
+  if (name !== undefined && HOST_SIDE_EFFECT_FREE_CALLS.has(name)) {
+    return args.some(expressionNeedsParentDispatch);
+  }
+  return true;
+}
+
+function semanticCallName(expression: SemanticExpression): string | undefined {
+  if (expression.kind === "symbol") return expression.name;
+  if (expression.kind === "member") {
+    const objectName = semanticCallName(expression.object);
+    return objectName ? `${objectName}.${expression.property}` : undefined;
+  }
+  return undefined;
 }
 
 function childExecutionPlanOptions(options: CudaWebGpuExecutionPlanOptions): CudaWebGpuExecutionPlanOptions {

@@ -25,10 +25,12 @@ resident buffers, and readback mechanics.
 
 ## Source Of Truth
 
-- `src/types.ts`: AST, diagnostics, Kernel IR, launch/input/result types.
+- `src/types.ts`: AST, diagnostics, private backend IR, launch/input/result types.
 - `src/parser.ts` and `src/lexer.ts`: syntax only. No semantic rewrites.
 - `src/analyzer.ts`: symbols, types, feature gates, safety checks, and lowering
   eligibility.
+- `src/semantic_ir.ts`: semantic model plus the new backend-neutral Kernel IR.
+  New compiler passes should target this path first.
 - `src/reference.ts`: CPU truth and traces from Kernel IR semantics.
 - `src/wgsl.ts`: WGSL emission only. It should not rediscover CUDA semantics.
 - `src/runtime_plan.ts`: CUDA runtime operations discovered from IR.
@@ -61,6 +63,14 @@ If a feature needs support in multiple files, add it in this order:
 - No assignment-specific names or course-specific branches in compiler logic.
 - Every unsupported CUDA feature maps to a semantic family in
   `compatibility.ts`.
+- Every emitted diagnostic/blocker code must have an explicit
+  `compatibility.ts` feature record. The compiler unit suite source-scans for
+  drift.
+- During the migration, `CompiledCudaLiteKernel.kernelIr` is the public semantic
+  IR contract. The AST-backed backend bridge is private implementation state
+  for reference, WGSL, and WebGPU orchestration while those paths migrate.
+  Do not add public or feature-level dependencies on the private bridge; migrate
+  feature families into `kernelIr` instead.
 - Semantic Kernel IR operations must expose compiler meaning, not parser shape:
   stores carry typed `MemoryRef` targets and read refs, calls/atomics/barriers
   are explicit operations, and backend code may not infer execution readiness
