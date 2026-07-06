@@ -60,6 +60,7 @@ interface SemanticReferenceContext {
   readonly buffers: Map<string, WgslTypedArray>;
   readonly constants: Map<string, number | WgslTypedArray>;
   readonly deviceGlobals: Map<string, WgslTypedArray>;
+  readonly sharedMemory: Map<string, WgslTypedArray>;
   readonly storageOffsets: Map<string, number>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly locals: Map<string, SemanticValue>;
@@ -83,6 +84,7 @@ interface MutableTrace {
 export function canRunCompiledKernelSemanticReference(compiled: CompiledCudaLiteKernel): boolean {
   return compiled.kernelIr.params.every(semanticReferenceParamSupported) &&
     compiled.kernelIr.memory.every(semanticReferenceMemorySymbolSupported) &&
+    semanticReferenceSharedShapeSupported(compiled) &&
     unsupportedSemanticReferenceOperation(compiled.kernelIr.operations, compiled) === undefined;
 }
 
@@ -93,6 +95,9 @@ export function runCompiledKernelSemanticReference(
 ): ReferenceKernelResult {
   const unsupported = unsupportedSemanticReferenceOperation(compiled.kernelIr.operations, compiled);
   if (unsupported) throw semanticReferenceError(`semantic reference does not support ${unsupported.kind}`, unsupported.span);
+  if (!semanticReferenceSharedShapeSupported(compiled)) {
+    throw semanticReferenceError("semantic reference does not support complex shared-memory barrier shape", compiled.kernelIr.span);
+  }
   validateCudaKernelLaunch(launch, compiled.kernelIr.workgroupSize);
   validateSemanticReferenceInput(compiled, input);
 
@@ -106,6 +111,8 @@ export function runCompiledKernelSemanticReference(
   for (let bz = 0; bz < launch.gridDim[2]; bz++) {
     for (let by = 0; by < launch.gridDim[1]; by++) {
       for (let bx = 0; bx < launch.gridDim[0]; bx++) {
+        const sharedMemory = semanticReferenceSharedMemory(compiled);
+        const blockContexts: SemanticReferenceContext[] = [];
         for (let tz = 0; tz < launch.blockDim[2]; tz++) {
           for (let ty = 0; ty < launch.blockDim[1]; ty++) {
             for (let tx = 0; tx < launch.blockDim[0]; tx++) {
@@ -118,11 +125,12 @@ export function runCompiledKernelSemanticReference(
                 sharedWrites: [],
               };
               traces.push(trace);
-              execSemanticOperations(compiled.kernelIr.operations, {
+              blockContexts.push({
                 compiled,
                 buffers,
                 constants,
                 deviceGlobals,
+                sharedMemory,
                 storageOffsets: new Map(),
                 scalars,
                 locals: new Map(),
@@ -135,6 +143,8 @@ export function runCompiledKernelSemanticReference(
             }
           }
         }
+        if (sharedMemory.size > 0) runSemanticBlockPhases(compiled.kernelIr.operations, blockContexts);
+        else for (const context of blockContexts) execSemanticOperations(compiled.kernelIr.operations, context);
       }
     }
   }
@@ -161,6 +171,10 @@ function unsupportedSemanticReferenceOperation(
   for (const operation of operations) {
     switch (operation.kind) {
       case "declare":
+        if (operation.target.addressSpace === "shared") {
+          if (operation.target.pointer || !semanticReferenceScalarTypeSupported(operation.target.valueType)) return operation;
+          break;
+        }
         if (operation.target.addressSpace !== "local" || operation.target.pointer) return operation;
         if (!semanticReferenceScalarTypeSupported(operation.target.valueType)) return operation;
         if (operation.target.dimensions.length > 0 && operation.init && !semanticReferenceLocalArrayInitSupported(operation.init)) return operation;
@@ -192,6 +206,9 @@ function unsupportedSemanticReferenceOperation(
       case "return":
         if (operation.value && (!allowReturnValue || !semanticReferenceExpressionSupported(operation.value, "scalar", compiled))) return operation;
         break;
+      case "barrier":
+        if (operation.callee !== "__syncthreads") return operation;
+        break;
       case "break":
       case "continue":
         break;
@@ -220,6 +237,19 @@ function semanticReferenceMemorySymbolSupported(symbol: CompiledCudaLiteKernel["
   return false;
 }
 
+function semanticReferenceSharedShapeSupported(compiled: CompiledCudaLiteKernel): boolean {
+  if (!compiled.kernelIr.memory.some((symbol) => symbol.kind === "shared")) return true;
+  return operationsHaveOnlyTopLevelSharedBarriers(compiled.kernelIr.operations);
+}
+
+function operationsHaveOnlyTopLevelSharedBarriers(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.every((operation) =>
+    operation.kind !== "branch" &&
+    operation.kind !== "loop" &&
+    operation.kind !== "block"
+  );
+}
+
 function semanticReferenceLoopInitSupported(
   init: SemanticKernelIrOperation | SemanticExpression,
   compiled: CompiledCudaLiteKernel,
@@ -234,11 +264,12 @@ function semanticReferenceScalarTypeSupported(valueType: CudaLiteScalarType | un
 }
 
 function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
-  if (ref.addressSpace !== "storage" && ref.addressSpace !== "constant" && ref.addressSpace !== "device-global" && ref.addressSpace !== "local") {
+  if (ref.addressSpace !== "storage" && ref.addressSpace !== "constant" && ref.addressSpace !== "device-global" && ref.addressSpace !== "local" && ref.addressSpace !== "shared") {
     return false;
   }
   if (ref.fields.length > 0) return false;
   if (ref.addressSpace === "local" && ref.indices.length === 0) return false;
+  if (ref.addressSpace === "shared" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "storage" && ref.indices.length === 0) return false;
   if (ref.addressSpace === "constant" && ref.indices.length !== 1) return false;
   if (ref.addressSpace === "device-global" && ref.indices.length > 1) return false;
@@ -435,6 +466,7 @@ function execSemanticOperations(
   for (const operation of operations) {
     switch (operation.kind) {
       case "declare":
+        if (operation.target.addressSpace === "shared") break;
         context.locals.set(operation.target.name, semanticDeclareValue(operation, context));
         break;
       case "store":
@@ -470,6 +502,8 @@ function execSemanticOperations(
       case "return":
         if (operation.value) context.returnValue = evalSemanticExpression(operation.value, context);
         return "return";
+      case "barrier":
+        break;
       case "break":
         return "break";
       case "continue":
@@ -739,6 +773,7 @@ function evalSemanticFunctionCall(
     buffers: context.buffers,
     constants: context.constants,
     deviceGlobals: context.deviceGlobals,
+    sharedMemory: context.sharedMemory,
     storageOffsets: new Map(context.storageOffsets),
     scalars: context.scalars,
     locals,
@@ -796,7 +831,7 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
     indices.unshift(target.index);
     target = target.target;
   }
-  if (target.kind !== "symbol" || (target.addressSpace !== "storage" && target.addressSpace !== "constant" && target.addressSpace !== "device-global" && target.addressSpace !== "local")) return undefined;
+  if (target.kind !== "symbol" || (target.addressSpace !== "storage" && target.addressSpace !== "constant" && target.addressSpace !== "device-global" && target.addressSpace !== "local" && target.addressSpace !== "shared")) return undefined;
   return {
     base: target.name,
     addressSpace: target.addressSpace,
@@ -813,6 +848,15 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
     if (!Array.isArray(buffer)) throw semanticReferenceError(`missing local array '${ref.base}'`, ref.span);
     const index = flatIndex(ref, context);
     return Number(buffer[index] ?? 0);
+  }
+  if (ref.addressSpace === "shared") {
+    const buffer = context.sharedMemory.get(ref.base);
+    if (!buffer) throw semanticReferenceError(`missing shared memory '${ref.base}'`, ref.span);
+    const index = flatIndex(ref, context);
+    const ok = index >= 0 && index < buffer.length;
+    const value = ok ? Number(buffer[index]) : 0;
+    context.trace.sharedReads.push({ name: ref.base, index, value, ok });
+    return value;
   }
   const buffer = ref.addressSpace === "constant"
     ? context.constants.get(ref.base)
@@ -836,6 +880,15 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
     if (index >= 0 && index < buffer.length) buffer[index] = value;
     return;
   }
+  if (ref.addressSpace === "shared") {
+    const buffer = context.sharedMemory.get(ref.base);
+    if (!buffer) throw semanticReferenceError(`missing shared memory '${ref.base}'`, ref.span);
+    const index = flatIndex(ref, context);
+    const ok = index >= 0 && index < buffer.length;
+    if (ok) buffer[index] = value;
+    context.trace.sharedWrites.push({ name: ref.base, index, value, ok });
+    return;
+  }
   const buffer = ref.addressSpace === "device-global" ? context.deviceGlobals.get(ref.base) : context.buffers.get(ref.base);
   if (!buffer) throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
   const index = flatIndex(ref, context);
@@ -845,10 +898,13 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
 }
 
 function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {
-  if (ref.addressSpace === "local") {
-    const symbol = context.compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === "local");
-    if (!symbol) throw semanticReferenceError(`unknown local array '${ref.base}'`, ref.span);
-    if (ref.indices.length !== symbol.dimensions.length) throw semanticReferenceError(`local array '${ref.base}' index rank mismatch`, ref.span);
+  if (ref.addressSpace === "local" || ref.addressSpace === "shared") {
+    const symbol = context.compiled.kernelIr.memory.find((item) => item.name === ref.base && item.kind === ref.addressSpace);
+    if (!symbol) throw semanticReferenceError(`unknown ${ref.addressSpace} array '${ref.base}'`, ref.span);
+    if (ref.addressSpace === "shared" && symbol.dimensions.length === 0 && ref.indices.length === 1) {
+      return Math.trunc(evalNumber(ref.indices[0]!, context));
+    }
+    if (ref.indices.length !== symbol.dimensions.length) throw semanticReferenceError(`${ref.addressSpace} array '${ref.base}' index rank mismatch`, ref.span);
     return flatIndexForDimensions(symbol.dimensions, ref.indices.map((index) => Math.trunc(evalNumber(index, context))));
   }
   if (ref.addressSpace === "device-global") {
@@ -963,6 +1019,43 @@ function validateSemanticReferenceInput(compiled: CompiledCudaLiteKernel, input:
   }
 }
 
+function runSemanticBlockPhases(
+  operations: readonly SemanticKernelIrOperation[],
+  contexts: readonly SemanticReferenceContext[],
+): void {
+  for (const segment of semanticBarrierSegments(operations)) {
+    for (const context of contexts) {
+      const control = execSemanticOperations(segment, context);
+      if (control === "break" || control === "continue") {
+        throw semanticReferenceError(`semantic reference unexpected ${control} across shared-memory phase`, context.compiled.kernelIr.span);
+      }
+    }
+  }
+}
+
+function semanticBarrierSegments(operations: readonly SemanticKernelIrOperation[]): readonly (readonly SemanticKernelIrOperation[])[] {
+  const segments: SemanticKernelIrOperation[][] = [[]];
+  for (const operation of operations) {
+    if (operation.kind === "barrier") {
+      segments.push([]);
+      continue;
+    }
+    segments.at(-1)!.push(operation);
+  }
+  return segments;
+}
+
+function semanticReferenceSharedMemory(compiled: CompiledCudaLiteKernel): Map<string, WgslTypedArray> {
+  const out = new Map<string, WgslTypedArray>();
+  for (const symbol of compiled.kernelIr.memory.filter((item) => item.kind === "shared")) {
+    out.set(
+      symbol.name,
+      typedArrayForScalar(symbol.valueType, compiled.dynamicSharedMemory?.[symbol.name] ?? totalElements(symbol.dimensions)),
+    );
+  }
+  return out;
+}
+
 function semanticReferenceConstants(compiled: CompiledCudaLiteKernel, input: CompiledKernelInput): Map<string, number | WgslTypedArray> {
   const constants = new Map<string, number | WgslTypedArray>();
   for (const constant of compiled.kernelIr.memory.filter((symbol) => symbol.kind === "constant")) {
@@ -970,6 +1063,12 @@ function semanticReferenceConstants(compiled: CompiledCudaLiteKernel, input: Com
     if (value !== undefined) constants.set(constant.name, value);
   }
   return constants;
+}
+
+function typedArrayForScalar(valueType: CudaLiteScalarType | undefined, length: number): WgslTypedArray {
+  if (valueType === "int") return new Int32Array(length);
+  if (valueType === "uint") return new Uint32Array(length);
+  return new Float32Array(length);
 }
 
 function cloneBuffers(buffers: Readonly<Record<string, WgslTypedArray>>): Map<string, WgslTypedArray> {
@@ -1013,8 +1112,8 @@ function freezeTrace(trace: MutableTrace): KernelThreadTrace {
     threadIdx: trace.threadIdx,
     reads: trace.reads.map((item) => ({ ...item })),
     writes: trace.writes.map((item) => ({ ...item })),
-    sharedReads: [],
-    sharedWrites: [],
+    sharedReads: trace.sharedReads.map((item) => ({ ...item })),
+    sharedWrites: trace.sharedWrites.map((item) => ({ ...item })),
   };
 }
 

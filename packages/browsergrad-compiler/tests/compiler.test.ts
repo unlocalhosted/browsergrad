@@ -512,17 +512,25 @@ __global__ void sharedReverse(float* out) {
   out[tid] = tile[3 - tid];
 }
 `, { workgroupSize: [4, 1, 1] });
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
     const result = runCompiledKernelReference(
       compiled,
       { buffers: { out: new Float32Array(4) } },
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(false);
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
     expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("var<workgroup> tile: array<f32, 4>;");
     expect(compiled.wgsl).toContain("workgroupBarrier();");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([4, 3, 2, 1]);
+    expect(semanticResult.trace.some((thread) => thread.sharedWrites.length > 0)).toBe(true);
+    expect(semanticResult.trace.some((thread) => thread.sharedReads.length > 0)).toBe(true);
     expect([...result.buffers.out as Float32Array]).toEqual([4, 3, 2, 1]);
   });
 
