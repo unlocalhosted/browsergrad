@@ -94,8 +94,9 @@ export interface CudaWebGpuExecutionPlanOptions {
   readonly hostDynamicLaunchDepth?: number;
 }
 
-const peerCopyProgramCache = new Map<CudaPeerCopyOperation["valueType"], WgslKernelProgram>();
-const peerFillProgramCache = new Map<CudaPeerCopyOperation["valueType"], WgslKernelProgram>();
+const peerCopyProgramCache = new Map<"float" | "int" | "uint", WgslKernelProgram>();
+const peerFillProgramCache = new Map<"float" | "int" | "uint", WgslKernelProgram>();
+let peerByteFillProgramCache: WgslKernelProgram | undefined;
 const DEFAULT_MAX_HOST_DYNAMIC_LAUNCH_DEPTH = 8;
 const HOST_SIDE_EFFECT_FREE_CALLS = new Set([
   "cudaDeviceSynchronize",
@@ -801,6 +802,51 @@ function definePeerFillProgram(fill: CudaPeerCopyOperation): WgslKernelProgram {
   return program;
 }
 
+function definePeerByteFillProgram(fill: CudaPeerCopyOperation): WgslKernelProgram {
+  if (fill.kind !== "fill-bytes") throw new Error("peer byte-fill program requires a byte-fill operation");
+  if (peerByteFillProgramCache) return peerByteFillProgramCache;
+  const program = defineWgslKernelProgram({
+    name: "bg_peer_fill_bytes",
+    workgroupSize: [64, 1, 1],
+    bindings: [
+      { kind: "storage", name: "bg_peer_dst", valueType: "u32", access: "read_write", binding: 0 },
+      { kind: "uniform", name: "params", byteLength: 16, binding: 1 },
+    ],
+    wgsl: [
+      "struct Params {",
+      "  dst_byte_base: u32,",
+      "  byte_count: u32,",
+      "  fill_value: u32,",
+      "};",
+      "@group(0) @binding(0) var<storage, read_write> bg_peer_dst: array<u32>;",
+      "@group(0) @binding(1) var<uniform> params: Params;",
+      "@compute @workgroup_size(64, 1, 1)",
+      "fn main(@builtin(global_invocation_id) gid: vec3<u32>) {",
+      "  let start_byte = params.dst_byte_base;",
+      "  let end_byte = start_byte + params.byte_count;",
+      "  let word_index = (start_byte >> 2u) + gid.x;",
+      "  let word_base = word_index << 2u;",
+      "  var mask: u32 = 0u;",
+      "  var value_bits: u32 = 0u;",
+      "  for (var lane: u32 = 0u; lane < 4u; lane = lane + 1u) {",
+      "    let byte_index = word_base + lane;",
+      "    if (byte_index >= start_byte && byte_index < end_byte) {",
+      "      let shift = lane * 8u;",
+      "      mask = mask | (255u << shift);",
+      "      value_bits = value_bits | ((params.fill_value & 255u) << shift);",
+      "    }",
+      "  }",
+      "  if (mask != 0u) {",
+      "    let current = bg_peer_dst[word_index];",
+      "    bg_peer_dst[word_index] = (current & ~mask) | value_bits;",
+      "  }",
+      "}",
+    ].join("\n"),
+  });
+  peerByteFillProgramCache = program;
+  return program;
+}
+
 function packPeerCopyParams(copy: CudaPeerCopyOperation): Uint8Array {
   if (copy.kind !== "copy") throw new Error("peer copy params require a copy operation");
   const bytes = new Uint8Array(16);
@@ -821,6 +867,16 @@ function packPeerFillParams(fill: CudaPeerCopyOperation): Uint8Array {
   return bytes;
 }
 
+function packPeerByteFillParams(fill: CudaPeerCopyOperation): Uint8Array {
+  if (fill.kind !== "fill-bytes") throw new Error("peer byte-fill params require a byte-fill operation");
+  const bytes = new Uint8Array(16);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, fill.dstByteOffset, true);
+  view.setUint32(4, fill.byteCount, true);
+  view.setUint32(8, fill.byteValue & 0xff, true);
+  return bytes;
+}
+
 function repeatedBytePattern(byteValue: number): number {
   const byte = byteValue & 0xff;
   return (byte | (byte << 8) | (byte << 16) | (byte << 24)) >>> 0;
@@ -832,6 +888,17 @@ function appendPeerCopySteps(
   storageAliases: Readonly<Record<string, string>> = {},
 ): void {
   for (const copy of copies) {
+    if (copy.kind === "fill-bytes") {
+      steps.push({
+        program: definePeerByteFillProgram(copy),
+        launch: { dispatchCount: [Math.max(byteFillWordCount(copy), 1), 1, 1] },
+        storageAliases: {
+          bg_peer_dst: storageAliases[copy.dstRoot] ?? copy.dstRoot,
+        },
+        uniforms: { params: packPeerByteFillParams(copy) },
+      });
+      continue;
+    }
     if (copy.kind === "fill") {
       steps.push({
         program: definePeerFillProgram(copy),
@@ -853,6 +920,13 @@ function appendPeerCopySteps(
       uniforms: { params: packPeerCopyParams(copy) },
     });
   }
+}
+
+function byteFillWordCount(fill: Extract<CudaPeerCopyOperation, { readonly kind: "fill-bytes" }>): number {
+  const firstWord = Math.trunc(fill.dstByteOffset / 4);
+  const lastByteExclusive = fill.dstByteOffset + fill.byteCount;
+  const lastWordExclusive = Math.trunc((lastByteExclusive + 3) / 4);
+  return Math.max(0, lastWordExclusive - firstWord);
 }
 
 function getOrCompileDynamicChild(

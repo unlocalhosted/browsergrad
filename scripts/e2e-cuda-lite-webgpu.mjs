@@ -144,6 +144,16 @@ __global__ void runtimeCopy(float *dst, const float *src, const unsigned int *bi
     cudaStreamDestroy(stream);
   }
 }`,
+  runtimeByteFill: `
+__global__ void runtimeByteFill(unsigned int *bits) {
+  cudaStream_t stream;
+  if (threadIdx.x == 0) {
+    cudaStreamCreate(&stream);
+    cudaMemset(bits, 0, 3);
+    cudaMemsetAsync(bits + 1, 0x7f, 5, stream);
+    cudaStreamDestroy(stream);
+  }
+}`,
   dynamicLaunch: `
 __global__ void child(float *dst, int n) {
   int idx = threadIdx.x;
@@ -9378,6 +9388,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "dst",
             expectedOutput: { type: "Float32Array", data: [2.5, 3.5, 4.5, 3.5] },
+          },
+          {
+            name: "runtime:byte-fill",
+            source: SOURCES.runtimeByteFill,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                bits: new Uint32Array([0xffffffff, 0, 0]),
+              },
+            }),
+            output: "bits",
+            expectedOutput: { type: "Uint32Array", data: [0xff000000, 0x7f7f7f7f, 0x0000007f] },
           },
           {
             name: "runtime:host-peer-copy-sync",

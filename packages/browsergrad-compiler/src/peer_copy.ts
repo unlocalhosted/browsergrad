@@ -42,7 +42,7 @@ export type CudaPeerCopyBlockerCode =
   | "parent-not-single-invocation"
   | "arguments-not-host-evaluable";
 
-export type CudaPeerCopyOperation = CudaPeerCopyBufferOperation | CudaPeerFillBufferOperation;
+export type CudaPeerCopyOperation = CudaPeerCopyBufferOperation | CudaPeerFillBufferOperation | CudaPeerByteFillBufferOperation;
 
 export interface CudaPeerCopyBufferOperation {
   readonly kind: "copy";
@@ -62,6 +62,15 @@ export interface CudaPeerFillBufferOperation {
   readonly dstOffset: number;
   readonly elementCount: number;
   readonly valueType: "float" | "int" | "uint";
+  readonly byteValue: number;
+}
+
+export interface CudaPeerByteFillBufferOperation {
+  readonly kind: "fill-bytes";
+  readonly expression: CudaLiteCallExpression;
+  readonly dstRoot: string;
+  readonly dstByteOffset: number;
+  readonly byteCount: number;
   readonly byteValue: number;
 }
 
@@ -348,7 +357,7 @@ function createPeerFillOperation(
   env: ReadonlyMap<string, HostEvalValue>,
   input: CompiledKernelInput,
   deviceGlobals: readonly CudaLiteDeviceGlobal[],
-): CudaPeerFillBufferOperation | undefined {
+): CudaPeerFillBufferOperation | CudaPeerByteFillBufferOperation | undefined {
   const dst = expression.args[0] ? evaluatePointerArgument(expression.args[0], env, input) : undefined;
   const value = expression.args[1] ? evaluateHostNumber(expression.args[1], env, input) : undefined;
   const count = expression.args[2] ? evaluateHostNumber(expression.args[2], env, input) : undefined;
@@ -357,9 +366,21 @@ function createPeerFillOperation(
   const dstBuffer = copyBufferViewFor(input, dst.root, deviceGlobals);
   if (!dstBuffer) return undefined;
   const elementSize = dstBuffer.elementSize;
-  if (Math.trunc(count) % elementSize !== 0) return undefined;
-  const elementCount = Math.trunc(count) / elementSize;
-  if (dst.offset + elementCount > dstBuffer.elementLength) return undefined;
+  const byteCount = Math.trunc(count);
+  const byteOffset = dst.offset * elementSize;
+  const byteLength = dstBuffer.elementLength * elementSize;
+  if (!Number.isInteger(count) || byteOffset + byteCount > byteLength) return undefined;
+  if (byteCount % elementSize !== 0) {
+    return {
+      kind: "fill-bytes",
+      expression,
+      dstRoot: dst.root,
+      dstByteOffset: byteOffset,
+      byteCount,
+      byteValue: Math.trunc(value) & 0xff,
+    };
+  }
+  const elementCount = byteCount / elementSize;
   return {
     kind: "fill",
     expression,
@@ -388,8 +409,10 @@ function createPeerFill2DOperations(
   if (!dstBuffer) return undefined;
   const elementSize = dstBuffer.elementSize;
   const byteValues = [pitchBytes, rowBytes];
-  if (byteValues.some((byteValue) => !Number.isInteger(byteValue) || Math.trunc(byteValue) % elementSize !== 0)) return undefined;
+  if (byteValues.some((byteValue) => !Number.isInteger(byteValue))) return undefined;
   if (!Number.isInteger(rows)) return undefined;
+  const byteLength = dstBuffer.elementLength * elementSize;
+  const alignedRows = byteValues.every((byteValue) => Math.trunc(byteValue) % elementSize === 0);
   const pitch = Math.trunc(pitchBytes) / elementSize;
   const elementCount = Math.trunc(rowBytes) / elementSize;
   const rowCount = Math.trunc(rows);
@@ -406,17 +429,31 @@ function createPeerFill2DOperations(
     }];
   }
   for (let row = 0; row < rowCount; row++) {
-    const dstOffset = dst.offset + row * pitch;
-    if (dstOffset + elementCount > dstBuffer.elementLength) return undefined;
-    out.push({
-      kind: "fill",
-      expression,
-      dstRoot: dst.root,
-      dstOffset,
-      elementCount,
-      valueType: dstBuffer.valueType,
-      byteValue: Math.trunc(value) & 0xff,
-    });
+    if (alignedRows) {
+      const dstOffset = dst.offset + row * pitch;
+      if (dstOffset + elementCount > dstBuffer.elementLength) return undefined;
+      out.push({
+        kind: "fill",
+        expression,
+        dstRoot: dst.root,
+        dstOffset,
+        elementCount,
+        valueType: dstBuffer.valueType,
+        byteValue: Math.trunc(value) & 0xff,
+      });
+    } else {
+      const dstByteOffset = (dst.offset * elementSize) + row * Math.trunc(pitchBytes);
+      const byteCount = Math.trunc(rowBytes);
+      if (dstByteOffset + byteCount > byteLength) return undefined;
+      out.push({
+        kind: "fill-bytes",
+        expression,
+        dstRoot: dst.root,
+        dstByteOffset,
+        byteCount,
+        byteValue: Math.trunc(value) & 0xff,
+      });
+    }
   }
   return out;
 }

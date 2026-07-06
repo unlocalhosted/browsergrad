@@ -3583,12 +3583,11 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
       "device-sync",
     ]);
     expect(plan.supported).toBe(true);
-    expect(plan.copies.map((copy) => ({
-      kind: copy.kind,
-      dstOffset: copy.dstOffset,
-      srcOffset: copy.kind === "copy" ? copy.srcOffset : undefined,
-      elementCount: copy.elementCount,
-    }))).toEqual([
+    expect(plan.copies.map((copy) => copy.kind === "copy"
+      ? { kind: copy.kind, dstOffset: copy.dstOffset, srcOffset: copy.srcOffset, elementCount: copy.elementCount }
+      : copy.kind === "fill"
+        ? { kind: copy.kind, dstOffset: copy.dstOffset, srcOffset: undefined, elementCount: copy.elementCount }
+        : { kind: copy.kind, dstOffset: undefined, srcOffset: undefined, elementCount: undefined })).toEqual([
       { kind: "fill", dstOffset: 0, srcOffset: undefined, elementCount: 4 },
       { kind: "copy", dstOffset: 0, srcOffset: 0, elementCount: 1 },
       { kind: "copy", dstOffset: 1, srcOffset: 0, elementCount: 2 },
@@ -3656,6 +3655,47 @@ __global__ void runtimeFill(unsigned int *bits) {
     }
   });
 
+  it("host-lifts byte-granular cudaMemset ranges for partial storage words", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void runtimeByteFill(unsigned int *bits) {
+  cudaStream_t stream;
+  if (threadIdx.x == 0) {
+    cudaStreamCreate(&stream);
+    cudaMemset(bits, 0, 3);
+    cudaMemsetAsync(bits + 1, 0x7f, 5, stream);
+    cudaStreamDestroy(stream);
+  }
+}`, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        bits: new Uint32Array([0xffffffff, 0, 0]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const plan = createCudaRuntimeCopyPlan(compiled, input, launch);
+    const webGpuPlan = createCudaWebGpuExecutionPlan(compiled, input, launch);
+
+    expect([...result.buffers.bits as Uint32Array]).toEqual([0xff000000, 0x7f7f7f7f, 0x0000007f]);
+    expect(plan.supported).toBe(true);
+    expect(plan.copies.map((copy) => copy.kind === "fill-bytes"
+      ? { kind: copy.kind, dstRoot: copy.dstRoot, dstByteOffset: copy.dstByteOffset, byteCount: copy.byteCount, byteValue: copy.byteValue }
+      : { kind: copy.kind, dstRoot: copy.dstRoot, dstByteOffset: undefined, byteCount: undefined, byteValue: copy.kind === "fill" ? copy.byteValue : undefined })).toEqual([
+      { kind: "fill-bytes", dstRoot: "bits", dstByteOffset: 0, byteCount: 3, byteValue: 0 },
+      { kind: "fill-bytes", dstRoot: "bits", dstByteOffset: 4, byteCount: 5, byteValue: 0x7f },
+    ]);
+    expect(webGpuPlan.supported).toBe(true);
+    if (webGpuPlan.supported) {
+      expect(webGpuPlan.kind).toBe("host-copy");
+      expect(webGpuPlan.steps).toHaveLength(3);
+      expect(webGpuPlan.steps[1]?.program.name).toBe("bg_peer_fill_bytes");
+      expect(webGpuPlan.steps[2]?.program.name).toBe("bg_peer_fill_bytes");
+    }
+  });
+
   it("host-lifts byte-wise cudaMemcpy across compatible 32-bit typed buffers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void runtimeCrossTypeCopy(float *dst, const unsigned int *src) {
@@ -3716,12 +3756,11 @@ __global__ void runtimeFill2D(unsigned int *bits) {
 
     expect([...result.buffers.bits as Uint32Array]).toEqual([0, 0xffffffff, 0, 0, 0xffffffff, 0, 0, 0]);
     expect(plan.supported).toBe(true);
-    expect(plan.copies.map((copy) => ({
-      kind: copy.kind,
-      dstOffset: copy.dstOffset,
-      elementCount: copy.elementCount,
-      byteValue: copy.kind === "fill" ? copy.byteValue : undefined,
-    }))).toEqual([
+    expect(plan.copies.map((copy) => copy.kind === "fill"
+      ? { kind: copy.kind, dstOffset: copy.dstOffset, elementCount: copy.elementCount, byteValue: copy.byteValue }
+      : copy.kind === "copy"
+        ? { kind: copy.kind, dstOffset: copy.dstOffset, elementCount: copy.elementCount, byteValue: undefined }
+        : { kind: copy.kind, dstOffset: undefined, elementCount: undefined, byteValue: copy.byteValue })).toEqual([
       { kind: "fill", dstOffset: 1, elementCount: 2, byteValue: 255 },
       { kind: "fill", dstOffset: 4, elementCount: 2, byteValue: 255 },
       { kind: "fill", dstOffset: 2, elementCount: 1, byteValue: 0 },
@@ -3767,7 +3806,9 @@ __global__ void runtimeSymbolCopy(unsigned int *dst, const unsigned int *src) {
     expect(plan.supported).toBe(true);
     expect(plan.copies.map((copy) => copy.kind === "copy"
       ? { dstRoot: copy.dstRoot, srcRoot: copy.srcRoot, dstOffset: copy.dstOffset, srcOffset: copy.srcOffset, elementCount: copy.elementCount }
-      : { dstRoot: copy.dstRoot, srcRoot: undefined, dstOffset: copy.dstOffset, srcOffset: undefined, elementCount: copy.elementCount })).toEqual([
+      : copy.kind === "fill"
+        ? { dstRoot: copy.dstRoot, srcRoot: undefined, dstOffset: copy.dstOffset, srcOffset: undefined, elementCount: copy.elementCount }
+        : { dstRoot: copy.dstRoot, srcRoot: undefined, dstOffset: undefined, srcOffset: undefined, elementCount: undefined })).toEqual([
       { dstRoot: "cBits", srcRoot: "src", dstOffset: 0, srcOffset: 0, elementCount: 2 },
       { dstRoot: "cBits", srcRoot: "src", dstOffset: 2, srcOffset: 2, elementCount: 1 },
       { dstRoot: "dst", srcRoot: "cBits", dstOffset: 0, srcOffset: 0, elementCount: 3 },
@@ -3807,7 +3848,9 @@ __global__ void runtimeDeviceSymbolCopy(unsigned int *dst, const unsigned int *s
     expect(plan.supported).toBe(true);
     expect(plan.copies.map((copy) => copy.kind === "copy"
       ? { dstRoot: copy.dstRoot, srcRoot: copy.srcRoot, dstOffset: copy.dstOffset, srcOffset: copy.srcOffset, elementCount: copy.elementCount }
-      : { dstRoot: copy.dstRoot, srcRoot: undefined, dstOffset: copy.dstOffset, srcOffset: undefined, elementCount: copy.elementCount })).toEqual([
+      : copy.kind === "fill"
+        ? { dstRoot: copy.dstRoot, srcRoot: undefined, dstOffset: copy.dstOffset, srcOffset: undefined, elementCount: copy.elementCount }
+        : { dstRoot: copy.dstRoot, srcRoot: undefined, dstOffset: undefined, srcOffset: undefined, elementCount: undefined })).toEqual([
       { dstRoot: "gBits", srcRoot: "src", dstOffset: 0, srcOffset: 0, elementCount: 3 },
       { dstRoot: "dst", srcRoot: "gBits", dstOffset: 0, srcOffset: 0, elementCount: 3 },
     ]);
@@ -3845,7 +3888,9 @@ __global__ void runtimeCopy2D(float *dst, const float *src) {
     expect(plan.supported).toBe(true);
     expect(plan.copies.map((copy) => copy.kind === "copy"
       ? { dstOffset: copy.dstOffset, srcOffset: copy.srcOffset, elementCount: copy.elementCount }
-      : { dstOffset: copy.dstOffset, srcOffset: undefined, elementCount: copy.elementCount })).toEqual([
+      : copy.kind === "fill"
+        ? { dstOffset: copy.dstOffset, srcOffset: undefined, elementCount: copy.elementCount }
+        : { dstOffset: undefined, srcOffset: undefined, elementCount: undefined })).toEqual([
       { dstOffset: 0, srcOffset: 0, elementCount: 2 },
       { dstOffset: 3, srcOffset: 3, elementCount: 2 },
       { dstOffset: 1, srcOffset: 3, elementCount: 1 },
