@@ -236,7 +236,7 @@ function semanticReferenceAtomicSupported(
   if (!atomicOp) return false;
   if (!operation.target || !semanticReferenceMemoryRefSupported(operation.target)) return false;
   if (operation.target.valueType !== "uint" && operation.target.valueType !== "int") return false;
-  if (!compiled.kernelIr.params.some((param) => param.name === operation.target?.base && param.addressSpace === "storage" && !param.constant)) {
+  if (!semanticReferenceAtomicTargetRootSupported(operation.target, compiled)) {
     return false;
   }
   const expectedArgs = atomicOp === "cas" ? 3 : 2;
@@ -259,12 +259,22 @@ function semanticReferenceAtomicCallSupported(
   const target = semanticAtomicCallTarget(expression);
   if (!target || !semanticReferenceMemoryRefSupported(target)) return false;
   if (target.valueType !== "uint" && target.valueType !== "int") return false;
-  if (!compiled.kernelIr.params.some((param) => param.name === target.base && param.addressSpace === "storage" && !param.constant)) {
+  if (!semanticReferenceAtomicTargetRootSupported(target, compiled)) {
     return false;
   }
   const expectedArgs = atomicOp === "cas" ? 3 : 2;
   return expression.args.length >= expectedArgs &&
     expression.args.slice(1, expectedArgs).every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
+}
+
+function semanticReferenceAtomicTargetRootSupported(ref: SemanticMemoryRef, compiled: CompiledCudaLiteKernel): boolean {
+  if (ref.addressSpace === "storage") {
+    return compiled.kernelIr.params.some((param) => param.name === ref.base && param.addressSpace === "storage" && !param.constant);
+  }
+  if (ref.addressSpace === "device-global") {
+    return compiled.kernelIr.memory.some((symbol) => symbol.name === ref.base && symbol.kind === "device-global");
+  }
+  return false;
 }
 
 function semanticReferenceExpressionSupported(expression: SemanticExpression, expected: "scalar" | "any"): boolean {
@@ -565,6 +575,16 @@ function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { read
   if (!firstArg) return undefined;
   if (firstArg.kind === "unary" && firstArg.operator === "&" && firstArg.argument.kind === "index") {
     return memoryRefFromIndexExpression(firstArg.argument);
+  }
+  if (firstArg.kind === "unary" && firstArg.operator === "&" && firstArg.argument.kind === "symbol" && firstArg.argument.addressSpace === "device-global") {
+    return {
+      base: firstArg.argument.name,
+      addressSpace: "device-global",
+      ...(firstArg.argument.valueType === undefined ? {} : { valueType: firstArg.argument.valueType }),
+      indices: [],
+      fields: [],
+      span: firstArg.argument.span,
+    };
   }
   if (firstArg.kind === "index") return memoryRefFromIndexExpression(firstArg);
   return undefined;

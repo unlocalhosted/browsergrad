@@ -1802,7 +1802,17 @@ __global__ void globals_atomic(uint* out) {
       { buffers: { out: new Uint32Array(4) } },
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3]);
+    expect([...semanticResult.buffers.counter as Uint32Array]).toEqual([4]);
     expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3]);
     expect([...result.buffers.counter as Uint32Array]).toEqual([4]);
     expect(backendIr(compiled).atomicDeviceGlobals).toEqual(["counter"]);
