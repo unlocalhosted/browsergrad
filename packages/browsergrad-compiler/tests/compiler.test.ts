@@ -5429,10 +5429,19 @@ __global__ void int_math_arg(int n, float *out) {
       { buffers: { out: new Float32Array(1) }, scalars: { n: 4 } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(1) }, scalars: { n: 4 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("sqrt(f32(bg_uniforms.n))");
     expect(compiled.wgsl).toContain("exp(f32((bg_uniforms.n - 2)))");
     expect(compiled.wgsl).toContain("min(f32(bg_uniforms.n), 3.5)");
+    expect([...semanticResult.buffers.out as Float32Array][0]).toBeCloseTo(Math.sqrt(4) + Math.exp(2) + 3.5, 5);
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(Math.sqrt(4) + Math.exp(2) + 3.5, 5);
   });
 

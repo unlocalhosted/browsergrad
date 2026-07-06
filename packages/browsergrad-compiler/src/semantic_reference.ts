@@ -42,6 +42,11 @@ const SEMANTIC_ATOMIC_OPS = new Map<string, SemanticAtomicOp>([
   ["atomicCAS", "cas"],
   ["atomicCAS_system", "cas"],
 ]);
+const SEMANTIC_MATH_CALLS = new Set([
+  "sqrt", "sqrtf", "exp", "expf", "log", "logf", "fabs", "fabsf", "abs",
+  "floor", "floorf", "ceil", "ceilf", "sin", "sinf", "cos", "cosf",
+  "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
+]);
 
 interface Vector3 {
   readonly x: number;
@@ -246,12 +251,18 @@ function semanticReferenceAtomicSupported(
 
 function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
   return semanticReferenceExpressionSupported(expression, "scalar") ||
-    expression.kind === "call" && semanticReferenceAtomicCallSupported(expression, compiled);
+    expression.kind === "call" && (semanticReferenceAtomicCallSupported(expression, compiled) || semanticReferenceMathCallSupported(expression));
 }
 
 function semanticReferenceLocalArrayInitSupported(expression: SemanticExpression): boolean {
   return expression.kind === "initializer" &&
     flattenInitializerExpressions(expression).every((item) => semanticReferenceExpressionSupported(item, "scalar"));
+}
+
+function semanticReferenceMathCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
+  if (expression.callee.kind !== "symbol" || !SEMANTIC_MATH_CALLS.has(expression.callee.name)) return false;
+  const arity = semanticMathCallArity(expression.callee.name);
+  return expression.args.length === arity && expression.args.every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
 }
 
 function semanticReferenceAtomicCallSupported(
@@ -320,6 +331,7 @@ function semanticReferenceExpressionSupported(expression: SemanticExpression, ex
         expression.argument.addressSpace === "local" &&
         (expression.operator === "++" || expression.operator === "--");
     case "call":
+      return semanticReferenceMathCallSupported(expression);
     case "initializer":
       return false;
   }
@@ -540,6 +552,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
     }
     case "call":
       if (semanticReferenceAtomicCallSupported(expression, context.compiled)) return evalSemanticAtomicCall(expression, context);
+      if (semanticReferenceMathCallSupported(expression)) return evalSemanticMathCall(expression, context);
       throw semanticReferenceError(`semantic reference does not support ${expression.kind} expression`, expression.span);
     case "initializer":
       throw semanticReferenceError(`semantic reference does not support ${expression.kind} expression`, expression.span);
@@ -582,6 +595,56 @@ function evalSemanticAtomicCall(
   const oldValue = readMemory(target, context);
   writeMemory(target, semanticAtomicValue(atomicOp, oldValue, evalNumber(value, context), expression, context), context);
   return oldValue;
+}
+
+function evalSemanticMathCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): number {
+  if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic reference math call requires symbol callee", expression.span);
+  const args = expression.args.map((arg) => evalNumber(arg, context));
+  switch (expression.callee.name) {
+    case "sqrt":
+    case "sqrtf": return Math.sqrt(args[0] ?? 0);
+    case "exp":
+    case "expf": return Math.exp(args[0] ?? 0);
+    case "log":
+    case "logf": return Math.log(args[0] ?? 0);
+    case "fabs":
+    case "fabsf":
+    case "abs": return Math.abs(args[0] ?? 0);
+    case "floor":
+    case "floorf": return Math.floor(args[0] ?? 0);
+    case "ceil":
+    case "ceilf": return Math.ceil(args[0] ?? 0);
+    case "sin":
+    case "sinf": return Math.sin(args[0] ?? 0);
+    case "cos":
+    case "cosf": return Math.cos(args[0] ?? 0);
+    case "fmin":
+    case "fminf":
+    case "min": return Math.min(args[0] ?? 0, args[1] ?? 0);
+    case "fmax":
+    case "fmaxf":
+    case "max": return Math.max(args[0] ?? 0, args[1] ?? 0);
+    case "pow":
+    case "powf": return Math.pow(args[0] ?? 0, args[1] ?? 0);
+    default:
+      throw semanticReferenceError(`semantic reference does not support math call '${expression.callee.name}'`, expression.span);
+  }
+}
+
+function semanticMathCallArity(name: string): number {
+  return name === "fmin" ||
+    name === "fminf" ||
+    name === "min" ||
+    name === "fmax" ||
+    name === "fmaxf" ||
+    name === "max" ||
+    name === "pow" ||
+    name === "powf"
+    ? 2
+    : 1;
 }
 
 function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { readonly kind: "call" }>): SemanticMemoryRef | undefined {

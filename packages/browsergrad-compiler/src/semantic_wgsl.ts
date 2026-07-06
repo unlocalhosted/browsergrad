@@ -26,6 +26,33 @@ const UNIFORM_PARAMS_NAME = "bg_uniforms";
 const BUILTIN_VECTOR_NAMES = new Set(["threadIdx", "blockIdx", "blockDim", "gridDim"]);
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!="]);
 const LOGICAL_OPERATORS = new Set(["&&", "||"]);
+const SEMANTIC_MATH_CALLS = new Map([
+  ["sqrt", "sqrt"],
+  ["sqrtf", "sqrt"],
+  ["exp", "exp"],
+  ["expf", "exp"],
+  ["log", "log"],
+  ["logf", "log"],
+  ["fabs", "abs"],
+  ["fabsf", "abs"],
+  ["abs", "abs"],
+  ["floor", "floor"],
+  ["floorf", "floor"],
+  ["ceil", "ceil"],
+  ["ceilf", "ceil"],
+  ["sin", "sin"],
+  ["sinf", "sin"],
+  ["cos", "cos"],
+  ["cosf", "cos"],
+  ["fmin", "min"],
+  ["fminf", "min"],
+  ["min", "min"],
+  ["fmax", "max"],
+  ["fmaxf", "max"],
+  ["max", "max"],
+  ["pow", "pow"],
+  ["powf", "pow"],
+]);
 const WGSL_ATOMIC_CALLEES = new Map([
   ["atomicAdd", "atomicAdd"],
   ["atomicAdd_system", "atomicAdd"],
@@ -301,12 +328,18 @@ function semanticWgslAtomicSupported(
 
 function semanticWgslValueExpressionSupported(expression: SemanticExpression, ir: SemanticKernelIrModule): boolean {
   return semanticWgslExpressionSupported(expression, "scalar") ||
-    expression.kind === "call" && semanticWgslAtomicCallSupported(expression, ir);
+    expression.kind === "call" && (semanticWgslAtomicCallSupported(expression, ir) || semanticWgslMathCallSupported(expression));
 }
 
 function semanticWgslLocalArrayInitSupported(expression: SemanticExpression): boolean {
   return expression.kind === "initializer" &&
     flattenInitializerExpressions(expression).every((item) => semanticWgslExpressionSupported(item, "scalar"));
+}
+
+function semanticWgslMathCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
+  if (expression.callee.kind !== "symbol" || !SEMANTIC_MATH_CALLS.has(expression.callee.name)) return false;
+  const arity = semanticMathCallArity(expression.callee.name);
+  return expression.args.length === arity && expression.args.every((arg) => semanticWgslExpressionSupported(arg, "scalar"));
 }
 
 function semanticWgslAtomicCallSupported(
@@ -377,6 +410,7 @@ function semanticWgslExpressionSupported(expression: SemanticExpression, expecte
     case "sequence":
       return expression.expressions.every((item) => semanticWgslExpressionSupported(item, "scalar"));
     case "call":
+      return semanticWgslMathCallSupported(expression);
     case "initializer":
       return false;
   }
@@ -586,6 +620,7 @@ function emitSemanticExpression(
       return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names);
     case "call":
       if (semanticWgslAtomicCallSupported(expression, ir)) return emitSemanticAtomicCall(expression, ir, names);
+      if (semanticWgslMathCallSupported(expression)) return emitSemanticMathCall(expression, ir, names);
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
     case "initializer":
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
@@ -619,7 +654,11 @@ function emitSemanticExpressionAs(
     if (sourceType === targetType) return emitted;
     return `${targetType}(${emitted})`;
   }
-  const sourceType = wgslValueScalar(semanticExpressionValueType(expression));
+  if (expression.kind === "call" && semanticWgslMathCallSupported(expression)) {
+    if (targetType === "f32") return emitted;
+    return `${targetType}(${emitted})`;
+  }
+  const sourceType = semanticExpressionWgslScalar(expression);
   if (sourceType === targetType) return emitted;
   return `${targetType}(${emitted})`;
 }
@@ -638,6 +677,30 @@ function emitSemanticAtomicCall(
   const emitted = operands.map((operand) => emitSemanticExpressionAs(operand, ir, names, wgslAtomicScalar(target.valueType)));
   const call = `${wgslCallee}(&${memoryRef}, ${emitted.join(", ")})`;
   return wgslCallee === "atomicCompareExchangeWeak" ? `${call}.old_value` : call;
+}
+
+function emitSemanticMathCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+): string {
+  if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL math call requires symbol callee", expression.span);
+  const wgslCallee = SEMANTIC_MATH_CALLS.get(expression.callee.name);
+  if (!wgslCallee) throw semanticWgslError(`semantic WGSL does not support math call '${expression.callee.name}'`, expression.span);
+  return `${wgslCallee}(${expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, "f32")).join(", ")})`;
+}
+
+function semanticMathCallArity(name: string): number {
+  return name === "fmin" ||
+    name === "fminf" ||
+    name === "min" ||
+    name === "fmax" ||
+    name === "fmaxf" ||
+    name === "max" ||
+    name === "pow" ||
+    name === "powf"
+    ? 2
+    : 1;
 }
 
 function emitSemanticMember(
@@ -688,8 +751,8 @@ function emitSemanticBinary(
 }
 
 function semanticBinaryOperandType(expression: Extract<SemanticExpression, { readonly kind: "binary" }>): WgslValueType {
-  const left = wgslValueScalar(semanticExpressionValueType(expression.left));
-  const right = wgslValueScalar(semanticExpressionValueType(expression.right));
+  const left = semanticExpressionWgslScalar(expression.left);
+  const right = semanticExpressionWgslScalar(expression.right);
   const result = wgslValueScalar(expression.valueType);
   if (left === "f32" || right === "f32" || result === "f32") return "f32";
   if (left === "u32" || right === "u32" || result === "u32") return "u32";
@@ -874,6 +937,38 @@ function wgslUniformScalar(valueType: CudaLiteScalarType | undefined): WgslValue
 
 function semanticExpressionValueType(expression: SemanticExpression): CudaLiteScalarType | undefined {
   return "valueType" in expression ? expression.valueType : undefined;
+}
+
+function semanticExpressionWgslScalar(expression: SemanticExpression): WgslValueType {
+  switch (expression.kind) {
+    case "call": {
+      if (semanticWgslMathCallSupported(expression)) return "f32";
+      const atomicType = semanticAtomicCallValueType(expression);
+      return atomicType ? wgslAtomicScalar(atomicType) : wgslValueScalar(expression.valueType);
+    }
+    case "binary": {
+      const left = semanticExpressionWgslScalar(expression.left);
+      const right = semanticExpressionWgslScalar(expression.right);
+      const result = wgslValueScalar(expression.valueType);
+      if (left === "f32" || right === "f32" || result === "f32") return "f32";
+      if (left === "u32" || right === "u32" || result === "u32") return "u32";
+      return "i32";
+    }
+    case "conditional": {
+      const consequent = semanticExpressionWgslScalar(expression.consequent);
+      const alternate = semanticExpressionWgslScalar(expression.alternate);
+      const result = wgslValueScalar(expression.valueType);
+      if (consequent === "f32" || alternate === "f32" || result === "f32") return "f32";
+      if (consequent === "u32" || alternate === "u32" || result === "u32") return "u32";
+      return "i32";
+    }
+    case "sequence":
+      return expression.expressions.length > 0
+        ? semanticExpressionWgslScalar(expression.expressions.at(-1)!)
+        : wgslValueScalar(expression.valueType);
+    default:
+      return wgslValueScalar(semanticExpressionValueType(expression));
+  }
 }
 
 function emitNumberLiteral(value: number, valueType: CudaLiteScalarType | undefined, expectedType?: WgslValueType): string {
