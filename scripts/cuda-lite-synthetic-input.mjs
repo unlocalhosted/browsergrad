@@ -8,7 +8,7 @@ export function syntheticInputForCompiled(compiled) {
   const memoryPools = {};
   const textures = {};
   const surfaces = {};
-  for (const param of compiled.ir.params) {
+  for (const param of compiled.kernelIr.params) {
     if (param.valueType === "surface2d") {
       surfaces[param.name] = { width: 64, height: 64, data: new Float32Array(64 * 64) };
     } else if (param.valueType === "texture2d") {
@@ -23,19 +23,19 @@ export function syntheticInputForCompiled(compiled) {
       scalars[param.name] = syntheticScalarForName(param.name);
     }
   }
-  for (const constant of compiled.ir.constants) {
+  for (const constant of compiled.ast.constants) {
     if (constant.init !== undefined) continue;
     constants[constant.name] = constant.dimensions.length === 0 && !isCudaVectorTypeName(constant.valueType)
       ? syntheticScalarForName(constant.name)
       : syntheticConstantBufferForType(constant.valueType, constant.name, 4096, compiled.f16Mode);
   }
-  for (const global of compiled.ir.deviceGlobals) {
+  for (const global of compiled.ast.deviceGlobals) {
     const length = global.dimensions.length === 0
       ? 1
       : global.dimensions.reduce((product, dimension) => product * dimension, 1);
     deviceGlobals[global.name] = syntheticBufferForType(global.valueType, length, compiled.f16Mode);
   }
-  for (const texture of compiled.ir.textures) {
+  for (const texture of compiled.ast.textures) {
     textures[texture.name] = { width: 64, height: 64, data: new Float32Array(64 * 64) };
   }
   for (const poolName of externalDevicePoolNamesFromSource(compiled.ast.source)) {
@@ -45,7 +45,7 @@ export function syntheticInputForCompiled(compiled) {
 }
 
 export function syntheticLaunchForCompiled(compiled) {
-  return { gridDim: [1, 1, 1], blockDim: compiled.ir.workgroupSize };
+  return { gridDim: [1, 1, 1], blockDim: compiled.kernelIr.workgroupSize };
 }
 
 export function externalDevicePoolNamesFromSource(source) {

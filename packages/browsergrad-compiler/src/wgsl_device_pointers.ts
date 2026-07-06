@@ -43,7 +43,7 @@ export interface WgslDevicePointerCallbacks {
   emitTruthinessExpression(expression: CudaLiteExpression, context: WgslDevicePointerContext): string;
   pointerBaseExpression(rootName: string, context: WgslDevicePointerContext): string | undefined;
   sharedDeclarationFor(rootName: string, context: WgslDevicePointerContext): CudaLiteVarDecl | undefined;
-  featureError(code: string, message: string): CudaLiteCompilerError;
+  featureError(code: string, message: string, span: SourceSpan): CudaLiteCompilerError;
 }
 
 export function emitDevicePointerArgument(
@@ -58,9 +58,10 @@ export function emitDevicePointerArgument(
       throw callbacks.featureError(
         "unsupported-device-pointer-param",
         `local-memory pointer array '${root}' cannot cross a storage pointer helper boundary`,
+        expression.span,
       );
     }
-    throw callbacks.featureError("unsupported-device-pointer-param", "device pointer argument must be a storage pointer or derived storage address");
+    throw callbacks.featureError("unsupported-device-pointer-param", "device pointer argument must be a storage pointer or derived storage address", expression.span);
   }
   return [parts.buffer, parts.base];
 }

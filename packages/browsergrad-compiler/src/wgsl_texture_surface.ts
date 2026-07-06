@@ -61,6 +61,12 @@ export function emitTextureHelper(name: string, context: WgslTextureSurfaceEmitC
     `fn bg_tex2d_uchar_${name}(x: f32, y: f32) -> u32 {`,
     `  return u32(${textureValue}.r);`,
     "}",
+    `fn bg_tex2d_bf16_${name}(x: f32, y: f32) -> f32 {`,
+    `  return ${wgslRoundBfloat16(`${textureValue}.r`)};`,
+    "}",
+    `fn bg_tex2d_bf162_${name}(x: f32, y: f32) -> vec2<f32> {`,
+    `  return vec2<f32>(${wgslRoundBfloat16(`${textureValue}.x`)}, ${wgslRoundBfloat16(`${textureValue}.y`)});`,
+    "}",
     ...emitTextureVectorCastHelpers(name, textureValue, ["int2", "int3", "int4", "uint2", "uint3", "uint4"]),
   ];
   if (context.requiredFeatures.includes("shader-f16")) {
@@ -196,6 +202,7 @@ export function emitCubeTextureAtlasHelpers(): string[] {
 
 export function textureReadHelperSuffix(valueType: CudaLiteScalarType | undefined): string {
   if (valueType === "int" || valueType === "uint" || valueType === "uchar") return valueType;
+  if (valueType === "bf16" || valueType === "bf162") return valueType;
   if (valueType === "half" || valueType === "half2") return valueType;
   if (isCudaVectorType(valueType)) return valueType;
   return "f32";
@@ -285,6 +292,8 @@ function emitTextureReadValue(value: string, valueType: CudaLiteScalarType | und
   if (valueType === "int") return `i32(${value}.r)`;
   if (valueType === "uint") return `u32(${value}.r)`;
   if (valueType === "uchar") return `u32(${value}.r)`;
+  if (valueType === "bf16") return wgslRoundBfloat16(`${value}.r`);
+  if (valueType === "bf162") return `vec2<f32>(${wgslRoundBfloat16(`${value}.x`)}, ${wgslRoundBfloat16(`${value}.y`)})`;
   if (valueType === "half") return `f16(${value}.r)`;
   if (valueType === "half2") return `vec2<f16>(${value}.xy)`;
   if (isCudaVectorType(valueType)) {
@@ -411,6 +420,10 @@ export function emitSurfaceWriteExpression(
     return `if (${xBytes} >= 0) { ${writes}; }`;
   }
   return writeCall(context.emitExpressionAsValueType(valueExpression, "float"), xBytes);
+}
+
+function wgslRoundBfloat16(value: string): string {
+  return `bitcast<f32>((bitcast<u32>(f32(${value})) + 0x8000u) & 0xffff0000u)`;
 }
 
 function emitTextureVectorCastHelpers(

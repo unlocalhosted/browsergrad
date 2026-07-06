@@ -18,7 +18,7 @@
     "noFallthroughCasesInSwitch": true,
     "noImplicitReturns": true,
     "noImplicitOverride": true,
-    "types": ["@webgpu/types", "vitest/globals"]
+    "types": ["@webgpu/types", "vitest/globals", "node"]
   },
   "include": ["src", "tests", "tests-browser"],
   "exclude": ["dist", "node_modules"]

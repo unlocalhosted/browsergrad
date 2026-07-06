@@ -22,6 +22,12 @@ import {
   usesFloatAtomicSub,
   usesFp8Intrinsics,
   usesFrexp,
+  usesFunnelShiftIntrinsics,
+  usesGammaIntrinsics,
+  usesInverseDistributionIntrinsics,
+  usesModf,
+  usesNextafterIntrinsics,
+  usesRoundingMathIntrinsics,
   usesIntViewAtomicStorage,
   usesSharedFloatAtomicAdd,
   usesSharedFloatAtomicMax,
@@ -38,8 +44,14 @@ import {
   emitCurandHelpers,
   emitFp8Helpers,
   emitFrexpHelpers,
+  emitFunnelShiftHelpers,
+  emitGammaHelpers,
+  emitInverseDistributionHelpers,
+  emitModfHelpers,
+  emitNextafterHelpers,
   emitPoolHelper,
   emitRawPoolHelper,
+  emitRoundingMathHelpers,
   emitSpecialFloatConstantHelpers,
 } from "./wgsl_support_helpers.js";
 import {
@@ -175,6 +187,12 @@ function appendKernelModuleSupportHelpers(
   if (usesSharedIntViewAtomics(ir)) lines.push("", ...emitIntViewAtomicHelpers("workgroup", intViewAtomicKinds(ir)));
   if (usesCurand(ir)) lines.push("", ...emitCurandHelpers());
   if (usesFrexp(ir)) lines.push("", ...emitFrexpHelpers());
+  if (usesModf(ir)) lines.push("", ...emitModfHelpers());
+  if (usesGammaIntrinsics(ir)) lines.push("", ...emitGammaHelpers());
+  if (usesInverseDistributionIntrinsics(ir)) lines.push("", ...emitInverseDistributionHelpers());
+  if (usesRoundingMathIntrinsics(ir)) lines.push("", ...emitRoundingMathHelpers());
+  if (usesNextafterIntrinsics(ir)) lines.push("", ...emitNextafterHelpers());
+  if (usesFunnelShiftIntrinsics(ir)) lines.push("", ...emitFunnelShiftHelpers());
   if (usesSpecialFloatNamedConstants(ir)) lines.push("", ...emitSpecialFloatConstantHelpers());
   if (usesFp8Intrinsics(ir)) lines.push("", ...emitFp8Helpers());
 }

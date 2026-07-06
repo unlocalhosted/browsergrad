@@ -67,6 +67,8 @@ const compiled = compilerCache.compile(
     workgroupSize: [8, 1, 1],
   },
 );
+console.log(compiled.semantic.kernelName);
+console.log(compiled.kernelIr.kind);
 console.log(compiled.loweringPlan.canRunOnGpu);
 const input = {
   buffers: {
@@ -83,6 +85,17 @@ const status = summarizeCudaWebGpuExecutionPlan(plan);
 console.log(status.canRunOnWebGpu, status.mode, status.kind);
 const gpu = await runCompiledKernelWebGpu(device, compiled, input, launch);
 ```
+
+Compiler results expose the production compiler contracts:
+
+- `ast`: syntax tree from the parser.
+- `semantic`: resolved semantic model for symbols, params, functions, and
+  required features.
+- `kernelIr`: backend-neutral semantic Kernel IR. New compiler passes should
+  target this path.
+- `loweringPlan`: diagnostic compatibility summary. For execution readiness,
+  prefer `createCudaWebGpuExecutionPlan()` and
+  `summarizeCudaWebGpuExecutionPlan()`.
 
 Examples live in `examples/`: SAXPY, guarded map, and shared-memory tiled
 matmul. The emitted WGSL is intentionally inspectable so labs can show source,
@@ -321,7 +334,7 @@ compatibility gaps by semantic family instead of raw parser messages.
 Use `createCudaRuntimePlan(compiled)` to see which kernels need host
 orchestration (`device-launch`, `device-sync`, `runtime-copy`, `grid-sync`) before
 trying WebGPU single-dispatch execution.
-Use `createCudaLaunchValidationDiagnostics(launch, compiled.ir.workgroupSize)`
+Use `createCudaLaunchValidationDiagnostics(launch, compiled.kernelIr.workgroupSize)`
 or `validateCudaKernelLaunch()` to preflight launch shape before selecting CPU
 reference or WebGPU execution. Reference and WebGPU runners use the same
 validator, and `createCudaWebGpuExecutionPlan()` reports the same failures as

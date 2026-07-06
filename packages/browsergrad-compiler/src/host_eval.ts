@@ -117,7 +117,7 @@ function evaluateHostMathCall(
       return Math.floor(first);
     case "round":
     case "roundf":
-      return Math.round(first);
+      return roundHalfAwayFromZero(first);
     case "trunc":
     case "truncf":
       return Math.trunc(first);
@@ -134,6 +134,11 @@ function evaluateHostMathCall(
     default:
       return undefined;
   }
+}
+
+function roundHalfAwayFromZero(value: number): number {
+  if (!Number.isFinite(value) || value === 0) return value;
+  return value < 0 ? Math.ceil(value - 0.5) : Math.floor(value + 0.5);
 }
 
 export function isHostVector(value: HostEvalValue | undefined): value is readonly [number, number, number] {

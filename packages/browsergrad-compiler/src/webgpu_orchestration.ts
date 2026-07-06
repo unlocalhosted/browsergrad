@@ -8,6 +8,7 @@ import {
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames } from "./ast_queries.js";
+import { internalBackendIrFor } from "./backend_ir.js";
 import { createCudaHostDynamicLaunchPlan } from "./dynamic_launch.js";
 import { CUDA_INTRINSICS } from "./intrinsics.js";
 import { createCudaLaunchValidationDiagnostics } from "./launch.js";
@@ -94,17 +95,73 @@ export interface CudaWebGpuExecutionPlanOptions {
 }
 
 const peerCopyProgramCache = new Map<CudaPeerCopyOperation["valueType"], WgslKernelProgram>();
+const peerFillProgramCache = new Map<CudaPeerCopyOperation["valueType"], WgslKernelProgram>();
 const DEFAULT_MAX_HOST_DYNAMIC_LAUNCH_DEPTH = 8;
 const HOST_SIDE_EFFECT_FREE_CALLS = new Set([
   "cudaDeviceSynchronize",
+  "cudaCtxResetPersistingL2Cache",
+  "cudaDeviceReset",
+  "cudaThreadExit",
+  "cudaThreadSynchronize",
+  "cudaDeviceGetAttribute",
+  "cudaDeviceGetLimit",
+  "cudaThreadGetLimit",
+  "cudaDeviceSetLimit",
+  "cudaThreadSetLimit",
+  "cudaDeviceCanAccessPeer",
+  "cudaDeviceEnablePeerAccess",
+  "cudaDeviceDisablePeerAccess",
+  "cudaGetDeviceFlags",
+  "cudaSetDeviceFlags",
+  "cudaMemGetInfo",
+  "cudaOccupancyMaxActiveBlocksPerMultiprocessor",
+  "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
+  "cudaOccupancyMaxPotentialBlockSize",
+  "cudaOccupancyMaxPotentialBlockSizeWithFlags",
+  "cudaDeviceGetCacheConfig",
+  "cudaDeviceSetCacheConfig",
+  "cudaDeviceGetSharedMemConfig",
+  "cudaThreadGetCacheConfig",
+  "cudaDeviceSetSharedMemConfig",
+  "cudaThreadSetCacheConfig",
+  "cudaThreadExchangeStreamCaptureMode",
+  "cudaDeviceGetStreamPriorityRange",
+  "cudaFree",
+  "cudaFreeAsync",
+  "cudaMemAdvise",
+  "cudaMemPrefetchAsync",
+  "cudaStreamAttachMemAsync",
   "cudaStreamCreate",
   "cudaStreamCreateWithFlags",
+  "cudaStreamCreateWithPriority",
   "cudaStreamDestroy",
+  "cudaStreamGetDevice",
+  "cudaStreamGetFlags",
+  "cudaStreamGetId",
+  "cudaStreamGetPriority",
+  "cudaStreamIsCapturing",
+  "cudaStreamGetCaptureInfo",
+  "cudaStreamQuery",
   "cudaStreamSynchronize",
+  "cudaStreamWaitEvent",
+  "cudaSetDevice",
+  "cudaGetDevice",
+  "cudaGetDeviceCount",
+  "cudaRuntimeGetVersion",
+  "cudaDriverGetVersion",
+  "cudaFuncSetAttribute",
+  "cudaFuncSetCacheConfig",
+  "cudaFuncSetSharedMemConfig",
+  "cudaGetLastError",
+  "cudaPeekAtLastError",
+  "cudaProfilerStart",
+  "cudaProfilerStop",
   "cudaEventCreate",
   "cudaEventCreateWithFlags",
   "cudaEventDestroy",
+  "cudaEventQuery",
   "cudaEventRecord",
+  "cudaEventRecordWithFlags",
   "cudaEventSynchronize",
   "deviceAllocate",
   "max",
@@ -117,6 +174,34 @@ const HOST_SIDE_EFFECT_FREE_CALLS = new Set([
   "streamOrderedAllocate",
   ...CUDA_INTRINSICS.map((intrinsic) => intrinsic.name),
 ]);
+const HOST_RUNTIME_QUERY_WRITE_CALLS = new Set([
+  "cudaGetDevice",
+  "cudaGetDeviceCount",
+  "cudaDeviceGetAttribute",
+  "cudaDeviceGetLimit",
+  "cudaThreadGetLimit",
+  "cudaDeviceCanAccessPeer",
+  "cudaGetDeviceFlags",
+  "cudaMemGetInfo",
+  "cudaOccupancyMaxActiveBlocksPerMultiprocessor",
+  "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
+  "cudaOccupancyMaxPotentialBlockSize",
+  "cudaOccupancyMaxPotentialBlockSizeWithFlags",
+  "cudaDeviceGetCacheConfig",
+  "cudaDeviceGetSharedMemConfig",
+  "cudaThreadGetCacheConfig",
+  "cudaThreadExchangeStreamCaptureMode",
+  "cudaDeviceGetStreamPriorityRange",
+  "cudaStreamGetDevice",
+  "cudaStreamGetFlags",
+  "cudaStreamGetId",
+  "cudaStreamGetPriority",
+  "cudaStreamIsCapturing",
+  "cudaStreamGetCaptureInfo",
+  "cudaRuntimeGetVersion",
+  "cudaDriverGetVersion",
+  "cudaEventElapsedTime",
+]);
 
 type DynamicChildCompileResult =
   | { readonly compiled: CompiledCudaLiteKernel }
@@ -128,7 +213,8 @@ export function createCudaWebGpuExecutionPlan(
   launch: KernelLaunch,
   options: CudaWebGpuExecutionPlanOptions = {},
 ): CudaWebGpuExecutionPlan {
-  const launchDiagnostics = createCudaLaunchValidationDiagnostics(launch, compiled.ir.workgroupSize);
+  const backendIr = internalBackendIrFor(compiled);
+  const launchDiagnostics = createCudaLaunchValidationDiagnostics(launch, backendIr.workgroupSize);
   if (launchDiagnostics.length > 0) {
     const launchBlockers = launchDiagnostics.map((diagnostic) => webGpuBlocker("launch", diagnostic.code, diagnostic.message));
     return {
@@ -141,7 +227,7 @@ export function createCudaWebGpuExecutionPlan(
   const runtimePlan = createCudaRuntimePlan(compiled);
   const blockers: CudaWebGpuExecutionBlocker[] = [];
 
-  const gridSyncPhasePlan = createCudaGridSyncPhasePlan(compiled.ir);
+  const gridSyncPhasePlan = createCudaGridSyncPhasePlan(backendIr);
   const gridSyncPlan = createGridSyncWebGpuPlan(compiled, input, launch, gridSyncPhasePlan);
   if (gridSyncPlan) return gridSyncPlan;
   if (runtimePlan.operations.some((operation) => operation.kind === "grid-sync") && !gridSyncPhasePlan.supported) {
@@ -226,12 +312,13 @@ export function normalizeCudaWebGpuReadback(
   compiled: CompiledCudaLiteKernel,
   buffers: Readonly<Record<string, WgslTypedArray>>,
 ): Record<string, WgslTypedArray> {
+  const backendIr = internalBackendIrFor(compiled);
   const out: Record<string, WgslTypedArray> = { ...buffers };
-  for (const pool of compiled.ir.params.filter(isDevicePoolParam)) {
+  for (const pool of backendIr.params.filter(isDevicePoolParam)) {
     const data = buffers[poolDataName(pool.name)];
     if (data) out[pool.name] = data;
   }
-  for (const poolName of collectExternalDevicePoolNames(compiled.ir.body)) {
+  for (const poolName of collectExternalDevicePoolNames(backendIr.body)) {
     const data = buffers[poolDataName(poolName)];
     if (data) out[poolName] = data;
   }
@@ -242,11 +329,12 @@ export function normalizeCudaWebGpuReadbackNames(
   compiled: CompiledCudaLiteKernel,
   names: readonly string[],
 ): readonly string[] {
+  const backendIr = internalBackendIrFor(compiled);
   const aliases = new Map<string, string>();
-  for (const pool of compiled.ir.params.filter(isDevicePoolParam)) {
+  for (const pool of backendIr.params.filter(isDevicePoolParam)) {
     aliases.set(pool.name, poolDataName(pool.name));
   }
-  for (const poolName of collectExternalDevicePoolNames(compiled.ir.body)) {
+  for (const poolName of collectExternalDevicePoolNames(backendIr.body)) {
     aliases.set(poolName, poolDataName(poolName));
   }
   return [...new Set(names.map((name) => aliases.get(name) ?? name))];
@@ -325,7 +413,7 @@ function createHostLiftedDynamicWebGpuPlan(
   const parentInput = createWgslRunInput(compiled, input);
   const buffers: Record<string, WgslTypedArray> = { ...parentInput.buffers };
   const residentBuffers = { ...parentInput.residentBuffers };
-  const parentDispatchNeeded = hostDynamicParentDispatchNeeded(compiled.ir.body);
+  const parentDispatchNeeded = hostDynamicParentDispatchNeeded(internalBackendIrFor(compiled).body);
   const poolOffsetUpdates = plan.poolOffsetUpdates ?? {};
   if (parentDispatchNeeded && Object.keys(poolOffsetUpdates).length > 0) {
     return unsupportedWebGpuPlan(compiled, [
@@ -465,6 +553,7 @@ function expressionNeedsParentDispatch(expression: CudaLiteExpression): boolean 
       return expression.expressions.some(expressionNeedsParentDispatch);
     case "call": {
       const name = expression.callee.kind === "identifier" ? expression.callee.name : undefined;
+      if (name !== undefined && HOST_RUNTIME_QUERY_WRITE_CALLS.has(name)) return true;
       if (name !== undefined && HOST_SIDE_EFFECT_FREE_CALLS.has(name)) {
         return expression.args.some(expressionNeedsParentDispatch);
       }
@@ -640,6 +729,7 @@ function normalizeMaxHostDynamicLaunchDepth(value: number | undefined): number {
 }
 
 function definePeerCopyProgram(copy: CudaPeerCopyOperation): WgslKernelProgram {
+  if (copy.kind !== "copy") throw new Error("peer copy program requires a copy operation");
   const cached = peerCopyProgramCache.get(copy.valueType);
   if (cached) return cached;
   const valueType = copy.valueType === "float" ? "f32" : copy.valueType === "int" ? "i32" : "u32";
@@ -673,7 +763,46 @@ function definePeerCopyProgram(copy: CudaPeerCopyOperation): WgslKernelProgram {
   return program;
 }
 
+function definePeerFillProgram(fill: CudaPeerCopyOperation): WgslKernelProgram {
+  if (fill.kind !== "fill") throw new Error("peer fill program requires a fill operation");
+  const cached = peerFillProgramCache.get(fill.valueType);
+  if (cached) return cached;
+  const valueType = fill.valueType === "float" ? "f32" : fill.valueType === "int" ? "i32" : "u32";
+  const fillValue = fill.valueType === "float"
+    ? "bitcast<f32>(params.fill_value)"
+    : fill.valueType === "int"
+      ? "bitcast<i32>(params.fill_value)"
+      : "params.fill_value";
+  const program = defineWgslKernelProgram({
+    name: `bg_peer_fill_${fill.valueType}`,
+    workgroupSize: [64, 1, 1],
+    bindings: [
+      { kind: "storage", name: "bg_peer_dst", valueType, access: "read_write", binding: 0 },
+      { kind: "uniform", name: "params", byteLength: 16, binding: 1 },
+    ],
+    wgsl: [
+      "struct Params {",
+      "  dst_base: u32,",
+      "  count: u32,",
+      "  fill_value: u32,",
+      "};",
+      "@group(0) @binding(0) var<storage, read_write> bg_peer_dst: array<" + valueType + ">;",
+      "@group(0) @binding(1) var<uniform> params: Params;",
+      "@compute @workgroup_size(64, 1, 1)",
+      "fn main(@builtin(global_invocation_id) gid: vec3<u32>) {",
+      "  let index = gid.x;",
+      "  if (index < params.count) {",
+      "    bg_peer_dst[params.dst_base + index] = " + fillValue + ";",
+      "  }",
+      "}",
+    ].join("\n"),
+  });
+  peerFillProgramCache.set(fill.valueType, program);
+  return program;
+}
+
 function packPeerCopyParams(copy: CudaPeerCopyOperation): Uint8Array {
+  if (copy.kind !== "copy") throw new Error("peer copy params require a copy operation");
   const bytes = new Uint8Array(16);
   const view = new DataView(bytes.buffer);
   view.setUint32(0, copy.dstOffset, true);
@@ -682,12 +811,38 @@ function packPeerCopyParams(copy: CudaPeerCopyOperation): Uint8Array {
   return bytes;
 }
 
+function packPeerFillParams(fill: CudaPeerCopyOperation): Uint8Array {
+  if (fill.kind !== "fill") throw new Error("peer fill params require a fill operation");
+  const bytes = new Uint8Array(16);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, fill.dstOffset, true);
+  view.setUint32(4, fill.elementCount, true);
+  view.setUint32(8, repeatedBytePattern(fill.byteValue), true);
+  return bytes;
+}
+
+function repeatedBytePattern(byteValue: number): number {
+  const byte = byteValue & 0xff;
+  return (byte | (byte << 8) | (byte << 16) | (byte << 24)) >>> 0;
+}
+
 function appendPeerCopySteps(
   steps: WgslKernelSequenceStep[],
   copies: readonly CudaPeerCopyOperation[],
   storageAliases: Readonly<Record<string, string>> = {},
 ): void {
   for (const copy of copies) {
+    if (copy.kind === "fill") {
+      steps.push({
+        program: definePeerFillProgram(copy),
+        launch: { dispatchCount: [Math.max(copy.elementCount, 1), 1, 1] },
+        storageAliases: {
+          bg_peer_dst: storageAliases[copy.dstRoot] ?? copy.dstRoot,
+        },
+        uniforms: { params: packPeerFillParams(copy) },
+      });
+      continue;
+    }
     steps.push({
       program: definePeerCopyProgram(copy),
       launch: { dispatchCount: [Math.max(copy.elementCount, 1), 1, 1] },
@@ -718,9 +873,10 @@ function getOrCompileDynamicChild(
   const cached = cache.get(key);
   if (cached) return { compiled: cached };
   try {
+    const parentBackendIr = internalBackendIrFor(parent);
     const compiled = compileKernel(parent.ast.source, {
       kernelName: item.kernel.name,
-      features: featureOptionsFor(parent.ir.requiredFeatures),
+      features: featureOptionsFor(parentBackendIr.requiredFeatures),
       referenceDynamicParallelism: true,
       referenceGridSync: true,
       referenceCudaRuntime: true,
@@ -757,6 +913,7 @@ function createWgslRunInput(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
 ): WgslKernelRunInput {
+  const backendIr = internalBackendIrFor(compiled);
   const uniforms = packCudaWebGpuUniformParams(compiled, input);
   const buffers = {
     ...input.buffers,
@@ -768,11 +925,11 @@ function createWgslRunInput(
   const storageMetadata = memoryPoolStorageMetadata(compiled);
   const readback = input.readback === undefined
     ? [
-      ...compiled.ir.params
+      ...backendIr.params
         .filter((param) => (param.pointer && !param.constant) || param.valueType === "surface2d")
         .map((param) => param.valueType === "devicepool" ? poolDataName(param.name) : param.name),
-      ...compiled.ir.deviceGlobals.map((global) => global.name),
-      ...collectExternalDevicePoolNames(compiled.ir.body).map(poolDataName),
+      ...backendIr.deviceGlobals.map((global) => global.name),
+      ...collectExternalDevicePoolNames(backendIr.body).map(poolDataName),
     ]
     : normalizeCudaWebGpuReadbackNames(compiled, input.readback);
   return {
@@ -806,18 +963,19 @@ export function packCudaWebGpuUniformParams(
   compiled: CompiledCudaLiteKernel,
   input: CompiledKernelInput,
 ): Uint8Array {
+  const backendIr = internalBackendIrFor(compiled);
   const scalarParams = [
-    ...compiled.ir.params.filter((param) => !param.pointer && param.valueType !== "surface2d" && param.valueType !== "texture2d"),
-    ...compiled.ir.constants.filter((constant) =>
+    ...backendIr.params.filter((param) => !param.pointer && param.valueType !== "surface2d" && param.valueType !== "texture2d"),
+    ...backendIr.constants.filter((constant) =>
       constant.dimensions.length === 0 &&
       constant.init === undefined &&
       !isCudaVectorType(constant.valueType)
     ),
-    ...compiled.ir.params.filter((param) => param.valueType === "surface2d").flatMap((param) => [
+    ...backendIr.params.filter((param) => param.valueType === "surface2d").flatMap((param) => [
       { name: `${param.name}_width`, valueType: "uint" as const, surface: param.name, span: param.span },
       { name: `${param.name}_height`, valueType: "uint" as const, surface: param.name, span: param.span },
     ]),
-    ...compiled.ir.params
+    ...backendIr.params
       .filter((param) => param.pointer && compiled.pointerBaseOffsets?.[param.name] !== undefined)
       .map((param) => ({
         name: pointerBaseOffsetUniformName(param.name),

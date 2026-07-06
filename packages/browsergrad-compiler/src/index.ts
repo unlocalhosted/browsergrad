@@ -49,6 +49,18 @@ export {
 } from "./types.js";
 
 export { parseCudaLite } from "./parser.js";
+export {
+  createCudaLiteSemanticModel,
+  lowerSemanticModelToKernelIr,
+  type CudaLiteSemanticFunction,
+  type CudaLiteSemanticModel,
+  type CudaLiteSemanticSymbol,
+  type SemanticAddressSpace,
+  type SemanticDeviceLaunch,
+  type SemanticExpression,
+  type SemanticKernelIrModule,
+  type SemanticKernelIrOperation,
+} from "./semantic_ir.js";
 export { analyzeCudaLite, lowerCudaLiteToKernelIr } from "./analyzer.js";
 export {
   classifyCudaCompatibilityFamily,

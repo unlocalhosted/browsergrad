@@ -6,11 +6,16 @@ import {
   type WgslPreparedKernelSequenceRunOptions,
 } from "@unlocalhosted/browsergrad-kernels";
 import { analyzeCudaLite, lowerAnalyzedCudaLiteToKernelIr } from "./analyzer.js";
+import { attachInternalBackendIr, internalBackendIrFor } from "./backend_ir.js";
 import { createCudaLoweringPlan } from "./compatibility.js";
 import { createCudaLiteCompileCacheKey } from "./cache-key.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import { parseCudaLite } from "./parser.js";
 import { runCompiledKernelReference } from "./reference.js";
+import {
+  createCudaLiteSemanticModel,
+  lowerSemanticModelToKernelIr,
+} from "./semantic_ir.js";
 import { emitKernelIrWgsl } from "./wgsl.js";
 import {
   type CudaWebGpuExecutionPlan,
@@ -72,9 +77,11 @@ export function compileCudaLiteKernel(
       errors,
     );
   }
-  const ir = lowerAnalyzedCudaLiteToKernelIr(analysis, options);
+  const semantic = createCudaLiteSemanticModel(analysis);
+  const kernelIr = lowerSemanticModelToKernelIr(analysis, semantic, options);
+  const backendIr = lowerAnalyzedCudaLiteToKernelIr(analysis, options);
   const emitted = emitKernelIrWgsl(
-    ir,
+    backendIr,
     {
       ...(options.features === undefined ? {} : { features: options.features }),
       ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
@@ -84,10 +91,11 @@ export function compileCudaLiteKernel(
     },
   );
   const loweringPlan = createCudaLoweringPlan(analysis.diagnostics);
-  return {
+  return attachInternalBackendIr({
     ast,
+    semantic,
+    kernelIr,
     analysis,
-    ir,
     wgsl: emitted.wgsl,
     wgslProgram: emitted.program,
     diagnostics: analysis.diagnostics,
@@ -96,7 +104,7 @@ export function compileCudaLiteKernel(
     ...(options.textureDescriptors === undefined ? {} : { textureDescriptors: options.textureDescriptors }),
     ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),
     ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
-  };
+  }, backendIr);
 }
 
 function validateTextureDescriptorOptions(options: CompileCudaLiteOptions): void {
@@ -166,7 +174,7 @@ export async function runCompiledKernelWebGpu(
   launch: KernelLaunch,
   options: CompiledKernelWebGpuExecutionOptions = {},
 ): Promise<ReferenceKernelResult> {
-  validateCudaKernelLaunch(launch, compiled.ir.workgroupSize);
+  validateCudaKernelLaunch(launch, internalBackendIrFor(compiled).workgroupSize);
   const compileKernel = createCachedWebGpuChildCompiler(options);
   const planOptions = webGpuExecutionPlanOptions(options, compileKernel);
   const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, planOptions);
@@ -188,7 +196,7 @@ export async function prepareCompiledKernelWebGpu(
   launch: KernelLaunch,
   options: PrepareCompiledKernelWebGpuOptions = {},
 ): Promise<PreparedCompiledKernelWebGpu> {
-  validateCudaKernelLaunch(launch, compiled.ir.workgroupSize);
+  validateCudaKernelLaunch(launch, internalBackendIrFor(compiled).workgroupSize);
   const compileKernel = createCachedWebGpuChildCompiler(options);
   const planOptions = webGpuExecutionPlanOptions(options, compileKernel);
   const executionPlan = createCudaWebGpuExecutionPlan(compiled, input, launch, planOptions);

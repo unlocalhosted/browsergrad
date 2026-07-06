@@ -5,6 +5,10 @@ import type {
   WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import type { CudaLoweringPlan } from "./compatibility.js";
+import type {
+  CudaLiteSemanticModel,
+  SemanticKernelIrModule,
+} from "./semantic_ir.js";
 
 export interface SourceSpan {
   readonly start: number;
@@ -444,6 +448,7 @@ export interface CudaLiteAnalysis {
 
 export interface KernelIrModule {
   readonly name: string;
+  readonly span: SourceSpan;
   readonly params: readonly CudaLiteParam[];
   readonly constants: readonly CudaLiteGlobalConstant[];
   readonly deviceGlobals: readonly CudaLiteDeviceGlobal[];
@@ -465,8 +470,9 @@ export interface CompileCudaLiteOptions extends CudaLiteAnalyzeOptions {
 
 export interface CompiledCudaLiteKernel {
   readonly ast: CudaLiteModule;
+  readonly semantic: CudaLiteSemanticModel;
+  readonly kernelIr: SemanticKernelIrModule;
   readonly analysis: CudaLiteAnalysis;
-  readonly ir: KernelIrModule;
   readonly wgsl: string;
   readonly wgslProgram: WgslKernelProgram;
   readonly diagnostics: readonly CudaLiteDiagnostic[];

@@ -306,7 +306,7 @@ function createAutoCorpusSmokeFixture(root, corpus, item, compiler, fixtureOptio
   };
   try {
     const compiled = compiler.compileCudaLiteKernelForWebGpu(source, compileOptions);
-    if (compiled.ir.requiredFeatures.some((feature) => !allowedRequiredFeatures.has(feature))) return undefined;
+    if (compiled.kernelIr.requiredFeatures.some((feature) => !allowedRequiredFeatures.has(feature))) return undefined;
     const input = syntheticInputForCompiled(compiled);
     if (verifyMode === "reference" && Object.keys(input.buffers).length === 0) return undefined;
     const launch = syntheticLaunchForCompiled(compiled);
@@ -330,10 +330,10 @@ function createAutoCorpusSmokeFixture(root, corpus, item, compiler, fixtureOptio
       corpusId: corpus.id,
       relativePath: item.file,
       kernelName: item.kernelName,
-      workgroupSize: compiled.ir.workgroupSize,
+      workgroupSize: compiled.kernelIr.workgroupSize,
       launch,
       options: compileOptions,
-      requiredFeatures: compiled.ir.requiredFeatures,
+      requiredFeatures: compiled.kernelIr.requiredFeatures,
       source,
       verifyMode,
       ...autoCorpusComparisonFor(corpus, item),

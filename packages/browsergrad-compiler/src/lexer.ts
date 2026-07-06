@@ -379,8 +379,11 @@ function normalizeAliasType(sourceType: string | undefined, defines: ReadonlyMap
     type === "CUtexObject" ||
     type === "CUtensorMap" ||
     type === "cudaGraphConditionalHandle" ||
+    type === "cudaGraph_t" ||
+    type === "cudaGraphNode_t" ||
     type === "__nv_fp8_storage_t"
   ) return "uint";
+  if (type === "cudaStreamCaptureStatus" || type === "cudaStreamCaptureMode") return "int";
   if (type === "long long" || type === "long" || type === "short" || type === "short int") return "int";
   const mapped = defines.get(type);
   if (mapped !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(mapped)) type = mapped;

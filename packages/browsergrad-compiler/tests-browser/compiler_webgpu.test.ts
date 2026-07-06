@@ -15,6 +15,7 @@ import {
   runCompiledKernelReference,
   runCompiledKernelWebGpu,
 } from "../src/index";
+import { internalBackendIrFor as backendIr } from "../src/backend_ir";
 
 interface DeviceCheck {
   readonly available: boolean;
@@ -448,7 +449,7 @@ __global__ void subgroupScalarCompat(float *x) {
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
-    expect(compiled.ir.requiredFeatures).not.toContain("subgroups");
+    expect(backendIr(compiled).requiredFeatures).not.toContain("subgroups");
     expect(compiled.wgsl).not.toContain("enable subgroups;");
     expect(compiled.wgsl).not.toMatch(/\bsubgroup(?:Add|Max|Min|Shuffle|Ballot|Elect|Broadcast|All|Any)\b/u);
     expect([...actual.buffers.x as Float32Array]).toEqual([...expected.buffers.x as Float32Array]);
@@ -2206,7 +2207,7 @@ __global__ void surfaceWrite3d(cudaSurfaceObject_t outputSurf) {
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
-    expect(compiled.wgsl).toContain("z * i32(bg_uniforms.outputSurf_height)");
+    expect(compiled.wgsl).toContain("let index = ((z * height) + y) * width + x;");
     expect([...actual.buffers.outputSurf as Float32Array]).toEqual([...expected.buffers.outputSurf as Float32Array]);
     expect([...actual.buffers.outputSurf as Float32Array]).toEqual([0, 1, 10, 11, 100, 101, 110, 111]);
   });
@@ -2226,7 +2227,7 @@ __global__ void driverSurfaceAlias(CUsurfObject surf) {
     const expected = runCompiledKernelReference(compiled, input, launch);
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
-    expect(compiled.ir.params.find((param) => param.name === "surf")?.valueType).toBe("surface2d");
+    expect(backendIr(compiled).params.find((param) => param.name === "surf")?.valueType).toBe("surface2d");
     expect([...actual.buffers.surf as Float32Array]).toEqual([...expected.buffers.surf as Float32Array]);
     expect([...actual.buffers.surf as Float32Array]).toEqual([3, 13]);
   });
@@ -2406,7 +2407,7 @@ __global__ void halfCompat(half* x, half2* y, half a) {
     const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
-    expect(compiled.ir.requiredFeatures).not.toContain("shader-f16");
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect([...actual.buffers.x as Float32Array]).toEqual([3.5]);
     expect([...actual.buffers.y as Float32Array]).toEqual([4, 7]);
   });
@@ -2479,7 +2480,7 @@ __global__ void doubleCompat(double* result, double* out, double a) {
     const actual = await runCompiledKernelWebGpu(await createDevice(), compiled, input, launch);
 
     expect(compiled.diagnostics.some((diagnostic) => diagnostic.code === "f64-lowered-to-f32")).toBe(true);
-    expect(compiled.ir.requiredFeatures).not.toContain("shader-f16");
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect([...actual.buffers.result as Float32Array]).toEqual([3]);
     expect([...actual.buffers.out as Float32Array]).toEqual([2.75, 3.75]);
   });

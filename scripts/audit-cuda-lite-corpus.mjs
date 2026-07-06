@@ -517,7 +517,7 @@ function webGpuLiftFor(compiled) {
   const executionPlan = createCudaWebGpuExecutionPlan(
     compiled,
     syntheticInputForCompiled(compiled),
-    { gridDim: [1, 1, 1], blockDim: compiled.ir.workgroupSize },
+    { gridDim: [1, 1, 1], blockDim: compiled.kernelIr.workgroupSize },
     {
       compileKernel: (childSource, options = {}) => compileCudaLiteKernelForWebGpu(childSource, {
         ...options,

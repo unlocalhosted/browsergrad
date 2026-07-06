@@ -1,5 +1,6 @@
 import type { WgslResidentBuffer, WgslTypedArray, WgslValueType } from "@unlocalhosted/browsergrad-kernels";
 import { expressionName } from "./analyzer.js";
+import { internalBackendIrFor } from "./backend_ir.js";
 import {
   evaluateHostNumber,
   evaluatePointerArgument,
@@ -38,7 +39,10 @@ export type CudaPeerCopyBlockerCode =
   | "parent-not-single-invocation"
   | "arguments-not-host-evaluable";
 
-export interface CudaPeerCopyOperation {
+export type CudaPeerCopyOperation = CudaPeerCopyBufferOperation | CudaPeerFillBufferOperation;
+
+export interface CudaPeerCopyBufferOperation {
+  readonly kind: "copy";
   readonly expression: CudaLiteCallExpression;
   readonly dstRoot: string;
   readonly srcRoot: string;
@@ -46,6 +50,16 @@ export interface CudaPeerCopyOperation {
   readonly srcOffset: number;
   readonly elementCount: number;
   readonly valueType: "float" | "int" | "uint";
+}
+
+export interface CudaPeerFillBufferOperation {
+  readonly kind: "fill";
+  readonly expression: CudaLiteCallExpression;
+  readonly dstRoot: string;
+  readonly dstOffset: number;
+  readonly elementCount: number;
+  readonly valueType: "float" | "int" | "uint";
+  readonly byteValue: number;
 }
 
 export type CudaRuntimeCopyPlan = CudaPeerCopyPlan;
@@ -70,6 +84,7 @@ export function createCudaPeerCopyPlan(
   input: CompiledKernelInput,
   launch: KernelLaunch,
 ): CudaPeerCopyPlan {
+  const backendIr = internalBackendIrFor(compiled);
   const runtimePlan = createCudaRuntimePlan(compiled);
   if (!runtimePlan.operations.some((operation) => operation.kind === "runtime-copy")) {
     return unsupported("no-peer-copy", "no peer-copy operation found");
@@ -77,7 +92,7 @@ export function createCudaPeerCopyPlan(
   if (!runtimePlan.operations.every((operation) => operation.kind === "runtime-copy" || operation.kind === "device-sync")) {
     return unsupported("mixed-runtime-operations", "runtime operations besides peer-copy/device sync require reference runtime");
   }
-  const copyCollection = collectHostPeerCopies(compiled.ir.body, input, launch);
+  const copyCollection = collectHostPeerCopies(backendIr.body, input, launch);
   const copies = copyCollection.copies;
   if (copyCollection.blocker) return unsupportedWithBlocker(copyCollection.blocker);
   if (copies.length === 0) return unsupported("no-host-liftable-peer-copy", copyCollection.reason ?? "no host-liftable peer-copy operations");
@@ -184,6 +199,7 @@ function createPeerCopyOperation(
   env: ReadonlyMap<string, HostEvalValue>,
   input: CompiledKernelInput,
 ): CudaPeerCopyOperation | undefined {
+  if (isRuntimeMemsetCall(expression)) return createPeerFillOperation(expression, env, input);
   const copyShape = cudaRuntimeCopyShape(expression);
   if (!copyShape) return undefined;
   const dst = expression.args[0] ? evaluatePointerArgument(expression.args[0], env, input) : undefined;
@@ -201,6 +217,7 @@ function createPeerCopyOperation(
   const elementCount = Math.trunc(byteCount) / elementSize;
   if (dst.offset + elementCount > dstBuffer.elementLength || src.offset + elementCount > srcBuffer.elementLength) return undefined;
   return {
+    kind: "copy",
     expression,
     dstRoot: dst.root,
     srcRoot: src.root,
@@ -208,6 +225,33 @@ function createPeerCopyOperation(
     srcOffset: src.offset,
     elementCount,
     valueType: dstBuffer.valueType,
+  };
+}
+
+function createPeerFillOperation(
+  expression: CudaLiteCallExpression,
+  env: ReadonlyMap<string, HostEvalValue>,
+  input: CompiledKernelInput,
+): CudaPeerFillBufferOperation | undefined {
+  const dst = expression.args[0] ? evaluatePointerArgument(expression.args[0], env, input) : undefined;
+  const value = expression.args[1] ? evaluateHostNumber(expression.args[1], env, input) : undefined;
+  const count = expression.args[2] ? evaluateHostNumber(expression.args[2], env, input) : undefined;
+  if (!dst || value === undefined || count === undefined || count < 0) return undefined;
+  if (dst.offset < 0) return undefined;
+  const dstBuffer = copyBufferViewFor(input, dst.root);
+  if (!dstBuffer) return undefined;
+  const elementSize = dstBuffer.elementSize;
+  if (Math.trunc(count) % elementSize !== 0) return undefined;
+  const elementCount = Math.trunc(count) / elementSize;
+  if (dst.offset + elementCount > dstBuffer.elementLength) return undefined;
+  return {
+    kind: "fill",
+    expression,
+    dstRoot: dst.root,
+    dstOffset: dst.offset,
+    elementCount,
+    valueType: dstBuffer.valueType,
+    byteValue: Math.trunc(value) & 0xff,
   };
 }
 
@@ -275,7 +319,13 @@ function hasParentSideEffectsAfterPeerCopy(statements: readonly CudaLiteStatemen
 }
 
 function isPeerCopyCall(expression: CudaLiteExpression): expression is CudaLiteCallExpression {
-  return expression.kind === "call" && cudaRuntimeCopyShape(expression) !== undefined;
+  return expression.kind === "call" && (cudaRuntimeCopyShape(expression) !== undefined || isRuntimeMemsetCall(expression));
+}
+
+function isRuntimeMemsetCall(expression: CudaLiteExpression): boolean {
+  if (expression.kind !== "call") return false;
+  const name = expressionName(expression.callee);
+  return name === "cudaMemset" || name === "cudaMemsetAsync";
 }
 
 function containsPeerCopyCall(statements: readonly CudaLiteStatement[]): boolean {
@@ -290,17 +340,102 @@ function containsPeerCopyCall(statements: readonly CudaLiteStatement[]): boolean
 function isHostNoopExpression(expression: CudaLiteExpression): boolean {
   if (expression.kind !== "call") return false;
   const name = expressionName(expression.callee);
+  if (name !== undefined && isRuntimeQueryWriteCall(name)) return false;
   return name === "cudaDeviceSynchronize" ||
+    name === "cudaCtxResetPersistingL2Cache" ||
+    name === "cudaDeviceReset" ||
+    name === "cudaThreadExit" ||
+    name === "cudaThreadSynchronize" ||
+    name === "cudaDeviceGetAttribute" ||
+    name === "cudaDeviceGetLimit" ||
+    name === "cudaThreadGetLimit" ||
+    name === "cudaDeviceSetLimit" ||
+    name === "cudaThreadSetLimit" ||
+    name === "cudaDeviceCanAccessPeer" ||
+    name === "cudaDeviceEnablePeerAccess" ||
+    name === "cudaDeviceDisablePeerAccess" ||
+    name === "cudaGetDeviceFlags" ||
+    name === "cudaSetDeviceFlags" ||
+    name === "cudaMemGetInfo" ||
+    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
+    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
+    name === "cudaOccupancyMaxPotentialBlockSize" ||
+    name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    name === "cudaDeviceGetCacheConfig" ||
+    name === "cudaDeviceSetCacheConfig" ||
+    name === "cudaDeviceGetSharedMemConfig" ||
+    name === "cudaThreadGetCacheConfig" ||
+    name === "cudaDeviceSetSharedMemConfig" ||
+    name === "cudaThreadSetCacheConfig" ||
+    name === "cudaThreadExchangeStreamCaptureMode" ||
+    name === "cudaDeviceGetStreamPriorityRange" ||
+    name === "cudaFree" ||
+    name === "cudaFreeAsync" ||
+    name === "cudaMemAdvise" ||
+    name === "cudaMemPrefetchAsync" ||
+    name === "cudaStreamAttachMemAsync" ||
     name === "cudaStreamCreate" ||
     name === "cudaStreamCreateWithFlags" ||
+    name === "cudaStreamCreateWithPriority" ||
     name === "cudaStreamDestroy" ||
+    name === "cudaStreamGetDevice" ||
+    name === "cudaStreamGetFlags" ||
+    name === "cudaStreamGetId" ||
+    name === "cudaStreamGetPriority" ||
+    name === "cudaStreamIsCapturing" ||
+    name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaStreamQuery" ||
     name === "cudaStreamSynchronize" ||
+    name === "cudaStreamWaitEvent" ||
+    name === "cudaSetDevice" ||
+    name === "cudaGetDevice" ||
+    name === "cudaGetDeviceCount" ||
+    name === "cudaRuntimeGetVersion" ||
+    name === "cudaDriverGetVersion" ||
+    name === "cudaFuncSetAttribute" ||
+    name === "cudaFuncSetCacheConfig" ||
+    name === "cudaFuncSetSharedMemConfig" ||
+    name === "cudaGetLastError" ||
+    name === "cudaPeekAtLastError" ||
+    name === "cudaProfilerStart" ||
+    name === "cudaProfilerStop" ||
     name === "cudaEventCreate" ||
     name === "cudaEventCreateWithFlags" ||
     name === "cudaEventDestroy" ||
+    name === "cudaEventQuery" ||
     name === "cudaEventRecord" ||
+    name === "cudaEventRecordWithFlags" ||
     name === "cudaEventSynchronize" ||
     name === "printf";
+}
+
+function isRuntimeQueryWriteCall(name: string): boolean {
+  return name === "cudaGetDevice" ||
+    name === "cudaGetDeviceCount" ||
+    name === "cudaDeviceGetAttribute" ||
+    name === "cudaDeviceGetLimit" ||
+    name === "cudaThreadGetLimit" ||
+    name === "cudaDeviceCanAccessPeer" ||
+    name === "cudaGetDeviceFlags" ||
+    name === "cudaMemGetInfo" ||
+    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
+    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
+    name === "cudaOccupancyMaxPotentialBlockSize" ||
+    name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    name === "cudaDeviceGetCacheConfig" ||
+    name === "cudaDeviceGetSharedMemConfig" ||
+    name === "cudaThreadGetCacheConfig" ||
+    name === "cudaThreadExchangeStreamCaptureMode" ||
+    name === "cudaDeviceGetStreamPriorityRange" ||
+    name === "cudaStreamGetDevice" ||
+    name === "cudaStreamGetFlags" ||
+    name === "cudaStreamGetId" ||
+    name === "cudaStreamGetPriority" ||
+    name === "cudaStreamIsCapturing" ||
+    name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaRuntimeGetVersion" ||
+    name === "cudaDriverGetVersion" ||
+    name === "cudaEventElapsedTime";
 }
 
 function cudaRuntimeCopyShape(

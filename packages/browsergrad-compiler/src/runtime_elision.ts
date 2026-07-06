@@ -1,4 +1,5 @@
 import { expressionName, rootIdentifier } from "./analyzer.js";
+import { internalBackendIrFor } from "./backend_ir.js";
 import { CUDA_INTRINSICS } from "./intrinsics.js";
 import type {
   CompiledCudaLiteKernel,
@@ -37,7 +38,8 @@ const SIDE_EFFECT_FREE_MEMBER_CALLS = new Set([
 ]);
 
 export function deviceLaunchTreeIsExternallySilent(compiled: CompiledCudaLiteKernel): boolean {
-  const entry = compiled.ast.kernels.find((kernel) => kernel.name === compiled.ir.name);
+  const backendIr = internalBackendIrFor(compiled);
+  const entry = compiled.ast.kernels.find((kernel) => kernel.name === backendIr.name);
   if (!entry) return false;
   const externalRoots = initialExternalRoots(entry, compiled.ast.deviceGlobals);
   return !launchableHasExternalWrite(compiled, entry, externalRoots, new Set());

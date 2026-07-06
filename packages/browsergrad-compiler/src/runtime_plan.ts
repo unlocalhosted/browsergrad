@@ -1,4 +1,5 @@
 import { walkCudaLiteExpressions } from "./ast_queries.js";
+import { internalBackendIrFor } from "./backend_ir.js";
 import type {
   CompiledCudaLiteKernel,
   CudaLiteExpression,
@@ -39,9 +40,9 @@ export type CudaGridSyncPhasePlan =
     };
 
 export function createCudaRuntimePlan(
-  compiled: Pick<CompiledCudaLiteKernel, "ir">,
+  compiled: CompiledCudaLiteKernel,
 ): CudaRuntimePlan {
-  const operations = collectRuntimeOperations(compiled.ir.body);
+  const operations = collectRuntimeOperations(internalBackendIrFor(compiled).body);
   return {
     operations,
     requiresHostOrchestration: operations.length > 0,
@@ -58,7 +59,13 @@ const REFERENCE_RUNTIME_OPERATIONS: ReadonlySet<CudaRuntimeOperationKind> = new 
 ]);
 
 export function createCudaGridSyncPhasePlan(ir: KernelIrModule): CudaGridSyncPhasePlan {
-  const runtimePlan = createCudaRuntimePlan({ ir });
+  const operations = collectRuntimeOperations(ir.body);
+  const runtimePlan: CudaRuntimePlan = {
+    operations,
+    requiresHostOrchestration: operations.length > 0,
+    canRunSingleDispatchWebGpu: operations.length === 0,
+    referenceAvailable: operations.every((operation) => REFERENCE_RUNTIME_OPERATIONS.has(operation.kind)),
+  };
   if (runtimePlan.operations.length === 0) return { supported: true, modules: [ir] };
   const unsupported = runtimePlan.operations.find((operation) => operation.kind !== "grid-sync");
   if (unsupported) {
@@ -159,19 +166,78 @@ function runtimeOperationForExpression(
 }
 
 function isCudaRuntimeCopyCall(name: string): boolean {
-  return name === "cudaMemcpy" || name === "cudaMemcpyAsync" || name === "cudaMemcpyPeerAsync";
+  return name === "cudaMemcpy" ||
+    name === "cudaMemcpyAsync" ||
+    name === "cudaMemcpyPeerAsync" ||
+    name === "cudaMemset" ||
+    name === "cudaMemsetAsync";
 }
 
 function isHostManagedRuntimeNoopCall(name: string): boolean {
   return name === "cudaDeviceSynchronize" ||
+    name === "cudaCtxResetPersistingL2Cache" ||
+    name === "cudaDeviceReset" ||
+    name === "cudaThreadExit" ||
+    name === "cudaThreadSynchronize" ||
+    name === "cudaDeviceGetAttribute" ||
+    name === "cudaDeviceGetLimit" ||
+    name === "cudaThreadGetLimit" ||
+    name === "cudaDeviceSetLimit" ||
+    name === "cudaThreadSetLimit" ||
+    name === "cudaDeviceCanAccessPeer" ||
+    name === "cudaDeviceEnablePeerAccess" ||
+    name === "cudaDeviceDisablePeerAccess" ||
+    name === "cudaGetDeviceFlags" ||
+    name === "cudaSetDeviceFlags" ||
+    name === "cudaMemGetInfo" ||
+    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
+    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
+    name === "cudaOccupancyMaxPotentialBlockSize" ||
+    name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    name === "cudaDeviceGetCacheConfig" ||
+    name === "cudaDeviceSetCacheConfig" ||
+    name === "cudaDeviceGetSharedMemConfig" ||
+    name === "cudaThreadGetCacheConfig" ||
+    name === "cudaDeviceSetSharedMemConfig" ||
+    name === "cudaThreadSetCacheConfig" ||
+    name === "cudaThreadExchangeStreamCaptureMode" ||
+    name === "cudaDeviceGetStreamPriorityRange" ||
+    name === "cudaFree" ||
+    name === "cudaFreeAsync" ||
+    name === "cudaMemAdvise" ||
+    name === "cudaMemPrefetchAsync" ||
+    name === "cudaStreamAttachMemAsync" ||
     name === "cudaStreamCreate" ||
     name === "cudaStreamCreateWithFlags" ||
+    name === "cudaStreamCreateWithPriority" ||
     name === "cudaStreamDestroy" ||
+    name === "cudaStreamGetDevice" ||
+    name === "cudaStreamGetFlags" ||
+    name === "cudaStreamGetId" ||
+    name === "cudaStreamGetPriority" ||
+    name === "cudaStreamIsCapturing" ||
+    name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaStreamQuery" ||
     name === "cudaStreamSynchronize" ||
+    name === "cudaStreamWaitEvent" ||
+    name === "cudaSetDevice" ||
+    name === "cudaGetDevice" ||
+    name === "cudaGetDeviceCount" ||
+    name === "cudaRuntimeGetVersion" ||
+    name === "cudaDriverGetVersion" ||
+    name === "cudaFuncSetAttribute" ||
+    name === "cudaFuncSetCacheConfig" ||
+    name === "cudaFuncSetSharedMemConfig" ||
+    name === "cudaGetLastError" ||
+    name === "cudaPeekAtLastError" ||
+    name === "cudaProfilerStart" ||
+    name === "cudaProfilerStop" ||
     name === "cudaEventCreate" ||
     name === "cudaEventCreateWithFlags" ||
     name === "cudaEventDestroy" ||
+    name === "cudaEventQuery" ||
     name === "cudaEventRecord" ||
+    name === "cudaEventRecordWithFlags" ||
     name === "cudaEventSynchronize";
 }
 

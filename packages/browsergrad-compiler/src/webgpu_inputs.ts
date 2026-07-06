@@ -4,6 +4,7 @@ import {
   type WgslTypedArray,
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames } from "./ast_queries.js";
+import { internalBackendIrFor } from "./backend_ir.js";
 import { CUDA_NAMED_CONSTANTS } from "./named_constants.js";
 import { poolDataName, poolOffsetName } from "./pool_bindings.js";
 import { isCudaVectorType } from "./vector_types.js";
@@ -21,7 +22,8 @@ export function surfaceBufferInputs(
   input: CompiledKernelInput,
 ): Record<string, WgslTypedArray> {
   const out: Record<string, WgslTypedArray> = {};
-  for (const surface of compiled.ir.params.filter((param) => param.valueType === "surface2d")) {
+  const backendIr = internalBackendIrFor(compiled);
+  for (const surface of backendIr.params.filter((param) => param.valueType === "surface2d")) {
     const value = input.surfaces?.[surface.name];
     if (!value) {
       throw new CudaLiteCompilerError(`missing surface input '${surface.name}'`, [{
@@ -90,7 +92,8 @@ export function constantBufferInputs(
   input: CompiledKernelInput,
 ): Record<string, WgslTypedArray> {
   const out: Record<string, WgslTypedArray> = {};
-  for (const constant of compiled.ir.constants.filter((item) =>
+  const backendIr = internalBackendIrFor(compiled);
+  for (const constant of backendIr.constants.filter((item) =>
     item.init === undefined &&
     (item.dimensions.length > 0 || isCudaVectorType(item.valueType))
   )) {
@@ -113,7 +116,8 @@ export function deviceGlobalBufferInputs(
   input: CompiledKernelInput,
 ): Record<string, WgslTypedArray> {
   const out: Record<string, WgslTypedArray> = {};
-  for (const global of compiled.ir.deviceGlobals) {
+  const backendIr = internalBackendIrFor(compiled);
+  for (const global of backendIr.deviceGlobals) {
     out[global.name] = input.deviceGlobals?.[global.name] ?? deviceGlobalInitialValue(global);
   }
   return out;
@@ -124,11 +128,12 @@ export function isDevicePoolParam(param: { readonly pointer: boolean; readonly v
 }
 
 function memoryPoolDescriptors(compiled: CompiledCudaLiteKernel): Array<{ readonly name: string; readonly span: CudaLiteDiagnostic["span"] }> {
+  const backendIr = internalBackendIrFor(compiled);
   return [
-    ...compiled.ir.params.filter(isDevicePoolParam).map((param) => ({ name: param.name, span: param.span })),
-    ...collectExternalDevicePoolNames(compiled.ir.body).map((name) => ({
+    ...backendIr.params.filter(isDevicePoolParam).map((param) => ({ name: param.name, span: param.span })),
+    ...collectExternalDevicePoolNames(backendIr.body).map((name) => ({
       name,
-      span: compiled.ir.body[0]?.span ?? compiled.ir.params[0]?.span ?? { start: 0, end: 0, line: 1, column: 1 },
+      span: backendIr.body[0]?.span ?? backendIr.params[0]?.span ?? { start: 0, end: 0, line: 1, column: 1 },
     })),
   ];
 }

@@ -56,6 +56,10 @@ const CUDA_SCALAR_TYPE_ALIASES = new Map<string, Exclude<CudaLiteScalarType, "vo
   ["CUsurfObject", "surface2d"],
   ["CUtensorMap", "uint"],
   ["cudaGraphConditionalHandle", "uint"],
+  ["cudaGraph_t", "uint"],
+  ["cudaGraphNode_t", "uint"],
+  ["cudaStreamCaptureStatus", "int"],
+  ["cudaStreamCaptureMode", "int"],
   ["__nv_fp8_storage_t", "uint"],
   ["__nv_fp8x2_storage_t", "uint"],
   ["__nv_fp8x4_storage_t", "uint"],
@@ -110,6 +114,10 @@ const TYPE_START_KEYWORDS = new Set([
   "cudaSurfaceObject_t",
   "cudaEvent_t",
   "cudaStream_t",
+  "cudaGraph_t",
+  "cudaGraphNode_t",
+  "cudaStreamCaptureStatus",
+  "cudaStreamCaptureMode",
   "DevicePool",
   "void",
 ]);
@@ -535,7 +543,7 @@ class Parser {
     if (this.match("static_assert")) return this.parseStaticAssert();
     this.rejectUnsupportedCudaCppObjectStatement();
     if (this.startsVarDecl()) return this.parseVarDeclList(true);
-    const expression = this.parseExpression();
+    const expression = this.parseExpressionSequence();
     const end = this.expect(";");
     return [{ kind: "expr", expression, span: mergeSpans(expression.span, end.span) }];
   }
@@ -1272,7 +1280,7 @@ class Parser {
     if (this.match("{")) return this.parseBracedInitializer();
     if (this.match("(")) {
       this.expect("(");
-      const expression = this.parseExpression();
+      const expression = this.parseExpressionSequence();
       this.expect(")");
       return expression;
     }
@@ -1512,7 +1520,13 @@ class Parser {
     if (token.value === "cufftComplex") return "complex64";
     if (token.value === "cudaTextureObject_t") return "texture2d";
     if (token.value === "cudaSurfaceObject_t") return "surface2d";
-    if (token.value === "cudaEvent_t" || token.value === "cudaStream_t") return "uint";
+    if (
+      token.value === "cudaEvent_t" ||
+      token.value === "cudaStream_t" ||
+      token.value === "cudaGraph_t" ||
+      token.value === "cudaGraphNode_t"
+    ) return "uint";
+    if (token.value === "cudaStreamCaptureStatus" || token.value === "cudaStreamCaptureMode") return "int";
     if (token.value === "DevicePool") return "devicepool";
     if (token.value === "void") return "voidptr";
     if (token.value === "__half") return "half";

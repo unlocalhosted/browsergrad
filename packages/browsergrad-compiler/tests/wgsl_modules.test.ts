@@ -246,6 +246,7 @@ function storageContext(options: {
   return {
     ir: {
       name: "test",
+      span,
       params: [...params.values()],
       constants: [],
       textures: [],
