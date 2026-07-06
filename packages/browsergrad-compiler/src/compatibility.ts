@@ -40,6 +40,7 @@ export interface CudaLoweringPlan {
 const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("parse-error", "frontend", "Unsupported CUDA/C++ syntax", "unsupported", false, false, "Parser stopped before semantic IR."),
   feature("semantic-reference-unsupported", "frontend", "Semantic reference unsupported", "unsupported", false, false, "The semantic CPU reference path rejected a kernel outside its migrated coverage."),
+  feature("semantic-wgsl-unsupported", "frontend", "Semantic WGSL unsupported", "unsupported", false, true, "The semantic WGSL path rejected a kernel outside its migrated coverage."),
   feature("internal-lowering-invariant", "frontend", "Internal lowering invariant failed", "unsupported", false, false, "Compiler invariant failed after semantic analysis; this indicates a compiler bug, not an unsupported CUDA feature."),
   feature("duplicate-symbol", "frontend", "Duplicate CUDA-lite symbol", "unsupported", false, false, "Symbol table construction requires unique names in the active scope."),
   feature("reserved-symbol", "frontend", "Reserved CUDA-lite symbol", "unsupported", false, false, "User declarations may not shadow compiler-reserved binding names."),

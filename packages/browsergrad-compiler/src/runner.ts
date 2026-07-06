@@ -19,6 +19,10 @@ import {
   createCudaLiteSemanticModel,
   lowerSemanticModelToKernelIr,
 } from "./semantic_ir.js";
+import {
+  canEmitSemanticKernelIrWgsl,
+  emitSemanticKernelIrWgsl,
+} from "./semantic_wgsl.js";
 import { emitKernelIrWgsl } from "./wgsl.js";
 import {
   type CudaWebGpuExecutionPlan,
@@ -82,17 +86,18 @@ export function compileCudaLiteKernel(
   }
   const semantic = createCudaLiteSemanticModel(analysis);
   const kernelIr = lowerSemanticModelToKernelIr(analysis, semantic, options);
-  const backendIr = lowerAnalyzedCudaLiteToKernelIr(analysis, options);
-  const emitted = emitKernelIrWgsl(
-    backendIr,
-    {
-      ...(options.features === undefined ? {} : { features: options.features }),
-      ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
-      ...(options.textureDescriptors === undefined ? {} : { textureDescriptors: options.textureDescriptors }),
-      ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),
-      ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
-    },
-  );
+  const emitted = options.pointerBaseOffsets === undefined && canEmitSemanticKernelIrWgsl(kernelIr)
+    ? emitSemanticKernelIrWgsl(kernelIr)
+    : emitKernelIrWgsl(
+      lowerAnalyzedCudaLiteToKernelIr(analysis, options),
+      {
+        ...(options.features === undefined ? {} : { features: options.features }),
+        ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
+        ...(options.textureDescriptors === undefined ? {} : { textureDescriptors: options.textureDescriptors }),
+        ...(options.f16Mode === undefined ? {} : { f16Mode: options.f16Mode }),
+        ...(options.subgroupMode === undefined ? {} : { subgroupMode: options.subgroupMode }),
+      },
+    );
   const loweringPlan = createCudaLoweringPlan(analysis.diagnostics);
   return {
     ast,
@@ -138,7 +143,9 @@ export function compileCudaLiteKernelForWebGpu(
 }
 
 export {
+  canEmitSemanticKernelIrWgsl,
   canRunCompiledKernelSemanticReference,
+  emitSemanticKernelIrWgsl,
   runCompiledKernelReference,
   runCompiledKernelSemanticReference,
 };

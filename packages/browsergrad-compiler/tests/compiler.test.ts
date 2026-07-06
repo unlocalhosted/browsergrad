@@ -13,6 +13,7 @@ import {
   compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   prepareCompiledKernelWebGpu,
+  canEmitSemanticKernelIrWgsl,
   canRunCompiledKernelSemanticReference,
   createCudaGridSyncPhasePlan,
   createCudaHostDynamicLaunchPlan,
@@ -334,6 +335,7 @@ describe("CUDA-lite compiler", () => {
       "declare",
       "branch",
     ]);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
     const guardedStore = compiled.kernelIr.operations[1]?.kind === "branch"
       ? compiled.kernelIr.operations[1].consequent[0]
       : undefined;
@@ -348,6 +350,7 @@ describe("CUDA-lite compiler", () => {
     });
     expect(guardedStore?.kind === "store" ? guardedStore.reads.map((read) => read.base) : []).toEqual(["x", "y"]);
     expect("body" in compiled.kernelIr).toBe(false);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("@workgroup_size(8, 1, 1)");
     expect(compiled.wgsl).toContain("var<storage, read> x: array<f32>;");
     expect(compiled.wgsl).toContain("var<storage, read_write> y: array<f32>;");
