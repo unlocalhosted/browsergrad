@@ -3740,6 +3740,44 @@ __global__ void runtimeSymbolCopy(unsigned int *dst, const unsigned int *src) {
     }
   });
 
+  it("host-lifts cudaMemcpy symbol copies for default-initialized device globals", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ unsigned int gBits[3];
+__global__ void runtimeDeviceSymbolCopy(unsigned int *dst, const unsigned int *src) {
+  if (threadIdx.x == 0) {
+    cudaMemcpyToSymbol(gBits, src, sizeof(unsigned int) * 3);
+    cudaMemcpyFromSymbol(dst, gBits, sizeof(unsigned int) * 3);
+  }
+}`, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        dst: new Uint32Array([0, 0, 0]),
+        src: new Uint32Array([7, 8, 9]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const plan = createCudaRuntimeCopyPlan(compiled, input, launch);
+    const webGpuPlan = createCudaWebGpuExecutionPlan(compiled, input, launch);
+
+    expect([...result.buffers.dst as Uint32Array]).toEqual([7, 8, 9]);
+    expect(plan.supported).toBe(true);
+    expect(plan.copies.map((copy) => copy.kind === "copy"
+      ? { dstRoot: copy.dstRoot, srcRoot: copy.srcRoot, dstOffset: copy.dstOffset, srcOffset: copy.srcOffset, elementCount: copy.elementCount }
+      : { dstRoot: copy.dstRoot, srcRoot: undefined, dstOffset: copy.dstOffset, srcOffset: undefined, elementCount: copy.elementCount })).toEqual([
+      { dstRoot: "gBits", srcRoot: "src", dstOffset: 0, srcOffset: 0, elementCount: 3 },
+      { dstRoot: "dst", srcRoot: "gBits", dstOffset: 0, srcOffset: 0, elementCount: 3 },
+    ]);
+    expect(webGpuPlan.supported).toBe(true);
+    if (webGpuPlan.supported) {
+      expect(webGpuPlan.kind).toBe("host-copy");
+      expect(webGpuPlan.steps).toHaveLength(3);
+    }
+  });
+
   it("host-lifts cudaMemcpy2D and cudaMemcpy2DAsync row copies", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void runtimeCopy2D(float *dst, const float *src) {

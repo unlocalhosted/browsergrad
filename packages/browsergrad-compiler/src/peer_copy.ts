@@ -13,10 +13,13 @@ import type {
   CompiledCudaLiteKernel,
   CompiledKernelInput,
   CudaLiteCallExpression,
+  CudaLiteDeviceGlobal,
   CudaLiteExpression,
+  CudaLiteScalarType,
   CudaLiteStatement,
   KernelLaunch,
 } from "./types.js";
+import { cudaVectorLaneCount, cudaVectorScalarType, isCudaVectorType } from "./vector_types.js";
 
 export interface CudaPeerCopyPlan {
   readonly supported: boolean;
@@ -92,7 +95,7 @@ export function createCudaPeerCopyPlan(
   if (!runtimePlan.operations.every((operation) => operation.kind === "runtime-copy" || operation.kind === "device-sync")) {
     return unsupported("mixed-runtime-operations", "runtime operations besides peer-copy/device sync require reference runtime");
   }
-  const copyCollection = collectHostPeerCopies(backendIr.body, input, launch);
+  const copyCollection = collectHostPeerCopies(backendIr.body, input, launch, backendIr.deviceGlobals);
   const copies = copyCollection.copies;
   if (copyCollection.blocker) return unsupportedWithBlocker(copyCollection.blocker);
   if (copies.length === 0) return unsupported("no-host-liftable-peer-copy", copyCollection.reason ?? "no host-liftable peer-copy operations");
@@ -119,6 +122,7 @@ function collectHostPeerCopies(
   statements: readonly CudaLiteStatement[],
   input: CompiledKernelInput,
   launch: KernelLaunch,
+  deviceGlobals: readonly CudaLiteDeviceGlobal[],
 ): HostPeerCopyCollection {
   const out: CudaPeerCopyOperation[] = [];
   const parentHasSingleInvocation = launch.gridDim.every((axis) => axis === 1) && launch.blockDim.every((axis) => axis === 1);
@@ -176,7 +180,7 @@ function collectHostPeerCopies(
           markUnsafe("unsafe-parent-side-effects", "parent side effects after peer copy cannot be replayed in host-lifted sequence");
         }
         else {
-          const operations = createPeerCopyOperations(item.expression, current, input);
+          const operations = createPeerCopyOperations(item.expression, current, input, deviceGlobals);
           if (!operations) {
             markUnsafe("arguments-not-host-evaluable", "peer-copy arguments must resolve to typed buffer aliases, non-negative offsets, and element-aligned byte count");
           }
@@ -198,16 +202,17 @@ function createPeerCopyOperations(
   expression: CudaLiteCallExpression,
   env: ReadonlyMap<string, HostEvalValue>,
   input: CompiledKernelInput,
+  deviceGlobals: readonly CudaLiteDeviceGlobal[],
 ): readonly CudaPeerCopyOperation[] | undefined {
   if (isRuntimeMemsetCall(expression)) {
-    if (isRuntimeMemset2DCall(expression)) return createPeerFill2DOperations(expression, env, input);
-    const fill = createPeerFillOperation(expression, env, input);
+    if (isRuntimeMemset2DCall(expression)) return createPeerFill2DOperations(expression, env, input, deviceGlobals);
+    const fill = createPeerFillOperation(expression, env, input, deviceGlobals);
     return fill ? [fill] : undefined;
   }
   const copyShape = cudaRuntimeCopyShape(expression);
   if (!copyShape) return undefined;
-  if (copyShape.kind === "symbol") return createPeerSymbolCopyOperation(expression, env, input, copyShape);
-  if (copyShape.kind === "copy2d") return createPeerCopy2DOperations(expression, env, input, copyShape);
+  if (copyShape.kind === "symbol") return createPeerSymbolCopyOperation(expression, env, input, deviceGlobals, copyShape);
+  if (copyShape.kind === "copy2d") return createPeerCopy2DOperations(expression, env, input, deviceGlobals, copyShape);
   const dst = expression.args[0] ? evaluatePointerArgument(expression.args[0], env, input) : undefined;
   const srcArg = expression.args[copyShape.srcIndex];
   const countArg = expression.args[copyShape.countIndex];
@@ -215,8 +220,8 @@ function createPeerCopyOperations(
   const byteCount = countArg ? evaluateHostNumber(countArg, env, input) : undefined;
   if (!dst || !src || byteCount === undefined || byteCount < 0) return undefined;
   if (dst.offset < 0 || src.offset < 0) return undefined;
-  const dstBuffer = copyBufferViewFor(input, dst.root);
-  const srcBuffer = copyBufferViewFor(input, src.root);
+  const dstBuffer = copyBufferViewFor(input, dst.root, deviceGlobals);
+  const srcBuffer = copyBufferViewFor(input, src.root, deviceGlobals);
   if (!dstBuffer || !srcBuffer || dstBuffer.valueType !== srcBuffer.valueType) return undefined;
   const elementSize = dstBuffer.elementSize;
   if (Math.trunc(byteCount) % elementSize !== 0) return undefined;
@@ -238,6 +243,7 @@ function createPeerSymbolCopyOperation(
   expression: CudaLiteCallExpression,
   env: ReadonlyMap<string, HostEvalValue>,
   input: CompiledKernelInput,
+  deviceGlobals: readonly CudaLiteDeviceGlobal[],
   copyShape: Extract<CudaRuntimeCopyShape, { readonly kind: "symbol" }>,
 ): readonly CudaPeerCopyOperation[] | undefined {
   const symbol = expression.args[copyShape.symbolIndex] ? evaluatePointerArgument(expression.args[copyShape.symbolIndex]!, env, input) : undefined;
@@ -246,8 +252,8 @@ function createPeerSymbolCopyOperation(
   const offsetBytes = copyShape.offsetIndex === undefined ? 0 : evaluateHostNumber(expression.args[copyShape.offsetIndex]!, env, input);
   if (!symbol || !pointer || byteCount === undefined || offsetBytes === undefined) return undefined;
   if (symbol.offset < 0 || pointer.offset < 0 || byteCount < 0 || offsetBytes < 0) return undefined;
-  const symbolBuffer = copyBufferViewFor(input, symbol.root);
-  const pointerBuffer = copyBufferViewFor(input, pointer.root);
+  const symbolBuffer = copyBufferViewFor(input, symbol.root, deviceGlobals);
+  const pointerBuffer = copyBufferViewFor(input, pointer.root, deviceGlobals);
   if (!symbolBuffer || !pointerBuffer || symbolBuffer.valueType !== pointerBuffer.valueType) return undefined;
   const elementSize = symbolBuffer.elementSize;
   if (!Number.isInteger(byteCount) || !Number.isInteger(offsetBytes)) return undefined;
@@ -277,6 +283,7 @@ function createPeerCopy2DOperations(
   expression: CudaLiteCallExpression,
   env: ReadonlyMap<string, HostEvalValue>,
   input: CompiledKernelInput,
+  deviceGlobals: readonly CudaLiteDeviceGlobal[],
   copyShape: Extract<CudaRuntimeCopyShape, { readonly kind: "copy2d" }>,
 ): readonly CudaPeerCopyOperation[] | undefined {
   const dst = expression.args[0] ? evaluatePointerArgument(expression.args[0], env, input) : undefined;
@@ -287,8 +294,8 @@ function createPeerCopy2DOperations(
   const rows = expression.args[5] ? evaluateHostNumber(expression.args[5], env, input) : undefined;
   if (!dst || !src || dstPitchBytes === undefined || srcPitchBytes === undefined || rowBytes === undefined || rows === undefined) return undefined;
   if (dst.offset < 0 || src.offset < 0 || dstPitchBytes < 0 || srcPitchBytes < 0 || rowBytes < 0 || rows < 0) return undefined;
-  const dstBuffer = copyBufferViewFor(input, dst.root);
-  const srcBuffer = copyBufferViewFor(input, src.root);
+  const dstBuffer = copyBufferViewFor(input, dst.root, deviceGlobals);
+  const srcBuffer = copyBufferViewFor(input, src.root, deviceGlobals);
   if (!dstBuffer || !srcBuffer || dstBuffer.valueType !== srcBuffer.valueType) return undefined;
   const elementSize = dstBuffer.elementSize;
   const byteValues = [dstPitchBytes, srcPitchBytes, rowBytes];
@@ -333,13 +340,14 @@ function createPeerFillOperation(
   expression: CudaLiteCallExpression,
   env: ReadonlyMap<string, HostEvalValue>,
   input: CompiledKernelInput,
+  deviceGlobals: readonly CudaLiteDeviceGlobal[],
 ): CudaPeerFillBufferOperation | undefined {
   const dst = expression.args[0] ? evaluatePointerArgument(expression.args[0], env, input) : undefined;
   const value = expression.args[1] ? evaluateHostNumber(expression.args[1], env, input) : undefined;
   const count = expression.args[2] ? evaluateHostNumber(expression.args[2], env, input) : undefined;
   if (!dst || value === undefined || count === undefined || count < 0) return undefined;
   if (dst.offset < 0) return undefined;
-  const dstBuffer = copyBufferViewFor(input, dst.root);
+  const dstBuffer = copyBufferViewFor(input, dst.root, deviceGlobals);
   if (!dstBuffer) return undefined;
   const elementSize = dstBuffer.elementSize;
   if (Math.trunc(count) % elementSize !== 0) return undefined;
@@ -360,6 +368,7 @@ function createPeerFill2DOperations(
   expression: CudaLiteCallExpression,
   env: ReadonlyMap<string, HostEvalValue>,
   input: CompiledKernelInput,
+  deviceGlobals: readonly CudaLiteDeviceGlobal[],
 ): readonly CudaPeerCopyOperation[] | undefined {
   const dst = expression.args[0] ? evaluatePointerArgument(expression.args[0], env, input) : undefined;
   const pitchBytes = expression.args[1] ? evaluateHostNumber(expression.args[1], env, input) : undefined;
@@ -368,7 +377,7 @@ function createPeerFill2DOperations(
   const rows = expression.args[4] ? evaluateHostNumber(expression.args[4], env, input) : undefined;
   if (!dst || pitchBytes === undefined || value === undefined || rowBytes === undefined || rows === undefined) return undefined;
   if (dst.offset < 0 || pitchBytes < 0 || rowBytes < 0 || rows < 0) return undefined;
-  const dstBuffer = copyBufferViewFor(input, dst.root);
+  const dstBuffer = copyBufferViewFor(input, dst.root, deviceGlobals);
   if (!dstBuffer) return undefined;
   const elementSize = dstBuffer.elementSize;
   const byteValues = [pitchBytes, rowBytes];
@@ -405,7 +414,7 @@ function createPeerFill2DOperations(
   return out;
 }
 
-function copyBufferViewFor(input: CompiledKernelInput, name: string): CopyBufferView | undefined {
+function copyBufferViewFor(input: CompiledKernelInput, name: string, deviceGlobals: readonly CudaLiteDeviceGlobal[]): CopyBufferView | undefined {
   const typed = input.buffers[name];
   const resident = input.residentBuffers?.[name];
   const constant = input.constants?.[name];
@@ -415,6 +424,8 @@ function copyBufferViewFor(input: CompiledKernelInput, name: string): CopyBuffer
   if (deviceGlobal) return copyTypedArrayView(deviceGlobal);
   if (constant && typeof constant !== "number") return copyTypedArrayView(constant);
   if (resident) return copyResidentBufferView(resident);
+  const global = deviceGlobals.find((item) => item.name === name);
+  if (global) return copyDeviceGlobalView(global);
   return undefined;
 }
 
@@ -422,6 +433,24 @@ function copyTypedArrayView(buffer: WgslTypedArray): CopyBufferView | undefined 
   if (buffer instanceof Float32Array) return { valueType: "float", elementSize: Float32Array.BYTES_PER_ELEMENT, elementLength: buffer.length };
   if (buffer instanceof Int32Array) return { valueType: "int", elementSize: Int32Array.BYTES_PER_ELEMENT, elementLength: buffer.length };
   if (buffer instanceof Uint32Array) return { valueType: "uint", elementSize: Uint32Array.BYTES_PER_ELEMENT, elementLength: buffer.length };
+  return undefined;
+}
+
+function copyDeviceGlobalView(global: CudaLiteDeviceGlobal): CopyBufferView | undefined {
+  const valueType = copyValueTypeForCuda(global.valueType);
+  if (!valueType) return undefined;
+  const lanes = isCudaVectorType(global.valueType) ? cudaVectorLaneCount(global.valueType) : 1;
+  const elements = global.dimensions.length === 0
+    ? 1
+    : global.dimensions.reduce((product, dimension) => product * dimension, 1);
+  return { valueType, elementSize: 4, elementLength: elements * lanes };
+}
+
+function copyValueTypeForCuda(valueType: CudaLiteScalarType): "float" | "int" | "uint" | undefined {
+  const scalar = cudaVectorScalarType(valueType) ?? valueType;
+  if (scalar === "float" || scalar === "double") return "float";
+  if (scalar === "int") return "int";
+  if (scalar === "uint" || scalar === "uchar" || scalar === "bool" || scalar === "voidptr") return "uint";
   return undefined;
 }
 

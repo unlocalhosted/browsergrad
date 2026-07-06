@@ -114,6 +114,7 @@ __global__ void peerCopySync(float *dst, const float *src) {
 }`,
   runtimeCopy: `
 __constant__ float cRuntimeCopySymbol[2];
+__device__ float gRuntimeCopySymbol[2];
 __global__ void runtimeCopy(float *dst, const float *src, int n) {
   cudaStream_t stream;
   cudaEvent_t event;
@@ -133,6 +134,8 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
     cudaMemcpyToSymbolAsync(cRuntimeCopySymbol, src + 1, sizeof(float), sizeof(float), cudaMemcpyDeviceToDevice, stream);
     cudaMemcpyFromSymbol(dst, cRuntimeCopySymbol, sizeof(float) * 2);
     cudaMemcpyFromSymbolAsync(dst + 2, cRuntimeCopySymbol, sizeof(float) * 2, 0, cudaMemcpyDeviceToDevice, stream);
+    cudaMemcpyToSymbol(gRuntimeCopySymbol, src, sizeof(float) * 2);
+    cudaMemcpyFromSymbol(dst, gRuntimeCopySymbol, sizeof(float) * 2);
     cudaEventRecord(event, stream);
     cudaEventSynchronize(event);
     cudaStreamSynchronize(stream);
