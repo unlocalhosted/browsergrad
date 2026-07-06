@@ -12,6 +12,10 @@ import { validateCudaKernelLaunch } from "./launch.js";
 import { parseCudaLite } from "./parser.js";
 import { runCompiledKernelReference } from "./reference.js";
 import {
+  canRunCompiledKernelSemanticReference,
+  runCompiledKernelSemanticReference,
+} from "./semantic_reference.js";
+import {
   createCudaLiteSemanticModel,
   lowerSemanticModelToKernelIr,
 } from "./semantic_ir.js";
@@ -133,7 +137,11 @@ export function compileCudaLiteKernelForWebGpu(
   return compileCudaLiteKernel(source, cudaLiteWebGpuCompileOptions(options));
 }
 
-export { runCompiledKernelReference };
+export {
+  canRunCompiledKernelSemanticReference,
+  runCompiledKernelReference,
+  runCompiledKernelSemanticReference,
+};
 
 function createCachedWebGpuChildCompiler(
   options: CompiledKernelWebGpuExecutionOptions,

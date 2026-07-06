@@ -13,6 +13,7 @@ import {
   compileCudaLiteKernelForWebGpu,
   compileCudaLiteKernel,
   prepareCompiledKernelWebGpu,
+  canRunCompiledKernelSemanticReference,
   createCudaGridSyncPhasePlan,
   createCudaHostDynamicLaunchPlan,
   createCudaLaunchValidationDiagnostics,
@@ -29,6 +30,7 @@ import {
   normalizeCudaWebGpuReadbackNames,
   parseCudaLite,
   runCompiledKernelReference,
+  runCompiledKernelSemanticReference,
   runCompiledKernelWebGpu,
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
@@ -366,20 +368,25 @@ describe("CUDA-lite compiler", () => {
     });
   });
 
-  it("runs SAXPY in the lockstep CPU reference interpreter", () => {
+  it("runs SAXPY through the semantic CPU reference path", () => {
     const compiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
+    const input = {
+      buffers: {
+        x: new Float32Array([1, 2, 3, 4]),
+        y: new Float32Array([10, 20, 30, 40]),
+      },
+      scalars: { a: 2, n: 4 },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [8, 1, 1] as const };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
     const result = runCompiledKernelReference(
       compiled,
-      {
-        buffers: {
-          x: new Float32Array([1, 2, 3, 4]),
-          y: new Float32Array([10, 20, 30, 40]),
-        },
-        scalars: { a: 2, n: 4 },
-      },
-      { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+      input,
+      launch,
     );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect([...semanticResult.buffers.y as Float32Array]).toEqual([12, 24, 36, 48]);
     expect([...result.buffers.y as Float32Array]).toEqual([12, 24, 36, 48]);
     expect(result.trace.some((thread) => thread.writes.length > 0)).toBe(true);
   });

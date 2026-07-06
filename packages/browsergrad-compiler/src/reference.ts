@@ -12,6 +12,10 @@ import { cudaDeviceLimitValue } from "./cuda_device_limits.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import {
+  canRunCompiledKernelSemanticReference,
+  runCompiledKernelSemanticReference,
+} from "./semantic_reference.js";
+import {
   type MatrixTileLayout,
   type MatrixTileResolvedSpec,
   flattenMatrixTileLeadingIndex,
@@ -211,6 +215,9 @@ export function runCompiledKernelReference(
   input: CompiledKernelInput,
   launch: KernelLaunch,
 ): ReferenceKernelResult {
+  if (canRunCompiledKernelSemanticReference(compiled)) {
+    return runCompiledKernelSemanticReference(compiled, input, launch);
+  }
   const backendIr = referenceKernelIrFor(compiled);
   validateCudaKernelLaunch(launch, backendIr.workgroupSize);
   validateInputs(input, backendIr);
