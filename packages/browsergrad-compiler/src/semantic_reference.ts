@@ -151,7 +151,7 @@ function unsupportedSemanticReferenceOperation(
         if (!semanticReferenceAssignmentOperatorSupported(operation.operator)) return operation;
         if (!semanticReferenceMemoryRefSupported(operation.target)) return operation;
         if (!compiled.kernelIr.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage")) return operation;
-        if (!semanticReferenceExpressionSupported(operation.value, "scalar")) return operation;
+        if (!semanticReferenceValueExpressionSupported(operation.value, compiled)) return operation;
         break;
       case "atomic":
         if (!semanticReferenceAtomicSupported(operation, compiled)) return operation;
@@ -219,6 +219,29 @@ function semanticReferenceAtomicSupported(
   const expectedArgs = atomicOp === "cas" ? 3 : 2;
   return operation.args.length >= expectedArgs &&
     operation.args.slice(1, expectedArgs).every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
+}
+
+function semanticReferenceValueExpressionSupported(expression: SemanticExpression, compiled: CompiledCudaLiteKernel): boolean {
+  return semanticReferenceExpressionSupported(expression, "scalar") ||
+    expression.kind === "call" && semanticReferenceAtomicCallSupported(expression, compiled);
+}
+
+function semanticReferenceAtomicCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  compiled: CompiledCudaLiteKernel,
+): boolean {
+  if (expression.callee.kind !== "symbol") return false;
+  const atomicOp = SEMANTIC_ATOMIC_OPS.get(expression.callee.name);
+  if (!atomicOp) return false;
+  const target = semanticAtomicCallTarget(expression);
+  if (!target || !semanticReferenceMemoryRefSupported(target)) return false;
+  if (target.valueType !== "uint" && target.valueType !== "int") return false;
+  if (!compiled.kernelIr.params.some((param) => param.name === target.base && param.addressSpace === "storage" && !param.constant)) {
+    return false;
+  }
+  const expectedArgs = atomicOp === "cas" ? 3 : 2;
+  return expression.args.length >= expectedArgs &&
+    expression.args.slice(1, expectedArgs).every((arg) => semanticReferenceExpressionSupported(arg, "scalar"));
 }
 
 function semanticReferenceExpressionSupported(expression: SemanticExpression, expected: "scalar" | "any"): boolean {
@@ -358,7 +381,7 @@ function semanticAtomicValue(
   atomicOp: SemanticAtomicOp,
   oldValue: number,
   value: number,
-  operation: Extract<SemanticKernelIrOperation, { readonly kind: "atomic" }>,
+  operation: Extract<SemanticKernelIrOperation, { readonly kind: "atomic" }> | Extract<SemanticExpression, { readonly kind: "call" }>,
   context: SemanticReferenceContext,
 ): number {
   switch (atomicOp) {
@@ -372,7 +395,10 @@ function semanticAtomicValue(
     case "exchange": return value;
     case "cas": {
       const replacement = operation.args[2];
-      if (!replacement) throw semanticReferenceError(`semantic reference atomic '${operation.callee}' missing replacement`, operation.span);
+      const callee = operation.kind === "atomic"
+        ? operation.callee
+        : operation.callee.kind === "symbol" ? operation.callee.name : "<expr>";
+      if (!replacement) throw semanticReferenceError(`semantic reference atomic '${callee}' missing replacement`, operation.span);
       return oldValue === value ? evalNumber(replacement, context) : oldValue;
     }
   }
@@ -454,6 +480,8 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
       return value;
     }
     case "call":
+      if (semanticReferenceAtomicCallSupported(expression, context.compiled)) return evalSemanticAtomicCall(expression, context);
+      throw semanticReferenceError(`semantic reference does not support ${expression.kind} expression`, expression.span);
     case "initializer":
       throw semanticReferenceError(`semantic reference does not support ${expression.kind} expression`, expression.span);
     case "update":
@@ -479,6 +507,32 @@ function readIndexExpression(expression: Extract<SemanticExpression, { kind: "in
   const ref = memoryRefFromIndexExpression(expression);
   if (!ref) throw semanticReferenceError("semantic reference supports only direct storage indexing", expression.span);
   return readMemory(ref, context);
+}
+
+function evalSemanticAtomicCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): number {
+  if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic reference atomic call requires symbol callee", expression.span);
+  const atomicOp = SEMANTIC_ATOMIC_OPS.get(expression.callee.name);
+  const target = semanticAtomicCallTarget(expression);
+  const value = expression.args[1];
+  if (!atomicOp || !target || !value) {
+    throw semanticReferenceError(`semantic reference does not support atomic '${expression.callee.name}'`, expression.span);
+  }
+  const oldValue = readMemory(target, context);
+  writeMemory(target, semanticAtomicValue(atomicOp, oldValue, evalNumber(value, context), expression, context), context);
+  return oldValue;
+}
+
+function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { readonly kind: "call" }>): SemanticMemoryRef | undefined {
+  const firstArg = expression.args[0];
+  if (!firstArg) return undefined;
+  if (firstArg.kind === "unary" && firstArg.operator === "&" && firstArg.argument.kind === "index") {
+    return memoryRefFromIndexExpression(firstArg.argument);
+  }
+  if (firstArg.kind === "index") return memoryRefFromIndexExpression(firstArg);
+  return undefined;
 }
 
 function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticMemoryRef | undefined {

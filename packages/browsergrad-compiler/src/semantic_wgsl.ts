@@ -148,7 +148,7 @@ function unsupportedSemanticWgslOperation(
           operation.target.addressSpace === "storage" &&
           !ir.params.some((param) => param.name === operation.target.base && param.addressSpace === "storage")
         ) return operation;
-        if (!semanticWgslExpressionSupported(operation.value, "scalar")) return operation;
+        if (!semanticWgslValueExpressionSupported(operation.value, ir)) return operation;
         break;
       case "atomic":
         if (!semanticWgslAtomicSupported(operation, ir)) return operation;
@@ -251,6 +251,27 @@ function semanticWgslAtomicSupported(
   const expectedArgs = operation.callee === "atomicCAS" || operation.callee === "atomicCAS_system" ? 3 : 2;
   return operation.args.length >= expectedArgs &&
     operation.args.slice(1, expectedArgs).every((arg) => semanticWgslExpressionSupported(arg, "scalar"));
+}
+
+function semanticWgslValueExpressionSupported(expression: SemanticExpression, ir: SemanticKernelIrModule): boolean {
+  return semanticWgslExpressionSupported(expression, "scalar") ||
+    expression.kind === "call" && semanticWgslAtomicCallSupported(expression, ir);
+}
+
+function semanticWgslAtomicCallSupported(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+): boolean {
+  if (expression.callee.kind !== "symbol" || !WGSL_ATOMIC_CALLEES.has(expression.callee.name)) return false;
+  const target = semanticAtomicCallTarget(expression);
+  if (!target || target.addressSpace !== "storage") return false;
+  if (!semanticWgslMemoryRefSupported(target)) return false;
+  if (target.indices.length !== 1 || target.fields.length > 0) return false;
+  if (target.valueType !== "uint" && target.valueType !== "int") return false;
+  if (!ir.params.some((param) => param.name === target.base && param.addressSpace === "storage" && !param.constant)) return false;
+  const expectedArgs = expression.callee.name === "atomicCAS" || expression.callee.name === "atomicCAS_system" ? 3 : 2;
+  return expression.args.length >= expectedArgs &&
+    expression.args.slice(1, expectedArgs).every((arg) => semanticWgslExpressionSupported(arg, "scalar"));
 }
 
 function semanticWgslExpressionSupported(expression: SemanticExpression, expected: "scalar" | "any"): boolean {
@@ -470,6 +491,8 @@ function emitSemanticExpression(
     case "sequence":
       return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names);
     case "call":
+      if (semanticWgslAtomicCallSupported(expression, ir)) return emitSemanticAtomicCall(expression, ir, names);
+      throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
     case "initializer":
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
   }
@@ -496,9 +519,31 @@ function emitSemanticExpressionAs(
     return emitNumberLiteral(expression.value, expression.valueType, targetType);
   }
   const emitted = emitSemanticExpression(expression, ir, names);
+  const atomicValueType = semanticAtomicCallValueType(expression);
+  if (atomicValueType) {
+    const sourceType = wgslAtomicScalar(atomicValueType);
+    if (sourceType === targetType) return emitted;
+    return `${targetType}(${emitted})`;
+  }
   const sourceType = wgslValueScalar(semanticExpressionValueType(expression));
   if (sourceType === targetType) return emitted;
   return `${targetType}(${emitted})`;
+}
+
+function emitSemanticAtomicCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+): string {
+  if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL atomic call requires symbol callee", expression.span);
+  const wgslCallee = WGSL_ATOMIC_CALLEES.get(expression.callee.name);
+  const target = semanticAtomicCallTarget(expression);
+  if (!wgslCallee || !target) throw semanticWgslError(`semantic WGSL does not support atomic '${expression.callee.name}'`, expression.span);
+  const memoryRef = emitSemanticMemoryRef(target, ir, names);
+  const operands = expression.args.slice(1, wgslCallee === "atomicCompareExchangeWeak" ? 3 : 2);
+  const emitted = operands.map((operand) => emitSemanticExpressionAs(operand, ir, names, wgslAtomicScalar(target.valueType)));
+  const call = `${wgslCallee}(&${memoryRef}, ${emitted.join(", ")})`;
+  return wgslCallee === "atomicCompareExchangeWeak" ? `${call}.old_value` : call;
 }
 
 function emitSemanticMember(
@@ -722,6 +767,7 @@ function semanticAtomicStorageNames(operations: readonly SemanticKernelIrOperati
     if (operation.kind === "atomic" && operation.target?.addressSpace === "storage") {
       names.add(operation.target.base);
     }
+    for (const name of semanticAtomicStorageNamesFromOperation(operation)) names.add(name);
     if (operation.kind === "branch") {
       for (const name of semanticAtomicStorageNames(operation.consequent)) names.add(name);
       for (const name of semanticAtomicStorageNames(operation.alternate)) names.add(name);
@@ -737,6 +783,78 @@ function semanticAtomicStorageNames(operations: readonly SemanticKernelIrOperati
     }
   }
   return names;
+}
+
+function semanticAtomicStorageNamesFromOperation(operation: SemanticKernelIrOperation): ReadonlySet<string> {
+  const expressions: SemanticExpression[] = [];
+  if (operation.kind === "declare" && operation.init) expressions.push(operation.init);
+  if (operation.kind === "store") expressions.push(operation.value, ...operation.target.indices);
+  if (operation.kind === "expression") expressions.push(operation.expression);
+  if (operation.kind === "branch") expressions.push(operation.condition);
+  if (operation.kind === "loop") {
+    if (operation.init && !isSemanticKernelIrOperation(operation.init)) expressions.push(operation.init);
+    if (operation.condition) expressions.push(operation.condition);
+    if (operation.update) expressions.push(operation.update);
+  }
+  const names = new Set<string>();
+  for (const expression of expressions) {
+    for (const name of semanticAtomicStorageNamesFromExpression(expression)) names.add(name);
+  }
+  return names;
+}
+
+function semanticAtomicStorageNamesFromExpression(expression: SemanticExpression): ReadonlySet<string> {
+  const names = new Set<string>();
+  const target = expression.kind === "call" ? semanticAtomicCallTarget(expression) : undefined;
+  if (target?.addressSpace === "storage") names.add(target.base);
+  for (const child of semanticExpressionChildren(expression)) {
+    for (const name of semanticAtomicStorageNamesFromExpression(child)) names.add(name);
+  }
+  return names;
+}
+
+function semanticExpressionChildren(expression: SemanticExpression): readonly SemanticExpression[] {
+  switch (expression.kind) {
+    case "literal":
+    case "symbol":
+      return [];
+    case "member":
+      return [expression.object];
+    case "index":
+      return [expression.target, expression.index];
+    case "call":
+      return [expression.callee, ...expression.args];
+    case "cast":
+      return [expression.expression];
+    case "unary":
+    case "update":
+      return [expression.argument];
+    case "binary":
+      return [expression.left, expression.right];
+    case "conditional":
+      return [expression.condition, expression.consequent, expression.alternate];
+    case "assignment":
+      return [expression.target, expression.value];
+    case "initializer":
+      return expression.elements;
+    case "sequence":
+      return expression.expressions;
+  }
+}
+
+function semanticAtomicCallTarget(expression: Extract<SemanticExpression, { readonly kind: "call" }>): SemanticMemoryRef | undefined {
+  const firstArg = expression.args[0];
+  if (!firstArg) return undefined;
+  if (firstArg.kind === "unary" && firstArg.operator === "&" && firstArg.argument.kind === "index") {
+    return memoryRefFromIndexExpression(firstArg.argument);
+  }
+  if (firstArg.kind === "index") return memoryRefFromIndexExpression(firstArg);
+  return undefined;
+}
+
+function semanticAtomicCallValueType(expression: SemanticExpression): CudaLiteScalarType | undefined {
+  if (expression.kind !== "call") return undefined;
+  return semanticAtomicCallTarget(expression)?.valueType;
 }
 
 function nameFor(name: string, names: ReadonlyMap<string, string>): string {

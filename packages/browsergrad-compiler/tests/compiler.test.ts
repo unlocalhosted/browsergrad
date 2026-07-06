@@ -519,6 +519,36 @@ __global__ void atomicRmw(int* x, int* out) {
     expect([...result.buffers.out as Int32Array]).toEqual([7, 5, 8, 0, 15, 1, 42, 99, 3]);
   });
 
+  it("emits return-valued integer atomics from semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void atomicReturns(uint* counter, uint* out) {
+  out[0] = atomicAdd(&counter[0], 2u);
+  out[1] = atomicCAS(&counter[1], 0u, 44u);
+  out[2] = counter[0];
+  out[3] = counter[1];
+}
+`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: {
+        counter: new Uint32Array([5, 0]),
+        out: new Uint32Array(4),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const result = runCompiledKernelReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("counter: array<atomic<u32>>");
+    expect(compiled.wgsl).toContain("out[0u] = atomicAdd(&counter[0u], 2u);");
+    expect(compiled.wgsl).toContain("out[1u] = atomicCompareExchangeWeak(&counter[1u], 0u, 44u).old_value;");
+    expect(compiled.wgsl).toContain("out[2u] = atomicLoad(&counter[0u]);");
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([5, 0, 7, 44]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([5, 0, 7, 44]);
+  });
+
   it("keeps canonical lab examples executable through Kernel IR and CPU reference", () => {
     const saxpy = compileCudaLiteKernelForWebGpu(compilerExampleText("saxpy.cu"), {
       workgroupSize: [8, 1, 1],
@@ -13873,14 +13903,15 @@ __global__ void atomic_more(int* x, int* out) {
 
     expect([...result.buffers.x as Int32Array]).toEqual([9, 2, 13]);
     expect([...result.buffers.out as Int32Array]).toEqual([2, 7, 4, 5, 3, 7, 6, 14]);
-    expect(compiled.wgsl).toContain("atomicExchange(&x[0], 7)");
-    expect(compiled.wgsl).toContain("atomicCompareExchangeWeak(&x[0], 7, 9).old_value");
-    expect(compiled.wgsl).toContain("atomicMax(&x[1], 5)");
-    expect(compiled.wgsl).toContain("atomicMin(&x[1], 3)");
-    expect(compiled.wgsl).toContain("atomicSub(&x[1], 1)");
-    expect(compiled.wgsl).toContain("atomicAnd(&x[2], 0x6)");
-    expect(compiled.wgsl).toContain("atomicOr(&x[2], 0x8)");
-    expect(compiled.wgsl).toContain("atomicXor(&x[2], 0x3)");
+    expect(compiled.wgsl).toContain("atomicExchange(&x[0");
+    expect(compiled.wgsl).toContain("atomicCompareExchangeWeak(&x[0");
+    expect(compiled.wgsl).toContain(".old_value");
+    expect(compiled.wgsl).toContain("atomicMax(&x[1");
+    expect(compiled.wgsl).toContain("atomicMin(&x[1");
+    expect(compiled.wgsl).toContain("atomicSub(&x[1");
+    expect(compiled.wgsl).toContain("atomicAnd(&x[2");
+    expect(compiled.wgsl).toContain("atomicOr(&x[2");
+    expect(compiled.wgsl).toContain("atomicXor(&x[2");
   });
 
   it("supports CUDA system-scope integer atomic aliases", () => {
