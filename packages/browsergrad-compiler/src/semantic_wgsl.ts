@@ -30,7 +30,6 @@ const LOGICAL_OPERATORS = new Set(["&&", "||"]);
 export function canEmitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): boolean {
   return unsupportedSemanticWgslOperation(ir.operations, ir) === undefined &&
     ir.requiredFeatures.length === 0 &&
-    isSaxpyClassSemanticKernel(ir) &&
     ir.params.every(semanticWgslParamSupported) &&
     ir.memory.every((symbol) => symbol.kind === "local" || symbol.kind === "shared");
 }
@@ -135,7 +134,7 @@ function unsupportedSemanticWgslOperation(
 }
 
 function semanticWgslParamSupported(param: SemanticKernelIrModule["params"][number]): boolean {
-  if (param.addressSpace === "storage") return Boolean(param.pointer) && param.valueType === "float";
+  if (param.addressSpace === "storage") return Boolean(param.pointer) && semanticWgslScalarTypeSupported(param.valueType);
   if (param.addressSpace === "uniform") return semanticWgslScalarTypeSupported(param.valueType);
   return false;
 }
@@ -188,18 +187,6 @@ function semanticWgslExpressionSupported(expression: SemanticExpression, expecte
   }
 }
 
-function isSaxpyClassSemanticKernel(ir: SemanticKernelIrModule): boolean {
-  if (ir.operations.length !== 2) return false;
-  const [declare, branch] = ir.operations;
-  if (declare?.kind !== "declare" || branch?.kind !== "branch") return false;
-  if (branch.alternate.length > 0 || branch.consequent.length === 0) return false;
-  return branch.consequent.every((operation) =>
-    operation.kind === "store" &&
-    operation.target.valueType === "float" &&
-    operation.reads.some((read) => read.addressSpace === "storage" && read.valueType === "float")
-  );
-}
-
 function emitSemanticOperations(
   operations: readonly SemanticKernelIrOperation[],
   ir: SemanticKernelIrModule,
@@ -219,11 +206,11 @@ function emitSemanticOperation(
   switch (operation.kind) {
     case "declare": {
       const type = wgslScalar(operation.target.valueType);
-      const init = operation.init ? ` = ${emitSemanticExpression(operation.init, ir, names, wgslValueScalar(operation.target.valueType))}` : "";
+      const init = operation.init ? ` = ${emitSemanticExpressionAs(operation.init, ir, names, wgslValueScalar(operation.target.valueType))}` : "";
       return [`${prefix}var ${nameFor(operation.target.name, names)}: ${type}${init};`];
     }
     case "store":
-      return [`${prefix}${emitSemanticMemoryRef(operation.target, ir, names)} = ${emitSemanticExpression(operation.value, ir, names, wgslValueScalar(operation.target.valueType))};`];
+      return [`${prefix}${emitSemanticMemoryRef(operation.target, ir, names)} = ${emitSemanticExpressionAs(operation.value, ir, names, wgslValueScalar(operation.target.valueType))};`];
     case "expression":
       return [`${prefix}${emitSemanticExpression(operation.expression, ir, names)};`];
     case "branch": {
@@ -245,12 +232,11 @@ function emitSemanticExpression(
   expression: SemanticExpression,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
-  expectedType?: WgslValueType,
 ): string {
   switch (expression.kind) {
     case "literal":
       if (typeof expression.value !== "number") throw semanticWgslError("semantic WGSL supports numeric literals only", expression.span);
-      return emitNumberLiteral(expression.value, expression.valueType, expectedType);
+      return emitNumberLiteral(expression.value, expression.valueType);
     case "symbol":
       if (expression.addressSpace === "uniform") return `${UNIFORM_PARAMS_NAME}.${nameFor(expression.name, names)}`;
       return nameFor(expression.name, names);
@@ -266,19 +252,34 @@ function emitSemanticExpression(
     case "unary":
       return emitSemanticUnary(expression, ir, names);
     case "binary":
-      return emitSemanticBinary(expression, ir, names, expectedType);
+      return emitSemanticBinary(expression, ir, names);
     case "conditional":
-      return `select(${emitSemanticExpression(expression.alternate, ir, names, expectedType)}, ${emitSemanticExpression(expression.consequent, ir, names, expectedType)}, ${emitTruthiness(expression.condition, ir, names)})`;
+      return `select(${emitSemanticExpression(expression.alternate, ir, names)}, ${emitSemanticExpression(expression.consequent, ir, names)}, ${emitTruthiness(expression.condition, ir, names)})`;
     case "assignment":
       if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local scalar assignment targets only", expression.target.span);
-      return `(${nameFor(expression.target.name, names)} = ${emitSemanticExpression(expression.value, ir, names, wgslValueScalar(expression.valueType))})`;
+      return `(${nameFor(expression.target.name, names)} = ${emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(expression.valueType))})`;
     case "sequence":
-      return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names, expectedType);
+      return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names);
     case "call":
     case "update":
     case "initializer":
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
   }
+}
+
+function emitSemanticExpressionAs(
+  expression: SemanticExpression,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  targetType: WgslValueType,
+): string {
+  if (expression.kind === "literal" && typeof expression.value === "number") {
+    return emitNumberLiteral(expression.value, expression.valueType, targetType);
+  }
+  const emitted = emitSemanticExpression(expression, ir, names);
+  const sourceType = wgslValueScalar(semanticExpressionValueType(expression));
+  if (sourceType === targetType) return emitted;
+  return `${targetType}(${emitted})`;
 }
 
 function emitSemanticMember(
@@ -290,13 +291,13 @@ function emitSemanticMember(
   const axisIndex = expression.property === "x" ? 0 : expression.property === "y" ? 1 : 2;
   switch (expression.object.name) {
     case "threadIdx":
-      return ir.workgroupSize[axisIndex] === 1 ? "0" : `i32(local_id.${expression.property})`;
+      return ir.workgroupSize[axisIndex] === 1 ? "0u" : `local_id.${expression.property}`;
     case "blockIdx":
-      return `i32(workgroup_id.${expression.property})`;
+      return `workgroup_id.${expression.property}`;
     case "blockDim":
-      return String(ir.workgroupSize[axisIndex]);
+      return `${ir.workgroupSize[axisIndex]}u`;
     case "gridDim":
-      return `i32(num_workgroups.${expression.property})`;
+      return `num_workgroups.${expression.property}`;
     default:
       return `${emitSemanticExpression(expression.object, ir, names)}.${expression.property}`;
   }
@@ -318,14 +319,23 @@ function emitSemanticBinary(
   expression: Extract<SemanticExpression, { readonly kind: "binary" }>,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
-  expectedType?: WgslValueType,
 ): string {
   if (LOGICAL_OPERATORS.has(expression.operator)) {
     return `(${emitTruthiness(expression.left, ir, names)} ${expression.operator} ${emitTruthiness(expression.right, ir, names)})`;
   }
-  const left = emitSemanticExpression(expression.left, ir, names, expectedType);
-  const right = emitSemanticExpression(expression.right, ir, names, expectedType);
+  const operandType = semanticBinaryOperandType(expression);
+  const left = emitSemanticExpressionAs(expression.left, ir, names, operandType);
+  const right = emitSemanticExpressionAs(expression.right, ir, names, operandType);
   return `(${left} ${expression.operator} ${right})`;
+}
+
+function semanticBinaryOperandType(expression: Extract<SemanticExpression, { readonly kind: "binary" }>): WgslValueType {
+  const left = wgslValueScalar(semanticExpressionValueType(expression.left));
+  const right = wgslValueScalar(semanticExpressionValueType(expression.right));
+  const result = wgslValueScalar(expression.valueType);
+  if (left === "f32" || right === "f32" || result === "f32") return "f32";
+  if (left === "u32" || right === "u32" || result === "u32") return "u32";
+  return "i32";
 }
 
 function emitTruthiness(
@@ -345,7 +355,7 @@ function emitSemanticMemoryRef(
   names: ReadonlyMap<string, string>,
 ): string {
   if (ref.indices.length !== 1 || ref.fields.length > 0) throw semanticWgslError("semantic WGSL supports 1D storage refs only", ref.span);
-  return `${nameFor(ref.base, names)}[${emitSemanticExpression(ref.indices[0]!, ir, names, "u32")}]`;
+  return `${nameFor(ref.base, names)}[${emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32")}]`;
 }
 
 function memoryRefFromIndexExpression(expression: Extract<SemanticExpression, { readonly kind: "index" }>): SemanticMemoryRef | undefined {
@@ -399,9 +409,14 @@ function wgslUniformScalar(valueType: CudaLiteScalarType | undefined): WgslValue
   return "f32";
 }
 
+function semanticExpressionValueType(expression: SemanticExpression): CudaLiteScalarType | undefined {
+  return "valueType" in expression ? expression.valueType : undefined;
+}
+
 function emitNumberLiteral(value: number, valueType: CudaLiteScalarType | undefined, expectedType?: WgslValueType): string {
   const type = expectedType ?? wgslScalar(valueType);
   if (type === "u32") return `${Math.trunc(value) >>> 0}u`;
+  if (type === "i32" && value > 2147483647) return `bitcast<i32>(${Math.trunc(value) >>> 0}u)`;
   if (type === "i32") return String(Math.trunc(value));
   if (Number.isInteger(value)) return `${value}.0`;
   return String(value);

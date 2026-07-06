@@ -2252,8 +2252,9 @@ __global__ void c_layout_literals(uint* out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("out[0] = 1");
-    expect(compiled.wgsl).toContain("out[2] = 16");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("out[0u] = 1u");
+    expect(compiled.wgsl).toContain("out[2u] = 16u");
     expect([...result.buffers.out as Uint32Array]).toEqual([1, 1, 16, 124, 10]);
   });
 
@@ -6327,8 +6328,8 @@ __global__ void hexMask(uint *out, uint value) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("0xffffffffu");
-    expect(compiled.wgsl).not.toContain("f32(0xffffffff");
+    expect(compiled.wgsl).toContain("4294967295u");
+    expect(compiled.wgsl).not.toContain("f32(4294967295u");
     expect([...result.buffers.out as Uint32Array]).toEqual([0, 7]);
   });
 
@@ -6339,7 +6340,7 @@ __global__ void signedHexMask(uint *out) {
   out[0] = uint(mask);
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toContain("var mask: i32 = bitcast<i32>(0xffffffffu);");
+    expect(compiled.wgsl).toContain("var mask: i32 = bitcast<i32>(4294967295u);");
     expect(compiled.wgsl).not.toContain("var mask: i32 = 0xffffffff;");
   });
 
@@ -6365,8 +6366,8 @@ __global__ void paramsBuffer(const float *params, float *out, int n) {
 
     expect(compiled.wgsl).toContain("var<storage, read> bg_params: array<f32>;");
     expect(compiled.wgsl).toContain("var<uniform> bg_uniforms: Params;");
-    expect(compiled.wgsl).toContain("bg_params[idx]");
-    expect(compiled.wgsl).toContain("idx < bg_uniforms.n");
+    expect(compiled.wgsl).toContain("bg_params[u32(idx)]");
+    expect(compiled.wgsl).toContain("u32(idx) < u32(bg_uniforms.n)");
     expect([...result.buffers.out as Float32Array]).toEqual([2, 3, 4, 5]);
   });
 
@@ -6406,7 +6407,7 @@ __global__ void floatToUint(const float *src, uint *out) {
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("out[idx] = u32((src[idx] * 255.0))");
+    expect(compiled.wgsl).toContain("out[u32(idx)] = u32((src[u32(idx)] * 255.0))");
     expect([...result.buffers.out as Uint32Array]).toEqual([127, 510]);
   });
 
@@ -11576,7 +11577,7 @@ __global__ void kernel(unsigned int *out, unsigned int pitch) {
   out[(blockIdx.x * pitch) + i] = 7;
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.wgsl).toContain("(u32(i32(workgroup_id.x)) * bg_uniforms.pitch)");
+    expect(compiled.wgsl).toContain("(workgroup_id.x * bg_uniforms.pitch)");
     expect(compiled.wgsl).toContain("+ u32(i)");
   });
 
@@ -14493,7 +14494,7 @@ __global__ void qualified_std_casts(float* out, int q) {
     expect([...result.buffers.out as Float32Array]).toEqual([12]);
     expect(compiled.wgsl).toContain("var a: u32 = (u32(bg_uniforms.q) * 2u);");
     expect(compiled.wgsl).toContain("var b: u32 = u32((a + 1u));");
-    expect(compiled.wgsl).toContain("var c: i32 = (i32(i32(workgroup_id.x)) + 3);");
+    expect(compiled.wgsl).toContain("var c: i32 = (i32(workgroup_id.x) + 3);");
   });
 
   it("lowers vector pack static constructors after source normalization", () => {
