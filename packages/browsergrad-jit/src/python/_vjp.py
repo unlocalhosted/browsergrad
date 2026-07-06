@@ -52,6 +52,8 @@ from ._ir import (
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
     OP_CONV2D_BACKWARD_WEIGHT, OP_CONV2D_BACKWARD_BIAS,
+    OP_CONV_TRANSPOSE2D, OP_CONV_TRANSPOSE2D_BACKWARD_INPUT,
+    OP_CONV_TRANSPOSE2D_BACKWARD_WEIGHT, OP_CONV_TRANSPOSE2D_BACKWARD_BIAS,
     OP_CONV3D, OP_CONV3D_BACKWARD_INPUT,
     OP_CONV3D_BACKWARD_WEIGHT, OP_CONV3D_BACKWARD_BIAS,
     OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
@@ -530,7 +532,7 @@ def _broadcast_batch_shape(
 
 
 # ---------------------------------------------------------------------------
-# CONV1D / CONV2D / CONV3D — primitive CNN rules
+# CONV1D / CONV2D / CONV_TRANSPOSE2D / CONV3D — primitive CNN rules
 # ---------------------------------------------------------------------------
 
 
@@ -605,6 +607,42 @@ def _vjp_conv2d(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional
     bias = inputs[2]
     grad_b = _vjp_uop(
         OP_CONV2D_BACKWARD_BIAS,
+        (dy,),
+        bias.shape,
+        bias.dtype,
+        output,
+        arg=arg,
+    )
+    return (grad_x, grad_w, grad_b)
+
+
+@register_vjp(OP_CONV_TRANSPOSE2D)
+def _vjp_conv_transpose2d(output: UOp, inputs: Tuple[UOp, ...], dy: UOp) -> Tuple[Optional[UOp], ...]:
+    x = inputs[0]
+    weight = inputs[1]
+    arg = dict(output.arg)
+    arg.pop("vjp_of", None)
+    grad_x = _vjp_uop(
+        OP_CONV_TRANSPOSE2D_BACKWARD_INPUT,
+        (dy, weight),
+        x.shape,
+        x.dtype,
+        output,
+        arg=arg,
+    )
+    grad_w = _vjp_uop(
+        OP_CONV_TRANSPOSE2D_BACKWARD_WEIGHT,
+        (dy, x),
+        weight.shape,
+        weight.dtype,
+        output,
+        arg=arg,
+    )
+    if len(inputs) == 2:
+        return (grad_x, grad_w)
+    bias = inputs[2]
+    grad_b = _vjp_uop(
+        OP_CONV_TRANSPOSE2D_BACKWARD_BIAS,
         (dy,),
         bias.shape,
         bias.dtype,

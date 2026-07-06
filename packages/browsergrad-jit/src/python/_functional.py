@@ -19,7 +19,8 @@ from typing import Any, Optional, Tuple
 import numpy as np
 
 from ._ir import (
-    UOp, OP_WHERE, OP_CONST, OP_CUSTOM, OP_CONV1D, OP_CONV2D, OP_CONV3D,
+    UOp, OP_WHERE, OP_CONST, OP_CUSTOM, OP_CONV1D, OP_CONV2D,
+    OP_CONV_TRANSPOSE2D, OP_CONV3D,
     OP_LAYER_NORM, OP_REDUCE, OP_DIV,
 )
 from ._tensor_proxy import (
@@ -942,50 +943,43 @@ def conv_transpose2d(
     out_shape = (N, C_out, H_out, W_out)
     in_per_group = C_in // groups
 
-    captured: dict = {}
-
-    def _forward(x_arr: np.ndarray, w_arr: np.ndarray, *maybe_bias: np.ndarray) -> np.ndarray:
-        out = np.zeros(out_shape, dtype=np.float32)
-        for n in range(N):
-            for ci in range(C_in):
-                group = ci // in_per_group
-                co0 = group * C_out_per_group
-                for ih in range(H):
-                    for iw in range(W):
-                        value = x_arr[n, ci, ih, iw]
-                        if value == 0:
-                            continue
-                        for r in range(kh):
-                            oh = ih * sh - ph + r * dh
-                            if oh < 0 or oh >= H_out:
-                                continue
-                            for c in range(kw):
-                                ow = iw * sw - pw + c * dw
-                                if 0 <= ow < W_out:
-                                    out[n, co0:co0+C_out_per_group, oh, ow] += (
-                                        value * w_arr[ci, :, r, c]
-                                    )
-        if maybe_bias:
-            out += maybe_bias[0].reshape(1, C_out, 1, 1)
-        captured["w"] = w_arr
-        return out.astype(np.dtype(input.dtype), copy=False)
-
     input_uops = [input._uop, weight._uop]
     input_proxies = [input, weight]
     if bias is not None:
         input_uops.append(bias._uop)
         input_proxies.append(bias)
     uop = UOp(
-        op=OP_CUSTOM,
+        op=OP_CONV_TRANSPOSE2D,
         inputs=tuple(input_uops),
         shape=out_shape,
         dtype=input.dtype,
-        arg={"fn": _forward, "captures": (), "name": "conv_transpose2d"},
+        arg={
+            "n": N,
+            "c_in": C_in,
+            "h": H,
+            "w": W,
+            "c_out": C_out,
+            "c_out_per_group": C_out_per_group,
+            "kh": kh,
+            "kw": kw,
+            "stride_h": sh,
+            "stride_w": sw,
+            "pad_h": ph,
+            "pad_w": pw,
+            "output_pad_h": oph,
+            "output_pad_w": opw,
+            "dilation_h": dh,
+            "dilation_w": dw,
+            "groups": groups,
+            "out_h": H_out,
+            "out_w": W_out,
+            "has_bias": bias is not None,
+        },
     )
 
     def _bw(dy: np.ndarray, ins: Tuple[np.ndarray, ...]) -> Tuple[Optional[np.ndarray], ...]:
         x_arr = ins[0]
-        w_arr = captured["w"]
+        w_arr = ins[1]
         grad_x = np.zeros_like(x_arr, dtype=np.float32)
         grad_w = np.zeros_like(w_arr, dtype=np.float32)
         for n in range(N):

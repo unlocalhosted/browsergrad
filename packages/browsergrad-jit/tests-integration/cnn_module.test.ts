@@ -222,12 +222,22 @@ F.conv2d(x_ref, w_ref, b_ref, stride=(1,1), padding=(1,0), dilation=(1,1), group
     const result = await target.run<{
       forwardClose: boolean;
       outShape: number[];
+      op: string;
       gradShapes: number[][];
       gradNonzero: boolean[];
+      gxClose: boolean;
+      gwClose: boolean;
+      gbClose: boolean;
+      gxOps: string[];
+      gwOps: string[];
+      gbOps: string[];
+      registered: string[];
     }>(`
 import browsergrad_jit as bg
 import numpy as np
 import browsergrad_jit.nn.functional as F
+from browsergrad_jit._ir import toposort
+from browsergrad_jit._vjp import list_registered
 
 def conv_transpose2d_ref(x, w, b, stride=(1,1), padding=(0,0), output_padding=(0,0), groups=1, dilation=(1,1)):
     N, C_in, H, W = x.shape
@@ -266,21 +276,50 @@ b = bg.tensor(b_data, requires_grad=True)
 y = F.conv_transpose2d(x, w, b, stride=(2,1), padding=(1,0), output_padding=(1,0), groups=2, dilation=(2,1))
 expected = conv_transpose2d_ref(x_data, w_data, b_data, stride=(2,1), padding=(1,0), output_padding=(1,0), groups=2, dilation=(2,1))
 y.sum().backward()
+
+def loss_x(inp):
+    return F.conv_transpose2d(inp, w, b, stride=(2,1), padding=(1,0), output_padding=(1,0), groups=2, dilation=(2,1)).sum()
+
+def loss_w(weight):
+    return F.conv_transpose2d(x, weight, b, stride=(2,1), padding=(1,0), output_padding=(1,0), groups=2, dilation=(2,1)).sum()
+
+def loss_b(bias):
+    return F.conv_transpose2d(x, w, bias, stride=(2,1), padding=(1,0), output_padding=(1,0), groups=2, dilation=(2,1)).sum()
+
+gx = bg.func.grad(loss_x)(x)
+gw = bg.func.grad(loss_w)(w)
+gb = bg.func.grad(loss_b)(b)
 {
     "forwardClose": bool(np.allclose(y.numpy(), expected, atol=1e-5)),
     "outShape": list(y.shape),
+    "op": y._uop.op,
     "gradShapes": [list(x.grad.shape), list(w.grad.shape), list(b.grad.shape)],
     "gradNonzero": [
         bool(np.abs(x.grad.numpy()).sum() > 0),
         bool(np.abs(w.grad.numpy()).sum() > 0),
         bool(np.abs(b.grad.numpy()).sum() > 0),
     ],
+    "gxClose": bool(np.allclose(gx.numpy(), x.grad.numpy(), atol=1e-5)),
+    "gwClose": bool(np.allclose(gw.numpy(), w.grad.numpy(), atol=1e-5)),
+    "gbClose": bool(np.allclose(gb.numpy(), b.grad.numpy(), atol=1e-5)),
+    "gxOps": [u.op for u in toposort(gx._uop)],
+    "gwOps": [u.op for u in toposort(gw._uop)],
+    "gbOps": [u.op for u in toposort(gb._uop)],
+    "registered": list(list_registered()),
 }
 `);
     expect(result.forwardClose).toBe(true);
     expect(result.outShape).toEqual([1, 4, 4, 4]);
+    expect(result.op).toBe("CONV_TRANSPOSE2D");
     expect(result.gradShapes).toEqual([[1, 4, 2, 3], [4, 2, 2, 2], [4]]);
     expect(result.gradNonzero).toEqual([true, true, true]);
+    expect(result.gxClose).toBe(true);
+    expect(result.gwClose).toBe(true);
+    expect(result.gbClose).toBe(true);
+    expect(result.gxOps).toContain("CONV_TRANSPOSE2D_BACKWARD_INPUT");
+    expect(result.gwOps).toContain("CONV_TRANSPOSE2D_BACKWARD_WEIGHT");
+    expect(result.gbOps).toContain("CONV_TRANSPOSE2D_BACKWARD_BIAS");
+    expect(result.registered).toContain("CONV_TRANSPOSE2D");
   });
 
   it("conv3d supports groups, dilation, tuple shapes, and backward", async () => {

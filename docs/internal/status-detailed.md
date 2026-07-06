@@ -7,9 +7,9 @@ Living document. Reflects the current state of each package, what's tested, and 
 | Package | Version | Surface tests | Integration tests | Browser tests |
 |---|---|---|---|---|
 | `@unlocalhosted/browsergrad-runtime` | `0.1.1` | 27 | 23 (Pyodide-in-node) | — |
-| `@unlocalhosted/browsergrad-kernels` | `0.1.2` | 35 (incl. JS-reference numerical checks, FUSED WGSL codegen) | — | 24 (real Chromium + WebGPU) |
+| `@unlocalhosted/browsergrad-kernels` | `0.1.2` | 35 (incl. JS-reference numerical checks, FUSED WGSL codegen) | — | 38 (real Chromium + WebGPU) |
 | `@unlocalhosted/browsergrad-grad` | `0.5.1` | 30 | 317 (Pyodide-in-node) | — |
-| `@unlocalhosted/browsergrad-jit` | `0.8.2` | 8 | 195 (Pyodide-in-node, incl. feedback + perf benches) | — (via kernels) |
+| `@unlocalhosted/browsergrad-jit` | `0.8.2` | 8 | 213 (Pyodide-in-node, incl. feedback + perf benches) | — (via kernels) |
 
 `browsergrad-grad` current local gates: 30 surface/unit tests and 317
 Pyodide-in-node integration tests green. Workspace-wide totals drift as
@@ -34,7 +34,7 @@ the intended GPU materialization boundaries.
 ## Surface inventory — `browsergrad-jit` (v0.8.0)
 
 ### Core (PRD-005)
-- 44-opcode IR (`_ir.py`): BUFFER, LOAD, STORE, CONST, RANDOM, CAST, ADD, MUL, DIV, NEG, EXP, LOG, CMP, MATMUL, CONV1D, CONV1D_BACKWARD_INPUT, CONV1D_BACKWARD_WEIGHT, CONV1D_BACKWARD_BIAS, CONV2D, CONV2D_BACKWARD_INPUT, CONV2D_BACKWARD_WEIGHT, CONV2D_BACKWARD_BIAS, CONV3D, CONV3D_BACKWARD_INPUT, CONV3D_BACKWARD_WEIGHT, CONV3D_BACKWARD_BIAS, REDUCE, RESHAPE, PERMUTE, SLICE, PAD, WHERE, INDEX, MASK, CUSTOM, FUSED_ELEMENTWISE, FUSED_SOFTMAX, SCATTER_ADD, BROADCAST_TO, ISNAN, SGD_UPDATE, ADAMW_UPDATE_M, ADAMW_UPDATE_V, ADAMW_UPDATE_PARAM.
+- 55-opcode IR (`_ir.py`): BUFFER, LOAD, STORE, CONST, RANDOM, CAST, ADD, MUL, DIV, NEG, EXP, LOG, CMP, MATMUL, CONV1D, CONV1D_BACKWARD_INPUT, CONV1D_BACKWARD_WEIGHT, CONV1D_BACKWARD_BIAS, CONV2D, CONV2D_BACKWARD_INPUT, CONV2D_BACKWARD_WEIGHT, CONV2D_BACKWARD_BIAS, CONV_TRANSPOSE2D, CONV_TRANSPOSE2D_BACKWARD_INPUT, CONV_TRANSPOSE2D_BACKWARD_WEIGHT, CONV_TRANSPOSE2D_BACKWARD_BIAS, CONV3D, CONV3D_BACKWARD_INPUT, CONV3D_BACKWARD_WEIGHT, CONV3D_BACKWARD_BIAS, LAYER_NORM, LAYER_NORM_BACKWARD_INPUT, LAYER_NORM_BACKWARD_WEIGHT, LAYER_NORM_BACKWARD_BIAS, REDUCE, RESHAPE, PERMUTE, SLICE, PAD, WHERE, INDEX, MASK, CUSTOM, FUSED_ELEMENTWISE, FUSED_SOFTMAX, SCATTER_ADD, BROADCAST_TO, ISNAN, SGD_UPDATE, ADAMW_UPDATE_M, ADAMW_UPDATE_V, ADAMW_UPDATE_PARAM, ADAM_UPDATE_M, ADAM_UPDATE_V, ADAM_UPDATE_PARAM.
 - `TensorProxy` — lazy tensor; metadata never realizes; arithmetic builds IR; `.numpy()` / `.item()` triggers realize.
 - `Session` + `BufferTable` for per-tab isolation.
 - NumPy realizer (`_realize.py`): single dispatch table; one Python function per opcode; deterministic across runs.
@@ -45,7 +45,7 @@ the intended GPU materialization boundaries.
 - Introspection: `bg.jit.debug_fused_kernels()`, `bg.jit.debug_unfused_reasons()`.
 
 ### Symbolic backward (PRD-007)
-- 15 VJP rules (ADD, MUL, DIV, NEG, EXP, LOG, CAST, MATMUL, CONV1D, CONV2D, CONV3D, REDUCE, RESHAPE, PERMUTE, ISNAN).
+- 17 VJP rules (ADD, MUL, DIV, NEG, EXP, LOG, CAST, MATMUL, CONV1D, CONV2D, CONV_TRANSPOSE2D, CONV3D, LAYER_NORM, REDUCE, RESHAPE, PERMUTE, ISNAN).
 - Closure-backward kept as the safety net for ops without VJPs.
 - `arg["vjp_of"]` tags every emitted backward node — observable by checkpointing.
 
@@ -73,34 +73,34 @@ the intended GPU materialization boundaries.
 - Whitelisted opcodes: BUFFER, LOAD, CONST, CAST, MATMUL, CONV1D,
   CONV1D_BACKWARD_INPUT, CONV1D_BACKWARD_WEIGHT, CONV1D_BACKWARD_BIAS,
   CONV2D, CONV2D_BACKWARD_INPUT, CONV2D_BACKWARD_WEIGHT,
-  CONV2D_BACKWARD_BIAS, FUSED_ELEMENTWISE, CUSTOM.
+  CONV2D_BACKWARD_BIAS, CONV_TRANSPOSE2D,
+  CONV_TRANSPOSE2D_BACKWARD_INPUT, CONV_TRANSPOSE2D_BACKWARD_WEIGHT,
+  CONV_TRANSPOSE2D_BACKWARD_BIAS, FUSED_ELEMENTWISE, CUSTOM.
 - `bg.kernels.flash_attention(Q, K, V, mask=None)` — opt-in CUSTOM op for FA-v2.
 - `nn.functional.conv1d(...)` / `nn.Conv1d(...)`,
-  `nn.functional.conv2d(...)` / `nn.Conv2d(...)`, and
+  `nn.functional.conv2d(...)` / `nn.Conv2d(...)`,
+  `nn.functional.conv_transpose2d(...)` / `nn.ConvTranspose2d(...)`, and
   `nn.functional.conv3d(...)` / `nn.Conv3d(...)` are primitive IR ops and can
   route forward/backward gradient roots through generic tensor-plan WebGPU.
 
 ### CNN parity in JIT
-- `nn.Conv1d`, `nn.Conv2d`, and `nn.Conv3d` are available as primitive
+- `nn.Conv1d`, `nn.Conv2d`, `nn.ConvTranspose2d`, and `nn.Conv3d` are available as primitive
   forward/backward IR with CPU handlers, symbolic VJPs, explicit vmap refusals,
   and ONNX refusals.
-- `bg.realize_tensor_plan_webgpu(...)` lowers Conv1d/Conv2d/Conv3d
+- `bg.realize_tensor_plan_webgpu(...)` lowers Conv1d/Conv2d/ConvTranspose2d/Conv3d
   forward/backward through the generic tensor-plan bridge (`run_tensor_plan`)
   instead of legacy per-op conv bridge methods.
-- `nn.ConvTranspose2d` remains available through `CUSTOM` NumPy realizers with
-  explicit backward closures.
 - Covered semantics: tuple stride/padding/dilation where applicable, groups,
   output padding for ConvTranspose2d, module state_dict keys, and torch alias
   exposure.
-- Conv1d/Conv2d/Conv3d/LayerNorm forward/backward have generic tensor-plan WebGPU
+- Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm forward/backward have generic tensor-plan WebGPU
   coverage.
 - `bg.optim.sgd_update(...)`, `bg.optim.adam_update(...)`, and
   `bg.optim.adamw_update(...)` emit functional
   optimizer/update IR and lower through generic tensor-plan WebGPU. They do
   not mutate params/state.
 - Remaining: default GPU `.backward()` mutation, mutating optimizer-step
-  residency, Adam (coupled weight decay) update IR, and ConvTranspose2d WebGPU
-  paths.
+  residency, and resident optimizer state.
 
 ### Tiled GEMM + fused codegen + GPU cast (PRD-012a)
 - `matmulTiledDirect` — 16×16 tiled GEMM (workgroup-shared A/B tiles). Closes most of the gap PRD-012 was claiming via "megakernels".
@@ -173,7 +173,7 @@ Plus the realizer-tier API:
 - `runDirect` / `materializeFloat32` / `uploadFloat32` — GPUBuffer-in/out dispatch path.
 - `runTensorGpuPlan` — generic f32 tensor-plan executor for BUFFER/LOAD,
   2-D MATMUL, elementwise chains, RESHAPE, PERMUTE, BROADCAST_TO, and
-  REDUCE(sum/mean) rank <= 4, plus Conv1d/Conv2d/Conv3d/LayerNorm
+  REDUCE(sum/mean) rank <= 4, plus Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm
   forward/backward and functional SGD/Adam/AdamW updates. It accepts
   the snake_case `browsergrad-jit` plan payload, keeps intermediates
   resident, and materializes only the declared root, matching the GPU-native
@@ -238,7 +238,7 @@ All 16 PRDs land at v0:
 | 011.5 (WGSL realizer seam) | ✅ Shipped |
 | 012 (megakernels) | ✅ Split: PRD-012a (tiled GEMM + fused codegen + CAST) shipped. PRD-012b (cost model + producer-consumer detection) shipped at `bg.jit.cost_model.*`. PRD-012c (transformer_block megakernel constructor) shipped at `bg.kernels.transformer_block(...)`. |
 | 013 (lab platform) | ✅ Shipped |
-| 014 (functional transforms) | ✅ Shipped — `grad`, `vjp`, `functional_call`, full `vmap` with 17 active rules + 20 refusal stubs (RANDOM, MASK, CUSTOM, CONV1D, CONV1D_BACKWARD_INPUT, CONV1D_BACKWARD_WEIGHT, CONV1D_BACKWARD_BIAS, CONV2D, CONV2D_BACKWARD_INPUT, CONV2D_BACKWARD_WEIGHT, CONV2D_BACKWARD_BIAS, CONV3D, CONV3D_BACKWARD_INPUT, CONV3D_BACKWARD_WEIGHT, CONV3D_BACKWARD_BIAS, STORE, SGD_UPDATE, ADAMW_UPDATE_M, ADAMW_UPDATE_V, ADAMW_UPDATE_PARAM). `vmap(grad(fn))` composition works. |
+| 014 (functional transforms) | ✅ Shipped — `grad`, `vjp`, `functional_call`, full `vmap` with 17 active rules + explicit refusal stubs for random, masking, custom ops, CNN primitives/backward roots, STORE, and optimizer-update roots. `vmap(grad(fn))` composition works. |
 | 015 (custom WGSL) | ✅ Shipped |
 | 016 (ONNX export) | ✅ Shipped |
 
@@ -248,7 +248,7 @@ All 16 PRDs land at v0:
 |---|---|
 | **Default `.backward()` through GPU realizer** | NumPy realizer handles autograd mutation. Explicit `realize_webgpu(...)` can run selected backward IR roots such as Conv1d/Conv2d input/weight/bias grads; `realize_tensor_plan_webgpu(...)` can run Conv/LayerNorm backward roots and functional SGD/Adam/AdamW updates. `.backward()` and mutating `Optimizer.step()` are not GPU-resident. |
 | **f16/bf16 cast kernels** | Future work — current CAST handler is f32→f32 only. |
-| **Primitive/WebGPU ConvTranspose in `browsergrad-jit`** | Lazy `browsergrad-jit` now has primitive Conv1d/Conv2d/Conv3d forward/backward IR with CPU handlers, symbolic VJPs, and generic tensor-plan WebGPU lowering. ConvTranspose2d still uses CUSTOM NumPy realizers + VJPs; ConvTranspose2d WebGPU path is pending. |
+| **Primitive/WebGPU ConvTranspose in `browsergrad-jit`** | Lazy `browsergrad-jit` now has primitive Conv1d/Conv2d/ConvTranspose2d/Conv3d forward/backward IR with CPU handlers, symbolic VJPs, and generic tensor-plan WebGPU lowering. |
 | **torch.cuda.\*, torch.compile, torch.fx** | Out of scope for `install_torch_alias`. Raises `AttributeError`. |
 | **Cross-browser WGSL compile-error line/column parsing** | Vendor diagnostic formats differ; ship raw browser messages and call it honest. |
 | **vmap of RANDOM** | Needs PRNG key splits (JAX-style PRNGKey). Refuses with clear message; user can hand-write a key-split pattern. |

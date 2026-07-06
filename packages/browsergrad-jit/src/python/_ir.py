@@ -19,7 +19,7 @@ hash the same. This is what lets the trace cache and pipeline cache
 
 Design notes:
 
-  * 51 opcodes total — corrects PRD-005's nominal 19. The extras are
+  * 55 opcodes total — corrects PRD-005's nominal 19. The extras are
     documented per-opcode below. Headline additions: RANDOM (dropout +
     nn.init at trace time), CMP (boolean results), CONV1D/CONV2D/CONV3D
     primitive CNN ops and backward refs, CUSTOM
@@ -57,7 +57,10 @@ from ._errors import ShapeError
 #   CNN:           CONV1D, CONV1D_BACKWARD_INPUT, CONV1D_BACKWARD_WEIGHT,
 #                  CONV1D_BACKWARD_BIAS, CONV2D,
 #                  CONV2D_BACKWARD_INPUT, CONV2D_BACKWARD_WEIGHT,
-#                  CONV2D_BACKWARD_BIAS, CONV3D,
+#                  CONV2D_BACKWARD_BIAS, CONV_TRANSPOSE2D,
+#                  CONV_TRANSPOSE2D_BACKWARD_INPUT,
+#                  CONV_TRANSPOSE2D_BACKWARD_WEIGHT,
+#                  CONV_TRANSPOSE2D_BACKWARD_BIAS, CONV3D,
 #                  CONV3D_BACKWARD_INPUT, CONV3D_BACKWARD_WEIGHT,
 #                  CONV3D_BACKWARD_BIAS
 #   Norm:          LAYER_NORM, LAYER_NORM_BACKWARD_INPUT,
@@ -88,6 +91,10 @@ OP_CONV2D  = "CONV2D"   # arg: {n,c_in,h,w,c_out,kh,kw,stride_h,stride_w,pad_h,p
 OP_CONV2D_BACKWARD_INPUT  = "CONV2D_BACKWARD_INPUT"   # inputs: (dy, weight), arg: conv2d metadata
 OP_CONV2D_BACKWARD_WEIGHT = "CONV2D_BACKWARD_WEIGHT"  # inputs: (dy, input), arg: conv2d metadata
 OP_CONV2D_BACKWARD_BIAS   = "CONV2D_BACKWARD_BIAS"    # inputs: (dy,), arg: conv2d metadata
+OP_CONV_TRANSPOSE2D  = "CONV_TRANSPOSE2D"   # arg: transposed conv2d metadata
+OP_CONV_TRANSPOSE2D_BACKWARD_INPUT  = "CONV_TRANSPOSE2D_BACKWARD_INPUT"   # inputs: (dy, weight)
+OP_CONV_TRANSPOSE2D_BACKWARD_WEIGHT = "CONV_TRANSPOSE2D_BACKWARD_WEIGHT"  # inputs: (dy, input)
+OP_CONV_TRANSPOSE2D_BACKWARD_BIAS   = "CONV_TRANSPOSE2D_BACKWARD_BIAS"    # inputs: (dy,)
 OP_CONV3D  = "CONV3D"   # arg: {n,c_in,d,h,w,c_out,kd,kh,kw,stride_d,stride_h,stride_w,pad_d,pad_h,pad_w,dilation_d,dilation_h,dilation_w,groups,out_d,out_h,out_w,has_bias}
 OP_CONV3D_BACKWARD_INPUT  = "CONV3D_BACKWARD_INPUT"   # inputs: (dy, weight), arg: conv3d metadata
 OP_CONV3D_BACKWARD_WEIGHT = "CONV3D_BACKWARD_WEIGHT"  # inputs: (dy, input), arg: conv3d metadata
@@ -149,6 +156,8 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
     OP_CONV2D_BACKWARD_WEIGHT, OP_CONV2D_BACKWARD_BIAS,
+    OP_CONV_TRANSPOSE2D, OP_CONV_TRANSPOSE2D_BACKWARD_INPUT,
+    OP_CONV_TRANSPOSE2D_BACKWARD_WEIGHT, OP_CONV_TRANSPOSE2D_BACKWARD_BIAS,
     OP_CONV3D, OP_CONV3D_BACKWARD_INPUT, OP_CONV3D_BACKWARD_WEIGHT,
     OP_CONV3D_BACKWARD_BIAS, OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
     OP_LAYER_NORM_BACKWARD_WEIGHT, OP_LAYER_NORM_BACKWARD_BIAS, OP_REDUCE,
@@ -163,7 +172,7 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
 })
-assert len(ALL_OPS) == 51, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
+assert len(ALL_OPS) == 55, "opcode count drifted from PRD-005+006+007+010+CNN+norm+optimizer"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -390,6 +399,8 @@ __all__ = [
     "OP_CONV2D",
     "OP_CONV2D_BACKWARD_INPUT", "OP_CONV2D_BACKWARD_WEIGHT",
     "OP_CONV2D_BACKWARD_BIAS",
+    "OP_CONV_TRANSPOSE2D", "OP_CONV_TRANSPOSE2D_BACKWARD_INPUT",
+    "OP_CONV_TRANSPOSE2D_BACKWARD_WEIGHT", "OP_CONV_TRANSPOSE2D_BACKWARD_BIAS",
     "OP_CONV3D", "OP_CONV3D_BACKWARD_INPUT",
     "OP_CONV3D_BACKWARD_WEIGHT", "OP_CONV3D_BACKWARD_BIAS",
     "OP_LAYER_NORM", "OP_LAYER_NORM_BACKWARD_INPUT",

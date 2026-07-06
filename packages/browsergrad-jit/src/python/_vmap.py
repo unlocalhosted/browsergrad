@@ -56,6 +56,8 @@ from ._ir import (
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
     OP_CONV2D_BACKWARD_WEIGHT, OP_CONV2D_BACKWARD_BIAS,
+    OP_CONV_TRANSPOSE2D, OP_CONV_TRANSPOSE2D_BACKWARD_INPUT,
+    OP_CONV_TRANSPOSE2D_BACKWARD_WEIGHT, OP_CONV_TRANSPOSE2D_BACKWARD_BIAS,
     OP_CONV3D, OP_CONV3D_BACKWARD_INPUT,
     OP_CONV3D_BACKWARD_WEIGHT, OP_CONV3D_BACKWARD_BIAS,
     OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
@@ -488,6 +490,31 @@ _VMAP_RULES[OP_CONV2D_BACKWARD_WEIGHT] = _refuse(
 _VMAP_RULES[OP_CONV2D_BACKWARD_BIAS] = _refuse(
     "OP_CONV2D_BACKWARD_BIAS",
     "conv backward batching needs explicit semantics for mapped batch "
+    "and output channels",
+)
+
+_VMAP_RULES[OP_CONV_TRANSPOSE2D] = _refuse(
+    "OP_CONV_TRANSPOSE2D",
+    "transposed CNN batching needs an explicit rule for whether vmap maps over N, "
+    "channels, groups, or an outer batch dim. Add that rule before using "
+    "ConvTranspose2d under vmap",
+)
+
+_VMAP_RULES[OP_CONV_TRANSPOSE2D_BACKWARD_INPUT] = _refuse(
+    "OP_CONV_TRANSPOSE2D_BACKWARD_INPUT",
+    "transposed conv backward batching needs explicit semantics for mapped batch, "
+    "channels, and groups",
+)
+
+_VMAP_RULES[OP_CONV_TRANSPOSE2D_BACKWARD_WEIGHT] = _refuse(
+    "OP_CONV_TRANSPOSE2D_BACKWARD_WEIGHT",
+    "transposed conv backward batching needs explicit semantics for mapped batch, "
+    "channels, and groups",
+)
+
+_VMAP_RULES[OP_CONV_TRANSPOSE2D_BACKWARD_BIAS] = _refuse(
+    "OP_CONV_TRANSPOSE2D_BACKWARD_BIAS",
+    "transposed conv backward batching needs explicit semantics for mapped batch "
     "and output channels",
 )
 

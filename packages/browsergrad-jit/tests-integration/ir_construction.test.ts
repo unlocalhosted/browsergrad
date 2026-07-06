@@ -33,13 +33,13 @@ browsergrad_jit.__version__
     expect(version).toMatch(/^0\.8\.\d+$/);
   });
 
-  it("exposes 51 opcodes in ALL_OPS (core + CNN + norm + fusion + autograd + AMP + optimizer)", async () => {
+  it("exposes 55 opcodes in ALL_OPS (core + CNN + norm + fusion + autograd + AMP + optimizer)", async () => {
     const target = await getJitTarget();
     const ops = await target.run<string[]>(`
 from browsergrad_jit._ir import ALL_OPS
 sorted(ALL_OPS)
 `);
-    expect(ops).toHaveLength(51);
+    expect(ops).toHaveLength(55);
     expect(ops).toContain("CONV1D");
     expect(ops).toContain("CONV1D_BACKWARD_INPUT");
     expect(ops).toContain("CONV1D_BACKWARD_WEIGHT");
@@ -48,6 +48,10 @@ sorted(ALL_OPS)
     expect(ops).toContain("CONV2D_BACKWARD_INPUT");
     expect(ops).toContain("CONV2D_BACKWARD_WEIGHT");
     expect(ops).toContain("CONV2D_BACKWARD_BIAS");
+    expect(ops).toContain("CONV_TRANSPOSE2D");
+    expect(ops).toContain("CONV_TRANSPOSE2D_BACKWARD_INPUT");
+    expect(ops).toContain("CONV_TRANSPOSE2D_BACKWARD_WEIGHT");
+    expect(ops).toContain("CONV_TRANSPOSE2D_BACKWARD_BIAS");
     expect(ops).toContain("CONV3D");
     expect(ops).toContain("CONV3D_BACKWARD_INPUT");
     expect(ops).toContain("CONV3D_BACKWARD_WEIGHT");

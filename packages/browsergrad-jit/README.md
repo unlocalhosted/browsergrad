@@ -62,11 +62,11 @@ pretending to match PyTorch.
   `conv1d`, `conv2d`, `conv_transpose2d`, `conv3d`
 - `optim.SGD`, `optim.Adam`, `optim.AdamW`
 
-`Conv1d`, `Conv2d`, `Conv3d`, and `LayerNorm` are primitive IR ops with NumPy
-handlers and symbolic VJPs. Conv1d/Conv2d/Conv3d/LayerNorm forward/backward
+`Conv1d`, `Conv2d`, `ConvTranspose2d`, `Conv3d`, and `LayerNorm` are primitive
+IR ops with NumPy handlers and symbolic VJPs. Their forward/backward roots
 lower through generic tensor-plan WebGPU via `realize_tensor_plan_webgpu(...)`.
-Default `.backward()` still writes CPU grads. `BatchNorm1d` and
-`ConvTranspose2d` remain `CUSTOM` realization paths with explicit NumPy VJPs.
+Default `.backward()` still writes CPU grads. `BatchNorm1d` remains a `CUSTOM`
+realization path with explicit NumPy VJPs.
 `bg.optim.sgd_update(...)`, `bg.optim.adam_update(...)`, and
 `bg.optim.adamw_update(...)` are functional optimizer/update IR nodes and lower
 through the same tensor-plan WebGPU path. They return updated tensors/state;
@@ -82,7 +82,7 @@ lowering.
 generic WebGPU bridge call (`run_tensor_plan`) instead of walking legacy per-op
 bridge methods. Current runtime coverage is f32 BUFFER/LOAD/2-D MATMUL and
 elementwise chains, RESHAPE, PERMUTE, BROADCAST_TO, and REDUCE(sum/mean) rank
-<= 4, plus Conv1d/Conv2d/Conv3d/LayerNorm forward/backward and functional
+<= 4, plus Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm forward/backward and functional
 SGD/Adam/AdamW updates; mutating optimizer-step tensor-plan codegen remains
 future work.
 
@@ -165,9 +165,10 @@ out = bg.realize_webgpu(x @ w + b)        # ndarray, materialized at the seam
 Explicit materialization in v0. Supported opcodes: `BUFFER`, `LOAD`, `CONST`,
 `CAST`, `MATMUL`, `CONV1D`, `CONV1D_BACKWARD_INPUT`,
 `CONV1D_BACKWARD_WEIGHT`, `CONV1D_BACKWARD_BIAS`, `CONV2D`,
-`CONV2D_BACKWARD_INPUT`,
-`CONV2D_BACKWARD_WEIGHT`, `CONV2D_BACKWARD_BIAS`, `FUSED_ELEMENTWISE`,
-`CUSTOM`. Supported `CUSTOM` bridge ops include FlashAttention forward and
+`CONV2D_BACKWARD_INPUT`, `CONV2D_BACKWARD_WEIGHT`, `CONV2D_BACKWARD_BIAS`,
+`FUSED_ELEMENTWISE`, `CUSTOM`. The newer tensor-plan path additionally covers
+ConvTranspose2d/Conv3d/LayerNorm/optimizer-update roots. Supported `CUSTOM`
+bridge ops include FlashAttention forward and
 custom WGSL kernels. Other opcodes raise with a pointer back to `bg.realize()`
 (NumPy).
 

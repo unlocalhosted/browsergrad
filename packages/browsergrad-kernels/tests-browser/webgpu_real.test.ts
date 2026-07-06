@@ -863,6 +863,84 @@ describe("real WebGPU — matmul + tiled GEMM + fused elementwise + FA-v2", () =
     expect([...db.data]).toEqual([100]);
   });
 
+  it("generic tensor GPU plan runs ConvTranspose2d forward and backward roots", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const arg = {
+      n: 1, c_in: 1, h: 2, w: 2, c_out: 1, c_out_per_group: 1, kh: 2, kw: 2,
+      stride_h: 1, stride_w: 1, pad_h: 0, pad_w: 0,
+      output_pad_h: 0, output_pad_w: 0,
+      dilation_h: 1, dilation_w: 1, groups: 1, out_h: 3, out_w: 3,
+    } as const;
+    const x = new Float32Array([1, 2, 3, 4]);
+    const weight = new Float32Array([1, 0, 0, -1]);
+    const bias = new Float32Array([0.5]);
+    const dy = new Float32Array([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+    async function runSingle(
+      op: string,
+      inputShapes: readonly (readonly number[])[],
+      outputShape: readonly number[],
+      inputs: readonly Float32Array[],
+    ): Promise<Float32Array> {
+      const steps = [
+        ...inputShapes.map((shape, i) => ({
+          step: i,
+          value_id: i,
+          op: "BUFFER",
+          input_ids: [],
+          shape,
+          dtype: "float32",
+        })),
+        ...inputShapes.map((shape, i) => ({
+          step: inputShapes.length + i,
+          value_id: inputShapes.length + i,
+          op: "LOAD",
+          input_ids: [i],
+          shape,
+          dtype: "float32",
+        })),
+        {
+          step: inputShapes.length * 2,
+          value_id: inputShapes.length * 2,
+          op,
+          input_ids: inputShapes.map((_, i) => inputShapes.length + i),
+          shape: outputShape,
+          dtype: "float32",
+          arg,
+        },
+      ];
+      const buffers = steps.map((step) => ({
+        value_id: step.value_id,
+        op: step.op,
+        shape: step.shape,
+        dtype: "float32",
+        bytes: step.shape.reduce((a, b) => a * b, 1) * 4,
+        first_step: step.step,
+        last_step: inputShapes.length * 2,
+        materialize: step.value_id === inputShapes.length * 2,
+      }));
+      const result = await runTensorGpuPlan(device, {
+        steps,
+        buffers,
+        root_id: inputShapes.length * 2,
+        materialization_boundary: "root",
+        peak_live_bytes: buffers.reduce((sum, buffer) => sum + buffer.bytes, 0),
+        has_custom_ops: false,
+      }, inputs.map((data, valueId) => ({ valueId, data })));
+      return result.data;
+    }
+
+    expect([...await runSingle("CONV_TRANSPOSE2D", [[1, 1, 2, 2], [1, 1, 2, 2], [1]], [1, 1, 3, 3], [x, weight, bias])])
+      .toEqual([1.5, 2.5, 0.5, 3.5, 3.5, -1.5, 0.5, -2.5, -3.5]);
+    expect([...await runSingle("CONV_TRANSPOSE2D_BACKWARD_INPUT", [[1, 1, 3, 3], [1, 1, 2, 2]], [1, 1, 2, 2], [dy, weight])])
+      .toEqual([-4, -4, -4, -4]);
+    expect([...await runSingle("CONV_TRANSPOSE2D_BACKWARD_WEIGHT", [[1, 1, 3, 3], [1, 1, 2, 2]], [1, 1, 2, 2], [dy, x])])
+      .toEqual([37, 47, 67, 77]);
+    expect([...await runSingle("CONV_TRANSPOSE2D_BACKWARD_BIAS", [[1, 1, 3, 3]], [1], [dy])])
+      .toEqual([45]);
+  });
+
   it("generic tensor GPU plan runs Conv3d forward and backward roots", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

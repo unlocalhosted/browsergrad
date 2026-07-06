@@ -573,6 +573,102 @@ class MockBridge:
                 values[value_id] = grad_w.astype(np.dtype(step["dtype"]), copy=False)
             elif op == "CONV2D_BACKWARD_BIAS":
                 values[value_id] = values[input_ids[0]].sum(axis=(0, 2, 3)).astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "CONV_TRANSPOSE2D":
+                arg = step["arg"]
+                x = values[input_ids[0]]
+                wt = values[input_ids[1]]
+                b_arr = values[input_ids[2]] if len(input_ids) > 2 else None
+                n = int(arg["n"]); c_in = int(arg["c_in"])
+                h = int(arg["h"]); w = int(arg["w"]); c_out = int(arg["c_out"])
+                c_out_per_group = int(arg["c_out_per_group"])
+                kh = int(arg["kh"]); kw = int(arg["kw"])
+                stride_h = int(arg["stride_h"]); stride_w = int(arg["stride_w"])
+                pad_h = int(arg["pad_h"]); pad_w = int(arg["pad_w"])
+                dilation_h = int(arg["dilation_h"]); dilation_w = int(arg["dilation_w"])
+                groups = int(arg["groups"]); out_h = int(arg["out_h"]); out_w = int(arg["out_w"])
+                in_per_group = c_in // groups
+                out = np.zeros((n, c_out, out_h, out_w), dtype=np.float32)
+                for nn in range(n):
+                    for ci in range(c_in):
+                        group = ci // in_per_group
+                        co0 = group * c_out_per_group
+                        for ih in range(h):
+                            for iw in range(w):
+                                x_val = x[nn, ci, ih, iw]
+                                for r in range(kh):
+                                    oh = ih * stride_h - pad_h + r * dilation_h
+                                    if oh < 0 or oh >= out_h:
+                                        continue
+                                    for s in range(kw):
+                                        ow = iw * stride_w - pad_w + s * dilation_w
+                                        if 0 <= ow < out_w:
+                                            out[nn, co0:co0+c_out_per_group, oh, ow] += x_val * wt[ci, :, r, s]
+                if b_arr is not None:
+                    out = out + b_arr.reshape(1, c_out, 1, 1)
+                values[value_id] = out.astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "CONV_TRANSPOSE2D_BACKWARD_INPUT":
+                arg = step["arg"]
+                grad_out = values[input_ids[0]]
+                wt = values[input_ids[1]]
+                n = int(arg["n"]); c_in = int(arg["c_in"])
+                h = int(arg["h"]); w = int(arg["w"])
+                c_out_per_group = int(arg["c_out_per_group"])
+                kh = int(arg["kh"]); kw = int(arg["kw"])
+                stride_h = int(arg["stride_h"]); stride_w = int(arg["stride_w"])
+                pad_h = int(arg["pad_h"]); pad_w = int(arg["pad_w"])
+                dilation_h = int(arg["dilation_h"]); dilation_w = int(arg["dilation_w"])
+                groups = int(arg["groups"]); out_h = int(arg["out_h"]); out_w = int(arg["out_w"])
+                in_per_group = c_in // groups
+                grad_x = np.zeros((n, c_in, h, w), dtype=np.float32)
+                for nn in range(n):
+                    for ci in range(c_in):
+                        group = ci // in_per_group
+                        co0 = group * c_out_per_group
+                        for ih in range(h):
+                            for iw in range(w):
+                                acc = 0.0
+                                for r in range(kh):
+                                    oh = ih * stride_h - pad_h + r * dilation_h
+                                    if oh < 0 or oh >= out_h:
+                                        continue
+                                    for s in range(kw):
+                                        ow = iw * stride_w - pad_w + s * dilation_w
+                                        if 0 <= ow < out_w:
+                                            acc += (grad_out[nn, co0:co0+c_out_per_group, oh, ow] * wt[ci, :, r, s]).sum()
+                                grad_x[nn, ci, ih, iw] = acc
+                values[value_id] = grad_x.astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "CONV_TRANSPOSE2D_BACKWARD_WEIGHT":
+                arg = step["arg"]
+                grad_out = values[input_ids[0]]
+                x = values[input_ids[1]]
+                n = int(arg["n"]); c_in = int(arg["c_in"])
+                h = int(arg["h"]); w = int(arg["w"])
+                c_out_per_group = int(arg["c_out_per_group"])
+                kh = int(arg["kh"]); kw = int(arg["kw"])
+                stride_h = int(arg["stride_h"]); stride_w = int(arg["stride_w"])
+                pad_h = int(arg["pad_h"]); pad_w = int(arg["pad_w"])
+                dilation_h = int(arg["dilation_h"]); dilation_w = int(arg["dilation_w"])
+                groups = int(arg["groups"]); out_h = int(arg["out_h"]); out_w = int(arg["out_w"])
+                in_per_group = c_in // groups
+                grad_w = np.zeros((c_in, c_out_per_group, kh, kw), dtype=np.float32)
+                for nn in range(n):
+                    for ci in range(c_in):
+                        group = ci // in_per_group
+                        co0 = group * c_out_per_group
+                        for ih in range(h):
+                            for iw in range(w):
+                                x_val = x[nn, ci, ih, iw]
+                                for r in range(kh):
+                                    oh = ih * stride_h - pad_h + r * dilation_h
+                                    if oh < 0 or oh >= out_h:
+                                        continue
+                                    for s in range(kw):
+                                        ow = iw * stride_w - pad_w + s * dilation_w
+                                        if 0 <= ow < out_w:
+                                            grad_w[ci, :, r, s] += grad_out[nn, co0:co0+c_out_per_group, oh, ow] * x_val
+                values[value_id] = grad_w.astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "CONV_TRANSPOSE2D_BACKWARD_BIAS":
+                values[value_id] = values[input_ids[0]].sum(axis=(0, 2, 3)).astype(np.dtype(step["dtype"]), copy=False)
             elif op == "CONV3D":
                 arg = step["arg"]
                 x = values[input_ids[0]]
@@ -1452,6 +1548,67 @@ gb_gpu = bg.realize_tensor_plan_webgpu(gb)
     expect(result.gx_ops).toContain("CONV2D_BACKWARD_INPUT");
     expect(result.gw_ops).toContain("CONV2D_BACKWARD_WEIGHT");
     expect(result.gb_ops).toContain("CONV2D_BACKWARD_BIAS");
+  });
+
+  it("realize_tensor_plan_webgpu runs ConvTranspose2d forward/backward roots through generic plan path", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      out_diff: number;
+      gx_diff: number;
+      gw_diff: number;
+      gb_diff: number;
+      tensor_plan: number;
+      out_ops: string[];
+      gx_ops: string[];
+      gw_ops: string[];
+      gb_ops: string[];
+    }>(`
+import browsergrad_jit as bg
+import browsergrad_jit.nn.functional as F
+import numpy as np
+from browsergrad_jit._tensor_proxy import TensorProxy
+from browsergrad_jit._vjp import get_rule
+
+rng = np.random.RandomState(17)
+x_np = rng.uniform(-1, 1, size=(1, 4, 2, 3)).astype(np.float32)
+w_np = rng.uniform(-1, 1, size=(4, 2, 2, 2)).astype(np.float32)
+b_np = rng.uniform(-0.2, 0.2, size=(4,)).astype(np.float32)
+x = bg.from_numpy(x_np.copy())
+w = bg.from_numpy(w_np.copy())
+b = bg.from_numpy(b_np.copy())
+out = F.conv_transpose2d(x, w, b, stride=(2, 1), padding=(1, 0), output_padding=(1, 0), dilation=(2, 1), groups=2)
+out_gpu = bg.realize_tensor_plan_webgpu(out)
+dy_np = rng.uniform(-1, 1, size=out.shape).astype(np.float32)
+dy = bg.from_numpy(dy_np.copy())
+rule = get_rule(out._uop.op)
+gx_uop, gw_uop, gb_uop = rule(out._uop, (x._uop, w._uop, b._uop), dy._uop)
+gx = TensorProxy(gx_uop, session=x._get_session(), requires_grad=False)
+gw = TensorProxy(gw_uop, session=x._get_session(), requires_grad=False)
+gb = TensorProxy(gb_uop, session=x._get_session(), requires_grad=False)
+gx_gpu = bg.realize_tensor_plan_webgpu(gx)
+gw_gpu = bg.realize_tensor_plan_webgpu(gw)
+gb_gpu = bg.realize_tensor_plan_webgpu(gb)
+{
+    "out_diff": float(np.max(np.abs(out_gpu - out.numpy()))),
+    "gx_diff": float(np.max(np.abs(gx_gpu - gx.numpy()))),
+    "gw_diff": float(np.max(np.abs(gw_gpu - gw.numpy()))),
+    "gb_diff": float(np.max(np.abs(gb_gpu - gb.numpy()))),
+    "tensor_plan": _mock.tensor_plan_count,
+    "out_ops": bg.gpu_plan_summary(out)["ops"],
+    "gx_ops": bg.gpu_plan_summary(gx)["ops"],
+    "gw_ops": bg.gpu_plan_summary(gw)["ops"],
+    "gb_ops": bg.gpu_plan_summary(gb)["ops"],
+}
+`);
+    expect(result.out_diff).toBeLessThan(1e-5);
+    expect(result.gx_diff).toBeLessThan(1e-5);
+    expect(result.gw_diff).toBeLessThan(1e-5);
+    expect(result.gb_diff).toBeLessThan(1e-5);
+    expect(result.tensor_plan).toBe(4);
+    expect(result.out_ops).toContain("CONV_TRANSPOSE2D");
+    expect(result.gx_ops).toContain("CONV_TRANSPOSE2D_BACKWARD_INPUT");
+    expect(result.gw_ops).toContain("CONV_TRANSPOSE2D_BACKWARD_WEIGHT");
+    expect(result.gb_ops).toContain("CONV_TRANSPOSE2D_BACKWARD_BIAS");
   });
 
   it("realize_tensor_plan_webgpu refuses CUSTOM ops before bridge dispatch", async () => {

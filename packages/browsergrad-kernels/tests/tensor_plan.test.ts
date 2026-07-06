@@ -182,4 +182,53 @@ describe("tensor GPU plan normalization", () => {
     });
     expect(plan.steps.map((step) => step.op)).toContain("LAYER_NORM_BACKWARD_BIAS");
   });
+
+  it("accepts ConvTranspose2d forward/backward IR plan steps", () => {
+    const arg = {
+      n: 1,
+      c_in: 1,
+      h: 2,
+      w: 2,
+      c_out: 1,
+      c_out_per_group: 1,
+      kh: 2,
+      kw: 2,
+      stride_h: 1,
+      stride_w: 1,
+      pad_h: 0,
+      pad_w: 0,
+      output_pad_h: 0,
+      output_pad_w: 0,
+      dilation_h: 1,
+      dilation_w: 1,
+      groups: 1,
+      out_h: 3,
+      out_w: 3,
+    };
+    const plan = normalizeTensorGpuPlan({
+      steps: [
+        { step: 0, value_id: 0, op: "BUFFER", input_ids: [], shape: [1, 1, 2, 2], dtype: "float32" },
+        { step: 1, value_id: 1, op: "BUFFER", input_ids: [], shape: [1, 1, 2, 2], dtype: "float32" },
+        { step: 2, value_id: 2, op: "BUFFER", input_ids: [], shape: [1], dtype: "float32" },
+        { step: 3, value_id: 3, op: "CONV_TRANSPOSE2D", input_ids: [0, 1, 2], shape: [1, 1, 3, 3], dtype: "float32", arg },
+        { step: 4, value_id: 4, op: "CONV_TRANSPOSE2D_BACKWARD_INPUT", input_ids: [3, 1], shape: [1, 1, 2, 2], dtype: "float32", arg },
+        { step: 5, value_id: 5, op: "CONV_TRANSPOSE2D_BACKWARD_WEIGHT", input_ids: [3, 0], shape: [1, 1, 2, 2], dtype: "float32", arg },
+        { step: 6, value_id: 6, op: "CONV_TRANSPOSE2D_BACKWARD_BIAS", input_ids: [3], shape: [1], dtype: "float32", arg },
+      ],
+      buffers: [
+        { value_id: 0, op: "BUFFER", shape: [1, 1, 2, 2], dtype: "float32", bytes: 16, first_step: 0, last_step: 5, materialize: false },
+        { value_id: 1, op: "BUFFER", shape: [1, 1, 2, 2], dtype: "float32", bytes: 16, first_step: 1, last_step: 4, materialize: false },
+        { value_id: 2, op: "BUFFER", shape: [1], dtype: "float32", bytes: 4, first_step: 2, last_step: 3, materialize: false },
+        { value_id: 3, op: "CONV_TRANSPOSE2D", shape: [1, 1, 3, 3], dtype: "float32", bytes: 36, first_step: 3, last_step: 6, materialize: false },
+        { value_id: 4, op: "CONV_TRANSPOSE2D_BACKWARD_INPUT", shape: [1, 1, 2, 2], dtype: "float32", bytes: 16, first_step: 4, last_step: 4, materialize: false },
+        { value_id: 5, op: "CONV_TRANSPOSE2D_BACKWARD_WEIGHT", shape: [1, 1, 2, 2], dtype: "float32", bytes: 16, first_step: 5, last_step: 5, materialize: false },
+        { value_id: 6, op: "CONV_TRANSPOSE2D_BACKWARD_BIAS", shape: [1], dtype: "float32", bytes: 4, first_step: 6, last_step: 6, materialize: true },
+      ],
+      root_id: 6,
+      materialization_boundary: "root",
+      peak_live_bytes: 108,
+      has_custom_ops: false,
+    });
+    expect(plan.steps.map((step) => step.op)).toContain("CONV_TRANSPOSE2D_BACKWARD_BIAS");
+  });
 });

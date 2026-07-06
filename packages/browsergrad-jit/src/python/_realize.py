@@ -37,7 +37,10 @@ from ._ir import (
     OP_CONV1D, OP_CONV1D_BACKWARD_INPUT, OP_CONV1D_BACKWARD_WEIGHT,
     OP_CONV1D_BACKWARD_BIAS, OP_CONV2D,
     OP_CONV2D_BACKWARD_INPUT, OP_CONV2D_BACKWARD_WEIGHT,
-    OP_CONV2D_BACKWARD_BIAS, OP_CONV3D,
+    OP_CONV2D_BACKWARD_BIAS, OP_CONV_TRANSPOSE2D,
+    OP_CONV_TRANSPOSE2D_BACKWARD_INPUT,
+    OP_CONV_TRANSPOSE2D_BACKWARD_WEIGHT,
+    OP_CONV_TRANSPOSE2D_BACKWARD_BIAS, OP_CONV3D,
     OP_CONV3D_BACKWARD_INPUT, OP_CONV3D_BACKWARD_WEIGHT,
     OP_CONV3D_BACKWARD_BIAS, OP_LAYER_NORM,
     OP_LAYER_NORM_BACKWARD_INPUT, OP_LAYER_NORM_BACKWARD_WEIGHT,
@@ -451,6 +454,133 @@ def _h_conv2d_backward_weight(node: UOp, vt: dict, bt: BufferTable) -> np.ndarra
 
 
 def _h_conv2d_backward_bias(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    dy = vt[id(node.inputs[0])]
+    return dy.sum(axis=(0, 2, 3)).astype(np.dtype(node.dtype), copy=False)
+
+
+def _conv_transpose2d_arg(arg: dict) -> tuple[int, ...]:
+    return (
+        int(arg["n"]),
+        int(arg["c_in"]),
+        int(arg["h"]),
+        int(arg["w"]),
+        int(arg["c_out"]),
+        int(arg["c_out_per_group"]),
+        int(arg["kh"]),
+        int(arg["kw"]),
+        int(arg["stride_h"]),
+        int(arg["stride_w"]),
+        int(arg["pad_h"]),
+        int(arg["pad_w"]),
+        int(arg["output_pad_h"]),
+        int(arg["output_pad_w"]),
+        int(arg["dilation_h"]),
+        int(arg["dilation_w"]),
+        int(arg["groups"]),
+        int(arg["out_h"]),
+        int(arg["out_w"]),
+    )
+
+
+def _h_conv_transpose2d(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    x = vt[id(node.inputs[0])]
+    weight = vt[id(node.inputs[1])]
+    bias = vt[id(node.inputs[2])] if len(node.inputs) > 2 else None
+    (
+        n, c_in, h, w, c_out, c_out_per_group, kh, kw,
+        stride_h, stride_w, pad_h, pad_w, _oph, _opw,
+        dilation_h, dilation_w, groups, out_h, out_w,
+    ) = _conv_transpose2d_arg(node.arg)
+    in_per_group = c_in // groups
+    out = np.zeros((n, c_out, out_h, out_w), dtype=np.float32)
+    for nn in range(n):
+        for ci in range(c_in):
+            group = ci // in_per_group
+            co0 = group * c_out_per_group
+            for ih in range(h):
+                for iw in range(w):
+                    value = x[nn, ci, ih, iw]
+                    if value == 0:
+                        continue
+                    for r in range(kh):
+                        oh = ih * stride_h - pad_h + r * dilation_h
+                        if oh < 0 or oh >= out_h:
+                            continue
+                        for c in range(kw):
+                            ow = iw * stride_w - pad_w + c * dilation_w
+                            if 0 <= ow < out_w:
+                                out[nn, co0:co0+c_out_per_group, oh, ow] += (
+                                    value * weight[ci, :, r, c]
+                                )
+    if bias is not None:
+        out += bias.reshape(1, c_out, 1, 1)
+    return out.astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_conv_transpose2d_backward_input(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    dy = vt[id(node.inputs[0])]
+    weight = vt[id(node.inputs[1])]
+    (
+        n, c_in, h, w, _c_out, c_out_per_group, kh, kw,
+        stride_h, stride_w, pad_h, pad_w, _oph, _opw,
+        dilation_h, dilation_w, groups, out_h, out_w,
+    ) = _conv_transpose2d_arg(node.arg)
+    in_per_group = c_in // groups
+    grad_x = np.zeros((n, c_in, h, w), dtype=np.float32)
+    for nn in range(n):
+        for ci in range(c_in):
+            group = ci // in_per_group
+            co0 = group * c_out_per_group
+            for ih in range(h):
+                for iw in range(w):
+                    acc = 0.0
+                    for r in range(kh):
+                        oh = ih * stride_h - pad_h + r * dilation_h
+                        if oh < 0 or oh >= out_h:
+                            continue
+                        for c in range(kw):
+                            ow = iw * stride_w - pad_w + c * dilation_w
+                            if 0 <= ow < out_w:
+                                acc += (
+                                    dy[nn, co0:co0+c_out_per_group, oh, ow]
+                                    * weight[ci, :, r, c]
+                                ).sum()
+                    grad_x[nn, ci, ih, iw] = acc
+    return grad_x.astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_conv_transpose2d_backward_weight(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    dy = vt[id(node.inputs[0])]
+    x = vt[id(node.inputs[1])]
+    (
+        n, c_in, h, w, _c_out, c_out_per_group, kh, kw,
+        stride_h, stride_w, pad_h, pad_w, _oph, _opw,
+        dilation_h, dilation_w, groups, out_h, out_w,
+    ) = _conv_transpose2d_arg(node.arg)
+    in_per_group = c_in // groups
+    grad_w = np.zeros((c_in, c_out_per_group, kh, kw), dtype=np.float32)
+    for nn in range(n):
+        for ci in range(c_in):
+            group = ci // in_per_group
+            co0 = group * c_out_per_group
+            for ih in range(h):
+                for iw in range(w):
+                    x_val = x[nn, ci, ih, iw]
+                    for r in range(kh):
+                        oh = ih * stride_h - pad_h + r * dilation_h
+                        if oh < 0 or oh >= out_h:
+                            continue
+                        for c in range(kw):
+                            ow = iw * stride_w - pad_w + c * dilation_w
+                            if 0 <= ow < out_w:
+                                grad_w[ci, :, r, c] += (
+                                    dy[nn, co0:co0+c_out_per_group, oh, ow]
+                                    * x_val
+                                )
+    return grad_w.astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_conv_transpose2d_backward_bias(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     dy = vt[id(node.inputs[0])]
     return dy.sum(axis=(0, 2, 3)).astype(np.dtype(node.dtype), copy=False)
 
@@ -1058,6 +1188,10 @@ _DISPATCH: dict[str, Handler] = {
     OP_CONV2D_BACKWARD_INPUT: _h_conv2d_backward_input,
     OP_CONV2D_BACKWARD_WEIGHT: _h_conv2d_backward_weight,
     OP_CONV2D_BACKWARD_BIAS: _h_conv2d_backward_bias,
+    OP_CONV_TRANSPOSE2D: _h_conv_transpose2d,
+    OP_CONV_TRANSPOSE2D_BACKWARD_INPUT: _h_conv_transpose2d_backward_input,
+    OP_CONV_TRANSPOSE2D_BACKWARD_WEIGHT: _h_conv_transpose2d_backward_weight,
+    OP_CONV_TRANSPOSE2D_BACKWARD_BIAS: _h_conv_transpose2d_backward_bias,
     OP_CONV3D:  _h_conv3d,
     OP_CONV3D_BACKWARD_INPUT: _h_conv3d_backward_input,
     OP_CONV3D_BACKWARD_WEIGHT: _h_conv3d_backward_weight,

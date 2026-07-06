@@ -32,6 +32,10 @@ export type TensorPlanOp =
   | "CONV2D_BACKWARD_INPUT"
   | "CONV2D_BACKWARD_WEIGHT"
   | "CONV2D_BACKWARD_BIAS"
+  | "CONV_TRANSPOSE2D"
+  | "CONV_TRANSPOSE2D_BACKWARD_INPUT"
+  | "CONV_TRANSPOSE2D_BACKWARD_WEIGHT"
+  | "CONV_TRANSPOSE2D_BACKWARD_BIAS"
   | "CONV3D"
   | "CONV3D_BACKWARD_INPUT"
   | "CONV3D_BACKWARD_WEIGHT"
@@ -311,6 +315,28 @@ function executeStep(
       const dy = requireValue(values, step.inputIds[0], step.op);
       return fromDirect(step, conv2dBackwardBiasDirect(device, dy, step.shape, step.arg));
     }
+    case "CONV_TRANSPOSE2D": {
+      const x = requireValue(values, step.inputIds[0], step.op);
+      const weight = requireValue(values, step.inputIds[1], step.op);
+      const bias = step.inputIds.length > 2
+        ? requireValue(values, step.inputIds[2], step.op)
+        : null;
+      return fromDirect(step, convTranspose2dDirect(device, x, weight, bias, step.shape, step.arg));
+    }
+    case "CONV_TRANSPOSE2D_BACKWARD_INPUT": {
+      const dy = requireValue(values, step.inputIds[0], step.op);
+      const weight = requireValue(values, step.inputIds[1], step.op);
+      return fromDirect(step, convTranspose2dBackwardInputDirect(device, dy, weight, step.shape, step.arg));
+    }
+    case "CONV_TRANSPOSE2D_BACKWARD_WEIGHT": {
+      const dy = requireValue(values, step.inputIds[0], step.op);
+      const x = requireValue(values, step.inputIds[1], step.op);
+      return fromDirect(step, convTranspose2dBackwardWeightDirect(device, dy, x, step.shape, step.arg));
+    }
+    case "CONV_TRANSPOSE2D_BACKWARD_BIAS": {
+      const dy = requireValue(values, step.inputIds[0], step.op);
+      return fromDirect(step, convTranspose2dBackwardBiasDirect(device, dy, step.shape, step.arg));
+    }
     case "CONV3D": {
       const x = requireValue(values, step.inputIds[0], step.op);
       const weight = requireValue(values, step.inputIds[1], step.op);
@@ -431,6 +457,28 @@ interface Conv2dArg {
   readonly strideW: number;
   readonly padH: number;
   readonly padW: number;
+  readonly dilationH: number;
+  readonly dilationW: number;
+  readonly groups: number;
+  readonly outH: number;
+  readonly outW: number;
+}
+
+interface ConvTranspose2dArg {
+  readonly n: number;
+  readonly cIn: number;
+  readonly h: number;
+  readonly w: number;
+  readonly cOut: number;
+  readonly cOutPerGroup: number;
+  readonly kh: number;
+  readonly kw: number;
+  readonly strideH: number;
+  readonly strideW: number;
+  readonly padH: number;
+  readonly padW: number;
+  readonly outputPadH: number;
+  readonly outputPadW: number;
   readonly dilationH: number;
   readonly dilationW: number;
   readonly groups: number;
@@ -1149,6 +1197,234 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 `;
 
 const CONV2D_BACKWARD_BIAS_WGSL = `
+@group(0) @binding(0) var<storage, read> DY: array<f32>;
+@group(0) @binding(1) var<storage, read_write> DB: array<f32>;
+
+struct Params {
+  n: u32,
+  c_out: u32,
+  out_h: u32,
+  out_w: u32,
+};
+@group(0) @binding(2) var<uniform> P: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let co = gid.x;
+  if (co >= P.c_out) { return; }
+  var acc = 0.0;
+  for (var nn = 0u; nn < P.n; nn = nn + 1u) {
+    for (var oh = 0u; oh < P.out_h; oh = oh + 1u) {
+      for (var ow = 0u; ow < P.out_w; ow = ow + 1u) {
+        let dy_index = ((nn * P.c_out + co) * P.out_h + oh) * P.out_w + ow;
+        acc = acc + DY[dy_index];
+      }
+    }
+  }
+  DB[co] = acc;
+}
+`;
+
+function convTranspose2dWgsl(hasBias: boolean): string {
+  const biasBinding = hasBias ? "@group(0) @binding(2) var<storage, read> B: array<f32>;" : "";
+  const outputBinding = hasBias ? 3 : 2;
+  const paramsBinding = hasBias ? 4 : 3;
+  const biasInit = hasBias ? "B[co]" : "0.0";
+  return `
+@group(0) @binding(0) var<storage, read> X: array<f32>;
+@group(0) @binding(1) var<storage, read> W: array<f32>;
+${biasBinding}
+@group(0) @binding(${outputBinding}) var<storage, read_write> Y: array<f32>;
+
+struct Params {
+  n: u32,
+  c_in: u32,
+  h: u32,
+  w: u32,
+  c_out: u32,
+  c_out_per_group: u32,
+  kh: u32,
+  kw: u32,
+  stride_h: u32,
+  stride_w: u32,
+  pad_h: u32,
+  pad_w: u32,
+  output_pad_h: u32,
+  output_pad_w: u32,
+  dilation_h: u32,
+  dilation_w: u32,
+  groups: u32,
+  out_h: u32,
+  out_w: u32,
+  pad0: u32,
+};
+@group(0) @binding(${paramsBinding}) var<uniform> P: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x;
+  let total = P.n * P.c_out * P.out_h * P.out_w;
+  if (idx >= total) { return; }
+  let ow = idx % P.out_w;
+  let oh = (idx / P.out_w) % P.out_h;
+  let co = (idx / (P.out_w * P.out_h)) % P.c_out;
+  let nn = idx / (P.out_w * P.out_h * P.c_out);
+  let in_per_group = P.c_in / P.groups;
+  let out_per_group = P.c_out_per_group;
+  let group = co / out_per_group;
+  let ci0 = group * in_per_group;
+  let co_local = co - group * out_per_group;
+  var acc = ${biasInit};
+  for (var ci_local = 0u; ci_local < in_per_group; ci_local = ci_local + 1u) {
+    let ci = ci0 + ci_local;
+    for (var r = 0u; r < P.kh; r = r + 1u) {
+      let h_num = i32(oh) + i32(P.pad_h) - i32(r * P.dilation_h);
+      if (h_num < 0 || (h_num % i32(P.stride_h)) != 0) { continue; }
+      let ih_i = h_num / i32(P.stride_h);
+      if (ih_i < 0 || ih_i >= i32(P.h)) { continue; }
+      let ih = u32(ih_i);
+      for (var c = 0u; c < P.kw; c = c + 1u) {
+        let w_num = i32(ow) + i32(P.pad_w) - i32(c * P.dilation_w);
+        if (w_num < 0 || (w_num % i32(P.stride_w)) != 0) { continue; }
+        let iw_i = w_num / i32(P.stride_w);
+        if (iw_i < 0 || iw_i >= i32(P.w)) { continue; }
+        let iw = u32(iw_i);
+        let x_index = ((nn * P.c_in + ci) * P.h + ih) * P.w + iw;
+        let w_index = ((ci * P.c_out_per_group + co_local) * P.kh + r) * P.kw + c;
+        acc = acc + X[x_index] * W[w_index];
+      }
+    }
+  }
+  Y[idx] = acc;
+}
+`;
+}
+
+const CONV_TRANSPOSE2D_BACKWARD_INPUT_WGSL = `
+@group(0) @binding(0) var<storage, read> DY: array<f32>;
+@group(0) @binding(1) var<storage, read> W: array<f32>;
+@group(0) @binding(2) var<storage, read_write> DX: array<f32>;
+
+struct Params {
+  n: u32,
+  c_in: u32,
+  h: u32,
+  w: u32,
+  c_out: u32,
+  c_out_per_group: u32,
+  kh: u32,
+  kw: u32,
+  stride_h: u32,
+  stride_w: u32,
+  pad_h: u32,
+  pad_w: u32,
+  output_pad_h: u32,
+  output_pad_w: u32,
+  dilation_h: u32,
+  dilation_w: u32,
+  groups: u32,
+  out_h: u32,
+  out_w: u32,
+  pad0: u32,
+};
+@group(0) @binding(3) var<uniform> P: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x;
+  let total = P.n * P.c_in * P.h * P.w;
+  if (idx >= total) { return; }
+  let iw = idx % P.w;
+  let ih = (idx / P.w) % P.h;
+  let ci = (idx / (P.w * P.h)) % P.c_in;
+  let nn = idx / (P.w * P.h * P.c_in);
+  let in_per_group = P.c_in / P.groups;
+  let out_per_group = P.c_out_per_group;
+  let group = ci / in_per_group;
+  let co0 = group * out_per_group;
+  var acc = 0.0;
+  for (var co_local = 0u; co_local < out_per_group; co_local = co_local + 1u) {
+    let co = co0 + co_local;
+    for (var r = 0u; r < P.kh; r = r + 1u) {
+      let oh_i = i32(ih * P.stride_h) - i32(P.pad_h) + i32(r * P.dilation_h);
+      if (oh_i < 0 || oh_i >= i32(P.out_h)) { continue; }
+      let oh = u32(oh_i);
+      for (var c = 0u; c < P.kw; c = c + 1u) {
+        let ow_i = i32(iw * P.stride_w) - i32(P.pad_w) + i32(c * P.dilation_w);
+        if (ow_i < 0 || ow_i >= i32(P.out_w)) { continue; }
+        let ow = u32(ow_i);
+        let dy_index = ((nn * P.c_out + co) * P.out_h + oh) * P.out_w + ow;
+        let w_index = ((ci * P.c_out_per_group + co_local) * P.kh + r) * P.kw + c;
+        acc = acc + DY[dy_index] * W[w_index];
+      }
+    }
+  }
+  DX[idx] = acc;
+}
+`;
+
+const CONV_TRANSPOSE2D_BACKWARD_WEIGHT_WGSL = `
+@group(0) @binding(0) var<storage, read> DY: array<f32>;
+@group(0) @binding(1) var<storage, read> X: array<f32>;
+@group(0) @binding(2) var<storage, read_write> DW: array<f32>;
+
+struct Params {
+  n: u32,
+  c_in: u32,
+  h: u32,
+  w: u32,
+  c_out: u32,
+  c_out_per_group: u32,
+  kh: u32,
+  kw: u32,
+  stride_h: u32,
+  stride_w: u32,
+  pad_h: u32,
+  pad_w: u32,
+  output_pad_h: u32,
+  output_pad_w: u32,
+  dilation_h: u32,
+  dilation_w: u32,
+  groups: u32,
+  out_h: u32,
+  out_w: u32,
+  pad0: u32,
+};
+@group(0) @binding(3) var<uniform> P: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x;
+  let total = P.c_in * P.c_out_per_group * P.kh * P.kw;
+  if (idx >= total) { return; }
+  let kc = idx % P.kw;
+  let kr = (idx / P.kw) % P.kh;
+  let co_local = (idx / (P.kw * P.kh)) % P.c_out_per_group;
+  let ci = idx / (P.kw * P.kh * P.c_out_per_group);
+  let in_per_group = P.c_in / P.groups;
+  let group = ci / in_per_group;
+  let co = group * P.c_out_per_group + co_local;
+  var acc = 0.0;
+  for (var nn = 0u; nn < P.n; nn = nn + 1u) {
+    for (var ih = 0u; ih < P.h; ih = ih + 1u) {
+      let oh_i = i32(ih * P.stride_h) - i32(P.pad_h) + i32(kr * P.dilation_h);
+      if (oh_i < 0 || oh_i >= i32(P.out_h)) { continue; }
+      let oh = u32(oh_i);
+      for (var iw = 0u; iw < P.w; iw = iw + 1u) {
+        let ow_i = i32(iw * P.stride_w) - i32(P.pad_w) + i32(kc * P.dilation_w);
+        if (ow_i < 0 || ow_i >= i32(P.out_w)) { continue; }
+        let ow = u32(ow_i);
+        let dy_index = ((nn * P.c_out + co) * P.out_h + oh) * P.out_w + ow;
+        let x_index = ((nn * P.c_in + ci) * P.h + ih) * P.w + iw;
+        acc = acc + DY[dy_index] * X[x_index];
+      }
+    }
+  }
+  DW[idx] = acc;
+}
+`;
+
+const CONV_TRANSPOSE2D_BACKWARD_BIAS_WGSL = `
 @group(0) @binding(0) var<storage, read> DY: array<f32>;
 @group(0) @binding(1) var<storage, read_write> DB: array<f32>;
 
@@ -2031,6 +2307,137 @@ function conv2dBackwardBiasDirect(
   });
 }
 
+function convTranspose2dDirect(
+  device: KernelDevice,
+  x: ResidentValue,
+  weight: ResidentValue,
+  bias: ResidentValue | null,
+  shape: readonly number[],
+  rawArg: unknown,
+): DirectDispatchResult {
+  const arg = expectConvTranspose2dArg(rawArg, "CONV_TRANSPOSE2D");
+  validateConvTranspose2dShapeFromArg("CONV_TRANSPOSE2D", arg);
+  expectShape(x.shape, [arg.n, arg.cIn, arg.h, arg.w], "CONV_TRANSPOSE2D.input");
+  expectShape(
+    weight.shape,
+    [arg.cIn, arg.cOutPerGroup, arg.kh, arg.kw],
+    "CONV_TRANSPOSE2D.weight",
+  );
+  expectShape(shape, [arg.n, arg.cOut, arg.outH, arg.outW], "CONV_TRANSPOSE2D.output");
+  const inputBuffers = [x.buffer, weight.buffer];
+  if (bias !== null) {
+    expectShape(bias.shape, [arg.cOut], "CONV_TRANSPOSE2D.bias");
+    inputBuffers.push(bias.buffer);
+  }
+  const outputLength = arg.n * arg.cOut * arg.outH * arg.outW;
+  return runDirect(device, {
+    name: bias === null ? "tensor_plan_conv_transpose2d_nobias" : "tensor_plan_conv_transpose2d_bias",
+    wgsl: convTranspose2dWgsl(bias !== null),
+    workgroupSize: [64, 1, 1],
+  }, {
+    inputBuffers,
+    outputLength,
+    params: convTranspose2dParams(arg),
+    dispatchCount: [outputLength, 1, 1],
+    cacheKeySuffix: `${bias === null ? "nobias" : "bias"}_${convTranspose2dCacheKey(arg)}`,
+  });
+}
+
+function convTranspose2dBackwardInputDirect(
+  device: KernelDevice,
+  dy: ResidentValue,
+  weight: ResidentValue,
+  shape: readonly number[],
+  rawArg: unknown,
+): DirectDispatchResult {
+  const arg = expectConvTranspose2dArg(rawArg, "CONV_TRANSPOSE2D_BACKWARD_INPUT");
+  validateConvTranspose2dShapeFromArg("CONV_TRANSPOSE2D_BACKWARD_INPUT", arg);
+  expectShape(
+    dy.shape,
+    [arg.n, arg.cOut, arg.outH, arg.outW],
+    "CONV_TRANSPOSE2D_BACKWARD_INPUT.dy",
+  );
+  expectShape(
+    weight.shape,
+    [arg.cIn, arg.cOutPerGroup, arg.kh, arg.kw],
+    "CONV_TRANSPOSE2D_BACKWARD_INPUT.weight",
+  );
+  expectShape(shape, [arg.n, arg.cIn, arg.h, arg.w], "CONV_TRANSPOSE2D_BACKWARD_INPUT.output");
+  const outputLength = arg.n * arg.cIn * arg.h * arg.w;
+  return runDirect(device, {
+    name: "tensor_plan_conv_transpose2d_backward_input",
+    wgsl: CONV_TRANSPOSE2D_BACKWARD_INPUT_WGSL,
+    workgroupSize: [64, 1, 1],
+  }, {
+    inputBuffers: [dy.buffer, weight.buffer],
+    outputLength,
+    params: convTranspose2dParams(arg),
+    dispatchCount: [outputLength, 1, 1],
+    cacheKeySuffix: convTranspose2dCacheKey(arg),
+  });
+}
+
+function convTranspose2dBackwardWeightDirect(
+  device: KernelDevice,
+  dy: ResidentValue,
+  x: ResidentValue,
+  shape: readonly number[],
+  rawArg: unknown,
+): DirectDispatchResult {
+  const arg = expectConvTranspose2dArg(rawArg, "CONV_TRANSPOSE2D_BACKWARD_WEIGHT");
+  validateConvTranspose2dShapeFromArg("CONV_TRANSPOSE2D_BACKWARD_WEIGHT", arg);
+  expectShape(
+    dy.shape,
+    [arg.n, arg.cOut, arg.outH, arg.outW],
+    "CONV_TRANSPOSE2D_BACKWARD_WEIGHT.dy",
+  );
+  expectShape(x.shape, [arg.n, arg.cIn, arg.h, arg.w], "CONV_TRANSPOSE2D_BACKWARD_WEIGHT.input");
+  expectShape(
+    shape,
+    [arg.cIn, arg.cOutPerGroup, arg.kh, arg.kw],
+    "CONV_TRANSPOSE2D_BACKWARD_WEIGHT.output",
+  );
+  const outputLength = arg.cIn * arg.cOutPerGroup * arg.kh * arg.kw;
+  return runDirect(device, {
+    name: "tensor_plan_conv_transpose2d_backward_weight",
+    wgsl: CONV_TRANSPOSE2D_BACKWARD_WEIGHT_WGSL,
+    workgroupSize: [64, 1, 1],
+  }, {
+    inputBuffers: [dy.buffer, x.buffer],
+    outputLength,
+    params: convTranspose2dParams(arg),
+    dispatchCount: [outputLength, 1, 1],
+    cacheKeySuffix: convTranspose2dCacheKey(arg),
+  });
+}
+
+function convTranspose2dBackwardBiasDirect(
+  device: KernelDevice,
+  dy: ResidentValue,
+  shape: readonly number[],
+  rawArg: unknown,
+): DirectDispatchResult {
+  const arg = expectConvTranspose2dArg(rawArg, "CONV_TRANSPOSE2D_BACKWARD_BIAS");
+  validateConvTranspose2dShapeFromArg("CONV_TRANSPOSE2D_BACKWARD_BIAS", arg);
+  expectShape(
+    dy.shape,
+    [arg.n, arg.cOut, arg.outH, arg.outW],
+    "CONV_TRANSPOSE2D_BACKWARD_BIAS.dy",
+  );
+  expectShape(shape, [arg.cOut], "CONV_TRANSPOSE2D_BACKWARD_BIAS.output");
+  return runDirect(device, {
+    name: "tensor_plan_conv_transpose2d_backward_bias",
+    wgsl: CONV_TRANSPOSE2D_BACKWARD_BIAS_WGSL,
+    workgroupSize: [64, 1, 1],
+  }, {
+    inputBuffers: [dy.buffer],
+    outputLength: arg.cOut,
+    params: new Uint32Array([arg.n, arg.cOut, arg.outH, arg.outW]),
+    dispatchCount: [arg.cOut, 1, 1],
+    cacheKeySuffix: `${arg.n}_${arg.cOut}_${arg.outH}_${arg.outW}`,
+  });
+}
+
 function conv3dDirect(
   device: KernelDevice,
   x: ResidentValue,
@@ -2741,6 +3148,163 @@ function conv2dCacheKey(arg: Conv2dArg): string {
   ].join("_");
 }
 
+function validateConvTranspose2dShape(
+  op: string,
+  n: number,
+  cIn: number,
+  h: number,
+  w: number,
+  cOut: number,
+  cOutPerGroup: number,
+  kh: number,
+  kw: number,
+  strideH: number,
+  strideW: number,
+  padH: number,
+  padW: number,
+  outputPadH: number,
+  outputPadW: number,
+  dilationH: number,
+  dilationW: number,
+  groups: number,
+  outH: number,
+  outW: number,
+): void {
+  for (const [value, name] of [
+    [n, "n"],
+    [cIn, "cIn"],
+    [h, "h"],
+    [w, "w"],
+    [cOut, "cOut"],
+    [cOutPerGroup, "cOutPerGroup"],
+    [kh, "kh"],
+    [kw, "kw"],
+    [strideH, "strideH"],
+    [strideW, "strideW"],
+    [dilationH, "dilationH"],
+    [dilationW, "dilationW"],
+    [groups, "groups"],
+    [outH, "outH"],
+    [outW, "outW"],
+  ] as const) {
+    assertPositiveInt(value, `${op}.${name}`);
+  }
+  if (!Number.isInteger(padH) || padH < 0 || !Number.isInteger(padW) || padW < 0) {
+    throw new KernelError(`tensor plan ${op} padding must be non-negative integers`);
+  }
+  if (
+    !Number.isInteger(outputPadH) || outputPadH < 0 ||
+    !Number.isInteger(outputPadW) || outputPadW < 0
+  ) {
+    throw new KernelError(`tensor plan ${op} output_padding must be non-negative integers`);
+  }
+  if (cIn % groups !== 0 || cOut !== cOutPerGroup * groups) {
+    throw new KernelError(`tensor plan ${op} channels must match groups`);
+  }
+  if (outputPadH >= strideH || outputPadW >= strideW) {
+    throw new KernelError(`tensor plan ${op} output_padding must be smaller than stride`);
+  }
+}
+
+function expectConvTranspose2dArg(rawArg: unknown, op: string): ConvTranspose2dArg {
+  const arg = expectRecord(rawArg, `tensor plan ${op}.arg`);
+  return {
+    n: expectNumber(arg.n, `${op}.n`),
+    cIn: expectNumber(arg.c_in, `${op}.c_in`),
+    h: expectNumber(arg.h, `${op}.h`),
+    w: expectNumber(arg.w, `${op}.w`),
+    cOut: expectNumber(arg.c_out, `${op}.c_out`),
+    cOutPerGroup: expectNumber(arg.c_out_per_group, `${op}.c_out_per_group`),
+    kh: expectNumber(arg.kh, `${op}.kh`),
+    kw: expectNumber(arg.kw, `${op}.kw`),
+    strideH: expectNumber(arg.stride_h, `${op}.stride_h`),
+    strideW: expectNumber(arg.stride_w, `${op}.stride_w`),
+    padH: expectNumber(arg.pad_h, `${op}.pad_h`),
+    padW: expectNumber(arg.pad_w, `${op}.pad_w`),
+    outputPadH: expectNumber(arg.output_pad_h, `${op}.output_pad_h`),
+    outputPadW: expectNumber(arg.output_pad_w, `${op}.output_pad_w`),
+    dilationH: expectNumber(arg.dilation_h, `${op}.dilation_h`),
+    dilationW: expectNumber(arg.dilation_w, `${op}.dilation_w`),
+    groups: expectNumber(arg.groups, `${op}.groups`),
+    outH: expectNumber(arg.out_h, `${op}.out_h`),
+    outW: expectNumber(arg.out_w, `${op}.out_w`),
+  };
+}
+
+function validateConvTranspose2dShapeFromArg(op: string, arg: ConvTranspose2dArg): void {
+  validateConvTranspose2dShape(
+    op,
+    arg.n,
+    arg.cIn,
+    arg.h,
+    arg.w,
+    arg.cOut,
+    arg.cOutPerGroup,
+    arg.kh,
+    arg.kw,
+    arg.strideH,
+    arg.strideW,
+    arg.padH,
+    arg.padW,
+    arg.outputPadH,
+    arg.outputPadW,
+    arg.dilationH,
+    arg.dilationW,
+    arg.groups,
+    arg.outH,
+    arg.outW,
+  );
+}
+
+function convTranspose2dParams(arg: ConvTranspose2dArg): Uint32Array {
+  return new Uint32Array([
+    arg.n,
+    arg.cIn,
+    arg.h,
+    arg.w,
+    arg.cOut,
+    arg.cOutPerGroup,
+    arg.kh,
+    arg.kw,
+    arg.strideH,
+    arg.strideW,
+    arg.padH,
+    arg.padW,
+    arg.outputPadH,
+    arg.outputPadW,
+    arg.dilationH,
+    arg.dilationW,
+    arg.groups,
+    arg.outH,
+    arg.outW,
+    0,
+  ]);
+}
+
+function convTranspose2dCacheKey(arg: ConvTranspose2dArg): string {
+  return [
+    arg.n,
+    arg.cIn,
+    arg.h,
+    arg.w,
+    arg.cOut,
+    arg.cOutPerGroup,
+    arg.kh,
+    arg.kw,
+    arg.strideH,
+    arg.strideW,
+    arg.padH,
+    arg.padW,
+    arg.outputPadH,
+    arg.outputPadW,
+    arg.dilationH,
+    arg.dilationW,
+    arg.groups,
+    arg.outH,
+    arg.outW,
+  ].join("_");
+}
+
 function validateConv3dShape(
   op: string,
   n: number,
@@ -3197,6 +3761,10 @@ function expectOp(value: unknown, name: string): TensorPlanOp {
     case "CONV2D_BACKWARD_INPUT":
     case "CONV2D_BACKWARD_WEIGHT":
     case "CONV2D_BACKWARD_BIAS":
+    case "CONV_TRANSPOSE2D":
+    case "CONV_TRANSPOSE2D_BACKWARD_INPUT":
+    case "CONV_TRANSPOSE2D_BACKWARD_WEIGHT":
+    case "CONV_TRANSPOSE2D_BACKWARD_BIAS":
     case "CONV3D":
     case "CONV3D_BACKWARD_INPUT":
     case "CONV3D_BACKWARD_WEIGHT":

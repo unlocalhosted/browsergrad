@@ -32,6 +32,8 @@ from ._ir import (
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
     OP_CONV2D_BACKWARD_WEIGHT, OP_CONV2D_BACKWARD_BIAS,
+    OP_CONV_TRANSPOSE2D, OP_CONV_TRANSPOSE2D_BACKWARD_INPUT,
+    OP_CONV_TRANSPOSE2D_BACKWARD_WEIGHT, OP_CONV_TRANSPOSE2D_BACKWARD_BIAS,
     OP_CONV3D, OP_CONV3D_BACKWARD_INPUT,
     OP_CONV3D_BACKWARD_WEIGHT, OP_CONV3D_BACKWARD_BIAS,
     OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
@@ -90,6 +92,17 @@ def estimate_flops(node: UOp) -> int:
         kernel = int(arg["kh"]) * int(arg["kw"]) * (int(arg["c_in"]) // int(arg["groups"]))
         return 2 * out_n * kernel
     if op == OP_CONV2D_BACKWARD_BIAS:
+        arg = node.arg
+        return int(arg["n"]) * int(arg["out_h"]) * int(arg["out_w"]) * int(arg["c_out"])
+    if op in (
+        OP_CONV_TRANSPOSE2D,
+        OP_CONV_TRANSPOSE2D_BACKWARD_INPUT,
+        OP_CONV_TRANSPOSE2D_BACKWARD_WEIGHT,
+    ):
+        arg = node.arg
+        kernel = int(arg["kh"]) * int(arg["kw"]) * int(arg["c_out_per_group"])
+        return 2 * out_n * kernel
+    if op == OP_CONV_TRANSPOSE2D_BACKWARD_BIAS:
         arg = node.arg
         return int(arg["n"]) * int(arg["out_h"]) * int(arg["out_w"]) * int(arg["c_out"])
     if op in (OP_CONV3D, OP_CONV3D_BACKWARD_INPUT, OP_CONV3D_BACKWARD_WEIGHT):

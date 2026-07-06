@@ -22,8 +22,8 @@ Scope (v0):
 
 Refusals (typed `OnnxUnmappableOp`):
   * OP_RANDOM (no runtime randomness in ONNX inference)
-  * OP_CONV1D/OP_CONV2D/OP_CONV3D and OP_CONV*_BACKWARD_* (tensor compiler/export mapping
-    deferred)
+  * OP_CONV1D/OP_CONV2D/OP_CONV_TRANSPOSE2D/OP_CONV3D and OP_CONV*_BACKWARD_*
+    (tensor compiler/export mapping deferred)
   * OP_CUSTOM (opaque)
   * OP_MASK, OP_INDEX, OP_SCATTER_ADD (initializer-tensor plumbing
     deferred to a follow-on)
@@ -52,6 +52,8 @@ from ._ir import (
     OP_CONV1D_BACKWARD_WEIGHT, OP_CONV1D_BACKWARD_BIAS,
     OP_CONV2D, OP_CONV2D_BACKWARD_INPUT,
     OP_CONV2D_BACKWARD_WEIGHT, OP_CONV2D_BACKWARD_BIAS,
+    OP_CONV_TRANSPOSE2D, OP_CONV_TRANSPOSE2D_BACKWARD_INPUT,
+    OP_CONV_TRANSPOSE2D_BACKWARD_WEIGHT, OP_CONV_TRANSPOSE2D_BACKWARD_BIAS,
     OP_CONV3D, OP_CONV3D_BACKWARD_INPUT,
     OP_CONV3D_BACKWARD_WEIGHT, OP_CONV3D_BACKWARD_BIAS,
     OP_LAYER_NORM, OP_LAYER_NORM_BACKWARD_INPUT,
@@ -481,7 +483,10 @@ def export_inference(
                 f"{OP_CONV1D_BACKWARD_BIAS!r}, {OP_CONV2D!r}, "
                 f"{OP_CONV2D_BACKWARD_INPUT!r}, and "
                 f"{OP_CONV2D_BACKWARD_WEIGHT!r}, and "
-                f"{OP_CONV2D_BACKWARD_BIAS!r}, {OP_CONV3D!r}, "
+                f"{OP_CONV2D_BACKWARD_BIAS!r}, {OP_CONV_TRANSPOSE2D!r}, "
+                f"{OP_CONV_TRANSPOSE2D_BACKWARD_INPUT!r}, "
+                f"{OP_CONV_TRANSPOSE2D_BACKWARD_WEIGHT!r}, "
+                f"{OP_CONV_TRANSPOSE2D_BACKWARD_BIAS!r}, {OP_CONV3D!r}, "
                 f"{OP_CONV3D_BACKWARD_INPUT!r}, "
                 f"{OP_CONV3D_BACKWARD_WEIGHT!r}, "
                 f"{OP_CONV3D_BACKWARD_BIAS!r}, {OP_SGD_UPDATE!r}, "
