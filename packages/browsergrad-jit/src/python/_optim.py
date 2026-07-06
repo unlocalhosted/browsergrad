@@ -12,7 +12,8 @@ CPU `step()` keeps the original NumPy update path. `step(device="webgpu")`
 routes supported optimizer math through primitive update IR and the tensor-plan
 WebGPU bridge, then writes the materialized result back to the CPU BufferTable.
 `SGD.step(device="webgpu", resident=True)` keeps the updated parameter buffer on
-GPU for the no-momentum case. Adam/AdamW resident state remains future work.
+GPU for the no-momentum case. `Adam.step(..., resident=True)` and
+`AdamW.step(..., resident=True)` keep parameter/m/v state tensors resident.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ from ._ir import (
     OP_ADAM_UPDATE_V,
     OP_ADAM_UPDATE_PARAM,
 )
-from ._tensor_proxy import TensorProxy, from_numpy
+from ._tensor_proxy import TensorProxy, from_numpy, _from_buffer_id
 from ._errors import RealizationError, ShapeError
 
 
@@ -62,7 +63,7 @@ def _realize_update_webgpu(tensor: TensorProxy) -> np.ndarray:
     )
 
 
-def _replace_param_with_webgpu_resident_update(p: TensorProxy, updated: TensorProxy) -> None:
+def _realize_update_webgpu_resident(tensor: TensorProxy) -> TensorProxy:
     from ._realize_webgpu import (
         get_registered_gpu_buffer_table,
         realize_tensor_plan_webgpu_resident,
@@ -73,17 +74,34 @@ def _replace_param_with_webgpu_resident_update(p: TensorProxy, updated: TensorPr
             "optimizer.step(device='webgpu', resident=True) requires a registered "
             "WebGPU bridge. Call browsergrad_jit.register_webgpu_bridge(...) first."
         )
-    sess = p._get_session()
-    param_bid = _param_buffer_id(p)
+    sess = tensor._get_session()
     tmp_bid = realize_tensor_plan_webgpu_resident(
-        updated._uop,
+        tensor._uop,
         numpy_buffer_table=sess.buffer_table,
         gpu_buffer_table=gbt,
     )
+    return _from_buffer_id(tmp_bid, tensor.shape, tensor.dtype, session=sess)
+
+
+def _replace_param_with_webgpu_resident_tensor(p: TensorProxy, updated: TensorProxy) -> None:
+    from ._realize_webgpu import get_registered_gpu_buffer_table
+    gbt = get_registered_gpu_buffer_table()
+    if gbt is None:
+        raise RealizationError(
+            "optimizer.step(device='webgpu', resident=True) requires a registered "
+            "WebGPU bridge. Call browsergrad_jit.register_webgpu_bridge(...) first."
+        )
+    sess = p._get_session()
+    param_bid = _param_buffer_id(p)
+    tmp_bid = _param_buffer_id(updated)
     handle = gbt.detach(tmp_bid)
     sess.buffer_table.evict(tmp_bid)
     sess.buffer_table.mark_unmaterialized(param_bid)
     gbt.replace(param_bid, handle)
+
+
+def _replace_param_with_webgpu_resident_update(p: TensorProxy, updated: TensorProxy) -> None:
+    _replace_param_with_webgpu_resident_tensor(p, _realize_update_webgpu_resident(updated))
 
 
 def _param_buffer_id(p: TensorProxy) -> str:
@@ -383,15 +401,50 @@ class Adam(Optimizer):
         self._step = 0
         self._m: dict[int, np.ndarray] = {}
         self._v: dict[int, np.ndarray] = {}
+        self._m_resident: dict[int, TensorProxy] = {}
+        self._v_resident: dict[int, TensorProxy] = {}
 
     def step(self, device: Optional[str] = None, resident: bool = False) -> None:
         self._step += 1
+        step_device = _normalize_step_device(device)
+        if resident and step_device != "webgpu":
+            raise ValueError("Adam.step(resident=True) requires device='webgpu'")
         if resident:
-            raise RealizationError(
-                "Adam.step(device='webgpu', resident=True) is not supported until "
-                "optimizer state is GPU-resident. Use resident=False or SGD without momentum."
-            )
-        if _normalize_step_device(device) == "webgpu":
+            for p in self._params:
+                if not p.requires_grad or p.grad is None:
+                    continue
+                bid = _param_buffer_id(p)
+                sess = p._get_session()
+                shape, dtype = sess.buffer_table.metadata(bid)
+                pid = id(p)
+                if pid not in self._m_resident:
+                    self._m_resident[pid] = from_numpy(
+                        np.zeros(shape, dtype=np.dtype(dtype)),
+                        session=sess,
+                    )
+                    self._v_resident[pid] = from_numpy(
+                        np.zeros(shape, dtype=np.dtype(dtype)),
+                        session=sess,
+                    )
+                new_p, new_m, new_v = adam_update(
+                    p,
+                    p.grad,
+                    self._m_resident[pid],
+                    self._v_resident[pid],
+                    lr=self.lr,
+                    betas=(self.beta1, self.beta2),
+                    eps=self.eps,
+                    weight_decay=self.weight_decay,
+                    step=self._step,
+                )
+                p_resident = _realize_update_webgpu_resident(new_p)
+                self._m_resident[pid] = _realize_update_webgpu_resident(new_m)
+                self._v_resident[pid] = _realize_update_webgpu_resident(new_v)
+                self._m.pop(pid, None)
+                self._v.pop(pid, None)
+                _replace_param_with_webgpu_resident_tensor(p, p_resident)
+            return
+        if step_device == "webgpu":
             for p in self._params:
                 if not p.requires_grad or p.grad is None:
                     continue
@@ -400,8 +453,14 @@ class Adam(Optimizer):
                 current = sess.buffer_table.get(bid)
                 pid = id(p)
                 if pid not in self._m:
-                    self._m[pid] = np.zeros_like(current)
-                    self._v[pid] = np.zeros_like(current)
+                    if pid in self._m_resident:
+                        self._m[pid] = self._m_resident[pid].numpy()
+                        self._v[pid] = self._v_resident[pid].numpy()
+                    else:
+                        self._m[pid] = np.zeros_like(current)
+                        self._v[pid] = np.zeros_like(current)
+                self._m_resident.pop(pid, None)
+                self._v_resident.pop(pid, None)
                 m = from_numpy(self._m[pid], session=sess)
                 v = from_numpy(self._v[pid], session=sess)
                 new_p, new_m, new_v = adam_update(
@@ -430,8 +489,14 @@ class Adam(Optimizer):
             if self.weight_decay != 0.0:
                 grad = grad + self.weight_decay * p.numpy()
             if id(p) not in self._m:
-                self._m[id(p)] = np.zeros_like(grad)
-                self._v[id(p)] = np.zeros_like(grad)
+                if id(p) in self._m_resident:
+                    self._m[id(p)] = self._m_resident[id(p)].numpy()
+                    self._v[id(p)] = self._v_resident[id(p)].numpy()
+                else:
+                    self._m[id(p)] = np.zeros_like(grad)
+                    self._v[id(p)] = np.zeros_like(grad)
+            self._m_resident.pop(id(p), None)
+            self._v_resident.pop(id(p), None)
             self._m[id(p)] = self.beta1 * self._m[id(p)] + (1 - self.beta1) * grad
             self._v[id(p)] = self.beta2 * self._v[id(p)] + (1 - self.beta2) * (grad * grad)
             m_hat = self._m[id(p)] / (1 - self.beta1 ** self._step)
@@ -450,12 +515,45 @@ class AdamW(Adam):
 
     def step(self, device: Optional[str] = None, resident: bool = False) -> None:
         self._step += 1
+        step_device = _normalize_step_device(device)
+        if resident and step_device != "webgpu":
+            raise ValueError("AdamW.step(resident=True) requires device='webgpu'")
         if resident:
-            raise RealizationError(
-                "AdamW.step(device='webgpu', resident=True) is not supported until "
-                "optimizer state is GPU-resident. Use resident=False or SGD without momentum."
-            )
-        if _normalize_step_device(device) == "webgpu":
+            for p in self._params:
+                if not p.requires_grad or p.grad is None:
+                    continue
+                bid = _param_buffer_id(p)
+                sess = p._get_session()
+                shape, dtype = sess.buffer_table.metadata(bid)
+                pid = id(p)
+                if pid not in self._m_resident:
+                    self._m_resident[pid] = from_numpy(
+                        np.zeros(shape, dtype=np.dtype(dtype)),
+                        session=sess,
+                    )
+                    self._v_resident[pid] = from_numpy(
+                        np.zeros(shape, dtype=np.dtype(dtype)),
+                        session=sess,
+                    )
+                new_p, new_m, new_v = adamw_update(
+                    p,
+                    p.grad,
+                    self._m_resident[pid],
+                    self._v_resident[pid],
+                    lr=self.lr,
+                    betas=(self.beta1, self.beta2),
+                    eps=self.eps,
+                    weight_decay=self.weight_decay,
+                    step=self._step,
+                )
+                p_resident = _realize_update_webgpu_resident(new_p)
+                self._m_resident[pid] = _realize_update_webgpu_resident(new_m)
+                self._v_resident[pid] = _realize_update_webgpu_resident(new_v)
+                self._m.pop(pid, None)
+                self._v.pop(pid, None)
+                _replace_param_with_webgpu_resident_tensor(p, p_resident)
+            return
+        if step_device == "webgpu":
             for p in self._params:
                 if not p.requires_grad or p.grad is None:
                     continue
@@ -464,8 +562,14 @@ class AdamW(Adam):
                 current = sess.buffer_table.get(bid)
                 pid = id(p)
                 if pid not in self._m:
-                    self._m[pid] = np.zeros_like(current)
-                    self._v[pid] = np.zeros_like(current)
+                    if pid in self._m_resident:
+                        self._m[pid] = self._m_resident[pid].numpy()
+                        self._v[pid] = self._v_resident[pid].numpy()
+                    else:
+                        self._m[pid] = np.zeros_like(current)
+                        self._v[pid] = np.zeros_like(current)
+                self._m_resident.pop(pid, None)
+                self._v_resident.pop(pid, None)
                 m = from_numpy(self._m[pid], session=sess)
                 v = from_numpy(self._v[pid], session=sess)
                 new_p, new_m, new_v = adamw_update(
@@ -492,8 +596,14 @@ class AdamW(Adam):
                 continue
             grad = p.grad.numpy()
             if id(p) not in self._m:
-                self._m[id(p)] = np.zeros_like(grad)
-                self._v[id(p)] = np.zeros_like(grad)
+                if id(p) in self._m_resident:
+                    self._m[id(p)] = self._m_resident[id(p)].numpy()
+                    self._v[id(p)] = self._v_resident[id(p)].numpy()
+                else:
+                    self._m[id(p)] = np.zeros_like(grad)
+                    self._v[id(p)] = np.zeros_like(grad)
+            self._m_resident.pop(id(p), None)
+            self._v_resident.pop(id(p), None)
             self._m[id(p)] = self.beta1 * self._m[id(p)] + (1 - self.beta1) * grad
             self._v[id(p)] = self.beta2 * self._v[id(p)] + (1 - self.beta2) * (grad * grad)
             m_hat = self._m[id(p)] / (1 - self.beta1 ** self._step)

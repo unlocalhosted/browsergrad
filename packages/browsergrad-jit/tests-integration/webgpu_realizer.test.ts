@@ -1541,24 +1541,129 @@ actual = p_gpu.numpy()
     expect(result.tensor_plan_resident).toBe(2);
   });
 
-  it("Adam.step(device='webgpu', resident=True) refuses until optimizer state is resident", async () => {
+  it("Adam/AdamW step(device='webgpu', resident=True) keep optimizer state resident", async () => {
     const target = await getJitTarget();
-    const result = await target.run<{ message: string; tensor_plan: number }>(`
+    const result = await target.run<{
+      adam_p_diff: number;
+      adam_m_diff: number;
+      adam_v_diff: number;
+      adamw_p_diff: number;
+      adamw_m_diff: number;
+      adamw_v_diff: number;
+      before_materialize: number;
+      after_materialize: number;
+      adam_param_materialized_before_numpy: boolean;
+      adam_m_materialized_before_numpy: boolean;
+      adam_v_materialized_before_numpy: boolean;
+      adamw_param_materialized_before_numpy: boolean;
+      adamw_m_materialized_before_numpy: boolean;
+      adamw_v_materialized_before_numpy: boolean;
+      adam_param_gpu_registered: boolean;
+      adam_m_gpu_registered: boolean;
+      adam_v_gpu_registered: boolean;
+      adamw_param_gpu_registered: boolean;
+      adamw_m_gpu_registered: boolean;
+      adamw_v_gpu_registered: boolean;
+      tensor_plan: number;
+      tensor_plan_resident: number;
+    }>(`
 import browsergrad_jit as bg
 import numpy as np
 
-p = bg.from_numpy(np.array([1.0, -2.0], dtype=np.float32), requires_grad=True)
-p.grad = bg.from_numpy(np.array([0.25, -0.5], dtype=np.float32))
-opt = bg.optim.Adam([p], lr=0.1)
-try:
-    opt.step(device="webgpu", resident=True)
-    msg = "no_error"
-except Exception as e:
-    msg = str(e)
-{"message": msg, "tensor_plan": _mock.tensor_plan_count}
+p_np = np.array([[0.5, -1.0, 2.0], [1.5, -0.25, 0.75]], dtype=np.float32)
+g1_np = np.array([[0.1, -0.2, 0.3], [0.4, -0.5, 0.6]], dtype=np.float32)
+g2_np = np.array([[-0.3, 0.2, -0.1], [0.05, -0.15, 0.25]], dtype=np.float32)
+
+def run_cpu(cls):
+    p = bg.from_numpy(p_np.copy(), requires_grad=True)
+    opt = cls([p], lr=0.01, betas=(0.8, 0.95), eps=1e-6, weight_decay=0.02)
+    for grad_np in (g1_np, g2_np):
+        p.grad = bg.from_numpy(grad_np.copy())
+        opt.step()
+    return p.numpy(), opt._m[id(p)], opt._v[id(p)]
+
+def run_resident(cls):
+    p = bg.from_numpy(p_np.copy(), requires_grad=True)
+    opt = cls([p], lr=0.01, betas=(0.8, 0.95), eps=1e-6, weight_decay=0.02)
+    for grad_np in (g1_np, g2_np):
+        p.grad = bg.realize_tensor_plan_webgpu_resident(bg.from_numpy(grad_np.copy()))
+        opt.step(device="webgpu", resident=True)
+    pid = id(p)
+    bt = p._get_session().buffer_table
+    gbt = bg._realize_webgpu.get_registered_gpu_buffer_table()
+    param_id = p._uop.inputs[0].arg
+    m_id = opt._m_resident[pid]._uop.inputs[0].arg
+    v_id = opt._v_resident[pid]._uop.inputs[0].arg
+    before = {
+        "param_materialized": bt.is_materialized(param_id),
+        "m_materialized": bt.is_materialized(m_id),
+        "v_materialized": bt.is_materialized(v_id),
+        "param_registered": gbt.has(param_id),
+        "m_registered": gbt.has(m_id),
+        "v_registered": gbt.has(v_id),
+    }
+    return p, opt, before
+
+adam_cpu_p, adam_cpu_m, adam_cpu_v = run_cpu(bg.optim.Adam)
+adam_p, adam_opt, adam_before = run_resident(bg.optim.Adam)
+adamw_cpu_p, adamw_cpu_m, adamw_cpu_v = run_cpu(bg.optim.AdamW)
+adamw_p, adamw_opt, adamw_before = run_resident(bg.optim.AdamW)
+
+before_materialize = _mock.materialize_count
+adam_p_np = adam_p.numpy()
+adam_m_np = adam_opt._m_resident[id(adam_p)].numpy()
+adam_v_np = adam_opt._v_resident[id(adam_p)].numpy()
+adamw_p_np = adamw_p.numpy()
+adamw_m_np = adamw_opt._m_resident[id(adamw_p)].numpy()
+adamw_v_np = adamw_opt._v_resident[id(adamw_p)].numpy()
+
+{
+    "adam_p_diff": float(np.max(np.abs(adam_p_np - adam_cpu_p))),
+    "adam_m_diff": float(np.max(np.abs(adam_m_np - adam_cpu_m))),
+    "adam_v_diff": float(np.max(np.abs(adam_v_np - adam_cpu_v))),
+    "adamw_p_diff": float(np.max(np.abs(adamw_p_np - adamw_cpu_p))),
+    "adamw_m_diff": float(np.max(np.abs(adamw_m_np - adamw_cpu_m))),
+    "adamw_v_diff": float(np.max(np.abs(adamw_v_np - adamw_cpu_v))),
+    "before_materialize": before_materialize,
+    "after_materialize": _mock.materialize_count,
+    "adam_param_materialized_before_numpy": adam_before["param_materialized"],
+    "adam_m_materialized_before_numpy": adam_before["m_materialized"],
+    "adam_v_materialized_before_numpy": adam_before["v_materialized"],
+    "adamw_param_materialized_before_numpy": adamw_before["param_materialized"],
+    "adamw_m_materialized_before_numpy": adamw_before["m_materialized"],
+    "adamw_v_materialized_before_numpy": adamw_before["v_materialized"],
+    "adam_param_gpu_registered": adam_before["param_registered"],
+    "adam_m_gpu_registered": adam_before["m_registered"],
+    "adam_v_gpu_registered": adam_before["v_registered"],
+    "adamw_param_gpu_registered": adamw_before["param_registered"],
+    "adamw_m_gpu_registered": adamw_before["m_registered"],
+    "adamw_v_gpu_registered": adamw_before["v_registered"],
+    "tensor_plan": _mock.tensor_plan_count,
+    "tensor_plan_resident": _mock.tensor_plan_resident_count,
+}
 `);
-    expect(result.message).toMatch(/optimizer state is GPU-resident/);
-    expect(result.tensor_plan).toBe(0);
+    expect(result.adam_p_diff).toBeLessThan(1e-5);
+    expect(result.adam_m_diff).toBeLessThan(1e-6);
+    expect(result.adam_v_diff).toBeLessThan(1e-6);
+    expect(result.adamw_p_diff).toBeLessThan(1e-5);
+    expect(result.adamw_m_diff).toBeLessThan(1e-6);
+    expect(result.adamw_v_diff).toBeLessThan(1e-6);
+    expect(result.before_materialize).toBe(0);
+    expect(result.after_materialize).toBe(6);
+    expect(result.adam_param_materialized_before_numpy).toBe(false);
+    expect(result.adam_m_materialized_before_numpy).toBe(false);
+    expect(result.adam_v_materialized_before_numpy).toBe(false);
+    expect(result.adamw_param_materialized_before_numpy).toBe(false);
+    expect(result.adamw_m_materialized_before_numpy).toBe(false);
+    expect(result.adamw_v_materialized_before_numpy).toBe(false);
+    expect(result.adam_param_gpu_registered).toBe(true);
+    expect(result.adam_m_gpu_registered).toBe(true);
+    expect(result.adam_v_gpu_registered).toBe(true);
+    expect(result.adamw_param_gpu_registered).toBe(true);
+    expect(result.adamw_m_gpu_registered).toBe(true);
+    expect(result.adamw_v_gpu_registered).toBe(true);
+    expect(result.tensor_plan).toBe(16);
+    expect(result.tensor_plan_resident).toBe(16);
   });
 
   it("realize_tensor_plan_webgpu runs LayerNorm forward/backward roots through generic plan path", async () => {

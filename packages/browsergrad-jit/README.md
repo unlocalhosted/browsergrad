@@ -77,7 +77,9 @@ through the same tensor-plan WebGPU path. They return updated tensors/state;
 `Optimizer.step(device="webgpu")` uses those IR nodes for SGD without momentum,
 Adam, and AdamW, then writes the materialized result back to CPU parameter/state
 buffers. `SGD.step(device="webgpu", resident=True)` keeps no-momentum parameter
-updates GPU-resident. Adam/AdamW resident optimizer state remains future work.
+updates GPU-resident. `Adam.step(device="webgpu", resident=True)` and
+`AdamW.step(device="webgpu", resident=True)` keep parameter, first-moment, and
+second-moment buffers resident.
 
 `bg.gpu_plan_summary(tensor)` and `bg.jit.gpu_plan.*` expose the first
 compiler-facing tensor-IR execution plan: scheduled primitive UOps, buffer
@@ -96,8 +98,8 @@ Conv1d/Conv2d/ConvTranspose2d/Conv3d/LayerNorm forward/backward and functional
 SGD/Adam/AdamW updates. `Optimizer.step(device="webgpu")` uses the same
 tensor-plan path for SGD without momentum, Adam, and AdamW, then writes the
 materialized result back to CPU buffers; `SGD.step(device="webgpu",
-resident=True)` keeps the updated parameter buffer resident. Fully resident
-Adam/AdamW state remains future work.
+resident=True)` keeps the updated parameter buffer resident, and resident
+Adam/AdamW keeps m/v state resident too.
 
 ### Gradient control
 ```python
@@ -248,9 +250,9 @@ Anything in the **Internal** row will break across minor releases. File an issue
 - CUDA device emulation.
 - GPU-resident default training loop. Explicit
   `loss.backward(device="webgpu", resident=True)` and
-  `SGD.step(device="webgpu", resident=True)` keep supported grads/params in
-  GPUBuffer storage until explicit `.numpy()` / `.item()`, but default
-  `.backward()`, Adam/AdamW state, and full training-loop scheduling remain
+  `Optimizer.step(device="webgpu", resident=True)` keep supported grads,
+  params, and optimizer state in GPUBuffer storage until explicit `.numpy()` /
+  `.item()`, but default `.backward()` and full training-loop scheduling remain
   future work.
 - Tensor layout/stride compatibility for contiguity teaching.
 - PyTorch-native checkpoint file compatibility.
