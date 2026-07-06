@@ -47,6 +47,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "sqrt", "sqrtf", "exp", "expf", "log", "logf", "fabs", "fabsf", "abs",
   "floor", "floorf", "ceil", "ceilf", "sin", "sinf", "cos", "cosf",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
+  "div_ceil", "ceil_div",
 ]);
 const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
 
@@ -797,6 +798,8 @@ function evalSemanticMathCall(
     case "max": return Math.max(args[0] ?? 0, args[1] ?? 0);
     case "pow":
     case "powf": return Math.pow(args[0] ?? 0, args[1] ?? 0);
+    case "div_ceil":
+    case "ceil_div": return Math.trunc((Math.trunc(args[0] ?? 0) + Math.trunc(args[1] ?? 1) - 1) / Math.trunc(args[1] ?? 1));
     default:
       throw semanticReferenceError(`semantic reference does not support math call '${expression.callee.name}'`, expression.span);
   }
@@ -846,7 +849,9 @@ function semanticMathCallArity(name: string): number {
     name === "fmaxf" ||
     name === "max" ||
     name === "pow" ||
-    name === "powf"
+    name === "powf" ||
+    name === "div_ceil" ||
+    name === "ceil_div"
     ? 2
     : 1;
 }

@@ -5612,6 +5612,34 @@ __global__ void int_math_arg(int n, float *out) {
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(Math.sqrt(4) + Math.exp(2) + 3.5, 5);
   });
 
+  it("lowers integer CUDA div_ceil helpers through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void int_div_ceil(int n, uint* out) {
+  if (threadIdx.x == 0) {
+    out[0] = uint(div_ceil(n, 4));
+    out[1] = uint(ceil_div(n + 1, 4));
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2) }, scalars: { n: 17 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2) }, scalars: { n: 17 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("(((bg_uniforms.n + 4) - 1) / 4)");
+    expect(compiled.wgsl).toContain("((((bg_uniforms.n + 1) + 4) - 1) / 4)");
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([5, 5]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([5, 5]);
+  });
+
   it("lowers C frexp exponent out params", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void frexpKernel(float *out, int *expOut) {

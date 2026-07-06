@@ -52,6 +52,8 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["max", "max"],
   ["pow", "pow"],
   ["powf", "pow"],
+  ["div_ceil", "div_ceil"],
+  ["ceil_div", "div_ceil"],
 ]);
 const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
 const WGSL_ATOMIC_CALLEES = new Map([
@@ -889,6 +891,14 @@ function emitSemanticMathCall(
   if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL math call requires symbol callee", expression.span);
   const wgslCallee = SEMANTIC_MATH_CALLS.get(expression.callee.name);
   if (!wgslCallee) throw semanticWgslError(`semantic WGSL does not support math call '${expression.callee.name}'`, expression.span);
+  if (wgslCallee === "div_ceil") {
+    const [left, right] = expression.args;
+    if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
+    const scalar = semanticExpressionWgslScalar(left) === "u32" ? "u32" : "i32";
+    const lhs = emitSemanticExpressionAs(left, ir, names, scalar);
+    const rhs = emitSemanticExpressionAs(right, ir, names, scalar);
+    return `(((${lhs} + ${rhs}) - ${scalar === "u32" ? "1u" : "1"}) / ${rhs})`;
+  }
   return `${wgslCallee}(${expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, "f32")).join(", ")})`;
 }
 
@@ -900,7 +910,9 @@ function semanticMathCallArity(name: string): number {
     name === "fmaxf" ||
     name === "max" ||
     name === "pow" ||
-    name === "powf"
+    name === "powf" ||
+    name === "div_ceil" ||
+    name === "ceil_div"
     ? 2
     : 1;
 }
