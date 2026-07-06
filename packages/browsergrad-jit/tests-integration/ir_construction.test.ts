@@ -33,13 +33,13 @@ browsergrad_jit.__version__
     expect(version).toMatch(/^0\.8\.\d+$/);
   });
 
-  it("exposes 44 opcodes in ALL_OPS (core + CNN + fusion + autograd + AMP + optimizer)", async () => {
+  it("exposes 47 opcodes in ALL_OPS (core + CNN + fusion + autograd + AMP + optimizer)", async () => {
     const target = await getJitTarget();
     const ops = await target.run<string[]>(`
 from browsergrad_jit._ir import ALL_OPS
 sorted(ALL_OPS)
 `);
-    expect(ops).toHaveLength(44);
+    expect(ops).toHaveLength(47);
     expect(ops).toContain("CONV1D");
     expect(ops).toContain("CONV1D_BACKWARD_INPUT");
     expect(ops).toContain("CONV1D_BACKWARD_WEIGHT");
@@ -56,6 +56,9 @@ sorted(ALL_OPS)
     expect(ops).toContain("ADAMW_UPDATE_M");
     expect(ops).toContain("ADAMW_UPDATE_V");
     expect(ops).toContain("ADAMW_UPDATE_PARAM");
+    expect(ops).toContain("ADAM_UPDATE_M");
+    expect(ops).toContain("ADAM_UPDATE_V");
+    expect(ops).toContain("ADAM_UPDATE_PARAM");
   });
 
   it("constructs a BUFFER leaf with the documented signature", async () => {

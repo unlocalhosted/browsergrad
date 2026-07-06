@@ -19,7 +19,7 @@ hash the same. This is what lets the trace cache and pipeline cache
 
 Design notes:
 
-  * 41 opcodes total — corrects PRD-005's nominal 19. The extras are
+  * 47 opcodes total — corrects PRD-005's nominal 19. The extras are
     documented per-opcode below. Headline additions: RANDOM (dropout +
     nn.init at trace time), CMP (boolean results), CONV1D/CONV2D/CONV3D
     primitive CNN ops and backward refs, CUSTOM
@@ -61,7 +61,7 @@ from ._errors import ShapeError
 #                  CONV3D_BACKWARD_INPUT, CONV3D_BACKWARD_WEIGHT,
 #                  CONV3D_BACKWARD_BIAS
 #   Escape hatch:  CUSTOM
-#   Optimizer:     SGD_UPDATE
+#   Optimizer:     SGD_UPDATE, ADAMW_UPDATE_*, ADAM_UPDATE_*
 # ---------------------------------------------------------------------------
 
 OP_BUFFER  = "BUFFER"   # arg: buffer_id (str)        ← leaf, no inputs
@@ -132,6 +132,9 @@ OP_SGD_UPDATE = "SGD_UPDATE"  # inputs: (param, grad), arg: {lr, weight_decay}
 OP_ADAMW_UPDATE_M = "ADAMW_UPDATE_M"  # inputs: (m, grad), arg: {beta1}
 OP_ADAMW_UPDATE_V = "ADAMW_UPDATE_V"  # inputs: (v, grad), arg: {beta2}
 OP_ADAMW_UPDATE_PARAM = "ADAMW_UPDATE_PARAM"  # inputs: (param, grad, m_new, v_new)
+OP_ADAM_UPDATE_M = "ADAM_UPDATE_M"  # inputs: (param, grad, m), arg: {beta1, weight_decay}
+OP_ADAM_UPDATE_V = "ADAM_UPDATE_V"  # inputs: (param, grad, v), arg: {beta2, weight_decay}
+OP_ADAM_UPDATE_PARAM = "ADAM_UPDATE_PARAM"  # inputs: (param, m_new, v_new), arg: {lr,beta1,beta2,eps,step}
 
 ALL_OPS: FrozenSet[str] = frozenset({
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM, OP_CAST,
@@ -150,9 +153,10 @@ ALL_OPS: FrozenSet[str] = frozenset({
     OP_SCATTER_ADD, OP_BROADCAST_TO,
     # Mixed precision (PRD-010)
     OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
-    OP_ADAMW_UPDATE_PARAM,
+    OP_ADAMW_UPDATE_PARAM, OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V,
+    OP_ADAM_UPDATE_PARAM,
 })
-assert len(ALL_OPS) == 44, "opcode count drifted from PRD-005+006+007+010+CNN+optimizer"
+assert len(ALL_OPS) == 47, "opcode count drifted from PRD-005+006+007+010+CNN+optimizer"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -388,6 +392,7 @@ __all__ = [
     "OP_SCATTER_ADD", "OP_BROADCAST_TO",
     "OP_ISNAN", "OP_SGD_UPDATE", "OP_ADAMW_UPDATE_M",
     "OP_ADAMW_UPDATE_V", "OP_ADAMW_UPDATE_PARAM",
+    "OP_ADAM_UPDATE_M", "OP_ADAM_UPDATE_V", "OP_ADAM_UPDATE_PARAM",
     "ALL_OPS",
     # Core class + helpers
     "UOp", "toposort", "all_buffers",

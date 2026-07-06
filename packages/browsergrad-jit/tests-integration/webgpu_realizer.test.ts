@@ -730,6 +730,43 @@ class MockBridge:
                 values[value_id] = (
                     param - lr * (m_hat / (np.sqrt(v_hat) + eps)) - lr * weight_decay * param
                 ).astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "ADAM_UPDATE_M":
+                arg = step["arg"]
+                param = values[input_ids[0]]
+                grad = values[input_ids[1]]
+                m = values[input_ids[2]]
+                beta1 = float(arg["beta1"])
+                weight_decay = float(arg.get("weight_decay", 0.0))
+                grad_eff = grad + weight_decay * param
+                values[value_id] = (
+                    beta1 * m + (1.0 - beta1) * grad_eff
+                ).astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "ADAM_UPDATE_V":
+                arg = step["arg"]
+                param = values[input_ids[0]]
+                grad = values[input_ids[1]]
+                v = values[input_ids[2]]
+                beta2 = float(arg["beta2"])
+                weight_decay = float(arg.get("weight_decay", 0.0))
+                grad_eff = grad + weight_decay * param
+                values[value_id] = (
+                    beta2 * v + (1.0 - beta2) * (grad_eff * grad_eff)
+                ).astype(np.dtype(step["dtype"]), copy=False)
+            elif op == "ADAM_UPDATE_PARAM":
+                arg = step["arg"]
+                param = values[input_ids[0]]
+                m_new = values[input_ids[1]]
+                v_new = values[input_ids[2]]
+                lr = float(arg["lr"])
+                beta1 = float(arg["beta1"])
+                beta2 = float(arg["beta2"])
+                eps = float(arg["eps"])
+                step_i = int(arg["step"])
+                m_hat = m_new / (1.0 - beta1 ** step_i)
+                v_hat = v_new / (1.0 - beta2 ** step_i)
+                values[value_id] = (
+                    param - lr * (m_hat / (np.sqrt(v_hat) + eps))
+                ).astype(np.dtype(step["dtype"]), copy=False)
             else:
                 raise ValueError(f"mock tensor plan: unsupported op {op}")
         root_id = plan.get("root_id", plan.get("rootId"))
@@ -1022,6 +1059,59 @@ v_gpu = bg.realize_tensor_plan_webgpu(new_v)
     expect(result.p_ops).toContain("ADAMW_UPDATE_PARAM");
     expect(result.m_ops).toContain("ADAMW_UPDATE_M");
     expect(result.v_ops).toContain("ADAMW_UPDATE_V");
+  });
+
+  it("realize_tensor_plan_webgpu runs functional Adam update through generic plan path", async () => {
+    const target = await getJitTarget();
+    const result = await target.run<{
+      p_diff: number;
+      m_diff: number;
+      v_diff: number;
+      tensor_plan: number;
+      p_ops: string[];
+      m_ops: string[];
+      v_ops: string[];
+    }>(`
+import browsergrad_jit as bg
+import numpy as np
+
+rng = np.random.RandomState(23)
+p_np = rng.uniform(-1, 1, size=(2, 3)).astype(np.float32)
+g_np = rng.uniform(-1, 1, size=(2, 3)).astype(np.float32)
+m_np = rng.uniform(-0.1, 0.1, size=(2, 3)).astype(np.float32)
+v_np = rng.uniform(0.0, 0.1, size=(2, 3)).astype(np.float32)
+p = bg.from_numpy(p_np.copy())
+g = bg.from_numpy(g_np.copy())
+m = bg.from_numpy(m_np.copy())
+v = bg.from_numpy(v_np.copy())
+new_p, new_m, new_v = bg.optim.adam_update(
+    p, g, m, v,
+    lr=0.02,
+    betas=(0.75, 0.9),
+    eps=1e-6,
+    weight_decay=0.03,
+    step=4,
+)
+p_gpu = bg.realize_tensor_plan_webgpu(new_p)
+m_gpu = bg.realize_tensor_plan_webgpu(new_m)
+v_gpu = bg.realize_tensor_plan_webgpu(new_v)
+{
+    "p_diff": float(np.max(np.abs(p_gpu - new_p.numpy()))),
+    "m_diff": float(np.max(np.abs(m_gpu - new_m.numpy()))),
+    "v_diff": float(np.max(np.abs(v_gpu - new_v.numpy()))),
+    "tensor_plan": _mock.tensor_plan_count,
+    "p_ops": bg.gpu_plan_summary(new_p)["ops"],
+    "m_ops": bg.gpu_plan_summary(new_m)["ops"],
+    "v_ops": bg.gpu_plan_summary(new_v)["ops"],
+}
+`);
+    expect(result.p_diff).toBeLessThan(1e-6);
+    expect(result.m_diff).toBeLessThan(1e-6);
+    expect(result.v_diff).toBeLessThan(1e-6);
+    expect(result.tensor_plan).toBe(3);
+    expect(result.p_ops).toContain("ADAM_UPDATE_PARAM");
+    expect(result.m_ops).toContain("ADAM_UPDATE_M");
+    expect(result.v_ops).toContain("ADAM_UPDATE_V");
   });
 
   it("realize_tensor_plan_webgpu runs Conv1d/Conv2d through generic plan path", async () => {

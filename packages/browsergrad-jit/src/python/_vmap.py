@@ -61,6 +61,7 @@ from ._ir import (
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
     OP_WHERE, OP_BROADCAST_TO, OP_ISNAN, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
+    OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
     OP_PAD, OP_SLICE, OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_INDEX, OP_MASK, OP_RANDOM, OP_CUSTOM,
     OP_STORE,
@@ -530,10 +531,13 @@ for _op_name, _op in (
     ("OP_ADAMW_UPDATE_M", OP_ADAMW_UPDATE_M),
     ("OP_ADAMW_UPDATE_V", OP_ADAMW_UPDATE_V),
     ("OP_ADAMW_UPDATE_PARAM", OP_ADAMW_UPDATE_PARAM),
+    ("OP_ADAM_UPDATE_M", OP_ADAM_UPDATE_M),
+    ("OP_ADAM_UPDATE_V", OP_ADAM_UPDATE_V),
+    ("OP_ADAM_UPDATE_PARAM", OP_ADAM_UPDATE_PARAM),
 ):
     _VMAP_RULES[_op] = _refuse(
         _op_name,
-        "AdamW update batching needs explicit optimizer-state semantics; "
+        "Adam update batching needs explicit optimizer-state semantics; "
         "vmap the loss/grad function, then apply optimizer updates outside vmap",
     )
 

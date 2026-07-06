@@ -84,7 +84,7 @@ describe("Python source registry", () => {
     expect(initFile!.content).toMatch(/__version__ = "0\.8\.\d+"/);
   });
 
-  it("declares all 44 opcodes in _ir.py (core + CNN + fusion + autograd + AMP + optimizer)", () => {
+  it("declares all 47 opcodes in _ir.py (core + CNN + fusion + autograd + AMP + optimizer)", () => {
     // Sanity check that the codegen bundled the IR with every opcode the
     // PRD-005 + PRD-006 + PRD-007 + PRD-010 surface needs.
     const irFile = SOURCE_FILES.find((f) => f.path.endsWith("_ir.py"));
@@ -106,6 +106,7 @@ describe("Python source registry", () => {
       "OP_SCATTER_ADD", "OP_BROADCAST_TO",
       "OP_ISNAN", "OP_SGD_UPDATE", "OP_ADAMW_UPDATE_M",
       "OP_ADAMW_UPDATE_V", "OP_ADAMW_UPDATE_PARAM",
+      "OP_ADAM_UPDATE_M", "OP_ADAM_UPDATE_V", "OP_ADAM_UPDATE_PARAM",
     ];
     for (const op of ops) {
       expect(irFile!.content).toContain(op);

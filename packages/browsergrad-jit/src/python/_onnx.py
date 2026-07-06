@@ -57,6 +57,7 @@ from ._ir import (
     OP_REDUCE, OP_RESHAPE, OP_PERMUTE,
     OP_WHERE, OP_BROADCAST_TO, OP_SGD_UPDATE,
     OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM,
+    OP_ADAM_UPDATE_M, OP_ADAM_UPDATE_V, OP_ADAM_UPDATE_PARAM,
 )
 from ._errors import JitError
 
@@ -483,7 +484,9 @@ def export_inference(
                 f"{OP_CONV3D_BACKWARD_WEIGHT!r}, "
                 f"{OP_CONV3D_BACKWARD_BIAS!r}, {OP_SGD_UPDATE!r}, "
                 f"{OP_ADAMW_UPDATE_M!r}, {OP_ADAMW_UPDATE_V!r}, and "
-                f"{OP_ADAMW_UPDATE_PARAM!r} need explicit ONNX mappings "
+                f"{OP_ADAMW_UPDATE_PARAM!r}, {OP_ADAM_UPDATE_M!r}, "
+                f"{OP_ADAM_UPDATE_V!r}, and {OP_ADAM_UPDATE_PARAM!r} "
+                f"need explicit ONNX mappings "
                 f"before export."
             )
 
