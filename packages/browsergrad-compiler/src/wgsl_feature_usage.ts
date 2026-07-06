@@ -204,6 +204,47 @@ export function usesFrexp(ir: KernelIrModule): boolean {
     ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["frexp", "frexpf"])));
 }
 
+export function usesModf(ir: KernelIrModule): boolean {
+  return statementsUseCall(ir.body, new Set(["modf", "modff"])) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, new Set(["modf", "modff"])));
+}
+
+export function usesGammaIntrinsics(ir: KernelIrModule): boolean {
+  const names = new Set(["tgamma", "tgammaf", "lgamma", "lgammaf"]);
+  return statementsUseCall(ir.body, names) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+}
+
+export function usesInverseDistributionIntrinsics(ir: KernelIrModule): boolean {
+  const names = new Set(["erfinv", "erfinvf", "erfcinv", "erfcinvf", "normcdfinv", "normcdfinvf"]);
+  return statementsUseCall(ir.body, names) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+}
+
+export function usesRoundingMathIntrinsics(ir: KernelIrModule): boolean {
+  const names = new Set([
+    "round", "roundf", "rint", "rintf", "nearbyint", "nearbyintf",
+    "lrint", "lrintf", "llrint", "llrintf", "lround", "lroundf", "llround", "llroundf",
+    "remainder", "remainderf", "remquo", "remquof", "logb", "logbf", "ilogb", "ilogbf",
+    "__float2int_rn", "__float2uint_rn", "__half2int_rn", "__half2uint_rn",
+    "__bfloat162int_rn", "__bfloat162uint_rn",
+  ]);
+  return statementsUseCall(ir.body, names) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+}
+
+export function usesNextafterIntrinsics(ir: KernelIrModule): boolean {
+  const names = new Set(["nextafter", "nextafterf", "nexttoward", "nexttowardf"]);
+  return statementsUseCall(ir.body, names) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+}
+
+export function usesFunnelShiftIntrinsics(ir: KernelIrModule): boolean {
+  const names = new Set(["__funnelshift_l", "__funnelshift_lc", "__funnelshift_r", "__funnelshift_rc"]);
+  return statementsUseCall(ir.body, names) ||
+    ir.functions.some((fn) => statementsUseCall(fn.body, names));
+}
+
 export function usesSpecialFloatNamedConstants(ir: KernelIrModule): boolean {
   const names = new Set(["INFINITY", "NAN"]);
   return statementsUseIdentifier(ir.body, names) ||

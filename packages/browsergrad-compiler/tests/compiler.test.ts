@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { createWgslFloat16Array } from "@unlocalhosted/browsergrad-kernels";
 import {
@@ -21,6 +24,7 @@ import {
   cudaLiteFeatureOptionsFromKernelFeatures,
   describeCudaDiagnostic,
   formatCudaLiteDiagnostics,
+  getCudaFeatureRegistry,
   normalizeCudaWebGpuReadbackNames,
   parseCudaLite,
   runCompiledKernelReference,
@@ -28,7 +32,82 @@ import {
   summarizeCudaWebGpuExecutionPlan,
   validateCudaKernelLaunch,
 } from "../src/index";
+import { internalBackendIrFor as backendIr } from "../src/backend_ir";
 import { packCudaWebGpuUniformParams } from "../src/webgpu_orchestration";
+
+const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+const gammaCoefficients = [
+  0.9999999999998099,
+  676.5203681218851,
+  -1259.1392167224028,
+  771.3234287776531,
+  -176.6150291621406,
+  12.507343278686905,
+  -0.13857109526572012,
+  9.984369578019572e-6,
+  1.5056327351493116e-7,
+] as const;
+
+function gammaApprox(value: number): number {
+  if (Number.isNaN(value)) return NaN;
+  if (value === Infinity) return Infinity;
+  if (value === -Infinity) return NaN;
+  if (value <= 0 && Number.isInteger(value)) return NaN;
+  if (value < 0.5) return Math.PI / (Math.sin(Math.PI * value) * gammaApprox(1 - value));
+  const z = value - 1;
+  let x = gammaCoefficients[0];
+  for (let i = 1; i < gammaCoefficients.length; i++) x += gammaCoefficients[i]! / (z + i);
+  const t = z + 7.5;
+  return Math.sqrt(2 * Math.PI) * (t ** (z + 0.5)) * Math.exp(-t) * x;
+}
+
+function erfApprox(value: number): number {
+  if (Number.isNaN(value)) return NaN;
+  if (!Number.isFinite(value)) return Math.sign(value);
+  const sign = value < 0 ? -1 : 1;
+  const absValue = Math.abs(value);
+  const t = 1 / (1 + 0.3275911 * absValue);
+  const polynomial = (((((1.061405429 * t) - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t;
+  return sign * (1 - polynomial * Math.exp(-absValue * absValue));
+}
+
+function roundEven(value: number): number {
+  const lower = Math.floor(value);
+  const diff = value - lower;
+  if (diff < 0.5) return lower;
+  if (diff > 0.5) return lower + 1;
+  return lower % 2 === 0 ? lower : lower + 1;
+}
+
+function roundAway(value: number): number {
+  if (!Number.isFinite(value) || value === 0) return value;
+  return value < 0 ? Math.ceil(value - 0.5) : Math.floor(value + 0.5);
+}
+
+const nextafterF32Buffer = new ArrayBuffer(4);
+const nextafterF32 = new Float32Array(nextafterF32Buffer);
+const nextafterU32 = new Uint32Array(nextafterF32Buffer);
+
+function floatToBits(value: number): number {
+  nextafterF32[0] = value;
+  return nextafterU32[0] ?? 0;
+}
+
+function bitsToFloat(bits: number): number {
+  nextafterU32[0] = bits >>> 0;
+  return nextafterF32[0] ?? 0;
+}
+
+function nextafterApprox(x: number, y: number): number {
+  if (Number.isNaN(x) || Number.isNaN(y)) return NaN;
+  if (Object.is(x, y) || x === y) return y;
+  if (x === 0) return bitsToFloat((y < 0 || Object.is(y, -0)) ? 0x80000001 : 0x00000001);
+  const bits = floatToBits(x);
+  return x > 0
+    ? bitsToFloat((x < y ? bits + 1 : bits - 1) >>> 0)
+    : bitsToFloat((x < y ? bits - 1 : bits + 1) >>> 0);
+}
 
 const SAXPY = `
 __global__ void saxpy(const float* x, float* y, float a, int n) {
@@ -167,13 +246,62 @@ function expectParseDiagnosticCode(source: string, code: string): void {
   throw new Error(`Expected parse diagnostic '${code}'`);
 }
 
+function collectEmittedDiagnosticCodes(srcDir: string): ReadonlySet<string> {
+  const out = new Set<string>();
+  const patterns = [
+    /error\(\s*"([^"]+)"/gsu,
+    /warning\(\s*"([^"]+)"/gsu,
+    /featureError\(\s*"([^"]+)"/gsu,
+    /code:\s*"([^"]+)"/gu,
+    /webGpuBlocker\(\s*[^,]+,\s*"([^"]+)"/gsu,
+  ];
+  for (const file of fs.readdirSync(srcDir)) {
+    if (!file.endsWith(".ts")) continue;
+    const source = fs.readFileSync(path.join(srcDir, file), "utf8");
+    for (const pattern of patterns) {
+      for (const match of source.matchAll(pattern)) {
+        const code = match[1];
+        if (code) out.add(code);
+      }
+    }
+  }
+  return out;
+}
+
+function compilerSourceText(file: string): string {
+  return fs.readFileSync(path.join(packageRoot, "src", file), "utf8");
+}
+
+function compilerExampleText(file: string): string {
+  return fs.readFileSync(path.join(packageRoot, "examples", file), "utf8");
+}
+
 describe("CUDA-lite compiler", () => {
   it("parses and compiles SAXPY to WGSL", () => {
     const ast = parseCudaLite(SAXPY);
     const compiled = compileCudaLiteKernel(SAXPY, { workgroupSize: [8, 1, 1] });
 
     expect(ast.kernels[0]?.name).toBe("saxpy");
-    expect(compiled.ir.params.map((param) => param.name)).toEqual(["x", "y", "a", "n"]);
+    expect(backendIr(compiled).params.map((param) => param.name)).toEqual(["x", "y", "a", "n"]);
+    expect(Object.hasOwn(compiled, "ir")).toBe(false);
+    expect(Object.hasOwn(compiled, "legacyIr")).toBe(false);
+    expect(compiled.semantic).toMatchObject({
+      kind: "cuda-lite-semantic-model",
+      kernelName: "saxpy",
+    });
+    expect(compiled.kernelIr.kind).toBe("semantic-kernel-ir");
+    expect(compiled.kernelIr.name).toBe("saxpy");
+    expect(compiled.kernelIr.params.map((param) => [param.name, param.addressSpace])).toEqual([
+      ["x", "storage"],
+      ["y", "storage"],
+      ["a", "uniform"],
+      ["n", "uniform"],
+    ]);
+    expect(compiled.kernelIr.operations.map((operation) => operation.kind)).toEqual([
+      "declare",
+      "branch",
+    ]);
+    expect("body" in compiled.kernelIr).toBe(false);
     expect(compiled.wgsl).toContain("@workgroup_size(8, 1, 1)");
     expect(compiled.wgsl).toContain("var<storage, read> x: array<f32>;");
     expect(compiled.wgsl).toContain("var<storage, read_write> y: array<f32>;");
@@ -210,6 +338,96 @@ describe("CUDA-lite compiler", () => {
 
     expect([...result.buffers.y as Float32Array]).toEqual([12, 24, 36, 48]);
     expect(result.trace.some((thread) => thread.writes.length > 0)).toBe(true);
+  });
+
+  it("keeps canonical lab examples executable through Kernel IR and CPU reference", () => {
+    const saxpy = compileCudaLiteKernelForWebGpu(compilerExampleText("saxpy.cu"), {
+      workgroupSize: [8, 1, 1],
+    });
+    expect(saxpy.kernelIr.kind).toBe("semantic-kernel-ir");
+    expect(summarizeCudaWebGpuExecutionPlan(createCudaWebGpuExecutionPlan(
+      saxpy,
+      {
+        buffers: {
+          x: new Float32Array([1, 2, 3, 4]),
+          y: new Float32Array([10, 20, 30, 40]),
+        },
+        scalars: { a: 2, n: 4 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    ))).toMatchObject({ canRunOnWebGpu: true, kind: "single-dispatch" });
+    const saxpyRef = runCompiledKernelReference(
+      saxpy,
+      {
+        buffers: {
+          x: new Float32Array([1, 2, 3, 4]),
+          y: new Float32Array([10, 20, 30, 40]),
+        },
+        scalars: { a: 2, n: 4 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    );
+    expect([...saxpyRef.buffers.y as Float32Array]).toEqual([12, 24, 36, 48]);
+
+    const guarded = compileCudaLiteKernelForWebGpu(compilerExampleText("guarded-map.cu"), {
+      workgroupSize: [8, 1, 1],
+    });
+    const guardedRef = runCompiledKernelReference(
+      guarded,
+      {
+        buffers: {
+          input: new Float32Array([-2, 3, -4, 5]),
+          output: new Float32Array([99, 99, 99, 99]),
+        },
+        scalars: { n: 3 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [8, 1, 1] },
+    );
+    expect([...guardedRef.buffers.output as Float32Array]).toEqual([0, 3, 0, 99]);
+
+    const tiled = compileCudaLiteKernelForWebGpu(compilerExampleText("tiled-matmul.cu"), {
+      workgroupSize: [2, 2, 1],
+    });
+    const tiledRef = runCompiledKernelReference(
+      tiled,
+      {
+        buffers: {
+          A: new Float32Array([
+            1, 2, 3, 4,
+            5, 6, 7, 8,
+            9, 10, 11, 12,
+            13, 14, 15, 16,
+          ]),
+          B: new Float32Array([
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+          ]),
+          C: new Float32Array(16),
+        },
+        scalars: { N: 4 },
+      },
+      { gridDim: [2, 2, 1], blockDim: [2, 2, 1] },
+    );
+    expect([...tiledRef.buffers.C as Float32Array]).toEqual([
+      1, 2, 3, 4,
+      5, 6, 7, 8,
+      9, 10, 11, 12,
+      13, 14, 15, 16,
+    ]);
+    expect(summarizeCudaWebGpuExecutionPlan(createCudaWebGpuExecutionPlan(
+      tiled,
+      {
+        buffers: {
+          A: new Float32Array(16),
+          B: new Float32Array(16),
+          C: new Float32Array(16),
+        },
+        scalars: { N: 4 },
+      },
+      { gridDim: [2, 2, 1], blockDim: [2, 2, 1] },
+    ))).toMatchObject({ canRunOnWebGpu: true, kind: "single-dispatch" });
   });
 
   it("uses C-style truncating integer division and remainder in the reference interpreter", () => {
@@ -290,7 +508,7 @@ __global__ void mutateParams(float* out, float alpha, float beta, int n, bool en
       compileOptions: { workgroupSize: [8, 1, 1] },
     });
     const compiled = defaulted.compile(SAXPY);
-    expect(compiled.ir.workgroupSize).toEqual([8, 1, 1]);
+    expect(backendIr(compiled).workgroupSize).toEqual([8, 1, 1]);
     expect(defaulted.compile(SAXPY)).toBe(compiled);
 
     const disabled = createCudaLiteCompilerCache({ maxEntries: 0 });
@@ -478,6 +696,28 @@ __global__ void vector_helper(float* out, const float* inp) {
     expect(compiled.wgsl).toContain("case 0u: { out[(index + 0u)] = value.x; out[(index + 1u)] = value.y; out[(index + 2u)] = value.z; out[(index + 3u)] = value.w; return; }");
     expect(compiled.wgsl).not.toContain("address[");
     expect([...result.buffers.out as Float32Array]).toEqual([1, 12, 3, 4]);
+  });
+
+  it("accepts s0-s3 CUDA vector lane aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void vector_lane_aliases(float* out) {
+  float4 value = make_float4(1.0f, 2.0f, 3.0f, 4.0f);
+  value.s2 = value.s0 + value.s1;
+  out[0] = value.s0;
+  out[1] = value.s1;
+  out[2] = value.s2;
+  out[3] = value.s3;
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-vector-member");
+    expect(compiled.wgsl).toContain("value.x");
+    expect(compiled.wgsl).toContain("value.z");
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 2, 3, 4]);
   });
 
   it("keeps shifted scalar bases aligned when casting helper pointer params to vector lanes", () => {
@@ -1186,6 +1426,30 @@ __global__ void aliased_rows(float* out, const float* inp, int rows, int cols) {
     expect(compiled.wgsl).toContain("bg_ptr_write_f32(0u, ((0u + u32((0 + (row * bg_uniforms.cols)))) + u32(col))");
   });
 
+  it("lowers mutable local pointer aliases declared in for initializers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void pointer_for_init(const float* inp, float* out) {
+  if (threadIdx.x == 0) {
+    float acc = 0.0f;
+    int i = 0;
+    for (const float* p = inp; i < 3; ++i, ++p) {
+      acc += *p;
+    }
+    out[0] = acc;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { inp: new Float32Array([2, 3, 5]), out: new Float32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-local-pointer-for-init");
+    expect(compiled.wgsl).toContain("loop {");
+    expect(compiled.wgsl).toContain("continuing {");
+    expect([...result.buffers.out as Float32Array]).toEqual([10]);
+  });
+
   it("keeps direct scalar storage updates off pointer helpers", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void incKernel(int *data, int n) {
@@ -1321,7 +1585,7 @@ __global__ void globals_atomic(uint* out) {
 
     expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3]);
     expect([...result.buffers.counter as Uint32Array]).toEqual([4]);
-    expect(compiled.ir.atomicDeviceGlobals).toEqual(["counter"]);
+    expect(backendIr(compiled).atomicDeviceGlobals).toEqual(["counter"]);
     expect(compiled.wgsl).toContain("var<storage, read_write> counter: array<atomic<u32>>;");
     expect(compiled.wgsl).toContain("atomicAdd(&counter[0u], 1u)");
   });
@@ -1416,13 +1680,13 @@ __global__ void kernel(float* x) {
     }));
   });
 
-  it("reports precise diagnostics for mixed local and storage helper pointer calls", () => {
+  it("lowers mixed local and storage helper pointer calls through local specializations", () => {
     const source = `
 __device__ void writeMaybeLocal(float* ptr, float value) {
   ptr[0] = value;
 }
 
-__global__ void bad(float* out, int pickStorage) {
+__global__ void mixedPointers(float* out, int pickStorage) {
   float scratch[1];
   float* ptrs[1];
   ptrs[0] = &scratch[0];
@@ -1431,18 +1695,27 @@ __global__ void bad(float* out, int pickStorage) {
   } else {
     writeMaybeLocal(ptrs[0], 1.0f);
   }
-  out[0] = scratch[0];
+  out[1] = scratch[0];
 }`;
-    try {
-      compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
-      throw new Error("expected mixed local/storage helper pointer call to fail");
-    } catch (error) {
-      expect(error).toBeInstanceOf(CudaLiteCompilerError);
-      expect((error as CudaLiteCompilerError).diagnostics).toContainEqual(expect.objectContaining({
-        code: "unsupported-device-pointer-param",
-        message: "local-memory pointer array 'ptrs' cannot cross a storage pointer helper boundary",
-      }));
-    }
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
+    const localResult = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) }, scalars: { pickStorage: 0 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const storageResult = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) }, scalars: { pickStorage: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-device-pointer-param");
+    expect(compiled.wgsl).toContain("fn writeMaybeLocal(ptr_buffer_arg: u32, ptr_base_arg: u32");
+    expect(compiled.wgsl).toContain("fn writeMaybeLocal__bg_localptr_ptr(ptr: ptr<function, f32>");
+    expect(compiled.wgsl).toContain("writeMaybeLocal(0u, 0u");
+    expect(compiled.wgsl).toContain("writeMaybeLocal__bg_localptr_ptr(&scratch[ptrs_base[u32(0)]]");
+    expect([...localResult.buffers.out as Float32Array]).toEqual([0, 1]);
+    expect([...storageResult.buffers.out as Float32Array]).toEqual([2, 0]);
   });
 
   it("lowers fixed thread-local arrays through reference and WGSL", () => {
@@ -1898,6 +2171,38 @@ __global__ void c_layout_literals(uint* out) {
     expect([...result.buffers.out as Uint32Array]).toEqual([1, 1, 16, 124, 10]);
   });
 
+  it("folds sizeof and alignof for modeled value expressions", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void value_sizeof(uint* out, uchar* bytes, float4* vectors) {
+  uchar b = bytes[0];
+  float4 v = vectors[0];
+  if (threadIdx.x == 0) {
+    out[0] = sizeof(b);
+    out[1] = alignof(b);
+    out[2] = sizeof(v);
+    out[3] = sizeof(v.x);
+    out[4] = sizeof(vectors[0]);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Uint32Array(5),
+          bytes: new Uint32Array([7]),
+          vectors: new Float32Array([1, 2, 3, 4]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-sizeof");
+    expect(compiled.wgsl).toContain("out[0] = u32(1)");
+    expect(compiled.wgsl).toContain("out[2] = u32(16)");
+    expect(compiled.wgsl).toContain("out[3] = u32(4)");
+    expect([...result.buffers.out as Uint32Array]).toEqual([1, 1, 16, 4, 16]);
+  });
+
   it("accepts common C integer aliases as CUDA-lite i32/u32 scalars", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void integerAliases(int32_t *signedOut, uint32_t *unsignedOut, signed int n) {
@@ -1958,8 +2263,8 @@ __global__ void cudaAliasKernel(volatile size_type *out, curandState *state, cur
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.ir.params.map((param) => [param.name, param.valueType])).toContainEqual(["map", "uint"]);
-    expect(compiled.ir.params.map((param) => [param.name, param.valueType])).toContainEqual(["direction", "uint"]);
+    expect(backendIr(compiled).params.map((param) => [param.name, param.valueType])).toContainEqual(["map", "uint"]);
+    expect(backendIr(compiled).params.map((param) => [param.name, param.valueType])).toContainEqual(["direction", "uint"]);
     expect([...result.buffers.out as Uint32Array]).toEqual([53]);
   });
 
@@ -2189,6 +2494,101 @@ __global__ void unsupported(float* x) {
     })).toMatchObject({ family: "frontend", gpuRuns: false, referenceRuns: false });
   });
 
+  it("keeps every emitted compiler diagnostic code in the compatibility registry", () => {
+    const emitted = collectEmittedDiagnosticCodes(path.join(packageRoot, "src"));
+    const registered = new Set(getCudaFeatureRegistry().map((feature) => feature.code));
+    const missing = [...emitted].filter((code) => !registered.has(code)).sort();
+
+    expect(missing).toEqual([]);
+  });
+
+  it("keeps modeled CUDA runtime calls wired through compiler stage guards", () => {
+    const modeledRuntimeCalls = [
+      "cudaDeviceSynchronize",
+      "cudaCtxResetPersistingL2Cache",
+      "cudaDeviceReset",
+      "cudaThreadExit",
+      "cudaThreadSynchronize",
+      "cudaDeviceGetAttribute",
+      "cudaDeviceGetLimit",
+      "cudaDeviceSetLimit",
+      "cudaThreadGetLimit",
+      "cudaThreadSetLimit",
+      "cudaDeviceCanAccessPeer",
+      "cudaDeviceEnablePeerAccess",
+      "cudaDeviceDisablePeerAccess",
+      "cudaGetDeviceFlags",
+      "cudaSetDeviceFlags",
+      "cudaMemGetInfo",
+      "cudaOccupancyMaxActiveBlocksPerMultiprocessor",
+      "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags",
+      "cudaOccupancyMaxPotentialBlockSize",
+      "cudaOccupancyMaxPotentialBlockSizeWithFlags",
+      "cudaDeviceGetCacheConfig",
+      "cudaDeviceSetCacheConfig",
+      "cudaDeviceGetSharedMemConfig",
+      "cudaDeviceSetSharedMemConfig",
+      "cudaDeviceGetStreamPriorityRange",
+      "cudaThreadGetCacheConfig",
+      "cudaThreadSetCacheConfig",
+      "cudaThreadExchangeStreamCaptureMode",
+      "cudaFree",
+      "cudaFreeAsync",
+      "cudaMemAdvise",
+      "cudaMemPrefetchAsync",
+      "cudaStreamAttachMemAsync",
+      "cudaStreamCreate",
+      "cudaStreamCreateWithFlags",
+      "cudaStreamCreateWithPriority",
+      "cudaStreamDestroy",
+      "cudaStreamGetDevice",
+      "cudaStreamGetFlags",
+      "cudaStreamGetId",
+      "cudaStreamGetPriority",
+      "cudaStreamIsCapturing",
+      "cudaStreamGetCaptureInfo",
+      "cudaStreamQuery",
+      "cudaStreamSynchronize",
+      "cudaStreamWaitEvent",
+      "cudaSetDevice",
+      "cudaGetDevice",
+      "cudaGetDeviceCount",
+      "cudaRuntimeGetVersion",
+      "cudaDriverGetVersion",
+      "cudaProfilerStart",
+      "cudaProfilerStop",
+      "cudaFuncSetAttribute",
+      "cudaFuncSetCacheConfig",
+      "cudaFuncSetSharedMemConfig",
+      "cudaGetLastError",
+      "cudaPeekAtLastError",
+      "cudaEventCreate",
+      "cudaEventCreateWithFlags",
+      "cudaEventDestroy",
+      "cudaEventQuery",
+      "cudaEventRecord",
+      "cudaEventRecordWithFlags",
+      "cudaEventSynchronize",
+    ];
+    const files = [
+      "analyzer.ts",
+      "reference.ts",
+      "runtime_plan.ts",
+      "dynamic_launch.ts",
+      "peer_copy.ts",
+      "webgpu_orchestration.ts",
+      "wgsl.ts",
+    ];
+    const missing = files.flatMap((file) => {
+      const source = compilerSourceText(file);
+      return modeledRuntimeCalls
+        .filter((call) => !source.includes(`"${call}"`))
+        .map((call) => `${file}:${call}`);
+    });
+
+    expect(missing).toEqual([]);
+  });
+
   it("reports unsupported C++ CUDA object-model gaps with stable diagnostic codes", () => {
     expectParseDiagnosticCode(`
 __global__ void cute(float* out) {
@@ -2237,7 +2637,7 @@ __global__ void bad(float* x) {
 
     const unsupportedCall = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(float* x) {
-  if (threadIdx.x < 1) { x[0] = erff(x[0]); }
+  if (threadIdx.x < 1) { x[0] = unsupported_math_island(x[0]); }
 }`));
     expect(unsupportedCall.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-call");
 
@@ -2357,7 +2757,7 @@ __global__ void lessonSyntax(const float *__restrict__ input, float *output, uns
     expect(compiled.wgsl).toContain("select");
     expect(compiled.wgsl).toContain("return;");
     expect(compiled.wgsl).toContain("continue;");
-    expect(compiled.ir.params.map((param) => [param.name, param.valueType])).toContainEqual(["n", "uint"]);
+    expect(backendIr(compiled).params.map((param) => [param.name, param.valueType])).toContainEqual(["n", "uint"]);
   });
 
   it("lowers canonical CUDA while loops with continue", () => {
@@ -2383,7 +2783,7 @@ __global__ void whileLoop(int *out) {
     expect([...result.buffers.out as Int32Array]).toEqual([13]);
   });
 
-  it("lowers CUDA do-while loops and rejects unsupported do-while continue", () => {
+  it("lowers CUDA do-while loops and continues through the continuing condition", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void doWhileLoop(int *out) {
   int i = 0;
@@ -2399,20 +2799,30 @@ __global__ void doWhileLoop(int *out) {
       { buffers: { out: new Int32Array(1) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
-    const unsupported = analyzeCudaLite(parseCudaLite(`
-__global__ void unsupportedDoContinue(int *out) {
+    const withContinue = compileCudaLiteKernel(`
+__global__ void doWhileContinue(int *out) {
   int i = 0;
+  int acc = 0;
   do {
     i++;
-    if (i == 1) continue;
-  } while (i < 2);
-  out[0] = i;
-}`));
+    if (i == 2) continue;
+    acc += i;
+  } while (i < 4);
+  out[0] = acc;
+}`, { workgroupSize: [1, 1, 1] });
+    const continueResult = runCompiledKernelReference(
+      withContinue,
+      { buffers: { out: new Int32Array(1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
     expect(compiled.wgsl).toContain("loop {");
     expect(compiled.wgsl).toContain("if (!((i < 4))) { break; }");
     expect([...result.buffers.out as Int32Array]).toEqual([6]);
-    expect(unsupported.diagnostics.map((diagnostic) => diagnostic.code)).toContain("unsupported-do-while-continue");
+    expect(withContinue.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-do-while-continue");
+    expect(withContinue.wgsl).toContain("continuing {");
+    expect(withContinue.wgsl).toContain("break if !((i < 4));");
+    expect([...continueResult.buffers.out as Int32Array]).toEqual([8]);
   });
 
   it("accepts empty CUDA statement bodies", () => {
@@ -2579,7 +2989,7 @@ __global__ void helperKernel(float *x) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.ir.functions.map((fn) => fn.name)).toEqual(["addOne"]);
+    expect(backendIr(compiled).functions.map((fn) => fn.name)).toEqual(["addOne"]);
     expect(compiled.wgsl).toContain("fn addOne(value_arg: f32");
     expect(compiled.wgsl).toContain("return (value + 1.0);");
     expect([...result.buffers.x as Float32Array]).toEqual([3]);
@@ -2599,7 +3009,7 @@ __global__ void helperKernel(float *x) {
   if (threadIdx.x < 1) { x[0] = addOne(x[0]); }
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.ir.functions.map((fn) => fn.name)).toEqual(["addOne"]);
+    expect(backendIr(compiled).functions.map((fn) => fn.name)).toEqual(["addOne"]);
     expect(compiled.wgsl).toContain("fn addOne(value_arg: f32");
     expect(compiled.wgsl).not.toContain("unused_desc");
     expect(compiled.wgsl).not.toContain("<< 62");
@@ -2617,7 +3027,7 @@ __global__ void helperKernel(float *x) {
   if (threadIdx.x < 1) { x[0] = addOne(x[0]); }
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.ir.requiredFeatures).not.toContain("shader-f16");
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.wgsl).toContain("fn addOne(value_arg: f32");
     expect(compiled.wgsl).not.toContain("unused_half2");
   });
@@ -2636,7 +3046,7 @@ __global__ void helperKernel(float *x) {
   if (threadIdx.x < 1) { x[0] = addOne(x[0]); }
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.ir.sharedDeclarations.map((shared) => shared.name)).not.toContain("unusedScratch");
+    expect(backendIr(compiled).sharedDeclarations.map((shared) => shared.name)).not.toContain("unusedScratch");
     expect(compiled.wgsl).not.toContain("unusedScratch");
   });
 
@@ -2660,7 +3070,7 @@ __global__ void overloadKernel(int *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.ir.functions.map((fn) => fn.name)).toEqual(["pick", "pick"]);
+    expect(backendIr(compiled).functions.map((fn) => fn.name)).toEqual(["pick", "pick"]);
     expect(compiled.wgsl).toContain("fn pick__bg_overload_0(");
     expect(compiled.wgsl).toContain("fn pick__bg_overload_1(");
     expect(compiled.wgsl).toContain("out[0] = i32(pick__bg_overload_0(4");
@@ -2774,7 +3184,7 @@ __global__ void voteKernel(uint *input, uint *out) {
     expect(compiled.wgsl).toContain("subgroupBallot");
     expect(compiled.wgsl).toContain("bg_warp_reduce_sum_uint_32(input[0], 32u, local_id)");
     expect(compiled.wgsl).toContain("countOneBits");
-    expect(compiled.ir.requiredFeatures).toContain("subgroups");
+    expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
     expect([...result.buffers.out as Uint32Array]).toEqual([1, 0, 1, 1, 7]);
   });
 
@@ -3018,7 +3428,7 @@ __global__ void gridSync(float *scratch, float *out) {
       severity: "warning",
     }));
     expect([...result.buffers.out as Float32Array]).toEqual([3]);
-    expect(createCudaGridSyncPhasePlan(compiled.ir).supported).toBe(true);
+    expect(createCudaGridSyncPhasePlan(backendIr(compiled)).supported).toBe(true);
     const webGpuPlan = createCudaWebGpuExecutionPlan(compiled, input, launch);
     expect(summarizeCudaWebGpuExecutionPlan(webGpuPlan)).toMatchObject({
       canRunOnWebGpu: true,
@@ -3114,6 +3524,7 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
   if (threadIdx.x == 0) {
     cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking);
     cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
+    cudaMemset(dst, 0, sizeof(float) * 4);
     cudaMemcpy(dst + 1, src, sizeof(float) * n, cudaMemcpyDeviceToDevice);
     cudaMemcpyAsync(dst + 3, src + 1, sizeof(float), cudaMemcpyDefault, stream);
     cudaEventRecord(event, stream);
@@ -3129,7 +3540,7 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
     });
     const input = {
       buffers: {
-        dst: new Float32Array([0, 0, 0, 0]),
+        dst: new Float32Array([9, 9, 9, 9]),
         src: new Float32Array([2.5, 3.5]),
       },
       scalars: { n: 2 },
@@ -3138,11 +3549,13 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
     const result = runCompiledKernelReference(compiled, input, launch);
     const plan = createCudaRuntimeCopyPlan(compiled, input, launch);
     const runtimePlan = createCudaRuntimePlan(compiled);
+    const webGpuPlan = createCudaWebGpuExecutionPlan(compiled, input, launch);
 
     expect([...result.buffers.dst as Float32Array]).toEqual([0, 2.5, 3.5, 3.5]);
     expect(runtimePlan.operations.map((operation) => operation.kind)).toEqual([
       "device-sync",
       "device-sync",
+      "runtime-copy",
       "runtime-copy",
       "runtime-copy",
       "device-sync",
@@ -3153,13 +3566,20 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
     ]);
     expect(plan.supported).toBe(true);
     expect(plan.copies.map((copy) => ({
+      kind: copy.kind,
       dstOffset: copy.dstOffset,
-      srcOffset: copy.srcOffset,
+      srcOffset: copy.kind === "copy" ? copy.srcOffset : undefined,
       elementCount: copy.elementCount,
     }))).toEqual([
-      { dstOffset: 1, srcOffset: 0, elementCount: 2 },
-      { dstOffset: 3, srcOffset: 1, elementCount: 1 },
+      { kind: "fill", dstOffset: 0, srcOffset: undefined, elementCount: 4 },
+      { kind: "copy", dstOffset: 1, srcOffset: 0, elementCount: 2 },
+      { kind: "copy", dstOffset: 3, srcOffset: 1, elementCount: 1 },
     ]);
+    expect(webGpuPlan.supported).toBe(true);
+    if (webGpuPlan.supported) {
+      expect(webGpuPlan.kind).toBe("host-copy");
+      expect(webGpuPlan.steps).toHaveLength(4);
+    }
 
     expect(() => compileCudaLiteKernel(`
 __global__ void unsupportedKind(float *dst, const float *src) {
@@ -3170,6 +3590,48 @@ __global__ void unsupportedKind(float *dst, const float *src) {
       referenceCudaRuntime: true,
       workgroupSize: [1, 1, 1],
     })).toThrow("unsupported-cuda-runtime-copy-kind");
+  });
+
+  it("host-lifts nonzero cudaMemset byte patterns for typed storage buffers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void runtimeFill(unsigned int *bits) {
+  cudaStream_t stream;
+  if (threadIdx.x == 0) {
+    cudaStreamCreate(&stream);
+    cudaMemsetAsync(bits + 1, 255, sizeof(unsigned int) * 2, stream);
+    cudaStreamSynchronize(stream);
+    cudaStreamDestroy(stream);
+  }
+}`, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        bits: new Uint32Array([0, 0, 0, 0]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const plan = createCudaRuntimeCopyPlan(compiled, input, launch);
+    const webGpuPlan = createCudaWebGpuExecutionPlan(compiled, input, launch);
+
+    expect([...result.buffers.bits as Uint32Array]).toEqual([0, 0xffffffff, 0xffffffff, 0]);
+    expect(plan.supported).toBe(true);
+    expect(plan.copies).toHaveLength(1);
+    expect(plan.copies[0]).toMatchObject({
+      kind: "fill",
+      dstRoot: "bits",
+      dstOffset: 1,
+      elementCount: 2,
+      valueType: "uint",
+      byteValue: 255,
+    });
+    expect(webGpuPlan.supported).toBe(true);
+    if (webGpuPlan.supported) {
+      expect(webGpuPlan.kind).toBe("host-copy");
+      expect(webGpuPlan.steps).toHaveLength(2);
+    }
   });
 
   it("explains why unsafe peer-copy lifts stay reference-only", () => {
@@ -3335,7 +3797,7 @@ __global__ void parent(float *x, int n) {
     const badGrid = { gridDim: [0, 1, 1] as const, blockDim: [8, 1, 1] as const };
     const badBlock = { gridDim: [1, 1, 1] as const, blockDim: [4, 1, 1] as const };
 
-    expect(createCudaLaunchValidationDiagnostics(badGrid, compiled.ir.workgroupSize)).toContainEqual(expect.objectContaining({
+    expect(createCudaLaunchValidationDiagnostics(badGrid, backendIr(compiled).workgroupSize)).toContainEqual(expect.objectContaining({
       code: "launch-grid-dim-invalid",
       message: "launch.gridDim[0] must be a positive integer",
     }));
@@ -3353,7 +3815,7 @@ __global__ void parent(float *x, int n) {
       requiresHostOrchestration: false,
       blockers: [expect.objectContaining({ code: "launch-grid-dim-invalid" })],
     });
-    expect(() => validateCudaKernelLaunch(badBlock, compiled.ir.workgroupSize)).toThrow(CudaLiteCompilerError);
+    expect(() => validateCudaKernelLaunch(badBlock, backendIr(compiled).workgroupSize)).toThrow(CudaLiteCompilerError);
     expect(() => runCompiledKernelReference(compiled, input, badGrid)).toThrow("launch.gridDim[0] must be a positive integer");
     await expect(runCompiledKernelWebGpu(
       {} as never,
@@ -3400,7 +3862,7 @@ __global__ void gridPhases(float *scratch, float *out) {
       referenceGridSync: true,
       workgroupSize: [1, 1, 1],
     });
-    const plan = createCudaGridSyncPhasePlan(compiled.ir);
+    const plan = createCudaGridSyncPhasePlan(backendIr(compiled));
 
     expect(plan.supported).toBe(true);
     if (plan.supported) {
@@ -3436,7 +3898,7 @@ __global__ void badGridPhase(float *out) {
       referenceGridSync: true,
       workgroupSize: [1, 1, 1],
     });
-    const plan = createCudaGridSyncPhasePlan(compiled.ir);
+    const plan = createCudaGridSyncPhasePlan(backendIr(compiled));
 
     expect(plan.supported).toBe(false);
     if (!plan.supported) expect(plan.reason).toContain("private thread state");
@@ -3462,7 +3924,7 @@ __global__ void sharedReuse(float *out) {
       referenceGridSync: true,
       workgroupSize: [2, 1, 1],
     });
-    const plan = createCudaGridSyncPhasePlan(compiled.ir);
+    const plan = createCudaGridSyncPhasePlan(backendIr(compiled));
 
     expect(plan.supported).toBe(true);
     if (plan.supported) expect(plan.modules).toHaveLength(2);
@@ -3482,7 +3944,7 @@ __global__ void sharedCarry(float *out) {
       referenceGridSync: true,
       workgroupSize: [2, 1, 1],
     });
-    const plan = createCudaGridSyncPhasePlan(compiled.ir);
+    const plan = createCudaGridSyncPhasePlan(backendIr(compiled));
 
     expect(plan.supported).toBe(false);
     if (!plan.supported) expect(plan.reason).toContain("read before rewrite");
@@ -3532,7 +3994,7 @@ __global__ void coalescedVote(uint *flags, uint *out) {
     expect(compiled.wgsl).toContain("subgroupBallot");
     expect(compiled.wgsl).toContain("bg_warp_shuffle_sync_int_1");
     expect(compiled.wgsl).toContain("countOneBits");
-    expect(compiled.ir.requiredFeatures).toContain("subgroups");
+    expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
     expect([...result.buffers.out as Uint32Array]).toEqual([1]);
   });
 
@@ -3589,7 +4051,7 @@ __global__ void binaryPartition(int *input, int *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.ir.requiredFeatures).toContain("subgroups");
+    expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
     expect(compiled.wgsl).toContain("subgroupBallot");
     expect(compiled.wgsl).toContain("countOneBits");
     expect(compiled.wgsl).toContain("bg_warp_partition_reduce_sum_int_1(value");
@@ -3802,27 +4264,80 @@ __global__ void mathy(float *x, float *out) {
       ceilf(value) +
       truncf(value) +
       roundf(value) +
+      rint(value) +
       rintf(value) +
+      nearbyint(value) +
+      nearbyintf(value) +
       sinf(value) +
+      sinpif(value) +
       cosf(value) +
+      cospif(value) +
       tanf(value) +
       asinf(__saturatef(value)) +
       acosf(__saturatef(value)) +
       atanf(value) +
+      asinhf(value) +
+      acoshf(fabsf(value) + 1.5f) +
+      atanhf(__saturatef(value) * 0.5f) +
       tanhf(value) +
+      __tanhf(value) +
+      sinhf(value) +
       coshf(value) +
       sqrt(fabsf(value)) +
       sqrtf(fabsf(value)) +
+      __fsqrt_rn(fabsf(value)) +
       rsqrt(fabsf(value) + 2.0f) +
       rsqrtf(fabsf(value) + 1.0f) +
+      __frsqrt_rn(fabsf(value) + 4.0f) +
       __frcp_rn(value + 3.0f) +
       __saturatef(value) +
       __expf(value) +
+      exp2f(value) +
+      __exp2f(value) +
+      exp10f(value) +
+      __exp10f(value) +
+      expm1f(value) +
+      erfcxf(value) +
+      normcdff(value) +
+      tgammaf(fabsf(value) + 1.0f) +
+      lgammaf(fabsf(value) + 1.0f) +
       __logf(fabsf(value) + 1.0f) +
+      log2f(fabsf(value) + 1.0f) +
+      __log2f(fabsf(value) + 1.0f) +
+      log10f(fabsf(value) + 1.0f) +
+      __log10f(fabsf(value) + 1.0f) +
+      log1pf(fabsf(value)) +
+      cbrtf(value) +
+      rcbrtf(value + 2.0f) +
       powf(fabsf(value), 2.0f) +
+      __powf(fabsf(value), 3.0f) +
       atan2f(value, 2.0f) +
+      hypotf(value, 2.0f) +
+      rhypotf(value, 2.0f) +
+      norm3df(value, 2.0f, -3.0f) +
+      norm4df(value, 2.0f, -3.0f, 4.0f) +
+      rnorm3df(value, 2.0f, -3.0f) +
+      rnorm4df(value, 2.0f, -3.0f, 4.0f) +
+      ldexpf(value, 2) +
+      scalblnf(value, 3) +
+      scalbnf(value, 1) +
+      fmodf(value, 2.0f) +
+      remainderf(value, 2.0f) +
+      logbf(fabsf(value) + 1.0f) +
+      ilogbf(fabsf(value) + 1.0f) +
+      fdimf(value, -0.5f) +
+      copysignf(value, -2.0f) +
+      fdividef(value, 4.0f) +
+      (signbitf(value) ? 1.0f : 0.0f) +
+      (isgreater(value, -2.0f) ? 1.0f : 0.0f) +
+      (isgreaterequal(value, value) ? 1.0f : 0.0f) +
+      (isless(value, 2.0f) ? 1.0f : 0.0f) +
+      (islessequal(value, value) ? 1.0f : 0.0f) +
+      (islessgreater(value, 0.0f) ? 1.0f : 0.0f) +
       fminf(value, 1.0f) +
       fmaxf(value, -1.0f) +
+      (isfinite(value) ? 1.0f : 0.0f) +
+      (isnormal(value) ? 1.0f : 0.0f) +
       __fdividef(value, 2.0f) +
       __fadd_rn(value, 2.0f) +
       __fsub_rn(value, 2.0f) +
@@ -3843,24 +4358,69 @@ __global__ void mathy(float *x, float *out) {
     expect(compiled.wgsl).toContain("floor(value)");
     expect(compiled.wgsl).toContain("ceil(value)");
     expect(compiled.wgsl).toContain("trunc(value)");
-    expect(compiled.wgsl).toContain("round(value)");
+    expect(compiled.wgsl).toContain("bg_round_away_f32(f32(value))");
+    expect(compiled.wgsl).toContain("fn bg_round_even_f32(");
+    expect(compiled.wgsl).toContain("fn bg_round_away_f32(");
+    expect(compiled.wgsl).toContain("bg_round_even_f32(f32(value))");
     expect(compiled.wgsl).toContain("sin(value)");
+    expect(compiled.wgsl).toContain("sin(3.141592653589793 * value)");
     expect(compiled.wgsl).toContain("cos(value)");
+    expect(compiled.wgsl).toContain("cos(3.141592653589793 * value)");
     expect(compiled.wgsl).toContain("tan(value)");
     expect(compiled.wgsl).toContain("asin(clamp(value, 0.0, 1.0))");
     expect(compiled.wgsl).toContain("acos(clamp(value, 0.0, 1.0))");
     expect(compiled.wgsl).toContain("atan(value)");
+    expect(compiled.wgsl).toContain("log(value + sqrt((value * value) + 1.0))");
+    expect(compiled.wgsl).toContain("log((abs(value) + 1.5) + sqrt(((abs(value) + 1.5) * (abs(value) + 1.5)) - 1.0))");
+    expect(compiled.wgsl).toContain("(0.5 * log((1.0 + (clamp(value, 0.0, 1.0) * 0.5)) / (1.0 - (clamp(value, 0.0, 1.0) * 0.5))))");
     expect(compiled.wgsl).toContain("atan2(value, 2.0)");
     expect(compiled.wgsl).toContain("tanh(value)");
+    expect(compiled.wgsl).toContain("sinh(value)");
     expect(compiled.wgsl).toContain("cosh(value)");
     expect(compiled.wgsl).toContain("sqrt(abs(value))");
+    expect(compiled.wgsl).toContain("inverseSqrt((abs(value) + 4.0))");
     expect(compiled.wgsl).toContain("inverseSqrt((abs(value) + 2.0))");
     expect(compiled.wgsl).toContain("inverseSqrt((abs(value) + 1.0))");
     expect(compiled.wgsl).toContain("(1.0 / (value + 3.0))");
     expect(compiled.wgsl).toContain("clamp(value, 0.0, 1.0)");
+    expect(compiled.wgsl).toContain("exp2(value)");
+    expect(compiled.wgsl).toContain("pow(10.0, value)");
+    expect(compiled.wgsl).toContain("(exp(value) - 1.0)");
+    expect(compiled.wgsl).toContain("(exp(value * value) * (1.0 - ");
+    expect(compiled.wgsl).toContain("(0.5 * (1.0 + ");
+    expect(compiled.wgsl).toContain("fn bg_tgamma(");
+    expect(compiled.wgsl).toContain("bg_tgamma(f32((abs(value) + 1.0)))");
+    expect(compiled.wgsl).toContain("bg_lgamma(f32((abs(value) + 1.0)))");
+    expect(compiled.wgsl).toContain("log2((abs(value) + 1.0))");
+    expect(compiled.wgsl).toContain("(log((abs(value) + 1.0)) / 2.302585092994046)");
+    expect(compiled.wgsl).toContain("log(1.0 + abs(value))");
+    expect(compiled.wgsl).toContain("select(pow(abs(value), 0.3333333333333333), -pow(abs(value), 0.3333333333333333), (value < 0.0))");
     expect(compiled.wgsl).toContain("pow(abs(value), 2.0)");
+    expect(compiled.wgsl).toContain("pow(abs(value), 3.0)");
+    expect(compiled.wgsl).toContain("sqrt((value * value) + (2.0 * 2.0))");
+    expect(compiled.wgsl).toContain("(1.0 / sqrt((value * value) + (2.0 * 2.0)))");
+    expect(compiled.wgsl).toContain("sqrt((value * value) + (2.0 * 2.0) + ((-3.0) * (-3.0)))");
+    expect(compiled.wgsl).toContain("sqrt((value * value) + (2.0 * 2.0) + ((-3.0) * (-3.0)) + (4.0 * 4.0))");
+    expect(compiled.wgsl).toContain("(f32(value) * exp2(f32(i32(2))))");
+    expect(compiled.wgsl).toContain("(f32(value) * exp2(f32(i32(3))))");
+    expect(compiled.wgsl).toContain("(f32(value) * exp2(f32(i32(1))))");
     expect(compiled.wgsl).toContain("min(value, 1.0)");
     expect(compiled.wgsl).toContain("max(value, (-1.0))");
+    expect(compiled.wgsl).toContain("(value - trunc(value / 2.0) * 2.0)");
+    expect(compiled.wgsl).toContain("bg_remainder(f32(value), f32(2.0))");
+    expect(compiled.wgsl).toContain("bg_logb(f32((abs(value) + 1.0)))");
+    expect(compiled.wgsl).toContain("bg_ilogb(f32((abs(value) + 1.0)))");
+    expect(compiled.wgsl).toContain("max((value - (-0.5)), 0.0)");
+    expect(compiled.wgsl).toContain("bitcast<f32>(bitcast<u32>(abs(f32(value))) | (bitcast<u32>(f32((-2.0))) & 0x80000000u))");
+    expect(compiled.wgsl).toContain("(value / 4.0)");
+    expect(compiled.wgsl).toContain("((bitcast<u32>(f32(value)) & 0x80000000u) != 0u)");
+    expect(compiled.wgsl).toContain("(!(((value) != (value)) || (((-2.0)) != ((-2.0)))) && ((value) > ((-2.0))))");
+    expect(compiled.wgsl).toContain("(!(((value) != (value)) || ((value) != (value))) && ((value) >= (value)))");
+    expect(compiled.wgsl).toContain("(!(((value) != (value)) || ((2.0) != (2.0))) && ((value) < (2.0)))");
+    expect(compiled.wgsl).toContain("(!(((value) != (value)) || ((value) != (value))) && ((value) <= (value)))");
+    expect(compiled.wgsl).toContain("(!(((value) != (value)) || ((0.0) != (0.0))) && (((value) < (0.0)) || ((value) > (0.0))))");
+    expect(compiled.wgsl).toContain("abs(value) <= 3.4028234663852886e38");
+    expect(compiled.wgsl).toContain("abs(value) >= 1.1754943508222875e-38");
     expect(compiled.wgsl).toContain("(value + 2.0)");
     expect(compiled.wgsl).toContain("(value - 2.0)");
     expect(compiled.wgsl).toContain("(value * 2.0)");
@@ -3871,28 +4431,81 @@ __global__ void mathy(float *x, float *out) {
       Math.floor(value) +
       Math.ceil(value) +
       Math.trunc(value) +
-      Math.round(value) +
-      Math.round(value) +
+      roundAway(value) +
+      roundEven(value) +
+      roundEven(value) +
+      roundEven(value) +
+      roundEven(value) +
       Math.sin(value) +
+      Math.sin(Math.PI * value) +
       Math.cos(value) +
+      Math.cos(Math.PI * value) +
       Math.tan(value) +
       Math.asin(Math.min(1, Math.max(0, value))) +
       Math.acos(Math.min(1, Math.max(0, value))) +
       Math.atan(value) +
+      Math.asinh(value) +
+      Math.acosh(Math.abs(value) + 1.5) +
+      Math.atanh(Math.min(1, Math.max(0, value)) * 0.5) +
       Math.tanh(value) +
+      Math.tanh(value) +
+      Math.sinh(value) +
       Math.cosh(value) +
+      Math.sqrt(Math.abs(value)) +
       Math.sqrt(Math.abs(value)) +
       Math.sqrt(Math.abs(value)) +
       (1 / Math.sqrt(Math.abs(value) + 2)) +
       (1 / Math.sqrt(Math.abs(value) + 1)) +
+      (1 / Math.sqrt(Math.abs(value) + 4)) +
       (1 / (value + 3)) +
       Math.min(1, Math.max(0, value)) +
       Math.exp(value) +
+      (2 ** value) +
+      (2 ** value) +
+      (10 ** value) +
+      (10 ** value) +
+      Math.expm1(value) +
+      (Math.exp(value * value) * (1 - erfApprox(value))) +
+      (0.5 * (1 + erfApprox(value * Math.SQRT1_2))) +
+      gammaApprox(Math.abs(value) + 1) +
+      Math.log(Math.abs(gammaApprox(Math.abs(value) + 1))) +
       Math.log(Math.abs(value) + 1) +
+      Math.log2(Math.abs(value) + 1) +
+      Math.log2(Math.abs(value) + 1) +
+      Math.log10(Math.abs(value) + 1) +
+      Math.log10(Math.abs(value) + 1) +
+      Math.log1p(Math.abs(value)) +
+      Math.cbrt(value) +
+      (1 / Math.cbrt(value + 2)) +
       Math.pow(Math.abs(value), 2) +
+      Math.pow(Math.abs(value), 3) +
       Math.atan2(value, 2) +
+      Math.hypot(value, 2) +
+      (1 / Math.hypot(value, 2)) +
+      Math.hypot(value, 2, -3) +
+      Math.hypot(value, 2, -3, 4) +
+      (1 / Math.hypot(value, 2, -3)) +
+      (1 / Math.hypot(value, 2, -3, 4)) +
+      (value * 4) +
+      (value * 8) +
+      (value * 2) +
+      (value - Math.trunc(value / 2) * 2) +
+      (value - roundEven(value / 2) * 2) +
+      Math.floor(Math.log2(Math.abs(value) + 1)) +
+      Math.floor(Math.log2(Math.abs(value) + 1)) +
+      Math.max(value - -0.5, 0) +
+      -Math.abs(value) +
+      (value / 4) +
+      (value < 0 || Object.is(value, -0) ? 1 : 0) +
+      (!Number.isNaN(value) && value > -2 ? 1 : 0) +
+      (!Number.isNaN(value) && value >= value ? 1 : 0) +
+      (!Number.isNaN(value) && value < 2 ? 1 : 0) +
+      (!Number.isNaN(value) && value <= value ? 1 : 0) +
+      (!Number.isNaN(value) && value !== 0 ? 1 : 0) +
       Math.min(value, 1) +
       Math.max(value, -1) +
+      1 +
+      1 +
       (value / 2) +
       (value + 2) +
       (value - 2) +
@@ -3905,13 +4518,124 @@ __global__ void mathy(float *x, float *out) {
     expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(expected[1]!, 5);
   });
 
+  it("lowers unordered CUDA float predicates without treating them as unsupported calls", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void float_predicates(float *out) {
+  if (threadIdx.x == 0) {
+    float nan_value = __uint_as_float(0x7fc00000u);
+    out[0] = isunordered(nan_value, 1.0f) ? 1.0f : 0.0f;
+    out[1] = islessgreater(nan_value, 1.0f) ? 1.0f : 0.0f;
+    out[2] = signbit(-0.0f) ? 1.0f : 0.0f;
+    out[3] = isnan(nanf("")) ? 1.0f : 0.0f;
+    out[4] = isnanf(nan_value) ? 1.0f : 0.0f;
+    out[5] = __isnanf(nan_value) ? 1.0f : 0.0f;
+    out[6] = isinff(__builtin_inff()) ? 1.0f : 0.0f;
+    out[7] = __isinff(__builtin_inff()) ? 1.0f : 0.0f;
+    out[8] = finitef(3.0f) && isfinitef(3.0f) && __finitef(3.0f) ? 1.0f : 0.0f;
+    out[9] = finite(__builtin_inff()) ? 1.0f : 0.0f;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(10) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.wgsl).toContain("(((nan_value) != (nan_value)) || ((1.0) != (1.0)))");
+    expect(compiled.wgsl).toContain("!(((nan_value) != (nan_value)) || ((1.0) != (1.0)))");
+    expect(compiled.wgsl).toContain("((bitcast<u32>(f32((-0.0))) & 0x80000000u) != 0u)");
+    expect(compiled.wgsl).toContain("bitcast<f32>(0x7fc00000u)");
+    expect(compiled.wgsl).toContain("(abs(bitcast<f32>(0x7f800000u)) > 3.4028234663852886e38)");
+    expect([...result.buffers.out as Float32Array]).toEqual([1, 0, 1, 1, 1, 1, 1, 1, 1, 0]);
+  });
+
+  it("uses round-to-even semantics for rint, nearbyint, and remainder", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void rounding(float *x, float *out) {
+  int idx = threadIdx.x;
+  float value = x[idx];
+  out[idx] = rintf(value) + nearbyintf(value) + remainderf(value, 2.0f) + logbf(fabsf(value)) + ilogbf(fabsf(value));
+}`, { workgroupSize: [4, 1, 1] });
+    const input = new Float32Array([2.5, 3.5, -2.5, 5.75]);
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: input, out: new Float32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.wgsl).toContain("fn bg_round_even_f32(");
+    expect(compiled.wgsl).toContain("fn bg_remainder(");
+    expect(compiled.wgsl).toContain("fn bg_ilogb(");
+    expect([...result.buffers.out as Float32Array]).toEqual([...input].map((value) =>
+      roundEven(value) + roundEven(value) + (value - roundEven(value / 2) * 2) +
+      Math.floor(Math.log2(Math.abs(value))) + Math.floor(Math.log2(Math.abs(value))),
+    ));
+  });
+
+  it("lowers CUDA remquo quotient out params", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void remquoKernel(float *out, int *quo) {
+  int localQuo = 0;
+  float localRem = remquof(7.0f, 2.0f, &localQuo);
+  out[0] = localRem;
+  quo[0] = localQuo;
+  out[1] = remquo(5.0f, 2.0f, &quo[1]);
+  remquof(-7.0f, 2.0f, &quo[2]);
+}
+`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(2), quo: new Int32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-remquo-quotient");
+    expect(compiled.wgsl).toContain("bg_round_even_f32(7.0 / 2.0)");
+    expect(compiled.wgsl).toContain("quo[1] = i32(bg_remquo_quo_");
+    expect(compiled.wgsl).toContain("quo[2] = i32(bg_remquo_quo_");
+    expect([...result.buffers.out as Float32Array]).toEqual([-1, 1]);
+    expect([...result.buffers.quo as Int32Array]).toEqual([4, 2, -4]);
+  });
+
+  it("lowers CUDA nextafter and nexttoward intrinsics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void nextafterKernel(float *out) {
+  out[0] = nextafterf(1.0f, 2.0f);
+  out[1] = nextafterf(1.0f, 0.0f);
+  out[2] = nextafterf(0.0f, -1.0f);
+  out[3] = nexttoward(-1.0f, 0.0f);
+  out[4] = nextafterf(INFINITY, 0.0f);
+}
+`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(5) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.wgsl).toContain("fn bg_nextafter(");
+    expect(compiled.wgsl).toContain("bg_nextafter(f32(1.0), f32(2.0))");
+    expect([...result.buffers.out as Float32Array]).toEqual([
+      nextafterApprox(1, 2),
+      nextafterApprox(1, 0),
+      nextafterApprox(0, -1),
+      nextafterApprox(-1, 0),
+      nextafterApprox(Infinity, 0),
+    ]);
+  });
+
   it("lowers C math aliases used in CUDA snippets", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void c_math_aliases(float *x, float *out) {
   float value = x[0];
   out[0] = fabs(value) + exp(value) + log(fabs(value) + 1.0f) +
     pow(fabs(value), 2.0f) + fmin(value, 1.0f) + fmax(value, -1.0f) +
-    __sinf(value) + __cosf(value) + __tanf(value) + lerp(2.0f, 6.0f, 0.25f);
+    __sinf(value) + __cosf(value) + __tanf(value) + erff(value) + erfcf(value) +
+    tgamma(fabs(value) + 1.0f) + lgamma(fabs(value) + 1.0f) + lerp(2.0f, 6.0f, 0.25f);
 }`, { workgroupSize: [1, 1, 1] });
     const value = -0.25;
     const result = runCompiledKernelReference(
@@ -3921,10 +4645,14 @@ __global__ void c_math_aliases(float *x, float *out) {
     );
     const expected = Math.abs(value) + Math.exp(value) + Math.log(Math.abs(value) + 1) +
       Math.pow(Math.abs(value), 2) + Math.min(value, 1) + Math.max(value, -1) +
-      Math.sin(value) + Math.cos(value) + Math.tan(value) + 3;
+      Math.sin(value) + Math.cos(value) + Math.tan(value) + erfApprox(value) + (1 - erfApprox(value)) +
+      gammaApprox(Math.abs(value) + 1) + Math.log(Math.abs(gammaApprox(Math.abs(value) + 1))) + 3;
 
     expect(compiled.wgsl).toContain("abs(value)");
     expect(compiled.wgsl).toContain("exp(value)");
+    expect(compiled.wgsl).toContain("0.3275911");
+    expect(compiled.wgsl).toContain("bg_tgamma(f32((abs(value) + 1.0)))");
+    expect(compiled.wgsl).toContain("bg_lgamma(f32((abs(value) + 1.0)))");
     expect(compiled.wgsl).toContain("pow(abs(value), 2.0)");
     expect(compiled.wgsl).toContain("fma(0.25, (6.0 - 2.0), 2.0)");
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(expected, 5);
@@ -3952,19 +4680,129 @@ __global__ void int_math_arg(int n, float *out) {
 __global__ void frexpKernel(float *out, int *expOut) {
   int exponent = 0;
   float mantissa = frexp(9.0f, &exponent);
+  float storageMantissa = frexpf(10.0f, &expOut[1]);
   out[0] = mantissa;
+  out[1] = storageMantissa;
+  out[2] = frexpf(12.0f, &expOut[2]);
   expOut[0] = exponent;
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { out: new Float32Array(1), expOut: new Int32Array(1) } },
+      { buffers: { out: new Float32Array(3), expOut: new Int32Array(3) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
     expect(compiled.wgsl).toContain("fn bg_frexp(");
     expect(compiled.wgsl).toContain("bg_frexp(9.0, &exponent)");
+    expect(compiled.wgsl).toContain("bg_frexp(10.0, &bg_frexp_exp_");
+    expect(compiled.wgsl).toContain("expOut[1] = i32(bg_frexp_exp_");
+    expect(compiled.wgsl).toContain("out[2] = f32(bg_frexp(12.0, &bg_frexp_exp_");
     expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(0.5625, 6);
-    expect([...result.buffers.expOut as Int32Array]).toEqual([4]);
+    expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(0.625, 6);
+    expect([...result.buffers.out as Float32Array][2]).toBeCloseTo(0.75, 6);
+    expect([...result.buffers.expOut as Int32Array]).toEqual([4, 4, 4]);
+  });
+
+  it("lowers C modf integer-part out params", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void modfKernel(float *out) {
+  float localInt = 0.0f;
+  float localFrac = modff(3.75f, &localInt);
+  out[0] = localFrac;
+  out[1] = localInt;
+  out[2] = modff(-2.25f, &out[3]);
+  float assignedInt = 0.0f;
+  out[4] = modf(5.5f, &assignedInt);
+  out[5] = assignedInt;
+  modff(8.125f, &out[6]);
+}
+`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(7).fill(-99) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-modf-intpart");
+    expect(compiled.wgsl).toContain("fn bg_modf(");
+    expect(compiled.wgsl).toContain("bg_modf(3.75, &localInt)");
+    expect(compiled.wgsl).toContain("out[3] = f32(bg_modf_int_");
+    expect(compiled.wgsl).toContain("out[6] = f32(bg_modf_int_");
+    expect([...result.buffers.out as Float32Array]).toEqual([0.75, 3, -0.25, -2, 0.5, 5, 8]);
+  });
+
+  it("lowers CUDA sincos output params", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sincosKernel(float *out) {
+  float s = 0.0f;
+  float c = 0.0f;
+  sincosf(0.25f, &s, &c);
+  out[0] = s;
+  out[1] = c;
+  __sincosf(0.5f, &out[2], &out[3]);
+  sincospi(0.5f, &out[4], &out[5]);
+}
+`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(6) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-sincos-output");
+    expect(compiled.wgsl).toContain("let bg_sincos_sin_");
+    expect(compiled.wgsl).toContain("sin(0.25)");
+    expect(compiled.wgsl).toContain("cos(0.25)");
+    expect(compiled.wgsl).toContain("sin((3.141592653589793 * 0.5))");
+    const out = [...result.buffers.out as Float32Array];
+    expect(out[0]).toBeCloseTo(Math.sin(0.25), 6);
+    expect(out[1]).toBeCloseTo(Math.cos(0.25), 6);
+    expect(out[2]).toBeCloseTo(Math.sin(0.5), 6);
+    expect(out[3]).toBeCloseTo(Math.cos(0.5), 6);
+    expect(out[4]).toBeCloseTo(1, 6);
+    expect(out[5]).toBeCloseTo(0, 6);
+  });
+
+  it("lowers CUDA math output params through local pointer aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void mathOutAliases(float *out, int *ints) {
+  float *intpart = out + 1;
+  float *sinOut = out + 2;
+  float *cosOut = out + 3;
+  int *expOut = ints + 1;
+  int *quoOut = ints + 2;
+  out[0] = modff(3.75f, intpart);
+  sincosf(0.25f, sinOut, cosOut);
+  out[4] = frexpf(9.0f, expOut);
+  out[5] = remquof(7.0f, 2.0f, quoOut);
+  out[6] = (float)ints[1];
+  out[7] = (float)ints[2];
+}
+`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(8), ints: new Int32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-frexp-exponent");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-modf-intpart");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-sincos-output");
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-remquo-quotient");
+    expect(compiled.wgsl).toContain("bg_ptr_write_f32");
+    expect(compiled.wgsl).toContain("bg_ptr_write_i32");
+    const out = [...result.buffers.out as Float32Array];
+    expect(out[0]).toBeCloseTo(0.75, 6);
+    expect(out[1]).toBeCloseTo(3, 6);
+    expect(out[2]).toBeCloseTo(Math.sin(0.25), 6);
+    expect(out[3]).toBeCloseTo(Math.cos(0.25), 6);
+    expect(out[4]).toBeCloseTo(0.5625, 6);
+    expect(out[5]).toBeCloseTo(-1, 6);
+    expect(out[6]).toBe(4);
+    expect(out[7]).toBe(4);
+    expect([...result.buffers.ints as Int32Array]).toEqual([0, 4, 4]);
   });
 
   it("lets user device functions shadow CUDA math aliases when CUDA source defines them", () => {
@@ -4003,19 +4841,53 @@ __global__ void intIntrinsics(int *x, uint *out) {
     out[8] = UMUL(6u, 7u);
     out[9] = UMAD(6u, 7u, 2u);
     out[10] = uint(IMAD(6, 7, -2));
+    out[11] = __brev(0x01234567u);
+    out[12] = __sad(-20, 7, 3u);
+    out[13] = __usad(2u, 9u, 5u);
+    out[14] = uint(__mulhi(-2000000000, 3));
+    out[15] = __umulhi(0xfedcba98u, 0x12345678u);
+    out[16] = __byte_perm(0x00112233u, 0x44556677u, 0x5410u);
+    out[17] = uint(__rhadd(-7, 2));
+    out[18] = __uhadd(0xffffffffu, 1u);
+    out[19] = __urhadd(0xffffffffu, 2u);
+    out[20] = uint(__hadd(-7, 2));
+    out[21] = __funnelshift_l(0x11223344u, 0x55667788u, 8u);
+    out[22] = __funnelshift_lc(0x11223344u, 0x55667788u, 40u);
+    out[23] = __funnelshift_r(0x11223344u, 0x55667788u, 8u);
+    out[24] = __funnelshift_rc(0x11223344u, 0x55667788u, 32u);
+    out[25] = uint(__clzll(0x10u));
+    out[26] = uint(__ffsll(0x10u));
+    out[27] = uint(__popcll(0xf0f0u));
+    out[28] = __brevll(0x000000f0u);
+    out[29] = uint(__mul64hi(-2000000000, 3));
+    out[30] = __umul64hi(0xfedcba98u, 0x12345678u);
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { x: new Int32Array([5]), out: new Uint32Array(11) } },
+      { buffers: { x: new Int32Array([5]), out: new Uint32Array(31) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
     expect(compiled.wgsl).toContain("countLeadingZeros");
     expect(compiled.wgsl).toContain("countTrailingZeros");
+    expect(compiled.wgsl).toContain("reverseBits(u32(0x01234567u))");
+    expect(compiled.wgsl).toContain("select((u32(7) - u32((-20))), (u32((-20)) - u32(7)), (i32((-20)) >= i32(7))) + u32(3u)");
+    expect(compiled.wgsl).toContain("max(u32(2u), u32(9u)) - min(u32(2u), u32(9u)) + u32(5u)");
+    expect(compiled.wgsl).toContain("select(0, i32(3), (i32((-2000000000)) < 0))");
+    expect(compiled.wgsl).toContain("u32(0xfedcba98u) >> 16u");
+    expect(compiled.wgsl).toContain("u32(0x5410u) >> 4u");
+    expect(compiled.wgsl).toContain("i32((-7)) | i32(2)");
+    expect(compiled.wgsl).toContain("u32(0xffffffffu) & u32(1u)");
+    expect(compiled.wgsl).toContain("u32(0xffffffffu) & u32(2u)");
+    expect(compiled.wgsl).toContain("(i32((-7)) & i32(2)) + ((i32((-7)) ^ i32(2)) >> 1u)");
+    expect(compiled.wgsl).toContain("fn bg_funnelshift_l(");
+    expect(compiled.wgsl).toContain("bg_funnelshift_rc(u32(0x11223344u), u32(0x55667788u), u32(32u))");
+    expect(compiled.wgsl).toContain("countLeadingZeros(u32(0x10u))) + 32");
+    expect(compiled.wgsl).toContain("countOneBits(u32(0xf0f0u))");
     expect(compiled.wgsl).toContain("min(u32(7u), u32(3u))");
     expect(compiled.wgsl).toContain("assert omitted");
-    expect([...result.buffers.out as Uint32Array]).toEqual([29, 15, 20, 3, 3, 0, 4, 7, 42, 44, 40]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([29, 15, 20, 3, 3, 0, 4, 7, 42, 44, 40, 0xe6a2c480, 30, 12, 0xfffffffe, 304062474, 0x66772233, 0xfffffffe, 2147483648, 2147483649, 0xfffffffd, 0x22334455, 0x55667788, 0x88112233, 0x55667788, 59, 5, 8, 0x0f000000, 0xfffffffe, 304062474]);
   });
 
   it("lowers CUDA float/integer bitcast intrinsics", () => {
@@ -4049,6 +4921,109 @@ __global__ void bitcast_intrinsics(float *x, uint *bits, int *signed_bits, float
     expect([...result.buffers.roundtrip as Float32Array]).toEqual([-3.5, -3.5]);
   });
 
+  it("lowers CUDA scalar conversion intrinsics with rounding modes", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void convert_intrinsics(float *x, int *iout, uint *uout, float *fout) {
+  float a = x[0];
+  float b = x[1];
+  iout[0] = __float2int_rn(a);
+  iout[1] = __float2int_rz(a);
+  iout[2] = __float2int_ru(a);
+  iout[3] = __float2int_rd(a);
+  iout[4] = __float2int_rn(b);
+  uout[0] = __float2uint_rn(3.5f);
+  uout[1] = __float2uint_rz(3.9f);
+  uout[2] = __float2uint_ru(3.1f);
+  uout[3] = __float2uint_rd(3.9f);
+  fout[0] = __int2float_rn(iout[3]);
+  fout[1] = __uint2float_rn(uout[2]);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([2.5, 3.5]),
+          iout: new Int32Array(5),
+          uout: new Uint32Array(4),
+          fout: new Float32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.wgsl).toContain("bg_round_even_f32(f32(a))");
+    expect(compiled.wgsl).toContain("i32(trunc(f32(a)))");
+    expect(compiled.wgsl).toContain("i32(ceil(f32(a)))");
+    expect(compiled.wgsl).toContain("i32(floor(f32(a)))");
+    expect(compiled.wgsl).toContain("u32(max(bg_round_even_f32(f32(3.5)), 0.0))");
+    expect([...result.buffers.iout as Int32Array]).toEqual([2, 2, 3, 2, 4]);
+    expect([...result.buffers.uout as Uint32Array]).toEqual([4, 3, 4, 3]);
+    expect([...result.buffers.fout as Float32Array]).toEqual([2, 4]);
+  });
+
+  it("lowers C integer rounding math aliases with CUDA tie semantics", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void round_integer_aliases(float *x, int *out) {
+  out[0] = lrintf(x[0]);
+  out[1] = lrint(x[1]);
+  out[2] = llrintf(x[2]);
+  out[3] = llrint(x[3]);
+  out[4] = lroundf(x[0]);
+  out[5] = lround(x[2]);
+  out[6] = llroundf(x[3]);
+  out[7] = llround(x[4]);
+  out[8] = (int)roundf(x[4]);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([2.5, 3.5, -2.5, -3.5, -1.5]),
+          out: new Int32Array(9),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.wgsl).toContain("i32(bg_round_even_f32(f32(x[0])))");
+    expect(compiled.wgsl).toContain("i32(bg_round_away_f32(f32(x[0])))");
+    expect(compiled.wgsl).toContain("bg_round_away_f32(f32(x[4]))");
+    expect([...result.buffers.out as Int32Array]).toEqual([2, 4, -2, -4, 3, -3, -4, -2, -2]);
+  });
+
+  it("lowers inverse error and normal-CDF CUDA math aliases to WGSL helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void inverse_distribution_math(float *out) {
+  out[0] = erfinvf(0.8427008f);
+  out[1] = erfinv(-0.8427008f);
+  out[2] = erfcinvf(0.1572992f);
+  out[3] = normcdfinvf(0.841344746f);
+  out[4] = normcdfinv(0.158655254f);
+  out[5] = normcdff(1.0f);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(6) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const out = [...result.buffers.out as Float32Array];
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.wgsl).toContain("fn bg_erfinv_f32(");
+    expect(compiled.wgsl).toContain("fn bg_normcdfinv_f32(");
+    expect(compiled.wgsl).toContain("bg_erfinv_f32(f32(0.8427008))");
+    expect(compiled.wgsl).toContain("bg_erfinv_f32(1.0 - f32(0.1572992))");
+    expect(compiled.wgsl).toContain("bg_normcdfinv_f32(f32(0.841344746))");
+    expect(out[0]).toBeCloseTo(1, 4);
+    expect(out[1]).toBeCloseTo(-1, 4);
+    expect(out[2]).toBeCloseTo(1, 4);
+    expect(out[3]).toBeCloseTo(1, 4);
+    expect(out[4]).toBeCloseTo(-1, 4);
+    expect(out[5]).toBeCloseTo(0.8413447, 4);
+  });
+
   it("recognizes CUDA/C numeric named constants", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void constants(float* out, uint* kinds) {
@@ -4064,13 +5039,17 @@ __global__ void constants(float* out, uint* kinds) {
     out[6] = isinf(out[0]) ? 1.0f : 0.0f;
     out[7] = isnan(out[3]) ? 1.0f : 0.0f;
     out[8] = isNan(out[3]) ? 1.0f : 0.0f;
+    out[9] = CUDART_PI_F + CUDART_PIO2_F + CUDART_SQRT_HALF_F;
+    out[10] = CUDART_INF_F;
+    out[11] = CUDART_NAN_F;
+    out[12] = CUDART_L2E_F + CUDART_LN2_F + CUDART_ONE_F + CUDART_ZERO_F;
     kinds[0] = cudaMemcpyDeviceToDevice + cudaStreamNonBlocking;
     kinds[1] = warpSize + WARP_SIZE;
   }
 }`, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
-      { buffers: { out: new Float32Array(9), kinds: new Uint32Array(2) } },
+      { buffers: { out: new Float32Array(13), kinds: new Uint32Array(2) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
     const out = [...result.buffers.out as Float32Array];
@@ -4087,6 +5066,10 @@ __global__ void constants(float* out, uint* kinds) {
     expect(out[6]).toBe(1);
     expect(out[7]).toBe(1);
     expect(out[8]).toBe(1);
+    expect(out[9]).toBeCloseTo(Math.PI + (Math.PI / 2) + Math.SQRT1_2, 6);
+    expect(out[10]).toBe(Number.POSITIVE_INFINITY);
+    expect(Number.isNaN(out[11])).toBe(true);
+    expect(out[12]).toBeCloseTo(Math.LOG2E + Math.LN2 + 1, 6);
     expect([...result.buffers.kinds as Uint32Array]).toEqual([4, 64]);
   });
 
@@ -4135,7 +5118,7 @@ __global__ void optional_output(int *data, int width, int *partial_sums = NULL) 
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
-    expect(compiled.ir.params.map((param) => param.name)).toEqual(["data", "width", "partial_sums"]);
+    expect(backendIr(compiled).params.map((param) => param.name)).toEqual(["data", "width", "partial_sums"]);
     expect([...result.buffers.data as Int32Array]).toEqual([4, 5]);
     expect([...result.buffers.partial_sums as Int32Array]).toEqual([4]);
   });
@@ -4496,7 +5479,7 @@ __global__ void half2Add(const half2 *x, half2 *y) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.ir.requiredFeatures).toContain("shader-f16");
+    expect(backendIr(compiled).requiredFeatures).toContain("shader-f16");
     expect(compiled.wgsl).toContain("enable f16;");
     expect(compiled.wgsl).toContain("vec2<f16>");
     expect(Array.from(result.buffers.y as ArrayLike<number>)).toEqual([4, 7]);
@@ -4546,12 +5529,18 @@ __global__ void half2Ops(const half2 *x, const half2 *y, half2 *out, float *scal
 
   it("lowers CUDA shuffle, fence, and conversion intrinsics", () => {
     const compiled = compileCudaLiteKernel(`
-__global__ void intrinsic_pack(half2 *h, float2 *f, float *out) {
+__global__ void intrinsic_pack(half2 *h, float2 *f, float *out, uint *bits) {
   int lane = __shfl_sync(0xffffffff, threadIdx.x, 0);
   __syncwarp(0xffffffff);
   __threadfence();
+  __threadfence_block();
+  __threadfence_system();
+  __nanosleep(8);
+  __prof_trigger(1);
   half2 value = make_half2(__int2half_rn(lane + 1), __int2half_rn(4));
   h[0] = value;
+  bits[0] = __half2_as_uint(value);
+  h[1] = __uint_as_half2(0x40003c00u);
   f[0] = __half22float2(value);
   out[0] = __fmaf_rn(f[0].x, 2.0f, f[0].y);
 }`, { features: { "shader-f16": true, subgroups: true }, workgroupSize: [1, 1, 1] });
@@ -4559,19 +5548,24 @@ __global__ void intrinsic_pack(half2 *h, float2 *f, float *out) {
       compiled,
       {
         buffers: {
-          h: createWgslFloat16Array(2),
+          h: createWgslFloat16Array(4),
           f: new Float32Array(2),
           out: new Float32Array(1),
+          bits: new Uint32Array(1),
         },
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.ir.requiredFeatures).toEqual(expect.arrayContaining(["shader-f16", "subgroups"]));
+    expect(backendIr(compiled).requiredFeatures).toEqual(expect.arrayContaining(["shader-f16", "subgroups"]));
     expect(compiled.wgsl).toContain("bg_warp_shuffle_sync_int_32(0, 0u, 32u, local_id)");
     expect(compiled.wgsl).toContain("workgroupBarrier()");
     expect(compiled.wgsl).toContain("storageBarrier()");
+    expect(compiled.wgsl).toContain("pack2x16float(vec2<f32>(f32((value).x), f32((value).y)))");
+    expect(compiled.wgsl).toContain("vec2<f16>(unpack2x16float(u32(0x40003c00u)))");
     expect([...result.buffers.f as Float32Array]).toEqual([1, 4]);
+    expect(Array.from(result.buffers.h as Iterable<number>)).toEqual([1, 4, 1, 2]);
+    expect([...result.buffers.bits as Uint32Array]).toEqual([0x44003c00]);
     expect([...result.buffers.out as Float32Array]).toEqual([6]);
   });
 
@@ -4598,7 +5592,7 @@ __global__ void reduction_alias_pack(const float *x, half2 *h, float *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.ir.requiredFeatures).toEqual(expect.arrayContaining(["shader-f16", "subgroups"]));
+    expect(backendIr(compiled).requiredFeatures).toEqual(expect.arrayContaining(["shader-f16", "subgroups"]));
     expect(compiled.wgsl).toContain("bg_warp_reduce_sum_float_32(x[i], 32u, local_id)");
     expect(compiled.wgsl).toContain("bg_warp_reduce_max_float_32(sum, 32u, local_id)");
     expect(compiled.wgsl).toContain("bg_warp_reduce_min_float_32(maxv, 32u, local_id)");
@@ -4625,7 +5619,7 @@ __global__ void reduce_int_alias(const int *x, int *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.ir.requiredFeatures).toContain("subgroups");
+    expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
     expect(compiled.wgsl).toContain("bg_warp_reduce_sum_int_32(x[i], 32u, local_id)");
     expect([...result.buffers.out as Int32Array]).toEqual([7]);
   });
@@ -5642,7 +6636,7 @@ __global__ (cufftComplex *data, int N) {
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
-    expect(compiled.ir.name).toBe("anonymous_kernel_1");
+    expect(backendIr(compiled).name).toBe("anonymous_kernel_1");
     expect([...result.buffers.data as Float32Array]).toEqual([2, 4, 6, 8]);
   });
 
@@ -6049,7 +7043,7 @@ __global__ void selected(float *x) {
     );
 
     expect([...result.buffers.x as Float32Array]).toEqual([5]);
-    expect(compiled.ir.name).toBe("selected");
+    expect(backendIr(compiled).name).toBe("selected");
     expect(compiled.wgsl).not.toContain("unused_launch");
   });
 
@@ -6195,7 +7189,7 @@ __global__ void selected(float *x) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.ir.constants.map((constant) => constant.name)).not.toContain("unused_coeffs");
+    expect(backendIr(compiled).constants.map((constant) => constant.name)).not.toContain("unused_coeffs");
     expect([...result.buffers.x as Float32Array]).toEqual([5]);
     expect(compiled.wgsl).not.toContain("unused_coeffs");
     expect(compiled.wgsl).not.toContain("unused_constant_helper");
@@ -6225,7 +7219,7 @@ __global__ void selected(float *x) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.ir.deviceGlobals.map((global) => global.name)).not.toContain("unused_state");
+    expect(backendIr(compiled).deviceGlobals.map((global) => global.name)).not.toContain("unused_state");
     expect([...result.buffers.x as Float32Array]).toEqual([5]);
     expect(compiled.wgsl).not.toContain("unused_state");
     expect(compiled.wgsl).not.toContain("unused_device_global_helper");
@@ -6256,7 +7250,7 @@ __global__ void selected(float *x) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.ir.functions.map((fn) => fn.name)).toEqual(["selected_helper"]);
+    expect(backendIr(compiled).functions.map((fn) => fn.name)).toEqual(["selected_helper"]);
     expect([...result.buffers.x as Float32Array]).toEqual([5]);
     expect(compiled.wgsl).toContain("selected_helper");
     expect(compiled.wgsl).not.toContain("unused_helper");
@@ -6283,9 +7277,9 @@ __global__ void selected(float *x) {
     );
 
     expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("missing-feature-shader-f16");
-    expect(compiled.ir.requiredFeatures).not.toContain("shader-f16");
-    expect(compiled.ir.constants.map((constant) => constant.name)).not.toContain("unused_coeffs");
-    expect(compiled.ir.deviceGlobals.map((global) => global.name)).not.toContain("unused_state");
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(backendIr(compiled).constants.map((constant) => constant.name)).not.toContain("unused_coeffs");
+    expect(backendIr(compiled).deviceGlobals.map((global) => global.name)).not.toContain("unused_state");
     expect([...result.buffers.x as Float32Array]).toEqual([5]);
     expect(compiled.wgsl).not.toContain("unused_coeffs");
     expect(compiled.wgsl).not.toContain("unused_state");
@@ -6487,6 +7481,37 @@ __global__ void parent(float *out, int enabled) {
     expect(executionPlan).toMatchObject({
       supported: true,
       kind: "single-dispatch",
+    });
+  });
+
+  it("rejects host-lifted dynamic launches followed by runtime query writes", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(int *out) {
+  if (threadIdx.x < 1) { out[0] = 7; }
+}
+__global__ void parent(int *out) {
+  if (threadIdx.x < 1) {
+    child<<<1, 1>>>(out);
+    cudaGetDevice(&out[1]);
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+
+    const executionPlan = createCudaWebGpuExecutionPlan(
+      compiled,
+      { buffers: { out: new Int32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      { compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options) },
+    );
+
+    expect(executionPlan).toMatchObject({
+      supported: false,
+      blockers: [{
+        code: "unsafe-parent-side-effects",
+      }],
     });
   });
 
@@ -6728,7 +7753,7 @@ __global__ void parent(int *out, int use_out) {
     });
   });
 
-  it("does not elide dynamic launches after unsupported assignment-expression pointer alias initialization", () => {
+  it("does not elide dynamic launches after assignment-expression pointer alias initialization", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void child(int *out) {
   if (threadIdx.x == 0) {
@@ -6755,10 +7780,57 @@ __global__ void parent(int *out) {
       { compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options) },
     );
 
-    expect(executionPlan.supported).toBe(false);
-    if (executionPlan.supported) throw new Error("expected assignment-expression pointer alias launch to be unsupported");
-    expect(executionPlan.blockers).toMatchObject([{ code: "dynamic-child-compile-failed" }]);
-    expect(executionPlan.reason).toContain("unsupported-local-pointer");
+    expect(executionPlan).toMatchObject({
+      supported: true,
+      kind: "host-dynamic-launch",
+    });
+
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array([4]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    expect([...result.buffers.out as Int32Array]).toEqual([5]);
+  });
+
+  it("does not elide dynamic launches after sequence pointer alias initialization", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void child(int *out) {
+  if (threadIdx.x == 0) {
+    int *tmp = nullptr;
+    int *ptr = (tmp = out, tmp);
+    atomicAdd(ptr, 1);
+  }
+}
+__global__ void parent(int *out) {
+  if (threadIdx.x == 0) {
+    child<<<1, 1>>>(out);
+    cudaDeviceSynchronize();
+  }
+}`, {
+      kernelName: "parent",
+      referenceDynamicParallelism: true,
+      workgroupSize: [1, 1, 1],
+    });
+
+    const executionPlan = createCudaWebGpuExecutionPlan(
+      compiled,
+      { buffers: { out: new Int32Array([4]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+      { compileKernel: (source, options = {}) => compileCudaLiteKernel(source, options) },
+    );
+
+    expect(executionPlan).toMatchObject({
+      supported: true,
+      kind: "host-dynamic-launch",
+    });
+
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array([4]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    expect([...result.buffers.out as Int32Array]).toEqual([5]);
   });
 
   it("plans host-liftable dynamic launches with DevicePool aliases", () => {
@@ -6945,7 +8017,7 @@ __global__ void parent(DevicePool *pool, int n) {
       blockDim: [2, 1, 1],
     });
 
-    expect(child.ir.name).toBe("childKernel");
+    expect(backendIr(child).name).toBe("childKernel");
     expect(compiled.wgsl).not.toContain("fn childKernel(");
     expect(child.wgsl).not.toContain("fn childKernel(");
     expect(plan.supported).toBe(true);
@@ -7211,29 +8283,501 @@ __global__ void parent(float *x) {
 
   it("treats standalone cudaDeviceSynchronize as a WebGPU-safe no-op", () => {
     const source = `
+__device__ float tunable_helper(float x) { return x + 1.0f; }
 __global__ void syncOnly(float *x) {
+  cudaStream_t stream;
+  cudaEvent_t event;
   if (threadIdx.x < 1) {
+    int attr = cudaFuncSetAttribute(tunable_helper, cudaFuncAttributeMaxDynamicSharedMemorySize, 0);
+    int cache = -1;
+    int bank = -1;
+    int cacheStatus = cudaDeviceGetCacheConfig(&cache);
+    int bankStatus = cudaDeviceGetSharedMemConfig(&bank);
+    int setCacheStatus = cudaDeviceSetCacheConfig(cudaFuncCachePreferShared);
+    int setBankStatus = cudaDeviceSetSharedMemConfig(cudaSharedMemBankSizeFourByte);
+    int funcCacheStatus = cudaFuncSetCacheConfig(tunable_helper, cudaFuncCachePreferL1);
+    int funcBankStatus = cudaFuncSetSharedMemConfig(tunable_helper, cudaSharedMemBankSizeFourByte);
+    int profilerStart = cudaProfilerStart();
+    int profilerStop = cudaProfilerStop();
+    cudaStreamCaptureMode captureMode = cudaStreamCaptureModeRelaxed;
+    int exchangeMode = cudaThreadExchangeStreamCaptureMode(&captureMode);
+    cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking);
+    cudaStreamCreateWithPriority(&stream, cudaStreamNonBlocking, 0);
+    cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
+    int streamReady = cudaStreamQuery(stream);
     cudaDeviceSynchronize();
-    x[0] = 9.0f;
+    cudaEventRecord(event, stream);
+    int eventRecordWithFlags = cudaEventRecordWithFlags(event, stream, cudaEventRecordExternal);
+    cudaStreamWaitEvent(stream, event, 0);
+    int eventReady = cudaEventQuery(event);
+    int freed = cudaFree(x);
+    int freedAsync = cudaFreeAsync(x, stream);
+    cudaEventSynchronize(event);
+    cudaStreamSynchronize(stream);
+    cudaEventDestroy(event);
+    cudaStreamDestroy(stream);
+    x[0] = tunable_helper(8.0f) + (float)(attr + cache + bank + cacheStatus + bankStatus + setCacheStatus + setBankStatus + funcCacheStatus + funcBankStatus + profilerStart + profilerStop + exchangeMode + captureMode + streamReady + eventRecordWithFlags + eventReady + freed + freedAsync + (int)(cudaEventWaitExternal - cudaEventRecordExternal));
   }
 }`;
-    expect(() => compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] })).toThrow(CudaLiteCompilerError);
-    const compiled = compileCudaLiteKernel(source, {
-      referenceDynamicParallelism: true,
-      workgroupSize: [1, 1, 1],
-    });
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [1, 1, 1] });
     const result = runCompiledKernelReference(
       compiled,
       { buffers: { x: new Float32Array([0]) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.diagnostics).toContainEqual(expect.objectContaining({
-      code: "unsupported-cuda-runtime",
-      severity: "warning",
-    }));
-    expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind)).toEqual(["device-sync"]);
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
+    expect(compiled.wgsl).toContain("var attr: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var cacheStatus: i32 = 0;");
+    expect(compiled.wgsl).toContain("var bankStatus: i32 = 0;");
+    expect(compiled.wgsl).toContain("var setCacheStatus: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var funcCacheStatus: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var profilerStart: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var profilerStop: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var exchangeMode: i32 = 0;");
+    expect(compiled.wgsl).toContain("captureMode = 0;");
+    expect(compiled.wgsl).toContain("var streamReady: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var eventRecordWithFlags: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var eventReady: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var freed: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var freedAsync: i32 = i32(0);");
+    expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind).every((kind) => kind === "device-sync")).toBe(true);
+    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { x: new Float32Array([0]) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
     expect([...result.buffers.x as Float32Array]).toEqual([9]);
+  });
+
+  it("models CUDA stream device/id/capture queries as deterministic zero-state writes", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void stream_queries(float *out) {
+  cudaStream_t stream;
+  cudaStreamCaptureStatus captureStatus = cudaStreamCaptureStatusActive;
+  cudaGraph_t graph = 7u;
+  if (threadIdx.x < 1) {
+    int device = -1;
+    uint streamId = 9u;
+    cudaStreamCaptureStatus captureInfoStatus = cudaStreamCaptureStatusActive;
+    uint captureId = 4u;
+    uint dependencyCount = 3u;
+    cudaStreamCreate(&stream);
+    int deviceStatus = cudaStreamGetDevice(stream, &device);
+    int idStatus = cudaStreamGetId(stream, &streamId);
+    int captureStatusResult = cudaStreamIsCapturing(stream, &captureStatus);
+    int captureInfoResult = cudaStreamGetCaptureInfo(stream, &captureInfoStatus, &captureId, &graph, NULL, NULL, &dependencyCount);
+    cudaStreamDestroy(stream);
+    out[0] = (float)(device + (int)streamId + captureStatus + captureInfoStatus + (int)captureId + (int)graph + (int)dependencyCount + deviceStatus + idStatus + captureStatusResult + captureInfoResult);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array([-1]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
+    expect(compiled.wgsl).toContain("device = 0;");
+    expect(compiled.wgsl).toContain("streamId = 0;");
+    expect(compiled.wgsl).toContain("captureStatus = 0;");
+    expect(compiled.wgsl).toContain("captureInfoStatus = 0;");
+    expect(compiled.wgsl).toContain("dependencyCount = 0;");
+    expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind).every((kind) => kind === "device-sync")).toBe(true);
+    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Float32Array([-1]) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
+    expect([...result.buffers.out as Float32Array]).toEqual([0]);
+  });
+
+  it("treats CUDA unified-memory advice and prefetch calls as WebGPU-safe no-ops", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void unified_memory_hints(float *x, int n) {
+  cudaStream_t stream;
+  if (threadIdx.x < 1) {
+    cudaStreamCreate(&stream);
+    int cache = cudaCtxResetPersistingL2Cache();
+    int advise = cudaMemAdvise(x, sizeof(float) * n, cudaMemAdviseSetPreferredLocation, 0);
+    int prefetch = cudaMemPrefetchAsync(x, sizeof(float) * n, 0, stream);
+    int attach = cudaStreamAttachMemAsync(stream, x, sizeof(float) * n, cudaMemAttachSingle);
+    cudaStreamDestroy(stream);
+    x[0] = 7.0f + (float)(cache + advise + prefetch + attach + (int)(cudaMemAttachGlobal + cudaMemAttachHost - 3u));
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { x: new Float32Array([0]) }, scalars: { n: 1 } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
+    expect(compiled.wgsl).toContain("var cache: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var advise: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var prefetch: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var attach: i32 = i32(0);");
+    expect(createCudaRuntimePlan(compiled).operations.map((operation) => operation.kind).every((kind) => kind === "device-sync")).toBe(true);
+    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { x: new Float32Array([0]) }, scalars: { n: 1 } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
+    expect([...result.buffers.x as Float32Array]).toEqual([7]);
+  });
+
+  it("models cudaEventElapsedTime as a zero elapsed-time write", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void event_elapsed(float *out) {
+  cudaEvent_t start;
+  cudaEvent_t stop;
+  if (threadIdx.x < 1) {
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    cudaEventRecord(start);
+    cudaEventRecord(stop);
+    float ms = -1.0f;
+    int status = -1;
+    status = cudaEventElapsedTime(&ms, start, stop);
+    cudaEventElapsedTime(&out[2], start, stop);
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+    out[0] = ms;
+    out[1] = (float)status;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array([-1, -1, -1]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
+    expect(compiled.wgsl).toContain("var status: i32 = (-1);");
+    expect(compiled.wgsl).toContain("status = 0;");
+    expect(compiled.wgsl).toContain("ms = 0.0;");
+    expect(compiled.wgsl).toContain("out[2] = f32(0.0);");
+    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Float32Array(3) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
+    expect([...result.buffers.out as Float32Array]).toEqual([0, 0, 0]);
+  });
+
+  it("models CUDA stream priority range queries", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void stream_priority_range(int *out) {
+  if (threadIdx.x < 1) {
+    int least = -7;
+    int greatest = -9;
+    int status = cudaDeviceGetStreamPriorityRange(&least, &greatest);
+    cudaDeviceGetStreamPriorityRange(&out[3], &out[4]);
+    out[0] = least;
+    out[1] = greatest;
+    out[2] = status;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(5).fill(-1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
+    expect(compiled.wgsl).toContain("var status: i32 = 0;");
+    expect(compiled.wgsl).toContain("least = 0;");
+    expect(compiled.wgsl).toContain("greatest = 0;");
+    expect(compiled.wgsl).toContain("out[3] = i32(0);");
+    expect(compiled.wgsl).toContain("out[4] = i32(0);");
+    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Int32Array(5) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
+    expect([...result.buffers.out as Int32Array]).toEqual([0, 0, 0, 0, 0]);
+  });
+
+  it("models CUDA stream flag and priority queries", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void stream_queries(uint *flagsOut, int *priorityOut) {
+  cudaStream_t stream;
+  if (threadIdx.x < 1) {
+    cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking);
+    uint flags = 99u;
+    int priority = -7;
+    int flagStatus = -1;
+    flagStatus = cudaStreamGetFlags(stream, &flags);
+    int priorityStatus = cudaStreamGetPriority(stream, &priority);
+    cudaStreamGetFlags(stream, &flagsOut[1]);
+    cudaStreamGetPriority(stream, &priorityOut[2]);
+    cudaStreamDestroy(stream);
+    flagsOut[0] = flags + (uint)flagStatus;
+    priorityOut[0] = priority;
+    priorityOut[1] = priorityStatus;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          flagsOut: new Uint32Array(2).fill(77),
+          priorityOut: new Int32Array(3).fill(-1),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
+    expect(compiled.wgsl).toContain("var flagStatus: i32 = (-1);");
+    expect(compiled.wgsl).toContain("flagStatus = 0;");
+    expect(compiled.wgsl).toMatch(/\bflags = 0u?;/u);
+    expect(compiled.wgsl).toContain("priority = 0;");
+    expect(compiled.wgsl).toContain("flagsOut[1] = 0u;");
+    expect(compiled.wgsl).toContain("priorityOut[2] = i32(0);");
+    expect(createCudaWebGpuExecutionPlan(
+      compiled,
+      { buffers: { flagsOut: new Uint32Array(2), priorityOut: new Int32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    ).supported).toBe(true);
+    expect([...result.buffers.flagsOut as Uint32Array]).toEqual([0, 0]);
+    expect([...result.buffers.priorityOut as Int32Array]).toEqual([0, 0, 0]);
+  });
+
+  it("models CUDA device flag queries and setters", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void device_flags(uint *out) {
+  if (threadIdx.x < 1) {
+    uint flags = 99u;
+    int status = -1;
+    status = cudaGetDeviceFlags(&flags);
+    int setStatus = cudaSetDeviceFlags(cudaDeviceScheduleSpin | cudaDeviceMapHost);
+    cudaGetDeviceFlags(&out[3]);
+    out[0] = flags;
+    out[1] = (uint)status;
+    out[2] = (uint)setStatus;
+    out[4] = cudaDeviceLmemResizeToMax;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(5).fill(77) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
+    expect(compiled.wgsl).toContain("var status: i32 = (-1);");
+    expect(compiled.wgsl).toContain("status = 0;");
+    expect(compiled.wgsl).toContain("var setStatus: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("flags = 0;");
+    expect(compiled.wgsl).toContain("out[3] = 0u;");
+    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Uint32Array(5) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
+    expect([...result.buffers.out as Uint32Array]).toEqual([0, 0, 0, 0, 16]);
+  });
+
+  it("treats CUDA device selection and last-error status as WebGPU-safe no-ops", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void runtime_status(int *out) {
+  if (threadIdx.x < 1) {
+    int set = cudaSetDevice(0);
+    int reset = cudaDeviceReset();
+    int last = cudaGetLastError();
+    int peek = cudaPeekAtLastError();
+    out[0] = set + reset + last + peek + (last == cudaSuccess ? 0 : cudaErrorInvalidValue);
+    out[1] = cudaErrorNotReady - 34;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array([5, 5]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
+    expect(compiled.wgsl).toContain("var set: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var reset: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var last: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var peek: i32 = i32(0);");
+    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Int32Array([5, 5]) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
+    expect([...result.buffers.out as Int32Array]).toEqual([0, 0]);
+  });
+
+  it("models cudaGetDevice as a status no-op that writes device zero", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void runtime_get_device(int *out) {
+  if (threadIdx.x < 1) {
+    int local = -1;
+    int count = -1;
+    int warp = -1;
+    int blocks = -1;
+    int runtimeVersion = -1;
+    int driverVersion = -1;
+    int peer = -1;
+    int status = cudaGetDevice(&local);
+    int countStatus = cudaGetDeviceCount(&count);
+    int attrStatus = cudaDeviceGetAttribute(&warp, cudaDevAttrWarpSize, 0);
+    cudaDeviceGetAttribute(&blocks, cudaDevAttrMaxThreadsPerBlock, 0);
+    int runtimeStatus = cudaRuntimeGetVersion(&runtimeVersion);
+    cudaDriverGetVersion(&driverVersion);
+    int peerStatus = cudaDeviceCanAccessPeer(&peer, 0, 0);
+    int enablePeerStatus = cudaDeviceEnablePeerAccess(0, 0);
+    int disablePeerStatus = cudaDeviceDisablePeerAccess(0);
+    cudaGetDevice(&out[2]);
+    cudaGetDeviceCount(&out[3]);
+    out[0] = local;
+    out[1] = status;
+    out[4] = count;
+    out[5] = countStatus;
+    out[6] = warp;
+    out[7] = blocks + attrStatus;
+    out[8] = runtimeVersion + runtimeStatus;
+    out[9] = driverVersion;
+    out[10] = peer + peerStatus + enablePeerStatus + disablePeerStatus;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(11).fill(-1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
+    expect(compiled.wgsl).toContain("var status: i32 = 0;");
+    expect(compiled.wgsl).toContain("var countStatus: i32 = 0;");
+    expect(compiled.wgsl).toContain("var attrStatus: i32 = 0;");
+    expect(compiled.wgsl).toContain("var runtimeStatus: i32 = 0;");
+    expect(compiled.wgsl).toContain("var peerStatus: i32 = 0;");
+    expect(compiled.wgsl).toContain("var enablePeerStatus: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("local = 0;");
+    expect(compiled.wgsl).toContain("count = 1;");
+    expect(compiled.wgsl).toContain("warp = 32;");
+    expect(compiled.wgsl).toContain("blocks = 1024;");
+    expect(compiled.wgsl).toContain("runtimeVersion = 12000;");
+    expect(compiled.wgsl).toContain("driverVersion = 12000;");
+    expect(compiled.wgsl).toContain("out[2] = i32(0);");
+    expect(compiled.wgsl).toContain("out[3] = i32(1);");
+    expect(compiled.wgsl).toContain("peer = 1;");
+    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Int32Array(11).fill(-1) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
+    expect([...result.buffers.out as Int32Array]).toEqual([0, 0, 0, 1, 1, 0, 32, 1024, 12000, 12000, 1]);
+  });
+
+  it("models CUDA device limit queries over size_t outputs", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void runtime_limit_query(uint *out) {
+  if (threadIdx.x < 1) {
+    size_t limit = 0;
+    int status = cudaDeviceGetLimit(&limit, cudaLimitPrintfFifoSize);
+    int setStatus = cudaDeviceSetLimit(cudaLimitPrintfFifoSize, limit);
+    out[0] = limit;
+    out[1] = (uint)(status + setStatus);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array([0, 9]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
+    expect(compiled.wgsl).toContain("var status: i32 = 0;");
+    expect(compiled.wgsl).toContain("var setStatus: i32 = i32(0);");
+    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Uint32Array(2) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
+    expect([...result.buffers.out as Uint32Array]).toEqual([1048576, 0]);
+  });
+
+  it("models deprecated CUDA thread runtime aliases", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void thread_aliases(uint *limits, int *status) {
+  if (threadIdx.x < 1) {
+    size_t limit = 0;
+    int cache = -1;
+    int limitStatus = cudaThreadGetLimit(&limit, cudaLimitPrintfFifoSize);
+    int cacheStatus = cudaThreadGetCacheConfig(&cache);
+    int setLimitStatus = cudaThreadSetLimit(cudaLimitPrintfFifoSize, limit);
+    int setCacheStatus = cudaThreadSetCacheConfig(cudaFuncCachePreferShared);
+    int syncStatus = cudaThreadSynchronize();
+    int exitStatus = cudaThreadExit();
+    limits[0] = limit;
+    status[0] = cache;
+    status[1] = limitStatus + cacheStatus + setLimitStatus + setCacheStatus + syncStatus + exitStatus;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { limits: new Uint32Array([0]), status: new Int32Array([-1, -1]) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
+    expect(compiled.wgsl).toContain("var limitStatus: i32 = 0;");
+    expect(compiled.wgsl).toContain("var cacheStatus: i32 = 0;");
+    expect(compiled.wgsl).toContain("var setLimitStatus: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var setCacheStatus: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var syncStatus: i32 = i32(0);");
+    expect(compiled.wgsl).toContain("var exitStatus: i32 = i32(0);");
+    expect(createCudaWebGpuExecutionPlan(
+      compiled,
+      { buffers: { limits: new Uint32Array(1), status: new Int32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    ).supported).toBe(true);
+    expect([...result.buffers.limits as Uint32Array]).toEqual([1048576]);
+    expect([...result.buffers.status as Int32Array]).toEqual([0, 0]);
+  });
+
+  it("models cudaMemGetInfo over size_t outputs", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void runtime_mem_info(uint *out) {
+  if (threadIdx.x < 1) {
+    size_t freeBytes = 0;
+    size_t totalBytes = 0;
+    int status = cudaMemGetInfo(&freeBytes, &totalBytes);
+    cudaMemGetInfo(&out[2], &out[3]);
+    out[0] = freeBytes + (uint)status;
+    out[1] = totalBytes;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(4) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
+    expect(compiled.wgsl).toContain("var status: i32 = 0;");
+    expect(compiled.wgsl).toContain("freeBytes = 268435456;");
+    expect(compiled.wgsl).toContain("totalBytes = 268435456;");
+    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Uint32Array(4) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
+    expect([...result.buffers.out as Uint32Array]).toEqual([268435456, 268435456, 268435456, 268435456]);
+  });
+
+  it("models CUDA occupancy runtime queries", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void runtime_occupancy(int *out) {
+  if (threadIdx.x < 1) {
+    int active = -1;
+    int activeFlags = -1;
+    int minGrid = -1;
+    int blockSize = -1;
+    int minGridFlags = -1;
+    int blockSizeFlags = -1;
+    int activeStatus = cudaOccupancyMaxActiveBlocksPerMultiprocessor(&active, runtime_occupancy, 128, 0);
+    int activeFlagsStatus = cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(&activeFlags, runtime_occupancy, 128, 0, cudaOccupancyDisableCachingOverride);
+    int potentialStatus = cudaOccupancyMaxPotentialBlockSize(&minGrid, &blockSize, runtime_occupancy, 0, 0);
+    int potentialFlagsStatus = cudaOccupancyMaxPotentialBlockSizeWithFlags(&minGridFlags, &blockSizeFlags, runtime_occupancy, 0, 0, cudaOccupancyDefault);
+    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&out[10], runtime_occupancy, 128, 0);
+    cudaOccupancyMaxPotentialBlockSize(&out[11], &out[12], runtime_occupancy, 0, 0);
+    out[0] = active;
+    out[1] = activeStatus;
+    out[2] = activeFlags;
+    out[3] = activeFlagsStatus;
+    out[4] = minGrid;
+    out[5] = blockSize;
+    out[6] = potentialStatus;
+    out[7] = minGridFlags;
+    out[8] = blockSizeFlags;
+    out[9] = potentialFlagsStatus;
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(13).fill(-1) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-cuda-runtime");
+    expect(compiled.wgsl).toContain("var activeStatus: i32 = 0;");
+    expect(compiled.wgsl).toContain("var potentialStatus: i32 = 0;");
+    expect(compiled.wgsl).toContain("active = 1;");
+    expect(compiled.wgsl).toContain("activeFlags = 1;");
+    expect(compiled.wgsl).toContain("minGrid = 1;");
+    expect(compiled.wgsl).toContain("blockSize = 256;");
+    expect(compiled.wgsl).toContain("minGridFlags = 1;");
+    expect(compiled.wgsl).toContain("blockSizeFlags = 256;");
+    expect(compiled.wgsl).toContain("out[10] = i32(1);");
+    expect(compiled.wgsl).toContain("out[11] = i32(1);");
+    expect(compiled.wgsl).toContain("out[12] = i32(256);");
+    expect(createCudaWebGpuExecutionPlan(compiled, { buffers: { out: new Int32Array(13) } }, { gridDim: [1, 1, 1], blockDim: [1, 1, 1] }).supported).toBe(true);
+    expect([...result.buffers.out as Int32Array]).toEqual([1, 0, 1, 0, 1, 256, 0, 1, 256, 0, 1, 1, 256]);
   });
 
   it("validates CUDA graph conditional setters as host-managed scheduler side effects", () => {
@@ -9132,10 +10676,10 @@ __global__ void padded(float *x) {
   });
 
   it("normalizes simple C++ aliases and CUDA kernel qualifiers before parsing", () => {
-    expect(compileCudaLiteKernel(`
+    expect(backendIr(compileCudaLiteKernel(`
 static __global__ void staticFirst(int *out) {
   out[0] = 1;
-}`).ir.name).toBe("staticFirst");
+}`)).name).toBe("staticFirst");
 
     const compiled = compileCudaLiteKernel(`
 #define WARP_SIZE 32
@@ -9157,7 +10701,7 @@ __global__ static void __launch_bounds__(WARP_SIZE * 2) boundedAlias(scalar_t *o
       { gridDim: [1, 1, 1], blockDim: [16, 1, 1] },
     );
 
-    expect(compiled.ir.params.map((param) => [param.name, param.valueType])).toContainEqual(["n", "uint"]);
+    expect(backendIr(compiled).params.map((param) => [param.name, param.valueType])).toContainEqual(["n", "uint"]);
     expect(compiled.wgsl).toContain("array<f32, 16>");
     expect([...result.buffers.out as Float32Array].slice(0, 3)).toEqual([16, 17, 0]);
   });
@@ -9187,7 +10731,7 @@ __global__ void templated(float *out) {
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
-    expect(compiled.ir.sharedDeclarations[0]?.dimensions).toEqual([2]);
+    expect(backendIr(compiled).sharedDeclarations[0]?.dimensions).toEqual([2]);
     expect(compiled.wgsl).toContain("var<workgroup> scratch: array<f32, 2>;");
     expect([...result.buffers.out as Float32Array]).toEqual([1]);
   });
@@ -9208,7 +10752,7 @@ __global__ void templatedBool(float *out) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(compiled.ir.sharedDeclarations[0]?.dimensions).toEqual([4]);
+    expect(backendIr(compiled).sharedDeclarations[0]?.dimensions).toEqual([4]);
     expect([...result.buffers.out as Float32Array]).toEqual([4]);
   });
 
@@ -9287,7 +10831,7 @@ __global__ void bounded(float *x) {
   if (threadIdx.x < 1) { x[0] = 1.0f; }
 }`, { workgroupSize: [1, 1, 1] });
 
-    expect(compiled.ir.name).toBe("bounded");
+    expect(backendIr(compiled).name).toBe("bounded");
     expect(compiled.wgsl).toContain("@workgroup_size(1, 1, 1)");
   });
 
@@ -9311,7 +10855,7 @@ __global__ void scale(const float *x, float *y, int n) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(compiled.ir.constants.map((constant) => constant.name)).toEqual(["scaleFactor"]);
+    expect(backendIr(compiled).constants.map((constant) => constant.name)).toEqual(["scaleFactor"]);
     expect(compiled.wgsl).toContain("scaleFactor: f32");
     expect(compiled.wgsl).toContain("bg_uniforms.scaleFactor");
     expect([...result.buffers.y as Float32Array]).toEqual([3, 6, 9, 12]);
@@ -9329,7 +10873,7 @@ __global__ void const_table(int *out) {
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
-    expect(compiled.ir.constants.map((constant) => constant.name)).toEqual(["table"]);
+    expect(backendIr(compiled).constants.map((constant) => constant.name)).toEqual(["table"]);
     expect([...result.buffers.out as Int32Array]).toEqual([3, 5]);
   });
 
@@ -9588,7 +11132,7 @@ __global__ void apply(float *x, int *out) {
       { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
     );
 
-    expect(compiled.ir.constants.map((constant) => [constant.name, constant.dimensions])).toEqual([
+    expect(backendIr(compiled).constants.map((constant) => [constant.name, constant.dimensions])).toEqual([
       ["scale", []],
       ["coeffs", [3]],
     ]);
@@ -9630,7 +11174,7 @@ __global__ void sample(float *out, int width) {
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
-    expect(compiled.ir.textures.map((texture) => texture.name)).toEqual(["texRef"]);
+    expect(backendIr(compiled).textures.map((texture) => texture.name)).toEqual(["texRef"]);
     expect(compiled.wgsl).toContain("var texRef: texture_2d<f32>;");
     expect(compiled.wgsl).toContain("bg_tex2d_f32_texRef");
     expect(compiled.wgslProgram.bindings).toContainEqual(expect.objectContaining({
@@ -9658,7 +11202,7 @@ __global__ void sample(float *out, int width, cudaTextureObject_t tex) {
       { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
     );
 
-    expect(compiled.ir.params.find((param) => param.name === "tex")?.valueType).toBe("texture2d");
+    expect(backendIr(compiled).params.find((param) => param.name === "tex")?.valueType).toBe("texture2d");
     expect(compiled.wgsl).toContain("var tex: texture_2d<f32>;");
     expect(compiled.wgsl).toContain("bg_tex2d_f32_tex");
     expect(compiled.wgslProgram.bindings).toContainEqual(expect.objectContaining({
@@ -9740,6 +11284,40 @@ __global__ void sample(uint *out) {
 
     expect(compiled.wgsl).toContain("bg_tex2d_uchar_texRef");
     expect([...result.buffers.out as Uint32Array]).toEqual([2, 127, 255]);
+  });
+
+  it("lowers templated bf16 and bf162 tex2D reads with native WebGPU f32 storage", () => {
+    const compiled = compileCudaLiteKernel(`
+texture<float, cudaTextureType2D, cudaReadModeElementType> texRef;
+__global__ void sample(float *out, uint *bits) {
+  __nv_bfloat16 scalar = tex2D<__nv_bfloat16>(texRef, 0.5f, 0.5f);
+  __nv_bfloat162 pair = tex2D<__nv_bfloat162>(texRef, 0.5f, 0.5f);
+  out[0] = __bfloat162float(scalar);
+  out[1] = pair.x;
+  out[2] = pair.y;
+  bits[0] = __bfloat16_as_ushort(scalar);
+  bits[1] = __bfloat162_as_uint(pair);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          out: new Float32Array(3),
+          bits: new Uint32Array(2),
+        },
+        textures: { texRef: { width: 1, height: 1, data: new Float32Array([1.1, 2.2, 3.3, 4.4]), channels: 4 } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-texture");
+    expect(compiled.wgsl).toContain("bg_tex2d_bf16_texRef");
+    expect(compiled.wgsl).toContain("bg_tex2d_bf162_texRef");
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect([...result.buffers.out as Float32Array][0]).toBeCloseTo(1.1015625);
+    expect([...result.buffers.out as Float32Array][1]).toBeCloseTo(1.1015625);
+    expect([...result.buffers.out as Float32Array][2]).toBeCloseTo(2.203125);
+    expect([...result.buffers.bits as Uint32Array]).toEqual([0x3f8d, 0x400d3f8d]);
   });
 
   it("passes CUDA texture handles through device helper params", () => {
@@ -9967,7 +11545,7 @@ __global__ void sample(float *out, CUtexObject tex) {
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
-    expect(compiled.ir.params.find((param) => param.name === "tex")?.valueType).toBe("texture2d");
+    expect(backendIr(compiled).params.find((param) => param.name === "tex")?.valueType).toBe("texture2d");
     expect([...result.buffers.out as Float32Array]).toEqual([7, 11]);
   });
 
@@ -10173,7 +11751,7 @@ __global__ void writeSurface(CUsurfObject surf) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.ir.params.find((param) => param.name === "surf")?.valueType).toBe("surface2d");
+    expect(backendIr(compiled).params.find((param) => param.name === "surf")?.valueType).toBe("surface2d");
     expect([...result.buffers.surf as Float32Array]).toEqual([3, 13]);
   });
 
@@ -10280,7 +11858,7 @@ __global__ void halfCompat(half* x, half2* y, half a) {
       f16Mode: "f32",
       workgroupSize: [1, 1, 1],
     });
-    expect(compiled.ir.requiredFeatures).not.toContain("shader-f16");
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.wgsl).not.toContain("enable f16;");
     expect(compiled.wgsl).not.toMatch(/\bf16\b/u);
     expect(compiled.wgsl).toContain("vec2<f32>");
@@ -10310,7 +11888,7 @@ __global__ void subgroupCompat(float* x) {
       subgroupMode: "scalar",
       workgroupSize: [32, 1, 1],
     });
-    expect(compiled.ir.requiredFeatures).not.toContain("subgroups");
+    expect(backendIr(compiled).requiredFeatures).not.toContain("subgroups");
     expect(compiled.wgsl).not.toContain("enable subgroups;");
     expect(compiled.wgsl).not.toMatch(/\bsubgroup(?:Add|Max|Min|Shuffle|Ballot|Any|All)/u);
   });
@@ -10546,6 +12124,9 @@ __global__ void half_convert(const half* input, half* output, int* flag) {
     float big = 1e6f;
     if (big > 999999.0f) { atomicExch(flag, 1); }
     output[idx] = __float2half(value * 2.0f);
+    output[idx + 1] = __uint2half_rn(4u);
+    flag[idx + 1] = __half_as_ushort(__float2half(1.5f));
+    output[idx + 2] = __ushort_as_half(0x3c00u);
   }
 }`, {
       features: { "shader-f16": true },
@@ -10556,8 +12137,8 @@ __global__ void half_convert(const half* input, half* output, int* flag) {
       {
         buffers: {
           input: createWgslFloat16Array([1.5]),
-          output: createWgslFloat16Array(1),
-          flag: new Int32Array([0]),
+          output: createWgslFloat16Array(3),
+          flag: new Int32Array(2),
         },
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
@@ -10565,9 +12146,56 @@ __global__ void half_convert(const half* input, half* output, int* flag) {
 
     expect(compiled.wgsl).toContain("f32(input[idx])");
     expect(compiled.wgsl).toContain("f16((value * 2.0))");
+    expect(compiled.wgsl).toContain("f16(f32(u32(4u)))");
+    expect(compiled.wgsl).toContain("pack2x16float(vec2<f32>(f32(f16(1.5)), 0.0)) & 0xffffu");
+    expect(compiled.wgsl).toContain("f16(unpack2x16float(u32(0x3c00u)).x)");
     expect(compiled.wgsl).toContain("1e6");
-    expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([3]);
-    expect([...result.buffers.flag as Int32Array]).toEqual([1]);
+    expect(Array.from(result.buffers.output as Iterable<number>)).toEqual([3, 4, 1]);
+    expect([...result.buffers.flag as Int32Array]).toEqual([1, 0x3e00]);
+  });
+
+  it("lowers CUDA half-to-int conversion rounding modes", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void half_int_modes(const half* input, int* iout, uint* uout) {
+  half a = input[0];
+  half b = input[1];
+  half c = input[2];
+  half d = input[3];
+  iout[0] = __half2int_rn(a);
+  iout[1] = __half2int_rz(a);
+  iout[2] = __half2int_ru(a);
+  iout[3] = __half2int_rd(a);
+  iout[4] = __half2int_rn(b);
+  iout[5] = __half2int_rn(c);
+  iout[6] = __half2int_rd(c);
+  uout[0] = __half2uint_rn(b);
+  uout[1] = __half2uint_rz(d);
+  uout[2] = __half2uint_ru(d);
+  uout[3] = __half2uint_rd(d);
+}`, {
+      features: { "shader-f16": true },
+      workgroupSize: [1, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          input: createWgslFloat16Array([2.5, 3.5, -2.5, 3.25]),
+          iout: new Int32Array(7),
+          uout: new Uint32Array(4),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.wgsl).toContain("bg_round_even_f32(f32(a))");
+    expect(compiled.wgsl).toContain("i32(trunc(f32(a)))");
+    expect(compiled.wgsl).toContain("i32(ceil(f32(a)))");
+    expect(compiled.wgsl).toContain("i32(floor(f32(a)))");
+    expect(compiled.wgsl).toContain("u32(max(bg_round_even_f32(f32(b)), 0.0))");
+    expect([...result.buffers.iout as Int32Array]).toEqual([2, 2, 3, 2, 4, -2, -3]);
+    expect([...result.buffers.uout as Uint32Array]).toEqual([4, 3, 4, 3]);
   });
 
   it("lowers CUDA fp8 storage conversions through explicit helpers", () => {
@@ -10606,14 +12234,22 @@ __global__ void fp8_convert(const uint* input, half* output, uint* encoded, int*
 
   it("lowers CUDA bf16 values as rounded f32 browser storage", () => {
     const compiled = compileCudaLiteKernel(`
-__global__ void bf16_convert(const __nv_bfloat16* input, __nv_bfloat16* output, float* as_float) {
+__global__ void bf16_convert(const __nv_bfloat16* input, __nv_bfloat16* output, float* as_float, uint* bits) {
   int idx = threadIdx.x;
   if (idx < 1) {
     __nv_bfloat16 a = input[0];
     __nv_bfloat16 b = __float2bfloat16(0.1f);
     __nv_bfloat162 pair = __halves2bfloat162(a, b);
+    __nv_bfloat162 rawPair = __uint_as_bfloat162(0x40003fc0u);
     output[0] = __hadd(pair.x, pair.y);
+    output[1] = __ushort_as_bfloat16(0x3fc0u);
+    output[2] = rawPair.x;
+    output[3] = rawPair.y;
     as_float[0] = __bfloat162float(output[0]);
+    bits[0] = __bfloat16_as_ushort(output[1]);
+    bits[1] = __nv_bfloat16_as_ushort(__float2bfloat16(2.0f));
+    bits[2] = __bfloat162_as_uint(rawPair);
+    bits[3] = __nv_bfloat162_as_uint(__uint_as_nv_bfloat162(0x40403f80u));
   }
 }`, {
       workgroupSize: [1, 1, 1],
@@ -10623,17 +12259,67 @@ __global__ void bf16_convert(const __nv_bfloat16* input, __nv_bfloat16* output, 
       {
         buffers: {
           input: new Float32Array([1.5]),
-          output: new Float32Array(1),
+          output: new Float32Array(4),
           as_float: new Float32Array(1),
+          bits: new Uint32Array(4),
         },
       },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.ir.requiredFeatures).not.toContain("shader-f16");
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
     expect(compiled.wgsl).toContain("vec2<f32>");
+    expect(compiled.wgsl).toContain("((bitcast<u32>(f32(output[1])) >> 16u) & 0xffffu)");
+    expect(compiled.wgsl).toContain("vec2<f32>(bitcast<f32>((u32(0x40003fc0u) & 0x0000ffffu) << 16u), bitcast<f32>(u32(0x40003fc0u) & 0xffff0000u))");
     expect([...result.buffers.output as Float32Array][0]).toBeCloseTo(1.6015625);
+    expect([...result.buffers.output as Float32Array][1]).toBeCloseTo(1.5);
+    expect([...result.buffers.output as Float32Array][2]).toBeCloseTo(1.5);
+    expect([...result.buffers.output as Float32Array][3]).toBeCloseTo(2);
     expect([...result.buffers.as_float as Float32Array][0]).toBeCloseTo(1.6015625);
+    expect([...result.buffers.bits as Uint32Array]).toEqual([0x3fc0, 0x4000, 0x40003fc0, 0x40403f80]);
+  });
+
+  it("lowers CUDA bf16 integer conversion rounding modes", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void bf16_int_modes(int* iout, uint* uout, __nv_bfloat16* output) {
+  __nv_bfloat16 a = __float2bfloat16(2.5f);
+  __nv_bfloat16 b = __float2bfloat16(3.5f);
+  __nv_bfloat16 c = __float2bfloat16(-2.5f);
+  __nv_bfloat16 d = __float2bfloat16(3.25f);
+  iout[0] = __bfloat162int_rn(a);
+  iout[1] = __bfloat162int_rz(a);
+  iout[2] = __bfloat162int_ru(a);
+  iout[3] = __bfloat162int_rd(a);
+  iout[4] = __bfloat162int_rn(b);
+  iout[5] = __bfloat162int_rn(c);
+  iout[6] = __bfloat162int_rd(c);
+  uout[0] = __bfloat162uint_rn(b);
+  uout[1] = __bfloat162uint_rz(d);
+  uout[2] = __bfloat162uint_ru(d);
+  uout[3] = __bfloat162uint_rd(d);
+  output[0] = __int2bfloat16_rn(iout[2]);
+  output[1] = __uint2bfloat16_rn(uout[2]);
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          iout: new Int32Array(7),
+          uout: new Uint32Array(4),
+          output: new Float32Array(2),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(backendIr(compiled).requiredFeatures).not.toContain("shader-f16");
+    expect(compiled.wgsl).toContain("bg_round_even_f32(f32(a))");
+    expect(compiled.wgsl).toContain("i32(trunc(f32(a)))");
+    expect(compiled.wgsl).toContain("u32(max(bg_round_even_f32(f32(b)), 0.0))");
+    expect([...result.buffers.iout as Int32Array]).toEqual([2, 2, 3, 2, 4, -2, -3]);
+    expect([...result.buffers.uout as Uint32Array]).toEqual([4, 3, 4, 3]);
+    expect([...result.buffers.output as Float32Array]).toEqual([3, 4]);
   });
 
   it("supports CUDA cache-hint pointer helpers for bf16 storage", () => {
@@ -11038,7 +12724,7 @@ __global__ void helper_byte_atomic(uchar* scratch, uint* out) {
     );
 
     expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
-    expect(compiled.ir.atomicParams).toContain("scratch");
+    expect(backendIr(compiled).atomicParams).toContain("scratch");
     expect(compiled.wgsl).toContain("fn bg_ptr_atomicAdd_u32(");
     expect(compiled.wgsl).toContain("case 0u: { return atomicAdd(&scratch[(u32(index)) >> 2u], value); }");
     expect([...result.buffers.out as Uint32Array]).toEqual([7, 12]);
@@ -11077,7 +12763,7 @@ __global__ void signed_byte_atomic(uchar* scratch, int* out) {
     );
 
     expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
-    expect(compiled.ir.atomicParams).toContain("scratch");
+    expect(backendIr(compiled).atomicParams).toContain("scratch");
     expect(compiled.wgsl).toContain("case 0u: { return bg_atomicAdd_storage_u32_as_i32(&scratch[(u32(index)) >> 2u], value); }");
     expect(compiled.wgsl).toContain("case 0u: { return bg_atomicMin_storage_u32_as_i32(&scratch[(u32(index)) >> 2u], value); }");
     expect(compiled.wgsl).toContain("case 0u: { return bg_atomicMax_storage_u32_as_i32(&scratch[(u32(index)) >> 2u], value); }");
@@ -11107,7 +12793,7 @@ __global__ void uchar_shared(uint* out) {
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
 
-    expect(compiled.ir.sharedDeclarations[0]?.valueType).toBe("uchar");
+    expect(backendIr(compiled).sharedDeclarations[0]?.valueType).toBe("uchar");
     expect(compiled.wgsl).toContain("var<workgroup> bytes: array<atomic<u32>, 4>;");
     expect(compiled.wgsl).toContain("fn bg_ptr_read_u8(");
     expect(compiled.wgsl).toContain("fn bg_ptr_write_u8(");
@@ -11761,6 +13447,59 @@ __global__ void loop_update_pointer_atomic(uint* left, uint* right, uint* out) {
     expect(compiled.wgsl).toContain("var<storage, read_write> out: array<u32>;");
   });
 
+  it("lowers standalone comma expression statements instead of blocking compatibility", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sequence_stmt(float* out) {
+  int i = 0;
+  int j = 0;
+  if (threadIdx.x == 0) {
+    i = 2, j = i + 3, out[0] = (float)j;
+    int k = (j = 4, j + 1);
+    out[1] = (k = k + 2, (float)k);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-sequence-expression");
+    expect(compiled.wgsl).toContain("i = 2;");
+    expect(compiled.wgsl).toContain("j = (i + 3);");
+    expect(compiled.wgsl).toContain("k = (k + 2);");
+    expect([...result.buffers.out as Float32Array]).toEqual([5, 7]);
+  });
+
+  it("lowers comma sequence return values in device helpers", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ int sequence_return(int value) {
+  int local = value;
+  return (local += 2, local * 3);
+}
+
+__device__ int assignment_return(int value) {
+  int local = value;
+  return (local += 3, local = local + 4);
+}
+
+__global__ void sequence_return_kernel(int* out) {
+  if (threadIdx.x == 0) {
+    out[0] = sequence_return(4);
+    out[1] = assignment_return(5);
+  }
+}`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Int32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-sequence-expression");
+    expect(compiled.wgsl).toContain("var bg_return_value_");
+    expect([...result.buffers.out as Int32Array]).toEqual([18, 12]);
+  });
+
   it("keeps unrelated same-type storage non-atomic for helper pointer atomics", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ void add_one(uint* target) {
@@ -11822,7 +13561,7 @@ __global__ void read_global(uint* out) {
     );
 
     expect([...result.buffers.out as Uint32Array]).toEqual([7]);
-    expect(compiled.ir.atomicDeviceGlobals).not.toContain("gCounter");
+    expect(backendIr(compiled).atomicDeviceGlobals).not.toContain("gCounter");
     expect(compiled.wgsl).toContain("var<storage, read_write> gCounter: array<u32>;");
     expect(compiled.wgsl).not.toContain("var<storage, read_write> gCounter: array<atomic<u32>>;");
   });
@@ -11852,8 +13591,8 @@ __global__ void plain_shared(uint* out) {
     );
 
     expect([...result.buffers.out as Uint32Array]).toEqual([9]);
-    expect(compiled.ir.atomicShared).not.toContain("unusedScratch");
-    expect(compiled.ir.atomicShared).not.toContain("scratch");
+    expect(backendIr(compiled).atomicShared).not.toContain("unusedScratch");
+    expect(backendIr(compiled).atomicShared).not.toContain("scratch");
     expect(compiled.wgsl).toContain("var<workgroup> scratch: array<u32, 1>;");
     expect(compiled.wgsl).not.toContain("var<workgroup> scratch: array<atomic<u32>, 1>;");
     expect(compiled.wgsl).not.toContain("unusedScratch");

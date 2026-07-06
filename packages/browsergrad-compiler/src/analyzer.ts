@@ -57,7 +57,57 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["__syncthreads", [0, 0]],
   ["__syncwarp", [0, 1]],
   ["__threadfence", [0, 0]],
+  ["__threadfence_block", [0, 0]],
+  ["__threadfence_system", [0, 0]],
+  ["__nanosleep", [1, 1]],
+  ["__prof_trigger", [1, 1]],
   ["__trap", [0, 0]],
+  ["cudaCtxResetPersistingL2Cache", [0, 0]],
+  ["cudaDeviceReset", [0, 0]],
+  ["cudaDeviceGetAttribute", [3, 3]],
+  ["cudaDeviceGetLimit", [2, 2]],
+  ["cudaDeviceSetLimit", [2, 2]],
+  ["cudaThreadGetLimit", [2, 2]],
+  ["cudaThreadSetLimit", [2, 2]],
+  ["cudaDeviceCanAccessPeer", [3, 3]],
+  ["cudaDeviceEnablePeerAccess", [2, 2]],
+  ["cudaDeviceDisablePeerAccess", [1, 1]],
+  ["cudaGetDeviceFlags", [1, 1]],
+  ["cudaSetDeviceFlags", [1, 1]],
+  ["cudaMemGetInfo", [2, 2]],
+  ["cudaOccupancyMaxActiveBlocksPerMultiprocessor", [4, 4]],
+  ["cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags", [5, 5]],
+  ["cudaOccupancyMaxPotentialBlockSize", [3, 5]],
+  ["cudaOccupancyMaxPotentialBlockSizeWithFlags", [6, 6]],
+  ["cudaSetDevice", [1, 1]],
+  ["cudaGetDevice", [1, 1]],
+  ["cudaGetDeviceCount", [1, 1]],
+  ["cudaGetLastError", [0, 0]],
+  ["cudaPeekAtLastError", [0, 0]],
+  ["cudaProfilerStart", [0, 0]],
+  ["cudaProfilerStop", [0, 0]],
+  ["cudaRuntimeGetVersion", [1, 1]],
+  ["cudaDriverGetVersion", [1, 1]],
+  ["cudaFuncSetAttribute", [3, 3]],
+  ["cudaFuncSetCacheConfig", [2, 2]],
+  ["cudaFuncSetSharedMemConfig", [2, 2]],
+  ["cudaDeviceGetCacheConfig", [1, 1]],
+  ["cudaDeviceSetCacheConfig", [1, 1]],
+  ["cudaDeviceGetSharedMemConfig", [1, 1]],
+  ["cudaDeviceSetSharedMemConfig", [1, 1]],
+  ["cudaDeviceGetStreamPriorityRange", [2, 2]],
+  ["cudaThreadGetCacheConfig", [1, 1]],
+  ["cudaThreadSetCacheConfig", [1, 1]],
+  ["cudaThreadExit", [0, 0]],
+  ["cudaThreadSynchronize", [0, 0]],
+  ["cudaThreadExchangeStreamCaptureMode", [1, 1]],
+  ["cudaFree", [1, 1]],
+  ["cudaFreeAsync", [2, 2]],
+  ["cudaMemAdvise", [4, 4]],
+  ["cudaMemPrefetchAsync", [3, 4]],
+  ["cudaStreamAttachMemAsync", [2, 4]],
+  ["cudaMemset", [3, 3]],
+  ["cudaMemsetAsync", [4, 4]],
   ["__shfl_sync", [3, 4]],
   ["__shfl_down_sync", [3, 4]],
   ["__shfl_up_sync", [3, 4]],
@@ -84,6 +134,19 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["max", [2, 2]],
   ["frexp", [2, 2]],
   ["frexpf", [2, 2]],
+  ["modf", [2, 2]],
+  ["modff", [2, 2]],
+  ["remquo", [3, 3]],
+  ["remquof", [3, 3]],
+  ["sincos", [3, 3]],
+  ["sincosf", [3, 3]],
+  ["__sincosf", [3, 3]],
+  ["sincospi", [3, 3]],
+  ["sincospif", [3, 3]],
+  ["nan", [1, 1]],
+  ["nanf", [1, 1]],
+  ["__builtin_nan", [1, 1]],
+  ["__builtin_nanf", [1, 1]],
   ["div_ceil", [2, 2]],
   ["fill_1D_regs", [2, 2]],
   ["fill_2D_regs", [2, 2]],
@@ -148,12 +211,24 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaDeviceSynchronize", [0, 0]],
   ["cudaStreamCreate", [1, 1]],
   ["cudaStreamCreateWithFlags", [2, 2]],
+  ["cudaStreamCreateWithPriority", [3, 3]],
   ["cudaStreamDestroy", [1, 1]],
+  ["cudaStreamGetDevice", [2, 2]],
+  ["cudaStreamGetFlags", [2, 2]],
+  ["cudaStreamGetId", [2, 2]],
+  ["cudaStreamGetPriority", [2, 2]],
+  ["cudaStreamIsCapturing", [2, 2]],
+  ["cudaStreamGetCaptureInfo", [2, 7]],
+  ["cudaStreamQuery", [1, 1]],
   ["cudaStreamSynchronize", [1, 1]],
+  ["cudaStreamWaitEvent", [2, 3]],
   ["cudaEventCreate", [1, 1]],
   ["cudaEventCreateWithFlags", [2, 2]],
   ["cudaEventDestroy", [1, 1]],
+  ["cudaEventQuery", [1, 1]],
+  ["cudaEventElapsedTime", [3, 3]],
   ["cudaEventRecord", [1, 2]],
+  ["cudaEventRecordWithFlags", [1, 3]],
   ["cudaEventSynchronize", [1, 1]],
   ["cudaMemcpy", [4, 4]],
   ["cudaMemcpyAsync", [5, 5]],
@@ -378,7 +453,10 @@ export function analyzeCudaLite(
             if (statement.pointer) validatePointerInitializerExpression(statement.init, scope, diagnostics, walkExpression);
             else walkExpression(statement.init, scope);
           }
-            if (statement.init) validateSideEffectPlacement(statement.init, false, diagnostics);
+            if (statement.init) {
+              const allowPointerInitializerAssignment = statement.pointer && statement.init.kind === "assignment";
+              validateSideEffectPlacement(statement.init, allowPointerInitializerAssignment, diagnostics, statement.init.kind === "sequence");
+            }
           break;
         case "dim3":
           if (names.has(statement.name)) {
@@ -499,16 +577,13 @@ export function analyzeCudaLite(
         case "do-while": {
           validateSideEffectPlacement(statement.condition, false, diagnostics);
           walkExpression(statement.condition, scope);
-          if (hasContinueTargetingDoWhile(statement.body)) {
-            diagnostics.push(error("unsupported-do-while-continue", "continue inside do-while is not supported until WGSL continuing-condition lowering is explicit", statement.span));
-          }
           const divergent = expressionIsDivergent(statement.condition, params);
           walkStatements(statement.body, createScope(scope), guardDepth, divergent ? divergentDepth + 1 : divergentDepth, loopDepth + 1, new Set());
           break;
         }
         case "return":
           if (statement.value) {
-            validateSideEffectPlacement(statement.value, false, diagnostics);
+            validateSideEffectPlacement(statement.value, false, diagnostics, statement.value.kind === "sequence");
             const info = walkExpression(statement.value, scope);
             if (info.kind !== "scalar" && info.kind !== "vector" && info.kind !== "complex" && info.kind !== "unknown") {
               diagnostics.push(error("unsupported-return-expression", "return expression must resolve to a scalar or CUDA vector value", statement.value.span));
@@ -628,6 +703,7 @@ export function lowerAnalyzedCudaLiteToKernelIr(
   const reachableSymbolNames = collectReferencedSymbolNames(sharedDeclarationBodies);
   return {
     name: analysis.kernel.name,
+    span: analysis.kernel.span,
     params: analysis.kernel.params,
     constants: analysis.constants.filter((constant) => reachableSymbolNames.has(constant.name)),
     deviceGlobals: analysis.deviceGlobals.filter((global) => reachableSymbolNames.has(global.name)),
@@ -1210,6 +1286,12 @@ function flattenInitializerExpressions(expression: CudaLiteExpression): readonly
   return expression.elements.flatMap((element) => flattenInitializerExpressions(element));
 }
 
+function flattenSequenceExpressions(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
+  return expression.kind === "sequence"
+    ? expression.expressions.flatMap((item) => flattenSequenceExpressions(item))
+    : [expression];
+}
+
 function isSupportedSharedPointerAlias(statement: CudaLiteVarDecl, scope: Scope): boolean {
   if (!statement.pointer || statement.storage !== "local") return false;
   if (statement.init?.kind !== "unary" || statement.init.operator !== "&") return false;
@@ -1255,6 +1337,21 @@ function validatePointerInitializerExpression(
     if (!isPointerLikeInfo(condition)) validateScalarOperand(condition, expression.condition.span, diagnostics);
     validatePointerInitializerExpression(expression.consequent, scope, diagnostics, walkExpression);
     validatePointerInitializerExpression(expression.alternate, scope, diagnostics, walkExpression);
+    return;
+  }
+  if (expression.kind === "sequence") {
+    const items = flattenSequenceExpressions(expression);
+    const final = items.at(-1);
+    for (const item of items.slice(0, -1)) walkExpression(item, scope);
+    if (final) validatePointerInitializerExpression(final, scope, diagnostics, walkExpression);
+    return;
+  }
+  if (expression.kind === "assignment" && expression.operator === "=") {
+    validatePointerInitializerExpression(expression.right, scope, diagnostics, walkExpression);
+    const target = walkExpression(expression.left, scope);
+    if (!isPointerLikeInfo(target) && target.kind !== "unknown") {
+      diagnostics.push(error("unsupported-pointer-assignment", "pointer initializer assignment target must be a modeled pointer", expression.left.span));
+    }
     return;
   }
   if (expression.kind === "call" && isPointerIdentityCall(expressionName(expression.callee))) {
@@ -1349,6 +1446,15 @@ function pointerSourceType(expression: CudaLiteExpression | undefined, scope: Sc
     if (consequent !== undefined && isNullPointerLiteral(expression.alternate)) return consequent;
     if (alternate !== undefined && isNullPointerLiteral(expression.consequent)) return alternate;
     return undefined;
+  }
+  if (expression.kind === "sequence") {
+    return pointerSourceType(flattenSequenceExpressions(expression).at(-1), scope);
+  }
+  if (expression.kind === "assignment" && expression.operator === "=") {
+    const left = pointerSourceType(expression.left, scope);
+    const right = pointerSourceType(expression.right, scope);
+    if (left === undefined || right === undefined) return undefined;
+    return pointerTypesCompatible(left, right, true) ? right : undefined;
   }
   if (expression.kind === "binary" && (expression.operator === "+" || expression.operator === "-")) {
     return pointerSourceType(expression.left, scope);
@@ -1579,8 +1685,40 @@ function validateCallExpression(
     }
     return { kind: "scalar" };
   }
+  if (callName === "cudaGetDevice" ||
+    callName === "cudaGetDeviceCount" ||
+    callName === "cudaDeviceGetAttribute" ||
+    callName === "cudaDeviceGetLimit" ||
+    callName === "cudaThreadGetLimit" ||
+    callName === "cudaDeviceCanAccessPeer" ||
+    callName === "cudaGetDeviceFlags" ||
+    callName === "cudaMemGetInfo" ||
+    callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
+    callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
+    callName === "cudaOccupancyMaxPotentialBlockSize" ||
+    callName === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    callName === "cudaDeviceGetCacheConfig" ||
+    callName === "cudaDeviceGetSharedMemConfig" ||
+    callName === "cudaThreadGetCacheConfig" ||
+    callName === "cudaThreadExchangeStreamCaptureMode" ||
+    callName === "cudaDeviceGetStreamPriorityRange" ||
+    callName === "cudaStreamGetDevice" ||
+    callName === "cudaStreamGetFlags" ||
+    callName === "cudaStreamGetId" ||
+    callName === "cudaStreamGetPriority" ||
+    callName === "cudaStreamIsCapturing" ||
+    callName === "cudaStreamGetCaptureInfo" ||
+    callName === "cudaRuntimeGetVersion" ||
+    callName === "cudaDriverGetVersion") {
+    validateCudaIntegerRuntimeQuery(expression, callName, scope, diagnostics, walkExpression);
+    return { kind: "scalar", valueType: "int" };
+  }
   if (isHostManagedRuntimeNoopCall(callName)) {
-    validateRuntimeCall(expression, `${callName}() is host-managed in CUDA-lite WebGPU execution`, diagnostics, walkExpression, scope, options, compatibilityDiagnosticsReachable);
+    validateHostManagedRuntimeNoopCall(expression, walkExpression, scope);
+    return { kind: "scalar", valueType: "int" };
+  }
+  if (callName === "cudaEventElapsedTime") {
+    validateCudaEventElapsedTime(expression, scope, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "int" };
   }
   if (isCudaRuntimeCopyCall(callName)) {
@@ -1648,6 +1786,10 @@ function validateCallExpression(
   if (callName === "__trap") {
     return { kind: "scalar", valueType: "int" };
   }
+  if (callName === "__nanosleep" || callName === "__prof_trigger") {
+    for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return { kind: "scalar", valueType: "int" };
+  }
   if (isFillRegsBuiltin(callName)) {
     validateFillRegs(expression, scope, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "voidptr" };
@@ -1660,6 +1802,33 @@ function validateCallExpression(
   if (callName === "__halves2bfloat162") {
     for (const arg of expression.args) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
     return { kind: "vector", valueType: "bf162" };
+  }
+  if (callName === "__bfloat162_as_uint" || callName === "__nv_bfloat162_as_uint") {
+    const arg = expression.args[0];
+    if (arg) {
+      const info = walkExpression(arg, scope);
+      if (info.kind !== "vector" && info.kind !== "unknown") {
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects bf162 argument`, arg.span));
+      } else if (info.kind === "vector" && info.valueType !== "bf162") {
+        diagnostics.push(error("unsupported-vector-argument", `${callName} expects bf162 argument`, arg.span));
+      }
+    }
+    return { kind: "scalar", valueType: "uint" };
+  }
+  if (callName === "__uint_as_bfloat162" || callName === "__uint_as_nv_bfloat162") {
+    const arg = expression.args[0];
+    if (arg) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return { kind: "vector", valueType: "bf162" };
+  }
+  if (callName === "__hadd") {
+    const infos = expression.args.map((arg) => walkExpression(arg, scope));
+    for (const [index, info] of infos.entries()) validateScalarOperand(info, expression.args[index]!.span, diagnostics);
+    if (infos.some((info) => info.valueType === "bf16")) return { kind: "scalar", valueType: "bf16" };
+    if (infos.some((info) => info.valueType === "half")) {
+      requiredFeatures.add("shader-f16");
+      return { kind: "scalar", valueType: "half" };
+    }
+    return { kind: "scalar", valueType: "int" };
   }
   if (isBfloat16ScalarArithmetic(callName)) {
     const infos = expression.args.map((arg) => walkExpression(arg, scope));
@@ -1691,6 +1860,25 @@ function validateCallExpression(
     }
     return { kind: "vector", valueType: returnType };
   }
+  if (callName === "__half2_as_uint") {
+    requiredFeatures.add("shader-f16");
+    const arg = expression.args[0];
+    if (arg) {
+      const info = walkExpression(arg, scope);
+      if (info.kind !== "vector" && info.kind !== "unknown") {
+        diagnostics.push(error("unsupported-vector-argument", "__half2_as_uint expects half2 argument", arg.span));
+      } else if (info.kind === "vector" && info.valueType !== "half2") {
+        diagnostics.push(error("unsupported-vector-argument", "__half2_as_uint expects half2 argument", arg.span));
+      }
+    }
+    return { kind: "scalar", valueType: "uint" };
+  }
+  if (callName === "__uint_as_half2") {
+    requiredFeatures.add("shader-f16");
+    const arg = expression.args[0];
+    if (arg) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return { kind: "vector", valueType: "half2" };
+  }
   if (callName === "__low2float" || callName === "__high2float") {
     requiredFeatures.add("shader-f16");
     const arg = expression.args[0];
@@ -1711,8 +1899,19 @@ function validateCallExpression(
   }
   const vectorMath = validateVectorMinMaxCall(expression, callName, scope, diagnostics, requiredFeatures, walkExpression);
   if (vectorMath) return vectorMath;
-  if (callName === "frexp" || callName === "frexpf") {
-    validateFrexp(expression, scope, diagnostics, walkExpression);
+  if (callName === "frexp" || callName === "frexpf" || callName === "modf" || callName === "modff" || callName === "remquo" || callName === "remquof") {
+    if (callName === "frexp" || callName === "frexpf") validateFrexp(expression, scope, diagnostics, walkExpression);
+    else if (callName === "modf" || callName === "modff") validateModf(expression, scope, diagnostics, walkExpression);
+    else validateRemquo(expression, scope, diagnostics, walkExpression);
+    return { kind: "scalar", valueType: "float" };
+  }
+  if (isSincosCallName(callName)) {
+    validateSincos(expression, scope, diagnostics, walkExpression);
+    return { kind: "scalar", valueType: "float" };
+  }
+  if (isNanPayloadCallName(callName)) {
+    const payload = expression.args[0];
+    if (payload && payload.kind !== "string") validateScalarOperand(walkExpression(payload, scope), payload.span, diagnostics);
     return { kind: "scalar", valueType: "float" };
   }
   if (isVectorMathBuiltin(callName)) {
@@ -1782,7 +1981,7 @@ function validateCallExpression(
     return { kind: "scalar", valueType: "float" };
   }
   if (callName === "sizeof" || callName === "alignof") {
-    validateSizeof(expression, diagnostics);
+    validateSizeof(expression, scope, diagnostics, walkExpression);
     return { kind: "scalar", valueType: "uint" };
   }
   if (callName === "vec_at") {
@@ -1872,13 +2071,220 @@ function validateFrexp(
   if (value) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
   if (!exponent) return;
   const info = validateReadPointerExpression(exponent, scope, diagnostics, walkExpression);
-  if (info.kind !== "address" && info.kind !== "unknown") {
-    diagnostics.push(error("unsupported-frexp-exponent", "frexp exponent must be an addressable local int", exponent.span));
+  if (!isMathOutPointerInfo(info)) {
+    diagnostics.push(error("unsupported-frexp-exponent", "frexp exponent must be an addressable int pointer", exponent.span));
     return;
   }
   if (info.valueType !== undefined && info.valueType !== "int") {
     diagnostics.push(error("unsupported-frexp-exponent", "frexp exponent must point to int storage", exponent.span));
   }
+}
+
+function validateModf(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const value = expression.args[0];
+  const intpart = expression.args[1];
+  if (value) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
+  if (!intpart) return;
+  const info = validateReadPointerExpression(intpart, scope, diagnostics, walkExpression);
+  if (!isMathOutPointerInfo(info)) {
+    diagnostics.push(error("unsupported-modf-intpart", "modf integer-part output must be an addressable float pointer", intpart.span));
+    return;
+  }
+  if (info.valueType !== undefined && info.valueType !== "float" && info.valueType !== "double") {
+    diagnostics.push(error("unsupported-modf-intpart", "modf integer-part output must point to float storage", intpart.span));
+  }
+}
+
+function validateSincos(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const value = expression.args[0];
+  if (value) validateScalarOperand(walkExpression(value, scope), value.span, diagnostics);
+  for (const target of expression.args.slice(1)) {
+    const info = validateReadPointerExpression(target, scope, diagnostics, walkExpression);
+    if (!isMathOutPointerInfo(info)) {
+      diagnostics.push(error("unsupported-sincos-output", "sincos output must be an addressable float pointer", target.span));
+      continue;
+    }
+    if (info.valueType !== undefined && info.valueType !== "float" && info.valueType !== "double") {
+      diagnostics.push(error("unsupported-sincos-output", "sincos output must point to float storage", target.span));
+    }
+  }
+}
+
+function validateRemquo(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const left = expression.args[0];
+  const right = expression.args[1];
+  const quotient = expression.args[2];
+  if (left) validateScalarOperand(walkExpression(left, scope), left.span, diagnostics);
+  if (right) validateScalarOperand(walkExpression(right, scope), right.span, diagnostics);
+  if (!quotient) return;
+  const info = validateReadPointerExpression(quotient, scope, diagnostics, walkExpression);
+  if (!isMathOutPointerInfo(info)) {
+    diagnostics.push(error("unsupported-remquo-quotient", "remquo quotient output must be an addressable int pointer", quotient.span));
+    return;
+  }
+  if (info.valueType !== undefined && info.valueType !== "int") {
+    diagnostics.push(error("unsupported-remquo-quotient", "remquo quotient output must point to int storage", quotient.span));
+  }
+}
+
+function isMathOutPointerInfo(info: ExpressionInfo): boolean {
+  return info.kind === "address" || info.kind === "pointer" || info.kind === "pool-pointer" || info.kind === "unknown";
+}
+
+function isSincosCallName(name: string | undefined): boolean {
+  return name === "sincos" || name === "sincosf" || name === "__sincosf" || name === "sincospi" || name === "sincospif";
+}
+
+function isNanPayloadCallName(name: string | undefined): boolean {
+  return name === "nan" || name === "nanf" || name === "__builtin_nan" || name === "__builtin_nanf";
+}
+
+function validateCudaIntegerRuntimeQuery(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  callName: string,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const target = expression.args[0];
+  if (!target) return;
+  if (callName === "cudaThreadExchangeStreamCaptureMode") {
+    validateRuntimeQueryPointerTarget(callName, target, "int", scope, diagnostics, walkExpression);
+    return;
+  }
+  if (callName === "cudaStreamGetFlags" || callName === "cudaStreamGetPriority") {
+    validateScalarOperand(walkExpression(target, scope), target.span, diagnostics);
+    const streamTarget = expression.args[1];
+    if (!streamTarget) return;
+    const streamInfo = validateReadPointerExpression(streamTarget, scope, diagnostics, walkExpression);
+    const expected = callName === "cudaStreamGetFlags" ? "uint" : "int";
+    if (streamInfo.kind !== "address" && streamInfo.kind !== "pointer" && streamInfo.kind !== "unknown") {
+      diagnostics.push(error("unsupported-cuda-runtime", `${callName} expects a ${expected} pointer target`, streamTarget.span));
+    } else if (streamInfo.valueType !== undefined && streamInfo.valueType !== expected) {
+      diagnostics.push(error("unsupported-cuda-runtime", `${callName} target must point to ${expected} storage`, streamTarget.span));
+    }
+    return;
+  }
+  if (callName === "cudaStreamGetDevice" || callName === "cudaStreamGetId" || callName === "cudaStreamIsCapturing") {
+    validateScalarOperand(walkExpression(target, scope), target.span, diagnostics);
+    const streamTarget = expression.args[1];
+    if (!streamTarget) return;
+    const expected = callName === "cudaStreamGetId" ? "uint" : "int";
+    validateRuntimeQueryPointerTarget(callName, streamTarget, expected, scope, diagnostics, walkExpression);
+    return;
+  }
+  if (callName === "cudaStreamGetCaptureInfo") {
+    validateScalarOperand(walkExpression(target, scope), target.span, diagnostics);
+    for (const [index, arg] of expression.args.entries()) {
+      if (index === 0 || !arg || isNullPointerExpression(arg)) continue;
+      validateRuntimeQueryPointerTarget(callName, arg, cudaStreamGetCaptureInfoTargetType(index), scope, diagnostics, walkExpression);
+    }
+    return;
+  }
+  if (callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" || callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags") {
+    validateRuntimeQueryPointerTarget(callName, target, "int", scope, diagnostics, walkExpression);
+    for (const arg of expression.args.slice(2)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return;
+  }
+  if (callName === "cudaOccupancyMaxPotentialBlockSize" || callName === "cudaOccupancyMaxPotentialBlockSizeWithFlags") {
+    validateRuntimeQueryPointerTarget(callName, target, "int", scope, diagnostics, walkExpression);
+    const blockSizeTarget = expression.args[1];
+    if (blockSizeTarget) validateRuntimeQueryPointerTarget(callName, blockSizeTarget, "int", scope, diagnostics, walkExpression);
+    for (const arg of expression.args.slice(3)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+    return;
+  }
+  const info = validateReadPointerExpression(target, scope, diagnostics, walkExpression);
+  if (info.kind !== "address" && info.kind !== "pointer" && info.kind !== "unknown") {
+    diagnostics.push(error("unsupported-cuda-runtime", `${callName} expects an int pointer target`, target.span));
+    return;
+  }
+  const expectedValueType = callName === "cudaDeviceGetLimit" || callName === "cudaThreadGetLimit" || callName === "cudaMemGetInfo" || callName === "cudaGetDeviceFlags" ? "uint" : "int";
+  if (info.valueType !== undefined && info.valueType !== expectedValueType) {
+    diagnostics.push(error("unsupported-cuda-runtime", `${callName} target must point to ${expectedValueType} storage`, target.span));
+  }
+  if (callName === "cudaMemGetInfo") {
+    const totalTarget = expression.args[1];
+    if (totalTarget) {
+      const totalInfo = validateReadPointerExpression(totalTarget, scope, diagnostics, walkExpression);
+      if (totalInfo.kind !== "address" && totalInfo.kind !== "pointer" && totalInfo.kind !== "unknown") {
+        diagnostics.push(error("unsupported-cuda-runtime", `${callName} expects a uint pointer target`, totalTarget.span));
+      } else if (totalInfo.valueType !== undefined && totalInfo.valueType !== "uint") {
+        diagnostics.push(error("unsupported-cuda-runtime", `${callName} target must point to uint storage`, totalTarget.span));
+      }
+    }
+    return;
+  }
+  if (callName === "cudaDeviceGetStreamPriorityRange") {
+    const greatestTarget = expression.args[1];
+    if (greatestTarget) {
+      const greatestInfo = validateReadPointerExpression(greatestTarget, scope, diagnostics, walkExpression);
+      if (greatestInfo.kind !== "address" && greatestInfo.kind !== "pointer" && greatestInfo.kind !== "unknown") {
+        diagnostics.push(error("unsupported-cuda-runtime", `${callName} expects an int pointer target`, greatestTarget.span));
+      } else if (greatestInfo.valueType !== undefined && greatestInfo.valueType !== "int") {
+        diagnostics.push(error("unsupported-cuda-runtime", `${callName} target must point to int storage`, greatestTarget.span));
+      }
+    }
+    return;
+  }
+  for (const arg of expression.args.slice(1)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
+}
+
+function validateRuntimeQueryPointerTarget(
+  callName: string,
+  target: CudaLiteExpression,
+  expectedValueType: Exclude<CudaLiteScalarType, "void">,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const info = validateReadPointerExpression(target, scope, diagnostics, walkExpression);
+  if (info.kind !== "address" && info.kind !== "pointer" && info.kind !== "unknown") {
+    diagnostics.push(error("unsupported-cuda-runtime", `${callName} expects a ${expectedValueType} pointer target`, target.span));
+  } else if (info.valueType !== undefined && info.valueType !== expectedValueType) {
+    diagnostics.push(error("unsupported-cuda-runtime", `${callName} target must point to ${expectedValueType} storage`, target.span));
+  }
+}
+
+function cudaStreamGetCaptureInfoTargetType(index: number): Exclude<CudaLiteScalarType, "void"> {
+  return index === 1 ? "int" : "uint";
+}
+
+function isNullPointerExpression(expression: CudaLiteExpression): boolean {
+  return (expression.kind === "identifier" && expression.name === "NULL") ||
+    (expression.kind === "number" && expression.value === 0);
+}
+
+function validateCudaEventElapsedTime(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  scope: Scope,
+  diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
+): void {
+  const target = expression.args[0];
+  if (target) {
+    const info = validateReadPointerExpression(target, scope, diagnostics, walkExpression);
+    if (info.kind !== "address" && info.kind !== "pointer" && info.kind !== "unknown") {
+      diagnostics.push(error("unsupported-cuda-runtime", "cudaEventElapsedTime expects a float pointer target", target.span));
+    } else if (info.valueType !== undefined && info.valueType !== "float") {
+      diagnostics.push(error("unsupported-cuda-runtime", "cudaEventElapsedTime target must point to float storage", target.span));
+    }
+  }
+  for (const arg of expression.args.slice(1)) validateScalarOperand(walkExpression(arg, scope), arg.span, diagnostics);
 }
 
 function validateReadPointerOperand(
@@ -2067,22 +2473,11 @@ function validateFillRegs(
   }
 }
 
-function validateRuntimeCall(
+function validateHostManagedRuntimeNoopCall(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
-  message: string,
-  diagnostics: CudaLiteDiagnostic[],
   walkExpression: ExpressionWalker,
   scope: Scope,
-  options: CudaLiteAnalyzeOptions,
-  compatibilityDiagnosticsReachable: boolean,
 ): void {
-  const referenceRuntime = options.referenceCudaRuntime || options.referenceDynamicParallelism;
-  if (compatibilityDiagnosticsReachable) {
-    diagnostics.push({
-      ...error("unsupported-cuda-runtime", message, expression.span),
-      severity: referenceRuntime ? "warning" : "error",
-    });
-  }
   for (const arg of expression.args) walkExpression(arg, scope);
 }
 
@@ -2118,7 +2513,11 @@ function validateRuntimeCopyCall(
 }
 
 function isCudaRuntimeCopyCall(callName: string): boolean {
-  return callName === "cudaMemcpy" || callName === "cudaMemcpyAsync" || callName === "cudaMemcpyPeerAsync";
+  return callName === "cudaMemcpy" ||
+    callName === "cudaMemcpyAsync" ||
+    callName === "cudaMemcpyPeerAsync" ||
+    callName === "cudaMemset" ||
+    callName === "cudaMemsetAsync";
 }
 
 function validateCudaGraphSetConditionalCall(
@@ -2140,14 +2539,65 @@ function validateCudaGraphSetConditionalCall(
 
 function isHostManagedRuntimeNoopCall(callName: string): boolean {
   return callName === "cudaDeviceSynchronize" ||
+    callName === "cudaCtxResetPersistingL2Cache" ||
+    callName === "cudaDeviceReset" ||
+    callName === "cudaThreadExit" ||
+    callName === "cudaThreadSynchronize" ||
+    callName === "cudaDeviceGetAttribute" ||
+    callName === "cudaDeviceGetLimit" ||
+    callName === "cudaDeviceSetLimit" ||
+    callName === "cudaThreadSetLimit" ||
+    callName === "cudaDeviceCanAccessPeer" ||
+    callName === "cudaDeviceEnablePeerAccess" ||
+    callName === "cudaDeviceDisablePeerAccess" ||
+    callName === "cudaSetDeviceFlags" ||
+    callName === "cudaMemGetInfo" ||
+    callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
+    callName === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
+    callName === "cudaOccupancyMaxPotentialBlockSize" ||
+    callName === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    callName === "cudaDeviceGetCacheConfig" ||
+    callName === "cudaDeviceSetCacheConfig" ||
+    callName === "cudaDeviceGetSharedMemConfig" ||
+    callName === "cudaDeviceSetSharedMemConfig" ||
+    callName === "cudaThreadSetCacheConfig" ||
+    callName === "cudaThreadExchangeStreamCaptureMode" ||
+    callName === "cudaFree" ||
+    callName === "cudaFreeAsync" ||
+    callName === "cudaMemAdvise" ||
+    callName === "cudaMemPrefetchAsync" ||
+    callName === "cudaStreamAttachMemAsync" ||
     callName === "cudaStreamCreate" ||
     callName === "cudaStreamCreateWithFlags" ||
+    callName === "cudaStreamCreateWithPriority" ||
     callName === "cudaStreamDestroy" ||
+    callName === "cudaStreamGetDevice" ||
+    callName === "cudaStreamGetFlags" ||
+    callName === "cudaStreamGetId" ||
+    callName === "cudaStreamGetPriority" ||
+    callName === "cudaStreamIsCapturing" ||
+    callName === "cudaStreamGetCaptureInfo" ||
+    callName === "cudaStreamQuery" ||
     callName === "cudaStreamSynchronize" ||
+    callName === "cudaStreamWaitEvent" ||
+    callName === "cudaSetDevice" ||
+    callName === "cudaGetDevice" ||
+    callName === "cudaGetDeviceCount" ||
+    callName === "cudaRuntimeGetVersion" ||
+    callName === "cudaDriverGetVersion" ||
+    callName === "cudaFuncSetAttribute" ||
+    callName === "cudaFuncSetCacheConfig" ||
+    callName === "cudaFuncSetSharedMemConfig" ||
+    callName === "cudaGetLastError" ||
+    callName === "cudaPeekAtLastError" ||
+    callName === "cudaProfilerStart" ||
+    callName === "cudaProfilerStop" ||
     callName === "cudaEventCreate" ||
     callName === "cudaEventCreateWithFlags" ||
     callName === "cudaEventDestroy" ||
+    callName === "cudaEventQuery" ||
     callName === "cudaEventRecord" ||
+    callName === "cudaEventRecordWithFlags" ||
     callName === "cudaEventSynchronize";
 }
 
@@ -2611,11 +3061,19 @@ function validateSurf2DWrite(
 
 function validateSizeof(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  scope: Scope,
   diagnostics: CudaLiteDiagnostic[],
+  walkExpression: ExpressionWalker,
 ): void {
   const target = expression.args[0];
-  if (target?.kind !== "identifier" || sizeofCudaType(target.name) === undefined) {
-    diagnostics.push(error("unsupported-sizeof", "sizeof/alignof only support CUDA-lite scalar types", target?.span ?? expression.span));
+  if (!target) {
+    diagnostics.push(error("unsupported-sizeof", "sizeof/alignof expects a CUDA-lite type or modeled value", expression.span));
+    return;
+  }
+  if (target.kind === "identifier" && sizeofCudaType(target.name) !== undefined) return;
+  const info = walkExpression(target, scope);
+  if (info.valueType === undefined || sizeofCudaType(info.valueType) === undefined) {
+    diagnostics.push(error("unsupported-sizeof", "sizeof/alignof only support CUDA-lite scalar types or modeled values", target.span));
   }
 }
 
@@ -2929,10 +3387,10 @@ function scanAtomicPointerStatements(
         scanChildAtomicPointerStatements(statement.body, aliases, markRoot, functionAtomicParams, functionsByName);
         break;
       case "var":
+        if (statement.init) visitExpression(statement.init);
         if (statement.pointer) {
           aliases.set(statement.name, pointerRootsFromExpression(statement.init, aliases));
         }
-        if (statement.init) visitExpression(statement.init);
         break;
       case "dim3":
         for (const arg of statement.args) visitExpression(arg);
@@ -3746,6 +4204,8 @@ function isSupportedTextureReadType(type: CudaLiteScalarType | undefined): boole
     type === "uchar" ||
     type === "half" ||
     type === "half2" ||
+    type === "bf16" ||
+    type === "bf162" ||
     type === "float2" ||
     type === "float3" ||
     type === "float4" ||
@@ -3863,7 +4323,12 @@ function validateSideEffectPlacement(
   expression: CudaLiteExpression,
   allowRootSideEffect: boolean,
   diagnostics: CudaLiteDiagnostic[],
+  allowRootSequenceSideEffects = false,
 ): void {
+  if (allowRootSequenceSideEffects && expression.kind === "sequence") {
+    validateSideEffectPlacement(expression, true, diagnostics);
+    return;
+  }
   if (allowRootSideEffect && expression.kind === "assignment") {
     validateAssignmentStatementSideEffects(expression, diagnostics);
     return;
@@ -3902,7 +4367,8 @@ function validateAssignmentStatementSideEffects(
   while (true) {
     visitNoSideEffect(cursor.left);
     if (cursor.right.kind !== "assignment") {
-      visitNoSideEffect(cursor.right);
+      if (cursor.right.kind === "sequence") validateSideEffectPlacement(cursor.right, true, diagnostics);
+      else visitNoSideEffect(cursor.right);
       return;
     }
     cursor = cursor.right;
@@ -3918,21 +4384,6 @@ function validateBarrierStatement(
   if (expression.args.length > maxArgs) {
     diagnostics.push(error("invalid-call-arity", `${name} expects ${maxArgs === 0 ? "0" : "0-1"} arguments`, expression.span));
   }
-}
-
-function hasContinueTargetingDoWhile(statements: readonly CudaLiteStatement[]): boolean {
-  for (const statement of statements) {
-    if (statement.kind === "continue") return true;
-    if (statement.kind === "block" && hasContinueTargetingDoWhile(statement.body)) return true;
-    if (statement.kind === "if") {
-      if (hasContinueTargetingDoWhile(statement.consequent)) return true;
-      if (statement.alternate && hasContinueTargetingDoWhile(statement.alternate)) return true;
-    }
-    if (statement.kind === "do-while" && hasContinueTargetingDoWhile(statement.body)) return true;
-    // A continue inside these bodies targets the nested loop, not the enclosing do-while.
-    if (statement.kind === "for" || statement.kind === "while") continue;
-  }
-  return false;
 }
 
 function collectSharedDeclarations(

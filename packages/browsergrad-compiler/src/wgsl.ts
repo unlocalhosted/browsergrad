@@ -4,6 +4,8 @@ import {
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectKernelLaunchCallees, walkCudaLiteExpressions } from "./ast_queries.js";
 import { expressionName, rootIdentifier } from "./analyzer.js";
+import { cudaDeviceAttributeValue } from "./cuda_device_attributes.js";
+import { cudaDeviceLimitValue } from "./cuda_device_limits.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import {
   type MatrixTileLayout,
@@ -238,10 +240,10 @@ export function emitKernelIrWgsl(
   const f16Mode = effectiveF16Mode(ir, options);
   const subgroupMode = effectiveSubgroupMode(ir, options);
   if (f16Mode === "native" && ir.requiredFeatures.includes("shader-f16") && !options.features?.["shader-f16"]) {
-    throw featureError("missing-feature-shader-f16", "half requires WebGPU shader-f16 support");
+    throw featureError("missing-feature-shader-f16", "half requires WebGPU shader-f16 support", ir.span);
   }
   if (subgroupMode === "native" && ir.requiredFeatures.includes("subgroups") && !options.features?.subgroups) {
-    throw featureError("missing-feature-subgroups", "bg_subgroup_add requires WebGPU subgroups support");
+    throw featureError("missing-feature-subgroups", "bg_subgroup_add requires WebGPU subgroups support", ir.span);
   }
 
   const context = contextWithDeviceFunctionTextureDescriptors(createEmitContext(ir, options));
@@ -257,6 +259,7 @@ export function emitKernelIrWgsl(
   const functionLines = emittedFunctions.flatMap((fn) => [
     "",
     ...emitDeviceFunction(fn, context),
+    ...emitDeviceFunctionLocalPointerSpecializations(fn, context),
     ...emitDeviceFunctionTextureSpecializations(fn, context),
     ...(deviceFunctionNeedsGuardedBarrierClone(fn) ? ["", ...emitDeviceFunction(fn, context, { guardedBarrierClone: true })] : []),
   ]);
@@ -392,6 +395,16 @@ function emitStatement(
           ...emitLocalArrayInitializer(statement, context, indentLevel, indent, (expression) => emitExpression(expression, context)),
         ];
       }
+      const sequence = emitVarInitWithSequence(statement, context, indentLevel);
+      if (sequence) return sequence;
+      const frexp = emitVarInitWithFrexpPointerExponent(statement, context, indentLevel);
+      if (frexp) return frexp;
+      const modf = emitVarInitWithModfIntpart(statement, context, indentLevel);
+      if (modf) return modf;
+      const remquo = emitVarInitWithRemquoQuotient(statement, context, indentLevel);
+      if (remquo) return remquo;
+      const runtimeQuery = emitVarInitWithCudaIntegerRuntimeQuery(statement, context, indentLevel);
+      if (runtimeQuery) return runtimeQuery;
       const conditional = emitVarInitWithConditionalSideEffect(statement, context, indentLevel);
       if (conditional) return conditional;
       const hoistedPointerArrayIndex = emitVarInitWithHoistedSideEffectingPointerArrayIndex(statement, context, indentLevel);
@@ -417,6 +430,10 @@ function emitStatement(
         if (cpAsync) return cpAsync;
       }
       {
+        const runtimeQuery = emitCudaIntegerRuntimeQueryStatement(statement.expression, context, indentLevel);
+        if (runtimeQuery) return runtimeQuery;
+      }
+      {
         const noopComment = noopCallComment(statement.expression);
         if (noopComment) return [`${prefix}// ${noopComment}`];
       }
@@ -428,6 +445,9 @@ function emitStatement(
       {
         const inlined = emitInlineBarrierDeviceFunctionExprStatement(statement.expression, context, indentLevel);
         if (inlined) return inlined;
+      }
+      if (statement.expression.kind === "sequence") {
+        return emitExpressionStatementSequence(statement.expression.expressions, context, indentLevel);
       }
       if (statement.expression.kind === "assignment") {
         const inlined = emitInlineBarrierDeviceFunctionAssignment(statement.expression, context, indentLevel);
@@ -441,6 +461,18 @@ function emitStatement(
       {
         const hoisted = emitExpressionStatementWithHoistedSideEffectingPointerArrayIndex(statement.expression, context, indentLevel);
         if (hoisted) return hoisted;
+      }
+      {
+        const remquo = emitRemquoExpressionStatement(statement.expression, context, indentLevel);
+        if (remquo) return remquo;
+      }
+      {
+        const sincos = emitSincosExpressionStatement(statement.expression, context, indentLevel);
+        if (sincos) return sincos;
+      }
+      {
+        const modf = emitModfExpressionStatement(statement.expression, context, indentLevel);
+        if (modf) return modf;
       }
       {
         const emitted = emitExpressionStatement(statement.expression, context);
@@ -485,10 +517,16 @@ function emitStatement(
       return lines;
     }
     case "for": {
+      const loopContext = scopedForLoopContext(statement, context);
+      const breakFlag = statementHasEarlyBreakBeforeBarrier(statement, context) ? `bg_loop_active_${statement.span.start}` : undefined;
+      if (statement.init?.kind === "var" && statement.init.pointer && context.localPointerHandleFor(statement.init.name, statement.init.span)) {
+        const lines = breakFlag ? [`${prefix}var ${breakFlag}: bool = true;`] : [];
+        lines.push(...emitForLoopWithLocalPointerHandleInit(statement, statement.init, loopContext, indentLevel, breakFlag));
+        return lines;
+      }
       if (statement.update?.kind === "sequence" || statement.init?.kind === "sequence") {
         return emitForLoopWithContinuing(statement, context, indentLevel);
       }
-      const loopContext = scopedForLoopContext(statement, context);
       const init = statement.init?.kind === "var"
         ? emitForVar(statement.init, loopContext)
         : statement.init
@@ -496,7 +534,6 @@ function emitStatement(
           : "";
       const condition = statement.condition ? emitTruthinessExpression(statement.condition, loopContext) : "true";
       const update = statement.update ? emitExpression(statement.update, loopContext) : "";
-      const breakFlag = statementHasEarlyBreakBeforeBarrier(statement, context) ? `bg_loop_active_${statement.span.start}` : undefined;
       if (breakFlag) {
         const lines = [`${prefix}var ${breakFlag}: bool = true;`, `${prefix}for (${init}; ${condition}; ${update}) {`];
         lines.push(...emitStatementSequence(statement.body, loopContext, indentLevel + 1, { activeFlag: breakFlag }));
@@ -533,6 +570,9 @@ function emitStatement(
       return lines;
     }
     case "do-while": {
+      if (hasContinueTargetingCurrentLoop(statement.body)) {
+        return emitDoWhileLoopWithContinuingCondition(statement, context, indentLevel);
+      }
       {
         const lazy = emitDoWhileLoopWithLazyConditionalCondition(statement, context, indentLevel);
         if (lazy) return lazy;
@@ -599,6 +639,35 @@ function emitForLoopWithLazyConditionalCondition(
   return lines;
 }
 
+function emitForLoopWithLocalPointerHandleInit(
+  statement: Extract<CudaLiteStatement, { kind: "for" }>,
+  init: CudaLiteVarDecl,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] {
+  const prefix = indent(indentLevel);
+  const innerPrefix = indent(indentLevel + 1);
+  const bodyPrefix = indent(indentLevel + 2);
+  const condition = statement.condition ? emitTruthinessExpression(statement.condition, context) : "true";
+  const guardedCondition = activeFlag ? `((${condition}) && ${activeFlag})` : condition;
+  const lines = [`${prefix}{`];
+  lines.push(...emitLocalPointerHandleDecl(init, context, indentLevel + 1, activeFlag));
+  lines.push(`${innerPrefix}loop {`);
+  lines.push(`${bodyPrefix}if (!(${guardedCondition})) { break; }`);
+  lines.push(...emitStatementSequence(statement.body, context, indentLevel + 2, activeFlag ? { activeFlag } : undefined));
+  if (statement.update) {
+    lines.push(`${bodyPrefix}continuing {`);
+    for (const expression of sequenceItems(statement.update)) {
+      lines.push(`${indent(indentLevel + 3)}${emitExpression(expression, context)};`);
+    }
+    lines.push(`${bodyPrefix}}`);
+  }
+  lines.push(`${innerPrefix}}`);
+  lines.push(`${prefix}}`);
+  return lines;
+}
+
 function emitWhileLoopWithLazyConditionalCondition(
   statement: Extract<CudaLiteStatement, { kind: "while" }>,
   context: EmitContext,
@@ -627,6 +696,38 @@ function emitDoWhileLoopWithLazyConditionalCondition(
   lines.push(...emitLazyConditionBreak(statement.condition, context, indentLevel + 1, activeFlag));
   lines.push(`${prefix}}`);
   return lines;
+}
+
+function emitDoWhileLoopWithContinuingCondition(
+  statement: Extract<CudaLiteStatement, { kind: "do-while" }>,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] {
+  const prefix = indent(indentLevel);
+  const condition = activeFlag
+    ? `(${activeFlag} && (${emitTruthinessExpression(statement.condition, context)}))`
+    : emitTruthinessExpression(statement.condition, context);
+  const lines = [`${prefix}loop {`];
+  lines.push(...emitStatementSequence(statement.body, context, indentLevel + 1, activeFlag ? { activeFlag } : undefined));
+  lines.push(`${indent(indentLevel + 1)}continuing {`);
+  lines.push(`${indent(indentLevel + 2)}break if !(${condition});`);
+  lines.push(`${indent(indentLevel + 1)}}`);
+  lines.push(`${prefix}}`);
+  return lines;
+}
+
+function hasContinueTargetingCurrentLoop(statements: readonly CudaLiteStatement[]): boolean {
+  for (const statement of statements) {
+    if (statement.kind === "continue") return true;
+    if (statement.kind === "block" && hasContinueTargetingCurrentLoop(statement.body)) return true;
+    if (statement.kind === "if") {
+      if (hasContinueTargetingCurrentLoop(statement.consequent)) return true;
+      if (statement.alternate && hasContinueTargetingCurrentLoop(statement.alternate)) return true;
+    }
+    if (statement.kind === "for" || statement.kind === "while" || statement.kind === "do-while") continue;
+  }
+  return false;
 }
 
 function emitLazyConditionBreak(
@@ -975,10 +1076,14 @@ function emitInlineGuardedBarrierDeviceFunctionStatement(
   const name = expressionName(statement.expression.callee);
   const deviceFunction = name ? context.deviceFunctionFor(name, statement.expression.args.length) : undefined;
   if (!deviceFunction || !deviceFunctionNeedsGuardedBarrierClone(deviceFunction)) return undefined;
-  const args = emitDeviceFunctionCallArgs(statement.expression, deviceFunction, context);
+  const localPointerParams = localPointerParamsForDeviceFunctionCall(statement.expression, deviceFunction, context);
+  const args = emitDeviceFunctionCallArgs(statement.expression, deviceFunction, context, localPointerParams);
   const specialization = textureSpecializationForDeviceFunctionCall(statement.expression, deviceFunction, context);
+  const defaultLocalPointerParams = defaultLocalPointerParamsForDeviceFunction(deviceFunction, context.ir);
   const linkName = specialization === undefined
-    ? guardedBarrierDeviceFunctionLinkName(deviceFunction, context.ir)
+    ? localPointerParams.size > 0 && !setsEqual(localPointerParams, defaultLocalPointerParams)
+      ? guardedBarrierDeviceFunctionLinkNameFromLinkName(localPointerSpecializationLinkName(deviceFunction, localPointerParams, context.ir))
+      : guardedBarrierDeviceFunctionLinkName(deviceFunction, context.ir)
     : guardedBarrierDeviceFunctionLinkNameFromLinkName(specialization.linkName);
   const prefix = indent(indentLevel);
   return [`${prefix}${context.nameFor(linkName)}(${[...args, guardSource, "local_id", "workgroup_id", "num_workgroups"].join(", ")});`];
@@ -1338,6 +1443,16 @@ function emitVarStatementWithActiveFlag(
   if (statement.pointer || statement.dimensions.length > 0 || statement.matrixTile || !statement.init) {
     return emitStatement(statement, context, indentLevel);
   }
+  const sequence = emitVarInitWithSequence(statement, context, indentLevel, activeFlag);
+  if (sequence) return sequence;
+  const frexp = emitVarInitWithFrexpPointerExponent(statement, context, indentLevel, activeFlag);
+  if (frexp) return frexp;
+  const modf = emitVarInitWithModfIntpart(statement, context, indentLevel, activeFlag);
+  if (modf) return modf;
+  const remquo = emitVarInitWithRemquoQuotient(statement, context, indentLevel, activeFlag);
+  if (remquo) return remquo;
+  const runtimeQuery = emitVarInitWithCudaIntegerRuntimeQuery(statement, context, indentLevel, activeFlag);
+  if (runtimeQuery) return runtimeQuery;
   const conditional = emitVarInitWithConditionalSideEffect(statement, context, indentLevel, activeFlag);
   if (conditional) return conditional;
   const hoistedPointerArrayIndex = emitVarInitWithHoistedSideEffectingPointerArrayIndex(statement, context, indentLevel, activeFlag);
@@ -1389,6 +1504,357 @@ function emitVarInitWithConditionalSideEffect(
   const lines = [`${prefix}var ${context.nameFor(statement.name)}: ${wgslScalar(statement.valueType)} = ${zeroValue(statement.valueType)};`];
   if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
   lines.push(...emitAssignmentWithLazyConditionalSideEffectRhs({ kind: "assignment", left: target, operator: "=", right: statement.init, span: statement.span }, context, branchIndent) ?? []);
+  if (activeFlag) lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitVarInitWithFrexpPointerExponent(
+  statement: CudaLiteVarDecl,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] | undefined {
+  if (statement.storage === "shared" || statement.pointer || statement.dimensions.length > 0 || statement.matrixTile) return undefined;
+  if (statement.valueType !== "float" || statement.init?.kind !== "call") return undefined;
+  const name = expressionName(statement.init.callee);
+  if (name !== "frexp" && name !== "frexpf") return undefined;
+  const exponent = statement.init.args[1];
+  if (!exponent || (exponent.kind === "unary" && exponent.operator === "&" && exponent.argument.kind === "identifier")) return undefined;
+  const value = statement.init.args[0] ? emitExpressionAsValueType(statement.init.args[0], "float", context) : "0.0";
+  const exponentTemp = context.nameFor(`bg_frexp_exp_${statement.init.span.start}`);
+  const prefix = indent(indentLevel);
+  const bodyIndent = activeFlag ? indentLevel + 1 : indentLevel;
+  const bodyPrefix = indent(bodyIndent);
+  const lines = [
+    `${prefix}var ${context.nameFor(statement.name)}: f32 = 0.0;`,
+    `${prefix}var ${exponentTemp}: i32 = 0;`,
+  ];
+  if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
+  lines.push(`${bodyPrefix}${context.nameFor(statement.name)} = bg_frexp(${value}, &${exponentTemp});`);
+  lines.push(...emitFrexpExponentWrite(exponent, exponentTemp, context, bodyIndent));
+  if (activeFlag) lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitVarInitWithModfIntpart(
+  statement: CudaLiteVarDecl,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] | undefined {
+  if (statement.storage === "shared" || statement.pointer || statement.dimensions.length > 0 || statement.matrixTile) return undefined;
+  if (statement.valueType !== "float" || statement.init?.kind !== "call") return undefined;
+  const name = expressionName(statement.init.callee);
+  if (name !== "modf" && name !== "modff") return undefined;
+  const intpart = statement.init.args[1];
+  if (!intpart || (intpart.kind === "unary" && intpart.operator === "&" && intpart.argument.kind === "identifier")) return undefined;
+  const value = statement.init.args[0] ? emitExpressionAsValueType(statement.init.args[0], "float", context) : "0.0";
+  const intpartTemp = context.nameFor(`bg_modf_int_${statement.init.span.start}`);
+  const prefix = indent(indentLevel);
+  const bodyIndent = activeFlag ? indentLevel + 1 : indentLevel;
+  const lines = [
+    `${prefix}var ${context.nameFor(statement.name)}: f32 = 0.0;`,
+    `${prefix}var ${intpartTemp}: f32 = 0.0;`,
+  ];
+  if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
+  lines.push(...emitModfDecomposeLines(value, context.nameFor(statement.name), intpartTemp, bodyIndent));
+  lines.push(...emitModfIntpartWrite(intpart, intpartTemp, context, bodyIndent));
+  if (activeFlag) lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitVarInitWithRemquoQuotient(
+  statement: CudaLiteVarDecl,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] | undefined {
+  if (statement.storage === "shared" || statement.pointer || statement.dimensions.length > 0 || statement.matrixTile) return undefined;
+  if (statement.valueType !== "float" || statement.init?.kind !== "call") return undefined;
+  const name = expressionName(statement.init.callee);
+  if (name !== "remquo" && name !== "remquof") return undefined;
+  const quotient = statement.init.args[2];
+  if (!quotient) return undefined;
+  const x = statement.init.args[0] ? emitExpressionAsValueType(statement.init.args[0], "float", context) : "0.0";
+  const y = statement.init.args[1] ? emitExpressionAsValueType(statement.init.args[1], "float", context) : "1.0";
+  const quotientTemp = context.nameFor(`bg_remquo_quo_${statement.init.span.start}`);
+  const prefix = indent(indentLevel);
+  const bodyIndent = activeFlag ? indentLevel + 1 : indentLevel;
+  const lines = [
+    `${prefix}var ${context.nameFor(statement.name)}: f32 = 0.0;`,
+    `${prefix}var ${quotientTemp}: i32 = 0;`,
+  ];
+  if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
+  lines.push(...emitRemquoDecomposeLines(x, y, context.nameFor(statement.name), quotientTemp, bodyIndent));
+  lines.push(...emitRemquoQuotientWrite(quotient, quotientTemp, context, bodyIndent));
+  if (activeFlag) lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitVarInitWithCudaIntegerRuntimeQuery(
+  statement: CudaLiteVarDecl,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] | undefined {
+  if (statement.storage === "shared" || statement.pointer || statement.dimensions.length > 0 || statement.matrixTile) return undefined;
+  if (statement.init?.kind !== "call") return undefined;
+  const init = statement.init;
+  const callName = expressionName(init.callee);
+  if (statement.valueType === "int" && callName === "cudaEventElapsedTime") {
+    return emitVarInitWithCudaEventElapsedTime(statement, init, context, indentLevel, activeFlag);
+  }
+  if (statement.valueType !== "int" || !isCudaIntegerRuntimeQueryCall(callName)) return undefined;
+  if (callName === "cudaMemGetInfo") {
+    return emitVarInitWithCudaMemGetInfo(statement, init, context, indentLevel, activeFlag);
+  }
+  if (callName === "cudaDeviceGetStreamPriorityRange") {
+    return emitVarInitWithCudaDeviceGetStreamPriorityRange(statement, init, context, indentLevel, activeFlag);
+  }
+  if (callName === "cudaStreamGetCaptureInfo") {
+    return emitVarInitWithCudaStreamGetCaptureInfo(statement, init, context, indentLevel, activeFlag);
+  }
+  if (callName === "cudaOccupancyMaxPotentialBlockSize" || callName === "cudaOccupancyMaxPotentialBlockSizeWithFlags") {
+    return emitVarInitWithCudaOccupancyMaxPotentialBlockSize(statement, init, context, indentLevel, activeFlag);
+  }
+  const target = cudaIntegerRuntimeQueryTarget(init);
+  if (!target) return undefined;
+  const value = cudaIntegerRuntimeQueryValue(init);
+  const prefix = indent(indentLevel);
+  const bodyIndent = activeFlag ? indentLevel + 1 : indentLevel;
+  const lines = [`${prefix}var ${context.nameFor(statement.name)}: i32 = 0;`];
+  if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
+  lines.push(...emitIntPointerWrite(
+    target,
+    { kind: "number", value, raw: String(value), span: init.span },
+    context,
+    bodyIndent,
+    "unsupported-cuda-runtime",
+    `${callName} expects a modeled int pointer target`,
+    cudaIntegerRuntimeQueryTargetValueType(callName),
+  ));
+  if (activeFlag) lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitVarInitWithCudaOccupancyMaxPotentialBlockSize(
+  statement: CudaLiteVarDecl,
+  init: CudaLiteCallExpression,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] {
+  const prefix = indent(indentLevel);
+  const bodyIndent = activeFlag ? indentLevel + 1 : indentLevel;
+  const lines = [`${prefix}var ${context.nameFor(statement.name)}: i32 = 0;`];
+  if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
+  lines.push(...emitCudaOccupancyMaxPotentialBlockSizeWrites(init, context, bodyIndent));
+  if (activeFlag) lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitVarInitWithCudaStreamGetCaptureInfo(
+  statement: CudaLiteVarDecl,
+  init: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] {
+  const prefix = indent(indentLevel);
+  const bodyIndent = activeFlag ? indentLevel + 1 : indentLevel;
+  const lines = [`${prefix}var ${context.nameFor(statement.name)}: i32 = 0;`];
+  if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
+  lines.push(...emitCudaStreamGetCaptureInfoWrites(init, context, bodyIndent));
+  if (activeFlag) lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitVarInitWithCudaEventElapsedTime(
+  statement: CudaLiteVarDecl,
+  init: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] {
+  const prefix = indent(indentLevel);
+  const bodyIndent = activeFlag ? indentLevel + 1 : indentLevel;
+  const lines = [`${prefix}var ${context.nameFor(statement.name)}: i32 = 0;`];
+  if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
+  lines.push(...emitCudaEventElapsedTimeWrite(init, context, bodyIndent));
+  if (activeFlag) lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitVarInitWithCudaMemGetInfo(
+  statement: CudaLiteVarDecl,
+  init: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] {
+  const prefix = indent(indentLevel);
+  const bodyIndent = activeFlag ? indentLevel + 1 : indentLevel;
+  const lines = [`${prefix}var ${context.nameFor(statement.name)}: i32 = 0;`];
+  if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
+  lines.push(...emitCudaMemGetInfoWrites(init, context, bodyIndent));
+  if (activeFlag) lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitVarInitWithCudaDeviceGetStreamPriorityRange(
+  statement: CudaLiteVarDecl,
+  init: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] {
+  const prefix = indent(indentLevel);
+  const bodyIndent = activeFlag ? indentLevel + 1 : indentLevel;
+  const lines = [`${prefix}var ${context.nameFor(statement.name)}: i32 = 0;`];
+  if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
+  lines.push(...emitCudaDeviceGetStreamPriorityRangeWrites(init, context, bodyIndent));
+  if (activeFlag) lines.push(`${prefix}}`);
+  return lines;
+}
+
+function emitFrexpExponentWrite(
+  exponent: CudaLiteExpression,
+  exponentTemp: string,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  return emitIntPointerWrite(
+    exponent,
+    { kind: "identifier", name: exponentTemp, span: exponent.span },
+    context,
+    indentLevel,
+    "unsupported-frexp-exponent",
+    "frexp exponent must target modeled integer storage",
+  );
+}
+
+function emitModfIntpartWrite(
+  intpart: CudaLiteExpression,
+  intpartTemp: string,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  return emitIntPointerWrite(
+    intpart,
+    { kind: "identifier", name: intpartTemp, span: intpart.span },
+    context,
+    indentLevel,
+    "unsupported-modf-intpart",
+    "modf integer-part output must target modeled float storage",
+    "float",
+  );
+}
+
+function emitRemquoQuotientWrite(
+  quotient: CudaLiteExpression,
+  quotientTemp: string,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  return emitIntPointerWrite(
+    quotient,
+    { kind: "identifier", name: quotientTemp, span: quotient.span },
+    context,
+    indentLevel,
+    "unsupported-remquo-quotient",
+    "remquo quotient output must target modeled integer storage",
+  );
+}
+
+function emitSincosOutputWrite(
+  target: CudaLiteExpression,
+  valueName: string,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  return emitIntPointerWrite(
+    target,
+    { kind: "identifier", name: valueName, span: target.span },
+    context,
+    indentLevel,
+    "unsupported-sincos-output",
+    "sincos output must target modeled float storage",
+    "float",
+  );
+}
+
+function isSincosCallName(name: string | undefined): boolean {
+  return name === "sincos" || name === "sincosf" || name === "__sincosf" || name === "sincospi" || name === "sincospif";
+}
+
+function isNanPayloadCallName(name: string | undefined): boolean {
+  return name === "nan" || name === "nanf" || name === "__builtin_nan" || name === "__builtin_nanf";
+}
+
+function emitModfDecomposeLines(value: string, fractionTarget: string, intpartTarget: string, indentLevel: number): string[] {
+  const prefix = indent(indentLevel);
+  return [
+    `${prefix}if (${value} != ${value}) {`,
+    `${prefix}  ${intpartTarget} = ${value};`,
+    `${prefix}  ${fractionTarget} = ${value};`,
+    `${prefix}} else if (abs(${value}) > 3.4028234663852886e38) {`,
+    `${prefix}  ${intpartTarget} = ${value};`,
+    `${prefix}  ${fractionTarget} = select(0.0, -0.0, ${value} < 0.0);`,
+    `${prefix}} else {`,
+    `${prefix}  ${intpartTarget} = trunc(${value});`,
+    `${prefix}  ${fractionTarget} = ${value} - ${intpartTarget};`,
+    `${prefix}}`,
+  ];
+}
+
+function emitRemquoDecomposeLines(x: string, y: string, remainderTarget: string, quotientTarget: string, indentLevel: number): string[] {
+  const prefix = indent(indentLevel);
+  return [
+    `${prefix}${quotientTarget} = i32(bg_round_even_f32(${x} / ${y}));`,
+    `${prefix}${remainderTarget} = ${x} - f32(${quotientTarget}) * ${y};`,
+  ];
+}
+
+function emitIntPointerWrite(
+  target: CudaLiteExpression,
+  value: CudaLiteExpression,
+  context: EmitContext,
+  indentLevel: number,
+  errorCode: string,
+  errorMessage: string,
+  valueType: CudaLiteScalarType = "int",
+): string[] {
+  if (target.kind === "unary" && target.operator === "&") {
+    const assignment: CudaLiteAssignmentExpression = {
+      kind: "assignment",
+      left: target.argument,
+      operator: "=",
+      right: value,
+      span: target.span,
+    };
+    return emitLazyConditionalAssignmentBranch(assignment, context, indentLevel);
+  }
+  const parts = devicePointerArgumentParts(target, context);
+  if (!parts) throw featureError(errorCode, errorMessage, target.span);
+  return [`${indent(indentLevel)}${pointerWriteHelperName(valueType)}(${parts.buffer}, ${parts.base}, ${emitExpressionAsValueType(value, valueType, context)});`];
+}
+
+function emitVarInitWithSequence(
+  statement: CudaLiteVarDecl,
+  context: EmitContext,
+  indentLevel: number,
+  activeFlag?: string,
+): string[] | undefined {
+  if (statement.storage === "shared" || statement.pointer || statement.dimensions.length > 0 || statement.matrixTile) return undefined;
+  if (statement.init?.kind !== "sequence" || statement.init.expressions.length === 0) return undefined;
+  const prefix = indent(indentLevel);
+  const bodyIndent = activeFlag ? indentLevel + 1 : indentLevel;
+  const items = statement.init.expressions;
+  const last = items.at(-1)!;
+  const lines = [`${prefix}var ${context.nameFor(statement.name)}: ${wgslScalar(statement.valueType)} = ${zeroValue(statement.valueType)};`];
+  if (activeFlag) lines.push(`${prefix}if (${activeFlag}) {`);
+  lines.push(...emitExpressionStatementSequence(items.slice(0, -1), context, bodyIndent));
+  lines.push(`${indent(bodyIndent)}${context.nameFor(statement.name)} = ${emitLocalInit({ ...statement, init: last }, context)};`);
   if (activeFlag) lines.push(`${prefix}}`);
   return lines;
 }
@@ -1784,7 +2250,7 @@ function emitInlineAsmStatement(
     return emitMmaM16N8K16Statement(statement, outputs, op.accumulator, context);
   }
   if (op?.kind !== "fma-rn-f32" || statement.inputs.length !== 2 || outputs.length !== 1) {
-    throw featureError("unsupported-inline-asm", `only ${inlineAsmSupportedList()} inline PTX are supported in WGSL output`);
+    throw featureError("unsupported-inline-asm", `only ${inlineAsmSupportedList()} inline PTX are supported in WGSL output`, statement.span);
   }
   const target = emitExpression(outputs[0]!, context);
   return `${target} = fma(${emitExpression(statement.inputs[0]!, context)}, ${emitExpression(statement.inputs[1]!, context)}, ${target})`;
@@ -1798,7 +2264,7 @@ function emitMmaM16N8K16Statement(
 ): string {
   if (accumulator === "f16") {
     if (outputs.length !== 2 || statement.inputs.length !== 8) {
-      throw featureError("invalid-inline-asm-operands", "mma.m16n8k16 f16 inline PTX operand mismatch");
+      throw featureError("invalid-inline-asm-operands", "mma.m16n8k16 f16 inline PTX operand mismatch", statement.span);
     }
     return outputs.map((output, index) => {
       const a = `u32(${emitExpression(statement.inputs[index % 4]!, context)})`;
@@ -1809,7 +2275,7 @@ function emitMmaM16N8K16Statement(
     }).join("\n");
   }
   if (outputs.length !== 4 || statement.inputs.length !== 10) {
-    throw featureError("invalid-inline-asm-operands", "mma.m16n8k16 f32 inline PTX operand mismatch");
+    throw featureError("invalid-inline-asm-operands", "mma.m16n8k16 f32 inline PTX operand mismatch", statement.span);
   }
   return outputs.map((output, index) => {
     const a = `u32(${emitExpression(statement.inputs[index % 4]!, context)})`;
@@ -1854,8 +2320,9 @@ function emitU8x4SadAddExpression(inputs: readonly CudaLiteExpression[], context
 function emitForVar(statement: CudaLiteVarDecl, context: EmitContext): string {
   if (statement.pointer && context.localPointerHandleFor(statement.name, statement.span)) {
     throw featureError(
-      "unsupported-local-pointer-for-init",
-      "mutable local pointer declarations in for-loop initializers are not supported yet",
+      "internal-lowering-invariant",
+      "mutable local pointer declarations in for-loop initializers must lower through block-scoped handles before emitForVar",
+      statement.span,
     );
   }
   if (statement.pointer) return `var ${context.nameFor(statement.name)}: u32${statement.init ? ` = ${emitExpression(statement.init, context)}` : " = 0u"}`;
@@ -1882,7 +2349,7 @@ function emitLocalPointerHandleDecl(
     }
     return lines;
   }
-  if (statement.init && splitLazyConditionalSideEffectExpression(statement.init, context)) {
+  if (statement.init && (splitLazyConditionalSideEffectExpression(statement.init, context) || isPointerInitializerAssignmentExpression(statement.init) || statement.init.kind === "sequence")) {
     return [
       `${prefix}var ${localPointerHandleBufferName(statement, context)}: u32 = 0u;`,
       `${prefix}var ${localPointerHandleBaseName(statement, context)}: u32 = 0u;`,
@@ -1905,11 +2372,37 @@ function emitLazyLocalPointerHandleInitAssignment(
   const split = splitLazyConditionalSideEffectExpression(expression, context);
   const prefix = indent(indentLevel);
   if (!split) {
+    if (expression.kind === "sequence") {
+      const items = flattenSequenceItems(expression);
+      const final = items.at(-1);
+      if (!final) return [];
+      return [
+        ...items.slice(0, -1).flatMap((item) => emitLazyConditionalExpressionStatementBranch(item, context, indentLevel)),
+        ...emitLazyLocalPointerHandleInitAssignment(statement, final, context, indentLevel),
+      ];
+    }
+    if (isPointerInitializerAssignmentExpression(expression)) {
+      const assignment = emitPointerRebaseAssignment(expression, context);
+      const parts = devicePointerArgumentParts(expression.right, context);
+      if (!assignment || !parts) {
+        throw featureError(
+          "unsupported-pointer-assignment",
+          "CUDA pointer initializer assignment expects modeled pointer source and target",
+          expression.span,
+        );
+      }
+      return [
+        `${prefix}${assignment};`,
+        `${prefix}${localPointerHandleBufferName(statement, context)} = ${parts.buffer};`,
+        `${prefix}${localPointerHandleBaseName(statement, context)} = ${parts.base};`,
+      ];
+    }
     const parts = devicePointerArgumentParts(expression, context);
     if (!parts) {
       throw featureError(
         "unsupported-device-pointer-param",
         `local pointer '${statement.name}' at line ${statement.span.line} must initialize from modeled storage or shared memory`,
+        expression.span,
       );
     }
     return [
@@ -1924,6 +2417,10 @@ function emitLazyLocalPointerHandleInitAssignment(
     ...emitLazyLocalPointerHandleInitAssignment(statement, split.alternate, context, indentLevel + 1),
     `${prefix}}`,
   ];
+}
+
+function isPointerInitializerAssignmentExpression(expression: CudaLiteExpression): expression is CudaLiteAssignmentExpression {
+  return expression.kind === "assignment" && expression.operator === "=";
 }
 
 function localPointerHandleBufferName(statement: CudaLiteVarDecl, context: EmitContext): string {
@@ -1961,6 +2458,7 @@ function emitLocalPointerHandleInit(statement: CudaLiteVarDecl, context: EmitCon
     throw featureError(
       "unsupported-device-pointer-param",
       `local pointer '${statement.name}' at line ${statement.span.line} must initialize from modeled storage or shared memory`,
+      statement.init.span,
     );
   }
   return [parts.buffer, parts.base];
@@ -1997,13 +2495,14 @@ function emitDeviceFunction(
     readonly guardedBarrierClone?: boolean;
     readonly textureDescriptors?: Readonly<Record<string, CudaLiteTextureDescriptor>>;
     readonly linkName?: string;
+    readonly localPointerParams?: ReadonlySet<string>;
   } = {},
 ): string[] {
   const cooperativeParams = new Map(fn.params
     .filter((param) => param.cooperativeGroupKind !== undefined)
     .map((param) => [param.name, cooperativeGroupForParam(param, context)] as const));
   const functionCooperativeGroups = collectCooperativeGroups(fn.body);
-  const functionPointerParams = new Set(fn.params
+  const functionPointerParams = options.localPointerParams ?? new Set(fn.params
     .filter((param) => param.pointer && usesFunctionLocalPointerParam(fn, param, context.ir))
     .map((param) => param.name));
   const functionLocalPointerHandleDeclarations = collectLocalPointerHandleDeclarations(fn.body, undefined, structuredPointerHandleRoots(context.ir));
@@ -2104,6 +2603,27 @@ function emitDeviceFunction(
   return lines;
 }
 
+function emitDeviceFunctionLocalPointerSpecializations(fn: CudaLiteDeviceFunction, context: EmitContext): string[] {
+  const specializations = localPointerSpecializationsForDeviceFunction(fn, context);
+  return specializations.flatMap((localPointerParams) => [
+    "",
+    ...emitDeviceFunction(fn, context, {
+      linkName: localPointerSpecializationLinkName(fn, localPointerParams, context.ir),
+      localPointerParams,
+    }),
+    ...(deviceFunctionNeedsGuardedBarrierClone(fn)
+      ? [
+          "",
+          ...emitDeviceFunction(fn, context, {
+            guardedBarrierClone: true,
+            linkName: localPointerSpecializationLinkName(fn, localPointerParams, context.ir),
+            localPointerParams,
+          }),
+        ]
+      : []),
+  ]);
+}
+
 function emitDeviceFunctionTextureSpecializations(fn: CudaLiteDeviceFunction, context: EmitContext): string[] {
   const specializations = context.deviceFunctionTextureSpecializations?.get(fn);
   if (specializations === undefined) return [];
@@ -2136,6 +2656,77 @@ function guardedBarrierDeviceFunctionLinkName(fn: CudaLiteDeviceFunction, ir: Ke
 
 function guardedBarrierDeviceFunctionLinkNameFromLinkName(linkName: string): string {
   return `${linkName}__bg_guarded_barrier`;
+}
+
+function localPointerSpecializationLinkName(
+  fn: CudaLiteDeviceFunction,
+  localPointerParams: ReadonlySet<string>,
+  ir: KernelIrModule,
+): string {
+  const suffix = fn.params
+    .filter((param) => param.pointer && localPointerParams.has(param.name))
+    .map((param) => safeWgslIdentifier(param.name))
+    .join("_");
+  return `${deviceFunctionLinkName(fn, ir)}__bg_localptr_${suffix}`;
+}
+
+function defaultLocalPointerParamsForDeviceFunction(
+  fn: CudaLiteDeviceFunction,
+  ir: KernelIrModule,
+): ReadonlySet<string> {
+  return new Set(fn.params
+    .filter((param) => param.pointer && usesFunctionLocalPointerParam(fn, param, ir))
+    .map((param) => param.name));
+}
+
+function setsEqual(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+  if (left.size !== right.size) return false;
+  for (const value of left) {
+    if (!right.has(value)) return false;
+  }
+  return true;
+}
+
+function localPointerSpecializationsForDeviceFunction(
+  fn: CudaLiteDeviceFunction,
+  context: EmitContext,
+): readonly ReadonlySet<string>[] {
+  const pointerParams = fn.params.filter((param) => param.pointer);
+  if (pointerParams.length === 0) return [];
+  const sharedNames = new Set(context.ir.sharedDeclarations.map((shared) => shared.name));
+  const out = new Map<string, ReadonlySet<string>>();
+  const roots: Array<{
+    readonly statements: readonly CudaLiteStatement[];
+    readonly localPointerParams: ReadonlySet<string>;
+  }> = [
+    { statements: context.ir.body, localPointerParams: new Set() },
+    ...context.ir.functions.map((caller) => ({
+      statements: caller.body,
+      localPointerParams: new Set(caller.params
+        .filter((callerParam) => callerParam.pointer && usesFunctionLocalPointerParam(caller, callerParam, context.ir))
+        .map((callerParam) => callerParam.name)),
+    })),
+  ];
+  for (const { statements, localPointerParams } of roots) {
+    const localArrayNames = new Set(collectLocalArrays(statements).keys());
+    const localPointerArrayNames = new Set(collectLocalPointerArrayRoots(statements).keys());
+    walkCudaLiteExpressions(statements, (expression) => {
+      if (expression.kind !== "call" || expressionName(expression.callee) !== fn.name) return;
+      const localParams = new Set<string>();
+      for (const param of pointerParams) {
+        const index = fn.params.findIndex((item) => item.name === param.name);
+        const arg = expression.args[index];
+        if (arg && isFunctionLocalPointerArgument(arg, sharedNames, localArrayNames, localPointerArrayNames, localPointerParams)) {
+          localParams.add(param.name);
+        }
+      }
+      if (localParams.size === 0) return;
+      if (setsEqual(localParams, defaultLocalPointerParamsForDeviceFunction(fn, context.ir))) return;
+      const key = fn.params.filter((param) => localParams.has(param.name)).map((param) => param.name).join("\0");
+      out.set(key, localParams);
+    });
+  }
+  return [...out.values()];
 }
 
 function withDevicePointerParams(
@@ -2318,9 +2909,74 @@ function emitReturnStatement(
 ): string[] {
   const prefix = indent(indentLevel);
   if (!statement.value) return [`${prefix}return;`];
+  if (statement.value.kind === "sequence") return emitReturnWithSequence(statement.value, context, indentLevel);
   const lazy = emitReturnWithLazyConditionalSideEffect(statement.value, context, indentLevel);
   if (lazy) return lazy;
   return [`${prefix}return ${emitReturnValue(statement.value, context)};`];
+}
+
+function emitReturnWithSequence(
+  expression: Extract<CudaLiteExpression, { kind: "sequence" }>,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const items = flattenSequenceItems(expression);
+  const final = items.at(-1);
+  if (!final) return [`${indent(indentLevel)}return;`];
+  const prefix = indent(indentLevel);
+  const before = items.slice(0, -1).flatMap((item) => emitLazyConditionalExpressionStatementBranch(item, context, indentLevel));
+  if (context.currentReturnType === undefined || context.currentReturnType === "void") {
+    return [
+      ...before,
+      ...emitLazyConditionalExpressionStatementBranch(final, context, indentLevel),
+      `${prefix}return;`,
+    ];
+  }
+  const tempName = context.nameFor(`bg_return_value_${expression.span.start}`);
+  const tempDecl = `${prefix}var ${tempName}: ${wgslScalar(context.currentReturnType)} = ${zeroValue(context.currentReturnType)};`;
+  const finalAssignment = emitSequenceFinalValueAssignment(tempName, final, context.currentReturnType, context, indentLevel);
+  return [
+    tempDecl,
+    ...before,
+    ...finalAssignment,
+    `${prefix}return ${tempName};`,
+  ];
+}
+
+function emitSequenceFinalValueAssignment(
+  targetName: string,
+  expression: CudaLiteExpression,
+  valueType: Exclude<CudaLiteScalarType, "void">,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const prefix = indent(indentLevel);
+  if (expression.kind === "assignment") {
+    const statement = emitExpressionStatement(expression, context);
+    return [
+      ...(statement.length === 0 ? [] : [`${prefix}${statement};`]),
+      `${prefix}${targetName} = ${emitReturnValue(expression.left, context)};`,
+    ];
+  }
+  if (expression.kind === "update") {
+    if (!expression.prefix) {
+      return [
+        `${prefix}${targetName} = ${emitReturnValue(expression.argument, context)};`,
+        ...emitLazyConditionalExpressionStatementBranch(expression, context, indentLevel),
+      ];
+    }
+    return [
+      ...emitLazyConditionalExpressionStatementBranch(expression, context, indentLevel),
+      `${prefix}${targetName} = ${emitReturnValue(expression.argument, context)};`,
+    ];
+  }
+  return emitLazyConditionalValueAssignment(targetName, expression, valueType, context, indentLevel);
+}
+
+function flattenSequenceItems(expression: CudaLiteExpression): readonly CudaLiteExpression[] {
+  return expression.kind === "sequence"
+    ? expression.expressions.flatMap((item) => flattenSequenceItems(item))
+    : [expression];
 }
 
 function emitReturnWithLazyConditionalSideEffect(
@@ -2639,7 +3295,7 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
     case "string":
       return expression.raw;
     case "initializer":
-      throw featureError("unsupported-local-array-init", "braced initializer is only valid in a declaration");
+      throw featureError("unsupported-local-array-init", "braced initializer is only valid in a declaration", expression.span);
     case "identifier":
       return emitIdentifier(expression.name, context, mode);
     case "cast": {
@@ -2844,7 +3500,7 @@ function emitExpression(expression: CudaLiteExpression, context: EmitContext, mo
     case "update":
       return emitUpdateExpression(expression, context);
     case "sequence":
-      throw featureError("unsupported-sequence-expression", "comma expressions are only supported in for-loop clauses");
+      throw featureError("unsupported-sequence-expression", "comma expressions are only supported in for-loop clauses", expression.span);
   }
 }
 
@@ -2858,6 +3514,75 @@ function emitExpressionStatement(expression: CudaLiteExpression, context: EmitCo
     if (isAtomicReturnCallName(name)) return `_ = ${source}`;
   }
   return source;
+}
+
+function emitModfExpressionStatement(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  if (expression.kind !== "call") return undefined;
+  const name = expressionName(expression.callee);
+  if (name !== "modf" && name !== "modff") return undefined;
+  const intpart = expression.args[1];
+  if (!intpart || (intpart.kind === "unary" && intpart.operator === "&" && intpart.argument.kind === "identifier")) return undefined;
+  const intpartTemp = context.nameFor(`bg_modf_int_${expression.span.start}`);
+  const fractionTemp = context.nameFor(`bg_modf_frac_${expression.span.start}`);
+  const value = expression.args[0] ? emitExpressionAsValueType(expression.args[0], "float", context) : "0.0";
+  const prefix = indent(indentLevel);
+  return [
+    `${prefix}var ${intpartTemp}: f32 = 0.0;`,
+    `${prefix}var ${fractionTemp}: f32 = 0.0;`,
+    ...emitModfDecomposeLines(value, fractionTemp, intpartTemp, indentLevel),
+    ...emitModfIntpartWrite(intpart, intpartTemp, context, indentLevel),
+  ];
+}
+
+function emitRemquoExpressionStatement(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  if (expression.kind !== "call") return undefined;
+  const name = expressionName(expression.callee);
+  if (name !== "remquo" && name !== "remquof") return undefined;
+  const quotient = expression.args[2];
+  if (!quotient) return undefined;
+  const quotientTemp = context.nameFor(`bg_remquo_quo_${expression.span.start}`);
+  const remainderTemp = context.nameFor(`bg_remquo_rem_${expression.span.start}`);
+  const x = expression.args[0] ? emitExpressionAsValueType(expression.args[0], "float", context) : "0.0";
+  const y = expression.args[1] ? emitExpressionAsValueType(expression.args[1], "float", context) : "1.0";
+  const prefix = indent(indentLevel);
+  return [
+    `${prefix}var ${quotientTemp}: i32 = 0;`,
+    `${prefix}var ${remainderTemp}: f32 = 0.0;`,
+    ...emitRemquoDecomposeLines(x, y, remainderTemp, quotientTemp, indentLevel),
+    ...emitRemquoQuotientWrite(quotient, quotientTemp, context, indentLevel),
+  ];
+}
+
+function emitSincosExpressionStatement(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  if (expression.kind !== "call") return undefined;
+  const name = expressionName(expression.callee);
+  if (!isSincosCallName(name)) return undefined;
+  const sinTarget = expression.args[1];
+  const cosTarget = expression.args[2];
+  if (!sinTarget || !cosTarget) return undefined;
+  const rawValue = expression.args[0] ? emitExpressionAsValueType(expression.args[0], "float", context) : "0.0";
+  const value = name === "sincospi" || name === "sincospif" ? `(3.141592653589793 * ${rawValue})` : rawValue;
+  const sinTemp = context.nameFor(`bg_sincos_sin_${expression.span.start}`);
+  const cosTemp = context.nameFor(`bg_sincos_cos_${expression.span.start}`);
+  const prefix = indent(indentLevel);
+  return [
+    `${prefix}let ${sinTemp}: f32 = sin(${value});`,
+    `${prefix}let ${cosTemp}: f32 = cos(${value});`,
+    ...emitSincosOutputWrite(sinTarget, sinTemp, context, indentLevel),
+    ...emitSincosOutputWrite(cosTarget, cosTemp, context, indentLevel),
+  ];
 }
 
 function emitExpressionStatementWithLazyConditionalSideEffect(
@@ -2882,12 +3607,25 @@ function emitLazyConditionalExpressionStatementBranch(
   context: EmitContext,
   indentLevel: number,
 ): string[] {
+  if (expression.kind === "sequence") return emitExpressionStatementSequence(expression.expressions, context, indentLevel);
   const nested = emitExpressionStatementWithLazyConditionalSideEffect(expression, context, indentLevel);
   if (nested) return nested;
   const hoistedPointerArrayIndex = emitExpressionStatementWithHoistedSideEffectingPointerArrayIndex(expression, context, indentLevel);
   if (hoistedPointerArrayIndex) return hoistedPointerArrayIndex;
   const emitted = emitExpressionStatement(expression, context);
   return emitted.length === 0 ? [] : [`${indent(indentLevel)}${emitted};`];
+}
+
+function emitExpressionStatementSequence(
+  expressions: readonly CudaLiteExpression[],
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  return expressions.flatMap((expression) =>
+    expression.kind === "sequence"
+      ? emitExpressionStatementSequence(expression.expressions, context, indentLevel)
+      : emitLazyConditionalExpressionStatementBranch(expression, context, indentLevel)
+  );
 }
 
 function emitExpressionStatementWithHoistedSideEffectingPointerArrayIndex(
@@ -2974,6 +3712,9 @@ function emitLoopWithActiveBreak(
 ): string[] {
   if (statement.kind === "while") return emitWhileLoopWithActiveBreak(statement, context, indentLevel, activeFlag);
   if (statement.kind === "do-while") return emitDoWhileLoopWithActiveBreak(statement, context, indentLevel, activeFlag);
+  if (statement.init?.kind === "var" && statement.init.pointer && context.localPointerHandleFor(statement.init.name, statement.init.span)) {
+    return emitForLoopWithLocalPointerHandleInit(statement, statement.init, context, indentLevel, activeFlag);
+  }
   if (statement.update?.kind === "sequence" || statement.init?.kind === "sequence") {
     return emitForLoopWithContinuing(statement, context, indentLevel, activeFlag);
   }
@@ -3011,6 +3752,9 @@ function emitDoWhileLoopWithActiveBreak(
   indentLevel: number,
   activeFlag: string,
 ): string[] {
+  if (hasContinueTargetingCurrentLoop(statement.body)) {
+    return emitDoWhileLoopWithContinuingCondition(statement, context, indentLevel, activeFlag);
+  }
   const prefix = indent(indentLevel);
   const condition = emitTruthinessExpression(statement.condition, context);
   const lines = [`${prefix}loop {`];
@@ -3232,8 +3976,18 @@ function emitAssignmentStatement(
   const prefix = indent(indentLevel);
   const conditionalLeft = emitAssignmentWithConditionalSideEffectLhs(expression, context, indentLevel);
   if (conditionalLeft) return conditionalLeft;
+  const sequence = emitAssignmentWithSequenceRhs(expression, context, indentLevel);
+  if (sequence) return sequence;
   const conditional = emitAssignmentWithConditionalSideEffectRhs(expression, context, indentLevel);
   if (conditional) return conditional;
+  const runtimeQuery = emitAssignmentWithCudaRuntimeQueryRhs(expression, context, indentLevel);
+  if (runtimeQuery) return runtimeQuery;
+  const frexp = emitAssignmentWithFrexpPointerExponent(expression, context, indentLevel);
+  if (frexp) return frexp;
+  const modf = emitAssignmentWithModfIntpart(expression, context, indentLevel);
+  if (modf) return modf;
+  const remquo = emitAssignmentWithRemquoQuotient(expression, context, indentLevel);
+  if (remquo) return remquo;
   const hoistedPointerArrayIndex = emitAssignmentWithHoistedSideEffectingPointerArrayIndex(expression, context, indentLevel);
   if (hoistedPointerArrayIndex) return hoistedPointerArrayIndex;
   const nested = splitNestedAssignmentExpression(expression.right);
@@ -3241,6 +3995,20 @@ function emitAssignmentStatement(
   return [
     ...emitAssignmentStatement(nested.assignment, context, indentLevel),
     `${prefix}${emitAssignment({ ...expression, right: nested.replacement }, context)};`,
+  ];
+}
+
+function emitAssignmentWithSequenceRhs(
+  expression: CudaLiteAssignmentExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  if (expression.right.kind !== "sequence" || expression.right.expressions.length === 0) return undefined;
+  const items = expression.right.expressions;
+  const last = items.at(-1)!;
+  return [
+    ...emitExpressionStatementSequence(items.slice(0, -1), context, indentLevel),
+    ...emitAssignmentStatement({ ...expression, right: last }, context, indentLevel),
   ];
 }
 
@@ -3342,8 +4110,101 @@ function emitLazyConditionalAssignmentBranch(
 ): string[] {
   return emitAssignmentWithLazyConditionalSideEffectLhs(expression, context, indentLevel) ??
     emitAssignmentWithLazyConditionalSideEffectRhs(expression, context, indentLevel) ??
+    emitAssignmentWithFrexpPointerExponent(expression, context, indentLevel) ??
+    emitAssignmentWithRemquoQuotient(expression, context, indentLevel) ??
     emitAssignmentWithHoistedSideEffectingPointerArrayIndex(expression, context, indentLevel) ??
     [`${indent(indentLevel)}${emitAssignment(expression, context)};`];
+}
+
+function emitAssignmentWithFrexpPointerExponent(
+  expression: CudaLiteAssignmentExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  if (expression.operator !== "=" || expression.right.kind !== "call") return undefined;
+  const name = expressionName(expression.right.callee);
+  if (name !== "frexp" && name !== "frexpf") return undefined;
+  const exponent = expression.right.args[1];
+  if (!exponent || (exponent.kind === "unary" && exponent.operator === "&" && exponent.argument.kind === "identifier")) return undefined;
+  const exponentTemp = context.nameFor(`bg_frexp_exp_${expression.right.span.start}`);
+  const value = expression.right.args[0] ?? { kind: "number", value: 0, raw: "0.0", span: expression.right.span };
+  const frexpValue: CudaLiteCallExpression = {
+    kind: "call",
+    callee: expression.right.callee,
+    args: [
+      value,
+      { kind: "unary", operator: "&", argument: { kind: "identifier", name: exponentTemp, span: expression.right.span }, span: expression.right.span },
+    ],
+    span: expression.right.span,
+  };
+  const prefix = indent(indentLevel);
+  return [
+    `${prefix}var ${exponentTemp}: i32 = 0;`,
+    `${prefix}${emitAssignment({ ...expression, right: frexpValue }, context)};`,
+    ...emitFrexpExponentWrite(exponent, exponentTemp, context, indentLevel),
+  ];
+}
+
+function emitAssignmentWithModfIntpart(
+  expression: CudaLiteAssignmentExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  if (expression.operator !== "=" || expression.right.kind !== "call") return undefined;
+  const name = expressionName(expression.right.callee);
+  if (name !== "modf" && name !== "modff") return undefined;
+  const intpart = expression.right.args[1];
+  if (!intpart || (intpart.kind === "unary" && intpart.operator === "&" && intpart.argument.kind === "identifier")) return undefined;
+  const intpartTemp = context.nameFor(`bg_modf_int_${expression.right.span.start}`);
+  const value = expression.right.args[0] ? emitExpressionAsValueType(expression.right.args[0], "float", context) : "0.0";
+  const fractionTemp = context.nameFor(`bg_modf_frac_${expression.right.span.start}`);
+  const prefix = indent(indentLevel);
+  return [
+    `${prefix}var ${intpartTemp}: f32 = 0.0;`,
+    `${prefix}var ${fractionTemp}: f32 = 0.0;`,
+    ...emitModfDecomposeLines(value, fractionTemp, intpartTemp, indentLevel),
+    `${prefix}${emitAssignment({ ...expression, right: { kind: "identifier", name: fractionTemp, span: expression.right.span } }, context)};`,
+    ...emitModfIntpartWrite(intpart, intpartTemp, context, indentLevel),
+  ];
+}
+
+function emitAssignmentWithRemquoQuotient(
+  expression: CudaLiteAssignmentExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  if (expression.operator !== "=" || expression.right.kind !== "call") return undefined;
+  const name = expressionName(expression.right.callee);
+  if (name !== "remquo" && name !== "remquof") return undefined;
+  const quotient = expression.right.args[2];
+  if (!quotient) return undefined;
+  const quotientTemp = context.nameFor(`bg_remquo_quo_${expression.right.span.start}`);
+  const remainderTemp = context.nameFor(`bg_remquo_rem_${expression.right.span.start}`);
+  const x = expression.right.args[0] ? emitExpressionAsValueType(expression.right.args[0], "float", context) : "0.0";
+  const y = expression.right.args[1] ? emitExpressionAsValueType(expression.right.args[1], "float", context) : "1.0";
+  const prefix = indent(indentLevel);
+  return [
+    `${prefix}var ${quotientTemp}: i32 = 0;`,
+    `${prefix}var ${remainderTemp}: f32 = 0.0;`,
+    ...emitRemquoDecomposeLines(x, y, remainderTemp, quotientTemp, indentLevel),
+    `${prefix}${emitAssignment({ ...expression, right: { kind: "identifier", name: remainderTemp, span: expression.right.span } }, context)};`,
+    ...emitRemquoQuotientWrite(quotient, quotientTemp, context, indentLevel),
+  ];
+}
+
+function emitAssignmentWithCudaRuntimeQueryRhs(
+  expression: CudaLiteAssignmentExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  if (expression.right.kind !== "call") return undefined;
+  const sideEffectLines = emitCudaRuntimeQueryWrites(expression.right, context, indentLevel);
+  if (!sideEffectLines) return undefined;
+  const statusValue: CudaLiteExpression = { kind: "number", value: 0, raw: "0", span: expression.right.span };
+  return [
+    ...sideEffectLines,
+    `${indent(indentLevel)}${emitAssignment({ ...expression, right: statusValue }, context)};`,
+  ];
 }
 
 function emitAssignmentWithHoistedSideEffectingPointerArrayIndex(
@@ -3641,7 +4502,9 @@ function expressionContainsSideEffectingCall(expression: CudaLiteExpression, con
         CUDA_CACHE_HINT_STORES.has(name) ||
         name === "cudaMemcpy" ||
         name === "cudaMemcpyAsync" ||
-        name === "cudaMemcpyPeerAsync")
+        name === "cudaMemcpyPeerAsync" ||
+        name === "cudaMemset" ||
+        name === "cudaMemsetAsync")
     ) {
       found = true;
     }
@@ -3703,6 +4566,252 @@ function emitFillRegsStatement(
   return emitLocalArrayFill(context.nameFor(target.name), array.dimensions, emitExpression(value, context), indentLevel);
 }
 
+function emitCudaIntegerRuntimeQueryStatement(
+  expression: CudaLiteExpression,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  if (expression.kind !== "call") return undefined;
+  return emitCudaRuntimeQueryWrites(expression, context, indentLevel);
+}
+
+function emitCudaRuntimeQueryWrites(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: EmitContext,
+  indentLevel: number,
+): string[] | undefined {
+  const callName = expressionName(expression.callee);
+  if (callName === "cudaEventElapsedTime") return emitCudaEventElapsedTimeWrite(expression, context, indentLevel);
+  if (!isCudaIntegerRuntimeQueryCall(callName)) return undefined;
+  if (callName === "cudaMemGetInfo") return emitCudaMemGetInfoWrites(expression, context, indentLevel);
+  if (callName === "cudaDeviceGetStreamPriorityRange") return emitCudaDeviceGetStreamPriorityRangeWrites(expression, context, indentLevel);
+  if (callName === "cudaStreamGetCaptureInfo") return emitCudaStreamGetCaptureInfoWrites(expression, context, indentLevel);
+  if (callName === "cudaOccupancyMaxPotentialBlockSize" || callName === "cudaOccupancyMaxPotentialBlockSizeWithFlags") return emitCudaOccupancyMaxPotentialBlockSizeWrites(expression, context, indentLevel);
+  const target = cudaIntegerRuntimeQueryTarget(expression);
+  if (!target) return [];
+  const value = cudaIntegerRuntimeQueryValue(expression);
+  return emitIntPointerWrite(
+    target,
+    { kind: "number", value, raw: String(value), span: expression.span },
+    context,
+    indentLevel,
+    "unsupported-cuda-runtime",
+    `${callName} expects a modeled int pointer target`,
+    cudaIntegerRuntimeQueryTargetValueType(callName),
+  );
+}
+
+function emitCudaOccupancyMaxPotentialBlockSizeWrites(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const lines: string[] = [];
+  const minGridSizeTarget = expression.args[0];
+  const blockSizeTarget = expression.args[1];
+  if (minGridSizeTarget) {
+    lines.push(...emitIntPointerWrite(
+      minGridSizeTarget,
+      { kind: "number", value: 1, raw: "1", span: expression.span },
+      context,
+      indentLevel,
+      "unsupported-cuda-runtime",
+      "cudaOccupancyMaxPotentialBlockSize expects a modeled int pointer target",
+    ));
+  }
+  if (blockSizeTarget) {
+    lines.push(...emitIntPointerWrite(
+      blockSizeTarget,
+      { kind: "number", value: 256, raw: "256", span: expression.span },
+      context,
+      indentLevel,
+      "unsupported-cuda-runtime",
+      "cudaOccupancyMaxPotentialBlockSize expects a modeled int pointer target",
+    ));
+  }
+  return lines;
+}
+
+function cudaIntegerRuntimeQueryTargetValueType(callName: string | undefined): CudaLiteScalarType {
+  return callName === "cudaDeviceGetLimit" ||
+    callName === "cudaThreadGetLimit" ||
+    callName === "cudaGetDeviceFlags" ||
+    callName === "cudaStreamGetFlags" ||
+    callName === "cudaStreamGetId"
+    ? "uint"
+    : "int";
+}
+
+function cudaIntegerRuntimeQueryTarget(expression: Extract<CudaLiteExpression, { kind: "call" }>): CudaLiteExpression | undefined {
+  const callName = expressionName(expression.callee);
+  if (
+    callName === "cudaStreamGetFlags" ||
+    callName === "cudaStreamGetPriority" ||
+    callName === "cudaStreamGetDevice" ||
+    callName === "cudaStreamGetId" ||
+    callName === "cudaStreamIsCapturing"
+  ) return expression.args[1];
+  return expression.args[0];
+}
+
+function emitCudaStreamGetCaptureInfoWrites(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const lines: string[] = [];
+  const value = { kind: "number" as const, value: 0, raw: "0", span: expression.span };
+  for (const [index, target] of expression.args.slice(1).entries()) {
+    if (!target || isNullPointerExpression(target)) continue;
+    const targetIndex = index + 1;
+    lines.push(...emitIntPointerWrite(
+      target,
+      value,
+      context,
+      indentLevel,
+      "unsupported-cuda-runtime",
+      `cudaStreamGetCaptureInfo expects a modeled ${cudaStreamGetCaptureInfoTargetType(targetIndex)} pointer target`,
+      cudaStreamGetCaptureInfoTargetType(targetIndex),
+    ));
+  }
+  return lines;
+}
+
+function cudaStreamGetCaptureInfoTargetType(index: number): CudaLiteScalarType {
+  return index === 1 ? "int" : "uint";
+}
+
+function emitCudaDeviceGetStreamPriorityRangeWrites(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const lines: string[] = [];
+  const leastTarget = expression.args[0];
+  const greatestTarget = expression.args[1];
+  const value = { kind: "number" as const, value: 0, raw: "0", span: expression.span };
+  if (leastTarget) {
+    lines.push(...emitIntPointerWrite(
+      leastTarget,
+      value,
+      context,
+      indentLevel,
+      "unsupported-cuda-runtime",
+      "cudaDeviceGetStreamPriorityRange expects a modeled int pointer target",
+    ));
+  }
+  if (greatestTarget) {
+    lines.push(...emitIntPointerWrite(
+      greatestTarget,
+      value,
+      context,
+      indentLevel,
+      "unsupported-cuda-runtime",
+      "cudaDeviceGetStreamPriorityRange expects a modeled int pointer target",
+    ));
+  }
+  return lines;
+}
+
+function emitCudaEventElapsedTimeWrite(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const target = expression.args[0];
+  if (!target) return [];
+  return emitIntPointerWrite(
+    target,
+    { kind: "number", value: 0, raw: "0.0", span: expression.span },
+    context,
+    indentLevel,
+    "unsupported-cuda-runtime",
+    "cudaEventElapsedTime expects a modeled float pointer target",
+    "float",
+  );
+}
+
+function emitCudaMemGetInfoWrites(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: EmitContext,
+  indentLevel: number,
+): string[] {
+  const lines: string[] = [];
+  const freeTarget = expression.args[0];
+  const totalTarget = expression.args[1];
+  const value = { kind: "number" as const, value: 268435456, raw: "268435456", span: expression.span };
+  if (freeTarget) {
+    lines.push(...emitIntPointerWrite(
+      freeTarget,
+      value,
+      context,
+      indentLevel,
+      "unsupported-cuda-runtime",
+      "cudaMemGetInfo expects a modeled uint pointer target",
+      "uint",
+    ));
+  }
+  if (totalTarget) {
+    lines.push(...emitIntPointerWrite(
+      totalTarget,
+      value,
+      context,
+      indentLevel,
+      "unsupported-cuda-runtime",
+      "cudaMemGetInfo expects a modeled uint pointer target",
+      "uint",
+    ));
+  }
+  return lines;
+}
+
+function isCudaIntegerRuntimeQueryCall(name: string | undefined): boolean {
+  return name === "cudaGetDevice" ||
+    name === "cudaGetDeviceCount" ||
+    name === "cudaDeviceGetAttribute" ||
+    name === "cudaDeviceGetLimit" ||
+    name === "cudaThreadGetLimit" ||
+    name === "cudaDeviceCanAccessPeer" ||
+    name === "cudaGetDeviceFlags" ||
+    name === "cudaMemGetInfo" ||
+    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
+    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
+    name === "cudaOccupancyMaxPotentialBlockSize" ||
+    name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    name === "cudaDeviceGetCacheConfig" ||
+    name === "cudaDeviceGetSharedMemConfig" ||
+    name === "cudaThreadGetCacheConfig" ||
+    name === "cudaThreadExchangeStreamCaptureMode" ||
+    name === "cudaDeviceGetStreamPriorityRange" ||
+    name === "cudaStreamGetDevice" ||
+    name === "cudaStreamGetFlags" ||
+    name === "cudaStreamGetId" ||
+    name === "cudaStreamGetPriority" ||
+    name === "cudaStreamIsCapturing" ||
+    name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaRuntimeGetVersion" ||
+    name === "cudaDriverGetVersion";
+}
+
+function cudaIntegerRuntimeQueryValue(expression: Extract<CudaLiteExpression, { kind: "call" }>): number {
+  const name = expressionName(expression.callee);
+  if (name === "cudaGetDeviceCount") return 1;
+  if (name === "cudaDeviceGetAttribute") return cudaDeviceAttributeValue(constantIntegerExpression(expression.args[1]) ?? 0);
+  if (name === "cudaDeviceGetLimit" || name === "cudaThreadGetLimit") return cudaDeviceLimitValue(constantIntegerExpression(expression.args[1]) ?? 0);
+  if (name === "cudaDeviceCanAccessPeer") return 1;
+  if (name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" || name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags") return 1;
+  if (name === "cudaRuntimeGetVersion" || name === "cudaDriverGetVersion") return 12000;
+  return 0;
+}
+
+function constantIntegerExpression(expression: CudaLiteExpression | undefined): number | undefined {
+  if (!expression) return undefined;
+  if (expression.kind === "number") return Math.trunc(expression.value);
+  if (expression.kind === "identifier") return CUDA_NAMED_CONSTANTS.get(expression.name)?.value;
+  if (expression.kind === "cast") return constantIntegerExpression(expression.expression);
+  return undefined;
+}
+
 interface EmittedMatrixTile {
   readonly name: string;
   readonly spec: MatrixTileResolvedSpec;
@@ -3752,7 +4861,7 @@ function emitWmmaLoadMatrixSync(
 ): string[] {
   const tile = emitMatrixTileRef(expression.args[0], context, "wmma::load_matrix_sync");
   const source = devicePointerArgumentParts(expression.args[1]!, context);
-  if (!source) throw featureError("unsupported-wmma-pointer-operand", "wmma::load_matrix_sync source expects storage/shared pointer");
+  if (!source) throw featureError("unsupported-wmma-pointer-operand", "wmma::load_matrix_sync source expects storage/shared pointer", expression.args[1]?.span ?? expression.span);
   const stride = `u32(${emitExpression(expression.args[2]!, context)})`;
   const layout = emitMatrixTileLayoutForCall(expression.args[3], tile.spec.layout ?? "row_major");
   const [rows, cols] = matrixTileRowsCols(tile.spec);
@@ -3817,7 +4926,7 @@ function emitWmmaStoreMatrixSync(
   indentLevel: number,
 ): string[] {
   const target = devicePointerArgumentParts(expression.args[0]!, context);
-  if (!target) throw featureError("unsupported-wmma-pointer-operand", "wmma::store_matrix_sync destination expects storage/shared pointer");
+  if (!target) throw featureError("unsupported-wmma-pointer-operand", "wmma::store_matrix_sync destination expects storage/shared pointer", expression.args[0]?.span ?? expression.span);
   const tile = emitMatrixTileRef(expression.args[1], context, "wmma::store_matrix_sync fragment");
   const stride = `u32(${emitExpression(expression.args[2]!, context)})`;
   const layout = emitMatrixTileLayoutForCall(expression.args[3], "mem_row_major");
@@ -3841,12 +4950,12 @@ function emitMatrixTileRef(
   context: EmitContext,
   label: string,
 ): EmittedMatrixTile {
-  if (!expression) throw featureError("unsupported-wmma-fragment-operand", `${label} expects WMMA fragment argument`);
+  if (!expression) throw featureError("unsupported-wmma-fragment-operand", `${label} expects WMMA fragment argument`, context.ir.span);
   const ref = matrixTileReference(expression);
-  if (!ref) throw featureError("unsupported-wmma-fragment-operand", `${label} expects WMMA fragment argument`);
+  if (!ref) throw featureError("unsupported-wmma-fragment-operand", `${label} expects WMMA fragment argument`, expression.span);
   const declaration = context.localArrayFor(ref.root);
   const spec = declaration?.matrixTile ? resolveMatrixTileSpec(declaration.matrixTile) : undefined;
-  if (!declaration || !spec) throw featureError("unsupported-wmma-fragment-operand", `'${ref.root}' is not a WMMA fragment`);
+  if (!declaration || !spec) throw featureError("unsupported-wmma-fragment-operand", `'${ref.root}' is not a WMMA fragment`, expression.span);
   const count = matrixTileElementCount(spec);
   const base = emitMatrixTileBase(ref.indices, declaration.dimensions, count, context);
   return { name: context.nameFor(ref.root), spec, base };
@@ -4080,6 +5189,7 @@ function emitPointerComparison(
       throw featureError(
         "unsupported-pointer-pointer-comparison",
         "WGSL output supports pointer comparison only against NULL/nullptr or the same pointer symbol",
+        expression.span,
       );
     }
     return expression.operator === "==" ? String(equal) : String(!equal);
@@ -4112,6 +5222,7 @@ function emitPointerComparison(
   throw featureError(
     "unsupported-pointer-pointer-comparison",
     "WGSL output supports pointer comparison only inside the same pointer address model",
+    expression.span,
   );
 }
 
@@ -4397,10 +5508,11 @@ function emitMember(expression: Extract<CudaLiteExpression, { kind: "member" }>,
   }
   const storageView = storageViewLValue(expression, context);
   if (storageView?.fieldIndex !== undefined) {
+    const field = vectorFieldName(storageView.fieldIndex);
     const shared = storageView.rootName ? sharedDeclarationFor(storageView.rootName, context) : undefined;
-    if (shared) return `${emitSharedPointerRead(shared, storageView.index, context.ir, context, storageView.valueType, storageView.subElementLane)}.${storageView.field}`;
+    if (shared) return `${emitSharedPointerRead(shared, storageView.index, context.ir, context, storageView.valueType, storageView.subElementLane)}.${field}`;
     const local = storageView.rootName ? localArrayForStorageView(storageView.rootName, expression.span, context) : undefined;
-    if (local) return `${emitLocalPointerRead(local, storageView.index, storageView.valueType, context, storageView.subElementLane)}.${storageView.field}`;
+    if (local) return `${emitLocalPointerRead(local, storageView.index, storageView.valueType, context, storageView.subElementLane)}.${field}`;
     return `${storageView.name}[${storageView.index} + ${storageView.fieldIndex}u]`;
   }
   const objectName = expressionName(expression.object);
@@ -4415,8 +5527,12 @@ function emitMember(expression: Extract<CudaLiteExpression, { kind: "member" }>,
       return String(context.ir.workgroupSize[axisIndex]);
     case "gridDim":
       return `i32(num_workgroups.${expression.property})`;
-    default:
+    default: {
+      const valueType = expressionValueTypeForEmit(expression.object, context);
+      const fieldIndex = isCudaVectorType(valueType) ? cudaVectorFieldIndex(valueType, expression.property) : undefined;
+      if (fieldIndex !== undefined) return `${emitExpression(expression.object, context)}.${vectorFieldName(fieldIndex)}`;
       return `${emitExpression(expression.object, context)}.${expression.property}`;
+    }
   }
 }
 
@@ -4430,8 +5546,8 @@ function emitMatrixTileMemberExpression(
   const spec = declaration?.matrixTile ? resolveMatrixTileSpec(declaration.matrixTile) : undefined;
   if (!declaration || !spec) return undefined;
   if (expression.property === "num_elements") return String(matrixTileElementCount(spec));
-  if (expression.property === "x") throw featureError("unsupported-wmma-fragment-member", "WMMA fragment lane storage requires indexed access");
-  throw featureError("unsupported-wmma-fragment-member", `unsupported WMMA fragment member '${expression.property}'`);
+  if (expression.property === "x") throw featureError("unsupported-wmma-fragment-member", "WMMA fragment lane storage requires indexed access", expression.span);
+  throw featureError("unsupported-wmma-fragment-member", `unsupported WMMA fragment member '${expression.property}'`, expression.span);
 }
 
 function emitMatrixTileLaneAccessExpression(
@@ -4513,6 +5629,11 @@ function uncachedExpressionValueTypeForEmit(expression: CudaLiteExpression, cont
       return expression.args[0] ? devicePointerValueTypeForExpression(expression.args[0], context) : undefined;
     }
     if (name === "__halves2bfloat162") return "bf162";
+    if (name === "__hadd") {
+      const valueTypes = expression.args.map((arg) => expressionValueTypeForEmit(arg, context));
+      const halfType = valueTypes.find((valueType) => valueType === "half" || valueType === "bf16");
+      return halfType ?? "int";
+    }
     const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
     if (intrinsic?.returnType === "argument1") return expression.args[0]
       ? expressionValueTypeForEmit(expression.args[0], context)
@@ -4887,6 +6008,15 @@ function emitFrexpCall(expression: CudaLiteCallExpression, context: EmitContext)
   return `bg_frexp(${value}, ${exponent})`;
 }
 
+function emitModfCall(expression: CudaLiteCallExpression, context: EmitContext): string {
+  const value = expression.args[0] ? emitExpressionAsValueType(expression.args[0], "float", context) : "0.0";
+  const intpart = expression.args[1];
+  if (!intpart || !(intpart.kind === "unary" && intpart.operator === "&" && intpart.argument.kind === "identifier")) {
+    throw featureError("unsupported-modf-intpart", "modf integer-part output must target modeled float storage", intpart?.span ?? expression.span);
+  }
+  return `bg_modf(${value}, &${context.nameFor(intpart.argument.name)})`;
+}
+
 interface VectorLaneAddressCast {
   readonly vectorName: string;
   readonly vectorType: CudaLiteScalarType;
@@ -4997,11 +6127,17 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     const value = expression.args[1];
     if (lane && value) return emitVectorLaneAddressFromFloatWrite(lane, emitExpressionAsValueType(value, "float", context));
   }
+  if (name && isHostManagedRuntimeNoopCall(name)) return "0";
   const deviceFunction = name ? context.deviceFunctionFor(name, expression.args.length) : undefined;
   if (deviceFunction) {
-    const args = emitDeviceFunctionCallArgs(expression, deviceFunction, context);
+    const localPointerParams = localPointerParamsForDeviceFunctionCall(expression, deviceFunction, context);
+    const args = emitDeviceFunctionCallArgs(expression, deviceFunction, context, localPointerParams);
     const specialization = textureSpecializationForDeviceFunctionCall(expression, deviceFunction, context);
-    const linkName = specialization?.linkName ?? deviceFunctionLinkName(deviceFunction, context.ir);
+    const defaultLocalPointerParams = defaultLocalPointerParamsForDeviceFunction(deviceFunction, context.ir);
+    const linkName = specialization?.linkName ??
+      (localPointerParams.size > 0 && !setsEqual(localPointerParams, defaultLocalPointerParams)
+        ? localPointerSpecializationLinkName(deviceFunction, localPointerParams, context.ir)
+        : deviceFunctionLinkName(deviceFunction, context.ir));
     return `${context.nameFor(linkName)}(${[...args, "local_id", "workgroup_id", "num_workgroups"].join(", ")})`;
   }
   const args = expression.args.map((arg) => emitExpression(arg, context));
@@ -5012,6 +6148,20 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
   const vectorLerp = emitVectorLerpCall(expression, name, context);
   if (vectorLerp !== undefined) return vectorLerp;
   if (name === "frexp" || name === "frexpf") return emitFrexpCall(expression, context);
+  if (name === "modf" || name === "modff") return emitModfCall(expression, context);
+  if (name === "remquo" || name === "remquof") {
+    throw featureError("unsupported-remquo-quotient", "remquo quotient output must target modeled integer storage", expression.args[2]?.span ?? expression.span);
+  }
+  if (isSincosCallName(name)) return "0";
+  if (isNanPayloadCallName(name)) return "bitcast<f32>(0x7fc00000u)";
+  if (name === "__hadd" && expression.args.every((arg) => {
+    const valueType = expressionValueTypeForEmit(arg, context);
+    return valueType !== "half" && valueType !== "bf16";
+  })) {
+    const left = args[0] ?? "0";
+    const right = args[1] ?? "0";
+    return `((i32(${left}) & i32(${right})) + ((i32(${left}) ^ i32(${right})) >> 1u))`;
+  }
   const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
   if (intrinsic?.emitWgsl) {
     const intrinsicArgs = intrinsicNeedsFloatArgs(name)
@@ -5045,7 +6195,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       }
     }
     const parts = devicePointerArgumentParts(target, context);
-    if (!parts) throw featureError("unsupported-device-pointer-param", `${name} expects a storage pointer or derived storage address`);
+    if (!parts) throw featureError("unsupported-device-pointer-param", `${name} expects a storage pointer or derived storage address`, target.span);
     const valueType = devicePointerValueTypeForExpression(target, context);
     return `${pointerReadHelperName(valueType)}(${parts.buffer}, ${parts.base})`;
   }
@@ -5069,7 +6219,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       }
     }
     const parts = devicePointerArgumentParts(target, context);
-    if (!parts) throw featureError("unsupported-device-pointer-param", `${name} expects a storage pointer or derived storage address`);
+    if (!parts) throw featureError("unsupported-device-pointer-param", `${name} expects a storage pointer or derived storage address`, target.span);
     const valueType = devicePointerValueTypeForExpression(target, context);
     return `${pointerWriteHelperName(valueType)}(${parts.buffer}, ${parts.base}, ${emitExpressionAsValueType(value, valueType, context)})`;
   }
@@ -5079,7 +6229,7 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     const sharedIndex = emitSharedAddressIndex(target, context.ir, (expression) => emitExpression(expression, context));
     if (sharedIndex) return `u32(${sharedIndex})`;
     const parts = devicePointerArgumentParts(target, context);
-    if (!parts) throw featureError("unsupported-device-pointer-param", "__cvta_generic_to_shared expects a storage or shared pointer");
+    if (!parts) throw featureError("unsupported-device-pointer-param", "__cvta_generic_to_shared expects a storage or shared pointer", target.span);
     return `u32(${parts.base})`;
   }
   if (isCpAsyncCopyCall(name) || isCpAsyncFenceCall(name)) return "0";
@@ -5088,7 +6238,12 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "__syncwarp":
       return "workgroupBarrier()";
     case "__threadfence":
+    case "__threadfence_block":
+    case "__threadfence_system":
       return "storageBarrier()";
+    case "__nanosleep":
+    case "__prof_trigger":
+      return "0";
     case "__trap":
       return "0";
     case "clock":
@@ -5096,14 +6251,63 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "clock64":
       return "i32(workgroup_id.x * 104729u + workgroup_id.y * 1009u + workgroup_id.z * 97u + local_id.x + local_id.y * 31u + local_id.z * 7u)";
     case "cudaDeviceSynchronize":
+    case "cudaDeviceReset":
+    case "cudaThreadExit":
+    case "cudaThreadSynchronize":
+    case "cudaDeviceGetAttribute":
+    case "cudaDeviceGetLimit":
+    case "cudaThreadGetLimit":
+    case "cudaDeviceSetLimit":
+    case "cudaThreadSetLimit":
+    case "cudaDeviceCanAccessPeer":
+    case "cudaDeviceEnablePeerAccess":
+    case "cudaDeviceDisablePeerAccess":
+    case "cudaGetDeviceFlags":
+    case "cudaSetDeviceFlags":
+    case "cudaMemGetInfo":
+    case "cudaOccupancyMaxActiveBlocksPerMultiprocessor":
+    case "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags":
+    case "cudaOccupancyMaxPotentialBlockSize":
+    case "cudaOccupancyMaxPotentialBlockSizeWithFlags":
+    case "cudaDeviceGetCacheConfig":
+    case "cudaDeviceSetCacheConfig":
+    case "cudaDeviceGetSharedMemConfig":
+    case "cudaDeviceSetSharedMemConfig":
+    case "cudaThreadGetCacheConfig":
+    case "cudaThreadSetCacheConfig":
+    case "cudaThreadExchangeStreamCaptureMode":
+    case "cudaDeviceGetStreamPriorityRange":
+    case "cudaFree":
+    case "cudaFreeAsync":
+    case "cudaMemAdvise":
+    case "cudaMemPrefetchAsync":
     case "cudaStreamCreate":
     case "cudaStreamCreateWithFlags":
+    case "cudaStreamCreateWithPriority":
     case "cudaStreamDestroy":
+    case "cudaStreamGetDevice":
+    case "cudaStreamGetFlags":
+    case "cudaStreamGetId":
+    case "cudaStreamGetPriority":
+    case "cudaStreamIsCapturing":
+    case "cudaStreamGetCaptureInfo":
+    case "cudaStreamQuery":
     case "cudaStreamSynchronize":
+    case "cudaStreamWaitEvent":
+    case "cudaRuntimeGetVersion":
+    case "cudaDriverGetVersion":
+    case "cudaFuncSetAttribute":
+    case "cudaFuncSetCacheConfig":
+    case "cudaFuncSetSharedMemConfig":
+    case "cudaProfilerStart":
+    case "cudaProfilerStop":
     case "cudaEventCreate":
     case "cudaEventCreateWithFlags":
     case "cudaEventDestroy":
+    case "cudaEventQuery":
+    case "cudaEventElapsedTime":
     case "cudaEventRecord":
+    case "cudaEventRecordWithFlags":
     case "cudaEventSynchronize":
       return "0";
     case "cudaMemcpy":
@@ -5111,6 +6315,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     case "cudaMemcpyAsync":
       return "0";
     case "cudaMemcpyPeerAsync":
+      return "0";
+    case "cudaMemset":
+      return "0";
+    case "cudaMemsetAsync":
       return "0";
     case "cudaGraphSetConditional":
       return "0";
@@ -5256,11 +6464,9 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       }
       return "0u";
     case "sizeof":
-      if (expression.args[0]?.kind === "identifier") return String(sizeofCudaType(expression.args[0].name) ?? 4);
-      return "4";
+      return String(emitSizeofValue(expression.args[0], context));
     case "alignof":
-      if (expression.args[0]?.kind === "identifier") return String(alignofCudaType(expression.args[0].name) ?? 4);
-      return "4";
+      return String(emitAlignofValue(expression.args[0], context));
     case "vec_at":
       return `(${args[0] ?? "vec4<f32>()"}[u32(${args[1] ?? "0"})])`;
     case "dot":
@@ -5323,6 +6529,18 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
     default:
       return `${emitExpression(expression.callee, context)}(${args.join(", ")})`;
   }
+}
+
+function emitSizeofValue(expression: CudaLiteExpression | undefined, context: EmitContext): number {
+  if (!expression) return 4;
+  if (expression.kind === "identifier") return sizeofCudaType(expression.name) ?? sizeofCudaType(expressionValueTypeForEmit(expression, context) ?? "") ?? 4;
+  return sizeofCudaType(expressionValueTypeForEmit(expression, context) ?? "") ?? 4;
+}
+
+function emitAlignofValue(expression: CudaLiteExpression | undefined, context: EmitContext): number {
+  if (!expression) return 4;
+  if (expression.kind === "identifier") return alignofCudaType(expression.name) ?? alignofCudaType(expressionValueTypeForEmit(expression, context) ?? "") ?? 4;
+  return alignofCudaType(expressionValueTypeForEmit(expression, context) ?? "") ?? 4;
 }
 
 function inferDeviceFunctionTextureDescriptors(
@@ -5467,6 +6685,7 @@ function emitDeviceFunctionCallArgs(
   expression: CudaLiteCallExpression,
   deviceFunction: CudaLiteDeviceFunction,
   context: EmitContext,
+  localPointerParams: ReadonlySet<string> = localPointerParamsForDeviceFunctionCall(expression, deviceFunction, context),
 ): string[] {
   return deviceFunction.params.flatMap((param, index) => {
     const arg = expression.args[index];
@@ -5479,11 +6698,39 @@ function emitDeviceFunctionCallArgs(
     if (param.valueType === "surface2d") return [emitSurfaceArgument(arg, textureSurfaceContext(context))];
     if (!arg) return param.pointer ? ["0u", "0u"] : [zeroValue(param.valueType)];
     return param.pointer
-      ? usesFunctionLocalPointerParam(deviceFunction, param, context.ir)
+      ? localPointerParams.has(param.name)
         ? [emitFunctionLocalPointerArgument(arg, context)]
         : emitDevicePointerArgument(arg, context)
       : [emitExpressionAsValueType(arg, param.valueType, context)];
   });
+}
+
+function localPointerParamsForDeviceFunctionCall(
+  expression: CudaLiteCallExpression,
+  deviceFunction: CudaLiteDeviceFunction,
+  context: EmitContext,
+): ReadonlySet<string> {
+  const out = new Set<string>();
+  for (const [index, param] of deviceFunction.params.entries()) {
+    if (!param.pointer) continue;
+    const arg = expression.args[index];
+    if (arg && isFunctionLocalPointerArgumentForEmit(arg, context)) out.add(param.name);
+  }
+  return out;
+}
+
+function isFunctionLocalPointerArgumentForEmit(expression: CudaLiteExpression, context: EmitContext): boolean {
+  if (expression.kind === "identifier") {
+    return context.localArrayFor(expression.name, expression.span) !== undefined;
+  }
+  if (expression.kind === "index" && expression.target.kind === "identifier") {
+    return context.localPointerArrayRootFor(expression.target.name, expression.target.span) !== undefined;
+  }
+  return expression.kind === "unary" &&
+    expression.operator === "&" &&
+    expression.argument.kind === "identifier" &&
+    context.localValueTypeFor(expression.argument.name) !== undefined &&
+    sharedDeclarationFor(expression.argument.name, context) === undefined;
 }
 
 function emitCooperativeGroupTileSizeArgument(
@@ -5578,14 +6825,21 @@ function emitExpressionAsValueType(
 }
 
 const FLOAT_ARG_INTRINSICS = new Set([
-  "sqrt", "sqrtf", "exp", "expf", "__expf", "log", "logf", "__logf",
+  "sqrt", "sqrtf", "__fsqrt_rn", "exp", "expf", "__expf", "exp2", "exp2f", "__exp2f", "exp10", "exp10f", "__exp10f", "expm1", "expm1f",
+  "erf", "erff", "erfc", "erfcf", "erfcx", "erfcxf", "erfinv", "erfinvf", "erfcinv", "erfcinvf", "normcdf", "normcdff", "normcdfinv", "normcdfinvf", "tgamma", "tgammaf", "lgamma", "lgammaf", "log", "logf", "__logf", "log2", "log2f", "__log2f", "log10", "log10f", "__log10f", "log1p", "log1pf",
   "fabs", "fabsf", "floor", "floorf", "ceil", "ceilf", "round", "roundf",
-  "rintf", "trunc", "truncf", "sin", "sinf", "__sinf", "cos", "cosf",
-  "__cosf", "tan", "tanf", "__tanf", "asin", "asinf", "acos", "acosf",
-  "atan", "atanf", "tanh", "tanhf", "cosh", "coshf", "isinf", "isnan",
-  "isNan", "rsqrt",
-  "rsqrtf", "__frcp_rn", "__saturatef", "pow", "powf", "atan2", "atan2f",
+  "rint", "rintf", "nearbyint", "nearbyintf", "trunc", "truncf", "sin", "sinf", "__sinf", "sinpi", "sinpif", "cos", "cosf",
+  "__cosf", "cospi", "cospif", "tan", "tanf", "__tanf", "asin", "asinf", "acos", "acosf",
+  "atan", "atanf", "asinh", "asinhf", "acosh", "acoshf", "atanh", "atanhf", "tanh", "tanhf", "__tanhf", "sinh", "sinhf", "cosh", "coshf", "cbrt", "cbrtf", "rcbrt", "rcbrtf", "isinf", "isfinite",
+  "isnan", "isNan", "isnormal", "signbit", "signbitf", "rsqrt",
+  "rsqrtf", "__frsqrt_rn", "__frcp_rn", "__saturatef", "pow", "powf", "atan2", "atan2f",
+  "__powf", "hypot", "hypotf", "rhypot", "rhypotf", "norm3df", "norm4df", "rnorm3df", "rnorm4df",
+  "fmod", "fmodf", "remainder", "remainderf", "nextafter", "nextafterf", "nexttoward", "nexttowardf", "logb", "logbf", "ilogb", "ilogbf", "fdim", "fdimf", "copysign", "copysignf", "fdividef",
+  "isgreater", "isgreaterequal", "isless", "islessequal", "islessgreater", "isunordered",
   "fmin", "fminf", "fmax", "fmaxf", "fma", "fmaf", "__fmaf_rn", "lerp",
+  "lrint", "lrintf", "llrint", "llrintf", "lround", "lroundf", "llround", "llroundf",
+  "__float2int_rn", "__float2int_rz", "__float2int_ru", "__float2int_rd",
+  "__float2uint_rn", "__float2uint_rz", "__float2uint_ru", "__float2uint_rd",
 ]);
 
 function intrinsicNeedsFloatArgs(name: string | undefined): boolean {
@@ -5643,7 +6897,7 @@ function emitDevicePointerMemberAssignment(expression: CudaLiteAssignmentExpress
   const pointerLvalue = devicePointerLValue(expression.left, context);
   if (!pointerLvalue || pointerLvalue.fieldIndex === undefined) return undefined;
   if (!isCudaVectorType(pointerLvalue.valueType)) {
-    throw featureError("unsupported-vector-assignment", "member assignment through pointer expects a CUDA vector pointer");
+    throw featureError("unsupported-vector-assignment", "member assignment through pointer expects a CUDA vector pointer", expression.left.span);
   }
   const read = `${pointerReadHelperName(pointerLvalue.valueType)}(${pointerLvalue.buffer}, ${pointerLvalue.index})`;
   const field = vectorFieldName(pointerLvalue.fieldIndex);
@@ -5703,7 +6957,7 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
       if (storageView.field) {
         const scalar = cudaVectorScalarType(storageView.valueType) ?? "float";
         const currentVector = read();
-        const current = `${currentVector}.${storageView.field}`;
+        const current = `${currentVector}.${vectorFieldName(storageView.fieldIndex ?? 0)}`;
         const laneValue = expression.operator === "="
           ? emitExpressionAsValueType(expression.right, scalar, context)
           : `(${current} ${expression.operator.slice(0, -1)} ${emitExpressionAsValueType(expression.right, scalar, context)})`;
@@ -5724,7 +6978,7 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
       if (storageView.field) {
         const scalar = cudaVectorScalarType(storageView.valueType) ?? "float";
         const currentVector = emitPointerStorageRead(param, storageView.index, context.ir, context, storageView.valueType);
-        const current = `${currentVector}.${storageView.field}`;
+        const current = `${currentVector}.${vectorFieldName(storageView.fieldIndex ?? 0)}`;
         const laneValue = expression.operator === "="
           ? emitExpressionAsValueType(expression.right, scalar, context)
           : `(${current} ${expression.operator.slice(0, -1)} ${emitExpressionAsValueType(expression.right, scalar, context)})`;
@@ -5745,7 +6999,7 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
       if (storageView.field) {
         const scalar = cudaVectorScalarType(storageView.valueType) ?? "float";
         const currentVector = emitDeviceGlobalPointerRead(global, storageView.index, context.ir, context, storageView.valueType);
-        const current = `${currentVector}.${storageView.field}`;
+        const current = `${currentVector}.${vectorFieldName(storageView.fieldIndex ?? 0)}`;
         const laneValue = expression.operator === "="
           ? emitExpressionAsValueType(expression.right, scalar, context)
           : `(${current} ${expression.operator.slice(0, -1)} ${emitExpressionAsValueType(expression.right, scalar, context)})`;
@@ -5814,7 +7068,7 @@ function emitAssignment(expression: CudaLiteAssignmentExpression, context: EmitC
     const read = `${pointerReadHelperName(pointerLvalue.valueType)}(${pointerLvalue.buffer}, ${pointerLvalue.index})`;
     if (pointerLvalue.fieldIndex !== undefined) {
       if (!isCudaVectorType(pointerLvalue.valueType)) {
-        throw featureError("unsupported-vector-assignment", "member assignment through pointer expects a CUDA vector pointer");
+        throw featureError("unsupported-vector-assignment", "member assignment through pointer expects a CUDA vector pointer", expression.left.span);
       }
       const field = vectorFieldName(pointerLvalue.fieldIndex);
       const scalar = cudaVectorScalarType(pointerLvalue.valueType) ?? "float";
@@ -6134,20 +7388,20 @@ function emitLocalPointerArrayAssignment(expression: CudaLiteAssignmentExpressio
   const pointerArray = context.localPointerArrayFor(expression.left.target.name, expression.left.target.span);
   if (!pointerArray) return undefined;
   if (expression.operator !== "=") {
-    throw featureError("unsupported-pointer-assignment", "CUDA pointer-array elements support direct assignment only");
+    throw featureError("unsupported-pointer-assignment", "CUDA pointer-array elements support direct assignment only", expression.span);
   }
   const localRoot = context.localPointerArrayRootFor(pointerArray.name, expression.left.target.span);
   if (localRoot) {
     const base = localPointerArrayLocalBase(expression.right, localRoot, context);
     if (!base) {
-      throw featureError("unsupported-pointer-assignment", "CUDA local pointer-array assignment expects an address inside one local array");
+      throw featureError("unsupported-pointer-assignment", "CUDA local pointer-array assignment expects an address inside one local array", expression.right.span);
     }
     const index = `u32(${emitExpression(expression.left.index, context)})`;
     return `${context.nameFor(`${pointerArray.name}_base`)}[${index}] = ${base}`;
   }
   const parts = devicePointerArgumentParts(expression.right, context);
   if (!parts) {
-    throw featureError("unsupported-pointer-assignment", "CUDA pointer-array assignment expects a modeled storage or shared pointer");
+    throw featureError("unsupported-pointer-assignment", "CUDA pointer-array assignment expects a modeled storage or shared pointer", expression.right.span);
   }
   const index = `u32(${emitExpression(expression.left.index, context)})`;
   return `${context.nameFor(`${pointerArray.name}_buffer`)}[${index}] = ${parts.buffer}; ${context.nameFor(`${pointerArray.name}_base`)}[${index}] = ${parts.base}`;
@@ -6236,7 +7490,7 @@ function emitPointerRebaseAssignment(expression: CudaLiteAssignmentExpression, c
     const base = localPointerHandleBaseName(handle, context);
     if (expression.operator === "=") {
       const parts = devicePointerArgumentParts(expression.right, context);
-      if (!parts) throw featureError("unsupported-pointer-assignment", "CUDA pointer assignment expects a modeled storage or shared pointer");
+      if (!parts) throw featureError("unsupported-pointer-assignment", "CUDA pointer assignment expects a modeled storage or shared pointer", expression.right.span);
       return `${buffer} = ${parts.buffer}; ${base} = ${parts.base}`;
     }
     if (expression.operator === "+=" || expression.operator === "-=") {
@@ -6250,10 +7504,10 @@ function emitPointerRebaseAssignment(expression: CudaLiteAssignmentExpression, c
   if (!base) return undefined;
   if (expression.operator === "=") {
     const parts = devicePointerArgumentParts(expression.right, context);
-    if (!parts) throw featureError("unsupported-pointer-assignment", "CUDA pointer assignment expects a modeled storage or shared pointer");
+    if (!parts) throw featureError("unsupported-pointer-assignment", "CUDA pointer assignment expects a modeled storage or shared pointer", expression.right.span);
     const expectedBuffer = context.storagePointerIdFor(expression.left.name);
     if (expectedBuffer !== undefined && parts.buffer !== `${expectedBuffer}u`) {
-      throw featureError("unsupported-pointer-assignment", "storage pointer parameter assignment must stay within the same buffer");
+      throw featureError("unsupported-pointer-assignment", "storage pointer parameter assignment must stay within the same buffer", expression.right.span);
     }
     return `${base} = ${parts.base}`;
   }
@@ -6349,7 +7603,7 @@ function emitVectorAssignment(expression: CudaLiteAssignmentExpression, context:
     const currentVector = shared
       ? emitSharedPointerRead(shared, direct.index, context.ir, context, direct.valueType)
       : emitLocalPointerRead(local!, direct.index, direct.valueType, context);
-    const current = `${currentVector}.${direct.field}`;
+    const current = `${currentVector}.${vectorFieldName(direct.fieldIndex)}`;
     const right = emitExpressionAsValueType(expression.right, scalar, context);
     const laneValue = expression.operator === "="
       ? right
@@ -6449,14 +7703,84 @@ function noopCallComment(expression: CudaLiteExpression): string | undefined {
       return "printf omitted: WebGPU has no device stdout";
     case "cudaDeviceSynchronize":
       return "cudaDeviceSynchronize omitted: WebGPU dispatch completion is host-managed";
+    case "cudaCtxResetPersistingL2Cache":
+      return "cudaCtxResetPersistingL2Cache omitted: WebGPU L2 cache policy is host-managed";
+    case "cudaDeviceReset":
+    case "cudaThreadExit":
+    case "cudaThreadSynchronize":
+      return "cudaDeviceReset omitted: WebGPU device lifecycle is host-managed";
+    case "cudaDeviceGetAttribute":
+      return "cudaDeviceGetAttribute omitted: WebGPU device attributes are compiler-modeled";
+    case "cudaDeviceGetLimit":
+    case "cudaThreadGetLimit":
+      return "cudaDeviceGetLimit omitted: WebGPU device limits are compiler-modeled";
+    case "cudaDeviceSetLimit":
+    case "cudaThreadSetLimit":
+      return "cudaDeviceSetLimit omitted: WebGPU device limits are host-managed";
+    case "cudaDeviceCanAccessPeer":
+      return "cudaDeviceCanAccessPeer omitted: WebGPU peer access is compiler-modeled";
+    case "cudaGetDeviceFlags":
+      return "cudaGetDeviceFlags omitted: WebGPU device flags are compiler-modeled";
+    case "cudaSetDeviceFlags":
+      return "cudaSetDeviceFlags omitted: WebGPU device flags are host-managed";
+    case "cudaDeviceEnablePeerAccess":
+    case "cudaDeviceDisablePeerAccess":
+      return `${expressionName(expression.callee)} omitted: WebGPU peer access is host-managed`;
+    case "cudaMemGetInfo":
+      return "cudaMemGetInfo omitted: WebGPU memory info is compiler-modeled";
+    case "cudaOccupancyMaxActiveBlocksPerMultiprocessor":
+    case "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags":
+    case "cudaOccupancyMaxPotentialBlockSize":
+    case "cudaOccupancyMaxPotentialBlockSizeWithFlags":
+      return `${expressionName(expression.callee)} omitted: WebGPU occupancy is compiler-modeled`;
+    case "cudaDeviceGetCacheConfig":
+    case "cudaThreadGetCacheConfig":
+    case "cudaDeviceSetCacheConfig":
+    case "cudaDeviceGetSharedMemConfig":
+    case "cudaDeviceSetSharedMemConfig":
+    case "cudaThreadSetCacheConfig":
+    case "cudaThreadExchangeStreamCaptureMode":
+    case "cudaDeviceGetStreamPriorityRange":
+      return `${expressionName(expression.callee)} omitted: WebGPU device memory config is host-managed`;
+    case "cudaFuncSetAttribute":
+      return "cudaFuncSetAttribute omitted: WebGPU function attributes are host-managed";
+    case "cudaFuncSetCacheConfig":
+    case "cudaFuncSetSharedMemConfig":
+      return `${expressionName(expression.callee)} omitted: WebGPU function memory config is host-managed`;
+    case "cudaFree":
+    case "cudaFreeAsync":
+      return `${expressionName(expression.callee)} omitted: WebGPU device allocation lifetime is host-managed`;
+    case "cudaMemAdvise":
+    case "cudaMemPrefetchAsync":
+      return `${expressionName(expression.callee)} omitted: WebGPU unified-memory placement is host-managed`;
+    case "cudaStreamAttachMemAsync":
+      return "cudaStreamAttachMemAsync omitted: WebGPU unified-memory stream association is host-managed";
     case "cudaStreamCreate":
     case "cudaStreamCreateWithFlags":
+    case "cudaStreamCreateWithPriority":
     case "cudaStreamDestroy":
+    case "cudaStreamGetDevice":
+    case "cudaStreamGetFlags":
+    case "cudaStreamGetId":
+    case "cudaStreamGetPriority":
+    case "cudaStreamIsCapturing":
+    case "cudaStreamGetCaptureInfo":
+    case "cudaStreamQuery":
     case "cudaStreamSynchronize":
+    case "cudaStreamWaitEvent":
+    case "cudaSetDevice":
+    case "cudaRuntimeGetVersion":
+    case "cudaDriverGetVersion":
+    case "cudaGetLastError":
+    case "cudaPeekAtLastError":
+    case "cudaProfilerStart":
+    case "cudaProfilerStop":
     case "cudaEventCreate":
     case "cudaEventCreateWithFlags":
     case "cudaEventDestroy":
+    case "cudaEventQuery":
     case "cudaEventRecord":
+    case "cudaEventRecordWithFlags":
     case "cudaEventSynchronize":
       return `${expressionName(expression.callee)} omitted: WebGPU stream/event orchestration is host-managed`;
     case "cudaMemcpy":
@@ -6465,11 +7789,77 @@ function noopCallComment(expression: CudaLiteExpression): string | undefined {
       return "cudaMemcpyAsync omitted: WebGPU copy orchestration is host-managed";
     case "cudaMemcpyPeerAsync":
       return "cudaMemcpyPeerAsync omitted: WebGPU copy orchestration is host-managed";
+    case "cudaMemset":
+      return "cudaMemset omitted: WebGPU fill orchestration is host-managed";
+    case "cudaMemsetAsync":
+      return "cudaMemsetAsync omitted: WebGPU fill orchestration is host-managed";
     case "cudaGraphSetConditional":
       return "cudaGraphSetConditional omitted: CUDA graph conditional scheduling is host-managed";
     default:
       return undefined;
   }
+}
+
+function isHostManagedRuntimeNoopCall(name: string): boolean {
+  return name === "cudaDeviceSynchronize" ||
+    name === "cudaCtxResetPersistingL2Cache" ||
+    name === "cudaDeviceReset" ||
+    name === "cudaThreadExit" ||
+    name === "cudaThreadSynchronize" ||
+    name === "cudaDeviceGetAttribute" ||
+    name === "cudaDeviceGetLimit" ||
+    name === "cudaDeviceSetLimit" ||
+    name === "cudaThreadSetLimit" ||
+    name === "cudaDeviceCanAccessPeer" ||
+    name === "cudaDeviceEnablePeerAccess" ||
+    name === "cudaDeviceDisablePeerAccess" ||
+    name === "cudaGetDeviceFlags" ||
+    name === "cudaSetDeviceFlags" ||
+    name === "cudaMemGetInfo" ||
+    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
+    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
+    name === "cudaOccupancyMaxPotentialBlockSize" ||
+    name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    name === "cudaDeviceGetCacheConfig" ||
+    name === "cudaDeviceSetCacheConfig" ||
+    name === "cudaDeviceGetSharedMemConfig" ||
+    name === "cudaDeviceSetSharedMemConfig" ||
+    name === "cudaThreadSetCacheConfig" ||
+    name === "cudaThreadExchangeStreamCaptureMode" ||
+    name === "cudaDeviceGetStreamPriorityRange" ||
+    name === "cudaFree" ||
+    name === "cudaFreeAsync" ||
+    name === "cudaMemAdvise" ||
+    name === "cudaMemPrefetchAsync" ||
+    name === "cudaStreamAttachMemAsync" ||
+    name === "cudaStreamCreate" ||
+    name === "cudaStreamCreateWithFlags" ||
+    name === "cudaStreamCreateWithPriority" ||
+    name === "cudaStreamDestroy" ||
+    name === "cudaStreamGetDevice" ||
+    name === "cudaStreamGetFlags" ||
+    name === "cudaStreamGetId" ||
+    name === "cudaStreamGetPriority" ||
+    name === "cudaStreamIsCapturing" ||
+    name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaStreamQuery" ||
+    name === "cudaStreamSynchronize" ||
+    name === "cudaStreamWaitEvent" ||
+    name === "cudaSetDevice" ||
+    name === "cudaFuncSetAttribute" ||
+    name === "cudaFuncSetCacheConfig" ||
+    name === "cudaFuncSetSharedMemConfig" ||
+    name === "cudaGetLastError" ||
+    name === "cudaPeekAtLastError" ||
+    name === "cudaProfilerStart" ||
+    name === "cudaProfilerStop" ||
+    name === "cudaEventCreate" ||
+    name === "cudaEventCreateWithFlags" ||
+    name === "cudaEventDestroy" ||
+    name === "cudaEventQuery" ||
+    name === "cudaEventRecord" ||
+    name === "cudaEventRecordWithFlags" ||
+    name === "cudaEventSynchronize";
 }
 
 function isEmittedPointerVar(statement: CudaLiteVarDecl, context: EmitContext): boolean {
@@ -6480,7 +7870,6 @@ function indent(level: number): string {
   return "  ".repeat(level);
 }
 
-function featureError(code: string, message: string): CudaLiteCompilerError {
-  const span: SourceSpan = { start: 0, end: 0, line: 1, column: 1 };
+function featureError(code: string, message: string, span: SourceSpan): CudaLiteCompilerError {
   return new CudaLiteCompilerError(message, [{ code, severity: "error", message, span }]);
 }

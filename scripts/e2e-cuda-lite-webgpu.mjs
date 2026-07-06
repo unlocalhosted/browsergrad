@@ -223,6 +223,34 @@ __global__ void parent(int *out, int use_out) {
     cudaDeviceSynchronize();
   }
 }`,
+  dynamicAssignmentAliasAtomicLaunch: `
+__global__ void child(int *out) {
+  if (threadIdx.x == 0) {
+    int *tmp = nullptr;
+    int *ptr = (tmp = out);
+    atomicAdd(ptr, 1);
+  }
+}
+__global__ void parent(int *out) {
+  if (threadIdx.x == 0) {
+    child<<<1, 1>>>(out);
+    cudaDeviceSynchronize();
+  }
+}`,
+  dynamicSequenceAliasAtomicLaunch: `
+__global__ void child(int *out) {
+  if (threadIdx.x == 0) {
+    int *tmp = nullptr;
+    int *ptr = (tmp = out, tmp);
+    atomicAdd(ptr, 1);
+  }
+}
+__global__ void parent(int *out) {
+  if (threadIdx.x == 0) {
+    child<<<1, 1>>>(out);
+    cudaDeviceSynchronize();
+  }
+}`,
   unreachableDynamicLaunch: `
 __global__ void child(float *x) {
   x[threadIdx.x] += 1.0f;
@@ -1718,6 +1746,20 @@ __global__ void frexpOutParams(float *out, int *expOut) {
   float mantissa = frexp(9.0f, &exponent);
   out[0] = mantissa;
   expOut[0] = exponent;
+}`,
+  mathOutParamAliases: `
+__global__ void mathOutParamAliases(float *out, int *ints) {
+  float *intpart = out + 1;
+  float *sinOut = out + 2;
+  float *cosOut = out + 3;
+  int *expOut = ints + 1;
+  int *quoOut = ints + 2;
+  out[0] = modff(3.75f, intpart);
+  sincosf(0.25f, sinOut, cosOut);
+  out[4] = frexpf(9.0f, expOut);
+  out[5] = remquof(7.0f, 2.0f, quoOut);
+  out[6] = (float)ints[1];
+  out[7] = (float)ints[2];
 }`,
   curandStorageState: `
 __global__ void curandStorageState(curandState_t *states, float *out, unsigned int seed) {
@@ -9404,6 +9446,32 @@ const html = String.raw`<!doctype html>
             expectedOutput: { type: "Int32Array", data: [5] },
           },
           {
+            name: "runtime:host-dynamic-assignment-alias-atomic",
+            source: SOURCES.dynamicAssignmentAliasAtomicLaunch,
+            options: { kernelName: "parent", workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array([4]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [5] },
+          },
+          {
+            name: "runtime:host-dynamic-sequence-alias-atomic",
+            source: SOURCES.dynamicSequenceAliasAtomicLaunch,
+            options: { kernelName: "parent", workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Int32Array([4]),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Int32Array", data: [5] },
+          },
+          {
             name: "runtime:unreachable-dynamic-launch",
             source: SOURCES.unreachableDynamicLaunch,
             options: { kernelName: "selected", workgroupSize: [1, 1, 1] },
@@ -11718,6 +11786,32 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Float32Array", data: [0.5625] },
+          },
+          {
+            name: "helpers:math-out-param-aliases",
+            source: SOURCES.mathOutParamAliases,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Float32Array(8),
+                ints: new Int32Array(3),
+              },
+            }),
+            output: "out",
+            expectedOutput: {
+              type: "Float32Array",
+              data: [
+                0.75,
+                3,
+                Math.sin(0.25),
+                Math.cos(0.25),
+                0.5625,
+                -1,
+                4,
+                4,
+              ],
+            },
           },
           {
             name: "helpers:curand-storage-state",
@@ -21340,7 +21434,7 @@ const html = String.raw`<!doctype html>
         const memoryPools = {};
         const textures = {};
         const surfaces = {};
-        for (const param of compiled.ir.params) {
+        for (const param of compiled.kernelIr.params) {
           if (param.valueType === "surface2d") {
             surfaces[param.name] = { width: 64, height: 64, data: new Float32Array(64 * 64) };
           } else if (param.valueType === "texture2d") {
@@ -21355,19 +21449,19 @@ const html = String.raw`<!doctype html>
             scalars[param.name] = syntheticScalarForName(param.name);
           }
         }
-        for (const constant of compiled.ir.constants) {
+        for (const constant of compiled.ast.constants) {
           if (constant.init !== undefined) continue;
           constants[constant.name] = constant.dimensions.length === 0 && !isCudaVectorTypeName(constant.valueType)
             ? syntheticScalarForName(constant.name)
             : syntheticConstantBufferForType(constant.valueType, constant.name, 4096, compiled.f16Mode);
         }
-        for (const global of compiled.ir.deviceGlobals) {
+        for (const global of compiled.ast.deviceGlobals) {
           const length = global.dimensions.length === 0
             ? 1
             : global.dimensions.reduce((product, dimension) => product * dimension, 1);
           deviceGlobals[global.name] = syntheticBufferForType(global.valueType, length, compiled.f16Mode);
         }
-        for (const texture of compiled.ir.textures) {
+        for (const texture of compiled.ast.textures) {
           textures[texture.name] = { width: 64, height: 64, data: new Float32Array(64 * 64) };
         }
         for (const poolName of externalDevicePoolNamesFromSource(compiled.ast.source)) {

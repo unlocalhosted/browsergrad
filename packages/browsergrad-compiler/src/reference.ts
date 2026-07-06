@@ -7,6 +7,9 @@ import {
 } from "@unlocalhosted/browsergrad-kernels";
 import { collectExternalDevicePoolNames, collectKernelLaunchCallees } from "./ast_queries.js";
 import { expressionName } from "./analyzer.js";
+import { internalBackendIrFor } from "./backend_ir.js";
+import { cudaDeviceAttributeValue } from "./cuda_device_attributes.js";
+import { cudaDeviceLimitValue } from "./cuda_device_limits.js";
 import { CUDA_CACHE_HINT_LOADS, CUDA_CACHE_HINT_STORES, CUDA_INTRINSICS_BY_NAME } from "./intrinsics.js";
 import { validateCudaKernelLaunch } from "./launch.js";
 import {
@@ -208,43 +211,44 @@ export function runCompiledKernelReference(
   input: CompiledKernelInput,
   launch: KernelLaunch,
 ): ReferenceKernelResult {
-  validateCudaKernelLaunch(launch, compiled.ir.workgroupSize);
+  const backendIr = internalBackendIrFor(compiled);
+  validateCudaKernelLaunch(launch, backendIr.workgroupSize);
   validateInputs(compiled, input);
   const buffers = cloneBuffers(input.buffers);
   const constants = cloneConstants(input.constants ?? {});
-  for (const constant of compiled.ir.constants) {
+  for (const constant of backendIr.constants) {
     if (constant.init !== undefined && !constants.has(constant.name)) {
       constants.set(constant.name, constantInitialValue(constant));
     }
   }
-  const constantDimensions = new Map(compiled.ir.constants.map((constant) => [constant.name, constant.dimensions]));
+  const constantDimensions = new Map(backendIr.constants.map((constant) => [constant.name, constant.dimensions]));
   const deviceGlobals = cloneDeviceGlobals(input.deviceGlobals ?? {});
-  for (const global of compiled.ir.deviceGlobals) {
+  for (const global of backendIr.deviceGlobals) {
     if (!deviceGlobals.has(global.name)) {
       deviceGlobals.set(global.name, deviceGlobalInitialValue(global));
     }
   }
-  const deviceGlobalDimensions = new Map(compiled.ir.deviceGlobals.map((global) => [global.name, global.dimensions]));
+  const deviceGlobalDimensions = new Map(backendIr.deviceGlobals.map((global) => [global.name, global.dimensions]));
   const textures = input.textures ?? {};
   const surfaces = cloneSurfaces(input.surfaces ?? {});
   const memoryPools = cloneMemoryPools(input.memoryPools ?? {});
-  const functions = collectReferenceFunctions(compiled.ir.functions);
+  const functions = collectReferenceFunctions(backendIr.functions);
   const kernels = collectReferenceKernels(compiled);
   const scalars = input.scalars ?? {};
   const valueTypes = new Map<string, CudaLiteScalarType>([
-    ...compiled.ir.params.map((param) => [param.name, param.valueType] as const),
-    ...compiled.ir.constants.map((constant) => [constant.name, constant.valueType] as const),
-    ...compiled.ir.deviceGlobals.map((global) => [global.name, global.valueType] as const),
+    ...backendIr.params.map((param) => [param.name, param.valueType] as const),
+    ...backendIr.constants.map((constant) => [constant.name, constant.valueType] as const),
+    ...backendIr.deviceGlobals.map((global) => [global.name, global.valueType] as const),
   ]);
   const traces: MutableTrace[] = [];
 
-  if (usesGridSync(compiled.ir.body)) {
-    runGrid(compiled.ir.body, compiled, buffers, constants, constantDimensions, deviceGlobals, deviceGlobalDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, vectorFromTuple(launch.blockDim), vectorFromTuple(launch.gridDim), traces);
+  if (usesGridSync(backendIr.body)) {
+    runGrid(backendIr.body, compiled, buffers, constants, constantDimensions, deviceGlobals, deviceGlobalDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, vectorFromTuple(launch.blockDim), vectorFromTuple(launch.gridDim), traces);
   } else {
     for (let bz = 0; bz < launch.gridDim[2]; bz++) {
       for (let by = 0; by < launch.gridDim[1]; by++) {
         for (let bx = 0; bx < launch.gridDim[0]; bx++) {
-          runBlock(compiled.ir.body, compiled, buffers, constants, constantDimensions, deviceGlobals, deviceGlobalDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, {
+          runBlock(backendIr.body, compiled, buffers, constants, constantDimensions, deviceGlobals, deviceGlobalDimensions, textures, surfaces, memoryPools, functions, kernels, scalars, valueTypes, {
             x: bx,
             y: by,
             z: bz,
@@ -256,9 +260,9 @@ export function runCompiledKernelReference(
 
   const readback = input.readback ??
     [
-      ...compiled.ir.params.filter((param) => (param.pointer && !param.constant) || param.valueType === "surface2d").map((param) => param.name),
-      ...compiled.ir.deviceGlobals.map((global) => global.name),
-      ...collectExternalDevicePoolNames(compiled.ir.body),
+      ...backendIr.params.filter((param) => (param.pointer && !param.constant) || param.valueType === "surface2d").map((param) => param.name),
+      ...backendIr.deviceGlobals.map((global) => global.name),
+      ...collectExternalDevicePoolNames(backendIr.body),
     ];
   const result: Record<string, WgslTypedArray> = {};
   for (const name of readback) {
@@ -334,7 +338,7 @@ function runBlock(
   gridDim: Vector3,
   traces: MutableTrace[],
 ): void {
-  const shared = allocateShared(sharedDeclarationsFor(body, compiled.ir.sharedDeclarations));
+  const shared = allocateShared(sharedDeclarationsFor(body, internalBackendIrFor(compiled).sharedDeclarations));
   const generators: BarrierGenerator[] = [];
   const active: boolean[] = [];
   const resumes: Array<EvalValue | undefined> = [];
@@ -559,7 +563,7 @@ function runGrid(
       for (let bx = 0; bx < gridDim.x; bx++) {
         const blockIdx = { x: bx, y: by, z: bz };
         const blockKey = `${bx},${by},${bz}`;
-        const shared = sharedByBlock.get(blockKey) ?? allocateShared(sharedDeclarationsFor(body, compiled.ir.sharedDeclarations));
+        const shared = sharedByBlock.get(blockKey) ?? allocateShared(sharedDeclarationsFor(body, internalBackendIrFor(compiled).sharedDeclarations));
         sharedByBlock.set(blockKey, shared);
         for (let tz = 0; tz < blockDim.z; tz++) {
           for (let ty = 0; ty < blockDim.y; ty++) {
@@ -1324,6 +1328,12 @@ function pointerArgumentValue(
     if (!pointer) throw compilerFailure("pointer identity call expects pointer argument");
     return pointerArgumentValue(pointer, valueType, context);
   }
+  if (arg.kind === "sequence") {
+    const final = arg.expressions.at(-1);
+    if (!final) return { kind: "pool-pointer", poolName: "", byteOffset: -1, valueType };
+    for (const item of arg.expressions.slice(0, -1)) evalExpression(item, context);
+    return pointerArgumentValue(final, valueType, context);
+  }
   if (arg.kind === "cast" && arg.pointer) {
     const pointer = pointerArgumentValue(arg.expression, arg.valueType, context);
     if (isPoolPointer(pointer)) return { ...pointer, valueType: arg.valueType };
@@ -1408,6 +1418,10 @@ function execCudaRuntimeCopy(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
   context: ThreadContext,
 ): void {
+  if (isCudaRuntimeMemsetCall(expressionName(expression.callee))) {
+    execCudaRuntimeMemset(expression, context);
+    return;
+  }
   const shape = cudaRuntimeCopyShape(expression);
   if (!shape) throw compilerFailure("unsupported CUDA runtime copy call");
   const dst = expression.args[0];
@@ -1427,6 +1441,24 @@ function execCudaRuntimeCopy(
   context.trace.writes.push({ name: dstView.name, index: dstView.byteOffset, value: writable, ok: writable === byteCount });
 }
 
+function execCudaRuntimeMemset(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: ThreadContext,
+): void {
+  const dst = expression.args[0];
+  const value = expression.args[1];
+  const count = expression.args[2];
+  if (!dst || !value || !count) throw compilerFailure("cudaMemset expects dst, value, and byte count");
+  const dstView = pointerBytesForCopy(dst, context);
+  const byteValue = Math.trunc(evalNumber(value, context)) & 0xff;
+  const byteCount = Math.max(0, Math.trunc(evalNumber(count, context)));
+  if (dstView.byteOffset < 0) return;
+  const writable = Math.max(0, Math.min(byteCount, dstView.bytes.byteLength - dstView.byteOffset));
+  if (writable <= 0) return;
+  dstView.bytes.fill(byteValue, dstView.byteOffset, dstView.byteOffset + writable);
+  context.trace.writes.push({ name: dstView.name, index: dstView.byteOffset, value: writable, ok: writable === byteCount });
+}
+
 function cudaRuntimeCopyShape(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
 ): { readonly srcIndex: number; readonly countIndex: number } | undefined {
@@ -1434,6 +1466,10 @@ function cudaRuntimeCopyShape(
   if (name === "cudaMemcpy" || name === "cudaMemcpyAsync") return { srcIndex: 1, countIndex: 2 };
   if (name === "cudaMemcpyPeerAsync") return { srcIndex: 2, countIndex: 4 };
   return undefined;
+}
+
+function isCudaRuntimeMemsetCall(name: string | undefined): boolean {
+  return name === "cudaMemset" || name === "cudaMemsetAsync";
 }
 
 interface PointerByteView {
@@ -1542,7 +1578,11 @@ function expressionValueType(expression: CudaLiteExpression, context: ThreadCont
     const name = expressionNameForReference(expression.callee);
     return name ? cudaVectorConstructorType(name) : undefined;
   }
-  if (expression.kind === "member") return expressionValueType(expression.object, context);
+  if (expression.kind === "member") {
+    const objectType = expressionValueType(expression.object, context);
+    if (isCudaVectorType(objectType) && cudaVectorFieldIndex(objectType, expression.property) !== undefined) return cudaVectorScalarType(objectType);
+    return objectType;
+  }
   return undefined;
 }
 
@@ -2431,8 +2471,98 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     fillLocalArray(expression, context);
     return 0;
   }
+  if (name === "cudaGetDevice" ||
+    name === "cudaGetDeviceCount" ||
+    name === "cudaDeviceGetAttribute" ||
+    name === "cudaDeviceGetLimit" ||
+    name === "cudaThreadGetLimit" ||
+    name === "cudaDeviceCanAccessPeer" ||
+    name === "cudaGetDeviceFlags" ||
+    name === "cudaMemGetInfo" ||
+    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
+    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
+    name === "cudaOccupancyMaxPotentialBlockSize" ||
+    name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    name === "cudaDeviceGetCacheConfig" ||
+    name === "cudaDeviceGetSharedMemConfig" ||
+    name === "cudaThreadGetCacheConfig" ||
+    name === "cudaThreadExchangeStreamCaptureMode" ||
+    name === "cudaDeviceGetStreamPriorityRange" ||
+    name === "cudaStreamGetDevice" ||
+    name === "cudaStreamGetFlags" ||
+    name === "cudaStreamGetId" ||
+    name === "cudaStreamGetPriority" ||
+    name === "cudaStreamIsCapturing" ||
+    name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaRuntimeGetVersion" ||
+    name === "cudaDriverGetVersion") {
+    if (name === "cudaMemGetInfo") {
+      const freeTarget = expression.args[0];
+      const totalTarget = expression.args[1];
+      if (freeTarget) writeLValue(resolvePointerArgument(freeTarget, context), 268435456, context);
+      if (totalTarget) writeLValue(resolvePointerArgument(totalTarget, context), 268435456, context);
+      return 0;
+    }
+    if (name === "cudaOccupancyMaxPotentialBlockSize" || name === "cudaOccupancyMaxPotentialBlockSizeWithFlags") {
+      const minGridSizeTarget = expression.args[0];
+      const blockSizeTarget = expression.args[1];
+      if (minGridSizeTarget) writeLValue(resolvePointerArgument(minGridSizeTarget, context), 1, context);
+      if (blockSizeTarget) writeLValue(resolvePointerArgument(blockSizeTarget, context), 256, context);
+      return 0;
+    }
+    if (name === "cudaDeviceGetStreamPriorityRange") {
+      const leastTarget = expression.args[0];
+      const greatestTarget = expression.args[1];
+      if (leastTarget) writeLValue(resolvePointerArgument(leastTarget, context), 0, context);
+      if (greatestTarget) writeLValue(resolvePointerArgument(greatestTarget, context), 0, context);
+      return 0;
+    }
+    if (name === "cudaStreamGetFlags" || name === "cudaStreamGetPriority") {
+      const target = expression.args[1];
+      if (target) writeLValue(resolvePointerArgument(target, context), 0, context);
+      return 0;
+    }
+    if (name === "cudaStreamGetDevice" || name === "cudaStreamGetId" || name === "cudaStreamIsCapturing") {
+      const target = expression.args[1];
+      if (target) writeLValue(resolvePointerArgument(target, context), 0, context);
+      return 0;
+    }
+    if (name === "cudaStreamGetCaptureInfo") {
+      for (const target of expression.args.slice(1)) {
+        if (!target || isNullPointerLiteral(target)) continue;
+        writeLValue(resolvePointerArgument(target, context), 0, context);
+      }
+      return 0;
+    }
+    if (name === "cudaThreadExchangeStreamCaptureMode") {
+      const target = expression.args[0];
+      if (target) writeLValue(resolvePointerArgument(target, context), 0, context);
+      return 0;
+    }
+    const target = expression.args[0];
+    const value = name === "cudaGetDeviceCount"
+      ? 1
+      : name === "cudaDeviceGetAttribute"
+        ? cudaDeviceAttributeValue(expression.args[1] ? evalNumber(expression.args[1], context) : 0)
+        : name === "cudaDeviceGetLimit" || name === "cudaThreadGetLimit"
+        ? cudaDeviceLimitValue(expression.args[1] ? evalNumber(expression.args[1], context) : 0)
+        : name === "cudaDeviceCanAccessPeer"
+          ? 1
+        : name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" || name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags"
+          ? 1
+        : name === "cudaRuntimeGetVersion" || name === "cudaDriverGetVersion"
+          ? 12000
+          : 0;
+    if (target) writeLValue(resolvePointerArgument(target, context), value, context);
+    return 0;
+  }
+  if (name === "cudaEventElapsedTime") {
+    const target = expression.args[0];
+    if (target) writeLValue(resolvePointerArgument(target, context), 0, context);
+    return 0;
+  }
   if (name !== undefined && isHostManagedRuntimeNoopCall(name)) return 0;
-  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync" || name === "cudaMemcpyPeerAsync") {
+  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync" || name === "cudaMemcpyPeerAsync" || isCudaRuntimeMemsetCall(name)) {
     execCudaRuntimeCopy(expression, context);
     return 0;
   }
@@ -2522,11 +2652,11 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     if (descriptor.filterMode === "linear" && (name === "tex2D" || name === "tex2DLod")) {
       return isCudaVectorType(valueType)
         ? readLinearTextureVector(expression, texture, descriptor, context, valueType)
-        : readLinearTextureScalar(expression, texture, descriptor, context);
+        : roundScalarTextureValue(valueType, readLinearTextureScalar(expression, texture, descriptor, context));
     }
     const [x, y] = textureAtlasCoord(expression, name, texture, context, textureName);
     if (isCudaVectorType(valueType)) return readTextureVector(texture, x, y, valueType);
-    return texture.data[(y * texture.width + x) * textureChannels(texture)] ?? 0;
+    return roundScalarTextureValue(valueType, texture.data[(y * texture.width + x) * textureChannels(texture)] ?? 0);
   }
   if (name === "surf1Dread" || name === "surf2Dread" || name === "surf2DLayeredread" || name === "surf3Dread") {
     const is1D = name === "surf1Dread";
@@ -2599,11 +2729,11 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   }
   if (name === "sizeof") {
     const target = expression.args[0];
-    return target?.kind === "identifier" ? sizeofCudaType(target.name) ?? 4 : 4;
+    return target ? referenceSizeofValue(target, context) : 4;
   }
   if (name === "alignof") {
     const target = expression.args[0];
-    return target?.kind === "identifier" ? alignofCudaType(target.name) ?? 4 : 4;
+    return target ? referenceAlignofValue(target, context) : 4;
   }
   if (name === "vec_at") {
     const vector = expression.args[0];
@@ -2704,6 +2834,23 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
       ],
     };
   }
+  if (name === "__bfloat162_as_uint" || name === "__nv_bfloat162_as_uint") {
+    const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "bf162");
+    const low = (bitsFromFloat(roundBfloat16(value.lanes[0] ?? 0)) >>> 16) & 0xffff;
+    const high = bitsFromFloat(roundBfloat16(value.lanes[1] ?? 0)) & 0xffff0000;
+    return (low | high) >>> 0;
+  }
+  if (name === "__uint_as_bfloat162" || name === "__uint_as_nv_bfloat162") {
+    const bits = Math.trunc(evalNumber(expression.args[0]!, context)) >>> 0;
+    return {
+      kind: "cuda-vector",
+      valueType: "bf162",
+      lanes: [
+        floatFromBits((bits & 0xffff) << 16),
+        floatFromBits(bits & 0xffff0000),
+      ],
+    };
+  }
   if (isHalf2Intrinsic(name)) {
     const left = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
     const right = valueAsCudaVector(evalExpression(expression.args[1]!, context), "half2");
@@ -2720,6 +2867,21 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   if (name === "__half22float2") {
     const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
     return { kind: "cuda-vector", valueType: "float2", lanes: value.lanes };
+  }
+  if (name === "__half2_as_uint") {
+    const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
+    return (float32ToFloat16Bits(value.lanes[0] ?? 0) | (float32ToFloat16Bits(value.lanes[1] ?? 0) << 16)) >>> 0;
+  }
+  if (name === "__uint_as_half2") {
+    const bits = Math.trunc(evalNumber(expression.args[0]!, context)) >>> 0;
+    return {
+      kind: "cuda-vector",
+      valueType: "half2",
+      lanes: [
+        float16BitsToFloat32(bits & 0xffff),
+        float16BitsToFloat32((bits >>> 16) & 0xffff),
+      ],
+    };
   }
   if (name === "__low2float" || name === "__high2float") {
     const value = valueAsCudaVector(evalExpression(expression.args[0]!, context), "half2");
@@ -2763,7 +2925,17 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
   const vectorMinMax = evalVectorMinMaxCall(name, expression, context);
   if (vectorMinMax !== undefined) return vectorMinMax;
   if (name === "frexp" || name === "frexpf") return evalFrexp(expression, context);
+  if (name === "modf" || name === "modff") return evalModf(expression, context);
+  if (name === "remquo" || name === "remquof") return evalRemquo(expression, context);
+  if (isSincosCallName(name)) return evalSincos(expression, context);
+  if (isNanPayloadCallName(name)) return Number.NaN;
   const args = expression.args.map((arg) => evalNumber(arg, context));
+  if (name === "__hadd" && expression.args.every((arg) => {
+    const valueType = expressionValueType(arg, context);
+    return valueType !== "half" && valueType !== "bf16";
+  })) {
+    return signedAverage(args[0] ?? 0, args[1] ?? 0);
+  }
   const intrinsic = name ? CUDA_INTRINSICS_BY_NAME.get(name) : undefined;
   if (intrinsic?.evaluate) return intrinsic.evaluate(args);
   switch (name) {
@@ -2771,6 +2943,11 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     case "__syncwarp":
       return 0;
     case "__threadfence":
+    case "__threadfence_block":
+    case "__threadfence_system":
+      return 0;
+    case "__nanosleep":
+    case "__prof_trigger":
       return 0;
     case "__trap":
       return 0;
@@ -2838,6 +3015,12 @@ function isHalf2Intrinsic(name: string | undefined): boolean {
     name === "__hmax2";
 }
 
+function signedAverage(xValue: number, yValue: number): number {
+  const x = BigInt(Math.trunc(xValue) | 0);
+  const y = BigInt(Math.trunc(yValue) | 0);
+  return Number((x + y) >> 1n) | 0;
+}
+
 function half2IntrinsicOperator(name: string | undefined): (left: number, right: number) => number {
   switch (name) {
     case "__hadd2":
@@ -2872,14 +3055,65 @@ function roundBfloat16(value: number): number {
 
 function isHostManagedRuntimeNoopCall(name: string): boolean {
   return name === "cudaDeviceSynchronize" ||
+    name === "cudaCtxResetPersistingL2Cache" ||
+    name === "cudaDeviceReset" ||
+    name === "cudaThreadExit" ||
+    name === "cudaThreadSynchronize" ||
+    name === "cudaDeviceGetAttribute" ||
+    name === "cudaDeviceGetLimit" ||
+    name === "cudaDeviceSetLimit" ||
+    name === "cudaThreadSetLimit" ||
+    name === "cudaDeviceCanAccessPeer" ||
+    name === "cudaDeviceEnablePeerAccess" ||
+    name === "cudaDeviceDisablePeerAccess" ||
+    name === "cudaSetDeviceFlags" ||
+    name === "cudaMemGetInfo" ||
+    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessor" ||
+    name === "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags" ||
+    name === "cudaOccupancyMaxPotentialBlockSize" ||
+    name === "cudaOccupancyMaxPotentialBlockSizeWithFlags" ||
+    name === "cudaDeviceGetCacheConfig" ||
+    name === "cudaDeviceSetCacheConfig" ||
+    name === "cudaDeviceGetSharedMemConfig" ||
+    name === "cudaDeviceSetSharedMemConfig" ||
+    name === "cudaThreadSetCacheConfig" ||
+    name === "cudaThreadExchangeStreamCaptureMode" ||
+    name === "cudaFree" ||
+    name === "cudaFreeAsync" ||
+    name === "cudaMemAdvise" ||
+    name === "cudaMemPrefetchAsync" ||
+    name === "cudaStreamAttachMemAsync" ||
     name === "cudaStreamCreate" ||
     name === "cudaStreamCreateWithFlags" ||
+    name === "cudaStreamCreateWithPriority" ||
     name === "cudaStreamDestroy" ||
+    name === "cudaStreamGetDevice" ||
+    name === "cudaStreamGetFlags" ||
+    name === "cudaStreamGetId" ||
+    name === "cudaStreamGetPriority" ||
+    name === "cudaStreamIsCapturing" ||
+    name === "cudaStreamGetCaptureInfo" ||
+    name === "cudaStreamQuery" ||
     name === "cudaStreamSynchronize" ||
+    name === "cudaStreamWaitEvent" ||
+    name === "cudaSetDevice" ||
+    name === "cudaGetDevice" ||
+    name === "cudaGetDeviceCount" ||
+    name === "cudaRuntimeGetVersion" ||
+    name === "cudaDriverGetVersion" ||
+    name === "cudaFuncSetAttribute" ||
+    name === "cudaFuncSetCacheConfig" ||
+    name === "cudaFuncSetSharedMemConfig" ||
+    name === "cudaGetLastError" ||
+    name === "cudaPeekAtLastError" ||
+    name === "cudaProfilerStart" ||
+    name === "cudaProfilerStop" ||
     name === "cudaEventCreate" ||
     name === "cudaEventCreateWithFlags" ||
     name === "cudaEventDestroy" ||
+    name === "cudaEventQuery" ||
     name === "cudaEventRecord" ||
+    name === "cudaEventRecordWithFlags" ||
     name === "cudaEventSynchronize";
 }
 
@@ -2892,7 +3126,7 @@ function readTextureVector(
   const channels = textureChannels(texture);
   const base = (y * texture.width + x) * channels;
   const lanes = Array.from({ length: cudaVectorLaneCount(valueType) }, (_, lane) => {
-    if (lane < channels) return texture.data[base + lane] ?? 0;
+    if (lane < channels) return roundVectorLane(valueType, texture.data[base + lane] ?? 0);
     return lane === 3 ? 1 : 0;
   });
   return { kind: "cuda-vector", valueType, lanes };
@@ -2906,10 +3140,18 @@ function readLinearTextureVector(
   valueType: CudaLiteVectorType,
 ): CudaVectorValue {
   const lanes = Array.from({ length: cudaVectorLaneCount(valueType) }, (_lane, lane) => {
-    if (lane < textureChannels(texture)) return readLinearTextureScalar(expression, texture, descriptor, context, lane);
+    if (lane < textureChannels(texture)) return roundVectorLane(valueType, readLinearTextureScalar(expression, texture, descriptor, context, lane));
     return lane === 3 ? 1 : 0;
   });
   return { kind: "cuda-vector", valueType, lanes };
+}
+
+function roundScalarTextureValue(valueType: CudaLiteScalarType, value: number): number {
+  if (valueType === "bf16") return roundBfloat16(value);
+  if (valueType === "half") return roundHalf(value);
+  if (valueType === "int") return Math.trunc(value) | 0;
+  if (valueType === "uint" || valueType === "uchar") return Math.trunc(value) >>> 0;
+  return value;
 }
 
 function readLinearTextureScalar(
@@ -2939,6 +3181,16 @@ function readTextureLane(
   return texture.data[(y * texture.width + x) * textureChannels(texture) + lane] ?? 0;
 }
 
+function referenceSizeofValue(expression: CudaLiteExpression, context: ThreadContext): number {
+  if (expression.kind === "identifier") return sizeofCudaType(expression.name) ?? sizeofCudaType(expressionValueType(expression, context) ?? "") ?? 4;
+  return sizeofCudaType(expressionValueType(expression, context) ?? "") ?? 4;
+}
+
+function referenceAlignofValue(expression: CudaLiteExpression, context: ThreadContext): number {
+  if (expression.kind === "identifier") return alignofCudaType(expression.name) ?? alignofCudaType(expressionValueType(expression, context) ?? "") ?? 4;
+  return alignofCudaType(expressionValueType(expression, context) ?? "") ?? 4;
+}
+
 function evalFrexp(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): number {
   const value = evalNumber(expression.args[0]!, context);
   const exponentTarget = resolvePointerArgument(expression.args[1]!, context);
@@ -2949,6 +3201,51 @@ function evalFrexp(expression: Extract<CudaLiteExpression, { kind: "call" }>, co
   const exponent = Math.floor(Math.log2(Math.abs(value))) + 1;
   writeLValue(exponentTarget, exponent, context);
   return value / 2 ** exponent;
+}
+
+function evalModf(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): number {
+  const value = evalNumber(expression.args[0]!, context);
+  const intpartTarget = resolvePointerArgument(expression.args[1]!, context);
+  if (!Number.isFinite(value)) {
+    writeLValue(intpartTarget, value, context);
+    return Number.isNaN(value) ? NaN : value < 0 ? -0 : 0;
+  }
+  const intpart = Math.trunc(value);
+  writeLValue(intpartTarget, intpart, context);
+  return value - intpart;
+}
+
+function evalRemquo(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): number {
+  const x = evalNumber(expression.args[0]!, context);
+  const y = evalNumber(expression.args[1]!, context);
+  const quotient = roundTiesToEvenNumber(x / y);
+  writeLValue(resolvePointerArgument(expression.args[2]!, context), quotient, context);
+  return x - quotient * y;
+}
+
+function roundTiesToEvenNumber(value: number): number {
+  const floor = Math.floor(value);
+  const diff = value - floor;
+  if (diff < 0.5) return floor;
+  if (diff > 0.5) return floor + 1;
+  return floor % 2 === 0 ? floor : floor + 1;
+}
+
+function evalSincos(expression: Extract<CudaLiteExpression, { kind: "call" }>, context: ThreadContext): number {
+  const name = expressionName(expression.callee);
+  const rawValue = evalNumber(expression.args[0]!, context);
+  const value = name === "sincospi" || name === "sincospif" ? Math.PI * rawValue : rawValue;
+  writeLValue(resolvePointerArgument(expression.args[1]!, context), Math.sin(value), context);
+  writeLValue(resolvePointerArgument(expression.args[2]!, context), Math.cos(value), context);
+  return 0;
+}
+
+function isSincosCallName(name: string | undefined): boolean {
+  return name === "sincos" || name === "sincosf" || name === "__sincosf" || name === "sincospi" || name === "sincospif";
+}
+
+function isNanPayloadCallName(name: string | undefined): boolean {
+  return name === "nan" || name === "nanf" || name === "__builtin_nan" || name === "__builtin_nanf";
 }
 
 function evalVectorMinMaxCall(
@@ -3536,7 +3833,7 @@ function resolvePointerInitializer(statement: CudaLiteVarDecl, context: ThreadCo
   const init = statement.init;
   if (!init) return { kind: "pool-pointer", poolName: "", byteOffset: -1 };
   if (isNullPointerLiteral(init)) return { kind: "pool-pointer", poolName: "", byteOffset: -1, valueType: statement.valueType };
-  if (init?.kind === "call" || (init?.kind === "cast" && init.pointer) || init?.kind === "identifier" || init?.kind === "binary" || init?.kind === "conditional") {
+  if (init?.kind === "call" || (init?.kind === "cast" && init.pointer) || init?.kind === "identifier" || init?.kind === "binary" || init?.kind === "conditional" || init?.kind === "assignment" || init?.kind === "sequence") {
     const value = pointerArgumentValue(init, statement.valueType, context);
     if (isPoolPointer(value)) return value;
     if (typeof value !== "number" && "kind" in value && value.kind === "address") {
@@ -4946,7 +5243,8 @@ function freezeTrace(trace: MutableTrace): KernelThreadTrace {
 }
 
 function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelInput): void {
-  for (const param of compiled.ir.params) {
+  const backendIr = internalBackendIrFor(compiled);
+  for (const param of backendIr.params) {
     if (param.valueType === "texture2d") {
       const texture = input.textures?.[param.name];
       if (!texture) throw compilerFailure(`missing texture input '${param.name}'`);
@@ -4985,7 +5283,7 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
       throw compilerFailure(`missing scalar input '${param.name}'`);
     }
   }
-  for (const constant of compiled.ir.constants) {
+  for (const constant of backendIr.constants) {
     if (constant.init !== undefined) continue;
     const value = input.constants?.[constant.name];
     if (value === undefined) throw compilerFailure(`missing constant input '${constant.name}'`);
@@ -5003,19 +5301,19 @@ function validateInputs(compiled: CompiledCudaLiteKernel, input: CompiledKernelI
       if (value.length < expected) throw compilerFailure(`constant '${constant.name}' expects at least ${expected} elements`);
     }
   }
-  for (const global of compiled.ir.deviceGlobals) {
+  for (const global of backendIr.deviceGlobals) {
     const value = input.deviceGlobals?.[global.name];
     if (value === undefined) continue;
     validateTypedDeviceGlobal(global.name, global.valueType, value);
     const expected = global.dimensions.length === 0 ? 1 : global.dimensions.reduce((product, dimension) => product * dimension, 1);
     if (value.length < expected) throw compilerFailure(`device global '${global.name}' expects at least ${expected} elements`);
   }
-  for (const texture of compiled.ir.textures) {
+  for (const texture of backendIr.textures) {
     const value = input.textures?.[texture.name];
     if (!value) throw compilerFailure(`missing texture input '${texture.name}'`);
     validateSurfaceInput(`texture ${texture.name}`, value);
   }
-  for (const poolName of collectExternalDevicePoolNames(compiled.ir.body)) {
+  for (const poolName of collectExternalDevicePoolNames(backendIr.body)) {
     const pool = input.memoryPools?.[poolName];
     if (!pool) throw compilerFailure(`missing memory pool input '${poolName}'`);
     validateMemoryPoolInput(poolName, pool);
