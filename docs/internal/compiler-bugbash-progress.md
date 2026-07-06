@@ -1,6 +1,6 @@
 # Compiler Bugbash Progress
 
-Last updated: 2026-07-06T15:46:03Z
+Last updated: 2026-07-06T15:53:24Z
 
 Purpose: make compiler bugbash visible. Update this file whenever a new bug, fixture, gate, or remaining risk changes.
 
@@ -11,7 +11,7 @@ Purpose: make compiler bugbash visible. Update this file whenever a new bug, fix
 | Overall status | Active bugbash, not complete |
 | Fixed failure movement | Started from 87 failing real-world/audit cases; current verifier gate is green at src `677/0/0`, dist `677/0/0`; real-world compile/codegen audit has `0` hard fails; real corpus WebGPU fixture outputs are pinned `117/117` |
 | Current focus | Pointer/vector storage correctness, texture/vector conversion, active-lane/control semantics, and hot-loop test speed |
-| Active work item | Runtime/builtin compatibility widening plus semantic Kernel IR bridge verified |
+| Active work item | Synchronous cudaMemcpyPeer host-copy lowering now runs natively through WebGPU orchestration |
 | Skip policy | No added skips. WebGPU commands must use `--forbid-skips` |
 | Worktree | Compiler-owned files should be clean after each batch; unrelated JIT dirty files may remain outside compiler bugbash |
 | Next proof command | `pnpm --filter @unlocalhosted/browsergrad-compiler run verify:changed:plan` |
@@ -50,6 +50,7 @@ Done means all of these are true:
 
 Current verified gates:
 
+- synchronous `cudaMemcpyPeer` host-copy lowering: added `cudaMemcpyPeer(dst, dstDevice, src, srcDevice, count)` to the modeled CUDA runtime copy family, sharing the existing host-lifted WebGPU copy/reference path with `cudaMemcpyPeerAsync`; analyzer recognizes the call, runtime planning marks it as `runtime-copy`, reference copies bytes, WGSL elides it as host-managed, WebGPU plan emits `bg_peer_copy_*`, and smoke promotes `runtime:host-peer-copy-sync`; focused unit `531/0`, exact real WebGPU `1/0/0`, hot repeat `2/0/0` best warm `3.2ms`, WebGPU smoke with progress `572/0/0`, skips `0`
 - runtime/builtin compatibility widening and semantic Kernel IR bridge: dirty compiler slice adds internal backend IR attachment, semantic Kernel IR model/export shape, broader CUDA runtime no-op/query/write modeling, host-lifted `cudaMemset/cudaMemsetAsync` byte-pattern fills, device attribute/limit constants, and expanded CUDA math/integer/bf16/fp8 intrinsic lowering; static changed ladder passed (`typecheck`, `lint`, compiler unit `531/0`, WGSL module `16/0`, synthetic-input, fixture, audit-corpus, bugbash status), full WebGPU smoke `571/0/0`, and full `verify:compiler` passed, skips `0`
 - pointer-alias math out params: `frexp/frexpf`, `modf/modff`, `remquo/remquof`, and `sincos*` out parameters now accept modeled local pointer aliases such as `float *p = out + 1` / `int *q = ints + 2`; analyzer treats pointer aliases as valid output pointers, WGSL emits device pointer writes, reference writes through the same pointer model, and rounding helper emission now includes the `bg_round_even_f32` dependency without invalid WGSL infinity literals; focused unit `531/0`, exact real WebGPU case `1/0/0`, hot repeat `2/0/0` best warm `4ms`, WebGPU smoke `571/0/0`, full `verify:compiler` passed, skips `0`
 - assignment/sequence pointer alias initialization: replaced the previous unsupported dynamic-child compile path for `int *ptr = (tmp = out); atomicAdd(ptr, 1);` and added comma-sequence support for `int *ptr = (tmp = out, tmp);`; analyzer, reference, WGSL local-pointer handle metadata, atomic alias root scanning, and host-dynamic WebGPU fixture coverage now preserve pointer side effects before use; focused unit `530/0`, exact real WebGPU sequence case `1/0/0`, hot repeat `4/0/0` best warm `1.2ms`/`3.8ms`, full WebGPU smoke `570/0/0`, full `verify:compiler` passed, skips `0`

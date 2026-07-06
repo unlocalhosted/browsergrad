@@ -168,6 +168,7 @@ function runtimeOperationForExpression(
 function isCudaRuntimeCopyCall(name: string): boolean {
   return name === "cudaMemcpy" ||
     name === "cudaMemcpyAsync" ||
+    name === "cudaMemcpyPeer" ||
     name === "cudaMemcpyPeerAsync" ||
     name === "cudaMemset" ||
     name === "cudaMemsetAsync";

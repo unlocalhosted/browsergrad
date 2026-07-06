@@ -23,6 +23,7 @@ export const runtimeScopeCases = [
   "runtime:expanded-pool-pointer-host-dynamic-launch",
   "runtime:launched-device-function-pool-dynamic-launch",
   "runtime:host-copy",
+  "runtime:host-peer-copy-sync",
 ];
 
 export const storageScopeCases = [

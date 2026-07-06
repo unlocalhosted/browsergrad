@@ -232,6 +232,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaEventSynchronize", [1, 1]],
   ["cudaMemcpy", [4, 4]],
   ["cudaMemcpyAsync", [5, 5]],
+  ["cudaMemcpyPeer", [5, 5]],
   ["cudaMemcpyPeerAsync", [6, 6]],
   ["cudaGraphSetConditional", [2, 2]],
   ...[...CUDA_CACHE_HINT_LOADS].map((name) => [name, [1, 1]] as const),
@@ -2498,8 +2499,9 @@ function validateRuntimeCopyCall(
     });
   }
   const dst = expression.args[0];
-  const src = expression.args[callName === "cudaMemcpyPeerAsync" ? 2 : 1];
-  const byteCount = expression.args[callName === "cudaMemcpyPeerAsync" ? 4 : 2];
+  const peerCopy = callName === "cudaMemcpyPeer" || callName === "cudaMemcpyPeerAsync";
+  const src = expression.args[peerCopy ? 2 : 1];
+  const byteCount = expression.args[peerCopy ? 4 : 2];
   if (dst) walkExpression(dst, scope);
   if (src) walkExpression(src, scope);
   if (byteCount) validateScalarOperand(walkExpression(byteCount, scope), byteCount.span, diagnostics);
@@ -2515,6 +2517,7 @@ function validateRuntimeCopyCall(
 function isCudaRuntimeCopyCall(callName: string): boolean {
   return callName === "cudaMemcpy" ||
     callName === "cudaMemcpyAsync" ||
+    callName === "cudaMemcpyPeer" ||
     callName === "cudaMemcpyPeerAsync" ||
     callName === "cudaMemset" ||
     callName === "cudaMemsetAsync";

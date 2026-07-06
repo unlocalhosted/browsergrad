@@ -1464,7 +1464,7 @@ function cudaRuntimeCopyShape(
 ): { readonly srcIndex: number; readonly countIndex: number } | undefined {
   const name = expression.callee.kind === "identifier" ? expression.callee.name : undefined;
   if (name === "cudaMemcpy" || name === "cudaMemcpyAsync") return { srcIndex: 1, countIndex: 2 };
-  if (name === "cudaMemcpyPeerAsync") return { srcIndex: 2, countIndex: 4 };
+  if (name === "cudaMemcpyPeer" || name === "cudaMemcpyPeerAsync") return { srcIndex: 2, countIndex: 4 };
   return undefined;
 }
 
@@ -2562,7 +2562,7 @@ function evalCall(expression: Extract<CudaLiteExpression, { kind: "call" }>, con
     return 0;
   }
   if (name !== undefined && isHostManagedRuntimeNoopCall(name)) return 0;
-  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync" || name === "cudaMemcpyPeerAsync" || isCudaRuntimeMemsetCall(name)) {
+  if (name === "cudaMemcpy" || name === "cudaMemcpyAsync" || name === "cudaMemcpyPeer" || name === "cudaMemcpyPeerAsync" || isCudaRuntimeMemsetCall(name)) {
     execCudaRuntimeCopy(expression, context);
     return 0;
   }

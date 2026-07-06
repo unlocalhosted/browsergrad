@@ -105,6 +105,12 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
     cudaMemcpyPeerAsync(dst + 1, 1, src, 0, sizeof(float) * n, 0);
   }
 }`,
+  peerCopySync: `
+__global__ void peerCopySync(float *dst, const float *src) {
+  if (threadIdx.x == 0) {
+    cudaMemcpyPeer(dst, 1, src, 0, sizeof(float) * 2);
+  }
+}`,
   runtimeCopy: `
 __global__ void runtimeCopy(float *dst, const float *src, int n) {
   cudaStream_t stream;
@@ -9350,6 +9356,20 @@ const html = String.raw`<!doctype html>
               scalars: { n: 2 },
             }),
             output: "dst",
+          },
+          {
+            name: "runtime:host-peer-copy-sync",
+            source: SOURCES.peerCopySync,
+            options: { workgroupSize: [1, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+            input: () => ({
+              buffers: {
+                dst: new Float32Array([0, 0, 0, 0]),
+                src: new Float32Array([2.5, 3.5]),
+              },
+            }),
+            output: "dst",
+            expectedOutput: { type: "Float32Array", data: [2.5, 3.5, 0, 0] },
           },
           {
             name: "runtime:host-dynamic-launch",

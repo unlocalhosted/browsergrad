@@ -271,5 +271,6 @@ function isRuntimeMemoryMutationCall(name: string): boolean {
     name === "streamOrderedAllocate" ||
     name === "cudaMemcpy" ||
     name === "cudaMemcpyAsync" ||
+    name === "cudaMemcpyPeer" ||
     name === "cudaMemcpyPeerAsync";
 }

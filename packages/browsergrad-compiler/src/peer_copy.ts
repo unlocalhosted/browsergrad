@@ -443,6 +443,6 @@ function cudaRuntimeCopyShape(
 ): { readonly srcIndex: number; readonly countIndex: number } | undefined {
   const name = expressionName(expression.callee);
   if (name === "cudaMemcpy" || name === "cudaMemcpyAsync") return { srcIndex: 1, countIndex: 2 };
-  if (name === "cudaMemcpyPeerAsync") return { srcIndex: 2, countIndex: 4 };
+  if (name === "cudaMemcpyPeer" || name === "cudaMemcpyPeerAsync") return { srcIndex: 2, countIndex: 4 };
   return undefined;
 }

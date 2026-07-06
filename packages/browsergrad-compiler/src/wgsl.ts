@@ -4502,6 +4502,7 @@ function expressionContainsSideEffectingCall(expression: CudaLiteExpression, con
         CUDA_CACHE_HINT_STORES.has(name) ||
         name === "cudaMemcpy" ||
         name === "cudaMemcpyAsync" ||
+        name === "cudaMemcpyPeer" ||
         name === "cudaMemcpyPeerAsync" ||
         name === "cudaMemset" ||
         name === "cudaMemsetAsync")
@@ -6314,6 +6315,8 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return "0";
     case "cudaMemcpyAsync":
       return "0";
+    case "cudaMemcpyPeer":
+      return "0";
     case "cudaMemcpyPeerAsync":
       return "0";
     case "cudaMemset":
@@ -7787,6 +7790,8 @@ function noopCallComment(expression: CudaLiteExpression): string | undefined {
       return "cudaMemcpy omitted: WebGPU copy orchestration is host-managed";
     case "cudaMemcpyAsync":
       return "cudaMemcpyAsync omitted: WebGPU copy orchestration is host-managed";
+    case "cudaMemcpyPeer":
+      return "cudaMemcpyPeer omitted: WebGPU copy orchestration is host-managed";
     case "cudaMemcpyPeerAsync":
       return "cudaMemcpyPeerAsync omitted: WebGPU copy orchestration is host-managed";
     case "cudaMemset":

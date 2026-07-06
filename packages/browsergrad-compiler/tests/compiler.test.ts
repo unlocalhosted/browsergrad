@@ -3438,10 +3438,11 @@ __global__ void gridSync(float *scratch, float *out) {
     });
   });
 
-  it("runs cudaMemcpyPeerAsync in CPU reference when explicitly enabled", async () => {
+  it("runs cudaMemcpyPeer and cudaMemcpyPeerAsync in CPU reference when explicitly enabled", async () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void peerCopy(float *dst, const float *src, int n) {
   if (threadIdx.x == 0) {
+    cudaMemcpyPeer(dst, 1, src, 0, sizeof(float));
     cudaMemcpyPeerAsync(dst + 1, 1, src, 0, sizeof(float) * n, 0);
   }
 }`, {
@@ -3464,7 +3465,7 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
       code: "unsupported-cuda-runtime",
       severity: "warning",
     }));
-    expect([...result.buffers.dst as Float32Array]).toEqual([0, 2.5, 3.5, 0]);
+    expect([...result.buffers.dst as Float32Array]).toEqual([2.5, 2.5, 3.5, 0]);
     const plan = createCudaPeerCopyPlan(
       compiled,
       {
@@ -3478,6 +3479,14 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
     );
     expect(plan.supported).toBe(true);
     expect(plan.copies[0]).toMatchObject({
+      dstRoot: "dst",
+      dstOffset: 0,
+      srcRoot: "src",
+      srcOffset: 0,
+      elementCount: 1,
+      valueType: "float",
+    });
+    expect(plan.copies[1]).toMatchObject({
       dstRoot: "dst",
       dstOffset: 1,
       srcRoot: "src",
@@ -3499,7 +3508,8 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
     expect(residentPlan.supported).toBe(true);
-    expect(residentPlan.copies[0]).toMatchObject({ dstRoot: "dst", srcRoot: "src", elementCount: 2 });
+    expect(residentPlan.copies[0]).toMatchObject({ dstRoot: "dst", srcRoot: "src", elementCount: 1 });
+    expect(residentPlan.copies[1]).toMatchObject({ dstRoot: "dst", srcRoot: "src", elementCount: 2 });
 
     const shortResidentPlan = createCudaPeerCopyPlan(
       compiled,
@@ -3525,6 +3535,7 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
     cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking);
     cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
     cudaMemset(dst, 0, sizeof(float) * 4);
+    cudaMemcpyPeer(dst, 1, src, 0, sizeof(float));
     cudaMemcpy(dst + 1, src, sizeof(float) * n, cudaMemcpyDeviceToDevice);
     cudaMemcpyAsync(dst + 3, src + 1, sizeof(float), cudaMemcpyDefault, stream);
     cudaEventRecord(event, stream);
@@ -3551,10 +3562,11 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
     const runtimePlan = createCudaRuntimePlan(compiled);
     const webGpuPlan = createCudaWebGpuExecutionPlan(compiled, input, launch);
 
-    expect([...result.buffers.dst as Float32Array]).toEqual([0, 2.5, 3.5, 3.5]);
+    expect([...result.buffers.dst as Float32Array]).toEqual([2.5, 2.5, 3.5, 3.5]);
     expect(runtimePlan.operations.map((operation) => operation.kind)).toEqual([
       "device-sync",
       "device-sync",
+      "runtime-copy",
       "runtime-copy",
       "runtime-copy",
       "runtime-copy",
@@ -3572,13 +3584,14 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
       elementCount: copy.elementCount,
     }))).toEqual([
       { kind: "fill", dstOffset: 0, srcOffset: undefined, elementCount: 4 },
+      { kind: "copy", dstOffset: 0, srcOffset: 0, elementCount: 1 },
       { kind: "copy", dstOffset: 1, srcOffset: 0, elementCount: 2 },
       { kind: "copy", dstOffset: 3, srcOffset: 1, elementCount: 1 },
     ]);
     expect(webGpuPlan.supported).toBe(true);
     if (webGpuPlan.supported) {
       expect(webGpuPlan.kind).toBe("host-copy");
-      expect(webGpuPlan.steps).toHaveLength(4);
+      expect(webGpuPlan.steps).toHaveLength(5);
     }
 
     expect(() => compileCudaLiteKernel(`
@@ -3721,6 +3734,7 @@ __global__ void parent(float *dst, float *src) {
     const peer = compileCudaLiteKernel(`
 __global__ void peerCopy(float *dst, const float *src, int n) {
   if (threadIdx.x == 0) {
+    cudaMemcpyPeer(dst, 1, src, 0, sizeof(float));
     cudaMemcpyPeerAsync(dst + 1, 1, src, 0, sizeof(float) * n, 0);
   }
 }`, {
@@ -3740,7 +3754,7 @@ __global__ void peerCopy(float *dst, const float *src, int n) {
     );
     expect(peerPlan).toMatchObject({ supported: true, kind: "host-copy" });
     if (peerPlan.supported) {
-      expect(peerPlan.steps.map((step) => step.program.name)).toEqual(["peerCopy", "bg_peer_copy_float"]);
+      expect(peerPlan.steps.map((step) => step.program.name)).toEqual(["peerCopy", "bg_peer_copy_float", "bg_peer_copy_float"]);
     }
 
     const dynamic = compileCudaLiteKernel(`
