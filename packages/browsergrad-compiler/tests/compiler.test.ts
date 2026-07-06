@@ -3656,6 +3656,46 @@ __global__ void runtimeFill(unsigned int *bits) {
     }
   });
 
+  it("host-lifts byte-wise cudaMemcpy across compatible 32-bit typed buffers", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void runtimeCrossTypeCopy(float *dst, const unsigned int *src) {
+  if (threadIdx.x == 0) {
+    cudaMemcpy(dst + 1, src, sizeof(unsigned int) * 2, cudaMemcpyDeviceToDevice);
+  }
+}`, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = {
+      buffers: {
+        dst: new Float32Array([0, 0, 0]),
+        src: new Uint32Array([0x3f800000, 0x40200000]),
+      },
+    };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const plan = createCudaRuntimeCopyPlan(compiled, input, launch);
+    const webGpuPlan = createCudaWebGpuExecutionPlan(compiled, input, launch);
+
+    expect([...result.buffers.dst as Float32Array]).toEqual([0, 1, 2.5]);
+    expect(plan.supported).toBe(true);
+    expect(plan.copies).toHaveLength(1);
+    expect(plan.copies[0]).toMatchObject({
+      kind: "copy",
+      dstRoot: "dst",
+      srcRoot: "src",
+      dstOffset: 1,
+      srcOffset: 0,
+      elementCount: 2,
+      valueType: "uint",
+    });
+    expect(webGpuPlan.supported).toBe(true);
+    if (webGpuPlan.supported) {
+      expect(webGpuPlan.kind).toBe("host-copy");
+      expect(webGpuPlan.steps).toHaveLength(2);
+    }
+  });
+
   it("host-lifts cudaMemset2D and cudaMemset2DAsync row fills", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void runtimeFill2D(unsigned int *bits) {

@@ -182,7 +182,8 @@ function collectHostPeerCopies(
         else {
           const operations = createPeerCopyOperations(item.expression, current, input, deviceGlobals);
           if (!operations) {
-            markUnsafe("arguments-not-host-evaluable", "peer-copy arguments must resolve to typed buffer aliases, non-negative offsets, and element-aligned byte count");
+            const callName = expressionName(item.expression.callee) ?? "runtime copy";
+            markUnsafe("arguments-not-host-evaluable", `${callName} arguments must resolve to typed buffer aliases, non-negative offsets, and element-aligned byte count`);
           }
           else {
             out.push(...operations);
@@ -222,8 +223,10 @@ function createPeerCopyOperations(
   if (dst.offset < 0 || src.offset < 0) return undefined;
   const dstBuffer = copyBufferViewFor(input, dst.root, deviceGlobals);
   const srcBuffer = copyBufferViewFor(input, src.root, deviceGlobals);
-  if (!dstBuffer || !srcBuffer || dstBuffer.valueType !== srcBuffer.valueType) return undefined;
-  const elementSize = dstBuffer.elementSize;
+  if (!dstBuffer || !srcBuffer) return undefined;
+  const copyView = copyCompatibleBufferView(dstBuffer, srcBuffer);
+  if (!copyView) return undefined;
+  const elementSize = copyView.elementSize;
   if (Math.trunc(byteCount) % elementSize !== 0) return undefined;
   const elementCount = Math.trunc(byteCount) / elementSize;
   if (dst.offset + elementCount > dstBuffer.elementLength || src.offset + elementCount > srcBuffer.elementLength) return undefined;
@@ -235,7 +238,7 @@ function createPeerCopyOperations(
     dstOffset: dst.offset,
     srcOffset: src.offset,
     elementCount,
-    valueType: dstBuffer.valueType,
+    valueType: copyView.valueType,
   }];
 }
 
@@ -254,8 +257,10 @@ function createPeerSymbolCopyOperation(
   if (symbol.offset < 0 || pointer.offset < 0 || byteCount < 0 || offsetBytes < 0) return undefined;
   const symbolBuffer = copyBufferViewFor(input, symbol.root, deviceGlobals);
   const pointerBuffer = copyBufferViewFor(input, pointer.root, deviceGlobals);
-  if (!symbolBuffer || !pointerBuffer || symbolBuffer.valueType !== pointerBuffer.valueType) return undefined;
-  const elementSize = symbolBuffer.elementSize;
+  if (!symbolBuffer || !pointerBuffer) return undefined;
+  const copyView = copyCompatibleBufferView(symbolBuffer, pointerBuffer);
+  if (!copyView) return undefined;
+  const elementSize = copyView.elementSize;
   if (!Number.isInteger(byteCount) || !Number.isInteger(offsetBytes)) return undefined;
   if (Math.trunc(byteCount) % elementSize !== 0 || Math.trunc(offsetBytes) % elementSize !== 0) return undefined;
   const elementCount = Math.trunc(byteCount) / elementSize;
@@ -275,7 +280,7 @@ function createPeerSymbolCopyOperation(
     dstOffset,
     srcOffset,
     elementCount,
-    valueType: dstBuffer.valueType,
+    valueType: copyView.valueType,
   }];
 }
 
@@ -296,8 +301,10 @@ function createPeerCopy2DOperations(
   if (dst.offset < 0 || src.offset < 0 || dstPitchBytes < 0 || srcPitchBytes < 0 || rowBytes < 0 || rows < 0) return undefined;
   const dstBuffer = copyBufferViewFor(input, dst.root, deviceGlobals);
   const srcBuffer = copyBufferViewFor(input, src.root, deviceGlobals);
-  if (!dstBuffer || !srcBuffer || dstBuffer.valueType !== srcBuffer.valueType) return undefined;
-  const elementSize = dstBuffer.elementSize;
+  if (!dstBuffer || !srcBuffer) return undefined;
+  const copyView = copyCompatibleBufferView(dstBuffer, srcBuffer);
+  if (!copyView) return undefined;
+  const elementSize = copyView.elementSize;
   const byteValues = [dstPitchBytes, srcPitchBytes, rowBytes];
   if (byteValues.some((value) => !Number.isInteger(value) || Math.trunc(value) % elementSize !== 0)) return undefined;
   if (!Number.isInteger(rows)) return undefined;
@@ -315,7 +322,7 @@ function createPeerCopy2DOperations(
       dstOffset: dst.offset,
       srcOffset: src.offset,
       elementCount: 0,
-      valueType: dstBuffer.valueType,
+      valueType: copyView.valueType,
     }];
   }
   for (let row = 0; row < rowCount; row++) {
@@ -330,7 +337,7 @@ function createPeerCopy2DOperations(
       dstOffset,
       srcOffset,
       elementCount,
-      valueType: dstBuffer.valueType,
+      valueType: copyView.valueType,
     });
   }
   return out;
@@ -426,6 +433,16 @@ function copyBufferViewFor(input: CompiledKernelInput, name: string, deviceGloba
   if (resident) return copyResidentBufferView(resident);
   const global = deviceGlobals.find((item) => item.name === name);
   if (global) return copyDeviceGlobalView(global);
+  return undefined;
+}
+
+function copyCompatibleBufferView(
+  dst: CopyBufferView | undefined,
+  src: CopyBufferView | undefined,
+): Pick<CopyBufferView, "elementSize" | "valueType"> | undefined {
+  if (!dst || !src || dst.elementSize !== src.elementSize) return undefined;
+  if (dst.valueType === src.valueType) return { elementSize: dst.elementSize, valueType: dst.valueType };
+  if (dst.elementSize === Uint32Array.BYTES_PER_ELEMENT) return { elementSize: dst.elementSize, valueType: "uint" };
   return undefined;
 }
 

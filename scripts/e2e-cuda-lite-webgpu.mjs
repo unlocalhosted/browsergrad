@@ -115,7 +115,7 @@ __global__ void peerCopySync(float *dst, const float *src) {
   runtimeCopy: `
 __constant__ float cRuntimeCopySymbol[2];
 __device__ float gRuntimeCopySymbol[2];
-__global__ void runtimeCopy(float *dst, const float *src, int n) {
+__global__ void runtimeCopy(float *dst, const float *src, const unsigned int *bits, int n) {
   cudaStream_t stream;
   cudaEvent_t event;
   if (threadIdx.x == 0) {
@@ -136,6 +136,7 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
     cudaMemcpyFromSymbolAsync(dst + 2, cRuntimeCopySymbol, sizeof(float) * 2, 0, cudaMemcpyDeviceToDevice, stream);
     cudaMemcpyToSymbol(gRuntimeCopySymbol, src, sizeof(float) * 2);
     cudaMemcpyFromSymbol(dst, gRuntimeCopySymbol, sizeof(float) * 2);
+    cudaMemcpy(dst + 2, bits, sizeof(unsigned int), cudaMemcpyDeviceToDevice);
     cudaEventRecord(event, stream);
     cudaEventSynchronize(event);
     cudaStreamSynchronize(stream);
@@ -9368,6 +9369,7 @@ const html = String.raw`<!doctype html>
               buffers: {
                 dst: new Float32Array([0, 0, 0, 0]),
                 src: new Float32Array([2.5, 3.5]),
+                bits: new Uint32Array([0x40900000]),
               },
               constants: {
                 cRuntimeCopySymbol: new Float32Array([0, 0]),
@@ -9375,7 +9377,7 @@ const html = String.raw`<!doctype html>
               scalars: { n: 2 },
             }),
             output: "dst",
-            expectedOutput: { type: "Float32Array", data: [2.5, 3.5, 2.5, 3.5] },
+            expectedOutput: { type: "Float32Array", data: [2.5, 3.5, 4.5, 3.5] },
           },
           {
             name: "runtime:host-peer-copy-sync",
