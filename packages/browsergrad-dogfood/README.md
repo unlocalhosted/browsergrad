@@ -30,13 +30,13 @@ and dogfood for post-publish registry checks.
 ## Running
 
 ```sh
-pnpm --filter @unlocalhosted/browsergrad-dogfood test
+pnpm --dir packages/browsergrad-dogfood test
 ```
 
 Headed Chromium is required on macOS for real WebGPU (Metal). On Linux CI,
 set `BG_BROWSER_HEADLESS=1` and rely on SwiftShader Vulkan.
 
-## Structure — coverage spans all 4 published packages
+## Structure — coverage spans all published packages
 
 ```
 tests/                              # browser mode (Chromium + WebGPU)
@@ -70,6 +70,9 @@ tests-node/                         # node mode (Pyodide-in-Node)
     jit_specific.test.ts            — J1-J11 (lazy IR, cache, fusion, custom kernel, ONNX)
   cross-package/
     integration.test.ts             — CP1-CP3 (grad+jit coexist, manifest vs jit version)
+  compiler/
+    compiler_examples.test.ts       — CUDA-lite examples, CPU reference, WebGPU plan summaries, diagnostics
+  published_module_compat.test.ts   — raw Node ESM imports for published tarballs
 ```
 
 Plus `hypotheses.md` — 77 adversarial hypotheses every test file derives from.

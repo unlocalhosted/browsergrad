@@ -11,9 +11,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@unlocalhosted/browsergrad-compiler": "0.1.2",
     "@unlocalhosted/browsergrad-grad": "0.5.1",
     "@unlocalhosted/browsergrad-jit": "0.8.1",
-    "@unlocalhosted/browsergrad-kernels": "0.1.1",
+    "@unlocalhosted/browsergrad-kernels": "0.1.2",
     "@unlocalhosted/browsergrad-runtime": "0.1.1"
   },
   "devDependencies": {

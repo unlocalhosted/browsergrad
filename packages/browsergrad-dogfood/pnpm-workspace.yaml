@@ -1,0 +1,6 @@
+# Dogfood installs freshly published tarballs outside the root workspace. These
+# excludes keep post-publish checks installable while pnpm's minimum-release-age
+# policy is active for just-published BrowserGrad artifacts.
+minimumReleaseAgeExclude:
+  - '@unlocalhosted/browsergrad-compiler@0.1.2'
+  - '@unlocalhosted/browsergrad-kernels@0.1.2'

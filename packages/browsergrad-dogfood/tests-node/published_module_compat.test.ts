@@ -37,6 +37,11 @@ describe("raw Node ESM compat — published tarballs", () => {
     expect(r.ok, `stderr: ${r.stderr}`).toBe(true);
   });
 
+  it("@unlocalhosted/browsergrad-compiler imports cleanly in raw Node ✓", () => {
+    const r = tryRawNodeImport("@unlocalhosted/browsergrad-compiler");
+    expect(r.ok, `stderr: ${r.stderr}`).toBe(true);
+  });
+
   it("@unlocalhosted/browsergrad-grad imports cleanly in raw Node ✓ (fixed in 0.5.1)", () => {
     const r = tryRawNodeImport("@unlocalhosted/browsergrad-grad");
     expect(r.ok, `stderr: ${r.stderr}`).toBe(true);

@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@unlocalhosted/browsergrad-compiler':
+        specifier: 0.1.2
+        version: 0.1.2
       '@unlocalhosted/browsergrad-grad':
         specifier: 0.5.1
         version: 0.5.1
@@ -15,8 +18,8 @@ importers:
         specifier: 0.8.1
         version: 0.8.1
       '@unlocalhosted/browsergrad-kernels':
-        specifier: 0.1.1
-        version: 0.1.1
+        specifier: 0.1.2
+        version: 0.1.2
       '@unlocalhosted/browsergrad-runtime':
         specifier: 0.1.1
         version: 0.1.1(pyodide@0.26.4)
@@ -191,14 +194,17 @@ packages:
   '@types/node@24.12.4':
     resolution: {integrity: sha512-GUUEShf+PBCGW2KaXwcIt3Yk+e3pkKwWKb9GSyM9WQVE+ep2jzmHdGsHzu4wgcZy5fN9FBdVzjpBQsYlpfpgLA==}
 
+  '@unlocalhosted/browsergrad-compiler@0.1.2':
+    resolution: {integrity: sha512-FLXw+kF5t8Bq+5qWDkRLd/UHSZasAokxzvaOp0nw6lcBR3JnDkP13QNoqJFfg2h6QCeMI+ZZvkdEmd0qytN4QA==}
+
   '@unlocalhosted/browsergrad-grad@0.5.1':
     resolution: {integrity: sha512-NsstuWJLT85jRqnLvKV1K1nUAsQ2nHp4/X90l3oZ8E2A6lHkj4G05e854tOQsi6JhE0eTX9E9LlZhvt+ldBI6w==}
 
   '@unlocalhosted/browsergrad-jit@0.8.1':
     resolution: {integrity: sha512-qJ0GDCnm9//tXmmOGEKlo3nL86bIkoMOPy7ZYXUtbThEzem04AzFfpNgrSPAU9uULlN885Z/MpDRtthuU5uYFw==}
 
-  '@unlocalhosted/browsergrad-kernels@0.1.1':
-    resolution: {integrity: sha512-vNJHe5s24kOyMw0sinGWA06XcxV2IsGdIsscdW7fSPQVUWgody5L7M6iuXGzPnJ20mB56NHYyuxSBwUDdiA7dQ==}
+  '@unlocalhosted/browsergrad-kernels@0.1.2':
+    resolution: {integrity: sha512-J2ZBetCgir6YQhQSvI+A0NorQxExXOji6sLJOPoWoR5NYviyMRS5YU+3valD/Fh6Wx/4CVoqWjFPvBxHzU+qMg==}
 
   '@unlocalhosted/browsergrad-runtime@0.1.1':
     resolution: {integrity: sha512-KvhluUfImyCHvucGubanN23adwzKQPixk2iwXIwRScopyZUuAf7/8kHjFHKH/wHURarVuFBXjyBZ9i6LHO6nKw==}
@@ -670,11 +676,15 @@ snapshots:
     dependencies:
       undici-types: 7.16.0
 
+  '@unlocalhosted/browsergrad-compiler@0.1.2':
+    dependencies:
+      '@unlocalhosted/browsergrad-kernels': 0.1.2
+
   '@unlocalhosted/browsergrad-grad@0.5.1': {}
 
   '@unlocalhosted/browsergrad-jit@0.8.1': {}
 
-  '@unlocalhosted/browsergrad-kernels@0.1.1': {}
+  '@unlocalhosted/browsergrad-kernels@0.1.2': {}
 
   '@unlocalhosted/browsergrad-runtime@0.1.1(pyodide@0.26.4)':
     dependencies:
