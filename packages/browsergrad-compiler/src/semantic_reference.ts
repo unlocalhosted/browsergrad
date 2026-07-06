@@ -1,5 +1,6 @@
 import type { WgslTypedArray } from "@unlocalhosted/browsergrad-kernels";
 import { validateCudaKernelLaunch } from "./launch.js";
+import { deviceGlobalBufferInputs } from "./webgpu_inputs.js";
 import type {
   CompiledCudaLiteKernel,
   CompiledKernelInput,
@@ -52,6 +53,7 @@ interface SemanticReferenceContext {
   readonly compiled: CompiledCudaLiteKernel;
   readonly buffers: Map<string, WgslTypedArray>;
   readonly constants: Map<string, number | WgslTypedArray>;
+  readonly deviceGlobals: Map<string, WgslTypedArray>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly locals: Map<string, SemanticValue>;
   readonly blockIdx: Vector3;
@@ -88,6 +90,7 @@ export function runCompiledKernelSemanticReference(
 
   const buffers = cloneBuffers(input.buffers);
   const constants = semanticReferenceConstants(compiled, input);
+  const deviceGlobals = cloneBuffers(deviceGlobalBufferInputs(compiled, input));
   const traces: MutableTrace[] = [];
   const blockDim = vectorFromTuple(launch.blockDim);
   const gridDim = vectorFromTuple(launch.gridDim);
@@ -111,6 +114,7 @@ export function runCompiledKernelSemanticReference(
                 compiled,
                 buffers,
                 constants,
+                deviceGlobals,
                 scalars,
                 locals: new Map(),
                 blockIdx: { x: bx, y: by, z: bz },
@@ -128,10 +132,11 @@ export function runCompiledKernelSemanticReference(
 
   const readback = input.readback ?? compiled.kernelIr.params
     .filter((param) => param.addressSpace === "storage" && param.pointer && !param.constant)
-    .map((param) => param.name);
+    .map((param) => param.name)
+    .concat(compiled.kernelIr.memory.filter((symbol) => symbol.kind === "device-global").map((symbol) => symbol.name));
   return {
     buffers: Object.fromEntries(readback.map((name) => {
-      const buffer = buffers.get(name);
+      const buffer = buffers.get(name) ?? deviceGlobals.get(name);
       if (!buffer) throw semanticReferenceError(`missing readback buffer '${name}'`, compiled.kernelIr.span);
       return [name, buffer];
     })),
@@ -195,6 +200,7 @@ function semanticReferenceParamSupported(param: CompiledCudaLiteKernel["kernelIr
 function semanticReferenceMemorySymbolSupported(symbol: CompiledCudaLiteKernel["kernelIr"]["memory"][number]): boolean {
   if (symbol.kind === "local" || symbol.kind === "shared") return true;
   if (symbol.kind === "constant") return !symbol.initialized && semanticReferenceScalarTypeSupported(symbol.valueType);
+  if (symbol.kind === "device-global") return semanticReferenceScalarTypeSupported(symbol.valueType);
   return false;
 }
 
@@ -212,10 +218,14 @@ function semanticReferenceScalarTypeSupported(valueType: CudaLiteScalarType | un
 }
 
 function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
-  return (ref.addressSpace === "storage" || ref.addressSpace === "constant" || ref.addressSpace === "local") &&
-    (ref.addressSpace === "local" ? ref.indices.length > 0 : ref.indices.length === 1) &&
-    ref.fields.length === 0 &&
-    semanticReferenceExpressionSupported(ref.indices[0]!, "scalar");
+  if (ref.addressSpace !== "storage" && ref.addressSpace !== "constant" && ref.addressSpace !== "device-global" && ref.addressSpace !== "local") {
+    return false;
+  }
+  if (ref.fields.length > 0) return false;
+  if (ref.addressSpace === "local" && ref.indices.length === 0) return false;
+  if ((ref.addressSpace === "storage" || ref.addressSpace === "constant") && ref.indices.length !== 1) return false;
+  if (ref.addressSpace === "device-global" && ref.indices.length > 1) return false;
+  return ref.indices.every((index) => semanticReferenceExpressionSupported(index, "scalar"));
 }
 
 function semanticReferenceAtomicSupported(
@@ -262,7 +272,11 @@ function semanticReferenceExpressionSupported(expression: SemanticExpression, ex
     case "literal":
       return typeof expression.value === "number";
     case "symbol":
-      return expression.addressSpace === "uniform" || expression.addressSpace === "local" || expression.addressSpace === "constant" || isBuiltinVectorSymbol(expression.name);
+      return expression.addressSpace === "uniform" ||
+        expression.addressSpace === "local" ||
+        expression.addressSpace === "constant" ||
+        expression.addressSpace === "device-global" ||
+        isBuiltinVectorSymbol(expression.name);
     case "member":
       return isBuiltinVectorMember(expression);
     case "index":
@@ -564,7 +578,7 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
     indices.unshift(target.index);
     target = target.target;
   }
-  if (target.kind !== "symbol" || (target.addressSpace !== "storage" && target.addressSpace !== "constant" && target.addressSpace !== "local")) return undefined;
+  if (target.kind !== "symbol" || (target.addressSpace !== "storage" && target.addressSpace !== "constant" && target.addressSpace !== "device-global" && target.addressSpace !== "local")) return undefined;
   return {
     base: target.name,
     addressSpace: target.addressSpace,
@@ -584,6 +598,8 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
   }
   const buffer = ref.addressSpace === "constant"
     ? context.constants.get(ref.base)
+    : ref.addressSpace === "device-global"
+    ? context.deviceGlobals.get(ref.base)
     : context.buffers.get(ref.base);
   if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
   const index = flatIndex(ref, context);
@@ -602,7 +618,7 @@ function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticRef
     if (index >= 0 && index < buffer.length) buffer[index] = value;
     return;
   }
-  const buffer = context.buffers.get(ref.base);
+  const buffer = ref.addressSpace === "device-global" ? context.deviceGlobals.get(ref.base) : context.buffers.get(ref.base);
   if (!buffer) throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
   const index = flatIndex(ref, context);
   const ok = index >= 0 && index < buffer.length;
@@ -616,6 +632,11 @@ function flatIndex(ref: SemanticMemoryRef, context: SemanticReferenceContext): n
     if (!symbol) throw semanticReferenceError(`unknown local array '${ref.base}'`, ref.span);
     if (ref.indices.length !== symbol.dimensions.length) throw semanticReferenceError(`local array '${ref.base}' index rank mismatch`, ref.span);
     return flatIndexForDimensions(symbol.dimensions, ref.indices.map((index) => Math.trunc(evalNumber(index, context))));
+  }
+  if (ref.addressSpace === "device-global") {
+    if (ref.indices.length === 0) return 0;
+    if (ref.indices.length === 1) return Math.trunc(evalNumber(ref.indices[0]!, context));
+    throw semanticReferenceError("semantic reference supports scalar/1D device-global indexing", ref.span);
   }
   if (ref.indices.length !== 1) throw semanticReferenceError("semantic reference supports only 1D storage indexing", ref.span);
   return Math.trunc(evalNumber(ref.indices[0]!, context));
@@ -632,6 +653,8 @@ function symbolValue(name: string, context: SemanticReferenceContext, span: Sour
   if (scalar !== undefined) return scalar;
   const constant = context.constants.get(name);
   if (typeof constant === "number") return constant;
+  const global = context.compiled.kernelIr.memory.find((symbol) => symbol.name === name && symbol.kind === "device-global");
+  if (global && global.dimensions.length === 0) return readMemory({ base: name, addressSpace: "device-global", indices: [], fields: [], span }, context);
   const storageParam = context.compiled.kernelIr.params.find((param) => param.name === name && param.addressSpace === "storage");
   if (storageParam) return context.buffers.has(name) ? 1 : 0;
   throw semanticReferenceError(`unknown semantic reference symbol '${name}'`, span);

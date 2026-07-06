@@ -70,6 +70,7 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
     ...constantMemorySymbols(ir).filter((symbol) => symbol.dimensions.length === 0),
   ];
   const constantBuffers = constantMemorySymbols(ir).filter((symbol) => symbol.dimensions.length > 0);
+  const deviceGlobalBuffers = deviceGlobalMemorySymbols(ir);
   const atomicStorage = semanticAtomicStorageNames(ir.operations);
   const bindings: WgslKernelBindingInput[] = ir.params
     .filter((param) => param.addressSpace === "storage")
@@ -86,6 +87,15 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
       name: constant.name,
       valueType: wgslBindingType(constant.valueType),
       access: "read",
+      binding: bindings.length,
+    });
+  }
+  for (const global of deviceGlobalBuffers) {
+    bindings.push({
+      kind: "storage",
+      name: global.name,
+      valueType: wgslBindingType(global.valueType),
+      access: "read_write",
       binding: bindings.length,
     });
   }
@@ -108,6 +118,9 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
   }
   for (const constant of constantBuffers) {
     lines.push(`@group(0) @binding(${bindingIndexFor(bindings, constant.name)}) var<storage, read> ${nameFor(constant.name, names)}: array<${wgslScalar(constant.valueType)}>;`);
+  }
+  for (const global of deviceGlobalBuffers) {
+    lines.push(`@group(0) @binding(${bindingIndexFor(bindings, global.name)}) var<storage, read_write> ${nameFor(global.name, names)}: array<${wgslScalar(global.valueType)}>;`);
   }
   for (const shared of sharedMemorySymbols(ir)) {
     lines.push(`var<workgroup> ${nameFor(shared.name, names)}: ${emitSharedType(shared)};`);
@@ -209,6 +222,7 @@ function semanticWgslParamSupported(param: SemanticKernelIrModule["params"][numb
 function semanticWgslMemorySymbolSupported(symbol: SemanticKernelIrModule["memory"][number]): boolean {
   if (symbol.kind === "local" || symbol.kind === "shared") return true;
   if (symbol.kind === "constant") return !symbol.initialized && semanticWgslScalarTypeSupported(symbol.valueType);
+  if (symbol.kind === "device-global") return semanticWgslScalarTypeSupported(symbol.valueType);
   return false;
 }
 
@@ -254,9 +268,10 @@ function semanticWgslLoopInitSupported(
 }
 
 function semanticWgslMemoryRefSupported(ref: SemanticMemoryRef): boolean {
-  if (ref.addressSpace !== "storage" && ref.addressSpace !== "shared" && ref.addressSpace !== "constant" && ref.addressSpace !== "local") return false;
+  if (ref.addressSpace !== "storage" && ref.addressSpace !== "shared" && ref.addressSpace !== "constant" && ref.addressSpace !== "device-global" && ref.addressSpace !== "local") return false;
   if (ref.fields.length > 0) return false;
   if ((ref.addressSpace === "storage" || ref.addressSpace === "constant") && ref.indices.length !== 1) return false;
+  if (ref.addressSpace === "device-global" && ref.indices.length > 1) return false;
   if (ref.addressSpace === "local" && ref.indices.length === 0) return false;
   return ref.indices.every((index) => semanticWgslExpressionSupported(index, "scalar"));
 }
@@ -307,6 +322,7 @@ function semanticWgslExpressionSupported(expression: SemanticExpression, expecte
       return expression.addressSpace === "uniform" ||
         expression.addressSpace === "local" ||
         expression.addressSpace === "constant" ||
+        expression.addressSpace === "device-global" ||
         expression.addressSpace === "shared" ||
         BUILTIN_VECTOR_NAMES.has(expression.name);
     case "member":
@@ -493,6 +509,7 @@ function emitSemanticExpression(
     case "symbol":
       if (expression.addressSpace === "uniform") return `${UNIFORM_PARAMS_NAME}.${nameFor(expression.name, names)}`;
       if (expression.addressSpace === "constant") return `${UNIFORM_PARAMS_NAME}.${nameFor(expression.name, names)}`;
+      if (expression.addressSpace === "device-global") return `${nameFor(expression.name, names)}[0u]`;
       return nameFor(expression.name, names);
     case "member":
       return emitSemanticMember(expression, ir, names);
@@ -657,6 +674,11 @@ function emitSemanticMemoryRef(
     if (ref.indices.length !== 1) throw semanticWgslError("semantic WGSL supports 1D constant refs only", ref.span);
     return `${nameFor(ref.base, names)}[${emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32")}]`;
   }
+  if (ref.addressSpace === "device-global") {
+    if (ref.indices.length > 1) throw semanticWgslError("semantic WGSL supports scalar/1D device globals only", ref.span);
+    const index = ref.indices[0] ? emitSemanticExpressionAs(ref.indices[0], ir, names, "u32") : "0u";
+    return `${nameFor(ref.base, names)}[${index}]`;
+  }
   if (ref.addressSpace === "local") {
     const local = localMemorySymbols(ir).find((symbol) => symbol.name === ref.base);
     if (!local) throw semanticWgslError(`unknown local memory '${ref.base}'`, ref.span);
@@ -673,7 +695,7 @@ function emitSemanticMemoryRef(
 
 function memoryRefFromIndexExpression(expression: Extract<SemanticExpression, { readonly kind: "index" }>): SemanticMemoryRef | undefined {
   const flattened = flattenMemoryRef(expression);
-  if (!flattened || (flattened.base.addressSpace !== "storage" && flattened.base.addressSpace !== "shared" && flattened.base.addressSpace !== "constant" && flattened.base.addressSpace !== "local")) return undefined;
+  if (!flattened || (flattened.base.addressSpace !== "storage" && flattened.base.addressSpace !== "shared" && flattened.base.addressSpace !== "constant" && flattened.base.addressSpace !== "device-global" && flattened.base.addressSpace !== "local")) return undefined;
   return {
     base: flattened.base.name,
     addressSpace: flattened.base.addressSpace,
@@ -705,6 +727,10 @@ function sharedMemorySymbols(ir: SemanticKernelIrModule): readonly SemanticKerne
 
 function constantMemorySymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["memory"][number][] {
   return ir.memory.filter((symbol) => symbol.kind === "constant");
+}
+
+function deviceGlobalMemorySymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["memory"][number][] {
+  return ir.memory.filter((symbol) => symbol.kind === "device-global");
 }
 
 function localMemorySymbols(ir: SemanticKernelIrModule): readonly SemanticKernelIrModule["memory"][number][] {

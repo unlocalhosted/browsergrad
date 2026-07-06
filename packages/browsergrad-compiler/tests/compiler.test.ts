@@ -1712,14 +1712,25 @@ __global__ void globals_scalar(uint* data, uint* out) {
       { buffers: { data: new Uint32Array([5]), out: new Uint32Array(2) } },
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { data: new Uint32Array([5]), out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
 
     expect(compiled.ast.deviceGlobals.map((global) => global.name)).toEqual(["numErrors", "errorFound"]);
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([3, 1]);
+    expect([...semanticResult.buffers.numErrors as Uint32Array]).toEqual([3]);
+    expect([...semanticResult.buffers.errorFound as Uint32Array]).toEqual([1]);
     expect([...result.buffers.out as Uint32Array]).toEqual([3, 1]);
     expect([...result.buffers.numErrors as Uint32Array]).toEqual([3]);
     expect([...result.buffers.errorFound as Uint32Array]).toEqual([1]);
     expect(compiled.wgsl).toContain("var<storage, read_write> numErrors: array<u32>;");
     expect(compiled.wgsl).toContain("var<storage, read_write> errorFound: array<u32>;");
-    expect(compiled.wgsl).toContain("numErrors[0u] += 1u");
+    expect(compiled.wgsl).toContain("numErrors[0u] = (numErrors[0u] + 1u)");
   });
 
   it("supports __device__ arrays as storage-backed device pointer arguments", () => {
