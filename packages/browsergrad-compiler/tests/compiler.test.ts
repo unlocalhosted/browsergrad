@@ -11650,10 +11650,26 @@ __global__ void scale(const float *x, float *y, int n) {
       },
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([1, 2, 3, 4]),
+          y: new Float32Array(4),
+        },
+        constants: { scaleFactor: 3 },
+        scalars: { n: 4 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
 
     expect(backendIr(compiled).constants.map((constant) => constant.name)).toEqual(["scaleFactor"]);
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("scaleFactor: f32");
     expect(compiled.wgsl).toContain("bg_uniforms.scaleFactor");
+    expect([...semanticResult.buffers.y as Float32Array]).toEqual([3, 6, 9, 12]);
     expect([...result.buffers.y as Float32Array]).toEqual([3, 6, 9, 12]);
   });
 
@@ -11688,12 +11704,24 @@ __global__ void apply(float *x) {
       },
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: { x: new Float32Array([2, 4]) },
+        constants: { coeffs: new Float32Array([10, 20]) },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
 
-    expect(compiled.wgsl).toContain("var<storage, read> coeffs: array<f32, 2>");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("var<storage, read> coeffs: array<f32>");
     expect(compiled.wgslProgram.bindings).toContainEqual(expect.objectContaining({
       name: "coeffs",
       access: "read",
     }));
+    expect([...semanticResult.buffers.x as Float32Array]).toEqual([20, 80]);
     expect([...result.buffers.x as Float32Array]).toEqual([20, 80]);
   });
 

@@ -51,6 +51,7 @@ interface Vector3 {
 interface SemanticReferenceContext {
   readonly compiled: CompiledCudaLiteKernel;
   readonly buffers: Map<string, WgslTypedArray>;
+  readonly constants: Map<string, number | WgslTypedArray>;
   readonly scalars: Readonly<Record<string, number>>;
   readonly locals: Map<string, SemanticValue>;
   readonly blockIdx: Vector3;
@@ -71,7 +72,7 @@ interface MutableTrace {
 
 export function canRunCompiledKernelSemanticReference(compiled: CompiledCudaLiteKernel): boolean {
   return compiled.kernelIr.params.every(semanticReferenceParamSupported) &&
-    compiled.kernelIr.memory.every((symbol) => symbol.kind === "local" || symbol.kind === "shared") &&
+    compiled.kernelIr.memory.every(semanticReferenceMemorySymbolSupported) &&
     unsupportedSemanticReferenceOperation(compiled.kernelIr.operations, compiled) === undefined;
 }
 
@@ -86,6 +87,7 @@ export function runCompiledKernelSemanticReference(
   validateSemanticReferenceInput(compiled, input);
 
   const buffers = cloneBuffers(input.buffers);
+  const constants = semanticReferenceConstants(compiled, input);
   const traces: MutableTrace[] = [];
   const blockDim = vectorFromTuple(launch.blockDim);
   const gridDim = vectorFromTuple(launch.gridDim);
@@ -108,6 +110,7 @@ export function runCompiledKernelSemanticReference(
               execSemanticOperations(compiled.kernelIr.operations, {
                 compiled,
                 buffers,
+                constants,
                 scalars,
                 locals: new Map(),
                 blockIdx: { x: bx, y: by, z: bz },
@@ -185,6 +188,12 @@ function semanticReferenceParamSupported(param: CompiledCudaLiteKernel["kernelIr
   return false;
 }
 
+function semanticReferenceMemorySymbolSupported(symbol: CompiledCudaLiteKernel["kernelIr"]["memory"][number]): boolean {
+  if (symbol.kind === "local" || symbol.kind === "shared") return true;
+  if (symbol.kind === "constant") return !symbol.initialized && semanticReferenceScalarTypeSupported(symbol.valueType);
+  return false;
+}
+
 function semanticReferenceLoopInitSupported(
   init: SemanticKernelIrOperation | SemanticExpression,
   compiled: CompiledCudaLiteKernel,
@@ -199,7 +208,7 @@ function semanticReferenceScalarTypeSupported(valueType: CudaLiteScalarType | un
 }
 
 function semanticReferenceMemoryRefSupported(ref: SemanticMemoryRef): boolean {
-  return ref.addressSpace === "storage" &&
+  return (ref.addressSpace === "storage" || ref.addressSpace === "constant") &&
     ref.indices.length === 1 &&
     ref.fields.length === 0 &&
     semanticReferenceExpressionSupported(ref.indices[0]!, "scalar");
@@ -249,7 +258,7 @@ function semanticReferenceExpressionSupported(expression: SemanticExpression, ex
     case "literal":
       return typeof expression.value === "number";
     case "symbol":
-      return expression.addressSpace === "uniform" || expression.addressSpace === "local" || isBuiltinVectorSymbol(expression.name);
+      return expression.addressSpace === "uniform" || expression.addressSpace === "local" || expression.addressSpace === "constant" || isBuiltinVectorSymbol(expression.name);
     case "member":
       return isBuiltinVectorMember(expression);
     case "index":
@@ -543,10 +552,10 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
     indices.unshift(target.index);
     target = target.target;
   }
-  if (target.kind !== "symbol" || target.addressSpace !== "storage") return undefined;
+  if (target.kind !== "symbol" || (target.addressSpace !== "storage" && target.addressSpace !== "constant")) return undefined;
   return {
     base: target.name,
-    addressSpace: "storage",
+    addressSpace: target.addressSpace,
     ...(expression.valueType === undefined ? {} : { valueType: expression.valueType }),
     indices,
     fields: [],
@@ -555,8 +564,10 @@ function memoryRefFromIndexExpression(expression: SemanticExpression): SemanticM
 }
 
 function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): number {
-  const buffer = context.buffers.get(ref.base);
-  if (!buffer) throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
+  const buffer = ref.addressSpace === "constant"
+    ? context.constants.get(ref.base)
+    : context.buffers.get(ref.base);
+  if (!buffer || typeof buffer === "number") throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
   const index = flatIndex(ref, context);
   const ok = index >= 0 && index < buffer.length;
   const value = ok ? Number(buffer[index]) : 0;
@@ -565,6 +576,7 @@ function readMemory(ref: SemanticMemoryRef, context: SemanticReferenceContext): 
 }
 
 function writeMemory(ref: SemanticMemoryRef, value: number, context: SemanticReferenceContext): void {
+  if (ref.addressSpace === "constant") throw semanticReferenceError(`cannot write constant memory '${ref.base}'`, ref.span);
   const buffer = context.buffers.get(ref.base);
   if (!buffer) throw semanticReferenceError(`missing buffer input '${ref.base}'`, ref.span);
   const index = flatIndex(ref, context);
@@ -587,6 +599,8 @@ function symbolValue(name: string, context: SemanticReferenceContext, span: Sour
   if (context.locals.has(name)) return context.locals.get(name)!;
   const scalar = context.scalars[name];
   if (scalar !== undefined) return scalar;
+  const constant = context.constants.get(name);
+  if (typeof constant === "number") return constant;
   const storageParam = context.compiled.kernelIr.params.find((param) => param.name === name && param.addressSpace === "storage");
   if (storageParam) return context.buffers.has(name) ? 1 : 0;
   throw semanticReferenceError(`unknown semantic reference symbol '${name}'`, span);
@@ -659,6 +673,26 @@ function validateSemanticReferenceInput(compiled: CompiledCudaLiteKernel, input:
       throw semanticReferenceError(`semantic reference does not support ${param.addressSpace} parameter '${param.name}'`, param.span);
     }
   }
+  for (const constant of compiled.kernelIr.memory.filter((symbol) => symbol.kind === "constant")) {
+    if (constant.initialized) continue;
+    const value = input.constants?.[constant.name];
+    if (value === undefined) throw semanticReferenceError(`missing constant input '${constant.name}'`, constant.span);
+    if (constant.dimensions.length === 0 && typeof value !== "number") {
+      throw semanticReferenceError(`constant '${constant.name}' expects scalar number`, constant.span);
+    }
+    if (constant.dimensions.length > 0 && typeof value === "number") {
+      throw semanticReferenceError(`constant '${constant.name}' expects typed array`, constant.span);
+    }
+  }
+}
+
+function semanticReferenceConstants(compiled: CompiledCudaLiteKernel, input: CompiledKernelInput): Map<string, number | WgslTypedArray> {
+  const constants = new Map<string, number | WgslTypedArray>();
+  for (const constant of compiled.kernelIr.memory.filter((symbol) => symbol.kind === "constant")) {
+    const value = input.constants?.[constant.name];
+    if (value !== undefined) constants.set(constant.name, value);
+  }
+  return constants;
 }
 
 function cloneBuffers(buffers: Readonly<Record<string, WgslTypedArray>>): Map<string, WgslTypedArray> {
