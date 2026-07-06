@@ -6873,6 +6873,30 @@ __global__ void cuComplexRobust(cuComplex *a, cuComplex *b, float *out) {
     expect(out[5]).toBeCloseTo(0.5, 5);
   });
 
+  it("lowers cuComplex fused multiply-add natively", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void cuComplexFma(cuComplex *a, cuComplex *b, cuComplex *d) {
+  int i = threadIdx.x;
+  d[i] = cuCfmaf(a[i], b[i], d[i]);
+}`, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: {
+          a: new Float32Array([1, 2, 3, 4]),
+          b: new Float32Array([5, 6, 7, 8]),
+          d: new Float32Array([9, 10, 11, 12]),
+        },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-call");
+    expect(compiled.wgsl).toContain("d[u32(i)] = vec2<f32>");
+    expect(compiled.wgsl).not.toContain("unsupported CUDA-lite call");
+    expect([...result.buffers.d as Float32Array]).toEqual([2, 26, 0, 64]);
+  });
+
   it("lowers supported inline PTX fma statements", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void asmFma(const float *A, const float *B, float *out) {

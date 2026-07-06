@@ -2578,6 +2578,10 @@ function evalCuComplexBuiltin(
   if (name === "cuCsubf") return { kind: "complex64", x: a.x - b.x, y: a.y - b.y };
   if (name === "cuCmulf") return { kind: "complex64", x: a.x * b.x - a.y * b.y, y: a.x * b.y + a.y * b.x };
   if (name === "cuCdivf") return divCuComplex(a, b);
+  if (name === "cuCfmaf") {
+    const d = valueAsComplex(evalExpression(expression.args[2]!, context), name);
+    return { kind: "complex64", x: a.x * b.x - a.y * b.y + d.x, y: a.x * b.y + a.y * b.x + d.y };
+  }
   return undefined;
 }
 
@@ -2600,7 +2604,8 @@ function isCuComplexBuiltin(name: string | undefined): boolean {
     name === "cuCaddf" ||
     name === "cuCsubf" ||
     name === "cuCmulf" ||
-    name === "cuCdivf";
+    name === "cuCdivf" ||
+    name === "cuCfmaf";
 }
 
 function matrixTileRowsCols(tile: MatrixTileResolvedSpec): readonly [number, number] {

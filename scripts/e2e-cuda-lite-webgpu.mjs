@@ -2109,6 +2109,11 @@ __global__ void complexCuRobust(cuComplex *a, cuComplex *b, float *out) {
   out[i * 3 + 1] = cuCrealf(q) * 1.0e20f;
   out[i * 3 + 2] = cuCimagf(q) * 1.0e20f;
 }`,
+  complexCuFma: `
+__global__ void complexCuFma(cuComplex *a, cuComplex *b, cuComplex *d) {
+  int i = threadIdx.x;
+  d[i] = cuCfmaf(a[i], b[i], d[i]);
+}`,
   subgroupScalarCompat: `
 __global__ void subgroupScalarCompat(float *x) {
   int idx = threadIdx.x;
@@ -12310,6 +12315,21 @@ const html = String.raw`<!doctype html>
             output: "out",
             tolerance: 1e-5,
             expectedOutput: { type: "Float32Array", data: [Math.SQRT2, 1, 0, Math.SQRT2, -1.5, 0.5] },
+          },
+          {
+            name: "complex:cu-helper-fma",
+            source: SOURCES.complexCuFma,
+            options: { workgroupSize: [2, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+            input: () => ({
+              buffers: {
+                a: new Float32Array([1, 2, 3, 4]),
+                b: new Float32Array([5, 6, 7, 8]),
+                d: new Float32Array([9, 10, 11, 12]),
+              },
+            }),
+            output: "d",
+            expectedOutput: { type: "Float32Array", data: [2, 26, 0, 64] },
           },
           {
             name: "compat:subgroup-scalar-mode",

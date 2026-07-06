@@ -220,6 +220,7 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cuCsubf", [2, 2]],
   ["cuCmulf", [2, 2]],
   ["cuCdivf", [2, 2]],
+  ["cuCfmaf", [3, 3]],
   ["cudaDeviceSynchronize", [0, 0]],
   ["cudaStreamCreate", [1, 1]],
   ["cudaStreamCreateWithFlags", [2, 2]],
@@ -3253,7 +3254,8 @@ function isCuComplexBuiltin(callName: string): boolean {
     callName === "cuCaddf" ||
     callName === "cuCsubf" ||
     callName === "cuCmulf" ||
-    callName === "cuCdivf";
+    callName === "cuCdivf" ||
+    callName === "cuCfmaf";
 }
 
 function isCuComplexScalarBuiltin(callName: string): boolean {

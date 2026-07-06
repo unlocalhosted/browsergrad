@@ -5592,7 +5592,8 @@ function cuComplexCallReturnType(name: string | undefined): CudaLiteScalarType |
     name === "cuCaddf" ||
     name === "cuCsubf" ||
     name === "cuCmulf" ||
-    name === "cuCdivf"
+    name === "cuCdivf" ||
+    name === "cuCfmaf"
   ) {
     return "complex64";
   }
@@ -6552,6 +6553,12 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       const a = args[0] ?? "vec2<f32>()";
       const b = args[1] ?? "vec2<f32>()";
       return `bg_cuCdivf(${a}, ${b})`;
+    }
+    case "cuCfmaf": {
+      const a = args[0] ?? "vec2<f32>()";
+      const b = args[1] ?? "vec2<f32>()";
+      const d = args[2] ?? "vec2<f32>()";
+      return `vec2<f32>(((${a}).x * (${b}).x - (${a}).y * (${b}).y + (${d}).x), ((${a}).x * (${b}).y + (${a}).y * (${b}).x + (${d}).y))`;
     }
     case "curand_init": {
       const helper = curandStateAddressSpace(expression.args[3], context) === "storage" ? "bg_curand_init_storage" : "bg_curand_init";
