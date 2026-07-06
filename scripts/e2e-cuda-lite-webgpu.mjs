@@ -57,6 +57,7 @@ const autoCorpusSmokeCache = args.get("--auto-corpus-smoke-cache") === "true";
 const caseFilters = parseCaseFilters(process.argv.slice(2));
 const caseTimeoutMs = parseNonNegativeInteger(args.get("--case-timeout-ms") ?? "0", "--case-timeout-ms");
 const deviceRecycleInterval = parseNonNegativeInteger(args.get("--device-recycle-interval") ?? "128", "--device-recycle-interval");
+const browserRetries = parseNonNegativeInteger(args.get("--browser-retries") ?? "1", "--browser-retries");
 const warmup = parseNonNegativeInteger(args.get("--warmup") ?? "0", "--warmup");
 const repeat = parsePositiveInteger(args.get("--repeat") ?? "1", "--repeat");
 const expectWarmSpeedupMin = args.has("--expect-warm-speedup-min")
@@ -22008,37 +22009,12 @@ const server = await createServer({
   }],
 });
 
-let browser;
 try {
   await server.listen();
   const urls = server.resolvedUrls?.local ?? [];
   const baseUrl = urls[0];
   if (!baseUrl) throw new Error("Vite did not expose a local URL");
-  browser = await chromium.launch({
-    headless: !headed,
-    args: ["--enable-unsafe-webgpu"],
-  });
-  const page = await browser.newPage();
-  if (progress) {
-    page.on("console", (message) => {
-      const text = message.text();
-      if (text.startsWith("__BG_PROGRESS__")) {
-        const payload = text.slice("__BG_PROGRESS__".length);
-        console.error(payload);
-        if (progressPath && progressPath !== "true") {
-          appendTextFileCreatingParents(path.resolve(progressPath), `${payload}\n`);
-        }
-      }
-    });
-  }
-  await page.goto(new URL("/__bg_cuda_lite_e2e__", baseUrl).href);
-  const result = await page.evaluate(() => globalThis.__bgRunE2e());
-  const report = {
-    tool: "browsergrad-cuda-lite-webgpu-e2e",
-    bundle,
-    userAgent: await page.evaluate(() => navigator.userAgent),
-    ...result,
-  };
+  const report = await runBrowserReportWithRetry(baseUrl);
   if (jsonPath && jsonPath !== "true") {
     writeTextFileCreatingParents(path.resolve(jsonPath), JSON.stringify(report, null, 2));
   }
@@ -22083,8 +22059,70 @@ try {
     writeTextFileCreatingParents(path.resolve(markdownPath), markdownReport(report));
   }
 } finally {
-  if (browser) await browser.close();
   await server.close();
+}
+
+async function runBrowserReportWithRetry(baseUrl) {
+  let lastError;
+  for (let attempt = 0; attempt <= browserRetries; attempt++) {
+    try {
+      return await runBrowserReport(baseUrl);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= browserRetries || !isTransientBrowserRunError(error)) throw error;
+      const payload = JSON.stringify({
+        event: "browser-retry",
+        attempt: attempt + 1,
+        maxRetries: browserRetries,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      console.error(payload);
+      if (progressPath && progressPath !== "true") {
+        appendTextFileCreatingParents(path.resolve(progressPath), `${payload}\n`);
+      }
+    }
+  }
+  throw lastError ?? new Error("WebGPU browser report failed without an error");
+}
+
+async function runBrowserReport(baseUrl) {
+  let browser;
+  try {
+    browser = await chromium.launch({
+      headless: !headed,
+      args: ["--enable-unsafe-webgpu"],
+    });
+    const page = await browser.newPage();
+    if (progress) {
+      page.on("console", (message) => {
+        const text = message.text();
+        if (text.startsWith("__BG_PROGRESS__")) {
+          const payload = text.slice("__BG_PROGRESS__".length);
+          console.error(payload);
+          if (progressPath && progressPath !== "true") {
+            appendTextFileCreatingParents(path.resolve(progressPath), `${payload}\n`);
+          }
+        }
+      });
+    }
+    await page.goto(new URL("/__bg_cuda_lite_e2e__", baseUrl).href);
+    const result = await page.evaluate(() => globalThis.__bgRunE2e());
+    return {
+      tool: "browsergrad-cuda-lite-webgpu-e2e",
+      bundle,
+      userAgent: await page.evaluate(() => navigator.userAgent),
+      ...result,
+    };
+  } finally {
+    if (browser) await browser.close();
+  }
+}
+
+function isTransientBrowserRunError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("Execution context was destroyed") ||
+    message.includes("Target page, context or browser has been closed") ||
+    message.includes("Page crashed");
 }
 
 function writeLastFailures(root, report, argv) {
