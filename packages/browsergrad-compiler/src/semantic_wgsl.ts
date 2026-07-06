@@ -243,6 +243,9 @@ function unsupportedSemanticWgslOperation(
       case "return":
         if (operation.value) return operation;
         break;
+      case "break":
+      case "continue":
+        break;
       default:
         return operation;
     }
@@ -418,7 +421,7 @@ function semanticWgslExpressionSupported(expression: SemanticExpression, expecte
         semanticWgslExpressionSupported(expression.consequent, expected) &&
         semanticWgslExpressionSupported(expression.alternate, expected);
     case "assignment":
-      return expression.operator === "=" &&
+      return semanticWgslAssignmentOperatorSupported(expression.operator) &&
         expression.target.kind === "symbol" &&
         expression.target.addressSpace === "local" &&
         semanticWgslExpressionSupported(expression.value, "scalar");
@@ -469,6 +472,7 @@ function emitSemanticOperation(
     case "atomic":
       return [`${prefix}${emitSemanticAtomic(operation, ir, names)};`];
     case "expression":
+      if (operation.expression.kind === "assignment") return [`${prefix}${emitSemanticAssignmentStatement(operation.expression, ir, names)};`];
       return [`${prefix}${emitSemanticExpression(operation.expression, ir, names)};`];
     case "branch": {
       const lines = [`${prefix}if (${emitTruthiness(operation.condition, ir, names)}) {`];
@@ -487,6 +491,10 @@ function emitSemanticOperation(
     case "return":
       if (operation.value) throw semanticWgslError("semantic WGSL supports kernel return without value only", operation.span);
       return [`${prefix}return;`];
+    case "break":
+      return [`${prefix}break;`];
+    case "continue":
+      return [`${prefix}continue;`];
     default:
       throw semanticWgslError(`semantic WGSL does not support ${operation.kind}`, operation.span);
   }
@@ -515,6 +523,19 @@ function emitSemanticStore(
   if (operation.operator === "+=") return `${target} = (${target} + ${value})`;
   if (operation.operator === "-=") return `${target} = (${target} - ${value})`;
   throw semanticWgslError(`semantic WGSL does not support assignment '${operation.operator}'`, operation.span);
+}
+
+function emitSemanticAssignmentStatement(
+  expression: Extract<SemanticExpression, { readonly kind: "assignment" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+): string {
+  if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local scalar assignment targets only", expression.target.span);
+  const target = nameFor(expression.target.name, names);
+  const value = emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(expression.target.valueType));
+  if (expression.operator === "+=") return `${target} += ${value}`;
+  if (expression.operator === "-=") return `${target} -= ${value}`;
+  return `${target} = ${value}`;
 }
 
 function emitLocalArrayInit(
@@ -576,7 +597,7 @@ function emitSemanticLoop(
   if (operation.loopKind === "for") {
     const init = operation.init ? emitSemanticLoopInit(operation.init, ir, names) : "";
     const condition = operation.condition ? emitTruthiness(operation.condition, ir, names) : "true";
-    const update = operation.update ? emitSemanticExpression(operation.update, ir, names) : "";
+    const update = operation.update ? emitSemanticLoopUpdate(operation.update, ir, names) : "";
     return [
       `${prefix}for (${init}; ${condition}; ${update}) {`,
       ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1),
@@ -593,9 +614,21 @@ function emitSemanticLoop(
   return [
     `${prefix}loop {`,
     ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1),
-    `${"  ".repeat(indentLevel + 1)}if (!(${operation.condition ? emitTruthiness(operation.condition, ir, names) : "false"})) { break; }`,
+    `${"  ".repeat(indentLevel + 1)}continuing {`,
+    `${"  ".repeat(indentLevel + 2)}break if !(${operation.condition ? emitTruthiness(operation.condition, ir, names) : "false"});`,
+    `${"  ".repeat(indentLevel + 1)}}`,
     `${prefix}}`,
   ];
+}
+
+function emitSemanticLoopUpdate(
+  update: SemanticExpression,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+): string {
+  return update.kind === "assignment"
+    ? emitSemanticAssignmentStatement(update, ir, names)
+    : emitSemanticExpression(update, ir, names);
 }
 
 function emitSemanticLoopInit(
@@ -651,7 +684,13 @@ function emitSemanticExpression(
       return `select(${emitSemanticExpression(expression.alternate, ir, names)}, ${emitSemanticExpression(expression.consequent, ir, names)}, ${emitTruthiness(expression.condition, ir, names)})`;
     case "assignment":
       if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local scalar assignment targets only", expression.target.span);
-      return `(${nameFor(expression.target.name, names)} = ${emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(expression.valueType))})`;
+      {
+        const target = nameFor(expression.target.name, names);
+        const value = emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(expression.valueType));
+        if (expression.operator === "+=") return `(${target} += ${value})`;
+        if (expression.operator === "-=") return `(${target} -= ${value})`;
+        return `(${target} = ${value})`;
+      }
     case "update":
       return emitSemanticUpdate(expression, names);
     case "sequence":

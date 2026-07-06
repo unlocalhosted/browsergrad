@@ -21,6 +21,7 @@ import type {
 
 type SemanticValue = number | Vector3 | number[];
 type SemanticAtomicOp = "add" | "sub" | "min" | "max" | "and" | "or" | "xor" | "exchange" | "cas";
+type SemanticControl = "fallthrough" | "return" | "break" | "continue";
 
 const SEMANTIC_ATOMIC_OPS = new Map<string, SemanticAtomicOp>([
   ["atomicAdd", "add"],
@@ -188,6 +189,9 @@ function unsupportedSemanticReferenceOperation(
         break;
       case "return":
         if (operation.value) return operation;
+        break;
+      case "break":
+      case "continue":
         break;
       default:
         return operation;
@@ -394,7 +398,7 @@ function isBuiltinVectorMember(expression: Extract<SemanticExpression, { kind: "
 function execSemanticOperations(
   operations: readonly SemanticKernelIrOperation[],
   context: SemanticReferenceContext,
-): boolean {
+): SemanticControl {
   for (const operation of operations) {
     switch (operation.kind) {
       case "declare":
@@ -417,20 +421,31 @@ function execSemanticOperations(
         break;
       case "branch":
         if (truthy(evalNumber(operation.condition, context))) {
-          if (execSemanticOperations(operation.consequent, context)) return true;
-        } else if (execSemanticOperations(operation.alternate, context)) return true;
+          const control = execSemanticOperations(operation.consequent, context);
+          if (control !== "fallthrough") return control;
+        } else {
+          const control = execSemanticOperations(operation.alternate, context);
+          if (control !== "fallthrough") return control;
+        }
         break;
       case "loop":
-        if (execSemanticLoop(operation, context)) return true;
+        {
+          const control = execSemanticLoop(operation, context);
+          if (control !== "fallthrough") return control;
+        }
         break;
       case "return":
         if (operation.value) throw semanticReferenceError("semantic reference supports kernel return without value only", operation.span);
-        return true;
+        return "return";
+      case "break":
+        return "break";
+      case "continue":
+        return "continue";
       default:
         throw semanticReferenceError(`semantic reference does not support ${operation.kind}`, operation.span);
     }
   }
-  return false;
+  return "fallthrough";
 }
 
 function storeValue(
@@ -507,27 +522,33 @@ function semanticAtomicValue(
 function execSemanticLoop(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "loop" }>,
   context: SemanticReferenceContext,
-): boolean {
+): SemanticControl {
   if (operation.loopKind === "for") {
     if (operation.init) execSemanticLoopInit(operation.init, context);
     for (let guard = 0; operation.condition === undefined || truthy(evalNumber(operation.condition, context)); guard++) {
       if (guard > 1_000_000) throw semanticReferenceError("semantic reference loop exceeded iteration cap", operation.span);
-      if (execSemanticOperations(operation.body, context)) return true;
+      const control = execSemanticOperations(operation.body, context);
+      if (control === "return") return control;
+      if (control === "break") return "fallthrough";
       if (operation.update) evalNumber(operation.update, context);
     }
-    return false;
+    return "fallthrough";
   }
   if (operation.loopKind === "while") {
     for (let guard = 0; operation.condition === undefined || truthy(evalNumber(operation.condition, context)); guard++) {
       if (guard > 1_000_000) throw semanticReferenceError("semantic reference loop exceeded iteration cap", operation.span);
-      if (execSemanticOperations(operation.body, context)) return true;
+      const control = execSemanticOperations(operation.body, context);
+      if (control === "return") return control;
+      if (control === "break") return "fallthrough";
     }
-    return false;
+    return "fallthrough";
   }
   for (let guard = 0; ; guard++) {
     if (guard > 1_000_000) throw semanticReferenceError("semantic reference loop exceeded iteration cap", operation.span);
-    if (execSemanticOperations(operation.body, context)) return true;
-    if (!operation.condition || !truthy(evalNumber(operation.condition, context))) return false;
+    const control = execSemanticOperations(operation.body, context);
+    if (control === "return") return control;
+    if (control === "break") return "fallthrough";
+    if (!operation.condition || !truthy(evalNumber(operation.condition, context))) return "fallthrough";
   }
 }
 

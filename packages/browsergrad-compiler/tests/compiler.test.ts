@@ -424,6 +424,57 @@ __global__ void window3(const float* x, float* y, int stride) {
     expect([...referenceResult.buffers.y as Float32Array]).toEqual([111, 222, 333, 444]);
   });
 
+  it("runs loop break and continue through semantic reference and WGSL paths", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void loopControl(int* out) {
+  int acc = 0;
+  for (int i = 0; i < 8; i++) {
+    if (i == 2) continue;
+    if (i == 5) break;
+    acc += i;
+  }
+  out[0] = acc;
+}
+`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Int32Array(1) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const referenceResult = runCompiledKernelReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("continue;");
+    expect(compiled.wgsl).toContain("break;");
+    expect([...semanticResult.buffers.out as Int32Array]).toEqual([8]);
+    expect([...referenceResult.buffers.out as Int32Array]).toEqual([8]);
+  });
+
+  it("runs do-while continue through semantic reference and WGSL continuing checks", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void doWhileContinue(int* out) {
+  int i = 0;
+  int acc = 0;
+  do {
+    i++;
+    if (i == 2) continue;
+    acc += i;
+  } while (i < 4);
+  out[0] = acc;
+}
+`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Int32Array(1) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+    const referenceResult = runCompiledKernelReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("continuing {");
+    expect(compiled.wgsl).toContain("break if !((u32(i) < 4u));");
+    expect([...semanticResult.buffers.out as Int32Array]).toEqual([8]);
+    expect([...referenceResult.buffers.out as Int32Array]).toEqual([8]);
+  });
+
   it("emits simple shared memory and barriers from semantic IR", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void sharedReverse(float* out) {
@@ -3130,7 +3181,7 @@ __global__ void whileLoop(int *out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("while ((i < 5))");
+    expect(compiled.wgsl).toContain("while ((u32(i) < 5u))");
     expect(compiled.wgsl).toContain("continue;");
     expect([...result.buffers.out as Int32Array]).toEqual([13]);
   });
@@ -3169,11 +3220,11 @@ __global__ void doWhileContinue(int *out) {
     );
 
     expect(compiled.wgsl).toContain("loop {");
-    expect(compiled.wgsl).toContain("if (!((i < 4))) { break; }");
+    expect(compiled.wgsl).toContain("break if !((u32(i) < 4u));");
     expect([...result.buffers.out as Int32Array]).toEqual([6]);
     expect(withContinue.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-do-while-continue");
     expect(withContinue.wgsl).toContain("continuing {");
-    expect(withContinue.wgsl).toContain("break if !((i < 4));");
+    expect(withContinue.wgsl).toContain("break if !((u32(i) < 4u));");
     expect([...continueResult.buffers.out as Int32Array]).toEqual([8]);
   });
 
