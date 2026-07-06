@@ -114,9 +114,9 @@ const executionStatus = summarizeCudaWebGpuExecutionPlan(
 The same `features` object should feed both capability labels and compiler
 options. Platform code should not duplicate `shader-f16`, subgroup, or
 compatibility flag strings. Use `executionStatus`, not
-`compiled.loweringPlan.canRunOnGpu`, for learner-facing WebGPU readiness because
-host-orchestrated plans can run real WebGPU even when direct lowering is
-conservatively marked as unsupported.
+`compiled.loweringPlan.canDirectLowerToWgsl`, for learner-facing WebGPU
+readiness because host-orchestrated plans can run real WebGPU even when direct
+lowering is conservatively marked as unsupported.
 Use `assignmentRubricKind()` to route Python, JavaScript, and unknown rubric
 paths to the right execution substrate.
 Use `assignmentRunnerRoute(plan)` when the platform wants one branch key:

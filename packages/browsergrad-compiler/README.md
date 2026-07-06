@@ -69,7 +69,7 @@ const compiled = compilerCache.compile(
 );
 console.log(compiled.semantic.kernelName);
 console.log(compiled.kernelIr.kind);
-console.log(compiled.loweringPlan.canRunOnGpu);
+console.log(compiled.loweringPlan.canDirectLowerToWgsl);
 const input = {
   buffers: {
     x: new Float32Array([1, 2, 3, 4]),
@@ -93,8 +93,8 @@ Compiler results expose the production compiler contracts:
   required features.
 - `kernelIr`: backend-neutral semantic Kernel IR. New compiler passes should
   target this path.
-- `loweringPlan`: diagnostic compatibility summary. For execution readiness,
-  prefer `createCudaWebGpuExecutionPlan()` and
+- `loweringPlan`: diagnostic/direct-WGSL compatibility summary. For execution
+  readiness, prefer `createCudaWebGpuExecutionPlan()` and
   `summarizeCudaWebGpuExecutionPlan()`.
 
 Examples live in `examples/`: SAXPY, guarded map, and shared-memory tiled
@@ -105,9 +105,9 @@ from `detectKernelFeatures()` into the compiler. This keeps `shader-f16`,
 subgroup, and compatibility-mode gates aligned with the runtime instead of
 duplicating string flags in platform code.
 Use `summarizeCudaWebGpuExecutionPlan()` for platform readiness UI. A kernel can
-have `compiled.loweringPlan.canRunOnGpu === false` because it contains runtime
-gaps, while a host-orchestrated WebGPU plan can still run it through real GPU
-passes.
+have `compiled.loweringPlan.canDirectLowerToWgsl === false` because it contains
+runtime gaps, while a host-orchestrated WebGPU plan can still run it through
+real GPU passes.
 Use `compileCudaLiteKernel()` when you need strict direct-lowering diagnostics.
 Use `compileCudaLiteKernelForWebGpu()` when the platform intends to run
 host-orchestrated WebGPU plans such as grid-sync phases, host runtime copy, or

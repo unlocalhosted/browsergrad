@@ -31,7 +31,7 @@ export interface CudaFeatureRecord {
 
 export interface CudaLoweringPlan {
   readonly features: readonly CudaFeatureRecord[];
-  readonly canRunOnGpu: boolean;
+  readonly canDirectLowerToWgsl: boolean;
   readonly requiresGpuPolyfill: boolean;
   readonly referenceAvailable: boolean;
   readonly unsupported: readonly CudaFeatureRecord[];
@@ -194,7 +194,7 @@ export function createCudaLoweringPlan(
   const unsupported = features.filter((featureRecord) => featureRecord.lowering === "unsupported");
   return {
     features,
-    canRunOnGpu: unsupported.length === 0 && features.every((featureRecord) => featureRecord.gpuRuns),
+    canDirectLowerToWgsl: unsupported.length === 0 && features.every((featureRecord) => featureRecord.gpuRuns),
     requiresGpuPolyfill: features.some((featureRecord) => featureRecord.lowering === "gpu-polyfill"),
     referenceAvailable: features.every((featureRecord) => featureRecord.referenceRuns),
     unsupported,

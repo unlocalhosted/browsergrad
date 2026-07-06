@@ -66,6 +66,15 @@ export interface CudaLiteSemanticModel {
   readonly requiredFeatures: readonly string[];
 }
 
+export interface SemanticMemoryRef {
+  readonly base: string;
+  readonly addressSpace: SemanticAddressSpace;
+  readonly valueType?: CudaLiteScalarType;
+  readonly indices: readonly SemanticExpression[];
+  readonly fields: readonly string[];
+  readonly span: SourceSpan;
+}
+
 export type SemanticExpression =
   | {
       readonly kind: "literal";
@@ -166,6 +175,10 @@ export type SemanticKernelIrOperation =
   | { readonly kind: "declare"; readonly target: CudaLiteSemanticSymbol; readonly init?: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "dim3-declare"; readonly name: string; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
   | { readonly kind: "cooperative-group-declare"; readonly declaration: CudaLiteCooperativeGroupDecl; readonly span: SourceSpan }
+  | { readonly kind: "load"; readonly source: SemanticMemoryRef; readonly span: SourceSpan }
+  | { readonly kind: "store"; readonly target: SemanticMemoryRef; readonly value: SemanticExpression; readonly operator: string; readonly reads: readonly SemanticMemoryRef[]; readonly span: SourceSpan }
+  | { readonly kind: "atomic"; readonly callee: string; readonly target?: SemanticMemoryRef; readonly args: readonly SemanticExpression[]; readonly span: SourceSpan }
+  | { readonly kind: "call"; readonly callee: string; readonly args: readonly SemanticExpression[]; readonly reads: readonly SemanticMemoryRef[]; readonly span: SourceSpan }
   | { readonly kind: "expression"; readonly expression: SemanticExpression; readonly span: SourceSpan }
   | { readonly kind: "branch"; readonly condition: SemanticExpression; readonly consequent: readonly SemanticKernelIrOperation[]; readonly alternate: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }
   | { readonly kind: "loop"; readonly loopKind: "for" | "while" | "do-while"; readonly init?: SemanticKernelIrOperation | SemanticExpression; readonly condition?: SemanticExpression; readonly update?: SemanticExpression; readonly body: readonly SemanticKernelIrOperation[]; readonly span: SourceSpan }
@@ -199,6 +212,7 @@ export interface SemanticKernelIrModule {
 const DEFAULT_WORKGROUP_SIZE: KernelLaunch["blockDim"] = [256, 1, 1];
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!=", "&&", "||"]);
 const BARRIER_CALLS = new Set(["__syncthreads", "__syncwarp", "grid.sync", "cg::sync"]);
+const ATOMIC_CALL_PREFIX = "atomic";
 
 export function createCudaLiteSemanticModel(analysis: CudaLiteAnalysis): CudaLiteSemanticModel {
   const params = analysis.kernel.params.map(symbolForParam);
@@ -282,6 +296,38 @@ function lowerStatement(
       const expression = lowerExpression(statement.expression, scope);
       if (expression.kind === "call" && expression.callee.kind === "symbol" && BARRIER_CALLS.has(expression.callee.name)) {
         return { kind: "barrier", callee: expression.callee.name, span: statement.span };
+      }
+      if (expression.kind === "assignment") {
+        const target = memoryRefFromExpression(expression.target);
+        if (target) {
+          return {
+            kind: "store",
+            target,
+            value: expression.value,
+            operator: expression.operator,
+            reads: collectMemoryRefs(expression.value),
+            span: statement.span,
+          };
+        }
+      }
+      if (expression.kind === "call" && expression.callee.kind === "symbol") {
+        const target = atomicTargetFromCall(expression);
+        if (expression.callee.name.startsWith(ATOMIC_CALL_PREFIX)) {
+          return {
+            kind: "atomic",
+            callee: expression.callee.name,
+            ...(target === undefined ? {} : { target }),
+            args: expression.args,
+            span: statement.span,
+          };
+        }
+        return {
+          kind: "call",
+          callee: expression.callee.name,
+          args: expression.args,
+          reads: expression.args.flatMap((arg) => collectMemoryRefs(arg)),
+          span: statement.span,
+        };
       }
       return { kind: "expression", expression, span: statement.span };
     }
@@ -455,6 +501,126 @@ function collectDeclaredMemory(operations: readonly SemanticKernelIrOperation[])
     if (operation.kind === "block") out.push(...collectDeclaredMemory(operation.body));
     else if (operation.kind === "branch") out.push(...collectDeclaredMemory(operation.consequent), ...collectDeclaredMemory(operation.alternate));
     else if (operation.kind === "loop") out.push(...collectDeclaredMemory(operation.body));
+  }
+  return out;
+}
+
+function atomicTargetFromCall(expression: Extract<SemanticExpression, { readonly kind: "call" }>): SemanticMemoryRef | undefined {
+  const firstArg = expression.args[0];
+  if (firstArg === undefined) return undefined;
+  if (firstArg.kind === "unary" && firstArg.operator === "&") return memoryRefFromExpression(firstArg.argument);
+  return memoryRefFromExpression(firstArg);
+}
+
+function collectMemoryRefs(expression: SemanticExpression): readonly SemanticMemoryRef[] {
+  const refs: SemanticMemoryRef[] = [];
+  collectMemoryRefsInto(expression, refs);
+  return dedupeMemoryRefs(refs);
+}
+
+function collectMemoryRefsInto(expression: SemanticExpression, refs: SemanticMemoryRef[]): void {
+  const ref = memoryRefFromExpression(expression);
+  if (ref) {
+    refs.push(ref);
+    for (const index of ref.indices) collectMemoryRefsInto(index, refs);
+    return;
+  }
+  switch (expression.kind) {
+    case "literal":
+    case "symbol":
+      return;
+    case "member":
+      collectMemoryRefsInto(expression.object, refs);
+      return;
+    case "index":
+      collectMemoryRefsInto(expression.target, refs);
+      collectMemoryRefsInto(expression.index, refs);
+      return;
+    case "call":
+      collectMemoryRefsInto(expression.callee, refs);
+      for (const arg of expression.args) collectMemoryRefsInto(arg, refs);
+      return;
+    case "cast":
+      collectMemoryRefsInto(expression.expression, refs);
+      return;
+    case "unary":
+    case "update":
+      collectMemoryRefsInto(expression.argument, refs);
+      return;
+    case "binary":
+      collectMemoryRefsInto(expression.left, refs);
+      collectMemoryRefsInto(expression.right, refs);
+      return;
+    case "conditional":
+      collectMemoryRefsInto(expression.condition, refs);
+      collectMemoryRefsInto(expression.consequent, refs);
+      collectMemoryRefsInto(expression.alternate, refs);
+      return;
+    case "assignment":
+      collectMemoryRefsInto(expression.target, refs);
+      collectMemoryRefsInto(expression.value, refs);
+      return;
+    case "initializer":
+      for (const element of expression.elements) collectMemoryRefsInto(element, refs);
+      return;
+    case "sequence":
+      for (const item of expression.expressions) collectMemoryRefsInto(item, refs);
+      return;
+  }
+}
+
+function memoryRefFromExpression(expression: SemanticExpression): SemanticMemoryRef | undefined {
+  const parts = flattenMemoryRef(expression);
+  if (!parts || !isMemoryAddressSpace(parts.base.addressSpace, parts.indices.length)) return undefined;
+  const valueType = expressionValueType(expression);
+  return {
+    base: parts.base.name,
+    addressSpace: parts.base.addressSpace,
+    ...(valueType === undefined ? {} : { valueType }),
+    indices: parts.indices,
+    fields: parts.fields,
+    span: expression.span,
+  };
+}
+
+function flattenMemoryRef(expression: SemanticExpression): {
+  readonly base: Extract<SemanticExpression, { readonly kind: "symbol" }>;
+  readonly indices: readonly SemanticExpression[];
+  readonly fields: readonly string[];
+} | undefined {
+  if (expression.kind === "symbol") return { base: expression, indices: [], fields: [] };
+  if (expression.kind === "index") {
+    const target = flattenMemoryRef(expression.target);
+    if (!target) return undefined;
+    return { ...target, indices: [...target.indices, expression.index] };
+  }
+  if (expression.kind === "member") {
+    const object = flattenMemoryRef(expression.object);
+    if (!object) return undefined;
+    return { ...object, fields: [...object.fields, expression.property] };
+  }
+  return undefined;
+}
+
+function isMemoryAddressSpace(addressSpace: SemanticAddressSpace, indexCount: number): boolean {
+  return addressSpace === "storage"
+    || addressSpace === "constant"
+    || addressSpace === "device-global"
+    || addressSpace === "shared"
+    || (addressSpace === "local" && indexCount > 0)
+    || addressSpace === "pool"
+    || addressSpace === "texture"
+    || addressSpace === "surface";
+}
+
+function dedupeMemoryRefs(refs: readonly SemanticMemoryRef[]): readonly SemanticMemoryRef[] {
+  const seen = new Set<string>();
+  const out: SemanticMemoryRef[] = [];
+  for (const ref of refs) {
+    const key = `${ref.base}:${ref.addressSpace}:${ref.span.start}:${ref.span.end}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(ref);
   }
   return out;
 }

@@ -300,6 +300,8 @@ describe("CUDA-lite compiler", () => {
     expect(backendIr(compiled).params.map((param) => param.name)).toEqual(["x", "y", "a", "n"]);
     expect(Object.hasOwn(compiled, "ir")).toBe(false);
     expect(Object.hasOwn(compiled, "legacyIr")).toBe(false);
+    expect(Object.hasOwn(compiled.loweringPlan, "canRunOnGpu")).toBe(false);
+    expect(compiled.loweringPlan.canDirectLowerToWgsl).toBe(true);
     expect(compiled.semantic).toMatchObject({
       kind: "cuda-lite-semantic-model",
       kernelName: "saxpy",
@@ -316,6 +318,19 @@ describe("CUDA-lite compiler", () => {
       "declare",
       "branch",
     ]);
+    const guardedStore = compiled.kernelIr.operations[1]?.kind === "branch"
+      ? compiled.kernelIr.operations[1].consequent[0]
+      : undefined;
+    expect(guardedStore).toMatchObject({
+      kind: "store",
+      target: {
+        base: "y",
+        addressSpace: "storage",
+        valueType: "float",
+      },
+      operator: "=",
+    });
+    expect(guardedStore?.kind === "store" ? guardedStore.reads.map((read) => read.base) : []).toEqual(["x", "y"]);
     expect("body" in compiled.kernelIr).toBe(false);
     expect(compiled.wgsl).toContain("@workgroup_size(8, 1, 1)");
     expect(compiled.wgsl).toContain("var<storage, read> x: array<f32>;");
@@ -2381,7 +2396,7 @@ __global__ void ok(float* x, float* out) {
   float* y = x + i;
   if (i < 1) { out[0] = y[0]; }
 }`);
-    expect(modeledLocalPointer.loweringPlan.canRunOnGpu).toBe(true);
+    expect(modeledLocalPointer.loweringPlan.canDirectLowerToWgsl).toBe(true);
 
     const conditionalLocalPointer = compileCudaLiteKernel(`
 __global__ void conditional_local_ptr(const float* a, const float* b, float* out, int flag) {
@@ -2401,7 +2416,7 @@ __global__ void conditional_local_ptr(const float* a, const float* b, float* out
       },
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
-    expect(conditionalLocalPointer.loweringPlan.canRunOnGpu).toBe(true);
+    expect(conditionalLocalPointer.loweringPlan.canDirectLowerToWgsl).toBe(true);
     expect([...conditionalResult.buffers.out as Float32Array]).toEqual([3, 4]);
 
     const mutableLocalPointer = compileCudaLiteKernel(`
@@ -2434,7 +2449,7 @@ __global__ void aligned(float* x, float* out) {
   float* y = (float*)__builtin_assume_aligned(x + threadIdx.x, 16);
   if (threadIdx.x < 1) { out[0] = y[0]; }
 }`);
-    expect(alignedPointer.loweringPlan.canRunOnGpu).toBe(true);
+    expect(alignedPointer.loweringPlan.canDirectLowerToWgsl).toBe(true);
 
     const invalidShared = analyzeCudaLite(parseCudaLite(`
 __global__ void bad(float* x) {
@@ -2454,7 +2469,7 @@ __global__ void exactLaunch(float* x) {
       code: "unguarded-write",
       severity: "warning",
     }));
-    expect(compiled.loweringPlan.canRunOnGpu).toBe(true);
+    expect(compiled.loweringPlan.canDirectLowerToWgsl).toBe(true);
   });
 
   it("classifies CUDA compatibility gaps by semantic feature", () => {
@@ -2464,7 +2479,7 @@ __global__ void unsupported(float* x) {
 }`));
     const plan = createCudaLoweringPlan(unsupported.diagnostics);
 
-    expect(plan.canRunOnGpu).toBe(false);
+    expect(plan.canDirectLowerToWgsl).toBe(false);
     expect(plan.referenceAvailable).toBe(true);
     expect(plan.unsupported).toContainEqual(expect.objectContaining({
       code: "unsupported-atomic-f32",
@@ -3437,7 +3452,7 @@ __global__ void gridSync(float *scratch, float *out) {
     const launch = { gridDim: [2, 1, 1], blockDim: [1, 1, 1] } as const;
     const result = runCompiledKernelReference(compiled, input, launch);
 
-    expect(compiled.loweringPlan.canRunOnGpu).toBe(false);
+    expect(compiled.loweringPlan.canDirectLowerToWgsl).toBe(false);
     expect(compiled.diagnostics).toContainEqual(expect.objectContaining({
       code: "unsupported-cooperative-groups",
       severity: "warning",
@@ -7823,7 +7838,7 @@ __global__ void parent(float *x) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.loweringPlan.canRunOnGpu).toBe(false);
+    expect(compiled.loweringPlan.canDirectLowerToWgsl).toBe(false);
     expect(compiled.diagnostics).toContainEqual(expect.objectContaining({
       code: "unsupported-dynamic-parallelism",
       severity: "warning",
@@ -13589,7 +13604,7 @@ __global__ void shared_pointer_cast(uint* out) {
       { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
     );
 
-    expect(compiled.loweringPlan.canRunOnGpu).toBe(true);
+    expect(compiled.loweringPlan.canDirectLowerToWgsl).toBe(true);
     expect([...result.buffers.out as Uint32Array]).toEqual([9]);
   });
 

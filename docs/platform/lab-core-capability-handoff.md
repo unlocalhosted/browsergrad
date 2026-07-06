@@ -248,8 +248,9 @@ const compilerOptions = compileCudaLiteOptionsFromKernelFeatures(features, {
 Use the same `features` object for capability preflight and CUDA-lite compiler
 gates. This avoids drift between "lab runnable" UI and actual WGSL emission.
 For compiled CUDA-lite kernels, derive learner-facing WebGPU status from
-`summarizeCudaWebGpuExecutionPlan()`, not `compiled.loweringPlan.canRunOnGpu`,
-because host-orchestrated plans can still run as real WebGPU passes.
+`summarizeCudaWebGpuExecutionPlan()`, not
+`compiled.loweringPlan.canDirectLowerToWgsl`, because host-orchestrated plans
+can still run as real WebGPU passes.
 Compile those runtime-gap kernels with `compileCudaLiteKernelForWebGpu()` so
 device launches, grid-sync phases, and runtime-copy calls enter planning as
 warnings instead of platform-side manual flag toggles.

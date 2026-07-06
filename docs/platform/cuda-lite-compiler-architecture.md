@@ -61,6 +61,10 @@ If a feature needs support in multiple files, add it in this order:
 - No assignment-specific names or course-specific branches in compiler logic.
 - Every unsupported CUDA feature maps to a semantic family in
   `compatibility.ts`.
+- Semantic Kernel IR operations must expose compiler meaning, not parser shape:
+  stores carry typed `MemoryRef` targets and read refs, calls/atomics/barriers
+  are explicit operations, and backend code may not infer execution readiness
+  from AST-shaped statements.
 - Any new GPU lift needs either a real browser test or a documented reason why
   only planner/unit coverage is possible.
 
@@ -143,7 +147,7 @@ Rules:
 - unsupported plan with diagnostics.
 
 Use `summarizeCudaWebGpuExecutionPlan()` for platform UI/readiness rows. Do not
-infer WebGPU execution readiness from `compiled.loweringPlan.canRunOnGpu` alone:
+infer WebGPU execution readiness from `compiled.loweringPlan.canDirectLowerToWgsl` alone:
 that lowering plan is intentionally conservative and marks CUDA runtime gaps as
 unsupported even when `createCudaWebGpuExecutionPlan()` can host-orchestrate real
 WebGPU passes for the same kernel.

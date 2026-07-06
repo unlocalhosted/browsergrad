@@ -60,6 +60,7 @@ export {
   type SemanticExpression,
   type SemanticKernelIrModule,
   type SemanticKernelIrOperation,
+  type SemanticMemoryRef,
 } from "./semantic_ir.js";
 export { analyzeCudaLite, lowerCudaLiteToKernelIr } from "./analyzer.js";
 export {
