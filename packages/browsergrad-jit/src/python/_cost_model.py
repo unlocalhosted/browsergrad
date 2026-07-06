@@ -37,7 +37,8 @@ from ._ir import (
     OP_REDUCE, OP_CAST, OP_RESHAPE, OP_PERMUTE,
     OP_BROADCAST_TO, OP_BUFFER, OP_LOAD, OP_CONST,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX, OP_CUSTOM,
-    OP_SGD_UPDATE,
+    OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
+    OP_ADAMW_UPDATE_PARAM,
 )
 
 
@@ -103,6 +104,8 @@ def estimate_flops(node: UOp) -> int:
         )
     if op == OP_SGD_UPDATE:
         return 4 * out_n
+    if op in (OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V, OP_ADAMW_UPDATE_PARAM):
+        return 8 * out_n
     if op == OP_REDUCE:
         # Reduces over its input's reduced axes — approximate by input numel.
         return _numel(node.inputs[0].shape)

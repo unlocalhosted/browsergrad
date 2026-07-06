@@ -19,7 +19,13 @@ from typing import Iterable, List, Optional
 
 import numpy as np
 
-from ._ir import UOp, OP_SGD_UPDATE
+from ._ir import (
+    UOp,
+    OP_SGD_UPDATE,
+    OP_ADAMW_UPDATE_M,
+    OP_ADAMW_UPDATE_V,
+    OP_ADAMW_UPDATE_PARAM,
+)
 from ._tensor_proxy import TensorProxy
 from ._errors import RealizationError, ShapeError
 
@@ -67,6 +73,74 @@ def sgd_update(
         arg={"lr": float(lr), "weight_decay": float(weight_decay)},
     )
     return TensorProxy(uop, session=param._get_session(), requires_grad=False)
+
+
+def adamw_update(
+    param: TensorProxy,
+    grad: TensorProxy,
+    m: TensorProxy,
+    v: TensorProxy,
+    *,
+    lr: float = 1e-3,
+    betas: tuple = (0.9, 0.999),
+    eps: float = 1e-8,
+    weight_decay: float = 0.0,
+    step: int,
+) -> tuple[TensorProxy, TensorProxy, TensorProxy]:
+    """Functional AdamW update IR.
+
+    Returns `(new_param, new_m, new_v)`. No mutation. This lets tensor-plan
+    WebGPU keep params/grad/state as graph values before the runtime grows
+    resident in-place optimizer state.
+    """
+    for name, tensor in (("grad", grad), ("m", m), ("v", v)):
+        if tensor.shape != param.shape:
+            raise ShapeError(
+                f"adamw_update: {name} shape {tensor.shape} must match param shape {param.shape}"
+            )
+        if tensor.dtype != param.dtype:
+            raise ShapeError(
+                f"adamw_update: {name} dtype {tensor.dtype} must match param dtype {param.dtype}"
+            )
+    if lr < 0:
+        raise ValueError(f"adamw_update: lr must be >= 0, got {lr}")
+    if step <= 0:
+        raise ValueError(f"adamw_update: step must be >= 1, got {step}")
+    beta1, beta2 = float(betas[0]), float(betas[1])
+    sess = param._get_session()
+    m_uop = UOp(
+        op=OP_ADAMW_UPDATE_M,
+        inputs=(m._uop, grad._uop),
+        shape=param.shape,
+        dtype=param.dtype,
+        arg={"beta1": beta1},
+    )
+    v_uop = UOp(
+        op=OP_ADAMW_UPDATE_V,
+        inputs=(v._uop, grad._uop),
+        shape=param.shape,
+        dtype=param.dtype,
+        arg={"beta2": beta2},
+    )
+    p_uop = UOp(
+        op=OP_ADAMW_UPDATE_PARAM,
+        inputs=(param._uop, grad._uop, m_uop, v_uop),
+        shape=param.shape,
+        dtype=param.dtype,
+        arg={
+            "lr": float(lr),
+            "beta1": beta1,
+            "beta2": beta2,
+            "eps": float(eps),
+            "weight_decay": float(weight_decay),
+            "step": int(step),
+        },
+    )
+    return (
+        TensorProxy(p_uop, session=sess, requires_grad=False),
+        TensorProxy(m_uop, session=sess, requires_grad=False),
+        TensorProxy(v_uop, session=sess, requires_grad=False),
+    )
 
 
 class Optimizer:
@@ -208,4 +282,4 @@ class AdamW(Adam):
             sess.buffer_table.update(bid, new_value.astype(current.dtype, copy=False))
 
 
-__all__ = ["Optimizer", "SGD", "Adam", "AdamW", "sgd_update"]
+__all__ = ["Optimizer", "SGD", "Adam", "AdamW", "sgd_update", "adamw_update"]

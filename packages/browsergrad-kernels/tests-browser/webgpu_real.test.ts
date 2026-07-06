@@ -368,6 +368,75 @@ describe("real WebGPU — matmul + tiled GEMM + fused elementwise + FA-v2", () =
     }
   });
 
+  it("generic tensor GPU plan runs AdamW update roots", async () => {
+    if (!deviceCheck.available) return;
+    const device = await createDevice();
+    const param = new Float32Array([1, -2, 3, -4]);
+    const grad = new Float32Array([0.5, -0.25, 0.75, -1]);
+    const m0 = new Float32Array([0.1, -0.2, 0.3, -0.4]);
+    const v0 = new Float32Array([0.01, 0.02, 0.03, 0.04]);
+    const arg = { lr: 0.01, beta1: 0.8, beta2: 0.95, eps: 1e-6, weight_decay: 0.02, step: 3 };
+    const expectedM = new Float32Array(m0.length);
+    const expectedV = new Float32Array(v0.length);
+    const expectedP = new Float32Array(param.length);
+    for (let i = 0; i < param.length; i++) {
+      expectedM[i] = arg.beta1 * m0[i]! + (1 - arg.beta1) * grad[i]!;
+      expectedV[i] = arg.beta2 * v0[i]! + (1 - arg.beta2) * grad[i]! * grad[i]!;
+      const mHat = expectedM[i]! / (1 - arg.beta1 ** arg.step);
+      const vHat = expectedV[i]! / (1 - arg.beta2 ** arg.step);
+      expectedP[i] = param[i]! - arg.lr * (mHat / (Math.sqrt(vHat) + arg.eps)) - arg.lr * arg.weight_decay * param[i]!;
+    }
+
+    async function runAdamRoot(rootOp: string, rootShape: readonly number[], rootInputs: readonly number[]) {
+      const steps = [
+        { step: 0, value_id: 0, op: "BUFFER", input_ids: [], shape: [4], dtype: "float32" },
+        { step: 1, value_id: 1, op: "BUFFER", input_ids: [], shape: [4], dtype: "float32" },
+        { step: 2, value_id: 2, op: "BUFFER", input_ids: [], shape: [4], dtype: "float32" },
+        { step: 3, value_id: 3, op: "BUFFER", input_ids: [], shape: [4], dtype: "float32" },
+        { step: 4, value_id: 4, op: "LOAD", input_ids: [0], shape: [4], dtype: "float32" },
+        { step: 5, value_id: 5, op: "LOAD", input_ids: [1], shape: [4], dtype: "float32" },
+        { step: 6, value_id: 6, op: "LOAD", input_ids: [2], shape: [4], dtype: "float32" },
+        { step: 7, value_id: 7, op: "LOAD", input_ids: [3], shape: [4], dtype: "float32" },
+        { step: 8, value_id: 8, op: "ADAMW_UPDATE_M", input_ids: [6, 5], shape: [4], dtype: "float32", arg },
+        { step: 9, value_id: 9, op: "ADAMW_UPDATE_V", input_ids: [7, 5], shape: [4], dtype: "float32", arg },
+        { step: 10, value_id: 10, op: rootOp, input_ids: rootInputs, shape: rootShape, dtype: "float32", arg },
+      ];
+      const buffers = steps.map((step) => ({
+        value_id: step.value_id,
+        op: step.op,
+        shape: step.shape,
+        dtype: "float32",
+        bytes: 16,
+        first_step: step.step,
+        last_step: 10,
+        materialize: step.value_id === 10,
+      }));
+      const result = await runTensorGpuPlan(device, {
+        steps,
+        buffers,
+        root_id: 10,
+        materialization_boundary: "root",
+        peak_live_bytes: 176,
+        has_custom_ops: false,
+      }, [
+        { valueId: 0, data: param },
+        { valueId: 1, data: grad },
+        { valueId: 2, data: m0 },
+        { valueId: 3, data: v0 },
+      ]);
+      return result.data;
+    }
+
+    const m = await runAdamRoot("ADAMW_UPDATE_M", [4], [6, 5]);
+    const v = await runAdamRoot("ADAMW_UPDATE_V", [4], [7, 5]);
+    const p = await runAdamRoot("ADAMW_UPDATE_PARAM", [4], [4, 5, 8, 9]);
+    for (let i = 0; i < param.length; i++) {
+      expect(Math.abs(m[i]! - expectedM[i]!)).toBeLessThan(1e-6);
+      expect(Math.abs(v[i]! - expectedV[i]!)).toBeLessThan(1e-6);
+      expect(Math.abs(p[i]! - expectedP[i]!)).toBeLessThan(1e-5);
+    }
+  });
+
   it("generic tensor GPU plan runs Conv1d and Conv2d forward", async () => {
     if (!deviceCheck.available) return;
     const device = await createDevice();

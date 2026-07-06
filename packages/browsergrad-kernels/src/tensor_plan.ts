@@ -36,7 +36,10 @@ export type TensorPlanOp =
   | "CONV3D_BACKWARD_INPUT"
   | "CONV3D_BACKWARD_WEIGHT"
   | "CONV3D_BACKWARD_BIAS"
-  | "SGD_UPDATE";
+  | "SGD_UPDATE"
+  | "ADAMW_UPDATE_M"
+  | "ADAMW_UPDATE_V"
+  | "ADAMW_UPDATE_PARAM";
 
 export interface TensorPlanStep {
   readonly step: number;
@@ -328,6 +331,23 @@ function executeStep(
       const grad = requireValue(values, step.inputIds[1], step.op);
       return fromDirect(step, sgdUpdateDirect(device, param, grad, step.shape, step.arg));
     }
+    case "ADAMW_UPDATE_M": {
+      const m = requireValue(values, step.inputIds[0], step.op);
+      const grad = requireValue(values, step.inputIds[1], step.op);
+      return fromDirect(step, adamwUpdateMDirect(device, m, grad, step.shape, step.arg));
+    }
+    case "ADAMW_UPDATE_V": {
+      const v = requireValue(values, step.inputIds[0], step.op);
+      const grad = requireValue(values, step.inputIds[1], step.op);
+      return fromDirect(step, adamwUpdateVDirect(device, v, grad, step.shape, step.arg));
+    }
+    case "ADAMW_UPDATE_PARAM": {
+      const param = requireValue(values, step.inputIds[0], step.op);
+      const grad = requireValue(values, step.inputIds[1], step.op);
+      const m = requireValue(values, step.inputIds[2], step.op);
+      const v = requireValue(values, step.inputIds[3], step.op);
+      return fromDirect(step, adamwUpdateParamDirect(device, param, grad, m, v, step.shape, step.arg));
+    }
     case "CONST":
       throw new KernelError("tensor plan CONST lowering needs scalar fill kernel");
     default:
@@ -400,6 +420,15 @@ interface Conv3dArg {
 interface SgdUpdateArg {
   readonly lr: number;
   readonly weightDecay: number;
+}
+
+interface AdamwUpdateArg {
+  readonly lr: number;
+  readonly beta1: number;
+  readonly beta2: number;
+  readonly eps: number;
+  readonly weightDecay: number;
+  readonly step: number;
 }
 
 const PERMUTE_WGSL = `
@@ -1372,6 +1401,79 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 }
 `;
 
+const ADAMW_UPDATE_M_WGSL = `
+@group(0) @binding(0) var<storage, read> M0: array<f32>;
+@group(0) @binding(1) var<storage, read> G: array<f32>;
+@group(0) @binding(2) var<storage, read_write> M1: array<f32>;
+
+struct Params {
+  beta1: f32,
+  total: u32,
+  pad0: u32,
+  pad1: u32,
+};
+@group(0) @binding(3) var<uniform> U: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x;
+  if (idx >= U.total) { return; }
+  M1[idx] = U.beta1 * M0[idx] + (1.0 - U.beta1) * G[idx];
+}
+`;
+
+const ADAMW_UPDATE_V_WGSL = `
+@group(0) @binding(0) var<storage, read> V0: array<f32>;
+@group(0) @binding(1) var<storage, read> G: array<f32>;
+@group(0) @binding(2) var<storage, read_write> V1: array<f32>;
+
+struct Params {
+  beta2: f32,
+  total: u32,
+  pad0: u32,
+  pad1: u32,
+};
+@group(0) @binding(3) var<uniform> U: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x;
+  if (idx >= U.total) { return; }
+  V1[idx] = U.beta2 * V0[idx] + (1.0 - U.beta2) * G[idx] * G[idx];
+}
+`;
+
+const ADAMW_UPDATE_PARAM_WGSL = `
+@group(0) @binding(0) var<storage, read> P0: array<f32>;
+@group(0) @binding(1) var<storage, read> G: array<f32>;
+@group(0) @binding(2) var<storage, read> M1: array<f32>;
+@group(0) @binding(3) var<storage, read> V1: array<f32>;
+@group(0) @binding(4) var<storage, read_write> P1: array<f32>;
+
+struct Params {
+  lr: f32,
+  beta1: f32,
+  beta2: f32,
+  eps: f32,
+  weight_decay: f32,
+  step: u32,
+  total: u32,
+  pad: u32,
+};
+@group(0) @binding(5) var<uniform> U: Params;
+
+@compute @workgroup_size(64, 1, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let idx = gid.x;
+  if (idx >= U.total) { return; }
+  let step_f = f32(U.step);
+  let m_hat = M1[idx] / (1.0 - pow(U.beta1, step_f));
+  let v_hat = V1[idx] / (1.0 - pow(U.beta2, step_f));
+  let update = m_hat / (sqrt(v_hat) + U.eps);
+  P1[idx] = P0[idx] - U.lr * update - U.lr * U.weight_decay * P0[idx];
+}
+`;
+
 function conv1dDirect(
   device: KernelDevice,
   x: ResidentValue,
@@ -1769,6 +1871,90 @@ function sgdUpdateDirect(
     params: sgdUpdateParams(arg, outputLength),
     dispatchCount: [outputLength, 1, 1],
     cacheKeySuffix: `${shapeStr(shape)}_${arg.lr}_${arg.weightDecay}`,
+  });
+}
+
+function adamwUpdateMDirect(
+  device: KernelDevice,
+  m: ResidentValue,
+  grad: ResidentValue,
+  shape: readonly number[],
+  rawArg: unknown,
+): DirectDispatchResult {
+  const arg = expectAdamwUpdateArg(rawArg, "ADAMW_UPDATE_M");
+  expectShape(m.shape, shape, "ADAMW_UPDATE_M.m");
+  expectShape(grad.shape, shape, "ADAMW_UPDATE_M.grad");
+  const outputLength = numel(shape);
+  return runDirect(device, {
+    name: "tensor_plan_adamw_update_m",
+    wgsl: ADAMW_UPDATE_M_WGSL,
+    workgroupSize: [64, 1, 1],
+  }, {
+    inputBuffers: [m.buffer, grad.buffer],
+    outputLength,
+    params: adamwMvParams(arg.beta1, outputLength),
+    dispatchCount: [outputLength, 1, 1],
+    cacheKeySuffix: `${shapeStr(shape)}_${arg.beta1}`,
+  });
+}
+
+function adamwUpdateVDirect(
+  device: KernelDevice,
+  v: ResidentValue,
+  grad: ResidentValue,
+  shape: readonly number[],
+  rawArg: unknown,
+): DirectDispatchResult {
+  const arg = expectAdamwUpdateArg(rawArg, "ADAMW_UPDATE_V");
+  expectShape(v.shape, shape, "ADAMW_UPDATE_V.v");
+  expectShape(grad.shape, shape, "ADAMW_UPDATE_V.grad");
+  const outputLength = numel(shape);
+  return runDirect(device, {
+    name: "tensor_plan_adamw_update_v",
+    wgsl: ADAMW_UPDATE_V_WGSL,
+    workgroupSize: [64, 1, 1],
+  }, {
+    inputBuffers: [v.buffer, grad.buffer],
+    outputLength,
+    params: adamwMvParams(arg.beta2, outputLength),
+    dispatchCount: [outputLength, 1, 1],
+    cacheKeySuffix: `${shapeStr(shape)}_${arg.beta2}`,
+  });
+}
+
+function adamwUpdateParamDirect(
+  device: KernelDevice,
+  param: ResidentValue,
+  grad: ResidentValue,
+  m: ResidentValue,
+  v: ResidentValue,
+  shape: readonly number[],
+  rawArg: unknown,
+): DirectDispatchResult {
+  const arg = expectAdamwUpdateArg(rawArg, "ADAMW_UPDATE_PARAM");
+  expectShape(param.shape, shape, "ADAMW_UPDATE_PARAM.param");
+  expectShape(grad.shape, shape, "ADAMW_UPDATE_PARAM.grad");
+  expectShape(m.shape, shape, "ADAMW_UPDATE_PARAM.m");
+  expectShape(v.shape, shape, "ADAMW_UPDATE_PARAM.v");
+  const outputLength = numel(shape);
+  return runDirect(device, {
+    name: "tensor_plan_adamw_update_param",
+    wgsl: ADAMW_UPDATE_PARAM_WGSL,
+    workgroupSize: [64, 1, 1],
+  }, {
+    inputBuffers: [param.buffer, grad.buffer, m.buffer, v.buffer],
+    outputLength,
+    params: adamwParamParams(arg, outputLength),
+    dispatchCount: [outputLength, 1, 1],
+    cacheKeySuffix: [
+      shapeStr(shape),
+      arg.lr,
+      arg.beta1,
+      arg.beta2,
+      arg.eps,
+      arg.weightDecay,
+      arg.step,
+    ].join("_"),
   });
 }
 
@@ -2277,6 +2463,46 @@ function sgdUpdateParams(arg: SgdUpdateArg, total: number): Uint32Array {
   return new Uint32Array(buffer);
 }
 
+function expectAdamwUpdateArg(rawArg: unknown, op: string): AdamwUpdateArg {
+  const arg = expectRecord(rawArg, `tensor plan ${op}.arg`);
+  const lr = expectFiniteNumber(arg.lr ?? 0.001, `${op}.lr`);
+  const beta1 = expectFiniteNumber(arg.beta1, `${op}.beta1`);
+  const beta2 = expectFiniteNumber(arg.beta2, `${op}.beta2`);
+  const eps = expectFiniteNumber(arg.eps ?? 1e-8, `${op}.eps`);
+  const weightDecay = expectFiniteNumber(
+    arg.weight_decay ?? arg.weightDecay ?? 0,
+    `${op}.weight_decay`,
+  );
+  const step = expectNumber(arg.step, `${op}.step`);
+  if (lr < 0) throw new KernelError(`tensor plan ${op}.lr must be >= 0`);
+  if (step <= 0) throw new KernelError(`tensor plan ${op}.step must be >= 1`);
+  return { lr, beta1, beta2, eps, weightDecay, step };
+}
+
+function adamwMvParams(beta: number, total: number): Uint32Array {
+  const buffer = new ArrayBuffer(16);
+  const view = new DataView(buffer);
+  view.setFloat32(0, beta, true);
+  view.setUint32(4, total, true);
+  view.setUint32(8, 0, true);
+  view.setUint32(12, 0, true);
+  return new Uint32Array(buffer);
+}
+
+function adamwParamParams(arg: AdamwUpdateArg, total: number): Uint32Array {
+  const buffer = new ArrayBuffer(32);
+  const view = new DataView(buffer);
+  view.setFloat32(0, arg.lr, true);
+  view.setFloat32(4, arg.beta1, true);
+  view.setFloat32(8, arg.beta2, true);
+  view.setFloat32(12, arg.eps, true);
+  view.setFloat32(16, arg.weightDecay, true);
+  view.setUint32(20, arg.step, true);
+  view.setUint32(24, total, true);
+  view.setUint32(28, 0, true);
+  return new Uint32Array(buffer);
+}
+
 function pad4(values: readonly number[]): [number, number, number, number] {
   if (values.length > 4) throw new KernelError("tensor plan rank > 4 unsupported in v0");
   return [
@@ -2437,6 +2663,9 @@ function expectOp(value: unknown, name: string): TensorPlanOp {
     case "CONV3D_BACKWARD_WEIGHT":
     case "CONV3D_BACKWARD_BIAS":
     case "SGD_UPDATE":
+    case "ADAMW_UPDATE_M":
+    case "ADAMW_UPDATE_V":
+    case "ADAMW_UPDATE_PARAM":
       return op;
     default:
       throw new KernelError(`${name} unsupported op ${JSON.stringify(op)}`);

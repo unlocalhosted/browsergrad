@@ -25,7 +25,7 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
 | `defineCuda1DProgram` / `simulateCuda1DProgram` / `emitCuda1DProgramWgsl` / `runCuda1DProgramWebGpu` / `simulateCuda1DGrid` | CUDA-shaped compatibility aliases for labs and rubrics that teach CUDA vocabulary | ✅ |
 | `flashAttentionDirect` | Flash Attention forward with online softmax, strict real-WebGPU parity vs composed reference. | ✅ |
 | `fusedElementwiseDirect` | Runtime WGSL codegen for arbitrary elementwise chains | ✅ |
-| `runTensorGpuPlan` | Generic tensor-plan executor for primitive f32 BUFFER/LOAD/MATMUL/elementwise/shape/reduce/Conv1d/Conv2d/Conv3d-forward-backward/SGD_UPDATE steps with GPUBuffer residency and single root readback | ✅ |
+| `runTensorGpuPlan` | Generic tensor-plan executor for primitive f32 BUFFER/LOAD/MATMUL/elementwise/shape/reduce/Conv1d/Conv2d/Conv3d-forward-backward/SGD/AdamW-update steps with GPUBuffer residency and single root readback | ✅ |
 | `WebGpuRealizerBridge.conv1d*` / `conv2d*` | Resident Conv1d/Conv2d forward plus input/weight/bias backward kernels for jit explicit realization. | ✅ |
 
 ### Realizer-tier surface (consumed by jit)
@@ -37,7 +37,8 @@ Zero tensor-library dependency. Drop in if you just need fast WGSL primitives; l
   emitted by `browsergrad-jit`, keeps intermediates resident, and materializes
   only the declared root. Current coverage: f32 BUFFER/LOAD/2-D MATMUL,
   elementwise chains, RESHAPE, PERMUTE, BROADCAST_TO, and REDUCE(sum/mean) rank
-  <= 4, plus Conv1d/Conv2d/Conv3d forward/backward and functional SGD_UPDATE. This is the future
+  <= 4, plus Conv1d/Conv2d/Conv3d forward/backward and functional SGD/AdamW
+  updates. This is the future
   framework-runtime direction; per-op bridge methods are legacy/interim
   coverage.
 - `createWebGpuRealizerBridge(device).run_tensor_plan(plan, inputs, dtype)` —

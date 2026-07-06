@@ -129,6 +129,9 @@ OP_ISNAN = "ISNAN"  # inputs: (x,) → bool-typed mask of same shape
 # GPU-native path: param + grad in, updated param out. In-place STORE/resident
 # optimizer state can build on this primitive without doing math in Python.
 OP_SGD_UPDATE = "SGD_UPDATE"  # inputs: (param, grad), arg: {lr, weight_decay}
+OP_ADAMW_UPDATE_M = "ADAMW_UPDATE_M"  # inputs: (m, grad), arg: {beta1}
+OP_ADAMW_UPDATE_V = "ADAMW_UPDATE_V"  # inputs: (v, grad), arg: {beta2}
+OP_ADAMW_UPDATE_PARAM = "ADAMW_UPDATE_PARAM"  # inputs: (param, grad, m_new, v_new)
 
 ALL_OPS: FrozenSet[str] = frozenset({
     OP_BUFFER, OP_LOAD, OP_STORE, OP_CONST, OP_RANDOM, OP_CAST,
@@ -146,9 +149,10 @@ ALL_OPS: FrozenSet[str] = frozenset({
     # Autograd-emitted (PRD-007)
     OP_SCATTER_ADD, OP_BROADCAST_TO,
     # Mixed precision (PRD-010)
-    OP_ISNAN, OP_SGD_UPDATE,
+    OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
+    OP_ADAMW_UPDATE_PARAM,
 })
-assert len(ALL_OPS) == 41, "opcode count drifted from PRD-005+006+007+010+CNN+optimizer"
+assert len(ALL_OPS) == 44, "opcode count drifted from PRD-005+006+007+010+CNN+optimizer"
 
 
 # Opcodes that take zero IR inputs. Their data lives entirely in `arg`.
@@ -382,7 +386,8 @@ __all__ = [
     "OP_WHERE", "OP_INDEX", "OP_MASK", "OP_CUSTOM",
     "OP_FUSED_ELEMENTWISE", "OP_FUSED_SOFTMAX",
     "OP_SCATTER_ADD", "OP_BROADCAST_TO",
-    "OP_ISNAN", "OP_SGD_UPDATE",
+    "OP_ISNAN", "OP_SGD_UPDATE", "OP_ADAMW_UPDATE_M",
+    "OP_ADAMW_UPDATE_V", "OP_ADAMW_UPDATE_PARAM",
     "ALL_OPS",
     # Core class + helpers
     "UOp", "toposort", "all_buffers",

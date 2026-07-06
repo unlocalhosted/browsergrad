@@ -44,7 +44,8 @@ from ._ir import (
     OP_WHERE, OP_INDEX, OP_MASK, OP_CUSTOM,
     OP_FUSED_ELEMENTWISE, OP_FUSED_SOFTMAX,
     OP_SCATTER_ADD, OP_BROADCAST_TO,
-    OP_ISNAN, OP_SGD_UPDATE,
+    OP_ISNAN, OP_SGD_UPDATE, OP_ADAMW_UPDATE_M, OP_ADAMW_UPDATE_V,
+    OP_ADAMW_UPDATE_PARAM,
 )
 from ._buffer_table import BufferTable
 from ._errors import RealizationError
@@ -884,6 +885,40 @@ def _h_sgd_update(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
     return (param - lr * update).astype(np.dtype(node.dtype), copy=False)
 
 
+def _h_adamw_update_m(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    m = vt[id(node.inputs[0])]
+    grad = vt[id(node.inputs[1])]
+    beta1 = float(node.arg["beta1"])
+    return (beta1 * m + (1.0 - beta1) * grad).astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_adamw_update_v(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    v = vt[id(node.inputs[0])]
+    grad = vt[id(node.inputs[1])]
+    beta2 = float(node.arg["beta2"])
+    return (beta2 * v + (1.0 - beta2) * (grad * grad)).astype(np.dtype(node.dtype), copy=False)
+
+
+def _h_adamw_update_param(node: UOp, vt: dict, bt: BufferTable) -> np.ndarray:
+    param = vt[id(node.inputs[0])]
+    m_new = vt[id(node.inputs[2])]
+    v_new = vt[id(node.inputs[3])]
+    arg = node.arg
+    lr = float(arg["lr"])
+    beta1 = float(arg["beta1"])
+    beta2 = float(arg["beta2"])
+    eps = float(arg["eps"])
+    step = int(arg["step"])
+    weight_decay = float(arg.get("weight_decay", 0.0))
+    m_hat = m_new / (1.0 - beta1 ** step)
+    v_hat = v_new / (1.0 - beta2 ** step)
+    update = m_hat / (np.sqrt(v_hat) + eps)
+    return (param - lr * update - lr * weight_decay * param).astype(
+        np.dtype(node.dtype),
+        copy=False,
+    )
+
+
 # Dispatch table. Adding a new opcode here is also an update to ALL_OPS in
 # _ir.py — the sanity check at module-import time below would fire if we
 # forget.
@@ -933,6 +968,9 @@ _DISPATCH: dict[str, Handler] = {
     OP_ISNAN:             _h_isnan,
     # Optimizer/update IR
     OP_SGD_UPDATE:        _h_sgd_update,
+    OP_ADAMW_UPDATE_M:    _h_adamw_update_m,
+    OP_ADAMW_UPDATE_V:    _h_adamw_update_v,
+    OP_ADAMW_UPDATE_PARAM: _h_adamw_update_param,
 }
 
 
