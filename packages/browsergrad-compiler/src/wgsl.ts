@@ -4507,7 +4507,9 @@ function expressionContainsSideEffectingCall(expression: CudaLiteExpression, con
         name === "cudaMemcpyPeer" ||
         name === "cudaMemcpyPeerAsync" ||
         name === "cudaMemset" ||
-        name === "cudaMemsetAsync")
+        name === "cudaMemsetAsync" ||
+        name === "cudaMemset2D" ||
+        name === "cudaMemset2DAsync")
     ) {
       found = true;
     }
@@ -6329,6 +6331,10 @@ function emitCall(expression: CudaLiteCallExpression, context: EmitContext): str
       return "0";
     case "cudaMemsetAsync":
       return "0";
+    case "cudaMemset2D":
+      return "0";
+    case "cudaMemset2DAsync":
+      return "0";
     case "cudaGraphSetConditional":
       return "0";
     case "min":
@@ -7808,6 +7814,10 @@ function noopCallComment(expression: CudaLiteExpression): string | undefined {
       return "cudaMemset omitted: WebGPU fill orchestration is host-managed";
     case "cudaMemsetAsync":
       return "cudaMemsetAsync omitted: WebGPU fill orchestration is host-managed";
+    case "cudaMemset2D":
+      return "cudaMemset2D omitted: WebGPU fill orchestration is host-managed";
+    case "cudaMemset2DAsync":
+      return "cudaMemset2DAsync omitted: WebGPU fill orchestration is host-managed";
     case "cudaGraphSetConditional":
       return "cudaGraphSetConditional omitted: CUDA graph conditional scheduling is host-managed";
     default:
@@ -7876,7 +7886,9 @@ function isHostManagedRuntimeNoopCall(name: string): boolean {
     name === "cudaEventRecordWithFlags" ||
     name === "cudaEventSynchronize" ||
     name === "cudaMemcpy2D" ||
-    name === "cudaMemcpy2DAsync";
+    name === "cudaMemcpy2DAsync" ||
+    name === "cudaMemset2D" ||
+    name === "cudaMemset2DAsync";
 }
 
 function isEmittedPointerVar(statement: CudaLiteVarDecl, context: EmitContext): boolean {

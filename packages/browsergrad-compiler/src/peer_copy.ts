@@ -200,6 +200,7 @@ function createPeerCopyOperations(
   input: CompiledKernelInput,
 ): readonly CudaPeerCopyOperation[] | undefined {
   if (isRuntimeMemsetCall(expression)) {
+    if (isRuntimeMemset2DCall(expression)) return createPeerFill2DOperations(expression, env, input);
     const fill = createPeerFillOperation(expression, env, input);
     return fill ? [fill] : undefined;
   }
@@ -315,6 +316,55 @@ function createPeerFillOperation(
   };
 }
 
+function createPeerFill2DOperations(
+  expression: CudaLiteCallExpression,
+  env: ReadonlyMap<string, HostEvalValue>,
+  input: CompiledKernelInput,
+): readonly CudaPeerCopyOperation[] | undefined {
+  const dst = expression.args[0] ? evaluatePointerArgument(expression.args[0], env, input) : undefined;
+  const pitchBytes = expression.args[1] ? evaluateHostNumber(expression.args[1], env, input) : undefined;
+  const value = expression.args[2] ? evaluateHostNumber(expression.args[2], env, input) : undefined;
+  const rowBytes = expression.args[3] ? evaluateHostNumber(expression.args[3], env, input) : undefined;
+  const rows = expression.args[4] ? evaluateHostNumber(expression.args[4], env, input) : undefined;
+  if (!dst || pitchBytes === undefined || value === undefined || rowBytes === undefined || rows === undefined) return undefined;
+  if (dst.offset < 0 || pitchBytes < 0 || rowBytes < 0 || rows < 0) return undefined;
+  const dstBuffer = copyBufferViewFor(input, dst.root);
+  if (!dstBuffer) return undefined;
+  const elementSize = dstBuffer.elementSize;
+  const byteValues = [pitchBytes, rowBytes];
+  if (byteValues.some((byteValue) => !Number.isInteger(byteValue) || Math.trunc(byteValue) % elementSize !== 0)) return undefined;
+  if (!Number.isInteger(rows)) return undefined;
+  const pitch = Math.trunc(pitchBytes) / elementSize;
+  const elementCount = Math.trunc(rowBytes) / elementSize;
+  const rowCount = Math.trunc(rows);
+  const out: CudaPeerCopyOperation[] = [];
+  if (rowCount === 0) {
+    return [{
+      kind: "fill",
+      expression,
+      dstRoot: dst.root,
+      dstOffset: dst.offset,
+      elementCount: 0,
+      valueType: dstBuffer.valueType,
+      byteValue: Math.trunc(value) & 0xff,
+    }];
+  }
+  for (let row = 0; row < rowCount; row++) {
+    const dstOffset = dst.offset + row * pitch;
+    if (dstOffset + elementCount > dstBuffer.elementLength) return undefined;
+    out.push({
+      kind: "fill",
+      expression,
+      dstRoot: dst.root,
+      dstOffset,
+      elementCount,
+      valueType: dstBuffer.valueType,
+      byteValue: Math.trunc(value) & 0xff,
+    });
+  }
+  return out;
+}
+
 function copyBufferViewFor(input: CompiledKernelInput, name: string): CopyBufferView | undefined {
   const typed = input.buffers[name];
   const resident = input.residentBuffers?.[name];
@@ -385,7 +435,13 @@ function isPeerCopyCall(expression: CudaLiteExpression): expression is CudaLiteC
 function isRuntimeMemsetCall(expression: CudaLiteExpression): boolean {
   if (expression.kind !== "call") return false;
   const name = expressionName(expression.callee);
-  return name === "cudaMemset" || name === "cudaMemsetAsync";
+  return name === "cudaMemset" || name === "cudaMemsetAsync" || isRuntimeMemset2DCall(expression);
+}
+
+function isRuntimeMemset2DCall(expression: CudaLiteExpression): boolean {
+  if (expression.kind !== "call") return false;
+  const name = expressionName(expression.callee);
+  return name === "cudaMemset2D" || name === "cudaMemset2DAsync";
 }
 
 function containsPeerCopyCall(statements: readonly CudaLiteStatement[]): boolean {

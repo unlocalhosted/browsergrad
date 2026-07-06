@@ -126,6 +126,8 @@ __global__ void runtimeCopy(float *dst, const float *src, int n) {
     cudaMemcpy(dst + 1, src + 1, sizeof(float), cudaMemcpyHostToHost);
     cudaMemcpy2D(dst, sizeof(float) * 2, src, sizeof(float), sizeof(float), 2, cudaMemcpyHostToDevice);
     cudaMemcpy2DAsync(dst + 1, sizeof(float) * 2, src, sizeof(float), sizeof(float), 2, cudaMemcpyDeviceToHost, stream);
+    cudaMemset2D(dst, sizeof(float) * 2, 0, sizeof(float), 2);
+    cudaMemset2DAsync(dst + 1, sizeof(float) * 2, 0, sizeof(float), 2, stream);
     cudaEventRecord(event, stream);
     cudaEventSynchronize(event);
     cudaStreamSynchronize(stream);

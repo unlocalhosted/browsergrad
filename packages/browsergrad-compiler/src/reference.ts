@@ -1483,6 +1483,10 @@ function execCudaRuntimeMemset(
   expression: Extract<CudaLiteExpression, { kind: "call" }>,
   context: ThreadContext,
 ): void {
+  if (isCudaRuntimeMemset2DCall(expressionName(expression.callee))) {
+    execCudaRuntimeMemset2D(expression, context);
+    return;
+  }
   const dst = expression.args[0];
   const value = expression.args[1];
   const count = expression.args[2];
@@ -1495,6 +1499,31 @@ function execCudaRuntimeMemset(
   if (writable <= 0) return;
   dstView.bytes.fill(byteValue, dstView.byteOffset, dstView.byteOffset + writable);
   context.trace.writes.push({ name: dstView.name, index: dstView.byteOffset, value: writable, ok: writable === byteCount });
+}
+
+function execCudaRuntimeMemset2D(
+  expression: Extract<CudaLiteExpression, { kind: "call" }>,
+  context: ThreadContext,
+): void {
+  const dst = expression.args[0];
+  const pitch = expression.args[1];
+  const value = expression.args[2];
+  const width = expression.args[3];
+  const height = expression.args[4];
+  if (!dst || !pitch || !value || !width || !height) throw compilerFailure("cudaMemset2D expects dst, pitch, value, width, and height");
+  const dstView = pointerBytesForCopy(dst, context);
+  const pitchBytes = Math.trunc(evalNumber(pitch, context));
+  const byteValue = Math.trunc(evalNumber(value, context)) & 0xff;
+  const rowBytes = Math.max(0, Math.trunc(evalNumber(width, context)));
+  const rows = Math.max(0, Math.trunc(evalNumber(height, context)));
+  if (dstView.byteOffset < 0 || pitchBytes < 0) return;
+  for (let row = 0; row < rows; row++) {
+    const dstOffset = dstView.byteOffset + row * pitchBytes;
+    const writable = Math.max(0, Math.min(rowBytes, dstView.bytes.byteLength - dstOffset));
+    if (writable <= 0) continue;
+    dstView.bytes.fill(byteValue, dstOffset, dstOffset + writable);
+    context.trace.writes.push({ name: dstView.name, index: dstOffset, value: writable, ok: writable === rowBytes });
+  }
 }
 
 type CudaRuntimeCopyShape =
@@ -1512,7 +1541,11 @@ function cudaRuntimeCopyShape(
 }
 
 function isCudaRuntimeMemsetCall(name: string | undefined): boolean {
-  return name === "cudaMemset" || name === "cudaMemsetAsync";
+  return name === "cudaMemset" || name === "cudaMemsetAsync" || isCudaRuntimeMemset2DCall(name);
+}
+
+function isCudaRuntimeMemset2DCall(name: string | undefined): boolean {
+  return name === "cudaMemset2D" || name === "cudaMemset2DAsync";
 }
 
 interface PointerByteView {

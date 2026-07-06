@@ -3656,6 +3656,44 @@ __global__ void runtimeFill(unsigned int *bits) {
     }
   });
 
+  it("host-lifts cudaMemset2D and cudaMemset2DAsync row fills", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void runtimeFill2D(unsigned int *bits) {
+  cudaStream_t stream;
+  if (threadIdx.x == 0) {
+    cudaMemset2D(bits + 1, sizeof(unsigned int) * 3, 255, sizeof(unsigned int) * 2, 2);
+    cudaMemset2DAsync(bits + 2, sizeof(unsigned int) * 3, 0, sizeof(unsigned int), 2, stream);
+  }
+}`, {
+      referenceCudaRuntime: true,
+      workgroupSize: [1, 1, 1],
+    });
+    const input = { buffers: { bits: new Uint32Array(8) } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const plan = createCudaRuntimeCopyPlan(compiled, input, launch);
+    const webGpuPlan = createCudaWebGpuExecutionPlan(compiled, input, launch);
+
+    expect([...result.buffers.bits as Uint32Array]).toEqual([0, 0xffffffff, 0, 0, 0xffffffff, 0, 0, 0]);
+    expect(plan.supported).toBe(true);
+    expect(plan.copies.map((copy) => ({
+      kind: copy.kind,
+      dstOffset: copy.dstOffset,
+      elementCount: copy.elementCount,
+      byteValue: copy.kind === "fill" ? copy.byteValue : undefined,
+    }))).toEqual([
+      { kind: "fill", dstOffset: 1, elementCount: 2, byteValue: 255 },
+      { kind: "fill", dstOffset: 4, elementCount: 2, byteValue: 255 },
+      { kind: "fill", dstOffset: 2, elementCount: 1, byteValue: 0 },
+      { kind: "fill", dstOffset: 5, elementCount: 1, byteValue: 0 },
+    ]);
+    expect(webGpuPlan.supported).toBe(true);
+    if (webGpuPlan.supported) {
+      expect(webGpuPlan.kind).toBe("host-copy");
+      expect(webGpuPlan.steps).toHaveLength(5);
+    }
+  });
+
   it("host-lifts cudaMemcpy2D and cudaMemcpy2DAsync row copies", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void runtimeCopy2D(float *dst, const float *src) {

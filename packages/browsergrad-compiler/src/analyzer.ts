@@ -108,6 +108,8 @@ const BUILTIN_CALLS = new Map<string, readonly [min: number, max: number]>([
   ["cudaStreamAttachMemAsync", [2, 4]],
   ["cudaMemset", [3, 3]],
   ["cudaMemsetAsync", [4, 4]],
+  ["cudaMemset2D", [5, 5]],
+  ["cudaMemset2DAsync", [6, 6]],
   ["__shfl_sync", [3, 4]],
   ["__shfl_down_sync", [3, 4]],
   ["__shfl_up_sync", [3, 4]],
@@ -2501,12 +2503,15 @@ function validateRuntimeCopyCall(
     });
   }
   const copy2d = callName === "cudaMemcpy2D" || callName === "cudaMemcpy2DAsync";
+  const memset2d = callName === "cudaMemset2D" || callName === "cudaMemset2DAsync";
   const peerCopy = callName === "cudaMemcpyPeer" || callName === "cudaMemcpyPeerAsync";
   const dst = expression.args[0];
-  const src = expression.args[copy2d ? 2 : peerCopy ? 2 : 1];
+  const src = memset2d ? undefined : expression.args[copy2d ? 2 : peerCopy ? 2 : 1];
   if (dst) walkExpression(dst, scope);
   if (src) walkExpression(src, scope);
-  const scalarArgs = copy2d
+  const scalarArgs = memset2d
+    ? [expression.args[1], expression.args[2], expression.args[3], expression.args[4]]
+    : copy2d
     ? [expression.args[1], expression.args[3], expression.args[4], expression.args[5]]
     : [expression.args[peerCopy ? 4 : 2]];
   for (const arg of scalarArgs) {
@@ -2530,7 +2535,9 @@ function isCudaRuntimeCopyCall(callName: string): boolean {
     callName === "cudaMemcpyPeer" ||
     callName === "cudaMemcpyPeerAsync" ||
     callName === "cudaMemset" ||
-    callName === "cudaMemsetAsync";
+    callName === "cudaMemsetAsync" ||
+    callName === "cudaMemset2D" ||
+    callName === "cudaMemset2DAsync";
 }
 
 function validateCudaGraphSetConditionalCall(

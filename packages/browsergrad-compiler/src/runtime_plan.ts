@@ -173,7 +173,9 @@ function isCudaRuntimeCopyCall(name: string): boolean {
     name === "cudaMemcpyPeer" ||
     name === "cudaMemcpyPeerAsync" ||
     name === "cudaMemset" ||
-    name === "cudaMemsetAsync";
+    name === "cudaMemsetAsync" ||
+    name === "cudaMemset2D" ||
+    name === "cudaMemset2DAsync";
 }
 
 function isHostManagedRuntimeNoopCall(name: string): boolean {
