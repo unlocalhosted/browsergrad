@@ -6804,7 +6804,11 @@ function localPointerParamsForDeviceFunctionCall(
 
 function isFunctionLocalPointerArgumentForEmit(expression: CudaLiteExpression, context: EmitContext): boolean {
   if (expression.kind === "identifier") {
-    return context.localArrayFor(expression.name, expression.span) !== undefined;
+    if (context.localArrayFor(expression.name, expression.span) !== undefined) return true;
+    const param = context.paramFor(expression.name);
+    return param?.pointer === true &&
+      context.isLocalName(expression.name) &&
+      context.devicePointerParamFor(expression.name) === undefined;
   }
   if (expression.kind === "index" && expression.target.kind === "identifier") {
     return context.localPointerArrayRootFor(expression.target.name, expression.target.span) !== undefined;

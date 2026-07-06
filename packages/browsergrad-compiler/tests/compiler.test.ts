@@ -1748,6 +1748,38 @@ __global__ void mixedPointers(float* out, int pickStorage) {
     expect([...storageResult.buffers.out as Float32Array]).toEqual([2, 0]);
   });
 
+  it("lowers nested helper calls with local scalar pointer params", () => {
+    const source = `
+__device__ uint bump(uint* state) {
+  *state = (*state * 1664525u) + 1013904223u;
+  return *state;
+}
+
+__device__ uint bump_twice(uint* state) {
+  bump(state);
+  return bump(state);
+}
+
+__global__ void nestedLocalPointer(uint* out) {
+  uint state = 7u + threadIdx.x;
+  out[threadIdx.x] = bump_twice(&state);
+}`;
+    const compiled = compileCudaLiteKernel(source, { workgroupSize: [2, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-device-pointer-param");
+    expect(compiled.wgsl).toContain("fn bump(state: ptr<function, u32>");
+    expect(compiled.wgsl).toContain("fn bump_twice(state: ptr<function, u32>");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      (((7 * 1664525 + 1013904223) >>> 0) * 1664525 + 1013904223) >>> 0,
+      (((8 * 1664525 + 1013904223) >>> 0) * 1664525 + 1013904223) >>> 0,
+    ]);
+  });
+
   it("lowers fixed thread-local arrays through reference and WGSL", () => {
     const compiled = compileCudaLiteKernel(LOCAL_ARRAY, { workgroupSize: [4, 1, 1] });
     expect(compiled.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
