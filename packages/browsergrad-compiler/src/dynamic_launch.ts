@@ -1,6 +1,5 @@
 import type { WgslResidentBuffer, WgslTypedArray } from "@unlocalhosted/browsergrad-kernels";
 import { expressionName, rootIdentifier } from "./analyzer.js";
-import { internalBackendIrFor } from "./backend_ir.js";
 import {
   evaluateHostNumber,
   evaluatePointerArgument,
@@ -88,7 +87,6 @@ export function createCudaHostDynamicLaunchPlan(
   launch: KernelLaunch,
   options: CudaHostDynamicLaunchPlanOptions = {},
 ): CudaHostDynamicLaunchPlan {
-  const backendIr = internalBackendIrFor(compiled);
   const runtimePlan = createCudaRuntimePlan(compiled);
   if (!runtimePlan.operations.some((operation) => operation.kind === "device-launch")) {
     return unsupported("no-device-launch", "no device-side launch found");
@@ -106,7 +104,7 @@ export function createCudaHostDynamicLaunchPlan(
     );
   }
 
-  const launchCollection = collectHostLiftedLaunches(backendIr.body, input, launch);
+  const launchCollection = collectHostLiftedLaunches(compiled.analysis.kernel.body, input, launch);
   const launches = launchCollection.launches;
   if (launches.length === 0) {
     if (!launchCollection.blocker) return { supported: true, launches: [], poolOffsetUpdates: launchCollection.poolOffsetUpdates };

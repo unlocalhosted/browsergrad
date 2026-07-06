@@ -7939,13 +7939,13 @@ __global__ void parent(float *x, int n) {
       referenceDynamicParallelism: true,
       workgroupSize: [1, 1, 1],
     });
-    const plan = createCudaHostDynamicLaunchPlan(
-      compiled,
-      { buffers: { x: new Float32Array([1, 2]) }, scalars: { n: 2 } },
-      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
-    );
+    const input = { buffers: { x: new Float32Array([1, 2]) }, scalars: { n: 2 } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const plan = createCudaHostDynamicLaunchPlan(compiled, input, launch);
+    const detachedPlan = createCudaHostDynamicLaunchPlan({ ...compiled }, input, launch);
 
     expect(plan.supported).toBe(true);
+    expect(detachedPlan.supported).toBe(true);
     expect(plan.launches).toHaveLength(1);
     expect(plan.launches[0]).toMatchObject({
       gridDim: [1, 1, 1],
