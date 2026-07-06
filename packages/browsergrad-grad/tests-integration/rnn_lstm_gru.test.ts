@@ -198,3 +198,122 @@ ok = bool(np.allclose(seq_arr, np.transpose(bf_arr, (1, 0, 2)), atol=1e-5))
     expect(result.shapes_equal).toBe(true);
   });
 });
+
+describe("nn.RNN/LSTM/GRU: multi-layer and bidirectional", () => {
+  beforeAll(reset);
+
+  it("RNN bidirectional output and h_n follow PyTorch direction ordering", async () => {
+    const result = await target.run<{ ok: boolean; max_diff: number }>(`
+${PRELUDE}
+np.random.seed(4)
+T, B, I, H = 4, 2, 3, 5
+rnn = nn.RNN(I, H, bidirectional=True, batch_first=False)
+x_np = np.random.randn(T, B, I).astype(np.float32)
+out, h_n = rnn(grad.Tensor(x_np))
+
+def run_direction(seq, W_ih, W_hh, b_ih, b_hh):
+    h = np.zeros((B, H), dtype=np.float32)
+    ys = []
+    for t in range(seq.shape[0]):
+        h = np.tanh(seq[t] @ W_ih.T + b_ih + h @ W_hh.T + b_hh)
+        ys.append(h.copy())
+    return np.stack(ys, axis=0), h
+
+fwd, h_fwd = run_direction(
+    x_np,
+    rnn.weight_ih_l0.data, rnn.weight_hh_l0.data,
+    rnn.bias_ih_l0.data, rnn.bias_hh_l0.data,
+)
+rev_raw, h_rev = run_direction(
+    x_np[::-1],
+    rnn.weight_ih_l0_reverse.data, rnn.weight_hh_l0_reverse.data,
+    rnn.bias_ih_l0_reverse.data, rnn.bias_hh_l0_reverse.data,
+)
+oracle = np.concatenate([fwd, rev_raw[::-1]], axis=2)
+oracle_h = np.stack([h_fwd, h_rev], axis=0)
+out_np = np.asarray(out.tolist(), dtype=np.float32)
+hn_np = np.asarray(h_n.tolist(), dtype=np.float32)
+max_diff = float(max(np.max(np.abs(out_np - oracle)), np.max(np.abs(hn_np - oracle_h))))
+{"ok": max_diff < 1e-4, "max_diff": max_diff}
+`);
+    expect(result.ok).toBe(true);
+  });
+
+  it("LSTM stacked bidirectional state shape and state_dict keys match PyTorch layout", async () => {
+    const result = await target.run<{ ok: boolean; keys_ok: boolean; shapes_ok: boolean; grads_ok: boolean }>(`
+${PRELUDE}
+np.random.seed(5)
+B, T, I, H = 2, 3, 4, 6
+lstm = nn.LSTM(I, H, num_layers=2, bidirectional=True, batch_first=True, dropout=0.25)
+lstm.eval()
+x = grad.Tensor(np.random.randn(B, T, I).astype(np.float32), requires_grad=True)
+h0 = grad.Tensor(np.random.randn(4, B, H).astype(np.float32))
+c0 = grad.Tensor(np.random.randn(4, B, H).astype(np.float32))
+out, (h_n, c_n) = lstm(x, (h0, c0))
+loss = out.sum() + h_n.sum() + c_n.sum()
+loss.backward()
+sd = lstm.state_dict()
+expected = [
+    "weight_ih_l0", "weight_hh_l0", "bias_ih_l0", "bias_hh_l0",
+    "weight_ih_l0_reverse", "weight_hh_l0_reverse", "bias_ih_l0_reverse", "bias_hh_l0_reverse",
+    "weight_ih_l1", "weight_hh_l1", "bias_ih_l1", "bias_hh_l1",
+    "weight_ih_l1_reverse", "weight_hh_l1_reverse", "bias_ih_l1_reverse", "bias_hh_l1_reverse",
+]
+keys_ok = sorted(sd.keys()) == sorted(expected)
+shapes_ok = (
+    out.shape == (B, T, 2 * H)
+    and h_n.shape == (4, B, H)
+    and c_n.shape == (4, B, H)
+    and sd["weight_ih_l1"].shape == (4 * H, 2 * H)
+    and sd["weight_ih_l1_reverse"].shape == (4 * H, 2 * H)
+)
+grads_ok = x.grad is not None and x.grad.shape == (B, T, I)
+{"ok": bool(keys_ok and shapes_ok and grads_ok), "keys_ok": bool(keys_ok), "shapes_ok": bool(shapes_ok), "grads_ok": bool(grads_ok)}
+`);
+    expect(result.ok).toBe(true);
+  });
+
+  it("GRU stacked bidirectional supports bias=False, custom h_0, and backward", async () => {
+    const result = await target.run<{ ok: boolean }>(`
+${PRELUDE}
+np.random.seed(6)
+T, B, I, H = 3, 2, 4, 5
+gru = nn.GRU(I, H, num_layers=2, bias=False, bidirectional=True)
+x = grad.Tensor(np.random.randn(T, B, I).astype(np.float32), requires_grad=True)
+h0 = grad.Tensor(np.random.randn(4, B, H).astype(np.float32))
+out, h_n = gru(x, h0)
+loss = (out * out).mean() + h_n.mean()
+loss.backward()
+sd = gru.state_dict()
+no_bias = all("bias" not in k for k in sd.keys())
+shape_ok = out.shape == (T, B, 2 * H) and h_n.shape == (4, B, H)
+keys_ok = "weight_ih_l1_reverse" in sd and sd["weight_ih_l1"].shape == (3 * H, 2 * H)
+grad_ok = x.grad is not None and x.grad.shape == x.shape
+{"ok": bool(no_bias and shape_ok and keys_ok and grad_ok)}
+`);
+    expect(result.ok).toBe(true);
+  });
+
+  it("RNN dropout applies between stacked layers in train mode only", async () => {
+    const result = await target.run<{ ok: boolean; train_eval_diff: number; eval_repeat_diff: number }>(`
+${PRELUDE}
+np.random.seed(7)
+T, B, I, H = 5, 2, 3, 4
+rnn = nn.RNN(I, H, num_layers=2, dropout=0.9)
+x = grad.Tensor(np.ones((T, B, I), dtype=np.float32))
+rnn.eval()
+eval_a, _ = rnn(x)
+eval_b, _ = rnn(x)
+rnn.train()
+np.random.seed(123)
+train_a, _ = rnn(x)
+eval_arr_a = np.asarray(eval_a.tolist())
+eval_arr_b = np.asarray(eval_b.tolist())
+train_arr = np.asarray(train_a.tolist())
+eval_repeat_diff = float(np.max(np.abs(eval_arr_a - eval_arr_b)))
+train_eval_diff = float(np.max(np.abs(train_arr - eval_arr_a)))
+{"ok": eval_repeat_diff == 0.0 and train_eval_diff > 1e-5, "train_eval_diff": train_eval_diff, "eval_repeat_diff": eval_repeat_diff}
+`);
+    expect(result.ok).toBe(true);
+  });
+});

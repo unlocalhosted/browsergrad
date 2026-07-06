@@ -39,6 +39,10 @@
       "types": "./dist/node-adapter.d.ts",
       "import": "./dist/node-adapter.js"
     },
+    "./kernel-device": {
+      "types": "./dist/kernel-device.d.ts",
+      "import": "./dist/kernel-device.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -66,6 +70,9 @@
     "pyodide": "^0.26.4",
     "typescript": "~6.0.0",
     "vitest": "^4.0.0"
+  },
+  "dependencies": {
+    "@unlocalhosted/browsergrad-kernels": "workspace:*"
   },
   "optionalPeerDependencies": {
     "pyodide": "^0.26.4"

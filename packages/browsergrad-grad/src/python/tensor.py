@@ -8,6 +8,7 @@ New methods: exp, log, transpose (axis-aware), reshape, view.
 from __future__ import annotations
 import numpy as np
 from typing import Callable, List, Optional, Tuple, Union
+from . import _device
 
 Number = Union[int, float]
 ArrayLike = Union[Number, List, Tuple, "np.ndarray", "Tensor"]
@@ -653,7 +654,7 @@ def _div(a, b):
                   lambda g, a_, b_: -g * a_ / (b_ * b_))
 
 
-def _matmul(a, b) -> Tensor:
+def _matmul(a, b, device=None) -> Tensor:
     a_t = _wrap(a)
     b_t = _wrap(b)
     if a_t.data.ndim < 2 or b_t.data.ndim < 2:
@@ -664,7 +665,16 @@ def _matmul(a, b) -> Tensor:
         raise ValueError(
             f"matmul: inner dimensions don't match ({a_t.data.shape[-1]} vs {b_t.data.shape[-2]})"
         )
-    out = Tensor(a_t.data @ b_t.data)
+    if device is not None:
+        if a_t.data.ndim != 2 or b_t.data.ndim != 2:
+            raise NotImplementedError(
+                f"matmul(device=...): only 2D tensors supported by KernelDevice bridge "
+                f"(got {a_t.data.ndim}D and {b_t.data.ndim}D)"
+            )
+        out_data = _device.matmul(device, a_t.data, b_t.data)
+    else:
+        out_data = a_t.data @ b_t.data
+    out = Tensor(out_data)
     a_data, b_data = a_t.data, b_t.data
     a_shape, b_shape = a_t.data.shape, b_t.data.shape
     def backward(g):
@@ -1069,13 +1079,13 @@ def manual_seed(seed: int) -> None:
 # Functional aliases for ops that are also methods/operators.
 # These exist so user code matching torch.* function-form works.
 
-def matmul(a, b) -> Tensor:
-    return _matmul(a, b)
+def matmul(a, b, device=None) -> Tensor:
+    return _matmul(a, b, device=device)
 
 
-def mm(a, b) -> Tensor:
+def mm(a, b, device=None) -> Tensor:
     """2-D matmul. PyTorch errors on non-2D; we don't enforce since matmul handles all ranks."""
-    return _matmul(a, b)
+    return _matmul(a, b, device=device)
 
 
 def bmm(a, b) -> Tensor:

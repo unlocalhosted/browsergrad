@@ -4,8 +4,9 @@
 import math
 import numpy as np
 from typing import Iterator, Optional, Tuple
-from .tensor import Tensor, _build_ctx, stack
+from .tensor import Tensor, _build_ctx, cat, stack
 from . import functional as F
+from . import _device
 
 
 class Module:

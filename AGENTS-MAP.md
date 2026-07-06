@@ -22,7 +22,7 @@ Use this as a fast navigation layer before diving into files.
 | Package | Read First | Primary Source | Tests |
 | --- | --- | --- | --- |
 | `browsergrad-runtime` | `packages/browsergrad-runtime/README.md` | `src/client.ts`, `src/worker/`, `src/lab.ts` | `tests/`, `tests-integration/`, dogfood runtime tests |
-| `browsergrad-grad` | `packages/browsergrad-grad/README.md` | `src/python/tensor.py`, `src/python/functional.py`, `src/python/optim.py`, `src/python/nn_chunks/`, `src/python/_torch_compat_*.py` | `tests/`, `tests-integration/` |
+| `browsergrad-grad` | `packages/browsergrad-grad/README.md` | `src/python/tensor.py`, `src/python/functional.py`, `src/python/optim.py`, `src/python/nn_chunks/`, `src/python/_device.py`, `src/python/_torch_compat_*.py`, `src/kernel-device.ts` | `tests/`, `tests-integration/` |
 | `browsergrad-jit` | `packages/browsergrad-jit/README.md` | `src/python/_ir.py`, `_tensor_proxy.py`, `_realize.py`, `_vjp.py`, `_functional.py`, `_nn.py`, `_optim.py`, `_torch_compat.py` | `tests/`, `tests-integration/` |
 | `browsergrad-kernels` | `packages/browsergrad-kernels/README.md` | `src/realizer.ts`, `src/kernels/` | `tests/`, `tests-browser/` |
 | `browsergrad-compiler` | `packages/browsergrad-compiler/README.md`, `docs/platform/cuda-lite-compiler-architecture.md` | `src/parser.ts`, `src/analyzer.ts`, `src/reference.ts`, `src/wgsl.ts`, `src/runner.ts`, `scripts/cuda-lite-source-normalizer.mjs` | `tests/`, `tests-browser/`, corpus/e2e scripts |
@@ -32,7 +32,7 @@ Use this as a fast navigation layer before diving into files.
 ## Generated Source Rules
 
 - `browsergrad-jit/src/python/*.py` are the editable Python source files. Generated siblings are built by `packages/browsergrad-jit/scripts/build-python-sources.mjs`.
-- `browsergrad-grad/src/python/tensor.py`, `functional.py`, `optim.py`, `_torch_compat_*.py`, and `nn_chunks/*` are editable Python source. `nn.generated.ts` is assembled from chunks.
+- `browsergrad-grad/src/python/tensor.py`, `functional.py`, `optim.py`, `_device.py`, `_torch_compat_*.py`, and `nn_chunks/*` are editable Python source. `nn.generated.ts` is assembled from chunks. `src/kernel-device.ts` is the TS adapter from `@unlocalhosted/browsergrad-kernels` to Python's explicit eager `device=` bridge.
 - Do not manually patch `*.generated.ts` or `dist/` unless the task is explicitly about build output inspection. Run codegen/build instead.
 
 ## Important Seams

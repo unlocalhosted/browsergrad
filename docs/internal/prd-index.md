@@ -10,7 +10,7 @@ This document plans the next 12 months of browsergrad work using market and tech
 
 ## 1. Executive summary
 
-Browsergrad is a PyTorch-shaped Python library that runs entirely in the browser via Pyodide and NumPy. v0.5.0 covers ~95% of the educational PyTorch surface, has a real PyTorch-conformance test suite (forward + backward within 1e-4 on five ops vs. torch 2.12.0), 234 integration tests, and ships under MIT.
+Browsergrad is a PyTorch-shaped Python library that runs entirely in the browser via Pyodide and NumPy, with explicit WebGPU bridges where useful. Current `browsergrad-grad` v0.5.1 covers ~95% of the educational PyTorch surface, has real PyTorch-conformance fixtures, 321 Pyodide-in-node integration tests, and ships under MIT.
 
 Four findings from May 2026 research reshape priorities for the next 12 months:
 
@@ -35,15 +35,15 @@ These facts shape the roadmap:
 
 Current library footprint:
 
-- **`@unlocalhosted/browsergrad-grad`** v0.5.0 — PyTorch-shaped Python API. All of nn.Linear/Conv*/Norm/Pool/Drop/Embedding/Sequential/MHA/RNN/LSTM/GRU/Loss-modules; full autograd; optim with SGD/Adam/AdamW/RMSprop/Adagrad/Adadelta; schedulers; `torch.utils.data.DataLoader`; state_dict + torch.save/load; multi-dtype; einsum; `torch.linalg.{norm,inv,svd,...}` via `Pile B`; loud `NotImplementedError` for compile/fx/jit/cuda/distributed/onnx/quantization (Pile C). Source in 12 chunked `.py` files for `nn.py`, codegen-emitted into a single Python module for Pyodide.
-- **`@unlocalhosted/browsergrad-kernels`** — six WGSL kernels (matmul, softmax, layernorm, activations, attention, plus JS reference impls). **Not wired to grad yet** — exists as a future fast-path option.
+- **`@unlocalhosted/browsergrad-grad`** v0.5.1 — PyTorch-shaped Python API. Linear/Conv1d/Conv2d/Conv3d/ConvTranspose2d/Norm/Pool/Drop/Embedding/Sequential/MHA/RNN/LSTM/GRU/Loss modules; full closure autograd; optim with SGD/Adam/AdamW/RMSprop/Adagrad/Adadelta; schedulers; `torch.utils.data.DataLoader`; state_dict + torch.save/load; multi-dtype; einsum; `torch.linalg.{norm,inv,svd,...}` via `Pile B`; explicit `device=` forward dispatch for matmul/softmax/layernorm/unmasked 2D attention; loud `NotImplementedError` for compile/fx/jit/cuda/distributed/onnx/quantization (Pile C). Source in 12 chunked `.py` files for `nn.py`, codegen-emitted into a single Python module for Pyodide.
+- **`@unlocalhosted/browsergrad-kernels`** — WGSL kernels and JS references for matmul, softmax, layernorm, activations, attention, FA-v2 references, and realizer bridges. Wired to `browsergrad-grad` via `@unlocalhosted/browsergrad-grad/kernel-device` for explicit eager `device=` forward dispatch; wired to `browsergrad-jit` via `createWebGpuRealizerBridge`.
 - **`@unlocalhosted/browsergrad-runtime`** — Pyodide-in-Worker host with assertion + artifact relay protocols, cooperative cancellation, structured exec results.
-- **Test substrate**: 234 integration tests (28 files) against real Pyodide-in-Node; 25 unit tests; 5 PyTorch-conformance fixtures generated from real torch 2.12.0 verified within 1e-4 on Linear/CrossEntropy/LayerNorm/Softmax/ReLU.
-- **Ships**: 27 commits at HEAD, public on GitHub, pushed to `github.com/unlocalhosted/browsergrad`.
+- **Test substrate**: `browsergrad-grad` has 321 integration tests (32 files) against real Pyodide-in-Node and 30 unit/surface tests; PyTorch-conformance fixtures are generated from real torch and verified within tolerance on representative ops.
+- **Ships**: MIT-licensed packages from the public `github.com/unlocalhosted/browsergrad` repo.
 
 **What it doesn't yet do**:
 
-- Touch the GPU at all. Every op runs on CPU via NumPy-in-Pyodide.
+- Run all eager ops on GPU. `device=` covers matmul, softmax, layernorm, and unmasked 2D attention only; everything else runs on CPU via NumPy-in-Pyodide.
 - Compile or fuse. Eager Python interpretation per op.
 - Cache anything between page loads.
 - Have a curriculum or lab UI (that's craftingattention's job, but the runtime needs hooks).
@@ -63,7 +63,7 @@ Current library footprint:
 | tinygrad | Yes (PyTorch-like) | Yes (`ops_webgpu.py`) | **No** (no browser bundle) | active |
 | Pyodide + NumPy | Yes | No (CPU only) | Yes | active |
 | PyTorch (real) | Yes | No (blocked on Pyodide #1625) | No | impossible |
-| **Browsergrad** | **Yes** | Planned via kernels | **Yes** | **v0.5.0** |
+| **Browsergrad** | **Yes** | Yes: explicit eager `device=` bridge + JIT WebGPU realizer + CUDA-lite compiler path | **Yes** | **grad v0.5.1 / jit v0.8.2** |
 | **`greed` (deep-ml.com)** | Yes | Yes (WebGPU shaders) | Yes (deep-ml.com only) | active but proprietary to one site |
 
 Citations: [Transformers.js GitHub](https://github.com/huggingface/transformers.js); [ORT Web docs](https://onnxruntime.ai/docs/tutorials/web/ep-webgpu.html); [TF.js releases](https://github.com/tensorflow/tfjs/releases); [WebLLM](https://github.com/mlc-ai/web-llm); [tinygrad](https://github.com/tinygrad/tinygrad); [Pyodide #1625](https://github.com/pyodide/pyodide/issues/1625); [Open-Deep-ML/DML-OpenProblem](https://github.com/Open-Deep-ML/DML-OpenProblem).
@@ -380,7 +380,7 @@ Every feature below has: **what** (one-sentence description), **why** (problem s
 
 **Acceptance**:
 1. PyTorch-conformance suite passes via the IR path within 1e-4.
-2. Existing 234 integration tests pass unchanged via the IR path.
+2. Existing `browsergrad-grad` integration coverage (currently 321 tests) passes unchanged via the IR path.
 3. Documented performance regression budget: ≤20% slower than eager during this step (the value is unlocking future gains, not immediate perf).
 4. Eager NumPy mode remains available behind `browsergrad.use_eager(True)`.
 

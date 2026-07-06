@@ -8,10 +8,10 @@ Living document. Reflects the current state of each package, what's tested, and 
 |---|---|---|---|---|
 | `@unlocalhosted/browsergrad-runtime` | `0.1.1` | 27 | 23 (Pyodide-in-node) | — |
 | `@unlocalhosted/browsergrad-kernels` | `0.1.2` | 35 (incl. JS-reference numerical checks, FUSED WGSL codegen) | — | 42 (real Chromium + WebGPU) |
-| `@unlocalhosted/browsergrad-grad` | `0.5.1` | 30 | 317 (Pyodide-in-node) | — |
+| `@unlocalhosted/browsergrad-grad` | `0.5.1` | 30 | 321 (Pyodide-in-node) | — |
 | `@unlocalhosted/browsergrad-jit` | `0.8.2` | 8 | 223 (Pyodide-in-node, incl. feedback + perf benches) | — (via kernels) |
 
-`browsergrad-grad` current local gates: 30 surface/unit tests and 317
+`browsergrad-grad` current local gates: 30 surface/unit tests and 321
 Pyodide-in-node integration tests green. Workspace-wide totals drift as
 compiler/WebGPU bug-bash work lands; prefer package-level commands as source of
 truth.

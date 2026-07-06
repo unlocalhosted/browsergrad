@@ -3,6 +3,7 @@
 
 import numpy as np
 from .tensor import Tensor, _build_ctx
+from . import _device
 
 
 # ─── Activations ───────────────────────────────────────────
@@ -64,13 +65,21 @@ def gelu(x: Tensor) -> Tensor:
 
 # ─── Softmax family ────────────────────────────────────────
 
-def softmax(x: Tensor, dim: int = -1) -> Tensor:
+def softmax(x: Tensor, dim: int = -1, device=None) -> Tensor:
     """Stable softmax along `dim`."""
     xd = x.data
-    shifted = xd - xd.max(axis=dim, keepdims=True)
-    exp_data = np.exp(shifted)
-    sum_data = exp_data.sum(axis=dim, keepdims=True)
-    s = exp_data / sum_data
+    axis = dim if dim >= 0 else xd.ndim + dim
+    if device is not None and axis != xd.ndim - 1:
+        raise NotImplementedError(
+            f"softmax(device=...): KernelDevice bridge supports only last dim (got dim={dim})"
+        )
+    if device is not None:
+        s = _device.softmax(device, xd)
+    else:
+        shifted = xd - xd.max(axis=dim, keepdims=True)
+        exp_data = np.exp(shifted)
+        sum_data = exp_data.sum(axis=dim, keepdims=True)
+        s = exp_data / sum_data
     out = Tensor(s)
     # d(softmax)/dx_i for row r:  s_i * (g_i - sum_j(s_j * g_j))
     def backward(g):
@@ -509,7 +518,8 @@ def cosine_similarity(x1: Tensor, x2: Tensor, dim: int = 1, eps: float = 1e-8) -
 
 def scaled_dot_product_attention(query: Tensor, key: Tensor, value: Tensor,
                                   attn_mask=None, dropout_p: float = 0.0,
-                                  is_causal: bool = False, scale=None) -> Tensor:
+                                  is_causal: bool = False, scale=None,
+                                  device=None) -> Tensor:
     """Scaled dot-product attention: softmax(Q @ K^T / sqrt(d_k)) @ V.
 
     Supports the subset of torch's API that matters most:
@@ -521,28 +531,45 @@ def scaled_dot_product_attention(query: Tensor, key: Tensor, value: Tensor,
     """
     if dropout_p != 0.0:
         raise NotImplementedError("scaled_dot_product_attention: dropout_p > 0 not supported")
+    if device is not None and (attn_mask is not None or is_causal or scale is not None):
+        raise NotImplementedError(
+            "scaled_dot_product_attention(device=...): KernelDevice bridge supports only "
+            "unmasked default-scale attention"
+        )
     Qd = query.data
     Kd = key.data
     Vd = value.data
     d_k = Qd.shape[-1]
     s = (1.0 / np.sqrt(d_k)) if scale is None else float(scale)
-    # scores: (..., L_q, L_k)
-    scores = np.matmul(Qd, np.swapaxes(Kd, -1, -2)) * s
-    if is_causal:
-        L_q, L_k = scores.shape[-2], scores.shape[-1]
-        tri = np.triu(np.ones((L_q, L_k), dtype=bool), k=1)
-        scores = np.where(tri, -np.inf, scores)
-    if attn_mask is not None:
-        m = np.asarray(attn_mask)
-        if m.dtype == bool:
-            scores = np.where(m, -np.inf, scores)
-        else:
-            scores = scores + m
-    # softmax along last axis, stable.
-    sm = scores - scores.max(axis=-1, keepdims=True)
-    e = np.exp(sm)
-    attn = e / e.sum(axis=-1, keepdims=True)
-    out_data = np.matmul(attn, Vd).astype(np.float32)
+    if device is not None:
+        if Qd.ndim != 2 or Kd.ndim != 2 or Vd.ndim != 2:
+            raise NotImplementedError(
+                "scaled_dot_product_attention(device=...): KernelDevice bridge supports "
+                f"2D Q/K/V only (got ranks {Qd.ndim}/{Kd.ndim}/{Vd.ndim})"
+            )
+        out_data = _device.attention(device, Qd, Kd, Vd)
+        scores = np.matmul(Qd, np.swapaxes(Kd, -1, -2)) * s
+        sm = scores - scores.max(axis=-1, keepdims=True)
+        e = np.exp(sm)
+        attn = e / e.sum(axis=-1, keepdims=True)
+    else:
+        # scores: (..., L_q, L_k)
+        scores = np.matmul(Qd, np.swapaxes(Kd, -1, -2)) * s
+        if is_causal:
+            L_q, L_k = scores.shape[-2], scores.shape[-1]
+            tri = np.triu(np.ones((L_q, L_k), dtype=bool), k=1)
+            scores = np.where(tri, -np.inf, scores)
+        if attn_mask is not None:
+            m = np.asarray(attn_mask)
+            if m.dtype == bool:
+                scores = np.where(m, -np.inf, scores)
+            else:
+                scores = scores + m
+        # softmax along last axis, stable.
+        sm = scores - scores.max(axis=-1, keepdims=True)
+        e = np.exp(sm)
+        attn = e / e.sum(axis=-1, keepdims=True)
+        out_data = np.matmul(attn, Vd).astype(np.float32)
     out = Tensor(out_data)
     def backward(g):
         # Educational backward through the explicit formula.

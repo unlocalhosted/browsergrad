@@ -17,6 +17,7 @@ import { TORCH_COMPAT_PY } from "./torch_compat.js";
 import { TORCH_COMPAT_REAL_PY } from "./_torch_compat_real.js";
 import { TORCH_COMPAT_LIMITED_PY } from "./_torch_compat_limited.js";
 import { TORCH_COMPAT_IMPOSSIBLE_PY } from "./_torch_compat_impossible.js";
+import { DEVICE_PY } from "./_device.js";
 import { UTILS_DATA_PY } from "./utils_data.js";
 import pkg from "../../package.json" with { type: "json" };
 
@@ -72,6 +73,7 @@ from .tensor import (
 from . import functional
 from . import nn
 from . import optim
+from . import _device
 from . import utils  # nested namespace: browsergrad_grad.utils.data
 from .torch_compat import install_torch_alias
 
@@ -139,6 +141,7 @@ export const SOURCE_FILES: readonly PythonSource[] = [
   { path: "browsergrad_grad/_torch_compat_real.py", content: TORCH_COMPAT_REAL_PY },
   { path: "browsergrad_grad/_torch_compat_limited.py", content: TORCH_COMPAT_LIMITED_PY },
   { path: "browsergrad_grad/_torch_compat_impossible.py", content: TORCH_COMPAT_IMPOSSIBLE_PY },
+  { path: "browsergrad_grad/_device.py", content: DEVICE_PY },
   { path: "browsergrad_grad/torch_compat.py", content: TORCH_COMPAT_PY },
   { path: "browsergrad_grad/utils/__init__.py", content: 'from . import data\n__all__ = ["data"]\n' },
   { path: "browsergrad_grad/utils/data.py", content: UTILS_DATA_PY },

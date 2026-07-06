@@ -2,9 +2,11 @@
 
 Tracking the v0.4.7 → ~v0.6 push to close the gaps that block real PyTorch labs.
 
-Last updated: 2026-05-26.
+Last updated: 2026-07-06.
 
-Pyodide-in-node integration suite is the source of truth: 17 files, 157 tests, all green at the head of each commit listed below.
+Pyodide-in-node integration suite is the source of truth: 32 files, 321 tests,
+all green for the current `browsergrad-grad` capability pass. Unit/surface
+suite: 30 tests green.
 
 ## Pile A — possible, just unbuilt
 
@@ -27,8 +29,8 @@ Implementable on NumPy with TDD. Each row = one focused commit (or small group).
 | 13 | Tensor math: `abs`, `sign`, `clip`/`clamp`, `where`, `min`/`max(dim)`, `std`, `var`, `topk`, `sort`, `sqrt`, `pow` | 🟡 partial — `abs`, `sign`, `sqrt`, `pow`, `clamp`/`clip`, `topk`, `where` done; `min`/`max(dim)`, `std`, `var`, `sort` still pending | — |
 | 14 | Tensor shape: `expand`, `repeat`, `chunk`, `split`, `contiguous`, `roll`, `flip` | 🟡 partial — `expand`, `repeat`, `flip` done; `chunk`, `split`, `contiguous`, `roll` still pending | — |
 | 15 | `nn.RNN` / `nn.LSTM` / `nn.GRU` + backward through time | ✅ done | — |
-| 16 | `nn.Conv3d` + `nn.ConvTranspose1d` / `nn.ConvTranspose2d` | ⏳ deferred (rarely used in browser labs; track if demand emerges) | — |
-| 17 | `nn.GroupNorm` / `nn.InstanceNorm{1,2,3}d` / `nn.BatchNorm3d` | 🟡 partial — GroupNorm, InstanceNorm2d, BatchNorm3d done; InstanceNorm1d/3d still pending | — |
+| 16 | `nn.Conv3d` + `nn.ConvTranspose1d` / `nn.ConvTranspose2d` | 🟡 partial — Conv3d and ConvTranspose2d done with oracle + finite-diff tests; ConvTranspose1d still deferred until demand emerges | — |
+| 17 | `nn.GroupNorm` / `nn.InstanceNorm{1,2,3}d` / `nn.BatchNorm3d` | 🟡 partial — GroupNorm, InstanceNorm2d, BatchNorm3d done with statistics-aware backward; InstanceNorm1d/3d still pending | — |
 | 18 | Module hooks: `register_forward_hook`, `register_backward_hook` | 🟡 partial — forward hook done; backward hook still pending | — |
 | ★ | **PyTorch-conformance fixture suite** (real torch in subprocess generates fixtures; Pyodide loads + compares) | ✅ done (Linear, CrossEntropy, LayerNorm, Softmax, ReLU against torch 2.12.0) | — |
 
@@ -42,6 +44,7 @@ Ship "good enough" with explicit caveats in docstrings + STATUS.md.
 | Basic image transforms (`torchvision.transforms`-like) | NumPy-based resize/normalize/to_tensor | ⏳ deferred |
 | `torch.linalg.*` subset (`norm`, `svd`, `eigh`, `inv`, `det`, `solve`, `pinv`) | Wrap `numpy.linalg` with backward where common | ✅ done (forward; backward via numpy) |
 | Single-notional-device "multi-GPU" hooks | `model.to([0, 1])` accepts but no-ops; document | ✅ done (Module.to is no-op) |
+| Explicit eager WebGPU forward dispatch | `device=` bridge to `browsergrad-kernels` for matmul, softmax, layernorm, attention; backward remains CPU closure autograd | ✅ done |
 
 ## Pile C — physically impossible in browser
 
@@ -74,4 +77,10 @@ For every item: write a behavior test first against an **independent oracle** (N
 
 ## End-state target
 
-`browsergrad-grad` covers the API surface a typical PyTorch lab actually uses (~95% idiom coverage). The torch shim is comprehensive enough that vanilla PyTorch tutorials run unmodified for everything except: distributed training, compilation, CUDA, multi-process data loading, ONNX. Those are explicitly documented as impossible-in-browser, not silent gaps.
+`browsergrad-grad` covers the API surface a typical PyTorch lab actually uses
+(~95% idiom coverage). The torch shim is comprehensive enough that vanilla
+PyTorch tutorials run unmodified for common CPU/eager exercises. Remaining hard
+limits: distributed training, compilation, CUDA runtime, multi-process data
+loading, ONNX, quantization, sparse tensors, ConvTranspose1d, and
+InstanceNorm1d/3d. These are explicit browser or scope refusals, not silent
+gaps.

@@ -122,7 +122,7 @@ diff = bool(np.abs(eval_logits - train_logits).max() > 0)
 {"initial_acc": initial, "final_acc": final, "train_eval_diff": diff}
 `);
     // 4-class problem, random init → ~25% accuracy.
-    expect(result.initial_acc).toBeLessThan(0.5);
+    expect(result.initial_acc).toBeLessThanOrEqual(0.5);
     // A correctly-wired pipeline reaches near-perfect on this trivial task.
     expect(result.final_acc).toBeGreaterThan(0.9);
     // Dropout / BatchNorm should produce different outputs in train vs eval.

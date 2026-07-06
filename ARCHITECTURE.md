@@ -71,7 +71,7 @@ real-world corpus gates compile/codegen pinned CUDA corpora and execute selected
 fixtures in Chromium/WebGPU against CPU reference outputs.
 
 ### `browsergrad-grad` — eager autograd
-Closure-based reverse-mode autograd in Python. Each op carries a closure that runs at `.backward()` time. NumPy-backed, no IR, no lazy semantics. Stable; designed to be readable source code.
+Closure-based reverse-mode autograd in Python. Each op carries a closure that runs at `.backward()` time. NumPy-backed by default, no IR, no lazy semantics. Stable; designed to be readable source code. It now covers the classic eager teaching surface — Conv1d/2d/3d, ConvTranspose2d, pooling, BatchNorm1d/2d/3d, GroupNorm/InstanceNorm2d, LayerNorm, Dropout, Embedding, MultiHeadAttention, single-layer RNN/LSTM/GRU, optimizers, schedulers, state_dict, hooks, and torch-alias shims. A small explicit `device=` path can run forward matmul / softmax / layernorm / unmasked 2D attention through `browsergrad-kernels`; CPU autograd still owns backward.
 
 ### `browsergrad-jit` — lazy IR
 The UOp graph + lazy execution path. Every arithmetic op builds an IR node; nothing realizes until `.numpy()` / `.item()` / `.backward()` / `optimizer.step()`. The IR enables fusion, symbolic backward, AMP cast-insertion, gradient-checkpointing IR rewrites, functional transforms (vmap / grad / vjp / functional_call), custom WGSL kernels, ONNX export, and pluggable backends.

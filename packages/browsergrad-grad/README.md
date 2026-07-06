@@ -15,21 +15,21 @@ y.backward()
 print(x.grad.tolist())   # [2.0, 4.0, 6.0]
 ```
 
-> **Status: v0.4.6 — stable.** Comprehensive layer set for CNNs and Transformers: Conv2d/Conv1d, BatchNorm2d/1d, LayerNorm, MaxPool/AvgPool, AdaptiveAvgPool2d, Dropout/Dropout2d, Embedding, MultiHeadAttention, Flatten + all common activations. Optimizers: SGD/Adam/AdamW. Module.train()/eval() mode system. **140 tests green** (25 surface + 115 Pyodide-in-node integration), with end-to-end training checks for MLP, CNN, sequence-CNN, and transformer-block.
+> **Status: v0.5.1 — stable.** Comprehensive layer set for CNNs and Transformers: ConvTranspose2d, Conv3d/2d/1d, BatchNorm3d/2d/1d, GroupNorm/InstanceNorm2d, LayerNorm, MaxPool/AvgPool, AdaptiveAvgPool2d, Dropout/Dropout2d, Embedding, MultiHeadAttention, RNN/LSTM/GRU, Flatten + all common activations. Optimizers: SGD/Adam/AdamW plus LR schedulers. Module.train()/eval(), hooks, state_dict/load_state_dict, torch-alias compatibility shims, and end-to-end training checks for MLP, CNN, sequence-CNN, and transformer-block.
 >
 > **The lazy-IR successor is [`browsergrad-jit`](../browsergrad-jit/)** — same PyTorch surface, but ops build a UOp graph that fusion / symbolic backward / AMP / gradient checkpointing / functional transforms / ONNX export / WebGPU realizer-bridge all hook into. Use grad for stable curriculum content; use jit when you want fusion + GPU acceleration + the broader toolkit. Both coexist in the same Pyodide session.
 
 ## What this is
 
-PyTorch-flavored API, NumPy-backed, **deliberately not PyTorch.** The Python module is named `browsergrad_grad`, not `torch` — because pretending to be PyTorch traps you into PyTorch's full surface area, and we want to stay small enough to read.
+PyTorch-flavored API, NumPy-backed, **deliberately not PyTorch.** The Python module is named `browsergrad_grad`, not `torch`; call `install_torch_alias()` when you want the supported `torch` shim. Unsupported PyTorch APIs fail loudly instead of pretending to work.
 
-The library is meant to be **legible source code**. If you `print(inspect.getsource(grad.Tensor))` you should be able to follow what's happening. The whole package is ~450 lines of Python.
+The library is meant to be **legible source code**. Tensor/autograd, functional ops, optimizers, and `nn` chunks live as editable Python files under `src/python/`; codegen embeds them into TypeScript for installation into Pyodide.
 
 ## What this is not
 
-- ❌ PyTorch. We don't try to match its API exactly.
-- ❌ A polyfill. Don't expect `import torch` to work.
-- ❌ Production-fast. NumPy-on-CPU. **GPU acceleration lives in [`browsergrad-jit`](../browsergrad-jit/)** via the WebGPU realizer-bridge (PRD-011.5) — if you need throughput, migrate to jit; if you want stable curriculum semantics, stay here.
+- ❌ PyTorch. We don't try to match its full API.
+- ❌ A full polyfill. `install_torch_alias()` supports common tutorial code, but CUDA, distributed, compile/fx/jit, ONNX, quantization, and multi-process loaders remain explicit browser-scope refusals.
+- ❌ Production-fast. NumPy-on-CPU by default. A forward-only `device=` escape hatch can dispatch matmul / softmax / layernorm / unmasked 2D attention through `@unlocalhosted/browsergrad-kernels`, but throughput-oriented model execution still belongs in [`browsergrad-jit`](../browsergrad-jit/) via its WebGPU realizer-bridge.
 - ❌ A general framework. It's a **teaching artifact** sized to fit in your head.
 
 ## Install
@@ -38,8 +38,9 @@ The library is meant to be **legible source code**. If you `print(inspect.getsou
 npm install @unlocalhosted/browsergrad-grad
 ```
 
-No dependencies. Pyodide is not a peer dep — `installGrad` works with any
-duck-typed Pyodide target.
+Depends on `@unlocalhosted/browsergrad-kernels` for the optional `device=`
+bridge. Pyodide is not a peer dep — `installGrad` works with any duck-typed
+Pyodide target.
 
 ## Usage
 
@@ -100,7 +101,33 @@ await installGrad(createNodePyodideTarget(py));
 
 `pyodide` is an `optionalPeerDependencies` — bring your own version. The adapter has no other dependencies.
 
-## Python API surface (v0.2.0)
+Optional WebGPU forward dispatch:
+
+```ts
+import { createDevice } from "@unlocalhosted/browsergrad-kernels";
+import { createGradKernelDeviceBridge } from "@unlocalhosted/browsergrad-grad/kernel-device";
+
+const device = await createDevice();
+const gradDevice = createGradKernelDeviceBridge(device);
+py.globals.set("grad_device", gradDevice);
+
+await py.runPythonAsync(`
+import browsergrad_grad as grad
+import browsergrad_grad.functional as F
+
+a = grad.Tensor([[1., 2.], [3., 4.]])
+b = grad.Tensor([[5., 6.], [7., 8.]])
+y = grad.matmul(a, b, device=grad_device)
+p = F.softmax(y, dim=-1, device=grad_device)
+`);
+```
+
+`device=` is intentionally small: 2D `grad.matmul` / `grad.mm`, last-dim
+`F.softmax`, last-dim `nn.LayerNorm(..., device=...)`, and unmasked default
+`F.scaled_dot_product_attention(..., device=...)` for 2D Q/K/V. Backward still
+uses BrowserGrad's CPU formulas after the GPU forward result is materialized.
+
+## Python API surface (v0.5.1)
 
 ```python
 import browsergrad_grad as grad
@@ -136,6 +163,7 @@ loss.backward()                    # accumulates into .grad of every leaf
 import browsergrad_grad.functional as F
 F.relu(x), F.leaky_relu(x, 0.01), F.sigmoid(x), F.tanh(x), F.gelu(x)
 F.softmax(x, dim=-1), F.log_softmax(x, dim=-1)
+F.scaled_dot_product_attention(q, k, v, attn_mask=None, is_causal=False)
 F.mse_loss(y_hat, y)               # regression
 F.cross_entropy_loss(logits, targets)   # classification (fused, stable)
 F.nll_loss(log_probs, targets)
@@ -144,16 +172,24 @@ F.nll_loss(log_probs, targets)
 import browsergrad_grad.nn as nn
 nn.Module                          # base — auto-tracks Tensor params
 nn.Linear(in_features, out_features, bias=True)
-nn.Conv2d(in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True)
+nn.Conv2d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True)
+nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride=1, padding=0, output_padding=0, groups=1, bias=True, dilation=1)
 nn.Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=0, bias=True)
+nn.Conv3d(in_channels, out_channels, kernel_size, stride=1, padding=0, dilation=1, groups=1, bias=True)
 nn.MaxPool2d(kernel_size, stride=None, padding=0)
 nn.AvgPool2d(kernel_size, stride=None, padding=0)
 nn.AdaptiveAvgPool2d(output_size)
 nn.BatchNorm2d(num_features, eps=1e-5, momentum=0.1, affine=True)
 nn.BatchNorm1d(num_features, eps=1e-5, momentum=0.1, affine=True)   # (N,C) or (N,C,L)
-nn.LayerNorm(normalized_shape, eps=1e-5)
+nn.BatchNorm3d(num_features, eps=1e-5, momentum=0.1, affine=True)
+nn.GroupNorm(num_groups, num_channels, eps=1e-5, affine=True)
+nn.InstanceNorm2d(num_features, eps=1e-5, affine=False)
+nn.LayerNorm(normalized_shape, eps=1e-5, device=None)
 nn.Embedding(num_embeddings, embedding_dim)
 nn.MultiHeadAttention(embed_dim, num_heads, bias=True)              # (N, S, D)
+nn.RNN(input_size, hidden_size, num_layers=1, bias=True, batch_first=False, dropout=0.0, bidirectional=False)
+nn.LSTM(input_size, hidden_size, num_layers=1, bias=True, batch_first=False, dropout=0.0, bidirectional=False)
+nn.GRU(input_size, hidden_size, num_layers=1, bias=True, batch_first=False, dropout=0.0, bidirectional=False)
 nn.Dropout(p=0.5)
 nn.Dropout2d(p=0.5)                                                 # channel-wise
 nn.Flatten(start_dim=1, end_dim=-1)
@@ -170,23 +206,25 @@ optim.Adam(params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0)
 optim.AdamW(params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-2)
 ```
 
-## What's NOT yet in (v0.3+ targets)
+## Current capability status
 
-These are documented as deferred — additive when they land:
+Done since the original v0.3 cut:
 
-- **Conv1d / Conv3d.** v0.4 if needed; v0.3 ships Conv2d only.
-- **Tuple kernel/stride/padding shapes, dilation, groups, ConvTranspose2d.** v0.4+.
-- **im2col + matmul optimization** for Conv2d. v0.3 ships naive nested loops (correct + readable). Refactor candidate when perf matters.
-- **BatchNorm / GroupNorm.** Mostly needed for older CNN architectures.
-- **Dropout, RNN, LSTM, GRU.** Less central for transformer-focused curriculum.
-- **WebGPU dispatch.** v0 is pure NumPy. v0.3 will add an optional `device` arg
-  that dispatches matmul / softmax / layernorm / attention to a `KernelDevice`
-  from `@unlocalhosted/browsergrad-kernels` when provided.
+- **Conv2d** now uses im2col + batched matmul, supports tuple `kernel_size` / `stride` / `padding`, `dilation`, and `groups`.
+- **ConvTranspose2d**, **Conv3d/2d/1d**, **BatchNorm3d/2d/1d**, **GroupNorm**, **InstanceNorm2d**, **Dropout/Dropout2d**, **RNN/LSTM/GRU** (multi-layer + bidirectional), **Embedding**, and **MultiHeadAttention** are in.
+- **Norm backward correctness** now covers full statistics-aware input gradients for BatchNorm3d, GroupNorm, and InstanceNorm2d.
+- **Module ergonomics** now cover `train()` / `eval()`, hooks, buffers, `state_dict`, `load_state_dict`, and torch compatibility shims.
+
+- **WebGPU forward dispatch** is in as an explicit `device=` path over `@unlocalhosted/browsergrad-kernels` for matmul, softmax, layernorm, and attention.
+
+Remaining explicit limits:
+
+- **Direct eager GPU scope.** `device=` is forward-only and intentionally explicit. It does not make all eager ops GPU-backed, and it materializes results before CPU autograd.
 
 ## Design notes
 
 - **No `_ctx`-mutability shenanigans.** Each op captures the data it needs at forward time and binds it in a closure. Backward functions are pure.
-- **No global gradient context.** No `torch.no_grad()` yet — to detach from autograd, call `.detach()` to get a fresh leaf.
+- **Global gradient context exists.** `grad.no_grad()` disables graph construction for inference sections; `.detach()` returns a fresh leaf copy.
 - **Reverse-mode only.** No forward-mode, no functional transforms (vmap, etc.).
 - **`Tensor.__slots__`.** Slot-based attribute layout to keep memory predictable for tensors in long training loops.
 

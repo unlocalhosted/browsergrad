@@ -31,6 +31,7 @@ const MODULES = [
   ["_torch_compat_real.py", "_torch_compat_real.generated.ts", "TORCH_COMPAT_REAL_PY"],
   ["_torch_compat_limited.py", "_torch_compat_limited.generated.ts", "TORCH_COMPAT_LIMITED_PY"],
   ["_torch_compat_impossible.py", "_torch_compat_impossible.generated.ts", "TORCH_COMPAT_IMPOSSIBLE_PY"],
+  ["_device.py", "_device.generated.ts", "DEVICE_PY"],
   ["utils_data.py", "utils_data.generated.ts", "UTILS_DATA_PY"],
 ];
 

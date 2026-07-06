@@ -209,6 +209,88 @@ y = conv(grad.Tensor(X))
     // x[0,0,0,1]=2, x[0,0,1,0]=4, x[0,0,1,1]=5 → sum=12.
     expect(result.corner_topleft).toBe(12);
   });
+
+  it("tuple kernel/stride/padding with dilation matches naive numpy correlation", async () => {
+    const result = await target.run<{
+      ours: number[][][][];
+      ref: number[][][][];
+      shape: number[];
+    }>(`
+${PRELUDE}
+X = (np.arange(1 * 2 * 5 * 6, dtype=np.float32).reshape(1, 2, 5, 6) - 10.0) / 7.0
+W = (np.arange(2 * 2 * 2 * 3, dtype=np.float32).reshape(2, 2, 2, 3) - 5.0) / 11.0
+b = np.array([0.25, -0.5], dtype=np.float32)
+conv = nn.Conv2d(2, 2, kernel_size=(2, 3), stride=(2, 1), padding=(1, 2), dilation=(2, 1))
+conv.weight.data[:] = W
+conv.bias.data[:] = b
+y = conv(grad.Tensor(X))
+
+ph, pw = 1, 2
+dh, dw = 2, 1
+sh, sw = 2, 1
+kh, kw = 2, 3
+xp = np.pad(X, ((0, 0), (0, 0), (ph, ph), (pw, pw)), mode="constant")
+H_out = (xp.shape[2] - (dh * (kh - 1) + 1)) // sh + 1
+W_out = (xp.shape[3] - (dw * (kw - 1) + 1)) // sw + 1
+ref = np.zeros((1, 2, H_out, W_out), dtype=np.float32)
+for n in range(1):
+  for co in range(2):
+    for i in range(H_out):
+      for j in range(W_out):
+        acc = b[co]
+        for ci in range(2):
+          for r in range(kh):
+            for c in range(kw):
+              acc += W[co, ci, r, c] * xp[n, ci, i * sh + r * dh, j * sw + c * dw]
+        ref[n, co, i, j] = acc
+{"ours": y.tolist(), "ref": ref.tolist(), "shape": list(y.shape)}
+`);
+    expect(result.shape).toEqual([1, 2, 3, 8]);
+    const ours = result.ours.flat(3);
+    const ref = result.ref.flat(3);
+    expect(ours.length).toBe(ref.length);
+    for (let i = 0; i < ours.length; i++) {
+      expect(Math.abs(ours[i]! - ref[i]!)).toBeLessThan(1e-4);
+    }
+  });
+
+  it("groups isolate input/output channel partitions", async () => {
+    const result = await target.run<number[][][]>(`
+${PRELUDE}
+conv = nn.Conv2d(4, 4, kernel_size=1, groups=2, bias=False)
+conv.weight.data[:] = 0.0
+conv.weight.data[0, 0, 0, 0] = 1.0
+conv.weight.data[1, 1, 0, 0] = 1.0
+conv.weight.data[2, 0, 0, 0] = 10.0
+conv.weight.data[3, 1, 0, 0] = 10.0
+X = np.array([[
+  [[1, 1], [1, 1]],
+  [[2, 2], [2, 2]],
+  [[3, 3], [3, 3]],
+  [[4, 4], [4, 4]],
+]], dtype=np.float32)
+y = conv(grad.Tensor(X))
+y.data[0].tolist()
+`);
+    expect(result).toEqual([
+      [
+        [1, 1],
+        [1, 1],
+      ],
+      [
+        [2, 2],
+        [2, 2],
+      ],
+      [
+        [30, 30],
+        [30, 30],
+      ],
+      [
+        [40, 40],
+        [40, 40],
+      ],
+    ]);
+  });
 });
 
 describe("Conv2d — backward", () => {
@@ -312,6 +394,58 @@ for i in range(X.shape[2]):
     for (let i = 0; i < result.analytic.length; i++) {
       expect(Math.abs(result.analytic[i]! - result.finite_diff[i]!)).toBeLessThan(5e-3);
     }
+  });
+
+  it("grouped 1x1 conv routes gradients only within each group", async () => {
+    const result = await target.run<{
+      x_grad: number[][][];
+      w_grad: number[][][][];
+      b_grad: number[];
+    }>(`
+${PRELUDE}
+conv = nn.Conv2d(4, 4, kernel_size=1, groups=2)
+conv.weight.data[:] = np.array([
+  [[[1.0]], [[2.0]]],
+  [[[3.0]], [[4.0]]],
+  [[[5.0]], [[6.0]]],
+  [[[7.0]], [[8.0]]],
+], dtype=np.float32)
+conv.bias.data[:] = 0.0
+x = grad.Tensor(np.array([[
+  [[1, 2], [3, 4]],
+  [[5, 6], [7, 8]],
+  [[9, 10], [11, 12]],
+  [[13, 14], [15, 16]],
+]], dtype=np.float32), requires_grad=True)
+loss = conv(x).sum()
+loss.backward()
+{"x_grad": x.grad.data[0].tolist(), "w_grad": conv.weight.grad.tolist(), "b_grad": conv.bias.grad.tolist()}
+`);
+    expect(result.x_grad).toEqual([
+      [
+        [4, 4],
+        [4, 4],
+      ],
+      [
+        [6, 6],
+        [6, 6],
+      ],
+      [
+        [12, 12],
+        [12, 12],
+      ],
+      [
+        [14, 14],
+        [14, 14],
+      ],
+    ]);
+    expect(result.w_grad).toEqual([
+      [[[10]], [[26]]],
+      [[[10]], [[26]]],
+      [[[42]], [[58]]],
+      [[[42]], [[58]]],
+    ]);
+    expect(result.b_grad).toEqual([4, 4, 4, 4]);
   });
 });
 

@@ -222,13 +222,14 @@ class LayerNorm(Module):
     """
 
     def __init__(self, normalized_shape, eps: float = 1e-5,
-                 elementwise_affine: bool = True):
+                 elementwise_affine: bool = True, device=None):
         super().__init__()
         if isinstance(normalized_shape, int):
             normalized_shape = (normalized_shape,)
         self.normalized_shape = tuple(normalized_shape)
         self.eps = float(eps)
         self.elementwise_affine = elementwise_affine
+        self.device = device
         if elementwise_affine:
             self.weight = Tensor(np.ones(self.normalized_shape, dtype=np.float32), requires_grad=True)
             self.bias = Tensor(np.zeros(self.normalized_shape, dtype=np.float32), requires_grad=True)
@@ -253,11 +254,27 @@ class LayerNorm(Module):
         var = (centered * centered).mean(axis=axes, keepdims=True)
         inv_std = 1.0 / np.sqrt(var + self.eps)
         normed = centered * inv_std
-        if self.weight is not None:
+        if self.device is not None and axes != (x.data.ndim - 1,):
+            raise NotImplementedError(
+                "LayerNorm(device=...): KernelDevice bridge supports normalization over last dim only"
+            )
+        if self.device is not None:
+            out_data = _device.layernorm(
+                self.device,
+                xd,
+                self.weight.data if self.weight is not None else None,
+                self.bias.data if self.weight is not None else None,
+                self.eps,
+            )
+        elif self.weight is not None:
             out_data = normed * self.weight.data + self.bias.data
             parents: Tuple[Tensor, ...] = (x, self.weight, self.bias)
         else:
             out_data = normed
+            parents = (x,)
+        if self.device is not None and self.weight is not None:
+            parents = (x, self.weight, self.bias)
+        elif self.device is not None:
             parents = (x,)
         out = Tensor(out_data)
 
@@ -328,22 +345,26 @@ class GroupNorm(Module):
             w_shape = (1, C) + tuple(1 for _ in spatial)
             out_data = out_data * self.weight.data.reshape(w_shape) + self.bias.data.reshape(w_shape)
         out = Tensor(out_data.astype(np.float32))
-        # Backward: only through affine path (gamma, beta) and an approximate
-        # x gradient that treats mean/var as constants.
         parents = (x, self.weight, self.bias) if self.affine else (x,)
-        x_hat_flat = (out_data - (self.bias.data.reshape(w_shape) if self.affine else 0.0)) / (self.weight.data.reshape(w_shape) if self.affine else 1.0) if self.affine else out_data
         affine = self.affine
         weight_data = self.weight.data if self.affine else None
+        group_size = float((C // G) * np.prod(spatial))
 
         def backward(g):
             dx_hat = g.data * weight_data.reshape(w_shape) if affine else g.data
-            inv_std_broadcast = inv_std.reshape(N, G, 1, *(1 for _ in spatial))
-            dx_grouped = dx_hat.reshape(N, G, C // G, *spatial) * inv_std_broadcast
+            dx_hat_grouped = dx_hat.reshape(N, G, C // G, *spatial)
+            sum_dx_hat = dx_hat_grouped.sum(axis=axes, keepdims=True)
+            sum_dx_hat_xhat = (dx_hat_grouped * x_hat).sum(axis=axes, keepdims=True)
+            dx_grouped = inv_std * (
+                dx_hat_grouped
+                - sum_dx_hat / group_size
+                - x_hat * sum_dx_hat_xhat / group_size
+            )
             dx = dx_grouped.reshape(xd.shape).astype(np.float32)
             if not affine:
                 return (dx,)
             reduce_axes = tuple(i for i in range(g.data.ndim) if i != 1)
-            dgamma = (g.data * x_hat_flat).sum(axis=reduce_axes).astype(np.float32)
+            dgamma = (g.data * x_hat.reshape(xd.shape)).sum(axis=reduce_axes).astype(np.float32)
             dbeta = g.data.sum(axis=reduce_axes).astype(np.float32)
             return (dx, dgamma, dbeta)
 
@@ -381,14 +402,21 @@ class InstanceNorm2d(Module):
         else:
             out_data = x_hat
         out = Tensor(out_data.astype(np.float32))
-        # Approximate backward through affine + scale (mean/var treated as constants).
         parents = (x, self.weight, self.bias) if self.affine else (x,)
         affine = self.affine
         weight_data = self.weight.data if self.affine else None
+        norm_size = float(H * W)
 
         def backward(g):
             dx_hat = g.data * weight_data.reshape(1, C, 1, 1) if affine else g.data
-            dx = (dx_hat * inv_std).astype(np.float32)
+            sum_dx_hat = dx_hat.sum(axis=(2, 3), keepdims=True)
+            sum_dx_hat_xhat = (dx_hat * x_hat).sum(axis=(2, 3), keepdims=True)
+            dx = inv_std * (
+                dx_hat
+                - sum_dx_hat / norm_size
+                - x_hat * sum_dx_hat_xhat / norm_size
+            )
+            dx = dx.astype(np.float32)
             if not affine:
                 return (dx,)
             dgamma = (g.data * x_hat).sum(axis=(0, 2, 3)).astype(np.float32)
@@ -449,10 +477,22 @@ class BatchNorm3d(Module):
         parents = (x, self.weight, self.bias) if self.affine else (x,)
         affine = self.affine
         weight_data = self.weight.data if self.affine else None
+        N_total = float(N * D * H * W)
+        training_pass = is_training_batch
 
         def backward(g):
             dx_hat = g.data * weight_data.reshape(bshape) if affine else g.data
-            dx = (dx_hat * inv_std.reshape(bshape)).astype(np.float32)
+            if training_pass:
+                sum_dx_hat = dx_hat.sum(axis=(0, 2, 3, 4), keepdims=True)
+                sum_dx_hat_xhat = (dx_hat * x_hat).sum(axis=(0, 2, 3, 4), keepdims=True)
+                dx = inv_std.reshape(bshape) * (
+                    dx_hat
+                    - sum_dx_hat / N_total
+                    - x_hat * sum_dx_hat_xhat / N_total
+                )
+            else:
+                dx = dx_hat * inv_std.reshape(bshape)
+            dx = dx.astype(np.float32)
             if not affine:
                 return (dx,)
             dgamma = (g.data * x_hat).sum(axis=(0, 2, 3, 4)).astype(np.float32)

@@ -2,6 +2,9 @@
 
 This is the production consumption guide for npm users, lab platforms, and
 agents that need to choose the right package without reading the whole repo.
+For explicit package requirements, low-level design, research basis, and
+production gates, see
+[`package-requirements-lld.md`](./package-requirements-lld.md).
 
 ## Install Matrix
 
@@ -29,6 +32,7 @@ npm install @unlocalhosted/browsergrad-kernels@latest @unlocalhosted/browsergrad
 | --- | --- | --- |
 | Run Python/Pyodide labs in a Worker | `@unlocalhosted/browsergrad-runtime` | `createSession`, `parseManifest`, `assertCompatibleRuntime` |
 | Use eager NumPy-backed autograd | `@unlocalhosted/browsergrad-grad` | `installGrad`, `createNodePyodideTarget` |
+| Route eager forward matmul/softmax/layernorm/attention through WebGPU | `@unlocalhosted/browsergrad-grad` + `@unlocalhosted/browsergrad-kernels` | `createGradKernelDeviceBridge`, `createDevice` |
 | Use lazy PyTorch-shaped IR, fusion, VJP, AMP, ONNX | `@unlocalhosted/browsergrad-jit` | `installJit`, `createNodePyodideTarget` |
 | Run browser WGSL kernels and JS references | `@unlocalhosted/browsergrad-kernels` | `createDevice`, `kernels`, `reference`, `createWebGpuRealizerBridge` |
 | Author generic WGSL programs | `@unlocalhosted/browsergrad-kernels` | `defineWgslKernelProgram`, `prepareWgslKernelProgramSequence`, `createWgslStorageBuffer` |
@@ -56,6 +60,7 @@ Subpath imports are also public for agents and bundlers that want smaller,
 domain-specific entry points:
 
 ```ts
+import { createGradKernelDeviceBridge } from "@unlocalhosted/browsergrad-grad/kernel-device";
 import { reference } from "@unlocalhosted/browsergrad-kernels/reference";
 import { defineWgslKernelProgram } from "@unlocalhosted/browsergrad-kernels/wgsl_program";
 import { createWgslFloat16Array } from "@unlocalhosted/browsergrad-kernels/float16";
@@ -84,6 +89,9 @@ Agents should follow these rules before generating code:
 - If the user asks for PyTorch-shaped Python in browser, start with `runtime`
   plus `jit`.
 - If the user asks for eager teaching autograd, use `grad` instead of `jit`.
+- If the user asks for eager teaching autograd with explicit WebGPU forward
+  acceleration, use `grad` plus `kernels` and pass
+  `createGradKernelDeviceBridge(device)` into Python as `device=...`.
 - If the user asks for direct WebGPU/WGSL kernels, use `kernels` only.
 - If the user asks for CUDA-like source, use `compiler` plus `kernels`; do not
   hand-write WGSL unless the user explicitly asks for WGSL.
@@ -117,4 +125,3 @@ pnpm test:release-packages
 packed kernels `dist/` exports, checks public subpath exports, and verifies the
 compiler tarball dependency on kernels is a concrete npm version, not
 `workspace:*`.
-

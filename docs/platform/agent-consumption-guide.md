@@ -2,6 +2,8 @@
 
 This guide is for coding agents that need to use BrowserGrad packages correctly
 from npm or inside this monorepo.
+For full package requirements, low-level design, production gates, and research
+basis, read [`package-requirements-lld.md`](./package-requirements-lld.md).
 
 ## First Decision
 
@@ -10,6 +12,7 @@ from npm or inside this monorepo.
 | "Run Python in browser", "Pyodide worker", "lab runtime" | `@unlocalhosted/browsergrad-runtime` |
 | "PyTorch-like training", "lazy tensor", "fusion", "ONNX", "custom WGSL" | `@unlocalhosted/browsergrad-jit` |
 | "Simple autograd", "teaching tensor", "eager backward" | `@unlocalhosted/browsergrad-grad` |
+| "Eager autograd plus WebGPU forward matmul/softmax/layernorm/attention" | `@unlocalhosted/browsergrad-grad` + `@unlocalhosted/browsergrad-kernels` |
 | "WebGPU kernels", "WGSL", "FlashAttention reference", "rubric tensor compare" | `@unlocalhosted/browsergrad-kernels` |
 | "CUDA-like kernel source", "compile CUDA to WGSL", "real CUDA corpus" | `@unlocalhosted/browsergrad-compiler` |
 | "Tokenization/data/eval/simulation/RL helper" | `@unlocalhosted/browsergrad-primitives` |
@@ -17,6 +20,8 @@ from npm or inside this monorepo.
 ## Import Rules
 
 - Prefer documented top-level exports.
+- Use `@unlocalhosted/browsergrad-grad/kernel-device` only for the explicit
+  eager `device=` bridge; regular eager autograd does not need it.
 - Use kernels subpaths only when the caller benefits from a smaller domain entry:
   `reference`, `wgsl_program`, `float16`, `cuda_concepts`, `cuda_program`, or
   `rubric`.
@@ -64,4 +69,3 @@ shows `workspace:*`, the release is broken even if CI was green.
 - Do not claim WebGPU coverage from unit tests. Use browser/WebGPU gates when
   shader behavior matters.
 - Do not skip tests to make release green.
-

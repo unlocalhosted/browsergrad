@@ -136,7 +136,7 @@ out = bg.realize_webgpu(x @ w + b)   # tiled GEMM, fused elementwise, custom WGS
 | [`browsergrad-jit`](./packages/browsergrad-jit) | Lazy-IR PyTorch-shape library. 28-opcode IR, fusion, symbolic VJP, AMP, gradient checkpointing, `bg.func.*`, custom WGSL kernels, ONNX export. |
 | [`browsergrad-kernels`](./packages/browsergrad-kernels) | WGSL compute-shader catalog, CUDA-shaped 1D program authoring, and pure-JS references for attention, tensor kernels, and GPU teaching subsets. |
 | [`browsergrad-compiler`](./packages/browsergrad-compiler) | Browser-native CUDA-lite compiler. Parser/analyzer, Kernel IR, CPU reference, WGSL/WebGPU runner, and pinned real-world CUDA corpus gates. |
-| [`browsergrad-grad`](./packages/browsergrad-grad) | Eager-autograd alternative. PyTorch-flavored, NumPy-backed, closure backward. Stable. |
+| [`browsergrad-grad`](./packages/browsergrad-grad) | Stable eager-autograd tier. PyTorch-flavored, NumPy-backed closure backward, CNN/Transformer/RNN layer set, optimizers/schedulers, torch shim, and optional forward-only `device=` dispatch through `browsergrad-kernels`. |
 | [`browsergrad-primitives`](./packages/browsergrad-primitives) | Canonical small-primitive facade: byte-BPE, streaming gates, data filters, snapshot comparators, hosted-training fixtures, deterministic simulations, and RL/alignment math. |
 
 The leaf primitive packages remain publishable implementation shards for
@@ -171,6 +171,7 @@ published-entry exports plus workspace dependency rewriting before release.
 ## Documentation
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — how the packages compose; data flow; design principles
+- [`docs/platform/package-requirements-lld.md`](./docs/platform/package-requirements-lld.md) — explicit package requirements, low-level design, research basis, and production gates
 - [`docs/platform/consuming-browsergrad.md`](./docs/platform/consuming-browsergrad.md) — production package selection and import matrix
 - [`docs/platform/agent-consumption-guide.md`](./docs/platform/agent-consumption-guide.md) — rules for coding agents consuming BrowserGrad packages
 - [`docs/platform/release-readiness.md`](./docs/platform/release-readiness.md) — pre-publish and post-publish artifact verification

@@ -40,6 +40,7 @@ describe("Python source bundle", () => {
       "browsergrad_grad/_torch_compat_real.py",
       "browsergrad_grad/_torch_compat_limited.py",
       "browsergrad_grad/_torch_compat_impossible.py",
+      "browsergrad_grad/_device.py",
       "browsergrad_grad/torch_compat.py",
       "browsergrad_grad/utils/__init__.py",
       "browsergrad_grad/utils/data.py",
@@ -151,6 +152,12 @@ describe("Python source bundle", () => {
   it("nn.py defines v0.3 Conv2d", () => {
     const nn = SOURCE_FILES.find((s) => s.path.endsWith("nn.py"));
     expect(nn?.content).toContain("class Conv2d(Module)");
+  });
+
+  it("nn.py defines v0.5 Conv3d / ConvTranspose2d", () => {
+    const nn = SOURCE_FILES.find((s) => s.path.endsWith("nn.py"));
+    expect(nn?.content).toContain("class Conv3d(Module)");
+    expect(nn?.content).toContain("class ConvTranspose2d(Module)");
   });
 
   it("nn.py defines v0.3.1 pooling layers", () => {
