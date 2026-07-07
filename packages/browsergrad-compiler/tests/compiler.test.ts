@@ -6752,6 +6752,37 @@ __global__ void modfKernel(float *out) {
     expect([...result.buffers.out as Float32Array]).toEqual([0.75, 3, -0.25, -2, 0.5, 5, 8]);
   });
 
+  it("lowers statement modf storage output aliases through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semanticModfOut(float *out) {
+  float *intpart = out + 1;
+  modff(8.125f, intpart);
+  modf(-2.25f, &out[2]);
+}
+`, { workgroupSize: [1, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Float32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Float32Array(3) } },
+      { gridDim: [1, 1, 1], blockDim: [1, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-modf-intpart");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_f32");
+    expect(compiled.wgsl).not.toContain("var intpart:");
+    expect(compiled.wgsl).toContain("out[1u] = trunc(8.125);");
+    expect(compiled.wgsl).toContain("out[2u] = trunc(-(2.25));");
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([0, 8, -2]);
+    expect([...result.buffers.out as Float32Array]).toEqual([0, 8, -2]);
+  });
+
   it("lowers CUDA sincos output params", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void sincosKernel(float *out) {

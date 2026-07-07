@@ -442,6 +442,8 @@ function lowerStatement(
         if (statement.expression.kind === "call") {
           const sincos = semanticSincosStores(statement.expression, expression, scope, statement.span);
           if (sincos) return sincos;
+          const modf = semanticModfStore(statement.expression, expression, scope, statement.span);
+          if (modf) return modf;
         }
         if (statement.expression.kind === "call" && CUDA_CACHE_HINT_STORES.has(expression.callee.name)) {
           const cacheTarget = cacheHintStoreTarget(statement.expression, scope);
@@ -746,6 +748,28 @@ function cacheHintStoreTarget(
   return target === undefined ? undefined : memoryRefFromExpression(target);
 }
 
+function semanticModfStore(
+  source: Extract<CudaLiteExpression, { readonly kind: "call" }>,
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
+  span: SourceSpan,
+): SemanticKernelIrOperation | undefined {
+  if (expression.callee.kind !== "symbol" || !isModfCallName(expression.callee.name)) return undefined;
+  const value = expression.args[0];
+  const target = source.args[1] === undefined ? undefined : pointerAliasValueExpression(source.args[1], scope, source.args[1].span);
+  if (!value || !target) return undefined;
+  const targetRef = memoryRefFromExpression(target);
+  if (!targetRef) return undefined;
+  return {
+    kind: "store",
+    target: targetRef,
+    value: mathCallExpression("trunc", value, value.span),
+    operator: "=",
+    reads: collectMemoryRefs(value),
+    span,
+  };
+}
+
 function semanticSincosStores(
   source: Extract<CudaLiteExpression, { readonly kind: "call" }>,
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
@@ -818,6 +842,10 @@ function isSincosCallName(name: string): boolean {
 
 function isSincosPiCallName(name: string): boolean {
   return name === "sincospi" || name === "sincospif";
+}
+
+function isModfCallName(name: string): boolean {
+  return name === "modf" || name === "modff";
 }
 
 function pointerAliasValueExpression(

@@ -46,6 +46,8 @@ const SEMANTIC_MATH_CALLS = new Map([
   ["floorf", "floor"],
   ["ceil", "ceil"],
   ["ceilf", "ceil"],
+  ["trunc", "trunc"],
+  ["truncf", "trunc"],
   ["sin", "sin"],
   ["sinf", "sin"],
   ["__sinf", "sin"],

@@ -46,7 +46,7 @@ const SEMANTIC_ATOMIC_OPS = new Map<string, SemanticAtomicOp>([
 const SEMANTIC_MATH_CALLS = new Set([
   "sqrt", "sqrtf", "__fsqrt_rn", "rsqrt", "rsqrtf", "__frsqrt_rn",
   "exp", "expf", "__expf", "log", "logf", "__logf", "fabs", "fabsf", "abs",
-  "floor", "floorf", "ceil", "ceilf", "sin", "sinf", "__sinf", "cos", "cosf", "__cosf",
+  "floor", "floorf", "ceil", "ceilf", "trunc", "truncf", "sin", "sinf", "__sinf", "cos", "cosf", "__cosf",
   "tan", "tanf", "__tanf", "atan", "atanf", "atan2", "atan2f", "tanh", "tanhf", "__tanhf",
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
   "__fdividef", "fma", "fmaf", "__fmaf_rn", "lerp", "div_ceil", "ceil_div",
@@ -1163,6 +1163,8 @@ function evalSemanticMathCall(
     case "floorf": return Math.floor(args[0] ?? 0);
     case "ceil":
     case "ceilf": return Math.ceil(args[0] ?? 0);
+    case "trunc":
+    case "truncf": return Math.trunc(args[0] ?? 0);
     case "sin":
     case "sinf":
     case "__sinf": return Math.sin(args[0] ?? 0);
