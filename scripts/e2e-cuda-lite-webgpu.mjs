@@ -2063,6 +2063,15 @@ __global__ void intrinsicPack(half2 *h, float2 *f, float *out) {
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
 }`,
+  semanticVote: `
+__global__ void semanticVote(uint *input, uint *out) {
+  int tid = threadIdx.x;
+  uint mask = 0xffffffffu;
+  out[tid * 4] = __any_sync(mask, input[tid]);
+  out[tid * 4 + 1] = __all_sync(mask, input[tid]);
+  out[tid * 4 + 2] = __ballot_sync(mask, input[tid]);
+  out[tid * 4 + 3] = __reduce_add_sync(mask, input[tid]);
+}`,
   syncthreadsPredicates: `
 __global__ void syncthreadsPredicates(int *out) {
   int tid = threadIdx.x;
@@ -12482,6 +12491,21 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [15, 15, 15, 15] },
+          },
+          {
+            name: "subgroup:semantic-vote-reduce",
+            source: SOURCES.semanticVote,
+            options: { workgroupSize: [4, 1, 1], features: { subgroups: true } },
+            requiredFeatures: ["subgroups"],
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                input: new Uint32Array([0, 1, 0, 1]),
+                out: new Uint32Array(16),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [1, 0, 10, 2, 1, 0, 10, 2, 1, 0, 10, 2, 1, 0, 10, 2] },
           },
           {
             name: "sync:syncthreads-predicates",

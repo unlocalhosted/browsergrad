@@ -120,6 +120,7 @@ const SEMANTIC_NOOP_CALLS = new Set([
   "__trap",
 ]);
 const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
+const SEMANTIC_SUBGROUP_CALLS = new Set(["__activemask", "__any_sync", "__all_sync", "__ballot_sync", "__reduce_add_sync"]);
 
 interface Vector3 {
   readonly x: number;
@@ -143,6 +144,7 @@ interface SemanticReferenceContext {
   readonly threadIdx: Vector3;
   readonly blockDim: Vector3;
   readonly gridDim: Vector3;
+  readonly blockContexts: readonly SemanticReferenceContext[];
   readonly trace: MutableTrace;
   returnValue?: SemanticValue;
 }
@@ -220,12 +222,13 @@ export function runCompiledKernelSemanticReference(
                 threadIdx: { x: tx, y: ty, z: tz },
                 blockDim,
                 gridDim,
+                blockContexts,
                 trace,
               });
             }
           }
         }
-        if (sharedMemory.size > 0) runSemanticBlockPhases(compiled.kernelIr.operations, blockContexts);
+        if (sharedMemory.size > 0 || semanticOperationsContainSubgroupCall(compiled.kernelIr.operations)) runSemanticBlockPhases(compiled.kernelIr.operations, blockContexts);
         else for (const context of blockContexts) execSemanticOperations(compiled.kernelIr.operations, context);
       }
     }
@@ -484,9 +487,9 @@ function semanticReferenceMathCallSupported(expression: Extract<SemanticExpressi
 }
 
 function semanticReferenceSubgroupCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
-  return expression.callee.kind === "symbol" &&
-    expression.callee.name === "__activemask" &&
-    expression.args.length === 0;
+  if (expression.callee.kind !== "symbol" || !SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name)) return false;
+  if (expression.callee.name === "__activemask") return expression.args.length === 0;
+  return expression.args.length === 2 && semanticReferenceExpressionSupported(expression.args[1]!, "scalar");
 }
 
 function semanticReferenceAddressPredicateCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
@@ -1381,10 +1384,8 @@ function evalNumber(expression: SemanticExpression, context: SemanticReferenceCo
 
 function semanticReferenceActiveMask(context: SemanticReferenceContext): number {
   if (context.compiled.subgroupMode === "scalar") return 1;
-  const blockSize = context.blockDim.x * context.blockDim.y * context.blockDim.z;
-  const rank = context.threadIdx.x +
-    context.threadIdx.y * context.blockDim.x +
-    context.threadIdx.z * context.blockDim.x * context.blockDim.y;
+  const blockSize = semanticBlockSize(context);
+  const rank = semanticLocalLinearRank(context);
   const warpBase = Math.floor(rank / 32) * 32;
   const warpEnd = Math.min(warpBase + 32, blockSize);
   let mask = 0;
@@ -1392,6 +1393,55 @@ function semanticReferenceActiveMask(context: SemanticReferenceContext): number 
     mask |= 1 << (thread - warpBase);
   }
   return mask >>> 0;
+}
+
+function evalSemanticSubgroupCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  context: SemanticReferenceContext,
+): number {
+  if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic subgroup call requires symbol callee", expression.span);
+  const name = expression.callee.name;
+  if (name === "__activemask") return semanticReferenceActiveMask(context);
+  const value = expression.args[1];
+  if (!value) throw semanticReferenceError(`${name} expects value operand`, expression.span);
+  if (context.compiled.subgroupMode === "scalar") {
+    const scalar = evalNumber(value, context);
+    if (name === "__any_sync" || name === "__all_sync" || name === "__ballot_sync") return truthy(scalar) ? 1 : 0;
+    return scalar;
+  }
+  const peers = semanticWarpContexts(context);
+  if (name === "__any_sync") return peers.some((peer) => truthy(evalNumber(value, peer))) ? 1 : 0;
+  if (name === "__all_sync") return peers.every((peer) => truthy(evalNumber(value, peer))) ? 1 : 0;
+  if (name === "__ballot_sync") {
+    let mask = 0;
+    for (const peer of peers) {
+      if (!truthy(evalNumber(value, peer))) continue;
+      mask |= 1 << (semanticLocalLinearRank(peer) % 32);
+    }
+    return mask >>> 0;
+  }
+  if (name === "__reduce_add_sync") return peers.reduce((sum, peer) => sum + evalNumber(value, peer), 0);
+  throw semanticReferenceError(`semantic reference does not support subgroup call '${name}'`, expression.span);
+}
+
+function semanticWarpContexts(context: SemanticReferenceContext): readonly SemanticReferenceContext[] {
+  const rank = semanticLocalLinearRank(context);
+  const warpBase = Math.floor(rank / 32) * 32;
+  const warpEnd = Math.min(warpBase + 32, semanticBlockSize(context));
+  return context.blockContexts.filter((peer) => {
+    const peerRank = semanticLocalLinearRank(peer);
+    return peerRank >= warpBase && peerRank < warpEnd;
+  });
+}
+
+function semanticLocalLinearRank(context: SemanticReferenceContext): number {
+  return context.threadIdx.x +
+    context.threadIdx.y * context.blockDim.x +
+    context.threadIdx.z * context.blockDim.x * context.blockDim.y;
+}
+
+function semanticBlockSize(context: SemanticReferenceContext): number {
+  return context.blockDim.x * context.blockDim.y * context.blockDim.z;
 }
 
 function evalSemanticAddressPredicateCall(expression: Extract<SemanticExpression, { readonly kind: "call" }>): number {
@@ -1477,7 +1527,7 @@ function evalSemanticExpression(expression: SemanticExpression, context: Semanti
     }
     case "call":
       if (semanticReferenceAtomicCallSupported(expression, context.compiled)) return evalSemanticAtomicCall(expression, context);
-      if (semanticReferenceSubgroupCallSupported(expression)) return semanticReferenceActiveMask(context);
+      if (semanticReferenceSubgroupCallSupported(expression)) return evalSemanticSubgroupCall(expression, context);
       if (semanticReferenceAddressPredicateCallSupported(expression)) return evalSemanticAddressPredicateCall(expression);
       if (semanticReferenceVectorConstructorSupported(expression, "any", context.compiled)) return evalSemanticVectorConstructor(expression, context);
       if (semanticReferenceVectorAtCallSupported(expression, context.compiled)) return evalSemanticVectorAtCall(expression, context);
@@ -2582,6 +2632,7 @@ function runSemanticFunction(
     threadIdx: context.threadIdx,
     blockDim: context.blockDim,
     gridDim: context.gridDim,
+    blockContexts: context.blockContexts,
     trace: context.trace,
   };
   const control = execSemanticOperations(fn.body, child);
@@ -3063,10 +3114,12 @@ function runSemanticBlockPhases(
   contexts: readonly SemanticReferenceContext[],
 ): void {
   for (const segment of semanticBarrierSegments(operations)) {
-    for (const context of contexts) {
-      const control = execSemanticOperations(segment, context);
-      if (control === "break" || control === "continue") {
-        throw semanticReferenceError(`semantic reference unexpected ${control} across shared-memory phase`, context.compiled.kernelIr.span);
+    for (const operation of segment) {
+      for (const context of contexts) {
+        const control = execSemanticOperations([operation], context);
+        if (control === "break" || control === "continue") {
+          throw semanticReferenceError(`semantic reference unexpected ${control} across shared-memory phase`, context.compiled.kernelIr.span);
+        }
       }
     }
   }
@@ -3082,6 +3135,50 @@ function semanticBarrierSegments(operations: readonly SemanticKernelIrOperation[
     segments.at(-1)!.push(operation);
   }
   return segments;
+}
+
+function semanticOperationsContainSubgroupCall(operations: readonly SemanticKernelIrOperation[]): boolean {
+  return operations.some((operation) => {
+    if (operation.kind === "declare") return operation.init !== undefined && semanticExpressionContainsSubgroupCall(operation.init);
+    if (operation.kind === "store") return semanticExpressionContainsSubgroupCall(operation.value) || operation.target.indices.some(semanticExpressionContainsSubgroupCall);
+    if (operation.kind === "atomic") return operation.args.some(semanticExpressionContainsSubgroupCall) || operation.target?.indices.some(semanticExpressionContainsSubgroupCall) === true;
+    if (operation.kind === "call") return SEMANTIC_SUBGROUP_CALLS.has(operation.callee) || operation.args.some(semanticExpressionContainsSubgroupCall);
+    if (operation.kind === "expression") return semanticExpressionContainsSubgroupCall(operation.expression);
+    if (operation.kind === "branch") return semanticExpressionContainsSubgroupCall(operation.condition) ||
+      semanticOperationsContainSubgroupCall(operation.consequent) ||
+      semanticOperationsContainSubgroupCall(operation.alternate);
+    if (operation.kind === "loop") return (operation.init === undefined
+      ? false
+      : isSemanticKernelIrOperation(operation.init)
+        ? semanticOperationsContainSubgroupCall([operation.init])
+        : semanticExpressionContainsSubgroupCall(operation.init)) ||
+      (operation.condition !== undefined && semanticExpressionContainsSubgroupCall(operation.condition)) ||
+      (operation.update !== undefined && semanticExpressionContainsSubgroupCall(operation.update)) ||
+      semanticOperationsContainSubgroupCall(operation.body);
+    if (operation.kind === "return") return operation.value !== undefined && semanticExpressionContainsSubgroupCall(operation.value);
+    if (operation.kind === "block") return semanticOperationsContainSubgroupCall(operation.body);
+    return false;
+  });
+}
+
+function semanticExpressionContainsSubgroupCall(expression: SemanticExpression): boolean {
+  if (expression.kind === "call") {
+    if (expression.callee.kind === "symbol" && SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name)) return true;
+    return semanticExpressionContainsSubgroupCall(expression.callee) || expression.args.some(semanticExpressionContainsSubgroupCall);
+  }
+  if (expression.kind === "member") return semanticExpressionContainsSubgroupCall(expression.object);
+  if (expression.kind === "index") return semanticExpressionContainsSubgroupCall(expression.target) || semanticExpressionContainsSubgroupCall(expression.index);
+  if (expression.kind === "texture-read") return semanticExpressionContainsSubgroupCall(expression.texture) || semanticExpressionContainsSubgroupCall(expression.x) || semanticExpressionContainsSubgroupCall(expression.y);
+  if (expression.kind === "surface-read") return semanticExpressionContainsSubgroupCall(expression.surface) || semanticExpressionContainsSubgroupCall(expression.xBytes) || semanticExpressionContainsSubgroupCall(expression.y) || (expression.z !== undefined && semanticExpressionContainsSubgroupCall(expression.z));
+  if (expression.kind === "cast") return semanticExpressionContainsSubgroupCall(expression.expression);
+  if (expression.kind === "unary") return semanticExpressionContainsSubgroupCall(expression.argument);
+  if (expression.kind === "binary") return semanticExpressionContainsSubgroupCall(expression.left) || semanticExpressionContainsSubgroupCall(expression.right);
+  if (expression.kind === "conditional") return semanticExpressionContainsSubgroupCall(expression.condition) || semanticExpressionContainsSubgroupCall(expression.consequent) || semanticExpressionContainsSubgroupCall(expression.alternate);
+  if (expression.kind === "assignment") return semanticExpressionContainsSubgroupCall(expression.target) || semanticExpressionContainsSubgroupCall(expression.value);
+  if (expression.kind === "update") return semanticExpressionContainsSubgroupCall(expression.argument);
+  if (expression.kind === "initializer") return expression.elements.some(semanticExpressionContainsSubgroupCall);
+  if (expression.kind === "sequence") return expression.expressions.some(semanticExpressionContainsSubgroupCall);
+  return false;
 }
 
 function semanticReferenceSharedMemory(compiled: CompiledCudaLiteKernel): Map<string, WgslTypedArray> {

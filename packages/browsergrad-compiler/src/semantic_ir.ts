@@ -651,6 +651,10 @@ function lowerExpression(
         ...(expression.templateValueType === undefined ? {} : { templateValueType: expression.templateValueType }),
         ...optionalValueType(expression.callee.kind === "identifier" && expression.callee.name === "__activemask"
           ? "uint"
+          : expression.callee.kind === "identifier" && (expression.callee.name === "__any_sync" || expression.callee.name === "__all_sync" || expression.callee.name === "__ballot_sync")
+            ? "uint"
+          : expression.callee.kind === "identifier" && expression.callee.name === "__reduce_add_sync"
+            ? expressionValueType(args[1]) ?? "uint"
           : expression.callee.kind === "identifier" && (expression.callee.name === "clock" || expression.callee.name === "clock64")
             ? "uint"
           : expression.callee.kind === "identifier" && isAddressSpacePredicateName(expression.callee.name)

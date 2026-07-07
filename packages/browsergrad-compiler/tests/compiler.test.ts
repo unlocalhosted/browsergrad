@@ -4723,10 +4723,56 @@ __global__ void voteKernel(uint *input, uint *out) {
     expect(compiled.wgsl).toContain("subgroupAny");
     expect(compiled.wgsl).toContain("subgroupAll");
     expect(compiled.wgsl).toContain("subgroupBallot");
-    expect(compiled.wgsl).toContain("bg_warp_reduce_sum_uint_32(input[0], 32u, local_id)");
+    expect(compiled.wgsl).toContain("subgroupAdd(input[0u])");
     expect(compiled.wgsl).toContain("countOneBits");
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(backendIr(compiled).requiredFeatures).toContain("subgroups");
     expect([...result.buffers.out as Uint32Array]).toEqual([1, 0, 1, 1, 7]);
+  });
+
+  it("lowers CUDA warp vote and reduce helpers through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void semanticVoteKernel(uint *input, uint *out) {
+  int tid = threadIdx.x;
+  uint mask = 0xffffffffu;
+  out[tid * 4] = __any_sync(mask, input[tid]);
+  out[tid * 4 + 1] = __all_sync(mask, input[tid]);
+  out[tid * 4 + 2] = __ballot_sync(mask, input[tid]);
+  out[tid * 4 + 3] = __reduce_add_sync(mask, input[tid]);
+}`, {
+      features: { subgroups: true },
+      workgroupSize: [4, 1, 1],
+    });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { input: new Uint32Array([0, 1, 0, 1]), out: new Uint32Array(16) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { input: new Uint32Array([0, 1, 0, 1]), out: new Uint32Array(16) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("subgroupAny");
+    expect(compiled.wgsl).toContain("subgroupAll");
+    expect(compiled.wgsl).toContain("subgroupBallot");
+    expect(compiled.wgsl).toContain("subgroupAdd");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      1, 0, 10, 2,
+      1, 0, 10, 2,
+      1, 0, 10, 2,
+      1, 0, 10, 2,
+    ]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([
+      1, 0, 10, 2,
+      1, 0, 10, 2,
+      1, 0, 10, 2,
+      1, 0, 10, 2,
+    ]);
   });
 
   it("lowers CUDA syncthreads predicate collectives through native workgroup memory", () => {

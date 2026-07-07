@@ -73,6 +73,7 @@ const SEMANTIC_NOOP_CALLS = new Set([
   "__trap",
 ]);
 const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
+const SEMANTIC_SUBGROUP_CALLS = new Set(["__activemask", "__any_sync", "__all_sync", "__ballot_sync", "__reduce_add_sync"]);
 const SEMANTIC_MATH_CALLS = new Map([
   ["clock", "clock"],
   ["clock64", "clock"],
@@ -1033,10 +1034,9 @@ function semanticWgslSubgroupCallSupported(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir?: SemanticKernelIrModule,
 ): boolean {
-  return expression.callee.kind === "symbol" &&
-    expression.callee.name === "__activemask" &&
-    expression.args.length === 0 &&
-    ir?.requiredFeatures.includes("subgroups") === true;
+  if (expression.callee.kind !== "symbol" || !SEMANTIC_SUBGROUP_CALLS.has(expression.callee.name) || ir?.requiredFeatures.includes("subgroups") !== true) return false;
+  if (expression.callee.name === "__activemask") return expression.args.length === 0;
+  return expression.args.length === 2 && semanticWgslExpressionSupported(expression.args[1]!, "scalar", ir);
 }
 
 function semanticWgslAddressPredicateCallSupported(expression: Extract<SemanticExpression, { readonly kind: "call" }>): boolean {
@@ -2380,7 +2380,7 @@ function emitSemanticExpression(
       return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names, options, textureSpecializations);
     case "call":
       if (semanticWgslAtomicCallSupported(expression, ir)) return emitSemanticAtomicCall(expression, ir, names, options, textureSpecializations);
-      if (semanticWgslSubgroupCallSupported(expression, ir)) return "subgroupBallot(true).x";
+      if (semanticWgslSubgroupCallSupported(expression, ir)) return emitSemanticSubgroupCall(expression, ir, names, options, textureSpecializations);
       if (semanticWgslAddressPredicateCallSupported(expression)) return emitSemanticAddressPredicateCall(expression);
       if (semanticWgslVectorConstructorSupported(expression, "any", ir)) return emitSemanticVectorConstructor(expression, ir, names, options, textureSpecializations);
       if (semanticWgslVectorAtCallSupported(expression, ir)) return emitSemanticVectorAtCall(expression, ir, names, options, textureSpecializations);
@@ -3118,6 +3118,31 @@ function emitSemanticAddressPredicateCall(expression: Extract<SemanticExpression
           expression.callee.name === "__isLocal" ? addressSpace === "local" :
             false;
   return matches ? "1" : "0";
+}
+
+function emitSemanticSubgroupCall(
+  expression: Extract<SemanticExpression, { readonly kind: "call" }>,
+  ir: SemanticKernelIrModule,
+  names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions,
+  textureSpecializations: SemanticTextureDescriptorSpecializations,
+): string {
+  if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL subgroup call requires symbol callee", expression.span);
+  const name = expression.callee.name;
+  if (name === "__activemask") return "subgroupBallot(true).x";
+  const value = expression.args[1];
+  if (!value) throw semanticWgslError(`${name} expects value operand`, expression.span);
+  if (name === "__any_sync" || name === "__all_sync" || name === "__ballot_sync") {
+    const predicate = emitTruthiness(value, ir, names, options);
+    if (name === "__any_sync") return `select(0u, 1u, subgroupAny(${predicate}))`;
+    if (name === "__all_sync") return `select(0u, 1u, subgroupAll(${predicate}))`;
+    return `subgroupBallot(${predicate}).x`;
+  }
+  if (name === "__reduce_add_sync") {
+    const scalar = semanticExpressionWgslScalar(value);
+    return `subgroupAdd(${emitSemanticExpressionAs(value, ir, names, scalar, options, textureSpecializations)})`;
+  }
+  throw semanticWgslError(`semantic WGSL does not support subgroup call '${name}'`, expression.span);
 }
 
 function semanticAddressPredicateAddressSpace(expression: SemanticExpression | undefined): SemanticAddressSpace | undefined {
