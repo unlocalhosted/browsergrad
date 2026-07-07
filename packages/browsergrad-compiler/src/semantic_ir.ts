@@ -1033,10 +1033,10 @@ function localPointerAliasForInitializer(
   if (expression.kind !== "unary" || expression.operator !== "&") return undefined;
   if (expression.argument.kind === "unary" && expression.argument.operator === "*") {
     const alias = localPointerAliasForInitializer(expression.argument.argument, scope);
-    if (alias?.pointerAddressSpace === "local") return alias;
+    if (semanticPointerAliasAddressSpaceSupported(alias?.pointerAddressSpace)) return alias;
   }
   const ref = localPointerAliasRoot(expression.argument, scope);
-  if (!ref || ref.root.addressSpace !== "local" || ref.root.dimensions.length === 0) return undefined;
+  if (!ref || !semanticPointerAliasAddressSpaceSupported(ref.root.addressSpace)) return undefined;
   return {
     pointerRoot: ref.root.name,
     pointerAddressSpace: ref.root.addressSpace,
@@ -1201,9 +1201,9 @@ function localPointerAliasRoot(
   }
   if (expression.kind !== "index" || expression.target.kind !== "identifier") return undefined;
   const target = scope.get(expression.target.name);
-  if (target?.pointerRoot && target.pointerAddressSpace === "local" && target.pointerBaseIndices?.length === 1) {
+  if (target?.pointerRoot && semanticPointerAliasAddressSpaceSupported(target.pointerAddressSpace) && target.pointerBaseIndices?.length === 1) {
     const root = scope.get(target.pointerRoot);
-    if (!root || root.kind !== "local" || root.dimensions.length === 0 || root.pointer) return undefined;
+    if (!root || !semanticPointerAliasAddressSpaceSupported(root.addressSpace)) return undefined;
     return {
       root,
       indices: [addIndexExpressions(target.pointerBaseIndices[0]!, lowerExpression(expression.index, scope), expression.span)],
