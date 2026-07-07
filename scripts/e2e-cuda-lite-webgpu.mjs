@@ -2084,6 +2084,11 @@ __global__ void syncwarpFenceSemantic(int *out) {
   __prof_trigger(1);
   out[tid] = tid + 7;
 }`,
+  semanticClock: `
+__global__ void semanticClock(clock_t *out) {
+  out[threadIdx.x] = clock();
+  out[threadIdx.x + 4] = clock64();
+}`,
   addressSpacePredicates: `
 __global__ void addressSpacePredicates(float *global, int *out) {
   __shared__ float tile[1];
@@ -12503,6 +12508,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Int32Array", data: [7, 8, 9, 10] },
+          },
+          {
+            name: "intrinsics:semantic-clock",
+            source: SOURCES.semanticClock,
+            options: { workgroupSize: [4, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(8),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [0, 1, 2, 3, 0, 1, 2, 3] },
           },
           {
             name: "intrinsics:address-space-predicates",

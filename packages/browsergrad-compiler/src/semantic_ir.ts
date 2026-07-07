@@ -651,6 +651,8 @@ function lowerExpression(
         ...(expression.templateValueType === undefined ? {} : { templateValueType: expression.templateValueType }),
         ...optionalValueType(expression.callee.kind === "identifier" && expression.callee.name === "__activemask"
           ? "uint"
+          : expression.callee.kind === "identifier" && (expression.callee.name === "clock" || expression.callee.name === "clock64")
+            ? "uint"
           : expression.callee.kind === "identifier" && isAddressSpacePredicateName(expression.callee.name)
             ? "int"
             : expression.templateValueType ?? expressionValueType(callee) ?? expressionValueType(args[0])),

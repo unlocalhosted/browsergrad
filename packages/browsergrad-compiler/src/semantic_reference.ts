@@ -57,6 +57,7 @@ const SEMANTIC_ATOMIC_OPS = new Map<string, SemanticAtomicOp>([
   ["atomicDec_system", "dec"],
 ]);
 const SEMANTIC_MATH_CALLS = new Set([
+  "clock", "clock64",
   "sqrt", "sqrtf", "__fsqrt_rn", "rsqrt", "rsqrtf", "__frsqrt_rn",
   "exp", "expf", "__expf", "exp2", "exp2f", "__exp2f", "exp10", "exp10f", "__exp10f", "expm1", "expm1f",
   "erf", "erff", "erfc", "erfcf", "erfcx", "erfcxf", "erfinv", "erfinvf", "erfcinv", "erfcinvf",
@@ -1658,6 +1659,14 @@ function evalSemanticMathCall(
   if (expression.callee.kind !== "symbol") throw semanticReferenceError("semantic reference math call requires symbol callee", expression.span);
   const args = expression.args.map((arg) => evalNumber(arg, context));
   switch (expression.callee.name) {
+    case "clock":
+    case "clock64":
+      return context.blockIdx.x * 104729 +
+        context.blockIdx.y * 1009 +
+        context.blockIdx.z * 97 +
+        context.threadIdx.x +
+        context.threadIdx.y * 31 +
+        context.threadIdx.z * 7;
     case "sqrt":
     case "sqrtf":
     case "__fsqrt_rn": return Math.sqrt(args[0] ?? 0);
@@ -2571,7 +2580,9 @@ function runSemanticFunction(
 }
 
 function semanticMathCallArity(name: string): number {
-  return name === "__builtin_inff" ||
+  return name === "clock" ||
+    name === "clock64" ||
+    name === "__builtin_inff" ||
     name === "__builtin_huge_valf"
     ? 0
     : name === "fmin" ||

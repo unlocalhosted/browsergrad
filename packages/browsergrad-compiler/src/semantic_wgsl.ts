@@ -74,6 +74,8 @@ const SEMANTIC_NOOP_CALLS = new Set([
 ]);
 const SEMANTIC_ADDRESS_PREDICATE_CALLS = new Set(["__isGlobal", "__isShared", "__isConstant", "__isLocal"]);
 const SEMANTIC_MATH_CALLS = new Map([
+  ["clock", "clock"],
+  ["clock64", "clock"],
   ["sqrt", "sqrt"],
   ["sqrtf", "sqrt"],
   ["__fsqrt_rn", "sqrt"],
@@ -3131,6 +3133,9 @@ function emitSemanticMathCall(
   if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL math call requires symbol callee", expression.span);
   const wgslCallee = SEMANTIC_MATH_CALLS.get(expression.callee.name);
   if (!wgslCallee) throw semanticWgslError(`semantic WGSL does not support math call '${expression.callee.name}'`, expression.span);
+  if (wgslCallee === "clock") {
+    return "u32(workgroup_id.x * 104729u + workgroup_id.y * 1009u + workgroup_id.z * 97u + local_id.x + local_id.y * 31u + local_id.z * 7u)";
+  }
   if (wgslCallee === "div_ceil") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
@@ -3563,7 +3568,9 @@ function wgslRoundBfloat16(value: string): string {
 }
 
 function semanticMathCallArity(name: string): number {
-  return name === "__builtin_inff" ||
+  return name === "clock" ||
+    name === "clock64" ||
+    name === "__builtin_inff" ||
     name === "__builtin_huge_valf"
     ? 0
     : name === "fmin" ||

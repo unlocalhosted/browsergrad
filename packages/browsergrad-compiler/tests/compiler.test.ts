@@ -8649,9 +8649,18 @@ __global__ void synthetic_clock(clock_t *out) {
       { buffers: { out: new Uint32Array(8) } },
       { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(8) } },
+      { gridDim: [1, 1, 1], blockDim: [4, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("workgroup_id.x * 104729u");
     expect([...result.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3, 0, 1, 2, 3]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([0, 1, 2, 3, 0, 1, 2, 3]);
   });
 
   it("accepts CUDA declarator qualifiers, alignment attrs, and constructor-style vector locals", () => {
