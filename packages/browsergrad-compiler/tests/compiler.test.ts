@@ -10760,7 +10760,19 @@ __global__ void parent(float *out) {
       pointerBaseOffsets: plan.launches[0]!.pointerBaseOffsets,
       workgroupSize: [1, 1, 1],
     });
+    expect(canEmitSemanticKernelIrWgsl(child.kernelIr, { pointerBaseOffsets: plan.launches[0]!.pointerBaseOffsets })).toBe(true);
+    expect(child.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(child.wgsl).toContain("bg_base_out");
+    expect(child.wgsl).toContain("var out__bg_ptr_offset: i32 = i32(bg_uniforms.bg_base_out);");
+    expect(child.wgsl).toContain("out[u32((out__bg_ptr_offset + 0))] = 7.0;");
+
+    const staleOffsetKey = compileCudaLiteKernel(compiled.ast.source, {
+      kernelName: "child",
+      pointerBaseOffsets: { stale: 9 },
+      workgroupSize: [1, 1, 1],
+    });
+    expect(staleOffsetKey.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(staleOffsetKey.wgsl).not.toContain("bg_base_stale");
   });
 
   it("keeps negative pointer-offset dynamic launches reference-only", () => {

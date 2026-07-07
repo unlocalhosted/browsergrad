@@ -15,11 +15,16 @@ import type {
   SourceSpan,
 } from "./types.js";
 import { CudaLiteCompilerError } from "./types.js";
+import { pointerBaseOffsetUniformName } from "./pointer_offsets.js";
 import { createWgslNameMap, safeWgslIdentifier } from "./wgsl_names.js";
 
 export interface SemanticKernelIrWgslOutput {
   readonly wgsl: string;
   readonly program: ReturnType<typeof defineWgslKernelProgram>;
+}
+
+export interface EmitSemanticKernelIrWgslOptions {
+  readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
 }
 
 const UNIFORM_PARAMS_NAME = "bg_uniforms";
@@ -108,7 +113,10 @@ const WGSL_ATOMIC_CALLEES = new Map([
   ["atomicCAS_system", "atomicCompareExchangeWeak"],
 ]);
 
-export function canEmitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): boolean {
+export function canEmitSemanticKernelIrWgsl(
+  ir: SemanticKernelIrModule,
+  _options: EmitSemanticKernelIrWgslOptions = {},
+): boolean {
   return unsupportedSemanticWgslOperation(ir.operations, ir) === undefined &&
     ir.requiredFeatures.length === 0 &&
     ir.params.every(semanticWgslParamSupported) &&
@@ -116,14 +124,17 @@ export function canEmitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): boolean
     ir.memory.every(semanticWgslMemorySymbolSupported);
 }
 
-export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKernelIrWgslOutput {
+export function emitSemanticKernelIrWgsl(
+  ir: SemanticKernelIrModule,
+  options: EmitSemanticKernelIrWgslOptions = {},
+): SemanticKernelIrWgslOutput {
   const unsupported = unsupportedSemanticWgslOperation(ir.operations, ir);
   if (unsupported) throw semanticWgslError(`semantic WGSL does not support ${unsupported.kind}`, unsupported.span);
   if (ir.requiredFeatures.length > 0) throw semanticWgslError("semantic WGSL does not support required WebGPU features yet", ir.span);
   const unsupportedParam = ir.params.find((param) => !semanticWgslParamSupported(param));
   if (unsupportedParam) throw semanticWgslError(`semantic WGSL does not support parameter '${unsupportedParam.name}'`, unsupportedParam.span);
 
-  const storageOffsetBases = semanticStorageOffsetBaseNames(ir.operations);
+  const storageOffsetBases = semanticStorageOffsetBaseNames(ir.operations, ir, options);
   const rawNames = new Set(ir.params.map((param) => param.name));
   for (const base of storageOffsetBases) rawNames.add(storageOffsetSymbol(base));
   for (const operation of ir.operations) collectOperationNames(operation, rawNames);
@@ -137,6 +148,11 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
     rawNames.add(surfaceWidthField(surface.name));
     rawNames.add(surfaceHeightField(surface.name));
   }
+  for (const param of ir.params) {
+    if (param.pointer && options.pointerBaseOffsets?.[param.name] !== undefined) {
+      rawNames.add(pointerBaseOffsetUniformName(param.name));
+    }
+  }
   const names = createWgslNameMap([...rawNames]);
   const initializedScalarConstants = constantMemorySymbols(ir).filter((symbol) => symbol.initialized && symbol.dimensions.length === 0);
   const initializedConstantArrays = constantMemorySymbols(ir).filter((symbol) => symbol.initialized && symbol.dimensions.length > 0);
@@ -147,6 +163,11 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
       { name: surfaceWidthField(surface.name), valueType: "uint" as const, span: surface.span },
       { name: surfaceHeightField(surface.name), valueType: "uint" as const, span: surface.span },
     ]),
+    ...ir.params.flatMap((param) =>
+      param.pointer && options.pointerBaseOffsets?.[param.name] !== undefined
+        ? [{ name: pointerBaseOffsetUniformName(param.name), valueType: "uint" as const, span: param.span }]
+        : []
+    ),
   ];
   const constantBuffers = constantMemorySymbols(ir).filter((symbol) => !symbol.initialized && symbol.dimensions.length > 0);
   const deviceGlobalBuffers = deviceGlobalMemorySymbols(ir);
@@ -231,7 +252,7 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
     lines.push(`@group(0) @binding(${bindingIndexFor(bindings, texture.name)}) var ${nameFor(texture.name, names)}: texture_2d<f32>;`);
   }
   for (const constant of initializedScalarConstants) {
-    lines.push(`const ${nameFor(constant.name, names)}: ${wgslScalar(constant.valueType)} = ${emitSemanticExpressionAs(constant.init ?? zeroExpression(constant.span), ir, names, wgslValueScalar(constant.valueType))};`);
+    lines.push(`const ${nameFor(constant.name, names)}: ${wgslScalar(constant.valueType)} = ${emitSemanticExpressionAs(constant.init ?? zeroExpression(constant.span), ir, names, wgslValueScalar(constant.valueType), options)};`);
   }
   for (const constant of initializedConstantArrays) {
     lines.push(emitInitializedConstantArray(constant, ir, names));
@@ -255,7 +276,7 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
     lines.push(`@group(0) @binding(${bindings.length - 1}) var<uniform> ${UNIFORM_PARAMS_NAME}: Params;`);
   }
   for (const fn of ir.functions) {
-    lines.push("", ...emitSemanticFunction(fn, ir, names));
+    lines.push("", ...emitSemanticFunction(fn, ir, names, options));
   }
   lines.push(
     "",
@@ -266,8 +287,8 @@ export function emitSemanticKernelIrWgsl(ir: SemanticKernelIrModule): SemanticKe
     "  @builtin(workgroup_id) workgroup_id: vec3<u32>,",
     "  @builtin(num_workgroups) num_workgroups: vec3<u32>",
     ") {",
-    ...emitSemanticStorageOffsetDeclarations(ir, names, 1),
-    ...emitSemanticOperations(ir.operations, ir, names, 1),
+    ...emitSemanticStorageOffsetDeclarations(ir, names, 1, options),
+    ...emitSemanticOperations(ir.operations, ir, names, 1, false, options),
     "}",
   );
   const wgsl = lines.join("\n");
@@ -709,8 +730,9 @@ function emitSemanticOperations(
   names: ReadonlyMap<string, string>,
   indentLevel: number,
   allowReturnValue = false,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): readonly string[] {
-  return operations.flatMap((operation) => emitSemanticOperation(operation, ir, names, indentLevel, allowReturnValue));
+  return operations.flatMap((operation) => emitSemanticOperation(operation, ir, names, indentLevel, allowReturnValue, options));
 }
 
 function emitSemanticOperation(
@@ -719,6 +741,7 @@ function emitSemanticOperation(
   names: ReadonlyMap<string, string>,
   indentLevel: number,
   allowReturnValue = false,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): readonly string[] {
   const prefix = "  ".repeat(indentLevel);
   switch (operation.kind) {
@@ -727,33 +750,33 @@ function emitSemanticOperation(
       if (operation.target.dimensions.length > 0) {
         return [
           `${prefix}var ${nameFor(operation.target.name, names)}: ${emitLocalArrayType(operation.target)};`,
-          ...emitLocalArrayInit(operation, ir, names, indentLevel),
+          ...emitLocalArrayInit(operation, ir, names, indentLevel, options),
         ];
       }
       const type = wgslScalar(operation.target.valueType);
-      const init = operation.init ? ` = ${emitSemanticExpressionAs(operation.init, ir, names, wgslValueScalar(operation.target.valueType))}` : "";
+      const init = operation.init ? ` = ${emitSemanticExpressionAs(operation.init, ir, names, wgslValueScalar(operation.target.valueType), options)}` : "";
       return [`${prefix}var ${nameFor(operation.target.name, names)}: ${type}${init};`];
     }
     case "store":
-      return [`${prefix}${emitSemanticStore(operation, ir, names)};`];
+      return [`${prefix}${emitSemanticStore(operation, ir, names, options)};`];
     case "surface-write":
-      return emitSemanticSurfaceWrite(operation, ir, names, indentLevel);
+      return emitSemanticSurfaceWrite(operation, ir, names, indentLevel, options);
     case "surface-read-store":
-      return [`${prefix}${emitSemanticSurfaceReadStore(operation, ir, names)};`];
+      return [`${prefix}${emitSemanticSurfaceReadStore(operation, ir, names, options)};`];
     case "atomic":
-      return [`${prefix}${emitSemanticAtomic(operation, ir, names)};`];
+      return [`${prefix}${emitSemanticAtomic(operation, ir, names, options)};`];
     case "call":
-      return emitSemanticCall(operation, ir, names, indentLevel);
+      return emitSemanticCall(operation, ir, names, indentLevel, options);
     case "expression":
       if (isSemanticNoopExpression(operation.expression)) return [];
-      if (operation.expression.kind === "assignment") return [`${prefix}${emitSemanticAssignmentStatement(operation.expression, ir, names)};`];
-      return [`${prefix}${emitSemanticExpression(operation.expression, ir, names)};`];
+      if (operation.expression.kind === "assignment") return [`${prefix}${emitSemanticAssignmentStatement(operation.expression, ir, names, options)};`];
+      return [`${prefix}${emitSemanticExpression(operation.expression, ir, names, options)};`];
     case "branch": {
-      const lines = [`${prefix}if (${emitTruthiness(operation.condition, ir, names)}) {`];
-      lines.push(...emitSemanticOperations(operation.consequent, ir, names, indentLevel + 1, allowReturnValue));
+      const lines = [`${prefix}if (${emitTruthiness(operation.condition, ir, names, options)}) {`];
+      lines.push(...emitSemanticOperations(operation.consequent, ir, names, indentLevel + 1, allowReturnValue, options));
       if (operation.alternate.length > 0) {
         lines.push(`${prefix}} else {`);
-        lines.push(...emitSemanticOperations(operation.alternate, ir, names, indentLevel + 1, allowReturnValue));
+        lines.push(...emitSemanticOperations(operation.alternate, ir, names, indentLevel + 1, allowReturnValue, options));
       }
       lines.push(`${prefix}}`);
       return lines;
@@ -761,17 +784,17 @@ function emitSemanticOperation(
     case "block":
       return [
         `${prefix}{`,
-        ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue),
+        ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue, options),
         `${prefix}}`,
       ];
     case "loop":
-      return emitSemanticLoop(operation, ir, names, indentLevel, allowReturnValue);
+      return emitSemanticLoop(operation, ir, names, indentLevel, allowReturnValue, options);
     case "barrier":
       return [`${prefix}workgroupBarrier();`];
     case "return":
       if (operation.value) {
         if (!allowReturnValue) throw semanticWgslError("semantic WGSL supports kernel return without value only", operation.span);
-        return [`${prefix}return ${emitSemanticExpression(operation.value, ir, names)};`];
+        return [`${prefix}return ${emitSemanticExpression(operation.value, ir, names, options)};`];
       }
       return [`${prefix}return;`];
     case "break":
@@ -787,6 +810,7 @@ function emitSemanticSurfaceReadStore(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "surface-read-store" }>,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   const targetName = semanticWgslSurfaceReadTargetName(operation.target);
   if (!targetName) throw semanticWgslError("semantic WGSL supports only local scalar surf2Dread targets", operation.span);
@@ -803,6 +827,7 @@ function emitSemanticSurfaceReadStore(
     },
     ir,
     names,
+    options,
   );
   return `${nameFor(targetName, names)} = ${value}`;
 }
@@ -820,16 +845,17 @@ function emitSemanticSurfaceWrite(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): readonly string[] {
   if (!semanticWgslSurfaceWriteSupported(operation, ir) || operation.surface.kind !== "symbol") {
     throw semanticWgslError("semantic WGSL supports only direct scalar surf2Dwrite", operation.span);
   }
   const prefix = "  ".repeat(indentLevel);
   const surfaceName = operation.surface.name;
-  const xBytes = emitSemanticExpressionAs(operation.xBytes, ir, names, "i32");
-  const y = emitSemanticExpressionAs(operation.y, ir, names, "i32");
-  const z = operation.z ? emitSemanticExpressionAs(operation.z, ir, names, "i32") : "0";
-  const value = emitSemanticExpressionAs(operation.value, ir, names, "f32");
+  const xBytes = emitSemanticExpressionAs(operation.xBytes, ir, names, "i32", options);
+  const y = emitSemanticExpressionAs(operation.y, ir, names, "i32", options);
+  const z = operation.z ? emitSemanticExpressionAs(operation.z, ir, names, "i32", options) : "0";
+  const value = emitSemanticExpressionAs(operation.value, ir, names, "f32", options);
   const directSurface = surfaceSymbols(ir).find((surface) => surface.name === surfaceName);
   if (!directSurface) return [`${prefix}${GENERIC_SURFACE_WRITE_HELPER_NAME}(${nameFor(surfaceName, names)}, ${value}, ${xBytes}, ${y}, ${z});`];
   return emitSemanticSurfaceWriteBody(directSurface, value, xBytes, y, z, names, indentLevel);
@@ -839,13 +865,14 @@ function emitSemanticStore(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "store" }>,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (semanticWgslStorageOffsetStoreSupported(operation, ir)) {
     const offset = nameFor(storageOffsetSymbol(operation.target.base), names);
-    const value = emitSemanticExpressionAs(operation.value, ir, names, "i32");
+    const value = emitSemanticExpressionAs(operation.value, ir, names, "i32", options);
     return operation.operator === "-=" ? `${offset} = (${offset} - ${value})` : `${offset} = (${offset} + ${value})`;
   }
-  const target = emitSemanticMemoryRef(operation.target, ir, names);
+  const target = emitSemanticMemoryRef(operation.target, ir, names, options);
   if (
     semanticAtomicStorageNames(ir.operations).has(operation.target.base) ||
     semanticAtomicDeviceGlobalNames(ir.operations).has(operation.target.base) ||
@@ -854,10 +881,10 @@ function emitSemanticStore(
     if (operation.operator !== "=") {
       throw semanticWgslError(`semantic WGSL does not support atomic storage assignment '${operation.operator}'`, operation.span);
     }
-    const atomicValue = emitSemanticExpressionAs(operation.value, ir, names, wgslAtomicScalar(operation.target.valueType));
+    const atomicValue = emitSemanticExpressionAs(operation.value, ir, names, wgslAtomicScalar(operation.target.valueType), options);
     return `atomicStore(&${target}, ${atomicValue})`;
   }
-  const value = emitSemanticExpressionAs(operation.value, ir, names, wgslValueScalar(operation.target.valueType));
+  const value = emitSemanticExpressionAs(operation.value, ir, names, wgslValueScalar(operation.target.valueType), options);
   if (operation.operator === "=") return `${target} = ${value}`;
   if (operation.operator === "+=") return `${target} = (${target} + ${value})`;
   if (operation.operator === "-=") return `${target} = (${target} - ${value})`;
@@ -868,12 +895,13 @@ function emitSemanticFunction(
   fn: SemanticKernelIrModule["functions"][number],
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): readonly string[] {
   const params = fn.params.map((param) => `${nameFor(param.name, names)}: ${emitSemanticFunctionParamType(param)}`).join(", ");
   const returnType = fn.returnType === "void" ? "" : ` -> ${wgslScalar(fn.returnType)}`;
   return [
     `fn ${nameFor(fn.name, names)}(${params})${returnType} {`,
-    ...emitSemanticOperations(fn.body, ir, names, 1, true),
+    ...emitSemanticOperations(fn.body, ir, names, 1, true, options),
     ...(fn.returnType === "void" ? [] : [`  return ${zeroForType(wgslScalar(fn.returnType))};`]),
     "}",
   ];
@@ -889,10 +917,11 @@ function emitSemanticAssignmentStatement(
   expression: Extract<SemanticExpression, { readonly kind: "assignment" }>,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local scalar assignment targets only", expression.target.span);
   const target = nameFor(expression.target.name, names);
-  const value = emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(expression.target.valueType));
+  const value = emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(expression.target.valueType), options);
   if (expression.operator === "+=") return `${target} += ${value}`;
   if (expression.operator === "-=") return `${target} -= ${value}`;
   return `${target} = ${value}`;
@@ -903,6 +932,7 @@ function emitLocalArrayInit(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): readonly string[] {
   if (!operation.init || operation.init.kind !== "initializer") return [];
   const prefix = "  ".repeat(indentLevel);
@@ -912,7 +942,7 @@ function emitLocalArrayInit(
       const indices = flatIndicesForDimensions(operation.target.dimensions, index)
         .map((item) => `[${item}u]`)
         .join("");
-      return `${prefix}${nameFor(operation.target.name, names)}${indices} = ${emitSemanticExpressionAs(value, ir, names, wgslValueScalar(operation.target.valueType))};`;
+      return `${prefix}${nameFor(operation.target.name, names)}${indices} = ${emitSemanticExpressionAs(value, ir, names, wgslValueScalar(operation.target.valueType), options)};`;
     });
 }
 
@@ -920,29 +950,36 @@ function emitSemanticStorageOffsetDeclarations(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): readonly string[] {
   const prefix = "  ".repeat(indentLevel);
-  return [...semanticStorageOffsetBaseNames(ir.operations)]
+  return [...semanticStorageOffsetBaseNames(ir.operations, ir, options)]
     .sort()
-    .map((base) => `${prefix}var ${nameFor(storageOffsetSymbol(base), names)}: i32 = 0;`);
+    .map((base) => {
+      const pointerBase = options.pointerBaseOffsets?.[base] === undefined
+        ? "0"
+        : `i32(${UNIFORM_PARAMS_NAME}.${nameFor(pointerBaseOffsetUniformName(base), names)})`;
+      return `${prefix}var ${nameFor(storageOffsetSymbol(base), names)}: i32 = ${pointerBase};`;
+    });
 }
 
 function emitSemanticAtomic(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "atomic" }>,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   const wgslCallee = WGSL_ATOMIC_CALLEES.get(operation.callee);
   if (!operation.target || !wgslCallee) {
     throw semanticWgslError(`semantic WGSL does not support atomic '${operation.callee}'`, operation.span);
   }
-  const target = emitSemanticMemoryRef(operation.target, ir, names);
+  const target = emitSemanticMemoryRef(operation.target, ir, names, options);
   const operands = operation.args.slice(1, wgslCallee === "atomicCompareExchangeWeak" ? 3 : 2);
   if (operands.length === 0 || operands.some((operand) => operand === undefined)) {
     throw semanticWgslError(`semantic WGSL atomic '${operation.callee}' missing operand`, operation.span);
   }
   const emitted = operands.map((operand) =>
-    emitSemanticExpressionAs(operand!, ir, names, wgslAtomicScalar(operation.target!.valueType))
+    emitSemanticExpressionAs(operand!, ir, names, wgslAtomicScalar(operation.target!.valueType), options)
   );
   return `_ = ${wgslCallee}(&${target}, ${emitted.join(", ")})`;
 }
@@ -952,9 +989,10 @@ function emitSemanticCall(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): readonly string[] {
-  if (semanticWgslVoidFunctionCallSupported(operation, ir)) return [`${"  ".repeat(indentLevel)}${emitSemanticVoidFunctionCall(operation, ir, names)};`];
-  if (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return emitSemanticLocalArrayFill(operation, ir, names, indentLevel);
+  if (semanticWgslVoidFunctionCallSupported(operation, ir)) return [`${"  ".repeat(indentLevel)}${emitSemanticVoidFunctionCall(operation, ir, names, options)};`];
+  if (SEMANTIC_LOCAL_ARRAY_FILL_CALLS.has(operation.callee)) return emitSemanticLocalArrayFill(operation, ir, names, indentLevel, options);
   throw semanticWgslError(`semantic WGSL does not support call '${operation.callee}'`, operation.span);
 }
 
@@ -962,10 +1000,11 @@ function emitSemanticVoidFunctionCall(
   operation: Extract<SemanticKernelIrOperation, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   const fn = ir.functions.find((item) => item.name === operation.callee);
   if (!fn) throw semanticWgslError(`semantic WGSL unknown function '${operation.callee}'`, operation.span);
-  return `${nameFor(fn.name, names)}(${operation.args.map((arg, index) => emitSemanticFunctionArg(arg, fn.params[index], ir, names)).join(", ")})`;
+  return `${nameFor(fn.name, names)}(${operation.args.map((arg, index) => emitSemanticFunctionArg(arg, fn.params[index], ir, names, options)).join(", ")})`;
 }
 
 function emitSemanticLocalArrayFill(
@@ -973,6 +1012,7 @@ function emitSemanticLocalArrayFill(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   indentLevel: number,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): readonly string[] {
   const [target, valueExpression] = operation.args;
   if (target?.kind !== "symbol" || target.addressSpace !== "local" || valueExpression === undefined) {
@@ -983,7 +1023,7 @@ function emitSemanticLocalArrayFill(
   return emitLocalArrayFill(
     nameFor(target.name, names),
     symbol.dimensions,
-    emitSemanticExpressionAs(valueExpression, ir, names, wgslValueScalar(symbol.valueType)),
+    emitSemanticExpressionAs(valueExpression, ir, names, wgslValueScalar(symbol.valueType), options),
     indentLevel,
   );
 }
@@ -994,30 +1034,31 @@ function emitSemanticLoop(
   names: ReadonlyMap<string, string>,
   indentLevel: number,
   allowReturnValue = false,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): readonly string[] {
   const prefix = "  ".repeat(indentLevel);
   if (operation.loopKind === "for") {
-    const init = operation.init ? emitSemanticLoopInit(operation.init, ir, names) : "";
-    const condition = operation.condition ? emitTruthiness(operation.condition, ir, names) : "true";
-    const update = operation.update ? emitSemanticLoopUpdate(operation.update, ir, names) : "";
+    const init = operation.init ? emitSemanticLoopInit(operation.init, ir, names, options) : "";
+    const condition = operation.condition ? emitTruthiness(operation.condition, ir, names, options) : "true";
+    const update = operation.update ? emitSemanticLoopUpdate(operation.update, ir, names, options) : "";
     return [
       `${prefix}for (${init}; ${condition}; ${update}) {`,
-      ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue),
+      ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue, options),
       `${prefix}}`,
     ];
   }
   if (operation.loopKind === "while") {
     return [
-      `${prefix}while (${operation.condition ? emitTruthiness(operation.condition, ir, names) : "true"}) {`,
-      ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue),
+      `${prefix}while (${operation.condition ? emitTruthiness(operation.condition, ir, names, options) : "true"}) {`,
+      ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue, options),
       `${prefix}}`,
     ];
   }
   return [
     `${prefix}loop {`,
-    ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue),
+    ...emitSemanticOperations(operation.body, ir, names, indentLevel + 1, allowReturnValue, options),
     `${"  ".repeat(indentLevel + 1)}continuing {`,
-    `${"  ".repeat(indentLevel + 2)}break if !(${operation.condition ? emitTruthiness(operation.condition, ir, names) : "false"});`,
+    `${"  ".repeat(indentLevel + 2)}break if !(${operation.condition ? emitTruthiness(operation.condition, ir, names, options) : "false"});`,
     `${"  ".repeat(indentLevel + 1)}}`,
     `${prefix}}`,
   ];
@@ -1027,25 +1068,27 @@ function emitSemanticLoopUpdate(
   update: SemanticExpression,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (isSemanticNoopExpression(update)) return "";
   return update.kind === "assignment"
-    ? emitSemanticAssignmentStatement(update, ir, names)
-    : emitSemanticExpression(update, ir, names);
+    ? emitSemanticAssignmentStatement(update, ir, names, options)
+    : emitSemanticExpression(update, ir, names, options);
 }
 
 function emitSemanticLoopInit(
   init: SemanticKernelIrOperation | SemanticExpression,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
-  if (!isSemanticKernelIrOperation(init)) return emitSemanticExpression(init, ir, names);
+  if (!isSemanticKernelIrOperation(init)) return emitSemanticExpression(init, ir, names, options);
   if (init.kind === "declare") {
     const type = wgslScalar(init.target.valueType);
-    const value = init.init ? emitSemanticExpressionAs(init.init, ir, names, wgslValueScalar(init.target.valueType)) : zeroForType(type);
+    const value = init.init ? emitSemanticExpressionAs(init.init, ir, names, wgslValueScalar(init.target.valueType), options) : zeroForType(type);
     return `var ${nameFor(init.target.name, names)}: ${type} = ${value}`;
   }
-  if (init.kind === "expression") return isSemanticNoopExpression(init.expression) ? "" : emitSemanticExpression(init.expression, ir, names);
+  if (init.kind === "expression") return isSemanticNoopExpression(init.expression) ? "" : emitSemanticExpression(init.expression, ir, names, options);
   throw semanticWgslError(`semantic WGSL does not support ${init.kind} loop initializer`, init.span);
 }
 
@@ -1057,6 +1100,7 @@ function emitSemanticExpression(
   expression: SemanticExpression,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   switch (expression.kind) {
     case "literal":
@@ -1074,11 +1118,11 @@ function emitSemanticExpression(
       }
       return nameFor(expression.name, names);
     case "member":
-      return emitSemanticMember(expression, ir, names);
+      return emitSemanticMember(expression, ir, names, options);
     case "index": {
       const ref = memoryRefFromIndexExpression(expression);
       if (ref) {
-        const memoryRef = emitSemanticMemoryRef(ref, ir, names);
+        const memoryRef = emitSemanticMemoryRef(ref, ir, names, options);
         if (
           semanticAtomicStorageNames(ir.operations).has(ref.base) ||
           semanticAtomicDeviceGlobalNames(ir.operations).has(ref.base) ||
@@ -1089,18 +1133,18 @@ function emitSemanticExpression(
       throw semanticWgslError("semantic WGSL does not support index target", expression.span);
     }
     case "cast":
-      return `${wgslScalar(expression.valueType)}(${emitSemanticExpression(expression.expression, ir, names)})`;
+      return `${wgslScalar(expression.valueType)}(${emitSemanticExpression(expression.expression, ir, names, options)})`;
     case "unary":
-      return emitSemanticUnary(expression, ir, names);
+      return emitSemanticUnary(expression, ir, names, options);
     case "binary":
-      return emitSemanticBinary(expression, ir, names);
+      return emitSemanticBinary(expression, ir, names, options);
     case "conditional":
-      return `select(${emitSemanticExpression(expression.alternate, ir, names)}, ${emitSemanticExpression(expression.consequent, ir, names)}, ${emitTruthiness(expression.condition, ir, names)})`;
+      return `select(${emitSemanticExpression(expression.alternate, ir, names, options)}, ${emitSemanticExpression(expression.consequent, ir, names, options)}, ${emitTruthiness(expression.condition, ir, names, options)})`;
     case "assignment":
       if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local scalar assignment targets only", expression.target.span);
       {
         const target = nameFor(expression.target.name, names);
-        const value = emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(expression.valueType));
+        const value = emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(expression.valueType), options);
         if (expression.operator === "+=") return `(${target} += ${value})`;
         if (expression.operator === "-=") return `(${target} -= ${value})`;
         return `(${target} = ${value})`;
@@ -1108,16 +1152,16 @@ function emitSemanticExpression(
     case "update":
       return emitSemanticUpdate(expression, names);
     case "sequence":
-      return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names);
+      return emitSemanticExpression(expression.expressions.at(-1) ?? zeroExpression(expression.span), ir, names, options);
     case "call":
-      if (semanticWgslAtomicCallSupported(expression, ir)) return emitSemanticAtomicCall(expression, ir, names);
-      if (semanticWgslFunctionCallSupported(expression, ir)) return emitSemanticFunctionCall(expression, ir, names);
-      if (semanticWgslMathCallSupported(expression)) return emitSemanticMathCall(expression, ir, names);
+      if (semanticWgslAtomicCallSupported(expression, ir)) return emitSemanticAtomicCall(expression, ir, names, options);
+      if (semanticWgslFunctionCallSupported(expression, ir)) return emitSemanticFunctionCall(expression, ir, names, options);
+      if (semanticWgslMathCallSupported(expression)) return emitSemanticMathCall(expression, ir, names, options);
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
     case "texture-read":
-      return emitSemanticTextureRead(expression, ir, names);
+      return emitSemanticTextureRead(expression, ir, names, options);
     case "surface-read":
-      return emitSemanticSurfaceRead(expression, ir, names);
+      return emitSemanticSurfaceRead(expression, ir, names, options);
     case "initializer":
       throw semanticWgslError(`semantic WGSL does not support ${expression.kind} expression`, expression.span);
   }
@@ -1127,14 +1171,15 @@ function emitSemanticSurfaceRead(
   expression: Extract<SemanticExpression, { readonly kind: "surface-read" }>,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (!semanticWgslSurfaceReadSupported(expression, ir) || expression.surface.kind !== "symbol") {
     throw semanticWgslError("semantic WGSL supports only direct scalar surf2Dread", expression.span);
   }
   const surfaceName = expression.surface.name;
-  const xBytes = emitSemanticExpressionAs(expression.xBytes, ir, names, "i32");
-  const y = emitSemanticExpressionAs(expression.y, ir, names, "i32");
-  const z = expression.z ? emitSemanticExpressionAs(expression.z, ir, names, "i32") : "0";
+  const xBytes = emitSemanticExpressionAs(expression.xBytes, ir, names, "i32", options);
+  const y = emitSemanticExpressionAs(expression.y, ir, names, "i32", options);
+  const z = expression.z ? emitSemanticExpressionAs(expression.z, ir, names, "i32", options) : "0";
   const directSurface = surfaceSymbols(ir).some((surface) => surface.name === surfaceName);
   const read = directSurface
     ? `${surfaceReadHelperName(surfaceName, names)}(${xBytes}, ${y}, ${z})`
@@ -1243,13 +1288,14 @@ function emitSemanticTextureRead(
   expression: Extract<SemanticExpression, { readonly kind: "texture-read" }>,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (!semanticWgslTextureReadSupported(expression, ir) || expression.texture.kind !== "symbol") {
     throw semanticWgslError("semantic WGSL supports only direct tex2D<float> reads", expression.span);
   }
   const texture = nameFor(expression.texture.name, names);
-  const x = emitSemanticExpressionAs(expression.x, ir, names, "f32");
-  const y = emitSemanticExpressionAs(expression.y, ir, names, "f32");
+  const x = emitSemanticExpressionAs(expression.x, ir, names, "f32", options);
+  const y = emitSemanticExpressionAs(expression.y, ir, names, "f32", options);
   const coord = `clamp(vec2<i32>(i32(floor(${x})), i32(floor(${y}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1))`;
   return `textureLoad(${texture}, ${coord}, 0).r`;
 }
@@ -1258,12 +1304,13 @@ function emitSemanticFunctionCall(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL function call requires symbol callee", expression.span);
   const callee = expression.callee.name;
   const fn = ir.functions.find((item) => item.name === callee);
   if (!fn) throw semanticWgslError(`semantic WGSL unknown function '${callee}'`, expression.span);
-  const args = expression.args.map((arg, index) => emitSemanticFunctionArg(arg, fn.params[index], ir, names));
+  const args = expression.args.map((arg, index) => emitSemanticFunctionArg(arg, fn.params[index], ir, names, options));
   return `${nameFor(fn.name, names)}(${args.join(", ")})`;
 }
 
@@ -1272,6 +1319,7 @@ function emitSemanticFunctionArg(
   param: SemanticKernelIrModule["functions"][number]["params"][number] | undefined,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (param?.addressSpace === "texture") {
     if (arg.kind !== "symbol" || arg.addressSpace !== "texture") throw semanticWgslError("semantic WGSL texture helper argument must be a texture symbol", arg.span);
@@ -1283,7 +1331,7 @@ function emitSemanticFunctionArg(
     if (handle === undefined) throw semanticWgslError(`unknown surface '${arg.name}'`, arg.span);
     return `${handle}u`;
   }
-  return emitSemanticExpressionAs(arg, ir, names, wgslValueScalar(param?.valueType));
+  return emitSemanticExpressionAs(arg, ir, names, wgslValueScalar(param?.valueType), options);
 }
 
 function emitSemanticUpdate(
@@ -1302,11 +1350,12 @@ function emitSemanticExpressionAs(
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
   targetType: WgslValueType,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (expression.kind === "literal" && typeof expression.value === "number") {
     return emitNumberLiteral(expression.value, expression.valueType, targetType);
   }
-  const emitted = emitSemanticExpression(expression, ir, names);
+  const emitted = emitSemanticExpression(expression, ir, names, options);
   const atomicValueType = semanticAtomicCallValueType(expression);
   if (atomicValueType) {
     const sourceType = wgslAtomicScalar(atomicValueType);
@@ -1326,14 +1375,15 @@ function emitSemanticAtomicCall(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL atomic call requires symbol callee", expression.span);
   const wgslCallee = WGSL_ATOMIC_CALLEES.get(expression.callee.name);
   const target = semanticAtomicCallTarget(expression);
   if (!wgslCallee || !target) throw semanticWgslError(`semantic WGSL does not support atomic '${expression.callee.name}'`, expression.span);
-  const memoryRef = emitSemanticMemoryRef(target, ir, names);
+  const memoryRef = emitSemanticMemoryRef(target, ir, names, options);
   const operands = expression.args.slice(1, wgslCallee === "atomicCompareExchangeWeak" ? 3 : 2);
-  const emitted = operands.map((operand) => emitSemanticExpressionAs(operand, ir, names, wgslAtomicScalar(target.valueType)));
+  const emitted = operands.map((operand) => emitSemanticExpressionAs(operand, ir, names, wgslAtomicScalar(target.valueType), options));
   const call = `${wgslCallee}(&${memoryRef}, ${emitted.join(", ")})`;
   return wgslCallee === "atomicCompareExchangeWeak" ? `${call}.old_value` : call;
 }
@@ -1342,6 +1392,7 @@ function emitSemanticMathCall(
   expression: Extract<SemanticExpression, { readonly kind: "call" }>,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (expression.callee.kind !== "symbol") throw semanticWgslError("semantic WGSL math call requires symbol callee", expression.span);
   const wgslCallee = SEMANTIC_MATH_CALLS.get(expression.callee.name);
@@ -1350,27 +1401,27 @@ function emitSemanticMathCall(
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
     const scalar = semanticExpressionWgslScalar(left) === "u32" ? "u32" : "i32";
-    const lhs = emitSemanticExpressionAs(left, ir, names, scalar);
-    const rhs = emitSemanticExpressionAs(right, ir, names, scalar);
+    const lhs = emitSemanticExpressionAs(left, ir, names, scalar, options);
+    const rhs = emitSemanticExpressionAs(right, ir, names, scalar, options);
     return `(((${lhs} + ${rhs}) - ${scalar === "u32" ? "1u" : "1"}) / ${rhs})`;
   }
   if (wgslCallee === "divide") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
-    return `(${emitSemanticExpressionAs(left, ir, names, "f32")} / ${emitSemanticExpressionAs(right, ir, names, "f32")})`;
+    return `(${emitSemanticExpressionAs(left, ir, names, "f32", options)} / ${emitSemanticExpressionAs(right, ir, names, "f32", options)})`;
   }
   if (wgslCallee === "lerp") {
     const [left, right, factor] = expression.args;
     if (!left || !right || !factor) throw semanticWgslError("lerp expects three operands", expression.span);
-    const start = emitSemanticExpressionAs(left, ir, names, "f32");
-    const end = emitSemanticExpressionAs(right, ir, names, "f32");
-    const amount = emitSemanticExpressionAs(factor, ir, names, "f32");
+    const start = emitSemanticExpressionAs(left, ir, names, "f32", options);
+    const end = emitSemanticExpressionAs(right, ir, names, "f32", options);
+    const amount = emitSemanticExpressionAs(factor, ir, names, "f32", options);
     return `fma(${amount}, (${end} - ${start}), ${start})`;
   }
   if (wgslCallee === "modf_intpart" || wgslCallee === "modf_fraction") {
     const [value] = expression.args;
     if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
-    const emitted = emitSemanticExpressionAs(value, ir, names, "f32");
+    const emitted = emitSemanticExpressionAs(value, ir, names, "f32", options);
     const nonFinite = `((${emitted} != ${emitted}) || (abs(${emitted}) > 3.4028234663852886e38))`;
     if (wgslCallee === "modf_intpart") return `select(trunc(${emitted}), ${emitted}, ${nonFinite})`;
     const infinityFraction = `select(0.0, -0.0, ${emitted} < 0.0)`;
@@ -1379,7 +1430,7 @@ function emitSemanticMathCall(
   if (wgslCallee === "frexp_exponent" || wgslCallee === "frexp_mantissa") {
     const [value] = expression.args;
     if (!value) throw semanticWgslError(`${expression.callee.name} expects one operand`, expression.span);
-    const emitted = emitSemanticExpressionAs(value, ir, names, "f32");
+    const emitted = emitSemanticExpressionAs(value, ir, names, "f32", options);
     const nonFiniteOrZero = `((${emitted} == 0.0) || (${emitted} != ${emitted}) || (abs(${emitted}) > 3.4028234663852886e38))`;
     const exponent = `(i32(floor(log2(abs(${emitted})))) + 1)`;
     if (wgslCallee === "frexp_exponent") return `select(${exponent}, 0, ${nonFiniteOrZero})`;
@@ -1388,8 +1439,8 @@ function emitSemanticMathCall(
   if (wgslCallee === "remquo_quotient" || wgslCallee === "remquo_remainder") {
     const [left, right] = expression.args;
     if (!left || !right) throw semanticWgslError(`${expression.callee.name} expects two operands`, expression.span);
-    const x = emitSemanticExpressionAs(left, ir, names, "f32");
-    const y = emitSemanticExpressionAs(right, ir, names, "f32");
+    const x = emitSemanticExpressionAs(left, ir, names, "f32", options);
+    const y = emitSemanticExpressionAs(right, ir, names, "f32", options);
     const ratio = `(${x} / ${y})`;
     const base = `floor(${ratio})`;
     const diff = `(${ratio} - ${base})`;
@@ -1397,7 +1448,7 @@ function emitSemanticMathCall(
     if (wgslCallee === "remquo_quotient") return quotient;
     return `(${x} - f32(${quotient}) * ${y})`;
   }
-  return `${wgslCallee}(${expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, "f32")).join(", ")})`;
+  return `${wgslCallee}(${expression.args.map((arg) => emitSemanticExpressionAs(arg, ir, names, "f32", options)).join(", ")})`;
 }
 
 function semanticMathCallArity(name: string): number {
@@ -1429,6 +1480,7 @@ function emitSemanticMember(
   expression: Extract<SemanticExpression, { readonly kind: "member" }>,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (expression.object.kind !== "symbol") throw semanticWgslError("semantic WGSL supports builtin vector members only", expression.span);
   const axisIndex = expression.property === "x" ? 0 : expression.property === "y" ? 1 : 2;
@@ -1442,7 +1494,7 @@ function emitSemanticMember(
     case "gridDim":
       return `num_workgroups.${expression.property}`;
     default:
-      return `${emitSemanticExpression(expression.object, ir, names)}.${expression.property}`;
+      return `${emitSemanticExpression(expression.object, ir, names, options)}.${expression.property}`;
   }
 }
 
@@ -1450,11 +1502,12 @@ function emitSemanticUnary(
   expression: Extract<SemanticExpression, { readonly kind: "unary" }>,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
-  if (expression.operator === "!") return `!(${emitTruthiness(expression.argument, ir, names)})`;
-  if (expression.operator === "~") return `~(${emitSemanticExpression(expression.argument, ir, names)})`;
-  if (expression.operator === "+") return emitSemanticExpression(expression.argument, ir, names);
-  if (expression.operator === "-") return `-(${emitSemanticExpression(expression.argument, ir, names)})`;
+  if (expression.operator === "!") return `!(${emitTruthiness(expression.argument, ir, names, options)})`;
+  if (expression.operator === "~") return `~(${emitSemanticExpression(expression.argument, ir, names, options)})`;
+  if (expression.operator === "+") return emitSemanticExpression(expression.argument, ir, names, options);
+  if (expression.operator === "-") return `-(${emitSemanticExpression(expression.argument, ir, names, options)})`;
   throw semanticWgslError(`semantic WGSL does not support unary '${expression.operator}'`, expression.span);
 }
 
@@ -1462,13 +1515,14 @@ function emitSemanticBinary(
   expression: Extract<SemanticExpression, { readonly kind: "binary" }>,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (LOGICAL_OPERATORS.has(expression.operator)) {
-    return `(${emitTruthiness(expression.left, ir, names)} ${expression.operator} ${emitTruthiness(expression.right, ir, names)})`;
+    return `(${emitTruthiness(expression.left, ir, names, options)} ${expression.operator} ${emitTruthiness(expression.right, ir, names, options)})`;
   }
   const operandType = semanticBinaryOperandType(expression);
-  const left = emitSemanticExpressionAs(expression.left, ir, names, operandType);
-  const right = emitSemanticExpressionAs(expression.right, ir, names, operandType);
+  const left = emitSemanticExpressionAs(expression.left, ir, names, operandType, options);
+  const right = emitSemanticExpressionAs(expression.right, ir, names, operandType, options);
   return `(${left} ${expression.operator} ${right})`;
 }
 
@@ -1485,22 +1539,24 @@ function emitTruthiness(
   expression: SemanticExpression,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (expression.kind === "binary" && (COMPARISON_OPERATORS.has(expression.operator) || LOGICAL_OPERATORS.has(expression.operator))) {
-    return emitSemanticBinary(expression, ir, names);
+    return emitSemanticBinary(expression, ir, names, options);
   }
-  return `(${emitSemanticExpression(expression, ir, names)} != 0)`;
+  return `(${emitSemanticExpression(expression, ir, names, options)} != 0)`;
 }
 
 function emitSemanticMemoryRef(
   ref: SemanticMemoryRef,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
   if (ref.fields.length > 0) throw semanticWgslError("semantic WGSL supports scalar memory refs only", ref.span);
   if (ref.addressSpace === "storage") {
     if (ref.indices.length === 0) throw semanticWgslError("semantic WGSL supports indexed storage refs only", ref.span);
-    return `${nameFor(ref.base, names)}[${emitFlatStorageIndex(ref, ir, names)}]`;
+    return `${nameFor(ref.base, names)}[${emitFlatStorageIndex(ref, ir, names, options)}]`;
   }
   if (ref.addressSpace === "constant") {
     const symbol = constantMemorySymbols(ir).find((item) => item.name === ref.base);
@@ -1741,12 +1797,13 @@ function emitFlatStorageIndex(
   ref: SemanticMemoryRef,
   ir: SemanticKernelIrModule,
   names: ReadonlyMap<string, string>,
+  options: EmitSemanticKernelIrWgslOptions = {},
 ): string {
-  const hasOffset = semanticStorageOffsetBaseNames(ir.operations).has(ref.base);
+  const hasOffset = semanticStorageOffsetBaseNames(ir.operations, ir, options).has(ref.base);
   if (!hasOffset && ref.indices.length === 1) {
-    return emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32");
+    return emitSemanticExpressionAs(ref.indices[0]!, ir, names, "u32", options);
   }
-  const terms = ref.indices.map((index) => emitSemanticExpressionAs(index, ir, names, "i32"));
+  const terms = ref.indices.map((index) => emitSemanticExpressionAs(index, ir, names, "i32", options));
   if (hasOffset) {
     terms.unshift(nameFor(storageOffsetSymbol(ref.base), names));
   }
@@ -1825,8 +1882,18 @@ function emitFlatLocalArrayIndexes(flat: string, dimensions: readonly number[]):
   }).join("");
 }
 
-function semanticStorageOffsetBaseNames(operations: readonly SemanticKernelIrOperation[]): Set<string> {
-  const out = new Set<string>();
+function semanticStorageOffsetBaseNames(
+  operations: readonly SemanticKernelIrOperation[],
+  ir: SemanticKernelIrModule,
+  options: EmitSemanticKernelIrWgslOptions = {},
+): Set<string> {
+  const out = new Set(ir.params
+    .filter((param) =>
+      param.addressSpace === "storage" &&
+      param.pointer &&
+      options.pointerBaseOffsets?.[param.name] !== undefined
+    )
+    .map((param) => param.name));
   collectSemanticStorageOffsetBaseNames(operations, out);
   return out;
 }
