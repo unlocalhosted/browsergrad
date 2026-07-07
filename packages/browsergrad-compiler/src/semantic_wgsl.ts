@@ -977,8 +977,8 @@ function semanticWgslExpressionSupported(
         semanticWgslExpressionSupported(expression.alternate, expected, ir);
     case "assignment":
       return semanticWgslAssignmentOperatorSupported(expression.operator) &&
-        expression.target.kind === "symbol" &&
-        expression.target.addressSpace === "local" &&
+        (expression.target.kind === "symbol" && expression.target.addressSpace === "local" ||
+          expression.target.kind === "member" && semanticWgslVectorMemberSupported(expression.target, ir)) &&
         semanticWgslExpressionSupported(expression.value, "scalar", ir);
     case "update":
       return expression.argument.kind === "symbol" &&
@@ -1270,6 +1270,13 @@ function emitSemanticAssignmentStatement(
   options: EmitSemanticKernelIrWgslOptions = {},
   textureSpecializations: SemanticTextureDescriptorSpecializations = new Map(),
 ): string {
+  if (expression.target.kind === "member" && semanticWgslVectorMemberSupported(expression.target, ir)) {
+    const target = emitSemanticMember(expression.target, ir, names, options);
+    const value = emitSemanticExpressionAs(expression.value, ir, names, "f32", options, textureSpecializations);
+    if (expression.operator === "+=") return `${target} += ${value}`;
+    if (expression.operator === "-=") return `${target} -= ${value}`;
+    return `${target} = ${value}`;
+  }
   if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local scalar assignment targets only", expression.target.span);
   const target = nameFor(expression.target.name, names);
   const value = emitSemanticExpressionAs(expression.value, ir, names, wgslValueScalar(expression.target.valueType), options, textureSpecializations);
@@ -1508,6 +1515,7 @@ function emitSemanticExpression(
     case "conditional":
       return `select(${emitSemanticExpression(expression.alternate, ir, names, options, textureSpecializations)}, ${emitSemanticExpression(expression.consequent, ir, names, options, textureSpecializations)}, ${emitTruthiness(expression.condition, ir, names, options)})`;
     case "assignment":
+      if (expression.target.kind === "member" && semanticWgslVectorMemberSupported(expression.target, ir)) return `(${emitSemanticAssignmentStatement(expression, ir, names, options, textureSpecializations)})`;
       if (expression.target.kind !== "symbol") throw semanticWgslError("semantic WGSL supports local scalar assignment targets only", expression.target.span);
       {
         const target = nameFor(expression.target.name, names);
@@ -1988,8 +1996,14 @@ function emitSemanticMember(
     case "gridDim":
       return `num_workgroups.${expression.property}`;
     default:
-      return `${emitSemanticExpression(expression.object, ir, names, options)}.${expression.property}`;
+      return `${emitSemanticExpression(expression.object, ir, names, options)}.${semanticVectorFieldName(expression)}`;
   }
+}
+
+function semanticVectorFieldName(expression: Extract<SemanticExpression, { readonly kind: "member" }>): string {
+  const valueType = semanticExpressionVectorValueType(expression.object);
+  const field = valueType === undefined ? undefined : cudaVectorFieldIndex(valueType, expression.property);
+  return ["x", "y", "z", "w"][field ?? -1] ?? expression.property;
 }
 
 function emitSemanticUnary(

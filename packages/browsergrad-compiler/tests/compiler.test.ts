@@ -7545,10 +7545,26 @@ __global__ void vectorSaxpy(float a, const float4* x, const float4* y, float4* z
       },
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: {
+          x: new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]),
+          y: new Float32Array([10, 20, 30, 40, 50, 60, 70, 80]),
+          z: new Float32Array(8),
+        },
+        scalars: { a: 2, n: 2 },
+      },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
 
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).toContain("var<storage, read> x: array<f32>;");
     expect(compiled.wgsl).toContain("vec4<f32>");
     expect([...result.buffers.z as Float32Array]).toEqual([12, 22, 33, 46, 60, 66, 77, 90]);
+    expect([...semanticResult.buffers.z as Float32Array]).toEqual([12, 22, 33, 46, 60, 66, 77, 90]);
   });
 
   it("lowers CUDA float4 storage elements through semantic IR", () => {
@@ -8114,7 +8130,8 @@ __global__ void addPacked(float *a, float *b, float *c, int n) {
       { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
     );
 
-    expect(compiled.wgsl).toContain("vec4<f32>(f32(a[");
+    expect(compiled.wgsl).toContain("vec4<f32>(");
+    expect(compiled.wgsl).toContain("a[");
     expect(compiled.wgsl).toContain("c[");
     expect([...result.buffers.c as Float32Array]).toEqual([11, 22, 33, 44, 55, 66, 77, 88]);
   });
@@ -8170,7 +8187,7 @@ __global__ void addPackedAlias(float *a, float *b, float *c) {
     );
 
     expect(compiled.wgsl).not.toContain("var ap");
-    expect(compiled.wgsl).toContain("vec4<f32>(f32(a[");
+    expect(compiled.wgsl).toContain("vec4<f32>(a[");
     expect([...result.buffers.c as Float32Array]).toEqual([3, 7, 11, 15]);
   });
 
