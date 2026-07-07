@@ -142,7 +142,7 @@ const BUILTIN_FEATURES: readonly CudaFeatureRecord[] = [
   feature("unsupported-cufft", "library", "cuFFT library island", "unsupported", false, true, "Future WGSL FFT library lowering."),
   feature("unsupported-curand", "library", "cuRAND library island", "unsupported", false, true, "Future counter RNG library lowering."),
   feature("curand-state-address", "library", "Unsupported cuRAND state address", "unsupported", false, true, "cuRAND state helpers require modeled state storage addresses."),
-  feature("unsupported-inline-asm", "subgroup", "Unsupported inline PTX", "unsupported", false, false, "Inline PTX requires modeled instruction semantics before reference or WGSL lowering."),
+  feature("unsupported-inline-asm", "subgroup", "Unsupported inline PTX", "unsupported", false, false, "Inline PTX fma.rn.f32, laneid, warpid, lanemask_lt, globaltimer, bfind.u32, u8x4 SAD, ldmatrix carriers, and m16n8k16 MMA carriers have modeled reference/WGSL lowering; remaining inline PTX requires modeled instruction semantics before reference or WGSL lowering."),
   feature("invalid-inline-asm-operands", "subgroup", "Invalid inline PTX operands", "unsupported", false, false, "Modeled inline PTX instruction received incompatible operands."),
   feature("unsupported-wmma-fragment-storage", "subgroup", "Unsupported WMMA fragment storage", "unsupported", false, true, "WMMA fragments are modeled only in supported local storage forms."),
   feature("unsupported-wmma-fragment-pointer", "subgroup", "Unsupported WMMA fragment pointer", "unsupported", false, true, "WMMA fragment pointers are not modeled by CUDA-lite."),

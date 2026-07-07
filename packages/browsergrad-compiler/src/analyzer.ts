@@ -1612,6 +1612,12 @@ function validateInlineAsmStatement(
   if (op?.kind === "laneid" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "laneid inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
   }
+  if (op?.kind === "warpid" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
+    asmDiagnostics.push(error("invalid-inline-asm-operands", "warpid inline PTX expects one output operand and no input operands", statement.span));
+  }
+  if (op?.kind === "warpid" && outputInfos[0]?.valueType !== undefined && outputInfos[0]?.valueType !== "uint" && outputInfos[0]?.valueType !== "int") {
+    asmDiagnostics.push(error("invalid-inline-asm-operands", "warpid inline PTX writes an integer output operand", outputs[0]?.span ?? statement.span));
+  }
   if (op?.kind === "lanemask-lt" && (outputs.length !== 1 || statement.inputs.length !== 0)) {
     asmDiagnostics.push(error("invalid-inline-asm-operands", "lanemask_lt inline PTX expects one output operand and no input operands", statement.span));
   }

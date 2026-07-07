@@ -807,6 +807,12 @@ function execInlineAsm(
     writeLValue(target, localLinearRank(context) % 32, context);
     return;
   }
+  if (op?.kind === "warpid") {
+    if (statement.inputs.length !== 0) throw compilerFailure("warpid inline asm expects no inputs");
+    if (outputs.length !== 1) throw compilerFailure("warpid inline asm expects one output operand");
+    writeLValue(resolveLValue(outputs[0]!, context), Math.floor(localLinearRank(context) / 32), context);
+    return;
+  }
   if (op?.kind === "lanemask-lt") {
     if (statement.inputs.length !== 0) throw compilerFailure("lanemask_lt inline asm expects no inputs");
     if (outputs.length !== 1) throw compilerFailure("lanemask_lt inline asm expects one output operand");

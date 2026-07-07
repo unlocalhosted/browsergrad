@@ -9703,6 +9703,28 @@ __global__ void laneId(int *out) {
     expect([...result.buffers.out as Int32Array]).toEqual([0, 1, 2, 3]);
   });
 
+  it("lowers output-only inline PTX warp id statements", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void warpId(uint *out) {
+  int idx = threadIdx.x;
+  unsigned int warp;
+  asm volatile("mov.u32 %0, %%warpid;" : "=r"(warp));
+  out[idx] = warp;
+}`, { workgroupSize: [64, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(64) } },
+      { gridDim: [1, 1, 1], blockDim: [64, 1, 1] },
+    );
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-inline-asm");
+    expect(compiled.wgsl).toContain("/ 32");
+    expect([...result.buffers.out as Uint32Array]).toEqual([
+      ...new Array(32).fill(0),
+      ...new Array(32).fill(1),
+    ]);
+  });
+
   it("lowers output-only inline PTX lanemask_lt statements", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void laneMaskLt(uint *out) {

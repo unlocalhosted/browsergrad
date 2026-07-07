@@ -2063,6 +2063,12 @@ __global__ void intrinsicPack(half2 *h, float2 *f, float *out) {
 __global__ void activeMask(uint *out) {
   out[threadIdx.x] = __activemask();
 }`,
+  inlineAsmWarpId: `
+__global__ void inlineAsmWarpId(uint *out) {
+  unsigned int warp;
+  asm volatile("mov.u32 %0, %%warpid;" : "=r"(warp));
+  out[threadIdx.x] = warp;
+}`,
   complexMagnitude: `
 __global__ void complexMagnitude(cufftComplex *data, float *mag, int N) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -12420,6 +12426,19 @@ const html = String.raw`<!doctype html>
             }),
             output: "out",
             expectedOutput: { type: "Uint32Array", data: [15, 15, 15, 15] },
+          },
+          {
+            name: "inline-asm:warpid",
+            source: SOURCES.inlineAsmWarpId,
+            options: { workgroupSize: [64, 1, 1] },
+            launch: { gridDim: [1, 1, 1], blockDim: [64, 1, 1] },
+            input: () => ({
+              buffers: {
+                out: new Uint32Array(64),
+              },
+            }),
+            output: "out",
+            expectedOutput: { type: "Uint32Array", data: [...new Array(32).fill(0), ...new Array(32).fill(1)] },
           },
           {
             name: "compat:double-f32-mode-atomic",

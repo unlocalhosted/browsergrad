@@ -2223,6 +2223,9 @@ function emitInlineAsmStatement(
   if (op?.kind === "laneid" && statement.inputs.length === 0 && outputs.length === 1) {
     return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `u32(${emitLocalLinearRank(context)} % 32)`, context)}`;
   }
+  if (op?.kind === "warpid" && statement.inputs.length === 0 && outputs.length === 1) {
+    return `${emitExpression(outputs[0]!, context)} = ${emitInlineU32Output(outputs[0]!, `u32(${emitLocalLinearRank(context)} / 32)`, context)}`;
+  }
   if (op?.kind === "lanemask-lt" && statement.inputs.length === 0 && outputs.length === 1) {
     const lane = `u32(${emitLocalLinearRank(context)} & 31)`;
     const mask = `select(0u, ((1u << ${lane}) - 1u), ${lane} > 0u)`;

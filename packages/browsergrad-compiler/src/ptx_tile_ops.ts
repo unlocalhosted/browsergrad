@@ -1,6 +1,7 @@
 export type InlineAsmOp =
   | { readonly kind: "fma-rn-f32" }
   | { readonly kind: "laneid" }
+  | { readonly kind: "warpid" }
   | { readonly kind: "lanemask-lt" }
   | { readonly kind: "globaltimer-u64" }
   | { readonly kind: "bfind-u32" }
@@ -17,6 +18,7 @@ export type InlineAsmOp =
 
 export function classifyInlineAsm(template: string): InlineAsmOp | undefined {
   if (/\bmov\.u32\b/u.test(template) && /%%laneid\b/u.test(template)) return { kind: "laneid" };
+  if (/\bmov\.u32\b/u.test(template) && /%%warpid\b/u.test(template)) return { kind: "warpid" };
   if (/\bmov\.u32\b/u.test(template) && /%%lanemask_lt\b/u.test(template)) return { kind: "lanemask-lt" };
   if (/\bmov\.u64\b/u.test(template) && /%globaltimer\b/u.test(template)) return { kind: "globaltimer-u64" };
   if (/\bbfind\.u32\b/u.test(template)) return { kind: "bfind-u32" };
@@ -44,6 +46,7 @@ export function inlineAsmSupportedList(): string {
   return [
     "fma.rn.f32",
     "laneid",
+    "warpid",
     "lanemask_lt",
     "globaltimer",
     "bfind.u32",
