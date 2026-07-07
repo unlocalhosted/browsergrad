@@ -6779,8 +6779,9 @@ __global__ void semanticFrexp(int *expOut) {
     expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
     expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
     expect(compiled.wgsl).not.toContain("var expAlias:");
-    expect(compiled.wgsl).toContain("expOut[1u] = 4;");
-    expect(compiled.wgsl).toContain("expOut[2u] = 0;");
+    expect(compiled.wgsl).toContain("var bg__bg_frexp_value_");
+    expect(compiled.wgsl).toContain("expOut[1u] = i32(select((i32(floor(log2(abs(bg__bg_frexp_value_");
+    expect(compiled.wgsl).toContain("expOut[2u] = i32(select((i32(floor(log2(abs(bg__bg_frexp_value_");
     expect([...semanticResult.buffers.expOut as Int32Array]).toEqual([0, 4, 0]);
     expect([...result.buffers.expOut as Int32Array]).toEqual([0, 4, 0]);
   });
@@ -6984,8 +6985,8 @@ __global__ void mathOutAliases(float *out, int *ints) {
     expect(compiled.wgsl).toContain("var bg__bg_modf_value_");
     expect(compiled.wgsl).toContain("out[1u] = select(trunc(bg__bg_modf_value_");
     expect(compiled.wgsl).toContain("out[0u] = select(select((bg__bg_modf_value_");
-    expect(compiled.wgsl).toContain("ints[1u] = 4;");
-    expect(compiled.wgsl).toContain("out[4u] = 0.5625;");
+    expect(compiled.wgsl).toContain("ints[1u] = i32(select((i32(floor(log2(abs(bg__bg_frexp_value_");
+    expect(compiled.wgsl).toContain("out[4u] = select((bg__bg_frexp_value_");
     expect(compiled.wgsl).toContain("ints[2u] = 4;");
     expect(compiled.wgsl).toContain("out[5u] = -1.0;");
     const out = [...result.buffers.out as Float32Array];
@@ -7040,8 +7041,8 @@ __global__ void mathOutVarInits(float *out, int *ints) {
     expect(compiled.wgsl).toContain("var bg__bg_modf_value_");
     expect(compiled.wgsl).toContain("out[1u] = select(trunc(bg__bg_modf_value_");
     expect(compiled.wgsl).toContain("var frac: f32 = select(select((bg__bg_modf_value_");
-    expect(compiled.wgsl).toContain("ints[1u] = 4;");
-    expect(compiled.wgsl).toContain("var mantissa: f32 = 0.5625;");
+    expect(compiled.wgsl).toContain("ints[1u] = i32(select((i32(floor(log2(abs(bg__bg_frexp_value_");
+    expect(compiled.wgsl).toContain("var mantissa: f32 = select((bg__bg_frexp_value_");
     expect(compiled.wgsl).toContain("ints[2u] = 4;");
     expect(compiled.wgsl).toContain("var rem: f32 = -1.0;");
     expect([...semanticResult.buffers.out as Float32Array]).toEqual([...result.buffers.out as Float32Array]);
@@ -7096,6 +7097,58 @@ __global__ void dynamicModf(float *out, float x) {
         const actualValue = actualOut[index]!;
         expect(Number.isNaN(actualValue) && Number.isNaN(value) || Object.is(actualValue, value)).toBe(true);
       }
+    }
+  });
+
+  it("lowers dynamic CUDA frexp storage outputs through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void dynamicFrexp(float *out, int *ints, float x) {
+  int *expOut = ints + 1;
+  out[0] = frexpf(x, expOut);
+  float mantissa = frexp(x + out[0], &ints[2]);
+  out[1] = mantissa;
+  out[2] = (float)ints[1];
+  out[3] = (float)ints[2];
+}
+`, { workgroupSize: [1, 1, 1] });
+    const input = { buffers: { out: new Float32Array(4), ints: new Int32Array(3) }, scalars: { x: -9 } };
+    const launch = { gridDim: [1, 1, 1] as const, blockDim: [1, 1, 1] as const };
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(compiled.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain("unsupported-frexp-exponent");
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).not.toContain("bg_frexp(");
+    expect(compiled.wgsl).not.toContain("bg_ptr_write_i32");
+    expect(compiled.wgsl).toContain("bg_uniforms.x");
+    expect(compiled.wgsl).toContain("var bg__bg_frexp_value_");
+    expect([...semanticResult.buffers.out as Float32Array][0]).toBeCloseTo(-0.5625, 6);
+    expect([...semanticResult.buffers.out as Float32Array][1]).toBeCloseTo(-0.59765625, 6);
+    expect([...semanticResult.buffers.out as Float32Array][2]).toBe(4);
+    expect([...semanticResult.buffers.out as Float32Array][3]).toBe(4);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([...result.buffers.out as Float32Array]);
+    expect([...semanticResult.buffers.ints as Int32Array]).toEqual([...result.buffers.ints as Int32Array]);
+
+    for (const x of [0, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY, Number.NaN]) {
+      const expected = runCompiledKernelReference(
+        compiled,
+        { buffers: { out: new Float32Array(4), ints: new Int32Array(3) }, scalars: { x } },
+        launch,
+      );
+      const actual = runCompiledKernelSemanticReference(
+        compiled,
+        { buffers: { out: new Float32Array(4), ints: new Int32Array(3) }, scalars: { x } },
+        launch,
+      );
+      const expectedOut = [...expected.buffers.out as Float32Array];
+      const actualOut = [...actual.buffers.out as Float32Array];
+      for (const [index, value] of expectedOut.entries()) {
+        const actualValue = actualOut[index]!;
+        expect(Number.isNaN(actualValue) && Number.isNaN(value) || Object.is(actualValue, value)).toBe(true);
+      }
+      expect([...actual.buffers.ints as Int32Array]).toEqual([...expected.buffers.ints as Int32Array]);
     }
   });
 

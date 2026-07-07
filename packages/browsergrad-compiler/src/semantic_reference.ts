@@ -51,6 +51,7 @@ const SEMANTIC_MATH_CALLS = new Set([
   "fmin", "fminf", "min", "fmax", "fmaxf", "max", "pow", "powf",
   "__fdividef", "fma", "fmaf", "__fmaf_rn", "lerp", "div_ceil", "ceil_div",
   "__bg_modf_intpart", "__bg_modf_fraction",
+  "__bg_frexp_exponent", "__bg_frexp_mantissa",
 ]);
 const SEMANTIC_LOCAL_ARRAY_FILL_CALLS = new Set(["fill_1D_regs", "fill_2D_regs", "fill_3D_regs"]);
 
@@ -1199,9 +1200,20 @@ function evalSemanticMathCall(
     case "ceil_div": return Math.trunc((Math.trunc(args[0] ?? 0) + Math.trunc(args[1] ?? 1) - 1) / Math.trunc(args[1] ?? 1));
     case "__bg_modf_intpart": return modfIntpart(args[0] ?? 0);
     case "__bg_modf_fraction": return modfFraction(args[0] ?? 0);
+    case "__bg_frexp_exponent": return frexpExponent(args[0] ?? 0);
+    case "__bg_frexp_mantissa": return frexpMantissa(args[0] ?? 0);
     default:
       throw semanticReferenceError(`semantic reference does not support math call '${expression.callee.name}'`, expression.span);
   }
+}
+
+function frexpExponent(value: number): number {
+  return value === 0 || !Number.isFinite(value) ? 0 : Math.floor(Math.log2(Math.abs(value))) + 1;
+}
+
+function frexpMantissa(value: number): number {
+  const exponent = frexpExponent(value);
+  return exponent === 0 ? value : value / 2 ** exponent;
 }
 
 function modfIntpart(value: number): number {

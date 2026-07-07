@@ -892,16 +892,19 @@ function semanticFrexpCallResult(
   scope: ReadonlyMap<string, CudaLiteSemanticSymbol>,
   span: SourceSpan,
 ): { readonly sideEffects: readonly SemanticKernelIrOperation[]; readonly value: SemanticExpression } | undefined {
-  const value = expression.args[0] ? staticNumberValue(expression.args[0]) : undefined;
+  const value = expression.args[0];
   const exponentTarget = source.args[1] === undefined ? undefined : pointerAliasValueExpression(source.args[1], scope, source.args[1].span);
-  if (value === undefined || !exponentTarget) return undefined;
+  if (value === undefined || !exponentTarget || !semanticExpressionSideEffectFree(value)) return undefined;
   const exponentRef = memoryRefFromExpression(exponentTarget);
   if (!exponentRef) return undefined;
-  const exponent = frexpExponentForFiniteNumber(value);
-  const mantissa = exponent === 0 ? value : value / (2 ** exponent);
+  const temp = tempScalarSymbol("__bg.frexp.value", span, "float");
+  const tempValue = semanticSymbolExpression(temp, value.span);
   return {
-    sideEffects: [storeOperation(exponentRef, intNumberExpression(exponent, expression.span), span)],
-    value: numberExpression(mantissa, expression.span),
+    sideEffects: [
+      { kind: "declare", target: temp, init: value, span },
+      storeOperation(exponentRef, unaryIntCallExpression("__bg_frexp_exponent", tempValue, expression.span), span),
+    ],
+    value: unaryFloatCallExpression("__bg_frexp_mantissa", tempValue, expression.span),
   };
 }
 
@@ -1047,6 +1050,16 @@ function mathCallExpression(name: string, value: SemanticExpression, span: Sourc
 
 function unaryFloatCallExpression(name: string, value: SemanticExpression, span: SourceSpan): SemanticExpression {
   return mathCallExpression(name, value, span);
+}
+
+function unaryIntCallExpression(name: string, value: SemanticExpression, span: SourceSpan): SemanticExpression {
+  return {
+    kind: "call",
+    callee: { kind: "symbol", name, valueType: "int", addressSpace: "builtin", span },
+    args: [value],
+    valueType: "int",
+    span,
+  };
 }
 
 function multiplyFloatExpressions(left: SemanticExpression, right: SemanticExpression, span: SourceSpan): SemanticExpression {
