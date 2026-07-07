@@ -118,7 +118,7 @@ export type SemanticExpression =
     }
   | {
       readonly kind: "texture-read";
-      readonly callee: "tex2D";
+      readonly callee: "tex2D" | "tex2DLod";
       readonly texture: SemanticExpression;
       readonly x: SemanticExpression;
       readonly y: SemanticExpression;
@@ -225,6 +225,7 @@ const DEFAULT_WORKGROUP_SIZE: KernelLaunch["blockDim"] = [256, 1, 1];
 const COMPARISON_OPERATORS = new Set(["<", "<=", ">", ">=", "==", "!=", "&&", "||"]);
 const BARRIER_CALLS = new Set(["__syncthreads", "__syncwarp", "grid.sync", "cg::sync"]);
 const ATOMIC_CALL_PREFIX = "atomic";
+const TEXTURE_2D_READ_CALLS = new Set(["tex2D", "tex2DLod"]);
 
 export function createCudaLiteSemanticModel(analysis: CudaLiteAnalysis): CudaLiteSemanticModel {
   const params = analysis.kernel.params.map(symbolForParam);
@@ -475,10 +476,14 @@ function lowerExpression(
     }
     case "call": {
       const args = expression.args.map((arg) => lowerExpression(arg, scope));
-      if (expression.callee.kind === "identifier" && expression.callee.name === "tex2D" && args.length === 3) {
+      if (
+        expression.callee.kind === "identifier" &&
+        TEXTURE_2D_READ_CALLS.has(expression.callee.name) &&
+        args.length >= 3
+      ) {
         return {
           kind: "texture-read",
-          callee: "tex2D",
+          callee: expression.callee.name as "tex2D" | "tex2DLod",
           texture: args[0]!,
           x: args[1]!,
           y: args[2]!,

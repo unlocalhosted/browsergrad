@@ -12460,6 +12460,27 @@ __global__ void sample(float *out, int width, cudaTextureObject_t tex) {
     expect([...semanticResult.buffers.out as Float32Array]).toEqual([2, 4, 6]);
   });
 
+  it("lowers scalar tex2DLod reads through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__global__ void sample(float *out, cudaTextureObject_t tex) {
+  out[0] = tex2DLod<float>(tex, 1.5f, 0.5f, 0.0f);
+}`, { workgroupSize: [1, 1, 1] });
+    const input = {
+      buffers: { out: new Float32Array(1) },
+      textures: { tex: { width: 2, height: 1, data: new Float32Array([5, 13]) } },
+    };
+    const launch = { gridDim: [1, 1, 1], blockDim: [1, 1, 1] } as const;
+    const result = runCompiledKernelReference(compiled, input, launch);
+    const semanticResult = runCompiledKernelSemanticReference(compiled, input, launch);
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("textureLoad(tex");
+    expect([...result.buffers.out as Float32Array]).toEqual([13]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([13]);
+  });
+
   it("honors normalized point-wrap texture descriptors in reference and WGSL lowering", () => {
     const compiled = compileCudaLiteKernel(`
 __global__ void sample(float *out, int width, int height, cudaTextureObject_t tex) {
