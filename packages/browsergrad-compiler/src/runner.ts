@@ -86,8 +86,11 @@ export function compileCudaLiteKernel(
   }
   const semantic = createCudaLiteSemanticModel(analysis);
   const kernelIr = lowerSemanticModelToKernelIr(analysis, semantic, options);
-  const semanticWgslOptions = options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets };
-  const emitted = options.textureDescriptors === undefined && canEmitSemanticKernelIrWgsl(kernelIr, semanticWgslOptions)
+  const semanticWgslOptions = {
+    ...(options.pointerBaseOffsets === undefined ? {} : { pointerBaseOffsets: options.pointerBaseOffsets }),
+    ...(options.textureDescriptors === undefined ? {} : { textureDescriptors: options.textureDescriptors }),
+  };
+  const emitted = canEmitSemanticKernelIrWgsl(kernelIr, semanticWgslOptions)
     ? emitSemanticKernelIrWgsl(kernelIr, semanticWgslOptions)
     : emitKernelIrWgsl(
       lowerAnalyzedCudaLiteToKernelIr(analysis, options),

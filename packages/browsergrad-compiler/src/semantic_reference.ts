@@ -6,6 +6,7 @@ import type {
   CompiledKernelInput,
   CudaLiteDiagnostic,
   CudaLiteScalarType,
+  CudaLiteTextureDescriptor,
   KernelLaunch,
   KernelMemoryAccess,
   KernelThreadTrace,
@@ -93,6 +94,7 @@ interface MutableTrace {
 export function canRunCompiledKernelSemanticReference(compiled: CompiledCudaLiteKernel): boolean {
   return compiled.kernelIr.params.every(semanticReferenceParamSupported) &&
     compiled.kernelIr.memory.every(semanticReferenceMemorySymbolSupported) &&
+    semanticReferenceTextureDescriptorsSupported(compiled) &&
     semanticReferenceSharedShapeSupported(compiled) &&
     unsupportedSemanticReferenceOperation(compiled.kernelIr.operations, compiled) === undefined &&
     !semanticReferenceOperationsContainUnsupportedCalls(compiled.kernelIr.operations, compiled) &&
@@ -392,9 +394,13 @@ function semanticReferenceTextureReadSupported(
   return expression.valueType === "float" &&
     expression.texture.kind === "symbol" &&
     expression.texture.addressSpace === "texture" &&
-    compiled.textureDescriptors === undefined &&
     semanticReferenceExpressionSupported(expression.x, "scalar", compiled) &&
     semanticReferenceExpressionSupported(expression.y, "scalar", compiled);
+}
+
+function semanticReferenceTextureDescriptorsSupported(compiled: CompiledCudaLiteKernel): boolean {
+  if (compiled.textureDescriptors === undefined) return true;
+  return compiled.kernelIr.functions.every((fn) => fn.params.every((param) => param.addressSpace !== "texture"));
 }
 
 function semanticReferenceSurfaceReadSupported(
@@ -1099,9 +1105,66 @@ function evalSemanticTextureRead(
   const texture = context.textures[expression.texture.name];
   if (!texture) throw semanticReferenceError(`missing texture input '${expression.texture.name}'`, expression.texture.span);
   const channels = texture.channels ?? 1;
-  const x = clampTextureCoord(Math.floor(evalNumber(expression.x, context)), texture.width);
-  const y = clampTextureCoord(Math.floor(evalNumber(expression.y, context)), texture.height);
+  const descriptor = context.compiled.textureDescriptors?.[expression.texture.name] ?? {};
+  if (descriptor.filterMode === "linear") return evalSemanticLinearTextureRead(texture, descriptor, expression, context, channels);
+  const x = semanticTextureCoord(evalNumber(expression.x, context), texture.width, descriptor, "x");
+  const y = semanticTextureCoord(evalNumber(expression.y, context), texture.height, descriptor, "y");
   return texture.data[(y * texture.width + x) * channels] ?? 0;
+}
+
+function evalSemanticLinearTextureRead(
+  texture: WgslTexture2DInput,
+  descriptor: CudaLiteTextureDescriptor,
+  expression: Extract<SemanticExpression, { readonly kind: "texture-read" }>,
+  context: SemanticReferenceContext,
+  channels: number,
+): number {
+  const x = semanticLinearTextureAxis(evalNumber(expression.x, context), texture.width, descriptor, "x");
+  const y = semanticLinearTextureAxis(evalNumber(expression.y, context), texture.height, descriptor, "y");
+  const v00 = texture.data[(y.i0 * texture.width + x.i0) * channels] ?? 0;
+  const v10 = texture.data[(y.i0 * texture.width + x.i1) * channels] ?? 0;
+  const v01 = texture.data[(y.i1 * texture.width + x.i0) * channels] ?? 0;
+  const v11 = texture.data[(y.i1 * texture.width + x.i1) * channels] ?? 0;
+  const top = v00 + (v10 - v00) * x.alpha;
+  const bottom = v01 + (v11 - v01) * x.alpha;
+  return top + (bottom - top) * y.alpha;
+}
+
+function semanticTextureCoord(
+  value: number,
+  extent: number,
+  descriptor: CudaLiteTextureDescriptor,
+  axis: "x" | "y",
+): number {
+  const scaled = descriptor.normalizedCoords ? value * extent : value;
+  return semanticTextureIndex(Math.floor(scaled), extent, descriptor, axis);
+}
+
+function semanticLinearTextureAxis(
+  value: number,
+  extent: number,
+  descriptor: CudaLiteTextureDescriptor,
+  axis: "x" | "y",
+): { readonly i0: number; readonly i1: number; readonly alpha: number } {
+  const scaled = descriptor.normalizedCoords ? value * extent : value;
+  const base = scaled - 0.5;
+  const i0 = Math.floor(base);
+  return {
+    i0: semanticTextureIndex(i0, extent, descriptor, axis),
+    i1: semanticTextureIndex(i0 + 1, extent, descriptor, axis),
+    alpha: base - i0,
+  };
+}
+
+function semanticTextureIndex(
+  value: number,
+  extent: number,
+  descriptor: CudaLiteTextureDescriptor,
+  axis: "x" | "y",
+): number {
+  const mode = descriptor.addressMode?.[axis === "x" ? 0 : 1] ?? "clamp";
+  if (mode === "wrap") return ((value % extent) + extent) % extent;
+  return Math.max(0, Math.min(extent - 1, value));
 }
 
 function evalUpdate(
@@ -1697,10 +1760,6 @@ function cloneSurfaces(surfaces: NonNullable<CompiledKernelInput["surfaces"]>): 
 
 function totalElements(dimensions: readonly number[]): number {
   return dimensions.length === 0 ? 1 : dimensions.reduce((product, dimension) => product * dimension, 1);
-}
-
-function clampTextureCoord(value: number, extent: number): number {
-  return Math.max(0, Math.min(Math.max(0, extent - 1), value));
 }
 
 function flattenInitializerExpressions(expression: SemanticExpression): readonly SemanticExpression[] {

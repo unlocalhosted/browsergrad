@@ -11,6 +11,7 @@ import type {
 } from "./semantic_ir.js";
 import type {
   CudaLiteDiagnostic,
+  CudaLiteTextureDescriptor,
   CudaLiteScalarType,
   SourceSpan,
 } from "./types.js";
@@ -25,6 +26,7 @@ export interface SemanticKernelIrWgslOutput {
 
 export interface EmitSemanticKernelIrWgslOptions {
   readonly pointerBaseOffsets?: Readonly<Record<string, number>>;
+  readonly textureDescriptors?: Readonly<Record<string, CudaLiteTextureDescriptor>>;
 }
 
 const UNIFORM_PARAMS_NAME = "bg_uniforms";
@@ -118,6 +120,7 @@ export function canEmitSemanticKernelIrWgsl(
   _options: EmitSemanticKernelIrWgslOptions = {},
 ): boolean {
   return unsupportedSemanticWgslOperation(ir.operations, ir) === undefined &&
+    semanticTextureDescriptorsSupported(ir, _options) &&
     ir.requiredFeatures.length === 0 &&
     ir.params.every(semanticWgslParamSupported) &&
     semanticWgslSharedBarrierShapeSupported(ir) &&
@@ -130,6 +133,9 @@ export function emitSemanticKernelIrWgsl(
 ): SemanticKernelIrWgslOutput {
   const unsupported = unsupportedSemanticWgslOperation(ir.operations, ir);
   if (unsupported) throw semanticWgslError(`semantic WGSL does not support ${unsupported.kind}`, unsupported.span);
+  if (!semanticTextureDescriptorsSupported(ir, options)) {
+    throw semanticWgslError("semantic WGSL does not support descriptor-specialized texture helper params yet", ir.span);
+  }
   if (ir.requiredFeatures.length > 0) throw semanticWgslError("semantic WGSL does not support required WebGPU features yet", ir.span);
   const unsupportedParam = ir.params.find((param) => !semanticWgslParamSupported(param));
   if (unsupportedParam) throw semanticWgslError(`semantic WGSL does not support parameter '${unsupportedParam.name}'`, unsupportedParam.span);
@@ -250,6 +256,10 @@ export function emitSemanticKernelIrWgsl(
   }
   for (const texture of textures) {
     lines.push(`@group(0) @binding(${bindingIndexFor(bindings, texture.name)}) var ${nameFor(texture.name, names)}: texture_2d<f32>;`);
+  }
+  for (const texture of textures) {
+    const descriptor = options.textureDescriptors?.[texture.name];
+    if (descriptor) lines.push("", ...emitSemanticTextureDescriptorHelper(texture.name, descriptor, names));
   }
   for (const constant of initializedScalarConstants) {
     lines.push(`const ${nameFor(constant.name, names)}: ${wgslScalar(constant.valueType)} = ${emitSemanticExpressionAs(constant.init ?? zeroExpression(constant.span), ir, names, wgslValueScalar(constant.valueType), options)};`);
@@ -577,6 +587,14 @@ function semanticWgslFunctionBodyShapeSupported(operations: readonly SemanticKer
     if (operation.kind === "loop") return semanticWgslFunctionBodyShapeSupported(operation.body);
     return operation.kind === "expression" || operation.kind === "return" || operation.kind === "break" || operation.kind === "continue";
   });
+}
+
+function semanticTextureDescriptorsSupported(
+  ir: SemanticKernelIrModule,
+  options: EmitSemanticKernelIrWgslOptions,
+): boolean {
+  if (options.textureDescriptors === undefined) return true;
+  return ir.functions.every((fn) => fn.params.every((param) => param.addressSpace !== "texture"));
 }
 
 function semanticWgslAtomicCallSupported(
@@ -1293,11 +1311,81 @@ function emitSemanticTextureRead(
   if (!semanticWgslTextureReadSupported(expression, ir) || expression.texture.kind !== "symbol") {
     throw semanticWgslError("semantic WGSL supports only direct tex2D<float> reads", expression.span);
   }
-  const texture = nameFor(expression.texture.name, names);
   const x = emitSemanticExpressionAs(expression.x, ir, names, "f32", options);
   const y = emitSemanticExpressionAs(expression.y, ir, names, "f32", options);
+  const descriptor = options.textureDescriptors?.[expression.texture.name];
+  if (descriptor) return `${semanticTextureDescriptorHelperName(expression.texture.name, names)}(${x}, ${y})`;
+  const texture = nameFor(expression.texture.name, names);
   const coord = `clamp(vec2<i32>(i32(floor(${x})), i32(floor(${y}))), vec2<i32>(0, 0), vec2<i32>(textureDimensions(${texture})) - vec2<i32>(1, 1))`;
   return `textureLoad(${texture}, ${coord}, 0).r`;
+}
+
+function emitSemanticTextureDescriptorHelper(
+  textureName: string,
+  descriptor: CudaLiteTextureDescriptor,
+  names: ReadonlyMap<string, string>,
+): readonly string[] {
+  const texture = nameFor(textureName, names);
+  const helper = semanticTextureDescriptorHelperName(textureName, names);
+  if (descriptor.filterMode === "linear") {
+    return [
+      `fn ${helper}(x: f32, y: f32) -> f32 {`,
+      `  let dims = textureDimensions(${texture});`,
+      `  let sx = ${semanticTextureScaledCoord("x", "dims.x", descriptor)};`,
+      `  let sy = ${semanticTextureScaledCoord("y", "dims.y", descriptor)};`,
+      "  let xb = sx - 0.5;",
+      "  let yb = sy - 0.5;",
+      "  let x0f = floor(xb);",
+      "  let y0f = floor(yb);",
+      "  let ax = xb - x0f;",
+      "  let ay = yb - y0f;",
+      `  let x0 = ${semanticTextureIndex("i32(x0f)", "dims.x", descriptor, "x")};`,
+      `  let x1 = ${semanticTextureIndex("(i32(x0f) + 1)", "dims.x", descriptor, "x")};`,
+      `  let y0 = ${semanticTextureIndex("i32(y0f)", "dims.y", descriptor, "y")};`,
+      `  let y1 = ${semanticTextureIndex("(i32(y0f) + 1)", "dims.y", descriptor, "y")};`,
+      `  let v00 = textureLoad(${texture}, vec2<i32>(x0, y0), 0).r;`,
+      `  let v10 = textureLoad(${texture}, vec2<i32>(x1, y0), 0).r;`,
+      `  let v01 = textureLoad(${texture}, vec2<i32>(x0, y1), 0).r;`,
+      `  let v11 = textureLoad(${texture}, vec2<i32>(x1, y1), 0).r;`,
+      "  return mix(mix(v00, v10, ax), mix(v01, v11, ax), ay);",
+      "}",
+    ];
+  }
+  return [
+    `fn ${helper}(x: f32, y: f32) -> f32 {`,
+    `  let dims = textureDimensions(${texture});`,
+    `  let ix = ${semanticTextureIndex(`i32(floor(${semanticTextureScaledCoord("x", "dims.x", descriptor)}))`, "dims.x", descriptor, "x")};`,
+    `  let iy = ${semanticTextureIndex(`i32(floor(${semanticTextureScaledCoord("y", "dims.y", descriptor)}))`, "dims.y", descriptor, "y")};`,
+    `  return textureLoad(${texture}, vec2<i32>(ix, iy), 0).r;`,
+    "}",
+  ];
+}
+
+function semanticTextureDescriptorHelperName(
+  textureName: string,
+  names: ReadonlyMap<string, string>,
+): string {
+  return `bg_sem_tex2d_${safeWgslIdentifier(nameFor(textureName, names))}`;
+}
+
+function semanticTextureScaledCoord(
+  value: string,
+  extent: string,
+  descriptor: CudaLiteTextureDescriptor,
+): string {
+  return descriptor.normalizedCoords ? `(${value} * f32(${extent}))` : value;
+}
+
+function semanticTextureIndex(
+  value: string,
+  extent: string,
+  descriptor: CudaLiteTextureDescriptor,
+  axis: "x" | "y",
+): string {
+  const mode = descriptor.addressMode?.[axis === "x" ? 0 : 1] ?? "clamp";
+  const signedExtent = `i32(${extent})`;
+  if (mode === "wrap") return `(((${value}) % ${signedExtent}) + ${signedExtent}) % ${signedExtent}`;
+  return `clamp(${value}, 0, (${signedExtent} - 1))`;
 }
 
 function emitSemanticFunctionCall(
