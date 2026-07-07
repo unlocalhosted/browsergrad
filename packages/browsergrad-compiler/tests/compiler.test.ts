@@ -1899,6 +1899,40 @@ __global__ void globals_array(float* out) {
     expect(compiled.wgsl).toContain("fn bg_ptr_write_f32(buffer: u32, index: u32, value: f32) {\n  d_CallValue[index] = value;");
   });
 
+  it("models initialized __device__ arrays through semantic IR storage bindings", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ uint seed[2] = {3u, 5u};
+
+__global__ void initializedDeviceGlobalArray(uint* out) {
+  int i = threadIdx.x;
+  out[i] = seed[i];
+}`, { workgroupSize: [2, 1, 1] });
+
+    const result = runCompiledKernelReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      { buffers: { out: new Uint32Array(2) } },
+      { gridDim: [1, 1, 1], blockDim: [2, 1, 1] },
+    );
+    const seed = compiled.kernelIr.memory.find((symbol) => symbol.name === "seed");
+
+    expect(seed?.kind).toBe("device-global");
+    expect(seed?.initialized).toBe(true);
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("var<storage, read_write> seed: array<u32>;");
+    expect(Object.keys(deviceGlobalBufferInputs(compiled, { buffers: { out: new Uint32Array(2) } }))).toEqual(["seed"]);
+    expect([...result.buffers.out as Uint32Array]).toEqual([3, 5]);
+    expect([...result.buffers.seed as Uint32Array]).toEqual([3, 5]);
+    expect([...semanticResult.buffers.out as Uint32Array]).toEqual([3, 5]);
+    expect([...semanticResult.buffers.seed as Uint32Array]).toEqual([3, 5]);
+  });
+
   it("packs wider pointer views over device global byte storage", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ uchar gScratch[8];

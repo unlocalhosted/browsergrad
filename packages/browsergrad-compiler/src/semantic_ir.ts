@@ -841,6 +841,8 @@ function symbolForDeviceGlobal(global: CudaLiteDeviceGlobal): CudaLiteSemanticSy
     valueType: global.valueType,
     pointer: global.dimensions.length > 0,
     constant: false,
+    initialized: global.init !== undefined,
+    ...(global.init === undefined ? {} : { init: lowerExpression(global.init, new Map()) }),
     dimensions: global.dimensions,
     addressSpace: "device-global",
     span: global.span,
