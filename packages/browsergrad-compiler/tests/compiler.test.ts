@@ -12780,6 +12780,45 @@ __global__ void sample(float *out, cudaTextureObject_t tex) {
     expect([...semanticResult.buffers.out as Float32Array]).toEqual([3, 6, 9]);
   });
 
+  it("lowers nested CUDA texture helper params through semantic IR", () => {
+    const compiled = compileCudaLiteKernel(`
+__device__ float sampleInner(cudaTextureObject_t texInner, float x) {
+  return tex2D<float>(texInner, x + 0.5f, 0.5f);
+}
+__device__ float sampleOuter(cudaTextureObject_t texOuter, float x) {
+  return sampleInner(texOuter, x);
+}
+__global__ void sample(float *out, cudaTextureObject_t tex) {
+  int x = threadIdx.x;
+  out[x] = sampleOuter(tex, (float)x);
+}`, { workgroupSize: [3, 1, 1] });
+    const result = runCompiledKernelReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(3) },
+        textures: { tex: { width: 3, height: 1, data: new Float32Array([4, 8, 12]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
+    );
+    const semanticResult = runCompiledKernelSemanticReference(
+      compiled,
+      {
+        buffers: { out: new Float32Array(3) },
+        textures: { tex: { width: 3, height: 1, data: new Float32Array([4, 8, 12]) } },
+      },
+      { gridDim: [1, 1, 1], blockDim: [3, 1, 1] },
+    );
+
+    expect(canRunCompiledKernelSemanticReference(compiled)).toBe(true);
+    expect(canEmitSemanticKernelIrWgsl(compiled.kernelIr)).toBe(true);
+    expect(compiled.wgsl).toContain("browsergrad-semantic-wgsl");
+    expect(compiled.wgsl).toContain("fn sampleInner(texInner: texture_2d<f32>");
+    expect(compiled.wgsl).toContain("fn sampleOuter(texOuter: texture_2d<f32>");
+    expect(compiled.wgsl).toContain("sampleInner(texOuter");
+    expect([...result.buffers.out as Float32Array]).toEqual([4, 8, 12]);
+    expect([...semanticResult.buffers.out as Float32Array]).toEqual([4, 8, 12]);
+  });
+
   it("propagates texture descriptors through device helper texture params", () => {
     const compiled = compileCudaLiteKernel(`
 __device__ float sampleAt(cudaTextureObject_t texSrc, float x, float y) {
